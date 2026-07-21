@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B站 Cookie 扫码获取</title>
+<style>
+  :root{ --bg:#fff; --fg:#222; --bd:#ddd; --acc:#00a1d6; --ok:#2e9e4f; --er:#d9534f; }
+  *{ box-sizing:border-box; }
+  body{ font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif; background:var(--bg); color:var(--fg);
+        max-width:520px; margin:24px auto; padding:0 16px; }
+  h2{ font-size:18px; margin:0 0 4px; }
+  .sub{ color:#888; font-size:13px; margin:0 0 18px; }
+  #qr{ width:240px; height:240px; border:1px solid var(--bd); border-radius:8px;
+       display:flex; align-items:center; justify-content:center; margin:0 auto 14px; overflow:hidden; }
+  #qr img{ width:100%; height:100%; object-fit:contain; }
+  #status{ text-align:center; min-height:22px; margin:6px 0 14px; font-weight:600; }
+  #status.ok{ color:var(--ok); } #status.er{ color:var(--er); } #status.wait{ color:var(--acc); }
+  textarea{ width:100%; height:120px; font:12px/1.5 Consolas,monospace; border:1px solid var(--bd);
+            border-radius:6px; padding:8px; resize:vertical; }
+  .row{ display:flex; gap:10px; margin-top:12px; }
+  button{ flex:1; padding:10px; border:0; border-radius:6px; background:var(--acc); color:#fff;
+          font-size:14px; cursor:pointer; }
+  button.sec{ background:#eee; color:#333; }
+  button:disabled{ opacity:.5; cursor:default; }
+  details{ margin-top:18px; border-top:1px solid var(--bd); padding-top:12px; }
+  summary{ cursor:pointer; color:#555; }
+  code{ background:#f4f4f4; padding:2px 5px; border-radius:4px; font-size:12px; }
+  .tip{ font-size:12px; color:#999; margin-top:8px; }
+  a.bm{ display:inline-block; background:#fffbe6; border:1px dashed #e0c060; padding:6px 10px;
+        border-radius:6px; text-decoration:none; color:#333; margin-top:8px; }
+  </style>
+  <script src="qrcode.min.js"></script>
+</head>
+<body>
+  <h2>B站 Cookie 扫码获取</h2>
+  <p class="sub">纯本地运行，不经过任何第三方服务器。用手机 B站 APP 扫码登录后自动导出。</p>
+
+  <div id="qr"><span style="color:#aaa">加载中…</span></div>
+  <div id="status">初始化…</div>
+
+  <textarea id="ck" readonly placeholder="登录成功后会显示 cookie，可复制或下载"></textarea>
+  <div class="row">
+    <button id="dl" disabled>下载 bili_cookie.txt</button>
+    <button id="copy" class="sec" disabled>复制</button>
+    <button id="refresh" class="sec">刷新二维码</button>
+  </div>
+  <p class="tip">下载后请把 <code>bili_cookie.txt</code> 放到 mpv 的 <code>portable_config\scripts\uosc_danmaku\</code> 目录（与 bili_danmaku.py 同目录）。Chrome/Edge 用户点"下载"会尝试直接保存到该目录。</p>
+
+  <details>
+    <summary>扫码方式走不通？用「书签一键复制」备选</summary>
+    <p class="tip">在已登录 bilibili.com 的页面，把下面这个链接拖到书签栏；以后点一下书签，会自动复制当前账号 cookie 到剪贴板，粘给我或直接存成 bili_cookie.txt 即可。</p>
+    <a class="bm" href="javascript:(function(){try{const c=document.cookie;navigator.clipboard.writeText(c).then(()=>alert('已复制 B站 cookie 到剪贴板'));}catch(e){prompt('复制失败，请手动复制：',document.cookie);}})();">B站Cookie一键复制</a>
+  </details>
+
+<script>
+const API = "/qr";
+const COOKIE_KEYS = ["SESSDATA","bili_jct","buvid3","buvid4","DedeUserID","DedeUserID__ckMd5","sid","ac_time_value"];
+let key = "";
+let timer = null;
+
+const $ = id => document.getElementById(id);
+const setStatus = (t, cls="") => { const s=$("status"); s.textContent=t; s.className=cls; };
+
+function parseCookieFromUrl(url){
+  try{
+    const u = new URL(url);
+    const p = new URLSearchParams(u.search);
+    return COOKIE_KEYS.filter(k => p.get(k)).map(k => k + "=" + p.get(k)).join("; ");
+  }catch(e){ return ""; }
+}
+
+async function start(){
+  if(timer) clearInterval(timer);
+  $("ck").value = ""; $("dl").disabled = true; $("copy").disabled = true;
+  setStatus("正在获取二维码…", "wait");
+  try{
+    const r = await fetch(API + "/generate", { method:"POST", headers:{"Content-Type":"application/json"} });
+    const j = await r.json();
+    if(j.code !== 0 || !j.data || !j.data.qrcode_key){ setStatus("获取二维码失败：" + (j.message||j.code), "er"); return; }
+    key = j.data.qrcode_key;
+    var qr = qrcode(0, "M"); qr.addData(j.data.url); qr.make();
+    $("qr").innerHTML = qr.createImgTag(5, 10);
+    setStatus("请用手机 B站 APP 扫码", "wait");
+    timer = setInterval(poll, 1500);
+  }catch(e){
+    setStatus("请求被浏览器拦截(CORS)。请用下方书签方式，或在该目录用本地服务器打开。", "er");
+  }
+}
+
+async function poll(){
+  try{
+    const r = await fetch(API + "/poll?qrcode_key=" + encodeURIComponent(key));
+    const j = await r.json();
+    const c = j.data ? j.data.code : -1;
+    if(c === 0){
+      clearInterval(timer);
+      const ck = parseCookieFromUrl(j.data.url || "");
+      if(ck){
+        $("ck").value = ck; $("dl").disabled = false; $("copy").disabled = false;
+        setStatus("登录成功！已拿到 cookie", "ok");
+      }else{
+        setStatus("登录成功但解析 cookie 失败，请改用书签方式", "er");
+      }
+    }else if(c === 86090){
+      setStatus("等待扫码…（请用手机 B站 APP 扫）", "wait");
+    }else if(c === 86091){
+      setStatus("已扫码，请在手机上点确认", "wait");
+    }else if(c === 86038 || c === 86039){
+      clearInterval(timer);
+      setStatus("二维码已过期，请点刷新", "er");
+    }else{
+      setStatus("状态 " + c + "，继续等待…", "wait");
+    }
+  }catch(e){
+    clearInterval(timer);
+    setStatus("轮询失败(CORS)。请用书签方式。", "er");
+  }
+}
+
+function download(txt){
+  const b = new Blob([txt], { type:"text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(b); a.download = "bili_cookie.txt"; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+$("dl").onclick = async () => {
+  const txt = $("ck").value.trim();
+  if(!txt) return;
+  // 优先尝试直接写同目录（Chrome/Edge 支持 File System Access）
+  if(window.showSaveFilePicker){
+    try{
+      const h = await window.showSaveFilePicker({ suggestedName:"bili_cookie.txt" });
+      const w = await h.createWritable(); await w.write(txt); await w.close();
+      setStatus("已直接保存到 " + h.name, "ok");
+      return;
+    }catch(e){ /* 用户取消或无权限，回退下载 */ }
+  }
+  download(txt);
+  setStatus("已触发下载，请另存到 uosc_danmaku 目录", "ok");
+};
+
+$("copy").onclick = () => {
+  const txt = $("ck").value.trim();
+  if(!txt) return;
+  navigator.clipboard.writeText(txt).then(()=>setStatus("已复制到剪贴板", "ok"));
+};
+
+$("refresh").onclick = start;
+start();
+</script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+// preload/plugins/titlebar.ts
+// Win11 Mica 标题栏 + 窗口控制 + 飞牛影视本地 logo 注入
+import { ipcRenderer } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
+import { registerHook } from '../core/hooks';
+import { HookType } from '../core/hooks';
+import logger from '../core/logger';
+
+// [v332 fix] 用 fs.readFileSync 读取本地 logo PNG，生成真正的 base64 data URI
+//   (v327 的 LOGO_DATA_URI 是一段 blob JSON 描述字符串，不是有效图片 → img.src 加载失败)
+let LOGO_DATA_URI = '';
+try {
+  const logoBuf = fs.readFileSync(path.resolve(__dirname, '../../../build/iconfntv.png'));
+  LOGO_DATA_URI = `data:image/png;base64,${logoBuf.toString('base64')}`;
+  logger.info(`Logo loaded: ${Math.round(logoBuf.length / 1024)}KB`);
+} catch (e) {
+  logger.error('Failed to load local logo file', String(e));
+}
+
+function injectTitleBar(): void {
+  logger.info('Injecting custom title bar...');
+  if (document.getElementById('custom-titlebar')) return;
+
+  /* ═══ Mica 标题栏条 ═══ */
+  const bar = document.createElement('div');
+  bar.id = 'custom-titlebar';
+  // [v374] 原生拖动: -webkit-app-region:drag (Chromium 原生, 仅移动窗口, 绝不放大)
+  //   ⚠️ 关键: 元素自身不能带 backdrop-filter, 否则 app-region 命中测试失效 → 去掉 blur, 只用纯半透背景
+  //   ⚠️ 关键: 必须 pointer-events:auto 才能接收 mousedown (之前 none 导致无法拖动)
+  bar.style.cssText = `height:32px;width:100vw;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
+    -webkit-app-region:drag;app-region:drag;
+    background:linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%);
+    border:none;`;
+
+  /* 窗口控制右对齐 (no-drag 保证可点击) */
+  const ctrls = document.createElement('div');
+  ctrls.style.cssText = 'position:absolute;top:0;right:0;height:32px;display:flex;align-items:center;pointer-events:auto;-webkit-app-region:no-drag;app-region:no-drag;padding-right:4px;gap:2px';
+  ctrls.innerHTML = [
+    '<button id="min-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
+    '<svg width="10" height="1.5" viewBox="0 0 10 1.5" fill="none"><rect width="10" height="1.5" rx="0.75" fill="#444"/></svg></button>',
+    '<button id="max-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
+    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="#444" stroke-width="1"/></svg></button>',
+    '<button id="close-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
+    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="#444" stroke-width="1.2" stroke-linecap="round"/></svg></button>'
+  ].join('');
+  bar.appendChild(ctrls);
+
+  document.body.appendChild(bar);
+
+  /* hover — Win11 Fluent 风格 */
+  const addHover = (id: string, bg: string, sc?: string) => {
+    const b = document.getElementById(id); if (!b) return;
+    b.addEventListener('mouseenter', () => { b.style.background = bg; if (sc) b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', sc)); });
+    b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', '#444')); });
+  };
+  addHover('min-btn', 'rgba(0,0,0,.05)');
+  addHover('max-btn', 'rgba(0,0,0,.05)');
+  addHover('close-btn', 'rgba(232,17,35,.10)', '#e81123');
+
+  document.getElementById('min-btn')?.addEventListener('click', () => ipcRenderer.send('window-minimize'));
+  document.getElementById('max-btn')?.addEventListener('click', () => ipcRenderer.send('window-maximize'));
+  document.getElementById('close-btn')?.addEventListener('click', () => ipcRenderer.send('window-close'));
+
+  /* ═══ 飞牛影视 logo 注入(写死: 固定悬浮, 不依赖飞牛 DOM) ═══ */
+  // [v367 修复] 旧逻辑把 logo 作为「导航栏子节点」插入, 飞牛 SPA 切换页面时重建导航栏 DOM,
+  //   logo 一并被销毁 → 切到某些页面 logo 丢失.
+  //   现改为: logo 永远挂在 document.body 顶层(飞牛只替换内容区, 动不了 body 直接子节点),
+  //   用 position:fixed 固定在导航栏垂直中心(约 y=72px: body padding-top 32 + navbar 半高 40),
+  //   不依赖飞牛任何原生 logo 元素, 切换任何页面都稳定显示.
+  if (LOGO_DATA_URI && !document.getElementById('tb-logo')) {
+    const logoImg = document.createElement('img');
+    logoImg.id = 'tb-logo';
+    logoImg.alt = '飞牛影视';
+    logoImg.src = LOGO_DATA_URI;
+    logoImg.draggable = false;
+    const pinLogo = () => {
+      logoImg.style.cssText =
+        'height:30px;width:auto;object-fit:contain;display:block;position:fixed;top:72px;left:50%;transform:translate(-50%,-50%);z-index:99998;opacity:.96;pointer-events:none';
+    };
+    pinLogo();
+    document.body.appendChild(logoImg);
+    logger.info('Logo injected (pinned to body, fixed centered)');
+
+    // 轻量守护: 万一 logo 被飞牛极端行为意外移除, 每 4s 检查并重建到 body
+    setInterval(() => {
+      if (!document.getElementById('tb-logo') && document.body) {
+        pinLogo();
+        document.body.appendChild(logoImg);
+      }
+    }, 4000);
+  }
+}
+
+registerHook(HookType.OnReady, injectTitleBar);
+export {};

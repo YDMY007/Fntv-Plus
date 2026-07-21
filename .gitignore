@@ -1,0 +1,20 @@
+node_modules
+release
+third_party/*
+package-lock.json
+!.gitkip
+*.zip
+log
+*.log
+docs
+dest
+paly_Full.txt
+77777.txt
+play_video.py
+*.exe
+.idea
+.vscode
+
+# 用户自定义 mpv 配置：B站 登录凭证与本地备份严禁提交
+bili_cookie.txt
+*.bak*
