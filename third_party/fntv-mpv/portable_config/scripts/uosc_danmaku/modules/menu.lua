@@ -248,6 +248,204 @@ function open_input_menu()
     end
 end
 
+-- ===================== B站弹幕搜索配置面板 =====================
+-- 查看 auto_load_extra 开关、当前文件名解析出的番名/集数、alias 映射等
+function open_bili_config_menu()
+    if not uosc_available then
+        show_message("B站弹幕配置需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local items = {}
+    table.insert(items, {
+        title = "B站弹幕搜索配置",
+        bold = true, italic = true, keep_open = true, selectable = false,
+    })
+
+    -- 当前文件名解析出的番名/集数（即 B站 默认会搜什么）
+    -- 网络流必须用 media-title（人类可读标题），filename 只是 URL 路径（含 IP 等无意义字符）
+    local raw_filename = mp.get_property("filename") or ""
+    local path = mp.get_property("path") or ""
+    local parse_target = raw_filename
+    if type(path) == "string" and (path:find("^%a[%w.+-]-://") ~= nil or path:find("^%a[%w.+-]-:%?") ~= nil) then
+        local mtitle = mp.get_property("media-title")
+        if mtitle and mtitle ~= "" then
+            parse_target = mtitle
+        end
+    end
+    local title, ep, method = guess_bili_title_ep_v2(parse_target)
+    local method_label = ({ fast = "极速策略", legacy = "兼容链", title_only = "极速·仅标题", legacy_title_only = "兼容·仅标题" })[method] or "无"
+    if title then
+        table.insert(items, { title = "解析策略：" .. method_label, keep_open = true, selectable = false })
+        table.insert(items, { title = "当前解析 → 番名：" .. title, keep_open = true, selectable = false })
+        table.insert(items, { title = "当前解析 → 集数：" .. (ep and ("第" .. ep .. "集") or "未知（将按单集/第1话搜索）"), keep_open = true, selectable = false })
+    else
+        table.insert(items, { title = "当前文件无法解析出番名（将转弹弹play兜底）", keep_open = true, selectable = false })
+    end
+
+    -- 关键配置项
+    table.insert(items, { title = "auto_load_extra（自动补源）：" .. (options.auto_load_extra and "开" or "关"), keep_open = true, selectable = false })
+    table.insert(items, { title = "fallback_server：" .. (options.fallback_server or "（空）"), keep_open = true, selectable = false })
+    table.insert(items, { title = "proxy：" .. (options.proxy ~= "" and options.proxy or "（无）"), keep_open = true, selectable = false })
+
+    -- 已关联弹幕（若有）
+    if DANMAKU.anime then
+        table.insert(items, { title = "已关联番剧：" .. DANMAKU.anime, keep_open = true, selectable = false })
+        table.insert(items, { title = "已关联集数：" .. (DANMAKU.episode or "未知"), keep_open = true, selectable = false })
+        table.insert(items, { title = "已关联来源：" .. (DANMAKU.source or "未知"), keep_open = true, selectable = false })
+    end
+
+    -- 搜索逻辑说明
+    table.insert(items, { title = "搜索优先级：番剧区 → 视频区 → 谐音兜底", keep_open = true, selectable = false })
+    table.insert(items, { title = "候选优选：同匹配下按弹幕数（video_review）取最多者", keep_open = true, selectable = false })
+
+    -- 操作项
+    table.insert(items, {
+        title = "▶ 手动搜索 B站弹幕",
+        value = { "script-message-to", mp.get_script_name(), "open_bili_manual_search" },
+        keep_open = false, selectable = true,
+    })
+    table.insert(items, {
+        title = "▶ 用当前解析立即搜索 B站弹幕",
+        value = { "script-message-to", mp.get_script_name(), "bili_search_now" },
+        keep_open = false, selectable = true,
+    })
+    table.insert(items, {
+        title = "▶ 查看 bili_alias.txt 番名映射",
+        value = { "script-message-to", mp.get_script_name(), "bili_show_alias" },
+        keep_open = false, selectable = true,
+    })
+
+    local menu_props = {
+        type = "menu_bili_config",
+        title = "B站弹幕配置",
+        search_style = "disabled",
+        items = items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
+-- ===================== B站弹幕手动搜索 =====================
+-- 手动输入番名（可尾随集数，如「番名 3」），直连 B站 搜索并叠加弹幕。
+bili_manual_title_cache = nil
+
+-- 第 1 步：uosc 输入条
+function open_bili_manual_search()
+    if not uosc_available then
+        show_message("手动搜索需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local menu_props = {
+        type = "menu_bili_manual",
+        title = "输入番名搜索 B站弹幕（可加空格+集数，如：番名 3）",
+        search_style = "palette",
+        search_debounce = "submit",
+        on_search = { "script-message-to", mp.get_script_name(), "bili_manual_search_event" },
+        footnote = "输入后回车搜索",
+        items = {},
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
+-- 第 2 步：选择搜索方式（仅番名 / 指定集数）
+function open_bili_manual_choose(title)
+    if not uosc_available then
+        show_message("需在 uosc 控制栏下使用", 3)
+        return
+    end
+    if title then bili_manual_title_cache = title end
+    local items = {
+        {
+            title = "手动搜索：" .. (bili_manual_title_cache or "（未知）"),
+            bold = true, italic = true, keep_open = true, selectable = false,
+        },
+        {
+            title = "▶ 仅番名搜索（单集/第1话）",
+            value = { "script-message-to", mp.get_script_name(), "bili_manual_do", "0" },
+            keep_open = false, selectable = true,
+        },
+        {
+            title = "▶ 指定集数搜索",
+            value = { "script-message-to", mp.get_script_name(), "open_bili_manual_ep" },
+            keep_open = false, selectable = true,
+        },
+    }
+    local menu_props = {
+        type = "menu_bili_manual_choose",
+        title = "选择搜索方式",
+        search_style = "disabled",
+        items = items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
+-- 第 3 步：输入集数
+function open_bili_manual_ep_menu()
+    if not uosc_available then
+        show_message("需在 uosc 控制栏下使用", 3)
+        return
+    end
+    if not bili_manual_title_cache then
+        show_message("请先输入番名", 3)
+        return
+    end
+    local menu_props = {
+        type = "menu_bili_manual_ep",
+        title = "输入集数（如 3，留空=单集/第1话）",
+        search_style = "palette",
+        search_debounce = "submit",
+        on_search = { "script-message-to", mp.get_script_name(), "bili_manual_do" },
+        footnote = "输入数字后回车",
+        items = {},
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
+-- 查看 bili_alias.txt 中「真实番名 = B站搜索词」的映射
+function open_bili_alias_menu()
+    if not uosc_available then
+        show_message("需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local alias_path = utils.join_path(mp.get_script_directory(), "bili_alias.txt")
+    local items = {}
+    table.insert(items, {
+        title = "bili_alias.txt 映射",
+        bold = true, italic = true, keep_open = true, selectable = false,
+    })
+    table.insert(items, {
+        title = "格式：真实番名 = B站搜索词",
+        keep_open = true, selectable = false,
+    })
+    local f = io.open(alias_path, "r")
+    if not f then
+        table.insert(items, { title = "（文件不存在，暂无映射）", keep_open = true, selectable = false })
+    else
+        local has = false
+        for line in f:lines() do
+            line = line:match("^%s*(.-)%s*$")
+            if line ~= "" and not line:match("^#") then
+                has = true
+                table.insert(items, { title = line, keep_open = true, selectable = false })
+            end
+        end
+        f:close()
+        if not has then
+            table.insert(items, { title = "（暂无映射，每行写 真实番名=搜索词）", keep_open = true, selectable = false })
+        end
+    end
+    table.insert(items, {
+        title = "编辑路径：" .. alias_path,
+        keep_open = true, selectable = false,
+    })
+    local menu_props = {
+        type = "menu_bili_alias",
+        title = "B站番名映射",
+        search_style = "disabled",
+        items = items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
 -- 打开弹幕源添加管理菜单
 function open_add_menu_get()
     mp.commandv('script-message-to', 'console', 'disable')
@@ -594,6 +792,30 @@ mp.commandv(
         icon = "grid_view",
         tooltip = "弹幕设置",
         command = "script-message open_add_total_menu",
+    })
+)
+
+mp.commandv(
+    "script-message-to",
+    "uosc",
+    "set-button",
+    "bili_config",
+    utils.format_json({
+        icon = "info",
+        tooltip = "B站弹幕配置",
+        command = "script-message open_bili_config_menu",
+    })
+)
+
+mp.commandv(
+    "script-message-to",
+    "uosc",
+    "set-button",
+    "bili_search",
+    utils.format_json({
+        icon = "search",
+        tooltip = "手动搜索B站弹幕",
+        command = "script-message open_bili_manual_search",
     })
 )
 

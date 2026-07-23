@@ -30,7 +30,7 @@ function injectTitleBar(): void {
   //   ⚠️ 关键: 必须 pointer-events:auto 才能接收 mousedown (之前 none 导致无法拖动)
   bar.style.cssText = `height:32px;width:100vw;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
     -webkit-app-region:drag;app-region:drag;
-    background:linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%);
+    background:var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%));
     border:none;`;
 
   /* 窗口控制右对齐 (no-drag 保证可点击) */
@@ -38,25 +38,31 @@ function injectTitleBar(): void {
   ctrls.style.cssText = 'position:absolute;top:0;right:0;height:32px;display:flex;align-items:center;pointer-events:auto;-webkit-app-region:no-drag;app-region:no-drag;padding-right:4px;gap:2px';
   ctrls.innerHTML = [
     '<button id="min-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="1.5" viewBox="0 0 10 1.5" fill="none"><rect width="10" height="1.5" rx="0.75" fill="#444"/></svg></button>',
+    '<svg width="10" height="1.5" viewBox="0 0 10 1.5" fill="none"><rect width="10" height="1.5" rx="0.75" fill="var(--fnos-titlebar-icon,#444)"/></svg></button>',
     '<button id="max-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="#444" stroke-width="1"/></svg></button>',
+    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="var(--fnos-titlebar-icon,#444)" stroke-width="1"/></svg></button>',
     '<button id="close-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="#444" stroke-width="1.2" stroke-linecap="round"/></svg></button>'
+    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="var(--fnos-titlebar-icon,#444)" stroke-width="1.2" stroke-linecap="round"/></svg></button>'
   ].join('');
   bar.appendChild(ctrls);
 
   document.body.appendChild(bar);
 
-  /* hover — Win11 Fluent 风格 */
-  const addHover = (id: string, bg: string, sc?: string) => {
+  /* hover — Win11 Fluent 风格 (主题自适应) */
+  const addHover = (id: string, bgVar: string, sc?: string) => {
     const b = document.getElementById(id); if (!b) return;
-    b.addEventListener('mouseenter', () => { b.style.background = bg; if (sc) b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', sc)); });
-    b.addEventListener('mouseleave', () => { b.style.background = 'transparent'; b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', '#444')); });
+    b.addEventListener('mouseenter', () => {
+      b.style.background = bgVar;
+      if (sc) b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', sc));
+    });
+    b.addEventListener('mouseleave', () => {
+      b.style.background = 'transparent';
+      b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-icon,#444)'));
+    });
   };
-  addHover('min-btn', 'rgba(0,0,0,.05)');
-  addHover('max-btn', 'rgba(0,0,0,.05)');
-  addHover('close-btn', 'rgba(232,17,35,.10)', '#e81123');
+  addHover('min-btn', 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))');
+  addHover('max-btn', 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))');
+  addHover('close-btn', 'var(--fnos-titlebar-hover-close-bg,rgba(232,17,35,.10))', 'var(--fnos-titlebar-hover-close-icon,#e81123)');
 
   document.getElementById('min-btn')?.addEventListener('click', () => ipcRenderer.send('window-minimize'));
   document.getElementById('max-btn')?.addEventListener('click', () => ipcRenderer.send('window-maximize'));
@@ -82,13 +88,44 @@ function injectTitleBar(): void {
     document.body.appendChild(logoImg);
     logger.info('Logo injected (pinned to body, fixed centered)');
 
-    // 轻量守护: 万一 logo 被飞牛极端行为意外移除, 每 4s 检查并重建到 body
+    // [v375] 仅首页显示 logo: 非首页(详情/播放/列表/搜索/个人中心等)隐藏, 避免遮挡观看
+    const isHomePage = (): boolean => {
+      const href = location.href.toLowerCase();
+      const path = (location.pathname || '/').toLowerCase();
+      // 明确非首页的子路由/页面
+      if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false; // 详情/播放
+      if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;          // 播放页
+      if (/\/search/.test(href)) return false;                                                  // 搜索
+      if (/\/(library|category|genre|channel|list|rank|ranking)/.test(href)) return false;     // 列表/分类
+      if (/\/(mine|my|user|account|setting|settings|favorite|favourite|history|collection|subscribe)/.test(href)) return false; // 个人中心
+      // 首页 = 路径层级浅(根或单段, 如 `/` `/home` `/recommend`); 多段子路由(如 `/v/tv/xxx`)视为非首页
+      const segs = path.split('/').filter(Boolean);
+      const home = segs.length <= 1;
+      logger.info('[logo] isHomePage=', home, 'path=', path);
+      return home;
+    };
+    const updateLogoVisibility = (): void => {
+      logoImg.style.visibility = isHomePage() ? 'visible' : 'hidden';
+    };
+    updateLogoVisibility();
+
+    // 轻量守护: 万一 logo 被飞牛极端行为意外移除, 每 4s 检查并重建到 body; 同时兜底同步可见性
     setInterval(() => {
       if (!document.getElementById('tb-logo') && document.body) {
         pinLogo();
         document.body.appendChild(logoImg);
       }
+      updateLogoVisibility();
     }, 4000);
+
+    // 路由切换时实时同步 logo 可见性(链式包装已有 pushState hook, 不破坏 embyWall 导航逻辑)
+    try {
+      const _ps = history.pushState, _rs = history.replaceState;
+      (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); updateLogoVisibility(); };
+      (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); updateLogoVisibility(); };
+      window.addEventListener('popstate', updateLogoVisibility);
+      window.addEventListener('hashchange', updateLogoVisibility);
+    } catch (e) { logger.error('logo nav hook err', String(e).substring(0, 60)); }
   }
 }
 

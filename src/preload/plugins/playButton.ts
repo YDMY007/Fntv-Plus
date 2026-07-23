@@ -106,7 +106,9 @@ function isPlaySemanticText(text: string): boolean {
 
 // 基于语义 + 多特征搜索播放按钮（增强：覆盖更多入口/版本/异步渲染场景）
 function findReferenceButton(context: Document | Element = document): HTMLButtonElement | null {
-    const buttons = Array.from(context.querySelectorAll('button')) as HTMLButtonElement[];
+    // 关键: 排除我们自己注入/已处理的按钮, 避免把克隆体误当原始按钮 → 重复注入累积
+    const buttons = (Array.from(context.querySelectorAll('button')) as HTMLButtonElement[])
+        .filter(b => !b.hasAttribute('data-mpv-btn') && !b.hasAttribute('data-custom-play'));
     if (buttons.length === 0) return null;
 
     // 1) 主播放按钮：primary 样式 + 播放语义文本（电影/详情页主按钮最常见形态）
@@ -148,8 +150,15 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
 }
 
 function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText: string): void {
+    // 若页面上已存在我们注入的 MPV 按钮, 直接跳过 → 防止 MutationObserver/轮询触发时累积重复
+    if (document.querySelector('[data-custom-play]')) return;
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
+
+    // 仅在详情页「带文字的主播放按钮」旁注入 MPV 按钮;
+    // 跳过播放控制栏里的纯图标按钮(播放/暂停, 只有 svg 无文字), 否则原生播放页控制栏会出现多余的 MPV 按钮
+    const hasText = (referenceButton.innerText || '').trim().length > 0;
+    if (!hasText) return;
 
     logger.info('Detected inject page, injecting play button...');
 
@@ -166,6 +175,8 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
 
     // 添加唯一标识
     newButton.setAttribute('data-custom-play', 'true');
+    // 同步更新 aria-label, 防止无障碍/选择器把克隆体误判为原始"播放"按钮
+    newButton.setAttribute('aria-label', 'MPV播放');
 
     // 添加点击事件，传入原始按钮作为参数
     newButton.addEventListener('click', () => callback(referenceButton));

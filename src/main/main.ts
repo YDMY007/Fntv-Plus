@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Notification } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -12,6 +12,7 @@ import * as log from '../modules/logger';
 import { getMainWindow } from './common/mainwin';
 import { isTrusted } from '../modules/cert_trust';
 import { startProxyProcess, shutdownProxyProcess } from './common/proxy';
+import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
 
 // 禁用输入法自动切换
 app.commandLine.appendSwitch('--lang', 'en-US');
@@ -48,6 +49,7 @@ if (!gotTheLock) {
         try {
             // 初始化日志系统
             log.info('=== 飞牛影视启动 ===');
+            initFnosDialogIpc();
             log.info('应用版本:', app.getVersion());
             log.info('Electron版本:', process.versions.electron);
             log.info('Node.js版本:', process.versions.node);
@@ -98,12 +100,20 @@ if (!gotTheLock) {
             // 恢复 Cookie
             await winctrl.setupCookieRestore(mainWindow);
 
-            // 延迟3秒后进行自动更新检查，避免影响应用启动速度
+            // 启动后延迟3秒自动检查更新一次（避免影响启动速度）
             setTimeout(() => {
                 getUpdateChecker().autoCheckForUpdates().catch((error: Error) => {
                     log.error('启动时自动检查更新失败:', error);
                 });
             }, 3000);
+
+            // 默认每日自动检查一次更新: 即使窗口关闭、仅托盘挂后台也持续(24h 周期)
+            // 仅当发现新版本时才弹窗提示, 无更新/网络失败均静默
+            setInterval(() => {
+                getUpdateChecker().autoCheckForUpdates().catch((error: Error) => {
+                    log.error('每日自动检查更新失败:', error);
+                });
+            }, 24 * 60 * 60 * 1000);
         } catch (error) {
             log.error('应用启动失败:', error);
             app.quit();
@@ -125,7 +135,7 @@ function setupWindowEvents(mainWindow: BrowserWindow): void {
 
                     if (action === 'ask') {
                         // 询问用户偏好
-                        const result = await dialog.showMessageBox(mainWindow, {
+                        const result = await fnosDialog(mainWindow, {
                             type: 'question',
                             title: '关闭窗口',
                             message: '您希望如何处理窗口关闭？',
@@ -134,7 +144,7 @@ function setupWindowEvents(mainWindow: BrowserWindow): void {
                             defaultId: 0,
                             cancelId: 2,
                             checkboxLabel: '记住我的选择',
-                            checkboxChecked: false
+                            checkboxChecked: false,
                         });
 
                         if (result.response === 0) {
@@ -170,7 +180,7 @@ function setupWindowEvents(mainWindow: BrowserWindow): void {
 
                     if (exitMode === 'ask') {
                         // 询问用户
-                        const result = await dialog.showMessageBox(mainWindow, {
+                        const result = await fnosDialog(mainWindow, {
                             type: 'question',
                             title: '退出确认',
                             message: '确定要退出飞牛影视吗？',
@@ -179,7 +189,7 @@ function setupWindowEvents(mainWindow: BrowserWindow): void {
                             defaultId: 1,
                             cancelId: 2,
                             checkboxLabel: '记住我的选择',
-                            checkboxChecked: false
+                            checkboxChecked: false,
                         });
 
                         if (result.response === 0) {

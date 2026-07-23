@@ -246,8 +246,16 @@ function injectCarousel(): void {
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
   _carouselInited = true;
 
-  // 数据: API优先(动态/自动/最新排序), 硬编码兜底
-  const shows = _apiShows.length >= RECENT_SHOWS.length ? _apiShows : RECENT_SHOWS;
+  // 预加载占位: 真实片库未就绪时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  if (_apiShows.length === 0) {
+    log('api not ready, showing loading placeholder');
+    buildLoadingPlaceholder(target);
+    return;
+  }
+
+  // 数据: API优先(动态/自动/最新排序); 仅当真实片库为空才兜底(上面已拦截空数据)
+  // 注意: 只要真实片库 >0 条就只用真实内容, 不再回退硬编码 demo(避免无职转生兜底出现)
+  const shows = _apiShows.length > 0 ? _apiShows : RECENT_SHOWS;
   log('injecting', shows.length, 'shows (api:', _apiShows.length, 'hardcoded:', RECENT_SHOWS.length, ')');
 
   const base = location.origin;
@@ -266,7 +274,7 @@ function injectCarousel(): void {
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:rgba(245,238,250,.5);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18)';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18)';
   wrapper.appendChild(container);
   _carouselContainer = container;
 
@@ -280,7 +288,7 @@ function injectCarousel(): void {
 
   // 指示点: 右侧纵向药丸
   const dots = document.createElement('div');
-  dots.style.cssText = 'position:absolute;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:5;padding:13px 7px;background:rgba(250,244,252,.65);border:1px solid rgba(0,0,0,.06);border-radius:20px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)';
+  dots.style.cssText = 'position:absolute;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:5;padding:13px 7px;background:var(--fnos-hero-dots);border:1px solid rgba(0,0,0,.06);border-radius:20px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)';
   container.appendChild(dots);
 
   // URL规范化: 硬编码用相对路径, API返回完整URL
@@ -306,22 +314,22 @@ function injectCarousel(): void {
     fetchImageAuth(pic).then((b) => { if (b) imgEl.src = b; });
     // 右边缘渐隐, 与右侧文字面板自然融合
     const edgeFade = document.createElement('div');
-    edgeFade.style.cssText = 'position:absolute;inset:0;background:linear-gradient(90deg,transparent 66%,rgba(243,235,250,.85) 100%)';
+    edgeFade.style.cssText = 'position:absolute;inset:0;background:var(--fnos-hero-edge)';
     leftEl.appendChild(edgeFade);
     slide.appendChild(leftEl);
 
     // 右: 文字面板 — [v344] 浅蓝玻璃(替代v343深色) + 字放大占满文字区~80%
     const rightPanel = document.createElement('div');
-    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:30px 54px 30px 30px;background:linear-gradient(160deg,rgba(248,240,250,.80),rgba(238,228,246,.86));backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:1px solid rgba(255,255,255,.5);overflow:hidden';
+    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:30px 54px 30px 30px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
 
     // 信息卡: 占满面板高度, 简介限制在标签/标题/按钮之间(不溢出); 字体整体放大
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
       <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(91,140,255,.16);border:1px solid rgba(91,140,255,.32);border-radius:20px;color:#2f57d6;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新</div>
-      <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:#0f1c3f;line-height:1.25;word-break:break-word;text-shadow:0 1px 10px rgba(255,255,255,.5);flex-shrink:0">${show.title}</div>
-      <div style="width:100%;height:2px;background:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
-      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:rgba(20,35,70,.82);letter-spacing:.4px;font-weight:500;text-indent:2em">${show.desc||''}</div>
+      <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
+      <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
+      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em">${show.desc||''}</div>
       <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:17px 34px;background:linear-gradient(135deg,#5b8cff,#7c5cff);border:none;border-radius:15px;color:#fff;font-size:18px;font-weight:700;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 24px rgba(91,140,255,.45);transition:transform .22s ease,box-shadow .22s ease;flex-shrink:0">
         <svg width="20" height="20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>
         开始观看
@@ -362,7 +370,7 @@ function injectCarousel(): void {
     infos.push(info);
 
     const dot = document.createElement('div');
-    dot.style.cssText = 'width:7px;height:7px;border-radius:50%;background:rgba(0,0,0,.16);transition:all .35s;cursor:pointer';
+    dot.style.cssText = 'width:7px;height:7px;border-radius:50%;background:var(--fnos-hero-dot);transition:all .35s;cursor:pointer';
     dot.onclick = () => goTo(i);
     dots.appendChild(dot);
   });
@@ -377,7 +385,7 @@ function injectCarousel(): void {
     currentIdx = idx;
     track.style.transform = `translateY(-${idx * 100}%)`;
     infos.forEach((el, j) => { el.style.opacity = j === idx ? '1' : '0'; el.style.transform = j === idx ? 'translateY(0)' : 'translateY(20px)'; });
-    for (let j = 0; j < dots.children.length; j++) (dots.children[j] as HTMLElement).style.background = j === idx ? '#5b8cff' : 'rgba(0,0,0,.16)';
+    for (let j = 0; j < dots.children.length; j++) (dots.children[j] as HTMLElement).style.background = j === idx ? '#5b8cff' : 'var(--fnos-hero-dot)';
   }
 
   let timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
@@ -399,6 +407,61 @@ function injectCarousel(): void {
   autoFetchDescs(base, shows, infos);
 
   log('carousel injected');
+}
+
+/* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
+// 真实片库未就绪时显示; 一旦 fetchShowsViaIPC 拉到数据, 上层 rebuild 机制会自动替换为真实轮播
+function buildLoadingPlaceholder(target: HTMLElement): void {
+  // shimmer 动画样式只注入一次
+  if (!document.getElementById('fnos-ph-style')) {
+    const st = document.createElement('style');
+    st.id = 'fnos-ph-style';
+    st.textContent = `
+@keyframes fnos-ph-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
+.fnos-ph-skel{position:relative;overflow:hidden;background:var(--fnos-skel-bg)}
+.fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
+`;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  target.innerHTML = '';
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
+  _carouselWrapper = wrapper;
+
+  const container = document.createElement('div');
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18);display:flex;align-items:center;justify-content:center;gap:30px';
+  _carouselContainer = container;
+
+  // 左侧: 海报骨架(粉紫流光)
+  const poster = document.createElement('div');
+  poster.className = 'fnos-ph-skel';
+  poster.style.cssText = 'width:118px;height:168px;border-radius:14px';
+  container.appendChild(poster);
+
+  // 右侧: 文字骨架 + 提示
+  const box = document.createElement('div');
+  box.style.cssText = 'display:flex;flex-direction:column;gap:14px;max-width:300px';
+  box.innerHTML = `
+    <div class="fnos-ph-skel" style="width:200px;height:26px;border-radius:8px"></div>
+    <div class="fnos-ph-skel" style="width:262px;height:14px;border-radius:6px"></div>
+    <div class="fnos-ph-skel" style="width:230px;height:14px;border-radius:6px"></div>
+    <div class="fnos-ph-tip" style="margin-top:8px;font-size:15px;color:rgba(70,55,95,.72);letter-spacing:1px">正在加载精彩内容…</div>
+  `;
+  container.appendChild(box);
+
+  wrapper.appendChild(container);
+  target.appendChild(wrapper);
+
+  // 若真实片库始终未加载(如 NAS 未连接/接口超时), 一段时间后温和提示, 避免"正在加载"永久卡住
+  const phTimer = window.setTimeout(() => {
+    if (_apiShows.length === 0 && _carouselContainer === container && document.body.contains(container)) {
+      const tip = container.querySelector('.fnos-ph-tip') as HTMLElement | null;
+      if (tip) tip.textContent = '加载较慢，请确认 NAS 已连接';
+    }
+  }, 16000);
+  // 占位被重建替换后, 该定时器留在原地无害(条件判断已失效)
+  void phTimer;
 }
 
 /* 自动从API获取缺失的简介(IPC主进程签名→渲染进程fetch→带cookie鉴权) */
@@ -429,7 +492,7 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
         } else if (btn) {
           const d = document.createElement('div');
           d.className = 'fnos-desc';
-          d.style.cssText = 'flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:rgba(20,35,70,.82);letter-spacing:.4px;font-weight:500;text-indent:2em';
+          d.style.cssText = 'flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em';
           d.textContent = desc;
           info.insertBefore(d, btn);
         }
@@ -459,7 +522,7 @@ function applyTvDetailGlass(): void {
     // 关键改动: 从"厚重白雾"改为"几乎透明的微妙融合"
     // 上方完全透出原图,底部仅极淡淡的暗→亮过渡(用于文字可读性)
     gradient.style.setProperty('background',
-      'linear-gradient(180deg,transparent 45%,rgba(12,18,35,.08) 72%,rgba(230,240,255,.22) 100%)', 'important');
+      'var(--fnos-detail-grad)', 'important');
     gradient.style.setProperty('height', '100%', 'important');       // 恢复全高
     gradient.style.setProperty('backdrop-filter', 'blur(1px) saturate(105%)', 'important');
     gradient.style.setProperty('-webkit-backdrop-filter', 'blur(1px) saturate(105%)', 'important');
@@ -478,11 +541,11 @@ function applyTvDetailGlass(): void {
   const descArea = findDescArea(header);
   if (descArea) {
     descArea.style.setProperty('background',
-      'linear-gradient(135deg,rgba(255,255,255,.20),rgba(240,248,255,.25))', 'important');
+      'var(--fnos-detail-desc)', 'important');
     descArea.style.setProperty('backdrop-filter', 'blur(20px) saturate(140%) brightness(1.02)', 'important');
     descArea.style.setProperty('-webkit-backdrop-filter', 'blur(20px) saturate(140%) brightness(1.02)', 'important');
     descArea.style.setProperty('border-radius', '14px', 'important');
-    descArea.style.setProperty('border', '1px solid rgba(255,255,255,.30)', 'important');
+    descArea.style.setProperty('border', '1px solid var(--fnos-detail-desc-border)', 'important');
     descArea.style.setProperty('box-shadow',
       '0 4px 24px rgba(31,41,90,.04),inset 0 .5px 0 rgba(255,255,255,.4)',
       'important');
@@ -495,13 +558,13 @@ function applyTvDetailGlass(): void {
   cards?.forEach((card) => {
     const el = card as HTMLElement;
     el.style.setProperty('background',
-      'linear-gradient(145deg,rgba(255,255,255,.18),rgba(232,244,255,.25))', 'important');
+      'var(--fnos-detail-card)', 'important');
     el.style.setProperty('backdrop-filter', 'blur(16px) saturate(135%)', 'important');
     el.style.setProperty('-webkit-backdrop-filter', 'blur(16px) saturate(135%)', 'important');
     el.style.setProperty('border-radius', '14px', 'important');
-    el.style.setProperty('border', '1px solid rgba(255,255,255,.28)', 'important');
+    el.style.setProperty('border', '1px solid var(--fnos-detail-card-border)', 'important');
     el.style.setProperty('box-shadow',
-      '0 3px 16px rgba(31,41,90,.04),0 1px 0 rgba(255,255,255,.5)',
+      'var(--fnos-detail-shadow-1)',
       'important');
     el.style.setProperty('transition', 'transform .25s ease, box-shadow .25s ease', 'important');
 
@@ -514,7 +577,7 @@ function applyTvDetailGlass(): void {
     el.addEventListener('mouseleave', () => {
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
-        '0 3px 16px rgba(31,41,90,.04),0 1px 0 rgba(255,255,255,.5)',
+        'var(--fnos-detail-shadow-1)',
         'important');
     });
   });
@@ -524,11 +587,11 @@ function applyTvDetailGlass(): void {
   if (actionBar && actionBar.parentElement) {
     const barWrap = actionBar.parentElement as HTMLElement;
     barWrap.style.setProperty('background',
-      'linear-gradient(180deg,rgba(255,255,255,.15),rgba(240,248,255,.20))', 'important');
+      'var(--fnos-detail-bar)', 'important');
     barWrap.style.setProperty('backdrop-filter', 'blur(18px) saturate(135%)', 'important');
     barWrap.style.setProperty('-webkit-backdrop-filter', 'blur(18px) saturate(135%)', 'important');
     barWrap.style.setProperty('border-radius', '14px', 'important');
-    barWrap.style.setProperty('border', '1px solid rgba(255,255,255,.25)', 'important');
+    barWrap.style.setProperty('border', '1px solid var(--fnos-detail-bar-border)', 'important');
     barWrap.style.setProperty('box-shadow',
       '0 3px 18px rgba(31,41,90,.04),inset 0 .5px 0 rgba(255,255,255,.4)',
       'important');
@@ -607,7 +670,7 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
   const gradientFull = header.querySelector('.gradient-for-full') as HTMLElement | null;
   if (gradientFull) {
     gradientFull.style.setProperty('background',
-      'linear-gradient(180deg,transparent 30%,rgba(15,22,40,.18) 58%,rgba(235,243,255,.78) 100%)', 'important');
+      'var(--fnos-detail-season-grad)', 'important');
     gradientFull.style.setProperty('backdrop-filter', 'blur(36px) saturate(170%) brightness(1.04)', 'important');
     gradientFull.style.setProperty('-webkit-backdrop-filter', 'blur(36px) saturate(170%) brightness(1.04)', 'important');
   }
@@ -626,11 +689,11 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       const wrap = s.parentElement;
       if (wrap) {
         (wrap as HTMLElement).style.setProperty('background',
-          'linear-gradient(135deg,rgba(255,255,255,.55),rgba(240,246,255,.6))', 'important');
+          'var(--fnos-detail-season-sec)', 'important');
         (wrap as HTMLElement).style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
         (wrap as HTMLElement).style.setProperty('-webkit-backdrop-filter', 'blur(22px) saturate(145%)', 'important');
         (wrap as HTMLElement).style.setProperty('border-radius', '14px', 'important');
-        (wrap as HTMLElement).style.setProperty('border', '1px solid rgba(255,255,255,.5)', 'important');
+        (wrap as HTMLElement).style.setProperty('border', '1px solid var(--fnos-detail-season-sec-border)', 'important');
         (wrap as HTMLElement).style.setProperty('box-shadow',
           '0 4px 20px rgba(31,41,90,.06),inset 0 1px 0 rgba(255,255,255,.6)',
           'important');
@@ -644,26 +707,26 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
   episodeCards.forEach((card) => {
     const el = card as HTMLElement;
     el.style.setProperty('background',
-      'linear-gradient(148deg,rgba(255,255,255,.48),rgba(232,242,255,.58))', 'important');
+      'var(--fnos-detail-ep)', 'important');
     el.style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
     el.style.setProperty('-webkit-backdrop-filter', 'blur(22px) saturate(145%)', 'important');
     el.style.setProperty('border-radius', '16px', 'important');
-    el.style.setProperty('border', '1px solid rgba(255,255,255,.48)', 'important');
+    el.style.setProperty('border', '1px solid var(--fnos-detail-ep-border)', 'important');
     el.style.setProperty('box-shadow',
-      '0 4px 20px rgba(31,41,90,.06),0 1px 0 rgba(255,255,255,.7),inset 0 1px 0 rgba(255,255,255,.5)',
+      'var(--fnos-detail-shadow-2)',
       'important');
     el.style.setProperty('transition', 'transform .28s ease, box-shadow .28s ease', 'important');
 
     el.addEventListener('mouseenter', () => {
       el.style.setProperty('transform', 'translateY(-5px) scale(1.025)', 'important');
       el.style.setProperty('box-shadow',
-        '0 14px 40px rgba(91,140,255,.14),0 1px 0 rgba(255,255,255,.7),inset 0 1px 0 rgba(255,255,255,.5)',
+        'var(--fnos-detail-shadow-3)',
         'important');
     });
     el.addEventListener('mouseleave', () => {
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
-        '0 4px 20px rgba(31,41,90,.06),0 1px 0 rgba(255,255,255,.7),inset 0 1px 0 rgba(255,255,255,.5)',
+        'var(--fnos-detail-shadow-2)',
         'important');
     });
   });
@@ -672,7 +735,7 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
   const scrollArea = document.querySelector('.trim-ui__scrollbar--list-specific') as HTMLElement | null;
   if (scrollArea) {
     scrollArea.style.setProperty('background',
-      'linear-gradient(180deg,rgba(238,244,255,.3),rgba(248,250,255.35))', 'important');
+      'var(--fnos-detail-scroll)', 'important');
   }
 }
 
@@ -695,18 +758,214 @@ function applyDetailLiquidGlass(): void {
 }
 
 
-/** [v358] 锁死浅色主题: 强制 html class=light, 防止飞牛(SPA路由切换/React重渲染)切回深色 */
-function lockLightTheme(): void {
-  const html = document.documentElement;
-  if (html.classList.contains('dark')) html.classList.remove('dark');
-  if (!html.classList.contains('light')) html.classList.add('light');
-  if (html.style.colorScheme !== 'light') html.style.colorScheme = 'light';
-  const body = document.body;
-  if (body.getAttribute('theme-mode') !== 'light') body.setAttribute('theme-mode', 'light');
-  // localStorage 兜底: 让飞牛初始化读取也是浅色(用户选择=浅色)
+/** [v400] UI 主题: 浅色 / 深色 / 跟随系统 三态, 持久化到 localStorage, 并同步飞牛原生主题.
+ *  用 CSS 变量(--fnos-ui-*) 驱动所有自建设备 UI, html.dark 类切换即整体换肤(含已打开面板实时生效). */
+type UiThemeMode = 'light' | 'dark' | 'system';
+const UI_THEME_KEY = 'fnos-ui-theme';
+let _refreshThemeSeg: (() => void) | null = null; // 设置面板内分段控件的刷新回调
+
+function getUiTheme(): UiThemeMode {
   try {
-    if (localStorage.getItem('mc-theme') !== 'light') localStorage.setItem('mc-theme', 'light');
-  } catch (e) { /* localStorage 不可用时忽略 */ }
+    const v = localStorage.getItem(UI_THEME_KEY);
+    if (v === 'light' || v === 'dark' || v === 'system') return v as UiThemeMode;
+  } catch (e) { /* ignore */ }
+  return 'light'; // 默认浅色
+}
+
+/** 系统是否偏好深色(跟随系统时用) */
+function systemPrefersDark(): boolean {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  } catch (e) { return false; }
+}
+
+/** 解析为实际明暗(跟随系统 → 读系统偏好) */
+function getEffectiveDark(): boolean {
+  const m = getUiTheme();
+  if (m === 'system') return systemPrefersDark();
+  return m === 'dark';
+}
+
+/** 把目标主题应用到页面, 并同步飞牛原生网页主题(html class / body theme-mode / 飞牛偏好键) */
+function applyThemeToFnos(isDark: boolean): void {
+  const html = document.documentElement;
+  html.classList.toggle('dark', isDark);
+  html.classList.toggle('light', !isDark);
+  html.style.colorScheme = isDark ? 'dark' : 'light';
+  const body = document.body;
+  if (body) body.setAttribute('theme-mode', isDark ? 'dark' : 'light');
+  // 同步飞牛原生偏好键: 飞牛(React)读取后会渲染对应主题; 不读我们的键, 互不干扰
+  try {
+    localStorage.setItem('fnos-theme-mode', isDark ? 'dark' : 'light');
+    localStorage.setItem('os-theme-mode', isDark ? 'dark' : 'light');
+    localStorage.setItem('mc-theme', isDark ? 'dark' : 'light');
+  } catch (e) { /* ignore */ }
+}
+
+/** 应用当前 UI 主题偏好(含已打开面板分段控件刷新) */
+function applyUiTheme(): void {
+  applyThemeToFnos(getEffectiveDark());
+  if (_refreshThemeSeg) { try { _refreshThemeSeg(); } catch (e) {} }
+}
+
+/** 设置并持久化 UI 主题(供开关/分段控件调用) */
+function setUiTheme(mode: UiThemeMode): void {
+  try { localStorage.setItem(UI_THEME_KEY, mode); } catch (e) {}
+  applyThemeToFnos(getEffectiveDark());
+}
+
+/** [v400] 注入自建设备 UI 的主题变量(浅色为 :root 默认, 深色由 html.dark 覆盖).
+ *  所有面板/弹窗/hover 均引用这些变量 → 切换 html.dark 即整体换肤, 已打开的面板也实时生效. */
+function injectUiThemeStyle(): void {
+  if (document.getElementById('fnos-ui-theme-style')) return;
+  const s = document.createElement('style');
+  s.id = 'fnos-ui-theme-style';
+  s.textContent = `
+:root{
+  --fnos-ui-panel-bg:linear-gradient(165deg,rgba(252,247,253,.94),rgba(244,238,251,.96));
+  --fnos-ui-text:#4a3d63;
+  --fnos-ui-sec:#9575cd;
+  --fnos-ui-muted:#6a5a88;
+  --fnos-ui-muted2:#8778a5;
+  --fnos-ui-btn-text:#5c4d7d;
+  --fnos-ui-btn-text2:#7a6a9a;
+  --fnos-ui-border:rgba(150,120,200,.14);
+  --fnos-ui-border2:rgba(150,120,200,.12);
+  --fnos-ui-border3:rgba(150,120,200,.16);
+  --fnos-ui-border-strong:rgba(150,120,200,.22);
+  --fnos-ui-border-outer:rgba(180,155,220,.35);
+  --fnos-ui-btn-bg:rgba(150,120,200,.12);
+  --fnos-ui-btn-bg2:rgba(150,120,200,.10);
+  --fnos-ui-btn-hover:rgba(183,155,232,.32);
+  --fnos-ui-btn-hover2:rgba(183,155,232,.28);
+  --fnos-ui-row-hover:rgba(150,120,200,.08);
+  --fnos-ui-input-bg:rgba(255,255,255,.5);
+  --fnos-ui-accent:#b79be8;
+  --fnos-ui-warn:#b06a3a;
+  --fnos-ui-ok:#3a8c5a;
+  --fnos-ui-pill-bg:rgba(125,95,201,.12);
+  --fnos-ui-pill-border:rgba(125,95,201,.3);
+  --fnos-ui-pill-hover:rgba(125,95,201,.9);
+  --fnos-ui-pill-text:#7d5fc9;
+  --fnos-ui-exit-on:rgba(147,117,205,.92);
+  --fnos-ui-exit-off:rgba(255,255,255,.55);
+  --fnos-hero-container:rgba(245,238,250,.5);
+  --fnos-hero-panel:linear-gradient(160deg,rgba(248,240,250,.80),rgba(238,228,246,.86));
+  --fnos-hero-dots:rgba(250,244,252,.65);
+  --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(243,235,250,.85) 100%);
+  --fnos-hero-dot:rgba(0,0,0,.16);
+  --fnos-hero-title:#0f1c3f;
+  --fnos-hero-desc:rgba(20,35,70,.82);
+  --fnos-hero-shadow:0 1px 10px rgba(255,255,255,.5);
+  --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);
+  --fnos-ui-veil:linear-gradient(180deg,rgba(245,240,248,.6) 0%,rgba(238,233,246,.55) 100%);
+  --fnos-detail-grad:linear-gradient(180deg,transparent 45%,rgba(12,18,35,.08) 72%,rgba(230,240,255,.22) 100%);
+  --fnos-detail-desc:linear-gradient(135deg,rgba(255,255,255,.20),rgba(240,248,255,.25));
+  --fnos-detail-desc-border:rgba(255,255,255,.30);
+  --fnos-detail-card:linear-gradient(145deg,rgba(255,255,255,.18),rgba(232,244,255,.25));
+  --fnos-detail-card-border:rgba(255,255,255,.28);
+  --fnos-detail-bar:linear-gradient(180deg,rgba(255,255,255,.15),rgba(240,248,255,.20));
+  --fnos-detail-bar-border:rgba(255,255,255,.25);
+  --fnos-detail-season-grad:linear-gradient(180deg,transparent 30%,rgba(15,22,40,.18) 58%,rgba(235,243,255,.78) 100%);
+  --fnos-detail-season-sec:linear-gradient(135deg,rgba(255,255,255,.55),rgba(240,246,255,.6));
+  --fnos-detail-season-sec-border:rgba(255,255,255,.5);
+  --fnos-detail-ep:linear-gradient(148deg,rgba(255,255,255,.48),rgba(232,242,255,.58));
+  --fnos-detail-ep-border:rgba(255,255,255,.48);
+  --fnos-detail-scroll:linear-gradient(180deg,rgba(238,244,255,.3),rgba(248,250,255.35));
+  --fnos-sidebar-bg:linear-gradient(160deg,rgba(250,244,250,.60),rgba(243,238,247,.64));
+  --fnos-sidebar-border:1px solid rgba(255,255,255,.5);
+  --fnos-sidebar-shadow:inset 1px 0 0 rgba(255,255,255,.5),-8px 0 32px rgba(140,130,160,.08);
+  --fnos-hero-panel-border:1px solid rgba(255,255,255,.5);
+  --fnos-detail-shadow-1:0 3px 16px rgba(31,41,90,.04),0 1px 0 rgba(255,255,255,.5);
+  --fnos-detail-shadow-2:0 4px 20px rgba(31,41,90,.06),0 1px 0 rgba(255,255,255,.7),inset 0 1px 0 rgba(255,255,255,.5);
+  --fnos-detail-shadow-3:0 14px 40px rgba(91,140,255,.14),0 1px 0 rgba(255,255,255,.7),inset 0 1px 0 rgba(255,255,255,.5);
+  --fnos-exit-border-on:1px solid rgba(147,117,205,.6);
+  --fnos-exit-border-off:1px solid rgba(150,120,200,.18);
+  --fnos-skel-bg:rgba(255,255,255,.45);
+  --fnos-skel-shine:rgba(255,255,255,.8);
+  --fnos-sidebar-btn-bg:rgba(70,52,100,.24);
+  --fnos-qr-bg:#fff;
+  --fnos-modal-overlay:rgba(40,30,60,.42);
+  --fnos-modal-inner-shadow:inset 0 1px 0 rgba(255,255,255,.6);
+  --fnos-titlebar-bg:linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%);
+  --fnos-titlebar-icon:#444;
+  --fnos-titlebar-hover-minmax:rgba(0,0,0,.05);
+  --fnos-titlebar-hover-close-bg:rgba(232,17,35,.10);
+  --fnos-titlebar-hover-close-icon:#e81123;
+}
+html.dark{
+  --fnos-ui-panel-bg:linear-gradient(165deg,rgba(36,30,52,.94),rgba(28,22,42,.96));
+  --fnos-ui-text:#e7def8;
+  --fnos-ui-sec:#b9a4ec;
+  --fnos-ui-muted:#b3a6d0;
+  --fnos-ui-muted2:#9d90bf;
+  --fnos-ui-btn-text:#d2c5ee;
+  --fnos-ui-btn-text2:#c4b6e3;
+  --fnos-ui-border:rgba(170,150,210,.18);
+  --fnos-ui-border2:rgba(170,150,210,.14);
+  --fnos-ui-border3:rgba(170,150,210,.20);
+  --fnos-ui-border-strong:rgba(170,150,210,.28);
+  --fnos-ui-border-outer:rgba(170,150,210,.42);
+  --fnos-ui-btn-bg:rgba(150,120,200,.18);
+  --fnos-ui-btn-bg2:rgba(150,120,200,.15);
+  --fnos-ui-btn-hover:rgba(183,155,232,.42);
+  --fnos-ui-btn-hover2:rgba(183,155,232,.36);
+  --fnos-ui-row-hover:rgba(150,120,200,.14);
+  --fnos-ui-input-bg:rgba(64,52,90,.30);
+  --fnos-ui-accent:#c9b2f0;
+  --fnos-ui-warn:#e3a06a;
+  --fnos-ui-ok:#6fcf8e;
+  --fnos-ui-pill-bg:rgba(150,120,200,.22);
+  --fnos-ui-pill-border:rgba(170,150,210,.34);
+  --fnos-ui-pill-hover:rgba(160,130,220,.95);
+  --fnos-ui-pill-text:#cbb8ef;
+  --fnos-ui-exit-on:rgba(160,130,220,.95);
+  --fnos-ui-exit-off:rgba(70,58,98,.30);
+  --fnos-hero-container:rgba(40,32,58,.55);
+  --fnos-hero-panel:linear-gradient(160deg,rgba(40,32,58,.82),rgba(30,24,46,.88));
+  --fnos-hero-dots:rgba(60,50,84,.72);
+  --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(60,50,84,.92) 100%);
+  --fnos-hero-dot:rgba(200,195,215,.35);
+  --fnos-hero-title:#f0ecff;
+  --fnos-hero-desc:rgba(225,218,245,.88);
+  --fnos-hero-shadow:0 1px 10px rgba(0,0,0,.5);
+  --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(140,160,255,.6),transparent);
+  --fnos-ui-veil:linear-gradient(180deg,rgba(30,24,46,.6) 0%,rgba(24,18,38,.55) 100%);
+  --fnos-detail-grad:linear-gradient(180deg,transparent 45%,rgba(0,0,0,.30) 72%,rgba(18,14,30,.58) 100%);
+  --fnos-detail-desc:linear-gradient(135deg,rgba(50,40,72,.45),rgba(34,27,52,.55));
+  --fnos-detail-desc-border:rgba(255,255,255,.12);
+  --fnos-detail-card:linear-gradient(145deg,rgba(54,44,76,.42),rgba(38,30,56,.52));
+  --fnos-detail-card-border:rgba(255,255,255,.10);
+  --fnos-detail-bar:linear-gradient(180deg,rgba(48,38,68,.42),rgba(33,26,50,.52));
+  --fnos-detail-bar-border:rgba(255,255,255,.10);
+  --fnos-detail-season-grad:linear-gradient(180deg,transparent 30%,rgba(0,0,0,.40) 58%,rgba(18,14,30,.72) 100%);
+  --fnos-detail-season-sec:linear-gradient(135deg,rgba(60,50,84,.35),rgba(45,36,64,.42));
+  --fnos-detail-season-sec-border:rgba(255,255,255,.12);
+  --fnos-detail-ep:linear-gradient(148deg,rgba(58,48,82,.40),rgba(40,32,58,.50));
+  --fnos-detail-ep-border:rgba(255,255,255,.12);
+  --fnos-detail-scroll:linear-gradient(180deg,rgba(20,16,34,.45),rgba(24,18,38,.50));
+  --fnos-sidebar-bg:linear-gradient(160deg,rgba(40,32,58,.82),rgba(30,24,46,.88));
+  --fnos-sidebar-border:1px solid rgba(255,255,255,.08);
+  --fnos-sidebar-shadow:inset 1px 0 0 rgba(255,255,255,.06),-8px 0 32px rgba(0,0,0,.30);
+  --fnos-hero-panel-border:1px solid rgba(255,255,255,.10);
+  --fnos-detail-shadow-1:0 3px 16px rgba(0,0,0,.25),0 1px 0 rgba(255,255,255,.06);
+  --fnos-detail-shadow-2:0 4px 20px rgba(0,0,0,.30),0 1px 0 rgba(255,255,255,.10),inset 0 1px 0 rgba(255,255,255,.06);
+  --fnos-detail-shadow-3:0 14px 40px rgba(91,140,255,.18),0 1px 0 rgba(255,255,255,.10),inset 0 1px 0 rgba(255,255,255,.06);
+  --fnos-exit-border-on:1px solid rgba(170,150,210,.6);
+  --fnos-exit-border-off:1px solid rgba(170,150,210,.18);
+  --fnos-skel-bg:rgba(150,140,170,.18);
+  --fnos-skel-shine:rgba(200,190,220,.18);
+  --fnos-sidebar-btn-bg:rgba(40,30,60,.38);
+  --fnos-qr-bg:rgba(220,215,230,.95);
+  --fnos-modal-overlay:rgba(0,0,0,.60);
+  --fnos-modal-inner-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+  --fnos-titlebar-bg:linear-gradient(180deg,rgba(20,15,33,.45) 0%,rgba(20,15,33,.28) 100%);
+  --fnos-titlebar-icon:#c4b6e3;
+  --fnos-titlebar-hover-minmax:rgba(255,255,255,.08);
+  --fnos-titlebar-hover-close-bg:rgba(232,17,35,.18);
+  --fnos-titlebar-hover-close-icon:#ff4d5a;
+}`;
+  (document.head || document.documentElement).appendChild(s);
 }
 
 /** [v358] 删除设置页"主题模式"区块(含 跟随系统/浅色/深色 三个 radio 卡片), 防止切回深色 */
@@ -735,18 +994,26 @@ function handle(): void {
   const logNav = (label: string) => log('NAV', label, location.href);
   logNav('init');
 
-  // [v358] 锁死浅色主题 + 删除设置页"主题模式"切换: 飞牛默认深色, 用户要强制浅色且不再能切回
-  lockLightTheme();
+  // [v400] 注入主题变量 + 应用 UI 主题偏好 + 隐藏飞牛自带主题开关
+  injectUiThemeStyle();
+  applyUiTheme();
   removeThemeModeSetting();
   // MutationObserver 守护: 飞牛路由切换/React重渲染可能改回深色或重建设置页DOM → 持续纠正
   //   observe documentElement: attributes 监听 html 的 class/style 变化(锁浅色), subtree 监听内部所有 DOM 变化(删主题模式区块)
   let _themeTimer = 0;
   const _themeObserver = new MutationObserver(() => {
     clearTimeout(_themeTimer);
-    _themeTimer = window.setTimeout(() => { lockLightTheme(); removeThemeModeSetting(); }, 150);
+    _themeTimer = window.setTimeout(() => { applyUiTheme(); removeThemeModeSetting(); }, 150);
   });
   _themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'], childList: true, subtree: true });
   window.addEventListener('beforeunload', () => _themeObserver.disconnect());
+  // [v400] 跟随系统: 系统明暗偏好变化时, 若当前为 system 则实时换肤
+  try {
+    const _mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const _onSys = () => { if (getUiTheme() === 'system') applyUiTheme(); };
+    if (typeof _mq.addEventListener === 'function') _mq.addEventListener('change', _onSys);
+    else if (typeof (_mq as any).addListener === 'function') (_mq as any).addListener(_onSys);
+  } catch (e) { /* ignore */ }
 
   // ── [v364] 初始化亚克力参数(透明度/模糊): 来自 localStorage, 供侧栏滑块实时调整 ──
   (() => {
@@ -825,6 +1092,13 @@ function handle(): void {
       const el = all[i];
       if (skipTags.has(el.tagName)) continue;
       if (el.dataset.fnosClear === '1') continue;
+      // [v397] 跳过所有自建设置弹窗(检查更新/关于/反馈/B站登录): 它们标了 data-fnos-ui='1',
+      //   且子树内卡片背景为浅粉不透 → 若被白底清除器误清成 transparent!important, 整窗会"全透明"看不见.
+      //   用 closest 保护整棵子树(卡片是 position:relative, 自身不会被 fixed 浮层保护规则覆盖).
+      if (el.dataset.fnosUi === '1' || (typeof el.closest === 'function' && el.closest('[data-fnos-ui="1"]'))) {
+        skippedCount++;
+        continue;
+      }
 
       // [v367] 先检查是否受保护的交互浮层
       if (_isProtectedOverlay(el)) {
@@ -897,16 +1171,13 @@ function handle(): void {
       if (child.classList?.contains('absolute')) continue;
       const panel = child;
       // Mica Acrylic: 粉紫暖调半透 + 高模糊 (透桌面真亚克力)
-      panel.style.setProperty('background',
-        'linear-gradient(160deg,rgba(250,244,250,.60),rgba(243,238,247,.64))', 'important');
+      panel.style.setProperty('background', 'var(--fnos-sidebar-bg)', 'important');
       panel.style.setProperty('backdrop-filter',
         'blur(56px) saturate(135%) brightness(1.02)', 'important');
       panel.style.setProperty('-webkit-backdrop-filter',
         'blur(56px) saturate(135%) brightness(1.02)', 'important');
-      panel.style.setProperty('border-right', '1px solid rgba(255,255,255,.5)', 'important');
-      panel.style.setProperty('box-shadow',
-        'inset 1px 0 0 rgba(255,255,255,.5),-8px 0 32px rgba(140,130,160,.08)',
-        'important');
+      panel.style.setProperty('border-right', 'var(--fnos-sidebar-border)', 'important');
+      panel.style.setProperty('box-shadow', 'var(--fnos-sidebar-shadow)', 'important');
       // [v352] 关键: 面板内层嵌套容器常带白底(bg-white/bg-gray), 会盖住浅蓝 → 把它们全部透明化
       const descendants = panel.querySelectorAll('*');
       for (let j = 0; j < descendants.length; j++) {
@@ -941,7 +1212,7 @@ function handle(): void {
     ctrl.id = 'fnos-glass-ctrl';
     ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;margin-top:14px;width:100%;'
       + 'padding:14px 14px 16px;border-radius:14px;'
-      + 'background:rgba(46,36,66,.30)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+      + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
       + 'color:#fff;font-size:12px;user-select:none;';
     ctrl.innerHTML = ''
@@ -949,12 +1220,12 @@ function handle(): void {
       +   '<span style="font-weight:600;letter-spacing:.5px;">亚克力透明度</span>'
       +   '<span id="fnos-alpha-val" style="opacity:.85;">' + alphaPct + '%</span></div>'
       + '<input id="fnos-alpha" type="range" min="0" max="100" value="' + alphaPct + '" '
-      +   'style="width:100%;accent-color:#b79be8;cursor:pointer;">'
+      +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px;">'
       +   '<span style="font-weight:600;letter-spacing:.5px;">背景模糊</span>'
       +   '<span id="fnos-blur-val" style="opacity:.85;">' + storedBlur + 'px</span></div>'
       + '<input id="fnos-blur" type="range" min="0" max="100" value="' + storedBlur + '" '
-      +   'style="width:100%;accent-color:#b79be8;cursor:pointer;">';
+      +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">';
     panel.appendChild(ctrl);
 
     const alphaInput = ctrl.querySelector('#fnos-alpha') as HTMLInputElement;
@@ -990,7 +1261,7 @@ function handle(): void {
     btn.type = 'button';
     btn.textContent = '⚙ 设置';
     btn.style.cssText = 'margin-top:12px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
-      + 'background:rgba(46,36,66,.30)!important;color:#fff;font-size:13px;font-weight:600;'
+      + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
       + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'box-shadow:0 4px 16px rgba(0,0,0,.18);';
     btn.addEventListener('click', (e: Event) => {
@@ -1000,6 +1271,48 @@ function handle(): void {
       else openSettingsPanel(panel);
     });
     ctrl.appendChild(btn);
+
+    // [恢复v383] ℹ 关于按钮（版本号 + 居中，匹配设置按钮样式）
+    if (!ctrl.querySelector('#fnos-about-btn')) {
+      const verBtn = document.createElement('button');
+      verBtn.id = 'fnos-about-btn';
+      verBtn.type = 'button';
+      verBtn.innerHTML = 'ℹ 关于&nbsp;v3.1.0';
+      verBtn.style.cssText = 'margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
+        + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
+      verBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        openAboutModal();
+      });
+      ctrl.appendChild(verBtn);
+      // 动态版本号: 从主进程取真实版本(打包后准确; dev 若为 unknown 则保留兜底版本)
+      try {
+        ipcRenderer.invoke('app:info').then((info: any) => {
+          if (info && info.version && info.version !== 'unknown') {
+            verBtn.innerHTML = 'ℹ 关于&nbsp;v' + info.version;
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
+    // [恢复v381] 💬 反馈按钮（独立反馈渠道：问卷链接 + 二维码）
+    if (!ctrl.querySelector('#fnos-feedback-btn')) {
+      const fbBtn = document.createElement('button');
+      fbBtn.id = 'fnos-feedback-btn';
+      fbBtn.type = 'button';
+      fbBtn.textContent = '💬 反馈';
+      fbBtn.style.cssText = 'margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
+        + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
+      fbBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        openFeedbackModal();
+      });
+      ctrl.appendChild(fbBtn);
+    }
 
     buildSettingsPanel();
   }
@@ -1016,16 +1329,16 @@ function handle(): void {
       b.textContent = text;
       if (small) {
         b.style.cssText = 'padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;'
-          + 'background:rgba(150,120,200,.12)!important;color:#5c4d7d;border:1px solid rgba(150,120,200,.22);'
+          + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text);border:1px solid var(--fnos-ui-border-strong);'
           + 'transition:background .15s;';
-        b.onmouseenter = () => { b.style.background = 'rgba(183,155,232,.32)!important'; };
-        b.onmouseleave = () => { b.style.background = 'rgba(150,120,200,.12)!important'; };
+        b.onmouseenter = () => { b.style.background = 'var(--fnos-ui-btn-hover)!important'; };
+        b.onmouseleave = () => { b.style.background = 'var(--fnos-ui-btn-bg)!important'; };
       } else {
         b.style.cssText = 'flex:1;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600;'
-          + 'background:rgba(150,120,200,.10)!important;color:#5c4d7d;border:1px solid rgba(150,120,200,.18);'
+          + 'background:var(--fnos-ui-btn-bg2)!important;color:var(--fnos-ui-btn-text);border:1px solid var(--fnos-ui-border3);'
           + 'transition:background .15s;';
-        b.onmouseenter = () => { b.style.background = 'rgba(183,155,232,.28)!important'; };
-        b.onmouseleave = () => { b.style.background = 'rgba(150,120,200,.10)!important'; };
+        b.onmouseenter = () => { b.style.background = 'var(--fnos-ui-btn-hover2)!important'; };
+        b.onmouseleave = () => { b.style.background = 'var(--fnos-ui-btn-bg2)!important'; };
       }
       return b;
     };
@@ -1033,8 +1346,8 @@ function handle(): void {
     // 分组卡片
     const section = (titleText?: string): { el: HTMLElement; body: HTMLElement } => {
       const d = document.createElement('div');
-      let css = 'border-radius:12px;background:rgba(255,255,255,.5)!important;'
-        + 'border:1px solid rgba(150,120,200,.16);overflow:hidden;';
+      let css = 'border-radius:12px;background:var(--fnos-ui-input-bg)!important;'
+        + 'border:1px solid var(--fnos-ui-border3);overflow:hidden;';
       if (titleText !== undefined) {
         css += 'margin-bottom:10px;'; // 带标题的分组有底部间距
       }
@@ -1045,7 +1358,7 @@ function handle(): void {
         const t = document.createElement('div');
         t.textContent = titleText;
         t.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;'
-          + 'color:#9575cd;padding:9px 12px 6px;border-bottom:1px solid rgba(150,120,200,.12);';
+          + 'color:var(--fnos-ui-sec);padding:9px 12px 6px;border-bottom:1px solid var(--fnos-ui-border2);';
         d.appendChild(t);
       }
 
@@ -1059,31 +1372,32 @@ function handle(): void {
     // ===== 主面板 =====
     const overlay = document.createElement('div');
     overlay.id = 'fnos-settings-panel';
-    overlay.style.cssText = 'position:fixed;z-index:2147483647;display:none;flex-direction:column;width:360px;'
-      + 'max-height:calc(100vh - 120px);overflow-y:auto;color:#4a3d63;font-size:12.5px;line-height:1.45;'
-      + 'background:linear-gradient(165deg,rgba(252,247,253,.94),rgba(244,238,251,.96))!important;'
+    overlay.setAttribute('data-fnos-ui', '1'); // 保护自建设备 UI 不被白底清除器误清(含内部卡片底色)
+    overlay.style.cssText = 'position:fixed;z-index:2147483600;display:none;flex-direction:column;width:360px;'
+      + 'max-height:calc(100vh - 120px);overflow-y:auto;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
+      + 'background:var(--fnos-ui-panel-bg)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14),inset 0 1px 0 rgba(255,255,255,.6);'
-      + 'border-radius:18px;border:1px solid rgba(180,155,220,.35);';
+      + 'border-radius:18px;border:1px solid var(--fnos-ui-border-outer);';
     overlay.addEventListener('click', (e: Event) => e.stopPropagation());
 
     // 头部(标题+关闭)
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:15px 16px 12px;'
-      + 'border-bottom:1px solid rgba(150,120,200,.14);flex-shrink:0;';
+      + 'border-bottom:1px solid var(--fnos-ui-border);flex-shrink:0;';
     const title = document.createElement('span');
     title.textContent = '⚙ 设置';
-    title.style.cssText = 'font-size:15px;font-weight:700;color:#4a3d63;letter-spacing:.3px;';
+    title.style.cssText = 'font-size:15px;font-weight:700;color:var(--fnos-ui-text);letter-spacing:.3px;';
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
     // 放大点击热区(36×36)并加大字号, 解决"关闭按钮难点击"
     closeBtn.style.cssText = 'width:36px;height:36px;flex-shrink:0;border-radius:10px;cursor:pointer;font-size:16px;font-weight:700;'
-      + 'background:rgba(150,120,200,.12)!important;color:#7a6a9a;border:1px solid rgba(150,120,200,.22);display:flex;'
+      + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text2);border:1px solid var(--fnos-ui-border-strong);display:flex;'
       + 'align-items:center;justify-content:center;transition:all .15s;line-height:1;';
     closeBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); overlay.style.display = 'none'; });
     closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(240,90,90,.85)!important'; closeBtn.style.color = '#fff'; closeBtn.style.border = '1px solid rgba(240,90,90,.5)'; };
-    closeBtn.onmouseleave = () => { closeBtn.style.background = 'rgba(150,120,200,.12)!important'; closeBtn.style.color = '#7a6a9a'; closeBtn.style.border = '1px solid rgba(150,120,200,.22)'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.background = 'var(--fnos-ui-btn-bg2)!important'; closeBtn.style.color = 'var(--fnos-ui-btn-text2)'; closeBtn.style.border = '1px solid var(--fnos-ui-border-strong)'; };
     header.appendChild(title); header.appendChild(closeBtn);
     overlay.appendChild(header);
 
@@ -1095,14 +1409,14 @@ function handle(): void {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 4px;'
         + 'cursor:pointer;border-radius:6px;transition:background .12s;';
-      row.onmouseenter = () => { row.style.background = 'rgba(150,120,200,.08)'; };
+      row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
       row.onmouseleave = () => { row.style.background = 'transparent'; };
       const span = document.createElement('span');
       span.textContent = label;
-      span.style.cssText = 'color:#4a3d63;font-weight:500;';
+      span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
       const sw = document.createElement('input');
       sw.type = 'checkbox';
-      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:#b79be8;';
+      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
       row.appendChild(span); row.appendChild(sw);
       secBody1.appendChild(row);
       return sw;
@@ -1113,6 +1427,40 @@ function handle(): void {
     swProxy.addEventListener('change', () => { ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked); });
     swHide.addEventListener('change', () => { ipcRenderer.invoke('settings:set-hide-play', swHide.checked); });
     swNas.addEventListener('change', () => { ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked); });
+    // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
+    const themeRow = document.createElement('div');
+    themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 4px;gap:10px;';
+    const themeLabel = document.createElement('span');
+    themeLabel.textContent = '主题模式';
+    themeLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;white-space:nowrap;';
+    const seg = document.createElement('div');
+    seg.style.cssText = 'display:inline-flex;background:var(--fnos-ui-input-bg);border-radius:9px;padding:3px;gap:2px;flex-shrink:0;';
+    const themeModes: [UiThemeMode, string][] = [['light', '浅色'], ['dark', '深色'], ['system', '跟随系统']];
+    const themeBtns: HTMLButtonElement[] = [];
+    themeModes.forEach(([mode, text]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = text;
+      b.dataset.mode = mode;
+      b.style.cssText = 'border:none;cursor:pointer;font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:7px;'
+        + 'background:transparent;color:var(--fnos-ui-btn-text);transition:all .15s;white-space:nowrap;';
+      b.addEventListener('click', (e: Event) => { e.stopPropagation(); setUiTheme(mode); if (_refreshThemeSeg) _refreshThemeSeg(); });
+      seg.appendChild(b);
+      themeBtns.push(b);
+    });
+    const refreshThemeSeg = (): void => {
+      const cur = getUiTheme();
+      themeBtns.forEach((b) => {
+        const on = b.dataset.mode === cur;
+        b.style.background = on ? 'var(--fnos-ui-exit-on)' : 'transparent';
+        b.style.color = on ? '#fff' : 'var(--fnos-ui-btn-text)';
+      });
+    };
+    _refreshThemeSeg = refreshThemeSeg;
+    refreshThemeSeg();
+    themeRow.appendChild(themeLabel);
+    themeRow.appendChild(seg);
+    secBody1.appendChild(themeRow);
     overlay.appendChild(sec1.el);
 
     // ===== 分组2: MPV 路径 =====
@@ -1121,14 +1469,14 @@ function handle(): void {
 
     const mpvLabel = document.createElement('div');
     mpvLabel.textContent = 'MPV 播放器路径';
-    mpvLabel.style.cssText = 'color:#6a5a88;font-size:11.5px;margin-bottom:5px;';
+    mpvLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin-bottom:5px;';
     secBody2.appendChild(mpvLabel);
 
     const mpvPath = document.createElement('div');
     mpvPath.id = 'fnos-mpv-path';
-    mpvPath.style.cssText = 'font-size:10.5px;color:#8778a5;word-break:break-all;margin-bottom:7px;min-height:13px;'
-      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:rgba(255,255,255,.5);border-radius:7px;'
-      + 'border:1px solid rgba(150,120,200,.14);';
+    mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
+      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);';
     secBody2.appendChild(mpvPath);
 
     const mpvBtns = document.createElement('div');
@@ -1170,19 +1518,150 @@ function handle(): void {
     });
     secBody3.appendChild(exitGrid);
     overlay.appendChild(sec3.el);
+
+    // ===== 分组: B站弹幕登录 =====
+    const secBili = section('B站弹幕登录');
+    const secBodyBili = secBili.body;
+
+    const biliStatus = document.createElement('div');
+    biliStatus.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);margin-bottom:8px;';
+    secBodyBili.appendChild(biliStatus);
+
+    const biliBtns = document.createElement('div');
+    biliBtns.style.cssText = 'display:flex;gap:6px;';
+    const scanBtn = mkBtn('扫码登录', true);
+    const clearBiliBtn = mkBtn('清除登录', true);
+    biliBtns.appendChild(scanBtn); biliBtns.appendChild(clearBiliBtn);
+    secBodyBili.appendChild(biliBtns);
+    overlay.appendChild(secBili.el);
+
+    // 刷新 B站登录状态(打开面板时调用)
+    const refreshBili = async (): Promise<void> => {
+      try {
+        const st: any = await ipcRenderer.invoke('bili:cookie-status');
+        if (st && st.exists) {
+          biliStatus.textContent = '已登录（UID: ' + (st.uid || '未知') + '）';
+          biliStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          biliStatus.textContent = '未登录';
+          biliStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        biliStatus.textContent = '状态获取失败';
+        biliStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    };
+
+    // 注入 qrcode 库(仅一次)
+    let _biliQrTimer = 0;
+    let _biliLibReady = false;
+    const ensureBiliQrLib = async (): Promise<boolean> => {
+      if (_biliLibReady && (window as any).qrcode) return true;
+      try {
+        const src: string = await ipcRenderer.invoke('bili:qr-lib');
+        if (!src) return false;
+        const s = document.createElement('script');
+        s.textContent = src;
+        document.head.appendChild(s);
+        _biliLibReady = !!(window as any).qrcode;
+        return _biliLibReady;
+      } catch { return false; }
+    };
+
+    // 打开扫码登录弹窗
+    const openBiliLogin = async (): Promise<void> => {
+      let modal = document.getElementById('fnos-bili-modal') as HTMLElement | null;
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'fnos-bili-modal';
+        modal.style.cssText = 'position:fixed;z-index:2147483700;display:none;align-items:center;justify-content:center;'
+          + 'left:0;top:0;width:100%;height:100%;background:var(--fnos-modal-overlay);';
+        modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除
+        const box = document.createElement('div');
+        box.style.cssText = 'width:300px;padding:22px 20px 18px;border-radius:18px;text-align:center;color:var(--fnos-ui-text);'
+          + 'background:var(--fnos-ui-panel-bg)!important;'
+          + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
+          + 'box-shadow:0 18px 50px rgba(80,60,120,.3),var(--fnos-modal-inner-shadow);'
+          + 'border:1px solid var(--fnos-ui-border-outer);';
+        box.innerHTML =
+          '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">B站弹幕登录</div>'
+          + '<div style="font-size:11px;color:var(--fnos-ui-sec);margin-bottom:14px;">请用 B站 APP 扫码登录</div>'
+          + '<div class="fnos-bili-qr" style="width:200px;height:200px;margin:0 auto 12px;display:flex;align-items:center;'
+          + 'justify-content:center;background:var(--fnos-qr-bg);border-radius:12px;padding:10px;box-sizing:border-box;overflow:hidden;"></div>'
+          + '<div class="fnos-bili-tip" style="font-size:12px;color:var(--fnos-ui-muted);min-height:18px;margin-bottom:14px;">准备中…</div>';
+        const closeB = document.createElement('button');
+        closeB.type = 'button';
+        closeB.textContent = '取消';
+        closeB.style.cssText = 'width:100%;padding:9px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;'
+          + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text2);border:1px solid var(--fnos-ui-border-strong);';
+        box.appendChild(closeB);
+        modal.appendChild(box);
+        modal.addEventListener('click', (e: Event) => {
+          if (e.target === modal) { modal!.style.display = 'none'; clearInterval(_biliQrTimer); }
+        });
+        closeB.addEventListener('click', (e: Event) => { e.stopPropagation(); modal!.style.display = 'none'; clearInterval(_biliQrTimer); });
+        document.body.appendChild(modal);
+      }
+      const m = modal;
+      m.style.display = 'flex';
+      const qrWrap = m.querySelector('.fnos-bili-qr') as HTMLElement | null;
+      const tip = m.querySelector('.fnos-bili-tip') as HTMLElement | null;
+      if (qrWrap) qrWrap.innerHTML = '生成二维码中…';
+      if (tip) tip.textContent = '';
+      clearInterval(_biliQrTimer);
+
+      const okLib = await ensureBiliQrLib();
+      if (!okLib) { if (qrWrap) qrWrap.textContent = '二维码库加载失败'; return; }
+      const gen: any = await ipcRenderer.invoke('bili:qr-generate');
+      if (!gen || !gen.ok) { if (qrWrap) qrWrap.textContent = '获取失败: ' + ((gen && gen.error) || '未知'); return; }
+      try {
+        const qr = (window as any).qrcode(0, 'M');
+        qr.addData(gen.url);
+        qr.make();
+        if (qrWrap) qrWrap.innerHTML = qr.createSvgTag(6, 10);
+      } catch (e: any) {
+        if (qrWrap) qrWrap.textContent = '渲染失败: ' + (e?.message || e);
+      }
+      if (tip) tip.textContent = '请用 B站 APP 扫码';
+      _biliQrTimer = window.setInterval(async () => {
+        const r: any = await ipcRenderer.invoke('bili:qr-poll', gen.key);
+        if (r.code === 0) {
+          clearInterval(_biliQrTimer);
+          if (tip) tip.textContent = '登录成功！';
+          refreshBili();
+          window.setTimeout(() => { m.style.display = 'none'; }, 900);
+        } else if (r.expired) {
+          clearInterval(_biliQrTimer);
+          if (tip) tip.textContent = '二维码已过期，请重新点击扫码登录';
+          if (qrWrap) qrWrap.innerHTML = '二维码已失效';
+        } else {
+          if (tip) tip.textContent = r.status || '等待扫码…';
+        }
+      }, 1500);
+    };
+
+    scanBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openBiliLogin(); });
+    clearBiliBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      try {
+        const r: any = await ipcRenderer.invoke('bili:clear');
+        biliStatus.textContent = (r && r.ok) ? '已清除登录信息' : '清除失败';
+        biliStatus.style.color = 'var(--fnos-ui-warn)';
+      } catch { biliStatus.textContent = '清除失败'; }
+    });
     const refreshExit = (): void => {
       const cur = (overlay as any)._exitMode || 'ask';
       exitEls.forEach((b) => {
         const on = b.dataset.mode === cur;
-        b.style.background = (on ? 'rgba(147,117,205,.92)' : 'rgba(255,255,255,.55)') + '!important';
-        b.style.color = on ? '#fff' : '#6a5a88';
+        b.style.background = (on ? 'var(--fnos-ui-exit-on)' : 'var(--fnos-ui-exit-off)') + '!important';
+        b.style.color = on ? '#fff' : 'var(--fnos-ui-muted)';
         b.style.fontWeight = on ? '700' : '500';
-        b.style.border = (on ? '1px solid rgba(147,117,205,.6)' : '1px solid rgba(150,120,200,.18)') + '!important';
+        b.style.border = (on ? 'var(--fnos-exit-border-on)' : 'var(--fnos-exit-border-off)') + '!important';
       });
     };
     // hover 时不要覆盖选中态背景 → 重写退出按钮的 hover(仅未选中项响应)
     exitEls.forEach((b) => {
-      b.onmouseenter = () => { if (b.dataset.mode !== ((overlay as any)._exitMode || 'ask')) b.style.background = 'rgba(183,155,232,.28)!important'; };
+      b.onmouseenter = () => { if (b.dataset.mode !== ((overlay as any)._exitMode || 'ask')) b.style.background = 'var(--fnos-ui-btn-hover2)!important'; };
       b.onmouseleave = () => { refreshExit(); };
     });
 
@@ -1192,11 +1671,9 @@ function handle(): void {
     const actRow = document.createElement('div');
     actRow.style.cssText = 'display:flex;gap:6px;';
     const updBtn = mkBtn('检查更新', true);
-    const showBtn = mkBtn('显示主窗口', true);
-    actRow.appendChild(updBtn); actRow.appendChild(showBtn);
+    actRow.appendChild(updBtn);
     secBody4.appendChild(actRow);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
-    showBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:show-main'); });
     overlay.appendChild(sec4.el);
 
     // 底部安全区(给滚动留空间)
@@ -1214,6 +1691,7 @@ function handle(): void {
         mpvPath.textContent = s.mpvPath || '';
         (overlay as any)._exitMode = s.exitMode || 'ask';
         refreshExit();
+        refreshBili();
       } catch (err) {
         log('SETTINGS refresh failed', err);
       }
@@ -1338,7 +1816,7 @@ function handle(): void {
     if (_veil && document.body.contains(_veil)) return _veil;
     const v = document.createElement('div');
     v.id = 'fnos-page-veil';
-    v.style.cssText = 'position:fixed;top:32px;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;opacity:0;background:linear-gradient(180deg,rgba(245,240,248,.6) 0%,rgba(238,233,246,.55) 100%);transition:opacity .26s ease;border-radius:0 0 16px 16px;overflow:hidden;';
+    v.style.cssText = 'position:fixed;top:32px;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;opacity:0;background:var(--fnos-ui-veil);transition:opacity .26s ease;border-radius:0 0 16px 16px;overflow:hidden;';
     document.body.appendChild(v);
     _veil = v;
     return v;
@@ -1423,4 +1901,112 @@ function handle(): void {
 }
 
 registerHook(HookType.OnReady, handle);
-export { };
+
+/* ========== [恢复v381/v383] 关于弹窗 & 反馈弹窗 ========== */
+const ABOUT_LINK_URL = 'https://github.com/YDMY007/fnos-tv';
+const openAboutModal = (): void => {
+  let modal = document.getElementById('fnos-about-modal') as HTMLElement | null;
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fnos-about-modal';
+    modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器(否则卡片浅粉底会被清成透明)
+    modal.style.cssText = 'position:fixed;z-index:2147483701;inset:0;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,.5);';
+    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
+
+    const card = document.createElement('div');
+    card.style.cssText = 'width:320px;border-radius:18px;padding:24px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-panel-bg)!important;'
+      + 'border:1px solid var(--fnos-ui-border-outer);'
+      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
+      + 'text-align:center;';
+
+    card.innerHTML = ''
+      + '<div style="font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">🎬 飞牛影视</div>'
+      + '<div style="font-size:13px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:16px;">YDMY007</div>'
+      + '<div style="font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;text-align:center;margin-bottom:20px;padding:0 4px;">'
+      +   '基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。'
+      +   '支持 MPV 播放器、B站弹幕、自定义透明度与模糊效果。</div>'
+      + '<a id="fnos-about-link" href="' + ABOUT_LINK_URL + '" style="display:inline-block;font-size:13px;font-weight:700;'
+      +   'color:var(--fnos-ui-pill-text);text-decoration:none;padding:8px 20px;border-radius:10px;'
+      +   'background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
+      +   'transition:background .15s,transform .1s;">🔗 GitHub 项目地址</a>';
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+
+    (document.getElementById('fnos-about-link') as HTMLElement).addEventListener('click', async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await ipcRenderer.invoke('app:open-external', ABOUT_LINK_URL); } catch (_) {}
+    });
+    const linkEl = document.getElementById('fnos-about-link') as HTMLElement;
+    linkEl.onmouseenter = () => { linkEl.style.transform = 'scale(1.03)'; linkEl.style.background = 'var(--fnos-ui-pill-hover)!important'; linkEl.style.color = '#fff'; };
+    linkEl.onmouseleave = () => { linkEl.style.transform = ''; linkEl.style.background = 'var(--fnos-ui-pill-bg)!important'; linkEl.style.color = 'var(--fnos-ui-pill-text)'; };
+  }
+  modal.style.display = 'flex';
+};
+
+const FEEDBACK_LINK_URL = 'https://wj.qq.com/s2/27390788/787a/';
+const openFeedbackModal = async (): Promise<void> => {
+  let modal = document.getElementById('fnos-feedback-modal') as HTMLElement | null;
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fnos-feedback-modal';
+    modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器(否则卡片浅粉底会被清成透明)
+    modal.style.cssText = 'position:fixed;z-index:2147483701;inset:0;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,.5);';
+    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
+
+    const card = document.createElement('div');
+    card.style.cssText = 'width:300px;border-radius:18px;padding:24px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-panel-bg)!important;'
+      + 'border:1px solid var(--fnos-ui-border-outer);'
+      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
+      + 'text-align:center;';
+
+    card.innerHTML = ''
+      + '<div style="font-size:20px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:6px;">💬 意见反馈</div>'
+      + '<div style="font-size:12.5px;line-height:1.7;color:var(--fnos-ui-text);opacity:.82;margin-bottom:16px;">'
+      +   '欢迎扫码填写问卷，向我们反馈使用体验与建议。</div>'
+      + '<div id="fnos-feedback-qr" style="width:180px;height:180px;margin:0 auto 14px;background:#fff;border-radius:12px;overflow:hidden;'
+      +   'display:flex;align-items:center;justify-content:center;"></div>'
+      + '<div style="font-size:11px;opacity:.65;margin-bottom:14px;">扫码参与用户调研</div>'
+      + '<a id="fnos-feedback-link" href="' + FEEDBACK_LINK_URL + '" style="display:inline-block;font-size:13px;font-weight:700;'
+      +   'color:var(--fnos-ui-pill-text);text-decoration:none;padding:8px 20px;border-radius:10px;'
+      +   'background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
+      +   'transition:background .15s,transform .1s;">🔗 用户调研问卷</a>';
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+
+    (document.getElementById('fnos-feedback-link') as HTMLElement).addEventListener('click', async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await ipcRenderer.invoke('app:open-external', FEEDBACK_LINK_URL); } catch (_) {}
+    });
+    const flink = document.getElementById('fnos-feedback-link') as HTMLElement;
+    flink.onmouseenter = () => { flink.style.transform = 'scale(1.03)'; flink.style.background = 'var(--fnos-ui-pill-hover)!important'; flink.style.color = '#fff'; };
+    flink.onmouseleave = () => { flink.style.transform = ''; flink.style.background = 'var(--fnos-ui-pill-bg)!important'; flink.style.color = 'var(--fnos-ui-pill-text)'; };
+  }
+  modal.style.display = 'flex';
+
+  // 加载用户给的二维码图片（主进程读取 build/qrcode.png 返回 base64）
+  const qrBox = document.getElementById('fnos-feedback-qr') as HTMLElement | null;
+  if (qrBox && !qrBox.querySelector('img')) {
+    try {
+      const res = await ipcRenderer.invoke('app:qr-image') as any;
+      if (res && res.ok && res.dataUri) {
+        const img = document.createElement('img');
+        img.src = res.dataUri;
+        img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+        qrBox.appendChild(img);
+      } else {
+        qrBox.textContent = 'QR';
+      }
+    } catch (e) { qrBox.textContent = 'QR'; }
+  }
+};
+

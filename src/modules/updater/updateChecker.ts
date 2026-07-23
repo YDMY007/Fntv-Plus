@@ -1,5 +1,6 @@
 import axios, { AxiosResponse } from 'axios';
-import { dialog, shell, app } from 'electron';
+import { shell, app } from 'electron';
+import { fnosDialog } from '../../main/common/fnosDialog';
 import { getDownloadProxyConfig } from '../fn_config/config';
 import log from '../logger';
 
@@ -275,18 +276,18 @@ export class UpdateChecker {
      */
     async showUpdateDialog(updateInfo: UpdateInfo): Promise<boolean> {
         const { latestVersion, releaseNotes, downloadUrl, htmlUrl } = updateInfo;
-        
-        const result: DialogResult = await dialog.showMessageBox({
+
+        const { response } = await fnosDialog(null, {
             type: 'info',
             title: '发现新版本',
             message: `飞牛影视有新版本可用！`,
             detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion}\n\n更新内容:\n${releaseNotes || '暂无更新说明'}`,
             buttons: ['立即下载', '查看详情', '稍后提醒'],
             defaultId: 0,
-            cancelId: 2
+            cancelId: 2,
         });
 
-        switch (result.response) {
+        switch (response) {
             case 0: // 立即下载
                 if (downloadUrl) {
                     shell.openExternal(downloadUrl);
@@ -299,8 +300,7 @@ export class UpdateChecker {
                     shell.openExternal(htmlUrl);
                 }
                 return false;
-            case 2: // 稍后提醒
-            default:
+            default: // 稍后提醒
                 return false;
         }
     }
@@ -309,12 +309,12 @@ export class UpdateChecker {
      * 显示没有更新的提示
      */
     async showNoUpdateDialog(): Promise<void> {
-        await dialog.showMessageBox({
+        await fnosDialog(null, {
             type: 'info',
             title: '检查更新',
             message: '当前已是最新版本',
             detail: `当前版本: ${this.currentVersion}`,
-            buttons: ['确定']
+            buttons: ['确定'],
         });
     }
 
@@ -323,12 +323,12 @@ export class UpdateChecker {
      * @param error - 错误信息
      */
     async showUpdateErrorDialog(error: string): Promise<void> {
-        await dialog.showMessageBox({
+        await fnosDialog(null, {
             type: 'error',
             title: '检查更新失败',
             message: '无法检查更新',
             detail: error,
-            buttons: ['确定']
+            buttons: ['确定'],
         });
     }
 

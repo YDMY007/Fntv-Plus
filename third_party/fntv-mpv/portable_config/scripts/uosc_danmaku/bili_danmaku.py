@@ -74,6 +74,26 @@ def log(s):
     sys.stderr.write("[bili_danmaku] " + str(s) + "\n")
     sys.stderr.flush()
 
+def parse_count(v):
+    """把 B站 返回的弹幕数/播放数（可能是 int、'1.2万'、'--'、None）统一成整数。"""
+    if v is None:
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v)
+    s = str(v).strip().replace(",", "")
+    if s in ("", "--", "无", "—"):
+        return 0
+    try:
+        m = re.match(r"([\d.]+)\s*亿", s)
+        if m:
+            return int(float(m.group(1)) * 1e8)
+        m = re.match(r"([\d.]+)\s*万", s)
+        if m:
+            return int(float(m.group(1)) * 10000)
+        return int(float(s))
+    except Exception:
+        return 0
+
 def fetch(url, binary=False):
     hdr = dict(UA)
     hdr["Cache-Control"] = "no-cache"
@@ -124,40 +144,82 @@ def wbi_sign(params):
     w_rid = hashlib.md5((s + str(wts)).encode()).hexdigest()
     return f"w_rid={w_rid}&wts={wts}"
 
+def _bangumi_cid(ep_id):
+    """由 ep_id 取 cid（仅当该 ep 有 cid 时）。"""
+    try:
+        sd = jget(f"https://api.bilibili.com/pgc/view/web/season?ep_id={ep_id}")
+        if sd.get("code") == 0:
+            for e in sd["result"].get("episodes", []):
+                if e.get("ep_id") == ep_id and e.get("cid"):
+                    return e["cid"]
+    except Exception as e:
+        log("pgc请求失败: " + str(e))
+    return None
+
 def search_bangumi(title, ep_num):
-    """番剧区搜索（B站正版番剧）。返回 (cid, title) 或 (None, None)。"""
+    """番剧区搜索（B站正版番剧）。返回 (cid, title) 或 (None, None)。
+    匹配逻辑：优先精确集数；集数超出范围时，改取该番「弹幕最多的一集」兜底，
+    避免默认取首集却弹幕稀少的情况。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(title)}&search_type=media_bangumi"
     d = jget(url)
     if not d or d.get("code") != 0:
         log("番剧区搜索失败 code=" + str(d.get("code")))
         return None, None
     prefix = title[:3]
+    matched = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "media_bangumi":
             for anime in it.get("data", []):
                 t = re.sub(r"<[^>]+>", "", anime.get("title") or "")
                 if "中配" in t:
                     continue
-                if prefix and prefix in t:
-                    eps = anime.get("eps") or []
-                    ep = None
-                    if 1 <= ep_num <= len(eps):
-                        ep = eps[ep_num - 1]
-                    elif eps:
-                        ep = eps[0]
-                    if not ep:
-                        continue
-                    ep_id = ep.get("ep_id") or ep.get("id")
-                    if not ep_id:
-                        continue
-                    try:
-                        sd = jget(f"https://api.bilibili.com/pgc/view/web/season?ep_id={ep_id}")
-                        if sd.get("code") == 0:
-                            for e in sd["result"].get("episodes", []):
-                                if e.get("ep_id") == ep_id and e.get("cid"):
-                                    return e["cid"], t
-                    except Exception as e:
-                        log("pgc请求失败: " + str(e))
+                if prefix and prefix not in t:
+                    continue
+                matched.append((t, anime))
+
+    if not matched:
+        return None, None
+
+    # 仅番名/单集模式：取首集（第1话）
+    if ep_num == 0:
+        for t, anime in matched:
+            eps = anime.get("eps") or []
+            if eps:
+                ep_id = eps[0].get("ep_id") or eps[0].get("id")
+                if ep_id:
+                    cid = _bangumi_cid(ep_id)
+                    if cid:
+                        return cid, t
+        return None, None
+
+    # 精确集数优先
+    for t, anime in matched:
+        eps = anime.get("eps") or []
+        if 1 <= ep_num <= len(eps):
+            ep = eps[ep_num - 1]
+            ep_id = ep.get("ep_id") or ep.get("id")
+            if ep_id:
+                cid = _bangumi_cid(ep_id)
+                if cid:
+                    return cid, t
+
+    # 兜底：第 N 话超出范围时，取「弹幕最多」的一集（搜索结果自带 danmaku 字段）
+    best = None
+    best_dm = -1
+    for t, anime in matched:
+        for ep in (anime.get("eps") or []):
+            dm = parse_count(ep.get("danmaku"))
+            ep_id = ep.get("ep_id") or ep.get("id")
+            if not ep_id:
+                continue
+            if dm > best_dm:
+                best_dm = dm
+                best = (t, ep_id)
+    if best:
+        cid = _bangumi_cid(best[1])
+        if cid:
+            log("番剧区：第%d话超出范围，改取弹幕最多的一集（弹幕=%d）: %s" % (ep_num, best_dm, best[0]))
+            return cid, best[0]
     return None, None
 
 def _ep_in_title(t, ep_num):
@@ -202,83 +264,90 @@ def cid_from_bvid(bvid, ep_num=None, title_hint=None):
         return None
 
 def search_video(title, ep_num):
-    """视频区搜索（UP主搬运）。优先匹配单集视频/多P对应分P，弹幕时间线对齐。"""
+    """视频区搜索（UP主搬运）。按弹幕数（video_review）优选候选，而非第一个命中即返回。
+    优先集数对齐；在「集数对齐且标题相关」的候选中挑弹幕最多的那一个。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(title)}&search_type=video"
     d = jget(url)
     if not d or d.get("code") != 0:
         return None, None
-    cands = []
+    pool = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "video":
             for v in it.get("data", []):
                 t = re.sub(r"<[^>]+>", "", v.get("title") or "")
                 bvid = v.get("bvid")
                 if bvid:
-                    cands.append((t, bvid))
-    if not cands:
+                    # video_review 即弹幕数（搜索结果自带，无需额外请求）
+                    vr = parse_count(v.get("video_review"))
+                    pool.append((t, bvid, vr))
+    if not pool:
         return None, None
 
     prefix = title[:2]
-
-    # 1) 优先：标题命中所求集数的视频 / 多P中对应分P（弹幕时间线对齐）
-    for t, bvid in cands:
+    # 预筛：标题含番名前缀、非二创，再按弹幕数降序
+    cands = []
+    for t, bvid, vr in pool:
         if any(k in t.lower() for k in BAD_TITLE):
             continue
-        if prefix not in t:
+        if prefix and prefix not in t:
             continue
-        cid = cid_from_bvid(bvid, ep_num, title_hint=t)
-        if cid:
-            log("视频区匹配: " + t)
-            return cid, t
+        cands.append((t, bvid, vr))
+    if not cands:
+        return None, None
+    cands.sort(key=lambda x: -x[2])
 
-    # 2) 兜底：仅第1话可用合集首P（合集开头≈第1话，时间线基本对齐）
-    if ep_num == 1:
-        for t, bvid in cands:
-            if any(k in t.lower() for k in BAD_TITLE):
-                continue
-            if prefix in t:
-                cid = cid_from_bvid(bvid)
-                if cid:
-                    log("视频区兜底匹配（合集首P，第1话时间线基本对齐）: " + t)
-                    return cid, t
-    else:
+    # 1) 集数对齐：按弹幕数降序逐个尝试，命中即返回（优先弹幕多且集数对齐）
+    if ep_num:
+        for t, bvid, vr in cands:
+            cid = cid_from_bvid(bvid, ep_num, title_hint=t)
+            if cid:
+                log("视频区：在%d个候选中按弹幕数优先选定（弹幕=%d）: %s" % (len(cands), vr, t))
+                return cid, t
         log("视频区未找到第%d话对应视频（仅有合集/无单集搬运）" % ep_num)
+        return None, None
+
+    # 2) 仅番名/第1话：直接取弹幕最多的（合集首P≈第1话，时间线基本对齐）
+    for t, bvid, vr in cands:
+        cid = cid_from_bvid(bvid)
+        if cid:
+            log("视频区（仅番名）：选定弹幕最多候选（弹幕=%d）: %s" % (vr, t))
+            return cid, t
+    log("视频区（仅番名）：候选均无可用分P")
     return None, None
 
 def search_video_fuzzy(kw, ep_num):
     """最后兜底：常规标题匹配全失败时，对 B站 视频搜索结果做「识别核心」字符相似度
-    猜测，仅当命中所需集数且相似度较高才采用，并明确告警（谐音/近似名不可靠，请核对）。"""
+    猜测，仅当命中所需集数且相似度较高才采用，并明确告警（谐音/近似名不可靠，请核对）。
+    在达到相似度阈值的候选中，优先弹幕数最多者。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(kw)}&search_type=video"
     d = jget(url)
     if not d or d.get("code") != 0:
         return None, None
-    cands = []
+    pool = []
     for it in d.get("data", {}).get("result", []):
         if isinstance(it, dict) and it.get("result_type") == "video":
             for v in it.get("data", []):
                 t = re.sub(r"<[^>]+>", "", v.get("title") or "")
                 bvid = v.get("bvid")
                 if bvid:
-                    cands.append((t, bvid))
-    if not cands:
+                    vr = parse_count(v.get("video_review"))
+                    pool.append((t, bvid, vr))
+    if not pool:
         return None, None
     core_kw = _core(kw)
-    best = None; best_score = 0.0
-    for t, bvid in cands:
+    # 先按弹幕数降序，逐个校验相似度，第一个达阈值者即最优（弹幕多且足够相似）
+    pool.sort(key=lambda x: -x[2])
+    for t, bvid, vr in pool:
         if any(k in t.lower() for k in BAD_TITLE):
             continue
-        # 先确认该视频确实有目标集（单P标题含集数 或 多P对应分P），否则跳过
         cid = cid_from_bvid(bvid, ep_num, title_hint=t)
         if not cid:
             continue
         sim = _overlap(core_kw, _core(t))
-        if sim > best_score:
-            best_score = sim; best = (t, bvid, cid)
-    if best and best_score >= 0.45:
-        t, bvid, cid = best
-        log(f"[模糊兜底-谐音/近似名猜测] 相似度={best_score:.2f} 命中: {t}  (不可靠，请核对集数)")
-        return cid, t
-    log(f"模糊兜底未找到足够相似的视频(最高相似度={best_score:.2f})")
+        if sim >= 0.45:
+            log(f"[模糊兜底-谐音/近似名猜测] 相似度={sim:.2f} 弹幕数={vr} 命中: {t}  (不可靠，请核对集数)")
+            return cid, t
+    log(f"模糊兜底未找到足够相似的视频")
     return None, None
 
 def search_cid(title, ep_num):

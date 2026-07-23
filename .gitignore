@@ -18,3 +18,17 @@ play_video.py
 # 用户自定义 mpv 配置：B站 登录凭证与本地备份严禁提交
 bili_cookie.txt
 *.bak*
+
+# 个人播放数据 / 运行时产物：严禁提交
+**/watch_later/
+**/__pycache__/
+danmaku-history.json
+mpv.log
+
+# 发布流程临时文件
+.exeresp.json
+.relbody.json
+.relid.txt
+.relresp.json
+.ymlresp.json
+_test_parse.js

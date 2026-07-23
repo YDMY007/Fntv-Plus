@@ -871,13 +871,27 @@ mp.register_event("file-loaded", function()
     if options.auto_load_extra then
         ENABLED = true
         bili_auto_triggered = false
-        local bt, be = guess_bili_title_ep(filename)
+        -- 对于网络流媒体，filename 是 URL 路径（可能含 IP 地址等无意义字符），
+        -- 而 media-title 才是人类可读的标题（如 "番名 - S1E2: 副标题"）。
+        -- 因此优先用 media-title 解析；本地文件则继续用 filename。
+        local parse_target = filename
+        if is_protocol(mp.get_property("path")) then
+            local mtitle = mp.get_property("media-title")
+            if mtitle and mtitle ~= "" then
+                parse_target = mtitle
+            end
+        end
+        local bt, be, bmethod = guess_bili_title_ep_v2(parse_target)
         if bt and be then
             bili_auto_triggered = true
-            msg.warn(("B站优先：文件名解析 %s 第%s集，触发 B站 弹幕"):format(bt, be))
+            msg.warn(("B站优先：极速解析 %s 第%s集（策略:%s），触发 B站 弹幕"):format(bt, be, bmethod))
             auto_search_extra(bt, be)
+        elseif bt then
+            bili_auto_triggered = true
+            msg.warn(("B站优先：极速解析仅识别番名 %s（无集数，策略:%s），按单集/第1话搜索"):format(bt, bmethod))
+            auto_search_extra(bt, 0)
         else
-            msg.warn("B站优先：文件名未解析出番名/集数，转由弹弹play 匹配后补源")
+            msg.warn("B站优先：文件名未解析出番名，转由弹弹play 匹配后补源")
         end
         -- 弹弹play 作为兜底源（其匹配成功后会用更准的番名再补一次 B站，见 dandanplay.lua）
         auto_load_danmaku(path, dir, filename)
@@ -945,3 +959,85 @@ mp.register_script_message("open_source_delay_menu", danmaku_delay_setup)
 mp.register_script_message("open_search_danmaku_menu", open_input_menu)
 mp.register_script_message("open_add_source_menu", open_add_menu)
 mp.register_script_message("open_add_total_menu", open_add_total_menu)
+mp.register_script_message("open_bili_config_menu", open_bili_config_menu)
+mp.register_script_message("bili_show_alias", function()
+    open_bili_alias_menu()
+end)
+mp.register_script_message("bili_search_now", function()
+    -- 网络流优先用 media-title（人类可读标题），本地文件用 filename
+    local parse_target = mp.get_property("filename") or ""
+    if is_protocol(mp.get_property("path")) then
+        local mtitle = mp.get_property("media-title")
+        if mtitle and mtitle ~= "" then
+            parse_target = mtitle
+        end
+    end
+    local title, ep, method = guess_bili_title_ep_v2(parse_target)
+    if title and ep then
+        auto_search_extra(title, ep)
+        show_message(("已触发 B站弹幕搜索：%s 第%s集（策略:%s）"):format(title, ep, method), 4)
+    elseif title then
+        auto_search_extra(title, 0)
+        show_message(("已触发 B站弹幕搜索：%s（仅番名，按第1话/单集，策略:%s）"):format(title, method), 4)
+    else
+        show_message("当前文件无法解析出番名，已跳过", 4)
+    end
+end)
+
+-- ============ B站弹幕手动搜索 ============
+-- 从输入串解析「番名 + 集数」：支持「番名 3」「番名 第5集」「番名@12」「番名 ep7」「番名 E9」
+-- 注意：多字节字符类（[话集]）后不要紧跟 $ 锚点（Lua 按字节匹配，会卡在字符中间）。
+local function bili_manual_parse(q)
+    q = q:gsub("^%s*(.-)%s*$", "%1")
+    if q == "" then return nil, nil end
+    -- 1) 番名 第X集 / 番名 第X话（阿拉伯数字）
+    local t, n = q:match("^(.-)%s+第%s*(%d+)%s*[话集]")
+    if t and n then
+        q = t:gsub("^%s*(.-)%s*$", "%1")
+        if q ~= "" then return q, tonumber(n) end
+    end
+    -- 2) 番名 3 / 番名@3 / 番名 ep3 / 番名 E3（数字在结尾，需有空格分隔）
+    t, n = q:match("^(.-)%s+(%d+)%s*$")
+    if not t then t, n = q:match("^(.-)@(%d+)%s*$") end
+    if not t then t, n = q:match("^(.-)%s+[Ee][pP]?%s*(%d+)%s*$") end
+    if t and n then
+        q = t:gsub("^%s*(.-)%s*$", "%1")
+        if q ~= "" then return q, tonumber(n) end
+    end
+    return q, nil
+end
+
+mp.register_script_message("open_bili_manual_search", function()
+    open_bili_manual_search()
+end)
+
+mp.register_script_message("open_bili_manual_ep", function()
+    open_bili_manual_ep_menu()
+end)
+
+mp.register_script_message("bili_manual_search_event", function(query)
+    local title, ep = bili_manual_parse(query or "")
+    if title and ep then
+        auto_search_extra(title, ep)
+        show_message(("已手动搜索 B站弹幕：%s 第%s集"):format(title, ep), 4)
+    elseif title then
+        open_bili_manual_choose(title)
+    else
+        show_message("无法从输入解析出番名，请直接输入番名", 4)
+    end
+end)
+
+mp.register_script_message("bili_manual_do", function(ep_str)
+    local title = bili_manual_title_cache
+    if not title then
+        show_message("请先输入番名再指定集数", 4)
+        return
+    end
+    local ep = tonumber((ep_str or ""):match("%d+")) or 0
+    auto_search_extra(title, ep)
+    if ep == 0 then
+        show_message(("已手动搜索 B站弹幕：%s（仅番名/单集）"):format(title), 4)
+    else
+        show_message(("已手动搜索 B站弹幕：%s 第%s集"):format(title, ep), 4)
+    end
+end)

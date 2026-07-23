@@ -386,17 +386,109 @@ function guess_bili_title_ep(filename)
     return title, ep
 end
 
+-- ============ 极速策略：轻量自包含解析（不依赖 dandanplay 21 条正则链） ============
+-- 单次提取「番名 + 集数」，覆盖更多真实文件名：电影/单集/OVA、中文第X集、
+-- 括号集数、纯数字分隔(-03/_03/.03)、E/EP 标记等。
+-- 返回 (title, ep, method)：method ∈ "fast"(番名+集数) / "title_only"(仅番名) / nil
+
+-- 中文数字 → 阿拉伯（一~九十九，按 UTF-8 逐字符解析）
+local function cn_ep_to_num(s)
+    if not s or s == "" then return nil end
+    local map = { ["一"]=1,["二"]=2,["三"]=3,["四"]=4,["五"]=5,["六"]=6,["七"]=7,["八"]=8,["九"]=9,["零"]=0,["两"]=2,["十"]=10 }
+    local chars, i, n = {}, 1, 0
+    while i <= #s do
+        local b = s:byte(i)
+        local len = (b < 0x80) and 1 or (b < 0xE0) and 2 or (b < 0xF0) and 3 or 4
+        chars[#chars + 1] = s:sub(i, i + len - 1)
+        i = i + len
+    end
+    local sec = 0
+    for _, ch in ipairs(chars) do
+        if ch == "十" then
+            n = n + (sec == 0 and 1 or sec) * 10
+            sec = 0
+        elseif map[ch] and map[ch] ~= 10 then
+            sec = map[ch]
+        end
+    end
+    n = n + sec
+    return n > 0 and n or nil
+end
+
+function bili_fast_parse(filename)
+    if not filename or filename == "" then return nil, nil, nil end
+    local s = filename:gsub("%.[^%.]+$", "")                                  -- 去扩展名
+    s = s:gsub("^[%[%(【『][^%]%)】』]*[%]%)】』]%s*", "")                     -- 去开头组标签
+    -- 去常见质量/编码/来源标签（不伤番名）
+    -- 去常见质量/编码/来源标签（拆成多条简单 gsub，避免超长正则在某些 Lua 实现下失效）
+    s = s:gsub("%d+[pPkKxX]", " ")
+    s = s:gsub("Blu[%.%-%s]?Ray", " "):gsub("WEB[%.%-%s]?DL", " "):gsub("WEBDL", " ")
+    s = s:gsub("HDTV", " "):gsub("DVD", " "):gsub("HDR", " ")
+    s = s:gsub("x264", " "):gsub("x265", " "):gsub("H%.?264", " "):gsub("H%.?265", " "):gsub("HEVC", " "):gsub("AVC", " ")
+    s = s:gsub("10bit", " "):gsub("8bit", " ")
+    s = s:gsub("AAC", " "):gsub("FLAC", " "):gsub("AC3", " "):gsub("DTS", " "):gsub("Dual", " ")
+    s = s:gsub("CHT", " "):gsub("CHS", " "):gsub("JPN", " "):gsub("GB", " "):gsub("BIG5", " "):gsub("RAW", " ")
+    s = s:gsub("%(%d%d%d%d%)", " "):gsub("%[%d%d%d%d%]", " ")                  -- 去年份
+    -- 提取集数（优先级：第X话/集 → E/EP → -/_/.数字 → [数字]）
+    local ep
+    local m = tonumber((s:match("第%s*(%d+)%s*[话集回話]")))
+    if not m then
+        local cm = s:match("第%s*([一二三四五六七八九十两零]+)%s*[话集回話]")
+        if cm then m = cn_ep_to_num(cm) end
+    end
+    if not m then m = tonumber((s:match("[Ee][pP]?%s*(%d+)"))) end
+    if not m then m = tonumber((s:match("%s[%#%-_%.]%s*(%d%d?)%s"))) end
+    if not m then m = tonumber((s:match("%[(%d%d?)%]"))) end
+    if m and m > 999 then m = nil end
+    ep = m
+    -- 标题 = 集数标记之前的部分，清理
+    local title = s
+    title = title:gsub("第%s*%d+%s*[话集回話]", "")
+    title = title:gsub("第%s*[一二三四五六七八九十两零]+%s*[话集回話]", "")
+    title = title:gsub("%s*[Ss]%d+%s*", " ")
+    title = title:gsub("[Ee][pP]?%s*%d+", "")
+    title = title:gsub("%s[%#%-_%.]%s*%d%d?%s*", " ")
+    title = title:gsub("%[%d%d?%]", "")
+    title = title:gsub("%[.-%]", " "):gsub("%(.-%)", " ")
+    title = title:gsub("%]", " "):gsub("%[", " "):gsub("%(", " "):gsub("%)", " ")
+    title = title:gsub("^%s*(.-)%s*$", "%1")
+    title = title:gsub("[_%.]+", " ")
+    title = title:gsub("%s+", " ")
+    if title == "" then return nil, nil, nil end
+    if ep then
+        return title, ep, "fast"
+    end
+    return title, nil, "title_only"
+end
+
+-- 极速优先、兼容链兜底的解析分发
+function guess_bili_title_ep_v2(filename)
+    local ft, fe, fm = bili_fast_parse(filename)
+    if ft then
+        if fe then return ft, fe, "fast" end
+        return ft, nil, "title_only"
+    end
+    local lt, le = guess_bili_title_ep(filename)
+    if lt then
+        if le then return lt, le, "legacy" end
+        return lt, nil, "legacy_title_only"
+    end
+    return nil, nil, nil
+end
+
 -- 自动补源：文件名优先解析到番名/集数后，直连 B站 搜索对应集弹幕并叠加
 -- （绕开失效的 extcomment 代理）。也作为弹弹play 匹配成功后的兜底补源。
 function auto_search_extra(title, episode_num)
     if not title or title == "" then return end
-    if episode_num == nil and DANMAKU.episode then
-        episode_num = tonumber(DANMAKU.episode:match("%d+")) or parse_cn_episode(DANMAKU.episode)
-    end
+    -- episode_num：数字=指定集；0/nil=仅标题搜索（B站 取最优结果，极速兜底）
     if episode_num == nil then
-        msg.warn("自动补源：集数缺失，跳过（episode=" .. tostring(DANMAKU.episode) .. "）")
-        return
+        if DANMAKU.episode then
+            episode_num = tonumber(DANMAKU.episode:match("%d+")) or parse_cn_episode(DANMAKU.episode) or 0
+        else
+            episode_num = 0
+        end
     end
+    if not episode_num or episode_num < 0 then episode_num = 0 end
 
     -- 去文件名里的非法字符，构造唯一 XML 路径
     local safe_title = (title:gsub('[\\/:*?"<>|]', "") or "x")
@@ -415,7 +507,8 @@ function auto_search_extra(title, episode_num)
     }
     local py_script = "C:/Users/24305/AppData/Local/Programs/fntv/third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/bili_danmaku.py"
 
-    msg.warn(("自动补源：直连B站搜索 %s 第%s集"):format(title, episode_num))
+    local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
+    msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))
     local ok = false
     for _, py in ipairs(py_candidates) do
         local res = mp.command_native({
