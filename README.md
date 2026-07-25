@@ -160,12 +160,23 @@ PotPlayer 使用其自带快捷键体系（与 MPV 默认不完全一致）
 
 本项目的上游与依赖参考以下开源项目：
 
+**上游 / Fork 来源**
 - [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) - 上游项目（本仓库 Fork 来源）
+- [QiaoKes/fntv-mpv-config](https://github.com/QiaoKes/fntv-mpv-config) - MPV 配置与预设着色器方案来源（本项目的 `portable_config` 基于此管理）
+- [fnos-tv](https://github.com/thshu/fnos-tv) - 支持弹幕的飞牛影视
+- [fnToPotplayer](https://github.com/gudqs7/fnToPotplayer) - 飞牛影视调用 PotPlayer 的集成逻辑
+
+**播放内核 / 解码补丁**
+- [mpv](https://github.com/mpv-player/mpv) - 内置 MPV 播放内核
+- [PotPlayer](https://potplayer.daum.net/) - 内置 PotPlayer 播放器（Kakao/DAUM）
 - [enable-chromium-hevc-hardware-decoding](https://github.com/StaZhu/enable-chromium-hevc-hardware-decoding) - Chromium HEVC 硬解码支持
 - [electron-media-patch](https://github.com/5rahim/electron-media-patch) - Electron 硬解码补丁
-- [fnToPotplayer](https://github.com/gudqs7/fnToPotplayer) - 飞牛影视调用 PotPlayer
-- [fnos-tv](https://github.com/thshu/fnos-tv) - fnos-tv 支持弹幕的飞牛影视
-- [mpv 弹幕插件](https://github.com/Tony15246/uosc_danmaku) - uosc_danmaku 基于 uosc 的弹幕插件
+
+**弹幕 / 画质（MPV 脚本与着色器）**
+- [tomasklaen/uosc](https://github.com/tomasklaen/uosc) - MPV 现代化 UI 框架（uosc_danmaku 弹幕插件基于此构建）
+- [Tony15246/uosc_danmaku](https://github.com/Tony15246/uosc_danmaku) - 基于 uosc 的 B站 / 弹弹play 弹幕插件
+- [bloc97/Anime4K](https://github.com/bloc97/Anime4K) - Anime4K 超分辨率 / 降噪着色器（画质增强模式核心）
+- [弹弹play 开放弹幕网络](https://www.dandanplay.com) - 番剧识别与弹幕匹配 API（[开放平台文档](https://doc.dandanplay.com/open/)）
 
 ---
 
