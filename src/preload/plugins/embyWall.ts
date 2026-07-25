@@ -1865,6 +1865,38 @@ function handle(): void {
       ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
     });
 
+    // Python 解释器路径（B站弹幕脚本 bili_danmaku.py 需要 Python；留空=用内置便携版）
+    const pyLabel = document.createElement('div');
+    pyLabel.textContent = 'Python 解释器路径（B站弹幕）';
+    pyLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:14px 0 5px;';
+    secBodyBili.appendChild(pyLabel);
+
+    const pyPath = document.createElement('div');
+    pyPath.id = 'fnos-python-path';
+    pyPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
+      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);';
+    secBodyBili.appendChild(pyPath);
+
+    const pyBtns = document.createElement('div');
+    pyBtns.style.cssText = 'display:flex;gap:6px;';
+    const pyPickBtn = mkBtn('选择文件', true);
+    const pyClearBtn = mkBtn('清空', true);
+    pyBtns.appendChild(pyPickBtn); pyBtns.appendChild(pyClearBtn);
+    secBodyBili.appendChild(pyBtns);
+
+    const pyDefaultText = '默认使用内置便携版（无需本机安装）';
+    pyPickBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const p = await ipcRenderer.invoke('settings:pick-python-path');
+      if (p) pyPath.textContent = p as string;
+    });
+    pyClearBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      await ipcRenderer.invoke('settings:clear-python-path');
+      pyPath.textContent = pyDefaultText;
+    });
+
     contentGrid.appendChild(secBili.el);
 
     // ===== 分组: Bangumi 登录（与「B站弹幕登录」并列，容器同尺寸）=====
@@ -2478,6 +2510,7 @@ function handle(): void {
         (overlay as any)._exitMode = s.exitMode || 'ask';
         refreshExit();
         refreshBili();
+        pyPath.textContent = s.pythonPath || '默认使用内置便携版（无需本机安装）';
         refreshDouban();
         // 调试日志开关
         swDebug.checked = !!s.debugEnabled;

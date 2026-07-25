@@ -505,13 +505,33 @@ function auto_search_extra(title, episode_num)
     end
 
     -- Python 解释器：动态探测（跨机器通用，绝不写死绝对路径）
-    --   1) 优先 WorkBuddy 托管的 python（~/.workbuddy/binaries/python/versions/<ver>/python.exe）
-    --   2) 系统 PATH 兜底：python3 / python / py
+    --   1) 用户自定义（设置页指定，写入同目录 python_path.txt，最高优先级）
+    --   2) 内置精简 Python（随安装包分发，third_party/python，零配置可用）
+    --   3) WorkBuddy 托管 python（~/.workbuddy/binaries/python/versions/<ver>/python.exe）
+    --   4) 系统 PATH 兜底：python3 / python / py
     local py_candidates = {}
     local function fexists(p)
         local f = io.open(p, "r")
         if f then f:close(); return true end
         return false
+    end
+    local script_dir = mp.get_script_directory()
+    -- 0) 用户自定义 Python（设置面板指定，最高优先级；文件不存在或为空则忽略）
+    local custom_py_file = utils.join_path(script_dir, "python_path.txt")
+    local cf = io.open(custom_py_file, "r")
+    if cf then
+        local line = cf:read("*l")
+        cf:close()
+        if line and line ~= "" then
+            table.insert(py_candidates, line)
+            msg.info(("Python 候选(自定义): %s"):format(line))
+        end
+    end
+    -- 1) 内置精简 Python（随安装包分发，third_party/python，零配置可用）
+    --    脚本目录为 .../portable_config/scripts/uosc_danmaku，上溯四级即 third_party/python
+    local bundled_py = utils.join_path(script_dir, "../../../../python/python.exe")
+    if fexists(bundled_py) then
+        table.insert(py_candidates, bundled_py)
     end
     local wb_root = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
     if wb_root ~= "" then

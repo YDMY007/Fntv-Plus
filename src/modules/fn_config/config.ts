@@ -52,8 +52,10 @@ export interface Config {
     bangumiSyncEnabled?: boolean;
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
-    // MPV B站弹幕搜索开关（控制 uosc_danmaku 的 B站手动搜索是否可用，写入 script-opts/uosc_danmaku.conf）
     mpvBiliSearchEnabled?: boolean;
+    // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
+    // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
+    pythonPath?: string;
 }
 
 /**
@@ -324,6 +326,23 @@ export function setPotPlayerPath(path: string | null): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取用户自定义 Python 解释器路径（B站弹幕用；留空=用内置便携版）
+export function getPythonPath(): string | undefined {
+    const config: Config = readConfig() || {};
+    return config.pythonPath;
+}
+
+// 设置用户自定义 Python 解释器路径（''/null = 清空，回退到内置便携版）
+export function setPythonPath(p: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!p) {
+        delete config.pythonPath; // 清空配置，回退到内置便携版
+    } else {
+        config.pythonPath = p;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取默认播放器（直接播放时使用的外置/内置播放器）
 export function getDefaultPlayer(): 'mpv' | 'potplayer' {
     const config: Config = readConfig() || {};
@@ -575,5 +594,7 @@ module.exports = {
     getBangumiSyncThreshold,
     setBangumiSyncThreshold,
     getMpvBiliSearchEnabled,
-    setMpvBiliSearchEnabled
+    setMpvBiliSearchEnabled,
+    getPythonPath,
+    setPythonPath
 };

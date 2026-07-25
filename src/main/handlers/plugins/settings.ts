@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, shell } from 'electron';
+import { BrowserWindow, dialog, shell, app } from 'electron';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,7 +35,8 @@ async function handleGetSettings(): Promise<any> {
         bangumiToken: fnConfig.getBangumiToken(),
         bangumiSyncEnabled: fnConfig.getBangumiSyncEnabled(),
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
-        mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled()
+        mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
+        pythonPath: fnConfig.getPythonPath() || ''
     };
 }
 
@@ -112,6 +113,56 @@ async function handleClearPotPath(): Promise<void> {
     fnConfig.setPotPlayerPath('');
     setPotPlayerPath(null);
     log.info('PotPlayer 播放器路径已清空');
+}
+
+// 把用户自定义 Python 路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（python_path.txt），
+// 供 MPV 内部 Lua 脚本（extra.lua）优先读取；传 null/空则删除该文件，回退到内置便携版。
+function writeBiliPythonSidecar(p: string | null): void {
+    try {
+        const base = app.isPackaged
+            ? path.dirname(app.getPath('exe'))
+            : app.getAppPath();
+        const file = path.join(base, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku', 'python_path.txt');
+        if (p) {
+            fs.writeFileSync(file, p, 'utf8');
+        } else if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+        }
+        log.info(`B站弹幕 Python sidecar 已${p ? '更新' : '清空'}: ${p || file}`);
+    } catch (error) {
+        log.error('写 B站弹幕 Python sidecar 失败:', error);
+    }
+}
+
+// 弹出系统文件选择框，选中用户本机 Python 解释器（python.exe），写回配置 + sidecar
+async function handlePickPythonPath(): Promise<string | null> {
+    const win = getMainWindow();
+    try {
+        const result = await dialog.showOpenDialog(win ?? undefined, {
+            title: '选择 Python 解释器（python.exe）',
+            properties: ['openFile'],
+            filters: [
+                { name: 'Python 可执行文件', extensions: process.platform === 'win32' ? ['exe'] : [] },
+                { name: '所有文件', extensions: ['*'] }
+            ]
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            const selectedPath = result.filePaths[0];
+            fnConfig.setPythonPath(selectedPath);
+            writeBiliPythonSidecar(selectedPath);
+            log.info(`B站弹幕 Python 路径已设置为: ${selectedPath}`);
+            return selectedPath;
+        }
+    } catch (error) {
+        log.error('选择 Python 路径失败:', error);
+    }
+    return null;
+}
+
+async function handleClearPythonPath(): Promise<void> {
+    fnConfig.setPythonPath('');
+    writeBiliPythonSidecar(null);
+    log.info('B站弹幕 Python 路径已清空，回退到内置便携版');
 }
 
 // 设置默认播放器（直接播放时使用）
@@ -286,6 +337,8 @@ function init(): void {
     registerHandler('settings:clear-mpv-path', handleClearMpvPath, { useHandle: true });
     registerHandler('settings:pick-pot-path', handlePickPotPath, { useHandle: true });
     registerHandler('settings:clear-pot-path', handleClearPotPath, { useHandle: true });
+    registerHandler('settings:pick-python-path', handlePickPythonPath, { useHandle: true });
+    registerHandler('settings:clear-python-path', handleClearPythonPath, { useHandle: true });
     registerHandler('settings:set-default-player', handleSetDefaultPlayer, { useHandle: true });
     registerHandler('settings:set-exit-mode', handleSetExitMode, { useHandle: true });
     registerHandler('settings:set-douban-enabled', handleSetDoubanEnabled, { useHandle: true });
