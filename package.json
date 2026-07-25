@@ -1,6 +1,6 @@
 {
     "name": "fntv",
-    "version": "3.2.1",
+    "version": "3.3.0",
     "description": "A fntv app built with Electron",
     "main": "dest/main/main.js",
     "scripts": {
@@ -93,6 +93,13 @@
                 {
                     "from": "third_party/potplayer",
                     "to": "third_party/potplayer",
+                    "filter": [
+                        "**/*"
+                    ]
+                },
+                {
+                    "from": "third_party/python",
+                    "to": "third_party/python",
                     "filter": [
                         "**/*"
                     ]

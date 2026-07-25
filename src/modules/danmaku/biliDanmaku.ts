@@ -45,9 +45,22 @@ function resolveScriptDir(): string | null {
     return null;
 }
 
-// ---- Python 解释器候选（与 Lua 端一致：优先 WorkBuddy 自带，其次系统 python/py）----
+// ---- Python 解释器候选（优先顺序：内置精简 Python > WorkBuddy 自带 > 系统 PATH）----
+// 内置 Python 随安装包分发（third_party/python，仅标准库即可跑 bili_danmaku.py），
+// 保证无 Python 环境的电脑（如纯净服务器）也能用 B站弹幕，无需用户自行安装。
+function getBundledPython(): string | null {
+    const base = app.isPackaged
+        ? path.dirname(app.getPath('exe'))   // 打包后 third_party 在 exe 同级目录
+        : app.getAppPath();                   // dev 下在项目根
+    const p = path.join(base, 'third_party', 'python', 'python.exe');
+    return fs.existsSync(p) ? p : null;
+}
+
 function findPythonCandidates(): string[] {
     const cands: string[] = [];
+    // 0) 内置精简 Python（最高优先级，零配置可用）
+    const bundled = getBundledPython();
+    if (bundled) cands.push(bundled);
     const home = os.homedir();
     // 1) 通用：扫描 WorkBuddy 托管的各版本 python
     const verRoot = path.join(home, '.workbuddy', 'binaries', 'python', 'versions');
