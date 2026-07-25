@@ -213,37 +213,41 @@ function interceptMaskButton(): void {
         btn.setAttribute('data-mask-intercepted', 'true');
 
         // 添加点击事件拦截器
-        const clickHandler = async (e: Event) => {
-            // 检查是否允许原有播放
-            if (btn.getAttribute('data-allow-original-play') === 'true') {
-                logger.info('Allowing original play logic to execute');
-                return; // 不拦截，让原有逻辑执行
-            }
+            const clickHandler = async (e: Event) => {
+                // 检查是否允许原有播放（由选择弹窗的「原生播放」触发）
+                if (btn.getAttribute('data-allow-original-play') === 'true') {
+                    logger.info('Allowing original play logic to execute');
+                    return; // 不拦截，让原有逻辑执行
+                }
 
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // 获取配置
-            const config = await getPlayButtonConfig();
+                // 获取配置
+                const config = await getPlayButtonConfig();
 
-            // 全部剧集（季）页面：无论是否隐藏原生按钮，都弹出选择（原生 + 默认外部播放器）
-            const modalConfig = isSeasonPage()
-                ? { ...config, hideOriginalPlayButton: false }
-                : config;
+                if (isSeasonPage()) {
+                    // 全部剧集（季/选集）页面：弹出「原生 + 外部播放器」选择
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    logger.info('Season page mask button: showing player choice modal');
+                    await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
+                    return false;
+                }
 
-            if (config.hideOriginalPlayButton && !isSeasonPage()) {
-                // 非剧集页且隐藏原生按钮：按默认播放器直接播放
-                logger.info(`Play button click intercepted, directly playing with ${config.defaultPlayer}`);
-                await playWithPlayer(btn, config.defaultPlayer);
-            } else {
-                // 显示选择弹窗（剧集页强制给出原生 + 外部选择）
-                logger.info('Play button click intercepted, showing player choice modal');
-                await createPlayModal(btn, modalConfig, (p) => playWithPlayer(btn, p));
-            }
-            
-            return false;
-        };
+                if (config.hideOriginalPlayButton) {
+                    // 隐藏原生按钮：按默认播放器直接播放（无弹窗）
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    logger.info(`Mask button click intercepted, directly playing with ${config.defaultPlayer}`);
+                    await playWithPlayer(btn, config.defaultPlayer);
+                    return false;
+                }
+
+                // 未隐藏原生按钮：放行原生播放（不拦截、不弹窗），
+                // 由 fnOS 自带的遮罩按钮直接播；应用另在详情区注入额外外部播放按钮（两个/一个，均直接播）
+                logger.info('Original play button NOT hidden, letting native mask button play directly (no modal)');
+                return;
+            };
 
         // 在捕获阶段添加事件监听器，确保优先拦截
         // 只监听 click 事件，避免重复触发
