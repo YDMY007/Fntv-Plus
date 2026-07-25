@@ -5,7 +5,7 @@ import { HookType } from '../core/hooks';
 import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
-import { getPlayButtonConfig, isSeasonPage, createPlayModal, PlayButtonConfig } from './playChoice';
+import { getPlayButtonConfig, createPlayModal, PlayButtonConfig } from './playChoice';
 
 // 发送播放信息到主进程
 function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
@@ -223,19 +223,12 @@ async function injectCustomPlayBtn(): Promise<void> {
     // 获取配置
     const config = await getPlayButtonConfig();
 
-    if (isSeasonPage()) {
-        // 全部剧集（季/选集）页面：主播放按钮弹出选择（原生 + 默认外部播放器）
-        interceptOriginalButtonWithChoice(config);
-        return;
-    }
-
     if (config.hideOriginalPlayButton) {
-        // 如果隐藏原有播放按钮，直接拦截原按钮（按默认播放器）
+        // 隐藏原有播放按钮：直接拦截原按钮（按默认播放器，无弹窗）
         interceptOriginalButton(config.defaultPlayer);
     } else {
-        // 否则添加额外的播放按钮（标签随默认播放器变化）
-        const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
-        clonePlayBtnAndInject((button) => sendPlayEventToMain(button, config.defaultPlayer), label);
+        // 未隐藏原生按钮：主播放按钮弹出选择（原生 + 默认外部播放器，二选一弹窗）
+        interceptOriginalButtonWithChoice(config);
     }
 }
 

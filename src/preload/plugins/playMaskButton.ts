@@ -5,7 +5,7 @@ import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { HookType } from '../core/hooks';
-import { getPlayButtonConfig, isSeasonPage, createPlayModal } from './playChoice';
+import { getPlayButtonConfig, createPlayModal } from './playChoice';
 
 // 调用播放器的公共方法（player 指定 mpv / potplayer）
 async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'): Promise<void> {
@@ -223,16 +223,6 @@ function interceptMaskButton(): void {
                 // 获取配置
                 const config = await getPlayButtonConfig();
 
-                if (isSeasonPage()) {
-                    // 全部剧集（季/选集）页面：弹出「原生 + 外部播放器」选择
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    logger.info('Season page mask button: showing player choice modal');
-                    await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
-                    return false;
-                }
-
                 if (config.hideOriginalPlayButton) {
                     // 隐藏原生按钮：按默认播放器直接播放（无弹窗）
                     e.preventDefault();
@@ -243,10 +233,13 @@ function interceptMaskButton(): void {
                     return false;
                 }
 
-                // 未隐藏原生按钮：放行原生播放（不拦截、不弹窗），
-                // 由 fnOS 自带的遮罩按钮直接播；应用另在详情区注入额外外部播放按钮（两个/一个，均直接播）
-                logger.info('Original play button NOT hidden, letting native mask button play directly (no modal)');
-                return;
+                // 未隐藏原生按钮：弹出「原生 + 外部播放器」选择弹窗（二选一）
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                logger.info('Original play button NOT hidden, showing player choice modal');
+                await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
+                return false;
             };
 
         // 在捕获阶段添加事件监听器，确保优先拦截
