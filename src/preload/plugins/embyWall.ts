@@ -1641,7 +1641,10 @@ function handle(): void {
     mpvBtns.style.cssText = 'display:flex;gap:6px;';
     const pickBtn = mkBtn('选择文件', true);
     const clearBtn = mkBtn('清空', true);
-    mpvBtns.appendChild(pickBtn); mpvBtns.appendChild(clearBtn);
+    const iccToggleBtn = mkBtn('ICC 校色：开', true);
+    iccToggleBtn.style.fontWeight = '600';
+    iccToggleBtn.style.color = 'var(--fnos-ui-accent)';
+    mpvBtns.appendChild(pickBtn); mpvBtns.appendChild(clearBtn); mpvBtns.appendChild(iccToggleBtn);
     colMpv.appendChild(mpvBtns);
     pickBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
@@ -1683,24 +1686,22 @@ function handle(): void {
     });
     colMpv.appendChild(shaderSel);
 
-    // MPV ICC 校色开关（默认开启，固化到 mpv-user.conf）
-    const iccRow = document.createElement('div');
-    iccRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 6px 4px;gap:10px;';
-    const iccSpan = document.createElement('span');
-    iccSpan.textContent = 'MPV ICC 校色（默认开启）';
-    iccSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
-    const swIcc = document.createElement('input');
-    swIcc.type = 'checkbox';
-    swIcc.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
-    iccRow.appendChild(iccSpan); iccRow.appendChild(swIcc);
-    colMpv.appendChild(iccRow);
-
     const applyShaderConfig = (): void => {
-      ipcRenderer.invoke('settings:set-mpv-shader-config', { shader: shaderSel.value, icc: swIcc.checked })
+      const iccOn = iccToggleBtn.textContent?.includes('开') ?? false;
+      ipcRenderer.invoke('settings:set-mpv-shader-config', { shader: shaderSel.value, icc: iccOn })
         .catch((err) => log('set-mpv-shader-config failed', err));
     };
+    const renderIccBtn = (on: boolean): void => {
+      iccToggleBtn.textContent = on ? 'ICC 校色：开' : 'ICC 校色：关';
+      iccToggleBtn.style.color = on ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-muted2)';
+    };
     shaderSel.addEventListener('change', applyShaderConfig);
-    swIcc.addEventListener('change', applyShaderConfig);
+    iccToggleBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const nowOn = !(iccToggleBtn.textContent?.includes('开') ?? false);
+      renderIccBtn(nowOn);
+      applyShaderConfig();
+    });
 
     // ===== PotPlayer 路径 =====
     const potLabel = document.createElement('div');
@@ -2471,7 +2472,7 @@ function handle(): void {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
         potPathEl.textContent = s.potPath || '应用内置（已随安装包分发，无需本机安装）';
         shaderSel.value = s.mpvDefaultShader || 'off';
-        swIcc.checked = s.mpvIccEnabled !== false;
+        renderIccBtn(s.mpvIccEnabled !== false);
         (overlay as any)._defaultPlayer = s.defaultPlayer || 'mpv';
         refreshDefaultPlayer();
         (overlay as any)._exitMode = s.exitMode || 'ask';
