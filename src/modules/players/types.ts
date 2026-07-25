@@ -57,6 +57,7 @@ export type Config = {
 // 播放器类型枚举
 export enum PlayerType {
     MPV = 'mpv',
+    POTPLAYER = 'potplayer',
     // 可以扩展其他播放器类型
 }
 
@@ -90,6 +91,13 @@ export abstract class BasePlayer {
 
     // 判断播放器是否正在播放
     abstract isPlaying(): boolean;
+
+    // 原地切换播放内容：在已运行的「同类型」播放器窗口内直接切换，不重新拉起页面。
+    // 默认不支持（返回 false）；PotPlayer 通过 /current 命令行复用现有窗口实现。
+    // 上层（media.ts）据此决定：返回 true 即已完成切换，无需 stop+重建。
+    switchTo(_infos: PlayItem[], _index: number): Promise<boolean> {
+        return Promise.resolve(false);
+    }
 
     // 获取当前播放状态
     protected getStatus(): PlayStatusData {

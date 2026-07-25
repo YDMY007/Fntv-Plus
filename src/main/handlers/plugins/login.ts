@@ -14,7 +14,7 @@ import * as log from '../../../modules/logger';
 /**
  * 清空登录信息和Cookie
  */
-function clearLoginCookies(): void {
+function clearLoginCookies(keepToken: boolean = false): void {
     log.info('清空登录信息和Cookie');
 
     // 清空配置中保存的token
@@ -24,10 +24,10 @@ function clearLoginCookies(): void {
         saveConfig({
             account: config.account || '',
             domain: config.domain || '',
-            token: '',
+            token: keepToken ? (config.token || '') : '',
             useHttps: config.useHttps
         });
-        log.info('已清空配置中的登录token');
+        log.info(keepToken ? '已保留 token(仅清空会话 cookie)' : '已清空配置中的登录token');
     }
 
     // 清除会话中的cookie
@@ -48,9 +48,13 @@ function clearLoginCookies(): void {
  */
 function handleLoginRequest(details: OnBeforeRequestListenerDetails, callback: (response: { cancel?: boolean }) => void): void {
     log.info('检测到登录请求，清空登录信息并跳转到登录页面');
-    
+
+    // FN ID 会话: 访问 /v/login 通常是会话过期, 保留 token 避免 FN ID 标记被清空
+    // (否则每次重启会话失效都会把 token 清空, 导致 FN ID 永远无法自动恢复, 反复要求重登)
+    const _cfg = readConfig() || {};
+    const _keepToken = _cfg.loginType === 'fnid' && !!_cfg.token;
     // 清空配置cookie
-    clearLoginCookies();
+    clearLoginCookies(_keepToken);
     
     // 取消请求
     callback({ cancel: true });

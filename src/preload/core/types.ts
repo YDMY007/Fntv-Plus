@@ -15,6 +15,7 @@ export interface PlayMovieData {
     id: string;
     token: string;
     sourceIndex: number; // 播放源
+    player?: 'mpv' | 'potplayer'; // 指定播放器；缺省由 defaultPlayer 决定
 }
 
 export interface Utils {

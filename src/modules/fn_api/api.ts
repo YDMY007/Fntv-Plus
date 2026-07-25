@@ -9,6 +9,9 @@ import { app } from 'electron';
 import log from '../logger';
 import * as types from './types';
 import { isTrusted } from '../cert_trust';
+
+// 字幕相关日志归到 'subtitle' 组件，可在设置面板单独开关
+const subLog = log.component('subtitle');
 import NodeCache from 'node-cache';
 
 export class ApiService {
@@ -243,29 +246,120 @@ export class ApiService {
     })(); // 10分钟缓存
 
     /**
-     * 获取字幕文件列表
-     * @param itemGuid - 视频项目的唯一标识符
-     * @returns 返回字幕对象数组的Promise
+     * 判断字幕流是否为中文（简体/繁体/国语/普通话）
      */
-    async getSubtitle(itemGuid: string): Promise<types.Subtitle[]> {
+    private isChineseSubtitle(stream: types.SubtitleStreamExtended): boolean {
+        const lang = (stream.language || '').toLowerCase();
+        if (/^(zh|chi|zho|cmn|yue)/.test(lang)) return true;
+        if (/chinese|中文|国语|普通话|简体|繁体/.test(lang)) return true;
+        const title = stream.title || '';
+        if (/[一-鿿]/.test(title)) return true; // 标题含中文字符
+        if (/中字|简体|繁体|国语|中文|字幕|chs|cht|gb|big5/i.test(title)) return true;
+        return false;
+    }
+
+    /**
+     * 计算字幕标题与影片中文标题的匹配度（0~2）：用于挑出"同剧同集"的正确字幕
+     * 归一化会去掉季/集号/SxxExx 等噪声，仅比较核心片名是否相互包含
+     */
+    private scoreSubtitleTitle(stream: types.SubtitleStreamExtended, videoTitle?: string): number {
+        if (!videoTitle) return 0;
+        const norm = (s: string): string =>
+            (s || '')
+                .replace(/[[\]()（）【】\s._\-]/g, '')
+                .replace(/(notitle|notvtitle)/gi, '') // 去掉 getTitle 的占位符噪声
+                .replace(/第?\d+[集话話]/g, '')
+                .replace(/s\d+e?\d+/gi, '')
+                .toLowerCase();
+        const a = norm(stream.title);
+        const b = norm(videoTitle);
+        if (!a || !b) return 0;
+        if (a === b) return 2;
+        if (a.includes(b) || b.includes(a)) return 1;
+        return 0;
+    }
+
+    /**
+     * 获取字幕文件列表（中文优先 + 标题匹配）
+     * @param itemGuid - 视频项目的唯一标识符
+     * @param videoTitle - 可选，影片中文标题，用于挑选同剧同集的正确字幕
+     * @returns 返回字幕对象数组（已按"最应该显示"排序，第一个为最佳）
+     */
+    async getSubtitle(itemGuid: string, videoTitle?: string): Promise<types.Subtitle[]> {
+        const log = subLog; // 本函数内日志归入 subtitle 组件
         try {
             const response = await this.getStreamList(itemGuid);
 
             if (response.success && response.data) {
-                const streams = response.data.subtitle_streams || [];
-                const subtitles: types.Subtitle[] = streams.filter(stream => stream.is_external).map(stream => ({
-                    id: stream.guid,
-                    format: stream.format,
-                    name: stream.title
-                }));
+                const streams: types.SubtitleStreamExtended[] =
+                    (response.data.subtitle_streams as types.SubtitleStreamExtended[]) || [];
+                const external = streams.filter(stream => stream.is_external);
 
-                if (subtitles.length > 0) {
-                    log.info('获取到字幕文件:', subtitles);
-                    return subtitles;
-                } else {
-                    log.info('没有找到字幕文件');
+                if (external.length === 0) {
+                    log.info('没有找到外挂字幕文件');
                     return [];
                 }
+
+                // 优先中文外挂字幕；若服务端未提供任何中文，则回退到全部外挂（避免无字幕可用）
+                const chinese = external.filter(s => this.isChineseSubtitle(s));
+                const pool = chinese.length > 0 ? chinese : external;
+
+                // 计算每条字幕标题与影片标题的匹配度，用于剔除错配
+                // （飞牛偶发把别的剧字幕元数据挂到本集，如本集返回「佐罗」字幕）
+                pool.forEach(s => { (s as any).__score = this.scoreSubtitleTitle(s, videoTitle); });
+                const matched = pool.filter(s => (s as any).__score > 0);
+
+                // 是否为分集内容（电视剧/综艺）：视频标题含 SxxExx 即视为剧集
+                const isEpisode = /s\d+e\d+/i.test(videoTitle || '');
+
+                let usePool: types.SubtitleStreamExtended[];
+                let forcedFallback = false;
+                if (matched.length > 0) {
+                    usePool = matched; // 有匹配项：仅用匹配项，避免混入错配字幕
+                } else if (!isEpisode) {
+                    // 电影/单集：标题无法确认匹配时仍退化为挂载最佳一条，避免无字幕可用
+                    // （电影通常只有一份正确字幕，且往往无分集名可供严格匹配）
+                    usePool = pool;
+                    forcedFallback = pool.length > 0;
+                } else {
+                    // 剧集且无一匹配：极可能是飞牛字幕元数据错配，不挂载，避免乱匹配
+                    usePool = [];
+                }
+
+                if (usePool.length === 0) {
+                    if (matched.length === 0 && isEpisode && pool.length > 0) {
+                        log.warn(`字幕标题均不与当前剧集匹配(videoTitle=${videoTitle})，疑似飞牛字幕元数据错配，` +
+                            `已跳过挂载避免乱匹配；候选字幕:`, pool.map(p => p.title));
+                    } else {
+                        log.info('没有可用外挂字幕(匹配后为空)');
+                    }
+                    return [];
+                }
+
+                // 排序：默认字幕优先 → 与影片标题匹配度高者优先 → 标题字母序
+                usePool.sort((x, y) => {
+                    const d = (y.is_default || 0) - (x.is_default || 0);
+                    if (d !== 0) return d;
+                    const m = ((y as any).__score || 0) - ((x as any).__score || 0);
+                    if (m !== 0) return m;
+                    return (x.title || '').localeCompare(y.title || '');
+                });
+
+                // 只选用「最佳匹配」的一条，避免一次性挂载多条字幕
+                const best = usePool[0];
+                const subtitle: types.Subtitle = {
+                    id: best.guid,
+                    format: best.format,
+                    name: best.title
+                };
+                if (forcedFallback) {
+                    log.warn(`字幕标题未与影片(${videoTitle})匹配，已退化挂载最佳一条(可能不准确):`,
+                        subtitle.name, `(score=0, guid=${best.guid})`);
+                } else {
+                    log.info(`获取到字幕(最佳匹配):`, subtitle.name,
+                        `(score=${(best as any).__score}, 中文优先 ${chinese.length}/${external.length}, guid=${best.guid}, format=${subtitle.format})`);
+                }
+                return [subtitle];
             } else {
                 log.error('获取字幕列表失败:', response.message);
                 return [];
@@ -282,6 +376,7 @@ export class ApiService {
      * @returns 返回下载成功的字幕文件路径数组
      */
     async downloadSubtitle(subs: types.Subtitle[]): Promise<string[]> {
+        const log = subLog; // 本函数内日志归入 subtitle 组件
         // 确保临时目录存在
         if (!fs.existsSync(this.tempDir)) {
             fs.mkdirSync(this.tempDir, { recursive: true });
@@ -293,7 +388,8 @@ export class ApiService {
         // 准备下载任务
         const downloadTasks = subs.map(sub => {
             const { id, name = id, format = 'srt' } = sub;
-            const safeName = name.replace(/[^a-z0-9]/gi, '_'); // 文件名安全处理
+            // 仅剔除文件系统非法字符，保留中文，使字幕显示名可读（MPV 内不再全是"___"）
+            const safeName = String(name).replace(/[\\/:*?"<>|]/g, '_');
             const filePath = path.join(this.tempDir, `${safeName}@${id}.${format}`);
 
             // 检查文件是否已存在
@@ -340,8 +436,8 @@ export class ApiService {
 
         const failedCount = results.length - successfulDownloads.length;
         const skippedCount = subs.filter(sub => {
-            const safeName = (sub.name || sub.id).replace(/[^a-z0-9]/gi, '_');
-            const filePath = path.join(this.tempDir, `${safeName}.${sub.format || 'srt'}`);
+            const safeName = String(sub.name || sub.id).replace(/[\\/:*?"<>|]/g, '_');
+            const filePath = path.join(this.tempDir, `${safeName}@${sub.id}.${sub.format || 'srt'}`);
             return fs.existsSync(filePath);
         }).length;
         const downloadedCount = successfulDownloads.length - skippedCount;

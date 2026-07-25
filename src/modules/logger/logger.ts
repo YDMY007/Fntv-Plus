@@ -42,6 +42,9 @@ export class Logger {
     private maxFiles: number;
     private logDir: string;
     private currentLogFile: string;
+    // 调试日志过滤：总开关 + 各组件开关（仅影响控制台输出，不影响文件）
+    private debugEnabled = false;
+    private debugComponents: Record<string, boolean> = {};
 
     constructor() {
         this.logLevel = getLogLevel(); // 使用配置获取日志级别
@@ -213,20 +216,60 @@ export class Logger {
     }
 
     /**
-     * 通用日志方法
+     * 设置调试日志过滤（仅影响控制台输出）
+     * @param enabled 调试总开关：开 → INFO/DEBUG 按组件开关显示；关 → 控制台仅 WARN/ERROR
+     * @param components 各组件开关表（组件 key → 是否显示）；缺省则全部显示
+     */
+    public setDebugFilter(enabled: boolean, components?: Record<string, boolean>): void {
+        this.debugEnabled = !!enabled;
+        if (components && typeof components === 'object') {
+            this.debugComponents = components;
+        }
+    }
+
+    /**
+     * 通用日志方法（无组件标记，归入 core，调试开时显示）
      */
     public log(level: LogLevel, message: string, ...args: any[]): void {
+        this.emit(level, undefined, message, ...args);
+    }
+
+    /**
+     * 带组件标记的日志方法（用于按组件过滤控制台输出）
+     */
+    public logC(component: string, level: LogLevel, message: string, ...args: any[]): void {
+        this.emit(level, component, message, ...args);
+    }
+
+    /**
+     * 是否应输出到控制台：WARN/ERROR 始终显示；INFO/DEBUG 受调试总开关与各组件开关控制
+     */
+    private shouldConsole(level: LogLevel, component: string | undefined): boolean {
+        if (!logConfig.consoleOutput) return false;
+        if (app && app.isPackaged) return false; // 与原有行为一致：仅非打包(开发/CMD)时输出
+        if (level >= LogLevel.WARN) return true;  // 警告/错误始终显示，便于排查
+        // INFO / DEBUG
+        if (!this.debugEnabled) return false;     // 调试总开关关闭 → 不显示详细日志
+        if (!component) return true;              // 无组件标记 → 调试开时显示
+        const setting = this.debugComponents[component];
+        return setting !== false;                 // 组件未显式关闭(默认开启)则显示
+    }
+
+    /**
+     * 内部统一输出：写文件 + 按过滤规则决定是否输出到控制台
+     */
+    private emit(level: LogLevel, component: string | undefined, message: string, ...args: any[]): void {
         if (level >= this.logLevel) {
             let formattedMessage = message;
             if (level != LogLevel.NOFORMAT) {
                 formattedMessage = this.formatMessage(level, message, ...args);
             }
 
-            // 写入文件
+            // 写入文件（始终记录，便于事后排查）
             this.writeToFile(formattedMessage);
 
-            // 同时输出到控制台（开发环境）
-            if (logConfig.consoleOutput && (!app || !app.isPackaged)) {
+            // 同时输出到控制台（受调试/组件过滤影响）
+            if (this.shouldConsole(level, component)) {
                 switch (level) {
                     case LogLevel.DEBUG:
                         console.log(formattedMessage);

@@ -11,7 +11,7 @@ import * as path from 'path';
  * - app:qr-image       → 返回关于弹窗二维码图片(base64 data URI)
  */
 
-const APP_REPO_URL = 'https://github.com/YDMY007/fnos-tv';
+const APP_REPO_URL = 'https://github.com/YDMY007/Fntv-Plus';
 const APP_NAME = '飞牛影视';
 
 /** 候选二维码图片路径(dev / 打包)，取首个存在者 */

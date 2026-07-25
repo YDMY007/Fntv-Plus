@@ -38,6 +38,11 @@ export async function restoreCookies(domain: string, token: string, isLogin: boo
     // 根据登录接口返回的 token 格式设置相应的 cookie
     try {
         const isHttps = domain.startsWith('https://');
+        // ★ 关键修复: 给 cookie 设 1 年过期时间.
+        //   不设置 expirationDate 时 cookie 是 session cookie(内存态),
+        //   在 persist:fntv 分区下重启应用后丢失 → FN ID 重启不记住.
+        //   设了过期时间后会被写入 persist 分区的磁盘存储, 重启后仍然存在.
+        const expireAt = Math.floor(Date.now() / 1000) + 86400 * 365;
 
         // 先清除可能存在的旧cookie
         await ses.cookies.remove(domain, 'Trim-MC-token')
@@ -53,7 +58,8 @@ export async function restoreCookies(domain: string, token: string, isLogin: boo
             path: '/',
             secure: isHttps,          // HTTPS 才设置 secure
             httpOnly: false,
-            sameSite: isHttps ? 'no_restriction' : 'lax'  // HTTP 下用 lax
+            sameSite: isHttps ? 'no_restriction' : 'lax',  // HTTP 下用 lax
+            expirationDate: expireAt  // ★ 持久化到磁盘
         });
 
         // 设置 mode=relay Cookie（FN Connect 外网访问必需）
@@ -64,7 +70,8 @@ export async function restoreCookies(domain: string, token: string, isLogin: boo
             path: '/',
             secure: isHttps,
             httpOnly: false,
-            sameSite: isHttps ? 'no_restriction' : 'lax'
+            sameSite: isHttps ? 'no_restriction' : 'lax',
+            expirationDate: expireAt  // ★ 持久化到磁盘
         });
 
         return true;

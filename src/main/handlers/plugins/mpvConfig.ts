@@ -22,21 +22,32 @@ function getMpvConfigDir(): string {
 }
 
 // 获取应用中的portable_config目录
+// ⚠️ 关键：必须返回 MPV 实际读取的【可写】目录。
+//   - 开发模式：app.getAppPath() = 项目根目录，CWD = 项目根目录 → 两者一致，可写。
+//   - 打包模式：app.getAppPath() = resources/app.asar（只读虚拟路径！），
+//     而 extraFiles 把 third_party/fntv-mpv 解压到【exe 同级目录】（可写），
+//     MPV 以相对路径 + CWD=exe目录 启动 → 实际读取 exe 目录下的 portable_config。
+//     故打包后必须用 path.dirname(app.getPath('exe')) 拼接，否则写 mpv-user.conf 会写进
+//     只读 asar 导致静默失败（面板改了默认着色器但不生效）。
 function getPortableConfigDir(): string {
+    const sub = path.join('third_party', 'fntv-mpv', 'portable_config');
     if (process.platform === 'darwin') {
-        // macOS: third_party目录在应用包的Contents目录下，而不是在app.asar内
-        // 构建时只复制了portable_config目录内容到third_party/fntv-mpv/portable_config
+        // macOS: third_party目录在应用包的Contents目录下（extraFiles 解压到 Contents/）
         const appPath = app.getAppPath();
         const contentsPath = path.dirname(path.dirname(appPath)); // 从app.asar向上两级到Contents
         return path.join(contentsPath, 'third_party', 'fntv-mpv', 'portable_config');
     } else if (process.platform === 'win32') {
-        // Windows: 复制了完整的fntv-mpv目录，包含portable_config子目录
-        const appPath = app.getAppPath();
-        return path.join(appPath, 'third_party', 'fntv-mpv', 'portable_config');
+        // Windows: extraFiles 将 third_party/fntv-mpv 解压到 exe 同级目录
+        if (app.isPackaged) {
+            return path.join(path.dirname(app.getPath('exe')), sub);
+        }
+        return path.join(app.getAppPath(), sub);
     } else {
-        // Linux: 构建时只复制了portable_config目录内容到third_party/fntv-mpv/portable_config
-        const appPath = app.getAppPath();
-        return path.join(appPath, 'third_party', 'fntv-mpv', 'portable_config');
+        // Linux: 同 Windows，extraFiles 解压到 exe 同级目录
+        if (app.isPackaged) {
+            return path.join(path.dirname(app.getPath('exe')), sub);
+        }
+        return path.join(app.getAppPath(), sub);
     }
 }
 
@@ -123,6 +134,145 @@ function stopConfigCheck(): void {
     }
 }
 
+/**
+ * MPV 默认着色器预设映射表（key → glsl-shaders 文件名列表）
+ * 与 input.conf 中 Ctrl+1~9 的临时切换列表保持一致。
+ */
+const MPV_SHADER_PRESETS: Record<string, string[]> = {
+    off: [],
+    // 模式A：大多数1080p动画
+    a: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_M.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl'
+    ],
+    // 模式B：大多数720p动画
+    b: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_Soft_M.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl'
+    ],
+    // 模式A+A：高质量1080p
+    aa: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Restore_CNN_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl'
+    ],
+    // 模式B+B：高质量720p
+    bb: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_Soft_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Restore_CNN_Soft_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl'
+    ],
+    // 轻量模式：低配置设备
+    lite: [
+        'Anime4K_Restore_CNN_S.glsl',
+        'Anime4K_Upscale_CNN_x2_S.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Upscale_CNN_x2_S.glsl'
+    ],
+    // 仅降噪
+    denoise: [
+        'Anime4K_Denoise_Bilateral_Mode.glsl'
+    ],
+    // 真实系：真人/纪录片
+    real: [
+        'CAS.glsl',
+        'ColorVibrance.glsl'
+    ],
+    // 电影感：动画 + 胶片粒度 + 色彩
+    cinema: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_M.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'FilmGrain.glsl',
+        'ColorVibrance.glsl'
+    ],
+    // 全增强：极致画质
+    ultra: [
+        'Anime4K_Clamp_Highlights.glsl',
+        'Anime4K_Restore_CNN_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'Anime4K_AutoDownscalePre_x2.glsl',
+        'Anime4K_Restore_CNN_L.glsl',
+        'Anime4K_Upscale_CNN_x2_M.glsl',
+        'CAS.glsl',
+        'FilmGrain.glsl',
+        'ColorVibrance.glsl'
+    ]
+};
+
+/**
+ * 将「默认 MPV 着色器 + ICC 校色」写入 portable_config/mpv-user.conf。
+ * 该文件被 mpv.conf 通过 `include=~~/mpv-user.conf` 加载，作为 MPV 启动默认。
+ * @param shaderKey 预设 key（'off' 表示不启用任何着色器）
+ * @param iccEnabled 是否开启 ICC 自动校色
+ */
+function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
+    try {
+        const dir = getPortableConfigDir();
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        const target = path.join(dir, 'mpv-user.conf');
+        const shaders = MPV_SHADER_PRESETS[shaderKey] || [];
+        const lines: string[] = [
+            '# 本文件由「应用设置面板 > 播放器 > 默认 MPV 着色器 / ICC 校色」自动生成。',
+            '# 修改后会被重写，请勿手动编辑。',
+            ''
+        ];
+        for (const s of shaders) {
+            lines.push('glsl-shaders-append=~~/shaders/' + s);
+        }
+        lines.push('icc-profile-auto=' + (iccEnabled ? 'yes' : 'no'));
+        fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+        logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled})`);
+    } catch (error) {
+        logger.error('写入 mpv-user.conf 失败:', error);
+    }
+}
+
+// 写入 MPV B站弹幕搜索开关到 script-opts/uosc_danmaku.conf
+// 同时控制 bili_search_enabled(手动搜索门控) 与 auto_load_extra(自动补源/B站自动搜索)，
+// 两者同开同关，确保关闭开关后既不能手动搜、也不会自动加载 B站弹幕。
+// 保留 conf 中其他选项，仅替换/追加这两个键。
+function writeBiliSearchEnabled(enabled: boolean): void {
+    try {
+        const dir = getPortableConfigDir();
+        const scriptOptsDir = path.join(dir, 'script-opts');
+        if (!fs.existsSync(scriptOptsDir)) {
+            fs.mkdirSync(scriptOptsDir, { recursive: true });
+        }
+        const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+        let lines: string[] = [];
+        if (fs.existsSync(target)) {
+            lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+        }
+        const val = enabled ? 'yes' : 'no';
+        // 移除已存在的 bili_search_enabled / auto_load_extra 行
+        lines = lines.filter(l => !/^\s*(bili_search_enabled|auto_load_extra)\s*=/.test(l));
+        lines.push('# B站弹幕搜索开关（由应用设置面板控制，同时控制自动补源 auto_load_extra）');
+        lines.push('bili_search_enabled=' + val);
+        lines.push('auto_load_extra=' + val);
+        fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+        logger.info(`MPV B站弹幕搜索开关已写入: ${target} (enabled=${enabled}, auto_load_extra=${val})`);
+    } catch (error) {
+        logger.error('写入 uosc_danmaku.conf (bili_search_enabled) 失败:', error);
+    }
+}
+
 // 插件初始化函数
 function init(): void {
     logger.info('Initializing MPV Config Plugin...');
@@ -139,5 +289,8 @@ function init(): void {
 }
 
 export {
-    init
+    init,
+    getPortableConfigDir,
+    writeMpvUserConfig,
+    writeBiliSearchEnabled
 };

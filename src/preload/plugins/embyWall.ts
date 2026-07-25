@@ -4,9 +4,25 @@ import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 
 const LOG = '[EmbyWall]';
+// EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
+// 关闭时 log() 完全不输出(终端 console.log 与上报主进程的 IPC 都跳过)，
+// 因此既能清掉 CMD 刷屏，也能避免写入 app.log 文件。
+let _embyWallLogEnabled = false;
+
+function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
+  const enabled = !!payload?.enabled;
+  const comps = payload?.components || {};
+  // 调试总开关开启 且 EmbyWall 组件未被显式关闭(默认开启) → 显示
+  _embyWallLogEnabled = enabled && comps['embywall'] !== false;
+}
+
+ipcRenderer.on('debug-filter', (_e: any, payload: any) => _applyEmbyWallDebugFilter(payload));
+// 页面加载时主动向主进程索取当前调试过滤(异步返回前默认安静)
+try { ipcRenderer.send('debug-filter-request'); } catch (e) {}
+
 function log(...a: any[]) {
+  if (!_embyWallLogEnabled) return; // 独立开关关闭 → 完全静默
   const msg = LOG + ' ' + a.join(' ');
-  console.log(msg);
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
 }
 
@@ -1035,7 +1051,7 @@ function handle(): void {
     const parts = m[1].split(',').map(s => parseFloat(s.trim()));
     const [r, g, b, a = 1] = parts;
     if (a < 0.05) return false; // 已透明
-    return r >= 235 && g >= 235 && b >= 235; // 白/浅灰系
+    return r >= 220 && g >= 220 && b >= 220; // 白/浅灰系(阈值从235降到220)
   };
 
   /** 判断一个元素是否是「应该保留背景的交互性浮层」→ 跳过不清除 */
@@ -1121,6 +1137,74 @@ function handle(): void {
       log('whitewash pass', _whitewashPasses, 'fixed', fixedCount, 'skipped-overlay', skippedCount);
     }
   };
+
+  // [v382] 全局圆角强制: 飞牛影视 React SPA 路由切换时可能添加 position:fixed 全屏层,
+  //        其 Tailwind 类名(如 fixed.top-0.left-0.w-full.h-full)不被 ACRYLIC_CSS
+  //        fixed.inset-0 选择器覆盖 → 四个角变方. JS 扫描所有 fixed 元素, 近全屏则强制圆角.
+  let _rcPasses = 0;
+  const _globalRoundedCornerEnforcer = () => {
+    _rcPasses++;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let fixedCount = 0;
+    // 只扫描 fixed 元素(数量远少于全 DOM)
+    const all = document.querySelectorAll<HTMLElement>('*');
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      // body/html 由 mainwin.ts 的 injectAcrylicCSS 统一处理(登录页灰底/主界面亚克力),
+      // 此处跳过以免把登录页的 #f5f5f5 灰底误清成 transparent(用户要求登录页不透明).
+      if (el === document.body || el === document.documentElement) continue;
+      try {
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed') continue;
+        const rect = el.getBoundingClientRect();
+        // 覆盖 ≥80% 视口的元素才加圆角(避免误伤小弹窗/按钮)
+        if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
+        // 跳过已标记的
+        if (el.dataset.fnosRounded === '1') continue;
+        el.style.setProperty('border-radius', '16px', 'important');
+        el.style.setProperty('overflow', 'hidden', 'important');
+        el.style.setProperty('clip-path', 'inset(0 round 16px)', 'important');
+        el.style.setProperty('-webkit-clip-path', 'inset(0 round 16px)', 'important');
+        // 同步清除白底: 全屏固定层的白底挡住 body 亚克力玻璃+桌面透出圆角
+        // [v384] 同时清除 background-image(渐变/图片): getComputedStyle 的 backgroundColor
+        //        对渐变返回 transparent, 导致白底漏网.
+        const bgImg = cs.backgroundImage;
+        if (bgImg && bgImg !== 'none') {
+          el.style.setProperty('background-image', 'none', 'important');
+        }
+        const bg = cs.backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)') {
+          const bm = bg.match(/rgba?\(([^)]+)\)/);
+          if (bm) {
+            const parts = bm[1].split(',').map(s => parseFloat(s.trim()));
+            if (parts[0] > 200 && parts[1] > 200 && parts[2] > 200 && (parts[3] ?? 1) > 0.1) {
+              el.style.setProperty('background', 'transparent', 'important');
+              el.style.setProperty('background-color', 'transparent', 'important');
+            }
+          }
+        }
+        el.dataset.fnosRounded = '1';
+        fixedCount++;
+      } catch (_) { /* skip */ }
+    }
+    if (_rcPasses % 20 === 1 || fixedCount > 0) {
+      log('rounded-corner pass', _rcPasses, 'fixed-fullscreen', fixedCount);
+    }
+  };
+  // 与白底清除器共用触发机制: 立即+延迟+DOM变化+定时巡检
+  setTimeout(_globalRoundedCornerEnforcer, 800);
+  setTimeout(_globalRoundedCornerEnforcer, 2500);
+  setTimeout(_globalRoundedCornerEnforcer, 4500);
+  let _rcTimer = 0;
+  const _rcObs = new MutationObserver(() => {
+    clearTimeout(_rcTimer);
+    _rcTimer = window.setTimeout(_globalRoundedCornerEnforcer, 200);
+  });
+  _rcObs.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('beforeunload', () => { _rcObs.disconnect(); clearInterval(_rcInterval); });
+  const _rcInterval = setInterval(_globalRoundedCornerEnforcer, 6000);
+
   // 三重触发: 立即一次 + MutationObserver(DOM变化时) + 定时巡检(兜底漏网)
   setTimeout(_globalWhitewashRemover, 500);
   setTimeout(_globalWhitewashRemover, 2000);
@@ -1277,7 +1361,8 @@ function handle(): void {
       const verBtn = document.createElement('button');
       verBtn.id = 'fnos-about-btn';
       verBtn.type = 'button';
-      verBtn.innerHTML = 'ℹ 关于&nbsp;v3.1.0';
+      // 初始不含具体版本号(避免硬编码假版本); 真实版本由下方 IPC(version-info) 动态写入
+      verBtn.innerHTML = 'ℹ 关于';
       verBtn.style.cssText = 'margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
@@ -1288,12 +1373,15 @@ function handle(): void {
       });
       ctrl.appendChild(verBtn);
       // 动态版本号: 从主进程取真实版本(打包后准确; dev 若为 unknown 则保留兜底版本)
+      // 主进程 get-version 用 ipcMain.on 注册、以 event.reply('version-info') 回传(on 模式)，
+      // 故渲染端必须用 send + on 接收，不能用 invoke(invoke 需 ipcMain.handle，会 reject)。
       try {
-        ipcRenderer.invoke('app:info').then((info: any) => {
+        ipcRenderer.send('get-version');
+        ipcRenderer.once('version-info', (_e: any, info: any) => {
           if (info && info.version && info.version !== 'unknown') {
             verBtn.innerHTML = 'ℹ 关于&nbsp;v' + info.version;
           }
-        }).catch(() => {});
+        });
       } catch (_) {}
     }
 
@@ -1347,7 +1435,7 @@ function handle(): void {
     const section = (titleText?: string): { el: HTMLElement; body: HTMLElement } => {
       const d = document.createElement('div');
       let css = 'border-radius:12px;background:var(--fnos-ui-input-bg)!important;'
-        + 'border:1px solid var(--fnos-ui-border3);overflow:hidden;';
+        + 'border:1px solid var(--fnos-ui-border3);overflow:hidden;display:flex;flex-direction:column;';
       if (titleText !== undefined) {
         css += 'margin-bottom:10px;'; // 带标题的分组有底部间距
       }
@@ -1358,13 +1446,13 @@ function handle(): void {
         const t = document.createElement('div');
         t.textContent = titleText;
         t.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;'
-          + 'color:var(--fnos-ui-sec);padding:9px 12px 6px;border-bottom:1px solid var(--fnos-ui-border2);';
+          + 'color:var(--fnos-ui-sec);padding:9px 12px 6px;border-bottom:1px solid var(--fnos-ui-border2);flex:none;';
         d.appendChild(t);
       }
 
       // 内容容器
       const body = document.createElement('div');
-      body.style.cssText = 'padding:8px 10px;';
+      body.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
       d.appendChild(body);
       return { el: d, body };
     };
@@ -1373,13 +1461,31 @@ function handle(): void {
     const overlay = document.createElement('div');
     overlay.id = 'fnos-settings-panel';
     overlay.setAttribute('data-fnos-ui', '1'); // 保护自建设备 UI 不被白底清除器误清(含内部卡片底色)
-    overlay.style.cssText = 'position:fixed;z-index:2147483600;display:none;flex-direction:column;width:360px;'
+    overlay.style.cssText = 'position:fixed;z-index:2147483600;display:none;flex-direction:column;width:min(680px,calc(100vw - 80px));'
       + 'max-height:calc(100vh - 120px);overflow-y:auto;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
       + 'background:var(--fnos-ui-panel-bg)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14),inset 0 1px 0 rgba(255,255,255,.6);'
-      + 'border-radius:18px;border:1px solid var(--fnos-ui-border-outer);';
+      + 'border-radius:18px;border:1px solid var(--fnos-ui-border-outer);'
+      // 飞牛导航栏带 -webkit-app-region:drag; 若面板不声明 no-drag, 覆盖在导航栏上方时点击会被系统当成拖拽窗口吞掉
+      + '-webkit-app-region:no-drag;app-region:no-drag;';
     overlay.addEventListener('click', (e: Event) => e.stopPropagation());
+
+    // 极淡模态遮罩: 点击遮罩任意处即可关闭面板(兜底 —— 即便右上角叉被某层遮挡/事件被吞也能关)
+    const mask = document.createElement('div');
+    mask.id = 'fnos-settings-mask';
+    mask.style.cssText = 'position:fixed;inset:0;z-index:2147483599;display:none;'
+      + 'background:rgba(18,14,28,.22);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);'
+      + '-webkit-app-region:no-drag;app-region:no-drag;';
+    const closeSettingsPanel = (): void => {
+      overlay.style.display = 'none';
+      mask.style.display = 'none';
+    };
+    mask.addEventListener('click', () => closeSettingsPanel());
+    // ESC 键关闭(兜底)
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && overlay.style.display === 'flex') closeSettingsPanel();
+    });
 
     // 头部(标题+关闭)
     const header = document.createElement('div');
@@ -1391,23 +1497,36 @@ function handle(): void {
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
-    // 放大点击热区(36×36)并加大字号, 解决"关闭按钮难点击"
-    closeBtn.style.cssText = 'width:36px;height:36px;flex-shrink:0;border-radius:10px;cursor:pointer;font-size:16px;font-weight:700;'
+    // 放大点击热区(36×36)并加大字号, 解决"关闭按钮难点击"; 抬升 z-index + 强制可点, 防被遮挡
+    closeBtn.style.cssText = 'position:relative;z-index:2;width:36px;height:36px;flex-shrink:0;box-sizing:border-box;'
+      + 'border-radius:10px;cursor:pointer;pointer-events:auto;font-size:16px;font-weight:700;'
       + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text2);border:1px solid var(--fnos-ui-border-strong);display:flex;'
-      + 'align-items:center;justify-content:center;transition:all .15s;line-height:1;';
-    closeBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); overlay.style.display = 'none'; });
+      + 'align-items:center;justify-content:center;transition:all .15s;line-height:1;'
+      // 防止父层/飞牛导航栏的 drag 区域把点击当窗口拖拽吞掉
+      + '-webkit-app-region:no-drag!important;app-region:no-drag!important;';
+    // 直接赋值 onclick(最稳) + addEventListener(捕获阶段) + pointerdown 兜底; 命中即关闭面板
+    closeBtn.onclick = (e: Event) => { if (e) e.stopPropagation(); closeSettingsPanel(); };
+    closeBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); closeSettingsPanel(); }, true);
+    closeBtn.addEventListener('pointerdown', (e: Event) => { e.stopPropagation(); closeSettingsPanel(); });
     closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(240,90,90,.85)!important'; closeBtn.style.color = '#fff'; closeBtn.style.border = '1px solid rgba(240,90,90,.5)'; };
     closeBtn.onmouseleave = () => { closeBtn.style.background = 'var(--fnos-ui-btn-bg2)!important'; closeBtn.style.color = 'var(--fnos-ui-btn-text2)'; closeBtn.style.border = '1px solid var(--fnos-ui-border-strong)'; };
     header.appendChild(title); header.appendChild(closeBtn);
     overlay.appendChild(header);
 
+    // 内容网格：响应式双栏，后续新增分组可自动排列，不再挤成单条竖栏
+    const contentGrid = document.createElement('div');
+    contentGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;'
+      + 'padding:12px 16px 10px;grid-auto-flow:dense;align-items:stretch;';
+    overlay.appendChild(contentGrid);
+
     // ===== 分组1: 开关选项 =====
     const sec1 = section('功能开关');
     const secBody1 = sec1.body;
+    secBody1.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
 
     const addToggle = (label: string): HTMLInputElement => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 4px;'
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
         + 'cursor:pointer;border-radius:6px;transition:background .12s;';
       row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
       row.onmouseleave = () => { row.style.background = 'transparent'; };
@@ -1429,7 +1548,7 @@ function handle(): void {
     swNas.addEventListener('change', () => { ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked); });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
-    themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 4px;gap:10px;';
+    themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
     const themeLabel = document.createElement('span');
     themeLabel.textContent = '主题模式';
     themeLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;white-space:nowrap;';
@@ -1461,30 +1580,69 @@ function handle(): void {
     themeRow.appendChild(themeLabel);
     themeRow.appendChild(seg);
     secBody1.appendChild(themeRow);
-    overlay.appendChild(sec1.el);
+
+    // ===== 底部操作栏：检查更新（独立 footer，与右侧日志按钮对齐）=====
+    const updFooter = document.createElement('div');
+    updFooter.style.cssText = 'padding:10px 12px;flex-shrink:0;';
+    const updDivider = document.createElement('div');
+    updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 8px;';
+    updFooter.appendChild(updDivider);
+    const updRow = document.createElement('div');
+    updRow.style.cssText = 'display:flex;gap:6px;';
+    const updBtn = mkBtn('检查更新', true);
+    const updMirrorBtn = mkBtn('镜像检查', true);
+    updRow.appendChild(updBtn);
+    updRow.appendChild(updMirrorBtn);
+    updFooter.appendChild(updRow);
+    sec1.el.appendChild(updFooter);
+    updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
+    updMirrorBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update-mirror'); });
+
+
+    contentGrid.appendChild(sec1.el);
 
     // ===== 分组2: MPV 路径 =====
     const sec2 = section('播放器');
+    sec2.el.style.gridColumn = '1 / -1'; // 播放器内容多，占满整行
     const secBody2 = sec2.body;
 
+    // 双栏布局：左=MPV，右=PotPlayer（窄屏自动折叠为单栏）
+    const playerCols = document.createElement('div');
+    playerCols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:16px;margin-top:4px;';
+    const colMpv = document.createElement('div');
+    colMpv.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:8px;';
+    const colPot = document.createElement('div');
+    colPot.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:8px;padding-left:16px;border-left:1px solid var(--fnos-ui-border2);';
+    const subHead = (text: string): HTMLElement => {
+        const d = document.createElement('div');
+        d.textContent = text;
+        d.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--fnos-ui-sec);margin-bottom:2px;';
+        return d;
+    };
+    colMpv.appendChild(subHead('MPV'));
+    colPot.appendChild(subHead('PotPlayer'));
+    playerCols.appendChild(colMpv);
+    playerCols.appendChild(colPot);
+    secBody2.appendChild(playerCols);
+
     const mpvLabel = document.createElement('div');
-    mpvLabel.textContent = 'MPV 播放器路径';
-    mpvLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin-bottom:5px;';
-    secBody2.appendChild(mpvLabel);
+    mpvLabel.textContent = 'MPV 路径（留空则使用应用内置）';
+    mpvLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:0 0 5px;';
+    colMpv.appendChild(mpvLabel);
 
     const mpvPath = document.createElement('div');
     mpvPath.id = 'fnos-mpv-path';
     mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
       + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);';
-    secBody2.appendChild(mpvPath);
+    colMpv.appendChild(mpvPath);
 
     const mpvBtns = document.createElement('div');
     mpvBtns.style.cssText = 'display:flex;gap:6px;';
     const pickBtn = mkBtn('选择文件', true);
     const clearBtn = mkBtn('清空', true);
     mpvBtns.appendChild(pickBtn); mpvBtns.appendChild(clearBtn);
-    secBody2.appendChild(mpvBtns);
+    colMpv.appendChild(mpvBtns);
     pickBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       const p = await ipcRenderer.invoke('settings:pick-mpv-path');
@@ -1493,13 +1651,141 @@ function handle(): void {
     clearBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       await ipcRenderer.invoke('settings:clear-mpv-path');
-      mpvPath.textContent = '';
+      mpvPath.textContent = '应用内置（已随安装包分发，无需本机安装）';
     });
-    overlay.appendChild(sec2.el);
+
+    // ===== 默认 MPV 着色器（由应用面板管理 MPV 启动默认，MPV 内 Ctrl+1~9 仍可临时切换）=====
+    const shaderLabel = document.createElement('div');
+    shaderLabel.textContent = '默认 MPV 着色器';
+    shaderLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:12px 0 5px;';
+    colMpv.appendChild(shaderLabel);
+
+    const shaderSel = document.createElement('select');
+    shaderSel.id = 'fnos-mpv-shader';
+    shaderSel.style.cssText = 'width:100%;font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;cursor:pointer;';
+    const shaderOptions: [string, string][] = [
+      ['off', '关闭（不启用着色器）'],
+      ['a', '模式A（大多数1080p动画）'],
+      ['b', '模式B（大多数720p动画）'],
+      ['aa', '模式A+A（高质量1080p）'],
+      ['bb', '模式B+B（高质量720p）'],
+      ['lite', '轻量模式（低配置设备）'],
+      ['denoise', '仅降噪'],
+      ['real', '真实系（真人/纪录片）'],
+      ['cinema', '电影感'],
+      ['ultra', '全增强（极致画质）']
+    ];
+    shaderOptions.forEach(([k, label]) => {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = label;
+      shaderSel.appendChild(o);
+    });
+    colMpv.appendChild(shaderSel);
+
+    // MPV ICC 校色开关（默认开启，固化到 mpv-user.conf）
+    const iccRow = document.createElement('div');
+    iccRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 6px 4px;gap:10px;';
+    const iccSpan = document.createElement('span');
+    iccSpan.textContent = 'MPV ICC 校色（默认开启）';
+    iccSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swIcc = document.createElement('input');
+    swIcc.type = 'checkbox';
+    swIcc.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    iccRow.appendChild(iccSpan); iccRow.appendChild(swIcc);
+    colMpv.appendChild(iccRow);
+
+    const applyShaderConfig = (): void => {
+      ipcRenderer.invoke('settings:set-mpv-shader-config', { shader: shaderSel.value, icc: swIcc.checked })
+        .catch((err) => log('set-mpv-shader-config failed', err));
+    };
+    shaderSel.addEventListener('change', applyShaderConfig);
+    swIcc.addEventListener('change', applyShaderConfig);
+
+    // ===== PotPlayer 路径 =====
+    const potLabel = document.createElement('div');
+    potLabel.textContent = 'PotPlayer 路径（留空则使用应用内置）';
+    potLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:0 0 5px;';
+    colPot.appendChild(potLabel);
+
+    const potPathEl = document.createElement('div');
+    potPathEl.id = 'fnos-pot-path';
+    potPathEl.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
+      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);';
+    colPot.appendChild(potPathEl);
+
+    const potBtns = document.createElement('div');
+    potBtns.style.cssText = 'display:flex;gap:6px;';
+    const pickPotBtn = mkBtn('选择文件', true);
+    const clearPotBtn = mkBtn('清空', true);
+    potBtns.appendChild(pickPotBtn); potBtns.appendChild(clearPotBtn);
+    colPot.appendChild(potBtns);
+    pickPotBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const p = await ipcRenderer.invoke('settings:pick-pot-path');
+      if (p) potPathEl.textContent = p as string;
+    });
+    clearPotBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      await ipcRenderer.invoke('settings:clear-pot-path');
+      potPathEl.textContent = '应用内置（已随安装包分发，无需本机安装）';
+    });
+
+    // ===== 默认播放器（直接播放时使用）=====
+    const defLabel = document.createElement('div');
+    defLabel.textContent = '默认播放器（直接播放时使用）';
+    defLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
+    colPot.appendChild(defLabel);
+
+    const defGrid = document.createElement('div');
+    defGrid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:5px;';
+    const defModes: [string, string][] = [['mpv', '内置 MPV'], ['potplayer', 'PotPlayer']];
+    const defEls: HTMLButtonElement[] = [];
+    defModes.forEach(([mode, text]) => {
+      const b = mkBtn(text);
+      b.dataset.dmode = mode;
+      b.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        (overlay as any)._defaultPlayer = mode;
+        refreshDefaultPlayer();
+        ipcRenderer.invoke('settings:set-default-player', mode).catch((err) => log('set-default-player failed', err));
+      });
+      defGrid.appendChild(b); defEls.push(b);
+    });
+    colPot.appendChild(defGrid);
+
+    const refreshDefaultPlayer = (): void => {
+      const cur = (overlay as any)._defaultPlayer || 'mpv';
+      defEls.forEach((b) => {
+        const on = b.dataset.dmode === cur;
+        b.style.background = on ? 'var(--fnos-ui-btn-hover2)!important' : 'var(--fnos-ui-btn-bg2)!important';
+        b.style.borderColor = on ? 'var(--fnos-ui-accent)!important' : 'var(--fnos-ui-border3)';
+      });
+    };
+
+    contentGrid.appendChild(sec2.el);
 
     // ===== 分组3: 退出行为 =====
     const sec3 = section('退出行为');
     const secBody3 = sec3.body;
+    secBody3.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    // 强制「功能开关」(sec1) 与「退出行为」(sec3) 两张卡等高，使底部横线/按钮左右平齐。
+    // 不依赖 grid 的 stretch（实测在打包环境未生效），直接按内容测量后把两者高度设为一致。
+    const syncCardHeights = (): void => {
+      // 先清除上一次强制高度，让浏览器按真实内容重新测量
+      sec1.el.style.height = '';
+      sec3.el.style.height = '';
+      const h1 = sec1.el.offsetHeight;
+      const h3 = sec3.el.offsetHeight;
+      const maxH = Math.max(h1, h3);
+      if (maxH > 0) {
+        sec1.el.style.height = maxH + 'px';
+        sec3.el.style.height = maxH + 'px';
+      }
+    };
+
     const exitModes: [string, string][] = [['direct', '直接退出'], ['minimize', '最小化到托盘'], ['ask', '每次询问']];
     const exitEls: HTMLButtonElement[] = [];
     const exitGrid = document.createElement('div');
@@ -1517,7 +1803,7 @@ function handle(): void {
       exitGrid.appendChild(b); exitEls.push(b);
     });
     secBody3.appendChild(exitGrid);
-    overlay.appendChild(sec3.el);
+    contentGrid.appendChild(sec3.el);
 
     // ===== 分组: B站弹幕登录 =====
     const secBili = section('B站弹幕登录');
@@ -1527,20 +1813,519 @@ function handle(): void {
     biliStatus.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);margin-bottom:8px;';
     secBodyBili.appendChild(biliStatus);
 
+    // 按钮行：扫码登录 / 退出登录 / 保存 Cookie（与豆瓣左半部分按钮行同款样式）
     const biliBtns = document.createElement('div');
-    biliBtns.style.cssText = 'display:flex;gap:6px;';
+    biliBtns.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
     const scanBtn = mkBtn('扫码登录', true);
-    const clearBiliBtn = mkBtn('清除登录', true);
-    biliBtns.appendChild(scanBtn); biliBtns.appendChild(clearBiliBtn);
+    const logoutBiliBtn = mkBtn('退出登录', true);
+    const saveBiliCookieBtn = mkBtn('保存 Cookie', true);
+    biliBtns.appendChild(scanBtn); biliBtns.appendChild(logoutBiliBtn); biliBtns.appendChild(saveBiliCookieBtn);
     secBodyBili.appendChild(biliBtns);
-    overlay.appendChild(secBili.el);
+
+    // 手动粘贴 Cookie（兜底：B站风控/扫码失效时用），与豆瓣左半部分 manualWrap 同款
+    const biliManualWrap = document.createElement('div');
+    biliManualWrap.style.cssText = 'margin-top:8px;';
+    const biliManualLabel = document.createElement('div');
+    biliManualLabel.textContent = '手动粘贴 Cookie（B站风控/扫码失效时用）';
+    biliManualLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-bottom:4px;';
+    biliManualWrap.appendChild(biliManualLabel);
+    const biliManualTa = document.createElement('input');
+    biliManualTa.type = 'text';
+    biliManualTa.placeholder = '粘贴浏览器里 B站的 Cookie 字符串（含 SESSDATA 等）';
+    biliManualTa.style.cssText = 'width:100%;height:32px;font-size:10.5px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    biliManualWrap.appendChild(biliManualTa);
+    secBodyBili.appendChild(biliManualWrap);
+
+    // MPV B站弹幕搜索开关（联动 MPV uosc_danmaku 的 script-opts/uosc_danmaku.conf）
+    const biliSearchRow = document.createElement('div');
+    biliSearchRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    biliSearchRow.onmouseenter = () => { biliSearchRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    biliSearchRow.onmouseleave = () => { biliSearchRow.style.background = 'transparent'; };
+    const biliSearchLabel = document.createElement('span');
+    biliSearchLabel.textContent = '启用 MPV B站弹幕搜索';
+    biliSearchLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swMpvBiliSearch = document.createElement('input');
+    swMpvBiliSearch.type = 'checkbox';
+    swMpvBiliSearch.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    biliSearchRow.appendChild(biliSearchLabel); biliSearchRow.appendChild(swMpvBiliSearch);
+    secBodyBili.appendChild(biliSearchRow);
+    swMpvBiliSearch.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-mpv-bili-search-enabled', swMpvBiliSearch.checked).catch((err) => log('set-mpv-bili-search-enabled failed', err));
+    });
+
+    // 打开默认弹幕文件夹按钮
+    const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
+    biliFolderBtn.style.marginTop = '6px';
+    secBodyBili.appendChild(biliFolderBtn);
+    biliFolderBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
+    });
+
+    contentGrid.appendChild(secBili.el);
+
+    // ===== 分组: Bangumi 登录（与「B站弹幕登录」并列，容器同尺寸）=====
+    const secBangumi = section('Bangumi 登录');
+    const secBodyBangumi = secBangumi.body;
+
+    let bangumiReal = ''; // 真实 token（仅存于闭包，界面只显示掩码星号）
+    const maskBangumi = (t: string): string => '*'.repeat(Math.max(0, t.length));
+
+    const bangumiHintTop = document.createElement('div');
+    bangumiHintTop.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin-bottom:8px;line-height:1.5;';
+    bangumiHintTop.textContent = '填入你的 Bangumi Access Token 以启用 Bangumi 关联功能。';
+    secBodyBangumi.appendChild(bangumiHintTop);
+
+    // 单行 token 输入框
+    const bangumiInput = document.createElement('input');
+    bangumiInput.type = 'text';
+    bangumiInput.placeholder = '粘贴 Bangumi Access Token';
+    bangumiInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;';
+    secBodyBangumi.appendChild(bangumiInput);
+
+    // 已保存时显示星号掩码；点击进入编辑自动清空，便于重新粘贴
+    bangumiInput.addEventListener('focus', () => {
+      if (bangumiInput.readOnly) { bangumiInput.readOnly = false; bangumiInput.value = ''; }
+    });
+    bangumiInput.addEventListener('blur', () => {
+      if (bangumiInput.value.trim() === '' && bangumiReal) {
+        bangumiInput.value = maskBangumi(bangumiReal);
+        bangumiInput.readOnly = true;
+      }
+    });
+
+    const bangumiBtns = document.createElement('div');
+    bangumiBtns.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const saveBangumiBtn = mkBtn('保存', true);
+    const clearBangumiBtn = mkBtn('清除', true);
+    bangumiBtns.appendChild(saveBangumiBtn);
+    bangumiBtns.appendChild(clearBangumiBtn);
+    secBodyBangumi.appendChild(bangumiBtns);
+
+    const bangumiStatus = document.createElement('div');
+    bangumiStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyBangumi.appendChild(bangumiStatus);
+
+    // Bangumi 集数级同步开关
+    const bangumiSyncRow = document.createElement('div');
+    bangumiSyncRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    bangumiSyncRow.onmouseenter = () => { bangumiSyncRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    bangumiSyncRow.onmouseleave = () => { bangumiSyncRow.style.background = 'transparent'; };
+    const bangumiSyncLabel = document.createElement('span');
+    bangumiSyncLabel.textContent = '启用 Bangumi 集数同步';
+    bangumiSyncLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swBangumiSync = document.createElement('input');
+    swBangumiSync.type = 'checkbox';
+    swBangumiSync.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    bangumiSyncRow.appendChild(bangumiSyncLabel); bangumiSyncRow.appendChild(swBangumiSync);
+    secBodyBangumi.appendChild(bangumiSyncRow);
+    swBangumiSync.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-bangumi-sync-enabled', swBangumiSync.checked).catch((err) => log('set-bangumi-sync-enabled failed', err));
+    });
+
+    // 同步阈值（百分比，默认80）
+    const bangumiThrRow = document.createElement('div');
+    bangumiThrRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+      + 'border-radius:6px;transition:background .12s;';
+    const bangumiThrLabel = document.createElement('span');
+    bangumiThrLabel.textContent = '同步阈值（播放进度 %）';
+    bangumiThrLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
+    const bangumiThresholdInput = document.createElement('input');
+    bangumiThresholdInput.type = 'number';
+    bangumiThresholdInput.min = '1'; bangumiThresholdInput.max = '100';
+    bangumiThresholdInput.style.cssText = 'width:56px;height:26px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;'
+      + 'padding:2px 6px;box-sizing:border-box;text-align:center;';
+    bangumiThrRow.appendChild(bangumiThrLabel); bangumiThrRow.appendChild(bangumiThresholdInput);
+    secBodyBangumi.appendChild(bangumiThrRow);
+    bangumiThresholdInput.addEventListener('change', () => {
+      const v = Number(bangumiThresholdInput.value) || 80;
+      ipcRenderer.invoke('settings:set-bangumi-sync-threshold', v).catch((err) => log('set-bangumi-sync-threshold failed', err));
+    });
+
+    // 底部提示：点击链接用系统浏览器打开获取页
+    const bangumiHintBottom = document.createElement('div');
+    bangumiHintBottom.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-top:10px;line-height:1.5;';
+    const bangumiLink = document.createElement('a');
+    bangumiLink.textContent = 'https://next.bgm.tv/demo/access-token';
+    bangumiLink.href = 'https://next.bgm.tv/demo/access-token';
+    bangumiLink.style.cssText = 'color:var(--fnos-ui-sec);text-decoration:underline;cursor:pointer;';
+    bangumiLink.addEventListener('click', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:open-external', 'https://next.bgm.tv/demo/access-token').catch(() => {});
+    });
+    bangumiHintBottom.appendChild(document.createTextNode('可在 '));
+    bangumiHintBottom.appendChild(bangumiLink);
+    bangumiHintBottom.appendChild(document.createTextNode(' 获取 Access Token。'));
+    secBodyBangumi.appendChild(bangumiHintBottom);
+
+    saveBangumiBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      // 处于掩码(readOnly)时保存真实 token，而不是界面上的星号
+      const token = bangumiInput.readOnly ? bangumiReal : bangumiInput.value.trim();
+      try {
+        const r: any = await ipcRenderer.invoke('settings:set-bangumi-token', token);
+        if (!r || r.ok !== false) {
+          bangumiReal = token;
+          if (token) {
+            bangumiInput.value = maskBangumi(token);
+            bangumiInput.readOnly = true;
+            bangumiStatus.textContent = '已保存 Token';
+            bangumiStatus.style.color = 'var(--fnos-ui-ok)';
+          } else {
+            bangumiInput.value = '';
+            bangumiInput.readOnly = false;
+            bangumiStatus.textContent = '已清除 Token';
+            bangumiStatus.style.color = 'var(--fnos-ui-warn)';
+          }
+        } else {
+          bangumiStatus.textContent = '保存失败';
+          bangumiStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        bangumiStatus.textContent = '保存失败';
+        bangumiStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    clearBangumiBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      bangumiInput.value = '';
+      bangumiInput.readOnly = false;
+      bangumiReal = '';
+      try {
+        await ipcRenderer.invoke('settings:set-bangumi-token', '');
+        bangumiStatus.textContent = '已清除 Token';
+        bangumiStatus.style.color = 'var(--fnos-ui-warn)';
+      } catch {
+        bangumiStatus.textContent = '清除失败';
+        bangumiStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    contentGrid.appendChild(secBangumi.el);
+
+    // ===== 分组: 豆瓣同步 =====
+    const secDouban = section('豆瓣同步');
+    secDouban.el.style.gridColumn = '1 / -1'; // 豆瓣同步内容多，占满整行
+    const secBodyDouban = secDouban.body;
+
+    const doubanStatus = document.createElement('div');
+    doubanStatus.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);margin-bottom:8px;';
+    secBodyDouban.appendChild(doubanStatus);
+
+    // 双栏布局：左=登录/账号，右=已观看同步（窄屏自动折叠为单栏）
+    const doubanCols = document.createElement('div');
+    doubanCols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:16px;margin-top:8px;';
+    const colLogin = document.createElement('div');
+    colLogin.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:8px;';
+    const colWatch = document.createElement('div');
+    colWatch.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:8px;padding-left:16px;border-left:1px solid var(--fnos-ui-border2);';
+    doubanCols.appendChild(colLogin);
+    doubanCols.appendChild(colWatch);
+    secBodyDouban.appendChild(doubanCols);
+
+    // 总开关
+    const addDoubanToggle = (label: string): HTMLInputElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+        + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+      row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
+      row.onmouseleave = () => { row.style.background = 'transparent'; };
+      const span = document.createElement('span');
+      span.textContent = label;
+      span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+      const sw = document.createElement('input');
+      sw.type = 'checkbox';
+      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+      row.appendChild(span); row.appendChild(sw);
+      colLogin.appendChild(row);
+      return sw;
+    };
+    const swDouban = addDoubanToggle('启用豆瓣同步');
+    swDouban.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-douban-enabled', swDouban.checked).catch((err) => log('set-douban-enabled failed', err));
+    });
+
+    // 登录按钮行
+    const doubanBtns = document.createElement('div');
+    doubanBtns.style.cssText = 'display:flex;gap:6px;margin-top:6px;';
+    const scanDoubanBtn = mkBtn('扫码登录', true);
+    const logoutDoubanBtn = mkBtn('退出登录', true);
+    const manualBtn = mkBtn('保存 Cookie', true);
+    doubanBtns.appendChild(scanDoubanBtn); doubanBtns.appendChild(logoutDoubanBtn); doubanBtns.appendChild(manualBtn);
+    colLogin.appendChild(doubanBtns);
+
+    scanDoubanBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      doubanStatus.textContent = '请在弹出的窗口中用豆瓣 App 扫码…';
+      doubanStatus.style.color = 'var(--fnos-ui-sec)';
+      try {
+        const r: any = await ipcRenderer.invoke('douban:open-login');
+        if (!r || !r.ok) doubanStatus.textContent = '打开登录窗口失败：' + ((r && r.msg) || '未知');
+      } catch {
+        doubanStatus.textContent = '打开登录窗口失败';
+      }
+    });
+    logoutDoubanBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      await ipcRenderer.invoke('douban:logout');
+      refreshDouban();
+    });
+
+    // 手动粘贴 Cookie（兜底）
+    const manualWrap = document.createElement('div');
+    manualWrap.style.cssText = 'margin-top:8px;';
+    const manualLabel = document.createElement('div');
+    manualLabel.textContent = '手动粘贴 Cookie（豆瓣风控/扫码失效时用）';
+    manualLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-bottom:4px;';
+    manualWrap.appendChild(manualLabel);
+    const manualTa = document.createElement('input');
+    manualTa.type = 'text';
+    manualTa.placeholder = '粘贴浏览器里豆瓣的 Cookie 字符串（含 dbcl2 等）';
+    manualTa.style.cssText = 'width:100%;height:32px;font-size:10.5px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    manualWrap.appendChild(manualTa);
+    manualBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const r: any = await ipcRenderer.invoke('douban:manual-cookie', manualTa.value);
+      if (r && r.ok) { manualTa.value = ''; refreshDouban(); }
+      else doubanStatus.textContent = '保存失败：' + ((r && r.msg) || '未知');
+    });
+    colLogin.appendChild(manualWrap);
+
+    // ===== 已观看列表 → 豆瓣"看过" 同步 =====
+    const watchedWrap = document.createElement('div');
+    watchedWrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+    const watchedTitle = document.createElement('div');
+    watchedTitle.textContent = '已观看列表 → 豆瓣「看过」';
+    watchedTitle.style.cssText = 'font-size:11px;font-weight:600;color:var(--fnos-ui-text);margin-bottom:6px;';
+    watchedWrap.appendChild(watchedTitle);
+
+    const watchedStatus = document.createElement('div');
+    watchedStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;';
+    watchedStatus.textContent = '读取飞牛「已观看」列表，批量标记到豆瓣（已标记的会跳过，不重复打）。';
+    watchedWrap.appendChild(watchedStatus);
+
+    const syncBtn = mkBtn('立即同步已观看列表', true);
+    syncBtn.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        syncBtn.setAttribute('disabled', 'true');
+        watchedStatus.textContent = '正在扫描飞牛「已观看」列表…（需加载列表页，约 10 秒）';
+        watchedStatus.style.color = 'var(--fnos-ui-sec)';
+        const r: any = await (window as any).fnosScanWatched();
+        syncBtn.removeAttribute('disabled');
+        if (r && r.error) {
+            watchedStatus.textContent = '同步失败：' + (r.error === 'timeout' ? '扫描超时' : r.error === 'busy' ? '上一次扫描仍在进行' : r.error);
+            watchedStatus.style.color = 'var(--fnos-ui-warn)';
+        } else if (r) {
+            const note = r.note ? '（' + r.note + '）' : '';
+            watchedStatus.textContent = `完成：共 ${r.total} 部，标记看过 ${r.marked}，跳过 ${r.skipped}，失败 ${r.failed}${note}`;
+            watchedStatus.style.color = r.marked > 0 ? 'var(--fnos-ui-ok)' : 'var(--fnos-ui-sub)';
+        }
+    });
+    watchedWrap.appendChild(syncBtn);
+
+    // 自动同步间隔
+    const autoRow = document.createElement('div');
+    autoRow.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    const autoLabel = document.createElement('span');
+    autoLabel.textContent = '自动同步间隔(分钟, 0=关闭):';
+    autoLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-text);';
+    const autoInput = document.createElement('input');
+    autoInput.type = 'number';
+    autoInput.min = '0';
+    autoInput.step = '5';
+    autoInput.style.cssText = 'width:64px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;';
+    const autoSave = mkBtn('保存', true);
+    autoSave.style.fontSize = '11px';
+    autoRow.appendChild(autoLabel); autoRow.appendChild(autoInput); autoRow.appendChild(autoSave);
+    watchedWrap.appendChild(autoRow);
+    autoSave.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        const v = Math.max(0, Math.floor(Number(autoInput.value) || 0));
+        const r: any = await ipcRenderer.invoke('douban:set-watched-scan-interval', v).catch(() => ({ ok: false }));
+        if (r && r.ok) {
+            watchedStatus.textContent = v > 0 ? `已设置每 ${v} 分钟自动同步一次（下限 10 分钟）` : '已关闭自动同步';
+            watchedStatus.style.color = 'var(--fnos-ui-ok)';
+        }
+    });
+    // 打开面板时回填当前间隔
+    ipcRenderer.invoke('douban:get-watched-scan-interval').then((r: any) => {
+        if (r && typeof r.interval === 'number') autoInput.value = String(r.interval);
+    }).catch(() => {});
+    colWatch.appendChild(watchedWrap);
+
+    contentGrid.appendChild(secDouban.el);
+
+    // ===== 调试日志（并入「退出行为」卡片）=====
+    // 分隔线：区分「退出行为」与「调试日志」
+    const dbgDivider = document.createElement('div');
+    dbgDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:12px 0 8px;';
+    secBody3.appendChild(dbgDivider);
+
+    // 小标题：纯文字，无背景/边框
+    const dbgLabel = document.createElement('div');
+    dbgLabel.style.cssText = 'color:var(--fnos-ui-sec);font-size:10px;margin:0 0 8px;'
+      + 'font-weight:700;text-transform:uppercase;letter-spacing:1.2px;';
+    dbgLabel.textContent = '调试日志';
+    secBody3.appendChild(dbgLabel);
+
+    // 调试开关动态挂载目标：主开关直接进卡片，组件开关进折叠区
+    let debugTarget: HTMLElement = secBody3;
+
+    const addDebugToggle = (label: string): HTMLInputElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 6px;'
+        + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+      row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
+      row.onmouseleave = () => { row.style.background = 'transparent'; };
+      const span = document.createElement('span');
+      span.textContent = label;
+      span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+      const sw = document.createElement('input');
+      sw.type = 'checkbox';
+      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+      row.appendChild(span); row.appendChild(sw);
+      debugTarget.appendChild(row);
+      return sw;
+    };
+
+    // ===== 主开关（始终可见，置于顶部）=====
+    debugTarget = secBody3;
+    const swDebug = addDebugToggle('启用调试日志（详细模式）');
+    swDebug.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-debug-enabled', swDebug.checked).catch((err) => log('set-debug-enabled failed', err));
+    });
+
+    // ===== 组件日志（默认折叠，置于主开关下方）=====
+    const dbgFold = document.createElement('div');
+    dbgFold.style.cssText = 'margin-top:4px;';
+    const dbgFoldHeader = document.createElement('div');
+    dbgFoldHeader.style.cssText = 'display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--fnos-ui-muted);'
+      + 'font-size:11.5px;padding:4px 6px;border-radius:6px;user-select:none;transition:background .12s;';
+    dbgFoldHeader.onmouseenter = () => { dbgFoldHeader.style.background = 'var(--fnos-ui-row-hover)'; };
+    dbgFoldHeader.onmouseleave = () => { dbgFoldHeader.style.background = 'transparent'; };
+    const dbgCaret = document.createElement('span');
+    dbgCaret.textContent = '▸';
+    dbgCaret.style.cssText = 'display:inline-block;transition:transform .12s;font-size:10px;';
+    const dbgFoldTitle = document.createElement('span');
+    dbgFoldTitle.textContent = '组件日志（按组件单独控制）';
+    dbgFoldHeader.appendChild(dbgCaret); dbgFoldHeader.appendChild(dbgFoldTitle);
+
+    const dbgFoldBody = document.createElement('div');
+    dbgFoldBody.style.cssText = 'display:none;'; // 默认折叠
+    dbgFoldHeader.addEventListener('click', () => {
+      const collapsed = dbgFoldBody.style.display === 'none';
+      dbgFoldBody.style.display = collapsed ? 'block' : 'none';
+      dbgCaret.style.transform = collapsed ? 'rotate(90deg)' : 'rotate(0deg)';
+      // 展开/折叠会改变 sec3 高度，重新同步两张卡等高
+      requestAnimationFrame(syncCardHeights);
+    });
+
+    const debugHint = document.createElement('div');
+    debugHint.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin:6px 0 8px;line-height:1.5;';
+    debugHint.textContent = '关闭时控制台仅显示 警告/错误；开启后可单独控制各组件是否输出详细日志(INFO/DEBUG)。';
+    dbgFoldBody.appendChild(debugHint);
+
+    // 组件开关进折叠区
+    debugTarget = dbgFoldBody;
+    const debugComps: [string, string][] = [
+      ['douban', '豆瓣同步'],
+      ['subtitle', '字幕'],
+      ['danmaku', 'B站弹幕'],
+      ['mpv', 'MPV 播放器'],
+      ['potplayer', 'PotPlayer'],
+      ['media', '播放器/媒体'],
+      ['embywall', 'EmbyWall 墙']
+    ];
+    const swDebugComps: Record<string, HTMLInputElement> = {};
+    debugComps.forEach(([key, label]) => {
+      const sw = addDebugToggle(label);
+      swDebugComps[key] = sw;
+      sw.addEventListener('change', () => {
+        const cur: Record<string, boolean> = {};
+        debugComps.forEach(([k]) => { cur[k] = !!swDebugComps[k].checked; });
+        ipcRenderer.invoke('settings:set-debug-components', cur).catch((err) => log('set-debug-components failed', err));
+      });
+    });
+    dbgFold.appendChild(dbgFoldHeader);
+    dbgFold.appendChild(dbgFoldBody);
+    secBody3.appendChild(dbgFold);
+
+    // 日志状态文字放在 body 内，避免占用 footer 高度导致左右 footer 不齐
+    const logStatus = document.createElement('div');
+    logStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBody3.appendChild(logStatus);
+
+    // ===== 底部操作栏：日志文件（独立 footer，与左侧检查更新按钮对齐）=====
+    const logFooter = document.createElement('div');
+    logFooter.style.cssText = 'padding:10px 12px;flex-shrink:0;';
+    const logDivider = document.createElement('div');
+    logDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 8px;';
+    logFooter.appendChild(logDivider);
+    const logRow = document.createElement('div');
+    logRow.style.cssText = 'display:flex;gap:6px;';
+    const openLogBtn = mkBtn('打开日志文件', true);
+    const exportLogBtn = mkBtn('导出日志文件', true);
+    logRow.appendChild(openLogBtn);
+    logRow.appendChild(exportLogBtn);
+    logFooter.appendChild(logRow);
+    sec3.el.appendChild(logFooter);
+
+    openLogBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:open-log').then((r: any) => {
+        if (!r || !r.ok) {
+          logStatus.textContent = '打开日志失败：' + ((r && r.error) || '未知');
+        } else {
+          logStatus.textContent = '';
+        }
+      }).catch(() => {});
+    });
+    exportLogBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:export-log').then((r: any) => {
+        if (r && r.ok) {
+          logStatus.textContent = '已导出日志：' + (r.savedPath || '');
+        } else if (r && r.error && r.error !== '已取消') {
+          logStatus.textContent = '导出失败：' + (r.error || '未知');
+        } else {
+          logStatus.textContent = '';
+        }
+      }).catch(() => {});
+    });
+
+    // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
+    const refreshDouban = async (): Promise<void> => {
+      try {
+        const st: any = await ipcRenderer.invoke('douban:login-status');
+        if (st && st.loggedIn) {
+          doubanStatus.textContent = '已登录豆瓣 ✓';
+          doubanStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          doubanStatus.textContent = '未登录豆瓣（点"扫码登录"）';
+          doubanStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+        swDouban.checked = !!(st && st.enabled);
+      } catch {
+        doubanStatus.textContent = '状态获取失败';
+        doubanStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    };
+    // 主进程登录成功/退出时主动通知前端刷新
+    ipcRenderer.on('douban:login-changed', () => { refreshDouban(); });
 
     // 刷新 B站登录状态(打开面板时调用)
     const refreshBili = async (): Promise<void> => {
       try {
         const st: any = await ipcRenderer.invoke('bili:cookie-status');
         if (st && st.exists) {
-          biliStatus.textContent = '已登录（UID: ' + (st.uid || '未知') + '）';
+          biliStatus.textContent = '已登录 ✓';
           biliStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
           biliStatus.textContent = '未登录';
@@ -1618,7 +2403,7 @@ function handle(): void {
         const qr = (window as any).qrcode(0, 'M');
         qr.addData(gen.url);
         qr.make();
-        if (qrWrap) qrWrap.innerHTML = qr.createSvgTag(6, 10);
+        if (qrWrap) { qrWrap.innerHTML = qr.createSvgTag(6, 10); const svg = qrWrap.querySelector('svg'); if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; } }
       } catch (e: any) {
         if (qrWrap) qrWrap.textContent = '渲染失败: ' + (e?.message || e);
       }
@@ -1641,13 +2426,19 @@ function handle(): void {
     };
 
     scanBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openBiliLogin(); });
-    clearBiliBtn.addEventListener('click', async (e: Event) => {
+    logoutBiliBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       try {
         const r: any = await ipcRenderer.invoke('bili:clear');
         biliStatus.textContent = (r && r.ok) ? '已清除登录信息' : '清除失败';
         biliStatus.style.color = 'var(--fnos-ui-warn)';
       } catch { biliStatus.textContent = '清除失败'; }
+    });
+    saveBiliCookieBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const r: any = await ipcRenderer.invoke('bili:manual-cookie', biliManualTa.value);
+      if (r && r.ok) { biliManualTa.value = ''; refreshBili(); }
+      else biliStatus.textContent = '保存失败：' + ((r && (r.msg || r.error)) || '未知');
     });
     const refreshExit = (): void => {
       const cur = (overlay as any)._exitMode || 'ask';
@@ -1665,17 +2456,6 @@ function handle(): void {
       b.onmouseleave = () => { refreshExit(); };
     });
 
-    // ===== 分组4: 操作按钮 =====
-    const sec4 = section(); // 无标题分组
-    const secBody4 = sec4.body;
-    const actRow = document.createElement('div');
-    actRow.style.cssText = 'display:flex;gap:6px;';
-    const updBtn = mkBtn('检查更新', true);
-    actRow.appendChild(updBtn);
-    secBody4.appendChild(actRow);
-    updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
-    overlay.appendChild(sec4.el);
-
     // 底部安全区(给滚动留空间)
     const footer = document.createElement('div');
     footer.style.cssText = 'height:6px;flex-shrink:0;';
@@ -1688,13 +2468,46 @@ function handle(): void {
         swProxy.checked = !!(s.downloadProxy && s.downloadProxy.enabled);
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
-        mpvPath.textContent = s.mpvPath || '';
+        mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
+        potPathEl.textContent = s.potPath || '应用内置（已随安装包分发，无需本机安装）';
+        shaderSel.value = s.mpvDefaultShader || 'off';
+        swIcc.checked = s.mpvIccEnabled !== false;
+        (overlay as any)._defaultPlayer = s.defaultPlayer || 'mpv';
+        refreshDefaultPlayer();
         (overlay as any)._exitMode = s.exitMode || 'ask';
         refreshExit();
         refreshBili();
+        refreshDouban();
+        // 调试日志开关
+        swDebug.checked = !!s.debugEnabled;
+        const dc: Record<string, boolean> = s.debugComponents || {};
+        debugComps.forEach(([k]) => {
+          if (swDebugComps[k]) swDebugComps[k].checked = dc[k] !== false; // 默认开启
+        });
+        // Bangumi Token 回填（已保存则显示星号掩码，不显示明文）
+        const bt: string | null = s.bangumiToken || null;
+        if (bt) {
+          bangumiReal = bt;
+          bangumiInput.value = maskBangumi(bt);
+          bangumiInput.readOnly = true;
+          bangumiStatus.textContent = '已保存 Token';
+          bangumiStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          bangumiReal = '';
+          bangumiInput.value = '';
+          bangumiInput.readOnly = false;
+          bangumiStatus.textContent = '';
+        }
+        // Bangumi 同步开关 + 阈值回填
+        swBangumiSync.checked = !!s.bangumiSyncEnabled;
+        bangumiThresholdInput.value = String(s.bangumiSyncThreshold || 80);
+        // MPV B站弹幕搜索开关回填（默认开启）
+        swMpvBiliSearch.checked = s.mpvBiliSearchEnabled !== false;
       } catch (err) {
         log('SETTINGS refresh failed', err);
       }
+      // 布局确定后强制两张卡等高，使底部横线/按钮左右平齐
+      requestAnimationFrame(syncCardHeights);
     };
 
     // 点击面板外部时自动收起
@@ -1707,7 +2520,11 @@ function handle(): void {
       overlay.style.display = 'none';
     }, true);
 
+    document.body.appendChild(mask);
     document.body.appendChild(overlay);
+
+    // 窗口尺寸变化（列数/卡片内换行可能改变）后重新同步两卡等高
+    window.addEventListener('resize', () => requestAnimationFrame(syncCardHeights));
   }
 
   /** [新] 打开设置面板: 固定宽度, 整窗口正中居中显示并刷新数据 */
@@ -1720,10 +2537,12 @@ function handle(): void {
     overlay.style.right = 'auto';
     overlay.style.bottom = 'auto';
     overlay.style.transform = 'translate(-50%, -50%)';
-    overlay.style.width = '360px';
+    overlay.style.width = 'min(680px, calc(100vw - 80px))';
     overlay.style.height = 'auto'; // 高度自适应内容
     overlay.style.maxHeight = (window.innerHeight - 120) + 'px'; // 超高则内部滚动
     overlay.style.display = 'flex';
+    const mask = document.getElementById('fnos-settings-mask');
+    if (mask) mask.style.display = 'block';
     const refresh = (overlay as any)._refresh;
     if (typeof refresh === 'function') refresh();
   }
@@ -1903,7 +2722,7 @@ function handle(): void {
 registerHook(HookType.OnReady, handle);
 
 /* ========== [恢复v381/v383] 关于弹窗 & 反馈弹窗 ========== */
-const ABOUT_LINK_URL = 'https://github.com/YDMY007/fnos-tv';
+const ABOUT_LINK_URL = 'https://github.com/YDMY007/Fntv-Plus';
 const openAboutModal = (): void => {
   let modal = document.getElementById('fnos-about-modal') as HTMLElement | null;
   if (!modal) {

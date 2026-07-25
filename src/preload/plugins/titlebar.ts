@@ -28,8 +28,9 @@ function injectTitleBar(): void {
   // [v374] 原生拖动: -webkit-app-region:drag (Chromium 原生, 仅移动窗口, 绝不放大)
   //   ⚠️ 关键: 元素自身不能带 backdrop-filter, 否则 app-region 命中测试失效 → 去掉 blur, 只用纯半透背景
   //   ⚠️ 关键: 必须 pointer-events:auto 才能接收 mousedown (之前 none 导致无法拖动)
-  bar.style.cssText = `height:32px;width:100vw;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
+  bar.style.cssText = `height:32px;width:100%;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
     -webkit-app-region:drag;app-region:drag;
+    border-top-left-radius:16px;border-top-right-radius:16px;
     background:var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%));
     border:none;`;
 

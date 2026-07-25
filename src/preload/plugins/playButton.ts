@@ -5,42 +5,10 @@ import { HookType } from '../core/hooks';
 import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
-
-// 获取配置的辅助函数（带 10s 缓存，避免轮询兜底期间频繁 IPC 往返）
-let _configCache: { hideOriginalPlayButton: boolean } | null = null;
-let _configCacheTime = 0;
-async function getPlayButtonConfig(): Promise<{ hideOriginalPlayButton: boolean }> {
-    if (_configCache && Date.now() - _configCacheTime < 10000) {
-        return _configCache;
-    }
-    return new Promise((resolve) => {
-        // 发送请求获取配置
-        ipcRenderer.send('get-play-button-config');
-
-        // 监听回复
-        const handler = (event: any, data: any) => {
-            ipcRenderer.off('play-button-config-info', handler);
-            const cfg = (data || { hideOriginalPlayButton: true }) as { hideOriginalPlayButton: boolean };
-            _configCache = cfg; // 默认隐藏
-            _configCacheTime = Date.now();
-            resolve(cfg);
-        };
-
-        ipcRenderer.once('play-button-config-info', handler);
-
-        // 2秒后超时，使用默认值
-        setTimeout(() => {
-            ipcRenderer.off('play-button-config-info', handler);
-            const cfg = _configCache || { hideOriginalPlayButton: true };
-            _configCache = cfg;
-            _configCacheTime = Date.now();
-            resolve(cfg);
-        }, 2000);
-    });
-}
+import { getPlayButtonConfig, isSeasonPage, createPlayModal, PlayButtonConfig } from './playChoice';
 
 // 发送播放信息到主进程
-function sendPlayEventToMain(button: HTMLElement | null = null): string | null {
+function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
     const url = window.location.href;
     const id = url.split('/').pop();
 
@@ -56,7 +24,7 @@ function sendPlayEventToMain(button: HTMLElement | null = null): string | null {
 
     if (id && token) {
         // 将动态获取的 sourceIndex 传给主进程
-        const playData: PlayMovieData = { id, token, sourceIndex };
+        const playData: PlayMovieData = { id, token, sourceIndex, player };
         ipcRenderer.send('play-movie', playData);
         return id;
     } else {
@@ -176,7 +144,7 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
     // 添加唯一标识
     newButton.setAttribute('data-custom-play', 'true');
     // 同步更新 aria-label, 防止无障碍/选择器把克隆体误判为原始"播放"按钮
-    newButton.setAttribute('aria-label', 'MPV播放');
+    newButton.setAttribute('aria-label', btnText);
 
     // 添加点击事件，传入原始按钮作为参数
     newButton.addEventListener('click', () => callback(referenceButton));
@@ -188,8 +156,8 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
     }
 }
 
-// 拦截原有播放按钮，直接用MPV播放
-function interceptOriginalButton(): void {
+// 拦截原有播放按钮，按默认播放器直接播放
+function interceptOriginalButton(defaultPlayer: 'mpv' | 'potplayer'): void {
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-intercepted')) return;
     // 已被遮罩插件拦截的按钮不再重复拦截，避免重复触发播放
@@ -206,8 +174,43 @@ function interceptOriginalButton(): void {
         e.stopPropagation();
         e.stopImmediatePropagation();
 
-        logger.info('Original play button intercepted, playing with MPV');
-        sendPlayEventToMain(referenceButton);
+        logger.info(`Original play button intercepted, playing with ${defaultPlayer}`);
+        sendPlayEventToMain(referenceButton, defaultPlayer);
+
+        return false;
+    };
+
+    // 在捕获阶段添加事件监听器，确保优先拦截
+    referenceButton.addEventListener('click', clickHandler, true);
+}
+
+// 拦截季/选集（全部剧集）页面的主播放按钮：弹出「原生 / 外部播放器」选择，而不是立即播放
+function interceptOriginalButtonWithChoice(config: PlayButtonConfig): void {
+    const referenceButton = findReferenceButton();
+    if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
+    // 已被遮罩插件拦截的按钮不再重复拦截，避免重复触发播放
+    if (referenceButton.hasAttribute('data-mask-intercepted')) return;
+    if (referenceButton.hasAttribute('data-mpv-intercepted')) return;
+
+    logger.info('Detected season page, intercepting main play button to show choice modal...');
+
+    // 标记已拦截
+    referenceButton.setAttribute('data-mpv-intercepted', 'true');
+
+    // 添加点击事件拦截器
+    const clickHandler = (e: Event) => {
+        // 放行原生播放（由选择弹窗的「原生播放」触发）
+        if (referenceButton.getAttribute('data-allow-original-play') === 'true') {
+            logger.info('Allowing original native play logic to execute');
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        logger.info('Season page main play button: showing player choice modal');
+        createPlayModal(referenceButton, config, (player) => sendPlayEventToMain(referenceButton, player));
 
         return false;
     };
@@ -220,12 +223,19 @@ async function injectCustomPlayBtn(): Promise<void> {
     // 获取配置
     const config = await getPlayButtonConfig();
 
+    if (isSeasonPage()) {
+        // 全部剧集（季/选集）页面：主播放按钮弹出选择（原生 + 默认外部播放器）
+        interceptOriginalButtonWithChoice(config);
+        return;
+    }
+
     if (config.hideOriginalPlayButton) {
-        // 如果隐藏原有播放按钮，直接拦截原按钮
-        interceptOriginalButton();
+        // 如果隐藏原有播放按钮，直接拦截原按钮（按默认播放器）
+        interceptOriginalButton(config.defaultPlayer);
     } else {
-        // 否则添加额外的MPV播放按钮
-        clonePlayBtnAndInject((button) => sendPlayEventToMain(button), 'MPV播放');
+        // 否则添加额外的播放按钮（标签随默认播放器变化）
+        const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
+        clonePlayBtnAndInject((button) => sendPlayEventToMain(button, config.defaultPlayer), label);
     }
 }
 

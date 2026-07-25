@@ -12,6 +12,12 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 // 处理渲染进程日志消息
 function handleLogMessage(event: IpcMainInvokeEvent, level: LogLevel, ...args: any[]): void {
     try {
+        // EmbyWall 渲染日志：msg 以 [EmbyWall] 开头，走组件过滤(受 embywall 独立开关控制)
+        const first = args[0];
+        if (typeof first === 'string' && first.startsWith('[EmbyWall]')) {
+            log.getLogger().logC('embywall', level as any, '[Renderer]', ...args);
+            return;
+        }
         // 根据级别调用对应的日志方法
         switch (level) {
             case 'debug':
