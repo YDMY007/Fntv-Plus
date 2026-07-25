@@ -224,11 +224,12 @@ async function injectCustomPlayBtn(): Promise<void> {
     const config = await getPlayButtonConfig();
 
     if (config.hideOriginalPlayButton) {
-        // 隐藏原有播放按钮：直接拦截原按钮（按默认播放器，无弹窗）
+        // 隐藏了原生播放按钮：直接拦截原按钮（按默认外部播放器，无弹窗）
         interceptOriginalButton(config.defaultPlayer);
     } else {
-        // 未隐藏原生按钮：主播放按钮弹出选择（原生 + 默认外部播放器，二选一弹窗）
-        interceptOriginalButtonWithChoice(config);
+        // 未隐藏原生按钮：在原按钮旁边克隆一个外部播放器按钮（两个并排，各播各的）
+        const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
+        clonePlayBtnAndInject((button) => sendPlayEventToMain(button, config.defaultPlayer), label);
     }
 }
 

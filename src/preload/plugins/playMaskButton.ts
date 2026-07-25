@@ -5,7 +5,7 @@ import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { HookType } from '../core/hooks';
-import { getPlayButtonConfig, createPlayModal } from './playChoice';
+import { getPlayButtonConfig } from './playChoice';
 
 // 调用播放器的公共方法（player 指定 mpv / potplayer）
 async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'): Promise<void> {
@@ -224,7 +224,7 @@ function interceptMaskButton(): void {
                 const config = await getPlayButtonConfig();
 
                 if (config.hideOriginalPlayButton) {
-                    // 隐藏原生按钮：按默认播放器直接播放（无弹窗）
+                    // 隐藏了原生播放按钮：拦截点击，直接走默认外部播放器
                     e.preventDefault();
                     e.stopPropagation();
                     e.stopImmediatePropagation();
@@ -233,13 +233,10 @@ function interceptMaskButton(): void {
                     return false;
                 }
 
-                // 未隐藏原生按钮：弹出「原生 + 外部播放器」选择弹窗（二选一）
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                logger.info('Original play button NOT hidden, showing player choice modal');
-                await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
-                return false;
+                // 未隐藏原生按钮：放行，让 fnOS 原生遮罩按钮自行处理；
+                // 外部播放器按钮由 playButton.ts 的 clonePlayBtnAndInject 在详情区额外注入
+                logger.info('Original play button NOT hidden, letting native mask button handle click');
+                return;
             };
 
         // 在捕获阶段添加事件监听器，确保优先拦截
