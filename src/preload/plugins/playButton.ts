@@ -118,8 +118,16 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
 }
 
 function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText: string): void {
-    // 若页面上已存在我们注入的 MPV 按钮, 直接跳过 → 防止 MutationObserver/轮询触发时累积重复
-    if (document.querySelector('[data-custom-play]')) return;
+    // 已注入按钮：标签与当前默认播放器一致则跳过；
+    // 不一致（切换了 MPV/PotPlayer）则移除旧按钮、清除占用标记后重建，避免需多次刷新才更新
+    const existing = document.querySelector('[data-custom-play]') as HTMLElement | null;
+    if (existing) {
+        const curText = (existing.getAttribute('aria-label') || existing.textContent || '').trim();
+        if (curText === btnText) return;
+        existing.remove();
+        const ref = findReferenceButton();
+        if (ref) ref.removeAttribute('data-mpv-btn'); // 清除占用标记，允许重新注入新播放器按钮
+    }
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
 
