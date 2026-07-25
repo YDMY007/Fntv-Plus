@@ -285,11 +285,15 @@ def search_video(title, ep_num):
 
     prefix = title[:2]
     # 预筛：标题含番名前缀、非二创，再按弹幕数降序
+    # 注意：番名自身可能以 BAD_TITLE 词开头（如《你们先走我断后…》的「你们」），
+    # 此时 prefix 与 BAD_TITLE 冲突会导致本番正片被自己过滤掉 → 匹配失败。
+    # 因此：含番名前缀的候选视为本番正片，跳过 BAD_TITLE 误杀；仅对未含前缀者用 BAD_TITLE 过滤。
     cands = []
     for t, bvid, vr in pool:
-        if any(k in t.lower() for k in BAD_TITLE):
+        has_prefix = bool(prefix) and (prefix in t)
+        if not has_prefix and any(k in t.lower() for k in BAD_TITLE):
             continue
-        if prefix and prefix not in t:
+        if not has_prefix:
             continue
         cands.append((t, bvid, vr))
     if not cands:
@@ -338,8 +342,8 @@ def search_video_fuzzy(kw, ep_num):
     # 先按弹幕数降序，逐个校验相似度，第一个达阈值者即最优（弹幕多且足够相似）
     pool.sort(key=lambda x: -x[2])
     for t, bvid, vr in pool:
-        if any(k in t.lower() for k in BAD_TITLE):
-            continue
+        # 模糊兜底已是最后手段，且下方有相似度阈值(0.45)把关，
+        # 不再用 BAD_TITLE 过滤，避免番名含 BAD_TITLE 词时把合法候选误杀（如「你们」）
         cid = cid_from_bvid(bvid, ep_num, title_hint=t)
         if not cid:
             continue
