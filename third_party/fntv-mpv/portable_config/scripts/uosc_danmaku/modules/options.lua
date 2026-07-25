@@ -30,6 +30,8 @@ options = {
     history_path = "~~/danmaku-history.json",
     open_search_danmaku_menu_key = "Ctrl+d",
     show_danmaku_keyboard_key = "j",
+    -- B站弹幕搜索开关（由应用设置面板写入 script-opts/uosc_danmaku.conf 控制）
+    bili_search_enabled = true,
     -- 中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体
     chConvert = 0,
     --滚动弹幕的显示时间

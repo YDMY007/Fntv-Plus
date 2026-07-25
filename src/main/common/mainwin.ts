@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserWindowConstructorOptions, screen } from 'electron';
+import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell } from 'electron';
 import * as path from 'path';
 
 /**
@@ -296,11 +296,82 @@ const ACRYLIC_CSS = `
 `;
 
 /**
+ * 判断当前 URL 是否为登录页路径.
+ * 登录页需要不透明白底(否则 transparent 窗口下全透明→桌面透出→看不清).
+ */
+function isLoginPath(url: string): boolean {
+    try {
+        const p = new URL(url).pathname.toLowerCase();
+        return p.includes('/login') || p.includes('/signin') || p.includes('/auth');
+    } catch { return false; }
+}
+
+/**
  * 注入亚克力 CSS 到主窗口
  * 可在 dom-ready 时反复调用 (幂等: CSS 规则重复不副作用)
+ *
+ * v380: 登录页(/login,/signin) 自动切换为不透明白底模式,
+ *       避免 transparent 窗口 + html{background:transparent} 导致桌面透出全白.
  */
 function injectAcrylicCSS(wc: Electron.WebContents): void {
-    wc.insertCSS(ACRYLIC_CSS);
+    // 主窗口的原生底板必须始终透明。登录页的不透明背景由下方 body
+    // 提供；若把 BrowserWindow 底板设为白色，clip-path 裁掉的四角仍会
+    // 露出白色窗口底板，视觉上就会重新变成方形。
+    const owner = BrowserWindow.fromWebContents(wc);
+    owner?.setBackgroundColor('#00000000');
+
+    const url = wc.getURL();
+    if (isLoginPath(url)) {
+        // 登录页圆角方案 (v381 重写):
+        //   主界面之所以能圆角, 是因为飞牛 React 渲染了一个真正
+        //   position:fixed;inset:0 的全屏容器(.fixed.inset-0), 其自带
+        //   clip-path:inset(0 round 16px) 把四角裁成圆角.
+        //   透明窗口下 html/body 的 clip-path 对"背景溢出视口"并不可靠
+        //   (body 背景会回退到 canvas, 不被裁剪 → 方角), 所以之前把 body
+        //   设成 position:fixed 的方案实测仍方.
+        //   现改: body 保持透明(不承载背景), 用全屏 fixed 伪元素
+        //   body::before 承载壁纸 + clip-path 圆角, 与主界面同一套可靠机制.
+        //   伪元素不在 querySelectorAll('*') 内, 不会被 embyWall 圆角扫描器误清.
+        wc.insertCSS(`
+            html{
+                height:100%!important;
+                background:transparent!important;
+                background-color:transparent!important;
+                overflow:hidden!important;
+                border-radius:16px!important;
+                clip-path:inset(0 round 16px)!important;
+                -webkit-clip-path:inset(0 round 16px)!important;
+            }
+            body{
+                background:transparent!important;
+                background-color:transparent!important;
+                margin:0!important;
+            }
+            body::before{
+                content:''!important;
+                position:fixed!important;
+                inset:0!important;
+                top:0!important;
+                left:0!important;
+                right:0!important;
+                bottom:0!important;
+                z-index:-1!important;
+                background-image:url("./image/bg-login.webp")!important;
+                background-repeat:no-repeat!important;
+                background-position:center center!important;
+                background-size:cover!important;
+                background-attachment:scroll!important;
+                border-radius:16px!important;
+                overflow:hidden!important;
+                clip-path:inset(0 round 16px)!important;
+                -webkit-clip-path:inset(0 round 16px)!important;
+            }
+            ::-webkit-scrollbar{width:0!important;height:0!important}
+        `);
+    } else {
+        // 主界面: 完整亚克力玻璃壳
+        wc.insertCSS(ACRYLIC_CSS);
+    }
 }
 
 /**
@@ -314,13 +385,32 @@ export function getMainWindow(): BrowserWindow {
         // 居中显示在所属屏幕, 避免从角落弹出
         mainwin.center();
 
-        // v376 修复: CSS 改为 dom-ready 注入 (而非窗口创建时一次性)
+        // v376 修复: CSS 改为 dom-ready 注��� (而非窗口创建时一次性)
         // 原因: MPV 关闭后 media.ts 会调 reloadIgnoringCache() 刷新页面,
         //       窗口创建时的 insertCSS 不会在 reload 后重新执行 →
         //       圆角/导航栏/白底清除全部丢失, 飞牛原生控制栏和窗口按钮重叠.
         //       注册 dom-ready 后, 每次页面加载(含 reload)都自动重注 CSS.
         mainwin.webContents.on('dom-ready', () => {
             injectAcrylicCSS(mainwin!.webContents);
+        });
+
+        // 接管 new-window / target="_blank": 同域(飞牛影视 NAS)链接在原窗口内打开,
+        // 保留玻璃壳; 外部链接交给系统浏览器. 否则 Electron 会开一个无 preload 的裸窗.
+        mainwin.webContents.setWindowOpenHandler((details) => {
+            const url = details.url;
+            try {
+                const target = new URL(url);
+                const current = new URL(mainwin!.webContents.getURL() || 'https://localhost');
+                const isInApp = target.host === current.host; // 同 NAS 域
+                if (isInApp) {
+                    log.info('[主窗口] 同域链接在原窗口内打开(保留玻璃壳):', url);
+                    mainwin!.loadURL(url);
+                    return { action: 'deny' };
+                }
+            } catch { /* ignore */ }
+            // 外部链接: 用系统默认浏览器打开, 同样不弹裸窗
+            shell.openExternal(url).catch(() => { });
+            return { action: 'deny' };
         });
     }
     return mainwin;

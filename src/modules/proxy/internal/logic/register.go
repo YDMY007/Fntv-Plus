@@ -15,6 +15,7 @@ func RunApiServer(addr string) error {
 	r.GET("/api/v1/playvideo/:itemGuid", api.PlayVideoHandler)
 	r.GET("/api/v1/skipinfo/:itemGuid", api.GetSkipInfoHandler)
 	r.POST("/api/v1/skipinfo", api.SetSkipInfoHandler)
+	r.GET("/api/v1/danmaku/:file", api.ServeDanmakuHandler)
 
 	// 404 路由
 	r.NoRoute(func(c *gin.Context) {

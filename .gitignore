@@ -32,3 +32,6 @@ mpv.log
 .relresp.json
 .ymlresp.json
 _test_parse.js
+
+# 截图 / 临时调试产物
+shots/

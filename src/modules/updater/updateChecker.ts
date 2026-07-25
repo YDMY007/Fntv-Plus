@@ -41,6 +41,18 @@ export interface DialogResult {
 }
 
 /**
+ * 镜像源定义。
+ * - fullPrefix=false（ghproxy 风格）：API 走 `镜像/repos/owner/repo/releases/latest` 路径式；
+ * - fullPrefix=true（github.dpik.top 等）：API 与下载均走 `镜像/https://原始完整URL` 前置式。
+ * 下载链接两种风格都接受「镜像 + 完整 URL」拼接（ghproxy 亦兼容）。
+ */
+export interface MirrorSource {
+    name: string;
+    base: string;
+    fullPrefix: boolean;
+}
+
+/**
  * 延时函数
  * @param ms - 延时毫秒数
  * @returns Promise<void>
@@ -57,7 +69,7 @@ export class UpdateChecker {
     private maxRetries: number;
     private baseRetryDelay: number;
 
-    constructor(owner: string = 'YDMY007', repo: string = 'fnos-tv', currentVersion: string | null = null) {
+    constructor(owner: string = 'YDMY007', repo: string = 'Fntv-Plus', currentVersion: string | null = null) {
         this.owner = owner;
         this.repo = repo;
         // 如果传入了版本号就使用传入的，否则尝试从app获取，最后使用默认值
@@ -69,7 +81,7 @@ export class UpdateChecker {
     }
 
     /**
-     * 检查是否有新版本
+     * 检查是否有新版本（直连 api.github.com，带梯度重试）。
      * @returns 更新信息
      */
     async checkForUpdates(): Promise<UpdateInfo> {
@@ -77,15 +89,26 @@ export class UpdateChecker {
     }
 
     /**
-     * 带梯度重试机制的检查更新
+     * 带梯度重试机制的检查更新（直连，无镜像）。
      * @param retryCount - 当前重试次数
      * @returns 更新信息
      */
     async checkForUpdatesWithRetry(retryCount: number = 0): Promise<UpdateInfo> {
+        return await this.fetchRelease(this.githubApiUrl, undefined, retryCount);
+    }
+
+    /**
+     * 实际抓取并解析 GitHub Release（直连或镜像共用）。
+     * @param apiUrl - 完整 API 地址（直连或经镜像重写）
+     * @param downloadBase - 镜像根地址，用于重写下载链接；为空则走用户配置的下载代理
+     * @param retryCount - 当前重试次数
+     * @returns 更新信息
+     */
+    async fetchRelease(apiUrl: string, downloadBase: string | undefined, retryCount: number = 0): Promise<UpdateInfo> {
         try {
-            log.info(`检查更新: 当前版本 ${this.currentVersion}${retryCount > 0 ? ` (重试 ${retryCount}/${this.maxRetries})` : ''}`);
-            
-            const response: AxiosResponse<GitHubRelease> = await axios.get(this.githubApiUrl, {
+            log.info(`检查更新: 当前版本 ${this.currentVersion}${retryCount > 0 ? ` (重试 ${retryCount}/${this.maxRetries})` : ''}${downloadBase ? ` [镜像 ${downloadBase}]` : ''}`);
+
+            const response: AxiosResponse<GitHubRelease> = await axios.get(apiUrl, {
                 timeout: 10000,
                 headers: {
                     'User-Agent': `fnos-tv/${this.currentVersion}`
@@ -94,10 +117,10 @@ export class UpdateChecker {
 
             const release = response.data;
             const latestVersion = release.tag_name.replace(/^v/, ''); // 移除 'v' 前缀
-            const downloadUrl = this.getDownloadUrl(release.assets);
-            
+            const downloadUrl = this.getDownloadUrl(release.assets, downloadBase);
+
             log.info(`最新版本: ${latestVersion}`);
-            
+
             // 使用 semver 比较版本，如果没有semver则使用简单比较
             let hasUpdate: boolean;
             if (semver) {
@@ -106,7 +129,7 @@ export class UpdateChecker {
                 // 简单的版本比较（仅用于测试）
                 hasUpdate = this.compareVersions(latestVersion, this.currentVersion) > 0;
             }
-            
+
             return {
                 hasUpdate,
                 latestVersion,
@@ -117,19 +140,53 @@ export class UpdateChecker {
             };
         } catch (error: any) {
             log.error(`检查更新失败 (尝试 ${retryCount + 1}/${this.maxRetries + 1}):`, error.message);
-            
+
             // 如果还有重试次数，则等待后重试
             if (retryCount < this.maxRetries) {
                 // 梯度延迟
                 const retryDelay = this.baseRetryDelay * Math.pow(2, retryCount);
                 log.info(`等待 ${retryDelay}ms 后重试...`);
                 await delay(retryDelay);
-                return await this.checkForUpdatesWithRetry(retryCount + 1);
+                return await this.fetchRelease(apiUrl, downloadBase, retryCount + 1);
             }
-            
+
             // 所有重试都失败了，抛出错误
             throw new Error(`检查更新失败: ${error.message} (已重试 ${this.maxRetries} 次)`);
         }
+    }
+
+    /**
+     * 通过国内可达的 GitHub 镜像依次检查更新（主接口 403 / 限流时的备选方案）。
+     * 依次尝试一组镜像，命中即用该镜像重写下载链接；全部失败则抛错。
+     *
+     * 镜像有两种 URL 风格，必须分别处理，否则必定失败：
+     *  - ghproxy 风格（fullPrefix=false）：API 用「镜像/repos/owner/repo/releases/latest」路径式；
+     *  - 前置式（fullPrefix=true，如 github.dpik.top）：API 与下载都用「镜像/https://原始完整URL」。
+     *    若对 dpik 用路径式「镜像/repos/...」会拿到 404，这是旧版"镜像检查有问题"的根因。
+     * @returns 更新信息
+     */
+    async checkForUpdatesViaMirror(): Promise<UpdateInfo> {
+        const mirrors: MirrorSource[] = [
+            { name: 'github.dpik.top', base: 'https://github.dpik.top', fullPrefix: true },
+            { name: 'mirror.ghproxy.com', base: 'https://mirror.ghproxy.com', fullPrefix: false },
+            { name: 'ghproxy.com', base: 'https://ghproxy.com', fullPrefix: false },
+            { name: 'github.moeyy.xyz', base: 'https://github.moeyy.xyz', fullPrefix: false },
+        ];
+        let lastErr: any = null;
+        for (const m of mirrors) {
+            const base = m.base.replace(/\/$/, '');
+            const apiUrl = m.fullPrefix
+                ? `${base}/https://api.github.com/repos/${this.owner}/${this.repo}/releases/latest`
+                : `${base}/repos/${this.owner}/${this.repo}/releases/latest`;
+            try {
+                log.info(`尝试通过镜像检查更新: ${m.name}`);
+                return await this.fetchRelease(apiUrl, base, 0);
+            } catch (e: any) {
+                lastErr = e;
+                log.warn(`镜像 ${m.name} 检查失败: ${e && e.message}`);
+            }
+        }
+        throw new Error(`所有镜像均不可用: ${(lastErr && lastErr.message) || '未知错误'}`);
     }
 
     /**
@@ -160,7 +217,7 @@ export class UpdateChecker {
      * @param assets - GitHub release assets
      * @returns 下载链接
      */
-    getDownloadUrl(assets: GitHubAsset[]): string | null {
+    getDownloadUrl(assets: GitHubAsset[], mirrorBase?: string): string | null {
         if (!assets || assets.length === 0) {
             return null;
         }
@@ -243,8 +300,15 @@ export class UpdateChecker {
                 
                 // 获取原始下载链接
                 const originalUrl = asset.browser_download_url;
-                
-                // 尝试获取代理配置并应用到下载链接
+
+                // 1) 若走镜像检查更新，优先用镜像重写下载链接（github.com → 镜像/https://github.com/...）
+                if (mirrorBase && originalUrl.includes('github.com')) {
+                    const proxiedUrl = `${mirrorBase.replace(/\/$/, '')}/${originalUrl}`;
+                    log.info(`使用镜像下载链接: ${proxiedUrl}`);
+                    return proxiedUrl;
+                }
+
+                // 2) 否则尝试获取用户配置的下载代理
                 try {
                     const proxyConfig = getDownloadProxyConfig();
                     if (proxyConfig.enabled && proxyConfig.proxyUrl && proxyConfig.proxyUrl.trim() !== '') {
@@ -367,6 +431,23 @@ export class UpdateChecker {
             await this.showUpdateErrorDialog(error.message);
         }
     }
+
+    /**
+     * 通过镜像手动检查更新（GitHub 主接口 403 / 国内不可达时的备选）
+     */
+    async manualCheckForUpdatesViaMirror(): Promise<void> {
+        try {
+            const updateInfo = await this.checkForUpdatesViaMirror();
+
+            if (updateInfo.hasUpdate) {
+                await this.showUpdateDialog(updateInfo);
+            } else {
+                await this.showNoUpdateDialog();
+            }
+        } catch (error: any) {
+            await this.showUpdateErrorDialog(error.message);
+        }
+    }
 }
 
 // 单例实例
@@ -375,11 +456,11 @@ let instance: UpdateChecker | null = null;
 /**
  * 获取 UpdateChecker 单例实例
  * @param owner - GitHub 仓库所有者，默认 'YDMY007'
- * @param repo - GitHub 仓库名称，默认 'fnos-tv'
+ * @param repo - GitHub 仓库名称，默认 'Fntv-Plus'
  * @param currentVersion - 当前版本号，默认从 app.getVersion() 获取
  * @returns UpdateChecker 实例
  */
-export function getInstance(owner: string = 'YDMY007', repo: string = 'fnos-tv', currentVersion: string | null = null): UpdateChecker {
+export function getInstance(owner: string = 'YDMY007', repo: string = 'Fntv-Plus', currentVersion: string | null = null): UpdateChecker {
     if (!instance) {
         instance = new UpdateChecker(owner, repo, currentVersion);
     }

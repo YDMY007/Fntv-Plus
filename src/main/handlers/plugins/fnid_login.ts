@@ -8,6 +8,55 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import * as log from '../../../modules/logger';
 
 /**
+ * 将 oauthSession 中指定域名的所有 cookie 批量复制到主窗口 fntv session.
+ *
+ * 为什么需要这个函数:
+ *   restoreCookies() 只设置 Trim-MC-token + mode=relay 两个 cookie,
+ *   但飞牛 OS 的真实会话需要一整套 cookie(session ID, CSRF token 等).
+ *   OAuth 流程中 oauthSession(persist:fnid-oauth) 在用户于 NAS /signin 授权后,
+ *   自然积累了完整 cookie, 必须全部复制到 fntv session, 否则 /v 会被重定向到登录页.
+ */
+async function copyAllCookiesToMainSession(
+    oauthSession: Electron.Session,
+    targetBaseUrl: string
+): Promise<number> {
+    try {
+        const mainSession = session.fromPartition('persist:fntv');
+        const cookies = await oauthSession.cookies.get({ domain: '' });
+        const targetUrl = new URL(targetBaseUrl);
+        const targetHost = targetUrl.hostname;
+        let copied = 0;
+        for (const c of cookies) {
+            const cookieDomain = c.domain?.replace(/^\./, '') || '';
+            if (cookieDomain !== targetHost && !targetHost.endsWith('.' + cookieDomain)) {
+                continue;
+            }
+            try {
+                await mainSession.cookies.set({
+                    url: targetBaseUrl,
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain,
+                    path: c.path || '/',
+                    secure: c.secure ?? targetUrl.protocol === 'https:',
+                    httpOnly: c.httpOnly ?? false,
+                    expirationDate: c.expirationDate || (Math.floor(Date.now() / 1000) + 86400 * 365),
+                    sameSite: c.sameSite || 'no_restriction',
+                });
+                copied++;
+            } catch (e) {
+                log.warn('[FN ID] cookie 复制失败:', c.name, e);
+            }
+        }
+        log.info(`[FN ID] cookie 批量复制完成: ${copied} 个 (${targetHost} → persist:fntv)`);
+        return copied;
+    } catch (err) {
+        log.error('[FN ID] cookie 批量复制失败:', err);
+        return 0;
+    }
+}
+
+/**
  * FN ID 登录插件
  * 通过 FN Connect OAuth 流程实现 FN ID 登录
  */
@@ -225,6 +274,19 @@ function getInjectionScript(username: string, password: string): string {
 
 /**
  * 处理 FN ID OAuth 登录流程
+ *
+ * 设计要点（恢复 v3.0.0 基线链路，仅加不破坏流程的安全补丁）:
+ *   1. oauthWindow(persist:fnid-oauth) 加载 5ddd.com/{fnId}
+ *   2. 注入脚本 hook /sac/.../new-user-guide/status → 拿 cookie → 拉 sys_config
+ *      → 确定 NAS 地址(baseUrl) → 在 oauthWindow 内导航到 NAS /signin
+ *   3. /signin 页面注入脚本自动点"授权" → /oauthapi/authorize 返回 code
+ *      → XHR hook 捕获 → completeLogin(code)
+ *   4. (兜底) 若 code 通过 URL 回跳(/v/oauth/result?code=) 传递, will-navigate 守卫也会捕获
+ *   5. completeLogin: 用 code 换 token → finalizeLogin(token)
+ *   6. finalizeLogin: 关窗 + 复制 NAS cookie 到 fntv + 存配置/历史 + 加载 /v
+ *
+ * 不再使用"延迟兜底收尾"：那条链路会在 OAuth 未完成时以无 token 提前收尾,
+ * 复制空 cookie, 导致 /v 弹登录页(密码错误/白页)。
  */
 export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData): Promise<void> {
     const fnId = loginData.domain.trim();
@@ -239,11 +301,13 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
     try {
         // 创建 OAuth 登录窗口
+        // 显式设置 backgroundColor, 避免 Windows 上继承主窗口 transparent 导致页面全透明.
         oauthWindow = new BrowserWindow({
             width: 800,
             height: 600,
             show: false, // Wait for ready-to-show
             title: 'FN ID 登录',
+            backgroundColor: '#ffffff',
             webPreferences: {
                 nodeIntegration: false,
                 contextIsolation: true,
@@ -259,6 +323,13 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
         const oauthSession = oauthWindow.webContents.session;
 
+        // 拦截 target="_blank" / window.open: 防止点击"飞牛影视APP"等产生裸窗或甩到系统浏览器.
+        // 注意: 这里只 deny 弹窗, 不阻止 oauthWindow 内部正常导航(授权流程靠内部导航完成).
+        oauthWindow.webContents.setWindowOpenHandler((details) => {
+            log.info('[FN ID] 拦截弹窗(统一在 oauthWindow 内处理):', details.url);
+            return { action: 'deny' };
+        });
+
         // 为 FN Connect 域名设置 mode=relay Cookie
         await oauthSession.cookies.set({
             url: fnConnectUrl,
@@ -268,9 +339,9 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             secure: true,
         });
 
-        // 注册 JS bridge 用于 WebView 与主进程通信
+        // 注册 JS bridge 用于 WebView 与主进程通信 + 安全检查
         oauthWindow.webContents.on('did-finish-load', () => {
-            if (!oauthWindow) return;
+            if (!oauthWindow || oauthWindow.isDestroyed()) return;
             const script = getInjectionScript(loginData.username, loginData.password);
             oauthWindow.webContents.executeJavaScript(`
                 window.__fntvBridge = function(msg) {
@@ -288,6 +359,157 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             const timeout = setTimeout(() => {
                 reject(new Error('FN ID 登录超时（120秒）'));
             }, 120000);
+
+            /**
+             * 用授权码换取 token 后完成登录（XHR hook / 回跳守卫 共同调用）.
+             */
+            async function completeLogin(code: string): Promise<void> {
+                if (authRequested) return;
+                authRequested = true;
+                log.info('[FN ID] 获取到授权码，开始换取 token');
+
+                try {
+                    if (!baseUrl) {
+                        throw new Error('未能确定 NAS 地址（baseUrl 为空），无法完成登录');
+                    }
+
+                    const fnapi = new ApiService(baseUrl);
+                    const authResponse = await fnapi.auth(code);
+
+                    if (!authResponse || !authResponse.success || !authResponse.data?.token) {
+                        const msg = authResponse?.message || '换取 token 失败';
+                        log.error(`[FN ID] ${baseUrl} 授权失败: ${msg}, 完整响应: ${JSON.stringify(authResponse)}`);
+                        authRequested = false;
+                        reject(new Error(msg));
+                        return;
+                    }
+
+                    const token = authResponse.data.token;
+                    log.info('[FN ID] 获取 token 成功');
+
+                    // 统一收尾(关窗/复制cookie/保存配置/加载主窗口)
+                    await finalizeLogin(token);
+                    clearTimeout(timeout);
+                    resolve();
+                } catch (err) {
+                    authRequested = false;
+                    log.error('[FN ID] Token 交换失败:', err);
+                    reject(err);
+                }
+            }
+
+            /**
+             * 登录收尾逻辑(统一入口, 仅由 completeLogin 在有 token 时调用).
+             */
+            async function finalizeLogin(token: string): Promise<void> {
+                // 1. 关闭 oauthWindow
+                if (oauthWindow && !oauthWindow.isDestroyed()) {
+                    log.info('[FN ID] finalizeLogin: 关闭 OAuth 登录窗');
+                    oauthWindow.close();
+                    oauthWindow = null;
+                }
+
+                if (!baseUrl) {
+                    log.warn('[FN ID] finalizeLogin: baseUrl 为空，跳过 cookie 复制和配置保存');
+                    return;
+                }
+
+                // 2. 批量复制 cookie
+                try {
+                    const oauthSes = session.fromPartition('persist:fnid-oauth');
+                    const copied = await copyAllCookiesToMainSession(oauthSes, baseUrl);
+                    log.info(`[FN ID] finalizeLogin: 已复制 ${copied} 个 cookie 到 fntv session`);
+                } catch (err) {
+                    log.error('[FN ID] finalizeLogin: cookie 复制失败:', err);
+                }
+
+                // 3. 保存配置 + 历史(标记 loginType:'fnid', 重启可免登录)
+                try {
+                    fnConfig.saveConfig({
+                        account: loginData.username,
+                        domain: baseUrl,
+                        token: token,
+                        useHttps: true,
+                        loginType: 'fnid',
+                    });
+
+                    fnConfig.addHistory({
+                        domain: baseUrl,
+                        account: loginData.username || fnId,
+                        password: loginData.password,
+                        useHttps: true,
+                        loginType: 'fnid',
+                        fnId: fnId,
+                    });
+                    log.info('[FN ID] finalizeLogin: 配置和历史已保存');
+                } catch (err) {
+                    log.error('[FN ID] finalizeLogin: 配置保存失败:', err);
+                }
+
+                // 4. 额外确保 Trim-MC-token 和 mode=relay 存在(兜底)
+                try {
+                    await restoreCookies(baseUrl, token, true);
+                } catch (err) {
+                    log.warn('[FN ID] finalizeLogin: restoreCookies 兜底失败:', err);
+                }
+
+                // 5. 加载主界面
+                const mainWindow = getMainWindow();
+                if (mainWindow) {
+                    log.info(`[FN ID] finalizeLogin: 跳转到主页面: ${baseUrl}/v`);
+                    // 登录页(/login,/signin,/v/login)白底不可见 → 强制不透明背景.
+                    // insertCSS 优先级高于页面内 <style> 与 ACRYLIC 玻璃壳, 且跨 SPA 路由持久.
+                    // 仅在登录路径注入, 不影响主界面 /v 的玻璃效果.
+                    let opaqueApplied = false;
+                    const syncOpaqueBg = () => {
+                        try {
+                            const u = new URL(mainWindow!.webContents.getURL());
+                            const p = u.pathname.toLowerCase();
+                            if ((p.includes('/login') || p.includes('/signin')) && !opaqueApplied) {
+                                mainWindow?.webContents.insertCSS(
+                                    'html,body{background:#ffffff!important;background-color:#ffffff!important;}'
+                                ).then(() => { opaqueApplied = true; }).catch(() => {});
+                                log.info('[FN ID] finalizeLogin: 登录页强制白底 path=', p);
+                            }
+                        } catch { /* ignore */ }
+                    };
+                    mainWindow.webContents.once('dom-ready', syncOpaqueBg);
+                    mainWindow.webContents.on('did-finish-load', syncOpaqueBg);
+                    mainWindow.webContents.on('did-navigate-in-page', syncOpaqueBg);
+                    mainWindow.loadURL(`${baseUrl}/v`);
+                    if (!mainWindow.isVisible()) mainWindow.show();
+                    mainWindow.focus();
+                }
+            }
+
+            // ── OAuth 结果回跳地址拦截(原生飞牛界面必须拦截, 并作为 code 的兜底捕获) ──
+            const REDIRECT_PATH = '/v/oauth/result';
+            function isOauthResultUrl(u: string): boolean {
+                try {
+                    return new URL(u).pathname.endsWith(REDIRECT_PATH);
+                } catch {
+                    return false;
+                }
+            }
+            function codeFromUrl(u: string): string | null {
+                try {
+                    const c = new URL(u).searchParams.get('code');
+                    return c && c.length > 0 ? c : null;
+                } catch {
+                    return null;
+                }
+            }
+            const guard = (event: any, url: string) => {
+                if (!isOauthResultUrl(url)) return;
+                event.preventDefault();
+                log.info('[FN ID] 拦截 OAuth 结果页跳转（避免显示原生飞牛界面）:', url);
+                const code = codeFromUrl(url);
+                if (code && !authRequested) {
+                    completeLogin(code);
+                }
+            };
+            oauthWindow!.webContents.on('will-navigate', guard);
+            oauthWindow!.webContents.on('will-redirect', guard);
 
             // 处理从 WebView 收到的消息
             async function handleMessage(messageData: any) {
@@ -377,10 +599,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                         }
                     }
 
-                    // 处理 OAuth 授权码响应
+                    // 处理 OAuth 授权码响应（XHR hook 捕获的 code）
                     if (type === 'Response' && url.includes('/oauthapi/authorize')) {
-                        if (authRequested) return;
-
                         let code = messageData.code;
                         if (!code && messageData.body) {
                             try {
@@ -388,61 +608,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                                 code = bodyJson.data?.code;
                             } catch (e) { }
                         }
-
                         if (code) {
-                            authRequested = true;
-                            log.info('[FN ID] 获取到授权码，开始换取 token');
-
-                            try {
-                                // 使用 baseUrl 创建 API 实例并换取 token
-                                const fnapi = new ApiService(baseUrl);
-                                const authResponse = await fnapi.auth(code);
-
-                                if (!authResponse || !authResponse.success || !authResponse.data?.token) {
-                                    const msg = authResponse?.message || '换取 token 失败';
-
-                                    log.error(`[FN ID] ${baseUrl} 授权失败: ${msg}, 完整响应: ${JSON.stringify(authResponse)}`);
-
-                                    authRequested = false;
-                                    reject(new Error(msg));
-                                    return;
-                                }
-
-                                const token = authResponse.data.token;
-                                log.info('[FN ID] 获取 token 成功');
-
-                                // 保存配置
-                                fnConfig.saveConfig({
-                                    account: loginData.username,
-                                    domain: baseUrl,
-                                    token: token,
-                                    useHttps: true,
-                                });
-
-                                // 添加到登录历史
-                                fnConfig.addHistory({
-                                    domain: fnId,
-                                    account: loginData.username,
-                                    password: loginData.password,
-                                    useHttps: true,
-                                });
-
-                                // 设置主窗口的 Cookie
-                                const mainWindow = getMainWindow();
-                                if (mainWindow) {
-                                    await restoreCookies(baseUrl, token, true);
-
-                                    log.info(`[FN ID] 登录成功，跳转到主页面: ${baseUrl}/v`);
-                                    mainWindow.loadURL(`${baseUrl}/v`);
-                                }
-
-                                clearTimeout(timeout);
-                                resolve();
-                            } catch (err) {
-                                authRequested = false;
-                                log.error('[FN ID] Token 交换失败:', err);
-                                reject(err);
-                            }
+                            await completeLogin(code);
                         }
                     }
                 } catch (err) {

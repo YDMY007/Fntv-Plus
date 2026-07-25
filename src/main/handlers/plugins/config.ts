@@ -14,6 +14,8 @@ interface ProxyConfig {
 
 interface PlayButtonConfig {
     hideOriginalPlayButton: boolean;
+    defaultPlayer?: 'mpv' | 'potplayer';
+    potPath?: string;
 }
 
 // 获取当前代理设置
@@ -39,7 +41,9 @@ function handleSetDownloadProxy(event: IpcMainEvent, { enabled, proxyUrl }: Part
 // 获取播放按钮配置
 function handleGetPlayButtonConfig(event: IpcMainEvent): void {
     const hideOriginalPlayButton = fnConfig.getHideOriginalPlayButton();
-    event.reply('play-button-config-info', { hideOriginalPlayButton });
+    const defaultPlayer = fnConfig.getDefaultPlayer();
+    const potPath = fnConfig.getPotPlayerPath() || '';
+    event.reply('play-button-config-info', { hideOriginalPlayButton, defaultPlayer, potPath });
 }
 
 // 设置播放按钮配置

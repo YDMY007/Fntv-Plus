@@ -379,13 +379,70 @@ function Controls:update_dimensions()
 	local width_for_gaps = math.min(empty_space_width, size * gaps)
 	local individual_space_width = spaces > 0 and ((empty_space_width - width_for_gaps) / spaces) or 0
 
+	-- Try to center the speed widget in the controls bar. uosc's normal 'space'
+	-- sizing only centers it in the leftover space between static elements, which
+	-- is often off-center when the left/right static groups have different widths.
+	local speed_index, left_space_index, right_space_index = nil, nil, nil
+	local left_static_width, right_static_width, speed_width = 0, 0, 0
+	for c, control in ipairs(self.layout) do
+		if not control.hide then
+			local function calc_width(sizing, s, r)
+				local h = size * s
+				if sizing == 'static' then
+					return h * r
+				elseif sizing == 'dynamic' then
+					return max_dynamics_width < width_for_dynamics
+						and h * r or width_for_dynamics * ((s * r) / dynamic_units)
+				elseif sizing == 'gap' and gaps > 0 then
+					return width_for_gaps * (r / gaps)
+				end
+				return 0
+			end
+
+			if control.kind == 'speed' then
+				speed_index = c
+				speed_width = calc_width(control.sizing, control.scale, control.ratio)
+			elseif speed_index == nil then
+				if control.sizing ~= 'space' then
+					left_static_width = left_static_width + calc_width(control.sizing, control.scale, control.ratio)
+					if c ~= #self.layout then left_static_width = left_static_width + spacing end
+				else
+					left_space_index = c
+				end
+			else
+				if control.sizing ~= 'space' then
+					right_static_width = right_static_width + calc_width(control.sizing, control.scale, control.ratio)
+					if c ~= #self.layout then right_static_width = right_static_width + spacing end
+				else
+					right_space_index = c
+				end
+			end
+		end
+	end
+
+	local left_space_width, right_space_width
+	if speed_index and left_space_index and right_space_index then
+		local target_ax = self.ax + (available_width - speed_width) / 2
+		left_space_width = target_ax - self.ax - left_static_width
+		right_space_width = self.ax + available_width - target_ax - speed_width - right_static_width
+		if left_space_width < 0 or right_space_width < 0 then
+			left_space_width, right_space_width = nil, nil
+		end
+	end
+
 	for c, control in ipairs(self.layout) do
 		if not control.hide then
 			local sizing, element, scale, ratio = control.sizing, control.element, control.scale, control.ratio
 			local width, height = 0, 0
 
 			if sizing == 'space' then
-				if individual_space_width > 0 then width = individual_space_width end
+				if c == left_space_index and left_space_width then
+					width = left_space_width
+				elseif c == right_space_index and right_space_width then
+					width = right_space_width
+				elseif individual_space_width > 0 then
+					width = individual_space_width
+				end
 			elseif sizing == 'gap' then
 				if width_for_gaps > 0 then width = width_for_gaps * (ratio / gaps) end
 			elseif sizing == 'static' then

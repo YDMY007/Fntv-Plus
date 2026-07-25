@@ -1,10 +1,11 @@
 import axios from 'axios';
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { registerHandler } from '../core/ipcHandler';
 import * as log from '../../../modules/logger';
+import { getQrcodeLibSource } from './qrcodeLib';
 
 /**
  * B站弹幕 Cookie 扫码登录（集成到设置面板）
@@ -44,6 +45,10 @@ function getUoscDanmakuCandidates(): string[] {
   }
   const appPath = app.getAppPath();
   arr.push(path.join(appPath, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
+  // [新] 打包态 MPV 实际脚本目录：exe 同目录 portable_config（extraFiles 解压，可写）
+  //   与 apis/extra.lua 通过 mp.get_script_directory() 定位到的 bili_danmaku.py 同目录，
+  //   必须一致，否则 MPV 端读不到这里写的 bili_cookie.txt（换机/重装后弹幕搜索无登录态）。
+  arr.push(path.join(path.dirname(app.getPath('exe')), 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
   if (process.platform === 'win32') {
     arr.push(path.join(os.homedir(), 'AppData', 'Roaming', 'mpv', 'scripts', 'uosc_danmaku'));
   } else {
@@ -52,10 +57,27 @@ function getUoscDanmakuCandidates(): string[] {
   return arr;
 }
 
+function isAsarPath(p: string): boolean {
+  return app.isPackaged && (p.includes('app.asar') || p.toLowerCase().includes('.asar'));
+}
+
 function resolveDanmakuDir(): string | null {
   const candidates = getUoscDanmakuCandidates();
-  for (const c of candidates) if (fs.existsSync(c)) return c;
-  return candidates[0] || null;
+  // 1) 优先：已存在 bili_cookie.txt 的目录（cookie 实际落盘处，通常与 MPV 脚本目录一致）
+  for (const c of candidates) {
+    if (fs.existsSync(c) && fs.existsSync(path.join(c, 'bili_cookie.txt'))) return c;
+  }
+  // 2) 其次：非 asar 的真实可写目录（exe 同目录 portable_config / 用户 mpv）
+  for (const c of candidates) {
+    if (isAsarPath(c)) continue;
+    if (fs.existsSync(c)) return c;
+  }
+  // 3) 回退：第一个非 asar 候选（即便尚不存在，mkdir 后也可写）
+  for (const c of candidates) {
+    if (isAsarPath(c)) continue;
+    return c;
+  }
+  return null;
 }
 
 function parseCookieFromUrl(u: string): string {
@@ -87,10 +109,11 @@ function harvestSetCookie(sc?: string | string[]): string {
 
 function saveCookie(ck: string): void {
   const candidates = getUoscDanmakuCandidates();
-  const targets = candidates.filter((d) => fs.existsSync(d));
-  const writeTo = targets.length ? targets : candidates.filter(Boolean);
+  // 排除只读的 asar 路径（打包态 resourcesPath/appPath 指向 app.asar 内部，写入静默失败）；
+  // 优先写入 exe 同目录 portable_config（与 MPV 实际脚本目录一致，确保 MPV 端能读到此 cookie）。
+  const writable = candidates.filter((d) => !isAsarPath(d));
   let saved = false;
-  for (const dir of writeTo) {
+  for (const dir of writable) {
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'bili_cookie.txt'), ck, 'utf8');
@@ -177,15 +200,10 @@ async function handleCookieStatus(): Promise<{ exists: boolean; uid?: string; ra
 }
 
 // 返回 qrcode.min.js 源码，供渲染进程注入后渲染二维码（避免新增 npm 依赖）
+// 注意：源码已内联打包（见 ./qrcodeLib.ts），不再依赖外部 third_party 文件，
+// 否则换机/打包环境下该文件缺失会导致前端报"二维码库加载失败"。
 async function handleQrLib(): Promise<string> {
-  const dir = resolveDanmakuDir();
-  if (!dir) return '';
-  const f = path.join(dir, 'qrcode.min.js');
-  try {
-    return fs.readFileSync(f, 'utf8');
-  } catch {
-    return '';
-  }
+  return getQrcodeLibSource();
 }
 
 // 清除已保存的 B站 Cookie（删除 bili_cookie.txt）
@@ -205,12 +223,46 @@ async function handleClear(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
+// 手动粘贴 Cookie 保存（扫码/风控失效时的兜底，结构与豆瓣 manual-cookie 对齐）
+async function handleManualCookie(_event: any, ck?: string): Promise<{ ok: boolean; error?: string }> {
+  const cookie = (ck || '').trim();
+  if (!cookie) return { ok: false, error: 'Cookie 为空' };
+  try {
+    saveCookie(cookie);
+    log.info('biliCookie: 已通过手动粘贴保存 Cookie');
+    return { ok: true };
+  } catch (e: any) {
+    log.error('biliCookie: 手动保存失败', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+// 打开默认弹幕下载文件夹（os.tmpdir()/fnos-danmaku，与 biliDanmaku.ts 的 CACHE_DIR 一致）
+async function handleOpenDanmakuFolder(): Promise<{ ok: boolean; error?: string }> {
+  const dir = path.join(os.tmpdir(), 'fnos-danmaku');
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const err = await shell.openPath(dir);
+    if (err) {
+      log.warn('biliCookie: openPath 返回错误', err);
+      return { ok: false, error: err };
+    }
+    log.info('biliCookie: 已打开弹幕文件夹 -> ' + dir);
+    return { ok: true };
+  } catch (e: any) {
+    log.error('biliCookie: 打开弹幕文件夹失败', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 function init(): void {
   registerHandler('bili:qr-generate', handleQrGenerate, { useHandle: true });
   registerHandler('bili:qr-poll', handleQrPoll, { useHandle: true });
   registerHandler('bili:cookie-status', handleCookieStatus, { useHandle: true });
   registerHandler('bili:qr-lib', handleQrLib, { useHandle: true });
   registerHandler('bili:clear', handleClear, { useHandle: true });
+  registerHandler('bili:manual-cookie', handleManualCookie, { useHandle: true });
+  registerHandler('bili:open-danmaku-folder', handleOpenDanmakuFolder, { useHandle: true });
   log.info('B站弹幕 Cookie 扫码登录插件已加载');
 }
 

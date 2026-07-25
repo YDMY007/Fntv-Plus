@@ -24,6 +24,24 @@ interface ILogger {
     setLogLevel(level: LogLevel): void;
     getLogFile(): string;
     getLogDir(): string;
+    // 返回一个按组件过滤的日志器（用于设置面板控制各组件 CMD 日志开关）
+    component(name: string): IComponentLogger;
+}
+
+/**
+ * 组件级日志器接口（不带组件参数，调用时自动带上组件名）
+ */
+interface IComponentLogger {
+    debug: LogMethod;
+    info: LogMethod;
+    warn: LogMethod;
+    error: LogMethod;
+    noformat: LogMethod;
+    log: LogMethod;
+    d: LogMethod;
+    i: LogMethod;
+    w: LogMethod;
+    e: LogMethod;
 }
 
 /**
@@ -42,23 +60,23 @@ const loggerInterface: ILogger = {
     error: (message: string, ...args: any[]) => logger.error(message, ...args),
     noformat: (message: string, ...args: any[]) => logger.noformat(message),
     log: (message: string, ...args: any[]) => logger.info(message, ...args), // log方法映射到info
-    
+
     // 提供logger实例的访问
     getLogger: () => logger,
-    
+
     // 提供设置日志级别的方法
     setLogLevel: (level: LogLevel) => logger.setLogLevel(level),
-    
+
     // 获取日志相关信息
     getLogFile: () => logger.getCurrentLogFile(),
     getLogDir: () => logger.getLogDir(),
-    
+
     // 方便的方法别名
     d: (message: string, ...args: any[]) => logger.debug(message, ...args),   // debug简写
     i: (message: string, ...args: any[]) => logger.info(message, ...args),    // info简写
     w: (message: string, ...args: any[]) => logger.warn(message, ...args),    // warn简写
     e: (message: string, ...args: any[]) => logger.error(message, ...args),   // error简写
-    
+
     // 专门的错误日志方法（自动格式化错误对象）
     logError: (message: string, error?: any, ...extraArgs: any[]) => {
         if (error instanceof Error) {
@@ -66,7 +84,21 @@ const loggerInterface: ILogger = {
         } else {
             logger.error(message, error, ...extraArgs);
         }
-    }
+    },
+
+    // 组件级日志器：返回按组件过滤的日志接口
+    component: (name: string): IComponentLogger => ({
+        debug: (message: string, ...args: any[]) => logger.logC(name, LogLevel.DEBUG, message, ...args),
+        info: (message: string, ...args: any[]) => logger.logC(name, LogLevel.INFO, message, ...args),
+        warn: (message: string, ...args: any[]) => logger.logC(name, LogLevel.WARN, message, ...args),
+        error: (message: string, ...args: any[]) => logger.logC(name, LogLevel.ERROR, message, ...args),
+        noformat: (message: string, ...args: any[]) => logger.logC(name, LogLevel.NOFORMAT, message),
+        log: (message: string, ...args: any[]) => logger.logC(name, LogLevel.INFO, message, ...args),
+        d: (message: string, ...args: any[]) => logger.logC(name, LogLevel.DEBUG, message, ...args),
+        i: (message: string, ...args: any[]) => logger.logC(name, LogLevel.INFO, message, ...args),
+        w: (message: string, ...args: any[]) => logger.logC(name, LogLevel.WARN, message, ...args),
+        e: (message: string, ...args: any[]) => logger.logC(name, LogLevel.ERROR, message, ...args),
+    })
 };
 
 // 使用CommonJS风格的导出来确保与现有代码兼容

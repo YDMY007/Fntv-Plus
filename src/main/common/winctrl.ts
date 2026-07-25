@@ -85,6 +85,37 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
         return;
     }
 
+    // ── FN ID 登录: 用持久化的 OAuth token 重建会话 cookie ──
+    // FN ID 的 OAuth token 不适用于 getUserInfo 验证(会失败→被踢回登录页),
+    // 但其真实会话 cookie 可由 restoreCookies(token) 用 token 重建到 persist:fntv 分区.
+    // 重启恢复时必须重新调用 restoreCookies(跳过验证) 写入 Trim-MC-token + mode=relay,
+    // 否则仅靠上次运行时遗留的 session cookie(无过期, 重启丢失)会导致进不去主界面.
+    if (savedConfig.loginType === 'fnid') {
+        log.info('[FN ID] 恢复登录状态(使用持久化 token 重建会话), domain:', savedConfig.domain);
+        const ok = await restoreCookies(savedConfig.domain, savedConfig.token, true);
+        if (!ok) {
+            log.warn('[FN ID] 重启恢复失败(token 可能已失效), 跳转登录页');
+            mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
+            return;
+        }
+        // 仅登录页路径(/login,/signin,/v/login)强制白底, 主界面 /v 保持玻璃效果.
+        // SPA 感知: /v 先加载后客户端跳 /v/login, 故需同时监听 dom-ready / did-finish-load / did-navigate-in-page.
+        const fnidSyncBg = () => {
+            try {
+                const u = new URL(mainWindow!.webContents.getURL());
+                const p = u.pathname.toLowerCase();
+                if (p.includes('/login') || p.includes('/signin')) {
+                    mainWindow?.webContents.insertCSS('html,body{background:#ffffff!important;background-color:#ffffff!important;}').catch(() => {});
+                }
+            } catch { /* ignore */ }
+        };
+        mainWindow.webContents.once('dom-ready', fnidSyncBg);
+        mainWindow.webContents.on('did-finish-load', fnidSyncBg);
+        mainWindow.webContents.on('did-navigate-in-page', fnidSyncBg);
+        mainWindow.loadURL(`${savedConfig.domain}/v`);
+        return;
+    }
+
     // 恢复 cookie 并跳转到对应的 URL
     log.info('恢复登录状态，即将跳转到主页面, domain:', savedConfig.domain, ' token:', savedConfig.token);
 
@@ -92,6 +123,19 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
     await restoreCookies(savedConfig.domain, savedConfig.token).then((result) => {
         if (result === true) {
             // cookie 恢复成功，跳转到主页面
+            // 仅登录页路径强制白底(insertCSS 覆盖 ACRYLIC 玻璃壳), SPA 感知
+            const normalSyncBg = () => {
+                try {
+                    const u = new URL(mainWindow!.webContents.getURL());
+                    const p = u.pathname.toLowerCase();
+                    if (p.includes('/login') || p.includes('/signin')) {
+                        mainWindow?.webContents.insertCSS('html,body{background:#ffffff!important;background-color:#ffffff!important;}').catch(() => {});
+                    }
+                } catch { /* ignore */ }
+            };
+            mainWindow.webContents.once('dom-ready', normalSyncBg);
+            mainWindow.webContents.on('did-finish-load', normalSyncBg);
+            mainWindow.webContents.on('did-navigate-in-page', normalSyncBg);
             mainWindow.loadURL(`${savedConfig.domain}/v`);
             return;
         }

@@ -1,0 +1,902 @@
+import { app, BrowserWindow } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
+import axios from 'axios';
+import { registerHandler } from '../core/ipcHandler';
+import { getInstance as getInterceptor } from '../core/interceptor';
+import { getMainWindow } from '../../common/mainwin';
+import * as fnConfig from '../../../modules/fn_config/config';
+import * as fn from '../../../modules/fn_api/api';
+import * as logger from '../../../modules/logger';
+const log = logger.component('douban');
+
+/**
+ * 豆瓣同步插件（影视进度 → 豆瓣"在看/看过"）
+ *
+ * 方案：
+ * - 认证：设置面板"扫码登录"→ 主进程开 BrowserWindow 内嵌豆瓣登录页，
+ *        用户用豆瓣 App 扫码；检测到 dbcl2 cookie 出现即提取全部 cookie 加密存盘。
+ *        另提供"手动粘贴 Cookie"作为兜底（豆瓣对 Electron 登录页偶尔有风控）。
+ * - 同步（直接读取飞牛影视记录，按剧集匹配豆瓣）：
+ *    1) 只要收到有效的进度事件（媒体有真实时长，即用户已开始播放）→ 标记"在看"(interest=do)。
+ *       注：percentage=floor(ts/duration*100) 开播前几秒恒为 0，故以"媒体有效"判定，确保刚开播就能标上。
+ *    2) 飞牛本身的"标记为已观看"按钮 → 命中 /v/api/v1/item/watched 请求，
+ *       被本插件的 session 拦截器捕获 → 标记"看过"(interest=collect)。
+ * - 限流优化：douban_id 解析结果按"剧名|类型|年代"缓存（seriesCache），同一部剧跨集、跨会话
+ *   只搜索一次豆瓣；缓存持久化到 userData/douban_id_cache.json，重启不丢失。
+ * - 防降级：若飞牛侧该条目已 is_watched=1（历史看过/重看），进度同步直接标"看过"，
+ *   不回退成"在看"，避免把豆瓣的"看过"覆盖成"在看"。
+ * - 写入接口：POST movie.douban.com/j/subject/{id}/interest （非公开 API，失败静默）。
+ *   该接口需要 ck(CSRF) 令牌：登录态 cookie 含 ck 时直接用；扫码登录走 passport 流程时
+ *   cookie 往往不含 ck，故登录后先访问 movie.douban.com 让服务端下发，运行时再兜底从
+ *   条目页 Set-Cookie/HTML 解析，三者缺一都会导致 POST 被拒（HTTP 200 但 status≠success）。
+ *
+ * 该文件会被 handlers/index.ts 自动加载（同目录 *.js 即视为插件，需导出 init）。
+ */
+
+type Interest = 'do' | 'collect' | 'wish';
+
+// 每个 item 的本地同步状态（'doing'=在看, 'collect'=看过），用于节流去重
+const stateMap = new Map<string, 'doing' | 'collect'>();
+// douban_id 缓存，避免每次进度回调都去查飞牛元数据
+const idCache = new Map<string, string>();
+// 解析失败的 itemGuid，避免每 tick 重复刷 WARN（同一次会话内）
+const missCache = new Set<string>();
+// 系列级 douban_id 缓存（"剧名|类型|年代" → id）：同一部剧跨集、跨会话只搜索一次豆瓣，
+// 避免「每集一次 subject_suggest 搜索」在短时间大量触发风控限流。
+const seriesCache = new Map<string, string>();
+// 持久化文件路径（userData 下），随应用重启保留缓存
+let _cacheFile = '';
+try { _cacheFile = path.join(app.getPath('userData'), 'douban_id_cache.json'); } catch (e) { _cacheFile = ''; }
+let _saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 启动时从磁盘加载系列缓存 */
+function loadIdCache(): void {
+    if (!_cacheFile) return;
+    try {
+        if (fs.existsSync(_cacheFile)) {
+            const obj = JSON.parse(fs.readFileSync(_cacheFile, 'utf8'));
+            if (obj && typeof obj === 'object') {
+                for (const [k, v] of Object.entries(obj)) {
+                    if (typeof v === 'string' && /^\d+$/.test(v)) seriesCache.set(k, v);
+                }
+            }
+            log.info('[豆瓣] 已加载系列缓存', seriesCache.size, '条');
+        }
+    } catch (e: any) {
+        log.warn('[豆瓣] 加载系列缓存失败', e && e.message);
+    }
+}
+
+/** 延迟落盘（合并多次写入），仅保留最近 500 条防止无限增长 */
+function scheduleSaveIdCache(): void {
+    if (_saveTimer || !_cacheFile) return;
+    _saveTimer = setTimeout(() => {
+        _saveTimer = null;
+        try {
+            const obj: Record<string, string> = {};
+            for (const [k, v] of Array.from(seriesCache.entries()).slice(-500)) obj[k] = v;
+            fs.writeFileSync(_cacheFile, JSON.stringify(obj), 'utf8');
+        } catch (e: any) {
+            log.warn('[豆瓣] 写入系列缓存失败', e && e.message);
+        }
+    }, 1500);
+}
+
+/**
+ * 已标记"看过"(collect) 的豆瓣条目缓存（douban_id → 时间戳）。
+ * 持久化到 userData/douban_collect_cache.json，跨会话保留：
+ * 同一部剧/电影一旦标记过"看过"，后续任何扫描/进度同步都不再重复写入豆瓣，
+ * 既避免把"看过"降级，也从根上消除"每部剧重复打豆瓣"的限流风险。
+ */
+const collectCache = new Map<string, number>();
+let _collectFile = '';
+try { _collectFile = path.join(app.getPath('userData'), 'douban_collect_cache.json'); } catch (e) { _collectFile = ''; }
+let _collectSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 启动时从磁盘加载"已看过"缓存 */
+function loadCollectCache(): void {
+    if (!_collectFile) return;
+    try {
+        if (fs.existsSync(_collectFile)) {
+            const obj = JSON.parse(fs.readFileSync(_collectFile, 'utf8'));
+            if (obj && typeof obj === 'object') {
+                for (const [k, v] of Object.entries(obj)) {
+                    if (typeof k === 'string' && /^\d+$/.test(k)) collectCache.set(k, Number(v) || Date.now());
+                }
+            }
+            log.info('[豆瓣] 已加载"看过"缓存', collectCache.size, '条');
+        }
+    } catch (e: any) {
+        log.warn('[豆瓣] 加载"看过"缓存失败', e && e.message);
+    }
+}
+
+/** 延迟落盘（合并多次写入），仅保留最近 1000 条 */
+function scheduleSaveCollectCache(): void {
+    if (_collectSaveTimer || !_collectFile) return;
+    _collectSaveTimer = setTimeout(() => {
+        _collectSaveTimer = null;
+        try {
+            const obj: Record<string, number> = {};
+            for (const [k, v] of Array.from(collectCache.entries()).slice(-1000)) obj[k] = v;
+            fs.writeFileSync(_collectFile, JSON.stringify(obj), 'utf8');
+        } catch (e: any) {
+            log.warn('[豆瓣] 写入"看过"缓存失败', e && e.message);
+        }
+    }, 1500);
+}
+
+let loginWin: BrowserWindow | null = null;
+let loginTimer: ReturnType<typeof setInterval> | null = null;
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000; // 扫码窗口 5 分钟超时
+
+// ============ 登录态 / 通知 ============
+
+function notifyLoginChanged(): void {
+    const mw = getMainWindow();
+    if (mw) {
+        mw.webContents.send('douban:login-changed', { loggedIn: !!fnConfig.getDoubanCookie() });
+    }
+}
+
+export function getLoginStatus(): any {
+    return {
+        loggedIn: !!fnConfig.getDoubanCookie(),
+        enabled: fnConfig.getDoubanSyncEnabled(),
+    };
+}
+
+export function openDoubanLoginWindow(): void {
+    if (loginWin) {
+        loginWin.focus();
+        return;
+    }
+    const mw = getMainWindow();
+    loginWin = new BrowserWindow({
+        width: 640,
+        height: 780,
+        parent: mw || undefined,
+        modal: false,
+        show: true,
+        webPreferences: {
+            // 独立 partition，避免污染主窗口(fntv)的登录态
+            partition: 'persist:douban-oauth',
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+    });
+
+    loginWin.loadURL('https://accounts.douban.com/passport/login');
+    log.info('[豆瓣] 已打开扫码登录窗口');
+
+    // 轮询：出现 dbcl2（登录态标志）即视为登录成功
+    loginTimer = setInterval(async () => {
+        if (!loginWin) return;
+        try {
+            const cookies = await loginWin.webContents.session.cookies.get({ domain: '.douban.com' });
+            const dbcl2 = cookies.find((c) => c.name === 'dbcl2');
+            if (dbcl2) {
+                if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
+                // 拉起 movie.douban.com 让服务端下发 ck(CSRF) cookie，否则后续 POST /j/interest 会被拒
+                try {
+                    await loginWin.loadURL('https://movie.douban.com/');
+                    await new Promise((r) => setTimeout(r, 2000));
+                } catch (e) { /* 导航失败则沿用已有 cookie，运行时再兜底取 ck */ }
+                const cookies2 = await loginWin.webContents.session.cookies.get({ domain: '.douban.com' });
+                const ck = cookies2.map((c) => `${c.name}=${c.value}`).join('; ');
+                fnConfig.setDoubanCookie(ck);
+                loginWin.close();
+                notifyLoginChanged();
+                log.info('[豆瓣] 扫码登录成功，已保存 cookie（含 ck）');
+            }
+        } catch {
+            // 窗口已关闭等情况，忽略
+        }
+    }, 1500);
+
+    // 超时自动关闭
+    setTimeout(() => {
+        if (loginWin) {
+            log.info('[豆瓣] 扫码窗口超时，自动关闭');
+            loginWin.close();
+        }
+    }, LOGIN_TIMEOUT_MS);
+
+    loginWin.on('closed', () => {
+        loginWin = null;
+        if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
+    });
+}
+
+export function logoutDouban(): void {
+    fnConfig.setDoubanCookie(null);
+    notifyLoginChanged();
+    log.info('[豆瓣] 已退出登录');
+}
+
+// ============ 取 douban_id ============
+
+/**
+ * 从飞牛播放信息里取豆瓣条目 ID。
+ *
+ * 说明：PlayInfo / PlayInfo.item 的 TS 类型上没有 douban_id，但
+ * getEpisodeList(guid) 返回的 PlayListItem[] 每项都带 douban_id(纯数字)。
+ * 因此多源尝试：
+ *  - 直接字段（运行期 API 可能比 TS 类型多返回 douban_id）
+ *  - 用各层级 guid 调 getEpisodeList，扫描所有条目里的 douban_id
+ *    （剧集取父级 guid 拿整部剧的 douban_id；电影用自身 guid 拿单条的）
+ */
+/**
+ * 构造用于豆瓣搜索的查询词：优先用剧名(tv_title/parent_title)，其次用单集标题。
+ * 去掉结尾的 (年份) 避免干扰匹配。
+ */
+function buildSearchQuery(item: any): string {
+    let q = (item.tv_title || item.parent_title || item.title || '').toString().trim();
+    q = q.replace(/\s*[（(]\s*\d{4}\s*[）)]?\s*$/, '').trim();
+    return q;
+}
+
+/** 按"标题包含 + 年份相符 + 类型相符"打分，取最佳匹配 */
+function pickBestSubject(arr: any[], query: string, wantType: string, year: string): string {    if (!Array.isArray(arr) || !arr.length) return '';
+    const q = query.toLowerCase();
+    let best: any = null;
+    let bestScore = -1;
+    for (const it of arr) {
+        let s = 0;
+        const t = String(it.title || '').toLowerCase();
+        if (t === q) s += 5;
+        else if (t.includes(q) || q.includes(t)) s += 2;
+        if (it.year && year && String(it.year) === String(year)) s += 3;
+        if (it.type && it.type === wantType) s += 2;
+        if (s > bestScore) { bestScore = s; best = it; }
+    }
+    if (best && best.id && bestScore >= 2) {
+        log.info('[豆瓣] 标题搜索命中:', query, '→', best.title, '(', best.id, ')');
+        return String(best.id);
+    }
+    return '';
+}
+
+/**
+ * 用标题去豆瓣搜索，返回 subject_id（纯数字）。
+ * 先试 JSON 自动补全接口（带登录 cookie），失败/空再试搜索页 HTML 正则兜底。
+ */
+async function searchDoubanByTitle(query: string, wantType: 'movie' | 'tv', year: string, cookie: string): Promise<string> {
+    const headers: any = {
+        'Referer': 'https://movie.douban.com/',
+        'Cookie': cookie,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest',
+    };
+    // 1) 自动补全接口（JSON）
+    try {
+        const r1 = await axios.get(`https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(query)}`, { headers, timeout: 12000 });
+        const picked = pickBestSubject(Array.isArray(r1.data) ? r1.data : [], query, wantType, year);
+        if (picked) return picked;
+    } catch (e: any) {
+        log.warn('[豆瓣] subject_suggest 失败', query, String(e && e.message || e));
+    }
+    // 2) 兜底：搜索页 HTML，正则提取 subject 链接里的数字 id
+    try {
+        const r2 = await axios.get(`https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}`, {
+            headers: { ...headers, 'X-Requested-With': undefined },
+            timeout: 12000,
+        });
+        const html = typeof r2.data === 'string' ? r2.data : '';
+        const m = html.match(/movie\.douban\.com\/subject\/(\d+)/);
+        if (m && m[1]) {
+            log.info('[豆瓣] 搜索页命中:', query, '→', m[1]);
+            return m[1];
+        }
+    } catch (e: any) {
+        log.warn('[豆瓣] subject_search 失败', query, String(e && e.message || e));
+    }
+    return '';
+}
+
+/** 系列级缓存 key：剧名(去年代) + 类型 + 年代，确保同一部剧跨集/跨会话只搜一次 */
+function buildSeriesKey(item: any): string {
+    const q = buildSearchQuery(item);
+    if (!q) return '';
+    const wantType = (item.type === 'Movie') ? 'movie' : 'tv';
+    const year = (item.release_date || item.air_date || '').slice(0, 4);
+    return `${q}|${wantType}|${year}`;
+}
+
+async function getDoubanId(itemGuid: string, info: any, fnapi: any): Promise<string> {
+    const item = (info && info.item) || info || {};
+
+    // 系列级缓存：同一部剧/电影只在首次解析时真正搜索豆瓣，后续集/会话直接复用，
+    // 彻底避免「每集一次 subject_suggest 搜索」触发豆瓣风控限流。
+    const seriesKey = buildSeriesKey(item);
+    if (seriesKey && seriesCache.has(seriesKey)) {
+        const cached = seriesCache.get(seriesKey)!;
+        log.info('[豆瓣] 系列缓存命中:', seriesKey, '→', cached);
+        return cached;
+    }
+
+    // 优先用带缓存的接口，避免每次进度都打飞牛
+    const getList = (fnapi && typeof fnapi.getEpisodeListCached === 'function')
+        ? fnapi.getEpisodeListCached.bind(fnapi)
+        : (fnapi && typeof fnapi.getEpisodeList === 'function' ? fnapi.getEpisodeList.bind(fnapi) : null);
+
+    const candidates: string[] = [];
+    const pushId = (raw: any): void => {
+        if (raw === undefined || raw === null || raw === '' || raw === 0) return;
+        const s = String(raw).trim();
+        if (s && /^\d+$/.test(s)) candidates.push(s); // 豆瓣 ID 是纯数字
+    };
+
+    // 1. 直接字段（运行期可能有）
+    pushId(item.douban_id);
+    pushId(item.doubanId);
+    pushId(info && info.douban_id);
+    pushId(info && info.doubanId);
+
+    // 2. 各层级 guid 调 getEpisodeList，全量扫描条目
+    const guids: string[] = [
+        item.parent_guid,
+        info && info.parent_guid,
+        info && info.grand_guid,
+        item.guid,
+        info && info.guid,
+    ].filter((g): g is string => typeof g === 'string' && !!g);
+
+    const tried: string[] = [];
+    for (const g of guids) {
+        if (!getList || candidates.length) break;
+        if (tried.includes(g)) continue;
+        tried.push(g);
+        try {
+            const list: any = await getList(g);
+            if (list && list.success && Array.isArray(list.data)) {
+                for (const it of list.data) {
+                    if (it) pushId(it.douban_id);
+                }
+            }
+        } catch (e: any) {
+            log.warn('[豆瓣] getEpisodeList 失败', g, String(e && e.message || e));
+        }
+    }
+
+    // 3. 兜底：飞牛没刮削到豆瓣号 → 用标题去豆瓣搜索匹配
+    if (!candidates.length) {
+        const cookie = fnConfig.getDoubanCookie();
+        if (cookie) {
+            const query = buildSearchQuery(item);
+            if (query) {
+                const wantType = (item.type === 'Movie') ? 'movie' : 'tv';
+                const year = (item.release_date || item.air_date || '').slice(0, 4);
+                try {
+                    const sid = await searchDoubanByTitle(query, wantType, year, cookie);
+                    if (sid) candidates.push(sid);
+                    else log.warn('[豆瓣] 标题搜索豆瓣无匹配; query =', query, '; type =', wantType, '; year =', year);
+                } catch (e: any) {
+                    log.warn('[豆瓣] 标题搜索豆瓣异常', query, String(e && e.message || e));
+                }
+            }
+        }
+    }
+
+    const id = candidates[0] || '';
+    if (id) {
+        log.info('[豆瓣] 解析到 douban_id =', id, '标题 =', item.title || item.tv_title || '');
+        if (seriesKey) { seriesCache.set(seriesKey, id); scheduleSaveIdCache(); }
+    } else {
+        if (!missCache.has(itemGuid)) {
+            missCache.add(itemGuid);
+            log.warn('[豆瓣] 无法解析 douban_id; item字段 =',
+                Object.keys(item).join(','),
+                '; 尝试过的guid =', tried.join(','));
+        }
+    }
+    return id;
+}
+
+// ============ 写入豆瓣 ============
+
+function extractCk(cookie: string): string {
+    const m = cookie.match(/(?:^|;\s*)ck=([^;]+)/i);
+    return m ? m[1] : '';
+}
+
+// 会话内缓存的 ck（豆瓣 CSRF 令牌）：登录态稳定期内复用，避免每次标记都去拉页面
+let _cachedCk = '';
+
+/**
+ * 取用于豆瓣写入接口的 ck（CSRF 令牌）。
+ * 优先级：① 已保存 cookie 里的 ck；② 会话内缓存；③ 临时拉取条目页，
+ *         从 Set-Cookie 头或 HTML 中解析（针对"扫码登录后 cookie 未含 ck"的情况）。
+ * ck 缺失会导致 POST /j/subject/{id}/interest 被豆瓣拒绝（HTTP 200 但 status≠success）。
+ */
+async function fetchCkForMarking(subjectId: string, cookie: string): Promise<string> {
+    try {
+        const r = await axios.get(`https://movie.douban.com/subject/${subjectId}/`, {
+            headers: {
+                Cookie: cookie,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+                'Referer': 'https://movie.douban.com/',
+            },
+            timeout: 12000,
+            maxRedirects: 5,
+        });
+        // 1) 响应头 Set-Cookie 里的 ck（已登录用户访问 movie 页服务端会下发）
+        const sc = r.headers && r.headers['set-cookie'];
+        if (Array.isArray(sc)) {
+            for (const c of sc) {
+                const m = c.match(/ck=([^;]+)/i);
+                if (m && m[1]) return decodeURIComponent(m[1]);
+            }
+        }
+        // 2) 页面 HTML 里嵌入的 ck（多种写法兜底）
+        const html = typeof r.data === 'string' ? r.data : '';
+        const m = html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i)
+            || html.match(/name=["']ck["'][^>]*value=["']([^"']+)["']/i)
+            || html.match(/["']ck["']\s*[:=]\s*["']([a-zA-Z0-9_\-]+)["']/);
+        if (m && m[1]) return m[1];
+    } catch (e: any) {
+        log.warn('[豆瓣] 拉取 ck 失败', e && e.message);
+    }
+    return '';
+}
+
+async function getCk(subjectId: string, cookie: string): Promise<string> {
+    if (_cachedCk) return _cachedCk;
+    const fromCookie = extractCk(cookie);
+    if (fromCookie) { _cachedCk = fromCookie; return fromCookie; }
+    const fetched = await fetchCkForMarking(subjectId, cookie);
+    if (fetched) _cachedCk = fetched;
+    return fetched;
+}
+
+async function markInterest(
+    subjectId: string,
+    interest: Interest,
+    cookie: string
+): Promise<{ ok: boolean; msg?: string; expired?: boolean }> {
+    const ck = await getCk(subjectId, cookie);
+    const url = `https://movie.douban.com/j/subject/${subjectId}/interest`;
+    const body = `ck=${encodeURIComponent(ck)}&interest=${interest}`
+        + `&rating=&foldcollect=F&tags=&comment=`;
+    try {
+        const resp = await axios.post(url, body, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Referer': `https://movie.douban.com/subject/${subjectId}/`,
+                'Cookie': cookie,
+                'X-Requested-With': 'XMLHttpRequest',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+            timeout: 15000,
+        });
+        const data: any = resp.data;
+        // 豆瓣异常时可能返回登录页/错误页 HTML（HTTP 200），按失败处理并打日志
+        if (typeof data === 'string') {
+            if (/<html|<body/i.test(data)) {
+                return { ok: false, msg: '豆瓣返回 HTML（疑似 cookie 失效或风控）' };
+            }
+            try { return { ok: false, msg: data.slice(0, 200) }; } catch { /* ignore */ }
+        }
+        // 成功判定：status==='success' 或 r===0（兼容不同返回形态）
+        if (data && (data.status === 'success' || data.r === 0)) return { ok: true };
+        if (resp.status === 401 || (data && data.status === 'please login') || /please login/i.test(JSON.stringify(data))) {
+            _cachedCk = ''; // cookie 失效，清空 ck 缓存以便下次重新获取
+            return { ok: false, msg: 'cookie 失效，请重新登录', expired: true };
+        }
+        const raw = JSON.stringify(data);
+        if (/频繁|频率|rate.?limit|too many/i.test(raw)) {
+            return { ok: false, msg: '触发豆瓣限流，稍后重试' };
+        }
+        const msg = (data && (data.message || data.msg)) || ('HTTP ' + resp.status);
+        log.warn('[豆瓣] markInterest 响应:', raw.slice(0, 300));
+        return { ok: false, msg };
+    } catch (e: any) {
+        if (e && e.response && e.response.status === 401) {
+            _cachedCk = '';
+            return { ok: false, msg: 'cookie 失效，请重新登录', expired: true };
+        }
+        return { ok: false, msg: String((e && e.message) || e) };
+    }
+}
+
+async function markWithRetry(subjectId: string, interest: Interest, cookie: string): Promise<void> {
+    for (let i = 0; i <= 1; i++) {
+        const r = await markInterest(subjectId, interest, cookie);
+        if (r.ok) return;
+        log.warn('[豆瓣] markInterest 失败', interest, r.msg);
+        if (r.expired) break; // cookie 失效不再重试
+        await new Promise((res) => setTimeout(res, 800 * (i + 1)));
+    }
+}
+
+// ============ 进度同步（被 media.ts 调用）============
+
+/** 取一个临时 ApiService 实例（用于"标记为已观看"拦截路径，该路径拿不到 media.ts 里的长生命周期实例） */
+function getFnapiFresh(): any {
+    const cfg = fnConfig.readConfig();
+    if (!cfg || !cfg.domain || !cfg.token) {
+        log.warn('[豆瓣] 缺少 fnOS 配置（domain/token），无法解析 douban_id');
+        return null;
+    }
+    return new fn.ApiService(cfg.domain, cfg.token);
+}
+
+/**
+ * 直接从飞牛 API 拉「已观看」列表（主进程，带 token），不再依赖渲染进程点击 DOM。
+ * 调用 item/list(parent_guid='' 表示根媒体库, exclude_folder=1 排除文件夹)，
+ * 过滤 watched===1 的条目。实证：根库共 133 项，其中已观看 3 项。
+ */
+async function getWatchedItems(): Promise<any[]> {
+    const fnapi = getFnapiFresh();
+    if (!fnapi) {
+        log.warn('[豆瓣] 缺少 fnOS 配置（domain/token），无法拉取已观看列表');
+        return [];
+    }
+    try {
+        const resp: any = await fnapi.getItemList({
+            parent_guid: '',
+            exclude_folder: 1,
+            sort_column: 'sort_title',
+            sort_type: 'ASC',
+        });
+        if (!resp.success || !resp.data || !Array.isArray(resp.data.list)) {
+            log.warn('[豆瓣] 拉取已观看列表失败:', resp && resp.message);
+            return [];
+        }
+        const total = resp.data.total;
+        const list: any[] = resp.data.list;
+        if (typeof total === 'number' && list.length < total) {
+            log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
+        }
+        const watched = list.filter((it: any) => it && it.watched === 1);
+        // 映射为 processWatchedList 所需的字段
+        const items = watched.map((it: any) => ({
+            guid: it.guid,
+            parent_guid: it.parent_guid,
+            douban_id: it.douban_id || 0,
+            title: it.title,
+            tv_title: it.tv_title,
+            parent_title: it.parent_title,
+            type: it.type,
+            air_date: it.air_date,
+            release_date: it.release_date,
+            watched: 1,
+        }));
+        log.info(`[豆瓣] 已观看列表: 根库 ${list.length} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
+        return items;
+    } catch (e: any) {
+        log.warn('[豆瓣] getWatchedItems 异常:', e && e.message);
+        return [];
+    }
+}
+
+/**
+ * 播放进度回调 → 同步到豆瓣。被 media.ts 的 PROGRESS 事件每秒调用。
+ * 内部用 stateMap 做状态机节流，只在状态切换时打豆瓣（天然限频、抗风控）。
+ *
+ * 规则：
+ * - 飞牛该条目已 is_watched=1（历史看过 / 重看）→ 直接标"看过"，避免被"在看"覆盖。
+ * - 否则只要有播放进度（percentage>0）且尚未同步过 → 标"在看"。
+ *
+ * @param itemGuid 飞牛播放项 GUID（作为去重 key）
+ * @param info     getPlayInfo 返回的 PlayInfo（含 item / parent 信息）
+ * @param percentage 播放器给的进度百分比（0-100）
+ * @param fnapi    当前 ApiService 实例（用于查 douban_id 兜底）
+ */
+/**
+ * 播放进度回调 → 同步到豆瓣。被 media.ts 的 PROGRESS 事件每秒调用。
+ * 内部用 stateMap 做状态机节流，只在状态切换时打豆瓣（天然限频、抗风控）。
+ *
+ * 规则：
+ * - 飞牛该条目已 is_watched=1（历史看过 / 重看）→ 直接标"看过"，避免被"在看"覆盖。
+ * - 否则只要收到有效的进度事件（媒体有真实时长）且尚未同步过 → 标"在看"。
+ *   注意：percentage = floor(ts/duration*100)，开播前几秒恒为 0，故不再以 pct>0 判定，
+ *   改用"媒体有效(duration>0)"，确保刚开播就能标上"在看"。
+ *
+ * @param itemGuid 飞牛播放项 GUID（作为去重 key）
+ * @param info     getPlayInfo 返回的 PlayInfo（含 item / parent 信息）
+ * @param percentage 播放器给的进度百分比（0-100，floor 后开播前可能为 0）
+ * @param fnapi    当前 ApiService 实例（用于查 douban_id 兜底）
+ * @param ts       播放器当前位置（秒）
+ * @param duration 媒体总时长（秒），>0 视为有效媒体
+ */
+export async function syncOnProgress(
+    itemGuid: string,
+    info: any,
+    percentage: number,
+    fnapi: any,
+    ts: number = 0,
+    duration: number = 0
+): Promise<void> {
+    try {
+        if (!fnConfig.getDoubanSyncEnabled()) return;
+        const cookie = fnConfig.getDoubanCookie();
+        if (!cookie) {
+            log.info('[豆瓣] 未登录，跳过同步');
+            return;
+        }
+        const pct = typeof percentage === 'number' ? percentage : 0;
+
+        let doubanId = idCache.get(itemGuid) || '';
+        if (!doubanId) {
+            if (missCache.has(itemGuid)) return; // 本次会话已确认拿不到，跳过
+            doubanId = await getDoubanId(itemGuid, info, fnapi);
+            if (doubanId) idCache.set(itemGuid, doubanId);
+        }
+        if (!doubanId) {
+            log.warn('[豆瓣] 无法获取 douban_id，跳过', itemGuid);
+            return;
+        }
+
+        // 已通过"已观看列表"同步标过"看过"的条目：保持看过，绝不被进度同步降级为"在看"
+        if (collectCache.has(doubanId)) {
+            stateMap.set(itemGuid, 'collect');
+            return;
+        }
+
+        const item = (info && info.item) || {};
+        const alreadyWatched = info && (info.watched === 1 || item.is_watched === 1);
+        const state = stateMap.get(itemGuid);
+        // 媒体有效（有真实时长）才视为"在看"，避免开播前的 0/0 空事件误标
+        const mediaValid = duration > 0;
+
+        if (alreadyWatched) {
+            // 飞牛侧已观看：直接标"看过"，不回退成"在看"
+            if (state !== 'collect' && mediaValid) {
+                await markWithRetry(doubanId, 'collect', cookie);
+                stateMap.set(itemGuid, 'collect');
+                log.info('[豆瓣] 已标记看过（飞牛侧已观看）', doubanId);
+            }
+            return;
+        }
+
+        // 首次有效进度事件即标"在看"（不再要求 percentage>0，开播前几秒恒为 0）
+        if (!state && mediaValid) {
+            await markWithRetry(doubanId, 'do', cookie);
+            stateMap.set(itemGuid, 'doing');
+            log.info('[豆瓣] 已标记在看（有播放进度）', doubanId);
+        }
+    } catch (e: any) {
+        log.warn('[豆瓣] syncOnProgress 异常', e && e.message);
+    }
+}
+
+/**
+ * 飞牛"标记为已观看"按钮被点击时触发（由 init 注册的 session 拦截器捕获
+ * /v/api/v1/item/watched 请求后调用）。同步到豆瓣为"看过"(interest=collect)。
+ *
+ * @param itemGuid 被标记为已观看的飞牛播放项 GUID
+ */
+export async function syncOnWatched(itemGuid: string): Promise<void> {
+    try {
+        if (!fnConfig.getDoubanSyncEnabled()) return;
+        const cookie = fnConfig.getDoubanCookie();
+        if (!cookie) {
+            log.info('[豆瓣] 未登录，跳过"看过"同步');
+            return;
+        }
+        if (stateMap.get(itemGuid) === 'collect') return; // 已同步过，幂等
+
+        const fnapi = getFnapiFresh();
+        if (!fnapi) return;
+
+        let doubanId = idCache.get(itemGuid) || '';
+        if (!doubanId) {
+            if (missCache.has(itemGuid)) return;
+            const resp = await fnapi.getPlayInfoCached(itemGuid).catch(() => null);
+            const resolvedInfo = resp && resp.success && resp.data ? resp.data : null;
+            doubanId = await getDoubanId(itemGuid, resolvedInfo, fnapi);
+            if (doubanId) idCache.set(itemGuid, doubanId);
+        }
+        if (!doubanId) {
+            log.warn('[豆瓣] 「标记为已观看」但无法解析 douban_id，跳过', itemGuid);
+            return;
+        }
+
+        // 已通过"已观看列表"同步标过"看过"的条目：幂等，跳过
+        if (collectCache.has(doubanId)) {
+            stateMap.set(itemGuid, 'collect');
+            return;
+        }
+
+        await markWithRetry(doubanId, 'collect', cookie);
+        stateMap.set(itemGuid, 'collect');
+        log.info('[豆瓣] 已标记看过（来自飞牛"标记为已观看"）', doubanId);
+    } catch (e: any) {
+        log.warn('[豆瓣] syncOnWatched 异常', e && e.message);
+    }
+}
+
+// ============ 已观看列表 → 豆瓣"看过" 同步 ============
+
+/**
+ * 处理渲染进程回传的"已观看"条目列表：解析 douban_id（seriesCache 命中则不重复搜索豆瓣），
+ * 标记"看过"(interest=collect)。已写入 collectCache 的条目直接跳过（幂等、防限流、防降级）。
+ * 写入串行化、两次之间间隔 600ms，配合 markWithRetry 的一次重试，天然抗豆瓣风控。
+ */
+export async function processWatchedList(items: any[]): Promise<any> {
+    try {
+        if (!Array.isArray(items) || !items.length) {
+            return { total: 0, marked: 0, skipped: 0, failed: 0 };
+        }
+        if (!fnConfig.getDoubanSyncEnabled()) {
+            return { total: items.length, marked: 0, skipped: 0, failed: 0, note: '豆瓣同步未开启' };
+        }
+        const cookie = fnConfig.getDoubanCookie();
+        if (!cookie) {
+            return { total: items.length, marked: 0, skipped: 0, failed: 0, note: '豆瓣未登录' };
+        }
+        const fnapi = getFnapiFresh();
+        let marked = 0, skipped = 0, failed = 0;
+        for (const it of items) {
+            try {
+                const rawId = it && it.douban_id ? String(it.douban_id) : '';
+                let doubanId = (/^\d+$/.test(rawId)) ? rawId : '';
+                if (!doubanId) {
+                    const info = { item: it, watched: 1, guid: it.guid, parent_guid: it.parent_guid };
+                    doubanId = await getDoubanId(it.guid, info, fnapi);
+                }
+                if (!doubanId) { skipped++; continue; }
+                if (collectCache.has(doubanId)) { skipped++; continue; }
+                await markWithRetry(doubanId, 'collect', cookie);
+                collectCache.set(doubanId, Date.now());
+                scheduleSaveCollectCache();
+                if (it && it.guid) stateMap.set(it.guid, 'collect');
+                marked++;
+                await new Promise((r) => setTimeout(r, 600)); // 节流：两次豆瓣写入间隔
+            } catch (e: any) {
+                failed++;
+                log.warn('[豆瓣] 已观看列表条目处理失败', (it && it.guid) || '', e && e.message);
+            }
+        }
+        log.info(`[豆瓣] 已观看列表同步完成: total=${items.length} marked=${marked} skipped=${skipped} failed=${failed}`);
+        return { total: items.length, marked, skipped, failed };
+    } catch (e: any) {
+        log.warn('[豆瓣] processWatchedList 异常', e && e.message);
+        return { total: Array.isArray(items) ? items.length : 0, marked: 0, skipped: 0, failed: 0 };
+    }
+}
+
+// 手动/自动扫描的待返回 promise（主进程等候渲染进程回传结果）
+let _pendingScanResolve: ((s: any) => void) | null = null;
+let _autoScanTimer: ReturnType<typeof setInterval> | null = null;
+let _lastScanTs = 0;
+const MIN_SCAN_GAP_MS = 10 * 60 * 1000; // 硬下限：两次扫描至少间隔 10 分钟（防手动+自动叠加过密）
+
+/** 触发渲染进程扫描已观看列表（主进程→渲染进程 send） */
+function triggerWatchedScan(): void {
+    const mw = getMainWindow();
+    if (!mw) return;
+    if (!fnConfig.getDoubanSyncEnabled() || !fnConfig.getDoubanCookie()) return;
+    const now = Date.now();
+    if (now - _lastScanTs < MIN_SCAN_GAP_MS) return; // 防抖
+    _lastScanTs = now;
+    mw.webContents.send('douban:scan-watched-request');
+}
+
+/** 启停自动扫描定时器（intervalMin<=0 关闭；下限 10 分钟） */
+function startAutoWatchedScan(intervalMin: number): void {
+    if (_autoScanTimer) { clearInterval(_autoScanTimer); _autoScanTimer = null; }
+    if (!intervalMin || intervalMin <= 0) {
+        log.info('[豆瓣] 已观看列表自动同步：关闭');
+        return;
+    }
+    const ms = Math.max(intervalMin, 10) * 60 * 1000;
+    _autoScanTimer = setInterval(triggerWatchedScan, ms);
+    log.info(`[豆瓣] 已观看列表自动同步：每 ${Math.max(intervalMin, 10)} 分钟一次`);
+}
+
+// ============ IPC 注册 ============
+
+export function init(): void {
+    loadIdCache();
+    loadCollectCache();
+    registerHandler('douban:login-status', () => getLoginStatus(), { useHandle: true });
+    registerHandler('douban:open-login', () => {
+        try {
+            openDoubanLoginWindow();
+            return { ok: true };
+        } catch (e: any) {
+            return { ok: false, msg: String((e && e.message) || e) };
+        }
+    }, { useHandle: true });
+    registerHandler('douban:logout', () => {
+        logoutDouban();
+        return { ok: true };
+    }, { useHandle: true });
+    registerHandler('douban:manual-cookie', (_e: any, cookie: string) => {
+        if (!cookie || !cookie.trim()) {
+            return { ok: false, msg: 'cookie 为空' };
+        }
+        fnConfig.setDoubanCookie(cookie.trim());
+        notifyLoginChanged();
+        return { ok: true };
+    }, { useHandle: true });
+
+    // 渲染进程回传"已观看"条目后，主进程标记豆瓣"看过"（串行+节流）
+    registerHandler('douban:process-watched', async (_e: any, items: any[]) => {
+        return await processWatchedList(items);
+    }, { useHandle: true });
+
+    // 主进程直接从 fnOS API 拉「已观看」列表（替代渲染进程点击 DOM，稳定可靠）
+    registerHandler('douban:get-watched-items', async () => {
+        return await getWatchedItems();
+    }, { useHandle: true });
+
+    // 手动触发扫描：主进程请求渲染进程扫描，等待回传结果（超时 25s）
+    registerHandler('douban:scan-watched-manual', () => {
+        const mw = getMainWindow();
+        if (!mw) return { error: 'no-window', total: 0, marked: 0, skipped: 0, failed: 0 };
+        if (_pendingScanResolve) return { error: 'busy', total: 0, marked: 0, skipped: 0, failed: 0 };
+        return new Promise((resolve) => {
+            _pendingScanResolve = resolve;
+            const timer = setTimeout(() => {
+                if (_pendingScanResolve === resolve) {
+                    _pendingScanResolve = null;
+                    resolve({ error: 'timeout', total: 0, marked: 0, skipped: 0, failed: 0 });
+                }
+            }, 25000);
+            const orig = resolve;
+            _pendingScanResolve = (s: any) => { clearTimeout(timer); orig(s); };
+            _lastScanTs = Date.now(); // 计入防抖窗口
+            mw.webContents.send('douban:scan-watched-request');
+        });
+    }, { useHandle: true });
+
+    // 渲染进程扫描完成后回传结果（手动/自动共用）
+    registerHandler('douban:scan-watched-done', (_e: any, summary: any) => {
+        log.info('[豆瓣] 已观看列表扫描回传:', JSON.stringify(summary || {}));
+        if (_pendingScanResolve) {
+            const r = _pendingScanResolve;
+            _pendingScanResolve = null;
+            r(summary || { total: 0, marked: 0, skipped: 0, failed: 0 });
+        }
+    }, { useHandle: true });
+
+    // 设置自动同步间隔（分钟，0=关闭）
+    registerHandler('douban:set-watched-scan-interval', (_e: any, min: number) => {
+        fnConfig.setWatchedScanIntervalMin(min);
+        startAutoWatchedScan(fnConfig.getWatchedScanIntervalMin());
+        return { ok: true, interval: fnConfig.getWatchedScanIntervalMin() };
+    }, { useHandle: true });
+
+    // 读取当前自动同步间隔
+    registerHandler('douban:get-watched-scan-interval', () => {
+        return { interval: fnConfig.getWatchedScanIntervalMin() };
+    }, { useHandle: true });
+
+    // 启动自动扫描（按已存配置）
+    startAutoWatchedScan(fnConfig.getWatchedScanIntervalMin());
+
+    // 拦截飞牛"标记为已观看"请求：用户点击飞牛 UI 的"标记为已观看"按钮时，
+    // fnOS 会向 /v/api/v1/item/watched 发 POST。捕获其 body 里的 item_guid，
+    // 异步同步到豆瓣"看过"。拦截器在 handlers/index.ts 里于插件 init 之后统一 run()，
+    // 因此此处注册会在会话级 webRequest 上生效。
+    try {
+        const interceptor = getInterceptor();
+        interceptor.registerBeforeRequest(
+            { urls: ['*://*/v/api/v1/item/watched'] },
+            (details: any, callback: any) => {
+                // 放行请求，不修改原行为
+                if (typeof callback === 'function') callback({});
+                try {
+                    const ud = details && details.uploadData;
+                    if (ud && Array.isArray(ud) && ud[0] && ud[0].bytes) {
+                        const body = ud[0].bytes.toString('utf8');
+                        const m = body.match(/"item_guid"\s*:\s*"([^"]+)"/);
+                        if (m && m[1]) {
+                            void syncOnWatched(m[1]);
+                        }
+                    }
+                } catch (e: any) {
+                    log.warn('[豆瓣] 解析 watched 请求失败', e && e.message);
+                }
+            },
+            'douban-watched'
+        );
+        log.info('[豆瓣] 已注册"标记为已观看"拦截器');
+    } catch (e: any) {
+        log.warn('[豆瓣] 注册 watched 拦截器失败', e && e.message);
+    }
+}

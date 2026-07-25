@@ -330,6 +330,10 @@ bili_manual_title_cache = nil
 
 -- 第 1 步：uosc 输入条
 function open_bili_manual_search()
+    if not options.bili_search_enabled then
+        show_message("B站弹幕搜索已禁用，请在应用设置中开启", 3)
+        return
+    end
     if not uosc_available then
         show_message("手动搜索需在 uosc 控制栏下使用", 3)
         return

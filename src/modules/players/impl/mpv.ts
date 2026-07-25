@@ -13,7 +13,8 @@ import {
     PlayItem // <-- Add PlayItem to the import list
 } from '../types';
 import { PlayerFactory } from '../factory';
-import log from '../../logger';
+import logger from '../../logger';
+const log = logger.component('mpv');
 import NodeMpv, { TimePosition } from 'node-mpv-2';
 import { title } from 'process';
 
@@ -248,10 +249,13 @@ export class MpvPlayer extends BasePlayer {
                 }
 
                 const currentItem = this.playlistItems.find(item => item.itemGuid === itemGuid);
+                const videoTitle = currentItem ? this.getTitle(currentItem) : undefined;
                 if (currentItem) {
-                    const title = this.getTitle(currentItem);
-                    // 设置窗口标题
-                    this.mpvInstance?.setProperty('force-media-title', title).catch(err => {
+                    // 设置窗口标题：剥掉 CJK 直角引号/书名号(『』「」《》等)，
+                    // 避免这些字符在 MPV OSC/字幕字体里无字形而显示成乱码框；
+                    // 注意：getSubtitle 仍用原始 videoTitle 以保留字幕标题匹配精度
+                    const displayTitle = (videoTitle || '').replace(/[『』「」【】〔〕《》〈〉""'']/g, '').trim();
+                    this.mpvInstance?.setProperty('force-media-title', displayTitle).catch(err => {
                         if (this.config.debug) {
                             log.debug('设置窗口标题失败:', err);
                         }
@@ -265,21 +269,35 @@ export class MpvPlayer extends BasePlayer {
                 }
 
                 const fnapi = this.getFnApi();
-                // 获取并下载字幕
-                fnapi.getSubtitle(itemGuid)
+                // 获取并下载字幕（基于影片中文标题挑选正确的中文外挂字幕）
+                fnapi.getSubtitle(itemGuid, videoTitle)
                     .then(fnapi.downloadSubtitle)
                     .then(async (subPaths: string[]) => {
                         // [fix] 切集时先清掉旧的外部字幕，避免第N集弹幕叠加残留（如看第3集同时加载了第2集的xml）
                         await this.removeAllExternalSubtitles();
-                        // 加载新字幕
-                        subPaths.forEach(subPath => {
-                            const subName = path.basename(subPath).split("@")[0]; // 获取原始字幕名称
-                            this.mpvInstance?.addSubtitles(subPath, "select", subName).catch(err => {
+                        if (subPaths.length === 0) {
+                            log.info(`[字幕] ${videoTitle} 无可用外挂字幕(跳过挂载)`);
+                            return;
+                        }
+                        log.info(`[字幕] ${videoTitle} 下载到字幕:`, subPaths.map(p => path.basename(p).split('@')[0]));
+                        // 加载新字幕：第一个为最佳匹配（已按中文优先 / 默认轨 / 标题匹配度排序），选中它显示；
+                        // 其余以 auto 方式加载，供用户在字幕菜单中手动切换，避免"错误的那条被强制显示"
+                        subPaths.forEach((subPath, idx) => {
+                            const subName = path.basename(subPath).split("@")[0]; // 获取原始字幕名称（保留中文）
+                            const flag = idx === 0 ? "select" : "auto";
+                            if (idx === 0) log.info(`[字幕] 选中显示: ${subName}`);
+                            this.mpvInstance?.addSubtitles(subPath, flag, subName).catch(err => {
                                 if (this.config.debug) {
                                     log.debug('加载字幕失败:', err);
                                 }
                             });
                         });
+                    })
+                    .catch((err: any) => {
+                        // 字幕获取/下载失败不应影响播放，且必须捕获以免产生 UnhandledPromiseRejection
+                        if (this.config.debug) {
+                            log.debug('字幕获取/下载失败(可忽略):', err);
+                        }
                     });
             }
         });

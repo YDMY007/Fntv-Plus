@@ -479,6 +479,11 @@ end
 -- 自动补源：文件名优先解析到番名/集数后，直连 B站 搜索对应集弹幕并叠加
 -- （绕开失效的 extcomment 代理）。也作为弹弹play 匹配成功后的兜底补源。
 function auto_search_extra(title, episode_num)
+    -- B站弹幕搜索总开关（由应用设置面板写入 script-opts/uosc_danmaku.conf 控制）
+    if not options.bili_search_enabled then
+        msg.info("自动补源：B站弹幕搜索已禁用，跳过")
+        return
+    end
     if not title or title == "" then return end
     -- episode_num：数字=指定集；0/nil=仅标题搜索（B站 取最优结果，极速兜底）
     if episode_num == nil then
@@ -499,13 +504,38 @@ function auto_search_extra(title, episode_num)
         return
     end
 
-    -- Python 解释器：优先用 WorkBuddy 自带的，其次系统 python / py
-    local py_candidates = {
-        "C:/Users/24305/.workbuddy/binaries/python/versions/3.13.12/python.exe",
-        "python",
-        "py",
-    }
-    local py_script = "C:/Users/24305/AppData/Local/Programs/fntv/third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/bili_danmaku.py"
+    -- Python 解释器：动态探测（跨机器通用，绝不写死绝对路径）
+    --   1) 优先 WorkBuddy 托管的 python（~/.workbuddy/binaries/python/versions/<ver>/python.exe）
+    --   2) 系统 PATH 兜底：python3 / python / py
+    local py_candidates = {}
+    local function fexists(p)
+        local f = io.open(p, "r")
+        if f then f:close(); return true end
+        return false
+    end
+    local wb_root = os.getenv("USERPROFILE") or os.getenv("HOME") or ""
+    if wb_root ~= "" then
+        local ver_root = utils.join_path(wb_root, ".workbuddy/binaries/python/versions")
+        local ok, entries = pcall(utils.readdir, ver_root)
+        if ok and entries then
+            for _, e in ipairs(entries) do
+                local name = type(e) == "table" and e.name or e
+                if name then
+                    local py_exe = utils.join_path(ver_root, name, "python.exe")
+                    if fexists(py_exe) then
+                        table.insert(py_candidates, py_exe)
+                    end
+                end
+            end
+        end
+    end
+    table.insert(py_candidates, "python3")
+    table.insert(py_candidates, "python")
+    table.insert(py_candidates, "py")
+
+    -- 脚本路径：用 mpv 脚本目录动态定位（跨机器通用，不依赖安装路径）
+    -- bili_danmaku.py 与 uosc_danmaku 脚本同目录（根目录），cookie 也在同目录
+    local py_script = utils.join_path(mp.get_script_directory(), "bili_danmaku.py")
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))

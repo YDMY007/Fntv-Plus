@@ -18,6 +18,7 @@ export interface Config {
     domain?: string;
     token?: string;
     useHttps?: boolean;
+    loginType?: 'fnid' | 'normal';
     history?: HistoryItem[];
     downloadProxyEnabled?: boolean;
     downloadProxy?: string;
@@ -26,7 +27,33 @@ export interface Config {
     trayNotificationShown?: boolean;
     nasProxyEnabled?: boolean;
     mpvPlayerPath?: string;
+    potPlayerPath?: string;
+    defaultPlayer?: 'mpv' | 'potplayer';
     exitMode?: 'direct' | 'minimize' | 'ask';
+    // MPV 默认着色器预设 key（由应用「设置面板 > 播放器 > 默认 MPV 着色器」管理）
+    // 'off' | 'a' | 'b' | 'aa' | 'bb' | 'lite' | 'denoise' | 'real' | 'cinema' | 'ultra'
+    mpvDefaultShader?: string;
+    // MPV 默认 ICC 校色开关（默认开启，固化到 mpv-user.conf）
+    mpvIccEnabled?: boolean;
+    // 豆瓣同步总开关（影视进度同步到豆瓣"在看/看过"）
+    doubanSyncEnabled?: boolean;
+    // 豆瓣登录态 Cookie（AES-256 加密存储；含 dbcl2/ck/bid 等）
+    doubanCookie?: string;
+    // 已观看列表→豆瓣"看过" 的自动同步间隔（分钟，0 或缺失=关闭；下限 10 分钟）
+    doubanWatchedScanIntervalMin?: number;
+    // 调试日志总开关：开=按组件显示详细日志(INFO/DEBUG)；关=控制台仅显示 WARN/ERROR
+    debugEnabled?: boolean;
+    // 各组件日志开关（仅当 debugEnabled 为 true 时生效）：组件 key -> 是否显示
+    // key 取值：douban(豆瓣同步) / subtitle(字幕) / danmaku(B站弹幕) / mpv(MPV) / potplayer(PotPlayer) / media(播放器/媒体) / embywall(EmbyWall 墙渲染日志)
+    debugComponents?: Record<string, boolean>;
+    // Bangumi Access Token（明文存于本地 config.json；用于 Bangumi 关联/同步）
+    bangumiToken?: string;
+    // Bangumi 集数级同步开关（观看进度达阈值时把该集标为 Bangumi「看过」）
+    bangumiSyncEnabled?: boolean;
+    // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
+    bangumiSyncThreshold?: number;
+    // MPV B站弹幕搜索开关（控制 uosc_danmaku 的 B站手动搜索是否可用，写入 script-opts/uosc_danmaku.conf）
+    mpvBiliSearchEnabled?: boolean;
 }
 
 /**
@@ -37,6 +64,8 @@ export interface HistoryItem {
     account: string;
     password: string;
     useHttps?: boolean;
+    loginType?: 'fnid' | 'normal';
+    fnId?: string;
 }
 
 /**
@@ -47,6 +76,7 @@ export interface SaveConfigParams {
     domain: string;
     token: string;
     useHttps?: boolean;
+    loginType?: 'fnid' | 'normal';
 }
 
 /**
@@ -57,6 +87,8 @@ export interface AddHistoryParams {
     account: string;
     password: string;
     useHttps?: boolean;
+    loginType?: 'fnid' | 'normal';
+    fnId?: string;
 }
 
 /**
@@ -121,17 +153,18 @@ export function readConfig(): Config | null {
 }
 
 // 保存配置（账号、域名、token、HTTPS设置）
-export function saveConfig({ account, domain, token, useHttps }: SaveConfigParams): void {
+export function saveConfig({ account, domain, token, useHttps, loginType }: SaveConfigParams): void {
     const config: Config = readConfig() || {};
     config.account = account;
     config.domain = domain;
     config.token = token;
     config.useHttps = useHttps || false;
+    if (loginType) config.loginType = loginType;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
 // 添加历史记录（域名、账号、加密密码、HTTPS设置）
-export function addHistory({ domain, account, password, useHttps }: AddHistoryParams): void {
+export function addHistory({ domain, account, password, useHttps, loginType, fnId }: AddHistoryParams): void {
     const config: Config = readConfig() || {};
     config.history = config.history || [];
     // 移除重复项
@@ -139,12 +172,10 @@ export function addHistory({ domain, account, password, useHttps }: AddHistoryPa
         item => !(item.domain === domain && item.account === account)
     );
     // 添加新项
-    config.history.unshift({
-        domain,
-        account,
-        password: encrypt(password),
-        useHttps: useHttps || false
-    });
+    const entry: HistoryItem = { domain, account, password: encrypt(password), useHttps: useHttps || false };
+    if (loginType) entry.loginType = loginType;
+    if (fnId) entry.fnId = fnId;
+    config.history.unshift(entry);
     // 限制最多数量
     if (config.history.length > HISTORY_LIMIT) {
         config.history = config.history.slice(0, HISTORY_LIMIT);
@@ -160,7 +191,9 @@ export function getHistory(): HistoryItem[] {
         domain: item.domain,
         account: item.account,
         password: decrypt(item.password),
-        useHttps: item.useHttps || false
+        useHttps: item.useHttps || false,
+        loginType: item.loginType || undefined,
+        fnId: item.fnId || undefined
     }));
 }
 
@@ -274,6 +307,66 @@ export function setMpvPlayerPath(path: string | null): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取 PotPlayer 播放器路径配置
+export function getPotPlayerPath(): string | undefined {
+    const config: Config = readConfig() || {};
+    return config.potPlayerPath;
+}
+
+// 设置 PotPlayer 播放器路径配置
+export function setPotPlayerPath(path: string | null): void {
+    const config: Config = readConfig() || {};
+    if (path === null || path === '') {
+        delete config.potPlayerPath; // 清空配置
+    } else {
+        config.potPlayerPath = path;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取默认播放器（直接播放时使用的外置/内置播放器）
+export function getDefaultPlayer(): 'mpv' | 'potplayer' {
+    const config: Config = readConfig() || {};
+    return config.defaultPlayer === 'potplayer' ? 'potplayer' : 'mpv';
+}
+
+// 设置默认播放器
+export function setDefaultPlayer(player: 'mpv' | 'potplayer'): void {
+    const config: Config = readConfig() || {};
+    config.defaultPlayer = player === 'potplayer' ? 'potplayer' : 'mpv';
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 MPV 默认着色器预设 key（'off' 表示不启用任何着色器）
+export function getMpvDefaultShader(): string {
+    const config: Config = readConfig() || {};
+    return config.mpvDefaultShader || 'off';
+}
+
+// 设置 MPV 默认着色器预设 key
+export function setMpvDefaultShader(shader: string): void {
+    const config: Config = readConfig() || {};
+    if (!shader || shader === 'off') {
+        config.mpvDefaultShader = 'off';
+    } else {
+        config.mpvDefaultShader = shader;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 MPV 默认 ICC 校色开关（默认开启）
+export function getMpvIccEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.mpvIccEnabled !== false; // 未设置视为开启
+}
+
+// 设置 MPV 默认 ICC 校色开关
+export function setMpvIccEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.mpvIccEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 向后兼容的函数
 export function getDownloadProxyUrl(): string {
     return getDownloadProxyConfig().proxyUrl;
@@ -298,6 +391,141 @@ export function setExitMode(mode: 'direct' | 'minimize' | 'ask'): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(updatedConfig, null, 2));
 }
 
+// 获取豆瓣同步总开关（默认关闭）
+export function getDoubanSyncEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.doubanSyncEnabled === true;
+}
+
+// 设置豆瓣同步总开关
+export function setDoubanSyncEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.doubanSyncEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取豆瓣登录态 Cookie（解密后的原始 cookie 字符串，未登录返回 null）
+export function getDoubanCookie(): string | null {
+    const config: Config = readConfig() || {};
+    if (!config.doubanCookie) return null;
+    try {
+        return decrypt(config.doubanCookie);
+    } catch {
+        return null;
+    }
+}
+
+// 设置/清除豆瓣登录态 Cookie（传 null/空串即清除）
+export function setDoubanCookie(cookie: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!cookie) {
+        delete config.doubanCookie;
+    } else {
+        config.doubanCookie = encrypt(cookie);
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取"已观看列表→豆瓣看过"自动同步间隔（分钟），默认 0=关闭
+export function getWatchedScanIntervalMin(): number {
+    const config: Config = readConfig() || {};
+    const v = Number(config.doubanWatchedScanIntervalMin);
+    if (!isFinite(v) || v <= 0) return 0;
+    return v;
+}
+
+// 设置自动同步间隔（分钟），<=0 表示关闭
+export function setWatchedScanIntervalMin(min: number): void {
+    const config: Config = readConfig() || {};
+    config.doubanWatchedScanIntervalMin = Math.max(0, Math.floor(Number(min) || 0));
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取调试日志总开关（默认关闭 → 控制台只显示 WARN/ERROR）
+export function getDebugEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.debugEnabled === true;
+}
+
+// 设置调试日志总开关
+export function setDebugEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.debugEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取各组件日志开关（未设置返回空对象，调用方按"默认开启"处理）
+export function getDebugComponents(): Record<string, boolean> {
+    const config: Config = readConfig() || {};
+    return config.debugComponents || {};
+}
+
+// 设置各组件日志开关
+export function setDebugComponents(components: Record<string, boolean>): void {
+    const config: Config = readConfig() || {};
+    config.debugComponents = components || {};
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 Bangumi Access Token（未设置返回 null）
+export function getBangumiToken(): string | null {
+    const config: Config = readConfig() || {};
+    return config.bangumiToken ? config.bangumiToken : null;
+}
+
+// 设置/清除 Bangumi Access Token（传 null/空串即清除）
+export function setBangumiToken(token: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!token) {
+        delete config.bangumiToken;
+    } else {
+        config.bangumiToken = token.trim();
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 Bangumi 同步开关
+export function getBangumiSyncEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.bangumiSyncEnabled === true;
+}
+
+// 设置 Bangumi 同步开关
+export function setBangumiSyncEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.bangumiSyncEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 Bangumi 同步阈值百分比（默认 80）
+export function getBangumiSyncThreshold(): number {
+    const config: Config = readConfig() || {};
+    const t = config.bangumiSyncThreshold;
+    if (typeof t === 'number' && t > 0 && t <= 100) return t;
+    return 80;
+}
+
+// 设置 Bangumi 同步阈值百分比
+export function setBangumiSyncThreshold(threshold: number): void {
+    const config: Config = readConfig() || {};
+    const t = Math.round(threshold);
+    config.bangumiSyncThreshold = (t > 0 && t <= 100) ? t : 80;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 MPV B站弹幕搜索开关（默认开启）
+export function getMpvBiliSearchEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.mpvBiliSearchEnabled !== false; // 未设置视为开启
+}
+
+// 设置 MPV B站弹幕搜索开关
+export function setMpvBiliSearchEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.mpvBiliSearchEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // CommonJS导出，确保与现有代码兼容
 module.exports = {
     saveConfig,
@@ -320,6 +548,32 @@ module.exports = {
     setTrayNotificationShown,
     getMpvPlayerPath,
     setMpvPlayerPath,
+    getPotPlayerPath,
+    setPotPlayerPath,
+    getDefaultPlayer,
+    setDefaultPlayer,
     getExitMode,
-    setExitMode
+    setExitMode,
+    getMpvDefaultShader,
+    setMpvDefaultShader,
+    getMpvIccEnabled,
+    setMpvIccEnabled,
+    getDoubanSyncEnabled,
+    setDoubanSyncEnabled,
+    getDoubanCookie,
+    setDoubanCookie,
+    getWatchedScanIntervalMin,
+    setWatchedScanIntervalMin,
+    getDebugEnabled,
+    setDebugEnabled,
+    getDebugComponents,
+    setDebugComponents,
+    getBangumiToken,
+    setBangumiToken,
+    getBangumiSyncEnabled,
+    setBangumiSyncEnabled,
+    getBangumiSyncThreshold,
+    setBangumiSyncThreshold,
+    getMpvBiliSearchEnabled,
+    setMpvBiliSearchEnabled
 };
