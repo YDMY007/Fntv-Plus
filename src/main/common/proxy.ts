@@ -32,7 +32,11 @@ function getProxyExecPath(): string {
         const contentsPath = path.dirname(path.dirname(appPath)); // 从app.asar向上两级到Contents
         return path.join(contentsPath, 'third_party', 'proxy', 'proxy');
     } else if (process.platform === 'win32') {
-        return ".\\third_party\\proxy\\proxy.exe";
+        // Windows: extraFiles 把 third_party 复制到了 exe 同级目录。
+        // 必须用 exe 所在目录拼【绝对路径】，否则从开始菜单/快捷方式/UAC 启动时
+        // 进程 cwd 未必是安装目录，相对路径 ".\\third_party\\proxy\\proxy.exe"
+        // 会解析失败 -> existsSync=false -> 代理启动抛错 -> 主进程在创建窗口前即退出(表现为"打不开")。
+        return path.join(path.dirname(app.getPath('exe')), 'third_party', 'proxy', 'proxy.exe');
     } else {
         // Linux: 构建时只复制了proxy目录内容到third_party/proxy
         const appPath = app.getAppPath();
