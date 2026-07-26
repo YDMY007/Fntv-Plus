@@ -39,6 +39,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
+  _apiShows.length = 0; // 清空旧数据, 支持定时重拉时干净重建(避免重复累积)
 
   try {
     // 隐藏iframe加载/v/list/all → React渲染 → 提取前10剧集
@@ -2727,6 +2728,25 @@ function handle(): void {
     _carouselInited = false;
     injectCarousel();
   }).catch(e => log('fetch error:', e));
+
+  // 3) 定时自动刷新轮播内容(无需退出重开):
+  //    库数据变化(新增/改名/排序)后, 留在首页即可看到最新轮播。
+  //    仅在轮播当前可见(处于首页)时重拉, 避免后台无意义 iframe 轮询;
+  //    非首页时安全跳过(注入逻辑找不到"媒体库"节点会自动 return)。
+  const CAROUSEL_REFRESH_MS = 5 * 60 * 1000;
+  setInterval(() => {
+    if (_apiLoading) return;
+    if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
+    _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
+    log('carousel auto-refresh: re-fetching');
+    fetchShowsViaIPC(base).then(() => {
+      if (_apiShows.length === 0) return;
+      log('carousel auto-refresh: got', _apiShows.length, 'shows, rebuilding');
+      _carouselInited = false;
+      injectCarousel();
+    }).catch(e => log('carousel auto-refresh error:', e));
+  }, CAROUSEL_REFRESH_MS);
+
   wheelToScroll();
   [2000, 4000, 8000].forEach(ms => setTimeout(wheelToScroll, ms));
 
