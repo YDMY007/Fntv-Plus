@@ -29,11 +29,10 @@
 >
 > - **上游项目**：基于飞牛影视（fnOS TV）Web 端封装的 Electron 桌面客户端。
 > - **原项目版权**：归原作者 [QiaoKes](https://github.com/QiaoKes) 所有，遵循 [GPL-3.0](LICENSE) 许可证。
-> - **本仓库（[YDMY007/Fntv-Plus](https://github.com/YDMY007/Fntv-Plus)）**：在上游基础上叠加了**桌面亚克力风格、原生窗口交互、侧栏设置面板、豆瓣同步、Bangumi 集数级同步、兼容PotPlayer播放器。**等大量 UI / 体验增强，**已改动上游核心代码此后将作为独立分支独立发展，不再跟随上游更新。**（preload 注入与 main 主进程均有修改）。
+> - **本仓库（[YDMY007/Fntv-Plus](https://github.com/YDMY007/Fntv-Plus)）**：在上游基础上叠加了**桌面亚克力风格、原生窗口交互、侧栏设置面板、豆瓣同步、Bangumi 集数级同步、兼容PotPlayer播放器等大量 UI / 体验增强**，**已改动上游核心代码此后将作为独立分支独立发展，不再跟随上游更新。**（preload 注入与 main 主进程均有修改）。
 > - **许可证继承**：本仓库沿用原项目的 GPL-3.0 许可证，完整条款见 [LICENSE](LICENSE) 文件。
 
->  **免责声明**：⚠️本项目为第三方客户端，与飞牛影视官方无关。使用前请确保遵守相关服务条款与版权规定。
-
+>  **免责声明**：⚠️本项目为第三方客户端，与飞牛影视官方无关。本项目仅为作者本人**个人练手 / 学习用途**的开源项目，不代表任何官方立场，亦与飞牛影视官方不存在任何关联或合作关系。使用前请确保遵守相关服务条款与版权规定，因使用本项目产生的任何后果由使用者自行承担。
 ---
 
 ## ✨ 本仓库增强功能
@@ -51,17 +50,17 @@
 
 ### 设置面板（侧栏「⚙ 设置」入口，居中半透面板）
 
-- **🎬 播放器设置** — MPV 可执行文件路径自定义、PotPlayer 外部播放器支持（含续播与逐集连播，进度实时回传）、MPV 播放器着色器方案优化（10 档预设 + 自定义）
+- **🎬 播放器设置** — MPV、PotPlayer 外部播放器支持（含续播与逐集连播，进度实时回传）、MPV 播放器着色器方案优化（10 档预设 + 自定义）
 - **🔍 B站弹幕自动获取** — 扫码登录B站，一键自动获取对应番剧弹幕，追番无忧；
-- **📺 豆瓣同步** — 播放进度自动标记豆瓣「在看」；飞牛「已观看列表」自动标记豆瓣「看过」。支持扫码登录与手动粘贴 Cookie，内置 CSRF 令牌自动获取与兜底。
-- **📊 Bangumi 自动点格子** — 播放进度达阈值（默认 80%，可调）自动标记该集为 Bangumi「看过」+ 条目标「在看」；末集自动标整部「看过」。
+- **📺 豆瓣同步** — 播放进度自动标记豆瓣「在看」；飞牛「已观看列表」自动标记豆瓣「看过」。
+- **📊 Bangumi 自动点格子** — 播放进度达阈值（默认 80%）自动标记该集为 Bangumi「看过」+ 条目标「在看」；末集自动标整部「看过」。
 - **🐛 调试日志** — 控制台日志级别开关 + 按组件单独控制；「打开日志文件」与「导出日志文件」快捷操作。
 
 ### 播放与媒体
 
 - **🎯 字幕自动选择** — 自动匹配最佳一条中文外挂字幕（按 lang/title/评分排序），MPV 与 PotPlayer 均支持。
-- **💬 B站弹幕自动匹配** — MPV 播放器自动按番名/集数匹配加载 B站弹幕；无法匹配时支持手动搜索（uosc 控制栏输入框）；弹幕标题归⼀化处理中日文书名号/引号。
-- **📺 PotPlayer 外链播放器** — 支持调用系统 PotPlayer 播放，带续播（和逐集连播；每 5 秒读取播放进度回写飞牛，实现进度同步；配置隔离（内置 PotPlayer 复制到 userData，触发便携模式）。
+- **💬 B站弹幕自动匹配** — MPV 播放器自动按番名/集数匹配加载 B站弹幕；无法匹配时支持手动搜索。
+- **📺 PotPlayer 外链播放器** — 支持调用系统 PotPlayer 播放，带续播和逐集连播；每 5 秒读取播放进度回写飞牛，实现进度同步。
 - **🎨 MPV 着色器 / ICC** — 10 档预设着色器方案（含 anime4K）+ ICC 校色开关，通过控制，设置面板即时生效。
 - **🔗 直链 / NAS 代理双模式** — 支持 302 重定向直链与 NAS 代理两种播放链路，可在设置面板切换。
 
@@ -70,6 +69,51 @@
 - **📋 托盘菜单精简** — 托盘右键菜单只保留「退出」，其余功能全部收进侧栏设置面板。
 - **🔧 侧栏实时调节** — 侧栏内透明 / 模糊滑块，实时调节客户端亚克力强度。
 - **🔐 FN ID 远程登录** — 使用 FN Connect 实现远程访问，独立 OAuth 窗口 + Cookie 持久化，支持多账户管理。
+
+---
+
+## 📁 项目结构
+
+```text
+Fntv-Plus/
+├── src/                          # 源码（TypeScript）
+│   ├── main/                     # Electron 主进程
+│   │   ├── main.ts               # 程序入口：窗口创建、生命周期、托盘、单实例锁
+│   │   ├── common/               # 主进程公共工具与类型
+│   │   └── handlers/             # IPC 处理器
+│   │       ├── core/             # 核心 IPC（窗口、导航、配置读写、登录）
+│   │       └── plugins/          # 功能 IPC（豆瓣 / Bangumi / 弹幕 / 播放器等）
+│   ├── preload/                  # 预加载脚本（隔离上下文桥接飞牛 Web 与 Node）
+│   │   ├── index.ts              # preload 入口
+│   │   ├── core/                 # 注入飞牛 Web 的钩子 / 工具 / 类型
+│   │   └── plugins/              # 注入侧功能模块
+│   ├── modules/                  # 可复用业务模块
+│   │   ├── cert_trust/           # 证书信任（NAS 自签 https）
+│   │   ├── danmaku/              # B站弹幕：获取 / 合并 / 叠层 / 字幕合并
+│   │   ├── fn_api/               # 飞牛影视 API 封装（api / request / types）
+│   │   ├── fn_config/            # 配置持久化（AES-256 加密，存 userData/config.json）
+│   │   ├── logger/               # 分级日志 + 敏感信息脱敏
+│   │   ├── players/              # 播放器抽象层（factory / index / types）
+│   │   │   └── impl/             # 具体实现：mpv.ts / potplayer.ts
+│   │   ├── proxy/                # NAS 代理服务（Go 编译 proxy.exe）+ potctl
+│   │   └── updater/              # 更新检查（GitHub 直连 + 镜像兜底）
+│   └── public/                   # 静态资源（注入 HTML / CSS 模板）
+├── third_party/                  # 第三方依赖（仅文本/配置入库，二进制由 CI/go build 生成）
+│   ├── fntv-mpv/                 # MPV 便携配置（uosc 脚本 / 着色器 / mpv.conf / .cache）
+│   ├── potplayer/                # 内置便携版 PotPlayer
+│   ├── proxy/                    # Go 代理源码（proxy.exe 构建时生成）
+│   └── python/                   # 内置 embeddable Python（B站弹幕脚本运行时）
+├── resource/                     # 文档与图片
+│   ├── docs/                     # README 截图（simple / Settings / Detailsettings / Potplayer）
+│   └── login/                    # 登录相关资源
+├── scripts/                      # 构建辅助脚本（图标生成 / potplayer 复制等）
+├── build/                        # 打包资源（icon / entitlements.mac.plist，供 electron-builder）
+├── .github/workflows/            # 自动构建（release.yml：macOS / Linux 自动，Windows 手传）
+├── package.json                  # 依赖与打包配置（artifactName = Fntv-Plus_*）
+├── tsconfig.json                 # TypeScript 配置
+├── CHANGELOG.md                  # 版本更新日志（本地维护，手动粘到 Release）
+└── README.md                     # 本文件
+```
 
 ---
 
