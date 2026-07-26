@@ -111,13 +111,31 @@ function getMpvPlayerPath(): string | undefined {
 }
 
 /**
- * 内置 PotPlayer 的「隔离运行目录」：放在 userData 下，确保有写权限，
- * 并通过 exe 同目录的 PotPlayerMini64.ini 启用「ini 便携模式」，
- * 完全脱离本机注册表（HKCU\Software\Daum\PotPlayer），
- * 从而与本机已安装的 PotPlayer 配置互不干扰。
+ * 路径是否纯 ASCII（不含中文/非 ASCII 字符）。
+ * PotPlayer 是 ANSI(C/GBK) 程序，凡经它解析的路径(ini/配置/字幕)若含非 ASCII
+ * 会按 GBK 错误解析，导致配置加载失败、「无法播放」或字幕打不开。
+ * 内置 PotPlayer 副本与字幕缓存都必须落在纯 ASCII 目录。
  */
-function getUserDataPotPlayerDir(): string {
-    return path.join(app.getPath('userData'), 'potplayer');
+function isAsciiPath(p: string): boolean {
+    return !/[^\x00-\x7F]/.test(p);
+}
+
+/**
+ * 内置 PotPlayer 的「隔离运行目录」。
+ * 必须落在【不含中文用户名/不含非 ASCII】的固定系统目录，
+ * 否则 PotPlayer（ANSI 程序）按 GBK 解析 ini/配置路径失败 → 无法播放。
+ * 优先 C:\Users\Public\Fntv-Plus（所有 Windows 固定英文路径、普通用户可写），
+ * 回退 C:\ProgramData\Fntv-Plus，最后才回退 userData（旧行为，会触发中文路径警告）。
+ */
+function getBundledPotPlayerDir(): string {
+    const candidates = [process.env.PUBLIC, process.env.ProgramData, app.getPath('userData')]
+        .filter(Boolean) as string[];
+    for (const base of candidates) {
+        if (isAsciiPath(base)) {
+            return path.join(base, 'Fntv-Plus', 'potplayer');
+        }
+    }
+    return path.join(app.getPath('userData'), 'Fntv-Plus', 'potplayer');
 }
 
 /**
@@ -146,10 +164,24 @@ function getBundledPotPlayerSource(): string | null {
  * 幂等：副本已存在则跳过（保留用户已生成的便携配置，不被覆盖）。
  */
 function prepareBundledPotPlayer(): void {
-    const dest = getUserDataPotPlayerDir();
+    const dest = getBundledPotPlayerDir();
+    fs.mkdirSync(dest, { recursive: true });
     const exePath = path.join(dest, 'PotPlayerMini64.exe');
     if (fs.existsSync(exePath)) {
         return; // 已就绪，保留用户配置
+    }
+    // 迁移旧版落在 userData 下的副本(含用户已生成的便携 ini 配置)，
+    // 既不重复复制 209MB、又保留用户配置，且把路径挪到确定非中文目录。
+    const legacy = path.join(app.getPath('userData'), 'potplayer');
+    const legacyExe = path.join(legacy, 'PotPlayerMini64.exe');
+    if (fs.existsSync(legacyExe)) {
+        try {
+            fs.renameSync(legacy, dest);
+            log.info(`[PotPlayer] 已迁移旧副本到非中文目录: ${dest}`);
+            return;
+        } catch (e) {
+            log.warn(`[PotPlayer] 迁移旧副本失败，改从内置来源复制: ${e}`);
+        }
     }
     const src = getBundledPotPlayerSource();
     if (!src) {
@@ -177,7 +209,7 @@ function prepareBundledPotPlayer(): void {
  * （ini 便携模式，不碰注册表），而非 Program Files 内只读来源。
  */
 function resolveBundledPotPlayerPath(): string {
-    return path.join(getUserDataPotPlayerDir(), 'PotPlayerMini64.exe');
+    return path.join(getBundledPotPlayerDir(), 'PotPlayerMini64.exe');
 }
 
 /**
@@ -189,7 +221,7 @@ export function isPotPlayerBundled(): boolean {
     if (configPath) return false; // 用户显式指定了覆盖路径 -> 非内置模式
     // 内置来源存在，或 userData 隔离副本已就绪
     return !!getBundledPotPlayerSource() ||
-        fs.existsSync(path.join(getUserDataPotPlayerDir(), 'PotPlayerMini64.exe'));
+        fs.existsSync(path.join(getBundledPotPlayerDir(), 'PotPlayerMini64.exe'));
 }
 
 /**

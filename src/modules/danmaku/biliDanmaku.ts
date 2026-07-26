@@ -463,7 +463,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 // ===================== 对外主入口 =====================
 
-const CACHE_DIR = path.join(os.tmpdir(), 'fnos-danmaku');
+/**
+ * 弹幕/ASS 缓存根目录。
+ * 必须落在【不含中文】的目录：PotPlayer 是按 ANSI(GBK) 解析 -sub 字幕参数的，
+ * 若目录含中文用户名(os.tmpdir() 默认指向 C:\Users\<中文>\AppData\Local\Temp)，
+ * PotPlayer 实际拿到的是坏路径 → 字幕/弹幕打不开。
+ * 优先 C:\Users\Public 与 C:\ProgramData（Windows 固定英文路径），
+ * 回退 os.tmpdir()（旧行为，中文用户名下会触发该问题）。
+ */
+function getDanmakuCacheBase(): string {
+    return process.env.PUBLIC || process.env.ProgramData || os.tmpdir();
+}
+const CACHE_DIR = path.join(getDanmakuCacheBase(), 'fnos-danmaku');
 
 function safeName(s: string): string {
     return (s || 'x').replace(/[\\/:*?"<>|]/g, '');
