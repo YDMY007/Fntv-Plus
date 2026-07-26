@@ -35,3 +35,8 @@ _test_parse.js
 
 # 截图 / 临时调试产物
 shots/
+
+# ⚠️ 本地 commit 归档：纯本地回退保底，【严禁推送 GitHub】
+# 内含 commits.md（详细改动记录）与 项目记忆.md，仅本机使用，绝不入库。
+本地commit/
+本地commit/*
