@@ -62,7 +62,7 @@
         },
         "icon": "build/icon.ico",
         "productName": "飞牛影视",
-        "artifactName": "FNMedia_${version}_${os}_${arch}.${ext}",
+        "artifactName": "Fntv-Plus_${version}_${os}_${arch}.${ext}",
         "appId": "com.qiaokes.fntv",
         "compression": "normal",
         "win": {
@@ -141,7 +141,7 @@
             ]
         },
         "dmg": {
-            "title": "FNMedia_${version}_${arch}",
+            "title": "Fntv-Plus_${version}_${arch}",
             "icon": "build/icon.icns",
             "window": {
                 "width": 540,

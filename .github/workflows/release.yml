@@ -1,26 +1,11 @@
 name: Release Build
 
 on:
-  push:
-    branches:
-      - release
-    # 排除爱发电相关的提交和文档更新
-    paths-ignore:
-      - 'README.md'
-      - '.github/afdian-action.cshtml'
-      - '.github/workflows/afdian-action.yml'
-      - 'docs/**'
-      - '*.md'
-#   pull_request:
-#     branches:
-#       - release
-#     # 排除爱发电相关文件的变更和文档更新
-#     paths-ignore:
-#       - 'README.md'
-#       - '.github/afdian-action.cshtml'
-#       - '.github/workflows/afdian-action.yml'
-#       - 'docs/**'
-#       - '*.md'
+  # 由维护者手动发布 Release（并上传 Windows 安装包）后触发：
+  # CI 自动构建 macOS / Linux 安装包并追加上传到该 Release。
+  # 普通 push 不再触发任何构建。
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -28,47 +13,14 @@ permissions:
   packages: write
 
 jobs:
-  # 检查提交消息是否应该跳过构建
-  check-commit:
-    runs-on: ubuntu-latest
-    outputs:
-      should-skip: ${{ steps.check.outputs.should-skip }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Check commit message
-        id: check
-        run: |
-          commit_message="${{ github.event.head_commit.message }}"
-          echo "Commit message: $commit_message"
-          
-          # 检查是否包含跳过关键词
-          if [[ "$commit_message" == *"[skip ci]"* ]] || \
-             [[ "$commit_message" == *"爱发电"* ]] || \
-             [[ "$commit_message" == *"afdian"* ]] || \
-             [[ "$commit_message" == *"sponsor"* ]]; then
-            echo "should-skip=true" >> $GITHUB_OUTPUT
-            echo "⏭️ Skipping build due to commit message"
-          else
-            echo "should-skip=false" >> $GITHUB_OUTPUT
-            echo "✅ Proceeding with build"
-          fi
-
   build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    needs: check-commit
-    if: needs.check-commit.outputs.should-skip != 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            platform: windows
           - os: macos-latest
             platform: macos
           - os: ubuntu-latest
@@ -145,15 +97,23 @@ jobs:
             
             # 根据平台使用不同的解压命令
             if [ "$RUNNER_OS" = "Windows" ]; then
-              # Windows 使用 PowerShell 解压
-              powershell -Command "Expand-Archive -Path mpv-config.zip -DestinationPath third_party/fntv-mpv -Force"
-              # Windows 删除文件
-              powershell -Command "Remove-Item -Path mpv-config.zip -Force -ErrorAction SilentlyContinue"
+              # Windows: 解压到临时目录再搬入，避免交互式覆盖提示与顶层目录嵌套
+              TMPD=$(powershell -Command "New-Item -ItemType Directory -Force -Path (Join-Path \$env:TEMP ([System.Guid]::NewGuid().ToString())) | Select-Object -ExpandProperty FullName")
+              powershell -Command "Expand-Archive -Path mpv-config.zip -DestinationPath '$TMPD' -Force"
+              powershell -Command "\$items = Get-ChildItem -Path '$TMPD'; if (\$items.Count -eq 1 -and \$items[0].PSIsContainer) { Move-Item -Path (Join-Path \$items[0].FullName '*') -Destination third_party/fntv-mpv -Force } else { Move-Item -Path (Join-Path '$TMPD' '*') -Destination third_party/fntv-mpv -Force }"
+              powershell -Command "Remove-Item -Path mpv-config.zip -Force -ErrorAction SilentlyContinue; Remove-Item -Path '$TMPD' -Recurse -Force -ErrorAction SilentlyContinue"
             else
-              # macOS 和 Linux 使用 unzip
-              unzip -q mpv-config.zip -d third_party/fntv-mpv
-              # macOS 和 Linux 删除文件
-              rm -f mpv-config.zip
+              # macOS / Linux: 解压到临时目录，遇同名文件强制覆盖(-o)，并展平可能的单一顶层目录
+              TMPD=$(mktemp -d)
+              unzip -oq mpv-config.zip -d "$TMPD"
+              shopt -s dotglob
+              items=("$TMPD"/*)
+              if [ ${#items[@]} -eq 1 ] && [ -d "${items[0]}" ]; then
+                mv "${items[0]}"/. third_party/fntv-mpv/ 2>/dev/null || true
+              else
+                mv "$TMPD"/. third_party/fntv-mpv/ 2>/dev/null || true
+              fi
+              rm -rf "$TMPD" mpv-config.zip
             fi
           fi
           
@@ -195,14 +155,14 @@ jobs:
           path: release/
           retention-days: 30
       # —— 构建后：兜底清理（避免影响后续/下次流水线）——
-      - name: Post-clean DMG volumes (FNMedia_* / 飞牛影视*)
+      - name: Post-clean DMG volumes (Fntv-Plus_* / FNMedia_* / 飞牛影视*)
         if: always() && runner.os == 'macOS'
         shell: bash
         run: |
             set -euo pipefail
             matches="$(
             hdiutil info | awk -F': ' '/mount-point/ {print $2}' | \
-            grep -E '^(\/Volumes\/FNMedia_|\/Volumes\/飞牛影视)' || true
+            grep -E '^(\/Volumes\/Fntv-Plus_|\/Volumes\/FNMedia_|\/Volumes\/飞牛影视)' || true
             )"
             if [ -n "$matches" ]; then
             echo "$matches" | while IFS= read -r V; do
@@ -217,10 +177,10 @@ jobs:
             fi
 
   release:
-    name: Create Release
-    needs: [check-commit, build]
+    name: Upload to Release
+    needs: [build]
     runs-on: ubuntu-latest
-    if: success() && needs.check-commit.outputs.should-skip != 'true'
+    if: success()
 
     steps:
       - name: Checkout code
@@ -233,21 +193,16 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Get commit info
-        id: commit
+      - name: Resolve target tag
+        id: tag
         run: |
-          {
-              echo "message<<EOF"
-              git log -1 --pretty=%B
-              echo
-              echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-
-      - name: Get package version
-        id: package
-        run: |
-          echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          # release 事件：直接用触发本次构建的 Release 的 tag
+          # workflow_dispatch 手动触发：兜底用 package.json 版本号拼 tag
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=v$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -257,35 +212,13 @@ jobs:
       - name: List downloaded files
         run: find artifacts -type f -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" | sort
 
-      - name: Create Release
+      - name: Upload assets to existing Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.package.outputs.version }}
-          name: 飞牛影视 v${{ steps.package.outputs.version }}
-          body: |
-            ## 🎬 飞牛影视 v${{ steps.package.outputs.version }}
-
-            ### 🔄 更新内容
-            ```
-            ${{ steps.commit.outputs.message }}
-            ```
-            
-            ### 💻 支持平台
-            - ✅ Windows (x64)
-            - ✅ macOS (Intel & Apple Silicon)
-            - ✅ Linux (x64 & ARM64)
-            
-            ### 📥 下载指南
-            | 平台 | 文件类型 | 说明 |
-            |------|----------|------|
-            | 💻 Windows | `.exe` | 安装程序，双击运行 |
-            | 🍎 macOS | `.dmg` | 磁盘镜像，安装后执行: `sudo find "/Applications/飞牛影视.app" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null` |
-            | 🐧 Linux | `.AppImage` | 便携应用，添加执行权限后直接运行。 插件前往[fntv-mpv](https://github.com/QiaoKes/fntv-mpv-config/releases) 自行安装，要求mpv版本>0.37.0 |
-            
-            ---
-            *自动构建于 GitHub Actions* 🤖
+          # 只往维护者已手动发布的 Release 追加 macOS / Linux 安装包；
+          # 不修改 Release 标题和说明（说明由维护者手动填写）。
+          tag_name: ${{ steps.tag.outputs.tag }}
           files: |
-            artifacts/windows-build/*.exe
             artifacts/macos-build/*.dmg
             artifacts/linux-build/*.AppImage
           draft: false

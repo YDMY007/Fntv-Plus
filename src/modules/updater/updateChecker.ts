@@ -229,7 +229,7 @@ export class UpdateChecker {
         log.info(`当前平台: ${platform}, 架构: ${arch}`);
 
         // 根据实际构建配置选择合适的安装包
-        // 文件命名格式: FNMedia_${version}_${os}_${arch}.${ext}
+        // 文件命名格式: Fntv-Plus_${version}_${os}_${arch}.${ext}（旧版为 FNMedia_ 前缀，正则同时兼容）
         let patterns: RegExp[] = [];
 
         switch (platform) {
@@ -237,7 +237,7 @@ export class UpdateChecker {
                 // Windows: 仅支持 x64
                 if (arch === 'x64') {
                     patterns = [
-                        /FNMedia_.*_win_x64\.exe$/i,
+                        /(?:FNMedia|Fntv-Plus)_.*_win_x64\.exe$/i,
                         /_win_x64\.exe$/i,
                         /win.*x64.*\.exe$/i
                     ];
@@ -251,13 +251,13 @@ export class UpdateChecker {
                 // macOS: 支持 x64 和 arm64
                 if (arch === 'arm64') {
                     patterns = [
-                        /FNMedia_.*_mac_arm64\.dmg$/i,
+                        /(?:FNMedia|Fntv-Plus)_.*_mac_arm64\.dmg$/i,
                         /_mac_arm64\.dmg$/i,
                         /mac.*arm64.*\.dmg$/i
                     ];
                 } else if (arch === 'x64') {
                     patterns = [
-                        /FNMedia_.*_mac_x64\.dmg$/i,
+                        /(?:FNMedia|Fntv-Plus)_.*_mac_x64\.dmg$/i,
                         /_mac_x64\.dmg$/i,
                         /mac.*x64.*\.dmg$/i
                     ];
@@ -271,13 +271,13 @@ export class UpdateChecker {
                 // Linux: 支持 x64 和 arm64
                 if (arch === 'x64') {
                     patterns = [
-                        /FNMedia_.*_linux_x64\.AppImage$/i,
+                        /(?:FNMedia|Fntv-Plus)_.*_linux_x64\.AppImage$/i,
                         /_linux_x64\.AppImage$/i,
                         /linux.*x64.*\.AppImage$/i
                     ];
                 } else if (arch === 'arm64') {
                     patterns = [
-                        /FNMedia_.*_linux_arm64\.AppImage$/i,
+                        /(?:FNMedia|Fntv-Plus)_.*_linux_arm64\.AppImage$/i,
                         /_linux_arm64\.AppImage$/i,
                         /linux.*arm64.*\.AppImage$/i
                     ];
