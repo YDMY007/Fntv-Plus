@@ -66,6 +66,7 @@ interface LoginData {
     username: string;
     password: string;
     useHttps?: boolean;
+    rememberPassword?: boolean;
 }
 
 /**
@@ -436,7 +437,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     fnConfig.addHistory({
                         domain: baseUrl,
                         account: loginData.username || fnId,
-                        password: loginData.password,
+                        password: loginData.rememberPassword ? loginData.password : '',
                         useHttps: true,
                         loginType: 'fnid',
                         fnId: fnId,

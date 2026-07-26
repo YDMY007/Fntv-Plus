@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { app } from 'electron';
+import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
 const log = logger.component('danmaku');
 
@@ -45,11 +46,28 @@ function resolveScriptDir(): string | null {
     return null;
 }
 
-// ---- Python 解释器候选（与 Lua 端一致：优先 WorkBuddy 自带，其次系统 python/py）----
+// ---- Python 解释器候选（优先顺序：用户自定义 > 内置精简 Python > WorkBuddy 自带 > 系统 PATH）----
+// 用户可在「B站弹幕登录」设置页指定本机 Python（pythonPath）；留空则回退到内置便携版。
+// 内置 Python 随安装包分发（third_party/python，仅标准库即可跑 bili_danmaku.py），
+// 保证无 Python 环境的电脑（如纯净服务器）也能用 B站弹幕，无需用户自行安装。
+function getBundledPython(): string | null {
+    const base = app.isPackaged
+        ? path.dirname(app.getPath('exe'))   // 打包后 third_party 在 exe 同级目录
+        : app.getAppPath();                   // dev 下在项目根
+    const p = path.join(base, 'third_party', 'python', 'python.exe');
+    return fs.existsSync(p) ? p : null;
+}
+
 function findPythonCandidates(): string[] {
     const cands: string[] = [];
+    // 0) 用户自定义 Python（设置页指定，最高优先级）
+    const custom = fnConfig.getPythonPath();
+    if (custom && fs.existsSync(custom)) cands.push(custom);
+    // 1) 内置精简 Python（零配置可用）
+    const bundled = getBundledPython();
+    if (bundled) cands.push(bundled);
     const home = os.homedir();
-    // 1) 通用：扫描 WorkBuddy 托管的各版本 python
+    // 2) 通用：扫描 WorkBuddy 托管的各版本 python
     const verRoot = path.join(home, '.workbuddy', 'binaries', 'python', 'versions');
     try {
         if (fs.existsSync(verRoot)) {
@@ -59,7 +77,7 @@ function findPythonCandidates(): string[] {
             }
         }
     } catch (_) { /* ignore */ }
-    // 2) 系统 PATH
+    // 3) 系统 PATH
     cands.push('python', 'python3', 'py');
     return cands;
 }
@@ -445,7 +463,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 // ===================== 对外主入口 =====================
 
-const CACHE_DIR = path.join(os.tmpdir(), 'fnos-danmaku');
+/**
+ * 弹幕/ASS 缓存根目录。
+ * 必须落在【不含中文】的目录：PotPlayer 是按 ANSI(GBK) 解析 -sub 字幕参数的，
+ * 若目录含中文用户名(os.tmpdir() 默认指向 C:\Users\<中文>\AppData\Local\Temp)，
+ * PotPlayer 实际拿到的是坏路径 → 字幕/弹幕打不开。
+ * 优先 C:\Users\Public 与 C:\ProgramData（Windows 固定英文路径），
+ * 回退 os.tmpdir()（旧行为，中文用户名下会触发该问题）。
+ */
+function getDanmakuCacheBase(): string {
+    return process.env.PUBLIC || process.env.ProgramData || os.tmpdir();
+}
+const CACHE_DIR = path.join(getDanmakuCacheBase(), 'fnos-danmaku');
 
 function safeName(s: string): string {
     return (s || 'x').replace(/[\\/:*?"<>|]/g, '');

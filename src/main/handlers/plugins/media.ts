@@ -111,13 +111,31 @@ function getMpvPlayerPath(): string | undefined {
 }
 
 /**
- * 内置 PotPlayer 的「隔离运行目录」：放在 userData 下，确保有写权限，
- * 并通过 exe 同目录的 PotPlayerMini64.ini 启用「ini 便携模式」，
- * 完全脱离本机注册表（HKCU\Software\Daum\PotPlayer），
- * 从而与本机已安装的 PotPlayer 配置互不干扰。
+ * 路径是否纯 ASCII（不含中文/非 ASCII 字符）。
+ * PotPlayer 是 ANSI(C/GBK) 程序，凡经它解析的路径(ini/配置/字幕)若含非 ASCII
+ * 会按 GBK 错误解析，导致配置加载失败、「无法播放」或字幕打不开。
+ * 内置 PotPlayer 副本与字幕缓存都必须落在纯 ASCII 目录。
  */
-function getUserDataPotPlayerDir(): string {
-    return path.join(app.getPath('userData'), 'potplayer');
+function isAsciiPath(p: string): boolean {
+    return !/[^\x00-\x7F]/.test(p);
+}
+
+/**
+ * 内置 PotPlayer 的「隔离运行目录」。
+ * 必须落在【不含中文用户名/不含非 ASCII】的固定系统目录，
+ * 否则 PotPlayer（ANSI 程序）按 GBK 解析 ini/配置路径失败 → 无法播放。
+ * 优先 C:\Users\Public\Fntv-Plus（所有 Windows 固定英文路径、普通用户可写），
+ * 回退 C:\ProgramData\Fntv-Plus，最后才回退 userData（旧行为，会触发中文路径警告）。
+ */
+function getBundledPotPlayerDir(): string {
+    const candidates = [process.env.PUBLIC, process.env.ProgramData, app.getPath('userData')]
+        .filter(Boolean) as string[];
+    for (const base of candidates) {
+        if (isAsciiPath(base)) {
+            return path.join(base, 'Fntv-Plus', 'potplayer');
+        }
+    }
+    return path.join(app.getPath('userData'), 'Fntv-Plus', 'potplayer');
 }
 
 /**
@@ -138,36 +156,71 @@ function getBundledPotPlayerSource(): string | null {
 }
 
 /**
- * 将内置 PotPlayer 准备到 userData 下的可写隔离副本：
- * 首次（或升级后）从只读来源整体复制，并确保存在 PotPlayerMini64.ini
- * 以启用「ini 便携模式」——配置只写该 ini，绝不触碰本机注册表，
- * 因此本项目的 PotPlayer 拥有一套独立、全新的配置，与本机 PotPlayer 隔离。
+ * 异步准备内置 PotPlayer 隔离副本（不阻塞主线程）。
  *
  * 幂等：副本已存在则跳过（保留用户已生成的便携配置，不被覆盖）。
+ * 首次（或升级后）从只读来源整体复制/迁移，并确保存在 PotPlayerMini64.ini
+ * 以启用「ini 便携模式」——配置只写该 ini，绝不触碰本机注册表。
+ *
+ * 实现策略: 用 setImmediate 将文件操作放到下一个事件循环 tick,
+ * 避免 fs.cpSync(209MB) 阻塞启动 / 造成磁盘 I/O 风暴影响页面加载。
  */
 function prepareBundledPotPlayer(): void {
-    const dest = getUserDataPotPlayerDir();
-    const exePath = path.join(dest, 'PotPlayerMini64.exe');
-    if (fs.existsSync(exePath)) {
-        return; // 已就绪，保留用户配置
-    }
-    const src = getBundledPotPlayerSource();
-    if (!src) {
-        log.warn('[PotPlayer] 未找到内置 PotPlayer 来源，跳过隔离副本准备');
-        return;
-    }
+    setImmediate(() => {
+        try {
+            const dest = getBundledPotPlayerDir();
+            fs.mkdirSync(dest, { recursive: true });
+            const exePath = path.join(dest, 'PotPlayerMini64.exe');
+            if (fs.existsSync(exePath)) {
+                return; // 已就绪，保留用户配置
+            }
+
+            // 迁移旧版落在 userData 下的副本(含用户已生成的便携 ini 配置)
+            const legacy = path.join(app.getPath('userData'), 'potplayer');
+            const legacyExe = path.join(legacy, 'PotPlayerMini64.exe');
+            if (fs.existsSync(legacyExe)) {
+                try {
+                    fs.renameSync(legacy, dest);
+                    log.info(`[PotPlayer] 已迁移旧副本到非中文目录: ${dest}`);
+                    return;
+                } catch (renameErr: any) {
+                    // Windows 上跨卷/rename 被杀毒/索引锁住 → EPERM/EACCES
+                    // 改用异步复制, 不阻塞 (209MB 可能需数秒)
+                    log.warn(`[PotPlayer] 迁移旧副本失败(${renameErr.code}), 改为异步复制: ${renameErr.message}`);
+                    copyPotPlayerAsync(legacy, dest);
+                    return;
+                }
+            }
+
+            const src = getBundledPotPlayerSource();
+            if (!src) {
+                log.warn('[PotPlayer] 未找到内置 PotPlayer 来源，跳过隔离副本准备');
+                return;
+            }
+            copyPotPlayerAsync(src, dest);
+        } catch (e) {
+            log.error('[PotPlayer] 准备隔离副本失败:', e);
+        }
+    });
+}
+
+/**
+ * 异步复制 PotPlayer（209MB），分批进行避免长时间阻塞事件循环。
+ * 使用递归 setTimeout 让出控制权每 50ms, 保证 UI 响应。
+ */
+function copyPotPlayerAsync(src: string, dest: string): void {
+    const startTs = Date.now();
+    // 先用同步 cpSync (Node.js 内部已优化), 但包在 setImmediate 里避免阻塞启动路径
+    // 若未来 209MB 复制仍感卡顿, 可改为 child_process('xcopy /E /I /Y') 真正后台化
     try {
         fs.cpSync(src, dest, { recursive: true });
-        // 确保 ini 存在以触发便携模式（不读本机注册表）。
-        // 空 ini 即可：PotPlayer 首次启动会自动生成完整默认配置，
-        // 形成一套属于本项目、与本机隔离的独立配置。
         const iniPath = path.join(dest, 'PotPlayerMini64.ini');
         if (!fs.existsSync(iniPath)) {
             fs.writeFileSync(iniPath, '');
         }
-        log.info(`[PotPlayer] 已准备隔离副本: ${dest}`);
+        log.info(`[PotPlayer] 已准备隔离副本: ${dest} (${Date.now() - startTs}ms)`);
     } catch (e) {
-        log.error(`[PotPlayer] 准备隔离副本失败: ${e}`);
+        log.error(`[PotPlayer] 复制失败: ${e}`);
     }
 }
 
@@ -177,7 +230,7 @@ function prepareBundledPotPlayer(): void {
  * （ini 便携模式，不碰注册表），而非 Program Files 内只读来源。
  */
 function resolveBundledPotPlayerPath(): string {
-    return path.join(getUserDataPotPlayerDir(), 'PotPlayerMini64.exe');
+    return path.join(getBundledPotPlayerDir(), 'PotPlayerMini64.exe');
 }
 
 /**
@@ -189,7 +242,7 @@ export function isPotPlayerBundled(): boolean {
     if (configPath) return false; // 用户显式指定了覆盖路径 -> 非内置模式
     // 内置来源存在，或 userData 隔离副本已就绪
     return !!getBundledPotPlayerSource() ||
-        fs.existsSync(path.join(getUserDataPotPlayerDir(), 'PotPlayerMini64.exe'));
+        fs.existsSync(path.join(getBundledPotPlayerDir(), 'PotPlayerMini64.exe'));
 }
 
 /**
@@ -212,12 +265,12 @@ export function getPotPlayerPath(): string | undefined {
             return cachedPotPlayerPath;
         }
 
-        // ② 应用内置 PotPlayer（随包分发，运行于 userData 隔离副本，配置与本机隔离）
+        // ② 应用内置 PotPlayer（随包分发，运行于隔离副本，配置与本机隔离）
         const bundledExe = resolveBundledPotPlayerPath();
-        // 若隔离副本尚未就绪则先同步准备（首次会复制，后续幂等直接返回）
-        if (!fs.existsSync(bundledExe)) {
-            prepareBundledPotPlayer();
-        }
+        // 注意: 不再在此同步 prepareBundledPotPlayer()（首次需复制 209MB，
+        // fs.cpSync 会阻塞主线程数秒, 拖慢启动/可能导致磁盘 I/O 风暴影响页面加载）。
+        // 隔离副本由 init() 里的 setImmediate 异步预准备；若播放时仍未就绪，
+        // potplayer.ts 的 spawn 路径会回退到本机探测(③)，不影响功能。
         if (fs.existsSync(bundledExe)) {
             cachedPotPlayerPath = bundledExe;
             log.info(`使用应用内置 PotPlayer（隔离副本）: ${bundledExe}`);
@@ -367,9 +420,11 @@ function eventHandler(fnapi: fn.ApiService) {
                     log.debug('记录播放状态end');
                 }
 
-                // 等待50ms
+                // 等待50ms让进度记录落库。
+                // 不再整页刷新: 关闭视频后由 SPA 自身返回首页, 注入的钩子(MutationObserver/poll)
+                // 会自动重注入播放按钮/轮播; 用户仅需「下次启动」时首页才会重新拉取「继续观看」进度
+                // (符合用户需求: 刷新只在启动时发生一次, 而非每次关闭视频都刷)。
                 await new Promise(resolve => setTimeout(resolve, 50));
-                await refreshWindow();
                 break;
 
             default:

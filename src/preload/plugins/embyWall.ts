@@ -40,6 +40,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
 
+  // 注意：不再在此处清空 _apiShows。
+  // 旧数据保留到新数据确实拉到之后才替换(见末尾赋值)，
+  // 避免"清空→异步拉取期间→injectCarousel读到空→显示loading占位→_carouselInited被锁死"的竞态。
+
   try {
     // 隐藏iframe加载/v/list/all → React渲染 → 提取前10剧集
     const shows = await new Promise<any[]>((resolve) => {
@@ -124,6 +128,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     log('iframe: got', shows.length, 'shows');
     if (shows.length === 0) { _apiLoading = false; return _apiShows; }
 
+    // 用局部变量收集新数据, 成功后整体替换 _apiShows(避免重拉期间旧数据被清空导致竞态)
+    const newShows: any[] = [];
+
     // 步骤2: 用item/{guid}获取每个剧集的poster+overview
     for (const show of shows.slice(0, 10)) {
       try {
@@ -146,7 +153,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const poster = pickImg(data.posters) || (show as any).poster || '';
         const backdrop = pickImg(data.backdrops) || poster;
         if (show.id === shows[0]?.id) log('1st backdrop:', backdrop.substring(0, 60), '| poster:', poster.substring(0, 60));
-        _apiShows.push({
+        newShows.push({
           id: show.id, title: show.title,
           poster, backdrop,
           desc: data.overview || ''
@@ -154,9 +161,14 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       } catch (e) { /* skip */ }
     }
 
+    // 仅在新数据确实拉到内容时才替换(空数据保留旧的不变)
+    if (newShows.length > 0) {
+      _apiShows.length = 0;
+      Array.prototype.push.apply(_apiShows, newShows);
+    }
     _apiLoaded = true;
     log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
-    log('total', _apiShows.length, 'shows from iframe+API');
+    log('total', _apiShows.length, 'shows from iframe+API (new=' + newShows.length + ')');
   } catch (e) { log('iframe error:', e); }
   _apiLoading = false;
   return _apiShows;
@@ -238,6 +250,40 @@ async function fetchImageAuth(fullUrl: string): Promise<string | null> {
 let _carouselInited = false;
 let _carouselContainer: HTMLElement | null = null;
 let _carouselWrapper: HTMLElement | null = null;
+// 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
+// injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
+let _placeholderInited = false;
+
+// [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
+// 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
+// 这里做多级兜底, 尽量在各类布局/语言下都能定位到正确的媒体库区块。
+function findMediaLibrarySection(): HTMLElement | null {
+  const labelRe = /媒体库|片库|影视库|library|my\s*media/i;
+  // 1) 原已知布局: .relative.flex.flex-col.gap-6 的直接子 div 且含媒体库标题
+  const known = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div');
+  for (const s of Array.from(known) as HTMLElement[]) {
+    const strong = s.querySelector('strong');
+    if (strong && labelRe.test(strong.textContent || '')) return s;
+  }
+  // 2) 宽匹配: 含 flex-col 的容器, 且内部标题含媒体库字样(确保定位到区块级)
+  const flexCols = document.querySelectorAll('div[class*="flex-col"]');
+  for (const s of Array.from(flexCols) as HTMLElement[]) {
+    const head = s.querySelector('strong,h2,h3');
+    if (head && labelRe.test(head.textContent || '')) return s;
+  }
+  // 3) 终极兜底: 找媒体库标题, 向上取到含子节点且具布局类的祖先作为 section
+  const heads = document.querySelectorAll('strong,h2,h3');
+  for (const h of Array.from(heads) as HTMLElement[]) {
+    if (!labelRe.test(h.textContent || '')) continue;
+    let el: HTMLElement | null = h.parentElement;
+    while (el && el !== document.body && el.parentElement) {
+      const cls = (el.className || '') as string;
+      if (el.children.length >= 1 && /flex|grid|relative|section/i.test(cls)) return el;
+      el = el.parentElement;
+    }
+  }
+  return null;
+}
 
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
@@ -251,23 +297,27 @@ function injectCarousel(): void {
     rebuild = true;
     log('rebuild: reusing section(parent of existing wrapper)');
   } else {
-    const sections = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div');
-    log('sections found:', sections.length);
-    sections.forEach((s) => {
-      const strong = s.querySelector('strong');
-      if (strong && strong.textContent?.includes('媒体库')) target = s as HTMLElement;
-    });
+    target = findMediaLibrarySection();
+    if (target) log('media-library section found via robust search');
   }
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
-  _carouselInited = true;
 
   // 预加载占位: 真实片库未就绪时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
     log('api not ready, showing loading placeholder');
+    // [lc-100 修复] 占位只构建一次: 下方 MutationObserver 监听 document.body 任意变更,
+    // 若每次都重建占位(清空+追加会触发 DOM 变更), 会再次唤醒 observer → 无限重建 → 渲染线程卡死白屏。
+    if (_placeholderInited) return;
     buildLoadingPlaceholder(target);
+    _placeholderInited = true;
     return;
   }
+  // 真实数据到达: 复位占位守卫, 以便将来数据清空时可再次显示占位
+  _placeholderInited = false;
+
+  _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
 
   // 数据: API优先(动态/自动/最新排序); 仅当真实片库为空才兜底(上面已拦截空数据)
   // 注意: 只要真实片库 >0 条就只用真实内容, 不再回退硬编码 demo(避免无职转生兜底出现)
@@ -1641,7 +1691,10 @@ function handle(): void {
     mpvBtns.style.cssText = 'display:flex;gap:6px;';
     const pickBtn = mkBtn('选择文件', true);
     const clearBtn = mkBtn('清空', true);
-    mpvBtns.appendChild(pickBtn); mpvBtns.appendChild(clearBtn);
+    const iccToggleBtn = mkBtn('ICC 校色：开', true);
+    iccToggleBtn.style.fontWeight = '600';
+    iccToggleBtn.style.color = 'var(--fnos-ui-accent)';
+    mpvBtns.appendChild(pickBtn); mpvBtns.appendChild(clearBtn); mpvBtns.appendChild(iccToggleBtn);
     colMpv.appendChild(mpvBtns);
     pickBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
@@ -1665,7 +1718,7 @@ function handle(): void {
     shaderSel.style.cssText = 'width:100%;font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
       + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;cursor:pointer;';
     const shaderOptions: [string, string][] = [
-      ['off', '关闭（不启用着色器）'],
+      ['off', '默认不生效任何着色器'],
       ['a', '模式A（大多数1080p动画）'],
       ['b', '模式B（大多数720p动画）'],
       ['aa', '模式A+A（高质量1080p）'],
@@ -1683,24 +1736,22 @@ function handle(): void {
     });
     colMpv.appendChild(shaderSel);
 
-    // MPV ICC 校色开关（默认开启，固化到 mpv-user.conf）
-    const iccRow = document.createElement('div');
-    iccRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 6px 4px;gap:10px;';
-    const iccSpan = document.createElement('span');
-    iccSpan.textContent = 'MPV ICC 校色（默认开启）';
-    iccSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
-    const swIcc = document.createElement('input');
-    swIcc.type = 'checkbox';
-    swIcc.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
-    iccRow.appendChild(iccSpan); iccRow.appendChild(swIcc);
-    colMpv.appendChild(iccRow);
-
     const applyShaderConfig = (): void => {
-      ipcRenderer.invoke('settings:set-mpv-shader-config', { shader: shaderSel.value, icc: swIcc.checked })
+      const iccOn = iccToggleBtn.textContent?.includes('开') ?? false;
+      ipcRenderer.invoke('settings:set-mpv-shader-config', { shader: shaderSel.value, icc: iccOn })
         .catch((err) => log('set-mpv-shader-config failed', err));
     };
+    const renderIccBtn = (on: boolean): void => {
+      iccToggleBtn.textContent = on ? 'ICC 校色：开' : 'ICC 校色：关';
+      iccToggleBtn.style.color = on ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-muted2)';
+    };
     shaderSel.addEventListener('change', applyShaderConfig);
-    swIcc.addEventListener('change', applyShaderConfig);
+    iccToggleBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const nowOn = !(iccToggleBtn.textContent?.includes('开') ?? false);
+      renderIccBtn(nowOn);
+      applyShaderConfig();
+    });
 
     // ===== PotPlayer 路径 =====
     const potLabel = document.createElement('div');
@@ -1862,6 +1913,38 @@ function handle(): void {
     biliFolderBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
+    });
+
+    // Python 解释器路径（B站弹幕脚本 bili_danmaku.py 需要 Python；留空=用内置便携版）
+    const pyLabel = document.createElement('div');
+    pyLabel.textContent = 'Python 解释器路径（B站弹幕）';
+    pyLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:14px 0 5px;';
+    secBodyBili.appendChild(pyLabel);
+
+    const pyPath = document.createElement('div');
+    pyPath.id = 'fnos-python-path';
+    pyPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
+      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);';
+    secBodyBili.appendChild(pyPath);
+
+    const pyBtns = document.createElement('div');
+    pyBtns.style.cssText = 'display:flex;gap:6px;';
+    const pyPickBtn = mkBtn('选择文件', true);
+    const pyClearBtn = mkBtn('清空', true);
+    pyBtns.appendChild(pyPickBtn); pyBtns.appendChild(pyClearBtn);
+    secBodyBili.appendChild(pyBtns);
+
+    const pyDefaultText = '默认使用内置便携版（无需本机安装）';
+    pyPickBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const p = await ipcRenderer.invoke('settings:pick-python-path');
+      if (p) pyPath.textContent = p as string;
+    });
+    pyClearBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      await ipcRenderer.invoke('settings:clear-python-path');
+      pyPath.textContent = pyDefaultText;
     });
 
     contentGrid.appendChild(secBili.el);
@@ -2471,12 +2554,13 @@ function handle(): void {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
         potPathEl.textContent = s.potPath || '应用内置（已随安装包分发，无需本机安装）';
         shaderSel.value = s.mpvDefaultShader || 'off';
-        swIcc.checked = s.mpvIccEnabled !== false;
+        renderIccBtn(s.mpvIccEnabled !== false);
         (overlay as any)._defaultPlayer = s.defaultPlayer || 'mpv';
         refreshDefaultPlayer();
         (overlay as any)._exitMode = s.exitMode || 'ask';
         refreshExit();
         refreshBili();
+        pyPath.textContent = s.pythonPath || '默认使用内置便携版（无需本机安装）';
         refreshDouban();
         // 调试日志开关
         swDebug.checked = !!s.debugEnabled;
@@ -2517,6 +2601,15 @@ function handle(): void {
       if (overlay.contains(t)) return;
       const sb = document.getElementById('fnos-settings-btn');
       if (sb && sb.contains(t)) return;
+      // 落在其他自建设置弹窗(检查更新 fnosDialog / 关于 / 反馈 / B站登录)内时,
+      // 不连带关闭设置面板, 实现\"一层一层关\"的层级交互。
+      if (t instanceof Element) {
+        const withinOtherUi = t.closest('#fnos-dialog-overlay')
+          || t.closest('#fnos-about-modal')
+          || t.closest('#fnos-feedback-modal')
+          || t.closest('#fnos-bili-modal');
+        if (withinOtherUi) return;
+      }
       overlay.style.display = 'none';
     }, true);
 
@@ -2693,6 +2786,26 @@ function handle(): void {
     _carouselInited = false;
     injectCarousel();
   }).catch(e => log('fetch error:', e));
+
+  // 3) 定时自动刷新轮播内容(无需退出重开):
+  //    库数据变化(新增/改名/排序)后, 留在首页即可看到最新轮播。
+  //    仅在轮播当前可见(处于首页)时重拉, 避免后台无意义 iframe 轮询;
+  //    非首页时安全跳过(注入逻辑找不到"媒体库"节点会自动 return)。
+  const CAROUSEL_REFRESH_MS = 5 * 60 * 1000;
+  setInterval(() => {
+    if (_apiLoading) return;
+    if (document.hidden) return; // 后台标签页跳过(iframe/fetch 会被浏览器节流, 必然失败/超时)
+    if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
+    _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
+    log('carousel auto-refresh: re-fetching');
+    fetchShowsViaIPC(base).then(() => {
+      if (_apiShows.length === 0) return;
+      log('carousel auto-refresh: got', _apiShows.length, 'shows, rebuilding');
+      _carouselInited = false;
+      injectCarousel();
+    }).catch(e => log('carousel auto-refresh error:', e));
+  }, CAROUSEL_REFRESH_MS);
+
   wheelToScroll();
   [2000, 4000, 8000].forEach(ms => setTimeout(wheelToScroll, ms));
 

@@ -1239,7 +1239,8 @@
             const loginData = {
                 domain: domain,
                 username: username,
-                password: rememberPassword ? password : '',
+                password: password,                    // 登录必需，始终发送真实密码
+                rememberPassword: rememberPassword,    // 仅控制是否把密码持久化到历史/配置
                 useHttps: useHttps
             };
 

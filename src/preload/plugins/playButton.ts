@@ -5,7 +5,7 @@ import { HookType } from '../core/hooks';
 import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
-import { getPlayButtonConfig, isSeasonPage, createPlayModal, PlayButtonConfig } from './playChoice';
+import { getPlayButtonConfig, createPlayModal, PlayButtonConfig } from './playChoice';
 
 // 发送播放信息到主进程
 function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
@@ -118,8 +118,16 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
 }
 
 function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText: string): void {
-    // 若页面上已存在我们注入的 MPV 按钮, 直接跳过 → 防止 MutationObserver/轮询触发时累积重复
-    if (document.querySelector('[data-custom-play]')) return;
+    // 已注入按钮：标签与当前默认播放器一致则跳过；
+    // 不一致（切换了 MPV/PotPlayer）则移除旧按钮、清除占用标记后重建，避免需多次刷新才更新
+    const existing = document.querySelector('[data-custom-play]') as HTMLElement | null;
+    if (existing) {
+        const curText = (existing.getAttribute('aria-label') || existing.textContent || '').trim();
+        if (curText === btnText) return;
+        existing.remove();
+        const ref = findReferenceButton();
+        if (ref) ref.removeAttribute('data-mpv-btn'); // 清除占用标记，允许重新注入新播放器按钮
+    }
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
 
@@ -223,17 +231,11 @@ async function injectCustomPlayBtn(): Promise<void> {
     // 获取配置
     const config = await getPlayButtonConfig();
 
-    if (isSeasonPage()) {
-        // 全部剧集（季/选集）页面：主播放按钮弹出选择（原生 + 默认外部播放器）
-        interceptOriginalButtonWithChoice(config);
-        return;
-    }
-
     if (config.hideOriginalPlayButton) {
-        // 如果隐藏原有播放按钮，直接拦截原按钮（按默认播放器）
+        // 隐藏了原生播放按钮：直接拦截原按钮（按默认外部播放器，无弹窗）
         interceptOriginalButton(config.defaultPlayer);
     } else {
-        // 否则添加额外的播放按钮（标签随默认播放器变化）
+        // 未隐藏原生按钮：在详情页主播放按钮旁克隆一个外部播放器按钮（两个并排，各播各的）
         const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
         clonePlayBtnAndInject((button) => sendPlayEventToMain(button, config.defaultPlayer), label);
     }

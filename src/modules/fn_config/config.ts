@@ -8,7 +8,44 @@ const HISTORY_LIMIT = 5;
 const ENCRYPTION_KEY = 'U2XDcFsV6rdTE9wB5ZHvy6BW9hBTKJ1H'; // 32 chars for aes-256
 const IV = Buffer.alloc(16, 0); // Initialization vector
 
-app.setPath('userData', USER_DATA_PATH);
+// userData 覆盖策略：
+//  - 开发模式(unpackaged, 即 `npx electron .` / dev.cmd)：使用独立的 .fntv-dev 目录，
+//    与已安装的生产版本完全隔离(配置/缓存/日志互不干扰)。
+//  - 生产模式(packaged, 即安装后的 Fntv-Plus.exe)：使用 Electron 默认目录
+//    (AppData/Roaming/Fntv-Plus)。
+// 关键点：开发版与生产版必须位于【不同】的 userData，否则二者共用同一单实例锁，
+//         运行 dev.cmd 时会被已安装的 Fntv-Plus.exe 接管(表现为「打开的是已安装版」)。
+// 历史兼容：早期版本曾把生产版也指向 .fntv-dev，这里做一次迁移，
+//          把 .fntv-dev 里的真实用户配置搬到生产默认目录，避免老用户登录/同步配置丢失。
+const DEV_USER_DATA = USER_DATA_PATH;
+const PROD_USER_DATA = app.getPath('userData'); // 默认 AppData/Roaming/Fntv-Plus
+
+if (app.isPackaged) {
+    // 生产模式：以默认目录为准；若默认目录尚无配置而 .fntv-dev 有，则迁移过去
+    migrateLegacyUserData(DEV_USER_DATA, PROD_USER_DATA);
+} else {
+    app.setPath('userData', DEV_USER_DATA);
+}
+
+/**
+ * 一次性迁移：早期版本把生产配置也写到了 .fntv-dev。
+ * 仅当目标生产目录【无 config.json】且旧 .fntv-dev【有 config.json】时才整目录重命名，
+ * 避免覆盖既有数据或无意义的空移动。迁移失败静默忽略，不阻断启动。
+ */
+function migrateLegacyUserData(legacy: string, target: string): void {
+    try {
+        if (legacy === target || !fs.existsSync(legacy)) return;
+        const legacyConfig = path.join(legacy, 'config.json');
+        const targetConfig = path.join(target, 'config.json');
+        if (fs.existsSync(legacyConfig) && !fs.existsSync(targetConfig)) {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.renameSync(legacy, target);
+            // 迁移后 .fntv-dev 已不存在，开发版下次启动会重新创建(空白)，符合预期
+        }
+    } catch (_) {
+        /* 迁移失败不影响启动 */
+    }
+}
 
 /**
  * 配置接口
@@ -52,8 +89,10 @@ export interface Config {
     bangumiSyncEnabled?: boolean;
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
-    // MPV B站弹幕搜索开关（控制 uosc_danmaku 的 B站手动搜索是否可用，写入 script-opts/uosc_danmaku.conf）
     mpvBiliSearchEnabled?: boolean;
+    // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
+    // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
+    pythonPath?: string;
 }
 
 /**
@@ -149,6 +188,15 @@ export function readConfig(): Config | null {
             return null;
         }
     }
+    // 兼容兜底: lc-091 把 userData 拆分为「开发(.fntv-dev) / 生产(AppData/Roaming/fntv)」两套,
+    // 若当前 userData 下没有配置, 尝试从另一个隔离目录读取, 避免登录配置"丢失"
+    // 导致白屏/被强制跳回登录页(尤其开发版与生产版共用同一 fnOS 账号时)。
+    try {
+        const alt = path.join(DEV_USER_DATA, 'config.json');
+        if (fs.existsSync(alt)) {
+            return JSON.parse(fs.readFileSync(alt, 'utf-8')) as Config;
+        }
+    } catch { /* ignore */ }
     return null;
 }
 
@@ -320,6 +368,23 @@ export function setPotPlayerPath(path: string | null): void {
         delete config.potPlayerPath; // 清空配置
     } else {
         config.potPlayerPath = path;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取用户自定义 Python 解释器路径（B站弹幕用；留空=用内置便携版）
+export function getPythonPath(): string | undefined {
+    const config: Config = readConfig() || {};
+    return config.pythonPath;
+}
+
+// 设置用户自定义 Python 解释器路径（''/null = 清空，回退到内置便携版）
+export function setPythonPath(p: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!p) {
+        delete config.pythonPath; // 清空配置，回退到内置便携版
+    } else {
+        config.pythonPath = p;
     }
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
@@ -575,5 +640,7 @@ module.exports = {
     getBangumiSyncThreshold,
     setBangumiSyncThreshold,
     getMpvBiliSearchEnabled,
-    setMpvBiliSearchEnabled
+    setMpvBiliSearchEnabled,
+    getPythonPath,
+    setPythonPath
 };

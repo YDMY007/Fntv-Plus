@@ -5,7 +5,7 @@ import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { HookType } from '../core/hooks';
-import { getPlayButtonConfig, isSeasonPage, createPlayModal } from './playChoice';
+import { getPlayButtonConfig, createPlayModal } from './playChoice';
 
 // 调用播放器的公共方法（player 指定 mpv / potplayer）
 async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'): Promise<void> {
@@ -138,33 +138,44 @@ function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | 
     });
 }
 
-// 从DOM获取id
+// 从DOM获取id（兼容详情页与首页卡片）
+const GUID_RE = /\/v\/(?:movie|tv)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
 function getItemGuidFromDOM(button: HTMLElement): string | null {
     try {
-        // 从播放按钮向上查找包含 data-id="details" 的容器
+        // 1) 详情页: data-id="details" 容器内的 季/集/电影 链接
         let container: Element | null = button;
         while (container && container !== document.body) {
-            if (container.getAttribute('data-id') === 'details') {
-                // 在details容器中查找包含 /v/tv/season/ 或 /v/tv/episode/ 的A标签
-                const aLinks = container.querySelectorAll('a[href*="/v/tv/season/"]');
-                const eLinks = container.querySelectorAll('a[href*="/v/tv/episode/"]');
-                const allLinks = aLinks.length > 0 ? aLinks : eLinks;
-                if (allLinks.length > 0) {
-                    const link = allLinks[0] as HTMLAnchorElement;
-                    const guidMatch = link.href.match(/\/v\/tv\/(?:season|episode)\/([a-f0-9]{32})/i);
-                    if (guidMatch && guidMatch[1]) {
-                        logger.info('Found guid:', guidMatch[1]);
-                        return guidMatch[1];
-                    }
+            if (container.getAttribute && container.getAttribute('data-id') === 'details') {
+                const links = container.querySelectorAll('a[href]');
+                for (const a of Array.from(links) as HTMLAnchorElement[]) {
+                    const m = a.href.match(GUID_RE);
+                    if (m && m[1]) { logger.info('Found guid in details:', m[1]); return m[1]; }
                 }
                 break;
             }
             container = container.parentElement;
         }
 
-        // 如果找不到，从当前URL获取
+        // 2) 首页/列表卡片: 取按钮所属卡片(.card-root / 含 card 类 / 最近 <a>), 从卡片内链接提取 guid。
+        //    这是修复「首页封面直接点播放图标走官方网页播放」的关键: 旧逻辑只认 data-id="details",
+        //    首页卡片没有该包裹, 导致取不到 guid → 回退到原始点击 → 官方播放器(未劫持)。
+        const card = (button.closest('.card-root') ||
+            button.closest('[class*="card"]') ||
+            button.closest('a')) as HTMLElement | null;
+        const scope: Element = card || button;
+        const cardLinks = scope.querySelectorAll('a[href]');
+        for (const a of Array.from(cardLinks) as HTMLAnchorElement[]) {
+            const m = a.href.match(GUID_RE);
+            if (m && m[1]) { logger.info('Found guid in card link:', m[1]); return m[1]; }
+        }
+        if (scope.tagName === 'A') {
+            const m = (scope as HTMLAnchorElement).href.match(GUID_RE);
+            if (m && m[1]) { logger.info('Found guid in card anchor:', m[1]); return m[1]; }
+        }
+
+        // 3) URL 兜底(详情页等)
         const url = window.location.href;
-        const urlMatch = url.match(/\/v\/tv\/episode\/([a-f0-9]{32})/i);
+        const urlMatch = url.match(GUID_RE);
         if (urlMatch && urlMatch[1]) {
             logger.info('Found guid from URL:', urlMatch[1]);
             return urlMatch[1];
@@ -213,37 +224,34 @@ function interceptMaskButton(): void {
         btn.setAttribute('data-mask-intercepted', 'true');
 
         // 添加点击事件拦截器
-        const clickHandler = async (e: Event) => {
-            // 检查是否允许原有播放
-            if (btn.getAttribute('data-allow-original-play') === 'true') {
-                logger.info('Allowing original play logic to execute');
-                return; // 不拦截，让原有逻辑执行
-            }
+            const clickHandler = async (e: Event) => {
+                // 检查是否允许原有播放（由选择弹窗的「原生播放」触发）
+                if (btn.getAttribute('data-allow-original-play') === 'true') {
+                    logger.info('Allowing original play logic to execute');
+                    return; // 不拦截，让原有逻辑执行
+                }
 
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // 获取配置
-            const config = await getPlayButtonConfig();
+                // 获取配置
+                const config = await getPlayButtonConfig();
 
-            // 全部剧集（季）页面：无论是否隐藏原生按钮，都弹出选择（原生 + 默认外部播放器）
-            const modalConfig = isSeasonPage()
-                ? { ...config, hideOriginalPlayButton: false }
-                : config;
+                if (config.hideOriginalPlayButton) {
+                    // 隐藏了原生播放按钮：拦截点击，直接走默认外部播放器
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    logger.info(`Mask button click intercepted, directly playing with ${config.defaultPlayer}`);
+                    await playWithPlayer(btn, config.defaultPlayer);
+                    return false;
+                }
 
-            if (config.hideOriginalPlayButton && !isSeasonPage()) {
-                // 非剧集页且隐藏原生按钮：按默认播放器直接播放
-                logger.info(`Play button click intercepted, directly playing with ${config.defaultPlayer}`);
-                await playWithPlayer(btn, config.defaultPlayer);
-            } else {
-                // 显示选择弹窗（剧集页强制给出原生 + 外部选择）
-                logger.info('Play button click intercepted, showing player choice modal');
-                await createPlayModal(btn, modalConfig, (p) => playWithPlayer(btn, p));
-            }
-            
-            return false;
-        };
+                // 未隐藏原生按钮：弹出「原生 + 外部播放器」选择弹窗（二选一）
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                logger.info('Original play button NOT hidden, showing player choice modal');
+                await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
+                return false;
+            };
 
         // 在捕获阶段添加事件监听器，确保优先拦截
         // 只监听 click 事件，避免重复触发
@@ -268,5 +276,70 @@ function startMaskPoll(): void {
     }, 1200);
 }
 registerHook(HookType.OnReady, startMaskPoll);
+
+// 首页卡片播放图标劫持(补充 .play-mask__btn--play 之外的情况)
+// 现象: 「继续观看」卡片的播放图标是 .play-mask__btn--play(已被 interceptMaskButton 劫持),
+//       但首页其他卡片的封面播放图标可能是另一元素(无 data-id="details" 包裹),
+//       旧逻辑取不到 guid → 回退到原始点击 → 官方网页播放(未劫持)。
+// 这里扫描首页卡片内带「播放」语义的按钮/链接, 统一劫持到外部播放器。
+function isPlayLabel(text: string): boolean {
+    const t = (text || '').trim();
+    if (!t) return false;
+    return /^(播放|立即播放|播放全片|继续播放|从头播放|play)$/i.test(t)
+        || /播放/.test(t) || /^play\b/i.test(t);
+}
+function interceptHomeCardPlay(): void {
+    // 仅在首页(/v)生效, 详情页交给 playButton.ts, 避免误伤
+    const path = (location.pathname || '').replace(/\/+$/, '');
+    if (path !== '/v' && path !== '') return;
+
+    const cards = document.querySelectorAll('.card-root, [class*="card"]:not([class*="drawer"])');
+    cards.forEach((card) => {
+        const nodes = card.querySelectorAll('button, a, [role="button"]');
+        nodes.forEach((node) => {
+            const el = node as HTMLElement;
+            if (el.hasAttribute('data-mask-intercepted') || el.hasAttribute('data-mpv-intercepted') || el.hasAttribute('data-home-intercepted')) return;
+            if (el.classList.contains('play-mask__btn--play')) return; // 已由 interceptMaskButton 处理
+            const label = (el.getAttribute('aria-label') || el.textContent || '').trim();
+            let ok = isPlayLabel(label);
+            if (!ok) {
+                // 无文字标签时, 退化为检测「播放三角」svg 路径
+                const pathEl = el.querySelector('svg path[d]') as SVGPathElement | null;
+                const d = pathEl ? (pathEl.getAttribute('d') || '') : '';
+                ok = d.startsWith('M5.984') || d.includes('18.819') || /M8 5v14|M6 4l14 8-14 8/.test(d);
+            }
+            if (!ok) return;
+            const inCard = el.closest('.card-root') || el.closest('[class*="card"]') || el.closest('a');
+            if (!inCard) return;
+
+            el.setAttribute('data-home-intercepted', 'true');
+            el.addEventListener('click', async (e: Event) => {
+                if (el.getAttribute('data-allow-original-play') === 'true') return;
+                const config = await getPlayButtonConfig();
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                logger.info('Home card play icon intercepted, playing with', config.defaultPlayer);
+                await playWithPlayer(el, config.defaultPlayer);
+                return false;
+            }, true);
+        });
+    });
+}
+registerHook(HookType.OnReady, interceptHomeCardPlay);
+
+// 首页异步渲染/滚动加载的卡片兜底(低频, 避免每个 DOM 变更都全量扫描)
+let _homePollTimer: any = null;
+function startHomePoll(): void {
+    if (_homePollTimer !== null) return;
+    _homePollTimer = setInterval(() => {
+        try {
+            const path = (location.pathname || '').replace(/\/+$/, '');
+            if (path !== '/v' && path !== '') return;
+            interceptHomeCardPlay();
+        } catch (e) { /* ignore */ }
+    }, 1500);
+}
+registerHook(HookType.OnReady, startHomePoll);
 
 export {};
