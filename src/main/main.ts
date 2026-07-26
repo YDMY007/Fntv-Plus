@@ -65,7 +65,8 @@ async function checkNonAsciiPathBlocking(): Promise<boolean> {
 if (process.platform === 'win32') {
     for (const legacy of ['FNMedia.exe', '飞牛影视.exe']) {
         try {
-            execSync(`taskkill /F /IM ${legacy}`, { windowsHide: true });
+            // stdio:'ignore' 屏蔽 taskkill 在「进程不存在」时往 stderr 打的 "ERROR: ... not found." 噪声
+            execSync(`taskkill /F /IM ${legacy}`, { windowsHide: true, stdio: 'ignore' });
             log.info(`[启动] 已清理残留旧版进程: ${legacy}`);
         } catch (_) { /* 无该进程则忽略 */ }
     }
