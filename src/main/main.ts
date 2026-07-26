@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Notification, dialog } from 'electron';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { registerAllPlugins } from './handlers';
@@ -31,35 +31,60 @@ let mainWindow: BrowserWindow | null = null;
 let proxyProcess: ChildProcess | null = null;
 
 /**
- * 启动期中文路径检测：若安装目录(exe)或用户数据目录(userData)含中文/非 ASCII 字符，
- * 弹友好提示。背景：默认 productName 曾为中文，导致默认安装目录含中文；原生子进程
- * (proxy.exe / mpv / potctl 等)按 ANSI/GBK 解析中文路径会失败，表现为「程序打不开」。
- * 非阻断——仅提示，不影响实际能跑的环境(如 D:\应用\fntv)。
+ * 启动期中文路径检测（lc-090 升级版, A 项）:
+ * 若安装目录(exe)或用户数据目录(userData)含中文/非 ASCII 字符, 阻断启动并引导重装到英文路径。
+ * 背景: 原生子进程(proxy.exe / mpv / potctl 等)按 ANSI/GBK 解析中文路径会失败,
+ * 表现为「打不开 / 闪退 / 无弹幕」。返回 true 表示已阻断(调用方应 app.quit()); false 表示路径安全可继续。
  */
-function warnIfNonAsciiPath(): void {
+async function checkNonAsciiPathBlocking(): Promise<boolean> {
     try {
         const exe = app.getPath('exe');
         const userData = app.getPath('userData');
         const bad = [exe, userData].filter(p => /[^\x00-\x7F]/.test(p));
-        if (bad.length === 0) return;
+        if (bad.length === 0) return false;
         log.warn('[启动检查] 检测到安装/用户目录含非 ASCII 字符: ' + bad.join(' ; '));
-        dialog.showMessageBox({
+        const { response } = await dialog.showMessageBox({
             type: 'warning',
-            title: '安装路径警告',
+            title: '安装路径不兼容',
             message: '检测到程序安装目录或系统用户目录包含中文 / 非英文字符：\n\n' + bad.join('\n') +
-                '\n\n这可能导致内置代理服务或外部播放器（MPV / PotPlayer）无法启动，表现为「程序打不开」或「无弹幕」。\n' +
-                '建议：将程序重新安装到纯英文路径（例如 D:\\Fntv-Plus），即可解决。',
-            buttons: ['我知道了，继续'],
+                '\n\n这会导致内置代理服务或外部播放器（MPV / PotPlayer）无法启动，表现为「程序打不开」「闪退」或「无弹幕」。\n' +
+                '您的登录配置存放在系统用户目录(AppData/Roaming/fntv)，与安装位置无关——重装到英文路径不会丢失登录状态。\n\n' +
+                '建议：卸载后重新安装到纯英文路径（例如 D:\\Fntv-Plus 或 C:\\Program Files\\Fntv-Plus），即可彻底解决。',
+            buttons: ['退出并重装到英文路径', '仍要继续运行（风险自担）'],
+            defaultId: 0,
+            cancelId: 1,
             noLink: true,
         });
-    } catch (_) { /* ignore */ }
+        // 选「退出并重装」(response===0) 才阻断; 选「继续」则放行(风险自担)
+        return response === 0;
+    } catch (_) { return false; }
+}
+
+// 升级/覆盖安装场景: 清掉可能残留的旧版进程(上游 FNMedia.exe / 飞牛影视.exe, 与本品同用 name=fntv 抢单实例锁)。
+// 否则旧进程常驻(关窗不退进程)会抢锁, 导致新版 requestSingleInstanceLock 失败 → 启动即 app.quit() 秒退(闪退)。
+if (process.platform === 'win32') {
+    for (const legacy of ['FNMedia.exe', '飞牛影视.exe']) {
+        try {
+            execSync(`taskkill /F /IM ${legacy}`, { windowsHide: true });
+            log.info(`[启动] 已清理残留旧版进程: ${legacy}`);
+        } catch (_) { /* 无该进程则忽略 */ }
+    }
 }
 
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
-    // 如果没有获取到锁，说明应用已经在运行，直接退出
-    app.quit();
+    // 仍未能获取锁: 可能是同名新版本进程残留(关窗不退进程)。给出明确提示而非静默秒退。
+    log.warn('[启动] 未能获取单实例锁, 另一个实例可能仍在运行');
+    app.whenReady().then(() => {
+        dialog.showMessageBox({
+            type: 'info',
+            title: '程序已在运行',
+            message: '检测到本程序另一个实例正在运行（或旧版本进程未完全退出）。\n\n请先通过托盘图标退出，或在任务管理器结束 Fntv-Plus / FNMedia 进程后重新启动。',
+            buttons: ['知道了'],
+            noLink: true,
+        }).then(() => app.quit());
+    });
 } else {
     // 当尝试启动第二个实例时，聚焦到现有窗口
     app.on('second-instance', (event, commandLine, workingDirectory) => {
@@ -80,8 +105,11 @@ if (!gotTheLock) {
             log.info('Node.js版本:', process.versions.node);
             log.info('日志文件位置:', log.getLogFile());
 
-            // 启动期中文路径检测（非阻断：仅对含非 ASCII 的 exe/userData 弹提示）
-            warnIfNonAsciiPath();
+            // [A 项] 启动期中文路径检测: 非 ASCII 路径阻断启动并引导重装到英文路径
+            if (await checkNonAsciiPathBlocking()) {
+                app.quit();
+                return;
+            }
 
             // 动态处理证书验证错误
             app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {

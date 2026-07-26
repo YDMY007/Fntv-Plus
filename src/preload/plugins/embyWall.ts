@@ -254,6 +254,37 @@ let _carouselWrapper: HTMLElement | null = null;
 // injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
 let _placeholderInited = false;
 
+// [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
+// 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
+// 这里做多级兜底, 尽量在各类布局/语言下都能定位到正确的媒体库区块。
+function findMediaLibrarySection(): HTMLElement | null {
+  const labelRe = /媒体库|片库|影视库|library|my\s*media/i;
+  // 1) 原已知布局: .relative.flex.flex-col.gap-6 的直接子 div 且含媒体库标题
+  const known = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div');
+  for (const s of Array.from(known) as HTMLElement[]) {
+    const strong = s.querySelector('strong');
+    if (strong && labelRe.test(strong.textContent || '')) return s;
+  }
+  // 2) 宽匹配: 含 flex-col 的容器, 且内部标题含媒体库字样(确保定位到区块级)
+  const flexCols = document.querySelectorAll('div[class*="flex-col"]');
+  for (const s of Array.from(flexCols) as HTMLElement[]) {
+    const head = s.querySelector('strong,h2,h3');
+    if (head && labelRe.test(head.textContent || '')) return s;
+  }
+  // 3) 终极兜底: 找媒体库标题, 向上取到含子节点且具布局类的祖先作为 section
+  const heads = document.querySelectorAll('strong,h2,h3');
+  for (const h of Array.from(heads) as HTMLElement[]) {
+    if (!labelRe.test(h.textContent || '')) continue;
+    let el: HTMLElement | null = h.parentElement;
+    while (el && el !== document.body && el.parentElement) {
+      const cls = (el.className || '') as string;
+      if (el.children.length >= 1 && /flex|grid|relative|section/i.test(cls)) return el;
+      el = el.parentElement;
+    }
+  }
+  return null;
+}
+
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
@@ -266,12 +297,8 @@ function injectCarousel(): void {
     rebuild = true;
     log('rebuild: reusing section(parent of existing wrapper)');
   } else {
-    const sections = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div');
-    log('sections found:', sections.length);
-    sections.forEach((s) => {
-      const strong = s.querySelector('strong');
-      if (strong && strong.textContent?.includes('媒体库')) target = s as HTMLElement;
-    });
+    target = findMediaLibrarySection();
+    if (target) log('media-library section found via robust search');
   }
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
