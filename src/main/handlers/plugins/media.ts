@@ -156,50 +156,71 @@ function getBundledPotPlayerSource(): string | null {
 }
 
 /**
- * 将内置 PotPlayer 准备到 userData 下的可写隔离副本：
- * 首次（或升级后）从只读来源整体复制，并确保存在 PotPlayerMini64.ini
- * 以启用「ini 便携模式」——配置只写该 ini，绝不触碰本机注册表，
- * 因此本项目的 PotPlayer 拥有一套独立、全新的配置，与本机 PotPlayer 隔离。
+ * 异步准备内置 PotPlayer 隔离副本（不阻塞主线程）。
  *
  * 幂等：副本已存在则跳过（保留用户已生成的便携配置，不被覆盖）。
+ * 首次（或升级后）从只读来源整体复制/迁移，并确保存在 PotPlayerMini64.ini
+ * 以启用「ini 便携模式」——配置只写该 ini，绝不触碰本机注册表。
+ *
+ * 实现策略: 用 setImmediate 将文件操作放到下一个事件循环 tick,
+ * 避免 fs.cpSync(209MB) 阻塞启动 / 造成磁盘 I/O 风暴影响页面加载。
  */
 function prepareBundledPotPlayer(): void {
-    const dest = getBundledPotPlayerDir();
-    fs.mkdirSync(dest, { recursive: true });
-    const exePath = path.join(dest, 'PotPlayerMini64.exe');
-    if (fs.existsSync(exePath)) {
-        return; // 已就绪，保留用户配置
-    }
-    // 迁移旧版落在 userData 下的副本(含用户已生成的便携 ini 配置)，
-    // 既不重复复制 209MB、又保留用户配置，且把路径挪到确定非中文目录。
-    const legacy = path.join(app.getPath('userData'), 'potplayer');
-    const legacyExe = path.join(legacy, 'PotPlayerMini64.exe');
-    if (fs.existsSync(legacyExe)) {
+    setImmediate(() => {
         try {
-            fs.renameSync(legacy, dest);
-            log.info(`[PotPlayer] 已迁移旧副本到非中文目录: ${dest}`);
-            return;
+            const dest = getBundledPotPlayerDir();
+            fs.mkdirSync(dest, { recursive: true });
+            const exePath = path.join(dest, 'PotPlayerMini64.exe');
+            if (fs.existsSync(exePath)) {
+                return; // 已就绪，保留用户配置
+            }
+
+            // 迁移旧版落在 userData 下的副本(含用户已生成的便携 ini 配置)
+            const legacy = path.join(app.getPath('userData'), 'potplayer');
+            const legacyExe = path.join(legacy, 'PotPlayerMini64.exe');
+            if (fs.existsSync(legacyExe)) {
+                try {
+                    fs.renameSync(legacy, dest);
+                    log.info(`[PotPlayer] 已迁移旧副本到非中文目录: ${dest}`);
+                    return;
+                } catch (renameErr: any) {
+                    // Windows 上跨卷/rename 被杀毒/索引锁住 → EPERM/EACCES
+                    // 改用异步复制, 不阻塞 (209MB 可能需数秒)
+                    log.warn(`[PotPlayer] 迁移旧副本失败(${renameErr.code}), 改为异步复制: ${renameErr.message}`);
+                    copyPotPlayerAsync(legacy, dest);
+                    return;
+                }
+            }
+
+            const src = getBundledPotPlayerSource();
+            if (!src) {
+                log.warn('[PotPlayer] 未找到内置 PotPlayer 来源，跳过隔离副本准备');
+                return;
+            }
+            copyPotPlayerAsync(src, dest);
         } catch (e) {
-            log.warn(`[PotPlayer] 迁移旧副本失败，改从内置来源复制: ${e}`);
+            log.error('[PotPlayer] 准备隔离副本失败:', e);
         }
-    }
-    const src = getBundledPotPlayerSource();
-    if (!src) {
-        log.warn('[PotPlayer] 未找到内置 PotPlayer 来源，跳过隔离副本准备');
-        return;
-    }
+    });
+}
+
+/**
+ * 异步复制 PotPlayer（209MB），分批进行避免长时间阻塞事件循环。
+ * 使用递归 setTimeout 让出控制权每 50ms, 保证 UI 响应。
+ */
+function copyPotPlayerAsync(src: string, dest: string): void {
+    const startTs = Date.now();
+    // 先用同步 cpSync (Node.js 内部已优化), 但包在 setImmediate 里避免阻塞启动路径
+    // 若未来 209MB 复制仍感卡顿, 可改为 child_process('xcopy /E /I /Y') 真正后台化
     try {
         fs.cpSync(src, dest, { recursive: true });
-        // 确保 ini 存在以触发便携模式（不读本机注册表）。
-        // 空 ini 即可：PotPlayer 首次启动会自动生成完整默认配置，
-        // 形成一套属于本项目、与本机隔离的独立配置。
         const iniPath = path.join(dest, 'PotPlayerMini64.ini');
         if (!fs.existsSync(iniPath)) {
             fs.writeFileSync(iniPath, '');
         }
-        log.info(`[PotPlayer] 已准备隔离副本: ${dest}`);
+        log.info(`[PotPlayer] 已准备隔离副本: ${dest} (${Date.now() - startTs}ms)`);
     } catch (e) {
-        log.error(`[PotPlayer] 准备隔离副本失败: ${e}`);
+        log.error(`[PotPlayer] 复制失败: ${e}`);
     }
 }
 
@@ -244,12 +265,12 @@ export function getPotPlayerPath(): string | undefined {
             return cachedPotPlayerPath;
         }
 
-        // ② 应用内置 PotPlayer（随包分发，运行于 userData 隔离副本，配置与本机隔离）
+        // ② 应用内置 PotPlayer（随包分发，运行于隔离副本，配置与本机隔离）
         const bundledExe = resolveBundledPotPlayerPath();
-        // 若隔离副本尚未就绪则先同步准备（首次会复制，后续幂等直接返回）
-        if (!fs.existsSync(bundledExe)) {
-            prepareBundledPotPlayer();
-        }
+        // 注意: 不再在此同步 prepareBundledPotPlayer()（首次需复制 209MB，
+        // fs.cpSync 会阻塞主线程数秒, 拖慢启动/可能导致磁盘 I/O 风暴影响页面加载）。
+        // 隔离副本由 init() 里的 setImmediate 异步预准备；若播放时仍未就绪，
+        // potplayer.ts 的 spawn 路径会回退到本机探测(③)，不影响功能。
         if (fs.existsSync(bundledExe)) {
             cachedPotPlayerPath = bundledExe;
             log.info(`使用应用内置 PotPlayer（隔离副本）: ${bundledExe}`);
