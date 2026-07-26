@@ -39,7 +39,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
-  _apiShows.length = 0; // 清空旧数据, 支持定时重拉时干净重建(避免重复累积)
+
+  // 注意：不再在此处清空 _apiShows。
+  // 旧数据保留到新数据确实拉到之后才替换(见末尾赋值)，
+  // 避免"清空→异步拉取期间→injectCarousel读到空→显示loading占位→_carouselInited被锁死"的竞态。
 
   try {
     // 隐藏iframe加载/v/list/all → React渲染 → 提取前10剧集
@@ -125,6 +128,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     log('iframe: got', shows.length, 'shows');
     if (shows.length === 0) { _apiLoading = false; return _apiShows; }
 
+    // 用局部变量收集新数据, 成功后整体替换 _apiShows(避免重拉期间旧数据被清空导致竞态)
+    const newShows: any[] = [];
+
     // 步骤2: 用item/{guid}获取每个剧集的poster+overview
     for (const show of shows.slice(0, 10)) {
       try {
@@ -147,7 +153,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const poster = pickImg(data.posters) || (show as any).poster || '';
         const backdrop = pickImg(data.backdrops) || poster;
         if (show.id === shows[0]?.id) log('1st backdrop:', backdrop.substring(0, 60), '| poster:', poster.substring(0, 60));
-        _apiShows.push({
+        newShows.push({
           id: show.id, title: show.title,
           poster, backdrop,
           desc: data.overview || ''
@@ -155,9 +161,14 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       } catch (e) { /* skip */ }
     }
 
+    // 仅在新数据确实拉到内容时才替换(空数据保留旧的不变)
+    if (newShows.length > 0) {
+      _apiShows.length = 0;
+      Array.prototype.push.apply(_apiShows, newShows);
+    }
     _apiLoaded = true;
     log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
-    log('total', _apiShows.length, 'shows from iframe+API');
+    log('total', _apiShows.length, 'shows from iframe+API (new=' + newShows.length + ')');
   } catch (e) { log('iframe error:', e); }
   _apiLoading = false;
   return _apiShows;
@@ -261,14 +272,16 @@ function injectCarousel(): void {
   }
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
-  _carouselInited = true;
 
   // 预加载占位: 真实片库未就绪时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
     log('api not ready, showing loading placeholder');
     buildLoadingPlaceholder(target);
     return;
   }
+
+  _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
 
   // 数据: API优先(动态/自动/最新排序); 仅当真实片库为空才兜底(上面已拦截空数据)
   // 注意: 只要真实片库 >0 条就只用真实内容, 不再回退硬编码 demo(避免无职转生兜底出现)
@@ -2736,6 +2749,7 @@ function handle(): void {
   const CAROUSEL_REFRESH_MS = 5 * 60 * 1000;
   setInterval(() => {
     if (_apiLoading) return;
+    if (document.hidden) return; // 后台标签页跳过(iframe/fetch 会被浏览器节流, 必然失败/超时)
     if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
     _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
     log('carousel auto-refresh: re-fetching');
