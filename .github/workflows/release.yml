@@ -148,6 +148,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Rename Linux x64 AppImage to x86_64 (匹配手动发布的命名)
+        # electron-builder 的 ${arch} 在 Linux 上只产出 "x64"，
+        # 但手动发布的资产名为 "x86_64"，这里在上传前对齐，保证自动构建产物与维护者手改的包名完全一致。
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          for f in release/*linux_x64*.AppImage; do
+            [ -e "$f" ] || continue
+            mv "$f" "${f/_linux_x64/_linux_x86_64}"
+            echo "Renamed: $f -> ${f/_linux_x64/_linux_x86_64}"
+          done
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
