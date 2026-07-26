@@ -420,9 +420,11 @@ function eventHandler(fnapi: fn.ApiService) {
                     log.debug('记录播放状态end');
                 }
 
-                // 等待50ms
+                // 等待50ms让进度记录落库。
+                // 不再整页刷新: 关闭视频后由 SPA 自身返回首页, 注入的钩子(MutationObserver/poll)
+                // 会自动重注入播放按钮/轮播; 用户仅需「下次启动」时首页才会重新拉取「继续观看」进度
+                // (符合用户需求: 刷新只在启动时发生一次, 而非每次关闭视频都刷)。
                 await new Promise(resolve => setTimeout(resolve, 50));
-                await refreshWindow();
                 break;
 
             default:
