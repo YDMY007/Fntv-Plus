@@ -57,3 +57,7 @@ shots/
 # 内含 commits.md（详细改动记录）与 项目记忆.md，仅本机使用，绝不入库。
 本地commit/
 本地commit/*
+
+# ⚠️ 版本更新日志：由维护者本人手动上传到 GitHub Release，【严禁推送 GitHub】
+# 命名约定 CHANGELOG_vX.Y.Z.md（如 CHANGELOG_v3.3.0.md），仅本地维护，不入库。
+CHANGELOG*.md
