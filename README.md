@@ -2,25 +2,25 @@
 
 &emsp;&emsp;飞牛影视第三方桌面客户端：基于 Electron 深度封装飞牛影视（Fntv-Plus）Web 端，旨在为你提供超越浏览器的桌面体验与丰富增强功能。
 
-<figure align="center">
+<div align="center">
   <img src="resource/docs/simple.png" width="100%" alt="飞牛影视桌面端界面预览">
-  <figcaption>图：飞牛影视桌面客户端主界面</figcaption>
-</figure>
+  <p><em>图：飞牛影视桌面客户端主界面</em></p>
+</div>
 
-<figure align="center">
+<div align="center">
   <img src="resource/docs/Settings.png" width="100%" alt="飞牛影视桌面端界面预览">
-  <figcaption>图：简单UI自定义</figcaption>
-</figure>
+  <p><em>图：简单UI自定义</em></p>
+</div>
 
-<figure align="center">
+<div align="center">
   <img src="resource/docs/Detailsettings.png" width="100%" alt="飞牛影视桌面端界面预览">
-  <figcaption>图：丰富自定义组件</figcaption>
-</figure>
+  <p><em>图：丰富自定义组件</em></p>
+</div>
 
-<figure align="center">
+<div align="center">
   <img src="resource/docs/Potplayer.png" width="100%" alt="飞牛影视桌面端界面预览">
-  <figcaption>图：支持调用PotPlayer。</figcaption>
-</figure>
+  <p><em>图：支持调用PotPlayer</em></p>
+</div>
 
 
 ## 🍴 Fork 声明
