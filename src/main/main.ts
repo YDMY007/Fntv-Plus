@@ -103,6 +103,22 @@ if (!gotTheLock) {
             // 创建主窗口
             mainWindow = getMainWindow();
 
+            // [诊断] 捕获渲染进程控制台错误/加载失败/崩溃, 便于定位"白屏卡死"类问题
+            // (fnOS 页面自身的 JS 报错默认不会写入 app.log, 这里统一收集)
+            try {
+                const wc = mainWindow.webContents;
+                wc.on('console-message', (_e: any, level: number, message: string, line?: number, sourceId?: string) => {
+                    const tag = level >= 3 ? 'ERROR' : level === 2 ? 'WARN' : level === 1 ? 'INFO' : 'DEBUG';
+                    log.info(`[Renderer:${tag}] ${message}${line ? ' (line ' + line + ')' : ''}${sourceId ? ' @ ' + sourceId : ''}`);
+                });
+                wc.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
+                    log.error(`[Renderer] 页面加载失败: ${validatedURL} (${errorCode}: ${errorDescription})`);
+                });
+                wc.on('render-process-gone', (_e: any, details: any) => {
+                    log.error(`[Renderer] 渲染进程崩溃/消失: ${JSON.stringify(details)}`);
+                });
+            } catch (_) { /* ignore */ }
+
             // [v374] 窗口拖动改为原生 -webkit-app-region:drag (见 titlebar.ts / mainwin.ts CSS),
             //   不再用 JS setPosition —— transparent 窗口下 setPosition 会触发 DWM 异常放大.
             //   改变窗口大小仅通过拖拽窗口边缘(resizable:true 原生行为).

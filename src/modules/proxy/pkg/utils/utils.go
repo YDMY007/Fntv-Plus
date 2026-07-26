@@ -79,13 +79,17 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	// 使用recover来捕获可能的panic
 	defer func() {
 		if err := recover(); err != nil {
-			// 检查是否是http.ErrAbortHandler错误
-			if err == http.ErrAbortHandler {
-				// logger.Debugf("客户端断开连接，忽略错误: %v", err)
-				return
-			}
-			// 其他panic重新抛出
-			panic(err)
+		// 检查是否是http.ErrAbortHandler错误
+		if err == http.ErrAbortHandler {
+			// logger.Debugf("客户端断开连接，忽略错误: %v", err)
+			return
+		}
+		// 其他panic: 切勿重新抛出! 否则单个坏请求会拖垮整个代理进程(exit 1,
+		// 表现为 Proxy 反复崩溃重启)。改为记录日志并返回 502, 让客户端自行处理。
+		logger.Errorf("DynamicProxy recovered panic: %v", err)
+		if c != nil && !c.Writer.Written() {
+			c.AbortWithStatusJSON(502, gin.H{"error": "proxy internal error"})
+		}
 		}
 	}()
 

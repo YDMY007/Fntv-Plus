@@ -188,6 +188,15 @@ export function readConfig(): Config | null {
             return null;
         }
     }
+    // 兼容兜底: lc-091 把 userData 拆分为「开发(.fntv-dev) / 生产(AppData/Roaming/fntv)」两套,
+    // 若当前 userData 下没有配置, 尝试从另一个隔离目录读取, 避免登录配置"丢失"
+    // 导致白屏/被强制跳回登录页(尤其开发版与生产版共用同一 fnOS 账号时)。
+    try {
+        const alt = path.join(DEV_USER_DATA, 'config.json');
+        if (fs.existsSync(alt)) {
+            return JSON.parse(fs.readFileSync(alt, 'utf-8')) as Config;
+        }
+    } catch { /* ignore */ }
     return null;
 }
 
