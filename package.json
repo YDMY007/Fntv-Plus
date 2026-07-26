@@ -61,7 +61,7 @@
             "output": "release"
         },
         "icon": "build/icon.ico",
-        "productName": "飞牛影视",
+        "productName": "Fntv-Plus",
         "artifactName": "Fntv-Plus_${version}_${os}_${arch}.${ext}",
         "appId": "com.qiaokes.fntv",
         "compression": "normal",

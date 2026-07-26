@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow, Notification, dialog } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -30,6 +30,31 @@ app.commandLine.appendSwitch('--ignore-ssl-errors'); // 忽略SSL错误（减少
 let mainWindow: BrowserWindow | null = null;
 let proxyProcess: ChildProcess | null = null;
 
+/**
+ * 启动期中文路径检测：若安装目录(exe)或用户数据目录(userData)含中文/非 ASCII 字符，
+ * 弹友好提示。背景：默认 productName 曾为中文，导致默认安装目录含中文；原生子进程
+ * (proxy.exe / mpv / potctl 等)按 ANSI/GBK 解析中文路径会失败，表现为「程序打不开」。
+ * 非阻断——仅提示，不影响实际能跑的环境(如 D:\应用\fntv)。
+ */
+function warnIfNonAsciiPath(): void {
+    try {
+        const exe = app.getPath('exe');
+        const userData = app.getPath('userData');
+        const bad = [exe, userData].filter(p => /[^\x00-\x7F]/.test(p));
+        if (bad.length === 0) return;
+        log.warn('[启动检查] 检测到安装/用户目录含非 ASCII 字符: ' + bad.join(' ; '));
+        dialog.showMessageBox({
+            type: 'warning',
+            title: '安装路径警告',
+            message: '检测到程序安装目录或系统用户目录包含中文 / 非英文字符：\n\n' + bad.join('\n') +
+                '\n\n这可能导致内置代理服务或外部播放器（MPV / PotPlayer）无法启动，表现为「程序打不开」或「无弹幕」。\n' +
+                '建议：将程序重新安装到纯英文路径（例如 D:\\Fntv-Plus），即可解决。',
+            buttons: ['我知道了，继续'],
+            noLink: true,
+        });
+    } catch (_) { /* ignore */ }
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -54,6 +79,9 @@ if (!gotTheLock) {
             log.info('Electron版本:', process.versions.electron);
             log.info('Node.js版本:', process.versions.node);
             log.info('日志文件位置:', log.getLogFile());
+
+            // 启动期中文路径检测（非阻断：仅对含非 ASCII 的 exe/userData 弹提示）
+            warnIfNonAsciiPath();
 
             // 动态处理证书验证错误
             app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
