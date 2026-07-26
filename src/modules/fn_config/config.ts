@@ -8,7 +8,44 @@ const HISTORY_LIMIT = 5;
 const ENCRYPTION_KEY = 'U2XDcFsV6rdTE9wB5ZHvy6BW9hBTKJ1H'; // 32 chars for aes-256
 const IV = Buffer.alloc(16, 0); // Initialization vector
 
-app.setPath('userData', USER_DATA_PATH);
+// userData 覆盖策略：
+//  - 开发模式(unpackaged, 即 `npx electron .` / dev.cmd)：使用独立的 .fntv-dev 目录，
+//    与已安装的生产版本完全隔离(配置/缓存/日志互不干扰)。
+//  - 生产模式(packaged, 即安装后的 Fntv-Plus.exe)：使用 Electron 默认目录
+//    (AppData/Roaming/Fntv-Plus)。
+// 关键点：开发版与生产版必须位于【不同】的 userData，否则二者共用同一单实例锁，
+//         运行 dev.cmd 时会被已安装的 Fntv-Plus.exe 接管(表现为「打开的是已安装版」)。
+// 历史兼容：早期版本曾把生产版也指向 .fntv-dev，这里做一次迁移，
+//          把 .fntv-dev 里的真实用户配置搬到生产默认目录，避免老用户登录/同步配置丢失。
+const DEV_USER_DATA = USER_DATA_PATH;
+const PROD_USER_DATA = app.getPath('userData'); // 默认 AppData/Roaming/Fntv-Plus
+
+if (app.isPackaged) {
+    // 生产模式：以默认目录为准；若默认目录尚无配置而 .fntv-dev 有，则迁移过去
+    migrateLegacyUserData(DEV_USER_DATA, PROD_USER_DATA);
+} else {
+    app.setPath('userData', DEV_USER_DATA);
+}
+
+/**
+ * 一次性迁移：早期版本把生产配置也写到了 .fntv-dev。
+ * 仅当目标生产目录【无 config.json】且旧 .fntv-dev【有 config.json】时才整目录重命名，
+ * 避免覆盖既有数据或无意义的空移动。迁移失败静默忽略，不阻断启动。
+ */
+function migrateLegacyUserData(legacy: string, target: string): void {
+    try {
+        if (legacy === target || !fs.existsSync(legacy)) return;
+        const legacyConfig = path.join(legacy, 'config.json');
+        const targetConfig = path.join(target, 'config.json');
+        if (fs.existsSync(legacyConfig) && !fs.existsSync(targetConfig)) {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.renameSync(legacy, target);
+            // 迁移后 .fntv-dev 已不存在，开发版下次启动会重新创建(空白)，符合预期
+        }
+    } catch (_) {
+        /* 迁移失败不影响启动 */
+    }
+}
 
 /**
  * 配置接口
