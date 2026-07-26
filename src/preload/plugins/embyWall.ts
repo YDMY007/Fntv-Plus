@@ -250,6 +250,9 @@ async function fetchImageAuth(fullUrl: string): Promise<string | null> {
 let _carouselInited = false;
 let _carouselContainer: HTMLElement | null = null;
 let _carouselWrapper: HTMLElement | null = null;
+// 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
+// injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
+let _placeholderInited = false;
 
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
@@ -277,9 +280,15 @@ function injectCarousel(): void {
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
     log('api not ready, showing loading placeholder');
+    // [lc-100 修复] 占位只构建一次: 下方 MutationObserver 监听 document.body 任意变更,
+    // 若每次都重建占位(清空+追加会触发 DOM 变更), 会再次唤醒 observer → 无限重建 → 渲染线程卡死白屏。
+    if (_placeholderInited) return;
     buildLoadingPlaceholder(target);
+    _placeholderInited = true;
     return;
   }
+  // 真实数据到达: 复位占位守卫, 以便将来数据清空时可再次显示占位
+  _placeholderInited = false;
 
   _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
 
