@@ -268,30 +268,8 @@ jobs:
         with:
           tag_name: v${{ steps.package.outputs.version }}
           name: 飞牛影视 v${{ steps.package.outputs.version }}
-          body: |
-            ## 🎬 飞牛影视 v${{ steps.package.outputs.version }}
-
-            ### 🔄 更新内容
-            ```
-            ${{ steps.commit.outputs.message }}
-            ```
-            
-            ### 💻 支持平台
-            - ✅ Windows (x64)
-            - ✅ macOS (Intel & Apple Silicon)
-            - ✅ Linux (x64 & ARM64)
-            
-            ### 📥 下载指南
-            | 平台 | 文件类型 | 说明 |
-            |------|----------|------|
-            | 💻 Windows | `.exe` | **由维护者手动上传至本 Release**（不通过自动构建） |
-            | 🍎 macOS | `.dmg` | 磁盘镜像，安装后执行: `sudo find "/Applications/飞牛影视.app" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null` |
-            | 🐧 Linux | `.AppImage` | 便携应用，添加执行权限后直接运行。 插件前往[fntv-mpv](https://github.com/QiaoKes/fntv-mpv-config/releases) 自行安装，要求mpv版本>0.37.0 |
-            
-            > 💡 **Windows 版本由维护者手动上传**，本 Release 的 macOS / Linux 安装包由 GitHub Actions 自动构建并发布。
-            
-            ---
-            *自动构建于 GitHub Actions* 🤖
+          # 说明文档（更新日志）由维护者在 GitHub Release 页面手动填写；
+          # 自动构建只负责构建并上传 macOS / Linux 安装包，不自动生成任何说明文字。
           files: |
             artifacts/macos-build/*.dmg
             artifacts/linux-build/*.AppImage
