@@ -2,7 +2,7 @@
 // 用法: node scripts/build-watch.mjs
 // 启动后浏览器打开 http://localhost:4848 即可实时观看构建进度与日志。
 // 脚本会自动设置 NODE_OPTIONS=--use-system-ca(沙箱环境需要，普通机器无害)。
-import { spawn } from 'node:child_process';
+import { spawn, exec } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -141,7 +141,6 @@ server.listen(PORT, () => {
   console.log('   浏览器打开上面的地址即可实时观看进度；构建完成后会显示 exe 路径。');
   // 尽力自动打开浏览器(沙箱/无 GUI 时静默失败)
   try {
-    const { exec } = await import('node:child_process');
     exec(`start "" "${url}"`, { windowsHide: true }, () => {});
   } catch { /* ignore */ }
 });
