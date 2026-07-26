@@ -1,0 +1,1461 @@
+﻿
+Историја верзија Пот плејера
+
+----------------------------------------------------------
+[260401]
+----------------------------------------------------------
++ Added the ability to output subtitles using libass
++ Added the ability to handle HLS/Dash playback using built-in modules
+
+- Improved subtitle output speed
+- Improved speed for some video filters
+- Fixed an issue where external audio could not be connected when multiple audio files were present
+- Fixed an issue where certain Unicode characters were displayed incorrectly
+- Fixed an issue where playback always started from the beginning upon completion in the temporary playback queue
+
+----------------------------------------------------------
+[260114]
+----------------------------------------------------------
++ Added APV decoding functionality
+
+- Improved subtitle character set handling
+- Fixed an issue where the real-time audio subtitle generation feature would not sync during live streaming playback
+- Fixed an issue where playback would not finish when playing certain MKV files
+- Fixed an issue where playback of certain MP4 files was slow.
+
+----------------------------------------------------------
+[250909]
+----------------------------------------------------------
++ Added real-time subtitle generation from audio.
+
+- Fixed a screen corruption issue when using WMV3/VC1 IDCT DXVA.
+- Fixed a black screen issue under certain conditions when using DXVA.
+- Fixed an issue where certain MKV files would open slowly.
+- Fixed an issue where embedded subtitles would not display in certain MKV files.
+- Fixed a black screen issue when playing certain AV1 files.
+- Fixed an issue where certain subtitle text would not appear.
+
+----------------------------------------------------------
+[250625]
+----------------------------------------------------------
++ Added ability to select HDR tone mapping type 
++ Added VAD function to Whisper 
+
+- Fixed an issue where an error occurred in certain situations 
+- Fixed an issue where certain MP3 lyrics could not be displayed 
+- Fixed an issue where certain subtitle backgrounds were cut off 
+- Fixed an issue where rotation of certain images could not be handled
+- Improved damaged MKV playback function
+
+----------------------------------------------------------
+[250514]
+----------------------------------------------------------
++ Added ability to change subtitle font handling
+
+- Improved handling of Whisper additional options
+- Improved D3D11 H/W HDR handling
+- Fixed issue where black screen appeared under certain conditions
+
+----------------------------------------------------------
+[250313]
+----------------------------------------------------------
+- Fixed an issue where certain PCs would stop playing 10-bit HEVC video
+- Fixed an issue where whisper faster would not work on NVIDIA 5000 series GPUs
+- Fixed an issue where certain ASS/SSA subtitles would not work properly
+
+----------------------------------------------------------
+[250226]
+----------------------------------------------------------
++ Added the ability to output ASS/SSA subtitles using libass
++ Added Faster-Whisper-XXL to the Whisper engine
++ Added the ability to update the Whisper engine
++ Added the ability to save subtitles with the same name as the video when generating voices with subtitles
+
+- Fixed the issue where the screen color was strange in certain situations when capturing video
+- Fixed the issue where memory leaks occurred in certain situations
+
+----------------------------------------------------------
+[241211]
+----------------------------------------------------------
++ Added the ability to generate subtitles from voice using Whisper
++ Added the ability to open audio together in command line options
++ Added the ability to set monitor luminance in HDR 2084
+
+- Fixed an issue where WEBP image files could not be played
+- Fixed an issue where certain MP3 lyrics did not appear
+- Fixed an issue where certain MPEG TS files were playing slowly
+- Fixed an issue where certain files were displayed in black when playing.
+
+----------------------------------------------------------
+[241015]
+----------------------------------------------------------
++ Added the ability to adjust playback speed when pressing the mouse button
+
+- Fixed an issue where certain MPEG TS playback times were abnormal
+- Fixed the problem of screen breaking when playing certain MPEG TS
+- Fixed the problem of certain ASS/SSA subtitles appearing strangely
+- Fixed an issue that caused abnormal operation when playing very long files.
+
+----------------------------------------------------------
+[240827]
+----------------------------------------------------------
++ Added WEBP to video capture 
++ Added ability to set delay time to seconds or less in image source filter 
++ Added auto-run feature when system starts
+
+- Fixed an issue where the size settings of the shortcut icon were not reflected. 
+- Fixed an issue where the Do not add duplicate files setting was reset in certain situations. 
+- Fixed an issue where the video was recognized as interlaced when playing with a specific codec. 
+- Fixed an error issue when decoding with libVPX 8/9
+- Fixed an issue where navigation occurred abnormally when playing MP4 streaming.
+- Fixed an issue where browsing certain FLV files was slow
+- Improved subtitle display speed
+
+----------------------------------------------------------
+[240618]
+----------------------------------------------------------
++ Added the ability to set the font for OSD playback information 
++ Added the ability to name albums in environment management automatic conditions 
++ Added the ability to go to the previous/next section in the section repeat list 
++ Added ability to not wait for vertical sync 
++ Added system media transport control function
+
+- Modified the window border skin to be prettier. 
+- Modified the subtitle format to be displayed in the name of the built-in subtitles. 
+- Fixed an issue where frame steps did not work properly in the built-in video renderer.
+
+----------------------------------------------------------
+[240509]
+----------------------------------------------------------
+- Fixed an issue where the screen did not appear when playing some MP4 files
+- Improved built-in D3D9 renderer stability
+- Fixed an issue where files in compressed files could not be played properly
+- Fixed an issue where the screen was broken after navigation when playing certain MPEG 2 with DXVA
+
+----------------------------------------------------------
+[240305]
+----------------------------------------------------------
++ Added NVIDIA RTX Video HDR function
++ Added ability to move files to playlist
+
+- Fixed an issue where damaged WAV files could not be played
+- Fixed an issue where the screen was broken when playing certain MPEG4 codecs
+- Fixed an issue where the screen did not appear when playing certain WMV videos
+- Fixed an issue where certain SRT protocols did not work
+- Fixed an issue where an error occurred when playing certain TS files
+- Fixed an issue where an error occurred in certain situations when playing some VP8/9 codecs.
+
+----------------------------------------------------------
+[231220]
+----------------------------------------------------------
++ Added the ability to select a device when outputting TTS
+
+- Fixed an error issue when playing MPEG 1/2 with DXVA on older GPUs.
+- Added ability to paste playlist below selected item
+- Fixed an issue where an error occurred when playing certain MKV files
+- Fixed an issue where navigation was not possible when playing certain files
+
+----------------------------------------------------------
+[231102]
+----------------------------------------------------------
++ Added the ability to display multiple lines in the subtitle explorer
++ NOTCHLC video codec playback function added
+
+- Modified to apply HDR color correction when capturing video if possible
+- Fixed an issue where the DTS pass-through function did not work on certain systems
+- Fixed an issue where embedded subtitles were displayed overlapping when playing files without interruption.
+- Fixed an issue where playback completion did not occur when using the delete related file function upon completion of playback.
+- Fixed a problem that freezing when playing HEVC with DXVA on old Intel GPUs
+- Fixed an issue where certain MKV videos could not be played after searching for them.
+
+----------------------------------------------------------
+[230830]
+----------------------------------------------------------
+- When translating subtitles, modify to maintain subtitle properties if possible
+- Fixed an issue where the ratio was not properly handled when playing a video in which some ratios were changed
+- When using the built-in D3D11 renderer, the screen is cut off when the resolution goes beyond another monitor.
+- Fixed an issue that crashed in certain situations
+- Improved stability of built-in video renderer
+
+----------------------------------------------------------
+[230705]
+----------------------------------------------------------
++ Added the ability to translate subtitles in addition to selected languages
++ Added support for g726 codec in MP4
++ Added support for ARIB subtitles
+
+- Fixed trackpad scrolling of playlists to be handled smoothly
+- Improved MP4 playback function while downloading
+- Improved raw av1 file playback function
+
+----------------------------------------------------------
+[230523]
+----------------------------------------------------------
+- Fixed an out-of-sync problem when playing with mjpeg codec
+- Fixed a problem where an error occurred when playing with a specific MPEG 2 codec
+- Fixed an issue where the title screen did not appear when playing certain DVDs
+- Fixed the problem that the screen was broken when using certain H264 DXVA
+
+----------------------------------------------------------
+[230405]
+----------------------------------------------------------
++ Added GPU Super Resolution function to built-in D3D11 video renderer
+
+- Fixed an issue where audio visualization did not work when only the right channel had voice
+- Fixed a problem that was captured strangely when capturing with subtitles in the D3D11 video renderer
+- Fixed a problem where sound did not come out in certain situations when playing damaged videos
+- Fixed a problem where sound did not come out in certain flac codecs
+
+----------------------------------------------------------
+[230207]
+----------------------------------------------------------
++ Added WEBP format to video capture
+
+- Modified to run a little faster when running for the first time
+- Fixed the problem that some corrupted FLAC files could not be played
+- Fixed the problem of playing slowly when playing some FTP/HTTP files
+- Fixed an issue where playback time was incorrectly handled when playing some MP4 files
+
+----------------------------------------------------------
+[221215]
+----------------------------------------------------------
+- Fixed the problem that certain AV1 files were not played
+- Fixed an issue where the quality could drop when playing non-i420p interlaced video
+- Fixed an issue that was interrupted when adjusting the speed when playing with a specific WaveOut device
+- Fixed an issue where subtitles could not be selected if there were too many subtitle files
+- Fixed an issue where some flv playback times were calculated incorrectly
+- Fixed a problem where spaces could not be processed in some Japanese subtitles
+- Fixed an issue where some RSS feeds could not be read
+
+----------------------------------------------------------
+[221102]
+----------------------------------------------------------
+- Fixed an error that occurred on certain systems
+- Fixed an issue where the screen was broken when taking a snapshot
+- Improved DASH/HLS playback function
+
+----------------------------------------------------------
+[220831]
+----------------------------------------------------------
+- Fixed an issue where there was no sound when playing certain MP4 files
+- Fixed an error that occurred when playing certain files
+- Fixed the problem of slow playback when playing for the first time
+- Improved stability when using DXVA
+
+----------------------------------------------------------
+[220706]
+----------------------------------------------------------
++ Added the ability to save translation when saving subtitles
++ Added SDR <-> HDR conversion function to H/W HDR function
++ Added the ability to play pes files
++ Added HEVC 420P12, 422P10, 422P12, 444P8, 444P10, 444P10 DXVA features (Intel only)
++ Added the ability to exclude the download if the subtitle download contains a certain string
+
+- Fixed a problem that was captured strangely when capturing a video with rotation applied in a specific video
+- Fixed an error that occurred when playing certain videos
+- Fixed a problem that certain menu items were not registered in shortcut keys
+- Fixed a problem that certain subtitles did not appear
+- Fixed a problem that black screen appeared when playing av1 with dxva copyback
+- Fixed an issue where random playback did not occur on first playback
+- Improved processing speed of internal color space
+- Fixed an issue that caused slow navigation with DXVA copyback
+
+----------------------------------------------------------
+[220420]
+----------------------------------------------------------
++ Added FTP/WebDAV file deletion function
++ Added the ability to play while downloading from a network driver
+
+- Fixed an issue where certain FLAC files could not be played
+
+----------------------------------------------------------
+[220302]
+----------------------------------------------------------
++ Added the ability to load external chapters in txt format
+
+- Improved handling of hiding mouse cursors
+- Fixed an issue where the folder monitoring function in the playlist did not work
+- Fixed the subtitle times being combined when they overlaped
+
+----------------------------------------------------------
+[220106]
+----------------------------------------------------------
+- Fixed an issue where skin UI did not appear in certain situations on the full screen
+- Fixed AAC/MP3 navigation to move more accurately
+- Fixed the navigation speed to work faster when playing HTTP streams
+- Fixed an issue where playback finished when navigating certain MP4
+
+----------------------------------------------------------
+[211118]
+----------------------------------------------------------
++ Added the ability to fill other monitors black in full screen
++ Added the ability to delay the end of a section iteration when repeating an interval
+
+- Fixed an issue that no sound while playing certain MPEG TS files
+- Fixed an issue where audio capture was not available in certain situations
+- Fixed an issue that caused AC3 to appear when playing certain DD+ audio
+- Fixed an issue where there was time error when making bookmarks playlist
+- Fixed an issue where subtitles were small when you specified a very large subtitle font size
+
+----------------------------------------------------------
+[210929]
+----------------------------------------------------------
++ Added fast repeating function
+
+- Fixed an issue that was abnormal when playing certain MP4 files
+- Fixed an error problem in certain situations by changing the skin during playback
+
+----------------------------------------------------------
+[210729]
+----------------------------------------------------------
+* Remove sponsor-related features
++ Added the ability to set the format when copying the current playback time
+
+- Fixed a problem that causes screen to broken when playing certain H264 TS
+- Fixed an issue where voice with too high sampling rate could not be played
+- Improved time overlap when using time minimum number of subtitles
+- Fixed an issue where video stopped when playing certain MP4s
+
+----------------------------------------------------------
+[210428]
+----------------------------------------------------------
++ Added the ability to sort into hotkey settings
+
+- Fixed an error problem when playing certain HEVC DXVA
+- Fixed an error problem when playing certain MP4 files
+- Fixed an issue where chapters disappeared by changing the image quality when playing YouTube with chapters
+- Fixed an issue where WEBDAV playlist was not sorted by date
+
+----------------------------------------------------------
+[210318]
+----------------------------------------------------------
++ Added the ability to invert the left/right image horizontally during 3D output
+
+- Fixed a problem that no sound was produced when playing certain AAC codec
+- Fixed a problem where certain ASS/SSA subtitles were displayed abnormally
+- Fixed a problem that added [Ext] to the track name when playing external audio
+- Fixed a problem that certain playlists were added duplicated
+- Fixed an issue where google subtitle word search was not detected
+- Fixed to support 10-bit video for AV1 DXVA
+
+----------------------------------------------------------
+[210127]
+----------------------------------------------------------
+* Removed Flash playback function
+
++ Added Dutch translation
++ Added the ability to use skin visualization in windows media visualization
++ Added AV1 DXVA playback capability
+
+- Fixed a problem that could not play smoothly when playing certain MKV videos
+- Fixed a problem that time shift was working abnormally
+- Fixed a problem that no sound was produced when the system audio sampling rate setting was greater than 192kHz
+- Fixed a problem that image quality could not be switched when watching a broadcast with a password
+- Fixed an error in certain situations when editing a bookmark
+- Fixed a problem where SMI integrated subtitles could not be selected
+
+----------------------------------------------------------
+[201209]
+----------------------------------------------------------
++ Added the ability to change the context menu
++ Added AV1 CUDA/QuickSync decoder
++ Added pixel shader settings function to preferences
++ Added the ability to view the item names in the menu
+
+- Fixed a problem that sometimes malfunctioned when deleting a bookmark in bookmark editing
+- Improved custom menu output speed
+- Fixed the start of execution to work faster
+- Fixed a problem that no sound while playing certain mkv files
+
+----------------------------------------------------------
+[201021]
+----------------------------------------------------------
++ Added the ability to batch edit time in bookmark editing
+
+- Fixed a problem where color was abnormal when playing HDR HLG video
+- Fixed a problem where video capture screen was abnormal when using 10-bit output
+- Fixed a problem that CPU usage was high when using LayeredWindow skin
+- Fixed an issue that total time was recognized as 0 when playing a specific MKV file
+- Fixed a problem that bookmarks were duplicated in certain situations when deleting a bookmark
+- Fixed to keep line breaks as much as possible when translating subtitles
+- Fixed a problem where output of certain ASS/SSA subtitles was abnormal
+- Fixed an issue where playback stopped when searching for certain MOV files
+
+----------------------------------------------------------
+[200908]
+----------------------------------------------------------
+- Fixed a problem that shortcut keys did not work in certain situations when opening a file
+- Fixed a problem that was a little slow to create a thumbnail
+- Enhanced 3D/360 format compatibility in mp4 files
+- Fixed an issue where Blu-ray folder playback did not start immediately
+- Fixed an error when playing certain files
+- Edited to support /seek, /sub commands for video shortcuts
+- Fixed a flickering problem in certain subtitles
+- Fixed a problem where deletion was strange in bookmark editing
+
+----------------------------------------------------------
+[200730]
+----------------------------------------------------------
++ Added the ability to make shortcuts of main menu work in playlist, bookmark editing, subtitle browser, etc.
++ Added the ability to reflect the time displayed on skin according to playback speed
++ Added filter function into bookmark editing
++ Added the ability to rename font only in ASS/SSA subtitle style processing
+
+- Fixed an issue that could not play due to an error in a specific system
+- Fixed an issue where subtitles were duplicated in certain subtitles
+- Fixed an issue that did not play certain Dash/HTTP live streaming
+- Fixed a slow problem in playing with 10-bit AV1 codec
+
+----------------------------------------------------------
+[200616]
+----------------------------------------------------------
++ Added the ability to open a bookmark list and previous playlist in an album
++ Added the ability to remember the "Frame Size of Main Menu" values
++ Added the ability to delay when repeating in section repeat
+
+- Fixed an issue that cannot play certain files using SuperEQ
+- Fixed an issue where viewer information could not be updated when broadcasting
+- Fixed an issue where MP4 files were played as damaged files in certain situations
+- Improved accessibility compatibility
+
+----------------------------------------------------------
+[200512]
+----------------------------------------------------------
++ Added Vulkan capture into game capture
++ Added the ability to switch the playback time <-> remaining time
++ Added an option to open subtitles into command line function
++ Added the ability to set the number of repetitions of section repeat
+
+- Fixed a problem that UWP window was not captured when capturing the window selection (Requires Windows 10 1803 or newer)
+- Fixed an issue that DirectDraw and Direct3D8 did not work in game capture
+- Improved performance of Screen Capture
+- Improved accessibility compatibility
+- Improved FTP server connection with special characters
+- Fixed an issue that remembered full screen capture when capturing screen
+- Fixed an issue that searched for spaces and conditions when searching in Playlist/File Navigator
+
+----------------------------------------------------------
+[200317]
+----------------------------------------------------------
++ Added the ability to copy the path of the selected items to the playlist
++ Added the ability to move items to playlist
++ Added the ability to open the preferred language ​only ​in subtitle download
+
+- Fixed a problem where installation started slowly or freezed on certain PCs
+- Improved lyrics comprehension built into MP3
+- Fixed an issue that certain WEBDAV servers cannot be connected
+- Fixed an issue that certain FTP servers cannot list files
+- Fixed an issue that caused errors when opening certain PNG files
+- Fixed a problem where navigation bar thumbnails were incorrect in certain MKVs
+- Fixed a problem that certain Blu-ray subtitles did not come out
+
+----------------------------------------------------------
+[200204]
+----------------------------------------------------------
++ Added search feature into preferences
++ Added the ability not to load embedded subtitles
+
+- Fixed an error when accessing a specific webdav server
+- Fixed an issue where external bookmarks were deleted when you closed playback
+- Improved slideshow output
+- Fixed a problem that certain PCs started playing slowly
+- Fixed a problem where fonts were displayed differently on certain PCs
+- Fixed an issue that caused pink to appear when using the exclusive overlay mixer
+- Fixed a problem that can't play files on certain FTP servers
+
+----------------------------------------------------------
+[191211]
+----------------------------------------------------------
+* Changed the PotPlayer version to date
+
++ Added H/W HDR output function to Built-in D3D11 Renderer
++ Fixed an issue that stopped when exclusive screen output was used with the Built-in D3D11 Renderer
++ Added Kurdish translation
++ Added the ability to dim the output (dark mode) when using system menu
++ Added the ability to use MPC Video Renderer
++ Added Yandex subtitle translation
+
+- Fixed a problem that played fast when playing certain ASF/WMV files
+- Fixed an issue where the last item was not cleared when saving the playback skip to an external file
+- Fixed an issue where the title was not changed when processing ASX playlist
+- Fixed DPI-Aware v2 action
+- Fixed an issue where the monitor name didn't appear in full screen settings
+- Fixed an issue that malfunctioned when cue file was specified in multiple media
+- Improved 10-bit output processing
+- Fixed an issue where no subtitles appeared when playing certain dvd ifo files
+- Fixed an issue that navigated certain MKV files slowly
+
+----------------------------------------------------------
+[1.7.20977]				        2019/10/31
+----------------------------------------------------------
++ Added the ability to hide subtitles unless it's your preferred language
++ Added the ability to display chapters in playback information
+
+- Fixed an error in certain situations
+- Fixed an issue that took a long time to read text files
+- Fixed an issue that cannot delete related files when playing seamlessly
+- Fixed an issue where opening address was not parsed
+- Fixed an issue where strange colors appeared in certain MOV files
+- Fixed an issue where Bluesky Frame Rate Converter did not work
+- Fixed an error when certain TS playbacks were finished
+
+----------------------------------------------------------
+[1.7.20538]				        2019/09/19
+----------------------------------------------------------
+* Changed default HEVC decoder to Built-in FFmpeg HEVC H/W Decoder
+
++ Added support for YTT subtitles
++ Added support for external chapters files (.chapters.xml)
+
+- Fixed a problem that occurs when playing certain TS files
+- Fixed a problem that can't play certain FLAC files
+- Fixed a problem that 2nd subtitles were appeared with certain YouTube videos
+- Fixed an issue where the title in the Open URL box was not reflected into playlist when attempt to open the related URL
+- Fixed a problem where settings are lost when switching between storing modes (INI <-> Registry)
+
+----------------------------------------------------------
+[1.7.19955]				        2019/07/31
+----------------------------------------------------------
++ Added VP4 codec
++ Added Arabic translation
++ Added the ability to set the background color of the video area
+
+- Fixed an issue where embedded subtitles in certain streams were disappeared quickly
+- Fixed an issue that went beyond the next content in tvingTV playback in certain situations
+
+----------------------------------------------------------
+[1.7.18958]				        2019/06/10
+----------------------------------------------------------
++ Added the ability to resize video according to display resolution
+
+- Fixed a problem that causes buffering when playing tvingTV
+- Fixed a problem that causes the video image to disappear when playing certain MPEG files
+- Fixed a problem where certain CUE files were incorrectly parsed
+- Fixed a problem that causes the program to crash when rendering bitmap-based subtitles in certain situations
+- Fixed a problem where Logitech BRIO webcam did not work in certain situations
+- Fixed a problem that no sound while playing certain MP4 files
+- Fixed an issue that starting playback takes a long time with files that have zero size
+- Improved handling of superEQ
+
+----------------------------------------------------------
+[1.7.18346]				        2019/04/19
+----------------------------------------------------------
++ Added the ability to include mouse cursor in Game Capture
+
+- Fixed seeking problem with certain MKV files
+- Fixed an issue where playlist items could not be sorted by size
+- Fixed an issue that causes TTML subtitle characters to be ignored
+- Fixed an issue that causes File Navigator to crash in certain situations
+- Fixed a problem that causes the program to run slowly with playback of certain files
+- Fixed a problem that causes screen to broken when playing certain H.264 files
+- Improved AV1 decoding performance
+- Fixed an abnormal behavior when playing certain MP4 files
+- Improved ZIP/RAR playback
+
+----------------------------------------------------------
+[1.7.17508]				        2019/02/12
+----------------------------------------------------------
++ Added the ability to update extensions
++ Added the ability to edit subtitles in Subtitle Browser
+
+- Modified saving of SMI subtitles to keep the original as much as possible
+- Fixed an abnormal behavior when using D3D11 OSC mode in certain situations
+- Fixed an issue where the PotScreenSaver could not be turned off with mouse
+- Changed default skin option of context menu to style defined in skin
+
+----------------------------------------------------------
+[1.7.16291]				        2018/12/12
+----------------------------------------------------------
++ Added online subtitles database tab into browser window
++ Added the ability to keep playback speed changes
+
+- Fixed an issue that prevents to create thumbnail image when Bluesky Frame Rate Converter is used
+- Fixed an issue that aspect ratio was abnormal when rotate function is used
+- Fixed a problem where some MP4 files were playing fast
+- Improved playback of HTTP streams
+- Fixed a problem where styles in certain SSA/ASS subtitle files was incorrectly parsed
+- Fixed a problem that can not play WMV/ASF files on certain PCs
+- Improved subtitle searching to match the video
+- Improved speed of loading skin files
+- Fixed a problem that occurs when playing certain MKV files
+- Fixed an issue where times in certain SRT subtitle files was incorrectly handled
+- Improved the option "remember playback positions within a playlist" so that it can be set individually in each playlist
+
+----------------------------------------------------------
+[1.7.14804]				        2018/10/16
+----------------------------------------------------------
++ Added the ability to output image subtitles to subtitle browser
++ Added the ability to move window only on the title bar
++ Added av1 video codec decoding function
+
+- Improved online subtitle download/upload function
+- Improved online subtitle translation processing
+- Fixed a problem where cover image of flac file was not shown when playing seamlessly
+- Fixed an issue where new PotPlayer was running when adding a playlist to browser
+- Fixed an issue that can't save some settings of the built-in WASAPI audio renderer
+- Fixed an error when decoding MJPEG in certain files
+- Fixed a problem that no sound while playing certain TS files
+- Fixed an issue that can't play certain AVI/OGG files
+- Fixed an issue where playback on the rotated monitor was not smooth
+
+----------------------------------------------------------
+[1.7.13963]				        2018/08/29
+----------------------------------------------------------
+* Fixed a security problem (remediation of damaged audio files playback vulnerability)
+
+- Fixed a problem where broadcast notification did not work in certain systems
+- Fixed a problem where album arts of certain MP3 were not shown
+- Fixed a problem where webm format was not created when capturing video
+- Fixed an issue that can't play certain blu-ray media
+- Fixed an issue where cover images of certain ogg files were not shown
+- Fixed a problem where cover image was not shown when playing seamlessly
+- Fixed a problem that browsed slowly when using online subtitle translation
+- Fixed a problem that screen did not come out when playing certain TS files
+- Fixed an issue where the program was killed when changing the video resolution under certain conditions
+- Fixed a bug of the built-in WASAPI audio renderer and improved it
+
+----------------------------------------------------------
+[1.7.13622]				        2018/07/26
+----------------------------------------------------------
+- Fixed a problem where a plus friend message was not sent when broadcasting
+
+----------------------------------------------------------
+[1.7.13621]				        2018/07/25
+----------------------------------------------------------
+* New Built-in skin
+
++ Added Dark mode to chat
++ Added the ability to play shorten (SHN) audio file
+
+- Improved handling in length calculation of MPEG file
+- Fixed an issue that can't play certain MPEG files
+- Improved H264 DSC handling of video capture
+- Improved cue playback processing
+- Fixed a problem where subtitle navigation did not work properly
+- Fixed a problem that screen was broken when playing certain WMV3
+- Fixed a problem where subtitles did not synchronize finely when playing FLV file
+
+----------------------------------------------------------
+[1.7.12845]				        2018/06/29
+----------------------------------------------------------
+- Fixed memory leak when playing http video
+
+----------------------------------------------------------
+[1.7.12844]				        2018/06/25
+----------------------------------------------------------
++ Added CUBE/EAC to 360 VR playback format
++ Added the ability to move to the parent folder with back button in playlist
+
+- Fixed an issue where logout was not complete
+- Fixed a problem where sync error of 1-2 frames occurred in certain videos
+- Fixed an issue of ftp/http subtitle priority
+- Fixed a problem that causes the program to crash when recording flac audio
+
+----------------------------------------------------------
+[1.7.12248]				        2018/05/24
+----------------------------------------------------------
+* Fixed a security problem (remediation of damaged skin files vulnerability)
+
++ Added PotPlayer extension with AngelScript
+  Added open address extension
+  Added media playlist/item extension
+  Added media source extension
+  Added online subtitle extension
+  Added online subtitle translation extension
++ Added Crossfeed function into sound processing
++ Added a function that did not close when selecting files in navigation
+
+- Fixed a problem where random playback did not work properly when the number of items was large
+- Fixed a problem where ftp/webdav could not be opened at a specific URL
+- Fixed a problem that did not play a certain 60-frame video smoothly
+- Fixed an issue that played certain HTTP videos abnormally
+
+----------------------------------------------------------
+[1.7.10667]				        2018/04/04
+----------------------------------------------------------
++ Added the ability to play MP4 streams
+
+- Improved seeking speed with Built-in HTTP Async Reader
+- Modified playlist handling to work asynchronously when possible
+- Fixed a problem where playback of AVI files did not work properly
+- Fixed an issue where codec-related settings were reset when switching presets
+- Fixed a problem that causes the program to crash when Built-in D3D11 Video Renderer is used in Windows 8
+- Fixed an issue where multiple color tags could not be read when subtitle time period is started from 0
+- Fixed a problem that prevents playback of certain fragmented MP4 files
+
+----------------------------------------------------------
+[1.7.8557]			         	2018/02/08
+----------------------------------------------------------
+- Fixed issues with ads
+- Fixed a problem that sometimes the video does not come out
+
+----------------------------------------------------------
+[1.7.8556]			         	2018/02/01
+----------------------------------------------------------
+* Reorganization of chat design
+
++ Added subtitle upload feature
++ Added the ability to navigate current file subtitles in online database
++ Added a function into When Playback Finished actions to stop autoplay when a playback is finished
++ Added the ability to receive audio only during live broadcasting of KakaoTV
+
+- Fixed playback problem of certain SWF files
+- Fixed time parsing problem with SRT/VTT subtitles
+- Fixed a problem that no sound while playing certain TS files
+- Improved output speed of bitmap text renderer
+- Fixed an issue where the program was killed when playing HDTV in certain situations
+- Improved handling of overlapped subtitles with processing of max/min showing periods
+
+----------------------------------------------------------
+[1.7.7145]				        2017/12/19
+----------------------------------------------------------
+* Fixed a security problem (remediation of playing damaged ra, mkv, swf files vulnerability)
+* Live audio bitrate up to 320K
+
++ Added the ability to output the selected items in file navigator
++ Added the ability to create the bookmark playlist
++ Added subtitle sync function to previous/next subtitle
++ Added AMD AMF H264 H/W encoder
+
+- Fixed an issue that decreased speed in navigating certain TS files
+- Improved online subtitle download
+- Removed AMD VCE encoder
+- Fixed an issue that playback did not work on certain FTP servers
+
+----------------------------------------------------------
+[1.7.5545]				        2017/11/16
+----------------------------------------------------------
++ Added the ability to scale the space in compression settings
++ Added audio pitch control function
++ Added the ability to output items as tiles in file navigator
++ Added item search feature to file navigator
++ Added the ability to hide the bookmark file list
+
+- Improved handling of playlist thumbnails
+
+----------------------------------------------------------
+[1.7.4353]				        2017/10/24
+----------------------------------------------------------
++ Added the ability to view hotkey list in program information
++ Added support for window effects in default skin
++ Added scene browser in file navigator
++ Added the ability to control subtitle sync after current position
++ Added the ability to limit the size of multiples if the image size was larger than the monitor
++ Added the ability to adjust the screen size to monitor size
++ Added the ability to output the synthetic top/bottom in 3D MVC decoding
+
+- Improved handling of hotkey input
+- Improved handling of viewing information on screen
+- Fixed an error that outputted the second subtitle under certain conditions
+- Fixed an error when playing certain files
+- Fixed DTV, ATV editor in favorites/playlist
+- Improved handling of bookmark external storage
+
+----------------------------------------------------------
+[1.7.3795]			                2017/09/06
+----------------------------------------------------------
++ Added the ability to select the drag operation in touch settings
++ Added the ability to remember audio, subtitle stream for user selection
++ Added the ability to use the user ratio for video expansion
++ Added the ability to play clipboard contents (Ctrl+V)
+
+- Improved reading ASS/SSA subtitle style
+- Fixed an error when using certain Live logos
+- Fixed an issue that color was strange with DXVA D3D11 copy-back under certain conditions
+- Fixed an issue that DXVA D3D9 copy-back didn't work when using full screen exclusive mode
+- Fixed an issue where title was broken when playing MP3 stream
+- Improved handling of alternative subtitle font
+- Improved an issue that UI responsed slowly when outputting complex ASS/SSA subtitles
+- Changed some hotkeys (Upside down -> Ctrl+P)
+
+----------------------------------------------------------
+[1.7.3344]					2017/08/01
+----------------------------------------------------------
++ Added web display function to broadcast logo(CEF installation is required)
++ Added search function to bookmark editor
++ Added the ability to set the background color by creating snapshot
++ Added the ability to switch the power state in configuration
++ Added the ability to delete recent capture files
+
+- Fixed the horizontal or vertical size of broadcast logo
+- Improved high-definition video playback
+- Improved skin drawing speed
+- Improved broadcast logo drawing speed
+- Fixed an issue that DVD subtitles were invisible with DXVA in D3D11 Renderer
+
+----------------------------------------------------------
+[1.7.2710]                                      2017/06/29
+----------------------------------------------------------
++ Added the ability to display sound level of broadcast information
++ Added the ability to rotate the screen according to the image ratio
++ Added the ability to auto rotate the screen according to the ratio of image rotation
++ Added the ability to repeat the previous/next subtitle/section
++ Added the ability to save the broadcast as MKV, MP4, AVC formats
+
+- Fixed an issue that appeared red when using D3D11 video renderer under certain conditions
+- Fixed an issue that can't handle MPEG TS in TrueHD
+- Fixed an issue that certain MPEG TS did not output videos
+- Fixed an issue where the capture worked abnormally when using rotation
+- Removed the AVI, OGV formats of the stored broadcasts
+- Improved handling of shortcut (.lnk) files
+- Fixed an issue that appeared strange colors in certain games with game capture
+- Added some Closed Captions support
+- Support time-shift function for rtmp, rtsp playback
+
+----------------------------------------------------------
+[1.7.2233]                                      2017/05/25
+----------------------------------------------------------
+* Changed the maximum number of chat users from 2000 to 3000
+
+- Fixed an issue that screen was broken when playing certain VOB files
+- Fixed an issue that subtitles were fading in OpenGL renderer
+- Fixed an issue that got no sound while playing certain MP4/TS files
+- Fixed an issue that program sometimes crashed on startup
+
+----------------------------------------------------------
+[1.7.1915]                                      2017/04/13
+----------------------------------------------------------
++ Added Belarusian translation
++ Added Direct3D 11, OpenGL to skin for outputting on screen
++ Added FTP in file navigator
++ Added URL in file navigator
++ Added album in file navigator
++ Added recent played items in file navigator
++ Added bookmark in file navigator
++ Added broadcast in file navigator
++ Added HDR Color Correction to Pixel Shader
+
+- Fixed green screen problem when capturing with mouse in DXGI 1.2 capture
+- Fixed an issue where subtitles were not displayed in certain HDMV
+- Improved file search in file navigator
+- Fixed an issue that no sound came out when playing certain MP4 files
+- Fixed to possibly open RAR Part file of HTTP
+
+----------------------------------------------------------
+[1.7.1150]                                      2017/03/16
+----------------------------------------------------------
+* Fixed a security problem(remediation of playing damaged mov file vulnerability)
+
++ Added function of broadcast to favorites
++ Added the ability to make chat emoticons invisible
+
+- Improved handling of chat user list
+- Changed option of broadcast compression to VBR
+- Fixed an issue that SMI integrated subtitles can't be selected
+- Fixed an issue that m3u can't be parsed on certain servers
+- Fixed an issue that log-in was released under certain conditions
+- Fixed an issue that appeared distorted when playing 360 VR
+
+----------------------------------------------------------
+[1.7.661]                                       2017/03/03
+----------------------------------------------------------
+- Решен проблем када уграђени D3D11 рендер не може да прихвати P010 улаз
+- Решен проблем код одабирања језика превода
+- Решен проблем репродукције неких MKV/MP4 фајлова
+- Решен проблем где чат улазне поруке нису биле приказане
+
+----------------------------------------------------------
+[1.7.456]                                       2017/02/22
+----------------------------------------------------------
++ Додат Азербејџански језик
+
+- Сређен истек емотикон токена
+- Сређен недостатак поруке уласком у чат собу
+- Сређен баг пријављен од гледалаца
+- Исправљена грешка код улаза у емитовање код неких PCs
+
+----------------------------------------------------------
+[1.7.351]                                    	2017/02/18
+----------------------------------------------------------
+* Реорганизација Kakao TV
+
++ Додата функција да је маска увек на врху
++ Додата могућност одабира уређаја на видео излазу Direct3D9
++ Додат Direct3D 11 видео излазни уређај (Виндовс 8 или новији)
++ Додата подршка pixel shader за OpenGL video излазни уређај
+
+- Решен проблем код декодирања неких MJPEG
+- Решен проблем не хватања слике са D3D11 код неких игара
+- Побољшано руковање затворених наслова 
+
+----------------------------------------------------------
+[1.6.63891]                                     2017/01/04
+----------------------------------------------------------
++ Додата функција ACM Vorbis Mode3 декодирања
++ Додата функција D3D12 снимања игрице
++ Додата MJPEG опција уграђеним кодецима
+
+- Решен проблем времена репродукције неких AVIs када су погрешно израчунати
+- Решена ненормална репродукција неких AVIs
+- Решен проблем замрзавања код коришћења уграђеног WASAPI аудио рендера
+- Решен проблем замрзавања приказа неких SSA превода
+- Решен проблем када је превод црн код неких PCs
+- Решен проблем црног екрана код DXVA декодирања H.264 фајлова
+- Побољшана брзина декодирања MJPEG
+
+----------------------------------------------------------
+[1.6.63856]                                     2016/11/17
+----------------------------------------------------------
+* Решен проблем безбедности (санације рањивости оштећеног Real фајла)
+
+- Решен проблем када право име не може бити верификовано
+- Решен проблем појаве изостанка звука на неким каналима код репродукције HDTV
+
+----------------------------------------------------------
+[1.6.63840]                                     2016/10/28
+----------------------------------------------------------
+* Решен проблем безбедности (санације рањивости оштећеног Real фајла)
+
++ Додата способност уношења више линија у прозору адреса
+
+- Решен проблем споре претраге MP4 фајлова
+- Решен проблем појављивања пола фрејма на неким графичким картицама током репродукције
+- Решен проблем не функционисања H/W непреплитања на неким PCs
+
+----------------------------------------------------------
+[1.6.63638]                                     2016/10/05
+----------------------------------------------------------
++ Додата H.264 MVC функција декодирања(потребна инсталација кодека)
++ Додата способност излаза на пуни екран на другим мониторима
++ Додата способност пребацивања на уобичајен pan & scan
++ Додата способност емитовања са ефектима покровитељства
+
+- Исправљена ненормална операција са одређеним srt преводом
+- Решен проблем немогућности излаза током снимања емитовања
+- Решен проблем HEVC 10-bit DXVA није радио са Radeon RX 4x0 видео картицом
+- Исправљен проблем цурења меморије током коришћења VapourSynth
+- Решен проблем да VapourSynth није радио у 64-bit верзији
+- Решен проблем Module фолдера није радио у VapourSynth портабле верзији
+
+----------------------------------------------------------
+[1.6.62949]                                     2016/08/11
+----------------------------------------------------------
++ Додата способност избора квалитета слике током емитовања 
++ Додата способност коришћења спољње листе
++ Додата способност репродукције дупле компресије FLAC
++ Додата способност ротације информација код репродукције JPEG фајла
+
+- Исправљен проблем репродукције неких TS фајлова
+- Исправљен проблем коришћења VapourSynth скрипти
+- Исправљен проблем репродукције неких AVI фајлова
+- Исправљена грешка дуплирања фајлова додатих у фолдер
+- Исправљена грешка код затварања са VMR9 Renderless
+
+----------------------------------------------------------
+[1.6.62377]                                     2016/07/12
+----------------------------------------------------------
+* Решен проблем безбедности (санације рањивости оштећеног AVI/MP4 фајла )
+
++ Додата могућност чувара екрана
++ Додата способност за излаз xxxx_Tooltip објашњења у језичким датотекама
++ Додата способност коришћења поп-уп менија дефинисанпг у масци
++ Додата могућност излаза провидног менија дефинисан у масци
++ Додата могућност VapourSynth филтера
++ Додата могућност 360 степени VR репродукције
++ Додата способност комбиновања изабраних као један фајл у листи за пуштање
++ Додата фунција H/W расплитања за уграђен Direct3D 9 Video Renderer
++ Додата контрола боја уграђеног Direct3D 9 Video Renderer
+
+- Решен проблем декодирања H.264
+- Решен проблем подршке DPI на Виндовс 7
+- Исправљена грешка навигације на неким рачунарима
+- Решен проблем меморије код пуштања много фајлова
+- Решен проблем не снимања емитовања
+- Решен проблем синх.репродукције са HLS
+- Побољшане могућности уграђеног Direct3D 9 Video Renderer у Виндовс 7 или новији
+- Побољшан 3D излаз видеа
+- Побољшан VMR7 Renderless mode
+
+----------------------------------------------------------
+[1.6.60136]                                     2016/05/11
+----------------------------------------------------------
+* Додата High DPI подршка (DPI-Aware)
+ (Додата подршка за  DPI у Windows 8.1 или новији!)
+
++ Додата способност зумирања маске
+
+- Решен проблем не функционисања дугмади током емитовања
+- Решен проблем не функционисања системског MFT AAC декодера
+- Решен проблем не функционисања неких пречица
+- Решен проблем погрешне поставке карактера на неким преводима
+
+----------------------------------------------------------
+[1.6.59347]                                     2016/03/23
+----------------------------------------------------------
+* Исправљен безбедносни проблем (исправка рањивости оштећених фајлова)
+
++ Додата способност додира за уобичајену маску
++ Додата способност промене величине наслова слике
++ Додате вертикалне опције на левој страни навигатора UI
+                                                       
+- Решен проблем када ставке листе не могу бити сортиране по фолдеру          
+- Решен проблем анализе YouTube листе
+- Решен проблем не пуштања HLS VOD протока
+- Решен проблем аутоматског пуштања у Windows 10
+- Решен проблем уграђених DirectSound Audio рендера
+- Решен проблем рада са листама код одређених FTP сервера
+- Решен проблем током снимања емитовања под одређеним условима
+- Решен проблем не пуштања (само за читање) MP3 фајлова
+- Решен проблем пријањања уз ивицу код Windows 10 
+- Побољшана способност аутоматске поставке карактера код отварања текста
+- Решен проблем који је изазвао грешку на крају репродукције под одређеним условима
+- Решен проблем треперења анимираних ASS/SSA превода
+
+----------------------------------------------------------
+[1.6.58613]                                     2016/02/11
+----------------------------------------------------------
+- Решен проблем мењања величине слике са DXVA
+- решен проблем не приказивања MKV уграђених превода
+- Решен проблем не снимања видеа код одређених фајлова
+- Решен проблем неодговарајућих наслова код  HTTP протока
+- Решен проблем црног екрана на одређеној резолуцији
+- Исправљен проблем шума код репродукције на Intel VGAs
+- Исправљена грешка код пуштања кратких AVI фајлова
+- Побољшано сортирање у плејлисти
+
+----------------------------------------------------------
+[1.6.58402]                                     2016/01/28
+----------------------------------------------------------
+* Исправљен безбедносни проблем (исправка рањивости код читања CUE)
+
++ Додата способност избора спољног VP8/9 кодека
++ Додата способност пуштаеа WEBM протока
+
+- Решен проблем немогучности пуштања MP3 протока
+- Решен проблем престанка рада програма код FTP отварања дијалога
+- Уклоњена подршка за  флеш из маски
+- Решен проблем S/PDIF није радио код одређених кодека
+
+----------------------------------------------------------
+[1.6.57875]                                     2015/12/29
+----------------------------------------------------------
++ Додата XInput Mouse Button подршка
++ Додата способност дељења емитовања отварањем адресе (http://tvpot.daum.net/xxxxxx.live)
+
+- Решен проблем током репродукције Винго ТВ под одређеним условима
+- Решен проблем poćetne вредности листе за емитовање  (Ctrl + Mouse Wheel)
+- Решен проблем недостатка звука током пуштања неких AVI фајлова
+- Решен проблем зеленог екрана током пуштањаh DX11 CopyBack декодера на NVIDIA VGA картицама
+- Решен проблем замрзавања приликом емитовања у појединим системима
+- Решен проблем приказа информација током OGG протока
+
+----------------------------------------------------------
+[1.6.57398]                                     2015/12/01
+----------------------------------------------------------
+* Решен проблем безбедности (санација рањивости оштећених MP4 хеадера )
+
++ Додата XInput (XBOX controller) подршка
++ Додат Арменски превод
++ Додата DVB Teletext подршка
++ Додата EIA 708 подршка затвореног превода
+
+- Исправљена грешка током емитовања са много ауто-ID менаџера
+- Решен проблем не приказивања одређених видео сличица
+- Решен проблем повременог замрзавања кад подешавања компресије током емитовања
+- Решен проблем не приказивања глатке анимације ASS превода
+- Решен проблем затварања програма са DXVA на неким VGA картицама током репродукције
+
+----------------------------------------------------------
+[1.6.56815]                                     2015/10/28
+----------------------------------------------------------
+* Знатна надоградња за FFmpeg(претходни модул не може бити коришћен)
+
++ Додат оперативни избор за показивање UI када се убаци фајл за пуштање
++ Додата опција приказивања мреже у фајл навигатору
+
+- Решен проблем не пуштања са одређеним AAC/MP3 фајловима
+- Сређено ненормално понашање код коришћења Виндовс бордер скин-а у Виндоњс 10 или новијем
+- Унапређен прегледач превода UI
+- Решен проблем без звука код одређених MKV fајлова
+
+----------------------------------------------------------
+[1.6.56209]                                     2015/09/09
+----------------------------------------------------------
++ Додат Грчки превод
++ Додат Таџикистански превод
++ Додат MFT HEVC декодер у Виндовс 10 или новијем (WDDM 2.0 или новија верзија)
++ Додат FFmpeg QuickSync H264 Декодер
+
+- Решен проблем не снимања формата у уређају за снимање
+- Решен проблем навигације код blu-ray mpls фајлова
+- Исправљена ffcodec.dll грешка код пуштања на одређеним PCs
+- Решен проблем изазвања грешке када креирате нови албум без ставки
+- Решен проблем не отварања одређених .sub превода
+
+* Побољшан рад привременог рeда репродукције
+
+----------------------------------------------------------
+[1.6.55390]                                     2015/07/22
+----------------------------------------------------------
+- Решен проблем да екран не ради правилно са ротирајућим или код промене величине слике током репродукције
+- Решен проблем испуштања кадрова код емитовања у одређеним ситуацијама
+- Решен проблем када не може да се изађе из програма у одређеним ситуацијама
+- Решен проблем отказивања копирања фајлова током инсталације
+- Решен проблем репродукције неких MP4 датотека
+
+----------------------------------------------------------
+[1.6.54915]                                     2015/07/02
+----------------------------------------------------------
+- Решен проблем да не приказивања неких ДВБ титлова
+- Решен проблем чудног изгледа маске после одвајања свих прозора
+- Решен проблем да преглед сличица не раде у D3D масци
+- Решен проблем кашњења 60-frame снимљеног видеа током емитовања
+
+----------------------------------------------------------
+[1.6.54871]                                     2015/06/29
+----------------------------------------------------------
+* Први део реорганизације у живом моду програма
+
++ Додата могућност излаза у више колона у експлореру сцене
++ Додата подршка за наслове у експлореру сцене
++ Додата опција за постављање транспарентне позадине у фајл навигатору
+
+- Исправљен нетачан прорачун величина датотеке
+- Решен проблем када вишеструки избор у плеј листи не може бити изабран десним кликом
+- Исправљена грешка приликом репродукције одређених МКВ фајлова
+- Побољшана брзина генерисања сличица у листи нумера / експлорер сцене
+- Исправљена грешка током репродукције одређених оштећених АВИ датотека
+- Решен проблем где се чат аутоматски не помера надоле у одређеним рачунарима
+- Решен проблем не пуштања аудио ЦД-а
+
+----------------------------------------------------------
+[1.6.54549]                                     2015/06/11
+----------------------------------------------------------
++ Додат Персијски превод
+
+- Решен проблем не подржаног плејбека на одређеним ФТП серверима
+- Решен проблем престанка рада Потплејера када је садржај ћаскања превелики
+- Решен проблем брисања садржаја ћаскања током пуштања следећег фајла током емитовања
+- Побољшана способност HEVC DXVA декодера
+- Повећана брзина стварања сличица
+- Решен проблем не читања одређених PNG датотека
+
+----------------------------------------------------------
+[1.6.54266]                                     2015/05/21
+----------------------------------------------------------
++ Додата могућност подешавања јачине звука за 200%
+
+- Решен проблем цурења меморија код пуштања одређених фајлова
+- Решен проблем код пуштања VMR9 Renderless у неким ситуацијама
+- Решен проблем да не може да скочи  претходни/следећи превод у Sup subtitles
+- Решен проблем синхронизације код пуштања са QuickSync decoder
+
+----------------------------------------------------------
+[1.6.54133]                                     2015/05/13
+----------------------------------------------------------
++ Додат Италијански превод
+
+- Решен проблем спорог приказа анимираних GIF-ова.
+- Решен проблем када поставка компресије не ступа на снагу током емитовања
+- Решен проблем приликом чувања емитовањa у одређеном формату
+- Побољшан спори старт  ауто-логин-а
+- Уклоњен MPEG4 video codec из емитовања
+- Решен проблем навигације са неким ASF фајловима
+- Решен проблем  са замрзавањем слике током емитовања
+- Решен проблем не појавлјивања слика са  HEVC MPEG TS фајловима
+- Решен проблем када не може аутоматски да се скролује код чат прозора
+- Побољшање квалитета видео записа током емитовања
+- Побољшан поступак са оштећеним AVI фајловима
+
+----------------------------------------------------------
+[1.6.53104]                                     2015/03/17
+----------------------------------------------------------
+* Решен проблем са баферовањем тренутне датотеке када промените уређај током емитовања
+
++ Додата могућност подешавања приказа сличица у фајл навигатору
++ Додати разни алгоритми у VMR9/EVR скалер
++ Додата способност приказа листе фолдера и фајлова на левој/десној страни код отварања FTP
+
+- Решен проблем немогућности пуштања неких MKV фајлова
+- Решен проблем непојављивања слика када се пуштају одређени MPEG фајлови
+- Решен проблем пуштања неких MPEG фајлова када је абнормалан de-interlacing
+- Побољшан приказ омота албума
+- Решен проблем правилног детектовањаt HDTV MMS канала
+- Решен проблем грешака у чат прозору
+- Решен проблем аутоматског скрола са много садржаја у чат прозору
+- Побоњшан лого емитовања да подржава анимирани PNG (APNG)
+
+----------------------------------------------------------
+[1.6.52515]                                     2015/02/02
+----------------------------------------------------------
++ Додат Шведски превод
++ Додата могућност снимања видеа у GIF формату
++ Додата опција примене ефеката само на емисије у етру
++ Додата функција утврђивања при покретању програма  да ли је недирнут PotPlayer.dll или не
++ Додата способност хватања екрана преко DirectDraw API
++ Додата подршка за NVIDIA 3D Vision Kit
++ Додата 3D излазна подршка за Built-in OpenGL Video Renderer
++ Додата подршка за затворене преводе
++ Додата могућност да подесите врсту пријем за BDA уређаје
++ Додата могућност додавања листу/измене фреквенције за BDA уређаје
++ Додат OpenH264 encoder
+
+- Решен проблем немогућности пуштања видеа из Daum's cloud сервера
+- Решен проблем неисправних фајлова приликом декодирања са DXVA на Intel VGAs
+- Решен проблем чудних боја када су слике у JPEG/PNG формату
+- Решен проблем неподешавања јачине звука  у Висти или новијем окружењу
+- Побољшан учинак Intel QuickSync Decoder
+- Решен проблем неотварања 8-bit PNG фајлова
+- Промењена подразумевана вредност Deinterlace на Motion Adaptive
+- Побољшан учинак Screen Capture via DXGI 1.2 API
+- Промењен метод учитавања спољних .dpl плејлист фајлова као привремени нови албум за директно уређивање
+- Промењен подразумевани резервни језик на Енглески за непреведене стрингове
+- Побољшано пуштање скинутих фајлова
+- Побољшан уграђени OpenGL Renderer
+- Решен проблем када DVD избор није радио са уграђеним OpenGL/Direct3D9 Video Renderers
+- Решен проблем синхронизације неких MP4 фајлова
+- Побољшан преглед сличица ставки за пуштање
+
+----------------------------------------------------------
+[1.6.51480]                                     2014/12/16
+----------------------------------------------------------
++ Додат Француски превод
++ Додат Тајландски превод
++ Додат Хебрејски превод
++ Додата подршка MP3 SYLT за текстове песама
++ Додата HLS VOD подршка репродукције
++ Додата функција читања текста
++ Додата способност зумирања и развлачења слике
+  коришћењем Ctrl, Alt, Shift + комбинације повлачења мишем
++ Додата способност постављања позиције превода
+  коришћењем Ctrl, Alt, Shift + комбинације повлачења мишем
+
+- Исправљен проблем немогућности декодирања одређених датотека када користи  CoreAVC
+- Исправљен проблем када снимање игре није функционисало
+- Исправљен проблем прескакања  следеће датотеке када се користи 
+  начин прескакања репродукције
+- Исправљен проблем немогућности пуштања одређених FTP адреса
+
+----------------------------------------------------------
+[1.6.49952]                                     2014/09/25
+----------------------------------------------------------
++ Додат Српски превод 
++ Додата способност контроле квалитета YouTube видеа из 
+  букмарк менија
+
+- Исправљен проблем који је проузроковао грешку са другим    
+  излазом превода
+- Исправљен проблем немогућности пуштања неких YouTube видеа
+- Побољшана подршка избора вишепојасног протока
+- Побољшана подршка емитовања UI дејства
+
+----------------------------------------------------------
+[1.6.49479]                                     13/08/2014
+----------------------------------------------------------
++ Додата способност одређивања спољњег аудио директоријума
+
+- Исправљен проблем непојављивања превода са 
+  Haali and Madshi видео рендерима
+- Исправљен проблем претраживача превода који 
+  није радио на неким системима
+- Исправљен проблем непуштања неких MP4 фајлова
+- Промењен начин употребе аудио нормалајзера 
+  коришћењем са/без емитовања
+- Исправљен проблем присилног излаза из ћаскања на неким   системима
+
+----------------------------------------------------------
+[1.6.49343]                                     07/08/2014
+----------------------------------------------------------
+* Састављен са новом верзијом компајлера
+
++ Додат Мађарски превод 
++ Додат Немачки превод
++ Додат Бугарски превод
++ Додата подршка за други излаз превода
++ Додата способност додавања превода на тренутни превод
++ Додата способност подешавања прескакања интервала репродукције 
+  посебно за сваку датотеку 
++ Додата опција за слање репродукованих датотека у канту
++ Додата способност одређивања библиотеке икона
++ Додата функција претражи у претраживачу превода
++ Додата подршка за MKV издање
++ Додата способност убацивања вучених фајлова на одређено 
+  место листе 
++ Додата подршка за вишеструки избор претраживача превода
++ Додата способност да аутоматски монтира ISO датотеке у оперативном   систему Виндовс 8 или новији
++ Додата способност за поновно учитавање превода на  промени   датотеке
++ Додата подршка за YouTube 
++ Додата могућност снимања HLS (HTTP Live Streaming) протока
+
+- Исправљен проблем положај екрана неких SSA превода
+- Уклоњен пренос превода уз емитовање
+- Исправљен проблем не пуштања неких HTTP TS протока
+- Исправљен проблем не појављивљња HDMV превода 
+- Исправљен проблем пријављивања са Даум налогом на неким   системима
+- Побољшана функција поновног учитавања превода
+
+----------------------------------------------------------
+[1.6.48576]                                     18/06/2014
+----------------------------------------------------------
++ Додат Шпански превод
++ Додат Украјински превод
++ Додата промена величине прозора код прве репродукције
++ Додата способност за корекцију палете боја
++ Додата способност да одвојено додели понови и насумичне функције за сваки   режим репродукције
++ Додата способност памћења положаја прозора и величину 
+  сваког режима маске
++ Додата опција за чување подешавања одмах када се паузира 
+  репродукција
++ Додата могућност да унапред прочита податке у уграђеном   сплитеру
+
+- Исправљен проблем не пуштања MOD датотека
+- Промењен прорачун SMI положаја превода из релативног
+  у односу на апсолутни
+- Исправљен проблем да стереоскопски 3Д излаз није радио   правилно
+- Исправљен проблем да неке пречице тастатуре нису радиле 
+- Исправњен проблем где функција листа за понављање није   радила ако је   режим насумичне репродукције био омогућен
+- Додата у инсталер могућност аутоматског утврђивања ефекта   избора   уграђених декодера/енкодера хардвера у зависности од   система
+- Побољшано руковање придруживања датотека у Виндовс 8
+
+----------------------------------------------------------
+[1.6.47995]                                     29/05/2014
+----------------------------------------------------------
++ Додат Јапански превод
++ Додаta могућност за подешавање да ли да покаже уграђени хардвер   Декодер/Енкодер избор
++ Додата подршка за стереоскопски 3Д режим Виндовс 8 или новији
++ Додата могућност да видите листе песама као сличице
+
+- Исправљен проблем немогућности пријављивања са Даум налогом  код   одређених рачунара
+- Исправљена ненормална операција, када је Пан & скен у   
+  режиму целог  екрана
+- Исправљен проблем непуштања неких MOV датотека
+- Додата могућност да подесите како програм треба да се
+  повеже на FTP сервер
+
+----------------------------------------------------------
+[1.6.47450]                                     08/05/2014
+----------------------------------------------------------
+* Додата подршка за језике(Енглеска/Кинеска/Португалска/Пољска/Руска   подршка)
+
++ Додата способност за коришћење Windows DMO/MFT   декодера/енкодера
++ Додат NVIDIA NVENC H.264 енкодер
++ Додат AMD VCE H.264 енкодер
++ Додата могућност да подесите  размеру прозора код 
+  покретања репродукције
++ Додата подршка за репродукцију VP7 видео формата
++ Додата могућност да проширење видеа између два
+  монитора у режиму целог екрана
++ Додата способност пуштања одмах ставки изабраних
+  нумера из албум менија
++ Додата способност снимања екрана преко DXGI 1.2 API   
+  умножавања десктопа (у Виндовс 8 или новији)
+
+- Исправљен проблем не читања специфичних SMI превода
+- Исправљен проблем са скоком на претходни превод
+- Промењена подразумевана вредност неких Sources/Splitters
+- Додат FFmpeg Source/Splitter избор у свим форматима у   
+  Source/Splitter контроли филтера
+- Исправљен проблем где корекција односа размере излазног 
+  уређаја није исправно радила
+- Исправљен проблем непуштања неких ASF датотека
+- Исправљен проблем цурења меморије са АСС преводима
+
+----------------------------------------------------------
+[1.5.45955]                                     06/03/2014
+----------------------------------------------------------
+- Исправљен проблем са лево/десно и горе/доле акције додира
+- Исправљен проблем када функција снимања игре није исправно   
+  радила у одређеним ситуацијама
+- Исправљен проблем поруке о грешци приликом гледања емисија   
+  на одређеним рачунарима
+- Исправљен проблем маски са коришћењем слојевитог прозора у   
+  OSC режиму
+
+----------------------------------------------------------
+[1.5.45948]                                     05/03/2014
+----------------------------------------------------------
++ Додата могућност подешавања аудио синхронизације за 2.     
+  аудио приказивач 
++ Додата способност да укључи преводе у сличици
++ Додата способност за пуштање DVD датотека
++ Додата могућност да подесите максимални приказ периода превода
++ Додат обрис замућености на  обраду превода
++ Додата  друга контура граница  на обраду превода 
++ Додата подршка за XML преводе
++ Додата функција претраживања превода
++ Додата функција FPS конверзија превода
++ Додата подршка за преводе отворене Датабасе (ОСДБ) да
+директно преузмете или потражите преводе на мрежи
++ Додата подршка за 10-bit и 16-bit YUV видео формате
++ Додата картица са информацијама система 
++ Додата могућност подешавања фонта ћаскања и величина прозора
++ Додата подршка за пуштање j2j датотека
+
+- Исправљен безбедносни проблем (санација оштећене MKV)
+- Побољшана брзина читања превода
+- Исправљен проблем да неки преводи нису нестали
+- Побољшано руковање уграђених source/parser (BASS, FLPC,APE, MPC)
+- Исправљен проблем где се неки DVD преводи не појављују
+- Исправљен проблем репродукције ogg протока
+- Неке исправке са уграђеним преводима
+- Исправљен проблем позиције blu-ray превода
+- Промењена уобичајена вредност ASF Splitter/Source
+- Побољшана руковање превод/аудио жељени језик 
+- Исправљен проблем са одређеним ознакама у преводима Руби
+- Исправљен проблем повременог треперења  караоке превода
+- Исправљен проблем немогућности прелома редова уграђених превода
+- Исправљен проблем где QuickSync decoder/encoder не ради на неким системима
+- Исправљен проблем немогућности пуштања HEVC (H.265) TS датотека
+- Исправљен проблем са више превода
+- Исправљен проблем са уграђеним преводима у MPEG PS/TS
+
+----------------------------------------------------------
+[1.5.44465]                                     16/01/2014
+----------------------------------------------------------
+- Исправљен проблем коришћења ефекта замућења неких видеа
+- Исправљен проблем емитовања када се користи оригинал FPS
+- Исправљен проблем у сабтајтл експлореру
+
+----------------------------------------------------------
+[1.5.44407]                                     15/01/2014
+----------------------------------------------------------
+* Иконе су промењене
+* Додате су селекције различитих формата кодека у контроли
+  филтера
++ Додата подршка за HEVC(H.265) видео формат
++ Додат Nvidia CUDA H.264 енкодер
++ Додат кодек подршка Dirac and MS Screen v1-4 
++ Додата подршка акције три прста на додир
++ Додата способност подешавања другог аудио рендера
++ Додат избор филтера WavPack/OPUS 
++ Додат способност промене видео протока
++ Додата способност комбинације Ctrl,Alt,Shift тастера са     
+  покретима миша
++ Додат deband филтер за видео обраду
+
+- Исправљен проблем тражења током репродукције AVCHD 
+  датотеке
+- Исправљен проблем да екран не ради док  се репродукују VC1/WMV3 
+  датотеке у DXVA IDCT моду
+- Исправљен проблем који користи превише системске кеш меморије током   репродукције
+- Исправљен проблем где се не приказују неке Руби ознаке правилно
+- Исправљен проблем да екран не ради са коришћењем DXVA у
+  одређенim ситуацијama
+- Побољшан скенер за HDTV каналe
+- Исправљен проблем код снимања idx/sub превода
+- Исправљен проблем када не може да репродукује датотеке из одређеног FTP   сервера 
+- Исправљена проблем синхронизације неких MPEG датотека
+- Промењено уобичајено подешавање компресије емитовања аудио на 48000, 128К
+- Промењено уобичајено подешавање ASF Splitter/Source на WMF Source филтер
+- Исправљен проблем претраге са неким DVDs
+- Исправљен проблем са CUDA and QuickSync декодерима који не раде 
+  приликом DVD репродукције
+- Уклоњен застарели кодеци из уграђеног аудио декодера
+- Додата способност игнорисања више ХТМЛ ознака у преводима
+- Омогућена AVC1-H264 обрада у MPEG PS/TS 
+- Исправљен проблем заустављања DVD репродукције при коришћењу DXVA у   одређеним ситуацијама
+- Повећање брзине MPEG TS/PS, MKV, OGG датотека
+- Побољшана репродукција мулти-програмаMPEG TS датотека
+- Побољшана функција креирање сличица 
+- Побољшана функција прегледачa сцене
+- Додат процес распознавања клика и дуплог клика 
+- Уклоњена акција додиром једног прста из подршке додиром
+- Промењен приказа умањених сличица (у бару за навигацију) 
+  у зависности од тренутног односа размере
+- Неке исправке са неким WebDAV сервера
+- Неке исправке у снимању екрана
+- Побољшано руковање са S/PDIF
+- Побољшано руковање уграђеним кодецима
+- Пресељене неке спољашње датотеке у фасциклу под називом "модул"
+
+----------------------------------------------------------

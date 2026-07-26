@@ -1,6 +1,23 @@
 node_modules
 release
-third_party/*
+# third_party: 只放行文本/源码配置，所有二进制 / 缓存严禁入库（由构建时 go build 生成或 CI 下载，不必提交）
+third_party/**
+!third_party/**/
+!third_party/**/.gitkip
+!third_party/**/*.md
+!third_party/**/*.txt
+!third_party/**/*.conf
+!third_party/**/*.bat
+!third_party/**/*.ps1
+!third_party/**/*.ico
+!third_party/**/*.png
+!third_party/**/*.webp
+!third_party/**/*.glsl
+!third_party/**/*.lua
+!third_party/**/*.json
+!third_party/**/*.js
+!third_party/**/*.html
+!third_party/**/*.py
 package-lock.json
 !.gitkip
 *.zip

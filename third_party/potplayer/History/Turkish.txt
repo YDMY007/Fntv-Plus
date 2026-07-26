@@ -1,0 +1,3040 @@
+
+PotPlayer'ın Versiyon Geçmişi
+
+----------------------------------------------------------
+[260401]
+----------------------------------------------------------
++ Added the ability to output subtitles using libass
++ Added the ability to handle HLS/Dash playback using built-in modules
+
+- Improved subtitle output speed
+- Improved speed for some video filters
+- Fixed an issue where external audio could not be connected when multiple audio files were present
+- Fixed an issue where certain Unicode characters were displayed incorrectly
+- Fixed an issue where playback always started from the beginning upon completion in the temporary playback queue
+
+----------------------------------------------------------
+[260114]
+----------------------------------------------------------
++ Added APV decoding functionality
+
+- Improved subtitle character set handling
+- Fixed an issue where the real-time audio subtitle generation feature would not sync during live streaming playback
+- Fixed an issue where playback would not finish when playing certain MKV files
+- Fixed an issue where playback of certain MP4 files was slow.
+
+----------------------------------------------------------
+[250909]
+----------------------------------------------------------
++ Added real-time subtitle generation from audio.
+
+- Fixed a screen corruption issue when using WMV3/VC1 IDCT DXVA.
+- Fixed a black screen issue under certain conditions when using DXVA.
+- Fixed an issue where certain MKV files would open slowly.
+- Fixed an issue where embedded subtitles would not display in certain MKV files.
+- Fixed a black screen issue when playing certain AV1 files.
+- Fixed an issue where certain subtitle text would not appear.
+
+----------------------------------------------------------
+[250625]
+----------------------------------------------------------
++ Added ability to select HDR tone mapping type 
++ Added VAD function to Whisper 
+
+- Fixed an issue where an error occurred in certain situations 
+- Fixed an issue where certain MP3 lyrics could not be displayed 
+- Fixed an issue where certain subtitle backgrounds were cut off 
+- Fixed an issue where rotation of certain images could not be handled
+- Improved damaged MKV playback function
+
+----------------------------------------------------------
+[250514]
+----------------------------------------------------------
++ Added ability to change subtitle font handling
+
+- Improved handling of Whisper additional options
+- Improved D3D11 H/W HDR handling
+- Fixed issue where black screen appeared under certain conditions
+
+----------------------------------------------------------
+[250313]
+----------------------------------------------------------
+- Fixed an issue where certain PCs would stop playing 10-bit HEVC video
+- Fixed an issue where whisper faster would not work on NVIDIA 5000 series GPUs
+- Fixed an issue where certain ASS/SSA subtitles would not work properly
+
+----------------------------------------------------------
+[250226]
+----------------------------------------------------------
++ Added the ability to output ASS/SSA subtitles using libass
++ Added Faster-Whisper-XXL to the Whisper engine
++ Added the ability to update the Whisper engine
++ Added the ability to save subtitles with the same name as the video when generating voices with subtitles
+
+- Fixed the issue where the screen color was strange in certain situations when capturing video
+- Fixed the issue where memory leaks occurred in certain situations
+
+----------------------------------------------------------
+[241211]
+----------------------------------------------------------
++ Added the ability to generate subtitles from voice using Whisper
++ Added the ability to open audio together in command line options
++ Added the ability to set monitor luminance in HDR 2084
+
+- Fixed an issue where WEBP image files could not be played
+- Fixed an issue where certain MP3 lyrics did not appear
+- Fixed an issue where certain MPEG TS files were playing slowly
+- Fixed an issue where certain files were displayed in black when playing.
+
+----------------------------------------------------------
+[241015]
+----------------------------------------------------------
++ Added the ability to adjust playback speed when pressing the mouse button
+
+- Fixed an issue where certain MPEG TS playback times were abnormal
+- Fixed the problem of screen breaking when playing certain MPEG TS
+- Fixed the problem of certain ASS/SSA subtitles appearing strangely
+- Fixed an issue that caused abnormal operation when playing very long files.
+
+----------------------------------------------------------
+[240827]
+----------------------------------------------------------
++ Added WEBP to video capture 
++ Added ability to set delay time to seconds or less in image source filter 
++ Added auto-run feature when system starts
+
+- Fixed an issue where the size settings of the shortcut icon were not reflected. 
+- Fixed an issue where the Do not add duplicate files setting was reset in certain situations. 
+- Fixed an issue where the video was recognized as interlaced when playing with a specific codec. 
+- Fixed an error issue when decoding with libVPX 8/9
+- Fixed an issue where navigation occurred abnormally when playing MP4 streaming.
+- Fixed an issue where browsing certain FLV files was slow
+- Improved subtitle display speed
+
+----------------------------------------------------------
+[240618]
+----------------------------------------------------------
++ Added the ability to set the font for OSD playback information 
++ Added the ability to name albums in environment management automatic conditions 
++ Added the ability to go to the previous/next section in the section repeat list 
++ Added ability to not wait for vertical sync 
++ Added system media transport control function
+
+- Modified the window border skin to be prettier. 
+- Modified the subtitle format to be displayed in the name of the built-in subtitles. 
+- Fixed an issue where frame steps did not work properly in the built-in video renderer.
+
+----------------------------------------------------------
+[240509]
+----------------------------------------------------------
+- Fixed an issue where the screen did not appear when playing some MP4 files
+- Improved built-in D3D9 renderer stability
+- Fixed an issue where files in compressed files could not be played properly
+- Fixed an issue where the screen was broken after navigation when playing certain MPEG 2 with DXVA
+
+----------------------------------------------------------
+[240305]
+----------------------------------------------------------
++ Added NVIDIA RTX Video HDR function
++ Added ability to move files to playlist
+
+- Fixed an issue where damaged WAV files could not be played
+- Fixed an issue where the screen was broken when playing certain MPEG4 codecs
+- Fixed an issue where the screen did not appear when playing certain WMV videos
+- Fixed an issue where certain SRT protocols did not work
+- Fixed an issue where an error occurred when playing certain TS files
+- Fixed an issue where an error occurred in certain situations when playing some VP8/9 codecs.
+
+----------------------------------------------------------
+[231220]
+----------------------------------------------------------
++ Added the ability to select a device when outputting TTS
+
+- Fixed an error issue when playing MPEG 1/2 with DXVA on older GPUs.
+- Added ability to paste playlist below selected item
+- Fixed an issue where an error occurred when playing certain MKV files
+- Fixed an issue where navigation was not possible when playing certain files
+
+----------------------------------------------------------
+[231102]
+----------------------------------------------------------
++ Added the ability to display multiple lines in the subtitle explorer
++ NOTCHLC video codec playback function added
+
+- Modified to apply HDR color correction when capturing video if possible
+- Fixed an issue where the DTS pass-through function did not work on certain systems
+- Fixed an issue where embedded subtitles were displayed overlapping when playing files without interruption.
+- Fixed an issue where playback completion did not occur when using the delete related file function upon completion of playback.
+- Fixed a problem that freezing when playing HEVC with DXVA on old Intel GPUs
+- Fixed an issue where certain MKV videos could not be played after searching for them.
+
+----------------------------------------------------------
+[230830]
+----------------------------------------------------------
+- When translating subtitles, modify to maintain subtitle properties if possible
+- Fixed an issue where the ratio was not properly handled when playing a video in which some ratios were changed
+- When using the built-in D3D11 renderer, the screen is cut off when the resolution goes beyond another monitor.
+- Fixed an issue that crashed in certain situations
+- Improved stability of built-in video renderer
+
+----------------------------------------------------------
+[230705]
+----------------------------------------------------------
++ Added the ability to translate subtitles in addition to selected languages
++ Added support for g726 codec in MP4
++ Added support for ARIB subtitles
+
+- Fixed trackpad scrolling of playlists to be handled smoothly
+- Improved MP4 playback function while downloading
+- Improved raw av1 file playback function
+
+----------------------------------------------------------
+[230523]
+----------------------------------------------------------
+- Fixed an out-of-sync problem when playing with mjpeg codec
+- Fixed a problem where an error occurred when playing with a specific MPEG 2 codec
+- Fixed an issue where the title screen did not appear when playing certain DVDs
+- Fixed the problem that the screen was broken when using certain H264 DXVA
+
+----------------------------------------------------------
+[230405]
+----------------------------------------------------------
++ Added GPU Super Resolution function to built-in D3D11 video renderer
+
+- Fixed an issue where audio visualization did not work when only the right channel had voice
+- Fixed a problem that was captured strangely when capturing with subtitles in the D3D11 video renderer
+- Fixed a problem where sound did not come out in certain situations when playing damaged videos
+- Fixed a problem where sound did not come out in certain flac codecs
+
+----------------------------------------------------------
+[230207]
+----------------------------------------------------------
++ Added WEBP format to video capture
+
+- Modified to run a little faster when running for the first time
+- Fixed the problem that some corrupted FLAC files could not be played
+- Fixed the problem of playing slowly when playing some FTP/HTTP files
+- Fixed an issue where playback time was incorrectly handled when playing some MP4 files
+
+----------------------------------------------------------
+[221215]
+----------------------------------------------------------
+- Fixed the problem that certain AV1 files were not played
+- Fixed an issue where the quality could drop when playing non-i420p interlaced video
+- Fixed an issue that was interrupted when adjusting the speed when playing with a specific WaveOut device
+- Fixed an issue where subtitles could not be selected if there were too many subtitle files
+- Fixed an issue where some flv playback times were calculated incorrectly
+- Fixed a problem where spaces could not be processed in some Japanese subtitles
+- Fixed an issue where some RSS feeds could not be read
+
+----------------------------------------------------------
+[221102]
+----------------------------------------------------------
+- Fixed an error that occurred on certain systems
+- Fixed an issue where the screen was broken when taking a snapshot
+- Improved DASH/HLS playback function
+
+----------------------------------------------------------
+[220831]
+----------------------------------------------------------
+- Fixed an issue where there was no sound when playing certain MP4 files
+- Fixed an error that occurred when playing certain files
+- Fixed the problem of slow playback when playing for the first time
+- Improved stability when using DXVA
+
+----------------------------------------------------------
+[220706]
+----------------------------------------------------------
++ Added the ability to save translation when saving subtitles
++ Added SDR <-> HDR conversion function to H/W HDR function
++ Added the ability to play pes files
++ Added HEVC 420P12, 422P10, 422P12, 444P8, 444P10, 444P10 DXVA features (Intel only)
++ Added the ability to exclude the download if the subtitle download contains a certain string
+
+- Fixed a problem that was captured strangely when capturing a video with rotation applied in a specific video
+- Fixed an error that occurred when playing certain videos
+- Fixed a problem that certain menu items were not registered in shortcut keys
+- Fixed a problem that certain subtitles did not appear
+- Fixed a problem that black screen appeared when playing av1 with dxva copyback
+- Fixed an issue where random playback did not occur on first playback
+- Improved processing speed of internal color space
+- Fixed an issue that caused slow navigation with DXVA copyback
+
+----------------------------------------------------------
+[220420]
+----------------------------------------------------------
++ Added FTP/WebDAV file deletion function
++ Added the ability to play while downloading from a network driver
+
+- Fixed an issue where certain FLAC files could not be played
+
+----------------------------------------------------------
+[220302]
+----------------------------------------------------------
++ Added the ability to load external chapters in txt format
+
+- Improved handling of hiding mouse cursors
+- Fixed an issue where the folder monitoring function in the playlist did not work
+- Fixed the subtitle times being combined when they overlaped
+
+----------------------------------------------------------
+[220106]
+----------------------------------------------------------
+- Fixed an issue where skin UI did not appear in certain situations on the full screen
+- Fixed AAC/MP3 navigation to move more accurately
+- Fixed the navigation speed to work faster when playing HTTP streams
+- Fixed an issue where playback finished when navigating certain MP4
+
+----------------------------------------------------------
+[211118]
+----------------------------------------------------------
++ Added the ability to fill other monitors black in full screen
++ Added the ability to delay the end of a section iteration when repeating an interval
+
+- Fixed an issue that no sound while playing certain MPEG TS files
+- Fixed an issue where audio capture was not available in certain situations
+- Fixed an issue that caused AC3 to appear when playing certain DD+ audio
+- Fixed an issue where there was time error when making bookmarks playlist
+- Fixed an issue where subtitles were small when you specified a very large subtitle font size
+
+----------------------------------------------------------
+[210929]
+----------------------------------------------------------
++ Seri tekrar işlevi eklendi
+
+- Belirli MP4 dosyalarını oynatırken programın anormal davranmasına neden olan bir sorun düzeltildi
+- Belirli durumlarda oynatma sırasında cilt değiştirildiğinde hataya neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[210729]
+----------------------------------------------------------
+* Programın live modundan sponsorlukla ilgili özellikler kaldırıldı
+
++ Panoya kopyalanan oynatma süresi biçimini ayarlama özelliği eklendi
+
+- Belirli H.264 TS dosyalarını oynatırken ekranın kırılmasına neden olan bir sorun düzeltildi
+- Seslerin çok yüksek bir örnekleme hızıyla çalınamaması sorunu düzeltildi
+- Örtüşen altyazı sürelerinin işlenmesi asgari gösterim periyodu fonksiyonu kullanımında iyileştirildi
+- Belirli MP4 dosyalarıyla oynatmanın durmasına neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[210428]
+----------------------------------------------------------
++ Tercihlerde tanımlanmış klavye kısayol tuşlarını sıralama yeteneği eklendi
+
+- DXVA modunda belirli HEVC dosyalarını oynatırken oluşan bir hata düzeltildi
+- Belirli MP4 dosyalarını oynatırken oluşan bir hata düzeltildi
+- Bölüm içeren YouTube içeriğini oynatırken kalite değiştirildiğinde bölüm işaretçilerinin kaybolmasına neden olan bir sorun düzeltildi
+- WEBDAV oynatma listelerinin tarihe göre sıralanamaması sorunu düzeltildi
+
+----------------------------------------------------------
+[210318]
+----------------------------------------------------------
++ 3D sol/sağ görüntüleri yatay ters çevirmek için bir işlev eklendi
+
+- Belirli AAC codeclerle sesin çıkmaması sorunu düzeltildi
+- Bazı ASS/SSA altyazılarının anormal şekilde görüntülenmesine neden olan bir sorun düzeltildi
+- Başında [Ext] etiketi görünecek şekilde harici parça adlarının görüntülenmesi değiştirildi
+- Bazı oynatma listelerinin yinelenerek eklendiği bir sorun düzeltildi
+- Google ile altyazı kelimelerini aramanın mümkün olmadığı bir sorun düzeltildi
+- AV1 DXVA işleme 10 bit videolarla çalışabilecek şekilde değiştirildi
+
+----------------------------------------------------------
+[210127]
+----------------------------------------------------------
+* Shockwave Flash (SWF) dosyalarının oynatım desteği kaldırıldı
+* Favori bir kanalın yayın başlatım bildirimi işlevi kaldırıldı
+
++ Hollandaca çeviri eklendi
++ Ciltte tanımlanan ses spektrumunu WMP görselleştirmesi olarak kullanma yeteneği eklendi
++ DXVA moduna AV1 kodek desteği eklendi
+
+- Belirli MKV dosyalarının oynatılmasının düzgün olmadığı bir sorun düzeltildi
+- Zaman kaydırma işlevinin anormal şekilde çalışmasına neden olan bir sorun düzeltildi
+- Sistem ses örnekleme hızı ayarı 192kHz'den yüksek olduğunda ses çıkmaması sorunu düzeltildi
+- Parola korumalı bir yayını izlerken video kalitesinin değiştirilememesi sorunu düzeltildi
+- Belirli durumlarda bir yer imini düzenlerken oluşan bir hata sorunu düzeltildi
+- Entegre SMI altyazılarının seçilememesine neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[201209]
+----------------------------------------------------------
++ İçerik menüsünü özelleştirme yeteneği eklendi
++ CUDA/QuickSync Video Çözücüye AV1 kodek desteği eklendi
++ Tercihlere piksel gölgelendirici ayar sekmesi eklendi
++ İçerik menüsü öğelerini cilt CmdID'leriyle birlikte görüntüleme yeteneği eklendi
+
+- Yer imi editöründe yer imi silinirken arızaya neden olan bir sorun düzeltildi
+- Özel menü çıktı hızı iyileştirildi
+- Programın başlangıçta daha hızlı çalışması için bazı düzeltmeler yapıldı
+- Bazı MKV dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+
+----------------------------------------------------------
+[201021]
+----------------------------------------------------------
++ Yer imi düzenleyicisine yer imi eklenen öğelerin zamanını topluca değiştirme yeteneği eklendi
+
+- HDR HLG video oynatılırken rengin anormal olması sorunu düzeltildi
+- 10 bit çıkışı kullanılırken video yakalama ekranının anormal olması sorunu düzeltildi
+- Katmanlı Pencere OSC modu kullanılırken CPU kullanımının yüksek olması sorunu düzeltildi
+- Belirli MKV dosyalarını oynatırken toplam sürenin sıfır olarak tanınmasına neden olan bir sorun düzeltildi
+- Belirli durumlarda yer imlerini silerken yer imlerinin çoğaltılmasına neden olan bir sorun düzeltildi
+- Satır sonlarını mümkün olduğunca korumak için çevrimiçi altyazı çevirisinin işleyişi düzenlendi
+- Belirli ASS/SSA altyazılarının çıktısının anormal olması sorunu düzeltildi
+- Belirli MOV dosyalarında atlama yaparken programın oynatmayı durdurmasına neden olan bir sorun düzeltildi
+- Döndürme bilgileriyle bir küçük resim oluştururken oluşan bir sorun düzeltildi
+
+----------------------------------------------------------
+[200908]
+----------------------------------------------------------
+- Belirli durumlarda bir dosyayı açarken kısayol tuşlarının çalışmaması sorunu giderildi
+- Küçük resim oluşturmanın biraz yavaş olması sorunu düzeltildi
+- Mp4 dosyalarında geliştirilmiş 3D/360 formatı uyumluluğu
+- Blu-ray klasörünün oynatılmasının hemen başlamamasına neden olan bir sorun düzeltildi
+- Belirli dosyaları oynatırken oluşan bir hata düzeltildi
+- Video kısayollarından da okunması için /seek ve /sub komut satırı anahtarları düzenlendi
+- Bazı altyazıların titreme sorunu düzeltildi
+- Yer imi düzenlemesinde bir yer imini silmeyle ilgili garip bir sorun düzeltildi
+
+----------------------------------------------------------
+[200730]
+----------------------------------------------------------
++ Oynatma listesinde, yer imi düzenleyicide, altyazı gezginde vb. Ana pencerenin kısayol tuşlarını çalıştırma yeteneği eklendi.
++ Dış görünümde tanımlanan oynatma sürelerini oynatma hızına göre düzeltmek için bir seçenek eklendi
++ Yer imi düzenleyicisine filtre işlevi eklendi
++ Yazı tipi yüzünü yalnızca ASS/SSA altyazılarında geçersiz kılma özelliği eklendi
+
+- Programın belirli sistemlerde oynatmayı başlatamamasına neden olan bir sorun düzeltildi
+- Bazı altyazılarda altyazıların çoğaltılması sorunu düzeltildi
+- Bazı Dash/HTTP canlı akışlarının oynatma sorunu düzeltildi
+- 10 bit AV1 codec ile oynatmanın yavaşlamasına neden olan bir sorun düzeltildi
+- Belirli MP4 dosyalarını oynatırken video görüntüsünün kaybolmasına neden olan bir sorun düzeltildi
+- Bazı ASS/SSA altyazılarının garip görünmesine neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[200616]
+----------------------------------------------------------
++ Oynatma listesine yer imi eklenmiş/oynatılan öğeleri listeleme özelliği eklendi
++ Video boyutu/konum değişikliklerini hatırlamak için bir işlev eklendi
++ Bölüm tekrarlarının gecikme süresini ayarlama yeteneği eklendi
+
+- SuperEQ işlevi kullanıldığında programın belirli dosyaları oynatamamasına neden olan bir sorun düzeltildi
+- Yayın sırasında izleyici bilgilerinin güncellenememesine neden olan bir sorun düzeltildi
+- Belirli durumlarda hasarlı bir dosya gibi MP4 dosyalarını oynatma sorunu düzeltildi
+- Geliştirilmiş erişilebilirlik uyumluluğu
+
+----------------------------------------------------------
+[200512]
+----------------------------------------------------------
++ Oyun yakalama işlevine Vulkan desteği eklendi
++ Görünümde tanımlanan geçen/kalan süreleri tersine çevirme yeteneği eklendi
++ Komut satırından altyazı yükleme özelliği eklendi
++ Bölümlerin döngü tekrarlarının sayısını ayarlama yeteneği eklendi
+
+- Programın belirli pencere yakalama işlevinde UWP pencerelerini yakalayamamasına neden olan bir sorun düzeltildi (Win10 1803 veya daha yenisini gerektirir)
+- DirectDraw ve Direct3D8 işlevlerinin Game Capture'da çalışmaması sorunu giderildi
+- Geliştirilmiş ekran yakalama performansı
+- Geliştirilmiş erişilebilirlik uyumluluğu
+- Özel karakterler içeren iyileştirilmiş FTP sunucusu bağlantıları
+- Ekran yakalamada tam ekran modunu hatırlamama sorunu düzeltildi
+- Oynatma listesi/gezgin aramasındaki boşluk karakteri "ve" koşulu olarak kabul edilecek şekilde değiştirildi.
+
+----------------------------------------------------------
+[200317]
+----------------------------------------------------------
++ Bir oynatma listesindeki seçili öğelerin yolunu panoya kopyalama özelliği eklendi
++ Bir oynatma listesi içindeki öğeleri taşıma yeteneği eklendi
++ Yalnızca tercih edilen dillerde bulunan altyazıları eklemek için altyazı indiriciye bir işlev eklendi
+
+- Bazı bilgisayarlarda kurulumun yavaş başlamasına veya durmasına neden olan bir sorun düzeltildi
+- Belirli bir WebDAV sunucusuna bağlanamama sorunu düzeltildi
+- Belirli bir FTP sunucusundan dosya listesi alınamayan bir sorun düzeltildi
+- Belirli PNG dosyalarını açarken hataya neden olan bir sorun düzeltildi
+- Bazı MKV'lerde gezinme çubuğundaki küçük resim önizlemesinin yanlış olduğu bir sorun düzeltildi
+- Belirli Blu-ray altyazılarının görünmediği bir sorun düzeltildi
+- MP3'e yerleştirilmiş şarkı sözlerinin uyumluluğu iyileştirildi
+
+----------------------------------------------------------
+[200204]
+----------------------------------------------------------
++ Tercihlere arama işlevi eklendi
++ Gömülü altyazıları göz ardı etme yeteneği eklendi
+
+- Belirli bir WebDAV sunucusuna bağlanırken oluşan bir hata düzeltildi
+- Oynatmanın başlangıcında oynatma kapatıldığında harici yer imlerinin silinmesine neden olan bir sorun düzeltildi
+- Geliştirilmiş slayt gösterisi görselleştirme modu
+- Belirli bilgisayarlarda oynatmaya başlarken programın yavaş çalışmasına neden olan bir sorun düzeltildi
+- Yazı tiplerinin belirli PC'lerde farklı görüntülendiği bir sorun düzeltildi
+- Overlay Mixer özel ekran modu kullanılırken ekranın pembe görünmesine neden olan bir sorun düzeltildi
+- Bazı FTP sunucularından dosyaların oynatılmamasına neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[191211]
+----------------------------------------------------------
+* Geçerli tarih artık programın sürüm numarası olarak kullanılıyor
+
++ Dahili D3D11 Video İşleyiciye H/W HDR çıkış modu eklendi
++ Dahili D3D11 Video İşleyici ile özel ekran modu kullanıldığında ekranın donmasına neden olan bir sorun düzeltildi
++ Kürtçe çeviri eklendi
++ Sistemin varsayılan içerik menüsünün karanlık modunu etkinleştirmek için bir seçenek eklendi
++ MPC Video Oluşturucuyu kullanma yeteneği eklendi
++ Yandex çevrimiçi çeviri motoru için destek eklendi
+
+- Bazı ASF/WMV dosyalarının hızlı oynatıldığı bir sorun düzeltildi
+- Oynatma atlama bilgileri harici bir dosyaya kaydedildiğinde son öğenin silinmemesi sorunu giderildi
+- Bir ASX oynatma listesi dosyası işlenirken başlığın değiştirilmemesine neden olan bir sorun düzeltildi
+- DPI-Aware v2 ile çalışmakla ilgili sorunlar düzeltildi
+- Tam ekran modu ayarlarında görüntüleme cihazı adının görünmemesi sorunu düzeltildi
+- .Cue dosyasında birden çok ortam belirtildiğinde programın arızalanmasına neden olan bir sorun düzeltildi
+- İyileştirilmiş 10 bit çıktı işleme
+- Bazı DVD .ifo dosyalarını oynatırken altyazıların görünmemesi sorunu düzeltildi
+- Belirli MKV dosyalarında yavaş arama sorunu düzeltildi
+
+----------------------------------------------------------
+[1.7.20977]				        2019/10/31
+----------------------------------------------------------
++ Tercih edilmeyen altyazı dillerini otomatik seçmeme özelliği eklendi
++ OSD çeşitli bilgilerinde bölüm/yer imi bilgilerini görüntüleme yeteneği eklendi
+
+- Belirli durumlarda hatalara neden olan bir sorun düzeltildi
+- Metin dosyalarını okuma sorunu düzeltildi
+- Kesintisiz oynatma modu sırasında ilgili dosyaların silinememesi sorunu giderildi
+- Açık Adres iletişim kutusunda açılan bir listenin ayrıştırılamaması sorunu düzeltildi
+- Belirli MOV dosyalarında rengin garip olduğu bir sorun düzeltildi
+- Bluesky Frame Rate Converter'ın çalışmadığı bir sorun düzeltildi
+- Belirli TS dosyalarının oynatılmasının sonunda hataya neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.20538]				        2019/09/19
+----------------------------------------------------------
+* Varsayılan HEVC kod çözücü, Dahili FFmpeg HEVC H/W Kod Çözücüye değiştirildi
+
++ YTT altyazıları için destek eklendi
++ Harici bölüm dosyaları (.chapters.xml) için destek eklendi
+
+- Belirli TS dosyalarını oynatırken ortaya çıkan bir sorun düzeltildi
+- Belirli FLAC dosyalarını oynatamayan bir sorun düzeltildi
+- Bazı YouTube videolarında 2. altyazıların görünmesi sorunu giderildi
+- İlgili URL'yi açmaya çalışırken URL'yi Aç kutusundaki başlığın oynatma listesine yansıtılmaması sorunu düzeltildi.
+- Saklama modları arasında geçiş yaparken ayarların kaybolmasına neden olan bir sorun düzeltildi (INI <-> Kayıt Defteri)
+
+----------------------------------------------------------
+[1.7.19955]				        2019/07/31
+----------------------------------------------------------
++ VP4 codec bileşeni eklendi
++ Arapça ve Katalanca çeviriler eklendi
++ Video alanının arka plan rengini ayarlama özelliği eklendi
+
+- Belirli akışlardaki gömülü altyazıların hızla kaybolduğu bir sorun düzeltildi
+- Belirli durumlarda tvingTV oynatmada sonraki içeriğin ötesine geçen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.18958]				        2019/06/10
+----------------------------------------------------------
++ Ekran çözünürlüğüne göre videoyu yeniden boyutlandırma yeteneği eklendi
+
+- Belirli MPEG dosyalarını oynatırken video görüntüsünün kaybolmasına neden olan bir sorun düzeltildi
+- Bazı CUE dosyalarının yanlış bir şekilde ayrıştırıldığı bir sorun düzeltildi
+- Belirli durumlarda bitmap tabanlı altyazıları işlerken programın çökmesine neden olan bir sorun düzeltildi
+- Logitech BRIO web kamerasının belirli durumlarda çalışmaması sorunu giderildi
+- Belirli MP4 dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+- Sıfır boyuta sahip dosyalarda oynatmaya başlamanın uzun sürmesi sorunu düzeltildi.
+- SuperEQ'nun iyileştirilmiş kullanımı
+
+----------------------------------------------------------
+[1.7.18346]				        2019/04/19
+----------------------------------------------------------
+* Yayın sırasında web oynatmanın anormal olmasına neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.18344]				        2019/04/17
+----------------------------------------------------------
++ Kakao çevrimiçi çeviri motoru için destek eklendi (yalnızca Koreli kullanıcılar için mevcuttur)
++ Game Capture'a fare imlecini dahil etme yeteneği eklendi
+
+- Belirli MKV dosyalarındaki arama sorunu düzeltildi
+- Oynatma listesi öğelerinin boyuta göre sıralanamaması sorunu düzeltildi
+- TTML altyazı karakterlerinin yok sayılmasına neden olan bir sorun düzeltildi
+- Dosya Gezgini'nin belirli durumlarda çökmesine neden olan bir sorun düzeltildi
+- Programın belirli dosyaları oynatırken yavaş çalışmasına neden olan bir sorun düzeltildi
+- Belirli H.264 dosyalarını oynatırken ekranın bozulmasına neden olan bir sorun düzeltildi
+- Geliştirilmiş AV1 kod çözme performansı
+- Belirli MP4 dosyalarını oynatırken anormal bir davranış düzeltildi
+- ZIP/RAR sıkıştırılmış dosyaların iyileştirilmiş oynatımı
+
+----------------------------------------------------------
+[1.7.17508]				        2019/02/12
+----------------------------------------------------------
++ Uzantıları güncelleme yeteneği eklendi
++ Altyazı Tarayıcısında altyazı düzenleme yeteneği eklendi
+
+- Orijinali olabildiğince korumak için SMI altyazılarının kaydedilmesi değiştirildi
+- Belirli durumlarda D3D11 OSC modunu kullanırken anormal bir davranış düzeltildi
+- PotScreenSaver'ın fare ile kapatılamaması sorunu giderildi
+- Bağlam menüsünün varsayılan dış görünüm seçeneği dış görünümde tanımlanan stille değiştirildi
+
+----------------------------------------------------------
+[1.7.16291]				        2018/12/12
+----------------------------------------------------------
++ Tarayıcı penceresine çevrimiçi altyazı veritabanı sekmesi eklendi
++ Oynatma hızı değişikliklerini tutma yeteneği eklendi
+
+- Bluesky Frame Rate Converter kullanıldığında küçük resim oluşturmayı engelleyen bir sorun düzeltildi
+- Döndürme işlevi kullanıldığında en boy oranının anormal olması sorunu giderildi
+- Bazı MP4 dosyalarının hızlı oynatılmasına neden olan bir sorun düzeltildi
+- HTTP akışlarının iyileştirilmiş oynatımı
+- Bazı SSA/ASS altyazı dosyalarındaki stillerin yanlış ayrıştırılmasına neden olan bir sorun düzeltildi
+- Belirli bilgisayarlarda WMV/ASF dosyalarını oynatamayan bir sorun düzeltildi
+- Videoyla eşleşecek şekilde geliştirilmiş altyazı araması
+- Dış görünüm dosyalarını yükleme hızı iyileştirildi
+- Belirli MKV dosyalarını oynatırken ortaya çıkan bir sorun düzeltildi
+- Belirli SRT altyazı dosyalarındaki zamanların yanlış işlendiği bir sorun düzeltildi
+- "Bir oynatma listesindeki oynatma konumlarını hatırla" seçeneği, her oynatma listesinde ayrı ayrı ayarlanabilmesi için iyileştirildi
+
+----------------------------------------------------------
+[1.7.14804]				        2018/10/16
+----------------------------------------------------------
++ Altyazı Tarayıcısına bitmap tabanlı altyazı desteği eklendi
++ Pencerenin başlık çubuğunun dışına sürüklenmesini önleme yeteneği eklendi
++ AV1 video formatı için destek eklendi
+
+- Geliştirilmiş çevrimiçi altyazı indirme/yükleme özellikleri
+- Çevrimiçi altyazı çevirisinin iyileştirilmiş kullanımı
+- Sorunsuz oynatma işlevi kullanıldığında FLAC dosyalarında albüm resmi/kapak resimlerinin gösterilmesini engelleyen bir sorun düzeltildi
+- Windows Gezgini'nden çalma listesine bir dosya eklendiğinde programın yeni bir örnek başlatmasına neden olan bir sorun düzeltildi
+- Yerleşik WASAPI ses oluşturucuyla ilgili bazı ayarların kaydedilmemesi sorunu giderildi
+- MJPEG dosyalarının kodunu çözerken ortaya çıkan bir sorun düzeltildi
+- Belirli TS dosyalarını çalarken sesin çıkmaması sorunu düzeltildi
+- Belirli AVI/OGG dosyalarının oynatılmasını engelleyen bir sorun düzeltildi
+- Döndürülmüş bir monitörde oynatmanın düzgün olmasını engelleyen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.13963]				        2018/08/29
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı ses dosyası oynatma güvenlik açığının düzeltilmesi)
+
+- Yayın bildirim işlevinin belirli bilgisayarlarda çalışmadığı bir sorun düzeltildi
+- Belirli MP3 dosyalarında albüm resmi/kapak resimlerinin gösterilmesini engelleyen bir sorun düzeltildi
+- WEBM formatında video kaydı sorunu düzeltildi
+- Belirli Blu-ray içeriklerinin oynatılmasını engelleyen bir sorun düzeltildi
+- Belirli OGG dosyalarında albüm resmi/kapak resimlerinin gösterilmesini engelleyen bir sorun düzeltildi
+- Kusursuz oynatma işlevi kullanıldığında albüm kapağı/kapak resimlerinin gösterilmesini engelleyen bir sorun düzeltildi
+- Çevrimiçi altyazı çevirisini kullanırken gezinmenin yavaş olmasına neden olan bir sorun düzeltildi
+- Belirli TS dosyalarını oynatırken video görüntüsünün kaybolmasına neden olan bir sorun düzeltildi
+- Belirli durumlarda video yeniden boyutlandırıldığında programın çökmesine neden olan bir sorun düzeltildi
+- Bazı sorunlar giderildi ve yerleşik WASAPI ses oluşturucuda iyileştirildi
+
+----------------------------------------------------------
+[1.7.13622]				        2018/07/26
+----------------------------------------------------------
+- Yayınlanırken artı arkadaş mesajının gönderilmesini engelleyen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.13621]				        2018/07/25
+----------------------------------------------------------
+* Yenilenmiş yerleşik görünümler
+
++ Yayın bildirim özelliği eklendi
++ Sohbete karanlık mod eklendi
++ Kısaltma (SHN) dosyalarını oynatma özelliği eklendi
++ Oynatma listesinde/gezginde 16: 9 küçük resim oranını kullanma yeteneği eklendi
+
+- MPEG dosyalarının iyileştirilmiş süre hesaplaması
+- Bazı MPEG dosyalarının oynatılamaması sorunu giderildi
+- Video Kaydedicinin H.264 DSC işlemesi iyileştirildi
+- CUE dosyalarıyla iyileştirilmiş oynatma
+- Altyazı Gezgini'nin açılmasının düzgün çalışmamasına neden olan bir sorun düzeltildi
+- Belirli WMV3 dosyalarını oynatırken ekranın bozulmasına neden olan bir sorun düzeltildi
+- FLV dosyalarını oynatırken altyazılar ve ince senkronizasyon ayarı sorunları düzeltildi
+
+----------------------------------------------------------
+[1.7.12845]				        2018/06/29
+----------------------------------------------------------
+- HTTP sunucularından oynatma ile ilgili bellek sızıntısı sorunu düzeltildi
+
+----------------------------------------------------------
+[1.7.12844]				        2018/06/25
+----------------------------------------------------------
++ Cubemap ve EAC (Equi-Angular Cubemap) 360° VR formatlarının oynatılması için destek eklendi
++ Çalma listesinin dosya gezgininde geri al tuşu ile bir ana klasöre geri dönme özelliği eklendi
+
+- Çıkış işleminin düzgün çalışmadığı bir sorun düzeltildi
+- Belirli videolarda 1,2 kare senkronizasyon hatasına neden olan bir sorun düzeltildi
+- FTP/HTTP sunucularından oynatırken altyazı önceliğini yok sayan bir sorun düzeltildi
+- FLAC formatında kayıtla ilgili bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.12248]				        2018/05/24
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı dış görünüm dosyaları güvenlik açığının giderilmesi)
+
++ AngelScript'e dayalı eklenti (eklenti) sistemi eklendi
+  -Media URL'si
+  -Media Playlist/Playitem
+  -Media Kaynağı
+  -Altyazı Arama
+  -Altyazı Çevir - uzantılar eklendi.
++ Ses işlemeye çapraz besleme işlevi eklendi
++ Bir öğe seçildiğinde iletişim kutusunu kapatmamak için Dosya Gezgini'ne bir seçenek eklendi
+
+- Oynatma listesinde çok fazla öğe varken karışık oynatma modunun çalışmaması sorunu giderildi
+- Belirli FTP/WebDAV sunucularından oynatmayı engelleyen bir sorun düzeltildi
+- Belirli 60 karelik videoların düzgün oynatılamaması sorunu düzeltildi
+- HTTP sunucularından bazı dosyaların düzgün oynatılamaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.7.10667]				        2018/04/04
+----------------------------------------------------------
++ MP4 akışlarını oynatma yeteneği eklendi
++ Endonezce çeviri eklendi
+
+- Yerleşik HTTP Async Okuyucu ile geliştirilmiş arama hızı
+- Mümkün olduğunda eşzamansız olarak çalışmak için değiştirilmiş oynatma listesi işleme
+- AVI dosyalarının oynatılmasının düzgün çalışmadığı bir sorun düzeltildi
+- Ön ayarlar değiştirilirken codec ile ilgili ayarların sıfırlandığı bir sorun düzeltildi
+- Windows 8'de Yerleşik D3D11 Video İşleyici kullanıldığında programın çökmesine neden olan bir sorun düzeltildi
+- Altyazı süresi 0'dan başlatıldığında birden çok renk etiketinin okunamaması sorunu giderildi
+- Parçalanmış belirli MP4 dosyalarının oynatılmasını engelleyen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.8557]			         	2018/02/08
+----------------------------------------------------------
+- Reklam yayınlamayla ilgili bazı sorunlar düzeltildi
+- Video görüntüsünün bazen kaybolmasına neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.8556]			         	2018/02/01
+----------------------------------------------------------
+* Sohbet tasarımının yeniden düzenlenmesi
+
++ Altyazı yükleme özelliği eklendi
++ Çevrimiçi veritabanında mevcut dosya altyazılarında gezinme yeteneği eklendi
++ Oynatma bittiğinde otomatik oynatmayı durdurmak için Oynatma Bittiğinde işlemlerine bir işlev eklendi
++ KakaoTV'nin canlı yayını sırasında yalnızca ses alma yeteneği eklendi
+
+- Bazı SWF dosyalarının oynatma sorunu düzeltildi
+- SRT/VTT altyazılarında sabit zaman ayrıştırma sorunu
+- Belirli TS dosyalarını çalarken sesin çıkmaması sorunu düzeltildi
+- Bitmap metin oluşturucunun çıktı hızı iyileştirildi
+- Belirli durumlarda HDTV oynatılırken programın öldürülmesine neden olan bir sorun düzeltildi
+- Maksimum/dakika gösterim periyotlarının işlenmesiyle üst üste binen altyazıların iyileştirilmesi
+
+----------------------------------------------------------
+[1.7.7150]				        2018/01/09
+----------------------------------------------------------
+* TvingTV'nin oynatılmasıyla ilgili ara reklam sorunu düzeltildi
+
+- Real Cook Audio içeren dosyalarla ilgili eşitleme sorunu düzeltildi
+- İndirilebilir altyazıların, tercih edilen altyazı dillerine göre otomatik olarak sıralanmaması sorunu giderildi
+- TS dosyalarıyla geliştirilmiş arama hızı
+
+----------------------------------------------------------
+[1.7.7145]				        2017/12/19
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı RA, MKV, SWF dosyaları oynatma güvenlik açığının düzeltilmesi)
+* 320K'ya kadar artırılmış ses bit hızı
+
++ Mevcut dosya yolunda gezinme yeteneği eklendi
++ Yer imlerini oynatma listesinde ayrı dosyalar olarak oynatma özelliği eklendi
++ Önceki/sonraki altyazı senkronizasyonunu mevcut altyazı konumuna sıfırlama yeteneği eklendi
++ Donanım hızlandırmalı AMD AMF H.264 Kodlayıcı eklendi
+
+- Belirli TS dosyalarının arama sorunu düzeltildi
+- Geliştirilmiş altyazı indirme özellikleri
+- AMD VCE Encoder kaldırıldı
+- Belirli FTP sunucusundan oynatmayı engelleyen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.5545]				        2017/11/16
+----------------------------------------------------------
++ Sıkıştırma ayarlarına alan ölçeği seçeneği eklendi
++ Sesi genişletme yeteneği eklendi
++ Gezinme içeriklerini kutucuk olarak görüntüleme yeteneği eklendi
++ Navigasyona arama işlevi eklendi
++ Bağlam menüsünde yer imi listesini göstermek/gizlemek için bir işlev eklendi
+
+- Oynatma listesi öğelerinin küçük resim görünümünün iyileştirilmiş kullanımı
+
+----------------------------------------------------------
+[1.7.4353]				        2017/10/24
+----------------------------------------------------------
++ Klavye kısayollarını (kısayol tuşları) görüntülemek için iletişim kutusuna bir sekme eklendi
++ Pencere animasyon özelliği eklendi
++ Dosya Gezgini'ne sahne tarayıcıları eklendi
++ Sonraki altyazı konumundan başlayarak altyazı senkronizasyon değişikliklerini uygulama yeteneği eklendi
++ Oynatma başlangıcında masaüstü boyutuna kıyasla pencere boyutunu sınırlama yeteneği eklendi
++ Masaüstü boyutuna göre pencere boyutlarını tanımlama yeteneği eklendi
++ 3D MVC desteğine sentezlenmiş görünüm çıktı modları eklendi
+
+- Kısayol tuşu girdisinin iyileştirilmiş kullanımı
+- OSD oynatma bilgi mesajlarının iyileştirilmiş kullanımı
+- Bazı durumlarda 2. altyazı çıktısıyla ilgili bir hata sorunu giderildi
+- Belirli dosyaları oynatırken oluşan bir hata sorunu düzeltildi
+- Favoriler/oynatma listesinde DTV ve ATV'nin düzenleme sorunu düzeltildi
+- Yer imlerinin harici saklanmasının iyileştirilmiş kullanımı
+
+----------------------------------------------------------
+[1.7.3795]			                2017/09/06
+----------------------------------------------------------
++ Dokunma desteğine sürükleme eylemleri eklendi
++ Ses ve altyazı seçimlerini hatırlama yeteneği eklendi
++ Belirtilen en boy oranına göre videoyu genişletme/kırpma özelliği eklendi
++ Dosyaları panodan açma özelliği eklendi (Ctrl V)
+
+- ASS/SSA altyazılarının stil okuması iyileştirildi
+- Belirli yayın logolarını kullanırken bir hata düzeltildi
+- Bazı durumlarda DXVA D3D11 Copyback Modu kullanılırken rengin tuhaf olduğu bir sorun düzeltildi
+- DXVA D3D9 Kopyalama Modunun Tam Ekran Özel Modu ile çalışmaması sorunu giderildi
+- MP3 akışı oynatılırken başlığın bozulmasına neden olan bir sorun düzeltildi
+- Geliştirilmiş altyazı yazı tipi işleme
+- Karmaşık ASS/SSA altyazı çıkışı ile geliştirilmiş kullanıcı arayüzü yanıtı
+- Dikey Çevir kısayol tuşu Ctrl P olarak değiştirildi
+
+----------------------------------------------------------
+[1.7.3344]					2017/08/01
+----------------------------------------------------------
++ Yayın kategorisi seçme yeteneği eklendi
++ Logoyu yayınlamak için web görüntüleme işlevi eklendi (CEF kurulumu gerektirir)
++ Yer imi düzenleyicisine bulma işlevi eklendi
++ Küçük resim görüntüsünün arka plan rengini ayarlama yeteneği eklendi
++ Yapılandırma yönetiminin otomatik seçim kriterlerine güç kaynağı durum koşulu eklendi
++ Son kaydedilen çerçeveyi silmek için bir işlev eklendi
+
+- Yayın logosunun boy ve genişlik olarak ayrı ayrı belirtilebilmesi için modifiye edilmiş boyut fonksiyonu
+- HD video oynatma performansı iyileştirildi
+- dış görünüm görünümünün geliştirilmiş çizim hızı
+- yayın logosu görünümünün geliştirilmiş çizim hızı
+- DXVA modunda D3D11 Video İşleyici kullanıldığında DVD altyazılarının görünmemesi sorunu giderildi
+
+----------------------------------------------------------
+[1.7.2710]                                      2017/06/29
+----------------------------------------------------------
++ Yayın iletişim kutusuna ses seviyesi göstergeleri eklendi
++ Görüntü en boy oranına göre ekranı otomatik döndürme özelliği eklendi
++ Görüntü boyutlarına göre ekranı otomatik döndürme yeteneği eklendi
++ Önceki/sonraki altyazı/bölüm/yer imi bölümlerini otomatik tekrarlama yeteneği eklendi
++ MKV, MP4 AVC formatlarında yayın kaydetme özelliği eklendi
+
+- Bazı durumlarda D3D11 Video İşleyici ile kırmızı ekran sorunu düzeltildi
+- MPEG TS kapsayıcısında TrueHD'yi işleyemeyen bir sorun düzeltildi
+- Videonun belirli MPEG TS dosyalarında görüntülenememesine neden olan bir sorun düzeltildi
+- Döndürme işlevi kullanıldığında video yakalamanın anormal davranışı düzeltildi
+- Yayın kayıt işlevinden AVI, OGV formatları kaldırıldı
+- Kısayol (.lnk) dosyalarının işlenmesi iyileştirildi
+- Oyun yakalama işlevi aracılığıyla belirli oyunları yakalarken ortaya çıkan garip renk sorunu düzeltildi
+- Bazı Kapalı Altyazılar için destek eklendi
+- Rtmp, rtsp akışlarının oynatılmasıyla çalışmak için iyileştirilmiş zaman kaydırma işlevi
+
+----------------------------------------------------------
+[1.7.2233]                                      2017/05/25
+----------------------------------------------------------
+* Bir sohbet odasının maksimum katılımcı sayısı 2000'den 3000'e çıkarıldı
+
+- Belirli VOB dosyalarını oynatırken ekranın bozulmasına neden olan bir sorun düzeltildi
+- OpenGL Video Renderer kullanıldığında altyazıların kaybolmasına neden olan bir sorun düzeltildi
+- Belirli MP4/TS dosyalarını oynatırken ses gelmemesi sorunu düzeltildi
+- Programın bazen başlangıçta çökmesine neden olan bir sorun düzeltildi
+- Yönetmenin (PD) fısıltı gönderememesi sorunu giderildi
+- Sohbet operatörünü düzenlerken bir giriş hatası mesajı eklendi
+- İhlal bildiren kullanıcıların takma adlarının gösterilmesi kaldırıldı
+
+----------------------------------------------------------
+[1.7.1915]                                      2017/04/13
+----------------------------------------------------------
++ Belarusça çevirisi eklendi
++ Direct3D 11 ve OpenGL OSC modları eklendi
++ FTP/WebDAV/HTTP Sunucularında gezinme yeteneği eklendi
++ URL'lerde gezinme yeteneği eklendi
++ Albümlerde gezinme yeteneği eklendi
++ Son oynanan öğelerde gezinme yeteneği eklendi
++ Yer imlerinde gezinme yeteneği eklendi
++ Yayınlarda gezinme yeteneği eklendi
++ PixelShader desteğine HDR renk düzeltme işlevi eklendi
+
+- DXGI 1.2 modunda fare imleci dahil ekranı yakalarken yeşil ekran sorunu düzeltildi
+- Bazı HDMV (PGS) altyazılarının gösterilmemesi sorunu giderildi
+- Dosya Gezgini'nde geliştirilmiş dosya arama işlevi
+- Belirli MP4 dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+- HTTP sunucularındaki RAR parçalarından dosya açma sorunu düzeltildi
+
+----------------------------------------------------------
+[1.7.1150]                                      2017/03/16
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı MOV dosyaları oynatma güvenlik açığının düzeltilmesi)
+
++ Favori yayın işlevi eklendi
++ Sohbet ifadelerini gizleme yeteneği eklendi
+
+- Geliştirilmiş sohbet kullanıcı listesi yönetimi
+- Yayın sıkıştırma seçeneği VBR olarak değiştirildi
+- Entegre SMI altyazılarının seçilemediği bir sorun düzeltildi
+- Belirli sunuculardan m3u akışlarını ayrıştıramayan bir sorun düzeltildi
+- Bazı durumlarda girişin devre dışı bırakılmasına neden olan bir sorun düzeltildi
+- 360° VR oynatmayı bozan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.661]                                       2017/03/03
+----------------------------------------------------------
+- Yerleşik D3D11 Video İşleyicinin P010 giriş formatını kabul etmemesi sorunu giderildi
+- Altyazı dili sırasını yanlış seçen bir sorun düzeltildi
+- Belirli MKV/MP4 dosyalarını oynatırken oluşan bir hata düzeltildi
+- Sohbet girişlerinin görüntülenmemesine neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.7.456]                                       2017/02/22
+----------------------------------------------------------
++ Azerbaycan çevirisi eklendi
+
+- İfade jetonunun sona erme tarihi düzeltildi
+- Sohbet odasına girerken hata mesajı düzeltildi
+- Yayın izleyicileri tarafından bildirilen bir hata sorunu düzeltildi
+- Belirli bilgisayarlarda yayın gönderirken oluşan bir hata düzeltildi
+
+----------------------------------------------------------
+[1.7.351]                                    	2017/02/18
+----------------------------------------------------------
+* Kakao TV'nin yeniden düzenlenmesi
+
++ Her bir pencereyi bağımsız olarak ana pencerenin üstünde tutma yeteneği eklendi
++ Direct3D 9 işleme cihazını belirleme yeteneği eklendi
++ Yerleşik Direct3D 11 Video Oluşturucu eklendi (Windows 8 veya daha yenisini gerektirir)
++ PixelShader'ı Dahili OpenGL Video Renderer ile kullanma yeteneği eklendi
+
+- Belirli MJPEG dosyalarının kodunu çözerken oluşan bir hata düzeltildi
+- Oyun yakalama işlevinin belirli D3D11 uygulamalarıyla çalışmadığı bir sorun düzeltildi
+- Geliştirilmiş Kapalı Altyazı işleme
+
+----------------------------------------------------------
+[1.6.63891]                                     2017/01/04
+----------------------------------------------------------
++ ACM Vorbis Mode3 kod çözme işlevi eklendi
++ Oyun yakalama işlevine D3D12 desteği eklendi
++ Yerleşik MJPEG video kod çözücüyü belirleme yeteneği eklendi
+
+- Bazı AVI dosyalarında oynatma süresinin yanlış hesaplandığı bir sorun düzeltildi
+- Belirli AVI dosyalarının oynatma sorunu düzeltildi
+- Yerleşik WASAPI ses oluşturucu kullanıldığında ara sıra donma sorunu düzeltildi
+- Bazı SSA altyazılarının görüntü sorunu düzeltildi
+- Bazı bilgisayarların siyah altyazı sorunu düzeltildi
+- DXVA modunda belirli H.264 dosyalarının kodunu çözerken ekranın bozulmasına neden olan bir sorun düzeltildi
+- MJPEG dosyalarının iyileştirilmiş kod çözme hızı
+
+----------------------------------------------------------
+[1.6.63856]                                     2016/11/17
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (RealMedia dosyaları oynatma güvenlik açığının düzeltilmesi)
+
+- Gerçek ad kimlik doğrulamasını engelleyen bir sorun düzeltildi
+- HDTV oynatılırken belirli kanallarda ses gelmemesi sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.63840]                                     2016/10/28
+----------------------------------------------------------
+* Gerçek adlarını doğrulamayan kullanıcıların raporlama sorunu düzeltildi
+
+- Belirli MP4 dosyalarının oynatma sorunu düzeltildi
+- Parolaya özel karakterler eklendiğinde oturum açmayı engelleyen bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.63835]                                     2016/10/26
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (RealMedia dosyaları oynatma güvenlik açığının düzeltilmesi)
+
++ URL'yi Aç iletişim kutusuna çok satırlı giriş desteği eklendi
+
+- Belirli TS dosyalarının oynatılmasını engelleyen bir sorun düzeltildi
+- Belirli YouTube DASH formatlarını gösteremeyen bir sorun düzeltildi
+- Belirli MP4 dosyalarının arama sorunu düzeltildi
+- Belirli yakalama kartlarında yarım kare hızı sorunu düzeltildi
+- H/W deinterlacing'in belirli PC'lerde çalışmadığı bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.63638]                                     2016/10/05
+----------------------------------------------------------
++ H.264 MVC kod çözme desteği eklendi (Intel Media SDK kitaplığı (libmfxsw32/64.dll) gerektirir)
++ Başka bir ekranda tam ekran özelliği eklendi
++ Pan arasında geçiş yapma yeteneği eklendi
++ Yayın desteğine sponsorluk efekti işlevi eklendi
+
+- Belirli srt altyazılarıyla anormal bir işlem düzeltildi
+- Yayının kaydını durdurmayı engelleyen bir sorun düzeltildi
+- HEVC 10-bit DXVA'nın Radeon RX 4x0 kartlarda çalışmaması sorunu giderildi
+- VapourSynth kullanımıyla ilgili bellek sızıntısı sorunu düzeltildi
+- VapourSynth'in 64 bit sürümünde çalışmadığı bir sorun düzeltildi
+- VapourSynth Portable sürümü Module klasöründe çalıştırıldığında oluşan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.62949]                                     2016/08/11
+----------------------------------------------------------
++ Canlı yayının mevcut video kalitesini seçme yeteneği eklendi
++ Bir albüm içinde harici çalma listesi kullanma yeteneği eklendi
++ Çift sıkıştırılmış FLAC dosyalarını oynatma yeteneği eklendi
++ EXIF yönlendirme meta verilerine göre JPEG resimleri otomatik döndürme özelliği eklendi
+
+- Belirli TS dosyalarının oynatma sorunu düzeltildi
+- VapourSynth komut dosyası olmadan etkinleştirildiğinde hataya neden olan bir sorun düzeltildi
+- Belirli AVI dosyalarını oynatırken hataya neden olan bir sorun düzeltildi
+- Klasör eklerken çift dosyaları ekleme seçeneği etkinleştirildiğinde bile yinelenen dosyaları ekleyen bir sorun düzeltildi
+- VMR9 Renderless modunda oynatmayı kapatırken hataya neden olan bir sorun düzeltildi
+- Bir yayını otomatik olarak kaydederken hataya neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.62377]                                     2016/07/12
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı AVI/MP4 dosyaları oynatma güvenlik açığının düzeltilmesi)
+
++ Ekran koruyucu özelliği eklendi
++ Dil dosyalarında xxxx_Tooltip olarak belirterek iletişim kutusu öğelerinin araç ipuçlarını ekleme yeteneği eklendi
++ Bağlam menüsüne dış görünüm desteği eklendi (Açılır/Sağ Tıklama Menüsü)
++ Dış görünüm içerik menüsünün şeffaflığını ayarlama yeteneği eklendi
++ VapourSynth filtrelerini kullanma yeteneği eklendi
++ 360° VR oynatma özelliği eklendi
++ Oynatma listesindeki seçili öğelere sorunsuz oynatma işlevi uygulama yeteneği eklendi
++ Yerleşik Direct3D 9 Video İşleyiciye H/W deinterlacing işlevi eklendi
++ Yerleşik Direct3D 9 Video İşleyiciye renk kontrolleri işlevi eklendi
+
+- Bazı H.264 dosyalarının kodunun çözülemediği bir sorun düzeltildi
+- Windows 7'de DPI desteğini engelleyen bir sorun düzeltildi
+- Belirli bilgisayarlarda navigasyon özelliğini kullanırken hataya neden olan bir sorun düzeltildi
+- Birçok dosya oynatıldığında bellek sızıntısı sorunu düzeltildi
+- Yayın kaydetme işlevinin etkinleştirilemediği bir sorun düzeltildi
+- HLS akışı oynatmanın senkronizasyon sorunu düzeltildi
+- Windows 7 ve daha yeni sürümlerde Yerleşik Direct3D 9 Video oluşturucunun performansı iyileştirildi
+- Geliştirilmiş 3D Video modu
+- Geliştirilmiş VMR7 Renderless modu
+
+----------------------------------------------------------
+[1.6.60136]                                     2016/05/11
+----------------------------------------------------------
+* Yüksek DPI desteği eklendi
+  (Windows 8.1 veya daha yeni sürümlerde monitör başına DPI desteğini etkinleştirir!)
+
++ Cilde yakınlaştırma yeteneği eklendi
+
+- Yayın aracı penceresindeki belirli düğmelerin çalışmadığı bir sorun düzeltildi
+- Windows MFT AAC kod çözücünün çalışmadığı bir sorun düzeltildi
+- Bazı kısayolların çalışmadığı bir sorun düzeltildi
+- Bazı altyazılarda karakter setinin yanlış belirlendiği bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.59347]                                     2016/03/23
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı dosya oynatma güvenlik açığının düzeltilmesi)
+
++ Cilt desteğine dokunma özelliği eklendi
++ Bitmap tabanlı altyazıları ölçeklendirme yeteneği eklendi
++ Dosya Gezgini'nde klasör bölmesini gösterme özelliği eklendi
+
+- Klasöre göre düzenlemeyi engelleyen sıralama işlevindeki bir sorun düzeltildi
+- YouTube oynatma listelerini ayrıştıramayan bir sorun düzeltildi
+- HLS VOD akışlarının oynatılmasını engelleyen bir sorun düzeltildi
+- Windows 10'da otomatik oynatmanın çalışmadığı bir sorun düzeltildi
+- Yerleşik DirectSound Audio Renderer'ın eşitleme sorunu düzeltildi
+- Belirli FTP sunucularından oynatma listesi içinde gezinmeyi engelleyen bir sorun düzeltildi
+- Belirli durumlarda video/akış kaydederken oluşan bir hata sorunu düzeltildi
+- Salt okunur MP3 dosyalarını çaldıktan sonra programın sonraki öğeye geçmemesi sorunu düzeltildi
+- Windows 10'da kenara/pencereye yapışma sırasında anormal bir işlem düzeltildi
+- Metin dosyalarını açarken geliştirilmiş otomatik karakter seti algılama işlevi
+- Belirli durumlarda oynatma sırasında bilgisayarı kapatırken bir hataya neden olan bir sorun düzeltildi
+- ASS/SSA altyazı animasyonlarında titremeye neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.58613]                                     2016/02/11
+----------------------------------------------------------
+- DXVA kullanılırken görüntü boyutu değiştirildiğinde bir sorun düzeltildi
+- Belirli MKV dosyalarındaki gömülü altyazıların görünmemesi sorunu giderildi
+- Belirli dosyalara video kaydetmeyi engelleyen bir sorun düzeltildi
+- HTTP akışlarında başlık görüntüleme sorunu düzeltildi
+- Belirli bir çözünürlükte yeniden boyutlandırmayı kullanırken siyah ekran sorunu düzeltildi
+- Intel VGA'larda oynatma sırasında gürültüye neden olan bir sorun düzeltildi
+- Kısa AVI dosyalarının oynatılmasıyla ilgili bir hata sorunu düzeltildi
+- Geliştirilmiş çalma listesi sıralama işlevi
+
+----------------------------------------------------------
+[1.6.58402]                                     2016/01/28
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (CUE okuyucu güvenlik açığının düzeltilmesi)
+
++ Harici VP8/9 video kod çözücüleri seçme yeteneği eklendi
++ WEBM akışlarını oynatma yeteneği eklendi
+
+- MP3 akışlarının oynatılmasını engelleyen bir sorun düzeltildi
+- FTP Aç iletişim kutusunda oynatmayı durduran bir sorun düzeltildi
+- Cildin logosundan flaş desteği kaldırıldı
+- S/PDIF'in belirli kodeklerle çalışmadığı bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.57875]                                     2015/12/29
+----------------------------------------------------------
++ XInput desteğine fare düğmesi eşleme işlevi eklendi
++ Açık URL iletişim kutusu aracılığıyla tvpot'ta paylaşılan yayınları açma özelliği eklendi (http://tvpot.daum.net/xxxxxx.live)
++ DXVA moduna VP9 desteği eklendi
+
+- Belirli durumlarda Vingo TV oynatma ile ilgili bir sorun düzeltildi
+- Geliştirilmiş Vingo TV oynatma
+- Son yakınlaştırma düzeyinde (Ctrl Fare Tekerleği) yayın penceresini başlatırken oluşan bir sorun düzeltildi
+- Belirli AVI dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+- NVIDIA VGA kartlarında meydana gelen DXVA2 Geri Kopyalama modu ile mevcut Direct3D 11 kullanılırken yeşil ekran sorunu düzeltildi
+- Belirli sistemlerde yayını durduran bir sorun düzeltildi
+- OGG akışlarında etiket bilgisi görüntüleme sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.57398]                                     2015/12/01
+----------------------------------------------------------
+* Bir güvenlik sorunu düzeltildi (hasarlı MP4 başlık güvenlik açığının düzeltilmesi)
+
++ Vingo TV için destek eklendi
++ XInput için destek eklendi (Xbox 360 Controller)
++ Ermenice çeviri eklendi
++ DVB Teletext altyazı desteği eklendi
++ EIA 708 Kapalı Başlık desteği eklendi
+
+- Yayında çok sayıda otomatik yönetici kimliği olduğunda oluşan bir hata sorunu düzeltildi
+- Bazı video dosyalarında küçük resimlerin gösterilmemesi sorunu giderildi
+- Yayın sırasında sıkıştırma ayarları değiştirildiğinde ara sıra donma sorunu düzeltildi
+- ASS animasyon altyazılarının düzgün şekilde gösterilmemesine neden olan bir sorun düzeltildi
+- Bazı VGA kartlarında DXVA ile oynatmayı kapatırken oluşan bir hata sorunu düzeltildi
+- SWF dosyasını yayın logosu olarak kullanırken bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.56815]                                     2015/10/28
+----------------------------------------------------------
+* FFmpeg için büyük güncelleme (Önceki modül kullanılamaz)
+* Bir güvenlik sorunu düzeltildi (hasarlı AVI başlık güvenlik açığının düzeltilmesi)
+
++ Sohbet katılımcılarının listesini görüntüleme yeteneği eklendi
++ Tarayıcıları etkin olmayan sohbet alanına yerleştirme yeteneği eklendi
++ Gelişmiş sürükle ve bırak etkileşim özelliği eklendi
++ Dosya gezgininde ağı gösterme seçeneği eklendi
+
+- Belirli AAC/MP3 dosyalarını çaldıktan sonra programın sonraki öğeye geçmemesi sorunu giderildi
+- Windows 10'da Pencere Çerçevesi Dış Görünümü ile anormal bir işlem düzeltildi
+- Altyazı Tarayıcısının geliştirilmiş kullanıcı arayüzü
+- Belirli MKV dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.56209]                                     2015/09/09
+----------------------------------------------------------
+* Programın canlı modunun yeniden düzenlenmesinin ikinci kısmı
+
++ Çekçe, Yunanca ve Tacikçe çeviriler eklendi
++ Microsoft'un MFT HEVC kod çözücüsünü kullanma yeteneği eklendi (Windows 10'dan itibaren mevcut olan en az WDDM 2.0 gerektirir)
++ FFmpeg QuickSync H264 Kod Çözücü eklendi
++ Sahne Tarayıcısının şeffaflığını belirleme yeteneği eklendi
+
+- Yakalama cihazı formatının hatırlanamaması sorunu giderildi
+- Blu-Ray .mpls dosyalarındaki arama sorunu düzeltildi
+- Bazı PC'lerde oluşan ffcodec.dll hata sorunu düzeltildi
+- Yeni bir albüm oluştururken boş çalma listesiyle ilgili bir hataya neden olan bir sorun düzeltildi
+- Belirli .sub altyazı dosyalarını açamayan bir sorun düzeltildi
+- Belirli FTP sunucularındaki dosyaları oynatamayan bir sorun düzeltildi
+
+* Geçici oynatma kuyruğunun iyileştirilmiş kullanımı
+
+----------------------------------------------------------
+[1.6.55390]                                     2015/07/22
+----------------------------------------------------------
++ Özbekçe çeviri eklendi
++ WDM cihazını açarken video çıkış formatını seçme yeteneği eklendi
++ DXVA2 Geri Kopyalama modu ile mevcut Direct3D 11'i kullanma yeteneği eklendi
+
+- Oynatma sırasında yeniden boyutlandırma ve döndürme işlevlerinin kullanılmasıyla ekranın bozulmasına neden olan bir sorun düzeltildi
+- Belirli durumlarda yayınla ilgili düşen çerçeve sorunu düzeltildi
+- Programın belirli durumlarda kapanmaması sorunu giderildi
+- Kurulum sorunu düzeltildi
+- Bazı MP4 dosyalarının oynatma sorunu düzeltildi
+- DXVA kullanımıyla ilgili GPU bellek sızıntısı sorunu düzeltildi
+- Bazı AVI dosyalarının senkronizasyon sorunu düzeltildi
+- Bazı MKV dosyalarının oynatılmasının sonunda bir sorun düzeltildi
+- Yayının oynatılması tamamlandığında programın öldürülmesine neden olan bir sorun düzeltildi
+- Çok sayıda albüm varken yavaş çalışan bir sorun düzeltildi
+- MadVR uyumluluğu iyileştirildi
+- Giriş/çıkış sırasında yayın listesinin yenilenmemesi sorunu düzeltildi
+- ISO dosyalarının otomatik olarak bağlanmasıyla ilgili bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.54915]                                     2015/07/02
+----------------------------------------------------------
+- Bazı DVB altyazılarının görünmemesine neden olan bir sorun düzeltildi
+- Pencereler ayrıldığında ortaya çıkan bir dış görünüm sorunu düzeltildi
+- Küçük resim önizleme işlevinin Direct3D9 OSC modunda çalışmadığı bir sorun düzeltildi
+- 60 FPS canlı akışla ilgili arabelleğe alma sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.54871]                                     2015/06/29
+----------------------------------------------------------
+* Programın canlı modunun yeniden düzenlenmesinin ilk kısmı
+
++ Scene Browser'a çoklu sütun desteği eklendi
++ Sahnelere altyazı aralıklarına göre göz atma yeteneği eklendi
++ Yalnızca Dosya/Menü/Altyazı Gezgini'nin arka planını şeffaf yapmak için bir seçenek eklendi
+
+- Dosya boyutunun hesaplanmasındaki bir hata düzeltildi
+- Sağ tıklamanın birden çok oynatma listesi öğesi seçimiyle çalışmaması sorunu düzeltildi
+- Belirli MKV dosyalarını oynatırken bir hataya neden olan bir sorun düzeltildi
+- Oynatma listesi/sahne tarayıcısının küçük resim yükleme hızı iyileştirildi
+- Belirli hasarlı AVI dosyalarını oynatırken bir hataya neden olan bir sorun düzeltildi
+- Belirli bilgisayarlarda otomatik sohbet kaydırması ile anormal bir işlem düzeltildi
+- Ses CD'lerinin oynatma sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.54549]                                     2015/06/11
+----------------------------------------------------------
++ Farsça çeviri eklendi
+
+- Belirli FTP sunucularındaki dosyaları oynatamayan bir sorun düzeltildi
+- Sohbet içeriği çok büyük olduğunda programın çalışmayı durdurması sorunu giderildi
+- Yayın sırasında bir sonraki dosya oynatıldığında sohbet içeriğinin temizlendiği bir sorun düzeltildi
+- Geliştirilmiş HEVC DXVA Dekoder
+- Küçük resim oluşturucunun ana kare aramasına göre küçük resimler oluşturarak iyileştirilmiş hızı
+- Belirli .png dosyalarını açamayan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.6.54266]                                     2015/05/21
+----------------------------------------------------------
++ Added the ability to amplify volume up to 200%
+
+- Diye dosyalarda bellek ağzı sorunu duzeltildi
+- Belirli durumlarda VMR9 Renderless ile ilgili bir sorun düzeltildi
+- Önceki/sonraki altyazıya atlamanın .sup altyazıları ile çalışmadığı bir sorun düzeltildi
+- Intel QuickSync Decoder ile belirli dosyaların eşitleme sorunu düzeltildi
+- Belirli noktalarda kare kare oynatma ile anormal bir işlem düzeltildi
+
+----------------------------------------------------------
+[1.6.54133]                                     2015/05/13
+----------------------------------------------------------
++ İtalyanca çeviri eklendi
+
+- Belirli Animasyonlu GIF logo dosyalarının düzgün oynatılmaması sorunu giderildi
+- Sıkıştırma ayarları değiştirildiğinde yayınlamayla ilgili bir sorun düzeltildi
+- Yayın yayınını belirli formatta kaydederken anormal bir işlem düzeltildi
+- Otomatik oturum açma ile yavaş olan geliştirilmiş program yürütme hızı
+- MPEG4 kodlayıcı yayın sıkıştırma ayarlarından kaldırıldı
+- Belirli ASF dosyalarında arama ile ilgili bir sorun düzeltildi
+- Yayının sonunda ara sıra donma sorunu düzeltildi
+- Belirli HEVC MPEG TS dosyalarını oynatırken videonun olmaması sorunu düzeltildi
+- Bazı durumlarda sohbetin otomatik olarak aşağı kaymaması sorunu giderildi
+- Video ve Akış Kaydedicinin performansı iyileştirildi
+- Hasarlı AVI dosyalarının iyileştirilmiş oynatımı
+- Geliştirilmiş döndürme işlevi
+
+----------------------------------------------------------
+[1.6.53104]                                     2015/03/17
+----------------------------------------------------------
+* Yayın sırasında cihaz değiştirilirse sonraki dosyanın arabelleğe alınmasıyla ilgili bir sorun düzeltildi
+
++ Dosya gezgininde video küçük resimlerini gösterme/gizleme seçeneği eklendi
++ Çeşitli WMR9/EVR ölçeklendirme algoritmaları eklendi
++ FTP/WebDAV/HTTP açık iletişim kutusunda bölmeleri yan yana gösterme seçeneği eklendi
+
+- Belirli MKV dosyalarının oynatılmasının düzgün olmadığı bir sorun düzeltildi
+- Belirli MPEG dosyalarını oynatırken video olmaması sorunu düzeltildi
+- Belirli MPEG dosyalarında görüntü ayrıştırma düzeltildi
+- Albüm kapak resmi/kapak resimlerinin görüntülenmesi iyileştirildi
+- HDTV MMS kanallarının düzgün bir şekilde algılanmadığı bir sorun düzeltildi
+- Sohbette ara sıra oluşan parametre hatası düzeltildi
+- Büyük miktarda sohbet içeriğiyle ilgili otomatik kaydırma sorunu düzeltildi
+- Amimated PNG (APNG) dosyalarıyla kullanılmak üzere düzeltilmiş yayın logosu desteği
+
+----------------------------------------------------------
+[1.6.52515]                                     2015/02/02
+----------------------------------------------------------
++ İsveççe çeviri eklendi
++ Videoları GIF formatında kaydetme özelliği eklendi
++ Yalnızca canlı yayınlara yayın efekti uygulama seçeneği eklendi
++ PotPlayer.dll'ye dokunulup dokunulmadığını belirlemek için program başlangıcında bir işlev eklendi
++ DirectDraw API aracılığıyla ekran yakalama yeteneği eklendi
++ NVIDIA 3D Vision Kit için destek eklendi
++ Yerleşik OpenGL Video İşleyiciye 3D çıktı desteği eklendi
++ Kapalı Altyazı için destek eklendi
++ BDA cihazlarının alım türünü ayarlama yeteneği eklendi
++ BDA cihazları için frekans listesi ekleme/düzenleme yeteneği eklendi
++ OpenH264 kodlayıcı eklendi
+
+- Daum'un bulut sunucusundan video oynatamayan bir sorun düzeltildi
+- Intel VGA'larda DXVA ile belirli dosyaların kodunu çözerken görüntü bozulması sorunu düzeltildi
+- Görüntüler JPEG/PNG formatında çekildiğinde ortaya çıkan garip renk sorunu düzeltildi
+- Vista'da veya daha yeni sürümlerde dalga ses kontrolü kullanıldığında ses seviyesinin ayarlanamaması sorunu giderildi
+- Alt tuşunun pencerenin sistem menüsünü tetiklediği ve odağı programdan uzaklaştırdığı bir sorun düzeltildi
+- Intel QuickSync Kod Çözücünün geliştirilmiş performansı
+- 8 bit PNG dosyalarını açamayan bir sorun düzeltildi
+- DXGI 1.2 API aracılığıyla Ekran Yakalama performansı iyileştirildi
+- Harici .dpl çalma listesi dosyalarının doğrudan düzenleme için geçici yeni bir albüm olarak yükleme yöntemi değiştirildi
+- Çevrilmemiş dizeler için varsayılan yedek dili İngilizce olarak değiştirildi
+- Dosyaların indirilmesinde iyileştirilmiş oynatma
+- Geliştirilmiş Yerleşik OpenGL Oluşturucu
+- DVD menüsünün Yerleşik OpenGL/Direct3D9 Video Oluşturucularla çalışmaması sorunu giderildi
+- Belirli MP4 dosyalarındaki eşitleme sorunu düzeltildi
+- Oynatma listesi öğelerinin iyileştirilmiş küçük resim görünümü
+
+----------------------------------------------------------
+[1.6.51480]                                     2014/12/16
+----------------------------------------------------------
++ Fransızca, İbranice, Tayca ve Türkçe çeviriler eklendi
++ MP3 dosyalarında senkronize şarkı sözleri (SYLT) desteği eklendi
++ VOD HLS akışlarını oynatma yeteneği eklendi
++ Konuşma özelliğine metin eklendi
++ Ctrl, Alt, Shift fare ile sürükleme kombinasyonunu kullanarak görüntüyü yakınlaştırma, kaydırma ve uzatma yeteneği eklendi
++ Ctrl, Alt fare ile sürükleme kombinasyonunu kullanarak altyazıların ekran konumunu ayarlama yeteneği eklendi
+
+- CoreAVC ile belirli dosyaların kodunun çözülemediği bir sorun düzeltildi
+- Oyun yakalama işlevinin düzgün çalışmadığı bir sorun düzeltildi
+- Atlama sonlandırma işlevi etkinleştirildiğinde programın sonraki öğeleri atlaması sorunu giderildi
+- Belirli FTP sunucularındaki dosyaları oynatamayan bir sorun düzeltildi
+- Tercihler iletişim kutusunun ilişkilendirme ve yapılandırma sekmelerindeki bazı düzenlemeler
+- Dahili Ses Oluşturucu, Yerleşik Directsound ve WASAPI Ses Oluşturucular olarak iki farklı seçeneğe ayrılmıştır.
+- Oynatma ses hızının iyileştirilmiş kontrolü
+- Geliştirilmiş SRT altyazı yükleme
+
+----------------------------------------------------------
+[1.6.49952]                                     2014/09/25
+----------------------------------------------------------
++ Sırpça çeviri eklendi
++ YouTube videolarının kalitesini yer imi menüsünden kontrol etme yeteneği eklendi
++ Yapılandırma yönetiminin otomatik seçim kriterlerine dosya süresi koşulu eklendi
++ CUDA/DXVA HEVC Kod Çözücü eklendi
+
+- 2. altyazı çıktısında hataya neden olan bir sorun düzeltildi
+- Bazı YouTube videolarını oynatamayan bir sorun düzeltildi
+- Çoklu akış seçimi desteği iyileştirildi
+- Yayın efektlerinin geliştirilmiş kullanıcı arayüzü
+
+----------------------------------------------------------
+[1.6.49479]                                     2014/08/13
+----------------------------------------------------------
++ Harici ses dizinlerini belirleme yeteneği eklendi
+
+- Haali ve Madshi Video Oluşturucularda altyazıların görünmemesi sorunu giderildi
+- Altyazı kelime arama işlevinin belirli sistemlerde çalışmaması sorunu giderildi
+- Bazı MP4 dosyalarını oynatamayan bir sorun düzeltildi
+- Yayınla/yayın yapmadan kullanılacak ses normalleştiricinin kullanım yöntemi değiştirildi
+- Belirli sistemlerde sohbetin zorunlu çıkış sorunu düzeltildi
+
+----------------------------------------------------------
+[1.6.49343]                                     2014/08/07
+----------------------------------------------------------
+* Derleyicinin yeni sürümüyle derlendi
+
++ Bulgarca, Almanca ve Macarca çeviriler eklendi
++ 2. altyazı çıktı desteği eklendi
++ Mevcut altyazıya altyazı ekleme yeteneği eklendi
++ Her dosya için özel olarak oynatma atlama aralıklarını ayarlama yeteneği eklendi
++ Oynatılan dosyaları Geri Dönüşüm Kutusu'na gönderme seçeneği eklendi
++ Simge kitaplıklarını belirleme yeteneği eklendi
++ Altyazı Tarayıcısına bulma işlevi eklendi
++ MKV Edition desteği eklendi
++ Bir oynatma listesinin bırakma noktasında sürüklenen dosyaları ekleme yeteneği eklendi
++ Altyazı Tarayıcısına çoklu seçim desteği eklendi
++ ISO dosyalarını Windows 8 veya daha yeni bir sürümde otomatik bağlama yeteneği eklendi
++ Dosya değişikliklerinde altyazıları otomatik olarak yeniden yükleme yeteneği eklendi
++ YouTube desteği eklendi
++ HLS (HTTP Canlı Akış) akışlarını kaydetme özelliği eklendi
+
+- Bazı SSA altyazılarının ekran konumu sorunu düzeltildi
+- Yayınlarla birlikte altyazı iletimi kaldırıldı
+- HTTP TS akışlarını oynatamayan bir sorun düzeltildi
+- Bazı HDMV altyazılarının görünmemesi sorunu giderildi
+- Bazı sistemlerden daum hesabı ile giriş yapamama sorunu düzeltildi
+- Altyazı yeniden yükleme işlevi iyileştirildi
+
+----------------------------------------------------------
+[1.6.48576]                                     2014/06/18
+----------------------------------------------------------
++ İspanyolca ve Ukraynaca çeviriler eklendi
++ Oynatma penceresi boyutu işlevini yalnızca çalışma zamanında ilk oynatma ile çalıştırma seçeneği eklendi
++ Renk gamı ​​düzeltmesi yapma yeteneği eklendi
++ Her bir oynatma moduna tekrarlama ve karıştırma işlevlerini ayrı ayrı atama yeteneği eklendi
++ Her bir dış görünüm modunun pencere konumunu ve boyutunu hatırlama yeteneği eklendi
++ Oynatma duraklatıldığında ayarları anında kaydetme seçeneği eklendi
++ Yerleşik kaynak/ayırıcı filtresine önbellek önceden okuma işlevi eklendi
+
+- MOD dosyalarını oynatamayan bir sorun düzeltildi
+- SMI altyazı konumunun hesaplaması göreceli yerine mutlak olarak değiştirildi
+- Stereoskopik 3D çıkış modunun düzgün çalışmaması sorunu giderildi
+- Bazı oynatma listesi klavye kısayollarının çalışmaması sorunu düzeltildi
+- Karışık oynatma modu etkinleştirilmişse oynatma listesini tekrarlama işlevinin çalışmaması sorunu giderildi
+- Sisteme bağlı olarak yerleşik donanım kod çözücü/kodlayıcı seçimlerinin gösterilip gösterilmeyeceğini otomatik olarak belirlemek için yükleyiciye bir eylem eklendi
+- Windows 8'de geliştirilmiş dosya ilişkilendirme yönetimi
+
+----------------------------------------------------------
+[1.6.47995]                                     2014/05/29
+----------------------------------------------------------
++ Japonca ve Rusça çeviriler eklendi
++ Yerleşik donanım kod çözücü/kodlayıcı seçimlerinin gösterilip gösterilmeyeceğini ayarlama yeteneği eklendi
++ Windows 8 veya daha yeni Stereoskopik 3D modu için destek eklendi
++ Oynatma listesi öğelerini küçük resimler olarak görüntüleme yeteneği eklendi
+
+- Bazı bilgisayarlardan daum hesabıyla oturum açamayan bir sorun düzeltildi
+- Pan sırasında anormal bir işlem düzeltildi
+- Belirli MOV dosyalarını oynatamayan bir sorun düzeltildi
+- Programın bir FTP sunucusuna nasıl bağlanması gerektiğini ayarlama yeteneği eklendi
+
+----------------------------------------------------------
+[1.6.47450]                                     2014/05/08
+----------------------------------------------------------
+* Yerelleştirme desteği eklendi
+  -Çince (Basitleştirilmiş) .ini
+  -Çince (Geleneksel) .ini
+  -English.ini
+  -Korean.ini
+  -Polish.ini
+  -Portuguese.ini - dosyalar şu anda mevcut.
+
++ Windows DMO/MFT kod çözücüleri/kodlayıcıları kullanma yeteneği eklendi
++ Nvidia NVENC H.264 kodlayıcı eklendi
++ AMD VCE H.264 kodlayıcı eklendi
++ Oynatmaya başlarken pencere en boy oranını ayarlama yeteneği eklendi
++ VP7 video formatının oynatılması için destek eklendi
++ Tam ekran modunda videoyu iki monitör arasında genişletme özelliği eklendi
++ Albüm Menüsünden seçilen çalma listesindeki öğeleri anında çalmaya başlama yeteneği eklendi
++ DXGI 1.2 masaüstü çoğaltma API'si aracılığıyla ekran yakalama yeteneği eklendi (Windows 8 veya daha yeni sürümlerde)
+
+- Belirli SMI altyazılarını okuyamayan bir sorun düzeltildi
+- Önceki altyazıya atlamayla ilgili bir sorun düzeltildi
+- Bazı Kaynakların/Bölücülerin varsayılan değeri değiştirildi
+- Kaynak/Bölücü filtre kontrolündeki tüm formatlar için FFmpeg Kaynak/Ayırıcı seçeneği eklendi
+- Çıkış cihazının en boy oranı düzeltmesinin düzgün çalışmadığı bir sorun düzeltildi
+- Belirli ASF dosyalarını oynatamayan bir sorun düzeltildi
+- ASS altyazılarında bellek sızıntısı sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.45955] 				 	2014/03/06
+----------------------------------------------------------
+- Sol/sağ ve yukarı/aşağı dokunma eylemleri sorunu düzeltildi
+- Oyun yakalama işlevinin belirli durumlarda düzgün çalışmadığı bir sorun düzeltildi
+- Bazı bilgisayarlarda yayın izlerken hata mesajı sorunu giderildi
+- Katmanlı pencere OSC modu kullanımıyla ilgili bir dış görünüm sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.45948] 				 	2014/03/05
+----------------------------------------------------------
++ 2. ses oluşturucu için ses senkronizasyonunu ayarlama yeteneği eklendi
++ Küçük resimlere altyazı ekleme yeteneği eklendi
++ DVD dosyalarını oynatma yeteneği eklendi
++ Maksimum altyazı gösterme süresini ayarlama yeteneği eklendi
++ Altyazı işlemeye anahat bulanıklaştırma efekti eklendi
++ Altyazı işlemeye 2. anahat kenarlık stili eklendi
++ XML altyazıları için destek eklendi
++ Altyazı işlemeye kelime arama işlevi eklendi
++ Altyazı FPS dönüştürme özelliği eklendi
++ Gömülü altyazılarda satır sonlarını işleyemeyen bir sorun düzeltildi
++ Çevrimiçi altyazıları doğrudan indirmek veya aramak için Open Subtitles DataBase (OSDb) desteği eklendi
++ 10 bit ve 16 bit YUV video formatları için destek eklendi
++ Dosya bilgileri iletişim kutusuna sistem bilgileri sekmesi eklendi
++ Sohbet yazı tipini ve pencere boyutunu ayarlama yeteneği eklendi
++ J2j dosyalarının oynatılması için destek eklendi
+
+- Bir güvenlik sorunu düzeltildi (hasarlı MKV başlık güvenlik açığının düzeltilmesi)
+- Altyazı okuma hızı iyileştirildi
+- Bazı altyazıların kaybolmaması sorunu giderildi
+- Geliştirilmiş yerleşik kaynak/ayrıştırıcı (BASS, FLPC, APE, MPC) işleme
+- Bazı DVD altyazılarının görünmemesi sorunu düzeltildi
+- Ogg akışlarının oynatma sorunu düzeltildi
+- Gömülü altyazılı bazı düzeltmeler
+- Blu-ray altyazılarının konum sorunu düzeltildi
+- ASF Bölücü/Kaynağın varsayılan değeri değiştirildi
+- Geliştirilmiş altyazı/ses tercihli dil işleme
+- Ruby altyazılarıyla ilgili bir sorun düzeltildi
+- Karaoke altyazılarında ara sıra oluşan titreme sorunu düzeltildi
+- QuickSync kod çözücünün/kodlayıcının bazı sistemlerde çalışmaması sorunu giderildi
+- Bazı HEVC (H.265) TS dosyalarını oynatamayan bir sorun düzeltildi
+- Birden çok altyazıyla ilgili bir sorun düzeltildi
+- MPEG PS/TS'ye gömülü altyazılarla ilgili bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.44465] 				 	2014/01/16
+----------------------------------------------------------
+- Belirli videolarda hareket bulanıklığı efektinin kullanılmasıyla ilgili bir sorun düzeltildi
+- Orijinal FPS kullanırken bir yayın sorunu düzeltildi
+- Altyazı gezgininde bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.44407] 				 	2014/01/15
+----------------------------------------------------------
+* Simgeler değiştirildi
+* Çeşitli kodek formatlarının seçimleri filtre kontrolüne eklenmiştir
+
++ HEVC (H.265) video formatı için destek eklendi
++ Nvidia CUDA H.264 kodlayıcı eklendi
++ Dirac ve MS Screen v1-4 codec desteği eklendi
++ Dokunma desteğine üç parmak hareketi eklendi
++ 2. ses oluşturucuyu ayarlama yeteneği eklendi
++ WavPack/OPUS filtre seçimi eklendi
++ Yerleşik video akışı değiştirici eklendi
++ Ctrl, Alt, Shift tuşlarını fare eylemleriyle birleştirme yeteneği eklendi
++ Video işlemeye borçlanma filtresi eklendi
+
+- AVCHD dosyalarını oynatırken arama sorunu düzeltildi
+- DXVA IDCT modunda VC1/WMV3 dosyalarını oynatırken ekranın kırılması sorunu düzeltildi
+- Oynatma sırasında çok fazla sistem belleği önbelleği kullanan bir sorun düzeltildi
+- Bazı yakut etiketlerinin düzgün görüntülenmemesine neden olan bir sorun düzeltildi
+- Belirli durumlarda DXVA kullanıldığında ekranın bozulmasına neden olan bir sorun düzeltildi
+- HDTV kanalları için geliştirilmiş tarayıcı
+- İdx/altyazıların kaydedilmesiyle ilgili bir sorun düzeltildi
+- Belirli FTP sunucularındaki dosyaları oynatamayan bir sorun düzeltildi
+- Belirli MPEG dosyalarının senkronizasyon sorunu düzeltildi
+- Yayın ses sıkıştırmasının varsayılan ayarı 48000, 128K olarak değiştirildi
+- ASF Bölücü/Kaynağın varsayılan ayarı WMF Kaynak Filtresi olarak değiştirildi
+- Belirli DVD'lerde arama sorunu düzeltildi
+- CUDA ve QuickSync kod çözücülerin DVD oynatma ile çalışmadığı bir sorun düzeltildi
+- Yerleşik Ses Kod Çözücüsünden kullanımdan kaldırılmış kodekler kaldırıldı
+- Altyazılarda daha fazla HTML etiketini yok sayma yeteneği eklendi
+- Varsayılan olarak MPEG PS/TS dosyalarının AVC1'den H264'e işlenmesi etkinleştirildi
+- Bazı durumlarda DXVA'yı kullanırken DVD oynatmanın durma sorunu düzeltildi
+- MPEG TS/PS, MKV, OGG dosyalarının arama hızı iyileştirildi
+- Çok programlı MPEG TS dosyalarının iyileştirilmiş oynatımı
+- Geliştirilmiş küçük resim oluşturma işlevi
+- Geliştirilmiş sahne gezgini özelliği
+- Tıklamalar ve çift tıklamalar arasında ayrım yapmak için bir işlem eklendi
+- Dokunma desteğinden tek parmakla dokunma eylemi kaldırıldı (fare tıklaması gibi davranır)
+- Mevcut en boy oranına bağlı olarak küçük resim önizlemelerinin görüntülenmesi (gezinme çubuğunda, sahne gezginde ...) değiştirildi
+- Bazı WebDAV sunucularında bazı düzeltmeler
+- Ekran yakalamada bazı düzeltmeler
+- Geliştirilmiş S/PDIF işleme
+- Geliştirilmiş yerleşik codec kullanımı
+- Bazı harici dosyaları "modül" adlı bir klasöre taşıdı
+  
+----------------------------------------------------------
+[1.5.40688] 				 	2013/10/17
+----------------------------------------------------------
++ DPI Farkındalığını kullanma yeteneği eklendi
++ Panjur gözlükleriyle Sayfa Çevirme 3D Modu için destek eklendi
+
+- Bazı WebDAV sunucularıyla çalışamayan bir sorun düzeltildi
+- Bazı png dosyalarını okuyamayan bir sorun düzeltildi
+- Belirli ortamlarda yayın logosu ile ilgili bazı düzeltmeler
+- Bazı bilgisayarlarda oynatmaya başlamanın uzun sürmesi sorunu giderildi
+- Özel kısayol tuşu iletişim kutusunda Alt C ve Alt O yazarken oluşan bir sorun düzeltildi
+- Windows Gezgini'nden çalma listesine dosya eklerken bir sorun düzeltildi
+- Belirli AVC1 dosyalarını oynatırken ekranın kararması sorunu düzeltildi
+- Dalga ses kontrolü ile ilgili bir sorun düzeltildi
+- Belirli durumlarda http ogg akışı oynatılırken bağlantı kesilmesi sorunu düzeltildi
+- Windows 8'de yer paylaşımlı karıştırıcının sorunu düzeltildi
+- Belirli yakalama kartlarında oynatma senkronizasyon sorunu düzeltildi
+- Bazı bilgisayarlarda multimedya kısayol tuşu sorunu düzeltildi
+- Belirli FLAC dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.40373] 				 	2013/10/07
+----------------------------------------------------------
++ WebDAV/HTTP oynatma işlevleri eklendi
++ Bir oynatma listesi içinde FTP/WebDAV/HTTP sunucusu klasörleri arasında gezinme yeteneği eklendi
++ Intel QuickSync H.264 kodlayıcı eklendi
++ Açılır menüde kaydırma çubuğunu kullanma yeteneği eklendi
++ Oynatma klasörüne önceki/sonraki dosyaları yükleme yeteneği eklendi
+
+- 64-Bit oyunları yakalarken bazı düzeltmeler
+- Belirli HTTP akışlarını oynatamayan bir sorun düzeltildi
+- Microsoft'un MultiMedia Klavyesinin sorunu düzeltildi
+- Yayın dosya adının düzgün çalışmadığı bir sorun düzeltildi
+- AVerMedia HD Capture'ın renk uzayları için doğrudan destek eklendi
+- Belirli ASF dosyalarını oynatamayan bir sorun düzeltildi
+- Windows8'de geliştirilmiş dosya ilişkilendirme yönetimi
+
+----------------------------------------------------------
+[1.5.39659] 				 	2013/08/27
+----------------------------------------------------------
++ Fare tekerleği sol/sağ eylemlerini ayarlama yeteneği eklendi
++ WASAPI kullanarak ses yakalama özelliği eklendi
++ Var olmayan öğelerin yer imlerini kaldırma yeteneği eklendi
++ Tercih edilen dillerle eşleştirmek için kullanılan altyazı öncelik sırasını ayarlama yeteneği eklendi
++ Oynatma listesi klasörünü ayarlama yeteneği eklendi
+
+- Bir güvenlik sorunu düzeltildi (DWMAPI DLL güvenlik açığının giderilmesi)
+- Geliştirilmiş dokunma özelliği
+- Bazı DVD altyazılarının görünmemesi sorunu giderildi
+- Çevrimiçi oyunlarla çalışmak için geliştirilmiş oyun yakalama işlevi
+- Hem 32 hem de 64 bit uygulamalarla çalışmak için geliştirilmiş oyun yakalama işlevi
+- Oyun yakalama sırasında geliştirilmiş GPU performansı
+- Varsayılan ses normalleştirici yöntemi değiştirildi
+- Hasarlı AVI/ASF dosyaları için harici Kaynak/Ayırıcı ekleme yeteneği eklendi
+- Belirli MP4/MOV dosyalarını oynatamayan bir sorun düzeltildi
+- MKV dosyalarını oynatırken bir sorun düzeltildi
+- Bir oynatma listesindeki oynatılan konumu hatırlamayla ilgili bir sorun düzeltildi
+- Benzer dosyaları açarken geliştirilmiş dosya açma yöntemi
+- Ses dosyalarının aralıksız oynatılması için bazı düzeltmeler
+
+----------------------------------------------------------
+[1.5.39036] 				 	2013/08/01
+----------------------------------------------------------
++ Önceki/sonraki ana karelere atlama yeteneği eklendi
++ Bilgisayarı belirli bir zamanda kapatma/uyku özelliği eklendi
+
+- Yer imlerini PBF dosyasına depolayan işlevin çalışmadığı bir sorun düzeltildi
+- Bazı oyunlarda oyun yakalama işlevi kullanıldığında rengin garip bir şekilde çıkması sorunu giderildi
+- Belirli WMA dosyalarının oynatma sorunu düzeltildi
+- Belirli MKV dosyalarını çaldıktan sonra programın sonraki öğeye geçmemesi sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.39007] 				 	2013/07/30
+----------------------------------------------------------
+* Geliştirilmiş A-B Tekrar işlevi
+  A-B Tekrar kurulum iletişim kutusu ekle
+  A-B Tekrar listesini bir .PBF dosyasında saklayabilme
+  A-B Tekrar menüsüne ulaşmak için "B" kısayol tuşunu ekleyin
+  A-B bölümünün kaç kez tekrarlanacağını belirleyebilme
+
+* Geliştirilmiş ekran yakalama özelliği
+  Add game capture function
+  Add specific window capture function
+  Ability to capture up to 60 FPS
+   
+- Yönetici haklarıyla dosya ilişkilendirme işlemini otomatik çalıştırma yeteneği eklendi
+- İlişkilendirme uzantılarının listesi alfabetik sırayla değiştirildi
+- Bazı karakterlerin hatalı bir şekilde .ini dosyasına kaydedildiği bir sorun düzeltildi
+- Yer imi zamanının belirli PC'lerde yanlış şekilde saklandığı bir sorun düzeltildi
+- Farklı çözünürlüklerde birden çok monitörle ilgili bir sorun düzeltildi
+- SMI altyazılarında <BR> etiketleriyle ilgili bazı düzeltmeler
+- Bazı H.264 kod çözme sorunları giderildi
+- Belirli VobSub altyazılarının görünmemesi sorunu giderildi
+- Bazı WMV dosyalarının en boy oranı sorunu düzeltildi
+- Kaplamayı otomatik gizle seçeneğiyle ilgili temel sorun düzeltildi
+- Programın belirli durumlarda öldürüldüğü bir sorun düzeltildi
+- Geliştirilmiş Şarkı Sözü işleme
+- WDM cihazları için AC3/DTS/AAC/MPEG/WMA Pro ses girişi desteği eklendi
+- Yerleşik ses kod çözücüye TTA/WavPack desteği eklendi
+- 10 bit videoların kodunu çözerken oluşan bir sorun düzeltildi
+- Düşük kaliteli ses hızı modu kullanılırken oluşan gürültü sorunu düzeltildi
+- LPCM çıkışlı Cyberlink codec bileşeni sorunu düzeltildi
+- İnternet bağlantısı yokken programın yavaş açılmasına neden olan bir sorun düzeltildi
+- Belirli durumlarda madVR kullanırken yakalama sorunu düzeltildi
+- Belirli m3u8 dosyalarının ayrıştırma sorunu düzeltildi
+- Önceki/sonraki görev çubuğu kontrol düğmeleri eklendi
+- Hasarlı MKV dosyalarının iyileştirilmiş oynatımı
+
+----------------------------------------------------------
+[1.5.38562] 				 	2013/06/25
+----------------------------------------------------------
++ Doğrudan DVD filmi oynatma özelliği eklendi
++ Aralıklarla kare yakalama yeteneği eklendi
++ Her ön ayar için ayrı ayrı filtre önceliği belirleme yeteneği eklendi
++ Avisynth filtreleri kullanma yeteneği eklendi
++ Direct3D9Ex Kaplama Modu eklendi
+
+- Yerleşik ses oluşturucunun kullanımıyla ilgili ses sorunu düzeltildi
+- XP'de yayın izlerken VMR9 Renderless ile ilgili bir sorun düzeltildi
+- VMR7 Renderless kullanırken ekranın kararması sorunu düzeltildi
+- Beş adede kadar yayın logosu ayarlama özelliği eklendi
+- 10 Bölümden fazla olduğunda yaşanan bir sorun düzeltildi
+- Bazı MPEG2 TS dosyalarını oynatırken bazı düzeltmeler
+- Bazı OGG/Theora dosyalarını oynatırken bazı düzeltmeler
+- Yayın listesinin dikey boyutu 600'den fazla olduğunda bir sorun düzeltildi
+- İkinci cihazın ses girişinin kullanılmasıyla ilgili bazı düzeltmeler
+- Bazı MP4 dosyalarını oynatamayan bir sorun düzeltildi
+- Belirli MPEG TS dosyalarını oynatamayan bir sorun düzeltildi
+- Ruby etiketleriyle ilgili bir sorun düzeltildi
+- Bazı durumlarda boş oynatma listesi dosyasıyla ilgili bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.37776] 				 	2013/05/15
+----------------------------------------------------------
+* 4 milyona kadar artan kişisel yayın bit hızı
+* Yayın artık 2000 kişiyle sınırlıdır
+* Kişisel yayın reklamı eklendi
+
++ 3D video desteği eklendi
++ Dokunma özelliği için destek eklendi
++ Yerleşik ses işleme filtresine akış değiştirici işlevi eklendi
++ Göreceli bir yola sahip bir altyazı klasörü ekleme yeteneği eklendi
++ Bölümleri/yer imlerini atlama yeteneği eklendi
++ Bilgisayarı kapatmak yerine uyku moduna geçme yeteneği eklendi
++ Yer imlerini bir .PBF dosyasına kaydetme özelliği eklendi
++ .MOV dosyalarını oynatırken dönüşü kalibre etme yeteneği eklendi
+  (yalnızca döndürmeyi destekleyen oluşturucularla çalışır, Pan
++ Japonca ve Çince karakterler için alternatif bir yazı tipi ayarlama özelliği eklendi (Yalnızca İngilizce Windows'ta)
++ WDM cihazları için PCM/AC3 ​​/ DTS ses işleme desteği eklendi
+
+- CD tanıma sorunu nedeniyle açılır menünün sıklıkla durdurulmasına neden olan bir sorun düzeltildi
+- Video veya ses codec bileşeni "yok" olarak ayarlandığında yakalama işlevinin çalışmaması sorunu düzeltildi
+- Video oynatma sırasında bazı işlemler (videoyu genişletme veya en boy oranını değiştirme gibi) sırasında bazı düzeltmeler
+- Geliştirilmiş DXVA kullanım koşulları
+- Yayın kaydetme işlevinin çalışmadığı bir sorun düzeltildi
+- PNG yakalama sorunu düzeltildi
+- Varsayılan kısayol tuşlarından biri ise, belirtilen tuşun varsayılan işlevini gösteren özel kısayol tuşu iletişim kutusuna bir işlev eklendi.
+- Belirli ortamlarda yayın logosu ile ilgili bazı düzeltmeler
+- OSD kısa bilgilerinin içeriğini ayarlama özelliği eklendi (F5> Genel> OSD)
+- Geliştirilmiş Manyetik Windows işleme (kenara/pencereye yaslanma özelliği)
+- Geliştirilmiş AVCHD oynatma
+- Bazı MKV dosyalarının arama sorunu düzeltildi
+- İyileştirilmiş tercih edilen dil (altyazı/ses) işleme
+- OGM dosyalarının oynatma sorunu düzeltildi
+- Bazı altyazıların yanlış tanınması sorunu giderildi
+- Çok çekirdekli işleme ile renk alanı işlemede bazı düzeltmeler
+- Bazı WMV2 dosyalarının kodunu çözerken ekran donması sorunu düzeltildi
+- Küçük resim önizleme işlevinin DVD oynatma ile çalışmaması sorunu giderildi
+- Belirli DVD başlıklarını oynatırken ekranın kararması sorunu giderildi
+- İkinci cihazın ses girişini kullanmayla ilgili bir sorun düzeltildi
+- İyileştirilmiş yakut etiketi kullanımı
+- Küçük resim önizlemelerinde bazı düzeltmeler
+- Bazı yerleşik ses codec önceliğini değiştirdi
+- MadVR kullanılırken sonraki kare eylemiyle ilgili bir sorun düzeltildi
+- Belirli Idx/Altyazıların görünmemesi sorunu giderildi
+- Yer imi ve bölüm yönetimleri birleştirildi
+- Bir yer imi eklemeden önce sorma yeteneği eklendi
+- Bazı durumlarda bazı yayın sorunları giderildi
+
+----------------------------------------------------------
+[1.5.36205] 				 	2013/03/20
+----------------------------------------------------------
++ Gezinme çubuğunda videonun küçük resim önizlemelerini görüntüleme özelliği eklendi
++ Canlı 'Daum tvPot'u izleme yeteneği eklendi (Bir Android Uygulaması)
+  -Daha fazla ayrıntı için lütfen http://blog.daum.net/ahahvideo/17946441 bakın
+
+- Yayın logosu işlevinin çalışmaması sorunu giderildi
+- Hasarlı AVI dosyalarını oynatamayan bir sorun düzeltildi
+- NV12 renk alanı işlemede bazı düzeltmeler
+- Küçük resim önizleme boyutu iki katına çıkarıldı
+- Belirli altyazılarda Ruby etiketlerinin düzgün görüntülenmemesine neden olan sorun çözüldü
+- Sohbet raporlama sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.36073] 				 	2013/03/11
+----------------------------------------------------------
++ FTP oynatma işlevi eklendi
++ Bir oynatma listesindeki klasörler arasında gezinme yeteneği eklendi
++ Kişisel yayın mobil aktarım işlevi eklendi
+
+- Geliştirilmiş AB tekrar işlevi
+- İyileştirilmiş radyo stili açılır menü kullanımı
+- Bazı TS dosyalarının süresinin yanlış hesaplandığı bir sorun düzeltildi
+- Bazı MP4 dosyalarını oynatırken sesin çıkmaması sorunu düzeltildi
+- Geliştirilmiş renk alanı kullanımı
+- Geliştirilmiş srt altyazı yönetimi
+- Bazı UTF8 işleme geliştirildi
+- Güç durumunu görüntüleme yeteneği eklendi
+
+----------------------------------------------------------
+[1.5.35491] 				 	2013/02/05
+----------------------------------------------------------
+- Flash oynatma sorunu düzeltildi
+- Sohbet komut dosyasını engelleme yeteneği eklendi
+
+----------------------------------------------------------
+[1.5.35431] 				 	2013/01/24
+----------------------------------------------------------
+- Flash'ın en son sürümüyle ilgili bir sorun düzeltildi
+- Vorbis sıkıştırmasıyla video yakalama sırasında oluşan bir sorun düzeltildi
+- Belirli durumlarda senkronizasyonla ilgili bir sorun düzeltildi
+- Otomatik güncelleme işlemi programın çıkışına taşındı
+
+----------------------------------------------------------
+[1.5.35238] 				 	2013/01/14
+----------------------------------------------------------
++ Yapılandırma yönetiminin otomatik seçim kriterlerine eşit koşul eklendi
++ MadVR'nin piksel gölgelendirici özelliği için destek eklendi
++ SUP (Blu-ray) altyazıları için destek eklendi
++ MP3 dosyalarını şarkı sözü altyazılı oynatma özelliği eklendi
++ DIVX (XSUB) altyazıları için destek eklendi
++ Stereo kanalları değiştirme yeteneği eklendi
++ Yakalama klasörlerini tek bir yerde ayarlama yeteneği eklendi (F5> Yakalama Klasörü)
+
+- Altyazı senkronizasyonunu yansıtırken bir sorun düzeltildi
+- Belirli BIK dosyalarını oynatırken anormal işlem düzeltildi
+- DXVA2 kullanarak DVD altyazıları ve DVD menüsü için bazı düzeltmeler
+- Geliştirilmiş Pixel gölgelendirici kullanımı
+- Geliştirilmiş logo kullanımı
+- Daum Cloud https için destek eklendi
+- Yer imleri artık 2000 ile sınırlıdır
+- Yapılandırma yönetiminin iyileştirilmiş otomatik seçim koşulları
+
+----------------------------------------------------------
+[1.5.34665] 				 	2012/11/20
+----------------------------------------------------------
+- 3'ten fazla ses kanalını yakalarken video yakalamanın anormal davranışı düzeltildi
+- MP4 formatında video yakalarken bazı düzeltmeler
+- Bazı AAC ses dosyalarının kodunu çözerken bazı düzeltmeler
+- Yayın sırasında H.264 codec bileşeniyle ilgili bir sorun düzeltildi
+- Dosya adı "" içeriyorsa oynatmanın başlamaması sorunu düzeltildi
+- Windows8'in varsayılan program ayarlarıyla ilgili bir sorun düzeltildi
+- Altyazı senkronizasyonunu yansıtırken bir sorun düzeltildi
+- Belirli ortamlarda pencereyi yeniden boyutlandırırken bazı düzeltmeler
+- Belirli ASS/SSA altyazılarıyla çok fazla bellek kullanan bir sorun düzeltildi
+- Altyazı çıkışı için kullanılabilir alan ayırma yeteneği eklendi
+- Belirli ortamlarda ekolayzır kullanırken ses gelmemesi sorunu giderildi
+- Daha uzun bir yayın sırasında kaynak yetersizliği nedeniyle anormal işlem olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.34321] 				 	2012/10/12
+----------------------------------------------------------
+- Hasarlı ASF dosyalarının daha iyi işlenmesi
+- Özel kısayolların geliştirilmiş görünümü
+- Bazı UTF8 altyazılarının yanlış işlenmesine neden olan bir sorun düzeltildi
+- Geliştirilmiş tercih edilen ses dili işleme
+- Bazı FLV dosyalarının arama sorunu düzeltildi
+- WDM/CAM/BDA cihazlarının oynatma süresi sorunu düzeltildi
+- SMI altyazıları için geliştirilmiş etiket işleme
+- Ekran yakalama sırasında fare imlecinin konum sorunu düzeltildi
+- H.264 kodlama seçeneklerinde bazı değişiklikler
+- Geliştirilmiş TAK ses çalma
+- Geliştirilmiş görüntü ayrıştırma seçenekleri
+
+----------------------------------------------------------
+[1.5.34115] 				 	2012/09/11
+----------------------------------------------------------
+- Ekran boyutu değiştirildiğinde altyazının titremesi sorunu düzeltildi
+- Arka plan rengi iyileştirildi
+- Bazı MPEG TS dosyalarını oynatırken ses çıkmaması sorunu düzeltildi
+- Flash'ın en son sürümüyle ilgili bir sorun düzeltildi
+- Direct3D 9 dış görünüm modu kullanılarak logonun yanıp sönmesi iyileştirildi
+- SMI altyazı senkronizasyon işlevini yansıtan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.34023] 				 	2012/08/16
+----------------------------------------------------------
+- FLV oynatma süresi bilgilerinin yanlış olduğu bir sorun düzeltildi
+- MP4/MOV dosyalarını oynatırken bazı düzeltmeler
+- Bazı H.264 dosyalarının kodunu çözerken bazı düzeltmeler
+- MPEG2 dosyalarını oynatırken bazı düzeltmeler
+
+----------------------------------------------------------
+[1.5.33948] 				 	2012/07/26
+----------------------------------------------------------
+- Tercihlerde bir dış görünüm değiştirildiğinde oluşan sorun düzeltildi
+- Bazı HTTP URL'lerini açamayan bir sorun düzeltildi
+- HTTP URL'lerini açarken bazı düzeltmeler
+- Oynatmayı hızlandırırken oluşan gürültü sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.33869] 				 	2012/07/17
+----------------------------------------------------------
+- Deneysel çift çerçeve taramasız hale getirmeyle ilgili bazı sorunlar düzeltildi
+- Yayın navigasyonunun yavaş çalışmasına neden olan bir sorun düzeltildi
+- Yayın sıkıştırma ayarları değiştirildiğinde aşırı CPU kullanımı düzeltildi
+
+----------------------------------------------------------
+[1.5.33820] 				 	2012/07/13
+----------------------------------------------------------
++ RSS beslemesi oynatma işlevi eklendi
++ Konfigürasyon yönetiminin otomatik seçim kriterlerine eklendi ve koşul
++ Altyazı efekt etiketlerini yok saymak için bir seçenek eklendi
+
+- MPEG TS dosyalarını oynatırken bazı düzeltmeler
+- Görüntü döndürme işlevinin düzgün çalışmadığı bir sorun düzeltildi
+- Videonun uzantısı olmadığında altyazıları okurken oluşan bir sorun düzeltildi
+- DVB Altyazılarının renk sorunu için bazı düzeltmeler
+- Yayın oynatma durdurulduğunda bir sorun düzeltildi
+- OGG dosyaları için bazı düzeltmeler
+- MKV gömülü altyazılar için bazı düzeltmeler
+- Bazı H.264 kod çözme sırasında ekranın kararması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.33573] 				 	2012/05/24
+----------------------------------------------------------
++ Oynatma listesi öğelerini uzantıya göre sıralama özelliği eklendi
++ Yerleşik RealMedia codec desteği eklendi
++ Intel Indeo 4/5 kod çözücü desteği eklendi
++ Mevcut altyazıyı panoya kopyalama özelliği eklendi
++ Üstte 3D altyazı eklendi
++ Bir oynatma listesi içinde oynatma süresi alma yeteneği eklendi
++ VMR9/EVR anizotropik ölçekleme yöntemi eklendi
++ İlgili klasördeki tüm dosyaları oynatmak için Dosya Gezgini'ne bir işlev eklendi
+
+- 8 bit renkli video oynatılırken ekranın kararması sorunu düzeltildi
+- Ön/sonraki eylemler sırasında entegre altyazıların konum sorunu düzeltildi
+- Belirli ASF dosyalarını oynatırken bazı düzeltmeler
+- Ekran dönüşleri arasında geçiş yapmak için ALT K klavye kısayolu eklendi
+- Ses senkronizasyonunun değerini ayarlama özelliği eklendi (Shift <,>) (F5> Ses> Kristallik> senkronizasyon kontrol ünitesi)
+- Altyazı/ses senkronizasyonunu sürdürme yeteneği eklendi
+- Mesajları görüntülerken 3D altyazı çıktısında bazı düzeltmeler
+- ASS/SSA altyazılarının stil yönetimi iyileştirildi
+- Kaldırıcıdaki bazı düzeltmeler (Korece)
+- Geliştirilmiş yayın başlangıç ​​hızı
+- Geliştirilmiş video yakalama işlemi
+- Geliştirilmiş ProRes kod çözücü dizileri
+- DVD altyazıları için bazı düzeltmeler
+- DXVA ile MPEG2 dosyalarını oynatırken oluşan bir sorun düzeltildi
+- RAW video işlemeyi kullanırken bazı düzeltmeler
+- Direct3D9Ex Çevirme modu iyileştirildi
+- RAR parçalarından açılan iyileştirilmiş dosya
+- Bazı Ses CD'sinin oynatma sorunu için bazı düzeltmeler
+
+----------------------------------------------------------
+[1.5.32007] 				 	2012/02/22
+----------------------------------------------------------
++ Bir oynatma listesi içinde oynanan konumu hatırlama yeteneği eklendi
++ Mevcut altyazı bölümünü otomatik tekrarlama yeteneği eklendi
+
+- DVD oynatma için bazı düzeltmeler
+- Görüntü boyutunu dinamik olarak değiştirirken CUDA/QuickSync kod çözücü hatası düzeltildi
+- Bazı ASS/SSA altyazılarının ekran konumu sorunu düzeltildi
+- Video İşleyici için bazı düzeltmeler
+- Blu-ray oynatmada, bölümlerin yerleşik 31979 ile gösterilmemesi sorunu giderildi
+- Belirli ASF dosyalarını oynatırken oluşan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.31934] 				 	2012/02/07
+----------------------------------------------------------
++ Mevcut altyazı konumuna atlama yeteneği eklendi
++ IMC1 ~ IMC4 renk alanları eklendi
++ Intel QuickSync Kod Çözücü eklendi (MPEG1/2, H264/AVC, WMV3, VC1 desteklenir)
++ Blu-ray bölümlerine geçme yeteneği eklendi
++ Blu-ray oynatma yöntemini seçme yeteneği eklendi
++ Video oynatmaya başlarken özel ekran boyutu ayarlama yeteneği eklendi
++ Yerleşik LPCM kod çözücü eklendi
++ Gezinme iletişim kutusunun şeffaflığını belirleme yeteneği eklendi
++ Oynatma listesine dosya adını yeniden adlandırma yeteneği eklendi
++ Nvidia CUDA Kod Çözücü eklendi (MPEG1/2, H264/AVC, VC1 desteklenir)
++ Oynatılamadığında bir sonraki öğeyi oynatma seçeneği eklendi
++ Dış görünüm desteğine CMD_VIDEO_CODEC_SIZE_MESSAGE, CMD_VIDEO_OUT_SIZE_MESSAGE, CMD_VIDEO_OUT_FPS_MESSAGE eklendi
++ DXVA'nın kullanım koşullarına çözünürlük sınırı ayarı eklendi
++ Yerleşik DXVA kod çözücüye WMV9 VLD desteği eklendi
++ Altyazının dış hatlarını/gölgesini ekran boyutuna sığacak şekilde ölçekleme seçeneği eklendi
+
+- TS dosyalarını oynatırken bazı düzeltmeler
+- Pencere boyutunu pencere merkezinden ayarlama seçeneği eklendi
+- İyileştirilmiş filtre önceliği işleme
+- FLAC ses kodek seçiminin çalışmaması sorunu giderildi
+- Dosya gezginindeki fare yanıt sorunu düzeltildi
+- WMA ses codec bileşeninin varsayılan ayarı yerleşik Kod Çözücü olarak değiştirildi
+- Arama sırasında Interlace VC1 oynatmanın senkronizasyon sorunu düzeltildi
+- Arama sırasında yerleşik WMV DMO codec bileşeninin eşitleme sorunu düzeltildi
+- Dahili MPEG ses kod çözücünün varsayılan ayarı FFmpeg Yüzer Kod Çözücü olarak değiştirildi
+- Belirli FFmpeg ses codec bileşeni için bazı düzeltmeler
+- Yerleşik H.264 DXVA kod çözücü için bazı düzeltmeler
+- Rar dosyalarının iyileştirilmiş desteği
+- Geçişli WDM'nin gelişmiş belirlenmesi
+- Yerleşik ayırıcıya birden fazla ses çıkışı işleme eklendi
+- Yerleşik codec bileşenine AVX talimatları desteği eklendi
+- ASF'nin hasarlı bir parçasını oynatamayan bir sorun düzeltildi
+- Geliştirilmiş albüm/favori menü kullanımı
+- Ekran yakalama kullanılırken tepsi simgesinin görünmemesi sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.30857] 				 	2011/12/15
+----------------------------------------------------------
++ Oynatma listesindeki CTRL Yukarı/Aşağı tuşlarıyla seçilen öğeyi taşıma yeteneği eklendi
++ Oynatma atlamaya zaman aralıkları ekleme yeteneği eklendi
+
+- Yerleşik kodek güncellendi
+- ASS/SSA altyazılarının konum sorunu düzeltildi
+- Pencerenin belirli bir ortamda başlangıçta hareket ettiği bir sorun düzeltildi
+- TS dosyalarını oynatırken bazı düzeltmeler
+- Belirli MOV/MP4 dosyaları oynatılırken ses çıkmayan bir sorun düzeltildi
+- Ruby etiketi için bazı düzeltmeler
+- Avs (avisynth komut dosyası) dosyalarını oynatırken ses çıkmayan bir sorun düzeltildi
+- Bazı MP3/MOV dosyalarında oynatma süresinin yanlış bir şekilde tanımlandığı bir hata düzeltildi
+- Bazı grafik kartları için varsayılan renk alanı değiştirildi
+- Opak kutu seçeneğinin blu-ray altyazısıyla çalışmaması sorunu giderildi
+- ASF gömülü altyazı desteği eklendi
+- Bazı PC'lerde oluşan çalışma zamanı hatası sorunu düzeltildi
+- Apple ProRes Codec desteği eklendi
+- DivX H.264 kod çözücü uyumluluk sorunu düzeltildi
+- İkiden fazla MP4 dosyası oynatılırken yapılan bazı düzeltmeler
+- H.264 HD yayının titreme sorunu düzeltildi
+- H.264 HD yayının bloklara ayrılma sorunu düzeltildi
+- H.264 dosyalarını oynatırken eşitleme sorunu düzeltildi
+- Bazı PC'lerde meydana gelen VMR9 Renderless'ın titreme sorunu düzeltildi
+- Geliştirilmiş video yakalama özelliği
+
+----------------------------------------------------------
+[1.5.29996] 				 	2011/10/31
+----------------------------------------------------------
+- Belirli MPEG2 dosyalarının oran sorunu düzeltildi
+- Geri Dönüşüm Kutusu'na dosya gönderme süreci iyileştirildi
+- MPEG2 TS'deki AAC Tanıma sorunu düzeltildi
+- RGB/YUV renk temalarında bazı değişiklikler
+
+----------------------------------------------------------
+[1.5.29917] 				 	2011/10/18
+----------------------------------------------------------
+- HDTV yayınının DXVA sorunu düzeltildi
+- Boyutu 0.5X veya 1.0X olarak ayarlandığında pencerenin sola taşınması sorunu giderildi
+- Yayın senkronizasyonu şimdi ayarlanabilir
+- Video işleme filtresi kullanılmadığında alt kenar boşluğu işlevini iyileştirmek için bir seçenek eklendi
+- Tam ekranda iyileştirilmiş altyazı marjı
+- Gerçek zamanlı oynatma sırasında bazı düzeltmeler
+- Geliştirilmiş asx/pls dosya analizi yetenekleri
+- Sabit VC1 DXVA Sorunu
+
+----------------------------------------------------------
+[1.5.29795] 				 	2011/09/29
+----------------------------------------------------------
+- Altyazıyla ilgili bir sorun düzeltildi
+- Geliştirilmiş yayın sesi modülasyonu
+- Bazı ASS/SSA altyazılarının garip sorunu düzeltildi
+- SMI altyazılarında <BR> etiketini yok saymak için bir seçenek eklendi
+- Geliştirilmiş dosya bilgileri özelliği
+- 500 MB'den fazla Rar/Zip dosyası için destek eklendi
+- Rar dosyalarının desteği düzeltildi
+
+----------------------------------------------------------
+[1.5.29601] 				 	2011/09/06
+----------------------------------------------------------
+- EVR Custom Present'ın kare adım sorunu düzeltildi
+- Yarı saydam pencereleri yakalama yeteneği eklendi
+- OGG Stream oynatma sorunu düzeltildi
+- Web kamerası yayınının görüntüleme ekranını atlama yeteneği eklendi
+- Çalma listesine dosya eklemenin uzun sürmesi sorunu düzeltildi
+- H264 kod çözmenin Diş Çerçevesinde bazı düzeltmeler
+- Belirli bir dosyanın eşitleme sorunu düzeltildi
+- Uzun bir altyazı gösterilirken yaşanan bir sorun düzeltildi
+- Belirli bir MPEG1 dosyasının senkronizasyon sorunu düzeltildi
+- H.263 codec bileşenini kullanırken video yakalama sorunu düzeltildi
+- FLV dosyalarını oynatırken bir sorun düzeltildi
+- Geliştirilmiş altyazı çıkışı hızı
+
+----------------------------------------------------------
+[1.5.29332] 				 	2011/08/11
+----------------------------------------------------------
+- DXVA kullanılırken video boyutunun değiştirilememesine neden olan bir sorun düzeltildi
+- Geliştirilmiş HTTP dosyası oynatma
+- WMV1, WMV2 varsayılan kodekleri değiştirildi
+- DXVA ile bazı dosyalarda sabit senkronizasyon sorunu
+- Thread Frame kullanıldığında oynatmanın düzgün olmaması sorunu giderildi
+- En son Cyberlink Video Kod Çözücünün VC1 bağlantı sorunu düzeltildi
+- Harici ASF ayırıcı kullanamayan bir sorun düzeltildi
+- Geliştirilmiş benzer dosya araması
+
+----------------------------------------------------------
+[1.5.29162] 				 	2011/07/29
+----------------------------------------------------------
+- Bazı H.264 dosyalarının oynatma senkronizasyon sorunu düzeltildi
+- Varsayılan taramasızlaştırma ayarları değiştirildi (Kalite sorunlarını düzeltmek için)
+- Odak sorunu ile klavye kısayol tuşunun gerçek durumu almadığı bir sorun düzeltildi
+- Sohbet özellikleri sırasında sohbet duyurularını sıfırlama ve sabit yayınlama eklendi
+- Kullanıcı güvenliğini artırmak için yayın dosya listesi değiştirildi
+
+----------------------------------------------------------
+[1.5.29148] 				 	2011/07/28
+----------------------------------------------------------
++ Sanal Kulaklık/Surround/Dolby ses çıkışları için destek eklendi
++ DVD Navigator ve HDTV Demuxer'ı özelleştirme yeteneği eklendi
++ AMR ses çalma eklendi
++ Stereoskopik altyazılar için destek eklendi
+
+- MP4 EAC3 için destek eklendi
+- H.264 videoları ile MPEG2 için bazı düzeltmeler
+- Intel GMA 4500'ün H.264 DXVA sorunu düzeltildi
+- İyileştirilmiş oynatma WTV dosyaları
+- Unicode yükleme Süreci için bazı düzeltmeler
+- MP4/MOV formatı için bazı düzeltmeler
+- Yayın/HTTP akışının iyileştirilmiş hızı
+- MPEG formatı için AAC LATM codec desteği eklendi
+- Pot TV video oynatma sırasında bir sorun düzeltildi
+- Yayın çözünürlüğü serbestçe ayarlanabilir
+- LPCM oynatmanın sabit hız sorunu
+- AVI oynatmanın titreşim değiştirme sorunu düzeltildi
+- ACM Vorbis sıkıştırılmış dosyalar için bazı düzeltmeler
+- Harici ASF/FLV Kaynağı/Ayırıcı seçme yeteneği eklendi
+- FFmpeg iş parçacığı işlemeyi seçme yeteneği eklendi
+- Bazı MP4 dosyalarının oynatılmaması sorunu düzeltildi
+- MadVR ve HaaliVR için bazı düzeltmeler
+- H.264 DXVA'nın bazı kartlarda düzgün çalışmaması sorunu giderildi
+- Geliştirilmiş DXVA kod çözme süreci
+- 9-bit H.264'ten fazla kod çözerken oluşan gürültü sorunu düzeltildi
+- Ses CD'si oynatma sorunu düzeltildi
+- Fare ayarlarını özelleştirme yeteneği eklendi
+- Bazı yayın sorunları giderildi
+- Geliştirilmiş sohbet güvenliği
+- Sohbet odasında bazı özel etiketlerin görüntülenme sorunu düzeltildi
+- MXF dosyalarını oynatma yeteneği eklendi
+
+----------------------------------------------------------
+[1.5.28025] 				 	2011/04/29
+----------------------------------------------------------
+- Direct3D9/OpenGL Video Renderer sorunlarının NV12 çıkışı düzeltildi
+- H264 DXVA görüntü sorunları için bazı düzeltmeler
+- Dosya yolunu alma sorunu düzeltildi
+- Harici DXVA kod çözücüyü kullanırken bir uyumluluk sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.28013] 				 	2011/04/28
+----------------------------------------------------------
++ FFmpeg-MT kod çözücü için ek destek (MPEG4, VP3, Theora, HUFFYUV)
++ ATI Radeon HD 6xxxx kartları için MPEG4 DXVA desteği eklendi (mükemmel değil)
++ İşleme modu olmadan DXVA desteği eklendi
++ HTTP Canlı akış medya oynatma eklendi
++ RealVideo codec bileşenleri eklendi
++ Direct3D9/OpenGL Video Oluşturucu eklendi
+
+- MP4 dosyalarını oynatma sırasında bazı sorunlar giderildi
+- PC ve BASS arasındaki bazı uyumluluk sorunları giderildi
+- Bazı VGA kartlarda oluşan bazı H264 DXVA sorunları düzeltildi
+- Geçersiz bir yer imi nedeniyle programın öldürüldüğü bir sorun düzeltildi
+- Yakalama kartıyla kayıt yaparken önbellek sorunu düzeltildi
+- Bazı GMA VGA Kartlarının H264 DXVA uyumluluk sorunu düzeltildi
+- Altyazı etiketi tanımlama sorunu düzeltildi
+- WMV3 formatının DXVA sorunu düzeltildi
+- Kaynak filtrenin öncelik ayarının geçerli olmaması sorunu giderildi
+
+----------------------------------------------------------
+[1.5.27313] 				 	2011/03/22
+----------------------------------------------------------
++ Albüm resmi görsel efektleri desteği eklendi
++ İletişim kutusunun yazı tipini ayarlama yeteneği eklendi
++ Animasyonlu özelliklere sahip ASS/SSA altyazıları için Destek eklendi
+
+- Albüm kapağının görselindeki değişiklikler
+- Birkaç albüm resmi işlevi desteği (geçiş yapmak için fareye tıklayarak)
+- Yüksek çözünürlüklü video kaydındaki hata sorunu giderildi
+- VC-1 dosyalarını oynatırken bazı düzeltmeler
+- Bazı sorunları çözmek için özel bir WMA ses kod çözücü desteği
+- Programı kapatırken oluşan hata sorunu giderildi
+- Yazı tipi seçiminde bazı yazı tiplerinin görünmez olması sorunu düzeltildi
+- Gezinme çubuğunda yer imlerini gösterme seçeneği eklendi
+- Bazı MP4 dosyalarındaki yer imlerini tanımayan bir sorun düzeltildi
+- Bozuk karakter sorunu olan altyazılar için bazı düzeltmeler
+- Analog tv izlerken manuel olarak altyazı düzenleme sorunu düzeltildi
+- İkinci ses cihazının ses girişinin bazı PC'lerde çalışmaması sorunu giderildi
+- Kısayollarda bazı düzeltmeler
+- ASS/SSA altyazı işlemede hata düzeltildi
+- Bazı FLV dosyalarını oynatırken yaşanan sorunlar düzeltildi
+- MKV dosyalarının temel parça işleme işlevi eklendi
+- CyberLink VC1 kod çözücünün bağlantı sorunu düzeltildi
+- TAK ses dosyaları için destek
+- Geçici kullanıcılar için sohbet kısıtlaması
+- Senkronize edildikten sonra takma adı değiştirin
+- Kullanıcı takma adı bağlantısı hakkında rapor oluşturma
+- Otomatik olarak kara listeye gönderilen bir menü öğesi eklendi
+
+----------------------------------------------------------
+[1.5.26392] 				 	2011/01/06
+----------------------------------------------------------
++ BIK dosyaları için destek eklendi
++ Müzik çalarken albüm kapağı eklendi
++ Geçici depolama klasörü ayarlama özelliği eklendi
++ Bitmiş eylem işlevini hatırla eklendi
+
+- MP4 dosyalarının ses oynatma sorunu düzeltildi
+- İyileştirilmiş INI dosyası işleme
+- Dosya uzantısını göstermek için oynatma listesi ayarlarına bir seçenek eklendi
+- Altyazı işlemede bazı değişiklikler
+- DXVA ile H264 videoları oynatırken Nvidia kartlarında yeşil ekran sorunu düzeltildi
+- EAC3 PassThrough'daki hata düzeltildi
+- Görselleştirmedeki hata düzeltildi
+- Bazı AAC ses desteği
+- Sohbetten Basit kullanıcı kimliği yasağı
+
+----------------------------------------------------------
+[1.5.26143] 				 	2010/12/14
+----------------------------------------------------------
++ AB tekrar işlevine 0.1 saniye ayarlama eklendi
++ Otomatik yer imi silme işlevi eklendi
+
+- AB tekrarının yanlış görüntülendiği bir sorun düzeltildi
+- Çok çekirdekli video işlemedeki sorunlar düzeltildi
+- Geliştirilmiş hareket bulanıklığı özelliği
+- Geliştirilmiş dosya silme işlevi
+- RT altyazı dosyasının düzgün işleyememesi sorunu giderildi
+- FLV video dosyalarını oynatırken oluşan sorunlar düzeltildi
+- RTSP oynatmayı optimize edin
+- Sohbet yönetimi sayfası değişiklikleri gerçek zamanlı olarak yansıtılır
+- Sohbette diğer kullanıcılarla ilgili bir hata düzeltildi
+- Kullanıcı adı ve takma addaki tutarsızlık düzeltildi
+  
+----------------------------------------------------------
+[1.5.25819] 				 	2010/11/25
+----------------------------------------------------------
++ Yeni bir görünüm eklendi
++ Bir kontrol paneli özelliği eklendi (Şu anda yeni dış görünüme dahil edilmiştir)
++ Özel renk teması özelliği eklendi
++ Hareket bulanıklığı işlevi eklendi
+
+- Albümün belirli koşullardan kaybolması sorunu giderildi
+- Küçültüldüğünde kontrol panelinin kaybolmaması sorunu giderildi
+- Depolanan giriş bilgilerinde düzeltildi
+- Bazı ASF dosyası oynatmanın ekran yırtılma sorunları düzeltildi
+- DXVA ve altyazı kullanarak HDTV oynatma ile ilgili uyumluluk sorunları düzeltildi
+- Uzantının bağlantısının kesildiği bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.5.25705] 				 	2010/11/18
+----------------------------------------------------------
++ Önceki konumda oynatmak için DVD oynatma yeteneği eklendi
+
+- Pencere boyutu kontrolünün değiştirilmesine göre değişen ayar
+- Yer paylaşımı karıştırıcısının altyazılar olmadan kullanımda olduğu bir sorun düzeltildi
+- Birden fazla yürütmeyi canlı ve mini olarak ayrı ayrı çalışmak üzere değiştirildi
+
+----------------------------------------------------------
+[1.5.25642] 				 	2010/11/11
+----------------------------------------------------------
++ Ekranda görüntü bindirme özelliği eklendi (Direct3D, LayeredWindow)
++ Yarı saydam cilt işlevi modu eklendi
++ Çalma listesine dosya bilgileri özelliği eklendi
++ Otomatik giriş özelliği eklendi
++ RTSP protokolü eklendi
++ Sohbet yasağı işlevi eklendi
+
+- Winamp DSP eklenti değişikliğinde bazı videoların çalışmaması sorunu giderildi
+- Bazı kısayolları değiştirdi
+- WMV7/8/9 için varsayılan olarak yerleşik codec bileşenleri
+- Farenin sağ düğmesine basıldığında bazı PC'lerin sonlandırılması sorunu giderildi
+- Görselleştirme çıktısının slayt gösterisi değiştirilebilir
+- Bazı yeniliklerde düzeltildi SRT altyazı okuması
+- MPEG2 dosyaları oynatılırken meydana gelen bazı düzeltmeler
+- Bir .MP4 dosyası oynatılırken genellikle aramanın durduğu bir sorun düzeltildi
+- Win Vista'nın daha fazla kontrole izin vermesi için bazı düzeltmeler
+- Yerleşik altyazılarda bir .mkv dosyası oynatılırken aramanın genellikle durduğu bir sorun düzeltildi
+- Yerleşik PAL DVD oynatma codec bileşeni veya sorunlu davranışlar için bazı düzeltmeler
+- INI tasarruf işleminin çevre yönetimi üzerinde olması sorunu giderildi
+- TV veya Video kaydı izlerken H264 DXVA sorunu düzeltildi
+- Çift ses parçası oynatılırken DV dosyalarının kalabalıkta görüntülenmesi sorunu giderildi
+- Yer imindeki bir sorun düzeltildi
+- İlgili bir yayın sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.24134] 				 	2010/09/08
+----------------------------------------------------------
+- MP4 dosyasının bir kısmından altyazı çıkmama sorunu düzeltildi
+- DVD menüsünü kullanırken EVR'nin tıklamaması sorunu giderildi
+- Geçici bir gürültü sorunu düzeltildi
+- Dijital TV izlerken Pixel shader sorunu düzeltildi
+- Diğer hata düzeltmeleri
+- Renk Alanını Değiştirin (YUY2, NV12, YV12 orta derecede isteğe bağlı)
+- İni dosyası kaydetme unicode olarak değiştirildi
+
+----------------------------------------------------------
+[1.5.23965] 				 	2010/08/30
+----------------------------------------------------------
++ Oynatmaya başlarken video penceresini ekranın merkezine taşı eklendi
++ Altyazıları alt kenar boşluğunu koruma özelliği eklendi
++ Doğrudan DHTV akışını kaydetme eklendi
++ Komut satırı parametreleri eklendi (/ autoplay)
++ Direct3D 9Ex kullanma yeteneği eklendi
++ Yazı tipi pürüzsüz genel çıktı işlevi eklendi
++ Yayın için GIF logosu özellikleri eklendi
++ Yayın için Flash Dosyası (SWF formatı) logo özellikleri eklendi (32 bit)
+
+- Yayın arabelleği sorunları düzeltildi
+- Bazı MP4 dosyaları için ses sorunu düzeltildi
+- Hareketli GIF resimlerini değiştirmek için kullanılacak logo
+- Yayın logosu PNG alfa kanalının yanlış işlenmesi sorunu giderildi
+- Programın eski CPU'da çalışmaması sorunu giderildi
+- Geçici dosyalar silinirken oluşan bir sorun düzeltildi
+- Tedavi alanında farenin çalışmadığı bir cilt sorunu düzeltildi
+- Tercih Edilen ses seçeneği eklendi
+- Altyazılar sola hizalı seçeneği zorla eklendi
+- Bazı H264 TS dosyası oynatma tanıma sorunları düzeltildi
+- Dosya ilişkilendirmesinin yenileme sorunları düzeltildi
+- Sabit yer imleri/bölümler ekran sorunlarını tanımlar
+- ARGB -> YV12 renk dönüştürme hatası sorunu düzeltildi
+- EVR oluşturucuyu kullanırken en boy oranı hesaplama sorunu düzeltildi
+- DXVA kullanımıyla ilgili Intel GMA-HD ekran kartının siyah ekran sorunu düzeltildi
+- Oynatma listesi sıralama sorunu düzeltildi
+- Bazı bilgisayarlarda oluşan geçersiz argüman hatası sorunu düzeltildi
+- DMO ile kodu çözülemeyen bazı VC-1 kodlu video oynatma düzeltildi
+- DTS ve DTS-HD'deki bazı sorunlar düzeltildi
+
+----------------------------------------------------------
+[1.5.23336] 				 	2010/07/26
+----------------------------------------------------------
+
++ Oynatma listesine arama işlevi ekleyin
++ Tekrar ayar fonksiyonu ekle
+
+- Yayın çalışırken bazı bellek hatası sorunları giderildi
+- Kayıt sırasında yayın senkronizasyon sorunu düzeltildi
+- Gezginden oynatma listesine dosya eklerken bir sorun düzeltildi
+- Fare imlecinin otomatik olarak gizlenmemesi sorunu giderildi
+- Winamp oynatma video bağlantısı düzeltmesi
+- Klasörün gizli özniteliği varsa dosyanın açılamaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.5.23312]                                     2010/07/22
+----------------------------------------------------------
+
++ DVD oynatma hızı ekleyin
++ Özel bir ses ayarı ekleyin
++ Zaman bilgilerini görüntülemek için arama çubuğuna bir işaretçi ekleyin
++ Belirli bir zamanda bir kapatma özelliği ekleyin
++ Kare oynatma gecikmesi ekleyin
++ TV Filmlerinin otomatik tanımlamalı taramalı taraması ekleyin
++ VP8 kodlama desteği ekleyin
++ WebM oynatma ekle
++ WebM Play kaydı ekle
++ Analog TV zaman konumlandırma işlevleri ekleyin
++ İşlevsel olarak yeni nesil EAC3, TrueHD, DTS-HD MA ekleyin
++ Altyazı sınır şeffaf işlevi ekleyin
++ Standart ses modunu otomatik olarak değiştirebilen Configuration Manager'a ekleyin
++ Film adı adlı kaydedilen altyazıları ekleyin
++ Altyazı ekle Fade efekti işlevi
++ Ekle Eşleşen altyazı yoksa altyazı dosyası klasörünü yüklemeye çalışıyor
++ Yerleşik bir ses oluşturucu ekleyin (çapraz geçiş işlevi)
++ Altyazı işlevi için zaman sınırı ekleyin
++ FLAC kaynak filtresi seçimi ekle
++ FLAC ses codec seçimi ekleyin
+
+- Kelime arası etiketleme altyazıları iyileştirildi
+- Bazı MP4 dosyalarının ses oynatma sorunları düzeltildi
+- AVI oynatma sorunlarının bir kısmı düzeltildi
+- MadVR oluşturucuya geçişle ilgili sorunlar düzeltildi
+- H.264 askıya alınmış animasyon sorunlarını oynatmak için bireysel bilgisayar programında yapılan değişiklikler
+- Başlamaya özel albüm resmi sorunu düzeltildi
+- Her anahtar konfigürasyonunun sabit konumu koruma durumu
+- Sabit kilitlenme sorunu prosedürel güvenlik önlemleri
+- Yayın mevcut konumda oynatılamadığında sabit hız ayarı
+- Geliştirilmiş özel yayın arabelleği modu
+- Geliştirilmiş harici kod çözücü altyazı senkronizasyonu
+- DVB makinesi FusionHDTV Express arama sorunları düzeltildi
+- Oynatma MPEG dosyası kilitleme sorunu düzeltildi
+- İlgili görünüm sorunları düzeltildi
+- Geliştirilmiş yayın arabelleği modu
+- Vista'da ayar ekranındaki bazı sorunlar giderildi
+- TV kartı/tam ekran oyun/yayın probleminde düzeltildi
+- Makine esnekliğiyle ilgili BDA anahtarlama sorunu düzeltildi
+- Bazı MP4 dosyaları altyazıları ile senkronize edilen sorunlar düzeltildi
+- AC3 SPDIF çıkış sıkıştırmasında 3'ten fazla ses parçasıyla ilgili sorun düzeltildi
+- Yayındaki gürültü ile ilgili ses sorunu düzeltildi
+- Altyazı çıktı sözcük aralığı ayarlarının geçersiz konumu düzeltildi
+- 64 bit sistemde ses kod çözücü oynatma gecikmeleri düzeltildi
+- Sabit hata menüsü kısayolları
+- Bazı geçici dosyaların silinmesi düzeltildi
+- En aza indirmek için klavye kısayollarıyla birlikte ekran kullanımı düzeltildi
+- Bazı MPEG2 dosyalarında ekran yırtılma oynatma sorunu düzeltildi
+- Sabit MPEG2 <-> H.264, BDA sorununda oynatmaya dönüştürülemiyor
+- Sohbet modülünün sabit güvenliği
+- Diğer hata düzeltmeleri
+
+----------------------------------------------------------
+[1.5.22243] 				 	2010/06/03
+----------------------------------------------------------
+- Yerleşik Codec'leri güncelleyin
+- Bazı varsayılan ayarları yapın
+- Diğer hata düzeltmeleri
+
+----------------------------------------------------------
+[1.5.22219] 					2010/06/01
+----------------------------------------------------------
+- DRM'yi yeniden yap
+- EVR CP 60 kare oynatma sorunu düzeltildi
+- Bazı düzeltmeler
+
+----------------------------------------------------------
+[1.5.22204] 				 	2010/06/01
+----------------------------------------------------------
+* Yeniden tasarlanan tercihler ekranı
+* Ana menü özeti
+
++ Altyazı çıkışına solma efekti ekleyin
++ Altyazı çıktısına bitmap formatında çıktı vermek için bir işlev eklendi
++ MadVR oluşturucu ekle
++ Gerçek zamanlı medya oynatılırken zaman kaydırma işlevi eklendi
++ Çalma listesine albüm işlevi ekleyin
++ Oynatma listesine geçici oynatma sırası işlevi ekleyin
++ MultiThread H.264 kod çözücüyü ekleyin
++ Oynatma bilgilerine MediaInfo dosya bilgileri işlevi eklendi
++ Pencereyi yarı saydam yapmak için bir işlev eklendi
++ Görüntüyü 90 derece döndürme işlevini ekleyin
++ Görüntü ofset işlevi ekleyin
++ Windows7 görev çubuğu işlevi eklendi
++ Yer imine küçük resim görüntüleme işlevi ekleyin
++ Yayını kaydederken formatı yakalamak için ASF ve OGV ekleyin
++ Oynatma tamamlama işlemine bir kapatma işlevi ekleyin
++ Kullanıcıların varsayılan boyutları ayarlama yeteneği eklendi
++ Easy Open'a varsayılan klasör işlevini ekleyin
++ Hızlı menüyü açmak için işlev eklendi
++ Basit oynatma bilgilerini görüntülemek için işlev eklendi
++ Ses işleme filtresinin kullanılıp kullanılmayacağına karar verme yeteneği eklendi.
++ Blu-ray oynatma listesi (mpls) dosyası oynatma işlevi eklendi
++ Önceki/sonraki yer imi işlevi ekle
++ Yayını sıkıştırırken H.264'ü video codec bileşeni olarak ekleyin
++ Sıkıştırma ayarlarına yeniden boyutlandırma ve taramasızlaştırma ekleyin
+
+- Yerleşik codec güncellemesi
+- Bazı altyazıların çıktısını alırken altyazıların görünmemesi sorunu giderildi
+- 2. sürücüde oynarken altyazıların görünmemesi sorunu giderildi
+- VMR9 Renderless, EVR Custom Present renderer güncellendi
+- Gelişmiş dosya oynatma işlevi (MPEG, NSV, OGG, REAL, MP4)
+- Birden fazla video içeren medya desteği
+- Sorunsuz oynatma iyileştirildi
+- Görüntü ayrıştırma işleme yöntemini iyileştirme
+- Video ve ses işleme işlevlerini iyileştirme
+- Geliştirilmiş video yakalama işlevi
+- Yayın sırasında geliştirilmiş kare hızı işleme işlevi
+- DXVA kod çözücü işlevi iyileştirmesi
+- Belirli bir dosyada H.264 aranırken ekranın kırılmasına neden olan bir sorun düzeltildi
+- HD-DVD altyazıları çıkarılırken CPU kullanımının yüksek olduğu bir sorun düzeltildi
+- Video uzantısını kullanırken ekranın belirli bir oranda kırılmasına neden olan bir sorun düzeltildi
+- Benzer dosyaları açmanın iyileştirilmiş kullanımı
+- Altyazı Gezgini iyileştirmeleri
+- Vista veya Windows7'de VMR7, VMR9 ve EVR modlarından bağımsız olarak sabit yer paylaşımlı altyazı çıktısı
+- Mesaj çıktı yöntemini iyileştirin
+- Geliştirilmiş Explorer dosya ilişkilendirme yöntemi
+- Bazı PC'lerde yayınları izlerken CPU% 100'ün kullanıldığı bir sorun düzeltildi
+- Yayın efektlerinin yayında olmasa bile kullanılabilmesi için değiştirildi
+- Görüntü işleme filtrelerinin kullanımının daha ayrıntılı ayarlanmasını sağlamak için değiştirildi
+- Mesaj ekrandan daha uzun görüntülendiğinde satırları değiştirmek için düzelt
+- Bazı m2ts dosyalarını oynatırken videonun görünmemesi sorunu düzeltildi
+- Bilinen diğer birçok hata düzeltildi
+
+----------------------------------------------------------
+[1.4.20928] 				  	 2010/05/20
+----------------------------------------------------------
+- Oturum açma politikasının değişmesi nedeniyle kimlik doğrulama işlevinin düzeltilmesi
+
+----------------------------------------------------------
+[1.4.20906] 				  	 2010/04/15
+----------------------------------------------------------
++ Daum CI (Kurumsal Kimlik) değişikliği
+
+----------------------------------------------------------
+[1.4.20896] 				  	 2010/04/09
+----------------------------------------------------------
++ Yayın kalitesini daha düzenli hale getirmek için ayarlandı
+
+- Star League videolarına göz atarken oluşan bir hata düzeltildi
+- Bazı yayınlarda rapor nedeniyle çekildikten sonra tekrar giriş sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.20879] 				 	2010/03/02
+----------------------------------------------------------
+- Sohbet sırasında html etiketi kullanımını yasaklayın
+- Sohbet odası hatası iyileştirmesi
+
+----------------------------------------------------------
+[1.4.20877] 				  	2010/02/23
+----------------------------------------------------------
+- Bir yayını izlerken ekranın donması olgusu düzeltildi
+
+----------------------------------------------------------
+[1.4.20865] 				  	2010/02/08
+----------------------------------------------------------
++ Film indirme hizmeti
++ Sohbet bağlantı noktası değişikliği
+
+- TRUE HD ses codec bileşeninin oynatılmaması sorunu düzeltildi
+- Bir video dosyası oynatılırken mevcut klasörde bir pod oynatıcı klasörünün oluşturulduğu bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.4.20717] 				  	2010/01/27
+----------------------------------------------------------
+- Videopod videosunun oynatılmaması olgusu düzeltildi
+
+----------------------------------------------------------
+[1.4.20715] 				  	2010/01/26
+----------------------------------------------------------
++ Sohbet protokolü değişikliği
+
+- Bazı MKV dosyalarını oynatırken donma sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.20631] 				  	2009/12/31
+----------------------------------------------------------
++ Yayın protokolü değişikliği
++ URL değişikliğiyle ilgili üye bilgileri
+
+----------------------------------------------------------
+[1.4.20618] 				  	2009/12/24
+----------------------------------------------------------
++ Gerçek ad kimlik doğrulama yönteminin değiştirilmesi
+
+- Bazı TS/TP dosyaları için videonun görüntülenmemesi sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.20387] 				  	2009/11/27
+----------------------------------------------------------
+- Bir DVD cihazı açılarak oynatılırken bazı durumlarda ekranın kesilmesine neden olan bir sorun düzeltildi
+- Bir DVD cihazı açılarak oynatılırken bazı durumlarda başlığın bozulmasına neden olan bir sorun düzeltildi
+- Ekran boyutu tuhaf olduğunda oynatmanın mümkün olmaması sorunu giderildi
+- Star League (URL FLV) oynarken aramanın mümkün olmaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.20207] 				  	2009/11/12
+----------------------------------------------------------
+- Sohbet ederken [Davetliler] sayısının eşleşmemesi sorunu düzeltildi
+- Sohbet ederken diğer kullanıcıların görünmemesine neden olan bir sorun düzeltildi
+- Sohbet ederken ifadelerin normal şekilde görüntülenmemesine neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.4.20199] 				  	2009/10/22
+----------------------------------------------------------
++ Sohbet protokolü değişikliği
+
+- Windows 7'de IE penceresinin açılmaması sorununu düzeltir
+
+----------------------------------------------------------
+[1.4.20169] 				  	 2009/9/30
+----------------------------------------------------------
++ Sohbet sırasında uygulanan yasak kelimeler
+
+- Sohbet ekranını değiştirirken kabul mesajındaki hatanın düzeltilmesi
+
+----------------------------------------------------------
+[1.4.20143] 				  	 2009/9/11
+----------------------------------------------------------
+- DXVA'nın 64bit pot oynatıcıda düzgün çalışmaması sorunu çözüldü
+
+----------------------------------------------------------
+[1.4.20129] 				  	 2009/9/2
+----------------------------------------------------------
++ Komut dosyası uygulamasının sohbet ekranına girmesini engelle
+
+- Sohbeti yeniden girerken atılan kullanıcıların girdiği bir sorun düzeltildi
+- Sohbet sırasında rapor sayısının sıfırlandığı bir sorun düzeltildi
+- Windows 7'de medya oynatıcıyı sildikten sonra müzik dosyalarını çalarken sona eren bir sorun düzeltildi
+- Windows 7'de Sistem varsayılan AVI Bölücü kullanılırken harici codec'in oynatılmaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.20062] 				  	 2009/8/11
+----------------------------------------------------------
+- Bazı MOV, MP4 formatındaki dosyaları oynatırken ses veya oynatma olmaması sorunu düzeltildi.
+- AVC codec bileşeni durumunda bazı dosyaların oynatılmaması sorunu düzeltildi.
+- Video yakalama sırasında depolama kapasitesi büyük olduğunda sesin olmadığı bir sorun düzeltildi.
+- DXVA'da bazı dosyaların oynatılmaması sorunu düzeltildi.
+- TSCC codec bileşeni durumunda gri çizgi oluştu.
+- Bir video çekerken veya bir yayın kaydederken, 640 * 360 ekran boyutu eklenir.
+- Yayın sırasında bazı durumlarda kara listenin normal şekilde görüntülenmemesi sorunu giderildi
+- Özel yayında sohbet eden kişi sayısının eşleşmemesi sorunu giderildi.
+
+----------------------------------------------------------
+[1.4.19976] 				  	 2009/6/24
+----------------------------------------------------------
+- Büyük dosya boyutlarına sahip bazı MP4 dosya formatlarının oynatılamaması sorunu düzeltildi
+- MP4 dosya formatlarına göz atmayı hızlandırın
+- Bazı MKV dosya formatlarında AVC kodek kullanılması durumunda programın sürekli oynatma sırasında sonlandırılması sorunu düzeltildi
+- Ses dış görünüm modunda bazı ses kodek adlarının görüntülenememesine neden olan bir sorun düzeltildi
+- Yayın sırasında sunucu bağlantısının sonlandırılması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.19843] 				  	 2009/5/8
+----------------------------------------------------------
++ Sohbet protokolü değişikliği
++ Sohbet penceresine otomatik rapor ve fısıltı işlevi eklendi
+
+----------------------------------------------------------
+[1.4.19837] 				  	 2009/4/16
+----------------------------------------------------------
+- Bazı altyazı dosyalarında altyazı çıktılamayan bir sorun düzeltildi
+- OSD ayarında görüntüye çıktı seçilirken sonlandırılan bir sorun düzeltildi
+- Altyazı senkronizasyonu kaydedildiğinde Hangul'un bozulmasına neden olan bir sorun düzeltildi (smi)
+
+----------------------------------------------------------
+[1.4.19825] 				  	 2009/3/27
+----------------------------------------------------------
+- Ekranın 'video oynatırken otomatik olarak gizle' durumunda normal şekilde görüntülenmemesi sorunu düzeltildi
+- Ağ bağlantı hatası iyileştirmesi
+
+----------------------------------------------------------
+[1.4.19802] 				  	 2009/3/20
+----------------------------------------------------------
++ Yayın karelerinin sayısını ayarlamak için işlev eklendi
++ HuffYUV codec bileşenini video sıkıştırma codec bileşenine ekleyin
+
+- Bazı H.264 kodlarını çözerken ekranın garip hale gelmesi sorunu düzeltildi
+- Cyberlink Demux kullanıldığında H.264'ün yerleşik codec'te oynatılamaması sorunu giderildi.
+- MPEG Splitter'ın bazı PC'lerde düzgün bağlanmaması sorunu düzeltildi
+- Mesaj/OSD çıktı hızı iyileştirmesi
+- DXVA2 kod çözücü kullanılırken H/W deinterlace'ın çalışmaması sorunu düzeltildi
+- H/W deinterlace'ın EVR Renderless'ta çalışmaması sorunu giderildi
+- Kullanıcı oranının düzgün çalışmaması sorunu giderildi
+- TV kartı çapraz çubuğu seçim sorunu düzeltildi
+- Otomatik gizle dış görünümü yalnızca video oynatılırken çalışacak şekilde düzeltildi
+- RLE ile sıkıştırılmış Bitmap codec bileşenini destekler
+- 64 bit Windows'ta 32 bit pod oynatıcı kullanılırken dosyaların bağlanamaması sorunu düzeltildi
+- Senkronizasyonun yerleşik FLAC ses kodekiyle senkronize olmadığı bir sorun düzeltildi
+- Video yakalamada belirli formatların senkronize olmaması sorunu giderildi
+
+----------------------------------------------------------
+[1.4.19374] 				 	  2009/3/2
+----------------------------------------------------------
++ VMR görüntü işlemeyi seçmek için bir işlev eklendi
++ VMR9/EVR yeniden boyutlandırma yöntemini seçmek için işlev eklendi
++ Renk ayarı mümkün olduğunda H/W işleme fonksiyonunun eklenmesi
++ TV ekleme ayarına geçmeli seçme özelliği eklendi
++ Bir Kamera veya analog TV'yi açarken 59,9 kare açma özelliğini ekleyin, cihazın düzgün çalışması için destek gerektirir
++ Ardıl görüntüyü kaldırmak için kareyi ikiye katlama işlevi eklendi
+  TV veya taramalı video oynatırken daha pürüzsüz çıkış (29,9 -> 59,9 kare mevcuttur)
++ Orijinal oran işlevi eklendi
+
+- M2TS dosyasının yerleşik altyazı işlevinin iyileştirilmesi
+- Win64 sürümünde dosya ilişkilendirme sorununu düzeltin
+- Ruby altyazılarının yanlış konumda gösterilmesi sorunu giderildi
+- Görüntü işleme yapılmadığında performans artışı
+- Uzantıları olmayan dosyaların oynatılamaması sorunu düzeltildi
+- Bazı kısayolların kullanımıyla ilgili bir sorun düzeltildi
+- DVD oynatılırken ekranın garip olması sorunu düzeltildi
+- Ortam ayarlarının belirli bir bilgisayarda başlatıldığı bir sorun düzeltildi
+- Win64 sürümünde UCC izlerken ölen bir sorun düzeltildi
+- Cam veya analog TV'nin pin ayarını hemen yansıtmak için değiştirildi
+
+----------------------------------------------------------
+[1.4.19159] 				 	 2009/2/10
+----------------------------------------------------------
+* 64 bitlik pot oynatıcı test sürümü dağıtımı (http://potplayer.daum.net/PotPlayer64/Beta/PotPlayer64.zip)
+
++ M2TS dosyaları için yerleşik altyazı desteği
++ M2TS dosyalarının TrueHD/MPL ses desteği
++ H.264, video yakalama FLV formatında desteklenen AAC codec bileşeni
++ Harici ses yüklemek için işlev eklendi
++ Kullanıcı tarafından ekran boyutunu ayarlama yeteneği eklendi
++ Yerleşik kaplamaları seçme yeteneği eklendi
++ Pencere kenar boşluğu ayarlama işlevi eklendi
++ Dahili MPEG kaynak filtresinde AVC1'i H.264 olarak işleme yeteneği eklendi. (H.264 ile işleme durumunda, hızlandırma işlevi Cyberlink AVC/H.264 kod çözücüsünden kaplama karıştırıcı oluşturucusuna kadar çalışır)
+
+- Yerleşik VC1 codec ile oynarken daha sorunsuz oynatmak için değiştirildi
+- Uzun olduğunda altyazıların yatay olarak gitmesine neden olan bir sorun düzeltildi
+- Bir klasörü oynatırken alt klasörleri işlemek için değiştirildi
+- Bazı altyazıların görünmemesi sorunu düzeltildi
+- DVD oynatılırken atlama oynatma kullanılırken oynatılamayan bir sorun düzeltildi
+- Win98/Me'de çalıştırılamayan bir sorun düzeltildi
+- Bazı FLAC oynatılırken oluşmayan bir hata düzeltildi
+- Bazı bilgisayarlarda DXVA oynarken meydana gelen bir hata düzeltildi
+- Vista'da dosya uzantısı ilişkilendirme sorununu düzeltin
+- Benzer dosyaların daha esnek bir şekilde açılmasını sağlamak için değiştirildi
+- Menüde kullanıcı tarafından ayarlanan kısayolu yansıtacak şekilde değiştirildi
+- Ardıl görüntüleri kaldırırken önce S/W işlemeyi kullanmak için varsayılanı değiştirin
+- Geliştirilmiş çıktı renk alanı (RGB çıktı) işleme işlevi
+- DXVA'nın en son ATI sürücüsünde çalışmaması sorunu düzeltildi
+- Tam ekran işleme iyileştirmeleri
+- Explorer'ı kapatmaya zorlandığında tepsi simgesi sorunu düzeltildi
+- Görüntü azaltma kullanılırken ekranın garip hale gelmesi sorunu düzeltildi
+- Oynatma sırasında daha küçük bellek kullanmak için değiştirildi
+
+----------------------------------------------------------
+[1.4.18731] 				 	  2009/1/9
+----------------------------------------------------------
++ Oynatma süresi ekranında yüzdeyi görüntülemek için bir işlev eklendi
+
+- Belirli bir çözünürlükte yayın yaparken programın ölmesi sorunu düzeltildi
+- Tam ekranda kapatıldığında varsayılan boyuta dönmeyen bir sorun düzeltildi
+- Bazı ortamlarda altyazıların görünmemesi sorunu giderildi
+- Boşluk varsa TV kanalı adlarının kesilmesine neden olan bir sorun düzeltildi
+- Explorer'da çift tıklandığında benzer dosyaların oynatılamaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.4.18691] 				 	  2009/1/8
+----------------------------------------------------------
++ Otomatik olduğunda bir hafta sonra güncellenecek bir işlev eklendi
++ Otomatik güncellemedeki değişiklikleri göstermek için bir işlev eklendi
++ Baskı kuyruğu işlevi eklendi
++ Overlay Mixer'da beta ekranları kullanma yeteneği eklendi (Kullanıldığında, VMR9 Renderless'ta performans iyileştirildi)
++ rt (RealText) altyazı desteği eklendi
++ Bireysel kanal ses seviyesi kontrolü eklendi
+
+- DXVA H.264/AVC1 kod çözücü performans iyileştirmesi
+- LFE Yeniden Yönlendirmenin düzgün çalışmaması sorunu giderildi
+- Sesli görsellerin geliştirilmiş frekans analizi (FFT)
+- Bazı ASF dosyalarının oynatılamaması sorunu düzeltildi
+- Bazı MP3 dosyalarının oynatılamaması sorunu düzeltildi
+- Hatalı FLV dosyalarını daha iyi oynatmak için düzeltme
+- Kullanıcının oynatma hızını nasıl ayarlayacağını seçmesine izin vermek için değiştirildi
+- Bazı Winamp DSP eklentisi uyumluluk iyileştirmeleri
+- Varsayılan olarak yerleşik VC1 codec bileşenini kullanacak şekilde değiştirildi
+- Yerleşik VC1 codec bileşeniyle oynamayı durduran bir sorun düzeltildi
+- Sorunsuz yazdırılacak mesajı değiştirin
+
+----------------------------------------------------------
+[1.4.18372] 				 	2008/12/22
+----------------------------------------------------------
+* Önemli ölçüde geliştirilmiş cilt işlevi
+* Çevre yönetimi işlevi ekleyin
+
++ Yeni dış görünüm ekle (WindowFrame)
++ Görünümde pencerenin kendi çerçevesini kullanma yeteneği eklendi. (Vista'nın Aero Görünümü kullanılabilir)
++ Pencerenin kendi çerçevesini kullanırken menüyü görüntülemek için bir işlev eklendi
++ Küçültme sırasında video penceresinin konumunu düzeltmek için bir işlev eklendi (video konumunun anormal şekilde değişmesi veya TV OUT sırasında görünmemesi sorununu çözer)
++ Logo (duvar kağıdı) seçme işlevi eklendi
++ Renk teması işlevi ekleyin
++ TV kontrolüne bileşen seçim işlevi eklendi
++ Oynatma listesinde simgeleri görüntüleme yeteneği eklendi
++ Ses efektlerine net, gürültü azaltma ve LFE yönlendirme işlevleri eklendi
++ Renk alanına NV12, NV21, VYUY eklendi
++ Çalma listesine yinelenen dosyaların eklenmesini önleyen özellik eklendi
++ Oynatma listesindeki dosyaları silerken altyazı gibi silmek için bir işlev eklendi
++ Çalma listesinde bulunmayan dosyaları silme yeteneği eklendi
++ Program penceresini ana görünümden ayırma işlevi eklendi
++ TabList kaplaması ekle
++ Sistem hacmine göre ses seviyesini ayarlama yeteneği eklendi
+
+- Tepsi simgesinin daha ayrıntılı görüntülenmesi düzeltildi
+- Ogg Mode3 ile sıkıştırılan videoların oynatılamaması sorunu düzeltildi
+- Önceki altyazı konumu/Sonraki altyazı konumu iyileştirildi
+- Yeniden tasarlanan uzantı simgesi
+- Tam ekranda oynatılırken ekranın görünmemesi sorunu giderildi
+- DVD'nin dil ayarının ayarlanamaması sorunu düzeltildi
+- Birden fazla yürütmeye izin vermeden iki kez yürütürken ölen bir sorun düzeltildi
+- Ortam yönetimi kullanılırken filtre ayarlarının düzgün çalışmamasına neden olan bir sorun düzeltildi
+- Bazı ASF dosyalarının oynatılamaması sorunu düzeltildi
+- Sohbet kullanıcı listesinin kaydırma çubuğunun tuhaf hale gelmesine neden olan bir sorun düzeltildi
+- Bazı bilgisayarlarda ekranın görünmemesi sorunu giderildi
+- Video çekerken, kaydetme süresi dakika cinsinden değiştirilir
+- Kesintisiz oynatma sırasında dosya sayısını belirtmek için değiştirildi
+- Bazı HDTV kartlarından sinyal gelmemesine neden olan sorun çözüldü
+- Bazı bilgisayarlarda çalıştırılamayan bir sorun düzeltildi
+- Explorer'da bir videoya çift tıklandığında yürütülemeyen bir sorun düzeltildi
+- Ortamı bir INI dosyası olarak kaydetmeyi seçerken programın ölmesi sorunu düzeltildi
+- Bazı MP3 dosyalarının oynatılamaması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.3.17106] 				 	2008/11/11
+----------------------------------------------------------
+* Derleyicinin yeni bir sürümüyle derleyin (iyileştirilmiş yürütme hızı ve güvenliği)
+
++ .Part'a bölünmüş rar dosyasını doğrudan oynatmak için bir işlev eklendi
++ En boy oranını pencerenin boyutuna göre ayarlama yeteneği eklendi
++ Arka planı yayın logosuna şeffaf hale getirmek için bir işlev eklendi
++ Yayın logosunda alfa içeren png dosyaları için alfa karıştırma işlevi eklendi
++ Yayın altyazılarında HTML kodunu işlemek için işlev eklendi
++ Görüntünün altına kenar boşluğu işlevi eklendi
++ DVD Gezgini seçim işlevi eklendi
++ Yayın kategorisi seçme işlevi eklendi
++ Dosyaları açmak için kullanılan uzantı düzenleme işlevinin eklenmesi
++ Kullanıcıların dosya ilişkilendirmelerini düzenleme yeteneği eklendi
++ BASS Ses Kaynağı Filtresi eklendi (MPC, FLAC, APE, MOD dosyası oynatmayı destekler)
++ Ortamı dosya olarak kaydetmek için işlev eklendi (reg, ini)
++ TAB ile ekranda bilgileri görüntülemek için işlev eklendi
++ Resimleri PNG dosyaları olarak yakalamak için işlev eklendi
++ Kapanırken varsayılan boyuta dönmek için fonksiyon eklendi
++ Seviye ayarlama işlevi eklendi
++ Anlık görüntü oluşturma işlevi eklendi
++ Altyazı kaydetme işlevi eklendi
++ Yerleşik video codec bileşenine DXVA MPEG2 VLD kod çözücü eklendi
++ MPEG2 Video dosyasının Kapalı Başlığını Destekleyin
++ Video penceresini tam ekranda ayırmak için bir işlev eklendi
++ Bazı USB HDTV kartları için ek destek
++ Kullanıcı altyazı senkronizasyon kontrol ünitesini ayarlayabilir
++ Kullanıcı oranı ayarı işlevi eklendi
++ DTS Wave dosyası desteği
++ Dahili AC3 codec bileşeni, E-AC3 kod çözmeyi destekler (mükemmel değil)
++ BDA'ya (HDTV) QAM 256 alım işlevi eklendi
++ H/W MPEG TV kartı desteği
++ Sonraki altyazı seçimi (Alt + L) eklendi
++ Altyazı işlevi ekle
++ ZIP/RAR sıkıştırılmış dosyalarda medya oynatmayı destekler (yalnızca 50M ... altındaki dosyalar)
++ APE/CUE dosya listesi desteği
++ Kolay açık ayar işlevi eklendi
++ Ana/dalga susturma işlevi eklendi
++ Otomatik cilt gizleme işlevi eklendi
++ DVD oynatırken ok tuşlarıyla menüde gezinme yeteneği eklendi
++ İzlenen yayını kaydetme işlevi eklendi
++ Video yakalama işlevi eklendi
++ Klavye ile pencere konumu/boyut ayarlama işlevi eklendi
++ DirectShow'da SWF dosyalarını oynatma yeteneği eklendi
+
+- Harici bir video codec bileşeni kullanılırken en boy oranının eşleşmemesi sorunu giderildi
+- Bazı sistemlerde programın bazen başlangıçta ölmesine neden olan bir sorun düzeltildi
+- Dosyaları bağlarken pot oynatıcı mini ve pot oynatıcı arasında ayrım yapmak için düzeltildi
+- H.264 DXVA kod çözücüde bazı dosyalar oynatılırken bazı dosyaların titremesine neden olan bir sorun düzeltildi
+- Monitörü taşırken VMR Renderless altyazılarının tuhaf görünmesi sorunu düzeltildi
+- Beta tam ekran kullanılırken ekranın donması veya görünmemesi sorunu düzeltildi
+- H.264 DXVA'nın bazı dosyalarda bulunmaması sorunu düzeltildi
+- Bazı NVIDIA kartlarda VMR Renderless altyazı kalitesinin zayıf olduğu bir sorun düzeltildi
+- "Geçersiz bağımsız değişken" hatasını düzeltin
+- Altyazı zamanının başlaması durumunda tanınmaması sorunu giderildi
+- Görüntü işlemesiz modda bir TV kartı kullanarak bir oyun yayınlarken anormal olan bir sorun düzeltildi
+- Vista'da DXVA'nın H.264 codec bileşeni için kullanılamaması sorunu giderildi
+- Piksel gölgelendiricisi yedekli olarak seçilebilir
+- Görüntüyü genişletirken, piksel genişletme değeri görüntü genişletildiğinde bile yansıtılır.
+- Vista'da yayın yaparken oluşmayan bir hata düzeltildi
+- XP'den önce işletim sisteminde GetProcessId hatasının meydana gelmesi sorununu düzeltir
+- Flash dosyaları oynatılırken oluşmayan bir hata düzeltildi
+- Görüntü altyazılarının çıktısını alırken, en boy oranını düzelttikten sonra çıktı alın
+- Vista'da Dosyayla İlişkili Sorunları Düzeltin
+- Bazı VC1 Remux dosyalarının oynatılamaması sorunu giderildi
+- DXVA IDCT kod çözücü hız iyileştirmesi
+- Geliştirilmiş UTF-8 altyazı tanıma
+- Bazı srt altyazılarının tanınmaması sorunu giderildi
+- S/PDIF çıkış durumunda ses yakalamayı etkinleştirmek için düzeltme
+- Bazı TS dosyalarını tanımama sorunu düzeltildi
+- HDTV alırken gelişmiş PID/PES tanıma işlevi
+- Yer imi/favori menünün düzgün çalışmamasına neden olan bir sorun düzeltildi
+- Birden fazla altyazının görüntülenmemesi sorunu düzeltildi
+- Programın belirli ortamlarda ölmemesi ve işlem listesinde kalması sorunu giderildi
+- ATI Radeon HD48xx üzerinde MEPG1/2 DXVA sırasında ekranın kırılmasına neden olan bir sorun düzeltildi
+- DXVA'nın Intel GMA'da çalışmaması sorunu düzeltildi
+- HDTV'yi kaydederken, PID'yi ayrı olarak kaydetmek için değiştirilir
+- HDTV oynatma sırasında kodek değiştiğinde destekler (MPEG2 <-> H.264)
+- Bazı büyük AVI dosyalarının oynatılamaması sorunu düzeltildi
+- Bazı MP4 dosyalarını oynatırken ses gelmemesi sorunu düzeltildi
+- Sohbet penceresi, yayın listesi kısayolu değişikliği, yayınla ilgili menüye gitme
+- Bu program .../Oynatma bilgileri kısayolunu değiştirin
+- Yerleşik codec'te H.264'e hızlanırken bazı videoların durdurulmasına neden olan bir sorun düzeltildi
+- Yakut etiketinin konumunun doğru olmaması sorunu düzeltildi
+- Bazı dosyalar oynatılırken masaüstünün titremesi sorunu giderildi
+- HDTV kanallarını değiştirirken programın kapanmasına neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[1.2.13746] 					 
+----------------------------------------------------------
+* Dahili video codec MPEG1/2 (IDCT/MoComp), WMV2 (MoComp), WMV3 (IDCT/MoComp), VC1 (IDCT/MoComp/VLD), H.264/AVC1 (VLD) için DXVA1/2 desteği
+* Kesintisiz dosya oynatma işlevi eklendi
+* Pot oynatıcıyı DLL'ye ayırın, ActiveX oynatıcı ekleyin
+* Yalnızca çevrimdışı oynatıcı ekle (PotPlayerMini.exe)
+
++ EVR (Enhanced Video Renderer) eklendi
++ Altyazıları VMR7, VMR9, EVR'de destekleyin
++ Winamp DSP eklenti desteği
++ Mouse X düğmesi işlevi eklendi
++ Fareye çift tıklandığında en son dosyayı oynatmak için işlev eklendi
++ Fare ayarı işlevi eklendi
++ Kısayol ayarı işlevi ekleyin
++ Multimedya tuş kontrol işlevi eklendi
++ Manuel altyazı giriş işlevi eklendi
++ Altyazı klasörü ayar işlevi eklendi
++ Tercih edilen altyazı dilini ayarlamak için işlev eklendi
++ Görüntü ayarlarına görüntü işleme işlevi ekleyin
++ Ana/dalga ses seviyesi kontrol işlevi eklendi
++ Çıktı renk alanı seçim işlevi eklendi
++ Yüksek kaliteli RGB dönüştürme, ITU 709, Tam Aralık işlevi eklendi
++ Görüntüyü sola ve sağa ters işlevi ekleyin
++ Görüntü boyutunu 0,5/1/1,5/2 kez sabitlemek için bir işlev eklendi
++ TV çıkış oranı işlevi eklendi
++ Yayınla ilgili menü eklendi
++ Yayınla ilgili kısayollar eklendi
++ Piksel gölgelendirici işlevi ekleyin
++ VMR7/9 ayar işlevi eklendi
++ Tam ekran olduğunda Direct3D beta modunda çıktıya işlev eklendi
++ Ses senkronizasyon kontrol işlevi eklendi
++ Video/ses çıkış cihazı seçme işlevi ekleyin
++ Ses kanalı seçim işlevi eklendi
++ WDM ek ayar işlevi ekleyin
++ LPCM/AC3 ​​S/pdif ile sıkıştırılmış çıktıya bir işlev eklendi
++ Video menüsüne video filtresi kullanımının eklenmesi
++ WDM oynatma sırasında kanalı sayısal tuşlarla ayarlamak için bir işlev eklendi
++ Uzun altyazı incelemesi eklendi
++ Ses yeniden örnekleme işlevi eklendi
++ Görüntü işleme ek ayar işlevi ekleyin
++ Videoda altyazı çıkışı için işlev eklendi
++ Tam ekran, tam ekran (oranı koru) işlevi eklendi
++ Favorilerini ekle
++ Benzer dosyalar eklendiğinde çalma listesine otomatik olarak benzer dosyalar eklemek için bir işlev eklendi
++ Yayın kalitemi görüntülemek için işlev eklendi
++ Ev adresi yayınlama işlevi eklendi
++ Önemli ölçüde geliştirilmiş görselleştirme (Windows Media Player başlangıcı, görselleştirme albümü eklendi)
++ NSV dosya desteği
++ Dijital TV (BDA cihazı) desteği
++ Analog TV ve CAM cihazları için ayrı destek
++ EVR Renderless, Haali Renderer eklendi
++ Bölüm taşıma işlevi eklendi
++ Doğrudan konumu girerek hareket etme yeteneği ekleyin
++ Yer imi işlevi ekle
++ Tam ekran monitör atama işlevi eklendi
++ Tam ekran çözünürlüğü değiştirme işlevi eklendi
++ Kolay Açma işlevi ekleyin
++ Sohbet içeriğini göz ardı etme yeteneği eklendi
++ Nintendo video dosyası (DPG) dosyası oynatma işlevi eklendi
++ Varsayılan kısayolları geçersiz kılma yeteneği eklendi
++ Altyazı paragrafı sıralama işlevi eklendi
++ DigitalVideo (DV) cihaz ses desteği işlevi eklendi
++ Mesaj (OSD) ayarı işlevi eklendi
+
+- Varsayılan ten mavisi tonuna geç
+- Ortamı kaydederken varsayılan değerleri kaydetmemek için değiştirin
+- Sabit oynatma başlangıç ​​hızı daha hızlı
+- Bazı dosyalarda bölüm tekrarının çalışmaması sorunu giderildi
+- Bazı DVD'leri oynatırken oluşan bir hata düzeltildi
+- Bazı çoklu SMI altyazı dosyalarının düzgün işlenememesi sorunu giderildi
+- Otomatik güncellemeyi iptal etmek için düzeltme
+- VC1 oynarken pürüzsüz olmayan bir sorun düzeltildi
+- Belirli dosyaları oynatırken CPU paylaşımının yüksek olması sorunu giderildi
+- Parlaklık S/W ile ayarlanamadığında H/W kullanabilmek için düzeltin
+- VMR Renderless modunda görüntü yakalamayı etkinleştirmek için değiştirildi
+- Yayın yaparken yayıncıların oranını takip etmek için değiştirin
+- Görüntü genişletme ve görüntü boyutu ayarlaması birlikte kullanıldığında bir sorun düzeltildi
+- Ruby altyazılarının yanlış yerde gösterilmesi sorunu giderildi
+- 2G'nin üzerindeki dosyaları oynatamayan bir sorun düzeltildi
+- Bazı MKV dosyası oynatma sorunları düzeltildi
+- DXVA Idct/MoComp modu hız iyileştirmesi
+- WDM kanallarıyla ilgili önemli ölçüde geliştirilmiş işlevler
+- Görüntü işleme filtrelerinin kullanımının iyileştirilmesi
+- Sohbet sırasında HTTP: // bağlantılarının hatalı şekilde alındığı bir sorun düzeltildi
+- Yer paylaşımlı altyazıların tam ekranda büyük görünmesine neden olan bir sorun düzeltildi
+- 1080 dosyaları oynatırken alt kısımda gri görünen bir sorun düzeltildi
+- Bazı sistemlerde ses seviyesini ayarlarken bir hata düzeltildi
+- Tam ekranda iyileştirilmiş cilt işleme yöntemi
+- Maksimum kişisel yayın sayısı 500'den 1000'e değiştirildi
+- Oynatma sırasında bazı sistemlerde bir hata veya donma düzeltildi
+- Bazı TV kartlarının iyileştirilmiş ses cihazı tanıma uyumluluğu
+- Gerçek zamanlı yayın kalitesi iyileştirmesi
+- Fare imlecinin otomatik olarak gizlenmemesine neden olan bir sorun düzeltildi
+- Bazı MPEG2 TS dosyalarının oynatılmaması sorunu düzeltildi
+- Başlangıçta daha hızlı çalışacak şekilde değiştirin
+- Hücre bağlantısını işleme sorununu düzeltin
+- Pod oynatıcının kurulu olduğu video bölmesi önbellek klasörünü kullanın
+- Çevrimdışı oynatıcıda günlük dosyası oluşturulmaması düzeltildi
+- Bazı MP4/MOV dosyalarının zamanının yanlış tanınması sorunu düzeltildi
+
+----------------------------------------------------------
+[1.1.9770]
+----------------------------------------------------------
++ DXVA desteği için yerleşik video codec bileşenini/filtresini kapatma yeteneği eklendi.
++ Kaynak/Ayırıcı filtresinin ücretsiz seçiminin eklenmesi
++ Ücretsiz video codec seçimi eklenmesi
++ Ses kodeklerini serbestçe seçme yeteneği ekler
++ Filtre önceliğini ayarlama yeteneği eklendi
++ Yerleşik ses kodekine çıkış kanalı (monodan 7.1 kanala) eklendi
++ Yerleşik ses kodekine çıkış biti seçme yeteneği eklendi
++ AC3 sesini yerleşik ses codec'ine S/pdif olarak çıkarmak için işlev eklendi
++ Oynatma hareket süresini ayarlamak için işlev eklendi
++ Ana karelere gitme yeteneği eklendi
++ Önleme fonksiyonunun eklenmesi
++ SMI altyazılarını yüklerken BR etiketi eklemek için bir işlev ekler
++ Altyazı satırı aralığı işlevi eklendi
++ Videopod reklam ses düzeyi kontrolü eklendi
++ Videopod öneri işlevi eklendi
++ Yeniden boyutlandırmadan önce resmi genişletmek için bir işlev eklendi
+
+* SMI altyazıları için iyileştirilmiş HTML etiketi desteği (Ruby etiketi desteği)
+* ASS altyazı çıkışındaki hata düzeltildi
+* MPEG dosyaları için MP4/VC1 desteği, H.264/QAM desteği geliştirilmiş
+* Gelişmiş MP4/MOV dosya desteği
+* Theora/Flac in Ogg desteği
+* Real Media (RM) dosya desteğinin geliştirilmesi (Surestream desteği)
+* Gerçek ses (RA) dosyası desteği
+* Varsayılan oluşturucuyu Overlay Mixer'dan VMR9'a değiştirin
+
+- Ayrıntılı video bölmesi hatası gösterecek şekilde düzeltildi
+- Bazı Windows 98'in çalışmaması sorunu düzeltildi
+- Korunacak altyazı dili ayarı düzeltildi
+- Yıldız pencere modunu yakalarken ekranın siyah görünmesi sorunu düzeltildi
+
+----------------------------------------------------------
+[1.0.6670]
+----------------------------------------------------------
+* Video bölmesi, TV bölmesi, canlı bölme entegrasyonunun yeniden düzenlenmesi
+* Yeni deri
+
++ Ekranı yakalarken fare imlecini birlikte yakalamak için bir işlev eklendi
++ DRM yükseltme programı eklendi
++ Sohbet alarmı işlevi eklendi
+
+- Videopod hata işleme iyileştirmesi
+- Geliştirilmiş FLV dosya formatı desteği
+- Videopod giriş politikası değişikliği
+- Video bölmesi oynatıldıktan sonra program sonlandırıldığında programın bellekten inmemesi sorunu düzeltildi
+- Ortamın INI olarak kaydedilememesi sorunu giderildi
+- Video Bölmesi oynatılırken oluşan uyarı hatası düzeltildi
+- Müzik çalarken bir dosyayı kapatırken duran bir sorun düzeltildi
+- Bazı AMD CPU'larda yayın yapılmayan bir sorun düzeltildi
+- Sohbet sırasında ayarlandığı gibi kendi renginizi ve yazı tipinizi görüntülemek için değiştirin
+- Yer paylaşımlı altyazıların görüntülenmemesine neden olan bir sorun düzeltildi
+- Sistemin yavaş olduğunu söyleyen bir hata mesajı düzeltildi
+- Geliştirilmiş arabelleğe alma işlemi
+
+----------------------------------------------------------
+[0.95.5106] 					
+----------------------------------------------------------
+* Daum Live'dan Daum Pot Player'ın adı değiştirildi
+
++ Kara liste yönetim sayfası ekle
++ Ses denetimi iletişim kutusu ekle
++ Görüntü bit hızı işleme işlevi iyileştirme
++ Yüksek kaliteli sıkıştırma ekleyin
++ Gömme işlevi ekleyin
++ Görüntülemeye hazırlanırken ekran ekleyin
++ Dosya yayını sırasında altyazıları doğrudan iletmek için işlev eklendi
++ Hızlı ekran yakalama işlevi eklendi
++ 16:10 en boy oranı, sonraki en boy oranı seçme işlevi eklendi
++ Videoda mesaj görüntülemek için işlev eklendi
++ Yayın önizleme işlevi eklendi
++ Yayın sırasında ekran yakalama önizlemesini atlamak için bir işlev eklendi
++ Ekranı yakalarken video çıkışını atlama işlevi eklendi
++ 1024 * 768, 40 fps eklendi
++ Pürüzsüz, keskinleştirme, gürültü giderme, seviye düzeltme eklendi
++ Yayın penceresine TV kanalı ayar işlevi eklendi
++ Sohbet penceresinin açılıp açılmayacağını belirlemek için bir işlev eklendi
++ Simge durumuna küçültüldüğünde diğer pencereleri küçültmeyecek bir işlev eklendi
+
+- Sohbet penceresinde http bağlantısının yanlış olduğu bir sorun düzeltildi
+- Bazı FLV dosyalarını oynatırken videonun görüntülenmemesi sorunu düzeltildi
+- Bazı birden fazla altyazının işlenememesi sorunu giderildi
+- Yayınları izlerken CPU'nun% 100'ünü tüketen bir sorun düzeltildi
+- Bir yayın kaydederken ses/video senkronizasyonunun senkronize olmaması sorunu düzeltildi
+- Ek ses girişi yapılırken ses seviyesinin küçük olduğu bir sorun düzeltildi
+- Bir yayına bağlanırken uzun süren bir sorun düzeltildi
+- Doygunluğu/rengi ayarlarken çöken bir sorun düzeltildi
+- Sonsuz bir arabelleğe alma sorunu düzeltildi
+- Yer paylaşımında mesaj görüntülemek için geliştirildi
+- Geliştirilmiş yayın kapatma hızı
+- Programın bazen öldüğü bir sorun düzeltildi
+- Ekran boyutunu değiştirirken sabitlenmiş pencerenin birlikte hareket etmesi sorunu düzeltildi.
+- Görüntü bit hızı işleme iyileştirmesi
+- 2G üzerindeki dosyaları destekleyemeyen bir sorun düzeltildi
+- Bazı sistemlerin çok fazla CPU kullanması sorunu düzeltildi
+- Videoya tıklandığında pod oynatıcının çalışmaması sorunu düzeltildi
+- Bazı altyazıların görünmemesi sorunu düzeltildi
+
+----------------------------------------------------------
+[0.9.2736] 					
+----------------------------------------------------------
++ Sohbete kullanıcı arama işlevi ekleyin
++ Sıkıştırma ayarlarına arabelleğe alma ekleyin
++ Yayın nakline izin verilip verilmeyeceğine karar vermek için bir işlev eklendi
++ Sıkıştırma ayarlarına eklenen sabit bit hızı özelliği
++ Sıkıştırma ayarlarına 1, 5, 10 FPS ekleyin
++ Sohbet penceresinde Ctrl + C ile kopyalama işlevi ekleyin
++ Sohbet yöneticisi işlevi eklendi
++ Yayın durumu işlevi eklendi
++ Müzik çalarken görselleştirme desteği
++ Müzik yayınlarken ekran yakalama desteği
++ Srt, Idx, Altyazı dosyalarını destekler
++ Ağ koşullarına göre eklenen video bit hızı ayarlama işlevi
++ Ağa göre video karesi atlama işlevi ekleyin
++ Daha fazla sıkıştırma çözünürlüğü desteği
++ Dosyaları yayınlarken harici ses girişi desteği (ment işlevi)
+
+- Yayın sırasında ses girişini ekran yakalama/açık cihazda mümkün olacak şekilde değiştirin
+- Ekranı TV/kamera vb. Üzerinde sorunsuz oynatmak için değiştirin.
+- Sohbetteki kullanıcı listesinin görüntülenmemesine neden olan bir sorun düzeltildi
+- Çözünürlüğe göre altyazı boyutunun düzeltilmemesi sorunu düzeltildi
+- Görselleştirme ve ekran yakalama seçimine izin veren değişiklikler
+- Sohbet penceresinde http: // bağlantısına izin vermek için değiştirin
+- Bazı uyarı hataları düzeltildi
+- Büyük yazı tipleriyle sorunları düzeltin
+- Yayın sırasında A/V senkronizasyonu 10 saniyeden fazla farklılık gösterdiğinde ekran yakalamaya geçme
+- Bazen VMR9 Renderless modunda duran bir sorun düzeltildi
+- Geliştirilmiş arabelleğe alma işlemi
+- Gelişmiş video bit hızı yönetimi işlevi
+- Biraz iyileştirilmiş ekran yakalama hızı
+- Bellek sızıntısı düzeltildi
+- Yayın sırasında çözünürlüğü değiştirirken oluşan bir hata düzeltildi
+- Bazı kameralarla yayın yaparken renklerin tersine dönmesi sorunu giderildi
+- İşaret kalemi işlevinin ekran kamerasında yanlış yere çizilmesi sorunu giderildi
+- Sohbet listesi güncelleme döngüsü değişikliği
+
+----------------------------------------------------------
+[0.9.2045] 					
+----------------------------------------------------------
++ Son oynatma listelerini tutma yeteneği eklendi
++ Yayın sırasında eklenen video sıkıştırma değiştirme işlevi
++ Ekran yakalamaya yumuşak filtre işlevi eklendi
++ Yayın gecikme süresi yüksek olduğunda kare atlama işlevi eklendi
++ Bölüm tekrar işlevi ekle
++ Atlamayı açma, atlama işlevi eklenmiştir
++ Önceki/sonraki kareyi, önceki/sonraki altyazı hareketini ekle
++ Oynatma kontrol menüsüne oynatma hızı kontrolü eklendi
++ Ses modülasyon işlevi eklendi
++ Yayın sırasında kayıt işlevi eklendi
++ İşaret kalemi işlevi eklendi
++ Altyazı gezgini ekle
++ Pan & scan ön ayar işlevi eklendi
++ Paylaşılan dosyaları oynatmak için işlev eklendi
++ Kendi kodek güncellemesi
++ Dosya süresini çalma listesinde görüntüle
+
+- Yayın bittiğinde sohbet penceresinin içeriğini silmemek için düzeltin
+- Bir sonraki yayın sona erdiğinde bazı bilgisayarlarda oluşan bir hata düzeltildi
+- Tam ekran bir oyun yakalarken yayının sonlandırılmasına sebep olan sorun çözüldü
+- Ses karıştırıcının ses düzeyinin% 100 olarak ayarlandığı bir sorun düzeltildi
+- 0 bayt dosyaları oynatılırken duran bir sorun düzeltildi
+- Yayın listesinde mozaiğin görünmesi sorunu giderildi
+- Yayın bittiğinde bazı sistemlerde duran bir sorun düzeltildi
+- Bazı kameralarda yayın yaparken yeşil ekranın görünmesi sorunu düzeltildi
+- DirectX9 kurulmadıysa çalışmayan bir sorun düzeltildi
+- Oynatma listesinde bazı dosyaların ayrıştırılamaması sorunu giderildi
+- 16 bit renkte bir emoji seçerken oluşan hata düzeltildi
+- Bazı videolardan MP3'e ses yakalarken oluşan bir hata düzeltildi
+- Yer paylaşımı ekranının Win98 16 bit renkte görünmemesine neden olan bir sorun düzeltildi
+
+----------------------------------------------------------
+[0.9.888] 
+----------------------------------------------------------
++ İş parçacığı kullanılarak dosya açma işlevi eklendi
++ Yer paylaşımlı altyazı çıktı işlevi eklendi
++ CDDA, CDXA, VOB dosya formatı desteği
++ Açık CD Menüsü Ekle
++ Görüntü sonrası görüntü kaldırma işlevinin eklenmesi
++ INI dosyasına ortam ayarlarını kaydetme yeteneği eklendi
++ Dosya bağlama işlevi ekleyin
++ Flash (SWF) dosyası oynatma işlevi eklendi
++ Video yakalama işlevi ekleyin
++ Ses yakalama işlevi eklendi
++ VMR7/9 Renderless modu eklendi
+
+- Video genişletme ve birlikte yeniden boyutlandırma kullanılırken oluşan hataların düzeltilmesi
+
+----------------------------------------------------------
+[0.8.469]
+----------------------------------------------------------
+Daum Live'nın ilk beta sürümü
