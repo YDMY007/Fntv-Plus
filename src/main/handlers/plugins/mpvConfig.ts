@@ -222,11 +222,6 @@ const MPV_SHADER_PRESETS: Record<string, string[]> = {
  */
 function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
     try {
-        const dir = getPortableConfigDir();
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        const target = path.join(dir, 'mpv-user.conf');
         const shaders = MPV_SHADER_PRESETS[shaderKey] || [];
         const lines: string[] = [
             '# 本文件由「应用设置面板 > 播放器 > 默认 MPV 着色器 / ICC 校色」自动生成。',
@@ -237,8 +232,26 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
             lines.push('glsl-shaders-append=~~/shaders/' + s);
         }
         lines.push('icc-profile-auto=' + (iccEnabled ? 'yes' : 'no'));
-        fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
-        logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled})`);
+        const content = lines.join('\n') + '\n';
+
+        // ⚠️ 关键修复：同时写入两个目录，确保无论 MPV 处于哪种模式都能生效：
+        //   - 便携模式（mpv.exe 同级 portable_config，Windows/macOS 打包态）：读 portable_config/mpv-user.conf
+        //   - 标准模式（读系统用户配置目录 AppData/Roaming/mpv 等）：读该目录下的 mpv-user.conf
+        // 旧实现只写 portable_config，而 checkAndCopyMpvConfig 仅在首次运行拷贝一次，
+        // 之后面板改的着色器写进死目录、正在运行的 MPV 读的是首次拷贝的旧文件 → 「选了不生效」。
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                const target = path.join(dir, 'mpv-user.conf');
+                fs.writeFileSync(target, content, 'utf-8');
+                logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled})`);
+            } catch (e) {
+                logger.error(`写入 mpv-user.conf 失败: ${dir}`, e);
+            }
+        }
     } catch (error) {
         logger.error('写入 mpv-user.conf 失败:', error);
     }

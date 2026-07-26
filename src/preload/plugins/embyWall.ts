@@ -1669,7 +1669,7 @@ function handle(): void {
     shaderSel.style.cssText = 'width:100%;font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
       + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;cursor:pointer;';
     const shaderOptions: [string, string][] = [
-      ['off', '关闭（不启用着色器）'],
+      ['off', '默认不生效任何着色器'],
       ['a', '模式A（大多数1080p动画）'],
       ['b', '模式B（大多数720p动画）'],
       ['aa', '模式A+A（高质量1080p）'],

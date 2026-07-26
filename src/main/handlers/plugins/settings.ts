@@ -329,6 +329,11 @@ function init(): void {
     applyDebugFilter();
     // 启动时把 MPV B站弹幕搜索开关同步到 script-opts/uosc_danmaku.conf（保证 MPV 读取到最新状态）
     try { writeBiliSearchEnabled(fnConfig.getMpvBiliSearchEnabled()); } catch (e) { log.warn('启动同步 bili_search_enabled 失败', e); }
+    // 启动时把已保存的「默认 MPV 着色器 / ICC 校色」重新写回活动配置目录。
+    // 关键修复：旧实现只在面板改着色器时写 portable_config 单一目录，而 MPV 在 Windows 标准模式下
+    // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
+    // 这里再在启动时补一次重放，确保用户「之前已选过但没生效」的着色器立即生效（无需重新手动选择）。
+    try { writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false); } catch (e) { log.warn('启动重放默认着色器失败', e); }
     registerHandler('settings:get', handleGetSettings, { useHandle: true });
     registerHandler('settings:set-download-proxy', handleSetDownloadProxy, { useHandle: true });
     registerHandler('settings:set-hide-play', handleSetHidePlay, { useHandle: true });
