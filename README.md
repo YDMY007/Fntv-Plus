@@ -73,15 +73,66 @@
 
 ---
 
+## 📁 项目结构
+
+```text
+Fntv-Plus/
+├── src/                          # 源码（TypeScript）
+│   ├── main/                     # Electron 主进程
+│   │   ├── main.ts               # 程序入口：窗口创建、生命周期、托盘、单实例锁
+│   │   ├── common/               # 主进程公共工具与类型
+│   │   └── handlers/             # IPC 处理器
+│   │       ├── core/             # 核心 IPC（窗口、导航、配置读写、登录）
+│   │       └── plugins/          # 功能 IPC（豆瓣 / Bangumi / 弹幕 / 播放器等）
+│   ├── preload/                  # 预加载脚本（隔离上下文桥接飞牛 Web 与 Node）
+│   │   ├── index.ts              # preload 入口
+│   │   ├── core/                 # 注入飞牛 Web 的钩子 / 工具 / 类型
+│   │   └── plugins/              # 注入侧功能模块
+│   ├── modules/                  # 可复用业务模块
+│   │   ├── cert_trust/           # 证书信任（NAS 自签 https）
+│   │   ├── danmaku/              # B站弹幕：获取 / 合并 / 叠层 / 字幕合并
+│   │   ├── fn_api/               # 飞牛影视 API 封装（api / request / types）
+│   │   ├── fn_config/            # 配置持久化（AES-256 加密，存 userData/config.json）
+│   │   ├── logger/               # 分级日志 + 敏感信息脱敏
+│   │   ├── players/              # 播放器抽象层（factory / index / types）
+│   │   │   └── impl/             # 具体实现：mpv.ts / potplayer.ts
+│   │   ├── proxy/                # NAS 代理服务（Go 编译 proxy.exe）+ potctl
+│   │   └── updater/              # 更新检查（GitHub 直连 + 镜像兜底）
+│   └── public/                   # 静态资源（注入 HTML / CSS 模板）
+├── third_party/                  # 第三方依赖（仅文本/配置入库，二进制由 CI/go build 生成）
+│   ├── fntv-mpv/                 # MPV 便携配置（uosc 脚本 / 着色器 / mpv.conf / .cache）
+│   ├── potplayer/                # 内置便携版 PotPlayer
+│   ├── proxy/                    # Go 代理源码（proxy.exe 构建时生成）
+│   └── python/                   # 内置 embeddable Python（B站弹幕脚本运行时）
+├── resource/                     # 文档与图片
+│   ├── docs/                     # README 截图（simple / Settings / Detailsettings / Potplayer）
+│   └── login/                    # 登录相关资源
+├── scripts/                      # 构建辅助脚本（图标生成 / potplayer 复制等）
+├── build/                        # 打包资源（icon / entitlements.mac.plist，供 electron-builder）
+├── .github/workflows/            # 自动构建（release.yml：macOS / Linux 自动，Windows 手传）
+├── release/                      # ① 本地构建产物（不入库）
+├── dest/                         # ① tsc 编译输出（不入库）
+├── node_modules/                 # ① 依赖（不入库）
+├── 本地commit/                   # ① 本地回退保底记录（不入库、不推送）
+├── package.json                  # 依赖与打包配置（artifactName = Fntv-Plus_*）
+├── tsconfig.json                 # TypeScript 配置
+├── CHANGELOG.md                  # 版本更新日志（本地维护，手动粘到 Release）
+└── README.md                     # 本文件
+```
+
+> ① 标注目录不纳入 Git 版本库（见 `.gitignore`）。其中 `本地commit/` 仅供本地回退保底，绝不推送；B站/豆瓣/Bangumi 等个人凭证始终存于运行时 `userData/config.json`（仓库外），不会进入本仓库。
+
+---
+
 ## 📦 安装方法
 
 ### 方式一：预编译版本（推荐）
 
 前往本仓库 [Releases 页面](https://github.com/YDMY007/Fntv-Plus/releases) 下载最新版本：
 
-- **Windows**：下载 `FNMedia_*_win_x64.exe`，双击安装。支持自定义安装路径、创建桌面快捷方式。
-- **macOS**：下载 `FNMedia_*_mac_*.dmg`，拖入 Applications 即可。
-- **Linux**：下载 `FNMedia_*_linux_*.AppImage`，添加执行权限后运行。
+- **Windows**：下载 `Fntv-Plus_*_win_x64.exe`，双击安装。支持自定义安装路径、创建桌面快捷方式。
+- **macOS**：下载 `Fntv-Plus_*_mac_*.dmg`，拖入 Applications 即可。
+- **Linux**：下载 `Fntv-Plus_*_linux_*.AppImage`，添加执行权限后运行。
 
 > ⚠️ Windows 安装后如需使用 **MPV B站弹幕搜索** 功能，请确保系统已安装 Python 3（`python` / `python3` 在 PATH 中，或安装有 WorkBuddy 自带的 Python 运行时）。
 
