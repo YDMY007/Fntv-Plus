@@ -67,8 +67,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            platform: windows
           - os: macos-latest
             platform: macos
           - os: ubuntu-latest
@@ -145,15 +143,23 @@ jobs:
             
             # 根据平台使用不同的解压命令
             if [ "$RUNNER_OS" = "Windows" ]; then
-              # Windows 使用 PowerShell 解压
-              powershell -Command "Expand-Archive -Path mpv-config.zip -DestinationPath third_party/fntv-mpv -Force"
-              # Windows 删除文件
-              powershell -Command "Remove-Item -Path mpv-config.zip -Force -ErrorAction SilentlyContinue"
+              # Windows: 解压到临时目录再搬入，避免交互式覆盖提示与顶层目录嵌套
+              TMPD=$(powershell -Command "New-Item -ItemType Directory -Force -Path (Join-Path \$env:TEMP ([System.Guid]::NewGuid().ToString())) | Select-Object -ExpandProperty FullName")
+              powershell -Command "Expand-Archive -Path mpv-config.zip -DestinationPath '$TMPD' -Force"
+              powershell -Command "\$items = Get-ChildItem -Path '$TMPD'; if (\$items.Count -eq 1 -and \$items[0].PSIsContainer) { Move-Item -Path (Join-Path \$items[0].FullName '*') -Destination third_party/fntv-mpv -Force } else { Move-Item -Path (Join-Path '$TMPD' '*') -Destination third_party/fntv-mpv -Force }"
+              powershell -Command "Remove-Item -Path mpv-config.zip -Force -ErrorAction SilentlyContinue; Remove-Item -Path '$TMPD' -Recurse -Force -ErrorAction SilentlyContinue"
             else
-              # macOS 和 Linux 使用 unzip
-              unzip -q mpv-config.zip -d third_party/fntv-mpv
-              # macOS 和 Linux 删除文件
-              rm -f mpv-config.zip
+              # macOS / Linux: 解压到临时目录，遇同名文件强制覆盖(-o)，并展平可能的单一顶层目录
+              TMPD=$(mktemp -d)
+              unzip -oq mpv-config.zip -d "$TMPD"
+              shopt -s dotglob
+              items=("$TMPD"/*)
+              if [ ${#items[@]} -eq 1 ] && [ -d "${items[0]}" ]; then
+                mv "${items[0]}"/. third_party/fntv-mpv/ 2>/dev/null || true
+              else
+                mv "$TMPD"/. third_party/fntv-mpv/ 2>/dev/null || true
+              fi
+              rm -rf "$TMPD" mpv-config.zip
             fi
           fi
           
@@ -278,14 +284,15 @@ jobs:
             ### 📥 下载指南
             | 平台 | 文件类型 | 说明 |
             |------|----------|------|
-            | 💻 Windows | `.exe` | 安装程序，双击运行 |
+            | 💻 Windows | `.exe` | **由维护者手动上传至本 Release**（不通过自动构建） |
             | 🍎 macOS | `.dmg` | 磁盘镜像，安装后执行: `sudo find "/Applications/飞牛影视.app" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null` |
             | 🐧 Linux | `.AppImage` | 便携应用，添加执行权限后直接运行。 插件前往[fntv-mpv](https://github.com/QiaoKes/fntv-mpv-config/releases) 自行安装，要求mpv版本>0.37.0 |
+            
+            > 💡 **Windows 版本由维护者手动上传**，本 Release 的 macOS / Linux 安装包由 GitHub Actions 自动构建并发布。
             
             ---
             *自动构建于 GitHub Actions* 🤖
           files: |
-            artifacts/windows-build/*.exe
             artifacts/macos-build/*.dmg
             artifacts/linux-build/*.AppImage
           draft: false
