@@ -18,6 +18,7 @@ interface LoginData {
     username: string;
     password: string;
     useHttps?: boolean;
+    rememberPassword?: boolean;
 }
 
 interface HistoryItem {
@@ -148,11 +149,11 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             useHttps: loginData.useHttps
         });
 
-        // 添加到登录历史
+        // 添加到登录历史（仅当用户勾选"记住密码"时持久化密码）
         addHistory({
             domain: loginData.domain,
             account: loginData.username,
-            password: loginData.password,
+            password: loginData.rememberPassword ? loginData.password : '',
             useHttps: loginData.useHttps
         });
 
