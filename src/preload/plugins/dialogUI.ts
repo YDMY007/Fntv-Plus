@@ -34,6 +34,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     const icon = ICON[type] || ICON.none;
 
     const overlay = document.createElement('div');
+    overlay.id = 'fnos-dialog-overlay';
     overlay.setAttribute('data-fnos-ui', '1');
     overlay.style.cssText = [
         'position:fixed', 'inset:0', 'z-index:2147483647',

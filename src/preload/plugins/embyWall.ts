@@ -2565,6 +2565,15 @@ function handle(): void {
       if (overlay.contains(t)) return;
       const sb = document.getElementById('fnos-settings-btn');
       if (sb && sb.contains(t)) return;
+      // 落在其他自建设置弹窗(检查更新 fnosDialog / 关于 / 反馈 / B站登录)内时,
+      // 不连带关闭设置面板, 实现\"一层一层关\"的层级交互。
+      if (t instanceof Element) {
+        const withinOtherUi = t.closest('#fnos-dialog-overlay')
+          || t.closest('#fnos-about-modal')
+          || t.closest('#fnos-feedback-modal')
+          || t.closest('#fnos-bili-modal');
+        if (withinOtherUi) return;
+      }
       overlay.style.display = 'none';
     }, true);
 
