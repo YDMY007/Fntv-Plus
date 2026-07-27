@@ -279,24 +279,55 @@ function getInjectionScript(username: string, password: string): string {
             };
 
             // 获取 sys_config（在非 /login 页面执行）
+            // 改进: ① 5ddd.com 落地页无 NAS app, 不在此拉取(避免误报 HTML);
+            //       ② 官方中继(.fnos.net)隧道建立可能慢于内网, 采用退避重试;
+            //       ③ 重试耗尽仍只拿到 HTML → 发 SysConfigFailed 让主进程快速明确报错,
+            //         而非静默卡死等 120s 超时.
             function fetchSysConfigOnce() {
                 try {
                     if (window.__fntv_sys_config_requested) return;
+                    var host = (window.location.hostname || '').toLowerCase();
+                    if (host.indexOf('5ddd.com') !== -1) return; // 落地页无 NAS, 跳过
                     if (window.location.href.indexOf('/login') !== -1) return;
                     window.__fntv_sys_config_requested = true;
-                    fetch('/v/api/v1/sys/config', { credentials: 'include' })
-                        .then(function(r) { return r.text(); })
-                        .then(function(text) {
-                            postMessage({
-                                type: "SysConfig",
-                                url: "/v/api/v1/sys/config",
-                                body: text || "",
-                                pageUrl: String(window.location.href || "")
+
+                    var attempt = 0;
+                    var maxAttempts = 6; // 退避重试, 总跨度约 11s
+                    function tryFetch() {
+                        attempt++;
+                        fetch('/v/api/v1/sys/config', { credentials: 'include' })
+                            .then(function(r) { return r.text(); })
+                            .then(function(text) {
+                                var t = (text || '').trim();
+                                var isHtml = t.indexOf('<!doctype') === 0 || t.indexOf('<html') === 0;
+                                if (isHtml && attempt < maxAttempts) {
+                                    // 中继隧道未就绪 / 返回门户 HTML → 退避重试
+                                    setTimeout(tryFetch, 700 * attempt);
+                                    return;
+                                }
+                                if (isHtml) {
+                                    // 重试耗尽仍非 JSON → 明确告知主进程(中继不支持该 API)
+                                    postMessage({
+                                        type: "SysConfigFailed",
+                                        url: "/v/api/v1/sys/config",
+                                        body: t,
+                                        pageUrl: String(window.location.href || "")
+                                    });
+                                    return;
+                                }
+                                postMessage({
+                                    type: "SysConfig",
+                                    url: "/v/api/v1/sys/config",
+                                    body: t,
+                                    pageUrl: String(window.location.href || "")
+                                });
+                            })
+                            .catch(function() {
+                                if (attempt < maxAttempts) { setTimeout(tryFetch, 700 * attempt); return; }
+                                window.__fntv_sys_config_requested = false;
                             });
-                        })
-                        .catch(function() {
-                            window.__fntv_sys_config_requested = false;
-                        });
+                    }
+                    setTimeout(tryFetch, 800);
                 } catch (e) {
                     window.__fntv_sys_config_requested = false;
                 }
@@ -336,6 +367,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
     let authRequested = false;
     let loginTimeout: NodeJS.Timeout | null = null;
     let loginReject: ((reason?: any) => void) | null = null;
+    let relayWatchdog: NodeJS.Timeout | null = null; // 官方中继(.fnos.net)配置看门狗
 
     try {
         // 创建 OAuth 登录窗口
@@ -385,9 +417,31 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 if (!authRequested && loginReject) {
                     authRequested = true; // 防止 closed 事件重复 reject
                     if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                    if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
                     loginReject(new Error(`FN ID 授权页无法加载（${errorDescription}）。外网请确认 FN Connect/远程访问已开启；内网请确认设备在线且地址可达。`));
                 }
             }
+        });
+
+        // ★ 官方中继(.fnos.net)配置看门狗: 中继服务器可能不代理 /v/api/v1/sys/config,
+        //   导致 app_id/baseUrl 永远拿不到 → 注入脚本重试耗尽后发 SysConfigFailed, 主进程快速报错.
+        //   此处再加一道兜底: 导航到 .fnos.net 后 25s 内若仍未完成 OAuth 配置, 给出明确错误,
+        //   而不是干等 120s 超时或永久卡死.
+        oauthWindow.webContents.on('did-navigate', (_e: any, navUrl: string) => {
+            try {
+                const navHost = new URL(navUrl).hostname.toLowerCase();
+                if (navHost.endsWith('.fnos.net')) {
+                    if (relayWatchdog) clearTimeout(relayWatchdog);
+                    relayWatchdog = setTimeout(() => {
+                        if (!authRequested && !sysConfigLoaded && loginReject) {
+                            authRequested = true;
+                            if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                            relayWatchdog = null;
+                            loginReject(new Error('FN ID 官方中继转发连接失败：中继服务器未返回有效的 NAS 配置（/v/api/v1/sys/config 返回非 JSON）。请改用 IPv6 / 公网 IP 或内网地址登录。'));
+                        }
+                    }, 25000);
+                }
+            } catch { /* ignore */ }
         });
 
         // 为 FN Connect 域名设置 mode=relay Cookie
@@ -451,6 +505,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     // 统一收尾(关窗/复制cookie/保存配置/加载主窗口)
                     await finalizeLogin(token);
                     if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                    if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
                     resolve();
                 } catch (err) {
                     authRequested = false;
@@ -672,6 +727,19 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                         }
                     }
 
+                    // 处理 SysConfig 彻底失败（注入脚本重试耗尽仍只拿到 HTML）
+                    // ★ 官方中继(.fnos.net)典型表现: /v/api/v1/sys/config 返回门户 HTML
+                    if (type === 'SysConfigFailed') {
+                        log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API), pageUrl=${messageData.pageUrl || ''}`);
+                        if (!authRequested && !sysConfigLoaded && loginReject) {
+                            authRequested = true;
+                            if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                            if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
+                            loginReject(new Error('FN ID 官方中继转发连接失败：中继服务器未返回有效的 NAS 配置（/v/api/v1/sys/config 返回非 JSON）。请改用 IPv6 / 公网 IP 或内网地址登录。'));
+                        }
+                        return;
+                    }
+
                     // 处理 OAuth 授权码响应（XHR hook 捕获的 code）
                     if (type === 'Response' && url.includes('/oauthapi/authorize')) {
                         let code = messageData.code;
@@ -780,6 +848,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             oauthWindow!.on('closed', () => {
                 oauthWindow = null;
                 if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
                 if (!authRequested) {
                     reject(new Error('用户关闭了登录窗口'));
                 }
