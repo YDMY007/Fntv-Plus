@@ -701,31 +701,27 @@ function applyTvDetailGlass(): void {
     barWrap.style.setProperty('padding', '12px 18px', 'important');
   }
 
-  // ⑥ 原生播放按钮: 深色玻璃风格覆盖（覆盖 fnOS Semi Design 默认亮蓝色）
+  // ⑥ 原生播放按钮: 极淡幽灵风格（融入深色背景，不抢视觉焦点）
   const nativePlayBtns = header.parentElement?.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]') ?? [];
   for (const btn of Array.from(nativePlayBtns)) {
     const el = btn as HTMLElement;
     if (el.classList.contains('fnos-play')) continue; // 跳过我们自己的按钮
-    el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
-    el.style.setProperty('backdrop-filter', 'blur(14px) saturate(130%)', 'important');
-    el.style.setProperty('-webkit-backdrop-filter', 'blur(14px) saturate(130%)', 'important');
-    el.style.setProperty('border', '1px solid rgba(180,160,255,.30)', 'important');
-    el.style.setProperty('border-radius', '12px', 'important');
-    el.style.setProperty('color', '#e8e0f8', 'important');
-    el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
-    el.style.setProperty('font-weight', '600', 'important');
+    el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
+    el.style.setProperty('border', '1px solid rgba(255,255,255,.10)', 'important');
+    el.style.setProperty('border-radius', '10px', 'important');
+    el.style.setProperty('color', 'rgba(232,228,248,.82)', 'important');
+    el.style.setProperty('box-shadow', 'none', 'important');
+    el.style.setProperty('font-weight', '500', 'important');
     el.addEventListener('mouseenter', () => {
       if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
-        el.style.setProperty('background', 'rgba(160,140,220,.32)', 'important');
-        el.style.setProperty('box-shadow', '0 6px 24px rgba(100,80,180,.22), inset 0 .5px 0 rgba(255,255,255,.35)', 'important');
-        el.style.setProperty('transform', 'translateY(-1px)', 'important');
+        el.style.setProperty('background', 'rgba(255,255,255,.11)', 'important');
+        el.style.setProperty('border-color', 'rgba(255,255,255,.18)', 'important');
       }
     }, { once: false });
     el.addEventListener('mouseleave', () => {
       delete el.dataset.glassHover;
-      el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
-      el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
-      el.style.removeProperty('transform');
+      el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
+      el.style.setProperty('border-color', 'rgba(255,255,255,.10)', 'important');
     }, { once: false });
   }
 }
@@ -832,14 +828,14 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
         } else {
           w.style.setProperty('background',
             'var(--fnos-detail-season-sec)', 'important');
-          w.style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
-          w.style.setProperty('-webkit-backdrop-filter', 'blur(22px) saturate(145%)', 'important');
-          w.style.setProperty('border-radius', '14px', 'important');
+          w.style.setProperty('backdrop-filter', 'blur(8px) saturate(120%)', 'important');
+          w.style.setProperty('-webkit-backdrop-filter', 'blur(8px) saturate(120%)', 'important');
+          w.style.setProperty('border-radius', '10px', 'important');
           w.style.setProperty('border', '1px solid var(--fnos-detail-season-sec-border)', 'important');
           w.style.setProperty('box-shadow',
-            '0 4px 20px rgba(31,41,90,.06),inset 0 1px 0 rgba(255,255,255,.6)',
+            'none',
             'important');
-          w.style.setProperty('padding', '10px 20px', 'important');
+          w.style.setProperty('padding', '6px 16px', 'important');
         }
       }
     }
@@ -895,31 +891,27 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       'var(--fnos-detail-scroll)', 'important');
   }
 
-  // ⑤ 原生播放按钮: 深色玻璃风格覆盖（同 applyTvDetailGlass ⑥）
+  // ⑤ 原生播放按钮: 极淡幽灵风格（同 applyTvDetailGlass ⑥）
   const seasonPlayBtns = document.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]');
   for (const btn of Array.from(seasonPlayBtns)) {
     const el = btn as HTMLElement;
     if (el.classList.contains('fnos-play')) continue;
-    el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
-    el.style.setProperty('backdrop-filter', 'blur(14px) saturate(130%)', 'important');
-    el.style.setProperty('-webkit-backdrop-filter', 'blur(14px) saturate(130%)', 'important');
-    el.style.setProperty('border', '1px solid rgba(180,160,255,.30)', 'important');
-    el.style.setProperty('border-radius', '12px', 'important');
-    el.style.setProperty('color', '#e8e0f8', 'important');
-    el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
-    el.style.setProperty('font-weight', '600', 'important');
+    el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
+    el.style.setProperty('border', '1px solid rgba(255,255,255,.10)', 'important');
+    el.style.setProperty('border-radius', '10px', 'important');
+    el.style.setProperty('color', 'rgba(232,228,248,.82)', 'important');
+    el.style.setProperty('box-shadow', 'none', 'important');
+    el.style.setProperty('font-weight', '500', 'important');
     el.addEventListener('mouseenter', () => {
       if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
-        el.style.setProperty('background', 'rgba(160,140,220,.32)', 'important');
-        el.style.setProperty('box-shadow', '0 6px 24px rgba(100,80,180,.22), inset 0 .5px 0 rgba(255,255,255,.35)', 'important');
-        el.style.setProperty('transform', 'translateY(-1px)', 'important');
+        el.style.setProperty('background', 'rgba(255,255,255,.11)', 'important');
+        el.style.setProperty('border-color', 'rgba(255,255,255,.18)', 'important');
       }
     }, { once: false });
     el.addEventListener('mouseleave', () => {
       delete el.dataset.glassHover;
-      el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
-      el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
-      el.style.removeProperty('transform');
+      el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
+      el.style.setProperty('border-color', 'rgba(255,255,255,.10)', 'important');
     }, { once: false });
   }
 }
@@ -1121,10 +1113,10 @@ html.dark{
   --fnos-detail-desc-border:rgba(255,255,255,.12);
   --fnos-detail-card:linear-gradient(145deg,rgba(54,44,76,.42),rgba(38,30,56,.52));
   --fnos-detail-card-border:rgba(255,255,255,.10);
-  --fnos-detail-bar:linear-gradient(180deg,rgba(48,38,68,.42),rgba(33,26,50,.52));
+  --fnos-detail-bar:linear-gradient(180deg,rgba(48,38,68,.20),rgba(33,26,50,.26));
   --fnos-detail-bar-border:rgba(255,255,255,.10);
   --fnos-detail-season-grad:linear-gradient(180deg,transparent 30%,rgba(0,0,0,.40) 58%,rgba(18,14,30,.72) 100%);
-  --fnos-detail-season-sec:linear-gradient(135deg,rgba(60,50,84,.35),rgba(45,36,64,.42));
+  --fnos-detail-season-sec:linear-gradient(135deg,rgba(60,50,84,.18),rgba(45,36,64,.22));
   --fnos-detail-season-sec-border:rgba(255,255,255,.12);
   --fnos-detail-ep:linear-gradient(148deg,rgba(58,48,82,.40),rgba(40,32,58,.50));
   --fnos-detail-ep-border:rgba(255,255,255,.12);
