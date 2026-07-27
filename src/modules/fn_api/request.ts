@@ -160,11 +160,22 @@ export async function request<T = any>(
 
             // 不是json直接返回二进制文件
             const contentType = response.headers['content-type'];
-            if (contentType && typeof contentType === 'string' && !contentType.includes('application/json')) {
-                return {
-                    success: true,
-                    data: response.data as any, // 直接返回原始数据
-                };
+            if (contentType && typeof contentType === 'string') {
+                // 服务器返回了网页(HTML)而非接口数据：几乎一定是地址/网络/代理问题
+                // (如 404/502/登录页/重定向页)。对二进制下载(text/html 不会是字幕/图片)安全判失败，
+                // 避免上层把 HTML 字符串误当成 success 并进一步读取不存在的 data.token。
+                if (contentType.includes('text/html')) {
+                    return {
+                        success: false,
+                        message: '服务器返回了网页(HTML)而非接口数据，请检查服务器地址是否正确、网络是否可达，以及是否应使用 FN ID 登录。'
+                    };
+                }
+                if (!contentType.includes('application/json')) {
+                    return {
+                        success: true,
+                        data: response.data as any, // 直接返回原始数据(二进制等)
+                    };
+                }
             }
 
             const res = response.data;

@@ -127,12 +127,34 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
 
         // 登录成功，处理返回的 token 和可能的重定向 URL
         server = response.moveUrl || server;
-        const token = response.data.token;
+        const token = response.data?.token;
         if (!token) {
-            log.error('登录失败: 没有有效的登录信息，无法恢复 cookies');
+            // 详细记录服务端原始响应，便于定位"success 但无 token"的真实原因
+            let dataPreview: string;
+            try {
+                dataPreview = typeof response.data === 'string'
+                    ? response.data.slice(0, 200)
+                    : JSON.stringify(response.data).slice(0, 500);
+            } catch { dataPreview = '<无法序列化>'; }
+            log.error('登录失败: 接口返回成功但缺少 token，无法恢复 cookies');
+            log.error('登录失败详情 → success:', response.success,
+                '| message:', response.message,
+                '| moveUrl:', response.moveUrl,
+                '| dataType:', typeof response.data,
+                '| dataPreview:', dataPreview);
+
+            let detail: string;
+            if (typeof response.data === 'string') {
+                // 绝大多数情况：request.ts 把 HTML/错误页误判为 success，data 是字符串
+                detail = '服务器返回的不是接口数据（可能是登录页或错误网页）。请检查服务器地址是否正确、网络是否可达，以及是否应使用 FN ID 登录。';
+            } else if (response.message) {
+                detail = response.message;
+            } else {
+                detail = '登录接口返回成功但未包含 token。可能该账号需要使用 FN ID 方式登录，或账号/密码有误。';
+            }
             event.reply('login-error', {
                 title: '登录失败',
-                message: '没有有效的登录信息，无法恢复 cookies'
+                message: detail
             });
             return;
         }
