@@ -404,11 +404,11 @@ function injectCarousel(): void {
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
-      <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(91,140,255,.16);border:1px solid rgba(91,140,255,.32);border-radius:20px;color:#2f57d6;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新</div>
+      <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新</div>
       <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em">${show.desc||''}</div>
-      <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:17px 34px;background:linear-gradient(135deg,#5b8cff,#7c5cff);border:none;border-radius:15px;color:#fff;font-size:18px;font-weight:700;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 24px rgba(91,140,255,.45);transition:transform .22s ease,box-shadow .22s ease;flex-shrink:0">
+      <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:rgba(140,120,200,.22);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid rgba(180,160,255,.30);border-radius:14px;color:#e8e0f8;font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.16),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
         <svg width="20" height="20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>
         开始观看
       </a>`;
@@ -435,6 +435,17 @@ function injectCarousel(): void {
             location.href = href;
           }
         }, 600);
+      });
+      // 悬停效果: 玻璃提亮 + 轻微上浮
+      playBtn.addEventListener('mouseenter', () => {
+        (playBtn as HTMLElement).style.background = 'rgba(160,140,220,.32)';
+        (playBtn as HTMLElement).style.boxShadow = '0 6px 24px rgba(100,80,180,.22),inset 0 .5px 0 rgba(255,255,255,.35)';
+        (playBtn as HTMLElement).style.transform = 'translateY(-1px)';
+      });
+      playBtn.addEventListener('mouseleave', () => {
+        (playBtn as HTMLElement).style.background = 'rgba(140,120,200,.22)';
+        (playBtn as HTMLElement).style.boxShadow = '0 4px 20px rgba(80,60,140,.16),inset 0 .5px 0 rgba(255,255,255,.25)';
+        (playBtn as HTMLElement).style.transform = '';
       });
     }
     // 剧集logo: 置于左图左上角
@@ -689,6 +700,34 @@ function applyTvDetailGlass(): void {
       'important');
     barWrap.style.setProperty('padding', '12px 18px', 'important');
   }
+
+  // ⑥ 原生播放按钮: 深色玻璃风格覆盖（覆盖 fnOS Semi Design 默认亮蓝色）
+  const nativePlayBtns = header.parentElement?.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]') ?? [];
+  for (const btn of Array.from(nativePlayBtns)) {
+    const el = btn as HTMLElement;
+    if (el.classList.contains('fnos-play')) continue; // 跳过我们自己的按钮
+    el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
+    el.style.setProperty('backdrop-filter', 'blur(14px) saturate(130%)', 'important');
+    el.style.setProperty('-webkit-backdrop-filter', 'blur(14px) saturate(130%)', 'important');
+    el.style.setProperty('border', '1px solid rgba(180,160,255,.30)', 'important');
+    el.style.setProperty('border-radius', '12px', 'important');
+    el.style.setProperty('color', '#e8e0f8', 'important');
+    el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
+    el.style.setProperty('font-weight', '600', 'important');
+    el.addEventListener('mouseenter', () => {
+      if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
+        el.style.setProperty('background', 'rgba(160,140,220,.32)', 'important');
+        el.style.setProperty('box-shadow', '0 6px 24px rgba(100,80,180,.22), inset 0 .5px 0 rgba(255,255,255,.35)', 'important');
+        el.style.setProperty('transform', 'translateY(-1px)', 'important');
+      }
+    }, { once: false });
+    el.addEventListener('mouseleave', () => {
+      delete el.dataset.glassHover;
+      el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
+      el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
+      el.style.removeProperty('transform');
+    }, { once: false });
+  }
 }
 
 /** 查找简介区域的辅助函数 */
@@ -854,6 +893,34 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
   if (scrollArea) {
     scrollArea.style.setProperty('background',
       'var(--fnos-detail-scroll)', 'important');
+  }
+
+  // ⑤ 原生播放按钮: 深色玻璃风格覆盖（同 applyTvDetailGlass ⑥）
+  const seasonPlayBtns = document.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]');
+  for (const btn of Array.from(seasonPlayBtns)) {
+    const el = btn as HTMLElement;
+    if (el.classList.contains('fnos-play')) continue;
+    el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
+    el.style.setProperty('backdrop-filter', 'blur(14px) saturate(130%)', 'important');
+    el.style.setProperty('-webkit-backdrop-filter', 'blur(14px) saturate(130%)', 'important');
+    el.style.setProperty('border', '1px solid rgba(180,160,255,.30)', 'important');
+    el.style.setProperty('border-radius', '12px', 'important');
+    el.style.setProperty('color', '#e8e0f8', 'important');
+    el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
+    el.style.setProperty('font-weight', '600', 'important');
+    el.addEventListener('mouseenter', () => {
+      if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
+        el.style.setProperty('background', 'rgba(160,140,220,.32)', 'important');
+        el.style.setProperty('box-shadow', '0 6px 24px rgba(100,80,180,.22), inset 0 .5px 0 rgba(255,255,255,.35)', 'important');
+        el.style.setProperty('transform', 'translateY(-1px)', 'important');
+      }
+    }, { once: false });
+    el.addEventListener('mouseleave', () => {
+      delete el.dataset.glassHover;
+      el.style.setProperty('background', 'rgba(140,120,200,.22)', 'important');
+      el.style.setProperty('box-shadow', '0 4px 20px rgba(80,60,140,.16), inset 0 .5px 0 rgba(255,255,255,.25)', 'important');
+      el.style.removeProperty('transform');
+    }, { once: false });
   }
 }
 
