@@ -375,6 +375,65 @@ async function handleExportLog(): Promise<{ ok: boolean; error?: string; savedPa
     }
 }
 
+// ===== 历史版本：列出并读取 resource/wiki 下的 MD 文件（设置面板「历史版本」按钮用）=====
+function getWikiDir(): string {
+    // dev: 项目根/resource/wiki；打包: asar 内 resource/wiki（需在 package.json files 含 resource/wiki）
+    return path.join(app.getAppPath(), 'resource', 'wiki');
+}
+
+// 防目录穿越：仅允许纯文件名（字母/数字/下划线/中文/连字符），解析后必须仍在 wikiDir 内
+function safeWikiFile(name: string): string | null {
+    if (!/^[A-Za-z0-9_一-龥\-]+\.md$/i.test(name)) return null;
+    const wikiDir = getWikiDir();
+    const full = path.join(wikiDir, name);
+    const rel = path.relative(wikiDir, full);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    return full;
+}
+
+function extractTitle(name: string, firstLine: string): string {
+    const line = (firstLine || '').trim();
+    if (line.startsWith('#')) return line.replace(/^#+\s*/, '').trim() || name;
+    return name.replace(/\.md$/i, '');
+}
+
+async function handleListChangelogs(): Promise<{ name: string; title: string; mtime: number }[]> {
+    try {
+        const wikiDir = getWikiDir();
+        if (!fs.existsSync(wikiDir)) return [];
+        const files = fs.readdirSync(wikiDir).filter(f => f.toLowerCase().endsWith('.md'));
+        const list = files.map(f => {
+            let title = f.replace(/\.md$/i, '');
+            let mtime = 0;
+            try {
+                const fp = path.join(wikiDir, f);
+                mtime = fs.statSync(fp).mtimeMs;
+                const head = fs.readFileSync(fp, 'utf8').split('\n')[0] || '';
+                title = extractTitle(f, head);
+            } catch (e) { /* 单文件错误忽略，保留文件名兜底 */ }
+            return { name: f, title, mtime };
+        });
+        list.sort((a, b) => b.mtime - a.mtime); // 最新在上
+        return list;
+    } catch (e: any) {
+        log.error('列出历史版本失败:', e);
+        return [];
+    }
+}
+
+async function handleReadChangelog(_event: any, name: string): Promise<{ ok: boolean; name: string; title: string; content: string; error?: string }> {
+    const full = safeWikiFile(name);
+    if (!full) return { ok: false, name, title: name, content: '', error: '非法文件名' };
+    try {
+        if (!fs.existsSync(full)) return { ok: false, name, title: name, content: '', error: '文件不存在' };
+        const raw = fs.readFileSync(full, 'utf8');
+        const title = extractTitle(name, raw.split('\n')[0] || '');
+        return { ok: true, name, title, content: raw };
+    } catch (e: any) {
+        return { ok: false, name, title: name, content: '', error: String((e && e.message) || e) };
+    }
+}
+
 function init(): void {
     // 启动时应用已保存的调试日志过滤，确保控制台日志开关在用户打开设置前即生效
     applyDebugFilter();
@@ -422,6 +481,8 @@ function init(): void {
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
     registerHandler('settings:open-log', handleOpenLog, { useHandle: true });
     registerHandler('settings:export-log', handleExportLog, { useHandle: true });
+    registerHandler('settings:list-changelogs', handleListChangelogs, { useHandle: true });
+    registerHandler('settings:read-changelog', handleReadChangelog, { useHandle: true });
 }
 
 export {
