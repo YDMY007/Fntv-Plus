@@ -299,6 +299,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
     let cookieString = '';
     let sysConfigLoaded = false;
     let authRequested = false;
+    let loginTimeout: NodeJS.Timeout | null = null;
+    let loginReject: ((reason?: any) => void) | null = null;
 
     try {
         // 创建 OAuth 登录窗口
@@ -331,6 +333,19 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             return { action: 'deny' };
         });
 
+        // ★ 外网诊断: 授权页(/signin)导航失败时给出明确错误, 而不是静默白屏等用户关窗后报"用户关闭了登录窗口".
+        oauthWindow.webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
+            // 仅关注真正的授权跳转失败(非初始 5ddd 加载), 避免误报
+            if (validatedURL.includes('/signin') || (baseUrl && validatedURL.startsWith(baseUrl))) {
+                log.error(`[FN ID] 授权页加载失败: ${validatedURL} (${errorCode}: ${errorDescription})`);
+                if (!authRequested && loginReject) {
+                    authRequested = true; // 防止 closed 事件重复 reject
+                    if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
+                    loginReject(new Error(`FN ID 授权页无法加载（${errorDescription}）。外网请确认 FN Connect/远程访问已开启；内网请确认设备在线且地址可达。`));
+                }
+            }
+        });
+
         // 为 FN Connect 域名设置 mode=relay Cookie
         await oauthSession.cookies.set({
             url: fnConnectUrl,
@@ -357,7 +372,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
         // 创建一个 Promise 来等待登录完成
         const loginPromise = new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
+            loginReject = reject;
+            loginTimeout = setTimeout(() => {
                 reject(new Error('FN ID 登录超时（120秒）'));
             }, 120000);
 
@@ -390,7 +406,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
                     // 统一收尾(关窗/复制cookie/保存配置/加载主窗口)
                     await finalizeLogin(token);
-                    clearTimeout(timeout);
+                    if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
                     resolve();
                 } catch (err) {
                     authRequested = false;
@@ -487,7 +503,9 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             const REDIRECT_PATH = '/v/oauth/result';
             function isOauthResultUrl(u: string): boolean {
                 try {
-                    return new URL(u).pathname.endsWith(REDIRECT_PATH);
+                    // 用 includes 而非 endsWith: 外网代理下路径可能带 /{fnId} 前缀
+                    // (如 https://5ddd.com/{fnId}/v/oauth/result)
+                    return new URL(u).pathname.includes(REDIRECT_PATH);
                 } catch {
                     return false;
                 }
@@ -553,10 +571,20 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                             const oauthUrl = data.nas_oauth.url || '';
 
                             // 确定 baseUrl
-                            if (oauthUrl && oauthUrl !== '://') {
+                            // ★ 外网修复: 当前在 5ddd.com 代理下(外网访问 fnOS 的通道)时,
+                            //   nas_oauth.url 通常是 NAS 内网 IP(如 http://192.168.x.x:18888),
+                            //   外网不可达 → 必须改用「当前代理页真实基址」(去掉 /v/api/v1/sys/config 后缀,
+                            //   保留可能的 /{fnId} 路径前缀), 才能走通授权流程.
+                            //   内网场景(当前页非 5ddd.com)维持原逻辑用 nas_oauth.url, 不受影响.
+                            const pageUrl = messageData.pageUrl || '';
+                            const onExternalRelay = /5ddd\.com/i.test(pageUrl);
+                            if (onExternalRelay && pageUrl) {
+                                baseUrl = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
+                                log.info(`[FN ID] 外网代理模式, 改用代理基址: ${baseUrl} (原 nas_oauth.url=${oauthUrl})`);
+                            } else if (oauthUrl && oauthUrl !== '://') {
                                 baseUrl = oauthUrl;
-                            } else if (messageData.pageUrl) {
-                                const parsed = new URL(messageData.pageUrl);
+                            } else if (pageUrl) {
+                                const parsed = new URL(pageUrl);
                                 baseUrl = `${parsed.protocol}//${parsed.host}`;
                             }
 
@@ -627,7 +655,12 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 if (!currentUrl) return;
 
                 const parsed = new URL(currentUrl);
-                const currentBaseUrl = `${parsed.protocol}//${parsed.host}`;
+                // ★ 外网修复: 当前在 5ddd.com 代理下时, 用「代理页真实基址」(保留 /{fnId} 路径前缀),
+                //   而非仅 origin; 内网则维持 origin(无路径前缀).
+                const onExternalRelay = /5ddd\.com/i.test(currentUrl);
+                const currentBaseUrl = onExternalRelay
+                    ? currentUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '')
+                    : `${parsed.protocol}//${parsed.host}`;
 
                 // 使用获取到的 Cookie，通过 API 获取 sys_config
                 const extraHeaders: Record<string, string> = { 'Cookie': cookie + '; mode=relay' };
@@ -646,7 +679,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     const oauth = data.nas_oauth;
                     if (oauth && oauth.app_id) {
                         let targetBaseUrl = currentBaseUrl;
-                        if (oauth.url && oauth.url !== '://') {
+                        // ★ 外网: 代理模式下忽略内网 nas_oauth.url, 始终用代理基址
+                        if (!onExternalRelay && oauth.url && oauth.url !== '://') {
                             targetBaseUrl = oauth.url;
                         }
                         baseUrl = targetBaseUrl;
@@ -701,7 +735,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             // 窗口关闭时取消登录
             oauthWindow!.on('closed', () => {
                 oauthWindow = null;
-                clearTimeout(timeout);
+                if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
                 if (!authRequested) {
                     reject(new Error('用户关闭了登录窗口'));
                 }
