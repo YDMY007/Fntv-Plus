@@ -3,10 +3,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { getLoginBgPath } from '../../modules/fn_config/config';
 
-// [lc-123] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
-const _loginBgDir = app.isPackaged
-    ? path.dirname(app.getPath('exe'))
-    : path.resolve(__dirname, '../../..'); // dest/main/ → 项目根目录
+// [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
+//   注意: 打包后 resource 在 app.asar 内, 取 app.getAppPath()(开发态=项目根/打包态=asar 虚拟路径)即可正确定位,
+//         不能取 path.dirname(app.getPath('exe'))(那是安装根目录, 没有 resource 子目录 → 默认图路径不存在 → 白屏).
+const _loginBgDir = app.getAppPath();
 const _loginBgDefaultFile = path.join(_loginBgDir, 'resource', 'login', 'image', 'bg-login.jpg');
 const _loginBgDefaultUrl = fs.existsSync(_loginBgDefaultFile)
     ? 'file:///' + _loginBgDefaultFile.replace(/\\/g, '/')

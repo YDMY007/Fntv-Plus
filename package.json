@@ -1,213 +1,213 @@
 {
-    "name": "fntv",
-    "version": "3.3.1",
-    "description": "A fntv app built with Electron",
-    "main": "dest/main/main.js",
-    "scripts": {
-        "build:proxy:win": "cd src/modules/proxy && go build -o ../../../third_party/proxy/proxy.exe",
-        "build:potctl:win": "cd src/modules/proxy && go build -o ../../../third_party/proxy/potctl.exe ./potctl",
-        "build:proxy:linux": "cd src/modules/proxy && go build -o ../../../third_party/proxy/proxy",
-        "build:proxy:mac:x64": "cd src/modules/proxy && GOOS=darwin GOARCH=amd64 go build -o ../../../third_party/proxy/proxy_x64",
-        "build:proxy:mac:arm64": "cd src/modules/proxy && GOOS=darwin GOARCH=arm64 go build -o ../../../third_party/proxy/proxy_arm64",
-        "build:proxy:mac:universal": "lipo -create -output third_party/proxy/proxy third_party/proxy/proxy_x64 third_party/proxy/proxy_arm64",
-        "clean:proxy:mac": "rimraf third_party/proxy/proxy_x64 third_party/proxy/proxy_arm64",
-        "start": "npm run clean && npm run build:proxy:win && npm run build:potctl:win && tsc && electron .",
-        "compile": "tsc",
-        "watch": "tsc --watch",
-        "clean": "rimraf dest",
-        "build:potplayer:win": "node scripts/copy-potplayer.js",
-        "build:win": "npm-run-all -s build:proxy:win build:potctl:win build:potplayer:win compile && electron-builder --win",
-        "build:win:fast": "npm-run-all -s build:potplayer:win compile && electron-builder --win",
-        "build:mac": "npm-run-all -s build:proxy:mac:x64 build:proxy:mac:arm64 build:proxy:mac:universal compile clean:proxy:mac && electron-builder --mac",
-        "build:linux": "npm-run-all -s build:proxy:linux compile && electron-builder --linux"
+  "name": "fntv",
+  "version": "3.3.2",
+  "description": "A fntv app built with Electron",
+  "main": "dest/main/main.js",
+  "scripts": {
+    "build:proxy:win": "cd src/modules/proxy && go build -o ../../../third_party/proxy/proxy.exe",
+    "build:potctl:win": "cd src/modules/proxy && go build -o ../../../third_party/proxy/potctl.exe ./potctl",
+    "build:proxy:linux": "cd src/modules/proxy && go build -o ../../../third_party/proxy/proxy",
+    "build:proxy:mac:x64": "cd src/modules/proxy && GOOS=darwin GOARCH=amd64 go build -o ../../../third_party/proxy/proxy_x64",
+    "build:proxy:mac:arm64": "cd src/modules/proxy && GOOS=darwin GOARCH=arm64 go build -o ../../../third_party/proxy/proxy_arm64",
+    "build:proxy:mac:universal": "lipo -create -output third_party/proxy/proxy third_party/proxy/proxy_x64 third_party/proxy/proxy_arm64",
+    "clean:proxy:mac": "rimraf third_party/proxy/proxy_x64 third_party/proxy/proxy_arm64",
+    "start": "npm run clean && npm run build:proxy:win && npm run build:potctl:win && tsc && electron .",
+    "compile": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rimraf dest",
+    "build:potplayer:win": "node scripts/copy-potplayer.js",
+    "build:win": "npm-run-all -s build:proxy:win build:potctl:win build:potplayer:win compile && electron-builder --win",
+    "build:win:fast": "npm-run-all -s build:potplayer:win compile && electron-builder --win",
+    "build:mac": "npm-run-all -s build:proxy:mac:x64 build:proxy:mac:arm64 build:proxy:mac:universal compile clean:proxy:mac && electron-builder --mac",
+    "build:linux": "npm-run-all -s build:proxy:linux compile && electron-builder --linux"
+  },
+  "author": "tracing",
+  "devDependencies": {
+    "@types/cacheable-request": "^6.0.3",
+    "@types/debug": "^4.1.12",
+    "@types/express": "^5.0.3",
+    "@types/fs-extra": "^11.0.4",
+    "@types/http-cache-semantics": "^4.0.4",
+    "@types/keyv": "^3.1.4",
+    "@types/ms": "^2.1.0",
+    "@types/multistream": "^4.1.3",
+    "@types/node": "^20.19.11",
+    "@types/plist": "^3.0.5",
+    "@types/responselike": "^1.0.3",
+    "@types/verror": "^1.10.11",
+    "@types/yauzl": "^2.10.3",
+    "copyfiles": "^2.4.1",
+    "cross-env": "^10.0.0",
+    "electron": "v38.0.0",
+    "electron-builder": "^26.0.12",
+    "npm-run-all": "^4.1.5",
+    "rimraf": "^5.0.9",
+    "sharp": "^0.34.3",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.61.1",
+    "axios": "^1.11.0",
+    "express": "^5.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "http-range-fetcher": "^2.0.0",
+    "multistream": "^4.1.0",
+    "node-cache": "^5.1.2",
+    "node-mpv-2": "^2.0.0-beta.3",
+    "semver": "^7.7.2",
+    "uuid": "^13.0.0"
+  },
+  "build": {
+    "directories": {
+      "output": "release"
     },
-    "author": "tracing",
-    "devDependencies": {
-        "@types/cacheable-request": "^6.0.3",
-        "@types/debug": "^4.1.12",
-        "@types/express": "^5.0.3",
-        "@types/fs-extra": "^11.0.4",
-        "@types/http-cache-semantics": "^4.0.4",
-        "@types/keyv": "^3.1.4",
-        "@types/ms": "^2.1.0",
-        "@types/multistream": "^4.1.3",
-        "@types/node": "^20.19.11",
-        "@types/plist": "^3.0.5",
-        "@types/responselike": "^1.0.3",
-        "@types/verror": "^1.10.11",
-        "@types/yauzl": "^2.10.3",
-        "copyfiles": "^2.4.1",
-        "cross-env": "^10.0.0",
-        "electron": "v38.0.0",
-        "electron-builder": "^26.0.12",
-        "npm-run-all": "^4.1.5",
-        "rimraf": "^5.0.9",
-        "sharp": "^0.34.3",
-        "typescript": "^5.5.4"
+    "icon": "build/icon.ico",
+    "productName": "Fntv-Plus",
+    "artifactName": "Fntv-Plus_${version}_${os}_${arch}.${ext}",
+    "appId": "com.qiaokes.fntv",
+    "compression": "normal",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "extraFiles": [
+        {
+          "from": "third_party/fntv-mpv",
+          "to": "third_party/fntv-mpv",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/proxy",
+          "to": "third_party/proxy",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/potplayer",
+          "to": "third_party/potplayer",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/python",
+          "to": "third_party/python",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
-    "dependencies": {
-        "@playwright/test": "^1.61.1",
-        "axios": "^1.11.0",
-        "express": "^5.1.0",
-        "http-proxy-middleware": "^3.0.5",
-        "http-range-fetcher": "^2.0.0",
-        "multistream": "^4.1.0",
-        "node-cache": "^5.1.2",
-        "node-mpv-2": "^2.0.0-beta.3",
-        "semver": "^7.7.2",
-        "uuid": "^13.0.0"
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "type": "development",
+      "extraFiles": [
+        {
+          "from": "third_party/fntv-mpv/portable_config",
+          "to": "third_party/fntv-mpv/portable_config",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/proxy",
+          "to": "third_party/proxy",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
-    "build": {
-        "directories": {
-            "output": "release"
+    "dmg": {
+      "title": "Fntv-Plus_${version}_${arch}",
+      "icon": "build/icon.icns",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
         },
-        "icon": "build/icon.ico",
-        "productName": "Fntv-Plus",
-        "artifactName": "Fntv-Plus_${version}_${os}_${arch}.${ext}",
-        "appId": "com.qiaokes.fntv",
-        "compression": "normal",
-        "win": {
-            "target": [
-                {
-                    "target": "nsis",
-                    "arch": [
-                        "x64"
-                    ]
-                }
-            ],
-            "icon": "build/icon.ico",
-            "extraFiles": [
-                {
-                    "from": "third_party/fntv-mpv",
-                    "to": "third_party/fntv-mpv",
-                    "filter": [
-                        "**/*"
-                    ]
-                },
-                {
-                    "from": "third_party/proxy",
-                    "to": "third_party/proxy",
-                    "filter": [
-                        "**/*"
-                    ]
-                },
-                {
-                    "from": "third_party/potplayer",
-                    "to": "third_party/potplayer",
-                    "filter": [
-                        "**/*"
-                    ]
-                },
-                {
-                    "from": "third_party/python",
-                    "to": "third_party/python",
-                    "filter": [
-                        "**/*"
-                    ]
-                }
-            ]
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "AudioVideo",
+      "icon": "build/icon.png",
+      "desktop": {
+        "entry": {
+          "Name": "Fntv-Plus",
+          "Comment": "Fntv-Plus 桌面客户端",
+          "Categories": "AudioVideo;Video;Player;"
+        }
+      },
+      "extraFiles": [
+        {
+          "from": "third_party/fntv-mpv/portable_config",
+          "to": "third_party/fntv-mpv/portable_config",
+          "filter": [
+            "**/*"
+          ]
         },
-        "mac": {
-            "target": [
-                {
-                    "target": "dmg",
-                    "arch": [
-                        "x64",
-                        "arm64"
-                    ]
-                }
-            ],
-            "category": "public.app-category.entertainment",
-            "icon": "build/icon.icns",
-            "hardenedRuntime": true,
-            "gatekeeperAssess": false,
-            "entitlements": "build/entitlements.mac.plist",
-            "entitlementsInherit": "build/entitlements.mac.plist",
-            "type": "development",
-            "extraFiles": [
-                {
-                    "from": "third_party/fntv-mpv/portable_config",
-                    "to": "third_party/fntv-mpv/portable_config",
-                    "filter": [
-                        "**/*"
-                    ]
-                },
-                {
-                    "from": "third_party/proxy",
-                    "to": "third_party/proxy",
-                    "filter": [
-                        "**/*"
-                    ]
-                }
-            ]
-        },
-        "dmg": {
-            "title": "Fntv-Plus_${version}_${arch}",
-            "icon": "build/icon.icns",
-            "window": {
-                "width": 540,
-                "height": 380
-            },
-            "contents": [
-                {
-                    "x": 130,
-                    "y": 220
-                },
-                {
-                    "x": 410,
-                    "y": 220,
-                    "type": "link",
-                    "path": "/Applications"
-                }
-            ]
-        },
-        "linux": {
-            "target": [
-                {
-                    "target": "AppImage",
-                    "arch": [
-                        "x64",
-                        "arm64"
-                    ]
-                }
-            ],
-            "category": "AudioVideo",
-            "icon": "build/icon.png",
-            "desktop": {
-                "entry": {
-                    "Name": "Fntv-Plus",
-                    "Comment": "Fntv-Plus 桌面客户端",
-                    "Categories": "AudioVideo;Video;Player;"
-                }
-            },
-            "extraFiles": [
-                {
-                    "from": "third_party/fntv-mpv/portable_config",
-                    "to": "third_party/fntv-mpv/portable_config",
-                    "filter": [
-                        "**/*"
-                    ]
-                },
-                {
-                    "from": "third_party/proxy",
-                    "to": "third_party/proxy",
-                    "filter": [
-                        "**/*"
-                    ]
-                }
-            ]
-        },
-        "nsis": {
-            "allowToChangeInstallationDirectory": true,
-            "oneClick": false,
-            "createDesktopShortcut": true,
-            "createStartMenuShortcut": true
-        },
-        "files": [
-            "dest",
-            "build",
-            "resource/login",
-            "resource/wiki"
-        ]
-    }
+        {
+          "from": "third_party/proxy",
+          "to": "third_party/proxy",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "oneClick": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "files": [
+      "dest",
+      "build",
+      "resource/login/**/*",
+      "resource/wiki/**/*"
+    ]
+  }
 }
