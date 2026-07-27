@@ -305,7 +305,8 @@ function getInjectionScript(username: string, password: string): string {
                             .then(function(text) {
                                 var t = (text || '').trim();
                                 var isJson = t.charAt(0) === '{';
-                                var isHtml = t.indexOf('<!doctype') === 0 || t.indexOf('<html') === 0;
+                                // 每次轮询都打日志, 便于 F12 直接观察轮询进度与响应内容
+                                console.log('[fntv-electron] sys/config 轮询 ' + attempt + '/' + maxAttempts + ': ' + (isJson ? 'JSON-OK' : ('非JSON: ' + t.slice(0, 60).replace(/\\s+/g, ' '))));
                                 if (isJson) {
                                     postMessage({
                                         type: "SysConfig",
@@ -315,8 +316,8 @@ function getInjectionScript(username: string, password: string): string {
                                     });
                                     return;
                                 }
-                                if (isHtml && attempt < maxAttempts) {
-                                    // 中继隧道未就绪 / 返回门户 HTML → 退避重试
+                                if (attempt < maxAttempts) {
+                                    // 任何非 JSON(隧道引导页/门户 HTML/空响应)都重试, 不再提前判死
                                     setTimeout(tryFetch, delayBase * Math.min(attempt, 6));
                                     return;
                                 }
@@ -379,6 +380,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
     let loginTimeout: NodeJS.Timeout | null = null;
     let loginReject: ((reason?: any) => void) | null = null;
     let relayWatchdog: NodeJS.Timeout | null = null; // 官方中继(.fnos.net)配置看门狗
+    let relayPollTimer: NodeJS.Timeout | null = null; // 官方中继子域主进程轮询定时器
+    let relayPollStarted = false;
 
     try {
         // 创建 OAuth 登录窗口
@@ -414,6 +417,11 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             // 安全检查: 只允许导航到 http/https 地址, 防止 javascript:/data: 等协议注入
             if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
                 oauthWindow?.loadURL(url);
+                // 目标是官方中继子域({fnId}.fnos.net) → 立即启动主进程配置轮询, 不等页面加载完成
+                try {
+                    const h = new URL(url).hostname.toLowerCase();
+                    if (h.endsWith('.fnos.net')) startRelaySubPoll(`https://${h}`);
+                } catch { /* ignore */ }
             } else {
                 log.warn('[FN ID] 拒绝非 http/https 弹窗:', url);
             }
@@ -434,12 +442,74 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             }
         });
 
+        // ★ lc-118 根治: 官方中继子域「主进程」轮询 sys/config.
+        //   F12 实证: 对 {fnId}.fnos.net/v/api/v1/sys/config 发普通 HTTP 请求即返回 JSON
+        //   (边缘服务器侧中继, NAS 与 fnos.net 保持长连接, 不依赖浏览器内隧道).
+        //   而子域根页面本身是 FN Connect 隧道引导 SPA(isUseSTUN/WebRTC),
+        //   页面内 fetch 在隧道就绪前只能拿到引导 HTML → 页面内轮询可能永远等不到 JSON.
+        //   因此由主进程直接轮询该 API, 拿到配置立即跳授权页, 完全绕开页面内隧道.
+        const startRelaySubPoll = (subBase: string) => {
+            if (relayPollStarted) return;
+            relayPollStarted = true;
+            let attempts = 0;
+            const maxAttempts = 30; // 30 × 2s ≈ 60s
+            const tick = async () => {
+                relayPollTimer = null;
+                if (sysConfigLoaded || authRequested || !oauthWindow || oauthWindow.isDestroyed()) return;
+                attempts++;
+                try {
+                    const resp = await request(
+                        subBase,
+                        '/v/api/v1/sys/config',
+                        HttpMethod.GET,
+                        '',
+                        undefined,
+                        cookieString ? { 'Cookie': cookieString + '; mode=relay' } : undefined,
+                        undefined,
+                        8000,
+                        0
+                    );
+                    const data = resp?.data as any;
+                    const oauth = data && typeof data === 'object' ? data.nas_oauth : null;
+                    if (resp?.success && oauth && oauth.app_id) {
+                        if (sysConfigLoaded || authRequested) return;
+                        sysConfigLoaded = true;
+                        baseUrl = subBase;
+                        const redirectUri = `${subBase}/v/oauth/result`;
+                        const targetUrl = `${subBase}/signin?client_id=${oauth.app_id}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+                        log.info(`[FN ID] 主进程轮询获取中继子域 OAuth 配置成功(第 ${attempts} 次), 跳转授权页: ${targetUrl}`);
+                        try {
+                            await oauthSession.cookies.set({ url: subBase, name: 'mode', value: 'relay', path: '/' });
+                        } catch { /* ignore */ }
+                        if (oauthWindow && !oauthWindow.isDestroyed()) {
+                            oauthWindow.loadURL(targetUrl);
+                        }
+                        return;
+                    }
+                    const brief = typeof data === 'string'
+                        ? data.slice(0, 60).replace(/\s+/g, ' ')
+                        : (data ? JSON.stringify(data).slice(0, 60) : String(resp?.message || ''));
+                    log.info(`[FN ID] 中继子域配置轮询 ${attempts}/${maxAttempts}: 未就绪 (success=${resp?.success}, resp=${brief})`);
+                } catch (e: any) {
+                    log.info(`[FN ID] 中继子域配置轮询 ${attempts}/${maxAttempts} 异常: ${e?.message || e}`);
+                }
+                if (attempts < maxAttempts && !sysConfigLoaded && !authRequested) {
+                    relayPollTimer = setTimeout(tick, 2000);
+                } else if (!sysConfigLoaded && !authRequested) {
+                    log.warn('[FN ID] 中继子域配置主进程轮询耗尽(约60s), 继续等待页面内注入脚本');
+                }
+            };
+            tick();
+        };
+
         // ★ 官方中继(.fnos.net)配置看门狗: 中继隧道建立可能较慢(实测可达数十秒),
         //   注入脚本已改为最长 60s 轮询; 此处仅作兜底日志(不弹窗), 防止消息丢失时永久卡死.
         oauthWindow.webContents.on('did-navigate', (_e: any, navUrl: string) => {
             try {
                 const navHost = new URL(navUrl).hostname.toLowerCase();
                 if (navHost.endsWith('.fnos.net')) {
+                    // 官方中继子域(非门户根 fnos.net) → 启动主进程配置轮询
+                    startRelaySubPoll(`https://${navHost}`);
                     if (relayWatchdog) clearTimeout(relayWatchdog);
                     relayWatchdog = setTimeout(() => {
                         if (!authRequested && !sysConfigLoaded) {
@@ -513,6 +583,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     await finalizeLogin(token);
                     if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
                     if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
+                    if (relayPollTimer) { clearTimeout(relayPollTimer); relayPollTimer = null; }
                     resolve();
                 } catch (err) {
                     authRequested = false;
@@ -857,6 +928,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 oauthWindow = null;
                 if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
                 if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
+                if (relayPollTimer) { clearTimeout(relayPollTimer); relayPollTimer = null; }
                 if (!authRequested) {
                     reject(new Error('用户关闭了登录窗口'));
                 }
