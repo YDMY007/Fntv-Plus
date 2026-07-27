@@ -499,13 +499,30 @@ function auto_search_extra(title, episode_num)
         return
     end
 
-    -- Python 解释器：优先用 WorkBuddy 自带的，其次系统 python / py
+    -- ⚠️ py_script 必须用脚本所在目录动态计算，绝不能写死绝对路径
+    -- （否则换机器 / 换目录 / 走 dev 仓库就找不到 bili_danmaku.py，导致 B站弹幕 100% 失败）
+    -- main.lua 通过 require('apis/extra') 加载本文件，故 get_script_directory() 返回
+    -- main.lua 所在目录 .../scripts/uosc_danmaku/，bili_danmaku.py 就在此目录下。
+    local script_dir = mp.get_script_directory()
+    local py_script = utils.join_path(script_dir, "bili_danmaku.py")
+
+    -- 向上回溯到 app 根目录：scripts/uosc_danmaku -> scripts -> portable_config -> 根（根下含 third_party）
+    local function _parent(p)
+        p = p:gsub("[\\/]$", "")  -- 去掉结尾分隔符，确保 split_path 行为稳定（不受 get_script_directory 是否带尾斜杠影响）
+        local d = utils.split_path(p)
+        return d
+    end
+    local app_root = _parent(_parent(_parent(script_dir)))
+
+    -- Python 解释器候选（与主进程 biliDanmaku.ts 的 findPythonCandidates 对齐）：
+    -- 内置便携 Python > 系统 PATH。保证无 Python 环境的电脑也能用 B站弹幕。
     local py_candidates = {
-        "C:/Users/24305/.workbuddy/binaries/python/versions/3.13.12/python.exe",
+        -- utils.join_path 仅接受两个参数，逐级拼接；app_root 已含尾斜杠
+        utils.join_path(utils.join_path(utils.join_path(app_root, "third_party"), "python"), "python.exe"),  -- 内置便携 Python（随安装包/仓库分发）
         "python",
+        "python3",
         "py",
     }
-    local py_script = "C:/Users/24305/AppData/Local/Programs/fntv/third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/bili_danmaku.py"
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))

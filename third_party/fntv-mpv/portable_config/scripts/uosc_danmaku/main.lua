@@ -66,17 +66,20 @@ function get_danmaku_visibility()
         history = utils.parse_json(history_json) or {}
         local flag = history["show_danmaku"]
         if flag == nil then
-            history["show_danmaku"] = false
+            -- 首次运行（无记录）：默认开启弹幕显示。
+            -- 与「MPV B站弹幕搜索」(auto_load_extra) 默认开启保持一致，避免「开了搜索却永远看不到弹幕」的静默陷阱。
+            -- 用户若曾手动关闭，show_danmaku 已被持久化为 false，下方 else 分支会如实返回，不受影响。
+            history["show_danmaku"] = true
             write_json_file(HISTORY_PATH, history)
         else
             return flag
         end
     else
         history = {}
-        history["show_danmaku"] = false
+        history["show_danmaku"] = true
         write_json_file(HISTORY_PATH, history)
     end
-    return false
+    return true
 end
 
 function set_danmaku_visibility(flag)
