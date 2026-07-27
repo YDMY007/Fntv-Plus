@@ -1,8 +1,58 @@
 import * as path from 'path';
+import * as net from 'net';
 import * as log from '../../modules/logger';
 import { readConfig } from '../../modules/fn_config/config';
 import { restoreCookies } from '../../modules/fn_config/cookie';
 import { BrowserWindow } from 'electron';
+
+/**
+ * 快速可达性预检: TCP 连接 domain 的 host:port, 超时即判定不可达.
+ * 用途: 启动恢复会话前, 先确认持久化的 domain(可能是内网 IP)在当前网络下可达,
+ *       否则(如内网 IP 切到外网)直接回登录页, 避免 loadURL 失败导致永久白屏.
+ */
+function isDomainReachable(domain: string, timeoutMs = 3000): Promise<boolean> {
+    return new Promise((resolve) => {
+        let url: URL;
+        try {
+            url = new URL(domain);
+        } catch {
+            resolve(false);
+            return;
+        }
+        const host = url.hostname;
+        const port = url.port ? parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
+        const socket = new net.Socket();
+        let settled = false;
+        const done = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            try { socket.destroy(); } catch { /* ignore */ }
+            resolve(ok);
+        };
+        socket.setTimeout(timeoutMs);
+        socket.once('connect', () => done(true));
+        socket.once('timeout', () => done(false));
+        socket.once('error', () => done(false));
+        try {
+            socket.connect(port, host);
+        } catch {
+            done(false);
+        }
+    });
+}
+
+/**
+ * 安全加载主页面: 若加载失败(域名不可达/证书等), 自动回退到登录页, 杜绝白屏.
+ */
+function loadMainOrFallback(mainWindow: BrowserWindow, url: string, label: string): void {
+    mainWindow.webContents.once('did-fail-load', (_e: any, _code: number, _desc: string, validatedURL: string) => {
+        if (validatedURL.startsWith(url.split('?')[0])) {
+            log.error(`[启动恢复] ${label} 主页面加载失败, 回退登录页: ${validatedURL}`);
+            mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
+        }
+    });
+    mainWindow.loadURL(url);
+}
 
 /**
  * 设置窗口为半屏
@@ -98,6 +148,14 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
             mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
             return;
         }
+        // ★ 外网/不可达预检: restoreCookies(isLogin=true) 仅写本地 cookie 不联网校验,
+        //   若持久化的是内网 IP 且当前切到外网, 这里直接回登录页, 避免 loadURL 失败白屏.
+        const reachable = await isDomainReachable(savedConfig.domain);
+        if (!reachable) {
+            log.warn(`[FN ID] 持久化域名不可达(可能已切换网络环境), 跳转登录页: ${savedConfig.domain}`);
+            mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
+            return;
+        }
         // 仅登录页路径(/login,/signin,/v/login)强制白底, 主界面 /v 保持玻璃效果.
         // SPA 感知: /v 先加载后客户端跳 /v/login, 故需同时监听 dom-ready / did-finish-load / did-navigate-in-page.
         const fnidSyncBg = () => {
@@ -112,12 +170,20 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
         mainWindow.webContents.once('dom-ready', fnidSyncBg);
         mainWindow.webContents.on('did-finish-load', fnidSyncBg);
         mainWindow.webContents.on('did-navigate-in-page', fnidSyncBg);
-        mainWindow.loadURL(`${savedConfig.domain}/v`);
+        loadMainOrFallback(mainWindow, `${savedConfig.domain}/v`, '[FN ID]');
         return;
     }
 
     // 恢复 cookie 并跳转到对应的 URL
     log.info('恢复登录状态，即将跳转到主页面, domain:', savedConfig.domain, ' token:', savedConfig.token);
+
+    // ★ 外网/不可达预检: 持久化域名在当前网络下不可达时, 直接回登录页避免白屏
+    const reachable = await isDomainReachable(savedConfig.domain);
+    if (!reachable) {
+        log.warn(`持久化域名不可达(可能已切换网络环境), 跳转登录页: ${savedConfig.domain}`);
+        mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
+        return;
+    }
 
     // 恢复 cookie
     await restoreCookies(savedConfig.domain, savedConfig.token).then((result) => {
@@ -136,7 +202,7 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
             mainWindow.webContents.once('dom-ready', normalSyncBg);
             mainWindow.webContents.on('did-finish-load', normalSyncBg);
             mainWindow.webContents.on('did-navigate-in-page', normalSyncBg);
-            mainWindow.loadURL(`${savedConfig.domain}/v`);
+            loadMainOrFallback(mainWindow, `${savedConfig.domain}/v`, '');
             return;
         }
 
