@@ -381,9 +381,9 @@ function getWikiDir(): string {
     return path.join(app.getAppPath(), 'resource', 'wiki');
 }
 
-// 防目录穿越：仅允许纯文件名（字母/数字/下划线/中文/连字符），解析后必须仍在 wikiDir 内
+// 防目录穿越：仅允许文件名（字母/数字/下划线/中文/连字符/点号），解析后必须仍在 wikiDir 内
 function safeWikiFile(name: string): string | null {
-    if (!/^[A-Za-z0-9_一-龥\-]+\.md$/i.test(name)) return null;
+    if (!/^[A-Za-z0-9_一-龥.\-]+\.md$/i.test(name)) return null;
     const wikiDir = getWikiDir();
     const full = path.join(wikiDir, name);
     const rel = path.relative(wikiDir, full);
@@ -391,9 +391,18 @@ function safeWikiFile(name: string): string | null {
     return full;
 }
 
+// 从文件名提取版本号（CHANGELOG_v3.3.2.md -> [3,3,2]），无则返回 null
+function parseVersion(name: string): number[] | null {
+    const m = name.match(/v(\d+)\.(\d+)\.(\d+)/i);
+    if (!m) return null;
+    return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
 function extractTitle(name: string, firstLine: string): string {
     const line = (firstLine || '').trim();
     if (line.startsWith('#')) return line.replace(/^#+\s*/, '').trim() || name;
+    const ver = parseVersion(name);
+    if (ver && /changelog/i.test(name)) return `v${ver.join('.')} 更新日志`;
     return name.replace(/\.md$/i, '');
 }
 
@@ -402,6 +411,7 @@ async function handleListChangelogs(): Promise<{ name: string; title: string; mt
         const wikiDir = getWikiDir();
         if (!fs.existsSync(wikiDir)) return [];
         const files = fs.readdirSync(wikiDir).filter(f => f.toLowerCase().endsWith('.md'));
+        const MANUAL = '用户使用手册.md';
         const list = files.map(f => {
             let title = f.replace(/\.md$/i, '');
             let mtime = 0;
@@ -413,7 +423,24 @@ async function handleListChangelogs(): Promise<{ name: string; title: string; mt
             } catch (e) { /* 单文件错误忽略，保留文件名兜底 */ }
             return { name: f, title, mtime };
         });
-        list.sort((a, b) => b.mtime - a.mtime); // 最新在上
+        list.sort((a, b) => {
+            // 1) 用户使用手册始终置顶
+            const aManual = a.name === MANUAL;
+            const bManual = b.name === MANUAL;
+            if (aManual !== bManual) return aManual ? -1 : 1;
+            // 2) 其余按版本号倒序（v3.3.2 > v3.3.1 > ...）；无版本号的文件按修改时间倒序兜底
+            const av = parseVersion(a.name);
+            const bv = parseVersion(b.name);
+            if (av && bv) {
+                for (let i = 0; i < 3; i++) {
+                    if (av[i] !== bv[i]) return bv[i] - av[i]; // 倒序
+                }
+                return 0;
+            }
+            if (av) return -1; // 有版本号的排前面
+            if (bv) return 1;
+            return b.mtime - a.mtime;
+        });
         return list;
     } catch (e: any) {
         log.error('列出历史版本失败:', e);
