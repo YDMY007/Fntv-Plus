@@ -37,7 +37,8 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         pythonPath: fnConfig.getPythonPath() || '',
-        detailBoxless: fnConfig.getDetailBoxless()
+        detailBoxless: fnConfig.getDetailBoxless(),
+        loginBg: fnConfig.getLoginBgPath() || ''
     };
 }
 
@@ -168,6 +169,51 @@ async function handleClearPythonPath(): Promise<void> {
     fnConfig.setPythonPath('');
     writeBiliPythonSidecar(null);
     log.info('B站弹幕 Python 路径已清空，回退到内置便携版');
+}
+
+// 弹出系统文件选择框，选择自定义登录页背景图（默认打开 resource/login/image 目录）
+async function handlePickLoginBg(): Promise<string | null> {
+    const win = getMainWindow();
+    const base = app.isPackaged ? path.dirname(app.getPath('exe')) : app.getAppPath();
+    const defaultPath = path.join(base, 'resource', 'login', 'image');
+    try {
+        const result = await dialog.showOpenDialog(win ?? undefined, {
+            title: '选择登录页背景图',
+            defaultPath: fs.existsSync(defaultPath) ? defaultPath : undefined,
+            properties: ['openFile'],
+            filters: [
+                { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+                { name: '所有文件', extensions: ['*'] }
+            ]
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            const selectedPath = result.filePaths[0];
+            fnConfig.setLoginBgPath(selectedPath);
+            log.info(`登录页背景图已设置为: ${selectedPath}`);
+            return selectedPath;
+        }
+    } catch (error) {
+        log.error('选择登录页背景图失败:', error);
+    }
+    return null;
+}
+
+// 手动输入路径设置登录页背景图（校验文件存在；不存在则回滚到当前已存值）
+async function handleSetLoginBg(_event: any, p: string): Promise<{ ok: boolean; existing?: string }> {
+    const v = (p || '').trim();
+    if (!v || !fs.existsSync(v)) {
+        return { ok: false, existing: fnConfig.getLoginBgPath() || '' };
+    }
+    fnConfig.setLoginBgPath(v);
+    log.info(`登录页背景图已设置为: ${v}`);
+    return { ok: true };
+}
+
+// 清空登录页背景图，恢复默认
+async function handleClearLoginBg(): Promise<{ ok: boolean }> {
+    fnConfig.setLoginBgPath('');
+    log.info('登录页背景图已清空，恢复默认');
+    return { ok: true };
 }
 
 // 设置默认播放器（直接播放时使用）
@@ -349,6 +395,9 @@ function init(): void {
     registerHandler('settings:clear-pot-path', handleClearPotPath, { useHandle: true });
     registerHandler('settings:pick-python-path', handlePickPythonPath, { useHandle: true });
     registerHandler('settings:clear-python-path', handleClearPythonPath, { useHandle: true });
+    registerHandler('settings:pick-login-bg', handlePickLoginBg, { useHandle: true });
+    registerHandler('settings:set-login-bg', handleSetLoginBg, { useHandle: true });
+    registerHandler('settings:clear-login-bg', handleClearLoginBg, { useHandle: true });
     registerHandler('settings:set-default-player', handleSetDefaultPlayer, { useHandle: true });
     registerHandler('settings:set-exit-mode', handleSetExitMode, { useHandle: true });
     registerHandler('settings:set-douban-enabled', handleSetDoubanEnabled, { useHandle: true });

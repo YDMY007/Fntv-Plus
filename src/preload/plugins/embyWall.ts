@@ -29,6 +29,8 @@ try {
       _detailBoxless = s.detailBoxless;
       if (isDetailPage()) applyDetailLiquidGlass();
     }
+    // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
+    if (s && s.loginBg) applyLoginBgVar(s.loginBg);
   });
 } catch (e) {}
 
@@ -36,6 +38,25 @@ function log(...a: any[]) {
   if (!_embyWallLogEnabled) return; // 独立开关关闭 → 完全静默
   const msg = LOG + ' ' + a.join(' ');
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
+}
+
+// [lc-120] 把任意本地图片路径转为 file:// URL（登录页伪元素 background-image 用）
+function toFileUrl(p: string): string {
+  if (!p) return '';
+  if (/^file:\/\//i.test(p)) return p;
+  const norm = p.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:\//.test(norm)) return 'file:///' + norm; // Windows D:/x -> file:///D:/x
+  if (norm.startsWith('/')) return 'file://' + norm;
+  return 'file:///' + norm;
+}
+
+// [lc-120] 应用/清除自定义登录页背景：设或清空 --fnos-login-bg 变量（mainwin.ts 登录页伪元素读取）
+function applyLoginBgVar(p: string): void {
+  if (p) {
+    document.documentElement.style.setProperty('--fnos-login-bg', 'url("' + toFileUrl(p) + '")');
+  } else {
+    document.documentElement.style.setProperty('--fnos-login-bg', '');
+  }
 }
 
 /* ========== logo(base64内嵌) ========== */
@@ -1973,6 +1994,74 @@ function handle(): void {
       exitGrid.appendChild(b); exitEls.push(b);
     });
     secBody3.appendChild(exitGrid);
+
+    // ===== [lc-120] 登录页背景图自定义 =====
+    const loginBgWrap = document.createElement('div');
+    loginBgWrap.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid var(--fnos-ui-border2);';
+    const loginBgLabel = document.createElement('div');
+    loginBgLabel.textContent = '登录页背景图';
+    loginBgLabel.style.cssText = 'font-size:10.5px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:8px;';
+    loginBgWrap.appendChild(loginBgLabel);
+
+    // 两个按钮：自定义登录页面背景图 / 清空
+    const loginBgBtns = document.createElement('div');
+    loginBgBtns.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+    const pickLoginBgBtn = mkBtn('自定义登录页面背景图', true);
+    const clearLoginBgBtn = mkBtn('清空', true);
+    loginBgBtns.appendChild(pickLoginBgBtn);
+    loginBgBtns.appendChild(clearLoginBgBtn);
+    loginBgWrap.appendChild(loginBgBtns);
+
+    // 选择路径按钮 + 单行输入框（显示地址，可手动编辑）
+    const loginBgRow = document.createElement('div');
+    loginBgRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+    const loginBgInput = document.createElement('input');
+    loginBgInput.type = 'text';
+    loginBgInput.placeholder = '背景图地址（留空=默认）';
+    loginBgInput.style.cssText = 'flex:1 1 auto;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    const loginBgBrowse = mkBtn('选择路径', true);
+    loginBgBrowse.style.cssText = 'flex:none;height:32px;';
+    loginBgRow.appendChild(loginBgInput);
+    loginBgRow.appendChild(loginBgBrowse);
+    loginBgWrap.appendChild(loginBgRow);
+
+    pickLoginBgBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const p = await ipcRenderer.invoke('settings:pick-login-bg');
+      if (p) { loginBgInput.value = p; applyLoginBgVar(p); }
+    });
+    clearLoginBgBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      await ipcRenderer.invoke('settings:clear-login-bg');
+      loginBgInput.value = '';
+      applyLoginBgVar('');
+    });
+    loginBgBrowse.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const p = await ipcRenderer.invoke('settings:pick-login-bg');
+      if (p) { loginBgInput.value = p; applyLoginBgVar(p); }
+    });
+    loginBgInput.addEventListener('change', async () => {
+      const v = (loginBgInput.value || '').trim();
+      if (!v) { await ipcRenderer.invoke('settings:clear-login-bg'); applyLoginBgVar(''); return; }
+      const r: any = await ipcRenderer.invoke('settings:set-login-bg', v);
+      if (r && r.ok) {
+        applyLoginBgVar(v);
+      } else if (r && r.existing !== undefined) {
+        loginBgInput.value = r.existing || '';
+        applyLoginBgVar(r.existing || '');
+      }
+    });
+
+    // 构建时回填当前已存背景路径（面板为单例，仅在首次构建时执行一次）
+    try {
+      ipcRenderer.invoke('settings:get').then((s: any) => {
+        if (s && s.loginBg) loginBgInput.value = s.loginBg;
+      });
+    } catch (_) {}
+
+    secBody3.appendChild(loginBgWrap);
     contentGrid.appendChild(sec3.el);
 
     // ===== 分组: B站弹幕登录 =====
