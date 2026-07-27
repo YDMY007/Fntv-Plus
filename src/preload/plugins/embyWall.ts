@@ -1588,6 +1588,120 @@ function handle(): void {
     buildSettingsPanel();
   }
 
+  /** 打开「历史版本」弹窗：列出 resource/wiki 下的 MD 文件，点击可查看内容 */
+  function openHistoryModal(): void {
+    if (document.getElementById('fnos-history-overlay')) return; // 防重复打开
+
+    const ov = document.createElement('div');
+    ov.id = 'fnos-history-overlay';
+    ov.setAttribute('data-fnos-ui', '1');
+    ov.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:2147483647',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(28,20,40,.40)',
+      'backdrop-filter:blur(5px)', '-webkit-backdrop-filter:blur(5px)',
+      'opacity:0', 'transition:opacity .18s ease',
+      'font-family:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,sans-serif',
+    ].join(';') + ';';
+
+    const card = document.createElement('div');
+    card.setAttribute('data-fnos-ui', '1');
+    card.style.cssText = [
+      'position:relative', 'display:flex', 'flex-direction:column',
+      'width:92%', 'max-width:780px', 'height:82vh', 'max-height:760px',
+      'background:rgba(252,247,253,.98)!important',
+      'backdrop-filter:blur(30px) saturate(135%)', '-webkit-backdrop-filter:blur(30px) saturate(135%)',
+      'border-radius:16px',
+      'box-shadow:0 18px 50px rgba(80,60,110,.30), inset 0 1px 0 rgba(255,255,255,.7)',
+      'color:#3a2d4d', 'overflow:hidden',
+      'transform:scale(.96)', 'transition:transform .18s cubic-bezier(.22,.61,.36,1)',
+    ].join(';') + ';';
+
+    // 头部：标题 + 关闭
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(139,111,209,.18);flex-shrink:0;';
+    const hTitle = document.createElement('div');
+    hTitle.textContent = '历史版本';
+    hTitle.style.cssText = 'font-size:16px;font-weight:700;color:#2e2340;';
+    const closeBtn = document.createElement('div');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;font-size:15px;color:#6a5e7e;background:rgba(139,111,209,.10);';
+    closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(139,111,209,.22)'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.background = 'rgba(139,111,209,.10)'; };
+    closeBtn.onclick = () => closeHistory();
+    header.appendChild(hTitle);
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    // 主体两栏：左列表 + 右内容
+    const body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex:1;min-height:0;';
+    const listPane = document.createElement('div');
+    listPane.style.cssText = 'width:230px;flex-shrink:0;border-right:1px solid rgba(139,111,209,.18);overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:4px;';
+    const contentPane = document.createElement('div');
+    contentPane.style.cssText = 'flex:1;min-width:0;overflow-y:auto;padding:18px 22px;font-size:13px;line-height:1.7;color:#3a2d4d;white-space:pre-wrap;word-break:break-word;font-family:"Segoe UI",system-ui,-apple-system,sans-serif;';
+    contentPane.textContent = '请选择左侧的历史版本查看更新内容。';
+    body.appendChild(listPane);
+    body.appendChild(contentPane);
+    card.appendChild(body);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+
+    requestAnimationFrame(() => { ov.style.opacity = '1'; card.style.transform = 'scale(1)'; });
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeHistory(); });
+
+    function closeHistory(): void {
+      ov.style.opacity = '0';
+      card.style.transform = 'scale(.96)';
+      setTimeout(() => ov.remove(), 180);
+    }
+
+    // 载入文件列表
+    ipcRenderer.invoke('settings:list-changelogs').then((list: any[]) => {
+      listPane.innerHTML = '';
+      if (!list || !list.length) {
+        const empty = document.createElement('div');
+        empty.textContent = '未找到历史版本文件';
+        empty.style.cssText = 'padding:12px;font-size:12px;color:#9a8eae;';
+        listPane.appendChild(empty);
+        return;
+      }
+      list.forEach((item) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:9px 11px;border-radius:9px;cursor:pointer;font-size:13px;color:#4a3d5e;transition:background .12s;';
+        row.textContent = item.title || item.name;
+        row.onmouseenter = () => { if (row.dataset.active !== '1') row.style.background = 'rgba(139,111,209,.10)'; };
+        row.onmouseleave = () => { if (row.dataset.active !== '1') row.style.background = 'transparent'; };
+        row.onclick = () => {
+          listPane.querySelectorAll('[data-active="1"]').forEach((el) => {
+            (el as HTMLElement).style.background = 'transparent';
+            (el as HTMLElement).dataset.active = '0';
+          });
+          row.dataset.active = '1';
+          row.style.background = 'rgba(139,111,209,.20)';
+          contentPane.textContent = '加载中…';
+          ipcRenderer.invoke('settings:read-changelog', item.name).then((res: any) => {
+            if (res && res.ok) {
+              contentPane.textContent = res.content;
+              contentPane.scrollTop = 0;
+            } else {
+              contentPane.textContent = '读取失败：' + ((res && res.error) || '未知错误');
+            }
+          }).catch((err: any) => {
+            contentPane.textContent = '读取失败：' + String(err);
+          });
+        };
+        listPane.appendChild(row);
+      });
+    }).catch((err: any) => {
+      listPane.innerHTML = '';
+      const e = document.createElement('div');
+      e.textContent = '加载失败：' + String(err);
+      e.style.cssText = 'padding:12px;font-size:12px;color:#c0504d;';
+      listPane.appendChild(e);
+    });
+  }
+
   /** [新] 创建设置面板(挂到 body, 打开时定位到侧栏区域)
    *  设计原则: 固定宽度不撑栏(340px)、高对比度文字、紧凑分组、可扩展 */
   function buildSettingsPanel(): void {
@@ -1781,12 +1895,15 @@ function handle(): void {
     updRow.style.cssText = 'display:flex;gap:6px;';
     const updBtn = mkBtn('检查更新', true);
     const updMirrorBtn = mkBtn('镜像检查', true);
+    const updHistoryBtn = mkBtn('历史版本', true);
     updRow.appendChild(updBtn);
     updRow.appendChild(updMirrorBtn);
+    updRow.appendChild(updHistoryBtn);
     updFooter.appendChild(updRow);
     sec1.el.appendChild(updFooter);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
     updMirrorBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update-mirror'); });
+    updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
 
 
     contentGrid.appendChild(sec1.el);
@@ -2781,7 +2898,8 @@ function handle(): void {
         const withinOtherUi = t.closest('#fnos-dialog-overlay')
           || t.closest('#fnos-about-modal')
           || t.closest('#fnos-feedback-modal')
-          || t.closest('#fnos-bili-modal');
+          || t.closest('#fnos-bili-modal')
+          || t.closest('#fnos-history-overlay');
         if (withinOtherUi) return;
       }
       overlay.style.display = 'none';
