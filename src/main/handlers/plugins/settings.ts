@@ -36,7 +36,8 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncEnabled: fnConfig.getBangumiSyncEnabled(),
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
-        pythonPath: fnConfig.getPythonPath() || ''
+        pythonPath: fnConfig.getPythonPath() || '',
+        detailBoxless: fnConfig.getDetailBoxless()
     };
 }
 
@@ -51,6 +52,10 @@ async function handleSetHidePlay(_event: any, hide: boolean): Promise<void> {
 
 async function handleSetNasProxy(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setNasProxyEnabled(!!enabled);
+}
+
+async function handleSetDetailBoxless(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setDetailBoxless(!!enabled);
 }
 
 // 弹出系统文件选择框，选中后写回配置并刷新 media 模块缓存
@@ -353,6 +358,7 @@ function init(): void {
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
+    registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:open-external', handleOpenExternal, { useHandle: true });
     // 渲染进程(EmbyWall 墙)主动索取当前调试过滤 → 回传，使其渲染侧日志开关即时生效
     registerHandler('debug-filter-request', (event: any) => {

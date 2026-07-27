@@ -93,6 +93,8 @@ export interface Config {
     // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
     // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
     pythonPath?: string;
+    // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
+    detailBoxless?: boolean;
 }
 
 /**
@@ -591,6 +593,19 @@ export function setMpvBiliSearchEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取「关闭详情页背景框」开关（默认关闭=false，保留玻璃背景框）
+export function getDetailBoxless(): boolean {
+    const config: Config = readConfig() || {};
+    return config.detailBoxless === true; // 默认关闭
+}
+
+// 设置「关闭详情页背景框」开关
+export function setDetailBoxless(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.detailBoxless = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // CommonJS导出，确保与现有代码兼容
 module.exports = {
     saveConfig,
@@ -642,5 +657,7 @@ module.exports = {
     getMpvBiliSearchEnabled,
     setMpvBiliSearchEnabled,
     getPythonPath,
-    setPythonPath
+    setPythonPath,
+    getDetailBoxless,
+    setDetailBoxless
 };
