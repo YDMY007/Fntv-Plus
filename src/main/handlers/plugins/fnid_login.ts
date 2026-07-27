@@ -326,10 +326,19 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
         const oauthSession = oauthWindow.webContents.session;
 
-        // 拦截 target="_blank" / window.open: 防止点击"飞牛影视APP"等产生裸窗或甩到系统浏览器.
-        // 注意: 这里只 deny 弹窗, 不阻止 oauthWindow 内部正常导航(授权流程靠内部导航完成).
+        // 拦截 target="_blank" / window.open: 不开新窗, 改为在 oauthWindow 内导航.
+        // 原因: 5ddd.com 中继选择页的三个选项(中继转发/公网IP)通过 window.open 或 target=_blank 跳转,
+        //       若直接 deny 则用户点击无反应(看起来像"无法点击").
+        //       授权流程(/signin)完成后的回跳由 will-navigate 守卫(isOauthResultUrl)拦截, 不会泄露到系统浏览器.
         oauthWindow.webContents.setWindowOpenHandler((details) => {
-            log.info('[FN ID] 拦截弹窗(统一在 oauthWindow 内处理):', details.url);
+            const url = details.url;
+            log.info('[FN ID] 弹窗导航(合并到 oauthWindow 内处理):', url);
+            // 安全检查: 只允许导航到 http/https 地址, 防止 javascript:/data: 等协议注入
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                oauthWindow?.loadURL(url);
+            } else {
+                log.warn('[FN ID] 拒绝非 http/https 弹窗:', url);
+            }
             return { action: 'deny' };
         });
 
