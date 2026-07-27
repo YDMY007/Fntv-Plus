@@ -1,7 +1,6 @@
 import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getLoginBgPath } from '../../modules/fn_config/config';
 
 // [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
 //   注意: 打包后 resource 在 app.asar 内, 取 app.getAppPath()(开发态=项目根/打包态=asar 虚拟路径)即可正确定位,
@@ -364,9 +363,17 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
 
     const url = wc.getURL();
     if (isLoginPath(url)) {
-        // [lc-141] 同步读取自定义登录背景(主进程直接读 config, 不依赖渲染进程异步 IPC 设置 CSS 变量),
-        //   避免 transparent 窗口下"body 已被设透明 + CSS 变量还未赋值"的竞态窗口全透/白屏.
-        const customBg = getLoginBgPath();
+        // [lc-144] 直接读 config.json 取 loginBgPath(不依赖 config 模块导出, 避免 asar/打包环境下
+        //   "getLoginBgPath is not a function" 崩溃——该崩溃已在多份打包构建中复现).
+        //   同步读取, 零耦合, 任何环境下不会因模块解析差异而失败.
+        let customBg = '';
+        try {
+            const cfgPath = path.join(app.getPath('userData'), 'config.json');
+            if (fs.existsSync(cfgPath)) {
+                const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+                customBg = (raw && raw.loginBgPath) || '';
+            }
+        } catch (_) { /* 读不到就留空, 用默认图 */ }
         const effectiveBgUrl = (customBg && fs.existsSync(customBg))
             ? 'file:///' + customBg.replace(/\\/g, '/')
             : _loginBgDefaultUrl;
