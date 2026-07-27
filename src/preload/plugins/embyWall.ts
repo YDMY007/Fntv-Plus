@@ -2350,8 +2350,8 @@ function handle(): void {
 
     const pyPath = document.createElement('div');
     pyPath.id = 'fnos-python-path';
-    pyPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
-      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+    pyPath.style.cssText = 'font-size:12px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
+      + 'max-height:72px;overflow-y:auto;padding:6px 9px;line-height:1.5;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);';
     secBodyBili.appendChild(pyPath);
 
