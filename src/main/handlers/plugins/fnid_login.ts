@@ -121,37 +121,72 @@ function getInjectionScript(username: string, password: string): string {
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            // 在 /login 页面自动填充用户名密码
-            if (window.location.href.indexOf('/login') !== -1) {
-                setTimeout(function() {
-                    var uInput = document.getElementById('username');
-                    var pInput = document.getElementById('password');
+            // 在 /login 页面自动填充用户名密码并提交
+            // 多选择器兼容: fnOS 不同版本/部署方式的 input id/name/placeholder 可能不同.
+            // 轮询重试: 外网中继跳转后页面加载比内网慢, 单次 setTimeout 200ms 不够.
+            (function tryAutoLogin() {
+                if (window.location.href.indexOf('/login') === -1 &&
+                    window.location.href.indexOf('/signin') === -1) return;
+
+                var attempts = 0;
+                var maxAttempts = 20; // 最多试 4 秒(20 × 200ms)
+                var timer = setInterval(function() {
+                    attempts++;
+                    // 多级选择器: id → name → placeholder → type+顺序
+                    var uInput = document.getElementById('username')
+                        || document.querySelector('input[name="username"]')
+                        || document.querySelector('input[placeholder*="用户名"]')
+                        || document.querySelector('input[placeholder*="账号"]')
+                        || (function() { var inputs = document.querySelectorAll('input[type="text"], input:not([type])'); return inputs.length > 0 ? inputs[0] : null; })();
+                    var pInput = document.getElementById('password')
+                        || document.querySelector('input[name="password"]')
+                        || document.querySelector('input[placeholder*="密码"]')
+                        || (function() { var inputs = document.querySelectorAll('input[type="password"]'); return inputs.length > 0 ? inputs[0] : null; })();
+
                     if (uInput && AUTO_LOGIN_USER) {
+                        clearInterval(timer);
+                        console.log("[fntv-electron] 找到登录框, 自动填充用户名 (第 " + attempts + " 次尝试)");
                         triggerInput(uInput, AUTO_LOGIN_USER);
                         if (AUTO_LOGIN_PASS && pInput) {
                             triggerInput(pInput, AUTO_LOGIN_PASS);
-                            // 自动点击登录按钮
+                            console.log("[fntv-electron] 密码已填充, 准备自动点击登录");
+                            // 自动点击登录按钮(多种选择器)
                             setTimeout(function() {
-                                var btn = document.querySelector('button[type="submit"]');
-                                if (btn) btn.click();
-                            }, 200);
+                                var btn = document.querySelector('button[type="submit"]')
+                                    || Array.from(document.querySelectorAll('button')).find(function(b) { return b.innerText.indexOf('登录') !== -1 || b.innerText.indexOf('登 录') !== -1; })
+                                    || document.querySelector('input[type="submit"]');
+                                if (btn) { btn.click(); console.log("[fntv-electron] 已点击登录按钮"); }
+                                else { console.warn("[fntv-electron] 未找到登录按钮"); }
+                            }, 300);
                         }
+                        return;
+                    }
+
+                    if (attempts >= maxAttempts) {
+                        clearInterval(timer);
+                        console.warn("[fntv-electron] 自动填充超时: " + maxAttempts + " 次尝试未找到登录框, URL=" + window.location.href);
                     }
                 }, 200);
-            }
+            })();
 
-            // 在 /signin 页面自动点击授权按钮
-            if (window.location.href.indexOf('/signin') !== -1) {
-                setTimeout(function() {
+            // 在 /signin 页面自动点击授权按钮(轮询重试, 同上)
+            (function tryAutoAuthorize() {
+                if (window.location.href.indexOf('/signin') === -1) return;
+                var attempts = 0;
+                var timer = setInterval(function() {
+                    attempts++;
                     var btns = document.querySelectorAll('button');
                     for (var i = 0; i < btns.length; i++) {
                         if (btns[i].innerText.indexOf('授权') !== -1) {
+                            clearInterval(timer);
                             btns[i].click();
-                            break;
+                            console.log("[fntv-electron] 已点击授权按钮 (第 " + attempts + " 次尝试)");
+                            return;
                         }
                     }
+                    if (attempts >= 20) { clearInterval(timer); console.warn("[fntv-electron] 授权按钮查找超时"); }
                 }, 200);
-            }
+            })();
 
             // Hook XMLHttpRequest
             var originalOpen = XMLHttpRequest.prototype.open;
