@@ -1,6 +1,7 @@
 import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getLoginBgPath } from '../../modules/fn_config/config';
 
 // [lc-123] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
 const _loginBgDir = app.isPackaged
@@ -363,16 +364,12 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
 
     const url = wc.getURL();
     if (isLoginPath(url)) {
-        // 登录页圆角方案 (v381 重写):
-        //   主界面之所以能圆角, 是因为飞牛 React 渲染了一个真正
-        //   position:fixed;inset:0 的全屏容器(.fixed.inset-0), 其自带
-        //   clip-path:inset(0 round 16px) 把四角裁成圆角.
-        //   透明窗口下 html/body 的 clip-path 对"背景溢出视口"并不可靠
-        //   (body 背景会回退到 canvas, 不被裁剪 → 方角), 所以之前把 body
-        //   设成 position:fixed 的方案实测仍方.
-        //   现改: body 保持透明(不承载背景), 用全屏 fixed 伪元素
-        //   body::before 承载壁纸 + clip-path 圆角, 与主界面同一套可靠机制.
-        //   伪元素不在 querySelectorAll('*') 内, 不会被 embyWall 圆角扫描器误清.
+        // [lc-141] 同步读取自定义登录背景(主进程直接读 config, 不依赖渲染进程异步 IPC 设置 CSS 变量),
+        //   避免 transparent 窗口下"body 已被设透明 + CSS 变量还未赋值"的竞态窗口全透/白屏.
+        const customBg = getLoginBgPath();
+        const effectiveBgUrl = (customBg && fs.existsSync(customBg))
+            ? 'file:///' + customBg.replace(/\\/g, '/')
+            : _loginBgDefaultUrl;
         wc.insertCSS(`
             html{
                 height:100%!important;
@@ -397,11 +394,12 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
                 right:0!important;
                 bottom:0!important;
                 z-index:-1!important;
-                background-image:var(--fnos-login-bg, url("${_loginBgDefaultUrl}"))!important;
+                background-image:url("${effectiveBgUrl}")!important;
                 background-repeat:no-repeat!important;
                 background-position:center center!important;
                 background-size:cover!important;
                 background-attachment:scroll!important;
+                background-color:#1a1a2e!important;
                 border-radius:16px!important;
                 overflow:hidden!important;
                 clip-path:inset(0 round 16px)!important;
