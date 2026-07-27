@@ -424,20 +424,17 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         });
 
         // ★ 官方中继(.fnos.net)配置看门狗: 中继服务器可能不代理 /v/api/v1/sys/config,
-        //   导致 app_id/baseUrl 永远拿不到 → 注入脚本重试耗尽后发 SysConfigFailed, 主进程快速报错.
-        //   此处再加一道兜底: 导航到 .fnos.net 后 25s 内若仍未完成 OAuth 配置, 给出明确错误,
-        //   而不是干等 120s 超时或永久卡死.
+        //   导致 app_id/baseUrl 永远拿不到 → 注入脚本重试耗尽后发 SysConfigFailed.
+        //   暂时只记日志不弹窗(给用户留出 F12 诊断时间), 等 F12 诊断结果回来后再根治.
         oauthWindow.webContents.on('did-navigate', (_e: any, navUrl: string) => {
             try {
                 const navHost = new URL(navUrl).hostname.toLowerCase();
                 if (navHost.endsWith('.fnos.net')) {
                     if (relayWatchdog) clearTimeout(relayWatchdog);
                     relayWatchdog = setTimeout(() => {
-                        if (!authRequested && !sysConfigLoaded && loginReject) {
-                            authRequested = true;
-                            if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
-                            relayWatchdog = null;
-                            loginReject(new Error('FN ID 官方中继转发连接失败：中继服务器未返回有效的 NAS 配置（/v/api/v1/sys/config 返回非 JSON）。请改用 IPv6 / 公网 IP 或内网地址登录。'));
+                        if (!authRequested && !sysConfigLoaded) {
+                            log.warn(`[FN ID] 官方中继(.fnos.net) 25s 内未完成 OAuth 配置(已记录不弹窗), url=${navUrl}`);
+                            if (relayWatchdog) { relayWatchdog = null; }
                         }
                     }, 25000);
                 }
@@ -729,14 +726,9 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
                     // 处理 SysConfig 彻底失败（注入脚本重试耗尽仍只拿到 HTML）
                     // ★ 官方中继(.fnos.net)典型表现: /v/api/v1/sys/config 返回门户 HTML
+                    // 暂时只记日志不弹窗(给用户留出 F12 诊断时间), 等 F12 诊断结果回来后再根治.
                     if (type === 'SysConfigFailed') {
-                        log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API), pageUrl=${messageData.pageUrl || ''}`);
-                        if (!authRequested && !sysConfigLoaded && loginReject) {
-                            authRequested = true;
-                            if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
-                            if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
-                            loginReject(new Error('FN ID 官方中继转发连接失败：中继服务器未返回有效的 NAS 配置（/v/api/v1/sys/config 返回非 JSON）。请改用 IPv6 / 公网 IP 或内网地址登录。'));
-                        }
+                        log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API, 已记录不弹窗), pageUrl=${messageData.pageUrl || ''}`);
                         return;
                     }
 
