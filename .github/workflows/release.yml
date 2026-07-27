@@ -1,26 +1,9 @@
 name: Release Build
 
 on:
-  push:
-    branches:
-      - release
-    # 排除爱发电相关的提交和文档更新
-    paths-ignore:
-      - 'README.md'
-      - '.github/afdian-action.cshtml'
-      - '.github/workflows/afdian-action.yml'
-      - 'docs/**'
-      - '*.md'
-#   pull_request:
-#     branches:
-#       - release
-#     # 排除爱发电相关文件的变更和文档更新
-#     paths-ignore:
-#       - 'README.md'
-#       - '.github/afdian-action.cshtml'
-#       - '.github/workflows/afdian-action.yml'
-#       - 'docs/**'
-#       - '*.md'
+  # 完全手动触发：仅在 GitHub Actions 页面手动点击「Run workflow」时才构建并建 Release。
+  # 已移除 push 到 release 分支的自动触发，避免每次 push 都白跑 mac/linux 构建、
+  # 或自动建出「无更新日志」的 Release。更新日志由维护者在 Release 页面手动填写。
   workflow_dispatch:
 
 permissions:
