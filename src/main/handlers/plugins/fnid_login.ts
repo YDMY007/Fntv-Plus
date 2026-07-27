@@ -1,4 +1,4 @@
-import { BrowserWindow, IpcMainEvent, session } from 'electron';
+import { BrowserWindow, IpcMainEvent, session, dialog } from 'electron';
 import { getMainWindow } from '../../common/mainwin';
 import { ApiService } from '../../../modules/fn_api/api';
 import { request, HttpMethod } from '../../../modules/fn_api/request';
@@ -382,6 +382,33 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
     let relayWatchdog: NodeJS.Timeout | null = null; // 官方中继(.fnos.net)配置看门狗
     let relayPollTimer: NodeJS.Timeout | null = null; // 官方中继子域主进程轮询定时器
     let relayPollStarted = false;
+    let relayFailedNotified = false; // 官方中继失败弹窗去重, 只弹一次
+
+    // 官方中继连接失败 → 弹原生错误框(lc-116 曾因挡 F12 诊断临时关闭, lc-126 恢复).
+    // 用原生 dialog 而非 fnosDialog: FN ID 登录期间 oauthWindow 浮在上层,
+    // fnosDialog 渲染在登录页主窗口可能被遮挡; 原生框为 OS 级模态, 保证置顶可见.
+    // 仅在「主进程轮询耗尽 + 注入脚本也失败」后才触发(最坏约 60s), 不会误伤正常登录.
+    const notifyRelayFailed = (reason: string): void => {
+        if (relayFailedNotified) return;
+        relayFailedNotified = true;
+        if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
+        if (relayPollTimer) { clearTimeout(relayPollTimer); relayPollTimer = null; }
+        log.error(`[FN ID] 官方中继连接失败: ${reason}`);
+        dialog.showMessageBox({
+            type: 'error',
+            title: '官方中继连接失败',
+            message: '无法通过官方中继完成飞牛 ID 登录',
+            detail: `${reason}\n\n可稍后重试，或改用「IPv6 / 公网 IP」方式直连。`,
+            buttons: ['确定'],
+            defaultId: 0,
+            cancelId: 0,
+        }).then(() => {
+            if (loginReject) {
+                loginReject(new Error('官方中继连接失败'));
+                loginReject = null;
+            }
+        });
+    };
 
     try {
         // 创建 OAuth 登录窗口
@@ -496,7 +523,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 if (attempts < maxAttempts && !sysConfigLoaded && !authRequested) {
                     relayPollTimer = setTimeout(tick, 2000);
                 } else if (!sysConfigLoaded && !authRequested) {
-                    log.warn('[FN ID] 中继子域配置主进程轮询耗尽(约60s), 继续等待页面内注入脚本');
+                    log.warn('[FN ID] 中继子域配置主进程轮询耗尽(约60s), 触发失败弹窗');
+                    notifyRelayFailed('中继子域在约 60 秒内未返回有效的系统配置（主进程轮询 /v/api/v1/sys/config 始终未就绪）');
                 }
             };
             tick();
@@ -513,10 +541,10 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     if (relayWatchdog) clearTimeout(relayWatchdog);
                     relayWatchdog = setTimeout(() => {
                         if (!authRequested && !sysConfigLoaded) {
-                            log.warn(`[FN ID] 官方中继(.fnos.net) 55s 内未完成 OAuth 配置(已记录不弹窗), url=${navUrl}`);
+                            notifyRelayFailed('官方中继（.fnos.net）在约 65 秒内未完成 OAuth 配置获取，中继隧道可能尚未建立');
                             if (relayWatchdog) { relayWatchdog = null; }
                         }
-                    }, 55000);
+                    }, 65000);
                 }
             } catch { /* ignore */ }
         });
@@ -817,7 +845,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     // ★ 官方中继(.fnos.net)典型表现: /v/api/v1/sys/config 返回门户 HTML
                     // 暂时只记日志不弹窗(给用户留出 F12 诊断时间), 等 F12 诊断结果回来后再根治.
                     if (type === 'SysConfigFailed') {
-                        log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API, 已记录不弹窗), pageUrl=${messageData.pageUrl || ''}`);
+                        log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API), pageUrl=${messageData.pageUrl || ''}`);
+                        notifyRelayFailed('中继服务器未返回有效的系统配置（/v/api/v1/sys/config 持续返回门户 HTML 而非 JSON）');
                         return;
                     }
 
