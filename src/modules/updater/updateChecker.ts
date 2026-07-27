@@ -2,6 +2,7 @@ import axios, { AxiosResponse } from 'axios';
 import { shell, app } from 'electron';
 import { fnosDialog } from '../../main/common/fnosDialog';
 import { getDownloadProxyConfig } from '../fn_config/config';
+import { getUpdateDismissedAt, setUpdateDismissedAt } from '../fn_config/config';
 import log from '../logger';
 
 // 尝试获取semver模块
@@ -353,6 +354,8 @@ export class UpdateChecker {
 
         switch (response) {
             case 0: // 立即下载
+                // 记录时间戳：7 天内不再自动弹窗更新提醒
+                setUpdateDismissedAt(Date.now());
                 if (downloadUrl) {
                     shell.openExternal(downloadUrl);
                 } else if (htmlUrl) {
@@ -401,6 +404,14 @@ export class UpdateChecker {
      */
     async autoCheckForUpdates(): Promise<void> {
         try {
+            // 检查 7 天免打扰：用户点过「立即下载」后 7 天内不再自动弹窗
+            const dismissedAt = getUpdateDismissedAt();
+            const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
+            if (dismissedAt > 0 && (Date.now() - dismissedAt) < SNOOZE_MS) {
+                log.info('更新提醒在 7 天免打扰期内，跳过自动弹窗');
+                return;
+            }
+
             const updateInfo = await this.checkForUpdates();
             
             if (updateInfo.hasUpdate) {

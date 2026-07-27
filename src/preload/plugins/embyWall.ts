@@ -2030,7 +2030,7 @@ function handle(): void {
     updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 8px;';
     updFooter.appendChild(updDivider);
     const updRow = document.createElement('div');
-    updRow.style.cssText = 'display:flex;gap:6px;';
+    updRow.style.cssText = 'display:flex;justify-content:space-evenly;gap:6px;';
     const updBtn = mkBtn('检查更新', true);
     const updMirrorBtn = mkBtn('镜像检查', true);
     const updHistoryBtn = mkBtn('历史版本', true);
