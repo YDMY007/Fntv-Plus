@@ -95,6 +95,8 @@ export interface Config {
     pythonPath?: string;
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
+    // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
+    loginBgPath?: string;
 }
 
 /**
@@ -361,6 +363,23 @@ export function setMpvPlayerPath(path: string | null): void {
 export function getPotPlayerPath(): string | undefined {
     const config: Config = readConfig() || {};
     return config.potPlayerPath;
+}
+
+// 获取自定义登录页背景图路径（留空=默认背景）
+export function getLoginBgPath(): string {
+    const config: Config = readConfig() || {};
+    return config.loginBgPath || '';
+}
+
+// 设置自定义登录页背景图路径（空字符串=恢复默认）
+export function setLoginBgPath(p: string): void {
+    const config: Config = readConfig() || {};
+    if (!p) {
+        delete config.loginBgPath;
+    } else {
+        config.loginBgPath = p;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
 // 设置 PotPlayer 播放器路径配置

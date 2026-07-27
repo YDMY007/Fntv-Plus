@@ -387,7 +387,7 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
                 right:0!important;
                 bottom:0!important;
                 z-index:-1!important;
-                background-image:url("./image/bg-login.webp")!important;
+                background-image:var(--fnos-login-bg, url("./image/bg-login.webp"))!important;
                 background-repeat:no-repeat!important;
                 background-position:center center!important;
                 background-size:cover!important;
