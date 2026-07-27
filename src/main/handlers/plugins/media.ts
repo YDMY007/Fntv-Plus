@@ -12,7 +12,6 @@ import * as path from 'path';
 import { PlayStatusData, ItemListRequest } from '../../../modules/fn_api/types';
 import { escape } from 'querystring';
 import { isTrusted } from '../../../modules/cert_trust';
-import { checkLibraryPageUrl } from '../../common/utils';
 import { getMainWindow } from '../../common/mainwin';
 import * as doubanSync from './doubanSync';
 import * as bangumiSync from './bangumiSync';
@@ -304,18 +303,6 @@ export function getPotPlayerPath(): string | undefined {
     return undefined;
 }
 
-// 刷新窗口
-async function refreshWindow(): Promise<void> {
-    const currentURL = getMainWindow().webContents.getURL() || '';
-    // 如果是资源库页面则不刷新
-    if (checkLibraryPageUrl(currentURL)) {
-        return;
-    }
-
-    log.info('刷新当前窗口');
-    getMainWindow().webContents.reloadIgnoringCache();
-}
-
 /**
  * 创建播放器事件处理器
  * @param fnapi - API服务实例
@@ -377,9 +364,12 @@ function eventHandler(fnapi: fn.ApiService) {
             case ply.EventType.EXIT:
                 const event = data as ply.PlayExitData;
                 if (event.code !== 0) {
-                    log.error(`播放器异常退出 (code ${event.code})`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                    await refreshWindow();
+                    // [lc-127] 播放器异常退出: 仅记录日志, 不再整页刷新。
+                    // 用户反馈「每次关闭视频后首页都会刷新一次」体验差, 改为仅在每次启动
+                    // 时随初始 loadURL 刷新一次首页。关闭视频后由 SPA 自身返回首页,
+                    // 注入钩子(MutationObserver/poll)会自动重注入播放按钮/轮播;
+                    // 玻璃壳 CSS 在 dom-ready 时重注(mainwin.ts), 不会丢失。
+                    log.error(`播放器异常退出 (code ${event.code})，不再整页刷新，交由 SPA 自行恢复`);
                     return;
                 }
 
@@ -421,9 +411,10 @@ function eventHandler(fnapi: fn.ApiService) {
                 }
 
                 // 等待50ms让进度记录落库。
-                // 不再整页刷新: 关闭视频后由 SPA 自身返回首页, 注入的钩子(MutationObserver/poll)
-                // 会自动重注入播放按钮/轮播; 用户仅需「下次启动」时首页才会重新拉取「继续观看」进度
-                // (符合用户需求: 刷新只在启动时发生一次, 而非每次关闭视频都刷)。
+                // [lc-127] 无论正常还是异常退出, 均不再整页刷新:
+                //   关闭视频后由 SPA 自身返回首页, 注入的钩子(MutationObserver/poll)
+                //   会自动重注入播放按钮/轮播; 用户仅需「下次启动」时首页才会重新拉取「继续观看」进度
+                //   (符合用户需求: 刷新只在启动时发生一次, 而非每次关闭视频都刷)。
                 await new Promise(resolve => setTimeout(resolve, 50));
                 break;
 
