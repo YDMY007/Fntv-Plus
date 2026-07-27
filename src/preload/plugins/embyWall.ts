@@ -1449,8 +1449,9 @@ function handle(): void {
    *  - 写入 localStorage, 重启后仍生效 */
   function injectGlassControl(panel: HTMLElement): void {
     if (panel.querySelector('#fnos-glass-ctrl')) return; // 幂等, 避免重复注入
-    const storedAlpha = parseFloat(localStorage.getItem('fnos-glass-alpha') || '0.42');
-    const storedBlur = parseInt(localStorage.getItem('fnos-glass-blur') || '60', 10);
+    // [lc-119] 首次登录(无 localStorage)默认: 透明度滑块=30%(对应 alpha 0.68), 背景模糊滑块=30px
+    const storedAlpha = parseFloat(localStorage.getItem('fnos-glass-alpha') || '0.68');
+    const storedBlur = parseInt(localStorage.getItem('fnos-glass-blur') || '30', 10);
     // 滑块 value=透明度%(0→浓度最高不透明0.95, 100→最透0.05); 与 alpha 反相关
     const alphaPct = Math.max(0, Math.min(100, Math.round((0.95 - storedAlpha) / 0.9 * 100)));
     const ctrl = document.createElement('div');

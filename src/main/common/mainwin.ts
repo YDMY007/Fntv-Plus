@@ -78,9 +78,9 @@ const ACRYLIC_CSS = `
         min-height:100vh!important;
         border-radius:16px!important;
         overflow:hidden!important;
-        background:rgba(250,244,250, var(--fnos-alpha,0.42))!important;
-        backdrop-filter:blur(var(--fnos-blur,60px)) saturate(132%) brightness(1.03)!important;
-        -webkit-backdrop-filter:blur(var(--fnos-blur,60px)) saturate(132%) brightness(1.03)!important;
+        background:rgba(250,244,250, var(--fnos-alpha,0.68))!important;
+        backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;
+        -webkit-backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;
         font-family:'Segoe UI Variable','Segoe UI',system-ui,-apple-system,sans-serif!important;
         -webkit-font-smoothing:antialiased!important;
     }
