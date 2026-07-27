@@ -1960,7 +1960,9 @@ function handle(): void {
     secBody1.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
 
     const addToggle = (label: string): HTMLInputElement => {
-      const row = document.createElement('div');
+      // 用 label 包裹文字+勾选框：点整行（文字或方框）都能切换，且只触发一次 change，
+      // 避免"点了文字但 checkbox 没切换"导致设置看似没保存（lc-140 修复）。
+      const row = document.createElement('label');
       row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
         + 'cursor:pointer;border-radius:6px;transition:background .12s;';
       row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
