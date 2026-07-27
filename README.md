@@ -8,6 +8,11 @@
 </div>
 
 <div align="center">
+  <img src="resource/docs/login.png" width="100%" alt="飞牛影视桌面端界面预览">
+  <p><em>图：支持多种登录方式域名/IP地址/FNID</em></p>
+</div>
+
+<div align="center">
   <img src="resource/docs/Settings.png" width="100%" alt="飞牛影视桌面端界面预览">
   <p><em>图：简单UI自定义</em></p>
 </div>
