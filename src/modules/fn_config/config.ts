@@ -97,6 +97,8 @@ export interface Config {
     detailBoxless?: boolean;
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
+    // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
+    updateDismissedAt?: number;
 }
 
 /**
@@ -622,6 +624,19 @@ export function getDetailBoxless(): boolean {
 export function setDetailBoxless(enabled: boolean): void {
     const config: Config = readConfig() || {};
     config.detailBoxless = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取「更新已打烊」时间戳（用户点过「立即下载」后 7 天内不再自动弹窗）
+export function getUpdateDismissedAt(): number {
+    const config: Config = readConfig() || {};
+    return typeof config.updateDismissedAt === 'number' ? config.updateDismissedAt : 0;
+}
+
+// 设置「更新已打烊」时间戳
+export function setUpdateDismissedAt(ts: number): void {
+    const config: Config = readConfig() || {};
+    config.updateDismissedAt = ts;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
