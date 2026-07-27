@@ -1825,6 +1825,7 @@ function handle(): void {
     mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
       + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
+    mpvPath.textContent = '应用内置（已随安装包分发，无需本机安装）'; // 初始占位, 不依赖 _refresh 回填
     colMpv.appendChild(mpvPath);
 
     const mpvBtns = document.createElement('div');
@@ -1904,6 +1905,7 @@ function handle(): void {
     potPathEl.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
       + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
+    potPathEl.textContent = '应用内置（已随安装包分发，无需本机安装）'; // 初始占位, 不依赖 _refresh 回填
     colPot.appendChild(potPathEl);
 
     const potBtns = document.createElement('div');
