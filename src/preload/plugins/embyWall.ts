@@ -8,6 +8,8 @@ const LOG = '[EmbyWall]';
 // 关闭时 log() 完全不输出(终端 console.log 与上报主进程的 IPC 都跳过)，
 // 因此既能清掉 CMD 刷屏，也能避免写入 app.log 文件。
 let _embyWallLogEnabled = false;
+// 详情页「关闭背景框」开关的运行时缓存：false=保留玻璃背景框(默认)，true=恢复 fnOS 原生外观
+let _detailBoxless = false;
 
 function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
   const enabled = !!payload?.enabled;
@@ -19,6 +21,16 @@ function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Re
 ipcRenderer.on('debug-filter', (_e: any, payload: any) => _applyEmbyWallDebugFilter(payload));
 // 页面加载时主动向主进程索取当前调试过滤(异步返回前默认安静)
 try { ipcRenderer.send('debug-filter-request'); } catch (e) {}
+
+// 启动时拉取「关闭详情页背景框」偏好，使已保存设置无需打开设置面板即生效
+try {
+  ipcRenderer.invoke('settings:get').then((s: any) => {
+    if (s && typeof s.detailBoxless === 'boolean') {
+      _detailBoxless = s.detailBoxless;
+      if (isDetailPage()) applyDetailLiquidGlass();
+    }
+  });
+} catch (e) {}
 
 function log(...a: any[]) {
   if (!_embyWallLogEnabled) return; // 独立开关关闭 → 完全静默
@@ -619,10 +631,22 @@ function applyTvDetailGlass(): void {
     descArea.style.setProperty('margin-top', '8px', 'important');
   }
 
-  // ④ 季/集卡片: 轻量液态玻璃
+  // ④ 季/集卡片: 轻量液态玻璃（可由「关闭背景框」开关禁用，恢复 fnOS 原生外观）
   const cards = header.parentElement?.querySelectorAll('.card-root');
   cards?.forEach((card) => {
     const el = card as HTMLElement;
+    if (_detailBoxless) {
+      // 关闭背景框：移除全部注入的玻璃样式，回退到 fnOS 原生外观
+      el.style.removeProperty('background');
+      el.style.removeProperty('backdrop-filter');
+      el.style.removeProperty('-webkit-backdrop-filter');
+      el.style.removeProperty('border-radius');
+      el.style.removeProperty('border');
+      el.style.removeProperty('box-shadow');
+      el.style.removeProperty('transition');
+      el.style.removeProperty('transform');
+      return;
+    }
     el.style.setProperty('background',
       'var(--fnos-detail-card)', 'important');
     el.style.setProperty('backdrop-filter', 'blur(16px) saturate(135%)', 'important');
@@ -635,12 +659,14 @@ function applyTvDetailGlass(): void {
     el.style.setProperty('transition', 'transform .25s ease, box-shadow .25s ease', 'important');
 
     el.addEventListener('mouseenter', () => {
+      if (_detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
       el.style.setProperty('transform', 'translateY(-3px) scale(1.015)', 'important');
       el.style.setProperty('box-shadow',
         '0 10px 32px rgba(91,140,255,.12),0 1px 0 rgba(255,255,255,.6)',
         'important');
     });
     el.addEventListener('mouseleave', () => {
+      if (_detailBoxless) return;
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-1)',
@@ -748,30 +774,54 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       '0 2px 24px rgba(255,255,255,.35),0 0 48px rgba(91,140,255,.18)', 'important');
   }
 
-  // ② 选集区标题栏: 玻璃标签
+  // ② 选集区标题栏: 玻璃标签（可由「关闭背景框」开关禁用，恢复 fnOS 原生外观）
   const sections = document.querySelectorAll('strong');
   sections.forEach(s => {
     if (s.textContent === '选集' || s.textContent === '演职人员') {
       const wrap = s.parentElement;
       if (wrap) {
-        (wrap as HTMLElement).style.setProperty('background',
-          'var(--fnos-detail-season-sec)', 'important');
-        (wrap as HTMLElement).style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
-        (wrap as HTMLElement).style.setProperty('-webkit-backdrop-filter', 'blur(22px) saturate(145%)', 'important');
-        (wrap as HTMLElement).style.setProperty('border-radius', '14px', 'important');
-        (wrap as HTMLElement).style.setProperty('border', '1px solid var(--fnos-detail-season-sec-border)', 'important');
-        (wrap as HTMLElement).style.setProperty('box-shadow',
-          '0 4px 20px rgba(31,41,90,.06),inset 0 1px 0 rgba(255,255,255,.6)',
-          'important');
-        (wrap as HTMLElement).style.setProperty('padding', '10px 20px', 'important');
+        const w = wrap as HTMLElement;
+        if (_detailBoxless) {
+          // 关闭背景框：移除注入的玻璃标签样式，回退到 fnOS 原生标题栏
+          w.style.removeProperty('background');
+          w.style.removeProperty('backdrop-filter');
+          w.style.removeProperty('-webkit-backdrop-filter');
+          w.style.removeProperty('border-radius');
+          w.style.removeProperty('border');
+          w.style.removeProperty('box-shadow');
+          w.style.removeProperty('padding');
+        } else {
+          w.style.setProperty('background',
+            'var(--fnos-detail-season-sec)', 'important');
+          w.style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
+          w.style.setProperty('-webkit-backdrop-filter', 'blur(22px) saturate(145%)', 'important');
+          w.style.setProperty('border-radius', '14px', 'important');
+          w.style.setProperty('border', '1px solid var(--fnos-detail-season-sec-border)', 'important');
+          w.style.setProperty('box-shadow',
+            '0 4px 20px rgba(31,41,90,.06),inset 0 1px 0 rgba(255,255,255,.6)',
+            'important');
+          w.style.setProperty('padding', '10px 20px', 'important');
+        }
       }
     }
   });
 
-  // ③ 集数卡片网格: 液态玻璃卡片
+  // ③ 集数卡片网格: 液态玻璃卡片（可由「关闭背景框」开关禁用，恢复 fnOS 原生外观）
   const episodeCards = document.querySelectorAll('[data-id="details"]');
   episodeCards.forEach((card) => {
     const el = card as HTMLElement;
+    if (_detailBoxless) {
+      // 关闭背景框：移除注入的玻璃卡片样式，回退到 fnOS 原生卡片
+      el.style.removeProperty('background');
+      el.style.removeProperty('backdrop-filter');
+      el.style.removeProperty('-webkit-backdrop-filter');
+      el.style.removeProperty('border-radius');
+      el.style.removeProperty('border');
+      el.style.removeProperty('box-shadow');
+      el.style.removeProperty('transition');
+      el.style.removeProperty('transform');
+      return;
+    }
     el.style.setProperty('background',
       'var(--fnos-detail-ep)', 'important');
     el.style.setProperty('backdrop-filter', 'blur(22px) saturate(145%)', 'important');
@@ -784,12 +834,14 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
     el.style.setProperty('transition', 'transform .28s ease, box-shadow .28s ease', 'important');
 
     el.addEventListener('mouseenter', () => {
+      if (_detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
       el.style.setProperty('transform', 'translateY(-5px) scale(1.025)', 'important');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-3)',
         'important');
     });
     el.addEventListener('mouseleave', () => {
+      if (_detailBoxless) return;
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-2)',
@@ -1593,9 +1645,16 @@ function handle(): void {
     const swProxy = addToggle('下载代理');
     const swHide = addToggle('隐藏原始播放按钮');
     const swNas = addToggle('NAS 本地网盘代理');
+    const swBoxless = addToggle('关闭详情页选集/演职人员背景框');
     swProxy.addEventListener('change', () => { ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked); });
     swHide.addEventListener('change', () => { ipcRenderer.invoke('settings:set-hide-play', swHide.checked); });
     swNas.addEventListener('change', () => { ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked); });
+    swBoxless.addEventListener('change', () => {
+      _detailBoxless = swBoxless.checked;
+      ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked);
+      // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
+      if (isDetailPage()) applyDetailLiquidGlass();
+    });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
     themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
@@ -2551,6 +2610,8 @@ function handle(): void {
         swProxy.checked = !!(s.downloadProxy && s.downloadProxy.enabled);
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
+        swBoxless.checked = !!s.detailBoxless;
+        _detailBoxless = !!s.detailBoxless;
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
         potPathEl.textContent = s.potPath || '应用内置（已随安装包分发，无需本机安装）';
         shaderSel.value = s.mpvDefaultShader || 'off';
