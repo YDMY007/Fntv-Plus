@@ -427,10 +427,12 @@ export function getMainWindow(): BrowserWindow {
         mainwin.center();
 
         // v376 修复: CSS 改为 dom-ready 注��� (而非窗口创建时一次性)
-        // 原因: MPV 关闭后 media.ts 会调 reloadIgnoringCache() 刷新页面,
+        // 原因: 历史上 MPV 关闭会触发 reloadIgnoringCache() 刷新页面,
         //       窗口创建时的 insertCSS 不会在 reload 后重新执行 →
         //       圆角/导航栏/白底清除全部丢失, 飞牛原生控制栏和窗口按钮重叠.
-        //       注册 dom-ready 后, 每次页面加载(含 reload)都自动重注 CSS.
+        //       注册 dom-ready 后, 每次页面加载(含 reload/启动导航)都自动重注 CSS.
+        //       [lc-127] media.ts 已不再在关闭视频时整页刷新, 但启动导航/用户手动刷新
+        //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
         mainwin.webContents.on('dom-ready', () => {
             injectAcrylicCSS(mainwin!.webContents);
         });
