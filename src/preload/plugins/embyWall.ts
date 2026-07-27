@@ -428,7 +428,7 @@ function injectCarousel(): void {
       <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新</div>
       <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
-      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em">${show.desc||''}</div>
+      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
       <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
         <svg width="20" height="20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>
         开始观看
@@ -602,7 +602,7 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
         } else if (btn) {
           const d = document.createElement('div');
           d.className = 'fnos-desc';
-          d.style.cssText = 'flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em';
+          d.style.cssText = 'flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)';
           d.textContent = desc;
           info.insertBefore(d, btn);
         }
