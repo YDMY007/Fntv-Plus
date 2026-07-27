@@ -30,15 +30,18 @@
   .stage.active .dot { background: var(--accent); animation: pulse 1.1s infinite; }
   .stage.done .dot { background: var(--green); }
   .stage.error .dot { background: var(--red); }
+  .stage.skipped .dot { background: repeating-linear-gradient(45deg, var(--gray), var(--gray) 3px, #2a313c 3px, #2a313c 6px); }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   .stage .label { flex: 1; font-size: 14px; }
   .stage .detail { color: var(--muted); font-size: 12px; }
   .stage.done .label { color: var(--green); }
   .stage.error .label { color: var(--red); }
+  .stage.skipped .label { color: var(--muted); text-decoration: line-through; opacity: .7; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; background: var(--border); color: var(--muted); }
   .stage.active .badge { background: rgba(59,130,246,.2); color: #93c5fd; }
   .stage.done .badge { background: rgba(46,160,67,.2); color: #7ee2a0; }
   .stage.error .badge { background: rgba(248,81,73,.2); color: #ffb3ae; }
+  .stage.skipped .badge { background: var(--border); color: var(--muted); }
   .log {
     background: #0a0e13; border: 1px solid var(--border); border-radius: 10px;
     padding: 12px; height: 280px; overflow-y: auto; font-family: "Cascadia Code", Consolas, monospace;
@@ -78,7 +81,7 @@
     return (m > 0 ? m + 'm ' : '') + (s % 60) + 's';
   }
   function badge(status) {
-    return { pending: '等待', active: '进行中', done: '完成', error: '出错' }[status] || status;
+    return { pending: '等待', active: '进行中', done: '完成', error: '出错', skipped: '跳过' }[status] || status;
   }
   function render(s) {
     $('ver').textContent = 'v' + s.version;

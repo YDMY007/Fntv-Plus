@@ -214,132 +214,109 @@ function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 
 }
 
 
-// 拦截遮罩按钮点击
-function interceptMaskButton(): void {
-    const playButtons = document.querySelectorAll('.play-mask__btn--play:not([data-mask-intercepted]):not([data-mpv-intercepted])');
+// ===== 统一播放按钮拦截(修复首页点击「MPV + 网页原生双播」) =====
+// 根因: 之前把 click 捕获监听挂在各个按钮上, 而 fnOS 的点击委托处理器通常挂在
+// document / 根容器(也是捕获阶段), 层级比按钮更高 → 它的捕获监听先执行,
+// 会先把页面跳转到 /v/video/{guid} 视频页; 我们按钮上的
+// preventDefault/stopImmediatePropagation 无法回头阻止这次跳转。
+// 视频页加载后网页原生 <video> 自动播放, 同时我们的劫持又起了 MPV → 双播放。
+// 修复: 改为在 window(比 document 更高) 捕获阶段拦截, 确保先于 fnOS 执行,
+//       真正 preventDefault + stopImmediatePropagation 阻止跳转与原生播放。
 
-    for (let i = 0; i < playButtons.length; i++) {
-        const btn = playButtons[i] as HTMLElement;
-        // 标记已处理
-        btn.setAttribute('data-mask-intercepted', 'true');
-
-        // 添加点击事件拦截器
-            const clickHandler = async (e: Event) => {
-                // 检查是否允许原有播放（由选择弹窗的「原生播放」触发）
-                if (btn.getAttribute('data-allow-original-play') === 'true') {
-                    logger.info('Allowing original play logic to execute');
-                    return; // 不拦截，让原有逻辑执行
-                }
-
-                // 获取配置
-                const config = await getPlayButtonConfig();
-
-                if (config.hideOriginalPlayButton) {
-                    // 隐藏了原生播放按钮：拦截点击，直接走默认外部播放器
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    logger.info(`Mask button click intercepted, directly playing with ${config.defaultPlayer}`);
-                    await playWithPlayer(btn, config.defaultPlayer);
-                    return false;
-                }
-
-                // 未隐藏原生按钮：弹出「原生 + 外部播放器」选择弹窗（二选一）
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                logger.info('Original play button NOT hidden, showing player choice modal');
-                await createPlayModal(btn, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(btn, p));
-                return false;
-            };
-
-        // 在捕获阶段添加事件监听器，确保优先拦截
-        // 只监听 click 事件，避免重复触发
-        btn.addEventListener('click', clickHandler, true);
-    }
-}
-
-// 注册hook
-registerHook(HookType.OnReady, interceptMaskButton);
-registerHook(HookType.OnDomChange, interceptMaskButton);
-
-// 轮询兜底: 继续观看等异步渲染/滚动加载的卡片
-let _maskPollTimer: any = null;
-function startMaskPoll(): void {
-    if (_maskPollTimer !== null) return;
-    _maskPollTimer = setInterval(() => {
-        try {
-            const btns = document.querySelectorAll('.play-mask__btn--play:not([data-mask-intercepted])');
-            if (btns.length === 0) return;
-            interceptMaskButton();
-        } catch (e) { /* ignore */ }
-    }, 1200);
-}
-registerHook(HookType.OnReady, startMaskPoll);
-
-// 首页卡片播放图标劫持(补充 .play-mask__btn--play 之外的情况)
-// 现象: 「继续观看」卡片的播放图标是 .play-mask__btn--play(已被 interceptMaskButton 劫持),
-//       但首页其他卡片的封面播放图标可能是另一元素(无 data-id="details" 包裹),
-//       旧逻辑取不到 guid → 回退到原始点击 → 官方网页播放(未劫持)。
-// 这里扫描首页卡片内带「播放」语义的按钮/链接, 统一劫持到外部播放器。
+// 是否「播放」语义(对齐 playButton.ts 的排除规则, 避免误拦 预览/试看/预告)
 function isPlayLabel(text: string): boolean {
     const t = (text || '').trim();
     if (!t) return false;
+    if (/(预览|试看|预告|trailer|preview|设置|配置|管理)/i.test(t)) return false;
     return /^(播放|立即播放|播放全片|继续播放|从头播放|play)$/i.test(t)
         || /播放/.test(t) || /^play\b/i.test(t);
 }
-function interceptHomeCardPlay(): void {
-    // 仅在首页(/v)生效, 详情页交给 playButton.ts, 避免误伤
+
+// 首页卡片内查找「带播放语义的封面播放图标」(排除 .play-mask__btn--play, 那种走上面分支)
+function findHomeCardPlay(target: HTMLElement): HTMLElement | null {
     const path = (location.pathname || '').replace(/\/+$/, '');
-    if (path !== '/v' && path !== '') return;
+    if (path !== '/v' && path !== '') return null;
 
-    const cards = document.querySelectorAll('.card-root, [class*="card"]:not([class*="drawer"])');
-    cards.forEach((card) => {
-        const nodes = card.querySelectorAll('button, a, [role="button"]');
-        nodes.forEach((node) => {
-            const el = node as HTMLElement;
-            if (el.hasAttribute('data-mask-intercepted') || el.hasAttribute('data-mpv-intercepted') || el.hasAttribute('data-home-intercepted')) return;
-            if (el.classList.contains('play-mask__btn--play')) return; // 已由 interceptMaskButton 处理
-            const label = (el.getAttribute('aria-label') || el.textContent || '').trim();
-            let ok = isPlayLabel(label);
-            if (!ok) {
-                // 无文字标签时, 退化为检测「播放三角」svg 路径
-                const pathEl = el.querySelector('svg path[d]') as SVGPathElement | null;
-                const d = pathEl ? (pathEl.getAttribute('d') || '') : '';
-                ok = d.startsWith('M5.984') || d.includes('18.819') || /M8 5v14|M6 4l14 8-14 8/.test(d);
-            }
-            if (!ok) return;
-            const inCard = el.closest('.card-root') || el.closest('[class*="card"]') || el.closest('a');
-            if (!inCard) return;
+    const el = target.closest('button, a, [role="button"]') as HTMLElement | null;
+    if (!el) return null;
+    if (el.classList.contains('play-mask__btn--play')) return null;
+    if (el.hasAttribute('data-mpv-intercepted')) return null; // 详情页已处理的按钮跳过
 
-            el.setAttribute('data-home-intercepted', 'true');
-            el.addEventListener('click', async (e: Event) => {
-                if (el.getAttribute('data-allow-original-play') === 'true') return;
-                const config = await getPlayButtonConfig();
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                logger.info('Home card play icon intercepted, playing with', config.defaultPlayer);
-                await playWithPlayer(el, config.defaultPlayer);
-                return false;
-            }, true);
-        });
-    });
+    const label = (el.getAttribute('aria-label') || el.textContent || '').trim();
+    let ok = isPlayLabel(label);
+    if (!ok) {
+        // 无文字标签时, 退化为检测「播放三角」svg 路径
+        const pathEl = el.querySelector('svg path[d]') as SVGPathElement | null;
+        const d = pathEl ? (pathEl.getAttribute('d') || '') : '';
+        ok = d.startsWith('M5.984') || d.includes('18.819') || /M8 5v14|M6 4l14 8-14 8/.test(d);
+    }
+    if (!ok) return null;
+
+    const inCard = el.closest('.card-root') || el.closest('[class*="card"]') || el.closest('a');
+    if (!inCard) return null;
+    return el;
 }
-registerHook(HookType.OnReady, interceptHomeCardPlay);
 
-// 首页异步渲染/滚动加载的卡片兜底(低频, 避免每个 DOM 变更都全量扫描)
-let _homePollTimer: any = null;
-function startHomePoll(): void {
-    if (_homePollTimer !== null) return;
-    _homePollTimer = setInterval(() => {
+function handleMaskPlay(mask: HTMLElement): void {
+    (async () => {
         try {
-            const path = (location.pathname || '').replace(/\/+$/, '');
-            if (path !== '/v' && path !== '') return;
-            interceptHomeCardPlay();
-        } catch (e) { /* ignore */ }
-    }, 1500);
+            const config = await getPlayButtonConfig();
+            if (config.hideOriginalPlayButton) {
+                logger.info(`Mask button click intercepted, directly playing with ${config.defaultPlayer}`);
+                await playWithPlayer(mask, config.defaultPlayer);
+            } else {
+                logger.info('Original play button NOT hidden, showing player choice modal');
+                await createPlayModal(mask, { ...config, hideOriginalPlayButton: false }, (p) => playWithPlayer(mask, p));
+            }
+        } catch (err) {
+            logger.error('Error in handleMaskPlay:', err);
+        }
+    })();
 }
-registerHook(HookType.OnReady, startHomePoll);
+
+let _playClickInstalled = false;
+function installPlayClickInterceptor(): void {
+    if (_playClickInstalled) return;
+    _playClickInstalled = true;
+
+    window.addEventListener('click', (e: Event) => {
+        const target = e.target as HTMLElement | null;
+        if (!target || typeof (target as any).closest !== 'function') return;
+
+        // 放行由「原生播放」按钮 / guid 兜底回退 触发的合成点击(带 data-allow-original-play)
+        if (target.closest('[data-allow-original-play="true"]')) return;
+
+        // 1) 遮罩播放按钮 .play-mask__btn--play
+        const mask = target.closest('.play-mask__btn--play') as HTMLElement | null;
+        if (mask) {
+            mask.setAttribute('data-mask-intercepted', 'true'); // 兼容 playButton.ts 互检
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            handleMaskPlay(mask);
+            return;
+        }
+
+        // 2) 首页卡片封面播放图标(非 .play-mask__btn--play 的其它播放入口)
+        const cardPlay = findHomeCardPlay(target);
+        if (cardPlay) {
+            cardPlay.setAttribute('data-home-intercepted', 'true');
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            (async () => {
+                const config = await getPlayButtonConfig();
+                logger.info('Home card play icon intercepted, playing with', config.defaultPlayer);
+                await playWithPlayer(cardPlay, config.defaultPlayer);
+            })();
+            return;
+        }
+    }, true);
+}
+
+registerHook(HookType.OnReady, installPlayClickInterceptor);
+// 注: 不再逐个按钮挂捕获监听(会晚于 fnOS 的 document 级捕获, 拦不住跳转),
+//     改为 window 级单次捕获, 覆盖全页含异步/滚动加载的卡片。
+//     playButton.ts 仍独立处理详情页 .semi-button-primary 主播放按钮, 互不冲突。
 
 export {};

@@ -267,7 +267,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.package.outputs.version }}
-          name: 飞牛影视 v${{ steps.package.outputs.version }}
+          name: Fntv-Plus v${{ steps.package.outputs.version }}
           # 说明文档（更新日志）由维护者在 GitHub Release 页面手动填写；
           # 自动构建只负责构建并上传 macOS / Linux 安装包，不自动生成任何说明文字。
           files: |

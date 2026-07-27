@@ -17,6 +17,7 @@
         "clean": "rimraf dest",
         "build:potplayer:win": "node scripts/copy-potplayer.js",
         "build:win": "npm-run-all -s build:proxy:win build:potctl:win build:potplayer:win compile && electron-builder --win",
+        "build:win:fast": "npm-run-all -s build:potplayer:win compile && electron-builder --win",
         "build:mac": "npm-run-all -s build:proxy:mac:x64 build:proxy:mac:arm64 build:proxy:mac:universal compile clean:proxy:mac && electron-builder --mac",
         "build:linux": "npm-run-all -s build:proxy:linux compile && electron-builder --linux"
     },
@@ -174,8 +175,8 @@
             "icon": "build/icon.png",
             "desktop": {
                 "entry": {
-                    "Name": "飞牛影视",
-                    "Comment": "飞牛影视播放器",
+                    "Name": "Fntv-Plus",
+                    "Comment": "Fntv-Plus 桌面客户端",
                     "Categories": "AudioVideo;Video;Player;"
                 }
             },
