@@ -654,10 +654,13 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     // 登录页(/login,/signin,/v/login)白底不可见 → 强制不透明背景.
                     // insertCSS 优先级高于页面内 <style> 与 ACRYLIC 玻璃壳, 且跨 SPA 路由持久.
                     // 仅在登录路径注入, 不影响主界面 /v 的玻璃效果.
+                    // ★ 排除 file:// 协议(我们自己的 resource/login/index.html 登录页),
+                    //   其 pathname 含 "/login" 但不应被强制白底(已有 ACRYLIC 注入背景图).
                     let opaqueApplied = false;
                     const syncOpaqueBg = () => {
                         try {
                             const u = new URL(mainWindow!.webContents.getURL());
+                            if (u.protocol === 'file:') return; // 自身登录页, 跳过
                             const p = u.pathname.toLowerCase();
                             if ((p.includes('/login') || p.includes('/signin')) && !opaqueApplied) {
                                 mainWindow?.webContents.insertCSS(
