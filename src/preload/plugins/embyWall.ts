@@ -1749,6 +1749,15 @@ function handle(): void {
     const hTitle = document.createElement('div');
     hTitle.textContent = '历史版本';
     hTitle.style.cssText = 'font-size:16px;font-weight:700;color:#2e2340;';
+    // 历史版本下载链接
+    const dlBtn = document.createElement('a');
+    dlBtn.textContent = '历史版本下载';
+    dlBtn.href = 'https://pan.baidu.com/s/5oy1iYKBLdfxP55pgXO5X1g';
+    dlBtn.target = '_blank';
+    dlBtn.rel = 'noopener';
+    dlBtn.style.cssText = 'display:inline-flex;align-items:center;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#fff;background:rgba(108,76,178,.88);text-decoration:none;letter-spacing:.3px;transition:background .18s ease;';
+    dlBtn.onmouseenter = () => { dlBtn.style.background = 'rgba(124,93,255,.95)'; };
+    dlBtn.onmouseleave = () => { dlBtn.style.background = 'rgba(108,76,178,.88)'; };
     const closeBtn = document.createElement('div');
     closeBtn.textContent = '✕';
     closeBtn.style.cssText = 'width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;font-size:15px;color:#6a5e7e;background:rgba(139,111,209,.10);';
@@ -1756,6 +1765,7 @@ function handle(): void {
     closeBtn.onmouseleave = () => { closeBtn.style.background = 'rgba(139,111,209,.10)'; };
     closeBtn.onclick = () => closeHistory();
     header.appendChild(hTitle);
+    header.appendChild(dlBtn);
     header.appendChild(closeBtn);
     card.appendChild(header);
 
