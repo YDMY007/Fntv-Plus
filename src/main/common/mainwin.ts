@@ -1,5 +1,15 @@
-import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell } from 'electron';
+import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
+
+// [lc-123] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
+const _loginBgDir = app.isPackaged
+    ? path.dirname(app.getPath('exe'))
+    : path.resolve(__dirname, '../../..'); // dest/main/ → 项目根目录
+const _loginBgDefaultFile = path.join(_loginBgDir, 'resource', 'login', 'image', 'bg-login.jpg');
+const _loginBgDefaultUrl = fs.existsSync(_loginBgDefaultFile)
+    ? 'file:///' + _loginBgDefaultFile.replace(/\\/g, '/')
+    : ''; // 兜底: 空字符串让登录页 HTML 自身背景生效
 
 /**
  * 计算适配屏幕的窗口尺寸 (任何分辨率通用).
@@ -387,7 +397,7 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
                 right:0!important;
                 bottom:0!important;
                 z-index:-1!important;
-                background-image:var(--fnos-login-bg, url("./image/bg-login.jpg"))!important;
+                background-image:var(--fnos-login-bg, url("${_loginBgDefaultUrl}"))!important;
                 background-repeat:no-repeat!important;
                 background-position:center center!important;
                 background-size:cover!important;
