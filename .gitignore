@@ -61,3 +61,9 @@ shots/
 # ⚠️ 版本更新日志：由维护者本人手动上传到 GitHub Release，【严禁推送 GitHub】
 # 命名约定 CHANGELOG_vX.Y.Z.md（如 CHANGELOG_v3.3.0.md），仅本地维护，不入库。
 CHANGELOG*.md
+
+# ⚠️ 根目录一键构建脚本（build-gui.js / 构建.cmd）：用户要求【严禁推送 GitHub】
+# 仅本机双击使用，备份保存在 backup-before-rewrite 分支。
+build-gui.js
+构建.cmd
+打包.cmd
