@@ -1822,9 +1822,9 @@ function handle(): void {
 
     const mpvPath = document.createElement('div');
     mpvPath.id = 'fnos-mpv-path';
-    mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
-      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
-      + 'border:1px solid var(--fnos-ui-border);';
+    mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
+      + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
     colMpv.appendChild(mpvPath);
 
     const mpvBtns = document.createElement('div');
@@ -1901,9 +1901,9 @@ function handle(): void {
 
     const potPathEl = document.createElement('div');
     potPathEl.id = 'fnos-pot-path';
-    potPathEl.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:13px;'
-      + 'max-height:36px;overflow-y:auto;padding:4px 7px;background:var(--fnos-ui-input-bg);border-radius:7px;'
-      + 'border:1px solid var(--fnos-ui-border);';
+    potPathEl.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
+      + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
+      + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
     colPot.appendChild(potPathEl);
 
     const potBtns = document.createElement('div');
