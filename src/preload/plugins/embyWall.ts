@@ -429,7 +429,7 @@ function injectCarousel(): void {
       <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:17px;line-height:1.95;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em">${show.desc||''}</div>
-      <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:rgba(140,120,200,.22);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid rgba(180,160,255,.30);border-radius:14px;color:#e8e0f8;font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.16),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
+      <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
         <svg width="20" height="20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>
         开始观看
       </a>`;
@@ -457,15 +457,15 @@ function injectCarousel(): void {
           }
         }, 600);
       });
-      // 悬停效果: 玻璃提亮 + 轻微上浮
+      // 悬停效果: 主题色提亮 + 轻微上浮
       playBtn.addEventListener('mouseenter', () => {
-        (playBtn as HTMLElement).style.background = 'rgba(160,140,220,.32)';
-        (playBtn as HTMLElement).style.boxShadow = '0 6px 24px rgba(100,80,180,.22),inset 0 .5px 0 rgba(255,255,255,.35)';
+        (playBtn as HTMLElement).style.background = 'var(--fnos-hero-play-hover)';
+        (playBtn as HTMLElement).style.boxShadow = '0 6px 24px rgba(100,80,180,.28),inset 0 .5px 0 rgba(255,255,255,.35)';
         (playBtn as HTMLElement).style.transform = 'translateY(-1px)';
       });
       playBtn.addEventListener('mouseleave', () => {
-        (playBtn as HTMLElement).style.background = 'rgba(140,120,200,.22)';
-        (playBtn as HTMLElement).style.boxShadow = '0 4px 20px rgba(80,60,140,.16),inset 0 .5px 0 rgba(255,255,255,.25)';
+        (playBtn as HTMLElement).style.background = 'var(--fnos-hero-play-bg)';
+        (playBtn as HTMLElement).style.boxShadow = '0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25)';
         (playBtn as HTMLElement).style.transform = '';
       });
     }
@@ -1056,6 +1056,11 @@ function injectUiThemeStyle(): void {
   --fnos-hero-desc:rgba(20,35,70,.82);
   --fnos-hero-shadow:0 1px 10px rgba(255,255,255,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);
+  /* 轮播「开始观看」按钮(主题自适应, 高对比) */
+  --fnos-hero-play-bg:rgba(108,76,178,.94);
+  --fnos-hero-play-text:#ffffff;
+  --fnos-hero-play-border:rgba(108,76,178,.9);
+  --fnos-hero-play-hover:rgba(124,90,205,1);
   --fnos-ui-veil:linear-gradient(180deg,rgba(245,240,248,.6) 0%,rgba(238,233,246,.55) 100%);
   --fnos-detail-grad:linear-gradient(180deg,transparent 45%,rgba(12,18,35,.08) 72%,rgba(230,240,255,.22) 100%);
   --fnos-detail-desc:linear-gradient(135deg,rgba(255,255,255,.20),rgba(240,248,255,.25));
@@ -1128,6 +1133,11 @@ html.dark{
   --fnos-hero-desc:rgba(225,218,245,.88);
   --fnos-hero-shadow:0 1px 10px rgba(0,0,0,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(140,160,255,.6),transparent);
+  /* 轮播「开始观看」按钮(主题自适应, 高对比) */
+  --fnos-hero-play-bg:rgba(124,93,255,.95);
+  --fnos-hero-play-text:#ffffff;
+  --fnos-hero-play-border:rgba(150,120,255,.7);
+  --fnos-hero-play-hover:rgba(140,110,255,1);
   --fnos-ui-veil:linear-gradient(180deg,rgba(30,24,46,.6) 0%,rgba(24,18,38,.55) 100%);
   --fnos-detail-grad:linear-gradient(180deg,transparent 45%,rgba(0,0,0,.30) 72%,rgba(18,14,30,.58) 100%);
   --fnos-detail-desc:linear-gradient(135deg,rgba(50,40,72,.45),rgba(34,27,52,.55));
