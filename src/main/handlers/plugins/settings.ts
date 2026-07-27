@@ -399,10 +399,11 @@ function parseVersion(name: string): number[] | null {
 }
 
 function extractTitle(name: string, firstLine: string): string {
+    // 更新日志类文件：始终以版本号显示（vX.Y.Z），不显示「更新日志」字样，方便对照查看
+    const ver = parseVersion(name);
+    if (ver && /changelog/i.test(name)) return `v${ver.join('.')}`;
     const line = (firstLine || '').trim();
     if (line.startsWith('#')) return line.replace(/^#+\s*/, '').trim() || name;
-    const ver = parseVersion(name);
-    if (ver && /changelog/i.test(name)) return `v${ver.join('.')} 更新日志`;
     return name.replace(/\.md$/i, '');
 }
 
@@ -411,7 +412,9 @@ async function handleListChangelogs(): Promise<{ name: string; title: string; mt
         const wikiDir = getWikiDir();
         if (!fs.existsSync(wikiDir)) return [];
         const files = fs.readdirSync(wikiDir).filter(f => f.toLowerCase().endsWith('.md'));
-        const MANUAL = '用户使用手册.md';
+        // 固定钉位：0=用户使用手册(置顶) 1=Fntv-Plus Wiki(Home.md) 2=其余(按版本号/时间)
+        const PIN: { [k: string]: number } = { '用户使用手册.md': 0, 'Home.md': 1 };
+        const pinRank = (n: string): number => (PIN[n] !== undefined ? PIN[n] : 2);
         const list = files.map(f => {
             let title = f.replace(/\.md$/i, '');
             let mtime = 0;
@@ -424,10 +427,9 @@ async function handleListChangelogs(): Promise<{ name: string; title: string; mt
             return { name: f, title, mtime };
         });
         list.sort((a, b) => {
-            // 1) 用户使用手册始终置顶
-            const aManual = a.name === MANUAL;
-            const bManual = b.name === MANUAL;
-            if (aManual !== bManual) return aManual ? -1 : 1;
+            // 1) 固定钉位：用户使用手册置顶，Fntv-Plus Wiki 次之
+            const ra = pinRank(a.name), rb = pinRank(b.name);
+            if (ra !== rb) return ra - rb;
             // 2) 其余按版本号倒序（v3.3.2 > v3.3.1 > ...）；无版本号的文件按修改时间倒序兜底
             const av = parseVersion(a.name);
             const bv = parseVersion(b.name);
