@@ -161,10 +161,10 @@ const ACRYLIC_CSS = `
     [class*="semi-color-bg-arrow-mask"]{display:none!important}
     .ms-thumb,.ms-track,.ms-track-box{display:none!important}
 
-    /* ── ⑥ 页面容器边距归零 ── */
+    /* ── ⑥ 页面容器边距归零（列表页由 ⑪ 统一接管）── */
     div.relative.flex.flex-col.gap-6.pb-6.pr-4{padding-right:0!important}
     div.relative.flex.flex-col.gap-6.pb-6{padding-left:0!important}
-    .ms-container.pl-\[44px\]{padding-right:44px!important;padding-left:44px!important}
+    /* 注意: .ms-container.pl-[44px] 的 padding 已移至 ⑪ 统一管理，避免 !important 冲突 */
 
     /* ── ⑦ 导航栏: 极淡融合条 + 原生拖动 ──
        v377: 几乎完全透明, 只保留微量模糊防文字抖动. 与下方 body 亚克力无缝衔接 */
@@ -259,7 +259,38 @@ const ACRYLIC_CSS = `
         transition:transform .25s ease,box-shadow .25s ease!important;
     }
 
-    /* ── ⑪ 深色模式 (html.dark): 窗口 chrome 同步变深 ── */
+    /* ── ⑪ 列表页全宽自适应（修复右侧留白）── */
+    /* 浏览器实测(fnOS原生 /v/tv 番剧页, 1600×900):
+       布局链: #root>div(1600) > sidebar(260) + content(1340)
+         > outer ms-container(1340,无padding) > inner ms-container.px-11(1340, padding:44px×2!)
+           > div.flex-wrap.gap-x-5(1252px=1340-88, 有inline height:11484px)
+       根因: inner ms-container 的 px-11=44px 内边距吃掉 88px 可用宽度 → 右侧留白。
+       修复: 收紧 px-11 从 44px→20px，可用宽从 1252→1300px(+48px)。
+       注意: 不做 flex→grid 转换——fnOS 用 JS 算好 inline height，转 grid 易坍塌。 */
+
+    /* 11a. 列表页滚动容器: 收紧内边距 44px → 20px */
+    .ms-container.trim-ui__scrollbar--list-specific.px-11,
+    [class*="ms-container"][class*="trim-ui__scrollbar"][class*="px-11"]{
+        padding-left:20px!important;
+        padding-right:20px!important;
+    }
+
+    /* 11b. 全局 px-11/px-10 收紧（排除顶部导航栏 z-20）*/
+    [class*="px-11"]:not([class*="z-20"]){
+        padding-left:20px!important;
+        padding-right:20px!important;
+    }
+    [class*="px-10"]:not([class*="z-20"]){
+        padding-left:16px!important;
+        padding-right:16px!important;
+    }
+
+    /* 11c. 兜底: 砍掉 max-width 约束 */
+    [class*="max-w"]{
+        max-width:none!important;
+    }
+
+    /* ── ⑫ 深色模式 (html.dark): 窗口 chrome 同步变深 ── */
     html.dark body{
         background:rgba(20,15,33, var(--fnos-alpha,0.42))!important;
     }
