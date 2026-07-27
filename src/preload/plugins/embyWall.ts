@@ -2003,63 +2003,25 @@ function handle(): void {
     loginBgLabel.style.cssText = 'font-size:10.5px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:8px;';
     loginBgWrap.appendChild(loginBgLabel);
 
-    // 两个按钮：自定义登录页面背景图 / 清空
+    // 两个按钮：自定义登录页面背景图 / 清空（点选即生效，无需手动输路径）
     const loginBgBtns = document.createElement('div');
-    loginBgBtns.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+    loginBgBtns.style.cssText = 'display:flex;gap:6px;';
     const pickLoginBgBtn = mkBtn('自定义登录页面背景图', true);
     const clearLoginBgBtn = mkBtn('清空', true);
     loginBgBtns.appendChild(pickLoginBgBtn);
     loginBgBtns.appendChild(clearLoginBgBtn);
     loginBgWrap.appendChild(loginBgBtns);
 
-    // 选择路径按钮 + 单行输入框（显示地址，可手动编辑）
-    const loginBgRow = document.createElement('div');
-    loginBgRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
-    const loginBgInput = document.createElement('input');
-    loginBgInput.type = 'text';
-    loginBgInput.placeholder = '背景图地址（留空=默认）';
-    loginBgInput.style.cssText = 'flex:1 1 auto;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
-      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
-    const loginBgBrowse = mkBtn('选择路径', true);
-    loginBgBrowse.style.cssText = 'flex:none;height:32px;';
-    loginBgRow.appendChild(loginBgInput);
-    loginBgRow.appendChild(loginBgBrowse);
-    loginBgWrap.appendChild(loginBgRow);
-
     pickLoginBgBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       const p = await ipcRenderer.invoke('settings:pick-login-bg');
-      if (p) { loginBgInput.value = p; applyLoginBgVar(p); }
+      if (p) applyLoginBgVar(p);
     });
     clearLoginBgBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       await ipcRenderer.invoke('settings:clear-login-bg');
-      loginBgInput.value = '';
       applyLoginBgVar('');
     });
-    loginBgBrowse.addEventListener('click', async (e: Event) => {
-      e.stopPropagation();
-      const p = await ipcRenderer.invoke('settings:pick-login-bg');
-      if (p) { loginBgInput.value = p; applyLoginBgVar(p); }
-    });
-    loginBgInput.addEventListener('change', async () => {
-      const v = (loginBgInput.value || '').trim();
-      if (!v) { await ipcRenderer.invoke('settings:clear-login-bg'); applyLoginBgVar(''); return; }
-      const r: any = await ipcRenderer.invoke('settings:set-login-bg', v);
-      if (r && r.ok) {
-        applyLoginBgVar(v);
-      } else if (r && r.existing !== undefined) {
-        loginBgInput.value = r.existing || '';
-        applyLoginBgVar(r.existing || '');
-      }
-    });
-
-    // 构建时回填当前已存背景路径（面板为单例，仅在首次构建时执行一次）
-    try {
-      ipcRenderer.invoke('settings:get').then((s: any) => {
-        if (s && s.loginBg) loginBgInput.value = s.loginBg;
-      });
-    } catch (_) {}
 
     secBody3.appendChild(loginBgWrap);
     contentGrid.appendChild(sec3.el);
