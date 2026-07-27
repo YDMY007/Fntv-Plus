@@ -38,7 +38,8 @@ async function handleGetSettings(): Promise<any> {
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         pythonPath: fnConfig.getPythonPath() || '',
         detailBoxless: fnConfig.getDetailBoxless(),
-        loginBg: fnConfig.getLoginBgPath() || ''
+        // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
+        loginBg: (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : ''
     };
 }
 
@@ -171,6 +172,21 @@ async function handleClearPythonPath(): Promise<void> {
     log.info('B站弹幕 Python 路径已清空，回退到内置便携版');
 }
 
+// 把任意本地图片复制进 userData/login-bg/，返回可移植路径（不再依赖原始绝对路径，换电脑/移动文件也不会失效）
+function copyLoginBgToUserData(src: string): string | null {
+    try {
+        const dir = path.join(app.getPath('userData'), 'login-bg');
+        fs.mkdirSync(dir, { recursive: true });
+        const ext = (path.extname(src) || '.jpg').toLowerCase();
+        const dest = path.join(dir, 'custom' + ext);
+        fs.copyFileSync(src, dest);
+        return dest;
+    } catch (e) {
+        log.error('复制登录背景图到用户数据目录失败:', e);
+        return null;
+    }
+}
+
 // 弹出系统文件选择框，选择自定义登录页背景图（默认打开 resource/login/image 目录）
 async function handlePickLoginBg(): Promise<string | null> {
     const win = getMainWindow();
@@ -188,9 +204,11 @@ async function handlePickLoginBg(): Promise<string | null> {
         });
         if (!result.canceled && result.filePaths.length > 0) {
             const selectedPath = result.filePaths[0];
-            fnConfig.setLoginBgPath(selectedPath);
-            log.info(`登录页背景图已设置为: ${selectedPath}`);
-            return selectedPath;
+            // 复制进 userData，存可移植路径（而非原始绝对路径）
+            const portable = copyLoginBgToUserData(selectedPath) || selectedPath;
+            fnConfig.setLoginBgPath(portable);
+            log.info(`登录页背景图已设置为: ${portable}${portable !== selectedPath ? ` (源: ${selectedPath})` : ''}`);
+            return portable;
         }
     } catch (error) {
         log.error('选择登录页背景图失败:', error);
@@ -200,17 +218,25 @@ async function handlePickLoginBg(): Promise<string | null> {
 
 // 手动输入路径设置登录页背景图（校验文件存在；不存在则回滚到当前已存值）
 async function handleSetLoginBg(_event: any, p: string): Promise<{ ok: boolean; existing?: string }> {
+    const existing = (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : '';
     const v = (p || '').trim();
     if (!v || !fs.existsSync(v)) {
-        return { ok: false, existing: fnConfig.getLoginBgPath() || '' };
+        return { ok: false, existing };
     }
-    fnConfig.setLoginBgPath(v);
-    log.info(`登录页背景图已设置为: ${v}`);
+    // 已在 userData/login-bg 内的视为已可移植；否则先复制再存可移植路径
+    const loginBgDir = path.join(app.getPath('userData'), 'login-bg');
+    const portable = v.startsWith(loginBgDir) ? v : (copyLoginBgToUserData(v) || v);
+    fnConfig.setLoginBgPath(portable);
+    log.info(`登录页背景图已设置为: ${portable}`);
     return { ok: true };
 }
 
-// 清空登录页背景图，恢复默认
+// 清空登录页背景图，恢复默认（并删除已复制的自定义图）
 async function handleClearLoginBg(): Promise<{ ok: boolean }> {
+    const cur = (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : '';
+    if (cur && cur.includes(path.join(app.getPath('userData'), 'login-bg'))) {
+        try { fs.unlinkSync(cur); } catch (e) { /* 忽略删除失败 */ }
+    }
     fnConfig.setLoginBgPath('');
     log.info('登录页背景图已清空，恢复默认');
     return { ok: true };
