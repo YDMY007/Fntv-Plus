@@ -287,44 +287,55 @@ function getInjectionScript(username: string, password: string): string {
                 try {
                     if (window.__fntv_sys_config_requested) return;
                     var host = (window.location.hostname || '').toLowerCase();
-                    if (host.indexOf('5ddd.com') !== -1) return; // 落地页无 NAS, 跳过
+                    if (host.indexOf('5ddd.com') !== -1) return;        // 落地页无 NAS, 跳过
+                    if (host === 'fnos.net') return;                    // 官方中继门户根(fnos.net/{fnId})只返回门户HTML; 真实 NAS 在 {fnId}.fnos.net 子域, 导航到子域后脚本会重新注入并执行
                     if (window.location.href.indexOf('/login') !== -1) return;
                     window.__fntv_sys_config_requested = true;
 
+                    // 官方中继子域(ydmy007.fnos.net)本身即 NAS, 但其隧道建立可能较慢(实测可达数十秒),
+                    // 需较长轮询; 直连/IPv6/5ddd 代理则快速判定.
+                    var isRelaySub = host.endsWith('.fnos.net');
+                    var maxAttempts = isRelaySub ? 40 : 6;   // 中继: 40×1.5s≈60s; 其余: 6×~0.7s≈11s
+                    var delayBase = isRelaySub ? 1500 : 700;
                     var attempt = 0;
-                    var maxAttempts = 6; // 退避重试, 总跨度约 11s
                     function tryFetch() {
                         attempt++;
                         fetch('/v/api/v1/sys/config', { credentials: 'include' })
                             .then(function(r) { return r.text(); })
                             .then(function(text) {
                                 var t = (text || '').trim();
+                                var isJson = t.charAt(0) === '{';
                                 var isHtml = t.indexOf('<!doctype') === 0 || t.indexOf('<html') === 0;
-                                if (isHtml && attempt < maxAttempts) {
-                                    // 中继隧道未就绪 / 返回门户 HTML → 退避重试
-                                    setTimeout(tryFetch, 700 * attempt);
-                                    return;
-                                }
-                                if (isHtml) {
-                                    // 重试耗尽仍非 JSON → 明确告知主进程(中继不支持该 API)
+                                if (isJson) {
                                     postMessage({
-                                        type: "SysConfigFailed",
+                                        type: "SysConfig",
                                         url: "/v/api/v1/sys/config",
                                         body: t,
                                         pageUrl: String(window.location.href || "")
                                     });
                                     return;
                                 }
+                                if (isHtml && attempt < maxAttempts) {
+                                    // 中继隧道未就绪 / 返回门户 HTML → 退避重试
+                                    setTimeout(tryFetch, delayBase * Math.min(attempt, 6));
+                                    return;
+                                }
+                                // 重试耗尽仍非 JSON → 明确告知主进程
                                 postMessage({
-                                    type: "SysConfig",
+                                    type: "SysConfigFailed",
                                     url: "/v/api/v1/sys/config",
                                     body: t,
                                     pageUrl: String(window.location.href || "")
                                 });
                             })
                             .catch(function() {
-                                if (attempt < maxAttempts) { setTimeout(tryFetch, 700 * attempt); return; }
-                                window.__fntv_sys_config_requested = false;
+                                if (attempt < maxAttempts) { setTimeout(tryFetch, delayBase * Math.min(attempt, 6)); return; }
+                                postMessage({
+                                    type: "SysConfigFailed",
+                                    url: "/v/api/v1/sys/config",
+                                    body: "",
+                                    pageUrl: String(window.location.href || "")
+                                });
                             });
                     }
                     setTimeout(tryFetch, 800);
@@ -423,9 +434,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
             }
         });
 
-        // ★ 官方中继(.fnos.net)配置看门狗: 中继服务器可能不代理 /v/api/v1/sys/config,
-        //   导致 app_id/baseUrl 永远拿不到 → 注入脚本重试耗尽后发 SysConfigFailed.
-        //   暂时只记日志不弹窗(给用户留出 F12 诊断时间), 等 F12 诊断结果回来后再根治.
+        // ★ 官方中继(.fnos.net)配置看门狗: 中继隧道建立可能较慢(实测可达数十秒),
+        //   注入脚本已改为最长 60s 轮询; 此处仅作兜底日志(不弹窗), 防止消息丢失时永久卡死.
         oauthWindow.webContents.on('did-navigate', (_e: any, navUrl: string) => {
             try {
                 const navHost = new URL(navUrl).hostname.toLowerCase();
@@ -433,10 +443,10 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     if (relayWatchdog) clearTimeout(relayWatchdog);
                     relayWatchdog = setTimeout(() => {
                         if (!authRequested && !sysConfigLoaded) {
-                            log.warn(`[FN ID] 官方中继(.fnos.net) 25s 内未完成 OAuth 配置(已记录不弹窗), url=${navUrl}`);
+                            log.warn(`[FN ID] 官方中继(.fnos.net) 55s 内未完成 OAuth 配置(已记录不弹窗), url=${navUrl}`);
                             if (relayWatchdog) { relayWatchdog = null; }
                         }
-                    }, 25000);
+                    }, 55000);
                 }
             } catch { /* ignore */ }
         });
@@ -674,9 +684,14 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                             //   内网场景(当前页非 5ddd.com)维持原逻辑用 nas_oauth.url, 不受影响.
                             const pageUrl = messageData.pageUrl || '';
                             const onExternalRelay = /5ddd\.com/i.test(pageUrl);
+                            const onRelaySub = (() => { try { return /\.fnos\.net$/i.test(new URL(pageUrl).hostname); } catch { return false; } })();
                             if (onExternalRelay && pageUrl) {
                                 baseUrl = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
                                 log.info(`[FN ID] 外网代理模式, 改用代理基址: ${baseUrl} (原 nas_oauth.url=${oauthUrl})`);
+                            } else if (onRelaySub && pageUrl) {
+                                // ★ 官方中继子域(ydmy007.fnos.net)本身即 NAS 基址, 忽略内网 nas_oauth.url
+                                baseUrl = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
+                                log.info(`[FN ID] 官方中继子域模式, 改用子域基址: ${baseUrl} (原 nas_oauth.url=${oauthUrl})`);
                             } else if (oauthUrl && oauthUrl !== '://') {
                                 baseUrl = oauthUrl;
                             } else if (pageUrl) {
@@ -762,6 +777,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 // ★ 外网修复: 当前在 5ddd.com 代理下时, 用「代理页真实基址」(保留 /{fnId} 路径前缀),
                 //   而非仅 origin; 内网则维持 origin(无路径前缀).
                 const onExternalRelay = /5ddd\.com/i.test(currentUrl);
+                const onRelaySub = /\.fnos\.net$/i.test(parsed.hostname);
                 const currentBaseUrl = onExternalRelay
                     ? currentUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '')
                     : `${parsed.protocol}//${parsed.host}`;
@@ -783,8 +799,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     const oauth = data.nas_oauth;
                     if (oauth && oauth.app_id) {
                         let targetBaseUrl = currentBaseUrl;
-                        // ★ 外网: 代理模式下忽略内网 nas_oauth.url, 始终用代理基址
-                        if (!onExternalRelay && oauth.url && oauth.url !== '://') {
+                        // ★ 外网: 代理/中继子域模式下忽略内网 nas_oauth.url, 始终用代理/子域基址
+                        if (!onExternalRelay && !onRelaySub && oauth.url && oauth.url !== '://') {
                             targetBaseUrl = oauth.url;
                         }
                         baseUrl = targetBaseUrl;
