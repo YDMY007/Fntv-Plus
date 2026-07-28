@@ -2,7 +2,7 @@
 # 直连 B站 弹幕下载器（绕开失效的弹弹play extcomment 代理）
 # 用法: bili_danmaku.py <番名> <集数> <输出xml>
 # 依赖: 仅 Python 标准库 (urllib / hashlib / re / html)
-import sys, json, os, urllib.request, urllib.parse, urllib.error, hashlib, time, html, re, difflib
+import sys, json, os, io, urllib.request, urllib.parse, urllib.error, hashlib, time, html, re, difflib
 
 UA = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.bilibili.com"}
 ENC = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52]
@@ -408,6 +408,12 @@ def extract(raw):
     return res
 
 def main():
+    # Windows 内嵌 Python 默认用 GBK/ANSI 编码写控制台，mpv subprocess 捕获后中文全变乱码。
+    # 强制 stdout/stderr 均使用 UTF-8，确保 BILI_RESULT JSON 和日志中的中文正确传递。
+    if sys.platform == "win32":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
     if len(sys.argv) < 4:
         log("用法: bili_danmaku.py <番名> <集数> <输出xml>")
         sys.exit(2)

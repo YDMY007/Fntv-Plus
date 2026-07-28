@@ -552,6 +552,7 @@ function auto_search_extra(title, episode_num)
             args = { py, py_script, title, tostring(episode_num), out_xml },
             capture_stdout = true,
             capture_stderr = true,
+            env = { ["PYTHONIOENCODING"] = "utf-8" },
         })
         -- 把 Python 的 stderr 日志（[番剧区]/[视频区]/匹配过程）逐行转发到 mpv 日志，
         -- 否则这些关键 debug 信息被 subprocess 捕获后直接丢弃、任何日志里都看不到
