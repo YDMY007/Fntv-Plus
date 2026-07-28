@@ -170,7 +170,7 @@ def search_bangumi(title, ep_num):
     d = jget(url)
     if not d or d.get("code") != 0:
         log("番剧区搜索失败 code=" + str(d.get("code")))
-        return None, None
+        return None, None, None
     cands = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "media_bangumi":
@@ -201,10 +201,11 @@ def search_bangumi(title, ep_num):
                 continue
             cid = _bangumi_cid(ep_id)
             if cid:
+                info = {"source": "bangumi", "season_id": anime.get("season_id"), "epid": ep_id, "bvid": None}
                 log(f"[番剧区] sim={sim:.2f}(阈值{thr}) 命中: {t!r} ep序号={ep.get('index')} cid={cid}")
-                return cid, t
+                return cid, t, info
     log("[番剧区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
-    return None, None
+    return None, None, None
 
 def _ep_in_title(t, ep_num):
     """判断标题/分P名是否明确指向第 ep_num 话。"""
@@ -289,11 +290,12 @@ def cid_from_bvid(bvid, ep_num=None, title_hint=None):
 
 def search_video(title, ep_num):
     """视频区搜索（UP主搬运）。按剧名相似度排序：优先完整剧名匹配，匹配失败降阈值到70%。
-    命中候选内再按集数/分P对齐（按分P标题中的集序号选分P，不按视频时长）。"""
+    命中候选内再按集数/分P对齐（按分P标题中的集序号选分P，不按视频时长）。
+    返回 (cid, title, info) 或 (None, None, None)。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(title)}&search_type=video"
     d = jget(url)
     if not d or d.get("code") != 0:
-        return None, None
+        return None, None, None
     pool = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "video":
@@ -304,7 +306,7 @@ def search_video(title, ep_num):
                     vr = parse_count(v.get("video_review"))
                     pool.append((t, bvid, vr))
     if not pool:
-        return None, None
+        return None, None, None
     # 预筛：去除 reaction/二创等明显非正片
     pool = [(t, b, vr) for (t, b, vr) in pool if not any(k in t.lower() for k in BAD_TITLE)]
     # 计算相似度并按 (相似度 desc, 弹幕数 desc) 排序
@@ -321,10 +323,11 @@ def search_video(title, ep_num):
                 continue
             cid = cid_from_bvid(bvid, ep_num, title_hint=t)
             if cid:
+                info = {"source": "video", "bvid": bvid}
                 log(f"[视频区] sim={sim:.2f}(阈值{thr}) 集数对齐命中: {t!r} cid={cid}")
-                return cid, t
+                return cid, t, info
     log("[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
-    return None, None
+    return None, None, None
 
 # （已移除 search_video_fuzzy 谐音/近似名模糊兜底：匹配策略改为剧名相似度阈值，见 search_bangumi/search_video）
 
@@ -332,7 +335,7 @@ def search_cid(title, ep_num):
     # 清洗弹弹play 可能附带的年份括号（如「尼古喵喵 (2026)」），避免 B站 搜不到
     title = re.sub(r"\s*[\(（]\d{4}[\)）]\s*$", "", title).strip()
     if not title:
-        return None, None
+        return None, None, None
     # ep_num 为 0 时尝试从标题/文件名里再挖一次集数（部分调用方传入的是含集数的完整标题）
     if not ep_num or ep_num == 0:
         derived = parse_ep_from_title(title)
@@ -343,17 +346,17 @@ def search_cid(title, ep_num):
             log(f"[search_cid] ep_num=0 且标题无集数: {title!r}")
     log(f"[search_cid] 开始匹配: title={title!r} ep_num={ep_num}")
     # 匹配策略：剧名相似度优先完整匹配(SIM_HIGH)，失败降阈值到 SIM_LOW(70%)，不做谐音兜底
-    cid, atitle = search_bangumi(title, ep_num)
+    cid, atitle, info = search_bangumi(title, ep_num)
     if cid:
         log(f"[search_cid] 番剧区命中 cid={cid}")
-        return cid, atitle
+        return cid, atitle, info
     log("番剧区无结果，回退到视频区(UP主搬运)")
-    cid, atitle = search_video(title, ep_num)
+    cid, atitle, info = search_video(title, ep_num)
     if cid:
         log(f"[search_cid] 视频区命中 cid={cid}")
-        return cid, atitle
+        return cid, atitle, info
     log("[search_cid] 番剧区/视频区均未匹配（已移除谐音/近似名兜底，不再猜测）")
-    return None, None
+    return None, None, None
 
 def read_varint(b, i):
     shift = 0; val = 0
@@ -410,9 +413,10 @@ def main():
         sys.exit(2)
     title = sys.argv[1]; ep_num = int(sys.argv[2]); out = sys.argv[3]
     log(f"番名={title} 集数={ep_num}" + (" [登录态]" if COOKIE else " [匿名]"))
-    cid, atitle = search_cid(title, ep_num)
+    cid, atitle, info = search_cid(title, ep_num)
     if not cid:
         log("未找到B站对应集（可能番名不匹配或网络受限）")
+        print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': '未找到匹配的B站视频'}, ensure_ascii=False)}")
         sys.exit(1)
     log(f"cid={cid} 番名={atitle}")
     all_d = []
@@ -428,6 +432,7 @@ def main():
         all_d.extend(dm)
     if not all_d:
         log("B站该集无弹幕")
+        print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': 'B站该集无弹幕数据'}, ensure_ascii=False)}")
         sys.exit(1)
     with open(out, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
@@ -436,6 +441,16 @@ def main():
             p = f"{t:.2f},{mode},25,{col},0,0,0"
             f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
         f.write("</danmaku>\n")
+    # 输出结构化元数据到 stdout（供 Lua extra.lua 解析后显示在配置面板）
+    result = {
+        "ok": True,
+        "bvid": info.get("bvid") if info else None,
+        "title": atitle,
+        "danmaku_count": len(all_d),
+        "source": info.get("source") if info else None,
+        "cid": cid,
+    }
+    print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
     log(f"生成 {len(all_d)} 条弹幕 -> {out}")
     sys.exit(0)
 

@@ -248,8 +248,8 @@ function open_input_menu()
     end
 end
 
--- ===================== B站弹幕搜索配置面板 =====================
--- 查看 auto_load_extra 开关、当前文件名解析出的番名/集数、alias 映射等
+-- ===================== B站弹幕配置面板 =====================
+-- 显示当前解析结果、B站关联状态（BV号/标题/弹幕数/是否成功），而非技术参数。
 function open_bili_config_menu()
     if not uosc_available then
         show_message("B站弹幕配置需在 uosc 控制栏下使用", 3)
@@ -257,12 +257,11 @@ function open_bili_config_menu()
     end
     local items = {}
     table.insert(items, {
-        title = "B站弹幕搜索配置",
+        title = "B站弹幕配置",
         bold = true, italic = true, keep_open = true, selectable = false,
     })
 
     -- 当前文件名解析出的番名/集数（即 B站 默认会搜什么）
-    -- 网络流必须用 media-title（人类可读标题），filename 只是 URL 路径（含 IP 等无意义字符）
     local raw_filename = mp.get_property("filename") or ""
     local path = mp.get_property("path") or ""
     local parse_target = raw_filename
@@ -282,21 +281,45 @@ function open_bili_config_menu()
         table.insert(items, { title = "当前文件无法解析出番名（将转弹弹play兜底）", keep_open = true, selectable = false })
     end
 
-    -- 关键配置项
-    table.insert(items, { title = "auto_load_extra（自动补源）：" .. (options.auto_load_extra and "开" or "关"), keep_open = true, selectable = false })
-    table.insert(items, { title = "fallback_server：" .. (options.fallback_server or "（空）"), keep_open = true, selectable = false })
-    table.insert(items, { title = "proxy：" .. (options.proxy ~= "" and options.proxy or "（无）"), keep_open = true, selectable = false })
+    -- 分隔线
+    table.insert(items, { title = "", keep_open = true, selectable = false })
 
-    -- 已关联弹幕（若有）
-    if DANMAKU.anime then
-        table.insert(items, { title = "已关联番剧：" .. DANMAKU.anime, keep_open = true, selectable = false })
-        table.insert(items, { title = "已关联集数：" .. (DANMAKU.episode or "未知"), keep_open = true, selectable = false })
-        table.insert(items, { title = "已关联来源：" .. (DANMAKU.source or "未知"), keep_open = true, selectable = false })
+    -- ====== B站关联状态区（用户最关心的信息）======
+    if BILI_INFO and type(BILI_INFO) == "table" then
+        if BILI_INFO.ok then
+            -- ✅ 关联成功
+            table.insert(items, { title = "✅ B站弹幕：已关联成功", bold = true, keep_open = true, selectable = false, })
+            if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
+                table.insert(items, { title = "  📺 视频：" .. (BILI_INFO.title or "未知") .. " [" .. BILI_INFO.bvid .. "]", keep_open = true, selectable = false })
+            elseif BILI_INFO.title then
+                table.insert(items, { title = "  📺 略剧：" .. BILI_INFO.title, keep_open = true, selectable = false })
+            end
+            if BILI_INFO.danmaku_count then
+                table.insert(items, { title = "  💬 弹幕数：" .. tostring(BILI_INFO.danmaku_count) .. " 条", keep_open = true, selectable = false })
+            end
+            local src_label = ({ bangumi = "番剧区（正版）", video = "视频区（UP主搬运）" })[BILI_INFO.source] or BILI_INFO.source or "未知"
+            table.insert(items, { title = "  🎯 匹配来源：" .. src_label, keep_open = true, selectable = false })
+        else
+            -- ❌ 搜索失败
+            table.insert(items, { title = "❌ B站弹幕：关联失败", bold = true, keep_open = true, selectable = false })
+            table.insert(items, { title = "  原因：" .. (BILI_INFO.error or "未知错误"), keep_open = true, selectable = false })
+        end
+    else
+        -- ⏳ 尚未搜索过
+        local has_bili_source = false
+        for url, source in pairs(DANMAKU.sources) do
+            if url and url:match("bili_danmaku_") then
+                has_bili_source = true
+                break
+            end
+        end
+        if has_bili_source then
+            table.insert(items, { title = "⏳ B站弹幕：已加载（旧版无元数据）", keep_open = true, selectable = false })
+        else
+            table.insert(items, { title = "⏳ B站弹幕：尚未搜索", keep_open = true, selectable = false })
+            table.insert(items, { title = "  点击下方「立即搜索」尝试自动匹配", keep_open = true, selectable = false })
+        end
     end
-
-    -- 搜索逻辑说明
-    table.insert(items, { title = "搜索优先级：番剧区 → 视频区 → 谐音兜底", keep_open = true, selectable = false })
-    table.insert(items, { title = "候选优选：同匹配下按弹幕数（video_review）取最多者", keep_open = true, selectable = false })
 
     -- 操作项
     table.insert(items, {

@@ -5,6 +5,10 @@ local msg = require 'mp.msg'
 -- 「弹弹play 匹配成功后再触发」重复跑 B站（两次可能用了不同番名→两份 XML）。
 bili_auto_triggered = false
 
+-- B站弹幕搜索结果元数据（由 bili_danmaku.py 的 stdout BILI_RESULT: JSON 填充）
+-- 供 menu.lua 的 open_bili_config_menu() 面板显示关联状态
+BILI_INFO = nil
+
 local Source = {
     ["b 站"] = "bilibili1",
     ["腾讯"] = "qq",
@@ -551,6 +555,18 @@ function auto_search_extra(title, episode_num)
         })
         if res.status == 0 and file_exists(out_xml) then
             ok = true
+            -- 解析 Python 输出的 BILI_RESULT JSON（供配置面板显示关联状态）
+            local stdout = res.stdout or ""
+            local bili_line = stdout:match("BILI_RESULT:(.+)")
+            if bili_line then
+                local ok_parse, parsed = pcall(utils.parse_json, bili_line)
+                if ok_parse and type(parsed) == "table" then
+                    BILI_INFO = parsed
+                    msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
+                else
+                    msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
+                end
+            end
             break
         end
     end
