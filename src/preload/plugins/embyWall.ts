@@ -722,27 +722,29 @@ function applyTvDetailGlass(): void {
     barWrap.style.setProperty('padding', '12px 18px', 'important');
   }
 
-  // ⑥ 原生播放按钮: 极淡幽灵风格（融入深色背景，不抢视觉焦点）
+  // ⑥ 原生播放按钮: 半透明白底(适配浅色/透明详情页背景, 保证可辨识度)
   const nativePlayBtns = header.parentElement?.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]') ?? [];
   for (const btn of Array.from(nativePlayBtns)) {
     const el = btn as HTMLElement;
     if (el.classList.contains('fnos-play')) continue; // 跳过我们自己的按钮
-    el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
-    el.style.setProperty('border', '1px solid rgba(255,255,255,.10)', 'important');
+    el.style.setProperty('background', 'rgba(255,255,255,.55)', 'important');
+    el.style.setProperty('border', '1px solid rgba(255,255,255,.35)', 'important');
     el.style.setProperty('border-radius', '10px', 'important');
-    el.style.setProperty('color', 'rgba(232,228,248,.82)', 'important');
-    el.style.setProperty('box-shadow', 'none', 'important');
+    el.style.setProperty('color', '#333', 'important');
+    el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     el.style.setProperty('font-weight', '500', 'important');
     el.addEventListener('mouseenter', () => {
       if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
-        el.style.setProperty('background', 'rgba(255,255,255,.11)', 'important');
-        el.style.setProperty('border-color', 'rgba(255,255,255,.18)', 'important');
+        el.style.setProperty('background', 'rgba(255,255,255,.75)', 'important');
+        el.style.setProperty('border-color', 'rgba(255,255,255,.5)', 'important');
+        el.style.setProperty('box-shadow', '0 2px 10px rgba(0,0,0,.12)', 'important');
       }
     }, { once: false });
     el.addEventListener('mouseleave', () => {
       delete el.dataset.glassHover;
-      el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
-      el.style.setProperty('border-color', 'rgba(255,255,255,.10)', 'important');
+      el.style.setProperty('background', 'rgba(255,255,255,.55)', 'important');
+      el.style.setProperty('border-color', 'rgba(255,255,255,.35)', 'important');
+      el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     }, { once: false });
   }
 }
@@ -912,27 +914,29 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       'var(--fnos-detail-scroll)', 'important');
   }
 
-  // ⑤ 原生播放按钮: 极淡幽灵风格（同 applyTvDetailGlass ⑥）
+  // ⑤ 原生播放按钮: 半透明白底(适配浅色/透明详情页背景, 保证可辨识度)
   const seasonPlayBtns = document.querySelectorAll('button[class*="primary"], .semi-button--primary, [class*="btn-primary"], a[class*="play"]');
   for (const btn of Array.from(seasonPlayBtns)) {
     const el = btn as HTMLElement;
     if (el.classList.contains('fnos-play')) continue;
-    el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
-    el.style.setProperty('border', '1px solid rgba(255,255,255,.10)', 'important');
+    el.style.setProperty('background', 'rgba(255,255,255,.55)', 'important');
+    el.style.setProperty('border', '1px solid rgba(255,255,255,.35)', 'important');
     el.style.setProperty('border-radius', '10px', 'important');
-    el.style.setProperty('color', 'rgba(232,228,248,.82)', 'important');
-    el.style.setProperty('box-shadow', 'none', 'important');
+    el.style.setProperty('color', '#333', 'important');
+    el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     el.style.setProperty('font-weight', '500', 'important');
     el.addEventListener('mouseenter', () => {
       if (!el.dataset.glassHover) { el.dataset.glassHover = '1';
-        el.style.setProperty('background', 'rgba(255,255,255,.11)', 'important');
-        el.style.setProperty('border-color', 'rgba(255,255,255,.18)', 'important');
+        el.style.setProperty('background', 'rgba(255,255,255,.75)', 'important');
+        el.style.setProperty('border-color', 'rgba(255,255,255,.5)', 'important');
+        el.style.setProperty('box-shadow', '0 2px 10px rgba(0,0,0,.12)', 'important');
       }
     }, { once: false });
     el.addEventListener('mouseleave', () => {
       delete el.dataset.glassHover;
-      el.style.setProperty('background', 'rgba(255,255,255,.06)', 'important');
-      el.style.setProperty('border-color', 'rgba(255,255,255,.10)', 'important');
+      el.style.setProperty('background', 'rgba(255,255,255,.55)', 'important');
+      el.style.setProperty('border-color', 'rgba(255,255,255,.35)', 'important');
+      el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     }, { once: false });
   }
 }
