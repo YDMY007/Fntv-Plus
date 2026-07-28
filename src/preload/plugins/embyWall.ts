@@ -626,6 +626,18 @@ function applyTvDetailGlass(): void {
   if (!header) return;
   log('applyTvDetailGlass: header found');
 
+  // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
+  //   选择器对应 mainwin.ts ⑦ 的 fnOS 原生导航栏(div.relative.z-20.flex...px-11.py-5)
+  const nativeNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
+  if (nativeNav) {
+    nativeNav.style.setProperty('background', 'transparent', 'important');
+    nativeNav.style.setProperty('backdrop-filter', 'none', 'important');
+    nativeNav.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    nativeNav.style.setProperty('box-shadow', 'none', 'important');
+    nativeNav.style.setProperty('border', 'none', 'important');
+    log('detail -> native nav immersive (transparent)');
+  }
+
   // ① 头部渐变遮罩: 极轻量 — 保持背景图清晰可见,仅底部做淡淡过渡
   const gradient = header.querySelector('.gradient') as HTMLElement | null;
   if (gradient) {
@@ -768,6 +780,16 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
 
 /** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃 */
 function applySeasonDetailGlass(): void {
+  // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
+  const seasonNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
+  if (seasonNav) {
+    seasonNav.style.setProperty('background', 'transparent', 'important');
+    seasonNav.style.setProperty('backdrop-filter', 'none', 'important');
+    seasonNav.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    seasonNav.style.setProperty('box-shadow', 'none', 'important');
+    seasonNav.style.setProperty('border', 'none', 'important');
+  }
+
   // ① 头部信息区 (470px高, 含模糊背景+海报+标题)
   const header = document.querySelector('.semi-always-dark.relative.box-border.flex.h-\\[470px\\]') as HTMLElement | null;
   if (!header) {
