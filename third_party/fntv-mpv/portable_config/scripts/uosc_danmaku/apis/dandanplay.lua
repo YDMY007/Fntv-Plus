@@ -45,17 +45,27 @@ function set_episode_id(input, from_menu)
     else
         fetch_danmaku(episodeId, from_menu)
     end
-    -- 自动补源（兜底）：仅当 file-loaded 阶段未按文件名成功触发 B站 时才补。
-    -- （B站优先模式下，文件名已解析成功即由 main.lua 先触发，这里避免重复跑）
-    if options.auto_load_extra and not bili_auto_triggered and DANMAKU.anime then
-        local ep_num = tonumber((DANMAKU.episode or ""):match("%d+"))
-        if ep_num then
-            msg.warn(("自动补源：触发 anime=%s ep=%s"):format(DANMAKU.anime, ep_num))
-            mp.add_timeout(1.2, function()
-                auto_search_extra(DANMAKU.anime, ep_num)
-            end)
+    -- 自动补源（兜底）：弹弹play 匹配成功后，用其返回的干净服务端标题 DANMAKU.anime 补源 B站。
+    -- 触发条件（满足其一）：
+    --   a) file-loaded 阶段未按文件名触发过 B站（bili_auto_triggered=false）
+    --   b) 文件名触发过但失败/无关联（BILI_INFO 为空或 ok=false）——典型场景是文件名乱码，
+    --      拿乱码去搜 B站 必然失败；此时必须用弹弹play的干净标题重试一次。
+    if options.auto_load_extra and DANMAKU.anime then
+        local bili_failed = (BILI_INFO == nil) or (type(BILI_INFO) == "table" and not BILI_INFO.ok)
+        if not bili_auto_triggered or bili_failed then
+            local ep_num = tonumber((DANMAKU.episode or ""):match("%d+"))
+            if ep_num then
+                msg.warn(("自动补源：触发 anime=%s ep=%s（%s）"):format(
+                    DANMAKU.anime, ep_num,
+                    bili_auto_triggered and "文件名触发失败，用弹弹play干净标题重试" or "首次触发"))
+                mp.add_timeout(1.2, function()
+                    auto_search_extra(DANMAKU.anime, ep_num)
+                end)
+            else
+                msg.warn(("自动补源：跳过（集数提取失败，episode=%s）"):format(DANMAKU.episode or "nil"))
+            end
         else
-            msg.warn(("自动补源：跳过（集数提取失败，episode=%s）"):format(DANMAKU.episode or "nil"))
+            msg.info("自动补源：B站已按文件名关联成功，跳过重复补源")
         end
     end
 end

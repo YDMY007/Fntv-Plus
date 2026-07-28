@@ -884,7 +884,18 @@ mp.register_event("file-loaded", function()
                 parse_target = mtitle
             end
         end
-        local bt, be, bmethod = guess_bili_title_ep_v2(parse_target)
+        -- 优先复用弹弹play已匹配到的干净标题（服务端规范中文名，绝无文件名乱码）。
+        -- 正常 file-loaded 时 DANMAKU 刚被重置、anime 为空，此分支不生效；
+        -- 但若历史记录(load_danmaku_history)等场景已提前填入，则直接用干净标题。
+        local bt, be, bmethod
+        if DANMAKU.anime and DANMAKU.anime ~= "" then
+            bt = DANMAKU.anime
+            be = DANMAKU.episode and tonumber(tostring(DANMAKU.episode):match("%d+")) or nil
+            bmethod = "dandan"
+            msg.warn(("B站优先：复用弹弹play干净标题 %s（跳过文件名解析）"):format(bt))
+        else
+            bt, be, bmethod = guess_bili_title_ep_v2(parse_target)
+        end
         if bt and be then
             bili_auto_triggered = true
             msg.warn(("B站优先：极速解析 %s 第%s集（策略:%s），触发 B站 弹幕"):format(bt, be, bmethod))
@@ -975,7 +986,15 @@ mp.register_script_message("bili_search_now", function()
             parse_target = mtitle
         end
     end
-    local title, ep, method = guess_bili_title_ep_v2(parse_target)
+    -- 优先复用弹弹play已匹配的干净标题（避免文件名乱码导致 B站 搜不到）
+    local title, ep, method
+    if DANMAKU.anime and DANMAKU.anime ~= "" then
+        title = DANMAKU.anime
+        ep = DANMAKU.episode and tonumber(tostring(DANMAKU.episode):match("%d+")) or nil
+        method = "弹弹play标题"
+    else
+        title, ep, method = guess_bili_title_ep_v2(parse_target)
+    end
     if title and ep then
         auto_search_extra(title, ep)
         show_message(("已触发 B站弹幕搜索：%s 第%s集（策略:%s）"):format(title, ep, method), 4)

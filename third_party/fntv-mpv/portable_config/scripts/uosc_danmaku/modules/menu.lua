@@ -271,8 +271,18 @@ function open_bili_config_menu()
             parse_target = mtitle
         end
     end
-    local title, ep, method = guess_bili_title_ep_v2(parse_target)
-    local method_label = ({ fast = "极速策略", legacy = "兼容链", title_only = "极速·仅标题", legacy_title_only = "兼容·仅标题" })[method] or "无"
+    -- 优先显示弹弹play匹配到的干净标题（服务端规范中文名）；
+    -- 弹弹play未匹配时才回退到文件名解析（可能含乱码）
+    local title, ep, method_label
+    if DANMAKU.anime and DANMAKU.anime ~= "" then
+        title = DANMAKU.anime
+        ep = DANMAKU.episode and tonumber(tostring(DANMAKU.episode):match("%d+")) or nil
+        method_label = "弹弹play标题（推荐）"
+    else
+        local method
+        title, ep, method = guess_bili_title_ep_v2(parse_target)
+        method_label = ({ fast = "极速策略", legacy = "兼容链", title_only = "极速·仅标题", legacy_title_only = "兼容·仅标题" })[method] or "无"
+    end
     if title then
         table.insert(items, { title = "解析策略：" .. method_label, keep_open = true, selectable = false })
         table.insert(items, { title = "当前解析 → 番名：" .. title, keep_open = true, selectable = false })
@@ -357,7 +367,8 @@ function open_bili_manual_search()
         show_message("手动搜索需在 uosc 控制栏下使用", 3)
         return
     end
-    local suggestion = parse_title() or ""
+    -- 预填优先级：弹弹play干净标题 > 文件名解析（后者可能含乱码）
+    local suggestion = (DANMAKU.anime and DANMAKU.anime ~= "" and DANMAKU.anime) or parse_title() or ""
     local menu_props = {
         type = "menu_bili_manual",
         title = "输入番名搜索 B站弹幕（可加空格+集数，如：番名 3）",

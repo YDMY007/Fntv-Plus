@@ -295,4 +295,6 @@ mp.add_hook("on_unload", 50, function()
         end
     end
     DANMAKU = {sources = {}, count = 1}
+    -- 换文件时重置 B站关联元数据，避免配置面板显示上一集的残留状态
+    BILI_INFO = nil
 end)
