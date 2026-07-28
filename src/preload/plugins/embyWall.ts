@@ -1505,27 +1505,6 @@ function handle(): void {
       +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">';
     panel.appendChild(ctrl);
 
-    // ═══ QQ 群反馈入口（亚克力透明度容器上方） ═══
-    if (!panel.querySelector('#fnos-qq-group')) {
-      const qqBtn = document.createElement('a');
-      qqBtn.id = 'fnos-qq-group';
-      qqBtn.href = 'https://qm.qq.com/q/dUnIQVvoIw';
-      qqBtn.target = '_blank';
-      qqBtn.rel = 'noopener noreferrer';
-      qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;gap:8px;'
-        + 'margin:0 0 12px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
-        + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
-        + 'border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:500;transition:background .15s,border-color .15s;';
-      qqBtn.innerHTML = ''
-        + '<svg width="18" height="18" viewBox="0 0 24 24" fill="#12B7F5" style="flex-shrink:0;"><path d="M12 2C6.48 2 2 6.48 2 12c0 1.54.36 3 .98 4.29L2 22l5.71-.98C9 21.64 10.46 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.38 0-2.67-.35-3.8-.96l-.27-.16-2.83.49.49-2.83-.17-.27A7.95 7.95 0 0 1 4 12c0-4.41 3.59-8 8-8s8 3.59 8 8-3.59 8-8 8z"/><circle cx="8.5" cy="11.5" r="1.5" fill="#12B7F5"/><circle cx="15.5" cy="11.5" r="1.5" fill="#12B7F5"/></svg>'
-        + '<span>加入 QQ 群交流</span>';
-      qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
-      qqBtn.addEventListener('mouseleave', () => { qqBtn.style.borderColor = 'rgba(255,255,255,.2)'; qqBtn.style.background = 'var(--fnos-sidebar-btn-bg)!important'; });
-      // 作为 #fnos-glass-ctrl 容器首个子元素插入(位于"亚克力透明度"标题上方),
-      // 直接放进确定可见的玻璃面板内, 避免外层 insertBefore 在某些重渲染时序下静默失败导致整段不显示
-      ctrl.insertBefore(qqBtn, ctrl.firstChild);
-    }
-
     const alphaInput = ctrl.querySelector('#fnos-alpha') as HTMLInputElement;
     const alphaVal = ctrl.querySelector('#fnos-alpha-val') as HTMLElement;
     const blurInput = ctrl.querySelector('#fnos-blur') as HTMLInputElement;
@@ -1545,6 +1524,41 @@ function handle(): void {
       localStorage.setItem('fnos-glass-blur', String(px));
     });
     injectSettingsUI(panel); // [新] 侧栏底部追加"设置"按钮 + 设置面板(替代托盘右键菜单设置项)
+  }
+
+  /** [新] 构造"加入 QQ 群"按钮(小企鹅图标), 返回 <a> 元素
+   *  - 图标为 QQ 经典小企鹅(黑身白肚、橙喙橙脚、红围巾)
+   *  - 点击新窗口打开群链接 https://qm.qq.com/q/dUnIQVvoIw */
+  function createQQGroupButton(): HTMLAnchorElement {
+    const qqBtn = document.createElement('a');
+    qqBtn.id = 'fnos-qq-group';
+    qqBtn.href = 'https://qm.qq.com/q/dUnIQVvoIw';
+    qqBtn.target = '_blank';
+    qqBtn.rel = 'noopener noreferrer';
+    qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;gap:8px;'
+      + 'margin-top:8px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
+      + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+      + 'border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:500;transition:background .15s,border-color .15s;';
+    qqBtn.innerHTML = ''
+      + '<svg width="18" height="18" viewBox="0 0 24 24" style="flex-shrink:0;">'
+      +   '<ellipse cx="12" cy="14" rx="7" ry="8" fill="#1a1a1a"/>'
+      +   '<ellipse cx="12" cy="15" rx="4.2" ry="6" fill="#ffffff"/>'
+      +   '<circle cx="12" cy="6" r="4.2" fill="#1a1a1a"/>'
+      +   '<circle cx="10.4" cy="5.6" r="1.1" fill="#fff"/>'
+      +   '<circle cx="13.6" cy="5.6" r="1.1" fill="#fff"/>'
+      +   '<circle cx="10.6" cy="5.7" r="0.5" fill="#1a1a1a"/>'
+      +   '<circle cx="13.8" cy="5.7" r="0.5" fill="#1a1a1a"/>'
+      +   '<path d="M11 7 L13 7 L12 9 Z" fill="#FF9A1E"/>'
+      +   '<path d="M8 9 Q12 11 16 9 L15.5 11 Q12 12.5 8.5 11 Z" fill="#EE2A24"/>'
+      +   '<ellipse cx="9.5" cy="21.6" rx="2" ry="1.1" fill="#FF9A1E"/>'
+      +   '<ellipse cx="14.5" cy="21.6" rx="2" ry="1.1" fill="#FF9A1E"/>'
+      +   '<ellipse cx="5.5" cy="14" rx="1.6" ry="3.5" fill="#1a1a1a"/>'
+      +   '<ellipse cx="18.5" cy="14" rx="1.6" ry="3.5" fill="#1a1a1a"/>'
+      + '</svg>'
+      + '<span>加入 QQ 群交流</span>';
+    qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
+    qqBtn.addEventListener('mouseleave', () => { qqBtn.style.borderColor = 'rgba(255,255,255,.2)'; qqBtn.style.background = 'var(--fnos-sidebar-btn-bg)!important'; });
+    return qqBtn;
   }
 
   /** [新] 侧栏底部追加"设置"按钮; 点击打开设置面板
@@ -1614,6 +1628,11 @@ function handle(): void {
         openFeedbackModal();
       });
       ctrl.appendChild(fbBtn);
+    }
+
+    // [新] 加入 QQ 群按钮(小企鹅图标) - 位于"反馈"按钮下方
+    if (!ctrl.querySelector('#fnos-qq-group')) {
+      ctrl.appendChild(createQQGroupButton());
     }
 
     buildSettingsPanel();
