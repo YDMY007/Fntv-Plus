@@ -3054,13 +3054,31 @@ function handle(): void {
 
     // 打开时刷新值
     (overlay as any)._refresh = async (): Promise<void> => {
+      // [修复] 原实现是一整个 try 块串行回填 40+ 项，任何一项抛错都会静默跳过
+      // 其后所有回填（典型症状：Bangumi 同步开关配置里明明是 true，面板却显示未勾选）。
+      // 现改为分段隔离：每段独立 try/catch + 记录失败段名，单段失败不殃及其他段。
+      let s: any = null;
       try {
-        const s = await ipcRenderer.invoke('settings:get');
+        s = await ipcRenderer.invoke('settings:get');
+      } catch (err) {
+        log('SETTINGS refresh failed: settings:get invoke error', err);
+        return;
+      }
+      if (!s || typeof s !== 'object') {
+        log('SETTINGS refresh failed: settings:get returned', s);
+        return;
+      }
+      const seg = (name: string, fn: () => void): void => {
+        try { fn(); } catch (err) { log(`SETTINGS refresh segment [${name}] failed`, err); }
+      };
+      seg('switches', () => {
         swProxy.checked = !!(s.downloadProxy && s.downloadProxy.enabled);
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
         swBoxless.checked = !!s.detailBoxless;
         _detailBoxless = !!s.detailBoxless;
+      });
+      seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
         potPathEl.textContent = s.potPath || '应用内置（已随安装包分发，无需本机安装）';
         shaderSel.value = s.mpvDefaultShader || 'off';
@@ -3069,15 +3087,20 @@ function handle(): void {
         refreshDefaultPlayer();
         (overlay as any)._exitMode = s.exitMode || 'ask';
         refreshExit();
+      });
+      seg('accounts', () => {
         refreshBili();
         pyPath.textContent = s.pythonPath || '默认使用内置便携版（无需本机安装）';
         refreshDouban();
-        // 调试日志开关
+      });
+      seg('debug', () => {
         swDebug.checked = !!s.debugEnabled;
         const dc: Record<string, boolean> = s.debugComponents || {};
         debugComps.forEach(([k]) => {
           if (swDebugComps[k]) swDebugComps[k].checked = dc[k] !== false; // 默认开启
         });
+      });
+      seg('bangumi', () => {
         // Bangumi Token 回填（已保存则显示星号掩码，不显示明文）
         const bt: string | null = s.bangumiToken || null;
         if (bt) {
@@ -3095,11 +3118,15 @@ function handle(): void {
         // Bangumi 同步开关 + 阈值回填
         swBangumiSync.checked = !!s.bangumiSyncEnabled;
         bangumiThresholdInput.value = String(s.bangumiSyncThreshold || 80);
+      });
+      seg('bili-search', () => {
         // MPV B站弹幕搜索开关回填（默认开启）
         swMpvBiliSearch.checked = s.mpvBiliSearchEnabled !== false;
-      } catch (err) {
-        log('SETTINGS refresh failed', err);
-      }
+      });
+      // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
+      log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
+        + ' swChecked=' + String(swBangumiSync.checked)
+        + ' token=' + (s.bangumiToken ? 'set' : 'none'));
       // 布局确定后强制两张卡等高，使底部横线/按钮左右平齐
       requestAnimationFrame(syncCardHeights);
     };
