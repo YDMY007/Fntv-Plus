@@ -274,8 +274,11 @@ function writeBiliSearchEnabled(enabled: boolean): void {
             lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
         }
         const val = enabled ? 'yes' : 'no';
-        // 移除已存在的 bili_search_enabled / auto_load_extra 行
-        lines = lines.filter(l => !/^\s*(bili_search_enabled|auto_load_extra)\s*=/.test(l));
+        // 移除已存在的 bili_search_enabled / auto_load_extra 行，以及旧的开关注释行（防止注释无限堆叠）
+        lines = lines.filter(l => !/^\s*(bili_search_enabled|auto_load_extra)\s*=/.test(l)
+            && !/^#\s*B站弹幕搜索开关/.test(l));
+        // 去掉末尾多余空行
+        while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
         lines.push('# B站弹幕搜索开关（由应用设置面板控制，同时控制自动补源 auto_load_extra）');
         lines.push('bili_search_enabled=' + val);
         lines.push('auto_load_extra=' + val);

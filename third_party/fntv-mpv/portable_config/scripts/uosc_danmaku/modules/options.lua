@@ -17,6 +17,8 @@ options = {
     autoload_for_url = false,
     -- 自动补源：弹弹play 匹配成功后，自动去 360kan 搜 B站源对应集弹幕并叠加显示
     auto_load_extra = false,
+    -- B站弹幕搜索总开关（由应用设置面板写入 conf；手动搜索门控，与 auto_load_extra 同开同关）
+    bili_search_enabled = true,
     save_danmaku = false,
     user_agent = "mpv_danmaku/1.0",
     proxy = "",

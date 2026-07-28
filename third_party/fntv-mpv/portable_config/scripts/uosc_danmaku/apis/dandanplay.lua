@@ -391,6 +391,15 @@ function fetch_danmaku_data(args, callback)
             return
         end
         local data = utils.parse_json(json)
+        if data == nil then
+            if json == nil or json:match("^%s*$") then
+                -- 空响应体：典型场景是弹弹play服务器限流(HTTP 429)或临时故障
+                msg.warn("弹弹play API 返回空响应（很可能是服务器限流 429，请几小时后再试）")
+                show_message("弹弹play服务器限流，请稍后再试", 5)
+            else
+                msg.warn("弹弹play API 返回非JSON内容: " .. json:sub(1, 200))
+            end
+        end
         callback(data)
     end)
 end
