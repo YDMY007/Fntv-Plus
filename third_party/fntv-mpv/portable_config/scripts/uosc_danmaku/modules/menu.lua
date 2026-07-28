@@ -351,17 +351,19 @@ end
 -- 手动输入番名（可尾随集数，如「番名 3」），直连 B站 搜索并叠加弹幕。
 bili_manual_title_cache = nil
 
--- 第 1 步：uosc 输入条
+-- 第 1 步：uosc 输入条（自动填入解析到的番名，与弹弹play手动搜索行为一致）
 function open_bili_manual_search()
     if not uosc_available then
         show_message("手动搜索需在 uosc 控制栏下使用", 3)
         return
     end
+    local suggestion = parse_title() or ""
     local menu_props = {
         type = "menu_bili_manual",
         title = "输入番名搜索 B站弹幕（可加空格+集数，如：番名 3）",
         search_style = "palette",
         search_debounce = "submit",
+        search_suggestion = suggestion,
         on_search = { "script-message-to", mp.get_script_name(), "bili_manual_search_event" },
         footnote = "输入后回车搜索",
         items = {},
