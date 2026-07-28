@@ -1526,8 +1526,9 @@ function handle(): void {
     injectSettingsUI(panel); // [新] 侧栏底部追加"设置"按钮 + 设置面板(替代托盘右键菜单设置项)
   }
 
-  /** [新] 构造"加入 QQ 群"按钮(小企鹅图标), 返回 <a> 元素
-   *  - 图标为 QQ 经典小企鹅(黑身白肚、橙喙橙脚、红围巾)
+  /** [新] 构造"加入 QQ 群"按钮(腾讯 QQ 小企鹅图标), 返回 <a> 元素
+   *  - 图标为腾讯 QQ 经典企鹅: 黑身白脸白肚、橙喙橙脚、标志性红围巾(区别于 Linux 的 Tux)
+   *  - 按钮内容居中对齐
    *  - 点击新窗口打开群链接 https://qm.qq.com/q/dUnIQVvoIw */
   function createQQGroupButton(): HTMLAnchorElement {
     const qqBtn = document.createElement('a');
@@ -1535,25 +1536,37 @@ function handle(): void {
     qqBtn.href = 'https://qm.qq.com/q/dUnIQVvoIw';
     qqBtn.target = '_blank';
     qqBtn.rel = 'noopener noreferrer';
-    qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;gap:8px;'
-      + 'margin-top:8px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
+    qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;'
+      + 'width:100%;margin-top:8px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
       + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:500;transition:background .15s,border-color .15s;';
     qqBtn.innerHTML = ''
       + '<svg width="18" height="18" viewBox="0 0 24 24" style="flex-shrink:0;">'
-      +   '<ellipse cx="12" cy="14" rx="7" ry="8" fill="#1a1a1a"/>'
-      +   '<ellipse cx="12" cy="15" rx="4.2" ry="6" fill="#ffffff"/>'
-      +   '<circle cx="12" cy="6" r="4.2" fill="#1a1a1a"/>'
-      +   '<circle cx="10.4" cy="5.6" r="1.1" fill="#fff"/>'
-      +   '<circle cx="13.6" cy="5.6" r="1.1" fill="#fff"/>'
-      +   '<circle cx="10.6" cy="5.7" r="0.5" fill="#1a1a1a"/>'
-      +   '<circle cx="13.8" cy="5.7" r="0.5" fill="#1a1a1a"/>'
-      +   '<path d="M11 7 L13 7 L12 9 Z" fill="#FF9A1E"/>'
-      +   '<path d="M8 9 Q12 11 16 9 L15.5 11 Q12 12.5 8.5 11 Z" fill="#EE2A24"/>'
-      +   '<ellipse cx="9.5" cy="21.6" rx="2" ry="1.1" fill="#FF9A1E"/>'
-      +   '<ellipse cx="14.5" cy="21.6" rx="2" ry="1.1" fill="#FF9A1E"/>'
-      +   '<ellipse cx="5.5" cy="14" rx="1.6" ry="3.5" fill="#1a1a1a"/>'
-      +   '<ellipse cx="18.5" cy="14" rx="1.6" ry="3.5" fill="#1a1a1a"/>'
+      // 身体(蛋形, 下宽上窄)
+      +   '<path d="M12 7 C7 7 5 11 5 15 C5 19.4 8 22 12 22 C16 22 19 19.4 19 15 C19 11 17 7 12 7 Z" fill="#1a1a1a"/>'
+      // 白肚
+      +   '<ellipse cx="12" cy="16" rx="4.3" ry="5" fill="#ffffff"/>'
+      // 头
+      +   '<circle cx="12" cy="6.2" r="4.8" fill="#1a1a1a"/>'
+      // 白脸(腾讯 QQ 企鹅特征: 大白脸)
+      +   '<ellipse cx="12" cy="7" rx="3.6" ry="3.1" fill="#fff"/>'
+      // 眼睛(黑点 + 高光)
+      +   '<circle cx="10.3" cy="6.6" r="1.05" fill="#1a1a1a"/>'
+      +   '<circle cx="13.7" cy="6.6" r="1.05" fill="#1a1a1a"/>'
+      +   '<circle cx="10.6" cy="6.3" r="0.34" fill="#fff"/>'
+      +   '<circle cx="14.0" cy="6.3" r="0.34" fill="#fff"/>'
+      // 橙喙
+      +   '<path d="M10.9 8.2 L13.1 8.2 L12 10 Z" fill="#FF9A1E"/>'
+      // 红围巾(腾讯 QQ 标志性, 区别于 Tux)
+      +   '<path d="M7.2 10 Q12 12.6 16.8 10 L16.3 12.4 Q12 14.6 7.7 12.4 Z" fill="#E60012"/>'
+      // 围巾结/垂下的一角
+      +   '<path d="M15.4 11.6 L18.2 14.4 L16.9 15.4 L14.4 12.6 Z" fill="#E60012"/>'
+      // 橙脚
+      +   '<ellipse cx="9.4" cy="21.8" rx="2.1" ry="1.1" fill="#FF9A1E"/>'
+      +   '<ellipse cx="14.6" cy="21.8" rx="2.1" ry="1.1" fill="#FF9A1E"/>'
+      // 翅膀
+      +   '<ellipse cx="4.8" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(8 4.8 14.5)"/>'
+      +   '<ellipse cx="19.2" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(-8 19.2 14.5)"/>'
       + '</svg>'
       + '<span>加入 QQ 群交流</span>';
     qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
