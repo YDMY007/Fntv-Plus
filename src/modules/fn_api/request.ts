@@ -165,6 +165,14 @@ export async function request<T = any>(
                 // (如 404/502/登录页/重定向页)。对二进制下载(text/html 不会是字幕/图片)安全判失败，
                 // 避免上层把 HTML 字符串误当成 success 并进一步读取不存在的 data.token。
                 if (contentType.includes('text/html')) {
+                    // ═══ 诊断日志: 记录实际返回内容, 方便定位"打到了什么页面" ═══
+                    let bodyPreview: string = '';
+                    try {
+                        const raw = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+                        bodyPreview = raw.slice(0, 500);
+                    } catch { bodyPreview = '<无法读取响应体>'; }
+                    log.error(`[HTML响应诊断] URL=${fullUrl} | status=${response.status} | content-type=${contentType}`);
+                    log.error(`[HTML响应诊断] 响应体前500字符: ${bodyPreview}`);
                     return {
                         success: false,
                         message: '服务器返回了网页(HTML)而非接口数据，请检查服务器地址是否正确、网络是否可达，以及是否应使用 FN ID 登录。'
