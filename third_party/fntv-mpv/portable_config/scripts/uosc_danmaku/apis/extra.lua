@@ -547,35 +547,42 @@ function auto_search_extra(title, episode_num)
     for _, py in ipairs(py_candidates) do
         msg.info(("[自动补源-DEBUG] 试 py=%q script=%q args=%s,%s,%s")
             :format(py, py_script, title, tostring(episode_num), out_xml))
+        -- 注意：绝不能给 subprocess 传 env 参数——mpv 的 env 要求字符串数组且会
+        -- 整体替换子进程环境变量（PATH 等全丢），传 Lua 字典还会直接报
+        -- "argument env has incompatible type" 导致 res=nil、整个脚本崩溃。
+        -- UTF-8 输出由 bili_danmaku.py 内部 io.TextIOWrapper 强制保证，无需 env。
         local res = mp.command_native({
             name = "subprocess",
             args = { py, py_script, title, tostring(episode_num), out_xml },
             capture_stdout = true,
             capture_stderr = true,
-            env = { ["PYTHONIOENCODING"] = "utf-8" },
         })
-        -- 把 Python 的 stderr 日志（[番剧区]/[视频区]/匹配过程）逐行转发到 mpv 日志，
-        -- 否则这些关键 debug 信息被 subprocess 捕获后直接丢弃、任何日志里都看不到
-        local stderr = res.stderr or ""
-        for line in stderr:gmatch("[^\r\n]+") do
-            -- Python log() 已自带 [bili_danmaku] 前缀，原样转发即可
-            msg.info(line)
-        end
-        -- 解析 Python 输出的 BILI_RESULT JSON（成功/失败都解析，供配置面板显示关联状态）
-        local stdout = res.stdout or ""
-        local bili_line = stdout:match("BILI_RESULT:([^\r\n]+)")
-        if bili_line then
-            local ok_parse, parsed = pcall(utils.parse_json, bili_line)
-            if ok_parse and type(parsed) == "table" then
-                BILI_INFO = parsed
-                msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
-            else
-                msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
+        if not res then
+            msg.warn(("[自动补源-DEBUG] subprocess 调用失败(res=nil) py=%q"):format(py))
+        else
+            -- 把 Python 的 stderr 日志（[番剧区]/[视频区]/匹配过程）逐行转发到 mpv 日志，
+            -- 否则这些关键 debug 信息被 subprocess 捕获后直接丢弃、任何日志里都看不到
+            local stderr = res.stderr or ""
+            for line in stderr:gmatch("[^\r\n]+") do
+                -- Python log() 已自带 [bili_danmaku] 前缀，原样转发即可
+                msg.info(line)
             end
-        end
-        if res.status == 0 and file_exists(out_xml) then
-            ok = true
-            break
+            -- 解析 Python 输出的 BILI_RESULT JSON（成功/失败都解析，供配置面板显示关联状态）
+            local stdout = res.stdout or ""
+            local bili_line = stdout:match("BILI_RESULT:([^\r\n]+)")
+            if bili_line then
+                local ok_parse, parsed = pcall(utils.parse_json, bili_line)
+                if ok_parse and type(parsed) == "table" then
+                    BILI_INFO = parsed
+                    msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
+                else
+                    msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
+                end
+            end
+            if res.status == 0 and file_exists(out_xml) then
+                ok = true
+                break
+            end
         end
     end
     if not ok then
