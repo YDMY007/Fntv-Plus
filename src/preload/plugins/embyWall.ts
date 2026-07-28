@@ -3298,6 +3298,47 @@ function handle(): void {
     requestAnimationFrame(() => { v.style.opacity = '0'; }); // 淡出揭示新页面
   };
 
+  // [lc-153] 修复: 透明窗口下, fnOS 视图栈残留的旧页面透出下层内容(而非桌面)
+  // 原理: fnOS(Emby系) SPA 路由切换会把旧页面保留在 DOM 里做"下层页面"(返回手势/转场用).
+  //       我们让页面透明后, 上层剧集页的透明区就透出了下层影视页的内容.
+  // 修复: 导航后隐藏视图栈里非活跃的下层页面(用非important的 display:none, 允许 fnOS 返回时恢复),
+  //       让活跃页的透明区直接落到 body(桌面亚克力).
+  // 启发式: 仅针对 position:absolute 且占满视口的直接兄弟(视图通常在 relative 容器内 absolute 堆叠);
+  //        排除 fixed 覆盖层(抽屉/遮罩)、我们的 fnos-* 注入、导航栏等.
+  const hideStaleViews = (): void => {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const candidates: HTMLElement[] = [];
+    const all = document.querySelectorAll<HTMLElement>('*');
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'absolute') continue;           // 视图是 absolute 堆叠; fixed 是覆盖层, 跳过
+      const rect = el.getBoundingClientRect();
+      if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
+      if (el.id && el.id.startsWith('fnos-')) continue;    // 我们的注入层跳过
+      if (el.classList.contains('absolute')) continue;     // 抽屉遮罩类跳过
+      candidates.push(el);
+    }
+    // 按父元素分组, 同容器内多个全屏 absolute 视为视图栈
+    const byParent = new Map<HTMLElement, HTMLElement[]>();
+    for (const el of candidates) {
+      const p = el.parentElement;
+      if (!p) continue;
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p)!.push(el);
+    }
+    for (const [parent, views] of byParent) {
+      if (views.length < 2) continue;                      // 只有一个视图无需处理
+      // DOM 末尾的视图=当前活跃页, 隐藏其余(非important, fnOS 返回可恢复)
+      for (let i = 0; i < views.length - 1; i++) {
+        if (getComputedStyle(views[i]).display !== 'none') {
+          views[i].style.display = 'none';
+          log('hideStaleViews: hid stacked view', i + 1, '/', views.length, '| class=', views[i].className.slice(0, 40));
+        }
+      }
+    }
+  };
+
   // 导航时关闭抽屉(菜单项跳转/路由切换后不应残留打开的抽屉)
   const closeDrawer = () => {
     const d = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
@@ -3305,10 +3346,11 @@ function handle(): void {
   };
   try {
     const _ps = history.pushState, _rs = history.replaceState;
-    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); };
-    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); setTimeout(closeDrawer, 300); };
-    window.addEventListener('popstate', () => { logNav('popstate'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); });
+    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    window.addEventListener('popstate', () => { logNav('popstate'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); });
     window.addEventListener('hashchange', () => logNav('hashchange'));
+    setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
 
 
