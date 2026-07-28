@@ -1487,7 +1487,7 @@ function handle(): void {
     const alphaPct = Math.max(0, Math.min(100, Math.round((0.95 - storedAlpha) / 0.9 * 100)));
     const ctrl = document.createElement('div');
     ctrl.id = 'fnos-glass-ctrl';
-    ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;margin-top:14px;width:100%;'
+    ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
       + 'padding:14px 14px 16px;border-radius:14px;'
       + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
@@ -1504,6 +1504,27 @@ function handle(): void {
       + '<input id="fnos-blur" type="range" min="0" max="100" value="' + storedBlur + '" '
       +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">';
     panel.appendChild(ctrl);
+
+    // ═══ QQ 群反馈入口（亚克力透明度容器上方） ═══
+    if (!panel.querySelector('#fnos-qq-group')) {
+      const qqBtn = document.createElement('a');
+      qqBtn.id = 'fnos-qq-group';
+      qqBtn.href = 'https://qm.qq.com/q/dUnIQVvoIw';
+      qqBtn.target = '_blank';
+      qqBtn.rel = 'noopener noreferrer';
+      qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;gap:8px;'
+        + 'margin:0 0 12px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:500;transition:background .15s,border-color .15s;';
+      qqBtn.innerHTML = ''
+        + '<svg width="18" height="18" viewBox="0 0 24 24" fill="#12B7F5" style="flex-shrink:0;"><path d="M12 2C6.48 2 2 6.48 2 12c0 1.54.36 3 .98 4.29L2 22l5.71-.98C9 21.64 10.46 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.38 0-2.67-.35-3.8-.96l-.27-.16-2.83.49.49-2.83-.17-.27A7.95 7.95 0 0 1 4 12c0-4.41 3.59-8 8-8s8 3.59 8 8-3.59 8-8 8z"/><circle cx="8.5" cy="11.5" r="1.5" fill="#12B7F5"/><circle cx="15.5" cy="11.5" r="1.5" fill="#12B7F5"/></svg>'
+        + '<span>加入 QQ 群交流</span>';
+      qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
+      qqBtn.addEventListener('mouseleave', () => { qqBtn.style.borderColor = 'rgba(255,255,255,.2)'; qqBtn.style.background = 'var(--fnos-sidebar-btn-bg)!important'; });
+      // 作为 #fnos-glass-ctrl 容器首个子元素插入(位于"亚克力透明度"标题上方),
+      // 直接放进确定可见的玻璃面板内, 避免外层 insertBefore 在某些重渲染时序下静默失败导致整段不显示
+      ctrl.insertBefore(qqBtn, ctrl.firstChild);
+    }
 
     const alphaInput = ctrl.querySelector('#fnos-alpha') as HTMLInputElement;
     const alphaVal = ctrl.querySelector('#fnos-alpha-val') as HTMLElement;
@@ -1537,7 +1558,7 @@ function handle(): void {
     btn.id = 'fnos-settings-btn';
     btn.type = 'button';
     btn.textContent = '⚙ 设置';
-    btn.style.cssText = 'margin-top:12px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+    btn.style.cssText = 'box-sizing:border-box;margin-top:12px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
       + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
       + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'box-shadow:0 4px 16px rgba(0,0,0,.18);';
@@ -1556,7 +1577,7 @@ function handle(): void {
       verBtn.type = 'button';
       // 初始不含具体版本号(避免硬编码假版本); 真实版本由下方 IPC(version-info) 动态写入
       verBtn.innerHTML = 'ℹ 关于';
-      verBtn.style.cssText = 'margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+      verBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
@@ -1584,7 +1605,7 @@ function handle(): void {
       fbBtn.id = 'fnos-feedback-btn';
       fbBtn.type = 'button';
       fbBtn.textContent = '💬 反馈';
-      fbBtn.style.cssText = 'margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+      fbBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
@@ -3143,6 +3164,77 @@ function handle(): void {
   // 立即执行一次 + 定时巡检
   ensureBurgerVisible();
   [800, 2000, 4000].forEach(t => setTimeout(ensureBurgerVisible, t));
+
+  // ═══ 首页导航栏刷新按钮 ═══
+  // 在飞牛原生导航栏「首页」标签右侧注入刷新按钮，点击后 reload 页面。
+  // 飞牛 SPA 路由切换会重建导航 DOM → 用 MutationObserver 兜底重建按钮。
+  const injectRefreshButton = (): void => {
+    if (document.getElementById('fnos-refresh-btn')) return; // 幂等
+
+    // ── 以汉堡键 ☰ 为锚点（与 ensureBurgerVisible 同一选择器，已验证可靠）──
+    // 顶栏实际布局: [☰] [首页] ... [logo] [搜索] [用户] [设置]
+    // 刷新按钮目标位置: 「首页」文字右侧、紧邻着
+    const burger = document.querySelector('[class*="lg:!hidden"]:not([class*="inset-0"])') as HTMLElement | null;
+    if (!burger) return; // 汉堡键还没渲染
+
+    // 排除侧边栏/抽屉内的汉堡键（只要顶栏那个）
+    const SIDEBAR_SEL = 'aside, [class*="sidebar"], [class*="drawer"], [class*="offcanvas"], [class*="side-panel"], [role="dialog"][aria-label*="导航"], [id*="sidebar"], [id*="drawer"]';
+    if (burger.closest(SIDEBAR_SEL)) return;
+
+    // 在汉堡键的父容器（导航栏）内，找紧挨着汉堡键的「首页」文字元素
+    const navBar = burger.parentElement;
+    if (!navBar) return;
+
+    let anchorEl: HTMLElement | null = null;
+    // 从汉堡键开始向后遍历兄弟节点，找含"首页"文字的元素
+    let sibling = burger.nextElementSibling as HTMLElement | null;
+    while (sibling) {
+      if ((sibling.textContent || '').trim() === '首页' || sibling.querySelector(':scope > *')) {
+        // 如果是包含"首页"的容器或"首页"本身
+        const textEls = sibling.querySelectorAll('*');
+        for (const t of Array.from(textEls) as HTMLElement[]) {
+          if (t.children.length === 0 && (t.textContent || '').trim() === '首页') {
+            anchorEl = t.parentElement ?? sibling;
+            break;
+          }
+        }
+        if (!anchorEl && (sibling.textContent || '').trim() === '首页') {
+          anchorEl = sibling;
+        }
+      }
+      if (anchorEl) break;
+      sibling = sibling.nextElementSibling as HTMLElement | null;
+    }
+
+    // 兜底：找不到「首页」就插在汉堡键紧后面
+    if (!anchorEl) anchorEl = burger;
+
+    const btn = document.createElement('button');
+    btn.id = 'fnos-refresh-btn';
+    btn.title = '刷新页面';
+    btn.style.cssText = 'background:none;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;margin-left:4px;border-radius:6px;transition:background .15s;color:var(--fnos-titlebar-icon,#666);vertical-align:middle;font-size:14px;line-height:1;position:relative;top:2px;';
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0C3.58 0 0 3.58 0 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 8 14 6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35z" fill="currentColor"/></svg>';
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(0,0,0,.06)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'none'; });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      location.reload();
+    });
+    // 插入到锚点元素（「首页」或汉堡键）的后面
+    anchorEl.parentNode?.insertBefore(btn, anchorEl.nextSibling);
+    log('Refresh button injected after anchor (burger/首页)');
+  };
+  // 立即尝试 + 延迟重试(导航栏可能尚未渲染)
+  injectRefreshButton();
+  [1000, 3000, 6000].forEach(t => setTimeout(injectRefreshButton, t));
+  // MutationObserver 兜底: SPA 切换导航重建时重新注入
+  const _refreshObsTimer = 0;
+  const _refreshObserver = new MutationObserver(() => {
+    window.setTimeout(injectRefreshButton, 200);
+  });
+  _refreshObserver.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('beforeunload', () => _refreshObserver.disconnect());
 
   // [v323] MutationObserver兜底: 飞牛SPA路由切换/重渲染头部时, 新汉堡键DOM无hook → 立即重绑
   // (解决: 轮播图整页导航→详情页头部重建→定时重试可能错过新元素 → hook丢失 → 点击失效)
