@@ -26,6 +26,11 @@ export class MpvPlayer extends BasePlayer {
     // 播放列表相关
     private playlistItems: PlayItem[] = [];
     private playlistFilePath: string = '';
+    // mpv 日志文件 tail → 转发进 app.log（弹幕脚本日志可见性）
+    private mpvLogPath: string = '';
+    private mpvLogTailTimer: NodeJS.Timeout | null = null;
+    private mpvLogOffset: number = 0;
+    private mpvLogRemainder: string = '';
 
     constructor(config: Config) {
         super(config);
@@ -54,6 +59,19 @@ export class MpvPlayer extends BasePlayer {
                 ...args || []
             );
 
+            // 让 mpv 写日志文件到 app.log 同目录（mpv.log）。
+            // 注意：node-mpv-2 默认传 --msg-level=all=no（终端全静默），但 --log-file
+            // 恒定以 verbose 级别写文件、不受 msg-level 影响，因此弹幕脚本(uosc_danmaku)
+            // 的 msg.info 日志只有这里才能看到。之后 tail 该文件把弹幕相关行转发进 app.log。
+            try {
+                const logDir = logger.getLogDir();
+                this.mpvLogPath = path.join(logDir, 'mpv.log');
+                mpvArgs.push(`--log-file=${this.mpvLogPath}`);
+            } catch (e) {
+                log.warn('计算 mpv.log 路径失败，跳过 mpv 日志转发:', e);
+                this.mpvLogPath = '';
+            }
+
             let mpvOptions = {
                 debug: this.config.debug,
                 binary: this.config.playerPath.length > 0 ? this.config.playerPath : undefined,
@@ -66,6 +84,9 @@ export class MpvPlayer extends BasePlayer {
 
             // 启动 MPV 并加载媒体
             await this.mpvInstance.start()
+
+            // 开始 tail mpv.log，把弹幕脚本日志转发进 app.log
+            this.startMpvLogTail();
 
             // 将所有的infos按顺序加入播放列表，并且播放第pos个视频
             await this.loadPlaylistItems(infos, pos);
@@ -452,9 +473,75 @@ export class MpvPlayer extends BasePlayer {
     }
 
     /**
+     * 开始 tail mpv.log：定时增量读取，把弹幕脚本相关行转发进 app.log
+     */
+    private startMpvLogTail(): void {
+        if (!this.mpvLogPath) return;
+        this.stopMpvLogTail();
+        // mpv 启动时会截断（truncate）--log-file 指定的文件，从头读即可
+        this.mpvLogOffset = 0;
+        this.mpvLogRemainder = '';
+        this.mpvLogTailTimer = setInterval(() => this.pumpMpvLog(), 1000);
+        log.info(`mpv 日志文件: ${this.mpvLogPath}（弹幕相关日志将转发到 app.log）`);
+    }
+
+    /**
+     * 增量读取 mpv.log 新内容，过滤出弹幕脚本日志写入 app.log。
+     * 只转发弹幕相关行：--log-file 是 verbose 级别，全量转发会刷爆 app.log。
+     */
+    private pumpMpvLog(): void {
+        try {
+            if (!this.mpvLogPath || !fs.existsSync(this.mpvLogPath)) return;
+            const size = fs.statSync(this.mpvLogPath).size;
+            if (size < this.mpvLogOffset) {
+                // 文件被截断（mpv 重启），从头再读
+                this.mpvLogOffset = 0;
+                this.mpvLogRemainder = '';
+            }
+            if (size === this.mpvLogOffset) return;
+            const fd = fs.openSync(this.mpvLogPath, 'r');
+            const len = size - this.mpvLogOffset;
+            const buf = Buffer.alloc(len);
+            fs.readSync(fd, buf, 0, len, this.mpvLogOffset);
+            fs.closeSync(fd);
+            this.mpvLogOffset = size;
+            const text = this.mpvLogRemainder + buf.toString('utf8');
+            const lines = text.split(/\r?\n/);
+            // 最后一段若不是完整行，留到下次拼接
+            this.mpvLogRemainder = lines.pop() || '';
+            for (const line of lines) {
+                if (!line) continue;
+                if (line.includes('uosc_danmaku') || line.includes('自动补源') ||
+                    line.includes('番剧区') || line.includes('视频区') ||
+                    line.includes('bili_danmaku') || line.includes('BILI_RESULT') ||
+                    line.includes('弹弹play')) {
+                    log.info('[mpv]', line);
+                }
+            }
+        } catch {
+            // 读日志失败不影响播放，静默忽略
+        }
+    }
+
+    /**
+     * 停止 tail mpv.log（播放器退出时调用；停止前做最后一次冲刷）
+     */
+    private stopMpvLogTail(): void {
+        if (this.mpvLogTailTimer) {
+            clearInterval(this.mpvLogTailTimer);
+            this.mpvLogTailTimer = null;
+            // 最后冲刷一次，避免丢失退出前的日志
+            this.pumpMpvLog();
+        }
+    }
+
+    /**
      * 处理退出事件
      */
     private handleExit(code: number): void {
+        // 停止 mpv 日志转发
+        this.stopMpvLogTail();
+
         // 清理播放列表文件
         this.cleanupPlaylistFile();
 

@@ -553,20 +553,27 @@ function auto_search_extra(title, episode_num)
             capture_stdout = true,
             capture_stderr = true,
         })
+        -- 把 Python 的 stderr 日志（[番剧区]/[视频区]/匹配过程）逐行转发到 mpv 日志，
+        -- 否则这些关键 debug 信息被 subprocess 捕获后直接丢弃、任何日志里都看不到
+        local stderr = res.stderr or ""
+        for line in stderr:gmatch("[^\r\n]+") do
+            -- Python log() 已自带 [bili_danmaku] 前缀，原样转发即可
+            msg.info(line)
+        end
+        -- 解析 Python 输出的 BILI_RESULT JSON（成功/失败都解析，供配置面板显示关联状态）
+        local stdout = res.stdout or ""
+        local bili_line = stdout:match("BILI_RESULT:([^\r\n]+)")
+        if bili_line then
+            local ok_parse, parsed = pcall(utils.parse_json, bili_line)
+            if ok_parse and type(parsed) == "table" then
+                BILI_INFO = parsed
+                msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
+            else
+                msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
+            end
+        end
         if res.status == 0 and file_exists(out_xml) then
             ok = true
-            -- 解析 Python 输出的 BILI_RESULT JSON（供配置面板显示关联状态）
-            local stdout = res.stdout or ""
-            local bili_line = stdout:match("BILI_RESULT:(.+)")
-            if bili_line then
-                local ok_parse, parsed = pcall(utils.parse_json, bili_line)
-                if ok_parse and type(parsed) == "table" then
-                    BILI_INFO = parsed
-                    msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
-                else
-                    msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
-                end
-            end
             break
         end
     end
