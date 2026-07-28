@@ -442,10 +442,11 @@ def main():
             f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
         f.write("</danmaku>\n")
     # 输出结构化元数据到 stdout（供 Lua extra.lua 解析后显示在配置面板）
+    # title 用传入的搜索词（弹弹play干净标题），而非 B站 返回的 atitle（可能为乱码/搬运标题）
     result = {
         "ok": True,
         "bvid": info.get("bvid") if info else None,
-        "title": atitle,
+        "title": title,
         "danmaku_count": len(all_d),
         "source": info.get("source") if info else None,
         "cid": cid,
