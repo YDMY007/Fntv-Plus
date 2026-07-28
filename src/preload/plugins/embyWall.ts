@@ -1594,7 +1594,7 @@ function handle(): void {
       +   '<ellipse cx="4.8" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(8 4.8 14.5)"/>'
       +   '<ellipse cx="19.2" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(-8 19.2 14.5)"/>'
       + '</svg>'
-      + '<span>加入 QQ 群交流</span>';
+      + '<span>Q群反馈</span>';
     qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
     qqBtn.addEventListener('mouseleave', () => { qqBtn.style.borderColor = 'rgba(255,255,255,.2)'; qqBtn.style.background = 'var(--fnos-sidebar-btn-bg)!important'; });
     return qqBtn;
@@ -1657,7 +1657,7 @@ function handle(): void {
       const fbBtn = document.createElement('button');
       fbBtn.id = 'fnos-feedback-btn';
       fbBtn.type = 'button';
-      fbBtn.textContent = '💬 反馈';
+      fbBtn.textContent = '💬 问卷反馈';
       fbBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
