@@ -18,6 +18,12 @@ try {
   logger.error('Failed to load local logo file', String(e));
 }
 
+/** 检测当前是否在一级详情页(TV/Movie 详情, 非 Season/播放) */
+function isDetailPage(): boolean {
+  const href = location.href.toLowerCase();
+  return /\/v\/(tv|movie)\//.test(href) && !/\/season\//.test(href);
+}
+
 function injectTitleBar(): void {
   logger.info('Injecting custom title bar...');
   if (document.getElementById('custom-titlebar')) return;
@@ -32,7 +38,7 @@ function injectTitleBar(): void {
     -webkit-app-region:drag;app-region:drag;
     border-top-left-radius:16px;border-top-right-radius:16px;
     background:var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%));
-    border:none;`;
+    border:none;transition:background .25s ease,border-radius .25s ease;`;
 
   /* 窗口控制右对齐 (no-drag 保证可点击) */
   const ctrls = document.createElement('div');
@@ -49,22 +55,87 @@ function injectTitleBar(): void {
 
   document.body.appendChild(bar);
 
-  /* hover — Win11 Fluent 风格 (主题自适应) */
-  const addHover = (id: string, bgVar: string, sc?: string) => {
-    const b = document.getElementById(id); if (!b) return;
-    b.addEventListener('mouseenter', () => {
-      b.style.background = bgVar;
-      if (sc) b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', sc));
+  /* ═══ 沉浸模式状态管理 ═══ */
+  let _immersive = false;
+
+  /** 切换标题栏沉浸模式(详情页全透明+白图标 vs 普通页半透Mica+深色图标) */
+  const setImmersive = (on: boolean): void => {
+    if (_immersive === on) return;
+    _immersive = on;
+    // 背景 & 圆角
+    bar.style.background = on ? 'transparent' : 'var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%))';
+    bar.style.borderTopLeftRadius = on ? '0' : '16px';
+    bar.style.borderTopRightRadius = on ? '0' : '16px';
+    // 图标颜色
+    const iconColor = on ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
+    ctrls.querySelectorAll('svg').forEach((svg) => {
+      svg.querySelectorAll('rect, path').forEach((el) => {
+        if (el instanceof SVGElement) {
+          if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
+            el.setAttribute('fill', iconColor);
+          if (el.hasAttribute('stroke'))
+            el.setAttribute('stroke', iconColor);
+        }
+      });
     });
-    b.addEventListener('mouseleave', () => {
-      b.style.background = 'transparent';
-      b.querySelectorAll('path,rect').forEach(e => (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-icon,#444)'));
+    logger.info(`titlebar immersive=${on}`);
+  };
+
+  /** 统一 hover 逻辑: 根据 _immersive 状态动态选择颜色 */
+  const setupButtonHover = (): void => {
+    const minBtn = document.getElementById('min-btn');
+    const maxBtn = document.getElementById('max-btn');
+    const closeBtn = document.getElementById('close-btn');
+    if (!minBtn || !maxBtn || !closeBtn) return;
+
+    const onEnter = (btn: HTMLElement) => {
+      if (_immersive) {
+        btn.style.background = btn.id === 'close-btn' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.15)';
+      } else {
+        btn.style.background = btn.id === 'close-btn'
+          ? 'var(--fnos-titlebar-hover-close-bg,rgba(232,17,35,.10))'
+          : 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))';
+      }
+      // close hover 时图标变红(普通模式) / 保持白(沉浸模式)
+      if (btn.id === 'close-btn' && !_immersive) {
+        btn.querySelectorAll('svg path, svg rect').forEach(e =>
+          (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-hover-close-icon,#e81123)'));
+      }
+    };
+    const onLeave = (btn: HTMLElement) => {
+      btn.style.background = 'transparent';
+      // 恢复基础图标颜色
+      const iconColor = _immersive ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
+      btn.querySelectorAll('svg rect, svg path').forEach(el => {
+        if (el instanceof SVGElement) {
+          if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
+            el.setAttribute('fill', iconColor);
+          if (el.hasAttribute('stroke'))
+            el.setAttribute('stroke', iconColor);
+        }
+      });
+    };
+    [minBtn, maxBtn, closeBtn].forEach(btn => {
+      btn.addEventListener('mouseenter', () => onEnter(btn));
+      btn.addEventListener('mouseleave', () => onLeave(btn));
     });
   };
-  addHover('min-btn', 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))');
-  addHover('max-btn', 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))');
-  addHover('close-btn', 'var(--fnos-titlebar-hover-close-bg,rgba(232,17,35,.10))', 'var(--fnos-titlebar-hover-close-icon,#e81123)');
 
+  // 初始应用沉浸状态
+  setImmersive(isDetailPage());
+  setupButtonHover();
+
+  // 路由切换时同步
+  const syncTitleBarStyle = (): void => { setImmersive(isDetailPage()); };
+  try {
+    const _ps = history.pushState, _rs = history.replaceState;
+    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); syncTitleBarStyle(); };
+    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); syncTitleBarStyle(); };
+    window.addEventListener('popstate', syncTitleBarStyle);
+    window.addEventListener('hashchange', syncTitleBarStyle);
+  } catch (e) { logger.error('titlebar nav hook err', String(e).substring(0, 60)); }
+
+  // 窗口控制点击事件
   document.getElementById('min-btn')?.addEventListener('click', () => ipcRenderer.send('window-minimize'));
   document.getElementById('max-btn')?.addEventListener('click', () => ipcRenderer.send('window-maximize'));
   document.getElementById('close-btn')?.addEventListener('click', () => ipcRenderer.send('window-close'));
