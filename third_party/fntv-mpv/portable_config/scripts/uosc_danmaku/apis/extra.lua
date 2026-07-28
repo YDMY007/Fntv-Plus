@@ -480,6 +480,9 @@ end
 -- （绕开失效的 extcomment 代理）。也作为弹弹play 匹配成功后的兜底补源。
 function auto_search_extra(title, episode_num)
     if not title or title == "" then return end
+    -- 调试：记录进入时的原始上下文
+    msg.info(("[自动补源-DEBUG] 进入 title=%q DANMAKU.episode=%q 传入episode_num=%s")
+        :format(title, tostring(DANMAKU.episode), tostring(episode_num)))
     -- episode_num：数字=指定集；0/nil=仅标题搜索（B站 取最优结果，极速兜底）
     if episode_num == nil then
         if DANMAKU.episode then
@@ -489,6 +492,15 @@ function auto_search_extra(title, episode_num)
         end
     end
     if not episode_num or episode_num < 0 then episode_num = 0 end
+    -- 若集数仍为 0，尝试从标题本身再挖一次集数（标题可能含 "第12话"/EP12 等）
+    if episode_num == 0 then
+        local _, te = guess_bili_title_ep_v2(title)
+        if te then
+            msg.info(("[自动补源-DEBUG] 从标题再解析到集数=%d: %q"):format(te, title))
+            episode_num = te
+        end
+    end
+    msg.info(("[自动补源-DEBUG] 最终 episode_num=%d (title=%q)"):format(episode_num, title))
 
     -- 去文件名里的非法字符，构造唯一 XML 路径
     local safe_title = (title:gsub('[\\/:*?"<>|]', "") or "x")
@@ -526,8 +538,11 @@ function auto_search_extra(title, episode_num)
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))
+    msg.info(("[自动补源-DEBUG] py_candidates=%s"):format(table.concat(py_candidates, " | ")))
     local ok = false
     for _, py in ipairs(py_candidates) do
+        msg.info(("[自动补源-DEBUG] 试 py=%q script=%q args=%s,%s,%s")
+            :format(py, py_script, title, tostring(episode_num), out_xml))
         local res = mp.command_native({
             name = "subprocess",
             args = { py, py_script, title, tostring(episode_num), out_xml },

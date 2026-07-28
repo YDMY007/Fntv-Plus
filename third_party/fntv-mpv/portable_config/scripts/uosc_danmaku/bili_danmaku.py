@@ -177,11 +177,17 @@ def search_bangumi(title, ep_num):
                     continue
                 matched.append((t, anime))
 
+    log(f"[番剧区] 命中候选 {len(matched)} 个, ep_num={ep_num}")
+    for i, (t, anime) in enumerate(matched[:5]):
+        eps = anime.get("eps") or []
+        log(f"[番剧区]   候选[{i}] {t!r} 总集数={len(eps)}")
+
     if not matched:
         return None, None
 
     # 仅番名/单集模式：取首集（第1话）
     if ep_num == 0:
+        log("[番剧区] ep_num=0 -> 取首集(第1话)兜底")
         for t, anime in matched:
             eps = anime.get("eps") or []
             if eps:
@@ -189,6 +195,7 @@ def search_bangumi(title, ep_num):
                 if ep_id:
                     cid = _bangumi_cid(ep_id)
                     if cid:
+                        log(f"[番剧区] 首集命中: {t!r} ep_id={ep_id} cid={cid}")
                         return cid, t
         return None, None
 
@@ -201,6 +208,7 @@ def search_bangumi(title, ep_num):
             if ep_id:
                 cid = _bangumi_cid(ep_id)
                 if cid:
+                    log(f"[番剧区] 精确第{ep_num}话命中: {t!r} ep_id={ep_id} cid={cid}")
                     return cid, t
 
     # 兜底：第 N 话超出范围时，取「弹幕最多」的一集（搜索结果自带 danmaku 字段）
@@ -232,32 +240,71 @@ def _ep_in_title(t, ep_num):
             return True
     return False
 
+def parse_ep_from_title(title):
+    """从标题/文件名字符串提取集数（无则返回 0）。
+    覆盖: 第12话/集/回、EP12/ep12/E12、(12)、-12/_12/.12、独立 '12话'。
+    过滤年份等大数字(>2010)误判。"""
+    if not title:
+        return 0
+    m = re.search(r"第\s*(\d+)\s*[话集回話]", title)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(?<![A-Za-z])[Ee][Pp]?\s*(\d+)", title)
+    if m:
+        n = int(m.group(1))
+        if n <= 2010:
+            return n
+    m = re.search(r"(?<![\d])(\d{1,4})(?![\d])\s*[话集回話]", title)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"[\(（]\s*(\d{1,4})\s*[\)）]", title)
+    if m:
+        n = int(m.group(1))
+        if n <= 2010:
+            return n
+    m = re.search(r"[\-_.\s]\s*(\d{1,4})\s*(?=[\-\]\)）\s]|$)", title)
+    if m:
+        n = int(m.group(1))
+        if n <= 2010:
+            return n
+    return 0
+
 def cid_from_bvid(bvid, ep_num=None, title_hint=None):
     """视频区 BV 号拿 cid。多P视频按 ep_num 选对应分P的 cid（分P弹幕时间线对齐）。"""
     try:
         d = jget(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
         if d.get("code") != 0 or not d.get("data"):
+            log(f"view请求失败 bvid={bvid} code={d.get('code')}")
             return None
         data = d["data"]
         pages = data.get("pages") or []
+        log(f"[cid_from_bvid] bvid={bvid} pages={len(pages)} ep_num={ep_num} title_hint={title_hint!r}")
         if not pages:
             cid = data.get("cid")
-            return cid if (ep_num is None or _ep_in_title(title_hint or "", ep_num)) else None
+            ok = (ep_num is None or _ep_in_title(title_hint or "", ep_num))
+            log(f"[cid_from_bvid] 单P: cid={cid} 集数匹配={ok}")
+            return cid if ok else None
         if len(pages) == 1:
             cid = pages[0].get("cid")
-            return cid if (ep_num is None or _ep_in_title(title_hint or "", ep_num)) else None
+            ok = (ep_num is None or _ep_in_title(title_hint or "", ep_num))
+            log(f"[cid_from_bvid] 单P列表: cid={cid} 集数匹配={ok}")
+            return cid if ok else None
         # 多P：匹配对应分P（优先非「先行版/预览」）
         if ep_num:
             best = None
-            for p in pages:
+            for i, p in enumerate(pages):
                 part = p.get("part", "") or ""
                 if _ep_in_title(part, ep_num):
                     if "先行" in part or "预览" in part:
                         if best is None:
                             best = p.get("cid")
+                        log(f"[cid_from_bvid] 分P[{i}]={part!r} 命中但为先行/预览, 暂存兜底")
                         continue
+                    log(f"[cid_from_bvid] 分P[{i}]={part!r} 集数匹配 -> cid={p.get('cid')}")
                     return p.get("cid")
+            log(f"[cid_from_bvid] 多P未精确匹配第{ep_num}话, 兜底 cid={best}")
             return best
+        log(f"[cid_from_bvid] 未指定集数, 取首P cid={pages[0].get('cid')}")
         return pages[0].get("cid")
     except Exception as e:
         log("view请求失败: " + str(e))
@@ -292,27 +339,30 @@ def search_video(title, ep_num):
         if prefix and prefix not in t:
             continue
         cands.append((t, bvid, vr))
+    log(f"[视频区] 候选池 {len(pool)} -> 预筛 {len(cands)} 个, ep_num={ep_num}")
     if not cands:
         return None, None
     cands.sort(key=lambda x: -x[2])
+    for i, (t, bvid, vr) in enumerate(cands[:5]):
+        log(f"[视频区]   候选[{i}] 弹幕={vr} bvid={bvid} {t!r}")
 
     # 1) 集数对齐：按弹幕数降序逐个尝试，命中即返回（优先弹幕多且集数对齐）
     if ep_num:
         for t, bvid, vr in cands:
             cid = cid_from_bvid(bvid, ep_num, title_hint=t)
             if cid:
-                log("视频区：在%d个候选中按弹幕数优先选定（弹幕=%d）: %s" % (len(cands), vr, t))
+                log(f"[视频区] 集数对齐命中(弹幕={vr}): {t!r} cid={cid}")
                 return cid, t
-        log("视频区未找到第%d话对应视频（仅有合集/无单集搬运）" % ep_num)
+        log(f"[视频区] 未找到第{ep_num}话对应视频（仅有合集/无单集搬运）")
         return None, None
 
     # 2) 仅番名/第1话：直接取弹幕最多的（合集首P≈第1话，时间线基本对齐）
     for t, bvid, vr in cands:
         cid = cid_from_bvid(bvid)
         if cid:
-            log("视频区（仅番名）：选定弹幕最多候选（弹幕=%d）: %s" % (vr, t))
+            log(f"[视频区] 仅番名: 取弹幕最多候选(弹幕={vr}): {t!r} cid={cid}")
             return cid, t
-    log("视频区（仅番名）：候选均无可用分P")
+    log("[视频区] 仅番名: 候选均无可用分P")
     return None, None
 
 def search_video_fuzzy(kw, ep_num):
@@ -355,6 +405,14 @@ def search_cid(title, ep_num):
     title = re.sub(r"\s*[\(（]\d{4}[\)）]\s*$", "", title).strip()
     if not title:
         return None, None
+    # ep_num 为 0 时尝试从标题/文件名里再挖一次集数（部分调用方传入的是含集数的完整标题）
+    if not ep_num or ep_num == 0:
+        derived = parse_ep_from_title(title)
+        if derived:
+            log(f"[search_cid] ep_num=0, 从标题解析到集数={derived}: {title!r}")
+            ep_num = derived
+        else:
+            log(f"[search_cid] ep_num=0 且标题无集数, 将走首集/弹幕最多兜底: {title!r}")
     # 谐音/近似名别名映射（用户编辑 bili_alias.txt）：用映射后的搜索词去 B站 找
     kw = title
     for k, v in ALIAS.items():
@@ -362,12 +420,15 @@ def search_cid(title, ep_num):
             kw = v
             log(f"[别名映射] 真实名={title} -> 搜索词={v}")
             break
+    log(f"[search_cid] 开始匹配: kw={kw!r} ep_num={ep_num}")
     cid, atitle = search_bangumi(kw, ep_num)
     if cid:
+        log(f"[search_cid] 番剧区命中 cid={cid}")
         return cid, atitle
     log("番剧区无结果，回退到视频区(UP主搬运)")
     cid, atitle = search_video(kw, ep_num)
     if cid:
+        log(f"[search_cid] 视频区命中 cid={cid}")
         return cid, atitle
     # 最后兜底：常规匹配全失败，尝试谐音/近似名模糊猜测
     log("常规匹配失败，尝试谐音/近似名模糊兜底")
