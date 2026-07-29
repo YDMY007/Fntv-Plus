@@ -645,11 +645,11 @@ export function setDetailBoxless(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
-// 获取「鼠标滚轮横向滚动」开关（默认开启=true）
+// 获取「鼠标滚轮横向滚动」开关（默认关闭=false，恢复飞牛原生上下滚动）
 export function getWheelHScroll(): boolean {
     const config: Config = readConfig() || {};
-    // 字段缺失或 false 时：undefined 视为开启（默认），只有显式 false 才关闭
-    return config.wheelHScroll !== false;
+    // 字段缺失时默认为关闭（=false），只有显式 true 才开启鼠标横向滚动
+    return config.wheelHScroll === true;
 }
 
 // 设置「鼠标滚轮横向滚动」开关

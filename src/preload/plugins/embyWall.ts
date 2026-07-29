@@ -12,7 +12,7 @@ let _embyWallLogEnabled = false;
 // 详情页「关闭背景框」开关的运行时缓存：false=保留玻璃背景框(默认)，true=恢复 fnOS 原生外观
 let _detailBoxless = false;
 // 鼠标滚轮横向滚动开关的运行时缓存：true=开启(默认，竖向滚轮转横向滑动)；false=关闭(恢复飞牛原生上下滚)
-let _wheelHScrollEnabled = true;
+let _wheelHScrollEnabled = false;
 
 function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
   const enabled = !!payload?.enabled;
@@ -256,8 +256,8 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
 const _wtsBound = new WeakMap<HTMLElement, (ev: WheelEvent) => void>();
 
 function wheelToScroll(): void {
-  // 关闭开关 → 移除所有已绑定的劫持监听，恢复飞牛原生行为：
-  // 鼠标只管上下滚动，横向滑动靠左右箭头键 / 滚动条 / 触控板横滑（fnOS 原生）。
+  // 关闭开关 → 解绑所有劫持监听，并清除我们附加在飞牛原生横滑箭头上的样式，
+  // 把 display/opacity/pointer-events 全部交还 fnOS 原生逻辑（箭头照常显示）。
   if (!_wheelHScrollEnabled) {
     document.querySelectorAll('[data-ws="1"]').forEach((e) => {
       const he = e as HTMLElement;
@@ -265,14 +265,24 @@ function wheelToScroll(): void {
       if (h) { he.removeEventListener('wheel', h as EventListener); _wtsBound.delete(he); }
       delete he.dataset.ws;
     });
-    // 恢复飞牛原生横向箭头遮罩（开启时被我们隐藏）
+    // 同时清掉旧版(wheelHScroll=display:none)可能残留的内联样式，确保原生箭头恢复
     document.querySelectorAll('[class*="semi-color-bg-arrow-mask"]').forEach((e) => {
-      (e as HTMLElement).style.display = '';
+      const el = e as HTMLElement;
+      el.style.display = '';
+      el.style.opacity = '';
+      el.style.pointerEvents = '';
     });
     return;
   }
+  // 开启开关 → 竖向滚轮在横向溢出容器内转为左右滑动。
+  // 关键：飞牛(Semi ScrollList)横向箭头的可见性由其原生激活逻辑控制，
+  // 一旦用 display:none 隐藏就会破坏该逻辑、且关闭后无法自行恢复。
+  // 因此只以 opacity:0 + pointer-events:none 做「视觉隐藏」，**绝不碰 display**，
+  // 这样关闭时清除上述样式即可让 fnOS 原生箭头完整恢复。
   document.querySelectorAll('[class*="semi-color-bg-arrow-mask"]').forEach((e) => {
-    (e as HTMLElement).style.display = 'none';
+    const el = e as HTMLElement;
+    el.style.opacity = '0';
+    el.style.pointerEvents = 'none';
   });
   document.querySelectorAll('div,section,main').forEach((e) => {
     const he = e as HTMLElement;
