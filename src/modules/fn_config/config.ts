@@ -90,7 +90,7 @@ export interface Config {
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
     mpvBiliSearchEnabled?: boolean;
-    // B站弹幕聚合阈值（默认 1000）：单个视频弹幕数 < 此值时，自动合并多个同类候选的弹幕
+    // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
     // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
     // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
@@ -616,10 +616,10 @@ export function setMpvBiliSearchEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
-// 获取「B站弹幕聚合阈值」（默认 1000；<=0 表示禁用聚合）
+// 获取「B站弹幕聚合阈值」（默认 1500；<=0 表示禁用聚合）
 export function getMpvBiliAggregateThreshold(): number {
     const config: Config = readConfig() || {};
-    return typeof config.mpvBiliAggregateThreshold === 'number' ? config.mpvBiliAggregateThreshold : 1000;
+    return typeof config.mpvBiliAggregateThreshold === 'number' ? config.mpvBiliAggregateThreshold : 1500;
 }
 
 // 设置「B站弹幕聚合阈值」

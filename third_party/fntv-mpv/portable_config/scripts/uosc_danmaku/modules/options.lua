@@ -21,8 +21,8 @@ options = {
     bili_search_enabled = true,
     -- B站弹幕聚合阈值（由应用设置面板写入 conf）。单个视频弹幕数 < 此值时，
     -- 自动合并多个同类候选（时间轴对齐的单集源）的弹幕，提升弹幕密度。
-    -- 设为 0 或负数可禁用聚合（只取最佳单源）。默认 1000。
-    aggregate_threshold = 1000,
+    -- 设为 0 或负数可禁用聚合（只取最佳单源）。默认 1500（单个视频弹幕>=1500 直接用单源，否则合并）。
+    aggregate_threshold = 1500,
     save_danmaku = false,
     user_agent = "mpv_danmaku/1.0",
     proxy = "",

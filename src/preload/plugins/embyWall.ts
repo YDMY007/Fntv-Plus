@@ -2424,7 +2424,7 @@ function handle(): void {
     aggInput.type = 'number';
     aggInput.min = '0';
     aggInput.step = '100';
-    aggInput.placeholder = '1000';
+    aggInput.placeholder = '1500';
     aggInput.style.cssText = 'width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--fnos-ui-border);'
       + 'background:var(--fnos-input-bg);color:var(--fnos-ui-text);font-size:13px;text-align:center;';
     aggRow.appendChild(aggLabel); aggRow.appendChild(aggInput);
@@ -3142,8 +3142,8 @@ function handle(): void {
       seg('bili-search', () => {
         // MPV B站弹幕搜索开关回填（默认开启）
         swMpvBiliSearch.checked = s.mpvBiliSearchEnabled !== false;
-        // B站弹幕聚合阈值回填（默认 1000；<0 视为禁用=0）
-        aggInput.value = String(s.mpvBiliAggregateThreshold == null ? 1000 : (s.mpvBiliAggregateThreshold < 0 ? 0 : s.mpvBiliAggregateThreshold));
+        // B站弹幕聚合阈值回填（默认 1500；<0 视为禁用=0）
+        aggInput.value = String(s.mpvBiliAggregateThreshold == null ? 1500 : (s.mpvBiliAggregateThreshold < 0 ? 0 : s.mpvBiliAggregateThreshold));
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)

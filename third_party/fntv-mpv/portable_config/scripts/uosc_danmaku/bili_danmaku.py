@@ -521,6 +521,34 @@ def _merge_danmaku(sources):
     return merged
 
 
+def _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku):
+    """「弹幕越多越好」选择策略（用户规则）：单个候选弹幕数 >= 阈值(1500) -> 直接用弹幕最多的
+    单源；否则 -> 合并所有【单集时间轴】候选。返回 (final_dm, cid, atitle, info, source, agg_count, srcs_str)。
+      - 仅【单集时间轴】候选(时间轴<=agg_time_limit)参与「对应集」匹配；跨多集(整季混剪)排除在外，
+        避免错把整季弹幕当对应集（lc-170 要求「对应集对应的弹幕」）。
+      - 取单集有效候选中弹幕最多者为 best：
+          · best >= agg_threshold -> 直接用 best 单源（不合并，对应集且弹幕最多）。
+          · 否则 -> 合并所有单集有效候选（弹幕越多越好）；合并后 < min 则退回 best 单源。
+      - 无任何单集有效候选(罕见, 全是跨多集且 ep_num=0) -> 退回全局弹幕最多者兜底。"""
+    valid = [f for f in fetched if f[4] <= agg_time_limit]
+    if valid:
+        best = max(valid, key=lambda x: len(x[3]))
+        if len(best[3]) >= agg_threshold:
+            return best[3], best[0], best[1], best[2], \
+                   (best[2].get("source") if best[2] else None), None, ""
+        if len(valid) >= 2:
+            merged = _merge_danmaku([f[3] for f in valid])
+            if len(merged) >= min_danmaku:
+                srcs = ", ".join((f[1] or f[0]) for f in valid)
+                return merged, best[0], best[1], best[2], "aggregate", len(valid), srcs
+        return best[3], best[0], best[1], best[2], \
+               (best[2].get("source") if best[2] else None), None, ""
+    # 罕见：无任何单集有效候选 -> 退回全局弹幕最多者兜底
+    best = max(fetched, key=lambda x: len(x[3]))
+    return best[3], best[0], best[1], best[2], \
+           (best[2].get("source") if best[2] else None), None, ""
+
+
 def main():
     # Windows 内嵌 Python 默认用 GBK/ANSI 编码写控制台，mpv subprocess 捕获后中文全变乱码。
     # 强制 stdout/stderr 均使用 UTF-8，确保 BILI_RESULT JSON 和日志中的中文正确传递。
@@ -532,9 +560,9 @@ def main():
         log("用法: bili_danmaku.py <番名> <集数> <输出xml> [聚合阈值]")
         sys.exit(2)
     title = sys.argv[1]; ep_num = int(sys.argv[2]); out = sys.argv[3]
-    # 第4参数: 聚合阈值(默认1000)。单视频弹幕<此数时，合并多个同类候选的弹幕。
-    # 设 0 或负数可禁用聚合（只取最佳单源）。
-    agg_threshold = 1000
+    # 第4参数: 聚合阈值(默认1500)。单个视频弹幕 >= 此数 -> 直接用该单源(弹幕最多者)；
+    # 无单源达此数 -> 合并多个单集有效候选的弹幕。设 0 或负数可禁用聚合（只取最佳单源）。
+    agg_threshold = 1500
     if len(sys.argv) >= 5:
         try:
             agg_threshold = int(sys.argv[4])
@@ -548,28 +576,23 @@ def main():
         print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': '未找到匹配的B站视频'}, ensure_ascii=False)}")
         sys.exit(1)
 
-    # 单集时长安全上限(秒)：弹幕时间轴超过此值的候选视为跨多集视频，聚合时跳过，
+    # 单集时长安全上限(秒)：弹幕时间轴超过此值的候选视为跨多集视频，选用/聚合时跳过，
     # 避免把整季混剪视频的「全集时间轴」弹幕叠加进来导致错位。
+    # 是否「合集」改以【实际时间轴】判定而非看标题——「全N集」多P 视频的某P 弹幕本就是
+    # 对应集(0~1400s)，应纳入聚合；标题含「合集」不再作为排除条件。
     AGG_TIME_LIMIT = 2200
     MIN_DANMAKU = 10
     CAP = 6  # 最多拉取前 6 个候选，控制网络开销
 
-    fetched = []  # (cid, atitle, info, all_d, max_time, is_comp)
+    fetched = []  # (cid, atitle, info, all_d, max_time)
     for idx, (cid, atitle, info) in enumerate(candidates[:CAP]):
         label = info.get("bvid") or atitle or f"候选#{idx+1}"
         log(f"[{idx+1}/{len(candidates)}] 尝试 cid={cid} ({label})")
         ok, all_d = try_fetch_danmaku(cid, out)
         if ok and all_d:
             max_t = max((pr for pr, _, _, _ in all_d), default=0) / 1000.0
-            is_comp = _is_compilation_title(atitle)
-            fetched.append((cid, atitle, info, all_d, max_t, is_comp))
-            log(f"  -> {len(all_d)} 条弹幕, 时间轴 0~{max_t:.0f}s, 合集={is_comp}")
-            # 快路径：单源已充足，直接用，无需聚合/继续拉取
-            if len(all_d) >= agg_threshold:
-                _write_xml(out, all_d)
-                _emit_result(title, cid, atitle, info, len(all_d), info.get("source") if info else None)
-                log(f"✅ 单源充足({len(all_d)}>={agg_threshold}): {label} -> {out}")
-                sys.exit(0)
+            fetched.append((cid, atitle, info, all_d, max_t))
+            log(f"  -> {len(all_d)} 条弹幕, 时间轴 0~{max_t:.0f}s")
         else:
             log(f"  ⚠️ 候选[{idx+1}] {label} 无弹幕数据，跳过")
 
@@ -579,37 +602,15 @@ def main():
         print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': f'已试{len(candidates)}个候选均无弹幕数据({tried})'}, ensure_ascii=False)}")
         sys.exit(1)
 
-    # 找最佳单源（弹幕最多）
-    best = max(fetched, key=lambda x: len(x[3]))
-    best_cid, best_atitle, best_info, best_dm, best_max, best_comp = best
-
-    # 进入聚合分支（最佳单源 < 阈值）。仅同类候选：
-    # 合并【非合集标题 且 时间轴为单集】的其他候选；最佳单源自身始终保留。
-    pool = [best]
-    for f in fetched:
-        if f is best:
-            continue
-        if f[5]:  # 合集标题，按「仅同类候选」设置跳过
-            continue
-        if f[4] > AGG_TIME_LIMIT:  # 时间轴跨多集，跳过
-            continue
-        pool.append(f)
-
-    if len(pool) > 1:
-        merged = _merge_danmaku([f[3] for f in pool])
-        if len(merged) >= MIN_DANMAKU:
-            _write_xml(out, merged)
-            srcs = ", ".join((f[1] or f[0]) for f in pool)
-            _emit_result(title, best_cid, best_atitle, best_info, len(merged), "aggregate", aggregated_from=len(pool))
-            log(f"✅ 聚合成功: 合并 {len(pool)} 个源 -> {len(merged)} 条弹幕 (源: {srcs})")
-            sys.exit(0)
-        else:
-            log(f"  ⚠️ 聚合后仍 <{MIN_DANMAKU} 条，退回最佳单源")
-
-    # 无更多可合并源 / 合并后仍太少 → 用最佳单源（弹幕数可能 < 阈值，但总比没有好）
-    _write_xml(out, best_dm)
-    _emit_result(title, best_cid, best_atitle, best_info, len(best_dm), best_info.get("source") if best_info else None)
-    log(f"✅ 单源(无足够同类候选聚合): {best_atitle} -> {len(best_dm)} 条弹幕 -> {out}")
+    # 选择策略：弹幕越多越好（详见 _select_danmaku）。
+    final_dm, best_cid, best_atitle, best_info, source, agg_count, srcs = _select_danmaku(
+        fetched, agg_threshold, AGG_TIME_LIMIT, MIN_DANMAKU)
+    _write_xml(out, final_dm)
+    _emit_result(title, best_cid, best_atitle, best_info, len(final_dm), source, aggregated_from=agg_count)
+    if agg_count:
+        log(f"✅ 最终输出(聚合 {agg_count} 源): {best_atitle} -> {len(final_dm)} 条弹幕 (源: {srcs}) -> {out}")
+    else:
+        log(f"✅ 最终输出: {best_atitle} -> {len(final_dm)} 条弹幕 (source={source}) -> {out}")
     sys.exit(0)
 
 if __name__ == "__main__":
