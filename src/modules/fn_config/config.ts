@@ -97,6 +97,9 @@ export interface Config {
     pythonPath?: string;
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
+    // 鼠标滚轮横向滚动开关（默认开启=true：竖向滚轮在横向容器内转为左右滑动；
+    // 关闭=false：恢复飞牛原生——鼠标只管上下滚动，横向靠左右箭头键/滚动条）
+    wheelHScroll?: boolean;
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
     // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
@@ -642,6 +645,20 @@ export function setDetailBoxless(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取「鼠标滚轮横向滚动」开关（默认开启=true）
+export function getWheelHScroll(): boolean {
+    const config: Config = readConfig() || {};
+    // 字段缺失或 false 时：undefined 视为开启（默认），只有显式 false 才关闭
+    return config.wheelHScroll !== false;
+}
+
+// 设置「鼠标滚轮横向滚动」开关
+export function setWheelHScroll(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.wheelHScroll = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「更新已打烊」时间戳（用户点过「立即下载」后 7 天内不再自动弹窗）
 export function getUpdateDismissedAt(): number {
     const config: Config = readConfig() || {};
@@ -710,5 +727,7 @@ module.exports = {
     getPythonPath,
     setPythonPath,
     getDetailBoxless,
-    setDetailBoxless
+    setDetailBoxless,
+    getWheelHScroll,
+    setWheelHScroll
 };

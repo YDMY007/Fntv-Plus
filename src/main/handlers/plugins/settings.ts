@@ -39,6 +39,8 @@ async function handleGetSettings(): Promise<any> {
         mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
         pythonPath: fnConfig.getPythonPath() || '',
         detailBoxless: fnConfig.getDetailBoxless(),
+        // 鼠标滚轮横向滚动开关（默认开启=true；关闭=false 恢复飞牛原生上下滚动）
+        wheelHScroll: fnConfig.getWheelHScroll(),
         // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
         loginBg: (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : ''
     };
@@ -59,6 +61,11 @@ async function handleSetNasProxy(_event: any, enabled: boolean): Promise<void> {
 
 async function handleSetDetailBoxless(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setDetailBoxless(!!enabled);
+}
+
+// 鼠标滚轮横向滚动开关：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
+async function handleSetWheelHScroll(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setWheelHScroll(!!enabled);
 }
 
 // 弹出系统文件选择框，选中后写回配置并刷新 media 模块缓存
@@ -581,6 +588,7 @@ function init(): void {
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
     registerHandler('settings:set-mpv-bili-aggregate-threshold', handleSetMpvBiliAggregateThreshold, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
+    registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
     registerHandler('settings:open-external', handleOpenExternal, { useHandle: true });
     // 渲染进程(EmbyWall 墙)主动索取当前调试过滤 → 回传，使其渲染侧日志开关即时生效
     registerHandler('debug-filter-request', (event: any) => {

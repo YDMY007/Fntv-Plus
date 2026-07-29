@@ -11,6 +11,8 @@ const LOG = '[EmbyWall]';
 let _embyWallLogEnabled = false;
 // 详情页「关闭背景框」开关的运行时缓存：false=保留玻璃背景框(默认)，true=恢复 fnOS 原生外观
 let _detailBoxless = false;
+// 鼠标滚轮横向滚动开关的运行时缓存：true=开启(默认，竖向滚轮转横向滑动)；false=关闭(恢复飞牛原生上下滚)
+let _wheelHScrollEnabled = true;
 
 function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
   const enabled = !!payload?.enabled;
@@ -30,6 +32,12 @@ try {
       _detailBoxless = s.detailBoxless;
       if (isDetailPage()) applyDetailLiquidGlass();
     }
+    // 鼠标滚轮横向滚动开关：false=关闭(恢复飞牛原生上下滚)，缺失/true=开启
+    if (s && typeof s.wheelHScroll === 'boolean') {
+      _wheelHScrollEnabled = s.wheelHScroll;
+    }
+    // 立即按开关状态应用/清除横向滚动劫持（偏好可能与默认值不同）
+    wheelToScroll();
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) applyLoginBgVar(s.loginBg);
   });
@@ -244,7 +252,25 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
 })();
 
 /* ========== 横滑滚轮 ========== */
+// 记录每个元素已绑定的 wheel 处理器，便于关闭开关时精确移除（removeEventListener 需同一引用）
+const _wtsBound = new WeakMap<HTMLElement, (ev: WheelEvent) => void>();
+
 function wheelToScroll(): void {
+  // 关闭开关 → 移除所有已绑定的劫持监听，恢复飞牛原生行为：
+  // 鼠标只管上下滚动，横向滑动靠左右箭头键 / 滚动条 / 触控板横滑（fnOS 原生）。
+  if (!_wheelHScrollEnabled) {
+    document.querySelectorAll('[data-ws="1"]').forEach((e) => {
+      const he = e as HTMLElement;
+      const h = _wtsBound.get(he);
+      if (h) { he.removeEventListener('wheel', h as EventListener); _wtsBound.delete(he); }
+      delete he.dataset.ws;
+    });
+    // 恢复飞牛原生横向箭头遮罩（开启时被我们隐藏）
+    document.querySelectorAll('[class*="semi-color-bg-arrow-mask"]').forEach((e) => {
+      (e as HTMLElement).style.display = '';
+    });
+    return;
+  }
   document.querySelectorAll('[class*="semi-color-bg-arrow-mask"]').forEach((e) => {
     (e as HTMLElement).style.display = 'none';
   });
@@ -254,13 +280,15 @@ function wheelToScroll(): void {
     const cs = getComputedStyle(he);
     if ((cs.overflowX === 'scroll' || cs.overflowX === 'auto') && he.scrollWidth > he.clientWidth + 2) {
       he.dataset.ws = '1';
-      he.addEventListener('wheel', (ev) => {
+      const handler = (ev: WheelEvent): void => {
         const r = he.getBoundingClientRect();
         if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
         if (Math.abs(ev.deltaY) < Math.abs(ev.deltaX) * 2) return;
         ev.preventDefault();
         he.scrollLeft += ev.deltaY * 1.5;
-      }, { passive: false });
+      };
+      _wtsBound.set(he, handler);
+      he.addEventListener('wheel', handler as EventListener, { passive: false });
     }
   });
 }
@@ -2184,6 +2212,7 @@ function handle(): void {
     const swHide = addToggle('隐藏原始播放按钮');
     const swNas = addToggle('NAS 本地网盘代理');
     const swBoxless = addToggle('关闭详情页选集/演职人员背景框');
+    const swWheel = addToggle('鼠标滚轮横向滚动');
     swProxy.addEventListener('change', () => { ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked); });
     swHide.addEventListener('change', () => { ipcRenderer.invoke('settings:set-hide-play', swHide.checked); });
     swNas.addEventListener('change', () => { ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked); });
@@ -2192,6 +2221,14 @@ function handle(): void {
       ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked);
       // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
       if (isDetailPage()) applyDetailLiquidGlass();
+    });
+    // 鼠标滚轮横向滚动：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
+    swWheel.checked = _wheelHScrollEnabled;
+    swWheel.addEventListener('change', () => {
+      _wheelHScrollEnabled = swWheel.checked;
+      ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked);
+      // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
+      wheelToScroll();
     });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
