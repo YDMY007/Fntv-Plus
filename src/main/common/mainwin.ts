@@ -183,6 +183,27 @@ const ACRYLIC_CSS = `
         background-color:#fff!important;
     }
 
+    /* 3g. 弹窗内按钮可见性恢复(lc-184):
+       核弹级白底清除(③a~③e)会把 semi-button-solid 的实心背景清成 transparent。
+       semi-button-primary 原本是"彩色底+白字", 背景透明后→白字在白色弹窗上=不可见。
+       "取消"等次要按钮是边框+透明底+深色字→透明后仍可见(所以只有确认/选择/创建等primary按钮消失)。
+       此处对弹窗内的实心按钮显式恢复可见背景+对比色文字。 */
+    .semi-modal-content .semi-button-solid,
+    [class*="modal-content"] .semi-button-solid,
+    [class*="dialog-content"] .semi-button-solid,
+    [role="dialog"] .semi-button-solid{
+        background:var(--semi-color-primary, #4a90d9)!important;
+        color:#fff!important;
+    }
+    /* 深色模式下弹窗按钮同步 */
+    html.dark .semi-modal-content .semi-button-solid,
+    html.dark [class*="modal-content"] .semi-button-solid,
+    html.dark [class*="dialog-content"] .semi-button-solid,
+    html.dark [role="dialog"] .semi-button-solid{
+        background:var(--semi-color-primary, #6c8ccf)!important;
+        color:#fff!important;
+    }
+
     /* ── ④ 滚动条隐藏 ── */
     ::-webkit-scrollbar{width:0!important;height:0!important}
     ::-webkit-scrollbar-track{display:none!important}
