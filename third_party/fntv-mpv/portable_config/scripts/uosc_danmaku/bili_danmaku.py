@@ -231,9 +231,10 @@ def _ep_in_title(t, ep_num):
     return False
 
 def _is_compilation_title(t):
-    """标题是否表明为多集合集（无法隔离单集弹幕）：全N集 / 合集 / 第1-12集 / 01-03话 / 01~03 等。"""
+    """标题是否表明为多集合集（无法隔离单集弹幕）：全N集/全N话 / 合集 / 第1-12集 / 01-03话 / 01~03 等。"""
     s = str(t)
-    if re.search(r"全\s*\d+\s*集", s):
+    # 「全13话」「全12集」「全N集」「全N话」— 最常见的多集合集标记
+    if re.search(r"全\s*\d+\s*[集话]", s):
         return True
     if "合集" in s or "总集" in s:
         return True
@@ -353,8 +354,9 @@ def search_video(title, ep_num):
             return 2
         return 1
     scored = [(title_sim(title, t), kind_of(t), t, bvid, vr) for (t, bvid, vr) in pool]
-    # 排序：单集优先 > 不明确 > 合集；同档按 (相似度↓, 弹幕数↓)
-    scored.sort(key=lambda x: (x[1], -x[0], -x[4]))
+    # 排序：单集优先 > 不明确 > 合集；同档按 (弹幕数↓, 相似度↓)
+    # 弹幕数优先：同类候选中弹幕多的先试，避免少弹幕视频抢占匹配机会
+    scored.sort(key=lambda x: (x[1], -x[4], -x[0]))
     log(f"[视频区] 候选 {len(scored)} 个, ep_num={ep_num}")
     for i, (sim, kind, t, bvid, vr) in enumerate(scored[:8]):
         tag = {0: "[单集]", 1: "[不明]", 2: "[合集]"}.get(kind, "?")
@@ -498,32 +500,65 @@ def main():
 
     # 逐个尝试候选视频的弹幕拉取：部分视频 seg.so 可能无数据（新传/冷门/被清），
     # 自动回退到下一候选，而非直接报"无弹幕"放弃。
+    # MIN_DANMAKU：单候选最低可接受弹幕数。低于此数视为「近乎空」继续试下一个，
+    # 避免少弹幕视频（如冷门搬运源/被清弹幕）抢占匹配机会、错过后面更好的候选。
+    MIN_DANMAKU = 10
+    best = None  # (cid, atitle, info, all_d) — 记录弹幕最多的候选（兜底）
     for idx, (cid, atitle, info) in enumerate(candidates):
         label = info.get("bvid") or atitle or f"候选#{idx+1}"
         log(f"[{idx+1}/{len(candidates)}] 尝试 cid={cid} ({label})")
         ok, all_d = try_fetch_danmaku(cid, out)
         if ok and all_d:
-            # 写 XML 文件
-            with open(out, "w", encoding="utf-8") as f:
-                f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
-                for (pr, mode, col, con) in all_d:
-                    t = pr / 1000.0
-                    p = f"{t:.2f},{mode},25,{col},0,0,0"
-                    f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
-                f.write("</danmaku>\n")
-            result = {
-                "ok": True,
-                "bvid": info.get("bvid") if info else None,
-                "title": title,
-                "danmaku_count": len(all_d),
-                "source": info.get("source") if info else None,
-                "cid": cid,
-            }
-            print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
-            log(f"✅ 候选[{idx+1}] 成功: {label} -> {len(all_d)} 条弹幕 -> {out}")
-            sys.exit(0)
+            if len(all_d) >= MIN_DANMAKU:
+                # 写 XML 文件
+                with open(out, "w", encoding="utf-8") as f:
+                    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
+                    for (pr, mode, col, con) in all_d:
+                        t = pr / 1000.0
+                        p = f"{t:.2f},{mode},25,{col},0,0,0"
+                        f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
+                    f.write("</danmaku>\n")
+                result = {
+                    "ok": True,
+                    "bvid": info.get("bvid") if info else None,
+                    "title": title,
+                    "danmaku_count": len(all_d),
+                    "source": info.get("source") if info else None,
+                    "cid": cid,
+                }
+                print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
+                log(f"✅ 候选[{idx+1}] 成功: {label} -> {len(all_d)} 条弹幕 -> {out}")
+                sys.exit(0)
+            else:
+                # 弹幕过少，记录为兜底但继续尝试更好的
+                if best is None or len(all_d) > len(best[3]):
+                    best = (cid, atitle, info, all_d)
+                log(f"  ⚠️ 候选[{idx+1}] {label} 仅 {len(all_d)} 条弹幕(<{MIN_DANMAKU})，继续试下一个")
         else:
             log(f"  ⚠️ 候选[{idx+1}] {label} 无弹幕数据，跳过试下一个")
+
+    # 所有候选都试完：如果有兜底（少量弹幕），总比完全没有好
+    if best:
+        cid, atitle, info, all_d = best
+        with open(out, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
+            for (pr, mode, col, con) in all_d:
+                t = pr / 1000.0
+                p = f"{t:.2f},{mode},25,{col},0,0,0"
+                f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
+            f.write("</danmaku>\n")
+        result = {
+            "ok": True,
+            "bvid": info.get("bvid") if info else None,
+            "title": title,
+            "danmaku_count": len(all_d),
+            "source": info.get("source") if info else None,
+            "cid": cid,
+        }
+        label = info.get("bvid") or atitle or ""
+        print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
+        log(f"✅ 兜底成功(所有候选均<{MIN_DANMAKU}条): {label} -> {len(all_d)} 条弹幕 -> {out}")
+        sys.exit(0)
 
     # 所有候选都试完了仍无弹幕
     tried = ", ".join(
