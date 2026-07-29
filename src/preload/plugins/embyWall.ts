@@ -312,6 +312,8 @@ let _placeholderInited = false;
 // 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
 // 这里做多级兜底, 尽量在各类布局/语言下都能定位到正确的媒体库区块。
 function findMediaLibrarySection(): HTMLElement | null {
+  // [lc-183] 兜底: 弹窗打开时绝不把弹窗内的"媒体库"当目标(弹窗守卫已在 injectCarousel 拦截, 此处双保险)
+  if (isModalOpen()) return null;
   const labelRe = /媒体库|片库|影视库|library|my\s*media/i;
   // 1) 原已知布局: .relative.flex.flex-col.gap-6 的直接子 div 且含媒体库标题
   const known = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div');
@@ -339,16 +341,30 @@ function findMediaLibrarySection(): HTMLElement | null {
   return null;
 }
 
+// [lc-183] 判断当前是否有 fnOS 弹窗/对话框打开。
+// 这些弹窗是 SPA 模态框(打开时 URL 仍是 /v, lc-182 路径守卫拦不住),
+// 且弹窗内(如"创建媒体库"标题)也含"媒体库"文字 → findMediaLibrarySection 会误匹配到弹窗内部
+// → target.innerHTML='' 把弹窗内容(含确认/确定/选择按钮)整个清空 → 按钮"消失"。
+// 因此: 只要页面上有任意弹窗, 一律不注入轮播(弹窗关闭后 Observer 会自然重新触发注入)。
+function isModalOpen(): boolean {
+  return !!document.querySelector(
+    '[role="dialog"], .semi-modal-mask, .semi-modal-wrapper, .semi-modal, [aria-modal="true"]'
+  );
+}
+
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
 
   // [lc-182] 路径守卫: 轮播仅注入首页(/v 或 /v/)。
-  // 创建媒体库弹窗(/v/settings/library)、设置页、详情页等非首页路径的 DOM 也可能
-  // 含"媒体库"文字 → findMediaLibrarySection 误匹配 → 轮播被注入弹窗内部(lc-179 截图)。
   const p = location.pathname;
   if (p !== '/v' && p !== '/v/') {
     return; // 静默跳过, 不打日志(避免非首页页面刷屏)
+  }
+
+  // [lc-183] 弹窗守卫: 任意 fnOS 弹窗打开时绝不注入(弹窗内"媒体库"文字会误导匹配)。
+  if (isModalOpen()) {
+    return; // 弹窗关闭后 DOM 变化会触发 Observer 重新注入
   }
 
   // 找"媒体库"section: 首屏用DOM搜索, 重建复用已有wrapper的parent(避免wrapper嵌套)
