@@ -1,4 +1,5 @@
 import { BrowserWindow, IpcMainEvent, session, dialog } from 'electron';
+import * as net from 'net';
 import { getMainWindow } from '../../common/mainwin';
 import { ApiService } from '../../../modules/fn_api/api';
 import { request, HttpMethod } from '../../../modules/fn_api/request';
@@ -85,6 +86,49 @@ export function isFnId(domain: string): boolean {
  */
 function buildFnConnectUrl(fnId: string): string {
     return `https://5ddd.com/${fnId.trim()}`;
+}
+
+/**
+ * 快速 TCP 可达性预检: 对 url 的 host:port 发起一次 TCP connect, 超时即判不可达.
+ * 用于 FN ID 登录时决定 baseUrl 优先用「NAS 内网 IP 直连」还是「5ddd 代理基址」:
+ *   - 同局域网下 NAS 内网 IP 可达 → 直连(恢复 3.3.1 行为, 避免代理对 /v/api/v1/auth 返回 HTML).
+ *   - 外网/不可达 → 回退代理基址(走 3.3.3 中继修复).
+ */
+function isUrlReachable(url: string, timeoutMs = 2000): Promise<boolean> {
+    return new Promise((resolve) => {
+        let u: URL;
+        try {
+            u = new URL(url);
+        } catch {
+            resolve(false);
+            return;
+        }
+        const host = u.hostname;
+        const port = u.port
+            ? parseInt(u.port, 10)
+            : u.protocol === 'https:' ? 443 : 80;
+        const socket = new net.Socket();
+        let settled = false;
+        const done = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            try {
+                socket.destroy();
+            } catch {
+                /* ignore */
+            }
+            resolve(ok);
+        };
+        socket.setTimeout(timeoutMs);
+        socket.once('connect', () => done(true));
+        socket.once('timeout', () => done(false));
+        socket.once('error', () => done(false));
+        try {
+            socket.connect(port, host);
+        } catch {
+            done(false);
+        }
+    });
 }
 
 /**
@@ -788,18 +832,36 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                             const pageUrl = messageData.pageUrl || '';
                             const onExternalRelay = /5ddd\.com/i.test(pageUrl);
                             const onRelaySub = (() => { try { return /\.fnos\.net$/i.test(new URL(pageUrl).hostname); } catch { return false; } })();
-                            if (onExternalRelay && pageUrl) {
-                                baseUrl = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
-                                log.info(`[FN ID] 外网代理模式, 改用代理基址: ${baseUrl} (原 nas_oauth.url=${oauthUrl})`);
+
+                            // ★ 回归修复(lc-193): 3.3.1 用 nas_oauth.url(NAS 内网 IP)直连完成 token 交换与 /v 加载,
+                            //   3.3.3 改为强制走 5ddd 代理基址。若代理对 /v/api/v1/auth 等返回 HTML(落地页, HTTP200),
+                            //   则 completeLogin 的 fnapi.auth(code) 拿到 HTML → request.ts 新诊断报"服务器返回了网页"。
+                            //   现改为: 当 NAS 内网 IP 直接可达(同局域网)时优先直连(oauthUrl), 不可达(外网)才回退代理/中继子域。
+                            const nasReachable = !!(
+                                oauthUrl &&
+                                oauthUrl !== '://' &&
+                                (await isUrlReachable(oauthUrl))
+                            );
+
+                            let chosenBase = '';
+                            if (nasReachable) {
+                                // 同局域网: 直连 NAS IP(恢复 3.3.1 行为)
+                                chosenBase = oauthUrl;
+                            } else if (onExternalRelay && pageUrl) {
+                                chosenBase = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
                             } else if (onRelaySub && pageUrl) {
-                                // ★ 官方中继子域(ydmy007.fnos.net)本身即 NAS 基址, 忽略内网 nas_oauth.url
-                                baseUrl = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
-                                log.info(`[FN ID] 官方中继子域模式, 改用子域基址: ${baseUrl} (原 nas_oauth.url=${oauthUrl})`);
+                                // 官方中继子域(ydmy007.fnos.net)本身即 NAS 基址
+                                chosenBase = pageUrl.replace(/\/v\/api\/v1\/sys\/config(\?.*)?$/i, '');
                             } else if (oauthUrl && oauthUrl !== '://') {
-                                baseUrl = oauthUrl;
+                                chosenBase = oauthUrl;
                             } else if (pageUrl) {
                                 const parsed = new URL(pageUrl);
-                                baseUrl = `${parsed.protocol}//${parsed.host}`;
+                                chosenBase = `${parsed.protocol}//${parsed.host}`;
+                            }
+
+                            if (chosenBase) {
+                                baseUrl = chosenBase;
+                                log.info(`[FN ID] baseUrl=${baseUrl} | onExternalRelay=${onExternalRelay} onRelaySub=${onRelaySub} nasReachable=${nasReachable} (nas_oauth.url=${oauthUrl})`);
                             }
 
                             if (baseUrl && appId) {
@@ -902,9 +964,16 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     const data = configResponse.data as any;
                     const oauth = data.nas_oauth;
                     if (oauth && oauth.app_id) {
+                        // ★ 回归修复(lc-193): 同局域网下 NAS IP 直连优先(恢复 3.3.1), 不可达才回退当前(代理/子域)基址
                         let targetBaseUrl = currentBaseUrl;
-                        // ★ 外网: 代理/中继子域模式下忽略内网 nas_oauth.url, 始终用代理/子域基址
-                        if (!onExternalRelay && !onRelaySub && oauth.url && oauth.url !== '://') {
+                        const nasReachable = !!(
+                            oauth.url &&
+                            oauth.url !== '://' &&
+                            (await isUrlReachable(oauth.url))
+                        );
+                        if (nasReachable) {
+                            targetBaseUrl = oauth.url;
+                        } else if (!onExternalRelay && !onRelaySub && oauth.url && oauth.url !== '://') {
                             targetBaseUrl = oauth.url;
                         }
                         baseUrl = targetBaseUrl;

@@ -186,14 +186,25 @@ export async function request<T = any>(
                     // 精准区分「需 FN ID 登录」与「服务器地址/端口错误」：
                     // 能拿到 HTML 说明网络是通的，所以"网络不通"已排除，只剩下面两类。
                     const htmlLower = rawBody.toLowerCase().slice(0, 2000);
+                    const isApiPath = /\/v\/api\//i.test(fullUrl); // 当前请求是否为接口路径
                     const isLoginPage = /(<input[^>]*type=["']?password|password|登录|sign\s*in|signin|fn\s*id|fnid|oauth|授权登录|账号|用户名)/.test(htmlLower);
                     const isAppShell = /<div[^>]*id=["'](app|root)["']|id=["']app["']|id=["']root["']|__nuxt|__next|<script[^>]*\.js/.test(rawBody);
                     const isServerErrorPage = /(404 not found|502 bad gateway|503 service|nginx|upstream|proxy error|网关|内部错误|无法访问|服务器错误)/.test(htmlLower);
 
                     let message: string;
                     let diag: string;
-                    if (isLoginPage) {
-                        // 典型表现：未登录 / FN ID 会话过期，/v/api 被 302 到登录页。
+                    if (isApiPath) {
+                        // ★ 关键修正(lc-193): 接口路径(/v/api/...)返回 HTML, 几乎一定是「地址/代理填错」
+                        //   ——请求没打到飞牛影视接口(正确形如 /v/api/v1/...), 而是命中了某个网页/代理落地页。
+                        //   这绝不可能是"FN ID 会话过期"(会话过期只会让非接口页面重定向到登录页, 不会让接口返回 HTML)。
+                        //   典型场景: FN ID/中继时把代理落地页地址当成了接口基址。
+                        diag = '地址/端口错误';
+                        message = '接口路径返回了网页(HTML)而非 JSON 数据。'
+                            + '这通常意味着「地址/代理填错」——请求没有打到飞牛影视接口（正确接口路径形如 /v/api/v1/...），'
+                            + '而是命中了某个网页或代理落地页。'
+                            + '👉 请检查：① 服务器地址/IP:端口 是否正确；② 若通过 FN ID / 中继访问，确认中继地址无误、不要在地址后多带路径或后缀。';
+                    } else if (isLoginPage) {
+                        // 典型表现：未登录 / FN ID 会话过期，非接口页面被重定向到登录页。
                         diag = '登录页(FN ID)';
                         message = '请求被重定向到了登录页（返回的是 HTML 网页而非接口数据）。'
                             + '原因几乎都是「未使用 FN ID 登录」或「FN ID 会话已过期」——飞牛影视接口需要 FN ID 会话 Cookie，用内网 IP 走本地账号登录拿不到它。'
