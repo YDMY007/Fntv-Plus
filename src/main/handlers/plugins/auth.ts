@@ -145,8 +145,17 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
 
             let detail: string;
             if (typeof response.data === 'string') {
-                // 绝大多数情况：request.ts 把 HTML/错误页误判为 success，data 是字符串
-                detail = '服务器返回的不是接口数据（可能是登录页或错误网页）。请检查服务器地址是否正确、网络是否可达，以及是否应使用 FN ID 登录。';
+                // 接口把 HTML/错误页当 success 透传过来，data 是字符串。精准区分两类根因：
+                const html = response.data.toLowerCase().slice(0, 2000);
+                const isLoginPage = /(<input[^>]*type=["']?password|password|登录|sign\s*in|signin|fn\s*id|fnid|oauth|授权登录|账号|用户名)/.test(html);
+                const isServerPage = /(404 not found|502 bad gateway|503 service|nginx|upstream|proxy error|网关|内部错误|服务器错误|<div[^>]*id=["'](app|root)["']|id=["']app["'])/.test(html);
+                if (isLoginPage) {
+                    detail = '服务器返回的是登录页（HTML 网页），而非登录接口数据。原因几乎都是「未使用 FN ID 登录」或「FN ID 会话已过期」——飞牛影视接口需要 FN ID 会话 Cookie，用内网 IP 走本地账号登录拿不到它。👉 请在登录框填写你的 FN ID（6–30 位、不含点的飞牛 ID，不要填内网 IP）走 FN ID 登录；若之前能进现在报错，重新走一次 FN ID 登录即可。';
+                } else if (isServerPage) {
+                    detail = '服务器返回的是网页首页/错误页（HTML），而非登录接口数据。说明服务器地址或端口填错，请求打到了网页而非飞牛影视接口。👉 请检查登录框里的「服务器地址」——内网应填 http://IP:端口（默认端口 18888，例如 http://192.168.31.170:18888），确认 IP 正确、端口没漏填、没有多余的路径或域名后缀。';
+                } else {
+                    detail = '服务器返回的不是接口数据（可能是登录页或错误网页）。请检查服务器地址/IP:端口 是否正确（接口应返回 JSON），以及是否应使用 FN ID 登录或重新登录（会话可能已过期）。';
+                }
             } else if (response.message) {
                 detail = response.message;
             } else {
