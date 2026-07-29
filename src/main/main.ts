@@ -138,7 +138,12 @@ if (!gotTheLock) {
                 const wc = mainWindow.webContents;
                 wc.on('console-message', (_e: any, level: number, message: string, line?: number, sourceId?: string) => {
                     const tag = level >= 3 ? 'ERROR' : level === 2 ? 'WARN' : level === 1 ? 'INFO' : 'DEBUG';
-                    log.info(`[Renderer:${tag}] ${message}${line ? ' (line ' + line + ')' : ''}${sourceId ? ' @ ' + sourceId : ''}`);
+                    const full = `[Renderer:${tag}] ${message}${line ? ' (line ' + line + ')' : ''}${sourceId ? ' @ ' + sourceId : ''}`;
+                    // 按真实级别写入, 使渲染进程的 WARN/ERROR 能进入 app-error.log (修复此前一律 log.info 导致降级丢失)
+                    if (level >= 3) log.error(full);
+                    else if (level === 2) log.warn(full);
+                    else if (level === 1) log.info(full);
+                    else log.debug(full);
                 });
                 wc.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
                     log.error(`[Renderer] 页面加载失败: ${validatedURL} (${errorCode}: ${errorDescription})`);
