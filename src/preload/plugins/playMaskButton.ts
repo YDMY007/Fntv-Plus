@@ -156,19 +156,36 @@ function getItemGuidFromDOM(button: HTMLElement): string | null {
             container = container.parentElement;
         }
 
-        // 2) 首页/列表卡片: 取按钮所属卡片(.card-root / 含 card 类 / 最近 <a>), 从卡片内链接提取 guid。
-        //    这是修复「首页封面直接点播放图标走官方网页播放」的关键: 旧逻辑只认 data-id="details",
-        //    首页卡片没有该包裹, 导致取不到 guid → 回退到原始点击 → 官方播放器(未劫持)。
+        // 0) 按钮自身携带的 guid（部分浮层菜单项直接带 data-item-guid / data-guid / data-id）
+        const selfGuid = button.getAttribute('data-item-guid') || button.getAttribute('data-guid') || button.getAttribute('data-id') || '';
+        if (selfGuid) {
+            const m = selfGuid.match(GUID_RE);
+            if (m && m[1]) { logger.info('Found guid in button data attr:', m[1]); return m[1]; }
+        }
+        // 1) 按钮自身即 <a href> 含 guid（常见于「继续观看」浮层菜单项）
+        if (button.tagName === 'A') {
+            const m = (button as HTMLAnchorElement).href.match(GUID_RE);
+            if (m && m[1]) { logger.info('Found guid in button anchor:', m[1]); return m[1]; }
+        }
+        // 2) 首页/列表卡片 或 浮层菜单(dropdown/popover/menu/portal): 从容器内链接提取 guid。
+        //    修复「继续观看」的「从头播放 / 继续播放」菜单项: 它们常渲染在脱离卡片的浮层里,
+        //    故把浮层容器也纳入查找范围; 浮层内任意指向 /v/{movie|tv}/{guid} 的链接都能提供 guid。
         const card = (button.closest('.card-root') ||
             button.closest('[class*="card"]') ||
-            button.closest('a')) as HTMLElement | null;
+            button.closest('a') ||
+            button.closest('[class*="dropdown"]') ||
+            button.closest('[class*="popover"]') ||
+            button.closest('[class*="menu"]') ||
+            button.closest('[role="menu"]') ||
+            button.closest('[role="listbox"]') ||
+            button.closest('.semi-portal')) as HTMLElement | null;
         const scope: Element = card || button;
         const cardLinks = scope.querySelectorAll('a[href]');
         for (const a of Array.from(cardLinks) as HTMLAnchorElement[]) {
             const m = a.href.match(GUID_RE);
-            if (m && m[1]) { logger.info('Found guid in card link:', m[1]); return m[1]; }
+            if (m && m[1]) { logger.info('Found guid in card/floating link:', m[1]); return m[1]; }
         }
-        if (scope.tagName === 'A') {
+        if (scope !== button && scope.tagName === 'A') {
             const m = (scope as HTMLAnchorElement).href.match(GUID_RE);
             if (m && m[1]) { logger.info('Found guid in card anchor:', m[1]); return m[1]; }
         }
@@ -252,7 +269,19 @@ function findHomeCardPlay(target: HTMLElement): HTMLElement | null {
     }
     if (!ok) return null;
 
-    const inCard = el.closest('.card-root') || el.closest('[class*="card"]') || el.closest('a');
+    // 放宽容器限制: 除了常规卡片(.card-root/[class*=card]/a), 也接受浮层菜单
+    // (dropdown/popover/menu/listbox/semi-portal) —— 这是修复「继续观看」的「从头播放 /
+    // 继续播放」菜单项的关键: 这些项渲染在脱离卡片的浮层里, 旧逻辑因找不到卡片容器而
+    // 直接 return null, 导致点击落到 fnOS 网页原生播放。
+    const inCard = el.closest('.card-root') ||
+        el.closest('[class*="card"]') ||
+        el.closest('a') ||
+        el.closest('[class*="dropdown"]') ||
+        el.closest('[class*="popover"]') ||
+        el.closest('[class*="menu"]') ||
+        el.closest('[role="menu"]') ||
+        el.closest('[role="listbox"]') ||
+        el.closest('.semi-portal');
     if (!inCard) return null;
     return el;
 }
