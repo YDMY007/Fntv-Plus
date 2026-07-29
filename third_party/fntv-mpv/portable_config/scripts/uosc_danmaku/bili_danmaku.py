@@ -522,13 +522,15 @@ def _merge_danmaku(sources):
 
 
 def _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku):
-    """「弹幕越多越好」选择策略（用户规则）：单个候选弹幕数 >= 阈值(1500) -> 直接用弹幕最多的
-    单源；否则 -> 合并所有【单集时间轴】候选。返回 (final_dm, cid, atitle, info, source, agg_count, srcs_str)。
+    """「弹幕越多越好」选择策略（用户规则）：
+       1) 单源弹幕最多的优先；
+       2) 若某个单集有效候选弹幕数 >= 阈值(1500) -> 直接用该弹幕最多的单源；
+       3) 否则(两个/多个单源都不够 1500) -> 找所有【单集时间轴】候选(单源视频)，
+          把几个单源视频的弹幕合并起来（弹幕越多越好）。
+       返回 (final_dm, cid, atitle, info, source, agg_count, srcs_str)。
       - 仅【单集时间轴】候选(时间轴<=agg_time_limit)参与「对应集」匹配；跨多集(整季混剪)排除在外，
         避免错把整季弹幕当对应集（lc-170 要求「对应集对应的弹幕」）。
-      - 取单集有效候选中弹幕最多者为 best：
-          · best >= agg_threshold -> 直接用 best 单源（不合并，对应集且弹幕最多）。
-          · 否则 -> 合并所有单集有效候选（弹幕越多越好）；合并后 < min 则退回 best 单源。
+      - 合并时把全部单集有效候选都纳入（不限两个），去重后输出；合并后 < min 则退回 best 单源。
       - 无任何单集有效候选(罕见, 全是跨多集且 ep_num=0) -> 退回全局弹幕最多者兜底。"""
     valid = [f for f in fetched if f[4] <= agg_time_limit]
     if valid:
@@ -582,7 +584,7 @@ def main():
     # 对应集(0~1400s)，应纳入聚合；标题含「合集」不再作为排除条件。
     AGG_TIME_LIMIT = 2200
     MIN_DANMAKU = 10
-    CAP = 6  # 最多拉取前 6 个候选，控制网络开销
+    CAP = 10  # 拉取前 10 个候选：合并模式下需攒到「几个单源(单集)视频」才能合出足量弹幕
 
     fetched = []  # (cid, atitle, info, all_d, max_time)
     for idx, (cid, atitle, info) in enumerate(candidates[:CAP]):
