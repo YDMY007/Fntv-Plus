@@ -29,6 +29,15 @@ import { registerHook, HookType } from '../core/hooks';
 
 const MIN_PAD = 20; // 每侧最小留白
 
+/**
+ * 判断当前是否为详情页（不应在此类页面执行列表居中逻辑）
+ * 详情页路径: /v/tv/{guid}、/v/movie/{guid} 及其子路由（season 等）
+ * 列表页路径: /v/、/v/library/*、/v/search 等
+ */
+function isDetailPage(): boolean {
+    return /^(\/v\/(tv|movie)\/[a-f0-9]{32})/.test(location.pathname);
+}
+
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
 function findCardGrid(): HTMLElement | null {
     const candidates = Array.from(
@@ -61,6 +70,9 @@ function makeKey(parent: HTMLElement): string {
  *       连续两次测量一致(≤2px)则锁定。
  */
 function applyFix(): boolean {
+    // ⛔ 详情页不执行列表居中逻辑（lc-190修复：详情页被误加巨大padding导致内容变窄）
+    if (isDetailPage()) return false;
+
     const card = findCardGrid();
     if (!card) return false;
 
