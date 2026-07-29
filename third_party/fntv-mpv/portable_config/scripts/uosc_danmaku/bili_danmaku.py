@@ -211,13 +211,36 @@ def search_bangumi(title, ep_num):
     return results
 
 def _ep_in_title(t, ep_num):
-    """判断标题/分P名是否明确指向第 ep_num 话。"""
-    if re.search(rf"第\s*0*{ep_num}\s*[话集話]", t):
+    """判断标题/分P名是否明确指向第 ep_num 话（精确单集）。
+    覆盖：第N话/集/回、EP03/E03/Episode 3、#3、(3)、独立 03。
+    含范围（如 01-03、第1-12集）的视为合集，不算单集命中。"""
+    if not ep_num:
+        return False
+    s = str(t)
+    if re.search(rf"第\s*0*{ep_num}\s*[话集回話]", s):
         return True
-    # 独立集数标记（如 02 / 2（先行版） / (2)），避免嵌在大数里（如 12 里的 2）
-    if re.search(rf"(?<![\d])0*{ep_num}(?![\d])", t):
-        if not re.search(r"\d\s*[~\-至]\s*\d", t):
-            return True
+    # 含范围（如 第1-12集 / 01-03话）整体算合集，不视为单集命中
+    if re.search(r"\d\s*[~\-–至]\s*\d", s):
+        return False
+    # EP03 / E03 / Episode 3 / ep.3 / #3
+    if re.search(rf"(?:^|[^A-Za-z\d])(?:e\.?p\.?\s*|episode\s*|#\s*)\s*0*{ep_num}(?!\d)", s, re.I):
+        return True
+    # 独立数字：03 / 3（排除嵌在大数里，如 12 里的 2）
+    if re.search(rf"(?<![\d])0*{ep_num}(?![\d])", s):
+        return True
+    return False
+
+def _is_compilation_title(t):
+    """标题是否表明为多集合集（无法隔离单集弹幕）：全N集 / 合集 / 第1-12集 / 01-03话 / 01~03 等。"""
+    s = str(t)
+    if re.search(r"全\s*\d+\s*集", s):
+        return True
+    if "合集" in s or "总集" in s:
+        return True
+    if re.search(r"第\s*\d+\s*[~\-–至]\s*\d+\s*[话集]", s):
+        return True
+    if re.search(r"\d+\s*[~\-–至]\s*\d+\s*话", s):
+        return True
     return False
 
 def parse_ep_from_title(title):
@@ -262,11 +285,19 @@ def cid_from_bvid(bvid, ep_num=None, title_hint=None):
         log(f"[cid_from_bvid] bvid={bvid} pages={len(pages)} ep_num={ep_num} title_hint={title_hint!r}")
         if not pages:
             cid = data.get("cid")
+            # 单cid视频：若标题表明是多集合集（全N集/合集/第1-12集）却只有一个cid，
+            # 无法隔离单集弹幕（弹幕是全集时间轴），直接跳过，让调用方试下一候选。
+            if ep_num and _is_compilation_title(title_hint or ""):
+                log(f"[cid_from_bvid] 单cid合集视频(标题含全集标记), 无法隔离第{ep_num}话, 跳过")
+                return None
             ok = (ep_num is None or _ep_in_title(title_hint or "", ep_num))
             log(f"[cid_from_bvid] 单P: cid={cid} 集数匹配={ok}")
             return cid if ok else None
         if len(pages) == 1:
             cid = pages[0].get("cid")
+            if ep_num and _is_compilation_title(title_hint or ""):
+                log(f"[cid_from_bvid] 单P合集视频(标题含全集标记), 无法隔离第{ep_num}话, 跳过")
+                return None
             ok = (ep_num is None or _ep_in_title(title_hint or "", ep_num))
             log(f"[cid_from_bvid] 单P列表: cid={cid} 集数匹配={ok}")
             return cid if ok else None
@@ -312,27 +343,38 @@ def search_video(title, ep_num):
         return []
     # 预筛：去除 reaction/二创等明显非正片
     pool = [(t, b, vr) for (t, b, vr) in pool if not any(k in t.lower() for k in BAD_TITLE)]
-    # 计算相似度并按 (相似度 desc, 弹幕数 desc) 排序
-    scored = [(title_sim(title, t), t, bvid, vr) for (t, bvid, vr) in pool]
-    scored.sort(key=lambda x: (-x[0], -x[3]))
+
+    # 候选分类：0=精确单集(第N集/EP N/第N话)  1=不明确单集(剧场版/OVA/无编号单集)  2=多集合集(全N集/合集/01-03话)
+    # 排序目标：优先精确单集视频（拿到的是「对应集」弹幕），把多集合集降到最后（其弹幕是全集时间轴）。
+    def kind_of(t):
+        if ep_num and _ep_in_title(t, ep_num) and not _is_compilation_title(t):
+            return 0
+        if _is_compilation_title(t):
+            return 2
+        return 1
+    scored = [(title_sim(title, t), kind_of(t), t, bvid, vr) for (t, bvid, vr) in pool]
+    # 排序：单集优先 > 不明确 > 合集；同档按 (相似度↓, 弹幕数↓)
+    scored.sort(key=lambda x: (x[1], -x[0], -x[4]))
     log(f"[视频区] 候选 {len(scored)} 个, ep_num={ep_num}")
-    for i, (sim, t, bvid, vr) in enumerate(scored[:5]):
-        log(f"[视频区]   候选[{i}] sim={sim:.2f} 弹幕={vr} {t!r}")
+    for i, (sim, kind, t, bvid, vr) in enumerate(scored[:8]):
+        tag = {0: "[单集]", 1: "[不明]", 2: "[合集]"}.get(kind, "?")
+        log(f"[视频区]   候选[{i}]{tag} sim={sim:.2f} 弹幕={vr} {t!r}")
 
     results = []
-    # 优先完整剧名；否则降阈值到 SIM_LOW；不做谐音兜底
-    # 收集所有达到阈值的候选（而非只返回第一个），供调用方逐个尝试弹幕拉取
+    # 已按 (单集>不明确>合集, 相似度↓, 弹幕数↓) 排序。单次遍历：只要 sim>=SIM_LOW 即采纳，
+    # 并保留上面的 kind 排序顺序（不再分 SIM_HIGH/SIM_LOW 两轮，否则高相似度合集会插到单集前面）。
+    # 调用方 main() 据此优先拿到「对应集」弹幕。
     seen_cids = set()
-    for thr in (SIM_HIGH, SIM_LOW):
-        for sim, t, bvid, vr in scored:
-            if sim < thr:
-                continue
-            cid = cid_from_bvid(bvid, ep_num, title_hint=t)
-            if cid and cid not in seen_cids:
-                seen_cids.add(cid)
-                info = {"source": "video", "bvid": bvid}
-                log(f"[视频区] sim={sim:.2f}(阈值{thr}) 候选: {t!r} cid={cid}")
-                results.append((cid, t, info))
+    for sim, kind, t, bvid, vr in scored:
+        if sim < SIM_LOW:
+            continue
+        cid = cid_from_bvid(bvid, ep_num, title_hint=t)
+        if cid and cid not in seen_cids:
+            seen_cids.add(cid)
+            info = {"source": "video", "bvid": bvid}
+            tag = {0: "[单集]", 1: "[不明]", 2: "[合集]"}.get(kind, "?")
+            log(f"[视频区] sim={sim:.2f}{tag} 候选: {t!r} cid={cid}")
+            results.append((cid, t, info))
     if not results:
         log("[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
     return results
