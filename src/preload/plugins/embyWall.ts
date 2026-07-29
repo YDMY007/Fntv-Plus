@@ -2,6 +2,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { isSyncableItemType } from '../../modules/fn_api/types';
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -170,10 +171,26 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const { ipcRenderer } = require('electron');
         const path = `/v/api/v1/item/${show.id}`;
         const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
-        const resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx } });
+        // [lc-181] 单条 item 请求加超时(8s): 非3类型(电视直播/其他视频)接口可能挂起,
+        // 若无限等待会阻塞整个顺序循环 → fetchShowsViaIPC 永不 resolve → 注入轮播永远不替换原生轮播 → 白屏卡死。
+        const ctrl = new AbortController();
+        const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 8000);
+        let resp: Response;
+        try {
+          resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
+        } finally {
+          clearTimeout(to);
+        }
         if (!resp.ok) continue;
         const json = await resp.json();
         const data = json?.data || {};
+        // [lc-181] 类型白名单: 仅电影/电视节目/混合影片(作品类)进入轮播;
+        // 电视直播/其他视频无作品级刮削且易触发白屏, 识别到就直接跳过、不加载。
+        const itemType = (data.type || data.item?.type) as string | undefined;
+        if (itemType && !isSyncableItemType(itemType)) {
+          log('skip non-syncable carousel item:', show.id, 'type=', itemType);
+          continue;
+        }
         // posters/backdrops是短路径字符串(如"/a9/06/xxx.webp"), 需补sys/img前缀
         const pickImg = (v: any): string => {
           let s = '';
@@ -198,6 +215,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     if (newShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, newShows);
+    } else if (shows.length > 0) {
+      // [lc-181] iframe 提取到条目, 但全部因「非3类型」被过滤 → 首页没有其他作品类内容可展示。
+      // 记一条诊断, 便于区分「白屏是卡死」还是「确实没有可展示的作品类」。
+      log('all extracted items filtered out as non-syncable (', shows.length, 'extracted, 0 kept) — 首页无可展示的作品类轮播');
     }
     _apiLoaded = true;
     log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
