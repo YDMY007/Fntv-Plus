@@ -391,6 +391,43 @@ const ACRYLIC_CSS = `
         background:#2b2a33!important;
         background-color:#2b2a33!important;
     }
+
+    /* ── ⑬ 详情页布局保护（lc-190: 修复 TV 剧集页带季选择器时内容变窄）
+         症状: 海报/播放按钮/简介等全部挤成中间一条窄带, 左右大片空白.
+         根因推测: ACRYLIC_CSS 全局规则(③白底清除/11b改padding/11c砍max-width)
+         与 fnOS TV 详情页(有季数选择器)的 DOM 布局产生交互异常,
+         导致某层容器失去正确宽度约束 → 子元素收缩至内容自然宽度(竖向海报宽≈260px).
+         修复: 强制详情页主内容容器链保持全宽展开. ── */
+
+    /* 13a. 滚动容器全宽 */
+    .ms-container{
+        width:100%!important;
+        max-width:none!important;
+    }
+
+    /* 13b. 详情页头部容器(TV详情用 .trim-mc__details--key-version,
+         Season详情用 .semi-always-dark.h-[470px])强制撑满父级 */
+    .trim-mc__details--key-version,
+    .semi-always-dark.box-border.flex.h-\\[470px\\]{
+        width:100%!important;
+        max-width:none!important;
+    }
+
+    /* 13c. 兜底: 详情页内任何 max-w 约束容器恢复合理宽度
+         (覆盖 11c 对详情页子容器的过度砍杀) */
+    .trim-mc__details--key-version [class*="max-w"],
+    .semi-always-dark [class*="max-w"]{
+        max-width:1280px!important;
+        width:auto!important;
+    }
+
+    /* 13d. 防止详情页主内容区收缩: 确保关键布局层撑开 */
+    .trim-mc__details--key-version > div,
+    .trim-mc__details--key-version > section,
+    .semi-always-dark.box-border.flex > div{
+        width:100%!important;
+        max-width:none!important;
+    }
 `;
 
 /**
