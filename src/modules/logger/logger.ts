@@ -42,6 +42,7 @@ export class Logger {
     private maxFiles: number;
     private logDir: string;
     private currentLogFile: string;
+    private errorLogFile: string; // 仅含 WARN/ERROR 的精简日志，便于快速定位报错
     // 调试日志过滤：总开关 + 各组件开关（仅影响控制台输出，不影响文件）
     private debugEnabled = false;
     private debugComponents: Record<string, boolean> = {};
@@ -52,6 +53,7 @@ export class Logger {
         this.maxFiles = logConfig.maxFiles;
         this.logDir = this.getLogDirectory();
         this.currentLogFile = path.join(this.logDir, 'app.log');
+        this.errorLogFile = path.join(this.logDir, 'app-error.log');
 
         // 确保日志目录存在
         this.ensureLogDirectory();
@@ -98,32 +100,41 @@ export class Logger {
     }
 
     /**
-     * 检查并轮转日志文件
+     * 检查并轮转日志文件（app.log 与 app-error.log 各自独立判断）
      */
     private checkLogRotation(): void {
         try {
-            if (fs.existsSync(this.currentLogFile)) {
-                const stats = fs.statSync(this.currentLogFile);
-                if (stats.size >= this.maxFileSize) {
-                    this.rotateLogFile();
-                }
+            if (this.fileSizeReached(this.currentLogFile, this.maxFileSize)) {
+                this.rotateLogFile(this.currentLogFile, 'app');
+            }
+            if (this.fileSizeReached(this.errorLogFile, this.maxFileSize)) {
+                this.rotateLogFile(this.errorLogFile, 'app-error');
             }
         } catch (error) {
             console.error('检查日志轮转失败:', (error as Error).message);
         }
     }
 
+    private fileSizeReached(file: string, limit: number): boolean {
+        try {
+            if (fs.existsSync(file)) {
+                return fs.statSync(file).size >= limit;
+            }
+        } catch { /* ignore */ }
+        return false;
+    }
+
     /**
-     * 轮转日志文件
+     * 轮转单个日志文件（按 prefix 生成历史文件名 app-<ts>.log / app-error-<ts>.log）
      */
-    private rotateLogFile(): void {
+    private rotateLogFile(currentPath: string, prefix: string): void {
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const rotatedFile = path.join(this.logDir, `app-${timestamp}.log`);
+            const rotatedFile = path.join(this.logDir, `${prefix}-${timestamp}.log`);
 
             // 移动当前日志文件
-            if (fs.existsSync(this.currentLogFile)) {
-                fs.renameSync(this.currentLogFile, rotatedFile);
+            if (fs.existsSync(currentPath)) {
+                fs.renameSync(currentPath, rotatedFile);
             }
 
             // 清理超过限制的旧日志文件
@@ -134,29 +145,37 @@ export class Logger {
     }
 
     /**
-     * 清理旧的日志文件，只保留最近的几个
+     * 清理旧的日志文件，只保留最近的几个（按前缀分别清理，互不干扰）
      */
     private cleanupOldLogs(): void {
         try {
-            const files: FileInfo[] = fs.readdirSync(this.logDir)
-                .filter(file => file.startsWith('app-') && file.endsWith('.log'))
-                .map(file => ({
-                    name: file,
-                    path: path.join(this.logDir, file),
-                    mtime: fs.statSync(path.join(this.logDir, file)).mtime
-                }))
-                .sort((a, b) => b.mtime.getTime() - a.mtime.getTime()); // 按修改时间降序排列
+            const groups: { prefix: string; current: string }[] = [
+                { prefix: 'app-', current: 'app.log' },
+                { prefix: 'app-error-', current: 'app-error.log' },
+            ];
+            for (const g of groups) {
+                const files: FileInfo[] = fs.readdirSync(this.logDir)
+                    .filter(file => file.startsWith(g.prefix) && file.endsWith('.log') && file !== g.current)
+                    // 避免 'app-' 前缀把 'app-error-*' 也算进来
+                    .filter(file => !(g.prefix === 'app-' && file.startsWith('app-error-')))
+                    .map(file => ({
+                        name: file,
+                        path: path.join(this.logDir, file),
+                        mtime: fs.statSync(path.join(this.logDir, file)).mtime
+                    }))
+                    .sort((a, b) => b.mtime.getTime() - a.mtime.getTime()); // 按修改时间降序排列
 
-            // 删除超过保留数量的文件
-            if (files.length > this.maxFiles - 1) { // -1 因为当前日志文件不在这个列表中
-                const filesToDelete = files.slice(this.maxFiles - 1);
-                filesToDelete.forEach(file => {
-                    try {
-                        fs.unlinkSync(file.path);
-                    } catch (error) {
-                        console.error(`删除旧日志文件失败: ${file.name}`, (error as Error).message);
-                    }
-                });
+                // 删除超过保留数量的文件（当前文件不在列表中，故保留 maxFiles-1 个历史）
+                if (files.length > this.maxFiles - 1) {
+                    const filesToDelete = files.slice(this.maxFiles - 1);
+                    filesToDelete.forEach(file => {
+                        try {
+                            fs.unlinkSync(file.path);
+                        } catch (error) {
+                            console.error(`删除旧日志文件失败: ${file.name}`, (error as Error).message);
+                        }
+                    });
+                }
             }
         } catch (error) {
             console.error('清理旧日志文件失败:', (error as Error).message);
@@ -203,13 +222,19 @@ export class Logger {
     /**
      * 写入日志到文件
      */
-    private writeToFile(formattedMessage: string): void {
+    private writeToFile(level: LogLevel, formattedMessage: string): void {
         try {
-            // 检查是否需要轮转日志
+            // 检查是否需要轮转日志（app.log 与 app-error.log 各自独立轮转）
             this.checkLogRotation();
 
-            // 写入日志
+            // 写入全量日志
             fs.appendFileSync(this.currentLogFile, formattedMessage + '\n', 'utf8');
+
+            // WARN/ERROR 额外写入精简报错日志，便于快速定位问题
+            // 注意：排除 NOFORMAT（级别更高，常用于转发 mpv 等外部大日志），避免 error 文件变大
+            if (level >= LogLevel.WARN && level <= LogLevel.ERROR) {
+                fs.appendFileSync(this.errorLogFile, formattedMessage + '\n', 'utf8');
+            }
         } catch (error) {
             console.error('写入日志文件失败:', (error as Error).message);
         }
@@ -266,7 +291,7 @@ export class Logger {
             }
 
             // 写入文件（始终记录，便于事后排查）
-            this.writeToFile(formattedMessage);
+            this.writeToFile(level, formattedMessage);
 
             // 同时输出到控制台（受调试/组件过滤影响）
             if (this.shouldConsole(level, component)) {
@@ -350,6 +375,13 @@ export class Logger {
      */
     public getLogDir(): string {
         return this.logDir;
+    }
+
+    /**
+     * 获取精简报错日志(app-error.log)路径：仅含 WARN/ERROR，便于快速定位问题
+     */
+    public getErrorLogFile(): string {
+        return this.errorLogFile;
     }
 }
 

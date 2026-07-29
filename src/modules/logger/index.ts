@@ -23,6 +23,7 @@ interface ILogger {
     getLogger(): typeof logger;
     setLogLevel(level: LogLevel): void;
     getLogFile(): string;
+    getErrorLogFile(): string;
     getLogDir(): string;
     // 返回一个按组件过滤的日志器（用于设置面板控制各组件 CMD 日志开关）
     component(name: string): IComponentLogger;
@@ -69,6 +70,7 @@ const loggerInterface: ILogger = {
 
     // 获取日志相关信息
     getLogFile: () => logger.getCurrentLogFile(),
+    getErrorLogFile: () => logger.getErrorLogFile(),
     getLogDir: () => logger.getLogDir(),
 
     // 方便的方法别名

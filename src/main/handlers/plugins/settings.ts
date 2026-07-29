@@ -383,6 +383,27 @@ async function handleOpenLog(): Promise<{ ok: boolean; error?: string }> {
 }
 
 /**
+ * 打开精简报错日志(app-error.log)：仅含 WARN/ERROR，体积小、便于快速定位问题。
+ * 若报错日志尚未生成（还没写过任何 WARN/ERROR），则回退打开全量日志。
+ */
+async function handleOpenErrorLog(): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const errFile = log.getErrorLogFile();
+        if (!errFile) return { ok: false, error: '无法定位日志文件路径' };
+        const target = fs.existsSync(errFile) ? errFile : log.getLogFile();
+        if (!target || !fs.existsSync(target)) return { ok: false, error: '日志文件尚未生成' };
+        const errMsg = await shell.openPath(target);
+        if (errMsg) {
+            log.warn('shell.openPath 打开报错日志失败，回退 notepad:', errMsg);
+            spawn('notepad.exe', [target], { windowsHide: false });
+        }
+        return { ok: true };
+    } catch (e: any) {
+        return { ok: false, error: String((e && e.message) || e) };
+    }
+}
+
+/**
  * 导出日志文件：弹出"另存为"对话框，把当前日志复制到用户指定位置。
  */
 async function handleExportLog(): Promise<{ ok: boolean; error?: string; savedPath?: string }> {
@@ -547,6 +568,7 @@ function init(): void {
     registerHandler('settings:check-update-mirror', handleCheckUpdateMirror, { useHandle: true });
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
     registerHandler('settings:open-log', handleOpenLog, { useHandle: true });
+    registerHandler('settings:open-error-log', handleOpenErrorLog, { useHandle: true });
     registerHandler('settings:export-log', handleExportLog, { useHandle: true });
     registerHandler('settings:list-changelogs', handleListChangelogs, { useHandle: true });
     registerHandler('settings:read-changelog', handleReadChangelog, { useHandle: true });

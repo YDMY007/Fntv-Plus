@@ -2882,8 +2882,10 @@ function handle(): void {
     const logRow = document.createElement('div');
     logRow.style.cssText = 'display:flex;gap:6px;';
     const openLogBtn = mkBtn('打开日志文件', true);
+    const openErrLogBtn = mkBtn('打开报错日志', true);
     const exportLogBtn = mkBtn('导出日志文件', true);
     logRow.appendChild(openLogBtn);
+    logRow.appendChild(openErrLogBtn);
     logRow.appendChild(exportLogBtn);
     logFooter.appendChild(logRow);
     sec3.el.appendChild(logFooter);
@@ -2893,6 +2895,16 @@ function handle(): void {
       ipcRenderer.invoke('settings:open-log').then((r: any) => {
         if (!r || !r.ok) {
           logStatus.textContent = '打开日志失败：' + ((r && r.error) || '未知');
+        } else {
+          logStatus.textContent = '';
+        }
+      }).catch(() => {});
+    });
+    openErrLogBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:open-error-log').then((r: any) => {
+        if (!r || !r.ok) {
+          logStatus.textContent = '打开报错日志失败：' + ((r && r.error) || '未知');
         } else {
           logStatus.textContent = '';
         }

@@ -53,10 +53,11 @@ export const logConfig: LogConfig = {
     productionLevel: LogLevel.INFO,
     
     // 最大文件大小 (字节)
-    maxFileSize: 10 * 1024 * 1024, // 10MB
-    
-    // 最大文件数量
-    maxFiles: 3,
+    // 单文件越小，打开越流畅、报错越好定位。之前 10MB 打开很卡，降到 2MB。
+    maxFileSize: 2 * 1024 * 1024, // 2MB
+
+    // 最大文件数量（每个前缀：当前文件 + 历史轮转文件）。适当提高到 5，保留更多排查历史。
+    maxFiles: 5,
     
     // 是否在控制台也输出日志（开发环境）
     consoleOutput: true,
