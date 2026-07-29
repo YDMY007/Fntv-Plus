@@ -343,6 +343,14 @@ function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
 
+  // [lc-182] 路径守卫: 轮播仅注入首页(/v 或 /v/)。
+  // 创建媒体库弹窗(/v/settings/library)、设置页、详情页等非首页路径的 DOM 也可能
+  // 含"媒体库"文字 → findMediaLibrarySection 误匹配 → 轮播被注入弹窗内部(lc-179 截图)。
+  const p = location.pathname;
+  if (p !== '/v' && p !== '/v/') {
+    return; // 静默跳过, 不打日志(避免非首页页面刷屏)
+  }
+
   // 找"媒体库"section: 首屏用DOM搜索, 重建复用已有wrapper的parent(避免wrapper嵌套)
   let target: HTMLElement | null = null;
   let rebuild = false;
