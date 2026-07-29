@@ -27,7 +27,8 @@ COOKIE = _load_cookie()
 # 明显非正片的标题关键词（reaction/二创/OP/ED/预告等）
 BAD_TITLE = ["reaction", "反应", "杂谈", "吐槽", "解说", "盘点", "二创", "mad", "amv",
              "算是", "你们", "为什么", "评", "空降", "切片", "速看", "高能", "op", "ed",
-             "ost", "pv", "预告", "花絮", "cos", "直播", "歌词", "致敬", "混剪", "剪辑"]
+             "ost", "pv", "预告", "花絮", "cos", "直播", "歌词", "致敬", "混剪", "剪辑",
+             "有声轻小说", "广播剧", "有声书", "有声小说"]  # 非动画正片（音频/文字向）
 
 # 标题/分P名里常见的非识别性填充词，做相似度比较时剔除
 _FILLER = ["高清","1080p","720p","480p","4k","合集","全集","更新","熟肉","生肉",
@@ -163,14 +164,14 @@ def _select_ep(eps, ep_num):
     return best
 
 def search_bangumi(title, ep_num):
-    """番剧区搜索（B站正版番剧）。返回 (cid, title) 或 (None, None)。
+    """番剧区搜索（B站正版番剧）。返回候选列表 [(cid, title, info), ...]（按相似度+弹幕数排序）。
     匹配策略：优先完整剧名(sim>=SIM_HIGH)；失败则降阈值到 SIM_LOW(70%，名字相同)；
     不做谐音/近似名兜底。集选择见 _select_ep。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(title)}&search_type=media_bangumi"
     d = jget(url)
     if not d or d.get("code") != 0:
         log("番剧区搜索失败 code=" + str(d.get("code")))
-        return None, None, None
+        return []
     cands = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "media_bangumi":
@@ -179,12 +180,13 @@ def search_bangumi(title, ep_num):
                 if "中配" in t:
                     continue
                 cands.append((title_sim(title, t), t, anime))
-    cands.sort(key=lambda x: -x[0])
+    cands.sort(key=lambda x: (-x[0], -parse_count(x[2].get("video_review", 0))))
     log(f"[番剧区] 命中候选 {len(cands)} 个, ep_num={ep_num}")
     for i, (sim, t, anime) in enumerate(cands[:5]):
         eps = anime.get("eps") or []
         log(f"[番剧区]   候选[{i}] sim={sim:.2f} 总集数={len(eps)} {t!r}")
 
+    results = []
     # 优先完整剧名(sim>=SIM_HIGH)；否则降阈值到 SIM_LOW(名字相同)；不做谐音兜底
     for thr in (SIM_HIGH, SIM_LOW):
         for sim, t, anime in cands:
@@ -202,10 +204,11 @@ def search_bangumi(title, ep_num):
             cid = _bangumi_cid(ep_id)
             if cid:
                 info = {"source": "bangumi", "season_id": anime.get("season_id"), "epid": ep_id, "bvid": None}
-                log(f"[番剧区] sim={sim:.2f}(阈值{thr}) 命中: {t!r} ep序号={ep.get('index')} cid={cid}")
-                return cid, t, info
-    log("[番剧区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
-    return None, None, None
+                log(f"[番剧区] sim={sim:.2f}(阈值{thr}) 候选: {t!r} ep序号={ep.get('index')} cid={cid}")
+                results.append((cid, t, info))
+    if not results:
+        log("[番剧区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
+    return results
 
 def _ep_in_title(t, ep_num):
     """判断标题/分P名是否明确指向第 ep_num 话。"""
@@ -291,11 +294,11 @@ def cid_from_bvid(bvid, ep_num=None, title_hint=None):
 def search_video(title, ep_num):
     """视频区搜索（UP主搬运）。按剧名相似度排序：优先完整剧名匹配，匹配失败降阈值到70%。
     命中候选内再按集数/分P对齐（按分P标题中的集序号选分P，不按视频时长）。
-    返回 (cid, title, info) 或 (None, None, None)。"""
+    返回候选列表 [(cid, title, info), ...]（按相似度+弹幕数排序），供 main() 逐个尝试拉弹幕。"""
     url = f"https://api.bilibili.com/x/web-interface/search/all/v2?keyword={urllib.parse.quote(title)}&search_type=video"
     d = jget(url)
     if not d or d.get("code") != 0:
-        return None, None, None
+        return []
     pool = []
     for it in d["data"]["result"]:
         if isinstance(it, dict) and it.get("result_type") == "video":
@@ -306,7 +309,7 @@ def search_video(title, ep_num):
                     vr = parse_count(v.get("video_review"))
                     pool.append((t, bvid, vr))
     if not pool:
-        return None, None, None
+        return []
     # 预筛：去除 reaction/二创等明显非正片
     pool = [(t, b, vr) for (t, b, vr) in pool if not any(k in t.lower() for k in BAD_TITLE)]
     # 计算相似度并按 (相似度 desc, 弹幕数 desc) 排序
@@ -316,26 +319,34 @@ def search_video(title, ep_num):
     for i, (sim, t, bvid, vr) in enumerate(scored[:5]):
         log(f"[视频区]   候选[{i}] sim={sim:.2f} 弹幕={vr} {t!r}")
 
+    results = []
     # 优先完整剧名；否则降阈值到 SIM_LOW；不做谐音兜底
+    # 收集所有达到阈值的候选（而非只返回第一个），供调用方逐个尝试弹幕拉取
+    seen_cids = set()
     for thr in (SIM_HIGH, SIM_LOW):
         for sim, t, bvid, vr in scored:
             if sim < thr:
                 continue
             cid = cid_from_bvid(bvid, ep_num, title_hint=t)
-            if cid:
+            if cid and cid not in seen_cids:
+                seen_cids.add(cid)
                 info = {"source": "video", "bvid": bvid}
-                log(f"[视频区] sim={sim:.2f}(阈值{thr}) 集数对齐命中: {t!r} cid={cid}")
-                return cid, t, info
-    log("[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
-    return None, None, None
+                log(f"[视频区] sim={sim:.2f}(阈值{thr}) 候选: {t!r} cid={cid}")
+                results.append((cid, t, info))
+    if not results:
+        log("[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
+    return results
 
 # （已移除 search_video_fuzzy 谐音/近似名模糊兜底：匹配策略改为剧名相似度阈值，见 search_bangumi/search_video）
 
 def search_cid(title, ep_num):
+    """搜索 B站 返回候选列表 [(cid, title, info), ...]（番剧区优先，回退视频区）。
+    每个候选都已通过相似度阈值+集数对齐验证。调用方应逐个尝试拉弹幕，
+    因部分视频可能 seg.so 无弹幕数据（新上传/冷门/被清），需回退到下一候选。"""
     # 清洗弹弹play 可能附带的年份括号（如「尼古喵喵 (2026)」），避免 B站 搜不到
     title = re.sub(r"\s*[\(（]\d{4}[\)）]\s*$", "", title).strip()
     if not title:
-        return None, None, None
+        return []
     # ep_num 为 0 时尝试从标题/文件名里再挖一次集数（部分调用方传入的是含集数的完整标题）
     if not ep_num or ep_num == 0:
         derived = parse_ep_from_title(title)
@@ -345,18 +356,35 @@ def search_cid(title, ep_num):
         else:
             log(f"[search_cid] ep_num=0 且标题无集数: {title!r}")
     log(f"[search_cid] 开始匹配: title={title!r} ep_num={ep_num}")
-    # 匹配策略：剧名相似度优先完整匹配(SIM_HIGH)，失败降阈值到 SIM_LOW(70%)，不做谐音兜底
-    cid, atitle, info = search_bangumi(title, ep_num)
-    if cid:
-        log(f"[search_cid] 番剧区命中 cid={cid}")
-        return cid, atitle, info
+    # 番剧区优先（正版番剧弹幕质量更高）
+    candidates = search_bangumi(title, ep_num)
+    if candidates:
+        log(f"[search_cid] 番剧区返回 {len(candidates)} 个候选")
+        return candidates
     log("番剧区无结果，回退到视频区(UP主搬运)")
-    cid, atitle, info = search_video(title, ep_num)
-    if cid:
-        log(f"[search_cid] 视频区命中 cid={cid}")
-        return cid, atitle, info
+    candidates = search_video(title, ep_num)
+    if candidates:
+        log(f"[search_cid] 视频区返回 {len(candidates)} 个候选")
+        return candidates
     log("[search_cid] 番剧区/视频区均未匹配（已移除谐音/近似名兜底，不再猜测）")
-    return None, None, None
+    return []
+
+
+def try_fetch_danmaku(cid, out):
+    """尝试从单个 cid 拉取 seg.so 弹幕。返回 (成功bool, 弹幕列表)。
+    不写文件、不输出 BILI_RESULT，纯拉取+解析。"""
+    all_d = []
+    for seg in range(1, 51):
+        raw = fetch_seg(cid, seg)
+        if len(raw) < 20:
+            log(f"  cid={cid} 段{seg}空，结束")
+            break
+        dm = extract(raw)
+        if not dm:
+            log(f"  cid={cid} 段{seg}无弹幕，结束")
+            break
+        all_d.extend(dm)
+    return (len(all_d) > 0), all_d
 
 def read_varint(b, i):
     shift = 0; val = 0
@@ -419,47 +447,50 @@ def main():
         sys.exit(2)
     title = sys.argv[1]; ep_num = int(sys.argv[2]); out = sys.argv[3]
     log(f"番名={title} 集数={ep_num}" + (" [登录态]" if COOKIE else " [匿名]"))
-    cid, atitle, info = search_cid(title, ep_num)
-    if not cid:
+
+    candidates = search_cid(title, ep_num)
+    if not candidates:
         log("未找到B站对应集（可能番名不匹配或网络受限）")
         print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': '未找到匹配的B站视频'}, ensure_ascii=False)}")
         sys.exit(1)
-    log(f"cid={cid} 番名={atitle}")
-    all_d = []
-    for seg in range(1, 51):
-        raw = fetch_seg(cid, seg)
-        if len(raw) < 20:
-            log(f"段{seg}空，结束")
-            break
-        dm = extract(raw)
-        if not dm:
-            log(f"段{seg}无弹幕，结束")
-            break
-        all_d.extend(dm)
-    if not all_d:
-        log("B站该集无弹幕")
-        print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': 'B站该集无弹幕数据'}, ensure_ascii=False)}")
-        sys.exit(1)
-    with open(out, "w", encoding="utf-8") as f:
-        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
-        for (pr, mode, col, con) in all_d:
-            t = pr / 1000.0
-            p = f"{t:.2f},{mode},25,{col},0,0,0"
-            f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
-        f.write("</danmaku>\n")
-    # 输出结构化元数据到 stdout（供 Lua extra.lua 解析后显示在配置面板）
-    # title 用传入的搜索词（弹弹play干净标题），而非 B站 返回的 atitle（可能为乱码/搬运标题）
-    result = {
-        "ok": True,
-        "bvid": info.get("bvid") if info else None,
-        "title": title,
-        "danmaku_count": len(all_d),
-        "source": info.get("source") if info else None,
-        "cid": cid,
-    }
-    print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
-    log(f"生成 {len(all_d)} 条弹幕 -> {out}")
-    sys.exit(0)
+
+    # 逐个尝试候选视频的弹幕拉取：部分视频 seg.so 可能无数据（新传/冷门/被清），
+    # 自动回退到下一候选，而非直接报"无弹幕"放弃。
+    for idx, (cid, atitle, info) in enumerate(candidates):
+        label = info.get("bvid") or atitle or f"候选#{idx+1}"
+        log(f"[{idx+1}/{len(candidates)}] 尝试 cid={cid} ({label})")
+        ok, all_d = try_fetch_danmaku(cid, out)
+        if ok and all_d:
+            # 写 XML 文件
+            with open(out, "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
+                for (pr, mode, col, con) in all_d:
+                    t = pr / 1000.0
+                    p = f"{t:.2f},{mode},25,{col},0,0,0"
+                    f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
+                f.write("</danmaku>\n")
+            result = {
+                "ok": True,
+                "bvid": info.get("bvid") if info else None,
+                "title": title,
+                "danmaku_count": len(all_d),
+                "source": info.get("source") if info else None,
+                "cid": cid,
+            }
+            print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
+            log(f"✅ 候选[{idx+1}] 成功: {label} -> {len(all_d)} 条弹幕 -> {out}")
+            sys.exit(0)
+        else:
+            log(f"  ⚠️ 候选[{idx+1}] {label} 无弹幕数据，跳过试下一个")
+
+    # 所有候选都试完了仍无弹幕
+    tried = ", ".join(
+        (info.get("bvid") or atitle or f"#{i+1}")
+        for i, (_, atitle, info) in enumerate(candidates)
+    )
+    log(f"全部 {len(candidates)} 个候选均无弹幕数据: {tried}")
+    print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': f'已试{len(candidates)}个候选均无弹幕数据({tried})'}, ensure_ascii=False)}")
+    sys.exit(1)
 
 if __name__ == "__main__":
     main()
