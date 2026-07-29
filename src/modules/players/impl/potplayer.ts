@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { PlayerFactory } from '../factory';
 import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku';
+import { isSyncableItemType } from '../../fn_api/types';
 import { mergeSubtitleWithDanmaku } from '../../danmaku/subtitleMerge';
 import logger from '../../logger';
 const log = logger.component('potplayer');
@@ -234,6 +235,10 @@ export class PotPlayer extends BasePlayer {
             try {
                 const dmTitle = normalizeDanmakuTitle(item.tvTitle || item.title);
                 const dmEp = item.episodeNumber || 0;
+                if (!isSyncableItemType(item.type)) {
+                    log.info(`[PotPlayer] 媒体类型 "${item.type || 'null'}" 不在弹幕匹配范围(仅电影/电视节目/混合影片)，跳过弹幕`);
+                    return;
+                }
                 log.info(`[PotPlayer] === 弹幕 ASS 获取开始 ===`);
                 log.info(`[PotPlayer] dmTitle="${dmTitle}", dmEp=${dmEp}, tvTitle="${item.tvTitle}", title="${item.title}"`);
                 if (dmTitle) {
@@ -678,13 +683,17 @@ export class PotPlayer extends BasePlayer {
         try {
             const dmTitle = startItem.tvTitle || startItem.title;
             const dmEp = startItem.episodeNumber || 0;
-            log.info(`[PotPlayer][legacy] === 弹幕 ASS 获取开始 ===`);
-            log.info(`[PotPlayer][legacy] dmTitle="${dmTitle}", dmEp=${dmEp}, tvTitle="${startItem.tvTitle}", title="${startItem.title}"`);
-            if (dmTitle) {
-                dmAss = await getDanmakuAss(dmTitle, dmEp);
-                log.info(`[PotPlayer][legacy] getDanmakuAss 返回: ${dmAss || 'null'}`);
+            if (!isSyncableItemType(startItem.type)) {
+                log.info(`[PotPlayer][legacy] 媒体类型 "${startItem.type || 'null'}" 不在弹幕匹配范围(仅电影/电视节目/混合影片)，跳过弹幕`);
             } else {
-                log.warn('[PotPlayer][legacy] ⚠️ dmTitle 为空，跳过弹幕');
+                log.info(`[PotPlayer][legacy] === 弹幕 ASS 获取开始 ===`);
+                log.info(`[PotPlayer][legacy] dmTitle="${dmTitle}", dmEp=${dmEp}, tvTitle="${startItem.tvTitle}", title="${startItem.title}"`);
+                if (dmTitle) {
+                    dmAss = await getDanmakuAss(dmTitle, dmEp);
+                    log.info(`[PotPlayer][legacy] getDanmakuAss 返回: ${dmAss || 'null'}`);
+                } else {
+                    log.warn('[PotPlayer][legacy] ⚠️ dmTitle 为空，跳过弹幕');
+                }
             }
         } catch (dmErr: any) {
             log.warn('PotPlayer[legacy] 弹幕 ASS 获取异常(已忽略):', dmErr?.message || dmErr);

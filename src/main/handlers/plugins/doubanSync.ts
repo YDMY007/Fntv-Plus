@@ -8,6 +8,7 @@ import { getMainWindow } from '../../common/mainwin';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as fn from '../../../modules/fn_api/api';
 import * as logger from '../../../modules/logger';
+import * as types from '../../../modules/fn_api/types';
 const log = logger.component('douban');
 
 /**
@@ -611,6 +612,11 @@ export async function syncOnProgress(
 ): Promise<void> {
     try {
         if (!fnConfig.getDoubanSyncEnabled()) return;
+        const _syncItem = (info && info.item) || {};
+        if (!types.isSyncableItemType(_syncItem.type)) {
+            log.info(`[豆瓣] 媒体类型 "${_syncItem.type || 'null'}" 不在可同步范围(仅电影/电视节目/混合影片)，跳过豆瓣同步`);
+            return;
+        }
         const cookie = fnConfig.getDoubanCookie();
         if (!cookie) {
             log.info('[豆瓣] 未登录，跳过同步');

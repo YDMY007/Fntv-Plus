@@ -215,6 +215,10 @@ export async function syncOnProgress(
 
         const item = info && info.item;
         if (!item) return;
+        if (!types.isSyncableItemType(item.type)) {
+            log.info(`[Bangumi] 媒体类型 "${item.type || 'null'}" 不在可同步范围(仅电影/电视节目/混合影片)，跳过 Bangumi 同步`);
+            return;
+        }
         const tvTitle = item.tv_title;
         const epNum = item.episode_number;
         if (!tvTitle || !epNum || epNum < 1) return;

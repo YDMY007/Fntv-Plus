@@ -756,3 +756,23 @@ export interface AuthResponse {
     /** 访问令牌 */
     token: string;
 }
+
+/**
+ * 飞牛影视「可同步」的媒体类型（作品类）。
+ * 仅 电影 / 电视节目 / 混合影片 走弹幕匹配、豆瓣同步、Bangumi 同步；
+ * 排除 电视直播、其他视频（无作品级刮削元数据，不应匹配弹幕/豆瓣/Bangumi）。
+ *
+ * item.type 取值（飞牛 API，已确认）：
+ *   - 电影           → "Movie"
+ *   - 电视节目(单集) → "Episode"
+ *   - 电视节目(系列) → "TvSeries" / "TV"
+ *   - 混合影片       → 内部 item 仍为 Movie / Episode（混合影片是库的容器类型，不是独立 item.type）
+ * 排除项（凡不在白名单即排除，具体值不影响判断）：
+ *   电视直播(Live/LiveTV/IPTV…)、其他视频(Video/Others/PersonalVideo…)。
+ */
+export const SYNCABLE_ITEM_TYPES = ['Movie', 'Episode', 'TvSeries', 'TV'] as const;
+
+/** 判断某 item.type 是否属于「可同步」的作品类（电影 / 电视节目 / 混合影片）。 */
+export function isSyncableItemType(type?: string | null): boolean {
+    return !!type && (SYNCABLE_ITEM_TYPES as readonly string[]).includes(type);
+}
