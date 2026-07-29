@@ -528,19 +528,29 @@ function auto_search_extra(title, episode_num)
         return utils.split_path(p)
     end
 
-    -- Python 解释器候选：内置便携 Python（随安装包/仓库分发于 <app根>/third_party/python/python.exe）
-    -- > 系统 PATH（python / python3 / py）。
-    -- 不同运行环境（dev 仓库 / 打包态 / asar 解包 / 便携目录）下，script_dir 到 app 根的层级数
-    -- 不固定（如 portable_config/scripts/uosc_danmaku 是 5 层），故不能写死回溯层数。
-    -- 改为从 script_dir 逐层向上枚举 0~6 层，每层拼 third_party/python/python.exe 作为候选，命中即止。
-    -- （此前写死 3 层回溯，在打包态会停在 fntv-mpv 目录，拼出 fntv-mpv/third_party/python 这一不存在
-    --   的路径，导致无系统 Python 的机器 B站弹幕 100% 失败——被开发机的系统 python 兜底掩盖。）
+    -- Python 解释器候选。优先级：主进程写入的精确路径 sidecar > 逐层枚举内置 Python > 系统 PATH。
+    -- ① 主进程（settings.ts init）在启动时把正确的 Python 绝对路径写入同目录的 python_path.txt
+    --   （用户自定义 > 内置便携版），优先读取即可直接命中，无需任何层级回溯猜测。
+    -- ② 兜底：从 script_dir 逐层向上枚举 0~6 层找 third_party/python/python.exe
+    --   （覆盖 sidecar 缺失/写失败场景，如安装到无写权限目录时主进程写盘被拒）。
+    -- ③ 最终兜底：系统 PATH 的 python / python3 / py。
     local py_candidates = {}
-    local d = script_dir
-    for i = 0, 6 do
-        if i > 0 then d = _parent(d) end
-        local p = utils.join_path(utils.join_path(utils.join_path(d, "third_party"), "python"), "python.exe")
-        py_candidates[#py_candidates + 1] = p
+    local sidecar = utils.join_path(script_dir, "python_path.txt")
+    local sh = io.open(sidecar, "r")
+    if sh then
+        local sp = sh:read("*l")
+        sh:close()
+        if sp and sp:gsub("%s+$", "") ~= "" then
+            py_candidates[#py_candidates + 1] = sp:gsub("%s+$", "")
+        end
+    end
+    if #py_candidates == 0 then
+        local d = script_dir
+        for i = 0, 6 do
+            if i > 0 then d = _parent(d) end
+            local p = utils.join_path(utils.join_path(utils.join_path(d, "third_party"), "python"), "python.exe")
+            py_candidates[#py_candidates + 1] = p
+        end
     end
     py_candidates[#py_candidates + 1] = "python"
     py_candidates[#py_candidates + 1] = "python3"

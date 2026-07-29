@@ -123,20 +123,40 @@ async function handleClearPotPath(): Promise<void> {
     log.info('PotPlayer 播放器路径已清空');
 }
 
-// 把用户自定义 Python 路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（python_path.txt），
-// 供 MPV 内部 Lua 脚本（extra.lua）优先读取；传 null/空则删除该文件，回退到内置便携版。
+// 计算随安装包分发的内置便携 Python 绝对路径（与 biliDanmaku.ts 的 getBundledPython 对齐）。
+// 打包后 third_party 在 exe 同级目录；dev 下在项目根。保证无 Python 环境的电脑也能用 B站弹幕。
+function getBundledPythonPath(): string | null {
+    const base = app.isPackaged
+        ? path.dirname(app.getPath('exe'))
+        : app.getAppPath();
+    const p = path.join(base, 'third_party', 'python', 'python.exe');
+    return fs.existsSync(p) ? p : null;
+}
+
+// 把 B站弹幕要用的 Python 解释器路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（python_path.txt），
+// 供 MPV 内部 Lua 脚本（extra.lua）优先读取，从而 100% 命中正确路径、无需层级回溯猜测。
+// 优先级：用户自定义 Python > 内置便携 Python（开箱即用）。两者都无则删除该文件回退到系统 PATH。
 function writeBiliPythonSidecar(p: string | null): void {
     try {
         const base = app.isPackaged
             ? path.dirname(app.getPath('exe'))
             : app.getAppPath();
         const file = path.join(base, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku', 'python_path.txt');
-        if (p) {
-            fs.writeFileSync(file, p, 'utf8');
+        // 解析最终要写入的路径：用户自定义优先，否则用内置便携版
+        let target: string | null = null;
+        if (p && fs.existsSync(p)) {
+            target = p;
+        } else {
+            const bundled = getBundledPythonPath();
+            if (bundled) target = bundled;
+        }
+        if (target) {
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, target, 'utf8');
         } else if (fs.existsSync(file)) {
             fs.unlinkSync(file);
         }
-        log.info(`B站弹幕 Python sidecar 已${p ? '更新' : '清空'}: ${p || file}`);
+        log.info(`B站弹幕 Python sidecar 已${target ? '更新: ' + target : '清空（无内置/自定义 Python）'}`);
     } catch (error) {
         log.error('写 B站弹幕 Python sidecar 失败:', error);
     }
@@ -531,6 +551,12 @@ function init(): void {
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
     // 这里再在启动时补一次重放，确保用户「之前已选过但没生效」的着色器立即生效（无需重新手动选择）。
     try { writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false); } catch (e) { log.warn('启动重放默认着色器失败', e); }
+    // 启动时把 B站弹幕要用的 Python 路径写入 sidecar：优先用户自定义，否则用内置便携版（开箱即用）。
+    // 这样新机器/纯净服务器无系统 Python 时也能直接拉起内置 Python 跑 B站弹幕，无需用户手动安装。
+    try {
+        const custom = fnConfig.getPythonPath();
+        writeBiliPythonSidecar(custom || null);
+    } catch (e) { log.warn('启动同步 B站弹幕 Python 路径失败', e); }
     registerHandler('settings:get', handleGetSettings, { useHandle: true });
     registerHandler('settings:set-download-proxy', handleSetDownloadProxy, { useHandle: true });
     registerHandler('settings:set-hide-play', handleSetHidePlay, { useHandle: true });
