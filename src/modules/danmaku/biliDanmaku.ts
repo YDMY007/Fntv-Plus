@@ -131,8 +131,9 @@ export async function fetchBiliDanmakuXml(title: string, ep: number, outXml: str
 
     for (const py of cands) {
         try {
-            log.info(`[danmaku] 尝试 python: "${py}" args=[${pyScript}, ${cleanTitle}, ${ep}, ${outXml}]`);
-            const ok = await runPython(py, [pyScript, cleanTitle, String(ep), outXml], 60000);
+            const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
+            log.info(`[danmaku] 尝试 python: "${py}" args=[${pyScript}, ${cleanTitle}, ${ep}, ${outXml}, ${aggThreshold}]`);
+            const ok = await runPython(py, [pyScript, cleanTitle, String(ep), outXml, String(aggThreshold)], 60000);
             log.info(`[danmaku] runPython 返回: ${ok}`);
             if (ok && fs.existsSync(outXml) && fs.statSync(outXml).size > 0) {
                 const xmlSize = fs.statSync(outXml).size;

@@ -553,7 +553,7 @@ function auto_search_extra(title, episode_num)
         -- UTF-8 输出由 bili_danmaku.py 内部 io.TextIOWrapper 强制保证，无需 env。
         local res = mp.command_native({
             name = "subprocess",
-            args = { py, py_script, title, tostring(episode_num), out_xml },
+            args = { py, py_script, title, tostring(episode_num), out_xml, tostring(options.aggregate_threshold or 1000) },
             capture_stdout = true,
             capture_stderr = true,
         })

@@ -19,6 +19,10 @@ options = {
     auto_load_extra = false,
     -- B站弹幕搜索总开关（由应用设置面板写入 conf；手动搜索门控，与 auto_load_extra 同开同关）
     bili_search_enabled = true,
+    -- B站弹幕聚合阈值（由应用设置面板写入 conf）。单个视频弹幕数 < 此值时，
+    -- 自动合并多个同类候选（时间轴对齐的单集源）的弹幕，提升弹幕密度。
+    -- 设为 0 或负数可禁用聚合（只取最佳单源）。默认 1000。
+    aggregate_threshold = 1000,
     save_danmaku = false,
     user_agent = "mpv_danmaku/1.0",
     proxy = "",

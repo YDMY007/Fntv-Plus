@@ -7,7 +7,7 @@ import { registerHandler } from '../core/ipcHandler';
 import { getMainWindow } from '../../common/mainwin';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold } from './mpvConfig';
 import * as log from '../../../modules/logger';
 
 /**
@@ -36,6 +36,7 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncEnabled: fnConfig.getBangumiSyncEnabled(),
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
+        mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
         pythonPath: fnConfig.getPythonPath() || '',
         detailBoxless: fnConfig.getDetailBoxless(),
         // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
@@ -284,6 +285,14 @@ async function handleSetMpvBiliSearchEnabled(_event: any, enabled: boolean): Pro
     log.info('MPV B站弹幕搜索开关 →', !!enabled);
 }
 
+// 设置 B站弹幕聚合阈值（写 config + 同步到 MPV 的 script-opts/uosc_danmaku.conf）
+async function handleSetMpvBiliAggregateThreshold(_event: any, threshold: number): Promise<void> {
+    const t = Number(threshold) || 0;
+    fnConfig.setMpvBiliAggregateThreshold(t);
+    writeBiliAggregateThreshold(t);
+    log.info('B站弹幕聚合阈值 →', t);
+}
+
 // 用系统默认浏览器打开外部链接（设置面板内的可点击链接用）
 async function handleOpenExternal(_event: any, url: string): Promise<void> {
     if (url && /^https?:\/\//i.test(url)) {
@@ -494,6 +503,8 @@ function init(): void {
     applyDebugFilter();
     // 启动时把 MPV B站弹幕搜索开关同步到 script-opts/uosc_danmaku.conf（保证 MPV 读取到最新状态）
     try { writeBiliSearchEnabled(fnConfig.getMpvBiliSearchEnabled()); } catch (e) { log.warn('启动同步 bili_search_enabled 失败', e); }
+    // 启动时把 B站弹幕聚合阈值同步到 script-opts/uosc_danmaku.conf
+    try { writeBiliAggregateThreshold(fnConfig.getMpvBiliAggregateThreshold()); } catch (e) { log.warn('启动同步 aggregate_threshold 失败', e); }
     // 启动时把已保存的「默认 MPV 着色器 / ICC 校色」重新写回活动配置目录。
     // 关键修复：旧实现只在面板改着色器时写 portable_config 单一目录，而 MPV 在 Windows 标准模式下
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
@@ -521,6 +532,7 @@ function init(): void {
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
+    registerHandler('settings:set-mpv-bili-aggregate-threshold', handleSetMpvBiliAggregateThreshold, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:open-external', handleOpenExternal, { useHandle: true });
     // 渲染进程(EmbyWall 墙)主动索取当前调试过滤 → 回传，使其渲染侧日志开关即时生效

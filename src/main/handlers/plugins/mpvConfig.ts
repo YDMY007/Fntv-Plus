@@ -289,6 +289,33 @@ function writeBiliSearchEnabled(enabled: boolean): void {
     }
 }
 
+// 写入 B站弹幕聚合阈值到 script-opts/uosc_danmaku.conf（由应用设置面板控制）
+function writeBiliAggregateThreshold(threshold: number): void {
+    try {
+        const dir = getPortableConfigDir();
+        const scriptOptsDir = path.join(dir, 'script-opts');
+        if (!fs.existsSync(scriptOptsDir)) {
+            fs.mkdirSync(scriptOptsDir, { recursive: true });
+        }
+        const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+        let lines: string[] = [];
+        if (fs.existsSync(target)) {
+            lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+        }
+        // 移除已存在的 aggregate_threshold 行及旧注释，避免重复堆叠
+        lines = lines.filter(l => !/^\s*aggregate_threshold\s*=/.test(l)
+            && !/^#\s*B站弹幕聚合阈值/.test(l));
+        while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+        const t = Number(threshold) || 0;
+        lines.push('# B站弹幕聚合阈值（单视频弹幕<此值时合并同类候选；0=禁用）');
+        lines.push('aggregate_threshold=' + t);
+        fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+        logger.info(`MPV B站弹幕聚合阈值已写入: ${target} (threshold=${t})`);
+    } catch (error) {
+        logger.error('写入 uosc_danmaku.conf (aggregate_threshold) 失败:', error);
+    }
+}
+
 // 插件初始化函数
 function init(): void {
     logger.info('Initializing MPV Config Plugin...');
@@ -308,5 +335,6 @@ export {
     init,
     getPortableConfigDir,
     writeMpvUserConfig,
-    writeBiliSearchEnabled
+    writeBiliSearchEnabled,
+    writeBiliAggregateThreshold
 };

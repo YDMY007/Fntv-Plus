@@ -479,6 +479,48 @@ def extract(raw):
             res.append((pr, mode, col, con))
     return res
 
+def _write_xml(out, dm):
+    """把弹幕列表 [(pr,mode,col,con),...] 写成 XML 文件。"""
+    with open(out, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
+        for (pr, mode, col, con) in dm:
+            t = pr / 1000.0
+            p = f"{t:.2f},{mode},25,{col},0,0,0"
+            f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
+        f.write("</danmaku>\n")
+
+
+def _emit_result(title, cid, atitle, info, count, source, aggregated_from=None):
+    """输出 BILI_RESULT JSON 到 stdout（供 Lua extra.lua 解析后显示在配置面板）。"""
+    result = {
+        "ok": True,
+        "bvid": info.get("bvid") if info else None,
+        "title": title,
+        "danmaku_count": count,
+        "source": source,
+        "cid": cid,
+    }
+    if aggregated_from is not None:
+        result["aggregated_from"] = aggregated_from
+    print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
+
+
+def _merge_danmaku(sources):
+    """合并多个候选弹幕，按 (秒级时间, 内容) 去重。sources: list of all_d 列表。
+    允许 1 秒时间容差（不同搬运源片头长度略有差异）。"""
+    seen = set()
+    merged = []
+    for dm in sources:
+        for (pr, mode, col, con) in dm:
+            key = (int(round(pr / 1000.0)), con)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append((pr, mode, col, con))
+    merged.sort(key=lambda x: x[0])
+    return merged
+
+
 def main():
     # Windows 内嵌 Python 默认用 GBK/ANSI 编码写控制台，mpv subprocess 捕获后中文全变乱码。
     # 强制 stdout/stderr 均使用 UTF-8，确保 BILI_RESULT JSON 和日志中的中文正确传递。
@@ -487,10 +529,18 @@ def main():
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
     if len(sys.argv) < 4:
-        log("用法: bili_danmaku.py <番名> <集数> <输出xml>")
+        log("用法: bili_danmaku.py <番名> <集数> <输出xml> [聚合阈值]")
         sys.exit(2)
     title = sys.argv[1]; ep_num = int(sys.argv[2]); out = sys.argv[3]
-    log(f"番名={title} 集数={ep_num}" + (" [登录态]" if COOKIE else " [匿名]"))
+    # 第4参数: 聚合阈值(默认1000)。单视频弹幕<此数时，合并多个同类候选的弹幕。
+    # 设 0 或负数可禁用聚合（只取最佳单源）。
+    agg_threshold = 1000
+    if len(sys.argv) >= 5:
+        try:
+            agg_threshold = int(sys.argv[4])
+        except ValueError:
+            pass
+    log(f"番名={title} 集数={ep_num} 聚合阈值={agg_threshold}" + (" [登录态]" if COOKIE else " [匿名]"))
 
     candidates = search_cid(title, ep_num)
     if not candidates:
@@ -498,76 +548,69 @@ def main():
         print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': '未找到匹配的B站视频'}, ensure_ascii=False)}")
         sys.exit(1)
 
-    # 逐个尝试候选视频的弹幕拉取：部分视频 seg.so 可能无数据（新传/冷门/被清），
-    # 自动回退到下一候选，而非直接报"无弹幕"放弃。
-    # MIN_DANMAKU：单候选最低可接受弹幕数。低于此数视为「近乎空」继续试下一个，
-    # 避免少弹幕视频（如冷门搬运源/被清弹幕）抢占匹配机会、错过后面更好的候选。
+    # 单集时长安全上限(秒)：弹幕时间轴超过此值的候选视为跨多集视频，聚合时跳过，
+    # 避免把整季混剪视频的「全集时间轴」弹幕叠加进来导致错位。
+    AGG_TIME_LIMIT = 2200
     MIN_DANMAKU = 10
-    best = None  # (cid, atitle, info, all_d) — 记录弹幕最多的候选（兜底）
-    for idx, (cid, atitle, info) in enumerate(candidates):
+    CAP = 6  # 最多拉取前 6 个候选，控制网络开销
+
+    fetched = []  # (cid, atitle, info, all_d, max_time, is_comp)
+    for idx, (cid, atitle, info) in enumerate(candidates[:CAP]):
         label = info.get("bvid") or atitle or f"候选#{idx+1}"
         log(f"[{idx+1}/{len(candidates)}] 尝试 cid={cid} ({label})")
         ok, all_d = try_fetch_danmaku(cid, out)
         if ok and all_d:
-            if len(all_d) >= MIN_DANMAKU:
-                # 写 XML 文件
-                with open(out, "w", encoding="utf-8") as f:
-                    f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
-                    for (pr, mode, col, con) in all_d:
-                        t = pr / 1000.0
-                        p = f"{t:.2f},{mode},25,{col},0,0,0"
-                        f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
-                    f.write("</danmaku>\n")
-                result = {
-                    "ok": True,
-                    "bvid": info.get("bvid") if info else None,
-                    "title": title,
-                    "danmaku_count": len(all_d),
-                    "source": info.get("source") if info else None,
-                    "cid": cid,
-                }
-                print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
-                log(f"✅ 候选[{idx+1}] 成功: {label} -> {len(all_d)} 条弹幕 -> {out}")
+            max_t = max((pr for pr, _, _, _ in all_d), default=0) / 1000.0
+            is_comp = _is_compilation_title(atitle)
+            fetched.append((cid, atitle, info, all_d, max_t, is_comp))
+            log(f"  -> {len(all_d)} 条弹幕, 时间轴 0~{max_t:.0f}s, 合集={is_comp}")
+            # 快路径：单源已充足，直接用，无需聚合/继续拉取
+            if len(all_d) >= agg_threshold:
+                _write_xml(out, all_d)
+                _emit_result(title, cid, atitle, info, len(all_d), info.get("source") if info else None)
+                log(f"✅ 单源充足({len(all_d)}>={agg_threshold}): {label} -> {out}")
                 sys.exit(0)
-            else:
-                # 弹幕过少，记录为兜底但继续尝试更好的
-                if best is None or len(all_d) > len(best[3]):
-                    best = (cid, atitle, info, all_d)
-                log(f"  ⚠️ 候选[{idx+1}] {label} 仅 {len(all_d)} 条弹幕(<{MIN_DANMAKU})，继续试下一个")
         else:
-            log(f"  ⚠️ 候选[{idx+1}] {label} 无弹幕数据，跳过试下一个")
+            log(f"  ⚠️ 候选[{idx+1}] {label} 无弹幕数据，跳过")
 
-    # 所有候选都试完：如果有兜底（少量弹幕），总比完全没有好
-    if best:
-        cid, atitle, info, all_d = best
-        with open(out, "w", encoding="utf-8") as f:
-            f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
-            for (pr, mode, col, con) in all_d:
-                t = pr / 1000.0
-                p = f"{t:.2f},{mode},25,{col},0,0,0"
-                f.write(f'<d p="{p}">{html.escape(con)}</d>\n')
-            f.write("</danmaku>\n")
-        result = {
-            "ok": True,
-            "bvid": info.get("bvid") if info else None,
-            "title": title,
-            "danmaku_count": len(all_d),
-            "source": info.get("source") if info else None,
-            "cid": cid,
-        }
-        label = info.get("bvid") or atitle or ""
-        print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
-        log(f"✅ 兜底成功(所有候选均<{MIN_DANMAKU}条): {label} -> {len(all_d)} 条弹幕 -> {out}")
-        sys.exit(0)
+    if not fetched:
+        tried = ", ".join((info.get("bvid") or atitle or f"#{i+1}") for i, (_, atitle, info) in enumerate(candidates))
+        log(f"全部 {len(candidates)} 个候选均无弹幕数据: {tried}")
+        print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': f'已试{len(candidates)}个候选均无弹幕数据({tried})'}, ensure_ascii=False)}")
+        sys.exit(1)
 
-    # 所有候选都试完了仍无弹幕
-    tried = ", ".join(
-        (info.get("bvid") or atitle or f"#{i+1}")
-        for i, (_, atitle, info) in enumerate(candidates)
-    )
-    log(f"全部 {len(candidates)} 个候选均无弹幕数据: {tried}")
-    print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': f'已试{len(candidates)}个候选均无弹幕数据({tried})'}, ensure_ascii=False)}")
-    sys.exit(1)
+    # 找最佳单源（弹幕最多）
+    best = max(fetched, key=lambda x: len(x[3]))
+    best_cid, best_atitle, best_info, best_dm, best_max, best_comp = best
+
+    # 进入聚合分支（最佳单源 < 阈值）。仅同类候选：
+    # 合并【非合集标题 且 时间轴为单集】的其他候选；最佳单源自身始终保留。
+    pool = [best]
+    for f in fetched:
+        if f is best:
+            continue
+        if f[5]:  # 合集标题，按「仅同类候选」设置跳过
+            continue
+        if f[4] > AGG_TIME_LIMIT:  # 时间轴跨多集，跳过
+            continue
+        pool.append(f)
+
+    if len(pool) > 1:
+        merged = _merge_danmaku([f[3] for f in pool])
+        if len(merged) >= MIN_DANMAKU:
+            _write_xml(out, merged)
+            srcs = ", ".join((f[1] or f[0]) for f in pool)
+            _emit_result(title, best_cid, best_atitle, best_info, len(merged), "aggregate", aggregated_from=len(pool))
+            log(f"✅ 聚合成功: 合并 {len(pool)} 个源 -> {len(merged)} 条弹幕 (源: {srcs})")
+            sys.exit(0)
+        else:
+            log(f"  ⚠️ 聚合后仍 <{MIN_DANMAKU} 条，退回最佳单源")
+
+    # 无更多可合并源 / 合并后仍太少 → 用最佳单源（弹幕数可能 < 阈值，但总比没有好）
+    _write_xml(out, best_dm)
+    _emit_result(title, best_cid, best_atitle, best_info, len(best_dm), best_info.get("source") if best_info else None)
+    log(f"✅ 单源(无足够同类候选聚合): {best_atitle} -> {len(best_dm)} 条弹幕 -> {out}")
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()

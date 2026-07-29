@@ -2414,6 +2414,26 @@ function handle(): void {
       ipcRenderer.invoke('settings:set-mpv-bili-search-enabled', swMpvBiliSearch.checked).catch((err) => log('set-mpv-bili-search-enabled failed', err));
     });
 
+    // B站弹幕聚合阈值（单个视频弹幕 < 此值时，自动合并多个同类候选的弹幕）
+    const aggRow = document.createElement('div');
+    aggRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;gap:10px;';
+    const aggLabel = document.createElement('span');
+    aggLabel.textContent = '弹幕聚合阈值（单视频弹幕少于此数则合并多个源）';
+    aggLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:12.5px;flex:1;line-height:1.4;';
+    const aggInput = document.createElement('input');
+    aggInput.type = 'number';
+    aggInput.min = '0';
+    aggInput.step = '100';
+    aggInput.placeholder = '1000';
+    aggInput.style.cssText = 'width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--fnos-ui-border);'
+      + 'background:var(--fnos-input-bg);color:var(--fnos-ui-text);font-size:13px;text-align:center;';
+    aggRow.appendChild(aggLabel); aggRow.appendChild(aggInput);
+    secBodyBili.appendChild(aggRow);
+    aggInput.addEventListener('change', () => {
+      const v = parseInt(aggInput.value, 10);
+      ipcRenderer.invoke('settings:set-mpv-bili-aggregate-threshold', isNaN(v) ? 0 : v).catch((err) => log('set-mpv-bili-aggregate-threshold failed', err));
+    });
+
     // 打开默认弹幕文件夹按钮
     const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
     biliFolderBtn.style.marginTop = '6px';
@@ -3122,6 +3142,8 @@ function handle(): void {
       seg('bili-search', () => {
         // MPV B站弹幕搜索开关回填（默认开启）
         swMpvBiliSearch.checked = s.mpvBiliSearchEnabled !== false;
+        // B站弹幕聚合阈值回填（默认 1000；<0 视为禁用=0）
+        aggInput.value = String(s.mpvBiliAggregateThreshold == null ? 1000 : (s.mpvBiliAggregateThreshold < 0 ? 0 : s.mpvBiliAggregateThreshold));
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)

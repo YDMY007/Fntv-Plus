@@ -90,6 +90,8 @@ export interface Config {
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
     mpvBiliSearchEnabled?: boolean;
+    // B站弹幕聚合阈值（默认 1000）：单个视频弹幕数 < 此值时，自动合并多个同类候选的弹幕
+    mpvBiliAggregateThreshold?: number;
     // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
     // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
     pythonPath?: string;
@@ -614,6 +616,19 @@ export function setMpvBiliSearchEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取「B站弹幕聚合阈值」（默认 1000；<=0 表示禁用聚合）
+export function getMpvBiliAggregateThreshold(): number {
+    const config: Config = readConfig() || {};
+    return typeof config.mpvBiliAggregateThreshold === 'number' ? config.mpvBiliAggregateThreshold : 1000;
+}
+
+// 设置「B站弹幕聚合阈值」
+export function setMpvBiliAggregateThreshold(threshold: number): void {
+    const config: Config = readConfig() || {};
+    config.mpvBiliAggregateThreshold = Number(threshold) || 0;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「关闭详情页背景框」开关（默认关闭=false，保留玻璃背景框）
 export function getDetailBoxless(): boolean {
     const config: Config = readConfig() || {};
@@ -690,6 +705,8 @@ module.exports = {
     setBangumiSyncThreshold,
     getMpvBiliSearchEnabled,
     setMpvBiliSearchEnabled,
+    getMpvBiliAggregateThreshold,
+    setMpvBiliAggregateThreshold,
     getPythonPath,
     setPythonPath,
     getDetailBoxless,
