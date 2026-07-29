@@ -522,23 +522,29 @@ function auto_search_extra(title, episode_num)
     local script_dir = mp.get_script_directory()
     local py_script = utils.join_path(script_dir, "bili_danmaku.py")
 
-    -- 向上回溯到 app 根目录：scripts/uosc_danmaku -> scripts -> portable_config -> 根（根下含 third_party）
+    -- 向上回溯找父目录（去尾斜杠，避免 split_path 行为受带/不带尾斜杠影响）
     local function _parent(p)
-        p = p:gsub("[\\/]$", "")  -- 去掉结尾分隔符，确保 split_path 行为稳定（不受 get_script_directory 是否带尾斜杠影响）
-        local d = utils.split_path(p)
-        return d
+        p = p:gsub("[\\/]$", "")
+        return utils.split_path(p)
     end
-    local app_root = _parent(_parent(_parent(script_dir)))
 
-    -- Python 解释器候选（与主进程 biliDanmaku.ts 的 findPythonCandidates 对齐）：
-    -- 内置便携 Python > 系统 PATH。保证无 Python 环境的电脑也能用 B站弹幕。
-    local py_candidates = {
-        -- utils.join_path 仅接受两个参数，逐级拼接；app_root 已含尾斜杠
-        utils.join_path(utils.join_path(utils.join_path(app_root, "third_party"), "python"), "python.exe"),  -- 内置便携 Python（随安装包/仓库分发）
-        "python",
-        "python3",
-        "py",
-    }
+    -- Python 解释器候选：内置便携 Python（随安装包/仓库分发于 <app根>/third_party/python/python.exe）
+    -- > 系统 PATH（python / python3 / py）。
+    -- 不同运行环境（dev 仓库 / 打包态 / asar 解包 / 便携目录）下，script_dir 到 app 根的层级数
+    -- 不固定（如 portable_config/scripts/uosc_danmaku 是 5 层），故不能写死回溯层数。
+    -- 改为从 script_dir 逐层向上枚举 0~6 层，每层拼 third_party/python/python.exe 作为候选，命中即止。
+    -- （此前写死 3 层回溯，在打包态会停在 fntv-mpv 目录，拼出 fntv-mpv/third_party/python 这一不存在
+    --   的路径，导致无系统 Python 的机器 B站弹幕 100% 失败——被开发机的系统 python 兜底掩盖。）
+    local py_candidates = {}
+    local d = script_dir
+    for i = 0, 6 do
+        if i > 0 then d = _parent(d) end
+        local p = utils.join_path(utils.join_path(utils.join_path(d, "third_party"), "python"), "python.exe")
+        py_candidates[#py_candidates + 1] = p
+    end
+    py_candidates[#py_candidates + 1] = "python"
+    py_candidates[#py_candidates + 1] = "python3"
+    py_candidates[#py_candidates + 1] = "py"
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))
