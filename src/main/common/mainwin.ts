@@ -162,6 +162,27 @@ const ACRYLIC_CSS = `
         background:transparent!important;
     }
 
+    /* 3f. Modal/Dialog 遮罩层例外: 弹窗背景必须不透明, 否则底层内容(如首页轮播图)会透过透明遮罩露出来 */
+    .semi-modal-mask,
+    .semi-modal-wrapper,
+    [class*="modal-mask"],
+    [class*="modal-overlay"],
+    [class*="dialog-mask"],
+    [class*="dialog-overlay"],
+    [role="dialog"]::backdrop,
+    [aria-modal="true"] + *{
+        background:rgba(0,0,0,.45)!important;
+        background-color:rgba(0,0,0,.45)!important;
+    }
+    /* 弹窗主体自身恢复不透明背景( Semi Design modal content ) */
+    .semi-modal-content,
+    [class*="modal-content"],
+    [class*="dialog-content"],
+    [role="dialog"]:not([style*="background:transparent"]){
+        background:#fff!important;
+        background-color:#fff!important;
+    }
+
     /* ── ④ 滚动条隐藏 ── */
     ::-webkit-scrollbar{width:0!important;height:0!important}
     ::-webkit-scrollbar-track{display:none!important}
@@ -333,6 +354,21 @@ const ACRYLIC_CSS = `
         background:rgba(42,34,62,.55)!important;
         border:1px solid rgba(255,255,255,.08)!important;
         box-shadow:0 1px 4px rgba(0,0,0,.25),0 .5px 0 rgba(255,255,255,.06)!important;
+    }
+
+    /* ── ⑫b 深色模式 Modal/Dialog 例外 ── */
+    html.dark .semi-modal-mask,
+    html.dark .semi-modal-wrapper,
+    html.dark [class*="modal-mask"],
+    html.dark [class*="modal-overlay"]{
+        background:rgba(0,0,0,.60)!important;
+        background-color:rgba(0,0,0,.60)!important;
+    }
+    html.dark .semi-modal-content,
+    html.dark [class*="modal-content"],
+    html.dark [class*="dialog-content"]{
+        background:#2b2a33!important;
+        background-color:#2b2a33!important;
     }
 `;
 
