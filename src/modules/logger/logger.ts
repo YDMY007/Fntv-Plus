@@ -357,6 +357,30 @@ export class Logger {
     }
 
     /**
+     * 关键诊断日志：同时写入全量日志(app.log)与精简报错日志(app-error.log)。
+     * 用于记录「高层结论 / 关键上下文」（如接口诊断结论、登录成败与方式）。
+     * 以 INFO 形式写入 app.log（受日志级别/调试开关影响控制台展示），并镜像进 app-error.log，
+     * 便于在精简报错日志里快速看到问题结论，又不会像 NOFORMAT 那样被 mpv 等大日志撑大。
+     */
+    public key(message: string, ...args: any[]): void {
+        const formatted = this.formatMessage(LogLevel.INFO, message, ...args);
+        this.appendToBothLogs(formatted);
+    }
+
+    /**
+     * 同时写入全量日志与报错日志（含各自独立的轮转判断）
+     */
+    private appendToBothLogs(formatted: string): void {
+        try {
+            this.checkLogRotation();
+            fs.appendFileSync(this.currentLogFile, formatted + '\n', 'utf8');
+            fs.appendFileSync(this.errorLogFile, formatted + '\n', 'utf8');
+        } catch (error) {
+            console.error('写入关键日志失败:', (error as Error).message);
+        }
+    }
+
+    /**
      * 设置日志级别
      */
     public setLogLevel(level: LogLevel): void {

@@ -2881,8 +2881,8 @@ function handle(): void {
     logFooter.appendChild(logDivider);
     const logRow = document.createElement('div');
     logRow.style.cssText = 'display:flex;gap:6px;';
-    const openLogBtn = mkBtn('打开日志文件', true);
-    const openErrLogBtn = mkBtn('打开报错日志', true);
+    const openLogBtn = mkBtn('日志文件', true);
+    const openErrLogBtn = mkBtn('报错日志', true);
     const exportLogBtn = mkBtn('导出日志文件', true);
     logRow.appendChild(openLogBtn);
     logRow.appendChild(openErrLogBtn);
@@ -2894,7 +2894,7 @@ function handle(): void {
       e.stopPropagation();
       ipcRenderer.invoke('settings:open-log').then((r: any) => {
         if (!r || !r.ok) {
-          logStatus.textContent = '打开日志失败：' + ((r && r.error) || '未知');
+          logStatus.textContent = '日志文件打开失败：' + ((r && r.error) || '未知');
         } else {
           logStatus.textContent = '';
         }
@@ -2904,7 +2904,7 @@ function handle(): void {
       e.stopPropagation();
       ipcRenderer.invoke('settings:open-error-log').then((r: any) => {
         if (!r || !r.ok) {
-          logStatus.textContent = '打开报错日志失败：' + ((r && r.error) || '未知');
+          logStatus.textContent = '报错日志打开失败：' + ((r && r.error) || '未知');
         } else {
           logStatus.textContent = '';
         }

@@ -76,11 +76,13 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
     // FN ID 登录分支
     if (isFnId(loginData.domain)) {
         log.info('检测到 FN ID 格式，使用 FN Connect OAuth 登录');
+        log.key('登录方式 = FN ID (FN Connect OAuth)');
         return handleFnIdLogin(event, loginData);
     }
 
     // 构建服务器地址
     let server = loginData.useHttps ? `https://${loginData.domain}` : `http://${loginData.domain}`;
+    log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
     const fnapi = new fn.ApiService(server);
 
     try {
@@ -118,6 +120,7 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
 
             const msg = response ? response.message : '未知错误';
             log.error('登录失败:', msg);
+            log.key(`登录失败 (本地账号) | server=${server} | ${msg}`);
             event.reply('login-error', {
                 title: '登录失败',
                 message: msg || '登录时发生未知错误，请稍后重试。'
@@ -168,6 +171,7 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             return;
         }
         log.info('登录成功 token:', token);
+        log.key(`登录成功 | server=${server}`);
 
         // 保存登录信息
         const { saveConfig, addHistory } = require('../../../modules/fn_config/config');

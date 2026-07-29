@@ -14,6 +14,7 @@ interface ILogger {
     warn: LogMethod;
     error: LogMethod;
     noformat: LogMethod;
+    key: LogMethod;
     log: LogMethod;
     d: LogMethod;
     i: LogMethod;
@@ -38,6 +39,7 @@ interface IComponentLogger {
     warn: LogMethod;
     error: LogMethod;
     noformat: LogMethod;
+    key: LogMethod;
     log: LogMethod;
     d: LogMethod;
     i: LogMethod;
@@ -60,6 +62,7 @@ const loggerInterface: ILogger = {
     warn: (message: string, ...args: any[]) => logger.warn(message, ...args),
     error: (message: string, ...args: any[]) => logger.error(message, ...args),
     noformat: (message: string, ...args: any[]) => logger.noformat(message),
+    key: (message: string, ...args: any[]) => logger.key(message, ...args),
     log: (message: string, ...args: any[]) => logger.info(message, ...args), // log方法映射到info
 
     // 提供logger实例的访问
@@ -95,6 +98,7 @@ const loggerInterface: ILogger = {
         warn: (message: string, ...args: any[]) => logger.logC(name, LogLevel.WARN, message, ...args),
         error: (message: string, ...args: any[]) => logger.logC(name, LogLevel.ERROR, message, ...args),
         noformat: (message: string, ...args: any[]) => logger.logC(name, LogLevel.NOFORMAT, message),
+        key: (message: string, ...args: any[]) => logger.key(message, ...args),
         log: (message: string, ...args: any[]) => logger.logC(name, LogLevel.INFO, message, ...args),
         d: (message: string, ...args: any[]) => logger.logC(name, LogLevel.DEBUG, message, ...args),
         i: (message: string, ...args: any[]) => logger.logC(name, LogLevel.INFO, message, ...args),

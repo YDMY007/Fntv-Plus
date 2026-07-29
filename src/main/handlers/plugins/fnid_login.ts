@@ -606,6 +606,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
                     const token = authResponse.data.token;
                     log.info('[FN ID] 获取 token 成功');
+                    log.key('[FN ID] 登录成功 (已获取 token)');
 
                     // 统一收尾(关窗/复制cookie/保存配置/加载主窗口)
                     await finalizeLogin(token);
@@ -980,6 +981,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
     } catch (error: any) {
         log.error('[FN ID] 登录失败:', error);
+        log.key(`[FN ID] 登录失败: ${(error && error.message) || error}`);
 
         // 关闭 OAuth 窗口
         if (oauthWindow && !oauthWindow.isDestroyed()) {

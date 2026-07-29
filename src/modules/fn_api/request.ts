@@ -215,6 +215,9 @@ export async function request<T = any>(
                     }
 
                     log.error(`[HTML响应诊断] 判定=${diag}`);
+                    // 关键结论写进精简报错日志，方便用户一眼看到「是什么问题、该怎么做」
+                    log.key(`[接口诊断结论] 判定=${diag} | URL=${fullUrl} | HTTP ${response.status}`);
+                    log.key(`[接口诊断结论] 处理建议: ${message}`);
                     return {
                         success: false,
                         message
@@ -282,12 +285,14 @@ export async function request<T = any>(
                 // 1) 连接层错误（网络不通/地址错/端口错）：按错误码给可操作建议
                 const netHint = NETWORK_ERROR_HINTS[errorCode];
                 if (netHint) {
+                    log.key(`[网络诊断结论] ${netHint}（技术细节：${errorMsg}）| URL=${fullUrl}`);
                     return { success: false, message: `${netHint}（技术细节：${errorMsg}）` };
                 }
 
                 // 2) HTTP 4xx/5xx 但响应体是 HTML（如网关 502 错误页）：归为地址/服务问题
                 const rdata = error.response && (error.response as any).data;
                 if (typeof rdata === 'string' && rdata.toLowerCase().includes('html')) {
+                    log.key(`[接口诊断结论] 服务器返回错误页(HTML)，地址/服务问题 | URL=${fullUrl}`);
                     return {
                         success: false,
                         message: '服务器返回了错误页（HTML）。请检查服务器地址/IP:端口 是否正确（接口应返回 JSON），以及服务是否正常运行。'
@@ -295,6 +300,7 @@ export async function request<T = any>(
                 }
 
                 // 3) 其它错误：保留原始 message 以便高级用户排查
+                log.key(`[请求异常结论] ${errorMsg} | URL=${fullUrl}`);
                 return { success: false, message: errorMsg };
             }
 
