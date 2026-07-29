@@ -210,7 +210,9 @@ const ACRYLIC_CSS = `
     ::-webkit-scrollbar-thumb{display:none!important}
 
     /* ── ⑤ 隐藏飞牛无关组件 ── */
-    [class*="semi-color-bg-arrow-mask"]{display:none!important}
+    /* 注: semi-color-bg-arrow-mask(飞牛原生横滑箭头)不再在此全局隐藏,
+       其显隐由 embyWall.ts wheelToScroll() 开关(『鼠标滚轮横向滚动』)控制:
+       开关开→opacity/pointer-events视觉隐藏; 关→恢复原生显示. */
     .ms-thumb,.ms-track,.ms-track-box{display:none!important}
 
     /* ── ⑥ 页面容器边距归零（列表页由 ⑪ 统一接管）── */
