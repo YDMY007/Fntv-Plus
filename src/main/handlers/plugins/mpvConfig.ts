@@ -225,7 +225,7 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
     try {
         const shaders = MPV_SHADER_PRESETS[shaderKey] || [];
         const lines: string[] = [
-            '# 本文件由「应用设置面板」自动生成（默认着色器 / ICC 校色 / 字幕样式）。',
+            '# 本文件由「应用设置面板」自动生成（默认着色器 / ICC 校色）。',
             '# 修改后会被重写，请勿手动编辑。',
             ''
         ];
@@ -233,19 +233,6 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
             lines.push('glsl-shaders-append=~~/shaders/' + s);
         }
         lines.push('icc-profile-auto=' + (iccEnabled ? 'yes' : 'no'));
-        // ===== 字幕样式（由「设置面板 > 字幕样式」控制）=====
-        const subFontSize = fnConfig.getMpvSubFontSize();
-        const subOutline = fnConfig.getMpvSubOutline();
-        const subShadow = fnConfig.getMpvSubShadow();
-        const subBold = fnConfig.getMpvSubBold();
-        const subColor = fnConfig.getMpvSubColor();
-        const subPos = fnConfig.getMpvSubPosition();
-        if (subFontSize > 0) lines.push('sub-font-size=' + subFontSize);
-        if (subOutline > 0) lines.push('sub-border-size=' + subOutline);
-        if (subShadow > 0) lines.push('sub-shadow-offset=' + subShadow);
-        lines.push('sub-bold=' + (subBold ? 'yes' : 'no'));
-        if (subColor && subColor !== '#FFFFFF') lines.push('sub-color=' + subColor);
-        if (subPos !== 100) lines.push('sub-pos=' + subPos);
         const content = lines.join('\n') + '\n';
 
         // ⚠️ 关键修复：同时写入两个目录，确保无论 MPV 处于哪种模式都能生效：
@@ -261,7 +248,7 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
                 }
                 const target = path.join(dir, 'mpv-user.conf');
                 fs.writeFileSync(target, content, 'utf-8');
-                logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled}, sub:size=${subFontSize},outline=${subOutline},shadow=${subShadow},bold=${subBold},color=${subColor},pos=${subPos})`);
+                logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled})`);
             } catch (e) {
                 logger.error(`写入 mpv-user.conf 失败: ${dir}`, e);
             }
@@ -269,11 +256,6 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
     } catch (error) {
         logger.error('写入 mpv-user.conf 失败:', error);
     }
-}
-
-// 触发 mpv-user.conf 重新生成（字幕样式变更后调用；着色器/ICC 保持当前设置不变）
-function writeMpvSubtitleStyle(): void {
-    writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false);
 }
 
 // 写入 MPV B站弹幕搜索开关到 script-opts/uosc_danmaku.conf
@@ -417,7 +399,6 @@ export {
     init,
     getPortableConfigDir,
     writeMpvUserConfig,
-    writeMpvSubtitleStyle,
     writeBiliSearchEnabled,
     writeBiliAggregateThreshold,
     writeBiliDanmakuStyle

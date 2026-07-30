@@ -7,8 +7,7 @@ import { registerHandler } from '../core/ipcHandler';
 import { getMainWindow } from '../../common/mainwin';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeMpvSubtitleStyle, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, getPortableConfigDir } from './mpvConfig';
-import { refreshGlobalShortcuts } from './globalShortcut';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, getPortableConfigDir } from './mpvConfig';
 import * as log from '../../../modules/logger';
 
 /**
@@ -42,13 +41,6 @@ async function handleGetSettings(): Promise<any> {
         detailBoxless: fnConfig.getDetailBoxless(),
         // 鼠标滚轮横向滚动开关（默认开启=true；关闭=false 恢复飞牛原生上下滚动）
         wheelHScroll: fnConfig.getWheelHScroll(),
-        // ===== 字幕样式 =====
-        mpvSubFontSize: fnConfig.getMpvSubFontSize(),
-        mpvSubOutline: fnConfig.getMpvSubOutline(),
-        mpvSubShadow: fnConfig.getMpvSubShadow(),
-        mpvSubBold: fnConfig.getMpvSubBold(),
-        mpvSubColor: fnConfig.getMpvSubColor(),
-        mpvSubPosition: fnConfig.getMpvSubPosition(),
         // ===== B站弹幕样式与过滤 =====
         biliDanmakuOpacity: fnConfig.getBiliDanmakuOpacity(),
         biliDanmakuFontSize: fnConfig.getBiliDanmakuFontSize(),
@@ -59,8 +51,6 @@ async function handleGetSettings(): Promise<any> {
         biliDanmakuMaxScreen: fnConfig.getBiliDanmakuMaxScreen(),
         biliDanmakuBlacklist: fnConfig.getBiliDanmakuBlacklist(),
         biliDanmakuBlockTypes: fnConfig.getBiliDanmakuBlockTypes(),
-        // ===== 全局快捷键 =====
-        globalShortcutsEnabled: fnConfig.getGlobalShortcutsEnabled(),
         // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
         loginBg: (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : ''
     };
@@ -383,19 +373,6 @@ async function handleSetMpvShaderConfig(_event: any, payload: { shader?: string;
     log.info(`默认 MPV 着色器已设置为: ${shader}（ICC=${icc}）`);
 }
 
-// 设置字幕样式（写入 mpv-user.conf 的 sub-* 参数）
-async function handleSetMpvSubtitleStyle(_event: any, payload: any): Promise<void> {
-    const p = payload || {};
-    if (typeof p.fontSize === 'number') fnConfig.setMpvSubFontSize(p.fontSize);
-    if (typeof p.outline === 'number') fnConfig.setMpvSubOutline(p.outline);
-    if (typeof p.shadow === 'number') fnConfig.setMpvSubShadow(p.shadow);
-    if (typeof p.bold === 'boolean') fnConfig.setMpvSubBold(p.bold);
-    if (typeof p.color === 'string') fnConfig.setMpvSubColor(p.color);
-    if (typeof p.position === 'number') fnConfig.setMpvSubPosition(p.position);
-    writeMpvSubtitleStyle();
-    log.info('字幕样式已更新');
-}
-
 // 设置 B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf + 屏蔽词文件）
 async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<void> {
     const p = payload || {};
@@ -410,13 +387,6 @@ async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<voi
     if (Array.isArray(p.blockTypes)) fnConfig.setBiliDanmakuBlockTypes(p.blockTypes);
     writeBiliDanmakuStyle();
     log.info('B站弹幕样式与过滤已更新');
-}
-
-// 设置全局快捷键开关（即时刷新系统级热键注册）
-async function handleSetGlobalShortcuts(_event: any, enabled: boolean): Promise<void> {
-    fnConfig.setGlobalShortcutsEnabled(!!enabled);
-    try { refreshGlobalShortcuts(); } catch (e) { log.warn('刷新全局快捷键失败', e); }
-    log.info('全局快捷键开关 →', !!enabled);
 }
 
 // 诊断信息：汇总当前运行态关键数据，供设置面板「诊断」页展示，减少"用户反馈→查日志"往返
@@ -456,8 +426,7 @@ async function handleGetDiagnostics(): Promise<any> {
             doubanEnabled: fnConfig.getDoubanSyncEnabled(),
             doubanLoggedIn: !!fnConfig.getDoubanCookie(),
             bangumiEnabled: fnConfig.getBangumiSyncEnabled(),
-            bangumiHasToken: !!fnConfig.getBangumiToken(),
-            globalShortcuts: fnConfig.getGlobalShortcutsEnabled()
+            bangumiHasToken: !!fnConfig.getBangumiToken()
         };
     } catch (e: any) {
         return { ok: false, error: String((e && e.message) || e) };
@@ -699,9 +668,7 @@ function init(): void {
         });
     }, { useHandle: false });
     registerHandler('settings:set-mpv-shader-config', handleSetMpvShaderConfig, { useHandle: true });
-    registerHandler('settings:set-mpv-subtitle-style', handleSetMpvSubtitleStyle, { useHandle: true });
     registerHandler('settings:set-bili-danmaku-style', handleSetBiliDanmakuStyle, { useHandle: true });
-    registerHandler('settings:set-global-shortcuts', handleSetGlobalShortcuts, { useHandle: true });
     registerHandler('settings:diagnostics', handleGetDiagnostics, { useHandle: true });
     registerHandler('settings:check-update', handleCheckUpdate, { useHandle: true });
     registerHandler('settings:check-update-mirror', handleCheckUpdateMirror, { useHandle: true });

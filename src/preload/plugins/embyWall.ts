@@ -3127,60 +3127,6 @@ function handle(): void {
       return { row, ta };
     };
 
-    // ===== 字幕样式（写入 MPV sub-* 参数，固化到 mpv-user.conf）=====
-    const secSub = section('字幕样式');
-    const subBody = secSub.body;
-    let _subTimer: any = null;
-    const pushSub = (): void => {
-      const payload = {
-        fontSize: parseFloat((subInputs.fontSize.input as HTMLInputElement).value),
-        outline: parseFloat((subInputs.outline.input as HTMLInputElement).value),
-        shadow: parseFloat((subInputs.shadow.input as HTMLInputElement).value),
-        bold: boldToggle.checked,
-        color: colorInput.value,
-        position: parseFloat((subInputs.position.input as HTMLInputElement).value)
-      };
-      if (_subTimer) clearTimeout(_subTimer);
-      _subTimer = setTimeout(() => {
-        ipcRenderer.invoke('settings:set-mpv-subtitle-style', payload).catch((err) => log('set-mpv-subtitle-style failed', err));
-      }, 250);
-    };
-    const subInputs = {
-      fontSize: addSlider('字号（0=自动）', 0, 120, 1, 0, (v) => v === 0 ? '自动' : String(v), pushSub),
-      outline: addSlider('描边', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushSub),
-      shadow: addSlider('阴影', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushSub),
-      position: addSlider('垂直位置（100=底部）', 0, 100, 1, 100, (v) => String(v), pushSub)
-    };
-    subBody.appendChild(subInputs.fontSize.row);
-    subBody.appendChild(subInputs.outline.row);
-    subBody.appendChild(subInputs.shadow.row);
-    subBody.appendChild(subInputs.position.row);
-    // 粗体 + 颜色 一行
-    const subLine = document.createElement('div');
-    subLine.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 6px;';
-    const boldToggle = addToggle('粗体');
-    boldToggle.checked = false;
-    boldToggle.addEventListener('change', pushSub);
-    const colorWrap = document.createElement('label');
-    colorWrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;';
-    const colorLabel = document.createElement('span');
-    colorLabel.textContent = '颜色';
-    colorLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
-    const colorInput = document.createElement('input');
-    colorInput.type = 'color';
-    colorInput.value = '#FFFFFF';
-    colorInput.style.cssText = 'width:34px;height:24px;border:none;background:none;cursor:pointer;';
-    colorInput.addEventListener('input', pushSub);
-    colorWrap.appendChild(colorLabel); colorWrap.appendChild(colorInput);
-    subLine.appendChild(boldToggle.parentElement as HTMLElement); subLine.appendChild(colorWrap);
-    subBody.appendChild(subLine);
-    // 说明
-    const subHint = document.createElement('div');
-    subHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
-    subHint.textContent = '修改即时生效（下次播放应用）；0=跟随 MPV 默认。';
-    subBody.appendChild(subHint);
-    contentGrid.appendChild(secSub.el);
-
     // ===== B站弹幕屏蔽（写入 danmaku_block_types.json + 屏蔽词文件）=====
     // [lc-215] 移除「弹幕样式」控制项（透明度/字号/描边/阴影/显示区域/同屏上限/粗体）——
     // 这些已由 MPV 底部控制栏的弹幕样式按钮管理；此处仅保留/新增「弹幕屏蔽」相关。
@@ -3229,21 +3175,6 @@ function handle(): void {
     danBody.appendChild(danHint);
     contentGrid.appendChild(secDanmaku.el);
 
-    // ===== 全局快捷键（即使窗口失焦也能控制播放）=====
-    const secShortcut = section('全局快捷键');
-    const scBody = secShortcut.body;
-    const swShortcut = addToggle('启用全局快捷键');
-    swShortcut.checked = true;
-    swShortcut.addEventListener('change', () => {
-      ipcRenderer.invoke('settings:set-global-shortcuts', swShortcut.checked).catch((err) => log('set-global-shortcuts failed', err));
-    });
-    scBody.appendChild(swShortcut.parentElement as HTMLElement);
-    const scHint = document.createElement('div');
-    scHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.7;white-space:pre-line;';
-    scHint.textContent = '播放/暂停：媒体键 或 键盘播放键\n下一集/上一集：媒体上一曲/下一曲键\n快退/快进：Ctrl/⌘ + Shift + ←/→\n倍速±：Ctrl/⌘ + Shift + ↑/↓';
-    scBody.appendChild(scHint);
-    contentGrid.appendChild(secShortcut.el);
-
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
     const secDiag = section('诊断信息');
     const diagBody = secDiag.body;
@@ -3268,7 +3199,6 @@ function handle(): void {
         lines.push(`MPV 配置目录: ${r.mpvConfigDir}`);
         lines.push(`B站弹幕搜索: ${r.biliSearchEnabled ? '开' : '关'}  聚合阈值: ${r.biliAggregateThreshold}`);
         lines.push(`豆瓣同步: ${r.doubanEnabled ? '开' : '关'}${r.doubanLoggedIn ? '(已登录)' : ''}   Bangumi: ${r.bangumiEnabled ? '开' : '关'}${r.bangumiHasToken ? '(有Token)' : ''}`);
-        lines.push(`全局快捷键: ${r.globalShortcuts ? '开' : '关'}`);
         lines.push('');
         lines.push('--- mpv-user.conf ---');
         lines.push(r.mpvUserConf || '(空)');
@@ -3364,7 +3294,6 @@ function handle(): void {
     debugTarget = dbgFoldBody;
     const debugComps: [string, string][] = [
       ['douban', '豆瓣同步'],
-      ['subtitle', '字幕'],
       ['danmaku', 'B站弹幕'],
       ['mpv', 'MPV 播放器'],
       ['potplayer', 'PotPlayer'],
@@ -3674,26 +3603,11 @@ function handle(): void {
         // B站弹幕聚合阈值回填（默认 1500；<0 视为禁用=0）
         aggInput.value = String(s.mpvBiliAggregateThreshold == null ? 1500 : (s.mpvBiliAggregateThreshold < 0 ? 0 : s.mpvBiliAggregateThreshold));
       });
-      seg('subtitle', () => {
-        subInputs.fontSize.input.value = String(s.mpvSubFontSize || 0);
-        subInputs.fontSize.valEl.textContent = (s.mpvSubFontSize || 0) === 0 ? '自动' : String(s.mpvSubFontSize || 0);
-        subInputs.outline.input.value = String(s.mpvSubOutline || 0);
-        subInputs.outline.valEl.textContent = (s.mpvSubOutline || 0).toFixed(1);
-        subInputs.shadow.input.value = String(s.mpvSubShadow || 0);
-        subInputs.shadow.valEl.textContent = (s.mpvSubShadow || 0).toFixed(1);
-        subInputs.position.input.value = String(s.mpvSubPosition || 100);
-        subInputs.position.valEl.textContent = String(s.mpvSubPosition || 100);
-        boldToggle.checked = !!s.mpvSubBold;
-        colorInput.value = s.mpvSubColor || '#FFFFFF';
-      });
       seg('danmaku', () => {
         // [lc-215] 弹幕分区已改为「B站弹幕屏蔽」：回填屏蔽类型勾选 + 屏蔽词，不再回填被移除的样式项
         const bt: string[] = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
         for (const b of blockToggles) b.input.checked = bt.includes(b.key);
         if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || '';
-      });
-      seg('shortcut', () => {
-        swShortcut.checked = s.globalShortcutsEnabled !== false;
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
