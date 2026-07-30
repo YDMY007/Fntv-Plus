@@ -557,11 +557,13 @@ export function getMainWindow(): BrowserWindow {
             return { action: 'deny' };
         });
 
-        // [lc-202] 导航守卫: 防止 fnOS 防伪码/隐私流程完成后跳转到原生桌面(/).
+        // [lc-203] 导航守卫: 防止 fnOS 访问码/隐私流程完成后跳转到原生桌面(/).
         // 飞牛影视是 SPA, 所有有效页面都在 /v/* 下. 若导航落到根路径或非 /v/* 路径,
-        // 说明 fnOS 把用户踢回了原生桌面(防伪码验证后/会话过期等), 需自动纠正回 /v.
+        // 说明 fnOS 把用户踢回了原生桌面(访问码验证后/会话过期等), 需自动纠正回 /v.
+        // 同时监听 did-navigate(完整页面加载) 与 did-navigate-in-page(SPA 内部路由切换),
+        // 因为 fnOS 访问码验证后可能是 SPA 客户端路由(pushState/history), 只触发后者.
         const ALLOWED_PATHS = ['/v/login', '/v/welcome', '/v/oauth', '/v/signin', '/v/auth'];
-        mainwin.webContents.on('did-navigate', (_event: any, url: string) => {
+        const guardRedirect = (url: string) => {
             try {
                 const u = new URL(url);
                 if (u.protocol !== 'http:' && u.protocol !== 'https:') return; // 忽略 file:// 等
@@ -571,7 +573,9 @@ export function getMainWindow(): BrowserWindow {
                 log.warn(`[导航守卫] 检测到非影视路径 ${p}, 自动纠正回 /v (原URL: ${url})`);
                 mainwin!.loadURL(`${u.origin}/v`);
             } catch { /* ignore 解析失败 */ }
-        });
+        };
+        mainwin.webContents.on('did-navigate', (_event: any, url: string) => guardRedirect(url));
+        mainwin.webContents.on('did-navigate-in-page', (_event: any, url: string) => guardRedirect(url));
     }
     return mainwin;
 }
