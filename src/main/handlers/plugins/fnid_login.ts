@@ -104,6 +104,48 @@ async function copyFntvCookiesToOauthSession(): Promise<number> {
 }
 
 /**
+ * 反向拷贝: 将 oauthWindow 的 persist:fnid-oauth session 全部 cookie 复制到主窗口 persist:fntv session.
+ *
+ * [lc-212] 用途: deskMonitor 检测到 oauthWindow 卡在 fnOS 桌面(用户已在弹窗里输完访问码)时,
+ *   需要让**主窗口** loadURL(/v) 呈现影视页。但访问码授权 cookie 写在 persist:fnid-oauth(弹窗会话),
+ *   主窗口 persist:fntv 没有它 → 主窗口 /v 会被访问码门禁再拦一次。故跳转前把弹窗会话 cookie 拷回主窗口,
+ *   主窗口 /v 即带上门禁授权, 不再弹访问码。
+ */
+async function copyOauthCookiesToFntvSession(): Promise<number> {
+    try {
+        const oauthSession = session.fromPartition('persist:fnid-oauth');
+        const fntvSession = session.fromPartition('persist:fntv');
+        const cookies = await oauthSession.cookies.get({});
+        let copied = 0;
+        for (const c of cookies) {
+            try {
+                const host = (c.domain || '').replace(/^\./, '') || 'localhost';
+                const url = `http${c.secure ? 's' : ''}://${host}${c.path || '/'}`;
+                await fntvSession.cookies.set({
+                    url,
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain,
+                    path: c.path || '/',
+                    secure: c.secure ?? false,
+                    httpOnly: c.httpOnly ?? false,
+                    expirationDate: c.expirationDate || (Math.floor(Date.now() / 1000) + 86400 * 365),
+                    sameSite: c.sameSite || 'no_restriction',
+                });
+                copied++;
+            } catch (e) {
+                log.warn('[FN ID] oauth→fntv cookie 复制失败:', c.name, e);
+            }
+        }
+        log.info(`[FN ID] 已复制 ${copied} 个 persist:fnid-oauth cookie → persist:fntv (含访问码授权)`);
+        return copied;
+    } catch (err) {
+        log.error('[FN ID] oauth→fntv cookie 批量复制失败:', err);
+        return 0;
+    }
+}
+
+/**
  * FN ID 登录插件
  * 通过 FN Connect OAuth 流程实现 FN ID 登录
  */
@@ -474,6 +516,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         let relayPollStarted = false;
         let relayFailedNotified = false; // 官方中继失败弹窗去重, 只弹一次
         let deskMonitor: NodeJS.Timeout | null = null; // [lc-210] oauthWindow 桌面→/v 兜底定时器
+        let deskConsecutive = 0; // [lc-212] oauthWindow 桌面检测连续命中计数(防正常授权瞬时桌面误杀)
 
     // 官方中继连接失败 → 弹原生错误框(lc-116 曾因挡 F12 诊断临时关闭, lc-126 恢复).
     // 用原生 dialog 而非 fnosDialog: FN ID 登录期间 oauthWindow 浮在上层,
@@ -529,11 +572,16 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         // 否则 oauthWindow 向 NAS 发 sys/config 会被访问码门禁拦截返回门户 HTML, 导致 FN ID 登录失败/卡桌面.
         await copyFntvCookiesToOauthSession();
 
-        // [lc-210] 桌面→/v 兜底: 主窗口(preload embyWall)已有桌面纠正, 但桌面可能渲染在 oauthWindow(独立 session,
-        // 无 embyWall)——登录卡住时桌面停在弹窗里, 主窗口纠正不触发. 此处在主进程侧检测 oauthWindow 是否停在
-        // fnOS 桌面(且 OAuth 尚未完成), 是则让主窗口 loadURL(/v) 并关闭弹窗, 实现"检测到首页就跳影视页".
+        // [lc-210/lc-212] 桌面→/v 兜底: 主窗口(preload embyWall)已有桌面纠正, 但桌面可能渲染在 oauthWindow
+        // (独立 session persist:fnid-oauth, 无 embyWall)——FN ID 登录卡住时桌面停在弹窗里, 主窗口纠正不触发.
+        // 此处在主进程侧检测 oauthWindow 是否停在 fnOS 桌面, 是则让主窗口 loadURL(/v) 并关闭弹窗.
+        // [lc-212] 修正: 原守卫要求 `!sysConfigLoaded`, 但用户输完访问码后 sys/config 返回 JSON → sysConfigLoaded=true,
+        //   正好把"该跳"的卡住场景豁免掉了 → 检测到桌面却不跳. 改为: 仅排除 `authRequested`(OAuth code 已拿到、
+        //   即将 finalizeLogin 自跳), 其余桌面一律视为卡住. 加 deskConsecutive 连续 2 次(≈6s)稳定命中才跳,
+        //   避免正常 FN ID /signin 授权过程中瞬时桌面误杀弹窗. 跳之前反向拷贝弹窗会话 cookie 到主窗口会话,
+        //   否则主窗口 /v 会被访问码门禁再拦.
         deskMonitor = setInterval(async () => {
-            if (!oauthWindow || oauthWindow.isDestroyed() || authRequested || sysConfigLoaded) return;
+            if (!oauthWindow || oauthWindow.isDestroyed()) return;
             try {
                 const isDesk = await oauthWindow.webContents.executeJavaScript(
                     "(function(){var p=location.pathname;if(p!=='/'&&p!=='/v'&&p!=='/v/')return false;" +
@@ -541,16 +589,25 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     "var h=['系统设置','应用中心','文件管理','影视','相册','商店','虚拟机','终端','下载','备份','安全中心','回收站','远程助手','飞牛同步'];" +
                     "return h.filter(function(x){return t.indexOf(x)>=0;}).length>=2;})()"
                 );
-                if (isDesk) {
-                    log.info('[FN ID] oauthWindow 检测到 fnOS 桌面(登录卡住), 主窗口跳 /v 并关闭弹窗');
-                    const mw = getMainWindow();
-                    const origin = (() => { try { return new URL(oauthWindow!.webContents.getURL()).origin; } catch { return ''; } })();
-                    if (mw && !mw.isDestroyed() && origin) mw.loadURL(`${origin}/v`);
-                    oauthWindow.close();
-                    oauthWindow = null;
-                    if (deskMonitor) { clearInterval(deskMonitor); deskMonitor = null; }
+                if (isDesk && !authRequested) {
+                    deskConsecutive++;
+                    if (deskConsecutive >= 2) {
+                        log.info('[FN ID] oauthWindow 检测到 fnOS 桌面(登录卡住), 主窗口跳 /v 并关闭弹窗');
+                        // 反向拷贝弹窗会话(含访问码授权)→ 主窗口会话, 否则主窗口 /v 会被访问码门禁再拦
+                        await copyOauthCookiesToFntvSession();
+                        const mw = getMainWindow();
+                        const origin = (() => { try { return new URL(oauthWindow!.webContents.getURL()).origin; } catch { return ''; } })();
+                        if (mw && !mw.isDestroyed() && origin) mw.loadURL(`${origin}/v`);
+                        oauthWindow.close();
+                        oauthWindow = null;
+                        if (deskMonitor) { clearInterval(deskMonitor); deskMonitor = null; }
+                    } else {
+                        log.info(`[FN ID] oauthWindow 疑似 fnOS 桌面, 等待确认(${deskConsecutive}/2)`);
+                    }
+                } else {
+                    deskConsecutive = 0;
                 }
-            } catch { /* ignore */ }
+            } catch { deskConsecutive = 0; }
         }, 3000);
 
         // 拦截 target="_blank" / window.open: 不开新窗, 改为在 oauthWindow 内导航.
