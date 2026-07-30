@@ -98,13 +98,14 @@ function init(): void {
     const interceptorManager = getInterceptor();
 
     // 注册登录请求拦截器
+    // 注意：仅拦截 /v/login（真正的登录页）。
+    // 不拦截 /v/welcome —— 那是 fnOS 的隐私协议/欢迎页（含防伪码验证后的流程），
+    // 拦截会导致用户输入防伪码后直接跳过隐私页进桌面（lc-202 修复）。
     interceptorManager.registerBeforeRequest(
         {
             urls: [
                 'http://*/v/login',
                 'https://*/v/login',
-                'http://*/v/welcome',
-                'https://*/v/welcome',
             ]
         },
         handleLoginRequest,
