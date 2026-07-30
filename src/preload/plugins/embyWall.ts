@@ -49,6 +49,48 @@ function log(...a: any[]) {
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
 }
 
+// [lc-205] 访问码验证后落到 fnOS 原生桌面(/)的渲染端纠正.
+// 主进程基于 pathname 的导航守卫(lc-203/204)对"纯前端渲染桌面(URL 仍是 /v)"无效,
+// 因此在这里(注入 fnOS 页面的 preload)检测桌面特征并自动进入飞牛影视.
+(function watchFnosDesktop(): void {
+  const SYS_APPS: ReadonlyArray<string> = ['文件', '相册', '影视', '音乐', '下载', '应用', '虚拟机', '容器', '文档', '相片'];
+  const isFnosDesktop = (): boolean => {
+    const links = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+    let hit = 0;
+    for (const a of links) {
+      const t = (a.textContent || '').trim();
+      if (SYS_APPS.indexOf(t) >= 0) hit++;
+    }
+    return hit >= 3; // 至少 3 个系统 app 名称并列, 视为 fnOS 桌面网格
+  };
+  const tryFix = (): void => {
+    try {
+      const p = location.pathname;
+      // 仅在根或 /v 疑似桌面/访问码后介入
+      if (p !== '/' && p !== '/v' && p !== '/v/') return;
+      if (!isFnosDesktop()) return;
+      const links = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+      const movie = links.find(a => (a.textContent || '').indexOf('影视') >= 0);
+      if (movie && movie.getAttribute('href')) {
+        const href = movie.getAttribute('href') as string;
+        ipcRenderer.send('renderer-desktop-fix', '检测到 fnOS 桌面, 自动进入影视 app: ' + href);
+        location.href = href;
+      } else {
+        ipcRenderer.send('renderer-desktop-fix', '检测到 fnOS 桌面(无影视入口), 强制 reload /v');
+        location.href = '/v';
+      }
+    } catch (e) { /* ignore */ }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(tryFix, 1200));
+  } else {
+    setTimeout(tryFix, 1200);
+  }
+  // 路由变化 + 定时兜底(应对 SPA 延迟渲染桌面)
+  setInterval(tryFix, 2500);
+  document.addEventListener('click', () => setTimeout(tryFix, 500));
+})();
+
 // [lc-120] 把任意本地图片路径转为 file:// URL（登录页伪元素 background-image 用）
 function toFileUrl(p: string): string {
   if (!p) return '';

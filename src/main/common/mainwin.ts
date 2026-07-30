@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app } from 'electron';
+import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -562,7 +562,11 @@ export function getMainWindow(): BrowserWindow {
         // 说明 fnOS 把用户踢回了原生桌面(访问码验证后/会话过期等), 需自动纠正回 /v.
         // 同时监听 did-navigate(完整页面加载) 与 did-navigate-in-page(SPA 内部路由切换),
         // 因为 fnOS 访问码验证后可能是 SPA 客户端路由(pushState/history), 只触发后者.
-        const ALLOWED_PATHS = ['/v/login', '/v/welcome', '/v/oauth', '/v/signin', '/v/auth'];
+        // 注: 纯前端渲染的桌面(URL 仍是 /v)本守卫无法捕获, 由渲染端 embyWall.ts 的
+        //      [lc-205] 桌面检测逻辑兜底纠正.
+        // /app 豁免: 飞牛影视在 fnOS 桌面里的 app 入口可能位于 /app/*, 渲染端会自动点击进入,
+        //   主进程不拦截以免纠正回 /v 造成死循环.
+        const ALLOWED_PATHS = ['/v/login', '/v/welcome', '/v/oauth', '/v/signin', '/v/auth', '/app'];
         const guardRedirect = (url: string) => {
             try {
                 const u = new URL(url);
@@ -576,6 +580,12 @@ export function getMainWindow(): BrowserWindow {
         };
         mainwin.webContents.on('did-navigate', (_event: any, url: string) => guardRedirect(url));
         mainwin.webContents.on('did-navigate-in-page', (_event: any, url: string) => guardRedirect(url));
+
+        // [lc-205] 接收渲染端(注入 fnOS 页面的 preload)发来的桌面纠正诊断, 写入 app.log
+        ipcMain.removeAllListeners('renderer-desktop-fix');
+        ipcMain.on('renderer-desktop-fix', (_e: any, msg: string) => {
+            log.info(`[渲染端桌面纠正] ${msg}`);
+        });
     }
     return mainwin;
 }
