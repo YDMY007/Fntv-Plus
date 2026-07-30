@@ -49,46 +49,46 @@ function log(...a: any[]) {
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
 }
 
-// [lc-205] 访问码验证后落到 fnOS 原生桌面(/)的渲染端纠正.
+// [lc-205] 访问码验证后落到 fnOS 原生桌面(/)的渲染端纠正(主动跳主页版).
 // 主进程基于 pathname 的导航守卫(lc-203/204)对"纯前端渲染桌面(URL 仍是 /v)"无效,
-// 因此在这里(注入 fnOS 页面的 preload)检测桌面特征并自动进入飞牛影视.
+// 因此在这里(注入 fnOS 页面的 preload)检测当前是否为 fnOS 系统界面(桌面/控制面板),
+// 命中则直接 reload /v —— 访问码验证通过会写授权 cookie, 重新加载 /v 时 fnOS 读到授权
+// 直接渲染飞牛影视, 不再弹访问码/跳桌面. 这正是用户要求的"登录后主动跳主页".
 (function watchFnosDesktop(): void {
-  const SYS_APPS: ReadonlyArray<string> = ['文件', '相册', '影视', '音乐', '下载', '应用', '虚拟机', '容器', '文档', '相片'];
-  const isFnosDesktop = (): boolean => {
-    const links = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-    let hit = 0;
-    for (const a of links) {
-      const t = (a.textContent || '').trim();
-      if (SYS_APPS.indexOf(t) >= 0) hit++;
-    }
-    return hit >= 3; // 至少 3 个系统 app 名称并列, 视为 fnOS 桌面网格
+  // fnOS 系统界面(桌面/控制面板)的典型字样, 几乎不会出现在飞牛影视页 → 用于区分"桌面"与"影视"
+  const SYS_HINTS: ReadonlyArray<string> = [
+    '系统设置', '控制面板', '应用中心', '存储管理', '文件管理',
+    '虚拟机', '容器', '应用商店', '设备信息', '应用管理', '安全防护'
+  ];
+  const detectSystemUI = (): string[] => {
+    const txt = (document.body && document.body.innerText || '').replace(/\s+/g, '');
+    const matched: string[] = [];
+    for (const h of SYS_HINTS) if (txt.indexOf(h) >= 0) matched.push(h);
+    return matched;
   };
+  let _lastReload = 0;
   const tryFix = (): void => {
     try {
       const p = location.pathname;
-      // 仅在根或 /v 疑似桌面/访问码后介入
+      // 仅在根或 /v 疑似桌面/访问码后介入; 影视内部页(/v/tv/...等)不干预
       if (p !== '/' && p !== '/v' && p !== '/v/') return;
-      if (!isFnosDesktop()) return;
-      const links = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-      const movie = links.find(a => (a.textContent || '').indexOf('影视') >= 0);
-      if (movie && movie.getAttribute('href')) {
-        const href = movie.getAttribute('href') as string;
-        ipcRenderer.send('renderer-desktop-fix', '检测到 fnOS 桌面, 自动进入影视 app: ' + href);
-        location.href = href;
-      } else {
-        ipcRenderer.send('renderer-desktop-fix', '检测到 fnOS 桌面(无影视入口), 强制 reload /v');
-        location.href = '/v';
-      }
+      const matched = detectSystemUI();
+      if (matched.length < 2) return; // 至少命中 2 个系统字样才判定为 fnOS 系统界面(防误判)
+      const now = Date.now();
+      if (now - _lastReload < 4000) return; // 防抖: 避免短时间重复 reload
+      _lastReload = now;
+      ipcRenderer.send('renderer-desktop-fix',
+        '检测到 fnOS 系统界面(桌面), 主动 reload /v 让 fnOS 重新判断授权, 命中: ' + matched.join(','));
+      location.href = '/v';
     } catch (e) { /* ignore */ }
   };
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(tryFix, 1200));
+    document.addEventListener('DOMContentLoaded', () => setTimeout(tryFix, 1500));
   } else {
-    setTimeout(tryFix, 1200);
+    setTimeout(tryFix, 1500);
   }
-  // 路由变化 + 定时兜底(应对 SPA 延迟渲染桌面)
-  setInterval(tryFix, 2500);
-  document.addEventListener('click', () => setTimeout(tryFix, 500));
+  // 定时兜底(应对 SPA 延迟渲染桌面 / 访问码验证后前端切换)
+  setInterval(tryFix, 3000);
 })();
 
 // [lc-120] 把任意本地图片路径转为 file:// URL（登录页伪元素 background-image 用）
