@@ -41,6 +41,7 @@ bili_cookie.txt
 **/__pycache__/
 danmaku-history.json
 mpv.log
+**/.cache/
 
 # 发布流程临时文件
 .exeresp.json
