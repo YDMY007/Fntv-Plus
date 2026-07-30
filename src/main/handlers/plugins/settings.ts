@@ -426,7 +426,20 @@ async function handleGetDiagnostics(): Promise<any> {
             doubanEnabled: fnConfig.getDoubanSyncEnabled(),
             doubanLoggedIn: !!fnConfig.getDoubanCookie(),
             bangumiEnabled: fnConfig.getBangumiSyncEnabled(),
-            bangumiHasToken: !!fnConfig.getBangumiToken()
+            bangumiHasToken: !!fnConfig.getBangumiToken(),
+            // 弹幕屏蔽（lc-215 新增，排障关键）
+            danmakuBlockTypes: fnConfig.getBiliDanmakuBlockTypes(),
+            danmakuBlacklist: fnConfig.getBiliDanmakuBlacklist() || '',
+            // MPV 渲染（着色器 / ICC 校色）
+            mpvShader: fnConfig.getMpvDefaultShader(),
+            mpvIcc: fnConfig.getMpvIccEnabled() !== false,
+            // 运行依赖（B站弹幕依赖内置 Python）
+            pythonPath: fnConfig.getPythonPath() || '(自动检测)',
+            // 界面 / 其它开关
+            wheelHScroll: fnConfig.getWheelHScroll() !== false,
+            detailBoxless: fnConfig.getDetailBoxless() === true,
+            loginBgPath: fnConfig.getLoginBgPath() || '(默认)',
+            updateDismissedAt: (c && c.updateDismissedAt) || 0
         };
     } catch (e: any) {
         return { ok: false, error: String((e && e.message) || e) };
