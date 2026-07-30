@@ -575,8 +575,81 @@ function open_content_menu(pos)
     end
 end
 
--- [lc-200] 已移除播放器内临时弹幕样式菜单(add_danmaku_setup)及其专用配置表(menu_items_config/ordered_keys)。
--- 弹幕样式/过滤全部改由 Electron 设置面板(「弹幕样式与过滤」区)持久化配置，不再有"仅本次播放生效"的临时入口。
+local menu_items_config = {
+    bold = { title = "粗体", hint = options.bold, original = options.bold,
+        footnote = "true / false", },
+    fontsize = { title = "大小", hint = options.fontsize, original = options.fontsize,
+        scope = { min = 0, max = math.huge }, footnote = "请输入整数(>=0)", },
+    outline = { title = "描边", hint = options.outline, original = options.outline,
+        scope = { min = 0.0, max = 4.0 }, footnote = "输入范围：(0.0-4.0)" },
+    shadow = { title = "阴影", hint = options.shadow, original = options.shadow,
+        scope = { min = 0, max = math.huge }, footnote = "请输入整数(>=0)", },
+    scrolltime = { title = "速度", hint = options.scrolltime, original = options.scrolltime,
+        scope = { min = 1, max = math.huge }, footnote = "请输入整数(>=1)", },
+    opacity = { title = "透明度", hint = options.opacity, original = options.opacity,
+        scope = { min = 0, max = 1 }, footnote = "输入范围：0（完全透明）到1（不透明）", },
+    displayarea = { title = "弹幕显示范围", hint = options.displayarea, original = options.displayarea,
+        scope = { min = 0.0, max = 1.0 }, footnote = "显示范围(0.0-1.0)", },
+}
+-- 创建一个包含键顺序的表，这是样式菜单的排布顺序
+local ordered_keys = {"bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea"}
+
+-- 设置弹幕样式菜单（仅本次播放生效；持久化样式请到 Electron 设置面板调整屏蔽类型）
+function add_danmaku_setup(actived, status)
+    if not uosc_available then
+        show_message("无uosc UI框架，不支持使用该功能", 2)
+        return
+    end
+
+    local items = {}
+    for _, key in ipairs(ordered_keys) do
+        local config = menu_items_config[key]
+        local item_config = {
+            title = config.title,
+            hint = "目前：" .. tostring(config.hint),
+            active = key == actived,
+            keep_open = true,
+            selectable = true,
+        }
+        if config.hint ~= config.original then
+            local original_str = tostring(config.original)
+            item_config.actions = {{icon = "refresh", name = key, label = "恢复默认配置 < " .. original_str .. " >"}}
+        end
+        table.insert(items, item_config)
+    end
+
+    local menu_props = {
+        type = "menu_style",
+        title = "弹幕样式",
+        search_style = "disabled",
+        footnote = "样式更改仅在本次播放生效",
+        item_actions_place = "outside",
+        items = items,
+        callback = { mp.get_script_name(), 'setup-danmaku-style'},
+    }
+
+    local actions = "open-menu"
+    if status ~= nil then
+        if status == "updata" then
+            -- "updata" 模式会保留输入框文字
+            menu_props.title = "  " .. menu_items_config[actived]["footnote"]
+            actions = "update-menu"
+        elseif status == "refresh" then
+            -- "refresh" 模式会清除输入框文字
+            menu_props.title = "  " .. menu_items_config[actived]["footnote"]
+        elseif status == "error" then
+            menu_props.title = "输入非数字字符或范围出错"
+            mp.add_timeout(1.0, function() add_danmaku_setup(actived, "updata") end)
+        end
+        menu_props.search_style = "palette"
+        menu_props.search_debounce = "submit"
+        menu_props.footnote = menu_items_config[actived]["footnote"] or ""
+        menu_props.on_search = { "script-message-to", mp.get_script_name(), "setup-danmaku-style", actived }
+    end
+
+    local json_props = utils.format_json(menu_props)
+    mp.commandv("script-message-to", uosc_available and "uosc" or "ignore", actions, json_props)
+end
 
 -- 设置弹幕源延迟菜单
 function danmaku_delay_setup(source_url)
@@ -883,22 +956,7 @@ mp.register_script_message("open_setup_danmaku_menu", function()
     if uosc_available then
         mp.commandv("script-message-to", "uosc", "close-menu", "menu_total")
     end
-    -- [lc-201] 写文件信号通知主进程打开设置面板的「弹幕样式与过滤」区(取代 user-data 属性桥接)。
-    -- 原因：user-data 属性桥接在部分 mpv 版本上触发内部 tonumber 报错(Lua error: bad argument #2 to 'tonumber')，
-    -- 导致本 handler 崩溃、按钮点击无反应。文件信号不依赖 mpv 任何属性类型，稳定可靠。
-    local ud = os.getenv("FNTV_USERDATA")
-    if ud and ud ~= "" then
-        local sigPath = ud:gsub("\\", "/") .. "/open-danmaku-settings.signal"
-        local ok, f = pcall(io.open, sigPath, "w")
-        if ok and f then
-            f:write(tostring(os.time()))  -- 写时间戳，保证每次点击内容不同、watch 必触发
-            f:close()
-        else
-            show_message("无法写入弹幕设置信号文件", 2)
-        end
-    else
-        show_message("未获取到应用数据目录，无法打开弹幕设置", 3)
-    end
+    add_danmaku_setup()
 end)
 mp.register_script_message("open_content_danmaku_menu", function()
     if uosc_available then
@@ -907,8 +965,56 @@ mp.register_script_message("open_content_danmaku_menu", function()
     open_content_menu()
 end)
 
--- [lc-200] 已移除临时弹幕样式回调(setup-danmaku-style)。弹幕样式改由 Electron 设置面板持久化配置，
--- 控制栏「弹幕样式」按钮(open_setup_danmaku_menu)与「弹幕设置」总菜单的"弹幕样式"项均唤起设置面板，调了即永久生效。
+-- [lc-217] 恢复播放器内弹幕样式菜单回调。lc-200/lc-215 将样式控件从设置面板也移除了,
+-- 导致「弹幕样式」按钮变成空壳。现恢复内置菜单(仅本次播放生效), 屏蔽类型仍由 Electron 设置面板管理。
+mp.register_script_message("setup-danmaku-style", function(query, text)
+    local event = utils.parse_json(query)
+    if event ~= nil then
+        -- item点击 或 图标点击
+        if event.type == "activate" then
+            if not event.action then
+                if ordered_keys[event.index] == "bold" then
+                    options.bold = not options.bold
+                    menu_items_config.bold.hint = options.bold and "true" or "false"
+                end
+                -- "updata" 模式会保留输入框文字
+                add_danmaku_setup(ordered_keys[event.index], "updata")
+                return
+            else
+                options[event.action] = menu_items_config[event.action]["original"]
+                menu_items_config[event.action]["hint"] = options[event.action]
+                add_danmaku_setup(event.action, "updata")
+                if event.action == "fontsize" or event.action == "scrolltime" then
+                    load_danmaku(true)
+                end
+            end
+        end
+    else
+        -- 数值输入
+        if text == nil or text == "" then
+            return
+        end
+        local newText, _ = text:gsub("%s", "") -- 移除所有空白字符
+        if tonumber(newText) ~= nil and menu_items_config[query]["scope"] ~= nil then
+            local num = tonumber(newText)
+            local min_num = menu_items_config[query]["scope"]["min"]
+            local max_num = menu_items_config[query]["scope"]["max"]
+            if num and min_num <= num and num <= max_num then
+                if string.match(menu_items_config[query]["footnote"], "整数") then
+                    num = tostring(math.floor(num))
+                end
+                options[query] = tostring(num)
+                menu_items_config[query]["hint"] = options[query]
+                add_danmaku_setup(query, "refresh")
+                if query == "fontsize" or query == "scrolltime" then
+                    load_danmaku(true, true)
+                end
+                return
+            end
+        end
+        add_danmaku_setup(query, "error")
+    end
+end)
 
 mp.register_script_message('setup-danmaku-source', function(json)
     local event = utils.parse_json(json)
