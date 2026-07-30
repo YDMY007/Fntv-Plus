@@ -42,6 +42,8 @@ bili_cookie.txt
 danmaku-history.json
 mpv.log
 **/.cache/
+**/cache/
+mpv.conf.bak*
 
 # 发布流程临时文件
 .exeresp.json
