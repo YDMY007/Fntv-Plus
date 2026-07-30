@@ -3048,6 +3048,7 @@ function handle(): void {
 
     // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
     const secDanmaku = section('弹幕样式与过滤');
+    secDanmaku.el.id = 'sec-danmaku'; // [lc-199] 供控制栏按钮唤起时滚动定位
     const danBody = secDanmaku.body;
     let _danTimer: any = null;
     const pushDan = (): void => {
@@ -3602,7 +3603,7 @@ function handle(): void {
   }
 
   /** [新] 打开设置面板: 固定宽度, 整窗口正中居中显示并刷新数据 */
-  function openSettingsPanel(_panel?: HTMLElement): void {
+  function openSettingsPanel(_panel?: HTMLElement, sectionId?: string): void {
     const overlay = document.getElementById('fnos-settings-panel') as HTMLElement | null;
     if (!overlay) return;
     // 整个客户端窗口正中居中(不再贴侧栏)
@@ -3619,7 +3620,14 @@ function handle(): void {
     if (mask) mask.style.display = 'block';
     const refresh = (overlay as any)._refresh;
     if (typeof refresh === 'function') refresh();
+    if (sectionId) {
+      const target = document.getElementById('sec-' + sectionId);
+      if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
   }
+
+  // [lc-199] 控制栏「弹幕样式」按钮 → 主进程转发 → 打开设置面板并定位到弹幕分区
+  ipcRenderer.on('fntv-open-settings', (_e: any, sectionId: string) => openSettingsPanel(undefined, sectionId));
 
   /** 判断某 background-color 是否为"不透明/半透明的白/浅灰底"(需透明化让浅蓝透出) */
   function isOpaqueLightBg(bg: string): boolean {

@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { PlayerFactory } from '../factory';
 import logger from '../../logger';
+import { getMainWindow } from '../../../main/common/mainwin';
 const log = logger.component('mpv');
 import NodeMpv, { TimePosition } from 'node-mpv-2';
 import { title } from 'process';
@@ -85,6 +86,19 @@ export class MpvPlayer extends BasePlayer {
 
             // 启动 MPV 并加载媒体
             await this.mpvInstance.start()
+
+            // [lc-199] 订阅 user-data 信号：控制栏「弹幕样式」按钮点击 → 唤起 Electron 设置面板
+            try {
+                await this.mpvInstance.observeProperty('user-data/fntv/open-danmaku-settings');
+            } catch (e: any) {
+                log.warn('[mpv] 订阅 user-data/fntv/open-danmaku-settings 失败:', e?.message || e);
+            }
+            this.mpvInstance.on('status', (s: any) => {
+                if (s && s.property === 'user-data/fntv/open-danmaku-settings' && Number(s.value) > 0) {
+                    const mw = getMainWindow();
+                    if (mw) mw.webContents.send('fntv-open-settings', 'danmaku');
+                }
+            });
 
             // 开始 tail mpv.log，把弹幕脚本日志转发进 app.log
             this.startMpvLogTail();

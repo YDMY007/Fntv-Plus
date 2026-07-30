@@ -924,7 +924,10 @@ mp.register_script_message("open_setup_danmaku_menu", function()
     if uosc_available then
         mp.commandv("script-message-to", "uosc", "close-menu", "menu_total")
     end
-    add_danmaku_setup()
+    -- [lc-199] 控制栏「弹幕样式」按钮不再开播放器内临时菜单，改为唤起 Electron 设置面板的
+    -- 「弹幕样式与过滤」区(持久化配置)。node-mpv-2 仅转发 property-change，故用 user-data 属性把信号传给主进程。
+    local cur = tonumber(mp.get_property("user-data/fntv/open-danmaku-settings", "0")) or 0
+    mp.set_property("user-data/fntv/open-danmaku-settings", tostring(cur + 1))
 end)
 mp.register_script_message("open_content_danmaku_menu", function()
     if uosc_available then
