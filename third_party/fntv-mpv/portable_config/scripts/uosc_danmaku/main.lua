@@ -93,8 +93,10 @@ function set_danmaku_visibility(flag)
 end
 
 function set_danmaku_button()
-    if get_danmaku_visibility() then
-        mp.commandv("script-message-to", "uosc", "set", "show_danmaku", "on")
+    -- [lc-216] 不再调用 `script-message-to uosc set show_danmaku`(旧 user-data 桥接崩溃路径, 见 lc-201)。
+    -- 弹幕开关改为 command 按钮, 这里仅同步控制栏按钮图标状态。
+    if uosc_available and sync_danmaku_toggle_btn then
+        sync_danmaku_toggle_btn()
     end
 end
 
@@ -946,24 +948,8 @@ mp.register_script_message("danmaku-delay", function(...)
 end)
 
 mp.register_script_message("show_danmaku_keyboard", function()
-    ENABLED = not ENABLED
-    if ENABLED then
-        mp.commandv("script-message-to", "uosc", "set", "show_danmaku", "on")
-        set_danmaku_visibility(true)
-        if COMMENTS == nil then
-            show_message("加载弹幕初始化...", 3)
-            local path = mp.get_property("path")
-            init(path)
-        else
-            show_loaded()
-            show_danmaku_func()
-        end
-    else
-        show_message("关闭弹幕", 2)
-        mp.commandv("script-message-to", "uosc", "set", "show_danmaku", "off")
-        set_danmaku_visibility(false)
-        hide_danmaku_func()
-    end
+    -- [lc-216] 复用 toggle_danmaku_state, 不再走 `set show_danmaku` 崩溃路径(见 lc-201)。
+    toggle_danmaku_state()
 end)
 
 mp.register_script_message("check-update", check_for_update)

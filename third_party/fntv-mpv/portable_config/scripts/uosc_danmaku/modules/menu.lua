@@ -780,34 +780,68 @@ mp.commandv(
     })
 )
 
+-- [lc-216] 弹幕开关改为 command 按钮(经 toggle_danmaku 处理), 不再依赖 uosc `set show_danmaku` 用户数据桥接。
+-- 该桥接在部分 mpv 版本触发内部 tonumber 崩溃, 使整个 uosc_danmaku 控制失效(见 lc-201)。
+-- 这里仅用 set-button 同步按钮图标状态(set-button 不读用户数据属性, 安全)。
+function sync_danmaku_toggle_btn()
+    if not uosc_available then return end
+    local ok, on = pcall(get_danmaku_visibility)
+    if not ok then on = false end
+    mp.commandv("script-message-to", "uosc", "set-button", "danmaku_toggle", utils.format_json({
+        icon = on and "toggle_on" or "toggle_off",
+        tooltip = on and "弹幕开关（开）" or "弹幕开关（关）",
+        command = "script-message toggle_danmaku",
+    }))
+end
+
+mp.commandv(
+    "script-message-to",
+    "uosc",
+    "set-button",
+    "danmaku_toggle",
+    utils.format_json({
+        icon = "toggle_on",
+        tooltip = "弹幕开关",
+        command = "script-message toggle_danmaku",
+    })
+)
+
 mp.register_script_message('uosc-version', function()
     uosc_available = true
 end)
 
-mp.commandv("script-message-to", "uosc", "set", "show_danmaku", "off")
-mp.register_script_message("set", function(prop, value)
-    if prop ~= "show_danmaku" then
-        return
-    end
+-- [lc-216] 移除启动时的 `set show_danmaku off`(旧 user-data 桥接崩溃路径, 见 lc-201);
+-- 弹幕开关改为 command 按钮, 由下方 toggle_danmaku 处理, 不再走 set 桥接。
+mp.register_script_message("toggle_danmaku", function()
+    toggle_danmaku_state()
+end)
 
-    if value == "on" then
+function toggle_danmaku_state()
+    if ENABLED then
+        ENABLED = false
+        set_danmaku_visibility(false)
+        show_message("关闭弹幕", 2)
+        hide_danmaku_func()
+    else
         ENABLED = true
         set_danmaku_visibility(true)
+        local path = mp.get_property("path")
         if COMMENTS == nil then
-            local path = mp.get_property("path")
             init(path)
         else
             show_loaded()
             show_danmaku_func()
         end
-    else
-        show_message("关闭弹幕", 2)
-        ENABLED = false
-        set_danmaku_visibility(false)
-        hide_danmaku_func()
     end
+    sync_danmaku_toggle_btn()
+end
 
-    mp.commandv("script-message-to", "uosc", "set", "show_danmaku", value)
+-- 兼容旧 uosc 属性桥接(已弃用): 仅做状态同步, 不再回写 `set show_danmaku`(旧崩溃路径)。
+mp.register_script_message("set", function(prop, value)
+    if prop ~= "show_danmaku" then
+        return
+    end
+    sync_danmaku_toggle_btn()
 end)
 
 -- 注册函数给 uosc 按钮使用

@@ -151,7 +151,7 @@ function parse_danmaku(ass_file_path, from_menu, no_osd)
             if not no_osd then
                 show_loaded(true)
             end
-            mp.commandv("script-message-to", "uosc", "set", "show_danmaku", "on")
+            if uosc_available and sync_danmaku_toggle_btn then sync_danmaku_toggle_btn() end
             show_danmaku_func()
         else
             show_message("")
