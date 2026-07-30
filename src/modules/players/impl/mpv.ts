@@ -16,12 +16,14 @@ import {
 import { PlayerFactory } from '../factory';
 import logger from '../../logger';
 import { getMainWindow } from '../../../main/common/mainwin';
+import { app } from 'electron';
 const log = logger.component('mpv');
 import NodeMpv, { TimePosition } from 'node-mpv-2';
 import { title } from 'process';
 
 export class MpvPlayer extends BasePlayer {
     private mpvInstance: NodeMpv | null = null;
+    private danmakuSignalWatcher: fs.FSWatcher | null = null;
     // 节流调用
     private lastProgressTime: number = 0;
     private throttleInterval: number = 15000; // 15秒间隔（毫秒）
@@ -79,6 +81,9 @@ export class MpvPlayer extends BasePlayer {
                 binary: this.config.playerPath.length > 0 ? this.config.playerPath : undefined,
             };
 
+            // [lc-201] 让 mpv 子进程(Lua 弹幕脚本)能定位 Electron userData 目录，用于写"打开设置面板"的文件信号
+            try { process.env.FNTV_USERDATA = app.getPath('userData'); } catch {}
+
             this.mpvInstance = new NodeMpv(mpvOptions, mpvArgs);
 
             // 设置事件监听器
@@ -87,18 +92,37 @@ export class MpvPlayer extends BasePlayer {
             // 启动 MPV 并加载媒体
             await this.mpvInstance.start()
 
-            // [lc-199] 订阅 user-data 信号：控制栏「弹幕样式」按钮点击 → 唤起 Electron 设置面板
+            // [lc-201] 文件信号桥接：控制栏「弹幕样式」按钮点击 → Lua 写 userData/open-danmaku-settings.signal
+            // → 此处 watch 该文件 → 打开 Electron 设置面板「弹幕样式与过滤」区。
+            // 取代原 user-data 属性桥接(在部分 mpv 版本触发内部 tonumber 报错, 见 menu.lua:854)。
             try {
-                await this.mpvInstance.observeProperty('user-data/fntv/open-danmaku-settings');
+                const signalFile = path.join(app.getPath('userData'), 'open-danmaku-settings.signal');
+                const signalDir = path.dirname(signalFile);
+                if (!fs.existsSync(signalDir)) fs.mkdirSync(signalDir, { recursive: true });
+                // 清掉上次遗留信号，避免启动即误触发
+                if (fs.existsSync(signalFile)) { try { fs.unlinkSync(signalFile); } catch {} }
+                // 关闭旧 watcher（重复 start 时避免泄漏/重复触发）
+                if (this.danmakuSignalWatcher) { try { this.danmakuSignalWatcher.close(); } catch {} this.danmakuSignalWatcher = null; }
+                let lastContent = '';
+                this.danmakuSignalWatcher = fs.watch(signalDir, (_evt: string, filename: string | null) => {
+                    if (filename !== 'open-danmaku-settings.signal') return;
+                    try {
+                        const content = fs.readFileSync(signalFile, 'utf-8');
+                        if (content === lastContent) return;
+                        lastContent = content;
+                        const mw = getMainWindow();
+                        if (mw && !mw.isDestroyed()) {
+                            mw.webContents.send('fntv-open-settings', 'danmaku');
+                            log.info('[mpv] 收到「弹幕样式」按钮信号，唤起设置面板(弹幕分区)');
+                        }
+                    } catch (e: any) {
+                        if (this.config.debug) log.debug('[mpv] 读取弹幕信号文件失败:', e?.message || e);
+                    }
+                });
+                this.danmakuSignalWatcher.on('error', () => {});
             } catch (e: any) {
-                log.warn('[mpv] 订阅 user-data/fntv/open-danmaku-settings 失败:', e?.message || e);
+                log.warn('[mpv] 初始化弹幕信号 watch 失败:', e?.message || e);
             }
-            this.mpvInstance.on('status', (s: any) => {
-                if (s && s.property === 'user-data/fntv/open-danmaku-settings' && Number(s.value) > 0) {
-                    const mw = getMainWindow();
-                    if (mw) mw.webContents.send('fntv-open-settings', 'danmaku');
-                }
-            });
 
             // 开始 tail mpv.log，把弹幕脚本日志转发进 app.log
             this.startMpvLogTail();

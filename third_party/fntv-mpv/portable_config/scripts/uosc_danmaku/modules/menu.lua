@@ -849,10 +849,22 @@ mp.register_script_message("open_setup_danmaku_menu", function()
     if uosc_available then
         mp.commandv("script-message-to", "uosc", "close-menu", "menu_total")
     end
-    -- [lc-199] 控制栏「弹幕样式」按钮不再开播放器内临时菜单，改为唤起 Electron 设置面板的
-    -- 「弹幕样式与过滤」区(持久化配置)。node-mpv-2 仅转发 property-change，故用 user-data 属性把信号传给主进程。
-    local cur = tonumber(mp.get_property("user-data/fntv/open-danmaku-settings", "0")) or 0
-    mp.set_property("user-data/fntv/open-danmaku-settings", tostring(cur + 1))
+    -- [lc-201] 写文件信号通知主进程打开设置面板的「弹幕样式与过滤」区(取代 user-data 属性桥接)。
+    -- 原因：user-data 属性桥接在部分 mpv 版本上触发内部 tonumber 报错(Lua error: bad argument #2 to 'tonumber')，
+    -- 导致本 handler 崩溃、按钮点击无反应。文件信号不依赖 mpv 任何属性类型，稳定可靠。
+    local ud = os.getenv("FNTV_USERDATA")
+    if ud and ud ~= "" then
+        local sigPath = ud:gsub("\\", "/") .. "/open-danmaku-settings.signal"
+        local ok, f = pcall(io.open, sigPath, "w")
+        if ok and f then
+            f:write(tostring(os.time()))  -- 写时间戳，保证每次点击内容不同、watch 必触发
+            f:close()
+        else
+            show_message("无法写入弹幕设置信号文件", 2)
+        end
+    else
+        show_message("未获取到应用数据目录，无法打开弹幕设置", 3)
+    end
 end)
 mp.register_script_message("open_content_danmaku_menu", function()
     if uosc_available then
