@@ -3181,48 +3181,51 @@ function handle(): void {
     subBody.appendChild(subHint);
     contentGrid.appendChild(secSub.el);
 
-    // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
-    const secDanmaku = section('弹幕样式与过滤');
+    // ===== B站弹幕屏蔽（写入 danmaku_block_types.json + 屏蔽词文件）=====
+    // [lc-215] 移除「弹幕样式」控制项（透明度/字号/描边/阴影/显示区域/同屏上限/粗体）——
+    // 这些已由 MPV 底部控制栏的弹幕样式按钮管理；此处仅保留/新增「弹幕屏蔽」相关。
+    const secDanmaku = section('B站弹幕屏蔽');
     secDanmaku.el.id = 'sec-danmaku'; // [lc-199] 供控制栏按钮唤起时滚动定位
     const danBody = secDanmaku.body;
     let _danTimer: any = null;
-    const pushDan = (): void => {
-      const payload = {
-        opacity: parseFloat((danInputs.opacity.input as HTMLInputElement).value),
-        fontSize: parseFloat((danInputs.fontSize.input as HTMLInputElement).value),
-        outline: parseFloat((danInputs.outline.input as HTMLInputElement).value),
-        shadow: parseFloat((danInputs.shadow.input as HTMLInputElement).value),
-        bold: danInputs.bold.checked,
-        displayArea: parseFloat((danInputs.displayArea.input as HTMLInputElement).value),
-        maxScreen: parseInt((danInputs.maxScreen.input as HTMLInputElement).value, 10),
-        blacklist: danInputs.blacklist.ta.value
-      };
+
+    // 屏蔽类型定义（key 必须与 bili_danmaku.py 的 danmaku_block_types.json 一致）
+    const BLOCK_TYPES: { key: string; label: string }[] = [
+      { key: 'top', label: '顶部弹幕' },
+      { key: 'bottom', label: '底部弹幕' },
+      { key: 'scroll', label: '滚动弹幕' },
+      { key: 'reverse', label: '逆向弹幕' },
+      { key: 'advanced', label: '高级弹幕' },
+      { key: 'color', label: '彩色弹幕' }
+    ];
+    const blockToggles: { key: string; input: HTMLInputElement }[] = [];
+
+    // 推送：仅传 屏蔽类型 + 屏蔽词（样式由 MPV 控制栏管理，不再经此通道）
+    let danBlacklist: { row: HTMLElement; ta: HTMLTextAreaElement };
+    function pushDan(): void {
+      const blockTypes = blockToggles.filter((b) => b.input.checked).map((b) => b.key);
+      const blacklist = danBlacklist ? danBlacklist.ta.value : '';
+      const payload = { blockTypes, blacklist };
       if (_danTimer) clearTimeout(_danTimer);
       _danTimer = setTimeout(() => {
         ipcRenderer.invoke('settings:set-bili-danmaku-style', payload).catch((err) => log('set-bili-danmaku-style failed', err));
       }, 300);
-    };
-    const danInputs = {
-      opacity: addSlider('透明度', 0, 1, 0.05, 0.7, (v) => v.toFixed(2), pushDan),
-      fontSize: addSlider('字号', 10, 120, 1, 50, (v) => String(v), pushDan),
-      outline: addSlider('描边', 0, 4, 0.1, 1.0, (v) => v.toFixed(1), pushDan),
-      shadow: addSlider('阴影', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushDan),
-      displayArea: addSlider('显示区域', 0, 1, 0.05, 0.85, (v) => v.toFixed(2), pushDan),
-      maxScreen: addSlider('同屏最大弹幕（0=不限）', 0, 200, 1, 0, (v) => v === 0 ? '不限' : String(v), pushDan),
-      bold: (() => { const t = addToggle('粗体'); t.checked = true; t.addEventListener('change', pushDan); return t; })(),
-      blacklist: addTextarea('屏蔽词（每行一条，支持正则）', '', '例如：\n广告\n关注.*', pushDan)
-    };
-    danBody.appendChild(danInputs.opacity.row);
-    danBody.appendChild(danInputs.fontSize.row);
-    danBody.appendChild(danInputs.outline.row);
-    danBody.appendChild(danInputs.shadow.row);
-    danBody.appendChild(danInputs.displayArea.row);
-    danBody.appendChild(danInputs.maxScreen.row);
-    danBody.appendChild(danInputs.bold.parentElement as HTMLElement);
-    danBody.appendChild(danInputs.blacklist.row);
+    }
+
+    for (const bt of BLOCK_TYPES) {
+      const t = addToggle(bt.label);
+      t.checked = false;
+      t.addEventListener('change', pushDan);
+      danBody.appendChild(t.parentElement as HTMLElement);
+      blockToggles.push({ key: bt.key, input: t });
+    }
+
+    danBlacklist = addTextarea('屏蔽词（每行一条，支持正则）', '', '例如：\n广告\n关注.*', pushDan);
+    danBody.appendChild(danBlacklist.row);
+
     const danHint = document.createElement('div');
     danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
-    danHint.textContent = '「屏蔽顶部/底部弹幕」「弹幕速度」需改 Lua 脚本，本版先开放上述可配置项。';
+    danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
     danBody.appendChild(danHint);
     contentGrid.appendChild(secDanmaku.el);
 
@@ -3684,20 +3687,10 @@ function handle(): void {
         colorInput.value = s.mpvSubColor || '#FFFFFF';
       });
       seg('danmaku', () => {
-        danInputs.opacity.input.value = String(s.biliDanmakuOpacity ?? 0.7);
-        danInputs.opacity.valEl.textContent = (s.biliDanmakuOpacity ?? 0.7).toFixed(2);
-        danInputs.fontSize.input.value = String(s.biliDanmakuFontSize || 50);
-        danInputs.fontSize.valEl.textContent = String(s.biliDanmakuFontSize || 50);
-        danInputs.outline.input.value = String(s.biliDanmakuOutline ?? 1.0);
-        danInputs.outline.valEl.textContent = (s.biliDanmakuOutline ?? 1.0).toFixed(1);
-        danInputs.shadow.input.value = String(s.biliDanmakuShadow || 0);
-        danInputs.shadow.valEl.textContent = (s.biliDanmakuShadow || 0).toFixed(1);
-        danInputs.displayArea.input.value = String(s.biliDanmakuDisplayArea ?? 0.85);
-        danInputs.displayArea.valEl.textContent = (s.biliDanmakuDisplayArea ?? 0.85).toFixed(2);
-        danInputs.maxScreen.input.value = String(s.biliDanmakuMaxScreen || 0);
-        danInputs.maxScreen.valEl.textContent = (s.biliDanmakuMaxScreen || 0) === 0 ? '不限' : String(s.biliDanmakuMaxScreen || 0);
-        danInputs.bold.checked = s.biliDanmakuBold !== false;
-        danInputs.blacklist.ta.value = s.biliDanmakuBlacklist || '';
+        // [lc-215] 弹幕分区已改为「B站弹幕屏蔽」：回填屏蔽类型勾选 + 屏蔽词，不再回填被移除的样式项
+        const bt: string[] = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
+        for (const b of blockToggles) b.input.checked = bt.includes(b.key);
+        if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || '';
       });
       seg('shortcut', () => {
         swShortcut.checked = s.globalShortcutsEnabled !== false;

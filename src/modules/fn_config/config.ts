@@ -116,6 +116,7 @@ export interface Config {
     biliDanmakuDisplayArea?: number; // 显示区域 0-1（默认 0.85）
     biliDanmakuMaxScreen?: number;   // 同屏最大弹幕数 0=不限（默认 0）
     biliDanmakuBlacklist?: string;   // 屏蔽词（换行分隔，支持正则），写入 blacklist.txt
+    biliDanmakuBlockTypes?: string[]; // 弹幕屏蔽类型（key: top/bottom/scroll/reverse/advanced/color），写入 danmaku_block_types.json
     // ===== 全局快捷键（即使 Electron 窗口失焦也能控制正在播放的 MPV/PotPlayer）=====
     globalShortcutsEnabled?: boolean; // 默认开启
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
@@ -542,6 +543,10 @@ export function getBiliDanmakuBlacklist(): string { const c = readConfig() || {}
 export function setBiliDanmakuBlacklist(v: string): void {
     const c = readConfig() || {}; c.biliDanmakuBlacklist = v || ''; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
 }
+export function getBiliDanmakuBlockTypes(): string[] { const c = readConfig() || {}; return Array.isArray(c.biliDanmakuBlockTypes) ? c.biliDanmakuBlockTypes : []; }
+export function setBiliDanmakuBlockTypes(v: string[]): void {
+    const c = readConfig() || {}; c.biliDanmakuBlockTypes = Array.isArray(v) ? v : []; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
 
 // ===== 全局快捷键 getter/setter =====
 export function getGlobalShortcutsEnabled(): boolean { const c = readConfig() || {}; return c.globalShortcutsEnabled !== false; }
@@ -835,6 +840,7 @@ module.exports = {
     getBiliDanmakuDisplayArea, setBiliDanmakuDisplayArea,
     getBiliDanmakuMaxScreen, setBiliDanmakuMaxScreen,
     getBiliDanmakuBlacklist, setBiliDanmakuBlacklist,
+    getBiliDanmakuBlockTypes, setBiliDanmakuBlockTypes,
     // 全局快捷键
     getGlobalShortcutsEnabled, setGlobalShortcutsEnabled,
     // 更新打烊时间戳

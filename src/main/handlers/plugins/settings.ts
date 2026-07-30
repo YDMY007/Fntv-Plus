@@ -58,6 +58,7 @@ async function handleGetSettings(): Promise<any> {
         biliDanmakuDisplayArea: fnConfig.getBiliDanmakuDisplayArea(),
         biliDanmakuMaxScreen: fnConfig.getBiliDanmakuMaxScreen(),
         biliDanmakuBlacklist: fnConfig.getBiliDanmakuBlacklist(),
+        biliDanmakuBlockTypes: fnConfig.getBiliDanmakuBlockTypes(),
         // ===== 全局快捷键 =====
         globalShortcutsEnabled: fnConfig.getGlobalShortcutsEnabled(),
         // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
@@ -406,6 +407,7 @@ async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<voi
     if (typeof p.displayArea === 'number') fnConfig.setBiliDanmakuDisplayArea(p.displayArea);
     if (typeof p.maxScreen === 'number') fnConfig.setBiliDanmakuMaxScreen(p.maxScreen);
     if (typeof p.blacklist === 'string') fnConfig.setBiliDanmakuBlacklist(p.blacklist);
+    if (Array.isArray(p.blockTypes)) fnConfig.setBiliDanmakuBlockTypes(p.blockTypes);
     writeBiliDanmakuStyle();
     log.info('B站弹幕样式与过滤已更新');
 }

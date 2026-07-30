@@ -490,6 +490,45 @@ def _write_xml(out, dm):
         f.write("</danmaku>\n")
 
 
+def _load_block_types():
+    """读取同目录 danmaku_block_types.json（由应用设置面板写入），返回需屏蔽的类型集合。
+    支持 key: top(顶部) bottom(底部) scroll(滚动) reverse(逆向) advanced(高级/代码) color(彩色)。"""
+    p = os.path.join(SCRIPT_DIR, "danmaku_block_types.json")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return set(str(x) for x in data)
+    except Exception:
+        pass
+    return set()
+
+
+def _filter_danmaku(dm, block_types):
+    """按屏蔽类型过滤弹幕列表。mode 映射：1滚动 4底部 5顶部 6逆向 7/8高级；col!=16777215 视为彩色。"""
+    if not block_types:
+        return dm
+    out = []
+    for (pr, mode, col, con) in dm:
+        tags = set()
+        if mode == 1:
+            tags.add("scroll")
+        elif mode == 4:
+            tags.add("bottom")
+        elif mode == 5:
+            tags.add("top")
+        elif mode == 6:
+            tags.add("reverse")
+        elif mode in (7, 8):
+            tags.add("advanced")
+        if col != 16777215:
+            tags.add("color")
+        if tags & block_types:
+            continue
+        out.append((pr, mode, col, con))
+    return out
+
+
 def _emit_result(title, cid, atitle, info, count, source, aggregated_from=None):
     """输出 BILI_RESULT JSON 到 stdout（供 Lua extra.lua 解析后显示在配置面板）。"""
     result = {
@@ -607,6 +646,12 @@ def main():
     # 选择策略：弹幕越多越好（详见 _select_danmaku）。
     final_dm, best_cid, best_atitle, best_info, source, agg_count, srcs = _select_danmaku(
         fetched, agg_threshold, AGG_TIME_LIMIT, MIN_DANMAKU)
+    # 弹幕屏蔽类型：按应用设置面板写入的 danmaku_block_types.json 过滤（B站补源弹幕）
+    block_types = _load_block_types()
+    if block_types:
+        before = len(final_dm)
+        final_dm = _filter_danmaku(final_dm, block_types)
+        log(f"弹幕屏蔽类型生效: 移除 {before - len(final_dm)} 条 (类型={','.join(sorted(block_types))}), 剩余 {len(final_dm)} 条")
     _write_xml(out, final_dm)
     _emit_result(title, best_cid, best_atitle, best_info, len(final_dm), source, aggregated_from=agg_count)
     if agg_count:
