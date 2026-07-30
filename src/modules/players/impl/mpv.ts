@@ -10,7 +10,8 @@ import {
     EventType,
     PlayErrorData,
     PlayExitData,
-    PlayItem // <-- Add PlayItem to the import list
+    PlayItem, // <-- Add PlayItem to the import list
+    PlayerControlAction
 } from '../types';
 import { PlayerFactory } from '../factory';
 import logger from '../../logger';
@@ -615,6 +616,60 @@ export class MpvPlayer extends BasePlayer {
      */
     isPlaying(): boolean {
         return this.mpvInstance !== null && this.mpvInstance.isRunning();
+    }
+
+    /**
+     * 统一控制入口（全局快捷键/远程控制转发）。
+     * 基于 node-mpv-2 实例方法实现；部分方法(node-mpv-2 类型未完全声明)用 any 强转。
+     */
+    control(action: PlayerControlAction): boolean {
+        const mpv = this.mpvInstance as any;
+        if (!mpv || !mpv.isRunning()) {
+            log.warn(`[control] MPV 未运行，忽略动作: ${action}`);
+            return false;
+        }
+        try {
+            switch (action) {
+                case 'playpause':
+                    mpv.togglePause();
+                    return true;
+                case 'play':
+                    mpv.resume();
+                    return true;
+                case 'pause':
+                    mpv.pause();
+                    return true;
+                case 'seek-back':
+                    mpv.seek(-5, 'relative');
+                    return true;
+                case 'seek-fwd':
+                    mpv.seek(5, 'relative');
+                    return true;
+                case 'speed-up':
+                case 'speed-down': {
+                    const cur = Number(mpv.getProperty('speed')) || 1;
+                    let next = action === 'speed-up' ? cur + 0.1 : cur - 0.1;
+                    next = Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
+                    mpv.setProperty('speed', next);
+                    log.info(`[control] 倍速 -> ${next}`);
+                    return true;
+                }
+                case 'next':
+                    if (typeof mpv.command === 'function') { mpv.command('playlist-next', []); return true; }
+                    return false;
+                case 'prev':
+                    if (typeof mpv.command === 'function') { mpv.command('playlist-prev', []); return true; }
+                    return false;
+                case 'stop':
+                    mpv.pause();
+                    return true;
+                default:
+                    return false;
+            }
+        } catch (e: any) {
+            log.warn(`[control] MPV 动作 ${action} 失败:`, e?.message || e);
+            return false;
+        }
     }
 }
 

@@ -11,7 +11,8 @@ import {
     EventType,
     PlayErrorData,
     PlayExitData,
-    PlayItem
+    PlayItem,
+    PlayerControlAction
 } from '../types';
 import { PlayerFactory } from '../factory';
 import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku';
@@ -613,6 +614,41 @@ export class PotPlayer extends BasePlayer {
     isPlaying(): boolean {
         // 与进程解耦：只要仍处于播放意图态即视为在播（抗 /current 进程重启造成的 this.proc.killed）
         return this.active;
+    }
+
+    /**
+     * 统一控制入口（全局快捷键转发）。
+     * 通过 PotPlayer 的「/Current」命令行控制已运行的实例：
+     *   /Current /play  → 播放
+     *   /Current /pause → 暂停
+     * 其余动作（快进/快退/倍速/上下集）PotPlayer CLI 不支持对运行实例精确控制，返回 false 由上层忽略。
+     */
+    control(action: PlayerControlAction): boolean {
+        if (!this.active || !this.config.playerPath) {
+            log.warn(`[control] PotPlayer 未运行，忽略动作: ${action}`);
+            return false;
+        }
+        const exe = this.config.playerPath;
+        const run = (cmd: string): boolean => {
+            try {
+                spawn(exe, ['/Current', cmd], { stdio: 'ignore', windowsHide: true });
+                return true;
+            } catch (e: any) {
+                log.warn(`[control] PotPlayer /Current ${cmd} 失败:`, e?.message || e);
+                return false;
+            }
+        };
+        switch (action) {
+            case 'playpause':
+            case 'play':
+                return run('/play');
+            case 'pause':
+            case 'stop':
+                return run('/pause');
+            default:
+                log.info(`[control] PotPlayer 不支持动作: ${action}`);
+                return false;
+        }
     }
 
     /**

@@ -63,6 +63,19 @@ export enum PlayerType {
     // 可以扩展其他播放器类型
 }
 
+// 全局快捷键/统一控制动作（由 media.ts 的 controlCurrentPlayer 转发到当前播放器）
+export type PlayerControlAction =
+    | 'playpause'   // 播放/暂停切换
+    | 'play'        // 播放
+    | 'pause'       // 暂停
+    | 'seek-back'   // 快退（相对 -5s）
+    | 'seek-fwd'    // 快进（相对 +5s）
+    | 'speed-up'    // 倍速 +
+    | 'speed-down'  // 倍速 -
+    | 'next'        // 下一集
+    | 'prev'        // 上一集
+    | 'stop';       // 停止（暂停）
+
 // 播放器抽象基类
 export abstract class BasePlayer {
     protected config: Required<Config>;
@@ -93,6 +106,12 @@ export abstract class BasePlayer {
 
     // 判断播放器是否正在播放
     abstract isPlaying(): boolean;
+
+    // 统一控制入口（全局快捷键/远程控制转发）。默认无操作；各播放器根据自身能力覆写。
+    // action 见 PlayerControlAction。返回是否"已处理"（未处理的动作由上层忽略）。
+    control(_action: PlayerControlAction): boolean {
+        return false;
+    }
 
     // 原地切换播放内容：在已运行的「同类型」播放器窗口内直接切换，不重新拉起页面。
     // 默认不支持（返回 false）；PotPlayer 通过 /current 命令行复用现有窗口实现。

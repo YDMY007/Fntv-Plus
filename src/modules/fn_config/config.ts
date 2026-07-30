@@ -100,6 +100,24 @@ export interface Config {
     // 鼠标滚轮横向滚动开关（默认开启=true：竖向滚轮在横向容器内转为左右滑动；
     // 关闭=false：恢复飞牛原生——鼠标只管上下滚动，横向靠左右箭头键/滚动条）
     wheelHScroll?: boolean;
+    // ===== 字幕样式（写入 MPV sub-* 参数，固化到 mpv-user.conf）=====
+    mpvSubFontSize?: number;     // 字幕字号（0=跟随 MPV 默认）
+    mpvSubOutline?: number;      // 描边尺寸（0=无；默认 0）
+    mpvSubShadow?: number;       // 阴影偏移（0=无；默认 0）
+    mpvSubBold?: boolean;        // 粗体（默认关）
+    mpvSubColor?: string;        // 字幕颜色（十六进制 #RRGGBB，默认白色）
+    mpvSubPosition?: number;     // 字幕垂直位置 0-100（100=底部；默认 100）
+    // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
+    biliDanmakuOpacity?: number;     // 透明度 0-1（默认 0.7）
+    biliDanmakuFontSize?: number;    // 字号（默认 50）
+    biliDanmakuOutline?: number;     // 描边 0-4（默认 1.0）
+    biliDanmakuShadow?: number;      // 阴影（默认 0）
+    biliDanmakuBold?: boolean;       // 粗体（默认 true）
+    biliDanmakuDisplayArea?: number; // 显示区域 0-1（默认 0.85）
+    biliDanmakuMaxScreen?: number;   // 同屏最大弹幕数 0=不限（默认 0）
+    biliDanmakuBlacklist?: string;   // 屏蔽词（换行分隔，支持正则），写入 blacklist.txt
+    // ===== 全局快捷键（即使 Electron 窗口失焦也能控制正在播放的 MPV/PotPlayer）=====
+    globalShortcutsEnabled?: boolean; // 默认开启
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
     // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
@@ -460,6 +478,77 @@ export function setMpvIccEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// ===== 字幕样式 getter/setter =====
+function numOr(cfg: Config, key: keyof Config, dflt: number): number {
+    const v = cfg[key];
+    return (typeof v === 'number' && !isNaN(v)) ? v : dflt;
+}
+
+export function getMpvSubFontSize(): number { return numOr(readConfig() || {}, 'mpvSubFontSize', 0); }
+export function setMpvSubFontSize(v: number): void {
+    const c = readConfig() || {}; c.mpvSubFontSize = Math.max(0, Math.round(v)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getMpvSubOutline(): number { return numOr(readConfig() || {}, 'mpvSubOutline', 0); }
+export function setMpvSubOutline(v: number): void {
+    const c = readConfig() || {}; c.mpvSubOutline = Math.max(0, Number(v) || 0); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getMpvSubShadow(): number { return numOr(readConfig() || {}, 'mpvSubShadow', 0); }
+export function setMpvSubShadow(v: number): void {
+    const c = readConfig() || {}; c.mpvSubShadow = Math.max(0, Number(v) || 0); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getMpvSubBold(): boolean { const c = readConfig() || {}; return c.mpvSubBold === true; }
+export function setMpvSubBold(v: boolean): void {
+    const c = readConfig() || {}; c.mpvSubBold = !!v; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getMpvSubColor(): string { const c = readConfig() || {}; return c.mpvSubColor || '#FFFFFF'; }
+export function setMpvSubColor(v: string): void {
+    const c = readConfig() || {}; c.mpvSubColor = v || '#FFFFFF'; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getMpvSubPosition(): number { return numOr(readConfig() || {}, 'mpvSubPosition', 100); }
+export function setMpvSubPosition(v: number): void {
+    const c = readConfig() || {}; c.mpvSubPosition = Math.min(100, Math.max(0, Math.round(v))); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+
+// ===== B站弹幕样式与过滤 getter/setter =====
+export function getBiliDanmakuOpacity(): number { return numOr(readConfig() || {}, 'biliDanmakuOpacity', 0.7); }
+export function setBiliDanmakuOpacity(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuOpacity = Math.min(1, Math.max(0, Number(v) || 0)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuFontSize(): number { return numOr(readConfig() || {}, 'biliDanmakuFontSize', 50); }
+export function setBiliDanmakuFontSize(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuFontSize = Math.max(1, Math.round(v)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuOutline(): number { return numOr(readConfig() || {}, 'biliDanmakuOutline', 1.0); }
+export function setBiliDanmakuOutline(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuOutline = Math.max(0, Number(v) || 0); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuShadow(): number { return numOr(readConfig() || {}, 'biliDanmakuShadow', 0); }
+export function setBiliDanmakuShadow(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuShadow = Math.max(0, Number(v) || 0); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuBold(): boolean { const c = readConfig() || {}; return c.biliDanmakuBold !== false; }
+export function setBiliDanmakuBold(v: boolean): void {
+    const c = readConfig() || {}; c.biliDanmakuBold = !!v; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuDisplayArea(): number { return numOr(readConfig() || {}, 'biliDanmakuDisplayArea', 0.85); }
+export function setBiliDanmakuDisplayArea(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuDisplayArea = Math.min(1, Math.max(0, Number(v) || 0)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuMaxScreen(): number { return numOr(readConfig() || {}, 'biliDanmakuMaxScreen', 0); }
+export function setBiliDanmakuMaxScreen(v: number): void {
+    const c = readConfig() || {}; c.biliDanmakuMaxScreen = Math.max(0, Math.round(v)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+export function getBiliDanmakuBlacklist(): string { const c = readConfig() || {}; return c.biliDanmakuBlacklist || ''; }
+export function setBiliDanmakuBlacklist(v: string): void {
+    const c = readConfig() || {}; c.biliDanmakuBlacklist = v || ''; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+
+// ===== 全局快捷键 getter/setter =====
+export function getGlobalShortcutsEnabled(): boolean { const c = readConfig() || {}; return c.globalShortcutsEnabled !== false; }
+export function setGlobalShortcutsEnabled(v: boolean): void {
+    const c = readConfig() || {}; c.globalShortcutsEnabled = !!v; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
+}
+
 // 向后兼容的函数
 export function getDownloadProxyUrl(): string {
     return getDownloadProxyConfig().proxyUrl;
@@ -729,5 +818,23 @@ module.exports = {
     getDetailBoxless,
     setDetailBoxless,
     getWheelHScroll,
-    setWheelHScroll
+    setWheelHScroll,
+    // 字幕样式
+    getMpvSubFontSize, setMpvSubFontSize,
+    getMpvSubOutline, setMpvSubOutline,
+    getMpvSubShadow, setMpvSubShadow,
+    getMpvSubBold, setMpvSubBold,
+    getMpvSubColor, setMpvSubColor,
+    getMpvSubPosition, setMpvSubPosition,
+    // B站弹幕样式与过滤
+    getBiliDanmakuOpacity, setBiliDanmakuOpacity,
+    getBiliDanmakuFontSize, setBiliDanmakuFontSize,
+    getBiliDanmakuOutline, setBiliDanmakuOutline,
+    getBiliDanmakuShadow, setBiliDanmakuShadow,
+    getBiliDanmakuBold, setBiliDanmakuBold,
+    getBiliDanmakuDisplayArea, setBiliDanmakuDisplayArea,
+    getBiliDanmakuMaxScreen, setBiliDanmakuMaxScreen,
+    getBiliDanmakuBlacklist, setBiliDanmakuBlacklist,
+    // 全局快捷键
+    getGlobalShortcutsEnabled, setGlobalShortcutsEnabled
 };

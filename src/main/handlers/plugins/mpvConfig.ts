@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as logger from '../../../modules/logger';
+import * as fnConfig from '../../../modules/fn_config/config';
 
 /**
  * MPV配置文件管理插件
@@ -224,7 +225,7 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
     try {
         const shaders = MPV_SHADER_PRESETS[shaderKey] || [];
         const lines: string[] = [
-            '# 本文件由「应用设置面板 > 播放器 > 默认 MPV 着色器 / ICC 校色」自动生成。',
+            '# 本文件由「应用设置面板」自动生成（默认着色器 / ICC 校色 / 字幕样式）。',
             '# 修改后会被重写，请勿手动编辑。',
             ''
         ];
@@ -232,6 +233,19 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
             lines.push('glsl-shaders-append=~~/shaders/' + s);
         }
         lines.push('icc-profile-auto=' + (iccEnabled ? 'yes' : 'no'));
+        // ===== 字幕样式（由「设置面板 > 字幕样式」控制）=====
+        const subFontSize = fnConfig.getMpvSubFontSize();
+        const subOutline = fnConfig.getMpvSubOutline();
+        const subShadow = fnConfig.getMpvSubShadow();
+        const subBold = fnConfig.getMpvSubBold();
+        const subColor = fnConfig.getMpvSubColor();
+        const subPos = fnConfig.getMpvSubPosition();
+        if (subFontSize > 0) lines.push('sub-font-size=' + subFontSize);
+        if (subOutline > 0) lines.push('sub-border-size=' + subOutline);
+        if (subShadow > 0) lines.push('sub-shadow-offset=' + subShadow);
+        lines.push('sub-bold=' + (subBold ? 'yes' : 'no'));
+        if (subColor && subColor !== '#FFFFFF') lines.push('sub-color=' + subColor);
+        if (subPos !== 100) lines.push('sub-pos=' + subPos);
         const content = lines.join('\n') + '\n';
 
         // ⚠️ 关键修复：同时写入两个目录，确保无论 MPV 处于哪种模式都能生效：
@@ -247,7 +261,7 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
                 }
                 const target = path.join(dir, 'mpv-user.conf');
                 fs.writeFileSync(target, content, 'utf-8');
-                logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled})`);
+                logger.info(`MPV 默认配置已写入: ${target} (shader=${shaderKey || 'off'}, icc=${iccEnabled}, sub:size=${subFontSize},outline=${subOutline},shadow=${subShadow},bold=${subBold},color=${subColor},pos=${subPos})`);
             } catch (e) {
                 logger.error(`写入 mpv-user.conf 失败: ${dir}`, e);
             }
@@ -255,6 +269,11 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
     } catch (error) {
         logger.error('写入 mpv-user.conf 失败:', error);
     }
+}
+
+// 触发 mpv-user.conf 重新生成（字幕样式变更后调用；着色器/ICC 保持当前设置不变）
+function writeMpvSubtitleStyle(): void {
+    writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false);
 }
 
 // 写入 MPV B站弹幕搜索开关到 script-opts/uosc_danmaku.conf
@@ -316,6 +335,63 @@ function writeBiliAggregateThreshold(threshold: number): void {
     }
 }
 
+// 写入 B站弹幕「样式与过滤」到 script-opts/uosc_danmaku.conf（覆盖 fontsize/opacity/outline/shadow/bold/displayarea/max_screen_danmaku/blacklist_path）
+// 同时把屏蔽词写入 <portable_config>/danmaku_blacklist.txt（用 ~~ 相对路径引用，MPV 自动解析到当前配置目录）。
+// 保留 conf 中其他选项（bili_search_enabled / auto_load_extra / aggregate_threshold 等由各自函数管理）。
+function writeBiliDanmakuStyle(): void {
+    try {
+        const opacity = fnConfig.getBiliDanmakuOpacity();
+        const fontsize = fnConfig.getBiliDanmakuFontSize();
+        const outline = fnConfig.getBiliDanmakuOutline();
+        const shadow = fnConfig.getBiliDanmakuShadow();
+        const bold = fnConfig.getBiliDanmakuBold();
+        const displayarea = fnConfig.getBiliDanmakuDisplayArea();
+        const maxScreen = fnConfig.getBiliDanmakuMaxScreen();
+        const blacklist = fnConfig.getBiliDanmakuBlacklist() || '';
+
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) fs.mkdirSync(scriptOptsDir, { recursive: true });
+                const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                // 移除已存在的相关键及旧注释，避免堆叠
+                lines = lines.filter(l => !/^\s*(fontsize|opacity|outline|shadow|bold|displayarea|max_screen_danmaku|blacklist_path)\s*=/.test(l)
+                    && !/^#\s*B站弹幕(样式|透明度|字号|描边|阴影|粗体|显示区域|同屏上限|屏蔽词)/.test(l));
+                while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+
+                const blacklistFile = path.join(dir, 'danmaku_blacklist.txt');
+                // 屏蔽词：按行写入（支持 lua 正则）；空则清空文件引用
+                const words = blacklist.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
+                fs.writeFileSync(blacklistFile, words.join('\n') + (words.length ? '\n' : ''), 'utf-8');
+
+                const push = (label: string, key: string, val: string) => {
+                    lines.push(`# B站弹幕${label}`);
+                    lines.push(`${key}=${val}`);
+                };
+                push('透明度', 'opacity', String(opacity));
+                push('字号', 'fontsize', String(fontsize));
+                push('描边', 'outline', String(outline));
+                push('阴影', 'shadow', String(shadow));
+                push('粗体', 'bold', bold ? 'yes' : 'no');
+                push('显示区域', 'displayarea', String(displayarea));
+                push('同屏上限', 'max_screen_danmaku', String(maxScreen));
+                push('屏蔽词', 'blacklist_path', '~~/danmaku_blacklist.txt');
+                fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                logger.info(`B站弹幕样式已写入: ${target} (opacity=${opacity},size=${fontsize},outline=${outline},shadow=${shadow},bold=${bold},area=${displayarea},max=${maxScreen},blacklist=${words.length}词)`);
+            } catch (e) {
+                logger.error(`写入 uosc_danmaku.conf 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('写入 B站弹幕样式失败:', error);
+    }
+}
+
 // 插件初始化函数
 function init(): void {
     logger.info('Initializing MPV Config Plugin...');
@@ -335,6 +411,8 @@ export {
     init,
     getPortableConfigDir,
     writeMpvUserConfig,
+    writeMpvSubtitleStyle,
     writeBiliSearchEnabled,
-    writeBiliAggregateThreshold
+    writeBiliAggregateThreshold,
+    writeBiliDanmakuStyle
 };

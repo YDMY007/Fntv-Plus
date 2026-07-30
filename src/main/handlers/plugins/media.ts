@@ -644,6 +644,23 @@ function init(): void {
     setImmediate(prepareBundledPotPlayer);
 }
 
+/**
+ * 统一控制当前播放器（全局快捷键/远程控制入口）。
+ * 转发到 currentPlayer.control(action)；无播放器在播时返回 false。
+ */
+export function controlCurrentPlayer(action: ply.PlayerControlAction): boolean {
+    if (!currentPlayer || !currentPlayer.isPlaying()) {
+        log.warn(`[controlCurrentPlayer] 当前无播放器在播，忽略动作: ${action}`);
+        return false;
+    }
+    try {
+        return currentPlayer.control(action);
+    } catch (e: any) {
+        log.warn(`[controlCurrentPlayer] 动作 ${action} 失败:`, e?.message || e);
+        return false;
+    }
+}
+
 export {
     init
 };

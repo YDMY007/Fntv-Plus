@@ -2944,6 +2944,213 @@ function handle(): void {
 
     contentGrid.appendChild(secDouban.el);
 
+    // ===== 通用小工具：滑块行（标签 + range + 实时数值）=====
+    const addSlider = (
+      labelText: string, min: number, max: number, step: number, value: number,
+      fmt: (v: number) => string, onInput: (v: number) => void
+    ): { row: HTMLElement; input: HTMLInputElement; valEl: HTMLElement } => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:7px 6px;';
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
+      const valEl = document.createElement('span');
+      valEl.textContent = fmt(value);
+      valEl.style.cssText = 'color:var(--fnos-ui-sec);font-size:11px;font-variant-numeric:tabular-nums;';
+      head.appendChild(span); head.appendChild(valEl);
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(min); input.max = String(max); input.step = String(step);
+      input.value = String(value);
+      input.style.cssText = 'width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;';
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        valEl.textContent = fmt(v);
+        onInput(v);
+      });
+      row.appendChild(head); row.appendChild(input);
+      return { row, input, valEl };
+    };
+    // 通用：多行文本框行
+    const addTextarea = (labelText: string, value: string, placeholder: string, onInput: (v: string) => void): { row: HTMLElement; ta: HTMLTextAreaElement } => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:7px 6px;';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.placeholder = placeholder;
+      ta.rows = 4;
+      ta.style.cssText = 'width:100%;resize:vertical;border-radius:8px;padding:7px 9px;font-size:11.5px;'
+        + 'background:var(--fnos-ui-input-bg)!important;color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);'
+        + 'font-family:inherit;line-height:1.5;';
+      ta.addEventListener('input', () => onInput(ta.value));
+      row.appendChild(span); row.appendChild(ta);
+      return { row, ta };
+    };
+
+    // ===== 字幕样式（写入 MPV sub-* 参数，固化到 mpv-user.conf）=====
+    const secSub = section('字幕样式');
+    const subBody = secSub.body;
+    let _subTimer: any = null;
+    const pushSub = (): void => {
+      const payload = {
+        fontSize: parseFloat((subInputs.fontSize.input as HTMLInputElement).value),
+        outline: parseFloat((subInputs.outline.input as HTMLInputElement).value),
+        shadow: parseFloat((subInputs.shadow.input as HTMLInputElement).value),
+        bold: boldToggle.checked,
+        color: colorInput.value,
+        position: parseFloat((subInputs.position.input as HTMLInputElement).value)
+      };
+      if (_subTimer) clearTimeout(_subTimer);
+      _subTimer = setTimeout(() => {
+        ipcRenderer.invoke('settings:set-mpv-subtitle-style', payload).catch((err) => log('set-mpv-subtitle-style failed', err));
+      }, 250);
+    };
+    const subInputs = {
+      fontSize: addSlider('字号（0=自动）', 0, 120, 1, 0, (v) => v === 0 ? '自动' : String(v), pushSub),
+      outline: addSlider('描边', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushSub),
+      shadow: addSlider('阴影', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushSub),
+      position: addSlider('垂直位置（100=底部）', 0, 100, 1, 100, (v) => String(v), pushSub)
+    };
+    subBody.appendChild(subInputs.fontSize.row);
+    subBody.appendChild(subInputs.outline.row);
+    subBody.appendChild(subInputs.shadow.row);
+    subBody.appendChild(subInputs.position.row);
+    // 粗体 + 颜色 一行
+    const subLine = document.createElement('div');
+    subLine.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 6px;';
+    const boldToggle = addToggle('粗体');
+    boldToggle.checked = false;
+    boldToggle.addEventListener('change', pushSub);
+    const colorWrap = document.createElement('label');
+    colorWrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;';
+    const colorLabel = document.createElement('span');
+    colorLabel.textContent = '颜色';
+    colorLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.value = '#FFFFFF';
+    colorInput.style.cssText = 'width:34px;height:24px;border:none;background:none;cursor:pointer;';
+    colorInput.addEventListener('input', pushSub);
+    colorWrap.appendChild(colorLabel); colorWrap.appendChild(colorInput);
+    subLine.appendChild(boldToggle.parentElement as HTMLElement); subLine.appendChild(colorWrap);
+    subBody.appendChild(subLine);
+    // 说明
+    const subHint = document.createElement('div');
+    subHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
+    subHint.textContent = '修改即时生效（下次播放应用）；0=跟随 MPV 默认。';
+    subBody.appendChild(subHint);
+    contentGrid.appendChild(secSub.el);
+
+    // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
+    const secDanmaku = section('弹幕样式与过滤');
+    const danBody = secDanmaku.body;
+    let _danTimer: any = null;
+    const pushDan = (): void => {
+      const payload = {
+        opacity: parseFloat((danInputs.opacity.input as HTMLInputElement).value),
+        fontSize: parseFloat((danInputs.fontSize.input as HTMLInputElement).value),
+        outline: parseFloat((danInputs.outline.input as HTMLInputElement).value),
+        shadow: parseFloat((danInputs.shadow.input as HTMLInputElement).value),
+        bold: danInputs.bold.checked,
+        displayArea: parseFloat((danInputs.displayArea.input as HTMLInputElement).value),
+        maxScreen: parseInt((danInputs.maxScreen.input as HTMLInputElement).value, 10),
+        blacklist: danInputs.blacklist.ta.value
+      };
+      if (_danTimer) clearTimeout(_danTimer);
+      _danTimer = setTimeout(() => {
+        ipcRenderer.invoke('settings:set-bili-danmaku-style', payload).catch((err) => log('set-bili-danmaku-style failed', err));
+      }, 300);
+    };
+    const danInputs = {
+      opacity: addSlider('透明度', 0, 1, 0.05, 0.7, (v) => v.toFixed(2), pushDan),
+      fontSize: addSlider('字号', 10, 120, 1, 50, (v) => String(v), pushDan),
+      outline: addSlider('描边', 0, 4, 0.1, 1.0, (v) => v.toFixed(1), pushDan),
+      shadow: addSlider('阴影', 0, 10, 0.5, 0, (v) => v.toFixed(1), pushDan),
+      displayArea: addSlider('显示区域', 0, 1, 0.05, 0.85, (v) => v.toFixed(2), pushDan),
+      maxScreen: addSlider('同屏最大弹幕（0=不限）', 0, 200, 1, 0, (v) => v === 0 ? '不限' : String(v), pushDan),
+      bold: (() => { const t = addToggle('粗体'); t.checked = true; t.addEventListener('change', pushDan); return t; })(),
+      blacklist: addTextarea('屏蔽词（每行一条，支持正则）', '', '例如：\n广告\n关注.*', pushDan)
+    };
+    danBody.appendChild(danInputs.opacity.row);
+    danBody.appendChild(danInputs.fontSize.row);
+    danBody.appendChild(danInputs.outline.row);
+    danBody.appendChild(danInputs.shadow.row);
+    danBody.appendChild(danInputs.displayArea.row);
+    danBody.appendChild(danInputs.maxScreen.row);
+    danBody.appendChild(danInputs.bold.parentElement as HTMLElement);
+    danBody.appendChild(danInputs.blacklist.row);
+    const danHint = document.createElement('div');
+    danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
+    danHint.textContent = '「屏蔽顶部/底部弹幕」「弹幕速度」需改 Lua 脚本，本版先开放上述可配置项。';
+    danBody.appendChild(danHint);
+    contentGrid.appendChild(secDanmaku.el);
+
+    // ===== 全局快捷键（即使窗口失焦也能控制播放）=====
+    const secShortcut = section('全局快捷键');
+    const scBody = secShortcut.body;
+    const swShortcut = addToggle('启用全局快捷键');
+    swShortcut.checked = true;
+    swShortcut.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-global-shortcuts', swShortcut.checked).catch((err) => log('set-global-shortcuts failed', err));
+    });
+    scBody.appendChild(swShortcut.parentElement as HTMLElement);
+    const scHint = document.createElement('div');
+    scHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.7;white-space:pre-line;';
+    scHint.textContent = '播放/暂停：媒体键 或 键盘播放键\n下一集/上一集：媒体上一曲/下一曲键\n快退/快进：Ctrl/⌘ + Shift + ←/→\n倍速±：Ctrl/⌘ + Shift + ↑/↓';
+    scBody.appendChild(scHint);
+    contentGrid.appendChild(secShortcut.el);
+
+    // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
+    const secDiag = section('诊断信息');
+    const diagBody = secDiag.body;
+    const diagPre = document.createElement('pre');
+    diagPre.style.cssText = 'margin:0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px;font-size:10.5px;'
+      + 'line-height:1.55;color:var(--fnos-ui-text);white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;';
+    diagPre.textContent = '点击「刷新」加载诊断信息…';
+    const diagBtns = document.createElement('div');
+    diagBtns.style.cssText = 'display:flex;gap:6px;padding:8px 0 0;';
+    const diagRefresh = mkBtn('刷新', true);
+    const diagCopy = mkBtn('复制', true);
+    diagBtns.appendChild(diagRefresh); diagBtns.appendChild(diagCopy);
+    const loadDiag = async (): Promise<void> => {
+      try {
+        const r: any = await ipcRenderer.invoke('settings:diagnostics');
+        if (!r || !r.ok) { diagPre.textContent = '诊断失败：' + ((r && r.error) || '未知'); return; }
+        const lines: string[] = [];
+        lines.push(`版本: ${r.version}${r.isPackaged ? ' (打包版)' : ' (dev)'}`);
+        lines.push(`NAS 地址: ${r.domain}`);
+        lines.push(`账号: ${r.account}  登录方式: ${r.loginType}  Token: ${r.hasToken ? '已保存' : '无'}`);
+        lines.push(`默认播放器: ${r.defaultPlayer}  MPV: ${r.mpvPath}  Pot: ${r.potPath}`);
+        lines.push(`MPV 配置目录: ${r.mpvConfigDir}`);
+        lines.push(`B站弹幕搜索: ${r.biliSearchEnabled ? '开' : '关'}  聚合阈值: ${r.biliAggregateThreshold}`);
+        lines.push(`豆瓣同步: ${r.doubanEnabled ? '开' : '关'}${r.doubanLoggedIn ? '(已登录)' : ''}   Bangumi: ${r.bangumiEnabled ? '开' : '关'}${r.bangumiHasToken ? '(有Token)' : ''}`);
+        lines.push(`全局快捷键: ${r.globalShortcuts ? '开' : '关'}`);
+        lines.push('');
+        lines.push('--- mpv-user.conf ---');
+        lines.push(r.mpvUserConf || '(空)');
+        lines.push('');
+        lines.push('--- uosc_danmaku.conf ---');
+        lines.push(r.danmakuConf || '(空)');
+        diagPre.textContent = lines.join('\n');
+      } catch (err) {
+        diagPre.textContent = '诊断加载异常：' + String(err);
+      }
+    };
+    diagRefresh.addEventListener('click', (e: Event) => { e.stopPropagation(); loadDiag(); });
+    diagCopy.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const text = diagPre.textContent || '';
+      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    });
+    diagBody.appendChild(diagPre);
+    diagBody.appendChild(diagBtns);
+    contentGrid.appendChild(secDiag.el);
+
     // ===== 调试日志（并入「退出行为」卡片）=====
     // 分隔线：区分「退出行为」与「调试日志」
     const dbgDivider = document.createElement('div');
@@ -3327,6 +3534,37 @@ function handle(): void {
         swMpvBiliSearch.checked = s.mpvBiliSearchEnabled !== false;
         // B站弹幕聚合阈值回填（默认 1500；<0 视为禁用=0）
         aggInput.value = String(s.mpvBiliAggregateThreshold == null ? 1500 : (s.mpvBiliAggregateThreshold < 0 ? 0 : s.mpvBiliAggregateThreshold));
+      });
+      seg('subtitle', () => {
+        subInputs.fontSize.input.value = String(s.mpvSubFontSize || 0);
+        subInputs.fontSize.valEl.textContent = (s.mpvSubFontSize || 0) === 0 ? '自动' : String(s.mpvSubFontSize || 0);
+        subInputs.outline.input.value = String(s.mpvSubOutline || 0);
+        subInputs.outline.valEl.textContent = (s.mpvSubOutline || 0).toFixed(1);
+        subInputs.shadow.input.value = String(s.mpvSubShadow || 0);
+        subInputs.shadow.valEl.textContent = (s.mpvSubShadow || 0).toFixed(1);
+        subInputs.position.input.value = String(s.mpvSubPosition || 100);
+        subInputs.position.valEl.textContent = String(s.mpvSubPosition || 100);
+        boldToggle.checked = !!s.mpvSubBold;
+        colorInput.value = s.mpvSubColor || '#FFFFFF';
+      });
+      seg('danmaku', () => {
+        danInputs.opacity.input.value = String(s.biliDanmakuOpacity ?? 0.7);
+        danInputs.opacity.valEl.textContent = (s.biliDanmakuOpacity ?? 0.7).toFixed(2);
+        danInputs.fontSize.input.value = String(s.biliDanmakuFontSize || 50);
+        danInputs.fontSize.valEl.textContent = String(s.biliDanmakuFontSize || 50);
+        danInputs.outline.input.value = String(s.biliDanmakuOutline ?? 1.0);
+        danInputs.outline.valEl.textContent = (s.biliDanmakuOutline ?? 1.0).toFixed(1);
+        danInputs.shadow.input.value = String(s.biliDanmakuShadow || 0);
+        danInputs.shadow.valEl.textContent = (s.biliDanmakuShadow || 0).toFixed(1);
+        danInputs.displayArea.input.value = String(s.biliDanmakuDisplayArea ?? 0.85);
+        danInputs.displayArea.valEl.textContent = (s.biliDanmakuDisplayArea ?? 0.85).toFixed(2);
+        danInputs.maxScreen.input.value = String(s.biliDanmakuMaxScreen || 0);
+        danInputs.maxScreen.valEl.textContent = (s.biliDanmakuMaxScreen || 0) === 0 ? '不限' : String(s.biliDanmakuMaxScreen || 0);
+        danInputs.bold.checked = s.biliDanmakuBold !== false;
+        danInputs.blacklist.ta.value = s.biliDanmakuBlacklist || '';
+      });
+      seg('shortcut', () => {
+        swShortcut.checked = s.globalShortcutsEnabled !== false;
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
