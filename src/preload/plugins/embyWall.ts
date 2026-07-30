@@ -116,55 +116,64 @@ function log(...a: any[]) {
   }
 
   // 延迟等 DOM 渲染(fnOS 登录页是 React SPA)
-  setTimeout(async () => {
+  setTimeout(() => {
     try {
-      const cfg: any = await ipcRenderer.invoke('get-config');
-      const config = (cfg && cfg.config) || {};
-      const history = (cfg && cfg.history) || [];
+      // [lc-213 修正] 'get-config' 是事件式注册(ipcMain.on, 非 ipcMain.handle),
+      //   故不能用 ipcRenderer.invoke(会报"No handler registered")——须用 send + once('config-data'),
+      //   与本地登录页 resource/login/index.html 的写法一致.
+      ipcRenderer.send('get-config');
+      ipcRenderer.once('config-data', (_e: any, data: any) => {
+        try {
+          const config = (data && data.config) || {};
+          const history = (data && data.history) || [];
 
-      // 优先从 config 取账号; 历史记录里也找同域条目取密码
-      let username = config.account || '';
-      let password = '';
+          // 优先从 config 取账号; 历史记录里也找同域条目取密码
+          let username = config.account || '';
+          let password = '';
 
-      // 从历史记录找密码(用户勾了"记住密码"时 history 条目含 password 字段)
-      const domain = config.domain || '';
-      for (const h of history) {
-        if (h.domain === domain && h.account === username && h.password) {
-          password = h.password;
-          break;
+          // 从历史记录找密码(用户勾了"记住密码"时 history 条目含 password 字段)
+          const domain = config.domain || '';
+          for (const h of history) {
+            if (h.domain === domain && h.account === username && h.password) {
+              password = h.password;
+              break;
+            }
+          }
+
+          if (!username) { log('[lc-213] /v/login 自动填充跳过: 无保存的账号'); return; }
+
+          // 多选择器兼容(同 fnid_login.ts 注入脚本)
+          const uInput = document.getElementById('username')
+            || document.querySelector('input[name="username"]')
+            || document.querySelector('input[placeholder*="用户名"]')
+            || document.querySelector('input[placeholder*="账号"]')
+            || (function() { const inputs = document.querySelectorAll('input[type="text"], input:not([type])'); return inputs.length > 0 ? inputs[0] as HTMLInputElement : null; })();
+          const pInput = document.getElementById('password')
+            || document.querySelector('input[name="password"]')
+            || document.querySelector('input[placeholder*="密码"]')
+            || (function() { const inputs = document.querySelectorAll('input[type="password"]'); return inputs.length > 0 ? inputs[0] as HTMLInputElement : null; })();
+
+          if (!uInput) { log('[lc-213] /v/login 未找到用户名输入框'); return; }
+
+          log(`[lc-213] /v/login 自动填充: 用户名=${username}, 密码=${password ? '有' : '无(未记住密码)'}`);
+          triggerInput(uInput as HTMLInputElement, username);
+          if (password && pInput) {
+            triggerInput(pInput as HTMLInputElement, password);
+            // 填充后自动点登录按钮
+            setTimeout(() => {
+              const btn = document.querySelector('button[type="submit"]')
+                || Array.from(document.querySelectorAll('button')).find((b: HTMLElement) => /登录/.test(b.innerText))
+                || document.querySelector('input[type="submit"]');
+              if (btn) { (btn as HTMLElement).click(); log('[lc-213] /v/login 已自动点击登录'); }
+              else { log('[lc-213] /v/login 未找到登录按钮'); }
+            }, 400);
+          } else {
+            log('[lc-213] /v/login 仅填充了用户名, 密码为空(需用户手动输入或勾选"记住密码")');
+          }
+        } catch (e) {
+          log('[lc-213] /v/login 自动填充处理异常:', String(e).slice(0, 120));
         }
-      }
-
-      if (!username) { log('[lc-213] /v/login 自动填充跳过: 无保存的账号'); return; }
-
-      // 多选择器兼容(同 fnid_login.ts 注入脚本)
-      const uInput = document.getElementById('username')
-        || document.querySelector('input[name="username"]')
-        || document.querySelector('input[placeholder*="用户名"]')
-        || document.querySelector('input[placeholder*="账号"]')
-        || (function() { const inputs = document.querySelectorAll('input[type="text"], input:not([type])'); return inputs.length > 0 ? inputs[0] as HTMLInputElement : null; })();
-      const pInput = document.getElementById('password')
-        || document.querySelector('input[name="password"]')
-        || document.querySelector('input[placeholder*="密码"]')
-        || (function() { const inputs = document.querySelectorAll('input[type="password"]'); return inputs.length > 0 ? inputs[0] as HTMLInputElement : null; })();
-
-      if (!uInput) { log('[lc-213] /v/login 未找到用户名输入框'); return; }
-
-      log(`[lc-213] /v/login 自动填充: 用户名=${username}, 密码=${password ? '有' : '无(未记住密码)'}`);
-      triggerInput(uInput as HTMLInputElement, username);
-      if (password && pInput) {
-        triggerInput(pInput as HTMLInputElement, password);
-        // 填充后自动点登录按钮
-        setTimeout(() => {
-          const btn = document.querySelector('button[type="submit"]')
-            || Array.from(document.querySelectorAll('button')).find((b: HTMLElement) => /登录/.test(b.innerText))
-            || document.querySelector('input[type="submit"]');
-          if (btn) { (btn as HTMLElement).click(); log('[lc-213] /v/login 已自动点击登录'); }
-          else { log('[lc-213] /v/login 未找到登录按钮'); }
-        }, 400);
-      } else {
-        log('[lc-213] /v/login 仅填充了用户名, 密码为空(需用户手动输入或勾选"记住密码")');
-      }
+      });
     } catch (e) {
       log('[lc-213] /v/login 自动填充异常:', String(e).slice(0, 120));
     }
