@@ -58,6 +58,52 @@ async function copyAllCookiesToMainSession(
 }
 
 /**
+ * 反向拷贝: 将主窗口 persist:fntv session 的全部 cookie 复制到 oauthWindow 的 persist:fnid-oauth session.
+ *
+ * 修复「访问码(防伪码)门禁导致 FN ID 登录失败 / 卡桌面」:
+ *   fnOS 新增的系统级「应用访问码」门禁, 验证通过会写授权 cookie 到 persist:fntv
+ *   (用户在主窗口 webview 里输访问码时落在此 session). 而 oauthWindow 用独立的 persist:fnid-oauth session,
+ *   没有该授权 cookie → 它向 NAS 发 /v/api/v1/sys/config 时被门禁拦截, 返回访问码门户 HTML 而非 JSON
+ *   → FN ID 登录报「中继连接失败 / sys/config 持续返回门户 HTML」→ 卡在桌面.
+ *   登录前把 persist:fntv 的 cookie(含访问码授权)复制到 oauth session, 让 oauthWindow 的请求带上授权 cookie,
+ *   sys/config 即返回 JSON, 登录流程得以继续.
+ */
+async function copyFntvCookiesToOauthSession(): Promise<number> {
+    try {
+        const fntvSession = session.fromPartition('persist:fntv');
+        const oauthSession = session.fromPartition('persist:fnid-oauth');
+        const cookies = await fntvSession.cookies.get({});
+        let copied = 0;
+        for (const c of cookies) {
+            try {
+                // 按每条 cookie 自身 domain 构造 url(去前导点), 跨域 set 才不会报错
+                const host = (c.domain || '').replace(/^\./, '') || 'localhost';
+                const url = `http${c.secure ? 's' : ''}://${host}${c.path || '/'}`;
+                await oauthSession.cookies.set({
+                    url,
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain,
+                    path: c.path || '/',
+                    secure: c.secure ?? false,
+                    httpOnly: c.httpOnly ?? false,
+                    expirationDate: c.expirationDate || (Math.floor(Date.now() / 1000) + 86400 * 365),
+                    sameSite: c.sameSite || 'no_restriction',
+                });
+                copied++;
+            } catch (e) {
+                log.warn('[FN ID] fntv→oauth cookie 复制失败:', c.name, e);
+            }
+        }
+        log.info(`[FN ID] 已复制 ${copied} 个 persist:fntv cookie → persist:fnid-oauth (含访问码授权)`);
+        return copied;
+    } catch (err) {
+        log.error('[FN ID] fntv→oauth cookie 批量复制失败:', err);
+        return 0;
+    }
+}
+
+/**
  * FN ID 登录插件
  * 通过 FN Connect OAuth 流程实现 FN ID 登录
  */
@@ -477,6 +523,10 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         });
 
         const oauthSession = oauthWindow.webContents.session;
+
+        // [lc-208] 访问码门禁修复: 登录前把主窗口 persist:fntv 的 cookie(含访问码授权)复制到 oauth session,
+        // 否则 oauthWindow 向 NAS 发 sys/config 会被访问码门禁拦截返回门户 HTML, 导致 FN ID 登录失败/卡桌面.
+        await copyFntvCookiesToOauthSession();
 
         // 拦截 target="_blank" / window.open: 不开新窗, 改为在 oauthWindow 内导航.
         // 原因: 5ddd.com 中继选择页的三个选项(中继转发/公网IP)通过 window.open 或 target=_blank 跳转,
