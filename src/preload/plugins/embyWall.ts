@@ -125,6 +125,10 @@ let _apiLoaded = false;
 let _apiLoading = false;
 
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
+  // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报: 此时 location.origin 为 "file://",
+  // 会拼出 file:///v/list/all 触发 ERR_FILE_NOT_FOUND 噪音(且永远拉不到数据).
+  // 直接返回空数组, 首屏仍用硬编码数据兜底, 避免创建 file:// iframe.
+  if (location.protocol === 'file:') return _apiShows;
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
