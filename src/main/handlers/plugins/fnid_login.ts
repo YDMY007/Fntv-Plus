@@ -471,8 +471,9 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
     let loginReject: ((reason?: any) => void) | null = null;
     let relayWatchdog: NodeJS.Timeout | null = null; // 官方中继(.fnos.net)配置看门狗
     let relayPollTimer: NodeJS.Timeout | null = null; // 官方中继子域主进程轮询定时器
-    let relayPollStarted = false;
-    let relayFailedNotified = false; // 官方中继失败弹窗去重, 只弹一次
+        let relayPollStarted = false;
+        let relayFailedNotified = false; // 官方中继失败弹窗去重, 只弹一次
+        let deskMonitor: NodeJS.Timeout | null = null; // [lc-210] oauthWindow 桌面→/v 兜底定时器
 
     // 官方中继连接失败 → 弹原生错误框(lc-116 曾因挡 F12 诊断临时关闭, lc-126 恢复).
     // 用原生 dialog 而非 fnosDialog: FN ID 登录期间 oauthWindow 浮在上层,
@@ -527,6 +528,30 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         // [lc-208] 访问码门禁修复: 登录前把主窗口 persist:fntv 的 cookie(含访问码授权)复制到 oauth session,
         // 否则 oauthWindow 向 NAS 发 sys/config 会被访问码门禁拦截返回门户 HTML, 导致 FN ID 登录失败/卡桌面.
         await copyFntvCookiesToOauthSession();
+
+        // [lc-210] 桌面→/v 兜底: 主窗口(preload embyWall)已有桌面纠正, 但桌面可能渲染在 oauthWindow(独立 session,
+        // 无 embyWall)——登录卡住时桌面停在弹窗里, 主窗口纠正不触发. 此处在主进程侧检测 oauthWindow 是否停在
+        // fnOS 桌面(且 OAuth 尚未完成), 是则让主窗口 loadURL(/v) 并关闭弹窗, 实现"检测到首页就跳影视页".
+        deskMonitor = setInterval(async () => {
+            if (!oauthWindow || oauthWindow.isDestroyed() || authRequested || sysConfigLoaded) return;
+            try {
+                const isDesk = await oauthWindow.webContents.executeJavaScript(
+                    "(function(){var p=location.pathname;if(p!=='/'&&p!=='/v'&&p!=='/v/')return false;" +
+                    "var t=(document.body&&document.body.innerText||'').replace(/\\s+/g,'');" +
+                    "var h=['系统设置','应用中心','文件管理','影视','相册','商店','虚拟机','终端','下载','备份','安全中心','回收站','远程助手','飞牛同步'];" +
+                    "return h.filter(function(x){return t.indexOf(x)>=0;}).length>=2;})()"
+                );
+                if (isDesk) {
+                    log.info('[FN ID] oauthWindow 检测到 fnOS 桌面(登录卡住), 主窗口跳 /v 并关闭弹窗');
+                    const mw = getMainWindow();
+                    const origin = (() => { try { return new URL(oauthWindow!.webContents.getURL()).origin; } catch { return ''; } })();
+                    if (mw && !mw.isDestroyed() && origin) mw.loadURL(`${origin}/v`);
+                    oauthWindow.close();
+                    oauthWindow = null;
+                    if (deskMonitor) { clearInterval(deskMonitor); deskMonitor = null; }
+                }
+            } catch { /* ignore */ }
+        }, 3000);
 
         // 拦截 target="_blank" / window.open: 不开新窗, 改为在 oauthWindow 内导航.
         // 原因: 5ddd.com 中继选择页的三个选项(中继转发/公网IP)通过 window.open 或 target=_blank 跳转,
@@ -1081,6 +1106,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 if (loginTimeout) { clearTimeout(loginTimeout); loginTimeout = null; }
                 if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
                 if (relayPollTimer) { clearTimeout(relayPollTimer); relayPollTimer = null; }
+                // [lc-210] 停止桌面检测兜底定时器, 避免窗口已关闭后仍空转
+                if (deskMonitor) { clearInterval(deskMonitor); deskMonitor = null; }
                 if (!authRequested) {
                     reject(new Error('用户关闭了登录窗口'));
                 }
