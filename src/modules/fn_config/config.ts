@@ -836,5 +836,9 @@ module.exports = {
     getBiliDanmakuMaxScreen, setBiliDanmakuMaxScreen,
     getBiliDanmakuBlacklist, setBiliDanmakuBlacklist,
     // 全局快捷键
-    getGlobalShortcutsEnabled, setGlobalShortcutsEnabled
+    getGlobalShortcutsEnabled, setGlobalShortcutsEnabled,
+    // 更新打烊时间戳
+    getUpdateDismissedAt, setUpdateDismissedAt,
+    // 登录背景图路径
+    getLoginBgPath, setLoginBgPath
 };
