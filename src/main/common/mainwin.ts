@@ -556,6 +556,22 @@ export function getMainWindow(): BrowserWindow {
             shell.openExternal(url).catch(() => { });
             return { action: 'deny' };
         });
+
+        // [lc-202] 导航守卫: 防止 fnOS 防伪码/隐私流程完成后跳转到原生桌面(/).
+        // 飞牛影视是 SPA, 所有有效页面都在 /v/* 下. 若导航落到根路径或非 /v/* 路径,
+        // 说明 fnOS 把用户踢回了原生桌面(防伪码验证后/会话过期等), 需自动纠正回 /v.
+        const ALLOWED_PATHS = ['/v/login', '/v/welcome', '/v/oauth', '/v/signin', '/v/auth'];
+        mainwin.webContents.on('did-navigate', (_event: any, url: string) => {
+            try {
+                const u = new URL(url);
+                if (u.protocol !== 'http:' && u.protocol !== 'https:') return; // 忽略 file:// 等
+                const p = u.pathname;
+                // 影视页面(/v/*)和允许的登录/隐私流程路径 → 不干预
+                if (p.startsWith('/v/') || ALLOWED_PATHS.some(a => p.startsWith(a))) return;
+                log.warn(`[导航守卫] 检测到非影视路径 ${p}, 自动纠正回 /v (原URL: ${url})`);
+                mainwin!.loadURL(`${u.origin}/v`);
+            } catch { /* ignore 解析失败 */ }
+        });
     }
     return mainwin;
 }
