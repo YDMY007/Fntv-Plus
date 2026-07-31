@@ -71,12 +71,24 @@ function log(...a: any[]) {
     for (const h of SYS_HINTS) if (txt.indexOf(h) >= 0) matched.push(h);
     return matched;
   };
+  // [lc-236] 自建设置 UI(含历史版本/wiki 弹窗)打开时跳过桌面纠正:
+  //   这些浮层统一标 data-fnos-ui='1'; wiki 文档正文含"影视/终端/下载"等系统字样, 而设置面板是
+  //   DOM 浮层不改变 URL(仍为 /v), 会被 watchFnosDesktop 误判为 fnOS 桌面触发 reload. 只要任一
+  //   自建设置 UI 可见就直接跳过, 用户在看设置/wiki 时绝不该被当成桌面重载.
+  const fnosUiVisible = (): boolean => {
+    const nodes = document.querySelectorAll<HTMLElement>('[data-fnos-ui="1"]');
+    for (const n of Array.from(nodes)) {
+      if (n.offsetParent !== null || n.style.display !== 'none') return true;
+    }
+    return false;
+  };
   let _lastReload = 0;
   const tryFix = (): void => {
     try {
       const p = location.pathname;
       // 仅在根或 /v 疑似桌面/访问码后介入; 影视内部页(/v/tv/...等)不干预
       if (p !== '/' && p !== '/v' && p !== '/v/') return;
+      if (fnosUiVisible()) return; // [lc-236] 自建设置 UI 打开时跳过桌面纠正(见 fnosUiVisible 注释)
       const matched = detectSystemUI();
       if (matched.length < 2) return; // 至少命中 2 个系统字样才判定为 fnOS 系统界面(防误判)
       const now = Date.now();
