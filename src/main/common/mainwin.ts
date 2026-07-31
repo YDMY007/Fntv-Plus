@@ -573,10 +573,15 @@ export function getMainWindow(): BrowserWindow {
                 const u = new URL(url);
                 if (u.protocol !== 'http:' && u.protocol !== 'https:') return; // 忽略 file:// 等
                 const p = u.pathname;
-                // 影视页面(/v/*)和允许的登录/隐私流程路径 → 不干预
-                if (p.startsWith('/v/') || ALLOWED_PATHS.some(a => p.startsWith(a))) return;
+                // 影视页面(首页 /v 本身及 /v/* 子路由)和允许的登录/隐私流程路径 → 不干预
+                // 注意: 首页 pathname 恰好是 "/v"(无末尾斜杠), 必须单独放行, 否则会被判为"非影视路径"
+                //       进而 loadURL("/v") 重定向到同一 URL → did-navigate 反复触发 → 死循环 → 渲染进程被 kill。
+                if (p === '/v' || p.startsWith('/v/') || ALLOWED_PATHS.some(a => p.startsWith(a))) return;
+                // 防御: 若纠正目标与当前路径相同(极端情况), 不再二次 loadURL, 避免死循环
+                const target = `${u.origin}/v`;
+                if (target === `${u.origin}${p}`) return;
                 log.warn(`[导航守卫] 检测到非影视路径 ${p}, 自动纠正回 /v (原URL: ${url})`);
-                mainwin!.loadURL(`${u.origin}/v`);
+                mainwin!.loadURL(target);
             } catch { /* ignore 解析失败 */ }
         };
         mainwin.webContents.on('did-navigate', (_event: any, url: string) => guardRedirect(url));
