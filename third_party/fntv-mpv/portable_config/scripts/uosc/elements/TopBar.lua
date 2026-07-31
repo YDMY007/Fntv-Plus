@@ -269,7 +269,10 @@ function TopBar:render()
 				color = button_bg, opacity = visibility * opacity, radius = state.radius,
 			})
 
-			ass:icon(bg_ax + bg_size / 2, bg_ay + bg_size / 2, bg_size * 0.5, button.icon, {
+			-- [Fntv] minimize 字形横线先天偏下, 单独上移约 15% 高度使其视觉居中
+			local icon_cx, icon_cy = bg_ax + bg_size / 2, bg_ay + bg_size / 2
+			if button.icon == 'minimize' then icon_cy = icon_cy - bg_size * 0.15 end
+			ass:icon(icon_cx, icon_cy, bg_size * 0.5, button.icon, {
 				color = button_fg,
 				border_color = button_bg,
 				opacity = visibility,
