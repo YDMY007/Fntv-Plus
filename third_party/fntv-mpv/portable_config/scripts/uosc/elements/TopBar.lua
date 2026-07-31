@@ -33,7 +33,16 @@ function TopBar:init()
 	local close = {icon = 'close', hover_bg = '2311e8', hover_fg = 'ffffff', command = function() mp.command('quit') end}
 	local max = {icon = 'crop_square', command = maximized_command}
 	local min = {icon = 'minimize', command = function() mp.command('cycle window-minimized') end}
-	self.buttons = options.top_bar_controls == 'left' and {close, max, min} or {min, max, close}
+	-- [Fntv] 窗口置顶按钮：点击切换 mpv 的 ontop 属性；active 时高亮显示当前已置顶
+	local ontop = {icon = 'vertical_align_top', hover_bg = '2a6df0', hover_fg = 'ffffff', active = false,
+		command = function() mp.command('cycle ontop') end}
+	self.buttons = options.top_bar_controls == 'left' and {close, max, min, ontop} or {min, max, ontop, close}
+
+	-- [Fntv] 监听 ontop 属性，更新置顶按钮的高亮态并重绘
+	self:observe_mp_property('ontop', 'bool', function(_, val)
+		ontop.active = val
+		request_render()
+	end)
 
 	self:register_observers()
 	self:decide_enabled()
@@ -245,9 +254,10 @@ function TopBar:render()
 		for _, button in ipairs(self.buttons) do
 			local rect = {ax = button_ax, ay = ay, bx = button_ax + self.size, by = by}
 			local is_hover = get_point_to_rectangle_proximity(cursor, rect) <= 0
-			local opacity = is_hover and 1 or config.opacity.controls
-			local button_fg = is_hover and (button.hover_fg or bg) or fg
-			local button_bg = is_hover and (button.hover_bg or fg) or bg
+			local is_active = not not button.active
+			local opacity = (is_hover or is_active) and 1 or config.opacity.controls
+			local button_fg = is_hover and (button.hover_fg or bg) or (is_active and 'ffffff' or fg)
+			local button_bg = is_hover and (button.hover_bg or fg) or (is_active and (button.hover_bg or '2a6df0') or bg)
 
 			cursor:zone('primary_down', rect, button.command)
 
