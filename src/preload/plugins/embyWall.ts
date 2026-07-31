@@ -2446,6 +2446,7 @@ function handle(): void {
     /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组2: MPV 路径 =====
+    console.error('[SETTINGS-DEBUG] START building sec2 (播放器)');
     const sec2 = section('播放器');
     const secBody2 = sec2.body;
 
@@ -2611,6 +2612,7 @@ function handle(): void {
     };
 
     /* 布局统一在末尾 layout 区追加 */
+    console.error('[SETTINGS-DEBUG] END building sec2 (播放器) sec2.el.children=' + sec2.el.children.length);
 
     // ===== 分组3: 退出行为 =====
     const sec3 = section('退出行为');
@@ -3401,35 +3403,41 @@ function handle(): void {
       pane.dataset.cat = cat.id;
       rightContent.appendChild(pane);
       panes[cat.id] = pane;
+      console.error('[SETTINGS-DEBUG] pane built cat=' + cat.id + ' childCount=' + pane.children.length + ' firstChild=' + (pane.children[0] ? (pane.children[0] as HTMLElement).textContent?.trim().substring(0, 20) : 'NONE'));
     });
     // 左侧导航按钮 + 切换逻辑
     const navBtns: Record<string, HTMLButtonElement> = {};
     const selectCat = (id: string): void => {
-      log('[SETTINGS-DIAG] selectCat id=' + id);
-      for (const c of cats) {
-        const on = c.id === id;
-        panes[c.id].style.display = on ? 'flex' : 'none';
-        const b = navBtns[c.id];
-        if (!b) continue;
-        if (on) {
-          b.style.background = 'var(--fnos-ui-accent)!important';
-          b.style.color = '#fff';
-          b.style.fontWeight = '700';
-          b.style.borderColor = 'var(--fnos-ui-accent)';
-        } else {
-          b.style.background = 'transparent';
-          b.style.color = 'var(--fnos-ui-text)';
-          b.style.fontWeight = '500';
-          b.style.borderColor = 'transparent';
+      console.error('[SETTINGS-DEBUG] selectCat called id=' + id);
+      try {
+        for (const c of cats) {
+          const on = c.id === id;
+          const pane = panes[c.id];
+          if (!pane) { console.error('[SETTINGS-DEBUG] MISSING pane for cat=' + c.id); continue; }
+          pane.style.display = on ? 'flex' : 'none';
+          const b = navBtns[c.id];
+          if (!b) continue;
+          if (on) {
+            b.style.background = 'var(--fnos-ui-accent)!important';
+            b.style.color = '#fff';
+            b.style.fontWeight = '700';
+            b.style.borderColor = 'var(--fnos-ui-accent)';
+          } else {
+            b.style.background = 'transparent';
+            b.style.color = 'var(--fnos-ui-text)';
+            b.style.fontWeight = '500';
+            b.style.borderColor = 'transparent';
+          }
         }
+        // 打印 player pane 切换后的真实 DOM 状态
+        const pp = panes['player'];
+        console.error('[SETTINGS-DEBUG] after-switch playerPane.display=' + (pp ? pp.style.display : 'MISSING')
+          + ' sec2.isConnected=' + (sec2 ? sec2.el.isConnected : 'NO SEC2')
+          + ' sec2.offsetHeight=' + (sec2 ? sec2.el.offsetHeight : '?')
+          + ' rightContent.children.length=' + rightContent.children.length);
+      } catch(e) {
+        console.error('[SETTINGS-DEBUG] selectCat THREW', e);
       }
-      // [临时诊断] 切换后打印 player pane 与 sec2 卡片真实状态, 用于定位"播放器打不开"
-      const _pp = panes['player'];
-      log('[SETTINGS-DIAG] after-switch playerPane.display=' + (_pp ? _pp.style.display : 'NONE')
-        + ' sec2.isConnected=' + sec2.el.isConnected
-        + ' sec2.offsetParent=' + (sec2.el.offsetParent ? 'attached' : 'null')
-        + ' sec2.offsetHeight=' + sec2.el.offsetHeight
-        + ' sec2.clientHeight=' + sec2.el.clientHeight);
     };
     // 暴露给 openSettingsPanel, 使 fntv-open-settings(若启用)能直接切到对应分类
     (overlay as any)._selectCat = (id: string): void => selectCat(id);
@@ -3443,7 +3451,7 @@ function handle(): void {
         + '-webkit-app-region:no-drag;app-region:no-drag;';
       btn.onmouseenter = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'var(--fnos-ui-row-hover)'; };
       btn.onmouseleave = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'transparent'; };
-      btn.onclick = (e: Event) => { e.stopPropagation(); log('[SETTINGS-DIAG] nav-click id=' + cat.id); selectCat(cat.id); };
+      btn.onclick = (e: Event) => { e.stopPropagation(); console.error('[SETTINGS-DEBUG] nav-click id=' + cat.id); selectCat(cat.id); };
       navBtns[cat.id] = btn;
       leftNav.appendChild(btn);
     });
