@@ -82,11 +82,18 @@ export class UpdateChecker {
     }
 
     /**
-     * 检查是否有新版本（直连 api.github.com，带梯度重试）。
+     * 检查是否有新版本（默认策略）。
+     * [lc-222] 先走国内镜像(网络通顺), 镜像全部不可达时再回退 GitHub 直链,
+     * 提升国内用户检测更新的成功率与速度。手动/自动检查均走此入口。
      * @returns 更新信息
      */
     async checkForUpdates(): Promise<UpdateInfo> {
-        return await this.checkForUpdatesWithRetry();
+        try {
+            return await this.checkForUpdatesViaMirror();
+        } catch (e: any) {
+            log.warn(`镜像检查更新失败, 回退 GitHub 直链: ${(e && e.message) || e}`);
+            return await this.checkForUpdatesWithRetry();
+        }
     }
 
     /**
