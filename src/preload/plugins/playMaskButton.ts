@@ -139,8 +139,8 @@ function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | 
 }
 
 // 从DOM获取id（兼容详情页与首页卡片）
-const GUID_RE = /\/v\/(?:movie|tv)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
-function getItemGuidFromDOM(button: HTMLElement): string | null {
+export const GUID_RE = /\/v\/(?:movie|tv)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
+export function getItemGuidFromDOM(button: HTMLElement): string | null {
     try {
         // 1) 详情页: data-id="details" 容器内的 季/集/电影 链接
         let container: Element | null = button;

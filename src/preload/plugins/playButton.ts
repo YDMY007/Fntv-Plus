@@ -6,14 +6,17 @@ import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { getPlayButtonConfig, createPlayModal, PlayButtonConfig } from './playChoice';
+import { getItemGuidFromDOM } from './playMaskButton';
 
 // 发送播放信息到主进程
 function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
-    const url = window.location.href;
-    const id = url.split('/').pop();
+    // [lc-224] 从按钮(及其祖先链接)提取真实 item guid, 不再用 window.location.href 末段:
+    // 首页 path=/v 时末段是 "v", 会令 getPlayInfo("v") 404 → 播放器打不开。
+    // 复用 playMaskButton 的 getItemGuidFromDOM(兼容详情页/首页卡片/浮层菜单)。
+    const id = button ? getItemGuidFromDOM(button) : '';
 
     if (!id) {
-        logger.error('Failed to extract ID from DOM or URL');
+        logger.error('Failed to extract item guid from button/DOM');
         return null;
     }
 
