@@ -1211,10 +1211,30 @@ function fixDetailLayoutWidth(): void {
   const vw = window.innerWidth;
   const MIN_EXPECTED_WIDTH = Math.max(vw * 0.55, 700); // 至少占视口55%或700px
 
+  // [lc-235] 排除侧边栏内部的 .ms-container: fnOS 侧边栏自己也用 .ms-container 作为内部滚动容器,
+  //   若对它强制撑宽会溢出 260px 侧边栏, 把侧边栏条目右侧的数目徽章顶到屏幕最右边。
+  const isSidebarDescendant = (el: HTMLElement): boolean => {
+    let p = el.parentElement;
+    while (p && p !== document.body) {
+      const cls = (typeof p.className === 'string') ? p.className : '';
+      if (cls.includes('260px')) return true; // fnOS 侧边栏固定 260px 宽
+      try { if (p.offsetWidth > 0 && p.offsetWidth <= 320) return true; } catch (e) {}
+      p = p.parentElement;
+    }
+    return false;
+  };
+
   const tryFix = () => {
     // 目标1: .ms-container (fnOS 主滚动容器)
     const msContainers = document.querySelectorAll<HTMLElement>('.ms-container');
     for (const c of Array.from(msContainers)) {
+      if (isSidebarDescendant(c)) {
+        // 撤销本守卫此前可能误加的强制宽度(否则残留 inline 仍会撑宽侧边栏)
+        c.style.removeProperty('width');
+        c.style.removeProperty('max-width');
+        c.style.removeProperty('min-width');
+        continue;
+      }
       const w = c.getBoundingClientRect().width;
       if (w < MIN_EXPECTED_WIDTH && w > 0) {
         log('[lc-190] FIX: .ms-container width=', w.toFixed(0), '< threshold', MIN_EXPECTED_WIDTH, '→ forcing 100%');
@@ -1245,6 +1265,7 @@ function fixDetailLayoutWidth(): void {
         const child = children[i] as HTMLElement;
         const cs = getComputedStyle(child);
         if (cs.position === 'fixed' || cs.position === 'absolute') continue;
+        if (isSidebarDescendant(child) || (typeof child.className === 'string' && child.className.includes('260px'))) continue; // 排除侧边栏
         const w = child.getBoundingClientRect().width;
         if (w < MIN_EXPECTED_WIDTH && w > 200) { // >200 排除侧栏等窄组件
           log('[lc-190] FIX: root child(#', child.id || child.className.slice(0, 30), ') width=', w.toFixed(0), '→ forcing 100%+flex防收缩');
