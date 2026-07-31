@@ -3455,6 +3455,19 @@ function handle(): void {
       navBtns[cat.id] = btn;
       leftNav.appendChild(btn);
     });
+    // [lc-230 诊断] 捕获阶段全局点击记录: 即便 nav 按钮 onclick 未触发, 也能看到真实命中的元素,
+    // 用于判定"点击播放器"到底打到了哪个元素(被遮挡/命中区异常/或根本没触发)。
+    document.addEventListener('click', (ev: Event) => {
+      try {
+        const t = ev.target as HTMLElement;
+        if (!t || !t.tagName) return;
+        const btn = (t.closest ? t.closest('button') : null) as HTMLElement | null;
+        const inOverlay = overlay.contains(t);
+        console.error('[SETTINGS-CLICK] target=' + (t.tagName + '#' + (t.id || '') + '.' + String(t.className).substring(0, 30))
+          + ' closestBtn=' + (btn ? (btn.textContent || '').trim().substring(0, 14) : 'NONE')
+          + ' inOverlay=' + inOverlay + ' overlayDisp=' + overlay.style.display);
+      } catch (e) {}
+    }, true);
     selectCat(cats[0].id); // 默认显示第一个分类(通用)
 
     // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
