@@ -69,7 +69,7 @@ function getCurrentSelectedVersionIndex(): number {
 function isPlaySemanticText(text: string): boolean {
     const t = (text || '').trim();
     if (!t) return false;
-    if (/(预览|试看|预告|trailer|preview|设置|配置|管理)/i.test(t)) return false;
+    if (/(预览|试看|预告|trailer|preview|设置|配置|管理|播放器)/i.test(t)) return false;
     return /^(播放|立即播放|播放全片|继续播放|从头播放|播放影片|play)$/i.test(t)
         || /^播放/.test(t)
         || /^play\b/i.test(t);
@@ -79,7 +79,10 @@ function isPlaySemanticText(text: string): boolean {
 function findReferenceButton(context: Document | Element = document): HTMLButtonElement | null {
     // 关键: 排除我们自己注入/已处理的按钮, 避免把克隆体误当原始按钮 → 重复注入累积
     const buttons = (Array.from(context.querySelectorAll('button')) as HTMLButtonElement[])
-        .filter(b => !b.hasAttribute('data-mpv-btn') && !b.hasAttribute('data-custom-play'));
+        .filter(b => !b.hasAttribute('data-mpv-btn') && !b.hasAttribute('data-custom-play')
+            // [lc-231] 排除我们自建 UI(设置面板等, 带 data-fnos-ui 标记)内的按钮:
+            // 否则「播放器」导航按钮会被误判为播放键并挂捕获拦截, 吃掉点击导致分类打不开
+            && !(b.closest && b.closest('[data-fnos-ui]')));
     if (buttons.length === 0) return null;
 
     // 1) 主播放按钮：primary 样式 + 播放语义文本（电影/详情页主按钮最常见形态）

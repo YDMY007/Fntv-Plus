@@ -2446,7 +2446,6 @@ function handle(): void {
     /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组2: MPV 路径 =====
-    console.error('[SETTINGS-DEBUG] START building sec2 (播放器)');
     const sec2 = section('播放器');
     const secBody2 = sec2.body;
 
@@ -2612,7 +2611,6 @@ function handle(): void {
     };
 
     /* 布局统一在末尾 layout 区追加 */
-    console.error('[SETTINGS-DEBUG] END building sec2 (播放器) sec2.el.children=' + sec2.el.children.length);
 
     // ===== 分组3: 退出行为 =====
     const sec3 = section('退出行为');
@@ -3403,40 +3401,28 @@ function handle(): void {
       pane.dataset.cat = cat.id;
       rightContent.appendChild(pane);
       panes[cat.id] = pane;
-      console.error('[SETTINGS-DEBUG] pane built cat=' + cat.id + ' childCount=' + pane.children.length + ' firstChild=' + (pane.children[0] ? (pane.children[0] as HTMLElement).textContent?.trim().substring(0, 20) : 'NONE'));
     });
     // 左侧导航按钮 + 切换逻辑
     const navBtns: Record<string, HTMLButtonElement> = {};
     const selectCat = (id: string): void => {
-      console.error('[SETTINGS-DEBUG] selectCat called id=' + id);
-      try {
-        for (const c of cats) {
-          const on = c.id === id;
-          const pane = panes[c.id];
-          if (!pane) { console.error('[SETTINGS-DEBUG] MISSING pane for cat=' + c.id); continue; }
-          pane.style.display = on ? 'flex' : 'none';
-          const b = navBtns[c.id];
-          if (!b) continue;
-          if (on) {
-            b.style.background = 'var(--fnos-ui-accent)!important';
-            b.style.color = '#fff';
-            b.style.fontWeight = '700';
-            b.style.borderColor = 'var(--fnos-ui-accent)';
-          } else {
-            b.style.background = 'transparent';
-            b.style.color = 'var(--fnos-ui-text)';
-            b.style.fontWeight = '500';
-            b.style.borderColor = 'transparent';
-          }
+      for (const c of cats) {
+        const on = c.id === id;
+        const pane = panes[c.id];
+        if (!pane) continue;
+        pane.style.display = on ? 'flex' : 'none';
+        const b = navBtns[c.id];
+        if (!b) continue;
+        if (on) {
+          b.style.background = 'var(--fnos-ui-accent)!important';
+          b.style.color = '#fff';
+          b.style.fontWeight = '700';
+          b.style.borderColor = 'var(--fnos-ui-accent)';
+        } else {
+          b.style.background = 'transparent';
+          b.style.color = 'var(--fnos-ui-text)';
+          b.style.fontWeight = '500';
+          b.style.borderColor = 'transparent';
         }
-        // 打印 player pane 切换后的真实 DOM 状态
-        const pp = panes['player'];
-        console.error('[SETTINGS-DEBUG] after-switch playerPane.display=' + (pp ? pp.style.display : 'MISSING')
-          + ' sec2.isConnected=' + (sec2 ? sec2.el.isConnected : 'NO SEC2')
-          + ' sec2.offsetHeight=' + (sec2 ? sec2.el.offsetHeight : '?')
-          + ' rightContent.children.length=' + rightContent.children.length);
-      } catch(e) {
-        console.error('[SETTINGS-DEBUG] selectCat THREW', e);
       }
     };
     // 暴露给 openSettingsPanel, 使 fntv-open-settings(若启用)能直接切到对应分类
@@ -3451,23 +3437,10 @@ function handle(): void {
         + '-webkit-app-region:no-drag;app-region:no-drag;';
       btn.onmouseenter = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'var(--fnos-ui-row-hover)'; };
       btn.onmouseleave = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'transparent'; };
-      btn.onclick = (e: Event) => { e.stopPropagation(); console.error('[SETTINGS-DEBUG] nav-click id=' + cat.id); selectCat(cat.id); };
+      btn.onclick = (e: Event) => { e.stopPropagation(); selectCat(cat.id); };
       navBtns[cat.id] = btn;
       leftNav.appendChild(btn);
     });
-    // [lc-230 诊断] 捕获阶段全局点击记录: 即便 nav 按钮 onclick 未触发, 也能看到真实命中的元素,
-    // 用于判定"点击播放器"到底打到了哪个元素(被遮挡/命中区异常/或根本没触发)。
-    document.addEventListener('click', (ev: Event) => {
-      try {
-        const t = ev.target as HTMLElement;
-        if (!t || !t.tagName) return;
-        const btn = (t.closest ? t.closest('button') : null) as HTMLElement | null;
-        const inOverlay = overlay.contains(t);
-        console.error('[SETTINGS-CLICK] target=' + (t.tagName + '#' + (t.id || '') + '.' + String(t.className).substring(0, 30))
-          + ' closestBtn=' + (btn ? (btn.textContent || '').trim().substring(0, 14) : 'NONE')
-          + ' inOverlay=' + inOverlay + ' overlayDisp=' + overlay.style.display);
-      } catch (e) {}
-    }, true);
     selectCat(cats[0].id); // 默认显示第一个分类(通用)
 
     // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
@@ -3714,34 +3687,6 @@ function handle(): void {
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
         + ' swChecked=' + String(swBangumiSync.checked)
         + ' token=' + (s.bangumiToken ? 'set' : 'none'));
-      // [临时诊断-展示期] 面板打开快照: 播放器按钮命中区是否被遮挡 + player pane 内容
-      try {
-        const _pb = navBtns['player'];
-        if (_pb) {
-          const r = _pb.getBoundingClientRect();
-          const cs = getComputedStyle(_pb);
-          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-          const top = document.elementFromPoint(cx, cy);
-          console.error('[SETTINGS-DEBUG] open playerBtn rect=' + JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) })
-            + ' pe=' + cs.pointerEvents + ' disp=' + cs.display + ' vis=' + cs.visibility
-            + ' topEl=' + (top ? (top.tagName + '#' + (top.id || '') + '.' + String(top.className).substring(0, 40)) : 'null')
-            + ' isPlayerBtn=' + (top ? (_pb === top || _pb.contains(top)) : false));
-        } else {
-          console.error('[SETTINGS-DEBUG] open NO playerBtn in navBtns');
-        }
-        const _pp = panes['player'];
-        console.error('[SETTINGS-DEBUG] open playerPane childCount=' + (_pp ? _pp.children.length : 'MISSING')
-          + ' offsetHeight=' + (_pp ? _pp.offsetHeight : '?')
-          + ' sec2.isConnected=' + (sec2 ? sec2.el.isConnected : '?')
-          + ' sec2.offsetHeight=' + (sec2 ? sec2.el.offsetHeight : '?'));
-        // 排查遮挡: 打印每个 nav 按钮命中中心的真实顶层元素
-        for (const cid of Object.keys(navBtns)) {
-          const b = navBtns[cid];
-          const rb = b.getBoundingClientRect();
-          const t2 = document.elementFromPoint(rb.left + rb.width / 2, rb.top + rb.height / 2);
-          console.error('[SETTINGS-DEBUG] open nav[' + cid + '] topEl=' + (t2 ? (t2.tagName + '#' + (t2.id || '')) : 'null') + ' isSelf=' + (t2 === b));
-        }
-      } catch (e) { console.error('[SETTINGS-DEBUG] open-diag THREW', e); }
     };
 
     // 点击面板外部时自动收起
