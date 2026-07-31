@@ -2447,7 +2447,6 @@ function handle(): void {
 
     // ===== 分组2: MPV 路径 =====
     const sec2 = section('播放器');
-    sec2.el.style.gridColumn = '1 / -1'; // 播放器内容多，占满整行
     const secBody2 = sec2.body;
 
     // 双栏布局：左=MPV，右=PotPlayer（窄屏自动折叠为单栏）
@@ -3406,6 +3405,7 @@ function handle(): void {
     // 左侧导航按钮 + 切换逻辑
     const navBtns: Record<string, HTMLButtonElement> = {};
     const selectCat = (id: string): void => {
+      log('[SETTINGS-DIAG] selectCat id=' + id);
       for (const c of cats) {
         const on = c.id === id;
         panes[c.id].style.display = on ? 'flex' : 'none';
@@ -3423,6 +3423,13 @@ function handle(): void {
           b.style.borderColor = 'transparent';
         }
       }
+      // [临时诊断] 切换后打印 player pane 与 sec2 卡片真实状态, 用于定位"播放器打不开"
+      const _pp = panes['player'];
+      log('[SETTINGS-DIAG] after-switch playerPane.display=' + (_pp ? _pp.style.display : 'NONE')
+        + ' sec2.isConnected=' + sec2.el.isConnected
+        + ' sec2.offsetParent=' + (sec2.el.offsetParent ? 'attached' : 'null')
+        + ' sec2.offsetHeight=' + sec2.el.offsetHeight
+        + ' sec2.clientHeight=' + sec2.el.clientHeight);
     };
     // 暴露给 openSettingsPanel, 使 fntv-open-settings(若启用)能直接切到对应分类
     (overlay as any)._selectCat = (id: string): void => selectCat(id);
@@ -3436,7 +3443,7 @@ function handle(): void {
         + '-webkit-app-region:no-drag;app-region:no-drag;';
       btn.onmouseenter = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'var(--fnos-ui-row-hover)'; };
       btn.onmouseleave = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'transparent'; };
-      btn.onclick = (e: Event) => { e.stopPropagation(); selectCat(cat.id); };
+      btn.onclick = (e: Event) => { e.stopPropagation(); log('[SETTINGS-DIAG] nav-click id=' + cat.id); selectCat(cat.id); };
       navBtns[cat.id] = btn;
       leftNav.appendChild(btn);
     });
