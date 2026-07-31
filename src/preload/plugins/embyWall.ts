@@ -2324,11 +2324,26 @@ function handle(): void {
     header.appendChild(title); header.appendChild(closeBtn);
     overlay.appendChild(header);
 
-    // 内容网格：响应式双栏，后续新增分组可自动排列，不再挤成单条竖栏
+    // 内容网格：响应式双栏。align-items:start → 每张卡按自身内容高度排版(不再拉伸对齐),
+    // 避免"强制等高"造成的空白/错位; 顺序由底部统一 append 控制, 故去掉 dense 让 DOM 顺序=视觉顺序。
     const contentGrid = document.createElement('div');
-    contentGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;'
-      + 'padding:12px 16px 10px;grid-auto-flow:dense;align-items:stretch;';
+    contentGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;'
+      + 'padding:12px 16px 14px;align-items:start;';
     overlay.appendChild(contentGrid);
+
+    // 分组小标题(跨整行, 用于把多张卡归类: 通用 / 播放与画面 / 账号与同步 / 弹幕与高级)
+    const groupHeader = (text: string): HTMLElement => {
+      const h = document.createElement('div');
+      h.style.cssText = 'grid-column:1 / -1;font-size:11px;font-weight:700;color:var(--fnos-ui-sec);'
+        + 'letter-spacing:.6px;margin:10px 2px 0;padding-top:10px;border-top:1px solid var(--fnos-ui-border2);';
+      h.textContent = text;
+      return h;
+    };
+
+    // 调试日志(独立卡片, 置于「诊断信息」下方; 从「退出行为」卡片迁出, 见下方 debug 块)
+    const secDebug = section('调试日志');
+    secDebug.el.style.gridColumn = '1 / -1';
+    const secDebugBody = secDebug.body;
 
     // ===== 分组1: 开关选项 =====
     const sec1 = section('功能开关');
@@ -2431,7 +2446,7 @@ function handle(): void {
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
 
 
-    contentGrid.appendChild(sec1.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组2: MPV 路径 =====
     const sec2 = section('播放器');
@@ -2599,27 +2614,12 @@ function handle(): void {
       });
     };
 
-    contentGrid.appendChild(sec2.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组3: 退出行为 =====
     const sec3 = section('退出行为');
     const secBody3 = sec3.body;
     secBody3.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
-
-    // 强制「功能开关」(sec1) 与「退出行为」(sec3) 两张卡等高，使底部横线/按钮左右平齐。
-    // 不依赖 grid 的 stretch（实测在打包环境未生效），直接按内容测量后把两者高度设为一致。
-    const syncCardHeights = (): void => {
-      // 先清除上一次强制高度，让浏览器按真实内容重新测量
-      sec1.el.style.height = '';
-      sec3.el.style.height = '';
-      const h1 = sec1.el.offsetHeight;
-      const h3 = sec3.el.offsetHeight;
-      const maxH = Math.max(h1, h3);
-      if (maxH > 0) {
-        sec1.el.style.height = maxH + 'px';
-        sec3.el.style.height = maxH + 'px';
-      }
-    };
 
     const exitModes: [string, string][] = [['direct', '直接退出'], ['minimize', '最小化到托盘'], ['ask', '每次询问']];
     const exitEls: HTMLButtonElement[] = [];
@@ -2668,7 +2668,7 @@ function handle(): void {
     });
 
     secBody3.appendChild(loginBgWrap);
-    contentGrid.appendChild(sec3.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组: B站弹幕登录 =====
     const secBili = section('B站弹幕登录');
@@ -2781,7 +2781,7 @@ function handle(): void {
       pyPath.textContent = pyDefaultText;
     });
 
-    contentGrid.appendChild(secBili.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组: Bangumi 登录（与「B站弹幕登录」并列，容器同尺寸）=====
     const secBangumi = section('Bangumi 登录');
@@ -2924,7 +2924,7 @@ function handle(): void {
         bangumiStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
-    contentGrid.appendChild(secBangumi.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组: 豆瓣同步 =====
     const secDouban = section('豆瓣同步');
@@ -3077,7 +3077,7 @@ function handle(): void {
     }).catch(() => {});
     colWatch.appendChild(watchedWrap);
 
-    contentGrid.appendChild(secDouban.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 通用小工具：滑块行（标签 + range + 实时数值）=====
     const addSlider = (
@@ -3173,7 +3173,7 @@ function handle(): void {
     danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
     danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
     danBody.appendChild(danHint);
-    contentGrid.appendChild(secDanmaku.el);
+    /* 布局统一在末尾 layout 区追加 */
 
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
     const secDiag = section('诊断信息');
@@ -3239,23 +3239,18 @@ function handle(): void {
     });
     diagBody.appendChild(diagPre);
     diagBody.appendChild(diagBtns);
-    contentGrid.appendChild(secDiag.el);
+    /* 布局统一在末尾 layout 区追加 */
 
-    // ===== 调试日志（并入「退出行为」卡片）=====
-    // 分隔线：区分「退出行为」与「调试日志」
-    const dbgDivider = document.createElement('div');
-    dbgDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:12px 0 8px;';
-    secBody3.appendChild(dbgDivider);
-
+    // ===== 调试日志（独立卡片, 置于「诊断信息」下方; 从「退出行为」卡片迁出）=====
     // 小标题：纯文字，无背景/边框
     const dbgLabel = document.createElement('div');
     dbgLabel.style.cssText = 'color:var(--fnos-ui-sec);font-size:10px;margin:0 0 8px;'
       + 'font-weight:700;text-transform:uppercase;letter-spacing:1.2px;';
     dbgLabel.textContent = '调试日志';
-    secBody3.appendChild(dbgLabel);
+    secDebugBody.appendChild(dbgLabel);
 
     // 调试开关动态挂载目标：主开关直接进卡片，组件开关进折叠区
-    let debugTarget: HTMLElement = secBody3;
+    let debugTarget: HTMLElement = secDebugBody;
 
     const addDebugToggle = (label: string): HTMLInputElement => {
       const row = document.createElement('div');
@@ -3275,7 +3270,7 @@ function handle(): void {
     };
 
     // ===== 主开关（始终可见，置于顶部）=====
-    debugTarget = secBody3;
+    debugTarget = secDebugBody;
     const swDebug = addDebugToggle('启用调试日志（详细模式）');
     swDebug.addEventListener('change', () => {
       ipcRenderer.invoke('settings:set-debug-enabled', swDebug.checked).catch((err) => log('set-debug-enabled failed', err));
@@ -3302,8 +3297,6 @@ function handle(): void {
       const collapsed = dbgFoldBody.style.display === 'none';
       dbgFoldBody.style.display = collapsed ? 'block' : 'none';
       dbgCaret.style.transform = collapsed ? 'rotate(90deg)' : 'rotate(0deg)';
-      // 展开/折叠会改变 sec3 高度，重新同步两张卡等高
-      requestAnimationFrame(syncCardHeights);
     });
 
     const debugHint = document.createElement('div');
@@ -3333,12 +3326,12 @@ function handle(): void {
     });
     dbgFold.appendChild(dbgFoldHeader);
     dbgFold.appendChild(dbgFoldBody);
-    secBody3.appendChild(dbgFold);
+    secDebugBody.appendChild(dbgFold);
 
     // 日志状态文字放在 body 内，避免占用 footer 高度导致左右 footer 不齐
     const logStatus = document.createElement('div');
     logStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
-    secBody3.appendChild(logStatus);
+    secDebugBody.appendChild(logStatus);
 
     // ===== 底部操作栏：日志文件（独立 footer，与左侧检查更新按钮对齐）=====
     const logFooter = document.createElement('div');
@@ -3355,7 +3348,7 @@ function handle(): void {
     logRow.appendChild(openErrLogBtn);
     logRow.appendChild(exportLogBtn);
     logFooter.appendChild(logRow);
-    sec3.el.appendChild(logFooter);
+    secDebug.el.appendChild(logFooter);
 
     openLogBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
@@ -3389,6 +3382,21 @@ function handle(): void {
         }
       }).catch(() => {});
     });
+
+    // ===== 统一布局：按「分组」归类 + 顺序追加，使相关卡片并排、结构清晰 =====
+    contentGrid.appendChild(groupHeader('通用'));
+    contentGrid.appendChild(sec1.el);        // 功能开关
+    contentGrid.appendChild(sec3.el);        // 退出行为
+    contentGrid.appendChild(groupHeader('播放与画面'));
+    contentGrid.appendChild(sec2.el);        // 播放器(占满整行)
+    contentGrid.appendChild(groupHeader('账号与同步'));
+    contentGrid.appendChild(secBili.el);     // B站弹幕登录
+    contentGrid.appendChild(secBangumi.el);  // Bangumi 登录
+    contentGrid.appendChild(secDouban.el);   // 豆瓣同步(占满整行)
+    contentGrid.appendChild(groupHeader('弹幕与高级'));
+    contentGrid.appendChild(secDanmaku.el);  // B站弹幕屏蔽
+    contentGrid.appendChild(secDiag.el);     // 诊断信息
+    contentGrid.appendChild(secDebug.el);    // 调试日志(占满整行)
 
     // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
     const refreshDouban = async (): Promise<void> => {
@@ -3634,8 +3642,6 @@ function handle(): void {
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
         + ' swChecked=' + String(swBangumiSync.checked)
         + ' token=' + (s.bangumiToken ? 'set' : 'none'));
-      // 布局确定后强制两张卡等高，使底部横线/按钮左右平齐
-      requestAnimationFrame(syncCardHeights);
     };
 
     // 点击面板外部时自动收起
@@ -3660,9 +3666,6 @@ function handle(): void {
 
     document.body.appendChild(mask);
     document.body.appendChild(overlay);
-
-    // 窗口尺寸变化（列数/卡片内换行可能改变）后重新同步两卡等高
-    window.addEventListener('resize', () => requestAnimationFrame(syncCardHeights));
   }
 
   /** [新] 打开设置面板: 固定宽度, 整窗口正中居中显示并刷新数据 */
