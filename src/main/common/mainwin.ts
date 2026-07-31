@@ -1,6 +1,7 @@
 import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as log from '../../modules/logger';
 
 // [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
 //   注意: 打包后 resource 在 app.asar 内, 取 app.getAppPath()(开发态=项目根/打包态=asar 虚拟路径)即可正确定位,
