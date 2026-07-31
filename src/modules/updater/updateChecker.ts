@@ -69,6 +69,8 @@ export class UpdateChecker {
     private githubApiUrl: string;
     private maxRetries: number;
     private baseRetryDelay: number;
+    private mirrorMaxRetries: number;
+    private mirrorTimeout: number;
 
     constructor(owner: string = 'YDMY007', repo: string = 'Fntv-Plus', currentVersion: string | null = null) {
         this.owner = owner;
@@ -79,6 +81,10 @@ export class UpdateChecker {
         // 重试配置
         this.maxRetries = 3;
         this.baseRetryDelay = 1000; // 基础延迟1秒
+        // 镜像专用：镜像通常网络通顺, 不可达时宜快速失败以尽快回退 GitHub 直链,
+        // 故缩短超时(10s→6s)并降低重试(3→1), 避免 4 个镜像全挂时长时间阻塞。
+        this.mirrorMaxRetries = 1;
+        this.mirrorTimeout = 6000;
     }
 
     /**
@@ -112,12 +118,14 @@ export class UpdateChecker {
      * @param retryCount - 当前重试次数
      * @returns 更新信息
      */
-    async fetchRelease(apiUrl: string, downloadBase: string | undefined, retryCount: number = 0): Promise<UpdateInfo> {
+    async fetchRelease(apiUrl: string, downloadBase: string | undefined, retryCount: number = 0, opts?: { timeout?: number; maxRetries?: number }): Promise<UpdateInfo> {
+        const timeout = opts?.timeout ?? 10000;
+        const maxRetries = opts?.maxRetries ?? this.maxRetries;
         try {
-            log.info(`检查更新: 当前版本 ${this.currentVersion}${retryCount > 0 ? ` (重试 ${retryCount}/${this.maxRetries})` : ''}${downloadBase ? ` [镜像 ${downloadBase}]` : ''}`);
+            log.info(`检查更新: 当前版本 ${this.currentVersion}${retryCount > 0 ? ` (重试 ${retryCount}/${maxRetries})` : ''}${downloadBase ? ` [镜像 ${downloadBase}]` : ''}`);
 
             const response: AxiosResponse<GitHubRelease> = await axios.get(apiUrl, {
-                timeout: 10000,
+                timeout,
                 headers: {
                     'User-Agent': `fnos-tv/${this.currentVersion}`
                 }
@@ -147,19 +155,19 @@ export class UpdateChecker {
                 htmlUrl: release.html_url
             };
         } catch (error: any) {
-            log.error(`检查更新失败 (尝试 ${retryCount + 1}/${this.maxRetries + 1}):`, error.message);
+            log.error(`检查更新失败 (尝试 ${retryCount + 1}/${maxRetries + 1}):`, error.message);
 
             // 如果还有重试次数，则等待后重试
-            if (retryCount < this.maxRetries) {
+            if (retryCount < maxRetries) {
                 // 梯度延迟
                 const retryDelay = this.baseRetryDelay * Math.pow(2, retryCount);
                 log.info(`等待 ${retryDelay}ms 后重试...`);
                 await delay(retryDelay);
-                return await this.fetchRelease(apiUrl, downloadBase, retryCount + 1);
+                return await this.fetchRelease(apiUrl, downloadBase, retryCount + 1, opts);
             }
 
             // 所有重试都失败了，抛出错误
-            throw new Error(`检查更新失败: ${error.message} (已重试 ${this.maxRetries} 次)`);
+            throw new Error(`检查更新失败: ${error.message} (已重试 ${maxRetries} 次)`);
         }
     }
 
@@ -188,7 +196,7 @@ export class UpdateChecker {
                 : `${base}/repos/${this.owner}/${this.repo}/releases/latest`;
             try {
                 log.info(`尝试通过镜像检查更新: ${m.name}`);
-                return await this.fetchRelease(apiUrl, base, 0);
+                return await this.fetchRelease(apiUrl, base, 0, { timeout: this.mirrorTimeout, maxRetries: this.mirrorMaxRetries });
             } catch (e: any) {
                 lastErr = e;
                 log.warn(`镜像 ${m.name} 检查失败: ${e && e.message}`);
