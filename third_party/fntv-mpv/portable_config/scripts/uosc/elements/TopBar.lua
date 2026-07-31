@@ -36,7 +36,7 @@ function TopBar:init()
 	-- [Fntv] 窗口置顶按钮：点击切换 mpv 的 ontop 属性；active 时高亮显示当前已置顶
 	local ontop = {icon = 'vertical_align_top', hover_bg = '2a6df0', hover_fg = 'ffffff', active = false,
 		command = function() mp.command('cycle ontop') end}
-	self.buttons = options.top_bar_controls == 'left' and {close, max, min, ontop} or {min, max, ontop, close}
+	self.buttons = options.top_bar_controls == 'left' and {ontop, close, max, min} or {ontop, min, max, close}
 
 	-- [Fntv] 监听 ontop 属性，更新置顶按钮的高亮态并重绘
 	self:observe_mp_property('ontop', 'bool', function(_, val)
