@@ -3701,6 +3701,34 @@ function handle(): void {
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
         + ' swChecked=' + String(swBangumiSync.checked)
         + ' token=' + (s.bangumiToken ? 'set' : 'none'));
+      // [临时诊断-展示期] 面板打开快照: 播放器按钮命中区是否被遮挡 + player pane 内容
+      try {
+        const _pb = navBtns['player'];
+        if (_pb) {
+          const r = _pb.getBoundingClientRect();
+          const cs = getComputedStyle(_pb);
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const top = document.elementFromPoint(cx, cy);
+          console.error('[SETTINGS-DEBUG] open playerBtn rect=' + JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) })
+            + ' pe=' + cs.pointerEvents + ' disp=' + cs.display + ' vis=' + cs.visibility
+            + ' topEl=' + (top ? (top.tagName + '#' + (top.id || '') + '.' + String(top.className).substring(0, 40)) : 'null')
+            + ' isPlayerBtn=' + (top ? (_pb === top || _pb.contains(top)) : false));
+        } else {
+          console.error('[SETTINGS-DEBUG] open NO playerBtn in navBtns');
+        }
+        const _pp = panes['player'];
+        console.error('[SETTINGS-DEBUG] open playerPane childCount=' + (_pp ? _pp.children.length : 'MISSING')
+          + ' offsetHeight=' + (_pp ? _pp.offsetHeight : '?')
+          + ' sec2.isConnected=' + (sec2 ? sec2.el.isConnected : '?')
+          + ' sec2.offsetHeight=' + (sec2 ? sec2.el.offsetHeight : '?'));
+        // 排查遮挡: 打印每个 nav 按钮命中中心的真实顶层元素
+        for (const cid of Object.keys(navBtns)) {
+          const b = navBtns[cid];
+          const rb = b.getBoundingClientRect();
+          const t2 = document.elementFromPoint(rb.left + rb.width / 2, rb.top + rb.height / 2);
+          console.error('[SETTINGS-DEBUG] open nav[' + cid + '] topEl=' + (t2 ? (t2.tagName + '#' + (t2.id || '')) : 'null') + ' isSelf=' + (t2 === b));
+        }
+      } catch (e) { console.error('[SETTINGS-DEBUG] open-diag THREW', e); }
     };
 
     // 点击面板外部时自动收起
