@@ -2273,7 +2273,7 @@ function handle(): void {
     overlay.id = 'fnos-settings-panel';
     overlay.setAttribute('data-fnos-ui', '1'); // 保护自建设备 UI 不被白底清除器误清(含内部卡片底色)
     overlay.style.cssText = 'position:fixed;z-index:2147483600;display:none;flex-direction:column;width:min(680px,calc(100vw - 80px));'
-      + 'max-height:calc(100vh - 120px);overflow-y:auto;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
+      + 'max-height:calc(100vh - 120px);overflow:hidden;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
       + 'background:var(--fnos-ui-panel-bg)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14),inset 0 1px 0 rgba(255,255,255,.6);'
@@ -2324,25 +2324,22 @@ function handle(): void {
     header.appendChild(title); header.appendChild(closeBtn);
     overlay.appendChild(header);
 
-    // 内容网格：响应式双栏。align-items:start → 每张卡按自身内容高度排版(不再拉伸对齐),
-    // 避免"强制等高"造成的空白/错位; 顺序由底部统一 append 控制, 故去掉 dense 让 DOM 顺序=视觉顺序。
-    const contentGrid = document.createElement('div');
-    contentGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;'
-      + 'padding:12px 16px 14px;align-items:start;';
-    overlay.appendChild(contentGrid);
+    // ===== 主体布局：左侧分类导航(30%) + 右侧内容区(70%) =====
+    // 结构: overlay(flex column) -> header / bodyRow(flex:1) -> leftNav(30%) + rightContent(flex:1)
+    const bodyRow = document.createElement('div');
+    bodyRow.style.cssText = 'display:flex;flex:1 1 auto;min-height:0;';
+    const leftNav = document.createElement('div');
+    leftNav.style.cssText = 'flex:0 0 30%;max-width:200px;min-width:130px;overflow-y:auto;'
+      + 'border-right:1px solid var(--fnos-ui-border);padding:10px 8px;display:flex;flex-direction:column;gap:5px;'
+      + 'background:var(--fnos-ui-nav-bg, rgba(125,110,160,.06));';
+    const rightContent = document.createElement('div');
+    rightContent.style.cssText = 'flex:1 1 auto;min-width:0;overflow-y:auto;padding:14px 16px 16px;';
+    bodyRow.appendChild(leftNav);
+    bodyRow.appendChild(rightContent);
+    overlay.appendChild(bodyRow);
 
-    // 分组小标题(跨整行, 用于把多张卡归类: 通用 / 播放与画面 / 账号与同步 / 弹幕与高级)
-    const groupHeader = (text: string): HTMLElement => {
-      const h = document.createElement('div');
-      h.style.cssText = 'grid-column:1 / -1;font-size:11px;font-weight:700;color:var(--fnos-ui-sec);'
-        + 'letter-spacing:.6px;margin:10px 2px 0;padding-top:10px;border-top:1px solid var(--fnos-ui-border2);';
-      h.textContent = text;
-      return h;
-    };
-
-    // 调试日志(独立卡片, 置于「诊断信息」下方; 从「退出行为」卡片迁出, 见下方 debug 块)
+    // 调试日志(独立卡片; 从「退出行为」卡片迁出, 见下方 debug 块)
     const secDebug = section('调试日志');
-    secDebug.el.style.gridColumn = '1 / -1';
     const secDebugBody = secDebug.body;
 
     // ===== 分组1: 开关选项 =====
@@ -3383,20 +3380,67 @@ function handle(): void {
       }).catch(() => {});
     });
 
-    // ===== 统一布局：按「分组」归类 + 顺序追加，使相关卡片并排、结构清晰 =====
-    contentGrid.appendChild(groupHeader('通用'));
-    contentGrid.appendChild(sec1.el);        // 功能开关
-    contentGrid.appendChild(sec3.el);        // 退出行为
-    contentGrid.appendChild(groupHeader('播放与画面'));
-    contentGrid.appendChild(sec2.el);        // 播放器(占满整行)
-    contentGrid.appendChild(groupHeader('账号与同步'));
-    contentGrid.appendChild(secBili.el);     // B站弹幕登录
-    contentGrid.appendChild(secBangumi.el);  // Bangumi 登录
-    contentGrid.appendChild(secDouban.el);   // 豆瓣同步(占满整行)
-    contentGrid.appendChild(groupHeader('弹幕与高级'));
-    contentGrid.appendChild(secDanmaku.el);  // B站弹幕屏蔽
-    contentGrid.appendChild(secDiag.el);     // 诊断信息
-    contentGrid.appendChild(secDebug.el);    // 调试日志(占满整行)
+    // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
+    // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
+    type Cat = { id: string; label: string; els: HTMLElement[] };
+    const cats: Cat[] = [
+      { id: 'general', label: '通用', els: [sec1.el, sec3.el] },
+      { id: 'player', label: '播放器', els: [sec2.el] },
+      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secDouban.el] },
+      { id: 'danmaku', label: '弹幕屏蔽', els: [secDanmaku.el] },
+      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
+    ];
+    // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
+    const panes: Record<string, HTMLElement> = {};
+    cats.forEach((cat) => {
+      const pane = document.createElement('div');
+      pane.style.cssText = 'display:none;flex-direction:column;gap:14px;';
+      cat.els.forEach((el) => {
+        el.style.gridColumn = '';
+        pane.appendChild(el);
+      });
+      pane.dataset.cat = cat.id;
+      rightContent.appendChild(pane);
+      panes[cat.id] = pane;
+    });
+    // 左侧导航按钮 + 切换逻辑
+    const navBtns: Record<string, HTMLButtonElement> = {};
+    const selectCat = (id: string): void => {
+      for (const c of cats) {
+        const on = c.id === id;
+        panes[c.id].style.display = on ? 'flex' : 'none';
+        const b = navBtns[c.id];
+        if (!b) continue;
+        if (on) {
+          b.style.background = 'var(--fnos-ui-accent)!important';
+          b.style.color = '#fff';
+          b.style.fontWeight = '700';
+          b.style.borderColor = 'var(--fnos-ui-accent)';
+        } else {
+          b.style.background = 'transparent';
+          b.style.color = 'var(--fnos-ui-text)';
+          b.style.fontWeight = '500';
+          b.style.borderColor = 'transparent';
+        }
+      }
+    };
+    // 暴露给 openSettingsPanel, 使 fntv-open-settings(若启用)能直接切到对应分类
+    (overlay as any)._selectCat = (id: string): void => selectCat(id);
+    cats.forEach((cat) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = cat.label;
+      btn.style.cssText = 'text-align:left;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;'
+        + 'border:1px solid transparent;background:transparent;color:var(--fnos-ui-text);transition:background .13s;'
+        + 'font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+        + '-webkit-app-region:no-drag;app-region:no-drag;';
+      btn.onmouseenter = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'var(--fnos-ui-row-hover)'; };
+      btn.onmouseleave = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'transparent'; };
+      btn.onclick = (e: Event) => { e.stopPropagation(); selectCat(cat.id); };
+      navBtns[cat.id] = btn;
+      leftNav.appendChild(btn);
+    });
+    selectCat(cats[0].id); // 默认显示第一个分类(通用)
 
     // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
     const refreshDouban = async (): Promise<void> => {
@@ -3687,8 +3731,15 @@ function handle(): void {
     const refresh = (overlay as any)._refresh;
     if (typeof refresh === 'function') refresh();
     if (sectionId) {
-      const target = document.getElementById('sec-' + sectionId);
-      if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      // [适配左导航布局] 若 sectionId 对应某个分类, 直接切换显示该分类; 否则回退到滚动定位
+      const catMap: Record<string, string> = { danmaku: 'danmaku' };
+      const sel = (overlay as any)._selectCat;
+      if (catMap[sectionId] && typeof sel === 'function') {
+        sel(catMap[sectionId]);
+      } else {
+        const target = document.getElementById('sec-' + sectionId);
+        if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
     }
   }
 
