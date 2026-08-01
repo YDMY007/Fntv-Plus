@@ -98,9 +98,9 @@ export class PotPlayer extends BasePlayer {
             return false;
         }
 
-        // 关键优化：先只带「视频 + 续播点」立即拉起 PotPlayer（零网络阻塞，秒开，与 MPV 一致），
-        // 字幕/弹幕在 launchEpisode 之后异步获取并挂上（见 resolveSubtitleArg / attachSubtitle）。
-        const launchArgs = this.buildBaseLaunchArgs(index);
+        // 关键优化：把【全部集的 URL】都传给 PotPlayer 构建播放列表（让用户在 PotPlayer 内看到完整剧集），
+        // 再用 /playindex 指定从哪集开始播。字幕/续播点随后异步挂载（零网络阻塞，秒开）。
+        const launchArgs = this.buildFullPlaylistLaunchArgs(index);
 
         log.info(`[第${index + 1}/${this.playlist.length}集] 启动 PotPlayer: ${this.config.playerPath} ${launchArgs.join(' ')}`);
 
@@ -179,8 +179,43 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
+     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
+     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集），
+     * 再用 /playindex 指定起播位置 + /seek 续播点。
+     *
+     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
+     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
+     */
+    private buildFullPlaylistLaunchArgs(index: number): string[] {
+        const item = this.playlist[index];
+        this.currentIndex = index;
+        this.currentItem = item;
+
+        // 全部集的 URL → PotPlayer 会把它们都加入播放列表
+        const launchArgs: string[] = this.playlist.map(i => i.playLink);
+
+        // 从指定集开始播放（0-based）
+        launchArgs.push(`/playindex=${index}`);
+
+        // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
+        const duration = item.duration || 0;
+        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
+            launchArgs.push(`/seek=${Math.floor(item.ts)}`);
+            this.currentProgress = { ts: Math.floor(item.ts), duration };
+        } else {
+            this.currentProgress = { ts: 0, duration };
+        }
+
+        // 透传调用方额外参数
+        if (this.lastArgs.length > 0) {
+            launchArgs.push(...this.lastArgs);
+        }
+
+        return launchArgs;
+    }
+
+    /**
      * 计算字幕挂载参数（-sub=...），并登记临时文件供退出时清理。
-     * 抽出自 pushSubtitles，便于「先开播、后挂幕」的异步路径复用（返回 string[] 而非直接 push）。
      */
     private computeSubArgs(subPaths: string[], dmAss: string | null): string[] {
         if (subPaths.length > 0 && dmAss) {
