@@ -16,7 +16,7 @@ import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
 
 // 禁用输入法自动切换
 app.commandLine.appendSwitch('--lang', 'en-US');
-app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
+// app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor'); // 禁用会导致透明窗口下 HTML5 video 黑屏(有声音没画面)
 
 // 抑制SSL相关的底层错误日志
 app.commandLine.appendSwitch('--log-level', '3'); // 只显示致命错误
