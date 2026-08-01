@@ -516,36 +516,63 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
 }
 
 /**
- * [lc-269] 修复 Electron v38 透明窗口 + HTML5 <video> 黑屏回归 bug 的 DevTools hack。
+ * [lc-271] 修复 Electron v38 透明窗口 + HTML5 <video> 黑屏回归 bug 的 DevTools hack（时序修正版）。
  *
- * 现象: 原生播放黑屏有声音, 打开 DevTools 后画面立即正常(用户9次实测一致)。
- * 机理: Electron 官方文档明载 "窗口在 DevTools 打开时不再透明", 且 DevTools 打开会
- *   强制重启 GPU 合成器 → video 的硬件 overlay 平面被拉回正常纹理合成路径 → 出画;
- *   关闭 DevTools 后该合成器状态保留 → video 持续正常(无需 DevTools 常驻)。
+ * 现象 & 用户实测关键事实:
+ *  - 原生播放黑屏有声音; 打开 DevTools 后画面立即正常; 关键: 关闭 DevTools 后画面【依旧正常】(持久修复)。
+ *  - 第二台机器: 进入播放页先正常显示约 1 秒, 随后整屏变黑 —— 印证 GPU 在播放 ~1s 后将视频提升为
+ *    硬件 overlay 平面, 而透明(分层)窗口无法合成该 overlay → 黑屏。DevTools 打开会强制窗口不透明 +
+ *    重启 GPU 合成器, 把视频拉回正常纹理合成路径, 且该状态在关闭 DevTools 后仍保留。
+ *  - lc-269/270 的 600ms 瞬时开关之所以失败: 进入播放页时视频元素尚未创建/播放, 我们过早关闭 DevTools,
+ *    等视频真正开始后 overlay 又被提升 → 黑屏。手动能好, 正是因为"视频正在播放时" DevTools 处于打开态,
+ *    关闭后才粘住修复态。
  *
- * 本函数瞬时 openDevTools 再 closeDevTools, 复刻上述效果。代价: DevTools 窗口会闪现
- * 约 HACK_DELAY_MS(本设定 600ms), 播放页进入时偶发一次。仅 Windows 需要(该 bug 仅 Win 复现)。
+ * 本版修正: 打开 DevTools 后, 轮询等待页面内 <video> 真正进入 playing 态(readyState>=3 且未暂停),
+ *   再关闭 DevTools —— 复刻"播放中关闭 DevTools"的粘滞修复。最长等待 HACK_MAX_WAIT_MS 保底关闭,
+ *   避免无 video 时 DevTools 常驻。仅 Windows 需要(该 bug 仅 Win 复现)。代价: 视频开始播放前
+ *   DevTools 窗口会短暂可见(数秒), 这是复刻手动成功路径的必要代价。
  *
  * @param win 主窗口
  */
-const DEVTOOLS_HACK_DELAY_MS = 600;
-function restartVideoCompositor(win: BrowserWindow): void {
+const HACK_MAX_WAIT_MS = 12000;
+const HACK_POLL_MS = 200;
+let compositorFixInProgress = false;
+
+/** 轮询等待页面内视频真正进入播放态 */
+async function waitForVideoPlaying(wc: Electron.WebContents, timeoutMs: number): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            const playing = await wc.executeJavaScript(
+                `(()=>{const v=document.querySelector('video');return !!(v&&!v.paused&&v.readyState>=3);})()`
+            );
+            if (playing) return true;
+        } catch (_) { /* 页面未就绪/已跳转, 忽略继续轮询 */ }
+        await new Promise((r) => setTimeout(r, HACK_POLL_MS));
+    }
+    return false;
+}
+
+async function restartVideoCompositor(win: BrowserWindow): Promise<void> {
     const wc = win.webContents;
-    if (wc.isDevToolsOpened()) return;
-    log.info('[lc-269] 播放页进入: 瞬时开关 DevTools 强制 GPU 合成器重启(修复透明窗口 video 黑屏)');
+    if (compositorFixInProgress || wc.isDevToolsOpened()) return;
+    compositorFixInProgress = true;
+    log.info('[lc-271] 播放页进入: 打开 DevTools, 等待 <video> 播放后关闭(粘滞修复透明窗口 video 黑屏)');
     try {
         wc.openDevTools({ mode: 'detach' });
     } catch (e) {
-        log.warn('[lc-269] openDevTools 失败(忽略):', e);
+        log.warn('[lc-271] openDevTools 失败(放弃修复):', e);
+        compositorFixInProgress = false;
         return;
     }
-    setTimeout(() => {
-        try {
-            if (wc.isDevToolsOpened()) wc.closeDevTools();
-        } catch (e) {
-            log.warn('[lc-269] closeDevTools 失败(忽略):', e);
-        }
-    }, DEVTOOLS_HACK_DELAY_MS);
+    // 关键: 等视频真正开始播放(此时窗口处于不透明态, 合成器修复已粘滞)再关, 否则过早关闭会复发黑屏
+    await waitForVideoPlaying(wc, HACK_MAX_WAIT_MS);
+    try {
+        if (wc.isDevToolsOpened()) wc.closeDevTools();
+    } catch (e) {
+        log.warn('[lc-271] closeDevTools 失败(忽略):', e);
+    }
+    compositorFixInProgress = false;
 }
 
 /**
@@ -568,10 +595,10 @@ export function getMainWindow(): BrowserWindow {
         //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
         const onPageEntered = (wc: Electron.WebContents) => {
             injectAcrylicCSS(wc);
-            // [lc-269] 播放页进入时瞬时开关 DevTools 强制 GPU 合成器重启, 修复透明窗口+video 黑屏
+            // [lc-271] 播放页进入时打开 DevTools 等视频播放后关闭, 粘滞修复透明窗口+video 黑屏
             // (该 bug 仅 Windows 复现, 且仅播放页需要; 非播放页保持透明亚克力不变)
             if (process.platform === 'win32' && PLAY_PAGE_RE.test(wc.getURL())) {
-                restartVideoCompositor(mainwin!);
+                void restartVideoCompositor(mainwin!);
             }
         };
         mainwin.webContents.on('dom-ready', () => onPageEntered(mainwin!.webContents));
@@ -582,8 +609,9 @@ export function getMainWindow(): BrowserWindow {
         //   故与 dom-ready 不会重复; 即便重复也有 isDevToolsOpened() 守卫.
         mainwin.webContents.on('did-navigate-in-page', (_e, url) => {
             log.info('[lc-270] SPA 路由变化:', url);
+            // [lc-271] 播放页进入: 打开 DevTools 等 video 播放后关闭(粘滞修复黑屏)
             if (process.platform === 'win32' && PLAY_PAGE_RE.test(url)) {
-                restartVideoCompositor(mainwin!);
+                void restartVideoCompositor(mainwin!);
             }
         });
 
