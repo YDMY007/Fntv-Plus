@@ -455,16 +455,7 @@ function isLoginPath(url: string): boolean {
 const PLAY_PAGE_RE = /\/v\/(tv|movie|video)\//;
 
 function injectAcrylicCSS(wc: Electron.WebContents): void {
-    const owner = BrowserWindow.fromWebContents(wc);
     const url = wc.getURL();
-    const isPlayPage = PLAY_PAGE_RE.test(url);
-
-    // [lc-261] 播放页必须关闭窗口透明度，否则透明窗口下 HTML5 <video>
-    // 的硬件解码帧无法被 DWM 合成→黑屏有声音(Chromium 已知限制)。
-    // 设为不透明纯黑(#000000)，视觉上与透明时完全一致(视频区本就是黑底)，
-    // 但允许 video overlay 正常合成到屏幕。非播放页保持透明(#00000000)
-    // 以保留亚克力玻璃效果。
-    owner?.setBackgroundColor(isPlayPage ? '#000000' : '#00000000');
 
     if (isLoginPath(url)) {
         // [lc-144] 直接读 config.json 取 loginBgPath(不依赖 config 模块导出, 避免 asar/打包环境下
@@ -525,6 +516,39 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
 }
 
 /**
+ * [lc-269] 修复 Electron v38 透明窗口 + HTML5 <video> 黑屏回归 bug 的 DevTools hack。
+ *
+ * 现象: 原生播放黑屏有声音, 打开 DevTools 后画面立即正常(用户9次实测一致)。
+ * 机理: Electron 官方文档明载 "窗口在 DevTools 打开时不再透明", 且 DevTools 打开会
+ *   强制重启 GPU 合成器 → video 的硬件 overlay 平面被拉回正常纹理合成路径 → 出画;
+ *   关闭 DevTools 后该合成器状态保留 → video 持续正常(无需 DevTools 常驻)。
+ *
+ * 本函数瞬时 openDevTools 再 closeDevTools, 复刻上述效果。代价: DevTools 窗口会闪现
+ * 约 HACK_DELAY_MS(本设定 600ms), 播放页进入时偶发一次。仅 Windows 需要(该 bug 仅 Win 复现)。
+ *
+ * @param win 主窗口
+ */
+const DEVTOOLS_HACK_DELAY_MS = 600;
+function restartVideoCompositor(win: BrowserWindow): void {
+    const wc = win.webContents;
+    if (wc.isDevToolsOpened()) return;
+    log.info('[lc-269] 播放页进入: 瞬时开关 DevTools 强制 GPU 合成器重启(修复透明窗口 video 黑屏)');
+    try {
+        wc.openDevTools({ mode: 'detach' });
+    } catch (e) {
+        log.warn('[lc-269] openDevTools 失败(忽略):', e);
+        return;
+    }
+    setTimeout(() => {
+        try {
+            if (wc.isDevToolsOpened()) wc.closeDevTools();
+        } catch (e) {
+            log.warn('[lc-269] closeDevTools 失败(忽略):', e);
+        }
+    }, DEVTOOLS_HACK_DELAY_MS);
+}
+
+/**
  * 获取主窗口实例
  * @returns {BrowserWindow}
  */
@@ -543,7 +567,13 @@ export function getMainWindow(): BrowserWindow {
         //       [lc-127] media.ts 已不再在关闭视频时整页刷新, 但启动导航/用户手动刷新
         //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
         mainwin.webContents.on('dom-ready', () => {
-            injectAcrylicCSS(mainwin!.webContents);
+            const wc = mainwin!.webContents;
+            injectAcrylicCSS(wc);
+            // [lc-269] 播放页进入时瞬时开关 DevTools 强制 GPU 合成器重启, 修复透明窗口+video 黑屏
+            // (该 bug 仅 Windows 复现, 且仅播放页需要; 非播放页保持透明亚克力不变)
+            if (process.platform === 'win32' && PLAY_PAGE_RE.test(wc.getURL())) {
+                restartVideoCompositor(mainwin!);
+            }
         });
 
         // 接管 new-window / target="_blank": 同域(飞牛影视 NAS)链接在原窗口内打开,
