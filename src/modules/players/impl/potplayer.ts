@@ -355,10 +355,11 @@ export class PotPlayer extends BasePlayer {
      * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
      */
     /**
-     * 构建「完整播放列表」启动参数：把当前 this.playlist 的全部剧集 URL 都传给 PotPlayer，
-     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
+     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件（含可读集名 + 极速标签），
+     * 把文件路径传给 PotPlayer，使其播放列表显示人类可读的剧名/集数而非 GUID 乱码。
+     *
      * 播放顺序由 this.playlist 决定（已在 playList() 入口处把目标集重排到索引 0），
-     * PotPlayer 默认从第一个文件开始播，即用户点击的那一集。
+     * PotPlayer 默认从第一个条目开始播，即用户点击的那一集。
      *
      * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
      * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
@@ -368,8 +369,13 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 全部集 URL 传给 PotPlayer（顺序即 this.playlist 的播放顺序）
-        const launchArgs: string[] = this.playlist.map(i => i.playLink);
+        // 生成 .m3u8 播放列表文件：每行含可读标题(getTitle) + [极速] 标签 + 实际代理 URL
+        // PotPlayer 解析 m3u8 后会在播放列表里显示 EXTINF 的 title 而非 URL 路径
+        const content = this.generateM3U8Playlist(this.playlist);
+        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
+        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
+
+        const launchArgs: string[] = [this.playlistFilePath];
 
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
@@ -915,13 +921,14 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 生成 M3U8 播放列表内容（legacy 回退模式）
+     * 生成 M3U8 播放列表内容（含可读标题 + 极速标签）
+     * 标题格式：getTitle() 返回的「剧名 - S01E04: 集标题」+ [极速]
      */
     private generateM3U8Playlist(infos: PlayItem[]): string {
         let content = '#EXTM3U\n';
         for (const item of infos) {
             const duration = item.duration || -1;
-            const title = this.getTitle(item);
+            const title = `${this.getTitle(item)} [极速]`;
             content += `#EXTINF:${duration},${title}\n`;
             content += `${item.playLink}\n`;
         }
