@@ -461,6 +461,30 @@ function isLoginPath(url: string): boolean {
     } catch { return false; }
 }
 
+// [lc-274] 播放页专用覆盖 CSS: 彻底关闭 ACRYLIC_CSS 注入的所有 backdrop-filter, 修复 video 黑屏。
+//   根因: ACRYLIC_CSS 在 body/导航栏/卡片上的 backdrop-filter 合成层与 <video> 硬件 overlay 直通
+//   显示冲突 → 黑屏(有声无画)。弹出授权窗口未注入此 CSS → 视频正常, 锁定根因。
+//   播放页为全屏视频, 本不需要亚克力玻璃壳。此处复用 ACRYLIC_CSS 保证圆角/白底清除等基础样式,
+//   再用更高特异性 + 后定义规则把所有 backdrop-filter 置 none, 并让 body/导航栏背景变不透明深色。
+const PLAY_PAGE_CSS = `
+    html body{
+        background:#0e0e12!important;
+        backdrop-filter:none!important;
+        -webkit-backdrop-filter:none!important;
+    }
+    div.relative.z-20.flex.items-center.justify-between.px-11.py-5{
+        background:#0e0e12!important;
+        backdrop-filter:none!important;
+        -webkit-backdrop-filter:none!important;
+    }
+    .card-root,[class*="card"]:not([class*="drawer"]),li[class*="cursor-pointer"],
+    [class*="rounded-lg"][class*="bg-white"],[class*="rounded-xl"][class*="bg-white"],
+    [class*="bg-white\\/"],[class*="bg-gray-50"]:not([class*="drawer"]){
+        backdrop-filter:none!important;
+        -webkit-backdrop-filter:none!important;
+    }
+`;
+
 /**
  * 注入亚克力 CSS 到主窗口
  * 可在 dom-ready 时反复调用 (幂等: CSS 规则重复不副作用)
@@ -523,6 +547,10 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
             }
             ::-webkit-scrollbar{width:0!important;height:0!important}
         `);
+    } else if (PLAY_PAGE_RE.test(url)) {
+        // [lc-274] 播放页: 复用 ACRYLIC_CSS 基础样式, 再叠加 PLAY_PAGE_CSS 关闭 backdrop-filter
+        //   (backdrop-filter 合成层与 <video> 硬件 overlay 冲突 → 黑屏; 弹出授权窗口未注入故正常)
+        wc.insertCSS(ACRYLIC_CSS + PLAY_PAGE_CSS);
     } else {
         // 主界面: 完整亚克力玻璃壳
         wc.insertCSS(ACRYLIC_CSS);
