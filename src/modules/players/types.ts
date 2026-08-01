@@ -5,6 +5,16 @@ export enum EventType {
     PROGRESS = 'progress',
     ERROR = 'error',
     EXIT = 'exit',
+    /** 当前集序号变化（手动切集 / 自动连播 / 原地切换均会触发），供主进程刷新悬浮控制条可用状态 */
+    EPISODE = 'episode',
+}
+
+// 当前集变化数据（EPISODE 事件载荷）
+export type EpisodeChangeData = {
+    /** 当前集索引（0 基） */
+    index: number;
+    /** 总集数 */
+    total: number;
 }
 
 // 单个播放源信息(非当前播放只需要传itemGuid)
@@ -41,7 +51,7 @@ export type PlayErrorData = {
 }
 
 // 播放器事件数据类型
-export type EventData = PlayStatusData | PlayExitData | PlayErrorData;
+export type EventData = PlayStatusData | PlayExitData | PlayErrorData | EpisodeChangeData;
 
 // 事件处理器类型
 export type EventHandler = (type: EventType, data: EventData) => void;

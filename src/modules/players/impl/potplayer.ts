@@ -143,6 +143,9 @@ export class PotPlayer extends BasePlayer {
             .then((subArgs) => { if (subArgs.length > 0) this.attachSubtitle(subArgs); })
             .catch((e: any) => log.warn('PotPlayer 字幕异步挂载失败(已忽略):', e?.message || e));
 
+        // 当前集序号已确定，通知主进程刷新悬浮控制条
+        this.emitEpisode();
+
         return true;
     }
 
@@ -387,6 +390,10 @@ export class PotPlayer extends BasePlayer {
             .catch((e: any) => log.warn('[switchTo] 字幕异步挂载失败(已忽略):', e?.message || e));
 
         log.info(`✅ 已切换到新内容（复用窗口 /current，未重新加载视频）`);
+
+        // 当前集序号已确定，通知主进程刷新悬浮控制条
+        this.emitEpisode();
+
         return true;
     }
 
@@ -624,6 +631,23 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
+     * 暴露当前集序号 / 总集数，供主进程悬浮控制条刷新「上一集/下一集」可用状态。
+     */
+    getEpisodeState(): { index: number; total: number } {
+        return { index: this.currentIndex, total: this.playlist.length };
+    }
+
+    /**
+     * 当前集序号变化时（起播 / 原地切换 / 自动连播）上报 EPISODE 事件，
+     * 让主进程据此刷新悬浮控制条按钮的禁用态。
+     */
+    private emitEpisode(): void {
+        if (!this.currentItem || this.playlist.length === 0) return;
+        const data: { index: number; total: number } = { index: this.currentIndex, total: this.playlist.length };
+        this.emitEvent(EventType.EPISODE, data);
+    }
+
+    /**
      * 统一控制入口（全局快捷键转发）。
      * 通过 PotPlayer 的「/Current」命令行控制已运行的实例：
      *   /Current /play  → 播放
@@ -652,6 +676,26 @@ export class PotPlayer extends BasePlayer {
             case 'pause':
             case 'stop':
                 return run('/pause');
+            case 'next': {
+                const n = this.currentIndex + 1;
+                if (n >= 0 && n < this.playlist.length) {
+                    log.info(`[control] PotPlayer 手动下一集 -> 第 ${n + 1}/${this.playlist.length} 集`);
+                    void this.switchTo(this.playlist, n);
+                    return true;
+                }
+                log.info(`[control] PotPlayer 已是最后一集，忽略 next`);
+                return false;
+            }
+            case 'prev': {
+                const p = this.currentIndex - 1;
+                if (p >= 0 && p < this.playlist.length) {
+                    log.info(`[control] PotPlayer 手动上一集 -> 第 ${p + 1}/${this.playlist.length} 集`);
+                    void this.switchTo(this.playlist, p);
+                    return true;
+                }
+                log.info(`[control] PotPlayer 已是第一集，忽略 prev`);
+                return false;
+            }
             default:
                 log.info(`[control] PotPlayer 不支持动作: ${action}`);
                 return false;

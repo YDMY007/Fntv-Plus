@@ -15,6 +15,7 @@ import { isTrusted } from '../../../modules/cert_trust';
 import { getMainWindow } from '../../common/mainwin';
 import * as doubanSync from './doubanSync';
 import * as bangumiSync from './bangumiSync';
+import { showPotPlayerControlBar, updatePotPlayerControlBar, hidePotPlayerControlBar } from './potplayerControlBar';
 
 /**
 * 媒体播放插件
@@ -356,12 +357,21 @@ function eventHandler(fnapi: fn.ApiService) {
                 void bangumiSync.syncOnProgress(progressData.itemGuid, info, progressData.percentage, fnapi, progressData.ts, progressData.duration);
                 break;
 
+            case ply.EventType.EPISODE: {
+                // 当前集序号变化（手动切集 / 自动连播 / 原地切换）：刷新悬浮控制条按钮禁用态
+                const ed = data as ply.EpisodeChangeData;
+                updatePotPlayerControlBar(ed.index, ed.total);
+                break;
+            }
+
             case ply.EventType.ERROR:
                 const errorData = data as ply.PlayErrorData;
                 log.error('MPV error:', String(errorData.message));
                 break;
 
             case ply.EventType.EXIT:
+                // 播放结束（正常或异常）：隐藏 PotPlayer 悬浮控制条
+                hidePotPlayerControlBar();
                 const event = data as ply.PlayExitData;
                 if (event.code !== 0) {
                     // [lc-127] 播放器异常退出: 仅记录日志, 不再整页刷新。
@@ -423,6 +433,16 @@ function eventHandler(fnapi: fn.ApiService) {
                 break;
         }
     };
+}
+
+// 同步 PotPlayer 悬浮控制条的显隐：
+// 仅当使用 PotPlayer 且为多集（>1）时显示「上一集/下一集」控制条；其余情况（MPV / 单集）隐藏。
+function syncPotBar(isPot: boolean, total: number, index: number): void {
+    if (isPot && total > 1) {
+        showPotPlayerControlBar(total, index);
+    } else {
+        hidePotPlayerControlBar();
+    }
 }
 
 // 处理播放事件
@@ -544,6 +564,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
                 const ok = await currentPlayer.switchTo(playList, currentIndex);
                 if (ok) {
                     log.info('✅ 已原地切换到新内容（未重新拉起 PotPlayer 窗口）');
+                    syncPotBar(wantPot, playList.length, currentIndex);
                     return;
                 }
                 log.warn('[PotPlayer] 原地切换失败，回退为停止后重新播放');
@@ -566,6 +587,9 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
 
     // 开始播放
     playerInstance.playList(playList, currentIndex);
+
+    // 同步 PotPlayer 悬浮控制条（仅 PotPlayer 多集时显示）
+    syncPotBar(wantPot, playList.length, currentIndex);
 }
 
 // 生成代理URL
@@ -638,6 +662,10 @@ function init(): void {
     }
 
     registerHandler('play-movie', handlePlayMovie);
+    // 悬浮控制条「上一集/下一集」按钮的点击：转发到统一控制入口（PotPlayer 走 switchTo 切集）
+    registerHandler('pot-control', (_e: IpcMainEvent, action: string) => {
+        controlCurrentPlayer(action as ply.PlayerControlAction);
+    });
     registerAppHook('beforeQuit', handleBeforeQuit);
 
     // 异步预准备内置 PotPlayer 的隔离副本（首次复制 209MB，避免播放时阻塞）
@@ -654,7 +682,13 @@ export function controlCurrentPlayer(action: ply.PlayerControlAction): boolean {
         return false;
     }
     try {
-        return currentPlayer.control(action);
+        const handled = currentPlayer.control(action);
+        // 手动切集（next/prev）成功后，确保悬浮控制条存在并刷新按钮禁用态（仅 PotPlayer 有控制条）
+        if (handled && (action === 'next' || action === 'prev') && currentPlayer instanceof ply.PotPlayer) {
+            const st = currentPlayer.getEpisodeState();
+            showPotPlayerControlBar(st.total, st.index);
+        }
+        return handled;
     } catch (e: any) {
         log.warn(`[controlCurrentPlayer] 动作 ${action} 失败:`, e?.message || e);
         return false;
