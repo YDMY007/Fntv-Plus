@@ -163,6 +163,12 @@ const ACRYLIC_CSS = `
         background:transparent!important;
     }
 
+    /* [lc-277 二分验证] 暂时注释掉 3.3.3 新增的 3f/3g/12b 弹窗 CSS 规则
+     * 怀疑: [class*="modal-content"] / [class*="dialog-content"] 等选择器误伤了 fnOS 视频播放器
+     * 的画质/字幕/设置浮层(→浮层全白), 且可能影响 video 合成层(→黑屏)。
+     * 若注释后视频出画+弹窗正常, 则锁定根因在此三段, 再逐段细分。
+     */
+    /*
     /* 3f. Modal/Dialog 遮罩层例外: 弹窗背景必须不透明, 否则底层内容(如首页轮播图)会透过透明遮罩露出来 */
     .semi-modal-mask,
     .semi-modal-wrapper,
@@ -204,6 +210,7 @@ const ACRYLIC_CSS = `
         background:var(--semi-color-primary, #6c8ccf)!important;
         color:#fff!important;
     }
+    */ /* end lc-277 comment-out 3f+3g */
 
     /* ── ④ 滚动条隐藏 ── */
     ::-webkit-scrollbar{width:0!important;height:0!important}
@@ -380,6 +387,8 @@ const ACRYLIC_CSS = `
         box-shadow:0 1px 4px rgba(0,0,0,.25),0 .5px 0 rgba(255,255,255,.06)!important;
     }
 
+    /* [lc-277 二分验证] 暂时注释 12b(同 3f/3g) */
+    /*
     /* ── ⑫b 深色模式 Modal/Dialog 例外 ── */
     html.dark .semi-modal-mask,
     html.dark .semi-modal-wrapper,
@@ -394,6 +403,7 @@ const ACRYLIC_CSS = `
         background:#2b2a33!important;
         background-color:#2b2a33!important;
     }
+    */ /* end lc-277 comment-out 12b */
 
     /* ── ⑬ 详情页布局保护（lc-190: 修复 TV 剧集页带季选择器时内容变窄）
          症状: 海报/播放按钮/简介等全部挤成中间一条窄带, 左右大片空白.
