@@ -486,14 +486,80 @@ const PLAY_PAGE_CSS = `
 `;
 
 /**
+ * [lc-275] 视频播放态专用 CSS: 复刻"弹出授权窗口"环境彻底修复 video 黑屏。
+ *   弹出授权窗口(无 acrylic / 无 backdrop-filter / 不透明)视频正常, 锁定根因是
+ *   ACRYLIC_CSS 的 backdrop-filter 合成层(含 fnOS 自身可能带的)与 <video> 硬件 overlay 冲突。
+ *   本 CSS 用 *{backdrop-filter:none!important} 兜掉一切 backdrop-filter(包括 fnOS 内联),
+ *   背景纯黑。配合主进程在检测到 <video> 时关原生 acrylic + 黑底, 构成完整修复。
+ */
+const VIDEO_PAGE_CSS = `
+    *{ backdrop-filter:none!important; -webkit-backdrop-filter:none!important; }
+    html,body{ background:#000000!important; }
+`;
+
+/** 当前注入的页面 CSS key(ACRYLIC 或 VIDEO), 供视频检测切换时整体移除 */
+let pageCssKey: string | null = null;
+let lastVideoPresent = false;
+let videoPollStarted = false;
+
+/** 统一移除旧页面 CSS 并注入新 CSS, 记录 key(insertCSS 在 Electron 中返回 Promise<string> key) */
+function applyPageCSS(wc: Electron.WebContents, css: string): void {
+    if (pageCssKey) { try { wc.removeInsertedCSS(pageCssKey); } catch (_) { /* key 失效忽略 */ } }
+    pageCssKey = null;
+    try {
+        const r: any = wc.insertCSS(css);
+        if (r && typeof r.then === 'function') {
+            (r as Promise<string>).then((k: string) => { pageCssKey = k; }).catch(() => { });
+        } else {
+            pageCssKey = r as string;
+        }
+    } catch (_) { /* 注入失败忽略 */ }
+}
+
+/**
+ * [lc-275] 视频播放态运行时切换: 轮询检测页面内可见 <video> 元素, 出现/消失时切换窗口材质与页面 CSS。
+ *   关键: fnOS 播放视频是页面内覆盖层, 不改变 URL, 故此前基于 did-navigate-in-page / PLAY_PAGE_RE 的
+ *   切换从未触发(用户实测进播放页无"路由变化"日志、无 DevTools 闪窗), acrylic/backdrop-filter 一直残留→黑屏。
+ *   弹出授权窗口(无 acrylic/backdrop-filter/不透明)视频正常→复刻其环境即可根治。
+ */
+async function pollVideoPresence(win: BrowserWindow): Promise<void> {
+    if (!win || win.isDestroyed()) return;
+    const wc = win.webContents;
+    if (wc.isLoading() || !wc.getURL()) return;
+    let present = false;
+    try {
+        present = await wc.executeJavaScript(
+            `(function(){var vs=document.getElementsByTagName('video');` +
+            `for(var i=0;i<vs.length;i++){var r=vs[i].getBoundingClientRect();` +
+            `if(r.width>80&&r.height>80)return true;}return false;})()`
+        );
+    } catch (_) { return; }
+    if (present === lastVideoPresent) return;
+    lastVideoPresent = present;
+    try {
+        if (present) {
+            // 视频出现: 复刻弹出窗口环境 —— 关原生 acrylic + 黑底 + 页面去全部 backdrop-filter
+            if (isWin11) { try { win.setBackgroundMaterial('none'); } catch (_) { } }
+            win.setBackgroundColor('#000000');
+            applyPageCSS(wc, VIDEO_PAGE_CSS);
+        } else {
+            // 视频消失: 恢复亚克力美观 + 重新注入 ACRYLIC_CSS
+            if (isWin11) { try { win.setBackgroundColor('#faf4fa'); win.setBackgroundMaterial('acrylic'); } catch (_) { } }
+            applyPageCSS(wc, ACRYLIC_CSS);
+        }
+    } catch (_) { }
+}
+
+/**
  * 注入亚克力 CSS 到主窗口
- * 可在 dom-ready 时反复调用 (幂等: CSS 规则重复不副作用)
+ * 可在 dom-ready / did-navigate-in-page / 视频检测轮询 时反复调用, 统一经 applyPageCSS 注入并存 key。
  *
  * v380: 登录页(/login,/signin) 自动切换为不透明白底模式,
  *       避免 transparent 窗口 + html{background:transparent} 导致桌面透出全白.
  */
 function injectAcrylicCSS(wc: Electron.WebContents): void {
     const url = wc.getURL();
+    let css: string;
 
     if (isLoginPath(url)) {
         // [lc-144] 直接读 config.json 取 loginBgPath(不依赖 config 模块导出, 避免 asar/打包环境下
@@ -510,7 +576,7 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
         const effectiveBgUrl = (customBg && fs.existsSync(customBg))
             ? 'file:///' + customBg.replace(/\\/g, '/')
             : _loginBgDefaultUrl;
-        wc.insertCSS(`
+        css = `
             html{
                 height:100%!important;
                 background:transparent!important;
@@ -546,15 +612,15 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
                 -webkit-clip-path:inset(0 round 16px)!important;
             }
             ::-webkit-scrollbar{width:0!important;height:0!important}
-        `);
+        `;
     } else if (PLAY_PAGE_RE.test(url)) {
-        // [lc-274] 播放页: 复用 ACRYLIC_CSS 基础样式, 再叠加 PLAY_PAGE_CSS 关闭 backdrop-filter
-        //   (backdrop-filter 合成层与 <video> 硬件 overlay 冲突 → 黑屏; 弹出授权窗口未注入故正常)
-        wc.insertCSS(ACRYLIC_CSS + PLAY_PAGE_CSS);
+        // 兼容: 若 URL 恰好是播放页路由(部分入口), 仍叠加 PLAY_PAGE_CSS; 多数情况由轮询检测兜底
+        css = ACRYLIC_CSS + PLAY_PAGE_CSS;
     } else {
         // 主界面: 完整亚克力玻璃壳
-        wc.insertCSS(ACRYLIC_CSS);
+        css = ACRYLIC_CSS;
     }
+    applyPageCSS(wc, css);
 }
 
 /**
@@ -677,6 +743,19 @@ export function getMainWindow(): BrowserWindow {
         ipcMain.on('renderer-desktop-fix', (_e: any, msg: string) => {
             log.info(`[渲染端桌面纠正] ${msg}`);
         });
+
+        // [lc-275] 视频检测轮询: fnOS 播放视频是页面内覆盖层(不改 URL, 不触发 did-navigate-in-page),
+        //   此前基于路由事件的 acrylic/背景材质切换从未触发 → 播放页一直残留 backdrop-filter → 黑屏。
+        //   改为每 600ms 检测可见 <video>: 出现→关原生 acrylic+黑底+页面去全部 backdrop-filter(复刻弹出窗口环境)→出画;
+        //   消失→恢复亚克力 + 重新注入 ACRYLIC_CSS。仅注册一次。
+        if (!videoPollStarted) {
+            videoPollStarted = true;
+            setInterval(() => {
+                if (mainwin && !mainwin.isDestroyed()) {
+                    void pollVideoPresence(mainwin);
+                }
+            }, 600);
+        }
     }
     return mainwin;
 }
