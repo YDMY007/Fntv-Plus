@@ -499,6 +499,19 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
     // 寻找当前播放的媒体在数组中的位置
     const currentIndex = playList.findIndex(item => item.itemGuid === itemGuid);
 
+    // [续播修复] 被点击集的真实观看进度在 getPlayInfo(id) 返回的 response.data.ts 中；
+    // 而上面构造 playList 用的是 getEpisodeList 每集的 ts(往往未被 fnOS 回填)，
+    // 故把 response.data.ts 合并覆盖到被点击集，确保续播起点正确。
+    if (currentIndex >= 0 && currentIndex < playList.length) {
+        const clickedTs = (response.data && response.data.ts) || 0;
+        if (clickedTs > 0) {
+            playList[currentIndex].ts = clickedTs;
+            log.info(`[续播] 合并被点击集进度 response.data.ts=${clickedTs}s → playList[${currentIndex}] (guid=${playList[currentIndex].itemGuid})`);
+        } else {
+            log.warn(`[续播] 被点击集 response.data.ts 无效(=${clickedTs})，续播可能从头开始`);
+        }
+    }
+
     // 检查是否选择了特定的播放源索引
     if (sourceIndex > 0) {
         log.info(`使用指定的播放源索引: ${sourceIndex}`);
@@ -586,7 +599,9 @@ function processEpisodeMedia(cfg: fnConfig.Config, info: fn.PlayListItem): ply.P
         tvTitle: info.tv_title,
         seasonNumber: info.season_number,
         episodeNumber: info.episode_number,
-        ts: info.ts,
+        // [续播修复] fnOS 的 episode/list 返回每集的 ts 往往未被回填观看进度(只有 watched 标记)，
+        // 故优先用 info.ts；若其为 0 再用兼容字段 watched_ts 兜底，避免续播点丢失。
+        ts: info.ts > 0 ? info.ts : (info.watched_ts || 0),
         duration: info.duration,
         playLink: getProxyUrl(cfg, info.guid),
         type: info.type,

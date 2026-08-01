@@ -312,6 +312,19 @@ export class PotPlayer extends BasePlayer {
      * 用于【先立即拉起 PotPlayer 开播】，字幕/弹幕随后异步挂载，避免网络请求阻塞启动（见 resolveSubtitleArg / attachSubtitle）。
      * 抽取自 launchEpisode，供「逐集拉起」与「原地切换(switchTo)」共用。
      */
+    /**
+     * 把秒数格式化为 PotPlayer /seek 需要的 HH:MM:SS。
+     * PotPlayer 官方语法为 /seek=hh:mm:ss.ms，部分版本不识别纯秒数，故统一转换。
+     */
+    private formatSeekTime(seconds: number): string {
+        const s = Math.max(0, Math.floor(seconds));
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        const pad = (n: number) => String(n).padStart(2, '0');
+        return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+    }
+
     private buildBaseLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
@@ -322,7 +335,7 @@ export class PotPlayer extends BasePlayer {
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${Math.floor(item.ts)}`);
+            launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
             this.currentProgress = { ts: Math.floor(item.ts), duration };
         } else {
             this.currentProgress = { ts: 0, duration };
@@ -362,23 +375,29 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 生成 .m3u8 播放列表文件：每行含可读标题(getTitle) + [极速] 标签 + 实际代理 URL
-        // PotPlayer 解析 m3u8 后会在播放列表里显示 EXTINF 的 title 而非 URL 路径
-        const content = this.generateM3U8Playlist(this.playlist);
-        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
-        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
+        // [续播修复] PotPlayer 对「.m3u8 播放列表文件」施用 /seek 时，/seek 是作用在整个
+        // 播放列表文件上(而非列表内第一项)，导致续播失效、从头开播。
+        // 故改用【多文件参数】方式：把每集 URL 作为独立命令行参数传给 PotPlayer，
+        // PotPlayer 会自动将其组成播放列表(保留全量上下集可见、可在内部切换)，
+        // 而 /seek 明确作用于【第一个参数(目标集)】，续播 100% 落到目标集内。
+        // (代价：PotPlayer 播放列表项显示 URL 而非可读名——可读名需求见 lc-243，待 PotPlayer
+        //  支持播放列表内 per-item seek 或 #EXT-X-START 生效后再恢复 m3u8 方案。)
+        const launchArgs: string[] = [];
 
-        const launchArgs: string[] = [this.playlistFilePath];
-
-        // [续播] PotPlayer 官方仅支持「启动时 /seek=秒」跳转到续播点(运行后用 CLI /Current /seek 动态 seek 无效)，
-        // 故把续播点作为启动参数写入(目标集已重排到索引0，/seek 落在第一集即目标集内)。
-        // 网络流缓冲前发出的 /seek 由 PotPlayer 自身在缓冲完成后生效，无需我们运行时重试(也避免重复弹窗)。
+        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)
         const duration = item.duration || 0;
+        launchArgs.push(item.playLink);
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${Math.floor(item.ts)}`);
+            launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
             this.currentProgress = { ts: Math.floor(item.ts), duration };
         } else {
             this.currentProgress = { ts: 0, duration };
+        }
+
+        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)
+        for (let i = 0; i < this.playlist.length; i++) {
+            if (i === index) continue;
+            launchArgs.push(this.playlist[i].playLink);
         }
 
         // 透传调用方额外参数
@@ -967,7 +986,7 @@ export class PotPlayer extends BasePlayer {
 
         const duration = startItem.duration || 0;
         if (startItem.ts > 0 && duration > 0 && startItem.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${Math.floor(startItem.ts)}`);
+            launchArgs.push(`/seek=${this.formatSeekTime(startItem.ts)}`);
         }
 
         const subPaths: string[] = [];
