@@ -1,6 +1,7 @@
 import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as log from '../../modules/logger';
 
 // [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
@@ -40,6 +41,12 @@ function computeWindowSize(): { width: number; height: number } {
     return { width: w, height: h };
 }
 
+// [lc-267] Win11 检测: 仅 Win11 支持 setBackgroundMaterial('acrylic') 原生亚克力,
+// 用于替代 Chromium GPU 亚克力(因 --disable-gpu 后 backdrop-filter 失效)。
+// build >= 22000 即 Win11。
+const IS_WIN11 = process.platform === 'win32'
+    && parseInt((os.release().split('.')[2] ?? '0'), 10) >= 22000;
+
 const mainwinConfig: BrowserWindowConstructorOptions = {
     minWidth: 1280,
     minHeight: 720,
@@ -47,8 +54,13 @@ const mainwinConfig: BrowserWindowConstructorOptions = {
     show: false,
     icon: path.join(__dirname, '../../../build/icon.ico'),
     frame: false,
-    // 透明窗口: 实现真正的 Mica/Acrylic 半透亚克力(桌面朦胧透出)
-    transparent: true,
+    // [lc-267] Win11: 关透明 + 原生亚克力(规避 Electron v38 透明窗口+video 黑屏 bug)。
+    //   关透明后 video 不再走 DWM overlay → 配合 --disable-gpu 软件合成 → 画面正常;
+    //   亚克力由 win.setBackgroundMaterial('acrylic') 在下方创建后提供(系统级 DWM 模糊)。
+    // 非 Win11(含 Win10/mac/linux): 维持原透明窗口 + CSS backdrop-filter 亚克力(无此 bug)。
+    transparent: !IS_WIN11,
+    // 圆角: 透明窗口 OS 忽略 roundedCorners(靠 CSS clip-path); 不透明窗口需靠它圆角(否则方角露亚克力)。
+    roundedCorners: true,
     backgroundColor: '#00000000',
     webPreferences: {
         webgl: true,
@@ -459,12 +471,11 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
     const url = wc.getURL();
     const isPlayPage = PLAY_PAGE_RE.test(url);
 
-    // [lc-261] 播放页必须关闭窗口透明度，否则透明窗口下 HTML5 <video>
-    // 的硬件解码帧无法被 DWM 合成→黑屏有声音(Chromium 已知限制)。
-    // 设为不透明纯黑(#000000)，视觉上与透明时完全一致(视频区本就是黑底)，
-    // 但允许 video overlay 正常合成到屏幕。非播放页保持透明(#00000000)
-    // 以保留亚克力玻璃效果。
-    owner?.setBackgroundColor(isPlayPage ? '#000000' : '#00000000');
+    // [lc-267] 不再调用 setBackgroundColor: 该调用会把关透明的 Win11 窗口
+    //   重新设为透明(#00000000)→ 重新触发 video 黑屏 bug 并破坏原生亚克力。
+    //   窗口透明度统一在创建时决定(Win11=不透明, 其余=透明), 此处不改动。
+    // (旧 lc-261 的播放页 #000000 切换方案经验证无效, 已废弃)
+    void owner; void isPlayPage;
 
     if (isLoginPath(url)) {
         // [lc-144] 直接读 config.json 取 loginBgPath(不依赖 config 模块导出, 避免 asar/打包环境下
@@ -534,6 +545,18 @@ export function getMainWindow(): BrowserWindow {
         mainwin = new BrowserWindow({ ...mainwinConfig, width: size.width, height: size.height });
         // 居中显示在所属屏幕, 避免从角落弹出
         mainwin.center();
+
+        // [lc-267] Win11: 用系统原生亚克力替代 Chromium GPU 亚克力(因 --disable-gpu 后
+        //   CSS backdrop-filter 失效)。setBackgroundMaterial 是 DWM 级模糊, 不依赖 Chromium GPU,
+        //   且窗口已关透明 → video 正常出画, 亚克力效果保留。
+        // 非 Win11 不调用(透明窗口 + CSS 亚克力, 维持原行为)。
+        if (IS_WIN11) {
+            try {
+                mainwin.setBackgroundMaterial('acrylic');
+            } catch (e) {
+                log.warn('[主窗口] setBackgroundMaterial(acrylic) 失败, 退回纯色窗口:', e);
+            }
+        }
 
         // v376 修复: CSS 改为 dom-ready 注��� (而非窗口创建时一次性)
         // 原因: 历史上 MPV 关闭会触发 reloadIgnoringCache() 刷新页面,

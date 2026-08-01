@@ -22,15 +22,15 @@ app.commandLine.appendSwitch('--lang', 'en-US');
 // 恢复后透明窗口 + video 正常工作。若当初禁用是为了修某个旧 bug 需重新评估。
 // app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
 
-// [lc-266] 禁用 DWM 硬件 video overlay 平面, 仅针对视频。
-// 症状: fnOS 网页原生 <video> 黑屏有声音, 打开 DevTools 后画面立即正常。
-// 机理: Chromium 默认把 video 走 Windows DWM 的硬件 overlay 平面合成,
-//   在特定窗口/合成条件下该 overlay 平面无法正常显示 → 黑屏;
-//   DevTools 打开时强制 video 退回纹理(texture)合成 → 正常。
-// 本开关精确禁用 video overlay, 把 video 强制进合成器纹理路径(与 DevTools 效果一致),
-// 但保留其余 GPU 合成 → 整页不卡顿; 也不动透明窗口 → 亚克力不受影响。
-// 只影响视频呈现层, 视频解码(H.264/HEVC)仍可硬件加速。
-app.commandLine.appendSwitch('--disable-direct-composition-video-overlays');
+// [lc-266→lc-267] 原生播放黑屏根因: Electron v38 透明窗口 + HTML5 <video> 合成回归 bug
+// (打开 DevTools 时窗口变不透明 + 重启 GPU 合成器 → 画面才正常, Electron 官方文档明载)。
+// 仅 Windows 复现(DWM 相关); mac/linux 无此 bug, 不加此开关以免回归其 GPU 渲染。
+// 修复: Windows 下强制 --disable-gpu, 让 video 走软件合成(纹理)路径, 不再走 DWM overlay → 出画。
+// 亚克力改由 Win11 原生 win.setBackgroundMaterial('acrylic') 提供(系统级 DWM 模糊, 不依赖 Chromium GPU),
+// 见 mainwin.ts。代价: 关闭 GPU 后整体渲染走软件, 性能略降(UI 无感, H.264 软解 CPU 无压力)。
+if (process.platform === 'win32') {
+    app.commandLine.appendSwitch('--disable-gpu');
+}
 
 // 抑制SSL相关的底层错误日志
 app.commandLine.appendSwitch('--log-level', '3'); // 只显示致命错误
