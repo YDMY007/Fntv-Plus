@@ -47,14 +47,9 @@ const mainwinConfig: BrowserWindowConstructorOptions = {
     show: false,
     icon: path.join(__dirname, '../../../build/icon.ico'),
     frame: false,
-    // [lc-265] 临时关闭透明窗口做根因验证: transparent:true → false。
-    // 原生播放黑屏根因 = transparent窗口(WS_EX_LAYERED分层窗口) + HTML5 <video> 的 GPU
-    // overlay 平面与 DWM 合成冲突 → 黑屏; 打开DevTools时窗口变相以非透明方式整体合成
-    // 才正常(用户实测"开DevTools就正常")。本验证直接去掉透明窗口, 确认 video 能否出画面。
-    // 已知代价: CSS backdrop-filter 亚克力失效(非透明窗口无"桌面"可模糊), 首页变纯色;
-    // 确认根因后由 lc-266 用 Windows 11 原生 win.setBackgroundMaterial('acrylic') 恢复模糊。
-    transparent: false,
-    backgroundColor: '#000000',
+    // 透明窗口: 实现真正的 Mica/Acrylic 半透亚克力(桌面朦胧透出)
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
         webgl: true,
         partition: 'persist:fntv',
