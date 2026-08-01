@@ -514,22 +514,6 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
     } else {
         // 主界面: 完整亚克力玻璃壳
         wc.insertCSS(ACRYLIC_CSS);
-
-        // [lc-259] 透明窗口 HTML5 video 黑屏修复
-        // 透明窗口(transparent:true)下，视频走 GPU 硬件解码(DXVA)的 overlay 平面合成，
-        // 与 DWM 透明层不兼容 → 画面黑屏但有声音(音频独立解码正常)。
-        // 强制 video 走独立合成层(纹理而非 overlay plane)即可在透明窗口正常显示。
-        // 仅对详情/播放页(/v/tv|movie|video/)注入，避免影响首页卡片 hover 动画。
-        if (/\/v\/(tv|movie|video)\//.test(url)) {
-            wc.insertCSS(`
-                video{
-                    transform:translateZ(0)!important;
-                    -webkit-transform:translateZ(0)!important;
-                    backface-visibility:hidden!important;
-                    -webkit-backface-visibility:hidden!important;
-                }
-            `);
-        }
     }
 }
 
