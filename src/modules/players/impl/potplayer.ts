@@ -48,6 +48,7 @@ export class PotPlayer extends BasePlayer {
     private pendingAdvance: boolean = false;   // 正在逐集推进（避免 onProcExit 误判为结束）
     private isSwitching: boolean = false;      // 正在切集(switchTo)（旧进程退出不触发 EXIT/刷新）
     private currentProgress: { ts: number; duration: number } = { ts: 0, duration: 0 };
+    private resumeSeekTimer: NodeJS.Timeout | null = null;  // [续播] 启动后延迟 seek 的轮询计时器
     private active: boolean = false;           // 处于「播放中」意图态（与 this.proc 解耦，抗 /current 进程重启造成的轮询中断）
     private exited: boolean = false;           // EXIT 事件是否已发出（幂等，避免重复刷新 fnOS）
     private missCount: number = 0;             // 连续未找到 PotPlayer 窗口次数（用于判定真实关闭 vs 瞬时丢失）
@@ -83,6 +84,9 @@ export class PotPlayer extends BasePlayer {
                 this.playlist = reordered;
                 infos = reordered;   // legacy 路径也用重排后列表
                 startPos = 0;        // 重排后目标集在索引 0
+                log.info(`[playList] 重排播放列表: 目标集原索引=${pos}, 重排后首位 guid=${reordered[0]?.itemGuid}, 总集数=${reordered.length}`);
+            } else {
+                log.info(`[playList] 未重排(目标集已是首集或索引越界): pos=${pos}, 首位 guid=${infos[0]?.itemGuid}`);
             }
 
             // 解析 potctl 助手路径（随包分发于 third_party/proxy/potctl.exe）
@@ -92,7 +96,7 @@ export class PotPlayer extends BasePlayer {
                 return this.playListLegacy(infos, startPos, this.lastArgs);
             }
 
-            return await this.launchEpisode(startPos);
+            return await this.launchEpisode(startPos, true);
         } catch (error: any) {
             log.error('PotPlayer 初始化失败:', error);
             const errorEvent: PlayErrorData = { message: error.message || error.toString() };
@@ -104,14 +108,23 @@ export class PotPlayer extends BasePlayer {
     /**
      * 逐集拉起 PotPlayer
      */
-    private async launchEpisode(index: number): Promise<boolean> {
+    private async launchEpisode(index: number, fresh: boolean = false): Promise<boolean> {
         if (index < 0 || index >= this.playlist.length) {
             this.finalize();
             return false;
         }
 
-        // 关键优化：把【全部集的 URL】都传给 PotPlayer 构建播放列表（让用户在 PotPlayer 内看到完整剧集），
-        // 再用 /playindex 指定从哪集开始播。字幕/续播点随后异步挂载（零网络阻塞，秒开）。
+        // [续播/起播修复] 全新起播(fresh=true, 由 playList 调用)时，若系统已有残留 PotPlayer 窗口
+        // (PotPlayer 单实例会把新启动参数当作"追加"而非"替换"，从而仍停在旧的第1集)，
+        // 先关闭残留并等待退出，再干净启动 —— 确保从目标集开始。
+        // 自动连播(advanceEpisode)传 fresh=false，复用当前正在播的 PotPlayer 实例，不关闭。
+        if (fresh) {
+            const wasRunning = await this.closeStrayPotPlayer();
+            log.info(`[launchEpisode] fresh 起播，启动前已有 PotPlayer 残留=${wasRunning}`);
+        }
+
+        // 把【全部集的 URL】都传给 PotPlayer 构建播放列表（让用户在 PotPlayer 内看到完整剧集），
+        // 目标集已通过 playList() 重排到首位 → PotPlayer 默认从第一个(目标集)开始播。
         const launchArgs = this.buildFullPlaylistLaunchArgs(index);
 
         log.info(`[第${index + 1}/${this.playlist.length}集] 启动 PotPlayer: ${this.config.playerPath} ${launchArgs.join(' ')}`);
@@ -155,7 +168,109 @@ export class PotPlayer extends BasePlayer {
             .then((subArgs) => { if (subArgs.length > 0) this.attachSubtitle(subArgs); })
             .catch((e: any) => log.warn('PotPlayer 字幕异步挂载失败(已忽略):', e?.message || e));
 
+        // [续播修复] 网络流(http 本地代理)启动时带 /seek 往往不生效(缓冲前 seek 被忽略)，
+        // 故改为【启动后等 PotPlayer 真正在播(已缓冲)再补发 /Current /seek=ts】，可靠续播到上次进度。
+        // 仅 fresh 起播且 ts>0 且未接近片尾时安排。
+        if (fresh) {
+            const item = this.playlist[index];
+            const dur = item.duration || 0;
+            if (item.ts > 0 && dur > 0 && item.ts <= 0.98 * dur) {
+                this.scheduleResumeSeek(Math.floor(item.ts));
+            } else {
+                log.info(`[launchEpisode] 无需续播跳转: ts=${item.ts}, dur=${dur}`);
+            }
+        }
+
         return true;
+    }
+
+    /**
+     * 检测当前是否有 PotPlayer 窗口在运行（基于 potctl info）。
+     * 用于全新起播前判断是否存在"残留单实例"，避免新启动参数被当作追加。
+     */
+    private async isPotPlayerRunning(): Promise<boolean> {
+        if (!this.potctlPath) return false;
+        try {
+            const out = await new Promise<string>((resolve) => {
+                const proc = spawn(this.potctlPath!, ['info'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                let s = '';
+                proc.stdout?.on('data', (d: any) => { s += d.toString(); });
+                proc.on('close', () => resolve(s));
+            });
+            const info = JSON.parse(out.trim());
+            return !!info.found;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * 关闭系统中残留的 PotPlayer 窗口并等待其退出（最多 ~3s）。
+     * 仅用于全新起播(fresh)前，确保 PotPlayer 单实例从目标集干净启动。
+     * 返回启动前是否检测到已有 PotPlayer 在运行。
+     */
+    private async closeStrayPotPlayer(): Promise<boolean> {
+        if (!this.config.playerPath) return false;
+        const running = await this.isPotPlayerRunning();
+        if (!running) return false;
+        try {
+            // 向已运行实例发送关闭命令（/Current 前缀表示控制现有实例）
+            spawn(this.config.playerPath, ['/Current', '/close'], { stdio: 'ignore', windowsHide: true });
+        } catch { /* ignore */ }
+        // 轮询等待退出
+        for (let i = 0; i < 15; i++) {
+            await new Promise((r) => setTimeout(r, 200));
+            if (!(await this.isPotPlayerRunning())) return true;
+        }
+        log.warn('[closeStrayPotPlayer] 等待 PotPlayer 退出超时(继续启动新实例)');
+        return true;
+    }
+
+    /**
+     * 安排续播跳转：启动后轮询 PotPlayer 状态，一旦真正在播(已缓冲,duration>0)即补发
+     * /Current /seek=<ts> 跳转到上次进度。网络流启动时 seek 不可靠，必须延迟到缓冲后。
+     * 最多尝试 ~10s，超时放弃(从片头播)。
+     */
+    private scheduleResumeSeek(ts: number): void {
+        if (!this.config.playerPath || !this.potctlPath) {
+            log.warn('[scheduleResumeSeek] potctl 缺失，无法延迟续播(依赖启动参数 /seek 尽力)');
+            return;
+        }
+        log.info(`[scheduleResumeSeek] 安排续播跳转 ts=${ts}s，等待 PotPlayer 缓冲就绪...`);
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries++;
+            const fire = () => {
+                clearInterval(timer);
+                try {
+                    spawn(this.config.playerPath!, ['/Current', `/seek=${ts}`], { stdio: 'ignore', windowsHide: true });
+                    log.info(`[scheduleResumeSeek] 已补发 /Current /seek=${ts}s`);
+                } catch (e: any) {
+                    log.warn('[scheduleResumeSeek] 补发 seek 失败(忽略):', e?.message || e);
+                }
+            };
+            const proc = spawn(this.potctlPath!, ['info'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+            let out = '';
+            proc.stdout?.on('data', (d: any) => { out += d.toString(); });
+            proc.on('close', () => {
+                try {
+                    const info = JSON.parse(out.trim());
+                    const durSec = Math.floor((Number(info.duration) || 0) / 1000);
+                    const state = Number(info.state);
+                    const posSec = Math.floor((Number(info.position) || 0) / 1000);
+                    // 已加载且正在播放(或已播放过)即认为可 seek
+                    if (info.found && durSec > 0 && (state === 2 || posSec > 0)) {
+                        fire();
+                    } else if (tries >= 10) {
+                        clearInterval(timer);
+                        log.warn(`[scheduleResumeSeek] 超时(${tries}次)未就绪，放弃续播(从片头播)`);
+                    }
+                } catch {
+                    if (tries >= 10) { clearInterval(timer); log.warn('[scheduleResumeSeek] 解析失败超时，放弃续播'); }
+                }
+            });
+        }, 1000);
+        this.resumeSeekTimer = timer;
     }
 
     /**
@@ -569,7 +684,7 @@ export class PotPlayer extends BasePlayer {
         if (this.proc) {
             try { this.proc.kill(); } catch (_) { /* ignore */ }
         }
-        this.launchEpisode(next);
+        this.launchEpisode(next, false);
         // [lc-237] 切集间隙保护: 旧进程已 kill、新 PotPlayer 窗口尚未出现的瞬间轮询可能短时间
         // miss(连续 2 次即判关闭), 用 isSwitching 守卫避免被误判为用户关闭 → 错误结束播放。
         this.isSwitching = true;
@@ -580,6 +695,9 @@ export class PotPlayer extends BasePlayer {
      * 处理退出事件
      */
     private handleExit(code: number): void {
+        // 清理续播轮询计时器（若还在等 PotPlayer 缓冲就绪）
+        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
+
         // 幂等：EXIT 已发出则忽略后续重复触发（进程重启/多次 close）
         if (this.exited) return;
 
@@ -619,6 +737,7 @@ export class PotPlayer extends BasePlayer {
      * 播放完全结束（最后一集播完）
      */
     private finalize(): void {
+        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
         if (this.exited) return;
         this.exited = true;
         this.active = false;
@@ -660,6 +779,7 @@ export class PotPlayer extends BasePlayer {
      * 停止播放
      */
     stop(): void {
+        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
         this.active = false;
         this.missCount = 0;
         this.stopPoller();
