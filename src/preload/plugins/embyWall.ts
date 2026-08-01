@@ -3962,6 +3962,20 @@ function handle(): void {
   //        排除 fixed 覆盖层(抽屉/遮罩)、我们的 fnos-* 注入、导航栏等.
   const hideStaleViews = (): void => {
     const vw = window.innerWidth, vh = window.innerHeight;
+
+    // [lc-278] 视频播放场景保护: fnOS 播放视频时, <video> 常位于某个全屏 absolute 视图内的 fixed 全屏层。
+    // 若此处隐藏该 absolute 视图(残留页), 会整棵子树 display:none → 连带视频被隐藏 → 黑屏但有声音。
+    // 故: 只要页面存在 <video>(或视频播放容器), 整个 hideStaleViews 跳过; 视频全屏覆盖无需防透出。
+    if (document.querySelector('video')) {
+      log('hideStaleViews: SKIP — <video> present, avoid hiding video page');
+      return;
+    }
+    // <video> 标签可能尚未插入(缓冲中): 用播放页容器 class 兜底(Emby/fnOS: .videoPlayer/.playerPage 通常先于 <video> 创建)
+    if (document.querySelector('.videoPlayer, .playerPage, #videoPlayer, [data-itemtype="Video"]')) {
+      log('hideStaleViews: SKIP — video container present');
+      return;
+    }
+
     const candidates: HTMLElement[] = [];
     const all = document.querySelectorAll<HTMLElement>('*');
     for (let i = 0; i < all.length; i++) {
@@ -3972,6 +3986,7 @@ function handle(): void {
       if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
       if (el.id && el.id.startsWith('fnos-')) continue;    // 我们的注入层跳过
       if (el.classList.contains('absolute')) continue;     // 抽屉遮罩类跳过
+      if (el.querySelector('video')) continue;             // [lc-278] 含视频的视图绝不隐藏(双保险)
       candidates.push(el);
     }
     // 按父元素分组, 同容器内多个全屏 absolute 视为视图栈
