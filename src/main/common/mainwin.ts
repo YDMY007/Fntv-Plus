@@ -451,14 +451,21 @@ function isLoginPath(url: string): boolean {
  * v380: 登录页(/login,/signin) 自动切换为不透明白底模式,
  *       避免 transparent 窗口 + html{background:transparent} 导致桌面透出全白.
  */
-function injectAcrylicCSS(wc: Electron.WebContents): void {
-    // 主窗口的原生底板必须始终透明。登录页的不透明背景由下方 body
-    // 提供；若把 BrowserWindow 底板设为白色，clip-path 裁掉的四角仍会
-    // 露出白色窗口底板，视觉上就会重新变成方形。
-    const owner = BrowserWindow.fromWebContents(wc);
-    owner?.setBackgroundColor('#00000000');
+/** 播放页 URL 匹配（fnOS 详情/视频播放页） */
+const PLAY_PAGE_RE = /\/v\/(tv|movie|video)\//;
 
+function injectAcrylicCSS(wc: Electron.WebContents): void {
+    const owner = BrowserWindow.fromWebContents(wc);
     const url = wc.getURL();
+    const isPlayPage = PLAY_PAGE_RE.test(url);
+
+    // [lc-261] 播放页必须关闭窗口透明度，否则透明窗口下 HTML5 <video>
+    // 的硬件解码帧无法被 DWM 合成→黑屏有声音(Chromium 已知限制)。
+    // 设为不透明纯黑(#000000)，视觉上与透明时完全一致(视频区本就是黑底)，
+    // 但允许 video overlay 正常合成到屏幕。非播放页保持透明(#00000000)
+    // 以保留亚克力玻璃效果。
+    owner?.setBackgroundColor(isPlayPage ? '#000000' : '#00000000');
+
     if (isLoginPath(url)) {
         // [lc-144] 直接读 config.json 取 loginBgPath(不依赖 config 模块导出, 避免 asar/打包环境下
         //   "getLoginBgPath is not a function" 崩溃——该崩溃已在多份打包构建中复现).
