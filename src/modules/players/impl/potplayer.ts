@@ -19,6 +19,7 @@ import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku'
 import { isSyncableItemType } from '../../fn_api/types';
 import { mergeSubtitleWithDanmaku } from '../../danmaku/subtitleMerge';
 import logger from '../../logger';
+import { playbackShim } from '../../../main/common/playbackShim';
 const log = logger.component('potplayer');
 
 /**
@@ -330,7 +331,8 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        const launchArgs: string[] = [item.playLink];
+        // 用本地 shim 包裹：PotPlayer 播放列表显示可读剧名，续播 /seek 仍精确生效
+        const launchArgs: string[] = [this.toDisplayUrl(item)];
 
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
@@ -350,14 +352,13 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件（含可读集名 + 极速标签），
-     * 把文件路径传给 PotPlayer，使其播放列表显示人类可读的剧名/集数而非 GUID 乱码。
+     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
+     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
      *
-     * 播放顺序由 this.playlist 决定（已在 playList() 入口处把目标集重排到索引 0），
-     * PotPlayer 默认从第一个条目开始播，即用户点击的那一集。
-     *
-     * 续播：/seek 使用 PotPlayer 官方 HH:MM:SS 格式，作用于 m3u8 文件打开时的首项。
-     * （lc-246 证实续播失效的主因是上游 ts=0 而非 m3u8 本身；现已修复上游进度合并。）
+     * 关键：PotPlayer 启动参数 /seek 仅对「多 URL 参数」可靠（对 m3u8 播放列表文件无效，
+     * 详见 lc-245/lc-246/lc-247 反复验证），故采用【目标集 URL 排第一】的多参数方式。
+     * 每个 URL 经 playbackShim 包裹为「可读名 URL」（127.0.0.1:22347/p/<id>/<剧名>.mp4），
+     * 由 shim 把视频流代理给真实 proxy —— 播放列表显示剧名，续播 /seek 仍精确生效。
      *
      * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
      * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
@@ -367,24 +368,22 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 生成 .m3u8 播放列表文件：每行含可读标题(getTitle) + [极速] 标签 + 实际代理 URL
-        // PotPlayer 解析 m3u8 后会在播放列表里显示 EXTINF 的 title 而非 URL 路径
-        const content = this.generateM3U8Playlist(this.playlist);
-        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
-        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
+        const launchArgs: string[] = [];
 
-        const launchArgs: string[] = [this.playlistFilePath];
-
-        // [续播] /seek=<HH:MM:SS>（PotPlayer 官方语法，纯秒数部分版本不识别）
-        // 目标集已重排到索引 0，/seek 落在第一项即目标集内。
-        // lc-246 根因修复：之前 /seek 始终为 0 是因为上游 episode/list 不回填每集观看进度，
-        // 现 media.ts 已合并 getPlayInfo 返回的被点击集真实进度(response.data.ts)。
+        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)，URL 用 shim 包裹为可读名
         const duration = item.duration || 0;
+        launchArgs.push(this.toDisplayUrl(item));
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
             launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
             this.currentProgress = { ts: Math.floor(item.ts), duration };
         } else {
             this.currentProgress = { ts: 0, duration };
+        }
+
+        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)，同样用 shim 包裹
+        for (let i = 0; i < this.playlist.length; i++) {
+            if (i === index) continue;
+            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
         }
 
         // 透传调用方额外参数
@@ -393,6 +392,16 @@ export class PotPlayer extends BasePlayer {
         }
 
         return launchArgs;
+    }
+
+    /**
+     * 把播放项转换为 PotPlayer 使用的「可读名 URL」：
+     * 经 playbackShim 包裹为 http://127.0.0.1:22347/p/<id>/<剧名 [极速]>.mp4，
+     * shim 再把视频流代理给真实 proxy URL。这样 PotPlayer 播放列表显示剧名而非 GUID。
+     */
+    private toDisplayUrl(item: PlayItem): string {
+        const name = `${this.getTitle(item)} [极速]`;
+        return playbackShim.makeUrl(name, item.playLink);
     }
 
     /**

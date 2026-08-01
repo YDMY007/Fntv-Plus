@@ -9,6 +9,7 @@ import { createTray, showTrayNotification, destroyTray } from './tray';
 import { getMacCloseAction, setMacCloseAction, getTrayNotificationShown, setTrayNotificationShown } from './preferences';
 import * as log from '../../modules/logger';
 import { getDaemonInstance, ProxyDaemon } from './proxyDaemon';
+import { playbackShim } from './playbackShim';
 
 
 // 全局守护程序实例
@@ -111,6 +112,13 @@ export async function startProxyProcess(): Promise<ChildProcess> {
         });
 
         log.info('Proxy模块启动成功');
+
+        // 启动本地播放 shim（PotPlayer 经可读名 URL 代理访问真实 proxy，兼顾续播与可读列表）
+        try {
+            await playbackShim.start();
+        } catch (e: any) {
+            log.warn('[playbackShim] 启动失败(已忽略，PotPlayer 列表将回退为原始 URL):', e?.message || e);
+        }
 
         // 初始化或更新守护程序
         if (!proxyDaemon) {
@@ -219,4 +227,5 @@ export async function shutdownProxyProcess(): Promise<void> {
         await proxyDaemon.shutdown();
         proxyDaemon = null;
     }
+    playbackShim.stop();
 }
