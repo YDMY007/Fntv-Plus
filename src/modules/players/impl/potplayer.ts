@@ -370,20 +370,21 @@ export class PotPlayer extends BasePlayer {
 
         const launchArgs: string[] = [];
 
-        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)，URL 用 shim 包裹为可读名
+        // 统一循环添加所有剧集 URL（经 shim 包裹为可读名）。
+        // ⚠️ 不要把「目标集」单独 push 再在循环里 skip——PotPlayer 会把命令行首个文件参数
+        //   同时当作「当前播放项」和「播放列表第1项」插入，导致目标集重复出现(lc-249)。
+        // 正确做法：所有项平等对待、统一追加，/seek 放最后(作用于 PotPlayer 打开的第一个文件)。
+        for (let i = 0; i < this.playlist.length; i++) {
+            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
+        }
+
+        // 续播 /seek(PotPlayer 官方语法 HH:MM:SS)，作用于列表第一项(即重排后的目标集)
         const duration = item.duration || 0;
-        launchArgs.push(this.toDisplayUrl(item));
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
             launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
             this.currentProgress = { ts: Math.floor(item.ts), duration };
         } else {
             this.currentProgress = { ts: 0, duration };
-        }
-
-        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)，同样用 shim 包裹
-        for (let i = 0; i < this.playlist.length; i++) {
-            if (i === index) continue;
-            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
         }
 
         // 透传调用方额外参数
