@@ -22,7 +22,17 @@ app.commandLine.appendSwitch('--lang', 'en-US');
 // 恢复后透明窗口 + video 正常工作。若当初禁用是为了修某个旧 bug 需重新评估。
 // app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
 
-// 抑制SSL相关的底层错误日志
+// [lc-264] 禁用 GPU 合成(强制软件合成 texture 路径), 修复透明窗口下原生播放黑屏。
+// 根因: transparent:true 窗口 + HTML5 <video> 默认走 GPU 硬件解码的 overlay 平面,
+// 与 Windows DWM 分层透明窗口的合成冲突 → 画面黑屏(音频/进度正常);
+// 打开 DevTools 时 Chromium 强制 video 走纹理(texture)合成而非 overlay plane → 画面正常。
+// 此开关直接禁用 GPU compositing, 所有图层(含 video)走软件 compositor 的纹理路径,
+// 不再使用 overlay plane, 透明窗口下可正常显示画面。
+// 代价: 亚克力 backdrop-filter 可能降级为不模糊(纯透明); 若需恢复模糊, 后续可用
+// Windows 11 原生 win.setBackgroundMaterial('acrylic') 替代(不依赖 GPU compositor)。
+// 仅影响渲染合成层, 视频解码仍可用硬件解码(H.264/HEVC)。
+app.commandLine.appendSwitch('--disable-gpu-compositing');
+
 app.commandLine.appendSwitch('--log-level', '3'); // 只显示致命错误
 app.commandLine.appendSwitch('--disable-logging');
 app.commandLine.appendSwitch('--silent');
