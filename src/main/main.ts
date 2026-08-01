@@ -16,12 +16,11 @@ import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
 
 // 禁用输入法自动切换
 app.commandLine.appendSwitch('--lang', 'en-US');
-app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
-// [lc-262] 禁用硬件视频解码(走软件解码纹理合成而非 DXVA overlay plane)。
-// 透明窗口(transparent:true)下, video 的 GPU overlay 平面无法与 DWM 透明层合成 → 黑屏有声音。
-// 禁用后 video 改走软件解码的纹理合成路径, 透明窗口可正常显示(用户实测: 打开DevTools强制非透明合成后即正常)。
-// 仅影响视频解码层, 不影响整体GPU加速(亚克力 backdrop-filter 仍走GPU); 片源为H.264, 软件解码CPU无压力。
-app.commandLine.appendSwitch('--disable-accelerated-video-decode');
+// [lc-263] 恢复 VizDisplayCompositor（lc-254 原始状态是禁用的）。
+// 禁用此开关导致 Chromium 退回旧合成路径, 透明窗口下 HTML5 <video> 渲染黑屏(有声音无画面);
+// 打开 DevTools 后画面正常 → DevTools 强制启用新合成器绕过了此限制。
+// 恢复后透明窗口 + video 正常工作。若当初禁用是为了修某个旧 bug 需重新评估。
+// app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
 
 // 抑制SSL相关的底层错误日志
 app.commandLine.appendSwitch('--log-level', '3'); // 只显示致命错误
