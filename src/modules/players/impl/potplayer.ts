@@ -351,38 +351,39 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-    /**
-     * 构建「单集」启动参数：仅目标集 URL + /seek。
+     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件，作为【单一启动参数】传给 PotPlayer。
      *
-     * ⚠️ PotPlayer 播放列表重复问题(lc-249/lc-250 反复验证)：
-     *   - 多文件参数 → 首个 URL 被双重计入（当前项+列表项）→ 重复
-     *   - 单文件启动 + /add 追加 → /add 也导致重复（原因不明，疑似 PotPlayer 内部行为）
-     *   - m3u8 播放列表文件 → 可读名✅ 但 /seek 不生效❌(lc-247 用户实测)
+     * 为什么用 m3u8（而不是多文件参数 / /add）：
+     *   - 多文件命令行参数 → PotPlayer 会把【第一个文件额外计入一次】(当前项+列表项) → 重复(lc-249 验证)
+     *   - 单文件 + /add 追加 → /add 也导致重复 + 二次 spawn 卡顿(lc-250 验证)
+     *   - m3u8 是【单一文件参数】：PotPlayer 解析后播放列表项 = 文件内 #EXTINF 条目数，精确等于集数，
+     *     物理上不可能重复，且天然规避 PotPlayer「同目录相似文件自动加」的默认行为(所有 shim URL 同目录易触发)。
      *
-     * 故采用【单文件 + shim 可读名】方案：
-     *   - 续播 /seek 100% 可靠（单文件启动参数）
-     *   - 窗口标题栏显示可读剧名（shim URL 末段 = 剧名.mp4）
-     *   - 播放列表仅显示当前 1 集（代价：用户需通过应用 UI 切换上下集）
+     * 播放列表显示：#EXTINF 标题 = 可读剧名「剧名 - S01E04: 集标题 [极速]」。
+     * 续播：#EXT-X-START 标签(目标集已重排到 m3u8 首项，TIME-OFFSET=ts 即落在目标集内)。
+     *   - 注：命令行 /seek 对 m3u8 文件整体无效(lc-247)，故续播改用 m3u8 内部 EXT-X-START 标签(HLS 标准起始点)。
      *
-     * 仅用于 launchEpisode（首次拉起）；
-     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current。
+     * 仅用于 launchEpisode（首次拉起）；switchTo（原地切换）仍用 buildBaseLaunchArgs + /current。
      */
     private buildFullPlaylistLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 目标集单文件（经 shim 包裹为可读名 URL）
-        const launchArgs: string[] = [this.toDisplayUrl(item)];
-
-        // 续播 /seek(PotPlayer 官方语法 HH:MM:SS)
+        // 续播偏移：目标集已重排到 this.playlist[0](playList 入口重排)，m3u8 首项即目标集，
+        // EXT-X-START 的 TIME-OFFSET 直接落在目标集内。
         const duration = item.duration || 0;
-        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
-            this.currentProgress = { ts: Math.floor(item.ts), duration };
-        } else {
-            this.currentProgress = { ts: 0, duration };
-        }
+        const resumeTs = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) ? Math.floor(item.ts) : 0;
+        this.currentProgress = { ts: resumeTs, duration };
+
+        // 生成 .m3u8 播放列表文件（含全部集、可读标题、EXT-X-START 续播偏移、shim 可读名 URL）
+        const content = this.generateM3U8Playlist(this.playlist, resumeTs);
+        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
+        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
+        log.info(`[playlist] 生成 m3u8 播放列表(${this.playlist.length} 集, 续播=${resumeTs}s): ${this.playlistFilePath}`);
+
+        // 仅传 m3u8 文件路径（单一参数）。/seek 命令行对 m3u8 文件无效，续播由 EXT-X-START 接管。
+        const launchArgs: string[] = [this.playlistFilePath];
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
@@ -954,13 +955,20 @@ export class PotPlayer extends BasePlayer {
      * 生成 M3U8 播放列表内容（含可读标题 + 极速标签）
      * 标题格式：getTitle() 返回的「剧名 - S01E04: 集标题」+ [极速]
      */
-    private generateM3U8Playlist(infos: PlayItem[]): string {
+    private generateM3U8Playlist(infos: PlayItem[], resumeTs: number = 0): string {
         let content = '#EXTM3U\n';
+        // [续播] HLS 标准起始偏移标签：PotPlayer 作为 HLS 客户端应尊重，从目标集 ts 秒开始播。
+        // （命令行 /seek 对 m3u8 文件整体无效，见 lc-247；EXT-X-START 是 m3u8 内部标签，PotPlayer 应当尊重）
+        if (resumeTs > 0) {
+            content += `#EXT-X-START:ENABLED=YES,TIME-OFFSET=${resumeTs.toFixed(3)}\n`;
+        }
         for (const item of infos) {
             const duration = item.duration || -1;
             const title = `${this.getTitle(item)} [极速]`;
+            // URL 经 playbackShim 包裹：PotPlayer 显示可读名(末段=剧名) + 走本地代理到真实 proxy
+            const url = playbackShim.makeUrl(title, item.playLink);
             content += `#EXTINF:${duration},${title}\n`;
-            content += `${item.playLink}\n`;
+            content += `${url}\n`;
         }
         return content;
     }
@@ -972,16 +980,14 @@ export class PotPlayer extends BasePlayer {
         const startItem = infos[pos] || infos[0];
         this.currentItem = startItem;
 
-        const playlistContent = this.generateM3U8Playlist(infos);
+        // 续播偏移交给 m3u8 的 EXT-X-START 标签（命令行 /seek 对 m3u8 文件无效，见 lc-247）
+        const duration = startItem.duration || 0;
+        const resumeTs = (startItem.ts > 0 && duration > 0 && startItem.ts <= 0.98 * duration) ? Math.floor(startItem.ts) : 0;
+        const playlistContent = this.generateM3U8Playlist(infos, resumeTs);
         this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
         await fs.promises.writeFile(this.playlistFilePath, playlistContent, 'utf-8');
 
         const launchArgs: string[] = [this.playlistFilePath];
-
-        const duration = startItem.duration || 0;
-        if (startItem.ts > 0 && duration > 0 && startItem.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${this.formatSeekTime(startItem.ts)}`);
-        }
 
         const subPaths: string[] = [];
         try {
