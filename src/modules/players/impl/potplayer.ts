@@ -350,22 +350,14 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
-     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
-     *
-     * 关键：PotPlayer 启动参数 /playindex 不可靠（它是 IPC 命令非启动开关），
-     * 因此采用【目标集 URL 排第一】的策略——把要播放的那一集放在参数列表最前面，
-     * PotPlayer 默认从第一个文件开始播，其余集顺延排在后面。
-     *
-     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
-     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
-     */
-    /**
      * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件（含可读集名 + 极速标签），
      * 把文件路径传给 PotPlayer，使其播放列表显示人类可读的剧名/集数而非 GUID 乱码。
      *
      * 播放顺序由 this.playlist 决定（已在 playList() 入口处把目标集重排到索引 0），
      * PotPlayer 默认从第一个条目开始播，即用户点击的那一集。
+     *
+     * 续播：/seek 使用 PotPlayer 官方 HH:MM:SS 格式，作用于 m3u8 文件打开时的首项。
+     * （lc-246 证实续播失效的主因是上游 ts=0 而非 m3u8 本身；现已修复上游进度合并。）
      *
      * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
      * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
@@ -375,29 +367,24 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // [续播修复] PotPlayer 对「.m3u8 播放列表文件」施用 /seek 时，/seek 是作用在整个
-        // 播放列表文件上(而非列表内第一项)，导致续播失效、从头开播。
-        // 故改用【多文件参数】方式：把每集 URL 作为独立命令行参数传给 PotPlayer，
-        // PotPlayer 会自动将其组成播放列表(保留全量上下集可见、可在内部切换)，
-        // 而 /seek 明确作用于【第一个参数(目标集)】，续播 100% 落到目标集内。
-        // (代价：PotPlayer 播放列表项显示 URL 而非可读名——可读名需求见 lc-243，待 PotPlayer
-        //  支持播放列表内 per-item seek 或 #EXT-X-START 生效后再恢复 m3u8 方案。)
-        const launchArgs: string[] = [];
+        // 生成 .m3u8 播放列表文件：每行含可读标题(getTitle) + [极速] 标签 + 实际代理 URL
+        // PotPlayer 解析 m3u8 后会在播放列表里显示 EXTINF 的 title 而非 URL 路径
+        const content = this.generateM3U8Playlist(this.playlist);
+        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
+        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
 
-        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)
+        const launchArgs: string[] = [this.playlistFilePath];
+
+        // [续播] /seek=<HH:MM:SS>（PotPlayer 官方语法，纯秒数部分版本不识别）
+        // 目标集已重排到索引 0，/seek 落在第一项即目标集内。
+        // lc-246 根因修复：之前 /seek 始终为 0 是因为上游 episode/list 不回填每集观看进度，
+        // 现 media.ts 已合并 getPlayInfo 返回的被点击集真实进度(response.data.ts)。
         const duration = item.duration || 0;
-        launchArgs.push(item.playLink);
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
             launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
             this.currentProgress = { ts: Math.floor(item.ts), duration };
         } else {
             this.currentProgress = { ts: 0, duration };
-        }
-
-        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)
-        for (let i = 0; i < this.playlist.length; i++) {
-            if (i === index) continue;
-            launchArgs.push(this.playlist[i].playLink);
         }
 
         // 透传调用方额外参数
