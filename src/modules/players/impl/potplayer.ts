@@ -48,7 +48,9 @@ export class PotPlayer extends BasePlayer {
     private pendingAdvance: boolean = false;   // 正在逐集推进（避免 onProcExit 误判为结束）
     private isSwitching: boolean = false;      // 正在切集(switchTo)（旧进程退出不触发 EXIT/刷新）
     private currentProgress: { ts: number; duration: number } = { ts: 0, duration: 0 };
-    private resumeSeekTimer: NodeJS.Timeout | null = null;  // [续播] 启动后延迟 seek 的轮询计时器
+    private resumeTarget: number = 0;          // [续播] 启动续播目标秒数
+    private resumePending: boolean = false;     // [续播] 等待 PotPlayer 真正跳到 resumeTarget 前，抑制进度回写(避免把真实进度覆盖成 0~12s)
+    private resumeStartedAt: number = 0;        // [续播] resumePending 起始时间(超时兜底清除)
     private active: boolean = false;           // 处于「播放中」意图态（与 this.proc 解耦，抗 /current 进程重启造成的轮询中断）
     private exited: boolean = false;           // EXIT 事件是否已发出（幂等，避免重复刷新 fnOS）
     private missCount: number = 0;             // 连续未找到 PotPlayer 窗口次数（用于判定真实关闭 vs 瞬时丢失）
@@ -168,17 +170,25 @@ export class PotPlayer extends BasePlayer {
             .then((subArgs) => { if (subArgs.length > 0) this.attachSubtitle(subArgs); })
             .catch((e: any) => log.warn('PotPlayer 字幕异步挂载失败(已忽略):', e?.message || e));
 
-        // [续播修复] 网络流(http 本地代理)启动时带 /seek 往往不生效(缓冲前 seek 被忽略)，
-        // 故改为【启动后等 PotPlayer 真正在播(已缓冲)再补发 /Current /seek=ts】，可靠续播到上次进度。
-        // 仅 fresh 起播且 ts>0 且未接近片尾时安排。
+        // [续播修复] PotPlayer 运行后无法用 CLI(/Current /seek) 动态 seek(官方命令行仅支持启动时 /seek)，
+        // 故续播改由【启动时 /seek=ts】完成(buildFullPlaylistLaunchArgs 已写入启动参数)，
+        // 此处仅标记 resumePending 以在 PotPlayer 真正跳到目标点前抑制进度回写(防止覆盖真实续播点)。
         if (fresh) {
             const item = this.playlist[index];
             const dur = item.duration || 0;
             if (item.ts > 0 && dur > 0 && item.ts <= 0.98 * dur) {
-                this.scheduleResumeSeek(Math.floor(item.ts));
+                this.resumeTarget = Math.floor(item.ts);
+                this.resumePending = true;
+                this.resumeStartedAt = Date.now();
+                log.info(`[launchEpisode] 安排启动续播: ts=${this.resumeTarget}s`);
             } else {
+                this.resumePending = false;
+                this.resumeTarget = 0;
                 log.info(`[launchEpisode] 无需续播跳转: ts=${item.ts}, dur=${dur}`);
             }
+        } else {
+            this.resumePending = false;
+            this.resumeTarget = 0;
         }
 
         return true;
@@ -242,9 +252,10 @@ export class PotPlayer extends BasePlayer {
      * 仅用于全新起播(fresh)前，确保 PotPlayer 单实例从目标集干净启动。
      * 返回启动前是否检测到已有 PotPlayer 在运行。
      *
-     * 关键坑：PotPlayer 没有可靠的「/close」CLI 命令（/Current /close 常被静默忽略），
-     * 若只靠它，单实例会把新启动参数当成“追加”而非“替换”，从而仍停在旧的第1集
-     * （用户反复报“选第4集却播第1集”的根因）。因此温和关闭无效时必须【按进程名强制结束】。
+     * 关键坑：PotPlayer 单实例，若残留窗口未清，新启动参数会被当成“追加”而非“替换”，从而仍停在旧的第1集
+     * （用户反复报“选第4集却播第1集”的根因）。PotPlayer 没有可靠的「/close」CLI 命令
+     * （/Current /close 常被静默忽略，且 /Current 会把最小化窗口拉到前台造成弹窗），
+     * 故这里【直接按进程名强制结束】，不尝试 /close，干净退出后再启动新实例。
      */
     private async closeStrayPotPlayer(): Promise<boolean> {
         if (!this.config.playerPath) return false;
@@ -256,12 +267,8 @@ export class PotPlayer extends BasePlayer {
         if (this.proc && !this.proc.killed) {
             try { this.proc.kill('SIGKILL'); } catch { /* ignore */ }
         }
-        // 2) 再尝试温和 CLI 关闭（覆盖 /current 重启后的新进程）
-        try {
-            spawn(this.config.playerPath, ['/Current', '/close'], { stdio: 'ignore', windowsHide: true });
-        } catch { /* ignore */ }
 
-        // 3) 轮询等待退出（最多 ~1.2s）
+        // 2) 轮询等待退出（最多 ~1.2s）
         for (let i = 0; i < 6; i++) {
             await new Promise((r) => setTimeout(r, 200));
             if (!(await this.isPotPlayerRunning())) {
@@ -270,12 +277,12 @@ export class PotPlayer extends BasePlayer {
             }
         }
 
-        // 4) 仍残留 → 按进程名强制结束（PotPlayer 单实例必须干净退出，否则新参数被当“追加”仍播旧集）
+        // 3) 仍残留 → 按进程名强制结束（PotPlayer 单实例必须干净退出，否则新参数被当“追加”仍播旧集）
         const exeName = path.basename(this.config.playerPath);
         log.warn(`[closeStrayPotPlayer] 常规关闭无效，强制结束进程: ${exeName}`);
         this.forceKillPotPlayer(exeName);
 
-        // 5) 再轮询确认已退出（最多 ~2s）
+        // 4) 再轮询确认已退出（最多 ~2s）
         for (let i = 0; i < 10; i++) {
             await new Promise((r) => setTimeout(r, 200));
             if (!(await this.isPotPlayerRunning())) return true;
@@ -298,60 +305,6 @@ export class PotPlayer extends BasePlayer {
         } catch (e: any) {
             log.warn('[forceKillPotPlayer] 失败:', e?.message || e);
         }
-    }
-
-    /**
-     * 安排续播跳转：启动后每 1s 轮询 PotPlayer 状态，一旦真正在播(已缓冲,duration>0)
-     * 即持续补发 /Current /seek=<ts>，直到 potctl 确认位置已到达目标点才停止。
-     * 网络流启动时 seek 不可靠(缓冲前被忽略)，故持续重试；最长 45s(对齐 MPV seekWithRetry)。
-     */
-    private scheduleResumeSeek(ts: number): void {
-        if (!this.config.playerPath || !this.potctlPath) {
-            log.warn('[scheduleResumeSeek] potctl 缺失，无法延迟续播');
-            return;
-        }
-        const target = ts;
-        log.info(`[scheduleResumeSeek] 安排续播跳转 ts=${target}s，每 1s 重试 seek 直到 potctl 确认到位(最长 45s)...`);
-        let tries = 0;
-        const MAX = 45;
-        const timer = setInterval(() => {
-            tries++;
-            const proc = spawn(this.potctlPath!, ['info'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-            let out = '';
-            proc.stdout?.on('data', (d: any) => { out += d.toString(); });
-            proc.on('close', () => {
-                let done = false;
-                try {
-                    const info = JSON.parse(out.trim());
-                    const durSec = Math.floor((Number(info.duration) || 0) / 1000);
-                    const posSec = Math.floor((Number(info.position) || 0) / 1000);
-                    if (info.found && durSec > 0) {
-                        // 已缓冲：补发 seek（幂等，缓冲未就绪时会被忽略，下一轮再发）
-                        try {
-                            spawn(this.config.playerPath!, ['/Current', `/seek=${target}`], { stdio: 'ignore', windowsHide: true });
-                        } catch (e: any) {
-                            log.warn('[scheduleResumeSeek] 补发 seek 失败(忽略):', e?.message || e);
-                        }
-                        // potctl 确认位置已到达目标点附近 → 续播成功
-                        if (posSec >= target - 8) {
-                            done = true;
-                            log.info(`[scheduleResumeSeek] 续播成功: potctl 位置=${posSec}s ≈ 目标=${target}s (第${tries}次)`);
-                        }
-                    }
-                } catch {
-                    /* 解析失败，本轮忽略，下一轮重试 */
-                }
-
-                if (done || tries >= MAX) {
-                    clearInterval(timer);
-                    this.resumeSeekTimer = null;
-                    if (!done) {
-                        log.warn(`[scheduleResumeSeek] 超时(${tries}次)未确认续播到位，放弃(从片头播)`);
-                    }
-                }
-            });
-        }, 1000);
-        this.resumeSeekTimer = timer;
     }
 
     /**
@@ -417,14 +370,16 @@ export class PotPlayer extends BasePlayer {
 
         const launchArgs: string[] = [this.playlistFilePath];
 
-        // 续播跳转不再用「启动参数 /seek」：m3u8 播放列表 + 网络流在缓冲完成前发出的 /seek 会被静默忽略，
-        // 且对播放列表文件可能产生跳轨；改由 launchEpisode 内的 scheduleResumeSeek() 在缓冲就绪后
-        // 持续补发 /Current /seek 直到 potctl 确认位置到达（鲁棒，对齐 MPV seekWithRetry）。
-        // 这里仅把续播目标点记到 currentProgress，供起播瞬间的 emitProgress 正确上报 fnOS。
+        // [续播] PotPlayer 官方仅支持「启动时 /seek=秒」跳转到续播点(运行后用 CLI /Current /seek 动态 seek 无效)，
+        // 故把续播点作为启动参数写入(目标集已重排到索引0，/seek 落在第一集即目标集内)。
+        // 网络流缓冲前发出的 /seek 由 PotPlayer 自身在缓冲完成后生效，无需我们运行时重试(也避免重复弹窗)。
         const duration = item.duration || 0;
-        this.currentProgress = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration)
-            ? { ts: Math.floor(item.ts), duration }
-            : { ts: 0, duration };
+        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
+            launchArgs.push(`/seek=${Math.floor(item.ts)}`);
+            this.currentProgress = { ts: Math.floor(item.ts), duration };
+        } else {
+            this.currentProgress = { ts: 0, duration };
+        }
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
@@ -708,6 +663,25 @@ export class PotPlayer extends BasePlayer {
 
                     if (durSec <= 0) return;
 
+                    // [续播] PotPlayer 真正跳到续播目标点之前，抑制进度回写：
+                    // 否则起播瞬间(0~十余秒)会把 fnOS「继续观看」里用户真实的续播进度覆盖成小值，
+                    // 造成"越看越靠前 / 进度存取错乱"。
+                    if (this.resumePending) {
+                        const elapsed = Date.now() - this.resumeStartedAt;
+                        if (posSec >= this.resumeTarget - 8) {
+                            // 已到达续播点：解除抑制，恢复正常回写
+                            this.resumePending = false;
+                            log.info(`[poll] 续播到位: potctl 位置=${posSec}s ≈ 目标=${this.resumeTarget}s`);
+                        } else if (elapsed < 90000) {
+                            // 仍在跳转窗口内：跳过本次回写（当前进度保留为续播目标点，不写小值）
+                            return;
+                        } else {
+                            // 超时兜底：放弃抑制，恢复正常回写（避免永久不回写）
+                            this.resumePending = false;
+                            log.warn(`[poll] 续播未在 90s 内到位(posSec=${posSec}, 目标=${this.resumeTarget})，解除抑制`);
+                        }
+                    }
+
                     this.currentProgress = { ts: posSec, duration: durSec };
                     this.emitProgress(posSec, durSec);
 
@@ -782,8 +756,9 @@ export class PotPlayer extends BasePlayer {
      * 处理退出事件
      */
     private handleExit(code: number): void {
-        // 清理续播轮询计时器（若还在等 PotPlayer 缓冲就绪）
-        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
+        // 复位续播抑制标志（退出后下次起播重新判断）
+        this.resumePending = false;
+        this.resumeTarget = 0;
 
         // 幂等：EXIT 已发出则忽略后续重复触发（进程重启/多次 close）
         if (this.exited) return;
@@ -824,7 +799,8 @@ export class PotPlayer extends BasePlayer {
      * 播放完全结束（最后一集播完）
      */
     private finalize(): void {
-        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
+        this.resumePending = false;
+        this.resumeTarget = 0;
         if (this.exited) return;
         this.exited = true;
         this.active = false;
@@ -866,7 +842,8 @@ export class PotPlayer extends BasePlayer {
      * 停止播放
      */
     stop(): void {
-        if (this.resumeSeekTimer) { clearInterval(this.resumeSeekTimer); this.resumeSeekTimer = null; }
+        this.resumePending = false;
+        this.resumeTarget = 0;
         this.active = false;
         this.missCount = 0;
         this.stopPoller();
