@@ -185,10 +185,15 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 检测当前是否有 PotPlayer 窗口在运行（基于 potctl info）。
+     * 检测当前是否有 PotPlayer 进程在运行。
+     * 主检测：系统进程列表（tasklist / pgrep），可靠且不依赖 potctl 的窗口探测。
+     * 辅检测：potctl info.found（potctl 存在时才用）。
      * 用于全新起播前判断是否存在"残留单实例"，避免新启动参数被当作追加。
      */
     private async isPotPlayerRunning(): Promise<boolean> {
+        // 1) 系统进程列表检测（最可靠，跨 potctl 能否探测到窗口）
+        if (await this.isPotPlayerRunningByTasklist()) return true;
+        // 2) potctl 辅助检测（仅当 potctl 可用）
         if (!this.potctlPath) return false;
         try {
             const out = await new Promise<string>((resolve) => {
@@ -202,6 +207,34 @@ export class PotPlayer extends BasePlayer {
         } catch {
             return false;
         }
+    }
+
+    /**
+     * 基于系统进程列表检测 PotPlayer 是否在运行（不依赖 potctl 窗口探测）。
+     * Windows 用 tasklist；其它平台用 pgrep。
+     */
+    private isPotPlayerRunningByTasklist(): Promise<boolean> {
+        return new Promise<boolean>((resolve) => {
+            const exeName = this.config.playerPath ? path.basename(this.config.playerPath) : '';
+            if (!exeName) { resolve(false); return; }
+            try {
+                if (process.platform === 'win32') {
+                    const proc = spawn('tasklist', ['/FI', `IMAGENAME eq ${exeName}`, '/NH', '/FO', 'CSV'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                    let s = '';
+                    proc.stdout?.on('data', (d: any) => { s += d.toString(); });
+                    proc.on('close', () => { resolve(s.toUpperCase().includes(exeName.toUpperCase())); });
+                    proc.on('error', () => resolve(false));
+                } else {
+                    const proc = spawn('pgrep', ['-f', exeName], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                    let s = '';
+                    proc.stdout?.on('data', (d: any) => { s += d.toString(); });
+                    proc.on('close', () => { resolve(s.trim().length > 0); });
+                    proc.on('error', () => resolve(false));
+                }
+            } catch {
+                resolve(false);
+            }
+        });
     }
 
     /**
@@ -268,46 +301,53 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 安排续播跳转：启动后轮询 PotPlayer 状态，一旦真正在播(已缓冲,duration>0)即补发
-     * /Current /seek=<ts> 跳转到上次进度。网络流启动时 seek 不可靠，必须延迟到缓冲后。
-     * 最多尝试 ~10s，超时放弃(从片头播)。
+     * 安排续播跳转：启动后每 1s 轮询 PotPlayer 状态，一旦真正在播(已缓冲,duration>0)
+     * 即持续补发 /Current /seek=<ts>，直到 potctl 确认位置已到达目标点才停止。
+     * 网络流启动时 seek 不可靠(缓冲前被忽略)，故持续重试；最长 45s(对齐 MPV seekWithRetry)。
      */
     private scheduleResumeSeek(ts: number): void {
         if (!this.config.playerPath || !this.potctlPath) {
-            log.warn('[scheduleResumeSeek] potctl 缺失，无法延迟续播(依赖启动参数 /seek 尽力)');
+            log.warn('[scheduleResumeSeek] potctl 缺失，无法延迟续播');
             return;
         }
-        log.info(`[scheduleResumeSeek] 安排续播跳转 ts=${ts}s，等待 PotPlayer 缓冲就绪...`);
+        const target = ts;
+        log.info(`[scheduleResumeSeek] 安排续播跳转 ts=${target}s，每 1s 重试 seek 直到 potctl 确认到位(最长 45s)...`);
         let tries = 0;
+        const MAX = 45;
         const timer = setInterval(() => {
             tries++;
-            const fire = () => {
-                clearInterval(timer);
-                try {
-                    spawn(this.config.playerPath!, ['/Current', `/seek=${ts}`], { stdio: 'ignore', windowsHide: true });
-                    log.info(`[scheduleResumeSeek] 已补发 /Current /seek=${ts}s`);
-                } catch (e: any) {
-                    log.warn('[scheduleResumeSeek] 补发 seek 失败(忽略):', e?.message || e);
-                }
-            };
             const proc = spawn(this.potctlPath!, ['info'], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
             let out = '';
             proc.stdout?.on('data', (d: any) => { out += d.toString(); });
             proc.on('close', () => {
+                let done = false;
                 try {
                     const info = JSON.parse(out.trim());
                     const durSec = Math.floor((Number(info.duration) || 0) / 1000);
-                    const state = Number(info.state);
                     const posSec = Math.floor((Number(info.position) || 0) / 1000);
-                    // 已加载且正在播放(或已播放过)即认为可 seek
-                    if (info.found && durSec > 0 && (state === 2 || posSec > 0)) {
-                        fire();
-                    } else if (tries >= 10) {
-                        clearInterval(timer);
-                        log.warn(`[scheduleResumeSeek] 超时(${tries}次)未就绪，放弃续播(从片头播)`);
+                    if (info.found && durSec > 0) {
+                        // 已缓冲：补发 seek（幂等，缓冲未就绪时会被忽略，下一轮再发）
+                        try {
+                            spawn(this.config.playerPath!, ['/Current', `/seek=${target}`], { stdio: 'ignore', windowsHide: true });
+                        } catch (e: any) {
+                            log.warn('[scheduleResumeSeek] 补发 seek 失败(忽略):', e?.message || e);
+                        }
+                        // potctl 确认位置已到达目标点附近 → 续播成功
+                        if (posSec >= target - 8) {
+                            done = true;
+                            log.info(`[scheduleResumeSeek] 续播成功: potctl 位置=${posSec}s ≈ 目标=${target}s (第${tries}次)`);
+                        }
                     }
                 } catch {
-                    if (tries >= 10) { clearInterval(timer); log.warn('[scheduleResumeSeek] 解析失败超时，放弃续播'); }
+                    /* 解析失败，本轮忽略，下一轮重试 */
+                }
+
+                if (done || tries >= MAX) {
+                    clearInterval(timer);
+                    this.resumeSeekTimer = null;
+                    if (!done) {
+                        log.warn(`[scheduleResumeSeek] 超时(${tries}次)未确认续播到位，放弃(从片头播)`);
+                    }
                 }
             });
         }, 1000);
@@ -377,14 +417,14 @@ export class PotPlayer extends BasePlayer {
 
         const launchArgs: string[] = [this.playlistFilePath];
 
-        // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
+        // 续播跳转不再用「启动参数 /seek」：m3u8 播放列表 + 网络流在缓冲完成前发出的 /seek 会被静默忽略，
+        // 且对播放列表文件可能产生跳轨；改由 launchEpisode 内的 scheduleResumeSeek() 在缓冲就绪后
+        // 持续补发 /Current /seek 直到 potctl 确认位置到达（鲁棒，对齐 MPV seekWithRetry）。
+        // 这里仅把续播目标点记到 currentProgress，供起播瞬间的 emitProgress 正确上报 fnOS。
         const duration = item.duration || 0;
-        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${Math.floor(item.ts)}`);
-            this.currentProgress = { ts: Math.floor(item.ts), duration };
-        } else {
-            this.currentProgress = { ts: 0, duration };
-        }
+        this.currentProgress = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration)
+            ? { ts: Math.floor(item.ts), duration }
+            : { ts: 0, duration };
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
