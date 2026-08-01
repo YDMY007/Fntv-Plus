@@ -52,6 +52,9 @@ function computeWindowSize(): { width: number; height: number } {
 const isWin = process.platform === 'win32';
 const isWin11 = isWin && parseInt((os.release().split('.')[2] || '0'), 10) >= 22000;
 
+/** 播放页 URL 匹配（fnOS 详情/视频播放页：/v/tv/ /v/movie/ /v/video/） */
+const PLAY_PAGE_RE = /\/v\/(tv|movie|video)\//;
+
 const mainwinConfig: BrowserWindowConstructorOptions = {
     minWidth: 1280,
     minHeight: 720,
@@ -564,8 +567,27 @@ export function getMainWindow(): BrowserWindow {
         //       注册 dom-ready 后, 每次页面加载(含 reload/启动导航)都自动重注 CSS.
         //       [lc-127] media.ts 已不再在关闭视频时整页刷新, 但启动导航/用户手动刷新
         //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
+        // [lc-273] 按当前页面切换背景材质: 播放页关闭原生 acrylic(窗口变实色不透明 → video overlay
+        //   正常合成出画); 非播放页开启原生 acrylic(保亚克力美观)。播放页为全屏视频, 关 acrylic 用户无感。
+        // 根因: Win11 native acrylic 底层仍为分层窗口, 会导致 <video> 黑屏; 仅在需要 video 的播放页
+        //   关闭 acrylic 即可根治, 其余页面照常亚克力。
+        const syncBackgroundMaterial = (url: string) => {
+            if (!mainwin || !isWin11) return;
+            try {
+                if (PLAY_PAGE_RE.test(url)) {
+                    mainwin.setBackgroundMaterial('none');
+                    mainwin.setBackgroundColor('#000000'); // 视频加载前黑底, 影院感
+                } else {
+                    mainwin.setBackgroundColor('#faf4fa');
+                    mainwin.setBackgroundMaterial('acrylic');
+                }
+            } catch (e) {
+                log.warn('[lc-273] 背景材质切换失败(忽略):', e);
+            }
+        };
         const onPageEntered = (wc: Electron.WebContents) => {
             injectAcrylicCSS(wc);
+            syncBackgroundMaterial(wc.getURL());
         };
         mainwin.webContents.on('dom-ready', () => onPageEntered(mainwin!.webContents));
         // [lc-272] 已移除原播放页 DevTools hack 的 did-navigate-in-page 监听(SPA 路由变化改由下方
@@ -617,7 +639,10 @@ export function getMainWindow(): BrowserWindow {
             } catch { /* ignore 解析失败 */ }
         };
         mainwin.webContents.on('did-navigate', (_event: any, url: string) => guardRedirect(url));
-        mainwin.webContents.on('did-navigate-in-page', (_event: any, url: string) => guardRedirect(url));
+        mainwin.webContents.on('did-navigate-in-page', (_event: any, url: string) => {
+            guardRedirect(url);
+            onPageEntered(mainwin!.webContents); // [lc-273] SPA 路由进/出播放页时切换背景材质(修复 video 黑屏)
+        });
 
         // [lc-205] 接收渲染端(注入 fnOS 页面的 preload)发来的桌面纠正诊断, 写入 app.log
         ipcMain.removeAllListeners('renderer-desktop-fix');
