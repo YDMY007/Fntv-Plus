@@ -4098,6 +4098,17 @@ function handle(): void {
       injectCarousel();
     }
   }, 5000);
+
+  // [lc-279] 播放页打标: 页面存在 <video> 时给 <html> 加 fnos-video-active,
+  // 使 mainwin.ts 注入的 ACRYLIC_CSS 中 lc-179 的 modal 例外规则(白底 #fff/#2b2a33)在播放页整体失效,
+  // 恢复 fnOS 播放器浮层原生深色玻璃(根治右下角按钮弹窗全白);
+  // 非播放页(系统弹窗如创建媒体库)保留该规则, 继续修复"遮罩透出首页轮播图"。
+  const _syncVideoActiveClass = (): void => {
+    const hasVideo = !!document.querySelector('video');
+    document.documentElement.classList.toggle('fnos-video-active', hasVideo);
+  };
+  _syncVideoActiveClass();
+  setInterval(_syncVideoActiveClass, 1000);
 }
 
 registerHook(HookType.OnReady, handle);

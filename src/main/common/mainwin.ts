@@ -164,22 +164,22 @@ const ACRYLIC_CSS = `
     }
 
     /* 3f. Modal/Dialog 遮罩层例外: 弹窗背景必须不透明, 否则底层内容(如首页轮播图)会透过透明遮罩露出来 */
-    .semi-modal-mask,
-    .semi-modal-wrapper,
-    [class*="modal-mask"],
-    [class*="modal-overlay"],
-    [class*="dialog-mask"],
-    [class*="dialog-overlay"],
-    [role="dialog"]::backdrop,
-    [aria-modal="true"] + *{
+    html:not(.fnos-video-active) .semi-modal-mask,
+    html:not(.fnos-video-active) .semi-modal-wrapper,
+    html:not(.fnos-video-active) [class*="modal-mask"],
+    html:not(.fnos-video-active) [class*="modal-overlay"],
+    html:not(.fnos-video-active) [class*="dialog-mask"],
+    html:not(.fnos-video-active) [class*="dialog-overlay"],
+    html:not(.fnos-video-active) [role="dialog"]::backdrop,
+    html:not(.fnos-video-active) [aria-modal="true"] + *{
         background:rgba(0,0,0,.45)!important;
         background-color:rgba(0,0,0,.45)!important;
     }
     /* 弹窗主体自身恢复不透明背景( Semi Design modal content ) */
-    .semi-modal-content,
-    [class*="modal-content"],
-    [class*="dialog-content"],
-    [role="dialog"]:not([style*="background:transparent"]){
+    html:not(.fnos-video-active) .semi-modal-content,
+    html:not(.fnos-video-active) [class*="modal-content"],
+    html:not(.fnos-video-active) [class*="dialog-content"],
+    html:not(.fnos-video-active) [role="dialog"]:not([style*="background:transparent"]){
         background:#fff!important;
         background-color:#fff!important;
     }
@@ -189,18 +189,18 @@ const ACRYLIC_CSS = `
        semi-button-primary 原本是"彩色底+白字", 背景透明后→白字在白色弹窗上=不可见。
        "取消"等次要按钮是边框+透明底+深色字→透明后仍可见(所以只有确认/选择/创建等primary按钮消失)。
        此处对弹窗内的实心按钮显式恢复可见背景+对比色文字。 */
-    .semi-modal-content .semi-button-solid,
-    [class*="modal-content"] .semi-button-solid,
-    [class*="dialog-content"] .semi-button-solid,
-    [role="dialog"] .semi-button-solid{
+    html:not(.fnos-video-active) .semi-modal-content .semi-button-solid,
+    html:not(.fnos-video-active) [class*="modal-content"] .semi-button-solid,
+    html:not(.fnos-video-active) [class*="dialog-content"] .semi-button-solid,
+    html:not(.fnos-video-active) [role="dialog"] .semi-button-solid{
         background:var(--semi-color-primary, #4a90d9)!important;
         color:#fff!important;
     }
     /* 深色模式下弹窗按钮同步 */
-    html.dark .semi-modal-content .semi-button-solid,
-    html.dark [class*="modal-content"] .semi-button-solid,
-    html.dark [class*="dialog-content"] .semi-button-solid,
-    html.dark [role="dialog"] .semi-button-solid{
+    html.dark:not(.fnos-video-active) .semi-modal-content .semi-button-solid,
+    html.dark:not(.fnos-video-active) [class*="modal-content"] .semi-button-solid,
+    html.dark:not(.fnos-video-active) [class*="dialog-content"] .semi-button-solid,
+    html.dark:not(.fnos-video-active) [role="dialog"] .semi-button-solid{
         background:var(--semi-color-primary, #6c8ccf)!important;
         color:#fff!important;
     }
@@ -381,16 +381,16 @@ const ACRYLIC_CSS = `
     }
 
     /* ── ⑫b 深色模式 Modal/Dialog 例外 ── */
-    html.dark .semi-modal-mask,
-    html.dark .semi-modal-wrapper,
-    html.dark [class*="modal-mask"],
-    html.dark [class*="modal-overlay"]{
+    html.dark:not(.fnos-video-active) .semi-modal-mask,
+    html.dark:not(.fnos-video-active) .semi-modal-wrapper,
+    html.dark:not(.fnos-video-active) [class*="modal-mask"],
+    html.dark:not(.fnos-video-active) [class*="modal-overlay"]{
         background:rgba(0,0,0,.60)!important;
         background-color:rgba(0,0,0,.60)!important;
     }
-    html.dark .semi-modal-content,
-    html.dark [class*="modal-content"],
-    html.dark [class*="dialog-content"]{
+    html.dark:not(.fnos-video-active) .semi-modal-content,
+    html.dark:not(.fnos-video-active) [class*="modal-content"],
+    html.dark:not(.fnos-video-active) [class*="dialog-content"]{
         background:#2b2a33!important;
         background-color:#2b2a33!important;
     }
