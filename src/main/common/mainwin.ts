@@ -1,6 +1,7 @@
 import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app, ipcMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as log from '../../modules/logger';
 
 // [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
@@ -40,6 +41,17 @@ function computeWindowSize(): { width: number; height: number } {
     return { width: w, height: h };
 }
 
+// [lc-272] 根治透明窗口 video 黑屏: 让窗口在 Windows 上真正不透明 + (Win11) 原生亚克力
+//   透明(transparent:true = WS_EX_LAYERED 分层)窗口下, Chromium 把 <video> 提升为硬件 overlay 平面后
+//   无法被分层窗口合成 → 黑屏(有声音无画面); 手动开 DevTools 画面即正常, 因 DevTools 强制窗口变不透明。
+//   故 Windows 整体改为 transparent:false(窗口不透明→overlay 正常合成→video 出画)。
+//   Win11(build>=22000) 额外启用 DWM 原生 acrylic 材质: 系统级亚克力模糊桌面透出,
+//   外观与现 CSS 亚克力一致(更贴近 fnOS 原生); acrylic 失效也只是退回实色窗口, video 仍正常。
+//   Win10 无 acrylic 材质 → 不透明实色窗(video 正常, 但无桌面亚克力, 为该系统的已知视觉取舍)。
+//   macOS/Linux 无此材质 → 保持 transparent:true + CSS 亚克力(原行为不变)。
+const isWin = process.platform === 'win32';
+const isWin11 = isWin && parseInt((os.release().split('.')[2] || '0'), 10) >= 22000;
+
 const mainwinConfig: BrowserWindowConstructorOptions = {
     minWidth: 1280,
     minHeight: 720,
@@ -47,9 +59,11 @@ const mainwinConfig: BrowserWindowConstructorOptions = {
     show: false,
     icon: path.join(__dirname, '../../../build/icon.ico'),
     frame: false,
-    // 透明窗口: 实现真正的 Mica/Acrylic 半透亚克力(桌面朦胧透出)
-    transparent: true,
-    backgroundColor: '#00000000',
+    // [lc-272] Windows: 不透明窗口(修复透明窗口 video 黑屏); Win11 叠加原生 acrylic 保亚克力。
+    //   macOS/Linux: 透明窗口 + CSS 亚克力(原行为)。
+    transparent: !isWin,
+    backgroundColor: isWin ? '#faf4fa' : '#00000000',
+    ...(isWin11 ? { backgroundMaterial: 'acrylic' as const } : {}),
     webPreferences: {
         webgl: true,
         partition: 'persist:fntv',
@@ -451,9 +465,6 @@ function isLoginPath(url: string): boolean {
  * v380: 登录页(/login,/signin) 自动切换为不透明白底模式,
  *       避免 transparent 窗口 + html{background:transparent} 导致桌面透出全白.
  */
-/** 播放页 URL 匹配（fnOS 详情/视频播放页） */
-const PLAY_PAGE_RE = /\/v\/(tv|movie|video)\//;
-
 function injectAcrylicCSS(wc: Electron.WebContents): void {
     const url = wc.getURL();
 
@@ -516,64 +527,13 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
 }
 
 /**
- * [lc-271] 修复 Electron v38 透明窗口 + HTML5 <video> 黑屏回归 bug 的 DevTools hack（时序修正版）。
- *
- * 现象 & 用户实测关键事实:
- *  - 原生播放黑屏有声音; 打开 DevTools 后画面立即正常; 关键: 关闭 DevTools 后画面【依旧正常】(持久修复)。
- *  - 第二台机器: 进入播放页先正常显示约 1 秒, 随后整屏变黑 —— 印证 GPU 在播放 ~1s 后将视频提升为
- *    硬件 overlay 平面, 而透明(分层)窗口无法合成该 overlay → 黑屏。DevTools 打开会强制窗口不透明 +
- *    重启 GPU 合成器, 把视频拉回正常纹理合成路径, 且该状态在关闭 DevTools 后仍保留。
- *  - lc-269/270 的 600ms 瞬时开关之所以失败: 进入播放页时视频元素尚未创建/播放, 我们过早关闭 DevTools,
- *    等视频真正开始后 overlay 又被提升 → 黑屏。手动能好, 正是因为"视频正在播放时" DevTools 处于打开态,
- *    关闭后才粘住修复态。
- *
- * 本版修正: 打开 DevTools 后, 轮询等待页面内 <video> 真正进入 playing 态(readyState>=3 且未暂停),
- *   再关闭 DevTools —— 复刻"播放中关闭 DevTools"的粘滞修复。最长等待 HACK_MAX_WAIT_MS 保底关闭,
- *   避免无 video 时 DevTools 常驻。仅 Windows 需要(该 bug 仅 Win 复现)。代价: 视频开始播放前
- *   DevTools 窗口会短暂可见(数秒), 这是复刻手动成功路径的必要代价。
- *
- * @param win 主窗口
+ * [lc-272] 已移除 lc-269/270/271 的 DevTools 瞬时开关 hack。
+ * 该 hack 试图复刻"手动开 DevTools→窗口变不透明→video 出画"的效果, 但程序化开关不可靠
+ * (用户实测自动打开仍黑屏)。根因: 黑屏是 transparent(WS_EX_LAYERED 分层)窗口无法合成 video 硬件
+ * overlay 平面所致; 真正修复是让窗口在 Win11 上真正不透明(transparent:false +
+ * setBackgroundMaterial('acrylic')), 见上方 mainwinConfig 与 getMainWindow 内的 isWin11 处理。
+ * 故 hack 整体移除, 不再有 DevTools 闪窗。
  */
-const HACK_MAX_WAIT_MS = 12000;
-const HACK_POLL_MS = 200;
-let compositorFixInProgress = false;
-
-/** 轮询等待页面内视频真正进入播放态 */
-async function waitForVideoPlaying(wc: Electron.WebContents, timeoutMs: number): Promise<boolean> {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-        try {
-            const playing = await wc.executeJavaScript(
-                `(()=>{const v=document.querySelector('video');return !!(v&&!v.paused&&v.readyState>=3);})()`
-            );
-            if (playing) return true;
-        } catch (_) { /* 页面未就绪/已跳转, 忽略继续轮询 */ }
-        await new Promise((r) => setTimeout(r, HACK_POLL_MS));
-    }
-    return false;
-}
-
-async function restartVideoCompositor(win: BrowserWindow): Promise<void> {
-    const wc = win.webContents;
-    if (compositorFixInProgress || wc.isDevToolsOpened()) return;
-    compositorFixInProgress = true;
-    log.info('[lc-271] 播放页进入: 打开 DevTools, 等待 <video> 播放后关闭(粘滞修复透明窗口 video 黑屏)');
-    try {
-        wc.openDevTools({ mode: 'detach' });
-    } catch (e) {
-        log.warn('[lc-271] openDevTools 失败(放弃修复):', e);
-        compositorFixInProgress = false;
-        return;
-    }
-    // 关键: 等视频真正开始播放(此时窗口处于不透明态, 合成器修复已粘滞)再关, 否则过早关闭会复发黑屏
-    await waitForVideoPlaying(wc, HACK_MAX_WAIT_MS);
-    try {
-        if (wc.isDevToolsOpened()) wc.closeDevTools();
-    } catch (e) {
-        log.warn('[lc-271] closeDevTools 失败(忽略):', e);
-    }
-    compositorFixInProgress = false;
-}
 
 /**
  * 获取主窗口实例
@@ -586,6 +546,17 @@ export function getMainWindow(): BrowserWindow {
         // 居中显示在所属屏幕, 避免从角落弹出
         mainwin.center();
 
+        // [lc-272] Win11: 兜底再显式启用原生 acrylic 材质(构造器已设 backgroundMaterial,
+        //   部分环境需在窗口就绪后调用才生效)。窗口不透明 → video overlay 正常合成, 黑屏根治;
+        //   acrylic 失效也只是退回实色窗口, video 仍正常出画。
+        if (isWin11) {
+            try {
+                mainwin.setBackgroundMaterial('acrylic');
+            } catch (e) {
+                log.warn('[lc-272] setBackgroundMaterial(acrylic) 失败(退回实色窗口, video 仍正常):', e);
+            }
+        }
+
         // v376 修复: CSS 改为 dom-ready 注��� (而非窗口创建时一次性)
         // 原因: 历史上 MPV 关闭会触发 reloadIgnoringCache() 刷新页面,
         //       窗口创建时的 insertCSS 不会在 reload 后重新执行 →
@@ -595,25 +566,10 @@ export function getMainWindow(): BrowserWindow {
         //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
         const onPageEntered = (wc: Electron.WebContents) => {
             injectAcrylicCSS(wc);
-            // [lc-271] 播放页进入时打开 DevTools 等视频播放后关闭, 粘滞修复透明窗口+video 黑屏
-            // (该 bug 仅 Windows 复现, 且仅播放页需要; 非播放页保持透明亚克力不变)
-            if (process.platform === 'win32' && PLAY_PAGE_RE.test(wc.getURL())) {
-                void restartVideoCompositor(mainwin!);
-            }
         };
         mainwin.webContents.on('dom-ready', () => onPageEntered(mainwin!.webContents));
-        // [lc-270] fnOS 是 SPA: 进入播放页是 history.pushState 前端路由, 不触发 dom-ready,
-        //   导致 lc-269 的 DevTools hack 在播放页从未执行(用户实测"无闪窗+仍黑屏").
-        //   改挂 did-navigate-in-page(SPA 路由变化事件, 携带新 URL)以在播放页触发 hack.
-        //   该事件仅在 in-page 导航(pushState/replaceState/hash)时触发, 初次整页加载不触发,
-        //   故与 dom-ready 不会重复; 即便重复也有 isDevToolsOpened() 守卫.
-        mainwin.webContents.on('did-navigate-in-page', (_e, url) => {
-            log.info('[lc-270] SPA 路由变化:', url);
-            // [lc-271] 播放页进入: 打开 DevTools 等 video 播放后关闭(粘滞修复黑屏)
-            if (process.platform === 'win32' && PLAY_PAGE_RE.test(url)) {
-                void restartVideoCompositor(mainwin!);
-            }
-        });
+        // [lc-272] 已移除原播放页 DevTools hack 的 did-navigate-in-page 监听(SPA 路由变化改由下方
+        //   guardRedirect 的 did-navigate-in-page 监听统一处理)。视频黑屏由 Win11 不透明窗口根治, 无需 hack。
 
         // 接管 new-window / target="_blank": 同域(飞牛影视 NAS)链接在原窗口内打开,
         // 保留玻璃壳; 外部链接交给系统浏览器. 否则 Electron 会开一个无 preload 的裸窗.

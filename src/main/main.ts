@@ -22,15 +22,10 @@ app.commandLine.appendSwitch('--lang', 'en-US');
 // 恢复后透明窗口 + video 正常工作。若当初禁用是为了修某个旧 bug 需重新评估。
 // app.commandLine.appendSwitch('--disable-features', 'VizDisplayCompositor');
 
-// [lc-266] 禁用 DWM 硬件 video overlay 平面, 仅针对视频。
-// 症状: fnOS 网页原生 <video> 黑屏有声音, 打开 DevTools 后画面立即正常。
-// 机理: Chromium 默认把 video 走 Windows DWM 的硬件 overlay 平面合成,
-//   在特定窗口/合成条件下该 overlay 平面无法正常显示 → 黑屏;
-//   DevTools 打开时强制 video 退回纹理(texture)合成 → 正常。
-// 本开关精确禁用 video overlay, 把 video 强制进合成器纹理路径(与 DevTools 效果一致),
-// 但保留其余 GPU 合成 → 整页不卡顿; 也不动透明窗口 → 亚克力不受影响。
-// 只影响视频呈现层, 视频解码(H.264/HEVC)仍可硬件加速。
-app.commandLine.appendSwitch('--disable-direct-composition-video-overlays');
+// [lc-266→lc-272] 原 lc-266 在此处加过 --disable-direct-composition-video-overlays 试图禁用 video overlay,
+//   实测无效(透明窗口下仍黑屏)。lc-272 改为从根因解决: 让窗口在 Win11 上真正不透明
+//   (transparent:false + setBackgroundMaterial('acrylic') 原生亚克力), 透明(WS_EX_LAYERED)分层窗口
+//   才是 video overlay 无法合成→黑屏的真凶。故此处 flag 已移除。
 
 // 抑制SSL相关的底层错误日志
 app.commandLine.appendSwitch('--log-level', '3'); // 只显示致命错误
