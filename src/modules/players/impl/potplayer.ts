@@ -19,7 +19,6 @@ import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku'
 import { isSyncableItemType } from '../../fn_api/types';
 import { mergeSubtitleWithDanmaku } from '../../danmaku/subtitleMerge';
 import logger from '../../logger';
-import { playbackShim } from '../../../main/common/playbackShim';
 const log = logger.component('potplayer');
 
 /**
@@ -124,11 +123,9 @@ export class PotPlayer extends BasePlayer {
         if (fresh) {
             const wasRunning = await this.closeStrayPotPlayer();
             log.info(`[launchEpisode] fresh 起播，启动前已有 PotPlayer 残留=${wasRunning}`);
-            // 关闭 PotPlayer「同文件夹自动加入列表」以根治"列表多一条重复"(OpenSameDir)
-            this.tryDisablePotPlayerAutoAdd();
         }
 
-        // 仅传目标集单文件 + /seek（续播可靠、无重复、启动快）
+        // 生成 m3u8 播放列表文件（含全部集、可读标题、原始 proxy URL —— 不经 shim，启动快）
         const launchArgs = this.buildFullPlaylistLaunchArgs(index);
 
         log.info(`[第${index + 1}/${this.playlist.length}集] 启动 PotPlayer: ${this.config.playerPath} ${launchArgs.join(' ')}`);
@@ -310,35 +307,6 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 关闭 PotPlayer「同文件夹文件自动加入播放列表」(OpenSameDir) 默认行为。
-     *
-     * 根因：PotPlayer 命令行传入多个文件时，会把【首个文件额外计入一次】（当前播放项 + 播放列表项），
-     * 导致目标集在列表里出现两次（用户反复报"多显示一集"）。该行为由 PotPlayer 的 OpenSameDir 开关控制，
-     * 关闭后 PotPlayer 不再自动把已打开文件重复加入列表 —— 重复即消失，且不影响"播完自动连播下一集"。
-     *
-     * 通过注册表一次性关闭（best-effort，写错键/无权限均忽略，不影响播放）。
-     * 仅 Windows 生效；为避免每次起播都写，用 autoAddDisabled 标记只执行一次。
-     */
-    private autoAddDisabled = false;
-    private tryDisablePotPlayerAutoAdd(): void {
-        if (this.autoAddDisabled) return;
-        this.autoAddDisabled = true;
-        if (process.platform !== 'win32') return;
-        const keys = [
-            'HKCU\\Software\\Daum\\PotPlayerMini64\\Play',
-            'HKCU\\Software\\Daum\\PotPlayerMini\\Play',
-        ];
-        for (const key of keys) {
-            try {
-                const proc = spawn('reg', ['add', key, '/v', 'OpenSameDir', '/t', 'REG_DWORD', '/d', '0', '/f'],
-                    { stdio: 'ignore', windowsHide: true });
-                proc.on('error', () => { /* 忽略：无权限/键不存在 */ });
-            } catch { /* 忽略 */ }
-        }
-        log.info('[PotPlayer] 已尝试关闭 PotPlayer 同文件夹自动加入列表(OpenSameDir=0)，消除列表重复');
-    }
-
-    /**
      * 构建「基础」启动参数（仅视频 URL + 续播跳转 + 透传参数），同步、零网络。
      * 用于【先立即拉起 PotPlayer 开播】，字幕/弹幕随后异步挂载，避免网络请求阻塞启动（见 resolveSubtitleArg / attachSubtitle）。
      * 抽取自 launchEpisode，供「逐集拉起」与「原地切换(switchTo)」共用。
@@ -361,8 +329,8 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 用本地 shim 包裹：PotPlayer 播放列表显示可读剧名，续播 /seek 仍精确生效
-        const launchArgs: string[] = [this.toDisplayUrl(item)];
+        // 直接用 proxy 原始 URL（不经 shim 代理层，避免额外 HTTP 转发导致卡顿）
+        const launchArgs: string[] = [item.playLink];
 
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
@@ -382,45 +350,41 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
-     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
+     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件（含可读标题 + 极速标签），
+     * 作为【单一启动参数】传给 PotPlayer。
      *
-     * 关键：PotPlayer 启动参数 /seek 仅对「多 URL 参数」可靠（对 m3u8 播放列表文件无效，
-     * 详见 lc-245/lc-246/lc-247/lc-252 反复验证——m3u8 会被 PotPlayer 按文件名重新排序落到 E01，
-     * 且 EXT-X-START 不被尊重），故采用【目标集 URL 排第一】的多参数方式。
-     * 每个 URL 经 playbackShim 包裹为「可读名 URL」（127.0.0.1:22347/p/<id>/<剧名>.mp4），
-     * 由 shim 把视频流代理给真实 proxy —— 播放列表显示剧名，续播 /seek 仍精确生效。
+     * 为什么用 m3u8（而不是多文件命令行参数）：
+     *   - 多文件参数 + shim 代理层 → 每个视频多一次 HTTP 转发握手，PotPlayer 启动时预扫描所有文件
+     *     元数据导致严重卡顿(lc-253 用户实测"即将播放..."卡死)
+     *   - 多文件参数（即使不用 shim）→ PotPlayer 把首个 URL 额外计入一次 → 列表重复(lc-249/250/251 反复验证)
+     *   - m3u8 是单一文件参数 → PotPlayer 解析后列表项 = 文件内 #EXTINF 条目数，精确等于集数，
+     *     物理上不可能重复，且启动快（只打开 1 个文件）
      *
-     * 关于「列表多一条重复」：PotPlayer 会把命令行首个文件额外计入一次（当前播放项 + 播放列表项），
-     * 表现为目标集出现两次。这是 PotPlayer 命令行硬行为，代码层无法消除；
-     * 根治手段是关闭 PotPlayer 的「同文件夹文件自动加入播放列表」(OpenSameDir)，
-     * 由 launchEpisode 在起播前通过注册表一次性关闭（tryDisablePotPlayerAutoAdd）。
+     * 播放列表显示：#EXTINF 标题 = 可读剧名「剧名 - S01E04: 集标题 [极速]」。
+     * 续播：#EXT-X-START 标签(目标集已重排到 m3u8 首项，TIME-OFFSET=ts 即落在目标集内)。
+     *   注：命令行 /seek 对 m3u8 文件无效(lc-247)；EXT-X-START 是 HLS 标准标签，PotPlayer 可能尊重也可能不尊重。
+     *   若 EXT-X-START 不生效，续播会从头开始——这是 PotPlayer 对 m3u8 的限制，非代码 bug。
      *
-     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
-     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
+     * 仅用于 launchEpisode（首次拉起）；switchTo 仍用 buildBaseLaunchArgs + /current。
      */
     private buildFullPlaylistLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
         this.currentItem = item;
 
-        const launchArgs: string[] = [];
-
-        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)，URL 用 shim 包裹为可读名
+        // 续播偏移：目标集已重排到 this.playlist[0](playList 入口重排)，m3u8 首项即目标集
         const duration = item.duration || 0;
-        launchArgs.push(this.toDisplayUrl(item));
-        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
-            launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
-            this.currentProgress = { ts: Math.floor(item.ts), duration };
-        } else {
-            this.currentProgress = { ts: 0, duration };
-        }
+        const resumeTs = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) ? Math.floor(item.ts) : 0;
+        this.currentProgress = { ts: resumeTs, duration };
 
-        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)，同样用 shim 包裹
-        for (let i = 0; i < this.playlist.length; i++) {
-            if (i === index) continue;
-            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
-        }
+        // 生成 .m3u8 播放列表文件（含全部集、可读标题、续播偏移、原始 proxy URL —— 不经 shim，直接连 proxy）
+        const content = this.generateM3U8Playlist(this.playlist, resumeTs);
+        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
+        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
+        log.info(`[playlist] 生成 m3u8(${this.playlist.length} 集, 续播=${resumeTs}s): ${this.playlistFilePath}`);
+
+        // 仅传 m3u8 文件路径（单一参数，启动快、无重复）
+        const launchArgs: string[] = [this.playlistFilePath];
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
@@ -428,16 +392,6 @@ export class PotPlayer extends BasePlayer {
         }
 
         return launchArgs;
-    }
-
-    /**
-     * 把播放项转换为 PotPlayer 使用的「可读名 URL」：
-     * 经 playbackShim 包裹为 http://127.0.0.1:22347/p/<id>/<剧名 [极速]>.mp4，
-     * shim 再把视频流代理给真实 proxy URL。这样 PotPlayer 播放列表显示剧名而非 GUID。
-     */
-    private toDisplayUrl(item: PlayItem): string {
-        const name = `${this.getTitle(item)} [极速]`;
-        return playbackShim.makeUrl(name, item.playLink);
     }
 
     /**
@@ -1002,10 +956,9 @@ export class PotPlayer extends BasePlayer {
         for (const item of infos) {
             const duration = item.duration || -1;
             const title = `${this.getTitle(item)} [极速]`;
-            // URL 经 playbackShim 包裹：PotPlayer 显示可读名(末段=剧名) + 走本地代理到真实 proxy
-            const url = playbackShim.makeUrl(title, item.playLink);
+            // 直接用原始 proxy URL（不经 shim，避免额外 HTTP 转发导致 PotPlayer 启动卡顿）
             content += `#EXTINF:${duration},${title}\n`;
-            content += `${url}\n`;
+            content += `${item.playLink}\n`;
         }
         return content;
     }
