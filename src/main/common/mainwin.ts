@@ -566,12 +566,23 @@ export function getMainWindow(): BrowserWindow {
         //       注册 dom-ready 后, 每次页面加载(含 reload/启动导航)都自动重注 CSS.
         //       [lc-127] media.ts 已不再在关闭视频时整页刷新, 但启动导航/用户手动刷新
         //       仍会 reload, 故保留 dom-ready 重注以保证玻璃壳不丢失.
-        mainwin.webContents.on('dom-ready', () => {
-            const wc = mainwin!.webContents;
+        const onPageEntered = (wc: Electron.WebContents) => {
             injectAcrylicCSS(wc);
             // [lc-269] 播放页进入时瞬时开关 DevTools 强制 GPU 合成器重启, 修复透明窗口+video 黑屏
             // (该 bug 仅 Windows 复现, 且仅播放页需要; 非播放页保持透明亚克力不变)
             if (process.platform === 'win32' && PLAY_PAGE_RE.test(wc.getURL())) {
+                restartVideoCompositor(mainwin!);
+            }
+        };
+        mainwin.webContents.on('dom-ready', () => onPageEntered(mainwin!.webContents));
+        // [lc-270] fnOS 是 SPA: 进入播放页是 history.pushState 前端路由, 不触发 dom-ready,
+        //   导致 lc-269 的 DevTools hack 在播放页从未执行(用户实测"无闪窗+仍黑屏").
+        //   改挂 did-navigate-in-page(SPA 路由变化事件, 携带新 URL)以在播放页触发 hack.
+        //   该事件仅在 in-page 导航(pushState/replaceState/hash)时触发, 初次整页加载不触发,
+        //   故与 dom-ready 不会重复; 即便重复也有 isDevToolsOpened() 守卫.
+        mainwin.webContents.on('did-navigate-in-page', (_e, url) => {
+            log.info('[lc-270] SPA 路由变化:', url);
+            if (process.platform === 'win32' && PLAY_PAGE_RE.test(url)) {
                 restartVideoCompositor(mainwin!);
             }
         });
