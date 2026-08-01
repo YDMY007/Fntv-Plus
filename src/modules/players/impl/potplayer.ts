@@ -124,6 +124,8 @@ export class PotPlayer extends BasePlayer {
         if (fresh) {
             const wasRunning = await this.closeStrayPotPlayer();
             log.info(`[launchEpisode] fresh 起播，启动前已有 PotPlayer 残留=${wasRunning}`);
+            // 关闭 PotPlayer「同文件夹自动加入列表」以根治"列表多一条重复"(OpenSameDir)
+            this.tryDisablePotPlayerAutoAdd();
         }
 
         // 仅传目标集单文件 + /seek（续播可靠、无重复、启动快）
@@ -308,6 +310,35 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
+     * 关闭 PotPlayer「同文件夹文件自动加入播放列表」(OpenSameDir) 默认行为。
+     *
+     * 根因：PotPlayer 命令行传入多个文件时，会把【首个文件额外计入一次】（当前播放项 + 播放列表项），
+     * 导致目标集在列表里出现两次（用户反复报"多显示一集"）。该行为由 PotPlayer 的 OpenSameDir 开关控制，
+     * 关闭后 PotPlayer 不再自动把已打开文件重复加入列表 —— 重复即消失，且不影响"播完自动连播下一集"。
+     *
+     * 通过注册表一次性关闭（best-effort，写错键/无权限均忽略，不影响播放）。
+     * 仅 Windows 生效；为避免每次起播都写，用 autoAddDisabled 标记只执行一次。
+     */
+    private autoAddDisabled = false;
+    private tryDisablePotPlayerAutoAdd(): void {
+        if (this.autoAddDisabled) return;
+        this.autoAddDisabled = true;
+        if (process.platform !== 'win32') return;
+        const keys = [
+            'HKCU\\Software\\Daum\\PotPlayerMini64\\Play',
+            'HKCU\\Software\\Daum\\PotPlayerMini\\Play',
+        ];
+        for (const key of keys) {
+            try {
+                const proc = spawn('reg', ['add', key, '/v', 'OpenSameDir', '/t', 'REG_DWORD', '/d', '0', '/f'],
+                    { stdio: 'ignore', windowsHide: true });
+                proc.on('error', () => { /* 忽略：无权限/键不存在 */ });
+            } catch { /* 忽略 */ }
+        }
+        log.info('[PotPlayer] 已尝试关闭 PotPlayer 同文件夹自动加入列表(OpenSameDir=0)，消除列表重复');
+    }
+
+    /**
      * 构建「基础」启动参数（仅视频 URL + 续播跳转 + 透传参数），同步、零网络。
      * 用于【先立即拉起 PotPlayer 开播】，字幕/弹幕随后异步挂载，避免网络请求阻塞启动（见 resolveSubtitleArg / attachSubtitle）。
      * 抽取自 launchEpisode，供「逐集拉起」与「原地切换(switchTo)」共用。
@@ -351,39 +382,45 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件，作为【单一启动参数】传给 PotPlayer。
+     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
+     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
      *
-     * 为什么用 m3u8（而不是多文件参数 / /add）：
-     *   - 多文件命令行参数 → PotPlayer 会把【第一个文件额外计入一次】(当前项+列表项) → 重复(lc-249 验证)
-     *   - 单文件 + /add 追加 → /add 也导致重复 + 二次 spawn 卡顿(lc-250 验证)
-     *   - m3u8 是【单一文件参数】：PotPlayer 解析后播放列表项 = 文件内 #EXTINF 条目数，精确等于集数，
-     *     物理上不可能重复，且天然规避 PotPlayer「同目录相似文件自动加」的默认行为(所有 shim URL 同目录易触发)。
+     * 关键：PotPlayer 启动参数 /seek 仅对「多 URL 参数」可靠（对 m3u8 播放列表文件无效，
+     * 详见 lc-245/lc-246/lc-247/lc-252 反复验证——m3u8 会被 PotPlayer 按文件名重新排序落到 E01，
+     * 且 EXT-X-START 不被尊重），故采用【目标集 URL 排第一】的多参数方式。
+     * 每个 URL 经 playbackShim 包裹为「可读名 URL」（127.0.0.1:22347/p/<id>/<剧名>.mp4），
+     * 由 shim 把视频流代理给真实 proxy —— 播放列表显示剧名，续播 /seek 仍精确生效。
      *
-     * 播放列表显示：#EXTINF 标题 = 可读剧名「剧名 - S01E04: 集标题 [极速]」。
-     * 续播：#EXT-X-START 标签(目标集已重排到 m3u8 首项，TIME-OFFSET=ts 即落在目标集内)。
-     *   - 注：命令行 /seek 对 m3u8 文件整体无效(lc-247)，故续播改用 m3u8 内部 EXT-X-START 标签(HLS 标准起始点)。
+     * 关于「列表多一条重复」：PotPlayer 会把命令行首个文件额外计入一次（当前播放项 + 播放列表项），
+     * 表现为目标集出现两次。这是 PotPlayer 命令行硬行为，代码层无法消除；
+     * 根治手段是关闭 PotPlayer 的「同文件夹文件自动加入播放列表」(OpenSameDir)，
+     * 由 launchEpisode 在起播前通过注册表一次性关闭（tryDisablePotPlayerAutoAdd）。
      *
-     * 仅用于 launchEpisode（首次拉起）；switchTo（原地切换）仍用 buildBaseLaunchArgs + /current。
+     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
+     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
      */
     private buildFullPlaylistLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 续播偏移：目标集已重排到 this.playlist[0](playList 入口重排)，m3u8 首项即目标集，
-        // EXT-X-START 的 TIME-OFFSET 直接落在目标集内。
+        const launchArgs: string[] = [];
+
+        // 目标集(第一项)放最前，并带续播 /seek(PotPlayer 官方语法 HH:MM:SS)，URL 用 shim 包裹为可读名
         const duration = item.duration || 0;
-        const resumeTs = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) ? Math.floor(item.ts) : 0;
-        this.currentProgress = { ts: resumeTs, duration };
+        launchArgs.push(this.toDisplayUrl(item));
+        if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
+            launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
+            this.currentProgress = { ts: Math.floor(item.ts), duration };
+        } else {
+            this.currentProgress = { ts: 0, duration };
+        }
 
-        // 生成 .m3u8 播放列表文件（含全部集、可读标题、EXT-X-START 续播偏移、shim 可读名 URL）
-        const content = this.generateM3U8Playlist(this.playlist, resumeTs);
-        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
-        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
-        log.info(`[playlist] 生成 m3u8 播放列表(${this.playlist.length} 集, 续播=${resumeTs}s): ${this.playlistFilePath}`);
-
-        // 仅传 m3u8 文件路径（单一参数）。/seek 命令行对 m3u8 文件无效，续播由 EXT-X-START 接管。
-        const launchArgs: string[] = [this.playlistFilePath];
+        // 其余集依次追加(形成完整播放列表，用户可在 PotPlayer 内看到/切换上下集)，同样用 shim 包裹
+        for (let i = 0; i < this.playlist.length; i++) {
+            if (i === index) continue;
+            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
+        }
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
