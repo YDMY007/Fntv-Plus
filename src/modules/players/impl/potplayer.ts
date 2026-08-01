@@ -504,12 +504,19 @@ export class PotPlayer extends BasePlayer {
         if (this.currentProgress.duration > 0) {
             this.emitProgress(this.currentProgress.duration, this.currentProgress.duration);
         }
-        this.pendingAdvance = true;
+        // [lc-237] 复位 pendingAdvance: launchEpisode 内 this.proc 已指向新进程,
+        // 旧进程 close 由 launchEpisode 的 `this.proc === proc` 守卫忽略(不会误判为结束),
+        // 故 pendingAdvance 不再需要。若不复位, pollOnce 会因 `|| this.pendingAdvance` 永久停轮询
+        // → 进度不再回传 + 后续再也触发不了自动连播(本集结束判定失效)。
+        this.pendingAdvance = false;
         if (this.proc) {
             try { this.proc.kill(); } catch (_) { /* ignore */ }
         }
-        // onProcExit 收到 close 后会因 pendingAdvance 重置并返回，不误判为结束
         this.launchEpisode(next);
+        // [lc-237] 切集间隙保护: 旧进程已 kill、新 PotPlayer 窗口尚未出现的瞬间轮询可能短时间
+        // miss(连续 2 次即判关闭), 用 isSwitching 守卫避免被误判为用户关闭 → 错误结束播放。
+        this.isSwitching = true;
+        setTimeout(() => { this.isSwitching = false; }, 2500);
     }
 
     /**

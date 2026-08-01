@@ -231,6 +231,41 @@ function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 
 }
 
 
+// 按 guid 直接路由到外部播放器(主进程按"已在播→复用窗口 switchTo / 未播→新开"处理)
+async function playEpisodeByGuid(guid: string): Promise<void> {
+    const token = getCookie('Trim-MC-token');
+    if (!guid || !token) {
+        logger.error('playEpisodeByGuid: 缺少 guid 或 token');
+        return;
+    }
+    const config = await getPlayButtonConfig();
+    const playData: PlayMovieData = { id: guid, token, sourceIndex: 0, player: config.defaultPlayer };
+    logger.info('[选集/下一集] 路由到外部播放器:', guid, config.defaultPlayer);
+    ipcRenderer.send('play-movie', playData);
+}
+
+// 从当前详情页的集数链接里找"下一集"的 guid(按文档顺序排列, 取当前集之后第一个)
+function findNextEpisodeGuid(): string | null {
+    try {
+        const cur = (location.pathname || '').match(GUID_RE);
+        const curGuid = cur && cur[1];
+        const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+        const eps: string[] = [];
+        for (const a of anchors) {
+            if (/season\//i.test(a.href)) continue;
+            const m = a.href.match(GUID_RE);
+            if (m && m[1] && !eps.includes(m[1])) eps.push(m[1]);
+        }
+        if (eps.length === 0) return null;
+        if (!curGuid) return eps[0];
+        const idx = eps.indexOf(curGuid);
+        if (idx >= 0 && idx + 1 < eps.length) return eps[idx + 1];
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 // ===== 统一播放按钮拦截(修复首页点击「MPV + 网页原生双播」) =====
 // 根因: 之前把 click 捕获监听挂在各个按钮上, 而 fnOS 的点击委托处理器通常挂在
 // document / 根容器(也是捕获阶段), 层级比按钮更高 → 它的捕获监听先执行,
@@ -339,6 +374,41 @@ function installPlayClickInterceptor(): void {
                 await playWithPlayer(cardPlay, config.defaultPlayer);
             })();
             return;
+        }
+
+        // 3) 详情页选集 / 相关推荐：点击集数链接 → 切换外部播放器到该集(不导航, 避免走 fnOS 内置播放)
+        const detailPath = (location.pathname || '').replace(/\/+$/, '');
+        if (/^\/v\/(tv|movie)\//.test(detailPath) && !/\/season\//.test(detailPath)) {
+            const epAnchor = target.closest('a[href]') as HTMLAnchorElement | null;
+            if (epAnchor && epAnchor.href && !/season\//i.test(epAnchor.href)) {
+                const em = epAnchor.href.match(GUID_RE);
+                if (em && em[1]) {
+                    // 已交给 playButton.ts 处理的播放按钮不重复拦截
+                    if (target.closest('[data-mpv-btn],[data-custom-play],[data-mask-intercepted],[data-mpv-intercepted]')) return;
+                    const curGuid = (detailPath.match(GUID_RE) || [])[1];
+                    if (em[1] === curGuid) return; // 点的是当前集, 放行
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    (async () => { await playEpisodeByGuid(em[1]); })();
+                    return;
+                }
+            }
+            // 4) 详情页「下一集」按钮(非链接形态)：找出下一集 guid 并切换外部播放器
+            const clickable = target.closest('button, [role="button"], a') as HTMLElement | null;
+            if (clickable) {
+                const label = (clickable.getAttribute('aria-label') || clickable.textContent || '').trim();
+                if (/下一集|下一話|next\s*episode/i.test(label)) {
+                    const nextGuid = findNextEpisodeGuid();
+                    if (nextGuid) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        (async () => { await playEpisodeByGuid(nextGuid); })();
+                        return;
+                    }
+                }
+            }
         }
     }, true);
 }
