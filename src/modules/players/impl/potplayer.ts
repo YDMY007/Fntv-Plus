@@ -208,22 +208,63 @@ export class PotPlayer extends BasePlayer {
      * 关闭系统中残留的 PotPlayer 窗口并等待其退出（最多 ~3s）。
      * 仅用于全新起播(fresh)前，确保 PotPlayer 单实例从目标集干净启动。
      * 返回启动前是否检测到已有 PotPlayer 在运行。
+     *
+     * 关键坑：PotPlayer 没有可靠的「/close」CLI 命令（/Current /close 常被静默忽略），
+     * 若只靠它，单实例会把新启动参数当成“追加”而非“替换”，从而仍停在旧的第1集
+     * （用户反复报“选第4集却播第1集”的根因）。因此温和关闭无效时必须【按进程名强制结束】。
      */
     private async closeStrayPotPlayer(): Promise<boolean> {
         if (!this.config.playerPath) return false;
-        const running = await this.isPotPlayerRunning();
+        // 检测到残留：potctl 能看到窗口，或我们自己上次拉起的进程仍存活（/current 重启后 potctl 可能短暂滞后）
+        const running = (await this.isPotPlayerRunning()) || (this.proc != null && !this.proc.killed);
         if (!running) return false;
+
+        // 1) 优先结束我们自己上次拉起的进程（精准，不误伤用户其它 PotPlayer）
+        if (this.proc && !this.proc.killed) {
+            try { this.proc.kill('SIGKILL'); } catch { /* ignore */ }
+        }
+        // 2) 再尝试温和 CLI 关闭（覆盖 /current 重启后的新进程）
         try {
-            // 向已运行实例发送关闭命令（/Current 前缀表示控制现有实例）
             spawn(this.config.playerPath, ['/Current', '/close'], { stdio: 'ignore', windowsHide: true });
         } catch { /* ignore */ }
-        // 轮询等待退出
-        for (let i = 0; i < 15; i++) {
+
+        // 3) 轮询等待退出（最多 ~1.2s）
+        for (let i = 0; i < 6; i++) {
+            await new Promise((r) => setTimeout(r, 200));
+            if (!(await this.isPotPlayerRunning())) {
+                log.info('[closeStrayPotPlayer] 已关闭残留 PotPlayer');
+                return true;
+            }
+        }
+
+        // 4) 仍残留 → 按进程名强制结束（PotPlayer 单实例必须干净退出，否则新参数被当“追加”仍播旧集）
+        const exeName = path.basename(this.config.playerPath);
+        log.warn(`[closeStrayPotPlayer] 常规关闭无效，强制结束进程: ${exeName}`);
+        this.forceKillPotPlayer(exeName);
+
+        // 5) 再轮询确认已退出（最多 ~2s）
+        for (let i = 0; i < 10; i++) {
             await new Promise((r) => setTimeout(r, 200));
             if (!(await this.isPotPlayerRunning())) return true;
         }
-        log.warn('[closeStrayPotPlayer] 等待 PotPlayer 退出超时(继续启动新实例)');
+        log.warn('[closeStrayPotPlayer] 强制结束后仍检测到 PotPlayer（可能权限不足或被快速重启）');
         return true;
+    }
+
+    /**
+     * 按可执行文件名强制结束进程（跨平台兜底）。Windows 用 taskkill，其他平台用 pkill。
+     * 用于 closeStrayPotPlayer 温和关闭失败时，确保 PotPlayer 单实例被干净终止。
+     */
+    private forceKillPotPlayer(exeName: string): void {
+        try {
+            if (process.platform === 'win32') {
+                spawn('taskkill', ['/IM', exeName, '/F'], { stdio: 'ignore', windowsHide: true });
+            } else {
+                spawn('pkill', ['-f', exeName], { stdio: 'ignore', windowsHide: true });
+            }
+        } catch (e: any) {
+            log.warn('[forceKillPotPlayer] 失败:', e?.message || e);
+        }
     }
 
     /**
