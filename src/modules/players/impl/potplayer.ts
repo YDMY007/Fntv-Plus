@@ -126,8 +126,7 @@ export class PotPlayer extends BasePlayer {
             log.info(`[launchEpisode] fresh 起播，启动前已有 PotPlayer 残留=${wasRunning}`);
         }
 
-        // 把【全部集的 URL】都传给 PotPlayer 构建播放列表（让用户在 PotPlayer 内看到完整剧集），
-        // 目标集已通过 playList() 重排到首位 → PotPlayer 默认从第一个(目标集)开始播。
+        // 仅传目标集单文件 + /seek（续播可靠、无重复）；其余集由下方 /add 追加
         const launchArgs = this.buildFullPlaylistLaunchArgs(index);
 
         log.info(`[第${index + 1}/${this.playlist.length}集] 启动 PotPlayer: ${this.config.playerPath} ${launchArgs.join(' ')}`);
@@ -159,6 +158,30 @@ export class PotPlayer extends BasePlayer {
                 this.handleExit(code === null ? 0 : code);
             }
         });
+
+        // [lc-250] 追加其余集到播放列表。
+        // PotPlayer 多文件参数会导致首个 URL 重复插入(lc-249)，故 buildFullPlaylistLaunchArgs 仅传目标集单文件；
+        // 此处起播后通过 /add 开关把剩余剧集追加到 PotPlayer 播放列表（PotPlayer 单实例，/add 会追加到当前窗口）。
+        if (this.playlist.length > 1) {
+            const restUrls: string[] = [];
+            for (let i = 0; i < this.playlist.length; i++) {
+                if (i === index) continue;
+                restUrls.push(this.toDisplayUrl(this.playlist[i]));
+            }
+            if (restUrls.length > 0) {
+                // 延迟 1.5s 等 PotPlayer 窗口初始化完成再追加（太早 /add 可能被忽略）
+                setTimeout(() => {
+                    log.info(`[playlist] /add 追加 ${restUrls.length} 集到播放列表`);
+                    spawn(this.config.playerPath, ['/add', ...restUrls], {
+                        detached: true,
+                        stdio: 'ignore',
+                        windowsHide: true
+                    }).on('error', (e: any) =>
+                        log.warn('[playlist] /add 追加失败(非致命):', e?.message || e)
+                    );
+                }, 1500);
+            }
+        }
 
         // 立即上报一次续播起点（让 fnOS 记录本集起始位置）
         this.emitProgress(Math.floor(this.currentProgress.ts), Math.floor(this.currentProgress.duration));
@@ -352,33 +375,26 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
-     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
+     * 构建「完整播放列表」启动参数：仅传【目标集】单个 URL + /seek。
      *
-     * 关键：PotPlayer 启动参数 /seek 仅对「多 URL 参数」可靠（对 m3u8 播放列表文件无效，
-     * 详见 lc-245/lc-246/lc-247 反复验证），故采用【目标集 URL 排第一】的多参数方式。
-     * 每个 URL 经 playbackShim 包裹为「可读名 URL」（127.0.0.1:22347/p/<id>/<剧名>.mp4），
-     * 由 shim 把视频流代理给真实 proxy —— 播放列表显示剧名，续播 /seek 仍精确生效。
+     * ⚠️ PotPlayer 多文件参数会导致首个 URL 重复插入播放列表(lc-249 反复验证)，
+     *   故不在此处传全部集。其余集由 launchEpisode 在起播后通过 /add 逐个追加。
      *
-     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
-     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
+     * 续播 /seek 对单文件参数 100% 可靠（lc-246/lc-248 验证）。
+     * URL 经 playbackShim 包裹为可读名。
+     *
+     * 仅用于 launchEpisode（首次拉起）；
+     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current。
      */
     private buildFullPlaylistLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
         this.currentItem = item;
 
-        const launchArgs: string[] = [];
+        // 仅目标集（单文件 → /seek 精准、无重复）
+        const launchArgs: string[] = [this.toDisplayUrl(item)];
 
-        // 统一循环添加所有剧集 URL（经 shim 包裹为可读名）。
-        // ⚠️ 不要把「目标集」单独 push 再在循环里 skip——PotPlayer 会把命令行首个文件参数
-        //   同时当作「当前播放项」和「播放列表第1项」插入，导致目标集重复出现(lc-249)。
-        // 正确做法：所有项平等对待、统一追加，/seek 放最后(作用于 PotPlayer 打开的第一个文件)。
-        for (let i = 0; i < this.playlist.length; i++) {
-            launchArgs.push(this.toDisplayUrl(this.playlist[i]));
-        }
-
-        // 续播 /seek(PotPlayer 官方语法 HH:MM:SS)，作用于列表第一项(即重排后的目标集)
+        // 续播 /seek(PotPlayer 官方语法 HH:MM:SS)
         const duration = item.duration || 0;
         if (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) {
             launchArgs.push(`/seek=${this.formatSeekTime(item.ts)}`);
