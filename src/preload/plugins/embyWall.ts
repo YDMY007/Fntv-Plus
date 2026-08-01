@@ -3972,6 +3972,10 @@ function handle(): void {
       if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
       if (el.id && el.id.startsWith('fnos-')) continue;    // 我们的注入层跳过
       if (el.classList.contains('absolute')) continue;     // 抽屉遮罩类跳过
+      // [lc-276] 保护视频: 含 <video> 的视图(视频播放页)绝不能隐藏, 否则其 DOM 被 display:none
+      //   → 黑屏有声音。这正是 3.3.3 引入原生播放黑屏的根因(lc-153 的 hideStaleViews 把含 video 的
+      //   全屏 absolute 视图误当"残留页"隐藏)。跳过含 video 的视图即可根治, 且不破坏 lc-153 的残留页修复。
+      if (el.querySelector('video')) continue;
       candidates.push(el);
     }
     // 按父元素分组, 同容器内多个全屏 absolute 视为视图栈
