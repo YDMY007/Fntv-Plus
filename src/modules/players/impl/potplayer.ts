@@ -73,14 +73,26 @@ export class PotPlayer extends BasePlayer {
             this.playlist = infos;
             this.lastArgs = args && args.length > 0 ? args : [];
 
+            // 重排播放列表：把用户点击的那一集(pos)循环移到索引 0，
+            // 使 PotPlayer 从正确集开始播，且 this.playlist 顺序与 PotPlayer 内部列表、
+            // 应用层自动连播(advanceEpisode 用 currentIndex+1)三者完全统一。
+            // 仅首次拉起时重排一次；切集/自动连播(launchEpisode/switchTo)不再重排，避免二次错位。
+            let startPos = pos;
+            if (pos > 0 && pos < infos.length) {
+                const reordered = infos.slice(pos).concat(infos.slice(0, pos));
+                this.playlist = reordered;
+                infos = reordered;   // legacy 路径也用重排后列表
+                startPos = 0;        // 重排后目标集在索引 0
+            }
+
             // 解析 potctl 助手路径（随包分发于 third_party/proxy/potctl.exe）
             this.potctlPath = this.getPotctlPath();
             if (!this.potctlPath) {
                 log.warn('potctl 助手缺失，回退到 m3u8 连播（仅首集带字幕、无实时进度）');
-                return this.playListLegacy(infos, pos, this.lastArgs);
+                return this.playListLegacy(infos, startPos, this.lastArgs);
             }
 
-            return await this.launchEpisode(pos);
+            return await this.launchEpisode(startPos);
         } catch (error: any) {
             log.error('PotPlayer 初始化失败:', error);
             const errorEvent: PlayErrorData = { message: error.message || error.toString() };
@@ -143,9 +155,6 @@ export class PotPlayer extends BasePlayer {
             .then((subArgs) => { if (subArgs.length > 0) this.attachSubtitle(subArgs); })
             .catch((e: any) => log.warn('PotPlayer 字幕异步挂载失败(已忽略):', e?.message || e));
 
-        // 当前集序号已确定，通知主进程刷新悬浮控制条
-        this.emitEpisode();
-
         return true;
     }
 
@@ -180,8 +189,20 @@ export class PotPlayer extends BasePlayer {
 
     /**
      * 构建「完整播放列表」启动参数：把全部剧集 URL 都传给 PotPlayer，
-     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集），
-     * 再用 /playindex 指定起播位置 + /seek 续播点。
+     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
+     *
+     * 关键：PotPlayer 启动参数 /playindex 不可靠（它是 IPC 命令非启动开关），
+     * 因此采用【目标集 URL 排第一】的策略——把要播放的那一集放在参数列表最前面，
+     * PotPlayer 默认从第一个文件开始播，其余集顺延排在后面。
+     *
+     * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
+     * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
+     */
+    /**
+     * 构建「完整播放列表」启动参数：把当前 this.playlist 的全部剧集 URL 都传给 PotPlayer，
+     * 使其播放列表（Playlist）显示所有集（用户可在 PotPlayer 内看到/切换上下集）。
+     * 播放顺序由 this.playlist 决定（已在 playList() 入口处把目标集重排到索引 0），
+     * PotPlayer 默认从第一个文件开始播，即用户点击的那一集。
      *
      * 仅用于 launchEpisode（首次拉起 PotPlayer 窗口）；
      * switchTo（原地切换）仍用 buildBaseLaunchArgs + /current（替换当前项、不重建列表）。
@@ -191,11 +212,8 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 全部集的 URL → PotPlayer 会把它们都加入播放列表
+        // 全部集 URL 传给 PotPlayer（顺序即 this.playlist 的播放顺序）
         const launchArgs: string[] = this.playlist.map(i => i.playLink);
-
-        // 从指定集开始播放（0-based）
-        launchArgs.push(`/playindex=${index}`);
 
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
@@ -425,9 +443,6 @@ export class PotPlayer extends BasePlayer {
             .catch((e: any) => log.warn('[switchTo] 字幕异步挂载失败(已忽略):', e?.message || e));
 
         log.info(`✅ 已切换到新内容（复用窗口 /current，未重新加载视频）`);
-
-        // 当前集序号已确定，通知主进程刷新悬浮控制条
-        this.emitEpisode();
 
         return true;
     }
@@ -663,23 +678,6 @@ export class PotPlayer extends BasePlayer {
     isPlaying(): boolean {
         // 与进程解耦：只要仍处于播放意图态即视为在播（抗 /current 进程重启造成的 this.proc.killed）
         return this.active;
-    }
-
-    /**
-     * 暴露当前集序号 / 总集数，供主进程悬浮控制条刷新「上一集/下一集」可用状态。
-     */
-    getEpisodeState(): { index: number; total: number } {
-        return { index: this.currentIndex, total: this.playlist.length };
-    }
-
-    /**
-     * 当前集序号变化时（起播 / 原地切换 / 自动连播）上报 EPISODE 事件，
-     * 让主进程据此刷新悬浮控制条按钮的禁用态。
-     */
-    private emitEpisode(): void {
-        if (!this.currentItem || this.playlist.length === 0) return;
-        const data: { index: number; total: number } = { index: this.currentIndex, total: this.playlist.length };
-        this.emitEvent(EventType.EPISODE, data);
     }
 
     /**
