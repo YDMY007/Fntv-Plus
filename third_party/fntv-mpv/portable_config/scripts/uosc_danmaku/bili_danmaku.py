@@ -553,44 +553,18 @@ def _emit_result(title, cid, atitle, info, count, source, aggregated_from=None):
     print(f"BILI_RESULT:{json.dumps(result, ensure_ascii=False)}")
 
 
-def _merge_danmaku(sources):
-    """合并多个候选弹幕，按 (秒级时间, 内容) 去重。sources: list of all_d 列表。
-    允许 1 秒时间容差（不同搬运源片头长度略有差异）。"""
-    seen = set()
-    merged = []
-    for dm in sources:
-        for (pr, mode, col, con) in dm:
-            key = (int(round(pr / 1000.0)), con)
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append((pr, mode, col, con))
-    merged.sort(key=lambda x: x[0])
-    return merged
-
-
 def _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku):
-    """「弹幕越多越好」选择策略（用户规则）：
-       1) 单源弹幕最多的优先；
-       2) 若某个单集有效候选弹幕数 >= 阈值(1500) -> 直接用该弹幕最多的单源；
-       3) 否则(两个/多个单源都不够 1500) -> 找所有【单集时间轴】候选(单源视频)，
-          把几个单源视频的弹幕合并起来（弹幕越多越好）。
+    """「弹幕对得上」优先策略：只取弹幕最多的【单集时间轴】候选，不合并多源。
+       不同 UP 主搬运源时间轴（片头长短/字幕组版本）不同，合并会把源A的弹幕
+       错位叠到源B的画面，导致"对不上"。故取消 lc-170 的多源聚合——宁少勿错。
+       agg_threshold/min_danmaku 保留签名兼容，实际不再触发合并（始终返回单源）。
        返回 (final_dm, cid, atitle, info, source, agg_count, srcs_str)。
       - 仅【单集时间轴】候选(时间轴<=agg_time_limit)参与「对应集」匹配；跨多集(整季混剪)排除在外，
         避免错把整季弹幕当对应集（lc-170 要求「对应集对应的弹幕」）。
-      - 合并时把全部单集有效候选都纳入（不限两个），去重后输出；合并后 < min 则退回 best 单源。
-      - 无任何单集有效候选(罕见, 全是跨多集且 ep_num=0) -> 退回全局弹幕最多者兜底。"""
+      - 无任何单集有效候选(罕见, 全是跨多集) -> 退回全局弹幕最多者兜底。"""
     valid = [f for f in fetched if f[4] <= agg_time_limit]
     if valid:
         best = max(valid, key=lambda x: len(x[3]))
-        if len(best[3]) >= agg_threshold:
-            return best[3], best[0], best[1], best[2], \
-                   (best[2].get("source") if best[2] else None), None, ""
-        if len(valid) >= 2:
-            merged = _merge_danmaku([f[3] for f in valid])
-            if len(merged) >= min_danmaku:
-                srcs = ", ".join((f[1] or f[0]) for f in valid)
-                return merged, best[0], best[1], best[2], "aggregate", len(valid), srcs
         return best[3], best[0], best[1], best[2], \
                (best[2].get("source") if best[2] else None), None, ""
     # 罕见：无任何单集有效候选 -> 退回全局弹幕最多者兜底
@@ -610,8 +584,8 @@ def main():
         log("用法: bili_danmaku.py <番名> <集数> <输出xml> [聚合阈值]")
         sys.exit(2)
     title = sys.argv[1]; ep_num = int(sys.argv[2]); out = sys.argv[3]
-    # 第4参数: 聚合阈值(默认1500)。单个视频弹幕 >= 此数 -> 直接用该单源(弹幕最多者)；
-    # 无单源达此数 -> 合并多个单集有效候选的弹幕。设 0 或负数可禁用聚合（只取最佳单源）。
+    # 第4参数: 聚合阈值(默认1500)。现已禁用多源合并（合并会错位"对不上"），
+    # 该参数仅保留签名兼容，实际总是取【弹幕最多的单集候选】单源，保证时间轴对齐。
     agg_threshold = 1500
     if len(sys.argv) >= 5:
         try:
@@ -652,7 +626,7 @@ def main():
         print(f"BILI_RESULT:{json.dumps({'ok': False, 'error': f'已试{len(candidates)}个候选均无弹幕数据({tried})'}, ensure_ascii=False)}")
         sys.exit(1)
 
-    # 选择策略：弹幕越多越好（详见 _select_danmaku）。
+    # 选择策略：只取弹幕最多的单集候选单源（不合并多源，保证弹幕对得上当前集）。
     final_dm, best_cid, best_atitle, best_info, source, agg_count, srcs = _select_danmaku(
         fetched, agg_threshold, AGG_TIME_LIMIT, MIN_DANMAKU)
     # 弹幕屏蔽类型：按应用设置面板写入的 danmaku_block_types.json 过滤（B站补源弹幕）
