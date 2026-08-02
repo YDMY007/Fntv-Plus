@@ -431,6 +431,26 @@ const ACRYLIC_CSS = `
         width:100%!important;
         max-width:none!important;
     }
+
+    /* ── ⑭ 手动匹配弹窗溢出修复（lc-302） ──
+         症状: 文件位置路径过长时右侧被截断不可见.
+         根因: 弹窗内多层 .ms-container 被 fnOS 滚动库强制设 min-width:1057.1px !important,
+               但弹窗实际可视宽度不足 → 内容右半边溢出 hidden.
+         修复: 弹窗范围内解除强制 min-width, 改为自适应+水平滚动; 同时释放文件路径
+               外层的 overflow-hidden, 确保 break-all 长路径完整可读可滚. ── */
+    .semi-modal-content .ms-container{
+        min-width:0!important;
+        width:100%!important;
+        max-width:100%!important;
+        overflow-x:auto!important;
+    }
+    .semi-modal-content .box-border.overflow-hidden{
+        overflow:visible!important;
+    }
+    .semi-modal-content p[title]{
+        word-break:break-all!important;
+        overflow-wrap:break-word!important;
+    }
 `;
 
 /**
