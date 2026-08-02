@@ -431,6 +431,44 @@ const ACRYLIC_CSS = `
         width:100%!important;
         max-width:none!important;
     }
+
+    /* ── ⑭ 手动匹配弹窗溢出修复（lc-302） ──
+         症状: "手动匹配"弹窗中文件位置的长路径右侧被截断不可见.
+         根因: 弹窗内存在多层 .ms-container 被 fnOS 滚动库强制设 min-width:1057.1px !important,
+               且外层 .max-h-[calc(100vh-160px)] / .box-border.overflow-hidden 等
+               多处 overflow:hidden → 内容右半边被裁剪.
+         DOM 链路(从截图HTML):
+           .semi-modal-content → .semi-modal-confirm-content → .w-full.max-h-[...]
+             → .ms-container(min-width:1057.1px) [第1层]
+               → .rounded-lg → .ms-container(min-width:1057.1px) [第2层]
+                 → .box-border.overflow-hidden [直接裁剪层] → p[title][文件路径]
+         修复策略:
+           a) 弹窗范围内**所有** .ms-container 解除 min-width 强制, 改自适应;
+           b) 弹窗内容区(max-h 容器 + flex col 容器) 允许水平滚动;
+           c) 文件路径外层 overflow-hidden 改 auto(可滚动而非简单可见);
+           d) 文件路径文本确保 break-all 换行.
+         仅限 .semi-modal-content 后代, 不影响详情页等其他场景. ── */
+    .semi-modal-content .ms-container{
+        min-width:0!important;
+        width:100%!important;
+        max-width:100%!important;
+    }
+    /* 弹窗主内容区: 允许水平滚动以容纳长路径 */
+    .semi-modal-content .max-h-\\[calc\\(100vh-160px\\)\\],
+    .semi-modal-content .semi-modal-confirm-content{
+        overflow-x:auto!important;
+        overflow-y:auto!important;
+    }
+    /* 文件路径卡片内的裁剪层: 改为可滚动 */
+    .semi-modal-content .rounded-lg .box-border.overflow-hidden{
+        overflow:auto!important;
+    }
+    /* 文件路径文本: 强制换行 */
+    .semi-modal-content p[title]{
+        word-break:break-all!important;
+        overflow-wrap:break-word!important;
+        max-width:100%!important;
+    }
 `;
 
 /**

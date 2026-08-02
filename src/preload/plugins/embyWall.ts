@@ -1240,6 +1240,11 @@ function fixDetailLayoutWidth(): void {
     // 目标1: .ms-container (fnOS 主滚动容器)
     const msContainers = document.querySelectorAll<HTMLElement>('.ms-container');
     for (const c of Array.from(msContainers)) {
+      // [lc-302c] 跳过弹窗内的 .ms-container: 本守卫原本只针对详情页主容器设 min-width,
+      //   但手动匹配等弹窗内的 .ms-container 原版飞牛无此限制(仅 overflow:auto),
+      //   强加 min-width 会把弹窗内长路径撑开裁剪(出现 1057.1px 行内 !important)。
+      //   让弹窗内容器保持原生行为, 与 fnOS 官方一致。
+      if (c.closest('.semi-modal-content')) continue;
       if (isSidebarDescendant(c)) {
         // 撤销本守卫此前可能误加的强制宽度(否则残留 inline 仍会撑宽侧边栏)
         c.style.removeProperty('width');
@@ -4112,6 +4117,11 @@ function handle(): void {
   };
   _syncVideoActiveClass();
   setInterval(_syncVideoActiveClass, 1000);
+
+  // [lc-302c] 手动匹配弹窗文件路径溢出根因修复已在上方 [lc-190] fixDetailLayoutWidth 的
+  //   tryFix() 中完成: 弹窗内 .ms-container 直接 `continue` 跳过, 不再被强加
+  //   min-width:1057px !important (此前误判为 fnOS 滚动库运行时写入, 实为 lc-190 布局守卫所致)。
+  //   故此处不再需要对抗式 MutationObserver; mainwin.ts 的 ACRYLIC_CSS ⑭ 仍保留作为 class 级兜底。
 }
 
 registerHook(HookType.OnReady, handle);
