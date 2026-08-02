@@ -2,8 +2,45 @@ import * as crypto from 'crypto';
 import axios, { AxiosResponse } from 'axios';
 import { setTimeout } from 'timers/promises';
 import https from 'https';
+import { session } from 'electron';
 import log from '../logger';
 import { isTrusted, showCertificateTrustDialog, isCertificateError, addTrustedHost } from '../cert_trust';
+
+/**
+ * [lc-294] 主进程 API 鉴权补全: 转发 persist:fntv 会话里的 fnOS 鉴权 Cookie(如 Trim-MC-token)。
+ *
+ * 根因: fnOS 影视接口的鉴权依赖浏览器会话 Cookie(restoreCookies 写入 persist:fntv 的
+ *   Trim-MC-token), webview 靠它才能加载首页/调接口。但主进程此前只用 `Authorization: token`
+ *   头 + 硬编码 `Cookie: mode=relay` 发请求, 直连 NAS 时接口不认 Authorization 头,
+ *   于是把请求弹回 HTML 登录/错误页 —— 表现为「获取播放信息失败: 接口返回HTML 判定=地址/端口错误」。
+ *   (webview 能开首页正是因为它带着真实会话 Cookie, 反证主进程缺的就是这个 Cookie。)
+ *
+ * 修复: 每次 API 请求前, 从 persist:fntv 分区读回 baseUrl 对应主机的会话 Cookie 并并入
+ *   Cookie 头(保留 mode=relay 以兼容 FN Connect 外网中继)。这样主进程与 webview 使用同一套
+ *   会话鉴权, 所有主进程 API(播放信息/进度/元数据等) 不再因缺 Cookie 而失败。
+ *
+ * 性能: 同一 baseUrl 的 Cookie 做 60s TTL 内存缓存, 避免高频进度上报时反复读磁盘。
+ */
+const cookieCache = new Map<string, { value: string; ts: number }>();
+const COOKIE_CACHE_TTL = 60000;
+
+async function getSessionCookieHeader(baseUrl: string): Promise<string> {
+    try {
+        const u = new URL(baseUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+        const cached = cookieCache.get(baseUrl);
+        if (cached && Date.now() - cached.ts < COOKIE_CACHE_TTL) {
+            return cached.value;
+        }
+        const ses = session.fromPartition('persist:fntv');
+        const cookies = await ses.cookies.get({ url: `${u.protocol}//${u.host}` });
+        const header = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+        cookieCache.set(baseUrl, { value: header, ts: Date.now() });
+        return header;
+    } catch {
+        return '';
+    }
+}
 
 // 全局配置
 const api_key = 'NDzZTVxnRKP8Z0jXg1VAMonaG8akvh';
@@ -98,10 +135,17 @@ export async function request<T = any>(
 
     const authx = genFnAuthx(url, data);
 
+    // [lc-294] 转发 persist:fntv 会话 Cookie(含 Trim-MC-token 鉴权), 与 webview 同源鉴权.
+    // 保留 mode=relay 以兼容 FN Connect 外网中继; 会话 Cookie 为空(未登录/登录中)时退化为仅 mode=relay.
+    const sessionCookieHeader = await getSessionCookieHeader(baseUrl);
+    const cookieParts = ['mode=relay'];
+    if (sessionCookieHeader) cookieParts.push(sessionCookieHeader);
+    const cookieHeader = cookieParts.join('; ');
+
     const headers = {
         "Content-Type": "application/json",
         "Authorization": token,
-        "Cookie": "mode=relay",
+        "Cookie": cookieHeader,
         "Authx": authx,
         ...extraHeaders
     };
