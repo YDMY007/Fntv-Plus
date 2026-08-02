@@ -253,7 +253,13 @@ function getInjectionScript(username: string, password: string): string {
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            // 在 /login 页面自动填充用户名密码并提交
+            // 在 /login 页面自动处理登录
+            //
+            // [lc-287] 重要行为变更: FN ID OAuth 回调后可能跳到飞牛影视的本地账号登录页(弹窗),
+            //   此时 FN ID 已完成身份认证, 不应再用本地 NAS 隐私账号密码去填(两者是不同账户体系).
+            //   正确做法: 点击底部的「使用 NAS 登录」链接 → 跳转授权确认页 → 确认即完成登录.
+            //   故优先检测「使用 NAS 登录」类链接, 命中则直接点击; 仅未找到时才回退到旧逻辑(填凭据+点登录).
+            //
             // 多选择器兼容: fnOS 不同版本/部署方式的 input id/name/placeholder 可能不同.
             // 轮询重试: 外网中继跳转后页面加载比内网慢, 单次 setTimeout 200ms 不够.
             (function tryAutoLogin() {
@@ -264,6 +270,25 @@ function getInjectionScript(username: string, password: string): string {
                 var maxAttempts = 20; // 最多试 4 秒(20 × 200ms)
                 var timer = setInterval(function() {
                     attempts++;
+
+                    // ★ [lc-287] 优先: 检测「使用 NAS 登录」/「使用NAS登录」链接并点击
+                    //    这是 FN ID 流程落到影视本地登录页时的正确路径(跳授权确认而非输密码).
+                    var nasLoginLink =
+                        Array.from(document.querySelectorAll('a, span, div, button, label, p')).find(function(el) {
+                            var t = (el.innerText || el.textContent || '').trim();
+                            return t.indexOf('使用 NAS 登录') !== -1 ||
+                                   t.indexOf('使用NAS登录') !== -1 ||
+                                   t.indexOf('使用NAS 登录') !== -1;
+                        })
+                        || document.querySelector('a[href*="nas"], a[href*="NAS"]');
+                    if (nasLoginLink) {
+                        clearInterval(timer);
+                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 自动点击 (第 " + attempts + " 次尝试)");
+                        nasLoginLink.click();
+                        return;
+                    }
+
+                    // 回退: 未找到 NAS 登录链接 → 尝试旧逻辑(填充用户名密码+点登录)
                     // 多级选择器: id → name → placeholder → type+顺序
                     var uInput = document.getElementById('username')
                         || document.querySelector('input[name="username"]')
@@ -277,7 +302,7 @@ function getInjectionScript(username: string, password: string): string {
 
                     if (uInput && AUTO_LOGIN_USER) {
                         clearInterval(timer);
-                        console.log("[fntv-electron] 找到登录框, 自动填充用户名 (第 " + attempts + " 次尝试)");
+                        console.log("[fntv-electron] 找到登录框, 自动填充用户名 (第 " + attempts + " 次尝试, 未检测到NAS登录链接)");
                         triggerInput(uInput, AUTO_LOGIN_USER);
                         if (AUTO_LOGIN_PASS && pInput) {
                             triggerInput(pInput, AUTO_LOGIN_PASS);
@@ -296,7 +321,7 @@ function getInjectionScript(username: string, password: string): string {
 
                     if (attempts >= maxAttempts) {
                         clearInterval(timer);
-                        console.warn("[fntv-electron] 自动填充超时: " + maxAttempts + " 次尝试未找到登录框, URL=" + window.location.href);
+                        console.warn("[fntv-electron] 自动处理超时: " + maxAttempts + " 次尝试未找到登录框或NAS登录链接, URL=" + window.location.href);
                     }
                 }, 200);
             })();
