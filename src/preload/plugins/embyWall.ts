@@ -2769,14 +2769,7 @@ function handle(): void {
       ipcRenderer.invoke('settings:set-mpv-bili-aggregate-threshold', isNaN(v) ? 0 : v).catch((err) => log('set-mpv-bili-aggregate-threshold failed', err));
     });
 
-    // 打开默认弹幕文件夹按钮
-    const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
-    biliFolderBtn.style.marginTop = '6px';
-    secBodyBili.appendChild(biliFolderBtn);
-    biliFolderBtn.addEventListener('click', (e: Event) => {
-      e.stopPropagation();
-      ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
-    });
+    // [lc-301] 「打开弹幕文件夹」按钮已移至下方「弹幕设置」区（secDanmaku），此处不再重复。
 
     // Python 解释器路径（B站弹幕脚本 bili_danmaku.py 需要 Python；留空=用内置便携版）
     const pyLabel = document.createElement('div');
@@ -3156,10 +3149,11 @@ function handle(): void {
       return { row, ta };
     };
 
-    // ===== B站弹幕屏蔽（写入 danmaku_block_types.json + 屏蔽词文件）=====
+    // ===== 弹幕设置（写入 danmaku_block_types.json + 屏蔽词文件 + 弹幕文件夹管理）=====
     // [lc-215] 移除「弹幕样式」控制项（透明度/字号/描边/阴影/显示区域/同屏上限/粗体）——
     // 这些已由 MPV 底部控制栏的弹幕样式按钮管理；此处仅保留/新增「弹幕屏蔽」相关。
-    const secDanmaku = section('B站弹幕屏蔽');
+    // [lc-301] 标题由「B站弹幕屏蔽」改为「弹幕设置」，并新增「打开弹幕文件夹」入口。
+    const secDanmaku = section('弹幕设置');
     secDanmaku.el.id = 'sec-danmaku'; // [lc-199] 供控制栏按钮唤起时滚动定位
     const danBody = secDanmaku.body;
     let _danTimer: any = null;
@@ -3202,6 +3196,15 @@ function handle(): void {
     danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
     danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
     danBody.appendChild(danHint);
+
+    // [lc-301] 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘一致：%TEMP%/fnos-danmaku）
+    const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
+    biliFolderBtn.style.marginTop = '10px';
+    danBody.appendChild(biliFolderBtn);
+    biliFolderBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
+    });
     /* 布局统一在末尾 layout 区追加 */
 
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
@@ -3419,7 +3422,7 @@ function handle(): void {
       { id: 'general', label: '通用', els: [sec1.el, sec3.el] },
       { id: 'player', label: '播放器', els: [sec2.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secDouban.el] },
-      { id: 'danmaku', label: '弹幕屏蔽', els: [secDanmaku.el] },
+      { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)

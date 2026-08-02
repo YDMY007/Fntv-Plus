@@ -490,6 +490,7 @@ def extract(raw):
 
 def _write_xml(out, dm):
     """把弹幕列表 [(pr,mode,col,con),...] 写成 XML 文件。"""
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)  # [lc-301] 确保父目录存在（MPV 落盘已改到 fnos-danmaku 子目录）
     with open(out, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<danmaku>\n')
         for (pr, mode, col, con) in dm:

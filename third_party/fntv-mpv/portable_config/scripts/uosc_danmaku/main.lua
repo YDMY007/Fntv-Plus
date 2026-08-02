@@ -21,7 +21,17 @@ require("modules/update")
 require("apis/dandanplay")
 require('apis/extra')
 
-DANMAKU_PATH = os.getenv("TEMP") or "/tmp/"
+-- [lc-301] 弹幕统一收纳到 fnos-danmaku 子目录，便于设置面板"打开弹幕文件夹"集中管理/删除
+DANMAKU_PATH = utils.join_path(os.getenv("TEMP") or "/tmp/", "fnos-danmaku")
+-- 确保弹幕目录存在（MPV 启动即建，避免写入子目录失败；subprocess 静默无窗口）
+do
+    local sep = package.config:sub(1, 1)
+    if sep == "\\" then
+        mp.utils.subprocess({ args = { 'cmd', '/c', 'mkdir', DANMAKU_PATH }, cancellable = false })
+    else
+        mp.utils.subprocess({ args = { 'mkdir', '-p', DANMAKU_PATH }, cancellable = false })
+    end
+end
 HISTORY_PATH = mp.command_native({"expand-path", options.history_path})
 PID = utils.getpid()
 DANMAKU = {sources = {}, count = 1}

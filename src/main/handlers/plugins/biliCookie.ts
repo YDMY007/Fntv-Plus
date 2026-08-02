@@ -237,7 +237,7 @@ async function handleManualCookie(_event: any, ck?: string): Promise<{ ok: boole
   }
 }
 
-// 打开默认弹幕下载文件夹（os.tmpdir()/fnos-danmaku，与 biliDanmaku.ts 的 CACHE_DIR 一致）
+// 打开弹幕文件夹（os.tmpdir()/fnos-danmaku，与 MPV DANMAKU_PATH 落盘目录一致：MPV 弹幕统一收纳于此便于管理/删除）
 async function handleOpenDanmakuFolder(): Promise<{ ok: boolean; error?: string }> {
   const dir = path.join(os.tmpdir(), 'fnos-danmaku');
   try {
