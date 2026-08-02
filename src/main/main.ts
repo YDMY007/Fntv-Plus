@@ -31,6 +31,26 @@ let mainWindow: BrowserWindow | null = null;
 let proxyProcess: ChildProcess | null = null;
 
 /**
+ * [lc-286] 判断 URL 是否指向私有/本地地址（用于证书自动信任）。
+ * 内网 fnOS 使用自签名证书，Chromium 每次导航都弹原生证书警告对话框且不记住用户选择。
+ * 对这些地址自动放行证书验证（callback(true)），与 lc-284 私有IP自动关HTTPS 同一安全逻辑。
+ */
+function isPrivateUrl(url: string): boolean {
+    try {
+        const hostname = new URL(url).hostname.toLowerCase();
+        // localhost / 127.0.0.1
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+        // IPv4 私有段：10.x, 172.16-31.x, 192.168.x
+        if (/^10(\.\d{1,3}){3}$/.test(hostname)) return true;
+        if (/^172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}$/.test(hostname)) return true;
+        if (/^192\.168(\.\d{1,3}){2}$/.test(hostname)) return true;
+        // IPv6 link-local / ULA
+        if (hostname.startsWith('fe80:') || hostname.startsWith('fc') || hostname.startsWith('fd')) return true;
+    } catch { /* 解析失败 → 不匹配 → 不放行 */ }
+    return false;
+}
+
+/**
  * 启动期中文路径检测（lc-090 升级版, A 项）:
  * 若安装目录(exe)或用户数据目录(userData)含中文/非 ASCII 字符, 阻断启动并引导重装到英文路径。
  * 背景: 原生子进程(proxy.exe / mpv / potctl 等)按 ANSI/GBK 解析中文路径会失败,
@@ -114,6 +134,15 @@ if (!gotTheLock) {
 
             // 动态处理证书验证错误
             app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+                // [lc-286] 私有/本地地址自动信任证书：内网 fnOS 使用自签名证书，
+                // 每次导航都弹"不受信任的SSL证书"原生对话框且点信任不记住 → 用户体验极差。
+                // 局域网环境自签名证书是正常预期（同 lc-284 私有IP自动关HTTPS 一脉相承）。
+                if (isPrivateUrl(url)) {
+                    log.info(`[证书自动信任] 私有地址 ${url} 的证书错误已自动放行 (${error})`);
+                    event.preventDefault();
+                    callback(true);
+                    return;
+                }
                 // 检查URL是否在信任列表中
                 if (isTrusted(url)) {
                     // log.debug(`URL ${url} 在信任列表中，忽略证书验证错误: ${error}`);
