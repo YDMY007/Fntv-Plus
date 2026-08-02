@@ -14,7 +14,13 @@ options = {
     load_more_danmaku = false,
     auto_load = false,
     autoload_local_danmaku = false,
-    autoload_for_url = false,
+    -- ⚠️ 网络流（fnOS 串流）自动跑弹弹play 匹配的总开关。
+    -- 默认 true 与提交态 uosc_danmaku.conf 的 autoload_for_url=yes 意图一致。
+    -- 应用层从不写此键（只写在 conf 里），故若某份 conf（如标准模式 AppData/Roaming/mpv
+    -- 那份，被 lc-308 的 writeBiliSearchEnabled 重写时未带此行）缺失该键，会回落到默认。
+    -- 若默认设 false，则这些 conf 下弹弹play 对网络流静默不自动触发（表现「直接不匹配、无任何反馈」）。
+    -- 故此处默认必须 true，确保任何读取路径下弹弹play 都自动跑（lc-312 修复）。
+    autoload_for_url = true,
     -- 自动补源：弹弹play 匹配成功后 / 文件名解析到番名后，自动去搜 B站对应集弹幕并叠加显示。
     -- 默认开启，与 bili_search_enabled（手动搜索门控）保持一致（两者由设置面板同开同关），
     -- 避免「开关开着却永远看不到 B站 弹幕」的静默陷阱；用户仍可在设置面板关闭。
