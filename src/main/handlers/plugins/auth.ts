@@ -1,4 +1,5 @@
 import { IpcMainEvent, BrowserWindow, session } from 'electron';
+import axios from 'axios';
 import { getMainWindow } from '../../common/mainwin';
 import * as fn from '../../../modules/fn_api/api';
 import { restoreCookies } from '../../../modules/fn_config/cookie';
@@ -80,8 +81,9 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
         return handleFnIdLogin(event, loginData);
     }
 
-    // 构建服务器地址（直接使用用户填写的地址，不再猜测/兜底端口：
-    // fnOS 影视端口因人而异，且访问码门禁会拦截接口返回 HTML，端口扫描会误判）
+    // 构建服务器地址：直接使用用户填写的地址（不再硬编码兜底端口——
+    // 飞牛影视没有独立端口，它挂在 fnOS 系统 Web 端口的 /v 下，影视/相册/系统共用一个端口，
+    // 该端口因人而异，访问码门禁也会拦截接口返回 HTML，故不扫描、不猜测）。
     let useHttps = loginData.useHttps;
     const rawDomain = loginData.domain.trim().replace(/^[a-z]+:\/\//i, ''); // 去掉可能误带的协议头
 
@@ -95,7 +97,22 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
     }
 
     const scheme = useHttps ? 'https' : 'http';
-    const server = `${scheme}://${rawDomain}`;
+
+    // 自动探测 fnOS 系统端口：仅当用户填【私有 IP 且未带端口】时触发。
+    // 飞牛影视没有独立端口，挂在系统 Web 端口的 /v 下；系统默认 HTTP 5666 / HTTPS 5667，
+    // 公测遗留 8000/8001；裸填 IP 时自动试这些端口，命中即用，免去手填。命中失败则回落手填。
+    let effectiveHost = rawDomain;
+    if (isPrivateAddress(rawDomain) && !/:(\d+)$/.test(rawDomain)) {
+        const detected = await detectFnOsPort(rawDomain);
+        if (detected) {
+            effectiveHost = `${rawDomain}:${detected}`;
+            log.key(`[端口探测] 裸IP ${rawDomain} 自动探测到 fnOS 系统端口 ${detected}`);
+        } else {
+            log.key(`[端口探测] 裸IP ${rawDomain} 未探测到 fnOS 系统端口，将回落到用户手填`);
+        }
+    }
+
+    const server = `${scheme}://${effectiveHost}`;
     log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
 
     const fnapi0 = new fn.ApiService(server);
@@ -175,6 +192,46 @@ function isPrivateAddress(host: string): boolean {
     // IPv6 本地 / link-local / ULA
     if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true;
     return false;
+}
+
+/**
+ * [端口自动探测] 飞牛影视没有独立端口，它挂在 fnOS 系统 Web 端口的 /v 路径下
+ * （影视/相册/系统 Web 共用一个端口，即用户在设置-安全性里改的那个）。
+ * 系统默认 HTTP 5666 / HTTPS 5667，公测遗留 8000/8001，80 为可选的「重定向」端口。
+ * 当用户裸填私有 IP（未带端口）时，依次试连这些候选端口，命中返回 fnOS 页面者即用。
+ * 仅在「连接成功 + 返回 HTML + 含 fnOS 标记」时判定命中，避免误连到其它 Web 服务。
+ * 全部未命中返回 null → 调用方回落到让用户手填端口。
+ */
+async function detectFnOsPort(host: string): Promise<number | null> {
+    const candidates = [5666, 8000, 5667, 8001, 80]; // 优先系统默认，80 仅作重定向兜底
+    const results = await Promise.allSettled(candidates.map(p => probePort(host, p)));
+    for (let i = 0; i < candidates.length; i++) {
+        const r = results[i];
+        if (r.status === 'fulfilled' && r.value === true) {
+            return candidates[i];
+        }
+    }
+    return null;
+}
+
+async function probePort(host: string, port: number): Promise<boolean> {
+    const url = `http://${host}:${port}/v`;
+    try {
+        const resp = await axios.get(url, {
+            timeout: 1500,
+            validateStatus: () => true, // 接受任意 HTTP 状态码（200/301/401/... 均视为「端口有服务」）
+            maxRedirects: 5,
+        });
+        if (resp.status >= 500) return false; // 5xx 视为非 fnOS
+        const ct = String(resp.headers['content-type'] || '').toLowerCase();
+        // 非 HTML（且明确声明了非 html 类型）视为非 fnOS；content-type 缺失时放行到下方 body 标记检查
+        if (ct && !ct.includes('text/html')) return false;
+        const body = typeof resp.data === 'string' ? resp.data : '';
+        // fnOS 影视页/系统页 HTML 必含这些标记之一（trim 为飞牛影视内部名）
+        return /fnos|trim|飞牛/i.test(body);
+    } catch {
+        return false; // 连接拒绝/超时/DNS 失败等 → 该端口无 fnOS
+    }
 }
 
 /**
