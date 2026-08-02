@@ -871,18 +871,13 @@ mp.register_event("file-loaded", function()
         load_danmaku_for_url(path)
     end
 
-    if filename == nil or dir == nil then
-        return
-    end
-    local danmaku_xml = utils.join_path(dir, filename .. ".xml")
-    if options.autoload_local_danmaku then
-        if file_exists(danmaku_xml) then
-            ENABLED = true
-            add_danmaku_source_local(danmaku_xml)
-            -- 不再 return：本地 XML 与弹弹play / extra 源叠加显示，满足"匹配上的弹幕都要"
-        end
-    end
-
+    -- ⚠️【lc-311】B站 自动补源（auto_load_extra）必须对所有路径触发，含网络流。
+    -- 原先这段放在下方 `if filename == nil or dir == nil then return end` 之后，
+    -- 网络流 dir 为 nil 会被提前 return 挡住，只能寄望「弹弹play 匹配成功→
+    -- dandanplay.lua 用 DANMAKU.anime 兜底触发 B站」。一旦弹弹play 失配（换机器 /
+    -- 该番不在库 / 文件名乱码），DANMAKU.anime 为空，B站 就彻底不自动搜索，
+    -- 表现「弹弹play 没匹配到、B站 也只能手点」。现把 B站 触发提到 dir 守卫之前，
+    -- 网络流统一用 media-title 解析番名+集数直接触发；本地文件行为不变。
     if options.auto_load_extra then
         ENABLED = true
         bili_auto_triggered = false
@@ -919,7 +914,24 @@ mp.register_event("file-loaded", function()
         else
             msg.warn("B站优先：文件名未解析出番名，转由弹弹play 匹配后补源")
         end
-        -- 弹弹play 作为兜底源（其匹配成功后会用更准的番名再补一次 B站，见 dandanplay.lua）
+    end
+
+    if filename == nil or dir == nil then
+        -- 网络流：B站 已由上方可选触发；弹弹play 已在 load_danmaku_for_url 中异步处理，
+        -- 此处无需再走本地文件名匹配，直接返回。
+        return
+    end
+    local danmaku_xml = utils.join_path(dir, filename .. ".xml")
+    if options.autoload_local_danmaku then
+        if file_exists(danmaku_xml) then
+            ENABLED = true
+            add_danmaku_source_local(danmaku_xml)
+            -- 不再 return：本地 XML 与弹弹play / extra 源叠加显示，满足"匹配上的弹幕都要"
+        end
+    end
+
+    if options.auto_load_extra then
+        -- 本地文件：B站 已由上方触发，弹弹play 作为兜底源叠加（匹配成功会再用更准的番名补一次 B站）
         auto_load_danmaku(path, dir, filename)
         addon_danmaku(dir, false)
         return
