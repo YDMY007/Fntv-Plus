@@ -27,9 +27,9 @@ DANMAKU_PATH = utils.join_path(os.getenv("TEMP") or "/tmp/", "fnos-danmaku")
 do
     local sep = package.config:sub(1, 1)
     if sep == "\\" then
-        mp.utils.subprocess({ args = { 'cmd', '/c', 'mkdir', DANMAKU_PATH }, cancellable = false })
+        utils.subprocess({ args = { 'cmd', '/c', 'mkdir', DANMAKU_PATH }, cancellable = false })
     else
-        mp.utils.subprocess({ args = { 'mkdir', '-p', DANMAKU_PATH }, cancellable = false })
+        utils.subprocess({ args = { 'mkdir', '-p', DANMAKU_PATH }, cancellable = false })
     end
 end
 HISTORY_PATH = mp.command_native({"expand-path", options.history_path})
