@@ -224,7 +224,7 @@ function isUrlReachable(url: string, timeoutMs = 2000): Promise<boolean> {
  * 功能：
  * 1. Hook XHR 和 Fetch，拦截 /oauthapi/authorize 响应获取 code
  * 2. 拦截 /sac/rpcproxy/v1/new-user-guide/status 获取 Cookie
- * 3. 在 /login 页面自动填充用户名密码并提交
+ * 3. [lc-292] /login 页面(飞牛 ID 影视登录弹窗)不再自动填充/点击, 完全交还用户手动操作
  * 4. 在 /signin 页面自动点击授权按钮
  * 5. 在非 /login 页面获取 sys_config
  */
@@ -253,90 +253,21 @@ function getInjectionScript(username: string, password: string): string {
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            // 在 /login 页面自动处理登录
+            // [lc-292] ★ 飞牛 ID 登录弹窗(/login)完全不自动干预
             //
-            // [lc-291] ★ 用户明确要求: FN ID 登录落到影视本地登录页(含「使用 NAS 登录」链接)时,
-            //   脚本**完全不干预** —— 不填账号密码、不点链接、不跳转、不 postMessage。
-            //   把控制权交还用户, 由用户手动点「使用 NAS 登录」/手动输入, 脚本耐心等待
-            //   (整体登录超时由主进程 loginTimeout=120s 控制)。
-            //   理由: lc-287~290 多次尝试 DOM 操作(点链接/清空表单/主进程跳转)均失败或不符合预期,
-            //   用户希望自己掌控该弹窗。故 FN ID 流程信号(检测到「使用 NAS 登录」链接) → 直接退出轮询。
+            // 本注入脚本**仅运行于 oauthWindow(persist:fnid-oauth, 飞牛 ID 流程)**,
+            // 故其中出现的 /login 页面, 永远是「飞牛 ID 登录」落到的影视本地登录弹窗,
+            // 不存在"纯本地登录"分支需要保留自动填(纯本地登录是主窗口走 auth.ts, 与此脚本无关)。
             //
-            //   纯本地登录(无「使用 NAS 登录」链接)时仍保留自动填密码逻辑(向后兼容)。
+            // 用户明确要求: 这个登录弹窗**不要自动填账号密码、不要自动点链接/登录按钮、不要跳转**,
+            // 全部交还用户手动输入与手动点击。所以 tryAutoLogin 对 /login 直接 return, 不做任何 DOM 操作。
             //
-            // 多选择器兼容: fnOS 不同版本/部署方式的 input id/name/placeholder 可能不同.
-            // 轮询重试: 外网中继跳转后页面加载比内网慢, 单次 setTimeout 200ms 不够.
+            // 授权确认页(/signin)的自动点「授权」由下方 tryAutoAuthorize() 负责 —— 那是"其他页面",
+            // 保持原样不变(用户仅要求这个 /login 弹窗不自动填充)。
             (function tryAutoLogin() {
-                if (window.location.href.indexOf('/login') === -1 &&
-                    window.location.href.indexOf('/signin') === -1) return;
-
-                // ★ [lc-291] 检测「使用 NAS 登录」类链接(区分 FN ID 流程与纯本地登录)
-                function isNasLoginEl(el) {
-                    var t = (el.innerText || el.textContent || '').trim();
-                    return t.indexOf('使用 NAS 登录') !== -1 ||
-                           t.indexOf('使用NAS登录') !== -1 ||
-                           t.indexOf('使用NAS 登录') !== -1 ||
-                           t.indexOf('使用 NAS 账号登录') !== -1 ||
-                           t.indexOf('使用NAS账号登录') !== -1 ||
-                           t.indexOf('NAS 登录') !== -1 ||
-                           t.indexOf('NAS登录') !== -1 ||
-                           (t.indexOf('切换') !== -1 && t.indexOf('NAS') !== -1) ||
-                           (t.indexOf('改用') !== -1 && t.indexOf('NAS') !== -1);
-                }
-
-                var attempts = 0;
-                var maxAttempts = 25; // 最多试 5 秒(25 × 200ms)
-                var timer = setInterval(function() {
-                    attempts++;
-
-                    // ★ [lc-291] FN ID 流程信号: 检测到「使用 NAS 登录」链接 → 完全不干预
-                    //   不填账号密码、不点链接、不跳转、不 postMessage, 把控制权交还用户手动操作。
-                    //   脚本仅退出轮询耐心等待(整体登录超时由主进程 loginTimeout 控制)。
-                    var nasLoginLink =
-                        Array.from(document.querySelectorAll('a, span, div, button, label, p, li, td, h1, h2, h3, h4')).find(isNasLoginEl)
-                        || document.querySelector('a[href*="nas"], a[href*="NAS"]');
-                    if (nasLoginLink) {
-                        clearInterval(timer);
-                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接(FN ID 流程), 不自动干预, 交还用户手动操作");
-                        return;
-                    }
-
-                    // 回退: 未找到 NAS 登录链接 → 纯本地登录(填充用户名密码+点登录)
-                    // 多级选择器: id → name → placeholder → type+顺序
-                    var uInput = document.getElementById('username')
-                        || document.querySelector('input[name="username"]')
-                        || document.querySelector('input[placeholder*="用户名"]')
-                        || document.querySelector('input[placeholder*="账号"]')
-                        || (function() { var inputs = document.querySelectorAll('input[type="text"], input:not([type])'); return inputs.length > 0 ? inputs[0] : null; })();
-                    var pInput = document.getElementById('password')
-                        || document.querySelector('input[name="password"]')
-                        || document.querySelector('input[placeholder*="密码"]')
-                        || (function() { var inputs = document.querySelectorAll('input[type="password"]'); return inputs.length > 0 ? inputs[0] : null; })();
-
-                    if (uInput && AUTO_LOGIN_USER) {
-                        clearInterval(timer);
-                        console.log("[fntv-electron] 找到登录框, 自动填充用户名 (第 " + attempts + " 次尝试, 未检测到NAS登录链接)");
-                        triggerInput(uInput, AUTO_LOGIN_USER);
-                        if (AUTO_LOGIN_PASS && pInput) {
-                            triggerInput(pInput, AUTO_LOGIN_PASS);
-                            console.log("[fntv-electron] 密码已填充, 准备自动点击登录");
-                            // 自动点击登录按钮(多种选择器)
-                            setTimeout(function() {
-                                var btn = document.querySelector('button[type="submit"]')
-                                    || Array.from(document.querySelectorAll('button')).find(function(b) { return b.innerText.indexOf('登录') !== -1 || b.innerText.indexOf('登 录') !== -1; })
-                                    || document.querySelector('input[type="submit"]');
-                                if (btn) { btn.click(); console.log("[fntv-electron] 已点击登录按钮"); }
-                                else { console.warn("[fntv-electron] 未找到登录按钮"); }
-                            }, 300);
-                        }
-                        return;
-                    }
-
-                    if (attempts >= maxAttempts) {
-                        clearInterval(timer);
-                        console.warn("[fntv-electron] 自动处理超时: " + maxAttempts + " 次尝试未找到登录框或NAS登录链接, URL=" + window.location.href);
-                    }
-                }, 200);
+                if (window.location.href.indexOf('/login') === -1) return;
+                console.log('[fntv-electron] 检测到飞牛 ID 登录页(/login), 不自动填充账号密码、不自动点击, 全部交还用户手动操作');
+                return;
             })();
 
             // 在 /signin 页面自动点击授权按钮(轮询重试, 同上)
