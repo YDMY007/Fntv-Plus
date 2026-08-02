@@ -17,6 +17,8 @@ export interface PlayItem {
     ts: number;
     duration: number;
     playLink: string;
+    /** 飞牛 trim_id（外部数据库标识，元数据源为 TMDB），用于 theintrodb 跳过兜底 */
+    trimId?: string;
     /** 飞牛媒体类型（"Movie"/"Episode"/"TvSeries"…），用于「仅作品类匹配弹幕」判断；缺省视为不可同步 */
     type?: string;
 }

@@ -36,6 +36,151 @@ local ask         = require('ask')
 local opts        = options.opts
 local DETECT_MODE = options.DETECT_MODE
 
+-- ===== Fntv-Plus 扩展：theintrodb 兜底 + 可点击跳过按钮 =====
+-- guid -> { tmdb=string, season=number?, episode=number? }，由 Electron 经 script-message 注入
+local skip_meta_map = {}
+local fnos_empty = false
+local pending_fallback = false
+
+-- 跳过按钮状态（enabled=no 时显示）
+local skip_btn = {
+    active = false,
+    hover = false,
+    kind = nil,    -- "跳过片头" / "跳过片尾"
+    target = 0,    -- 点击后跳转到的秒数
+    rect = { x = 0, y = 0, w = 0, h = 0 },
+}
+
+-- theintrodb 兜底：根据当前播放 guid 查 tmdb 元数据获取片头/片尾
+local function try_theintrodb_fallback()
+    local play_url = mp.get_property("path")
+    local id = mutils.extract_id_and_query(play_url)
+    if not id then
+        msg.error("theintrodb: 无法从播放地址解析 guid")
+        return
+    end
+    local meta = skip_meta_map[id]
+    if not meta or not meta.tmdb then
+        -- 元数据可能晚于 fnOS 返回到达，标记待补触发
+        pending_fallback = true
+        msg.info("theintrodb: 当前条目暂无可兜底数据（等待元数据）")
+        return
+    end
+    pending_fallback = false
+    api.get_theintrodb(meta.tmdb, meta.season, meta.episode, function(resp, err)
+        if err or not resp then
+            msg.error("theintrodb 请求失败: " .. tostring(err))
+            return
+        end
+        local total_dur = mutils.dur()
+        if not total_dur or total_dur <= 0 then return end
+
+        local intro = resp.intro and resp.intro[1]
+        local credits = resp.credits and resp.credits[1]
+        if intro then
+            local s = (intro.start_ms and intro.start_ms / 1000) or 0
+            local e = (intro.end_ms and intro.end_ms / 1000) or 0
+            if e > s then
+                opts.manual_intro_start = s
+                opts.manual_intro_end = e
+                msg.info(string.format("theintrodb 片头: %.0f - %.0f 秒", s, e))
+            end
+        end
+        if credits then
+            local s = (credits.start_ms and credits.start_ms / 1000) or 0
+            local e = (credits.end_ms and credits.end_ms / 1000) or total_dur
+            if e > s then
+                opts.manual_outro_start = s
+                opts.manual_outro_end = e
+                msg.info(string.format("theintrodb 片尾: %.0f - %.0f 秒", s, e))
+            end
+        end
+    end)
+end
+
+-- 接收 Electron 注入的 skip 元数据（guid -> tmdb/season/episode）
+mp.register_script_message('skip-metadata', function(payload)
+    if not payload or payload == "" then return end
+    local meta = utils.parse_json(payload)
+    if not meta or type(meta) ~= "table" then
+        msg.error("skip-metadata 解析失败: " .. tostring(payload))
+        return
+    end
+    skip_meta_map = meta
+    local n = 0
+    for _ in pairs(meta) do n = n + 1 end
+    msg.info("收到 skip 元数据, 条目数: " .. n)
+    -- 若此前 fnOS 已返回空而元数据晚到，补触发兜底
+    if pending_fallback then
+        pending_fallback = false
+        try_theintrodb_fallback()
+    end
+end)
+
+-- 绘制右下角跳过按钮（enabled=no 时）
+local function draw_skip_button()
+    local w = mp.get_property_number("osd-width") or 1280
+    local h = mp.get_property_number("osd-height") or 720
+    if not skip_btn.active then
+        mp.set_osd_ass(w, h, "")
+        return
+    end
+    local bw, bh = 200, 54
+    local bx = w - bw - 40
+    local by = h - bh - 90
+    skip_btn.rect = { x = bx, y = by, w = bw, h = bh }
+    local bg_hex = skip_btn.hover and "4C8DFF" or "2A2F3A"
+    local ass = string.format(
+        "{\\an1\\p1\\c&H%s&\\3c&HE0E0E0&\\3a&H60&}m %d %d l %d %d l %d %d l %d %d{\\p0}{\\an5\\pos(%d,%d)\\c&HFFFFFF&\\b1\\fs26}%s",
+        bg_hex, bx, by, bx + bw, by, bx + bw, by + bh, bx, by + bh,
+        bx + bw / 2, by + bh / 2, skip_btn.kind)
+    mp.set_osd_ass(w, h, ass)
+end
+
+-- 根据当前播放位置更新按钮显示/隐藏
+local function update_skip_button(curr_pos, result)
+    local show, label, target = false, "", 0
+    if result and result.intro and curr_pos >= result.intro[1] and curr_pos <= result.intro[2] then
+        show, label, target = true, "跳过片头", result.intro[2]
+    elseif result and result.outro and curr_pos >= result.outro[1] and curr_pos <= result.outro[2] then
+        show, label, target = true, "跳过片尾", result.outro[2]
+    end
+    if show then
+        if not skip_btn.active or skip_btn.kind ~= label then
+            skip_btn.active = true
+            skip_btn.kind = label
+            skip_btn.target = target
+            draw_skip_button()
+        end
+    elseif skip_btn.active then
+        skip_btn.active = false
+        skip_btn.kind = nil
+        draw_skip_button()
+    end
+end
+
+-- 鼠标悬停高亮
+mp.observe_property("mouse-pos", "native", function(_, pos)
+    if not skip_btn.active or not pos then return end
+    local r = skip_btn.rect
+    local inside = pos.x >= r.x and pos.x <= r.x + r.w and pos.y >= r.y and pos.y <= r.y + r.h
+    if inside ~= skip_btn.hover then
+        skip_btn.hover = inside
+        draw_skip_button()
+    end
+end)
+
+-- 鼠标点击命中按钮区域 → 跳转跳过
+mp.register_event("mouse-btn-down", function()
+    if skip_btn.active and skip_btn.hover then
+        mp.set_property_number("time-pos", skip_btn.target)
+        mutils.show_message(string.format("⏭️ 已%s", skip_btn.kind), 2)
+        skip_btn.active = false
+        skip_btn.kind = nil
+        draw_skip_button()
+    end
+end)
+
 --  通过章节检测片头片尾
 local function detect_by_chapters()
     local chapters = mutils.get_chapter_list()
@@ -102,7 +247,9 @@ local function load_server_config()
     local play_url = mp.get_property("path")
     api.get_skip_time(play_url, function(resp, err)
         if err or not resp or resp.code ~= 0 then
-            msg.error("获取服务器跳过时间点失败: " .. err)
+            msg.error("获取服务器跳过时间点失败: " .. tostring(err))
+            fnos_empty = true
+            try_theintrodb_fallback()
             return
         end
         local data = resp.data
@@ -127,6 +274,10 @@ local function load_server_config()
             msg.info(string.format("服务器跳过时间点: 片头 %d - %d 秒, 片尾 %d - %d 秒",
                 opts.manual_intro_start, opts.manual_intro_end,
                 opts.manual_outro_start, opts.manual_outro_end))
+        else
+            msg.info("fnOS 无跳过数据，尝试 theintrodb 兜底")
+            fnos_empty = true
+            try_theintrodb_fallback()
         end
     end)
 end
@@ -150,17 +301,26 @@ local function smart_skip()
     local has_skip_intro = false
     local has_skip_outro = false
 
-    -- 监听播放位置以执行跳过
+    -- 监听播放位置以执行跳过 / 显示按钮
     mp.observe_property("time-pos", "number", function(_, curr_pos)
         if not curr_pos then
             return
         end
 
+        local result = detect_by_mode()
+
+        -- 未开启自动跳过：仅在片头/片尾窗口内显示可点击按钮
         if not opts.enabled then
+            update_skip_button(curr_pos, result)
             return
         end
 
-        local result = detect_by_mode()
+        -- 已开启自动跳过：隐藏按钮并执行自动跳过
+        if skip_btn.active then
+            skip_btn.active = false
+            skip_btn.kind = nil
+            draw_skip_button()
+        end
 
         if not has_skip_intro and result and result.intro then
             has_skip_intro = mutils.skip_if_in(curr_pos, result.intro[1], result.intro[2], "⏭️ 正在跳过片头...")

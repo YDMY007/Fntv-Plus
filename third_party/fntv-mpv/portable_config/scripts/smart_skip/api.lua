@@ -51,7 +51,7 @@ function api.set_skip_time(play_url, start_time, end_time, callback)
         return false
     end
 
-    local url = "http://127.0.0.1:22345/api/v1/skipinfo?" .. query
+    local url = "http://127.0.0.1:22346/api/v1/skipinfo?" .. query
     local data = {
         guid = id,
         skipStart = start_time,
@@ -82,7 +82,7 @@ function api.get_skip_time(play_url, callback)
         return nil
     end
 
-    local url = "http://127.0.0.1:22345/api/v1/skipinfo/".. id .. "?" .. query
+    local url = "http://127.0.0.1:22346/api/v1/skipinfo/".. id .. "?" .. query
 
     http_async.request({
         url = url,
@@ -90,6 +90,36 @@ function api.get_skip_time(play_url, callback)
         headers = nil,
         json = true
     }, callback)
+
+    return true
+end
+
+-- 从 theintrodb 兜底获取片头/片尾（当 fnOS 未配置跳过时）
+-- tmdb_id 来自 fnOS 的 trim_id（飞牛影视元数据源为 TMDB）
+-- 返回结构: { intro=[{start_ms,end_ms}], credits=[{start_ms,end_ms}], ... }（毫秒；null 表示视频头/尾）
+function api.get_theintrodb(tmdb_id, season, episode, callback)
+    if not tmdb_id or tostring(tmdb_id) == "" or tostring(tmdb_id) == "0" then
+        msg.error("theintrodb: 缺少有效 tmdb_id")
+        if callback then callback(nil, "no tmdb_id") end
+        return false
+    end
+
+    local url = "https://api.theintrodb.org/v2/media?tmdb_id=" .. tostring(tmdb_id)
+    if season and tonumber(season) then
+        url = url .. "&season=" .. tostring(season)
+        if episode and tonumber(episode) then
+            url = url .. "&episode=" .. tostring(episode)
+        end
+    end
+
+    http_async.request({
+        url = url,
+        method = "GET",
+        headers = nil,
+        json = true
+    }, function(resp, err)
+        if callback then callback(resp, err) end
+    end)
 
     return true
 end

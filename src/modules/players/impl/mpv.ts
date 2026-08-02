@@ -94,6 +94,27 @@ export class MpvPlayer extends BasePlayer {
             // 开始 tail mpv.log，把弹幕脚本日志转发进 app.log
             this.startMpvLogTail();
 
+            // [skip] 向 MPV 注入 theintrodb 兜底所需的元数据（guid -> tmdb/season/episode）
+            // 必须在 loadPlaylistItems 之前发送，确保 smart_skip 脚本在 file-loaded 时已拿到映射
+            try {
+                const skipMeta: Record<string, { tmdb: string; season?: number; episode?: number }> = {};
+                for (const it of infos) {
+                    if (it.trimId) {
+                        skipMeta[it.itemGuid] = {
+                            tmdb: it.trimId,
+                            season: it.seasonNumber > 0 ? it.seasonNumber : undefined,
+                            episode: it.episodeNumber > 0 ? it.episodeNumber : undefined,
+                        };
+                    }
+                }
+                if (this.mpvInstance && Object.keys(skipMeta).length > 0) {
+                    this.mpvInstance.command('script-message', ['skip-metadata', JSON.stringify(skipMeta)]);
+                    log.debug('已发送 skip 元数据, 条目数:', Object.keys(skipMeta).length);
+                }
+            } catch (e) {
+                log.warn('发送 skip 元数据失败:', e);
+            }
+
             // 将所有的infos按顺序加入播放列表，并且播放第pos个视频
             await this.loadPlaylistItems(infos, pos);
 

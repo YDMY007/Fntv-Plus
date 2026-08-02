@@ -632,6 +632,7 @@ function processEpisodeMedia(cfg: fnConfig.Config, info: fn.PlayListItem): ply.P
         ts: info.ts > 0 ? info.ts : (info.watched_ts || 0),
         duration: info.duration,
         playLink: getProxyUrl(cfg, info.guid),
+        trimId: info.trim_id,
         type: info.type,
     };
 }
@@ -647,6 +648,7 @@ function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayIt
         ts: info.ts,
         duration: info.item.duration,
         playLink: getProxyUrl(cfg, info.guid),
+        trimId: info.item.trim_id,
         type: info.item.type,
     };
 }
