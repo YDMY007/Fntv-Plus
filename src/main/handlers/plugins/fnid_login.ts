@@ -224,7 +224,7 @@ function isUrlReachable(url: string, timeoutMs = 2000): Promise<boolean> {
  * 功能：
  * 1. Hook XHR 和 Fetch，拦截 /oauthapi/authorize 响应获取 code
  * 2. 拦截 /sac/rpcproxy/v1/new-user-guide/status 获取 Cookie
- * 3. [lc-292] /login 页面(飞牛 ID 影视登录弹窗)不再自动填充/点击, 完全交还用户手动操作
+ * 3. [lc-293] 飞牛ID系统登录页(5ddd.com)自动填充飞牛ID账号密码; NAS影视/login弹窗完全不填充, 交用户手动
  * 4. 在 /signin 页面自动点击授权按钮
  * 5. 在非 /login 页面获取 sys_config
  */
@@ -253,21 +253,66 @@ function getInjectionScript(username: string, password: string): string {
                 input.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            // [lc-292] ★ 飞牛 ID 登录弹窗(/login)完全不自动干预
+            // [lc-292→lc-293] 飞牛 ID 登录流程「两个页面」的自动填充策略(用户明确要求, 之前版本顺序搞反):
             //
-            // 本注入脚本**仅运行于 oauthWindow(persist:fnid-oauth, 飞牛 ID 流程)**,
-            // 故其中出现的 /login 页面, 永远是「飞牛 ID 登录」落到的影视本地登录弹窗,
-            // 不存在"纯本地登录"分支需要保留自动填(纯本地登录是主窗口走 auth.ts, 与此脚本无关)。
+            // ① 第一个「飞牛ID系统登录页」= oauthWindow 初始加载 https://5ddd.com/{fnId}
+            //    (用户输入飞牛ID账号密码的地方) → **自动填充** 保存的飞牛ID账号密码(AUTO_LOGIN_USER/PASS),
+            //    省去手动输入。填充后**不自动点击登录**, 交用户手动点(与"手动操作"偏好一致)。
             //
-            // 用户明确要求: 这个登录弹窗**不要自动填账号密码、不要自动点链接/登录按钮、不要跳转**,
-            // 全部交还用户手动输入与手动点击。所以 tryAutoLogin 对 /login 直接 return, 不做任何 DOM 操作。
+            // ② 第二个「NAS 影视登录弹窗」= path 含 /login (落到的影视本地登录弹窗)
+            //    → **完全不填充、不点击、不跳转**, 交还用户手动输入 NAS 隐私账号密码。
             //
-            // 授权确认页(/signin)的自动点「授权」由下方 tryAutoAuthorize() 负责 —— 那是"其他页面",
-            // 保持原样不变(用户仅要求这个 /login 弹窗不自动填充)。
+            // 区分依据: hostname 含 5ddd.com 且 path 不含 /login = 飞牛ID系统页;
+            //           path 含 /login = 影视弹窗(5ddd.com 也可能代理 NAS /login, 此时 /login 优先判为影视弹窗)。
+            // 授权确认页(/signin)自动点「授权」由下方 tryAutoAuthorize() 负责, 此处不改。
             (function tryAutoLogin() {
-                if (window.location.href.indexOf('/login') === -1) return;
-                console.log('[fntv-electron] 检测到飞牛 ID 登录页(/login), 不自动填充账号密码、不自动点击, 全部交还用户手动操作');
-                return;
+                var href = window.location.href;
+                var host = (window.location.hostname || '').toLowerCase();
+                var isNasLoginPopup = href.indexOf('/login') !== -1;                       // ② NAS 影视登录弹窗
+                var isFnIdSystemPage = host.indexOf('5ddd.com') !== -1 && !isNasLoginPopup; // ① 飞牛ID系统登录页
+
+                if (isNasLoginPopup) {
+                    // ② 影视登录弹窗: 不干预, 交还用户手动
+                    console.log('[fntv-electron] 检测到 NAS 影视登录弹窗(/login), 不自动填充, 交还用户手动操作');
+                    return;
+                }
+                if (!isFnIdSystemPage) {
+                    // 既不是影视弹窗也不是飞牛ID系统页(如 /signin 授权页、桌面) → 不干预
+                    return;
+                }
+
+                // ① 飞牛ID系统登录页: 自动填充账号密码(不自动点击登录, 交用户手动点)
+                var attempts = 0;
+                var maxAttempts = 25; // 最多试 5 秒(25 × 200ms)
+                var timer = setInterval(function() {
+                    attempts++;
+                    // 多级选择器: id → name → placeholder → type+顺序(兼容不同版本飞牛ID登录表单)
+                    var uInput = document.getElementById('username')
+                        || document.querySelector('input[name="username"]')
+                        || document.querySelector('input[placeholder*="用户名"]')
+                        || document.querySelector('input[placeholder*="账号"]')
+                        || (function() { var inputs = document.querySelectorAll('input[type="text"], input:not([type])'); return inputs.length > 0 ? inputs[0] : null; })();
+                    var pInput = document.getElementById('password')
+                        || document.querySelector('input[name="password"]')
+                        || document.querySelector('input[placeholder*="密码"]')
+                        || (function() { var inputs = document.querySelectorAll('input[type="password"]'); return inputs.length > 0 ? inputs[0] : null; })();
+
+                    if (uInput && AUTO_LOGIN_USER) {
+                        clearInterval(timer);
+                        console.log('[fntv-electron] 飞牛ID系统登录页: 自动填充账号 (第 ' + attempts + ' 次尝试)');
+                        triggerInput(uInput, AUTO_LOGIN_USER);
+                        if (AUTO_LOGIN_PASS && pInput) {
+                            triggerInput(pInput, AUTO_LOGIN_PASS);
+                            console.log('[fntv-electron] 飞牛ID系统登录页: 密码已填充, 请手动点击登录');
+                        }
+                        return;
+                    }
+
+                    if (attempts >= maxAttempts) {
+                        clearInterval(timer);
+                        console.warn('[fntv-electron] 飞牛ID系统登录页自动填充超时: ' + maxAttempts + ' 次尝试未找到登录框, URL=' + href);
+                    }
+                }, 200);
             })();
 
             // 在 /signin 页面自动点击授权按钮(轮询重试, 同上)
