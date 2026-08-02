@@ -21,17 +21,11 @@ require("modules/update")
 require("apis/dandanplay")
 require('apis/extra')
 
--- [lc-301] 弹幕统一收纳到 fnos-danmaku 子目录，便于设置面板"打开弹幕文件夹"集中管理/删除
-DANMAKU_PATH = utils.join_path(os.getenv("TEMP") or "/tmp/", "fnos-danmaku")
--- 确保弹幕目录存在（MPV 启动即建，避免写入子目录失败；subprocess 静默无窗口）
-do
-    local sep = package.config:sub(1, 1)
-    if sep == "\\" then
-        utils.subprocess({ args = { 'cmd', '/c', 'mkdir', DANMAKU_PATH }, cancellable = false })
-    else
-        utils.subprocess({ args = { 'mkdir', '-p', DANMAKU_PATH }, cancellable = false })
-    end
-end
+-- [修复] 弹幕直接落盘到 TEMP 根目录（与设置面板"打开弹幕文件夹"打开的是同一目录），
+-- 不再自建 fnos-danmaku 子目录：该子目录在部分机器上因路径含 forward-slash 导致
+-- `cmd /c mkdir` 报"语法错误"而建不起来，连带弹幕写不进去。回退到原始 TEMP 根行为。
+-- TEMP/TMP 根目录必然存在，无需额外 mkdir。
+DANMAKU_PATH = os.getenv("TEMP") or os.getenv("TMP") or "/tmp/"
 HISTORY_PATH = mp.command_native({"expand-path", options.history_path})
 PID = utils.getpid()
 DANMAKU = {sources = {}, count = 1}

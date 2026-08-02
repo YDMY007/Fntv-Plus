@@ -237,9 +237,9 @@ async function handleManualCookie(_event: any, ck?: string): Promise<{ ok: boole
   }
 }
 
-// 打开弹幕文件夹（os.tmpdir()/fnos-danmaku，与 MPV DANMAKU_PATH 落盘目录一致：MPV 弹幕统一收纳于此便于管理/删除）
+// 打开弹幕文件夹（os.tmpdir() 根目录，与 MPV DANMAKU_PATH 落盘目录一致：弹幕直接写在 TEMP 根，不再建子目录）
 async function handleOpenDanmakuFolder(): Promise<{ ok: boolean; error?: string }> {
-  const dir = path.join(os.tmpdir(), 'fnos-danmaku');
+  const dir = os.tmpdir();
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const err = await shell.openPath(dir);

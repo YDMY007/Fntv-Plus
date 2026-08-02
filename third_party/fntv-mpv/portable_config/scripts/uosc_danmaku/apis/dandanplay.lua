@@ -292,7 +292,11 @@ end
 
 -- 从 certutil 输出中解析 MD5（精确匹配 16 个字节对，避免误匹配到其他含十六进制字符的行）
 local function parse_certutil_hash(out)
-    if not out then return nil end
+    -- [修复] call_cmd_async 失败时第二参数传的是空 table {} 而非 nil/字符串，
+    -- 原 `if not out` 守卫拦不住 table（table 在 Lua 里为 truthy），导致 `{}:gmatch` 直接崩溃，
+    -- 进而整个 uosc_danmaku 脚本死亡、后续 B站弹幕触发代码无法执行。
+    -- 改为显式判断字符串类型；非字符串（nil/table）一律返回 nil，由上层回退到 Lua 自带 MD5。
+    if type(out) ~= "string" then return nil end
     for line in out:gmatch("[^\r\n]+") do
         if line:match("^%s*(%x%x%s+){15}%x%x%s*$") then
             return line:gsub("%s+", ""):lower()
