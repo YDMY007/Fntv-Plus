@@ -255,21 +255,14 @@ function getInjectionScript(username: string, password: string): string {
 
             // 在 /login 页面自动处理登录
             //
-            // [lc-287/lc-289] FN ID OAuth 回调后可能跳到飞牛影视的本地账号登录页(弹窗).
-            //   正确路径: 点击底部的「使用 NAS 登录」链接 → 跳转授权确认页(/signin) → 确认即完成登录.
+            // [lc-291] ★ 用户明确要求: FN ID 登录落到影视本地登录页(含「使用 NAS 登录」链接)时,
+            //   脚本**完全不干预** —— 不填账号密码、不点链接、不跳转、不 postMessage。
+            //   把控制权交还用户, 由用户手动点「使用 NAS 登录」/手动输入, 脚本耐心等待
+            //   (整体登录超时由主进程 loginTimeout=120s 控制)。
+            //   理由: lc-287~290 多次尝试 DOM 操作(点链接/清空表单/主进程跳转)均失败或不符合预期,
+            //   用户希望自己掌控该弹窗。故 FN ID 流程信号(检测到「使用 NAS 登录」链接) → 直接退出轮询。
             //
-            // [lc-290] ★ 根治方案变更: lc-287~289 尝试 DOM 操作(点击链接/清空表单)均失败,
-            //   根因: 飞牛前端点「使用 NAS 登录」时会先读取表单预填凭据做校验,
-            //   校验失败即停在登录页("账号密码错误"),授权页根本没机会加载.
-            //   且表单受 React/Vue 受控组件控制 + 浏览器 autofill 反复重填,
-            //   JS 清空不可靠(用户实测 lc-289 clearAllInputs 完全无效, EIKO+密码仍在).
-            //
-            //   新策略: 检测到 /login + 「使用 NAS 登录」链接存在时,
-            //   不做任何 DOM 操作(不清空、不点击), 直接 postMessage 通知主进程,
-            //   由主进程用 oauthWindow.loadURL() 直接跳转 /signin 授权页(带完整 OAuth 参数),
-            //   彻底绕过登录弹窗及其表单校验.
-            //
-            // [lc-288] 全局防重入仍保留: window.__fntv_nas_login_clicked 跨注入持久.
+            //   纯本地登录(无「使用 NAS 登录」链接)时仍保留自动填密码逻辑(向后兼容)。
             //
             // 多选择器兼容: fnOS 不同版本/部署方式的 input id/name/placeholder 可能不同.
             // 轮询重试: 外网中继跳转后页面加载比内网慢, 单次 setTimeout 200ms 不够.
@@ -277,13 +270,7 @@ function getInjectionScript(username: string, password: string): string {
                 if (window.location.href.indexOf('/login') === -1 &&
                     window.location.href.indexOf('/signin') === -1) return;
 
-                // ★ [lc-288] 若之前已点过/请求过「使用 NAS 登录」跳转,则永远不再重复请求
-                if (window.__fntv_nas_login_clicked) {
-                    console.log("[fntv-electron] 已请求过「使用 NAS 登录」跳转, 跳过 (防重入)");
-                    return;
-                }
-
-                // ★ [lc-290] 检测「使用 NAS 登录」类链接(区分 FN ID 流程与纯本地登录)
+                // ★ [lc-291] 检测「使用 NAS 登录」类链接(区分 FN ID 流程与纯本地登录)
                 function isNasLoginEl(el) {
                     var t = (el.innerText || el.textContent || '').trim();
                     return t.indexOf('使用 NAS 登录') !== -1 ||
@@ -302,23 +289,15 @@ function getInjectionScript(username: string, password: string): string {
                 var timer = setInterval(function() {
                     attempts++;
 
-                    // ★ [lc-288] 二次检查(轮询过程中可能被其他代码设置)
-                    if (window.__fntv_nas_login_clicked) {
-                        clearInterval(timer);
-                        console.log("[fntv-electron] 已请求过「使用 NAS 登录」跳转, 终止轮询");
-                        return;
-                    }
-
-                    // ★ [lc-290] 检测「使用 NAS 登录」链接 → 通知主进程直接跳转 /signin (绕过表单)
+                    // ★ [lc-291] FN ID 流程信号: 检测到「使用 NAS 登录」链接 → 完全不干预
+                    //   不填账号密码、不点链接、不跳转、不 postMessage, 把控制权交还用户手动操作。
+                    //   脚本仅退出轮询耐心等待(整体登录超时由主进程 loginTimeout 控制)。
                     var nasLoginLink =
                         Array.from(document.querySelectorAll('a, span, div, button, label, p, li, td, h1, h2, h3, h4')).find(isNasLoginEl)
                         || document.querySelector('a[href*="nas"], a[href*="NAS"]');
                     if (nasLoginLink) {
                         clearInterval(timer);
-                        window.__fntv_nas_login_clicked = true;
-                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 通知主进程跳转授权页 (第 " + attempts + " 次尝试)");
-                        // ★ 不做任何 DOM 操作(不清空表单、不 click), 直接让主进程 loadURL /signin
-                        postMessage({ type: 'nas_login_redirect', url: window.location.href });
+                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接(FN ID 流程), 不自动干预, 交还用户手动操作");
                         return;
                     }
 
@@ -565,7 +544,6 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
 
     let oauthWindow: BrowserWindow | null = null;
     let baseUrl = '';
-    let nasOauthAppId = ''; // [lc-290] 从 SysConfig(nas_oauth.app_id)提取,供 nas_login_redirect 构建 /signin URL
     let cookieString = '';
     let sysConfigLoaded = false;
     let authRequested = false;
@@ -813,8 +791,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         const loginPromise = new Promise<void>((resolve, reject) => {
             loginReject = reject;
             loginTimeout = setTimeout(() => {
-                reject(new Error('FN ID 登录超时（120秒）'));
-            }, 120000);
+                reject(new Error('FN ID 登录超时（300秒）'));
+            }, 300000);
 
             /**
              * 用授权码换取 token 后完成登录（XHR hook / 回跳守卫 共同调用）.
@@ -1013,8 +991,6 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                             if (!data || !data.nas_oauth) return;
 
                             const appId = data.nas_oauth.app_id;
-                            // [lc-290] 保存到作用域变量,供 nas_login_redirect 消息处理使用
-                            if (appId) nasOauthAppId = appId;
                             const oauthUrl = data.nas_oauth.url || '';
 
                             // 确定 baseUrl
@@ -1104,38 +1080,6 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                     if (type === 'SysConfigFailed') {
                         log.error(`[FN ID] SysConfig 重试耗尽仍非 JSON(中继不支持该 API), pageUrl=${messageData.pageUrl || ''}`);
                         notifyRelayFailed('中继服务器未返回有效的系统配置（/v/api/v1/sys/config 持续返回门户 HTML 而非 JSON）');
-                        return;
-                    }
-
-                    // 处理「使用 NAS 登录」跳转请求 (lc-290)
-                    // 注入脚本检测到 /login 页面含「使用 NAS 登录」链接时,
-                    // 不做任何 DOM 操作(不清空表单/不 click), 直接通知主进程跳转 /signin 授权页,
-                    // 彻底绕过登录弹窗的表单校验(该校验会因预填错误凭据导致"账号密码错误").
-                    if (type === 'nas_login_redirect') {
-                        const pageUrl = messageData.url || '';
-                        log.info(`[FN ID] 注入脚本检测到本地登录页+「使用 NAS 登录」链接, 准备直接跳转授权页. 当前URL: ${pageUrl}`);
-
-                        // 从当前 oauthWindow URL 提取 origin 作为 baseUrl(若尚未确定)
-                        if (!baseUrl && oauthWindow && !oauthWindow.isDestroyed()) {
-                            try {
-                                const parsed = new URL(oauthWindow.webContents.getURL());
-                                baseUrl = `${parsed.protocol}//${parsed.host}`;
-                            } catch { /* 保持空 */ }
-                        }
-
-                        if (baseUrl) {
-                            // 构建 /signin 授权 URL (appId 从 SysConfig nas_oauth 提取)
-                            const redirectUri = `${baseUrl}/v/oauth/result`;
-                            const targetUrl = `${baseUrl}/signin?client_id=${nasOauthAppId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
-
-                            log.info(`[FN ID] 直接跳转 OAuth 授权页 (绕过登录弹窗): ${targetUrl}`);
-                            if (oauthWindow && !oauthWindow.isDestroyed()) {
-                                oauthWindow.loadURL(targetUrl);
-                            }
-                        } else {
-                            log.warn('[FN ID] 检测到 NAS 登录链接但 baseUrl 未就绪, 无法构建 /signin URL');
-                            notifyRelayFailed('FN ID 登录异常：检测到本地登录页面但无法确定 NAS 地址，请重试');
-                        }
                         return;
                     }
 
