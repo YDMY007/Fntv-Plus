@@ -16,6 +16,8 @@ export interface ApiResponse<T = any> {
     message?: string;
     certificateError?: boolean; // 标识是否为证书错误
     moveUrl?: string; // 重定向URL
+    htmlResponse?: boolean;     // 命中网页(HTML)而非接口 JSON —— 多为地址/端口填错
+    networkError?: boolean;     // 连接层失败(无 HTTP 响应: DNS/端口/网络不可达) —— 与业务报错区分
 }
 
 export interface FnApiResponseData<T = any> {
@@ -231,7 +233,8 @@ export async function request<T = any>(
                     log.key(`[接口诊断结论] 处理建议: ${message}`);
                     return {
                         success: false,
-                        message
+                        message,
+                        htmlResponse: true
                     };
                 }
                 if (!contentType.includes('application/json')) {
@@ -293,11 +296,14 @@ export async function request<T = any>(
 
             // 如果是最后一次尝试，返回精准错误提示
             if (attempt >= tryTimes) {
+                // 无 HTTP 响应 = 连接层失败(DNS/端口无监听/网络不可达)，与业务报错区分
+                const isConnErr = !error.response;
+
                 // 1) 连接层错误（网络不通/地址错/端口错）：按错误码给可操作建议
                 const netHint = NETWORK_ERROR_HINTS[errorCode];
                 if (netHint) {
                     log.key(`[网络诊断结论] ${netHint}（技术细节：${errorMsg}）| URL=${fullUrl}`);
-                    return { success: false, message: `${netHint}（技术细节：${errorMsg}）` };
+                    return { success: false, message: `${netHint}（技术细节：${errorMsg}）`, networkError: isConnErr };
                 }
 
                 // 2) HTTP 4xx/5xx 但响应体是 HTML（如网关 502 错误页）：归为地址/服务问题
@@ -312,7 +318,7 @@ export async function request<T = any>(
 
                 // 3) 其它错误：保留原始 message 以便高级用户排查
                 log.key(`[请求异常结论] ${errorMsg} | URL=${fullUrl}`);
-                return { success: false, message: errorMsg };
+                return { success: false, message: errorMsg, networkError: isConnErr };
             }
 
             await setTimeout(100);

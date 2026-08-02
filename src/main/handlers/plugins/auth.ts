@@ -80,14 +80,31 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
         return handleFnIdLogin(event, loginData);
     }
 
-    // 构建服务器地址
-    let server = loginData.useHttps ? `https://${loginData.domain}` : `http://${loginData.domain}`;
-    log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
-    const fnapi = new fn.ApiService(server);
+    // 构建服务器地址候选列表（含 fnOS 影视默认端口兜底）
+    const scheme = loginData.useHttps ? 'https' : 'http';
+    const rawDomain = loginData.domain.trim().replace(/^[a-z]+:\/\//i, ''); // 去掉可能误带的协议头
+    const candidateServers: string[] = [`${scheme}://${rawDomain}`];
+    // 未显式带端口时，追加 fnOS 影视默认端口 18888 做兜底：
+    // 用户裸填内网 IP(如 192.168.31.170)时，80 端口通常返回网页/无服务，影视接口实际在 18888。
+    if (!/:(\d+)$/.test(rawDomain)) {
+        candidateServers.push(`${scheme}://${rawDomain}:18888`);
+    }
+
+    let server = candidateServers[0];
+    let response: any = null;
+    for (const candidate of candidateServers) {
+        server = candidate;
+        log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
+        const fnapi = new fn.ApiService(candidate);
+        const resp = await fnapi.login(loginData.username, loginData.password);
+        response = resp;
+        if (resp && resp.success) break; // 登录成功
+        // 仅「地址/端口错(返回网页 HTML)」或「连接层失败(无 HTTP 响应)」才尝试下一候选端口；
+        // 其它(密码错/证书错等业务报错)立即停止，避免把真实错误覆盖成端口扫描结果。
+        if (!resp?.htmlResponse && !resp?.networkError) break;
+    }
 
     try {
-        const response = await fnapi.login(loginData.username, loginData.password);
-
         if (!response || !response.success) {
             // 检查是否为证书错误
             if (response && response.certificateError) {
