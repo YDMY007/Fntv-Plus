@@ -15,8 +15,10 @@ options = {
     auto_load = false,
     autoload_local_danmaku = false,
     autoload_for_url = false,
-    -- 自动补源：弹弹play 匹配成功后，自动去 360kan 搜 B站源对应集弹幕并叠加显示
-    auto_load_extra = false,
+    -- 自动补源：弹弹play 匹配成功后 / 文件名解析到番名后，自动去搜 B站对应集弹幕并叠加显示。
+    -- 默认开启，与 bili_search_enabled（手动搜索门控）保持一致（两者由设置面板同开同关），
+    -- 避免「开关开着却永远看不到 B站 弹幕」的静默陷阱；用户仍可在设置面板关闭。
+    auto_load_extra = true,
     -- B站弹幕搜索总开关（由应用设置面板写入 conf；手动搜索门控，与 auto_load_extra 同开同关）
     bili_search_enabled = true,
     -- B站弹幕聚合阈值（由应用设置面板写入 conf）。单个视频弹幕数 < 此值时，

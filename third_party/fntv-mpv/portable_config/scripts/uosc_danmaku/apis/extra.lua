@@ -387,7 +387,7 @@ function guess_bili_title_ep(filename)
     title = title:gsub("%s*[Ee]%d+%.?%d*", "")    -- 去掉集 E3
     title = title:match("^%s*(.-)%s*$")
     if not title or title == "" then return nil, nil end
-    return title, ep
+    return clean_bili_title(title), ep
 end
 
 -- ============ 极速策略：轻量自包含解析（不依赖 dandanplay 21 条正则链） ============
@@ -417,6 +417,27 @@ local function cn_ep_to_num(s)
     end
     n = n + sec
     return n > 0 and n or nil
+end
+
+-- 清理 fnOS 注入 media-title 的副标题垃圾后缀。
+-- 来源：src/modules/players/impl/mpv.ts 构造的
+--   `{tvTitle} - S{season}E{episode}: {title}`
+-- 当集标题为空时追加 "noTitle"，形成 "番名 - S4E16: noTitle" / "番名 - : noTitle"。
+-- 这些后缀若带入 B站 搜索标题，会严重拉低匹配率（番剧区相似度阈值 70% 全不达标），
+-- 必须在解析番名后剥离，只保留干净番名。
+local function clean_bili_title(t)
+    if not t or t == "" then return t end
+    -- 1) "番名 - S4E16: noTitle"（含季集+副标题，最常见）
+    t = t:gsub("%s*%-%s*S?%d*E?%d*%s*:%s*noTitle%s*$", "")
+    -- 2) 残留 ": noTitle"（无 " - " 前缀时）
+    t = t:gsub("%s*:%s*noTitle%s*$", "")
+    -- 3) "番名 - S4E16"（仅有季集、无副标题）
+    t = t:gsub("%s*%-%s*S%d+E%d+%s*$", "")
+    -- 4) 因上述剥离而残留的孤立 " - "
+    t = t:gsub("%s*%-%s*$", "")
+    -- 收尾：压缩内部空白并去首尾空白
+    t = t:gsub("%s+", " "):gsub("^%s*(.-)%s*$", "%1")
+    return t
 end
 
 function bili_fast_parse(filename)
@@ -458,6 +479,7 @@ function bili_fast_parse(filename)
     title = title:gsub("^%s*(.-)%s*$", "%1")
     title = title:gsub("[_%.]+", " ")
     title = title:gsub("%s+", " ")
+    title = clean_bili_title(title)
     if title == "" then return nil, nil, nil end
     if ep then
         return title, ep, "fast"
@@ -484,6 +506,9 @@ end
 -- （绕开失效的 extcomment 代理）。也作为弹弹play 匹配成功后的兜底补源。
 function auto_search_extra(title, episode_num)
     if not title or title == "" then return end
+    -- 清理 fnOS 注入 media-title 的副标题垃圾后缀（" - S4E16: noTitle" / " - : noTitle"），
+    -- 否则这些后缀会污染 B站 搜索标题、导致番剧区 0 命中。
+    title = clean_bili_title(title) or title
     -- 调试：记录进入时的原始上下文
     msg.info(("[自动补源-DEBUG] 进入 title=%q DANMAKU.episode=%q 传入episode_num=%s")
         :format(title, tostring(DANMAKU.episode), tostring(episode_num)))
