@@ -82,8 +82,19 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
 
     // 构建服务器地址（直接使用用户填写的地址，不再猜测/兜底端口：
     // fnOS 影视端口因人而异，且访问码门禁会拦截接口返回 HTML，端口扫描会误判）
-    const scheme = loginData.useHttps ? 'https' : 'http';
+    let useHttps = loginData.useHttps;
     const rawDomain = loginData.domain.trim().replace(/^[a-z]+:\/\//i, ''); // 去掉可能误带的协议头
+
+    // 本地/私有 IP 自动关闭 HTTPS：内网 fnOS 通常只提供 HTTP，
+    // 开着 HTTPS 会用 TLS 握手去连 HTTP 服务器 → WRONG_VERSION_NUMBER 错误。
+    if (useHttps && isPrivateAddress(rawDomain)) {
+        log.key(`[HTTPS自动关闭] 检测到本地/私有地址 "${rawDomain}"，自动禁用 HTTPS（避免 SSL 握手失败）`);
+        useHttps = false;
+        // 同步更新 loginData，使后续 saveConfig/addHistory 存的也是 false
+        loginData.useHttps = false;
+    }
+
+    const scheme = useHttps ? 'https' : 'http';
     const server = `${scheme}://${rawDomain}`;
     log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
 
@@ -147,6 +158,23 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             message: '无法连接到服务器，请检查域名是否正确或网络连接是否正常。'
         });
     }
+}
+
+/**
+ * 判断地址是否为本地/私有地址（IPv4 私有段、localhost、IPv6 本地）。
+ * 本地地址的 fnOS 通常只提供 HTTP，开着 HTTPS 会导致 SSL 握手失败（WRONG_VERSION_NUMBER）。
+ */
+function isPrivateAddress(host: string): boolean {
+    const h = host.trim().toLowerCase();
+    // localhost / 127.0.0.1
+    if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(h)) return true;
+    // IPv4 私有段：10.x.x.x, 172.16-31.x.x, 192.168.x.x
+    if (/^10(\.\d{1,3}){3}(:\d+)?$/.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}(:\d+)?$/.test(h)) return true;
+    if (/^192\.168(\.\d{1,3}){2}(:\d+)?$/.test(h)) return true;
+    // IPv6 本地 / link-local / ULA
+    if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true;
+    return false;
 }
 
 /**
