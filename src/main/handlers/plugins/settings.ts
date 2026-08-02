@@ -514,6 +514,31 @@ async function handleOpenErrorLog(): Promise<{ ok: boolean; error?: string }> {
 }
 
 /**
+ * 打开 MPV 播放器日志(mpv.log)：弹幕脚本(uosc_danmaku)的全部 verbose 日志落盘于此，
+ * 与 app.log 同目录(log.getLogDir())。仅在 MPV 至少播放过一次后才存在
+ * （播放器启动时通过 --log-file 创建，播放退出时截断并续写）。
+ * 若尚未生成，提示用户先播放一次；打开失败回退 notepad。
+ */
+async function handleOpenMpvLog(): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const logDir = log.getLogDir();
+        if (!logDir) return { ok: false, error: '无法定位日志目录' };
+        const mpvLogFile = path.join(logDir, 'mpv.log');
+        if (!fs.existsSync(mpvLogFile)) {
+            return { ok: false, error: 'MPV 日志尚未生成（请先用 MPV 播放一次后再试）' };
+        }
+        const errMsg = await shell.openPath(mpvLogFile);
+        if (errMsg) {
+            log.warn('shell.openPath 打开 MPV 日志失败，回退 notepad:', errMsg);
+            spawn('notepad.exe', [mpvLogFile], { windowsHide: false });
+        }
+        return { ok: true };
+    } catch (e: any) {
+        return { ok: false, error: String((e && e.message) || e) };
+    }
+}
+
+/**
  * 导出日志文件：弹出"另存为"对话框，把当前日志复制到用户指定位置。
  */
 async function handleExportLog(): Promise<{ ok: boolean; error?: string; savedPath?: string }> {
@@ -688,6 +713,7 @@ function init(): void {
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
     registerHandler('settings:open-log', handleOpenLog, { useHandle: true });
     registerHandler('settings:open-error-log', handleOpenErrorLog, { useHandle: true });
+    registerHandler('settings:open-mpv-log', handleOpenMpvLog, { useHandle: true });
     registerHandler('settings:export-log', handleExportLog, { useHandle: true });
     registerHandler('settings:list-changelogs', handleListChangelogs, { useHandle: true });
     registerHandler('settings:read-changelog', handleReadChangelog, { useHandle: true });

@@ -3377,13 +3377,15 @@ function handle(): void {
     logDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 8px;';
     logFooter.appendChild(logDivider);
     const logRow = document.createElement('div');
-    logRow.style.cssText = 'display:flex;gap:6px;';
+    logRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
     const openLogBtn = mkBtn('日志文件', true);
     const openErrLogBtn = mkBtn('报错日志', true);
     const exportLogBtn = mkBtn('导出日志文件', true);
+    const openMpvLogBtn = mkBtn('MPV 播放器日志', true);
     logRow.appendChild(openLogBtn);
     logRow.appendChild(openErrLogBtn);
     logRow.appendChild(exportLogBtn);
+    logRow.appendChild(openMpvLogBtn);
     logFooter.appendChild(logRow);
     secDebug.el.appendChild(logFooter);
 
@@ -3414,6 +3416,16 @@ function handle(): void {
           logStatus.textContent = '已导出日志：' + (r.savedPath || '');
         } else if (r && r.error && r.error !== '已取消') {
           logStatus.textContent = '导出失败：' + (r.error || '未知');
+        } else {
+          logStatus.textContent = '';
+        }
+      }).catch(() => {});
+    });
+    openMpvLogBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:open-mpv-log').then((r: any) => {
+        if (!r || !r.ok) {
+          logStatus.textContent = 'MPV 日志打开失败：' + ((r && r.error) || '未知');
         } else {
           logStatus.textContent = '';
         }
