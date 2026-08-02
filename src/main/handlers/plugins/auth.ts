@@ -222,6 +222,8 @@ async function finalizeLocalLogin(event: IpcMainEvent, loginData: LoginData, ser
         const success = await restoreCookies(server, token, true);
         if (success) {
             mainWindow.loadURL(`${server}/v`);
+            mainWindow.show();
+            mainWindow.focus();
         } else {
             event.reply('login-error', {
                 title: '登录失败',
@@ -233,8 +235,9 @@ async function finalizeLocalLogin(event: IpcMainEvent, loginData: LoginData, ser
 
 /**
  * [访问码门禁修复] 本地账号登录被访问码拦截(接口返回HTML)时，弹真实浏览器窗口让用户输访问码。
- * 用户在网页里输访问码 → 授权 cookie 写入 persist:fntv 会话 → 主进程轮询到 cookie 变化后，
- * 以 Cookie 头注入重试登录接口（绕过门禁）。复用 FN ID 的 persist:fntv 会话，登录成功后 /v 自然带授权。
+ * 用户在网页里输访问码 → 授权 cookie 写入 persist:fntv 会话(与主窗口共享) → 
+ * 检测到 cookie 变化后立即关闭弹窗、直接导航主窗口到 /v(cookie 已在会话中, /v 应能加载)，
+ * 后台继续用 Cookie 头重试 login API 拿 token(供后续 XHR 调用认证); 拿不到也不阻塞用户进影视页。
  */
 async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, server: string): Promise<void> {
     log.info(`[访问码] 打开浏览器窗口让用户输入访问码: ${server}`);
@@ -246,7 +249,7 @@ async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, ser
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            partition: 'persist:fntv', // 与影视 webview / FN ID 同一会话，cookie 直接被 /v 复用
+            partition: 'persist:fntv', // 与影视 webview / 主窗口同一会话，cookie 直接共享
         }
     });
     accessWin.loadURL(server);
@@ -261,10 +264,34 @@ async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, ser
     const baseline = await readCookieHeader();
     let lastSig = baseline;
     let done = false;
+    let navigated = false; // 是否已导航主窗口到 /v
     let ticks = 0;
     const MAX_TICKS = 45; // ~90s 超时
 
     log.key(`[访问码] 已打开访问码输入窗口，请在浏览器中输入访问码，登录将自动继续`);
+
+    // 后台尝试登录 API 拿 token（不阻塞主窗口导航）
+    const tryLoginForToken = async (cookieHeader: string): Promise<boolean> => {
+        try {
+            const fnapi = new fn.ApiService(server);
+            const resp = await fnapi.login(loginData.username, loginData.password, { Cookie: cookieHeader });
+            if (resp && resp.success) {
+                log.key(`[访问码] 登录 API 成功拿到 token，恢复登录状态`);
+                // 异步收尾：存配置/历史 + restoreCookies + 重载 /v(带 token)
+                finalizeLocalLogin(event, loginData, server, resp).catch(err => {
+                    log.error('[访问码] finalizeLocalLogin 异步失败:', err);
+                });
+                return true;
+            }
+            if (!resp?.htmlResponse) {
+                log.warn(`[访问码] 登录 API 返回业务错误(非 HTML): ${resp?.message}`);
+            }
+            return false;
+        } catch (err) {
+            log.error(`[访问码] 登录 API 异常:`, err);
+            return false;
+        }
+    };
 
     const timer = setInterval(async () => {
         if (done) { clearInterval(timer); return; }
@@ -280,20 +307,37 @@ async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, ser
             }
             return;
         }
-        lastSig = sig; // cookie 集合发生变化（用户已输入访问码）→ 重试登录
-        const fnapi = new fn.ApiService(server);
-        const resp = await fnapi.login(loginData.username, loginData.password, { Cookie: sig });
-        if (resp && resp.success) {
-            done = true; clearInterval(timer);
-            if (!accessWin.isDestroyed()) accessWin.close();
-            return finalizeLocalLogin(event, loginData, server, resp);
+        // ★ cookie 变化：用户已输入访问码
+        lastSig = sig;
+        log.key(`[访问码] 检测到 cookie 变化，开始处理...`);
+
+        // 1. 立即关闭访问码弹窗
+        if (!accessWin.isDestroyed()) accessWin.close();
+
+        // 2. 立即导航主窗口到 /v（persist:fntv 会话已有授权 cookie，/v 应能直接加载）
+        if (!navigated) {
+            navigated = true;
+            const mainWindow = getMainWindow();
+            if (mainWindow) {
+                log.info(`[访问码] 导航主窗口到 ${server}/v`);
+                mainWindow.loadURL(`${server}/v`);
+                mainWindow.show();
+                mainWindow.focus();
+            }
         }
-        if (!resp?.htmlResponse) {
-            // 不再是访问码门禁（如密码错等业务报错）→ 直接报错，停止轮询
-            finish(resp?.message || '登录失败，请检查账号密码或改用 FN ID 登录。', '登录失败');
-            return;
+
+        // 3. 后台尝试登录 API 拿 token（不阻塞）
+        tryLoginForToken(sig);
+
+        // 4. 再等几轮看 cookie 是否还有变化（可能 /v 加载后也设新 cookie），
+        //    同时给登录 API 多次机会（每次 cookie 变化都重试）
+        //    但不再卡住用户——主窗口已经去了 /v
+        if (ticks >= MAX_TICKS) {
+            // 超时但主窗口已导航，静默结束轮询（不弹错误打扰用户）
+            done = true;
+            clearInterval(timer);
+            log.info('[访问码] 轮询超时，但主窗口已导航到 /v（若页面功能异常请用 FN ID 登录）');
         }
-        // 仍是 htmlResponse：用户可能还在输入/输错，继续轮询（lastSig 已更新，等下次变化再试）
     }, 2000);
 
     function finish(message: string, title: string): void {
@@ -301,7 +345,10 @@ async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, ser
         done = true;
         clearInterval(timer);
         if (!accessWin.isDestroyed()) accessWin.close();
-        event.reply('login-error', { title, message });
+        // 仅在未导航过主窗口时才报错（若已导航到 /v，不打扰用户）
+        if (!navigated) {
+            event.reply('login-error', { title, message });
+        }
     }
 
     accessWin.on('closed', () => {
