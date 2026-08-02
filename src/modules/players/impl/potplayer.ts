@@ -350,41 +350,45 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 构建「完整播放列表」启动参数：生成临时 .m3u8 播放列表文件（含可读标题 + 极速标签），
-     * 作为【单一启动参数】传给 PotPlayer。
+     * 构建「单集 m3u8」启动参数：生成临时 .m3u8 播放列表文件（仅含【目标集】一个 #EXTINF，
+     * 标题 = 可读剧名「剧名 - S01E04: 集标题 [极速]」），作为【单一启动参数】传给 PotPlayer。
      *
-     * 为什么用 m3u8（而不是多文件命令行参数）：
-     *   - 多文件参数 + shim 代理层 → 每个视频多一次 HTTP 转发握手，PotPlayer 启动时预扫描所有文件
-     *     元数据导致严重卡顿(lc-253 用户实测"即将播放..."卡死)
-     *   - 多文件参数（即使不用 shim）→ PotPlayer 把首个 URL 额外计入一次 → 列表重复(lc-249/250/251 反复验证)
-     *   - m3u8 是单一文件参数 → PotPlayer 解析后列表项 = 文件内 #EXTINF 条目数，精确等于集数，
-     *     物理上不可能重复，且启动快（只打开 1 个文件）
+     * 为什么用 m3u8（而不是多文件命令行参数 / 单文件 URL）：
+     *   - 多文件参数 + shim 代理层 → PotPlayer 启动预扫描所有文件元数据导致严重卡顿(lc-253)
+     *   - 多文件参数（不用 shim）→ 列表重复(lc-249/250/251)；单文件 URL 则标题退化成 proxy URL（"文件名正常显示"回归）
+     *   - 单集 m3u8：PotPlayer 解析后列表项 = 1（当前集），列表不重复 + 标题可读，且是「单流」便于 /seek 续播
      *
-     * 播放列表显示：#EXTINF 标题 = 可读剧名「剧名 - S01E04: 集标题 [极速]」。
-     * 续播：#EXT-X-START 标签(目标集已重排到 m3u8 首项，TIME-OFFSET=ts 即落在目标集内)。
-     *   注：命令行 /seek 对 m3u8 文件无效(lc-247)；EXT-X-START 是 HLS 标准标签，PotPlayer 可能尊重也可能不尊重。
-     *   若 EXT-X-START 不生效，续播会从头开始——这是 PotPlayer 对 m3u8 的限制，非代码 bug。
+     * [续播修复 lc-280] 旧版「全集合一 m3u8」依赖 EXT-X-START 标签续播，但 PotPlayer 不尊重该标签(lc-247)
+     * → 续播永远从头；且全集合一会让 PotPlayer 自行连播所有集，与 advanceEpisode 的 nearEnd 判定冲突(跳集)。
+     * 现改为「单集 m3u8 + 启动 /seek=ts」：单流下 PotPlayer 的 /seek 对「当前播放内容」生效(比全集合一更可能成功)；
+     * m3u8 内仍保留 EXT-X-START 双保险。连播改由 advanceEpisode 驱动(每次生成下一集单集 m3u8)，干净无跳集。
      *
-     * 仅用于 launchEpisode（首次拉起）；switchTo 仍用 buildBaseLaunchArgs + /current。
+     * 仅用于 launchEpisode（首次拉起 / 自动连播）；switchTo 仍用 buildBaseLaunchArgs + /current。
      */
     private buildFullPlaylistLaunchArgs(index: number): string[] {
         const item = this.playlist[index];
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 续播偏移：目标集已重排到 this.playlist[0](playList 入口重排)，m3u8 首项即目标集
+        // 续播偏移
         const duration = item.duration || 0;
         const resumeTs = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) ? Math.floor(item.ts) : 0;
         this.currentProgress = { ts: resumeTs, duration };
 
-        // 生成 .m3u8 播放列表文件（含全部集、可读标题、续播偏移、原始 proxy URL —— 不经 shim，直接连 proxy）
-        const content = this.generateM3U8Playlist(this.playlist, resumeTs);
+        // [续播修复 lc-280] 只放目标集一个 EXTINF（可读标题 + 列表不重复 + 单流便于 /seek 续播），
+        // 不再全集合一（避免 PotPlayer 自行连播与 advanceEpisode 跳集冲突 + EXT-X-START 续播失效）。
+        const content = this.generateM3U8Playlist([item], resumeTs);
         this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
         fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
-        log.info(`[playlist] 生成 m3u8(${this.playlist.length} 集, 续播=${resumeTs}s): ${this.playlistFilePath}`);
+        log.info(`[playlist] 生成单集 m3u8(guid=${item.itemGuid}, 续播=${resumeTs}s): ${this.playlistFilePath}`);
 
         // 仅传 m3u8 文件路径（单一参数，启动快、无重复）
         const launchArgs: string[] = [this.playlistFilePath];
+
+        // [续播修复 lc-280] 单 EXTINF m3u8 下 /seek 对单流有效(比全集合一更可能生效)；EXT-X-START 已在 m3u8 内双保险
+        if (resumeTs > 0) {
+            launchArgs.push(`/seek=${this.formatSeekTime(resumeTs)}`);
+        }
 
         // 透传调用方额外参数
         if (this.lastArgs.length > 0) {
