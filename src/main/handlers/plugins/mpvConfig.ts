@@ -261,32 +261,42 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
 // 写入 MPV B站弹幕搜索开关到 script-opts/uosc_danmaku.conf
 // 同时控制 bili_search_enabled(手动搜索门控) 与 auto_load_extra(自动补源/B站自动搜索)，
 // 两者同开同关，确保关闭开关后既不能手动搜、也不会自动加载 B站弹幕。
+// ⚠️ 双写：同时写入 getPortableConfigDir() 与 getMpvConfigDir()（用户配置目录 AppData/Roaming/mpv）。
+//   mpv 在「便携模式」(CWD=exe目录) 读 portable_config，在「标准模式」读用户配置目录；
+//   只写一处会导致另一模式下 auto_load_extra 不生效（典型表现：换台机器/某些环境 B站 永不自动搜索）。
+//   这与 writeMpvUserConfig / writeBiliDanmakuStyle 的双写策略一致（lc-094 教训：着色器单写导致不生效）。
 // 保留 conf 中其他选项，仅替换/追加这两个键。
 function writeBiliSearchEnabled(enabled: boolean): void {
     try {
-        const dir = getPortableConfigDir();
-        const scriptOptsDir = path.join(dir, 'script-opts');
-        if (!fs.existsSync(scriptOptsDir)) {
-            fs.mkdirSync(scriptOptsDir, { recursive: true });
-        }
-        const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
-        let lines: string[] = [];
-        if (fs.existsSync(target)) {
-            lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
-        }
         const val = enabled ? 'yes' : 'no';
-        // 移除已存在的 bili_search_enabled / auto_load_extra 行，以及旧的开关注释行（防止注释无限堆叠）
-        lines = lines.filter(l => !/^\s*(bili_search_enabled|auto_load_extra)\s*=/.test(l)
-            && !/^#\s*B站弹幕搜索开关/.test(l));
-        // 去掉末尾多余空行
-        while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
-        lines.push('# B站弹幕搜索开关（由应用设置面板控制，同时控制自动补源 auto_load_extra）');
-        lines.push('bili_search_enabled=' + val);
-        lines.push('auto_load_extra=' + val);
-        fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
-        logger.info(`MPV B站弹幕搜索开关已写入: ${target} (enabled=${enabled}, auto_load_extra=${val})`);
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) {
+                    fs.mkdirSync(scriptOptsDir, { recursive: true });
+                }
+                const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                // 移除已存在的 bili_search_enabled / auto_load_extra 行，以及旧的开关注释行（防止注释无限堆叠）
+                lines = lines.filter(l => !/^\s*(bili_search_enabled|auto_load_extra)\s*=/.test(l)
+                    && !/^#\s*B站弹幕搜索开关/.test(l));
+                // 去掉末尾多余空行
+                while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+                lines.push('# B站弹幕搜索开关（由应用设置面板控制，同时控制自动补源 auto_load_extra）');
+                lines.push('bili_search_enabled=' + val);
+                lines.push('auto_load_extra=' + val);
+                fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                logger.info(`MPV B站弹幕搜索开关已写入: ${target} (enabled=${enabled}, auto_load_extra=${val})`);
+            } catch (e) {
+                logger.error(`写入 uosc_danmaku.conf (B站弹幕搜索开关) 失败: ${dir}`, e);
+            }
+        }
     } catch (error) {
-        logger.error('写入 uosc_danmaku.conf (bili_search_enabled) 失败:', error);
+        logger.error('写入 B站弹幕搜索开关失败:', error);
     }
 }
 
