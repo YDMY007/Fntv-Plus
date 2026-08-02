@@ -1,4 +1,4 @@
-import { IpcMainEvent } from 'electron';
+import { IpcMainEvent, BrowserWindow, session } from 'electron';
 import { getMainWindow } from '../../common/mainwin';
 import * as fn from '../../../modules/fn_api/api';
 import { restoreCookies } from '../../../modules/fn_config/cookie';
@@ -80,29 +80,15 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
         return handleFnIdLogin(event, loginData);
     }
 
-    // 构建服务器地址候选列表（含 fnOS 影视默认端口兜底）
+    // 构建服务器地址（直接使用用户填写的地址，不再猜测/兜底端口：
+    // fnOS 影视端口因人而异，且访问码门禁会拦截接口返回 HTML，端口扫描会误判）
     const scheme = loginData.useHttps ? 'https' : 'http';
     const rawDomain = loginData.domain.trim().replace(/^[a-z]+:\/\//i, ''); // 去掉可能误带的协议头
-    const candidateServers: string[] = [`${scheme}://${rawDomain}`];
-    // 未显式带端口时，追加 fnOS 影视默认端口 18888 做兜底：
-    // 用户裸填内网 IP(如 192.168.31.170)时，80 端口通常返回网页/无服务，影视接口实际在 18888。
-    if (!/:(\d+)$/.test(rawDomain)) {
-        candidateServers.push(`${scheme}://${rawDomain}:18888`);
-    }
+    const server = `${scheme}://${rawDomain}`;
+    log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
 
-    let server = candidateServers[0];
-    let response: any = null;
-    for (const candidate of candidateServers) {
-        server = candidate;
-        log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
-        const fnapi = new fn.ApiService(candidate);
-        const resp = await fnapi.login(loginData.username, loginData.password);
-        response = resp;
-        if (resp && resp.success) break; // 登录成功
-        // 仅「地址/端口错(返回网页 HTML)」或「连接层失败(无 HTTP 响应)」才尝试下一候选端口；
-        // 其它(密码错/证书错等业务报错)立即停止，避免把真实错误覆盖成端口扫描结果。
-        if (!resp?.htmlResponse && !resp?.networkError) break;
-    }
+    const fnapi0 = new fn.ApiService(server);
+    let response: any = await fnapi0.login(loginData.username, loginData.password);
 
     try {
         if (!response || !response.success) {
@@ -135,6 +121,13 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
                 }
             }
 
+            // 访问码门禁：登录接口返回网页(HTML)而非 JSON，通常是服务器开了访问码，
+            // 主进程接口调用没有交互网页输访问码导致。弹出真实浏览器窗口让用户输访问码后重试。
+            if (response && response.htmlResponse) {
+                log.key(`登录被访问码门禁拦截(返回HTML) | server=${server}`);
+                return openAccessCodeFlow(event, loginData, server);
+            }
+
             const msg = response ? response.message : '未知错误';
             log.error('登录失败:', msg);
             log.key(`登录失败 (本地账号) | server=${server} | ${msg}`);
@@ -145,84 +138,8 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             return;
         }
 
-        // 登录成功，处理返回的 token 和可能的重定向 URL
-        server = response.moveUrl || server;
-        const token = response.data?.token;
-        if (!token) {
-            // 详细记录服务端原始响应，便于定位"success 但无 token"的真实原因
-            let dataPreview: string;
-            try {
-                dataPreview = typeof response.data === 'string'
-                    ? response.data.slice(0, 200)
-                    : JSON.stringify(response.data).slice(0, 500);
-            } catch { dataPreview = '<无法序列化>'; }
-            log.error('登录失败: 接口返回成功但缺少 token，无法恢复 cookies');
-            log.error('登录失败详情 → success:', response.success,
-                '| message:', response.message,
-                '| moveUrl:', response.moveUrl,
-                '| dataType:', typeof response.data,
-                '| dataPreview:', dataPreview);
-
-            let detail: string;
-            if (typeof response.data === 'string') {
-                // 接口把 HTML/错误页当 success 透传过来，data 是字符串。精准区分两类根因：
-                const html = response.data.toLowerCase().slice(0, 2000);
-                const isLoginPage = /(<input[^>]*type=["']?password|password|登录|sign\s*in|signin|fn\s*id|fnid|oauth|授权登录|账号|用户名)/.test(html);
-                const isServerPage = /(404 not found|502 bad gateway|503 service|nginx|upstream|proxy error|网关|内部错误|服务器错误|<div[^>]*id=["'](app|root)["']|id=["']app["'])/.test(html);
-                if (isLoginPage) {
-                    detail = '服务器返回的是登录页（HTML 网页），而非登录接口数据。原因几乎都是「未使用 FN ID 登录」或「FN ID 会话已过期」——飞牛影视接口需要 FN ID 会话 Cookie，用内网 IP 走本地账号登录拿不到它。👉 请在登录框填写你的 FN ID（6–30 位、不含点的飞牛 ID，不要填内网 IP）走 FN ID 登录；若之前能进现在报错，重新走一次 FN ID 登录即可。';
-                } else if (isServerPage) {
-                    detail = '服务器返回的是网页首页/错误页（HTML），而非登录接口数据。说明服务器地址或端口填错，请求打到了网页而非飞牛影视接口。👉 请检查登录框里的「服务器地址」——内网应填 http://IP:端口（默认端口 18888，例如 http://192.168.31.170:18888），确认 IP 正确、端口没漏填、没有多余的路径或域名后缀。';
-                } else {
-                    detail = '服务器返回的不是接口数据（可能是登录页或错误网页）。请检查服务器地址/IP:端口 是否正确（接口应返回 JSON），以及是否应使用 FN ID 登录或重新登录（会话可能已过期）。';
-                }
-            } else if (response.message) {
-                detail = response.message;
-            } else {
-                detail = '登录接口返回成功但未包含 token。可能该账号需要使用 FN ID 方式登录，或账号/密码有误。';
-            }
-            event.reply('login-error', {
-                title: '登录失败',
-                message: detail
-            });
-            return;
-        }
-        log.info('登录成功 token:', token);
-        log.key(`登录成功 | server=${server}`);
-
-        // 保存登录信息
-        const { saveConfig, addHistory } = require('../../../modules/fn_config/config');
-
-        // 保存配置
-        saveConfig({
-            account: loginData.username,
-            domain: server,
-            token: response.data.token,
-            useHttps: loginData.useHttps
-        });
-
-        // 添加到登录历史（仅当用户勾选"记住密码"时持久化密码）
-        addHistory({
-            domain: loginData.domain,
-            account: loginData.username,
-            password: loginData.rememberPassword ? loginData.password : '',
-            useHttps: loginData.useHttps
-        });
-
-        // 跳转到主页
-        const mainWindow = getMainWindow();
-        if (mainWindow) {
-            log.info('恢复登录状态，即将跳转到主页面, domain:', server);
-            const success = await restoreCookies(server, token, true);
-            if (success) {
-                mainWindow.loadURL(`${server}/v`);
-            } else {
-                event.reply('login-error', {
-                    title: '登录失败',
-                    message: '无法恢复登录状态，请重新登录。'
-                });
-            }
-        }
+        // 登录成功：提取 token 并收尾（统一封装，供访问码重试复用）
+        return finalizeLocalLogin(event, loginData, server, response);
     } catch (error) {
         log.error('登录请求失败:', error);
         event.reply('login-error', {
@@ -230,6 +147,166 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             message: '无法连接到服务器，请检查域名是否正确或网络连接是否正常。'
         });
     }
+}
+
+/**
+ * 本地账号登录成功后的统一收尾：提取 token、存配置/历史、恢复 cookie、加载 /v。
+ * 同时处理「success 但无 token」(接口把 HTML 当 success 透传)的情况。
+ * 供首次登录与访问码重试共用。
+ */
+async function finalizeLocalLogin(event: IpcMainEvent, loginData: LoginData, server: string, response: any): Promise<void> {
+    server = response.moveUrl || server;
+    const token = response.data?.token;
+    if (!token) {
+        // 详细记录服务端原始响应，便于定位"success 但无 token"的真实原因
+        let dataPreview: string;
+        try {
+            dataPreview = typeof response.data === 'string'
+                ? response.data.slice(0, 200)
+                : JSON.stringify(response.data).slice(0, 500);
+        } catch { dataPreview = '<无法序列化>'; }
+        log.error('登录失败: 接口返回成功但缺少 token，无法恢复 cookies');
+        log.error('登录失败详情 → success:', response.success,
+            '| message:', response.message,
+            '| moveUrl:', response.moveUrl,
+            '| dataType:', typeof response.data,
+            '| dataPreview:', dataPreview);
+
+        let detail: string;
+        if (typeof response.data === 'string') {
+            // 接口把 HTML/错误页当 success 透传过来，data 是字符串。精准区分两类根因：
+            const html = response.data.toLowerCase().slice(0, 2000);
+            const isLoginPage = /(<input[^>]*type=["']?password|password|登录|sign\s*in|signin|fn\s*id|fnid|oauth|授权登录|账号|用户名)/.test(html);
+            const isServerPage = /(404 not found|502 bad gateway|503 service|nginx|upstream|proxy error|网关|内部错误|服务器错误|<div[^>]*id=["'](app|root)["']|id=["']app["'])/.test(html);
+            if (isLoginPage) {
+                detail = '服务器返回的是登录页（HTML 网页），而非登录接口数据。原因几乎都是「未使用 FN ID 登录」或「FN ID 会话已过期」——飞牛影视接口需要 FN ID 会话 Cookie，用内网 IP 走本地账号登录拿不到它。👉 请在登录框填写你的 FN ID（6–30 位、不含点的飞牛 ID，不要填内网 IP）走 FN ID 登录；若之前能进现在报错，重新走一次 FN ID 登录即可。';
+            } else if (isServerPage) {
+                detail = '服务器返回的是网页首页/错误页（HTML），而非登录接口数据。说明服务器地址或端口填错，请求打到了网页而非飞牛影视接口。👉 请检查登录框里的「服务器地址」——内网应填 http://IP:端口（端口因人而异，请填你 NAS 上飞牛影视实际监听的端口，默认通常为 18888），确认 IP 正确、端口没漏填、没有多余的路径或域名后缀。';
+            } else {
+                detail = '服务器返回的不是接口数据（可能是登录页或错误网页）。请检查服务器地址/IP:端口 是否正确（接口应返回 JSON），以及是否应使用 FN ID 登录或重新登录（会话可能已过期）。';
+            }
+        } else if (response.message) {
+            detail = response.message;
+        } else {
+            detail = '登录接口返回成功但未包含 token。可能该账号需要使用 FN ID 方式登录，或账号/密码有误。';
+        }
+        event.reply('login-error', { title: '登录失败', message: detail });
+        return;
+    }
+    log.info('登录成功 token:', token);
+    log.key(`登录成功 | server=${server}`);
+
+    // 保存登录信息
+    const { saveConfig, addHistory } = require('../../../modules/fn_config/config');
+
+    // 保存配置
+    saveConfig({
+        account: loginData.username,
+        domain: server,
+        token: response.data.token,
+        useHttps: loginData.useHttps
+    });
+
+    // 添加到登录历史（仅当用户勾选"记住密码"时持久化密码）
+    addHistory({
+        domain: loginData.domain,
+        account: loginData.username,
+        password: loginData.rememberPassword ? loginData.password : '',
+        useHttps: loginData.useHttps
+    });
+
+    // 跳转到主页
+    const mainWindow = getMainWindow();
+    if (mainWindow) {
+        log.info('恢复登录状态，即将跳转到主页面, domain:', server);
+        const success = await restoreCookies(server, token, true);
+        if (success) {
+            mainWindow.loadURL(`${server}/v`);
+        } else {
+            event.reply('login-error', {
+                title: '登录失败',
+                message: '无法恢复登录状态，请重新登录。'
+            });
+        }
+    }
+}
+
+/**
+ * [访问码门禁修复] 本地账号登录被访问码拦截(接口返回HTML)时，弹真实浏览器窗口让用户输访问码。
+ * 用户在网页里输访问码 → 授权 cookie 写入 persist:fntv 会话 → 主进程轮询到 cookie 变化后，
+ * 以 Cookie 头注入重试登录接口（绕过门禁）。复用 FN ID 的 persist:fntv 会话，登录成功后 /v 自然带授权。
+ */
+async function openAccessCodeFlow(event: IpcMainEvent, loginData: LoginData, server: string): Promise<void> {
+    log.info(`[访问码] 打开浏览器窗口让用户输入访问码: ${server}`);
+    const accessWin = new BrowserWindow({
+        width: 900,
+        height: 720,
+        title: '请输入访问码以登录飞牛影视',
+        backgroundColor: '#ffffff',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: 'persist:fntv', // 与影视 webview / FN ID 同一会话，cookie 直接被 /v 复用
+        }
+    });
+    accessWin.loadURL(server);
+    accessWin.once('ready-to-show', () => accessWin.show());
+
+    const fntvSession = session.fromPartition('persist:fntv');
+    const readCookieHeader = async (): Promise<string> => {
+        const cookies = await fntvSession.cookies.get({ url: server });
+        return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    };
+
+    const baseline = await readCookieHeader();
+    let lastSig = baseline;
+    let done = false;
+    let ticks = 0;
+    const MAX_TICKS = 45; // ~90s 超时
+
+    log.key(`[访问码] 已打开访问码输入窗口，请在浏览器中输入访问码，登录将自动继续`);
+
+    const timer = setInterval(async () => {
+        if (done) { clearInterval(timer); return; }
+        if (accessWin.isDestroyed()) {
+            finish('访问码输入窗口已关闭，登录取消。若服务器开了访问码，请重新登录并在弹窗中输入访问码，或改用 FN ID 登录。', '已取消');
+            return;
+        }
+        ticks++;
+        const sig = await readCookieHeader();
+        if (sig === lastSig) {
+            if (ticks >= MAX_TICKS) {
+                finish('在浏览器中输入访问码后登录未能自动继续。请确认访问码正确，或改用 FN ID 登录。', '访问码输入超时');
+            }
+            return;
+        }
+        lastSig = sig; // cookie 集合发生变化（用户已输入访问码）→ 重试登录
+        const fnapi = new fn.ApiService(server);
+        const resp = await fnapi.login(loginData.username, loginData.password, { Cookie: sig });
+        if (resp && resp.success) {
+            done = true; clearInterval(timer);
+            if (!accessWin.isDestroyed()) accessWin.close();
+            return finalizeLocalLogin(event, loginData, server, resp);
+        }
+        if (!resp?.htmlResponse) {
+            // 不再是访问码门禁（如密码错等业务报错）→ 直接报错，停止轮询
+            finish(resp?.message || '登录失败，请检查账号密码或改用 FN ID 登录。', '登录失败');
+            return;
+        }
+        // 仍是 htmlResponse：用户可能还在输入/输错，继续轮询（lastSig 已更新，等下次变化再试）
+    }, 2000);
+
+    function finish(message: string, title: string): void {
+        if (done) return;
+        done = true;
+        clearInterval(timer);
+        if (!accessWin.isDestroyed()) accessWin.close();
+        event.reply('login-error', { title, message });
+    }
+
+    accessWin.on('closed', () => {
+        if (!done) finish('访问码输入窗口已关闭，登录取消。若服务器开了访问码，请重新登录并在弹窗中输入访问码，或改用 FN ID 登录。', '已取消');
+    });
 }
 
 // 注册认证相关处理器

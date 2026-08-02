@@ -138,12 +138,12 @@ export class ApiService {
     /**
     * 用户登录
     */
-    login(username: string, password: string): Promise<fn.ApiResponse<any>> {
+    login(username: string, password: string, extraHeaders?: Record<string, string>): Promise<fn.ApiResponse<any>> {
         return fn.request(this.baseURL, '/v/api/v1/login', HttpMethod.POST, this.token, {
             app_name: "trimemedia-web",
             username: username,
             password: password,
-        } as types.LoginData);
+        } as types.LoginData, extraHeaders);
     }
 
     /**
