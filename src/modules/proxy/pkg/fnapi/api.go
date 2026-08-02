@@ -45,11 +45,12 @@ type ApiService struct {
 	baseURL    string
 	token      string
 	skipVerify bool
+	cookie     string // [lc-295] 会话 Cookie(Trim-MC-token 等), 由主进程经代理 URL 传入, 转发给 NAS 鉴权
 	client     *http.Client
 }
 
 // NewApiService 创建API服务实例
-func NewApiService(baseURL, token string, skipVerify bool) *ApiService {
+func NewApiService(baseURL, token string, skipVerify bool, cookie string) *ApiService {
 	initGlobalCache()
 
 	// 创建HTTP客户端
@@ -66,6 +67,7 @@ func NewApiService(baseURL, token string, skipVerify bool) *ApiService {
 		baseURL:    baseURL,
 		token:      token,
 		skipVerify: skipVerify,
+		cookie:     cookie,
 		client:     client,
 	}
 }
@@ -114,40 +116,40 @@ func (s *ApiService) Login(username, password string) (*ApiResponse[interface{}]
 		AppName:  "trimemedia-web",
 		Username: username,
 		Password: password,
-	}, nil, 0, 0)
+	}, nil, 0, 0, s.cookie)
 }
 
 // Logout 用户登出
 func (s *ApiService) Logout() (*ApiResponse[interface{}], error) {
-	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/logout", MethodPOST, s.token, nil, nil, 0, 0)
+	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/logout", MethodPOST, s.token, nil, nil, 0, 0, s.cookie)
 }
 
 // GetUserInfo 获取用户信息
 func (s *ApiService) GetUserInfo() (*ApiResponse[UserInfo], error) {
-	return Request[UserInfo](s.client, s.baseURL, "/v/api/v1/user/info", MethodGET, s.token, nil, nil, 0, 0)
+	return Request[UserInfo](s.client, s.baseURL, "/v/api/v1/user/info", MethodGET, s.token, nil, nil, 0, 0, s.cookie)
 }
 
 // GetPlayInfo 获取视频播放信息
 func (s *ApiService) GetPlayInfo(itemGUID string) (*ApiResponse[PlayInfo], error) {
 	data := PlayInfoData{ItemGUID: itemGUID}
-	return Request[PlayInfo](s.client, s.baseURL, "/v/api/v1/play/info", MethodPOST, s.token, data, nil, 0, 0)
+	return Request[PlayInfo](s.client, s.baseURL, "/v/api/v1/play/info", MethodPOST, s.token, data, nil, 0, 0, s.cookie)
 }
 
 // GetPlayQuality 获取播放质量列表
 func (s *ApiService) GetPlayQuality(mediaGUID string) (*ApiResponse[PlayQualityResponse], error) {
 	return Request[PlayQualityResponse](s.client, s.baseURL, "/v/api/v1/play/quality", MethodPOST, s.token, map[string]string{
 		"media_guid": mediaGUID,
-	}, nil, 0, 0)
+	}, nil, 0, 0, s.cookie)
 }
 
 // GetStreamList 获取流列表
 func (s *ApiService) GetStreamList(itemGUID string) (*ApiResponse[StreamListResponse], error) {
-	return Request[StreamListResponse](s.client, s.baseURL, fmt.Sprintf("/v/api/v1/stream/list/%s", itemGUID), MethodGET, s.token, nil, nil, 0, 0)
+	return Request[StreamListResponse](s.client, s.baseURL, fmt.Sprintf("/v/api/v1/stream/list/%s", itemGUID), MethodGET, s.token, nil, nil, 0, 0, s.cookie)
 }
 
 // GetEpisodeList 获取播放列表
 func (s *ApiService) GetEpisodeList(id string) (*ApiResponse[[]PlayListItem], error) {
-	return Request[[]PlayListItem](s.client, s.baseURL, fmt.Sprintf("/v/api/v1/episode/list/%s", id), MethodGET, s.token, nil, nil, 0, 0)
+	return Request[[]PlayListItem](s.client, s.baseURL, fmt.Sprintf("/v/api/v1/episode/list/%s", id), MethodGET, s.token, nil, nil, 0, 0, s.cookie)
 }
 
 // GetVideoURL 获取视频直链地址
@@ -159,12 +161,12 @@ func (s *ApiService) GetVideoURL(mediaGUID string) string {
 func (s *ApiService) SetWatched(itemGUID string) (*ApiResponse[interface{}], error) {
 	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/item/watched", MethodPOST, s.token, WatchedData{
 		ItemGUID: itemGUID,
-	}, nil, 0, 0)
+	}, nil, 0, 0, s.cookie)
 }
 
 // RecordPlayStatus 记录播放状态
 func (s *ApiService) RecordPlayStatus(statusData PlayStatusData) (*ApiResponse[interface{}], error) {
-	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/play/record", MethodPOST, s.token, statusData, nil, 0, 0)
+	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/play/record", MethodPOST, s.token, statusData, nil, 0, 0, s.cookie)
 }
 
 // GetStream 获取流信息
@@ -177,7 +179,7 @@ func (s *ApiService) GetStream(mediaGUID, ip string) (*ApiResponse[StreamRespons
 		MediaGUID: mediaGUID,
 		IP:        ip,
 	}
-	return Request[StreamResponse](s.client, s.baseURL, "/v/api/v1/stream", MethodPOST, s.token, data, nil, 0, 0)
+	return Request[StreamResponse](s.client, s.baseURL, "/v/api/v1/stream", MethodPOST, s.token, data, nil, 0, 0, s.cookie)
 }
 
 // SetSkipInfo 设置跳过片头片尾信息
@@ -187,7 +189,7 @@ func (s *ApiService) SetSkipInfo(parentGuid string, skipStart, skipEnd int) erro
 		SkipStart:  skipStart,
 		SkipEnd:    skipEnd,
 	}
-	resp, err := Request[any](s.client, s.baseURL, "/v/api/v1/play/setConfigByItem", MethodPOST, s.token, data, nil, 0, 0)
+	resp, err := Request[any](s.client, s.baseURL, "/v/api/v1/play/setConfigByItem", MethodPOST, s.token, data, nil, 0, 0, s.cookie)
 	if err != nil {
 		return err
 	}

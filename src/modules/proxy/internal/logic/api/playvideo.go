@@ -85,7 +85,7 @@ func PlayVideoHandler(c *gin.Context) {
 		return
 	}
 
-	fnApi := fnapi.NewApiService(params.Domain, params.Token, params.SkipVerify == 1)
+	fnApi := fnapi.NewApiService(params.Domain, params.Token, params.SkipVerify == 1, params.Cookie)
 	resp, err := fnApi.GetStreamListCached(params.ItemGuid)
 	if err != nil || !resp.Success || len(resp.Data.VideoStreams) == 0 {
 		logger.Errorf("获取播放信息失败或为空: %v", err)
@@ -149,7 +149,9 @@ func PlayVideoHandler(c *gin.Context) {
 		// 本地 NAS 转发模式 ---
 		// 只有请求 NAS 时才需要 Authorization Token
 		extraHeaders["Authorization"] = params.Token
-		extraHeaders["Cookie"] = extraHeaders["Cookie"] + "; mode=relay"
+		// [lc-295] 注入 persist:fntv 会话 Cookie(Trim-MC-token), 与 webview/主进程同源鉴权,
+		// 否则 NAS 媒体流接口会被弹回登录页 HTML(playvideo 返回 500 / 解析 JSON 失败 '<')。
+		extraHeaders["Cookie"] = params.Cookie + "; mode=relay"
 	}
 
 	// 执行代理

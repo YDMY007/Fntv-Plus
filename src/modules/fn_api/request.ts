@@ -24,7 +24,7 @@ import { isTrusted, showCertificateTrustDialog, isCertificateError, addTrustedHo
 const cookieCache = new Map<string, { value: string; ts: number }>();
 const COOKIE_CACHE_TTL = 60000;
 
-async function getSessionCookieHeader(baseUrl: string): Promise<string> {
+export async function getSessionCookieHeader(baseUrl: string): Promise<string> {
     try {
         const u = new URL(baseUrl);
         if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';

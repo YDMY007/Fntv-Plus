@@ -86,7 +86,7 @@ func GenFnAuthx(url string, data interface{}) string {
 const DefaultTimeout = 10000 // 默认超时时间（毫秒）
 
 // Request 发送API请求
-func Request[T any](client *http.Client, baseURL, url string, method HttpMethod, token string, data interface{}, extraHeaders map[string]string, timeout, tryTimes int) (*ApiResponse[T], error) {
+func Request[T any](client *http.Client, baseURL, url string, method HttpMethod, token string, data interface{}, extraHeaders map[string]string, timeout, tryTimes int, sessionCookie string) (*ApiResponse[T], error) {
 	if tryTimes <= 0 {
 		tryTimes = 5
 	}
@@ -111,11 +111,18 @@ func Request[T any](client *http.Client, baseURL, url string, method HttpMethod,
 
 	authx := GenFnAuthx(url, data)
 
+	// [lc-295] 会话 Cookie 注入: NAS 影视接口/媒体流依赖 persist:fntv 的 Trim-MC-token 等会话 Cookie,
+	// 仅带 Authorization 头会被弹回登录页 HTML。这里把主进程传来的 sessionCookie 并入 Cookie 头
+	// (保留 mode=relay 以兼容 FN Connect 外网中继); 为空时退化为仅 mode=relay(原行为)。
+	cookieParts := []string{"mode=relay"}
+	if sessionCookie != "" {
+		cookieParts = append(cookieParts, sessionCookie)
+	}
 	headers := map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": token,
 		"Authx":         authx,
-		"Cookie":        "mode=relay",
+		"Cookie":        strings.Join(cookieParts, "; "),
 	}
 	for k, v := range extraHeaders {
 		headers[k] = v

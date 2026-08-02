@@ -12,6 +12,7 @@ import * as path from 'path';
 import { PlayStatusData, ItemListRequest } from '../../../modules/fn_api/types';
 import { escape } from 'querystring';
 import { isTrusted } from '../../../modules/cert_trust';
+import { getSessionCookieHeader } from '../../../modules/fn_api/request';
 import { getMainWindow } from '../../common/mainwin';
 import * as doubanSync from './doubanSync';
 import * as bangumiSync from './bangumiSync';
@@ -29,6 +30,20 @@ interface PlayRequest {
 
 // 全局播放器实例引用
 let currentPlayer: ply.BasePlayer | null = null;
+
+// [lc-295] 本地代理(Go proxy.exe)播放鉴权补全:
+// fnOS 影视接口/媒体流依赖 persist:fntv 会话 Cookie(Trim-MC-token)。Electron 主进程 request.ts 已在
+// lc-294 转发该 Cookie, 但独立 Go 代理进程拿不到 persist:fntv。故此处把会话 Cookie 读出来、经代理 URL
+// 的 cookie 查询参数传给 Go 代理, 由它在调 NAS 接口(/v/api/v1/stream/*)与转发媒体流时一并带上,
+// 避免代理被弹回登录页 HTML(表现为 playvideo 返回 500 / 解析 JSON 失败 '<')。
+let cachedSessionCookie = '';
+async function refreshSessionCookie(domain: string): Promise<void> {
+    try {
+        cachedSessionCookie = await getSessionCookieHeader(domain);
+    } catch {
+        cachedSessionCookie = '';
+    }
+}
 
 // MPV播放器路径缓存
 let cachedPlayerPath: string | null = null;
@@ -434,6 +449,9 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
         throw new Error('无法找到服务器地址配置');
     }
 
+    // [lc-295] 播放前刷新一次会话 Cookie, getProxyUrl 会将其编入代理 URL 传给 Go 代理
+    await refreshSessionCookie(config.domain);
+
     const fnapi = new fn.ApiService(config.domain, token);
 
     const response = await fnapi.getPlayInfo(id);
@@ -587,8 +605,11 @@ function getProxyUrl(cfg: fnConfig.Config, itemGuid: string, sourceIndex: number
     const useNasLocal = cfg.nasProxyEnabled === true ? '1' : '0';
     // urlencode
     const domain = escape(cfg.domain || '');
+    // [lc-295] 把 persist:fntv 会话 Cookie 经查询参数传给 Go 代理(MPV/PotPlayer 链路均经此 URL),
+    // 由代理注入 NAS 请求鉴权; 为空(未登录/登录中)时退化为不带 cookie(原行为)。
+    const cookieParam = cachedSessionCookie ? `&cookie=${encodeURIComponent(cachedSessionCookie)}` : '';
     // const skipVerify = '1'; // 永远跳过证书验证
-    return `http://127.0.0.1:22346/api/v1/playvideo/${itemGuid}?token=${cfg.token}&skipVerify=${skipVerify}&account=${cfg.account}&domain=${domain}&useNasLocal=${useNasLocal}&sourceIndex=${sourceIndex}`;
+    return `http://127.0.0.1:22346/api/v1/playvideo/${itemGuid}?token=${cfg.token}&skipVerify=${skipVerify}&account=${cfg.account}&domain=${domain}&useNasLocal=${useNasLocal}&sourceIndex=${sourceIndex}${cookieParam}`;
 }
 
 // 处理当前播放的媒体信息

@@ -28,7 +28,7 @@ func GetSkipInfoHandler(c *gin.Context) {
 		return
 	}
 
-	fnApi := fnapi.NewApiService(params.Domain, params.Token, params.SkipVerify == 1)
+	fnApi := fnapi.NewApiService(params.Domain, params.Token, params.SkipVerify == 1, params.Cookie)
 
 	// 获取跳过片头片尾信息
 	logger.Infof("开始获取跳过片头片尾信息: itemGuid=%s", params.ItemGuid)
@@ -80,7 +80,7 @@ func SetSkipInfoHandler(c *gin.Context) {
 		return
 	}
 
-	fnApi := fnapi.NewApiService(req.Domain, req.Token, req.SkipVerify == 1)
+	fnApi := fnapi.NewApiService(req.Domain, req.Token, req.SkipVerify == 1, req.Cookie)
 
 	// 获取播放信息缓存
 	playInfo, err := fnApi.GetPlayInfoCached(req.Guid)

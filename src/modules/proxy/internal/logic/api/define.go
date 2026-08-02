@@ -36,6 +36,7 @@ type PlayVideoParams struct {
 	SkipVerify  int32  `json:"skipVerify" form:"skipVerify"`
 	UseNasLocal int32  `json:"useNasLocal" form:"useNasLocal"`
 	SourceIndex int32  `json:"sourceIndex" form:"sourceIndex"`
+	Cookie      string `json:"cookie" form:"cookie"` // [lc-295] 主进程传来的 persist:fntv 会话 Cookie, 注入 NAS 请求鉴权
 }
 
 // CloudStorageInfo 云存储信息
@@ -57,6 +58,7 @@ type GetSkipInfoParams struct {
 	Token      string `json:"token" form:"token"`
 	Domain     string `json:"domain" form:"domain"`
 	SkipVerify int32  `json:"skipVerify" form:"skipVerify"`
+	Cookie     string `json:"cookie" form:"cookie"` // [lc-295] 会话 Cookie, 注入 NAS 请求鉴权
 }
 
 type GetSkipInfoResp struct {
@@ -71,4 +73,5 @@ type SetSkipInfoReq struct {
 	Token      string `json:"token" form:"token"`
 	Domain     string `json:"domain" form:"domain"`
 	SkipVerify int32  `json:"skipVerify" form:"skipVerify"`
+	Cookie     string `json:"cookie" form:"cookie"` // [lc-295] 会话 Cookie, 注入 NAS 请求鉴权
 }
