@@ -40,6 +40,13 @@ _FILLER = ["高清","1080p","720p","480p","4k","合集","全集","更新","熟�
 SIM_HIGH = 0.90
 SIM_LOW  = 0.70
 
+# 视频区兜底接受阈值：低于 SIM_LOW 但 >= 此值、且含集数/核心剧名的视频，仍纳入候选池，
+# 作为「高相似候选无弹幕时」的兜底。典型场景：官方译名带长副标题，搬运标题只写简称
+# （如「小书痴的下克上 第四季」省掉「为了成为图书管理员而不择手段」），标题相似度仅 ~0.4，
+# 但确为同番且有海量弹幕。噪声候选（reaction/无关视频 sim 多在 0.00~0.09）仍被排除。
+# 调用方 main() 会逐个候选拉弹幕、取弹幕最多者，故放低下限不会误用错误视频。
+VIDEO_SIM_FLOOR = 0.40
+
 def _norm(t):
     """剧名归一化：去标点/空白/集数标记/填充词，仅留小写识别核心（保留数字以区分季/续作）。"""
     t = (t or "").lower()
@@ -363,19 +370,21 @@ def search_video(title, ep_num):
         log(f"[视频区]   候选[{i}]{tag} sim={sim:.2f} 弹幕={vr} {t!r}")
 
     results = []
-    # 已按 (单集>不明确>合集, 相似度↓, 弹幕数↓) 排序。单次遍历：只要 sim>=SIM_LOW 即采纳，
-    # 并保留上面的 kind 排序顺序（不再分 SIM_HIGH/SIM_LOW 两轮，否则高相似度合集会插到单集前面）。
-    # 调用方 main() 据此优先拿到「对应集」弹幕。
+    # 已按 (单集>不明确>合集, 相似度↓, 弹幕数↓) 排序。单次遍历：sim>=VIDEO_SIM_FLOOR 即采纳
+    # （VIDEO_SIM_FLOOR 低于 SIM_LOW，作为「高相似候选无弹幕时」的兜底，纳入简称/异译标题但确为同番、
+    # 且有弹幕的视频，如官方长副标题被搬运省略导致相似度仅~0.4）。噪声候选(sim<此值)仍排除。
+    # 调用方 main() 据此优先拿到「对应集」弹幕；候选逐个尝试拉弹幕，弹幕最多者胜出。
     seen_cids = set()
     for sim, kind, t, bvid, vr in scored:
-        if sim < SIM_LOW:
+        if sim < VIDEO_SIM_FLOOR:
             continue
         cid = cid_from_bvid(bvid, ep_num, title_hint=t)
         if cid and cid not in seen_cids:
             seen_cids.add(cid)
             info = {"source": "video", "bvid": bvid}
             tag = {0: "[单集]", 1: "[不明]", 2: "[合集]"}.get(kind, "?")
-            log(f"[视频区] sim={sim:.2f}{tag} 候选: {t!r} cid={cid}")
+            mark = "" if sim >= SIM_LOW else " [兜底]"
+            log(f"[视频区] sim={sim:.2f}{tag}{mark} 候选: {t!r} cid={cid}")
             results.append((cid, t, info))
     if not results:
         log("[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）")
