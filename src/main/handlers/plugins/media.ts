@@ -545,6 +545,9 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
     const wantPot = (player || fnConfig.getDefaultPlayer()) === 'potplayer';
     const playerType = wantPot ? ply.PlayerType.POTPLAYER : ply.PlayerType.MPV;
     const playerPath = wantPot ? getPotPlayerPath() : getMpvPlayerPath();
+    // [lc-298] 播放器检测：仅 MPV 触发弹幕搜索/下载（由 MPV 内部 uosc_danmaku Lua 脚本实现）；
+    // PotPlayer / 原生播放均不触发主进程弹幕拉取（PotPlayer 的弹幕触发已在 potplayer.ts 移除）。
+    log.info(`[播放器检测] 请求播放器=${player || '默认(' + fnConfig.getDefaultPlayer() + ')'} → 实际=${playerType === ply.PlayerType.MPV ? 'MPV(触发弹幕)' : 'PotPlayer(不触发弹幕)'}`);
     if (!playerPath) {
         if (wantPot) {
             log.error('无法找到 PotPlayer 播放器路径（请在设置中指定）');

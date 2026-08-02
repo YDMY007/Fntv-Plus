@@ -15,9 +15,6 @@ import {
     PlayerControlAction
 } from '../types';
 import { PlayerFactory } from '../factory';
-import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku';
-import { isSyncableItemType } from '../../fn_api/types';
-import { mergeSubtitleWithDanmaku } from '../../danmaku/subtitleMerge';
 import logger from '../../logger';
 import { playbackShim } from '../../../main/common/playbackShim';
 const log = logger.component('potplayer');
@@ -483,29 +480,14 @@ export class PotPlayer extends BasePlayer {
     /**
      * 计算字幕挂载参数（-sub=...），并登记临时文件供退出时清理。
      */
-    private computeSubArgs(subPaths: string[], dmAss: string | null): string[] {
-        if (subPaths.length > 0 && dmAss) {
-            const merged = mergeSubtitleWithDanmaku(subPaths[0], dmAss);
-            if (merged) {
-                // 合并文件 + 翻译原文件都进清理列表；弹幕 ASS 走缓存不删
-                this.subtitleFilePaths = [merged, ...subPaths];
-                log.info('[PotPlayer] 字幕(合并轨·最稳): ' + merged);
-                return [`-sub=${merged}`];
-            }
-            // 合并失败：退回「仅弹幕单轨」（保住弹幕，绝不退回需手动开双字幕的多轨）。
-            this.subtitleFilePaths = subPaths;
-            log.warn('[PotPlayer] 字幕(合并失败·退回仅弹幕单轨): ' + dmAss);
-            return [`-sub=${dmAss}`];
-        }
+    // [lc-298] PotPlayer 不触发弹幕搜索/下载（弹幕为 MPV 专属，由 MPV 内部 uosc_danmaku Lua 脚本实现）；
+    // 故此处只负责翻译字幕挂载，不再拉取/合并 B站弹幕 ASS。
+    private computeSubArgs(subPaths: string[]): string[] {
         if (subPaths.length > 0) {
             this.subtitleFilePaths = subPaths;
             const args = this.buildSubtitleArgs(subPaths);
             log.info('[PotPlayer] 字幕(仅翻译): ' + subPaths.join(' | '));
             return args;
-        }
-        if (dmAss) {
-            log.info('[PotPlayer] 字幕(仅弹幕): ' + dmAss);
-            return [`-sub=${dmAss}`];
         }
         return [];
     }
@@ -520,8 +502,9 @@ export class PotPlayer extends BasePlayer {
         // 清理上一轮残留临时字幕，避免新旧集字幕叠加
         this.cleanupSubtitleFile();
         const subPaths: string[] = [];
-        let dmAss: string | null = null;
 
+        // [lc-298] 仅拉取翻译字幕。弹幕搜索/下载为 MPV 专属（MPV 内部 Lua 脚本实现），
+        // PotPlayer 不再触发，避免无意义的 B站弹幕请求与合并。
         const subChain = (async () => {
             try {
                 const fnapi = this.getFnApi();
@@ -536,32 +519,11 @@ export class PotPlayer extends BasePlayer {
             }
         })();
 
-        const dmChain = (async () => {
-            try {
-                const dmTitle = normalizeDanmakuTitle(item.tvTitle || item.title);
-                const dmEp = item.episodeNumber || 0;
-                if (!isSyncableItemType(item.type)) {
-                    log.info(`[PotPlayer] 媒体类型 "${item.type || 'null'}" 不在弹幕匹配范围(仅电影/电视节目/混合影片)，跳过弹幕`);
-                    return;
-                }
-                log.info(`[PotPlayer] === 弹幕 ASS 获取开始 ===`);
-                log.info(`[PotPlayer] dmTitle="${dmTitle}", dmEp=${dmEp}, tvTitle="${item.tvTitle}", title="${item.title}"`);
-                if (dmTitle) {
-                    dmAss = await getDanmakuAss(dmTitle, dmEp);
-                    log.info(`[PotPlayer] getDanmakuAss 返回: ${dmAss || 'null'}`);
-                } else {
-                    log.warn('[PotPlayer] ⚠️ dmTitle 为空，跳过弹幕');
-                }
-            } catch (dmErr: any) {
-                log.warn('PotPlayer 弹幕 ASS 获取异常(已忽略):', dmErr?.message || dmErr);
-            }
-        })();
-
-        // 6s 超时保护：字幕/弹幕未就绪也不阻塞（视频已在播），超时则本轮不挂字幕
+        // 6s 超时保护：字幕未就绪也不阻塞（视频已在播），超时则本轮不挂字幕
         const guard = new Promise<void>((resolve) => setTimeout(resolve, 6000));
-        await Promise.race([Promise.all([subChain, dmChain]), guard]);
+        await Promise.race([subChain, guard]);
 
-        return this.computeSubArgs(subPaths, dmAss);
+        return this.computeSubArgs(subPaths);
     }
 
     /**
@@ -1085,29 +1047,8 @@ export class PotPlayer extends BasePlayer {
             log.warn('PotPlayer 获取外挂字幕失败(已忽略):', subErr?.message || subErr);
         }
 
-        // B站弹幕（legacy 兜底模式同样走合并轨方案，与逐集模式一致）
-        let dmAss: string | null = null;
-        try {
-            const dmTitle = startItem.tvTitle || startItem.title;
-            const dmEp = startItem.episodeNumber || 0;
-            if (!isSyncableItemType(startItem.type)) {
-                log.info(`[PotPlayer][legacy] 媒体类型 "${startItem.type || 'null'}" 不在弹幕匹配范围(仅电影/电视节目/混合影片)，跳过弹幕`);
-            } else {
-                log.info(`[PotPlayer][legacy] === 弹幕 ASS 获取开始 ===`);
-                log.info(`[PotPlayer][legacy] dmTitle="${dmTitle}", dmEp=${dmEp}, tvTitle="${startItem.tvTitle}", title="${startItem.title}"`);
-                if (dmTitle) {
-                    dmAss = await getDanmakuAss(dmTitle, dmEp);
-                    log.info(`[PotPlayer][legacy] getDanmakuAss 返回: ${dmAss || 'null'}`);
-                } else {
-                    log.warn('[PotPlayer][legacy] ⚠️ dmTitle 为空，跳过弹幕');
-                }
-            }
-        } catch (dmErr: any) {
-            log.warn('PotPlayer[legacy] 弹幕 ASS 获取异常(已忽略):', dmErr?.message || dmErr);
-        }
-
-        // 字幕（翻译 + 弹幕）挂载：同逐集模式，合并优先（见 launchEpisode 注释）
-        this.pushSubtitles(launchArgs, subPaths, dmAss);
+        // [lc-298] legacy 兜底模式同样只挂翻译字幕，不触发 B站弹幕搜索/下载（弹幕为 MPV 专属）。
+        this.pushSubtitles(launchArgs, subPaths);
 
         if (args && args.length > 0) {
             launchArgs.push(...args);
@@ -1149,15 +1090,12 @@ export class PotPlayer extends BasePlayer {
     }
 
     /**
-     * 把翻译字幕 + 弹幕 ASS 挂到 PotPlayer 启动参数。
-     * 优先【合并成同一个 ASS 轨道】用单个 -sub 加载（最稳，不依赖 PotPlayer 双字幕开关）；
-     * 合并失败则退回【重复 -sub=】多轨道加载（此时弹幕需 PotPlayer 手动开次字幕输出）。
+     * 把翻译字幕挂到 PotPlayer 启动参数（仅翻译，不挂弹幕；弹幕为 MPV 专属）。
      * @param launchArgs 启动参数数组（直接 push）
      * @param subPaths   已下载的翻译字幕路径数组
-     * @param dmAss      弹幕 ASS 路径（可能为 null）
      */
-    private pushSubtitles(launchArgs: string[], subPaths: string[], dmAss: string | null): void {
-        const args = this.computeSubArgs(subPaths, dmAss);
+    private pushSubtitles(launchArgs: string[], subPaths: string[]): void {
+        const args = this.computeSubArgs(subPaths);
         if (args.length > 0) launchArgs.push(...args);
     }
 
