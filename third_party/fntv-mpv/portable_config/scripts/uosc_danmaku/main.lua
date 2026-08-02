@@ -851,9 +851,12 @@ mp.register_event("file-loaded", function()
     local dir = get_parent_directory(path)
     local filename = mp.get_property('filename/no-ext')
     local video = mp.get_property_native("current-tracks/video")
-    local fps = mp.get_property_number("container-fps", 0)
     local duration = mp.get_property_number("duration", 0)
-    if not video or video["image"] or video["albumart"] or fps < 23 or duration < 60 then
+    -- ⚠️ 不能用 container-fps 做自动搜索闸门：网络流（fnOS 串流）在 file-loaded 瞬间
+    -- container-fps 常为 0，会被 `0 < 23` 误杀，导致整段自动弹幕搜索（弹弹play + B站）
+    -- 全部跳过——表现为「两条都不自动触发、但手动能用」（手动走菜单路径，不经过此 gate）。
+    -- 仅保留 duration<60 + 图片/专辑封面 守卫，与旧 init() 兜底逻辑保持一致。
+    if not video or video["image"] or video["albumart"] or duration < 60 then
         return
     end
 
