@@ -516,6 +516,10 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
 
     // 寻找当前播放的媒体在数组中的位置
     const currentIndex = playList.findIndex(item => item.itemGuid === itemGuid);
+    log.info(`[选集诊断] 被点击 itemGuid=${itemGuid}, currentIndex=${currentIndex}/${playList.length - 1}, 列表前3项guid=[${playList.slice(0, 3).map(i => i.itemGuid).join(', ')}]`);
+    if (currentIndex < 0) {
+        log.error(`[选集诊断] 未匹配到被点击集(currentIndex=-1)，将静默从第1集(索引0)开始——疑似 getEpisodeList 返回的 guid 与 getPlayInfo 不一致`);
+    }
 
     // [续播修复] 被点击集的真实观看进度在 getPlayInfo(id) 返回的 response.data.ts 中；
     // 而上面构造 playList 用的是 getEpisodeList 每集的 ts(往往未被 fnOS 回填)，
