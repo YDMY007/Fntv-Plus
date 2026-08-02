@@ -19,6 +19,7 @@ import { getDanmakuAss, normalizeDanmakuTitle } from '../../danmaku/biliDanmaku'
 import { isSyncableItemType } from '../../fn_api/types';
 import { mergeSubtitleWithDanmaku } from '../../danmaku/subtitleMerge';
 import logger from '../../logger';
+import { playbackShim } from '../../../main/common/playbackShim';
 const log = logger.component('potplayer');
 
 /**
@@ -29,8 +30,13 @@ const log = logger.component('potplayer');
  *      并 emit PROGRESS 事件（由 media.ts 写回 fnOS 续播记录）——即「功能二：实时进度回传」
  *   3) 采用「逐集拉起」而非单一 m3u8 连播：每集独立带 /sub 字幕 + /seek 续播点，
  *      由 potctl 轮询检测到本集播完即自动拉起下一集——顺带解决「多集连播只有首集带字幕」的限制
+ *   4) [lc-297] 播放链接改用 playbackShim 可读名 URL(http://127.0.0.1:22347/p/<id>/<剧名>.mp4)，
+ *      PotPlayer 显示可读中文名而非代理 GUID URL，并避开 m3u8 无 BOM 被按 GBK 解析的乱码；
+ *      单视频项同时让 /seek 续播稳定生效。启动目标集后，populatePlaylistPanel 经 /Current /add
+ *      把【其余所有集】以可读名追加进 PotPlayer 播放列表面板(显示全部集数)，播放仍由 app 逐集驱动。
  *
- * 播放链接本身就是本地代理 URL(http://127.0.0.1:22346/...)，token 已编入，故无需额外传 header。
+ * 播放链接本身就是本地代理 URL(http://127.0.0.1:22346/...)，token 已编入，故无需额外传 header；
+ * shim(22347) 仅做本地逐字节代理并套一层可读名，无额外卡顿。
  */
 export class PotPlayer extends BasePlayer {
     private proc: ChildProcess | null = null;
@@ -54,6 +60,7 @@ export class PotPlayer extends BasePlayer {
     private active: boolean = false;           // 处于「播放中」意图态（与 this.proc 解耦，抗 /current 进程重启造成的轮询中断）
     private exited: boolean = false;           // EXIT 事件是否已发出（幂等，避免重复刷新 fnOS）
     private missCount: number = 0;             // 连续未找到 PotPlayer 窗口次数（用于判定真实关闭 vs 瞬时丢失）
+    private mismatchCount: number = 0;         // 连续时长不匹配次数（用于面板手动切集的兜底同步，避免单次抖动误判）
 
     constructor(config: Config) {
         super(config);
@@ -163,6 +170,12 @@ export class PotPlayer extends BasePlayer {
 
         // 启动进度轮询（仅启动一次）
         this.startPoller();
+
+        // [lc-297] 目标集已在播；延时等 PotPlayer 窗口就绪后，把其余所有集以可读名追加到面板(display only)。
+        // 既让面板显示本系列全部集数，又不触发 PotPlayer 自身连播(仍由 app 逐集驱动)。
+        setTimeout(() => {
+            if (this.active && !this.exited) this.populatePlaylistPanel(index);
+        }, 900);
 
         // 异步挂幕：先开播、后挂字幕/弹幕，避免网络请求阻塞启动（与 MPV 同款）
         this.resolveSubtitleArg(index)
@@ -329,8 +342,9 @@ export class PotPlayer extends BasePlayer {
         this.currentIndex = index;
         this.currentItem = item;
 
-        // 直接用 proxy 原始 URL（不经 shim 代理层，避免额外 HTTP 转发导致卡顿）
-        const launchArgs: string[] = [item.playLink];
+        // 用 playbackShim 可读名 URL 启动：PotPlayer 解码后显示「剧名 - S01E04: 集标题」而非
+        // 代理 GUID URL；同时单视频项使 /seek 续播稳定生效(shim 仅为本地 22347 逐字节代理, 无卡顿)。
+        const launchArgs: string[] = [this.getShimUrl(item)];
 
         // 续播跳转：/seek=<秒>（与 MPV 同样兜底：即将到达片尾不跳转）
         const duration = item.duration || 0;
@@ -375,17 +389,14 @@ export class PotPlayer extends BasePlayer {
         const resumeTs = (item.ts > 0 && duration > 0 && item.ts <= 0.98 * duration) ? Math.floor(item.ts) : 0;
         this.currentProgress = { ts: resumeTs, duration };
 
-        // [续播修复 lc-280] 只放目标集一个 EXTINF（可读标题 + 列表不重复 + 单流便于 /seek 续播），
-        // 不再全集合一（避免 PotPlayer 自行连播与 advanceEpisode 跳集冲突 + EXT-X-START 续播失效）。
-        const content = this.generateM3U8Playlist([item], resumeTs);
-        this.playlistFilePath = path.join(os.tmpdir(), `potplayer_playlist_${Date.now()}.m3u8`);
-        fs.writeFileSync(this.playlistFilePath, content, 'utf-8');
-        log.info(`[playlist] 生成单集 m3u8(guid=${item.itemGuid}, 续播=${resumeTs}s): ${this.playlistFilePath}`);
+        // [lc-297] 改用 playbackShim 单条可读名 URL 启动(替代单集 m3u8)：
+        //  - 文件名显示「剧名 - S01E04: 集标题」而非代理 GUID URL，且避开 PotPlayer 按 GBK 读无 BOM UTF-8 m3u8 的乱码；
+        //  - 单视频项使 /seek 续播稳定生效(lc-247/280 的 m3u8 EXT-X-START / 整体 /seek 均不可靠)；
+        //  - 播放列表其余集由 populatePlaylistPanel 经 /Current /add 追加到面板(见 launchEpisode)，不在此 m3u8 内。
+        this.playlistFilePath = '';
+        const launchArgs: string[] = [this.getShimUrl(item)];
 
-        // 仅传 m3u8 文件路径（单一参数，启动快、无重复）
-        const launchArgs: string[] = [this.playlistFilePath];
-
-        // [续播修复 lc-280] 单 EXTINF m3u8 下 /seek 对单流有效(比全集合一更可能生效)；EXT-X-START 已在 m3u8 内双保险
+        // 续播跳转：单视频项下 /seek 对当前播放内容稳定生效
         if (resumeTs > 0) {
             launchArgs.push(`/seek=${this.formatSeekTime(resumeTs)}`);
         }
@@ -395,7 +406,78 @@ export class PotPlayer extends BasePlayer {
             launchArgs.push(...this.lastArgs);
         }
 
+        log.info(`[launch] 单集 shim URL 启动(guid=${item.itemGuid}, 续播=${resumeTs}s, 标题=${this.getTitle(item)})`);
         return launchArgs;
+    }
+
+    /**
+     * 生成 PotPlayer 可读名 shim URL：displayName 经 playbackShim 编码为
+     * http://127.0.0.1:22347/p/<id>/<剧名>.mp4，PotPlayer 解码后显示可读中文名。
+     */
+    private getShimUrl(item: PlayItem): string {
+        return playbackShim.makeUrl(this.getTitle(item), item.playLink);
+    }
+
+    /**
+     * 把【除当前集外】的全部集数以可读名 shim URL 追加进 PotPlayer 播放列表面板(display only)，
+     * 使面板正确显示本系列所有集数；但播放仍由本 app 逐集驱动(launchEpisode/advanceEpisode)，
+     * 不依赖 PotPlayer 自身连播，从而避免 lc-247/280 的「PotPlayer 自行连播跳集」冲突。
+     * 在 launchEpisode 启动目标集并延时(等窗口就绪)后调用。
+     */
+    private populatePlaylistPanel(exceptIndex: number): void {
+        if (!this.config.playerPath) return;
+        const adds: string[] = [];
+        for (let i = 0; i < this.playlist.length; i++) {
+            if (i === exceptIndex) continue;
+            adds.push(this.getShimUrl(this.playlist[i]));
+        }
+        if (adds.length === 0) return;
+
+        // PotPlayer /Current /add <url> 把单条追加进现有实例播放列表(不切换播放)；
+        // 多条则重复 /add 开关。PotPlayer 懒加载, 不会像「多 URL 命令行」那样启动预扫描全部元数据(lc-253)。
+        const args: string[] = ['/Current'];
+        for (const u of adds) {
+            args.push('/add', u);
+        }
+        log.info(`[playlist] 追加其余 ${adds.length} 集到 PotPlayer 面板(可读名)`);
+        const fwd = spawn(this.config.playerPath, args, { detached: false, stdio: 'ignore', windowsHide: false });
+        fwd.on('error', (e: any) => log.warn('[playlist] 追加失败(忽略):', e?.message || e));
+        fwd.unref?.();
+    }
+
+    /**
+     * 面板手动切集兜底同步：用户在 PotPlayer 面板内点了别的集时，potctl 无法报告当前列表索引，
+     * 故这里用「实际播放时长」与跟踪集时长比对——连续两次不符且能在播放列表里唯一匹配到某集时，
+     * 把 currentIndex/currentItem 同步到正确集并重新挂该集字幕，避免进度写到错误的集。
+     * 单次抖动(拖动/seek 瞬间)不触发(需连续两次)，且必须唯一匹配，防止误判。
+     */
+    private resyncByDuration(durSec: number): void {
+        if (durSec <= 0 || !this.currentItem) { this.mismatchCount = 0; return; }
+        const expected = this.playlist[this.currentIndex]?.duration || 0;
+        if (Math.abs(expected - durSec) <= 3) { this.mismatchCount = 0; return; }
+
+        this.mismatchCount++;
+        if (this.mismatchCount < 2) return; // 需连续两次不符，过滤单次 seek/抖动
+
+        let matchIdx = -1, matchCount = 0;
+        for (let i = 0; i < this.playlist.length; i++) {
+            if (Math.abs((this.playlist[i].duration || 0) - durSec) <= 3) { matchIdx = i; matchCount++; }
+        }
+        if (matchCount === 1 && matchIdx !== this.currentIndex) {
+            const switched = this.playlist[matchIdx];
+            log.info(`[播放列表同步] 检测到手动切集: 索引${this.currentIndex}(${this.currentItem.itemGuid}, dur=${expected}) → 索引${matchIdx}(${switched.itemGuid}, dur=${durSec})`);
+            this.currentIndex = matchIdx;
+            this.currentItem = switched;
+            this.currentProgress = { ts: 0, duration: durSec };
+            this.mismatchCount = 0;
+            // 重新挂该集字幕/弹幕(异步, 不阻塞)
+            this.resolveSubtitleArg(matchIdx)
+                .then((subArgs) => { if (subArgs.length > 0) this.attachSubtitle(subArgs); })
+                .catch((e: any) => log.warn('[播放列表同步] 字幕重挂失败(忽略):', e?.message || e));
+        } else {
+            // 无法唯一匹配(如两集时长恰好相同) → 不贸然改 currentIndex, 仅复位计数等下次再判
+            this.mismatchCount = 0;
+        }
     }
 
     /**
@@ -691,6 +773,10 @@ export class PotPlayer extends BasePlayer {
                         }
                     }
 
+                    // [lc-297] 面板手动切集兜底：先把实际时长与跟踪集比对，必要时同步 currentIndex/currentItem
+                    // (防用户在 PotPlayer 面板点了别的集导致进度写到错误集)，随后再用真实位置回写。
+                    this.resyncByDuration(durSec);
+
                     this.currentProgress = { ts: posSec, duration: durSec };
                     this.emitProgress(posSec, durSec);
 
@@ -951,7 +1037,10 @@ export class PotPlayer extends BasePlayer {
      * 标题格式：getTitle() 返回的「剧名 - S01E04: 集标题」+ [极速]
      */
     private generateM3U8Playlist(infos: PlayItem[], resumeTs: number = 0): string {
-        let content = '#EXTM3U\n';
+        // [lc-297] 前置 UTF-8 BOM：PotPlayer 在中文 Windows 默认按系统代码页(GBK)读 m3u8，
+        // 无 BOM 的 UTF-8 中文会被解析成乱码(文件名乱码根因)。主路径已改用 shim 可读名 URL，
+        // 此 m3u8 仅作 potctl 缺失时的 legacy 兜底，仍加 BOM 确保标题不乱码。
+        let content = '\uFEFF#EXTM3U\n';
         // [续播] HLS 标准起始偏移标签：PotPlayer 作为 HLS 客户端应尊重，从目标集 ts 秒开始播。
         // （命令行 /seek 对 m3u8 文件整体无效，见 lc-247；EXT-X-START 是 m3u8 内部标签，PotPlayer 应当尊重）
         if (resumeTs > 0) {
