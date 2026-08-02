@@ -277,8 +277,33 @@ function getInjectionScript(username: string, password: string): string {
                     return;
                 }
 
+                // 清空所有账号/密码输入框(防浏览器自动填充或历史残留的错误凭据干扰 FN ID 授权)
+                function clearAllInputs() {
+                    var inputs = document.querySelectorAll('input');
+                    for (var i = 0; i < inputs.length; i++) {
+                        var t = inputs[i].type;
+                        if (t === 'password' || t === 'text' || t === 'email' || t === '' || t === undefined) {
+                            triggerInput(inputs[i], '');
+                        }
+                    }
+                }
+
+                // ★ [lc-287/lc-289] 检测「使用 NAS 登录」类链接(区分 FN ID 流程与纯本地登录)
+                function isNasLoginEl(el) {
+                    var t = (el.innerText || el.textContent || '').trim();
+                    return t.indexOf('使用 NAS 登录') !== -1 ||
+                           t.indexOf('使用NAS登录') !== -1 ||
+                           t.indexOf('使用NAS 登录') !== -1 ||
+                           t.indexOf('使用 NAS 账号登录') !== -1 ||
+                           t.indexOf('使用NAS账号登录') !== -1 ||
+                           t.indexOf('NAS 登录') !== -1 ||
+                           t.indexOf('NAS登录') !== -1 ||
+                           (t.indexOf('切换') !== -1 && t.indexOf('NAS') !== -1) ||
+                           (t.indexOf('改用') !== -1 && t.indexOf('NAS') !== -1);
+                }
+
                 var attempts = 0;
-                var maxAttempts = 20; // 最多试 4 秒(20 × 200ms)
+                var maxAttempts = 25; // 最多试 5 秒(25 × 200ms)
                 var timer = setInterval(function() {
                     attempts++;
 
@@ -289,26 +314,24 @@ function getInjectionScript(username: string, password: string): string {
                         return;
                     }
 
-                    // ★ [lc-287] 优先: 检测「使用 NAS 登录」/「使用NAS登录」链接并点击
+                    // ★ [lc-287/lc-289] 优先: 检测「使用 NAS 登录」类链接并点击
                     //    这是 FN ID 流程落到影视本地登录页时的正确路径(跳授权确认而非输密码).
                     var nasLoginLink =
-                        Array.from(document.querySelectorAll('a, span, div, button, label, p')).find(function(el) {
-                            var t = (el.innerText || el.textContent || '').trim();
-                            return t.indexOf('使用 NAS 登录') !== -1 ||
-                                   t.indexOf('使用NAS登录') !== -1 ||
-                                   t.indexOf('使用NAS 登录') !== -1;
-                        })
+                        Array.from(document.querySelectorAll('a, span, div, button, label, p, li, td, h1, h2, h3, h4')).find(isNasLoginEl)
                         || document.querySelector('a[href*="nas"], a[href*="NAS"]');
                     if (nasLoginLink) {
                         clearInterval(timer);
-                        // ★ [lc-288] 设置全局标记,防止后续脚本重新注入后再填密码
+                        // ★ [lc-289] 点击前先清空表单: 飞牛前端点「使用 NAS 登录」会先读取表单里的
+                        //   (浏览器自动填充/历史残留的) NAS 隐私账号密码做一次错误校验 → "账号密码错误",
+                        //   导致授权页出不来。清空后再点击即跳授权确认页。此清空同样修复"手动点击也报错"。
                         window.__fntv_nas_login_clicked = true;
-                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 自动点击 (第 " + attempts + " 次尝试) [防重入已启用]");
+                        clearAllInputs();
+                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 清空表单并自动点击 (第 " + attempts + " 次尝试)");
                         nasLoginLink.click();
                         return;
                     }
 
-                    // 回退: 未找到 NAS 登录链接 → 尝试旧逻辑(填充用户名密码+点登录)
+                    // 回退: 未找到 NAS 登录链接 → 纯本地登录(填充用户名密码+点登录)
                     // 多级选择器: id → name → placeholder → type+顺序
                     var uInput = document.getElementById('username')
                         || document.querySelector('input[name="username"]')
