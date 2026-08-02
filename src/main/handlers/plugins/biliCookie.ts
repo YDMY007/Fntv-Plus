@@ -237,9 +237,11 @@ async function handleManualCookie(_event: any, ck?: string): Promise<{ ok: boole
   }
 }
 
-// 打开弹幕文件夹（os.tmpdir() 根目录，与 MPV DANMAKU_PATH 落盘目录一致：弹幕直接写在 TEMP 根，不再建子目录）
+// 打开弹幕文件夹（与 Node 端 biliDanmaku.ts CACHE_DIR 完全一致：%PUBLIC%\fnos-danmaku，
+// 即 MPV DANMAKU_PATH 落盘目录。按钮打开的就是"对应的弹幕文件夹"，不再开 TEMP 根）
 async function handleOpenDanmakuFolder(): Promise<{ ok: boolean; error?: string }> {
-  const dir = os.tmpdir();
+  const base = process.env.PUBLIC || process.env.ProgramData || os.tmpdir();
+  const dir = path.join(base, 'fnos-danmaku');
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const err = await shell.openPath(dir);

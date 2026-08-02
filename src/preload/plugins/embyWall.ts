@@ -3202,7 +3202,7 @@ function handle(): void {
     danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
     danBody.appendChild(danHint);
 
-    // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘一致：%TEMP% 根目录，不再自建 fnos-danmaku 子目录）
+    // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘、Node 端弹幕缓存一致：%PUBLIC%\fnos-danmaku）
     const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
     biliFolderBtn.style.marginTop = '10px';
     danBody.appendChild(biliFolderBtn);

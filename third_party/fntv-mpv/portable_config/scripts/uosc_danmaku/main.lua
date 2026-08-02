@@ -21,11 +21,14 @@ require("modules/update")
 require("apis/dandanplay")
 require('apis/extra')
 
--- [修复] 弹幕直接落盘到 TEMP 根目录（与设置面板"打开弹幕文件夹"打开的是同一目录），
--- 不再自建 fnos-danmaku 子目录：该子目录在部分机器上因路径含 forward-slash 导致
--- `cmd /c mkdir` 报"语法错误"而建不起来，连带弹幕写不进去。回退到原始 TEMP 根行为。
--- TEMP/TMP 根目录必然存在，无需额外 mkdir。
-DANMAKU_PATH = os.getenv("TEMP") or os.getenv("TMP") or "/tmp/"
+-- [修复 lc-306] 弹幕落盘目录与 Node 端弹幕缓存（biliDanmaku.ts CACHE_DIR）统一为
+-- %PUBLIC%\fnos-danmaku（Windows 固定英文路径，规避中文用户名问题），同时与设置面板
+-- "打开弹幕文件夹"按钮打开的是同一目录——按钮打开的才是"对应的弹幕文件夹"。
+-- 不再落到 TEMP 根（lc-305 的回退）：TEMP 根混入大量无关文件，且 Node 端弹幕实际缓存
+-- 在 %PUBLIC%\fnos-danmaku，按钮开 TEMP 根会让用户找不到自己的弹幕。
+-- 该目录由 Node（biliDanmaku.ts fs.mkdirSync）与 Python（bili_danmaku.py os.makedirs）
+-- 负责创建，MPV 侧不做 cmd mkdir，故不会触发之前 forward-slash 的"语法错误"。
+DANMAKU_PATH = utils.join_path(os.getenv("PUBLIC") or os.getenv("ProgramData") or os.getenv("TEMP") or os.getenv("TMP") or "/tmp/", "fnos-danmaku")
 HISTORY_PATH = mp.command_native({"expand-path", options.history_path})
 PID = utils.getpid()
 DANMAKU = {sources = {}, count = 1}
