@@ -260,16 +260,34 @@ function getInjectionScript(username: string, password: string): string {
             //   正确做法: 点击底部的「使用 NAS 登录」链接 → 跳转授权确认页 → 确认即完成登录.
             //   故优先检测「使用 NAS 登录」类链接, 命中则直接点击; 仅未找到时才回退到旧逻辑(填凭据+点登录).
             //
+            // [lc-288] 全局防重入: did-finish-load 每次导航都重新注入整个脚本(全新闭包,变量全重置).
+            //   点「使用 NAS 登录」后发生页面跳转,新页面脚本重新注入,若新页面仍含/login路径或登录元素,
+            //   而「使用 NAS 登录」链接尚未渲染,则回退逻辑会抢先填入NAS隐私账号密码→"账号密码错误".
+            //   故用 window.__fntv_nas_login_clicked 全局标记(跨注入持久),点过一次后永久禁用自动填密码.
+            //
             // 多选择器兼容: fnOS 不同版本/部署方式的 input id/name/placeholder 可能不同.
             // 轮询重试: 外网中继跳转后页面加载比内网慢, 单次 setTimeout 200ms 不够.
             (function tryAutoLogin() {
                 if (window.location.href.indexOf('/login') === -1 &&
                     window.location.href.indexOf('/signin') === -1) return;
 
+                // ★ [lc-288] 若之前已点过「使用 NAS 登录」,则永远不再自动填密码(跨注入持久)
+                if (window.__fntv_nas_login_clicked) {
+                    console.log("[fntv-electron] 已点过「使用 NAS 登录」, 跳过自动填充 (防重入)");
+                    return;
+                }
+
                 var attempts = 0;
                 var maxAttempts = 20; // 最多试 4 秒(20 × 200ms)
                 var timer = setInterval(function() {
                     attempts++;
+
+                    // ★ [lc-288] 二次检查(轮询过程中可能被其他代码设置)
+                    if (window.__fntv_nas_login_clicked) {
+                        clearInterval(timer);
+                        console.log("[fntv-electron] 已点过「使用 NAS 登录」, 终止轮询");
+                        return;
+                    }
 
                     // ★ [lc-287] 优先: 检测「使用 NAS 登录」/「使用NAS登录」链接并点击
                     //    这是 FN ID 流程落到影视本地登录页时的正确路径(跳授权确认而非输密码).
@@ -283,7 +301,9 @@ function getInjectionScript(username: string, password: string): string {
                         || document.querySelector('a[href*="nas"], a[href*="NAS"]');
                     if (nasLoginLink) {
                         clearInterval(timer);
-                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 自动点击 (第 " + attempts + " 次尝试)");
+                        // ★ [lc-288] 设置全局标记,防止后续脚本重新注入后再填密码
+                        window.__fntv_nas_login_clicked = true;
+                        console.log("[fntv-electron] 检测到「使用 NAS 登录」链接, 自动点击 (第 " + attempts + " 次尝试) [防重入已启用]");
                         nasLoginLink.click();
                         return;
                     }
