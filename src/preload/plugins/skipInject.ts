@@ -22,27 +22,28 @@ const log = logger;
 const triggeredGuids = new Set<string>();
 
 /**
+ * fnOS 标准 GUID 正则（32 位十六进制，无连字符）。
+ * 与 playMaskButton.ts 的 GUID_RE 保持一致。
+ */
+const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
+
+/** 通过 fetch/XHR 拦截捕获的 guid（最可靠，优先使用） */
+let interceptedGuid: string | null = null;
+
+/**
  * 从当前页面 URL 提取 itemGuid。
+ * 使用 fnOS 标准 GUID 正则（32 位十六进制），与 playMaskButton.ts 的 GUID_RE 一致。
  * 支持的 URL 模式：
  *   /v/movie/{guid}          — 电影
  *   /v/tv/{guid}             — 剧集主页
  *   /v/tv/season/{guid}      — 季
- *   /v/tv/episode/{guid}     — 单集（最常见于播放场景）
+ *   /v/tv/episode/{guid}     — 单集
+ *   /v/video/{guid}          — 视频播放页（部分版本）
  */
 function extractGuidFromUrl(): string | null {
     const url = window.location.href;
-    // 按优先级匹配（越具体越靠前）
-    const patterns = [
-        /\/v\/tv\/episode\/([a-f0-9\-]{36,})/i,
-        /\/v\/tv\/season\/([a-f0-9\-]{36,})/i,
-        /\/v\/movie\/([a-f0-9\-]{36,})/i,
-        /\/v\/tv\/([a-f0-9\-]{36,})(?:\/|$)/i,
-    ];
-    for (const pat of patterns) {
-        const m = url.match(pat);
-        if (m?.[1]) return m[1];
-    }
-    return null;
+    const m = url.match(GUID_RE);
+    return m?.[1] || null;
 }
 
 /**
@@ -50,24 +51,34 @@ function extractGuidFromUrl(): string | null {
  * 复用 playMaskButton 已验证的模式：data 属性、链接 href 等。
  */
 function extractGuidFromDom(): string | null {
+    // 0) 优先使用拦截到的 guid
+    if (interceptedGuid) return interceptedGuid;
+
     // 1) video 元素自身或容器可能带 data 属性
     const video = document.querySelector('video');
     if (video) {
-        const el = video.closest('[data-guid], [data-item-id], [data-itemguid]') as HTMLElement | null;
+        const el = video.closest('[data-guid], [data-item-id], [data-itemguid], [data-id]') as HTMLElement | null;
         if (el) {
-            const g = el.getAttribute('data-guid') || el.getAttribute('data-item-id') || el.getAttribute('data-itemguid');
-            if (g) return g;
+            const g = el.getAttribute('data-guid') || el.getAttribute('data-item-id') ||
+                      el.getAttribute('data-itemguid') || el.getAttribute('data-id');
+            if (g) {
+                const m = g.match(/[a-f0-9]{32}/i);
+                if (m?.[0]) return m[0];
+            }
         }
     }
 
-    // 2) 播放页容器 class
-    const container = document.querySelector('.videoPlayer, .playerPage, #videoPlayer') as HTMLElement | null;
-    if (container) {
-        const g = container.getAttribute('data-guid') || container.getAttribute('data-item-id');
-        if (g) return g;
+    // 2) 播放页容器 class 或页面内任意含 guid 的链接
+    const container = document.querySelector('.videoPlayer, .playerPage, #videoPlayer, [class*="player"]') as HTMLElement | null;
+    const scope = container || document.body;
+    const links = scope.querySelectorAll('a[href]');
+    for (const a of Array.from(links) as HTMLAnchorElement[]) {
+        const m = a.href.match(GUID_RE);
+        if (m?.[1]) return m[1];
     }
 
-    return null;
+    // 3) 当前 URL 再试一次（可能 DOM 变化后 URL 也变了）
+    return extractGuidFromUrl();
 }
 
 /**
@@ -121,6 +132,80 @@ function isVideoPlayerPage(): boolean {
         document.querySelector('.videoPlayer, .playerPage, #videoPlayer')
     );
 }
+
+// ─── fetch/XHR 拦截：捕获播放请求中的 item_guid（最可靠方式）───
+
+/**
+ * 从请求体 JSON 中提取 item_guid。
+ * fnOS 播放接口（getPlayInfo / playvideo）的 POST/GET 请求体里带 item_guid 字段。
+ */
+function tryExtractGuidFromRequestBody(body: any): string | null {
+    if (!body) return null;
+    // 直接字段
+    if (body.item_guid && typeof body.item_guid === 'string' && /^[a-f0-9]{32}$/.test(body.item_guid)) {
+        return body.item_guid;
+    }
+    // 嵌套在 data / params 里
+    for (const key of ['data', 'params', 'query']) {
+        if (body[key]?.item_guid && typeof body[key].item_guid === 'string') {
+            const g = body[key].item_guid.match(/[a-f0-9]{32}/i);
+            if (g?.[0]) return g[0];
+        }
+    }
+    return null;
+}
+
+/** 初始化拦截器（只执行一次） */
+let interceptorSetup = false;
+function setupInterceptors(): void {
+    if (interceptorSetup) return;
+    interceptorSetup = true;
+
+    // 拦截 fetch
+    const origFetch = window.fetch;
+    window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url || '';
+        // 只关注 fnOS 播放相关 API
+        if (url.includes('play') || url.includes('Play') || url.includes('media')) {
+            try {
+                if (init?.body) {
+                    const parsed = JSON.parse(typeof init.body === 'string' ? init.body : '');
+                    const guid = tryExtractGuidFromRequestBody(parsed);
+                    if (guid) {
+                        log.info(`[skipInject] fetch 拦截到 guid=${guid} url=${url.slice(0, 80)}`);
+                        interceptedGuid = guid;
+                    }
+                }
+            } catch { /* 非 JSON body，忽略 */ }
+        }
+        return origFetch.call(this, input, init);
+    };
+
+    // 拦截 XHR
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
+        (this as any)._skipUrl = String(url);
+        return (origOpen as any).call(this, method, url, ...rest);
+    };
+    XMLHttpRequest.prototype.send = function (body?: any) {
+        const url = (this as any)._skipUrl || '';
+        if ((url.includes('play') || url.includes('Play') || url.includes('media')) && body) {
+            try {
+                const parsed = JSON.parse(typeof body === 'string' ? body : '');
+                const guid = tryExtractGuidFromRequestBody(parsed);
+                if (guid) {
+                    log.info(`[skipInject] XHR 拦截到 guid=${guid} url=${url.slice(0, 80)}`);
+                    interceptedGuid = guid;
+                }
+            } catch { /* 非 JSON body，忽略 */ }
+        }
+        return origSend.call(this, body);
+    };
+}
+
+// 页面加载时立即安装拦截器（不等 hooks）
+setupInterceptors();
 
 // ─── 注册钩子 ───
 
