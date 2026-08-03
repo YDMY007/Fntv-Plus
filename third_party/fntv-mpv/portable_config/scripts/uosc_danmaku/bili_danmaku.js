@@ -212,17 +212,18 @@ function jget(url) {
 
 // WBI 签名（与 Python 版逐行一致；mixin 计算后与 Python 一样未参与最终 w_rid，保留以对齐逻辑）
 function wbi_sign(params) {
+    // 返回 Promise<string>：已签名的 query 串（含 w_rid & wts）。
+    // 复用全局 ENC 表作为 WBI mixin 排列（与 B站官方算法一致；imgKey/subKey 现各 32 字符）。
     return jget('https://api.bilibili.com/x/web-interface/nav').then((nav) => {
         const img = nav.data.wbi_img.img_url;
         const sub = nav.data.wbi_img.sub_url;
         const ik = img.split('/').pop().split('.')[0];
         const sk = sub.split('/').pop().split('.')[0];
-        const mixed = crypto.createHash('md5').update(ik + sk).digest('hex');
-        const mixin = mixed.split('').map((c, i) => mixed[ENC[i] % 32]).join('').slice(0, 32);
-        const p = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('');
-        const wts = Math.floor(Date.now() / 1000);
-        const w_rid = crypto.createHash('md5').update(p + wts).digest('hex');
-        return `w_rid=${w_rid}&wts=${wts}`;
+        const mixinKey = ENC.map((i) => (ik + sk)[i]).join('').substring(0, 32);
+        const signed = Object.assign({}, params, { wts: Math.floor(Date.now() / 1000) });
+        const qs = Object.keys(signed).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(signed[k])}`).join('&');
+        const w_rid = crypto.createHash('md5').update(qs + mixinKey).digest('hex');
+        return `${qs}&w_rid=${w_rid}`;
     });
 }
 
@@ -397,6 +398,86 @@ function cid_from_bvid(bvid, ep_num, title_hint) {
     });
 }
 
+// ── 官方番剧（WBI 签名搜索 + pgc 取集 cid）──
+// 说明：B站匿名 search/all/v2 的 media_bangumi 已返回 0，必须用 WBI 签名的
+// wbi/search/type 才有机会拿到官方番剧；且需要登录态 Cookie 才能真正返回结果
+// （匿名时同样为空）。命中后走 pgc/view/web/season 取对应集官方 cid，
+// 官方单集弹幕常几千~上万条，远超 UP主 搬运。无 Cookie / 无结果时自动回退 UP主。
+async function _get_pgc_episodes(season_id) {
+    const apis = [
+        `https://api.bilibili.com/pgc/view/web/season?season_id=${season_id}`,
+        `https://api.bilibili.com/pgc/web/season/section?season_id=${season_id}`,
+    ];
+    for (const url of apis) {
+        try {
+            const d = await jget(url);
+            if (d && d.code === 0 && d.result) {
+                const eps = (d.result.main_section && d.result.main_section.episodes) || d.result.episodes || [];
+                if (eps.length) return eps;
+            }
+        } catch (e) { /* 尝试下一个接口 */ }
+    }
+    return [];
+}
+function _pick_episode(eps, ep_num) {
+    if (!eps || !eps.length) return null;
+    if (ep_num && ep_num >= 1 && ep_num <= eps.length) return eps[ep_num - 1];
+    if (ep_num) {
+        for (const ep of eps) {
+            const tt = (ep.title || '') + ' ' + (ep.long_title || '');
+            if (_ep_in_title(tt, ep_num)) return ep;
+        }
+    }
+    return eps[0];
+}
+async function search_bangumi_wbi(title, ep_num, season_num) {
+    if (!COOKIE) {
+        log('[番剧区WBI] 无登录态 Cookie，跳过官方番剧搜索（匿名 media_bangumi 返回 0）');
+        return [];
+    }
+    let signed;
+    try {
+        signed = await wbi_sign({ keyword: title, search_type: 'media_bangumi' });
+    } catch (e) {
+        log('[番剧区WBI] 签名失败: ' + (e.message || e));
+        return [];
+    }
+    const url = `https://api.bilibili.com/x/web-interface/wbi/search/type?${signed}`;
+    let d;
+    try { d = await jget(url); } catch (e) { log('[番剧区WBI] 搜索请求失败: ' + (e.message || e)); return []; }
+    if (!d || d.code !== 0 || !d.data || !d.data.result) {
+        log(`[番剧区WBI] 无结果 code=${d && d.code} (可能 Cookie 无权限/匿名)`);
+        return [];
+    }
+    const cands = [];
+    for (const item of d.data.result) {
+        const season_id = item.season_id;
+        if (!season_id) continue;
+        const t = String(item.title || '').replace(/<[^>]+>/g, '');
+        const sim = title_sim(title, t);
+        const season = parse_season_from_title(t);
+        const season_match = isSeasonHit(season, season_num);
+        cands.push({ season_id, t, sim, season, season_match });
+    }
+    cands.sort((x, y) => ((y.season_match ? 0 : 1) - (x.season_match ? 0 : 1)) || (y.sim - x.sim));
+    log(`[番剧区WBI] 命中候选 ${cands.length} 个`);
+    const results = [];
+    const seen = new Set();
+    for (const c of cands) {
+        if (c.sim < SIM_LOW) continue;
+        const eps = await _get_pgc_episodes(c.season_id);
+        const ep = _pick_episode(eps, ep_num);
+        if (!ep || !ep.cid) continue;
+        if (seen.has(ep.cid)) continue;
+        seen.add(ep.cid);
+        const info = { source: 'bangumi', season_id: c.season_id, sim: c.sim, season_match: c.season_match };
+        const epLabel = ep.long_title ? `${ep.title} ${ep.long_title}` : (ep.title || '');
+        results.push([ep.cid, `${c.t}${epLabel ? ' (' + epLabel + ')' : ''}`, info]);
+        if (results.length >= 3) break;
+    }
+    return results;
+}
+
 async function search_video(title, ep_num, season_num) {
     // ── 内部：搜索 + 提取候选（复用逻辑）──
     async function _do_search(keyword, label) {
@@ -491,6 +572,12 @@ async function search_cid(title, ep_num, season_num) {
         }
     }
     log(`[search_cid] 开始匹配: title=${JSON.stringify(t)} ep_num=${ep_num} season_num=${season_num || 0}`);
+    // 优先：官方番剧（WBI 签名搜索，需 Cookie；命中即官方单集弹幕，量级远高于 UP主）
+    const bangumiWbi = await search_bangumi_wbi(t, ep_num, season_num);
+    if (bangumiWbi.length) {
+        log(`[search_cid] 官方番剧(WBI)返回 ${bangumiWbi.length} 个候选`);
+        return bangumiWbi;
+    }
     const bangumi = await search_bangumi(t, ep_num, season_num);
     if (bangumi.length) {
         log(`[search_cid] 番剧区返回 ${bangumi.length} 个候选`);
