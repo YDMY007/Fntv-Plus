@@ -1,10 +1,12 @@
 import * as http from 'http';
+import * as https from 'https';
 import * as url from 'url';
 import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
 import { runBiliDanmaku } from './biliRunner';
+import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
 
 /**
@@ -94,108 +96,185 @@ class PlaybackShim {
     }
 
     /**
-     * 把请求代理到真实 proxy URL，透传 Range 等头，并逐字节回传响应。
-     * 若真实 proxy 返回 3xx 重定向，则在 shim 内跟随一次（避免 PotPlayer 直接连到 guid URL）。
-     * sid 为诊断会话号，用于把同一请求的多行日志串联起来。
+     * 把请求代理到真实 proxy URL（Go proxy @127.0.0.1:22346），透传 Range 等头，逐字节回传。
+     * 若 Go proxy 不可达（部分环境/杀软拦截 loopback 时常见），自动降级到 Node 主进程兜底代理
+     * （直接调 fnOS API 解析流地址再反代），彻底去掉对 Go proxy 的硬依赖。
      */
-    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, sid = '', depth = 0, retry = true): void {
+    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, sid = ''): void {
+        this.reverseProxyTo(target, req, res, sid, {}, false, 0, (err) => {
+            // Go proxy 连接失败 -> 主进程兜底（解析流地址后直连 fnOS）
+            log.info(`[playbackShim][${sid}] Go proxy 不可达(${err.code})，启用 Node 主进程兜底代理`);
+            this.fallbackProxy(target, req, res, sid);
+        });
+    }
+
+    /**
+     * 通用反向代理核心：把请求透传到 targetUrl（Go proxy 或兜底解析出的 fnOS/云盘地址），
+     * 回写 MIME、透传 Range、跟随一次重定向。onConnectFail 在「连接层失败且尚未写响应」时被调用，
+     * 用于触发降级（如 Go proxy -> 主进程兜底）。
+     */
+    private reverseProxyTo(
+        target: string,
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        sid: string,
+        extraHeaders: Record<string, string>,
+        skipVerify: boolean,
+        depth = 0,
+        onConnectFail?: (err: NodeJS.ErrnoException) => void,
+    ): void {
         const t = url.parse(target);
-        const options: http.RequestOptions = {
+        const isHttps = (t.protocol || 'http:') === 'https:';
+        const headers: any = { ...req.headers, host: t.host || '' };
+        delete headers.origin;
+        delete headers.referer;
+        for (const k of Object.keys(extraHeaders)) headers[k] = extraHeaders[k];
+        const options: any = {
             protocol: t.protocol || 'http:',
             host: t.hostname,
             port: t.port,
             path: t.path,
             method: req.method,
-            headers: { ...req.headers, host: t.host || '' },
-            timeout: 30000, // [lc-323] 上游连接超时 30s
+            headers,
+            timeout: 30000,
         };
-        // 丢弃可能触发跨域/来源校验的头，避免 proxy 拒绝
-        delete (options.headers as any).origin;
-        delete (options.headers as any).referer;
-
+        if (isHttps) {
+            // Node 的 https.request 直接读取顶层 rejectUnauthorized（没有 options.https 子对象）
+            options.rejectUnauthorized = !skipVerify;
+        }
         const range = req.headers['range'];
+
+        // 客户端(PotPlayer)可能在兜底代理的异步解析过程中断开: 忽略 res 上的写入错误,
+        // 避免 "write after end" / EPIPE 等未处理 error 事件导致主进程崩溃
+        res.on('error', () => { /* 客户端已断开, 静默忽略 */ });
         log.info(`[playbackShim][${sid || '?'}]   代理到上游 | target=${target} range_forwarded=${range || '(无)'}`);
 
         let upstreamBytes = 0;
-        let responded = false; // [lc-323] 防止 close/error 双写竞态
+        let responded = false;
         const markResponded = () => { responded = true; };
 
-        const p = http.request(options, (pres) => {
-            // 跟随一次重定向（proxy 偶尔 302）
+        const requester = isHttps ? https : http;
+        const p = requester.request(options, (pres) => {
             if (pres.statusCode && pres.statusCode >= 300 && pres.statusCode < 400 && pres.headers.location && depth < 3) {
                 const next = url.resolve(target, pres.headers.location);
                 log.info(`[playbackShim][${sid || '?'}]   跟随上游重定向 -> ${next}`);
-                pres.resume(); // 消耗掉原响应体
+                pres.resume();
                 markResponded();
-                this.proxy(next, req, res, sid, depth + 1, false);
+                this.reverseProxyTo(next, req, res, sid, extraHeaders, skipVerify, depth + 1, onConnectFail);
                 return;
             }
-            // 过滤逐跳头，避免把上游的 connection/keep-alive 透传给 PotPlayer 造成协议混乱
-            const headers: http.IncomingHttpHeaders = { ...pres.headers };
-            delete headers.connection;
-            delete (headers as any)['keep-alive'];
-            // 回写 MIME：PotPlayer 对 application/octet-stream 敏感，可能直接「打不开」
+            const outHeaders: http.IncomingHttpHeaders = { ...pres.headers };
+            delete (outHeaders as any).connection;
+            delete (outHeaders as any)['keep-alive'];
             const upstreamType = pres.headers['content-type'];
-            const mt = this.resolveContentType(target, req.url || '', upstreamType);
+            const mt = this.resolveContentType(target, req.url || '', upstreamType as string | undefined);
             const mimeRewritten = !!mt && mt !== upstreamType;
-            if (mt) headers['content-type'] = mt;
-
+            if (mt) (outHeaders as any)['content-type'] = mt;
             const cl = pres.headers['content-length'];
-            log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} upstreamType=${upstreamType || '(无)'} -> rewrittenType=${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} contentLength=${cl || '(无/chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
-
+            log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} type=${upstreamType || '(无)'} -> ${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} len=${cl || '(chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
             markResponded();
-            res.writeHead(pres.statusCode || 502, headers as any);
+            res.writeHead(pres.statusCode || 502, outHeaders as any);
             pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
             pres.on('end', () => {
                 const complete = cl ? upstreamBytes >= Number(cl) : true;
-                // key 级日志同时进 app.log 与 app-error.log，便于在精简报错日志里一眼看到本次播放结论
-                log.key(`[playbackShim][${sid || '?'}] ✓ 上游流结束 | 已转发 ${upstreamBytes} 字节 status=${pres.statusCode} ${cl ? `(目标 ${cl}, ${complete ? '完整' : '不完整'})` : '(流式/chunked)'}`);
+                log.key(`[playbackShim][${sid || '?'}] ✓ 上游流结束 | 已转发 ${upstreamBytes} 字节 status=${pres.statusCode} ${cl ? `(目标 ${cl}, ${complete ? '完整' : '不完整'})` : '(流式)'}`);
             });
             pres.pipe(res);
         });
-        // 客户端（PotPlayer）在流未结束前断开：可能是拖动(正常)/主动放弃/传输中断(异常)。
-        // 及时销毁到上游的连接，避免挂起 socket 与 read ECONNRESET 噪音，并释放 Go 代理侧资源。
+
         const onClientGone = () => { try { p.destroy(); } catch { /* noop */ } };
         res.on('close', () => {
             if (!responded && !res.writableEnded) {
-                log.warn(`[playbackShim][${sid || '?'}] ✗ PotPlayer 中途断开(流未结束) | 已转发 ${upstreamBytes} 字节 range=${range || '(无)'} —— 可能为拖动/主动放弃或传输中断`);
+                log.warn(`[playbackShim][${sid || '?'}] ✗ PotPlayer 中途断开 | 已转发 ${upstreamBytes} 字节 range=${range || '(无)'}`);
                 onClientGone();
             }
         });
-        req.on('close', () => {
-            if (!responded) onClientGone();
-        });
+        req.on('close', () => { if (!responded) onClientGone(); });
 
         p.on('error', (err) => {
             const code = (err as NodeJS.ErrnoException).code;
-            // [lc-323] 客户端断开 / 上游不可达导致的连接重置均属正常生命周期，统一静默 + debug 级别
-            if (code === 'ECONNRESET' || code === 'socket hang up' || code === 'ECONNREFUSED') {
+            const connectFail = code === 'ECONNRESET' || code === 'socket hang up' || code === 'ECONNREFUSED';
+            if (connectFail) {
                 log.debug(`[playbackShim][${sid || '?'}] 上游连接异常(${code}): ${err.message}`);
             } else {
-                log.warn(`[playbackShim][${sid || '?'}] 代理请求失败 target=${target}: ${err.message} (code=${code})`);
+                log.warn(`[playbackShim][${sid || '?'}] 代理请求失败: ${err.message} (${code})`);
             }
-            // 防止 close 回调与 error 回调竞态双写
             if (responded) return;
             markResponded();
-            // 尝试向 PotPlayer 返回有意义的错误（若响应头尚未发送）
-            if (!res.headersSent && !res.writableEnded) {
-                res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-                const body = `Bad Gateway: 无法连接到视频代理服务 (${code || 'unknown'}). 请检查:\n1. 应用是否正常启动（Go proxy 应监听 127.0.0.1:22346）\n2. 是否有防火墙/杀毒软件拦截本地代理\n3. 重启应用后再试`;
-                res.end(body);
-            } else if (!res.writableEnded) {
-                res.end();
+            if (connectFail && depth === 0 && onConnectFail && !res.headersSent) {
+                onConnectFail(err as NodeJS.ErrnoException);
+                return;
             }
-            // [lc-323] 首次失败且允许重试时，延迟 500ms 后重试一次（覆盖 Go proxy 启动竞态窗口）
-            if (retry && depth === 0 && code !== 'ECONNRESET') {
-                log.info(`[playbackShim][${sid}] 500ms 后重试上游连接...`);
-                setTimeout(() => {
-                    if (!res.writableEnded && !responded) {
-                        this.proxy(target, req, res, sid, 0, false);
-                    }
-                }, 500);
-            }
+            this.fail502(res, sid, `无法连接视频上游 (${code || 'unknown'})`);
         });
         req.pipe(p);
+    }
+
+    /**
+     * Go proxy 不可达时的兜底：直接调 fnOS API 解析流地址，再反向代理到 fnOS/云盘，
+     * 行为与 Go proxy 的 PlayVideoHandler 一致（本地 NAS 注入 Authorization+会话Cookie；云盘用直链+云盘Cookie）。
+     */
+    private async fallbackProxy(goTarget: string, req: http.IncomingMessage, res: http.ServerResponse, sid: string): Promise<void> {
+        try {
+            const u = url.parse(goTarget, true);
+            const q = u.query as Record<string, string | undefined>;
+            const itemGuid = (u.pathname || '').split('/').pop() || '';
+            const token = (q.token as string) || '';
+            const domain = q.domain ? decodeURIComponent(q.domain as string) : '';
+            const account = (q.account as string) || '';
+            const sourceIndex = parseInt((q.sourceIndex as string) || '0', 10) || 0;
+            const cookie = (q.cookie as string) || '';
+            let skipVerify = (q.skipVerify as string) === '1';
+            const useNasLocal = (q.useNasLocal as string) === '1';
+            if (!itemGuid || !token || !domain) {
+                this.fail502(res, sid, '兜底代理缺少必要参数(itemGuid/token/domain)');
+                return;
+            }
+            const api = new ApiService(domain, token);
+            const list = await api.getStreamList(itemGuid);
+            if (!list.success || !list.data || !(list.data as any).video_streams?.length) {
+                this.fail502(res, sid, '兜底代理: 获取流列表失败 ' + (list.message || ''));
+                return;
+            }
+            const streams = (list.data as any).video_streams;
+            let mediaGuid = streams[0].media_guid;
+            if (sourceIndex > 0 && sourceIndex < streams.length) mediaGuid = streams[sourceIndex].media_guid;
+            const streamResp = await api.getStream(mediaGuid, account);
+            if (!streamResp.success || !streamResp.data) {
+                this.fail502(res, sid, '兜底代理: 获取流失败 ' + (streamResp.message || ''));
+                return;
+            }
+            const data: any = streamResp.data;
+            const cloud = data.cloud_storage_info;
+            const useCloud = cloud && cloud.valid !== false && data.direct_link_qualities?.length > 0 && !useNasLocal;
+            let targetUrl: string;
+            const extraHeaders: Record<string, string> = {};
+            if (useCloud) {
+                targetUrl = data.direct_link_qualities[0].url;
+                // 云盘直链：证书通常合法，强制不跳过验证（与 Go proxy 一致）
+                skipVerify = false;
+                if (data.header?.Cookie?.length) extraHeaders['Cookie'] = data.header.Cookie.join('; ');
+                const ua = data.header?.['User-Agent'] || data.header?.['user-agent'];
+                if (Array.isArray(ua) && ua.length) extraHeaders['User-Agent'] = ua[0];
+                log.info(`[playbackShim][${sid}] 兜底代理: 云盘直链模式 target=${targetUrl.slice(0, 90)}`);
+            } else {
+                targetUrl = api.getVideoUrl(mediaGuid); // ${domain}/v/api/v1/media/range/${mediaGuid}
+                extraHeaders['Authorization'] = token;
+                extraHeaders['Cookie'] = (cookie || '') + '; mode=relay';
+                log.info(`[playbackShim][${sid}] 兜底代理: 本地 NAS 模式 target=${targetUrl.slice(0, 90)}`);
+            }
+            this.reverseProxyTo(targetUrl, req, res, sid, extraHeaders, skipVerify, 0);
+        } catch (e: any) {
+            log.error(`[playbackShim][${sid}] 兜底代理异常: ${e?.message || e}`);
+            this.fail502(res, sid, '兜底代理异常: ' + (e?.message || e));
+        }
+    }
+
+    private fail502(res: http.ServerResponse, sid: string, detail: string): void {
+        if (res.headersSent || res.writableEnded) { try { res.end(); } catch { /* noop */ } return; }
+        log.warn(`[playbackShim][${sid || '?'}] ✗ 返回 502 | ${detail}`);
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Bad Gateway: ' + detail + '\n\n请检查:\n1. fnOS 服务是否正常运行\n2. 本机与 fnOS 网络是否连通、防火墙是否放行\n3. 重启应用后再试');
     }
 
     /**

@@ -28,7 +28,7 @@ app.commandLine.appendSwitch('--ignore-ssl-errors-spki-list'); // 忽略SSL SPKI
 app.commandLine.appendSwitch('--ignore-ssl-errors'); // 忽略SSL错误（减少相关日志）
 
 let mainWindow: BrowserWindow | null = null;
-let proxyProcess: ChildProcess | null = null;
+let proxyProcess: ChildProcess | null | undefined = null;
 
 /**
  * [lc-286] 判断 URL 是否指向私有/本地地址（用于证书自动信任）。
@@ -155,8 +155,14 @@ if (!gotTheLock) {
                 }
             });
 
-            // 启动代理服务器
-            proxyProcess = await startProxyProcess();
+            // 启动代理服务器（非致命：即使 Go proxy 启动失败也继续启动应用，
+            // PotPlayer 经 playbackShim 兜底代理仍可播放；失败原因已记录在日志中便于排查）
+            try {
+                proxyProcess = await startProxyProcess();
+            } catch (e: any) {
+                log.error(`[startup] Go proxy 启动失败，PotPlayer 将走主进程兜底代理: ${e?.message || e}`);
+                proxyProcess = undefined;
+            }
 
             // 创建主窗口
             mainWindow = getMainWindow();

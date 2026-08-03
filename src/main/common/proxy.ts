@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, Notification } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
+import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
 import { registerAllPlugins } from '../handlers';
@@ -15,6 +16,36 @@ import { playbackShim } from './playbackShim';
 // 全局守护程序实例
 let proxyDaemon: ProxyDaemon | null = null;
 let restartScheduled = false;
+
+// Go proxy 实际监听的端口（与 proxy/pkg/fnapi、main.go 中 RunApiServer("127.0.0.1:22346") 一致）
+const PROXY_PORT = 22346;
+
+/**
+ * 探测本地端口是否在监听（用于确认 Go proxy 真正就绪，而非仅凭进程对象存在就误判为成功）。
+ * 成功返回 true，timeoutMs 内都连不上返回 false。
+ */
+function probePort(port: number, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+        const start = Date.now();
+        const attempt = () => {
+            const sock = net.connect(port, '127.0.0.1');
+            let done = false;
+            const finish = (ok: boolean) => {
+                if (done) return;
+                done = true;
+                sock.destroy();
+                resolve(ok);
+            };
+            sock.once('connect', () => finish(true));
+            sock.once('error', () => {
+                sock.destroy();
+                if (Date.now() - start >= timeoutMs) finish(false);
+                else setTimeout(attempt, 250);
+            });
+        };
+        attempt();
+    });
+}
 
 // 获取应用中的proxy可执行文件路径
 function getProxyExecPath(): string {
@@ -69,46 +100,52 @@ export async function startProxyProcess(): Promise<ChildProcess> {
 
         log.info('正在启动proxy进程...');
 
-        // 等待proxy进程启动成功
+        // 等待proxy进程真正在 22346 监听就绪（不再仅凭"进程对象存在"误判为成功）
         await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const stderrBuf: string[] = [];
+            const fail = (msg: string) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                clearInterval(poll);
+                const detail = stderrBuf.join('').slice(-1000);
+                reject(new Error(msg + (detail ? `\n--- proxy stderr ---\n${detail}` : '')));
+            };
             const timeout = setTimeout(() => {
-                const errorMsg = 'Proxy进程启动超时';
-                const detailMsg = `等待时间: 10秒\n可执行文件: ${proxyPath}\n\n可能的原因:\n• Proxy程序启动缓慢\n• 端口2345被占用\n• 系统资源不足\n\n建议检查:\n1. 确认端口2345未被其他程序占用\n2. 查看系统资源使用情况\n3. 重新编译proxy模块`;
-                log.error(errorMsg);
-                reject(new Error(errorMsg + '\n' + detailMsg));
+                fail(`Proxy进程启动超时: 10秒内未在 127.0.0.1:${PROXY_PORT} 监听到监听\n可执行文件: ${proxyPath}`);
             }, 10000); // 10秒超时
 
+            // 进程直接报错（如文件损坏/无法执行）
             proxyProcess.on('error', (error) => {
-                clearTimeout(timeout);
-                const errorMsg = `Proxy进程启动失败`;
-                const detailMsg = `错误详情: ${error.message}\n可执行文件: ${proxyPath}\n\n可能的原因:\n• 文件损坏或权限不足\n• 缺少必要的动态库\n• 系统兼容性问题\n\n建议检查:\n1. 确认文件完整性\n2. 检查文件执行权限\n3. 查看系统日志`;
-                log.error(errorMsg + ': ' + error.message);
-                reject(new Error(errorMsg + '\n' + detailMsg));
+                fail(`Proxy进程启动失败: ${error.message}\n可执行文件: ${proxyPath}`);
+            });
+            // 进程在就绪前退出（崩溃）—— 此前被 2 秒 !killed 兜底掩盖为"成功"，正是播放 22346 全 reset 的根因
+            proxyProcess.on('exit', (code, signal) => {
+                if (!settled) fail(`Proxy进程在就绪前退出 (code=${code} signal=${signal})，22346 不会监听`);
             });
 
-            // 监听stdout来确认进程已启动
             proxyProcess.stdout?.on('data', (data) => {
-                const output = data.toString('utf8');
-                log.noformat(output);
-                // 检查启动成功的标志
-                if (output.includes('启动') || output.includes('listening') || output.includes('server') || output.includes('运行')) {
-                    clearTimeout(timeout);
-                    resolve();
-                }
+                log.noformat(data.toString('utf8'));
             });
-
             proxyProcess.stderr?.on('data', (data) => {
                 const output = data.toString('utf8');
+                stderrBuf.push(output);
                 log.error('Proxy stderr:', output);
             });
 
-            // 如果进程在短时间内没有错误，认为启动成功
-            setTimeout(() => {
-                if (proxyProcess && !proxyProcess.killed) {
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            }, 2000);
+            // 轮询端口就绪：真正连上才视为成功，避免"日志早于 bind"或"进程已死却误判成功"
+            const poll = setInterval(() => {
+                if (settled) { clearInterval(poll); return; }
+                probePort(PROXY_PORT, 800).then((ok) => {
+                    if (ok && !settled) {
+                        settled = true;
+                        clearTimeout(timeout);
+                        clearInterval(poll);
+                        resolve();
+                    }
+                });
+            }, 300);
         });
 
         log.info('Proxy模块启动成功');
@@ -183,37 +220,47 @@ async function startProxyProcessInternal(): Promise<ChildProcess> {
 
     log.info('正在启动proxy进程（重启）...');
 
-    // 等待proxy进程启动成功
+    // 等待proxy进程真正在 22346 监听就绪（与 startProxyProcess 一致：端口探测 + 退出检测）
     await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const stderrBuf: string[] = [];
+        const fail = (msg: string) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            clearInterval(poll);
+            const detail = stderrBuf.join('').slice(-1000);
+            reject(new Error(msg + (detail ? `\n--- proxy stderr ---\n${detail}` : '')));
+        };
         const timeout = setTimeout(() => {
-            reject(new Error('Proxy进程重启启动超时'));
+            fail(`Proxy进程重启启动超时: 10秒内未在 127.0.0.1:${PROXY_PORT} 监听到监听`);
         }, 10000);
 
-        proxyProcess.on('error', (error) => {
-            clearTimeout(timeout);
-            reject(error);
+        proxyProcess.on('error', (error) => fail(`Proxy进程重启启动失败: ${error.message}`));
+        proxyProcess.on('exit', (code, signal) => {
+            if (!settled) fail(`Proxy进程在就绪前退出 (code=${code} signal=${signal})，22346 不会监听`);
         });
 
         proxyProcess.stdout?.on('data', (data) => {
-            const output = data.toString('utf8');
-            log.noformat(output);
-            if (output.includes('启动') || output.includes('listening') || output.includes('server') || output.includes('运行')) {
-                clearTimeout(timeout);
-                resolve();
-            }
+            log.noformat(data.toString('utf8'));
         });
-
         proxyProcess.stderr?.on('data', (data) => {
             const output = data.toString('utf8');
+            stderrBuf.push(output);
             log.error('Proxy stderr:', output);
         });
 
-        setTimeout(() => {
-            if (proxyProcess && !proxyProcess.killed) {
-                clearTimeout(timeout);
-                resolve();
-            }
-        }, 2000);
+        const poll = setInterval(() => {
+            if (settled) { clearInterval(poll); return; }
+            probePort(PROXY_PORT, 800).then((ok) => {
+                if (ok && !settled) {
+                    settled = true;
+                    clearTimeout(timeout);
+                    clearInterval(poll);
+                    resolve();
+                }
+            });
+        }, 300);
     });
 
     return proxyProcess;
