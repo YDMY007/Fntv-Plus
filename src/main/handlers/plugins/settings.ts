@@ -179,6 +179,36 @@ function writeBiliPythonSidecar(p: string | null): void {
     }
 }
 
+// 计算当前进程的可执行文件是否为 node（dev 下 process.argv[0] 为 node.exe；
+// 打包后 argv[0] 是 electron.exe，无独立 node，返回 null 让 Lua 回退系统 PATH 的 node/nodejs）。
+function getNodePath(): string | null {
+    const a = process.argv[0] || '';
+    if (/node(\.exe)?$/i.test(a) && fs.existsSync(a)) return a;
+    return null;
+}
+
+// 把 B站弹幕要用的 Node 解释器路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（node_path.txt），
+// 供 MPV 内部 Lua 脚本（extra.lua）优先读取，从而 100% 命中正确路径、无需依赖系统 PATH。
+// 仅 dev 模式（argv[0]=node.exe）能写；打包环境无独立 node，删除旧 sidecar 回退到系统 PATH node/nodejs。
+function writeBiliNodeSidecar(): void {
+    try {
+        const base = app.isPackaged
+            ? path.dirname(app.getPath('exe'))
+            : app.getAppPath();
+        const file = path.join(base, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku', 'node_path.txt');
+        const target = getNodePath();
+        if (target) {
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, target, 'utf8');
+        } else if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+        }
+        log.info(`B站弹幕 Node sidecar 已${target ? '更新: ' + target : '清空（当前环境无独立 node，回退系统 PATH）'}`);
+    } catch (error) {
+        log.error('写 B站弹幕 Node sidecar 失败:', error);
+    }
+}
+
 // 弹出系统文件选择框，选中用户本机 Python 解释器（python.exe），写回配置 + sidecar
 async function handlePickPythonPath(): Promise<string | null> {
     const win = getMainWindow();
@@ -672,6 +702,10 @@ function init(): void {
         const custom = fnConfig.getPythonPath();
         writeBiliPythonSidecar(custom || null);
     } catch (e) { log.warn('启动同步 B站弹幕 Python 路径失败', e); }
+    // 启动时把 B站弹幕要用的 Node 路径写入 sidecar（dev 下=node.exe，供 extra.lua 优先以 JS 模式运行 bili_danmaku.js）。
+    try {
+        writeBiliNodeSidecar();
+    } catch (e) { log.warn('启动同步 B站弹幕 Node 路径失败', e); }
     registerHandler('settings:get', handleGetSettings, { useHandle: true });
     registerHandler('settings:set-download-proxy', handleSetDownloadProxy, { useHandle: true });
     registerHandler('settings:set-hide-play', handleSetHidePlay, { useHandle: true });
