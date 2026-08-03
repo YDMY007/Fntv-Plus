@@ -52,6 +52,7 @@ interface DanmakuMeta {
     isMovie: boolean;
     count: number;
     aggregatedFrom?: any;
+    cookieStatus?: string;
     error?: string;
 }
 
@@ -517,6 +518,22 @@ function sourceLabel(s: string): string {
     return s || '未知';
 }
 
+// Cookie 登录态 → 详情弹窗展示文案（非有效时 warn=true，弹窗会标红横幅）
+function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: string } {
+    if (s === 'valid') return { text: '已登录（Cookie 有效）', warn: false, detail: '' };
+    if (s === 'expired') return {
+        text: 'Cookie 已过期 / 无效',
+        warn: true,
+        detail: 'B站 登录态已失效，弹幕数量受限（候选更少、seg.so 可能被风控掐掉）。请从浏览器重新复制 SESSDATA 填回 bili_cookie.txt 后重启。',
+    };
+    if (s === 'missing') return {
+        text: '未登录（无 Cookie 文件）',
+        warn: true,
+        detail: '未配置 bili_cookie.txt，弹幕数量受限。请把浏览器 B站 登录态 Cookie（SESSDATA 等）整行填入该文件后重启。',
+    };
+    return { text: '—', warn: false, detail: '' };
+}
+
 function ensureModal(): HTMLDivElement {
     if (modal) return modal;
     const m = document.createElement('div');
@@ -592,6 +609,7 @@ function renderModalBody(): void {
         return;
     }
 
+    const cookie = cookieStatusInfo(meta.cookieStatus || '');
     const rows: [string, string][] = [
         ['搜索番名', meta.searchTitle || '—'],
         ['来源区域', sourceLabel(meta.source)],
@@ -603,8 +621,21 @@ function renderModalBody(): void {
         ['CID', meta.cid != null ? String(meta.cid) : '—'],
         ['弹幕条数', String(meta.count)],
         ['聚合', meta.aggregatedFrom ? `${meta.aggregatedFrom} 个候选聚合` : '单源'],
+        ['登录状态', cookie.text],
     ];
     if (meta.error) rows.push(['备注', meta.error]);
+
+    // 非有效登录态：醒目红色横幅提示（一眼可见，对应 lc-336 的 Cookie 过期检查）
+    if (cookie.warn) {
+        const banner = document.createElement('div');
+        banner.textContent = '⚠️ ' + cookie.detail;
+        Object.assign(banner.style, {
+            marginBottom: '14px', padding: '9px 11px', borderRadius: '8px',
+            background: 'rgba(255,76,76,0.12)', border: '1px solid rgba(255,76,76,0.45)',
+            color: '#ff8a8a', fontSize: '13px', lineHeight: '1.5',
+        } as CSSStyleDeclaration);
+        body.appendChild(banner);
+    }
 
     const grid = document.createElement('div');
     Object.assign(grid.style, {
@@ -622,7 +653,12 @@ function renderModalBody(): void {
         const vEl = document.createElement('div');
         vEl.textContent = v;
         vEl.style.wordBreak = 'break-all';
-        vEl.style.color = '#eaeaea';
+        if (k === '登录状态') {
+            vEl.style.color = cookie.warn ? '#ff5c5c' : '#5ad17a';
+            vEl.style.fontWeight = '600';
+        } else {
+            vEl.style.color = '#eaeaea';
+        }
         grid.appendChild(kEl);
         grid.appendChild(vEl);
     }

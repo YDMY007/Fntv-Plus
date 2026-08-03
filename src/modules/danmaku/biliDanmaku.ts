@@ -85,6 +85,7 @@ export interface DanmakuMeta {
     season: number;         // 目标季数（0=未指定；>0 时优先精确匹配该季）
     count: number;
     aggregatedFrom?: any;
+    cookieStatus?: string;   // 'valid' | 'expired' | 'missing'
     error?: string;
 }
 
@@ -453,6 +454,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
         ep, isMovie, season,
         count: items.length,
         aggregatedFrom: r.aggregated_from,
+        cookieStatus: r.cookie_status || undefined,
     };
     try {
         fs.writeFileSync(cacheFile, JSON.stringify({ items, meta }), 'utf-8');

@@ -26,6 +26,7 @@ export interface BiliDanmakuResult {
     source?: string;
     cid?: any;
     aggregated_from?: any;
+    cookie_status?: string;   // 'valid' | 'expired' | 'missing'，由 bili_danmaku.js run() 透传
     error?: string;
 }
 
