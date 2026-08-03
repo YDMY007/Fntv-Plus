@@ -50,6 +50,27 @@ interface FetchAndFillResult {
 const filledGuids = new Set<string>();
 
 /**
+ * 把飞牛 trim_id 转换成 theintrodb 查询参数候选列表。
+ * 飞牛的 trim_id 形态不定：
+ *   - 纯数字 → TMDB id（如 94997）
+ *   - "tt" + 数字 → 多为飞牛把 TMDB 数字 id 错加 tt 前缀（如 tt94997 → 实为 TMDB 94997）
+ *   - 真实 IMDb id → tt + 7 位以上数字
+ * 策略：优先用 tmdb_id（剥离 tt 前缀），失败再试 imdb_id。
+ */
+function buildIntroDbQueries(raw?: string): string[] {
+    if (!raw) return [];
+    const s = String(raw).trim();
+    if (/^\d+$/.test(s)) {
+        return [`tmdb_id=${s}`];
+    }
+    const m = s.match(/^tt(\d+)$/i);
+    if (m) {
+        return [`tmdb_id=${m[1]}`, `imdb_id=${s}`];
+    }
+    return [];
+}
+
+/**
  * 核心流程：
  * 1. GET /api/v1/skipinfo/:guid → 查飞牛是否已有数据
  * 2. 若 SkipStart/SkipEnd 均为 0 → 调 theintrodb 兜底
@@ -75,26 +96,27 @@ async function handleFetchAndFill(
     const token = config.token || '';
     const proxyBase = 'http://127.0.0.1:22346';
 
-    // ── 若未提供 trimId/season/episode，从 fnOS PlayInfo 补查 ──
+    // ── 从 fnOS PlayInfo 补查 trimId / season / episode / 总时长 ──
+    // 始终查询：既补全元数据，又拿到视频总时长（片尾时长换算需要）
     let effectiveTrimId = trimId;
     let effectiveSeason = season;
     let effectiveEpisode = episode;
+    let effectiveTotalDur = 0;
 
-    if (!effectiveTrimId && domain && token) {
+    if (domain && token) {
         try {
             const fnapi = new fn.ApiService(domain, token);
             const playResp = await fnapi.getPlayInfo(guid);
             if (playResp.success && playResp.data) {
                 const item = playResp.data.item;
-                // 优先取当前集的 trim_id，没有则留空
-                effectiveTrimId = item?.trim_id || '';
-                // 季/集信息
-                if (item?.season_number) effectiveSeason = item.season_number;
-                if (item?.episode_number) effectiveEpisode = item.episode_number;
-                log.info(`[skip:fetch-and-fill] 从 PlayInfo 补到元数据 guid=${guid} tmdb=${effectiveTrimId} s=${effectiveSeason} e=${effectiveEpisode}`);
+                if (!effectiveTrimId) effectiveTrimId = item?.trim_id || '';
+                if (!effectiveSeason && item?.season_number) effectiveSeason = item.season_number;
+                if (!effectiveEpisode && item?.episode_number) effectiveEpisode = item.episode_number;
+                effectiveTotalDur = item?.duration || 0;
+                log.info(`[skip:fetch-and-fill] 从 PlayInfo 补到元数据 guid=${guid} tmdb=${effectiveTrimId} s=${effectiveSeason} e=${effectiveEpisode} dur=${effectiveTotalDur}s`);
             }
         } catch (e) {
-            log.warn(`[skip:fetch-and-fill] 查询 PlayInfo 获取 trimId 失败:`, (e as Error).message);
+            log.warn(`[skip:fetch-and-fill] 查询 PlayInfo 失败:`, (e as Error).message);
         }
     }
 
@@ -122,39 +144,56 @@ async function handleFetchAndFill(
         }
 
         // ── Step 2: 飞牛无数据 → theintrodb 兜底 ──
-        if (source === 'none' && effectiveTrimId && effectiveTrimId !== '0' && effectiveTrimId !== '') {
-            try {
-                let tidUrl = `https://api.theintrodb.org/v2/media?tmdb_id=${effectiveTrimId}`;
-                if (effectiveSeason && effectiveSeason > 0) {
-                    tidUrl += `&season=${effectiveSeason}`;
-                    if (effectiveEpisode && effectiveEpisode > 0) tidUrl += `&episode=${effectiveEpisode}`;
+        // 飞牛 skipStart/skipEnd 语义 = 时长（秒）：片头从 0 跳过的秒数 / 片尾结尾跳过的秒数。
+        // theintrodb intro.end_ms = 片头结束绝对位置（≈片头时长，因片头从 0 开始）；
+        // credits.start_ms = 片尾开始绝对位置，片尾时长 = 总时长 − credits.start_ms。
+        if (source === 'none') {
+            const queries = buildIntroDbQueries(effectiveTrimId);
+            for (const q of queries) {
+                try {
+                    let tidUrl = `https://api.theintrodb.org/v2/media?${q}`;
+                    if (effectiveSeason && effectiveSeason > 0) {
+                        tidUrl += `&season=${effectiveSeason}`;
+                        if (effectiveEpisode && effectiveEpisode > 0) tidUrl += `&episode=${effectiveEpisode}`;
+                    }
+                    const tidResp = await axios.get(tidUrl, { timeout: 8000 });
+                    const data = tidResp.data;
+                    if (!data || data.error) {
+                        log.warn(`[skip:fetch-and-fill] theintrodb (${q}) 无数据: ${data?.error || '空响应'}`);
+                        continue; // 试下一个候选（tmdb → imdb）
+                    }
+                    // 片头：intro[0].end_ms（绝对结束位置 ≈ 片头时长）
+                    if (data?.intro?.[0]?.end_ms) {
+                        const introEnd = Math.round(data.intro[0].end_ms / 1000);
+                        if (introEnd > 0) skipStart = introEnd;
+                    }
+                    // 片尾：总时长 − credits[0].start_ms（需视频总时长）
+                    if (data?.credits?.[0]?.start_ms) {
+                        if (effectiveTotalDur > 0) {
+                            const credStart = Math.round(data.credits[0].start_ms / 1000);
+                            const outroDur = effectiveTotalDur - credStart;
+                            if (outroDur > 0 && outroDur < effectiveTotalDur / 2) {
+                                skipEnd = outroDur;
+                            } else {
+                                log.warn(`[skip:fetch-and-fill] theintrodb 片尾时长异常(outro=${outroDur}s)，仅填片头`);
+                            }
+                        } else {
+                            log.warn(`[skip:fetch-and-fill] 缺视频总时长，无法换算片尾时长，仅填片头`);
+                        }
+                    }
+                    if (skipStart > 0 || skipEnd > 0) {
+                        source = 'theintrodb';
+                        log.info(`[skip:fetch-and-fill] theintrodb 兜底成功 (${q}) guid=${guid} start=${skipStart} end=${skipEnd}`);
+                        break;
+                    }
+                } catch (e) {
+                    log.warn(`[skip:fetch-and-fill] theintrodb 请求失败 (${q}):`, (e as Error).message);
                 }
-                const tidResp = await axios.get(tidUrl, { timeout: 8000 });
-                const data = tidResp.data;
-
-                // intro[] → 片头窗口（取第一个区间的 end_ms 作为 skipStart）
-                if (data?.intro?.[0]) {
-                    const intro = data.intro[0];
-                    // start_ms=null 表示从 0 开始；end_ms 是片头结束时间(ms→s)
-                    skipStart = Math.round((intro.end_ms ?? 0) / 1000);
-                }
-                // credits[] → 片尾窗口（取第一个区间的 start_ms 作为 skipEnd）
-                if (data?.credits?.[0]) {
-                    const credit = data.credits[0];
-                    skipEnd = Math.round((credit.start_ms ?? 0) / 1000);
-                }
-
-                if (skipStart > 0 || skipEnd > 0) {
-                    source = 'theintrodb';
-                    log.info(`[skip:fetch-and-fill] theintrodb 兜底成功 guid=${guid} tmdb=${trimId} start=${skipStart} end=${skipEnd}`);
-                }
-            } catch (e) {
-                log.warn(`[skip:fetch-and-fill] theintrodb 请求失败:`, (e as Error).message);
             }
         }
 
-        // ── Step 3: 有有效数据 → 写回飞牛服务端 ──
-        if ((skipStart > 0 || skipEnd > 0) && source !== 'none') {
+        // ── Step 3: theintrodb 兜底拿到数据 → 写回飞牛服务端 ──
+        if (source === 'theintrodb' && (skipStart > 0 || skipEnd > 0)) {
             try {
                 let cookie = '';
                 try { cookie = await getSessionCookieHeader(domain); } catch (_) { /* ignore */ }
@@ -172,6 +211,11 @@ async function handleFetchAndFill(
                 log.error(`[skip:fetch-and-fill] 写回飞牛失败:`, (e as Error).message);
                 return { filled: false, skipStart, skipEnd, source, message: '写回飞牛服务端失败' };
             }
+        }
+
+        // 飞牛已有数据：直接返回（无需写回）
+        if (source === 'fnos') {
+            return { filled: true, skipStart, skipEnd, source };
         }
 
         // 无可用数据
