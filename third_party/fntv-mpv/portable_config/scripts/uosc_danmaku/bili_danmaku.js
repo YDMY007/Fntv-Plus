@@ -27,7 +27,10 @@ function _load_cookie() {
         return null;
     }
 }
-const COOKIE = _load_cookie();
+// 登录态 Cookie：同目录 bili_cookie.txt（一行）。可绕过匿名 seg.so 概率性空响应风控；缺失则走匿名。
+// 改为每次 run() 时按需加载（支持主进程内热更新），此处仅声明，初始匿名。
+let COOKIE = null;
+function _refresh_cookie() { COOKIE = _load_cookie(); }
 
 // 明显非正片的标题关键词（reaction/二创/OP/ED/预告等）
 const BAD_TITLE = ['reaction', '反应', '杂谈', '吐槽', '解说', '盘点', '二创', 'mad', 'amv',
@@ -83,8 +86,18 @@ function title_sim(a, b) {
     return _lcsRatio(a, b);
 }
 
+// 日志接收器：默认输出到 stderr；主进程可通过 setLogSink() 注入（如转发到 app.log）
+let _logSink = null;
+function setLogSink(fn) {
+    _logSink = (typeof fn === 'function') ? fn : null;
+}
 function log(s) {
-    process.stderr.write('[bili_danmaku] ' + String(s) + '\n');
+    const line = '[bili_danmaku] ' + String(s);
+    if (_logSink) {
+        try { _logSink(line); } catch (e) { /* 忽略 sink 异常，避免影响主流程 */ }
+    } else {
+        process.stderr.write(line + '\n');
+    }
 }
 
 function parse_count(v) {
@@ -553,19 +566,6 @@ function _filter_danmaku(dm, block_types) {
     return out;
 }
 
-function _emit_result(title, cid, atitle, info, count, source, aggregated_from) {
-    const result = {
-        ok: true,
-        bvid: info && info.bvid ? info.bvid : null,
-        title: title,
-        danmaku_count: count,
-        source: source,
-        cid: cid,
-    };
-    if (aggregated_from !== null && aggregated_from !== undefined) result.aggregated_from = aggregated_from;
-    process.stdout.write('BILI_RESULT:' + JSON.stringify(result) + '\n');
-}
-
 function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
     const valid = fetched.filter((f) => f[4] <= agg_time_limit);
     if (valid.length) {
@@ -578,26 +578,20 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
     return [best[3], best[0], best[1], best[2], best[2] && best[2].source, null, ''];
 }
 
-async function main() {
-    if (process.argv.length < 4) {
-        log('用法: bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]');
-        process.exit(2);
-    }
-    const title = process.argv[2];
-    const ep_num = parseInt(process.argv[3], 10);
-    const out = process.argv[4];
-    let agg_threshold = 1500;
-    if (process.argv.length >= 6) {
-        const n = parseInt(process.argv[5], 10);
-        if (!isNaN(n)) agg_threshold = n;
-    }
+// 核心入口：可被主进程 require 后调用，返回结果对象，不调用 process.exit（避免杀掉宿主进程）。
+// 副作用：会把弹幕 XML 写到 out 路径（供 MPV / PotPlayer 读取）。
+async function run(title, ep_num, out, agg_threshold) {
+    _refresh_cookie();
+    if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
+    if (isNaN(ep_num)) ep_num = 0;
+    if (typeof agg_threshold === 'string') agg_threshold = parseInt(agg_threshold, 10);
+    if (isNaN(agg_threshold) || !agg_threshold) agg_threshold = 1500;
     log(`番名=${title} 集数=${ep_num} 聚合阈值=${agg_threshold}` + (COOKIE ? ' [登录态]' : ' [匿名]'));
 
     const candidates = await search_cid(title, ep_num);
     if (!candidates.length) {
         log('未找到B站对应集（可能番名不匹配或网络受限）');
-        process.stdout.write('BILI_RESULT:' + JSON.stringify({ ok: false, error: '未找到匹配的B站视频' }) + '\n');
-        process.exit(1);
+        return { ok: false, error: '未找到匹配的B站视频' };
     }
 
     const AGG_TIME_LIMIT = 2200;
@@ -624,8 +618,7 @@ async function main() {
     if (!fetched.length) {
         const tried = candidates.map(([, atitle, info], i) => (info && info.bvid) || atitle || `#${i + 1}`).join(', ');
         log(`全部 ${candidates.length} 个候选均无弹幕数据: ${tried}`);
-        process.stdout.write('BILI_RESULT:' + JSON.stringify({ ok: false, error: `已试${candidates.length}个候选均无弹幕数据(${tried})` }) + '\n');
-        process.exit(1);
+        return { ok: false, error: `已试${candidates.length}个候选均无弹幕数据(${tried})` };
     }
 
     const [final_dm, best_cid, best_atitle, best_info, source, agg_count, srcs] = _select_danmaku(fetched, agg_threshold, AGG_TIME_LIMIT, MIN_DANMAKU);
@@ -637,19 +630,47 @@ async function main() {
         log(`弹幕屏蔽类型生效: 移除 ${before - final.length} 条 (类型=${[...block_types].sort().join(',')}), 剩余 ${final.length} 条`);
     }
     _write_xml(out, final);
-    _emit_result(title, best_cid, best_atitle, best_info, final.length, source, agg_count);
+    const result = {
+        ok: true,
+        bvid: best_info && best_info.bvid ? best_info.bvid : null,
+        title: title,
+        danmaku_count: final.length,
+        source: source,
+        cid: best_cid,
+    };
+    if (agg_count) result.aggregated_from = agg_count;
     if (agg_count) {
         log(`✅ 最终输出(聚合 ${agg_count} 源): ${best_atitle} -> ${final.length} 条弹幕 (源: ${srcs}) -> ${out}`);
     } else {
         log(`✅ 最终输出: ${best_atitle} -> ${final.length} 条弹幕 (source=${source}) -> ${out}`);
     }
-    process.exit(0);
+    return result;
 }
 
-if (require.main === module) {
-    main().catch((e) => {
+// CLI 入口：解析 argv -> run -> 输出 BILI_RESULT 到 stdout -> 退出码。
+// （历史用法：node bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]）
+async function main() {
+    if (process.argv.length < 4) {
+        log('用法: bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]');
+        process.exit(2);
+    }
+    const title = process.argv[2];
+    const ep_num = process.argv[3];
+    const out = process.argv[4];
+    const agg_threshold = process.argv[5];
+    try {
+        const result = await run(title, ep_num, out, agg_threshold);
+        process.stdout.write('BILI_RESULT:' + JSON.stringify(result) + '\n');
+        process.exit(result.ok ? 0 : 1);
+    } catch (e) {
         log('致命错误: ' + (e && e.stack ? e.stack : e));
         process.stdout.write('BILI_RESULT:' + JSON.stringify({ ok: false, error: String(e && e.message ? e.message : e) }) + '\n');
         process.exit(1);
-    });
+    }
+}
+
+module.exports = { run: run, setLogSink: setLogSink, _load_cookie: _load_cookie };
+
+if (require.main === module) {
+    main();
 }

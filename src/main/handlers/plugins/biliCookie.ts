@@ -46,7 +46,7 @@ function getUoscDanmakuCandidates(): string[] {
   const appPath = app.getAppPath();
   arr.push(path.join(appPath, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
   // [新] 打包态 MPV 实际脚本目录：exe 同目录 portable_config（extraFiles 解压，可写）
-  //   与 apis/extra.lua 通过 mp.get_script_directory() 定位到的 bili_danmaku.py 同目录，
+  //   与 apis/extra.lua 通过 mp.get_script_directory() 定位到的 bili_danmaku.js 同目录，
   //   必须一致，否则 MPV 端读不到这里写的 bili_cookie.txt（换机/重装后弹幕搜索无登录态）。
   arr.push(path.join(path.dirname(app.getPath('exe')), 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
   if (process.platform === 'win32') {

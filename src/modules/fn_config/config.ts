@@ -94,9 +94,6 @@ export interface Config {
     smartSkipEnabled?: boolean;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
-    // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
-    // 留空=使用包内自带的便携版（third_party/python），无需本机安装。
-    pythonPath?: string;
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
     // 鼠标滚轮横向滚动开关（默认开启=true：竖向滚轮在横向容器内转为左右滑动；
@@ -408,23 +405,6 @@ export function setPotPlayerPath(path: string | null): void {
         delete config.potPlayerPath; // 清空配置
     } else {
         config.potPlayerPath = path;
-    }
-    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
-}
-
-// 获取用户自定义 Python 解释器路径（B站弹幕用；留空=用内置便携版）
-export function getPythonPath(): string | undefined {
-    const config: Config = readConfig() || {};
-    return config.pythonPath;
-}
-
-// 设置用户自定义 Python 解释器路径（''/null = 清空，回退到内置便携版）
-export function setPythonPath(p: string | null): void {
-    const config: Config = readConfig() || {};
-    if (!p) {
-        delete config.pythonPath; // 清空配置，回退到内置便携版
-    } else {
-        config.pythonPath = p;
     }
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
@@ -796,8 +776,6 @@ module.exports = {
     // 智能跳过片头片尾
     getSmartSkipEnabled,
     setSmartSkipEnabled,
-    getPythonPath,
-    setPythonPath,
     getDetailBoxless,
     setDetailBoxless,
     getWheelHScroll,

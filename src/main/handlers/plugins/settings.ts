@@ -37,7 +37,6 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
-        pythonPath: fnConfig.getPythonPath() || '',
         detailBoxless: fnConfig.getDetailBoxless(),
         // 鼠标滚轮横向滚动开关（默认开启=true；关闭=false 恢复飞牛原生上下滚动）
         wheelHScroll: fnConfig.getWheelHScroll(),
@@ -138,106 +137,6 @@ async function handleClearPotPath(): Promise<void> {
     fnConfig.setPotPlayerPath('');
     setPotPlayerPath(null);
     log.info('PotPlayer 播放器路径已清空');
-}
-
-// 计算随安装包分发的内置便携 Python 绝对路径（与 biliDanmaku.ts 的 getBundledPython 对齐）。
-// 打包后 third_party 在 exe 同级目录；dev 下在项目根。保证无 Python 环境的电脑也能用 B站弹幕。
-function getBundledPythonPath(): string | null {
-    const base = app.isPackaged
-        ? path.dirname(app.getPath('exe'))
-        : app.getAppPath();
-    const p = path.join(base, 'third_party', 'python', 'python.exe');
-    return fs.existsSync(p) ? p : null;
-}
-
-// 把 B站弹幕要用的 Python 解释器路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（python_path.txt），
-// 供 MPV 内部 Lua 脚本（extra.lua）优先读取，从而 100% 命中正确路径、无需层级回溯猜测。
-// 优先级：用户自定义 Python > 内置便携 Python（开箱即用）。两者都无则删除该文件回退到系统 PATH。
-function writeBiliPythonSidecar(p: string | null): void {
-    try {
-        const base = app.isPackaged
-            ? path.dirname(app.getPath('exe'))
-            : app.getAppPath();
-        const file = path.join(base, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku', 'python_path.txt');
-        // 解析最终要写入的路径：用户自定义优先，否则用内置便携版
-        let target: string | null = null;
-        if (p && fs.existsSync(p)) {
-            target = p;
-        } else {
-            const bundled = getBundledPythonPath();
-            if (bundled) target = bundled;
-        }
-        if (target) {
-            fs.mkdirSync(path.dirname(file), { recursive: true });
-            fs.writeFileSync(file, target, 'utf8');
-        } else if (fs.existsSync(file)) {
-            fs.unlinkSync(file);
-        }
-        log.info(`B站弹幕 Python sidecar 已${target ? '更新: ' + target : '清空（无内置/自定义 Python）'}`);
-    } catch (error) {
-        log.error('写 B站弹幕 Python sidecar 失败:', error);
-    }
-}
-
-// 计算当前进程的可执行文件是否为 node（dev 下 process.argv[0] 为 node.exe；
-// 打包后 argv[0] 是 electron.exe，无独立 node，返回 null 让 Lua 回退系统 PATH 的 node/nodejs）。
-function getNodePath(): string | null {
-    const a = process.argv[0] || '';
-    if (/node(\.exe)?$/i.test(a) && fs.existsSync(a)) return a;
-    return null;
-}
-
-// 把 B站弹幕要用的 Node 解释器路径写进 MPV uosc_danmaku 脚本目录的 sidecar 文件（node_path.txt），
-// 供 MPV 内部 Lua 脚本（extra.lua）优先读取，从而 100% 命中正确路径、无需依赖系统 PATH。
-// 仅 dev 模式（argv[0]=node.exe）能写；打包环境无独立 node，删除旧 sidecar 回退到系统 PATH node/nodejs。
-function writeBiliNodeSidecar(): void {
-    try {
-        const base = app.isPackaged
-            ? path.dirname(app.getPath('exe'))
-            : app.getAppPath();
-        const file = path.join(base, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku', 'node_path.txt');
-        const target = getNodePath();
-        if (target) {
-            fs.mkdirSync(path.dirname(file), { recursive: true });
-            fs.writeFileSync(file, target, 'utf8');
-        } else if (fs.existsSync(file)) {
-            fs.unlinkSync(file);
-        }
-        log.info(`B站弹幕 Node sidecar 已${target ? '更新: ' + target : '清空（当前环境无独立 node，回退系统 PATH）'}`);
-    } catch (error) {
-        log.error('写 B站弹幕 Node sidecar 失败:', error);
-    }
-}
-
-// 弹出系统文件选择框，选中用户本机 Python 解释器（python.exe），写回配置 + sidecar
-async function handlePickPythonPath(): Promise<string | null> {
-    const win = getMainWindow();
-    try {
-        const result = await dialog.showOpenDialog(win ?? undefined, {
-            title: '选择 Python 解释器（python.exe）',
-            properties: ['openFile'],
-            filters: [
-                { name: 'Python 可执行文件', extensions: process.platform === 'win32' ? ['exe'] : [] },
-                { name: '所有文件', extensions: ['*'] }
-            ]
-        });
-        if (!result.canceled && result.filePaths.length > 0) {
-            const selectedPath = result.filePaths[0];
-            fnConfig.setPythonPath(selectedPath);
-            writeBiliPythonSidecar(selectedPath);
-            log.info(`B站弹幕 Python 路径已设置为: ${selectedPath}`);
-            return selectedPath;
-        }
-    } catch (error) {
-        log.error('选择 Python 路径失败:', error);
-    }
-    return null;
-}
-
-async function handleClearPythonPath(): Promise<void> {
-    fnConfig.setPythonPath('');
-    writeBiliPythonSidecar(null);
-    log.info('B站弹幕 Python 路径已清空，回退到内置便携版');
 }
 
 // 把任意本地图片复制进 userData/login-bg/，返回可移植路径（不再依赖原始绝对路径，换电脑/移动文件也不会失效）
@@ -463,8 +362,6 @@ async function handleGetDiagnostics(): Promise<any> {
             // MPV 渲染（着色器 / ICC 校色）
             mpvShader: fnConfig.getMpvDefaultShader(),
             mpvIcc: fnConfig.getMpvIccEnabled() !== false,
-            // 运行依赖（B站弹幕依赖内置 Python）
-            pythonPath: fnConfig.getPythonPath() || '(自动检测)',
             // 界面 / 其它开关
             wheelHScroll: fnConfig.getWheelHScroll() !== false,
             detailBoxless: fnConfig.getDetailBoxless() === true,
@@ -696,16 +593,6 @@ function init(): void {
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
     // 这里再在启动时补一次重放，确保用户「之前已选过但没生效」的着色器立即生效（无需重新手动选择）。
     try { writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false); } catch (e) { log.warn('启动重放默认着色器失败', e); }
-    // 启动时把 B站弹幕要用的 Python 路径写入 sidecar：优先用户自定义，否则用内置便携版（开箱即用）。
-    // 这样新机器/纯净服务器无系统 Python 时也能直接拉起内置 Python 跑 B站弹幕，无需用户手动安装。
-    try {
-        const custom = fnConfig.getPythonPath();
-        writeBiliPythonSidecar(custom || null);
-    } catch (e) { log.warn('启动同步 B站弹幕 Python 路径失败', e); }
-    // 启动时把 B站弹幕要用的 Node 路径写入 sidecar（dev 下=node.exe，供 extra.lua 优先以 JS 模式运行 bili_danmaku.js）。
-    try {
-        writeBiliNodeSidecar();
-    } catch (e) { log.warn('启动同步 B站弹幕 Node 路径失败', e); }
     registerHandler('settings:get', handleGetSettings, { useHandle: true });
     registerHandler('settings:set-download-proxy', handleSetDownloadProxy, { useHandle: true });
     registerHandler('settings:set-hide-play', handleSetHidePlay, { useHandle: true });
@@ -714,8 +601,6 @@ function init(): void {
     registerHandler('settings:clear-mpv-path', handleClearMpvPath, { useHandle: true });
     registerHandler('settings:pick-pot-path', handlePickPotPath, { useHandle: true });
     registerHandler('settings:clear-pot-path', handleClearPotPath, { useHandle: true });
-    registerHandler('settings:pick-python-path', handlePickPythonPath, { useHandle: true });
-    registerHandler('settings:clear-python-path', handleClearPythonPath, { useHandle: true });
     registerHandler('settings:pick-login-bg', handlePickLoginBg, { useHandle: true });
     registerHandler('settings:set-login-bg', handleSetLoginBg, { useHandle: true });
     registerHandler('settings:clear-login-bg', handleClearLoginBg, { useHandle: true });

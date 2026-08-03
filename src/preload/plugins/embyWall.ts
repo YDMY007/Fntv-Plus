@@ -2776,38 +2776,6 @@ function handle(): void {
 
     // [lc-301] 「打开弹幕文件夹」按钮已移至下方「弹幕设置」区（secDanmaku），此处不再重复。
 
-    // Python 解释器路径（B站弹幕脚本 bili_danmaku.py 需要 Python；留空=用内置便携版）
-    const pyLabel = document.createElement('div');
-    pyLabel.textContent = 'Python 解释器路径（B站弹幕）';
-    pyLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:14px 0 5px;';
-    secBodyBili.appendChild(pyLabel);
-
-    const pyPath = document.createElement('div');
-    pyPath.id = 'fnos-python-path';
-    pyPath.style.cssText = 'font-size:12px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
-      + 'max-height:72px;overflow-y:auto;padding:6px 9px;line-height:1.5;background:var(--fnos-ui-input-bg);border-radius:7px;'
-      + 'border:1px solid var(--fnos-ui-border);';
-    secBodyBili.appendChild(pyPath);
-
-    const pyBtns = document.createElement('div');
-    pyBtns.style.cssText = 'display:flex;gap:6px;';
-    const pyPickBtn = mkBtn('选择文件', true);
-    const pyClearBtn = mkBtn('清空', true);
-    pyBtns.appendChild(pyPickBtn); pyBtns.appendChild(pyClearBtn);
-    secBodyBili.appendChild(pyBtns);
-
-    const pyDefaultText = '默认使用内置便携版（无需本机安装）';
-    pyPickBtn.addEventListener('click', async (e: Event) => {
-      e.stopPropagation();
-      const p = await ipcRenderer.invoke('settings:pick-python-path');
-      if (p) pyPath.textContent = p as string;
-    });
-    pyClearBtn.addEventListener('click', async (e: Event) => {
-      e.stopPropagation();
-      await ipcRenderer.invoke('settings:clear-python-path');
-      pyPath.textContent = pyDefaultText;
-    });
-
     /* 布局统一在末尾 layout 区追加 */
 
     // ===== 分组: Bangumi 登录（与「B站弹幕登录」并列，容器同尺寸）=====
@@ -3242,7 +3210,6 @@ function handle(): void {
         lines.push(`默认播放器: ${r.defaultPlayer}`);
         lines.push(`MPV 路径: ${r.mpvPath}   PotPlayer 路径: ${r.potPath}`);
         lines.push(`MPV 配置目录: ${r.mpvConfigDir}`);
-        lines.push(`Python(弹幕依赖): ${r.pythonPath}`);
         lines.push('');
         lines.push('== MPV 渲染 ==');
         lines.push(`默认着色器: ${r.mpvShader || 'off'}   ICC 校色: ${r.mpvIcc ? '开' : '关'}`);
@@ -3723,7 +3690,6 @@ function handle(): void {
       });
       seg('accounts', () => {
         refreshBili();
-        pyPath.textContent = s.pythonPath || '默认使用内置便携版（无需本机安装）';
         refreshDouban();
       });
       seg('debug', () => {

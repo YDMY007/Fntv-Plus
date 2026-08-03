@@ -540,137 +540,74 @@ function auto_search_extra(title, episode_num)
         return
     end
 
-    -- ⚠️ py_script 必须用脚本所在目录动态计算，绝不能写死绝对路径
-    -- （否则换机器 / 换目录 / 走 dev 仓库就找不到 bili_danmaku.py，导致 B站弹幕 100% 失败）
-    -- main.lua 通过 require('apis/extra') 加载本文件，故 get_script_directory() 返回
-    -- main.lua 所在目录 .../scripts/uosc_danmaku/，bili_danmaku.py 就在此目录下。
-    local script_dir = mp.get_script_directory()
-    -- ⚠️ 脚本必须用脚本所在目录动态计算，绝不能写死绝对路径
-    -- （否则换机器 / 换目录 / 走 dev 仓库就找不到脚本，导致 B站弹幕 100% 失败）
-    -- main.lua 通过 require('apis/extra') 加载本文件，故 get_script_directory() 返回
-    -- main.lua 所在目录 .../scripts/uosc_danmaku/，bili_danmaku.js / .py 就在此目录下。
-    -- 2026-08-03 起切换为「JS 首选 + Python 兜底」：优先用 node 跑 bili_danmaku.js（逻辑与 .py 一致），
-    -- JS 失败（无 node 环境/脚本异常）再回退 Python，保证 B站弹幕在任何环境都能拉到。
-    local js_script = utils.join_path(script_dir, "bili_danmaku.js")
-    local py_script = utils.join_path(script_dir, "bili_danmaku.py")
+    -- 2026-08-03（重构）：改为经本地 Node shim(127.0.0.1:22347) 的 /danmaku 端点触发弹幕。
+    -- 主进程内运行 bili_danmaku.js（纯 Node 内置模块，Node 已在 electron.exe 内），
+    -- 彻底摆脱对外部 Python/node 解释器的依赖——不再需要捆绑 ~20MB Python，也无需用户装 node。
+    -- 打包版（无 node.exe、无内置 Python）也能稳定拉到 B站弹幕。
+    local function url_encode(str)
+        if not str then return "" end
+        return (str:gsub("([^%w%-%.%_%~])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end))
+    end
 
-    -- 统一执行某个「解释器 + 脚本」，转发 [bili_danmaku] 日志并解析 BILI_RESULT，返回是否成功拉到弹幕
-    local function try_run(interp, script)
-        msg.info(("[自动补源-DEBUG] 试 interp=%q script=%q args=%s,%s,%s")
-            :format(interp, script, title, tostring(episode_num), out_xml))
-        -- 注意：绝不能给 subprocess 传 env 参数——mpv 的 env 要求字符串数组且会
-        -- 整体替换子进程环境变量（PATH 等全丢），传 Lua 字典还会直接报
-        -- "argument env has incompatible type" 导致 res=nil、整个脚本崩溃。
-        -- UTF-8 输出由脚本内部强制保证（.py 用 io.TextIOWrapper，.js 走 Node 默认 UTF-8 管道），无需 env。
-        local res = mp.command_native({
-            name = "subprocess",
-            args = { interp, script, title, tostring(episode_num), out_xml, tostring(options.aggregate_threshold or 1500) },
-            capture_stdout = true,
-            capture_stderr = true,
-        })
+    -- 经本地 shim HTTP GET 触发弹幕；跨平台用 curl(类Unix) / PowerShell(Windows)。
+    local function http_get(u)
+        local platform = mp.get_property("platform") or ""
+        local res
+        if platform == "windows" then
+            res = mp.command_native({
+                name = "subprocess",
+                args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                         "try { (Invoke-WebRequest -Uri '" .. u .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+                capture_stdout = true,
+                capture_stderr = true,
+            })
+        else
+            res = mp.command_native({
+                name = "subprocess",
+                args = { "curl", "-sS", "--max-time", "60", u },
+                capture_stdout = true,
+                capture_stderr = true,
+            })
+        end
         if not res then
-            msg.warn(("[自动补源-DEBUG] subprocess 调用失败(res=nil) interp=%q"):format(interp))
-            return false
+            msg.warn("[自动补源-DEBUG] HTTP 调用失败(res=nil)")
+            return nil
         end
-        -- 把脚本的 stderr 日志（[番剧区]/[视频区]/匹配过程）逐行转发到 mpv 日志，
-        -- 否则这些关键 debug 信息被 subprocess 捕获后直接丢弃、任何日志里都看不到
-        local stderr = res.stderr or ""
-        for line in stderr:gmatch("[^\r\n]+") do
-            -- 脚本 log() 已自带 [bili_danmaku] 前缀，原样转发即可
-            msg.info(line)
+        local body = (res.stdout or ""):gsub("\\r?\\n$", "")
+        if body:sub(1, 4) == "ERR:" then
+            msg.warn("[自动补源] 本地代理请求失败: " .. body:sub(5))
+            return nil
         end
-        -- 解析脚本输出的 BILI_RESULT JSON（成功/失败都解析，供配置面板显示关联状态）
-        local stdout = res.stdout or ""
-        local bili_line = stdout:match("BILI_RESULT:([^\r\n]+)")
-        if bili_line then
-            local ok_parse, parsed = pcall(utils.parse_json, bili_line)
-            if ok_parse and type(parsed) == "table" then
-                BILI_INFO = parsed
-                msg.info(("[自动补源] B站元数据: %s"):format(bili_line))
-            else
-                msg.warn("[自动补源] BILI_RESULT JSON 解析失败: " .. tostring(bili_line))
-            end
-        end
-        if res.status == 0 and file_exists(out_xml) then
-            return true
-        end
-        return false
+        return body
     end
-
-    -- node 解释器候选（JS 模式首选）。优先级：主进程写入的精确路径 sidecar > 系统 PATH。
-    -- ① 主进程（settings.ts init）在 dev 模式下把 node.exe 绝对路径写入同目录的 node_path.txt，
-    --   优先读取即可直接命中（dev 下 node 必在 PATH，侧car 进一步锁定精确路径）。
-    -- ② 兜底：系统 PATH 的 node / nodejs。
-    local node_candidates = {}
-    local node_sidecar = utils.join_path(script_dir, "node_path.txt")
-    local nsh = io.open(node_sidecar, "r")
-    if nsh then
-        local np = nsh:read("*l")
-        nsh:close()
-        if np and np:gsub("%s+$", "") ~= "" then
-            node_candidates[#node_candidates + 1] = np:gsub("%s+$", "")
-        end
-    end
-    node_candidates[#node_candidates + 1] = "node"
-    node_candidates[#node_candidates + 1] = "nodejs"
-
-    -- 向上回溯找父目录（去尾斜杠，避免 split_path 行为受带/不带尾斜杠影响）
-    local function _parent(p)
-        p = p:gsub("[\\/]$", "")
-        return utils.split_path(p)
-    end
-
-    -- Python 解释器候选（兜底）。优先级：主进程写入的精确路径 sidecar > 逐层枚举内置 Python > 系统 PATH。
-    -- ① 主进程（settings.ts init）在启动时把正确的 Python 绝对路径写入同目录的 python_path.txt
-    --   （用户自定义 > 内置便携版），优先读取即可直接命中，无需任何层级回溯猜测。
-    -- ② 兜底：从 script_dir 逐层向上枚举 0~6 层找 third_party/python/python.exe
-    --   （覆盖 sidecar 缺失/写失败场景，如安装到无写权限目录时主进程写盘被拒）。
-    -- ③ 最终兜底：系统 PATH 的 python / python3 / py。
-    local py_candidates = {}
-    local sidecar = utils.join_path(script_dir, "python_path.txt")
-    local sh = io.open(sidecar, "r")
-    if sh then
-        local sp = sh:read("*l")
-        sh:close()
-        if sp and sp:gsub("%s+$", "") ~= "" then
-            py_candidates[#py_candidates + 1] = sp:gsub("%s+$", "")
-        end
-    end
-    if #py_candidates == 0 then
-        local d = script_dir
-        for i = 0, 6 do
-            if i > 0 then d = _parent(d) end
-            local p = utils.join_path(utils.join_path(utils.join_path(d, "third_party"), "python"), "python.exe")
-            py_candidates[#py_candidates + 1] = p
-        end
-    end
-    py_candidates[#py_candidates + 1] = "python"
-    py_candidates[#py_candidates + 1] = "python3"
-    py_candidates[#py_candidates + 1] = "py"
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
-    msg.warn(("自动补源：直连B站搜索 %s（%s）"):format(title, ep_label))
-    msg.info(("[自动补源-DEBUG] node_candidates=%s"):format(table.concat(node_candidates, " | ")))
-    msg.info(("[自动补源-DEBUG] py_candidates=%s"):format(table.concat(py_candidates, " | ")))
+    msg.warn(("自动补源：经本地代理直连B站搜索 %s（%s）"):format(title, ep_label))
+    local api = string.format(
+        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s",
+        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500))
+    msg.info(("[自动补源-DEBUG] 请求 %s"):format(api))
 
+    local body = http_get(api)
     local ok = false
-    -- 首选 JS 模式（node 跑 bili_danmaku.js，逻辑与 .py 一致）
-    if file_exists(js_script) then
-        for _, node in ipairs(node_candidates) do
-            if try_run(node, js_script) then ok = true; break end
+    if body and body ~= "" then
+        local ok_parse, parsed = pcall(utils.parse_json, body)
+        if ok_parse and type(parsed) == "table" then
+            if parsed.ok then
+                BILI_INFO = parsed
+                msg.info(("[自动补源] B站元数据: %s"):format(body))
+                ok = true
+            else
+                msg.warn("[自动补源] B站弹幕获取失败: " .. tostring(parsed.error or "未知"))
+            end
+        else
+            msg.warn("[自动补源] 响应 JSON 解析失败: " .. tostring(body))
         end
-    else
-        msg.info("[自动补源-DEBUG] 未找到 bili_danmaku.js，跳过 JS 模式")
-    end
-    -- JS 未成功 → 回退 Python 模式
-    if not ok then
-        msg.info("[自动补源-DEBUG] JS 模式未成功，回退 Python 模式")
-        for _, py in ipairs(py_candidates) do
-            if try_run(py, py_script) then ok = true; break end
-        end
     end
     if not ok then
-        msg.warn("自动补源：B站弹幕下载失败（检查网络/Python环境，详见 mpv.log 的 [bili_danmaku] 日志）")
+        msg.warn("自动补源：B站弹幕下载失败（确认本地代理 127.0.0.1:22347 已随应用启动，详见 mpv.log）")
         return
     end
     msg.warn(("自动补源：叠加 B站弹幕（%s 第%s集）"):format(title, episode_num))

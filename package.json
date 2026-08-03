@@ -78,17 +78,17 @@
       "icon": "build/icon.ico",
       "extraFiles": [
         {
-            "from": "third_party/fntv-mpv",
-            "to": "third_party/fntv-mpv",
-            "filter": [
-              "**/*",
-              "!**/portable_config/cache/**",
-              "!**/portable_config/.cache/**",
-              "!**/portable_config/mpv.log",
-              "!**/portable_config/watch_later/**",
-              "!**/portable_config/danmaku-history.json",
-              "!**/portable_config/mpv.conf.bak*"
-            ]
+          "from": "third_party/fntv-mpv",
+          "to": "third_party/fntv-mpv",
+          "filter": [
+            "**/*",
+            "!**/portable_config/cache/**",
+            "!**/portable_config/.cache/**",
+            "!**/portable_config/mpv.log",
+            "!**/portable_config/watch_later/**",
+            "!**/portable_config/danmaku-history.json",
+            "!**/portable_config/mpv.conf.bak*"
+          ]
         },
         {
           "from": "third_party/proxy",
@@ -100,13 +100,6 @@
         {
           "from": "third_party/potplayer",
           "to": "third_party/potplayer",
-          "filter": [
-            "**/*"
-          ]
-        },
-        {
-          "from": "third_party/python",
-          "to": "third_party/python",
           "filter": [
             "**/*"
           ]
@@ -132,17 +125,17 @@
       "type": "development",
       "extraFiles": [
         {
-            "from": "third_party/fntv-mpv/portable_config",
-            "to": "third_party/fntv-mpv/portable_config",
-            "filter": [
-              "**/*",
-              "!**/cache/**",
-              "!**/.cache/**",
-              "!**/mpv.log",
-              "!**/watch_later/**",
-              "!**/danmaku-history.json",
-              "!**/mpv.conf.bak*"
-            ]
+          "from": "third_party/fntv-mpv/portable_config",
+          "to": "third_party/fntv-mpv/portable_config",
+          "filter": [
+            "**/*",
+            "!**/cache/**",
+            "!**/.cache/**",
+            "!**/mpv.log",
+            "!**/watch_later/**",
+            "!**/danmaku-history.json",
+            "!**/mpv.conf.bak*"
+          ]
         },
         {
           "from": "third_party/proxy",
@@ -194,17 +187,17 @@
       },
       "extraFiles": [
         {
-            "from": "third_party/fntv-mpv/portable_config",
-            "to": "third_party/fntv-mpv/portable_config",
-            "filter": [
-              "**/*",
-              "!**/cache/**",
-              "!**/.cache/**",
-              "!**/mpv.log",
-              "!**/watch_later/**",
-              "!**/danmaku-history.json",
-              "!**/mpv.conf.bak*"
-            ]
+          "from": "third_party/fntv-mpv/portable_config",
+          "to": "third_party/fntv-mpv/portable_config",
+          "filter": [
+            "**/*",
+            "!**/cache/**",
+            "!**/.cache/**",
+            "!**/mpv.log",
+            "!**/watch_later/**",
+            "!**/danmaku-history.json",
+            "!**/mpv.conf.bak*"
+          ]
         },
         {
           "from": "third_party/proxy",

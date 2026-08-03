@@ -1,7 +1,10 @@
 import * as http from 'http';
 import * as url from 'url';
+import * as os from 'os';
+import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
+import { runBiliDanmaku } from './biliRunner';
 const log = logger.component('playbackShim');
 
 /**
@@ -65,7 +68,14 @@ class PlaybackShim {
 
     private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
         const u = url.parse(req.url || '');
-        const m = (u.pathname || '').match(/^\/p\/([^/]+)\//);
+        const pathname = u.pathname || '';
+        // B站弹幕端点：extra.lua 经 HTTP 触发主进程内运行 bili_danmaku.js（绕开外部 Python/node）
+        // 用法: GET /danmaku?title=<番名>&ep=<集数>&out=<输出xml绝对路径>&threshold=<聚合阈值>
+        if (pathname === '/danmaku') {
+            this.handleDanmaku(req, res);
+            return;
+        }
+        const m = pathname.match(/^\/p\/([^/]+)\//);
         if (!m) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
             res.end('not found');
@@ -192,6 +202,76 @@ class PlaybackShim {
             flac: 'audio/flac',
         };
         return ext ? map[ext] : undefined;
+    }
+
+    // ===================== B站弹幕端点（/danmaku）=====================
+
+    /**
+     * 处理 /danmaku 请求：在主进程内运行 bili_danmaku.js 获取弹幕并写出 XML。
+     * 仅接受 out 落在安全缓存目录（PUBLIC/ProgramData/tmp 下的 fnos-danmaku）内的请求，
+     * 防止通过 out 参数做路径穿越写任意文件。
+     */
+    private handleDanmaku(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const title = (q.title || '').toString();
+        const ep = parseInt((q.ep || '0').toString(), 10) || 0;
+        const out = (q.out || '').toString();
+        const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
+
+        if (!title || !out) {
+            this.json(res, 400, { ok: false, error: '缺少 title 或 out 参数' });
+            return;
+        }
+        if (!this.isSafeDanmakuPath(out)) {
+            log.warn(`[playbackShim][danmaku] ❌ 拒绝非安全输出路径: ${out}`);
+            this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
+            return;
+        }
+        log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} out=${out} threshold=${threshold ?? '(默认)'}`);
+        runBiliDanmaku(title, ep, out, threshold).then((r) => {
+            if (r.ok) {
+                log.info(`[playbackShim][danmaku] ✅ 弹幕就绪 | count=${r.danmaku_count} source=${r.source} cid=${r.cid}`);
+                this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, cid: r.cid });
+            } else {
+                log.warn(`[playbackShim][danmaku] ❌ 弹幕获取失败: ${r.error}`);
+                this.json(res, 200, { ok: false, error: r.error });
+            }
+        }).catch((e) => {
+            log.warn(`[playbackShim][danmaku] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
+    /** 校验 out 是否落在允许的弹幕缓存目录内（防路径穿越）。 */
+    private isSafeDanmakuPath(out: string): boolean {
+        let resolved: string;
+        try {
+            resolved = path.resolve(out);
+        } catch (_) {
+            return false;
+        }
+        const bases = this.resolveSafeDanmakuBases();
+        return bases.some((b) => {
+            const rb = path.resolve(b);
+            return resolved === rb || resolved.startsWith(rb + path.sep);
+        });
+    }
+
+    /** 允许的弹幕 XML 输出根目录（与 uosc_danmaku/main.lua 的 DANMAKU_PATH 对齐）。 */
+    private resolveSafeDanmakuBases(): string[] {
+        const roots = [process.env.PUBLIC, process.env.ProgramData, os.tmpdir()].filter(Boolean) as string[];
+        const dirs = roots.map((r) => path.join(r, 'fnos-danmaku'));
+        if (process.platform !== 'win32') {
+            dirs.push(path.join(os.homedir(), '.config', 'mpv', 'scripts', 'uosc_danmaku'));
+        }
+        return dirs;
+    }
+
+    private json(res: http.ServerResponse, code: number, obj: any): void {
+        const body = JSON.stringify(obj);
+        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(body);
     }
 }
 

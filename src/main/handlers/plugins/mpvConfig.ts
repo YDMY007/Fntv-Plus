@@ -364,7 +364,7 @@ function writeBiliAggregateThreshold(threshold: number): void {
 
 // 写入 B站弹幕「样式与过滤」到 script-opts/uosc_danmaku.conf（覆盖 fontsize/opacity/outline/shadow/bold/displayarea/max_screen_danmaku/blacklist_path）
 // 同时把屏蔽词写入 <portable_config>/danmaku_blacklist.txt（用 ~~ 相对路径引用，MPV 自动解析到当前配置目录），
-// 把弹幕屏蔽类型写入 <portable_config>/scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.py 启动时读取并过滤）。
+// 把弹幕屏蔽类型写入 <portable_config>/scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.js 启动时读取并过滤）。
 // 保留 conf 中其他选项（bili_search_enabled / auto_load_extra / aggregate_threshold 等由各自函数管理）。
 function writeBiliDanmakuStyle(): void {
     try {
@@ -411,7 +411,7 @@ function writeBiliDanmakuStyle(): void {
                 push('屏蔽词', 'blacklist_path', '~~/danmaku_blacklist.txt');
                 fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
                 logger.info(`B站弹幕样式已写入: ${target} (opacity=${opacity},size=${fontsize},outline=${outline},shadow=${shadow},bold=${bold},area=${displayarea},max=${maxScreen},blacklist=${words.length}词)`);
-                // 弹幕屏蔽类型：写入 scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.py 启动时读取并过滤）
+                // 弹幕屏蔽类型：写入 scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.js 启动时读取并过滤）
                 const blockTypes = fnConfig.getBiliDanmakuBlockTypes();
                 const uoscDir = path.join(dir, 'scripts', 'uosc_danmaku');
                 if (!fs.existsSync(uoscDir)) fs.mkdirSync(uoscDir, { recursive: true });

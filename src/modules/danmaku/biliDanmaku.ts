@@ -1,94 +1,33 @@
-import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { app } from 'electron';
 import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
+import { runBiliDanmaku } from '../../main/common/biliRunner';
 const log = logger.component('danmaku');
 
 /**
  * PotPlayer 弹幕支持。
  *
  * 背景：本项目的「B站弹幕」由 MPV 专属的 uosc_danmaku Lua 脚本实现——
- * 它调用同目录的 `bili_danmaku.py`（用标题+集数去 B站搜对应集、抓弹幕 XML），
+ * 它调用同目录的 `bili_danmaku.js`（用标题+集数去 B站搜对应集、抓弹幕 XML），
  * 再把 XML 转成 ASS 字幕轨道渲染。PotPlayer 跑不了 MPV 的 Lua 脚本，
- * 因此这里在主进程复刻同一条链路：直接调用同一个 `bili_danmaku.py` 出 XML，
+ * 因此这里在主进程复刻同一条链路：直接通过 biliRunner 在主进程内运行同一个
+ * `bili_danmaku.js`（纯 Node 内置模块，Node 已在 electron.exe 内）出 XML，
  * 再用移植自 Lua 的碰撞避让算法把 XML 转成 ASS，最后由 potplayer.ts 通过 /sub 喂给 PotPlayer。
  *
- * 这样 PotPlayer 的弹幕能力就与 MPV 对齐（同数据源、同排版算法、同 Cookie）。
+ * 这样 PotPlayer 的弹幕能力就与 MPV 对齐（同数据源、同排版算法、同 Cookie），
+ * 且不再依赖内置 ~20MB 的 Python 安装包。
  */
-
-// ---- 候选 uosc_danmaku 脚本目录（与 biliCookie.ts 保持一致，内联避免跨层依赖）----
-function getDanmakuScriptCandidates(): string[] {
-    const arr: string[] = [];
-    if (process.resourcesPath) {
-        arr.push(path.join(process.resourcesPath, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
-    }
-    try {
-        arr.push(path.join(app.getAppPath(), 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
-    } catch (_) { /* ignore */ }
-    // [新] 打包态 MPV 实际脚本目录：exe 同目录 portable_config（extraFiles 解压，可写）
-    try {
-        arr.push(path.join(path.dirname(app.getPath('exe')), 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
-    } catch (_) { /* ignore */ }
-    if (process.platform === 'win32') {
-        arr.push(path.join(os.homedir(), 'AppData', 'Roaming', 'mpv', 'scripts', 'uosc_danmaku'));
-    } else {
-        arr.push(path.join(os.homedir(), '.config', 'mpv', 'scripts', 'uosc_danmaku'));
-    }
-    return arr;
-}
-
-function resolveScriptDir(): string | null {
-    for (const c of getDanmakuScriptCandidates()) if (fs.existsSync(c)) return c;
-    return null;
-}
-
-// ---- Python 解释器候选（优先顺序：用户自定义 > 内置精简 Python > WorkBuddy 自带 > 系统 PATH）----
-// 用户可在「B站弹幕登录」设置页指定本机 Python（pythonPath）；留空则回退到内置便携版。
-// 内置 Python 随安装包分发（third_party/python，仅标准库即可跑 bili_danmaku.py），
-// 保证无 Python 环境的电脑（如纯净服务器）也能用 B站弹幕，无需用户自行安装。
-function getBundledPython(): string | null {
-    const base = app.isPackaged
-        ? path.dirname(app.getPath('exe'))   // 打包后 third_party 在 exe 同级目录
-        : app.getAppPath();                   // dev 下在项目根
-    const p = path.join(base, 'third_party', 'python', 'python.exe');
-    return fs.existsSync(p) ? p : null;
-}
-
-function findPythonCandidates(): string[] {
-    const cands: string[] = [];
-    // 0) 用户自定义 Python（设置页指定，最高优先级）
-    const custom = fnConfig.getPythonPath();
-    if (custom && fs.existsSync(custom)) cands.push(custom);
-    // 1) 内置精简 Python（零配置可用）
-    const bundled = getBundledPython();
-    if (bundled) cands.push(bundled);
-    const home = os.homedir();
-    // 2) 通用：扫描 WorkBuddy 托管的各版本 python
-    const verRoot = path.join(home, '.workbuddy', 'binaries', 'python', 'versions');
-    try {
-        if (fs.existsSync(verRoot)) {
-            for (const v of fs.readdirSync(verRoot)) {
-                const p = path.join(verRoot, v, 'python.exe');
-                if (fs.existsSync(p)) cands.push(p);
-            }
-        }
-    } catch (_) { /* ignore */ }
-    // 3) 系统 PATH
-    cands.push('python', 'python3', 'py');
-    return cands;
-}
 
 /**
  * 规范化弹幕搜索用的番名：去掉 CJK 书名号/直角引号等包裹符号。
  *
  * 背景：飞牛的 tvTitle 常带『』「」《》等（如『你们先走我断后』，于是…），
- * 而 B站番名没有这些符号。bili_danmaku.py 用 `title[:2/3]` 做前缀过滤，
+ * 而 B站番名没有这些符号。bili_danmaku.js 用 `_norm()` 做前缀清洗，
  * 带『时前缀变成『你们，B站结果里没有，导致整批候选被过滤→匹配不上。
- * 这里在进搜索前统一剥掉，和 bili_danmaku.py 内的清洗保持一致。
+ * 这里在进搜索前统一剥掉，和 bili_danmaku.js 内的清洗保持一致。
  */
 export function normalizeDanmakuTitle(title: string): string {
     if (!title) return title;
@@ -98,7 +37,7 @@ export function normalizeDanmakuTitle(title: string): string {
 }
 
 /**
- * 调用 bili_danmaku.py 抓取 B站弹幕 XML。
+ * 在主进程内调用 bili_danmaku.js 抓取 B站弹幕 XML（替代旧方案 spawn 外部 Python）。
  * @param title 干净番名（如「葬送的芙莉莲」），不要用含 S1E2 的完整媒体标题
  * @param ep    集数；0 表示仅标题搜索（取最优/首集兜底）
  * @param outXml 输出 XML 路径
@@ -106,94 +45,20 @@ export function normalizeDanmakuTitle(title: string): string {
  */
 export async function fetchBiliDanmakuXml(title: string, ep: number, outXml: string): Promise<boolean> {
     const cleanTitle = normalizeDanmakuTitle(title);
-    log.info(`[danmaku] === fetchBiliDanmakuXml 开始 ===`);
+    log.info(`[danmaku] === fetchBiliDanmakuXml 开始(主进程 JS) ===`);
     log.info(`[danmaku] 参数: title="${title}" -> cleanTitle="${cleanTitle}", ep=${ep}, outXml="${outXml}"`);
 
-    const scriptDir = resolveScriptDir();
-    if (!scriptDir) {
-        log.warn(`[danmaku] ❌ 未找到 uosc_danmaku 脚本目录！候选路径:`);
-        for (const c of getDanmakuScriptCandidates()) {
-            log.warn(`[danmaku]   候选: ${c} (存在:${fs.existsSync(c)})`);
-        }
-        return false;
-    }
-    log.info(`[danmaku] ✅ 脚本目录: ${scriptDir}`);
+    const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
+    log.info(`[danmaku] 聚合阈值: ${aggThreshold}`);
 
-    const pyScript = path.join(scriptDir, 'bili_danmaku.py');
-    if (!fs.existsSync(pyScript)) {
-        log.warn(`[danmaku] ❌ bili_danmaku.py 不存在: ${pyScript}`);
-        return false;
+    const r = await runBiliDanmaku(cleanTitle, ep, outXml, aggThreshold);
+    if (r.ok && fs.existsSync(outXml) && fs.statSync(outXml).size > 0) {
+        const xmlSize = fs.statSync(outXml).size;
+        log.info(`[danmaku] ✅ XML生成成功: ${outXml} (${xmlSize} bytes) count=${r.danmaku_count}`);
+        return true;
     }
-    log.info(`[danmaku] ✅ Python脚本: ${pyScript}`);
-
-    const cands = findPythonCandidates();
-    log.info(`[danmaku] Python候选(${cands.length}个): ${cands.join(' | ')}`);
-
-    for (const py of cands) {
-        try {
-            const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
-            log.info(`[danmaku] 尝试 python: "${py}" args=[${pyScript}, ${cleanTitle}, ${ep}, ${outXml}, ${aggThreshold}]`);
-            const ok = await runPython(py, [pyScript, cleanTitle, String(ep), outXml, String(aggThreshold)], 60000);
-            log.info(`[danmaku] runPython 返回: ${ok}`);
-            if (ok && fs.existsSync(outXml) && fs.statSync(outXml).size > 0) {
-                const xmlSize = fs.statSync(outXml).size;
-                log.info(`[danmaku] ✅ XML生成成功: ${outXml} (${xmlSize} bytes)`);
-                return true;
-            } else {
-                log.warn(`[danmaku] XML未生成或为空: exists=${fs.existsSync(outXml)}, size=${fs.existsSync(outXml) ? fs.statSync(outXml).size : 'N/A'}`);
-            }
-        } catch (e: any) {
-            log.warn('[danmaku] python 调用异常 (' + py + '): ' + (e?.message || e));
-        }
-    }
-    log.warn(`[danmaku] ❌ 所有 Python 候选均失败，无法获取弹幕 XML`);
+    log.warn(`[danmaku] ❌ 弹幕获取失败: ${r.error || '未知错误'} (XML exists=${fs.existsSync(outXml)})`);
     return false;
-}
-
-function runPython(py: string, args: string[], timeoutMs: number): Promise<boolean> {
-    return new Promise((resolve) => {
-        let done = false;
-        let out = '';
-        let err = '';
-        let child: any = null;
-        const finish = (r: boolean) => {
-            if (done) return;
-            done = true;
-            resolve(r);
-        };
-        try {
-            log.info(`[danmaku] spawn: "${py}" ${args.map(a => `"${a}"`).join(' ')}`);
-            child = spawn(py, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
-        } catch (e) {
-            log.warn(`[danmaku] spawn 失败: ${e}`);
-            finish(false);
-            return;
-        }
-        const timer = setTimeout(() => {
-            try { child.kill(); } catch (_) { /* ignore */ }
-            log.warn('[danmaku] python 超时(' + timeoutMs + 'ms)，已终止');
-            log.info(`[danmaku] 超时时 stdout(${out.length}字符): ${out.slice(0, 2000)}`);
-            log.info(`[danmaku] 超时时 stderr(${err.length}字符): ${err.slice(0, 2000)}`);
-            finish(false);
-        }, timeoutMs);
-        child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-        child.stderr?.on('data', (d: Buffer) => { err += d.toString(); });
-        child.on('close', (code: number) => {
-            clearTimeout(timer);
-            log.info(`[danmaku] python 进程退出 code=${code}, stdout(${out.length}字符): ${out.slice(0, 2000)}`);
-            if (err.length > 0) {
-                log.info(`[danmaku] python stderr(${err.length}字符): ${err.slice(0, 2000)}`);
-            }
-            if (code !== 0) {
-                log.warn('[danmaku] bili_danmaku.py 非零退出码 ' + code);
-            }
-            finish(code === 0);
-        });
-        child.on('error', (e: any) => {
-            log.warn(`[danmaku] spawn error事件: ${e?.message || e}`);
-            finish(false);
-        });
-    });
 }
 
 // ===================== XML -> ASS 转换（移植自 uosc_danmaku/modules/parse.lua）=====================
