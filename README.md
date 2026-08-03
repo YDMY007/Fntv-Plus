@@ -229,6 +229,10 @@ PotPlayer 使用其自带快捷键体系（与 MPV 默认不完全一致）
 - [bloc97/Anime4K](https://github.com/bloc97/Anime4K) - Anime4K 超分辨率 / 降噪着色器（画质增强模式核心）
 - [弹弹play 开放弹幕网络](https://www.dandanplay.com) - 番剧识别与弹幕匹配 API（[开放平台文档](https://doc.dandanplay.com/open/)）
 - [Bangumi API](https://bangumi.github.io/api/) - 番剧条目与单集同步 API（[api.bgm.tv](https://api.bgm.tv)，支撑「Bangumi 自动点格子」集数级同步）
+- [huangxd-/danmu_api](https://github.com/huangxd-/danmu_api) - 弹幕聚合 API 参考（借鉴其官方番剧直达思路与 WBI 搜索 / pgc 解析逻辑，用于本项目原生 B站 弹幕通道；本项目零新增依赖、未整包引入）
+
+**跳过数据 / 元数据 API**
+- [theintrodb](https://api.theintrodb.org) - 跳过片头片尾数据 API（本项目「智能跳过」功能的数据源，已迁移至 v3）
 
 ---
 
