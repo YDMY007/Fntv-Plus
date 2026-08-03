@@ -26,6 +26,12 @@ class PlaybackShim {
     async start(): Promise<void> {
         if (this.started) return;
         this.server = http.createServer((req, res) => this.handle(req, res));
+        // 关闭 Node 默认的连接/请求超时：GB 级长视频流若被 5s keepAliveTimeout 或 300s
+        // requestTimeout 掐断，PotPlayer 会拿到截断的 200 并重头拉全文件（日志里反复全量拉取的根源之一）
+        this.server.keepAliveTimeout = 0;
+        this.server.headersTimeout = 0;
+        this.server.requestTimeout = 0;
+        this.server.timeout = 0;
         await new Promise<void>((resolve, reject) => {
             this.server!.on('error', reject);
             this.server!.listen(this.port, '127.0.0.1', () => resolve());
@@ -100,17 +106,67 @@ class PlaybackShim {
                 this.proxy(next, req, res, depth + 1);
                 return;
             }
-            res.writeHead(pres.statusCode || 502, pres.headers as any);
+            // 过滤逐跳头，避免把上游的 connection/keep-alive 透传给 PotPlayer 造成协议混乱
+            const headers: http.IncomingHttpHeaders = { ...pres.headers };
+            delete headers.connection;
+            delete (headers as any)['keep-alive'];
+            // 回写 MIME：PotPlayer 对 application/octet-stream 敏感，可能直接「打不开」
+            const mt = this.resolveContentType(target, req.url || '', pres.headers['content-type']);
+            if (mt) headers['content-type'] = mt;
+
+            res.writeHead(pres.statusCode || 502, headers as any);
             pres.pipe(res);
         });
+        // 客户端（PotPlayer）断开或中止时，及时销毁到上游的连接，
+        // 避免挂起的 socket 与 `read ECONNRESET` 噪音，并释放 Go 代理侧资源
+        const onClientGone = () => { try { p.destroy(); } catch { /* noop */ } };
+        res.on('close', onClientGone);
+        req.on('close', onClientGone);
+
         p.on('error', (err) => {
-            log.warn('[playbackShim] 代理请求失败:', err.message);
+            // 客户端断开导致的上游读取重置属正常生命周期，静默处理
+            if ((err as NodeJS.ErrnoException).code === 'ECONNRESET') {
+                log.debug('[playbackShim] 上游连接被重置（客户端可能已断开）:', err.message);
+            } else {
+                log.warn('[playbackShim] 代理请求失败:', err.message);
+            }
             if (!res.headersSent) {
                 res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
             }
-            res.end('bad gateway');
+            if (!res.writableEnded) res.end('bad gateway');
         });
         req.pipe(p);
+    }
+
+    /**
+     * 解析应回写给 PotPlayer 的 Content-Type。
+     * - 上游已给出明确的 video/* 时原样保留；
+     * - 否则按 URL 扩展名（shim URL 恒为 .mp4）回写为标准 video/* MIME，
+     *   规避 fnOS 返回 application/octet-stream 时 PotPlayer 拒绝打开的问题。
+     */
+    private resolveContentType(targetUrl: string, reqPath: string, upstreamType?: string): string | undefined {
+        if (upstreamType && /^video\//i.test(upstreamType as string)) {
+            return upstreamType as string;
+        }
+        const path = reqPath || targetUrl;
+        const ext = (path.split('?')[0].split('#')[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+        const map: Record<string, string> = {
+            mp4: 'video/mp4',
+            m4v: 'video/mp4',
+            mov: 'video/quicktime',
+            mkv: 'video/x-matroska',
+            avi: 'video/x-msvideo',
+            ts: 'video/mp2t',
+            m2ts: 'video/mp2t',
+            webm: 'video/webm',
+            flv: 'video/x-flv',
+            wmv: 'video/x-ms-wmv',
+            mp3: 'audio/mpeg',
+            m4a: 'audio/mp4',
+            aac: 'audio/aac',
+            flac: 'audio/flac',
+        };
+        return ext ? map[ext] : undefined;
     }
 }
 
