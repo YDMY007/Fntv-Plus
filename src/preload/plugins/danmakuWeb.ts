@@ -3,10 +3,12 @@
 // [原生网页播放器弹幕] 飞牛「原声播放器」(fnOS 网页自身 <video>) 的 B站弹幕支持。
 //
 // 设计要点（用户明确要求）：
-//   1) 控制栏里有两个按钮：
+//   1) 控制栏里有三个按钮：
 //        - 「弹幕」：弹幕开关（默认开，localStorage 记忆，颜色区分开/关）。
 //        - 「详情」：弹出窗口，展示弹幕【来源信息】（从哪个区/哪个 B站标题匹配、相似度、
 //                    bvid/cid、条数）—— 与 MPV 的弹幕来源提示一致，而非罗列全部弹幕。
+//        - 「样式」：弹出面板，调节弹幕样式（粗体/字号/描边/阴影/滚动时长/透明度/显示范围），
+//                    对齐 MPV 弹幕样式旋钮，配置 localStorage 独立持久化。
 //   2) 弹幕渲染采用 B站网页播放器同款方案：<canvas> 逐帧重绘引擎（非 DOM 元素），
 //      挂在 body 上 position:fixed，每帧按 video.getBoundingClientRect() 对齐播放画面，
 //      彻底规避「overlay 没盖对位置 / video 元素选错」导致的时灵时不灵。
@@ -29,6 +31,7 @@ const loadedGuids = new Set<string>();
 const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
 
 const LS_KEY = 'fntv_danmaku_enabled';
+const LS_STYLE_KEY = 'fntv_danmaku_style';
 
 interface DanmakuItem {
     time: number;   // 秒
@@ -52,6 +55,16 @@ interface DanmakuMeta {
     error?: string;
 }
 
+interface DanmakuStyle {
+    bold: boolean;          // 粗体（MPV bold）
+    fontScale: number;      // 字号 / 画布高（MPV fontsize 概念）
+    outline: number;        // 描边强度 0~3（MPV outline，默认 1.0）
+    shadow: number;         // 阴影强度 0~3（MPV shadow，默认 0）
+    scrollDuration: number; // 滚动横跨秒数（MPV scrolltime，默认 8）
+    opacity: number;        // 全局不透明度 0.3~1（MPV opacity，默认 0.7）
+    displayArea: number;    // 弹幕显示范围（占画布高比例，MPV displayarea 默认 0.85）
+}
+
 interface ActiveState {
     appear: number;          // 出现时的 video.currentTime
     lane: number;
@@ -67,6 +80,8 @@ let toggleWrap: HTMLDivElement | null = null;
 let toggleSpan: HTMLSpanElement | null = null;
 let detailsWrap: HTMLDivElement | null = null;
 let modal: HTMLDivElement | null = null;
+let styleWrap: HTMLDivElement | null = null;
+let stylePanel: HTMLDivElement | null = null;
 let controlsPlaced = false;
 let mountedForGuid: string | null = null;
 let loading = false;
@@ -86,11 +101,50 @@ let laneBusyFix: number[] = [];       // 各轨道"固定弹幕"占用到
 let laneCount = 0;
 
 // 渲染参数（参照 B站网页弹幕引擎）
-const SCROLL_DURATION = 8;   // 滚动弹幕横跨屏幕秒数
-const FIX_DURATION = 5;      // 顶/底弹幕停留秒数
-const LANE_RATIO = 0.034;    // 轨道高 / 画布高
-const FONT_RATIO = 0.036;    // 字号 / 画布高
+const LANE_RATIO = 0.034;    // 单轨道高 / 画布高（轨道高度基准，不暴露给用户）
 const MAX_ACTIVE = 80;       // 同屏活跃弹幕硬顶（防极端高峰）
+
+// 弹幕样式（默认对齐 MPV 观感；用户可在播放器内「样式」面板调节，各端独立持久化）
+const DEFAULT_STYLE: DanmakuStyle = {
+    bold: false,
+    fontScale: 0.036,
+    outline: 1.0,
+    shadow: 0,
+    scrollDuration: 8,
+    opacity: 0.9,
+    displayArea: 0.85,
+};
+
+function clampNum(v: any, min: number, max: number, dflt: number): number {
+    const n = Number(v);
+    if (!isFinite(n)) return dflt;
+    return Math.min(max, Math.max(min, n));
+}
+
+function loadStyle(): DanmakuStyle {
+    try {
+        const raw = localStorage.getItem(LS_STYLE_KEY);
+        if (raw) {
+            const p = JSON.parse(raw);
+            return {
+                bold: !!p.bold,
+                fontScale: clampNum(p.fontScale, 0.018, 0.072, DEFAULT_STYLE.fontScale),
+                outline: clampNum(p.outline, 0, 3, DEFAULT_STYLE.outline),
+                shadow: clampNum(p.shadow, 0, 3, DEFAULT_STYLE.shadow),
+                scrollDuration: clampNum(p.scrollDuration, 4, 16, DEFAULT_STYLE.scrollDuration),
+                opacity: clampNum(p.opacity, 0.3, 1, DEFAULT_STYLE.opacity),
+                displayArea: clampNum(p.displayArea, 0.3, 1, DEFAULT_STYLE.displayArea),
+            };
+        }
+    } catch { /* ignore */ }
+    return { ...DEFAULT_STYLE };
+}
+
+function saveStyle(): void {
+    try { localStorage.setItem(LS_STYLE_KEY, JSON.stringify(style)); } catch { /* ignore */ }
+}
+
+let style: DanmakuStyle = loadStyle();
 
 // ─── 页面检测 ───
 
@@ -177,6 +231,7 @@ function ensureMounted(): void {
         if (!toggleWrap) createControls();
         if (toggleWrap && toggleWrap.parentElement !== bar) bar.appendChild(toggleWrap);
         if (detailsWrap && detailsWrap.parentElement !== bar) bar.appendChild(detailsWrap);
+        if (styleWrap && styleWrap.parentElement !== bar) bar.appendChild(styleWrap);
         if (!controlsPlaced) {
             log.info('[danmakuWeb] 弹幕开关已注入控制栏(' + String(bar.className).slice(0, 40) + ')');
             controlsPlaced = true;
@@ -186,6 +241,7 @@ function ensureMounted(): void {
         if (!toggleWrap) createControls();
         if (toggleWrap && !toggleWrap.parentElement) document.body.appendChild(toggleWrap);
         if (detailsWrap && !detailsWrap.parentElement) document.body.appendChild(detailsWrap);
+        if (styleWrap && !styleWrap.parentElement) document.body.appendChild(styleWrap);
     }
 }
 
@@ -219,6 +275,8 @@ function createControls(): void {
     toggleSpan = t.span;
     const d = makeControlButton('详情', () => openDetails());
     detailsWrap = d.wrap;
+    const s = makeControlButton('样式', () => openStylePanel());
+    styleWrap = s.wrap;
     syncToggleUI();
 }
 
@@ -370,6 +428,7 @@ function render(): void {
     const cw = canvas.width / (window.devicePixelRatio || 1);
     const ch = canvas.height / (window.devicePixelRatio || 1);
     const t = videoEl.currentTime;
+    const fixDuration = Math.max(3, style.scrollDuration * 0.6);
 
     // 倒退（seek 回拖）→ 清空已生成集合，允许重播
     if (lastTime >= 0 && t < lastTime - 0.5) {
@@ -381,14 +440,25 @@ function render(): void {
     lastTime = t;
 
     const laneH = Math.max(20, ch * LANE_RATIO);
-    const n = Math.max(6, Math.floor(ch / laneH));
+    const usableH = ch * style.displayArea;
+    const n = Math.max(6, Math.floor(usableH / laneH));
     ensureLanes(n);
-    const fontSize = Math.max(16, Math.min(40, ch * FONT_RATIO));
+    const fontSize = Math.max(14, Math.min(48, ch * style.fontScale));
     ctx.clearRect(0, 0, cw, ch);
-    ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    ctx.font = `${style.bold ? 'bold ' : ''}${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textBaseline = 'top';
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = Math.max(1, fontSize * 0.12);
+    if (style.shadow > 0) {
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = fontSize * 0.06 * style.shadow;
+    } else {
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+    }
+    if (style.outline > 0) {
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(1, fontSize * 0.04 * style.outline);
+        ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+    }
 
     // ① 激活到点的弹幕（只进不出，直到播完才移到 finished）
     if (active.size < MAX_ACTIVE) {
@@ -396,7 +466,7 @@ function render(): void {
             if (active.has(i) || finished.has(i)) continue;
             if (items[i].time <= t) {
                 const isFix = items[i].type === 4 || items[i].type === 5;
-                const dur = isFix ? FIX_DURATION : SCROLL_DURATION;
+                const dur = isFix ? fixDuration : style.scrollDuration;
                 const lane = allocLane(isFix ? laneBusyFix : laneBusyScroll, t, dur);
                 if (lane < 0) continue; // 轨道占满，本帧跳过，下帧再试
                 const w = ctx.measureText(items[i].text).width;
@@ -411,7 +481,7 @@ function render(): void {
     for (const [i, st] of active) {
         const d = items[i];
         const isFix = st.fix;
-        const dur = isFix ? FIX_DURATION : SCROLL_DURATION;
+        const dur = isFix ? fixDuration : style.scrollDuration;
         const elapsed = t - st.appear;
         if (t > d.time + dur || elapsed < 0) {
             // 播完 → finished 并释放轨道
@@ -422,17 +492,18 @@ function render(): void {
         const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
         let x: number;
         let y = fixedY(st.lane) + fontSize;
-        let alpha = 1;
+        let alpha = style.opacity;
         if (isFix) {
             x = (cw - st.w) / 2;
-            if (elapsed < 0.2) alpha = elapsed / 0.2;
-            else if (elapsed > dur - 0.3) alpha = Math.max(0, (dur - elapsed) / 0.3);
+            if (elapsed < 0.2) alpha = (elapsed / 0.2) * style.opacity;
+            else if (elapsed > dur - 0.3) alpha = Math.max(0, (dur - elapsed) / 0.3) * style.opacity;
         } else {
             const p = elapsed / dur; // 0→1
             x = cw - p * (cw + st.w);
         }
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
         ctx.fillStyle = color;
+        if (style.outline > 0) ctx.strokeText(d.text, x, y);
         ctx.fillText(d.text, x, y);
     }
     ctx.globalAlpha = 1;
@@ -574,6 +645,157 @@ function openDetails(): void {
 
 function closeDetails(): void {
     if (modal) modal.style.display = 'none';
+}
+
+// ─── 弹幕样式调节面板（对齐 MPV 弹幕样式 7 项旋钮：粗体/字号/描边/阴影/滚动时长/透明度/显示范围）───
+
+function makeSlider(label: string, min: number, max: number, step: number, value: number,
+                    fmt: (v: number) => string, onInput: (v: number) => void): HTMLElement {
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '6px' } as CSSStyleDeclaration);
+    const top = document.createElement('div');
+    Object.assign(top.style, { display: 'flex', justifyContent: 'space-between', fontSize: '13px' } as CSSStyleDeclaration);
+    const lab = document.createElement('span');
+    lab.textContent = label;
+    lab.style.color = '#cfd3d8';
+    const val = document.createElement('span');
+    val.style.color = '#9aa0a6';
+    val.textContent = fmt(value);
+    top.appendChild(lab);
+    top.appendChild(val);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    Object.assign(input.style, { width: '100%' } as CSSStyleDeclaration);
+    input.style.setProperty('accent-color', '#3374DB');
+    input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        val.textContent = fmt(v);
+        onInput(v);
+    });
+    row.appendChild(top);
+    row.appendChild(input);
+    return row;
+}
+
+function makeToggle(label: string, value: boolean, onChange: (v: boolean) => void): HTMLElement {
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' } as CSSStyleDeclaration);
+    const lab = document.createElement('span');
+    lab.textContent = label;
+    lab.style.color = '#cfd3d8';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = value;
+    Object.assign(input.style, { width: '18px', height: '18px' } as CSSStyleDeclaration);
+    input.style.setProperty('accent-color', '#3374DB');
+    input.addEventListener('change', () => onChange(input.checked));
+    row.appendChild(lab);
+    row.appendChild(input);
+    return row;
+}
+
+function buildStyleControls(): HTMLElement {
+    const wrap = document.createElement('div');
+    Object.assign(wrap.style, { display: 'flex', flexDirection: 'column', gap: '14px' } as CSSStyleDeclaration);
+
+    wrap.appendChild(makeToggle('粗体', style.bold, (v) => { style.bold = v; saveStyle(); }));
+
+    // 字号：以默认 fontScale(0.036) 为 100% 的相对倍数（50%~180%）
+    wrap.appendChild(makeSlider('字号', 50, 180, 1, Math.round(style.fontScale / 0.036 * 100),
+        (v) => v + '%', (v) => { style.fontScale = 0.036 * (v / 100); saveStyle(); }));
+
+    wrap.appendChild(makeSlider('描边', 0, 3, 0.1, style.outline,
+        (v) => v.toFixed(1), (v) => { style.outline = v; saveStyle(); }));
+
+    wrap.appendChild(makeSlider('阴影', 0, 3, 0.1, style.shadow,
+        (v) => v.toFixed(1), (v) => { style.shadow = v; saveStyle(); }));
+
+    // 滚动时长（秒）：值越大弹幕越慢，对应 MPV scrolltime
+    wrap.appendChild(makeSlider('滚动时长', 4, 16, 0.5, style.scrollDuration,
+        (v) => v.toFixed(1) + 's（越大越慢）', (v) => { style.scrollDuration = v; saveStyle(); }));
+
+    wrap.appendChild(makeSlider('透明度', 0.3, 1, 0.05, style.opacity,
+        (v) => Math.round(v * 100) + '%', (v) => { style.opacity = v; saveStyle(); }));
+
+    wrap.appendChild(makeSlider('显示范围', 0.3, 1, 0.05, style.displayArea,
+        (v) => Math.round(v * 100) + '%', (v) => { style.displayArea = v; saveStyle(); }));
+
+    const reset = document.createElement('button');
+    reset.textContent = '恢复默认';
+    Object.assign(reset.style, {
+        marginTop: '4px', padding: '8px 12px', background: '#3374DB', color: '#fff',
+        border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px',
+    } as CSSStyleDeclaration);
+    reset.addEventListener('click', () => {
+        style = { ...DEFAULT_STYLE };
+        saveStyle();
+        const body = stylePanel?.querySelector('#fntv-dm-style-body') as HTMLElement | null;
+        if (body) { body.innerHTML = ''; body.appendChild(buildStyleControls()); }
+    });
+    wrap.appendChild(reset);
+    return wrap;
+}
+
+function ensureStylePanel(): HTMLDivElement {
+    if (stylePanel) return stylePanel;
+    const m = document.createElement('div');
+    m.id = 'fntv-dm-style';
+    Object.assign(m.style, {
+        position: 'fixed', inset: '0', zIndex: '2147483647', display: 'none',
+        alignItems: 'center', justifyContent: 'center',
+    } as CSSStyleDeclaration);
+
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, { position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.55)' } as CSSStyleDeclaration);
+    backdrop.addEventListener('click', () => closeStylePanel());
+
+    const panel = document.createElement('div');
+    Object.assign(panel.style, {
+        position: 'relative', width: 'min(420px, 92vw)', maxHeight: '82vh', background: '#1e1e20',
+        color: '#eaeaea', borderRadius: '12px', display: 'flex', flexDirection: 'column',
+        overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.6)', fontSize: '14px',
+    } as CSSStyleDeclaration);
+
+    const head = document.createElement('div');
+    Object.assign(head.style, {
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '12px 16px', borderBottom: '1px solid #333', fontWeight: '600', fontSize: '15px',
+    } as CSSStyleDeclaration);
+    const titleEl = document.createElement('span');
+    titleEl.textContent = '弹幕样式';
+    const closeEl = document.createElement('span');
+    closeEl.textContent = '✕';
+    closeEl.style.cursor = 'pointer';
+    closeEl.style.padding = '0 4px';
+    closeEl.addEventListener('click', () => closeStylePanel());
+    head.appendChild(titleEl);
+    head.appendChild(closeEl);
+
+    const body = document.createElement('div');
+    body.id = 'fntv-dm-style-body';
+    Object.assign(body.style, { overflow: 'auto', padding: '14px 16px', flex: '1' } as CSSStyleDeclaration);
+    body.appendChild(buildStyleControls());
+
+    panel.appendChild(head);
+    panel.appendChild(body);
+    m.appendChild(backdrop);
+    m.appendChild(panel);
+    document.body.appendChild(m);
+    stylePanel = m;
+    return m;
+}
+
+function openStylePanel(): void {
+    const m = ensureStylePanel();
+    m.style.display = 'flex';
+}
+
+function closeStylePanel(): void {
+    if (stylePanel) stylePanel.style.display = 'none';
 }
 
 // ─── 初始化 ───
