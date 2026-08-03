@@ -45,7 +45,7 @@ const _FILLER = ['高清', '1080p', '720p', '480p', '4k', '合集', '全集', '�
 
 // 剧名匹配阈值：优先完整剧名(SIM_HIGH)；失败则降低阈值到 SIM_LOW(名字相同即可)。
 const SIM_HIGH = 0.90;
-const SIM_LOW = 0.70;
+const SIM_LOW = 0.30;
 
 // 视频区兜底接受阈值：低于 SIM_LOW 但 >= 此值、且含集数/核心剧名的视频，仍纳入候选池。
 const VIDEO_SIM_FLOOR = 0.40;
