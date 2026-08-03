@@ -77,14 +77,18 @@ class PlaybackShim {
             res.end('unknown id');
             return;
         }
-        this.proxy(target, req, res);
+        // 诊断会话号：把「入站请求 / 上游请求 / 上游响应 / 结束 / 断开」五行日志串起来，便于一次性定位
+        const sid = `${Date.now().toString(36)}.${this.counter.toString(36)}`;
+        log.info(`[playbackShim][${sid}] ▶ PotPlayer 入站请求 | method=${req.method} range=${req.headers['range'] || '(无)'} ua=${req.headers['user-agent'] || '(无)'}`);
+        this.proxy(target, req, res, sid);
     }
 
     /**
      * 把请求代理到真实 proxy URL，透传 Range 等头，并逐字节回传响应。
      * 若真实 proxy 返回 3xx 重定向，则在 shim 内跟随一次（避免 PotPlayer 直接连到 guid URL）。
+     * sid 为诊断会话号，用于把同一请求的多行日志串联起来。
      */
-    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, depth = 0): void {
+    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, sid = '', depth = 0): void {
         const t = url.parse(target);
         const options: http.RequestOptions = {
             protocol: t.protocol || 'http:',
@@ -98,12 +102,17 @@ class PlaybackShim {
         delete (options.headers as any).origin;
         delete (options.headers as any).referer;
 
+        const range = req.headers['range'];
+        log.info(`[playbackShim][${sid || '?'}]   代理到上游 | target=${target} range_forwarded=${range || '(无)'}`);
+
+        let upstreamBytes = 0;
         const p = http.request(options, (pres) => {
             // 跟随一次重定向（proxy 偶尔 302）
             if (pres.statusCode && pres.statusCode >= 300 && pres.statusCode < 400 && pres.headers.location && depth < 3) {
                 const next = url.resolve(target, pres.headers.location);
+                log.info(`[playbackShim][${sid || '?'}]   跟随上游重定向 -> ${next}`);
                 pres.resume(); // 消耗掉原响应体
-                this.proxy(next, req, res, depth + 1);
+                this.proxy(next, req, res, sid, depth + 1);
                 return;
             }
             // 过滤逐跳头，避免把上游的 connection/keep-alive 透传给 PotPlayer 造成协议混乱
@@ -111,24 +120,40 @@ class PlaybackShim {
             delete headers.connection;
             delete (headers as any)['keep-alive'];
             // 回写 MIME：PotPlayer 对 application/octet-stream 敏感，可能直接「打不开」
-            const mt = this.resolveContentType(target, req.url || '', pres.headers['content-type']);
+            const upstreamType = pres.headers['content-type'];
+            const mt = this.resolveContentType(target, req.url || '', upstreamType);
+            const mimeRewritten = !!mt && mt !== upstreamType;
             if (mt) headers['content-type'] = mt;
 
+            const cl = pres.headers['content-length'];
+            log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} upstreamType=${upstreamType || '(无)'} -> rewrittenType=${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} contentLength=${cl || '(无/chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
+
             res.writeHead(pres.statusCode || 502, headers as any);
+            pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
+            pres.on('end', () => {
+                const complete = cl ? upstreamBytes >= Number(cl) : true;
+                // key 级日志同时进 app.log 与 app-error.log，便于在精简报错日志里一眼看到本次播放结论
+                log.key(`[playbackShim][${sid || '?'}] ✓ 上游流结束 | 已转发 ${upstreamBytes} 字节 status=${pres.statusCode} ${cl ? `(目标 ${cl}, ${complete ? '完整' : '不完整'})` : '(流式/chunked)'}`);
+            });
             pres.pipe(res);
         });
-        // 客户端（PotPlayer）断开或中止时，及时销毁到上游的连接，
-        // 避免挂起的 socket 与 `read ECONNRESET` 噪音，并释放 Go 代理侧资源
+        // 客户端（PotPlayer）在流未结束前断开：可能是拖动(正常)/主动放弃/传输中断(异常)。
+        // 及时销毁到上游的连接，避免挂起 socket 与 read ECONNRESET 噪音，并释放 Go 代理侧资源。
         const onClientGone = () => { try { p.destroy(); } catch { /* noop */ } };
-        res.on('close', onClientGone);
+        res.on('close', () => {
+            if (!res.writableEnded) {
+                log.warn(`[playbackShim][${sid || '?'}] ✗ PotPlayer 中途断开(流未结束) | 已转发 ${upstreamBytes} 字节 range=${range || '(无)'} —— 可能为拖动/主动放弃或传输中断`);
+                onClientGone();
+            }
+        });
         req.on('close', onClientGone);
 
         p.on('error', (err) => {
             // 客户端断开导致的上游读取重置属正常生命周期，静默处理
             if ((err as NodeJS.ErrnoException).code === 'ECONNRESET') {
-                log.debug('[playbackShim] 上游连接被重置（客户端可能已断开）:', err.message);
+                log.debug(`[playbackShim][${sid || '?'}] 上游连接被重置（客户端可能已断开）: ${err.message}`);
             } else {
-                log.warn('[playbackShim] 代理请求失败:', err.message);
+                log.warn(`[playbackShim][${sid || '?'}] 代理请求失败 target=${target}: ${err.message}`);
             }
             if (!res.headersSent) {
                 res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
