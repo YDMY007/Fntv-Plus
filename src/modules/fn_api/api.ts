@@ -276,6 +276,21 @@ export class ApiService {
         if (!a || !b) return 0;
         if (a === b) return 2;
         if (a.includes(b) || b.includes(a)) return 1;
+        // [lc-339] 同集信号：字幕标题与影片标题含相同的 SxxExx / 第N集 标识，视为同集匹配。
+        // 兼容「罗马数字季名 / 季名表述不同」导致的归一化互含失败（如 视频『无职转生Ⅲ S03E06』
+        // vs 同名字幕『无职转生 S03E06』：Ⅲ 与 S03E06 无法互含，但共享 S03E06 → 判为匹配），
+        // 避免「同目录同名外挂字幕」在剧集模式下被剧名差异误杀。
+        const epTokens = (s: string): string[] => {
+            const out: string[] = [];
+            const m1 = (s || '').match(/s\d+e\d+/gi);
+            if (m1) out.push(...m1.map(x => x.toLowerCase()));
+            const m2 = (s || '').match(/第?\d+[集话話]/g);
+            if (m2) out.push(...m2.map(x => x.toLowerCase()));
+            return out;
+        };
+        const ea = epTokens(stream.title);
+        const eb = epTokens(videoTitle);
+        if (ea.length && eb.length && ea.some(x => eb.includes(x))) return 1;
         return 0;
     }
 
