@@ -398,53 +398,82 @@ function cid_from_bvid(bvid, ep_num, title_hint) {
 }
 
 async function search_video(title, ep_num, season_num) {
-    const url = `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(title)}&search_type=video`;
-    const d = await jget(url);
-    if (!d || d.code !== 0) return [];
-    const pool = [];
-    for (const it of (d.data.result || [])) {
-        if (it && typeof it === 'object' && it.result_type === 'video') {
-            for (const v of (it.data || [])) {
-                const t = String(v.title || '').replace(/<[^>]+>/g, '');
-                const bvid = v.bvid;
-                if (bvid) pool.push([t, bvid, parse_count(v.video_review)]);
+    // ── 内部：搜索 + 提取候选（复用逻辑）──
+    async function _do_search(keyword, label) {
+        const url = `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(keyword)}&search_type=video`;
+        const d = await jget(url);
+        if (!d || d.code !== 0) return [];
+        const pool = [];
+        for (const it of (d.data.result || [])) {
+            if (it && typeof it === 'object' && it.result_type === 'video') {
+                for (const v of (it.data || [])) {
+                    const t = String(v.title || '').replace(/<[^>]+>/g, '');
+                    const bvid = v.bvid;
+                    if (bvid) pool.push([t, bvid, parse_count(v.video_review)]);
+                }
             }
         }
-    }
-    if (!pool.length) return [];
-    const filtered = pool.filter(([t]) => {
-        const low = t.toLowerCase();
-        return !BAD_TITLE.some((k) => low.indexOf(k) >= 0);
-    });
-    function kind_of(t) {
-        if (ep_num && _ep_in_title(t, ep_num) && !_is_compilation_title(t)) return 0;
-        if (_is_compilation_title(t)) return 2;
-        return 1;
-    }
-    const scored = filtered.map(([t, bvid, vr]) => [title_sim(title, t), kind_of(t), t, bvid, vr, parse_season_from_title(t)]);
-    scored.sort((x, y) => (x[1] - y[1]) || (y[4] - x[4]) || (y[0] - x[0]));
-    log(`[视频区] 候选 ${scored.length} 个, ep_num=${ep_num} season_num=${season_num || 0}`);
-    const tagmap = { 0: '[单集]', 1: '[不明]', 2: '[合集]' };
-    for (let i = 0; i < Math.min(scored.length, 8); i++) {
-        const [sim, kind, t, bvid, vr, season] = scored[i];
-        log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} season=${season} 弹幕=${vr} ${JSON.stringify(t)}`);
-    }
-    const results = [];
-    const seen = new Set();
-    for (const [sim, kind, t, bvid, vr, season] of scored) {
-        if (sim < VIDEO_SIM_FLOOR) continue;
-        const cid = await cid_from_bvid(bvid, ep_num, t);
-        if (cid && !seen.has(cid)) {
-            seen.add(cid);
-            const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num) };
-            const tag = tagmap[kind] || '?';
-            const mark = sim >= SIM_LOW ? '' : ' [兜底]';
-            log(`[视频区] sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
-            results.push([cid, t, info]);
+        if (!pool.length) return [];
+        const filtered = pool.filter(([t]) => {
+            const low = t.toLowerCase();
+            return !BAD_TITLE.some((k) => low.indexOf(k) >= 0);
+        });
+        function kind_of(t) {
+            if (ep_num && _ep_in_title(t, ep_num) && !_is_compilation_title(t)) return 0;
+            if (_is_compilation_title(t)) return 2;
+            return 1;
         }
+        const scored = filtered.map(([t, bvid, vr]) => [title_sim(title, t), kind_of(t), t, bvid, vr, parse_season_from_title(t)]);
+        scored.sort((x, y) => (x[1] - y[1]) || (y[4] - x[4]) || (y[0] - x[0]));
+        log(`[视频区]${label ? ' (' + label + ')' : ''} 候选 ${scored.length} 个, keyword="${keyword}", ep_num=${ep_num} season_num=${season_num || 0}`);
+        const tagmap = { 0: '[单集]', 1: '[不明]', 2: '[合集]' };
+        for (let i = 0; i < Math.min(scored.length, 8); i++) {
+            const [sim, kind, t, bvid, vr, season] = scored[i];
+            log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} season=${season} 弹幕=${vr} ${JSON.stringify(t)}`);
+        }
+        // 解析 CID 并返回有效候选
+        const results = [];
+        for (const [sim, kind, t, bvid, vr, season] of scored) {
+            if (sim < VIDEO_SIM_FLOOR) continue;
+            const cid = await cid_from_bvid(bvid, ep_num, t);
+            if (cid) {
+                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num) };
+                const tag = tagmap[kind] || '?';
+                const mark = sim >= SIM_LOW ? '' : ' [兜底]';
+                log(`[视频区]${label ? ' (' + label + ')' : ''} sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
+                results.push([cid, t, info]);
+            }
+        }
+        return results;
     }
+
+    // ── 主搜索（按番名搜）──
+    let results = await _do_search(title, '');
+
+    // ── 二次搜索兜底：主搜索候选不足 3 个时，用"番名 第N话/第N集"再搜一轮 ──
+    // 目的：找到单集上传源（单P 视频 cid 直接可用），这类源在纯番名搜索中排名靠后
+    if (results.length < 3 && ep_num && ep_num > 0) {
+        const epHints = [
+            `${title} 第${ep_num}话`,
+            `${title} 第${ep_num}集`,
+            `${title} 第${ep_num}`,
+        ];
+        const seenCids = new Set(results.map(([cid]) => cid));
+        for (const hint of epHints) {
+            const extra = await _do_search(hint, `二次:${hint.slice(-8)}`);
+            for (const cand of extra) {
+                if (!seenCids.has(cand[0])) {
+                    seenCids.add(cand[0]);
+                    results.push(cand);
+                }
+            }
+            if (results.length >= 6) break; // 够了就停
+        }
+        log(`[视频区] 二次搜索补充后共 ${results.length} 个候选`);
+    }
+
     if (!results.length) {
-        log(`[视频区] 无达到相似度阈值(${VIDEO_SIM_FLOOR})的候选，放弃匹配（已移除谐音兜底）`);
+        log(`[视频区] 无达到相似度阈值(${VIDEO_SIM_FLOOR})的候选，放弃匹配`);
     }
     return results;
 }
@@ -619,6 +648,7 @@ function _filter_danmaku(dm, block_types) {
 }
 
 function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
+    // ── 单源优选：季匹配优先，取弹幕最多者 ──
     function pick(pool) {
         if (!pool.length) return null;
         const valid = pool.filter((f) => f[4] <= agg_time_limit);
@@ -627,12 +657,63 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
         for (const f of use) if (f[3].length > best[3].length) best = f;
         return best;
     }
-    // 季数匹配优先：优先从"命中目标季(season_match)"的候选里挑弹幕最多的；
-    // 若没有任何季匹配候选（例如 B站 未区分季 / 仅 UP主搬运），才退回到全部候选，保持旧行为。
     const hit = fetched.filter((f) => f[2] && f[2].season_match);
     const chosen = pick(hit) || pick(fetched);
     if (!chosen) return [null, null, null, null, null, null, ''];
-    return [chosen[3], chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, null, ''];
+
+    // ── 单源已达阈值 → 直接返回 ──
+    if (!agg_threshold || chosen[3].length >= agg_threshold) {
+        return [chosen[3], chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, null, ''];
+    }
+
+    // ── 聚合：单源不足阈值时合并多源弹幕 ──
+    // 策略：只从「季匹配」候选中聚合（不混入错季弹幕）；
+    // 去重用时间窗口 ±AGG_DUP_SEC（同一窗口内相同文本视为重复，保留先出现的）。
+    const AGG_DUP_SEC = 2; // 去重时间窗口（秒）
+    const pool = hit.filter((f) => f !== chosen); // 仅季命中候选参与聚合
+
+    if (pool.length === 0) {
+        log(`[聚合] 首选 ${chosen[1]}(${chosen[3].length}条) 不足阈值${agg_threshold}, 无其他季匹配候选可聚合`);
+        return [chosen[3], chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, null, ''];
+    }
+
+    // 时间窗口去重：bucket key = Math.floor(time / AGG_DUP_SEC)，同桶内同文本去重
+    const buckets = new Map(); // bucketKey → Set<text>（已见文本）
+    const merged = [];
+    let src_count = 1;
+    const src_titles = [(chosen[2] && chosen[2].bvid) || chosen[1]];
+
+    function tryAdd(d) {
+        const bk = String(Math.floor(d.time / AGG_DUP_SEC));
+        const seen = buckets.get(bk);
+        if (seen && seen.has(d.text)) return false; // 窗口内重复
+        if (!seen) { buckets.set(bk, new Set()); buckets.get(bk).add(d.text); }
+        else seen.add(d.text);
+        merged.push(d);
+        return true;
+    }
+
+    // 注入首选源
+    for (const d of chosen[3]) tryAdd(d);
+
+    // 逐源追加（仅时间轴合理的候选）
+    for (const cand of pool) {
+        if (cand[4] > agg_time_limit) continue;
+        let added = 0;
+        for (const d of cand[3]) {
+            if (tryAdd(d)) added++;
+        }
+        if (added > 0) {
+            src_count++;
+            src_titles.push((cand[2] && cand[2].bvid) || cand[1]);
+        }
+        if (merged.length >= agg_threshold) break;
+    }
+
+    merged.sort((a, b) => a.time - b.time);
+
+    log(`[聚合] 首选 ${chosen[1]}(${chosen[3].length}条) 不足阈值${agg_threshold}, 从 ${pool.length} 个季匹配候选中合并 ${src_count - 1} 个额外源 → ${merged.length} 条(去重窗口±${AGG_DUP_SEC}s)`);
+    return [merged, chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, src_count > 1 ? src_count : null, src_titles.join(' + ')];
 }
 
 // 核心入口：可被主进程 require 后调用，返回结果对象，不调用 process.exit（避免杀掉宿主进程）。
