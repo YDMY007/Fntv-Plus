@@ -98,7 +98,7 @@ class PlaybackShim {
      * 若真实 proxy 返回 3xx 重定向，则在 shim 内跟随一次（避免 PotPlayer 直接连到 guid URL）。
      * sid 为诊断会话号，用于把同一请求的多行日志串联起来。
      */
-    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, sid = '', depth = 0): void {
+    private proxy(target: string, req: http.IncomingMessage, res: http.ServerResponse, sid = '', depth = 0, retry = true): void {
         const t = url.parse(target);
         const options: http.RequestOptions = {
             protocol: t.protocol || 'http:',
@@ -107,6 +107,7 @@ class PlaybackShim {
             path: t.path,
             method: req.method,
             headers: { ...req.headers, host: t.host || '' },
+            timeout: 30000, // [lc-323] 上游连接超时 30s
         };
         // 丢弃可能触发跨域/来源校验的头，避免 proxy 拒绝
         delete (options.headers as any).origin;
@@ -116,13 +117,17 @@ class PlaybackShim {
         log.info(`[playbackShim][${sid || '?'}]   代理到上游 | target=${target} range_forwarded=${range || '(无)'}`);
 
         let upstreamBytes = 0;
+        let responded = false; // [lc-323] 防止 close/error 双写竞态
+        const markResponded = () => { responded = true; };
+
         const p = http.request(options, (pres) => {
             // 跟随一次重定向（proxy 偶尔 302）
             if (pres.statusCode && pres.statusCode >= 300 && pres.statusCode < 400 && pres.headers.location && depth < 3) {
                 const next = url.resolve(target, pres.headers.location);
                 log.info(`[playbackShim][${sid || '?'}]   跟随上游重定向 -> ${next}`);
                 pres.resume(); // 消耗掉原响应体
-                this.proxy(next, req, res, sid, depth + 1);
+                markResponded();
+                this.proxy(next, req, res, sid, depth + 1, false);
                 return;
             }
             // 过滤逐跳头，避免把上游的 connection/keep-alive 透传给 PotPlayer 造成协议混乱
@@ -138,6 +143,7 @@ class PlaybackShim {
             const cl = pres.headers['content-length'];
             log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} upstreamType=${upstreamType || '(无)'} -> rewrittenType=${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} contentLength=${cl || '(无/chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
 
+            markResponded();
             res.writeHead(pres.statusCode || 502, headers as any);
             pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
             pres.on('end', () => {
@@ -151,24 +157,43 @@ class PlaybackShim {
         // 及时销毁到上游的连接，避免挂起 socket 与 read ECONNRESET 噪音，并释放 Go 代理侧资源。
         const onClientGone = () => { try { p.destroy(); } catch { /* noop */ } };
         res.on('close', () => {
-            if (!res.writableEnded) {
+            if (!responded && !res.writableEnded) {
                 log.warn(`[playbackShim][${sid || '?'}] ✗ PotPlayer 中途断开(流未结束) | 已转发 ${upstreamBytes} 字节 range=${range || '(无)'} —— 可能为拖动/主动放弃或传输中断`);
                 onClientGone();
             }
         });
-        req.on('close', onClientGone);
+        req.on('close', () => {
+            if (!responded) onClientGone();
+        });
 
         p.on('error', (err) => {
-            // 客户端断开导致的上游读取重置属正常生命周期，静默处理
-            if ((err as NodeJS.ErrnoException).code === 'ECONNRESET') {
-                log.debug(`[playbackShim][${sid || '?'}] 上游连接被重置（客户端可能已断开）: ${err.message}`);
+            const code = (err as NodeJS.ErrnoException).code;
+            // [lc-323] 客户端断开 / 上游不可达导致的连接重置均属正常生命周期，统一静默 + debug 级别
+            if (code === 'ECONNRESET' || code === 'socket hang up' || code === 'ECONNREFUSED') {
+                log.debug(`[playbackShim][${sid || '?'}] 上游连接异常(${code}): ${err.message}`);
             } else {
-                log.warn(`[playbackShim][${sid || '?'}] 代理请求失败 target=${target}: ${err.message}`);
+                log.warn(`[playbackShim][${sid || '?'}] 代理请求失败 target=${target}: ${err.message} (code=${code})`);
             }
-            if (!res.headersSent) {
+            // 防止 close 回调与 error 回调竞态双写
+            if (responded) return;
+            markResponded();
+            // 尝试向 PotPlayer 返回有意义的错误（若响应头尚未发送）
+            if (!res.headersSent && !res.writableEnded) {
                 res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+                const body = `Bad Gateway: 无法连接到视频代理服务 (${code || 'unknown'}). 请检查:\n1. 应用是否正常启动（Go proxy 应监听 127.0.0.1:22346）\n2. 是否有防火墙/杀毒软件拦截本地代理\n3. 重启应用后再试`;
+                res.end(body);
+            } else if (!res.writableEnded) {
+                res.end();
             }
-            if (!res.writableEnded) res.end('bad gateway');
+            // [lc-323] 首次失败且允许重试时，延迟 500ms 后重试一次（覆盖 Go proxy 启动竞态窗口）
+            if (retry && depth === 0 && code !== 'ECONNRESET') {
+                log.info(`[playbackShim][${sid}] 500ms 后重试上游连接...`);
+                setTimeout(() => {
+                    if (!res.writableEnded && !responded) {
+                        this.proxy(target, req, res, sid, 0, false);
+                    }
+                }, 500);
+            }
         });
         req.pipe(p);
     }
