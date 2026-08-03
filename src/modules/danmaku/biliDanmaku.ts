@@ -70,6 +70,28 @@ export interface DanmakuItem {
     text: string;
 }
 
+/**
+ * 弹幕来源信息（"弹幕是从哪来的"），供原生网页播放器的「详情」弹窗展示（与 MPV 一致）。
+ */
+export interface DanmakuMeta {
+    searchTitle: string;     // 我们拿去 B站 搜的番名（fnOS 提供的标题）
+    matchedTitle: string;    // B站 实际匹配到的标题（常与 searchTitle 不同，如 UP 主搬运合集名）
+    source: string;          // 'bangumi' = 番剧区；'video' = 视频区(UP主搬运)
+    bvid?: string | null;
+    cid?: any;
+    sim?: number | null;     // 匹配相似度（0~1）
+    ep: number;
+    isMovie: boolean;
+    count: number;
+    aggregatedFrom?: any;
+    error?: string;
+}
+
+export interface GetDanmakuResult {
+    items: DanmakuItem[];
+    meta: DanmakuMeta;
+}
+
 // 弹幕排版参数（与 uosc_danmaku.conf 保持一致）
 const FONT_NAME = 'Microsoft YaHei'; // PotPlayer 用显式 CJK 字体更稳（MPV 用 sans-serif 经 libass 回退）
 const FONT_SIZE = 25;
@@ -360,21 +382,25 @@ function cacheBaseName(title: string, ep: number): string {
 }
 
 /**
- * 获取某集的 B站弹幕【原始条目数组】（供 overlay 弹幕层使用）。
+ * 获取某集的 B站弹幕【原始条目数组 + 来源信息】（供原生网页弹幕 overlay 使用）。
  * 与 getDanmakuAss 同源：标题+集数搜 B站、抓弹幕 XML。区别是这里直接返回
- * 结构化的 {time,type,color,text}[]，由 overlay 的 HTML 引擎自己做碰撞避让与动画，
+ * 结构化的 {time,type,color,text}[]，由 overlay 的 canvas 引擎自己做碰撞避让与动画，
  * 不再走 PotPlayer 的字幕轨道（避免弹幕与真实字幕互相争抢显示位）。
  *
- * 带磁盘缓存（.json），避免重复请求 B站。
- * @param title 干净番名
- * @param ep    集数（0=仅标题）
- * @returns 弹幕条目数组；失败返回 null
+ * 额外返回 meta（来源信息：实际匹配到的 B站标题、来源区域、相似度、bvid/cid 等），
+ * 用于「详情」弹窗展示"弹幕是从哪来的"。
+ *
+ * 带磁盘缓存（.json 内含 {items, meta}），避免重复请求 B站。
+ * @param title   干净番名
+ * @param ep      集数（0=仅标题）
+ * @param isMovie 是否电影（仅影响 meta 标注）
+ * @returns {items, meta}；失败返回 null
  */
-export async function getDanmakuItems(title: string, ep: number): Promise<DanmakuItem[] | null> {
-    title = normalizeDanmakuTitle(title);
+export async function getDanmakuItems(title: string, ep: number, isMovie = false): Promise<GetDanmakuResult | null> {
+    const cleanTitle = normalizeDanmakuTitle(title);
     log.info(`[danmaku] ========== getDanmakuItems 入口 ==========`);
-    log.info(`[danmaku] title="${title}", ep=${ep}`);
-    if (!title) {
+    log.info(`[danmaku] title="${cleanTitle}", ep=${ep}`);
+    if (!cleanTitle) {
         log.warn('[danmaku] ❌ title 为空，直接返回 null');
         return null;
     }
@@ -382,21 +408,30 @@ export async function getDanmakuItems(title: string, ep: number): Promise<Danmak
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (_) { /* ignore */ }
 
-    const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(title, ep)}.json`);
+    const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep)}.json`);
     if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 0) {
         try {
-            const items = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as DanmakuItem[];
-            if (Array.isArray(items) && items.length > 0) {
+            const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as any;
+            const items = (parsed && Array.isArray(parsed.items)) ? parsed.items : (Array.isArray(parsed) ? parsed : null);
+            const meta = (parsed && parsed.meta) ? parsed.meta : null;
+            if (items && items.length > 0) {
                 log.info(`[danmaku] ✅ 命中缓存(条目): ${cacheFile} (${items.length} 条)`);
-                return items;
+                return {
+                    items,
+                    meta: (meta && typeof meta === 'object') ? meta : {
+                        searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
+                        ep, isMovie, count: items.length,
+                    },
+                };
             }
         } catch (_) { /* ignore */ }
     }
 
-    const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(title, ep)}.xml`);
-    const got = await fetchBiliDanmakuXml(title, ep, xmlFile);
-    if (!got) {
-        log.warn('[danmaku] ❌ XML 抓取失败，返回 null');
+    const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep)}.xml`);
+    const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
+    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold);
+    if (!r.ok) {
+        log.warn('[danmaku] ❌ 弹幕获取失败: ' + (r.error || '未知'));
         return null;
     }
     const items = parseDanmakuXml(xmlFile);
@@ -405,11 +440,22 @@ export async function getDanmakuItems(title: string, ep: number): Promise<Danmak
         log.warn('[danmaku] ❌ 解析弹幕条目为空');
         return null;
     }
+    const meta: DanmakuMeta = {
+        searchTitle: cleanTitle,
+        matchedTitle: r.matched_title || cleanTitle,
+        source: r.source || '',
+        bvid: r.bvid || null,
+        cid: r.cid,
+        sim: (typeof r.sim === 'number') ? r.sim : null,
+        ep, isMovie,
+        count: items.length,
+        aggregatedFrom: r.aggregated_from,
+    };
     try {
-        fs.writeFileSync(cacheFile, JSON.stringify(items), 'utf-8');
+        fs.writeFileSync(cacheFile, JSON.stringify({ items, meta }), 'utf-8');
         log.info(`[danmaku] ✅ 弹幕条目就绪: ${cacheFile} (${items.length} 条)`);
     } catch (_) { /* ignore */ }
-    return items;
+    return { items, meta };
 }
 
 /**

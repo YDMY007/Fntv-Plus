@@ -5,13 +5,16 @@
 // 设计要点（用户明确要求）：
 //   1) 控制栏里有两个按钮：
 //        - 「弹幕」：弹幕开关（默认开，localStorage 记忆，颜色区分开/关）。
-//        - 「详情」：弹出窗口，列出已匹配弹幕的详细信息（标题/集数/来源/条数 + 时间轴列表）。
-//   2) 弹幕 overlay 直接渲染在播放器容器内（覆盖 video，pointer-events:none，绝不影响控制栏点击）。
+//        - 「详情」：弹出窗口，展示弹幕【来源信息】（从哪个区/哪个 B站标题匹配、相似度、
+//                    bvid/cid、条数）—— 与 MPV 的弹幕来源提示一致，而非罗列全部弹幕。
+//   2) 弹幕渲染采用 B站网页播放器同款方案：<canvas> 逐帧重绘引擎（非 DOM 元素），
+//      挂在 body 上 position:fixed，每帧按 video.getBoundingClientRect() 对齐播放画面，
+//      彻底规避「overlay 没盖对位置 / video 元素选错」导致的时灵时不灵。
 //   3) 默认开；开关状态用 localStorage 记忆。
 //   4) 电影(ep=0)：主进程 search_cid 自动退化为「仅按番名搜、取弹幕最多的集」，与 MPV 一致。
 //
 // 数据通道：ipcRenderer.invoke('danmaku:prepare', {guid}) → 主进程解析标题/集数并抓 B站弹幕，
-// 返回结构化弹幕条目（避免 https 页 fetch http 本地服务的 mixed-content/CORS 问题）。
+// 返回结构化弹幕条目 + 来源 meta（避免 https 页 fetch http 本地服务的 mixed-content/CORS 问题）。
 
 import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
@@ -35,23 +38,36 @@ interface DanmakuItem {
 }
 
 interface DanmakuMeta {
-    title: string;
+    searchTitle: string;
+    matchedTitle: string;
+    source: string;          // 'bangumi' | 'video'
+    bvid?: string | null;
+    cid?: any;
+    sim?: number | null;
     ep: number;
     isMovie: boolean;
-    source?: string;
     count: number;
+    aggregatedFrom?: any;
     error?: string;
 }
 
+interface ActiveState {
+    appear: number;          // 出现时的 video.currentTime
+    lane: number;
+    w: number;               // 文本像素宽（激活时测量一次）
+    fix: boolean;            // 是否固定弹幕（顶/底）
+}
+
 // ─── 运行态 ───
-let video: HTMLVideoElement | null = null;
-let overlay: HTMLDivElement | null = null;
-let toggleWrap: HTMLDivElement | null = null;   // 弹幕开关（仿原生 plugin-placeholder）
-let toggleSpan: HTMLSpanElement | null = null;   // 开关文字
-let detailsWrap: HTMLDivElement | null = null;   // 详情按钮（仿原生 plugin-placeholder）
-let modal: HTMLDivElement | null = null;         // 弹幕详情弹窗
-let controlsPlaced = false;                       // 是否已成功注入控制栏
-let mountedForGuid: string | null = null;         // 已初始化过的 guid（幂等，避免每 2.4s 重跑）
+let videoEl: HTMLVideoElement | null = null;
+let canvas: HTMLCanvasElement | null = null;
+let ctx: CanvasRenderingContext2D | null = null;
+let toggleWrap: HTMLDivElement | null = null;
+let toggleSpan: HTMLSpanElement | null = null;
+let detailsWrap: HTMLDivElement | null = null;
+let modal: HTMLDivElement | null = null;
+let controlsPlaced = false;
+let mountedForGuid: string | null = null;
 let loading = false;
 let enabled = true;
 let items: DanmakuItem[] = [];
@@ -59,11 +75,20 @@ let meta: DanmakuMeta | null = null;
 let currentGuid: string | null = null;
 let rafId = 0;
 let lastTime = -1;
-const spawned = new Set<number>();
 
-/** 同屏最大弹幕数上限（防 rAF 风暴卡死渲染进程） */
-const MAX_VISIBLE = 50;
-let visibleCount = 0;
+// canvas 渲染引擎状态
+const active = new Map<number, ActiveState>();
+const finished = new Set<number>();
+let laneBusyScroll: number[] = [];   // 各轨道"滚动弹幕"占用到（video 时间）
+let laneBusyFix: number[] = [];       // 各轨道"固定弹幕"占用到
+let laneCount = 0;
+
+// 渲染参数（参照 B站网页弹幕引擎）
+const SCROLL_DURATION = 8;   // 滚动弹幕横跨屏幕秒数
+const FIX_DURATION = 5;      // 顶/底弹幕停留秒数
+const LANE_RATIO = 0.034;    // 轨道高 / 画布高
+const FONT_RATIO = 0.036;    // 字号 / 画布高
+const MAX_ACTIVE = 80;       // 同屏活跃弹幕硬顶（防极端高峰）
 
 // ─── 页面检测 ───
 
@@ -76,38 +101,38 @@ function getGuid(): string | null {
     return m?.[1] || null;
 }
 
-// ─── DOM 定位 ───
+// ─── 选视频（取可见面积最大的那个，规避"选错 video 元素"导致的时灵时不灵）───
 
-/** 找到 video 的挂载容器（只读查找，不修改任何样式，避免触发 embyWall 白底清除→全透明） */
-function findMountRoot(): HTMLElement | null {
-    const v = document.querySelector('video');
-    if (!v) return null;
-    // 直接用 video 的父级作为挂载根；不向上遍历、不修改 position
-    return v.parentElement as HTMLElement | null;
+function pickVideo(): HTMLVideoElement | null {
+    const vs = document.querySelectorAll('video');
+    let best: HTMLVideoElement | null = null;
+    let bestArea = 0;
+    for (let i = 0; i < vs.length; i++) {
+        const v = vs[i] as HTMLVideoElement;
+        const r = v.getBoundingClientRect();
+        const area = r.width * r.height;
+        if (area > bestArea) { bestArea = area; best = v; }
+    }
+    return best;
 }
+
+// ─── DOM 定位：控制栏 ───
 
 /**
  * 找原生控制栏（从 document 精确锚定，不使用会误中提示气泡的模糊选择器）。
  * 飞牛播放器实测 DOM：<xg-controls class="xgplayer-controls"> 内含 <xg-right-grid>，
  * 原画/选集/倍速等文字按钮都是 <div class="plugin-placeholder"> 子节点。
- * 我们把弹幕按钮注入 <xg-right-grid>（最右端，紧跟倍速之后）。
  */
 function findControlsBar(): HTMLElement | null {
-    // ① 精确命中飞牛 xgplayer 控制栏右区（用户实测 DOM，首选）
     const right = document.querySelector('xg-right-grid') as HTMLElement | null;
-    if (right && right.offsetHeight > 0) {
-        return right;
-    }
-    // ② 退一步：整个控制栏 <xg-controls class="xgplayer-controls">
+    if (right && right.offsetHeight > 0) return right;
     const controls = (document.querySelector('xg-controls.xgplayer-controls') ||
         document.querySelector('.xgplayer-controls')) as HTMLElement | null;
     if (controls && controls.offsetHeight > 0) {
-        // 若 controls 内部有 right-grid，优先返回它
         const innerRight = controls.querySelector('xg-right-grid') as HTMLElement | null;
         if (innerRight && innerRight.offsetHeight > 0) return innerRight;
         return controls;
     }
-    // ③ 通用兜底：找含"倍速/选集/原画"等中文文字、高度像控制栏的容器
     const all = document.querySelectorAll('div, nav, [role]');
     for (let i = 0; i < all.length; i++) {
         const el = all[i] as HTMLElement;
@@ -121,34 +146,28 @@ function findControlsBar(): HTMLElement | null {
     return null;
 }
 
-// ─── 挂载 overlay + 控制栏按钮 ───
+// ─── 挂载 canvas + 控制栏按钮 ───
+
+function ensureCanvas(): void {
+    if (canvas) return;
+    const c = document.createElement('canvas');
+    c.id = 'fntv-danmaku-canvas';
+    Object.assign(c.style, {
+        position: 'fixed',
+        left: '0',
+        top: '0',
+        zIndex: '5',          // 高于 video(0)，低于 xgplayer 控制栏/UI
+        pointerEvents: 'none',
+        display: enabled ? 'block' : 'none',
+    } as CSSStyleDeclaration);
+    document.body.appendChild(c);
+    canvas = c;
+    ctx = c.getContext('2d');
+}
 
 function ensureMounted(): void {
     if (!isPlayerPage()) return;
-    const v = document.querySelector('video') as HTMLVideoElement | null;
-    if (!v) return;
-    video = v;
-
-    const root = findMountRoot();
-    if (!root) return;
-
-    // overlay（透明、覆盖 video、不拦截点击；z-index 低于控制栏）
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'fntv-danmaku-overlay';
-        Object.assign(overlay.style, {
-            position: 'absolute',
-            left: '0',
-            top: '0',
-            right: '0',
-            bottom: '0',
-            overflow: 'hidden',
-            pointerEvents: 'none',
-            zIndex: '10',
-        } as CSSStyleDeclaration);
-        root.appendChild(overlay);
-    }
-    overlay.style.display = enabled ? 'block' : 'none';
+    ensureCanvas();
 
     // 控制栏按钮：弹幕开关 + 详情
     const bar = findControlsBar();
@@ -156,42 +175,18 @@ function ensureMounted(): void {
         if (!toggleWrap) createControls();
         if (toggleWrap && toggleWrap.parentElement !== bar) bar.appendChild(toggleWrap);
         if (detailsWrap && detailsWrap.parentElement !== bar) bar.appendChild(detailsWrap);
-        // 控制栏就绪 → 移除可能存在的兜底停靠条，避免重复
-        const dock = root.querySelector('#fntv-danmaku-dock');
-        if (dock) dock.remove();
         if (!controlsPlaced) {
             log.info('[danmakuWeb] 弹幕开关已注入控制栏(' + String(bar.className).slice(0, 40) + ')');
             controlsPlaced = true;
         }
     } else {
-        // 兜底：创建一个固定在播放器底部的停靠条（仅当控制栏尚未就绪）
-        let dock = root.querySelector('#fntv-danmaku-dock') as HTMLElement | null;
-        if (!dock) {
-            dock = document.createElement('div');
-            dock.id = 'fntv-danmaku-dock';
-            Object.assign(dock.style, {
-                position: 'absolute',
-                left: '0',
-                right: '0',
-                bottom: '0',
-                height: '42px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-end',
-                padding: '0 14px',
-                zIndex: '9999',
-                pointerEvents: 'auto',
-                background: 'linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))',
-            } as CSSStyleDeclaration);
-            root.appendChild(dock);
-        }
+        // 控制栏尚未就绪：把按钮挂到 body 末尾也能点（极少见，飞牛几乎必有 xg-right-grid）
         if (!toggleWrap) createControls();
-        if (toggleWrap && toggleWrap.parentElement !== dock) dock.appendChild(toggleWrap);
-        if (detailsWrap && detailsWrap.parentElement !== dock) dock.appendChild(detailsWrap);
+        if (toggleWrap && !toggleWrap.parentElement) document.body.appendChild(toggleWrap);
+        if (detailsWrap && !detailsWrap.parentElement) document.body.appendChild(detailsWrap);
     }
 }
 
-/** 生成仿原生控制栏按钮：plugin-placeholder > h-full > flex > span */
 function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivElement; span: HTMLSpanElement } {
     const wrap = document.createElement('div');
     wrap.className = 'plugin-placeholder';
@@ -217,17 +212,14 @@ function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivE
 
 function createControls(): void {
     if (toggleWrap) return;
-    // 弹幕开关
     const t = makeControlButton('弹幕', () => toggleDanmaku());
     toggleWrap = t.wrap;
     toggleSpan = t.span;
-    // 详情按钮
     const d = makeControlButton('详情', () => openDetails());
     detailsWrap = d.wrap;
     syncToggleUI();
 }
 
-/** 弹幕开关状态可视化：开启时给文字加品牌色高亮，关闭时降透明度 */
 function syncToggleUI(): void {
     if (!toggleSpan) return;
     toggleSpan.textContent = loading ? '弹幕…' : '弹幕';
@@ -240,7 +232,7 @@ function syncToggleUI(): void {
 function toggleDanmaku(): void {
     enabled = !enabled;
     try { localStorage.setItem(LS_KEY, enabled ? '1' : '0'); } catch { /* ignore */ }
-    if (overlay) overlay.style.display = enabled ? 'block' : 'none';
+    if (canvas) canvas.style.display = enabled ? 'block' : 'none';
     syncToggleUI();
     if (enabled) startRender();
     else stopRender();
@@ -252,21 +244,17 @@ async function prepareAndLoad(): Promise<void> {
     const guid = getGuid();
     if (!guid) return;
 
-    // 切集：guid 变化 → 重置
     if (guid !== currentGuid) {
         currentGuid = guid;
         items = [];
         meta = null;
-        spawned.clear();
-        stopRender();
-        if (overlay) overlay.innerHTML = '';
-        visibleCount = 0;
+        resetRenderState();
         closeDetails();
     } else if (items.length && enabled) {
         startRender();
         return;
     }
-    if (loadedGuids.has(guid) && items.length === 0) {
+    if (loadedGuids.has(guid) && items.length === 0 && meta) {
         return;
     }
 
@@ -276,12 +264,20 @@ async function prepareAndLoad(): Promise<void> {
         const res = await ipcRenderer.invoke('danmaku:prepare', { guid }) as any;
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
             items = res.items as DanmakuItem[];
-            meta = { title: res.title, ep: res.ep, isMovie: res.isMovie, source: res.source, count: res.count };
+            meta = res.meta as DanmakuMeta || {
+                searchTitle: res.title || '', matchedTitle: res.title || '',
+                source: res.source || '', ep: res.ep || 0, isMovie: !!res.isMovie,
+                count: res.count || items.length,
+            };
             loadedGuids.add(guid);
-            log.info(`[danmakuWeb] 获取弹幕 ${res.count} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
+            log.info(`[danmakuWeb] 获取弹幕 ${items.length} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
             if (enabled) startRender();
         } else {
-            meta = { title: res?.title || '', ep: res?.ep ?? 0, isMovie: !!res?.isMovie, count: 0, error: res?.error || '空' };
+            meta = {
+                searchTitle: res?.title || '', matchedTitle: res?.title || '',
+                source: res?.source || '', ep: res?.ep ?? 0, isMovie: !!res?.isMovie,
+                count: 0, error: res?.error || '空',
+            };
             log.info('[danmakuWeb] 无弹幕: ' + (res?.error || '空'));
             loadedGuids.add(guid);
         }
@@ -293,159 +289,152 @@ async function prepareAndLoad(): Promise<void> {
     }
 }
 
-// ─── 渲染（rAF + video.currentTime 同步）───
-// ⚠️ 防卡死设计：
-//   - 单一全局 rAF 循环（tick），不在每条弹幕内创建独立 rAF
-//   - 滚动弹幕用 CSS @keyframes + animation 驱动移动（GPU 加速，不占 JS 主线程）
-//   - 同屏硬顶 MAX_VISIBLE(50) 条，超出的直接丢弃不渲染
+// ─── Canvas 渲染引擎（B站网页弹幕同款：逐帧重绘）───
 
-/** 注入一次性 CSS 动画 keyframes（滚动弹幕从右到左） */
-function injectCSSAnimation(): void {
-    if (document.getElementById('fntv-dm-css')) return;
-    const style = document.createElement('style');
-    style.id = 'fntv-dm-css';
-    style.textContent = `
-        @keyframes fntv-dm-scroll {
-            from { transform: translateX(100vw); }
-            to   { transform: translateX(-100%); }
-        }
-        .fntv-dm-item {
-            position: absolute;
-            white-space: nowrap;
-            font-size: 24px;
-            font-weight: bold;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.85);
-            pointer-events: none;
-            will-change: transform;
-            opacity: 0;
-            animation-fill-mode: forwards;
-        }
-        /* ⚠️ 关键修复：滚动弹幕必须显式 opacity:1，否则继承 .fntv-dm-item 的 opacity:0 而完全不可见 */
-        .fntv-dm-scroll { animation: fntv-dm-scroll 9s linear forwards; opacity: 1; }
-        .fntv-dm-top, .fntv-dm-btm {
-            animation: fntv-dm-fadein 0.15s ease-out forwards,
-                       fntv-dm-fadeout 4.35s ease-in 4.5s forwards;
-        }
-        @keyframes fntv-dm-fadein { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fntv-dm-fadeout { to { opacity: 0; } }
-    `;
-    document.head.appendChild(style);
+function syncCanvasRect(): void {
+    if (!canvas || !videoEl) return;
+    const r = videoEl.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * dpr);
+    const h = Math.round(r.height * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+    }
+    canvas.style.left = r.left + 'px';
+    canvas.style.top = r.top + 'px';
+    canvas.style.width = r.width + 'px';
+    canvas.style.height = r.height + 'px';
+    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 之后一律用 CSS 像素绘制
+}
+
+function allocLane(busy: number[], t: number, dur: number): number {
+    for (let i = 0; i < busy.length; i++) {
+        if (t >= busy[i]) { busy[i] = t + dur; return i; }
+    }
+    return -1;
+}
+
+function ensureLanes(n: number): void {
+    if (laneCount === n) return;
+    laneCount = n;
+    laneBusyScroll = new Array(n).fill(-Infinity);
+    laneBusyFix = new Array(n).fill(-Infinity);
+}
+
+function resetRenderState(): void {
+    active.clear();
+    finished.clear();
+    laneBusyScroll = new Array(laneCount).fill(-Infinity);
+    laneBusyFix = new Array(laneCount).fill(-Infinity);
+    lastTime = -1;
+    if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function startRender(): void {
     if (rafId || !enabled) return;
-    injectCSSAnimation();
-    lastTime = -1;
     const loop = () => {
         rafId = requestAnimationFrame(loop);
-        tick();
+        render();
     };
     rafId = requestAnimationFrame(loop);
 }
 
 function stopRender(): void {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-    if (overlay) {
-        // 清除所有弹幕 DOM
-        overlay.querySelectorAll('.fntv-dm-item').forEach(el => el.remove());
-    }
-    visibleCount = 0;
+    resetRenderState();
 }
 
-function tick(): void {
-    if (!video || !overlay || !enabled) return;
-    const t = video.currentTime;
+function render(): void {
+    if (!ctx || !canvas || !enabled) return;
+
+    // 视频元素失效则重新选取（规避选错/丢 video 导致的时灵时不灵）
+    if (!videoEl || videoEl.getBoundingClientRect().width < 2) {
+        videoEl = pickVideo();
+    }
+    if (!videoEl) return;
+    syncCanvasRect();
+
+    const cw = canvas.width / (window.devicePixelRatio || 1);
+    const ch = canvas.height / (window.devicePixelRatio || 1);
+    const t = videoEl.currentTime;
+
     // 倒退（seek 回拖）→ 清空已生成集合，允许重播
     if (lastTime >= 0 && t < lastTime - 0.5) {
-        spawned.clear();
-        overlay.querySelectorAll('.fntv-dm-item').forEach(el => el.remove());
-        visibleCount = 0;
+        active.clear();
+        finished.clear();
+        laneBusyScroll = new Array(laneCount).fill(-Infinity);
+        laneBusyFix = new Array(laneCount).fill(-Infinity);
     }
     lastTime = t;
 
-    for (let i = 0; i < items.length; i++) {
-        if (spawned.has(i)) continue;
-        if (items[i].time <= t + 0.15) {
-            spawned.add(i);
-            // ⚠️ 硬顶：超限就不渲染了，防止 rAF/DOM 风暴卡死
-            if (visibleCount >= MAX_VISIBLE) continue;
-            spawnDanmaku(items[i]);
+    const laneH = Math.max(20, ch * LANE_RATIO);
+    const n = Math.max(6, Math.floor(ch / laneH));
+    ensureLanes(n);
+    const fontSize = Math.max(16, Math.min(40, ch * FONT_RATIO));
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = Math.max(1, fontSize * 0.12);
+
+    // ① 激活到点的弹幕（只进不出，直到播完才移到 finished）
+    if (active.size < MAX_ACTIVE) {
+        for (let i = 0; i < items.length; i++) {
+            if (active.has(i) || finished.has(i)) continue;
+            if (items[i].time <= t) {
+                const isFix = items[i].type === 4 || items[i].type === 5;
+                const dur = isFix ? FIX_DURATION : SCROLL_DURATION;
+                const lane = allocLane(isFix ? laneBusyFix : laneBusyScroll, t, dur);
+                if (lane < 0) continue; // 轨道占满，本帧跳过，下帧再试
+                const w = ctx.measureText(items[i].text).width;
+                active.set(i, { appear: t, lane, w, fix: isFix });
+                if (active.size >= MAX_ACTIVE) break;
+            }
         }
     }
-}
 
-/** 当前可用轨道数 */
-function laneCount(): number {
-    if (!overlay) return 10;
-    const h = overlay.clientHeight || 540;
-    return Math.max(6, Math.floor(h / 32));
-}
-
-/** 简单轮询分配轨道 */
-let laneCursor = 0;
-function pickLane(): number {
-    const n = laneCount();
-    const lane = laneCursor % n;
-    laneCursor++;
-    return lane;
-}
-
-function spawnDanmaku(d: DanmakuItem): void {
-    if (!overlay || visibleCount >= MAX_VISIBLE) return;
-    const el = document.createElement('div');
-    el.className = 'fntv-dm-item';
-    el.textContent = d.text;
-    const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
-    el.style.color = color;
-
-    const isTop = d.type === 5;
-    const isBottom = d.type === 4;
-    const lane = pickLane();
-
-    if (isTop || isBottom) {
-        // 固定弹幕：居中显示，CSS 动画控制淡入淡出
-        el.classList.add(isTop ? 'fntv-dm-top' : 'fntv-dm-btm');
-        el.style.top = (8 + lane * 32) + 'px';
-        el.style.left = '50%';
-        el.style.transform = 'translateX(-50%)';
-        overlay.appendChild(el);
-        visibleCount++;
-        // 4.5s 后自动移除（CSS animation 会 fadeOut，animationend 后清 DOM）
-        el.addEventListener('animationend', () => {
-            el.remove();
-            visibleCount--;
-        }, { once: true });
-        // 安全兜底：即使 animationend 没触发也清理
-        setTimeout(() => {
-            if (el.parentNode) { el.remove(); visibleCount--; }
-        }, 5000);
-    } else {
-        // 滚动弹幕：纯 CSS @keyframes 驱动，零 JS 开销
-        el.classList.add('fntv-dm-scroll');
-        el.style.top = (8 + lane * 32) + 'px';
-        el.style.right = '-200px'; /* 从右侧外开始 */
-        overlay.appendChild(el);
-        visibleCount++;
-        // 9s 后（动画结束）自动移除
-        el.addEventListener('animationend', () => {
-            el.remove();
-            visibleCount--;
-        }, { once: true });
-        setTimeout(() => {
-            if (el.parentNode) { el.remove(); visibleCount--; }
-        }, 9500);
+    // ② 绘制活跃弹幕
+    const fixedY = (lane: number) => 6 + lane * laneH;
+    for (const [i, st] of active) {
+        const d = items[i];
+        const isFix = st.fix;
+        const dur = isFix ? FIX_DURATION : SCROLL_DURATION;
+        const elapsed = t - st.appear;
+        if (t > d.time + dur || elapsed < 0) {
+            // 播完 → finished 并释放轨道
+            active.delete(i);
+            finished.add(i);
+            continue;
+        }
+        const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
+        let x: number;
+        let y = fixedY(st.lane) + fontSize;
+        let alpha = 1;
+        if (isFix) {
+            x = (cw - st.w) / 2;
+            if (elapsed < 0.2) alpha = elapsed / 0.2;
+            else if (elapsed > dur - 0.3) alpha = Math.max(0, (dur - elapsed) / 0.3);
+        } else {
+            const p = elapsed / dur; // 0→1
+            x = cw - p * (cw + st.w);
+        }
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+        ctx.fillStyle = color;
+        ctx.fillText(d.text, x, y);
     }
+    ctx.globalAlpha = 1;
 }
 
-// ─── 弹幕详情弹窗 ───
+// ─── 弹幕详情弹窗（展示"弹幕是从哪来的"，与 MPV 一致）───
 
-function fmtTime(t: number): string {
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+function sourceLabel(s: string): string {
+    if (s === 'bangumi') return '番剧区（B站正版）';
+    if (s === 'video') return '视频区（UP主搬运）';
+    return s || '未知';
 }
 
-/** 懒创建弹窗 DOM（挂到 body，不被 overlay 的 overflow:hidden 裁剪） */
 function ensureModal(): HTMLDivElement {
     if (modal) return modal;
     const m = document.createElement('div');
@@ -461,16 +450,14 @@ function ensureModal(): HTMLDivElement {
 
     const backdrop = document.createElement('div');
     Object.assign(backdrop.style, {
-        position: 'absolute',
-        inset: '0',
-        background: 'rgba(0,0,0,0.55)',
+        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.55)',
     } as CSSStyleDeclaration);
     backdrop.addEventListener('click', () => closeDetails());
 
     const panel = document.createElement('div');
     Object.assign(panel.style, {
         position: 'relative',
-        width: 'min(680px, 92vw)',
+        width: 'min(560px, 92vw)',
         maxHeight: '82vh',
         background: '#1e1e20',
         color: '#eaeaea',
@@ -484,16 +471,11 @@ function ensureModal(): HTMLDivElement {
 
     const head = document.createElement('div');
     Object.assign(head.style, {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '12px 16px',
-        borderBottom: '1px solid #333',
-        fontWeight: '600',
-        fontSize: '15px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '12px 16px', borderBottom: '1px solid #333', fontWeight: '600', fontSize: '15px',
     } as CSSStyleDeclaration);
     const titleEl = document.createElement('span');
-    titleEl.textContent = '弹幕详情';
+    titleEl.textContent = '弹幕来源信息';
     const closeEl = document.createElement('span');
     closeEl.textContent = '✕';
     closeEl.style.cursor = 'pointer';
@@ -502,26 +484,14 @@ function ensureModal(): HTMLDivElement {
     head.appendChild(titleEl);
     head.appendChild(closeEl);
 
-    const info = document.createElement('div');
-    info.id = 'fntv-dm-modal-info';
-    Object.assign(info.style, {
-        padding: '8px 16px',
-        color: '#9aa0a6',
-        fontSize: '13px',
-        borderBottom: '1px solid #2a2a2a',
-    } as CSSStyleDeclaration);
-
-    const list = document.createElement('div');
-    list.id = 'fntv-dm-modal-list';
-    Object.assign(list.style, {
-        overflow: 'auto',
-        padding: '6px 16px 16px',
-        flex: '1',
+    const body = document.createElement('div');
+    body.id = 'fntv-dm-modal-body';
+    Object.assign(body.style, {
+        overflow: 'auto', padding: '14px 16px', flex: '1',
     } as CSSStyleDeclaration);
 
     panel.appendChild(head);
-    panel.appendChild(info);
-    panel.appendChild(list);
+    panel.appendChild(body);
     m.appendChild(backdrop);
     m.appendChild(panel);
     document.body.appendChild(m);
@@ -531,59 +501,57 @@ function ensureModal(): HTMLDivElement {
 
 function renderModalBody(): void {
     const m = ensureModal();
-    const info = m.querySelector('#fntv-dm-modal-info') as HTMLElement | null;
-    const list = m.querySelector('#fntv-dm-modal-list') as HTMLElement | null;
-    if (!info || !list) return;
+    const body = m.querySelector('#fntv-dm-modal-body') as HTMLElement | null;
+    if (!body) return;
+    body.innerHTML = '';
 
     if (!meta) {
-        info.textContent = '弹幕加载中…';
-        list.innerHTML = '';
+        body.textContent = '弹幕加载中…';
         return;
     }
-    if (!items.length) {
-        info.textContent = `「${meta.title || '未知'}」${meta.isMovie ? '(电影)' : '第 ' + meta.ep + ' 集'} — 无弹幕（${meta.error || '未匹配到'}）`;
-        list.innerHTML = '';
-        return;
-    }
-    info.textContent = `「${meta.title}」${meta.isMovie ? '(电影)' : '第 ' + meta.ep + ' 集'} · 来源 ${meta.source || 'bilibili'} · 共 ${meta.count} 条`;
 
-    list.innerHTML = '';
-    // 最多渲染 500 条，避免 DOM 过多卡顿
-    const show = items.slice(0, 500);
-    const frag = document.createDocumentFragment();
-    for (const d of show) {
-        const row = document.createElement('div');
-        Object.assign(row.style, {
-            display: 'flex',
-            gap: '8px',
-            padding: '3px 0',
-            borderBottom: '1px solid #2a2a2a',
-            alignItems: 'baseline',
-        } as CSSStyleDeclaration);
-        const time = document.createElement('span');
-        time.textContent = fmtTime(d.time);
-        Object.assign(time.style, {
-            color: '#8b9096',
-            flex: '0 0 48px',
-            fontVariantNumeric: 'tabular-nums',
-            fontFamily: 'monospace',
-        } as CSSStyleDeclaration);
-        const txt = document.createElement('span');
-        txt.textContent = d.text;
-        txt.style.color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
-        txt.style.wordBreak = 'break-all';
-        row.appendChild(time);
-        row.appendChild(txt);
-        frag.appendChild(row);
+    const rows: [string, string][] = [
+        ['搜索番名', meta.searchTitle || '—'],
+        ['来源区域', sourceLabel(meta.source)],
+        ['实际匹配', meta.matchedTitle || '—'],
+        ['集数', meta.isMovie ? '电影（按番名搜最优集）' : `第 ${meta.ep} 集`],
+        ['匹配相似度', meta.sim != null ? (meta.sim * 100).toFixed(0) + '%' : '—'],
+        ['BVID', meta.bvid || '—'],
+        ['CID', meta.cid != null ? String(meta.cid) : '—'],
+        ['弹幕条数', String(meta.count)],
+        ['聚合', meta.aggregatedFrom ? `${meta.aggregatedFrom} 个候选聚合` : '单源'],
+    ];
+    if (meta.error) rows.push(['备注', meta.error]);
+
+    const grid = document.createElement('div');
+    Object.assign(grid.style, {
+        display: 'grid',
+        gridTemplateColumns: '96px 1fr',
+        rowGap: '10px',
+        columnGap: '12px',
+        alignItems: 'start',
+    } as CSSStyleDeclaration);
+    for (const [k, v] of rows) {
+        const kEl = document.createElement('div');
+        kEl.textContent = k;
+        kEl.style.color = '#9aa0a6';
+        kEl.style.flexShrink = '0';
+        const vEl = document.createElement('div');
+        vEl.textContent = v;
+        vEl.style.wordBreak = 'break-all';
+        vEl.style.color = '#eaeaea';
+        grid.appendChild(kEl);
+        grid.appendChild(vEl);
     }
-    list.appendChild(frag);
-    if (items.length > show.length) {
-        const more = document.createElement('div');
-        more.textContent = `…仅显示前 ${show.length} 条（共 ${items.length} 条）`;
-        more.style.color = '#6b7075';
-        more.style.padding = '8px 0';
-        list.appendChild(more);
-    }
+    body.appendChild(grid);
+
+    const tip = document.createElement('div');
+    tip.textContent = '数据来源：B站（与 MPV 弹幕同源）';
+    Object.assign(tip.style, {
+        marginTop: '14px', paddingTop: '10px', borderTop: '1px solid #2a2a2a',
+        color: '#6b7075', fontSize: '12px',
+    } as CSSStyleDeclaration);
+    body.appendChild(tip);
 }
 
 function openDetails(): void {
@@ -600,7 +568,6 @@ function closeDetails(): void {
 
 function maybeSetup(): void {
     if (!isPlayerPage()) return;
-    // 读取记忆的开关状态（默认开）
     try {
         const saved = localStorage.getItem(LS_KEY);
         enabled = saved !== '0';
@@ -609,28 +576,23 @@ function maybeSetup(): void {
     const guid = getGuid();
     if (!guid) return;
 
-    // 幂等：同一 guid 且控制栏已注入 → 只同步状态，不再重复初始化/打日志
     if (guid === mountedForGuid && controlsPlaced) {
-        if (overlay) overlay.style.display = enabled ? 'block' : 'none';
+        if (canvas) canvas.style.display = enabled ? 'block' : 'none';
         syncToggleUI();
         return;
     }
 
-    // 首次 / 切集 / 控制栏尚未就绪 → 完整初始化（ensureMounted 内部对按钮/overlay 做了存在性判断）
     ensureMounted();
     mountedForGuid = guid;
     syncToggleUI();
     prepareAndLoad();
 }
 
-// OnReady: 页面加载完成后检查
 registerHook(HookType.OnReady, () => {
     setTimeout(maybeSetup, 1500);
 });
 
-// OnDomChange: SPA 路由切换 / 异步渲染控制栏
 registerHook(HookType.OnDomChange, () => {
-    // 防抖：控制栏可能延迟渲染，多试几次
     if ((maybeSetup as any)._t) clearTimeout((maybeSetup as any)._t);
     (maybeSetup as any)._t = setTimeout(maybeSetup, 800);
 });

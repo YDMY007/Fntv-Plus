@@ -3,7 +3,7 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import { registerHandler } from '../core/ipcHandler';
 import log from '../../../modules/logger';
 import * as fn from '../../../modules/fn_api/api';
-import { getDanmakuItems, DanmakuItem } from '../../../modules/danmaku/biliDanmaku';
+import { getDanmakuItems, DanmakuItem, DanmakuMeta } from '../../../modules/danmaku/biliDanmaku';
 
 /**
  * 原生网页播放器弹幕插件（danmakuWeb）
@@ -32,6 +32,7 @@ interface PrepareResult {
     items?: DanmakuItem[];
     source?: string;
     error?: string;
+    meta?: DanmakuMeta;
 }
 
 async function handlePrepare(
@@ -79,12 +80,13 @@ async function handlePrepare(
 
     // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化）──
     try {
-        const items = await getDanmakuItems(title, ep);
-        if (!items || items.length === 0) {
+        const res = await getDanmakuItems(title, ep, isMovie);
+        if (!res || !res.items || res.items.length === 0) {
             return { ok: false, title, ep, isMovie, count: 0, error: '未找到匹配的B站弹幕' };
         }
-        log.info(`[danmakuWeb] ✅ 弹幕就绪: title="${title}" ep=${ep} movie=${isMovie} count=${items.length}`);
-        return { ok: true, title, ep, isMovie, count: items.length, items, source: 'bilibili' };
+        const { items, meta } = res;
+        log.info(`[danmakuWeb] ✅ 弹幕就绪: title="${title}" ep=${ep} movie=${isMovie} count=${items.length} source=${meta.source} matched="${meta.matchedTitle}"`);
+        return { ok: true, title, ep, isMovie, count: items.length, items, source: 'bilibili', meta };
     } catch (e: any) {
         return { ok: false, title, ep, isMovie, error: '弹幕获取异常: ' + (e?.message || e) };
     }

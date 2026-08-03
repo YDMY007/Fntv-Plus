@@ -20,6 +20,8 @@ export interface BiliDanmakuResult {
     ok: boolean;
     bvid?: string | null;
     title?: string;
+    matched_title?: string;
+    sim?: number | null;
     danmaku_count?: number;
     source?: string;
     cid?: any;

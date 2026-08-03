@@ -264,7 +264,7 @@ async function search_bangumi(title, ep_num) {
             if (!ep_id) continue;
             const cid = await _bangumi_cid(ep_id);
             if (cid) {
-                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null };
+                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim };
                 log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} ep序号=${ep.index} cid=${cid}`);
                 results.push([cid, t, info]);
             }
@@ -403,7 +403,7 @@ async function search_video(title, ep_num) {
         const cid = await cid_from_bvid(bvid, ep_num, t);
         if (cid && !seen.has(cid)) {
             seen.add(cid);
-            const info = { source: 'video', bvid: bvid };
+            const info = { source: 'video', bvid: bvid, sim: sim };
             const tag = tagmap[kind] || '?';
             const mark = sim >= SIM_LOW ? '' : ' [兜底]';
             log(`[视频区] sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} cid=${cid}`);
@@ -634,6 +634,8 @@ async function run(title, ep_num, out, agg_threshold) {
         ok: true,
         bvid: best_info && best_info.bvid ? best_info.bvid : null,
         title: title,
+        matched_title: best_atitle || title,
+        sim: (best_info && typeof best_info.sim === 'number') ? best_info.sim : null,
         danmaku_count: final.length,
         source: source,
         cid: best_cid,
