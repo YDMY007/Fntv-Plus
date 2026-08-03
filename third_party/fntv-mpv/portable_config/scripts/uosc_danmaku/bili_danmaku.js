@@ -162,11 +162,8 @@ function fetch_seg(cid, seg) {
     const doTry = (attempt) => {
         return fetch(url, true).then((raw) => {
             if (raw.length >= 20) return raw;
+            // 短响应(<20字节) = 该段无弹幕 / 已到弹幕末尾，直接当结束处理，不再重试（避免无谓等待）
             last = raw;
-            if (attempt < 2) {
-                log(`段${seg}空响应(重试${attempt + 1}/3)`);
-                return new Promise((r) => setTimeout(r, 2000)).then(() => doTry(attempt + 1));
-            }
             return raw;
         }).catch((e) => {
             log(`段${seg}下载失败(重试${attempt + 1}/3): ${e.message || e}`);
@@ -444,25 +441,44 @@ async function search_cid(title, ep_num) {
     return [];
 }
 
-function try_fetch_danmaku(cid) {
+// 并发受限的 map（避免一次性打爆 B站接口，也避免顺序 await 太慢）
+async function mapLimit(arr, limit, fn) {
+    const out = new Array(arr.length);
+    let i = 0;
+    async function worker() {
+        while (i < arr.length) {
+            const idx = i++;
+            out[idx] = await fn(arr[idx]);
+        }
+    }
+    const n = Math.min(limit, arr.length);
+    const ws = [];
+    for (let k = 0; k < n; k++) ws.push(worker());
+    await Promise.all(ws);
+    return out;
+}
+
+// 并行批量拉取弹幕分片（每批 6 段、批内并发 4），显著快于原先逐段顺序 await。
+// 命中「空响应(<20字节)」即判定到弹幕末尾并停止（与旧逻辑一致）。
+async function try_fetch_danmaku(cid) {
     const all_d = [];
-    const loop = (seg) => {
-        if (seg > 50) return Promise.resolve([all_d.length > 0, all_d]);
-        return fetch_seg(cid, seg).then((raw) => {
-            if (raw.length < 20) {
-                log(`  cid=${cid} 段${seg}空，结束`);
-                return [all_d.length > 0, all_d];
-            }
+    const BATCH = 6;
+    const MAX_SEG = 40;
+    let seg = 1;
+    while (seg <= MAX_SEG) {
+        const nums = [];
+        for (let k = 0; k < BATCH; k++) nums.push(seg + k);
+        const raws = await mapLimit(nums, 4, (n) => fetch_seg(cid, n));
+        let stop = false;
+        for (const raw of raws) {
+            if (!raw || raw.length < 20) { stop = true; break; }
             const dm = extract(raw);
-            if (!dm.length) {
-                log(`  cid=${cid} 段${seg}无弹幕，结束`);
-                return [all_d.length > 0, all_d];
-            }
             for (const d of dm) all_d.push(d);
-            return loop(seg + 1);
-        });
-    };
-    return loop(1);
+        }
+        if (stop) break;
+        seg += BATCH;
+    }
+    return [all_d.length > 0, all_d];
 }
 
 function read_varint(buf, i) {
@@ -596,7 +612,7 @@ async function run(title, ep_num, out, agg_threshold) {
 
     const AGG_TIME_LIMIT = 2200;
     const MIN_DANMAKU = 10;
-    const CAP = 10;
+    const CAP = 8;
 
     const fetched = [];
     for (let idx = 0; idx < Math.min(candidates.length, CAP); idx++) {

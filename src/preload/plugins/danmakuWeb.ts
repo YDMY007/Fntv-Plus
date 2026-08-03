@@ -69,6 +69,7 @@ let modal: HTMLDivElement | null = null;
 let controlsPlaced = false;
 let mountedForGuid: string | null = null;
 let loading = false;
+let inflight = false;       // 同一 guid 只允许一个在途请求（单飞，避免并发重复拉取触发 B站限流）
 let enabled = true;
 let items: DanmakuItem[] = [];
 let meta: DanmakuMeta | null = null;
@@ -250,6 +251,7 @@ async function prepareAndLoad(): Promise<void> {
         meta = null;
         resetRenderState();
         closeDetails();
+        inflight = false;
     } else if (items.length && enabled) {
         startRender();
         return;
@@ -257,6 +259,13 @@ async function prepareAndLoad(): Promise<void> {
     if (loadedGuids.has(guid) && items.length === 0 && meta) {
         return;
     }
+    // 单飞：同一 guid 只允许一个在途请求。OnReady/OnDomChange 在控制栏就绪前可能各触发一次，
+    // 没有此保护会导致同一集并发跑多个 run() → B站限流(分片重试 2s) → 整体被拖到 1 分钟。
+    if (inflight) {
+        log.info('[danmakuWeb] 已有弹幕请求在途，跳过重复拉取');
+        return;
+    }
+    inflight = true;
 
     loading = true;
     syncToggleUI();
@@ -284,6 +293,7 @@ async function prepareAndLoad(): Promise<void> {
     } catch (e) {
         log.error('[danmakuWeb] 获取弹幕失败:', e);
     } finally {
+        inflight = false;
         loading = false;
         syncToggleUI();
     }
