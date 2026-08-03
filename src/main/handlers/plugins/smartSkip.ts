@@ -151,10 +151,15 @@ async function handleFetchAndFill(
             const queries = buildIntroDbQueries(effectiveTrimId);
             for (const q of queries) {
                 try {
-                    let tidUrl = `https://api.theintrodb.org/v2/media?${q}`;
+                    // [lc-338] theintrodb v2 -> v3 迁移（v2 将于 2027-01-18 废弃）。
+                    // 端点改为 /v3/media，并尽可能附带 duration_ms 以匹配正确的发行版本（影院版/加长版等）。
+                    let tidUrl = `https://api.theintrodb.org/v3/media?${q}`;
                     if (effectiveSeason && effectiveSeason > 0) {
                         tidUrl += `&season=${effectiveSeason}`;
                         if (effectiveEpisode && effectiveEpisode > 0) tidUrl += `&episode=${effectiveEpisode}`;
+                    }
+                    if (effectiveTotalDur > 0) {
+                        tidUrl += `&duration_ms=${Math.round(effectiveTotalDur * 1000)}`;
                     }
                     const tidResp = await axios.get(tidUrl, { timeout: 8000 });
                     const data = tidResp.data;

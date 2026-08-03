@@ -67,7 +67,8 @@ local function try_theintrodb_fallback()
         return
     end
     pending_fallback = false
-    api.get_theintrodb(meta.tmdb, meta.season, meta.episode, function(resp, err)
+    local dur_ms = (mutils.dur() or 0) * 1000
+    api.get_theintrodb(meta.tmdb, meta.season, meta.episode, dur_ms, function(resp, err)
         if err or not resp then
             msg.error("theintrodb 请求失败: " .. tostring(err))
             return

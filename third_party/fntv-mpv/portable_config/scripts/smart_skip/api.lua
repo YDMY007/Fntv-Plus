@@ -97,19 +97,24 @@ end
 -- 从 theintrodb 兜底获取片头/片尾（当 fnOS 未配置跳过时）
 -- tmdb_id 来自 fnOS 的 trim_id（飞牛影视元数据源为 TMDB）
 -- 返回结构: { intro=[{start_ms,end_ms}], credits=[{start_ms,end_ms}], ... }（毫秒；null 表示视频头/尾）
-function api.get_theintrodb(tmdb_id, season, episode, callback)
+function api.get_theintrodb(tmdb_id, season, episode, duration_ms, callback)
     if not tmdb_id or tostring(tmdb_id) == "" or tostring(tmdb_id) == "0" then
         msg.error("theintrodb: 缺少有效 tmdb_id")
         if callback then callback(nil, "no tmdb_id") end
         return false
     end
 
-    local url = "https://api.theintrodb.org/v2/media?tmdb_id=" .. tostring(tmdb_id)
+    -- [lc-338] theintrodb v2 -> v3 迁移（v2 将于 2027-01-18 废弃）。
+    -- 端点改为 /v3/media，并尽可能附带 duration_ms 以匹配正确的发行版本。
+    local url = "https://api.theintrodb.org/v3/media?tmdb_id=" .. tostring(tmdb_id)
     if season and tonumber(season) then
         url = url .. "&season=" .. tostring(season)
         if episode and tonumber(episode) then
             url = url .. "&episode=" .. tostring(episode)
         end
+    end
+    if duration_ms and tonumber(duration_ms) and tonumber(duration_ms) > 0 then
+        url = url .. "&duration_ms=" .. tostring(math.floor(tonumber(duration_ms)))
     end
 
     http_async.request({
