@@ -32,6 +32,31 @@ function _load_cookie() {
 let COOKIE = null;
 function _refresh_cookie() { COOKIE = _load_cookie(); }
 
+// 真正校验 Cookie 是否有效（是否过期/失效）：调 nav 接口看 isLogin。
+// 注意：仅判断 COOKIE 非空字符串无法识别“过期”——过期 Cookie 仍非空但 isLogin=false，
+// 这会导致匿名限制（候选少/seg.so 被风控），是本机 vs 其他机器弹幕数量差异的根因之一。
+// 每次 run() 都会调用本函数，避免依赖启动时的一次性判断。
+let _cookie_verified = null; // { ok, uname, reason }
+async function verify_cookie() {
+    if (!COOKIE) {
+        _cookie_verified = { ok: false, reason: 'missing' };
+        return _cookie_verified;
+    }
+    try {
+        const nav = await jget('https://api.bilibili.com/x/web-interface/nav');
+        const data = (nav && nav.data) || {};
+        const isLogin = !!data.isLogin;
+        _cookie_verified = {
+            ok: isLogin,
+            uname: data.uname || null,
+            reason: isLogin ? null : 'expired_or_invalid',
+        };
+    } catch (e) {
+        _cookie_verified = { ok: false, reason: 'nav_request_failed', err: String(e && e.message ? e.message : e) };
+    }
+    return _cookie_verified;
+}
+
 // 明显非正片的标题关键词（reaction/二创/OP/ED/预告等）
 const BAD_TITLE = ['reaction', '反应', '杂谈', '吐槽', '解说', '盘点', '二创', 'mad', 'amv',
     '算是', '你们', '为什么', '评', '空降', '切片', '速看', '高能', 'op', 'ed',
@@ -807,13 +832,23 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
 // 副作用：会把弹幕 XML 写到 out 路径（供 MPV / PotPlayer 读取）。
 async function run(title, ep_num, out, agg_threshold, season_num) {
     _refresh_cookie();
+    await verify_cookie();
     if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
     if (isNaN(ep_num)) ep_num = 0;
     if (typeof season_num === 'string') season_num = parseInt(season_num, 10);
     if (isNaN(season_num)) season_num = 0;
     if (typeof agg_threshold === 'string') agg_threshold = parseInt(agg_threshold, 10);
     if (isNaN(agg_threshold) || !agg_threshold) agg_threshold = 1500;
-    log(`番名=${title} 集数=${ep_num} 季数=${season_num || 0} 聚合阈值=${agg_threshold}` + (COOKIE ? ' [登录态]' : ' [匿名]'));
+    const cv = _cookie_verified;
+    let loginTag;
+    if (!cv || !cv.ok) {
+        if (!COOKIE) loginTag = ' [匿名] 无Cookie文件，弹幕数量受限';
+        else if (cv && cv.reason === 'expired_or_invalid') loginTag = ' [登录态失效] Cookie已过期/无效，弹幕数量将受限（请从浏览器重新复制SESSDATA填回bili_cookie.txt）';
+        else loginTag = ` [登录态检查失败] ${cv ? cv.reason : '未知'}`;
+    } else {
+        loginTag = ` [登录态已验证]${cv.uname ? ' (' + cv.uname + ')' : ''}`;
+    }
+    log(`番名=${title} 集数=${ep_num} 季数=${season_num || 0} 聚合阈值=${agg_threshold}${loginTag}`);
 
     const candidates = await search_cid(title, ep_num, season_num);
     if (!candidates.length) {
@@ -868,6 +903,7 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         cid: best_cid,
     };
     if (agg_count) result.aggregated_from = agg_count;
+    result.cookie_status = (cv && cv.ok) ? 'valid' : ((cv && cv.reason === 'expired_or_invalid') ? 'expired' : 'missing');
     if (agg_count) {
         log(`✅ 最终输出(聚合 ${agg_count} 源): ${best_atitle} -> ${final.length} 条弹幕 (源: ${srcs}) -> ${out}`);
     } else {
