@@ -47,6 +47,12 @@ export class Logger {
     private debugEnabled = false;
     private debugComponents: Record<string, boolean> = {};
 
+    // 重复日志合并：相同 (级别+内容) 在窗口内只记一次，其余合并为摘要
+    private dedupEnabled: boolean;
+    private dedupWindowMs: number;
+    private dedupMap: Map<string, { count: number; firstTs: number; lastTs: number; level: LogLevel; content: string }> = new Map();
+    private dedupTimer: any = null;
+
     constructor() {
         this.logLevel = getLogLevel(); // 使用配置获取日志级别
         this.maxFileSize = logConfig.maxFileSize;
@@ -60,6 +66,14 @@ export class Logger {
 
         // 初始化时检查并清理旧的日志文件
         this.cleanupOldLogs();
+
+        // 重复日志合并定时器：窗口结束后若停止写入则结算摘要；unref 避免阻止进程退出
+        this.dedupEnabled = logConfig.dedupEnabled;
+        this.dedupWindowMs = logConfig.dedupWindowMs || 3000;
+        if (this.dedupEnabled) {
+            this.dedupTimer = setInterval(() => this.flushStaleBursts(), Math.max(1000, Math.floor(this.dedupWindowMs / 2)));
+            if (this.dedupTimer && typeof this.dedupTimer.unref === 'function') this.dedupTimer.unref();
+        }
     }
 
     /**
@@ -285,6 +299,40 @@ export class Logger {
      */
     private emit(level: LogLevel, component: string | undefined, message: string, ...args: any[]): void {
         if (level >= this.logLevel) {
+            // 脱敏（供去重键与格式化复用）
+            const maskedArgs = maskLogArguments(message, ...args);
+            const [maskedMessage, ...restMaskedArgs] = maskedArgs;
+
+            // 重复日志合并：相同 (级别+内容) 在窗口内只记一次，其余合并为摘要
+            if (this.dedupEnabled && level != LogLevel.NOFORMAT) {
+                const now = Date.now();
+                const key = this.buildDedupKey(level, maskedMessage, restMaskedArgs);
+                const existing = this.dedupMap.get(key);
+                if (existing) {
+                    if (now - existing.firstTs <= this.dedupWindowMs) {
+                        // 窗口内连续重复 → 抑制，仅计数
+                        existing.count++;
+                        existing.lastTs = now;
+                        // 持续高频时给出阶段性摘要，避免延迟太久才看到汇总
+                        if (existing.count % 100 === 0) {
+                            this.flushDedupEntry(key, existing, true);
+                            existing.count = 0;
+                            existing.firstTs = now;
+                        }
+                        return;
+                    } else {
+                        // 窗口已过的旧突发：先结算，再开始新一轮
+                        this.flushDedupEntry(key, existing);
+                        this.dedupMap.delete(key);
+                    }
+                }
+                const content = (maskedMessage + (restMaskedArgs.length ? ' ' + restMaskedArgs.map(a =>
+                    a instanceof Error ? `${a.name}:${a.message}`
+                        : (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a))
+                ).join(' ') : '')).slice(0, 300);
+                this.dedupMap.set(key, { count: 1, firstTs: now, lastTs: now, level, content });
+            }
+
             let formattedMessage = message;
             if (level != LogLevel.NOFORMAT) {
                 formattedMessage = this.formatMessage(level, message, ...args);
@@ -310,6 +358,45 @@ export class Logger {
                         console.error(formattedMessage);
                         break;
                 }
+            }
+        }
+    }
+
+    /**
+     * 计算重复日志合并用的去重键（级别 + 脱敏后的内容，不含时间戳）
+     */
+    private buildDedupKey(level: LogLevel, maskedMessage: string, restMaskedArgs: any[]): string {
+        const argStr = restMaskedArgs.map(a => {
+            if (a instanceof Error) return `${a.name}:${a.message}`;
+            if (typeof a === 'object' && a !== null) {
+                try { return JSON.stringify(a); } catch { return String(a); }
+            }
+            return String(a);
+        }).join(' ');
+        return `${level} ${maskedMessage} ${argStr}`;
+    }
+
+    /**
+     * 结算一条重复日志突发，写出摘要（仅当重复次数 > 1 才有意义）
+     */
+    private flushDedupEntry(key: string, entry: { count: number; firstTs: number; lastTs: number; level: LogLevel; content: string }, ongoing = false): void {
+        if (entry.count <= 1) return;
+        const dur = entry.lastTs - entry.firstTs;
+        const tail = ongoing ? '（持续中）' : '';
+        const summary = `⏱️ 重复日志合并: 相同内容在 ${dur}ms 内出现 ${entry.count} 次${tail} | [${LogLevelNames[entry.level]}] ${entry.content}`;
+        this.writeToFile(LogLevel.WARN, this.formatMessage(LogLevel.WARN, summary));
+    }
+
+    /**
+     * 定时结算已停止（超过窗口无新相同日志）的突发，避免摘要永远不落盘
+     */
+    private flushStaleBursts(): void {
+        if (!this.dedupEnabled) return;
+        const now = Date.now();
+        for (const [key, entry] of this.dedupMap) {
+            if (now - entry.lastTs >= this.dedupWindowMs) {
+                this.flushDedupEntry(key, entry);
+                this.dedupMap.delete(key);
             }
         }
     }

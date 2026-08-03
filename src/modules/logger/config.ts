@@ -30,7 +30,13 @@ interface LogConfig {
     
     // 是否在控制台也输出日志（开发环境）
     consoleOutput: boolean;
-    
+
+    // 重复日志合并：相同 (级别+内容) 在 dedupWindowMs 窗口内只记一次，其余合并为摘要，避免刷屏
+    dedupEnabled: boolean;
+
+    // 重复判定窗口（毫秒）
+    dedupWindowMs: number;
+
     // 日志格式配置
     format: {
         timestamp: boolean;
@@ -61,7 +67,13 @@ export const logConfig: LogConfig = {
     
     // 是否在控制台也输出日志（开发环境）
     consoleOutput: true,
-    
+
+    // 重复日志合并（默认开启）：避免短时间内同一错误被反复写文件刷屏
+    dedupEnabled: true,
+
+    // 重复判定窗口（毫秒）：窗口内相同内容只记首条，其余合并为摘要
+    dedupWindowMs: 3000,
+
     // 日志格式配置
     format: {
         timestamp: true,
