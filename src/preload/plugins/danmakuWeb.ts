@@ -3,7 +3,9 @@
 // [原生网页播放器弹幕] 飞牛「原声播放器」(fnOS 网页自身 <video>) 的 B站弹幕支持。
 //
 // 设计要点（用户明确要求）：
-//   1) 弹幕开关按钮直接做进「飞牛原声播放器的底部控制栏」里——不悬浮在屏幕上（悬浮丑）。
+//   1) 控制栏里有两个按钮：
+//        - 「弹幕」：弹幕开关（默认开，localStorage 记忆，颜色区分开/关）。
+//        - 「详情」：弹出窗口，列出已匹配弹幕的详细信息（标题/集数/来源/条数 + 时间轴列表）。
 //   2) 弹幕 overlay 直接渲染在播放器容器内（覆盖 video，pointer-events:none，绝不影响控制栏点击）。
 //   3) 默认开；开关状态用 localStorage 记忆。
 //   4) 电影(ep=0)：主进程 search_cid 自动退化为「仅按番名搜、取弹幕最多的集」，与 MPV 一致。
@@ -32,16 +34,28 @@ interface DanmakuItem {
     text: string;
 }
 
+interface DanmakuMeta {
+    title: string;
+    ep: number;
+    isMovie: boolean;
+    source?: string;
+    count: number;
+    error?: string;
+}
+
 // ─── 运行态 ───
 let video: HTMLVideoElement | null = null;
 let overlay: HTMLDivElement | null = null;
-let toggleWrap: HTMLDivElement | null = null;   // 仿原生 plugin-placeholder 容器
-let toggleSpan: HTMLSpanElement | null = null;   // 实际文字按钮
+let toggleWrap: HTMLDivElement | null = null;   // 弹幕开关（仿原生 plugin-placeholder）
+let toggleSpan: HTMLSpanElement | null = null;   // 开关文字
+let detailsWrap: HTMLDivElement | null = null;   // 详情按钮（仿原生 plugin-placeholder）
+let modal: HTMLDivElement | null = null;         // 弹幕详情弹窗
 let controlsPlaced = false;                       // 是否已成功注入控制栏
 let mountedForGuid: string | null = null;         // 已初始化过的 guid（幂等，避免每 2.4s 重跑）
 let loading = false;
 let enabled = true;
 let items: DanmakuItem[] = [];
+let meta: DanmakuMeta | null = null;
 let currentGuid: string | null = null;
 let rafId = 0;
 let lastTime = -1;
@@ -107,7 +121,7 @@ function findControlsBar(): HTMLElement | null {
     return null;
 }
 
-// ─── 挂载 overlay + 开关按钮 ───
+// ─── 挂载 overlay + 控制栏按钮 ───
 
 function ensureMounted(): void {
     if (!isPlayerPage()) return;
@@ -136,13 +150,12 @@ function ensureMounted(): void {
     }
     overlay.style.display = enabled ? 'block' : 'none';
 
-    // 开关按钮：注入原生控制栏右区（xg-right-grid）；找不到则停靠播放器底部
+    // 控制栏按钮：弹幕开关 + 详情
     const bar = findControlsBar();
     if (bar) {
-        if (!toggleWrap) createToggle();
-        if (toggleWrap && toggleWrap.parentElement !== bar) {
-            bar.appendChild(toggleWrap);
-        }
+        if (!toggleWrap) createControls();
+        if (toggleWrap && toggleWrap.parentElement !== bar) bar.appendChild(toggleWrap);
+        if (detailsWrap && detailsWrap.parentElement !== bar) bar.appendChild(detailsWrap);
         // 控制栏就绪 → 移除可能存在的兜底停靠条，避免重复
         const dock = root.querySelector('#fntv-danmaku-dock');
         if (dock) dock.remove();
@@ -172,29 +185,24 @@ function ensureMounted(): void {
             } as CSSStyleDeclaration);
             root.appendChild(dock);
         }
-        if (!toggleWrap) createToggle();
-        if (toggleWrap && toggleWrap.parentElement !== dock) {
-            dock.appendChild(toggleWrap);
-        }
+        if (!toggleWrap) createControls();
+        if (toggleWrap && toggleWrap.parentElement !== dock) dock.appendChild(toggleWrap);
+        if (detailsWrap && detailsWrap.parentElement !== dock) dock.appendChild(detailsWrap);
     }
 }
 
-function createToggle(): void {
-    if (toggleWrap) return;
-    // 仿照飞牛原生控制栏按钮结构：plugin-placeholder > h-full > flex > span
+/** 生成仿原生控制栏按钮：plugin-placeholder > h-full > flex > span */
+function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivElement; span: HTMLSpanElement } {
     const wrap = document.createElement('div');
     wrap.className = 'plugin-placeholder';
-    wrap.id = 'fntv-danmaku-toggle-wrap';
     const hfull = document.createElement('div');
     hfull.className = 'h-full';
     const flex = document.createElement('div');
     flex.className = 'flex h-full items-center justify-center';
     flex.setAttribute('tabindex', '0');
     const span = document.createElement('span');
-    span.id = 'fntv-danmaku-toggle';
-    // 与原生 原画/选集/倍速 一致的文字样式
     span.className = 'cursor-pointer text-lg leading-lg text-[var(--semi-color-text-1)] hover:text-[var(--semi-color-text-0)]';
-    span.textContent = '弹幕';
+    span.textContent = label;
     span.style.userSelect = 'none';
     flex.appendChild(span);
     hfull.appendChild(flex);
@@ -202,21 +210,27 @@ function createToggle(): void {
     flex.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        toggleDanmaku();
+        onClick();
     });
-    toggleWrap = wrap;
-    toggleSpan = span;
+    return { wrap, span };
+}
+
+function createControls(): void {
+    if (toggleWrap) return;
+    // 弹幕开关
+    const t = makeControlButton('弹幕', () => toggleDanmaku());
+    toggleWrap = t.wrap;
+    toggleSpan = t.span;
+    // 详情按钮
+    const d = makeControlButton('详情', () => openDetails());
+    detailsWrap = d.wrap;
     syncToggleUI();
 }
 
 /** 弹幕开关状态可视化：开启时给文字加品牌色高亮，关闭时降透明度 */
 function syncToggleUI(): void {
     if (!toggleSpan) return;
-    if (loading) {
-        toggleSpan.textContent = '弹幕…';
-    } else {
-        toggleSpan.textContent = '弹幕';
-    }
+    toggleSpan.textContent = loading ? '弹幕…' : '弹幕';
     toggleSpan.style.color = enabled
         ? 'var(--fn-bg-brand, #3374DB)'
         : 'var(--semi-color-text-1)';
@@ -242,10 +256,12 @@ async function prepareAndLoad(): Promise<void> {
     if (guid !== currentGuid) {
         currentGuid = guid;
         items = [];
+        meta = null;
         spawned.clear();
         stopRender();
         if (overlay) overlay.innerHTML = '';
         visibleCount = 0;
+        closeDetails();
     } else if (items.length && enabled) {
         startRender();
         return;
@@ -260,10 +276,12 @@ async function prepareAndLoad(): Promise<void> {
         const res = await ipcRenderer.invoke('danmaku:prepare', { guid }) as any;
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
             items = res.items as DanmakuItem[];
+            meta = { title: res.title, ep: res.ep, isMovie: res.isMovie, source: res.source, count: res.count };
             loadedGuids.add(guid);
             log.info(`[danmakuWeb] 获取弹幕 ${res.count} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
             if (enabled) startRender();
         } else {
+            meta = { title: res?.title || '', ep: res?.ep ?? 0, isMovie: !!res?.isMovie, count: 0, error: res?.error || '空' };
             log.info('[danmakuWeb] 无弹幕: ' + (res?.error || '空'));
             loadedGuids.add(guid);
         }
@@ -302,7 +320,8 @@ function injectCSSAnimation(): void {
             opacity: 0;
             animation-fill-mode: forwards;
         }
-        .fntv-dm-scroll { animation: fntv-dm-scroll 9s linear forwards; }
+        /* ⚠️ 关键修复：滚动弹幕必须显式 opacity:1，否则继承 .fntv-dm-item 的 opacity:0 而完全不可见 */
+        .fntv-dm-scroll { animation: fntv-dm-scroll 9s linear forwards; opacity: 1; }
         .fntv-dm-top, .fntv-dm-btm {
             animation: fntv-dm-fadein 0.15s ease-out forwards,
                        fntv-dm-fadeout 4.35s ease-in 4.5s forwards;
@@ -416,6 +435,165 @@ function spawnDanmaku(d: DanmakuItem): void {
             if (el.parentNode) { el.remove(); visibleCount--; }
         }, 9500);
     }
+}
+
+// ─── 弹幕详情弹窗 ───
+
+function fmtTime(t: number): string {
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** 懒创建弹窗 DOM（挂到 body，不被 overlay 的 overflow:hidden 裁剪） */
+function ensureModal(): HTMLDivElement {
+    if (modal) return modal;
+    const m = document.createElement('div');
+    m.id = 'fntv-dm-modal';
+    Object.assign(m.style, {
+        position: 'fixed',
+        inset: '0',
+        zIndex: '2147483647',
+        display: 'none',
+        alignItems: 'center',
+        justifyContent: 'center',
+    } as CSSStyleDeclaration);
+
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, {
+        position: 'absolute',
+        inset: '0',
+        background: 'rgba(0,0,0,0.55)',
+    } as CSSStyleDeclaration);
+    backdrop.addEventListener('click', () => closeDetails());
+
+    const panel = document.createElement('div');
+    Object.assign(panel.style, {
+        position: 'relative',
+        width: 'min(680px, 92vw)',
+        maxHeight: '82vh',
+        background: '#1e1e20',
+        color: '#eaeaea',
+        borderRadius: '12px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        boxShadow: '0 12px 48px rgba(0,0,0,0.6)',
+        fontSize: '14px',
+    } as CSSStyleDeclaration);
+
+    const head = document.createElement('div');
+    Object.assign(head.style, {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '12px 16px',
+        borderBottom: '1px solid #333',
+        fontWeight: '600',
+        fontSize: '15px',
+    } as CSSStyleDeclaration);
+    const titleEl = document.createElement('span');
+    titleEl.textContent = '弹幕详情';
+    const closeEl = document.createElement('span');
+    closeEl.textContent = '✕';
+    closeEl.style.cursor = 'pointer';
+    closeEl.style.padding = '0 4px';
+    closeEl.addEventListener('click', () => closeDetails());
+    head.appendChild(titleEl);
+    head.appendChild(closeEl);
+
+    const info = document.createElement('div');
+    info.id = 'fntv-dm-modal-info';
+    Object.assign(info.style, {
+        padding: '8px 16px',
+        color: '#9aa0a6',
+        fontSize: '13px',
+        borderBottom: '1px solid #2a2a2a',
+    } as CSSStyleDeclaration);
+
+    const list = document.createElement('div');
+    list.id = 'fntv-dm-modal-list';
+    Object.assign(list.style, {
+        overflow: 'auto',
+        padding: '6px 16px 16px',
+        flex: '1',
+    } as CSSStyleDeclaration);
+
+    panel.appendChild(head);
+    panel.appendChild(info);
+    panel.appendChild(list);
+    m.appendChild(backdrop);
+    m.appendChild(panel);
+    document.body.appendChild(m);
+    modal = m;
+    return m;
+}
+
+function renderModalBody(): void {
+    const m = ensureModal();
+    const info = m.querySelector('#fntv-dm-modal-info') as HTMLElement | null;
+    const list = m.querySelector('#fntv-dm-modal-list') as HTMLElement | null;
+    if (!info || !list) return;
+
+    if (!meta) {
+        info.textContent = '弹幕加载中…';
+        list.innerHTML = '';
+        return;
+    }
+    if (!items.length) {
+        info.textContent = `「${meta.title || '未知'}」${meta.isMovie ? '(电影)' : '第 ' + meta.ep + ' 集'} — 无弹幕（${meta.error || '未匹配到'}）`;
+        list.innerHTML = '';
+        return;
+    }
+    info.textContent = `「${meta.title}」${meta.isMovie ? '(电影)' : '第 ' + meta.ep + ' 集'} · 来源 ${meta.source || 'bilibili'} · 共 ${meta.count} 条`;
+
+    list.innerHTML = '';
+    // 最多渲染 500 条，避免 DOM 过多卡顿
+    const show = items.slice(0, 500);
+    const frag = document.createDocumentFragment();
+    for (const d of show) {
+        const row = document.createElement('div');
+        Object.assign(row.style, {
+            display: 'flex',
+            gap: '8px',
+            padding: '3px 0',
+            borderBottom: '1px solid #2a2a2a',
+            alignItems: 'baseline',
+        } as CSSStyleDeclaration);
+        const time = document.createElement('span');
+        time.textContent = fmtTime(d.time);
+        Object.assign(time.style, {
+            color: '#8b9096',
+            flex: '0 0 48px',
+            fontVariantNumeric: 'tabular-nums',
+            fontFamily: 'monospace',
+        } as CSSStyleDeclaration);
+        const txt = document.createElement('span');
+        txt.textContent = d.text;
+        txt.style.color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
+        txt.style.wordBreak = 'break-all';
+        row.appendChild(time);
+        row.appendChild(txt);
+        frag.appendChild(row);
+    }
+    list.appendChild(frag);
+    if (items.length > show.length) {
+        const more = document.createElement('div');
+        more.textContent = `…仅显示前 ${show.length} 条（共 ${items.length} 条）`;
+        more.style.color = '#6b7075';
+        more.style.padding = '8px 0';
+        list.appendChild(more);
+    }
+}
+
+function openDetails(): void {
+    const m = ensureModal();
+    renderModalBody();
+    m.style.display = 'flex';
+}
+
+function closeDetails(): void {
+    if (modal) modal.style.display = 'none';
 }
 
 // ─── 初始化 ───
