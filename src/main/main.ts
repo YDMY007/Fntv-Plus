@@ -183,8 +183,23 @@ if (!gotTheLock) {
                 wc.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
                     log.error(`[Renderer] 页面加载失败: ${validatedURL} (${errorCode}: ${errorDescription})`);
                 });
+                // [lc-328] 渲染进程崩溃自动恢复：fnOS 页面自身 WebAudio 偶发崩溃(如 AudioContext 报错)
+                // 会让 transparent 窗口永久透明/卡死。这里自动重载(带 10s 窗口内最多 3 次防循环)，
+                // 避免用户看到"全透明无响应"的死窗口。
+                let lastCrashTs = 0;
+                let crashStreak = 0;
                 wc.on('render-process-gone', (_e: any, details: any) => {
                     log.error(`[Renderer] 渲染进程崩溃/消失: ${JSON.stringify(details)}`);
+                    const now = Date.now();
+                    if (now - lastCrashTs > 10000) crashStreak = 0;
+                    lastCrashTs = now;
+                    crashStreak++;
+                    if (crashStreak <= 3 && mainWindow && !mainWindow.isDestroyed() && !wc.isDestroyed()) {
+                        log.warn(`[Renderer] 自动重载以恢复(第 ${crashStreak} 次, 10s 内)`);
+                        setTimeout(() => { try { wc.reload(); } catch { /* ignore */ } }, 800);
+                    } else {
+                        log.error('[Renderer] 渲染进程反复崩溃, 已停止自动重载; 请检查音频设备/驱动或手动重启应用');
+                    }
                 });
             } catch (_) { /* ignore */ }
 

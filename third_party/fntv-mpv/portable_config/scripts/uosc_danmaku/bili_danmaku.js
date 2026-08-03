@@ -47,8 +47,8 @@ const _FILLER = ['高清', '1080p', '720p', '480p', '4k', '合集', '全集', '�
 const SIM_HIGH = 0.90;
 const SIM_LOW = 0.30;
 
-// 视频区兜底接受阈值：低于 SIM_LOW 但 >= 此值、且含集数/核心剧名的视频，仍纳入候选池。
-const VIDEO_SIM_FLOOR = 0.40;
+// 视频区兜底接受阈值：低于 SIM_LOW 直接跳过。用户要求统一为 0.3。
+const VIDEO_SIM_FLOOR = 0.30;
 
 function _norm(t) {
     t = (t || '').toLowerCase();
@@ -227,7 +227,7 @@ function _select_ep(eps, ep_num) {
 }
 
 // 番剧区搜索（B站正版番剧）。与 bili_danmaku.py search_bangumi 逻辑一致：
-// 优先完整剧名(sim>=SIM_HIGH)；失败则降阈值到 SIM_LOW(70%)；不做谐音/近似名兜底。
+// 优先完整剧名(sim>=SIM_HIGH)；失败则降阈值到 SIM_LOW(0.3)；不做谐音/近似名兜底。
 async function search_bangumi(title, ep_num) {
     const url = `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(title)}&search_type=media_bangumi`;
     const d = await jget(url);
@@ -271,7 +271,7 @@ async function search_bangumi(title, ep_num) {
         }
     }
     if (!results.length) {
-        log('[番剧区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）');
+        log(`[番剧区] 无达到相似度阈值(${SIM_LOW})的候选，放弃匹配（已移除谐音兜底）`);
     }
     return results;
 }
@@ -411,7 +411,7 @@ async function search_video(title, ep_num) {
         }
     }
     if (!results.length) {
-        log('[视频区] 无达到相似度阈值(70%)的候选，放弃匹配（已移除谐音兜底）');
+        log(`[视频区] 无达到相似度阈值(${VIDEO_SIM_FLOOR})的候选，放弃匹配（已移除谐音兜底）`);
     }
     return results;
 }

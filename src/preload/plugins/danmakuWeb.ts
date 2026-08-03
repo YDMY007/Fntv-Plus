@@ -35,7 +35,10 @@ interface DanmakuItem {
 // ─── 运行态 ───
 let video: HTMLVideoElement | null = null;
 let overlay: HTMLDivElement | null = null;
-let toggleBtn: HTMLButtonElement | null = null;
+let toggleWrap: HTMLDivElement | null = null;   // 仿原生 plugin-placeholder 容器
+let toggleSpan: HTMLSpanElement | null = null;   // 实际文字按钮
+let controlsPlaced = false;                       // 是否已成功注入控制栏
+let mountedForGuid: string | null = null;         // 已初始化过的 guid（幂等，避免每 2.4s 重跑）
 let loading = false;
 let enabled = true;
 let items: DanmakuItem[] = [];
@@ -70,43 +73,34 @@ function findMountRoot(): HTMLElement | null {
 }
 
 /**
- * 在容器内找原生控制栏。
- * 策略：广匹配选择器 + 兜底停靠条。
- * fnOS 播放器控制栏通常含 倍速/选集/原画/CC/设置/音量/全屏 等文字或图标按钮。
+ * 找原生控制栏（从 document 精确锚定，不使用会误中提示气泡的模糊选择器）。
+ * 飞牛播放器实测 DOM：<xg-controls class="xgplayer-controls"> 内含 <xg-right-grid>，
+ * 原画/选集/倍速等文字按钮都是 <div class="plugin-placeholder"> 子节点。
+ * 我们把弹幕按钮注入 <xg-right-grid>（最右端，紧跟倍速之后）。
  */
-function findControlsBar(root: HTMLElement): HTMLElement | null {
-    // 更精确的选择器列表（覆盖常见视频播放器框架）
-    const selectors = [
-        // 通用
-        '[class*="control-bar"]', '[class*="controlBar"]', '[class*="controls"]',
-        '[class*="player-bar"]', '[class*="bottom-bar"]', '[class*="bottomBar"]',
-        '[class*="tool-bar"]', '[class*="toolbar"]', '[role="toolbar"]',
-        '[class*="action-bar"]', '[class*="controller"]',
-        // xgplayer (西瓜/西瓜系)
-        '[class*="xgplayer-controls"]', '[class*="xg-bottom"]',
-        '[data-name="controls"]',
-        // video.js
-        '[class*="vjs-control-bar"]',
-        // 通用含文字的选择器（fnOS 控制栏有"倍速""选集"等中文）
-        '.xgplayer-controls', '.video-controls',
-    ];
-    for (const s of selectors) {
-        const el = root.querySelector(s) as HTMLElement | null;
-        if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-            log.info('[danmakuWeb] 控制栏命中选择器: ' + s + ' (' + el.className + ')');
-            return el;
-        }
+function findControlsBar(): HTMLElement | null {
+    // ① 精确命中飞牛 xgplayer 控制栏右区（用户实测 DOM，首选）
+    const right = document.querySelector('xg-right-grid') as HTMLElement | null;
+    if (right && right.offsetHeight > 0) {
+        return right;
     }
-    // 二级查找：在整个 document 内找包含"倍速"/"选集"/"全屏"等中文的控制区域
-    const allDivs = root.querySelectorAll('div, nav, [role]');
-    for (let i = 0; i < allDivs.length; i++) {
-        const el = allDivs[i] as HTMLElement;
-        const text = el.textContent || '';
-        if ((text.includes('倍速') || text.includes('选集') || text.includes('原画') ||
-             text.includes('音量') || text.includes('全屏')) &&
-            el.offsetHeight > 20 && el.offsetHeight < 120 &&
-            el.children.length >= 2) {
-            log.info('[danmakuWeb] 控制栏命中文本特征: tag=' + el.tagName + ' class=' + String(el.className).slice(0, 60));
+    // ② 退一步：整个控制栏 <xg-controls class="xgplayer-controls">
+    const controls = (document.querySelector('xg-controls.xgplayer-controls') ||
+        document.querySelector('.xgplayer-controls')) as HTMLElement | null;
+    if (controls && controls.offsetHeight > 0) {
+        // 若 controls 内部有 right-grid，优先返回它
+        const innerRight = controls.querySelector('xg-right-grid') as HTMLElement | null;
+        if (innerRight && innerRight.offsetHeight > 0) return innerRight;
+        return controls;
+    }
+    // ③ 通用兜底：找含"倍速/选集/原画"等中文文字、高度像控制栏的容器
+    const all = document.querySelectorAll('div, nav, [role]');
+    for (let i = 0; i < all.length; i++) {
+        const el = all[i] as HTMLElement;
+        const h = el.offsetHeight;
+        const txt = el.textContent || '';
+        if ((txt.includes('倍速') || txt.includes('选集') || txt.includes('原画')) &&
+            h > 20 && h < 120 && el.children.length >= 2) {
             return el;
         }
     }
@@ -142,19 +136,22 @@ function ensureMounted(): void {
     }
     overlay.style.display = enabled ? 'block' : 'none';
 
-    // 开关按钮：优先注入原生控制栏；找不到则停靠播放器底部
-    const bar = findControlsBar(root);
+    // 开关按钮：注入原生控制栏右区（xg-right-grid）；找不到则停靠播放器底部
+    const bar = findControlsBar();
     if (bar) {
-        if (!toggleBtn) {
-            toggleBtn = createToggle();
-            bar.appendChild(toggleBtn);
+        if (!toggleWrap) createToggle();
+        if (toggleWrap && toggleWrap.parentElement !== bar) {
+            bar.appendChild(toggleWrap);
         }
-        // 确保 toggleBtn 在 bar 内可见
-        if (toggleBtn.parentElement !== bar) {
-            bar.appendChild(toggleBtn);
+        // 控制栏就绪 → 移除可能存在的兜底停靠条，避免重复
+        const dock = root.querySelector('#fntv-danmaku-dock');
+        if (dock) dock.remove();
+        if (!controlsPlaced) {
+            log.info('[danmakuWeb] 弹幕开关已注入控制栏(' + String(bar.className).slice(0, 40) + ')');
+            controlsPlaced = true;
         }
     } else {
-        // 兜底：创建一个固定在播放器底部的停靠条
+        // 兜底：创建一个固定在播放器底部的停靠条（仅当控制栏尚未就绪）
         let dock = root.querySelector('#fntv-danmaku-dock') as HTMLElement | null;
         if (!dock) {
             dock = document.createElement('div');
@@ -169,56 +166,61 @@ function ensureMounted(): void {
                 alignItems: 'center',
                 justifyContent: 'flex-end',
                 padding: '0 14px',
-                zIndex: '9999',  /* 高于原生控制栏，确保可见 */
+                zIndex: '9999',
                 pointerEvents: 'auto',
                 background: 'linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0))',
             } as CSSStyleDeclaration);
             root.appendChild(dock);
         }
-        if (!toggleBtn) {
-            toggleBtn = createToggle();
-            dock.appendChild(toggleBtn);
-        }
-        if (toggleBtn.parentElement !== dock) {
-            dock.appendChild(toggleBtn);
+        if (!toggleWrap) createToggle();
+        if (toggleWrap && toggleWrap.parentElement !== dock) {
+            dock.appendChild(toggleWrap);
         }
     }
 }
 
-function createToggle(): HTMLButtonElement {
-    const btn = document.createElement('button');
-    btn.id = 'fntv-danmaku-toggle';
-    btn.type = 'button';
-    btn.textContent = '弹幕';
-    Object.assign(btn.style, {
-        marginLeft: '10px',
-        padding: '2px 12px',
-        borderRadius: '14px',
-        border: '1px solid rgba(255,255,255,0.35)',
-        background: enabled ? 'rgba(80,160,255,0.9)' : 'rgba(255,255,255,0.18)',
-        color: '#fff',
-        fontSize: '13px',
-        lineHeight: '1.7',
-        cursor: 'pointer',
-        pointerEvents: 'auto',
-        userSelect: 'none',
-        outline: 'none',
-    } as CSSStyleDeclaration);
-    btn.addEventListener('click', (e) => {
+function createToggle(): void {
+    if (toggleWrap) return;
+    // 仿照飞牛原生控制栏按钮结构：plugin-placeholder > h-full > flex > span
+    const wrap = document.createElement('div');
+    wrap.className = 'plugin-placeholder';
+    wrap.id = 'fntv-danmaku-toggle-wrap';
+    const hfull = document.createElement('div');
+    hfull.className = 'h-full';
+    const flex = document.createElement('div');
+    flex.className = 'flex h-full items-center justify-center';
+    flex.setAttribute('tabindex', '0');
+    const span = document.createElement('span');
+    span.id = 'fntv-danmaku-toggle';
+    // 与原生 原画/选集/倍速 一致的文字样式
+    span.className = 'cursor-pointer text-lg leading-lg text-[var(--semi-color-text-1)] hover:text-[var(--semi-color-text-0)]';
+    span.textContent = '弹幕';
+    span.style.userSelect = 'none';
+    flex.appendChild(span);
+    hfull.appendChild(flex);
+    wrap.appendChild(hfull);
+    flex.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
         toggleDanmaku();
     });
-    return btn;
+    toggleWrap = wrap;
+    toggleSpan = span;
+    syncToggleUI();
 }
 
+/** 弹幕开关状态可视化：开启时给文字加品牌色高亮，关闭时降透明度 */
 function syncToggleUI(): void {
-    if (!toggleBtn) return;
-    toggleBtn.style.background = enabled
-        ? 'rgba(80,160,255,0.9)'
-        : 'rgba(255,255,255,0.18)';
-    if (loading) toggleBtn.textContent = '弹幕…';
-    else toggleBtn.textContent = '弹幕';
+    if (!toggleSpan) return;
+    if (loading) {
+        toggleSpan.textContent = '弹幕…';
+    } else {
+        toggleSpan.textContent = '弹幕';
+    }
+    toggleSpan.style.color = enabled
+        ? 'var(--fn-bg-brand, #3374DB)'
+        : 'var(--semi-color-text-1)';
+    toggleSpan.style.opacity = enabled ? '1' : '0.55';
 }
 
 function toggleDanmaku(): void {
@@ -423,11 +425,22 @@ function maybeSetup(): void {
     // 读取记忆的开关状态（默认开）
     try {
         const saved = localStorage.getItem(LS_KEY);
-        if (saved === '0') enabled = false;
-        else enabled = true;
+        enabled = saved !== '0';
     } catch { /* ignore */ }
 
+    const guid = getGuid();
+    if (!guid) return;
+
+    // 幂等：同一 guid 且控制栏已注入 → 只同步状态，不再重复初始化/打日志
+    if (guid === mountedForGuid && controlsPlaced) {
+        if (overlay) overlay.style.display = enabled ? 'block' : 'none';
+        syncToggleUI();
+        return;
+    }
+
+    // 首次 / 切集 / 控制栏尚未就绪 → 完整初始化（ensureMounted 内部对按钮/overlay 做了存在性判断）
     ensureMounted();
+    mountedForGuid = guid;
     syncToggleUI();
     prepareAndLoad();
 }
