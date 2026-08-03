@@ -3432,6 +3432,33 @@ function handle(): void {
       }).catch(() => {});
     });
 
+    // ===== 插件面板：跳过片头片尾（smart_skip 插件，控制面从 MPV 菜单抽到此处）=====
+    const secSkip = section('跳过片头片尾');
+    secSkip.el.id = 'sec-skip';
+    const skipBody = secSkip.body;
+    const skipDesc = document.createElement('div');
+    skipDesc.textContent = '自动加载飞牛/影片库跳过数据；可在播放时显示「跳过片头/片尾」按钮，或开启后自动跳过。';
+    skipDesc.style.cssText = 'color:#9aa0a6;font-size:12px;line-height:1.5;margin-bottom:6px;';
+    skipBody.appendChild(skipDesc);
+    const skipRow = document.createElement('div');
+    skipRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    skipRow.onmouseenter = () => { skipRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    skipRow.onmouseleave = () => { skipRow.style.background = 'transparent'; };
+    const skipLabel = document.createElement('span');
+    skipLabel.textContent = '自动跳过片头片尾';
+    skipLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swSkip = document.createElement('input');
+    swSkip.type = 'checkbox';
+    swSkip.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    skipRow.appendChild(skipLabel); skipRow.appendChild(swSkip);
+    skipBody.appendChild(skipRow);
+    swSkip.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-smart-skip-enabled', swSkip.checked).catch((err) => log('set-smart-skip-enabled failed', err));
+    });
+    // 读取初始值（默认关闭）
+    ipcRenderer.invoke('settings:get-smart-skip-enabled').then((v: boolean) => { swSkip.checked = !!v; }).catch(() => { swSkip.checked = false; });
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
@@ -3441,6 +3468,7 @@ function handle(): void {
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
+      { id: 'plugins', label: '插件', els: [secSkip.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
     const panes: Record<string, HTMLElement> = {};

@@ -300,6 +300,41 @@ function writeBiliSearchEnabled(enabled: boolean): void {
     }
 }
 
+// 写入智能跳过片头片尾开关到 script-opts/smart_skip.conf（由应用「插件」面板控制）
+// ⚠️ 同样双写 portable_config 与用户配置目录（AppData/Roaming/mpv），
+//   确保 mpv 在便携/标准两种模式下都读到正确的 enabled（lc-094 教训）。
+function writeSmartSkipEnabled(enabled: boolean): void {
+    try {
+        const val = enabled ? 'yes' : 'no';
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) {
+                    fs.mkdirSync(scriptOptsDir, { recursive: true });
+                }
+                const target = path.join(scriptOptsDir, 'smart_skip.conf');
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                // 移除已存在的 enabled 行及旧注释，避免重复堆叠
+                lines = lines.filter(l => !/^\s*enabled\s*=/.test(l)
+                    && !/^#\s*智能跳过片头片尾开关/.test(l));
+                while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+                lines.push('# 智能跳过片头片尾开关（由应用「插件」面板控制）');
+                lines.push('enabled=' + val);
+                fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                logger.info(`智能跳过片头片尾开关已写入: ${target} (enabled=${enabled})`);
+            } catch (e) {
+                logger.error(`写入 smart_skip.conf (智能跳过开关) 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('写入 智能跳过片头片尾开关失败:', error);
+    }
+}
+
 // 写入 B站弹幕聚合阈值到 script-opts/uosc_danmaku.conf（由应用设置面板控制）
 function writeBiliAggregateThreshold(threshold: number): void {
     try {
@@ -410,6 +445,7 @@ export {
     getPortableConfigDir,
     writeMpvUserConfig,
     writeBiliSearchEnabled,
+    writeSmartSkipEnabled,
     writeBiliAggregateThreshold,
     writeBiliDanmakuStyle
 };

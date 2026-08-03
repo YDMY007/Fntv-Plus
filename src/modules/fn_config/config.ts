@@ -90,6 +90,8 @@ export interface Config {
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
     mpvBiliSearchEnabled?: boolean;
+    // 智能跳过片头片尾总开关（默认关闭：仅显示「跳过」按钮，不自动跳；开启后自动跳过）
+    smartSkipEnabled?: boolean;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
     // 用户自定义 Python 解释器路径（B站弹幕用 bili_danmaku.py 需要 Python）。
@@ -686,6 +688,19 @@ export function setMpvBiliAggregateThreshold(threshold: number): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取「智能跳过片头片尾」总开关（默认关闭=false：仅显示按钮不自动跳）
+export function getSmartSkipEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.smartSkipEnabled === true;
+}
+
+// 设置「智能跳过片头片尾」总开关
+export function setSmartSkipEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.smartSkipEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「关闭详情页背景框」开关（默认关闭=false，保留玻璃背景框）
 export function getDetailBoxless(): boolean {
     const config: Config = readConfig() || {};
@@ -778,6 +793,9 @@ module.exports = {
     setMpvBiliSearchEnabled,
     getMpvBiliAggregateThreshold,
     setMpvBiliAggregateThreshold,
+    // 智能跳过片头片尾
+    getSmartSkipEnabled,
+    setSmartSkipEnabled,
     getPythonPath,
     setPythonPath,
     getDetailBoxless,
