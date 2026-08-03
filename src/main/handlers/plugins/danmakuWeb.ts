@@ -49,9 +49,10 @@ async function handlePrepare(
         return { ok: false, error: '未配置服务器地址或未登录' };
     }
 
-    // ── 用 guid 解析番名 + 集数（电影/剧集）──
+    // ── 用 guid 解析番名 + 集数 + 季数（电影/剧集）──
     let title = '';
     let ep = 0;
+    let season = 0;
     let isMovie = false;
     try {
         const fnapi = new fn.ApiService(config.domain, config.token);
@@ -65,11 +66,14 @@ async function handlePrepare(
         if (type === 'movie') {
             isMovie = true;
             ep = 0; // 电影：仅按番名搜，取最优/首集
+            season = 0;
         } else {
             isMovie = false;
             ep = item?.episode_number ? Number(item.episode_number) : 0;
+            // 季数：优先 item.season_number（fnOS 剧集元数据可靠提供），用于精确匹配 B站 季，根治跨季错配。
+            season = item?.season_number ? Number(item.season_number) : 0;
         }
-        log.info(`[danmakuWeb] guid=${guid} type=${type} title="${title}" ep=${ep}`);
+        log.info(`[danmakuWeb] guid=${guid} type=${type} title="${title}" ep=${ep} season=${season}`);
     } catch (e: any) {
         return { ok: false, error: '查询播放信息异常: ' + (e?.message || e) };
     }
@@ -78,9 +82,9 @@ async function handlePrepare(
         return { ok: false, error: '无法解析标题（tv_title 为空）' };
     }
 
-    // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化）──
+    // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化；season>0 时优先精确匹配该季）──
     try {
-        const res = await getDanmakuItems(title, ep, isMovie);
+        const res = await getDanmakuItems(title, ep, isMovie, season);
         if (!res || !res.items || res.items.length === 0) {
             return { ok: false, title, ep, isMovie, count: 0, error: '未找到匹配的B站弹幕' };
         }

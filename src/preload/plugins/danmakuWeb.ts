@@ -45,6 +45,7 @@ interface DanmakuMeta {
     cid?: any;
     sim?: number | null;
     ep: number;
+    season: number;          // 目标季数（0=未指定）；>0 时优先精确匹配该季
     isMovie: boolean;
     count: number;
     aggregatedFrom?: any;
@@ -275,7 +276,7 @@ async function prepareAndLoad(): Promise<void> {
             items = res.items as DanmakuItem[];
             meta = res.meta as DanmakuMeta || {
                 searchTitle: res.title || '', matchedTitle: res.title || '',
-                source: res.source || '', ep: res.ep || 0, isMovie: !!res.isMovie,
+                source: res.source || '', ep: res.ep || 0, season: res.season || 0, isMovie: !!res.isMovie,
                 count: res.count || items.length,
             };
             loadedGuids.add(guid);
@@ -284,7 +285,7 @@ async function prepareAndLoad(): Promise<void> {
         } else {
             meta = {
                 searchTitle: res?.title || '', matchedTitle: res?.title || '',
-                source: res?.source || '', ep: res?.ep ?? 0, isMovie: !!res?.isMovie,
+                source: res?.source || '', ep: res?.ep ?? 0, season: res?.season || 0, isMovie: !!res?.isMovie,
                 count: 0, error: res?.error || '空',
             };
             log.info('[danmakuWeb] 无弹幕: ' + (res?.error || '空'));
@@ -525,6 +526,7 @@ function renderModalBody(): void {
         ['来源区域', sourceLabel(meta.source)],
         ['实际匹配', meta.matchedTitle || '—'],
         ['集数', meta.isMovie ? '电影（按番名搜最优集）' : `第 ${meta.ep} 集`],
+        ['目标季数', meta.season > 0 ? `第 ${meta.season} 季（优先精确匹配）` : '未指定（仅按番名+集数）'],
         ['匹配相似度', meta.sim != null ? (meta.sim * 100).toFixed(0) + '%' : '—'],
         ['BVID', meta.bvid || '—'],
         ['CID', meta.cid != null ? String(meta.cid) : '—'],

@@ -83,6 +83,7 @@ function loadModule(): any {
  * @param ep      集数（0=仅标题搜索）
  * @param out     输出 XML 路径（run 内部会确保父目录存在）
  * @param threshold 聚合阈值（可选，默认 1500）
+ * @param season  季数（可选，0/undefined=不启用季过滤；>0 时优先精确匹配该季，根治跨季错配）
  * @param timeoutMs 超时保护（默认 60000ms），超时返回 {ok:false}
  * @returns 结果对象（ok=true 表示成功并写出 XML）
  */
@@ -91,6 +92,7 @@ export async function runBiliDanmaku(
     ep: number | string,
     out: string,
     threshold?: number | string,
+    season?: number | string,
     timeoutMs = 60000,
 ): Promise<BiliDanmakuResult> {
     let mod: any;
@@ -101,7 +103,7 @@ export async function runBiliDanmaku(
         return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
     }
     try {
-        const runP = Promise.resolve(mod.run(title, ep, out, threshold));
+        const runP = Promise.resolve(mod.run(title, ep, out, threshold, season));
         let timeoutHandle: NodeJS.Timeout | null = null;
         const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
             timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);

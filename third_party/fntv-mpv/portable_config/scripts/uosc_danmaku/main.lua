@@ -903,14 +903,17 @@ mp.register_event("file-loaded", function()
         else
             bt, be, bmethod = guess_bili_title_ep_v2(parse_target)
         end
+        -- 季数：从 media-title（fnOS 注入的 S{season}E{episode}）或文件名提取，用于精确匹配 B站 季。
+        local _, snum, _ = parse_title()
+        local bseason = (snum and tonumber(snum) and tonumber(snum) > 0) and tonumber(snum) or 0
         if bt and be then
             bili_auto_triggered = true
-            msg.warn(("B站优先：极速解析 %s 第%s集（策略:%s），触发 B站 弹幕"):format(bt, be, bmethod))
-            auto_search_extra(bt, be)
+            msg.warn(("B站优先：极速解析 %s 第%s集（策略:%s season=%s），触发 B站 弹幕"):format(bt, be, bmethod, tostring(bseason)))
+            auto_search_extra(bt, be, bseason)
         elseif bt then
             bili_auto_triggered = true
-            msg.warn(("B站优先：极速解析仅识别番名 %s（无集数，策略:%s），按单集/第1话搜索"):format(bt, bmethod))
-            auto_search_extra(bt, 0)
+            msg.warn(("B站优先：极速解析仅识别番名 %s（无集数，策略:%s season=%s），按单集/第1话搜索"):format(bt, bmethod, tostring(bseason)))
+            auto_search_extra(bt, 0, bseason)
         else
             msg.warn("B站优先：文件名未解析出番名，转由弹弹play 匹配后补源")
         end

@@ -86,6 +86,36 @@ function title_sim(a, b) {
     return _lcsRatio(a, b);
 }
 
+// 从候选标题解析"第几季"：阿拉伯数字 / 中文数字 / 罗马数字 / 英文 Season。
+// 无季标记返回 0（含义：未知季 / 通常即第1季，由 isSeasonHit 解释）。
+const _CN_SEASON = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+const _ROMAN_SEASON = { 'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10 };
+function parse_season_from_title(t) {
+    if (!t) return 0;
+    const s = String(t).replace(/<[^>]+>/g, '');
+    let m = s.match(/第\s*([0-9]+)\s*[季部]/);
+    if (m) { const v = parseInt(m[1], 10); if (v > 0) return v; }
+    m = s.match(/第\s*([一二三四五六七八九十]+)\s*[季部]/);
+    if (m && _CN_SEASON[m[1]]) { const v = _CN_SEASON[m[1]]; if (v > 0) return v; }
+    m = s.match(/(?:^|[^A-Za-z0-9])([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ])(?:[^A-Za-z0-9]|$)/);
+    if (m && _ROMAN_SEASON[m[1]]) return _ROMAN_SEASON[m[1]];
+    m = s.match(/[Ss]eason\s*([0-9]+)/);
+    if (m) { const v = parseInt(m[1], 10); if (v > 0) return v; }
+    m = s.match(/([0-9]+)(?:st|nd|rd|th)\s*[Ss]eason/);
+    if (m) { const v = parseInt(m[1], 10); if (v > 0) return v; }
+    return 0;
+}
+
+// season_num 来自 fnOS(0=未知)：
+//   - 未提供 → 不启用季过滤（命中一切，保持旧行为）；
+//   - 候选无季标记(candSeason=0) → 仅在目标为第1季时视为命中（无标记多指第1季）；
+//   - 否则要求季数精确相等，根治跨季错配（如《无职转生》二/三季互串）。
+function isSeasonHit(candSeason, season_num) {
+    if (!season_num || season_num === 0) return true;
+    if (candSeason === 0) return season_num === 1;
+    return candSeason === season_num;
+}
+
 // 日志接收器：默认输出到 stderr；主进程可通过 setLogSink() 注入（如转发到 app.log）
 let _logSink = null;
 function setLogSink(fn) {
@@ -225,7 +255,7 @@ function _select_ep(eps, ep_num) {
 
 // 番剧区搜索（B站正版番剧）。与 bili_danmaku.py search_bangumi 逻辑一致：
 // 优先完整剧名(sim>=SIM_HIGH)；失败则降阈值到 SIM_LOW(0.3)；不做谐音/近似名兜底。
-async function search_bangumi(title, ep_num) {
+async function search_bangumi(title, ep_num, season_num) {
     const url = `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(title)}&search_type=media_bangumi`;
     const d = await jget(url);
     if (!d || d.code !== 0) {
@@ -238,20 +268,26 @@ async function search_bangumi(title, ep_num) {
             for (const anime of (it.data || [])) {
                 const t = String(anime.title || '').replace(/<[^>]+>/g, '');
                 if (t.indexOf('中配') >= 0) continue;
-                cands.push([title_sim(title, t), t, anime]);
+                const season = parse_season_from_title(t);
+                cands.push([title_sim(title, t), t, anime, season]);
             }
         }
     }
-    cands.sort((x, y) => (y[0] - x[0]) || (parse_count(y[2].video_review || 0) - parse_count(x[2].video_review || 0)));
-    log(`[番剧区] 命中候选 ${cands.length} 个, ep_num=${ep_num}`);
+    // 季数过滤启用时(season_num>0)，优先把"命中目标季"的候选排前面，
+    // 避免被弹幕更多的其它季挤到 run 的 CAP 之外（run 最多取前 CAP 个候选拉取）。
+    cands.sort((x, y) =>
+        ((isSeasonHit(y[3], season_num) ? 0 : 1) - (isSeasonHit(x[3], season_num) ? 0 : 1)) ||
+        (y[0] - x[0]) ||
+        (parse_count(y[2].video_review || 0) - parse_count(x[2].video_review || 0)));
+    log(`[番剧区] 命中候选 ${cands.length} 个, ep_num=${ep_num} season_num=${season_num || 0}`);
     for (let i = 0; i < Math.min(cands.length, 5); i++) {
-        const [sim, t, anime] = cands[i];
+        const [sim, t, anime, season] = cands[i];
         const eps = anime.eps || [];
-        log(`[番剧区]   候选[${i}] sim=${sim.toFixed(2)} 总集数=${eps.length} ${JSON.stringify(t)}`);
+        log(`[番剧区]   候选[${i}] sim=${sim.toFixed(2)} season=${season} 总集数=${eps.length} ${JSON.stringify(t)}`);
     }
     const results = [];
     for (const thr of [SIM_HIGH, SIM_LOW]) {
-        for (const [sim, t, anime] of cands) {
+        for (const [sim, t, anime, season] of cands) {
             if (sim < thr) continue;
             const eps = anime.eps || [];
             if (!eps.length) continue;
@@ -261,8 +297,8 @@ async function search_bangumi(title, ep_num) {
             if (!ep_id) continue;
             const cid = await _bangumi_cid(ep_id);
             if (cid) {
-                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim };
-                log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} ep序号=${ep.index} cid=${cid}`);
+                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim, season_match: isSeasonHit(season, season_num) };
+                log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) ep序号=${ep.index} cid=${cid}`);
                 results.push([cid, t, info]);
             }
         }
@@ -361,7 +397,7 @@ function cid_from_bvid(bvid, ep_num, title_hint) {
     });
 }
 
-async function search_video(title, ep_num) {
+async function search_video(title, ep_num, season_num) {
     const url = `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(title)}&search_type=video`;
     const d = await jget(url);
     if (!d || d.code !== 0) return [];
@@ -385,25 +421,25 @@ async function search_video(title, ep_num) {
         if (_is_compilation_title(t)) return 2;
         return 1;
     }
-    const scored = filtered.map(([t, bvid, vr]) => [title_sim(title, t), kind_of(t), t, bvid, vr]);
+    const scored = filtered.map(([t, bvid, vr]) => [title_sim(title, t), kind_of(t), t, bvid, vr, parse_season_from_title(t)]);
     scored.sort((x, y) => (x[1] - y[1]) || (y[4] - x[4]) || (y[0] - x[0]));
-    log(`[视频区] 候选 ${scored.length} 个, ep_num=${ep_num}`);
+    log(`[视频区] 候选 ${scored.length} 个, ep_num=${ep_num} season_num=${season_num || 0}`);
     const tagmap = { 0: '[单集]', 1: '[不明]', 2: '[合集]' };
     for (let i = 0; i < Math.min(scored.length, 8); i++) {
-        const [sim, kind, t, bvid, vr] = scored[i];
-        log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} 弹幕=${vr} ${JSON.stringify(t)}`);
+        const [sim, kind, t, bvid, vr, season] = scored[i];
+        log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} season=${season} 弹幕=${vr} ${JSON.stringify(t)}`);
     }
     const results = [];
     const seen = new Set();
-    for (const [sim, kind, t, bvid, vr] of scored) {
+    for (const [sim, kind, t, bvid, vr, season] of scored) {
         if (sim < VIDEO_SIM_FLOOR) continue;
         const cid = await cid_from_bvid(bvid, ep_num, t);
         if (cid && !seen.has(cid)) {
             seen.add(cid);
-            const info = { source: 'video', bvid: bvid, sim: sim };
+            const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num) };
             const tag = tagmap[kind] || '?';
             const mark = sim >= SIM_LOW ? '' : ' [兜底]';
-            log(`[视频区] sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} cid=${cid}`);
+            log(`[视频区] sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
             results.push([cid, t, info]);
         }
     }
@@ -413,7 +449,7 @@ async function search_video(title, ep_num) {
     return results;
 }
 
-async function search_cid(title, ep_num) {
+async function search_cid(title, ep_num, season_num) {
     let t = title.replace(/\s*[\(（]\d{4}[\)）]\s*$/, '').trim();
     if (!t) return [];
     if (!ep_num || ep_num === 0) {
@@ -425,14 +461,14 @@ async function search_cid(title, ep_num) {
             log(`[search_cid] ep_num=0 且标题无集数: ${JSON.stringify(t)}`);
         }
     }
-    log(`[search_cid] 开始匹配: title=${JSON.stringify(t)} ep_num=${ep_num}`);
-    const bangumi = await search_bangumi(t, ep_num);
+    log(`[search_cid] 开始匹配: title=${JSON.stringify(t)} ep_num=${ep_num} season_num=${season_num || 0}`);
+    const bangumi = await search_bangumi(t, ep_num, season_num);
     if (bangumi.length) {
         log(`[search_cid] 番剧区返回 ${bangumi.length} 个候选`);
         return bangumi;
     }
     log('番剧区无结果，回退到视频区(UP主搬运)');
-    const video = await search_video(t, ep_num);
+    const video = await search_video(t, ep_num, season_num);
     if (video.length) {
         log(`[search_cid] 视频区返回 ${video.length} 个候选`);
         return video;
@@ -583,28 +619,35 @@ function _filter_danmaku(dm, block_types) {
 }
 
 function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
-    const valid = fetched.filter((f) => f[4] <= agg_time_limit);
-    if (valid.length) {
-        let best = valid[0];
-        for (const f of valid) if (f[3].length > best[3].length) best = f;
-        return [best[3], best[0], best[1], best[2], best[2] && best[2].source, null, ''];
+    function pick(pool) {
+        if (!pool.length) return null;
+        const valid = pool.filter((f) => f[4] <= agg_time_limit);
+        const use = valid.length ? valid : pool;
+        let best = use[0];
+        for (const f of use) if (f[3].length > best[3].length) best = f;
+        return best;
     }
-    let best = fetched[0];
-    for (const f of fetched) if (f[3].length > best[3].length) best = f;
-    return [best[3], best[0], best[1], best[2], best[2] && best[2].source, null, ''];
+    // 季数匹配优先：优先从"命中目标季(season_match)"的候选里挑弹幕最多的；
+    // 若没有任何季匹配候选（例如 B站 未区分季 / 仅 UP主搬运），才退回到全部候选，保持旧行为。
+    const hit = fetched.filter((f) => f[2] && f[2].season_match);
+    const chosen = pick(hit) || pick(fetched);
+    if (!chosen) return [null, null, null, null, null, null, ''];
+    return [chosen[3], chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, null, ''];
 }
 
 // 核心入口：可被主进程 require 后调用，返回结果对象，不调用 process.exit（避免杀掉宿主进程）。
 // 副作用：会把弹幕 XML 写到 out 路径（供 MPV / PotPlayer 读取）。
-async function run(title, ep_num, out, agg_threshold) {
+async function run(title, ep_num, out, agg_threshold, season_num) {
     _refresh_cookie();
     if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
     if (isNaN(ep_num)) ep_num = 0;
+    if (typeof season_num === 'string') season_num = parseInt(season_num, 10);
+    if (isNaN(season_num)) season_num = 0;
     if (typeof agg_threshold === 'string') agg_threshold = parseInt(agg_threshold, 10);
     if (isNaN(agg_threshold) || !agg_threshold) agg_threshold = 1500;
-    log(`番名=${title} 集数=${ep_num} 聚合阈值=${agg_threshold}` + (COOKIE ? ' [登录态]' : ' [匿名]'));
+    log(`番名=${title} 集数=${ep_num} 季数=${season_num || 0} 聚合阈值=${agg_threshold}` + (COOKIE ? ' [登录态]' : ' [匿名]'));
 
-    const candidates = await search_cid(title, ep_num);
+    const candidates = await search_cid(title, ep_num, season_num);
     if (!candidates.length) {
         log('未找到B站对应集（可能番名不匹配或网络受限）');
         return { ok: false, error: '未找到匹配的B站视频' };
@@ -669,15 +712,16 @@ async function run(title, ep_num, out, agg_threshold) {
 // （历史用法：node bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]）
 async function main() {
     if (process.argv.length < 4) {
-        log('用法: bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]');
+        log('用法: bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值] [季数]');
         process.exit(2);
     }
     const title = process.argv[2];
     const ep_num = process.argv[3];
     const out = process.argv[4];
     const agg_threshold = process.argv[5];
+    const season_num = process.argv[6];
     try {
-        const result = await run(title, ep_num, out, agg_threshold);
+        const result = await run(title, ep_num, out, agg_threshold, season_num);
         process.stdout.write('BILI_RESULT:' + JSON.stringify(result) + '\n');
         process.exit(result.ok ? 0 : 1);
     } catch (e) {

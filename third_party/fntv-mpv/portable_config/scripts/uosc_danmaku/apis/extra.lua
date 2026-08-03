@@ -504,7 +504,8 @@ end
 
 -- 自动补源：文件名优先解析到番名/集数后，直连 B站 搜索对应集弹幕并叠加
 -- （绕开失效的 extcomment 代理）。也作为弹弹play 匹配成功后的兜底补源。
-function auto_search_extra(title, episode_num)
+-- season：季数（可选，0=不启用季过滤；>0 时优先精确匹配该季，根治跨季错配）。
+function auto_search_extra(title, episode_num, season)
     if not title or title == "" then return end
     -- 清理 fnOS 注入 media-title 的副标题垃圾后缀（" - S4E16: noTitle" / " - : noTitle"），
     -- 否则这些后缀会污染 B站 搜索标题、导致番剧区 0 命中。
@@ -585,10 +586,11 @@ function auto_search_extra(title, episode_num)
 
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：经本地代理直连B站搜索 %s（%s）"):format(title, ep_label))
+    local season_arg = (season and season > 0) and ("&season=" .. tostring(season)) or ""
     local api = string.format(
-        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s",
-        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500))
-    msg.info(("[自动补源-DEBUG] 请求 %s"):format(api))
+        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s%s",
+        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500), season_arg)
+    msg.info(("[自动补源-DEBUG] 请求 %s (season=%s)"):format(api, tostring(season or 0)))
 
     local body = http_get(api)
     local ok = false

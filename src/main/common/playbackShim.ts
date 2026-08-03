@@ -322,6 +322,7 @@ class PlaybackShim {
         const ep = parseInt((q.ep || '0').toString(), 10) || 0;
         const out = (q.out || '').toString();
         const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
+        const season = q.season ? parseInt(q.season.toString(), 10) : 0;
 
         if (!title || !out) {
             this.json(res, 400, { ok: false, error: '缺少 title 或 out 参数' });
@@ -332,8 +333,8 @@ class PlaybackShim {
             this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
             return;
         }
-        log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} out=${out} threshold=${threshold ?? '(默认)'}`);
-        runBiliDanmaku(title, ep, out, threshold).then((r) => {
+        log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} season=${season || 0} out=${out} threshold=${threshold ?? '(默认)'}`);
+        runBiliDanmaku(title, ep, out, threshold, season).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku] ✅ 弹幕就绪 | count=${r.danmaku_count} source=${r.source} cid=${r.cid}`);
                 this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, cid: r.cid });

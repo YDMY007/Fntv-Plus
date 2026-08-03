@@ -82,6 +82,7 @@ export interface DanmakuMeta {
     sim?: number | null;     // 匹配相似度（0~1）
     ep: number;
     isMovie: boolean;
+    season: number;         // 目标季数（0=未指定；>0 时优先精确匹配该季）
     count: number;
     aggregatedFrom?: any;
     error?: string;
@@ -376,9 +377,11 @@ function safeName(s: string): string {
  * 中文常被按 ANSI 解析/截断，PotPlayer 实际拿到的字幕路径是坏的，
  * 导致「加载了字幕参数却打不开文件」→ 无弹幕。改用 ASCII hash 文件名彻底规避。
  */
-function cacheBaseName(title: string, ep: number): string {
-    const h = createHash('md5').update(`${title}::${ep}`, 'utf-8').digest('hex').slice(0, 16);
-    return `bili_${h}_${ep}`;
+function cacheBaseName(title: string, ep: number, season = 0): string {
+    // 季数纳入缓存键：同一番名+集数不同季的弹幕不同（如《无职转生》二/三季），
+    // 必须分目录缓存，否则旧缓存会让"错误季"的弹幕长期命中。
+    const h = createHash('md5').update(`${title}::${season}::${ep}`, 'utf-8').digest('hex').slice(0, 16);
+    return season > 0 ? `bili_${h}_s${season}_${ep}` : `bili_${h}_${ep}`;
 }
 
 /**
@@ -396,7 +399,7 @@ function cacheBaseName(title: string, ep: number): string {
  * @param isMovie 是否电影（仅影响 meta 标注）
  * @returns {items, meta}；失败返回 null
  */
-export async function getDanmakuItems(title: string, ep: number, isMovie = false): Promise<GetDanmakuResult | null> {
+export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0): Promise<GetDanmakuResult | null> {
     const cleanTitle = normalizeDanmakuTitle(title);
     log.info(`[danmaku] ========== getDanmakuItems 入口 ==========`);
     log.info(`[danmaku] title="${cleanTitle}", ep=${ep}`);
@@ -408,7 +411,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
     } catch (_) { /* ignore */ }
 
-    const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep)}.json`);
+    const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.json`);
     if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 0) {
         try {
             const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as any;
@@ -420,16 +423,16 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
                     items,
                     meta: (meta && typeof meta === 'object') ? meta : {
                         searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
-                        ep, isMovie, count: items.length,
+                        ep, isMovie, season, count: items.length,
                     },
                 };
             }
         } catch (_) { /* ignore */ }
     }
 
-    const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep)}.xml`);
+    const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.xml`);
     const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
-    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold);
+    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season);
     if (!r.ok) {
         log.warn('[danmaku] ❌ 弹幕获取失败: ' + (r.error || '未知'));
         return null;
@@ -447,7 +450,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
         bvid: r.bvid || null,
         cid: r.cid,
         sim: (typeof r.sim === 'number') ? r.sim : null,
-        ep, isMovie,
+        ep, isMovie, season,
         count: items.length,
         aggregatedFrom: r.aggregated_from,
     };
