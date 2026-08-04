@@ -3029,6 +3029,108 @@ function handle(): void {
     });
     /* 布局统一在末尾 layout 区追加 */
 
+    // ===== 分组: TMDB API Key（用于「热门剧更新」浮层的 TMDB 电影/剧集数据源）=====
+    const secTmdb = section('TMDB API Key');
+    const secBodyTmdb = secTmdb.body;
+
+    let tmdbReal = ''; // 真实 key（仅存于闭包，界面只显示掩码星号）
+    const maskTmdb = (t: string): string => '*'.repeat(Math.max(0, t.length));
+
+    const tmdbHintTop = document.createElement('div');
+    tmdbHintTop.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin-bottom:8px;line-height:1.5;';
+    tmdbHintTop.textContent = '填入你的 TMDB API Key（或 v4 Read Access Token）以启用「热门剧更新」中的 TMDB 电影/剧集数据源。';
+    secBodyTmdb.appendChild(tmdbHintTop);
+
+    // 单行 key 输入框
+    const tmdbInput = document.createElement('input');
+    tmdbInput.type = 'text';
+    tmdbInput.placeholder = '粘贴 TMDB API Key / Read Access Token';
+    tmdbInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;';
+    secBodyTmdb.appendChild(tmdbInput);
+
+    tmdbInput.addEventListener('focus', () => {
+      if (tmdbInput.readOnly) { tmdbInput.readOnly = false; tmdbInput.value = ''; }
+    });
+    tmdbInput.addEventListener('blur', () => {
+      if (tmdbInput.value.trim() === '' && tmdbReal) {
+        tmdbInput.value = maskTmdb(tmdbReal);
+        tmdbInput.readOnly = true;
+      }
+    });
+
+    const tmdbBtns = document.createElement('div');
+    tmdbBtns.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const saveTmdbBtn = mkBtn('保存', true);
+    const clearTmdbBtn = mkBtn('清除', true);
+    tmdbBtns.appendChild(saveTmdbBtn);
+    tmdbBtns.appendChild(clearTmdbBtn);
+    secBodyTmdb.appendChild(tmdbBtns);
+
+    const tmdbStatus = document.createElement('div');
+    tmdbStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyTmdb.appendChild(tmdbStatus);
+
+    // 底部提示：引导去 TMDB 申请
+    const tmdbHintBottom = document.createElement('div');
+    tmdbHintBottom.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-top:10px;line-height:1.5;';
+    const tmdbLink = document.createElement('a');
+    tmdbLink.textContent = 'https://www.themoviedb.org/settings/api';
+    tmdbLink.href = 'https://www.themoviedb.org/settings/api';
+    tmdbLink.style.cssText = 'color:var(--fnos-ui-sec);text-decoration:underline;cursor:pointer;';
+    tmdbLink.addEventListener('click', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:open-external', 'https://www.themoviedb.org/settings/api').catch(() => {});
+    });
+    tmdbHintBottom.appendChild(document.createTextNode('可在 '));
+    tmdbHintBottom.appendChild(tmdbLink);
+    tmdbHintBottom.appendChild(document.createTextNode(' 免费申请 API Key。'));
+    secBodyTmdb.appendChild(tmdbHintBottom);
+
+    saveTmdbBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const key = tmdbInput.readOnly ? tmdbReal : tmdbInput.value.trim();
+      try {
+        const r: any = await ipcRenderer.invoke('settings:set-tmdb-key', key);
+        if (!r || r.ok !== false) {
+          tmdbReal = key;
+          if (key) {
+            tmdbInput.value = maskTmdb(key);
+            tmdbInput.readOnly = true;
+            tmdbStatus.textContent = '已保存 TMDB Key';
+            tmdbStatus.style.color = 'var(--fnos-ui-ok)';
+          } else {
+            tmdbInput.value = '';
+            tmdbInput.readOnly = false;
+            tmdbStatus.textContent = '已清除 TMDB Key';
+            tmdbStatus.style.color = 'var(--fnos-ui-warn)';
+          }
+        } else {
+          tmdbStatus.textContent = '保存失败';
+          tmdbStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        tmdbStatus.textContent = '保存失败';
+        tmdbStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    clearTmdbBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      tmdbInput.value = '';
+      tmdbInput.readOnly = false;
+      tmdbReal = '';
+      try {
+        await ipcRenderer.invoke('settings:set-tmdb-key', '');
+        tmdbStatus.textContent = '已清除 TMDB Key';
+        tmdbStatus.style.color = 'var(--fnos-ui-warn)';
+      } catch {
+        tmdbStatus.textContent = '清除失败';
+        tmdbStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+
     // ===== 分组: 豆瓣同步 =====
     const secDouban = section('豆瓣同步');
     secDouban.el.style.gridColumn = '1 / -1'; // 豆瓣同步内容多，占满整行
@@ -3540,7 +3642,7 @@ function handle(): void {
     const cats: Cat[] = [
       { id: 'general', label: '通用', els: [sec1.el, sec3.el] },
       { id: 'player', label: '播放器', els: [sec2.el] },
-      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secDouban.el] },
+      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'plugins', label: '插件', els: [secSkip.el] },
@@ -3825,6 +3927,22 @@ function handle(): void {
         // Bangumi 同步开关 + 阈值回填
         swBangumiSync.checked = !!s.bangumiSyncEnabled;
         bangumiThresholdInput.value = String(s.bangumiSyncThreshold || 80);
+      });
+      seg('tmdb', () => {
+        // TMDB Key 回填（已保存则显示星号掩码，不显示明文）
+        const kt: string | null = s.tmdbApiKey || null;
+        if (kt) {
+          tmdbReal = kt;
+          tmdbInput.value = maskTmdb(kt);
+          tmdbInput.readOnly = true;
+          tmdbStatus.textContent = '已保存 TMDB Key';
+          tmdbStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          tmdbReal = '';
+          tmdbInput.value = '';
+          tmdbInput.readOnly = false;
+          tmdbStatus.textContent = '';
+        }
       });
       seg('bili-search', () => {
         // MPV B站弹幕搜索开关回填（默认开启）

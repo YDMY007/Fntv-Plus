@@ -33,6 +33,7 @@ async function handleGetSettings(): Promise<any> {
         debugEnabled: fnConfig.getDebugEnabled(),
         debugComponents: fnConfig.getDebugComponents(),
         bangumiToken: fnConfig.getBangumiToken(),
+        tmdbApiKey: fnConfig.getTmdbApiKey(),
         bangumiSyncEnabled: fnConfig.getBangumiSyncEnabled(),
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
@@ -229,6 +230,13 @@ async function handleSetDoubanEnabled(_event: any, enabled: boolean): Promise<vo
 async function handleSetBangumiToken(_event: any, token: string): Promise<{ ok: boolean }> {
     fnConfig.setBangumiToken(token ? String(token) : null);
     log.info('Bangumi Access Token 已更新');
+    return { ok: true };
+}
+
+// 设置 TMDB API Key / Read Access Token（保存/清除）
+async function handleSetTmdbApiKey(_event: any, key: string): Promise<{ ok: boolean }> {
+    fnConfig.setTmdbApiKey(key ? String(key) : null);
+    log.info('TMDB API Key 已更新');
     return { ok: true };
 }
 
@@ -531,8 +539,9 @@ async function handleListChangelogs(): Promise<{ name: string; title: string; mt
         if (!fs.existsSync(wikiDir)) return [];
         const files = fs.readdirSync(wikiDir).filter(f => f.toLowerCase().endsWith('.md'));
         // 固定钉位：0=用户使用手册(置顶) 1=Fntv-Plus Wiki(Home.md) 2=其余(按版本号/时间)
-        const PIN: { [k: string]: number } = { '用户使用手册.md': 0, 'Home.md': 1 };
-        const pinRank = (n: string): number => (PIN[n] !== undefined ? PIN[n] : 2);
+        // 固定钉位：0=插件开发与使用文档(置顶) 1=用户使用手册 2=Fntv-Plus Wiki(Home.md) 其余(版本号/时间)排其后
+        const PIN: { [k: string]: number } = { '插件开发与使用文档.md': 0, '用户使用手册.md': 1, 'Home.md': 2 };
+        const pinRank = (n: string): number => (PIN[n] !== undefined ? PIN[n] : 3);
         const list = files.map(f => {
             let title = f.replace(/\.md$/i, '');
             let mtime = 0;
@@ -610,6 +619,7 @@ function init(): void {
     registerHandler('settings:set-debug-enabled', handleSetDebugEnabled, { useHandle: true });
     registerHandler('settings:set-debug-components', handleSetDebugComponents, { useHandle: true });
     registerHandler('settings:set-bangumi-token', handleSetBangumiToken, { useHandle: true });
+    registerHandler('settings:set-tmdb-key', handleSetTmdbApiKey, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });

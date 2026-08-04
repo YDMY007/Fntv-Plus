@@ -85,6 +85,8 @@ export interface Config {
     debugComponents?: Record<string, boolean>;
     // Bangumi Access Token（明文存于本地 config.json；用于 Bangumi 关联/同步）
     bangumiToken?: string;
+    // TMDB API Key / Read Access Token（明文存于本地 config.json；用于「热门剧更新」TMDB 数据源；默认空，由用户各自填写）
+    tmdbApiKey?: string;
     // Bangumi 集数级同步开关（观看进度达阈值时把该集标为 Bangumi「看过」）
     bangumiSyncEnabled?: boolean;
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
@@ -613,6 +615,23 @@ export function setBangumiToken(token: string | null): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取 TMDB API Key / Read Access Token（未设置返回 null）
+export function getTmdbApiKey(): string | null {
+    const config: Config = readConfig() || {};
+    return config.tmdbApiKey ? config.tmdbApiKey : null;
+}
+
+// 设置/清除 TMDB API Key（传 null/空串即清除）。支持 v3 api_key 与 v4 JWT Read Access Token 两种格式
+export function setTmdbApiKey(key: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!key) {
+        delete config.tmdbApiKey;
+    } else {
+        config.tmdbApiKey = key.trim();
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取 Bangumi 同步开关
 export function getBangumiSyncEnabled(): boolean {
     const config: Config = readConfig() || {};
@@ -765,6 +784,8 @@ module.exports = {
     setDebugComponents,
     getBangumiToken,
     setBangumiToken,
+    getTmdbApiKey,
+    setTmdbApiKey,
     getBangumiSyncEnabled,
     setBangumiSyncEnabled,
     getBangumiSyncThreshold,

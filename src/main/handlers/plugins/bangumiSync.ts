@@ -339,6 +339,67 @@ export async function fetchEpisodeDescs(tvTitle: string, totalEps: number): Prom
     }
 }
 
+/**
+ * 拉取 Bangumi 每日放送（正在播），供「热门剧更新」浮层使用。
+ * - 接口为公开端点，无需鉴权（无 token 也能用）。
+ * - 仅保留 动画(type=2) 与 三次元(type=6, 含真人剧/电视剧)，排除游戏/书籍/音乐。
+ * - 返回完整过滤列表（不切片）；排序交给 preload 端按「星期 / 热度」切换。
+ * - 字段携带 air_weekday / weekdayCn / collectionTotal / rating 供前端排序与展示。
+ */
+async function fetchCalendar(): Promise<{ ok: boolean; items?: any[]; error?: string }> {
+    try {
+        const resp = await axios.get(`${BANGUMI_API}/calendar`, {
+            timeout: 12000,
+            headers: { 'User-Agent': bangumiUA() },
+        });
+        const days: any[] = Array.isArray(resp.data) ? resp.data : [];
+        const map = new Map<number, any>();
+        for (const day of days) {
+            const items: any[] = (day && day.items) || [];
+            const wdId = (day && day.weekday && day.weekday.id) || null;
+            const wdCn = (day && day.weekday && day.weekday.cn) || '';
+            for (const it of items) {
+                if (!it || !it.id) continue;
+                if (it.type !== undefined && it.type !== 2 && it.type !== 6) continue; // 只要动画 / 三次元剧集
+                const rating = it.rating || {};
+                const collTotal = sumNumeric(it.collection);
+                const item = {
+                    id: it.id,
+                    name: it.name || '',
+                    name_cn: it.name_cn || '',
+                    images: it.images || {},
+                    summary: it.summary || '',
+                    air_date: it.air_date || '',
+                    air_weekday: it.air_weekday || wdId,
+                    weekdayCn: wdCn,
+                    eps: it.eps || null,
+                    rating: typeof rating.score === 'number' ? rating.score : null,
+                    ratingTotal: typeof rating.total === 'number' ? rating.total : 0,
+                    collectionTotal: collTotal,
+                    url: `https://bgm.tv/subject/${it.id}`,
+                };
+                // 同条目可能出现在多天（罕见），保留收藏数更高的版本
+                const prev = map.get(it.id);
+                if (!prev || item.collectionTotal > prev.collectionTotal) map.set(it.id, item);
+            }
+        }
+        const items = Array.from(map.values());
+        items.sort((a, b) => b.collectionTotal - a.collectionTotal || (b.rating || 0) - (a.rating || 0));
+        return { ok: true, items };
+    } catch (e: any) {
+        return { ok: false, error: String((e && e.message) || e) };
+    }
+}
+
+/** 把对象里所有数值字段求和（兼容 collection 为 {wish,collect,...} 或数字等多种形态） */
+function sumNumeric(obj: any): number {
+    if (typeof obj === 'number') return obj;
+    if (!obj || typeof obj !== 'object') return 0;
+    let s = 0;
+    for (const v of Object.values(obj)) if (typeof v === 'number') s += v;
+    return s;
+}
+
 /** 插件初始化（handlers/index.ts 自动加载同目录 *.ts 并调用 init） */
 export function init(): void {
     loadCache();
@@ -346,6 +407,10 @@ export function init(): void {
     // 注册 IPC：供 preload 选集页调用获取 Bangumi 每集简介
     registerHandler('bangumi:episode-descs', async (_e: any, tvTitle: string, totalEps: number) => {
         return fetchEpisodeDescs(tvTitle, totalEps);
+    }, { useHandle: true });
+    // 注册 IPC：供「热门剧更新」浮层拉取 Bangumi 每日放送
+    registerHandler('bangumi:calendar', async () => {
+        return fetchCalendar();
     }, { useHandle: true });
     log.info('Bangumi 集数级同步插件已加载');
 }
