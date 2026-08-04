@@ -1191,6 +1191,71 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     }, { once: false });
   }
+
+  // ⑥ 补齐缺失的集简介：fnOS 的 /episode/list 仅第1集返回 overview（父级简介），
+  //     第2集起 overview 为空 → 选集卡片只有时长没有简介文字。
+  //     本步骤从第1集（或页面头部父级简介区）提取简介，填充到其余无简介的卡片。
+  fillMissingEpisodeDescs();
+}
+
+/** 为 Season 详情页选集中缺失简介的卡片补齐描述文字 */
+function fillMissingEpisodeDescs(): void {
+  const cards = document.querySelectorAll('[data-id="details"]');
+  if (cards.length <= 1) return; // 单集无需补齐
+
+  // 从第1集卡片提取简介文字（fnOS 已填充父级 overview）
+  const firstCard = cards[0] as HTMLElement;
+  let sourceDesc = '';
+  // 策略：找卡片内最长的文本节点（排除标题"第N集"和时长"XX分钟XX秒"）
+  const walkText = (el: HTMLElement): string => {
+    let longest = '';
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const t = child.textContent?.trim() || '';
+        if (t.length > longest.length && t.length > 20 && !/^\d+分钟\d+秒$/.test(t) && !/^第\d+集$/.test(t)) {
+          longest = t;
+        }
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const sub = walkText(child as HTMLElement);
+        if (sub.length > longest.length) longest = sub;
+      }
+    }
+    return longest;
+  };
+  sourceDesc = walkText(firstCard);
+
+  // fallback: 第1集也没简介时，从页面头部的父级简介区提取
+  if (!sourceDesc) {
+    const headerDesc = document.querySelector('.trim-mc__details--key-version');
+    if (headerDesc) {
+      const headerText = walkText(headerDesc as HTMLElement);
+      if (headerText.length > 30) sourceDesc = headerText;
+    }
+  }
+  if (!sourceDesc) return; // 无源简介可复制
+
+  log('fillMissingEpisodeDescs: source desc length=', sourceDesc.length, ', cards=', cards.length);
+
+  // 为第2集起无简介的卡片注入相同简介
+  const descStyle = 'font-size:13px;line-height:1.7;color:var(--fnos-text-secondary,#9aa0a6);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:4px;letter-spacing:.25px';
+  for (let i = 1; i < cards.length; i++) {
+    const card = cards[i] as HTMLElement;
+    // 检查该卡片是否已有足够长的简介文字（>20字符即认为有）
+    const existingText = walkText(card);
+    if (existingText.length > 20) continue; // 已有简介，跳过
+
+    const descEl = document.createElement('div');
+    descEl.className = 'fnos-ep-desc-filled';
+    descEl.style.cssText = descStyle;
+    descEl.textContent = sourceDesc;
+    card.appendChild(descEl);
+  }
+  if (cards.length > 1) {
+    const filled = Array.from(cards).slice(1).filter(c => !(c as HTMLElement).querySelector('.fnos-ep-desc-filled') === false).length;
+    // 实际统计：数一下被填充的（有 .fnos-ep-desc-filled 的）
+    const filledCount = document.querySelectorAll('.fnos-ep-desc-filled').length;
+    log('fillMissingEpisodeDescs: filled', filledCount, '/', cards.length - 1, 'episode cards');
+  }
 }
 
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
