@@ -3,7 +3,8 @@
 // 复用既有机制：preload 自动加载 → registerHook(OnReady) 注入 DOM → ipcRenderer 调主进程。
 // 数据源：
 //   · Bangumi —— 主进程 bangumi:calendar（/calendar 公开接口，无需 token），按星期/热度排序
-//   · TMDB    —— 主进程 tmdb:discover（需用户在设置面板填写 TMDB Key），按热门/高分/最新排序
+//   · TMDB    —— 主进程 tmdb:discover（需 Key，海外站，可能被墙）；豆瓣 —— 主进程 douban:discover（免 Key，国内直连）
+//   · 数据源由设置面板「TMDB / 豆瓣」切换，默认豆瓣（国内直连、零配置）
 // 功能：① 数据源切换 ② 排序切换 ③ 卡片「不感兴趣」剔除 ④ localStorage 持久化屏蔽（按数据源隔离）
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
@@ -19,6 +20,41 @@ const WD_CN = ['周一', '周二', '周三', '周四', '周五', '周六', '周�
 function shouldInject(): boolean {
   const h = location.href.toLowerCase();
   return !h.startsWith('file:') && !h.includes('/login') && /^https?:\/\//.test(h);
+}
+
+// ═══ 首页判定（与 titlebar.ts 的 logo 首页规则保持一致：仅 /v 等浅层路径视为首页，
+//    详情/播放/搜索/列表/个人中心等子路由一律视为非首页） ═══
+let _lastHotHome: boolean | null = null;
+function isHomePage(): boolean {
+  const href = location.href.toLowerCase();
+  const path = (location.pathname || '/').toLowerCase();
+  if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false; // 详情/播放
+  if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;          // 播放页
+  if (/\/search/.test(href)) return false;                                                  // 搜索
+  if (/\/(library|category|genre|channel|list|rank|ranking)/.test(href)) return false;     // 列表/分类
+  if (/\/(mine|my|user|account|setting|settings|favorite|favourite|history|collection|subscribe)/.test(href)) return false; // 个人中心
+  const segs = path.split('/').filter(Boolean);
+  return segs.length <= 1;
+}
+
+/** 首页才显示「每日放送」浮窗，切到其他页面隐藏，避免遮挡内容 */
+function syncHomeVisibility(): void {
+  const home = isHomePage();
+  if (home === _lastHotHome) return;           // 状态未变不重复操作（避免日志刷屏/无谓 DOM 写）
+  _lastHotHome = home;
+  const tab = document.getElementById('fntv-hot-tab');
+  const panel = document.getElementById('fntv-hot-panel');
+  if (!tab || !panel) return;
+  if (home) {
+    tab.style.display = '';
+    panel.style.display = '';
+    logger.info('[hotUpdates] 首页：显示每日放送浮窗');
+  } else {
+    tab.style.display = 'none';
+    panel.style.display = 'none';
+    panel.classList.remove('open');            // 切走时收起，回来不会自动弹开
+    logger.info('[hotUpdates] 非首页：隐藏每日放送浮窗（避免遮挡）');
+  }
 }
 
 /** 读取已屏蔽的条目 key 集合（持久化，key 含数据源前缀以隔离命名空间） */
@@ -187,8 +223,23 @@ function injectStyle(): void {
   border-top: 1px solid rgba(255,255,255,.1); }
 #fntv-hot-reset:hover { color: #ffd666; }
 
+#fntv-hot-foot { display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 14px 9px; font-size: 11px; line-height: 1.4;
+  color: rgba(255,255,255,.42); border-top: 1px solid rgba(255,255,255,.08); }
+#fntv-hot-foot-time { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#fntv-hot-refresh { flex: 0 0 auto; margin-left: 10px; padding: 3px 9px; cursor: pointer;
+  font-size: 11px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.16); border-radius: 10px; transition: background .15s, color .15s; }
+#fntv-hot-refresh:hover { background: rgba(255,214,102,.22); color: #ffd666; }
+#fntv-hot-refresh:disabled { opacity: .5; cursor: default; }
+#fntv-hot-refresh.loading::after { content: "…"; }
+
 .fntv-hot-loading, .fntv-hot-empty, .fntv-hot-err {
   padding: 30px 16px; text-align: center; font-size: 12.5px; opacity:.78; line-height: 1.6;
+}
+.fntv-hot-warn {
+  margin: 8px 10px; padding: 7px 10px; border-radius: 8px; font-size: 11.5px; line-height: 1.5;
+  color: #ffd666; background: rgba(255,180,60,.12); border: 1px solid rgba(255,180,60,.28);
 }
 `;
   const el = document.createElement('style');
@@ -237,9 +288,10 @@ function renderTmdbCard(it: any): string {
   const tp = it.mediaType === 'movie' ? '电影' : '剧集';
   const yr = it.year ? `<span class="fntv-hot-yr">${escapeHtml(it.year)}</span>` : '';
   const rt = typeof it.rating === 'number' && it.rating ? `<span class="fntv-hot-rt">★ ${it.rating.toFixed(1)}</span>` : '';
+  // 海报走主进程图片代理（tmdb:image），规避渲染进程 DNS 污染；data-poster 由 hydratePosters 填充
   return `
   <div class="fntv-hot-card" data-id="tm|${it.id}" data-url="${it.url}">
-    ${img ? `<img class="fntv-hot-poster" src="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
+    ${img ? `<img class="fntv-hot-poster" data-poster="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
            : `<div class="fntv-hot-poster"></div>`}
     <div class="fntv-hot-meta">
       <div class="fntv-hot-title">${escapeHtml(title)}</div>
@@ -248,6 +300,21 @@ function renderTmdbCard(it: any): string {
     </div>
     <button class="fntv-hot-block" title="不感兴趣" data-id="tm|${it.id}">✕</button>
   </div>`;
+}
+
+/** 把含 data-poster 的 <img> 经主进程 tmdb:image 拉取为 data URL（海报走代理/直连，绕过渲染进程 DNS 污染） */
+function hydratePosters(root: HTMLElement): void {
+  const imgs = root.querySelectorAll('img.fntv-hot-poster[data-poster]');
+  imgs.forEach((el: any) => {
+    const url = el.getAttribute('data-poster');
+    if (!url) return;
+    el.removeAttribute('data-poster');
+    // 豆瓣图片走 douban:image（带 Referer 解防盗链 418），其余走 tmdb:image
+    const isDouban = /doubanio\.com/i.test(url);
+    ipcRenderer.invoke(isDouban ? 'douban:image' : 'tmdb:image', url).then((r: any) => {
+      if (r && r.ok && r.dataUrl) el.src = r.dataUrl;
+    }).catch(() => { /* 加载失败则留空 */ });
+  });
 }
 
 /** Bangumi 排序渲染（weekday=分组按星期；hot=按热度纯列表） */
@@ -274,7 +341,7 @@ function renderBgBody(items: any[], mode: string): string {
 
 /** TMDB 渲染（new=最新全部；tv=仅剧集；movie=仅电影） */
 function renderTmdbBody(items: any[], mode: string): string {
-  if (!items.length) return `<div class="fntv-hot-empty">暂无数据，请确认 TMDB Key 已填写</div>`;
+  if (!items.length) return `<div class="fntv-hot-empty">暂无数据（数据源未返回内容，详见日志 [豆瓣诊断]/[TMDB诊断]）</div>`;
   let list = items;
   if (mode === 'tv') list = items.filter((it) => it.mediaType === 'tv');
   else if (mode === 'movie') list = items.filter((it) => it.mediaType === 'movie');
@@ -291,7 +358,20 @@ function escapeHtml(s: string): string {
   ));
 }
 
+/** 把时间戳格式化为底部小字：当天显示 HH:MM，跨天显示 M/D HH:MM（缓存可能是昨天的快照） */
+function fmtFootTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return `${hh}:${mm}`;
+  }
+  return `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
+}
+
 function buildPanel(): void {
+  let hotLabel = 'TMDB';   // 浮层「热门影视」标签文字：按设置数据源动态显示（默认豆瓣）
   if (document.getElementById(PANEL_ID)) return;
 
   /* ---- 宫灯按钮（渐变发光 + 火焰图标）---- */
@@ -316,7 +396,11 @@ function buildPanel(): void {
       <div class="fntv-seg-btn" data-mode="hot">按热度</div>
     </div>
     <div id="fntv-hot-body"><div class="fntv-hot-loading">⏳ 正在加载…</div></div>
-    <div id="fntv-hot-reset"></div>`;
+    <div id="fntv-hot-reset"></div>
+    <div id="fntv-hot-foot">
+      <span id="fntv-hot-foot-time"></span>
+      <button id="fntv-hot-refresh" type="button" title="忽略本地缓存，重新拉取最新数据">↻ 刷新</button>
+    </div>`;
 
   document.body.appendChild(tab);
   document.body.appendChild(panel);
@@ -338,6 +422,15 @@ function buildPanel(): void {
   const srcSeg = panel.querySelector('#fntv-hot-src') as HTMLElement;
   const subEl = panel.querySelector('#fntv-hot-sub') as HTMLElement;
   const resetEl = panel.querySelector('#fntv-hot-reset') as HTMLElement;
+  const footTimeEl = panel.querySelector('#fntv-hot-foot-time') as HTMLElement;
+  const refreshBtn = panel.querySelector('#fntv-hot-refresh') as HTMLButtonElement;
+
+  // 把接口的更新时间戳写成底部小字「数据更新于 HH:MM（本地缓存）」
+  const updateFoot = (res: any): void => {
+    const ts = res && typeof res.cachedAt === 'number' ? res.cachedAt : 0;
+    if (!ts) { footTimeEl.textContent = ''; return; }
+    footTimeEl.textContent = '数据更新于 ' + fmtFootTime(ts) + (res.fromCache ? ' · 本地缓存' : '');
+  };
 
   const refreshReset = (): void => {
     const n = getBlockedSet().size;
@@ -361,7 +454,7 @@ function buildPanel(): void {
         <div class="fntv-seg-btn${sortMode === 'new' ? ' active' : ''}" data-mode="new">最新</div>
         <div class="fntv-seg-btn${sortMode === 'tv' ? ' active' : ''}" data-mode="tv">剧集</div>
         <div class="fntv-seg-btn${sortMode === 'movie' ? ' active' : ''}" data-mode="movie">电影</div>`;
-      subEl.textContent = 'TMDB 最新 · 剧集 · 电影';
+      subEl.textContent = hotLabel + ' 最新 · 剧集 · 电影';
     }
     bindSeg();
   };
@@ -374,6 +467,7 @@ function buildPanel(): void {
     } else {
       const visible = allTm.filter((it) => !blocked.has(`tm|${it.id}`));
       body.innerHTML = renderTmdbBody(visible, sortMode);
+      hydratePosters(body); // 海报经主进程图片代理加载（绕过渲染进程 DNS 污染）
     }
   };
 
@@ -446,36 +540,75 @@ function buildPanel(): void {
     panel.classList.remove('open');
   });
 
+  // 强制刷新按钮：忽略 24h 磁盘缓存，重新拉取【当前数据源】最新数据并覆写缓存。
+  // 仅用户主动点击才触发，日常自动刷新仍走缓存，避免被第三方接口限流/封禁。
+  refreshBtn.addEventListener('click', () => {
+    if (refreshBtn.disabled) return;
+    if (source === 'bangumi') loadBg(true);
+    else loadTm(true);
+  });
+
   refreshReset();
   applySourceUi();
 
-  async function loadBg(): Promise<void> {
+  // 浮层「热门影视」标签文字按设置的数据源动态显示（默认豆瓣）：豆瓣→「豆瓣」，TMDB→「TMDB」
+  ipcRenderer.invoke('settings:get-hot-source').then((s: string) => {
+    hotLabel = (s === 'douban') ? '豆瓣' : 'TMDB';
+    const tmdbBtn = srcSeg.querySelector('[data-src="tmdb"]') as HTMLElement | null;
+    if (tmdbBtn) tmdbBtn.textContent = hotLabel;
+    if (source !== 'bangumi') applySourceUi(); // 刷新副标题文案
+  }).catch(() => {});
+
+  async function loadBg(force?: boolean): Promise<void> {
+    body.innerHTML = `<div class="fntv-hot-loading">⏳ 正在加载…</div>`;
+    refreshBtn.disabled = true; refreshBtn.classList.add('loading');
     try {
-      const res = await ipcRenderer.invoke('bangumi:calendar');
+      const res = await ipcRenderer.invoke('bangumi:calendar', !!force);
       if (!res || !res.ok) {
         body.innerHTML = `<div class="fntv-hot-err">获取失败：${escapeHtml((res && res.error) || '未知错误')}</div>`;
         return;
       }
       allBg.length = 0;
       for (const it of (res.items || [])) allBg.push(it);
+      updateFoot(res);
       render();
     } catch (e: any) {
       body.innerHTML = `<div class="fntv-hot-err">获取失败：${escapeHtml(String((e && e.message) || e))}</div>`;
+    } finally {
+      refreshBtn.disabled = false; refreshBtn.classList.remove('loading');
     }
   }
 
-  async function loadTm(): Promise<void> {
+  async function loadTm(force?: boolean): Promise<void> {
+    body.innerHTML = `<div class="fntv-hot-loading">⏳ 正在加载…</div>`;
+    refreshBtn.disabled = true; refreshBtn.classList.add('loading');
     try {
-      const res = await ipcRenderer.invoke('tmdb:discover');
+      const source: string = await ipcRenderer.invoke('settings:get-hot-source').catch(() => 'douban');
+      const channel = source === 'tmdb' ? 'tmdb:discover' : 'douban:discover';
+      const res = await ipcRenderer.invoke(channel, !!force);
       if (!res || !res.ok) {
-        body.innerHTML = `<div class="fntv-hot-err">获取失败：${escapeHtml((res && res.error) || '未知错误')}</div>`;
+        const base = source === 'douban' ? '豆瓣数据获取失败' : 'TMDB 数据获取失败';
+        body.innerHTML = `<div class="fntv-hot-err">获取失败：${escapeHtml((res && res.error) || base)}</div>`;
         return;
       }
       allTm.length = 0;
       for (const it of (res.items || [])) allTm.push(it);
+      updateFoot(res);
+      if (!allTm.length) {
+        const tip = res.warning || (source === 'douban'
+          ? '豆瓣未返回数据（可能网络波动，请稍后重试）。'
+          : 'TMDB 未返回数据（可能 Key 无效，或本机网络无法连接 api.themoviedb.org；请在设置开启「免梯子直连」或设置 HTTPS_PROXY 后重试，详见日志 [TMDB诊断]）');
+        body.innerHTML = `<div class="fntv-hot-err">${escapeHtml(tip)}</div>`;
+        return;
+      }
       render();
+      if (res.warning) {
+        body.insertAdjacentHTML('afterbegin', `<div class="fntv-hot-warn">⚠ ${escapeHtml(res.warning)}</div>`);
+      }
     } catch (e: any) {
       body.innerHTML = `<div class="fntv-hot-err">获取失败：${escapeHtml(String((e && e.message) || e))}</div>`;
+    } finally {
+      refreshBtn.disabled = false; refreshBtn.classList.remove('loading');
     }
   }
 }
@@ -484,6 +617,21 @@ function initHotUpdates(): void {
   if (!shouldInject()) return;
   injectStyle();
   buildPanel();
+  syncHomeVisibility();   // 挂载即按当前页面决定显隐（首页显示，其余页隐藏）
+
+  // 首页才显示浮窗：路由切换时实时同步可见性（复用 titlebar 的 pushState 链式包装机制，
+  // 不破坏 embyWall 导航逻辑；另加 popstate/hashchange 覆盖浏览器前进后退与 hash 路由）
+  try {
+    const _ps = history.pushState, _rs = history.replaceState;
+    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); syncHomeVisibility(); };
+    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); syncHomeVisibility(); };
+    window.addEventListener('popstate', syncHomeVisibility);
+    window.addEventListener('hashchange', syncHomeVisibility);
+  } catch (e) { logger.error('[hotUpdates] nav hook err', String(e).substring(0, 60)); }
+
+  // 兜底：某些导航可能绕过 history API（如整页加载/特殊路由），定时核对一次首页状态
+  setInterval(syncHomeVisibility, 3000);
+
   logger.info('[hotUpdates] 热门剧更新浮层（宫灯版，Bangumi/TMDB 双源）已挂载');
 }
 

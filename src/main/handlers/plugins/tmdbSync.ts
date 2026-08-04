@@ -1,8 +1,12 @@
 import { app } from 'electron';
 import axios, { AxiosInstance } from 'axios';
+import * as https from 'https';
+import * as dns from 'dns';
+import HttpsProxyAgentMod = require('https-proxy-agent');
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as logger from '../../../modules/logger';
 import { registerHandler } from '../core/ipcHandler';
+import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
 
 const log = logger.component('tmdb');
 
@@ -22,6 +26,177 @@ const log = logger.component('tmdb');
 const TMDB_API = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 
+/**
+ * TMDB 请求基址。默认官方；可设环境变量 TMDB_BASE_URL 指向自建反代
+ * （如 Cloudflare Worker / 海外节点转发），从而本机无需梯子即可访问被墙的 TMDB。
+ * 反代只需原样转发请求（含鉴权），不改变响应结构。
+ */
+const TMDB_BASE_URL = (process.env.TMDB_BASE_URL || TMDB_API).replace(/\/+$/, '');
+
+/**
+ * TMDB 图片基址。默认官方 image.tmdb.org；同样在大陆可能被墙，
+ * 可设 TMDB_IMG_BASE_URL 指向自建反代（与 TMDB_BASE_URL 同一 Worker 的不同路径前缀即可）。
+ */
+const TMDB_IMG_BASE_URL = (process.env.TMDB_IMG_BASE_URL || TMDB_IMG).replace(/\/+$/, '');
+
+/**
+ * 内置 TMDB 直连 IP 快照（取自 CheckTMDB 项目，2026-08-04 数据）。
+ * TMDB 用 Cloudflare/AWS 边缘节点，国内 DNS 被污染解析到假 IP 导致直连失败；
+ * 这些是被筛出的「国内可直连」真实边缘 IP。CDN 调度会变，用户可在设置面板覆盖或点「更新 IP」。
+ */
+const TMDB_IP_SNAPSHOT = { api: '65.8.20.79', img: '65.8.20.8' };
+// CheckTMDB 每日更新的 hosts 片段（含 api/image 域名最新可用 IP）
+const TMDB_IP_UPDATE_URL = 'https://raw.githubusercontent.com/cnwikee/CheckTMDB/refs/heads/main/Tmdb_host_ipv4';
+// 自动跟随 CheckTMDB 每日刷新 IP 的间隔（24h）。CheckTMDB 仓库每天 GitHub Action 重算可用 IP，
+// 故此处定时拉取即可让本机直连 IP 自动跟上，无需梯子、无需手动点按钮。
+const TMDB_IP_REFRESH_INTERVAL = 24 * 3600 * 1000;
+
+// 弱网 / 跨网络环境（换电脑、公司网、需代理）下给足余量
+const TMDB_TIMEOUT = 25000;   // 单请求超时（原 12s，换网络环境极易触发）
+const TMDB_RETRIES = 2;       // 网络类错误自动重试次数（指数退避 1s / 2s）
+
+/** 当前生效的直连 IP：用户自定义优先，否则内置快照 */
+function directIp(): { api: string; img: string } {
+    const cfg = fnConfig.getTmdbDirectIp();
+    return {
+        api: (cfg && cfg.api) || TMDB_IP_SNAPSHOT.api,
+        img: (cfg && cfg.img) || TMDB_IP_SNAPSHOT.img,
+    };
+}
+
+/**
+ * 自定义 DNS lookup：命中 TMDB 域名则返回指定 IPv4（绕过污染），否则走系统 DNS。
+ * TLS 仍用原域名（SNI/证书不受影响）。与 HTTPS_PROXY 互斥（有代理时上层不会调用本函数）。
+ */
+function directLookup(): (hostname: string, opts: any, cb: any) => void {
+    const ip = directIp();
+    const map: Record<string, string> = {};
+    if (ip.api) {
+        map['api.themoviedb.org'] = ip.api;
+        map['www.themoviedb.org'] = ip.api;
+        map['themoviedb.org'] = ip.api;
+        map['auth.themoviedb.org'] = ip.api;
+    }
+    if (ip.img) {
+        map['image.tmdb.org'] = ip.img;
+        map['images.tmdb.org'] = ip.img;
+    }
+    return (hostname: string, opts: any, cb: any) => {
+        // Electron/Node 可能以 2 参 (hostname, callback) 或 3 参 (hostname, options, callback) 调用；
+        // options 可能是对象 / 数字(family) / 省略，统一归一化，避免 cb 落到 undefined 上。
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
+        opts = opts || {};
+        const hit = map[hostname];
+        if (hit) {
+            // 命中：强制返回 IPv4。若上层要求 all（数组形式）则按数组返回，否则单值。
+            // 关键：hit 必为有效 IP 字符串（map 仅在 ip.api/img 真时赋值），绝不传 undefined，
+            // 否则 Node 抛 ERR_INVALID_IP_ADDRESS（Invalid IP address: undefined）。
+            if (opts.all) return cb(null, [{ address: hit, family: 4 }]);
+            return cb(null, hit, 4);
+        }
+        return dns.lookup(hostname, opts, cb);
+    };
+}
+
+/** 从 CheckTMDB 的 hosts 片段文本里抠出指定域名的 IPv4 */
+function pickIpFromHosts(text: string, host: string): string | null {
+    const re = new RegExp('\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\s+' + host.replace(/\./g, '\\.') + '\\b');
+    const m = text.match(re);
+    return m ? m[1] : null;
+}
+
+/**
+ * 从 CheckTMDB 远程拉取最新可用 IP 并写入配置。
+ * force=false（自动每日刷新）：尊重用户手动填过的 IP——手动设过的字段保留，仅补齐未设字段；
+ *                              避免自动刷新把你手动调通的 IP 覆盖成 CheckTMDB 的通用值。
+ * force=true （手动点「更新 IP」按钮）：强制用 CheckTMDB 最新值覆盖全部字段。
+ * 注意：raw.githubusercontent.com 在国内也可能被墙，拉取失败会返回明确错误，由前端提示手动填。
+ */
+async function updateDirectIpFromRemote(force = false): Promise<{ ok: boolean; api?: string; img?: string; error?: string }> {
+    try {
+        const agent = proxyAgent();
+        const client = axios.create({
+            timeout: 20000,
+            ...(agent ? { httpsAgent: agent, proxy: false } : {}),
+        });
+        const resp = await client.get(TMDB_IP_UPDATE_URL);
+        const text = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
+        const remoteApi = pickIpFromHosts(text, 'api.themoviedb.org');
+        const remoteImg = pickIpFromHosts(text, 'image.tmdb.org');
+        if (!remoteApi && !remoteImg) {
+            return { ok: false, error: '未能从 CheckTMDB 解析出 IP（可能返回格式变化）' };
+        }
+        // 非强制时尊重用户手动值：cur.api 存在则保留，否则用远端最新值
+        const cur = fnConfig.getTmdbDirectIp() || {};
+        const nextApi = force ? remoteApi : (cur.api || remoteApi);
+        const nextImg = force ? remoteImg : (cur.img || remoteImg);
+        fnConfig.setTmdbDirectIp({ api: nextApi || undefined, img: nextImg || undefined });
+        return { ok: true, api: nextApi || undefined, img: nextImg || undefined };
+    } catch (e: any) {
+        return {
+            ok: false,
+            error: '拉取 CheckTMDB 失败（raw.githubusercontent.com 在国内可能被墙，请手动填 IP 或先开梯子）：' +
+                String((e && e.message) || e),
+        };
+    }
+}
+
+/**
+ * 自动跟随 CheckTMDB 每日更新：仅在用户开启「免梯子直连」时，后台定时拉取最新 IP。
+ * - 启动后延迟 30s 做一次（不阻塞启动）；之后每 24h 一次。
+ * - 一天内已更新过（手动或上次自动）则跳过，避免无谓请求。
+ * - 拉取失败（如 raw 被墙）静默回退到内置快照 / 上次成功值，不影响使用。
+ */
+function scheduleAutoIpRefresh(): void {
+    const tryRefresh = async (): Promise<void> => {
+        if (!fnConfig.getTmdbDirectConnect()) return;   // 未开启直连则不拉
+        const last = fnConfig.getTmdbDirectIpUpdatedAt();
+        if (Date.now() - last < TMDB_IP_REFRESH_INTERVAL) return;  // 一天内已更新过则跳过
+        try {
+            const r = await updateDirectIpFromRemote(false);
+            if (r.ok) {
+                log.info('TMDB 直连 IP 已自动跟随 CheckTMDB 更新（api=' + (r.api || '-') + ' img=' + (r.img || '-') + '）');
+            } else {
+                log.warn('TMDB 直连 IP 自动更新跳过：' + (r.error || '未知'));
+            }
+        } catch (e: any) {
+            log.warn('TMDB 直连 IP 自动更新失败，继续使用现有 IP：' + String((e && e.message) || e));
+        }
+    };
+    setTimeout(tryRefresh, 30 * 1000);
+    setInterval(tryRefresh, TMDB_IP_REFRESH_INTERVAL);
+}
+
+/**
+ * 图片代理：渲染进程（Chromium）不走主进程 lookup/代理，直接用系统 DNS 会命中污染，
+ * 故海报等图片统一经主进程拉取（复用直连/代理逻辑）后返回 base64 data URL。
+ * 这样「免梯子直连」开启时海报也能正常加载，且与 HTTPS_PROXY 方案互不冲突。
+ */
+async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
+    try {
+        if (!/^https?:\/\//.test(url)) return { ok: false, error: '非法图片地址' };
+        const agent = proxyAgent();
+        const direct = fnConfig.getTmdbDirectConnect() && !agent;
+        const a = agent || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
+        const ip = directIp();
+        const mode = agent ? 'HTTPS_PROXY 代理' : (direct ? ('免梯子直连(img=' + ip.img + ')') : '系统 DNS 直连');
+        log.info('[TMDB诊断] 拉取图片(' + mode + ')：' + url.slice(0, 80));
+        const client = axios.create({
+            timeout: 20000,
+            responseType: 'arraybuffer',
+            ...(a ? { httpsAgent: a, proxy: false } : {}),
+        });
+        const resp = await client.get(url);
+        const ct = (resp.headers && resp.headers['content-type']) || 'image/jpeg';
+        const b64 = Buffer.from(resp.data as Buffer).toString('base64');
+        log.info('[TMDB诊断] 图片拉取成功，' + (resp.data as Buffer).length + ' 字节');
+        return { ok: true, dataUrl: `data:${ct};base64,${b64}` };
+    } catch (e: any) {
+        log.error('[TMDB诊断] 图片拉取失败：' + dumpErr(e));
+        return { ok: false, error: String((e && e.message) || e) };
+    }
+}
+
 function tmdbUA(): string {
     let ver = 'unknown';
     try { ver = app.getVersion(); } catch (e) { /* 测试环境无 app */ }
@@ -38,23 +213,134 @@ function authFor(key: string): { headers: Record<string, string>; queryKey?: str
     return { headers: {}, queryKey: key.trim() };
 }
 
-/** 带鉴权 + 超时 + UA 的 http 客户端 */
+/**
+ * 从环境变量读取代理（HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy）。
+ * Node/Electron 默认不走 Windows 系统代理，所以靠梯子上网的机器必须显式给：
+ *   Clash 默认 http://127.0.0.1:7890；v2rayN 默认 http://127.0.0.1:10809 等。
+ * 仅支持 HTTP/HTTPS 代理；SOCKS 需用梯子的「HTTP 代理端口」。
+ * 返回 axios 可用的 httpsAgent（已禁用 axios 自带代理逻辑），无代理则 undefined。
+ */
+function proxyAgent(): HttpsProxyAgentMod.HttpsProxyAgent | undefined {
+    const raw =
+        process.env.HTTPS_PROXY || process.env.https_proxy ||
+        process.env.HTTP_PROXY || process.env.http_proxy;
+    if (!raw) return undefined;
+    if (/^socks/i.test(raw)) {
+        log.warn('TMDB: 检测到 SOCKS 代理，但当前内置仅支持 HTTP/HTTPS 代理；' +
+            '请在梯子设置里改用「HTTP 代理端口」，或在 CLAUDE/README 中改用支持 SOCKS 的方式。');
+        return undefined;
+    }
+    try {
+        const agent = new HttpsProxyAgentMod.HttpsProxyAgent(raw);
+        log.info('TMDB: 已启用代理 ' + raw.replace(/\/\/[^@]+@/, '//***@'));
+        return agent;
+    } catch (e: any) {
+        log.warn('TMDB: 代理初始化失败：' + String(e && e.message));
+        return undefined;
+    }
+}
+
+/** 带鉴权 + 超时 + UA + 可选代理/直连 的 http 客户端 */
 function http(): AxiosInstance {
     const key = fnConfig.getTmdbApiKey();
     const a = key ? authFor(key) : { headers: {} as Record<string, string> };
+    const proxy = proxyAgent();
+    // 与代理互斥：设了 HTTPS_PROXY 走代理；否则若开启免梯子直连，用自定义 DNS lookup 覆盖解析
+    const direct = fnConfig.getTmdbDirectConnect() && !proxy;
+    const agent = proxy || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
+    const ip = directIp();
+    const proxyRaw = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+    const mode = proxy
+        ? ('HTTPS_PROXY 代理(' + (proxyRaw || '?') + ')')
+        : direct
+            ? ('免梯子直连(强制解析 api=' + ip.api + ' img=' + ip.img + ')')
+            : '系统 DNS 直连(无代理/未开直连)';
+    log.info('[TMDB诊断] 请求模式=' + mode +
+        ' | baseURL=' + TMDB_BASE_URL + (TMDB_BASE_URL !== TMDB_API ? '(环境变量覆盖)' : '') +
+        ' | Key格式=' + (key ? (a.queryKey ? 'v3短Key(api_key)' : 'v4长Token(JWT Bearer)') : '未配置') +
+        ' | 超时=' + TMDB_TIMEOUT + 'ms');
     return axios.create({
-        baseURL: TMDB_API,
-        timeout: 12000,
+        baseURL: TMDB_BASE_URL,
+        timeout: TMDB_TIMEOUT,
         headers: {
             'User-Agent': tmdbUA(),
             'Content-Type': 'application/json',
             ...a.headers,
         },
+        // 有代理/直连时交给自定义 httpsAgent，并关闭 axios 自带代理逻辑（避免与 lookup/隧道冲突）
+        ...(agent ? { httpsAgent: agent, proxy: false } : {}),
     });
 }
 
+/** 是否为可重试的网络类错误（超时 / 抖动 / DNS 暂态） */
+function isRetryableNetworkError(e: any): boolean {
+    const code = e && e.code;
+    const msg = String((e && e.message) || '');
+    return code === 'ETIMEDOUT' || code === 'ECONNABORTED' ||
+        code === 'ENOTFOUND' || code === 'EAI_AGAIN' ||
+        code === 'ECONNRESET' || code === 'EPIPE' ||
+        msg.includes('timeout') || msg.includes('Network Error');
+}
+
+/** 单次 GET，遇网络类错误自动重试（指数退避） */
+async function getWithRetry(client: AxiosInstance, url: string, cfg: any): Promise<any> {
+    let lastErr: any;
+    for (let attempt = 0; attempt <= TMDB_RETRIES; attempt++) {
+        try {
+            return await client.get(url, cfg);
+        } catch (e) {
+            lastErr = e;
+            if (!isRetryableNetworkError(e) || attempt === TMDB_RETRIES) throw e;
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+    }
+    throw lastErr;
+}
+
+/** 把错误转成详细诊断字符串（含 HTTP 状态码 / 响应体片段 / Node 错误码 / DNS 信息） */
+function dumpErr(e: any): string {
+    if (!e) return '未知错误';
+    const parts: string[] = [];
+    parts.push('msg=' + String(e.message || e));
+    if (e.code) parts.push('code=' + e.code);
+    if (e.errno) parts.push('errno=' + e.errno);
+    if (e.syscall) parts.push('syscall=' + e.syscall);
+    if (e.hostname) parts.push('hostname=' + e.hostname);
+    if (e.address) parts.push('address=' + e.address);
+    if (e.port) parts.push('port=' + e.port);
+    const status = e.response && e.response.status;
+    if (status) {
+        parts.push('httpStatus=' + status);
+        const data = e.response.data;
+        let snippet = '';
+        try {
+            snippet = typeof data === 'string' ? data.slice(0, 300) : JSON.stringify(data).slice(0, 300);
+        } catch { snippet = '(响应体不可序列化)'; }
+        if (snippet) parts.push('resp=' + snippet);
+    } else if (e.request) {
+        parts.push('(无 HTTP 响应：疑似网络连接失败 / 代理 / DNS 污染)');
+    }
+    return parts.join(' | ');
+}
+
+/** 把 axios / 网络错误翻译成对用户友好的中文提示（帮助判断是否本机网络问题） */
+function describeTmdbError(e: any): string {
+    const status = e && e.response && e.response.status;
+    const code = e && e.code;
+    const msg = String((e && e.message) || e);
+    if (status === 401) return 'TMDB Key 无效或无访问权限，请检查设置面板填写的 Key。';
+    if (status === 429) return 'TMDB 请求过于频繁（触发限速），请稍后再试。';
+    if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return '无法解析 TMDB 域名（DNS 失败），请检查本机网络连接。';
+    if (code === 'ECONNREFUSED') return 'TMDB 连接被拒绝，请检查本机网络 / 代理设置。';
+    if (code === 'ETIMEDOUT' || code === 'ECONNABORTED' || msg.includes('timeout'))
+        return 'TMDB 请求超时：本机网络无法直连 api.themoviedb.org（DNS 被污染 / 需代理）。' +
+            '可选方案：① 设置 HTTPS_PROXY=http://127.0.0.1:代理端口（Clash 7890 / v2rayN 10809）；' +
+            '② 部署自建反代后设置 TMDB_BASE_URL=https://你的反代域名；③ 直接用「每日放送」的 Bangumi 源（国内直连、免 Key）。';
+    return msg;
+}
+
 function posterUrl(posterPath: any): string {
-    if (typeof posterPath === 'string' && posterPath) return TMDB_IMG + posterPath;
+    if (typeof posterPath === 'string' && posterPath) return TMDB_IMG_BASE_URL + posterPath;
     return '';
 }
 
@@ -85,7 +371,7 @@ function normalize(raw: any, mediaType: 'movie' | 'tv'): any {
  * 拉取 TMDB 热门电影 + 剧集（discover，按 popularity 降序），合并去重。
  * 仅在用户已配置 TMDB Key 时可用。
  */
-async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: string }> {
+async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: string; warning?: string }> {
     const key = fnConfig.getTmdbApiKey();
     if (!key) {
         return { ok: false, error: '未配置 TMDB API Key，请在设置面板填写。' };
@@ -99,12 +385,25 @@ async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: st
             page: 1,
             ...(a.queryKey ? { api_key: a.queryKey } : {}),
         };
-        const [movieRes, tvRes] = await Promise.all([
-            client.get('/discover/movie', { params: baseParams }),
-            client.get('/discover/tv', { params: baseParams }),
+        // 两个源分别请求、分别容错：一个超时 / 失败不影响另一个
+        const [movieR, tvR] = await Promise.allSettled([
+            getWithRetry(client, '/discover/movie', { params: baseParams }),
+            getWithRetry(client, '/discover/tv', { params: baseParams }),
         ]);
-        const movies: any[] = (movieRes.data && movieRes.data.results) || [];
-        const tvs: any[] = (tvRes.data && tvRes.data.results) || [];
+        if (movieR.status === 'fulfilled') {
+            const n = movieR.value?.data?.results?.length || 0;
+            log.info('[TMDB诊断] discover/movie 成功，返回 ' + n + ' 条');
+        } else {
+            log.error('[TMDB诊断] discover/movie 失败：' + dumpErr(movieR.reason));
+        }
+        if (tvR.status === 'fulfilled') {
+            const n = tvR.value?.data?.results?.length || 0;
+            log.info('[TMDB诊断] discover/tv 成功，返回 ' + n + ' 条');
+        } else {
+            log.error('[TMDB诊断] discover/tv 失败：' + dumpErr(tvR.reason));
+        }
+        const movies: any[] = movieR.status === 'fulfilled' && movieR.value?.data?.results ? movieR.value.data.results : [];
+        const tvs: any[] = tvR.status === 'fulfilled' && tvR.value?.data?.results ? tvR.value.data.results : [];
         const seen = new Set<number>();
         const items: any[] = [];
         for (const m of movies) {
@@ -117,22 +416,52 @@ async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: st
             seen.add(t.id);
             items.push(normalize(t, 'tv'));
         }
-        // 混合列表按热度降序（前端再按「热门/高分/最新」二次排序）
+        // 两个源都失败 → 返回细化错误（直接提示网络 / DNS / 代理问题）
+        if (!items.length) {
+            const reasons = [movieR, tvR]
+                .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+                .map((r) => describeTmdbError(r.reason));
+            return { ok: false, error: reasons[0] || 'TMDB 数据获取失败。' };
+        }
+        // 部分成功 → 仍返回数据，并附带提示
+        let warning: string | undefined;
+        if (movieR.status === 'rejected' || tvR.status === 'rejected') {
+            warning = '部分数据源（电影 / 剧集）获取失败，已显示可用部分。';
+        }
+        // 混合列表按热度降序（前端再按「最新 / 剧集 / 电影」二次排序）
         items.sort((x, y) => (y.popularity || 0) - (x.popularity || 0));
-        return { ok: true, items };
+        log.info('[TMDB诊断] 拉取完成，共合并 ' + items.length + ' 条（电影 ' + movies.length + ' + 剧集 ' + tvs.length + '）' + (warning ? '；' + warning : ''));
+        return { ok: true, items, warning };
     } catch (e: any) {
-        const status = e && e.response && e.response.status;
-        let msg = String((e && e.message) || e);
-        if (status === 401) msg = 'TMDB Key 无效或无访问权限，请检查设置。';
-        else if (status === 429) msg = 'TMDB 请求过于频繁（限速），请稍后再试。';
-        return { ok: false, error: msg };
+        return { ok: false, error: describeTmdbError(e) };
     }
 }
 
 function init(): void {
-    registerHandler('tmdb:discover', async () => {
-        return fetchDiscover();
+    registerHandler('tmdb:discover', async (_e: any, force?: boolean) => {
+        try {
+            // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 TMDB 限流/封禁
+            // force=true（浮窗「↻ 刷新」按钮）时忽略缓存、强制重新抓取并覆写磁盘缓存
+            const r = await getDailyCached('tmdb_hot', async () => {
+                const res = await fetchDiscover();
+                if (!res.ok) throw new Error(res.error || 'tmdb fetch failed');
+                return res;
+            }, DEFAULT_TTL_MS, !!force);
+            log.info('[TMDB诊断] 数据' + (r.fromCache ? '来自本地缓存（未发网络请求）' : '已从线上刷新')
+                + '，更新于 ' + new Date(r.fetchedAt).toLocaleString('zh-CN'));
+            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache };
+        } catch (e: any) {
+            return { ok: false, error: (e && e.message) || 'TMDB 数据获取失败' };
+        }
     }, { useHandle: true });
+    registerHandler('tmdb:update-ip', async () => {
+        return updateDirectIpFromRemote(true);   // 手动点按钮：强制用 CheckTMDB 最新值覆盖
+    }, { useHandle: true });
+    registerHandler('tmdb:image', async (_e: any, url: string) => {
+        return fetchImageAsDataUrl(url);
+    }, { useHandle: true });
+    // 启动自动跟随 CheckTMDB 每日刷新直连 IP（用户开启免梯子直连时生效）
+    scheduleAutoIpRefresh();
     log.info('TMDB 数据源插件已加载');
 }
 

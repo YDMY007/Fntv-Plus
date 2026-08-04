@@ -87,6 +87,14 @@ export interface Config {
     bangumiToken?: string;
     // TMDB API Key / Read Access Token（明文存于本地 config.json；用于「热门剧更新」TMDB 数据源；默认空，由用户各自填写）
     tmdbApiKey?: string;
+    // TMDB 免梯子直连开关（实验）：开启后用固定 IP 覆盖 DNS 解析，绕过污染直连 TMDB，无需梯子
+    tmdbDirectConnect?: boolean;
+    // TMDB 免梯子直连自定义 IP（可选覆盖内置快照）：api=api.themoviedb.org，img=image.tmdb.org
+    tmdbDirectIp?: { api?: string; img?: string };
+    // TMDB 免梯子直连 IP 上次更新时间戳（ms，自动/手动更新都会写入）：用于每日自动跟随 CheckTMDB 刷新判断
+    tmdbDirectIpUpdatedAt?: number;
+    // 「热门剧更新」数据源：'tmdb'（需 Key，海外站）/ 'douban'（免 Key，国内直连）。默认 'douban'
+    hotSource?: 'tmdb' | 'douban';
     // Bangumi 集数级同步开关（观看进度达阈值时把该集标为 Bangumi「看过」）
     bangumiSyncEnabled?: boolean;
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
@@ -632,6 +640,61 @@ export function setTmdbApiKey(key: string | null): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取 TMDB 免梯子直连开关（默认 false）
+export function getTmdbDirectConnect(): boolean {
+    const config: Config = readConfig() || {};
+    return !!config.tmdbDirectConnect;
+}
+
+// 设置 TMDB 免梯子直连开关
+export function setTmdbDirectConnect(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.tmdbDirectConnect = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 TMDB 免梯子直连自定义 IP（未设置返回 null，回退内置快照）
+export function getTmdbDirectIp(): { api?: string; img?: string } | null {
+    const config: Config = readConfig() || {};
+    return config.tmdbDirectIp ? config.tmdbDirectIp : null;
+}
+
+// 设置/清除 TMDB 免梯子直连自定义 IP（传 null 或空即清除，回退内置快照）
+export function setTmdbDirectIp(ip: { api?: string; img?: string } | null): void {
+    const config: Config = readConfig() || {};
+    if (!ip || (!ip.api && !ip.img)) {
+        delete config.tmdbDirectIp;
+    } else {
+        config.tmdbDirectIp = { api: ip.api ? ip.api.trim() : undefined, img: ip.img ? ip.img.trim() : undefined };
+    }
+    // 无论手动还是自动更新 IP，都记录时间戳（用于每日自动刷新判断 / 避免重复覆盖手动值）
+    if (config.tmdbDirectIp) {
+        config.tmdbDirectIpUpdatedAt = Date.now();
+    } else {
+        delete config.tmdbDirectIpUpdatedAt;
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取 TMDB 直连 IP 上次更新时间戳（ms）；从未更新过返回 0
+export function getTmdbDirectIpUpdatedAt(): number {
+    const config: Config = readConfig() || {};
+    return typeof config.tmdbDirectIpUpdatedAt === 'number' ? config.tmdbDirectIpUpdatedAt : 0;
+}
+
+// 获取「热门剧更新」数据源（默认 'douban'：国内直连、免 Key、零配置）
+export function getHotSource(): 'tmdb' | 'douban' {
+    const config: Config = readConfig() || {};
+    return config.hotSource === 'tmdb' ? 'tmdb' : 'douban';
+}
+
+// 设置「热门剧更新」数据源（'tmdb' / 'douban'）
+export function setHotSource(s: 'tmdb' | 'douban'): void {
+    const config: Config = readConfig() || {};
+    config.hotSource = s === 'tmdb' ? 'tmdb' : 'douban';
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取 Bangumi 同步开关
 export function getBangumiSyncEnabled(): boolean {
     const config: Config = readConfig() || {};
@@ -786,6 +849,11 @@ module.exports = {
     setBangumiToken,
     getTmdbApiKey,
     setTmdbApiKey,
+    getTmdbDirectConnect,
+    setTmdbDirectConnect,
+    getTmdbDirectIp,
+    setTmdbDirectIp,
+    getTmdbDirectIpUpdatedAt,
     getBangumiSyncEnabled,
     setBangumiSyncEnabled,
     getBangumiSyncThreshold,
@@ -813,6 +881,8 @@ module.exports = {
     getBiliDanmakuBlockTypes, setBiliDanmakuBlockTypes,
     // 更新打烊时间戳
     getUpdateDismissedAt, setUpdateDismissedAt,
+    // 热门剧更新数据源（TMDB / 豆瓣）
+    getHotSource, setHotSource,
     // 登录背景图路径
     getLoginBgPath, setLoginBgPath
 };

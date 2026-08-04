@@ -70,3 +70,8 @@ CHANGELOG*.md
 build-gui.js
 构建.cmd
 打包.cmd
+
+# resource 软件资源目录：用户要求纳入 GitHub（放行 resource/docs 下图片/资源）
+# 注意：resource/wiki 下 CHANGELOG_vX.Y.Z.md 仍按上方 CHANGELOG*.md 约定不入库（发 Release 用）
+!resource/docs/
+!resource/docs/**

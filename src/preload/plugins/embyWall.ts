@@ -13,6 +13,8 @@ let _embyWallLogEnabled = false;
 let _detailBoxless = false;
 // 鼠标滚轮横向滚动开关的运行时缓存：true=开启(默认，竖向滚轮转横向滑动)；false=关闭(恢复飞牛原生上下滚)
 let _wheelHScrollEnabled = false;
+// 「热门剧更新」数据源运行时缓存（'tmdb' / 'douban'），默认豆瓣；由启动时 settings:get 回填
+let _hotSource: 'tmdb' | 'douban' = 'douban';
 
 function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
   const enabled = !!payload?.enabled;
@@ -38,6 +40,8 @@ try {
     }
     // 立即按开关状态应用/清除横向滚动劫持（偏好可能与默认值不同）
     wheelToScroll();
+    // 回填「热门剧更新」数据源（供设置面板 TMDB 区块初始显隐 TMDB 设置）
+    if (s && (s.hotSource === 'tmdb' || s.hotSource === 'douban')) _hotSource = s.hotSource;
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) applyLoginBgVar(s.loginBg);
   });
@@ -3131,6 +3135,151 @@ function handle(): void {
       }
     });
 
+    // ===== TMDB 免梯子直连（实验）：用固定 IP 覆盖 DNS 解析，绕过污染直连，无需梯子 =====
+    const dcWrap = document.createElement('div');
+    dcWrap.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--fnos-ui-line);';
+    secBodyTmdb.appendChild(dcWrap);
+
+    const dcTitle = document.createElement('div');
+    dcTitle.style.cssText = 'font-size:12px;color:var(--fnos-ui-text);font-weight:600;margin-bottom:6px;';
+    dcTitle.textContent = '免梯子直连（实验）';
+    dcWrap.appendChild(dcTitle);
+
+    const dcDesc = document.createElement('div');
+    dcDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    dcDesc.textContent = '开启后用固定 IP 覆盖 DNS 解析，绕过污染直连 TMDB（无需梯子）。IP 来自 CheckTMDB 项目，CDN 边缘节点可能变动，可点「更新 IP」拉取最新，或手动填写。';
+    dcWrap.appendChild(dcDesc);
+
+    const dcRow = document.createElement('label');
+    dcRow.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fnos-ui-text);cursor:pointer;margin-bottom:8px;';
+    const dcToggle = document.createElement('input');
+    dcToggle.type = 'checkbox';
+    dcToggle.style.cssText = 'width:16px;height:16px;cursor:pointer;';
+    const dcToggleLabel = document.createElement('span');
+    dcToggleLabel.textContent = '启用免梯子直连';
+    dcRow.appendChild(dcToggle);
+    dcRow.appendChild(dcToggleLabel);
+    dcWrap.appendChild(dcRow);
+
+    const dcIpGrid = document.createElement('div');
+    dcIpGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;';
+    const dcApiInput = document.createElement('input');
+    dcApiInput.type = 'text';
+    dcApiInput.placeholder = 'api IP（如 65.8.20.79）';
+    dcApiInput.style.cssText = 'width:100%;height:30px;font-size:11px;color:var(--fnos-ui-text);';
+    const dcImgInput = document.createElement('input');
+    dcImgInput.type = 'text';
+    dcImgInput.placeholder = 'img IP（如 65.8.20.8）';
+    dcImgInput.style.cssText = 'width:100%;height:30px;font-size:11px;color:var(--fnos-ui-text);';
+    dcIpGrid.appendChild(dcApiInput);
+    dcIpGrid.appendChild(dcImgInput);
+    dcWrap.appendChild(dcIpGrid);
+
+    const dcBtns = document.createElement('div');
+    dcBtns.style.cssText = 'display:flex;gap:6px;';
+    const dcSaveBtn = mkBtn('保存', true);
+    const dcUpdateBtn = mkBtn('从 CheckTMDB 更新 IP', true);
+    dcBtns.appendChild(dcSaveBtn);
+    dcBtns.appendChild(dcUpdateBtn);
+    dcWrap.appendChild(dcBtns);
+
+    const dcStatus = document.createElement('div');
+    dcStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    dcWrap.appendChild(dcStatus);
+
+    dcSaveBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      try {
+        const api = dcApiInput.value.trim();
+        const img = dcImgInput.value.trim();
+        const r: any = await ipcRenderer.invoke('settings:set-tmdb-direct', {
+          enabled: dcToggle.checked,
+          ip: { api: api || undefined, img: img || undefined },
+        });
+        if (!r || r.ok !== false) {
+          dcStatus.textContent = dcToggle.checked ? '已启用免梯子直连' : '已关闭免梯子直连';
+          dcStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          dcStatus.textContent = '保存失败';
+          dcStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        dcStatus.textContent = '保存失败';
+        dcStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    dcUpdateBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      dcStatus.textContent = '正在从 CheckTMDB 拉取最新 IP…';
+      dcStatus.style.color = 'var(--fnos-ui-sub)';
+      try {
+        const r: any = await ipcRenderer.invoke('tmdb:update-ip');
+        if (r && r.ok) {
+          if (r.api) dcApiInput.value = r.api;
+          if (r.img) dcImgInput.value = r.img;
+          dcStatus.textContent = '已更新为最新 IP' + (r.api ? `（api ${r.api}）` : '');
+          dcStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          dcStatus.textContent = (r && r.error) || '更新失败';
+          dcStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        dcStatus.textContent = '更新失败';
+        dcStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+
+    // ===== 数据源切换：TMDB / 豆瓣（默认豆瓣，国内直连免 Key）=====
+    const tmdbSettingsWrap = document.createElement('div');
+    tmdbSettingsWrap.appendChild(tmdbHintTop);
+    tmdbSettingsWrap.appendChild(tmdbInput);
+    tmdbSettingsWrap.appendChild(tmdbBtns);
+    tmdbSettingsWrap.appendChild(tmdbStatus);
+    tmdbSettingsWrap.appendChild(tmdbHintBottom);
+    tmdbSettingsWrap.appendChild(dcWrap);
+
+    const dsHint = document.createElement('div');
+    dsHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    dsHint.textContent = '选择「热门剧更新」浮层的数据源。豆瓣国内直连、免 Key、零配置；TMDB 数据更全但需 Key 且可能被墙（需免梯子直连/代理）。';
+
+    const dsSeg = document.createElement('div');
+    dsSeg.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+    const mkDsBtn = (label: string, val: 'tmdb' | 'douban'): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.style.cssText = 'flex:1;height:30px;font-size:12px;border-radius:7px;cursor:pointer;border:1px solid var(--fnos-ui-border);background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);';
+      b.addEventListener('click', (e: Event) => { e.stopPropagation(); setDs(val); });
+      return b;
+    };
+    const dsTmdbBtn = mkDsBtn('TMDB', 'tmdb');
+    const dsDoubanBtn = mkDsBtn('豆瓣', 'douban');
+    dsSeg.appendChild(dsTmdbBtn);
+    dsSeg.appendChild(dsDoubanBtn);
+
+    const doubanHint = document.createElement('div');
+    doubanHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-ok);line-height:1.5;margin-bottom:8px;';
+    doubanHint.textContent = '✓ 已选豆瓣：国内直连、免 Key、零配置，无需任何额外设置。「热门剧更新」浮层将展示豆瓣热门影视。';
+
+    const setDs = (val: 'tmdb' | 'douban'): void => {
+      try { ipcRenderer.invoke('settings:set-hot-source', val).catch(() => {}); } catch { /* ignore */ }
+      const isDouban = val === 'douban';
+      dsDoubanBtn.style.background = isDouban ? 'var(--fnos-ui-sec)' : 'var(--fnos-ui-input-bg)';
+      dsDoubanBtn.style.color = isDouban ? '#fff' : 'var(--fnos-ui-text)';
+      dsTmdbBtn.style.background = isDouban ? 'var(--fnos-ui-input-bg)' : 'var(--fnos-ui-sec)';
+      dsTmdbBtn.style.color = isDouban ? 'var(--fnos-ui-text)' : '#fff';
+      tmdbSettingsWrap.style.display = isDouban ? 'none' : '';
+      doubanHint.style.display = isDouban ? '' : 'none';
+    };
+
+    secBodyTmdb.insertBefore(dsHint, secBodyTmdb.firstChild);
+    secBodyTmdb.appendChild(dsSeg);
+    secBodyTmdb.appendChild(tmdbSettingsWrap);
+    secBodyTmdb.appendChild(doubanHint);
+
+    // 初始状态（_hotSource 由启动时 settings:get 回填，缺省默认豆瓣）
+    setDs(_hotSource);
+
     // ===== 分组: 豆瓣同步 =====
     const secDouban = section('豆瓣同步');
     secDouban.el.style.gridColumn = '1 / -1'; // 豆瓣同步内容多，占满整行
@@ -3943,6 +4092,11 @@ function handle(): void {
           tmdbInput.readOnly = false;
           tmdbStatus.textContent = '';
         }
+        // TMDB 免梯子直连回填
+        dcToggle.checked = !!s.tmdbDirectConnect;
+        const dip: any = s.tmdbDirectIp || null;
+        dcApiInput.value = (dip && dip.api) || '';
+        dcImgInput.value = (dip && dip.img) || '';
       });
       seg('bili-search', () => {
         // MPV B站弹幕搜索开关回填（默认开启）

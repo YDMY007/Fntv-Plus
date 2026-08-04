@@ -6,6 +6,7 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
 import { registerHandler } from '../core/ipcHandler';
+import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
 
 const log = logger.component('bangumi');
 
@@ -409,8 +410,22 @@ export function init(): void {
         return fetchEpisodeDescs(tvTitle, totalEps);
     }, { useHandle: true });
     // 注册 IPC：供「热门剧更新」浮层拉取 Bangumi 每日放送
-    registerHandler('bangumi:calendar', async () => {
-        return fetchCalendar();
+    // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 Bangumi 限流/封禁
+    registerHandler('bangumi:calendar', async (_e: any, force?: boolean) => {
+        try {
+            // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 Bangumi 限流/封禁
+            // force=true（浮窗「↻ 刷新」按钮）时忽略缓存、强制重新抓取并覆写磁盘缓存
+            const r = await getDailyCached('bangumi_calendar', async () => {
+                const res = await fetchCalendar();
+                if (!res.ok) throw new Error(res.error || 'bangumi fetch failed');
+                return res;
+            }, DEFAULT_TTL_MS, !!force);
+            log.info('[Bangumi] 每日放送数据' + (r.fromCache ? '来自本地缓存（未发网络请求）' : '已从线上刷新')
+                + '，更新于 ' + new Date(r.fetchedAt).toLocaleString('zh-CN'));
+            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache };
+        } catch (e: any) {
+            return { ok: false, error: (e && e.message) || 'Bangumi 数据获取失败' };
+        }
     }, { useHandle: true });
     log.info('Bangumi 集数级同步插件已加载');
 }

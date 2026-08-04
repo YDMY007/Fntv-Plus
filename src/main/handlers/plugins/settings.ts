@@ -34,6 +34,10 @@ async function handleGetSettings(): Promise<any> {
         debugComponents: fnConfig.getDebugComponents(),
         bangumiToken: fnConfig.getBangumiToken(),
         tmdbApiKey: fnConfig.getTmdbApiKey(),
+        tmdbDirectConnect: fnConfig.getTmdbDirectConnect(),
+        tmdbDirectIp: fnConfig.getTmdbDirectIp(),
+        // 热门剧更新数据源（默认 'douban'：国内直连、免 Key、零配置）
+        hotSource: fnConfig.getHotSource(),
         bangumiSyncEnabled: fnConfig.getBangumiSyncEnabled(),
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
@@ -237,6 +241,24 @@ async function handleSetBangumiToken(_event: any, token: string): Promise<{ ok: 
 async function handleSetTmdbApiKey(_event: any, key: string): Promise<{ ok: boolean }> {
     fnConfig.setTmdbApiKey(key ? String(key) : null);
     log.info('TMDB API Key 已更新');
+    return { ok: true };
+}
+
+// 设置 TMDB 免梯子直连开关 + 自定义 IP（与 HTTPS_PROXY 互斥，开启后用 IP 覆盖 DNS 解析）
+async function handleSetTmdbDirect(_event: any, payload: { enabled?: boolean; ip?: { api?: string; img?: string } }): Promise<{ ok: boolean }> {
+    if (payload && typeof payload.enabled === 'boolean') fnConfig.setTmdbDirectConnect(payload.enabled);
+    if (payload && payload.ip) fnConfig.setTmdbDirectIp(payload.ip);
+    log.info('TMDB 免梯子直连已更新', JSON.stringify(payload));
+    return { ok: true };
+}
+
+// 「热门剧更新」数据源读写（'tmdb' / 'douban'）
+async function handleGetHotSource(): Promise<'tmdb' | 'douban'> {
+    return fnConfig.getHotSource();
+}
+async function handleSetHotSource(_event: any, source: 'tmdb' | 'douban'): Promise<{ ok: boolean }> {
+    fnConfig.setHotSource(source === 'tmdb' ? 'tmdb' : 'douban');
+    log.info('热门剧更新数据源 →', source);
     return { ok: true };
 }
 
@@ -620,6 +642,9 @@ function init(): void {
     registerHandler('settings:set-debug-components', handleSetDebugComponents, { useHandle: true });
     registerHandler('settings:set-bangumi-token', handleSetBangumiToken, { useHandle: true });
     registerHandler('settings:set-tmdb-key', handleSetTmdbApiKey, { useHandle: true });
+    registerHandler('settings:set-tmdb-direct', handleSetTmdbDirect, { useHandle: true });
+    registerHandler('settings:set-hot-source', handleSetHotSource, { useHandle: true });
+    registerHandler('settings:get-hot-source', handleGetHotSource, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
