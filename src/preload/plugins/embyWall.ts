@@ -1192,21 +1192,45 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
     }, { once: false });
   }
 
-  // ⑥ 补齐缺失的集简介：fnOS 的 /episode/list 仅第1集返回 overview（父级简介），
-  //     第2集起 overview 为空 → 选集卡片只有时长没有简介文字。
-  //     本步骤从第1集（或页面头部父级简介区）提取简介，填充到其余无简介的卡片。
-  fillMissingEpisodeDescs();
+  // ⑥ 补齐缺失的集简介（真实数据来源：飞牛单集详情接口 item/{guid}）
+  //    飞牛 /episode/list 仅第1集返回 overview（复制自父级简介），第2集起 overview 为空 → 卡片只剩时长。
+  //    但点进单集详情页时 item/{guid} 其实存了每集真实简介（列表没带出来）。这里按集捞回来回填。
+  fillEpisodeDescsFromFnOS();
 }
 
-/** 为 Season 详情页选集中缺失简介的卡片补齐描述文字 */
-function fillMissingEpisodeDescs(): void {
-  const cards = document.querySelectorAll('[data-id="details"]');
-  if (cards.length <= 1) return; // 单集无需补齐
+/** 同 season 只触发一次取数，避免重复网络请求 */
+const _epDescDone = new Set<string>();
 
-  // 从第1集卡片提取简介文字（fnOS 已填充父级 overview）
-  const firstCard = cards[0] as HTMLElement;
-  let sourceDesc = '';
-  // 策略：找卡片内最长的文本节点（排除标题"第N集"和时长"XX分钟XX秒"）
+/**
+ * ⑥ 选集卡片缺失简介补齐（真实数据，不伪造）。
+ * 飞牛 /episode/list 仅第1集返回 overview（复制自父级简介），第2集起 overview 为空 → 卡片只剩时长无简介。
+ * 飞牛的单集详情接口 item/{guid} 存了每集真实简介（点进单集详情页能看到），本函数按集去取并回填到对应卡片。
+ */
+function fillEpisodeDescsFromFnOS(): void {
+  const m = location.href.match(/\/season\/([a-f0-9]{32})/) || location.href.match(/\/tv\/([a-f0-9]{32})/);
+  const parentGuid = m && m[1];
+  if (!parentGuid) return;
+  if (_epDescDone.has(parentGuid)) return;
+
+  const cards = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
+  if (cards.length <= 1) return; // 单集/骨架态无需补齐
+  _epDescDone.add(parentGuid);
+
+  // 解析卡片标题里的集数（第N集 / ENN / SxxENN / 第N话 / EP.N）
+  const parseEp = (text: string): number | null => {
+    if (!text) return null;
+    let mm = text.match(/第\s*(\d+)\s*[集话話]/);
+    if (mm) return parseInt(mm[1], 10);
+    mm = text.match(/S\d+E(\d+)/i);
+    if (mm) return parseInt(mm[1], 10);
+    mm = text.match(/\bE(\d{1,3})\b/i);
+    if (mm) return parseInt(mm[1], 10);
+    mm = text.match(/EP?\.?\s*(\d{1,3})/i);
+    if (mm) return parseInt(mm[1], 10);
+    return null;
+  };
+
+  // 取卡片内最长的简介文本（排除"第N集"标题与"XX分钟XX秒"时长）
   const walkText = (el: HTMLElement): string => {
     let longest = '';
     for (const child of Array.from(el.childNodes)) {
@@ -1222,40 +1246,66 @@ function fillMissingEpisodeDescs(): void {
     }
     return longest;
   };
-  sourceDesc = walkText(firstCard);
 
-  // fallback: 第1集也没简介时，从页面头部的父级简介区提取
-  if (!sourceDesc) {
-    const headerDesc = document.querySelector('.trim-mc__details--key-version');
-    if (headerDesc) {
-      const headerText = walkText(headerDesc as HTMLElement);
-      if (headerText.length > 30) sourceDesc = headerText;
+  (async () => {
+    try {
+      const { ipcRenderer } = require('electron');
+      const base = location.origin;
+      // 1) 拿该季所有集（含每集自己的 guid / episode_number / overview）
+      const listPath = `/v/api/v1/episode/list/${parentGuid}`;
+      const listAx = await ipcRenderer.invoke('fnos-gen-authx', listPath);
+      const listResp = await fetch(`${base}${listPath}`, { credentials: 'include', headers: { 'Authx': listAx } });
+      if (!listResp.ok) return;
+      const listJson = await listResp.json();
+      const items: any[] = Array.isArray(listJson?.data) ? listJson.data : [];
+      if (!items.length) return;
+
+      // 2) 对 overview 为空的集，去 item/{guid} 取真实单集简介
+      const overviewByEp = new Map<number, string>();
+      const fetches: Promise<void>[] = [];
+      for (const it of items) {
+        const ep = Number(it.episode_number);
+        const ov = (it.overview || '').trim();
+        if (ov) { overviewByEp.set(ep, ov); continue; }
+        if (!it.guid) continue;
+        fetches.push((async () => {
+          try {
+            const p = `/v/api/v1/item/${it.guid}`;
+            const ax = await ipcRenderer.invoke('fnos-gen-authx', p);
+            const r = await fetch(`${base}${p}`, { credentials: 'include', headers: { 'Authx': ax } });
+            if (!r.ok) return;
+            const j = await r.json();
+            const o = (j?.data?.overview || j?.data?.item?.overview || '').trim();
+            if (o) overviewByEp.set(ep, o);
+          } catch (e) { /* ignore */ }
+        })());
+        if (fetches.length >= 40) break; // 安全上限，避免长剧集风暴
+      }
+      if (fetches.length) await Promise.all(fetches);
+      if (overviewByEp.size === 0) return; // 飞牛确实没有单集简介 → 不伪造
+
+      // 3) 按集数把真实简介回填到对应卡片（仅当卡片本身缺简介时）
+      const descStyle = 'font-size:13px;line-height:1.7;color:var(--fnos-text-secondary,#9aa0a6);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:4px;letter-spacing:.25px';
+      let filled = 0;
+      for (const card of cards) {
+        const ep = parseEp(card.textContent || '');
+        if (ep == null) continue;
+        const ov = overviewByEp.get(ep);
+        if (!ov) continue;
+        if (walkText(card).length > 20) continue; // 已有简介
+        if (card.querySelector('.fnos-ep-desc-filled')) continue; // 已填过
+        const descEl = document.createElement('div');
+        descEl.className = 'fnos-ep-desc-filled';
+        descEl.style.cssText = descStyle;
+        descEl.textContent = ov;
+        card.appendChild(descEl);
+        filled++;
+      }
+      if (filled) log('fillEpisodeDescsFromFnOS: 回填真实简介', filled, '张卡片 (来源 item/{guid})');
+    } catch (e) {
+      log('fillEpisodeDescsFromFnOS error', e);
     }
-  }
-  if (!sourceDesc) return; // 无源简介可复制
-
-  log('fillMissingEpisodeDescs: source desc length=', sourceDesc.length, ', cards=', cards.length);
-
-  // 为第2集起无简介的卡片注入相同简介
-  const descStyle = 'font-size:13px;line-height:1.7;color:var(--fnos-text-secondary,#9aa0a6);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:4px;letter-spacing:.25px';
-  for (let i = 1; i < cards.length; i++) {
-    const card = cards[i] as HTMLElement;
-    // 检查该卡片是否已有足够长的简介文字（>20字符即认为有）
-    const existingText = walkText(card);
-    if (existingText.length > 20) continue; // 已有简介，跳过
-
-    const descEl = document.createElement('div');
-    descEl.className = 'fnos-ep-desc-filled';
-    descEl.style.cssText = descStyle;
-    descEl.textContent = sourceDesc;
-    card.appendChild(descEl);
-  }
-  if (cards.length > 1) {
-    const filled = Array.from(cards).slice(1).filter(c => !(c as HTMLElement).querySelector('.fnos-ep-desc-filled') === false).length;
-    // 实际统计：数一下被填充的（有 .fnos-ep-desc-filled 的）
-    const filledCount = document.querySelectorAll('.fnos-ep-desc-filled').length;
-    log('fillMissingEpisodeDescs: filled', filledCount, '/', cards.length - 1, 'episode cards');
-  }
+  })();
 }
 
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
