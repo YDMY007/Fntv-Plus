@@ -1192,21 +1192,23 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
     }, { once: false });
   }
 
-  // ⑥ 补齐缺失的集简介（真实数据来源：飞牛单集详情接口 item/{guid}）
+  // ⑥ 补齐缺失的集简介（真实数据来源：Bangumi 每集 desc）
   //    飞牛 /episode/list 仅第1集返回 overview（复制自父级简介），第2集起 overview 为空 → 卡片只剩时长。
-  //    但点进单集详情页时 item/{guid} 其实存了每集真实简介（列表没带出来）。这里按集捞回来回填。
-  fillEpisodeDescsFromFnOS();
+  //    飞牛单集详情接口 item/{guid} 也无简介数据（已验证）。
+  //    改用 Bangumi /v0/episodes 的 desc 字段（每集剧情简介，日文原文，丰富且准确），
+  //    通过主进程 bangumiSync.fetchEpisodeDescs 获取，本地 JSON 缓存持久化（重启不丢、不重复请求）。
+  fillEpisodeDescsFromBangumi();
 }
 
 /** 同 season 只触发一次取数，避免重复网络请求 */
 const _epDescDone = new Set<string>();
 
 /**
- * ⑥ 选集卡片缺失简介补齐（真实数据，不伪造）。
- * 飞牛 /episode/list 仅第1集返回 overview（复制自父级简介），第2集起 overview 为空 → 卡片只剩时长无简介。
- * 飞牛的单集详情接口 item/{guid} 存了每集真实简介（点进单集详情页能看到），本函数按集去取并回填到对应卡片。
+ * ⑥ 选集卡片缺失简介补齐（Bangumi 真实每集 desc，不伪造）。
+ * 数据流：页面番名 → IPC 'bangumi:episode-descs' → 主进程搜 Bangumi subject → 取 episodes desc → 本地缓存 → 回填卡片。
+ * 首次网络取后缓存到 userData/bangumi_ep_descs.json（持久化），后续同番直接读缓存。
  */
-function fillEpisodeDescsFromFnOS(): void {
+function fillEpisodeDescsFromBangumi(): void {
   const m = location.href.match(/\/season\/([a-f0-9]{32})/) || location.href.match(/\/tv\/([a-f0-9]{32})/);
   const parentGuid = m && m[1];
   if (!parentGuid) return;
@@ -1215,6 +1217,21 @@ function fillEpisodeDescsFromFnOS(): void {
   const cards = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
   if (cards.length <= 1) return; // 单集/骨架态无需补齐
   _epDescDone.add(parentGuid);
+
+  // 从页面头部提取番剧标题（用于 Bangumi 搜索匹配）
+  const pageTitle = (() => {
+    // 尝试从 h1 / 标题区提取
+    const h1 = document.querySelector('h1, [class*="title"], [class*="header"]');
+    if (h1) {
+      const t = h1.textContent?.trim() || '';
+      // 去掉可能的季数后缀用于搜索（如 "第三季" → 更好匹配 Bangumi 条目）
+      return t.replace(/\s*(第?[一二三四五六七八九十\d]+季|Season\s*\d+|S\d+)\s*$/i, '').trim();
+    }
+    // fallback: 从 <title> 提取
+    return (document.title || '').split('-')[0]?.trim() || '';
+  })();
+
+  if (!pageTitle) return;
 
   // 解析卡片标题里的集数（第N集 / ENN / SxxENN / 第N话 / EP.N）
   const parseEp = (text: string): number | null => {
@@ -1250,60 +1267,36 @@ function fillEpisodeDescsFromFnOS(): void {
   (async () => {
     try {
       const { ipcRenderer } = require('electron');
-      const base = location.origin;
-      // 1) 拿该季所有集（含每集自己的 guid / episode_number / overview）
-      const listPath = `/v/api/v1/episode/list/${parentGuid}`;
-      const listAx = await ipcRenderer.invoke('fnos-gen-authx', listPath);
-      const listResp = await fetch(`${base}${listPath}`, { credentials: 'include', headers: { 'Authx': listAx } });
-      if (!listResp.ok) return;
-      const listJson = await listResp.json();
-      const items: any[] = Array.isArray(listJson?.data) ? listJson.data : [];
-      if (!items.length) return;
+      // 调主进程 Bangumi 每集简介接口（带缓存，首次网络取后持久化）
+      const result: any = await ipcRenderer.invoke('bangumi:episode-descs', pageTitle, cards.length);
+      if (!result || !result.eps || result.eps.length === 0) return;
 
-      // 2) 对 overview 为空的集，去 item/{guid} 取真实单集简介
-      const overviewByEp = new Map<number, string>();
-      const fetches: Promise<void>[] = [];
-      for (const it of items) {
-        const ep = Number(it.episode_number);
-        const ov = (it.overview || '').trim();
-        if (ov) { overviewByEp.set(ep, ov); continue; }
-        if (!it.guid) continue;
-        fetches.push((async () => {
-          try {
-            const p = `/v/api/v1/item/${it.guid}`;
-            const ax = await ipcRenderer.invoke('fnos-gen-authx', p);
-            const r = await fetch(`${base}${p}`, { credentials: 'include', headers: { 'Authx': ax } });
-            if (!r.ok) return;
-            const j = await r.json();
-            const o = (j?.data?.overview || j?.data?.item?.overview || '').trim();
-            if (o) overviewByEp.set(ep, o);
-          } catch (e) { /* ignore */ }
-        })());
-        if (fetches.length >= 40) break; // 安全上限，避免长剧集风暴
+      const descByEp = new Map<number, string>();
+      for (const e of result.eps) {
+        if (e.desc) descByEp.set(e.ep, e.desc);
       }
-      if (fetches.length) await Promise.all(fetches);
-      if (overviewByEp.size === 0) return; // 飞牛确实没有单集简介 → 不伪造
+      if (descByEp.size === 0) return; // Bangumi 无该番简介数据
 
-      // 3) 按集数把真实简介回填到对应卡片（仅当卡片本身缺简介时）
+      // 按集数回填到对应缺简介的卡片
       const descStyle = 'font-size:13px;line-height:1.7;color:var(--fnos-text-secondary,#9aa0a6);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:4px;letter-spacing:.25px';
       let filled = 0;
       for (const card of cards) {
         const ep = parseEp(card.textContent || '');
         if (ep == null) continue;
-        const ov = overviewByEp.get(ep);
-        if (!ov) continue;
+        const desc = descByEp.get(ep);
+        if (!desc) continue;
         if (walkText(card).length > 20) continue; // 已有简介
         if (card.querySelector('.fnos-ep-desc-filled')) continue; // 已填过
         const descEl = document.createElement('div');
         descEl.className = 'fnos-ep-desc-filled';
         descEl.style.cssText = descStyle;
-        descEl.textContent = ov;
+        descEl.textContent = desc;
         card.appendChild(descEl);
         filled++;
       }
-      if (filled) log('fillEpisodeDescsFromFnOS: 回填真实简介', filled, '张卡片 (来源 item/{guid})');
+      if (filled) log('fillEpisodeDescsFromBangumi: 回填 Bangumi 简介', filled, '张卡片 (subject', result.subjectId, ')');
     } catch (e) {
-      log('fillEpisodeDescsFromFnOS error', e);
+      log('fillEpisodeDescsFromBangumi error', e);
     }
   })();
 }

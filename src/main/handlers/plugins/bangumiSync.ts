@@ -5,6 +5,7 @@ import axios, { AxiosInstance } from 'axios';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
+import { registerHandler } from '../core/ipcHandler';
 
 const log = logger.component('bangumi');
 
@@ -263,8 +264,88 @@ export async function syncOnProgress(
     }
 }
 
+// ---- 每集简介缓存（Bangumi → 选集卡片注入） ----
+let _descCacheFile = '';
+let _descCache: Record<string, Record<number, string>> = {}; // subject_id → { ep_num: desc }
+let _descSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function loadDescCache(): void {
+    try { _descCacheFile = path.join(app.getPath('userData'), 'bangumi_ep_descs.json'); } catch (e) { return; }
+    try {
+        if (fs.existsSync(_descCacheFile)) _descCache = JSON.parse(fs.readFileSync(_descCacheFile, 'utf-8')) || {};
+    } catch (e) { /* 首次运行或文件损坏 */ }
+}
+
+function scheduleDescSave(): void {
+    if (_descSaveTimer || !_descCacheFile) return;
+    _descSaveTimer = setTimeout(() => {
+        _descSaveTimer = null;
+        try { fs.writeFileSync(_descCacheFile, JSON.stringify(_descCache)); } catch (e) {}
+    }, 2000);
+}
+
+interface BgEpDesc { ep: number; name_cn: string; desc: string; }
+
+/**
+ * 从 Bangumi 获取某番剧的每集简介（desc 字段），带本地持久化缓存。
+ * 返回 { subjectId, eps: [{ep, name_cn, desc}] } 或 null。
+ * 缓存命中时不再请求网络；首次获取后自动持久化到 userData/bangumi_ep_descs.json。
+ */
+export async function fetchEpisodeDescs(tvTitle: string, totalEps: number): Promise<{ subjectId: number; eps: BgEpDesc[] } | null> {
+    // 1. 搜条目（复用已有 searchSubject + subjectCache）
+    const subjectId = await searchSubject(tvTitle, totalEps);
+    if (!subjectId) return null;
+
+    // 2. 检查内存缓存
+    if (_descCache[subjectId] && Object.keys(_descCache[subjectId]).length > 0) {
+        const cached = _descCache[subjectId];
+        const eps: BgEpDesc[] = Object.entries(cached)
+            .map(([ep, desc]) => ({ ep: Number(ep), name_cn: '', desc }))
+            .sort((a, b) => a.ep - b.ep);
+        return { subjectId, eps };
+    }
+
+    // 3. 网络取 episodes（含 desc）
+    try {
+        const resp = await http().get('/v0/episodes', {
+            params: { subject_id: subjectId, type: 0, limit: 500 },
+        });
+        const rawEps: any[] = (resp.data && resp.data.data) || [];
+        // 只取 type=0(正篇)，提取 ep + name_cn + desc
+        const eps: BgEpDesc[] = rawEps
+            .filter((e: any) => Number(e.type) === 0 && (e.desc || '').length > 0)
+            .map((e: any) => ({
+                ep: Number(e.ep) || Number(e.sort) || 0,
+                name_cn: e.name_cn || e.name || '',
+                desc: e.desc || '',
+            }))
+            .sort((a, b) => a.ep - b.ep);
+
+        if (eps.length === 0) {
+            log.info(`Bangumi subject ${subjectId} 无正篇简介数据(${rawEps.length} 条原始)`);
+            return null;
+        }
+
+        // 4. 写入缓存（持久化）
+        const entry: Record<number, string> = {};
+        for (const e of eps) entry[e.ep] = e.desc;
+        _descCache[subjectId] = entry;
+        scheduleDescSave();
+        log.info(`已获取 Bangumi ${subjectId} 每集简介 ${eps.length} 集，已缓存`);
+        return { subjectId, eps };
+    } catch (e: any) {
+        log.warn(`取 Bangumi 每集简介失败 subject ${subjectId}:`, e && e.message);
+        return null;
+    }
+}
+
 /** 插件初始化（handlers/index.ts 自动加载同目录 *.ts 并调用 init） */
 export function init(): void {
     loadCache();
+    loadDescCache();       // 加载每集简介缓存
+    // 注册 IPC：供 preload 选集页调用获取 Bangumi 每集简介
+    registerHandler('bangumi:episode-descs', async (_e: any, tvTitle: string, totalEps: number) => {
+        return fetchEpisodeDescs(tvTitle, totalEps);
+    }, { useHandle: true });
     log.info('Bangumi 集数级同步插件已加载');
 }
