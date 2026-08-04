@@ -182,6 +182,9 @@ function injectStyle(): void {
 
 .fntv-hot-group { font-size: 11px; font-weight: 700; letter-spacing: 1px;
   color: rgba(255,255,255,.55); padding: 10px 4px 5px; display:flex; align-items:center; gap:6px; }
+.fntv-hot-group.today { color: #ffd666; }
+.fntv-hot-group.today::after { content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(255,214,102,.5), rgba(255,214,102,0)); }
 
 .fntv-hot-card { position: relative; display: flex; gap: 11px; padding: 10px;
   border-radius: 13px; cursor: pointer; transition: background .15s ease, transform .15s ease;
@@ -317,6 +320,11 @@ function hydratePosters(root: HTMLElement): void {
   });
 }
 
+/** 把 JS getDay()（0=周日…6=周六）转为 Bangumi air_weekday（1=周一…7=周日） */
+function todayBangumiWeekday(): number {
+  return ((new Date().getDay() + 6) % 7) + 1;
+}
+
 /** Bangumi 排序渲染（weekday=分组按星期；hot=按热度纯列表） */
 function renderBgBody(items: any[], mode: string): string {
   if (!items.length) return `<div class="fntv-hot-empty">暂无正在放送的条目</div>`;
@@ -326,12 +334,19 @@ function renderBgBody(items: any[], mode: string): string {
       const w = (typeof it.air_weekday === 'number' && it.air_weekday >= 1 && it.air_weekday <= 7) ? it.air_weekday : 99;
       (groups[w] = groups[w] || []).push(it);
     }
-    const order = Object.keys(groups).map(Number).sort((a, b) => a - b);
+    // 按「今天优先」循环排序：今天 → 明天 → … → 周日 → 周一…，末尾放「其他」(99)。
+    // 不再固定周一到周日，解决「周三打开却先看到周一」的问题。
+    const today = todayBangumiWeekday();
+    const order = Object.keys(groups).map(Number).sort((a, b) => {
+      const rank = (w: number) => (w === 99 ? 999 : ((w - today + 7) % 7));
+      return rank(a) - rank(b);
+    });
     let html = '';
     for (const w of order) {
+      const isToday = w === today;
       const label = w >= 1 && w <= 7 ? WD_CN[w - 1] : '其他';
       groups[w].sort((a, b) => (b.collectionTotal || 0) - (a.collectionTotal || 0));
-      html += `<div class="fntv-hot-group">${label}</div>` + groups[w].map(renderBgCard).join('');
+      html += `<div class="fntv-hot-group${isToday ? ' today' : ''}">${label}${isToday ? ' · 今天' : ''}</div>` + groups[w].map(renderBgCard).join('');
     }
     return html;
   }
