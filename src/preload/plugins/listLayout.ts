@@ -30,24 +30,31 @@ import { registerHook, HookType } from '../core/hooks';
 const MIN_PAD = 20; // 每侧最小留白
 
 /**
- * 判断当前是否为列表页（仅在此类页面执行卡片居中逻辑）
- * 采用白名单策略：只允许已知的列表页 URL 模式，
- * 其他所有页面（含 TV/Movie 详情、Season、Person/Actor、设置等）一律排除。
- * 原因: 黑名单策略会漏掉新页面类型（如演员页被误加 padding 导致变窄）。
+ * 检测当前页面是否存在左侧「媒体库 / 分类」导航列表。
+ * 只有存在这些列表的页面（首页、媒体库列表、分类列表等）才启用卡片居中；
+ * 演员/人物详情页、剧集详情页等没有左侧列表的页面一律不处理。
+ *
+ * 检测策略：DOM 白名单 — 查找含「媒体库/片库/影视库/library」标题的侧边栏
+ * 或导航区域，或含「分类/genre/category」字样的筛选面板。
  */
-function isListPage(): boolean {
-    const p = location.pathname.toLowerCase();
-    // 首页
-    if (p === '/v' || p === '/v/' || p === '/') return true;
-    // 列表/分类/搜索/推荐（二级路径且非 32 位 GUID 详情页）
-    if (/^\/v\/(library|lib|search|recommend|category|collection|playlist|favorites|recent|new|discover)/.test(p)) return true;
-    // 其余一律不处理（包括 /v/tv/:guid、/v/movie/:guid、/v/tv/season/:guid、
-    //   /v/person/:guid、/v/people/:guid 等所有 GUID 级详情页）
-    return false;
+function hasSidebarLibraryNav(): boolean {
+    // 快速路径：检测侧边栏/导航容器内是否出现「媒体库」「分类」等关键词
+    const navContainers = document.querySelectorAll(
+        'aside, [class*="sidebar"], [class*="drawer"], [class*="offcanvas"], '
+        + '[class*="side-panel"], [class*="side-nav"], [role="navigation"]'
+    );
+    const labelRe = /媒体库|片库|影视库|分类|library|my\s*media|category|genre/i;
+    for (let i = 0; i < navContainers.length; i++) {
+        if (labelRe.test(navContainers[i].textContent || '')) return true;
+    }
+    // 兜底：整个 body 里出现「媒体库」+「番剧/电影/电视」组合（首页/列表页特征）
+    // 但排除弹窗（弹窗里也可能偶然出现这些词）
+    const bodyText = document.body?.textContent || '';
+    return /媒体库/.test(bodyText) && /(番剧|电视剧?|电影)/.test(bodyText);
 }
 
-/** 兼容旧调用点（语义已反转） */
-function isDetailPage(): boolean { return !isListPage(); }
+/** 兼容旧调用点 */
+function isDetailPage(): boolean { return !hasSidebarLibraryNav(); }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
 function findCardGrid(): HTMLElement | null {
@@ -81,8 +88,8 @@ function makeKey(parent: HTMLElement): string {
  *       连续两次测量一致(≤2px)则锁定。
  */
 function applyFix(): boolean {
-    // ⛔ 详情页不执行列表居中逻辑（lc-190修复：详情页被误加巨大padding导致内容变窄）
-    if (isDetailPage()) return false;
+    // ⛔ 无左侧「媒体库/分类」导航列表的页面不执行居中（演员页/详情页等没有这些列表）
+    if (!hasSidebarLibraryNav()) return false;
 
     const card = findCardGrid();
     if (!card) return false;
