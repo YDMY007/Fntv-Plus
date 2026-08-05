@@ -30,13 +30,24 @@ import { registerHook, HookType } from '../core/hooks';
 const MIN_PAD = 20; // 每侧最小留白
 
 /**
- * 判断当前是否为详情页（不应在此类页面执行列表居中逻辑）
- * 详情页路径: /v/tv/{guid}、/v/movie/{guid} 及其子路由（season 等）
- * 列表页路径: /v/、/v/library/*、/v/search 等
+ * 判断当前是否为列表页（仅在此类页面执行卡片居中逻辑）
+ * 采用白名单策略：只允许已知的列表页 URL 模式，
+ * 其他所有页面（含 TV/Movie 详情、Season、Person/Actor、设置等）一律排除。
+ * 原因: 黑名单策略会漏掉新页面类型（如演员页被误加 padding 导致变窄）。
  */
-function isDetailPage(): boolean {
-    return /^(\/v\/(tv|movie)\/[a-f0-9]{32})/.test(location.pathname);
+function isListPage(): boolean {
+    const p = location.pathname.toLowerCase();
+    // 首页
+    if (p === '/v' || p === '/v/' || p === '/') return true;
+    // 列表/分类/搜索/推荐（二级路径且非 32 位 GUID 详情页）
+    if (/^\/v\/(library|lib|search|recommend|category|collection|playlist|favorites|recent|new|discover)/.test(p)) return true;
+    // 其余一律不处理（包括 /v/tv/:guid、/v/movie/:guid、/v/tv/season/:guid、
+    //   /v/person/:guid、/v/people/:guid 等所有 GUID 级详情页）
+    return false;
 }
+
+/** 兼容旧调用点（语义已反转） */
+function isDetailPage(): boolean { return !isListPage(); }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
 function findCardGrid(): HTMLElement | null {
