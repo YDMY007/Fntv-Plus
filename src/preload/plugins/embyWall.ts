@@ -492,6 +492,7 @@ async function fetchImageAuth(fullUrl: string): Promise<string | null> {
 
 let _carouselInited = false;
 let _carouselContainer: HTMLElement | null = null;
+let _carouselUpdatedAt = 0; // 最近更新板块数据就绪(轮播注入)时间戳, 用于标题旁显示更新时间
 let _carouselWrapper: HTMLElement | null = null;
 // 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
 // injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
@@ -541,6 +542,13 @@ function isModalOpen(): boolean {
   );
 }
 
+/** 轮播「最近更新」标签内的日期: M/D（不带时间） */
+function fmtCarouselUpdated(ts: number): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return (d.getMonth() + 1) + '/' + d.getDate();
+}
+
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
@@ -585,6 +593,8 @@ function injectCarousel(): void {
   _placeholderInited = false;
 
   _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
+  _carouselUpdatedAt = Date.now(); // 记录"最近更新"板块数据就绪时刻, 供标题旁更新时间显示
+  log('carousel data ready at', new Date(_carouselUpdatedAt).toLocaleString('zh-CN'));
 
   // 数据: API优先(动态/自动/最新排序); 仅当真实片库为空才兜底(上面已拦截空数据)
   // 注意: 只要真实片库 >0 条就只用真实内容, 不再回退硬编码 demo(避免无职转生兜底出现)
@@ -659,7 +669,7 @@ function injectCarousel(): void {
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
-      <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新</div>
+      <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
       <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
