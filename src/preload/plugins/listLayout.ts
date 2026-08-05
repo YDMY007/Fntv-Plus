@@ -30,22 +30,48 @@ import { registerHook, HookType } from '../core/hooks';
 const MIN_PAD = 20; // 每侧最小留白
 
 /**
- * 检测左侧导航栏（媒体库/分类列表侧边栏）是否存在。
- * 直接定位 fnOS 侧边栏最外层容器（Tailwind 类组合：mt-6 flex h-0 w-full flex-1 flex-col），
- * 并校验其内部含「媒体库」(/v/library/) 或「分类」(/v/list/) 导航链接。
+ * 检测左侧导航栏（媒体库 / 分类 侧边栏）是否存在。
+ *
+ * ⚠️ 关键原则：检测只看「URL 路由」和容器结构，**绝不看媒体库的显示名称**。
+ * 每个用户给媒体库起的名字都不一样（动画 / 番剧 / Anime / 美剧 / 我的影视 …），
+ * 侧边栏里那些链接的文字千变万化，但 fnOS 的路由是固定不变的：
+ *   · 单个媒体库    → /v/library/{id}
+ *   · 分类（筛选）  → /v/list/{id}
+ * 所以这里只校验容器内是否含这两种路由链接，与库名无关 —— 任何人改名都不会影响判定。
+ *
+ * 定位方式：直接定位 fnOS 侧边栏最外层容器（用户提供的 Tailwind 类组合
+ * mt-6 flex h-0 w-full flex-1 flex-col），再校验其内部含媒体库(/v/library/)
+ * 或分类(/v/list/)导航链接。
  *
  * 有此侧边栏的页面（首页 / 媒体库列表 / 分类列表）才启用卡片居中；
- * 演员/人物详情页、剧集详情页等不渲染该侧边栏，一律不处理。
+ * 演员/人物详情页、剧集详情页等不渲染该侧边栏（或其中无上述路由链接），一律不处理。
  */
+
+/** 判断一个链接是否为「媒体库/分类」导航（按路由，不按显示名）。兼容有无结尾斜杠、绝对/相对 href。 */
+function isLibraryNavHref(href: string | null): boolean {
+    if (!href) return false;
+    try {
+        const url = new URL(href, location.href);
+        const p = url.pathname.toLowerCase();
+        return p === '/v/library' || p.startsWith('/v/library/')
+            || p === '/v/list'    || p.startsWith('/v/list/');
+    } catch {
+        // 解析失败（极少数非法 href）兜底：直接按路径前缀判断
+        return /\/v\/library\/?/i.test(href) || /\/v\/list\/?/i.test(href);
+    }
+}
+
 function hasSidebarLibraryNav(): boolean {
     const sidebar = document.querySelector(
         '.mt-6.flex.h-0.w-full.flex-1.flex-col'
     ) as HTMLElement | null;
     if (!sidebar) return false;
-    // 侧边栏内必须含媒体库(/v/library/)或分类(/v/list/)导航项
-    return sidebar.querySelectorAll(
-        'a[href^="/v/library/"], a[href^="/v/list/"]'
-    ).length > 0;
+    // 侧边栏内必须含媒体库(/v/library/)或分类(/v/list/)导航项（按路由，与库显示名无关）
+    const links = sidebar.querySelectorAll('a[href]');
+    for (let i = 0; i < links.length; i++) {
+        if (isLibraryNavHref(links[i].getAttribute('href'))) return true;
+    }
+    return false;
 }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
