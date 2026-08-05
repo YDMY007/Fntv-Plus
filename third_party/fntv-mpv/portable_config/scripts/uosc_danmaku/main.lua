@@ -108,13 +108,20 @@ function set_danmaku_button()
 end
 
 function show_loaded(init)
+    -- 显示数量优先用「B站弹幕脚本」回传的权威条数（BILI_INFO.danmaku_count）。
+    -- 该值在 apis/extra.lua 的 auto_search_extra() 经本地代理(127.0.0.1:22347/danmaku)
+    -- 调用 bili_danmaku.js 抓弹幕后写入；能拿到就直接用（这才是「我B站弹幕脚本获取的弹幕数量」），
+    -- 否则回退到本地解析后的 #COMMENTS（dandanplay 等其它来源的合并数）。
+    local has_bili = BILI_INFO and BILI_INFO.danmaku_count and BILI_INFO.danmaku_count > 0
+    local shown = has_bili and BILI_INFO.danmaku_count or #COMMENTS
+    local label = has_bili and "B站弹幕加载成功，共计" or "弹幕加载成功，共计"
     if DANMAKU.anime and DANMAKU.episode then
-        show_message("匹配内容：" .. DANMAKU.anime .. "-" .. DANMAKU.episode .. "\\N弹幕加载成功，共计" .. #COMMENTS .. "条弹幕", 3)
+        show_message("匹配内容：" .. DANMAKU.anime .. "-" .. DANMAKU.episode .. "\\N" .. label .. shown .. "条弹幕", 3)
         if init then
-            msg.info(DANMAKU.anime .. "-" .. DANMAKU.episode .. " 弹幕加载成功，共计" .. #COMMENTS .. "条弹幕")
+            msg.info(DANMAKU.anime .. "-" .. DANMAKU.episode .. " " .. label .. shown .. "条弹幕")
         end
     else
-        show_message("弹幕加载成功，共计" .. #COMMENTS .. "条弹幕", 3)
+        show_message(label .. shown .. "条弹幕", 3)
     end
 end
 
