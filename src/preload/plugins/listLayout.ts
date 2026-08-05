@@ -30,31 +30,23 @@ import { registerHook, HookType } from '../core/hooks';
 const MIN_PAD = 20; // 每侧最小留白
 
 /**
- * 检测当前页面是否存在左侧「媒体库 / 分类」导航列表。
- * 只有存在这些列表的页面（首页、媒体库列表、分类列表等）才启用卡片居中；
- * 演员/人物详情页、剧集详情页等没有左侧列表的页面一律不处理。
+ * 检测左侧导航栏（媒体库/分类列表侧边栏）是否存在。
+ * 直接定位 fnOS 侧边栏最外层容器（Tailwind 类组合：mt-6 flex h-0 w-full flex-1 flex-col），
+ * 并校验其内部含「媒体库」(/v/library/) 或「分类」(/v/list/) 导航链接。
  *
- * 检测策略：DOM 白名单 — 查找含「媒体库/片库/影视库/library」标题的侧边栏
- * 或导航区域，或含「分类/genre/category」字样的筛选面板。
+ * 有此侧边栏的页面（首页 / 媒体库列表 / 分类列表）才启用卡片居中；
+ * 演员/人物详情页、剧集详情页等不渲染该侧边栏，一律不处理。
  */
 function hasSidebarLibraryNav(): boolean {
-    // 快速路径：检测侧边栏/导航容器内是否出现「媒体库」「分类」等关键词
-    const navContainers = document.querySelectorAll(
-        'aside, [class*="sidebar"], [class*="drawer"], [class*="offcanvas"], '
-        + '[class*="side-panel"], [class*="side-nav"], [role="navigation"]'
-    );
-    const labelRe = /媒体库|片库|影视库|分类|library|my\s*media|category|genre/i;
-    for (let i = 0; i < navContainers.length; i++) {
-        if (labelRe.test(navContainers[i].textContent || '')) return true;
-    }
-    // 兜底：整个 body 里出现「媒体库」+「番剧/电影/电视」组合（首页/列表页特征）
-    // 但排除弹窗（弹窗里也可能偶然出现这些词）
-    const bodyText = document.body?.textContent || '';
-    return /媒体库/.test(bodyText) && /(番剧|电视剧?|电影)/.test(bodyText);
+    const sidebar = document.querySelector(
+        '.mt-6.flex.h-0.w-full.flex-1.flex-col'
+    ) as HTMLElement | null;
+    if (!sidebar) return false;
+    // 侧边栏内必须含媒体库(/v/library/)或分类(/v/list/)导航项
+    return sidebar.querySelectorAll(
+        'a[href^="/v/library/"], a[href^="/v/list/"]'
+    ).length > 0;
 }
-
-/** 兼容旧调用点 */
-function isDetailPage(): boolean { return !hasSidebarLibraryNav(); }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
 function findCardGrid(): HTMLElement | null {
