@@ -137,7 +137,7 @@ Fntv-Plus/
 
 ### 方式一：预编译版本（推荐）
 
-前往本仓库 [Releases 页面](https://gitee.com/YDMY007/fntv-plus/releases) 下载最新版本：
+前往 GitHub [Releases 页面](https://github.com/YDMY007/Fntv-Plus/releases) 下载最新版本（国内 Gitee 不提供大文件托管，发行版文件统一托管于 GitHub）：
 
 - **Windows**：下载 `FNMedia_*_win_x64.exe`，双击安装。支持自定义安装路径、创建桌面快捷方式。
 - **macOS**：下载 `FNMedia_*_mac_*.dmg`，拖入 Applications 即可。
