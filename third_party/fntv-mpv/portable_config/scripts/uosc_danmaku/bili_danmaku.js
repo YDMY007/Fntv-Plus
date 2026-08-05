@@ -796,11 +796,16 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
     const src_titles = [(chosen[2] && chosen[2].bvid) || chosen[1]];
 
     function tryAdd(d) {
-        const bk = String(Math.floor(d.time / AGG_DUP_SEC));
+        // 注意：extract() 返回的弹幕是数组 [pr(毫秒), mode, col, con(文本)]，
+        // 不是对象，必须用下标读取，不能用 d.time / d.text（否则恒为 undefined，
+        // 导致所有弹幕落入同一("NaN")桶、文案同为 undefined，被去重成只剩 1 条）。
+        const tSec = (d[0] || 0) / 1000.0; // pr 为毫秒，换算成秒
+        const bk = String(Math.floor(tSec / AGG_DUP_SEC));
+        const txt = d[3];
         const seen = buckets.get(bk);
-        if (seen && seen.has(d.text)) return false; // 窗口内重复
-        if (!seen) { buckets.set(bk, new Set()); buckets.get(bk).add(d.text); }
-        else seen.add(d.text);
+        if (seen && seen.has(txt)) return false; // 窗口内重复
+        if (!seen) { buckets.set(bk, new Set()); buckets.get(bk).add(txt); }
+        else seen.add(txt);
         merged.push(d);
         return true;
     }
