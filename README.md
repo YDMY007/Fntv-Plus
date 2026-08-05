@@ -14,7 +14,7 @@
 
 <div align="center">
   <img src="resource/docs/hotlist.png" width="100%" alt="每日放送快速查看一个不漏过">
-  <p><em>图：支持多种登录方式域名/IP地址/FNID</em></p>
+  <p><em>图：每日放送快速查询</em></p>
 </div>
 
 <div align="center">
@@ -39,7 +39,7 @@
 >
 > - **上游项目**：基于飞牛影视（fnOS TV）Web 端封装的 Electron 桌面客户端。
 > - **原项目版权**：归原作者 [QiaoKes](https://github.com/QiaoKes) 所有，遵循 [GPL-3.0](LICENSE) 许可证。
-> - **本仓库（[YDMY007/Fntv-Plus](https://github.com/YDMY007/Fntv-Plus)）**：在上游基础上叠加了**桌面亚克力风格、原生窗口交互、侧栏设置面板、豆瓣同步、Bangumi 集数级同步、兼容PotPlayer播放器等大量 UI / 体验增强**，**已改动上游核心代码此后将作为独立分支独立发展，不再跟随上游更新。**（preload 注入与 main 主进程均有修改）。
+> - **本仓库（[YDMY007/fntv-plus](https://gitee.com/YDMY007/fntv-plus)）**：在上游基础上叠加了**桌面亚克力风格、原生窗口交互、侧栏设置面板、豆瓣同步、Bangumi 集数级同步、兼容PotPlayer播放器等大量 UI / 体验增强**，**已改动上游核心代码此后将作为独立分支独立发展，不再跟随上游更新。**（preload 注入与 main 主进程均有修改）。
 > - **许可证继承**：本仓库沿用原项目的 GPL-3.0 许可证，完整条款见 [LICENSE](LICENSE) 文件。
 
 >  **免责声明**：⚠️本项目为第三方客户端，与飞牛影视官方无关。本项目仅为作者本人**个人练手 / 学习用途**的开源项目，不代表任何官方立场，亦与飞牛影视官方不存在任何关联或合作关系。使用前请确保遵守相关服务条款与版权规定，因使用本项目产生的任何后果由使用者自行承担。
@@ -137,7 +137,7 @@ Fntv-Plus/
 
 ### 方式一：预编译版本（推荐）
 
-前往本仓库 [Releases 页面](https://github.com/YDMY007/Fntv-Plus/releases) 下载最新版本：
+前往本仓库 [Releases 页面](https://gitee.com/YDMY007/fntv-plus/releases) 下载最新版本：
 
 - **Windows**：下载 `FNMedia_*_win_x64.exe`，双击安装。支持自定义安装路径、创建桌面快捷方式。
 - **macOS**：下载 `FNMedia_*_mac_*.dmg`，拖入 Applications 即可。
@@ -149,7 +149,7 @@ Fntv-Plus/
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/YDMY007/Fntv-Plus.git
+git clone https://gitee.com/YDMY007/fntv-plus.git
 cd Fntv-Plus
 
 # 2. 安装依赖（需 Node.js 18+）
