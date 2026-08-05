@@ -856,7 +856,13 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         return { ok: false, error: '未找到匹配的B站视频' };
     }
 
-    const AGG_TIME_LIMIT = 2200;
+    // 候选弹幕时间轴上限（秒）：单个候选的弹幕时间轴 max_t 超过此值，则在聚合合并阶段跳过，
+    // 且不作为「时长优先」的优选。原值 2200(≈37min) 本意是排除 12 集合集(时间轴动辄上万秒)。
+    // 但很多搬运 UP 主为躲避版权，会在视频【尾部追加一大段空白/黑屏】，使单集文件时长被显著拉长；
+    // 同时部分单集本身偏长（2 集合、45min 特别篇），其弹幕时间轴常逼近甚至超过 2200s。
+    // 放宽到 4500(≈75min)：仍能干净排除 5+ 集合集(≥7000s)，但给「加长 / 带空白尾」的单集留足余量，
+    // 避免它们被误判为长片而落选或无法参与合并。
+    const AGG_TIME_LIMIT = 4500;
     const MIN_DANMAKU = 10;
     const CAP = 8;
 
