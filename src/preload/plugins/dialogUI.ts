@@ -59,7 +59,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     const card = document.createElement('div');
     card.setAttribute('data-fnos-ui', '1');
     card.style.cssText = [
-        'position:relative', 'min-width:360px', 'max-width:460px', 'width:88%',
+        'position:relative', 'min-width:420px', 'max-width:600px', 'width:90%',
         'background:rgba(252,247,253,.97)!important',
         'backdrop-filter:blur(30px) saturate(135%)', '-webkit-backdrop-filter:blur(30px) saturate(135%)',
         'border-radius:16px',
@@ -111,7 +111,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     if (payload.markdown) {
         const mdWrap = document.createElement('div');
         mdWrap.style.cssText = [
-            'max-height:300px', 'overflow-y:auto',
+            'max-height:380px', 'overflow-y:auto',
             'background:rgba(255,255,255,.5)!important',
             'border-radius:10px', 'padding:6px 12px', 'margin-bottom:6px',
         ].join(';') + ';';

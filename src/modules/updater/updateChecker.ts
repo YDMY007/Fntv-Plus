@@ -429,16 +429,30 @@ export class UpdateChecker {
     }
 
     /**
-     * 显示没有更新的提示
+     * 显示「已达最新版本」的弹窗：除提示已是最新外，
+     * 同时展示该最新版本自身的更新介绍（changelog，来自 release body 的 Markdown），
+     * 让用户知道「当前版本都更新了什么」。
+     * @param updateInfo - 检测到的更新信息（含 releaseNotes）
      */
-    async showNoUpdateDialog(): Promise<void> {
-        await fnosDialog(null, {
+    async showLatestVersionDialog(updateInfo: UpdateInfo): Promise<void> {
+        const { latestVersion, releaseNotes, htmlUrl } = updateInfo;
+
+        const { response } = await fnosDialog(null, {
             type: 'info',
-            title: '检查更新',
-            message: '当前已是最新版本',
-            detail: `当前版本: ${this.currentVersion}`,
-            buttons: ['确定'],
+            title: '已是最新版本',
+            message: '您当前使用的就是最新版本，感谢支持！',
+            detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion || this.currentVersion}`,
+            // 复用最新版本的更新日志（Markdown 富文本渲染），介绍本次版本更新内容
+            markdown: releaseNotes || '暂无更新说明',
+            buttons: ['查看详情', '确定'],
+            defaultId: 1,
+            cancelId: 1,
         });
+
+        // 用户点击「查看详情」则打开 GitHub 发行版页面
+        if (response === 0 && htmlUrl) {
+            shell.openExternal(htmlUrl);
+        }
     }
 
     /**
@@ -492,7 +506,7 @@ export class UpdateChecker {
             if (updateInfo.hasUpdate) {
                 await this.showUpdateDialog(updateInfo);
             } else {
-                await this.showNoUpdateDialog();
+                await this.showLatestVersionDialog(updateInfo);
             }
         } catch (error: any) {
             await this.showUpdateErrorDialog(error.message);
@@ -509,7 +523,7 @@ export class UpdateChecker {
             if (updateInfo.hasUpdate) {
                 await this.showUpdateDialog(updateInfo);
             } else {
-                await this.showNoUpdateDialog();
+                await this.showLatestVersionDialog(updateInfo);
             }
         } catch (error: any) {
             await this.showUpdateErrorDialog(error.message);
