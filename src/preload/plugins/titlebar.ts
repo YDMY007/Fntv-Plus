@@ -9,7 +9,7 @@ import { isFntvTvPage } from '../core/pageMode';
 import logger from '../core/logger';
 
 // [v332 fix] 用 fs.readFileSync 读取本地 logo PNG，生成真正的 base64 data URI
-//   (v327 的 LOGO_DATA_URI 是一段 blob JSON 描述字符串，不是有效图片 → img.src 加载失败)
+//   (v327 的 LOGO_DATA_URI 是一段 blob JSON 描述字符串，不是有效图片 -> img.src 加载失败)
 let LOGO_DATA_URI = '';
 try {
   const logoBuf = fs.readFileSync(path.resolve(__dirname, '../../../build/iconfntv.png'));
@@ -29,12 +29,56 @@ function injectTitleBar(): void {
   logger.info('Injecting custom title bar...');
   if (document.getElementById('custom-titlebar')) return;
 
-  /* ═══ Mica 标题栏条 ═══ */
+  const nativePage = !isFntvTvPage();
+
+  /* ═══ SVG 图标（共用）═══ */
+  const minSvg = '<svg width="10" height="1.5" viewBox="0 0 10 1.5" fill="none"><rect width="10" height="1.5" rx="0.75" fill="currentColor"/></svg>';
+  const maxSvg = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1"/></svg>';
+  const closeSvg = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
+  if (nativePage) {
+    /* ── 原生页：悬浮圆形小按钮组（右上角，不遮挡原生 UI） ── */
+    const floatBar = document.createElement('div');
+    floatBar.id = 'custom-titlebar';
+    floatBar.style.cssText =
+      'position:fixed;top:8px;right:8px;z-index:999999;display:flex;gap:2px;pointer-events:auto;' +
+      '-webkit-app-region:no-drag;app-region:no-drag;';
+
+    const btnCss =
+      'background:rgba(30,30,34,.72);border:1px solid rgba(255,255,255,.18);' +
+      'width:32px;height:32px;border-radius:50%;display:flex;align-items:center;' +
+      'justify-content:center;cursor:pointer;color:#ddd;transition:background .15s,color .15s;' +
+      'backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);';
+
+    const makeBtn = (id: string, svg: string, hoverBg: string): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.id = id;
+      b.type = 'button';
+      b.innerHTML = svg;
+      b.style.cssText = btnCss;
+      b.addEventListener('mouseenter', function () { b.style.background = hoverBg; b.style.color = '#fff'; });
+      b.addEventListener('mouseleave', function () { b.style.background = 'rgba(30,30,34,.72)'; b.style.color = '#ddd'; });
+      return b;
+    };
+
+    floatBar.appendChild(makeBtn('min-btn', minSvg, 'rgba(255,255,255,.18)'));
+    floatBar.appendChild(makeBtn('max-btn', maxSvg, 'rgba(255,255,255,.18)'));
+    floatBar.appendChild(makeBtn('close-btn', closeSvg, 'rgba(232,17,35,.82)'));
+
+    document.body.appendChild(floatBar);
+
+    // 点击事件
+    document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });
+    document.getElementById('max-btn')?.addEventListener('click', function () { ipcRenderer.send('window-maximize'); });
+    document.getElementById('close-btn')?.addEventListener('click', function () { ipcRenderer.send('window-close'); });
+
+    logger.info('Native page: floating window controls injected');
+    return; // 原生页不需要标题栏/logo/沉浸模式
+  }
+
+  /* ═══ TV 页：Mica 标题栏条 ═══ */
   const bar = document.createElement('div');
   bar.id = 'custom-titlebar';
-  // [v374] 原生拖动: -webkit-app-region:drag (Chromium 原生, 仅移动窗口, 绝不放大)
-  //   ⚠️ 关键: 元素自身不能带 backdrop-filter, 否则 app-region 命中测试失效 → 去掉 blur, 只用纯半透背景
-  //   ⚠️ 关键: 必须 pointer-events:auto 才能接收 mousedown (之前 none 导致无法拖动)
   bar.style.cssText = `height:32px;width:100%;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
     -webkit-app-region:drag;app-region:drag;
     border-top-left-radius:16px;border-top-right-radius:16px;
@@ -44,23 +88,24 @@ function injectTitleBar(): void {
   /* 窗口控制右对齐 (no-drag 保证可点击) */
   const ctrls = document.createElement('div');
   ctrls.style.cssText = 'position:absolute;top:0;right:0;height:32px;display:flex;align-items:center;pointer-events:auto;-webkit-app-region:no-drag;app-region:no-drag;padding-right:4px;gap:2px';
-  ctrls.innerHTML = [
-    '<button id="min-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="1.5" viewBox="0 0 10 1.5" fill="none"><rect width="10" height="1.5" rx="0.75" fill="var(--fnos-titlebar-icon,#444)"/></svg></button>',
-    '<button id="max-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" stroke="var(--fnos-titlebar-icon,#444)" stroke-width="1"/></svg></button>',
-    '<button id="close-btn" style="background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;">',
-    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="var(--fnos-titlebar-icon,#444)" stroke-width="1.2" stroke-linecap="round"/></svg></button>'
-  ].join('');
+  const tvBtnIds = ['min-btn', 'max-btn', 'close-btn'];
+  tvBtnIds.forEach(function (id, i) {
+    const svgs = [minSvg, maxSvg, closeSvg];
+    const btn = document.createElement('button');
+    btn.id = id;
+    btn.type = 'button';
+    btn.innerHTML = svgs[i];
+    btn.style.cssText = 'background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;color:var(--fnos-titlebar-icon,#444);';
+    ctrls.appendChild(btn);
+  });
   bar.appendChild(ctrls);
-
   document.body.appendChild(bar);
 
   /* ═══ 沉浸模式状态管理 ═══ */
   let _immersive = false;
 
   /** 切换标题栏沉浸模式(详情页全透明+白图标 vs 普通页半透Mica+深色图标) */
-  const setImmersive = (on: boolean): void => {
+  const setImmersive = function (on: boolean): void {
     if (_immersive === on) return;
     _immersive = on;
     // 背景 & 圆角
@@ -69,8 +114,8 @@ function injectTitleBar(): void {
     bar.style.borderTopRightRadius = on ? '0' : '16px';
     // 图标颜色
     const iconColor = on ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
-    ctrls.querySelectorAll('svg').forEach((svg) => {
-      svg.querySelectorAll('rect, path').forEach((el) => {
+    ctrls.querySelectorAll('svg').forEach(function (svg) {
+      svg.querySelectorAll('rect, path').forEach(function (el) {
         if (el instanceof SVGElement) {
           if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
             el.setAttribute('fill', iconColor);
@@ -83,13 +128,13 @@ function injectTitleBar(): void {
   };
 
   /** 统一 hover 逻辑: 根据 _immersive 状态动态选择颜色 */
-  const setupButtonHover = (): void => {
+  const setupButtonHover = function (): void {
     const minBtn = document.getElementById('min-btn');
     const maxBtn = document.getElementById('max-btn');
     const closeBtn = document.getElementById('close-btn');
     if (!minBtn || !maxBtn || !closeBtn) return;
 
-    const onEnter = (btn: HTMLElement) => {
+    const onEnter = function (btn: HTMLElement): void {
       if (_immersive) {
         btn.style.background = btn.id === 'close-btn' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.15)';
       } else {
@@ -99,26 +144,27 @@ function injectTitleBar(): void {
       }
       // close hover 时图标变红(普通模式) / 保持白(沉浸模式)
       if (btn.id === 'close-btn' && !_immersive) {
-        btn.querySelectorAll('svg path, svg rect').forEach(e =>
-          (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-hover-close-icon,#e81123)'));
+        btn.querySelectorAll('svg path, svg rect').forEach(function (e) {
+          (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-hover-close-icon,#e81123)');
+        });
       }
     };
-    const onLeave = (btn: HTMLElement) => {
+    const onLeave = function (btn: HTMLElement): void {
       btn.style.background = 'transparent';
       // 恢复基础图标颜色
-      const iconColor = _immersive ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
-      btn.querySelectorAll('svg rect, svg path').forEach(el => {
+      const ic = _immersive ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
+      btn.querySelectorAll('svg rect, svg path').forEach(function (el) {
         if (el instanceof SVGElement) {
           if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
-            el.setAttribute('fill', iconColor);
+            el.setAttribute('fill', ic);
           if (el.hasAttribute('stroke'))
-            el.setAttribute('stroke', iconColor);
+            el.setAttribute('stroke', ic);
         }
       });
     };
-    [minBtn, maxBtn, closeBtn].forEach(btn => {
-      btn.addEventListener('mouseenter', () => onEnter(btn));
-      btn.addEventListener('mouseleave', () => onLeave(btn));
+    [minBtn, maxBtn, closeBtn].forEach(function (btn) {
+      btn.addEventListener('mouseenter', function () { onEnter(btn); });
+      btn.addEventListener('mouseleave', function () { onLeave(btn); });
     });
   };
 
@@ -127,7 +173,7 @@ function injectTitleBar(): void {
   setupButtonHover();
 
   // 路由切换时同步
-  const syncTitleBarStyle = (): void => { setImmersive(isDetailPage()); };
+  const syncTitleBarStyle = function (): void { setImmersive(isDetailPage()); };
   try {
     const _ps = history.pushState, _rs = history.replaceState;
     (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); syncTitleBarStyle(); };
@@ -137,13 +183,13 @@ function injectTitleBar(): void {
   } catch (e) { logger.error('titlebar nav hook err', String(e).substring(0, 60)); }
 
   // 窗口控制点击事件
-  document.getElementById('min-btn')?.addEventListener('click', () => ipcRenderer.send('window-minimize'));
-  document.getElementById('max-btn')?.addEventListener('click', () => ipcRenderer.send('window-maximize'));
-  document.getElementById('close-btn')?.addEventListener('click', () => ipcRenderer.send('window-close'));
+  document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });
+  document.getElementById('max-btn')?.addEventListener('click', function () { ipcRenderer.send('window-maximize'); });
+  document.getElementById('close-btn')?.addEventListener('click', function () { ipcRenderer.send('window-close'); });
 
   /* ═══ 飞牛影视 logo 注入(写死: 固定悬浮, 不依赖飞牛 DOM) ═══ */
   // [v367 修复] 旧逻辑把 logo 作为「导航栏子节点」插入, 飞牛 SPA 切换页面时重建导航栏 DOM,
-  //   logo 一并被销毁 → 切到某些页面 logo 丢失.
+  //   logo 一并被销毁 -> 切到某些页面 logo 丢失.
   //   现改为: logo 永远挂在 document.body 顶层(飞牛只替换内容区, 动不了 body 直接子节点),
   //   用 position:fixed 固定在导航栏垂直中心(约 y=72px: body padding-top 32 + navbar 半高 40),
   //   不依赖飞牛任何原生 logo 元素, 切换任何页面都稳定显示.
@@ -153,7 +199,7 @@ function injectTitleBar(): void {
     logoImg.alt = '飞牛影视';
     logoImg.src = LOGO_DATA_URI;
     logoImg.draggable = false;
-    const pinLogo = () => {
+    const pinLogo = function (): void {
       logoImg.style.cssText =
         'height:30px;width:auto;object-fit:contain;display:block;position:fixed;top:72px;left:50%;transform:translate(-50%,-50%);z-index:99998;opacity:.96;pointer-events:none';
     };
@@ -162,28 +208,28 @@ function injectTitleBar(): void {
     logger.info('Logo injected (pinned to body, fixed centered)');
 
     // [v375] 仅首页显示 logo: 非首页(详情/播放/列表/搜索/个人中心等)隐藏, 避免遮挡观看
-    const isHomePage = (): boolean => {
+    const isHomePage = function (): boolean {
       const href = location.href.toLowerCase();
-      const path = (location.pathname || '/').toLowerCase();
+      const pt = (location.pathname || '/').toLowerCase();
       // 明确非首页的子路由/页面
-      if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false; // 详情/播放
-      if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;          // 播放页
-      if (/\/search/.test(href)) return false;                                                  // 搜索
-      if (/\/(library|category|genre|channel|list|rank|ranking)/.test(href)) return false;     // 列表/分类
-      if (/\/(mine|my|user|account|setting|settings|favorite|favourite|history|collection|subscribe)/.test(href)) return false; // 个人中心
-      // 首页 = 路径层级浅(根或单段, 如 `/` `/home` `/recommend`); 多段子路由(如 `/v/tv/xxx`)视为非首页
-      const segs = path.split('/').filter(Boolean);
+      if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false;
+      if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;
+      if (/\/search/.test(href)) return false;
+      if (/\/(library|category|genre|channel|list|rank|ranking)/.test(href)) return false;
+      if (/\/(mine|my|user|account|setting|settings|favorite|favourite|history|collection|subscribe)/.test(href)) return false;
+      // 首页 = 路径层级浅(根或单段)
+      const segs = pt.split('/').filter(Boolean);
       const home = segs.length <= 1;
-      logger.info('[logo] isHomePage=', home, 'path=', path);
+      logger.info('[logo] isHomePage=', home, 'path=', pt);
       return home;
     };
-    const updateLogoVisibility = (): void => {
+    const updateLogoVisibility = function (): void {
       logoImg.style.visibility = isHomePage() ? 'visible' : 'hidden';
     };
     updateLogoVisibility();
 
-    // 轻量守护: 万一 logo 被飞牛极端行为意外移除, 每 4s 检查并重建到 body; 同时兜底同步可见性
-    setInterval(() => {
+    // 轻量守护: 每 4s 检查并重建
+    setInterval(function () {
       if (!document.getElementById('tb-logo') && document.body) {
         pinLogo();
         document.body.appendChild(logoImg);
@@ -191,11 +237,11 @@ function injectTitleBar(): void {
       updateLogoVisibility();
     }, 4000);
 
-    // 路由切换时实时同步 logo 可见性(链式包装已有 pushState hook, 不破坏 embyWall 导航逻辑)
+    // 路由切换时同步可见性
     try {
-      const _ps = history.pushState, _rs = history.replaceState;
-      (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); updateLogoVisibility(); };
-      (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); updateLogoVisibility(); };
+      const _ps2 = history.pushState, _rs2 = history.replaceState;
+      (history as any).pushState = function (...a: any[]) { _ps2.apply(this, a as any); updateLogoVisibility(); };
+      (history as any).replaceState = function (...a: any[]) { _rs2.apply(this, a as any); updateLogoVisibility(); };
       window.addEventListener('popstate', updateLogoVisibility);
       window.addEventListener('hashchange', updateLogoVisibility);
     } catch (e) { logger.error('logo nav hook err', String(e).substring(0, 60)); }

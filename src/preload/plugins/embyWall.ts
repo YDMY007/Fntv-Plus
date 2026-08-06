@@ -1973,9 +1973,14 @@ function handle(): void {
       panel.style.setProperty('border-right', 'var(--fnos-sidebar-border)', 'important');
       panel.style.setProperty('box-shadow', 'var(--fnos-sidebar-shadow)', 'important');
       // [v352] 关键: 面板内层嵌套容器常带白底(bg-white/bg-gray), 会盖住浅蓝 → 把它们全部透明化
+      // [lc-371-fix] 跳过 #fnos-switch-system-btn 等注入按钮(否则二次调用 applySidebarGlass 时
+      //   已存在的按钮背景被透明化 → 在半透明面板上不可见)
       const descendants = panel.querySelectorAll('*');
       for (let j = 0; j < descendants.length; j++) {
         const el = descendants[j] as HTMLElement;
+        // 跳过我们注入的侧栏按钮（保持自身背景色）
+        if (el.id === 'fnos-switch-system-btn' || el.id === 'fnos-settings-btn'
+          || el.id === 'fnos-feedback-choice-btn' || el.closest('#fnos-sidebar-actions')) continue;
         const bg = getComputedStyle(el).backgroundColor;
         // 命中不透明/半透明的白系或浅灰底 → 透明, 让浅蓝透上来
         if (isOpaqueLightBg(bg)) {
