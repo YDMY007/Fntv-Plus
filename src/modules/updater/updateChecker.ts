@@ -66,7 +66,6 @@ export class UpdateChecker {
     private owner: string;
     private repo: string;
     private currentVersion: string;
-    private githubApiUrl: string;
     private maxRetries: number;
     private baseRetryDelay: number;
     private mirrorMaxRetries: number;
@@ -77,7 +76,6 @@ export class UpdateChecker {
         this.repo = repo;
         // 如果传入了版本号就使用传入的，否则尝试从app获取，最后使用默认值
         this.currentVersion = currentVersion || (app ? app.getVersion() : 'unknown');
-        this.githubApiUrl = `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
         // 重试配置
         this.maxRetries = 3;
         this.baseRetryDelay = 1000; // 基础延迟1秒
@@ -89,30 +87,16 @@ export class UpdateChecker {
 
     /**
      * 检查是否有新版本（默认策略）。
-     * [2026-08-06] 「是否有更新」的判定**只通过国内 Gitee 检测**（gitee.com 同源，
-     * 国内访问顺畅、不依赖梯子/镜像）；仅当 Gitee 自身不可达(网络/限流)时才回退
-     * GitHub 直链做兜底，正常路径永远是 Gitee。
+     * [2026-08-06] 「是否有更新」**只通过国内 Gitee 检测**，绝不回退国外 GitHub。
+     * Gitee 国内访问稳定可达（实测连续 HTTP 200，无需兜底）；若 Gitee 偶发失败，
+     * 错误直接向上抛出，由手动检查(提示失败) / 自动检查(静默) 各自处理。
      * 不论从哪检测到更新，下载/详情链接都指向**国外 GitHub 发行版最新下载页**
      * （国内 Gitee 不托管大文件，仅放源码与 Release 说明）。
      * 手动/自动检查均走此入口。
      * @returns 更新信息
      */
     async checkForUpdates(): Promise<UpdateInfo> {
-        try {
-            return await this.checkForUpdatesViaGitee();
-        } catch (e: any) {
-            log.warn(`国内 Gitee 检测更新失败, 回退 GitHub 直链: ${(e && e.message) || e}`);
-            return await this.checkForUpdatesWithRetry();
-        }
-    }
-
-    /**
-     * 带梯度重试机制的检查更新（直连，无镜像）。
-     * @param retryCount - 当前重试次数
-     * @returns 更新信息
-     */
-    async checkForUpdatesWithRetry(retryCount: number = 0): Promise<UpdateInfo> {
-        return await this.fetchRelease(this.githubApiUrl, undefined, retryCount);
+        return await this.checkForUpdatesViaGitee();
     }
 
     /**
