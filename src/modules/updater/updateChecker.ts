@@ -440,10 +440,11 @@ export class UpdateChecker {
         const { response } = await fnosDialog(null, {
             type: 'info',
             title: '已是最新版本',
-            message: '您当前使用的就是最新版本，感谢支持！',
+            // 先明确告知用户：已是最新版本、无需更新
+            message: `您当前使用的已经是最新版本（${latestVersion || this.currentVersion}），无需更新。下面是本次版本的更新日志：`,
             detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion || this.currentVersion}`,
-            // 复用最新版本的更新日志（Markdown 富文本渲染），介绍本次版本更新内容
-            markdown: releaseNotes || '暂无更新说明',
+            // 复用最新版本的更新日志（Markdown 富文本渲染），并加"本次更新日志"小标题明确内容
+            markdown: releaseNotes ? `## 本次更新日志\n\n${releaseNotes}` : '暂无更新说明',
             buttons: ['查看详情', '确定'],
             defaultId: 1,
             cancelId: 1,
