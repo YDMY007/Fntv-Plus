@@ -172,9 +172,21 @@ function scheduleAutoIpRefresh(): void {
  * 故海报等图片统一经主进程拉取（复用直连/代理逻辑）后返回 base64 data URL。
  * 这样「免梯子直连」开启时海报也能正常加载，且与 HTTPS_PROXY 方案互不冲突。
  */
+// 图片 data URL 内存缓存：渲染进程每次 render 重建 DOM 会重新请求同一批海报，
+// 若无缓存则会反复重新下载（既烧 TMDB 流量/触发限流，又造成"明明加载过却重拉"的观感）。
+// 这里按 URL 缓存已下载的 data URL，相同图第二次起直接返回，跳过网络下载。FIFO 上限防无限增长。
+const _imgDataUrlCache = new Map<string, string>();
+const IMG_CACHE_MAX = 400;
+
 async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
     try {
         if (!/^https?:\/\//.test(url)) return { ok: false, error: '非法图片地址' };
+        // [lc-370] 命中缓存：直接返回已下载的 data URL，跳过网络下载
+        const cached = _imgDataUrlCache.get(url);
+        if (cached) {
+            log.info('[TMDB诊断] 图片命中本地缓存，跳过下载：' + url.slice(0, 80));
+            return { ok: true, dataUrl: cached };
+        }
         const agent = proxyAgent();
         const direct = fnConfig.getTmdbDirectConnect() && !agent;
         const a = agent || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
@@ -189,8 +201,15 @@ async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?
         const resp = await client.get(url);
         const ct = (resp.headers && resp.headers['content-type']) || 'image/jpeg';
         const b64 = Buffer.from(resp.data as Buffer).toString('base64');
+        const dataUrl = `data:${ct};base64,${b64}`;
+        // 写入缓存（超过上限时淘汰最早一项）
+        if (_imgDataUrlCache.size >= IMG_CACHE_MAX) {
+            const oldest = _imgDataUrlCache.keys().next().value;
+            if (oldest) _imgDataUrlCache.delete(oldest);
+        }
+        _imgDataUrlCache.set(url, dataUrl);
         log.info('[TMDB诊断] 图片拉取成功，' + (resp.data as Buffer).length + ' 字节');
-        return { ok: true, dataUrl: `data:${ct};base64,${b64}` };
+        return { ok: true, dataUrl };
     } catch (e: any) {
         log.error('[TMDB诊断] 图片拉取失败：' + dumpErr(e));
         return { ok: false, error: String((e && e.message) || e) };

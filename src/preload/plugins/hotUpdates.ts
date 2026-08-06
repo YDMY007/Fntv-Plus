@@ -324,6 +324,10 @@ function renderTmdbCard(it: any): string {
   </div>`;
 }
 
+// [lc-370] 已加载海报的 URL→dataURL 映射：render 重建 DOM 后同一批图不再重复发 IPC，直接填充。
+// 与主进程 _imgDataUrlCache 双保险——主进程防网络重下，此处防 IPC 重发。
+const _posterCache = new Map<string, string>();
+
 /** 把含 data-poster 的 <img> 经主进程图片代理拉取为 data URL
  *  路由：豆瓣 → douban:image（带 Referer 解防盗链 418）
  *       Bangumi / TMDB / 其他 → tmdb:image（通用图片代理，支持免梯子直连绕 DNS 污染）
@@ -341,13 +345,16 @@ function hydratePosters(root: HTMLElement): void {
       const url = el.getAttribute('data-poster');
       if (!url) continue;
       el.removeAttribute('data-poster');
+      // 命中前端缓存：已加载过的图直接填，不发 IPC
+      const cached = _posterCache.get(url);
+      if (cached) { el.src = cached; continue; }
       // 按域名路由到对应主进程代理
       const isDouban = /doubanio\.com/i.test(url);
       // Bangumi 图片走 tmdb:image（通用代理，支持直连）；豆瓣走 douban:image（带 Referer）
       const req = ipcRenderer.invoke(isDouban ? 'douban:image' : 'tmdb:image', url);
       const timeout = new Promise<any>((resolve) => setTimeout(() => resolve(null), 8000));
       Promise.race([req, timeout]).then((r: any) => {
-        if (r && r.ok && r.dataUrl) el.src = r.dataUrl;
+        if (r && r.ok && r.dataUrl) { _posterCache.set(url, r.dataUrl); el.src = r.dataUrl; }
       }).catch(() => { /* 加载失败则留空 */ }).finally(worker);
       return; // 本次 worker 仅发起一个请求, 由 finally 链式推进(并发上限=CONCURRENCY)
     }
