@@ -1700,7 +1700,8 @@ function injectNativeReturnButton(): void {
     e.stopPropagation();
     // [lc-374] 清除"主动看系统页"标记 → 回到 /v 后 watchFnosDesktop 恢复原有纠正逻辑
     try { sessionStorage.removeItem('fntv-system-intent'); } catch (_) { /* ignore */ }
-    window.location.href = location.origin + '/v';
+    // [lc-375] 交主进程清除 _systemPageMode 并跳转 /v(原子操作, 避免守卫竞态)
+    ipcRenderer.send('fntv:exit-system-page');
   });
   document.body.appendChild(btn);
   // 兜底: 原生 SPA 若重建 body 子节点, 每 3s 确保按钮仍在(避免被移除后无法返回)
@@ -2110,7 +2111,9 @@ function handle(): void {
         e.stopPropagation();
         // [lc-374] 标记用户主动切系统页 → 抑制 watchFnosDesktop 的桌面纠正(reload /v)
         try { sessionStorage.setItem('fntv-system-intent', '1'); } catch (_) { /* ignore */ }
-        window.location.href = location.origin + '/';
+        // [lc-375] 改由主进程执行跳转: 先置 _systemPageMode 再 loadURL('/'), 避免
+        //   主进程导航守卫(lc-203)的 did-navigate 在标记生效前就把 / 纠正回 /v
+        ipcRenderer.send('fntv:enter-system-page');
       });
       ctrl.prepend(swBtn);  // 放进容器内部最顶部 → 一定在"设置"按钮上方可见
     }

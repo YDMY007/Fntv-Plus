@@ -752,11 +752,41 @@ export function getMainWindow(): BrowserWindow {
         // /app 豁免: 飞牛影视在 fnOS 桌面里的 app 入口可能位于 /app/*, 渲染端会自动点击进入,
         //   主进程不拦截以免纠正回 /v 造成死循环.
         const ALLOWED_PATHS = ['/v/login', '/v/welcome', '/v/oauth', '/v/signin', '/v/auth', '/app'];
+
+        // [lc-375] 切换系统页面: 用户主动进入 fnOS 原生桌面时, 主进程导航守卫(lc-203)会拦截
+        //   did-navigate 到 / 并强制纠正回 /v。_systemPageMode 标记期间放行, 不纠正;
+        //   用户点「返回影视」(fntv:exit-system-page)或自行进入 /v 时自动清除。
+        //   跳转由主进程在置标记后原子执行, 杜绝"标记未生效守卫已纠正"的竞态。
+        let _systemPageMode = false;
+        ipcMain.removeAllListeners('fntv:enter-system-page');
+        ipcMain.on('fntv:enter-system-page', () => {
+            _systemPageMode = true;
+            try {
+                const cur = new URL(mainwin!.webContents.getURL() || 'https://localhost');
+                log.info('[切换系统页面] 进入 fnOS 原生桌面: ' + cur.origin + '/');
+                mainwin!.loadURL(cur.origin + '/');
+            } catch { /* ignore */ }
+        });
+        ipcMain.removeAllListeners('fntv:exit-system-page');
+        ipcMain.on('fntv:exit-system-page', () => {
+            _systemPageMode = false;
+            try {
+                const cur = new URL(mainwin!.webContents.getURL() || 'https://localhost');
+                log.info('[切换系统页面] 返回影视: ' + cur.origin + '/v');
+                mainwin!.loadURL(cur.origin + '/v');
+            } catch { /* ignore */ }
+        });
+
         const guardRedirect = (url: string) => {
             try {
                 const u = new URL(url);
                 if (u.protocol !== 'http:' && u.protocol !== 'https:') return; // 忽略 file:// 等
                 const p = u.pathname;
+                // [lc-375] 系统页面模式: 放行原生桌面及其子路由; 一旦进入 /v 自动退出系统模式
+                if (_systemPageMode) {
+                    if (p === '/v' || p.startsWith('/v/')) _systemPageMode = false;
+                    return;
+                }
                 // 影视页面(首页 /v 本身及 /v/* 子路由)和允许的登录/隐私流程路径 → 不干预
                 // 注意: 首页 pathname 恰好是 "/v"(无末尾斜杠), 必须单独放行, 否则会被判为"非影视路径"
                 //       进而 loadURL("/v") 重定向到同一 URL → did-navigate 反复触发 → 死循环 → 渲染进程被 kill。
