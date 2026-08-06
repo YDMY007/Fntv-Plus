@@ -1,6 +1,8 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as dns from 'dns';
+import * as https from 'https';
 import axios, { AxiosInstance } from 'axios';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as logger from '../../../modules/logger';
@@ -30,6 +32,72 @@ const log = logger.component('bangumi');
 
 const BANGUMI_API = 'https://api.bgm.tv';
 
+// ===== 「免梯子直连」对 Bangumi 域名的支持（仅此国外源 + TMDB 受该开关影响；豆瓣国内直连不管） =====
+// 国内系统 DNS 对 api.bgm.tv 一般可直连，但部分网络环境会被污染/劫持；
+// 开启「免梯子直连」时改用国内可信公共 DNS 解析 Bangumi 域名，绕过系统 DNS 干扰。
+// 与 TMDB 不同：Bangumi 未被解析到假 IP，故无需精确 IP 快照，公共 DNS 即可拿到真实边缘 IP。
+const PUBLIC_DNS_SERVERS = ['223.5.5.5', '119.29.29.29']; // 阿里 / 腾讯 公共 DNS（国内快且稳）
+const BGM_DNS_TTL = 10 * 60 * 1000; // 解析结果缓存 10 分钟，避免每次请求都查公共 DNS
+const _bgmDnsCache = new Map<string, { ip: string; ts: number }>();
+
+function isBangumiHost(hostname: string): boolean {
+    return /(^|\.)bgm\.tv$/.test(hostname);
+}
+
+async function resolveBangumiPublic(hostname: string): Promise<string | null> {
+    const cached = _bgmDnsCache.get(hostname);
+    if (cached && Date.now() - cached.ts < BGM_DNS_TTL) return cached.ip;
+    for (const s of PUBLIC_DNS_SERVERS) {
+        try {
+            const resolver = new dns.promises.Resolver();
+            resolver.setServers([s]); // 用指定公共 DNS 解析（绕过系统 DNS 污染）
+            const addrs = await Promise.race([
+                resolver.resolve4(hostname),
+                new Promise<string[]>((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+            ]);
+            if (addrs && addrs.length) {
+                _bgmDnsCache.set(hostname, { ip: addrs[0], ts: Date.now() });
+                return addrs[0];
+            }
+        } catch { /* 试下一个公共 DNS */ }
+    }
+    return null;
+}
+
+/** 自定义 DNS lookup：开启直连时 Bangumi 域名走公共 DNS（绕过系统 DNS 污染），否则系统 DNS。 */
+function bangumiDirectLookup() {
+    return async (hostname: string, opts: any): Promise<any> => {
+        if (typeof opts === 'function') opts = {};
+        opts = opts || {};
+        if (isBangumiHost(hostname)) {
+            const ip = await resolveBangumiPublic(hostname);
+            if (ip) {
+                log.info('[Bangumi直连] 公共DNS解析 ' + hostname + ' => ' + ip);
+                if (opts.all) return [{ address: ip, family: 4 }];
+                return ip;
+            }
+        }
+        // 未开启直连 / 非 Bangumi 域名 / 公共 DNS 失败 → 系统 DNS
+        const r = await dns.promises.lookup(hostname, { all: false });
+        if (opts.all) return [{ address: r.address, family: r.family }];
+        return r.address;
+    };
+}
+
+/** 开启「免梯子直连」时返回带自定义 DNS lookup 的 https agent；否则 undefined（走系统 DNS） */
+function bangumiDirectAgent(): https.Agent | undefined {
+    return fnConfig.getTmdbDirectConnect()
+        ? new https.Agent({ lookup: bangumiDirectLookup(), keepAlive: false })
+        : undefined;
+}
+
+/** 把直连 agent 注入 axios 配置（不可与代理混用；本插件不处理代理，保持与原有行为一致） */
+function withDirectAgent(cfg: any): any {
+    const a = bangumiDirectAgent();
+    if (a) { cfg.httpsAgent = a; cfg.proxy = false; }
+    return cfg;
+}
+
 // 条目收藏类型：1=想看 2=看过 3=在看 4=搁置 5=抛弃
 const SUBJECT_DOING = 3; // 在看
 const SUBJECT_COLLECT = 2; // 看过
@@ -46,7 +114,7 @@ function bangumiUA(): string {
 /** 带认证的 http 客户端（每次按当前 token 重建 header，token 变更即时生效） */
 function http(): AxiosInstance {
     const token = fnConfig.getBangumiToken();
-    return axios.create({
+    const cfg: any = {
         baseURL: BANGUMI_API,
         timeout: 12000,
         headers: {
@@ -54,7 +122,9 @@ function http(): AxiosInstance {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-    });
+    };
+    withDirectAgent(cfg); // 开启「免梯子直连」时注入自定义 DNS lookup（覆盖同步/取集简介等全部请求）
+    return axios.create(cfg);
 }
 
 // ---- 缓存与节流 ----
@@ -349,10 +419,12 @@ export async function fetchEpisodeDescs(tvTitle: string, totalEps: number): Prom
  */
 async function fetchCalendar(): Promise<{ ok: boolean; items?: any[]; error?: string }> {
     try {
-        const resp = await axios.get(`${BANGUMI_API}/calendar`, {
+        const cfg: any = {
             timeout: 12000,
             headers: { 'User-Agent': bangumiUA() },
-        });
+        };
+        withDirectAgent(cfg); // 开启「免梯子直连」时让每日放送数据源也走公共 DNS
+        const resp = await axios.get(`${BANGUMI_API}/calendar`, cfg);
         const days: any[] = Array.isArray(resp.data) ? resp.data : [];
         const map = new Map<number, any>();
         for (const day of days) {
