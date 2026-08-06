@@ -2003,54 +2003,6 @@ function handle(): void {
     return wrap;
   }
 
-  /** [新] 构造"加入 QQ 群"按钮(腾讯 QQ 小企鹅图标), 返回 <a> 元素
-   *  - 图标为腾讯 QQ 经典企鹅: 黑身白脸白肚、橙喙橙脚、标志性红围巾(区别于 Linux 的 Tux)
-   *  - 按钮内容居中对齐
-   *  - 点击新窗口打开群链接 https://qm.qq.com/q/dUnIQVvoIw */
-  function createQQGroupButton(): HTMLAnchorElement {
-    const qqBtn = document.createElement('a');
-    qqBtn.id = 'fnos-qq-group';
-    qqBtn.href = 'https://qm.qq.com/q/dUnIQVvoIw';
-    qqBtn.target = '_blank';
-    qqBtn.rel = 'noopener noreferrer';
-    qqBtn.style.cssText = 'box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:8px;'
-      + 'width:100%;margin-top:8px;padding:10px 14px;border-radius:10px;cursor:pointer;text-decoration:none;color:#fff;'
-      + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
-      + 'border:1px solid rgba(255,255,255,.2);font-size:13px;font-weight:500;transition:background .15s,border-color .15s;';
-    qqBtn.innerHTML = ''
-      + '<svg width="18" height="18" viewBox="0 0 24 24" style="flex-shrink:0;">'
-      // 身体(蛋形, 下宽上窄)
-      +   '<path d="M12 7 C7 7 5 11 5 15 C5 19.4 8 22 12 22 C16 22 19 19.4 19 15 C19 11 17 7 12 7 Z" fill="#1a1a1a"/>'
-      // 白肚
-      +   '<ellipse cx="12" cy="16" rx="4.3" ry="5" fill="#ffffff"/>'
-      // 头
-      +   '<circle cx="12" cy="6.2" r="4.8" fill="#1a1a1a"/>'
-      // 白脸(腾讯 QQ 企鹅特征: 大白脸)
-      +   '<ellipse cx="12" cy="7" rx="3.6" ry="3.1" fill="#fff"/>'
-      // 眼睛(黑点 + 高光)
-      +   '<circle cx="10.3" cy="6.6" r="1.05" fill="#1a1a1a"/>'
-      +   '<circle cx="13.7" cy="6.6" r="1.05" fill="#1a1a1a"/>'
-      +   '<circle cx="10.6" cy="6.3" r="0.34" fill="#fff"/>'
-      +   '<circle cx="14.0" cy="6.3" r="0.34" fill="#fff"/>'
-      // 橙喙
-      +   '<path d="M10.9 8.2 L13.1 8.2 L12 10 Z" fill="#FF9A1E"/>'
-      // 红围巾(腾讯 QQ 标志性, 区别于 Tux)
-      +   '<path d="M7.2 10 Q12 12.6 16.8 10 L16.3 12.4 Q12 14.6 7.7 12.4 Z" fill="#E60012"/>'
-      // 围巾结/垂下的一角
-      +   '<path d="M15.4 11.6 L18.2 14.4 L16.9 15.4 L14.4 12.6 Z" fill="#E60012"/>'
-      // 橙脚
-      +   '<ellipse cx="9.4" cy="21.8" rx="2.1" ry="1.1" fill="#FF9A1E"/>'
-      +   '<ellipse cx="14.6" cy="21.8" rx="2.1" ry="1.1" fill="#FF9A1E"/>'
-      // 翅膀
-      +   '<ellipse cx="4.8" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(8 4.8 14.5)"/>'
-      +   '<ellipse cx="19.2" cy="14.5" rx="1.7" ry="3.6" fill="#1a1a1a" transform="rotate(-8 19.2 14.5)"/>'
-      + '</svg>'
-      + '<span>Q群反馈</span>';
-    qqBtn.addEventListener('mouseenter', () => { qqBtn.style.borderColor = 'rgba(18,183,245,.5)'; qqBtn.style.background = 'rgba(18,183,245,.08)'; });
-    qqBtn.addEventListener('mouseleave', () => { qqBtn.style.borderColor = 'rgba(255,255,255,.2)'; qqBtn.style.background = 'var(--fnos-sidebar-btn-bg)!important'; });
-    return qqBtn;
-  }
-
   /** [新] 侧栏底部追加"设置"按钮; 点击打开设置面板
    *  注意: 按钮必须 append 到 sticky 底部容器内部(而非 panel 直子),
    *  否则飞牛侧栏面板的 overflow/height 会把按钮裁到可视区域外.
@@ -2088,26 +2040,21 @@ function handle(): void {
     });
     ctrl.appendChild(btn);
 
-    // [恢复v381] 💬 反馈按钮（独立反馈渠道：问卷链接 + 二维码）
-    if (!ctrl.querySelector('#fnos-feedback-btn')) {
-      const fbBtn = document.createElement('button');
-      fbBtn.id = 'fnos-feedback-btn';
-      fbBtn.type = 'button';
-      fbBtn.textContent = '💬 问卷反馈';
-      fbBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+    // [lc-361] 合并"问卷反馈"与"Q群反馈"为单个"软件反馈建议"按钮(点击弹出选择弹窗)
+    if (!ctrl.querySelector('#fnos-feedback-choice-btn')) {
+      const fbChoiceBtn = document.createElement('button');
+      fbChoiceBtn.id = 'fnos-feedback-choice-btn';
+      fbChoiceBtn.type = 'button';
+      fbChoiceBtn.textContent = '💡 软件反馈建议';
+      fbChoiceBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
-      fbBtn.addEventListener('click', (e: Event) => {
+      fbChoiceBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        openFeedbackModal();
+        openFeedbackChoiceModal();
       });
-      ctrl.appendChild(fbBtn);
-    }
-
-    // [新] 加入 QQ 群按钮(小企鹅图标) - 位于"反馈"按钮下方
-    if (!ctrl.querySelector('#fnos-qq-group')) {
-      ctrl.appendChild(createQQGroupButton());
+      ctrl.appendChild(fbChoiceBtn);
     }
 
     buildSettingsPanel();
@@ -4560,6 +4507,7 @@ registerHook(HookType.OnReady, handle);
 const ABOUT_LINK_URL = 'https://github.com/YDMY007/Fntv-Plus';
 
 const FEEDBACK_LINK_URL = 'https://wj.qq.com/s2/27390788/787a/';
+const QQ_GROUP_URL = 'https://qm.qq.com/q/dUnIQVvoIw'; // [lc-361] QQ 交流群(原侧栏"Q群反馈"按钮迁入反馈选择弹窗)
 const openFeedbackModal = async (): Promise<void> => {
   let modal = document.getElementById('fnos-feedback-modal') as HTMLElement | null;
   if (!modal) {
@@ -4617,7 +4565,70 @@ const openFeedbackModal = async (): Promise<void> => {
       } else {
         qrBox.textContent = 'QR';
       }
-    } catch (e) { qrBox.textContent = 'QR'; }
+      } catch (e) { qrBox.textContent = 'QR'; }
   }
+};
+
+/* ========== [lc-361] 反馈方式选择弹窗（合并"问卷反馈"与"Q群反馈"为单一入口） ========== */
+const openFeedbackChoiceModal = (): void => {
+  let modal = document.getElementById('fnos-feedback-choice-modal') as HTMLElement | null;
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fnos-feedback-choice-modal';
+    modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+    modal.style.cssText = 'position:fixed;z-index:2147483702;inset:0;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,.5);';
+    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
+
+    const card = document.createElement('div');
+    card.style.cssText = 'width:320px;border-radius:18px;padding:22px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);';
+
+    card.innerHTML = ''
+      + '<div style="font-size:19px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">💡 软件反馈建议</div>'
+      + '<div style="font-size:12.5px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:16px;">请选择反馈方式：</div>';
+
+    // 选项一：用户调研问卷（→ 原问卷反馈弹窗）
+    const optSurvey = document.createElement('button');
+    optSurvey.type = 'button';
+    optSurvey.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:14px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:left;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
+      + 'transition:background .15s,border-color .15s;';
+    optSurvey.innerHTML = '<div style="font-size:14px;font-weight:700;">📝 用户调研问卷</div>'
+      + '<div style="font-size:11.5px;opacity:.7;">填写问卷，反馈使用体验与建议</div>';
+    optSurvey.addEventListener('click', () => {
+      if (modal) modal.style.display = 'none';
+      openFeedbackModal();
+    });
+
+    // 选项二：QQ 交流群（→ 系统浏览器打开群链接）
+    const optQQ = document.createElement('button');
+    optQQ.type = 'button';
+    optQQ.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:14px 16px;border-radius:14px;cursor:pointer;text-align:left;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
+      + 'transition:background .15s,border-color .15s;';
+    optQQ.innerHTML = '<div style="font-size:14px;font-weight:700;">💬 QQ 交流群</div>'
+      + '<div style="font-size:11.5px;opacity:.7;">加入 QQ 群，实时交流反馈</div>';
+    optQQ.addEventListener('click', async () => {
+      if (modal) modal.style.display = 'none';
+      try { await ipcRenderer.invoke('app:open-external', QQ_GROUP_URL); } catch (_) {}
+    });
+
+    // 悬停高亮
+    [optSurvey, optQQ].forEach((b) => {
+      b.addEventListener('mouseenter', () => { b.style.background = 'var(--fnos-ui-pill-hover)!important'; b.style.borderColor = 'var(--fnos-ui-pill-border)'; });
+      b.addEventListener('mouseleave', () => { b.style.background = 'var(--fnos-ui-input-bg)!important'; b.style.borderColor = 'var(--fnos-ui-border3)'; });
+    });
+
+    card.appendChild(optSurvey);
+    card.appendChild(optQQ);
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
 };
 
