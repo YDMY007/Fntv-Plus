@@ -90,6 +90,10 @@ function log(...a: any[]) {
   let _lastReload = 0;
   const tryFix = (): void => {
     try {
+      // [lc-374] 用户主动切换系统页标记: 侧栏"切换系统页面"按钮置位(sessionStorage='1')后,
+      //   进入飞牛原生桌面时不再强制跳回 /v; "返回影视"按钮清除该标记。
+      //   访问码验证后自动落到系统的旧场景(lc-205)不会置位, 纠正逻辑保持不变。
+      if (sessionStorage.getItem('fntv-system-intent') === '1') return;
       const p = location.pathname;
       // 仅在根或 /v 疑似桌面/访问码后介入; 影视内部页(/v/tv/...等)不干预
       if (p !== '/' && p !== '/v' && p !== '/v/') return;
@@ -1694,6 +1698,8 @@ function injectNativeReturnButton(): void {
     + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
   btn.addEventListener('click', (e: Event) => {
     e.stopPropagation();
+    // [lc-374] 清除"主动看系统页"标记 → 回到 /v 后 watchFnosDesktop 恢复原有纠正逻辑
+    try { sessionStorage.removeItem('fntv-system-intent'); } catch (_) { /* ignore */ }
     window.location.href = location.origin + '/v';
   });
   document.body.appendChild(btn);
@@ -2102,6 +2108,8 @@ function handle(): void {
         + 'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
       swBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
+        // [lc-374] 标记用户主动切系统页 → 抑制 watchFnosDesktop 的桌面纠正(reload /v)
+        try { sessionStorage.setItem('fntv-system-intent', '1'); } catch (_) { /* ignore */ }
         window.location.href = location.origin + '/';
       });
       ctrl.prepend(swBtn);  // 放进容器内部最顶部 → 一定在"设置"按钮上方可见
