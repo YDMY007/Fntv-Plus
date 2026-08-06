@@ -1948,7 +1948,7 @@ function handle(): void {
           el.style.setProperty('background-color', 'transparent', 'important');
         }
       }
-      injectGlassControl(panel); // [v364] 底部注入"透明度/模糊"滑块
+      injectSettingsUI(panel); // [lc-360] 侧栏底部只保留"设置/反馈/QQ"按钮(滑块已迁入设置面板"外观"标签页)
       break; // 只处理第一个非 absolute 子元素
     }
     // 遮罩层: 极淡暖灰雾感, 与 Mica 亚克力风格统一
@@ -1957,25 +1957,20 @@ function handle(): void {
       drawer.style.setProperty('-webkit-backdrop-filter', 'blur(8px) saturate(120%)', 'important');
   }
 
-  /** [v364] 侧栏底部注入"亚克力透明度/模糊"调节滑块, 实时调整 --fnos-alpha / --fnos-blur
+  /** [lc-360] 构造"亚克力透明度/模糊"调节滑块组(纯 DOM, 可复用于设置面板"外观"标签页)
    *  - 透明度滑块(0~100): 值越大越透(桌面透出越多). 反向映射到 body 背景 alpha(0.95→0.05)
    *  - 模糊滑块(0~100px): 调节 backdrop-filter 模糊强度
    *  - 写入 localStorage, 重启后仍生效 */
-  function injectGlassControl(panel: HTMLElement): void {
-    if (panel.querySelector('#fnos-glass-ctrl')) return; // 幂等, 避免重复注入
+  function buildAppearanceControls(): HTMLElement {
     // [lc-119] 首次登录(无 localStorage)默认: 透明度滑块=30%(对应 alpha 0.68), 背景模糊滑块=30px
     const storedAlpha = parseFloat(localStorage.getItem('fnos-glass-alpha') || '0.68');
     const storedBlur = parseInt(localStorage.getItem('fnos-glass-blur') || '30', 10);
     // 滑块 value=透明度%(0→浓度最高不透明0.95, 100→最透0.05); 与 alpha 反相关
     const alphaPct = Math.max(0, Math.min(100, Math.round((0.95 - storedAlpha) / 0.9 * 100)));
-    const ctrl = document.createElement('div');
-    ctrl.id = 'fnos-glass-ctrl';
-    ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
-      + 'padding:14px 14px 16px;border-radius:14px;'
-      + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
-      + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
-      + 'color:#fff;font-size:12px;user-select:none;';
-    ctrl.innerHTML = ''
+    const wrap = document.createElement('div');
+    wrap.id = 'fnos-appearance-ctrl';
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+    wrap.innerHTML = ''
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
       +   '<span style="font-weight:600;letter-spacing:.5px;">亚克力透明度</span>'
       +   '<span id="fnos-alpha-val" style="opacity:.85;">' + alphaPct + '%</span></div>'
@@ -1986,12 +1981,11 @@ function handle(): void {
       +   '<span id="fnos-blur-val" style="opacity:.85;">' + storedBlur + 'px</span></div>'
       + '<input id="fnos-blur" type="range" min="0" max="100" value="' + storedBlur + '" '
       +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">';
-    panel.appendChild(ctrl);
 
-    const alphaInput = ctrl.querySelector('#fnos-alpha') as HTMLInputElement;
-    const alphaVal = ctrl.querySelector('#fnos-alpha-val') as HTMLElement;
-    const blurInput = ctrl.querySelector('#fnos-blur') as HTMLInputElement;
-    const blurVal = ctrl.querySelector('#fnos-blur-val') as HTMLElement;
+    const alphaInput = wrap.querySelector('#fnos-alpha') as HTMLInputElement;
+    const alphaVal = wrap.querySelector('#fnos-alpha-val') as HTMLElement;
+    const blurInput = wrap.querySelector('#fnos-blur') as HTMLInputElement;
+    const blurVal = wrap.querySelector('#fnos-blur-val') as HTMLElement;
 
     alphaInput.addEventListener('input', () => {
       const pct = parseInt(alphaInput.value, 10);
@@ -2006,7 +2000,7 @@ function handle(): void {
       if (blurVal) blurVal.textContent = px + 'px';
       localStorage.setItem('fnos-glass-blur', String(px));
     });
-    injectSettingsUI(panel); // [新] 侧栏底部追加"设置"按钮 + 设置面板(替代托盘右键菜单设置项)
+    return wrap;
   }
 
   /** [新] 构造"加入 QQ 群"按钮(腾讯 QQ 小企鹅图标), 返回 <a> 元素
@@ -2058,17 +2052,31 @@ function handle(): void {
   }
 
   /** [新] 侧栏底部追加"设置"按钮; 点击打开设置面板
-   *  注意: 按钮必须 append 到 #fnos-glass-ctrl 容器内部(而非 panel 直子),
-   *  否则飞牛侧栏面板的 overflow/height 会把按钮裁到可视区域外. */
+   *  注意: 按钮必须 append 到 sticky 底部容器内部(而非 panel 直子),
+   *  否则飞牛侧栏面板的 overflow/height 会把按钮裁到可视区域外.
+   *  [lc-360] 容器优先复用旧 #fnos-glass-ctrl(兼容), 缺失时自建 #fnos-sidebar-actions
+   *  (亚克力滑块已迁入设置面板"外观"标签页, 侧栏容器不再含滑块). */
   function injectSettingsUI(panel: HTMLElement): void {
-    const ctrl = panel.querySelector('#fnos-glass-ctrl') as HTMLElement | null;
-    if (!ctrl || ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
+    // 容器: 兼容旧 #fnos-glass-ctrl, 否则复用/新建 #fnos-sidebar-actions
+    let ctrl = panel.querySelector('#fnos-glass-ctrl') as HTMLElement | null;
+    if (!ctrl) ctrl = panel.querySelector('#fnos-sidebar-actions') as HTMLElement | null;
+    if (!ctrl) {
+      ctrl = document.createElement('div');
+      ctrl.id = 'fnos-sidebar-actions';
+      ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
+        + 'padding:14px 14px 16px;border-radius:14px;display:flex;flex-direction:column;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
+        + 'color:#fff;font-size:12px;user-select:none;';
+      panel.appendChild(ctrl);
+    }
+    if (ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
 
     const btn = document.createElement('button');
     btn.id = 'fnos-settings-btn';
     btn.type = 'button';
     btn.textContent = '⚙ 设置';
-    btn.style.cssText = 'box-sizing:border-box;margin-top:12px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+    btn.style.cssText = 'box-sizing:border-box;margin-top:0;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
       + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
       + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
       + 'box-shadow:0 4px 16px rgba(0,0,0,.18);';
@@ -3814,6 +3822,12 @@ function handle(): void {
     aboutLink.onmouseleave = () => { aboutLink.style.transform = ''; aboutLink.style.background = 'var(--fnos-ui-pill-bg)!important'; aboutLink.style.color = 'var(--fnos-ui-pill-text)'; };
     secBodyAbout.appendChild(aboutLink);
 
+    // ===== 分组: 外观（独立标签页；原侧栏"亚克力透明度/背景模糊"滑块迁入设置面板）=====
+    const secAppearance = section('亚克力外观');
+    const secBodyAppearance = secAppearance.body;
+    secBodyAppearance.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+    secBodyAppearance.appendChild(buildAppearanceControls());
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
@@ -3824,6 +3838,7 @@ function handle(): void {
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'plugins', label: '插件', els: [secSkip.el] },
+      { id: 'appearance', label: '外观', els: [secAppearance.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
