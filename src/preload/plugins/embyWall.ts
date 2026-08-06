@@ -3097,14 +3097,9 @@ function handle(): void {
     });
 
     // ===== TMDB 免梯子直连（实验）：用固定 IP 覆盖 DNS 解析，绕过污染直连，无需梯子 =====
+    // （此区块整体迁入设置面板「插件」标签页，见下方 secTmdbDirect，故此处不再挂到 TMDB Key 区）
     const dcWrap = document.createElement('div');
-    dcWrap.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid var(--fnos-ui-line);';
-    secBodyTmdb.appendChild(dcWrap);
-
-    const dcTitle = document.createElement('div');
-    dcTitle.style.cssText = 'font-size:12px;color:var(--fnos-ui-text);font-weight:600;margin-bottom:6px;';
-    dcTitle.textContent = '免梯子直连（实验）';
-    dcWrap.appendChild(dcTitle);
+    dcWrap.style.cssText = 'margin-top:4px;';
 
     const dcDesc = document.createElement('div');
     dcDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
@@ -3197,7 +3192,6 @@ function handle(): void {
     tmdbSettingsWrap.appendChild(tmdbBtns);
     tmdbSettingsWrap.appendChild(tmdbStatus);
     tmdbSettingsWrap.appendChild(tmdbHintBottom);
-    tmdbSettingsWrap.appendChild(dcWrap);
 
     const dsHint = document.createElement('div');
     dsHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
@@ -3240,6 +3234,12 @@ function handle(): void {
 
     // 初始状态（_hotSource 由启动时 settings:get 回填，缺省默认豆瓣）
     setDs(_hotSource);
+
+    // ===== 分组: TMDB 免梯子直连（实验）（从账号同步的 TMDB API Key 区迁出，独立放入「插件」标签页）=====
+    const secTmdbDirect = section('TMDB 免梯子直连（实验）');
+    secTmdbDirect.el.style.gridColumn = '1 / -1'; // 内容较多，占满整行
+    const secBodyTmdbDirect = secTmdbDirect.body;
+    secBodyTmdbDirect.appendChild(dcWrap);
 
     // ===== 分组: 豆瓣同步 =====
     const secDouban = section('豆瓣同步');
@@ -3809,7 +3809,7 @@ function handle(): void {
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
-      { id: 'plugins', label: '插件', els: [secSkip.el] },
+      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
