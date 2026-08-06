@@ -67,9 +67,16 @@ function injectTitleBar(): void {
 
     document.body.appendChild(floatBar);
 
-    // [lc-377] 原生页无标题栏填充, 清除主进程 ACRYLIC_CSS 强制的 body{padding-top:32px!important} → 消除顶部白线
-    //   必须用 !important 才能压过主进程 insertCSS 注入的 !important 规则(普通 inline 会被覆盖)
+    // [lc-377/lc-379] 原生页消除 body 白色亚克力背景露白(顶部/底部白边同一根因):
+    //   主进程 ACRYLIC_CSS 给 body 设了 background:rgba(250,244,250,.68)+backdrop-filter 做 TV 页亚克力,
+    //   但原生 fnOS 桌面自带不透明背景; body 白底会在内容没撑满视口时于顶/底间隙露出白边。
+    //   原生页将 body 背景/模糊全部透明化, 让 fnOS 桌面自身背景透出 → 上下白边一并消除。
+    //   均用 !important 压过主进程 insertCSS 注入的 !important 规则。
     document.body.style.setProperty('padding-top', '0', 'important');
+    document.body.style.setProperty('background', 'transparent', 'important');
+    document.body.style.setProperty('background-color', 'transparent', 'important');
+    document.body.style.setProperty('backdrop-filter', 'none', 'important');
+    document.body.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
     // 点击事件
     document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });
