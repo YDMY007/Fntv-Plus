@@ -2080,35 +2080,6 @@ function handle(): void {
     });
     ctrl.appendChild(btn);
 
-    // [恢复v383] ℹ 关于按钮（版本号 + 居中，匹配设置按钮样式）
-    if (!ctrl.querySelector('#fnos-about-btn')) {
-      const verBtn = document.createElement('button');
-      verBtn.id = 'fnos-about-btn';
-      verBtn.type = 'button';
-      // 初始不含具体版本号(避免硬编码假版本); 真实版本由下方 IPC(version-info) 动态写入
-      verBtn.innerHTML = 'ℹ 关于';
-      verBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
-        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
-        + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
-        + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
-      verBtn.addEventListener('click', (e: Event) => {
-        e.stopPropagation();
-        openAboutModal();
-      });
-      ctrl.appendChild(verBtn);
-      // 动态版本号: 从主进程取真实版本(打包后准确; dev 若为 unknown 则保留兜底版本)
-      // 主进程 get-version 用 ipcMain.on 注册、以 event.reply('version-info') 回传(on 模式)，
-      // 故渲染端必须用 send + on 接收，不能用 invoke(invoke 需 ipcMain.handle，会 reject)。
-      try {
-        ipcRenderer.send('get-version');
-        ipcRenderer.once('version-info', (_e: any, info: any) => {
-          if (info && info.version && info.version !== 'unknown') {
-            verBtn.innerHTML = 'ℹ 关于&nbsp;v' + info.version;
-          }
-        });
-      } catch (_) {}
-    }
-
     // [恢复v381] 💬 反馈按钮（独立反馈渠道：问卷链接 + 二维码）
     if (!ctrl.querySelector('#fnos-feedback-btn')) {
       const fbBtn = document.createElement('button');
@@ -3795,6 +3766,54 @@ function handle(): void {
     // 读取初始值（默认关闭）
     ipcRenderer.invoke('settings:get-smart-skip-enabled').then((v: boolean) => { swSkip.checked = !!v; }).catch(() => { swSkip.checked = false; });
 
+    // ===== 分组: 关于（独立标签页；原侧栏"关于"按钮迁入设置面板）=====
+    const secAbout = section();
+    const secBodyAbout = secAbout.body;
+    secBodyAbout.style.cssText = 'padding:18px 16px;flex:1 1 auto;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;';
+
+    const aboutTitle = document.createElement('div');
+    aboutTitle.style.cssText = 'font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);';
+    aboutTitle.textContent = '🎬 飞牛影视';
+    secBodyAbout.appendChild(aboutTitle);
+
+    const aboutAuthor = document.createElement('div');
+    aboutAuthor.style.cssText = 'font-size:13px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:4px;';
+    aboutAuthor.textContent = 'YDMY007';
+    secBodyAbout.appendChild(aboutAuthor);
+
+    const aboutDesc = document.createElement('div');
+    aboutDesc.style.cssText = 'font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;';
+    aboutDesc.textContent = '基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。支持 MPV 播放器、B站弹幕、自定义透明度与模糊效果。';
+    secBodyAbout.appendChild(aboutDesc);
+
+    const aboutVer = document.createElement('div');
+    aboutVer.id = 'fnos-about-version';
+    aboutVer.style.cssText = 'font-size:12.5px;color:var(--fnos-ui-muted);margin-top:2px;';
+    aboutVer.textContent = '版本：获取中…';
+    secBodyAbout.appendChild(aboutVer);
+    // 动态版本号：复用主进程 get-version / version-info（与旧侧栏关于按钮同源）
+    try {
+      ipcRenderer.send('get-version');
+      ipcRenderer.once('version-info', (_e: any, info: any) => {
+        if (info && info.version) aboutVer.textContent = '版本：v' + info.version;
+      });
+    } catch (_) {}
+
+    const aboutLink = document.createElement('a');
+    aboutLink.href = ABOUT_LINK_URL;
+    aboutLink.textContent = '🔗 GitHub 项目地址';
+    aboutLink.style.cssText = 'display:inline-block;font-size:13px;font-weight:700;color:var(--fnos-ui-pill-text);text-decoration:none;'
+      + 'padding:8px 20px;border-radius:10px;background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
+      + 'transition:background .15s,transform .1s;margin-top:6px;cursor:pointer;';
+    aboutLink.addEventListener('click', async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await ipcRenderer.invoke('app:open-external', ABOUT_LINK_URL); } catch (_) {}
+    });
+    aboutLink.onmouseenter = () => { aboutLink.style.transform = 'scale(1.03)'; aboutLink.style.background = 'var(--fnos-ui-pill-hover)!important'; aboutLink.style.color = '#fff'; };
+    aboutLink.onmouseleave = () => { aboutLink.style.transform = ''; aboutLink.style.background = 'var(--fnos-ui-pill-bg)!important'; aboutLink.style.color = 'var(--fnos-ui-pill-text)'; };
+    secBodyAbout.appendChild(aboutLink);
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
@@ -3805,6 +3824,7 @@ function handle(): void {
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'plugins', label: '插件', els: [secSkip.el] },
+      { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
     const panes: Record<string, HTMLElement> = {};
@@ -4133,11 +4153,10 @@ function handle(): void {
       if (overlay.contains(t)) return;
       const sb = document.getElementById('fnos-settings-btn');
       if (sb && sb.contains(t)) return;
-      // 落在其他自建设置弹窗(检查更新 fnosDialog / 关于 / 反馈 / B站登录)内时,
+      // 落在其他自建设置弹窗(检查更新 fnosDialog / 反馈 / B站登录)内时,
       // 不连带关闭设置面板, 实现\"一层一层关\"的层级交互。
       if (t instanceof Element) {
         const withinOtherUi = t.closest('#fnos-dialog-overlay')
-          || t.closest('#fnos-about-modal')
           || t.closest('#fnos-feedback-modal')
           || t.closest('#fnos-bili-modal')
           || t.closest('#fnos-history-overlay');
@@ -4522,51 +4541,8 @@ function handle(): void {
 
 registerHook(HookType.OnReady, handle);
 
-/* ========== [恢复v381/v383] 关于弹窗 & 反馈弹窗 ========== */
+/* ========== [恢复v381] 反馈弹窗 ========== */
 const ABOUT_LINK_URL = 'https://github.com/YDMY007/Fntv-Plus';
-const openAboutModal = (): void => {
-  let modal = document.getElementById('fnos-about-modal') as HTMLElement | null;
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'fnos-about-modal';
-    modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器(否则卡片浅粉底会被清成透明)
-    modal.style.cssText = 'position:fixed;z-index:2147483701;inset:0;display:none;align-items:center;justify-content:center;'
-      + 'background:rgba(0,0,0,.5);';
-    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
-
-    const card = document.createElement('div');
-    card.style.cssText = 'width:320px;border-radius:18px;padding:24px;color:var(--fnos-ui-text);'
-      + 'background:var(--fnos-ui-panel-bg)!important;'
-      + 'border:1px solid var(--fnos-ui-border-outer);'
-      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
-      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
-      + 'text-align:center;';
-
-    card.innerHTML = ''
-      + '<div style="font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">🎬 飞牛影视</div>'
-      + '<div style="font-size:13px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:16px;">YDMY007</div>'
-      + '<div style="font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;text-align:center;margin-bottom:20px;padding:0 4px;">'
-      +   '基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。'
-      +   '支持 MPV 播放器、B站弹幕、自定义透明度与模糊效果。</div>'
-      + '<a id="fnos-about-link" href="' + ABOUT_LINK_URL + '" style="display:inline-block;font-size:13px;font-weight:700;'
-      +   'color:var(--fnos-ui-pill-text);text-decoration:none;padding:8px 20px;border-radius:10px;'
-      +   'background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
-      +   'transition:background .15s,transform .1s;">🔗 GitHub 项目地址</a>';
-
-    modal.appendChild(card);
-    document.body.appendChild(modal);
-
-    (document.getElementById('fnos-about-link') as HTMLElement).addEventListener('click', async (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      try { await ipcRenderer.invoke('app:open-external', ABOUT_LINK_URL); } catch (_) {}
-    });
-    const linkEl = document.getElementById('fnos-about-link') as HTMLElement;
-    linkEl.onmouseenter = () => { linkEl.style.transform = 'scale(1.03)'; linkEl.style.background = 'var(--fnos-ui-pill-hover)!important'; linkEl.style.color = '#fff'; };
-    linkEl.onmouseleave = () => { linkEl.style.transform = ''; linkEl.style.background = 'var(--fnos-ui-pill-bg)!important'; linkEl.style.color = 'var(--fnos-ui-pill-text)'; };
-  }
-  modal.style.display = 'flex';
-};
 
 const FEEDBACK_LINK_URL = 'https://wj.qq.com/s2/27390788/787a/';
 const openFeedbackModal = async (): Promise<void> => {
