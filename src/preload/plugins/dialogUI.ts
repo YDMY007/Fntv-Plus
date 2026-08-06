@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron';
+import { renderMarkdown, MD_BODY_CSS } from '../markdown';
 
 // 粉紫亚克力自定义对话框，替代 Electron 原生 dialog.showMessageBox
 // 主进程通过 webContents.send('fnos-dialog:open', payload) 唤起，
@@ -9,6 +10,8 @@ interface FnosDialogPayload {
     title: string;
     message?: string;
     detail?: string;
+    /** Markdown 更新日志；存在时渲染为富文本（.md-body），优于纯文本 detail */
+    markdown?: string;
     type?: 'none' | 'info' | 'question' | 'error';
     buttons?: string[];
     defaultId?: number;
@@ -32,6 +35,14 @@ ipcRenderer.on('fnos-dialog:open', (_event: any, payload: FnosDialogPayload) => 
 function buildDialog(payload: FnosDialogPayload): HTMLElement {
     const type = payload.type || 'none';
     const icon = ICON[type] || ICON.none;
+
+    // 注入 markdown 渲染样式（.md-body），本浮层独立生效，不依赖 embyWall 的全局 CSS
+    if (payload.markdown) {
+        const style = document.createElement('style');
+        style.setAttribute('data-fnos-md', '1');
+        style.textContent = MD_BODY_CSS;
+        (document.head || document.documentElement).appendChild(style);
+    }
 
     const overlay = document.createElement('div');
     overlay.id = 'fnos-dialog-overlay';
@@ -96,6 +107,18 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
         card.appendChild(detail);
     }
 
+    // Markdown 更新日志（富文本渲染，带独立滚动区）
+    if (payload.markdown) {
+        const mdWrap = document.createElement('div');
+        mdWrap.style.cssText = [
+            'max-height:300px', 'overflow-y:auto',
+            'background:rgba(255,255,255,.5)!important',
+            'border-radius:10px', 'padding:6px 12px', 'margin-bottom:6px',
+        ].join(';') + ';';
+        mdWrap.innerHTML = renderMarkdown(payload.markdown);
+        card.appendChild(mdWrap);
+    }
+
     // 可选 checkbox
     let checked = !!payload.checkboxChecked;
     if (payload.checkboxLabel) {
@@ -136,7 +159,11 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
         btn.addEventListener('click', () => {
             overlay.style.opacity = '0';
             card.style.transform = 'scale(.96)';
-            setTimeout(() => overlay.remove(), 180);
+            setTimeout(() => {
+                overlay.remove();
+                const mdStyle = document.querySelector('style[data-fnos-md="1"]');
+                if (mdStyle) mdStyle.remove();
+            }, 180);
             ipcRenderer.send('fnos-dialog:result', payload.id, index, checked);
         });
         footer.appendChild(btn);

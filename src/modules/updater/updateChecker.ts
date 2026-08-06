@@ -400,7 +400,9 @@ export class UpdateChecker {
             type: 'info',
             title: '发现新版本',
             message: `飞牛影视有新版本可用！`,
-            detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion}\n\n更新内容:\n${releaseNotes || '暂无更新说明'}`,
+            detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion}`,
+            // 更新日志记录以 Markdown 传入，弹窗按 .md-body 富文本渲染（含标题/列表/加粗/链接）
+            markdown: releaseNotes || '暂无更新说明',
             buttons: ['立即下载', '查看详情', '稍后提醒'],
             defaultId: 0,
             cancelId: 2,

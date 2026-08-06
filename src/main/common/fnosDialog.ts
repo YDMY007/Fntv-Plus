@@ -8,6 +8,8 @@ export interface FnosDialogOptions {
     title?: string;
     message?: string;
     detail?: string;
+    /** Markdown 更新日志（渲染进程会按 .md-body 样式渲染，优于纯文本 detail） */
+    markdown?: string;
     type?: 'none' | 'info' | 'question' | 'error';
     buttons?: string[];
     defaultId?: number;
