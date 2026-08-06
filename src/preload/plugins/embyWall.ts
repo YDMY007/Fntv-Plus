@@ -4120,6 +4120,7 @@ function handle(): void {
       if (t instanceof Element) {
         const withinOtherUi = t.closest('#fnos-dialog-overlay')
           || t.closest('#fnos-feedback-modal')
+          || t.closest('#fnos-qq-group-modal')
           || t.closest('#fnos-bili-modal')
           || t.closest('#fnos-history-overlay');
         if (withinOtherUi) return;
@@ -4527,6 +4528,9 @@ const openFeedbackModal = async (): Promise<void> => {
       + 'text-align:center;';
 
     card.innerHTML = ''
+      + '<div id="fnos-feedback-back" style="display:flex;align-items:center;gap:6px;margin-bottom:16px;cursor:pointer;'
+      +   'font-size:13px;font-weight:600;color:var(--fnos-ui-pill-text);">'
+      +   '<span style="font-size:17px;line-height:1;">←</span><span>返回</span></div>'
       + '<div style="font-size:20px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:6px;">💬 意见反馈</div>'
       + '<div style="font-size:12.5px;line-height:1.7;color:var(--fnos-ui-text);opacity:.82;margin-bottom:16px;">'
       +   '欢迎扫码填写问卷，向我们反馈使用体验与建议。</div>'
@@ -4541,6 +4545,13 @@ const openFeedbackModal = async (): Promise<void> => {
     modal.appendChild(card);
     document.body.appendChild(modal);
 
+    (document.getElementById('fnos-feedback-back') as HTMLElement).addEventListener('click', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      modal!.style.display = 'none';
+      const choice = document.getElementById('fnos-feedback-choice-modal');
+      if (choice) choice.style.display = 'flex';
+    });
     (document.getElementById('fnos-feedback-link') as HTMLElement).addEventListener('click', async (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4613,9 +4624,9 @@ const openFeedbackChoiceModal = (): void => {
       + 'transition:background .15s,border-color .15s;';
     optQQ.innerHTML = '<div style="font-size:14px;font-weight:700;">💬 QQ 交流群</div>'
       + '<div style="font-size:11.5px;opacity:.7;">加入 QQ 群，实时交流反馈</div>';
-    optQQ.addEventListener('click', async () => {
+    optQQ.addEventListener('click', () => {
       if (modal) modal.style.display = 'none';
-      try { await ipcRenderer.invoke('app:open-external', QQ_GROUP_URL); } catch (_) {}
+      openQQGroupModal();
     });
 
     // 悬停高亮
@@ -4628,6 +4639,57 @@ const openFeedbackChoiceModal = (): void => {
     card.appendChild(optQQ);
     modal.appendChild(card);
     document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+};
+
+/* ========== [lc-362] QQ 交流群弹窗（带返回按钮，一层一层返回） ========== */
+const openQQGroupModal = (): void => {
+  let modal = document.getElementById('fnos-qq-group-modal') as HTMLElement | null;
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fnos-qq-group-modal';
+    modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+    modal.style.cssText = 'position:fixed;z-index:2147483703;inset:0;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,.5);';
+    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
+
+    const card = document.createElement('div');
+    card.style.cssText = 'width:320px;border-radius:18px;padding:22px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);';
+
+    card.innerHTML = ''
+      + '<div id="fnos-qq-back" style="display:flex;align-items:center;gap:6px;margin-bottom:16px;cursor:pointer;'
+      +   'font-size:13px;font-weight:600;color:var(--fnos-ui-pill-text);">'
+      +   '<span style="font-size:17px;line-height:1;">←</span><span>返回</span></div>'
+      + '<div style="font-size:20px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:6px;">💬 QQ 交流群</div>'
+      + '<div style="font-size:12.5px;line-height:1.7;color:var(--fnos-ui-text);opacity:.82;margin-bottom:18px;">'
+      +   '点击下方按钮加入 QQ 群，实时交流使用体验与建议。</div>'
+      + '<a id="fnos-qq-join" href="' + QQ_GROUP_URL + '" style="display:inline-block;font-size:13px;font-weight:700;'
+      +   'color:var(--fnos-ui-pill-text);text-decoration:none;padding:9px 22px;border-radius:10px;'
+      +   'background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
+      +   'transition:background .15s,transform .1s;">➕ 加入 QQ 群</a>';
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
+
+    (document.getElementById('fnos-qq-back') as HTMLElement).addEventListener('click', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      modal!.style.display = 'none';
+      const choice = document.getElementById('fnos-feedback-choice-modal');
+      if (choice) choice.style.display = 'flex';
+    });
+    (document.getElementById('fnos-qq-join') as HTMLElement).addEventListener('click', async (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await ipcRenderer.invoke('app:open-external', QQ_GROUP_URL); } catch (_) {}
+    });
+    const qjoin = document.getElementById('fnos-qq-join') as HTMLElement;
+    qjoin.onmouseenter = () => { qjoin.style.transform = 'scale(1.03)'; qjoin.style.background = 'var(--fnos-ui-pill-hover)!important'; qjoin.style.color = '#fff'; };
+    qjoin.onmouseleave = () => { qjoin.style.transform = ''; qjoin.style.background = 'var(--fnos-ui-pill-bg)!important'; qjoin.style.color = 'var(--fnos-ui-pill-text)'; };
   }
   modal.style.display = 'flex';
 };
