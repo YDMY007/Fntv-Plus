@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { isFntvTvPage } from '../core/pageMode';
 import logger from '../core/logger';
 
 // [v332 fix] 用 fs.readFileSync 读取本地 logo PNG，生成真正的 base64 data URI
@@ -146,7 +147,7 @@ function injectTitleBar(): void {
   //   现改为: logo 永远挂在 document.body 顶层(飞牛只替换内容区, 动不了 body 直接子节点),
   //   用 position:fixed 固定在导航栏垂直中心(约 y=72px: body padding-top 32 + navbar 半高 40),
   //   不依赖飞牛任何原生 logo 元素, 切换任何页面都稳定显示.
-  if (LOGO_DATA_URI && !document.getElementById('tb-logo')) {
+  if (isFntvTvPage() && LOGO_DATA_URI && !document.getElementById('tb-logo')) {
     const logoImg = document.createElement('img');
     logoImg.id = 'tb-logo';
     logoImg.alt = '飞牛影视';

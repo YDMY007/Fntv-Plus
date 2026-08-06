@@ -9,6 +9,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { isFntvTvPage } from '../core/pageMode';
 import logger from '../core/logger';
 
 const PANEL_ID = 'fntv-hot-updates';
@@ -673,6 +674,8 @@ function buildPanel(): void {
 
 function initHotUpdates(): void {
   if (!shouldInject()) return;
+  // [lc-371] 仅在 TV 页注入每日放送浮层; 飞牛原生系统页不显示, 避免遮挡原生 UI
+  if (!isFntvTvPage()) return;
   injectStyle();
   applyDailyVisibility(); // [lc-363] 按"外观"开关决定是否注入每日放送按钮
   // 实时响应设置面板开关变化（同源同窗口内 localStorage 写入不触发 storage 事件，故用自定义事件）

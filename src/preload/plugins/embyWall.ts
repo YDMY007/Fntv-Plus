@@ -2,6 +2,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { isFntvTvPage } from '../core/pageMode';
 import { isSyncableItemType } from '../../modules/fn_api/types';
 
 const LOG = '[EmbyWall]';
@@ -1677,9 +1678,43 @@ function removeThemeModeSetting(): void {
 }
 
 /* ========== 入口 ========== */
+/** [lc-371] 飞牛原生 NAS 系统页下的浮动"返回影视"按钮: 点击切回 TV 模式(/v)。
+ *  原生页不注入 Fntv-Plus 侧栏, 故用此浮动按钮提供返回入口, 避免进入原生页后无路可退。 */
+function injectNativeReturnButton(): void {
+  if (document.getElementById('fnos-native-return')) return;
+  const btn = document.createElement('button');
+  btn.id = 'fnos-native-return';
+  btn.type = 'button';
+  btn.textContent = '↩ 返回影视';
+  btn.setAttribute('data-fnos-ui', '1');
+  // 纯色背景(无 backdrop-filter): 避开 transparent 窗口 GPU 负担历史坑(lc-366/lc-369)
+  btn.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:2147483647;'
+    + 'padding:9px 16px;border-radius:12px;cursor:pointer;'
+    + 'background:rgba(40,30,60,.92);color:#fff;font-size:13px;font-weight:600;'
+    + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
+  btn.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    window.location.href = location.origin + '/v';
+  });
+  document.body.appendChild(btn);
+  // 兜底: 原生 SPA 若重建 body 子节点, 每 3s 确保按钮仍在(避免被移除后无法返回)
+  setInterval(() => {
+    if (!document.getElementById('fnos-native-return') && document.body) {
+      document.body.appendChild(btn);
+    }
+  }, 3000);
+}
+
 function handle(): void {
   const base = location.origin;
   log('handle start');
+
+  // [lc-371] 原生系统页守卫: 仅在飞牛影视 TV 页(/v)执行 TV 专属改造(白底清除器/主题/侧栏等);
+  //   切到飞牛原生 NAS 系统页(根路径 `/`)时, 这些改造会破坏原生 UI, 故跳过, 仅注入"返回影视"浮动按钮。
+  if (!isFntvTvPage()) {
+    injectNativeReturnButton();
+    return;
+  }
 
   // 导航诊断: 记录每次URL变化, 排查"返回落到全部剧集而非首页"
   const logNav = (label: string) => log('NAV', label, location.href);
@@ -2047,6 +2082,23 @@ function handle(): void {
         + 'color:#fff;font-size:12px;user-select:none;';
       panel.appendChild(ctrl);
     }
+    // [lc-371] "切换系统页面"按钮: 置于侧栏设置容器(#fnos-sidebar-actions)之上,
+    //   点击后整窗导航到飞牛原生 NAS 系统页(根路径 `/`); 原生页由 injectNativeReturnButton 提供返回。
+    if (!panel.querySelector('#fnos-switch-system-btn')) {
+      const swBtn = document.createElement('button');
+      swBtn.id = 'fnos-switch-system-btn';
+      swBtn.type = 'button';
+      swBtn.textContent = '🖥 切换系统页面';
+      swBtn.style.cssText = 'box-sizing:border-box;margin:0 0 10px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
+        + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
+      swBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        window.location.href = location.origin + '/';
+      });
+      panel.insertBefore(swBtn, ctrl);
+    }
+
     if (ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
 
     const btn = document.createElement('button');
