@@ -146,15 +146,16 @@ function injectStyle(): void {
   border-radius: 20px; overflow: hidden; pointer-events: none;
   opacity: 0; visibility: hidden; transform: translateY(14px) scale(.97);
   transition: opacity .25s ease, transform .25s ease, visibility .25s ease;
-  background: linear-gradient(160deg, rgba(32,34,44,.55), rgba(18,20,28,.38));
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border: 1px solid rgba(255,255,255,.28);
+  /* [lc-369] 彻底移除 backdrop-filter：透明窗口下 blur/saturate 是 GPU 崩溃元凶，
+     fnOS/Electron 组合即使 blur(18px) 放一会也会未响应。改用高不透明度纯色背景，
+     牺牲毛玻璃效果换取稳定性——功能可用 > 好看但卡死。 */
+  background: rgba(24,26,34,.92);
+  border: 1px solid rgba(255,255,255,.18);
   box-shadow:
     0 20px 70px rgba(0,0,0,.50),
-    0 0 80px rgba(255,107,53,.12),
-    inset 0 1px 0 rgba(255,255,255,.35),
-    inset 0 -1px 0 rgba(255,255,255,.08);
+    0 0 40px rgba(255,107,53,.08),
+    inset 0 1px 0 rgba(255,255,255,.30),
+    inset 0 -1px 0 rgba(255,255,255,.06);
   color: #f2f3f7;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -278,7 +279,10 @@ function weekdayCnOf(it: any): string {
   return it.weekdayCn || '';
 }
 
-/** Bangumi 卡片 */
+/** Bangumi 卡片
+ *  [lc-369] 海报改为 data-poster 模式（与 TMDB 一致），由 hydratePosters 统一经主进程代理加载。
+ *  原因：渲染进程直接 <img src="bgm.tv/..."> 在透明窗口+多图并发下极易触发 GPU 未响应；
+ *  走主进程代理可复用并发限制(5)+超时(8s)兜底，且绕过渲染进程 DNS 污染。 */
 function renderBgCard(it: any): string {
   const img = bestImage(it.images);
   const title = it.name_cn || it.name || '未知';
@@ -288,7 +292,7 @@ function renderBgCard(it: any): string {
   const rt = typeof it.rating === 'number' && it.rating ? `<span class="fntv-hot-rt">★ ${it.rating.toFixed(1)}</span>` : '';
   return `
   <div class="fntv-hot-card" data-id="bg|${it.id}" data-url="${it.url}">
-    ${img ? `<img class="fntv-hot-poster" src="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
+    ${img ? `<img class="fntv-hot-poster" data-poster="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
            : `<div class="fntv-hot-poster"></div>`}
     <div class="fntv-hot-meta">
       <div class="fntv-hot-title">${escapeHtml(title)}</div>
@@ -320,13 +324,15 @@ function renderTmdbCard(it: any): string {
   </div>`;
 }
 
-/** 把含 data-poster 的 <img> 经主进程 tmdb:image 拉取为 data URL（海报走代理/直连，绕过渲染进程 DNS 污染） */
+/** 把含 data-poster 的 <img> 经主进程图片代理拉取为 data URL
+ *  路由：豆瓣 → douban:image（带 Referer 解防盗链 418）
+ *       Bangumi / TMDB / 其他 → tmdb:image（通用图片代理，支持免梯子直连绕 DNS 污染）
+ *  [lc-369] Bangumi 海报也走此通道，不再渲染进程直连 bgm.tv */
 function hydratePosters(root: HTMLElement): void {
   const imgs = Array.from(root.querySelectorAll('img.fntv-hot-poster[data-poster]')) as any[];
   if (!imgs.length) return;
-  // [lc-366] 并发限制 + 超时兜底: TMDB 直连(系统 DNS)慢/被墙时, 若一次性发起数十个
-  // ipcRenderer.invoke('tmdb:image') 会堆积、拖慢主进程, 间接加剧 transparent 窗口卡顿/崩溃。
-  // 这里限制同时最多 5 个, 单个最长 8s 超时, 失败静默(留空)。
+  // 并发限制 + 超时兜底: 多图 ipcRenderer.invoke 会堆积、拖慢主进程,
+  // 间接加剧 transparent 窗口卡顿/崩溃。限制同时最多 5 个, 单个最长 8s 超时, 失败静默(留空)。
   const CONCURRENCY = 5;
   let cursor = 0;
   const worker = (): void => {
@@ -335,8 +341,9 @@ function hydratePosters(root: HTMLElement): void {
       const url = el.getAttribute('data-poster');
       if (!url) continue;
       el.removeAttribute('data-poster');
-      // 豆瓣图片走 douban:image（带 Referer 解防盗链 418），其余走 tmdb:image
+      // 按域名路由到对应主进程代理
       const isDouban = /doubanio\.com/i.test(url);
+      // Bangumi 图片走 tmdb:image（通用代理，支持直连）；豆瓣走 douban:image（带 Referer）
       const req = ipcRenderer.invoke(isDouban ? 'douban:image' : 'tmdb:image', url);
       const timeout = new Promise<any>((resolve) => setTimeout(() => resolve(null), 8000));
       Promise.race([req, timeout]).then((r: any) => {
@@ -510,8 +517,9 @@ function buildPanel(): void {
     } else {
       const visible = allTm.filter((it) => !blocked.has(`tm|${it.id}`));
       body.innerHTML = renderTmdbBody(visible, sortMode);
-      hydratePosters(body); // 海报经主进程图片代理加载（绕过渲染进程 DNS 污染）
     }
+    // [lc-369] 统一走主进程海报代理：Bangumi 不再直连 bgm.tv（避免渲染进程多图并发+透明窗口 GPU 爆炸）
+    hydratePosters(body);
   };
 
   // 排序分段点击（动态重建后需重新绑定）
