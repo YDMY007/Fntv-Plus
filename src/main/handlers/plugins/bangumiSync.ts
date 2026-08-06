@@ -64,23 +64,35 @@ async function resolveBangumiPublic(hostname: string): Promise<string | null> {
     return null;
 }
 
-/** 自定义 DNS lookup：开启直连时 Bangumi 域名走公共 DNS（绕过系统 DNS 污染），否则系统 DNS。 */
-function bangumiDirectLookup() {
-    return async (hostname: string, opts: any): Promise<any> => {
-        if (typeof opts === 'function') opts = {};
+/**
+ * 自定义 DNS lookup（回调式，与 TMDB 直连保持一致）：
+ * Node/Electron 的 http(s).Agent 的 lookup 选项必须走回调 (hostname, options, callback)，
+ * 不能返回 Promise——否则地址不会被交付给 socket，请求会静默失败（这正是之前每日放送
+ * 一直走旧缓存、却谎称「未发网络请求」的根因）。
+ * 命中 Bangumi 域名 → 公共 DNS 解析；其余 / 公共 DNS 失败 → 系统 DNS 兜底。
+ */
+function bangumiDirectLookup(): (hostname: string, opts: any, cb: any) => void {
+    return (hostname: string, opts: any, cb: any) => {
+        // Electron/Node 可能以 2 参 (hostname, callback) 或 3 参 (hostname, options, callback) 调用；
+        // options 可能是对象 / 数字(family) / 省略，统一归一化，避免 cb 落到 undefined 上。
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
         opts = opts || {};
         if (isBangumiHost(hostname)) {
-            const ip = await resolveBangumiPublic(hostname);
-            if (ip) {
-                log.info('[Bangumi直连] 公共DNS解析 ' + hostname + ' => ' + ip);
-                if (opts.all) return [{ address: ip, family: 4 }];
-                return ip;
-            }
+            resolveBangumiPublic(hostname)
+                .then((ip: string | null) => {
+                    if (ip) {
+                        log.info('[Bangumi直连] 公共DNS解析 ' + hostname + ' => ' + ip);
+                        if (opts.all) return cb(null, [{ address: ip, family: 4 }]);
+                        return cb(null, ip, 4);
+                    }
+                    // 公共 DNS 失败 → 系统 DNS 兜底
+                    dns.lookup(hostname, opts, cb);
+                })
+                .catch(() => dns.lookup(hostname, opts, cb));
+            return;
         }
-        // 未开启直连 / 非 Bangumi 域名 / 公共 DNS 失败 → 系统 DNS
-        const r = await dns.promises.lookup(hostname, { all: false });
-        if (opts.all) return [{ address: r.address, family: r.family }];
-        return r.address;
+        // 非 Bangumi 域名 → 系统 DNS
+        dns.lookup(hostname, opts, cb);
     };
 }
 
@@ -492,7 +504,13 @@ export function init(): void {
                 if (!res.ok) throw new Error(res.error || 'bangumi fetch failed');
                 return res;
             }, DEFAULT_TTL_MS, !!force);
-            log.info('[Bangumi] 每日放送数据' + (r.fromCache ? '来自本地缓存（未发网络请求）' : '已从线上刷新')
+            // 区分三种情况，避免再出现「明明发了请求却谎称未发」的误导日志：
+            //   1) 有效期内缓存命中（确实没发请求）；2) 真正从线上刷新；3) 线上失败、降级用过期缓存（非最新）。
+            const stale = r.fromCache && (Date.now() - r.fetchedAt > DEFAULT_TTL_MS);
+            log.info('[Bangumi] 每日放送数据'
+                + (stale ? '线上抓取失败，降级使用过期本地缓存（非最新数据）'
+                    : r.fromCache ? '来自本地缓存（未发网络请求，仍在有效期内）'
+                        : '已从线上刷新')
                 + '，更新于 ' + new Date(r.fetchedAt).toLocaleString('zh-CN'));
             return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache };
         } catch (e: any) {
