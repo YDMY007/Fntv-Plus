@@ -262,6 +262,18 @@ async function handleSetHotSource(_event: any, source: 'tmdb' | 'douban'): Promi
     return { ok: true };
 }
 
+// 读取 fnOS 系统桌面地址（切换系统页面跳转目标；留空=自动）
+async function handleGetSystemPageUrl(): Promise<{ url: string }> {
+    return { url: fnConfig.getSystemPageUrl() };
+}
+
+// 设置 fnOS 系统桌面地址（留空/undefined/null=恢复自动）
+async function handleSetSystemPageUrl(_event: any, url: string | null): Promise<{ ok: boolean }> {
+    fnConfig.setSystemPageUrl(typeof url === 'string' ? url : null);
+    log.info('fnOS 系统桌面地址 →', fnConfig.getSystemPageUrl() || '(自动)');
+    return { ok: true };
+}
+
 // 设置 Bangumi 集数级同步开关
 async function handleSetBangumiSyncEnabled(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setBangumiSyncEnabled(!!enabled);
@@ -645,6 +657,8 @@ function init(): void {
     registerHandler('settings:set-tmdb-direct', handleSetTmdbDirect, { useHandle: true });
     registerHandler('settings:set-hot-source', handleSetHotSource, { useHandle: true });
     registerHandler('settings:get-hot-source', handleGetHotSource, { useHandle: true });
+    registerHandler('settings:get-system-page-url', handleGetSystemPageUrl, { useHandle: true });
+    registerHandler('settings:set-system-page-url', handleSetSystemPageUrl, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });

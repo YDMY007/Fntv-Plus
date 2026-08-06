@@ -123,6 +123,10 @@ export interface Config {
     loginBgPath?: string;
     // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
     updateDismissedAt?: number;
+    // fnOS 系统桌面地址（含端口）：点「切换系统页面」时跳转的目标。
+    // 留空=自动，用当前 TV 连接的 origin 根路径（同端口场景）；
+    // 若系统 Web 端口与媒体端口不同（每人各异），用户在此填完整地址如 https://192.168.1.50:5666
+    systemPageUrl?: string;
 }
 
 /**
@@ -803,6 +807,23 @@ export function setUpdateDismissedAt(ts: number): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取 fnOS 系统桌面地址（留空=自动，用当前 TV 连接的 origin 根路径）
+export function getSystemPageUrl(): string {
+    const config: Config = readConfig() || {};
+    return (typeof config.systemPageUrl === 'string' && config.systemPageUrl.trim()) ? config.systemPageUrl.trim() : '';
+}
+
+// 设置 fnOS 系统桌面地址（传 null/空串即恢复自动）
+export function setSystemPageUrl(url: string | null): void {
+    const config: Config = readConfig() || {};
+    if (!url || !url.trim()) {
+        delete config.systemPageUrl;
+    } else {
+        config.systemPageUrl = url.trim();
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // CommonJS导出，确保与现有代码兼容
 module.exports = {
     saveConfig,
@@ -884,5 +905,7 @@ module.exports = {
     // 热门剧更新数据源（TMDB / 豆瓣）
     getHotSource, setHotSource,
     // 登录背景图路径
-    getLoginBgPath, setLoginBgPath
+    getLoginBgPath, setLoginBgPath,
+    // fnOS 系统桌面地址（切换系统页面用，留空=自动）
+    getSystemPageUrl, setSystemPageUrl
 };

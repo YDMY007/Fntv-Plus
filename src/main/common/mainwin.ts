@@ -2,6 +2,7 @@ import { BrowserWindow, BrowserWindowConstructorOptions, screen, shell, app, ipc
 import * as path from 'path';
 import * as fs from 'fs';
 import * as log from '../../modules/logger';
+import * as fnConfig from '../../modules/fn_config/config';
 
 // [lc-142] 预计算登录页背景图的绝对 file:// URL（避免 insertCSS 相对路径在不同 loadFile 入口解析不一致导致白屏）
 //   注意: 打包后 resource 在 app.asar 内, 取 app.getAppPath()(开发态=项目根/打包态=asar 虚拟路径)即可正确定位,
@@ -762,9 +763,17 @@ export function getMainWindow(): BrowserWindow {
         ipcMain.on('fntv:enter-system-page', () => {
             _systemPageMode = true;
             try {
-                const cur = new URL(mainwin!.webContents.getURL() || 'https://localhost');
-                log.info('[切换系统页面] 进入 fnOS 原生桌面: ' + cur.origin + '/');
-                mainwin!.loadURL(cur.origin + '/');
+                // 系统桌面地址：用户可在设置里自定义（每人 NAS 的系统 Web 端口不同）。
+                // 留空=自动，用当前 TV 连接的 origin 根路径（同端口场景）。
+                const cfgUrl = fnConfig.getSystemPageUrl();
+                if (cfgUrl) {
+                    log.info('[切换系统页面] 进入 fnOS 原生桌面（自定义地址）: ' + cfgUrl);
+                    mainwin!.loadURL(cfgUrl);
+                } else {
+                    const cur = new URL(mainwin!.webContents.getURL() || 'https://localhost');
+                    log.info('[切换系统页面] 进入 fnOS 原生桌面（自动）: ' + cur.origin + '/');
+                    mainwin!.loadURL(cur.origin + '/');
+                }
             } catch { /* ignore */ }
         });
         ipcMain.removeAllListeners('fntv:exit-system-page');

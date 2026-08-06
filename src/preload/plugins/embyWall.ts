@@ -3888,11 +3888,80 @@ function handle(): void {
     secBodyAppearance.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
     secBodyAppearance.appendChild(buildAppearanceControls());
 
+    // ===== 分组: 系统桌面（切换系统页面目标地址，每人 NAS 端口各异）=====
+    const secSystem = section('系统桌面');
+    const secBodySystem = secSystem.body;
+    secBodySystem.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    const sysDesc = document.createElement('div');
+    sysDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    sysDesc.textContent = '「切换系统页面」会跳到飞牛原生 NAS 系统桌面。每个人的系统 Web 端口可能不同（默认 5666，但都能改），不一定和影视媒体端口一致。留空=自动（用当前影视连接的同端口根路径）；若桌面在别的端口，请填完整地址，如 https://192.168.1.50:5666。';
+    secBodySystem.appendChild(sysDesc);
+
+    const sysInput = document.createElement('input');
+    sysInput.type = 'text';
+    sysInput.placeholder = '留空=自动；或填系统桌面完整地址，如 https://192.168.1.50:5666';
+    sysInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;margin-bottom:8px;';
+    secBodySystem.appendChild(sysInput);
+
+    const sysBtns = document.createElement('div');
+    sysBtns.style.cssText = 'display:flex;gap:6px;';
+    const sysSaveBtn = mkBtn('保存', true);
+    const sysResetBtn = mkBtn('重置为自动', true);
+    sysBtns.appendChild(sysSaveBtn);
+    sysBtns.appendChild(sysResetBtn);
+    secBodySystem.appendChild(sysBtns);
+
+    const sysStatus = document.createElement('div');
+    sysStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodySystem.appendChild(sysStatus);
+
+    sysSaveBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      try {
+        const val = sysInput.value.trim();
+        const r: any = await ipcRenderer.invoke('settings:set-system-page-url', val);
+        if (!r || r.ok !== false) {
+          sysStatus.textContent = val ? ('已保存：' + val) : '已设为自动（当前影视连接根路径）';
+          sysStatus.style.color = 'var(--fnos-ui-ok)';
+        } else {
+          sysStatus.textContent = '保存失败';
+          sysStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+      } catch {
+        sysStatus.textContent = '保存失败';
+        sysStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    sysResetBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      sysInput.value = '';
+      try {
+        const r: any = await ipcRenderer.invoke('settings:set-system-page-url', '');
+        if (!r || r.ok !== false) {
+          sysStatus.textContent = '已重置为自动（当前影视连接根路径）';
+          sysStatus.style.color = 'var(--fnos-ui-ok)';
+        }
+      } catch {
+        sysStatus.textContent = '重置失败';
+        sysStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+
+    // 初始回填：读取已保存地址（留空=自动）
+    (async () => {
+      try {
+        const g: any = await ipcRenderer.invoke('settings:get-system-page-url');
+        if (g && typeof g.url === 'string') sysInput.value = g.url;
+      } catch { /* ignore */ }
+    })();
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
-      { id: 'general', label: '通用', els: [sec1.el, sec3.el] },
+      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
       { id: 'player', label: '播放器', els: [sec2.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
