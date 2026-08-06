@@ -2087,21 +2087,24 @@ function handle(): void {
         + 'color:#fff;font-size:12px;user-select:none;';
       panel.appendChild(ctrl);
     }
-    // [lc-371] "切换系统页面"按钮: 置于侧栏设置容器(#fnos-sidebar-actions)之上,
+    // [lc-371] "切换系统页面"按钮: 置于 #fnos-sidebar-actions 容器内部最顶部(设置按钮之上),
     //   点击后整窗导航到飞牛原生 NAS 系统页(根路径 `/`); 原生页由 injectNativeReturnButton 提供返回。
-    if (!panel.querySelector('#fnos-switch-system-btn')) {
+    // [lc-373-fix] 必须放进 ctrl 容器内部(prepend), 不能 insertBefore 到容器外——
+    //   容器外的位置可能被面板布局推出可视区/被遮挡导致不可见。
+    if (!ctrl.querySelector('#fnos-switch-system-btn')) {
       const swBtn = document.createElement('button');
       swBtn.id = 'fnos-switch-system-btn';
       swBtn.type = 'button';
       swBtn.textContent = '🖥 切换系统页面';
       swBtn.style.cssText = 'box-sizing:border-box;margin:0 0 10px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
-        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
-        + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
+        + 'background:rgba(160,140,180,.35)!important;color:#fff;font-size:13px;font-weight:600;'
+        + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;'
+        + 'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
       swBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         window.location.href = location.origin + '/';
       });
-      panel.insertBefore(swBtn, ctrl);
+      ctrl.prepend(swBtn);  // 放进容器内部最顶部 → 一定在"设置"按钮上方可见
     }
 
     if (ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
