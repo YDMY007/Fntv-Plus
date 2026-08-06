@@ -89,15 +89,19 @@ export class UpdateChecker {
 
     /**
      * 检查是否有新版本（默认策略）。
-     * [lc-222] 先走国内镜像(网络通顺), 镜像全部不可达时再回退 GitHub 直链,
-     * 提升国内用户检测更新的成功率与速度。手动/自动检查均走此入口。
+     * [2026-08-06] 「是否有更新」的判定**只通过国内 Gitee 检测**（gitee.com 同源，
+     * 国内访问顺畅、不依赖梯子/镜像）；仅当 Gitee 自身不可达(网络/限流)时才回退
+     * GitHub 直链做兜底，正常路径永远是 Gitee。
+     * 不论从哪检测到更新，下载/详情链接都指向**国外 GitHub 发行版最新下载页**
+     * （国内 Gitee 不托管大文件，仅放源码与 Release 说明）。
+     * 手动/自动检查均走此入口。
      * @returns 更新信息
      */
     async checkForUpdates(): Promise<UpdateInfo> {
         try {
-            return await this.checkForUpdatesViaMirror();
+            return await this.checkForUpdatesViaGitee();
         } catch (e: any) {
-            log.warn(`镜像检查更新失败, 回退 GitHub 直链: ${(e && e.message) || e}`);
+            log.warn(`国内 Gitee 检测更新失败, 回退 GitHub 直链: ${(e && e.message) || e}`);
             return await this.checkForUpdatesWithRetry();
         }
     }
@@ -109,6 +113,57 @@ export class UpdateChecker {
      */
     async checkForUpdatesWithRetry(retryCount: number = 0): Promise<UpdateInfo> {
         return await this.fetchRelease(this.githubApiUrl, undefined, retryCount);
+    }
+
+    /**
+     * 国内 Gitee 仓库地址（仓库名转小写，与 GitHub 仅大小写差异；如 Fntv-Plus → fntv-plus）。
+     */
+    private giteeLatestUrl(): string {
+        const giteeRepo = this.repo.toLowerCase();
+        return `https://gitee.com/api/v5/repos/${this.owner}/${giteeRepo}/releases/latest`;
+    }
+
+    /**
+     * 通过国内 Gitee 检测最新版本（仅用于「是否有更新」的判定）。
+     * Gitee 不返回 html_url、且无大文件 assets，因此：
+     *  - 版本号取 `tag_name`（去 v 前缀）；
+     *  - 发布时间取 `created_at`（Gitee 用 created_at，非 published_at）；
+     *  - 下载/详情链接**统一指向国外 GitHub 发行版最新下载页**
+     *    （https://github.com/{owner}/{repo}/releases/latest），保证点击下载跳转国外仓库。
+     * @returns 更新信息
+     */
+    async checkForUpdatesViaGitee(): Promise<UpdateInfo> {
+        const url = this.giteeLatestUrl();
+        log.info(`通过国内 Gitee 检测更新: ${url}`);
+
+        const response = await axios.get(url, {
+            timeout: 10000,
+            headers: { 'User-Agent': `fnos-tv/${this.currentVersion}` }
+        });
+
+        const r = response.data;
+        const latestVersion = String(r.tag_name || '').replace(/^v/, '');
+        // 下载 / 详情始终指向国外 GitHub 发行版最新下载页（国内 Gitee 不托管大文件）
+        const githubReleaseUrl = `https://github.com/${this.owner}/${this.repo}/releases/latest`;
+
+        log.info(`Gitee 最新标签: ${latestVersion}`);
+
+        let hasUpdate: boolean;
+        if (semver) {
+            hasUpdate = semver.gt(latestVersion, this.currentVersion);
+        } else {
+            hasUpdate = this.compareVersions(latestVersion, this.currentVersion) > 0;
+        }
+
+        return {
+            hasUpdate,
+            latestVersion,
+            // 即便 Gitee 无 assets，也明确指向 GitHub 发行版页面（立即下载/查看详情均跳转此处）
+            downloadUrl: githubReleaseUrl,
+            releaseNotes: r.body || '',
+            publishedAt: r.created_at || '',
+            htmlUrl: githubReleaseUrl
+        };
     }
 
     /**
