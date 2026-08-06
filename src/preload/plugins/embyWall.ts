@@ -2082,6 +2082,23 @@ function handle(): void {
       ctrl.appendChild(fbChoiceBtn);
     }
 
+    // [lc-365] 侧栏设置框底部常规显示版本号（像大厂软件：小灰字 + 上分隔线，居中）
+    if (!ctrl.querySelector('#fnos-sidebar-version')) {
+      const verLine = document.createElement('div');
+      verLine.id = 'fnos-sidebar-version';
+      verLine.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);'
+        + 'text-align:center;font-size:11.5px;letter-spacing:.3px;color:rgba(255,255,255,.5);user-select:none;';
+      verLine.textContent = 'v…';
+      ctrl.appendChild(verLine);
+      // 动态版本号：复用主进程 get-version / version-info（与"关于"标签页同源）
+      try {
+        ipcRenderer.send('get-version');
+        ipcRenderer.once('version-info', (_e: any, info: any) => {
+          if (info && info.version) verLine.textContent = 'v' + info.version;
+        });
+      } catch (_) {}
+    }
+
     buildSettingsPanel();
   }
 
