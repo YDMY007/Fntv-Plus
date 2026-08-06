@@ -67,8 +67,9 @@ function injectTitleBar(): void {
 
     document.body.appendChild(floatBar);
 
-    // [lc-377] 原生页无标题栏填充, 清除主进程 ACRYLIC_CSS 强制的 body{padding-top:32px} → 消除顶部白线
-    document.body.style.paddingTop = '0';
+    // [lc-377] 原生页无标题栏填充, 清除主进程 ACRYLIC_CSS 强制的 body{padding-top:32px!important} → 消除顶部白线
+    //   必须用 !important 才能压过主进程 insertCSS 注入的 !important 规则(普通 inline 会被覆盖)
+    document.body.style.setProperty('padding-top', '0', 'important');
 
     // 点击事件
     document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });

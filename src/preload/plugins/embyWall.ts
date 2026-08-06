@@ -1692,8 +1692,8 @@ function injectNativeReturnButton(): void {
   btn.textContent = '↩ 返回影视';
   btn.setAttribute('data-fnos-ui', '1');
   // 纯色背景(无 backdrop-filter): 避开 transparent 窗口 GPU 负担历史坑(lc-366/lc-369)
-  // [lc-377] bottom 增至 24px 避开窗口 16px 圆角裁切区; 左下角定位
-  btn.style.cssText = 'position:fixed;left:16px;bottom:24px;z-index:2147483647;'
+  // [lc-377] 远离窗口 16px 圆角/边缘裁切区: bottom 30px + left 20px 确保完整可见
+  btn.style.cssText = 'position:fixed;left:20px;bottom:30px;z-index:2147483647;'
     + 'padding:9px 16px;border-radius:12px;cursor:pointer;'
     + 'background:rgba(40,30,60,.92);color:#fff;font-size:13px;font-weight:600;'
     + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
