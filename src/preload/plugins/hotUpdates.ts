@@ -144,11 +144,11 @@ function injectStyle(): void {
   position: fixed; right: 20px; bottom: 78px; z-index: 99999;
   width: 340px; max-height: 74vh; display: flex; flex-direction: column;
   border-radius: 20px; overflow: hidden; pointer-events: none;
-  opacity: 0; transform: translateY(14px) scale(.97);
-  transition: opacity .25s ease, transform .25s ease;
+  opacity: 0; visibility: hidden; transform: translateY(14px) scale(.97);
+  transition: opacity .25s ease, transform .25s ease, visibility .25s ease;
   background: linear-gradient(160deg, rgba(32,34,44,.55), rgba(18,20,28,.38));
-  backdrop-filter: blur(32px) saturate(170%);
-  -webkit-backdrop-filter: blur(32px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid rgba(255,255,255,.28);
   box-shadow:
     0 20px 70px rgba(0,0,0,.50),
@@ -158,7 +158,7 @@ function injectStyle(): void {
   color: #f2f3f7;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-#fntv-hot-panel.open { opacity: 1; transform: none; pointer-events: auto; }
+#fntv-hot-panel.open { opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
 
 #fntv-hot-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -322,17 +322,30 @@ function renderTmdbCard(it: any): string {
 
 /** 把含 data-poster 的 <img> 经主进程 tmdb:image 拉取为 data URL（海报走代理/直连，绕过渲染进程 DNS 污染） */
 function hydratePosters(root: HTMLElement): void {
-  const imgs = root.querySelectorAll('img.fntv-hot-poster[data-poster]');
-  imgs.forEach((el: any) => {
-    const url = el.getAttribute('data-poster');
-    if (!url) return;
-    el.removeAttribute('data-poster');
-    // 豆瓣图片走 douban:image（带 Referer 解防盗链 418），其余走 tmdb:image
-    const isDouban = /doubanio\.com/i.test(url);
-    ipcRenderer.invoke(isDouban ? 'douban:image' : 'tmdb:image', url).then((r: any) => {
-      if (r && r.ok && r.dataUrl) el.src = r.dataUrl;
-    }).catch(() => { /* 加载失败则留空 */ });
-  });
+  const imgs = Array.from(root.querySelectorAll('img.fntv-hot-poster[data-poster]')) as any[];
+  if (!imgs.length) return;
+  // [lc-366] 并发限制 + 超时兜底: TMDB 直连(系统 DNS)慢/被墙时, 若一次性发起数十个
+  // ipcRenderer.invoke('tmdb:image') 会堆积、拖慢主进程, 间接加剧 transparent 窗口卡顿/崩溃。
+  // 这里限制同时最多 5 个, 单个最长 8s 超时, 失败静默(留空)。
+  const CONCURRENCY = 5;
+  let cursor = 0;
+  const worker = (): void => {
+    while (cursor < imgs.length) {
+      const el = imgs[cursor++];
+      const url = el.getAttribute('data-poster');
+      if (!url) continue;
+      el.removeAttribute('data-poster');
+      // 豆瓣图片走 douban:image（带 Referer 解防盗链 418），其余走 tmdb:image
+      const isDouban = /doubanio\.com/i.test(url);
+      const req = ipcRenderer.invoke(isDouban ? 'douban:image' : 'tmdb:image', url);
+      const timeout = new Promise<any>((resolve) => setTimeout(() => resolve(null), 8000));
+      Promise.race([req, timeout]).then((r: any) => {
+        if (r && r.ok && r.dataUrl) el.src = r.dataUrl;
+      }).catch(() => { /* 加载失败则留空 */ }).finally(worker);
+      return; // 本次 worker 仅发起一个请求, 由 finally 链式推进(并发上限=CONCURRENCY)
+    }
+  };
+  for (let i = 0; i < Math.min(CONCURRENCY, imgs.length); i++) worker();
 }
 
 /** 把 JS getDay()（0=周日…6=周六）转为 Bangumi air_weekday（1=周一…7=周日） */
