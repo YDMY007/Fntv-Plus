@@ -1980,7 +1980,15 @@ function handle(): void {
       +   '<span style="font-weight:600;letter-spacing:.5px;">背景模糊</span>'
       +   '<span id="fnos-blur-val" style="opacity:.85;">' + storedBlur + 'px</span></div>'
       + '<input id="fnos-blur" type="range" min="0" max="100" value="' + storedBlur + '" '
-      +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">';
+      +   'style="width:100%;accent-color:var(--fnos-ui-accent);cursor:pointer;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">'
+      +   '<span style="font-weight:600;letter-spacing:.5px;">首页「每日放送」按钮</span>'
+      +   '<label style="position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;">'
+      +     '<input id="fnos-show-daily" type="checkbox" style="position:absolute;opacity:0;width:0;height:0;">'
+      +     '<span id="fnos-show-daily-track" style="position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;"></span>'
+      +     '<span id="fnos-show-daily-knob" style="position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>'
+      +   '</label>'
+      + '</div>';
 
     const alphaInput = wrap.querySelector('#fnos-alpha') as HTMLInputElement;
     const alphaVal = wrap.querySelector('#fnos-alpha-val') as HTMLElement;
@@ -1999,6 +2007,23 @@ function handle(): void {
       document.documentElement.style.setProperty('--fnos-blur', px + 'px');
       if (blurVal) blurVal.textContent = px + 'px';
       localStorage.setItem('fnos-glass-blur', String(px));
+    });
+
+    // [lc-363] 首页「每日放送」按钮开关（设置面板"外观"）：写 localStorage + 广播自定义事件给 hotUpdates 实时刷新
+    const showDaily = localStorage.getItem('fnos-show-daily') !== '0';
+    const dailyInput = wrap.querySelector('#fnos-show-daily') as HTMLInputElement;
+    const dailyTrack = wrap.querySelector('#fnos-show-daily-track') as HTMLElement;
+    const dailyKnob = wrap.querySelector('#fnos-show-daily-knob') as HTMLElement;
+    const paintDaily = (): void => {
+      dailyTrack.style.background = dailyInput.checked ? 'var(--fnos-ui-accent)' : 'rgba(140,140,160,.45)';
+      dailyKnob.style.left = dailyInput.checked ? '21.5px' : '2.5px';
+    };
+    dailyInput.checked = showDaily;
+    paintDaily();
+    dailyInput.addEventListener('change', () => {
+      localStorage.setItem('fnos-show-daily', dailyInput.checked ? '1' : '0');
+      paintDaily();
+      try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
     return wrap;
   }

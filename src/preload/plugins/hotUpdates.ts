@@ -14,6 +14,7 @@ import logger from '../core/logger';
 const PANEL_ID = 'fntv-hot-updates';
 const STYLE_ID = 'fntv-hot-updates-style';
 const BLOCK_KEY = 'fntv-hot-blocked';          // localStorage 屏蔽列表键（值形如 "bg|123" / "tm|456"）
+const DAILY_VISIBLE_KEY = 'fnos-show-daily';    // [lc-363] 设置面板"外观"开关：首页「每日放送」按钮是否显示（默认显示）
 const WD_CN = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 /** 仅在飞牛主界面注入；跳过登录页(file://) 与外部页 */
@@ -54,6 +55,20 @@ function syncHomeVisibility(): void {
     panel.style.display = 'none';
     panel.classList.remove('open');            // 切走时收起，回来不会自动弹开
     logger.info('[hotUpdates] 非首页：隐藏每日放送浮窗（避免遮挡）');
+  }
+}
+
+/** [lc-363] 由设置面板「外观」开关控制首页「每日放送」按钮是否注入；默认显示（localStorage 不为 '0' 即显示） */
+function applyDailyVisibility(): void {
+  const on = localStorage.getItem(DAILY_VISIBLE_KEY) !== '0';
+  const tab = document.getElementById('fntv-hot-tab');
+  const panel = document.getElementById('fntv-hot-panel');
+  if (on) {
+    if (!tab && !panel) { buildPanel(); syncHomeVisibility(); } // 首次/重新开启：注入并按当前页面同步显隐
+  } else {
+    if (tab) tab.remove();
+    if (panel) panel.remove();
+    _lastHotHome = null; // 重置首页状态机，便于重新开启时正确同步
   }
 }
 
@@ -631,8 +646,9 @@ function buildPanel(): void {
 function initHotUpdates(): void {
   if (!shouldInject()) return;
   injectStyle();
-  buildPanel();
-  syncHomeVisibility();   // 挂载即按当前页面决定显隐（首页显示，其余页隐藏）
+  applyDailyVisibility(); // [lc-363] 按"外观"开关决定是否注入每日放送按钮
+  // 实时响应设置面板开关变化（同源同窗口内 localStorage 写入不触发 storage 事件，故用自定义事件）
+  window.addEventListener('fntv:daily-toggle', applyDailyVisibility as EventListener);
 
   // 首页才显示浮窗：路由切换时实时同步可见性（复用 titlebar 的 pushState 链式包装机制，
   // 不破坏 embyWall 导航逻辑；另加 popstate/hashchange 覆盖浏览器前进后退与 hash 路由）
