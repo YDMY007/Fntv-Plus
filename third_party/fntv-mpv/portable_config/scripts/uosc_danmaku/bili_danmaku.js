@@ -426,11 +426,14 @@ function cid_from_bvid(bvid, ep_num, title_hint) {
     });
 }
 
-// ── 官方番剧（WBI 签名搜索 + pgc 取集 cid）──
+// ── 官方番剧/国创（WBI 签名搜索 + pgc 取集 cid）──
 // 说明：B站匿名 search/all/v2 的 media_bangumi 已返回 0，必须用 WBI 签名的
-// wbi/search/type 才有机会拿到官方番剧；且需要登录态 Cookie 才能真正返回结果
+// wbi/search/type 才有机会拿到官方 PGC；且需要登录态 Cookie 才能真正返回结果
 // （匿名时同样为空）。命中后走 pgc/view/web/season 取对应集官方 cid，
-// 官方单集弹幕常几千~上万条，远超 UP主 搬运。无 Cookie / 无结果时自动回退 UP主。
+// 官方单集弹幕常几千~上万条（国创如《灵笼》单集可达 10 万+），远超 UP主 搬运。
+// 无 Cookie / 无结果时自动回退 UP主。
+// 番剧(season_type=1)与国创(season_type=4)在 B站 同属 media_bangumi 索引，靠 season_type 区分，
+// 分别由 search_bangumi_wbi / search_guochuang_wbi 两个通道匹配，互不串区（见 _wbi_pgc_search）。
 async function _get_pgc_episodes(season_id) {
     const apis = [
         `https://api.bilibili.com/pgc/view/web/season?season_id=${season_id}`,
@@ -458,27 +461,35 @@ function _pick_episode(eps, ep_num) {
     }
     return eps[0];
 }
-async function search_bangumi_wbi(title, ep_num, season_num) {
+// 通用 WBI PGC 搜索（番剧/国创共用）：签名搜索某 search_type，收集带 season_id 的 PGC 条目，
+// 解析对应集官方 cid。seasonType 指定时只保留该内容类型（1=番剧, 4=国创，对应 WBI 条目的
+// season_type 字段；注意不是 item.type 那个 'media_bangumi' 字符串）。
+// 注意：官方 PGC 搜索必须登录态 Cookie —— 匿名时 WBI 接口直接 -412/返回空，本函数返回 []，
+// 由上层 search_cid 自动回退到 UP主 视频区（国创/番剧 匿名均走此路）。
+// 重要：WBI search/type 返回的是【扁平 PGC 条目数组】(每项直接带 season_id/title/season_type)，
+// 不是 all/v2 的嵌套 {result_type,data} 结构——旧版按嵌套结构遍历导致官方匹配长期静默失效，已修正。
+async function _wbi_pgc_search(title, ep_num, season_num, search_type, label, sourceName, seasonType) {
     if (!COOKIE) {
-        log('[番剧区WBI] 无登录态 Cookie，跳过官方番剧搜索（匿名 media_bangumi 返回 0）');
+        log(`[${label}WBI] 无登录态 Cookie，跳过官方搜索（匿名 ${search_type} 返回 0）`);
         return [];
     }
     let signed;
     try {
-        signed = await wbi_sign({ keyword: title, search_type: 'media_bangumi' });
+        signed = await wbi_sign({ keyword: title, search_type });
     } catch (e) {
-        log('[番剧区WBI] 签名失败: ' + (e.message || e));
+        log(`[${label}WBI] 签名失败: ` + (e.message || e));
         return [];
     }
     const url = `https://api.bilibili.com/x/web-interface/wbi/search/type?${signed}`;
     let d;
-    try { d = await jget(url); } catch (e) { log('[番剧区WBI] 搜索请求失败: ' + (e.message || e)); return []; }
+    try { d = await jget(url); } catch (e) { log(`[${label}WBI] 搜索请求失败: ` + (e.message || e)); return []; }
     if (!d || d.code !== 0 || !d.data || !d.data.result) {
-        log(`[番剧区WBI] 无结果 code=${d && d.code} (可能 Cookie 无权限/匿名)`);
+        log(`[${label}WBI] 无结果 code=${d && d.code} (可能 Cookie 无权限/匿名)`);
         return [];
     }
     const cands = [];
     for (const item of d.data.result) {
+        if (seasonType != null && item.season_type !== seasonType) continue;
         const season_id = item.season_id;
         if (!season_id) continue;
         const t = String(item.title || '').replace(/<[^>]+>/g, '');
@@ -488,7 +499,7 @@ async function search_bangumi_wbi(title, ep_num, season_num) {
         cands.push({ season_id, t, sim, season, season_match });
     }
     cands.sort((x, y) => ((y.season_match ? 0 : 1) - (x.season_match ? 0 : 1)) || (y.sim - x.sim));
-    log(`[番剧区WBI] 命中候选 ${cands.length} 个`);
+    log(`[${label}WBI] 命中候选 ${cands.length} 个`);
     const results = [];
     const seen = new Set();
     for (const c of cands) {
@@ -498,12 +509,26 @@ async function search_bangumi_wbi(title, ep_num, season_num) {
         if (!ep || !ep.cid) continue;
         if (seen.has(ep.cid)) continue;
         seen.add(ep.cid);
-        const info = { source: 'bangumi', season_id: c.season_id, sim: c.sim, season_match: c.season_match };
+        const info = { source: sourceName, season_id: c.season_id, sim: c.sim, season_match: c.season_match };
         const epLabel = ep.long_title ? `${ep.title} ${ep.long_title}` : (ep.title || '');
         results.push([ep.cid, `${c.t}${epLabel ? ' (' + epLabel + ')' : ''}`, info]);
         if (results.length >= 3) break;
     }
     return results;
+}
+
+async function search_bangumi_wbi(title, ep_num, season_num) {
+    // 番剧区（日番/引进番）：media_bangumi，仅取 season_type=1（番剧），与国创通道互斥避免串区
+    return _wbi_pgc_search(title, ep_num, season_num, 'media_bangumi', '番剧区', 'bangumi', 1);
+}
+
+// ── 国创官方区（WBI 签名搜索 + pgc 取集 cid）──
+// 国创(中国动画)在 B站 PGC 体系中与番剧【同属 media_bangumi 索引】，靠 season_type 区分
+// （1=番剧, 4=国创），并非独立 search_type。故本函数直接搜 media_bangumi 并仅取 season_type=4
+// （实测 media_ft 为影视分区、不含国创，不予采用）。与 search_bangumi_wbi 完全对称、互不重叠。
+// 需登录态 Cookie 才有结果；匿名返回 0，自动回退 UP主 视频区（与番剧区行为一致）。
+async function search_guochuang_wbi(title, ep_num, season_num) {
+    return _wbi_pgc_search(title, ep_num, season_num, 'media_bangumi', '国创区', 'guochuang', 4);
 }
 
 async function search_video(title, ep_num, season_num) {
@@ -605,6 +630,12 @@ async function search_cid(title, ep_num, season_num) {
     if (bangumiWbi.length) {
         log(`[search_cid] 官方番剧(WBI)返回 ${bangumiWbi.length} 个候选`);
         return bangumiWbi;
+    }
+    // 国创官方区（WBI 签名搜索，需 Cookie；与番剧区对称，覆盖 media_ft / media_bangumi type=4）
+    const guochuangWbi = await search_guochuang_wbi(t, ep_num, season_num);
+    if (guochuangWbi.length) {
+        log(`[search_cid] 国创官方(WBI)返回 ${guochuangWbi.length} 个候选`);
+        return guochuangWbi;
     }
     const bangumi = await search_bangumi(t, ep_num, season_num);
     if (bangumi.length) {
@@ -949,7 +980,7 @@ async function main() {
     }
 }
 
-module.exports = { run: run, setLogSink: setLogSink, _load_cookie: _load_cookie };
+module.exports = { run: run, setLogSink: setLogSink, _load_cookie: _load_cookie, search_guochuang_wbi: search_guochuang_wbi, search_bangumi_wbi: search_bangumi_wbi };
 
 if (require.main === module) {
     main();
