@@ -1802,6 +1802,30 @@ function injectVideoPreviewExternalPlay(): void {
   marker.style.display = 'none';
   document.body.appendChild(marker);
 
+  // 冻结/解冻: 在用户选择播放方式之前, 阻止飞牛原生 xgplayer 自动播放(避免"还没选就播了").
+  // 原理: capture 阶段拦截 <video> 的 play 事件(prioritize 于 xgplayer 的 listener),
+  //       preventDefault + stopImmediatePropagation + 再次 pause, 使任何 play() 企图都被挡住.
+  const frozen = new WeakSet<HTMLVideoElement>();
+  function freezeVideo(video: HTMLVideoElement | null): void {
+    if (!video || frozen.has(video)) return;
+    frozen.add(video);
+    try { video.pause(); } catch (_) { /* ignore */ }
+    const block = (e: Event): void => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      try { video.pause(); } catch (_) { /* ignore */ }
+    };
+    video.addEventListener('play', block, true);
+    (video as any).__fntvBlock = block;
+  }
+  function unfreezeVideo(video: HTMLVideoElement | null): void {
+    if (!video) return;
+    const block = (video as any).__fntvBlock as EventListener | undefined;
+    if (block) { video.removeEventListener('play', block, true); (video as any).__fntvBlock = null; }
+    frozen.delete(video);
+    try { video.play().catch(() => {}); } catch (_) { /* ignore */ }
+  }
+
   /** 用外部播放器打开: 抓 video 直链 → external-play → 关闭原生预览 */
   function launchExternal(modal: HTMLElement): void {
     const video = modal.querySelector('video') as HTMLVideoElement | null;
@@ -1829,7 +1853,6 @@ function injectVideoPreviewExternalPlay(): void {
     modal.dataset.fntvChoice = '1';
 
     const video = modal.querySelector('video') as HTMLVideoElement | null;
-    try { video?.pause(); } catch (_) { /* ignore */ }
 
     const overlay = document.createElement('div');
     overlay.className = 'fntv-choice-dialog';
@@ -1857,7 +1880,7 @@ function injectVideoPreviewExternalPlay(): void {
     };
 
     const closeDialog = (): void => { overlay.remove(); delete modal.dataset.fntvChoice; };
-    const playNative = (): void => { try { video?.play(); } catch (_) { /* ignore */ } };
+    const playNative = (): void => { unfreezeVideo(video); }; // 解冻并交由飞牛原声播放
 
     card.appendChild(mkBtn('🎬 外置播放器 (PotPlayer / MPV)', true, () => {
       closeDialog();
@@ -1902,6 +1925,7 @@ function injectVideoPreviewExternalPlay(): void {
     document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
       const modal = m as HTMLElement;
       if (modal.querySelector('video')) {
+        freezeVideo(modal.querySelector('video')); // 选择前冻结原生播放, 避免"还没选就播了"
         showChoiceDialog(modal); // 自动弹窗(主要交互)
         ensureButton(modal);     // 标题栏按钮(弹窗关闭后仍可作为二次入口)
       }
@@ -1912,7 +1936,11 @@ function injectVideoPreviewExternalPlay(): void {
   // 首次注入时也扫一遍(模态可能已存在)
   document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
     const modal = m as HTMLElement;
-    if (modal.querySelector('video')) { showChoiceDialog(modal); ensureButton(modal); }
+    if (modal.querySelector('video')) {
+      freezeVideo(modal.querySelector('video'));
+      showChoiceDialog(modal);
+      ensureButton(modal);
+    }
   });
 
   log('[视频预览外放] 已注入(自动弹窗选择 + 标题栏外部打开按钮)');
