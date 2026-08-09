@@ -1859,10 +1859,15 @@ function handle(): void {
 
   // [lc-371] 原生系统页守卫: 仅在飞牛影视 TV 页(/v)执行 TV 专属改造(白底清除器/主题/侧栏等);
   //   切到飞牛原生 NAS 系统页(根路径 `/`)时, 这些改造会破坏原生 UI, 故跳过, 仅注入"返回影视"浮动按钮。
+  // [lc-389] 视频预览外放按钮须无条件注册: 它只 watch .trim-ui__app-layout--window 内的 <video>,
+  //   影视 TV 页(/v)无此窗口故无害; 而若放在 !isFntvTvPage() 分支内, 当 preload 初次即在影视页(/v)
+  //   加载时该分支不执行, 飞牛切系统页为 SPA 不重载 webContents → handle() 不再重跑 →
+  //   按钮 observer 永不注册 → 文件管理器双击视频"无事发生". 故改无条件调用.
+  injectVideoPreviewExternalPlay();
+
   if (!isFntvTvPage()) {
     injectNativeReturnButton();
     injectExternalPlayButton();
-    injectVideoPreviewExternalPlay();  // fnOS 视频预览窗口 → 外部播放器(PotPlayer/MPV)
     return;
   }
 
