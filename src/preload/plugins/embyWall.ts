@@ -1802,6 +1802,83 @@ function injectVideoPreviewExternalPlay(): void {
   marker.style.display = 'none';
   document.body.appendChild(marker);
 
+  /** 用外部播放器打开: 抓 video 直链 → external-play → 关闭原生预览 */
+  function launchExternal(modal: HTMLElement): void {
+    const video = modal.querySelector('video') as HTMLVideoElement | null;
+    const url = video?.currentSrc || video?.src || '';
+    if (!url || !/^https?:\/\//i.test(url)) {
+      log('[视频预览外放] 未取到有效直链');
+      alert('未能获取视频直链，无法外部打开');
+      return;
+    }
+    const titleEl = modal.querySelector('.trim-ui__app-layout--header-title span');
+    const title = (titleEl?.textContent || 'fnOS 视频').trim();
+    log('[视频预览外放] 外部打开:', title, url);
+    ipcRenderer.send('external-play', { kind: 'url', url, title });
+    // 关闭原生预览(轻微延迟, 让外部播放器先启动)
+    setTimeout(() => {
+      const closeBtn = modal.querySelector('.app-layout-header-close') as HTMLElement | null;
+      if (closeBtn) closeBtn.click();
+      else modal.style.display = 'none';
+    }, 200);
+  }
+
+  /** 弹出居中选择弹窗(暂停原生 video 避免双声); 飞牛原声 / 外置播放器 二选一 */
+  function showChoiceDialog(modal: HTMLElement): void {
+    if (modal.dataset.fntvChoice === '1') return; // 防重复弹出
+    modal.dataset.fntvChoice = '1';
+
+    const video = modal.querySelector('video') as HTMLVideoElement | null;
+    try { video?.pause(); } catch (_) { /* ignore */ }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fntv-choice-dialog';
+    // z-index 高于飞牛预览窗口(10015), 遮罩盖住预览直到用户选择
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);';
+
+    const card = document.createElement('div');
+    card.style.cssText = 'min-width:300px;max-width:90vw;padding:20px 22px;border-radius:14px;background:var(--semi-color-bg-1,#fff);box-shadow:0 8px 30px rgba(0,0,0,0.25);color:var(--semi-color-text-0);';
+    card.innerHTML =
+      '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">选择播放方式</div>' +
+      '<div style="opacity:0.7;font-size:12px;margin-bottom:14px;">要如何播放此视频？</div>';
+
+    const mkBtn = (label: string, primary: boolean, onClick: () => void): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText =
+        'display:block;width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;' +
+        (primary
+          ? 'background:var(--semi-color-primary,#3370ff);color:#fff;'
+          : 'background:var(--semi-color-fill-0,#f0f0f0);color:var(--semi-color-text-0);');
+      b.onmouseenter = () => { b.style.opacity = '0.85'; };
+      b.onmouseleave = () => { b.style.opacity = '1'; };
+      b.onclick = onClick;
+      return b;
+    };
+
+    const closeDialog = (): void => { overlay.remove(); delete modal.dataset.fntvChoice; };
+    const playNative = (): void => { try { video?.play(); } catch (_) { /* ignore */ } };
+
+    card.appendChild(mkBtn('🎬 外置播放器 (PotPlayer / MPV)', true, () => {
+      closeDialog();
+      launchExternal(modal);
+    }));
+    card.appendChild(mkBtn('▶ 飞牛原声播放', false, () => {
+      closeDialog();
+      playNative();
+    }));
+
+    overlay.appendChild(card);
+    // 点击遮罩空白处 = 飞牛原声(不打断用户)
+    overlay.addEventListener('click', (e: Event) => {
+      if (e.target === overlay) { closeDialog(); playNative(); }
+    });
+    overlay.addEventListener('mousedown', (e: Event) => e.stopPropagation()); // 防穿透到预览窗口
+
+    document.body.appendChild(overlay);
+    log('[视频预览外放] 已弹出播放方式选择弹窗');
+  }
+
   function ensureButton(modal: HTMLElement): void {
     if (modal.querySelector('.fntv-ext-open')) return; // 幂等(应对 fnOS 重渲染标题栏)
 
@@ -1815,22 +1892,7 @@ function injectVideoPreviewExternalPlay(): void {
     btn.style.cssText = 'font-weight:600;font-size:13px;white-space:nowrap;user-select:none;color:var(--semi-color-text-0);';
     btn.textContent = '🎬 外部打开';
     btn.title = '用 PotPlayer / MPV 打开此视频';
-
-    const onOpen = (e: Event) => {
-      e.stopPropagation();
-      const video = modal.querySelector('video') as HTMLVideoElement | null;
-      const url = video?.currentSrc || video?.src || '';
-      if (!url || !/^https?:\/\//i.test(url)) {
-        log('[视频预览外放] 未取到有效直链');
-        alert('未能获取视频直链，无法外部打开');
-        return;
-      }
-      const titleEl = modal.querySelector('.trim-ui__app-layout--header-title span');
-      const title = (titleEl?.textContent || 'fnOS 视频').trim();
-      log('[视频预览外放] 外部打开:', title, url);
-      ipcRenderer.send('external-play', { kind: 'url', url, title });
-    };
-    btn.addEventListener('click', onOpen);
+    btn.addEventListener('click', (e: Event) => { e.stopPropagation(); launchExternal(modal); });
     btn.addEventListener('mousedown', (e: Event) => e.stopPropagation()); // 避免触发标题栏拖拽
 
     headerBtns.insertBefore(btn, headerBtns.firstChild);
@@ -1839,7 +1901,10 @@ function injectVideoPreviewExternalPlay(): void {
   const observer = new MutationObserver(() => {
     document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
       const modal = m as HTMLElement;
-      if (modal.querySelector('video')) ensureButton(modal);
+      if (modal.querySelector('video')) {
+        showChoiceDialog(modal); // 自动弹窗(主要交互)
+        ensureButton(modal);     // 标题栏按钮(弹窗关闭后仍可作为二次入口)
+      }
     });
   });
   observer.observe(document.body, { childList: true, subtree: true });
@@ -1847,10 +1912,10 @@ function injectVideoPreviewExternalPlay(): void {
   // 首次注入时也扫一遍(模态可能已存在)
   document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
     const modal = m as HTMLElement;
-    if (modal.querySelector('video')) ensureButton(modal);
+    if (modal.querySelector('video')) { showChoiceDialog(modal); ensureButton(modal); }
   });
 
-  log('[视频预览外放] 已注入(标题栏「🎬 外部打开」按钮)');
+  log('[视频预览外放] 已注入(自动弹窗选择 + 标题栏外部打开按钮)');
 }
 
 function handle(): void {
