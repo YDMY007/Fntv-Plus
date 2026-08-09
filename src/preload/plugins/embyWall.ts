@@ -1880,7 +1880,16 @@ function injectVideoPreviewExternalPlay(): void {
     };
 
     const closeDialog = (): void => { overlay.remove(); delete modal.dataset.fntvChoice; };
-    const playNative = (): void => { unfreezeVideo(video); }; // 解冻并交由飞牛原生播放
+    const playNative = (): void => {
+      unfreezeVideo(video); // 解冻(移除 play 拦截) + 底层 video.play()(用户手势内, 允许播放)
+      // 同步 xgplayer 状态机: freeze 期间 xgplayer 的 play 被 preventDefault 拒绝, 其 UI 可能停在"暂停"态.
+      // 若播放按钮仍为 data-state="pause"(以为未播放), 在用户手势同步链内点击它, 走 xgplayer 自身播放逻辑,
+      // 既不被 autoplay 策略拦截, 又让进度条/按钮正确切到"播放中".
+      const xpPlay = modal.querySelector('.xgplayer-play') as HTMLElement | null;
+      if (xpPlay && xpPlay.getAttribute('data-state') === 'pause') {
+        try { xpPlay.click(); } catch (_) { /* ignore */ }
+      }
+    };
 
     card.appendChild(mkBtn('🎬 外置播放器 (PotPlayer / MPV)', true, () => {
       closeDialog();
