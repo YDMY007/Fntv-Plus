@@ -1847,7 +1847,7 @@ function injectVideoPreviewExternalPlay(): void {
     }, 200);
   }
 
-  /** 弹出居中选择弹窗(暂停原生 video 避免双声); 飞牛原声 / 外置播放器 二选一 */
+  /** 弹出居中选择弹窗(暂停原生 video 避免双声); 飞牛原生 / 外置播放器 二选一 */
   function showChoiceDialog(modal: HTMLElement): void {
     if (modal.dataset.fntvChoice === '1') return; // 防重复弹出
     modal.dataset.fntvChoice = '1';
@@ -1880,19 +1880,19 @@ function injectVideoPreviewExternalPlay(): void {
     };
 
     const closeDialog = (): void => { overlay.remove(); delete modal.dataset.fntvChoice; };
-    const playNative = (): void => { unfreezeVideo(video); }; // 解冻并交由飞牛原声播放
+    const playNative = (): void => { unfreezeVideo(video); }; // 解冻并交由飞牛原生播放
 
     card.appendChild(mkBtn('🎬 外置播放器 (PotPlayer / MPV)', true, () => {
       closeDialog();
       launchExternal(modal);
     }));
-    card.appendChild(mkBtn('▶ 飞牛原声播放', false, () => {
+    card.appendChild(mkBtn('▶ 飞牛原生播放', false, () => {
       closeDialog();
       playNative();
     }));
 
     overlay.appendChild(card);
-    // 点击遮罩空白处 = 飞牛原声(不打断用户)
+    // 点击遮罩空白处 = 飞牛原生(不打断用户)
     overlay.addEventListener('click', (e: Event) => {
       if (e.target === overlay) { closeDialog(); playNative(); }
     });
