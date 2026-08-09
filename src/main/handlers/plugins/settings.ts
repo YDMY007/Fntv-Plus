@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as fnConfig from '../../../modules/fn_config/config';
+import * as proxyModule from '../../../modules/proxyAgent';
 import { registerHandler } from '../core/ipcHandler';
 import { getMainWindow } from '../../common/mainwin';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
@@ -75,6 +76,13 @@ async function handleGetCustomProxy(): Promise<any> {
 // 自定义代理：开关 + 地址一起设置（enabled 默认 false，proxyUrl 默认空串）
 async function handleSetCustomProxy(_event: any, enabled: boolean, proxyUrl?: string): Promise<void> {
     fnConfig.setCustomProxyConfig({ enabled: !!enabled, proxyUrl: (typeof proxyUrl === 'string' ? proxyUrl : '') });
+}
+
+// 自定义代理：测试连通性（不依赖已保存配置，直接拿传入的地址试连 Bangumi）
+async function handleTestCustomProxy(_event: any, enabled: boolean, proxyUrl?: string): Promise<any> {
+    const url = (typeof proxyUrl === 'string' ? proxyUrl : '').trim();
+    if (!enabled || !url) return { ok: false, error: '未启用或未填写地址' };
+    return await proxyModule.testProxyConnection(url);
 }
 
 async function handleSetHidePlay(_event: any, hide: boolean): Promise<void> {
@@ -674,6 +682,7 @@ function init(): void {
     // 自定义代理（让 Bangumi 每日放送、TMDB 走用户自建代理入口）
     registerHandler('settings:get-custom-proxy', handleGetCustomProxy, { useHandle: true });
     registerHandler('settings:set-custom-proxy', handleSetCustomProxy, { useHandle: true });
+    registerHandler('settings:test-custom-proxy', handleTestCustomProxy, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });

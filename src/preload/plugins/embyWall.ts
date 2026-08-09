@@ -3965,7 +3965,7 @@ function handle(): void {
 
     const cpDesc = document.createElement('div');
     cpDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    cpDesc.textContent = '为 Bangumi 每日放送、TMDB（影视发现/海报）等数据源单独指定 HTTP/HTTPS 代理入口。优先级低于环境变量 HTTPS_PROXY（已设环境变量则它先生效）。地址须以 http:// 或 https:// 开头，如 http://127.0.0.1:7890（Clash）或 http://127.0.0.1:10809（v2rayN）。开启开关并填写地址后才生效；仅支持 HTTP/HTTPS 代理，不支持 SOCKS（请在梯子里改用 HTTP 代理端口）。';
+    cpDesc.textContent = '为 Bangumi 每日放送、TMDB（影视发现/海报）等数据源指定代理入口。支持 HTTP / HTTPS / SOCKS5，可填账号密码鉴权。优先级低于环境变量 HTTPS_PROXY（已设环境变量则它先生效）。开启开关并填写地址后才生效。';
     secBodyCustomProxy.appendChild(cpDesc);
 
     // 开关行（整行可点）
@@ -3980,18 +3980,58 @@ function handle(): void {
     cpToggleRow.appendChild(cpToggleSpan); cpToggleRow.appendChild(cpToggle);
     secBodyCustomProxy.appendChild(cpToggleRow);
 
-    const cpInput = document.createElement('input');
-    cpInput.type = 'text';
-    cpInput.placeholder = '代理地址，如 http://127.0.0.1:7890';
-    cpInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
-      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;margin-bottom:8px;';
-    secBodyCustomProxy.appendChild(cpInput);
+    // 类型 + 主机:端口 行
+    const cpRow1 = document.createElement('div');
+    cpRow1.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+    const cpType = document.createElement('select');
+    cpType.style.cssText = 'height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:4px 6px;box-sizing:border-box;';
+    const cpTypeOpts: [string, string][] = [['https', 'HTTPS'], ['http', 'HTTP'], ['socks5', 'SOCKS5']];
+    cpTypeOpts.forEach(([v, t]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      cpType.appendChild(o);
+    });
+    const cpAddr = document.createElement('input');
+    cpAddr.type = 'text';
+    cpAddr.placeholder = '主机:端口，如 127.0.0.1:7890';
+    cpAddr.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    cpRow1.appendChild(cpType);
+    cpRow1.appendChild(cpAddr);
+    secBodyCustomProxy.appendChild(cpRow1);
+
+    // 账号 / 密码 行（可选鉴权）
+    const cpRow2 = document.createElement('div');
+    cpRow2.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+    const cpUser = document.createElement('input');
+    cpUser.type = 'text';
+    cpUser.placeholder = '账号（可选）';
+    cpUser.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    const cpPass = document.createElement('input');
+    cpPass.type = 'password';
+    cpPass.placeholder = '密码（可选）';
+    cpPass.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    cpRow2.appendChild(cpUser);
+    cpRow2.appendChild(cpPass);
+    secBodyCustomProxy.appendChild(cpRow2);
+
+    // 根据表单组装代理 URL（类型://[user:pass@]host:port）
+    function buildCpUrl(): string {
+      const type = cpType.value || 'https';
+      const addr = cpAddr.value.trim();
+      if (!addr) return '';
+      const user = cpUser.value.trim();
+      const pass = cpPass.value;
+      const auth = (user || pass) ? (encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@') : '';
+      return type + '://' + auth + addr;
+    }
 
     const cpBtns = document.createElement('div');
     cpBtns.style.cssText = 'display:flex;gap:6px;';
     const cpSaveBtn = mkBtn('保存', true);
+    const cpTestBtn = mkBtn('测试连接', true);
     const cpResetBtn = mkBtn('关闭代理', true);
     cpBtns.appendChild(cpSaveBtn);
+    cpBtns.appendChild(cpTestBtn);
     cpBtns.appendChild(cpResetBtn);
     secBodyCustomProxy.appendChild(cpBtns);
 
@@ -3999,41 +4039,83 @@ function handle(): void {
     cpStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
     secBodyCustomProxy.appendChild(cpStatus);
 
+    function cpSetStatus(msg: string, ok: boolean | null): void {
+      cpStatus.textContent = msg;
+      cpStatus.style.color = ok === null ? 'var(--fnos-ui-sub)' : (ok ? 'var(--fnos-ui-ok)' : 'var(--fnos-ui-warn)');
+    }
+
     cpSaveBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       try {
-        const val = cpInput.value.trim();
-        await ipcRenderer.invoke('settings:set-custom-proxy', cpToggle.checked, val);
-        cpStatus.textContent = (cpToggle.checked && val)
-          ? ('已保存并启用：' + val)
-          : (cpToggle.checked ? '已启用但未填写地址（不生效）' : '已关闭自定义代理');
-        cpStatus.style.color = 'var(--fnos-ui-ok)';
+        const url = buildCpUrl();
+        if (cpToggle.checked && !url) {
+          cpSetStatus('已启用但未填写主机:端口（不生效）', false);
+          return;
+        }
+        await ipcRenderer.invoke('settings:set-custom-proxy', cpToggle.checked, url);
+        cpSetStatus(cpToggle.checked && url ? ('已保存并启用：' + url) : '已关闭自定义代理', true);
       } catch {
-        cpStatus.textContent = '保存失败';
-        cpStatus.style.color = 'var(--fnos-ui-warn)';
-      }
-    });
-    cpResetBtn.addEventListener('click', async (e: Event) => {
-      e.stopPropagation();
-      cpToggle.checked = false;
-      cpInput.value = '';
-      try {
-        await ipcRenderer.invoke('settings:set-custom-proxy', false, '');
-        cpStatus.textContent = '已关闭自定义代理';
-        cpStatus.style.color = 'var(--fnos-ui-ok)';
-      } catch {
-        cpStatus.textContent = '重置失败';
-        cpStatus.style.color = 'var(--fnos-ui-warn)';
+        cpSetStatus('保存失败', false);
       }
     });
 
-    // 初始回填：读取已保存的开关与地址
+    cpTestBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      const url = buildCpUrl();
+      if (!url) { cpSetStatus('请先填写主机:端口', false); return; }
+      cpSetStatus('测试中…', null);
+      cpTestBtn.disabled = true;
+      try {
+        const r: any = await ipcRenderer.invoke('settings:test-custom-proxy', true, url);
+        if (r && r.ok) cpSetStatus('测试' + (r.info ? ('：' + r.info) : '通过'), true);
+        else cpSetStatus('测试失败：' + ((r && r.error) || '未知'), false);
+      } catch (err: any) {
+        cpSetStatus('测试异常：' + String((err && err.message) || err), false);
+      } finally {
+        cpTestBtn.disabled = false;
+      }
+    });
+
+    cpResetBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      cpToggle.checked = false;
+      cpType.value = 'https';
+      cpAddr.value = '';
+      cpUser.value = '';
+      cpPass.value = '';
+      try {
+        await ipcRenderer.invoke('settings:set-custom-proxy', false, '');
+        cpSetStatus('已关闭自定义代理', true);
+      } catch {
+        cpSetStatus('重置失败', false);
+      }
+    });
+
+    // 初始回填：读取已保存的开关与地址，解析出 类型 / 主机:端口 / 账号 / 密码
     (async () => {
       try {
         const g: any = await ipcRenderer.invoke('settings:get-custom-proxy');
         if (g) {
           cpToggle.checked = !!g.enabled;
-          if (typeof g.proxyUrl === 'string') cpInput.value = g.proxyUrl;
+          const u = (typeof g.proxyUrl === 'string') ? g.proxyUrl.trim() : '';
+          if (u) {
+            let rest = u;
+            const m = rest.match(/^([a-zA-Z0-9]+):\/\/(.*)$/);
+            if (m) {
+              const scheme = m[1].toLowerCase();
+              cpType.value = scheme.indexOf('socks') === 0 ? 'socks5' : (scheme === 'http' ? 'http' : 'https');
+              rest = m[2];
+            }
+            const am = rest.match(/^([^@]+)@(.+)$/);
+            if (am) {
+              const up = am[1];
+              rest = am[2];
+              const c = up.indexOf(':');
+              if (c >= 0) { cpUser.value = decodeURIComponent(up.slice(0, c)); cpPass.value = decodeURIComponent(up.slice(c + 1)); }
+              else { cpUser.value = decodeURIComponent(up); }
+            }
+            cpAddr.value = rest;
+          }
         }
       } catch { /* ignore */ }
     })();

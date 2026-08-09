@@ -55,6 +55,7 @@
     "node-cache": "^5.1.2",
     "node-mpv-2": "^2.0.0-beta.3",
     "semver": "^7.7.2",
+    "socks-proxy-agent": "^8.0.5",
     "uuid": "^13.0.0"
   },
   "build": {

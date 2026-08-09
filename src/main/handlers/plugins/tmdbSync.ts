@@ -2,7 +2,6 @@ import { app } from 'electron';
 import axios, { AxiosInstance } from 'axios';
 import * as https from 'https';
 import * as dns from 'dns';
-import HttpsProxyAgentMod = require('https-proxy-agent');
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as proxyModule from '../../../modules/proxyAgent';
 import * as logger from '../../../modules/logger';
@@ -238,7 +237,7 @@ function authFor(key: string): { headers: Record<string, string>; queryKey?: str
  * 统一走共享模块 proxyModule.resolveProxyAgent()，避免重复实现 SOCKS 校验等逻辑。
  * 返回 axios 可用的 httpsAgent（已禁用 axios 自带代理逻辑由调用方设置 proxy:false），无代理则 undefined。
  */
-function proxyAgent(): HttpsProxyAgentMod.HttpsProxyAgent | undefined {
+function proxyAgent(): any {
     return proxyModule.resolveProxyAgent();
 }
 
