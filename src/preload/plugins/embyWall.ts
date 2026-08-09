@@ -1790,11 +1790,11 @@ function injectExternalPlayButton(): void {
   }, 3000);
 }
 
-// ─── fnOS 视频预览窗口 → 外部播放器 ───
+// ─── fnOS 视频预览窗口 → 标题栏「🎬 外部打开」按钮 ───
 // 飞牛视频预览以模态窗口(.trim-ui__app-layout--window)内联 xgplayer <video> 播放,
 // 其 src 为带签名(sign)的直链 /download/.../file.mp4?t=...&sign=..., 自鉴权,
 // 可直接交给外部播放器(PotPlayer/MPV)播放, 无需再走 fnOS 代理或 cookie.
-// 策略: MutationObserver 监听该模态出现 → 取 video 直链 → external-play(url) → 暂停并关闭原生模态.
+// 策略: 保留原生预览, 仅在模态标题栏注入一个按钮, 点击时取 video 直链 → external-play(url).
 function injectVideoPreviewExternalPlay(): void {
   if (document.getElementById('fnos-video-preview-hook')) return;
   const marker = document.createElement('div');
@@ -1802,54 +1802,55 @@ function injectVideoPreviewExternalPlay(): void {
   marker.style.display = 'none';
   document.body.appendChild(marker);
 
-  const handled = new WeakSet<HTMLVideoElement>();
+  function ensureButton(modal: HTMLElement): void {
+    if (modal.querySelector('.fntv-ext-open')) return; // 幂等(应对 fnOS 重渲染标题栏)
 
-  function doLaunch(video: HTMLVideoElement, url: string): void {
-    const modal = video.closest('.trim-ui__app-layout--window') as HTMLElement | null;
-    const titleEl = modal?.querySelector('.trim-ui__app-layout--header-title span');
-    const title = (titleEl?.textContent || 'fnOS 视频').trim();
+    // 标题栏右侧按钮容器 = 关闭按钮的父节点(minimize/maximize/close 同容器)
+    const closeBtn = modal.querySelector('.app-layout-header-close') as HTMLElement | null;
+    const headerBtns = (closeBtn?.parentElement) as HTMLElement | null;
+    if (!headerBtns) return;
 
-    // 立刻暂停原生播放, 避免与外部播放器双声音
-    try { video.pause(); } catch (_) { /* ignore */ }
+    const btn = document.createElement('div');
+    btn.className = 'fntv-ext-open flex h-full items-center px-[15px] cursor-pointer hover:!bg-[var(--semi-color-fill-0)] active:!bg-[var(--semi-color-fill-0)]';
+    btn.style.cssText = 'font-weight:600;font-size:13px;white-space:nowrap;user-select:none;color:var(--semi-color-text-0);';
+    btn.textContent = '🎬 外部打开';
+    btn.title = '用 PotPlayer / MPV 打开此视频';
 
-    log('[视频预览外放] 检测到飞牛预览, 外放直链:', title, url);
-    ipcRenderer.send('external-play', { kind: 'url', url, title });
-
-    // 关闭原生预览模态(轻微延迟, 让外部播放器先启动); 失败则直接隐藏
-    setTimeout(() => {
-      const closeBtn = modal?.querySelector('.app-layout-header-close') as HTMLElement | null;
-      if (closeBtn) closeBtn.click();
-      else if (modal) modal.style.display = 'none';
-    }, 400);
-  }
-
-  // video.src 可能稍后才注入(xgplayer 动态设置), 重试至多 ~1s
-  function scheduleLaunch(video: HTMLVideoElement): void {
-    if (handled.has(video)) return;
-    const tryNow = (attempt: number): void => {
-      const url = video.currentSrc || video.src || '';
-      if (url && /^https?:\/\//i.test(url)) {
-        handled.add(video);
-        doLaunch(video, url);
+    const onOpen = (e: Event) => {
+      e.stopPropagation();
+      const video = modal.querySelector('video') as HTMLVideoElement | null;
+      const url = video?.currentSrc || video?.src || '';
+      if (!url || !/^https?:\/\//i.test(url)) {
+        log('[视频预览外放] 未取到有效直链');
+        alert('未能获取视频直链，无法外部打开');
         return;
       }
-      if (attempt < 20) setTimeout(() => tryNow(attempt + 1), 50);
-      else handled.add(video); // 放弃, 避免无限重试
+      const titleEl = modal.querySelector('.trim-ui__app-layout--header-title span');
+      const title = (titleEl?.textContent || 'fnOS 视频').trim();
+      log('[视频预览外放] 外部打开:', title, url);
+      ipcRenderer.send('external-play', { kind: 'url', url, title });
     };
-    tryNow(0);
+    btn.addEventListener('click', onOpen);
+    btn.addEventListener('mousedown', (e: Event) => e.stopPropagation()); // 避免触发标题栏拖拽
+
+    headerBtns.insertBefore(btn, headerBtns.firstChild);
   }
 
   const observer = new MutationObserver(() => {
-    const videos = document.querySelectorAll('.trim-ui__app-layout--window video');
-    videos.forEach((v) => scheduleLaunch(v as HTMLVideoElement));
+    document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
+      const modal = m as HTMLElement;
+      if (modal.querySelector('video')) ensureButton(modal);
+    });
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
   // 首次注入时也扫一遍(模态可能已存在)
-  const existing = document.querySelectorAll('.trim-ui__app-layout--window video');
-  existing.forEach((v) => scheduleLaunch(v as HTMLVideoElement));
+  document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
+    const modal = m as HTMLElement;
+    if (modal.querySelector('video')) ensureButton(modal);
+  });
 
-  log('[视频预览外放] 已注入(MutationObserver 监听飞牛预览窗口)');
+  log('[视频预览外放] 已注入(标题栏「🎬 外部打开」按钮)');
 }
 
 function handle(): void {
