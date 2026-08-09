@@ -1713,6 +1713,83 @@ function injectNativeReturnButton(): void {
   }, 3000);
 }
 
+// [lc-385] 系统页(飞牛原生桌面/文件管理器)显式「外部播放」入口：
+// 不劫持正常点击，提供浮动按钮 + 小面板，让用户粘贴直链 / 选择本地文件，
+// 经主进程 external-play IPC 用 PotPlayer/MPV 打开（fnOS 流类点击拦截另由点击委托实现）。
+function injectExternalPlayButton(): void {
+  if (document.getElementById('fnos-ext-play')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'fnos-ext-play-panel';
+  panel.style.cssText = 'position:fixed;right:20px;bottom:80px;z-index:2147483647;width:260px;padding:12px;'
+    + 'border-radius:14px;background:rgba(30,24,44,.94);color:#fff;font-size:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);'
+    + 'border:1px solid rgba(255,255,255,.2);display:none;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
+
+  panel.innerHTML = ''
+    + '<div style="font-weight:700;margin-bottom:8px;">外部播放器打开</div>'
+    + '<div style="margin-bottom:8px;">播放器：'
+    + '<label style="margin-right:10px;cursor:pointer;"><input type="radio" name="ext-player" value="mpv" checked> MPV</label>'
+    + '<label style="cursor:pointer;"><input type="radio" name="ext-player" value="potplayer"> PotPlayer</label>'
+    + '</div>'
+    + '<div style="margin-bottom:6px;color:rgba(255,255,255,.7);">直链 URL</div>'
+    + '<input id="ext-url" type="text" placeholder="https://.../xxx.mp4" style="width:100%;box-sizing:border-box;height:30px;margin-bottom:8px;'
+    + 'border-radius:7px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.3);color:#fff;padding:0 8px;">'
+    + '<button id="ext-open-url" style="width:100%;height:30px;margin-bottom:10px;border-radius:7px;border:none;cursor:pointer;'
+    + 'background:#6c5ce7;color:#fff;font-weight:600;">用播放器打开直链</button>'
+    + '<div style="margin-bottom:6px;color:rgba(255,255,255,.7);">本地文件</div>'
+    + '<input id="ext-file" type="file" accept="video/*" style="width:100%;margin-bottom:8px;color:#fff;">'
+    + '<button id="ext-open-file" style="width:100%;height:30px;border-radius:7px;border:none;cursor:pointer;'
+    + 'background:#00b894;color:#fff;font-weight:600;">用播放器打开本地文件</button>';
+
+  const toggle = document.createElement('button');
+  toggle.id = 'fnos-ext-play';
+  toggle.type = 'button';
+  toggle.textContent = '🎬 外部播放';
+  toggle.style.cssText = 'position:fixed;right:20px;bottom:30px;z-index:2147483647;padding:9px 14px;border-radius:12px;cursor:pointer;'
+    + 'background:rgba(40,30,60,.92);color:#fff;font-size:13px;font-weight:600;'
+    + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
+
+  toggle.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+
+  panel.querySelector('#ext-open-url')!.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    const url = (panel.querySelector('#ext-url') as HTMLInputElement).value.trim();
+    const player = (panel.querySelector('input[name=ext-player]:checked') as HTMLInputElement)?.value as 'mpv' | 'potplayer';
+    if (!url) { alert('请先粘贴视频直链'); return; }
+    ipcRenderer.send('external-play', { kind: 'url', url, player });
+    panel.style.display = 'none';
+  });
+
+  panel.querySelector('#ext-open-file')!.addEventListener('click', (e: Event) => {
+    e.stopPropagation();
+    const fileInput = panel.querySelector('#ext-file') as HTMLInputElement;
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) { alert('请先选择本地视频文件'); return; }
+    const player = (panel.querySelector('input[name=ext-player]:checked') as HTMLInputElement)?.value as 'mpv' | 'potplayer';
+    // Electron 渲染进程里 fileInput.files[0].path 即本地绝对路径
+    const p = (f as any).path as string;
+    if (!p) { alert('无法读取本地文件路径'); return; }
+    ipcRenderer.send('external-play', { kind: 'file', path: p, player });
+    panel.style.display = 'none';
+  });
+
+  // 点击面板内部不冒泡关闭；点击面板外关闭
+  panel.addEventListener('click', (e: Event) => e.stopPropagation());
+  document.addEventListener('click', () => { if (panel.style.display === 'block') panel.style.display = 'none'; });
+
+  document.body.appendChild(panel);
+  document.body.appendChild(toggle);
+  setInterval(() => {
+    if (!document.getElementById('fnos-ext-play') && document.body) {
+      document.body.appendChild(panel);
+      document.body.appendChild(toggle);
+    }
+  }, 3000);
+}
+
 function handle(): void {
   const base = location.origin;
   log('handle start');
@@ -1721,6 +1798,7 @@ function handle(): void {
   //   切到飞牛原生 NAS 系统页(根路径 `/`)时, 这些改造会破坏原生 UI, 故跳过, 仅注入"返回影视"浮动按钮。
   if (!isFntvTvPage()) {
     injectNativeReturnButton();
+    injectExternalPlayButton();
     return;
   }
 

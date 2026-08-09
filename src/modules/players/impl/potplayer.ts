@@ -412,6 +412,8 @@ export class PotPlayer extends BasePlayer {
      * http://127.0.0.1:22347/p/<id>/<剧名>.mp4，PotPlayer 解码后显示可读中文名。
      */
     private getShimUrl(item: PlayItem): string {
+        // [lc-385] 本地文件/直链(rawLink)直接透传给 PotPlayer，不走可读名 shim(否则会被当成要走 127.0.0.1:22347 代理的地址)
+        if (item.rawLink) return item.playLink;
         return playbackShim.makeUrl(this.getTitle(item), item.playLink);
     }
 

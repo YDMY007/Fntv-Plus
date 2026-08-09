@@ -28,6 +28,20 @@ interface PlayRequest {
     player?: 'mpv' | 'potplayer'; // 指定播放器；缺省由 defaultPlayer 决定
 }
 
+// [lc-385] 通用外部播放入口：支持 fnOS 流(fnos) / 本地文件(file) / 直链(url)
+interface ExtPlayRequest {
+    kind: 'fnos' | 'file' | 'url';
+    player?: 'mpv' | 'potplayer'; // 指定播放器；缺省由 defaultPlayer 决定
+    // fnos 类
+    id?: string;
+    token?: string;
+    sourceIndex?: number;
+    // file / url 类
+    path?: string;
+    url?: string;
+    title?: string;
+}
+
 // 全局播放器实例引用
 let currentPlayer: ply.BasePlayer | null = null;
 
@@ -606,6 +620,63 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
     playerInstance.playList(playList, currentIndex);
 }
 
+// [lc-385] 通用外部播放入口：fnOS 流 / 本地文件 / 直链 统一拉起 PotPlayer/MPV
+async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Promise<void> {
+    log.info('[external-play] 收到请求:', JSON.stringify({ kind: req.kind, player: req.player, id: req.id, hasPath: !!req.path, hasUrl: !!req.url }));
+    const config = fnConfig.readConfig();
+    if (!config || !config.domain) {
+        log.error('[external-play] 无法找到服务器地址配置');
+        return;
+    }
+    const wantPot = (req.player || fnConfig.getDefaultPlayer()) === 'potplayer';
+
+    // fnos 类：直接复用现有 fnOS 播放链路（含续播/字幕/选集/代理鉴权）
+    if (req.kind === 'fnos') {
+        if (!req.id) { log.error('[external-play] fnos 缺少 id'); return; }
+        // token 由 preload 从 fnOS 桌面页 cookie(Trim-MC-token) 取得传入；缺失则回退配置 token
+        const token = req.token || config.token || '';
+        return handlePlayMovie(_event, { id: req.id, token, sourceIndex: req.sourceIndex || 0, player: req.player });
+    }
+
+    // file / url 类：本地文件或直链，无需 fnOS 代理与 fnapi 字幕
+    const link = req.kind === 'file' ? (req.path || '') : (req.url || '');
+    if (!link) { log.error('[external-play] file/url 缺少 path/url'); return; }
+
+    const playerType = wantPot ? ply.PlayerType.POTPLAYER : ply.PlayerType.MPV;
+    const playerPath = wantPot ? getPotPlayerPath() : getMpvPlayerPath();
+    if (!playerPath) {
+        log.error(wantPot ? '[external-play] 无法找到 PotPlayer 路径（请在设置中指定）' : '[external-play] 无法找到 MPV 路径');
+        return;
+    }
+
+    const fnapi = new fn.ApiService(config.domain, config.token || '');
+    const itemGuid = req.kind === 'file' ? ('file://' + link) : ('url://' + link);
+    const title = req.title || (req.kind === 'file' ? path.basename(link) : link);
+    const playList: ply.PlayItem[] = [{
+        itemGuid, title, tvTitle: '', seasonNumber: 0, episodeNumber: 0,
+        ts: 0, duration: 0, playLink: link, rawLink: true,
+    }];
+
+    // 复用「抢占 / 原地切换 + 创建 + 播放」逻辑（与 handlePlayMovie 一致）
+    if (currentPlayer && currentPlayer.isPlaying()) {
+        if (wantPot && currentPlayer instanceof ply.PotPlayer) {
+            try {
+                const ok = await currentPlayer.switchTo(playList, 0);
+                if (ok) { log.info('[external-play] PotPlayer 原地切换到外部文件/URL'); return; }
+            } catch (e: any) { log.warn('[external-play] 原地切换失败:', e?.message || e); }
+        }
+        currentPlayer.stop();
+        currentPlayer = null;
+    }
+    const playerInstance = ply.PlayerFactory.createPlayer(playerType, {
+        fnapi, playerPath,
+        extraArgs: wantPot ? [] : ['--force-window=immediate', '--network-timeout=180'],
+        debug: true, onEvent: eventHandler(fnapi),
+    } as ply.Config);
+    currentPlayer = playerInstance;
+    playerInstance.playList(playList, 0);
+}
+
 // 生成代理URL
 function getProxyUrl(cfg: fnConfig.Config, itemGuid: string, sourceIndex: number = 0): string {
     const skipVerify = isTrusted(cfg.domain || '') ? '1' : '0';
@@ -683,6 +754,8 @@ function init(): void {
     }
 
     registerHandler('play-movie', handlePlayMovie);
+    registerHandler('external-play', handleExternalPlay);
+
     registerAppHook('beforeQuit', handleBeforeQuit);
 
     // 异步预准备内置 PotPlayer 的隔离副本（首次复制 209MB，避免播放时阻塞）
