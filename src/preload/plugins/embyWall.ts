@@ -4,7 +4,6 @@ import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
 import { isSyncableItemType } from '../../modules/fn_api/types';
-import { getCookie } from '../core/utils';
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -1791,100 +1790,66 @@ function injectExternalPlayButton(): void {
   }, 3000);
 }
 
-// ─── fnOS 文件管理器视频点击拦截 → 外部播放器 ───
-// 策略: hook fetch/XHR 拦截文件列表 API 响应 → 解析 {name, guid} 建映射表;
-//       监听 document dblclick, 从被点元素提取视频文件名 → 查映射得 GUID → external-play(fnos).
-// 不依赖 DOM data-guid 属性(前端框架可能不暴露), 走服务端数据源更稳.
-const VIDEO_EXT_RE = /\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m2ts|rmvb|mpg|mpeg|3gp|m4v)$/i;
-
-function injectFileClickInterceptor(): void {
-  if (document.getElementById('fnos-file-click-hook')) return;
+// ─── fnOS 视频预览窗口 → 外部播放器 ───
+// 飞牛视频预览以模态窗口(.trim-ui__app-layout--window)内联 xgplayer <video> 播放,
+// 其 src 为带签名(sign)的直链 /download/.../file.mp4?t=...&sign=..., 自鉴权,
+// 可直接交给外部播放器(PotPlayer/MPV)播放, 无需再走 fnOS 代理或 cookie.
+// 策略: MutationObserver 监听该模态出现 → 取 video 直链 → external-play(url) → 暂停并关闭原生模态.
+function injectVideoPreviewExternalPlay(): void {
+  if (document.getElementById('fnos-video-preview-hook')) return;
   const marker = document.createElement('div');
-  marker.id = 'fnos-file-click-hook';
+  marker.id = 'fnos-video-preview-hook';
   marker.style.display = 'none';
   document.body.appendChild(marker);
 
-  // 文件名 → GUID 映射表 (每次文件夹导航后由文件列表响应重建)
-  const guidMap = new Map<string, string>();
+  const handled = new WeakSet<HTMLVideoElement>();
 
-  /** 尝试从任意形状的响应数据中提取 {name, guid} 对并写入映射表 */
-  function parseFileListResponse(data: any): void {
-    const items: any[] = Array.isArray(data) ? data
-      : (data?.data?.list || data?.list || data?.items || data?.files || data?.entries || []);
-    let added = 0;
-    for (const item of items) {
-      if (!item || typeof item !== 'object') continue;
-      const name = item.name || item.fileName || item.filename || item.title || '';
-      const guid = String(item.guid || item.id || item.fileId || item.mediaGuid || item.uuid || '');
-      if (name && guid && typeof name === 'string') {
-        guidMap.set(name, guid);
-        added++;
-      }
-    }
-    if (added > 0) log('[文件点击拦截] 已捕获', added, '条文件映射(总计', guidMap.size + ')');
+  function doLaunch(video: HTMLVideoElement, url: string): void {
+    const modal = video.closest('.trim-ui__app-layout--window') as HTMLElement | null;
+    const titleEl = modal?.querySelector('.trim-ui__app-layout--header-title span');
+    const title = (titleEl?.textContent || 'fnOS 视频').trim();
+
+    // 立刻暂停原生播放, 避免与外部播放器双声音
+    try { video.pause(); } catch (_) { /* ignore */ }
+
+    log('[视频预览外放] 检测到飞牛预览, 外放直链:', title, url);
+    ipcRenderer.send('external-play', { kind: 'url', url, title });
+
+    // 关闭原生预览模态(轻微延迟, 让外部播放器先启动); 失败则直接隐藏
+    setTimeout(() => {
+      const closeBtn = modal?.querySelector('.app-layout-header-close') as HTMLElement | null;
+      if (closeBtn) closeBtn.click();
+      else if (modal) modal.style.display = 'none';
+    }, 400);
   }
 
-  // ── hook fetch ──
-  const _origFetch = window.fetch;
-  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const url = (typeof input === 'string') ? input
-      : (input instanceof URL) ? input.href : (input as Request)?.url || '';
-    // 匹配 fnOS 文件列表类端点 (含 /files /file/ /directory 等, 且带 api 或 v/ 路径)
-    if (/(\/files|\/file\/|\/directory|\/entries)/i.test(url) && /(\/api\/|\/v\/)/i.test(url)) {
-      try {
-        const resp = await _origFetch.call(this, input, init);
-        try { parseFileListResponse(await resp.clone().json()); } catch (_) { /* 非 JSON 忽略 */ }
-        return resp;
-      } catch (e) { return _origFetch.call(this, input, init); }
-    }
-    return _origFetch.call(this, input, init);
-  };
+  // video.src 可能稍后才注入(xgplayer 动态设置), 重试至多 ~1s
+  function scheduleLaunch(video: HTMLVideoElement): void {
+    if (handled.has(video)) return;
+    const tryNow = (attempt: number): void => {
+      const url = video.currentSrc || video.src || '';
+      if (url && /^https?:\/\//i.test(url)) {
+        handled.add(video);
+        doLaunch(video, url);
+        return;
+      }
+      if (attempt < 20) setTimeout(() => tryNow(attempt + 1), 50);
+      else handled.add(video); // 放弃, 避免无限重试
+    };
+    tryNow(0);
+  }
 
-  // ── hook XMLHttpRequest ──
-  const _origOpen = XMLHttpRequest.prototype.open;
-  const _origSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method: string, url: string, ...rest: any[]) {
-    (this as any).__fci_url = url;
-    return (_origOpen as any).call(this, method, url, ...rest);
-  };
-  XMLHttpRequest.prototype.send = function (body?: any) {
-    const url = (this as any).__fci_url || '';
-    if (/(\/files|\/file\/|\/directory|\/entries)/i.test(url) && /(\/api\/|\/v\/)/i.test(url)) {
-      this.addEventListener('load', () => {
-        try { parseFileListResponse(JSON.parse((this as XMLHttpRequest).responseText)); } catch (_) {}
-      });
-    }
-    return _origSend.call(this, body);
-  };
+  const observer = new MutationObserver(() => {
+    const videos = document.querySelectorAll('.trim-ui__app-layout--window video');
+    videos.forEach((v) => scheduleLaunch(v as HTMLVideoElement));
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 
-  // ── dblclick 拦截 ──
-  document.addEventListener('dblclick', (e: MouseEvent) => {
-    // 从被点元素向上查找包含视频扩展名的文本作为文件名
-    let el: HTMLElement | null = e.target as HTMLElement;
-    let filename = '';
-    for (let i = 0; i < 6 && el; i++) {
-      const text = (el.textContent || '').trim();
-      const m = text.match(/([^\s\n\r]+\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m2ts|rmvb|mpg|mpeg|3gp|m4v))/i);
-      if (m) { filename = m[1]; break; }
-      el = el.parentElement;
-    }
-    if (!filename) return; // 不是视频文件
+  // 首次注入时也扫一遍(模态可能已存在)
+  const existing = document.querySelectorAll('.trim-ui__app-layout--window video');
+  existing.forEach((v) => scheduleLaunch(v as HTMLVideoElement));
 
-    const guid = guidMap.get(filename);
-    if (!guid) {
-      log('[文件点击拦截] 未找到 GUID:', filename, '(映射表大小:', guidMap.size + ')');
-      return;
-    }
-
-    // 找到了 GUID → 阻止 fnOS 自身播放器打开, 改走外部播放器
-    e.preventDefault();
-    e.stopPropagation();
-    const token = getCookie('Trim-MC-token') || '';
-    ipcRenderer.send('external-play', { kind: 'fnos', id: guid, token, player: 'potplayer' });
-    log('[文件点击拦截] → 外部播放器:', filename, 'GUID:', guid);
-  }, true); // capture phase, 抢在 fnOS handler 之前
-
-  log('[文件点击拦截] 已注入(fetch/XHR hook + dblclick 拦截)');
+  log('[视频预览外放] 已注入(MutationObserver 监听飞牛预览窗口)');
 }
 
 function handle(): void {
@@ -1896,7 +1861,7 @@ function handle(): void {
   if (!isFntvTvPage()) {
     injectNativeReturnButton();
     injectExternalPlayButton();
-    injectFileClickInterceptor();  // fnOS 文件管理器视频双击 → PotPlayer/MPV
+    injectVideoPreviewExternalPlay();  // fnOS 视频预览窗口 → 外部播放器(PotPlayer/MPV)
     return;
   }
 
