@@ -4042,12 +4042,12 @@ function handle(): void {
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
-      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el, secCustomProxy.el] },
+      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
       { id: 'player', label: '播放器', els: [sec2.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
-      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el] },
+      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
