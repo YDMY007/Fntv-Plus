@@ -59,6 +59,10 @@ export interface Config {
     history?: HistoryItem[];
     downloadProxyEnabled?: boolean;
     downloadProxy?: string;
+    // 全局自定义 HTTP/HTTPS 代理（让 Bangumi 每日放送、TMDB 等走用户自建代理入口）
+    // 区别于 downloadProxy（仅 ghfast.top 下载加速）与 tmdbDirectConnect（DNS 覆盖式免梯子直连）
+    customProxyEnabled?: boolean;
+    customProxy?: string;
     hideOriginalPlayButton?: boolean;
     macCloseAction?: 'minimize' | 'quit' | 'ask';
     trayNotificationShown?: boolean;
@@ -317,6 +321,35 @@ export function setDownloadProxyConfig({ enabled = true, proxyUrl = 'https://ghf
     const config: Config = readConfig() || {};
     config.downloadProxyEnabled = enabled;
     config.downloadProxy = proxyUrl;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 全局自定义代理配置（HTTP/HTTPS 代理地址）
+export interface CustomProxyConfig {
+    enabled: boolean;
+    proxyUrl: string;
+}
+
+// 设置自定义代理配置参数接口
+export interface SetCustomProxyConfigParams {
+    enabled?: boolean;
+    proxyUrl?: string;
+}
+
+// 获取自定义代理配置（默认关闭；proxyUrl 留空时用空串，调用方需自行校验）
+export function getCustomProxyConfig(): CustomProxyConfig {
+    const config: Config = readConfig() || {};
+    return {
+        enabled: config.customProxyEnabled === true, // 默认关闭
+        proxyUrl: (typeof config.customProxy === 'string' && config.customProxy.trim()) ? config.customProxy.trim() : ''
+    };
+}
+
+// 设置自定义代理配置
+export function setCustomProxyConfig({ enabled = false, proxyUrl = '' }: SetCustomProxyConfigParams = {}): void {
+    const config: Config = readConfig() || {};
+    config.customProxyEnabled = enabled;
+    config.customProxy = (typeof proxyUrl === 'string' && proxyUrl.trim()) ? proxyUrl.trim() : '';
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
@@ -836,6 +869,8 @@ module.exports = {
     setDownloadProxyUrl,
     getDownloadProxyConfig,
     setDownloadProxyConfig,
+    getCustomProxyConfig,
+    setCustomProxyConfig,
     getHideOriginalPlayButton,
     setHideOriginalPlayButton,
     getNasProxyEnabled,

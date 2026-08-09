@@ -4,6 +4,7 @@ import * as https from 'https';
 import * as dns from 'dns';
 import HttpsProxyAgentMod = require('https-proxy-agent');
 import * as fnConfig from '../../../modules/fn_config/config';
+import * as proxyModule from '../../../modules/proxyAgent';
 import * as logger from '../../../modules/logger';
 import { registerHandler } from '../core/ipcHandler';
 import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
@@ -191,7 +192,7 @@ async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?
         const direct = fnConfig.getTmdbDirectConnect() && !agent;
         const a = agent || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
         const ip = directIp();
-        const mode = agent ? 'HTTPS_PROXY 代理' : (direct ? ('免梯子直连(img=' + ip.img + ')') : '系统 DNS 直连');
+        const mode = agent ? '代理(环境变量/自定义)' : (direct ? ('免梯子直连(img=' + ip.img + ')') : '系统 DNS 直连');
         log.info('[TMDB诊断] 拉取图片(' + mode + ')：' + url.slice(0, 80));
         const client = axios.create({
             timeout: 20000,
@@ -233,30 +234,12 @@ function authFor(key: string): { headers: Record<string, string>; queryKey?: str
 }
 
 /**
- * 从环境变量读取代理（HTTPS_PROXY / https_proxy / HTTP_PROXY / http_proxy）。
- * Node/Electron 默认不走 Windows 系统代理，所以靠梯子上网的机器必须显式给：
- *   Clash 默认 http://127.0.0.1:7890；v2rayN 默认 http://127.0.0.1:10809 等。
- * 仅支持 HTTP/HTTPS 代理；SOCKS 需用梯子的「HTTP 代理端口」。
- * 返回 axios 可用的 httpsAgent（已禁用 axios 自带代理逻辑），无代理则 undefined。
+ * 解析代理 agent：环境变量优先，其次设置面板「自定义代理」。
+ * 统一走共享模块 proxyModule.resolveProxyAgent()，避免重复实现 SOCKS 校验等逻辑。
+ * 返回 axios 可用的 httpsAgent（已禁用 axios 自带代理逻辑由调用方设置 proxy:false），无代理则 undefined。
  */
 function proxyAgent(): HttpsProxyAgentMod.HttpsProxyAgent | undefined {
-    const raw =
-        process.env.HTTPS_PROXY || process.env.https_proxy ||
-        process.env.HTTP_PROXY || process.env.http_proxy;
-    if (!raw) return undefined;
-    if (/^socks/i.test(raw)) {
-        log.warn('TMDB: 检测到 SOCKS 代理，但当前内置仅支持 HTTP/HTTPS 代理；' +
-            '请在梯子设置里改用「HTTP 代理端口」，或在 CLAUDE/README 中改用支持 SOCKS 的方式。');
-        return undefined;
-    }
-    try {
-        const agent = new HttpsProxyAgentMod.HttpsProxyAgent(raw);
-        log.info('TMDB: 已启用代理 ' + raw.replace(/\/\/[^@]+@/, '//***@'));
-        return agent;
-    } catch (e: any) {
-        log.warn('TMDB: 代理初始化失败：' + String(e && e.message));
-        return undefined;
-    }
+    return proxyModule.resolveProxyAgent();
 }
 
 /** 带鉴权 + 超时 + UA + 可选代理/直连 的 http 客户端 */
@@ -264,13 +247,14 @@ function http(): AxiosInstance {
     const key = fnConfig.getTmdbApiKey();
     const a = key ? authFor(key) : { headers: {} as Record<string, string> };
     const proxy = proxyAgent();
-    // 与代理互斥：设了 HTTPS_PROXY 走代理；否则若开启免梯子直连，用自定义 DNS lookup 覆盖解析
+    // 与代理互斥：设了代理（环境变量或设置面板自定义）走代理；否则若开启免梯子直连，用自定义 DNS lookup 覆盖解析
     const direct = fnConfig.getTmdbDirectConnect() && !proxy;
     const agent = proxy || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
     const ip = directIp();
-    const proxyRaw = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+    const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
+    const proxyLabel = envProxy ? ('环境变量代理(' + envProxy + ')') : '自定义代理(设置面板)';
     const mode = proxy
-        ? ('HTTPS_PROXY 代理(' + (proxyRaw || '?') + ')')
+        ? proxyLabel
         : direct
             ? ('免梯子直连(强制解析 api=' + ip.api + ' img=' + ip.img + ')')
             : '系统 DNS 直连(无代理/未开直连)';

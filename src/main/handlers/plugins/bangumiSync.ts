@@ -5,6 +5,7 @@ import * as dns from 'dns';
 import * as https from 'https';
 import axios, { AxiosInstance } from 'axios';
 import * as fnConfig from '../../../modules/fn_config/config';
+import * as proxyModule from '../../../modules/proxyAgent';
 import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
 import { registerHandler } from '../core/ipcHandler';
@@ -103,10 +104,22 @@ function bangumiDirectAgent(): https.Agent | undefined {
         : undefined;
 }
 
-/** 把直连 agent 注入 axios 配置（不可与代理混用；本插件不处理代理，保持与原有行为一致） */
-function withDirectAgent(cfg: any): any {
-    const a = bangumiDirectAgent();
-    if (a) { cfg.httpsAgent = a; cfg.proxy = false; }
+/**
+ * 统一注入传输方式（优先级：代理 > 免梯子直连DNS > 系统DNS）：
+ *  1. 代理（环境变量 HTTPS_PROXY 或设置面板「自定义代理」）→ 走用户代理入口；
+ *  2. 开启「免梯子直连」→ 公共 DNS 覆盖解析；
+ *  3. 否则 → 系统 DNS 直连。
+ * 代理与直连互斥：设了代理则 proxy:false 关闭 axios 自带代理逻辑，交给自定义 agent。
+ */
+function withTransport(cfg: any): any {
+    const proxy = proxyModule.resolveProxyAgent();
+    if (proxy) {
+        cfg.httpsAgent = proxy;
+        cfg.proxy = false;
+        return cfg;
+    }
+    const direct = bangumiDirectAgent();
+    if (direct) { cfg.httpsAgent = direct; cfg.proxy = false; }
     return cfg;
 }
 
@@ -135,7 +148,7 @@ function http(): AxiosInstance {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
     };
-    withDirectAgent(cfg); // 开启「免梯子直连」时注入自定义 DNS lookup（覆盖同步/取集简介等全部请求）
+    withTransport(cfg); // 注入传输方式（代理 > 免梯子直连DNS > 系统DNS；覆盖同步/取集简介等全部请求）
     return axios.create(cfg);
 }
 
@@ -435,7 +448,7 @@ async function fetchCalendar(): Promise<{ ok: boolean; items?: any[]; error?: st
             timeout: 12000,
             headers: { 'User-Agent': bangumiUA() },
         };
-        withDirectAgent(cfg); // 开启「免梯子直连」时让每日放送数据源也走公共 DNS
+        withTransport(cfg); // 注入传输方式（代理 > 免梯子直连DNS > 系统DNS；让每日放送数据源也可走用户自定义代理）
         const resp = await axios.get(`${BANGUMI_API}/calendar`, cfg);
         const days: any[] = Array.isArray(resp.data) ? resp.data : [];
         const map = new Map<number, any>();

@@ -20,6 +20,8 @@ import * as log from '../../../modules/logger';
 async function handleGetSettings(): Promise<any> {
     return {
         downloadProxy: fnConfig.getDownloadProxyConfig(),
+        // 自定义代理（让 Bangumi 每日放送、TMDB 等走用户自建代理入口；环境变量优先于它）
+        customProxy: fnConfig.getCustomProxyConfig(),
         hideOriginalPlayButton: fnConfig.getHideOriginalPlayButton(),
         nasProxyEnabled: fnConfig.getNasProxyEnabled(),
         mpvPath: fnConfig.getMpvPlayerPath() || '',
@@ -63,6 +65,16 @@ async function handleGetSettings(): Promise<any> {
 async function handleSetDownloadProxy(_event: any, enabled: boolean): Promise<void> {
     const cur = fnConfig.getDownloadProxyConfig();
     fnConfig.setDownloadProxyConfig({ enabled: !!enabled, proxyUrl: cur.proxyUrl });
+}
+
+// 自定义代理：获取当前配置
+async function handleGetCustomProxy(): Promise<any> {
+    return fnConfig.getCustomProxyConfig();
+}
+
+// 自定义代理：开关 + 地址一起设置（enabled 默认 false，proxyUrl 默认空串）
+async function handleSetCustomProxy(_event: any, enabled: boolean, proxyUrl?: string): Promise<void> {
+    fnConfig.setCustomProxyConfig({ enabled: !!enabled, proxyUrl: (typeof proxyUrl === 'string' ? proxyUrl : '') });
 }
 
 async function handleSetHidePlay(_event: any, hide: boolean): Promise<void> {
@@ -659,6 +671,9 @@ function init(): void {
     registerHandler('settings:get-hot-source', handleGetHotSource, { useHandle: true });
     registerHandler('settings:get-system-page-url', handleGetSystemPageUrl, { useHandle: true });
     registerHandler('settings:set-system-page-url', handleSetSystemPageUrl, { useHandle: true });
+    // 自定义代理（让 Bangumi 每日放送、TMDB 走用户自建代理入口）
+    registerHandler('settings:get-custom-proxy', handleGetCustomProxy, { useHandle: true });
+    registerHandler('settings:set-custom-proxy', handleSetCustomProxy, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-enabled', handleSetBangumiSyncEnabled, { useHandle: true });
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });

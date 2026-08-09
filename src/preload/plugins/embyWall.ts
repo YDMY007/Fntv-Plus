@@ -3958,11 +3958,91 @@ function handle(): void {
       } catch { /* ignore */ }
     })();
 
+    // ===== 分组: 自定义代理（让 Bangumi 每日放送、TMDB 等走用户自建代理入口）=====
+    const secCustomProxy = section('自定义代理');
+    const secBodyCustomProxy = secCustomProxy.body;
+    secBodyCustomProxy.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    const cpDesc = document.createElement('div');
+    cpDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    cpDesc.textContent = '为 Bangumi 每日放送、TMDB（影视发现/海报）等数据源单独指定 HTTP/HTTPS 代理入口。优先级低于环境变量 HTTPS_PROXY（已设环境变量则它先生效）。地址须以 http:// 或 https:// 开头，如 http://127.0.0.1:7890（Clash）或 http://127.0.0.1:10809（v2rayN）。开启开关并填写地址后才生效；仅支持 HTTP/HTTPS 代理，不支持 SOCKS（请在梯子里改用 HTTP 代理端口）。';
+    secBodyCustomProxy.appendChild(cpDesc);
+
+    // 开关行（整行可点）
+    const cpToggleRow = document.createElement('label');
+    cpToggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;';
+    const cpToggleSpan = document.createElement('span');
+    cpToggleSpan.textContent = '启用自定义代理';
+    cpToggleSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const cpToggle = document.createElement('input');
+    cpToggle.type = 'checkbox';
+    cpToggle.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    cpToggleRow.appendChild(cpToggleSpan); cpToggleRow.appendChild(cpToggle);
+    secBodyCustomProxy.appendChild(cpToggleRow);
+
+    const cpInput = document.createElement('input');
+    cpInput.type = 'text';
+    cpInput.placeholder = '代理地址，如 http://127.0.0.1:7890';
+    cpInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;margin-bottom:8px;';
+    secBodyCustomProxy.appendChild(cpInput);
+
+    const cpBtns = document.createElement('div');
+    cpBtns.style.cssText = 'display:flex;gap:6px;';
+    const cpSaveBtn = mkBtn('保存', true);
+    const cpResetBtn = mkBtn('关闭代理', true);
+    cpBtns.appendChild(cpSaveBtn);
+    cpBtns.appendChild(cpResetBtn);
+    secBodyCustomProxy.appendChild(cpBtns);
+
+    const cpStatus = document.createElement('div');
+    cpStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyCustomProxy.appendChild(cpStatus);
+
+    cpSaveBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      try {
+        const val = cpInput.value.trim();
+        await ipcRenderer.invoke('settings:set-custom-proxy', cpToggle.checked, val);
+        cpStatus.textContent = (cpToggle.checked && val)
+          ? ('已保存并启用：' + val)
+          : (cpToggle.checked ? '已启用但未填写地址（不生效）' : '已关闭自定义代理');
+        cpStatus.style.color = 'var(--fnos-ui-ok)';
+      } catch {
+        cpStatus.textContent = '保存失败';
+        cpStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+    cpResetBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      cpToggle.checked = false;
+      cpInput.value = '';
+      try {
+        await ipcRenderer.invoke('settings:set-custom-proxy', false, '');
+        cpStatus.textContent = '已关闭自定义代理';
+        cpStatus.style.color = 'var(--fnos-ui-ok)';
+      } catch {
+        cpStatus.textContent = '重置失败';
+        cpStatus.style.color = 'var(--fnos-ui-warn)';
+      }
+    });
+
+    // 初始回填：读取已保存的开关与地址
+    (async () => {
+      try {
+        const g: any = await ipcRenderer.invoke('settings:get-custom-proxy');
+        if (g) {
+          cpToggle.checked = !!g.enabled;
+          if (typeof g.proxyUrl === 'string') cpInput.value = g.proxyUrl;
+        }
+      } catch { /* ignore */ }
+    })();
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
-      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
+      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el, secCustomProxy.el] },
       { id: 'player', label: '播放器', els: [sec2.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
