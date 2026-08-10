@@ -93,7 +93,7 @@ function injectTitleBar(): void {
   bar.style.cssText = `height:32px;width:100%;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
     -webkit-app-region:drag;app-region:drag;
     border-top-left-radius:16px;border-top-right-radius:16px;
-    background:var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%));
+    background:var(--fnos-titlebar-bg,transparent);
     border:none;transition:background .25s ease,border-radius .25s ease;`;
 
   /* 窗口控制右对齐 (no-drag 保证可点击) */
@@ -119,8 +119,8 @@ function injectTitleBar(): void {
   const setImmersive = function (on: boolean): void {
     if (_immersive === on) return;
     _immersive = on;
-    // 背景 & 圆角
-    bar.style.background = on ? 'transparent' : 'var(--fnos-titlebar-bg,linear-gradient(180deg,rgba(249,249,249,.50) 0%,rgba(243,243,245,.34) 100%))';
+    // 背景 & 圆角: 标题栏保持透明, 直接透出与下方窗口一致的亚克力底(消除顶部白条色差)
+    bar.style.background = 'transparent';
     bar.style.borderTopLeftRadius = on ? '0' : '16px';
     bar.style.borderTopRightRadius = on ? '0' : '16px';
     // 图标颜色
