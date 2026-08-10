@@ -2,6 +2,9 @@ import { app } from 'electron';
 import axios, { AxiosInstance } from 'axios';
 import * as https from 'https';
 import * as dns from 'dns';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as proxyModule from '../../../modules/proxyAgent';
 import * as logger from '../../../modules/logger';
@@ -178,21 +181,50 @@ function scheduleAutoIpRefresh(): void {
 const _imgDataUrlCache = new Map<string, string>();
 const IMG_CACHE_MAX = 400;
 
+// [lc-416] 图片磁盘缓存：把已下载的 data URL 落到 userData/cache/img/，跨软件重启持久化。
+// 轮播图 Logo / 浮层海报等 TMDB 图片从此不再每次向 image.tmdb.org 读取。
+function imgDiskDir(): string {
+    const dir = path.join(app.getPath('userData'), 'cache', 'img');
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch { /* 忽略，下载分支仍可用 */ }
+    return dir;
+}
+function imgDiskFile(url: string): string {
+    const h = crypto.createHash('sha1').update(url).digest('hex');
+    return path.join(imgDiskDir(), h + '.txt');
+}
+function imgDiskRead(url: string): string | null {
+    try {
+        const f = imgDiskFile(url);
+        if (fs.existsSync(f)) return fs.readFileSync(f, 'utf-8');
+    } catch { /* 忽略损坏缓存，走下载 */ }
+    return null;
+}
+function imgDiskWrite(url: string, dataUrl: string): void {
+    try { fs.writeFileSync(imgDiskFile(url), dataUrl, 'utf-8'); } catch { /* 忽略写盘失败，不影响本次返回 */ }
+}
+
 async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }> {
     try {
         if (!/^https?:\/\//.test(url)) return { ok: false, error: '非法图片地址' };
-        // [lc-370] 命中缓存：直接返回已下载的 data URL，跳过网络下载
-        const cached = _imgDataUrlCache.get(url);
-        if (cached) {
-            log.info('[TMDB诊断] 图片命中本地缓存，跳过下载：' + url.slice(0, 80));
-            return { ok: true, dataUrl: cached };
+        // [lc-370] 内存缓存：直接返回已下载的 data URL，跳过网络下载
+        const mem = _imgDataUrlCache.get(url);
+        if (mem) {
+            log.info('[TMDB图片缓存] 命中内存缓存，跳过下载：' + url.slice(0, 80));
+            return { ok: true, dataUrl: mem };
+        }
+        // [lc-416] 磁盘缓存（跨重启持久化）：命中则直接返回，不再向 TMDB 图片服务器读取
+        const disk = imgDiskRead(url);
+        if (disk) {
+            _imgDataUrlCache.set(url, disk); // 回填内存，加速下次
+            log.info('[TMDB图片缓存] 命中磁盘缓存(' + disk.length + ' 字符)，跳过下载：' + url.slice(0, 80));
+            return { ok: true, dataUrl: disk };
         }
         const agent = proxyAgent();
         const direct = fnConfig.getTmdbDirectConnect() && !agent;
         const a = agent || (direct ? new https.Agent({ lookup: directLookup(), keepAlive: false }) : undefined);
         const ip = directIp();
         const mode = agent ? '代理(环境变量/自定义)' : (direct ? ('免梯子直连(img=' + ip.img + ')') : '系统 DNS 直连');
-        log.info('[TMDB诊断] 拉取图片(' + mode + ')：' + url.slice(0, 80));
+        log.info('[TMDB图片缓存] 未命中缓存，开始下载(' + mode + ')：' + url.slice(0, 80));
         const client = axios.create({
             timeout: 20000,
             responseType: 'arraybuffer',
@@ -202,16 +234,18 @@ async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?
         const ct = (resp.headers && resp.headers['content-type']) || 'image/jpeg';
         const b64 = Buffer.from(resp.data as Buffer).toString('base64');
         const dataUrl = `data:${ct};base64,${b64}`;
-        // 写入缓存（超过上限时淘汰最早一项）
+        // 写入内存缓存（超过上限时淘汰最早一项）
         if (_imgDataUrlCache.size >= IMG_CACHE_MAX) {
             const oldest = _imgDataUrlCache.keys().next().value;
             if (oldest) _imgDataUrlCache.delete(oldest);
         }
         _imgDataUrlCache.set(url, dataUrl);
-        log.info('[TMDB诊断] 图片拉取成功，' + (resp.data as Buffer).length + ' 字节');
+        // 写入磁盘缓存（持久化，关掉软件再开不重复下载）
+        imgDiskWrite(url, dataUrl);
+        log.info('[TMDB图片缓存] 下载成功(' + (resp.data as Buffer).length + ' 字节)，已写入磁盘缓存：' + url.slice(0, 80));
         return { ok: true, dataUrl };
     } catch (e: any) {
-        log.error('[TMDB诊断] 图片拉取失败：' + dumpErr(e));
+        log.error('[TMDB图片缓存] 图片下载失败：' + dumpErr(e));
         return { ok: false, error: String((e && e.message) || e) };
     }
 }
@@ -527,9 +561,23 @@ function init(): void {
     registerHandler('tmdb:image', async (_e: any, url: string) => {
         return fetchImageAsDataUrl(url);
     }, { useHandle: true });
-    // [lc-408] 轮播图透明 logo：渲染进程传入 {id?,title?,mediaType?}，主进程查 TMDB images 取 logo 路径
+    // [lc-416] 轮播图透明 logo：渲染进程传入 {id?,title?,mediaType?}，主进程查 TMDB images 取 logo 路径。
+    // 结果按 id/title 持久化缓存(默认 24h)，避免每次轮播渲染都请求 TMDB 接口（既省流量也防 429）。
     registerHandler('tmdb:logo', async (_e: any, arg: { id?: number | string; title?: string; mediaType?: 'tv' | 'movie' }) => {
-        return getTmdbLogo(arg || {});
+        const mt = arg.mediaType === 'movie' ? 'movie' : 'tv';
+        const key = 'logo_' + mt + '_' + (arg.id != null ? String(arg.id) : ('t_' + (arg.title || '')));
+        try {
+            const r = await getDailyCached(key, async () => {
+                const res = await getTmdbLogo(arg || {});
+                if (!res.ok) throw new Error(res.error || 'logo 获取失败');
+                return res;
+            }, DEFAULT_TTL_MS, false);
+            log.info('[TMDB图片缓存] logo 选择' + (r.fromCache ? '来自磁盘缓存(未请求TMDB)' : '已向TMDB刷新') + ' key=' + key);
+            return r.data;
+        } catch (e: any) {
+            log.warn('[TMDB图片缓存] logo 获取失败：' + (e?.message || e));
+            return { ok: false, error: String((e && e.message) || e) };
+        }
     }, { useHandle: true });
     // 启动自动跟随 CheckTMDB 每日刷新直连 IP（用户开启免梯子直连时生效）
     scheduleAutoIpRefresh();
