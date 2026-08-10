@@ -444,10 +444,10 @@ async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: st
  * 入参：{ id?, title?, mediaType? }
  *   - 有 id：直接查 /3/{mediaType}/{id}/images
  *   - 无 id 但有 title：先 /3/search/{mediaType}?query= 拿到 id 再查 images
- * 出参：{ ok, logoPath?, error? }（logoPath 为 image.tmdb.org 的 /t/p 路径，不含域名）
+ * 出参：{ ok, logoPath?, logoPaths?, error? }（logoPath 为首选 /t/p 路径；logoPaths 为按优先级排序的「横屏」候选路径列表，均不含域名；渲染端再排除纯白 PNG）
  * 仅返回路径，真实图片由渲染进程经 tmdb:image 代理转 base64（复用图片缓存 + 免梯子直连）。
  */
-async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaType?: 'tv' | 'movie' }): Promise<{ ok: boolean; logoPath?: string; error?: string }> {
+async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaType?: 'tv' | 'movie' }): Promise<{ ok: boolean; logoPath?: string; logoPaths?: string[]; error?: string }> {
     const mediaType = arg.mediaType === 'movie' ? 'movie' : 'tv';
     const key = fnConfig.getTmdbApiKey();
     try {
@@ -466,12 +466,24 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
         }
         if (!id) return { ok: false, error: '缺少 tmdb id 且无法从标题搜索' };
 
-        // 取 logos：默认返回全部语言，再本地排序「英文 > 无语言(null) > 其他」，其次按投票最高
+        // 取 logos：默认返回全部语言；[lc-413] 先按「横屏(宽>高)」筛选，再排序「英文 > 无语言(null) > 其他」，其次按投票最高
         const iResp = await getWithRetry(client, `/${mediaType}/${id}/images`, { params: { ...baseParams } });
         const logos = (iResp?.data?.logos || []) as any[];
         if (!logos.length) return { ok: false, error: 'TMDB 无 logo: ' + arg.title + ' (id=' + id + ')' };
 
-        const scored = logos.map((l) => ({
+        // [lc-413] 横屏筛选：优先 width>height；缺失宽高时退用 aspect_ratio>1；二者皆缺则保守保留（交由渲染端像素复核）
+        const isLandscape = (l: any): boolean => {
+            const w = typeof l.width === 'number' ? l.width : 0;
+            const h = typeof l.height === 'number' ? l.height : 0;
+            if (w && h) return w > h;
+            const ar = typeof l.aspect_ratio === 'number' ? l.aspect_ratio : 0;
+            if (ar) return ar > 1;
+            return true;
+        };
+        const landscape = logos.filter(isLandscape);
+        if (!landscape.length) return { ok: false, error: 'TMDB 无横屏 logo: ' + arg.title + ' (id=' + id + ')' };
+
+        const scored = landscape.map((l) => ({
             path: l.file_path as string,
             lang: (l.iso_639_1 as string) || '',
             vote: typeof l.vote_average === 'number' ? l.vote_average : 0,
@@ -482,9 +494,11 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
             if (rx !== ry) return ry - rx;
             return y.vote - x.vote;
         });
-        const best = scored[0];
-        log.info('[TMDB诊断] logo 选定 path=' + best.path + ' lang=' + best.lang + ' vote=' + best.vote + ' (共 ' + scored.length + ' 个候选)');
-        return { ok: true, logoPath: best.path };
+        // [lc-413] 返回横屏候选列表（按优先级排序），渲染端逐个尝试并排除纯白 PNG，挑首个可用；logoPath 保留首选以兼容旧调用
+        const logoPaths = scored.map((s) => s.path);
+        log.info('[TMDB诊断] logo 横屏候选 ' + logoPaths.length + ' 个（原始 ' + logos.length + ' 个）：'
+            + logoPaths.slice(0, 3).join(', ') + (logoPaths.length > 3 ? ' …' : ''));
+        return { ok: true, logoPath: logoPaths[0], logoPaths };
     } catch (e: any) {
         return { ok: false, error: describeTmdbError(e) };
     }

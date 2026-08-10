@@ -919,24 +919,34 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
     const info = infos[i];
     if (!info) return;
     if (show.tmdbId) {
-      // API 真实条目 → TMDB 透明 logo
+      // API 真实条目 → TMDB 透明 logo（主进程已按「横屏」筛选并返回候选列表；此处再排除纯白 PNG）
       setTimeout(async () => {
         try {
           const { ipcRenderer } = require('electron');
           const r = await ipcRenderer.invoke('tmdb:logo', { id: show.tmdbId, mediaType: show.mediaType || 'tv' });
-          if (!r || !r.ok || !r.logoPath) {
+          if (!r || !r.ok) {
             log('tmdb logo none:', show.title, (r && r.error) || '无 logo');
             return;
           }
-          const url = 'https://image.tmdb.org/t/p/w500' + r.logoPath;
-          const img = await ipcRenderer.invoke('tmdb:image', url);
-          if (!img || !img.ok || !img.dataUrl) {
-            log('tmdb logo img fail:', show.title);
-            return;
+          // [lc-413] 优先用横屏候选列表逐个尝试，挑首个「非纯白」logo；旧调用仅返回 logoPath 时退化为单候选
+          const paths = (r.logoPaths && r.logoPaths.length) ? r.logoPaths : (r.logoPath ? [r.logoPath] : []);
+          for (const p of paths) {
+            try {
+              const url = 'https://image.tmdb.org/t/p/w500' + p;
+              const img = await ipcRenderer.invoke('tmdb:image', url);
+              if (!img || !img.ok || !img.dataUrl) continue;
+              // [lc-413] 纯白 PNG 过滤：可见像素几乎全部接近纯白 → 在浅色面板上不可见，跳过换下一个候选
+              if (await isPureWhitePng(img.dataUrl)) {
+                log('tmdb logo 纯白跳过:', show.title, p);
+                continue;
+              }
+              show.tmdbLogo = img.dataUrl;
+              swapTitleToLogo(info, img.dataUrl);
+              log('tmdb logo applied:', show.title);
+              return;
+            } catch (e) { log('tmdb logo candidate err:', show.title, e); }
           }
-          show.tmdbLogo = img.dataUrl;
-          swapTitleToLogo(info, img.dataUrl);
-          log('tmdb logo applied:', show.title);
+          log('tmdb logo 全部候选不可用(纯白或失败):', show.title);
         } catch (e) { log('tmdb logo err:', show.title, e); }
       }, i * 600);
     } else if (show.logo) {
@@ -960,6 +970,37 @@ function swapTitleToLogo(info: HTMLElement, src: string): void {
   logoEl.src = src;
   logoEl.style.display = 'block';
   titleEl.style.display = 'none';
+}
+
+/** [lc-413] 判断 base64/blob PNG 是否为「纯白 logo」：可见(非透明)像素几乎全部接近纯白 → 视为纯白，
+ *  在浅色面板上不可见，应跳过；完全透明(无可见内容)同样视为不可用。渲染端 canvas 像素分析。 */
+function isPureWhitePng(dataUrl: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { resolve(true); return; } // 无尺寸 → 不可用（跳过）
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d');
+        if (!ctx) { resolve(false); return; } // 取不到上下文不误杀
+        ctx.drawImage(img, 0, 0);
+        const px = ctx.getImageData(0, 0, w, h).data;
+        let visible = 0, white = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          const a = px[i + 3];
+          if (a < 16) continue; // 透明像素跳过
+          visible++;
+          if (px[i] >= 245 && px[i + 1] >= 245 && px[i + 2] >= 245) white++;
+        }
+        if (visible < 25) { resolve(true); return; } // 实质无可见内容 → 跳过
+        resolve(white / visible >= 0.9); // 可见像素 90% 以上为白 → 判为纯白
+      } catch (e) { resolve(false); } // 解析异常不误杀（保留原图）
+    };
+    img.onerror = () => resolve(false); // 加载失败不误杀
+    img.src = dataUrl;
+  });
 }
 
 /** 设置开关变更后即时作用于当前已渲染的轮播：开→拉取 logo 替换；关→还原文字标题 */
