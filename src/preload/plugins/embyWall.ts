@@ -1879,17 +1879,8 @@ function injectVideoPreviewExternalPlay(): void {
       return b;
     };
 
-    const closeDialog = (): void => { overlay.remove(); delete modal.dataset.fntvChoice; };
-    const playNative = (): void => {
-      unfreezeVideo(video); // 解冻(移除 play 拦截) + 底层 video.play()(用户手势内, 允许播放)
-      // 同步 xgplayer 状态机: freeze 期间 xgplayer 的 play 被 preventDefault 拒绝, 其 UI 可能停在"暂停"态.
-      // 若播放按钮仍为 data-state="pause"(以为未播放), 在用户手势同步链内点击它, 走 xgplayer 自身播放逻辑,
-      // 既不被 autoplay 策略拦截, 又让进度条/按钮正确切到"播放中".
-      const xpPlay = modal.querySelector('.xgplayer-play') as HTMLElement | null;
-      if (xpPlay && xpPlay.getAttribute('data-state') === 'pause') {
-        try { xpPlay.click(); } catch (_) { /* ignore */ }
-      }
-    };
+    const closeDialog = (): void => { overlay.remove(); }; // 保留 dataset.fntvChoice='1', 防止 observer 重新弹窗/重新冻结
+    const playNative = (): void => { unfreezeVideo(video); }; // 解冻(移除 play 拦截) + 底层 video.play()(用户手势内允许播放; 不再被 observer 重新冻结, 故稳定播放)
 
     card.appendChild(mkBtn('🎬 外置播放器 (PotPlayer / MPV)', true, () => {
       closeDialog();
@@ -1930,27 +1921,25 @@ function injectVideoPreviewExternalPlay(): void {
     headerBtns.insertBefore(btn, headerBtns.firstChild);
   }
 
+  // 注意: MutationObserver 在 xgplayer 播放时因进度条等 DOM 变化会反复触发.
+  // 已处理过的 modal(dataset.fntvChoice==='1')必须整体跳过, 否则会对已解冻的视频重新 freeze(视频反复被暂停),
+  // 且会因 closeDialog 删除 dataset 而重新弹出选择窗(现象: 弹窗关不掉/视频不播).
+  const handleModal = (modal: HTMLElement): void => {
+    if (modal.dataset.fntvChoice === '1') return; // 已选过播放方式: 不再冻结/弹窗/注入按钮
+    if (modal.querySelector('video')) {
+      freezeVideo(modal.querySelector('video')); // 选择前冻结原生播放, 避免"还没选就播了"
+      showChoiceDialog(modal); // 自动弹窗(主要交互)
+      ensureButton(modal);     // 标题栏按钮(弹窗关闭后仍可作为二次入口)
+    }
+  };
+
   const observer = new MutationObserver(() => {
-    document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
-      const modal = m as HTMLElement;
-      if (modal.querySelector('video')) {
-        freezeVideo(modal.querySelector('video')); // 选择前冻结原生播放, 避免"还没选就播了"
-        showChoiceDialog(modal); // 自动弹窗(主要交互)
-        ensureButton(modal);     // 标题栏按钮(弹窗关闭后仍可作为二次入口)
-      }
-    });
+    document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => handleModal(m as HTMLElement));
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
   // 首次注入时也扫一遍(模态可能已存在)
-  document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => {
-    const modal = m as HTMLElement;
-    if (modal.querySelector('video')) {
-      freezeVideo(modal.querySelector('video'));
-      showChoiceDialog(modal);
-      ensureButton(modal);
-    }
-  });
+  document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => handleModal(m as HTMLElement));
 
   log('[视频预览外放] 已注入(自动弹窗选择 + 标题栏外部打开按钮)');
 }
