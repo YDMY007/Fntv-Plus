@@ -3314,8 +3314,16 @@ function handle(): void {
 
     saveBangumiBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
-      // 处于掩码(readOnly)时保存真实 token，而不是界面上的星号
-      const token = bangumiInput.readOnly ? bangumiReal : bangumiInput.value.trim();
+      // 防误清空：掩码态(readOnly)直接保存已存真实 token；若输入框被点击进入编辑态
+      // 但并未填入新值（focus 已自动清空掩码），保存应保留已存 token，而不是写空串把
+      // 磁盘上的旧 token 抹掉。真正清空请用「清除」按钮。
+      let token: string;
+      if (bangumiInput.readOnly) {
+        token = bangumiReal;
+      } else {
+        const typed = bangumiInput.value.trim();
+        token = (typed === '' && bangumiReal) ? bangumiReal : typed;
+      }
       try {
         const r: any = await ipcRenderer.invoke('settings:set-bangumi-token', token);
         if (!r || r.ok !== false) {
@@ -3418,7 +3426,14 @@ function handle(): void {
 
     saveTmdbBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
-      const key = tmdbInput.readOnly ? tmdbReal : tmdbInput.value.trim();
+      // 防误清空：同 Bangumi——掩码态保存已存真实 key；编辑态清空未填新值时保留已存 key。
+      let key: string;
+      if (tmdbInput.readOnly) {
+        key = tmdbReal;
+      } else {
+        const typed = tmdbInput.value.trim();
+        key = (typed === '' && tmdbReal) ? tmdbReal : typed;
+      }
       try {
         const r: any = await ipcRenderer.invoke('settings:set-tmdb-key', key);
         if (!r || r.ok !== false) {
