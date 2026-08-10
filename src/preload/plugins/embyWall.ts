@@ -1338,128 +1338,6 @@ function applyDetailLiquidGlass(): void {
   log('detail liquid glass applied for', location.href.substring(location.href.lastIndexOf('/v/')));
 }
 
-/** [lc-401] 媒体库列表页布局宽度守护 — 仅作用于影视墙/网格列表页
- *   生效白名单(用户提供精确 URL 结构):
- *     · 媒体库列表: /v/library/{具体值}
- *     · 五个分类页: /v/list/all , /v/list/movie , /v/list/tv , /v/list/live , /v/list/other
- *   首页为 /v (海报墙设计 injectCarousel 仅在此注入), 与上面白名单互不重叠, 不会误伤.
- *   其余所有页面一律不干预并清除残留CSS, 明确排除:
- *     · 剧集/电影详情页: /v/tv/{hash} , /v/movie/{hash}
- *     · 季页: /v/.../season/{hash}
- *     · 演员/人物页: /v/person/**  ← [用户明确要求] 绝不在此启用
- *     · 其他所有子页面
- *   [lc-403] 当前整段函数 early-return 完全禁用(之前白名单过宽+IIFE 崩 preload 引发首页异常);
- *           列表页居中布局来自用户自有设计, 与本文无关, 故禁用不影响列表页外观.
- */
-let _layoutGuardActive = false;
-function fixDetailLayoutWidth(): void {
-  // [lc-403] 安全开关: 暂时完全禁用, 待用户确认精确生效 URL 后再开启.
-  //   lc-402 白名单 /v/library\/.+ 过于宽泛, 把首页也匹配上了→破坏布局+侧栏不可点.
-  // 同时清除任何残留的守护 CSS
-  const _stale = document.getElementById('fntv-detail-layout-guard');
-  if (_stale) _stale.remove();
-  return;
-
-  // ── 白名单: 仅上述媒体库列表页 / 分类页 URL ──
-  const isListPage = /^\/v\/(library\/.+|list\/(all|movie|tv|live|other))($|\/|\?|#)/i.test(location.pathname + location.search);
-  if (!isListPage) {
-    // 非列表页: 清除可能残留的 CSS
-    const existing = document.getElementById('fntv-detail-layout-guard');
-    if (existing) { (existing as HTMLElement).remove(); log('[lc-401] layout guard: removed CSS (non-list page)'); }
-    return;
-  }
-
-  const vw = window.innerWidth;
-  const MIN_EXPECTED_WIDTH = Math.max(vw * 0.70, 700); // 至少占视口70%或700px
-
-  // ── ① 持久 CSS 规则: 仅针对媒体库列表页容器 (不含详情页选择器) ──
-  if (!document.getElementById('fntv-detail-layout-guard')) {
-    const guardStyle = document.createElement('style');
-    guardStyle.id = 'fntv-detail-layout-guard';
-    guardStyle.textContent = [
-      /* fnOS 主滚动容器(列表页) */
-      '.ms-container:not(.semi-modal-content .ms-container):not([style*="width:260px"]){max-width:none!important;width:100%!important;}',
-      /* #root 直接子级(排除 fixed/absolute/侧边栏 层) */
-      '#root > div:not([style*="position:fixed"]):not([style*="position:absolute"]){max-width:none!important;width:100%!important;}',
-    ].join('\n');
-    document.head.appendChild(guardStyle);
-    log('[lc-400] layout guard: persistent CSS injected (list-page only)');
-  }
-
-  // 排除侧边栏内部的元素
-  const isSidebarDescendant = (el: HTMLElement): boolean => {
-    let p = el.parentElement;
-    while (p && p !== document.body) {
-      const cls = (typeof p.className === 'string') ? p.className : '';
-      if (cls.includes('260px')) return true;
-      try { if (p.offsetWidth > 0 && p.offsetWidth <= 320) return true; } catch (e) {}
-      p = p.parentElement;
-    }
-    return false;
-  };
-
-  const tryFix = () => {
-    // ── 目标1: .ms-container (fnOS 主滚动容器/列表页容器) ──
-    const msContainers = document.querySelectorAll<HTMLElement>('.ms-container');
-    for (const c of Array.from(msContainers)) {
-      if (c.closest('.semi-modal-content')) continue;
-      if (isSidebarDescendant(c)) {
-        c.style.removeProperty('width');
-        c.style.removeProperty('max-width');
-        c.style.removeProperty('min-width');
-        continue;
-      }
-      const w = c.getBoundingClientRect().width;
-      if (w < MIN_EXPECTED_WIDTH && w > 0) {
-        log('[lc-398] FIX: .ms-container width=', w.toFixed(0), '< threshold', MIN_EXPECTED_WIDTH, '→ forcing 100%');
-        c.style.setProperty('width', '100%', 'important');
-        c.style.setProperty('max-width', 'none', 'important');
-        c.style.setProperty('min-width', MIN_EXPECTED_WIDTH + 'px', 'important');
-      }
-    }
-
-    // ── 目标2: #root 直接子级 (排除 fixed/absolute/侧边栏) ──
-    const root = document.getElementById('root');
-    if (root) {
-      const children = root.children;
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i] as HTMLElement;
-        const cs = getComputedStyle(child);
-        if (cs.position === 'fixed' || cs.position === 'absolute') continue;
-        if (isSidebarDescendant(child) || (typeof child.className === 'string' && child.className.includes('260px'))) continue;
-        const w = child.getBoundingClientRect().width;
-        if (w < MIN_EXPECTED_WIDTH && w > 200) {
-          log('[lc-398] FIX: root child(#', child.id || child.className.slice(0, 30), ') width=', w.toFixed(0), '→ forcing 100%+flex');
-          child.style.setProperty('width', '100%', 'important');
-          child.style.setProperty('max-width', 'none', 'important');
-          child.style.setProperty('flex', '1 1 0%', 'important');
-        }
-      }
-    }
-  };
-
-  // 立即修一次
-  tryFix();
-
-  // 延迟修 + 持续监控
-  if (!_layoutGuardActive) {
-    _layoutGuardActive = true;
-    [300, 600, 1000, 1500, 2500, 4000].forEach(ms => setTimeout(tryFix, ms));
-
-    try {
-      const ro = new ResizeObserver(() => tryFix());
-      if (document.body) ro.observe(document.body);
-      const rootEl = document.getElementById('root');
-      if (rootEl) ro.observe(rootEl as Element);
-      document.querySelectorAll<HTMLElement>('.ms-container').forEach(c => ro.observe(c));
-      log('[lc-401] layout guard: ResizeObserver active (body/root/ms-container)');
-    } catch (e) {
-      log('[lc-398] layout guard: ResizeObserver err:', String(e).slice(0, 60));
-    }
-  }
-}
-
-
 /** [v400] UI 主题: 浅色 / 深色 / 跟随系统 三态, 持久化到 localStorage, 并同步飞牛原生主题.
  *  用 CSS 变量(--fnos-ui-*) 驱动所有自建设备 UI, html.dark 类切换即整体换肤(含已打开面板实时生效). */
 type UiThemeMode = 'light' | 'dark' | 'system';
@@ -5110,35 +4988,15 @@ function handle(): void {
   _syncVideoActiveClass();
   setInterval(_syncVideoActiveClass, 1000);
 
-  // [lc-302c] 手动匹配弹窗文件路径溢出根因修复已在上方 [lc-190] fixDetailLayoutWidth 的
-  //   tryFix() 中完成: 弹窗内 .ms-container 直接 `continue` 跳过, 不再被强加
-  //   min-width:1057px !important (此前误判为 fnOS 滚动库运行时写入, 实为 lc-190 布局守卫所致)。
+  // [lc-302c] 历史: 弹窗内 .ms-container 曾被布局守护(lc-190 fixDetailLayoutWidth)误强加
+  //   min-width:1057px !important(此前误判为 fnOS 滚动库运行时写入)。该布局守护已于 [lc-406] 整体删除,
   //   故此处不再需要对抗式 MutationObserver; mainwin.ts 的 ACRYLIC_CSS ⑭ 仍保留作为 class 级兜底。
 }
 
-// [lc-401] 媒体库列表页布局宽度守护 — 独立调用点(与详情页液态玻璃解耦)
-// 仅在纯列表页(/v/library/{id} 与 /v/list/{all,movie,tv,live,other})生效; 其余页面清除残留CSS.
-// ⚠️ 必须放在 registerHook 之前且绝不能抛错, 否则 registerHook 不执行→handle()不跑→整页 preload 失效.
-//   document.body 在 preload 早期可能为 null → 退化观察 documentElement, 并整体 try-catch 兜底.
-(() => {
-  try {
-    const tryApply = () => { try { fixDetailLayoutWidth(); } catch (e) { log('[lc-401] guard err', String(e).slice(0, 60)); } };
-    tryApply();
-    [300, 1000, 2500].forEach(ms => setTimeout(tryApply, ms));
-    const _onNav = (): void => { setTimeout(tryApply, 200); };
-    addEventListener('popstate', _onNav);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let _lgTimer: any = 0;
-    const _obsTarget: Node = document.body || document.documentElement;
-    new MutationObserver(() => { clearTimeout(_lgTimer); _lgTimer = window.setTimeout(tryApply, 500); })
-      .observe(_obsTarget, { childList: true, subtree: true });
-  } catch (e) {
-    log('[lc-401] guard IIFE err (non-fatal):', String(e).slice(0, 80));
-  }
-})();
-
-// [lc-404] 关键: registerHook 必须在任何可能抛错的模块级代码之前执行,
-//   否则 preload 初始化中断→handle() 不跑→首页自定义样式/轮播/侧栏增强全部失效.
+// [lc-406] 布局守护(fixDetailLayoutWidth 函数及其 IIFE 调用点)已整体删除:
+//   列表页居中布局来自用户自有设计(injectCarousel/主题注入), 与该守护无关;
+//   且该守护曾因 IIFE 在 document.body 为 null 时 observe() 抛错而中断 preload 初始化(见 lc-404 根因).
+//   删除后此处不再有任何模块级副作用代码, registerHook 稳定执行即可.
 registerHook(HookType.OnReady, handle);
 
 /* ========== [恢复v381] 反馈弹窗 ========== */
