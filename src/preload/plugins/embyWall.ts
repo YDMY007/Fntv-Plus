@@ -3625,12 +3625,8 @@ function handle(): void {
     doubanHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-ok);line-height:1.5;margin-bottom:8px;';
     doubanHint.textContent = '✓ 已选豆瓣：国内直连、免 Key、零配置，无需任何额外设置。「热门剧更新」浮层将展示豆瓣热门影视。';
 
-    const setDs = (val: 'tmdb' | 'douban'): void => {
-      // 关键：同步更新模块级 _hotSource，否则 fnOS SPA 重渲染侧栏后会重建设置面板，
-      // 届时 buildSettingsPanel 末尾的 setDs(_hotSource) 会用「启动时的旧值」把磁盘上
-      // 用户刚选的 tmdb 又写回 douban，导致「关掉设置再打开变回豆瓣」。
-      _hotSource = val;
-      try { ipcRenderer.invoke('settings:set-hot-source', val).catch(() => {}); } catch { /* ignore */ }
+    // 仅刷新 UI 显示（不写盘）：用于构建/打开时按「磁盘真值」回填，避免用默认/内存旧值覆盖已保存选择
+    const reflectDs = (val: 'tmdb' | 'douban'): void => {
       const isDouban = val === 'douban';
       dsDoubanBtn.style.background = isDouban ? 'var(--fnos-ui-sec)' : 'var(--fnos-ui-input-bg)';
       dsDoubanBtn.style.color = isDouban ? '#fff' : 'var(--fnos-ui-text)';
@@ -3640,13 +3636,28 @@ function handle(): void {
       doubanHint.style.display = isDouban ? '' : 'none';
     };
 
+    // 用户点击选择数据源：写盘 + 同步内存 + 刷新 UI
+    const setDs = (val: 'tmdb' | 'douban'): void => {
+      _hotSource = val;
+      try { ipcRenderer.invoke('settings:set-hot-source', val).catch(() => {}); } catch { /* ignore */ }
+      reflectDs(val);
+    };
+
     secBodyTmdb.insertBefore(dsHint, secBodyTmdb.firstChild);
     secBodyTmdb.appendChild(dsSeg);
     secBodyTmdb.appendChild(tmdbSettingsWrap);
     secBodyTmdb.appendChild(doubanHint);
 
-    // 初始状态（_hotSource 由启动时 settings:get 回填，缺省默认豆瓣）
-    setDs(_hotSource);
+    // 初始状态：异步从「磁盘真值」回填 UI（不写盘！）
+    // 关键修复：此前这里用同步 setDs(_hotSource)，而 _hotSource 要到 settings:get 异步回填(行55)才就绪，
+    // 构建期若早于回填执行，_hotSource 仍是默认 'douban'，会把磁盘上已存的 'tmdb' 错误写回 'douban'，
+    // 表现为「选了 TMDB → 关掉设置/导航后变回豆瓣」。改为只读磁盘真值 reflect，杜绝启动期 clobber。
+    try {
+      ipcRenderer.invoke('settings:get-hot-source').then((s: string) => {
+        _hotSource = (s === 'tmdb') ? 'tmdb' : 'douban';
+        reflectDs(_hotSource);
+      }).catch(() => { reflectDs(_hotSource); });
+    } catch { reflectDs(_hotSource); }
 
     // ===== 分组: TMDB 免梯子直连（实验）（从账号同步的 TMDB API Key 区迁出，独立放入「插件」标签页）=====
     const secTmdbDirect = section('TMDB 免梯子直连（实验）');
