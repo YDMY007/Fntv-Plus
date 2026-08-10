@@ -5110,25 +5110,28 @@ function handle(): void {
 }
 
 // [lc-401] 媒体库列表页布局宽度守护 — 独立调用点(与详情页液态玻璃解耦)
-// 仅在纯列表页(/v, /v/tv, /v/movie 等)生效; 导航切换时重新检测; 非列表页清除残留CSS.
+// 仅在纯列表页(/v/library/{id} 与 /v/list/{all,movie,tv,live,other})生效; 其余页面清除残留CSS.
+// ⚠️ 必须放在 registerHook 之前且绝不能抛错, 否则 registerHook 不执行→handle()不跑→整页 preload 失效.
+//   document.body 在 preload 早期可能为 null → 退化观察 documentElement, 并整体 try-catch 兜底.
 (() => {
-  const tryApply = () => fixDetailLayoutWidth();
-  // 首次 + 延迟重试
-  tryApply();
-  [300, 1000, 2500].forEach(ms => setTimeout(tryApply, ms));
-  // SPA 导航时重新检测
-  const _origPush = history.pushState;
-  const _origReplace = history.replaceState;
-  const _onNav = (): void => { setTimeout(tryApply, 200); };
-  // 注意: pushState/replaceState 可能在其他地方已被 hook, 这里用防重复方式
-  addEventListener('popstate', _onNav);
-  // MutationObserver 兜底: DOM 变化时检测(低频节流)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let _lgTimer: any = 0;
-  new MutationObserver(() => { clearTimeout(_lgTimer); _lgTimer = window.setTimeout(tryApply, 500); })
-    .observe(document.body, { childList: true, subtree: true });
+  try {
+    const tryApply = () => { try { fixDetailLayoutWidth(); } catch (e) { log('[lc-401] guard err', String(e).slice(0, 60)); } };
+    tryApply();
+    [300, 1000, 2500].forEach(ms => setTimeout(tryApply, ms));
+    const _onNav = (): void => { setTimeout(tryApply, 200); };
+    addEventListener('popstate', _onNav);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let _lgTimer: any = 0;
+    const _obsTarget: Node = document.body || document.documentElement;
+    new MutationObserver(() => { clearTimeout(_lgTimer); _lgTimer = window.setTimeout(tryApply, 500); })
+      .observe(_obsTarget, { childList: true, subtree: true });
+  } catch (e) {
+    log('[lc-401] guard IIFE err (non-fatal):', String(e).slice(0, 80));
+  }
 })();
 
+// [lc-404] 关键: registerHook 必须在任何可能抛错的模块级代码之前执行,
+//   否则 preload 初始化中断→handle() 不跑→首页自定义样式/轮播/侧栏增强全部失效.
 registerHook(HookType.OnReady, handle);
 
 /* ========== [恢复v381] 反馈弹窗 ========== */
