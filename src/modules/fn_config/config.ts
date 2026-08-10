@@ -29,8 +29,13 @@ if (app.isPackaged) {
 
 /**
  * 一次性迁移：早期版本把生产配置也写到了 .fntv-dev。
- * 仅当目标生产目录【无 config.json】且旧 .fntv-dev【有 config.json】时才整目录重命名，
- * 避免覆盖既有数据或无意义的空移动。迁移失败静默忽略，不阻断启动。
+ * 仅当目标生产目录【无 config.json】且旧 .fntv-dev【有 config.json】时，把配置【复制】进目标目录。
+ *
+ * ⚠️ 关键修正（lc-417）：历史上这里用 fs.renameSync 把整个 .fntv-dev 目录改名搬进生产目录，
+ * 但当前架构下 .fntv-dev 是【开发版的永久专属 userData】（dev/生产必须隔离，否则会被单实例锁接管）。
+ * 一旦安装版启动、且生产目录尚未有配置，就会把开发版整个目录搬空 → 开发版下次启动配置清零、显示全新默认。
+ * 故改为 copyFileSync（target 缺失才补一份），绝不移动/删除 .fntv-dev，既保留老用户数据，又不破坏开发版。
+ * 迁移失败静默忽略，不阻断启动。
  */
 function migrateLegacyUserData(legacy: string, target: string): void {
     try {
@@ -39,8 +44,8 @@ function migrateLegacyUserData(legacy: string, target: string): void {
         const targetConfig = path.join(target, 'config.json');
         if (fs.existsSync(legacyConfig) && !fs.existsSync(targetConfig)) {
             fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.renameSync(legacy, target);
-            // 迁移后 .fntv-dev 已不存在，开发版下次启动会重新创建(空白)，符合预期
+            fs.copyFileSync(legacyConfig, targetConfig);
+            // 仅复制配置，.fntv-dev 原封不动（开发版数据不丢失）
         }
     } catch (_) {
         /* 迁移失败不影响启动 */
