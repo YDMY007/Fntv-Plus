@@ -1358,6 +1358,13 @@ function applyDetailLiquidGlass(): void {
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
+  // [lc-399] 仅在媒体库列表/影视墙页生效, 不干预详情页.
+  //   详情页 URL: /v/tv/{32char-hash} 或 /v/movie/{32char-hash} 或 /season/
+  //   列表页 URL: /v , /v/tv , /v/movie (无 hash 后缀)
+  if (/\/v\/(tv|movie)\/[a-f0-9]{32}/.test(location.href) || location.href.includes('/season/')) {
+    return;
+  }
+
   const vw = window.innerWidth;
   const MIN_EXPECTED_WIDTH = Math.max(vw * 0.70, 700); // 至少占视口70%或700px
 
