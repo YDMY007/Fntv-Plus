@@ -1358,37 +1358,33 @@ function applyDetailLiquidGlass(): void {
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
-  // [lc-399] 仅在媒体库列表/影视墙页生效, 不干预详情页.
-  //   详情页 URL: /v/tv/{32char-hash} 或 /v/movie/{32char-hash} 或 /season/
-  //   列表页 URL: /v , /v/tv , /v/movie (无 hash 后缀)
-  if (/\/v\/(tv|movie)\/[a-f0-9]{32}/.test(location.href) || location.href.includes('/season/')) {
+  // [lc-400] 仅在媒体库列表/影视墙页生效, 不干预详情页.
+  //   生效范围: 侧边栏「媒体库」(番剧/电影等) + 「分类」栏(全部/电影/电视节目/电视直播/其他)
+  //   即 URL 为 /v , /v/tv , /v/movie 等列表页(无 32 位 hash 后缀, 非 /season/)
+  const isDetailPage = /\/v\/(tv|movie)\/[a-f0-9]{32}/.test(location.href) || location.href.includes('/season/');
+
+  // ── 详情页: 移除已注入的布局守护 CSS, 避免残留规则破坏详情页 ──
+  if (isDetailPage) {
+    const existing = document.getElementById('fntv-detail-layout-guard');
+    if (existing) { existing.remove(); log('[lc-400] layout guard: removed CSS (detail page)'); }
     return;
   }
 
   const vw = window.innerWidth;
   const MIN_EXPECTED_WIDTH = Math.max(vw * 0.70, 700); // 至少占视口70%或700px
 
-  // ── ① 持久 CSS 规则: 防止 fnOS 后续样式覆盖 (比 JS 循环更可靠) ──
+  // ── ① 持久 CSS 规则: 仅针对媒体库列表页容器 (不含详情页选择器) ──
   if (!document.getElementById('fntv-detail-layout-guard')) {
     const guardStyle = document.createElement('style');
     guardStyle.id = 'fntv-detail-layout-guard';
-    // 覆盖 fnOS 详情页主链路上所有可能的宽度约束容器
     guardStyle.textContent = [
-      /* fnOS 主滚动容器 */
+      /* fnOS 主滚动容器(列表页) */
       '.ms-container:not(.semi-modal-content .ms-container):not([style*="width:260px"]){max-width:none!important;width:100%!important;}',
-      /* 详情页头部及其直接父级 */
-      '.trim-mc__details--key-version{max-width:none!important;width:100%!important;}',
-      '.trim-mc__details--key-version > *{max-width:none!important;width:100%!important;}',
-      /* Season 详情页头部 */
-      '.semi-always-dark.box-border{max-width:none!important;width:100%!important;}',
-      /* #root 下的直接子级(排除 fixed/absolute 层) */
+      /* #root 直接子级(排除 fixed/absolute/侧边栏 层) */
       '#root > div:not([style*="position:fixed"]):not([style*="position:absolute"]){max-width:none!important;width:100%!important;}',
-      /* 兜底: 详情页内常见的 constrained wrapper */
-      '[class*="details--key"]{max-width:none!important;width:100%!important;}',
-      '[class*="detail-page"],[class*="detailPage"]{max-width:none!important;width:100%!important;}',
     ].join('\n');
     document.head.appendChild(guardStyle);
-    log('[lc-398] layout guard: persistent CSS rules injected');
+    log('[lc-400] layout guard: persistent CSS injected (list-page only)');
   }
 
   // 排除侧边栏内部的元素
