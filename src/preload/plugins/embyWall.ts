@@ -1336,37 +1336,20 @@ function applyDetailLiquidGlass(): void {
   }
   _detailGlassInited = true;
   log('detail liquid glass applied for', location.href.substring(location.href.lastIndexOf('/v/')));
-
-  // [lc-190] 布局守护: TV剧集页(尤其带季选择器)会在约1秒后被某段延迟代码压窄.
-  //   用 ResizeObserver 持续监控主容器宽度, 发现异常(<窗口宽55%)立即强制修正.
-  //   同时延迟500ms/1000ms/1500ms/2500ms各修一次(覆盖白底清除器/圆角执行器等时机).
-  fixDetailLayoutWidth();
 }
 
-
-/** [lc-398] 详情页布局宽度守护 — 修复"时宽时窄 / 左右不对称"问题
- *
- * 根因: fnOS 在不同导航路径下(尤其从演职人员页点进剧集详情)可能通过不同的祖先容器
- *   施加 max-width / width / padding 约束, 导致内容区变窄且左右不对称.
- *   旧版(lc-190)仅盯 .ms-container / .trim-mc__details--key-version / #root>children 三个目标,
- *   漏掉了实际约束宽度的中间层容器.
- *
- * 策略:
- *   ① 注入持久 CSS 规则(最高优先级), 强制详情页主链路容器全宽;
- *   ② 从详情头部向上遍历所有祖先, 逐级清除宽度约束;
- *   ③ ResizeObserver + 定时重试持续监控, 发现异常立即修正.
+/** [lc-401] 媒体库列表页布局宽度守护 — 仅作用于影视墙/网格列表页
+ *   生效范围: URL 为 /v , /v/tv , /v/movie 等纯列表页(无 32 位 hash 后缀).
+ *   不干预: 剧集详情页(/v/tv/{hash})、季页(/season/)、演员/人物页、其他所有子页面.
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
-  // [lc-400] 仅在媒体库列表/影视墙页生效, 不干预详情页.
-  //   生效范围: 侧边栏「媒体库」(番剧/电影等) + 「分类」栏(全部/电影/电视节目/电视直播/其他)
-  //   即 URL 为 /v , /v/tv , /v/movie 等列表页(无 32 位 hash 后缀, 非 /season/)
-  const isDetailPage = /\/v\/(tv|movie)\/[a-f0-9]{32}/.test(location.href) || location.href.includes('/season/');
-
-  // ── 详情页: 移除已注入的布局守护 CSS, 避免残留规则破坏详情页 ──
-  if (isDetailPage) {
+  // ── 白名单: 仅纯列表页 URL (无 hash 后缀, 无 season, 无 person 等) ──
+  const isListPage = /^\/v($|\/$|\/\?|#|\/tv($|\/$|\/\?)|\/movie($|\/$|\/\?))/i.test(location.pathname + location.search);
+  if (!isListPage) {
+    // 非列表页: 清除可能残留的 CSS
     const existing = document.getElementById('fntv-detail-layout-guard');
-    if (existing) { existing.remove(); log('[lc-400] layout guard: removed CSS (detail page)'); }
+    if (existing) { existing.remove(); log('[lc-401] layout guard: removed CSS (non-list page)'); }
     return;
   }
 
@@ -1400,35 +1383,7 @@ function fixDetailLayoutWidth(): void {
   };
 
   const tryFix = () => {
-    // ── ② 找到详情头部, 向上遍历所有祖先强制全宽 ──
-    const detailHeader = document.querySelector<HTMLElement>('.trim-mc__details--key-version')
-      || document.querySelector<HTMLElement>('.semi-always-dark.box-border.flex.h-\\[470px\\]');
-    if (detailHeader && !isSidebarDescendant(detailHeader)) {
-      let ancestor: HTMLElement | null = detailHeader.parentElement;
-      let depth = 0;
-      while (ancestor && ancestor !== document.body && depth < 15) {
-        if (!isSidebarDescendant(ancestor)) {
-          const rect = ancestor.getBoundingClientRect();
-          // 如果祖先宽度明显窄于视口(留5%容差给圆角/阴影), 强制撑开
-          if (rect.width < vw * 0.95 && rect.width > 200) {
-            ancestor.style.setProperty('max-width', 'none', 'important');
-            ancestor.style.setProperty('width', '100%', 'important');
-            // 如果是 flex/grid 子项, 防收缩
-            const cs = getComputedStyle(ancestor);
-            if (cs.display === 'flex' || cs.display === 'grid') {
-              // 不改父级的 display, 但确保自身不收缩
-            }
-            if (cs.flexGrow !== '1') {
-              ancestor.style.setProperty('flex', '1 1 auto', 'important');
-            }
-          }
-        }
-        ancestor = ancestor.parentElement;
-        depth++;
-      }
-    }
-
-    // ── ③ 目标: .ms-container (fnOS 主滚动容器) ──
+    // ── 目标1: .ms-container (fnOS 主滚动容器/列表页容器) ──
     const msContainers = document.querySelectorAll<HTMLElement>('.ms-container');
     for (const c of Array.from(msContainers)) {
       if (c.closest('.semi-modal-content')) continue;
@@ -1447,18 +1402,7 @@ function fixDetailLayoutWidth(): void {
       }
     }
 
-    // ── ④ 目标: 详情页头部本身 ──
-    if (detailHeader && !isSidebarDescendant(detailHeader)) {
-      const w = detailHeader.getBoundingClientRect().width;
-      if (w < MIN_EXPECTED_WIDTH && w > 0) {
-        log('[lc-398] FIX: detailHeader width=', w.toFixed(0), '< threshold → forcing 100%');
-        detailHeader.style.setProperty('width', '100%', 'important');
-        detailHeader.style.setProperty('max-width', 'none', 'important');
-        detailHeader.style.setProperty('min-width', MIN_EXPECTED_WIDTH + 'px', 'important');
-      }
-    }
-
-    // ── ⑤ 兜底: #root 直接子级 ──
+    // ── 目标2: #root 直接子级 (排除 fixed/absolute/侧边栏) ──
     const root = document.getElementById('root');
     if (root) {
       const children = root.children;
@@ -1492,11 +1436,7 @@ function fixDetailLayoutWidth(): void {
       const rootEl = document.getElementById('root');
       if (rootEl) ro.observe(rootEl);
       document.querySelectorAll<HTMLElement>('.ms-container').forEach(c => ro.observe(c));
-      // 同时观察详情头部(如果已存在)
-      const dh = document.querySelector<HTMLElement>('.trim-mc__details--key-version')
-        || document.querySelector<HTMLElement>('.semi-always-dark.box-border');
-      if (dh) { let a = dh.parentElement; while (a && a !== document.body && ro) { ro.observe(a); a = a.parentElement; } }
-      log('[lc-398] layout guard: ResizeObserver active (body/root/ms-container/detail-ancestors)');
+      log('[lc-401] layout guard: ResizeObserver active (body/root/ms-container)');
     } catch (e) {
       log('[lc-398] layout guard: ResizeObserver err:', String(e).slice(0, 60));
     }
@@ -5159,6 +5099,26 @@ function handle(): void {
   //   min-width:1057px !important (此前误判为 fnOS 滚动库运行时写入, 实为 lc-190 布局守卫所致)。
   //   故此处不再需要对抗式 MutationObserver; mainwin.ts 的 ACRYLIC_CSS ⑭ 仍保留作为 class 级兜底。
 }
+
+// [lc-401] 媒体库列表页布局宽度守护 — 独立调用点(与详情页液态玻璃解耦)
+// 仅在纯列表页(/v, /v/tv, /v/movie 等)生效; 导航切换时重新检测; 非列表页清除残留CSS.
+(() => {
+  const tryApply = () => fixDetailLayoutWidth();
+  // 首次 + 延迟重试
+  tryApply();
+  [300, 1000, 2500].forEach(ms => setTimeout(tryApply, ms));
+  // SPA 导航时重新检测
+  const _origPush = history.pushState;
+  const _origReplace = history.replaceState;
+  const _onNav = (): void => { setTimeout(tryApply, 200); };
+  // 注意: pushState/replaceState 可能在其他地方已被 hook, 这里用防重复方式
+  addEventListener('popstate', _onNav);
+  // MutationObserver 兜底: DOM 变化时检测(低频节流)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let _lgTimer: any = 0;
+  new MutationObserver(() => { clearTimeout(_lgTimer); _lgTimer = window.setTimeout(tryApply, 500); })
+    .observe(document.body, { childList: true, subtree: true });
+})();
 
 registerHook(HookType.OnReady, handle);
 
