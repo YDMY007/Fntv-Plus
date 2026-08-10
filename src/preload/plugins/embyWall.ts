@@ -1344,19 +1344,52 @@ function applyDetailLiquidGlass(): void {
 }
 
 
-/** [lc-190] 详情页布局宽度守护 — 修复"一秒后变窄"问题 */
+/** [lc-398] 详情页布局宽度守护 — 修复"时宽时窄 / 左右不对称"问题
+ *
+ * 根因: fnOS 在不同导航路径下(尤其从演职人员页点进剧集详情)可能通过不同的祖先容器
+ *   施加 max-width / width / padding 约束, 导致内容区变窄且左右不对称.
+ *   旧版(lc-190)仅盯 .ms-container / .trim-mc__details--key-version / #root>children 三个目标,
+ *   漏掉了实际约束宽度的中间层容器.
+ *
+ * 策略:
+ *   ① 注入持久 CSS 规则(最高优先级), 强制详情页主链路容器全宽;
+ *   ② 从详情头部向上遍历所有祖先, 逐级清除宽度约束;
+ *   ③ ResizeObserver + 定时重试持续监控, 发现异常立即修正.
+ */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
   const vw = window.innerWidth;
-  const MIN_EXPECTED_WIDTH = Math.max(vw * 0.55, 700); // 至少占视口55%或700px
+  const MIN_EXPECTED_WIDTH = Math.max(vw * 0.70, 700); // 至少占视口70%或700px
 
-  // [lc-235] 排除侧边栏内部的 .ms-container: fnOS 侧边栏自己也用 .ms-container 作为内部滚动容器,
-  //   若对它强制撑宽会溢出 260px 侧边栏, 把侧边栏条目右侧的数目徽章顶到屏幕最右边。
+  // ── ① 持久 CSS 规则: 防止 fnOS 后续样式覆盖 (比 JS 循环更可靠) ──
+  if (!document.getElementById('fntv-detail-layout-guard')) {
+    const guardStyle = document.createElement('style');
+    guardStyle.id = 'fntv-detail-layout-guard';
+    // 覆盖 fnOS 详情页主链路上所有可能的宽度约束容器
+    guardStyle.textContent = [
+      /* fnOS 主滚动容器 */
+      '.ms-container:not(.semi-modal-content .ms-container):not([style*="width:260px"]){max-width:none!important;width:100%!important;}',
+      /* 详情页头部及其直接父级 */
+      '.trim-mc__details--key-version{max-width:none!important;width:100%!important;}',
+      '.trim-mc__details--key-version > *{max-width:none!important;width:100%!important;}',
+      /* Season 详情页头部 */
+      '.semi-always-dark.box-border{max-width:none!important;width:100%!important;}',
+      /* #root 下的直接子级(排除 fixed/absolute 层) */
+      '#root > div:not([style*="position:fixed"]):not([style*="position:absolute"]){max-width:none!important;width:100%!important;}',
+      /* 兜底: 详情页内常见的 constrained wrapper */
+      '[class*="details--key"]{max-width:none!important;width:100%!important;}',
+      '[class*="detail-page"],[class*="detailPage"]{max-width:none!important;width:100%!important;}',
+    ].join('\n');
+    document.head.appendChild(guardStyle);
+    log('[lc-398] layout guard: persistent CSS rules injected');
+  }
+
+  // 排除侧边栏内部的元素
   const isSidebarDescendant = (el: HTMLElement): boolean => {
     let p = el.parentElement;
     while (p && p !== document.body) {
       const cls = (typeof p.className === 'string') ? p.className : '';
-      if (cls.includes('260px')) return true; // fnOS 侧边栏固定 260px 宽
+      if (cls.includes('260px')) return true;
       try { if (p.offsetWidth > 0 && p.offsetWidth <= 320) return true; } catch (e) {}
       p = p.parentElement;
     }
@@ -1364,16 +1397,39 @@ function fixDetailLayoutWidth(): void {
   };
 
   const tryFix = () => {
-    // 目标1: .ms-container (fnOS 主滚动容器)
+    // ── ② 找到详情头部, 向上遍历所有祖先强制全宽 ──
+    const detailHeader = document.querySelector<HTMLElement>('.trim-mc__details--key-version')
+      || document.querySelector<HTMLElement>('.semi-always-dark.box-border.flex.h-\\[470px\\]');
+    if (detailHeader && !isSidebarDescendant(detailHeader)) {
+      let ancestor: HTMLElement | null = detailHeader.parentElement;
+      let depth = 0;
+      while (ancestor && ancestor !== document.body && depth < 15) {
+        if (!isSidebarDescendant(ancestor)) {
+          const rect = ancestor.getBoundingClientRect();
+          // 如果祖先宽度明显窄于视口(留5%容差给圆角/阴影), 强制撑开
+          if (rect.width < vw * 0.95 && rect.width > 200) {
+            ancestor.style.setProperty('max-width', 'none', 'important');
+            ancestor.style.setProperty('width', '100%', 'important');
+            // 如果是 flex/grid 子项, 防收缩
+            const cs = getComputedStyle(ancestor);
+            if (cs.display === 'flex' || cs.display === 'grid') {
+              // 不改父级的 display, 但确保自身不收缩
+            }
+            if (cs.flexGrow !== '1') {
+              ancestor.style.setProperty('flex', '1 1 auto', 'important');
+            }
+          }
+        }
+        ancestor = ancestor.parentElement;
+        depth++;
+      }
+    }
+
+    // ── ③ 目标: .ms-container (fnOS 主滚动容器) ──
     const msContainers = document.querySelectorAll<HTMLElement>('.ms-container');
     for (const c of Array.from(msContainers)) {
-      // [lc-302c] 跳过弹窗内的 .ms-container: 本守卫原本只针对详情页主容器设 min-width,
-      //   但手动匹配等弹窗内的 .ms-container 原版飞牛无此限制(仅 overflow:auto),
-      //   强加 min-width 会把弹窗内长路径撑开裁剪(出现 1057.1px 行内 !important)。
-      //   让弹窗内容器保持原生行为, 与 fnOS 官方一致。
       if (c.closest('.semi-modal-content')) continue;
       if (isSidebarDescendant(c)) {
-        // 撤销本守卫此前可能误加的强制宽度(否则残留 inline 仍会撑宽侧边栏)
         c.style.removeProperty('width');
         c.style.removeProperty('max-width');
         c.style.removeProperty('min-width');
@@ -1381,27 +1437,25 @@ function fixDetailLayoutWidth(): void {
       }
       const w = c.getBoundingClientRect().width;
       if (w < MIN_EXPECTED_WIDTH && w > 0) {
-        log('[lc-190] FIX: .ms-container width=', w.toFixed(0), '< threshold', MIN_EXPECTED_WIDTH, '→ forcing 100%');
+        log('[lc-398] FIX: .ms-container width=', w.toFixed(0), '< threshold', MIN_EXPECTED_WIDTH, '→ forcing 100%');
         c.style.setProperty('width', '100%', 'important');
         c.style.setProperty('max-width', 'none', 'important');
         c.style.setProperty('min-width', MIN_EXPECTED_WIDTH + 'px', 'important');
       }
     }
 
-    // 目标2: 详情页头部 (.trim-mc__details--key-version 或 Season header)
-    const detailHeader = document.querySelector<HTMLElement>('.trim-mc__details--key-version')
-      || document.querySelector<HTMLElement>('.semi-always-dark.box-border.flex.h-\\[470px\\]');
-    if (detailHeader) {
+    // ── ④ 目标: 详情页头部本身 ──
+    if (detailHeader && !isSidebarDescendant(detailHeader)) {
       const w = detailHeader.getBoundingClientRect().width;
       if (w < MIN_EXPECTED_WIDTH && w > 0) {
-        log('[lc-190] FIX: detailHeader width=', w.toFixed(0), '< threshold → forcing 100%');
+        log('[lc-398] FIX: detailHeader width=', w.toFixed(0), '< threshold → forcing 100%');
         detailHeader.style.setProperty('width', '100%', 'important');
         detailHeader.style.setProperty('max-width', 'none', 'important');
         detailHeader.style.setProperty('min-width', MIN_EXPECTED_WIDTH + 'px', 'important');
       }
     }
 
-    // 目标3: 兜底 — #root 下最外层内容容器(排除 fixed/absolute 层)
+    // ── ⑤ 兜底: #root 直接子级 ──
     const root = document.getElementById('root');
     if (root) {
       const children = root.children;
@@ -1409,13 +1463,13 @@ function fixDetailLayoutWidth(): void {
         const child = children[i] as HTMLElement;
         const cs = getComputedStyle(child);
         if (cs.position === 'fixed' || cs.position === 'absolute') continue;
-        if (isSidebarDescendant(child) || (typeof child.className === 'string' && child.className.includes('260px'))) continue; // 排除侧边栏
+        if (isSidebarDescendant(child) || (typeof child.className === 'string' && child.className.includes('260px'))) continue;
         const w = child.getBoundingClientRect().width;
-        if (w < MIN_EXPECTED_WIDTH && w > 200) { // >200 排除侧栏等窄组件
-          log('[lc-190] FIX: root child(#', child.id || child.className.slice(0, 30), ') width=', w.toFixed(0), '→ forcing 100%+flex防收缩');
+        if (w < MIN_EXPECTED_WIDTH && w > 200) {
+          log('[lc-398] FIX: root child(#', child.id || child.className.slice(0, 30), ') width=', w.toFixed(0), '→ forcing 100%+flex');
           child.style.setProperty('width', '100%', 'important');
           child.style.setProperty('max-width', 'none', 'important');
-          child.style.setProperty('flex', '1 1 0%', 'important'); // flex 子项防收缩
+          child.style.setProperty('flex', '1 1 0%', 'important');
         }
       }
     }
@@ -1424,21 +1478,24 @@ function fixDetailLayoutWidth(): void {
   // 立即修一次
   tryFix();
 
-  // 延迟修: 覆盖 500ms(白底清除器) / 800ms(圆角器) / 1500ms(hideStaleViews) / 600ms(detail glass 重试)
+  // 延迟修 + 持续监控
   if (!_layoutGuardActive) {
     _layoutGuardActive = true;
-    [500, 1000, 1500, 2500].forEach(ms => setTimeout(tryFix, ms));
+    [300, 600, 1000, 1500, 2500, 4000].forEach(ms => setTimeout(tryFix, ms));
 
-    // ResizeObserver 持续监控: 窗口 resize 或 DOM 变化导致宽度异常时立即修正
     try {
       const ro = new ResizeObserver(() => tryFix());
       if (document.body) ro.observe(document.body);
       const rootEl = document.getElementById('root');
       if (rootEl) ro.observe(rootEl);
       document.querySelectorAll<HTMLElement>('.ms-container').forEach(c => ro.observe(c));
-      log('[lc-190] layout guard: ResizeObserver active, monitoring body/root/ms-container');
+      // 同时观察详情头部(如果已存在)
+      const dh = document.querySelector<HTMLElement>('.trim-mc__details--key-version')
+        || document.querySelector<HTMLElement>('.semi-always-dark.box-border');
+      if (dh) { let a = dh.parentElement; while (a && a !== document.body && ro) { ro.observe(a); a = a.parentElement; } }
+      log('[lc-398] layout guard: ResizeObserver active (body/root/ms-container/detail-ancestors)');
     } catch (e) {
-      log('[lc-190] layout guard: ResizeObserver err:', String(e).slice(0, 60));
+      log('[lc-398] layout guard: ResizeObserver err:', String(e).slice(0, 60));
     }
   }
 }
