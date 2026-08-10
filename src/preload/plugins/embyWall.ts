@@ -1342,7 +1342,14 @@ function applyDetailLiquidGlass(): void {
  *   生效白名单(用户提供精确 URL 结构):
  *     · 媒体库列表: /v/library/{具体值}
  *     · 五个分类页: /v/list/all , /v/list/movie , /v/list/tv , /v/list/live , /v/list/other
- *   其余所有页面(详情页/季页/演员人物页/其他子页面)一律不干预并清除残留CSS.
+ *   首页为 /v (海报墙设计 injectCarousel 仅在此注入), 与上面白名单互不重叠, 不会误伤.
+ *   其余所有页面一律不干预并清除残留CSS, 明确排除:
+ *     · 剧集/电影详情页: /v/tv/{hash} , /v/movie/{hash}
+ *     · 季页: /v/.../season/{hash}
+ *     · 演员/人物页: /v/person/**  ← [用户明确要求] 绝不在此启用
+ *     · 其他所有子页面
+ *   [lc-403] 当前整段函数 early-return 完全禁用(之前白名单过宽+IIFE 崩 preload 引发首页异常);
+ *           列表页居中布局来自用户自有设计, 与本文无关, 故禁用不影响列表页外观.
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
