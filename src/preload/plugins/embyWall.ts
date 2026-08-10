@@ -1339,13 +1339,15 @@ function applyDetailLiquidGlass(): void {
 }
 
 /** [lc-401] 媒体库列表页布局宽度守护 — 仅作用于影视墙/网格列表页
- *   生效范围: URL 为 /v , /v/tv , /v/movie 等纯列表页(无 32 位 hash 后缀).
- *   不干预: 剧集详情页(/v/tv/{hash})、季页(/season/)、演员/人物页、其他所有子页面.
+ *   生效白名单(用户提供精确 URL 结构):
+ *     · 媒体库列表: /v/library/{具体值}
+ *     · 五个分类页: /v/list/all , /v/list/movie , /v/list/tv , /v/list/live , /v/list/other
+ *   其余所有页面(详情页/季页/演员人物页/其他子页面)一律不干预并清除残留CSS.
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
-  // ── 白名单: 仅纯列表页 URL (无 hash 后缀, 无 season, 无 person 等) ──
-  const isListPage = /^\/v($|\/$|\/\?|#|\/tv($|\/$|\/\?)|\/movie($|\/$|\/\?))/i.test(location.pathname + location.search);
+  // ── 白名单: 仅上述媒体库列表页 / 分类页 URL ──
+  const isListPage = /^\/v\/(library\/.+|list\/(all|movie|tv|live|other))($|\/|\?|#)/i.test(location.pathname + location.search);
   if (!isListPage) {
     // 非列表页: 清除可能残留的 CSS
     const existing = document.getElementById('fntv-detail-layout-guard');
