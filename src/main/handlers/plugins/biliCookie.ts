@@ -40,7 +40,9 @@ function cookieHeader(): string {
 // 候选 uosc_danmaku 目录（dev / 打包 / 用户 mpv 目录），取首个存在者
 function getUoscDanmakuCandidates(): string[] {
   const arr: string[] = [];
-  if (process.resourcesPath) {
+  // 仅在打包态使用 resourcesPath：dev 下它指向 node_modules/electron/dist/resources，
+  // 并非应用资源目录；往里写会污染 node_modules 并制造「存在但缺 bili_danmaku.js」的阴影目录。
+  if (app.isPackaged && process.resourcesPath) {
     arr.push(path.join(process.resourcesPath, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
   }
   const appPath = app.getAppPath();

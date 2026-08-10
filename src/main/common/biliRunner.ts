@@ -36,7 +36,9 @@ let logSinkBound = false;
 // ---- 候选 uosc_danmaku 脚本目录（与 biliCookie.ts / biliDanmaku.ts 保持一致）----
 function resolveDanmakuScriptDir(): string | null {
     const candidates: string[] = [];
-    if (process.resourcesPath) {
+    // 仅在打包态使用 resourcesPath：dev 下它指向 node_modules/electron/dist/resources，
+    // 并非应用资源目录；往里写会污染 node_modules 并制造「存在但缺 bili_danmaku.js」的阴影目录。
+    if (app.isPackaged && process.resourcesPath) {
         candidates.push(path.join(process.resourcesPath, 'third_party', 'fntv-mpv', 'portable_config', 'scripts', 'uosc_danmaku'));
     }
     try {
@@ -51,6 +53,13 @@ function resolveDanmakuScriptDir(): string | null {
     } else {
         candidates.push(path.join(process.env.HOME || '', '.config', 'mpv', 'scripts', 'uosc_danmaku'));
     }
+    // 关键修复：目录存在 ≠ 脚本齐备。必须确认 bili_danmaku.js 真实存在，
+    // 否则会命中「存在但缺文件」的候选（如 dev 下 resourcesPath 目录被 cookie 落盘创建、
+    // 却不含 bili_danmaku.js），导致加载失败。优先选含脚本的目录。
+    for (const c of candidates) {
+        if (fs.existsSync(c) && fs.existsSync(path.join(c, 'bili_danmaku.js'))) return c;
+    }
+    // 兜底：保守返回首个存在的目录（保持旧行为，便于报错信息指向真实路径）
     for (const c of candidates) {
         if (fs.existsSync(c)) return c;
     }
