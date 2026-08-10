@@ -3594,6 +3594,10 @@ function handle(): void {
     doubanHint.textContent = '✓ 已选豆瓣：国内直连、免 Key、零配置，无需任何额外设置。「热门剧更新」浮层将展示豆瓣热门影视。';
 
     const setDs = (val: 'tmdb' | 'douban'): void => {
+      // 关键：同步更新模块级 _hotSource，否则 fnOS SPA 重渲染侧栏后会重建设置面板，
+      // 届时 buildSettingsPanel 末尾的 setDs(_hotSource) 会用「启动时的旧值」把磁盘上
+      // 用户刚选的 tmdb 又写回 douban，导致「关掉设置再打开变回豆瓣」。
+      _hotSource = val;
       try { ipcRenderer.invoke('settings:set-hot-source', val).catch(() => {}); } catch { /* ignore */ }
       const isDouban = val === 'douban';
       dsDoubanBtn.style.background = isDouban ? 'var(--fnos-ui-sec)' : 'var(--fnos-ui-input-bg)';
