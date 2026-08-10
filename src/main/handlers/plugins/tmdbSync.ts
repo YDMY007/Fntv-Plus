@@ -439,6 +439,57 @@ async function fetchDiscover(): Promise<{ ok: boolean; items?: any[]; error?: st
     }
 }
 
+/**
+ * 拉取指定影视的 TMDB 透明 logo（用于替换轮播图文字标题）。
+ * 入参：{ id?, title?, mediaType? }
+ *   - 有 id：直接查 /3/{mediaType}/{id}/images
+ *   - 无 id 但有 title：先 /3/search/{mediaType}?query= 拿到 id 再查 images
+ * 出参：{ ok, logoPath?, error? }（logoPath 为 image.tmdb.org 的 /t/p 路径，不含域名）
+ * 仅返回路径，真实图片由渲染进程经 tmdb:image 代理转 base64（复用图片缓存 + 免梯子直连）。
+ */
+async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaType?: 'tv' | 'movie' }): Promise<{ ok: boolean; logoPath?: string; error?: string }> {
+    const mediaType = arg.mediaType === 'movie' ? 'movie' : 'tv';
+    const key = fnConfig.getTmdbApiKey();
+    try {
+        const client = http();
+        const a = key ? authFor(key) : { headers: {} as Record<string, string> };
+        const baseParams = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
+
+        let id = arg.id;
+        if (!id && arg.title) {
+            // 无 tmdb id：用标题搜索（中文标题也能命中，TMDB 含别名索引）
+            const sResp = await getWithRetry(client, `/search/${mediaType}`, { params: { ...baseParams, query: arg.title, page: 1 } });
+            const results = (sResp?.data?.results || []) as any[];
+            if (!results.length) return { ok: false, error: 'TMDB 搜索无结果: ' + arg.title };
+            id = results[0].id;
+            log.info('[TMDB诊断] logo 搜索 "' + arg.title + '" → tmdb id ' + id);
+        }
+        if (!id) return { ok: false, error: '缺少 tmdb id 且无法从标题搜索' };
+
+        // 取 logos：默认返回全部语言，再本地排序「英文 > 无语言(null) > 其他」，其次按投票最高
+        const iResp = await getWithRetry(client, `/${mediaType}/${id}/images`, { params: { ...baseParams } });
+        const logos = (iResp?.data?.logos || []) as any[];
+        if (!logos.length) return { ok: false, error: 'TMDB 无 logo: ' + arg.title + ' (id=' + id + ')' };
+
+        const scored = logos.map((l) => ({
+            path: l.file_path as string,
+            lang: (l.iso_639_1 as string) || '',
+            vote: typeof l.vote_average === 'number' ? l.vote_average : 0,
+        }));
+        const rank = (lang: string): number => (lang === 'en' ? 2 : (lang === '' || lang === 'null' ? 1 : 0));
+        scored.sort((x, y) => {
+            const rx = rank(x.lang), ry = rank(y.lang);
+            if (rx !== ry) return ry - rx;
+            return y.vote - x.vote;
+        });
+        const best = scored[0];
+        log.info('[TMDB诊断] logo 选定 path=' + best.path + ' lang=' + best.lang + ' vote=' + best.vote + ' (共 ' + scored.length + ' 个候选)');
+        return { ok: true, logoPath: best.path };
+    } catch (e: any) {
+        return { ok: false, error: describeTmdbError(e) };
+    }
+}
+
 function init(): void {
     registerHandler('tmdb:discover', async (_e: any, force?: boolean) => {
         try {
@@ -461,6 +512,10 @@ function init(): void {
     }, { useHandle: true });
     registerHandler('tmdb:image', async (_e: any, url: string) => {
         return fetchImageAsDataUrl(url);
+    }, { useHandle: true });
+    // [lc-408] 轮播图透明 logo：渲染进程传入 {id?,title?,mediaType?}，主进程查 TMDB images 取 logo 路径
+    registerHandler('tmdb:logo', async (_e: any, arg: { id?: number | string; title?: string; mediaType?: 'tv' | 'movie' }) => {
+        return getTmdbLogo(arg || {});
     }, { useHandle: true });
     // 启动自动跟随 CheckTMDB 每日刷新直连 IP（用户开启免梯子直连时生效）
     scheduleAutoIpRefresh();

@@ -229,6 +229,29 @@ const _apiShows: any[] = [];
 let _apiLoaded = false;
 let _apiLoading = false;
 
+/**
+ * [lc-408] 从 fnOS item 数据中多字段兜底提取 TMDB id（用于拉取 TMDB 透明 logo）。
+ * 优先级：显式 tmdb 字段 → trimId 剥前缀（tm/tt + 数字）。
+ * 注意：trimId 形如 tt325158 / tm63578，fnOS 不透明令牌；剥前缀取数字作 tmdb id 候选。
+ */
+function extractTmdbId(data: any): string | undefined {
+  if (!data) return undefined;
+  const direct = [
+    data.tmdbId, data.tmdb_id,
+    data.ProviderIds && (data.ProviderIds.Tmdb || data.ProviderIds.tmdb),
+    data.externalIds && (data.externalIds.tmdb_id || data.externalIds.tmdb),
+  ];
+  for (const c of direct) {
+    if (c != null && /^\d+$/.test(String(c).trim())) return String(c).trim();
+  }
+  const trimId = data.trimId || data.trim_id;
+  if (typeof trimId === 'string') {
+    const m = trimId.match(/^(?:tt|tm)(\d+)$/i);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报: 此时 location.origin 为 "file://",
   // 会拼出 file:///v/list/all 触发 ERR_FILE_NOT_FOUND 噪音(且永远拉不到数据).
@@ -274,7 +297,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
             title = title.replace(/^\d+\.\d+\s*/, '').replace(/\s*共\s*\d+\s*[集话話季].*$/, '').replace(/\s*·\s*\d{4}.*$/, '').replace(/\s*第\s*\d+\s*[季集].*$/, '').trim();
             if (title.length < 2) return;
             seen.add(m[2]);
-            cards.push({ id: m[2], title, poster: '' });
+            cards.push({ id: m[2], title, poster: '', mediaType: m[1] });
           });
           log('iframe extracted', cards.length, 'cards, first GUID:', cards[0]?.id);
 
@@ -348,6 +371,8 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (!resp.ok) continue;
         const json = await resp.json();
         const data = json?.data || {};
+        // [lc-408] 诊断：打印首个 item 的 data 顶层字段，便于核对 tmdb id 字段名（后续可删）
+        if (show.id === shows[0]?.id) log('1st item data keys:', Object.keys(data).join(','));
         // [lc-181] 类型白名单: 仅电影/电视节目/混合影片(作品类)进入轮播;
         // 电视直播/其他视频无作品级刮削且易触发白屏, 识别到就直接跳过、不加载。
         const itemType = (data.type || data.item?.type) as string | undefined;
@@ -367,10 +392,15 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const poster = pickImg(data.posters) || (show as any).poster || '';
         const backdrop = pickImg(data.backdrops) || poster;
         if (show.id === shows[0]?.id) log('1st backdrop:', backdrop.substring(0, 60), '| poster:', poster.substring(0, 60));
+        // [lc-408] 提取 tmdb id + mediaType，供轮播图标题替换为 TMDB 透明 logo
+        const tmdbId = extractTmdbId(data);
+        if (show.id === shows[0]?.id) log('1st tmdbId:', tmdbId || '(none)', '| mediaType:', show.mediaType || 'tv');
         newShows.push({
           id: show.id, title: show.title,
           poster, backdrop,
-          desc: data.overview || ''
+          desc: data.overview || '',
+          mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
+          tmdbId
         });
       } catch (e) { /* skip */ }
     }
@@ -675,7 +705,10 @@ function injectCarousel(): void {
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
       <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
-      <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);flex-shrink:0">${show.title}</div>
+      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center">
+        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
+        <img class="fnos-logo" alt="" style="display:none;max-width:82%;max-height:72px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 2px 10px rgba(0,0,0,.3))">
+      </div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
       <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
@@ -718,15 +751,13 @@ function injectCarousel(): void {
         (playBtn as HTMLElement).style.transform = '';
       });
     }
-    // 剧集logo: 置于左图左上角
-    if (show.logo) {
-      const logo = document.createElement('img');
-      logo.style.cssText = 'position:absolute;top:22px;left:24px;max-width:200px;max-height:54px;z-index:3;object-fit:contain;opacity:0;transition:opacity .5s;filter:drop-shadow(0 2px 6px rgba(0,0,0,.12))';
-      leftEl.appendChild(logo);
-      fetchImageAuth(imgUrl(show.logo)).then((b) => { if (b) { logo.src = b; logo.style.opacity = '1'; } });
-    }
     track.appendChild(slide);
     infos.push(info);
+
+    // [lc-408] 重建轮播时若已缓存过 logo(tmdbLogo/本地 logo), 立即复用, 避免重渲后退回文字标题
+    if (show.tmdbLogo) {
+      swapTitleToLogo(info, show.tmdbLogo);
+    }
 
     const dot = document.createElement('div');
     dot.style.cssText = 'width:7px;height:7px;border-radius:50%;background:var(--fnos-hero-dot);transition:all .35s;cursor:pointer';
@@ -764,6 +795,9 @@ function injectCarousel(): void {
 
   /* 异步补齐缺失的简介(从详情页提取,未来新增自动获取) */
   autoFetchDescs(base, shows, infos);
+
+  /* [lc-408] 异步把右侧文字标题替换为 TMDB 透明 logo（获取成功才替换，否则保留文字） */
+  applyTitleLogo(base, shows, infos);
 
   log('carousel injected');
 }
@@ -858,6 +892,58 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
       } catch (e) { log('desc error:', show.title, e); }
     }, i * 800);
   });
+}
+
+/* [lc-408] 把轮播右侧文字标题替换为透明 logo：
+ * - API 真实条目（show.tmdbId 存在）：经主进程 tmdb:logo 取 logo 路径 → tmdb:image 代理转 base64
+ * - 硬编码兜底条目（show.logo 本地 sys/img）：经 fetchImageAuth 取本地 logo
+ * 获取成功才把 .fnos-title 隐藏、显示 .fnos-logo；任一环节失败则保留文字标题（静默降级）。 */
+function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
+  shows.forEach((show, i) => {
+    const info = infos[i];
+    if (!info) return;
+    if (show.tmdbId) {
+      // API 真实条目 → TMDB 透明 logo
+      setTimeout(async () => {
+        try {
+          const { ipcRenderer } = require('electron');
+          const r = await ipcRenderer.invoke('tmdb:logo', { id: show.tmdbId, mediaType: show.mediaType || 'tv' });
+          if (!r || !r.ok || !r.logoPath) {
+            log('tmdb logo none:', show.title, (r && r.error) || '无 logo');
+            return;
+          }
+          const url = 'https://image.tmdb.org/t/p/w500' + r.logoPath;
+          const img = await ipcRenderer.invoke('tmdb:image', url);
+          if (!img || !img.ok || !img.dataUrl) {
+            log('tmdb logo img fail:', show.title);
+            return;
+          }
+          show.tmdbLogo = img.dataUrl;
+          swapTitleToLogo(info, img.dataUrl);
+          log('tmdb logo applied:', show.title);
+        } catch (e) { log('tmdb logo err:', show.title, e); }
+      }, i * 600);
+    } else if (show.logo) {
+      // 硬编码兜底条目 → 本地 sys/img logo 替换标题
+      setTimeout(async () => {
+        try {
+          const full = show.logo.startsWith('http') ? show.logo : `${base}/v/api/v1/${show.logo}`;
+          const b = await fetchImageAuth(full);
+          if (b) swapTitleToLogo(info, b);
+        } catch (e) { log('local logo err:', show.title, e); }
+      }, i * 600);
+    }
+  });
+}
+
+/** 把右侧文字标题隐藏、显示 logo 图片（取 logo 成功后的统一替换） */
+function swapTitleToLogo(info: HTMLElement, src: string): void {
+  const titleEl = info.querySelector('.fnos-title') as HTMLElement | null;
+  const logoEl = info.querySelector('.fnos-logo') as HTMLImageElement | null;
+  if (!titleEl || !logoEl) return;
+  logoEl.src = src;
+  logoEl.style.display = 'block';
+  titleEl.style.display = 'none';
 }
 
 /* ========== 详情页苹果液态玻璃 (TV详情 / Season详情) ========== */
