@@ -500,8 +500,8 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
         }
         if (!id) return { ok: false, error: '缺少 tmdb id 且无法从标题搜索' };
 
-        // 取 logos：默认返回全部语言；[lc-413] 先按「横屏(宽>高)」筛选，再排序「英文 > 无语言(null) > 其他」，其次按投票最高
-        const iResp = await getWithRetry(client, `/${mediaType}/${id}/images`, { params: { ...baseParams } });
+        // 取 logos：显式请求 中文/日语/英语/无语言 四类；[lc-413] 先按「横屏(宽>高)」筛选，再按「中文>日语>英语>其他」优先级排序，其次按投票最高
+        const iResp = await getWithRetry(client, `/${mediaType}/${id}/images`, { params: { ...baseParams, include_image_language: 'zh,ja,en,null' } });
         const logos = (iResp?.data?.logos || []) as any[];
         if (!logos.length) return { ok: false, error: 'TMDB 无 logo: ' + arg.title + ' (id=' + id + ')' };
 
@@ -522,7 +522,13 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
             lang: (l.iso_639_1 as string) || '',
             vote: typeof l.vote_average === 'number' ? l.vote_average : 0,
         }));
-        const rank = (lang: string): number => (lang === 'en' ? 2 : (lang === '' || lang === 'null' ? 1 : 0));
+        // 语言优先级：中文(zh) > 日语(ja) > 英语(en) > 其他（含无语言 null）；其次按投票最高
+        const rank = (lang: string): number => {
+            if (lang === 'zh' || lang === 'zh-CN' || lang.startsWith('zh')) return 3;
+            if (lang === 'ja') return 2;
+            if (lang === 'en') return 1;
+            return 0;
+        };
         scored.sort((x, y) => {
             const rx = rank(x.lang), ry = rank(y.lang);
             if (rx !== ry) return ry - rx;
