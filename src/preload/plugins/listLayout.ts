@@ -106,6 +106,11 @@ function makeKey(parent: HTMLElement): string {
  *       连续两次测量一致(≤2px)则锁定。
  */
 function applyFix(): boolean {
+    // ⛔ [lc-407] 演员/人物详情页(/v/person/...)不启用居中布局（用户明确要求）。
+    //   演员页复用了左侧媒体库/分类侧边栏(导致 hasSidebarLibraryNav 误判为 true)，
+    //   但其内容并非卡片网格，套上居中 padding 会被压成窄屏；故按路由显式排除。
+    if (/^\/v\/person(\/|$)/i.test(location.pathname)) return false;
+
     // ⛔ 无左侧「媒体库/分类」导航列表的页面不执行居中（演员页/详情页等没有这些列表）
     if (!hasSidebarLibraryNav()) return false;
 
