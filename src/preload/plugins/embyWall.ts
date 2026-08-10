@@ -2875,12 +2875,13 @@ function handle(): void {
     const swNas = addToggle('NAS 本地网盘代理');
     const swBoxless = addToggle('关闭详情页选集/演职人员背景框');
     const swWheel = addToggle('鼠标滚轮横向滚动');
-    swProxy.addEventListener('change', () => { ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked); });
-    swHide.addEventListener('change', () => { ipcRenderer.invoke('settings:set-hide-play', swHide.checked); });
-    swNas.addEventListener('change', () => { ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked); });
+    swProxy.addEventListener('change', () => { log('[开关保存] swProxy=' + swProxy.checked); ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked).catch((e) => log('set-download-proxy failed', e)); });
+    swHide.addEventListener('change', () => { log('[开关保存] swHide=' + swHide.checked); ipcRenderer.invoke('settings:set-hide-play', swHide.checked).catch((e) => log('set-hide-play failed', e)); });
+    swNas.addEventListener('change', () => { log('[开关保存] swNas=' + swNas.checked); ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked).catch((e) => log('set-nas-proxy failed', e)); });
     swBoxless.addEventListener('change', () => {
       _detailBoxless = swBoxless.checked;
-      ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked);
+      log('[开关保存] swBoxless=' + swBoxless.checked);
+      ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked).catch((e) => log('set-detail-boxless failed', e));
       // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
       if (isDetailPage()) applyDetailLiquidGlass();
     });
@@ -2888,7 +2889,8 @@ function handle(): void {
     swWheel.checked = _wheelHScrollEnabled;
     swWheel.addEventListener('change', () => {
       _wheelHScrollEnabled = swWheel.checked;
-      ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked);
+      log('[开关保存] swWheel=' + swWheel.checked);
+      ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked).catch((e) => log('set-wheel-hscroll failed', e));
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
       wheelToScroll();
     });
@@ -4732,13 +4734,21 @@ function handle(): void {
         try { fn(); } catch (err) { log(`SETTINGS refresh segment [${name}] failed`, err); }
       };
       seg('switches', () => {
-        swProxy.checked = !!(s.downloadProxy && s.downloadProxy.enabled);
+        const dl = !!(s.downloadProxy && s.downloadProxy.enabled);
+        swProxy.checked = dl;
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
         swBoxless.checked = !!s.detailBoxless;
         _detailBoxless = !!s.detailBoxless;
+        // [lc-418] 补回滚轮开关回填：此前只在构建期按 _wheelHScrollEnabled 赋值,
+        // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
+        swWheel.checked = !!s.wheelHScroll;
+        _wheelHScrollEnabled = !!s.wheelHScroll;
         swLogo.checked = !!s.carouselLogoEnabled;
         _carouselLogoEnabled = !!s.carouselLogoEnabled;
+        // [lc-418] 诊断日志：面板每次打开记录开关回填值, 便于核对"配置文件 vs 面板显示"是否一致
+        log('[开关回填] swProxy=' + swProxy.checked + ' swHide=' + swHide.checked + ' swNas=' + swNas.checked
+          + ' swBoxless=' + swBoxless.checked + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
       });
       seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';

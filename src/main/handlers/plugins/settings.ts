@@ -68,6 +68,7 @@ async function handleGetSettings(): Promise<any> {
 async function handleSetDownloadProxy(_event: any, enabled: boolean): Promise<void> {
     const cur = fnConfig.getDownloadProxyConfig();
     fnConfig.setDownloadProxyConfig({ enabled: !!enabled, proxyUrl: cur.proxyUrl });
+    log.info('[开关保存-MAIN] downloadProxy.enabled=' + (!!enabled) + ' path=' + fnConfig.getConfigPath());
 }
 
 // 自定义代理：获取当前配置
@@ -89,19 +90,23 @@ async function handleTestCustomProxy(_event: any, enabled: boolean, proxyUrl?: s
 
 async function handleSetHidePlay(_event: any, hide: boolean): Promise<void> {
     fnConfig.setHideOriginalPlayButton(!!hide);
+    log.info('[开关保存-MAIN] hideOriginalPlayButton=' + (!!hide) + ' path=' + fnConfig.getConfigPath());
 }
 
 async function handleSetNasProxy(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setNasProxyEnabled(!!enabled);
+    log.info('[开关保存-MAIN] nasProxyEnabled=' + (!!enabled) + ' path=' + fnConfig.getConfigPath());
 }
 
 async function handleSetDetailBoxless(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setDetailBoxless(!!enabled);
+    log.info('[开关保存-MAIN] detailBoxless=' + (!!enabled) + ' path=' + fnConfig.getConfigPath());
 }
 
 // 鼠标滚轮横向滚动开关：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
 async function handleSetWheelHScroll(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setWheelHScroll(!!enabled);
+    log.info('[开关保存-MAIN] wheelHScroll=' + (!!enabled) + ' path=' + fnConfig.getConfigPath());
 }
 
 // 设置「轮播图标题替换为 TMDB 透明 Logo」开关（true=替换，false=保留文字标题）

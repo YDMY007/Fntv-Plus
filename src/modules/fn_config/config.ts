@@ -28,28 +28,19 @@ if (app.isPackaged) {
 }
 
 /**
- * 一次性迁移：早期版本把生产配置也写到了 .fntv-dev。
- * 仅当目标生产目录【无 config.json】且旧 .fntv-dev【有 config.json】时，把配置【复制】进目标目录。
+ * 【lc-418】迁移彻底作废，原地置为无操作。
  *
- * ⚠️ 关键修正（lc-417）：历史上这里用 fs.renameSync 把整个 .fntv-dev 目录改名搬进生产目录，
- * 但当前架构下 .fntv-dev 是【开发版的永久专属 userData】（dev/生产必须隔离，否则会被单实例锁接管）。
- * 一旦安装版启动、且生产目录尚未有配置，就会把开发版整个目录搬空 → 开发版下次启动配置清零、显示全新默认。
- * 故改为 copyFileSync（target 缺失才补一份），绝不移动/删除 .fntv-dev，既保留老用户数据，又不破坏开发版。
- * 迁移失败静默忽略，不阻断启动。
+ * 历史背景：早期版本曾把生产配置误存到 .fntv-dev，这段代码本意是把那份配置"搬回"生产目录。
+ * 但当前架构下 .fntv-dev 已经是【开发版的永久专属 userData】（dev/生产严格隔离，否则会被单实例锁接管），
+ * 它里面装的是开发版自己的配置，绝不是"该迁移给生产版的旧数据"。
+ *
+ * 惨痛教训：即便 lc-417 把 rename 改成 copy，只要【已安装的旧二进制】仍带着 rename 版本，
+ * 用户每次打开安装版都会把开发版 .fntv-dev 整目录改名搬走 → 开发版配置清零、开关/账号全丢。
+ * 所以这里直接 no-op：开发版的 .fntv-dev 永不被读取/移动/复制，彻底斩断"安装版偷开发版配置"的链路。
+ * 任何「把 .fntv-dev 内容并入生产目录」的需求都不再成立（二者本就该独立）。
  */
-function migrateLegacyUserData(legacy: string, target: string): void {
-    try {
-        if (legacy === target || !fs.existsSync(legacy)) return;
-        const legacyConfig = path.join(legacy, 'config.json');
-        const targetConfig = path.join(target, 'config.json');
-        if (fs.existsSync(legacyConfig) && !fs.existsSync(targetConfig)) {
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            fs.copyFileSync(legacyConfig, targetConfig);
-            // 仅复制配置，.fntv-dev 原封不动（开发版数据不丢失）
-        }
-    } catch (_) {
-        /* 迁移失败不影响启动 */
-    }
+function migrateLegacyUserData(_legacy: string, _target: string): void {
+    // 故意空实现：.fntv-dev 是开发版永久家目录，禁止任何迁移/搬动。
 }
 
 /**
@@ -200,7 +191,7 @@ export interface SetDownloadProxyConfigParams {
     proxyUrl?: string;
 }
 
-function getConfigPath(): string {
+export function getConfigPath(): string {
     const dir = app.getPath('userData');
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
