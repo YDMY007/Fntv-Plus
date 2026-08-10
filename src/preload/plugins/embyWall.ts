@@ -1346,12 +1346,19 @@ function applyDetailLiquidGlass(): void {
  */
 let _layoutGuardActive = false;
 function fixDetailLayoutWidth(): void {
+  // [lc-403] 安全开关: 暂时完全禁用, 待用户确认精确生效 URL 后再开启.
+  //   lc-402 白名单 /v/library\/.+ 过于宽泛, 把首页也匹配上了→破坏布局+侧栏不可点.
+  // 同时清除任何残留的守护 CSS
+  const _stale = document.getElementById('fntv-detail-layout-guard');
+  if (_stale) _stale.remove();
+  return;
+
   // ── 白名单: 仅上述媒体库列表页 / 分类页 URL ──
   const isListPage = /^\/v\/(library\/.+|list\/(all|movie|tv|live|other))($|\/|\?|#)/i.test(location.pathname + location.search);
   if (!isListPage) {
     // 非列表页: 清除可能残留的 CSS
     const existing = document.getElementById('fntv-detail-layout-guard');
-    if (existing) { existing.remove(); log('[lc-401] layout guard: removed CSS (non-list page)'); }
+    if (existing) { (existing as HTMLElement).remove(); log('[lc-401] layout guard: removed CSS (non-list page)'); }
     return;
   }
 
@@ -1436,7 +1443,7 @@ function fixDetailLayoutWidth(): void {
       const ro = new ResizeObserver(() => tryFix());
       if (document.body) ro.observe(document.body);
       const rootEl = document.getElementById('root');
-      if (rootEl) ro.observe(rootEl);
+      if (rootEl) ro.observe(rootEl as Element);
       document.querySelectorAll<HTMLElement>('.ms-container').forEach(c => ro.observe(c));
       log('[lc-401] layout guard: ResizeObserver active (body/root/ms-container)');
     } catch (e) {
