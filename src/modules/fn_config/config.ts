@@ -26,6 +26,8 @@ if (app.isPackaged) {
 } else {
     app.setPath('userData', DEV_USER_DATA);
 }
+// [lc-419 诊断] 模块加载时立即确认 setPath 是否生效
+try { (require('../logger') as any).info('[config-diag] module-init isPackaged=' + app.isPackaged + ' DEV_USER_DATA=' + DEV_USER_DATA + ' PROD_USER_DATA=' + PROD_USER_DATA + ' effectiveUserData=' + app.getPath('userData')); } catch(_) {}
 
 /**
  * 【lc-418】迁移彻底作废，原地置为无操作。
@@ -193,6 +195,8 @@ export interface SetDownloadProxyConfigParams {
 
 export function getConfigPath(): string {
     const dir = app.getPath('userData');
+    // [lc-419 诊断] 每次调用记录实际 userData 路径，排查"开发版配置清零"
+    try { require('../logger').info('[config-diag] getConfigPath userData=' + dir + ' isPackaged=' + app.isPackaged); } catch(_) {}
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -218,6 +222,8 @@ function decrypt(encrypted: string): string {
 // 读取配置
 export function readConfig(): Config | null {
     const p = getConfigPath();
+    // [lc-419 诊断] 记录实际读取路径和文件状态，排查"开发版配置清零"
+    try { require('../logger').info('[config-diag] readConfig path=' + p + ' exists=' + fs.existsSync(p) + (fs.existsSync(p) ? ' size=' + fs.statSync(p).size : '')); } catch(_) {}
     if (fs.existsSync(p)) {
         try {
             return JSON.parse(fs.readFileSync(p, 'utf-8')) as Config;
@@ -870,7 +876,10 @@ export function setSystemPageUrl(url: string | null): void {
 }
 
 // CommonJS导出，确保与现有代码兼容
-module.exports = {
+// 注意：使用 Object.assign 合并而非整体覆盖，避免 `export function` 声明的函数被白名单遗漏
+// （之前 getCarouselLogoEnabled 用了 export function 却漏加白名单，导致 settings:get 抛
+//  "is not a function"，整屏设置回落默认，表现为「配置全丢失」）
+Object.assign(module.exports, {
     saveConfig,
     readConfig,
     addHistory,
@@ -955,4 +964,4 @@ module.exports = {
     getLoginBgPath, setLoginBgPath,
     // fnOS 系统桌面地址（切换系统页面用，留空=自动）
     getSystemPageUrl, setSystemPageUrl
-};
+});
