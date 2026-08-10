@@ -2851,15 +2851,6 @@ function handle(): void {
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
       wheelToScroll();
     });
-    // [lc-409] 轮播图标题替换为 TMDB 透明 Logo 开关：开启=用 logo 图替换右侧文字标题；关闭=保留文字标题
-    const swLogo = addToggle('轮播图标题替换为 Logo');
-    swLogo.checked = _carouselLogoEnabled;
-    swLogo.addEventListener('change', () => {
-      _carouselLogoEnabled = swLogo.checked;
-      ipcRenderer.invoke('settings:set-carousel-logo', swLogo.checked);
-      // 立即对当前已渲染轮播生效（开→拉取 logo 替换；关→还原文字标题）
-      applyCarouselLogoNow();
-    });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
     themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
@@ -4412,6 +4403,35 @@ function handle(): void {
       } catch { /* ignore */ }
     })();
 
+    // ===== [lc-412] 轮播图 Logo 插件：首页轮播图右侧文字标题 ⇄ TMDB 透明 Logo 开关（归入「插件」分类） =====
+    const secCarousel = section('轮播图 Logo');
+    const secBodyCarousel = secCarousel.body;
+    secBodyCarousel.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    const carouselLogoDesc = document.createElement('div');
+    carouselLogoDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    carouselLogoDesc.textContent = '开启后，首页轮播图右侧的文字标题会被替换为 TMDB 的透明 Logo 图（仅当该剧集在 TMDB 有透明 Logo 时）。关闭则保留原始文字标题。';
+    secBodyCarousel.appendChild(carouselLogoDesc);
+
+    // 开关行（整行可点）：开启=用 logo 图替换右侧文字标题；关闭=保留文字标题
+    const swLogo = document.createElement('input');
+    swLogo.type = 'checkbox';
+    swLogo.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    const swLogoRow = document.createElement('label');
+    swLogoRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;';
+    const swLogoSpan = document.createElement('span');
+    swLogoSpan.textContent = '轮播图标题替换为 Logo';
+    swLogoSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    swLogoRow.appendChild(swLogoSpan); swLogoRow.appendChild(swLogo);
+    secBodyCarousel.appendChild(swLogoRow);
+    swLogo.checked = _carouselLogoEnabled;
+    swLogo.addEventListener('change', () => {
+      _carouselLogoEnabled = swLogo.checked;
+      ipcRenderer.invoke('settings:set-carousel-logo', swLogo.checked);
+      // 立即对当前已渲染轮播生效（开→拉取 logo 替换；关→还原文字标题）
+      applyCarouselLogoNow();
+    });
+
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
     // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
     type Cat = { id: string; label: string; els: HTMLElement[] };
@@ -4421,7 +4441,7 @@ function handle(): void {
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
-      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el] },
+      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el, secCarousel.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
