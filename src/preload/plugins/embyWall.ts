@@ -1802,6 +1802,17 @@ function injectVideoPreviewExternalPlay(): void {
   marker.style.display = 'none';
   document.body.appendChild(marker);
 
+  // [lc-395] 统一飞牛视频预览模态头部配色: 头部 .trim-ui__app-layout--header 默认用 bg-modal-header,
+  //   与窗口主体背景 var(--semi-color-app) 不一致(顶部色条突兀, 深色主题下尤为明显).
+  //   给视频预览模态加专属类 fntv-video-modal, 并将头部背景统一为窗口主体同色, 消除色差.
+  //   仅作用于视频预览模态, 不动 fnOS 其它界面.
+  if (!document.getElementById('fntv-video-modal-style')) {
+    const st = document.createElement('style');
+    st.id = 'fntv-video-modal-style';
+    st.textContent = '.fntv-video-modal > .trim-ui__app-layout--header{background:var(--semi-color-app)!important;}';
+    document.head.appendChild(st);
+  }
+
   // 冻结/解冻: 在用户选择播放方式之前, 阻止飞牛原生 xgplayer 自动播放(避免"还没选就播了").
   // 原理: capture 阶段拦截 <video> 的 play 事件(prioritize 于 xgplayer 的 listener),
   //       preventDefault + stopImmediatePropagation + 再次 pause, 使任何 play() 企图都被挡住.
@@ -1927,6 +1938,7 @@ function injectVideoPreviewExternalPlay(): void {
   const handleModal = (modal: HTMLElement): void => {
     if (modal.dataset.fntvChoice === '1') return; // 已选过播放方式: 不再冻结/弹窗/注入按钮
     if (modal.querySelector('video')) {
+      modal.classList.add('fntv-video-modal'); // [lc-395] 标记视频预览模态, 触发头部配色统一
       freezeVideo(modal.querySelector('video')); // 选择前冻结原生播放, 避免"还没选就播了"
       showChoiceDialog(modal); // 自动弹窗(主要交互)
       ensureButton(modal);     // 标题栏按钮(弹窗关闭后仍可作为二次入口)
