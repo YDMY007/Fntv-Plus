@@ -16,6 +16,12 @@ let _detailBoxless = false;
 let _wheelHScrollEnabled = false;
 // 「热门剧更新」数据源运行时缓存（'tmdb' / 'douban'），默认豆瓣；由启动时 settings:get 回填
 let _hotSource: 'tmdb' | 'douban' = 'douban';
+// 轮播图标题替换为 TMDB 透明 Logo 开关的运行时缓存：true=替换(默认)，false=保留文字标题
+let _carouselLogoEnabled = true;
+// 当前已渲染轮播的引用，供设置切换时即时应用/还原（无需等下次导航/重建）
+let _carouselInfos: HTMLElement[] = [];
+let _carouselShows: any[] = [];
+let _carouselBase = '';
 
 function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
   const enabled = !!payload?.enabled;
@@ -38,6 +44,10 @@ try {
     // 鼠标滚轮横向滚动开关：false=关闭(恢复飞牛原生上下滚)，缺失/true=开启
     if (s && typeof s.wheelHScroll === 'boolean') {
       _wheelHScrollEnabled = s.wheelHScroll;
+    }
+    // 轮播图标题替换为 Logo 开关：缺失/true=开启(替换)，false=保留文字标题
+    if (s && typeof s.carouselLogoEnabled === 'boolean') {
+      _carouselLogoEnabled = s.carouselLogoEnabled;
     }
     // 立即按开关状态应用/清除横向滚动劫持（偏好可能与默认值不同）
     wheelToScroll();
@@ -797,6 +807,10 @@ function injectCarousel(): void {
   autoFetchDescs(base, shows, infos);
 
   /* [lc-408] 异步把右侧文字标题替换为 TMDB 透明 logo（获取成功才替换，否则保留文字） */
+  // [lc-409] 记录当前轮播引用，供设置开关即时生效
+  _carouselInfos = infos;
+  _carouselShows = shows;
+  _carouselBase = base;
   applyTitleLogo(base, shows, infos);
 
   log('carousel injected');
@@ -899,6 +913,8 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
  * - 硬编码兜底条目（show.logo 本地 sys/img）：经 fetchImageAuth 取本地 logo
  * 获取成功才把 .fnos-title 隐藏、显示 .fnos-logo；任一环节失败则保留文字标题（静默降级）。 */
 function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
+  // [lc-409] 开关关闭时完全跳过（既不拉取也不替换），保留文字标题
+  if (!_carouselLogoEnabled) return;
   shows.forEach((show, i) => {
     const info = infos[i];
     if (!info) return;
@@ -944,6 +960,21 @@ function swapTitleToLogo(info: HTMLElement, src: string): void {
   logoEl.src = src;
   logoEl.style.display = 'block';
   titleEl.style.display = 'none';
+}
+
+/** 设置开关变更后即时作用于当前已渲染的轮播：开→拉取 logo 替换；关→还原文字标题 */
+function applyCarouselLogoNow(): void {
+  if (!_carouselInfos.length) return;
+  if (_carouselLogoEnabled) {
+    applyTitleLogo(_carouselBase, _carouselShows, _carouselInfos);
+  } else {
+    _carouselInfos.forEach((info) => {
+      const t = info.querySelector('.fnos-title') as HTMLElement | null;
+      const l = info.querySelector('.fnos-logo') as HTMLImageElement | null;
+      if (t) t.style.display = '';
+      if (l) { l.style.display = 'none'; l.src = ''; }
+    });
+  }
 }
 
 /* ========== 详情页苹果液态玻璃 (TV详情 / Season详情) ========== */
@@ -2820,6 +2851,15 @@ function handle(): void {
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
       wheelToScroll();
     });
+    // [lc-409] 轮播图标题替换为 TMDB 透明 Logo 开关：开启=用 logo 图替换右侧文字标题；关闭=保留文字标题
+    const swLogo = addToggle('轮播图标题替换为 Logo');
+    swLogo.checked = _carouselLogoEnabled;
+    swLogo.addEventListener('change', () => {
+      _carouselLogoEnabled = swLogo.checked;
+      ipcRenderer.invoke('settings:set-carousel-logo', swLogo.checked);
+      // 立即对当前已渲染轮播生效（开→拉取 logo 替换；关→还原文字标题）
+      applyCarouselLogoNow();
+    });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
     themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
@@ -4606,6 +4646,8 @@ function handle(): void {
         swNas.checked = !!s.nasProxyEnabled;
         swBoxless.checked = !!s.detailBoxless;
         _detailBoxless = !!s.detailBoxless;
+        swLogo.checked = !!s.carouselLogoEnabled;
+        _carouselLogoEnabled = !!s.carouselLogoEnabled;
       });
       seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';

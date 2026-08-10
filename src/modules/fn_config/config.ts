@@ -113,6 +113,9 @@ export interface Config {
     // 鼠标滚轮横向滚动开关（默认开启=true：竖向滚轮在横向容器内转为左右滑动；
     // 关闭=false：恢复飞牛原生——鼠标只管上下滚动，横向靠左右箭头键/滚动条）
     wheelHScroll?: boolean;
+    // 轮播图标题替换为 TMDB 透明 Logo 开关（默认开启=true：用 logo 图替换右侧文字标题；
+    // false=保留文字标题）
+    carouselLogoEnabled?: boolean;
     // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
     biliDanmakuOpacity?: number;     // 透明度 0-1（默认 0.7）
     biliDanmakuFontSize?: number;    // 字号（默认 50）
@@ -824,6 +827,19 @@ export function getWheelHScroll(): boolean {
 export function setWheelHScroll(enabled: boolean): void {
     const config: Config = readConfig() || {};
     config.wheelHScroll = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取「轮播图标题替换为 TMDB 透明 Logo」开关（默认开启=true，与既有视觉一致；false=保留文字标题）
+export function getCarouselLogoEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.carouselLogoEnabled !== false; // 默认开启
+}
+
+// 设置「轮播图标题替换为 TMDB 透明 Logo」开关
+export function setCarouselLogoEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.carouselLogoEnabled = !!enabled;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

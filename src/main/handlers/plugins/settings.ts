@@ -48,6 +48,8 @@ async function handleGetSettings(): Promise<any> {
         detailBoxless: fnConfig.getDetailBoxless(),
         // 鼠标滚轮横向滚动开关（默认开启=true；关闭=false 恢复飞牛原生上下滚动）
         wheelHScroll: fnConfig.getWheelHScroll(),
+        // 轮播图标题替换为 TMDB 透明 Logo 开关（默认开启=true；false=保留文字标题）
+        carouselLogoEnabled: fnConfig.getCarouselLogoEnabled(),
         // ===== B站弹幕样式与过滤 =====
         biliDanmakuOpacity: fnConfig.getBiliDanmakuOpacity(),
         biliDanmakuFontSize: fnConfig.getBiliDanmakuFontSize(),
@@ -100,6 +102,12 @@ async function handleSetDetailBoxless(_event: any, enabled: boolean): Promise<vo
 // 鼠标滚轮横向滚动开关：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
 async function handleSetWheelHScroll(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setWheelHScroll(!!enabled);
+}
+
+// 设置「轮播图标题替换为 TMDB 透明 Logo」开关（true=替换，false=保留文字标题）
+async function handleSetCarouselLogoEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setCarouselLogoEnabled(!!enabled);
+    log.info('轮播图标题替换为 Logo 开关 →', !!enabled);
 }
 
 // 弹出系统文件选择框，选中后写回配置并刷新 media 模块缓存
@@ -689,6 +697,7 @@ function init(): void {
     registerHandler('settings:set-mpv-bili-aggregate-threshold', handleSetMpvBiliAggregateThreshold, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
+    registerHandler('settings:set-carousel-logo', handleSetCarouselLogoEnabled, { useHandle: true });
     registerHandler('settings:open-external', handleOpenExternal, { useHandle: true });
     // 渲染进程(EmbyWall 墙)主动索取当前调试过滤 → 回传，使其渲染侧日志开关即时生效
     registerHandler('debug-filter-request', (event: any) => {
