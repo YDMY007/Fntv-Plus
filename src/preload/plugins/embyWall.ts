@@ -936,16 +936,18 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
             log('tmdb logo none:', show.title, (r && r.error) || '无 logo');
             return;
           }
-          // [lc-413] 优先用横屏候选列表逐个尝试，挑首个「非纯白」logo；旧调用仅返回 logoPath 时退化为单候选
+          // [lc-437] 优先用横屏候选列表逐个尝试；不再以「纯白」硬性排除（logo 已移至左侧深色海报，纯白可见）
           const paths = (r.logoPaths && r.logoPaths.length) ? r.logoPaths : (r.logoPath ? [r.logoPath] : []);
+          let whiteFallback: string | null = null; // [lc-437] 纯白 logo 留作最后兜底
           for (const p of paths) {
             try {
               const url = 'https://image.tmdb.org/t/p/w500' + p;
               const img = await ipcRenderer.invoke('tmdb:image', url);
               if (!img || !img.ok || !img.dataUrl) continue;
-              // [lc-413] 纯白 PNG 过滤：可见像素几乎全部接近纯白 → 在浅色面板上不可见，跳过换下一个候选
+              // [lc-437] 纯白检测不再立即跳过：先收藏为兜底，优先用非纯白
               if (await isPureWhitePng(img.dataUrl)) {
-                log('tmdb logo 纯白跳过:', show.title, p);
+                if (!whiteFallback) whiteFallback = img.dataUrl;
+                log('tmdb logo 纯白候选(留作兜底):', show.title, p);
                 continue;
               }
               show.tmdbLogo = img.dataUrl;
@@ -954,7 +956,14 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
               return;
             } catch (e) { log('tmdb logo candidate err:', show.title, e); }
           }
-          log('tmdb logo 全部候选不可用(纯白或失败):', show.title);
+          // [lc-437] 兜底：无任何非纯白可用时，才选用纯白 logo
+          if (whiteFallback) {
+            show.tmdbLogo = whiteFallback;
+            swapTitleToLogo(info, whiteFallback);
+            log('tmdb logo applied(纯白兜底):', show.title);
+            return;
+          }
+          log('tmdb logo 全部候选不可用:', show.title);
         } catch (e) { log('tmdb logo err:', show.title, e); }
       }, i * 600);
     } else if (show.logo) {
