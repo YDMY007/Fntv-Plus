@@ -658,6 +658,11 @@ function injectCarousel(): void {
     wrapper.innerHTML = ''; // 清空旧container(我们自己的节点, 不影响飞牛DOM), 内部重建
   } else {
     target.innerHTML = ''; // 首屏清空section原内容(媒体库标题+卡片)
+    // [lc-444] 清掉飞牛section自身顶部边框/阴影/上边距, 避免与顶部导航栏之间出现细黑线
+    target.style.borderTop = 'none';
+    target.style.boxShadow = 'none';
+    target.style.marginTop = '0';
+    target.style.background = 'transparent';
     wrapper = document.createElement('div');
     wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
     _carouselWrapper = wrapper;
@@ -911,6 +916,11 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   }
 
   target.innerHTML = '';
+  // [lc-444] 同上: 清掉section自身顶部边框/阴影/上边距, 避免细黑线
+  target.style.borderTop = 'none';
+  target.style.boxShadow = 'none';
+  target.style.marginTop = '0';
+  target.style.background = 'transparent';
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
   _carouselWrapper = wrapper;
