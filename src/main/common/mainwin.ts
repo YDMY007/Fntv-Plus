@@ -397,8 +397,9 @@ const ACRYLIC_CSS = `
         padding-right:16px!important;
     }
 
-    /* 11c. 兜底: 砍掉 max-width 约束 */
-    [class*="max-w"]{
+    /* 11c. 兜底: 砍掉 max-width 约束 (仅限影视TV页 /v;
+       全局生效会误伤系统页如文件管理的缩略图容器, 去掉 max-width 让其撑大溢出) [lc-456] */
+    .fnos-tv-page [class*="max-w"]{
         max-width:none!important;
     }
 
@@ -547,8 +548,11 @@ const LIQUID_GLASS_CSS = `
         position:relative!important;
     }
 
-    /* ── 窗口底板: 抬升饱和+亮度, 加内描边高光 (液态通透感) ── */
-    body{
+    /* ── 窗口底板: 抬升饱和+亮度, 加内描边高光 (液态通透感) ──
+       [lc-456] 限定到 .fnos-tv-page: body 的 backdrop-filter 会建立包含块,
+       导致系统页(文件管理等非 /v 页)内带 object-fit/绝对定位的 <img>(缩略图)
+       绘制异常→超出容器被放大框住. 同 lc-455 原则, 系统页 body 保持干净. */
+    .fnos-tv-page body{
         backdrop-filter:blur(var(--fnos-blur,30px)) saturate(150%) brightness(1.04)!important;
         -webkit-backdrop-filter:blur(var(--fnos-blur,30px)) saturate(150%) brightness(1.04)!important;
         box-shadow:
