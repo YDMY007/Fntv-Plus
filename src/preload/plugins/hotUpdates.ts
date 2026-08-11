@@ -228,6 +228,12 @@ function injectStyle(): void {
 .fntv-hot-tp { background: rgba(140,220,160,.22); padding: 1.5px 7.5px; border-radius: 999px; color: #9be3b0; }
 .fntv-hot-yr { background: rgba(255,255,255,.14); padding: 1.5px 7.5px; border-radius: 999px; color: #e8e8ee; }
 
+/* [lc-460] 已入库角标：命中飞牛影视库索引的卡片常驻显示于左上角 */
+.fntv-hot-inlib { position: absolute; top: 6px; left: 6px;
+  background: rgba(46,204,113,.92); color: #fff; font-size: 10px; font-weight: 700;
+  padding: 1.5px 7px; border-radius: 999px; line-height: 1.4;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3); pointer-events: none; z-index: 2; }
+
 /* 不感兴趣按钮：默认隐藏，hover 卡片时浮现于右上角 */
 .fntv-hot-block { position: absolute; top: 6px; right: 6px;
   width: 22px; height: 22px; border: none; border-radius: 50%;
@@ -463,6 +469,8 @@ function ensureLibraryIndex(): Promise<LibItem[]> {
       _libLoading = false;
       _libWaiters.forEach((r) => r(idx)); _libWaiters = [];
       logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项 (rounds=' + attempts + ')');
+      // [lc-460] 索引就绪后，对当前已渲染的每日放送卡片补标「已入库」（覆盖「渲染先于索引就绪」的时序）
+      try { markInLibrary(document); } catch { /* ignore */ }
       resolve(idx);
     };
     // 在 iframe 文档内把各可滚动容器滚到底部, 触发飞牛懒加载下一页/渲染后续项
@@ -531,6 +539,29 @@ function matchLibrary(titleCn: string, titleOrig: string): string | null {
     if (t.includes(c) || c.includes(t)) return it.href;
   }
   return null;
+}
+
+/** [lc-460] 给已渲染的每日放送卡片标注「已入库」：库内有该剧(命中 _libIndex)显示角标，否则移除。
+ *  三个数据源(Bangumi/TMDB/豆瓣)卡片结构一致(均带 data-title-cn/data-title)，统一遍历标注即可。
+ *  库索引异步构建，故需在 render 后 与 索引就绪后 各调用一次，覆盖两种时序。 */
+function markInLibrary(root: ParentNode): void {
+  const cards = root.querySelectorAll('.fntv-hot-card');
+  cards.forEach((c: any) => {
+    const titleCn = c.getAttribute('data-title-cn') || '';
+    const titleOrig = c.getAttribute('data-title') || '';
+    const hit = matchLibrary(titleCn, titleOrig);
+    let badge = c.querySelector('.fntv-hot-inlib') as HTMLElement | null;
+    if (hit) {
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'fntv-hot-inlib';
+        badge.textContent = '已入库';
+        c.appendChild(badge);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  });
 }
 
 /** 站内跳飞牛影视详情页：复用 embyWall「开始观看」的 SPA 跳法(pushState+popstate, 兜底整页导航) */
@@ -658,6 +689,8 @@ function buildPanel(): void {
     }
     // [lc-369] 统一走主进程海报代理：Bangumi 不再直连 bgm.tv（避免渲染进程多图并发+透明窗口 GPU 爆炸）
     hydratePosters(body);
+    // [lc-460] 卡片重建后按库索引标注「已入库」（索引若已就绪则命中，否则待索引 finish 后补标）
+    markInLibrary(body);
   };
 
   // 排序分段点击（动态重建后需重新绑定）
