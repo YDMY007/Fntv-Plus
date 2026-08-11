@@ -445,18 +445,36 @@ function ensureLibraryIndex(): Promise<LibItem[]> {
   return new Promise((resolve) => {
     const base = location.origin; // 当前即飞牛影视页，iframe 同源可读
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;z-index:-1;opacity:0;border:none;pointer-events:none';
+    // [lc-457-fix] 必须全屏(而非1px)隐藏: 飞牛列表是滚动懒加载/虚拟滚动, 1px 视口下
+    // 仅渲染首屏约19项且 IntersectionObserver 判不可见不加载后续; 全屏+opacity:0 放背后
+    // (pointer-events:none) 既不影响用户视图, 又能让飞牛正常渲染并触发懒加载。
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:0;border:none;pointer-events:none';
     iframe.src = base + '/v/list/all';
     const map = new Map<string, LibItem>();
     let attempts = 0;
+    let lastCount = 0;
+    let stableRounds = 0;
+    const MAX_ROUNDS = 80;      // 80*500ms=40s 硬上限, 避免极端情况死循环
+    const STABLE_ROUNDS = 5;    // 连续5轮无新增 GUID 视为已滚到列表底部(全量)
     const finish = (): void => {
       try { iframe.remove(); } catch { /* ignore */ }
       const idx: LibItem[] = Array.from(map.values());
       _libIndex = idx;
       _libLoading = false;
       _libWaiters.forEach((r) => r(idx)); _libWaiters = [];
-      logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项');
+      logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项 (rounds=' + attempts + ')');
       resolve(idx);
+    };
+    // 在 iframe 文档内把各可滚动容器滚到底部, 触发飞牛懒加载下一页/渲染后续项
+    const scrollAll = (doc: any): void => {
+      try {
+        const w: any = doc.defaultView || doc.parentWindow;
+        if (w) w.scrollTo(0, 1e9);
+      } catch { /* ignore */ }
+      const els = doc.querySelectorAll('*');
+      els.forEach((el: any) => {
+        try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = el.scrollHeight; } catch { /* ignore */ }
+      });
     };
     const poll = (): void => {
       attempts++;
@@ -465,7 +483,7 @@ function ensureLibraryIndex(): Promise<LibItem[]> {
         if (!doc) { if (attempts < 30) setTimeout(poll, 400); else finish(); return; }
         const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
         if (links.length < 5 && attempts < 30) { setTimeout(poll, 400); return; }
-        // 多次轮询收集（飞牛可能分批渲染/虚拟滚动），最多再收集若干轮
+        // 收集当前可见的所有条目(GUID 去重, 虚拟滚动也不丢已出现过的项)
         links.forEach((a: any) => {
           const href = a.getAttribute('href') || '';
           const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
@@ -480,7 +498,11 @@ function ensureLibraryIndex(): Promise<LibItem[]> {
           if (!title) return;
           map.set(m[2], { title, href: base + '/v/' + m[1] + '/' + m[2], mediaType: m[1] });
         });
-        if (attempts < 14) setTimeout(poll, 500); else finish();
+        scrollAll(doc);  // 滚动触发后续渲染/分页加载
+        const nowCount = map.size;
+        if (nowCount === lastCount) stableRounds++; else { stableRounds = 0; lastCount = nowCount; }
+        if (stableRounds >= STABLE_ROUNDS || attempts >= MAX_ROUNDS) finish();
+        else setTimeout(poll, 500);
       } catch (e) { if (attempts < 30) setTimeout(poll, 400); else finish(); }
     };
     iframe.onload = () => setTimeout(poll, 500);
@@ -687,14 +709,19 @@ function buildPanel(): void {
     const url = card.getAttribute('data-url');
     const titleCn = card.getAttribute('data-title-cn') || '';
     const titleOrig = card.getAttribute('data-title') || '';
-    // [lc-457] 联动：库内有该剧 → 站内跳详情页；否则 → 打开外部链接(Bangumi/TMDB)
-    const hit = matchLibrary(titleCn, titleOrig);
-    if (hit) {
-      logger.info('[hotUpdates] 库内命中，跳详情页', hit);
-      navigateToDetail(hit);
-    } else if (url) {
-      ipcRenderer.invoke('app:open-external', url).catch(() => {});
-    }
+    // [lc-457-fix] 异步等待库索引就绪再匹配: 即便索引还在滚动构建中也不误判为"库内无",
+    // 避免错跳外链。正常情况(OnReady 已预取)下 _libIndex 早已存在, 此处同步 resolve 无延迟。
+    ensureLibraryIndex().then(() => {
+      const hit = matchLibrary(titleCn, titleOrig);
+      if (hit) {
+        logger.info('[hotUpdates] 库内命中，跳详情页', hit);
+        navigateToDetail(hit);
+      } else if (url) {
+        ipcRenderer.invoke('app:open-external', url).catch(() => {});
+      }
+    }).catch(() => {
+      if (url) ipcRenderer.invoke('app:open-external', url).catch(() => {});
+    });
   });
 
   // 恢复屏蔽项
@@ -812,6 +839,10 @@ function initHotUpdates(): void {
 
   // 兜底：某些导航可能绕过 history API（如整页加载/特殊路由），定时核对一次首页状态
   setInterval(syncHomeVisibility, 3000);
+
+  // [lc-457-fix] 首页挂载即静默预建飞牛影视库索引, 用户展开浮层/点卡片前通常早已滚完就绪,
+  // 避免「刚展开就点」时索引仍在构建(仅首屏项)而误判为库内无该剧 → 错误跳外链。
+  ensureLibraryIndex().catch(() => {});
 
   logger.info('[hotUpdates] 热门剧更新浮层（宫灯版，Bangumi/TMDB 双源）已挂载');
 }
