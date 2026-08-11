@@ -816,7 +816,11 @@ function injectCarousel(): void {
       item.appendChild(pImg);
       item.appendChild(pTitle);
       item.addEventListener('click', () => goTo(pi));
-      item.addEventListener('mouseenter', () => { item.style.opacity='1'; item.style.transform='scale(1)'; });
+      // [lc-440] 悬停联动：鼠标放到右侧某海报, 主轮播切到该集
+      item.addEventListener('mouseenter', () => {
+        goTo(pi);
+        item.style.opacity='1'; item.style.transform='scale(1)';
+      });
       item.addEventListener('mouseleave', () => {
         if (pi !== currentIdx) { item.style.opacity='.65'; item.style.transform='scale(.92)'; }
       });
@@ -824,14 +828,19 @@ function injectCarousel(): void {
     });
     _carouselPosterStrip.appendChild(pInner);
 
-    // 自动滚动：缓慢向上循环，到底后无缝回顶
+    // 自动滚动：缓慢向上循环，到底后无缝回顶；悬停右侧海报条时暂停，方便选取
     let psTop = 0;
+    let psPaused = false;
+    _carouselPosterStrip.addEventListener('mouseenter', () => { psPaused = true; });
+    _carouselPosterStrip.addEventListener('mouseleave', () => { psPaused = false; });
     const psScroll = () => {
       if (!_carouselPosterStrip || !pInner.parentElement) return;
-      psTop += 0.4;
-      const maxScroll = Math.max(0, pInner.scrollHeight - _carouselPosterStrip.clientHeight + 20);
-      if (psTop >= maxScroll) psTop = 0;
-      pInner.style.transform = `translateY(-${psTop}px)`;
+      if (!psPaused) {
+        psTop += 0.4;
+        const maxScroll = Math.max(0, pInner.scrollHeight - _carouselPosterStrip.clientHeight + 20);
+        if (psTop >= maxScroll) psTop = 0;
+        pInner.style.transform = `translateY(-${psTop}px)`;
+      }
       requestAnimationFrame(psScroll);
     };
     const psTimer = setTimeout(() => requestAnimationFrame(psScroll), 1500);
