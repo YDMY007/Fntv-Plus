@@ -715,11 +715,9 @@ function injectCarousel(): void {
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
       <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
-      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;flex-shrink:0;justify-content:flex-start;margin-top:2px">
+      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
-        <div class="fnos-logo-box" style="display:none;width:100%;height:92px;flex-shrink:0;align-items:center;justify-content:flex-start;margin-top:6px;overflow:hidden;border-radius:10px">
-          <img class="fnos-logo" alt="" style="width:100%;height:100%;object-fit:contain;object-position:left center;filter:drop-shadow(0 3px 12px rgba(0,0,0,.32))">
-        </div>
+        <img class="fnos-logo" alt="" style="display:none;max-width:80%;max-height:86px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 3px 12px rgba(0,0,0,.32))">
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
@@ -1107,11 +1105,10 @@ function backfillDetailLogo(): void {
 /** 把右侧文字标题隐藏、显示 logo 图片（取 logo 成功后的统一替换） */
 function swapTitleToLogo(info: HTMLElement, src: string): void {
   const titleEl = info.querySelector('.fnos-title') as HTMLElement | null;
-  const boxEl = info.querySelector('.fnos-logo-box') as HTMLElement | null;
   const logoEl = info.querySelector('.fnos-logo') as HTMLImageElement | null;
-  if (!titleEl || !boxEl || !logoEl) return;
+  if (!titleEl || !logoEl) return;
   logoEl.src = src;
-  boxEl.style.display = 'flex';
+  logoEl.style.display = 'block';
   titleEl.style.display = 'none';
 }
 
@@ -1154,11 +1151,9 @@ function applyCarouselLogoNow(): void {
   } else {
     _carouselInfos.forEach((info) => {
       const t = info.querySelector('.fnos-title') as HTMLElement | null;
-      const box = info.querySelector('.fnos-logo-box') as HTMLElement | null;
       const l = info.querySelector('.fnos-logo') as HTMLImageElement | null;
       if (t) t.style.display = '';
-      if (box) box.style.display = 'none';
-      if (l) { l.style.display = ''; l.src = ''; }
+      if (l) { l.style.display = 'none'; l.src = ''; }
     });
   }
 }
