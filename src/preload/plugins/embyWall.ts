@@ -668,7 +668,7 @@ function injectCarousel(): void {
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18)';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
   wrapper.appendChild(container);
   _carouselContainer = container;
 
