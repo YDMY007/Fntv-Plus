@@ -699,9 +699,9 @@ function injectCarousel(): void {
     slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
     slide.className = 'fnos-slide';
 
-    // 左: 图片面板(占 ~64%, 撑满无白边)
+    // 左: 图片面板(占 ~80%, 撑满无白边)
     const leftEl = document.createElement('div');
-    leftEl.style.cssText = 'position:relative;width:64%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
+    leftEl.style.cssText = 'position:relative;width:80%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
     const imgEl = document.createElement('img');
     // [v337] 改 cover 撑满左面板(上下无白边); 仅裁左右一点点, 左对齐保持(替代 v336 的 contain+22px白边)
     imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center';
@@ -723,7 +723,7 @@ function injectCarousel(): void {
 
     // 右: 文字面板 — [lc-439] 收窄为30%, 为右侧海报条让空间
     const rightPanel = document.createElement('div');
-    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:34px 50px 34px 34px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
+    rightPanel.style.cssText = 'position:relative;width:20%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:24px 22px 24px 22px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
 
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
