@@ -405,12 +405,16 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         // [lc-408] 提取 tmdb id + mediaType，供轮播图标题替换为 TMDB 透明 logo
         const tmdbId = extractTmdbId(data);
         if (show.id === shows[0]?.id) log('1st tmdbId:', tmdbId || '(none)', '| mediaType:', show.mediaType || 'tv');
+        // [lc-451] 集数: number_of_episodes=官方总集数, local_number_of_episodes=本地已刮削/更新到的集数
+        const totalEps = (data.number_of_episodes as number) || 0;
+        const localEps = (data.local_number_of_episodes as number) || 0;
         newShows.push({
           id: show.id, title: show.title,
           poster, backdrop,
           desc: data.overview || '',
           mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
-          tmdbId
+          tmdbId,
+          totalEps, localEps
         });
       } catch (e) { /* skip */ }
     }
@@ -733,8 +737,14 @@ function injectCarousel(): void {
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
+    // [lc-451] 徽标：剧集显示「总集数 · 更新至X集」；电影回退「电影」标签
+    const totalEps = (show as any).totalEps || 0;
+    const localEps = (show as any).localEps || 0;
+    const pillText = localEps > 0
+      ? `📺 共${totalEps > 0 ? totalEps : localEps}集 · 更新至${localEps}集`
+      : (show.mediaType === 'movie' ? '🎬 电影' : '✨ 最近更新');
     info.innerHTML = `
-      <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
+      <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${pillText}</div>
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
       </div>
