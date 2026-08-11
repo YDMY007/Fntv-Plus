@@ -84,12 +84,18 @@ const ACRYLIC_CSS = `
 
     /* ── ② Body: 亚克力底板 (粉紫半透+模糊桌面) ──
        透明度 --fnos-alpha / 模糊 --fnos-blur 由侧栏滑块实时控制 */
+    /* body 基础(全局): 仅保留无边框透明窗口必需的顶部安全区 + 防溢出。
+       亚克力底板/模糊/字体等仅在影视TV页(.fnos-tv-page)生效,
+       否则系统页(文件管理等 / 根路径)会被透明化→缩略图 img 透出桌面变黑框. [lc-455] */
     body{
         margin:0!important;
         padding-top:32px!important;
+        overflow:hidden!important;
+    }
+    /* 影视TV页: 亚克力底板 + 模糊透桌面 + 字体平滑 */
+    .fnos-tv-page body{
         min-height:100vh!important;
         border-radius:16px!important;
-        overflow:hidden!important;
         background:rgba(250,244,250, var(--fnos-alpha,0.68))!important;
         backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;
         -webkit-backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;

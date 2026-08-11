@@ -2265,6 +2265,24 @@ function handle(): void {
   //   按钮 observer 永不注册 → 文件管理器双击视频"无事发生". 故改无条件调用.
   injectVideoPreviewExternalPlay();
 
+  // [lc-455] SPA 路由同步 <html>.fnos-tv-page 类:
+  //   飞牛系统页(/)与影视页(/v)是同一 webContents 内 SPA 切换, 不重载 webContents → handle() 不再重跑。
+  //   若初次在影视页加了 .fnos-tv-page, 切到系统页时类残留 → ① body 亚克力(已限定 .fnos-tv-page)仍误伤系统页。
+  //   故周期性比对 pathname, 动态 add/remove 类, 确保系统页始终不被亚克力化(避免缩略图变黑框)。
+  const syncTvPageClass = () => {
+    document.documentElement.classList.toggle('fnos-tv-page', isFntvTvPage());
+  };
+  syncTvPageClass();
+  let _lastPath = location.pathname;
+  const _tvClassTimer = window.setInterval(() => {
+    if (location.pathname !== _lastPath) {
+      _lastPath = location.pathname;
+      syncTvPageClass();
+      log('[TV类同步]', location.pathname, 'isTv=', isFntvTvPage());
+    }
+  }, 400);
+  window.addEventListener('beforeunload', () => window.clearInterval(_tvClassTimer));
+
   if (!isFntvTvPage()) {
     injectNativeReturnButton();
     injectExternalPlayButton();
