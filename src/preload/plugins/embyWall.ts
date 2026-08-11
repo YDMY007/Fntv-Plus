@@ -628,11 +628,9 @@ function injectCarousel(): void {
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(不再用硬编码 demo 无职转生)
-  // [修复] 仅当「尚未完成首次加载(_apiLoaded=false)」才显示占位; 若已加载完毕但为空(实时抓取失败/
-  //   fnOS 结构变化/NAS 未连), 不再卡在占位, 而是落到下方 RECENT_SHOWS 硬编码兜底, 保证海报墙始终可见。
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
-  if (_apiShows.length === 0 && !_apiLoaded) {
-    log('api not ready (loading), showing loading placeholder');
+  if (_apiShows.length === 0) {
+    log('api not ready, showing loading placeholder');
     // [lc-100 修复] 占位只构建一次: 下方 MutationObserver 监听 document.body 任意变更,
     // 若每次都重建占位(清空+追加会触发 DOM 变更), 会再次唤醒 observer → 无限重建 → 渲染线程卡死白屏。
     if (_placeholderInited) return;
@@ -728,9 +726,9 @@ function injectCarousel(): void {
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
       <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
-      <div class="fnos-title-wrap" style="position:relative;display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center;min-height:clamp(96px,13vh,140px)">
-        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);transition:opacity .35s ease">${show.title}</div>
-        <img class="fnos-logo" alt="" style="position:absolute;left:0;top:0;bottom:0;margin:auto 0;max-width:92%;max-height:clamp(72px,10vh,120px);width:auto;height:auto;object-fit:contain;object-position:left center;opacity:0;transform:scale(.96);transition:opacity .45s ease,transform .45s ease;filter:drop-shadow(0 6px 18px rgba(0,0,0,.28));pointer-events:none">
+      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center">
+        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
+        <img class="fnos-logo" alt="" style="display:none;max-width:82%;max-height:72px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 2px 10px rgba(0,0,0,.3))">
       </div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
@@ -1124,10 +1122,8 @@ function swapTitleToLogo(info: HTMLElement, src: string): void {
   const logoEl = info.querySelector('.fnos-logo') as HTMLImageElement | null;
   if (!titleEl || !logoEl) return;
   logoEl.src = src;
-  // [lc-426] 平滑交叉淡入：标题淡出 + logo 淡入(配合 CSS transition, 避免生硬闪烁与布局跳动)
-  titleEl.style.opacity = '0';
-  logoEl.style.opacity = '1';
-  logoEl.style.transform = 'scale(1)';
+  logoEl.style.display = 'block';
+  titleEl.style.display = 'none';
 }
 
 /** [lc-413] 判断 base64/blob PNG 是否为「纯白 logo」：可见(非透明)像素几乎全部接近纯白 → 视为纯白，
@@ -1170,8 +1166,8 @@ function applyCarouselLogoNow(): void {
     _carouselInfos.forEach((info) => {
       const t = info.querySelector('.fnos-title') as HTMLElement | null;
       const l = info.querySelector('.fnos-logo') as HTMLImageElement | null;
-      if (t) t.style.opacity = '';
-      if (l) { l.style.opacity = '0'; l.style.transform = 'scale(.96)'; l.src = ''; }
+      if (t) t.style.display = '';
+      if (l) { l.style.display = 'none'; l.src = ''; }
     });
   }
 }
@@ -5315,7 +5311,7 @@ function handle(): void {
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
   fetchShowsViaIPC(base).then(() => {
-    if (_apiShows.length === 0) { log('API empty → 用 RECENT_SHOWS 硬编码兜底重建轮播'); _carouselInited = false; injectCarousel(); return; }
+    if (_apiShows.length === 0) { log('API empty'); return; }
     log('got', _apiShows.length, 'shows from API, rebuilding');
     _carouselInited = false;
     injectCarousel();
