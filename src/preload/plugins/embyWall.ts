@@ -708,23 +708,25 @@ function injectCarousel(): void {
 
     // 右: 文字面板 — [v344] 浅蓝玻璃(替代v343深色) + 字放大占满文字区~80%
     const rightPanel = document.createElement('div');
-    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:30px 54px 30px 30px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
+    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:34px 50px 34px 34px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
 
-    // 信息卡: 占满面板高度, 简介限制在标签/标题/按钮之间(不溢出); 字体整体放大
+    // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
-    info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
+    info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
-      <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
-      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center">
-        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
-        <img class="fnos-logo" alt="" style="display:none;max-width:82%;max-height:72px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 2px 10px rgba(0,0,0,.3))">
+      <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
+      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
+        <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
+        <img class="fnos-logo" alt="" style="display:none;max-width:80%;max-height:86px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 3px 12px rgba(0,0,0,.32))">
       </div>
-      <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
-      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
-      <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;align-self:flex-start;padding:15px 32px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:17px;font-weight:600;text-decoration:none;letter-spacing:1.2px;box-shadow:0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease;flex-shrink:0">
-        <svg width="20" height="20" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#fff"/></svg>
-        开始观看
-      </a>`;
+      <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
+      <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
+      <div class="fnos-action" style="flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:14px;padding-top:6px">
+        <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;padding:15px 34px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:16.5px;font-weight:600;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 22px rgba(80,60,140,.22),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease">
+          <svg width="19" height="19" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          开始观看
+        </a>
+      </div>`;
     rightPanel.appendChild(info);
     slide.appendChild(rightPanel);
 
