@@ -133,15 +133,35 @@ const ACRYLIC_CSS = `
     [class*="menu-bar"]{
         border-bottom:none!important;
         box-shadow:none!important;
+        filter:none!important;
     }
-    /* 顶栏可能用 ::after 伪元素画分隔线, 一并清掉 */
+    /* 顶栏可能用 ::after / ::before 伪元素画分隔线或投影, 一并清掉 */
     header::after,
+    header::before,
     [class*="header"]::after,
+    [class*="header"]::before,
     [class*="navbar"]::after,
+    [class*="navbar"]::before,
     [class*="nav-bar"]::after,
+    [class*="nav-bar"]::before,
     [class*="topbar"]::after,
-    [class*="top-bar"]::after{
+    [class*="topbar"]::before,
+    [class*="top-bar"]::after,
+    [class*="top-bar"]::before{
         display:none!important;
+    }
+    /* 顶栏内部子元素若单独带阴影/投影(如内容层), 也一并清除 */
+    header *,
+    nav *,
+    [class*="header"] *,
+    [class*="navbar"] *,
+    [class*="nav-bar"] *,
+    [class*="topbar"] *,
+    [class*="top-bar"] *,
+    [class*="appbar"] *,
+    [class*="app-bar"] *{
+        box-shadow:none!important;
+        filter:none!important;
     }
 
     /* ── ③ 核弹级白底清除: 覆盖一切可能的白色背景来源 ── */
