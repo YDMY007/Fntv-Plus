@@ -26,9 +26,6 @@ if (app.isPackaged) {
 } else {
     app.setPath('userData', DEV_USER_DATA);
 }
-// [lc-419 诊断] 模块加载时立即确认 setPath 是否生效
-try { (require('../logger') as any).info('[config-diag] module-init isPackaged=' + app.isPackaged + ' DEV_USER_DATA=' + DEV_USER_DATA + ' PROD_USER_DATA=' + PROD_USER_DATA + ' effectiveUserData=' + app.getPath('userData')); } catch(_) {}
-
 /**
  * 【lc-418】迁移彻底作废，原地置为无操作。
  *
@@ -195,8 +192,6 @@ export interface SetDownloadProxyConfigParams {
 
 export function getConfigPath(): string {
     const dir = app.getPath('userData');
-    // [lc-419 诊断] 每次调用记录实际 userData 路径，排查"开发版配置清零"
-    try { require('../logger').info('[config-diag] getConfigPath userData=' + dir + ' isPackaged=' + app.isPackaged); } catch(_) {}
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -222,8 +217,6 @@ function decrypt(encrypted: string): string {
 // 读取配置
 export function readConfig(): Config | null {
     const p = getConfigPath();
-    // [lc-419 诊断] 记录实际读取路径和文件状态，排查"开发版配置清零"
-    try { require('../logger').info('[config-diag] readConfig path=' + p + ' exists=' + fs.existsSync(p) + (fs.existsSync(p) ? ' size=' + fs.statSync(p).size : '')); } catch(_) {}
     if (fs.existsSync(p)) {
         try {
             return JSON.parse(fs.readFileSync(p, 'utf-8')) as Config;

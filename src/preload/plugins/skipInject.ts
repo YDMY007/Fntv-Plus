@@ -25,7 +25,7 @@ const log = logger;
  * 注：主进程 webRequest 拦截挂在特定 partition 的 session 上，覆盖不到飞牛页面，故改在页面侧抓。
  */
 const CAPTURE_API_RE = /(^|\/)(upload|saveEditDetail|getEditDetail|editDetail)(\?|$)/i;
-function captureFnosApi(url: string, method: string, body: any): void {
+function captureFnosApi(url: string, method: string, body: any, headers?: any): void {
     try {
         if (!CAPTURE_API_RE.test(url)) return;
         let bodyStr = '';
@@ -45,7 +45,13 @@ function captureFnosApi(url: string, method: string, body: any): void {
                 try { bodyStr = JSON.stringify(body); } catch { bodyStr = String(body); }
             }
         }
-        log.info(`[API捕获-页面] ${method} ${url} | body=${bodyStr.slice(0, 6000)}`);
+        // 记录 Authx 请求头（尤其飞牛原生手动上传时的真实签名，用于校准自动回填的上传签名）
+        let authxStr = '';
+        if (headers) {
+            const a = (typeof headers.get === 'function') ? headers.get('Authx') : (headers['Authx'] || headers['authx']);
+            if (a) authxStr = ' | Authx=' + String(a).slice(0, 120);
+        }
+        log.info(`[API捕获-页面] ${method} ${url} | body=${bodyStr.slice(0, 6000)}${authxStr}`);
     } catch (e) {
         log.error('[API捕获-页面] 处理异常', String(e));
     }
@@ -214,7 +220,7 @@ function setupInterceptors(): void {
         }
         // [lc-421] 捕获飞牛元数据保存接口（含响应体）
         if (CAPTURE_API_RE.test(url)) {
-            captureFnosApi(url, method, init?.body);
+            captureFnosApi(url, method, init?.body, init?.headers);
             const resp = await origFetch.call(this, input, init);
             try {
                 const ct = resp.headers?.get?.('content-type') || '';

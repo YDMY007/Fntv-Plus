@@ -726,9 +726,9 @@ function injectCarousel(): void {
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:16px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
     info.innerHTML = `
       <div style="display:inline-flex;align-items:center;gap:4px;padding:6px 13px;background:rgba(150,120,200,.15);border:1px solid rgba(170,150,220,.28);border-radius:20px;color:#c4b6e3;font-size:12px;font-weight:600;letter-spacing:.8px;align-self:flex-start;flex-shrink:0">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
-      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center">
-        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
-        <img class="fnos-logo" alt="" style="display:none;max-width:82%;max-height:72px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 2px 10px rgba(0,0,0,.3))">
+      <div class="fnos-title-wrap" style="position:relative;display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:center;min-height:clamp(96px,13vh,140px)">
+        <div class="fnos-title" style="font-size:clamp(30px,3.5vh,42px);font-weight:800;color:var(--fnos-hero-title);line-height:1.25;word-break:break-word;text-shadow:var(--fnos-hero-shadow);transition:opacity .35s ease">${show.title}</div>
+        <img class="fnos-logo" alt="" style="position:absolute;left:0;top:0;bottom:0;margin:auto 0;max-width:92%;max-height:clamp(72px,10vh,120px);width:auto;height:auto;object-fit:contain;object-position:left center;opacity:0;transform:scale(.96);transition:opacity .45s ease,transform .45s ease;filter:drop-shadow(0 6px 18px rgba(0,0,0,.28));pointer-events:none">
       </div>
       <div style="width:100%;height:2px;background:var(--fnos-hero-divider);margin:6px 0 10px;flex-shrink:0;border-radius:1px"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:4;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.72;color:var(--fnos-hero-desc);letter-spacing:.35px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 75%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
@@ -978,10 +978,93 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
   });
 }
 
-/* [lc-421] 详情页 Logo 回填飞牛元数据：取到 TMDB 透明 logo(zh→ja→en) 后，写回飞牛 item 的 logos 字段，实现本地持久化。
+/* [lc-425] 详情页 Logo 回填飞牛元数据（真实写回）：取到 TMDB 透明 logo(zh→ja→en) 后，
+ * 经飞牛「临时图床上传 + 保存详情」两个接口写回 item 的 logos 字段，实现本地持久化。
  * 安全策略：仅当该 item 当前「无 logo」时才回填，绝不覆盖飞牛自带/用户已设的 logo；
- * 且首轮仅记录「拟写回」请求、不实际发送，待捕获到飞牛真实保存端点(用户手动保存一次)后放开真实写回，避免用猜测请求体污染元数据。 */
+ * 写回采用「读 getEditDetail 全量 → 仅改 logos+logos_locked → 原样回写 saveEditDetail」，
+ * 避免字段缺失被飞牛清空其他元数据。
+ * 签名：fnOS 的 POST 必须按 {request.go/request.ts} 约定——把 nonce 写进 JSON body，且 Authx
+ *   用「含 nonce 的 body」签名后再发同一个含 nonce 的 body（服务端按原始 body 字节验签，否则
+ *   invalid sign）。端点形状 + 字段取自用户在运行 app 中实测抓包（2026-08-11）。 */
 const _backfilledGuids = new Set<string>();
+
+/** 生成 fnOS 防重放随机数（与 GenerateRandomDigits(100000,1000000) 同区间） */
+function fnNonce(): string {
+  return String(Math.floor(Math.random() * 900000) + 100000);
+}
+
+/** base64 dataURL → Blob（用于把 TMDB logo 作为二进制图上传到飞牛临时图床） */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',');
+  const meta = dataUrl.slice(0, comma);
+  const b64 = dataUrl.slice(comma + 1);
+  const mime = /:(.*?);/.exec(meta)?.[1] || 'image/png';
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+/** 读取 item 当前完整可编辑元数据（POST 带 nonce，按 fnOS 约定签名） */
+async function fnosGetEditDetail(origin: string, guid: string): Promise<any | null> {
+  try {
+    const { ipcRenderer } = require('electron');
+    const body = { item_guid: guid, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/getEditDetail', body).catch(() => '');
+    const resp = await fetch(`${origin}/v/api/v1/item/getEditDetail`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) { log('[回填] getEditDetail HTTP', resp.status, guid); return null; }
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0) { log('[回填] getEditDetail 业务失败', JSON.stringify(j).substring(0, 200)); return null; }
+    return j.data || null;
+  } catch (e) { log('[回填] getEditDetail 异常', String(e).substring(0, 120)); return null; }
+}
+
+/** 上传 logo 到飞牛临时图床，返回 hash_path（如 /f5/04/upload_logo_xxx.webp）或 null。
+ *  签名 data 取非文件表单字段 {image_type, nonce}（与 fnOS 前端 multipart 约定一致）。 */
+async function uploadLogoToFnos(origin: string, dataUrl: string): Promise<string | null> {
+  try {
+    const { ipcRenderer } = require('electron');
+    const blob = dataUrlToBlob(dataUrl);
+    const fd = new FormData();
+    fd.append('file', blob, 'logo.png');
+    fd.append('image_type', 'logo');
+    const signData = { image_type: 'logo', nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/image/temp/upload', signData).catch(() => '');
+    const resp = await fetch(`${origin}/v/api/v1/image/temp/upload`, {
+      method: 'POST', credentials: 'include',
+      headers: { ...(authx ? { Authx: authx } : {}) }, body: fd,
+    });
+    if (!resp.ok) { log('[回填] upload HTTP', resp.status); return null; }
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0 || !j.data?.hash_path) {
+      log('[回填] upload 业务失败', JSON.stringify(j).substring(0, 200)); return null;
+    }
+    return j.data.hash_path as string;
+  } catch (e) { log('[回填] upload 异常', String(e).substring(0, 120)); return null; }
+}
+
+/** 把完整详情对象回写飞牛（仅改 logos + logos_locked，带 nonce 签名），成功返回 true */
+async function saveEditDetail(origin: string, data: any, logoHashPath: string): Promise<boolean> {
+  try {
+    const { ipcRenderer } = require('electron');
+    const body = { ...data, logos: logoHashPath, logos_locked: true, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/saveEditDetail', body).catch(() => '');
+    const resp = await fetch(`${origin}/v/api/v1/item/saveEditDetail`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) { log('[回填] saveEditDetail HTTP', resp.status); return false; }
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0) { log('[回填] saveEditDetail 业务失败', JSON.stringify(j).substring(0, 200)); return false; }
+    return true;
+  } catch (e) { log('[回填] saveEditDetail 异常', String(e).substring(0, 120)); return false; }
+}
+
 function backfillDetailLogo(): void {
   if (!_carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
   if (!isDetailPage()) return;
@@ -991,26 +1074,26 @@ function backfillDetailLogo(): void {
   const mediaType = m[1] === 'tv' ? 'tv' : 'movie';
   if (_backfilledGuids.has(guid)) return;
   _backfilledGuids.add(guid);
-  const base = location.origin;
+  const origin = location.origin;
   setTimeout(async () => {
     try {
       const { ipcRenderer } = require('electron');
-      // 1) 读取 item 当前元数据
-      const path = `/v/api/v1/item/${guid}`;
-      const authxGet = await ipcRenderer.invoke('fnos-gen-authx', path);
-      const resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authxGet } });
-      if (!resp.ok) { log('[回填] item GET 失败', resp.status, guid); return; }
-      const json = await resp.json();
-      const data = json?.data || {};
-      // 2) 已有 logo → 不覆盖(飞牛自带/用户已设)
-      const existing = data.logos;
-      if (Array.isArray(existing) && existing.length) { log('[回填] 已有 logo, 跳过', guid, JSON.stringify(existing).substring(0, 80)); return; }
-      // 3) 取 tmdbId
+      // 1) 读取 item 当前完整可编辑元数据（与保存接口同构，避免字段缺失被清空）
+      const data = await fnosGetEditDetail(origin, guid);
+      if (!data) return;
+      // 2) 已有 logo → 绝不覆盖（飞牛自带/用户已设）
+      if (data.logos && String(data.logos).trim()) {
+        log('[回填] 已有 logo, 跳过', guid, String(data.logos).substring(0, 80)); return;
+      }
+      // 3) 取 TMDB id（优先 trim_id；Bangumi 源 bg 前缀无 TMDB id，则用标题搜索兜底）
       const tmdbId = extractTmdbId(data);
-      if (!tmdbId) { log('[回填] 无 tmdbId, 跳过', guid); return; }
-      // 4) 取 TMDB 透明 logo(zh→ja→en)
-      const r = await ipcRenderer.invoke('tmdb:logo', { id: tmdbId, mediaType });
-      if (!r || !r.ok) { log('[回填] TMDB 无 logo', tmdbId); return; }
+      const title = (data.title || '').trim();
+      if (!tmdbId && !title) { log('[回填] 无 tmdbId 且无标题, 跳过', guid); return; }
+      const logoArg: any = { mediaType };
+      if (tmdbId) logoArg.id = tmdbId; else logoArg.title = title;
+      const r = await ipcRenderer.invoke('tmdb:logo', logoArg);
+      if (!r || !r.ok) { log('[回填] TMDB 无 logo', tmdbId || title); return; }
+      // 4) 逐个候选：下载 → 排除纯白 → 上传 → 保存，首个成功即止
       const paths = (r.logoPaths && r.logoPaths.length) ? r.logoPaths : (r.logoPath ? [r.logoPath] : []);
       for (const p of paths) {
         try {
@@ -1018,9 +1101,14 @@ function backfillDetailLogo(): void {
           const img = await ipcRenderer.invoke('tmdb:image', url);
           if (!img || !img.ok || !img.dataUrl) continue;
           if (await isPureWhitePng(img.dataUrl)) { log('[回填] 纯白跳过', p); continue; }
-          // 5) 记录「拟写回」请求(首轮不实际发送, 待捕获飞牛真实保存端点后再放开)
-          log('[回填] 拟写回 logo → guid=' + guid + ' tmdbPath=' + p + ' tmdbUrl=' + url);
-          return;
+          const hashPath = await uploadLogoToFnos(origin, img.dataUrl);
+          if (!hashPath) { log('[回填] 上传失败', p); continue; }
+          const saved = await saveEditDetail(origin, data, hashPath);
+          if (saved) {
+            log('[回填] ✅ 已写回 logo → guid=' + guid + ' path=' + hashPath);
+            return;
+          }
+          log('[回填] 保存失败', p);
         } catch (e) { log('[回填] 候选失败', p, String(e).substring(0, 80)); }
       }
       log('[回填] 无可用 logo', guid);
@@ -1034,8 +1122,10 @@ function swapTitleToLogo(info: HTMLElement, src: string): void {
   const logoEl = info.querySelector('.fnos-logo') as HTMLImageElement | null;
   if (!titleEl || !logoEl) return;
   logoEl.src = src;
-  logoEl.style.display = 'block';
-  titleEl.style.display = 'none';
+  // [lc-426] 平滑交叉淡入：标题淡出 + logo 淡入(配合 CSS transition, 避免生硬闪烁与布局跳动)
+  titleEl.style.opacity = '0';
+  logoEl.style.opacity = '1';
+  logoEl.style.transform = 'scale(1)';
 }
 
 /** [lc-413] 判断 base64/blob PNG 是否为「纯白 logo」：可见(非透明)像素几乎全部接近纯白 → 视为纯白，
@@ -1078,8 +1168,8 @@ function applyCarouselLogoNow(): void {
     _carouselInfos.forEach((info) => {
       const t = info.querySelector('.fnos-title') as HTMLElement | null;
       const l = info.querySelector('.fnos-logo') as HTMLImageElement | null;
-      if (t) t.style.display = '';
-      if (l) { l.style.display = 'none'; l.src = ''; }
+      if (t) t.style.opacity = '';
+      if (l) { l.style.opacity = '0'; l.style.transform = 'scale(.96)'; l.src = ''; }
     });
   }
 }
