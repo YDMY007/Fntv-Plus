@@ -686,7 +686,7 @@ function injectCarousel(): void {
   // 右侧独立竖向海报条容器（与轮播容器并列）
   const posterStrip = document.createElement('div');
   posterStrip.className = 'fnos-poster-strip';
-  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 8px;background:rgba(255,255,255,.12);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);border-radius:24px;border:none';
+  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:block;padding:0 8px;background:rgba(255,255,255,.12);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);border-radius:24px;border:none';
   wrapper.appendChild(posterStrip);
   _carouselPosterStrip = posterStrip;
 
@@ -798,7 +798,7 @@ function injectCarousel(): void {
     _carouselPosterStrip.innerHTML = '';
     const pInner = document.createElement('div');
     pInner.className = 'fnos-ps-inner';
-    pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;padding:14px 0;position:relative;transition:transform .4s ease';
+    pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;padding:20px 0;position:relative;transition:transform .4s ease';
     // 每个海报项：竖向封面 + 标题截断
     shows.forEach((show, pi) => {
       const item = document.createElement('div');
