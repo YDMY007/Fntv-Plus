@@ -962,6 +962,56 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
   });
 }
 
+/* [lc-421] 详情页 Logo 回填飞牛元数据：取到 TMDB 透明 logo(zh→ja→en) 后，写回飞牛 item 的 logos 字段，实现本地持久化。
+ * 安全策略：仅当该 item 当前「无 logo」时才回填，绝不覆盖飞牛自带/用户已设的 logo；
+ * 且首轮仅记录「拟写回」请求、不实际发送，待捕获到飞牛真实保存端点(用户手动保存一次)后放开真实写回，避免用猜测请求体污染元数据。 */
+const _backfilledGuids = new Set<string>();
+function backfillDetailLogo(): void {
+  if (!_carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
+  if (!isDetailPage()) return;
+  const m = location.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+  if (!m) return;
+  const guid = m[2];
+  const mediaType = m[1] === 'tv' ? 'tv' : 'movie';
+  if (_backfilledGuids.has(guid)) return;
+  _backfilledGuids.add(guid);
+  const base = location.origin;
+  setTimeout(async () => {
+    try {
+      const { ipcRenderer } = require('electron');
+      // 1) 读取 item 当前元数据
+      const path = `/v/api/v1/item/${guid}`;
+      const authxGet = await ipcRenderer.invoke('fnos-gen-authx', path);
+      const resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authxGet } });
+      if (!resp.ok) { log('[回填] item GET 失败', resp.status, guid); return; }
+      const json = await resp.json();
+      const data = json?.data || {};
+      // 2) 已有 logo → 不覆盖(飞牛自带/用户已设)
+      const existing = data.logos;
+      if (Array.isArray(existing) && existing.length) { log('[回填] 已有 logo, 跳过', guid, JSON.stringify(existing).substring(0, 80)); return; }
+      // 3) 取 tmdbId
+      const tmdbId = extractTmdbId(data);
+      if (!tmdbId) { log('[回填] 无 tmdbId, 跳过', guid); return; }
+      // 4) 取 TMDB 透明 logo(zh→ja→en)
+      const r = await ipcRenderer.invoke('tmdb:logo', { id: tmdbId, mediaType });
+      if (!r || !r.ok) { log('[回填] TMDB 无 logo', tmdbId); return; }
+      const paths = (r.logoPaths && r.logoPaths.length) ? r.logoPaths : (r.logoPath ? [r.logoPath] : []);
+      for (const p of paths) {
+        try {
+          const url = 'https://image.tmdb.org/t/p/w500' + p;
+          const img = await ipcRenderer.invoke('tmdb:image', url);
+          if (!img || !img.ok || !img.dataUrl) continue;
+          if (await isPureWhitePng(img.dataUrl)) { log('[回填] 纯白跳过', p); continue; }
+          // 5) 记录「拟写回」请求(首轮不实际发送, 待捕获飞牛真实保存端点后再放开)
+          log('[回填] 拟写回 logo → guid=' + guid + ' tmdbPath=' + p + ' tmdbUrl=' + url);
+          return;
+        } catch (e) { log('[回填] 候选失败', p, String(e).substring(0, 80)); }
+      }
+      log('[回填] 无可用 logo', guid);
+    } catch (e) { log('[回填] err', String(e).substring(0, 120)); }
+  }, 800);
+}
+
 /** 把右侧文字标题隐藏、显示 logo 图片（取 logo 成功后的统一替换） */
 function swapTitleToLogo(info: HTMLElement, src: string): void {
   const titleEl = info.querySelector('.fnos-title') as HTMLElement | null;
@@ -5134,8 +5184,9 @@ function handle(): void {
   // 详情页液态玻璃: 检测URL→分发到TV详情/Season详情
   if (isDetailPage()) {
     applyDetailLiquidGlass();
+    backfillDetailLogo();
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(applyDetailLiquidGlass, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { applyDetailLiquidGlass(); backfillDetailLogo(); }, ms));
     // 导航切换时重新检测
     const _origPush = (history as any).pushState;
     const _origReplace = (history as any).replaceState;
@@ -5146,7 +5197,7 @@ function handle(): void {
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) applyDetailLiquidGlass();
+      if (isDetailPage()) { applyDetailLiquidGlass(); backfillDetailLogo(); }
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
