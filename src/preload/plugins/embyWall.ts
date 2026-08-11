@@ -663,26 +663,26 @@ function injectCarousel(): void {
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18);display:flex';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18)';
   wrapper.appendChild(container);
   _carouselContainer = container;
 
-  // [lc-439] 左侧轮播主区域（slides + dots），右侧竖向海报条
-  const slideArea = document.createElement('div');
-  slideArea.style.cssText = 'flex:1 1 0;min-width:0;position:relative;overflow:hidden;height:100%';
-  container.appendChild(slideArea);
+  // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
+  wrapper.style.display = 'flex';
+  wrapper.style.alignItems = 'flex-start';
+  wrapper.style.gap = '12px';
 
   // Slide track (纵向: 上→下切换)
   const track = document.createElement('div');
   track.style.cssText = 'display:flex;flex-direction:column;position:absolute;top:0;left:0;width:100%;height:100%;transition:transform .8s ease-in-out';
   track.style.transform = 'translateX(0)';
-  slideArea.appendChild(track);
+  container.appendChild(track);
 
-  // 右侧竖向海报条（宽度对齐飞牛列表页竖向海报，滚动展示全部10个剧）
+  // 右侧独立竖向海报条容器（与轮播容器并列）
   const posterStrip = document.createElement('div');
   posterStrip.className = 'fnos-poster-strip';
-  posterStrip.style.cssText = 'width:160px;flex-shrink:0;height:100%;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 10px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-left:1px solid rgba(255,255,255,.5);border-radius:0 24px 24px 0';
-  container.appendChild(posterStrip);
+  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 8px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:24px;border:1px solid rgba(200,180,220,.25)';
+  wrapper.appendChild(posterStrip);
   _carouselPosterStrip = posterStrip;
 
   // 轮播点已移除(lc-441, 用户不需要)
@@ -699,9 +699,9 @@ function injectCarousel(): void {
     slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
     slide.className = 'fnos-slide';
 
-    // 左: 图片面板(占 ~56%, 为右侧海报条让出空间)
+    // 左: 图片面板(占 ~64%, 撑满无白边)
     const leftEl = document.createElement('div');
-    leftEl.style.cssText = 'position:relative;width:56%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
+    leftEl.style.cssText = 'position:relative;width:64%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
     const imgEl = document.createElement('img');
     // [v337] 改 cover 撑满左面板(上下无白边); 仅裁左右一点点, 左对齐保持(替代 v336 的 contain+22px白边)
     imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center';
@@ -723,7 +723,7 @@ function injectCarousel(): void {
 
     // 右: 文字面板 — [lc-439] 收窄为30%, 为右侧海报条让空间
     const rightPanel = document.createElement('div');
-    rightPanel.style.cssText = 'position:relative;width:30%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:28px 36px 28px 28px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
+    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:34px 50px 34px 34px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
 
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
@@ -867,6 +867,9 @@ function injectCarousel(): void {
   let timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
   container.addEventListener('mouseenter', () => clearInterval(timer));
   container.addEventListener('mouseleave', () => { timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000); });
+  // [lc-442] 海报条独立容器，悬停也暂停主轮播
+  posterStrip.addEventListener('mouseenter', () => clearInterval(timer));
+  posterStrip.addEventListener('mouseleave', () => { timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000); });
 
   let startY = 0, dragging = false;
   container.addEventListener('mousedown', (e) => { startY = e.clientY; dragging = true; });
