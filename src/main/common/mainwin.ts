@@ -115,6 +115,35 @@ const ACRYLIC_CSS = `
         -webkit-clip-path:inset(0 round 0 0 16px 16px)!important;
     }
 
+    /* ── ②c 飞牛顶部固定导航栏底部分隔线(黑线)移除 ──
+       fnOS 全局固定顶栏(含影视logo)自带 border-bottom / box-shadow 分隔线,
+       透明窗口下显示为一条黑线, 这里移除之(不动布局/高度) */
+    header,
+    nav,
+    [role="banner"],
+    [class*="header"],
+    [class*="Header"],
+    [class*="navbar"],
+    [class*="nav-bar"],
+    [class*="topbar"],
+    [class*="top-bar"],
+    [class*="appbar"],
+    [class*="app-bar"],
+    [class*="menubar"],
+    [class*="menu-bar"]{
+        border-bottom:none!important;
+        box-shadow:none!important;
+    }
+    /* 顶栏可能用 ::after 伪元素画分隔线, 一并清掉 */
+    header::after,
+    [class*="header"]::after,
+    [class*="navbar"]::after,
+    [class*="nav-bar"]::after,
+    [class*="topbar"]::after,
+    [class*="top-bar"]::after{
+        display:none!important;
+    }
+
     /* ── ③ 核弹级白底清除: 覆盖一切可能的白色背景来源 ── */
 
     /* 3a. 常见 class 模式 */
