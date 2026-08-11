@@ -286,13 +286,15 @@ function weekdayCnOf(it: any): string {
  *  走主进程代理可复用并发限制(5)+超时(8s)兜底，且绕过渲染进程 DNS 污染。 */
 function renderBgCard(it: any): string {
   const img = bestImage(it.images);
-  const title = it.name_cn || it.name || '未知';
+  const titleCn = it.name_cn || '';
+  const titleOrig = it.name || '';
+  const title = titleCn || titleOrig || '未知';
   const sub = [weekdayCnOf(it) ? `每周${weekdayCnOf(it)}更新` : '', it.eps ? `${it.eps} 话` : '']
     .filter(Boolean).join(' · ') || '正在放送';
   const wd = weekdayCnOf(it) ? `<span class="fntv-hot-wd">${weekdayCnOf(it)}</span>` : '';
   const rt = typeof it.rating === 'number' && it.rating ? `<span class="fntv-hot-rt">★ ${it.rating.toFixed(1)}</span>` : '';
   return `
-  <div class="fntv-hot-card" data-id="bg|${it.id}" data-url="${it.url}">
+  <div class="fntv-hot-card" data-id="bg|${it.id}" data-url="${it.url}" data-title-cn="${escapeHtml(titleCn)}" data-title="${escapeHtml(titleOrig)}">
     ${img ? `<img class="fntv-hot-poster" data-poster="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
            : `<div class="fntv-hot-poster"></div>`}
     <div class="fntv-hot-meta">
@@ -307,13 +309,15 @@ function renderBgCard(it: any): string {
 /** TMDB 卡片（电影 / 剧集通用） */
 function renderTmdbCard(it: any): string {
   const img = bestImage(it.images);
-  const title = it.name_cn || it.name || '未知';
+  const titleCn = it.name_cn || '';
+  const titleOrig = it.name || '';
+  const title = titleCn || titleOrig || '未知';
   const tp = it.mediaType === 'movie' ? '电影' : '剧集';
   const yr = it.year ? `<span class="fntv-hot-yr">${escapeHtml(it.year)}</span>` : '';
   const rt = typeof it.rating === 'number' && it.rating ? `<span class="fntv-hot-rt">★ ${it.rating.toFixed(1)}</span>` : '';
   // 海报走主进程图片代理（tmdb:image），规避渲染进程 DNS 污染；data-poster 由 hydratePosters 填充
   return `
-  <div class="fntv-hot-card" data-id="tm|${it.id}" data-url="${it.url}">
+  <div class="fntv-hot-card" data-id="tm|${it.id}" data-url="${it.url}" data-title-cn="${escapeHtml(titleCn)}" data-title="${escapeHtml(titleOrig)}">
     ${img ? `<img class="fntv-hot-poster" data-poster="${img}" referrerpolicy="no-referrer" loading="lazy" alt="">`
            : `<div class="fntv-hot-poster"></div>`}
     <div class="fntv-hot-meta">
@@ -414,6 +418,110 @@ function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
   ));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [lc-457] 每日放送 → 飞牛影视库联动
+//   点击卡片：库内已有该剧 → 直接站内跳详情页(/v/tv|movie/{hash})；
+//            库内没有   → 退回打开 Bangumi / TMDB 外部链接。
+//   实现：后台隐藏 iframe 抓 /v/list/all 全量条目(标题+详情页 hash)，去重缓存；
+//        点击时用番剧名(中/原)与库索引做匹配。库索引只在首次懒加载一次。
+// ═══════════════════════════════════════════════════════════════════════════
+interface LibItem { title: string; href: string; mediaType: string; }
+let _libIndex: LibItem[] | null = null;
+let _libLoading = false;
+let _libWaiters: ((v: LibItem[]) => void)[] = [];
+
+/** 懒加载飞牛影视库索引（/v/list/all 全量去重条目）；并发调用只真正抓一次 */
+function ensureLibraryIndex(): Promise<LibItem[]> {
+  if (_libIndex) return Promise.resolve(_libIndex);
+  if (_libLoading) {
+    return new Promise((resolve) => {
+      const t = setInterval(() => { if (_libIndex) { clearInterval(t); resolve(_libIndex); } }, 200);
+      setTimeout(() => { clearInterval(t); resolve(_libIndex || []); }, 4000);
+    });
+  }
+  _libLoading = true;
+  return new Promise((resolve) => {
+    const base = location.origin; // 当前即飞牛影视页，iframe 同源可读
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;z-index:-1;opacity:0;border:none;pointer-events:none';
+    iframe.src = base + '/v/list/all';
+    const map = new Map<string, LibItem>();
+    let attempts = 0;
+    const finish = (): void => {
+      try { iframe.remove(); } catch { /* ignore */ }
+      const idx: LibItem[] = Array.from(map.values());
+      _libIndex = idx;
+      _libLoading = false;
+      _libWaiters.forEach((r) => r(idx)); _libWaiters = [];
+      logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项');
+      resolve(idx);
+    };
+    const poll = (): void => {
+      attempts++;
+      try {
+        const doc: any = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!doc) { if (attempts < 30) setTimeout(poll, 400); else finish(); return; }
+        const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
+        if (links.length < 5 && attempts < 30) { setTimeout(poll, 400); return; }
+        // 多次轮询收集（飞牛可能分批渲染/虚拟滚动），最多再收集若干轮
+        links.forEach((a: any) => {
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+          if (!m || map.has(m[2])) return;
+          let el: any = a, title = '';
+          for (let d = 0; d < 5 && !title; d++) {
+            const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
+            if (t.length > 4) title = t;
+            el = el.parentElement;
+          }
+          if (!title) title = (a.getAttribute('title') || '').trim();
+          if (!title) return;
+          map.set(m[2], { title, href: base + '/v/' + m[1] + '/' + m[2], mediaType: m[1] });
+        });
+        if (attempts < 14) setTimeout(poll, 500); else finish();
+      } catch (e) { if (attempts < 30) setTimeout(poll, 400); else finish(); }
+    };
+    iframe.onload = () => setTimeout(poll, 500);
+    iframe.onerror = () => {
+      try { iframe.remove(); } catch { /* ignore */ }
+      _libIndex = []; _libLoading = false; _libWaiters.forEach((r) => r([])); _libWaiters = [];
+      resolve([]);
+    };
+    document.body.appendChild(iframe);
+  });
+}
+
+/** 标题归一化：去空白、去常见分隔符，便于中文/原名模糊匹配 */
+function normalizeTitle(s: string): string {
+  return (s || '').toLowerCase().replace(/\s+/g, '').replace(/[：:·・\-—~～]/g, '');
+}
+
+/** 用番剧名(中/原)在库索引中匹配；精确优先，其次双向包含；无则返回 null */
+function matchLibrary(titleCn: string, titleOrig: string): string | null {
+  if (!_libIndex || !_libIndex.length) return null;
+  const cands = [titleCn, titleOrig].map(normalizeTitle).filter((x) => x && x.length >= 2);
+  if (!cands.length) return null;
+  for (const c of cands) for (const it of _libIndex) if (normalizeTitle(it.title) === c) return it.href;
+  for (const c of cands) for (const it of _libIndex) {
+    const t = normalizeTitle(it.title);
+    if (t.includes(c) || c.includes(t)) return it.href;
+  }
+  return null;
+}
+
+/** 站内跳飞牛影视详情页：复用 embyWall「开始观看」的 SPA 跳法(pushState+popstate, 兜底整页导航) */
+function navigateToDetail(href: string): void {
+  try {
+    history.pushState({}, '', href);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    // [兜底] 若飞牛未响应 popstate(详情页未渲染)，600ms 后退化整页导航
+    setTimeout(() => {
+      const ready = !!document.querySelector('button[aria-label="返回"]');
+      if (!ready) location.href = href;
+    }, 600);
+  } catch (e) { try { location.href = href; } catch { /* ignore */ } }
 }
 
 /** 把时间戳格式化为底部小字：当天显示 HH:MM，跨天显示 M/D HH:MM（缓存可能是昨天的快照） */
@@ -577,7 +685,16 @@ function buildPanel(): void {
     const card = target.closest('.fntv-hot-card') as HTMLElement | null;
     if (!card) return;
     const url = card.getAttribute('data-url');
-    if (url) ipcRenderer.invoke('app:open-external', url).catch(() => {});
+    const titleCn = card.getAttribute('data-title-cn') || '';
+    const titleOrig = card.getAttribute('data-title') || '';
+    // [lc-457] 联动：库内有该剧 → 站内跳详情页；否则 → 打开外部链接(Bangumi/TMDB)
+    const hit = matchLibrary(titleCn, titleOrig);
+    if (hit) {
+      logger.info('[hotUpdates] 库内命中，跳详情页', hit);
+      navigateToDetail(hit);
+    } else if (url) {
+      ipcRenderer.invoke('app:open-external', url).catch(() => {});
+    }
   });
 
   // 恢复屏蔽项
@@ -593,6 +710,8 @@ function buildPanel(): void {
       loadedBg = true;
       loadBg();
     }
+    // [lc-457] 展开浮层时后台预建飞牛影视库索引，供卡片点击联动（懒加载，仅一次）
+    if (open) ensureLibraryIndex().catch(() => {});
   };
   tab.addEventListener('click', toggle);
   (panel.querySelector('#fntv-hot-close') as HTMLElement).addEventListener('click', () => {
