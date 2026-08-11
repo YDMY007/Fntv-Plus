@@ -598,10 +598,6 @@ function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
 
-  // [lc-424 对照开关] localStorage.fntv_no_carousel=1 时完全跳过轮播注入(不隐藏/不替换媒体库 section),
-  // 用于排查「番剧等分区白屏」是否由本注入破坏飞牛 React 树引起。
-  if (localStorage.getItem('fntv_no_carousel') === '1') { log('carousel skipped by fntv_no_carousel flag'); return; }
-
   // [lc-182] 路径守卫: 轮播仅注入首页(/v 或 /v/)。
   const p = location.pathname;
   if (p !== '/v' && p !== '/v/') {
@@ -660,16 +656,9 @@ function injectCarousel(): void {
     wrapper = _carouselWrapper;
     wrapper.innerHTML = ''; // 清空旧container(我们自己的节点, 不影响飞牛DOM), 内部重建
   } else {
-    // [lc-424] 关键修复: 不再 target.innerHTML='' 清空飞牛管理的 section(会破坏飞牛 React 树,
-    //   导致番剧等分区级联白屏 + 飞牛 scrollLeft 崩溃)。改为隐藏原始 section 并在其前面插入
-    //   独立兄弟节点承载 hero 轮播, 飞牛 DOM 树保持完整、滚动容器 ref 不悬空。
-    if (!target.dataset.fntvHidden) {
-      target.style.setProperty('display', 'none', 'important');
-      target.dataset.fntvHidden = '1';
-    }
+    target.innerHTML = ''; // 首屏清空section原内容(媒体库标题+卡片)
     wrapper = document.createElement('div');
     wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
-    if (target.parentElement) target.parentElement.insertBefore(wrapper, target);
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
@@ -842,14 +831,9 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // [lc-424] 同 injectCarousel: 隐藏原始 section 而非清空, 保留飞牛 DOM 树完整(防止 ref 悬空/级联白屏)
-  if (!target.dataset.fntvHidden) {
-    target.style.setProperty('display', 'none', 'important');
-    target.dataset.fntvHidden = '1';
-  }
+  target.innerHTML = '';
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
-  if (target.parentElement) target.parentElement.insertBefore(wrapper, target);
   _carouselWrapper = wrapper;
 
   const container = document.createElement('div');
