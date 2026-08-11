@@ -917,7 +917,7 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
 }
 
 /* [lc-408] 把轮播右侧文字标题替换为透明 logo：
- * - API 真实条目（show.tmdbId 存在）：经主进程 tmdb:logo 取 logo 路径 → tmdb:image 代理转 base64
+ * - API 真实条目：优先用 show.tmdbId 查 logo；无 tmdbId 时退用 show.title 标题匹配查 TMDB → tmdb:image 代理转 base64
  * - 硬编码兜底条目（show.logo 本地 sys/img）：经 fetchImageAuth 取本地 logo
  * 获取成功才在左侧海报左下角显示 logo；右侧文字标题始终保留不隐藏；任一环节失败则保留文字标题（静默降级）。 */
 function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
@@ -926,12 +926,14 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
   shows.forEach((show, i) => {
     const info = infos[i];
     if (!info) return;
-    if (show.tmdbId) {
+    if (show.tmdbId || show.title) {
       // API 真实条目 → TMDB 透明 logo（主进程已按「横屏」筛选并返回候选列表；此处再排除纯白 PNG）
       setTimeout(async () => {
         try {
           const { ipcRenderer } = require('electron');
-          const r = await ipcRenderer.invoke('tmdb:logo', { id: show.tmdbId, mediaType: show.mediaType || 'tv' });
+          const logoArg: any = { mediaType: show.mediaType || 'tv' };
+          if (show.tmdbId) logoArg.id = show.tmdbId; else logoArg.title = show.title;
+          const r = await ipcRenderer.invoke('tmdb:logo', logoArg);
           if (!r || !r.ok) {
             log('tmdb logo none:', show.title, (r && r.error) || '无 logo');
             return;
