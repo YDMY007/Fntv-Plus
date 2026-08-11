@@ -689,6 +689,7 @@ function injectCarousel(): void {
   shows.forEach((show, i) => {
     const slide = document.createElement('div');
     slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
+    slide.className = 'fnos-slide';
 
     // 左: 图片面板(占 ~64%, 撑满无白边) — [v342] 比例 68→64, 让出空间给文字区
     const leftEl = document.createElement('div');
@@ -704,6 +705,12 @@ function injectCarousel(): void {
     const edgeFade = document.createElement('div');
     edgeFade.style.cssText = 'position:absolute;inset:0;background:var(--fnos-hero-edge)';
     leftEl.appendChild(edgeFade);
+    // [lc-436] logo 移到整个海报(左侧图片)左下角, 叠在背景图上, z-index 高于渐隐
+    const cornerLogo = document.createElement('img');
+    cornerLogo.className = 'fnos-logo';
+    cornerLogo.alt = '';
+    cornerLogo.style.cssText = 'position:absolute;left:28px;bottom:24px;max-width:36%;max-height:88px;width:auto;height:auto;object-fit:contain;object-position:left bottom;filter:drop-shadow(0 3px 14px rgba(0,0,0,.55));display:none;z-index:3';
+    leftEl.appendChild(cornerLogo);
     slide.appendChild(leftEl);
 
     // 右: 文字面板 — [v344] 浅蓝玻璃(替代v343深色) + 字放大占满文字区~80%
@@ -717,7 +724,6 @@ function injectCarousel(): void {
       <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
-        <img class="fnos-logo" alt="" style="display:none;max-width:92%;max-height:120px;width:auto;height:auto;object-fit:contain;object-position:left center;filter:drop-shadow(0 4px 16px rgba(0,0,0,.34))">
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
@@ -913,7 +919,7 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
 /* [lc-408] 把轮播右侧文字标题替换为透明 logo：
  * - API 真实条目（show.tmdbId 存在）：经主进程 tmdb:logo 取 logo 路径 → tmdb:image 代理转 base64
  * - 硬编码兜底条目（show.logo 本地 sys/img）：经 fetchImageAuth 取本地 logo
- * 获取成功才把 .fnos-title 隐藏、显示 .fnos-logo；任一环节失败则保留文字标题（静默降级）。 */
+ * 获取成功才在左侧海报左下角显示 logo；右侧文字标题始终保留不隐藏；任一环节失败则保留文字标题（静默降级）。 */
 function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
   // [lc-409] 开关关闭时完全跳过（既不拉取也不替换），保留文字标题
   if (!_carouselLogoEnabled) return;
@@ -1102,14 +1108,13 @@ function backfillDetailLogo(): void {
   }, 800);
 }
 
-/** 把右侧文字标题隐藏、显示 logo 图片（取 logo 成功后的统一替换） */
+/** [lc-436] 在左侧海报左下角显示 logo 图片；右侧文字标题保留不隐藏 */
 function swapTitleToLogo(info: HTMLElement, src: string): void {
-  const titleEl = info.querySelector('.fnos-title') as HTMLElement | null;
-  const logoEl = info.querySelector('.fnos-logo') as HTMLImageElement | null;
-  if (!titleEl || !logoEl) return;
+  const slide = info.closest('.fnos-slide') as HTMLElement | null;
+  const logoEl = slide?.querySelector('.fnos-logo') as HTMLImageElement | null;
+  if (!logoEl) return;
   logoEl.src = src;
   logoEl.style.display = 'block';
-  titleEl.style.display = 'none';
 }
 
 /** [lc-413] 判断 base64/blob PNG 是否为「纯白 logo」：可见(非透明)像素几乎全部接近纯白 → 视为纯白，
@@ -1150,9 +1155,8 @@ function applyCarouselLogoNow(): void {
     applyTitleLogo(_carouselBase, _carouselShows, _carouselInfos);
   } else {
     _carouselInfos.forEach((info) => {
-      const t = info.querySelector('.fnos-title') as HTMLElement | null;
-      const l = info.querySelector('.fnos-logo') as HTMLImageElement | null;
-      if (t) t.style.display = '';
+      const slide = info.closest('.fnos-slide') as HTMLElement | null;
+      const l = slide?.querySelector('.fnos-logo') as HTMLImageElement | null;
       if (l) { l.style.display = 'none'; l.src = ''; }
     });
   }
