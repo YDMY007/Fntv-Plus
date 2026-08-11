@@ -686,7 +686,7 @@ function injectCarousel(): void {
   // 右侧独立竖向海报条容器（与轮播容器并列）
   const posterStrip = document.createElement('div');
   posterStrip.className = 'fnos-poster-strip';
-  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 8px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:24px;border:1px solid rgba(200,180,220,.25)';
+  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 8px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:24px;border:1px solid rgba(200,180,220,.25)';
   wrapper.appendChild(posterStrip);
   _carouselPosterStrip = posterStrip;
 
@@ -798,7 +798,7 @@ function injectCarousel(): void {
     _carouselPosterStrip.innerHTML = '';
     const pInner = document.createElement('div');
     pInner.className = 'fnos-ps-inner';
-    pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%';
+    pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;padding:14px 0;position:relative;transition:transform .4s ease';
     // 每个海报项：竖向封面 + 标题截断
     shows.forEach((show, pi) => {
       const item = document.createElement('div');
@@ -827,31 +827,28 @@ function injectCarousel(): void {
     });
     _carouselPosterStrip.appendChild(pInner);
 
-    // 自动滚动：缓慢向上循环，到底后无缝回顶；悬停右侧海报条时暂停，方便选取
-    let psTop = 0;
-    let psPaused = false;
-    _carouselPosterStrip.addEventListener('mouseenter', () => { psPaused = true; });
-    _carouselPosterStrip.addEventListener('mouseleave', () => { psPaused = false; });
-    const psScroll = () => {
-      if (!_carouselPosterStrip || !pInner.parentElement) return;
-      if (!psPaused) {
-        psTop += 0.4;
-        const maxScroll = Math.max(0, pInner.scrollHeight - _carouselPosterStrip.clientHeight + 20);
-        if (psTop >= maxScroll) psTop = 0;
-        pInner.style.transform = `translateY(-${psTop}px)`;
-      }
-      requestAnimationFrame(psScroll);
-    };
-    const psTimer = setTimeout(() => requestAnimationFrame(psScroll), 1500);
+    // [lc-448] 右侧海报不自滚动：选中项自动居中并放大, 与左侧主轮播联动
+    function centerPoster(idx: number) {
+      const strip = _carouselPosterStrip;
+      if (!strip) return;
+      const target = pInner.children[idx] as HTMLElement | undefined;
+      if (!target) return;
+      const stripH = strip.clientHeight;
+      const desired = target.offsetTop + target.offsetHeight / 2 - stripH / 2;
+      const maxScroll = Math.max(0, pInner.scrollHeight - stripH);
+      const clamped = Math.min(Math.max(desired, 0), maxScroll);
+      pInner.style.transform = `translateY(-${clamped}px)`;
+    }
 
-    // 高亮当前slide对应的海报（goTo 里同步调用）
+    // 高亮当前slide对应的海报：选中项放大+不透明并居中, 其余缩小+半透明（goTo 里同步调用）
     (_carouselPosterStrip as any)._highlight = (idx: number) => {
       const items = pInner.children;
       for (let k = 0; k < items.length; k++) {
         const el = items[k] as HTMLElement;
-        if (k === idx) { el.style.opacity = '1'; el.style.transform = 'scale(1)'; }
-        else { el.style.opacity = '.65'; el.style.transform = 'scale(.92)'; }
+        if (k === idx) { el.style.opacity = '1'; el.style.transform = 'scale(1.12)'; el.style.zIndex = '2'; }
+        else { el.style.opacity = '.5'; el.style.transform = 'scale(.9)'; el.style.zIndex = '1'; }
       }
+      centerPoster(idx);
     };
   }
 
