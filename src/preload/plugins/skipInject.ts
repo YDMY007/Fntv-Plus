@@ -18,6 +18,39 @@ import { getCookie } from '../core/utils';
 
 const log = logger;
 
+/**
+ * [lc-421] 飞牛元数据保存接口捕获（页面侧，绕过主进程 partition 限制）。
+ * 捕获 upload / saveEditDetail / getEditDetail 三条请求及其响应，打印 method/url/body/resp，
+ * 用于逆向「详情页 Logo 回填」所需的真实保存端点与请求体。
+ * 注：主进程 webRequest 拦截挂在特定 partition 的 session 上，覆盖不到飞牛页面，故改在页面侧抓。
+ */
+const CAPTURE_API_RE = /(^|\/)(upload|saveEditDetail|getEditDetail|editDetail)(\?|$)/i;
+function captureFnosApi(url: string, method: string, body: any): void {
+    try {
+        if (!CAPTURE_API_RE.test(url)) return;
+        let bodyStr = '';
+        if (body) {
+            if (typeof body === 'string') {
+                bodyStr = body;
+            } else if (typeof FormData !== 'undefined' && body instanceof FormData) {
+                try {
+                    const parts: string[] = [];
+                    (body as any).forEach((val: any, key: string) => {
+                        if (val && typeof val === 'object' && val.name) parts.push(`${key}=[file:${val.name},${val.type || ''},${val.size ?? '?'}B]`);
+                        else parts.push(`${key}=${String(val).slice(0, 200)}`);
+                    });
+                    bodyStr = '{' + parts.join(', ') + '}';
+                } catch { bodyStr = '[FormData]'; }
+            } else {
+                try { bodyStr = JSON.stringify(body); } catch { bodyStr = String(body); }
+            }
+        }
+        log.info(`[API捕获-页面] ${method} ${url} | body=${bodyStr.slice(0, 6000)}`);
+    } catch (e) {
+        log.error('[API捕获-页面] 处理异常', String(e));
+    }
+}
+
 /** 已触发的 guid 去重集合 */
 const triggeredGuids = new Set<string>();
 
@@ -165,6 +198,7 @@ function setupInterceptors(): void {
     const origFetch = window.fetch;
     window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
         const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url || '';
+        const method = (init?.method || 'GET').toUpperCase();
         // 只关注 fnOS 播放相关 API
         if (url.includes('play') || url.includes('Play') || url.includes('media')) {
             try {
@@ -178,6 +212,19 @@ function setupInterceptors(): void {
                 }
             } catch { /* 非 JSON body，忽略 */ }
         }
+        // [lc-421] 捕获飞牛元数据保存接口（含响应体）
+        if (CAPTURE_API_RE.test(url)) {
+            captureFnosApi(url, method, init?.body);
+            const resp = await origFetch.call(this, input, init);
+            try {
+                const ct = resp.headers?.get?.('content-type') || '';
+                if (ct.includes('json')) {
+                    const txt = await resp.clone().text();
+                    log.info(`[API捕获-页面][响应] ${method} ${url} | resp=${txt.slice(0, 6000)}`);
+                }
+            } catch { /* 读取响应失败，忽略 */ }
+            return resp;
+        }
         return origFetch.call(this, input, init);
     };
 
@@ -186,10 +233,12 @@ function setupInterceptors(): void {
     const origSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
         (this as any)._skipUrl = String(url);
+        (this as any)._skipMethod = String(method || 'GET').toUpperCase();
         return (origOpen as any).call(this, method, url, ...rest);
     };
     XMLHttpRequest.prototype.send = function (body?: any) {
         const url = (this as any)._skipUrl || '';
+        const method = (this as any)._skipMethod || 'GET';
         if ((url.includes('play') || url.includes('Play') || url.includes('media')) && body) {
             try {
                 const parsed = JSON.parse(typeof body === 'string' ? body : '');
@@ -200,6 +249,8 @@ function setupInterceptors(): void {
                 }
             } catch { /* 非 JSON body，忽略 */ }
         }
+        // [lc-421] 捕获飞牛元数据保存接口（XHR 侧，仅请求）
+        captureFnosApi(url, method, body);
         return origSend.call(this, body);
     };
 }
