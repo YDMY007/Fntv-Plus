@@ -539,6 +539,7 @@ let _carouselInited = false;
 let _carouselContainer: HTMLElement | null = null;
 let _carouselUpdatedAt = 0; // 最近更新板块数据就绪(轮播注入)时间戳, 用于标题旁显示更新时间
 let _carouselWrapper: HTMLElement | null = null;
+let _carouselPosterStrip: HTMLElement | null = null; // [lc-439] 右侧竖向海报条
 // 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
 // injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
 let _placeholderInited = false;
@@ -662,22 +663,32 @@ function injectCarousel(): void {
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18)';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:0 10px 40px rgba(150,130,180,.18);display:flex';
   wrapper.appendChild(container);
   _carouselContainer = container;
+
+  // [lc-439] 左侧轮播主区域（slides + dots），右侧竖向海报条
+  const slideArea = document.createElement('div');
+  slideArea.style.cssText = 'flex:1 1 0;min-width:0;position:relative;overflow:hidden;height:100%';
+  container.appendChild(slideArea);
 
   // Slide track (纵向: 上→下切换)
   const track = document.createElement('div');
   track.style.cssText = 'display:flex;flex-direction:column;position:absolute;top:0;left:0;width:100%;height:100%;transition:transform .8s ease-in-out';
   track.style.transform = 'translateX(0)';
-  container.appendChild(track);
+  slideArea.appendChild(track);
 
-  container.appendChild(track);
+  // 右侧竖向海报条（宽度对齐飞牛列表页竖向海报，滚动展示全部10个剧）
+  const posterStrip = document.createElement('div');
+  posterStrip.className = 'fnos-poster-strip';
+  posterStrip.style.cssText = 'width:146px;flex-shrink:0;height:100%;overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 8px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-left:1px solid rgba(255,255,255,.5)';
+  container.appendChild(posterStrip);
+  _carouselPosterStrip = posterStrip;
 
   // 指示点: 右侧纵向药丸
   const dots = document.createElement('div');
   dots.style.cssText = 'position:absolute;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:5;padding:13px 7px;background:var(--fnos-hero-dots);border:1px solid rgba(0,0,0,.06);border-radius:20px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)';
-  container.appendChild(dots);
+  slideArea.appendChild(dots);
 
   // URL规范化: 硬编码用相对路径, API返回完整URL
   const imgUrl = (p: string, w?: number) => {
@@ -691,9 +702,9 @@ function injectCarousel(): void {
     slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
     slide.className = 'fnos-slide';
 
-    // 左: 图片面板(占 ~64%, 撑满无白边) — [v342] 比例 68→64, 让出空间给文字区
+    // 左: 图片面板(占 ~56%, 为右侧海报条让出空间)
     const leftEl = document.createElement('div');
-    leftEl.style.cssText = 'position:relative;width:64%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
+    leftEl.style.cssText = 'position:relative;width:56%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
     const imgEl = document.createElement('img');
     // [v337] 改 cover 撑满左面板(上下无白边); 仅裁左右一点点, 左对齐保持(替代 v336 的 contain+22px白边)
     imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center';
@@ -713,9 +724,9 @@ function injectCarousel(): void {
     leftEl.appendChild(cornerLogo);
     slide.appendChild(leftEl);
 
-    // 右: 文字面板 — [v344] 浅蓝玻璃(替代v343深色) + 字放大占满文字区~80%
+    // 右: 文字面板 — [lc-439] 收窄为30%, 为右侧海报条让空间
     const rightPanel = document.createElement('div');
-    rightPanel.style.cssText = 'position:relative;width:36%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:34px 50px 34px 34px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
+    rightPanel.style.cssText = 'position:relative;width:30%;height:100%;flex-shrink:0;display:flex;flex-direction:column;padding:28px 36px 28px 28px;background:var(--fnos-hero-panel);backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px);border-left:var(--fnos-hero-panel-border);overflow:hidden';
 
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
@@ -783,10 +794,64 @@ function injectCarousel(): void {
     dots.appendChild(dot);
   });
 
+  // [lc-439] 填充右侧竖向海报条：全部10个剧的竖向poster，自动滚动+点击跳转
+  if (_carouselPosterStrip && shows.length > 0) {
+    _carouselPosterStrip.innerHTML = '';
+    const pInner = document.createElement('div');
+    pInner.className = 'fnos-ps-inner';
+    pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%';
+    // 每个海报项：竖向封面 + 标题截断
+    shows.forEach((show, pi) => {
+      const item = document.createElement('div');
+      item.style.cssText = 'cursor:pointer;transition:all .3s ease;opacity:.65;transform:scale(.92)';
+      item.dataset.idx = String(pi);
+      const pImg = document.createElement('img');
+      pImg.alt = show.title;
+      pImg.style.cssText = 'width:120px;height:170px;object-fit:cover;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.18);display:block;background:rgba(200,190,220,.25)';
+      const pUrl = imgUrl(show.poster);
+      fetchImageAuth(pUrl).then((b) => { if (b) pImg.src = b; });
+      const pTitle = document.createElement('div');
+      pTitle.style.cssText = 'font-size:11px;color:rgba(20,35,70,.7);text-align:center;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;line-height:1.3';
+      pTitle.textContent = show.title;
+      item.appendChild(pImg);
+      item.appendChild(pTitle);
+      item.addEventListener('click', () => goTo(pi));
+      item.addEventListener('mouseenter', () => { item.style.opacity='1'; item.style.transform='scale(1)'; });
+      item.addEventListener('mouseleave', () => {
+        if (pi !== currentIdx) { item.style.opacity='.65'; item.style.transform='scale(.92)'; }
+      });
+      pInner.appendChild(item);
+    });
+    _carouselPosterStrip.appendChild(pInner);
+
+    // 自动滚动：缓慢向上循环，到底后无缝回顶
+    let psTop = 0;
+    const psScroll = () => {
+      if (!_carouselPosterStrip || !pInner.parentElement) return;
+      psTop += 0.4;
+      const maxScroll = Math.max(0, pInner.scrollHeight - _carouselPosterStrip.clientHeight + 20);
+      if (psTop >= maxScroll) psTop = 0;
+      pInner.style.transform = `translateY(-${psTop}px)`;
+      requestAnimationFrame(psScroll);
+    };
+    const psTimer = setTimeout(() => requestAnimationFrame(psScroll), 1500);
+
+    // 高亮当前slide对应的海报（goTo 里同步调用）
+    (_carouselPosterStrip as any)._highlight = (idx: number) => {
+      const items = pInner.children;
+      for (let k = 0; k < items.length; k++) {
+        const el = items[k] as HTMLElement;
+        if (k === idx) { el.style.opacity = '1'; el.style.transform = 'scale(1)'; }
+        else { el.style.opacity = '.65'; el.style.transform = 'scale(.92)'; }
+      }
+    };
+  }
+
   if (infos.length > 0) {
     infos[0].style.opacity = '1';
     infos[0].style.transform = 'translateY(0)';
     (dots.children[0] as HTMLElement).style.background = '#5b8cff';
+    if (_carouselPosterStrip && (_carouselPosterStrip as any)._highlight) (_carouselPosterStrip as any)._highlight(0);
   }
 
   function goTo(idx: number) {
@@ -794,6 +859,8 @@ function injectCarousel(): void {
     track.style.transform = `translateY(-${idx * 100}%)`;
     infos.forEach((el, j) => { el.style.opacity = j === idx ? '1' : '0'; el.style.transform = j === idx ? 'translateY(0)' : 'translateY(20px)'; });
     for (let j = 0; j < dots.children.length; j++) (dots.children[j] as HTMLElement).style.background = j === idx ? '#5b8cff' : 'var(--fnos-hero-dot)';
+    // [lc-439] 同步高亮右侧海报条
+    if (_carouselPosterStrip && (_carouselPosterStrip as any)._highlight) (_carouselPosterStrip as any)._highlight(idx);
   }
 
   let timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
