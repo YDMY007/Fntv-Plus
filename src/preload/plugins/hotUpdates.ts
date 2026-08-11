@@ -228,11 +228,9 @@ function injectStyle(): void {
 .fntv-hot-tp { background: rgba(140,220,160,.22); padding: 1.5px 7.5px; border-radius: 999px; color: #9be3b0; }
 .fntv-hot-yr { background: rgba(255,255,255,.14); padding: 1.5px 7.5px; border-radius: 999px; color: #e8e8ee; }
 
-/* [lc-460] 已入库角标：命中飞牛影视库索引的卡片常驻显示于左上角 */
-.fntv-hot-inlib { position: absolute; top: 6px; left: 6px;
-  background: rgba(46,204,113,.92); color: #fff; font-size: 10px; font-weight: 700;
-  padding: 1.5px 7px; border-radius: 999px; line-height: 1.4;
-  box-shadow: 0 1px 4px rgba(0,0,0,.3); pointer-events: none; z-index: 2; }
+/* [lc-460] 已入库徽标：命中飞牛影视库索引的卡片显示于评分(★)之后，内联胶囊 */
+.fntv-hot-inlib { background: rgba(46,204,113,.22); color: #6fe39a;
+  padding: 1.5px 7.5px; border-radius: 999px; font-weight: 600; }
 
 /* 不感兴趣按钮：默认隐藏，hover 卡片时浮现于右上角 */
 .fntv-hot-block { position: absolute; top: 6px; right: 6px;
@@ -553,10 +551,19 @@ function markInLibrary(root: ParentNode): void {
     let badge = c.querySelector('.fntv-hot-inlib') as HTMLElement | null;
     if (hit) {
       if (!badge) {
-        badge = document.createElement('div');
+        badge = document.createElement('span');
         badge.className = 'fntv-hot-inlib';
         badge.textContent = '已入库';
-        c.appendChild(badge);
+        // [lc-461] 紧跟评分(★)之后显示；无评分则兜底到徽标行末尾
+        const rt = c.querySelector('.fntv-hot-rt');
+        const badgeRow = c.querySelector('.fntv-hot-badge');
+        if (rt) {
+          (rt as HTMLElement).insertAdjacentElement('afterend', badge);
+        } else if (badgeRow) {
+          (badgeRow as HTMLElement).appendChild(badge);
+        } else {
+          c.appendChild(badge);
+        }
       }
     } else if (badge) {
       badge.remove();
