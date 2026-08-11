@@ -164,52 +164,53 @@ const ACRYLIC_CSS = `
         filter:none!important;
     }
 
-    /* ── ③ 核弹级白底清除: 覆盖一切可能的白色背景来源 ── */
-
+    /* ── ③ 白底清除(仅限影视TV页 /v): 覆盖白色背景来源实现亚克力透出 ──
+       [lc-453] 重要: 这些规则必须限定在 .fnos-tv-page 下, 否则文件管理/设置等系统页的缩略图/容器背景会被误杀变黑框.
+       .fnos-tv-page 类由 preload(embyWall.ts handle())在检测到 /v 路径时添加到 <html> 上. */
     /* 3a. 常见 class 模式 */
-    #root,#app,
-    [class*="bg-white"],
-    [class*="bg-gray-50"],
-    [class*="bg-gray-100"],
-    [class*="bg-gray-200"],
-    [class*="bg-slate-50"],
-    [class*="bg-slate-100"],
-    [class*="neutral-50"],
-    [class*="neutral-100"]{
+    .fnos-tv-page #root,.fnos-tv-page #app,
+    .fnos-tv-page [class*="bg-white"],
+    .fnos-tv-page [class*="bg-gray-50"],
+    .fnos-tv-page [class*="bg-gray-100"],
+    .fnos-tv-page [class*="bg-gray-200"],
+    .fnos-tv-page [class*="bg-slate-50"],
+    .fnos-tv-page [class*="bg-slate-100"],
+    .fnos-tv-page [class*="neutral-50"],
+    .fnos-tv-page [class*="neutral-100"]{
         background:transparent!important;
     }
 
     /* 3b. Tailwind 任意值白底 */
-    [class*="bg-[#ff"][class*="f]"],
-    [class*="bg-[#FFF]"],
-    [class*="bg-[rgb(255"],
-    [class*="bg-[rgba(255"],
-    [class*="bg-white/"]{
+    .fnos-tv-page [class*="bg-[#ff"][class*="f]"],
+    .fnos-tv-page [class*="bg-[#FFF]"],
+    .fnos-tv-page [class*="bg-[rgb(255"],
+    .fnos-tv-page [class*="bg-[rgba(255"],
+    .fnos-tv-page [class*="bg-white/"]{
         background:transparent!important;
     }
 
     /* 3c. 飞牛主题变量白底 */
-    [style*="background:#fff"],
-    [style*="background:#FFF"],
-    [style*="background:white"],
-    [style*="background-color:#fff"],
-    [style*="background-color:#FFF"],
-    [style*="background-color:white"],
-    [style*="background:var(--mc-bg"],
-    [style*="background-color:var(--mc-bg"]{
+    .fnos-tv-page [style*="background:#fff"],
+    .fnos-tv-page [style*="background:#FFF"],
+    .fnos-tv-page [style*="background:white"],
+    .fnos-tv-page [style*="background-color:#fff"],
+    .fnos-tv-page [style*="background-color:#FFF"],
+    .fnos-tv-page [style*="background-color:white"],
+    .fnos-tv-page [style*="background:var(--mc-bg"],
+    .fnos-tv-page [style*="background-color:var(--mc-bg"]{
         background:transparent!important;
         background-color:transparent!important;
     }
 
     /* 3d. 全屏容器强制透 */
-    .min-h-screen,[class*="min-h-screen"],
-    .h-screen,[class*="h-screen"],
-    [class*="w-full"][class*="min-h"]{
+    .fnos-tv-page .min-h-screen,.fnos-tv-page [class*="min-h-screen"],
+    .fnos-tv-page .h-screen,.fnos-tv-page [class*="h-screen"],
+    .fnos-tv-page [class*="w-full"][class*="min-h"]{
         background:transparent!important;
     }
 
     /* 3e. 兜底: section/main/article/nav 默认透 */
-    section,main,article,nav,aside{
+    .fnos-tv-page section,.fnos-tv-page main,.fnos-tv-page article,.fnos-tv-page nav,.fnos-tv-page aside{
         background:transparent!important;
     }
 

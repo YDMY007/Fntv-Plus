@@ -2271,6 +2271,10 @@ function handle(): void {
     return;
   }
 
+  // [lc-453] 标记 <html> 为影视TV页: 供 mainwin.ts ACRYLIC_CSS 的白底清除规则(③)限定作用域,
+  //   避免文件管理/设置等系统页的缩略图容器背景被误杀变黑框.
+  document.documentElement.classList.add('fnos-tv-page');
+
   // 导航诊断: 记录每次URL变化, 排查"返回落到全部剧集而非首页"
   const logNav = (label: string) => log('NAV', label, location.href);
   logNav('init');
