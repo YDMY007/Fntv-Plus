@@ -231,7 +231,6 @@ function injectTitleBar(): void {
       // 首页 = 路径层级浅(根或单段)
       const segs = pt.split('/').filter(Boolean);
       const home = segs.length <= 1;
-      logger.info('[logo] isHomePage=', home, 'path=', pt);
       return home;
     };
     const updateLogoVisibility = function (): void {
