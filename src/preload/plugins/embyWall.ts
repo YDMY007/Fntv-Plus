@@ -688,7 +688,7 @@ function injectCarousel(): void {
 
   shows.forEach((show, i) => {
     const slide = document.createElement('div');
-    slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent';
+    slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
 
     // 左: 图片面板(占 ~64%, 撑满无白边) — [v342] 比例 68→64, 让出空间给文字区
     const leftEl = document.createElement('div');
