@@ -10,7 +10,7 @@ import * as log from '../../../modules/logger';
 function init(): void {
     const interceptor = getInterceptor();
     interceptor.registerBeforeRequest(
-        { urls: ['*://*/v/api/v1/*'] },
+        { urls: ['*://*/*'] },
         (details: any, callback: any) => {
             try {
                 const method = (details.method || 'GET').toUpperCase();
@@ -19,11 +19,17 @@ function init(): void {
                     return;
                 }
                 const url = details.url || '';
-                // 只关注与「元数据保存 / 图片上传」相关的端点，避免噪音
-                if (!/\/(item|sys\/img|metadata|media)\b/.test(url)) {
+                // 跳过静态资源
+                if (/\/v\/assets\/|\.(js|css|png|jpg|jpeg|gif|webp|svg|woff2?|ttf|ico|json|map)(\?|$)/i.test(url)) {
                     callback({});
                     return;
                 }
+                // 跳过已知的外部 API（TMDB / Bangumi / 豆瓣 / Gitee 等）
+                if (/themoviedb\.org|bangumi\.tv|api\.bgm\.tv|douban\.com|gitee\.com|github\.com|wikipedia\.org|fnnas\.com|mediasvc/i.test(url)) {
+                    callback({});
+                    return;
+                }
+                const kw = (url.match(/\/(item|sys\/img|metadata|media|tag|actor|genre|upload|file|logo|poster|backdrop)\b/) || ['(其他)'])[0];
                 let bodyStr = '';
                 try {
                     const rb = details.requestBody;
@@ -32,6 +38,7 @@ function init(): void {
                             bodyStr = rb.raw.map((r: any) => {
                                 const b = r.bytes;
                                 if (Buffer.isBuffer(b)) return b.toString('utf8');
+                                if (b instanceof ArrayBuffer) return Buffer.from(new Uint8Array(b)).toString('utf8');
                                 if (b && typeof b.toString === 'function') return b.toString('utf8');
                                 return String(b);
                             }).join('');
@@ -44,7 +51,7 @@ function init(): void {
                 } catch (e) {
                     bodyStr = '[parse err ' + String(e).substring(0, 60) + ']';
                 }
-                log.info('[API捕获] ' + method + ' ' + url + ' | body=' + bodyStr.substring(0, 4000));
+                log.info('[API捕获][' + kw + '] ' + method + ' ' + url + ' | body=' + bodyStr.substring(0, 4000));
             } catch (e) {
                 log.error('[API捕获] 处理异常', e);
             }
