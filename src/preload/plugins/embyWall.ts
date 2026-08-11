@@ -627,10 +627,12 @@ function injectCarousel(): void {
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
-  // 预加载占位: 真实片库未就绪时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  // [修复] 仅当「尚未完成首次加载(_apiLoaded=false)」才显示占位; 若已加载完毕但为空(实时抓取失败/
+  //   fnOS 结构变化/NAS 未连), 不再卡在占位, 而是落到下方 RECENT_SHOWS 硬编码兜底, 保证海报墙始终可见。
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
-  if (_apiShows.length === 0) {
-    log('api not ready, showing loading placeholder');
+  if (_apiShows.length === 0 && !_apiLoaded) {
+    log('api not ready (loading), showing loading placeholder');
     // [lc-100 修复] 占位只构建一次: 下方 MutationObserver 监听 document.body 任意变更,
     // 若每次都重建占位(清空+追加会触发 DOM 变更), 会再次唤醒 observer → 无限重建 → 渲染线程卡死白屏。
     if (_placeholderInited) return;
@@ -5313,7 +5315,7 @@ function handle(): void {
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
   fetchShowsViaIPC(base).then(() => {
-    if (_apiShows.length === 0) { log('API empty'); return; }
+    if (_apiShows.length === 0) { log('API empty → 用 RECENT_SHOWS 硬编码兜底重建轮播'); _carouselInited = false; injectCarousel(); return; }
     log('got', _apiShows.length, 'shows from API, rebuilding');
     _carouselInited = false;
     injectCarousel();
