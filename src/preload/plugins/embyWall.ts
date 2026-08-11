@@ -686,7 +686,7 @@ function injectCarousel(): void {
   // 右侧独立竖向海报条容器（与轮播容器并列）
   const posterStrip = document.createElement('div');
   posterStrip.className = 'fnos-poster-strip';
-  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 8px;background:rgba(245,238,250,.35);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:24px;border:1px solid rgba(200,180,220,.25)';
+  posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 8px;background:rgba(255,255,255,.12);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);border-radius:24px;border:none';
   wrapper.appendChild(posterStrip);
   _carouselPosterStrip = posterStrip;
 
