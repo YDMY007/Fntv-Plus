@@ -717,7 +717,7 @@ function injectCarousel(): void {
       <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">✨ 最近更新${_carouselUpdatedAt ? ' ' + fmtCarouselUpdated(_carouselUpdatedAt) : ''}</div>
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
-        <div class="fnos-logo-box" style="display:none;width:100%;height:128px;flex-shrink:0;align-items:center;justify-content:flex-start;margin-top:6px">
+        <div class="fnos-logo-box" style="display:none;width:100%;height:92px;flex-shrink:0;align-items:center;justify-content:flex-start;margin-top:6px;overflow:hidden;border-radius:10px">
           <img class="fnos-logo" alt="" style="width:100%;height:100%;object-fit:contain;object-position:left center;filter:drop-shadow(0 3px 12px rgba(0,0,0,.32))">
         </div>
       </div>
