@@ -620,6 +620,36 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, pl
     playerInstance.playList(playList, currentIndex);
 }
 
+// [lc-467] strm 解析辅助：.strm 本质是文本文件（每行一个真实播放 URL）。
+// 外部播放器(PotPlayer/MPV)不会解析其内部 URL，直接打开 .strm 会拿到文本而播放失败。
+// 故在交给播放器前，若链接指向 .strm，先下载并提取首个 http(s) URL 作为真实播放地址；
+// 解析失败 / 非 strm / 运行环境无 fetch 时原样返回，不影响其它直链与 fnos 路径。
+async function resolveStrm(raw: string): Promise<string> {
+  try {
+    const pathPart = raw.split('?')[0].toLowerCase();
+    if (!pathPart.endsWith('.strm')) return raw;
+    log.info('[strm] 检测到 .strm 链接，尝试解析内部真实 URL:', raw);
+    const fetchFn = (globalThis as any).fetch;
+    const AbortControllerCtor = (globalThis as any).AbortController;
+    if (!fetchFn) { log.warn('[strm] 运行环境无 fetch，跳过解析'); return raw; }
+    const ctrl = AbortControllerCtor ? new AbortControllerCtor() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+    const resp = await fetchFn(raw, ctrl ? { signal: ctrl.signal } : {});
+    if (timer) clearTimeout(timer);
+    if (!resp.ok) { log.warn('[strm] 下载 strm 失败 status=' + resp.status + '，回退原链接'); return raw; }
+    const text = await resp.text();
+    const lines = String(text).split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/^https?:\/\//i.test(line)) { log.info('[strm] 解析到真实播放 URL:', line); return line; }
+    }
+    log.warn('[strm] strm 内容未包含 http(s) URL，回退原链接');
+    return raw;
+  } catch (e: any) {
+    log.warn('[strm] 解析异常，回退原链接:', e?.message || e);
+    return raw;
+  }
+}
+
 // [lc-385] 通用外部播放入口：fnOS 流 / 本地文件 / 直链 统一拉起 PotPlayer/MPV
 async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Promise<void> {
     log.info('[external-play] 收到请求:', JSON.stringify({ kind: req.kind, player: req.player, id: req.id, hasPath: !!req.path, hasUrl: !!req.url }));
@@ -639,8 +669,11 @@ async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Pr
     }
 
     // file / url 类：本地文件或直链，无需 fnOS 代理与 fnapi 字幕
-    const link = req.kind === 'file' ? (req.path || '') : (req.url || '');
+    let link = req.kind === 'file' ? (req.path || '') : (req.url || '');
     if (!link) { log.error('[external-play] file/url 缺少 path/url'); return; }
+    // [lc-467] strm 解析：.strm 是文本文件(每行一个真实播放 URL)，外部播放器不会解析其内部 URL。
+    //   交给 PotPlayer/MPV 前先探测：若指向 .strm，则下载提取首个 http(s) URL 作为真实播放地址。
+    link = await resolveStrm(link);
 
     const playerType = wantPot ? ply.PlayerType.POTPLAYER : ply.PlayerType.MPV;
     const playerPath = wantPot ? getPotPlayerPath() : getMpvPlayerPath();
