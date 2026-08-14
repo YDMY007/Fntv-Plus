@@ -8,7 +8,9 @@
 //      listLayout 靠 getBoundingClientRect 做卡片水平居中，vertical translate 不影响左右间隙计算，
 //      scale 会改变宽高→破坏测量与居中。弹窗可用 scale（不参与布局测量）。
 //   ③ 绝不介入视频预览模态(.trim-ui__app-layout--window)：动画可能干扰 xgplayer 播放。
-//   ④ 卡片在 MutationObserver 中「插入即置 0 + 下一帧淡入」，从根本上避免路由检测延迟导致的闪烁。
+//   ④ 卡片「首帧前即用 CSS 预隐藏(opacity:0，作用域 .fnos-tv-page)，anime 随后淡入」——这是根治 FOUC 闪一下的关键：
+//      MutationObserver 在节点插入后才置 0 会漏掉首帧(先全不透明度画一帧再淡入=闪)。CSS 在 paint 之前生效，从根上消除闪烁。
+//      首屏已存在卡片由 requestAnimationFrame(scanGrids) 立即补入场(不等 600ms)，并配 1500ms 看门狗防永久隐藏。
 //   ⑤ 每个元素只动画一次（dataset 标记），避免虚拟滚动/重渲染反复触发。
 //
 // 模块级代码铁律：除 import 与 registerHook 外不含任何模块级副作用；registerHook 最先执行，
@@ -34,6 +36,25 @@ function reducedMotion(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * [lc-465] 预隐藏网格卡片：用 CSS 在「首帧绘制前」就把卡片设为 opacity:0。
+ * 这是根治「点开详情页闪一下」的关键——之前靠 MutationObserver 在节点插入后才置 0，
+ * 浏览器可能已先以全不透明度画了一帧，anime 再把起点设为 0 淡入，中间那一帧就是闪(FOUC)。
+ * CSS 规则在 paint 之前生效，从根上杜绝该闪烁；实际淡入仍由 enterCards(anime.js) 驱动。
+ * 作用域严格限定 .fnos-tv-page（<html> 由 embyWall 在 /v 路径同步 add/remove），绝不误伤系统页；
+ * reduced-motion 下不预隐藏，直接展示。
+ */
+function injectHideCSS(): void {
+  if (document.getElementById('fntv-page-anim-hide')) return;
+  const s = document.createElement('style');
+  s.id = 'fntv-page-anim-hide';
+  s.textContent = `
+@media (prefers-reduced-motion: no-preference) {
+  .fnos-tv-page [class*="flex-wrap"][class*="gap-x"] > * { opacity: 0; }
+}`;
+  (document.head || document.documentElement).appendChild(s);
 }
 
 /** 暴露全局工具，供其它插件复用（hotUpdates 等已直连 window.anime，此处统一出口）。 */
@@ -170,24 +191,36 @@ function setupObservers(): void {
 
   try {
     observe();
-    // 兜底：setup 之前已存在于 DOM 的卡片（首屏已渲染完成的情况）补一次入场
-    setTimeout(() => {
+    // 首屏已存在的卡片：CSS 已预隐藏，首帧不会闪；这里立即错落入场（不必等 600ms），避免首屏空白。
+    const scanGrids = (): void => {
       if (!isFntvTvPage()) return;
       const grids = document.querySelectorAll(GRID_SEL) as any;
-      const missed: HTMLElement[] = [];
+      const found: HTMLElement[] = [];
       grids.forEach((g: any) => {
         Array.from(g.children).forEach((c: any) => {
           if (c.dataset.fntvIn === '1') return;
           if (typeof c.className === 'string' && (c.className.includes('fnos-') || c.className.includes('fntv-'))) return;
-          if (c.closest && c.closest('.trim-ui__app-layout--window')) return;
+          if (c.closest && c.closest('.trim-ui__app-layout--window')) return; // 视频预览不介入
           c.dataset.fntvIn = '1';
           c.style.opacity = '0';
-          missed.push(c);
+          found.push(c);
         });
       });
-      if (missed.length) { pendingCards = missed; scheduled = true; requestAnimationFrame(flush); }
-    }, 600);
-    logger.info('[pageAnim] 全局动画观察者已安装（卡片错落 + 弹窗入场）');
+      if (found.length) {
+        pendingCards = pendingCards.concat(found);
+        if (!scheduled) { scheduled = true; requestAnimationFrame(flush); }
+      }
+    };
+    requestAnimationFrame(scanGrids);   // 首帧后立即补入场
+    setTimeout(scanGrids, 600);         // SPA 分批渲染兜底
+    // 看门狗：极端情况下(anime 未就绪 / observer 漏抓)若仍有卡片卡在 opacity:0，强制显示，避免永久隐藏。
+    setTimeout(() => {
+      const hidden = document.querySelectorAll('.fnos-tv-page ' + GRID_SEL + ' > *') as any;
+      Array.from(hidden).forEach((c: any) => {
+        if (getComputedStyle(c).opacity === '0' && c.dataset.fntvIn !== '1') { c.dataset.fntvIn = '1'; c.style.opacity = '1'; }
+      });
+    }, 1500);
+    logger.info('[pageAnim] 全局动画观察者已安装（CSS 预隐藏 + 卡片错落 + 弹窗入场）');
   } catch (e: any) {
     logger.warn('[pageAnim] 观察者安装失败: ' + (e && e.message));
   }
@@ -196,6 +229,8 @@ function setupObservers(): void {
 function initPageAnim(): void {
   // 仅在飞牛影视 TV 页注入全局动画；系统页/登录页跳过
   if (!isFntvTvPage()) return;
+  // 注入 CSS 预隐藏规则：首帧前把网格卡片置 0，根治「点开详情页闪一下」(FOUC)。作用域限定 .fnos-tv-page。
+  injectHideCSS();
   // 暴露工具出口（即便 anime 暂未就绪也先挂上，animeLib 同步注入后调用方即可用）
   (window as any).fntvAnim = toolkit();
   // animeLib 通常在前序插件中同步注入 window.anime；但为防加载顺序极端情况，短暂轮询等待就绪再装观察者。
