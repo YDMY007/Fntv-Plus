@@ -10,7 +10,10 @@
 //   ③ 绝不介入视频预览模态(.trim-ui__app-layout--window)：动画可能干扰 xgplayer 播放。
 //   ④ 卡片「首帧前即用 CSS 预隐藏(opacity:0，作用域 .fnos-tv-page)，anime 随后淡入」——这是根治 FOUC 闪一下的关键：
 //      MutationObserver 在节点插入后才置 0 会漏掉首帧(先全不透明度画一帧再淡入=闪)。CSS 在 paint 之前生效，从根上消除闪烁。
-//      首屏已存在卡片由 requestAnimationFrame(scanGrids) 立即补入场(不等 600ms)，并配 1500ms 看门狗防永久隐藏。
+//      入场用文档级 collect()(任意 childList 变更下一帧去抖触发)，对 fnOS「先插网格后插卡片(分批 mutation)」同样可靠捕获；
+//      1500ms 看门狗(不依赖 fntvIn 闸门)强制显示任何仍卡在 opacity:0 的卡片，杜绝空白。
+//      注意：fnOS 部分网格用 position:absolute + transform:translate() 做卡片绝对定位，入场动画对这类「定位包装层」只用 opacity
+//      (不用 translateY)，否则会覆写 fnOS 的 transform→卡片错位/丢失(空白)。普通 flex 流式网格保留 translateY 微滑。
 //   ⑤ 每个元素只动画一次（dataset 标记），避免虚拟滚动/重渲染反复触发。
 //
 // 模块级代码铁律：除 import 与 registerHook 外不含任何模块级副作用；registerHook 最先执行，
@@ -72,21 +75,31 @@ function toolkit() {
   };
 }
 
-/** 列表/卡片错落入场（核心：opacity + translateY，绝不用 scale） */
+/** 列表/卡片错落入场（核心：opacity + translateY，绝不用 scale）
+ *  [lc-466] 稳健性修正：fnOS 部分网格(flex-wrap+gap-x)用 position:absolute + transform:translate()
+ *  做卡片绝对定位。若给这类「定位包装层」动画 translateY，会覆写 fnOS 的 transform→卡片错位/丢失(空白)。
+ *  故检测：只要存在绝对定位的包装层，就改为纯 opacity 淡入(不动 transform)，安全且观感一致；
+ *  普通 flex 流式网格仍保留 translateY 微滑。动画异常也兜底显示，绝不留 opacity:0。 */
 function enterCards(els: any): void {
   const a = getAnime();
   if (!els || (els as any).length === 0) return;
-  if (reducedMotion()) { Array.from(els as any).forEach((e: any) => (e.style.opacity = '1')); return; }
-  if (!a) { Array.from(els as any).forEach((e: any) => (e.style.opacity = '1')); return; }
+  if (reducedMotion() || !a) { Array.from(els as any).forEach((e: any) => (e.style.opacity = '1')); return; }
   try {
+    const list = Array.from(els as any) as HTMLElement[];
+    const safeSlide = list.every((e) => {
+      try { return getComputedStyle(e).position !== 'absolute'; } catch { return true; }
+    });
     a.animate(els, {
       opacity: [0, 1],
-      translateY: [14, 0],
+      ...(safeSlide ? { translateY: [14, 0] } : {}),
       delay: a.stagger(22),
       duration: 430,
       ease: 'outExpo',
     });
-  } catch { /* ignore */ }
+  } catch {
+    // 兜底：动画异常也要把卡片显示出来，绝不留 opacity:0 导致空白
+    Array.from(els as any).forEach((e: any) => (e.style.opacity = '1'));
+  }
 }
 
 /** 整块内容轻入场：opacity + 轻微 translateY（不用 scale，平移对水平测量无影响） */
@@ -122,7 +135,11 @@ function modalIn(el: any): void {
   } catch { /* ignore */ }
 }
 
-/** 安装「插入即动画」观察者：卡片网格新增卡片错落入场；弹窗打开接上入场动画。 */
+/** 安装「插入即动画」观察者：卡片网格新增卡片错落入场；弹窗打开接上入场动画。
+ *  [lc-466] 稳健性重写：原版按「被插入节点」递归查找网格子项，在 fnOS「先插网格后插卡片(分批 mutation)」
+ *  的场景下会漏抓→卡片永久卡在 CSS 预隐藏的 opacity:0(空白)。改为：任意 childList 变更都触发一次
+ *  文档级 collect()(下一帧去抖)，无论网格与卡片同帧还是分批插入都能可靠捕获；看门狗去掉 fntvIn 闸门，
+ *  只要 computed opacity 仍为 0 就强制显示，彻底杜绝空白。 */
 function setupObservers(): void {
   const a = getAnime();
   if (!a) {
@@ -133,10 +150,11 @@ function setupObservers(): void {
 
   let pendingCards: HTMLElement[] = [];
   let pendingModals: HTMLElement[] = [];
-  let scheduled = false;
+  let flushScheduled = false;
+  let collectScheduled = false;
 
   const flush = (): void => {
-    scheduled = false;
+    flushScheduled = false;
     const cards = pendingCards;
     const modals = pendingModals;
     pendingCards = [];
@@ -155,69 +173,61 @@ function setupObservers(): void {
     }
   };
 
-  const observe = (): void => {
-    const obs = new MutationObserver((muts) => {
-      if (!isFntvTvPage()) return;          // 系统页/登录页不介入
-      for (const m of muts) {
-        if (m.type !== 'childList') continue;
-        m.addedNodes.forEach((n) => {
-          const el = n as HTMLElement;
-          if (el.nodeType !== 1) return;
-          // —— 弹窗 ——
-          if (el.matches && el.matches(MODAL_SEL)) {
-            if (el.dataset.fntvAnim !== '1') { el.dataset.fntvAnim = '1'; el.style.opacity = '0'; pendingModals.push(el); }
-          } else if (el.querySelectorAll) {
-            el.querySelectorAll(MODAL_SEL).forEach((x: any) => {
-              if (x.dataset.fntvAnim !== '1') { x.dataset.fntvAnim = '1'; x.style.opacity = '0'; pendingModals.push(x); }
-            });
-          }
-          // —— 卡片网格新增子项 ——（插入即置 0，下一帧统一淡入，杜绝闪烁）
-          if (el.querySelectorAll) {
-            el.querySelectorAll(GRID_SEL + ' > *').forEach((c: any) => {
-              if (c.dataset.fntvIn === '1') return;
-              if (typeof c.className === 'string' && (c.className.includes('fnos-') || c.className.includes('fntv-'))) return;
-              if (c.closest && c.closest('.trim-ui__app-layout--window')) return; // 视频预览不介入
-              c.dataset.fntvIn = '1';
-              c.style.opacity = '0';
-              pendingCards.push(c);
-            });
-          }
-        });
-      }
-      if (!scheduled) { scheduled = true; requestAnimationFrame(flush); }
+  // collect：文档级扫描所有未动画的网格子项与弹窗，置 0 并入队(下一帧统一淡入)。
+  // 用文档级查询而非「被插入节点递归」，对 fnOS 分批插入同样可靠。
+  const collect = (): void => {
+    collectScheduled = false;
+    if (!isFntvTvPage()) return;
+    const grids = document.querySelectorAll(GRID_SEL) as any;
+    grids.forEach((g: any) => {
+      Array.from(g.children).forEach((c: any) => {
+        if (c.dataset.fntvIn === '1') return;
+        if (typeof c.className === 'string' && (c.className.includes('fnos-') || c.className.includes('fntv-'))) return;
+        if (c.closest && c.closest('.trim-ui__app-layout--window')) return; // 视频预览不介入
+        c.dataset.fntvIn = '1';
+        c.style.opacity = '0';
+        pendingCards.push(c);
+      });
     });
-    obs.observe(document.body, { childList: true, subtree: true });
+    document.querySelectorAll(MODAL_SEL).forEach((m: any) => {
+      if (m.dataset.fntvAnim === '1') return;
+      m.dataset.fntvAnim = '1';
+      m.style.opacity = '0';
+      pendingModals.push(m);
+    });
+    if ((pendingCards.length || pendingModals.length) && !flushScheduled) {
+      flushScheduled = true;
+      requestAnimationFrame(flush);
+    }
+  };
+
+  // 任意 childList 变更触发一次收集(下一帧去抖)，捕获无论同帧/分批插入的卡片。
+  const scheduleCollect = (): void => {
+    if (collectScheduled) return;
+    collectScheduled = true;
+    requestAnimationFrame(collect);
   };
 
   try {
-    observe();
-    // 首屏已存在的卡片：CSS 已预隐藏，首帧不会闪；这里立即错落入场（不必等 600ms），避免首屏空白。
-    const scanGrids = (): void => {
-      if (!isFntvTvPage()) return;
-      const grids = document.querySelectorAll(GRID_SEL) as any;
-      const found: HTMLElement[] = [];
-      grids.forEach((g: any) => {
-        Array.from(g.children).forEach((c: any) => {
-          if (c.dataset.fntvIn === '1') return;
-          if (typeof c.className === 'string' && (c.className.includes('fnos-') || c.className.includes('fntv-'))) return;
-          if (c.closest && c.closest('.trim-ui__app-layout--window')) return; // 视频预览不介入
-          c.dataset.fntvIn = '1';
-          c.style.opacity = '0';
-          found.push(c);
-        });
-      });
-      if (found.length) {
-        pendingCards = pendingCards.concat(found);
-        if (!scheduled) { scheduled = true; requestAnimationFrame(flush); }
+    const obs = new MutationObserver((muts) => {
+      if (!isFntvTvPage()) return;          // 系统页/登录页不介入
+      for (const m of muts) {
+        if (m.type === 'childList') { scheduleCollect(); break; }
       }
-    };
-    requestAnimationFrame(scanGrids);   // 首帧后立即补入场
-    setTimeout(scanGrids, 600);         // SPA 分批渲染兜底
-    // 看门狗：极端情况下(anime 未就绪 / observer 漏抓)若仍有卡片卡在 opacity:0，强制显示，避免永久隐藏。
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+
+    // 首屏已存在的卡片：CSS 已预隐藏，首帧不会闪；首帧后立即收集(不必等 600ms)，避免首屏空白。
+    requestAnimationFrame(collect);   // 首帧后立即补入场
+    setTimeout(collect, 600);         // SPA 分批渲染兜底
+    // 看门狗：极端情况下若仍有网格子项/弹窗卡在 opacity:0(computed)，强制显示，杜绝永久空白。
+    // 不依赖 fntvIn 闸门——JS 已置 0 但未淡入成功的卡片也能被救回。
     setTimeout(() => {
-      const hidden = document.querySelectorAll('.fnos-tv-page ' + GRID_SEL + ' > *') as any;
-      Array.from(hidden).forEach((c: any) => {
-        if (getComputedStyle(c).opacity === '0' && c.dataset.fntvIn !== '1') { c.dataset.fntvIn = '1'; c.style.opacity = '1'; }
+      document.querySelectorAll('.fnos-tv-page ' + GRID_SEL + ' > *').forEach((c: any) => {
+        if (getComputedStyle(c).opacity === '0') { c.dataset.fntvIn = '1'; c.style.opacity = '1'; }
+      });
+      document.querySelectorAll(MODAL_SEL).forEach((m: any) => {
+        if (getComputedStyle(m).opacity === '0') { m.dataset.fntvAnim = '1'; m.style.opacity = '1'; }
       });
     }, 1500);
     logger.info('[pageAnim] 全局动画观察者已安装（CSS 预隐藏 + 卡片错落 + 弹窗入场）');
@@ -239,7 +249,13 @@ function initPageAnim(): void {
   const t = window.setInterval(() => {
     tries++;
     if (getAnime()) { window.clearInterval(t); setupObservers(); }
-    else if (tries > 20) { window.clearInterval(t); logger.warn('[pageAnim] 等待 anime.js 超时，降级为原生（无动画）'); }
+    else if (tries > 20) {
+      window.clearInterval(t);
+      logger.warn('[pageAnim] 等待 anime.js 超时，降级为原生（无动画）');
+      // 移除预隐藏 CSS，否则卡片会永久卡在 opacity:0(空白)。降级也要保证可见。
+      const s = document.getElementById('fntv-page-anim-hide');
+      if (s && s.parentNode) s.parentNode.removeChild(s);
+    }
   }, 50);
 }
 
