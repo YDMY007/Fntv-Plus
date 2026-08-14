@@ -571,6 +571,25 @@ function markInLibrary(root: ParentNode): void {
   });
 }
 
+// [lc-462] 卡片入场动画：用 anime.js 错落(stagger)浮现（opacity + 上移 + 轻微放大）。
+// window.anime 由 animeLib 注入；若未注入成功则静默降级（卡片照常显示）。
+function animateCardsIn(root: ParentNode): void {
+  const a = (window as any).anime;
+  if (!a) return;
+  try {
+    const cards = root.querySelectorAll('.fntv-hot-card');
+    if (!cards.length) return;
+    a.animate(cards, {
+      opacity: [0, 1],
+      translateY: [16, 0],
+      scale: [0.96, 1],
+      delay: a.stagger(26),
+      duration: 430,
+      ease: 'outExpo',
+    });
+  } catch { /* ignore */ }
+}
+
 /** 站内跳飞牛影视详情页：复用 embyWall「开始观看」的 SPA 跳法(pushState+popstate, 兜底整页导航) */
 function navigateToDetail(href: string): void {
   try {
@@ -631,12 +650,24 @@ function buildPanel(): void {
   document.body.appendChild(tab);
   document.body.appendChild(panel);
 
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      tab.classList.add('entering');
-      setTimeout(() => tab.classList.remove('entering'), 520);
+  // [lc-462] 宫灯按钮入场动画：优先用 anime.js（带回弹），未注入则降级为原 CSS keyframe
+  const aTab = (window as any).anime;
+  if (aTab) {
+    aTab.animate(tab, {
+      opacity: [0, 1],
+      translateY: [-12, 0],
+      scale: [0.85, 1],
+      duration: 540,
+      ease: 'outBack',
     });
-  });
+  } else {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        tab.classList.add('entering');
+        setTimeout(() => tab.classList.remove('entering'), 520);
+      });
+    });
+  }
 
   let loadedBg = false, loadedTm = false;
   let source = 'bangumi';     // 当前数据源
@@ -698,6 +729,8 @@ function buildPanel(): void {
     hydratePosters(body);
     // [lc-460] 卡片重建后按库索引标注「已入库」（索引若已就绪则命中，否则待索引 finish 后补标）
     markInLibrary(body);
+    // [lc-462] 卡片错落入场动画（anime.js）
+    animateCardsIn(body);
   };
 
   // 排序分段点击（动态重建后需重新绑定）

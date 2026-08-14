@@ -99,6 +99,13 @@
           ]
         },
         {
+          "from": "third_party/anime",
+          "to": "third_party/anime",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
           "from": "third_party/potplayer",
           "to": "third_party/potplayer",
           "filter": [
@@ -141,6 +148,13 @@
         {
           "from": "third_party/proxy",
           "to": "third_party/proxy",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/anime",
+          "to": "third_party/anime",
           "filter": [
             "**/*"
           ]
@@ -203,6 +217,13 @@
         {
           "from": "third_party/proxy",
           "to": "third_party/proxy",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "third_party/anime",
+          "to": "third_party/anime",
           "filter": [
             "**/*"
           ]
