@@ -44,7 +44,8 @@ const MIN_PAD = 20; // 每侧最小留白
  * 或分类(/v/list/)导航链接。
  *
  * 有此侧边栏的页面（首页 / 媒体库列表 / 分类列表）才启用卡片居中；
- * 演员/人物详情页、剧集详情页等不渲染该侧边栏（或其中无上述路由链接），一律不处理。
+ * ⚠️ fnOS 现版本详情页（/v/tv、/v/movie、/v/person）也会复用该侧边栏，
+ *    故仅靠 hasSidebarLibraryNav() 不够，必须按路由显式排除详情页（见 isDetailRoute）。
  */
 
 /** 判断一个链接是否为「媒体库/分类」导航（按路由，不按显示名）。兼容有无结尾斜杠、绝对/相对 href。 */
@@ -72,6 +73,13 @@ function hasSidebarLibraryNav(): boolean {
         if (isLibraryNavHref(links[i].getAttribute('href'))) return true;
     }
     return false;
+}
+
+/** 详情页判定：/v/tv/ 剧集、/v/movie/ 电影、/v/person/ 人物。
+ * 这些页面 fnOS 会复用左侧「媒体库/分类」侧边栏（hasSidebarLibraryNav 误判为 true），
+ * 但其主内容并非浏览器卡片网格，套上对称 padding 会把内容挤到中间，故显式排除。 */
+function isDetailRoute(): boolean {
+    return /^\/v\/(tv|movie|person)(\/|$)/i.test(location.pathname);
 }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
@@ -106,10 +114,22 @@ function makeKey(parent: HTMLElement): string {
  *       连续两次测量一致(≤2px)则锁定。
  */
 function applyFix(): boolean {
-    // ⛔ [lc-407] 演员/人物详情页(/v/person/...)不启用居中布局（用户明确要求）。
-    //   演员页复用了左侧媒体库/分类侧边栏(导致 hasSidebarLibraryNav 误判为 true)，
-    //   但其内容并非卡片网格，套上居中 padding 会被压成窄屏；故按路由显式排除。
-    if (/^\/v\/person(\/|$)/i.test(location.pathname)) return false;
+    // ⛔ [lc-407/lc-468] 详情页不启用居中布局。
+    //   fnOS 现版本在详情页也会复用左侧「媒体库/分类」侧边栏，
+    //   导致 hasSidebarLibraryNav 误判为 true；但详情页主内容并非浏览器卡片网格
+    //   （如剧集详情页的季/集区域、相关推荐条），套上对称 padding 会把内容挤到中间。
+    //   故按路由显式排除：/v/tv/ 剧集、/v/movie/ 电影、/v/person/ 人物。
+    //   （/v/library/ 媒体库、/v/list/ 分类 这类真正的浏览页才走居中。）
+    if (isDetailRoute()) {
+        // 清除旧构建可能在详情页误加的对称 padding（仅本插件标记过的元素）
+        document.querySelectorAll('[data-fntv-layout]').forEach((el) => {
+            const e = el as HTMLElement;
+            e.style.removeProperty('padding-left');
+            e.style.removeProperty('padding-right');
+            e.removeAttribute('data-fntv-layout');
+        });
+        return false;
+    }
 
     // ⛔ 无左侧「媒体库/分类」导航列表的页面不执行居中（演员页/详情页等没有这些列表）
     if (!hasSidebarLibraryNav()) return false;
@@ -144,6 +164,7 @@ function applyFix(): boolean {
         const initialPad = Math.max(MIN_PAD, Math.round((parentW - rowW) / 2));
         parent.style.setProperty('padding-left', initialPad + 'px', 'important');
         parent.style.setProperty('padding-right', initialPad + 'px', 'important');
+        parent.dataset.fntvLayout = '1';
         console.log(`[listLayout] 初算 padding ${initialPad}px（容器${parentW}px，等待测量微调…）`);
     }
 
@@ -185,6 +206,7 @@ function applyFix(): boolean {
                 // 仍有偏差 → 补偿一半，下一轮继续逼近
                 parent.style.setProperty('padding-left', target + 'px', 'important');
                 parent.style.setProperty('padding-right', target + 'px', 'important');
+                parent.dataset.fntvLayout = '1';
                 lastPad = target;
                 confirmCount = 1;
                 console.log(`[listLayout] 微调 padding ${current}→${target}px（左${Math.round(leftGap)} / 右${Math.round(rightGap)}）`);
