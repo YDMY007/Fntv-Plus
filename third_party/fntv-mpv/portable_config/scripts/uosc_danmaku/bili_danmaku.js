@@ -61,10 +61,13 @@ async function verify_cookie() {
 // 注意：BAD_TITLE 只放「确定非正片」的强信号词。曾误放 '你们'/'为什么'/'算是'/'评' 等
 // 中文虚词/单字，会误杀剧名本身含这些字眼的番（如《『你们先走我断后』…》标题即含「你们」，
 // 导致所有搬运候选被过滤成 0）。已移除这类过宽词条；reaction/二创类仍保留英文与强信号词。
+// [lc-469] 增补「解说/合集/速看」类强信号：一口气看完、解析、精讲、讲解 等——这些在视频区
+// 兜底（电视剧/真人剧等不进官方番剧区的内容）常因 sim 高、弹幕多而被误选为正片源。
 const BAD_TITLE = ['reaction', '反应', '杂谈', '吐槽', '解说', '盘点', '二创', 'mad', 'amv',
     '空降', '切片', '速看', '高能', 'op', 'ed',
     'ost', 'pv', '预告', '花絮', 'cos', '直播', '歌词', '致敬', '混剪', '剪辑',
-    '有声轻小说', '广播剧', '有声书', '有声小说'];
+    '有声轻小说', '广播剧', '有声书', '有声小说',
+    '一口气看完', '一口气蹲坑', '看完这', '解析', '精讲', '讲解', '速览', '合集', '总集'];
 
 // 标题/分P名里常见的非识别性填充词，做相似度比较时剔除
 const _FILLER = ['高清', '1080p', '720p', '480p', '4k', '合集', '全集', '更新', '熟肉', '生肉',
@@ -351,7 +354,7 @@ function _ep_in_title(t, ep_num) {
 function _is_compilation_title(t) {
     const s = String(t);
     if (new RegExp('全\\s*\\d+\\s*[集话]').test(s)) return true;
-    if (s.indexOf('合集') >= 0 || s.indexOf('总集') >= 0) return true;
+    if (s.indexOf('合集') >= 0 || s.indexOf('总集') >= 0 || s.indexOf('全集') >= 0) return true;
     if (new RegExp('第\\s*\\d+\\s*[~\\-–至]\\s*\\d+\\s*[话集]').test(s)) return true;
     if (new RegExp('\\d+\\s*[~\\-–至]\\s*\\d+\\s*话').test(s)) return true;
     return false;
@@ -571,7 +574,10 @@ async function search_video(title, ep_num, season_num) {
             if (sim < VIDEO_SIM_FLOOR) continue;
             const cid = await cid_from_bvid(bvid, ep_num, t);
             if (cid) {
-                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num) };
+                // [lc-469] 合集/解说类(kind=2 或命中 BAD_TITLE)标记 isCompilation：
+                // 不参与「首选/聚合优选」，避免电视剧兜底时误选「一口气看完全集」之类。
+                const isCompilation = (kind === 2) || BAD_TITLE.some((k) => t.toLowerCase().indexOf(k) >= 0);
+                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num), isCompilation };
                 const tag = tagmap[kind] || '?';
                 const mark = sim >= SIM_LOW ? '' : ' [兜底]';
                 log(`[视频区]${label ? ' (' + label + ')' : ''} sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
@@ -794,13 +800,17 @@ function _filter_danmaku(dm, block_types) {
 }
 
 function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
-    // ── 单源优选：季匹配优先，取弹幕最多者 ──
+    // ── 单源优选：季匹配优先；同季内排除「合集/解说」源，取弹幕最多者 ──
+    // [lc-469] 合集源(isCompilation)不参与首选/聚合优选，避免电视剧兜底时误选
+    // 「一口气看完全集」之类解说合集（弹幕多但非正片）。仅在确实无任何非合集候选时才兜底选用。
     function pick(pool) {
         if (!pool.length) return null;
         const valid = pool.filter((f) => f[4] <= agg_time_limit);
         const use = valid.length ? valid : pool;
-        let best = use[0];
-        for (const f of use) if (f[3].length > best[3].length) best = f;
+        const nonComp = use.filter((f) => !(f[2] && f[2].isCompilation));
+        const base = nonComp.length ? nonComp : use; // 全为合集才退而求其次
+        let best = base[0];
+        for (const f of base) if (f[3].length > best[3].length) best = f;
         return best;
     }
     const hit = fetched.filter((f) => f[2] && f[2].season_match);
@@ -816,7 +826,7 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
     // 策略：只从「季匹配」候选中聚合（不混入错季弹幕）；
     // 去重用时间窗口 ±AGG_DUP_SEC（同一窗口内相同文本视为重复，保留先出现的）。
     const AGG_DUP_SEC = 2; // 去重时间窗口（秒）
-    const pool = hit.filter((f) => f !== chosen); // 仅季命中候选参与聚合
+    const pool = hit.filter((f) => f !== chosen && !(f[2] && f[2].isCompilation)); // 仅季命中且非合集候选参与聚合
 
     if (pool.length === 0) {
         log(`[聚合] 首选 ${chosen[1]}(${chosen[3].length}条) 不足阈值${agg_threshold}, 无其他季匹配候选可聚合`);
