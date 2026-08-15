@@ -30,6 +30,23 @@ export interface BiliDanmakuResult {
     error?: string;
 }
 
+export interface BiliCandidate {
+    index: number;
+    cid: any;
+    bvid: string | null;
+    title: string;
+    source: string;
+    season: number;
+    is_compilation: boolean;
+    sim: number | null;
+}
+
+export interface BiliCandidatesResult {
+    ok: boolean;
+    candidates?: BiliCandidate[];
+    error?: string;
+}
+
 let cachedModule: any = null;
 let logSinkBound = false;
 
@@ -131,4 +148,68 @@ export async function runBiliDanmaku(
 export function resetBiliModule(): void {
     cachedModule = null;
     logSinkBound = false;
+}
+
+/**
+ * 仅搜索 B站 候选视频列表（标题/bvid/来源/是否合集），不拉取/聚合弹幕。
+ * 供 MPV 侧「手动搜索」展示候选列表，由用户选定具体视频。
+ */
+export async function runBiliDanmakuCandidates(
+    title: string,
+    ep: number | string,
+    season?: number | string,
+    timeoutMs = 60000,
+): Promise<BiliCandidatesResult> {
+    let mod: any;
+    try {
+        mod = loadModule();
+    } catch (e: any) {
+        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
+        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+    }
+    try {
+        const runP = Promise.resolve(mod.search_candidates(title, ep, season));
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutP = new Promise<BiliCandidatesResult>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `候选搜索超时(${timeoutMs}ms)` }), timeoutMs);
+        });
+        const r = await Promise.race([runP, timeoutP]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（search_candidates 无返回）' };
+    } catch (e: any) {
+        log.warn('[biliRunner] search_candidates 异常: ' + (e?.message || e));
+        return { ok: false, error: String(e?.message || e) };
+    }
+}
+
+/**
+ * 由用户选定的 bvid 直接拉取该视频弹幕（手动搜索：用户已明确选定视频）。
+ */
+export async function runBiliDanmakuByBvid(
+    title: string,
+    bvid: string,
+    out: string,
+    threshold?: number | string,
+    timeoutMs = 60000,
+): Promise<BiliDanmakuResult> {
+    let mod: any;
+    try {
+        mod = loadModule();
+    } catch (e: any) {
+        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
+        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+    }
+    try {
+        const runP = Promise.resolve(mod.run_candidates(title, bvid, out, threshold));
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
+        });
+        const r = await Promise.race([runP, timeoutP]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run_candidates 无返回）' };
+    } catch (e: any) {
+        log.warn('[biliRunner] run_candidates 异常: ' + (e?.message || e));
+        return { ok: false, error: String(e?.message || e) };
+    }
 }

@@ -308,7 +308,14 @@ function open_bili_config_menu()
                 table.insert(items, { title = "  💬 弹幕数：" .. tostring(BILI_INFO.danmaku_count) .. " 条", keep_open = true, selectable = false })
             end
             local src_label = ({ bangumi = "番剧区（正版）", video = "视频区（UP主搬运）" })[BILI_INFO.source] or BILI_INFO.source or "未知"
-            table.insert(items, { title = "  🎯 匹配来源：" .. src_label, keep_open = true, selectable = false })
+            -- 匹配来源后追加 BV 号（官方番剧区 bvid 为空时显示 cid）
+            local src_extra = ""
+            if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
+                src_extra = "  (BV:" .. BILI_INFO.bvid .. ")"
+            elseif BILI_INFO.cid then
+                src_extra = "  (cid:" .. tostring(BILI_INFO.cid) .. ")"
+            end
+            table.insert(items, { title = "  🎯 匹配来源：" .. src_label .. src_extra, keep_open = true, selectable = false })
         else
             -- ❌ 搜索失败
             table.insert(items, { title = "❌ B站弹幕：关联失败", bold = true, keep_open = true, selectable = false })
@@ -361,22 +368,44 @@ end
 -- 手动输入番名（可尾随集数，如「番名 3」），直连 B站 搜索并叠加弹幕。
 bili_manual_title_cache = nil
 
--- 第 1 步：uosc 输入条（自动填入解析到的番名，与弹弹play手动搜索行为一致）
+-- 第 1 步：uosc 输入条（自动填入解析到的「番名 + 季 + 集」，与手动搜索后的候选列表流程衔接）
 function open_bili_manual_search()
     if not uosc_available then
         show_message("手动搜索需在 uosc 控制栏下使用", 3)
         return
     end
-    -- 预填优先级：弹弹play干净标题 > 文件名解析（后者可能含乱码）
-    local suggestion = (DANMAKU.anime and DANMAKU.anime ~= "" and DANMAKU.anime) or parse_title() or ""
+    -- 自动预填：优先弹弹play干净标题，否则用 parse_title 从文件/媒体标题解析出的番名；
+    -- 同时把「季 / 集」附加到预填串（形如「番名 S2 第5集」），用户可直接回车或改。
+    local suggestion = ""
+    local base_title = (DANMAKU.anime and DANMAKU.anime ~= "" and DANMAKU.anime) or (function()
+        local t, _, _ = parse_title()
+        return t or ""
+    end)() or ""
+    if base_title ~= "" then
+        -- 季：从 parse_title 第二返回值
+        local _, snum, _ = parse_title()
+        local bseason = (snum and tonumber(snum) and tonumber(snum) > 0) and tonumber(snum) or 0
+        -- 集：弹弹play 优先，否则 parse_title 第三返回值
+        local ep = nil
+        if DANMAKU.episode then
+            ep = tonumber(tostring(DANMAKU.episode):match("%d+"))
+        end
+        if not ep then
+            local _, _, enum = parse_title()
+            ep = enum and tonumber(enum) or nil
+        end
+        suggestion = base_title
+        if bseason and bseason > 0 then suggestion = suggestion .. " S" .. tostring(bseason) end
+        if ep and ep > 0 then suggestion = suggestion .. " 第" .. tostring(ep) .. "集" end
+    end
     local menu_props = {
         type = "menu_bili_manual",
-        title = "输入番名搜索 B站弹幕（可加空格+集数，如：番名 3）",
+        title = "输入番名搜索 B站弹幕（可加空格+集数/季，如：番名 第5集 或 番名 S2 第5集）",
         search_style = "palette",
         search_debounce = "submit",
         search_suggestion = suggestion,
         on_search = { "script-message-to", mp.get_script_name(), "bili_manual_search_event" },
-        footnote = "输入后回车搜索",
+        footnote = "输入后回车搜索（将展示候选列表供手动选择）",
         items = {},
     }
     mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
@@ -480,6 +509,99 @@ function open_bili_alias_menu()
         items = items,
     }
     mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+end
+
+-- ===================== B站弹幕候选列表（手动搜索后展示，供用户选定具体视频）=====================
+-- 经本地 shim(127.0.0.1:22347) 的 /danmaku-candidates 查询候选并展示为菜单。
+function open_bili_candidates_menu(title, ep, season)
+    if not uosc_available then
+        show_message("需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local items = {
+        { title = "🔍 正在搜索 B站 候选视频…", keep_open = true, selectable = false, italic = true },
+    }
+    local menu_props = {
+        type = "menu_bili_candidates",
+        title = ("B站候选：「%s」%s"):format(title, (ep and ep > 0) and ("第" .. ep .. "集") or ""),
+        search_style = "disabled",
+        items = items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+
+    -- 异步查询候选
+    local params = "title=" .. url_encode(title) .. "&ep=" .. tostring(ep or 0)
+    if season and season > 0 then params = params .. "&season=" .. tostring(season) end
+    local api = "http://127.0.0.1:22347/danmaku-candidates?" .. params
+    local platform = mp.get_property("platform") or ""
+    local res
+    if platform == "windows" then
+        res = mp.command_native({
+            name = "subprocess",
+            args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     "try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+            capture_stdout = true, capture_stderr = true,
+        })
+    else
+        res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "60", api }, capture_stdout = true, capture_stderr = true })
+    end
+    if not res then
+        open_bili_candidates_error("请求失败（shim 未启动？）")
+        return
+    end
+    local body = (res.stdout or ""):gsub("\\r?\\n$", "")
+    if body:sub(1, 4) == "ERR:" then
+        open_bili_candidates_error(body:sub(5))
+        return
+    end
+    local ok_parse, parsed = pcall(utils.parse_json, body)
+    if not ok_parse or type(parsed) ~= "table" then
+        open_bili_candidates_error("响应解析失败")
+        return
+    end
+    if not parsed.ok then
+        open_bili_candidates_error(parsed.error or "未知错误")
+        return
+    end
+    local cands = parsed.candidates or {}
+    if #cands == 0 then
+        open_bili_candidates_error("未找到候选（番名不匹配或网络受限）")
+        return
+    end
+    -- 展示候选列表
+    local new_items = {}
+    table.insert(new_items, { title = ("✅ 共 %d 个候选，选择一个视频使用其弹幕："):format(#cands), bold = true, italic = true, keep_open = true, selectable = false })
+    for _, c in ipairs(cands) do
+        local src_label = ({ bangumi = "番剧区", video = "视频区" })[c.source] or c.source
+        local tag = c.is_compilation and " ⚠️合集/解说" or ""
+        table.insert(new_items, {
+            title = ("%s [%s] %s%s"):format(c.title, c.bvid or "?", src_label, tag),
+            hint = ("BV: %s"):format(c.bvid or "未知"),
+            value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", c.bvid or "", title, tostring(ep or 0) },
+            keep_open = false, selectable = true,
+        })
+    end
+    local props = {
+        type = "menu_bili_candidates",
+        title = ("B站候选：「%s」%s"):format(title, (ep and ep > 0) and ("第" .. ep .. "集") or ""),
+        search_style = "disabled",
+        items = new_items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
+end
+
+function open_bili_candidates_error(msg_text)
+    if not uosc_available then
+        show_message("候选搜索失败：" .. msg_text, 4)
+        return
+    end
+    local items = {
+        { title = "❌ 候选搜索失败：" .. msg_text, keep_open = true, selectable = false, bold = true },
+        { title = "点击下方返回重新搜索", keep_open = true, selectable = false },
+        { title = "▶ 重新搜索", value = { "script-message-to", mp.get_script_name(), "open_bili_manual_search" }, keep_open = false, selectable = true },
+    }
+    local props = { type = "menu_bili_candidates", title = "候选搜索失败", search_style = "disabled", items = items }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
 end
 
 -- 打开弹幕源添加管理菜单

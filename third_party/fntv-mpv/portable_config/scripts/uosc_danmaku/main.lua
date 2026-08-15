@@ -1025,26 +1025,34 @@ mp.register_script_message("bili_search_now", function()
 end)
 
 -- ============ B站弹幕手动搜索 ============
--- 从输入串解析「番名 + 集数」：支持「番名 3」「番名 第5集」「番名@12」「番名 ep7」「番名 E9」
+-- 从输入串解析「番名 + 季 + 集数」：支持「番名 第5集」「番名 S2 第5集」「番名 第2季 第5集」
+-- 「番名 3」「番名@12」「番名 ep7」「番名 E9」。返回 (番名, 集数, 季数)。
 -- 注意：多字节字符类（[话集]）后不要紧跟 $ 锚点（Lua 按字节匹配，会卡在字符中间）。
 local function bili_manual_parse(q)
     q = q:gsub("^%s*(.-)%s*$", "%1")
-    if q == "" then return nil, nil end
-    -- 1) 番名 第X集 / 番名 第X话（阿拉伯数字）
-    local t, n = q:match("^(.-)%s+第%s*(%d+)%s*[话集]")
-    if t and n then
-        q = t:gsub("^%s*(.-)%s*$", "%1")
-        if q ~= "" then return q, tonumber(n) end
+    if q == "" then return nil, nil, nil end
+    local season = nil
+    -- 季：番名 S2 / 番名 第2季 / 番名 第2部
+    local t, s = q:match("^(.-)%s+[Ss](%d+)%s*$")
+    if t and s then q, season = t, tonumber(s) end
+    t, s = q:match("^(.-)%s+第%s*(%d+)%s*[季部]")
+    if t and s then q, season = t:gsub("^%s*(.-)%s*$", "%1"), tonumber(s) end
+
+    -- 集：番名 第X集 / 番名 第X话
+    local tt, n = q:match("^(.-)%s+第%s*(%d+)%s*[话集]")
+    if tt and n then
+        q = tt:gsub("^%s*(.-)%s*$", "%1")
+        if q ~= "" then return q, tonumber(n), season end
     end
-    -- 2) 番名 3 / 番名@3 / 番名 ep3 / 番名 E3（数字在结尾，需有空格分隔）
-    t, n = q:match("^(.-)%s+(%d+)%s*$")
-    if not t then t, n = q:match("^(.-)@(%d+)%s*$") end
-    if not t then t, n = q:match("^(.-)%s+[Ee][pP]?%s*(%d+)%s*$") end
-    if t and n then
-        q = t:gsub("^%s*(.-)%s*$", "%1")
-        if q ~= "" then return q, tonumber(n) end
+    -- 集：番名 3 / 番名@3 / 番名 ep3 / 番名 E3（数字在结尾，需有空格分隔）
+    tt, n = q:match("^(.-)%s+(%d+)%s*$")
+    if not tt then tt, n = q:match("^(.-)@(%d+)%s*$") end
+    if not tt then tt, n = q:match("^(.-)%s+[Ee][pP]?%s*(%d+)%s*$") end
+    if tt and n then
+        q = tt:gsub("^%s*(.-)%s*$", "%1")
+        if q ~= "" then return q, tonumber(n), season end
     end
-    return q, nil
+    return q:gsub("^%s*(.-)%s*$", "%1"), nil, season
 end
 
 mp.register_script_message("open_bili_manual_search", function()
@@ -1056,28 +1064,68 @@ mp.register_script_message("open_bili_manual_ep", function()
 end)
 
 mp.register_script_message("bili_manual_search_event", function(query)
-    local title, ep = bili_manual_parse(query or "")
-    if title and ep then
-        auto_search_extra(title, ep)
-        show_message(("已手动搜索 B站弹幕：%s 第%s集"):format(title, ep), 4)
-    elseif title then
-        open_bili_manual_choose(title)
-    else
+    local title, ep, season = bili_manual_parse(query or "")
+    if not title or title == "" then
         show_message("无法从输入解析出番名，请直接输入番名", 4)
-    end
-end)
-
-mp.register_script_message("bili_manual_do", function(ep_str)
-    local title = bili_manual_title_cache
-    if not title then
-        show_message("请先输入番名再指定集数", 4)
         return
     end
-    local ep = tonumber((ep_str or ""):match("%d+")) or 0
-    auto_search_extra(title, ep)
-    if ep == 0 then
-        show_message(("已手动搜索 B站弹幕：%s（仅番名/单集）"):format(title), 4)
-    else
-        show_message(("已手动搜索 B站弹幕：%s 第%s集"):format(title, ep), 4)
+    -- 先填缓存（候选选择流程会用到）；展示候选列表让用户选定具体视频
+    bili_manual_title_cache = title
+    open_bili_candidates_menu(title, ep or 0, season or 0)
+end)
+
+-- 用户从候选列表中选定某个视频（按 bvid）
+mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
+    bvid = (bvid or ""):gsub("^%s*(.-)%s*$", "%1")
+    title = (title or ""):gsub("^%s*(.-)%s*$", "%1")
+    if not bvid or bvid == "" or not title or title == "" then
+        show_message("候选缺少 bvid 或 番名，无法拉取", 4)
+        return
     end
+    bili_manual_title_cache = title
+    local ep = tonumber((ep_str or ""):match("%d+")) or 0
+    -- 复用 auto_search_extra 的 out_xml 构造逻辑（同一集唯一路径，避免重复加载）
+    local safe_title = (title:gsub('[\\/:*?"<>|]', "") or "x")
+    local out_xml = utils.join_path(DANMAKU_PATH, "bili_danmaku_" .. safe_title .. "_" .. ep .. ".xml")
+    if DANMAKU.sources[out_xml] then
+        show_message("该集B站弹幕已加载，跳过", 3)
+        return
+    end
+    -- 经本地 shim 的 /danmaku-by-bvid 端点按选定 bvid 拉取弹幕
+    local function url_encode(str)
+        if not str then return "" end
+        return (str:gsub("([^%w%-%.%_%~])", function(c) return string.format("%%%02X", string.byte(c)) end))
+    end
+    local api = string.format(
+        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s",
+        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500))
+    local platform = mp.get_property("platform") or ""
+    local res
+    if platform == "windows" then
+        res = mp.command_native({
+            name = "subprocess",
+            args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     "try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+            capture_stdout = true, capture_stderr = true,
+        })
+    else
+        res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "60", api }, capture_stdout = true, capture_stderr = true })
+    end
+    if not res then
+        show_message("选定视频弹幕拉取失败（shim 未启动？）", 4)
+        return
+    end
+    local body = (res.stdout or ""):gsub("\\r?\\n$", "")
+    if body:sub(1, 4) == "ERR:" then
+        show_message("选定视频弹幕拉取失败：" .. body:sub(5), 4)
+        return
+    end
+    local ok_parse, parsed = pcall(utils.parse_json, body)
+    if not ok_parse or type(parsed) ~= "table" or not parsed.ok then
+        show_message("选定视频弹幕拉取失败：" .. (parsed and parsed.error or "未知"), 4)
+        return
+    end
+    BILI_INFO = parsed
+    add_danmaku_source_local(out_xml, false)
+    show_message(("已使用选定视频弹幕：%s（BV:%s，%d 条）"):format(title, bvid, parsed.danmaku_count or 0), 4)
 end)

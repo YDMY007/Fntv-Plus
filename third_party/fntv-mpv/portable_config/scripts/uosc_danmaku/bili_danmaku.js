@@ -967,6 +967,79 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
     return result;
 }
 
+// ===================== 候选搜索模式（供手动搜索 UI 展示候选列表）=====================
+// 只搜索并返回候选视频列表（标题/bvid/弹幕数/来源/季），不拉取/聚合弹幕、不写 XML。
+// 用于 MPV 侧「手动搜索 B站弹幕」时，先把候选列表展示给用户，由用户选定具体视频。
+async function search_candidates(title, ep_num, season_num) {
+    if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
+    if (isNaN(ep_num)) ep_num = 0;
+    if (typeof season_num === 'string') season_num = parseInt(season_num, 10);
+    if (isNaN(season_num)) season_num = 0;
+    let t = String(title || '').replace(/\s*[\(（]\d{4}[\)）]\s*$/, '').trim();
+    if (!t) return { ok: false, error: '缺少番名' };
+
+    _refresh_cookie();
+    await verify_cookie();
+    if (!ep_num || ep_num === 0) {
+        const derived = parse_ep_from_title(t);
+        if (derived) ep_num = derived;
+    }
+    log(`[候选搜索] 番名=${t} 集数=${ep_num} 季数=${season_num || 0}`);
+
+    const candidates = await search_cid(t, ep_num, season_num);
+    if (!candidates.length) {
+        log('[候选搜索] 未找到任何候选');
+        return { ok: true, candidates: [] };
+    }
+    // 整理为 UI 友好结构（含候选是否合集/解说，供前端优先置底或标记）
+    const list = candidates.slice(0, 12).map(([cid, atitle, info], i) => ({
+        index: i,
+        cid: cid,
+        bvid: (info && info.bvid) || null,
+        title: atitle || '',
+        source: (info && info.source) || 'unknown',
+        season: (info && info.season_match) ? season_num : 0,
+        is_compilation: !!(info && info.isCompilation),
+        sim: (info && typeof info.sim === 'number') ? info.sim : null,
+    }));
+    // 按「非合集优先、相似度降序」排序，让正片候选排在前面（合集/解说沉底）
+    list.sort((a, b) =>
+        ((a.is_compilation ? 1 : 0) - (b.is_compilation ? 1 : 0)) ||
+        ((b.sim || 0) - (a.sim || 0)));
+    log(`[候选搜索] 返回 ${list.length} 个候选`);
+    return { ok: true, candidates: list };
+}
+
+// 由用户选定的 bvid 直接拉取该视频弹幕（手动搜索模式：用户已明确选定视频）。
+async function run_candidates(title, bvid, out, threshold) {
+    if (!title || !bvid || !out) return { ok: false, error: '缺少 title/bvid/out 参数' };
+    if (typeof threshold === 'string') threshold = parseInt(threshold, 10);
+    if (isNaN(threshold) || !threshold) threshold = 1500;
+    _refresh_cookie();
+    await verify_cookie();
+    log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out}`);
+    const cid = await cid_from_bvid(bvid, 0, title);
+    if (!cid) return { ok: false, error: `无法解析 bvid=${bvid} 的 cid` };
+    const [ok, all_d] = await try_fetch_danmaku(cid);
+    if (!ok || !all_d.length) return { ok: false, error: `bvid=${bvid} 无弹幕数据` };
+    const block_types = _load_block_types();
+    let final = all_d;
+    if (block_types.size) final = _filter_danmaku(final, block_types);
+    _write_xml(out, final);
+    const result = {
+        ok: true,
+        bvid: bvid,
+        title: title,
+        matched_title: title,
+        sim: null,
+        danmaku_count: final.length,
+        source: 'video',
+        cid: cid,
+    };
+    log(`✅ [候选拉取] ${title} -> ${final.length} 条弹幕 (bvid=${bvid}) -> ${out}`);
+    return result;
+}
+
 // CLI 入口：解析 argv -> run -> 输出 BILI_RESULT 到 stdout -> 退出码。
 // （历史用法：node bili_danmaku.js <番名> <集数> <输出xml> [聚合阈值]）
 async function main() {
@@ -990,7 +1063,7 @@ async function main() {
     }
 }
 
-module.exports = { run: run, setLogSink: setLogSink, _load_cookie: _load_cookie, search_guochuang_wbi: search_guochuang_wbi, search_bangumi_wbi: search_bangumi_wbi };
+module.exports = { run: run, search_candidates: search_candidates, run_candidates: run_candidates, setLogSink: setLogSink, _load_cookie: _load_cookie, search_guochuang_wbi: search_guochuang_wbi, search_bangumi_wbi: search_bangumi_wbi };
 
 if (require.main === module) {
     main();

@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
-import { runBiliDanmaku } from './biliRunner';
+import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
 
@@ -75,6 +75,16 @@ class PlaybackShim {
         // 用法: GET /danmaku?title=<番名>&ep=<集数>&out=<输出xml绝对路径>&threshold=<聚合阈值>
         if (pathname === '/danmaku') {
             this.handleDanmaku(req, res);
+            return;
+        }
+        // 候选搜索：仅返回候选视频列表（标题/bvid/来源/是否合集），供 MPV 手动搜索 UI 展示
+        if (pathname === '/danmaku-candidates') {
+            this.handleDanmakuCandidates(req, res);
+            return;
+        }
+        // 用户选定 bvid 后，直接拉取该视频弹幕
+        if (pathname === '/danmaku-by-bvid') {
+            this.handleDanmakuByBvid(req, res);
             return;
         }
         const m = pathname.match(/^\/p\/([^/]+)\//);
@@ -377,6 +387,73 @@ class PlaybackShim {
         const body = JSON.stringify(obj);
         res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(body);
+    }
+
+    // ===================== 候选搜索端点（/danmaku-candidates）=====================
+
+    /**
+     * 处理 /danmaku-candidates 请求：搜索 B站 候选视频列表（不拉取弹幕、不写 XML）。
+     * 供 MPV 手动搜索 UI 展示候选列表，由用户选定具体视频。
+     */
+    private handleDanmakuCandidates(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const title = (q.title || '').toString();
+        const ep = parseInt((q.ep || '0').toString(), 10) || 0;
+        const season = q.season ? parseInt(q.season.toString(), 10) : 0;
+        if (!title) {
+            this.json(res, 400, { ok: false, error: '缺少 title 参数' });
+            return;
+        }
+        log.info(`[playbackShim][danmaku-candidates] ▶ 请求候选 | title=${JSON.stringify(title)} ep=${ep} season=${season || 0}`);
+        runBiliDanmakuCandidates(title, ep, season).then((r) => {
+            if (r.ok) {
+                log.info(`[playbackShim][danmaku-candidates] ✅ 候选 ${r.candidates ? r.candidates.length : 0} 个`);
+                this.json(res, 200, { ok: true, candidates: r.candidates || [] });
+            } else {
+                log.warn(`[playbackShim][danmaku-candidates] ❌ 候选搜索失败: ${r.error}`);
+                this.json(res, 200, { ok: false, error: r.error });
+            }
+        }).catch((e) => {
+            log.warn(`[playbackShim][danmaku-candidates] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
+    // ===================== 指定 bvid 拉取端点（/danmaku-by-bvid）=====================
+
+    /**
+     * 处理 /danmaku-by-bvid 请求：由用户选定的 bvid 直接拉取该视频弹幕并写出 XML。
+     */
+    private handleDanmakuByBvid(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const title = (q.title || '').toString();
+        const bvid = (q.bvid || '').toString();
+        const out = (q.out || '').toString();
+        const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
+        if (!title || !bvid || !out) {
+            this.json(res, 400, { ok: false, error: '缺少 title / bvid / out 参数' });
+            return;
+        }
+        if (!this.isSafeDanmakuPath(out)) {
+            log.warn(`[playbackShim][danmaku-by-bvid] ❌ 拒绝非安全输出路径: ${out}`);
+            this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
+            return;
+        }
+        log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'}`);
+        runBiliDanmakuByBvid(title, bvid, out, threshold).then((r) => {
+            if (r.ok) {
+                log.info(`[playbackShim][danmaku-by-bvid] ✅ 弹幕就绪 | count=${r.danmaku_count} bvid=${r.bvid}`);
+                this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, bvid: r.bvid, cid: r.cid });
+            } else {
+                log.warn(`[playbackShim][danmaku-by-bvid] ❌ 弹幕获取失败: ${r.error}`);
+                this.json(res, 200, { ok: false, error: r.error });
+            }
+        }).catch((e) => {
+            log.warn(`[playbackShim][danmaku-by-bvid] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
     }
 }
 
