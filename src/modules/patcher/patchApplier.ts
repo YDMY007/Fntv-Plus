@@ -173,9 +173,9 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-// 解析版本号中的 hotfix 后缀（-hotfix => 1, -hotfix2 => 2, 普通 => 0）
+// 解析版本号中的 hotfix/full 后缀（-hotfix => 1, -hotfix2 => 2, 普通/base => 0）
 function parseVersion(v: string): { base: string; hotfix: number } {
-    const m = /^(.*?)-hotfix(\d*)$/i.exec(v || '');
+    const m = /^(.*?)-(?:hotfix|full)(\d*)$/i.exec(v || '');
     if (m) {
         const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
         return { base: m[1], hotfix: idx };
@@ -190,6 +190,16 @@ function versionGreater(latest: string, baseline: string): boolean {
     const c = compareVersions(a.base, b.base);
     if (c !== 0) return c > 0;
     return a.hotfix > b.hotfix;
+}
+
+// 从发行说明(更新日志)取最新 ## vX.Y.Z(-hotfix|-full)? (date) heading 的版本号；找不到回退 null
+function parseLatestChangelogVersion(body: string): string | null {
+    const lines = (body || '').split(/\r?\n/);
+    for (const line of lines) {
+        const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)/i.exec(line.trim());
+        if (m) return m[1];
+    }
+    return null;
 }
 
 /**
@@ -241,11 +251,15 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
     log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}`);
 
     const release = await fetchReleaseJson();
-    const latestVersion: string = String(release.tag_name || '').replace(/^v/, '');
-    if (!latestVersion) {
+    // [lc-477] 版本号以更新日志最新 heading 为准(## vX.Y.Z(-hotfix)? (date))，Git tag 仅兜底
+    const body = release.body || release.note || '';
+    const latestVersion: string = parseLatestChangelogVersion(body)
+        || String(release.tag_name || '').replace(/^v/i, '')
+        || '0';
+    if (!latestVersion || latestVersion === '0') {
         return { ok: false, filesApplied: 0, needsRestart: false, message: 'Release 缺少版本号' };
     }
-    log.info(`[patch] 最新补丁版本: ${latestVersion}`);
+    log.info(`[patch] 最新补丁版本(更新日志): ${latestVersion}, Git tag: ${release.tag_name || '(无)'}`);
 
     if (applied && !versionGreater(latestVersion, applied)) {
         return {

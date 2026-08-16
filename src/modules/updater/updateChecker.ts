@@ -70,13 +70,17 @@ export class UpdateChecker {
 
     /**
      * 解析更新类型标识。
-     * 主信号 = 版本号后缀：发行 tag 形如 `v1.2.3-hotfix` / `v1.2.3-hotfix2` 即判定为热补丁(hotfix)，
-     * 用户只需在国内 Gitee 发布版本号时后面带上 `hotfix` 即可，无需额外写标识。
+     * 主信号 = 更新日志里最新 `## vX.Y.Z(-hotfix|-full) (date)` heading 的版本后缀：
+     *  - `-hotfix` / `-hotfixN` → 热补丁(hotfix)，应用内拉取 Gitee 补丁包；
+     *  - `-full` / `-fullN`     → 全量包(full)，去 GitHub 下载覆盖安装；
+     *  - 无后缀的普通版本(如 `v3.3.6`) → 视为全量包(full)。
+     * Git Release tag 本身保持干净(如 `v3.3.6`)，不带后缀。
      * 兼容旧发布：发行说明显式标识 `<!-- fntv:type:hotfix -->` / `<!-- fntv:type:full -->` 仍生效；
-     * 再退按资产推断：含 `patch-<ver>.json` 视为 hotfix；缺省 full。
+     * 再退按资产推断：含 `patch-<ver>.json` 视为 hotfix。
      */
     private parseUpdateType(body: string, assets: any[], latestVersion: string): 'hotfix' | 'full' {
         if (/-hotfix\d*$/i.test(latestVersion || '')) return 'hotfix';
+        if (/-full\d*$/i.test(latestVersion || '')) return 'full';
         const m = /fntv:type:\s*(hotfix|full)/i.exec(body || '');
         if (m) return m[1].toLowerCase() === 'hotfix' ? 'hotfix' : 'full';
         const hasPatch = Array.isArray(assets)
@@ -85,10 +89,25 @@ export class UpdateChecker {
     }
 
     /**
+     * 从发行说明(更新日志)里取「最新一条」`## vX.Y.Z(-hotfix|-full)? (date)` heading 的版本号。
+     * 更新日志 newest-first，取第一个 `## ` heading 即为当前发布版本。
+     * 找不到则返回 null（调用方回退到 Git tag_name）。
+     */
+    private parseLatestChangelogVersion(body: string): string | null {
+        const lines = (body || '').split(/\r?\n/);
+        for (const line of lines) {
+            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)/i.exec(line.trim());
+            if (m) return m[1];
+        }
+        return null;
+    }
+
+    /**
      * 通过国内 Gitee 检测最新版本（唯一检测源）。
-     *  - 版本号取 `tag_name`（去 v 前缀）；
+     *  - 版本号/类型以「更新日志最新 heading」为准：`## vX.Y.Z(-hotfix|-full) (date)`（newest-first 取第一条）；
+     *    Git Release tag 保持干净(如 v3.3.6)，仅作兜底；
      *  - 发布时间取 `created_at`（Gitee 用 created_at，非 published_at）；
-     *  - 更新类型取发行说明标识 / 资产推断（hotfix|full）；
+     *  - 更新类型由 heading 版本后缀决定(-hotfix=应用内补丁 / -full 或无后缀=GitHub 全量包)；
      *  - 下载/详情链接统一指向国外 GitHub 发行版最新下载页。
      * @returns 更新信息
      */
@@ -102,13 +121,17 @@ export class UpdateChecker {
         });
 
         const r = response.data;
-        const latestVersion = String(r.tag_name || '').replace(/^v/, '');
+        // [lc-477] 版本号/类型以「更新日志最新 heading」为准：## vX.Y.Z(-hotfix|-full) (date)。
+        // Git Release tag 保持干净(如 v3.3.6)，仅作兜底；真正的版本+类型从更新日志 heading 取。
+        const latestVersion = this.parseLatestChangelogVersion(r.body || '')
+            || String(r.tag_name || '').replace(/^v/i, '')
+            || '0';
         // 不论类型，详情/全量包下载均指向国外 GitHub 发行版最新下载页（国内 Gitee 不托管大文件）
         const githubReleaseUrl = `https://github.com/${this.owner}/${this.repo}/releases/latest`;
 
         // [lc-476] hotfix 类以「已应用补丁版本」为比较基准，避免重复提示
         const updateType = this.parseUpdateType(r.body || '', r.assets, latestVersion);
-        log.info(`Gitee 最新标签: ${latestVersion}, 类型: ${updateType}`);
+        log.info(`Gitee 检测版本(更新日志): ${latestVersion}, 类型: ${updateType}, Git tag: ${r.tag_name || '(无)'}`);
 
         const applied = getAppliedPatchVersion();
         // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本
@@ -159,7 +182,7 @@ export class UpdateChecker {
      * 普通版本 → { base:'1.2.3', hotfix:0 }。
      */
     private parseVersion(v: string): { base: string; hotfix: number } {
-        const m = /^(.*?)-hotfix(\d*)$/i.exec(v || '');
+        const m = /^(.*?)-(?:hotfix|full)(\d*)$/i.exec(v || '');
         if (m) {
             const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
             return { base: m[1], hotfix: idx };

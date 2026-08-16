@@ -4,25 +4,33 @@
  *
  * 用法:
  *   node scripts/publish-patch.mjs <version> <dest文件1> [<dest文件2> ...]
- * 例:
- *   node scripts/publish-patch.mjs 1.2.3-hotfix dest/preload/plugins/embyWall.js dest/main/handlers/plugins/media.js
+ * 例(热补丁):
+ *   node scripts/publish-patch.mjs 3.3.7-hotfix dest/preload/plugins/embyWall.js
+ * 例(全量, 仅写更新日志通知, 安装包仍走 GitHub):
+ *   node scripts/publish-patch.mjs 3.3.7-full
  *
- * 版本号约定: 热补丁版本号直接带上 `-hotfix` 后缀(如 `1.2.3-hotfix` / `1.2.3-hotfix2`)。
- *   应用内更新检测即据此判定为「热补丁(hotfix)」并弹出补丁弹窗 —— 这是唯一的类型信号，
- *   不需要再在发行说明里写任何标识(旧的 `<!-- fntv:type:hotfix -->` 标识仍兼容生效)。
- *   全量安装包版本号用普通 semver(如 `1.3.0`)，应用内判定为 full 并引导去 GitHub 下载覆盖安装。
+ * 版本号 = 更新日志里的版本(带类型后缀), 不是 Git tag:
+ *   - 热补丁: `3.3.7-hotfix` / `3.3.7-hotfix2`  → 应用内判定 hotfix, 弹窗「应用补丁」应用内拉取。
+ *   - 全量:   `3.3.7-full`                       → 应用内判定 full, 弹窗引导去 GitHub 下载覆盖安装。
+ *   - 普通:   `3.3.7`(无后缀)                    → 视为 full。
+ * 类型信号 = 更新日志最新 heading 的版本后缀: `## v3.3.7-hotfix (2026-08-11)`。
+ *
+ * Git Release tag 保持干净(如 v3.3.6, 不带后缀):
+ *   - 默认 Git tag = 当前应用版本(pkg.version), 即把补丁追加到"当前在发的那个 Release"上(用户保持 tag 原样);
+ *   - 如需指定其它 tag, 设环境变量 GITEE_TAG(如 v3.3.7)。
+ * 脚本会把更新日志顶部 heading 写成 `## v<version> (YYYY-MM-DD)`(已存在则替换首行), 供应用内检测。
  *
  * 行为:
  *   1. 读取各 dest 文件, base64 编码;
  *   2. 生成 patch-<version>.json(含 version / minAppVersion / files[]);
  *      - target 自动去掉开头的 dest/ 前缀(如 dest/preload/plugins/x.js -> preload/plugins/x.js)
  *   3. 上传(源优先级 = Gitee 优先, GitHub 次选):
- *      - Gitee: 设环境变量 GITEE_TOKEN 后, 自动查/建 Release(v<version>)并上传附件(国内直连,
- *        与拉包端 patchApplier 的 Gitee 优先一致); 未设 token 则跳过。
+ *      - Gitee: 设 GITEE_TOKEN 后, 自动查/建 Git tag 对应 Release, 把更新日志顶部 heading 写为
+ *        `## v<version> (日期)`, 并上传 patch-<version>.json 附件(国内直连); 未设 token 则跳过。
  *      - GitHub: 检测到 gh CLI 且有 GITHUB_TOKEN 时, `gh release upload v<version>` 作次选保底。
  *      - 两者都不可用则仅把 json 写到项目根目录, 并打印手动上传说明。
  *
- * 说明: 本脚本只负责"出包+上传", 不自动 git push。确保标签 v<version> 已推到目标仓库。
+ * 说明: 本脚本只负责"出包+上传", 不自动 git push。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -76,6 +84,11 @@ async function giteeUpload(tag, filePath, fileName) {
         return false;
     }
     const H = { 'User-Agent': 'fnos-tv-publish' };
+    // 更新日志 heading：## v<version> (YYYY-MM-DD)。应用内检测据此 heading 的版本后缀判定 hotfix/full，
+    // Git Release tag 本身保持干净(如 v3.3.6，不带后缀)。
+    const today = new Date().toISOString().slice(0, 10);
+    const newHeading = `## v${version} (${today})`;
+    const changelogBody = `${newHeading}\n\nFntv-Plus 热补丁 ${version}`;
     let release;
     try {
         const r = await fetch(giteeApi(`releases/tags/${tag}?access_token=${GITEE_TOKEN}`), { headers: H });
@@ -86,13 +99,29 @@ async function giteeUpload(tag, filePath, fileName) {
             const r = await fetch(giteeApi(`releases?access_token=${GITEE_TOKEN}`), {
                 method: 'POST',
                 headers: { ...H, 'Content-Type': 'application/json' },
-                // [lc-476] 发行说明首行写入显式类型标识 `<!-- fntv:type:hotfix -->`，
-                // 应用内更新检测据此判定为「应用内补丁」(hotfix)；全量包(full)无需此标识(缺省 full)。
-                body: JSON.stringify({ tag_name: tag, name: `热补丁 ${tag}`, body: `<!-- fntv:type:hotfix -->\nFntv-Plus 热补丁 ${tag}`, prerelease: false, target_commitish: 'release' }),
+                body: JSON.stringify({ tag_name: tag, name: `热补丁 ${tag}`, body: changelogBody, prerelease: false, target_commitish: 'release' }),
             });
             if (r.ok) release = await r.json();
             else console.log(`[publish-patch] Gitee 创建 Release 失败(${r.status}), 可能标签 ${tag} 尚未推送到 Gitee`);
         } catch (e) { console.log('[publish-patch] Gitee 创建 Release 异常:', e.message); }
+    } else {
+        // Release 已存在(用户保持同一 Git tag 如 v3.3.6、仅更新更新日志)：把最新 heading 写到 body 顶部，
+        // 使应用内检测读到新版本号/类型。已有 heading 则替换首行，否则 prepend。
+        const prevBody = release.body || '';
+        const newBody = /^##\s+/m.test(prevBody)
+            ? prevBody.replace(/^##\s+.*$/m, newHeading)
+            : `${newHeading}\n\n${prevBody}`.trim();
+        if (newBody !== prevBody) {
+            try {
+                const r = await fetch(giteeApi(`releases/${release.id}?access_token=${GITEE_TOKEN}`), {
+                    method: 'PATCH',
+                    headers: { ...H, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ body: newBody }),
+                });
+                if (r.ok) console.log(`[publish-patch] 已更新 Gitee Release ${tag} 更新日志顶部: ${newHeading}`);
+                else console.log(`[publish-patch] Gitee 更新 Release body 失败(${r.status})`);
+            } catch (e) { console.log('[publish-patch] Gitee PATCH Release 异常:', e.message); }
+        }
     }
     if (!release || !release.id) {
         console.log(`[publish-patch] 未找到/未创建 Gitee Release ${tag}, 跳过 Gitee 上传。`);
@@ -119,7 +148,12 @@ async function giteeUpload(tag, filePath, fileName) {
     return false;
 }
 
-const tag = version.startsWith('v') ? version : 'v' + version;
+// Git Release tag 保持干净(如 v3.3.6)，不带 -hotfix/-full 后缀：
+// 默认 = 当前应用版本(pkg.version)，即把补丁追加到"当前在发的那个 Release"上(用户保持 tag 原样)；
+// 如需新建/指定其它 tag，可设环境变量 GITEE_TAG(如 v3.3.7)。版本参数(version)始终是更新日志里的版本号。
+const tag = process.env.GITEE_TAG
+    ? (process.env.GITEE_TAG.startsWith('v') ? process.env.GITEE_TAG : 'v' + process.env.GITEE_TAG)
+    : 'v' + pkg.version;
 let uploaded = await giteeUpload(tag, outPath, outName);
 
 // ---------- GitHub 次选保底 ----------
