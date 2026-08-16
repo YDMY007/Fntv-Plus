@@ -3173,18 +3173,15 @@ function handle(): void {
     const updRow = document.createElement('div');
     updRow.style.cssText = 'display:flex;justify-content:space-evenly;gap:6px;';
     const updBtn = mkBtn('检查更新', true);
-    const updMirrorBtn = mkBtn('镜像检查', true);
     const updHistoryBtn = mkBtn('历史版本', true);
     // [lc-474] 一键应用热补丁：应用内直接拉取并填补小 bug 修复，不跳浏览器手动下载
     const patchBtn = mkBtn('应用补丁', true);
     updRow.appendChild(updBtn);
-    updRow.appendChild(updMirrorBtn);
     updRow.appendChild(updHistoryBtn);
     updRow.appendChild(patchBtn);
     updFooter.appendChild(updRow);
     sec1.el.appendChild(updFooter);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
-    updMirrorBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update-mirror'); });
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
     patchBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();

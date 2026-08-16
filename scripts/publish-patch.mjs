@@ -81,7 +81,9 @@ async function giteeUpload(tag, filePath, fileName) {
             const r = await fetch(giteeApi(`releases?access_token=${GITEE_TOKEN}`), {
                 method: 'POST',
                 headers: { ...H, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tag_name: tag, name: `热补丁 ${tag}`, body: `Fntv-Plus 热补丁 ${tag}`, prerelease: false, target_commitish: 'release' }),
+                // [lc-476] 发行说明首行写入显式类型标识 `<!-- fntv:type:hotfix -->`，
+                // 应用内更新检测据此判定为「应用内补丁」(hotfix)；全量包(full)无需此标识(缺省 full)。
+                body: JSON.stringify({ tag_name: tag, name: `热补丁 ${tag}`, body: `<!-- fntv:type:hotfix -->\nFntv-Plus 热补丁 ${tag}`, prerelease: false, target_commitish: 'release' }),
             });
             if (r.ok) release = await r.json();
             else console.log(`[publish-patch] Gitee 创建 Release 失败(${r.status}), 可能标签 ${tag} 尚未推送到 Gitee`);

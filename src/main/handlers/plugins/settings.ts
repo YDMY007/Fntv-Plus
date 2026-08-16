@@ -456,14 +456,6 @@ async function handleCheckUpdate(): Promise<void> {
     }
 }
 
-async function handleCheckUpdateMirror(): Promise<void> {
-    try {
-        await getUpdateChecker().manualCheckForUpdatesViaMirror();
-    } catch (error) {
-        log.error('镜像检查更新失败:', error);
-    }
-}
-
 async function handleShowMain(): Promise<void> {
     const win = getMainWindow();
     if (win) {
@@ -715,7 +707,6 @@ function init(): void {
     registerHandler('settings:set-bili-danmaku-style', handleSetBiliDanmakuStyle, { useHandle: true });
     registerHandler('settings:diagnostics', handleGetDiagnostics, { useHandle: true });
     registerHandler('settings:check-update', handleCheckUpdate, { useHandle: true });
-    registerHandler('settings:check-update-mirror', handleCheckUpdateMirror, { useHandle: true });
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
     registerHandler('settings:open-log', handleOpenLog, { useHandle: true });
     registerHandler('settings:open-error-log', handleOpenErrorLog, { useHandle: true });
