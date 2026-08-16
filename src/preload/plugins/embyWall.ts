@@ -3200,6 +3200,35 @@ function handle(): void {
         }
     });
 
+    // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
+    const testBtn = mkBtn('测试更新', true);
+    const updRow2 = document.createElement('div');
+    updRow2.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;margin-top:8px;';
+    const testHint = document.createElement('span');
+    testHint.textContent = '开发者测试通道（需解锁码）';
+    testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.7;';
+    updRow2.appendChild(testHint);
+    updRow2.appendChild(testBtn);
+    updFooter.appendChild(updRow2);
+    testBtn.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        if (testBtn.disabled) return;
+        const code = await promptUnlockCode();
+        if (code === null) return; // 用户取消
+        const old = testBtn.textContent;
+        testBtn.textContent = '获取中…';
+        testBtn.disabled = true;
+        try {
+            const res: any = await ipcRenderer.invoke('settings:apply-test-patch', code);
+            showPatchToast((res && res.message) || (res && res.ok ? '已应用测试补丁' : '获取失败'));
+        } catch (err: any) {
+            showPatchToast('获取失败: ' + ((err && err.message) || err));
+        } finally {
+            testBtn.textContent = old || '测试更新';
+            testBtn.disabled = false;
+        }
+    });
+
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
     function showPatchToast(msg: string): void {
         let t = document.getElementById('fntv-patch-toast');
@@ -3215,6 +3244,71 @@ function handle(): void {
         t.textContent = msg;
         requestAnimationFrame(() => { if (t) t.style.opacity = '1'; });
         setTimeout(() => { if (t) t.style.opacity = '0'; }, 2400);
+    }
+
+    // [lc-481] 解锁码输入弹窗：返回输入的解锁码；用户取消返回 null。复用现有 modal 样式；可重复调用（resolve 用模块级变量避免重复绑定）。
+    let _unlockResolve: ((v: string | null) => void) | null = null;
+    function promptUnlockCode(): Promise<string | null> {
+        return new Promise((resolve) => {
+            let modal = document.getElementById('fntv-unlock-modal') as HTMLElement | null;
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'fntv-unlock-modal';
+                modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+                modal.style.cssText = 'position:fixed;z-index:2147483703;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+                modal.addEventListener('click', (e: Event) => {
+                    if (e.target === modal) { modal!.style.display = 'none'; if (_unlockResolve) _unlockResolve(null); }
+                });
+
+                const card = document.createElement('div');
+                card.style.cssText = 'width:300px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
+                    + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+                    + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+                    + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
+                card.innerHTML = ''
+                    + '<div style="font-size:16px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">🔧 开发者测试更新</div>'
+                    + '<div style="font-size:12px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:14px;">请输入解锁码以获取 Gitee 测试补丁</div>';
+
+                const input = document.createElement('input');
+                input.type = 'password';
+                input.placeholder = '解锁码';
+                input.id = 'fntv-unlock-input';
+                input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
+                    + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
+                card.appendChild(input);
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
+                const cancelBtn = document.createElement('button');
+                cancelBtn.type = 'button';
+                cancelBtn.textContent = '取消';
+                cancelBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
+                    + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-btn-text);';
+                const okBtn = document.createElement('button');
+                okBtn.type = 'button';
+                okBtn.textContent = '确定';
+                okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
+                    + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
+                row.appendChild(cancelBtn);
+                row.appendChild(okBtn);
+                card.appendChild(row);
+                modal.appendChild(card);
+                document.body.appendChild(modal);
+
+                const doClose = (val: string | null) => { modal!.style.display = 'none'; if (_unlockResolve) _unlockResolve(val); };
+                cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(null); });
+                okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(input.value); });
+                input.addEventListener('keydown', (e: KeyboardEvent) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') doClose(input.value);
+                    else if (e.key === 'Escape') doClose(null);
+                });
+            }
+            _unlockResolve = resolve;
+            modal.style.display = 'flex';
+            const inp = modal.querySelector('#fntv-unlock-input') as HTMLInputElement | null;
+            if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+        });
     }
 
 
