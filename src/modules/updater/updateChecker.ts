@@ -69,11 +69,14 @@ export class UpdateChecker {
     }
 
     /**
-     * 解析发行说明里的更新类型标识。
-     * 优先读显式标识 `<!-- fntv:type:hotfix -->` / `<!-- fntv:type:full -->`；
-     * 否则按资产推断：含 `patch-<ver>.json` 视为 hotfix；缺省 full。
+     * 解析更新类型标识。
+     * 主信号 = 版本号后缀：发行 tag 形如 `v1.2.3-hotfix` / `v1.2.3-hotfix2` 即判定为热补丁(hotfix)，
+     * 用户只需在国内 Gitee 发布版本号时后面带上 `hotfix` 即可，无需额外写标识。
+     * 兼容旧发布：发行说明显式标识 `<!-- fntv:type:hotfix -->` / `<!-- fntv:type:full -->` 仍生效；
+     * 再退按资产推断：含 `patch-<ver>.json` 视为 hotfix；缺省 full。
      */
     private parseUpdateType(body: string, assets: any[], latestVersion: string): 'hotfix' | 'full' {
+        if (/-hotfix\d*$/i.test(latestVersion || '')) return 'hotfix';
         const m = /fntv:type:\s*(hotfix|full)/i.exec(body || '');
         if (m) return m[1].toLowerCase() === 'hotfix' ? 'hotfix' : 'full';
         const hasPatch = Array.isArray(assets)
@@ -108,16 +111,12 @@ export class UpdateChecker {
         log.info(`Gitee 最新标签: ${latestVersion}, 类型: ${updateType}`);
 
         const applied = getAppliedPatchVersion();
-        const baseForCompare = (updateType === 'hotfix' && applied && this.compareVersions(applied, this.currentVersion) > 0)
-            ? applied
-            : this.currentVersion;
+        // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本
+        const baseline = (updateType === 'hotfix' && applied) ? applied : this.currentVersion;
 
-        let hasUpdate: boolean;
-        if (semver) {
-            hasUpdate = semver.gt(latestVersion, baseForCompare);
-        } else {
-            hasUpdate = this.compareVersions(latestVersion, baseForCompare) > 0;
-        }
+        // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
+        // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
+        const hasUpdate = this.versionGreater(latestVersion, baseline);
 
         return {
             hasUpdate,
@@ -152,6 +151,45 @@ export class UpdateChecker {
         }
 
         return 0;
+    }
+
+    /**
+     * 解析版本号中的 hotfix 后缀。
+     * `1.2.3-hotfix` → { base:'1.2.3', hotfix:1 }；`1.2.3-hotfix2` → { base:'1.2.3', hotfix:2 }；
+     * 普通版本 → { base:'1.2.3', hotfix:0 }。
+     */
+    private parseVersion(v: string): { base: string; hotfix: number } {
+        const m = /^(.*?)-hotfix(\d*)$/i.exec(v || '');
+        if (m) {
+            const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
+            return { base: m[1], hotfix: idx };
+        }
+        return { base: v || '0', hotfix: 0 };
+    }
+
+    /** 仅比较 base 部分（semver 优先，失败回落到数字比较）。 */
+    private cmpBase(a: string, b: string): number {
+        if (semver) {
+            try {
+                if (semver.gt(a, b)) return 1;
+                if (semver.lt(a, b)) return -1;
+                return 0;
+            } catch { /* fallthrough */ }
+        }
+        return this.compareVersions(a, b);
+    }
+
+    /**
+     * 版本比较：base 优先，base 相同则比 hotfix 序号。
+     * 关键修正：`-hotfix` 视为高于同 base 的正式版，
+     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true。
+     */
+    private versionGreater(latest: string, baseline: string): boolean {
+        const a = this.parseVersion(latest);
+        const b = this.parseVersion(baseline);
+        const c = this.cmpBase(a.base, b.base);
+        if (c !== 0) return c > 0;
+        return a.hotfix > b.hotfix;
     }
 
     /**

@@ -5,7 +5,12 @@
  * 用法:
  *   node scripts/publish-patch.mjs <version> <dest文件1> [<dest文件2> ...]
  * 例:
- *   node scripts/publish-patch.mjs 1.2.3 dest/preload/plugins/embyWall.js dest/main/handlers/plugins/media.js
+ *   node scripts/publish-patch.mjs 1.2.3-hotfix dest/preload/plugins/embyWall.js dest/main/handlers/plugins/media.js
+ *
+ * 版本号约定: 热补丁版本号直接带上 `-hotfix` 后缀(如 `1.2.3-hotfix` / `1.2.3-hotfix2`)。
+ *   应用内更新检测即据此判定为「热补丁(hotfix)」并弹出补丁弹窗 —— 这是唯一的类型信号，
+ *   不需要再在发行说明里写任何标识(旧的 `<!-- fntv:type:hotfix -->` 标识仍兼容生效)。
+ *   全量安装包版本号用普通 semver(如 `1.3.0`)，应用内判定为 full 并引导去 GitHub 下载覆盖安装。
  *
  * 行为:
  *   1. 读取各 dest 文件, base64 编码;

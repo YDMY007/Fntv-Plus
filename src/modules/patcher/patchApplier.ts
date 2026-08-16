@@ -173,6 +173,25 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
+// 解析版本号中的 hotfix 后缀（-hotfix => 1, -hotfix2 => 2, 普通 => 0）
+function parseVersion(v: string): { base: string; hotfix: number } {
+    const m = /^(.*?)-hotfix(\d*)$/i.exec(v || '');
+    if (m) {
+        const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
+        return { base: m[1], hotfix: idx };
+    }
+    return { base: v || '0', hotfix: 0 };
+}
+
+// 版本比较：base 优先，base 相同比 hotfix 序号；`-hotfix` 视为高于同 base 正式版
+function versionGreater(latest: string, baseline: string): boolean {
+    const a = parseVersion(latest);
+    const b = parseVersion(baseline);
+    const c = compareVersions(a.base, b.base);
+    if (c !== 0) return c > 0;
+    return a.hotfix > b.hotfix;
+}
+
 /**
  * [lc-476] 拉取并应用最新热补丁，随后按需重载渲染端 / 重启应用使生效。
  * 由「设置页-应用补丁」按钮与「更新弹窗-hotfix」主按钮共用，避免重载/重启逻辑重复。
@@ -228,7 +247,7 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
     }
     log.info(`[patch] 最新补丁版本: ${latestVersion}`);
 
-    if (applied && compareVersions(latestVersion, applied) <= 0) {
+    if (applied && !versionGreater(latestVersion, applied)) {
         return {
             ok: true, filesApplied: 0, needsRestart: false,
             version: latestVersion,
