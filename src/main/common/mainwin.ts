@@ -846,6 +846,13 @@ export function getMainWindow(): BrowserWindow {
             } catch { /* ignore */ }
         });
 
+        // [lc-473] 接收渲染端(注入 fnOS 页面的 preload)发来的精准桌面纠正诊断, 写入 app.log。
+        //   仅记录原因, 不做任何纠正动作(纠正由 preload 直接 location.href 完成)。
+        ipcMain.removeAllListeners('renderer-desktop-fix');
+        ipcMain.on('renderer-desktop-fix', (_e: any, msg: string) => {
+            log.info(`[渲染端桌面纠正] ${msg}`);
+        });
+
         const guardRedirect = (url: string) => {
             try {
                 const u = new URL(url);

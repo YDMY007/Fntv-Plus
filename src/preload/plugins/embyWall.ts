@@ -64,12 +64,39 @@ function log(...a: any[]) {
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
 }
 
-// [lc-472] 渲染端桌面纠正(watchFnosDesktop 关键词检测)已彻底移除。
-//   原因: fnOS 桌面是纯前端渲染(URL 仍为 /v), 关键词检测(lc-205)会误命中飞牛影视主页
-//   (主页含"影视/下载"等字样, 命中≥2)→ 每 ~3s 反复 reload /v, 主页持续闪烁死循环。
-//   现完全依赖主进程 pathname 导航守卫(lc-203/204)做 URL 精准纠正: 仅当 pathname 偏离
-//   /v 时纠正回 /v; URL 仍为 /v 的桌面场景由用户"切换系统页面"(fntv:enter-system-page,
-//   lc-375)及访问码登录流程(lc-283 立即导航 /v)覆盖, 不再需要渲染端关键词兜底。
+// [lc-473] 登录后自动跳影视(精准 pathname 检测版, 取代 lc-205 关键词检测):
+//   判定完全基于 pathname(isFntvTvPage), 绝不扫页面文字关键词 → 不会误命中影视主页造成死循环。
+//   - 命中条件: 当前落在「飞牛原生桌面」(根路径 '/', 即 fnOS 主页) 且用户未主动切系统页(fntv-system-intent)。
+//   - 一次性跳转(无 setInterval): 仅页面加载后延迟 1.5s 执行一次; 跳到 /v 后 pathname 变 /v → 不再触发 → 无循环。
+//   - 用户手动"切换系统页面"(fntv:enter-system-page, lc-375)会置 fntv-system-intent='1', 本逻辑跳过,
+//     实现"到达影视后再手动切系统页才不触发"的语义。
+//   - 飞牛影视页(/v, 含 /v/login 等子路由)、已主动切系统页 → 一律不干预(关键: 绝不碰 /v 主页)。
+//   主进程 pathname 守卫(lc-203)对 pathname 偏离 /v 已做纠正; 本逻辑是渲染端对"原生桌面 '/'"的
+//   精准补充——直接在 fnOS 主页落点处跳影视, 比等守卫异步 reload 更快更稳。
+(function autoJumpToTv(): void {
+  const tryJump = (): void => {
+    try {
+      // 用户主动切系统页(侧栏"切换系统页面"按钮已置位)→ 不跳, 尊重手动选择
+      if (sessionStorage.getItem('fntv-system-intent') === '1') return;
+      // 已在飞牛影视页(/v, 含 /v/login 等子路由)→ 不干预(关键: 绝不碰 /v 主页, 杜绝关键词误命中死循环)
+      if (isFntvTvPage()) return;
+      const p = location.pathname || '/';
+      // 仅当落在飞牛原生桌面(根路径 '/')时跳影视; 其他非 /v 路径(异常)不主动跳, 交给主进程守卫
+      if (p !== '/') return;
+      const target = location.origin + '/v';
+      if (location.href === target) return;
+      ipcRenderer.send('renderer-desktop-fix',
+        '登录后自动跳影视: 当前在飞牛原生桌面(/), 跳转到 /v');
+      location.href = target;
+    } catch (e) { /* ignore */ }
+  };
+  // 页面可能 SPA 延迟渲染, 延迟 1.5s 执行一次; 一次性(无 setInterval)→ 任何循环都不可能发生
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(tryJump, 1500));
+  } else {
+    setTimeout(tryJump, 1500);
+  }
+})();
 
 // [lc-213] /v/login 自动填充: 当主窗口因 deskMonitor(lc-212)跳到 /v 后被 fnOS 重定向到 /v/login 时,
 //   自动用保存的凭据填充用户名+密码并提交登录, 让用户无需手动再输一次.
@@ -1949,6 +1976,8 @@ function injectNativeReturnButton(): void {
     + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
   btn.addEventListener('click', (e: Event) => {
     e.stopPropagation();
+    // [lc-473] 清除"主动看系统页"标记 → 回到 /v 后 autoJumpToTv 恢复(本就只在 / 跳, /v 不跳)
+    try { sessionStorage.removeItem('fntv-system-intent'); } catch (_) { /* ignore */ }
     // [lc-375] 交主进程清除 _systemPageMode 并跳转 /v(原子操作, 避免守卫竞态)
     ipcRenderer.send('fntv:exit-system-page');
   });
@@ -2621,6 +2650,8 @@ function handle(): void {
         + 'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
       swBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
+        // [lc-473] 标记用户主动切系统页 → 抑制 autoJumpToTv 的桌面纠正(reload /v)
+        try { sessionStorage.setItem('fntv-system-intent', '1'); } catch (_) { /* ignore */ }
         // [lc-375] 改由主进程执行跳转: 先置 _systemPageMode 再 loadURL('/'), 避免
         //   主进程导航守卫(lc-203)的 did-navigate 在标记生效前就把 / 纠正回 /v
         ipcRenderer.send('fntv:enter-system-page');
