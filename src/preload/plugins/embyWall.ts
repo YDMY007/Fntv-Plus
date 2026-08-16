@@ -3175,14 +3175,50 @@ function handle(): void {
     const updBtn = mkBtn('检查更新', true);
     const updMirrorBtn = mkBtn('镜像检查', true);
     const updHistoryBtn = mkBtn('历史版本', true);
+    // [lc-474] 一键应用热补丁：应用内直接拉取并填补小 bug 修复，不跳浏览器手动下载
+    const patchBtn = mkBtn('应用补丁', true);
     updRow.appendChild(updBtn);
     updRow.appendChild(updMirrorBtn);
     updRow.appendChild(updHistoryBtn);
+    updRow.appendChild(patchBtn);
     updFooter.appendChild(updRow);
     sec1.el.appendChild(updFooter);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
     updMirrorBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update-mirror'); });
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
+    patchBtn.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        if (patchBtn.disabled) return;
+        const old = patchBtn.textContent;
+        patchBtn.textContent = '应用中…';
+        patchBtn.disabled = true;
+        try {
+            const res: any = await ipcRenderer.invoke('settings:apply-patch');
+            showPatchToast((res && res.message) || (res && res.ok ? '已应用补丁' : '应用失败'));
+        } catch (err: any) {
+            showPatchToast('应用失败: ' + ((err && err.message) || err));
+        } finally {
+            patchBtn.textContent = old || '应用补丁';
+            patchBtn.disabled = false;
+        }
+    });
+
+    // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
+    function showPatchToast(msg: string): void {
+        let t = document.getElementById('fntv-patch-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'fntv-patch-toast';
+            t.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:99999;'
+                + 'max-width:80vw;padding:8px 14px;border-radius:8px;font-size:12px;line-height:1.5;'
+                + 'background:rgba(20,22,30,.92);color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.4);'
+                + 'pointer-events:none;opacity:0;transition:opacity .25s;white-space:pre-wrap;text-align:center;';
+            document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        requestAnimationFrame(() => { if (t) t.style.opacity = '1'; });
+        setTimeout(() => { if (t) t.style.opacity = '0'; }, 2400);
+    }
 
 
     /* 布局统一在末尾 layout 区追加 */

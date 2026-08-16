@@ -88,6 +88,8 @@ export interface Config {
     tmdbApiKey?: string;
     // TMDB 免梯子直连开关（实验）：开启后用固定 IP 覆盖 DNS 解析，绕过污染直连 TMDB，无需梯子
     tmdbDirectConnect?: boolean;
+    // [lc-474] 已应用的热补丁版本号（由「一键应用补丁」写入，用于判定是否有更新的补丁可拉取）
+    appliedPatchVersion?: string;
     // TMDB 免梯子直连自定义 IP（可选覆盖内置快照）：api=api.themoviedb.org，img=image.tmdb.org
     tmdbDirectIp?: { api?: string; img?: string };
     // TMDB 免梯子直连 IP 上次更新时间戳（ms，自动/手动更新都会写入）：用于每日自动跟随 CheckTMDB 刷新判断
@@ -244,6 +246,19 @@ export function saveConfig({ account, domain, token, useHttps, loginType }: Save
     config.token = token;
     config.useHttps = useHttps || false;
     if (loginType) config.loginType = loginType;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// [lc-474] 读取已应用的热补丁版本号
+export function getAppliedPatchVersion(): string {
+    const config = readConfig();
+    return (config && config.appliedPatchVersion) || '';
+}
+
+// [lc-474] 写入已应用的热补丁版本号（合并写入，不动其它配置字段）
+export function setAppliedPatchVersion(version: string): void {
+    const config: Config = readConfig() || {};
+    config.appliedPatchVersion = version;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

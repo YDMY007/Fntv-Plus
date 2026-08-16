@@ -767,6 +767,11 @@ function injectAcrylicCSS(wc: Electron.WebContents): void {
  * @returns {BrowserWindow}
  */
 export function getMainWindow(): BrowserWindow {
+    // [lc-474] 注入热补丁目录到环境变量，供 preload(渲染端)读取 asar 外补丁；主进程侧直接复用此路径
+    const patchesDir = path.join(app.getPath('userData'), 'patches');
+    try { if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true }); } catch (_) { /* ignore */ }
+    process.env.FNTV_PATCHES_DIR = patchesDir;
+
     if (!mainwin) {
         const size = computeWindowSize();
         mainwin = new BrowserWindow({ ...mainwinConfig, width: size.width, height: size.height });
