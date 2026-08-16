@@ -2905,12 +2905,9 @@ function handle(): void {
 
     function closeHistory(): void {
       ov.style.opacity = '0';
-      ov.style.pointerEvents = 'none'; // [lc-484] 淡出期间禁用点击，避免透明层短暂拦截
+      ov.style.pointerEvents = 'none'; // 淡出期间禁用点击，避免透明层短暂拦截
       card.style.transform = 'scale(.96)';
       setTimeout(() => ov.remove(), 180);
-      // [lc-484] 关闭历史弹窗时一并收起设置面板，避免遗留半透明遮罩
-      const sp = document.getElementById('fnos-settings-panel'); if (sp) sp.style.display = 'none';
-      const sm = document.getElementById('fnos-settings-mask'); if (sm) sm.style.display = 'none';
     }
 
     // 载入文件列表
@@ -3248,7 +3245,7 @@ function handle(): void {
                 modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
                 modal.style.cssText = 'position:fixed;z-index:2147483703;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
                 modal.addEventListener('click', (e: Event) => {
-                    if (e.target === modal) { modal!.remove(); if (_unlockResolve) { _unlockResolve(null); _unlockResolve = null; } dismissSettingsPanel(); }
+                    if (e.target === modal) { modal!.remove(); if (_unlockResolve) { _unlockResolve(null); _unlockResolve = null; } }
                 });
 
                 const card = document.createElement('div');
@@ -3286,7 +3283,7 @@ function handle(): void {
                 modal.appendChild(card);
                 document.body.appendChild(modal);
 
-                const doClose = (val: string | null) => { modal!.remove(); if (_unlockResolve) { _unlockResolve(val); _unlockResolve = null; } dismissSettingsPanel(); };
+                const doClose = (val: string | null) => { modal!.remove(); if (_unlockResolve) { _unlockResolve(val); _unlockResolve = null; } };
                 cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(null); });
                 okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(input.value); });
                 input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -3305,14 +3302,7 @@ function handle(): void {
     // [lc-483] 热补丁「应用补丁」向导弹窗：
     // 打开即实时检查 → 有更新显示版本号+「立即应用」→ 点击后实时下载进度 → 应用完立即重启/重载。
     // 单例 modal，用户关闭即 remove() 并从 DOM 移除（下次打开重建并重新检查），进度事件通过 settings:patch-progress 实时驱动。
-    // [lc-484] 收起设置面板 + 遮罩：子弹窗(补丁向导/解锁码)被用户关闭时调用，
-    // 确保回到干净的应用界面，不再遗留一层半透明遮罩(#fnos-settings-mask)在最上层。
-    function dismissSettingsPanel(): void {
-        const sp = document.getElementById('fnos-settings-panel');
-        if (sp) sp.style.display = 'none';
-        const sm = document.getElementById('fnos-settings-mask');
-        if (sm) sm.style.display = 'none';
-    }
+    // [lc-485] 分层关闭：关掉本向导只移除自身，回到设置面板这一层（遮罩仍在）；彻底退出由设置面板自身关闭(点遮罩/ESC/关闭按钮)处理。
 
     let _patchWizardModal: HTMLElement | null = null;
     let _patchProgHandler: ((_e: any, p: any) => void) | null = null;
@@ -3352,8 +3342,6 @@ function handle(): void {
     function closePatchWizard(): void {
         if (_patchWizardModal) { _patchWizardModal.remove(); _patchWizardModal = null; }
         if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
-        // [lc-484] 用户关闭补丁向导时一并收起设置面板，避免遗留半透明遮罩
-        dismissSettingsPanel();
     }
 
     // 渲染不同状态的卡片内容
