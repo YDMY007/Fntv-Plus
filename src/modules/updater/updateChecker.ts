@@ -18,8 +18,8 @@ try {
 export interface UpdateInfo {
     hasUpdate: boolean;
     latestVersion?: string;
-    // 更新类型：hotfix=国内 Gitee 应用内补丁；full=国外 GitHub 全量安装包覆盖安装
-    updateType: 'hotfix' | 'full';
+    // 更新类型：hotfix=国内 Gitee 应用内补丁；full=国外 GitHub 全量安装包覆盖安装；test=开发者自用测试版(绝不推送用户)
+    updateType: 'hotfix' | 'full' | 'test';
     downloadUrl?: string | null;
     releaseNotes?: string;
     publishedAt?: string;
@@ -52,7 +52,8 @@ export class UpdateChecker {
      * [lc-476] 更新检测**只走国内 Gitee**（剥离旧版 GitHub 镜像检测路径）。
      * Gitee 不托管大文件，故：
      *  - hotfix 类更新：弹窗主按钮「应用补丁」(应用内 Gitee 拉取填补)；
-     *  - full 类更新：弹窗主按钮「下载全量安装包」(国外 GitHub 发行页)。
+     *  - full 类更新：弹窗主按钮「下载全量安装包」(国外 GitHub 发行页)；
+     *  - test 类更新：开发者自用测试版，绝不向任何用户弹窗推送（仅供「应用补丁」按钮手动拉取测试）。
      * 手动/自动检查均走此入口。
      * @returns 更新信息
      */
@@ -70,19 +71,25 @@ export class UpdateChecker {
 
     /**
      * 解析更新类型标识。
-     * 主信号 = 更新日志里最新 `## vX.Y.Z(-hotfix|-full) (date)` heading 的版本后缀：
+     * 主信号 = 更新日志里最新 `## vX.Y.Z(-hotfix|-full|-test) (date)` heading 的版本后缀：
      *  - `-hotfix` / `-hotfixN` → 热补丁(hotfix)，应用内拉取 Gitee 补丁包；
      *  - `-full` / `-fullN`     → 全量包(full)，去 GitHub 下载覆盖安装；
+     *  - `-test` / `-testN`     → 开发者自用测试版(test)，绝不向用户推送（仅供「应用补丁」按钮手动拉取测试）；
      *  - 无后缀的普通版本(如 `v3.3.6`) → 视为全量包(full)。
      * Git Release tag 本身保持干净(如 `v3.3.6`)，不带后缀。
-     * 兼容旧发布：发行说明显式标识 `<!-- fntv:type:hotfix -->` / `<!-- fntv:type:full -->` 仍生效；
+     * 兼容旧发布：发行说明显式标识 `<!-- fntv:type:hotfix|full|test -->` 仍生效；
      * 再退按资产推断：含 `patch-<ver>.json` 视为 hotfix。
      */
-    private parseUpdateType(body: string, assets: any[], latestVersion: string): 'hotfix' | 'full' {
+    private parseUpdateType(body: string, assets: any[], latestVersion: string): 'hotfix' | 'full' | 'test' {
         if (/-hotfix\d*$/i.test(latestVersion || '')) return 'hotfix';
         if (/-full\d*$/i.test(latestVersion || '')) return 'full';
-        const m = /fntv:type:\s*(hotfix|full)/i.exec(body || '');
-        if (m) return m[1].toLowerCase() === 'hotfix' ? 'hotfix' : 'full';
+        // [lc-480] -test / -testN = 开发者自用测试版，绝不向用户推送更新
+        if (/-test\d*$/i.test(latestVersion || '')) return 'test';
+        const m = /fntv:type:\s*(hotfix|full|test)/i.exec(body || '');
+        if (m) {
+            const t = m[1].toLowerCase();
+            return t === 'hotfix' ? 'hotfix' : (t === 'test' ? 'test' : 'full');
+        }
         const hasPatch = Array.isArray(assets)
             && assets.some((a: any) => a && a.name === `patch-${latestVersion}.json`);
         return hasPatch ? 'hotfix' : 'full';
@@ -96,7 +103,7 @@ export class UpdateChecker {
     private parseLatestChangelogVersion(body: string): string | null {
         const lines = (body || '').split(/\r?\n/);
         for (const line of lines) {
-            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)/i.exec(line.trim());
+            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full|test)\d*)?)/i.exec(line.trim());
             if (m) return m[1];
         }
         return null;
@@ -131,15 +138,17 @@ export class UpdateChecker {
 
         // [lc-476] hotfix 类以「已应用补丁版本」为比较基准，避免重复提示
         const updateType = this.parseUpdateType(r.body || '', r.assets, latestVersion);
-        log.info(`Gitee 检测版本(更新日志): ${latestVersion}, 类型: ${updateType}, Git tag: ${r.tag_name || '(无)'}`);
+        // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送：即便版本更高也不视为"有更新"
+        const isTest = updateType === 'test';
+        log.info(`Gitee 检测版本(更新日志): ${latestVersion}, 类型: ${updateType}${isTest ? ' (test 开发版, 不推送用户)' : ''}, Git tag: ${r.tag_name || '(无)'}`);
 
         const applied = getAppliedPatchVersion();
-        // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本
+        // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本；test 不推送
         const baseline = (updateType === 'hotfix' && applied) ? applied : this.currentVersion;
 
         // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
         // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
-        const hasUpdate = this.versionGreater(latestVersion, baseline);
+        const hasUpdate = !isTest && this.versionGreater(latestVersion, baseline);
 
         return {
             hasUpdate,
@@ -177,17 +186,20 @@ export class UpdateChecker {
     }
 
     /**
-     * 解析版本号中的 hotfix 后缀。
-     * `1.2.3-hotfix` → { base:'1.2.3', hotfix:1 }；`1.2.3-hotfix2` → { base:'1.2.3', hotfix:2 }；
-     * 普通版本 → { base:'1.2.3', hotfix:0 }。
+     * 解析版本号中的类型后缀为可比较的 rank。
+     * 无后缀=0；`-test`/`-testN`=1xx；`-hotfix`/`-hotfixN`=2xx；`-full`/`-fullN`=3xx（xx=序号）。
+     * 关键：[lc-480] `-test` 权重低于真实 hotfix/full，但高于无后缀同 base，
+     *   使得开发者先应用 test 补丁后，后续真实 hotfix 仍能被判定为"更新"。
      */
-    private parseVersion(v: string): { base: string; hotfix: number } {
-        const m = /^(.*?)-(?:hotfix|full)(\d*)$/i.exec(v || '');
+    private parseVersion(v: string): { base: string; rank: number } {
+        const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
         if (m) {
+            const suffix = m[0].toLowerCase();
+            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('hotfix') ? 2 : 3);
             const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
-            return { base: m[1], hotfix: idx };
+            return { base: m[1], rank: typeRank * 100 + idx };
         }
-        return { base: v || '0', hotfix: 0 };
+        return { base: v || '0', rank: 0 };
     }
 
     /** 仅比较 base 部分（semver 优先，失败回落到数字比较）。 */
@@ -203,16 +215,16 @@ export class UpdateChecker {
     }
 
     /**
-     * 版本比较：base 优先，base 相同则比 hotfix 序号。
-     * 关键修正：`-hotfix` 视为高于同 base 的正式版，
-     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true。
+     * 版本比较：base 优先，base 相同则比 rank（类型/序号）。
+     * 关键修正：`-hotfix` 视为高于同 base 的正式版；`-test` 低于真实 hotfix/full 但高于无后缀同 base。
+     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true；versionGreater('1.2.3-hotfix','1.2.3-test') === true。
      */
     private versionGreater(latest: string, baseline: string): boolean {
         const a = this.parseVersion(latest);
         const b = this.parseVersion(baseline);
         const c = this.cmpBase(a.base, b.base);
         if (c !== 0) return c > 0;
-        return a.hotfix > b.hotfix;
+        return a.rank > b.rank;
     }
 
     /**
@@ -341,6 +353,12 @@ export class UpdateChecker {
 
             const updateInfo = await this.checkForUpdates();
 
+            // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送（自动/手动检查均不弹窗）
+            if (updateInfo.updateType === 'test') {
+                log.info(`[更新检测] 最新为 test 开发版(${updateInfo.latestVersion})，不向用户推送，跳过提示`);
+                return;
+            }
+
             if (updateInfo.hasUpdate) {
                 log.info('发现新版本，显示更新提示');
                 await this.showUpdateDialog(updateInfo);
@@ -359,6 +377,12 @@ export class UpdateChecker {
     async manualCheckForUpdates(): Promise<void> {
         try {
             const updateInfo = await this.checkForUpdates();
+
+            // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送（自动/手动检查均不弹窗）
+            if (updateInfo.updateType === 'test') {
+                log.info(`[更新检测] 最新为 test 开发版(${updateInfo.latestVersion})，不向用户推送，跳过提示`);
+                return;
+            }
 
             if (updateInfo.hasUpdate) {
                 await this.showUpdateDialog(updateInfo);

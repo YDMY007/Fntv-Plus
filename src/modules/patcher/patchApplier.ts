@@ -173,23 +173,26 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-// 解析版本号中的 hotfix/full 后缀（-hotfix => 1, -hotfix2 => 2, 普通/base => 0）
-function parseVersion(v: string): { base: string; hotfix: number } {
-    const m = /^(.*?)-(?:hotfix|full)(\d*)$/i.exec(v || '');
+// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-hotfix=2xx；-full=3xx（xx=序号, 如 -hotfix2=202）
+// [lc-480] -test 权重低于真实 hotfix/full，使开发者先应用 test 后，真实 hotfix 仍判为"更新"
+function parseVersion(v: string): { base: string; rank: number } {
+    const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
     if (m) {
+        const suffix = m[0].toLowerCase();
+        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('hotfix') ? 2 : 3);
         const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
-        return { base: m[1], hotfix: idx };
+        return { base: m[1], rank: typeRank * 100 + idx };
     }
-    return { base: v || '0', hotfix: 0 };
+    return { base: v || '0', rank: 0 };
 }
 
-// 版本比较：base 优先，base 相同比 hotfix 序号；`-hotfix` 视为高于同 base 正式版
+// 版本比较：base 优先，base 相同比 rank（类型/序号）。-test 视为低于真实 hotfix/full，但高于无后缀同 base
 function versionGreater(latest: string, baseline: string): boolean {
     const a = parseVersion(latest);
     const b = parseVersion(baseline);
     const c = compareVersions(a.base, b.base);
     if (c !== 0) return c > 0;
-    return a.hotfix > b.hotfix;
+    return a.rank > b.rank;
 }
 
 // 从发行说明(更新日志)取最新 ## vX.Y.Z(-hotfix|-full)? (date) heading 的版本号；找不到回退 null
