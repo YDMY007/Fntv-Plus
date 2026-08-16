@@ -97,6 +97,13 @@ function log(...a: any[]) {
     }
     return false;
   };
+  // [lc-471] 桌面纠正防死循环: 单次会话最多纠正 MAX_DESKTOP_FIX 次, 达到上限即放弃。
+  //   旧逻辑仅靠模块级 _lastReload 做 4s 防抖, 但 location.href 重载会让整个 preload 重跑、
+  //   _lastReload 归零, 跨重载的防抖完全失效 → 命中桌面时每 ~3s 被反复 reload /v, 主页持续闪烁。
+  //   改用 sessionStorage 计数持久化"已纠正次数"(同标签页 reload 不丢), 达到上限就不再 reload,
+  //   彻底掐断死循环; 一旦页面不再是桌面(命中<2)则重置计数, 将来真正需要纠正时仍可触发。
+  const FIX_KEY = 'fntv-desktop-fix-count';
+  const MAX_DESKTOP_FIX = 2;
   let _lastReload = 0;
   const tryFix = (): void => {
     try {
@@ -109,10 +116,17 @@ function log(...a: any[]) {
       if (p !== '/' && p !== '/v' && p !== '/v/') return;
       if (fnosUiVisible()) return; // [lc-236] 自建设置 UI 打开时跳过桌面纠正(见 fnosUiVisible 注释)
       const matched = detectSystemUI();
-      if (matched.length < 2) return; // 至少命中 2 个系统字样才判定为 fnOS 系统界面(防误判)
+      if (matched.length < 2) {
+        // 已不在桌面 → 重置纠正计数, 将来真需要纠正时(如待定授权)仍可触发
+        try { sessionStorage.removeItem(FIX_KEY); } catch (_) { /* ignore */ }
+        return;
+      }
+      const done = parseInt((sessionStorage.getItem(FIX_KEY) || '0'), 10) || 0;
+      if (done >= MAX_DESKTOP_FIX) return; // 已达上限, 放弃纠正, 防死循环闪烁
       const now = Date.now();
-      if (now - _lastReload < 4000) return; // 防抖: 避免短时间重复 reload
+      if (now - _lastReload < 4000) return; // 防抖: 避免单页内短时重复 reload
       _lastReload = now;
+      try { sessionStorage.setItem(FIX_KEY, String(done + 1)); } catch (_) { /* ignore */ }
       ipcRenderer.send('renderer-desktop-fix',
         '检测到 fnOS 系统界面(桌面), 主动 reload /v 让 fnOS 重新判断授权, 命中: ' + matched.join(','));
       location.href = '/v';
