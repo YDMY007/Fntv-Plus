@@ -2905,8 +2905,12 @@ function handle(): void {
 
     function closeHistory(): void {
       ov.style.opacity = '0';
+      ov.style.pointerEvents = 'none'; // [lc-484] 淡出期间禁用点击，避免透明层短暂拦截
       card.style.transform = 'scale(.96)';
       setTimeout(() => ov.remove(), 180);
+      // [lc-484] 关闭历史弹窗时一并收起设置面板，避免遗留半透明遮罩
+      const sp = document.getElementById('fnos-settings-panel'); if (sp) sp.style.display = 'none';
+      const sm = document.getElementById('fnos-settings-mask'); if (sm) sm.style.display = 'none';
     }
 
     // 载入文件列表
@@ -3164,22 +3168,32 @@ function handle(): void {
     themeRow.appendChild(seg);
     secBody1.appendChild(themeRow);
 
-    // ===== 底部操作栏：检查更新（独立 footer，与右侧日志按钮对齐）=====
+    // ===== 底部操作栏：更新相关操作（2×2 等宽栅格，清晰对齐）=====
     const updFooter = document.createElement('div');
-    updFooter.style.cssText = 'padding:10px 12px;flex-shrink:0;';
+    updFooter.style.cssText = 'padding:12px;flex-shrink:0;';
     const updDivider = document.createElement('div');
-    updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 8px;';
+    updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 10px;';
     updFooter.appendChild(updDivider);
-    const updRow = document.createElement('div');
-    updRow.style.cssText = 'display:flex;justify-content:space-evenly;gap:6px;';
+
+    const updGrid = document.createElement('div');
+    updGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
     const updBtn = mkBtn('检查更新', true);
     const updHistoryBtn = mkBtn('历史版本', true);
     // [lc-474] 一键应用热补丁：应用内直接拉取并填补小 bug 修复，不跳浏览器手动下载
     const patchBtn = mkBtn('应用补丁', true);
-    updRow.appendChild(updBtn);
-    updRow.appendChild(updHistoryBtn);
-    updRow.appendChild(patchBtn);
-    updFooter.appendChild(updRow);
+    // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
+    const testBtn = mkBtn('测试更新', true);
+    updGrid.appendChild(updBtn);
+    updGrid.appendChild(updHistoryBtn);
+    updGrid.appendChild(patchBtn);
+    updGrid.appendChild(testBtn);
+    updFooter.appendChild(updGrid);
+
+    const testHint = document.createElement('div');
+    testHint.textContent = '🔧 测试更新：开发者测试通道，需解锁码（普通用户无需操作）';
+    testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.75;text-align:center;margin-top:9px;line-height:1.5;';
+    updFooter.appendChild(testHint);
+
     sec1.el.appendChild(updFooter);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
@@ -3187,17 +3201,6 @@ function handle(): void {
         e.stopPropagation();
         openPatchWizard();
     });
-
-    // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
-    const testBtn = mkBtn('测试更新', true);
-    const updRow2 = document.createElement('div');
-    updRow2.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;margin-top:8px;';
-    const testHint = document.createElement('span');
-    testHint.textContent = '开发者测试通道（需解锁码）';
-    testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.7;';
-    updRow2.appendChild(testHint);
-    updRow2.appendChild(testBtn);
-    updFooter.appendChild(updRow2);
     testBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (testBtn.disabled) return;
@@ -3245,7 +3248,7 @@ function handle(): void {
                 modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
                 modal.style.cssText = 'position:fixed;z-index:2147483703;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
                 modal.addEventListener('click', (e: Event) => {
-                    if (e.target === modal) { modal!.style.display = 'none'; if (_unlockResolve) _unlockResolve(null); }
+                    if (e.target === modal) { modal!.remove(); if (_unlockResolve) { _unlockResolve(null); _unlockResolve = null; } dismissSettingsPanel(); }
                 });
 
                 const card = document.createElement('div');
@@ -3283,7 +3286,7 @@ function handle(): void {
                 modal.appendChild(card);
                 document.body.appendChild(modal);
 
-                const doClose = (val: string | null) => { modal!.style.display = 'none'; if (_unlockResolve) _unlockResolve(val); };
+                const doClose = (val: string | null) => { modal!.remove(); if (_unlockResolve) { _unlockResolve(val); _unlockResolve = null; } dismissSettingsPanel(); };
                 cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(null); });
                 okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(input.value); });
                 input.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -3301,7 +3304,16 @@ function handle(): void {
 
     // [lc-483] 热补丁「应用补丁」向导弹窗：
     // 打开即实时检查 → 有更新显示版本号+「立即应用」→ 点击后实时下载进度 → 应用完立即重启/重载。
-    // 单例 modal，关闭即隐藏（下次打开重新检查），进度事件通过 settings:patch-progress 实时驱动。
+    // 单例 modal，用户关闭即 remove() 并从 DOM 移除（下次打开重建并重新检查），进度事件通过 settings:patch-progress 实时驱动。
+    // [lc-484] 收起设置面板 + 遮罩：子弹窗(补丁向导/解锁码)被用户关闭时调用，
+    // 确保回到干净的应用界面，不再遗留一层半透明遮罩(#fnos-settings-mask)在最上层。
+    function dismissSettingsPanel(): void {
+        const sp = document.getElementById('fnos-settings-panel');
+        if (sp) sp.style.display = 'none';
+        const sm = document.getElementById('fnos-settings-mask');
+        if (sm) sm.style.display = 'none';
+    }
+
     let _patchWizardModal: HTMLElement | null = null;
     let _patchProgHandler: ((_e: any, p: any) => void) | null = null;
     function openPatchWizard(): void {
@@ -3338,8 +3350,10 @@ function handle(): void {
     }
 
     function closePatchWizard(): void {
-        if (_patchWizardModal) _patchWizardModal.style.display = 'none';
+        if (_patchWizardModal) { _patchWizardModal.remove(); _patchWizardModal = null; }
         if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
+        // [lc-484] 用户关闭补丁向导时一并收起设置面板，避免遗留半透明遮罩
+        dismissSettingsPanel();
     }
 
     // 渲染不同状态的卡片内容
