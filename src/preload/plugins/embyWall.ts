@@ -64,82 +64,12 @@ function log(...a: any[]) {
   try { require('electron').ipcRenderer.invoke('log-message', 'info', msg); } catch(e) {}
 }
 
-// [lc-205] 访问码验证后落到 fnOS 原生桌面(/)的渲染端纠正(主动跳主页版).
-// 主进程基于 pathname 的导航守卫(lc-203/204)对"纯前端渲染桌面(URL 仍是 /v)"无效,
-// 因此在这里(注入 fnOS 页面的 preload)检测当前是否为 fnOS 系统界面(桌面/控制面板),
-// 命中则直接 reload /v —— 访问码验证通过会写授权 cookie, 重新加载 /v 时 fnOS 读到授权
-// 直接渲染飞牛影视, 不再弹访问码/跳桌面. 这正是用户要求的"登录后主动跳主页".
-(function watchFnosDesktop(): void {
-  // fnOS 系统界面(桌面)的典型字样 —— 实测桌面为整屏 app 图标网格, 默认必含下列系统 app.
-  // 取"至少命中 2 个"判定为桌面; 这些词几乎不会出现在飞牛影视页(影视页仅含"影视"1 个, 不足 2).
-  // 同时保留旧版 fnOS 的通用叫法(控制面板/存储管理/容器/应用商店/...)兜底, 抗版本 wording 变动.
-  const SYS_HINTS: ReadonlyArray<string> = [
-    // 真实桌面默认 app(实测 550W 设备含: 文件管理/系统设置/应用中心/影视/商店/相册/虚拟机/终端/下载/备份/安全中心/回收站/远程助手/飞牛同步...)
-    '系统设置', '应用中心', '文件管理', '影视', '相册', '商店',
-    '虚拟机', '终端', '下载', '备份', '安全中心', '回收站', '远程助手', '飞牛同步',
-    // 旧版/其他叫法兜底
-    '控制面板', '存储管理', '容器', '应用商店', '设备信息', '应用管理', '安全防护'
-  ];
-  const detectSystemUI = (): string[] => {
-    const txt = (document.body && document.body.innerText || '').replace(/\s+/g, '');
-    const matched: string[] = [];
-    for (const h of SYS_HINTS) if (txt.indexOf(h) >= 0) matched.push(h);
-    return matched;
-  };
-  // [lc-236] 自建设置 UI(含历史版本/wiki 弹窗)打开时跳过桌面纠正:
-  //   这些浮层统一标 data-fnos-ui='1'; wiki 文档正文含"影视/终端/下载"等系统字样, 而设置面板是
-  //   DOM 浮层不改变 URL(仍为 /v), 会被 watchFnosDesktop 误判为 fnOS 桌面触发 reload. 只要任一
-  //   自建设置 UI 可见就直接跳过, 用户在看设置/wiki 时绝不该被当成桌面重载.
-  const fnosUiVisible = (): boolean => {
-    const nodes = document.querySelectorAll<HTMLElement>('[data-fnos-ui="1"]');
-    for (const n of Array.from(nodes)) {
-      if (n.offsetParent !== null || n.style.display !== 'none') return true;
-    }
-    return false;
-  };
-  // [lc-471] 桌面纠正防死循环: 单次会话最多纠正 MAX_DESKTOP_FIX 次, 达到上限即放弃。
-  //   旧逻辑仅靠模块级 _lastReload 做 4s 防抖, 但 location.href 重载会让整个 preload 重跑、
-  //   _lastReload 归零, 跨重载的防抖完全失效 → 命中桌面时每 ~3s 被反复 reload /v, 主页持续闪烁。
-  //   改用 sessionStorage 计数持久化"已纠正次数"(同标签页 reload 不丢), 达到上限就不再 reload,
-  //   彻底掐断死循环; 一旦页面不再是桌面(命中<2)则重置计数, 将来真正需要纠正时仍可触发。
-  const FIX_KEY = 'fntv-desktop-fix-count';
-  const MAX_DESKTOP_FIX = 2;
-  let _lastReload = 0;
-  const tryFix = (): void => {
-    try {
-      // [lc-374] 用户主动切换系统页标记: 侧栏"切换系统页面"按钮置位(sessionStorage='1')后,
-      //   进入飞牛原生桌面时不再强制跳回 /v; "返回影视"按钮清除该标记。
-      //   访问码验证后自动落到系统的旧场景(lc-205)不会置位, 纠正逻辑保持不变。
-      if (sessionStorage.getItem('fntv-system-intent') === '1') return;
-      const p = location.pathname;
-      // 仅在根或 /v 疑似桌面/访问码后介入; 影视内部页(/v/tv/...等)不干预
-      if (p !== '/' && p !== '/v' && p !== '/v/') return;
-      if (fnosUiVisible()) return; // [lc-236] 自建设置 UI 打开时跳过桌面纠正(见 fnosUiVisible 注释)
-      const matched = detectSystemUI();
-      if (matched.length < 2) {
-        // 已不在桌面 → 重置纠正计数, 将来真需要纠正时(如待定授权)仍可触发
-        try { sessionStorage.removeItem(FIX_KEY); } catch (_) { /* ignore */ }
-        return;
-      }
-      const done = parseInt((sessionStorage.getItem(FIX_KEY) || '0'), 10) || 0;
-      if (done >= MAX_DESKTOP_FIX) return; // 已达上限, 放弃纠正, 防死循环闪烁
-      const now = Date.now();
-      if (now - _lastReload < 4000) return; // 防抖: 避免单页内短时重复 reload
-      _lastReload = now;
-      try { sessionStorage.setItem(FIX_KEY, String(done + 1)); } catch (_) { /* ignore */ }
-      ipcRenderer.send('renderer-desktop-fix',
-        '检测到 fnOS 系统界面(桌面), 主动 reload /v 让 fnOS 重新判断授权, 命中: ' + matched.join(','));
-      location.href = '/v';
-    } catch (e) { /* ignore */ }
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(tryFix, 1500));
-  } else {
-    setTimeout(tryFix, 1500);
-  }
-  // 定时兜底(应对 SPA 延迟渲染桌面 / 访问码验证后前端切换)
-  setInterval(tryFix, 3000);
-})();
+// [lc-472] 渲染端桌面纠正(watchFnosDesktop 关键词检测)已彻底移除。
+//   原因: fnOS 桌面是纯前端渲染(URL 仍为 /v), 关键词检测(lc-205)会误命中飞牛影视主页
+//   (主页含"影视/下载"等字样, 命中≥2)→ 每 ~3s 反复 reload /v, 主页持续闪烁死循环。
+//   现完全依赖主进程 pathname 导航守卫(lc-203/204)做 URL 精准纠正: 仅当 pathname 偏离
+//   /v 时纠正回 /v; URL 仍为 /v 的桌面场景由用户"切换系统页面"(fntv:enter-system-page,
+//   lc-375)及访问码登录流程(lc-283 立即导航 /v)覆盖, 不再需要渲染端关键词兜底。
 
 // [lc-213] /v/login 自动填充: 当主窗口因 deskMonitor(lc-212)跳到 /v 后被 fnOS 重定向到 /v/login 时,
 //   自动用保存的凭据填充用户名+密码并提交登录, 让用户无需手动再输一次.
@@ -2019,8 +1949,6 @@ function injectNativeReturnButton(): void {
     + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 6px 20px rgba(0,0,0,.35);';
   btn.addEventListener('click', (e: Event) => {
     e.stopPropagation();
-    // [lc-374] 清除"主动看系统页"标记 → 回到 /v 后 watchFnosDesktop 恢复原有纠正逻辑
-    try { sessionStorage.removeItem('fntv-system-intent'); } catch (_) { /* ignore */ }
     // [lc-375] 交主进程清除 _systemPageMode 并跳转 /v(原子操作, 避免守卫竞态)
     ipcRenderer.send('fntv:exit-system-page');
   });
@@ -2693,8 +2621,6 @@ function handle(): void {
         + 'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
       swBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        // [lc-374] 标记用户主动切系统页 → 抑制 watchFnosDesktop 的桌面纠正(reload /v)
-        try { sessionStorage.setItem('fntv-system-intent', '1'); } catch (_) { /* ignore */ }
         // [lc-375] 改由主进程执行跳转: 先置 _systemPageMode 再 loadURL('/'), 避免
         //   主进程导航守卫(lc-203)的 did-navigate 在标记生效前就把 / 纠正回 /v
         ipcRenderer.send('fntv:enter-system-page');

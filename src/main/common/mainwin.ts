@@ -869,12 +869,6 @@ export function getMainWindow(): BrowserWindow {
         };
         mainwin.webContents.on('did-navigate', (_event: any, url: string) => guardRedirect(url));
         mainwin.webContents.on('did-navigate-in-page', (_event: any, url: string) => guardRedirect(url));
-
-        // [lc-205] 接收渲染端(注入 fnOS 页面的 preload)发来的桌面纠正诊断, 写入 app.log
-        ipcMain.removeAllListeners('renderer-desktop-fix');
-        ipcMain.on('renderer-desktop-fix', (_e: any, msg: string) => {
-            log.info(`[渲染端桌面纠正] ${msg}`);
-        });
     }
     return mainwin;
 }
