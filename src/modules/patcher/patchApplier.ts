@@ -59,7 +59,9 @@ const REPO = 'Fntv-Plus';
 // Gitee 源（国内直连，首选）。仓库名用小写 fntv-plus（与 GitHub 镜像发布流程一致）
 const GITEE_OWNER = 'YDMY007';
 const GITEE_REPO = 'fntv-plus';
-const GITEE_RELEASES_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?per_page=1`;
+// [lc-482] 注意：Gitee 的 /releases 默认按创建时间「升序」(最旧在前)，per_page=1 会拿到最旧发布。
+// 故一次拉全量(per_page=100)后由 pickLatestRelease 选出「版本号最高的非 test 发布」作为"最新"。
+const GITEE_RELEASES_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?per_page=100`;
 const GITEE_TAG_RELEASE_URL = (tag: string) =>
     `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${tag}`;
 const GITEE_CREATE_RELEASE_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases`;
@@ -96,8 +98,11 @@ async function fetchReleaseJson(): Promise<any> {
         });
         const arr = r.data;
         if (Array.isArray(arr) && arr.length) {
-            log.info('[patch] 通过 Gitee 获取 Release 成功');
-            return arr[0];
+            const picked = pickLatestRelease(arr);
+            if (picked) {
+                log.info('[patch] 通过 Gitee 获取 Release 成功(已选最新版本发布)');
+                return picked;
+            }
         }
     } catch (e) {
         log.warn('[patch] Gitee 获取 Release 失败, 回退 GitHub:', (e as Error).message);
@@ -195,16 +200,37 @@ function versionGreater(latest: string, baseline: string): boolean {
     return a.rank > b.rank;
 }
 
-// 从发行说明(更新日志)取最新 ## vX.Y.Z(-hotfix|-full)? (date) heading 的版本号；找不到回退 null
+// 从发行说明(更新日志)取「版本号最高」的 ## vX.Y.Z(-hotfix|-full)? (date) heading；找不到回退 null
 // 注意：仅匹配 hotfix|full，天然排除 -test，使默认检测/应用补丁永不落到测试版。
-// (?!\S) 锚定：避免 `## v3.3.7-test` 被部分匹配成基版本 `3.3.7`（那样会把测试版误判为普通版）。
+// (?=[\s（(]|$) 锚定：版本号后须为空白/半角或全角左括号/行尾，避免 `## v3.3.7-test` 被部分匹配成
+// 基版本 `3.3.7`（那样会把测试版误判为普通版）；同时兼容更新日志里 `（2026-...）` 全角括号的写法。
+// 取「最高版本」而非「首条」：兼容更新日志乱序/多次追加 hotfix 的情况（如 v3.3.7-hotfix 与 v3.3.8-hotfix）。
 function parseLatestChangelogVersion(body: string): string | null {
     const lines = (body || '').split(/\r?\n/);
+    let best: string | null = null;
     for (const line of lines) {
-        const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)(?!\S)/i.exec(line.trim());
-        if (m) return m[1];
+        const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)(?=[\s（(]|$)/i.exec(line.trim());
+        if (!m) continue;
+        const v = m[1];
+        if (!best || versionGreater(v, best)) best = v;
     }
-    return null;
+    return best;
+}
+
+// [lc-482] 从 Gitee 发布列表中选出「版本号最高的非 test 发布」作为"最新"。
+// Gitee /releases 默认升序(最旧在前)，直接取 [0] 会拿到 v3.0.0 之类的旧版，故需自行择优。
+// test 发布(更新日志含 -test heading 或 tag 带 -test)一律排除——普通检测/应用补丁只认 hotfix|full。
+function pickLatestRelease(releases: any[]): any {
+    let best: any = null;
+    let bestVer = '0';
+    for (const rel of (releases || [])) {
+        const body = rel.body || rel.note || '';
+        const v = parseLatestChangelogVersion(body)
+            || String(rel.tag_name || '').replace(/^v/i, '');
+        if (!v || /-test\d*$/i.test(v)) continue;
+        if (versionGreater(v, bestVer)) { bestVer = v; best = rel; }
+    }
+    return best;
 }
 
 // [lc-481] 从更新日志取指定类型(hotfix|full|test)的最高版本号；找不到返回 null。

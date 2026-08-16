@@ -66,7 +66,9 @@ export class UpdateChecker {
      */
     private giteeLatestUrl(): string {
         const giteeRepo = this.repo.toLowerCase();
-        return `https://gitee.com/api/v5/repos/${this.owner}/${giteeRepo}/releases/latest`;
+        // [lc-482] Gitee 无 GitHub 专属的 /releases/latest，且 /releases 默认升序(最旧在前)。
+        // 故一次拉全量(per_page=100)，由 pickLatestRelease 选「版本号最高的非 test 发布」。
+        return `https://gitee.com/api/v5/repos/${this.owner}/${giteeRepo}/releases?per_page=100`;
     }
 
     /**
@@ -102,11 +104,33 @@ export class UpdateChecker {
      */
     private parseLatestChangelogVersion(body: string): string | null {
         const lines = (body || '').split(/\r?\n/);
+        let best: string | null = null;
         for (const line of lines) {
-            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full|test)\d*)?)/i.exec(line.trim());
-            if (m) return m[1];
+            // 仅匹配 hotfix|full（排除 -test），使 test 更新日志永不触发用户更新；取最高版本非首条。
+            // (?=[\s（(]|$) 兼容全角括号 `（2026-...）` 写法，并防止 `v3.3.7-test` 被部分匹配成 `3.3.7`。
+            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)(?=[\s（(]|$)/i.exec(line.trim());
+            if (!m) continue;
+            const v = m[1];
+            if (!best || this.versionGreater(v, best)) best = v;
         }
-        return null;
+        return best;
+    }
+
+    /**
+     * [lc-482] 从 Gitee 发布列表中选出「版本号最高的非 test 发布」作为"最新"。
+     * Gitee /releases 默认升序(最旧在前)，取 [0] 会拿到 v3.0.0 之类的旧版；test 发布一律排除。
+     */
+    private pickLatestRelease(releases: any[]): any {
+        let best: any = null;
+        let bestVer = '0';
+        for (const rel of (releases || [])) {
+            const body = rel.body || rel.note || '';
+            const v = this.parseLatestChangelogVersion(body)
+                || String(rel.tag_name || '').replace(/^v/i, '');
+            if (!v || /-test\d*$/i.test(v)) continue;
+            if (this.versionGreater(v, bestVer)) { bestVer = v; best = rel; }
+        }
+        return best;
     }
 
     /**
@@ -122,19 +146,33 @@ export class UpdateChecker {
         const url = this.giteeLatestUrl();
         log.info(`通过国内 Gitee 检测更新: ${url}`);
 
+        // 不论类型，详情/全量包下载均指向国外 GitHub 发行版最新下载页（国内 Gitee 不托管大文件）
+        const githubReleaseUrl = `https://github.com/${this.owner}/${this.repo}/releases/latest`;
+
         const response = await axios.get(url, {
             timeout: 10000,
             headers: { 'User-Agent': `fnos-tv/${this.currentVersion}` }
         });
 
-        const r = response.data;
+        // [lc-482] Gitee 返回的是发布数组(升序)，从中选出版本号最高的非 test 发布；取不到则返回"无更新"
+        const arr = Array.isArray(response.data) ? response.data : [response.data];
+        const r = this.pickLatestRelease(arr);
+        if (!r) {
+            log.warn('Gitee 未找到可用的非 test 发布');
+            return {
+                hasUpdate: false,
+                updateType: 'full',
+                downloadUrl: githubReleaseUrl,
+                releaseNotes: '',
+                publishedAt: '',
+                htmlUrl: githubReleaseUrl,
+            };
+        }
         // [lc-477] 版本号/类型以「更新日志最新 heading」为准：## vX.Y.Z(-hotfix|-full) (date)。
         // Git Release tag 保持干净(如 v3.3.6)，仅作兜底；真正的版本+类型从更新日志 heading 取。
         const latestVersion = this.parseLatestChangelogVersion(r.body || '')
             || String(r.tag_name || '').replace(/^v/i, '')
             || '0';
-        // 不论类型，详情/全量包下载均指向国外 GitHub 发行版最新下载页（国内 Gitee 不托管大文件）
-        const githubReleaseUrl = `https://github.com/${this.owner}/${this.repo}/releases/latest`;
 
         // [lc-476] hotfix 类以「已应用补丁版本」为比较基准，避免重复提示
         const updateType = this.parseUpdateType(r.body || '', r.assets, latestVersion);
