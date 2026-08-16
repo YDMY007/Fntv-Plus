@@ -46,17 +46,27 @@ function requirePatch(patchFile: string): void {
 }
 
 const patchedNames = new Set<string>();
-if (patchesDir && fs.existsSync(patchesDir)) {
-    fs.readdirSync(patchesDir).forEach((file: string) => {
-        if (file.endsWith('.js')) {
+// [lc-479] 递归加载 patches/preload 下所有 .js：应用器按 preload/plugins/X.js 子目录写入补丁文件，
+//   原「仅扫 patches/ 顶层」会漏掉子目录里的补丁 → 下载后永不生效（asar 旧文件照跑）。
+//   仅加载 preload 分支，避免在主进程上下文误加载 main 补丁；basename 纳入 patchedNames 以便跳过 bundled 同名插件。
+function loadPatchDir(dir: string): void {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            loadPatchDir(full);
+        } else if (entry.isFile() && entry.name.endsWith('.js')) {
             try {
-                requirePatch(path.join(patchesDir, file));
-                patchedNames.add(file);
+                requirePatch(full);
+                patchedNames.add(entry.name);
             } catch (err) {
-                preloadLogger.error('[patch] 加载热补丁失败:', file, err);
+                preloadLogger.error('[patch] 加载热补丁失败:', entry.name, err);
             }
         }
-    });
+    }
+}
+if (patchesDir && fs.existsSync(patchesDir)) {
+    loadPatchDir(path.join(patchesDir, 'preload'));
     if (patchedNames.size) preloadLogger.info(`[patch] 已加载热补丁 ${patchedNames.size} 个: ${[...patchedNames].join(', ')}`);
 }
 
