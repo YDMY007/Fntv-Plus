@@ -45,6 +45,30 @@ export interface ApplyResult {
     message: string;
 }
 
+// [lc-483] 进度阶段：检查中 / 下载中 / 应用中 / 完成 / 失败
+export type PatchPhase = 'checking' | 'downloading' | 'applying' | 'done' | 'error';
+
+// [lc-483] 实时进度回报：渲染端弹窗根据 phase 切换 UI，percent=-1 表示未知总量（ indeterminate）
+export interface PatchProgress {
+    phase: PatchPhase;
+    percent: number; // 0-100；-1=未知
+    loaded?: number;
+    total?: number;
+    message?: string;
+}
+
+export interface PatchApplyOptions {
+    onProgress?: (p: PatchProgress) => void;
+}
+
+// [lc-483] 仅检查（不下载）的返回结构：弹窗先用它判断是否弹「立即应用」
+export interface PatchCheckInfo {
+    hasUpdate: boolean;
+    version: string;       // 最新补丁版本号（无则空串）
+    currentVersion: string; // 当前已应用/基准版本
+    message: string;
+}
+
 // 国内可达的 GitHub 镜像（与 updateChecker.ts 保持一致；主要用于拉取 Release JSON 与补丁资产）
 const MIRRORS: Array<{ name: string; base: string; fullPrefix: boolean }> = [
     { name: 'github.dpik.top', base: 'https://github.dpik.top', fullPrefix: true },
@@ -139,7 +163,7 @@ function getAssetDownloadUrl(asset: any): string {
     return asset && (asset.browser_download_url || asset.url || asset.download_url);
 }
 
-async function downloadText(url: string): Promise<string> {
+async function downloadText(url: string, onProgress?: (loaded: number, total: number) => void): Promise<string> {
     // 先试直连，再逐镜像重写 URL
     const candidates: string[] = [url];
     for (const m of MIRRORS) {
@@ -148,7 +172,15 @@ async function downloadText(url: string): Promise<string> {
     let lastErr: any = null;
     for (const u of candidates) {
         try {
-            const r = await axios.get(u, { timeout: 15000, responseType: 'text' });
+            const r = await axios.get(u, {
+                timeout: 15000,
+                responseType: 'text',
+                onDownloadProgress: (e: any) => {
+                    if (onProgress && typeof e.loaded === 'number') {
+                        onProgress(e.loaded, e.total || 0);
+                    }
+                },
+            });
             return typeof r.data === 'string' ? r.data : JSON.stringify(r.data);
         } catch (e) {
             lastErr = e;
@@ -280,15 +312,48 @@ async function finalizeAfterApply(result: ApplyResult): Promise<ApplyResult> {
 }
 
 /**
+ * [lc-483] 仅检查是否有可用热补丁（不下载、不应用），供渲染端弹窗先展示版本号与确认按钮。
+ * 逻辑与 applyLatestPatch 的「是否更新」判断保持一致：以更新日志最新 heading 为准，
+ * 与已应用补丁版本比较；天然排除 -test（parseLatestChangelogVersion 只认 hotfix|full）。
+ */
+export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
+    const applied = getAppliedPatchVersion();
+    const currentVersion = applied || app.getVersion();
+    try {
+        const release = await fetchReleaseJson();
+        const body = release.body || release.note || '';
+        const latestVersion: string = parseLatestChangelogVersion(body)
+            || String(release.tag_name || '').replace(/^v/i, '')
+            || '0';
+        if (!latestVersion || latestVersion === '0') {
+            return { hasUpdate: false, version: '', currentVersion, message: '未找到可用的热补丁' };
+        }
+        const hasUpdate = !applied || versionGreater(latestVersion, applied);
+        return {
+            hasUpdate,
+            version: latestVersion,
+            currentVersion,
+            message: hasUpdate
+                ? `发现新补丁 v${latestVersion}`
+                : `已是最新补丁 v${latestVersion}`,
+        };
+    } catch (e: any) {
+        return { hasUpdate: false, version: '', currentVersion, message: `检查失败: ${(e && e.message) || '未知错误'}` };
+    }
+}
+
+/**
  * [lc-476] 拉取并应用最新热补丁（默认检测/应用补丁按钮共用），随后按需重载/重启。
+ * @param opts.onProgress 实时进度回调（检查/下载/应用阶段）
  * @returns 应用结果（是否成功、版本、填补文件数、是否需重启）
  */
-export async function applyLatestPatchAndReload(): Promise<ApplyResult> {
+export async function applyLatestPatchAndReload(opts?: PatchApplyOptions): Promise<ApplyResult> {
     let result: ApplyResult;
     try {
-        result = await applyLatestPatch();
+        result = await applyLatestPatch(opts);
     } catch (e: any) {
         log.error('[patch] 应用失败:', e && e.message);
+        if (opts && opts.onProgress) opts.onProgress({ phase: 'error', percent: -1, message: `应用失败: ${(e && e.message) || '未知错误'}` });
         result = { ok: false, filesApplied: 0, needsRestart: false, message: `应用失败: ${(e && e.message) || '未知错误'}` };
     }
     return finalizeAfterApply(result);
@@ -301,12 +366,14 @@ export async function applyLatestPatchAndReload(): Promise<ApplyResult> {
  *  - 忽略「已应用」检查，开发者可重复覆盖应用同一 test 版本做验证；
  *  - 由设置页「获取测试更新」按钮在解锁码验证通过后调用。
  */
-export async function applyTestPatch(): Promise<ApplyResult> {
+export async function applyTestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
+    const onProgress = opts && opts.onProgress;
     log.info('[patch] 开发者手动拉取 test 测试补丁');
     const release = await fetchReleaseJson();
     const body = release.body || release.note || '';
     const testVersion = findChangelogVersionByType(body, 'test');
     if (!testVersion) {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: 'Gitee 未找到 -test 测试版补丁' });
         return {
             ok: false, filesApplied: 0, needsRestart: false,
             message: 'Gitee 未找到 -test 测试版补丁（请确认更新日志含 ## vX.Y.Z-test 条目）',
@@ -319,6 +386,7 @@ export async function applyTestPatch(): Promise<ApplyResult> {
     const exact = assets.find((a: any) => a.name === `patch-${testVersion}.json`);
     const asset = exact || assets.find((a: any) => /^patch-.*-test\d*\.json$/i.test(a.name));
     if (!asset) {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: `v${testVersion} 未提供热补丁包` });
         return {
             ok: false, filesApplied: 0, needsRestart: false,
             version: testVersion,
@@ -326,7 +394,10 @@ export async function applyTestPatch(): Promise<ApplyResult> {
         };
     }
 
-    const raw = await downloadText(getAssetDownloadUrl(asset));
+    if (onProgress) onProgress({ phase: 'downloading', percent: 0, message: `正在下载测试补丁 v${testVersion}` });
+    const raw = await downloadText(getAssetDownloadUrl(asset), (loaded, total) => {
+        if (onProgress) onProgress({ phase: 'downloading', percent: total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : -1, loaded, total });
+    });
     let manifest: PatchManifest;
     try {
         manifest = JSON.parse(raw);
@@ -345,6 +416,7 @@ export async function applyTestPatch(): Promise<ApplyResult> {
     const patchesDir = getPatchesDir();
     if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
 
+    if (onProgress) onProgress({ phase: 'applying', percent: 100, message: `正在应用测试补丁 v${testVersion}` });
     let count = 0;
     let needsRestart = false;
     for (const f of manifest.files || []) {
@@ -381,22 +453,25 @@ export async function applyTestPatch(): Promise<ApplyResult> {
 /**
  * [lc-481] 拉取并应用 test 测试补丁，随后按需重载/重启（与 finalizeAfterApply 共用）。
  */
-export async function applyTestPatchAndReload(): Promise<ApplyResult> {
+export async function applyTestPatchAndReload(opts?: PatchApplyOptions): Promise<ApplyResult> {
     let result: ApplyResult;
     try {
-        result = await applyTestPatch();
+        result = await applyTestPatch(opts);
     } catch (e: any) {
         log.error('[patch] 测试补丁应用失败:', e && e.message);
+        if (opts && opts.onProgress) opts.onProgress({ phase: 'error', percent: -1, message: `应用失败: ${(e && e.message) || '未知错误'}` });
         result = { ok: false, filesApplied: 0, needsRestart: false, message: `应用失败: ${(e && e.message) || '未知错误'}` };
     }
     return finalizeAfterApply(result);
 }
 
 /**
- * 拉取并应用最新热补丁。
+ * [lc-483] 拉取并应用最新热补丁。
+ * @param opts.onProgress 实时进度回调（检查/下载/应用阶段），供渲染端弹窗展示
  * @returns 应用结果（是否成功、版本、填补文件数、是否需重启）
  */
-export async function applyLatestPatch(): Promise<ApplyResult> {
+export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
+    const onProgress = opts && opts.onProgress;
     const applied = getAppliedPatchVersion();
     log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}`);
 
@@ -407,11 +482,13 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
         || String(release.tag_name || '').replace(/^v/i, '')
         || '0';
     if (!latestVersion || latestVersion === '0') {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: 'Release 缺少版本号' });
         return { ok: false, filesApplied: 0, needsRestart: false, message: 'Release 缺少版本号' };
     }
     log.info(`[patch] 最新补丁版本(更新日志): ${latestVersion}, Git tag: ${release.tag_name || '(无)'}`);
 
     if (applied && !versionGreater(latestVersion, applied)) {
+        if (onProgress) onProgress({ phase: 'done', percent: 100, message: `已是最新补丁（v${latestVersion}）` });
         return {
             ok: true, filesApplied: 0, needsRestart: false,
             version: latestVersion,
@@ -426,6 +503,7 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
     if (exact) asset = exact;
     else asset = assets.find((a: any) => /^patch-.*\.json$/i.test(a.name));
     if (!asset) {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: `v${latestVersion} 未提供热补丁包` });
         return {
             ok: false, filesApplied: 0, needsRestart: false,
             version: latestVersion,
@@ -433,15 +511,20 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
         };
     }
 
-    const raw = await downloadText(getAssetDownloadUrl(asset));
+    if (onProgress) onProgress({ phase: 'downloading', percent: 0, message: `正在下载补丁 v${latestVersion}` });
+    const raw = await downloadText(getAssetDownloadUrl(asset), (loaded, total) => {
+        if (onProgress) onProgress({ phase: 'downloading', percent: total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : -1, loaded, total });
+    });
     let manifest: PatchManifest;
     try {
         manifest = JSON.parse(raw);
     } catch (e) {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: `补丁清单解析失败: ${(e as Error).message}` });
         return { ok: false, filesApplied: 0, needsRestart: false, message: `补丁清单解析失败: ${(e as Error).message}` };
     }
 
     if (manifest.minAppVersion && compareVersions(app.getVersion(), manifest.minAppVersion) < 0) {
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: `当前版本过低，请先升级安装包` });
         return {
             ok: false, filesApplied: 0, needsRestart: false,
             version: latestVersion,
@@ -452,6 +535,7 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
     const patchesDir = getPatchesDir();
     if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
 
+    if (onProgress) onProgress({ phase: 'applying', percent: 100, message: `正在应用补丁 v${latestVersion}` });
     let count = 0;
     let needsRestart = false;
     for (const f of manifest.files || []) {
@@ -474,6 +558,7 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
 
     setAppliedPatchVersion(latestVersion);
     log.info(`[patch] 应用完成: v${latestVersion}, 共 ${count} 个文件, 需重启=${needsRestart}`);
+    if (onProgress) onProgress({ phase: 'done', percent: 100, message: needsRestart ? '补丁已应用，正在重启应用…' : '补丁已应用，正在重载…' });
     return {
         ok: true,
         version: latestVersion,

@@ -3183,21 +3183,9 @@ function handle(): void {
     sec1.el.appendChild(updFooter);
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
-    patchBtn.addEventListener('click', async (e: Event) => {
+    patchBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        if (patchBtn.disabled) return;
-        const old = patchBtn.textContent;
-        patchBtn.textContent = '应用中…';
-        patchBtn.disabled = true;
-        try {
-            const res: any = await ipcRenderer.invoke('settings:apply-patch');
-            showPatchToast((res && res.message) || (res && res.ok ? '已应用补丁' : '应用失败'));
-        } catch (err: any) {
-            showPatchToast('应用失败: ' + ((err && err.message) || err));
-        } finally {
-            patchBtn.textContent = old || '应用补丁';
-            patchBtn.disabled = false;
-        }
+        openPatchWizard();
     });
 
     // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
@@ -3309,6 +3297,198 @@ function handle(): void {
             const inp = modal.querySelector('#fntv-unlock-input') as HTMLInputElement | null;
             if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
         });
+    }
+
+    // [lc-483] 热补丁「应用补丁」向导弹窗：
+    // 打开即实时检查 → 有更新显示版本号+「立即应用」→ 点击后实时下载进度 → 应用完立即重启/重载。
+    // 单例 modal，关闭即隐藏（下次打开重新检查），进度事件通过 settings:patch-progress 实时驱动。
+    let _patchWizardModal: HTMLElement | null = null;
+    let _patchProgHandler: ((_e: any, p: any) => void) | null = null;
+    function openPatchWizard(): void {
+        if (!_patchWizardModal) {
+            const modal = document.createElement('div');
+            modal.id = 'fntv-patch-wizard';
+            modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+            modal.style.cssText = 'position:fixed;z-index:2147483704;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+            modal.addEventListener('click', (e: Event) => {
+                // 仅检查/完成/出错状态允许点遮罩关闭；下载/应用中禁止（避免打断）
+                if (e.target === modal && modal.getAttribute('data-closable') === '1') closePatchWizard();
+            });
+            const card = document.createElement('div');
+            card.style.cssText = 'width:340px;border-radius:16px;padding:22px;color:var(--fnos-ui-text);'
+                + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+                + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+                + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
+            const body = document.createElement('div');
+            body.id = 'fntv-patch-body';
+            card.appendChild(body);
+            modal.appendChild(card);
+            document.body.appendChild(modal);
+            _patchWizardModal = modal;
+        }
+        _patchWizardModal.style.display = 'flex';
+        _patchWizardModal.setAttribute('data-closable', '1');
+        renderPatchState('checking', null);
+        ipcRenderer.invoke('settings:check-patch').then((info: any) => {
+            if (info && info.hasUpdate) renderPatchState('available', info);
+            else renderPatchState('uptodate', info);
+        }).catch((err: any) => {
+            renderPatchState('error', { message: '检查失败: ' + ((err && err.message) || err) });
+        });
+    }
+
+    function closePatchWizard(): void {
+        if (_patchWizardModal) _patchWizardModal.style.display = 'none';
+        if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
+    }
+
+    // 渲染不同状态的卡片内容
+    function renderPatchState(state: string, info: any): void {
+        const modal = _patchWizardModal;
+        if (!modal) return;
+        const body = modal.querySelector('#fntv-patch-body') as HTMLElement;
+        if (!body) return;
+        // 关闭可用性：仅非进行中状态允许遮罩/叉关闭
+        const closable = (state === 'checking' || state === 'available' || state === 'uptodate' || state === 'error');
+        modal.setAttribute('data-closable', closable ? '1' : '0');
+        body.innerHTML = '';
+        const version = (info && info.version) ? info.version : '';
+        const curVer = (info && info.currentVersion) ? info.currentVersion : '';
+
+        if (state === 'checking') {
+            body.appendChild(spinnerEl());
+            body.appendChild(centerText('正在检查更新…', '14px', 'var(--fnos-ui-text)', 'margin-top:14px;font-weight:600;'));
+            return;
+        }
+        if (state === 'available') {
+            body.appendChild(centerText('🔥 发现新热补丁', '16px', 'var(--fnos-ui-pill-text)', 'font-weight:800;margin-bottom:10px;'));
+            const chip = document.createElement('div');
+            chip.textContent = 'v' + version;
+            chip.style.cssText = 'display:inline-block;padding:5px 14px;border-radius:20px;font-size:15px;font-weight:800;'
+                + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);margin-bottom:8px;';
+            body.appendChild(chip);
+            body.appendChild(centerText(curVer ? `当前已应用：${curVer}` : '当前未应用任何热补丁', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:16px;'));
+            body.appendChild(actionRow([
+                { label: '稍后', primary: false, onClick: () => closePatchWizard() },
+                { label: '立即应用', primary: true, onClick: () => startPatchApply() },
+            ]));
+            return;
+        }
+        if (state === 'uptodate') {
+            body.appendChild(centerText('✓', '26px', 'var(--fnos-ui-accent)', 'font-weight:800;margin-bottom:6px;'));
+            body.appendChild(centerText('已是最新热补丁', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:6px;'));
+            body.appendChild(centerText(version ? `当前版本：v${version}` : (info && info.message) || '', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:16px;'));
+            body.appendChild(actionRow([{ label: '关闭', primary: true, onClick: () => closePatchWizard() }]));
+            return;
+        }
+        if (state === 'error') {
+            body.appendChild(centerText('⚠', '24px', '#ff7a7a', 'font-weight:800;margin-bottom:6px;'));
+            body.appendChild(centerText('出错了', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
+            body.appendChild(centerText((info && info.message) || '未知错误', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
+            body.appendChild(actionRow([{ label: '关闭', primary: true, onClick: () => closePatchWizard() }]));
+            return;
+        }
+        if (state === 'downloading' || state === 'applying' || state === 'done') {
+            const pct = (info && typeof info.percent === 'number') ? info.percent : -1;
+            const note = (info && info.message) || (state === 'downloading' ? '正在下载…' : state === 'applying' ? '正在应用…' : '完成');
+            // 进度条
+            const track = document.createElement('div');
+            track.style.cssText = 'height:8px;border-radius:6px;background:var(--fnos-ui-input-bg);overflow:hidden;margin:6px 0 8px;';
+            const fill = document.createElement('div');
+            fill.id = 'fntv-patch-fill';
+            const done = state === 'done';
+            const indeterminate = pct < 0 && !done;
+            fill.style.cssText = 'height:100%;border-radius:6px;transition:width .25s;'
+                + 'background:var(--fnos-ui-pill-bg)!important;'
+                + (done ? 'width:100%;' : indeterminate ? 'width:40%;animation:fnosPatchIndet 1.1s infinite ease-in-out;' : `width:${pct}%;`);
+            track.appendChild(fill);
+            body.appendChild(track);
+            const pctText = state === 'downloading'
+                ? (pct >= 0 ? `正在下载… ${pct}%` : '正在下载…')
+                : state === 'applying' ? '正在应用补丁…'
+                : '✓ 补丁已应用';
+            body.appendChild(centerText(pctText, '13px', done ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-text)', 'font-weight:600;margin-bottom:4px;'));
+            if (indeterminate || pct >= 0) {
+                const sub = document.createElement('div');
+                sub.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.7;';
+                if (info && info.total && info.total > 0) {
+                    const fmt = (n: number) => (n / 1024).toFixed(0) + ' KB';
+                    sub.textContent = `${fmt(info.loaded || 0)} / ${fmt(info.total)}`;
+                } else {
+                    sub.textContent = done ? '即将重启应用使补丁生效' : '下载中，请稍候…';
+                }
+                body.appendChild(sub);
+            }
+            // done 状态补一句重启提示
+            if (done) {
+                body.appendChild(centerText('应用即将重启 / 重载…', '11px', 'var(--fnos-ui-muted)', 'opacity:.7;margin-top:6px;'));
+            }
+            return;
+        }
+    }
+
+    // 进度事件 → 更新下载/应用状态（保留 modal 不被关闭）
+    function startPatchApply(): void {
+        renderPatchState('downloading', { percent: 0, message: '正在下载…' });
+        _patchProgHandler = (_e: any, p: any) => {
+            if (!p) return;
+            if (p.phase === 'downloading' || p.phase === 'applying' || p.phase === 'done') {
+                renderPatchState(p.phase, p);
+            } else if (p.phase === 'error') {
+                renderPatchState('error', { message: p.message || '应用失败' });
+            }
+        };
+        ipcRenderer.on('settings:patch-progress', _patchProgHandler);
+        ipcRenderer.invoke('settings:apply-patch').then((res: any) => {
+            if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
+            if (res && res.ok) {
+                renderPatchState('done', res); // 应用进程随后会重载/重启，无需手动关闭
+            } else {
+                renderPatchState('error', { message: (res && res.message) || '应用失败' });
+            }
+        }).catch((err: any) => {
+            if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
+            renderPatchState('error', { message: '应用失败: ' + ((err && err.message) || err) });
+        });
+    }
+
+    // 小工具：居中文字
+    function centerText(text: string, size: string, color: string, extra = ''): HTMLElement {
+        const d = document.createElement('div');
+        d.textContent = text;
+        d.style.cssText = `font-size:${size};color:${color};${extra}`;
+        return d;
+    }
+    // 小工具：按钮行
+    function actionRow(actions: Array<{ label: string; primary: boolean; onClick: () => void }>): HTMLElement {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;';
+        for (const a of actions) {
+            const b = mkBtn(a.label, !a.primary);
+            if (a.primary) {
+                b.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;'
+                    + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
+            }
+            b.addEventListener('click', (e: Event) => { e.stopPropagation(); a.onClick(); });
+            row.appendChild(b);
+        }
+        return row;
+    }
+    // 小工具：旋转 spinner
+    function spinnerEl(): HTMLElement {
+        const s = document.createElement('div');
+        s.style.cssText = 'width:30px;height:30px;margin:2px auto 0;border-radius:50%;'
+            + 'border:3px solid var(--fnos-ui-border);border-top-color:var(--fnos-ui-pill-bg);'
+            + 'animation:fnosPatchSpin .8s linear infinite;';
+        return s;
+    }
+    // 注入 keyframes（仅一次）
+    if (!document.getElementById('fntv-patch-kf')) {
+        const st = document.createElement('style');
+        st.id = 'fntv-patch-kf';
+        st.textContent = '@keyframes fnosPatchSpin{to{transform:rotate(360deg)}}'
+            + '@keyframes fnosPatchIndet{0%{margin-left:0}50%{margin-left:55%}100%{margin-left:0}}';
+        document.head.appendChild(st);
     }
 
 
