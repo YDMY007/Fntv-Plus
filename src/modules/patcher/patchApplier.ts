@@ -56,6 +56,14 @@ const MIRRORS: Array<{ name: string; base: string; fullPrefix: boolean }> = [
 const OWNER = 'YDMY007';
 const REPO = 'Fntv-Plus';
 
+// Gitee 源（国内直连，首选）。仓库名用小写 fntv-plus（与 GitHub 镜像发布流程一致）
+const GITEE_OWNER = 'YDMY007';
+const GITEE_REPO = 'fntv-plus';
+const GITEE_RELEASES_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?per_page=1`;
+const GITEE_TAG_RELEASE_URL = (tag: string) =>
+    `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${tag}`;
+const GITEE_CREATE_RELEASE_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases`;
+
 function getPatchesDir(): string {
     return process.env.FNTV_PATCHES_DIR
         || path.join(app.getPath('userData'), 'patches');
@@ -80,7 +88,21 @@ function buildMirrorAssetUrl(originalUrl: string, m: { base: string; fullPrefix:
 }
 
 async function fetchReleaseJson(): Promise<any> {
-    // 1) 直连 GitHub
+    // 1) Gitee 优先（国内直连，最快最稳；公开 API 无需 token 读最新 release）
+    try {
+        const r = await axios.get(GITEE_RELEASES_URL, {
+            timeout: 10000,
+            headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
+        });
+        const arr = r.data;
+        if (Array.isArray(arr) && arr.length) {
+            log.info('[patch] 通过 Gitee 获取 Release 成功');
+            return arr[0];
+        }
+    } catch (e) {
+        log.warn('[patch] Gitee 获取 Release 失败, 回退 GitHub:', (e as Error).message);
+    }
+    // 2) 直连 GitHub
     try {
         const r = await axios.get(githubApiLatest(), {
             timeout: 10000,
@@ -90,7 +112,7 @@ async function fetchReleaseJson(): Promise<any> {
     } catch (e) {
         log.warn('[patch] 直连 GitHub 获取 Release 失败, 尝试镜像:', (e as Error).message);
     }
-    // 2) 依次尝试镜像
+    // 3) 依次尝试镜像
     for (const m of MIRRORS) {
         try {
             const r = await axios.get(buildMirrorApiUrl(m), {
@@ -103,7 +125,13 @@ async function fetchReleaseJson(): Promise<any> {
             log.warn(`[patch] 镜像 ${m.name} 失败:`, (e as Error).message);
         }
     }
-    throw new Error('无法获取 Release 信息（直连与镜像均失败）');
+    throw new Error('无法获取 Release 信息（Gitee / 直连 / 镜像均失败）');
+}
+
+// Gitee 资产下载链接直连即可（国内快），GitHub 资产则走镜像。downloadText 已按 url 是否含
+// github.com 决定是否加镜像前缀，这里无需额外处理。
+function getAssetDownloadUrl(asset: any): string {
+    return asset && (asset.browser_download_url || asset.url || asset.download_url);
 }
 
 async function downloadText(url: string): Promise<string> {
@@ -182,7 +210,7 @@ export async function applyLatestPatch(): Promise<ApplyResult> {
         };
     }
 
-    const raw = await downloadText(asset.browser_download_url);
+    const raw = await downloadText(getAssetDownloadUrl(asset));
     let manifest: PatchManifest;
     try {
         manifest = JSON.parse(raw);

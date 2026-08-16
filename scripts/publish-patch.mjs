@@ -11,10 +11,13 @@
  *   1. 读取各 dest 文件, base64 编码;
  *   2. 生成 patch-<version>.json(含 version / minAppVersion / files[]);
  *      - target 自动去掉开头的 dest/ 前缀(如 dest/preload/plugins/x.js -> preload/plugins/x.js)
- *   3. 若检测到 gh CLI 且环境有 GITHUB_TOKEN, 自动 `gh release upload v<version>`;
- *      否则仅把 json 写到项目根目录, 并打印手动上传说明。
+ *   3. 上传(源优先级 = Gitee 优先, GitHub 次选):
+ *      - Gitee: 设环境变量 GITEE_TOKEN 后, 自动查/建 Release(v<version>)并上传附件(国内直连,
+ *        与拉包端 patchApplier 的 Gitee 优先一致); 未设 token 则跳过。
+ *      - GitHub: 检测到 gh CLI 且有 GITHUB_TOKEN 时, `gh release upload v<version>` 作次选保底。
+ *      - 两者都不可用则仅把 json 写到项目根目录, 并打印手动上传说明。
  *
- * 说明: 本脚本只负责"出包+上传", 不自动 git push。Release/标签需你已存在(或用 gh 创建)。
+ * 说明: 本脚本只负责"出包+上传", 不自动 git push。确保标签 v<version> 已推到目标仓库。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -56,23 +59,79 @@ const outPath = path.join(root, outName);
 fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));
 console.log(`[publish-patch] 已生成 ${outName}`);
 
-// 尝试用 gh 上传到 Release(标签 v<version>)
-let uploaded = false;
-try {
-    execSync('gh --version', { stdio: 'ignore' });
-    const tag = version.startsWith('v') ? version : 'v' + version;
-    console.log(`[publish-patch] 通过 gh 上传到 Release ${tag} ...`);
-    execSync(`gh release upload ${tag} ${outName} --clobber`, { stdio: 'inherit', cwd: root });
-    uploaded = true;
-    console.log(`[publish-patch] 上传完成。应用内点「应用补丁」即可拉取 v${version}。`);
-} catch (e) {
-    console.log('[publish-patch] 未检测到 gh CLI 或上传失败, 改用手动上传。');
+// ---------- Gitee 优先上传 ----------
+const GITEE_OWNER = 'YDMY007';
+const GITEE_REPO = 'fntv-plus';
+const GITEE_TOKEN = process.env.GITEE_TOKEN || '';
+const giteeApi = (p) => `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/${p}`;
+
+async function giteeUpload(tag, filePath, fileName) {
+    if (!GITEE_TOKEN) {
+        console.log('[publish-patch] 未设置 GITEE_TOKEN 环境变量, 跳过 Gitee 上传(应用内拉包仍可走 GitHub 镜像)。');
+        return false;
+    }
+    const H = { 'User-Agent': 'fnos-tv-publish' };
+    let release;
+    try {
+        const r = await fetch(giteeApi(`releases/tags/${tag}?access_token=${GITEE_TOKEN}`), { headers: H });
+        if (r.ok) release = await r.json();
+    } catch { /* ignore */ }
+    if (!release) {
+        try {
+            const r = await fetch(giteeApi(`releases?access_token=${GITEE_TOKEN}`), {
+                method: 'POST',
+                headers: { ...H, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag_name: tag, name: `热补丁 ${tag}`, body: `Fntv-Plus 热补丁 ${tag}`, prerelease: false, target_commitish: 'release' }),
+            });
+            if (r.ok) release = await r.json();
+            else console.log(`[publish-patch] Gitee 创建 Release 失败(${r.status}), 可能标签 ${tag} 尚未推送到 Gitee`);
+        } catch (e) { console.log('[publish-patch] Gitee 创建 Release 异常:', e.message); }
+    }
+    if (!release || !release.id) {
+        console.log(`[publish-patch] 未找到/未创建 Gitee Release ${tag}, 跳过 Gitee 上传。`);
+        return false;
+    }
+    const existing = (release.assets || []).find((a) => a.name === fileName);
+    if (existing && existing.id) {
+        try {
+            await fetch(giteeApi(`releases/${release.id}/attach_files/${existing.id}?access_token=${GITEE_TOKEN}`), { method: 'DELETE', headers: H });
+            console.log(`[publish-patch] 已删除 Gitee 旧资产 ${fileName}`);
+        } catch { /* ignore */ }
+    }
+    const buf = fs.readFileSync(filePath);
+    const form = new FormData();
+    form.append('file', new Blob([buf], { type: 'application/json' }), fileName);
+    const r = await fetch(giteeApi(`releases/${release.id}/attach_files?access_token=${GITEE_TOKEN}`), {
+        method: 'POST', headers: H, body: form,
+    });
+    if (r.ok) {
+        console.log(`[publish-patch] 已上传 Gitee Release ${tag}: ${fileName}`);
+        return true;
+    }
+    console.log(`[publish-patch] Gitee 上传失败(${r.status}):`, await r.text().catch(() => ''));
+    return false;
+}
+
+const tag = version.startsWith('v') ? version : 'v' + version;
+let uploaded = await giteeUpload(tag, outPath, outName);
+
+// ---------- GitHub 次选保底 ----------
+if (!uploaded) {
+    try {
+        execSync('gh --version', { stdio: 'ignore' });
+        console.log(`[publish-patch] 通过 gh 上传到 Release ${tag} ...`);
+        execSync(`gh release upload ${tag} ${outName} --clobber`, { stdio: 'inherit', cwd: root });
+        uploaded = true;
+        console.log(`[publish-patch] 上传完成(GitHub)。应用内点「应用补丁」即可拉取 v${version}。`);
+    } catch (e) {
+        console.log('[publish-patch] 未检测到 gh CLI 或上传失败, 改用手动上传。');
+    }
 }
 
 if (!uploaded) {
-    console.log(`\n请手动把 ${outName} 上传为 GitHub Release(v${version}) 的附件:`);
-    console.log(`  1. 打开 https://github.com/YDMY007/Fntv-Plus/releases/tag/v${version}`);
-    console.log(`  2. 把 ${outName} 作为资产(Asset)上传;`);
-    console.log(`  3. 应用内点「应用补丁」即可拉取。\n`);
-    console.log(`(也可安装 gh CLI 并配置 GITHUB_TOKEN 后重跑本脚本自动上传)`);
+    console.log(`\n请手动把 ${outName} 上传为 Release(v${version}) 的附件:`);
+    console.log(`  Gitee: https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/releases/tag/${tag}`);
+    console.log(`  GitHub: https://github.com/YDMY007/Fntv-Plus/releases/tag/${tag}`);
+    console.log(`  把 ${outName} 作为资产(Asset)上传; 应用内点「应用补丁」即可拉取。\n`);
+    console.log(`(Gitee 自动上传需 GITEE_TOKEN 环境变量; GitHub 需 gh CLI + GITHUB_TOKEN)`);
 }
