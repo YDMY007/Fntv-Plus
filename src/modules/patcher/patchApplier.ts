@@ -318,7 +318,11 @@ async function finalizeAfterApply(result: ApplyResult): Promise<ApplyResult> {
  */
 export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
     const applied = getAppliedPatchVersion();
-    const currentVersion = applied || app.getVersion();
+    // [fix] 基线取「已应用补丁版本」或「应用安装版本」，不可为空。
+    //   原逻辑 applied 为空时 `!applied` 直接判有新更新，且 versionGreater 把空基线当 0，
+    //   导致「从未应用过补丁」也误报「发现新热补丁」。
+    const baseline = applied || app.getVersion();
+    const currentVersion = baseline;
     try {
         const release = await fetchReleaseJson();
         const body = release.body || release.note || '';
@@ -328,7 +332,7 @@ export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
         if (!latestVersion || latestVersion === '0') {
             return { hasUpdate: false, version: '', currentVersion, message: '未找到可用的热补丁' };
         }
-        const hasUpdate = !applied || versionGreater(latestVersion, applied);
+        const hasUpdate = versionGreater(latestVersion, baseline);
         return {
             hasUpdate,
             version: latestVersion,
@@ -473,7 +477,9 @@ export async function applyTestPatchAndReload(opts?: PatchApplyOptions): Promise
 export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
     const onProgress = opts && opts.onProgress;
     const applied = getAppliedPatchVersion();
-    log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}`);
+    // [fix] 与 checkLatestPatchInfo 一致：基线取已应用版本或安装版本，避免空基线误判
+    const baseline = applied || app.getVersion();
+    log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}, 基线版本: ${baseline}`);
 
     const release = await fetchReleaseJson();
     // [lc-477] 版本号以更新日志最新 heading 为准(## vX.Y.Z(-hotfix)? (date))，Git tag 仅兜底
@@ -487,7 +493,7 @@ export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyR
     }
     log.info(`[patch] 最新补丁版本(更新日志): ${latestVersion}, Git tag: ${release.tag_name || '(无)'}`);
 
-    if (applied && !versionGreater(latestVersion, applied)) {
+    if (!versionGreater(latestVersion, baseline)) {
         if (onProgress) onProgress({ phase: 'done', percent: 100, message: `已是最新补丁（v${latestVersion}）` });
         return {
             ok: true, filesApplied: 0, needsRestart: false,

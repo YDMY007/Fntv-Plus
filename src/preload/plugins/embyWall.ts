@@ -3342,6 +3342,9 @@ function handle(): void {
     function closePatchWizard(): void {
         if (_patchWizardModal) { _patchWizardModal.remove(); _patchWizardModal = null; }
         if (_patchProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _patchProgHandler); _patchProgHandler = null; }
+        // [fix] 应用补丁是一次性任务流，关闭向导后直接退出设置面板回到侧边栏，
+        //   避免「关了向导还有一层遮罩、需再点一次才退出」的割裂感（区别于历史/解锁码等仍回面板的弹窗）
+        closeSettingsPanel();
     }
 
     // 渲染不同状态的卡片内容
