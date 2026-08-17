@@ -2,8 +2,10 @@
 -- Fntv-Plus · MPV 插帧（AI 补帧）实时切换
 -- ───────────────────────────────────────────────────────────────────────
 -- 触发：uosc 控制栏按钮
---   cycle:auto_awesome:user-data/fntv/interp:no/yes!?插帧
---   点击切换 user-data/fntv/interp 属性（'yes'/'no'），本脚本监听并应用对应引擎。
+--   cycle:auto_awesome:fntv_interp@fntv_interp:no/yes!?插帧
+--   点击时 uosc 自动算出下一值（no↔yes）并把 set 消息回传给本脚本；
+--   本脚本据此应用插帧，并用 script-message-to uosc set 回写高亮态
+--   （yes=高亮、no=不高亮）—— 实现「开启即高亮」。
 -- 实时生效，无需重启 MPV。
 --
 -- 引擎优先级（engine=auto 时）：SVP → RIFE → MPV 内置平滑运动
@@ -26,10 +28,18 @@ local conf = {
 }
 opt.read_options(conf, 'fntv_interp')
 
-local PROP = 'user-data/fntv/interp'
+-- uosc 外部属性名（须与 controls 行 @fntv_interp 的脚本名一致）
+local EXT = 'fntv_interp'
 
 local function toast(msg)
     pcall(function() mp.commandv('show-text', msg, 2200) end)
+end
+
+-- 通知 uosc 更新按钮高亮态（yes=高亮 / no=不高亮）
+local function set_uosc(val)
+    pcall(function()
+        mp.commandv('script-message-to', 'uosc', 'set', EXT, val)
+    end)
 end
 
 -- 内置平滑运动（MPV 自带，永远可用）
@@ -58,6 +68,7 @@ local function try_profile(name)
     return ok and res == true
 end
 
+-- 核心：按引擎应用/关闭插帧（含 OSD 提示）
 local function apply(on)
     if on then
         local eng = (conf.engine or 'auto'):lower()
@@ -92,24 +103,20 @@ local function apply(on)
     end
 end
 
--- 文件加载后：按默认开关初始化 user-data（使 uosc 按钮高亮与默认一致）
+-- 文件加载后：按默认开关设定初始「高亮态 + 插帧开关」
 mp.register_event('file-loaded', function()
-    if conf.default_on then
-        mp.set_property(PROP, 'yes')
-    end
+    local init = conf.default_on and 'yes' or 'no'
+    set_uosc(init)
+    apply(init == 'yes')
 end)
 
--- 监听 user-data/fntv/interp，实时应用
-mp.observe_property(PROP, 'string', function(_, val)
-    apply(val == 'yes' or val == true)
-end)
-
--- 备用：通过 script-message 触发（若改用 command:...:script-message fntv-interp toggle）
-mp.register_script_message('fntv-interp', function(arg)
-    if arg == 'toggle' then
-        local cur = mp.get_property(PROP, 'no')
-        mp.set_property(PROP, cur == 'yes' and 'no' or 'yes')
-    end
+-- 监听 uosc 控制栏按钮（cycle:...@fntv_interp）点击：
+-- uosc 算出下一值后回传 set 消息，本脚本据此应用插帧并回写高亮态。
+mp.register_script_message('set', function(prop, value)
+    if prop ~= EXT then return end
+    local on = (value == 'yes' or value == true)
+    apply(on)
+    set_uosc(value) -- 回写，确保 uosc 显示态与真实状态一致
 end)
 
 mp.log('info', '[fntv_interp] 已加载 (engine=' .. tostring(conf.engine) .. ', default_on=' .. tostring(conf.default_on) .. ')')

@@ -131,7 +131,6 @@ function startConfigCheck(): void {
 
 // [lc-486] 升级兼容：把新增的插帧文件（Lua 脚本 + conf）从 portable_config 同步到用户 MPV 目录。
 // 仅当目标缺失时才拷贝，绝不覆盖用户已有的自定义内容。
-// 注：uosc.conf 的 controls 行改动不在此同步（避免覆盖用户自定义控制栏），新装/重装用户自然获得。
 function syncNewInterpFiles(): void {
     try {
         const srcDir = getPortableConfigDir();
@@ -147,8 +146,34 @@ function syncNewInterpFiles(): void {
                 logger.info(`[插帧] 已同步新增文件到用户 MPV 目录: ${dst}`);
             }
         }
+        // [lc-487] 控制栏「插帧」按钮升级为高亮 cycle: 版本
+        syncUoscControls();
     } catch (e) {
         logger.error('[插帧] 同步新增文件失败:', e);
+    }
+}
+
+// [lc-487] 升级兼容：把用户 uosc.conf 控制栏的「插帧」按钮从旧 command: 标记更新为高亮 cycle: 标记；
+// 若用户 uosc.conf 完全没有该按钮，则在 controls= 行末尾插入。只改动我们托管的那一段，不触碰其余自定义。
+const INTERP_BTN_NEW = 'cycle:auto_awesome:fntv_interp@fntv_interp:no/yes!?插帧';
+const INTERP_BTN_OLD = 'command:auto_awesome:script-message fntv-interp toggle?插帧';
+
+function syncUoscControls(): void {
+    try {
+        const dst = path.join(getMpvConfigDir(), 'script-opts', 'uosc.conf');
+        if (!fs.existsSync(dst)) return; // 用户无此文件则交由 MPV 读 portable_config 内置版本
+        let text = fs.readFileSync(dst, 'utf-8');
+        if (text.includes(INTERP_BTN_NEW)) return; // 已是最新高亮版
+        if (text.includes(INTERP_BTN_OLD)) {
+            text = text.replace(INTERP_BTN_OLD, INTERP_BTN_NEW);
+        } else {
+            // 没有该按钮：在生效的 controls= 行（非注释）末尾的 ,fullscreen 前插入
+            text = text.replace(/^controls=([^\n]*),fullscreen/m, 'controls=$1,' + INTERP_BTN_NEW + ',fullscreen');
+        }
+        fs.writeFileSync(dst, text, 'utf-8');
+        logger.info('[插帧] 已更新用户 uosc.conf 控制栏插帧按钮（高亮版）');
+    } catch (e) {
+        logger.error('[插帧] 更新 uosc.conf 失败:', e);
     }
 }
 
