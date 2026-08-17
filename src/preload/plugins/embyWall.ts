@@ -2643,7 +2643,7 @@ function handle(): void {
       const swBtn = document.createElement('button');
       swBtn.id = 'fnos-switch-system-btn';
       swBtn.type = 'button';
-      swBtn.textContent = '🖥 切换系统页面';
+      swBtn.textContent = '切换系统页面';
       swBtn.style.cssText = 'box-sizing:border-box;margin:0 0 10px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:rgba(160,140,180,.35)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;'
