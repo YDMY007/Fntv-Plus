@@ -125,7 +125,7 @@ export interface Config {
     biliDanmakuBlockTypes?: string[]; // 弹幕屏蔽类型（key: top/bottom/scroll/reverse/advanced/color），写入 danmaku_block_types.json
     // [lc-486] MPV 插帧（AI 补帧）设置：写入 script-opts/fntv_interp.conf 供 fntv_interp.lua 读取
     mpvInterpEnabled?: boolean;      // 默认开启插帧（启动即生效）
-    mpvInterpEngine?: 'auto' | 'svp' | 'rife' | 'builtin'; // 插帧引擎
+    mpvInterpEngine?: 'auto' | 'svp' | 'rife' | 'builtin' | 'nvidia'; // 插帧引擎
     mpvInterpEnginePath?: string;    // 引擎路径（SVP 目录 / rife-ncnn-vulkan 可执行文件路径）
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
@@ -796,10 +796,10 @@ export function getMpvInterpEnabled(): boolean {
     const config: Config = readConfig() || {};
     return config.mpvInterpEnabled === true; // 未设置视为关
 }
-export function getMpvInterpEngine(): 'auto' | 'svp' | 'rife' | 'builtin' {
+export function getMpvInterpEngine(): 'auto' | 'svp' | 'rife' | 'builtin' | 'nvidia' {
     const config: Config = readConfig() || {};
     const e = config.mpvInterpEngine;
-    if (e === 'svp' || e === 'rife' || e === 'builtin' || e === 'auto') return e;
+    if (e === 'svp' || e === 'rife' || e === 'builtin' || e === 'auto' || e === 'nvidia') return e;
     return 'auto';
 }
 export function getMpvInterpEnginePath(): string {
@@ -811,9 +811,9 @@ export function setMpvInterpEnabled(enabled: boolean): void {
     config.mpvInterpEnabled = !!enabled;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
-export function setMpvInterpEngine(engine: 'auto' | 'svp' | 'rife' | 'builtin'): void {
+export function setMpvInterpEngine(engine: 'auto' | 'svp' | 'rife' | 'builtin' | 'nvidia'): void {
     const config: Config = readConfig() || {};
-    if (engine === 'svp' || engine === 'rife' || engine === 'builtin' || engine === 'auto') {
+    if (engine === 'svp' || engine === 'rife' || engine === 'builtin' || engine === 'auto' || engine === 'nvidia') {
         config.mpvInterpEngine = engine;
     } else {
         config.mpvInterpEngine = 'auto';

@@ -4494,7 +4494,8 @@ function handle(): void {
       ['auto', '自动（SVP → RIFE → 内置平滑运动）'],
       ['builtin', 'MPV 内置平滑运动（无需额外引擎）'],
       ['svp', 'SVP（需本机安装并运行 SmoothVideo Project）'],
-      ['rife', 'RIFE AI 补帧（需 rife-ncnn-vulkan 等运行时）']
+      ['rife', 'RIFE AI 补帧（需 rife-ncnn-vulkan 等运行时）'],
+      ['nvidia', 'N 卡 Smooth Motion（RTX50 驱动级，需在 NVIDIA App 开启）']
     ] as [string, string][]).forEach(([k, label]) => {
       const o = document.createElement('option');
       o.value = k; o.textContent = label;
@@ -4516,7 +4517,7 @@ function handle(): void {
 
     const interpHint = document.createElement('div');
     interpHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:8px 0 0;line-height:1.5;';
-    interpHint.textContent = '播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好；未安装时自动回退 MPV 内置平滑运动。';
+    interpHint.textContent = '播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好，未安装时自动回退 MPV 内置平滑运动；选 N 卡需 RTX50+ 并在 NVIDIA App 开启「Smooth Motion（视频）」。';
     interpBody.appendChild(interpHint);
 
     let _interpTimer: any = null;

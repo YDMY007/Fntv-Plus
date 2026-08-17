@@ -135,17 +135,22 @@ function syncNewInterpFiles(): void {
     try {
         const srcDir = getPortableConfigDir();
         const dstDir = getMpvConfigDir();
-        const files = ['scripts/fntv_interp.lua', 'script-opts/fntv_interp.conf'];
-        for (const rel of files) {
+        // fntv_interp.lua 为应用全量托管（用户不应手改），始终覆盖以确保老用户拿到最新逻辑（如新增 nvidia 引擎档）；
+        // fntv_interp.conf 由各端 writeInterpConfig 负责全量写入，此处仅做缺失补位，不覆盖用户已生成的配置。
+        const always = ['scripts/fntv_interp.lua'];
+        const missingOnly = ['script-opts/fntv_interp.conf'];
+        const copy = (rel: string, overwrite: boolean) => {
             const src = path.join(srcDir, rel);
             const dst = path.join(dstDir, rel);
-            if (fs.existsSync(src) && !fs.existsSync(dst)) {
-                const dstParent = path.dirname(dst);
-                if (!fs.existsSync(dstParent)) fs.mkdirSync(dstParent, { recursive: true });
-                fs.copyFileSync(src, dst);
-                logger.info(`[插帧] 已同步新增文件到用户 MPV 目录: ${dst}`);
-            }
-        }
+            if (!fs.existsSync(src)) return;
+            if (!overwrite && fs.existsSync(dst)) return;
+            const dstParent = path.dirname(dst);
+            if (!fs.existsSync(dstParent)) fs.mkdirSync(dstParent, { recursive: true });
+            fs.copyFileSync(src, dst);
+            logger.info(`[插帧] 已同步文件到用户 MPV 目录: ${dst}${overwrite ? ' (覆盖)' : ''}`);
+        };
+        always.forEach((rel) => copy(rel, true));
+        missingOnly.forEach((rel) => copy(rel, false));
         // [lc-487] 控制栏「插帧」按钮升级为高亮 cycle: 版本
         syncUoscControls();
     } catch (e) {
@@ -315,12 +320,12 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
 //   确保便携模式(读 portable_config)与标准模式(读 AppData/Roaming/mpv)下都能读到。
 export function writeInterpConfig(enabled: boolean, engine: string, enginePath: string): void {
     try {
-        const eng = (engine === 'svp' || engine === 'rife' || engine === 'builtin') ? engine : 'auto';
+        const eng = (engine === 'svp' || engine === 'rife' || engine === 'builtin' || engine === 'nvidia') ? engine : 'auto';
         const lines = [
             '# Fntv-Plus 插帧（AI 补帧）配置',
             '# 由应用「设置面板 > 插帧（AI 补帧）」写入，请勿手动编辑（修改会被覆盖）。',
             '',
-            '# 插帧引擎：auto(自动探测 SVP→RIFE→内置) / svp / rife / builtin',
+            '# 插帧引擎：auto(自动探测 SVP→RIFE→内置) / svp / rife / builtin / nvidia(RTX50 驱动级 Smooth Motion)',
             'engine=' + eng,
             '',
             '# 启动播放时即开启插帧（默认关=否）',

@@ -12,6 +12,8 @@
 --   - SVP  ：SmoothVideo Project 已安装并运行，启用 [fntv-interp-svp] profile
 --   - RIFE ：rife-ncnn-vulkan 已就位，启用 [fntv-interp-rife] profile
 --   - builtin：MPV 自带 interpolation + video-sync=display-resample（运动补偿/去抖动）
+--   - nvidia：N 卡 Smooth Motion（RTX50+ 驱动级视频帧生成），走 D3D11 呈现由驱动接管；
+--            显式档，不进 auto 自动探测（无法可靠识别 RTX50+ 与驱动是否开启 Smooth Motion）。
 -- 若所选/探测到的 AI 引擎不可用（profile 不存在或 apply 失败），
 -- 自动回退到 MPV 内置平滑运动并提示，绝不报错卡死。
 
@@ -19,7 +21,7 @@ local mp = require 'mp'
 local opt = require 'mp.options'
 
 local conf = {
-    -- auto | svp | rife | builtin
+    -- auto | svp | rife | builtin | nvidia
     engine = 'auto',
     -- 启动即开启插帧（默认关）
     default_on = false,
@@ -72,6 +74,16 @@ end
 local function apply(on)
     if on then
         local eng = (conf.engine or 'auto'):lower()
+
+        if eng == 'nvidia' then
+            -- N 卡 Smooth Motion（RTX50+ 驱动级视频帧生成）
+            -- 机制：驱动在 D3D11 呈现的视频帧上做帧生成，无需 VapourSynth/MPCVR/AI 模型。
+            -- 只需确保解码帧经 D3D11 呈现（hwdec=*-copy），其余交给 NVIDIA 驱动。
+            -- 前提：用户在 NVIDIA App / 驱动面板开启「Smooth Motion（视频）」，且仅 RTX50+ 支持。
+            pcall(function() mp.set_property('hwdec', 'd3d11va-copy') end)
+            toast('插帧：N 卡 Smooth Motion（RTX50 驱动级）已请求开启\n请在 NVIDIA App 开启「Smooth Motion（视频）」；若未生效请重启播放器')
+            return
+        end
 
         if eng == 'builtin' then
             apply_builtin(true)
