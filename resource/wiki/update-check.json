@@ -1,7 +1,1 @@
-{
-  "version": "3.4.1-hotfix",
-  "date": "2026-08-18",
-  "downloadUrl": "https://github.com/YDMY007/fntv-plus/releases/latest",
-  "patchUrl": "https://gitee.com/YDMY007/fntv-plus/raw/release/resource/patches/patch-3.4.1-hotfix.json",
-  "notes": "v3.4.1 热补丁(-hotfix)：移除侧边栏「软件反馈建议」前的 💡 emoji。应用内一键应用，无需下载全量安装包。"
-}
+{"version": "3.4.2-hotfix", "date": "2026-08-18", "type": "hotfix", "downloadUrl": "https://github.com/YDMY007/Fntv-Plus/releases/latest", "patchUrl": "https://github.com/YDMY007/Fntv-Plus/releases/download/v3.4.2-hotfix/patch-3.4.2-hotfix.json", "notes": "热补丁 v3.4.2-hotfix：「软件反馈建议」弹窗内选项（用户调研问卷 / QQ 交流群）文字改为居中显示。"}

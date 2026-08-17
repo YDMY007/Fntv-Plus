@@ -6124,8 +6124,8 @@ const openFeedbackChoiceModal = (): void => {
     // 选项一：用户调研问卷（→ 原问卷反馈弹窗）
     const optSurvey = document.createElement('button');
     optSurvey.type = 'button';
-    optSurvey.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;box-sizing:border-box;'
-      + 'padding:14px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:left;'
+    optSurvey.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:14px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:center;'
       + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
       + 'transition:background .15s,border-color .15s;';
     optSurvey.innerHTML = '<div style="font-size:14px;font-weight:700;">📝 用户调研问卷</div>'
@@ -6138,8 +6138,8 @@ const openFeedbackChoiceModal = (): void => {
     // 选项二：QQ 交流群（→ 系统浏览器打开群链接）
     const optQQ = document.createElement('button');
     optQQ.type = 'button';
-    optQQ.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;box-sizing:border-box;'
-      + 'padding:14px 16px;border-radius:14px;cursor:pointer;text-align:left;'
+    optQQ.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:14px 16px;border-radius:14px;cursor:pointer;text-align:center;'
       + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
       + 'transition:background .15s,border-color .15s;';
     optQQ.innerHTML = '<div style="font-size:14px;font-weight:700;">💬 QQ 交流群</div>'
