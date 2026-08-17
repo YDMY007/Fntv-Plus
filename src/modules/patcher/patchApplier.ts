@@ -267,13 +267,14 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-hotfix=2xx；-full=3xx（xx=序号, 如 -hotfix2=202）
-// [lc-480] -test 权重低于真实 hotfix/full，使开发者先应用 test 后，真实 hotfix 仍判为"更新"
+// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-full=2xx；-hotfix=3xx（xx=序号, 如 -hotfix2=302）
+// [lc-501] hotfix rank > full rank：同 base 下热补丁优先于全量包，避免全量发布盖掉热补丁导致已装用户收不到热补丁提示
 function parseVersion(v: string): { base: string; rank: number } {
     const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
     if (m) {
         const suffix = m[0].toLowerCase();
-        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('hotfix') ? 2 : 3);
+        // hotfix=3 > full=2 > test=1：同 base 下热补丁优先
+        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 2 : 3);
         const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
         return { base: m[1], rank: typeRank * 100 + idx };
     }

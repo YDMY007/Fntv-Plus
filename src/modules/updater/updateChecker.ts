@@ -225,15 +225,19 @@ export class UpdateChecker {
 
     /**
      * 解析版本号中的类型后缀为可比较的 rank。
-     * 无后缀=0；`-test`/`-testN`=1xx；`-hotfix`/`-hotfixN`=2xx；`-full`/`-fullN`=3xx（xx=序号）。
-     * 关键：[lc-480] `-test` 权重低于真实 hotfix/full，但高于无后缀同 base，
-     *   使得开发者先应用 test 补丁后，后续真实 hotfix 仍能被判定为"更新"。
+     * 无后缀=0；`-test`/`-testN`=1xx；`-full`/`-fullN`=2xx；`-hotfix`/`-hotfixN`=3xx（xx=序号）。
+     * 关键：[lc-501] `-hotfix` 权重高于 `-full`：同一 base 版本下，
+     *   已装该 base 的用户应优先收到「热补丁」提示（无需重下全量包），
+     *   而不是被全量发布盖掉导致热补丁永远推不到。
+     *   跨版本升级仍由 base 比较决定（base 高者优先），不受 rank 影响。
+     *   `-test` 权重最低，开发者测试版绝不向普通用户推送。
      */
     private parseVersion(v: string): { base: string; rank: number } {
         const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
         if (m) {
             const suffix = m[0].toLowerCase();
-            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('hotfix') ? 2 : 3);
+            // hotfix=3 > full=2 > test=1：同 base 下热补丁优先于全量包
+            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 2 : 3);
             const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
             return { base: m[1], rank: typeRank * 100 + idx };
         }
