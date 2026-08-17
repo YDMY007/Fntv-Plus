@@ -1,0 +1,12 @@
+[
+  {
+    "version": "3.4.0-test1",
+    "patchUrl": "https://gitee.com/YDMY007/fntv-plus-test/releases/download/v3.4.0-test1/patch-3.4.0-test1.json",
+    "notes": "测试补丁：移除侧边栏「切换系统页面」按钮前的 🖥 emoji。"
+  },
+  {
+    "version": "3.3.7-test1",
+    "patchUrl": "https://gitee.com/YDMY007/fntv-plus-test/releases/download/v3.3.7-test1/patch-3.3.7-test1.json",
+    "notes": "测试补丁（旧版基线）：移除侧边栏「切换系统页面」按钮前的 🖥 emoji。"
+  }
+]

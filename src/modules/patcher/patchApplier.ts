@@ -130,9 +130,10 @@ async function fetchPatchInfoViaRaw(): Promise<RawPatchInfo | null> {
 // 仓库名可通过环境变量覆盖（如测试仓库取名不同）；默认约定为 fntv-plus-test。
 const GITEE_TEST_OWNER = process.env.FNTV_TEST_REPO_OWNER || 'YDMY007';
 const GITEE_TEST_REPO = process.env.FNTV_TEST_REPO_NAME || 'fntv-plus-test';
-const GITEE_TEST_RELEASES_URL = `https://gitee.com/api/v5/repos/${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}/releases?per_page=100`;
-const GITEE_TEST_TAG_RELEASE_URL = (tag: string) =>
-    `https://gitee.com/api/v5/repos/${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}/releases/tags/${tag}`;
+// [lc-509] 测试仓库列表改为读取公开 raw 索引文件（与正式仓库 update-check.json 同思路），
+// 避开 Gitee /releases API 对 token 的强制要求（无 token=403）。索引就放在测试仓库自身（master 分支），
+// 不污染正式仓库；位于 resource/wiki/ 目录（已验证匿名可访问）；其中每项 patchUrl 指向测试仓库可匿名下载的 releases/download/ 直链。
+const GITEE_TEST_INDEX_URL = `https://gitee.com/${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}/raw/master/resource/wiki/test-index.json`;
 
 function getPatchesDir(): string {
     return process.env.FNTV_PATCHES_DIR
@@ -201,37 +202,48 @@ async function fetchReleaseJson(): Promise<any> {
     throw new Error('无法获取 Release 信息（Gitee / 直连 / 镜像均失败）');
 }
 
-// [lc-493] 拉取测试仓库的全部 Release（按 tag 列出所有 -test 发布）。
-// 仅走 Gitee（国内直连，测试仓库为 Gitee 专属）；失败抛出明确提示。
+// [lc-509] 读取测试仓库的公开 raw 索引文件（test-index.json），列出全部 -test 补丁版本 + 直链。
+// 与 Gitee /releases API 不同，raw 文件无需 token 即可匿名读取，分发版也能用。
+async function fetchTestIndex(): Promise<any[]> {
+    const r = await axios.get(GITEE_TEST_INDEX_URL, {
+        timeout: 10000,
+        headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
+    });
+    const list = Array.isArray(r.data) ? r.data : JSON.parse(typeof r.data === 'string' ? r.data : '[]');
+    return list;
+}
+
+// [lc-493] 拉取测试仓库的全部 -test 发布（映射成与 Gitee releases API 兼容的结构）。
+// [lc-509] 改为读公开 raw 索引文件，不再走需 token 的 /releases API。
 async function fetchTestReleases(): Promise<any[]> {
     try {
-        const r = await axios.get(GITEE_TEST_RELEASES_URL, {
-            timeout: 10000,
-            headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
-        });
-        if (Array.isArray(r.data)) return r.data;
-        return [];
+        const list = await fetchTestIndex();
+        return list.map((e: any) => ({
+            tag_name: e.version,
+            assets: [{ name: `patch-${e.version}.json`, browser_download_url: e.patchUrl }],
+        }));
     } catch (e) {
-        log.warn('[patch] 测试仓库获取 Release 失败:', (e as Error).message);
+        log.warn('[patch] 测试仓库读取索引失败:', (e as Error).message);
         throw new Error('无法获取测试仓库 Release（请确认已创建并公开测试仓库 ' +
             `${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}）`);
     }
 }
 
-// [lc-493] 按 tag 拉取测试仓库中某个具体发布；
-// 兼容「带 v 前缀」与「不带 v 前缀」两种 tag 命名，优先 v 前缀。
+// [lc-493] 按 version 在测试仓库索引中定位某个具体 -test 发布的 patch 资产。
+// [lc-509] 改为读公开 raw 索引文件并按 version 查找，不再走需 token 的 /releases/tags API。
 async function fetchTestReleaseByTag(version: string): Promise<any> {
-    const candidates = [`v${version}`.replace(/^vv/i, 'v'), version.replace(/^v/i, '')];
-    for (const tag of candidates) {
-        try {
-            const r = await axios.get(GITEE_TEST_TAG_RELEASE_URL(tag), {
-                timeout: 10000,
-                headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
-            });
-            if (r.data && (r.data.tag_name || r.data.id)) return r.data;
-        } catch {
-            // 该命名未命中，尝试下一个
+    const norm = version.replace(/^v/i, '');
+    try {
+        const list = await fetchTestIndex();
+        const entry = list.find((e: any) => String(e.version).replace(/^v/i, '') === norm);
+        if (entry) {
+            return {
+                tag_name: entry.version,
+                assets: [{ name: `patch-${entry.version}.json`, browser_download_url: entry.patchUrl }],
+            };
         }
+    } catch (e) {
+        log.warn('[patch] 测试仓库读取索引失败:', (e as Error).message);
     }
     throw new Error('未找到对应的测试发布');
 }
