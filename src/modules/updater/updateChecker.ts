@@ -64,11 +64,11 @@ export class UpdateChecker {
     /**
      * 国内 Gitee 仓库地址（仓库名转小写，与 GitHub 仅大小写差异；如 Fntv-Plus → fntv-plus）。
      */
-    private giteeLatestUrl(): string {
+    private updateCheckUrl(): string {
         const giteeRepo = this.repo.toLowerCase();
-        // [lc-482] Gitee 无 GitHub 专属的 /releases/latest，且 /releases 默认升序(最旧在前)。
-        // 故一次拉全量(per_page=100)，由 pickLatestRelease 选「版本号最高的非 test 发布」。
-        return `https://gitee.com/api/v5/repos/${this.owner}/${giteeRepo}/releases?per_page=100`;
+        // [lc-505] 改用 Gitee 公开 raw 文件检测更新，无需 token（Gitee /releases API 与 contents API 均强制需 token，分发版不可用）。
+        // 该文件随发版更新并 push 到 release 分支，内容为最新版本号(带 -full/-hotfix 后缀)、日期、下载链接、简述。
+        return `https://gitee.com/${this.owner}/${giteeRepo}/raw/release/resource/wiki/update-check.json`;
     }
 
     /**
@@ -143,22 +143,22 @@ export class UpdateChecker {
      * @returns 更新信息
      */
     async checkForUpdatesViaGitee(): Promise<UpdateInfo> {
-        const url = this.giteeLatestUrl();
-        log.info(`通过国内 Gitee 检测更新: ${url}`);
+        const url = this.updateCheckUrl();
+        log.info(`通过国内 Gitee 检测更新(公开 raw, 无 token): ${url}`);
 
         // 不论类型，详情/全量包下载均指向国外 GitHub 发行版最新下载页（国内 Gitee 不托管大文件）
         const githubReleaseUrl = `https://github.com/${this.owner}/${this.repo}/releases/latest`;
 
-        const response = await axios.get(url, {
-            timeout: 10000,
-            headers: { 'User-Agent': `fnos-tv/${this.currentVersion}` }
-        });
-
-        // [lc-482] Gitee 返回的是发布数组(升序)，从中选出版本号最高的非 test 发布；取不到则返回"无更新"
-        const arr = Array.isArray(response.data) ? response.data : [response.data];
-        const r = this.pickLatestRelease(arr);
-        if (!r) {
-            log.warn('Gitee 未找到可用的非 test 发布');
+        let resp: any;
+        try {
+            resp = await axios.get(url, {
+                timeout: 10000,
+                responseType: 'text',
+                headers: { 'User-Agent': `fnos-tv/${this.currentVersion}` }
+            });
+        } catch (e: any) {
+            // raw 文件不可达(未发布/网络异常) → 静默视为无更新，不弹「检查失败」打扰用户
+            log.warn(`Gitee 更新检测文件不可达: ${e?.message || e}`);
             return {
                 hasUpdate: false,
                 updateType: 'full',
@@ -168,17 +168,19 @@ export class UpdateChecker {
                 htmlUrl: githubReleaseUrl,
             };
         }
-        // [lc-477] 版本号/类型以「更新日志最新 heading」为准：## vX.Y.Z(-hotfix|-full) (date)。
-        // Git Release tag 保持干净(如 v3.3.6)，仅作兜底；真正的版本+类型从更新日志 heading 取。
-        const latestVersion = this.parseLatestChangelogVersion(r.body || '')
-            || String(r.tag_name || '').replace(/^v/i, '')
-            || '0';
 
-        // [lc-476] hotfix 类以「已应用补丁版本」为比较基准，避免重复提示
-        const updateType = this.parseUpdateType(r.body || '', r.assets, latestVersion);
-        // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送：即便版本更高也不视为"有更新"
+        let data: any;
+        try {
+            data = typeof resp.data === 'string' ? JSON.parse(resp.data) : resp.data;
+        } catch {
+            log.warn('Gitee 更新检测文件解析失败(非 JSON)');
+            return { hasUpdate: false, updateType: 'full', downloadUrl: githubReleaseUrl, releaseNotes: '', publishedAt: '', htmlUrl: githubReleaseUrl };
+        }
+
+        const ver = String(data.version || data.tag_name || '0').replace(/^v/i, '');
+        const updateType = this.typeFromVersion(ver);
         const isTest = updateType === 'test';
-        log.info(`Gitee 检测版本(更新日志): ${latestVersion}, 类型: ${updateType}${isTest ? ' (test 开发版, 不推送用户)' : ''}, Git tag: ${r.tag_name || '(无)'}`);
+        log.info(`Gitee 检测版本: ${ver}, 类型: ${updateType}${isTest ? ' (test 开发版, 不推送用户)' : ''}`);
 
         const applied = getAppliedPatchVersion();
         // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本；test 不推送
@@ -186,18 +188,26 @@ export class UpdateChecker {
 
         // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
         // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
-        const hasUpdate = !isTest && this.versionGreater(latestVersion, baseline);
+        const hasUpdate = !isTest && this.versionGreater(ver, baseline);
 
         return {
             hasUpdate,
-            latestVersion,
+            latestVersion: ver,
             updateType,
-            // 即便 Gitee 无 assets，也明确指向 GitHub 发行版页面（立即下载/查看详情均跳转此处）
-            downloadUrl: githubReleaseUrl,
-            releaseNotes: r.body || '',
-            publishedAt: r.created_at || '',
-            htmlUrl: githubReleaseUrl
+            // 即便未配 downloadUrl，也明确指向 GitHub 发行版页面（立即下载/查看详情均跳转此处）
+            downloadUrl: data.downloadUrl || githubReleaseUrl,
+            releaseNotes: data.notes || data.changelog || '',
+            publishedAt: data.date || '',
+            htmlUrl: data.downloadUrl || githubReleaseUrl
         };
+    }
+
+    /** 从版本号后缀解析更新类型（与 parseUpdateType 后缀规则一致）：-hotfix=补丁 / -full=全量包 / -test=开发者版 / 无后缀=full。 */
+    private typeFromVersion(v: string): 'hotfix' | 'full' | 'test' {
+        if (/-hotfix\d*$/i.test(v)) return 'hotfix';
+        if (/-full\d*$/i.test(v)) return 'full';
+        if (/-test\d*$/i.test(v)) return 'test';
+        return 'full';
     }
 
     /**
