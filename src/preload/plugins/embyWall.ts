@@ -4468,6 +4468,72 @@ function handle(): void {
       e.stopPropagation();
       ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
     });
+
+    // ===== 插帧（AI 补帧）=====
+    // [lc-486] MPV 播放器插帧：uosc 控制栏有「插帧」按钮实时切换；此处提供应用侧默认配置
+    // （默认开启 + 引擎选择 + 引擎路径），写入 script-opts/fntv_interp.conf 供 fntv_interp.lua 读取。
+    const secInterp = section('插帧（AI 补帧）');
+    const interpBody = secInterp.body;
+
+    const interpEnabledToggle = addToggle('默认开启插帧（启动即生效）');
+    interpBody.appendChild(interpEnabledToggle.parentElement as HTMLElement);
+
+    const engineLabel = document.createElement('div');
+    engineLabel.textContent = '插帧引擎';
+    engineLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
+    interpBody.appendChild(engineLabel);
+
+    const engineSel = document.createElement('select');
+    engineSel.id = 'fntv-interp-engine';
+    engineSel.style.cssText = 'width:100%;font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;cursor:pointer;';
+    ([
+      ['auto', '自动（SVP → RIFE → 内置平滑运动）'],
+      ['builtin', 'MPV 内置平滑运动（无需额外引擎）'],
+      ['svp', 'SVP（需本机安装并运行 SmoothVideo Project）'],
+      ['rife', 'RIFE AI 补帧（需 rife-ncnn-vulkan 等运行时）']
+    ] as [string, string][]).forEach(([k, label]) => {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = label;
+      engineSel.appendChild(o);
+    });
+    interpBody.appendChild(engineSel);
+
+    const pathLabel = document.createElement('div');
+    pathLabel.textContent = '引擎路径（SVP 目录 / RIFE 可执行文件，留空=自动探测）';
+    pathLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
+    interpBody.appendChild(pathLabel);
+
+    const pathInput = document.createElement('input');
+    pathInput.type = 'text';
+    pathInput.placeholder = '例如：C:\\Program Files (x86)\\SVP 4';
+    pathInput.style.cssText = 'width:100%;font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;';
+    interpBody.appendChild(pathInput);
+
+    const interpHint = document.createElement('div');
+    interpHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:8px 0 0;line-height:1.5;';
+    interpHint.textContent = '播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好；未安装时自动回退 MPV 内置平滑运动。';
+    interpBody.appendChild(interpHint);
+
+    let _interpTimer: any = null;
+    const pushInterp = (): void => {
+      const payload = { enabled: interpEnabledToggle.checked, engine: engineSel.value, path: pathInput.value.trim() };
+      if (_interpTimer) clearTimeout(_interpTimer);
+      _interpTimer = setTimeout(() => {
+        ipcRenderer.invoke('settings:set-interp', payload).catch((err) => log('set-interp failed', err));
+      }, 300);
+    };
+    interpEnabledToggle.addEventListener('change', pushInterp);
+    engineSel.addEventListener('change', pushInterp);
+    pathInput.addEventListener('input', pushInterp);
+
+    ipcRenderer.invoke('settings:get-interp').then((r: any) => {
+      if (!r) return;
+      interpEnabledToggle.checked = !!r.enabled;
+      engineSel.value = r.engine || 'auto';
+      pathInput.value = r.path || '';
+    }).catch((err) => log('get-interp failed', err));
     /* 布局统一在末尾 layout 区追加 */
 
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
@@ -5035,7 +5101,7 @@ function handle(): void {
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
       { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
-      { id: 'player', label: '播放器', els: [sec2.el] },
+      { id: 'player', label: '播放器', els: [sec2.el, secInterp.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },

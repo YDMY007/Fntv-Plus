@@ -117,13 +117,39 @@ function checkAndCopyMpvConfig(): void {
 function startConfigCheck(): void {
     // 立即执行一次检查
     checkAndCopyMpvConfig();
+    // [lc-486] 升级兼容：确保新增的插帧脚本/配置同步到用户 MPV 目录（老用户 scripts 目录已存在，首次拷贝不会覆盖）
+    syncNewInterpFiles();
 
     // 设置定时检查（每分钟检查一次）
     configCheckInterval = setInterval(() => {
         checkAndCopyMpvConfig();
+        syncNewInterpFiles();
     }, 60 * 1000);
 
     logger.info('MPV config check started, checking every 1 minute');
+}
+
+// [lc-486] 升级兼容：把新增的插帧文件（Lua 脚本 + conf）从 portable_config 同步到用户 MPV 目录。
+// 仅当目标缺失时才拷贝，绝不覆盖用户已有的自定义内容。
+// 注：uosc.conf 的 controls 行改动不在此同步（避免覆盖用户自定义控制栏），新装/重装用户自然获得。
+function syncNewInterpFiles(): void {
+    try {
+        const srcDir = getPortableConfigDir();
+        const dstDir = getMpvConfigDir();
+        const files = ['scripts/fntv_interp.lua', 'script-opts/fntv_interp.conf'];
+        for (const rel of files) {
+            const src = path.join(srcDir, rel);
+            const dst = path.join(dstDir, rel);
+            if (fs.existsSync(src) && !fs.existsSync(dst)) {
+                const dstParent = path.dirname(dst);
+                if (!fs.existsSync(dstParent)) fs.mkdirSync(dstParent, { recursive: true });
+                fs.copyFileSync(src, dst);
+                logger.info(`[插帧] 已同步新增文件到用户 MPV 目录: ${dst}`);
+            }
+        }
+    } catch (e) {
+        logger.error('[插帧] 同步新增文件失败:', e);
+    }
 }
 
 // 停止定时检查
@@ -255,6 +281,46 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
         }
     } catch (error) {
         logger.error('写入 mpv-user.conf 失败:', error);
+    }
+}
+
+// [lc-486] 写入 MPV 插帧（AI 补帧）配置到 script-opts/fntv_interp.conf。
+// 供 fntv_interp.lua 读取（engine / default_on / engine_path）。
+// ⚠️ 双写：同时写入 getPortableConfigDir() 与 getMpvConfigDir()（与 writeMpvUserConfig 策略一致），
+//   确保便携模式(读 portable_config)与标准模式(读 AppData/Roaming/mpv)下都能读到。
+export function writeInterpConfig(enabled: boolean, engine: string, enginePath: string): void {
+    try {
+        const eng = (engine === 'svp' || engine === 'rife' || engine === 'builtin') ? engine : 'auto';
+        const lines = [
+            '# Fntv-Plus 插帧（AI 补帧）配置',
+            '# 由应用「设置面板 > 插帧（AI 补帧）」写入，请勿手动编辑（修改会被覆盖）。',
+            '',
+            '# 插帧引擎：auto(自动探测 SVP→RIFE→内置) / svp / rife / builtin',
+            'engine=' + eng,
+            '',
+            '# 启动播放时即开启插帧（默认关=否）',
+            'default_on=' + (enabled ? 'yes' : 'no'),
+            '',
+            '# 引擎路径：SVP 安装目录 或 rife-ncnn-vulkan 可执行文件完整路径',
+            '# 留空=自动探测（SVP 走默认管道；RIFE 需在 mpv.conf 的 [fntv-interp-rife] 中配好 vf）',
+            'engine_path=' + (enginePath || ''),
+            ''
+        ];
+        const content = lines.join('\n');
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) fs.mkdirSync(scriptOptsDir, { recursive: true });
+                const target = path.join(scriptOptsDir, 'fntv_interp.conf');
+                fs.writeFileSync(target, content, 'utf-8');
+                logger.info(`[插帧] 配置已写入: ${target} (engine=${eng}, default_on=${enabled})`);
+            } catch (e) {
+                logger.error(`[插帧] 写入 fntv_interp.conf 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('[插帧] 写入 fntv_interp.conf 失败:', error);
     }
 }
 

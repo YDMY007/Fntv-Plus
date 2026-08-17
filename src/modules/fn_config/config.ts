@@ -123,6 +123,10 @@ export interface Config {
     biliDanmakuMaxScreen?: number;   // 同屏最大弹幕数 0=不限（默认 0）
     biliDanmakuBlacklist?: string;   // 屏蔽词（换行分隔，支持正则），写入 blacklist.txt
     biliDanmakuBlockTypes?: string[]; // 弹幕屏蔽类型（key: top/bottom/scroll/reverse/advanced/color），写入 danmaku_block_types.json
+    // [lc-486] MPV 插帧（AI 补帧）设置：写入 script-opts/fntv_interp.conf 供 fntv_interp.lua 读取
+    mpvInterpEnabled?: boolean;      // 默认开启插帧（启动即生效）
+    mpvInterpEngine?: 'auto' | 'svp' | 'rife' | 'builtin'; // 插帧引擎
+    mpvInterpEnginePath?: string;    // 引擎路径（SVP 目录 / rife-ncnn-vulkan 可执行文件路径）
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
     // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
@@ -787,6 +791,41 @@ export function setMpvBiliSearchEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// [lc-486] 获取 MPV 插帧（AI 补帧）设置（默认：关 / auto / 空路径）
+export function getMpvInterpEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.mpvInterpEnabled === true; // 未设置视为关
+}
+export function getMpvInterpEngine(): 'auto' | 'svp' | 'rife' | 'builtin' {
+    const config: Config = readConfig() || {};
+    const e = config.mpvInterpEngine;
+    if (e === 'svp' || e === 'rife' || e === 'builtin' || e === 'auto') return e;
+    return 'auto';
+}
+export function getMpvInterpEnginePath(): string {
+    const config: Config = readConfig() || {};
+    return typeof config.mpvInterpEnginePath === 'string' ? config.mpvInterpEnginePath : '';
+}
+export function setMpvInterpEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.mpvInterpEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+export function setMpvInterpEngine(engine: 'auto' | 'svp' | 'rife' | 'builtin'): void {
+    const config: Config = readConfig() || {};
+    if (engine === 'svp' || engine === 'rife' || engine === 'builtin' || engine === 'auto') {
+        config.mpvInterpEngine = engine;
+    } else {
+        config.mpvInterpEngine = 'auto';
+    }
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+export function setMpvInterpEnginePath(p: string): void {
+    const config: Config = readConfig() || {};
+    config.mpvInterpEnginePath = typeof p === 'string' ? p : '';
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「B站弹幕聚合阈值」（默认 1500；<=0 表示禁用聚合）
 export function getMpvBiliAggregateThreshold(): number {
     const config: Config = readConfig() || {};
@@ -964,6 +1003,10 @@ Object.assign(module.exports, {
     getBiliDanmakuMaxScreen, setBiliDanmakuMaxScreen,
     getBiliDanmakuBlacklist, setBiliDanmakuBlacklist,
     getBiliDanmakuBlockTypes, setBiliDanmakuBlockTypes,
+    // [lc-486] MPV 插帧（AI 补帧）
+    getMpvInterpEnabled, setMpvInterpEnabled,
+    getMpvInterpEngine, setMpvInterpEngine,
+    getMpvInterpEnginePath, setMpvInterpEnginePath,
     // 更新打烊时间戳
     getUpdateDismissedAt, setUpdateDismissedAt,
     // 热门剧更新数据源（TMDB / 豆瓣）

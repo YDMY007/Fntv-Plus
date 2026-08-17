@@ -8,7 +8,7 @@ import { registerHandler } from '../core/ipcHandler';
 import { getMainWindow } from '../../common/mainwin';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, getPortableConfigDir } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir } from './mpvConfig';
 import * as log from '../../../modules/logger';
 
 /**
@@ -393,6 +393,28 @@ async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<voi
     log.info('B站弹幕样式与过滤已更新');
 }
 
+// [lc-486] 设置 MPV 插帧（AI 补帧）：写 config + 同步到 script-opts/fntv_interp.conf（供 fntv_interp.lua 读取）
+async function handleSetInterp(_event: any, payload: any): Promise<void> {
+    const p = payload || {};
+    const enabled = !!p.enabled;
+    const engine = (p.engine === 'svp' || p.engine === 'rife' || p.engine === 'builtin') ? p.engine : 'auto';
+    const enginePath = typeof p.path === 'string' ? p.path : '';
+    fnConfig.setMpvInterpEnabled(enabled);
+    fnConfig.setMpvInterpEngine(engine);
+    fnConfig.setMpvInterpEnginePath(enginePath);
+    writeInterpConfig(enabled, engine, enginePath);
+    log.info(`[插帧] 已设置: enabled=${enabled}, engine=${engine}, path=${enginePath || '(空)'}`);
+}
+
+// [lc-486] 读取 MPV 插帧当前设置（供设置面板初始渲染）
+async function handleGetInterp(): Promise<any> {
+    return {
+        enabled: fnConfig.getMpvInterpEnabled(),
+        engine: fnConfig.getMpvInterpEngine(),
+        path: fnConfig.getMpvInterpEnginePath()
+    };
+}
+
 // 诊断信息：汇总当前运行态关键数据，供设置面板「诊断」页展示，减少"用户反馈→查日志"往返
 function readFileSafe(p: string): string {
     try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '(文件不存在)'; } catch (e) { return '(读取失败)'; }
@@ -705,6 +727,8 @@ function init(): void {
     }, { useHandle: false });
     registerHandler('settings:set-mpv-shader-config', handleSetMpvShaderConfig, { useHandle: true });
     registerHandler('settings:set-bili-danmaku-style', handleSetBiliDanmakuStyle, { useHandle: true });
+    registerHandler('settings:set-interp', handleSetInterp, { useHandle: true });
+    registerHandler('settings:get-interp', handleGetInterp, { useHandle: true });
     registerHandler('settings:diagnostics', handleGetDiagnostics, { useHandle: true });
     registerHandler('settings:check-update', handleCheckUpdate, { useHandle: true });
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
