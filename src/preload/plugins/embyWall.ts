@@ -3203,18 +3203,7 @@ function handle(): void {
         if (testBtn.disabled) return;
         const code = await promptUnlockCode();
         if (code === null) return; // 用户取消
-        const old = testBtn.textContent;
-        testBtn.textContent = '获取中…';
-        testBtn.disabled = true;
-        try {
-            const res: any = await ipcRenderer.invoke('settings:apply-test-patch', code);
-            showPatchToast((res && res.message) || (res && res.ok ? '已应用测试补丁' : '获取失败'));
-        } catch (err: any) {
-            showPatchToast('获取失败: ' + ((err && err.message) || err));
-        } finally {
-            testBtn.textContent = old || '测试更新';
-            testBtn.disabled = false;
-        }
+        openTestPatchWizard(code);
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
@@ -3345,6 +3334,190 @@ function handle(): void {
         // [fix] 应用补丁是一次性任务流，关闭向导后直接退出设置面板回到侧边栏，
         //   避免「关了向导还有一层遮罩、需再点一次才退出」的割裂感（区别于历史/解锁码等仍回面板的弹窗）
         closeSettingsPanel();
+    }
+
+    // [lc-492] 开发者测试更新「选择 + 应用」向导弹窗：
+    // 解锁码验证通过 → 实时列出 Gitee 上所有 -test 测试补丁 → 用户选择版本 → 点「立即应用」实时下载/应用 → 应用完重启/重载。
+    // 与 openPatchWizard 同源设计，但走 settings:list-test-patches / settings:apply-test-patch(带版本)。
+    // 关闭即退出设置面板（一次性任务流，避免「关了向导还有一层遮罩」）。
+    let _testWizardModal: HTMLElement | null = null;
+    let _testProgHandler: ((_e: any, p: any) => void) | null = null;
+    let _lastTestCode = '';
+    let _testSelectedVersion: string | null = null;
+
+    function openTestPatchWizard(code: string): void {
+        _lastTestCode = code;
+        if (!_testWizardModal) {
+            const modal = document.createElement('div');
+            modal.id = 'fntv-test-wizard';
+            modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+            modal.style.cssText = 'position:fixed;z-index:2147483705;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+            modal.addEventListener('click', (e: Event) => {
+                // 仅非进行中状态允许点遮罩关闭；下载/应用中禁止
+                if (e.target === modal && modal.getAttribute('data-closable') === '1') closeTestPatchWizard();
+            });
+            const card = document.createElement('div');
+            card.style.cssText = 'width:360px;border-radius:16px;padding:22px;color:var(--fnos-ui-text);'
+                + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+                + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+                + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
+            const body = document.createElement('div');
+            body.id = 'fntv-test-body';
+            card.appendChild(body);
+            modal.appendChild(card);
+            document.body.appendChild(modal);
+            _testWizardModal = modal;
+        }
+        _testWizardModal.style.display = 'flex';
+        _testWizardModal.setAttribute('data-closable', '1');
+        renderTestState('listing', null);
+        ipcRenderer.invoke('settings:list-test-patches', code).then((res: any) => {
+            if (res && res.ok) {
+                const patches: any[] = (res.patches || []).filter((p: any) => p && p.hasAsset);
+                if (patches.length > 0) renderTestState('select', { patches });
+                else renderTestState('empty', { message: 'Gitee 暂无带补丁包的 -test 测试版' });
+            } else {
+                renderTestState('error', { message: (res && res.message) || '检测失败' });
+            }
+        }).catch((err: any) => {
+            renderTestState('error', { message: '检测失败: ' + ((err && err.message) || err) });
+        });
+    }
+
+    function closeTestPatchWizard(): void {
+        if (_testWizardModal) { _testWizardModal.remove(); _testWizardModal = null; }
+        if (_testProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _testProgHandler); _testProgHandler = null; }
+        closeSettingsPanel();
+    }
+
+    // 测试补丁向导渲染：listing / select / empty / error / downloading / applying / done
+    function renderTestState(state: string, info: any): void {
+        const modal = _testWizardModal;
+        if (!modal) return;
+        const body = modal.querySelector('#fntv-test-body') as HTMLElement;
+        if (!body) return;
+        const closable = (state === 'listing' || state === 'select' || state === 'empty' || state === 'error');
+        modal.setAttribute('data-closable', closable ? '1' : '0');
+        body.innerHTML = '';
+
+        if (state === 'listing') {
+            body.appendChild(spinnerEl());
+            body.appendChild(centerText('正在检测测试补丁列表…', '14px', 'var(--fnos-ui-text)', 'margin-top:14px;font-weight:600;'));
+            return;
+        }
+        if (state === 'empty') {
+            body.appendChild(centerText('📭', '24px', 'var(--fnos-ui-muted)', 'margin-bottom:6px;'));
+            body.appendChild(centerText('暂无可用测试补丁', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:6px;'));
+            body.appendChild(centerText((info && info.message) || 'Gitee 上未发布带补丁包的 -test 版本', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:16px;'));
+            body.appendChild(actionRow([{ label: '关闭', primary: true, onClick: () => closeTestPatchWizard() }]));
+            return;
+        }
+        if (state === 'error') {
+            body.appendChild(centerText('⚠', '24px', '#ff7a7a', 'font-weight:800;margin-bottom:6px;'));
+            body.appendChild(centerText('出错了', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
+            body.appendChild(centerText((info && info.message) || '未知错误', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
+            body.appendChild(actionRow([
+                { label: '重试', primary: false, onClick: () => { if (_testWizardModal) _testWizardModal.style.display = 'none'; openTestPatchWizard(_lastTestCode); } },
+                { label: '关闭', primary: true, onClick: () => closeTestPatchWizard() },
+            ]));
+            return;
+        }
+        if (state === 'select') {
+            const patches: any[] = (info && info.patches) || [];
+            _testSelectedVersion = patches.length ? patches[0].version : null; // 默认选最新
+            body.appendChild(centerText('🔧 开发者测试补丁', '16px', 'var(--fnos-ui-pill-text)', 'font-weight:800;margin-bottom:4px;'));
+            body.appendChild(centerText('选择要应用的测试版本', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:12px;'));
+            const list = document.createElement('div');
+            list.style.cssText = 'display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;margin-bottom:14px;';
+            const btns: HTMLButtonElement[] = [];
+            patches.forEach((p: any, idx: number) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.textContent = 'v' + p.version;
+                item.style.cssText = 'width:100%;padding:9px 12px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;text-align:left;'
+                    + (idx === 0
+                        ? 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);'
+                        : 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);');
+                item.addEventListener('click', (e: Event) => {
+                    e.stopPropagation();
+                    _testSelectedVersion = p.version;
+                    btns.forEach((b, i) => {
+                        const sel = i === idx;
+                        b.style.background = sel ? 'var(--fnos-ui-pill-bg)!important' : 'var(--fnos-ui-input-bg)';
+                        b.style.color = sel ? 'var(--fnos-ui-pill-text)' : 'var(--fnos-ui-text)';
+                        b.style.border = sel ? '1px solid var(--fnos-ui-pill-border)' : '1px solid var(--fnos-ui-border)';
+                    });
+                });
+                btns.push(item);
+                list.appendChild(item);
+            });
+            body.appendChild(list);
+            body.appendChild(actionRow([
+                { label: '取消', primary: false, onClick: () => closeTestPatchWizard() },
+                { label: '立即应用', primary: true, onClick: () => startTestApply() },
+            ]));
+            return;
+        }
+        if (state === 'downloading' || state === 'applying' || state === 'done') {
+            const pct = (info && typeof info.percent === 'number') ? info.percent : -1;
+            const track = document.createElement('div');
+            track.style.cssText = 'height:8px;border-radius:6px;background:var(--fnos-ui-input-bg);overflow:hidden;margin:6px 0 8px;';
+            const fill = document.createElement('div');
+            const done = state === 'done';
+            const indeterminate = pct < 0 && !done;
+            fill.style.cssText = 'height:100%;border-radius:6px;transition:width .25s;'
+                + 'background:var(--fnos-ui-pill-bg)!important;'
+                + (done ? 'width:100%;' : indeterminate ? 'width:40%;animation:fnosPatchIndet 1.1s infinite ease-in-out;' : `width:${pct}%;`);
+            track.appendChild(fill);
+            body.appendChild(track);
+            const pctText = state === 'downloading'
+                ? (pct >= 0 ? `正在下载… ${pct}%` : '正在下载…')
+                : state === 'applying' ? '正在应用补丁…'
+                : '✓ 测试补丁已应用';
+            body.appendChild(centerText(pctText, '13px', done ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-text)', 'font-weight:600;margin-bottom:4px;'));
+            if (indeterminate || pct >= 0) {
+                const sub = document.createElement('div');
+                sub.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.7;';
+                if (info && info.total && info.total > 0) {
+                    const fmt = (n: number) => (n / 1024).toFixed(0) + ' KB';
+                    sub.textContent = `${fmt(info.loaded || 0)} / ${fmt(info.total)}`;
+                } else {
+                    sub.textContent = done ? '即将重启应用使补丁生效' : '下载中，请稍候…';
+                }
+                body.appendChild(sub);
+            }
+            if (done) {
+                body.appendChild(centerText('应用即将重启 / 重载…', '11px', 'var(--fnos-ui-muted)', 'opacity:.7;margin-top:6px;'));
+            }
+            return;
+        }
+    }
+
+    function startTestApply(): void {
+        const code = _lastTestCode;
+        const version = _testSelectedVersion;
+        if (!version) { renderTestState('error', { message: '未选择测试版本' }); return; }
+        renderTestState('downloading', { percent: 0, message: '正在下载…' });
+        _testProgHandler = (_e: any, p: any) => {
+            if (!p) return;
+            if (p.phase === 'downloading' || p.phase === 'applying' || p.phase === 'done') {
+                renderTestState(p.phase, p);
+            } else if (p.phase === 'error') {
+                renderTestState('error', { message: p.message || '应用失败' });
+            }
+        };
+        ipcRenderer.on('settings:patch-progress', _testProgHandler);
+        ipcRenderer.invoke('settings:apply-test-patch', code, version).then((res: any) => {
+            if (_testProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _testProgHandler); _testProgHandler = null; }
+            if (res && res.ok) {
+                renderTestState('done', res); // 应用进程随后会重载/重启，无需手动关闭
+            } else {
+                renderTestState('error', { message: (res && res.message) || '应用失败' });
+            }
+        }).catch((err: any) => {
+            if (_testProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _testProgHandler); _testProgHandler = null; }
+            renderTestState('error', { message: '应用失败: ' + ((err && err.message) || err) });
+        });
     }
 
     // 渲染不同状态的卡片内容

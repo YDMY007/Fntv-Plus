@@ -69,6 +69,18 @@ export interface PatchCheckInfo {
     message: string;
 }
 
+// [lc-492] 测试补丁列表项：一个 -test 版本及其对应补丁包资产
+export interface TestPatchInfo {
+    version: string;       // 如 3.3.8-test1
+    assetName: string | null; // 对应 patch-<version>.json 资产名（未找到为 null）
+    hasAsset: boolean;     // 是否存在对应补丁包（无包则不可选）
+}
+export interface TestPatchListResult {
+    ok: boolean;
+    message?: string;
+    patches: TestPatchInfo[];
+}
+
 // 国内可达的 GitHub 镜像（与 updateChecker.ts 保持一致；主要用于拉取 Release JSON 与补丁资产）
 const MIRRORS: Array<{ name: string; base: string; fullPrefix: boolean }> = [
     { name: 'github.dpik.top', base: 'https://github.dpik.top', fullPrefix: true },
@@ -364,18 +376,57 @@ export async function applyLatestPatchAndReload(opts?: PatchApplyOptions): Promi
 }
 
 /**
+ * [lc-492] 列出 Gitee 上所有 -test 测试补丁版本（开发者测试通道「选择 + 应用」流程用）。
+ * 解析更新日志中所有 `## vX.Y.Z-testN` heading，并在同一 Release 的 assets 中查找对应
+ * `patch-<version>.json` 资产。渲染端据此展示可选择的测试补丁列表（无补丁包的版本不可选）。
+ */
+export async function listTestPatches(): Promise<TestPatchListResult> {
+    try {
+        const release = await fetchReleaseJson();
+        const body = release.body || release.note || '';
+        const assets: any[] = release.assets || [];
+        const lines = (body || '').split(/\r?\n/);
+        const re = /-test\d*$/i;
+        const seen: { [k: string]: boolean } = {};
+        const versions: string[] = [];
+        for (const line of lines) {
+            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full|test)\d*)?)/i.exec(line.trim());
+            if (!m) continue;
+            const v = m[1];
+            if (!re.test(v)) continue;
+            if (seen[v]) continue;
+            seen[v] = true;
+            versions.push(v);
+        }
+        // 降序（最新在前）：先比 base 版本，再比 rank（类型/序号）
+        versions.sort((a, b) => {
+            if (versionGreater(a, b)) return -1;
+            if (versionGreater(b, a)) return 1;
+            return 0;
+        });
+        const patches: TestPatchInfo[] = versions.map((v) => {
+            const exact = assets.find((a: any) => a.name === `patch-${v}.json`);
+            return { version: v, assetName: exact ? exact.name : null, hasAsset: !!exact };
+        });
+        return { ok: true, patches };
+    } catch (e: any) {
+        return { ok: false, message: `检测失败: ${(e && e.message) || '未知错误'}`, patches: [] };
+    }
+}
+
+/**
  * [lc-481] 开发者手动拉取并应用 Gitee 上的 -test 测试补丁。
  * 与普通 applyLatestPatch 区别：
  *  - 从更新日志专门定位 -test 版本（普通检测默认跳过 test）；
  *  - 忽略「已应用」检查，开发者可重复覆盖应用同一 test 版本做验证；
  *  - 由设置页「获取测试更新」按钮在解锁码验证通过后调用。
  */
-export async function applyTestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
+export async function applyTestPatch(opts?: PatchApplyOptions, targetVersion?: string): Promise<ApplyResult> {
     const onProgress = opts && opts.onProgress;
-    log.info('[patch] 开发者手动拉取 test 测试补丁');
+    log.info(`[patch] 开发者手动拉取 test 测试补丁${targetVersion ? ` (指定版本 ${targetVersion})` : ''}`);
     const release = await fetchReleaseJson();
     const body = release.body || release.note || '';
-    const testVersion = findChangelogVersionByType(body, 'test');
+    const testVersion = targetVersion || findChangelogVersionByType(body, 'test');
     if (!testVersion) {
         if (onProgress) onProgress({ phase: 'error', percent: -1, message: 'Gitee 未找到 -test 测试版补丁' });
         return {
@@ -457,10 +508,10 @@ export async function applyTestPatch(opts?: PatchApplyOptions): Promise<ApplyRes
 /**
  * [lc-481] 拉取并应用 test 测试补丁，随后按需重载/重启（与 finalizeAfterApply 共用）。
  */
-export async function applyTestPatchAndReload(opts?: PatchApplyOptions): Promise<ApplyResult> {
+export async function applyTestPatchAndReload(opts?: PatchApplyOptions, targetVersion?: string): Promise<ApplyResult> {
     let result: ApplyResult;
     try {
-        result = await applyTestPatch(opts);
+        result = await applyTestPatch(opts, targetVersion);
     } catch (e: any) {
         log.error('[patch] 测试补丁应用失败:', e && e.message);
         if (opts && opts.onProgress) opts.onProgress({ phase: 'error', percent: -1, message: `应用失败: ${(e && e.message) || '未知错误'}` });

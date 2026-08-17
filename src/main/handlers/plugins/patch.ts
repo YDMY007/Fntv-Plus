@@ -4,6 +4,7 @@ import {
     applyLatestPatchAndReload,
     applyTestPatchAndReload,
     checkLatestPatchInfo,
+    listTestPatches,
     PatchCheckInfo,
     ApplyResult,
 } from '../../../modules/patcher/patchApplier';
@@ -40,10 +41,23 @@ async function handleApplyPatch(event: IpcMainInvokeEvent): Promise<ApplyResult>
 }
 
 /**
+ * [lc-492] 列出 Gitee 上所有 -test 测试补丁版本（开发者测试通道「选择 + 应用」流程第一步）。
+ * 码错误直接拒绝；码正确才走 listTestPatches 返回可选版本列表。
+ */
+async function handleListTestPatches(_event: IpcMainInvokeEvent, code?: string): Promise<any> {
+    log.info('[patch] 收到列出测试补丁请求');
+    if (!code || code !== DEV_UNLOCK_CODE) {
+        return { ok: false, message: '解锁代码错误，无法获取测试补丁列表' };
+    }
+    return await listTestPatches();
+}
+
+/**
  * [lc-481] 开发者拉取 test 测试补丁（需解锁码）。
  * 码错误直接拒绝，绝不触碰 Gitee；码正确才走 applyTestPatchAndReload（含重载/重启 + 进度）。
+ * [lc-492] 支持指定 version（用户从列表选择的具体测试版本）；不传则应用最新 test 版本。
  */
-async function handleApplyTestPatch(event: IpcMainInvokeEvent, code?: string): Promise<ApplyResult> {
+async function handleApplyTestPatch(event: IpcMainInvokeEvent, code?: string, version?: string): Promise<ApplyResult> {
     log.info('[patch] 收到开发者测试补丁请求');
     if (!code || code !== DEV_UNLOCK_CODE) {
         return { ok: false, filesApplied: 0, needsRestart: false, message: '解锁代码错误，无法获取测试补丁' };
@@ -52,12 +66,13 @@ async function handleApplyTestPatch(event: IpcMainInvokeEvent, code?: string): P
         onProgress: (p) => {
             try { event.sender.send('settings:patch-progress', p); } catch { /* 渲染端可能已关闭 */ }
         },
-    });
+    }, version);
 }
 
 function init(): void {
     registerHandler('settings:check-patch', handleCheckPatch, { useHandle: true });
     registerHandler('settings:apply-patch', handleApplyPatch, { useHandle: true });
+    registerHandler('settings:list-test-patches', handleListTestPatches, { useHandle: true });
     registerHandler('settings:apply-test-patch', handleApplyTestPatch, { useHandle: true });
 }
 
