@@ -3198,6 +3198,10 @@ function handle(): void {
         e.stopPropagation();
         openPatchWizard();
     });
+    // [lc-507] 更新检测弹窗「应用补丁」→ 打开补丁向导(自带进度条+完成提示)，autoApply 跳过二次确认直接应用
+    ipcRenderer.on('fntv:open-patch-wizard', (_e: any, opts?: any) => {
+        openPatchWizard(!!(opts && opts.autoApply));
+    });
     testBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (testBtn.disabled) return;
@@ -3295,7 +3299,7 @@ function handle(): void {
 
     let _patchWizardModal: HTMLElement | null = null;
     let _patchProgHandler: ((_e: any, p: any) => void) | null = null;
-    function openPatchWizard(): void {
+    function openPatchWizard(autoApply: boolean = false): void {
         if (!_patchWizardModal) {
             const modal = document.createElement('div');
             modal.id = 'fntv-patch-wizard';
@@ -3321,8 +3325,12 @@ function handle(): void {
         _patchWizardModal.setAttribute('data-closable', '1');
         renderPatchState('checking', null);
         ipcRenderer.invoke('settings:check-patch').then((info: any) => {
-            if (info && info.hasUpdate) renderPatchState('available', info);
-            else renderPatchState('uptodate', info);
+            if (info && info.hasUpdate) {
+                if (autoApply) startPatchApply();
+                else renderPatchState('available', info);
+            } else {
+                renderPatchState('uptodate', info);
+            }
         }).catch((err: any) => {
             renderPatchState('error', { message: '检查失败: ' + ((err && err.message) || err) });
         });

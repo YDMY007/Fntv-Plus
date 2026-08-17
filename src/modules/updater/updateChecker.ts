@@ -1,8 +1,7 @@
 import axios from 'axios';
-import { shell, app } from 'electron';
+import { BrowserWindow, shell, app } from 'electron';
 import { fnosDialog } from '../../main/common/fnosDialog';
 import { getUpdateDismissedAt, setUpdateDismissedAt, getAppliedPatchVersion } from '../fn_config/config';
-import { applyLatestPatchAndReload } from '../patcher/patchApplier';
 import log from '../logger';
 
 // 尝试获取semver模块
@@ -303,8 +302,11 @@ export class UpdateChecker {
 
             switch (response) {
                 case 0: // 应用补丁（应用内 Gitee 拉取，不跳浏览器）
+                    // [lc-507] 不再主进程静默应用(无进度/无反馈)，改为唤起渲染端补丁向导：
+                    //   带下载进度条 + "✓ 补丁已应用"完成提示 + 自动重载，autoApply 跳过二次确认。
                     setUpdateDismissedAt(Date.now());
-                    await applyLatestPatchAndReload();
+                    const target = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) || null;
+                    if (target) target.webContents.send('fntv:open-patch-wizard', { autoApply: true });
                     return true;
                 case 1: // 仍可选择去 GitHub 下载全量包覆盖安装
                     if (downloadUrl) shell.openExternal(downloadUrl);
