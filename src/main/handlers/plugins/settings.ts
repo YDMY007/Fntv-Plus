@@ -428,7 +428,7 @@ async function handleGetDiagnostics(): Promise<any> {
         const mpvUserConf = readFileSafe(path.join(portableDir, 'mpv-user.conf'));
         const danmakuConf = readFileSafe(path.join(portableDir, 'script-opts', 'uosc_danmaku.conf'));
         let version = '';
-        try { version = app.getVersion(); } catch (e) { version = ''; }
+        try { version = fnConfig.getAppliedPatchVersion() || app.getVersion(); } catch (e) { version = ''; }
         return {
             ok: true,
             version,

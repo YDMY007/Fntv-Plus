@@ -1,6 +1,7 @@
 import { app, IpcMainEvent } from 'electron';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { registerHandler } from '../core/ipcHandler';
+import { getAppliedPatchVersion } from '../../../modules/fn_config/config';
 import * as log from '../../../modules/logger';
 
 /**
@@ -24,9 +25,12 @@ async function handleAutoCheckUpdate(event: IpcMainEvent): Promise<void> {
 }
 
 // 获取当前版本信息
+// [lc-495] 已应用热补丁后，显示的「当前版本」应同步为补丁版本（如 3.3.7-test1），
+//   而非安装包版本；取 applied 版本为优先，未打补丁时回退安装版本。
 function handleGetVersion(event: IpcMainEvent): void {
+    const displayVersion = getAppliedPatchVersion() || app.getVersion();
     event.reply('version-info', {
-        version: app.getVersion(),
+        version: displayVersion,
         name: app.getName()
     });
 }
