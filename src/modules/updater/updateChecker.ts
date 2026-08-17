@@ -50,8 +50,8 @@ export class UpdateChecker {
      * 检查是否有新版本（默认策略）。
      * [lc-476] 更新检测**只走国内 Gitee**（剥离旧版 GitHub 镜像检测路径）。
      * Gitee 不托管大文件，故：
-     *  - hotfix 类更新：弹窗主按钮「应用补丁」(应用内 Gitee 拉取填补)；
-     *  - full 类更新：弹窗主按钮「下载全量安装包」(国外 GitHub 发行页)；
+     *  - hotfix 类更新：弹窗主按钮「应用补丁」(应用内 Gitee 拉取填补，明确提示无需下载全量包)；
+     *  - full 类更新：弹窗主按钮「前往下载全量包安装新版本更新」(国外 GitHub 发行页，**不提供「应用补丁」**)；
      *  - test 类更新：开发者自用测试版，绝不向任何用户弹窗推送（仅供「应用补丁」按钮手动拉取测试）。
      * 手动/自动检查均走此入口。
      * @returns 更新信息
@@ -291,7 +291,8 @@ export class UpdateChecker {
             const { response } = await fnosDialog(null, {
                 type: 'info',
                 title: '发现热补丁',
-                message: `飞牛影视有热补丁可用！`,
+                // [lc-510] 明显提示用户：推荐直接应用补丁，无需下载全量包（应用内即可完成）
+                message: `飞牛影视有热补丁可用！\n✅ 推荐直接「应用补丁」——应用内即可完成更新，无需下载全量安装包。`,
                 detail: `当前版本: ${this.currentVersion}\n热补丁版本: ${latestVersion}`,
                 // 更新日志记录以 Markdown 传入，弹窗按 .md-body 富文本渲染（含标题/列表/加粗/链接）
                 markdown: releaseNotes || '暂无更新说明',
@@ -318,14 +319,15 @@ export class UpdateChecker {
         }
 
         // ===== full：前往国外 GitHub 下载全量安装包覆盖安装 =====
+        // [lc-510] 全量包不提供「应用补丁」按钮（补丁仅适用于热补丁），主按钮直接引导下载全量包
         const { response } = await fnosDialog(null, {
             type: 'info',
             title: '发现新版本',
-            message: `飞牛影视有新版本可用！`,
+            message: `飞牛影视有新版本可用！请下载全量安装包覆盖安装。`,
             detail: `当前版本: ${this.currentVersion}\n最新版本: ${latestVersion}`,
             // 更新日志记录以 Markdown 传入，弹窗按 .md-body 富文本渲染（含标题/列表/加粗/链接）
             markdown: releaseNotes || '暂无更新说明',
-            buttons: ['下载全量安装包', '查看详情', '稍后提醒'],
+            buttons: ['前往下载全量包安装新版本更新', '查看详情', '稍后提醒'],
             defaultId: 0,
             cancelId: 2,
         });
