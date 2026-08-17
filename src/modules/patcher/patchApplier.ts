@@ -140,6 +140,32 @@ function getPatchesDir(): string {
         || path.join(app.getPath('userData'), 'patches');
 }
 
+/**
+ * [lc-511] 一键清除所有已应用补丁（回滚到原版）。
+ * 删除 patches 覆盖目录（移除热补丁 / main 补丁的文件覆盖）并清空 appliedPatchVersion，
+ * 使下次启动回退到安装包原始文件。供「回滚补丁」按钮与「下载全量包前清理」调用，
+ * 确保正式版(全量包)安装后能真正盖过旧补丁（否则旧补丁文件会持续覆盖新包文件）。
+ */
+export function clearAllPatches(): void {
+    try {
+        const dir = getPatchesDir();
+        if (fs.existsSync(dir)) {
+            fs.rmSync(dir, { recursive: true, force: true });
+            log.info(`[patch] 已删除补丁覆盖目录: ${dir}`);
+        } else {
+            log.info('[patch] 补丁覆盖目录不存在，无需删除');
+        }
+    } catch (e: any) {
+        log.warn('[patch] 删除补丁覆盖目录失败:', e?.message || e);
+    }
+    try {
+        setAppliedPatchVersion('');
+        log.info('[patch] 已清空 appliedPatchVersion');
+    } catch (e: any) {
+        log.warn('[patch] 清空 appliedPatchVersion 失败:', e?.message || e);
+    }
+}
+
 function githubApiLatest(): string {
     return `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
 }

@@ -6,7 +6,9 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import * as proxyModule from '../../../modules/proxyAgent';
 import { registerHandler } from '../core/ipcHandler';
 import { getMainWindow } from '../../common/mainwin';
+import { fnosDialog } from '../../common/fnosDialog';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
+import { clearAllPatches } from '../../../modules/patcher/patchApplier';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
 import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir } from './mpvConfig';
 import * as log from '../../../modules/logger';
@@ -478,6 +480,37 @@ async function handleCheckUpdate(): Promise<void> {
     }
 }
 
+/**
+ * [lc-511] 回滚补丁：清除已应用的热补丁覆盖文件并重启应用，使软件回到安装包原版。
+ * 先确认当前确有已应用补丁；若无则提示无需回滚。二次确认后执行清除并重启（与补丁应用后重启同机制，
+ * 确保 main 端补丁也一并失效）。
+ */
+async function handleRollbackPatch(): Promise<void> {
+    if (!fnConfig.getAppliedPatchVersion()) {
+        await fnosDialog(getMainWindow(), {
+            type: 'info',
+            title: '回滚补丁',
+            message: '当前没有已应用的补丁，无需回滚。',
+            buttons: ['确定'],
+            defaultId: 0,
+        });
+        return;
+    }
+    const { response } = await fnosDialog(getMainWindow(), {
+        type: 'question',
+        title: '回滚补丁',
+        message: '确定要回滚到原版（清除已应用的热补丁）吗？\n此操作会删除补丁覆盖文件并重启应用。',
+        buttons: ['确定回滚', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+    });
+    if (response !== 0) return;
+    clearAllPatches();
+    // 重启应用，使 main 端补丁也失效（与 patchApplier 应用补丁后重启同机制）
+    app.relaunch({ args: process.argv.slice(1) });
+    app.exit(0);
+}
+
 async function handleShowMain(): Promise<void> {
     const win = getMainWindow();
     if (win) {
@@ -731,6 +764,7 @@ function init(): void {
     registerHandler('settings:get-interp', handleGetInterp, { useHandle: true });
     registerHandler('settings:diagnostics', handleGetDiagnostics, { useHandle: true });
     registerHandler('settings:check-update', handleCheckUpdate, { useHandle: true });
+    registerHandler('settings:rollback-patch', handleRollbackPatch, { useHandle: true });
     registerHandler('settings:show-main', handleShowMain, { useHandle: true });
     registerHandler('settings:open-log', handleOpenLog, { useHandle: true });
     registerHandler('settings:open-error-log', handleOpenErrorLog, { useHandle: true });

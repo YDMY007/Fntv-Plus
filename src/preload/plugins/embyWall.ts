@@ -3180,10 +3180,13 @@ function handle(): void {
     const patchBtn = mkBtn('应用补丁', true);
     // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
     const testBtn = mkBtn('测试更新', true);
+    // [lc-511] 回滚补丁：清除已应用补丁覆盖并重启回原版
+    const rollbackBtn = mkBtn('回滚补丁', true);
     updGrid.appendChild(updBtn);
     updGrid.appendChild(updHistoryBtn);
     updGrid.appendChild(patchBtn);
     updGrid.appendChild(testBtn);
+    updGrid.appendChild(rollbackBtn);
     updFooter.appendChild(updGrid);
 
     const testHint = document.createElement('div');
@@ -3208,6 +3211,11 @@ function handle(): void {
         const code = await promptUnlockCode();
         if (code === null) return; // 用户取消
         openTestPatchWizard(code);
+    });
+    // [lc-511] 回滚补丁：调用主进程清除补丁覆盖并重启回原版
+    rollbackBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        ipcRenderer.invoke('settings:rollback-patch');
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）

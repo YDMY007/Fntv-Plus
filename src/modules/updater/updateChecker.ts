@@ -2,6 +2,7 @@ import axios from 'axios';
 import { BrowserWindow, shell, app } from 'electron';
 import { fnosDialog } from '../../main/common/fnosDialog';
 import { getUpdateDismissedAt, setUpdateDismissedAt, getAppliedPatchVersion } from '../fn_config/config';
+import { clearAllPatches } from '../patcher/patchApplier';
 import log from '../logger';
 
 // 尝试获取semver模块
@@ -182,8 +183,10 @@ export class UpdateChecker {
         log.info(`Gitee 检测版本: ${ver}, 类型: ${updateType}${isTest ? ' (test 开发版, 不推送用户)' : ''}`);
 
         const applied = getAppliedPatchVersion();
-        // hotfix 以「已应用补丁版本」为比较基准，避免重复提示；full 直接比当前安装版本；test 不推送
-        const baseline = (updateType === 'hotfix' && applied) ? applied : this.currentVersion;
+        // [lc-511] 仅当「已应用版本」与「待检测更新」同为热补丁时，才以已应用版本为基线（热补丁链式递进、避免重复提示）；
+        // 若已应用的是 -test 开发者版、或待检测为全量包，一律以安装包版本(currentVersion)为基线，
+        // 确保：① 开发者测试版版本号再高也不会挡住官方更新；② 用户已应用热补丁后，正式版(全量包)更新总能直接盖过。
+        const baseline = (updateType === 'hotfix' && applied && /-hotfix\d*$/i.test(applied)) ? applied : this.currentVersion;
 
         // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
         // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
@@ -336,6 +339,9 @@ export class UpdateChecker {
             case 0: // 下载全量安装包（国外 GitHub）
                 // 记录时间戳：7 天内不再自动弹窗更新提醒
                 setUpdateDismissedAt(Date.now());
+                // [lc-511] 下载全量包前先清除已应用的补丁覆盖：否则旧补丁文件会持续覆盖新安装包，
+                // 导致全量更新无法真正「盖过」热补丁。清版本号 + 删 patches 目录，待用户安装并重启后即为纯新版本。
+                clearAllPatches();
                 if (downloadUrl) {
                     shell.openExternal(downloadUrl);
                 } else if (htmlUrl) {
