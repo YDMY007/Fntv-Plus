@@ -102,6 +102,16 @@ const GITEE_TAG_RELEASE_URL = (tag: string) =>
     `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${tag}`;
 const GITEE_CREATE_RELEASE_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases`;
 
+// [lc-493] 测试补丁专用仓库（独立于正式仓库 fntv-plus）。
+// 正式仓库只承载「官方发布 / 安装包更新检测 / 官方热补丁」；开发者测试文件单独部署到此仓库，
+// 互不影响：正式用户永不触达此仓库，测试也不会污染正式仓库的更新日志/资产。
+// 仓库名可通过环境变量覆盖（如测试仓库取名不同）；默认约定为 fntv-plus-test。
+const GITEE_TEST_OWNER = process.env.FNTV_TEST_REPO_OWNER || 'YDMY007';
+const GITEE_TEST_REPO = process.env.FNTV_TEST_REPO_NAME || 'fntv-plus-test';
+const GITEE_TEST_RELEASES_URL = `https://gitee.com/api/v5/repos/${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}/releases?per_page=100`;
+const GITEE_TEST_TAG_RELEASE_URL = (tag: string) =>
+    `https://gitee.com/api/v5/repos/${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}/releases/tags/${tag}`;
+
 function getPatchesDir(): string {
     return process.env.FNTV_PATCHES_DIR
         || path.join(app.getPath('userData'), 'patches');
@@ -167,6 +177,41 @@ async function fetchReleaseJson(): Promise<any> {
         }
     }
     throw new Error('无法获取 Release 信息（Gitee / 直连 / 镜像均失败）');
+}
+
+// [lc-493] 拉取测试仓库的全部 Release（按 tag 列出所有 -test 发布）。
+// 仅走 Gitee（国内直连，测试仓库为 Gitee 专属）；失败抛出明确提示。
+async function fetchTestReleases(): Promise<any[]> {
+    try {
+        const r = await axios.get(GITEE_TEST_RELEASES_URL, {
+            timeout: 10000,
+            headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
+        });
+        if (Array.isArray(r.data)) return r.data;
+        return [];
+    } catch (e) {
+        log.warn('[patch] 测试仓库获取 Release 失败:', (e as Error).message);
+        throw new Error('无法获取测试仓库 Release（请确认已创建并公开测试仓库 ' +
+            `${GITEE_TEST_OWNER}/${GITEE_TEST_REPO}）`);
+    }
+}
+
+// [lc-493] 按 tag 拉取测试仓库中某个具体发布；
+// 兼容「带 v 前缀」与「不带 v 前缀」两种 tag 命名，优先 v 前缀。
+async function fetchTestReleaseByTag(version: string): Promise<any> {
+    const candidates = [`v${version}`.replace(/^vv/i, 'v'), version.replace(/^v/i, '')];
+    for (const tag of candidates) {
+        try {
+            const r = await axios.get(GITEE_TEST_TAG_RELEASE_URL(tag), {
+                timeout: 10000,
+                headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
+            });
+            if (r.data && (r.data.tag_name || r.data.id)) return r.data;
+        } catch {
+            // 该命名未命中，尝试下一个
+        }
+    }
+    throw new Error('未找到对应的测试发布');
 }
 
 // Gitee 资产下载链接直连即可（国内快），GitHub 资产则走镜像。downloadText 已按 url 是否含
@@ -277,22 +322,6 @@ function pickLatestRelease(releases: any[]): any {
     return best;
 }
 
-// [lc-481] 从更新日志取指定类型(hotfix|full|test)的最高版本号；找不到返回 null。
-// 用于「开发者测试更新」按钮单独定位 -test 版本（普通检测已被 parseLatestChangelogVersion 排除）。
-function findChangelogVersionByType(body: string, suffix: 'test' | 'hotfix' | 'full'): string | null {
-    const lines = (body || '').split(/\r?\n/);
-    const re = new RegExp(`-${suffix}\\d*$`, 'i');
-    let best: string | null = null;
-    for (const line of lines) {
-        const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full|test)\d*)?)/i.exec(line.trim());
-        if (!m) continue;
-        const v = m[1];
-        if (!re.test(v)) continue;
-        if (!best || versionGreater(v, best)) best = v;
-    }
-    return best;
-}
-
 /**
  * 应用结果返回后，延迟执行「重载渲染端 / 重启应用」使补丁生效。
  * 仅当实际填补了文件才刷新；"已是最新/无文件"无需刷新。
@@ -382,31 +411,26 @@ export async function applyLatestPatchAndReload(opts?: PatchApplyOptions): Promi
  */
 export async function listTestPatches(): Promise<TestPatchListResult> {
     try {
-        const release = await fetchReleaseJson();
-        const body = release.body || release.note || '';
-        const assets: any[] = release.assets || [];
-        const lines = (body || '').split(/\r?\n/);
+        // [lc-493] 改从独立的测试仓库读取，不再依赖正式仓库的更新日志/资产
+        const releases = await fetchTestReleases();
         const re = /-test\d*$/i;
-        const seen: { [k: string]: boolean } = {};
-        const versions: string[] = [];
-        for (const line of lines) {
-            const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full|test)\d*)?)/i.exec(line.trim());
-            if (!m) continue;
-            const v = m[1];
-            if (!re.test(v)) continue;
-            if (seen[v]) continue;
-            seen[v] = true;
-            versions.push(v);
+        const patches: TestPatchInfo[] = [];
+        for (const rel of releases) {
+            const tag = String(rel.tag_name || '').replace(/^v/i, '');
+            if (!re.test(tag)) continue; // 仅纳入 -test 发布
+            const assets: any[] = rel.assets || [];
+            const exact = assets.find((a: any) => a.name === `patch-${tag}.json`);
+            patches.push({
+                version: tag,
+                assetName: exact ? exact.name : null,
+                hasAsset: !!exact,
+            });
         }
         // 降序（最新在前）：先比 base 版本，再比 rank（类型/序号）
-        versions.sort((a, b) => {
-            if (versionGreater(a, b)) return -1;
-            if (versionGreater(b, a)) return 1;
+        patches.sort((a, b) => {
+            if (versionGreater(a.version, b.version)) return -1;
+            if (versionGreater(b.version, a.version)) return 1;
             return 0;
-        });
-        const patches: TestPatchInfo[] = versions.map((v) => {
-            const exact = assets.find((a: any) => a.name === `patch-${v}.json`);
-            return { version: v, assetName: exact ? exact.name : null, hasAsset: !!exact };
         });
         return { ok: true, patches };
     } catch (e: any) {
@@ -415,37 +439,54 @@ export async function listTestPatches(): Promise<TestPatchListResult> {
 }
 
 /**
- * [lc-481] 开发者手动拉取并应用 Gitee 上的 -test 测试补丁。
+ * [lc-493] 开发者手动拉取并应用「测试仓库」上的 -test 测试补丁。
  * 与普通 applyLatestPatch 区别：
- *  - 从更新日志专门定位 -test 版本（普通检测默认跳过 test）；
+ *  - 数据来自独立的测试仓库（GITEE_TEST_OWNER/GITEE_TEST_REPO），与正式仓库互不干扰；
  *  - 忽略「已应用」检查，开发者可重复覆盖应用同一 test 版本做验证；
  *  - 由设置页「获取测试更新」按钮在解锁码验证通过后调用。
  */
 export async function applyTestPatch(opts?: PatchApplyOptions, targetVersion?: string): Promise<ApplyResult> {
     const onProgress = opts && opts.onProgress;
     log.info(`[patch] 开发者手动拉取 test 测试补丁${targetVersion ? ` (指定版本 ${targetVersion})` : ''}`);
-    const release = await fetchReleaseJson();
-    const body = release.body || release.note || '';
-    const testVersion = targetVersion || findChangelogVersionByType(body, 'test');
-    if (!testVersion) {
-        if (onProgress) onProgress({ phase: 'error', percent: -1, message: 'Gitee 未找到 -test 测试版补丁' });
-        return {
-            ok: false, filesApplied: 0, needsRestart: false,
-            message: 'Gitee 未找到 -test 测试版补丁（请确认更新日志含 ## vX.Y.Z-test 条目）',
-        };
-    }
-    log.info(`[patch] 测试补丁版本(更新日志): ${testVersion}, Git tag: ${release.tag_name || '(无)'}`);
 
-    // 在 assets 中找 patch-<testVersion>.json（优先精确名，再退首个 -test 补丁包）
+    // 1) 定位目标 test 版本：指定版本直接用；否则取测试仓库最新（降序首个且有补丁包）
+    let testVersion: string;
+    if (targetVersion) {
+        testVersion = targetVersion.replace(/^v/i, '');
+    } else {
+        const list = await listTestPatches();
+        const selectable = list.patches.filter((p) => p.hasAsset);
+        if (!selectable.length) {
+            const msg = '测试仓库未找到可用的 -test 补丁包';
+            if (onProgress) onProgress({ phase: 'error', percent: -1, message: msg });
+            return { ok: false, filesApplied: 0, needsRestart: false, message: msg };
+        }
+        testVersion = selectable[0].version; // listTestPatches 已按降序
+    }
+    if (!/-test\d*$/i.test(testVersion)) {
+        const msg = `版本 ${testVersion} 不是合法的 -test 版本`;
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: msg });
+        return { ok: false, filesApplied: 0, needsRestart: false, message: msg };
+    }
+
+    // 2) 按 tag 拉取该 test 发布的 release，定位 patch-<version>.json 资产
+    let release: any;
+    try {
+        release = await fetchTestReleaseByTag(testVersion);
+    } catch (e: any) {
+        const msg = `未找到测试发布 v${testVersion}：${(e && e.message) || ''}`;
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: msg });
+        return { ok: false, filesApplied: 0, needsRestart: false, version: testVersion, message: msg };
+    }
     const assets: any[] = release.assets || [];
-    const exact = assets.find((a: any) => a.name === `patch-${testVersion}.json`);
-    const asset = exact || assets.find((a: any) => /^patch-.*-test\d*\.json$/i.test(a.name));
+    const asset = assets.find((a: any) => a.name === `patch-${testVersion}.json`);
     if (!asset) {
-        if (onProgress) onProgress({ phase: 'error', percent: -1, message: `v${testVersion} 未提供热补丁包` });
+        const msg = `v${testVersion} 未提供热补丁包（patch-${testVersion}.json）`;
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: msg });
         return {
             ok: false, filesApplied: 0, needsRestart: false,
             version: testVersion,
-            message: `v${testVersion} 未提供热补丁包（patch-${testVersion}.json）`,
+            message: msg,
         };
     }
 
