@@ -34,6 +34,16 @@ ipcRenderer.on('debug-filter', (_e: any, payload: any) => _applyEmbyWallDebugFil
 // 页面加载时主动向主进程索取当前调试过滤(异步返回前默认安静)
 try { ipcRenderer.send('debug-filter-request'); } catch (e) {}
 
+// [lc-512] 「应用补丁」向导弹窗监听：必须在模块顶层注册（与 debug-filter 同生命周期），
+//   不能再嵌在 injectSettingsUI 内——首页首次渲染时 injectSettingsUI 若在注册前抛错/未跑完，
+//   监听便不会注册，导致从首页更新弹窗点「应用补丁」主进程 IPC 无人接收（表现为点一下没反应/没弹窗）。
+//   用模块级 ref 桥接嵌套的 openPatchWizard（函数声明提升，可在定义前绑定）。
+let _openPatchWizardRef: ((autoApply: boolean) => void) | null = null;
+ipcRenderer.on('fntv:open-patch-wizard', (_e: any, opts?: any) => {
+    if (_openPatchWizardRef) _openPatchWizardRef(!!(opts && opts.autoApply));
+    else console.warn('[EmbyWall] fntv:open-patch-wizard 收到，但向导尚未就绪(ref 未绑定)');
+});
+
 // 启动时拉取「关闭详情页背景框」偏好，使已保存设置无需打开设置面板即生效
 try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
@@ -3201,10 +3211,9 @@ function handle(): void {
         e.stopPropagation();
         openPatchWizard();
     });
-    // [lc-507] 更新检测弹窗「应用补丁」→ 打开补丁向导(自带进度条+完成提示)，autoApply 跳过二次确认直接应用
-    ipcRenderer.on('fntv:open-patch-wizard', (_e: any, opts?: any) => {
-        openPatchWizard(!!(opts && opts.autoApply));
-    });
+    // [lc-512] 原嵌套的 ipcRenderer.on('fntv:open-patch-wizard') 已移到模块顶层（见文件顶部），
+    //   这里仅把 openPatchWizard 绑定到模块级 ref，供顶层监听调用。函数声明提升，此处已可用。
+    _openPatchWizardRef = openPatchWizard;
     testBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (testBtn.disabled) return;
