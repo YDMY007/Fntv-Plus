@@ -195,7 +195,24 @@ function computeInstallSignature(): string {
  * 必须在窗口/版本显示读取 appliedPatchVersion 之前调用。
  */
 export function reconcilePatchStateOnStartup(): void {
-    if (!app.isPackaged) return;
+    // [lc-521] dev 版不自动清除覆盖层(以免清掉本次会话刚应用的测试/热补丁, 破坏测试流程),
+    // 但残留覆盖层会影子覆盖 dest 源码, 导致"跑的其实不是最新 dev 版"。
+    // 故在启动时给出明确告警, 提示用户清空该目录以回到最新 dev 代码(符合用户"最新 dev 版"铁律)。
+    if (!app.isPackaged) {
+        try {
+            const dir = getPatchesDir();
+            const hasOverlay = fs.existsSync(dir) && fs.readdirSync(dir).length > 0;
+            if (hasOverlay) {
+                const applied = getAppliedPatchVersion();
+                log.warn(`[patch][dev] 检测到 dev 覆盖层(${dir}), appliedPatchVersion=${applied || '(无)'}，`
+                    + `它将影子覆盖 dest 源码, 使 dev 实际并非最新代码。`
+                    + `如需回到最新 dev 代码, 请清空该目录(删除 ${dir}) 并重启。`);
+            }
+        } catch (e: any) {
+            log.warn('[patch][dev] 检测 dev 覆盖层失败:', e?.message || e);
+        }
+        return;
+    }
     try {
         const sig = computeInstallSignature();
         if (!sig) return;
