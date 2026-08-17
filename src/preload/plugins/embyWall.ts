@@ -3555,7 +3555,7 @@ function handle(): void {
         if (state === 'uptodate') {
             body.appendChild(centerText('✓', '26px', 'var(--fnos-ui-accent)', 'font-weight:800;margin-bottom:6px;'));
             body.appendChild(centerText('已是最新热补丁', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:6px;'));
-            body.appendChild(centerText(version ? `当前版本：v${version}` : (info && info.message) || '', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:16px;'));
+            body.appendChild(centerText(curVer ? `当前版本：v${curVer}` : (info && info.message) || '', '11.5px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:16px;'));
             body.appendChild(actionRow([{ label: '关闭', primary: true, onClick: () => closePatchWizard() }]));
             return;
         }
