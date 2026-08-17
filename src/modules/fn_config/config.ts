@@ -129,8 +129,11 @@ export interface Config {
     mpvInterpEnginePath?: string;    // 引擎路径（SVP 目录 / rife-ncnn-vulkan 可执行文件路径）
     // 自定义登录页背景图路径（留空=使用默认 resource/login/image/bg-login.webp）
     loginBgPath?: string;
-    // 用户点击「立即下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
+    // 用户点击「稍后提醒/应用补丁/下载」后不再自动弹窗更新的时间戳（毫秒）；缺失/0=未设置（每次启动都弹）
+    // 热补丁(hotfix)使用此字段，免打扰 1 天
     updateDismissedAt?: number;
+    // 全量包(full)专用免打扰时间戳；免打扰 7 天，与热补丁分开计，避免下载全量后热补丁也被长期屏蔽
+    fullUpdateDismissedAt?: number;
     // fnOS 系统桌面地址（含端口）：点「切换系统页面」时跳转的目标。
     // 留空=自动，用当前 TV 连接的 origin 根路径（同端口场景）；
     // 若系统 Web 端口与媒体端口不同（每人各异），用户在此填完整地址如 https://192.168.1.50:5666
@@ -898,10 +901,23 @@ export function getUpdateDismissedAt(): number {
     return typeof config.updateDismissedAt === 'number' ? config.updateDismissedAt : 0;
 }
 
-// 设置「更新已打烊」时间戳
+// 设置「更新已打烊」时间戳（热补丁专用，免打扰 1 天）
 export function setUpdateDismissedAt(ts: number): void {
     const config: Config = readConfig() || {};
     config.updateDismissedAt = ts;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// 获取「全量包更新已打烊」时间戳（用户点过全量包「下载」/「稍后提醒」后 7 天内不再自动弹窗）
+export function getFullUpdateDismissedAt(): number {
+    const config: Config = readConfig() || {};
+    return typeof config.fullUpdateDismissedAt === 'number' ? config.fullUpdateDismissedAt : 0;
+}
+
+// 设置「全量包更新已打烊」时间戳（全量包专用，免打扰 7 天）
+export function setFullUpdateDismissedAt(ts: number): void {
+    const config: Config = readConfig() || {};
+    config.fullUpdateDismissedAt = ts;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
@@ -1008,7 +1024,7 @@ Object.assign(module.exports, {
     getMpvInterpEngine, setMpvInterpEngine,
     getMpvInterpEnginePath, setMpvInterpEnginePath,
     // 更新打烊时间戳
-    getUpdateDismissedAt, setUpdateDismissedAt,
+    getUpdateDismissedAt, setUpdateDismissedAt, getFullUpdateDismissedAt, setFullUpdateDismissedAt,
     // 热门剧更新数据源（TMDB / 豆瓣）
     getHotSource, setHotSource,
     // 登录背景图路径

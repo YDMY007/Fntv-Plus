@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { BrowserWindow, shell, app } from 'electron';
 import { fnosDialog } from '../../main/common/fnosDialog';
-import { getUpdateDismissedAt, setUpdateDismissedAt, getAppliedPatchVersion } from '../fn_config/config';
+import { getUpdateDismissedAt, setUpdateDismissedAt, getFullUpdateDismissedAt, setFullUpdateDismissedAt, getAppliedPatchVersion } from '../fn_config/config';
 import { clearAllPatches } from '../patcher/patchApplier';
 import log from '../logger';
 
@@ -316,7 +316,8 @@ export class UpdateChecker {
                     if (downloadUrl) shell.openExternal(downloadUrl);
                     else if (htmlUrl) shell.openExternal(htmlUrl);
                     return false;
-                default: // 稍后提醒
+                default: // 稍后提醒（记录 1 天免打扰）
+                    setUpdateDismissedAt(Date.now());
                     return false;
             }
         }
@@ -337,8 +338,8 @@ export class UpdateChecker {
 
         switch (response) {
             case 0: // 下载全量安装包（国外 GitHub）
-                // 记录时间戳：7 天内不再自动弹窗更新提醒
-                setUpdateDismissedAt(Date.now());
+                // 记录时间戳：7 天内不再自动弹窗更新提醒（全量包专用字段）
+                setFullUpdateDismissedAt(Date.now());
                 // [lc-511] 下载全量包前先清除已应用的补丁覆盖：否则旧补丁文件会持续覆盖新安装包，
                 // 导致全量更新无法真正「盖过」热补丁。清版本号 + 删 patches 目录，待用户安装并重启后即为纯新版本。
                 clearAllPatches();
@@ -353,7 +354,8 @@ export class UpdateChecker {
                     shell.openExternal(htmlUrl);
                 }
                 return false;
-            default: // 稍后提醒
+            default: // 稍后提醒（记录 7 天免打扰）
+                setFullUpdateDismissedAt(Date.now());
                 return false;
         }
     }
@@ -405,19 +407,20 @@ export class UpdateChecker {
      */
     async autoCheckForUpdates(): Promise<void> {
         try {
-            // 检查 7 天免打扰：用户点过「立即下载」后 7 天内不再自动弹窗
-            const dismissedAt = getUpdateDismissedAt();
-            const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000; // 7 天
-            if (dismissedAt > 0 && (Date.now() - dismissedAt) < SNOOZE_MS) {
-                log.info('更新提醒在 7 天免打扰期内，跳过自动弹窗');
-                return;
-            }
-
             const updateInfo = await this.checkForUpdates();
 
             // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送（自动/手动检查均不弹窗）
             if (updateInfo.updateType === 'test') {
                 log.info(`[更新检测] 最新为 test 开发版(${updateInfo.latestVersion})，不向用户推送，跳过提示`);
+                return;
+            }
+
+            // [lc-513] 免打扰时长按更新类型区分：热补丁(hotfix) 1 天，全量包(full) 7 天
+            const isFull = updateInfo.updateType === 'full';
+            const dismissedAt = isFull ? getFullUpdateDismissedAt() : getUpdateDismissedAt();
+            const SNOOZE_MS = isFull ? 7 * 24 * 60 * 60 * 1000 : 1 * 24 * 60 * 60 * 1000;
+            if (dismissedAt > 0 && (Date.now() - dismissedAt) < SNOOZE_MS) {
+                log.info(`更新提醒在免打扰期内(${isFull ? '全量包 7 天' : '热补丁 1 天'})，跳过自动弹窗`);
                 return;
             }
 
