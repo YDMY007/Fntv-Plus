@@ -2682,7 +2682,7 @@ function handle(): void {
       const fbChoiceBtn = document.createElement('button');
       fbChoiceBtn.id = 'fnos-feedback-choice-btn';
       fbChoiceBtn.type = 'button';
-      fbChoiceBtn.textContent = '💡 软件反馈建议';
+      fbChoiceBtn.textContent = '软件反馈建议';
       fbChoiceBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
@@ -6110,7 +6110,7 @@ const openFeedbackChoiceModal = (): void => {
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);';
 
     card.innerHTML = ''
-      + '<div style="font-size:19px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">💡 软件反馈建议</div>'
+      + '<div style="font-size:19px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">软件反馈建议</div>'
       + '<div style="font-size:12.5px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:16px;">请选择反馈方式：</div>';
 
     // 选项一：用户调研问卷（→ 原问卷反馈弹窗）

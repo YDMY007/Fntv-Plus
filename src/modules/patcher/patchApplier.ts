@@ -102,6 +102,28 @@ const GITEE_TAG_RELEASE_URL = (tag: string) =>
     `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${tag}`;
 const GITEE_CREATE_RELEASE_URL = `https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases`;
 
+// [lc-506] 国内 Gitee 公开 raw 检测源（无 token，与 updateChecker 一致）：
+// 直接读 update-check.json 拿到最新热补丁版本 + 补丁包直链(patchUrl)，避免 Gitee /releases API 强制 token 导致用户端 403。
+const UPDATE_CHECK_RAW_URL = `https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/raw/release/resource/wiki/update-check.json`;
+
+interface RawPatchInfo { version: string; patchUrl: string; notes: string; }
+
+// 读 Gitee 公开 raw update-check.json（无 token 可访问），返回最新版本与补丁包直链；失败返回 null（交由旧 releases 路径回退）
+async function fetchPatchInfoViaRaw(): Promise<RawPatchInfo | null> {
+    try {
+        const r = await axios.get(UPDATE_CHECK_RAW_URL, {
+            timeout: 10000,
+            headers: { 'User-Agent': `fnos-tv/${app.getVersion()}` },
+        });
+        const data = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;
+        if (!data || !data.version) return null;
+        return { version: String(data.version), patchUrl: data.patchUrl || '', notes: data.notes || '' };
+    } catch (e) {
+        log.warn('[patch] 读取 update-check.json 失败, 回退 releases:', (e as Error).message);
+        return null;
+    }
+}
+
 // [lc-493] 测试补丁专用仓库（独立于正式仓库 fntv-plus）。
 // 正式仓库只承载「官方发布 / 安装包更新检测 / 官方热补丁」；开发者测试文件单独部署到此仓库，
 // 互不影响：正式用户永不触达此仓库，测试也不会污染正式仓库的更新日志/资产。
@@ -366,6 +388,25 @@ export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
     const baseline = applied || app.getVersion();
     const currentVersion = baseline;
     try {
+        // [lc-506] 优先走国内 Gitee 公开 raw（无 token）
+        const rawInfo = await fetchPatchInfoViaRaw();
+        if (rawInfo && rawInfo.version) {
+            const latestVersion = rawInfo.version;
+            const hasUpdate = versionGreater(latestVersion, baseline);
+            return {
+                hasUpdate,
+                version: latestVersion,
+                currentVersion,
+                message: hasUpdate
+                    ? `发现新补丁 v${latestVersion}`
+                    : `已是最新补丁 v${latestVersion}`,
+            };
+        }
+    } catch (e) {
+        log.warn('[patch] raw 检测失败, 回退 releases:', (e as Error).message);
+    }
+    // [回退] 旧 Gitee releases API / GitHub / 镜像
+    try {
         const release = await fetchReleaseJson();
         const body = release.body || release.note || '';
         const latestVersion: string = parseLatestChangelogVersion(body)
@@ -562,6 +603,48 @@ export async function applyTestPatchAndReload(opts?: PatchApplyOptions, targetVe
     return finalizeAfterApply(result);
 }
 
+// [lc-506] 提取「写补丁文件 + 标记已应用」的公共逻辑，供 raw 直链与旧 releases 两条路径共用
+async function applyManifestFiles(manifest: PatchManifest, version: string, onProgress?: (p: PatchProgress) => void): Promise<ApplyResult> {
+    if (manifest.minAppVersion && compareVersions(app.getVersion(), manifest.minAppVersion) < 0) {
+        const msg = `当前应用版本 v${app.getVersion()} 低于补丁要求 v${manifest.minAppVersion}`;
+        if (onProgress) onProgress({ phase: 'error', percent: -1, message: msg });
+        return { ok: false, filesApplied: 0, needsRestart: false, version, message: msg };
+    }
+    const patchesDir = getPatchesDir();
+    if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
+    if (onProgress) onProgress({ phase: 'applying', percent: 100, message: `正在应用补丁 v${version}` });
+    let count = 0;
+    let needsRestart = false;
+    for (const f of manifest.files || []) {
+        const rel = sanitizeTarget(f.target);
+        if (!rel) {
+            log.warn(`[patch] 跳过非法路径: ${f.target}`);
+            continue;
+        }
+        if (rel.startsWith('main/')) needsRestart = true;
+        const dest = path.join(patchesDir, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, Buffer.from(f.b64 || '', 'base64'));
+        count++;
+        log.info(`[patch] 已填补: ${rel}`);
+    }
+    if (count === 0) {
+        return { ok: false, filesApplied: 0, needsRestart: false, message: '补丁包内无有效文件' };
+    }
+    setAppliedPatchVersion(version);
+    log.info(`[patch] 应用完成: v${version}, 共 ${count} 个文件, 需重启=${needsRestart}`);
+    if (onProgress) onProgress({ phase: 'done', percent: 100, message: needsRestart ? '补丁已应用，正在重启应用…' : '补丁已应用，正在重载…' });
+    return {
+        ok: true,
+        version,
+        filesApplied: count,
+        needsRestart,
+        message: needsRestart
+            ? `已应用补丁 v${version}（${count} 个文件），需重启应用生效`
+            : `已应用补丁 v${version}（${count} 个文件），即将重载生效`,
+    };
+}
+
 /**
  * [lc-483] 拉取并应用最新热补丁。
  * @param opts.onProgress 实时进度回调（检查/下载/应用阶段），供渲染端弹窗展示
@@ -574,6 +657,34 @@ export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyR
     const baseline = applied || app.getVersion();
     log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}, 基线版本: ${baseline}`);
 
+    // [lc-506] 优先走国内 Gitee 公开 raw（无 token）：读 update-check.json 拿版本 + 补丁包直链
+    const rawInfo = await fetchPatchInfoViaRaw();
+    if (rawInfo && rawInfo.version) {
+        const latestVersion: string = rawInfo.version;
+        log.info(`[patch] raw 检测版本(更新日志): ${latestVersion}`);
+        if (!versionGreater(latestVersion, baseline)) {
+            if (onProgress) onProgress({ phase: 'done', percent: 100, message: `已是最新补丁（v${latestVersion}）` });
+            return { ok: true, filesApplied: 0, needsRestart: false, version: latestVersion, message: `已是最新补丁（v${latestVersion}）` };
+        }
+        if (!rawInfo.patchUrl) {
+            if (onProgress) onProgress({ phase: 'error', percent: -1, message: `v${latestVersion} 未提供补丁包直链` });
+            return { ok: false, filesApplied: 0, needsRestart: false, version: latestVersion, message: `v${latestVersion} 未提供补丁包直链（patchUrl）` };
+        }
+        if (onProgress) onProgress({ phase: 'downloading', percent: 0, message: `正在下载补丁 v${latestVersion}` });
+        const raw = await downloadText(rawInfo.patchUrl, (loaded, total) => {
+            if (onProgress) onProgress({ phase: 'downloading', percent: total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : -1, loaded, total });
+        });
+        let manifest: PatchManifest;
+        try {
+            manifest = JSON.parse(raw);
+        } catch (e) {
+            if (onProgress) onProgress({ phase: 'error', percent: -1, message: `补丁清单解析失败: ${(e as Error).message}` });
+            return { ok: false, filesApplied: 0, needsRestart: false, message: `补丁清单解析失败: ${(e as Error).message}` };
+        }
+        return applyManifestFiles(manifest, latestVersion, onProgress);
+    }
+
+    // [回退] 旧 Gitee releases API / GitHub / 镜像（Gitee 需 token，仅供有 token 场景；GitHub 公开可读作为兜底）
     const release = await fetchReleaseJson();
     // [lc-477] 版本号以更新日志最新 heading 为准(## vX.Y.Z(-hotfix)? (date))，Git tag 仅兜底
     const body = release.body || release.note || '';

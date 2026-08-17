@@ -1,6 +1,7 @@
 {
-  "version": "3.4.0-full",
-  "date": "2026-08-17",
+  "version": "3.4.1-hotfix",
+  "date": "2026-08-18",
   "downloadUrl": "https://github.com/YDMY007/fntv-plus/releases/latest",
-  "notes": "v3.4.0 更新：上线热补丁更新机制（检测版本号后缀 -hotfix 走应用内补丁，-full 提示下载全量安装包）；修复飞牛影视个人视频库消失、PotPlayer 播放 strm 失败、特定详情页显示异常、B站弹幕匹配电视剧逻辑、首页特定情况重复刷新等问题；优化动画。"
+  "patchUrl": "https://gitee.com/YDMY007/fntv-plus/raw/release/resource/patches/patch-3.4.1-hotfix.json",
+  "notes": "v3.4.1 热补丁(-hotfix)：移除侧边栏「软件反馈建议」前的 💡 emoji。应用内一键应用，无需下载全量安装包。"
 }
