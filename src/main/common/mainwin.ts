@@ -54,7 +54,7 @@ const mainwinConfig: BrowserWindowConstructorOptions = {
     webPreferences: {
         webgl: true,
         partition: 'persist:fntv',
-        preload: path.join(__dirname, '../../preload/index.js'),
+        preload: path.join(__dirname, '../preload/index.js'),
         nodeIntegration: true,
         contextIsolation: false,
         spellcheck: false,
