@@ -151,6 +151,8 @@ function syncNewInterpFiles(): void {
         };
         always.forEach((rel) => copy(rel, true));
         missingOnly.forEach((rel) => copy(rel, false));
+        // [lc-490] 启动时按当前引擎同步 N 卡上下文配置（防止设置改过但 mpv-interp-nvidia.conf 状态不一致）
+        writeInterpNvidiaContext(fnConfig.getMpvInterpEngine() === 'nvidia');
         // [lc-487] 控制栏「插帧」按钮升级为高亮 cycle: 版本
         syncUoscControls();
     } catch (e) {
@@ -283,7 +285,10 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
         const lines: string[] = [
             '# 本文件由「应用设置面板」自动生成（默认着色器 / ICC 校色）。',
             '# 修改后会被重写，请勿手动编辑。',
-            ''
+            '',
+            '# N 卡 Smooth Motion（RTX50 驱动级）开关：由 mpv-interp-nvidia.conf 控制',
+            '# （应用「插帧引擎=N 卡」时写入 gpu-context=winvk；关闭即清空，不影响其它引擎/默认呈现）',
+            'include=~~/mpv-interp-nvidia.conf'
         ];
         for (const s of shaders) {
             lines.push('glsl-shaders-append=~~/shaders/' + s);
@@ -349,8 +354,40 @@ export function writeInterpConfig(enabled: boolean, engine: string, enginePath: 
                 logger.error(`[插帧] 写入 fntv_interp.conf 失败: ${dir}`, e);
             }
         }
+        // [lc-490] N 卡 Smooth Motion 需 mpv 走 Vulkan 呈现（gpu-context=winvk）才能被 NVIDIA 驱动接管；
+        // d3d11 上下文 NVIDIA SM 不生效。gpu-context 是启动项，无法运行时切换，故写入独立被 include 的
+        // mpv-interp-nvidia.conf（由 mpv-user.conf 的 include 加载），下次启动生效。仅引擎=nvidia 时写入。
+        writeInterpNvidiaContext(engine === 'nvidia');
     } catch (error) {
         logger.error('[插帧] 写入 fntv_interp.conf 失败:', error);
+    }
+}
+
+// [lc-490] 写入/清空 N 卡 Smooth Motion 所需的 Vulkan 呈现上下文配置。
+// 仅当引擎= nvidia 时写入 gpu-context=winvk + video-sync=audio（NVIDIA 驱动级 SM 的实测可用组合）；
+// 关闭时写入空文件（include 存在但无内容，不影响默认 D3D11 呈现与其它引擎）。
+function writeInterpNvidiaContext(enabled: boolean): void {
+    try {
+        const content = enabled
+            ? '# Fntv-Plus · N 卡 Smooth Motion（RTX50 驱动级）\n'
+              + '# 仅当「插帧引擎=N 卡」时由应用写入；请勿手动编辑。\n'
+              + '# 启用 Vulkan 呈现上下文，NVIDIA 驱动级 Smooth Motion 才能对视频层做帧生成（d3d11 不生效）。\n'
+              + 'gpu-context=winvk\n'
+              + 'video-sync=audio\n'
+            : '# Fntv-Plus · N 卡 Smooth Motion 未启用（空）\n';
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                const target = path.join(dir, 'mpv-interp-nvidia.conf');
+                fs.writeFileSync(target, content, 'utf-8');
+                logger.info(`[插帧] N 卡上下文配置已写入: ${target} (enabled=${enabled})`);
+            } catch (e) {
+                logger.error(`[插帧] 写入 mpv-interp-nvidia.conf 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('[插帧] 写入 mpv-interp-nvidia.conf 失败:', error);
     }
 }
 

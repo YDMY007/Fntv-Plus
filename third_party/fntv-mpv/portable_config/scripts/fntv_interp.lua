@@ -77,11 +77,13 @@ local function apply(on)
 
         if eng == 'nvidia' then
             -- N 卡 Smooth Motion（RTX50+ 驱动级视频帧生成）
-            -- 机制：驱动在 D3D11 呈现的视频帧上做帧生成，无需 VapourSynth/MPCVR/AI 模型。
-            -- 只需确保解码帧经 D3D11 呈现（hwdec=*-copy），其余交给 NVIDIA 驱动。
-            -- 前提：用户在 NVIDIA App / 驱动面板开启「Smooth Motion（视频）」，且仅 RTX50+ 支持。
-            pcall(function() mp.set_property('hwdec', 'd3d11va-copy') end)
-            toast('插帧：N 卡 Smooth Motion（RTX50 驱动级）已请求开启\n请在 NVIDIA App 开启「Smooth Motion（视频）」；若未生效请重启播放器')
+            -- 机制：驱动在 Vulkan(DX12) 呈现的视频帧上做帧生成，无需 VapourSynth/MPCVR/AI 模型，最轻量。
+            -- ⚠️ 关键：必须走 Vulkan 呈现（gpu-context=winvk），D3D11 上下文 NVIDIA SM 不生效；
+            --    gpu-context 是启动项，无法运行时切换，已由应用侧写入 mpv-interp-nvidia.conf（被 mpv-user.conf include），
+            --    故开启后需重启一次播放器才生效。本分支只负责提示与高亮，不做运行时属性切换。
+            -- 前提：① 显卡 RTX50+；② 在 NVIDIA App 将本播放器 mpv.exe 加入「程序设置」并开启 Smooth Motion
+            --       （仅全局开启对多数播放器无效，必须按 exe 单独加；NVIDIA App / Profile Inspector 均可）。
+            toast('插帧：N 卡 Smooth Motion（RTX50 驱动级）已开启\n重启播放器后由 NVIDIA 驱动接管；\n请确认 NVIDIA App 已把本播放器 mpv.exe 加入程序列表并开启 Smooth Motion')
             return
         end
 
