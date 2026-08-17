@@ -35,18 +35,9 @@ ipcRenderer.on('debug-filter', (_e: any, payload: any) => _applyEmbyWallDebugFil
 try { ipcRenderer.send('debug-filter-request'); } catch (e) {}
 
 // [lc-516] 「应用补丁」向导弹窗监听：模块顶层注册，直接唤起自包含的补丁应用弹窗。
-//   不再依赖 settings 面板注入（修复原 ref 中转在「首页更新弹窗早于侧栏玻璃化」时 ref 为 null、
-//   点应用补丁毫无反应、只关弹窗的 bug）。弹窗自身创建到 document.body，独立于设置面板。
-ipcRenderer.on('fntv:open-patch-wizard', (_e: any, opts?: any) => {
-    const autoApply = !!(opts && opts.autoApply);
-    console.log('[EmbyWall][patch] 收到 fntv:open-patch-wizard，autoApply =', autoApply);
-    try { fntvOpenPatchApplyPopup(autoApply); }
-    catch (err: any) { console.error('[EmbyWall][patch] 唤起补丁弹窗失败:', err && err.message); }
-});
-
 // ===== [lc-516] 模块级、自包含的补丁应用弹窗 =====
-// 由更新弹窗的 IPC(fntv:open-patch-wizard) 直接唤起，也可由设置面板「应用补丁」按钮调用。
-// 彻底修复「点应用补丁只关弹窗、毫无反应」的 bug：不依赖 injectSettingsUI 的执行时机。
+// 由设置面板「应用补丁」按钮调用，也由更新弹窗经 fntv-open-settings('patch') 通道跳转后自动唤起。
+// 弹窗自身创建到 document.body，独立于设置面板；不依赖 injectSettingsUI 的执行时机。
 let _patchApplyModal: HTMLElement | null = null;
 let _patchApplyProgHandler: ((_e: any, p: any) => void) | null = null;
 
@@ -5740,7 +5731,19 @@ function handle(): void {
   }
 
   // [lc-199] 控制栏「弹幕样式」按钮 → 主进程转发 → 打开设置面板并定位到弹幕分区
-  ipcRenderer.on('fntv-open-settings', (_e: any, sectionId: string) => openSettingsPanel(undefined, sectionId));
+  // [lc-518] 首页更新弹窗「应用补丁」→ 主进程发 fntv-open-settings('patch')：
+  //   打开设置面板并定位后，自动唤起补丁应用弹窗(autoApply 直接下载显示进度，复用已验证路径)
+  ipcRenderer.on('fntv-open-settings', (_e: any, sectionId: string) => {
+      if (sectionId === 'patch') {
+          openSettingsPanel(undefined, 'patch');
+          setTimeout(() => {
+              console.log('[EmbyWall][patch] 更新弹窗跳转设置面板后自动应用补丁');
+              fntvOpenPatchApplyPopup(true);
+          }, 350);
+          return;
+      }
+      openSettingsPanel(undefined, sectionId);
+  });
 
   /** 判断某 background-color 是否为"不透明/半透明的白/浅灰底"(需透明化让浅蓝透出) */
   function isOpaqueLightBg(bg: string): boolean {

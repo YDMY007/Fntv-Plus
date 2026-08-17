@@ -311,7 +311,7 @@ export class UpdateChecker {
                     //   带下载进度条 + "✓ 补丁已应用"完成提示 + 自动重载，autoApply 跳过二次确认。
                     setUpdateDismissedAt(Date.now());
                     const target = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) || null;
-                    if (target) target.webContents.send('fntv:open-patch-wizard', { autoApply: true });
+                    if (target) target.webContents.send('fntv-open-settings', 'patch'); // [lc-518] 走已验证通道：打开设置面板并自动应用补丁
                     return true;
                 case 1: // 仍可选择去 GitHub 下载全量包覆盖安装
                     if (downloadUrl) shell.openExternal(downloadUrl);
