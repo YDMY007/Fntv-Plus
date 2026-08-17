@@ -855,6 +855,9 @@ end
 
 mp.register_event("file-loaded", function()
     local path = mp.get_property("path")
+    -- ⚠️【lc-504】换片时清零「主集」标记，使新的自动补源能重新锁定当前集
+    -- (否则残留的上一次主集会误杀本次正确集数的补源)。
+    DANMAKU._primary_ep = nil
     local dir = get_parent_directory(path)
     local filename = mp.get_property('filename/no-ext')
     local video = mp.get_property_native("current-tracks/video")

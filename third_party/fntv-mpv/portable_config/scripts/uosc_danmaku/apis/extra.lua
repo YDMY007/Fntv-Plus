@@ -532,6 +532,19 @@ function auto_search_extra(title, episode_num, season)
     end
     msg.info(("[自动补源-DEBUG] 最终 episode_num=%d (title=%q)"):format(episode_num, title))
 
+    -- ⚠️【lc-504】防止错位集数覆盖当前集弹幕元数据：
+    -- 记录本次播放的「主集」(第一个成功关联的集数)。后续若自动补源又搜到
+    -- 不同集数(如后台误搜了上一集/标题解析串集)，直接跳过——既不更新 BILI_INFO
+    -- (避免「1850 条变 45 条」的错位覆盖)，也不作为弹幕源叠加(避免上一集弹幕
+    -- 混进当前集画面)。DANMAKU._primary_ep 由 file-loaded 处理器在每次换片时清零。
+    if DANMAKU._primary_ep == nil then
+        DANMAKU._primary_ep = episode_num
+    elseif episode_num ~= 0 and episode_num ~= DANMAKU._primary_ep then
+        msg.warn(("[自动补源] 跳过：搜到集数 %d 与当前主集 %d 不符，避免错位覆盖弹幕元数据")
+            :format(episode_num, DANMAKU._primary_ep))
+        return
+    end
+
     -- 去文件名里的非法字符，构造唯一 XML 路径
     local safe_title = (title:gsub('[\\/:*?"<>|]', "") or "x")
     local out_xml = utils.join_path(DANMAKU_PATH, "bili_danmaku_" .. safe_title .. "_" .. episode_num .. ".xml")
