@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { BrowserWindow, shell, app } from 'electron';
 import { fnosDialog } from '../../main/common/fnosDialog';
-import { getUpdateDismissedAt, setUpdateDismissedAt, getFullUpdateDismissedAt, setFullUpdateDismissedAt, getAppliedPatchVersion } from '../fn_config/config';
+import { getUpdateDismissedAt, setUpdateDismissedAt, getFullUpdateDismissedAt, setFullUpdateDismissedAt, getAppliedPatchVersion, getDebugEnabled } from '../fn_config/config';
 import { clearAllPatches } from '../patcher/patchApplier';
 import log from '../logger';
 
@@ -418,12 +418,17 @@ export class UpdateChecker {
             }
 
             // [lc-513] 免打扰时长按更新类型区分：热补丁(hotfix) 1 天，全量包(full) 7 天
+            // [lc-517] 开发者调试模式(debugEnabled=true)下，免打扰不生效——方便反复测弹窗，不影响正式用户(prod 版默认 false)
             const isFull = updateInfo.updateType === 'full';
-            const dismissedAt = isFull ? getFullUpdateDismissedAt() : getUpdateDismissedAt();
-            const SNOOZE_MS = isFull ? 7 * 24 * 60 * 60 * 1000 : 1 * 24 * 60 * 60 * 1000;
-            if (dismissedAt > 0 && (Date.now() - dismissedAt) < SNOOZE_MS) {
-                log.info(`更新提醒在免打扰期内(${isFull ? '全量包 7 天' : '热补丁 1 天'})，跳过自动弹窗`);
-                return;
+            if (getDebugEnabled()) {
+                log.info('[update-debug] debug 模式，跳过免打扰限制，强制提示更新');
+            } else {
+                const dismissedAt = isFull ? getFullUpdateDismissedAt() : getUpdateDismissedAt();
+                const SNOOZE_MS = isFull ? 7 * 24 * 60 * 60 * 1000 : 1 * 24 * 60 * 60 * 1000;
+                if (dismissedAt > 0 && (Date.now() - dismissedAt) < SNOOZE_MS) {
+                    log.info(`更新提醒在免打扰期内(${isFull ? '全量包 7 天' : '热补丁 1 天'})，跳过自动弹窗`);
+                    return;
+                }
             }
 
             if (updateInfo.hasUpdate) {
