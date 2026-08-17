@@ -32,8 +32,20 @@ function requirePatch(patchFile: string): void {
             if (patchesDir && parent && typeof parent.filename === 'string'
                 && parent.filename.startsWith(patchesDir)
                 && typeof request === 'string' && request.startsWith('.')) {
-                const bundled = require('path').resolve(bundledPluginsDir, request);
-                if (fs.existsSync(bundled)) return bundled;
+                // [fix] 把相对依赖重新相对到 bundled 插件目录解析；
+                //   用 stub-parent 走 _origResolve 可自动补 .js/.json 扩展名，
+                //   旧写法 path.resolve 不带扩展名、fs.existsSync 必为 false 导致回退失效，
+                //   补丁文件(如 embyWall.js)因 require('../core/hooks') 失败而被整体跳过，热补丁永不生效。
+                const stubParent = {
+                    filename: path.join(bundledPluginsDir, '_patch_stub_.js'),
+                    id: path.join(bundledPluginsDir, '_patch_stub_.js'),
+                    paths: [],
+                };
+                try {
+                    return _origResolve.call(this, request, stubParent as any, ...rest);
+                } catch {
+                    // bundled 中也缺失该依赖，保留原错误
+                }
             }
             throw e;
         }

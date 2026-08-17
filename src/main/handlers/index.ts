@@ -30,8 +30,18 @@ function loadPlugins(): void {
                 if (mainPatchDir && parent && typeof parent.filename === 'string'
                     && parent.filename.startsWith(mainPatchDir)
                     && typeof request === 'string' && request.startsWith('.')) {
-                    const bundled = require('path').resolve(bundledDir, request);
-                    if (fs.existsSync(bundled)) return bundled;
+                    // [fix] 同 preload/index.ts：用 stub-parent 走 _origResolve 自动补扩展名，
+                    //   旧 path.resolve + fs.existsSync(无扩展名) 必为 false，导致 main/* 补丁依赖回退失效。
+                    const stubParent = {
+                        filename: path.join(bundledDir, '_patch_stub_.js'),
+                        id: path.join(bundledDir, '_patch_stub_.js'),
+                        paths: [],
+                    };
+                    try {
+                        return _origResolve.call(this, request, stubParent as any, ...rest);
+                    } catch {
+                        // bundled 中也缺失该依赖，保留原错误
+                    }
                 }
                 throw e;
             }
