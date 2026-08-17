@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import axios from 'axios';
-import { getAppliedPatchVersion, setAppliedPatchVersion } from '../fn_config/config';
+import { getAppliedPatchVersion, setAppliedPatchVersion, getAppliedPatchSignature, setAppliedPatchSignature } from '../fn_config/config';
 import log from '../logger';
 
 /**
@@ -160,9 +160,62 @@ export function clearAllPatches(): void {
     }
     try {
         setAppliedPatchVersion('');
-        log.info('[patch] 已清空 appliedPatchVersion');
+        setAppliedPatchSignature('');
+        log.info('[patch] 已清空 appliedPatchVersion / appliedPatchSignature');
     } catch (e: any) {
         log.warn('[patch] 清空 appliedPatchVersion 失败:', e?.message || e);
+    }
+}
+
+/**
+ * [lc-520] 计算当前安装包签名（仅打包版有效）：取可执行文件(process.execPath)的修改时间(mtimeMs)。
+ * 重装/升级会重写 exe → mtime 变化 → 签名变化；普通重启/热补丁重载不改写 exe → 签名不变。
+ * 用于启动对账：若当前签名与应用补丁时记录的签名不同，说明安装包被替换，旧补丁覆盖层已失效，应清除。
+ */
+function computeInstallSignature(): string {
+    try {
+        if (!app.isPackaged) return '';
+        const st = fs.statSync(process.execPath);
+        return String(st.mtimeMs);
+    } catch (e: any) {
+        log.warn('[patch] 读取安装包签名失败:', e?.message || e);
+        return '';
+    }
+}
+
+/**
+ * [lc-520] 启动期补丁对账：保证"覆盖安装官方版"能正确回退到安装包真实版本，不再残留旧 hotfix 版本号。
+ * 机制：
+ *  - 应用补丁时记录当时的安装包签名(appliedPatchSignature)；
+ *  - 每次启动(packaged 版)比对当前安装包签名：
+ *      · 一致 → 补丁仍有效，保留；
+ *      · 不一致(重装/升级) → 旧补丁覆盖层已失效，clearAllPatches() 回退到安装包版本；
+ *      · 缺失(appliedPatchSignature 为空，即修复前旧版应用的补丁) → 视为未知安装状态，清除以保证官方版优先。
+ * dev 版(isPackaged=false)不处理（dev 用独立 config 且不涉及"覆盖安装"场景）。
+ * 必须在窗口/版本显示读取 appliedPatchVersion 之前调用。
+ */
+export function reconcilePatchStateOnStartup(): void {
+    if (!app.isPackaged) return;
+    try {
+        const sig = computeInstallSignature();
+        if (!sig) return;
+        const applied = getAppliedPatchVersion();
+        if (!applied) return; // 无已应用补丁，无需处理
+        const appliedSig = getAppliedPatchSignature();
+        if (appliedSig) {
+            if (appliedSig !== sig) {
+                log.info(`[patch] 检测到安装包已变更(重装/升级): 旧签名=${appliedSig} 新签名=${sig} → 清除已应用热补丁 ${applied}，回退到安装包版本 ${app.getVersion()}`);
+                clearAllPatches();
+            } else {
+                log.info(`[patch] 安装包签名一致(${sig})，已应用热补丁 ${applied} 仍然有效`);
+            }
+        } else {
+            // 修复前旧版应用的补丁无签名：本次为签名感知构建首次启动，清除以保证官方安装包版本优先显示
+            log.info(`[patch] 检测到修复前应用的热补丁(${applied})无安装签名，清除以回退到安装包版本 ${app.getVersion()}`);
+            clearAllPatches();
+        }
+    } catch (e: any) {
+        log.warn('[patch] 启动补丁对账失败:', e?.message || e);
     }
 }
 
@@ -614,6 +667,7 @@ export async function applyTestPatch(opts?: PatchApplyOptions, targetVersion?: s
     }
 
     setAppliedPatchVersion(testVersion);
+    setAppliedPatchSignature(computeInstallSignature());
     log.info(`[patch] 测试补丁应用完成: v${testVersion}, 共 ${count} 个文件, 需重启=${needsRestart}`);
     return {
         ok: true,
@@ -670,6 +724,7 @@ async function applyManifestFiles(manifest: PatchManifest, version: string, onPr
         return { ok: false, filesApplied: 0, needsRestart: false, message: '补丁包内无有效文件' };
     }
     setAppliedPatchVersion(version);
+    setAppliedPatchSignature(computeInstallSignature());
     log.info(`[patch] 应用完成: v${version}, 共 ${count} 个文件, 需重启=${needsRestart}`);
     if (onProgress) onProgress({ phase: 'done', percent: 100, message: needsRestart ? '补丁已应用，正在重启应用…' : '补丁已应用，正在重载…' });
     return {

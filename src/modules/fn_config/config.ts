@@ -90,6 +90,9 @@ export interface Config {
     tmdbDirectConnect?: boolean;
     // [lc-474] 已应用的热补丁版本号（由「一键应用补丁」写入，用于判定是否有更新的补丁可拉取）
     appliedPatchVersion?: string;
+    // [lc-520] 应用补丁时的安装包签名（可执行文件 mtime）：用于启动对账——若安装包被重装/升级(签名变化)，
+    // 旧补丁覆盖层已失效，应清除以回退到安装包真实版本，避免"覆盖安装官方版仍显示旧 hotfix 版本"。
+    appliedPatchSignature?: string;
     // TMDB 免梯子直连自定义 IP（可选覆盖内置快照）：api=api.themoviedb.org，img=image.tmdb.org
     tmdbDirectIp?: { api?: string; img?: string };
     // TMDB 免梯子直连 IP 上次更新时间戳（ms，自动/手动更新都会写入）：用于每日自动跟随 CheckTMDB 刷新判断
@@ -266,6 +269,18 @@ export function getAppliedPatchVersion(): string {
 export function setAppliedPatchVersion(version: string): void {
     const config: Config = readConfig() || {};
     config.appliedPatchVersion = version;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// [lc-520] 读取/写入应用补丁时的安装包签名（用于启动对账识别重装/升级）
+export function getAppliedPatchSignature(): string {
+    const config = readConfig();
+    return (config && config.appliedPatchSignature) || '';
+}
+
+export function setAppliedPatchSignature(signature: string): void {
+    const config: Config = readConfig() || {};
+    config.appliedPatchSignature = signature;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

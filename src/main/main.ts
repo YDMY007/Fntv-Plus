@@ -13,6 +13,7 @@ import { getMainWindow } from './common/mainwin';
 import { isTrusted } from '../modules/cert_trust';
 import { startProxyProcess, shutdownProxyProcess } from './common/proxy';
 import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
+import { reconcilePatchStateOnStartup } from '../modules/patcher/patchApplier';
 
 // 禁用输入法自动切换
 app.commandLine.appendSwitch('--lang', 'en-US');
@@ -122,6 +123,8 @@ if (!gotTheLock) {
             log.info('=== 飞牛影视启动 ===');
             initFnosDialogIpc();
             log.info('应用版本:', app.getVersion());
+            // [lc-520] 启动期补丁对账：覆盖安装官方版后回退到安装包真实版本，避免残留旧 hotfix 版本号
+            reconcilePatchStateOnStartup();
             log.info('Electron版本:', process.versions.electron);
             log.info('Node.js版本:', process.versions.node);
             log.info('日志文件位置:', log.getLogFile());
