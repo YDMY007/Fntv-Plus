@@ -101,6 +101,7 @@ function findCardGrid(): HTMLElement | null {
 
 // ===== 锁定状态 =====
 let lockedKey = '';      // 锁定时的 "路由|容器宽"，二者任一变化即失锁
+let lockedEl: HTMLElement | null = null; // 真正被锁定的容器节点（区别于仅字符串 key）
 let lastPad = -1;        // 上一次测量得到的 pad
 let confirmCount = 0;    // 连续确认次数（≥2 才锁定）
 
@@ -128,6 +129,12 @@ function applyFix(): boolean {
             e.style.removeProperty('padding-right');
             e.removeAttribute('data-fntv-layout');
         });
+        // [fix] 详情页清掉了列表容器的居中标记/内边距，锁已失效：必须清空，
+        //   否则返回列表时 lockedKey 仍是 "列表路由|宽"，会被误判为"已锁定"而跳过重算。
+        lockedEl = null;
+        lockedKey = '';
+        lastPad = -1;
+        confirmCount = 0;
         return false;
     }
 
@@ -141,9 +148,15 @@ function applyFix(): boolean {
     if (!parent) return false;
 
     const key = makeKey(parent);
-    if (lockedKey === key) return true; // 已锁定：什么都不做（虚拟滚动随便变）
-    if (lockedKey && lockedKey !== key) {
-        // 路由/宽度变了 → 失锁重来（不清除旧 padding，直接在其基础上微调）
+    // [fix] 锁定仅在「同一个真实 DOM 节点仍挂着我们标记的 padding」时生效。
+    //   仅靠字符串 key 会因 SPA 路由返回后容器节点被重建（或详情页清过标记）
+    //   而误判"已锁定"、跳过重算 → 居中失效。故必须校验 lockedEl 仍在文档且带标记。
+    if (lockedEl && document.contains(lockedEl) && lockedEl.dataset.fntvLayout && lockedKey === key) {
+        return true; // 同一节点、仍居中、key 未变 → 什么都不做（虚拟滚动随便变）
+    }
+    if (!lockedEl || !document.contains(lockedEl) || lockedKey !== key) {
+        // 节点已不在文档(被 SPA 重建) / key 变化 / 从未锁定 → 失锁重来
+        // （不清除旧 padding，直接在其基础上微调；新节点则从头初算）
         lockedKey = '';
         lastPad = -1;
         confirmCount = 0;
@@ -200,6 +213,7 @@ function applyFix(): boolean {
                 }
                 if (confirmCount >= 2 && !lockedKey) {
                     lockedKey = makeKey(parent);
+                    lockedEl = parent; // 锁定当前这个真实节点，便于后续校验它是否仍在文档
                     console.log(`[listLayout] 已锁定：padding ${current}px 居中对称（${lockedKey}）`);
                 }
             } else {
