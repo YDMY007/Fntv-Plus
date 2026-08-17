@@ -228,12 +228,16 @@ if (!gotTheLock) {
             // 恢复 Cookie
             await winctrl.setupCookieRestore(mainWindow);
 
-            // 启动后延迟3秒自动检查更新一次（避免影响启动速度）
-            setTimeout(() => {
-                getUpdateChecker().autoCheckForUpdates().catch((error: Error) => {
-                    log.error('启动时自动检查更新失败:', error);
-                });
-            }, 3000);
+            // 启动后自动检查更新一次（避免影响启动速度 + 确保渲染端 dialogUI 已注册 fnos-dialog:open 监听）
+            // [lc-514] 改为等主窗口内容加载完成(webContents did-finish-load)后再延迟触发：
+            //   否则启动 3 秒过早触发时若弹窗 IPC 丢失，自动更新弹窗永不显示（手动点「检查更新」能弹，正因彼时已就绪）。
+            mainWindow.webContents.once('did-finish-load', () => {
+                setTimeout(() => {
+                    getUpdateChecker().autoCheckForUpdates().catch((error: Error) => {
+                        log.error('启动时自动检查更新失败:', error);
+                    });
+                }, 1500);
+            });
 
             // 默认每日自动检查一次更新: 即使窗口关闭、仅托盘挂后台也持续(24h 周期)
             // 仅当发现新版本时才弹窗提示, 无更新/网络失败均静默

@@ -191,6 +191,7 @@ export class UpdateChecker {
         // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
         // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
         const hasUpdate = !isTest && this.versionGreater(ver, baseline);
+        log.info(`[update-debug] checkGitee: ver=${ver} type=${updateType} applied=${applied} baseline=${baseline} hasUpdate=${hasUpdate}`);
 
         return {
             hasUpdate,
@@ -408,6 +409,7 @@ export class UpdateChecker {
     async autoCheckForUpdates(): Promise<void> {
         try {
             const updateInfo = await this.checkForUpdates();
+            log.info(`[update-debug] autoCheck 检测完成: type=${updateInfo.updateType} hasUpdate=${updateInfo.hasUpdate} latestVersion=${updateInfo.latestVersion}`);
 
             // [lc-480] test 开发版仅供开发者个人测试，绝不向用户推送（自动/手动检查均不弹窗）
             if (updateInfo.updateType === 'test') {

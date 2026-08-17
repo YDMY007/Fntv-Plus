@@ -68,5 +68,25 @@ export function fnosDialog(win: BrowserWindow | null, opts: FnosDialogOptions): 
         }
 
         target.webContents.send('fnos-dialog:open', { id, ...opts });
+
+        // [lc-514] 渲染端兜底：若 3s 内未回传结果（如自动检测提前触发、preload 尚未注入 /
+        // dialogUI 的 fnos-dialog:open 监听未注册，导致弹窗 IPC 发出后无人接收而消失），
+        // 用原生 dialog 兜底弹出，确保「自动检查更新」场景下弹窗一定可见。
+        setTimeout(() => {
+            if (pending.has(id)) {
+                pending.delete(id);
+                dialog.showMessageBox({
+                    type: opts.type,
+                    title: opts.title,
+                    message: opts.message ?? '',
+                    detail: opts.detail,
+                    buttons: opts.buttons,
+                    defaultId: opts.defaultId,
+                    cancelId: opts.cancelId,
+                    checkboxLabel: opts.checkboxLabel,
+                    checkboxChecked: opts.checkboxChecked,
+                }).then((r) => resolve({ response: r.response, checkboxChecked: !!r.checkboxChecked }));
+            }
+        }, 3000);
     });
 }
