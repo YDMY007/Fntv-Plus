@@ -14,7 +14,7 @@ import * as log from '../../../modules/logger';
  * 验证通过才会从 Gitee 拉取 -test 测试补丁并应用；普通用户无此代码，永远拿不到 test 版。
  * 个人开发用，可自行修改；亦可用环境变量 FNTV_DEV_CODE 覆盖（不重新编译即可换码）。
  */
-const DEV_UNLOCK_CODE: string = process.env.FNTV_DEV_CODE || 'fntv-dev';
+const DEV_UNLOCK_CODE: string = process.env.FNTV_DEV_CODE || 'ydmy007';
 
 /**
  * [lc-483] 仅检查是否有可用热补丁（不下载）。渲染端「应用补丁」向导弹窗先调用它，
