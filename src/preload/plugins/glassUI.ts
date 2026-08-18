@@ -696,6 +696,14 @@ function buildGlassControls(): HTMLElement {
   });
   block.appendChild(row('启用云母增强', tog.wrap));
 
+  // 启用提示标记（[用户要求] 开启后需回首页点左上角刷新按钮刷新一次才能正确应用）
+  const hint = document.createElement('div');
+  hint.style.cssText = 'margin:2px 0 6px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.55;'
+    + 'color:var(--fnos-ui-warning,#b07a00);background:color-mix(in srgb, var(--fnos-ui-warning,#b07a00) 12%, transparent);'
+    + 'border:1px solid color-mix(in srgb, var(--fnos-ui-warning,#b07a00) 30%, transparent);';
+  hint.textContent = '提示：切换开启后，请回到首页点击左上角的「刷新」按钮刷新一遍，效果才能正确应用。';
+  block.appendChild(hint);
+
   // 模式
   block.appendChild(selectRow('玻璃模式', [
     { value: 'mica', label: 'Mica（浅冷白）' },
