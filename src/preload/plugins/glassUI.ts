@@ -285,6 +285,14 @@ function tintToRgb(hex: string): { r: number; g: number; b: number } {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
+// ── 本地路径 → file:// URL（与 mainwin.ts 登录壁纸一致；远程 fnOS 页面须 file:// 才能跨域加载）──
+function toFileUrl(p: string): string {
+  if (!p) return p;
+  if (/^(file:|https?:|data:)/i.test(p)) return p; // 已为合法资源 URL
+  const norm = p.replace(/\\/g, '/');               // Windows 反斜杠 → 正斜杠
+  return 'file:///' + (norm.startsWith('/') ? norm.slice(1) : norm);
+}
+
 // ── 构建背景层（按 bg 源）──
 function buildBgLayer(s: GlassSettings): void {
   destroyBgLayer();
@@ -300,9 +308,15 @@ function buildBgLayer(s: GlassSettings): void {
   } else if (s.bg === 'wallpaper') {
     if (s.wallpaper) {
       const img = document.createElement('img');
-      img.src = s.wallpaper;
+      img.src = toFileUrl(s.wallpaper);
       img.alt = '';
       img.draggable = false;
+      img.addEventListener('error', () => {
+        console.warn(LOG, '壁纸加载失败，回退流体背景:', s.wallpaper);
+        const fluid = document.createElement('div');
+        fluid.id = 'fntv-glass-fluid';
+        layer.appendChild(fluid);
+      });
       layer.appendChild(img);
     } else {
       // 未填 URL 时回退流体，避免空白
@@ -313,7 +327,7 @@ function buildBgLayer(s: GlassSettings): void {
   } else if (s.bg === 'video') {
     if (s.video) {
       const vid = document.createElement('video');
-      vid.src = s.video;
+      vid.src = toFileUrl(s.video);
       vid.autoplay = true;
       vid.loop = true;
       vid.muted = true;
