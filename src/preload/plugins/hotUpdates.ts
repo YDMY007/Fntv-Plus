@@ -265,6 +265,67 @@ function injectStyle(): void {
   margin: 8px 10px; padding: 7px 10px; border-radius: 8px; font-size: 11.5px; line-height: 1.5;
   color: #ffd666; background: rgba(255,180,60,.12); border: 1px solid rgba(255,180,60,.28);
 }
+
+/* ===== [lc-543] 浅色主题：跟随 fnOS 系统浅色模式（panel 带 .fntv-hot-light 时启用）===== */
+#fntv-hot-panel.fntv-hot-light {
+  background: rgba(255,255,255,.94);
+  border: 1px solid rgba(0,0,0,.12);
+  color: #1f2330;
+  box-shadow:
+    0 20px 70px rgba(0,0,0,.22),
+    0 0 40px rgba(255,107,53,.06),
+    inset 0 1px 0 rgba(255,255,255,.85);
+}
+#fntv-hot-panel.fntv-hot-light #fntv-hot-head {
+  background: linear-gradient(135deg, rgba(255,107,53,.10), rgba(247,65,143,.07));
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+#fntv-hot-panel.fntv-hot-light #fntv-hot-head .s { opacity: .5; }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-close {
+  background: rgba(0,0,0,.06); color: #1f2330;
+}
+#fntv-hot-panel.fntv-hot-light #fntv-hot-close:hover { background: rgba(0,0,0,.12); }
+#fntv-hot-panel.fntv-hot-light .fntv-seg-btn {
+  border-color: rgba(0,0,0,.12); background: rgba(0,0,0,.04); color: #1f2330;
+}
+#fntv-hot-panel.fntv-hot-light .fntv-seg-btn:hover { background: rgba(0,0,0,.08); }
+#fntv-hot-panel.fntv-hot-light .fntv-seg-btn.active {
+  background: linear-gradient(135deg, #ff6b35, #f7418f);
+  border-color: rgba(0,0,0,.15); color: #fff;
+  box-shadow: 0 2px 12px rgba(255,107,53,.30), inset 0 1px 0 rgba(255,255,255,.4);
+}
+#fntv-hot-panel.fntv-hot-light #fntv-hot-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-group { color: rgba(0,0,0,.5); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-group.today { color: #d4880a; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-group.today::after {
+  background: linear-gradient(90deg, rgba(212,136,10,.5), rgba(212,136,10,0)); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-card:hover {
+  background: rgba(0,0,0,.05); border-color: rgba(255,107,53,.30);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-poster {
+  background: rgba(0,0,0,.06); border: 1px solid rgba(0,0,0,.12); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-title { color: #1f2330; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-sub { color: rgba(0,0,0,.55); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-block { background: rgba(0,0,0,.35); color: #fff; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-wd { background: rgba(120,180,255,.30); color: #1b5ec0; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-rt { background: rgba(255,200,90,.32); color: #a9780a; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-tp { background: rgba(140,220,160,.34); color: #1f8a48; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-yr { background: rgba(0,0,0,.08); color: #3a3f4d; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-inlib { background: rgba(46,204,113,.24); color: #1c8a4c; }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-reset {
+  color: rgba(0,0,0,.5); border-top: 1px solid rgba(0,0,0,.08); }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-reset:hover { color: #d4880a; }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-foot {
+  color: rgba(0,0,0,.45); border-top: 1px solid rgba(0,0,0,.08); }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-refresh {
+  color: rgba(0,0,0,.6); background: rgba(0,0,0,.05);
+  border: 1px solid rgba(0,0,0,.12); }
+#fntv-hot-panel.fntv-hot-light #fntv-hot-refresh:hover { background: rgba(255,180,60,.22); color: #a9780a; }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-warn {
+  color: #a9780a; background: rgba(255,180,60,.14); border: 1px solid rgba(255,180,60,.30); }
+#fntv-hot-panel.fntv-hot-light .fntv-hot-loading,
+#fntv-hot-panel.fntv-hot-light .fntv-hot-empty,
+#fntv-hot-panel.fntv-hot-light .fntv-hot-err { color: rgba(0,0,0,.6); }
 `;
   const el = document.createElement('style');
   el.id = STYLE_ID;
@@ -422,6 +483,45 @@ function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
   ));
+}
+
+// ═══ [lc-543] 跟随 fnOS 系统深浅模式 ═══
+// fnOS 并未暴露独立的 dark/light 标志，沿用 Glass UI 的成熟判定：取 .fnos-tv-page
+// 计算背景相对亮度（ITU-R BT.709），>50% 视为浅色主题。用户切系统浅/深时背景会随之变化，
+// 故靠 MutationObserver 监听根节点/页面容器 class·style 变化来实时重算。
+// [lc-543-fix] 回退链：.fnos-tv-page → body → html；云母增强会把 .fnos-tv-page 设透明，
+// 此时必须回退到 body/html 才能读到真实系统底色，否则永远误判为"深色"。
+function detectHotLightMode(): boolean {
+  const candidates = [
+    document.querySelector('.fnos-tv-page'),
+    document.body,
+    document.documentElement,
+  ];
+  for (const el of candidates) {
+    if (!el) continue;
+    try {
+      const cs = getComputedStyle(el);
+      const bg = cs.backgroundColor;
+      const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      if (!m) continue;
+      const alpha = m[4] !== undefined ? parseFloat(m[4]) : 1;
+      // 透明度 < 5% 视为不可见（如云母设的 transparent），跳过找下一个候选
+      if (alpha < 0.05) continue;
+      const r = parseInt(m[1], 10) / 255;
+      const g = parseInt(m[2], 10) / 255;
+      const b = parseInt(m[3], 10) / 255;
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return lum > 0.5;
+    } catch (_) { /* continue */ }
+  }
+  return false; // 全部失败默认深色
+}
+
+/** 让每日放送面板跟随系统深浅模式：浅色→加 .fntv-hot-light 应用浅色配色，深色→移除 */
+function applyHotTheme(): void {
+  const panel = document.getElementById('fntv-hot-panel');
+  if (!panel) return;
+  panel.classList.toggle('fntv-hot-light', detectHotLightMode());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -812,6 +912,8 @@ function buildPanel(): void {
     }
     // [lc-457] 展开浮层时后台预建飞牛影视库索引，供卡片点击联动（懒加载，仅一次）
     if (open) ensureLibraryIndex().catch(() => {});
+    // [lc-543] 展开时按当前系统深浅模式套用对应配色
+    if (open) applyHotTheme();
   };
   tab.addEventListener('click', toggle);
   (panel.querySelector('#fntv-hot-close') as HTMLElement).addEventListener('click', () => {
@@ -916,6 +1018,33 @@ function initHotUpdates(): void {
   // [lc-457-fix] 首页挂载即静默预建飞牛影视库索引, 用户展开浮层/点卡片前通常早已滚完就绪,
   // 避免「刚展开就点」时索引仍在构建(仅首屏项)而误判为库内无该剧 → 错误跳外链。
   ensureLibraryIndex().catch(() => {});
+
+  // [lc-543] 实时跟随 fnOS 系统深浅模式：监听根节点/页面容器 class·style 变化并重算面板主题。
+  // fnOS 切主题会改 .fnos-tv-page 计算背景色，靠 mutation 即时套用浅/深配色；250ms 去抖防抖动。
+  try {
+    let lastThemeCheck = 0;
+    const themeMo = new MutationObserver(() => {
+      const now = Date.now();
+      if (now - lastThemeCheck < 250) return;
+      lastThemeCheck = now;
+      applyHotTheme();
+    });
+    const observePage = (): void => {
+      const el = document.querySelector('.fnos-tv-page');
+      if (el) themeMo.observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
+    };
+    themeMo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    themeMo.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+    observePage();
+    // 页面容器可能尚未渲染，轮询补挂观察者（最多 15s）
+    if (!document.querySelector('.fnos-tv-page')) {
+      const iv = setInterval(() => {
+        if (document.querySelector('.fnos-tv-page')) { clearInterval(iv); observePage(); }
+      }, 1000);
+      setTimeout(() => clearInterval(iv), 15000);
+    }
+    applyHotTheme(); // 初次挂载即按当前系统模式套用一次
+  } catch (e) { logger.error('[hotUpdates] theme observer err', String(e).substring(0, 60)); }
 
   logger.info('[hotUpdates] 热门剧更新浮层（宫灯版，Bangumi/TMDB 双源）已挂载');
 }
