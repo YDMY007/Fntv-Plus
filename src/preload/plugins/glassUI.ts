@@ -186,8 +186,22 @@ const GATE_CSS = `
     50% { transform: translate(-7vmax, -5vmax) scale(1.1); }
   }
 
-  /* ═══ 排除规则：顶部导航/标题栏区域不玻璃化，避免白线色块 ═══ */
-  /* fnOS 原生顶栏（含面包屑/标题行）：透明融合到背景层，不单独着色 */
+  /* ═══ 排除规则：顶部导航/标题栏区域完全透明化 ═══ */
+  /* 策略：暴力向上追溯 z-20 顶条的所有祖先（最多6层），全部强制透明 */
+  /* 同时覆盖 fnOS 常见布局包裹层（sticky/fixed/relative 顶栏容器） */
+  html[data-fntv-glass] .fnos-tv-page [class*="z-20"],
+  html[data-fntv-glass] .fnos-tv-page [class*="z-10"],
+  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-10"]),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-20"])),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-10"])),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> [class*="z-20"]))),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> [class*="z-10"]))),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> [class*="z-20"])))),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> [class*="z-10"])))),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> :has(> [class*="z-20"]))))),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> :has(> [class*="z-10"]))))),
+  /* 通用语义标签排除 */
   html[data-fntv-glass] .fnos-tv-page header,
   html[data-fntv-glass] .fnos-tv-page nav,
   html[data-fntv-glass] .fnos-tv-page [class*="navbar"],
@@ -195,39 +209,23 @@ const GATE_CSS = `
   html[data-fntv-glass] .fnos-tv-page [class*="appbar"],
   html[data-fntv-glass] .fnos-tv-page [class*="header-bar"],
   html[data-fntv-glass] .fnos-tv-page [class*="nav-bar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="page-header"] {
-    background: transparent !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-  /* 顶部可能的 table / 列表头行容器：同样排除 */
-  html[data-fntv-glass] .fnos-tv-page [class*="table"]:not([class*="card"]):not([class*="panel"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="page-header"],
+  html[data-fntv-glass] .fnos-tv-page [class*="toolbar"],
   html[data-fntv-glass] .fnos-tv-page [class*="list-head"],
-  html[data-fntv-glass] .fnos-tv-page [class*="toolbar"] {
+  /* fnOS 顶栏特征：flex items-center justify-between + px/py 大间距 = 导航条包裹 */
+  html[data-fntv-glass] .fnos-tv-page [class*="sticky"],
+  html[data-fntv-glass] .fnos-tv-page [class*="fixed"]:not([class*="modal"]):not([class*="popup"]):not([class*="overlay"]):not([class*="toast"]),
+  /* 上述所有目标统一归零 */
+  {
     background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  /* ═══ 关键修复：顶部导航条(z-20)及其包裹层(canvas/card)不玻璃化 ═══ */
-  /* 顶部条本身：class 含 z-20（fnOS 顶栏固定用 z-20） */
-  html[data-fntv-glass] .fnos-tv-page [class*="z-20"] {
-    background: transparent !important;
+    background-color: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     border: none !important;
+    border-top: none !important;
+    border-bottom: none !important;
     box-shadow: none !important;
-  }
-  /* 顶部条的父级 / 祖父级包裹容器（常带 card/panel 类，被玻璃规则误伤）：用 :has 精准排除 */
-  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-20"])) {
-    background: transparent !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border: none !important;
-    box-shadow: none !important;
+    outline: none !important;
   }
 `;
 
