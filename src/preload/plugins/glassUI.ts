@@ -151,6 +151,26 @@ const GATE_CSS = `
     box-shadow: 0 8px 28px rgba(0,0,0, var(--fntv-glass-shadow, 0.14)) !important;
   }
 
+  /* ②-L 浅色模式自动弱化：亮底上边框+阴影会像"画了条线"，暗底则自然融合。
+     JS 在 applyGlass 中检测页面背景亮度并设 --fntv-glass-is-light 变量。 */
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
+    border-color: transparent !important;
+    box-shadow: 0 2px 8px rgba(0,0,0, 0.06) !important;
+  }
+
   /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1） */
   #fntv-glass-bg, #fntv-glass-particles {
     position: fixed !important;
@@ -287,6 +307,25 @@ function tintToRgb(hex: string): { r: number; g: number; b: number } {
   const n = parseInt(h, 16);
   if (isNaN(n)) return { r: 250, g: 248, b: 252 };
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+// ── 检测页面是否为浅色主题（用于自动弱化浅色模式下的边框/阴影）──
+function detectLightMode(): boolean {
+  try {
+    const el = document.querySelector('.fnos-tv-page') || document.body;
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    const bg = cs.backgroundColor;
+    // 解析 rgb(r, g, b) 或 rgba(r, g, b, a)
+    const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (!m) return false;
+    const r = parseInt(m[1], 10) / 255;
+    const g = parseInt(m[2], 10) / 255;
+    const b = parseInt(m[3], 10) / 255;
+    // 相对亮度（ITU-R BT.709）
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return lum > 0.5; // 亮度 > 50% 视为浅色
+  } catch (_) { return false; }
 }
 
 // ── 本地路径 → file:// URL（与 mainwin.ts 登录壁纸一致；远程 fnOS 页面须 file:// 才能跨域加载）──
@@ -510,6 +549,10 @@ function applyGlass(): void {
     root.style.setProperty('--fntv-glass-border-alpha', String(s.borderAlpha));
     root.style.setProperty('--fntv-glass-shadow', String(s.shadow));
 
+    // 浅色模式检测：取 .fnos-tv-page 或 body 的背景亮度，亮底时自动弱化边框+阴影（避免"画线"感）
+    const isLight = detectLightMode();
+    root.setAttribute('data-fntv-glass-is-light', isLight ? '1' : '0');
+
     if (s.enabled) {
       root.setAttribute('data-fntv-glass', '');
       root.setAttribute('data-fntv-glass-mode', s.mode);
@@ -527,6 +570,7 @@ function applyGlass(): void {
     } else {
       root.removeAttribute('data-fntv-glass');
       root.removeAttribute('data-fntv-glass-mode');
+      root.removeAttribute('data-fntv-glass-is-light');
       root.removeAttribute('data-fntv-glass-noise');
       root.removeAttribute('data-fntv-glass-vignette');
       destroyBgLayer();
