@@ -5,7 +5,7 @@
 // 设计目标（用户决策）：
 //   - 路线 B：纯 CSS 玻璃拟态（backdrop-filter + 半透明卡片 + 底层 ambient 容器），
 //     非 Windows 原生 Mica；全平台（fnOS/Linux、Windows、macOS）一致生效。
-//   - 完整对齐 DSH：组件磨砂 + 背景层（流体/壁纸/视频）+ 设置面板独立控件。
+//   - 完整对齐 DSH：组件磨砂 + 背景层（流体动态）+ 设置面板独立控件。
 //   - 默认关闭；非侵入接入（不动 embyWall.ts 现有机制，仅往"外观"分区锚点后挂控件）。
 //
 // 接入方式：
@@ -32,9 +32,8 @@ const K = {
   frost: 'fntvGlass.frost',        // 0..1 玻璃不透明度
   sat: 'fntvGlass.sat',            // 饱和度 %
   bright: 'fntvGlass.bright',      // 背景亮度 %
-  bg: 'fntvGlass.bg',              // 'none' | 'fluid' | 'wallpaper' | 'video'
-  wallpaper: 'fntvGlass.wallpaper',// 图片 URL
-  video: 'fntvGlass.video',        // 视频 URL
+  bg: 'fntvGlass.bg',              // 'none' | 'fluid'
+  fluidSpeed: 'fntvGlass.fluidSpeed', // 流体动画速度倍率(>1 更快, <1 更慢)
   particles: 'fntvGlass.particles',// '0' | '1'
   border: 'fntvGlass.border',      // '0' | '1' 玻璃边框
   borderAlpha: 'fntvGlass.borderAlpha', // 0..1 边框浓度
@@ -53,8 +52,7 @@ const DEF = {
   sat: 140,
   bright: 100,
   bg: 'fluid',
-  wallpaper: '',
-  video: '',
+  fluidSpeed: 1,
   particles: false,
   border: true,
   borderAlpha: 0.2,
@@ -77,7 +75,7 @@ function setStr(k: string, v: string): void { try { localStorage.setItem(k, v); 
 // ── 读取全部设置 ──
 interface GlassSettings {
   enabled: boolean; mode: string; tint: string; blur: number; frost: number; sat: number;
-  bright: number; bg: string; wallpaper: string; video: string; particles: boolean;
+  bright: number; bg: string; fluidSpeed: number; particles: boolean;
   border: boolean; borderAlpha: number; shadow: number; noise: boolean; vignette: boolean;
 }
 function readSettings(): GlassSettings {
@@ -90,8 +88,7 @@ function readSettings(): GlassSettings {
     sat: getNum(K.sat, DEF.sat),
     bright: getNum(K.bright, DEF.bright),
     bg: getStr(K.bg, DEF.bg),
-    wallpaper: getStr(K.wallpaper, DEF.wallpaper),
-    video: getStr(K.video, DEF.video),
+    fluidSpeed: getNum(K.fluidSpeed, DEF.fluidSpeed),
     particles: getBool(K.particles, DEF.particles),
     border: getBool(K.border, DEF.border),
     borderAlpha: getNum(K.borderAlpha, DEF.borderAlpha),
@@ -198,7 +195,7 @@ const GATE_CSS = `
     background: linear-gradient(125deg, #6a5acd, #8e44ad, #3498db, #1abc9c, #6a5acd);
     background-size: 400% 400% !important;
     filter: saturate(1.1);
-    animation: fntvFluid 22s ease infinite;
+    animation: fntvFluid calc(var(--fntv-glass-fluid-speed, 1) * 22s) ease infinite;
   }
   #fntv-glass-fluid::before, #fntv-glass-fluid::after {
     content: "" !important;
@@ -211,13 +208,13 @@ const GATE_CSS = `
     width: 46vmax !important; height: 46vmax !important;
     left: -8vmax !important; top: -10vmax !important;
     background: radial-gradient(circle, #ff9ad5, transparent 70%);
-    animation: fntvBlob1 18s ease-in-out infinite;
+    animation: fntvBlob1 calc(var(--fntv-glass-fluid-speed, 1) * 18s) ease-in-out infinite;
   }
   #fntv-glass-fluid::after {
     width: 40vmax !important; height: 40vmax !important;
     right: -6vmax !important; bottom: -8vmax !important;
     background: radial-gradient(circle, #7ee8fa, transparent 70%);
-    animation: fntvBlob2 21s ease-in-out infinite;
+    animation: fntvBlob2 calc(var(--fntv-glass-fluid-speed, 1) * 21s) ease-in-out infinite;
   }
   @keyframes fntvFluid {
     0% { background-position: 0% 50%; }
@@ -330,14 +327,6 @@ function detectLightMode(): boolean {
   } catch (_) { return false; }
 }
 
-// ── 本地路径 → file:// URL（与 mainwin.ts 登录壁纸一致；远程 fnOS 页面须 file:// 才能跨域加载）──
-function toFileUrl(p: string): string {
-  if (!p) return p;
-  if (/^(file:|https?:|data:)/i.test(p)) return p; // 已为合法资源 URL
-  const norm = p.replace(/\\/g, '/');               // Windows 反斜杠 → 正斜杠
-  return 'file:///' + (norm.startsWith('/') ? norm.slice(1) : norm);
-}
-
 // ── 构建背景层（按 bg 源）──
 function buildBgLayer(s: GlassSettings): void {
   destroyBgLayer();
@@ -346,51 +335,10 @@ function buildBgLayer(s: GlassSettings): void {
   layer.id = 'fntv-glass-bg';
   layer.style.filter = `brightness(${(s.bright / 100).toFixed(3)})`;
 
-  if (s.bg === 'fluid') {
-    const fluid = document.createElement('div');
-    fluid.id = 'fntv-glass-fluid';
-    layer.appendChild(fluid);
-  } else if (s.bg === 'wallpaper') {
-    if (s.wallpaper) {
-      const img = document.createElement('img');
-      img.src = toFileUrl(s.wallpaper);
-      img.alt = '';
-      img.draggable = false;
-      img.addEventListener('error', () => {
-        console.warn(LOG, '壁纸加载失败，回退流体背景:', s.wallpaper);
-        const fluid = document.createElement('div');
-        fluid.id = 'fntv-glass-fluid';
-        layer.appendChild(fluid);
-      });
-      layer.appendChild(img);
-    } else {
-      // 未填 URL 时回退流体，避免空白
-      const fluid = document.createElement('div');
-      fluid.id = 'fntv-glass-fluid';
-      layer.appendChild(fluid);
-    }
-  } else if (s.bg === 'video') {
-    if (s.video) {
-      const vid = document.createElement('video');
-      vid.src = toFileUrl(s.video);
-      vid.autoplay = true;
-      vid.loop = true;
-      vid.muted = true;
-      vid.playsInline = true;
-      (vid as any).webkitPlaysInline = true;
-      vid.addEventListener('error', () => {
-        // 视频加载失败回退流体
-        const fluid = document.createElement('div');
-        fluid.id = 'fntv-glass-fluid';
-        layer.appendChild(fluid);
-      });
-      layer.appendChild(vid);
-    } else {
-      const fluid = document.createElement('div');
-      fluid.id = 'fntv-glass-fluid';
-      layer.appendChild(fluid);
-    }
-  }
+  // 背景层仅保留流体动态（壁纸/视频已移除）；其余取值统一回落为流体
+  const fluid = document.createElement('div');
+  fluid.id = 'fntv-glass-fluid';
+  layer.appendChild(fluid);
 
   (document.body || document.documentElement).appendChild(layer);
   bgLayer = layer;
@@ -551,6 +499,9 @@ function applyGlass(): void {
     root.style.setProperty('--fntv-glass-border-alpha', String(s.borderAlpha));
     root.style.setProperty('--fntv-glass-shadow', String(s.shadow));
 
+    // 流体动画速度倍率（>1 更快，<1 更慢）
+    root.style.setProperty('--fntv-glass-fluid-speed', String(s.fluidSpeed));
+
     // 浅色模式检测：取 .fnos-tv-page 或 body 的背景亮度，亮底时自动弱化边框+阴影（避免"画线"感）
     const isLight = detectLightMode();
     root.setAttribute('data-fntv-glass-is-light', isLight ? '1' : '0');
@@ -704,87 +655,7 @@ function colorRow(labelText: string, value: string, onCommit: (v: string) => voi
   return wrap;
 }
 
-// ── 壁纸文件选择器行（按钮 + 预览路径 + 清空）──
-// onSwitched: 选图成功后回调（用于把"背景层"自动切到"壁纸图片"，否则用户看不到变化）
-// onCleared: 清空成功后回调（用于把"背景层"切回"流体"，避免空白）
-function buildWallpaperPickerRow(currentPath: string, onSwitched?: () => void, onCleared?: () => void): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'margin:12px 0 8px;';
-  const head = document.createElement('div');
-  head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-  const label = document.createElement('span');
-  label.style.cssText = 'font-weight:600;letter-spacing:.5px;';
-  label.textContent = '壁纸图片';
-  head.appendChild(label);
-  wrap.appendChild(head);
-
-  // 按钮行
-  const btns = document.createElement('div');
-  btns.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
-
-  const pickBtn = document.createElement('button');
-  pickBtn.textContent = currentPath ? '重新选择' : '选择图片';
-  pickBtn.style.cssText = 'padding:5px 14px;font-size:11px;border:none;border-radius:7px;cursor:pointer;'
-    + 'background:var(--fnos-ui-accent,#4a90d9);color:#fff;transition:.15s;';
-  pickBtn.addEventListener('mouseenter', () => { pickBtn.style.opacity = '0.85'; });
-  pickBtn.addEventListener('mouseleave', () => { pickBtn.style.opacity = '1'; });
-
-  const clearBtn = document.createElement('button');
-  clearBtn.textContent = '清空';
-  clearBtn.style.cssText = 'padding:5px 12px;font-size:11px;border:none;border-radius:7px;cursor:pointer;'
-    + 'background:rgba(255,70,70,.7);color:#fff;transition:.15s;' + (!currentPath ? 'display:none;' : '');
-  clearBtn.addEventListener('mouseenter', () => { clearBtn.style.opacity = '0.85'; });
-  clearBtn.addEventListener('mouseleave', () => { clearBtn.style.opacity = '1'; });
-
-  // 路径预览
-  const pathPreview = document.createElement('div');
-  pathPreview.style.cssText = 'font-size:10px;color:var(--fnos-ui-sub,#888);word-break:break-all;margin-top:4px;max-height:36px;overflow:auto;'
-    + (!currentPath ? 'display:none;' : '');
-  pathPreview.textContent = currentPath ? (currentPath.replace(/\\/g, '/').split('/').pop() || '') : '';
-
-  btns.appendChild(pickBtn);
-  btns.appendChild(clearBtn);
-  wrap.appendChild(btns);
-  wrap.appendChild(pathPreview);
-
-  // 选择图片
-  pickBtn.addEventListener('click', async () => {
-    try {
-      const p = await ipcRenderer.invoke('settings:pick-glass-wallpaper');
-      if (p) {
-        setStr(K.wallpaper, p);
-        pathPreview.textContent = p.replace(/\\/g, '/').split('/').pop() || '';
-        pathPreview.style.display = '';
-        clearBtn.style.display = '';
-        pickBtn.textContent = '重新选择';
-        // 选图即把背景源切到"壁纸图片"，否则壁纸存了也不显示，用户以为"没变化"
-        if (onSwitched) onSwitched();
-        if (readSettings().bg === 'wallpaper') applyGlass();
-      }
-    } catch (e) {
-      console.error(LOG, 'pick wallpaper failed', e);
-    }
-  });
-
-  // 清空
-  clearBtn.addEventListener('click', async () => {
-    try {
-      await ipcRenderer.invoke('settings:clear-glass-wallpaper');
-      setStr(K.wallpaper, '');
-      pathPreview.style.display = 'none';
-      clearBtn.style.display = 'none';
-      pickBtn.textContent = '选择图片';
-      // 清空后背景源切回"流体"，避免背景空白
-      if (onCleared) onCleared();
-      if (readSettings().bg === 'wallpaper') applyGlass();
-    } catch (e) {
-      console.error(LOG, 'clear wallpaper failed', e);
-    }
-  });
-
-  return wrap;
-}
-
+// ── 设置面板控件 ──
 function buildGlassControls(): HTMLElement {
   const block = document.createElement('div');
   block.id = 'fntv-glass-ctrl';
@@ -798,7 +669,7 @@ function buildGlassControls(): HTMLElement {
   title.textContent = '云母增强（Glass UI）';
   const sub = document.createElement('div');
   sub.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-bottom:8px;';
-  sub.textContent = '组件磨砂玻璃 + 背景层（流体/壁纸/视频）。默认关闭，开启后影视页组件浮于背景之上。';
+  sub.textContent = '组件磨砂玻璃 + 背景层（流体动态）。默认关闭，开启后影视页组件浮于背景之上。';
   block.appendChild(title); block.appendChild(sub);
 
   // 总开关
@@ -823,21 +694,18 @@ function buildGlassControls(): HTMLElement {
   const tintRow = colorRow('玻璃色调', s.tint, (v) => { setStr(K.tint, v); applyGlass(); });
   block.appendChild(tintRow);
 
-  // 背景源
-  const bgRow = selectRow('背景层', [
+  // 背景源（仅保留 无 / 流体动态）
+  block.appendChild(selectRow('背景层', [
     { value: 'none', label: '无（透桌面）' },
     { value: 'fluid', label: '流体动态' },
-    { value: 'wallpaper', label: '壁纸图片' },
-    { value: 'video', label: '视频' },
-  ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); refreshBgDepFields(); });
-  block.appendChild(bgRow);
-  const bgSel = bgRow.querySelector('select') as HTMLSelectElement | null;
+  ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); }));
 
-  // 模糊 / 磨砂 / 饱和度 / 亮度
+  // 模糊 / 磨砂 / 饱和度 / 亮度 / 流体速度
   block.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
   block.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
   block.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
   block.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
+  block.appendChild(rangeRow('流体速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
 
   // 边框 / 阴影（控制"廉价感"的关键）
   const borderTog = mkToggle();
@@ -872,22 +740,7 @@ function buildGlassControls(): HTMLElement {
   });
   block.appendChild(row('背景暗角', vigTog.wrap));
 
-  // 壁纸文件选择（按钮行，弹系统文件选择框）/ 视频仍用 URL / 粒子
-  // 选图/清空时同步切换"背景层"下拉，避免"选了图却没变化"
-  const wallRow = buildWallpaperPickerRow(
-    s.wallpaper,
-    () => {
-      setStr(K.bg, 'wallpaper');
-      if (bgSel) bgSel.value = 'wallpaper';
-      refreshBgDepFields();
-    },
-    () => {
-      setStr(K.bg, 'fluid');
-      if (bgSel) bgSel.value = 'fluid';
-      refreshBgDepFields();
-    }
-  );
-  const vidRow = textRow('背景视频 URL', 'https://.../bg.mp4', s.video, (v) => { setStr(K.video, v); if (readSettings().bg === 'video') applyGlass(); });
+  // 粒子效果
   const particleTog = mkToggle();
   paintToggle(particleTog, s.particles);
   particleTog.input.checked = s.particles;
@@ -896,21 +749,13 @@ function buildGlassControls(): HTMLElement {
     paintToggle(particleTog, particleTog.input.checked);
     applyGlass();
   });
-  block.appendChild(wallRow);
-  block.appendChild(vidRow);
   block.appendChild(row('粒子效果', particleTog.wrap));
 
   // 显隐依赖字段（函数声明，提升，供上方 change 回调安全引用）
-  function refreshBgDepFields(): void {
-    const cur = readSettings().bg;
-    wallRow.style.display = cur === 'wallpaper' ? '' : 'none';
-    vidRow.style.display = cur === 'video' ? '' : 'none';
-  }
   function refreshModeDepFields(): void {
     const cur = readSettings().mode;
     tintRow.style.display = cur === 'custom' ? '' : 'none';
   }
-  refreshBgDepFields();
   refreshModeDepFields();
 
   return block;
