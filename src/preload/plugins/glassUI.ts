@@ -187,20 +187,16 @@ const GATE_CSS = `
   }
 
   /* ═══ 排除规则：顶部导航/标题栏区域完全透明化 ═══ */
-  /* 精准命中：任意包含顶栏(z-20/z-10)后代的布局容器(card/panel/section/header 等)，不限嵌套深度 */
+  /* 顶栏容器本身：fnOS 透明模式下标记 data-fnos-clear="1"（class 形如 relative z-[2] h-[80px] bg-[var(--semi-color-bg-1)]） */
+  html[data-fntv-glass] .fnos-tv-page [data-fnos-clear="1"],
+  /* 顶栏所有祖先容器（含真正承载玻璃效果的 card/panel 包裹层）：用 :has 不限层级命中 */
+  html[data-fntv-glass] .fnos-tv-page :has([data-fnos-clear="1"]),
+  /* 兜底：含顶栏 z-20/z-10 的容器与祖先（z-20 在更深层的内层 div，不限层级命中） */
   html[data-fntv-glass] .fnos-tv-page [class*="z-20"],
   html[data-fntv-glass] .fnos-tv-page [class*="z-10"],
-  html[data-fntv-glass] .fnos-tv-page [class*="card"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="section"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="layout"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="wrapper"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="container"]:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page header:has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page nav:has([class*="z-20"]),
-  /* 通用语义标签排除 */
+  html[data-fntv-glass] .fnos-tv-page :has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page :has([class*="z-10"]),
+  /* 语义标签排除 */
   html[data-fntv-glass] .fnos-tv-page header,
   html[data-fntv-glass] .fnos-tv-page nav,
   html[data-fntv-glass] .fnos-tv-page [class*="navbar"],
@@ -342,29 +338,29 @@ function stopParticles(): void {
   particles = [];
 }
 
-// ── 调试：打印顶栏元素的祖先链 + 页面顶层子节点，便于定位未被排除的玻璃容器 ──
+// ── 调试：定位顶栏玻璃容器 ──
 function debugTopAncestry(): void {
   try {
     const page = document.querySelector('.fnos-tv-page');
     if (!page) { console.log('[GLASS-DEBUG] .fnos-tv-page not found'); return; }
-    const nav = page.querySelector('[class*="z-20"]') as HTMLElement | null;
-    console.log('[GLASS-DEBUG] top nav (z-20):', nav ? nav.className : 'NOT FOUND');
+    const nav = page.querySelector('[data-fnos-clear="1"]') as HTMLElement | null;
+    console.log('[GLASS-DEBUG] top bar (data-fnos-clear):', nav ? nav.className : 'NOT FOUND');
     if (nav) {
-      let el: Element | null = nav.parentElement;
+      let el: Element | null = nav;
       let depth = 0;
       while (el && el !== page && depth < 12) {
-        const cs = getComputedStyle(el as Element);
-        const bg = cs.backgroundColor;
-        const hasCard = /card|panel|section|layout|wrapper|container/i.test(el.className);
-        console.log(`[GLASS-DEBUG] L${depth}`, (el.tagName || '').toLowerCase(), '| class=', (el.className || '').slice(0, 90), '| bg=', bg, '| border=', cs.borderTopWidth + '/' + cs.borderBottomWidth, hasCard ? '<-- 命中玻璃候选' : '');
+        const cs = getComputedStyle(el);
+        const glassy = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent'
+          || cs.borderTopWidth !== '0px' || cs.borderBottomWidth !== '0px'
+          || (cs.boxShadow && cs.boxShadow !== 'none')
+          || cs.backdropFilter !== 'none';
+        console.log(`[GLASS-DEBUG] L${depth}`, (el.tagName || '').toLowerCase(), '| class=', (el.className || '').slice(0, 90),
+          '| bg=', cs.backgroundColor, '| borderT/B=', cs.borderTopWidth + '/' + cs.borderBottomWidth,
+          '| shadow=', (cs.boxShadow || '').slice(0, 30), '| bf=', cs.backdropFilter, glassy ? ' <-- 可能带玻璃' : '');
         el = el.parentElement;
         depth++;
       }
     }
-    // 顶层子节点结构
-    const kids = Array.from(page.children).slice(0, 4);
-    console.log('[GLASS-DEBUG] .fnos-tv-page 顶层子节点:');
-    kids.forEach((k, i) => console.log(`  [${i}]`, (k.tagName || '').toLowerCase(), '| class=', (k.className || '').slice(0, 90)));
   } catch (err) {
     console.error('[GLASS-DEBUG] error', err);
   }
@@ -387,6 +383,8 @@ function applyGlass(): void {
       buildBgLayer(s);
       if (s.particles) startParticles(); else stopParticles();
       debugTopAncestry();
+      // SPA 可能尚未渲染顶栏，延迟再抓一次
+      setTimeout(debugTopAncestry, 1800);
     } else {
       root.removeAttribute('data-fntv-glass');
       root.removeAttribute('data-fntv-glass-mode');
