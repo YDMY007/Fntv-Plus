@@ -130,20 +130,20 @@ const GATE_CSS = `
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
      lc-526~530 教训：事后排除规则 !important 对抗不稳定，改用 :not() 让选择器根本不匹配顶栏区域 */
-  html[data-fntv-glass] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
-  html[data-fntv-glass] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]) {
+  html[data-fntv-glass] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
     background: rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), var(--fntv-glass-frost, 0.5)) !important;
     backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
     -webkit-backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
@@ -424,6 +424,8 @@ function stopParticles(): void {
 }
 
 // ── JS 兜底：直接置空顶栏祖先行内样式（优先级高于所有 CSS !important）──
+//    同时给 data-fnos-clear 容器的所有后代打 data-fntv-glass-exclude 标记，
+//    防止规则 ② 命中内部子元素（如导航栏行"飞牛影视"区域），避免该行单独浮出。
 function neutralizeTopBar(): void {
   try {
     const bar = document.querySelector('[data-fnos-clear="1"]') as HTMLElement | null;
@@ -449,6 +451,10 @@ function neutralizeTopBar(): void {
       el = el.parentElement;
       depth++;
     }
+    // 给顶栏容器所有后代打排除标记 → 规则 ② :not([data-fntv-glass-exclude]) 跳过
+    const descendants = bar.querySelectorAll('*') as NodeListOf<HTMLElement>;
+    descendants.forEach((d) => { d.setAttribute('data-fntv-glass-exclude', ''); });
+    bar.setAttribute('data-fntv-glass-exclude', ''); // 自身也标记
   } catch (_) { /* silent */ }
 }
 
