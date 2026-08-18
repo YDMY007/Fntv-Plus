@@ -151,8 +151,9 @@ const GATE_CSS = `
     box-shadow: 0 8px 28px rgba(0,0,0, var(--fntv-glass-shadow, 0.14)) !important;
   }
 
-  /* ②-L 浅色模式自动弱化：亮底上边框+阴影会像"画了条线"，暗底则自然融合。
-     JS 在 applyGlass 中检测页面背景亮度并设 --fntv-glass-is-light 变量。 */
+  /* ②-L 浅色模式专用卡片观感：暗底上「浅色磨砂面板+微阴影」自然立体；亮底上同款白磨砂会糊成一片、失去层次。
+     故浅色模式改用「干净白磨砂面板(rgba 白 0.72)+ 柔和投影」，制造与暗底同等的"浮起卡片"立体感，
+     且不画硬边框(避免"框线")。JS 在 applyGlass 检测页面亮度并设 data-fntv-glass-is-light。 */
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
@@ -167,8 +168,9 @@ const GATE_CSS = `
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
   html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
+    background: rgba(255, 255, 255, 0.72) !important;
     border-color: transparent !important;
-    box-shadow: 0 2px 8px rgba(0,0,0, 0.06) !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10) !important;
   }
 
   /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1） */
