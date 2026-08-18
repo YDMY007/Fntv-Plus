@@ -116,9 +116,13 @@ const GATE_CSS = `
     --fntv-glass-tint-b: 47;
   }
 
-  /* ① 接管 body：关闭整窗亚克力（改由组件级磨砂），body 透明让背景层/桌面透出 */
+  /* ① 接管 body / 页面根容器：关闭整窗亚克力（改由组件级磨砂），透明让背景层/桌面透出
+     —— 关键：fnOS 主题底色在 .fnos-tv-page 容器上，若只透 body 不透它，背景层(z-index:-1)会被盖死，
+        壁纸/流体完全透不出来（只有卡片 backdrop-filter 能模糊到一点），表现为"玻璃盖掉壁纸"。 */
+  html[data-fntv-glass] .fnos-tv-page,
   html[data-fntv-glass] .fnos-tv-page body {
     background: transparent !important;
+    background-color: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -649,7 +653,9 @@ function colorRow(labelText: string, value: string, onCommit: (v: string) => voi
 }
 
 // ── 壁纸文件选择器行（按钮 + 预览路径 + 清空）──
-function buildWallpaperPickerRow(currentPath: string): HTMLElement {
+// onSwitched: 选图成功后回调（用于把"背景层"自动切到"壁纸图片"，否则用户看不到变化）
+// onCleared: 清空成功后回调（用于把"背景层"切回"流体"，避免空白）
+function buildWallpaperPickerRow(currentPath: string, onSwitched?: () => void, onCleared?: () => void): HTMLElement {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'margin:12px 0 8px;';
   const head = document.createElement('div');
@@ -699,6 +705,8 @@ function buildWallpaperPickerRow(currentPath: string): HTMLElement {
         pathPreview.style.display = '';
         clearBtn.style.display = '';
         pickBtn.textContent = '重新选择';
+        // 选图即把背景源切到"壁纸图片"，否则壁纸存了也不显示，用户以为"没变化"
+        if (onSwitched) onSwitched();
         if (readSettings().bg === 'wallpaper') applyGlass();
       }
     } catch (e) {
@@ -714,6 +722,8 @@ function buildWallpaperPickerRow(currentPath: string): HTMLElement {
       pathPreview.style.display = 'none';
       clearBtn.style.display = 'none';
       pickBtn.textContent = '选择图片';
+      // 清空后背景源切回"流体"，避免背景空白
+      if (onCleared) onCleared();
       if (readSettings().bg === 'wallpaper') applyGlass();
     } catch (e) {
       console.error(LOG, 'clear wallpaper failed', e);
@@ -762,12 +772,14 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(tintRow);
 
   // 背景源
-  block.appendChild(selectRow('背景层', [
+  const bgRow = selectRow('背景层', [
     { value: 'none', label: '无（透桌面）' },
     { value: 'fluid', label: '流体动态' },
     { value: 'wallpaper', label: '壁纸图片' },
     { value: 'video', label: '视频' },
-  ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); refreshBgDepFields(); }));
+  ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); refreshBgDepFields(); });
+  block.appendChild(bgRow);
+  const bgSel = bgRow.querySelector('select') as HTMLSelectElement | null;
 
   // 模糊 / 磨砂 / 饱和度 / 亮度
   block.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
@@ -809,7 +821,20 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(row('背景暗角', vigTog.wrap));
 
   // 壁纸文件选择（按钮行，弹系统文件选择框）/ 视频仍用 URL / 粒子
-  const wallRow = buildWallpaperPickerRow(s.wallpaper);
+  // 选图/清空时同步切换"背景层"下拉，避免"选了图却没变化"
+  const wallRow = buildWallpaperPickerRow(
+    s.wallpaper,
+    () => {
+      setStr(K.bg, 'wallpaper');
+      if (bgSel) bgSel.value = 'wallpaper';
+      refreshBgDepFields();
+    },
+    () => {
+      setStr(K.bg, 'fluid');
+      if (bgSel) bgSel.value = 'fluid';
+      refreshBgDepFields();
+    }
+  );
   const vidRow = textRow('背景视频 URL', 'https://.../bg.mp4', s.video, (v) => { setStr(K.video, v); if (readSettings().bg === 'video') applyGlass(); });
   const particleTog = mkToggle();
   paintToggle(particleTog, s.particles);
