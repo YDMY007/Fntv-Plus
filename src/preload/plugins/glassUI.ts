@@ -124,6 +124,19 @@ const GATE_CSS = `
     -webkit-backdrop-filter: none !important;
   }
 
+  /* ①b 玻璃模式下顶区全透：标题栏安全区(32px)内所有元素/根容器/#root/#app 全部透明，
+     否则 fnOS 自身顶栏底色会露出来导致"最上面一条颜色不匹配" [lc-541] */
+  html[data-fntv-glass] .fnos-tv-page #root,
+  html[data-fntv-glass] .fnos-tv-page #app,
+  html[data-fntv-glass] .fnos-tv-page > div,
+  html[data-fntv-glass] .fnos-tv-page body > div,
+  html[data-fntv-glass] .fnos-tv-page body > nav,
+  html[data-fntv-glass] .fnos-tv-page body > header,
+  html[data-fntv-glass] .fnos-tv-page body > section {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
      lc-526~530 教训：事后排除规则 !important 对抗不稳定，改用 :not() 让选择器根本不匹配顶栏区域 */
@@ -195,7 +208,7 @@ const GATE_CSS = `
     background: linear-gradient(125deg, #6a5acd, #8e44ad, #3498db, #1abc9c, #6a5acd);
     background-size: 400% 400% !important;
     filter: saturate(1.1);
-    animation: fntvFluid calc(var(--fntv-glass-fluid-speed, 1) * 22s) ease infinite;
+    animation: fntvFluid calc(22s / var(--fntv-glass-fluid-speed, 1)) ease infinite;
   }
   #fntv-glass-fluid::before, #fntv-glass-fluid::after {
     content: "" !important;
@@ -208,13 +221,13 @@ const GATE_CSS = `
     width: 46vmax !important; height: 46vmax !important;
     left: -8vmax !important; top: -10vmax !important;
     background: radial-gradient(circle, #ff9ad5, transparent 70%);
-    animation: fntvBlob1 calc(var(--fntv-glass-fluid-speed, 1) * 18s) ease-in-out infinite;
+    animation: fntvBlob1 calc(18s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite;
   }
   #fntv-glass-fluid::after {
     width: 40vmax !important; height: 40vmax !important;
     right: -6vmax !important; bottom: -8vmax !important;
     background: radial-gradient(circle, #7ee8fa, transparent 70%);
-    animation: fntvBlob2 calc(var(--fntv-glass-fluid-speed, 1) * 21s) ease-in-out infinite;
+    animation: fntvBlob2 calc(21s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite;
   }
   @keyframes fntvFluid {
     0% { background-position: 0% 50%; }
