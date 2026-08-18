@@ -104,21 +104,23 @@ const GATE_CSS = `
     -webkit-backdrop-filter: none !important;
   }
 
-  /* ② 组件级玻璃：卡片/面板/控制栏/导航/搜索框/输入框 浮在背景层上做磨砂 */
-  html[data-fntv-glass] .fnos-tv-page [class*="card"],
-  html[data-fntv-glass] .fnos-tv-page [class*="Card"],
-  html[data-fntv-glass] .fnos-tv-page [class*="panel"],
-  html[data-fntv-glass] .fnos-tv-page [class*="Panel"],
-  html[data-fntv-glass] .fnos-tv-page [class*="playbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="control-bar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="ControlBar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="navbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="topbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="appbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="search"],
-  html[data-fntv-glass] .fnos-tv-page [class*="Search"],
-  html[data-fntv-glass] .fnos-tv-page header,
-  html[data-fntv-glass] .fnos-tv-page nav {
+  /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
+     关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
+     lc-526~530 教训：事后排除规则 !important 对抗不稳定，改用 :not() 让选择器根本不匹配顶栏区域 */
+  html[data-fntv-glass] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]),
+  html[data-fntv-glass] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]) {
     background: rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), var(--fntv-glass-frost, 0.5)) !important;
     backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
     -webkit-backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
@@ -338,6 +340,35 @@ function stopParticles(): void {
   particles = [];
 }
 
+// ── JS 兜底：直接置空顶栏祖先行内样式（优先级高于所有 CSS !important）──
+function neutralizeTopBar(): void {
+  try {
+    const bar = document.querySelector('[data-fnos-clear="1"]') as HTMLElement | null;
+    if (!bar) return;
+    // 顶栏本身
+    bar.style.setProperty('background', 'transparent', 'important');
+    bar.style.setProperty('background-color', 'transparent', 'important');
+    bar.style.setProperty('backdrop-filter', 'none', 'important');
+    bar.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    bar.style.setProperty('border', 'none', 'important');
+    bar.style.setProperty('box-shadow', 'none', 'important');
+    // 向上追溯所有祖先，强制归零（覆盖 mainwin.ts insertCSS + 玻璃规则）
+    let el: Element | null = bar.parentElement;
+    let depth = 0;
+    while (el && depth < 10) {
+      const h = el as HTMLElement;
+      h.style.setProperty('background', 'transparent', 'important');
+      h.style.setProperty('background-color', 'transparent', 'important');
+      h.style.setProperty('backdrop-filter', 'none', 'important');
+      h.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+      h.style.setProperty('border', 'none', 'important');
+      h.style.setProperty('box-shadow', 'none', 'important');
+      el = el.parentElement;
+      depth++;
+    }
+  } catch (_) { /* silent */ }
+}
+
 // ── 调试：定位顶栏玻璃容器 ──
 function debugTopAncestry(): void {
   try {
@@ -382,8 +413,11 @@ function applyGlass(): void {
       root.setAttribute('data-fntv-glass-mode', s.mode);
       buildBgLayer(s);
       if (s.particles) startParticles(); else stopParticles();
+      // JS 兜底：强制清空顶栏祖先样式（行内 > CSS !important，覆盖 mainwin.ts insertCSS）
+      neutralizeTopBar();
+      setTimeout(neutralizeTopBar, 800);
+      setTimeout(neutralizeTopBar, 2000);
       debugTopAncestry();
-      // SPA 可能尚未渲染顶栏，延迟再抓一次
       setTimeout(debugTopAncestry, 1800);
     } else {
       root.removeAttribute('data-fntv-glass');
