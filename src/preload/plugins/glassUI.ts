@@ -19,6 +19,7 @@
 
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { ipcRenderer } from 'electron';
 
 const LOG = '[GlassUI]';
 
@@ -183,6 +184,31 @@ const GATE_CSS = `
   @keyframes fntvBlob2 {
     0%,100% { transform: translate(0,0) scale(1); }
     50% { transform: translate(-7vmax, -5vmax) scale(1.1); }
+  }
+
+  /* ═══ 排除规则：顶部导航/标题栏区域不玻璃化，避免白线色块 ═══ */
+  /* fnOS 原生顶栏（含面包屑/标题行）：透明融合到背景层，不单独着色 */
+  html[data-fntv-glass] .fnos-tv-page header,
+  html[data-fntv-glass] .fnos-tv-page nav,
+  html[data-fntv-glass] .fnos-tv-page [class*="navbar"],
+  html[data-fntv-glass] .fnos-tv-page [class*="topbar"],
+  html[data-fntv-glass] .fnos-tv-page [class*="appbar"],
+  html[data-fntv-glass] .fnos-tv-page [class*="header-bar"],
+  html[data-fntv-glass] .fnos-tv-page [class*="nav-bar"],
+  html[data-fntv-glass] .fnos-tv-page [class*="page-header"] {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  /* 顶部可能的 table / 列表头行容器：同样排除 */
+  html[data-fntv-glass] .fnos-tv-page [class*="table"]:not([class*="card"]):not([class*="panel"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="list-head"],
+  html[data-fntv-glass] .fnos-tv-page [class*="toolbar"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 `;
 
@@ -433,6 +459,81 @@ function textRow(labelText: string, placeholder: string, value: string, onCommit
   return wrap;
 }
 
+// ── 壁纸文件选择器行（按钮 + 预览路径 + 清空）──
+function buildWallpaperPickerRow(currentPath: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin:12px 0 8px;';
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+  const label = document.createElement('span');
+  label.style.cssText = 'font-weight:600;letter-spacing:.5px;';
+  label.textContent = '壁纸图片';
+  head.appendChild(label);
+  wrap.appendChild(head);
+
+  // 按钮行
+  const btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+
+  const pickBtn = document.createElement('button');
+  pickBtn.textContent = currentPath ? '重新选择' : '选择图片';
+  pickBtn.style.cssText = 'padding:5px 14px;font-size:11px;border:none;border-radius:7px;cursor:pointer;'
+    + 'background:var(--fnos-ui-accent,#4a90d9);color:#fff;transition:.15s;';
+  pickBtn.addEventListener('mouseenter', () => { pickBtn.style.opacity = '0.85'; });
+  pickBtn.addEventListener('mouseleave', () => { pickBtn.style.opacity = '1'; });
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = '清空';
+  clearBtn.style.cssText = 'padding:5px 12px;font-size:11px;border:none;border-radius:7px;cursor:pointer;'
+    + 'background:rgba(255,70,70,.7);color:#fff;transition:.15s;' + (!currentPath ? 'display:none;' : '');
+  clearBtn.addEventListener('mouseenter', () => { clearBtn.style.opacity = '0.85'; });
+  clearBtn.addEventListener('mouseleave', () => { clearBtn.style.opacity = '1'; });
+
+  // 路径预览
+  const pathPreview = document.createElement('div');
+  pathPreview.style.cssText = 'font-size:10px;color:var(--fnos-ui-sub,#888);word-break:break-all;margin-top:4px;max-height:36px;overflow:auto;'
+    + (!currentPath ? 'display:none;' : '');
+  pathPreview.textContent = currentPath ? (currentPath.replace(/\\/g, '/').split('/').pop() || '') : '';
+
+  btns.appendChild(pickBtn);
+  btns.appendChild(clearBtn);
+  wrap.appendChild(btns);
+  wrap.appendChild(pathPreview);
+
+  // 选择图片
+  pickBtn.addEventListener('click', async () => {
+    try {
+      const p = await ipcRenderer.invoke('settings:pick-glass-wallpaper');
+      if (p) {
+        setStr(K.wallpaper, p);
+        pathPreview.textContent = p.replace(/\\/g, '/').split('/').pop() || '';
+        pathPreview.style.display = '';
+        clearBtn.style.display = '';
+        pickBtn.textContent = '重新选择';
+        if (readSettings().bg === 'wallpaper') applyGlass();
+      }
+    } catch (e) {
+      console.error(LOG, 'pick wallpaper failed', e);
+    }
+  });
+
+  // 清空
+  clearBtn.addEventListener('click', async () => {
+    try {
+      await ipcRenderer.invoke('settings:clear-glass-wallpaper');
+      setStr(K.wallpaper, '');
+      pathPreview.style.display = 'none';
+      clearBtn.style.display = 'none';
+      pickBtn.textContent = '选择图片';
+      if (readSettings().bg === 'wallpaper') applyGlass();
+    } catch (e) {
+      console.error(LOG, 'clear wallpaper failed', e);
+    }
+  });
+
+  return wrap;
+}
+
 function buildGlassControls(): HTMLElement {
   const block = document.createElement('div');
   block.id = 'fntv-glass-ctrl';
@@ -480,8 +581,8 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
   block.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
 
-  // 壁纸 / 视频 URL（按需显隐）
-  const wallRow = textRow('壁纸图片 URL', 'https://.../img.jpg', s.wallpaper, (v) => { setStr(K.wallpaper, v); if (readSettings().bg === 'wallpaper') applyGlass(); });
+  // 壁纸文件选择（按钮行，弹系统文件选择框）/ 视频仍用 URL / 粒子
+  const wallRow = buildWallpaperPickerRow(s.wallpaper);
   const vidRow = textRow('背景视频 URL', 'https://.../bg.mp4', s.video, (v) => { setStr(K.video, v); if (readSettings().bg === 'video') applyGlass(); });
   const particleTog = mkToggle();
   paintToggle(particleTog, s.particles);

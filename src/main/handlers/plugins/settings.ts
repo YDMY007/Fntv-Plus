@@ -194,6 +194,46 @@ function copyLoginBgToUserData(src: string): string | null {
     }
 }
 
+// 弹出系统文件选择框，选择 Glass UI 自定义壁纸（复制到 userData/glass-wallpaper/ 保证可移植）
+async function handlePickGlassWallpaper(): Promise<string | null> {
+    const win = getMainWindow();
+    try {
+        const result = await dialog.showOpenDialog(win ?? undefined, {
+            title: '选择云母增强壁纸',
+            properties: ['openFile'],
+            filters: [
+                { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] },
+                { name: '所有文件', extensions: ['*'] }
+            ]
+        });
+        if (!result.canceled && result.filePaths.length > 0) {
+            const selectedPath = result.filePaths[0];
+            // 复制到 userData/glass-wallpaper/，返回可移植路径
+            const dir = path.join(app.getPath('userData'), 'glass-wallpaper');
+            fs.mkdirSync(dir, { recursive: true });
+            const ext = (path.extname(selectedPath) || '.jpg').toLowerCase();
+            const dest = path.join(dir, 'custom' + ext);
+            fs.copyFileSync(selectedPath, dest);
+            log.info(`Glass UI 壁纸已设置为: ${dest}`);
+            return dest;
+        }
+    } catch (error) {
+        log.error('选择 Glass UI 壁纸失败:', error);
+    }
+    return null;
+}
+
+// 清空 Glass UI 自定义壁纸（删除已复制的文件）
+async function handleClearGlassWallpaper(): Promise<void> {
+    const dir = path.join(app.getPath('userData'), 'glass-wallpaper');
+    const dest = path.join(dir, 'custom.jpg'); // 尝试常见扩展名
+    for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.svg']) {
+        const f = path.join(dir, 'custom' + ext);
+        try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch { /* ignore */ }
+    }
+    log.info('Glass UI 壁纸已清空');
+}
+
 // 弹出系统文件选择框，选择自定义登录页背景图（默认打开 resource/login/image 目录）
 async function handlePickLoginBg(): Promise<string | null> {
     const win = getMainWindow();
@@ -727,6 +767,8 @@ function init(): void {
     registerHandler('settings:pick-login-bg', handlePickLoginBg, { useHandle: true });
     registerHandler('settings:set-login-bg', handleSetLoginBg, { useHandle: true });
     registerHandler('settings:clear-login-bg', handleClearLoginBg, { useHandle: true });
+    registerHandler('settings:pick-glass-wallpaper', handlePickGlassWallpaper, { useHandle: true });
+    registerHandler('settings:clear-glass-wallpaper', handleClearGlassWallpaper, { useHandle: true });
     registerHandler('settings:set-default-player', handleSetDefaultPlayer, { useHandle: true });
     registerHandler('settings:set-exit-mode', handleSetExitMode, { useHandle: true });
     registerHandler('settings:set-douban-enabled', handleSetDoubanEnabled, { useHandle: true });
