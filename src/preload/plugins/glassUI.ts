@@ -26,7 +26,8 @@ const LOG = '[GlassUI]';
 // ── 持久化键（localStorage，沿用 fnos-glass-* 命名风格，与现有亚克力滑块一致）──
 const K = {
   enabled: 'fntvGlass.enabled',
-  mode: 'fntvGlass.mode',          // 'mica' | 'compat'
+  mode: 'fntvGlass.mode',          // 'mica' | 'compat' | 'custom'
+  tint: 'fntvGlass.tint',          // 自定义色调 hex（mode=custom 时生效）
   blur: 'fntvGlass.blur',          // px
   frost: 'fntvGlass.frost',        // 0..1 玻璃不透明度
   sat: 'fntvGlass.sat',            // 饱和度 %
@@ -35,12 +36,18 @@ const K = {
   wallpaper: 'fntvGlass.wallpaper',// 图片 URL
   video: 'fntvGlass.video',        // 视频 URL
   particles: 'fntvGlass.particles',// '0' | '1'
+  border: 'fntvGlass.border',      // '0' | '1' 玻璃边框
+  borderAlpha: 'fntvGlass.borderAlpha', // 0..1 边框浓度
+  shadow: 'fntvGlass.shadow',      // 0..1 阴影浓度
+  noise: 'fntvGlass.noise',        // '0' | '1' 磨砂噪点
+  vignette: 'fntvGlass.vignette',  // '0' | '1' 背景暗角
 };
 
 // ── 默认值 ──
 const DEF = {
   enabled: false,
   mode: 'mica',
+  tint: '#faf8fc',
   blur: 14,
   frost: 0.5,
   sat: 140,
@@ -49,6 +56,11 @@ const DEF = {
   wallpaper: '',
   video: '',
   particles: false,
+  border: true,
+  borderAlpha: 0.2,
+  shadow: 0.14,
+  noise: false,
+  vignette: false,
 };
 
 function getStr(k: string, d: string): string {
@@ -64,13 +76,15 @@ function setStr(k: string, v: string): void { try { localStorage.setItem(k, v); 
 
 // ── 读取全部设置 ──
 interface GlassSettings {
-  enabled: boolean; mode: string; blur: number; frost: number; sat: number;
+  enabled: boolean; mode: string; tint: string; blur: number; frost: number; sat: number;
   bright: number; bg: string; wallpaper: string; video: string; particles: boolean;
+  border: boolean; borderAlpha: number; shadow: number; noise: boolean; vignette: boolean;
 }
 function readSettings(): GlassSettings {
   return {
     enabled: getBool(K.enabled, DEF.enabled),
     mode: getStr(K.mode, DEF.mode),
+    tint: getStr(K.tint, DEF.tint),
     blur: getNum(K.blur, DEF.blur),
     frost: getNum(K.frost, DEF.frost),
     sat: getNum(K.sat, DEF.sat),
@@ -79,6 +93,11 @@ function readSettings(): GlassSettings {
     wallpaper: getStr(K.wallpaper, DEF.wallpaper),
     video: getStr(K.video, DEF.video),
     particles: getBool(K.particles, DEF.particles),
+    border: getBool(K.border, DEF.border),
+    borderAlpha: getNum(K.borderAlpha, DEF.borderAlpha),
+    shadow: getNum(K.shadow, DEF.shadow),
+    noise: getBool(K.noise, DEF.noise),
+    vignette: getBool(K.vignette, DEF.vignette),
   };
 }
 
@@ -124,8 +143,8 @@ const GATE_CSS = `
     background: rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), var(--fntv-glass-frost, 0.5)) !important;
     backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
     -webkit-backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
-    border: 1px solid rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), calc(var(--fntv-glass-frost, 0.5) * 0.45)) !important;
-    box-shadow: 0 8px 28px rgba(0,0,0,0.18) !important;
+    border: calc(var(--fntv-glass-border, 1) * 1px) solid rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), calc(var(--fntv-glass-frost, 0.5) * var(--fntv-glass-border-alpha, 0.2))) !important;
+    box-shadow: 0 8px 28px rgba(0,0,0, var(--fntv-glass-shadow, 0.14)) !important;
   }
 
   /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1） */
@@ -188,6 +207,33 @@ const GATE_CSS = `
     50% { transform: translate(-7vmax, -5vmax) scale(1.1); }
   }
 
+  /* ④ 磨砂噪点层：固定铺满、置于背景与内容之间（z-index:-1），微妙颗粒增强玻璃质感 */
+  #fntv-glass-noise {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: -1 !important;
+    pointer-events: none !important;
+    opacity: 0.06 !important;
+    mix-blend-mode: overlay !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") !important;
+    background-size: 160px 160px !important;
+    display: none !important;
+  }
+  html[data-fntv-glass][data-fntv-glass-noise="1"] #fntv-glass-noise {
+    display: block !important;
+  }
+
+  /* ⑤ 背景层暗角：增强层次（仅玻璃开启 + 有背景层时） */
+  html[data-fntv-glass][data-fntv-glass-vignette="1"] #fntv-glass-bg::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    pointer-events: none !important;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 50%, rgba(0,0,0,0.38) 100%) !important;
+  }
+
   /* ═══ 排除规则：顶部导航/标题栏区域完全透明化 ═══ */
   /* 顶栏容器本身：fnOS 透明模式下标记 data-fnos-clear="1"（class 形如 relative z-[2] h-[80px] bg-[var(--semi-color-bg-1)]） */
   html[data-fntv-glass] .fnos-tv-page [data-fnos-clear="1"],
@@ -226,8 +272,18 @@ const GATE_CSS = `
 // ── 运行时引用 ──
 let styleEl: HTMLStyleElement | null = null;
 let bgLayer: HTMLElement | null = null;
+let noiseEl: HTMLElement | null = null;
 let particleCanvas: HTMLCanvasElement | null = null;
 let particleRAF = 0;
+
+// ── hex 色调 → rgb ──
+function tintToRgb(hex: string): { r: number; g: number; b: number } {
+  let h = (hex || DEF.tint).replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  if (isNaN(n)) return { r: 250, g: 248, b: 252 };
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
 
 // ── 构建背景层（按 bg 源）──
 function buildBgLayer(s: GlassSettings): void {
@@ -284,6 +340,15 @@ function buildBgLayer(s: GlassSettings): void {
 function destroyBgLayer(): void {
   if (bgLayer && bgLayer.parentElement) bgLayer.parentElement.removeChild(bgLayer);
   bgLayer = null;
+}
+
+// ── 噪点层（创建一次，display 由 data 属性控制）──
+function ensureNoiseLayer(): void {
+  if (noiseEl) return;
+  const el = document.createElement('div');
+  el.id = 'fntv-glass-noise';
+  (document.body || document.documentElement).appendChild(el);
+  noiseEl = el;
 }
 
 // ── 粒子层（轻量 rAF，文档隐藏时暂停）──
@@ -408,9 +473,25 @@ function applyGlass(): void {
     root.style.setProperty('--fntv-glass-frost', String(s.frost));
     root.style.setProperty('--fntv-glass-sat', s.sat + '%');
 
+    // 玻璃色调：mica=浅冷白 / compat=深灰 / custom=自定义颜色
+    let tr = 250, tg = 248, tb = 252;
+    if (s.mode === 'compat') { tr = 34; tg = 38; tb = 47; }
+    else if (s.mode === 'custom') { const t = tintToRgb(s.tint); tr = t.r; tg = t.g; tb = t.b; }
+    root.style.setProperty('--fntv-glass-tint-r', String(tr));
+    root.style.setProperty('--fntv-glass-tint-g', String(tg));
+    root.style.setProperty('--fntv-glass-tint-b', String(tb));
+
+    // 边框 / 阴影浓度
+    root.style.setProperty('--fntv-glass-border', s.border ? '1' : '0');
+    root.style.setProperty('--fntv-glass-border-alpha', String(s.borderAlpha));
+    root.style.setProperty('--fntv-glass-shadow', String(s.shadow));
+
     if (s.enabled) {
       root.setAttribute('data-fntv-glass', '');
       root.setAttribute('data-fntv-glass-mode', s.mode);
+      root.setAttribute('data-fntv-glass-noise', s.noise ? '1' : '0');
+      root.setAttribute('data-fntv-glass-vignette', s.vignette ? '1' : '0');
+      ensureNoiseLayer();
       buildBgLayer(s);
       if (s.particles) startParticles(); else stopParticles();
       // JS 兜底：强制清空顶栏祖先样式（行内 > CSS !important，覆盖 mainwin.ts insertCSS）
@@ -422,6 +503,8 @@ function applyGlass(): void {
     } else {
       root.removeAttribute('data-fntv-glass');
       root.removeAttribute('data-fntv-glass-mode');
+      root.removeAttribute('data-fntv-glass-noise');
+      root.removeAttribute('data-fntv-glass-vignette');
       destroyBgLayer();
       stopParticles();
     }
@@ -533,6 +616,24 @@ function textRow(labelText: string, placeholder: string, value: string, onCommit
   return wrap;
 }
 
+function colorRow(labelText: string, value: string, onCommit: (v: string) => void): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin:12px 0 8px;';
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
+  const label = document.createElement('span');
+  label.style.cssText = 'font-weight:600;letter-spacing:.5px;';
+  label.textContent = labelText;
+  head.appendChild(label);
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = value;
+  input.style.cssText = 'width:44px;height:28px;border:1px solid var(--fnos-ui-border,rgba(255,255,255,.2));border-radius:7px;background:none;cursor:pointer;padding:2px;';
+  input.addEventListener('input', () => onCommit(input.value));
+  wrap.appendChild(head); wrap.appendChild(input);
+  return wrap;
+}
+
 // ── 壁纸文件选择器行（按钮 + 预览路径 + 清空）──
 function buildWallpaperPickerRow(currentPath: string): HTMLElement {
   const wrap = document.createElement('div');
@@ -639,7 +740,12 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(selectRow('玻璃模式', [
     { value: 'mica', label: 'Mica（浅冷白）' },
     { value: 'compat', label: 'Compat（深灰低透）' },
-  ], s.mode, (v) => { setStr(K.mode, v); applyGlass(); }));
+    { value: 'custom', label: '自定义颜色' },
+  ], s.mode, (v) => { setStr(K.mode, v); applyGlass(); refreshModeDepFields(); }));
+
+  // 玻璃色调（仅自定义模式显示）
+  const tintRow = colorRow('玻璃色调', s.tint, (v) => { setStr(K.tint, v); applyGlass(); });
+  block.appendChild(tintRow);
 
   // 背景源
   block.appendChild(selectRow('背景层', [
@@ -654,6 +760,39 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
   block.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
   block.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
+
+  // 边框 / 阴影（控制"廉价感"的关键）
+  const borderTog = mkToggle();
+  paintToggle(borderTog, s.border);
+  borderTog.input.checked = s.border;
+  borderTog.input.addEventListener('change', () => {
+    setStr(K.border, borderTog.input.checked ? '1' : '0');
+    paintToggle(borderTog, borderTog.input.checked);
+    applyGlass();
+  });
+  block.appendChild(row('玻璃边框', borderTog.wrap));
+  block.appendChild(rangeRow('边框浓度', 0, 100, 1, Math.round(s.borderAlpha * 100), '%', (v) => { setStr(K.borderAlpha, String(v / 100)); applyGlass(); }));
+  block.appendChild(rangeRow('阴影浓度', 0, 100, 1, Math.round(s.shadow * 100), '%', (v) => { setStr(K.shadow, String(v / 100)); applyGlass(); }));
+
+  // 磨砂噪点 / 暗角（提升质感）
+  const noiseTog = mkToggle();
+  paintToggle(noiseTog, s.noise);
+  noiseTog.input.checked = s.noise;
+  noiseTog.input.addEventListener('change', () => {
+    setStr(K.noise, noiseTog.input.checked ? '1' : '0');
+    paintToggle(noiseTog, noiseTog.input.checked);
+    applyGlass();
+  });
+  block.appendChild(row('磨砂噪点', noiseTog.wrap));
+  const vigTog = mkToggle();
+  paintToggle(vigTog, s.vignette);
+  vigTog.input.checked = s.vignette;
+  vigTog.input.addEventListener('change', () => {
+    setStr(K.vignette, vigTog.input.checked ? '1' : '0');
+    paintToggle(vigTog, vigTog.input.checked);
+    applyGlass();
+  });
+  block.appendChild(row('背景暗角', vigTog.wrap));
 
   // 壁纸文件选择（按钮行，弹系统文件选择框）/ 视频仍用 URL / 粒子
   const wallRow = buildWallpaperPickerRow(s.wallpaper);
@@ -670,13 +809,18 @@ function buildGlassControls(): HTMLElement {
   block.appendChild(vidRow);
   block.appendChild(row('粒子效果', particleTog.wrap));
 
-  // 显隐依赖字段（函数声明，提升，供上方背景源 change 回调安全引用）
+  // 显隐依赖字段（函数声明，提升，供上方 change 回调安全引用）
   function refreshBgDepFields(): void {
     const cur = readSettings().bg;
     wallRow.style.display = cur === 'wallpaper' ? '' : 'none';
     vidRow.style.display = cur === 'video' ? '' : 'none';
   }
+  function refreshModeDepFields(): void {
+    const cur = readSettings().mode;
+    tintRow.style.display = cur === 'custom' ? '' : 'none';
+  }
   refreshBgDepFields();
+  refreshModeDepFields();
 
   return block;
 }
