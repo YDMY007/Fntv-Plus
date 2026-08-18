@@ -210,6 +210,25 @@ const GATE_CSS = `
     border: none !important;
     box-shadow: none !important;
   }
+
+  /* ═══ 关键修复：顶部导航条(z-20)及其包裹层(canvas/card)不玻璃化 ═══ */
+  /* 顶部条本身：class 含 z-20（fnOS 顶栏固定用 z-20） */
+  html[data-fntv-glass] .fnos-tv-page [class*="z-20"] {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  /* 顶部条的父级 / 祖父级包裹容器（常带 card/panel 类，被玻璃规则误伤）：用 :has 精准排除 */
+  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-20"])) {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
 `;
 
 // ── 运行时引用 ──
