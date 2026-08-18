@@ -187,20 +187,19 @@ const GATE_CSS = `
   }
 
   /* ═══ 排除规则：顶部导航/标题栏区域完全透明化 ═══ */
-  /* 策略：暴力向上追溯 z-20 顶条的所有祖先（最多6层），全部强制透明 */
-  /* 同时覆盖 fnOS 常见布局包裹层（sticky/fixed/relative 顶栏容器） */
+  /* 精准命中：任意包含顶栏(z-20/z-10)后代的布局容器(card/panel/section/header 等)，不限嵌套深度 */
   html[data-fntv-glass] .fnos-tv-page [class*="z-20"],
   html[data-fntv-glass] .fnos-tv-page [class*="z-10"],
-  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page :has(> [class*="z-10"]),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-20"])),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> [class*="z-10"])),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> [class*="z-20"]))),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> [class*="z-10"]))),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> [class*="z-20"])))),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> [class*="z-10"])))),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> :has(> [class*="z-20"]))))),
-  html[data-fntv-glass] .fnos-tv-page :has(> :has(> :has(> :has(> :has(> [class*="z-10"]))))),
+  html[data-fntv-glass] .fnos-tv-page [class*="card"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="section"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="layout"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="wrapper"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page [class*="container"]:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page header:has([class*="z-20"]),
+  html[data-fntv-glass] .fnos-tv-page nav:has([class*="z-20"]),
   /* 通用语义标签排除 */
   html[data-fntv-glass] .fnos-tv-page header,
   html[data-fntv-glass] .fnos-tv-page nav,
@@ -212,9 +211,6 @@ const GATE_CSS = `
   html[data-fntv-glass] .fnos-tv-page [class*="page-header"],
   html[data-fntv-glass] .fnos-tv-page [class*="toolbar"],
   html[data-fntv-glass] .fnos-tv-page [class*="list-head"],
-  /* fnOS 顶栏特征：flex items-center justify-between + px/py 大间距 = 导航条包裹 */
-  html[data-fntv-glass] .fnos-tv-page [class*="sticky"],
-  html[data-fntv-glass] .fnos-tv-page [class*="fixed"]:not([class*="modal"]):not([class*="popup"]):not([class*="overlay"]):not([class*="toast"]),
   /* 上述所有目标统一归零 */
   {
     background: transparent !important;
@@ -346,6 +342,34 @@ function stopParticles(): void {
   particles = [];
 }
 
+// ── 调试：打印顶栏元素的祖先链 + 页面顶层子节点，便于定位未被排除的玻璃容器 ──
+function debugTopAncestry(): void {
+  try {
+    const page = document.querySelector('.fnos-tv-page');
+    if (!page) { console.log('[GLASS-DEBUG] .fnos-tv-page not found'); return; }
+    const nav = page.querySelector('[class*="z-20"]') as HTMLElement | null;
+    console.log('[GLASS-DEBUG] top nav (z-20):', nav ? nav.className : 'NOT FOUND');
+    if (nav) {
+      let el: Element | null = nav.parentElement;
+      let depth = 0;
+      while (el && el !== page && depth < 12) {
+        const cs = getComputedStyle(el as Element);
+        const bg = cs.backgroundColor;
+        const hasCard = /card|panel|section|layout|wrapper|container/i.test(el.className);
+        console.log(`[GLASS-DEBUG] L${depth}`, (el.tagName || '').toLowerCase(), '| class=', (el.className || '').slice(0, 90), '| bg=', bg, '| border=', cs.borderTopWidth + '/' + cs.borderBottomWidth, hasCard ? '<-- 命中玻璃候选' : '');
+        el = el.parentElement;
+        depth++;
+      }
+    }
+    // 顶层子节点结构
+    const kids = Array.from(page.children).slice(0, 4);
+    console.log('[GLASS-DEBUG] .fnos-tv-page 顶层子节点:');
+    kids.forEach((k, i) => console.log(`  [${i}]`, (k.tagName || '').toLowerCase(), '| class=', (k.className || '').slice(0, 90)));
+  } catch (err) {
+    console.error('[GLASS-DEBUG] error', err);
+  }
+}
+
 // ── 应用：把设置落到 DOM（门控属性 + CSS 变量 + 背景层/粒子）──
 function applyGlass(): void {
   try {
@@ -362,6 +386,7 @@ function applyGlass(): void {
       root.setAttribute('data-fntv-glass-mode', s.mode);
       buildBgLayer(s);
       if (s.particles) startParticles(); else stopParticles();
+      debugTopAncestry();
     } else {
       root.removeAttribute('data-fntv-glass');
       root.removeAttribute('data-fntv-glass-mode');
