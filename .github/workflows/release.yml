@@ -244,7 +244,9 @@ jobs:
           path: artifacts
 
       - name: List downloaded files
-        run: find artifacts -type f -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" | sort
+        run: |
+          echo "== all downloaded artifacts =="
+          find artifacts -type f | sort
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -253,9 +255,12 @@ jobs:
           name: Fntv-Plus v${{ steps.package.outputs.version }}
           # 说明文档（更新日志）由维护者在 GitHub Release 页面手动填写；
           # 自动构建只负责构建并上传 macOS / Linux 安装包，不自动生成任何说明文字。
+          # 用 ** 递归通配，覆盖产物可能落在 artifacts/<platform>-build/ 任意层级的情况；
+          # fail_on_unmatched_files 确保一旦没匹配到安装包就显式失败（不再静默空 Release）。
           files: |
-            artifacts/macos-build/*.dmg
-            artifacts/linux-build/*.AppImage
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           generate_release_notes: false
