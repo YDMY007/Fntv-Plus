@@ -4,6 +4,7 @@ import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
 import { isSyncableItemType } from '../../modules/fn_api/types';
+import { ensureLibraryIndex, LibItem } from './hotUpdates';
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -446,171 +447,110 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // 避免"清空→异步拉取期间→injectCarousel读到空→显示loading占位→_carouselInited被锁死"的竞态。
 
   try {
-    // 隐藏iframe加载/v/list/all → React渲染 → 提取前10剧集
-    const shows = await new Promise<any[]>((resolve) => {
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:1;border:none;pointer-events:none';
-      iframe.src = base + '/v/list/all';
-      let attempts = 0;
-      const poll = () => {
-        attempts++;
-        try {
-          const doc = iframe.contentDocument || iframe.contentWindow?.document;
-          if (!doc) { log('iframe poll', attempts, 'no doc'); if (attempts < 25) setTimeout(poll, 500); else resolve([]); return; }
-          const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
-          log('iframe poll', attempts, 'links:', links.length, 'readyState:', doc.readyState);
-          if (links.length < 5) { if (attempts < 25) setTimeout(poll, 500); else resolve([]); return; }
-          // React已渲染,提取前10(标题+GUID)
-          const cards: any[] = [];
-          const seen = new Set<string>();
-          links.forEach((a: any) => {
-            const href = a.getAttribute('href') || '';
-            const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-            if (!m || seen.has(m[2]) || cards.length >= 10) return;
-            let el = a, title = '';
-            for (let d = 0; d < 5 && !title; d++) {
-              const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
-              if (t.length > 4) title = t;
-              el = el.parentElement;
-            }
-            if (!title) return;
-            title = title.replace(/^\d+\.\d+\s*/, '').replace(/\s*共\s*\d+\s*[集话話季].*$/, '').replace(/\s*·\s*\d{4}.*$/, '').replace(/\s*第\s*\d+\s*[季集].*$/, '').trim();
-            if (title.length < 2) return;
-            seen.add(m[2]);
-            cards.push({ id: m[2], title, poster: '', mediaType: m[1] });
-          });
-          log('iframe extracted', cards.length, 'cards, first GUID:', cards[0]?.id);
+    // [lc-546] 复用 hotUpdates 的全量库索引（ensureLibraryIndex），
+    // 替代原来的隐藏 iframe 抓 /v/list/all（首屏不滚动→只拿到部分库的条目）。
+    // 库索引通过全屏 iframe + 滚动到底触发懒加载，能拿到所有媒体库的全量条目。
+    // 按媒体库全部顺序从头到尾，取最前面（列表顶部）的 10 个条目，再逐个拉 API 取封面。
+    const libItems: LibItem[] = await ensureLibraryIndex();
+    log('library index:', libItems.length, 'items total');
 
-          // 图片异步加载,等加载完(每500ms尝试)
-          let imgAttempts = 0;
-          const extractImgs = () => {
-            imgAttempts++;
-            // 从卡片链接反向找图片(链接→向上遍历→搜img)
-            cards.forEach(c => {
-              if (c.poster) return;
-              const aEl = doc.querySelector(`a[href*="/v/tv/${c.id}"]`);
-              if (!aEl) return;
-              let el: any = aEl;
-              for (let d = 0; d < 20 && el && !c.poster; d++) {
-                el.querySelectorAll('img').forEach((img: any) => {
-                  const s = img.currentSrc || img.src || '';
-                  if (s.includes('/v/api/v1/sys/img/') && !c.poster) {
-                    c.poster = s;
-                    if (cards.indexOf(c) === 0 && imgAttempts === 1) {
-                      log('IMG0 raw src:', (img.getAttribute('src')||'').substring(0,120));
-                      log('IMG0 raw currentSrc:', (img.currentSrc||'').substring(0,120));
-                      log('IMG0 raw srcset:', (img.getAttribute('srcset')||'').substring(0,160));
-                      log('IMG0 raw data-src:', (img.getAttribute('data-src')||img.getAttribute('data-original')||'').substring(0,120));
-                    }
-                  }
-                });
-                el = el.parentElement;
-              }
-            });
-            const found = cards.filter((c: any) => c.poster).length;
-            log('iframe imgs attempt', imgAttempts, 'found', found, '/', cards.length);
-            if (found >= 1 || imgAttempts >= 3) {
-              log('iframe imgs: found', found, '/', cards.length, 'at', imgAttempts, 'sample:', cards[0]?.poster?.substring(0, 60));
-              iframe.remove();
-              resolve(cards);
-            } else {
-              setTimeout(extractImgs, 500);
-            }
-          };
-          setTimeout(extractImgs, 500);
-        } catch (e) { resolve([]); }
-      };
-      iframe.onload = () => setTimeout(poll, 500);
-      iframe.onerror = () => { resolve([]); };
-      document.body.appendChild(iframe);
-      setTimeout(() => { try { iframe.remove(); } catch(e){}; resolve([]); }, 15000);
-    });
+    // 从全量索引头部依次扫描，取前 N 个有 tv/movie href 的条目作为候选。
+    // [lc-546-fix] 前面可能有大量 M3U8 直播频道（如 CCTV 新闻/财经等），
+    // 它们的 href 也是 /v/tv/{guid} 格式会进入候选，但在后续并行 API 阶段被 is_m3u8 过滤掉。
+    // 故多取候选（50 个）确保直播被过滤后仍能剩 10 个有效作品进入轮播。
+    const candidates: any[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < libItems.length && candidates.length < 50; i++) {
+      const item = libItems[i];
+      const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+      if (!hrefMatch || seen.has(hrefMatch[2])) continue;
+      seen.add(hrefMatch[2]);
+      candidates.push({
+        id: hrefMatch[2],
+        title: item.title,
+        poster: '',
+        mediaType: hrefMatch[1],
+      });
+    }
+    log('selected', candidates.length, 'candidates from index (first:', candidates[0]?.title?.substring(0, 20), ')');
 
-    log('iframe: got', shows.length, 'shows');
-    if (shows.length === 0) { _apiLoading = false; return _apiShows; }
+    if (candidates.length === 0) { _apiLoading = false; return _apiShows; }
 
     // 用局部变量收集新数据, 成功后整体替换 _apiShows(避免重拉期间旧数据被清空导致竞态)
     const newShows: any[] = [];
 
-    // 步骤2: 用item/{guid}获取每个剧集的poster+overview
-    for (const show of shows.slice(0, 10)) {
+    // 步骤2: 并行用item/{guid}获取每个候选的poster+overview（5s 短超时），一次性拿全部结果后过滤
+    // [lc-546-fix] 改为并行而非串行：串行时每个直播电视候选占 8s 超时，30 个候选最坏 240s → 轮播一直卡「加载中」白屏。
+    // 并行后无论多少候选，总时间≈单条超时(5s)，且 is_m3u8/类型/无封面 三道过滤直接剔掉直播电视，取前 10 个有效项。
+    const pickImg = (v: any): string => {
+      let s = '';
+      if (typeof v === 'string') s = v;
+      else if (Array.isArray(v) && v.length) { const it = v[0]; s = typeof it === 'string' ? it : (it?.url || it?.path || it?.image || it?.src || ''); }
+      if (!s) return '';
+      if (s.startsWith('http') || s.includes('sys/img')) return s;
+      return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
+    };
+    const fetchOne = async (show: any): Promise<any | null> => {
       try {
         const { ipcRenderer } = require('electron');
         const path = `/v/api/v1/item/${show.id}`;
         const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
-        // [lc-181] 单条 item 请求加超时(8s): 非3类型(电视直播/其他视频)接口可能挂起,
-        // 若无限等待会阻塞整个顺序循环 → fetchShowsViaIPC 永不 resolve → 注入轮播永远不替换原生轮播 → 白屏卡死。
         const ctrl = new AbortController();
-        const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 8000);
+        const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 5000);
         let resp: Response;
         try {
           resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
-        } finally {
-          clearTimeout(to);
-        }
-        if (!resp.ok) continue;
+        } finally { clearTimeout(to); }
+        if (!resp.ok) return null;
         const json = await resp.json();
         const data = json?.data || {};
-        // [lc-408] 诊断：打印首个 item 的 data 顶层字段，便于核对 tmdb id 字段名（后续可删）
-        if (show.id === shows[0]?.id) log('1st item data keys:', Object.keys(data).join(','));
-        // [lc-181] 类型白名单: 仅电影/电视节目/混合影片(作品类)进入轮播;
-        // 电视直播/其他视频无作品级刮削且易触发白屏, 识别到就直接跳过、不加载。
         const itemType = (data.type || data.item?.type) as string | undefined;
+        // 类型白名单：仅电影/电视节目/混合影片(作品类)进入轮播
         if (itemType && !isSyncableItemType(itemType)) {
           log('skip non-syncable carousel item:', show.id, 'type=', itemType);
-          continue;
+          return null;
         }
-        // [lc-545] M3U8/电视直播剔除：即使 type 通过白名单(如 TV/TvSeries)，
-        // is_m3u8=true 的项无封面图（poster/backdrop 为空），会导致轮播加载失败/白屏。
+        // [lc-545] M3U8/电视直播剔除：is_m3u8=true 的项无封面图，直接剔掉
         if (data.is_m3u8) {
           log('skip m3u8/live-tv carousel item:', show.id, 'is_m3u8=true');
-          continue;
+          return null;
         }
-        // posters/backdrops是短路径字符串(如"/a9/06/xxx.webp"), 需补sys/img前缀
-        const pickImg = (v: any): string => {
-          let s = '';
-          if (typeof v === 'string') s = v;
-          else if (Array.isArray(v) && v.length) { const it = v[0]; s = typeof it === 'string' ? it : (it?.url || it?.path || it?.image || it?.src || ''); }
-          if (!s) return '';
-          if (s.startsWith('http') || s.includes('sys/img')) return s;
-          return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
-        };
         const poster = pickImg(data.posters) || (show as any).poster || '';
         const backdrop = pickImg(data.backdrops) || poster;
-        if (show.id === shows[0]?.id) log('1st backdrop:', backdrop.substring(0, 60), '| poster:', poster.substring(0, 60));
-        // [lc-545] 无封面图防御：poster 和 backdrop 都为空的项无法渲染轮播，直接跳过。
+        // 无封面图防御：poster 和 backdrop 都为空的项无法渲染轮播，跳过
         if (!backdrop) {
           log('skip no-image carousel item:', show.id, 'no poster/backdrop');
-          continue;
+          return null;
         }
-        // [lc-408] 提取 tmdb id + mediaType，供轮播图标题替换为 TMDB 透明 logo
         const tmdbId = extractTmdbId(data);
-        if (show.id === shows[0]?.id) log('1st tmdbId:', tmdbId || '(none)', '| mediaType:', show.mediaType || 'tv');
-        // [lc-451] 集数: number_of_episodes=官方总集数, local_number_of_episodes=本地已刮削/更新到的集数
         const totalEps = (data.number_of_episodes as number) || 0;
         const localEps = (data.local_number_of_episodes as number) || 0;
-        // 年份: 电影用 production_year 优先, 回退 premiere_date/air_date 前4位
         const rawYear = (data.production_year as any) || ((data.premiere_date as string) || (data.air_date as string) || '').slice(0, 4);
         const year = Number(rawYear) || 0;
-        newShows.push({
+        return {
           id: show.id, title: show.title,
           poster, backdrop,
           desc: data.overview || '',
           mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
-          tmdbId,
-          totalEps, localEps, year
-        });
-      } catch (e) { /* skip */ }
-    }
+          tmdbId, totalEps, localEps, year
+        };
+      } catch (e) { return null; }
+    };
+    // 并行拉取全部候选（保留顺序），再过滤掉 null（直播/非作品类/无封面），取前 10 个
+    log('fetching', candidates.length, 'candidate details in parallel...');
+    const results = await Promise.all(candidates.map((c) => fetchOne(c)));
+    const valid = results.filter((x: any) => x);
+    newShows.push(...valid.slice(0, 10));
+    log('parallel fetch done:', results.length, 'fetched,', valid.length, 'valid, took first', newShows.length);
 
     // 仅在新数据确实拉到内容时才替换(空数据保留旧的不变)
     if (newShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, newShows);
-    } else if (shows.length > 0) {
+    } else if (candidates.length > 0) {
       // [lc-181] iframe 提取到条目, 但全部因「非3类型」被过滤 → 首页没有其他作品类内容可展示。
       // 记一条诊断, 便于区分「白屏是卡死」还是「确实没有可展示的作品类」。
-      log('all extracted items filtered out as non-syncable (', shows.length, 'extracted, 0 kept) — 首页无可展示的作品类轮播');
+      log('all extracted items filtered out as non-syncable (', candidates.length, 'extracted, 0 kept) — 首页无可展示的作品类轮播');
     }
     _apiLoaded = true;
     log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
