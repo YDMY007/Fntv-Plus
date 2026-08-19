@@ -1104,7 +1104,7 @@ function injectCarousel(): void {
     info.innerHTML = `
       ${pillRow}
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
-        <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
+        <div class="fnos-title" style="font-size:clamp(30px,3.8vh,44px);font-weight:800;line-height:1.18;letter-spacing:1px;word-break:break-word;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)">${show.title}</div>
         ${genreHtml}
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
@@ -2219,6 +2219,8 @@ function injectUiThemeStyle(): void {
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(243,235,250,.85) 100%);
   --fnos-hero-dot:rgba(0,0,0,.16);
   --fnos-hero-title:#0f1c3f;
+  --fnos-hero-title-grad:linear-gradient(135deg,#0f1c3f 15%,#4a3a8f 65%,#7d5fc9 100%); /* [lc-575] 浅色主题大标题渐变 */
+  --fnos-hero-title-glow:drop-shadow(0 1px 5px rgba(90,70,160,.22)); /* [lc-575] 浅色主题发光(弱) */
   --fnos-hero-desc:rgba(20,35,70,.82);
   --fnos-hero-shadow:0 1px 10px rgba(255,255,255,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);
@@ -2296,6 +2298,8 @@ html.dark{
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(60,50,84,.92) 100%);
   --fnos-hero-dot:rgba(200,195,215,.35);
   --fnos-hero-title:#f0ecff;
+  --fnos-hero-title-grad:linear-gradient(135deg,#ffffff 28%,#ece0ff 60%,#c9a7f0 100%); /* [lc-575] 深色主题大标题渐变 */
+  --fnos-hero-title-glow:drop-shadow(0 2px 14px rgba(130,95,215,.45)) drop-shadow(0 1px 3px rgba(0,0,0,.4)); /* [lc-575] 深色主题发光 */
   --fnos-hero-desc:rgba(225,218,245,.88);
   --fnos-hero-shadow:0 1px 10px rgba(0,0,0,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(140,160,255,.6),transparent);
