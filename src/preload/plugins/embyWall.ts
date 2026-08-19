@@ -522,13 +522,17 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
           log('skip no-image carousel item:', show.id, 'no poster/backdrop');
           return null;
         }
+        // [lc-547] 标题优先用 API 返回的干净字段（data.title/name），
+        // 库索引的 item.title 是 textContent 抓的全文本（含评分8.4/季数/年份等垃圾前缀）。
+        const apiTitle = (data.title || data.name || '').trim();
+        const cleanTitle = apiTitle || show.title.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
         const tmdbId = extractTmdbId(data);
         const totalEps = (data.number_of_episodes as number) || 0;
         const localEps = (data.local_number_of_episodes as number) || 0;
         const rawYear = (data.production_year as any) || ((data.premiere_date as string) || (data.air_date as string) || '').slice(0, 4);
         const year = Number(rawYear) || 0;
         return {
-          id: show.id, title: show.title,
+          id: show.id, title: cleanTitle,
           poster, backdrop,
           desc: data.overview || '',
           mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
