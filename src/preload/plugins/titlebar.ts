@@ -44,6 +44,28 @@ function injectTitleBar(): void {
       'position:fixed;top:8px;right:8px;z-index:999999;display:flex;gap:2px;pointer-events:auto;' +
       '-webkit-app-region:no-drag;app-region:no-drag;';
 
+    /* ── [lc-556] 原生页顶部拖拽区域：允许通过窗口顶部拖动窗口 ──
+       TV 页有 32px 高的 drag bar(第91行)，但原生页(登录页等)之前只注入了按钮、没有 drag 区域
+       → 点击窗口控制栏附近无法拖动窗口。新增一个全宽 36px 的透明 drag 层，
+       z-index 低于 floatBar 确保按钮可点击。 */
+    const dragRegion = document.createElement('div');
+    dragRegion.id = 'fntv-native-drag';
+    dragRegion.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:36px;z-index:999998;' +
+      '-webkit-app-region:drag;app-region:drag;' +
+      'pointer-events:auto;';
+    document.body.appendChild(dragRegion);
+
+    /* ── [lc-556] 原生页去掉窗口圆角：ACRYLIC_CSS 给 html 加了全局 border-radius:16px+clip-path,
+       在登录页等原生页会裁出难看的圆角(内容被裁掉)。用更高优先级覆盖回直角。 ── */
+    const noCornerStyle = document.createElement('style');
+    noCornerStyle.id = 'fntv-native-nocorner';
+    noCornerStyle.textContent = `
+      html{border-radius:0!important;clip-path:none!important;-webkit-clip-path:none!important;}
+      body{border-radius:0!important;}
+    `;
+    document.head.appendChild(noCornerStyle);
+
     const btnCss =
       'background:rgba(30,30,34,.72);border:1px solid rgba(255,255,255,.18);' +
       'width:32px;height:32px;border-radius:50%;display:flex;align-items:center;' +
