@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { BrowserWindow } from 'electron';
 import * as logger from '../../../modules/logger';
 import { registerHandler } from '../core/ipcHandler';
 import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
@@ -171,16 +172,24 @@ async function fetchImageAsDataUrl(url: string): Promise<{ ok: boolean; dataUrl?
 function init(): void {
     registerHandler('douban:discover', async (_e: any, force?: boolean) => {
         try {
-            // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被豆瓣限流/封禁
-            // force=true（浮窗「↻ 刷新」按钮）时忽略缓存、强制重新抓取并覆写磁盘缓存
+            // [lc-581] onRefreshed: 过期缓存立即返回(秒见旧数据), 后台刷新成功后推送给渲染进程无感更新
             const r = await getDailyCached('douban_hot', async () => {
                 const res = await fetchDiscover();
                 if (!res.ok) throw new Error(res.error || 'douban fetch failed');
                 return res;
-            }, DEFAULT_TTL_MS, !!force);
-            log.info('[豆瓣诊断] 数据' + (r.fromCache ? '来自本地缓存（未发网络请求）' : '已从线上刷新')
+            }, DEFAULT_TTL_MS, !!force, (data) => {
+                try {
+                    BrowserWindow.getAllWindows().forEach((w) => {
+                        w.webContents.send('hot-data-refreshed', { source: 'douban', data, cachedAt: Date.now() });
+                    });
+                } catch { /* ignore */ }
+            });
+            log.info('[豆瓣诊断] 数据'
+                + (r.stale ? '返回过期缓存(后台正在刷新新数据)'
+                    : r.fromCache ? '来自本地缓存（未发网络请求）'
+                        : '已从线上刷新')
                 + (force ? '（强制刷新）' : '') + '，更新于 ' + new Date(r.fetchedAt).toLocaleString('zh-CN'));
-            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache };
+            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache, stale: r.stale };
         } catch (e: any) {
             return { ok: false, error: (e && e.message) || '豆瓣数据获取失败' };
         }

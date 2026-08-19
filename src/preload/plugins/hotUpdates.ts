@@ -835,6 +835,32 @@ function buildPanel(): void {
     footTimeEl.textContent = '数据更新于 ' + fmtFootTime(ts) + (res.fromCache ? ' · 本地缓存' : '');
   };
 
+  // [lc-581] stale-while-revalidate: 主进程「过期缓存立即返回 + 后台异步刷新」成功后推送,
+  // 渲染进程收到后无感替换为新数据(浮层打开时生效), 用户点开先见旧缓存、几秒后自动变新。
+  ipcRenderer.on('hot-data-refreshed', (_ev: any, payload: any) => {
+    try {
+      if (!payload || !payload.data || !payload.data.items) return;
+      const panelOpen = panel.classList.contains('open');
+      if (payload.source === 'bangumi') {
+        allBg.length = 0;
+        for (const it of (payload.data.items || [])) allBg.push(it);
+        if (source === 'bangumi' && panelOpen) {
+          updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
+          render();
+          logger.info('[hotUpdates] 后台刷新 Bangumi 数据已推送更新');
+        }
+      } else {
+        allTm.length = 0;
+        for (const it of (payload.data.items || [])) allTm.push(it);
+        if (source !== 'bangumi' && panelOpen) {
+          updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
+          render();
+          logger.info('[hotUpdates] 后台刷新' + (payload.source === 'douban' ? '豆瓣' : 'TMDB') + '数据已推送更新');
+        }
+      }
+    } catch (e) { logger.error('[hotUpdates] 后台刷新推送 err', String(e).substring(0, 80)); }
+  });
+
   const refreshReset = (): void => {
     const n = getBlockedSet().size;
     if (n > 0) {

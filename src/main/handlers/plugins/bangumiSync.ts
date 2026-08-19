@@ -1,4 +1,4 @@
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dns from 'dns';
@@ -510,22 +510,28 @@ export function init(): void {
     // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 Bangumi 限流/封禁
     registerHandler('bangumi:calendar', async (_e: any, force?: boolean) => {
         try {
-            // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 Bangumi 限流/封禁
-            // force=true（浮窗「↻ 刷新」按钮）时忽略缓存、强制重新抓取并覆写磁盘缓存
+            // [lc-581] onRefreshed: 过期缓存立即返回(秒见旧数据), 后台刷新成功后推送给渲染进程无感更新
             const r = await getDailyCached('bangumi_calendar', async () => {
                 const res = await fetchCalendar();
                 if (!res.ok) throw new Error(res.error || 'bangumi fetch failed');
                 return res;
-            }, DEFAULT_TTL_MS, !!force);
+            }, DEFAULT_TTL_MS, !!force, (data) => {
+                try {
+                    BrowserWindow.getAllWindows().forEach((w) => {
+                        w.webContents.send('hot-data-refreshed', { source: 'bangumi', data, cachedAt: Date.now() });
+                    });
+                } catch { /* ignore */ }
+            });
             // 区分三种情况，避免再出现「明明发了请求却谎称未发」的误导日志：
             //   1) 有效期内缓存命中（确实没发请求）；2) 真正从线上刷新；3) 线上失败、降级用过期缓存（非最新）。
             const stale = r.fromCache && (Date.now() - r.fetchedAt > DEFAULT_TTL_MS);
             log.info('[Bangumi] 每日放送数据'
-                + (stale ? '线上抓取失败，降级使用过期本地缓存（非最新数据）'
-                    : r.fromCache ? '来自本地缓存（未发网络请求，仍在有效期内）'
-                        : '已从线上刷新')
+                + (r.stale ? '返回过期缓存(后台正在刷新新数据)'
+                    : stale ? '线上抓取失败，降级使用过期本地缓存（非最新数据）'
+                        : r.fromCache ? '来自本地缓存（未发网络请求，仍在有效期内）'
+                            : '已从线上刷新')
                 + '，更新于 ' + new Date(r.fetchedAt).toLocaleString('zh-CN'));
-            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache };
+            return { ...r.data, cachedAt: r.fetchedAt, fromCache: r.fromCache, stale: r.stale };
         } catch (e: any) {
             return { ok: false, error: (e && e.message) || 'Bangumi 数据获取失败' };
         }
