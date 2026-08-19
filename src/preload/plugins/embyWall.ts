@@ -433,149 +433,55 @@ function extractTmdbId(data: any): string | undefined {
 }
 
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
-  // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报: 此时 location.origin 为 "file://",
-  // 会拼出 file:///v/list/all 触发 ERR_FILE_NOT_FOUND 噪音(且永远拉不到数据).
-  // 直接返回空数组, 首屏仍用硬编码数据兜底, 避免创建 file:// iframe.
+  // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return _apiShows;
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
 
-  // 注意：不再在此处清空 _apiShows。
-  // 旧数据保留到新数据确实拉到之后才替换(见末尾赋值)，
-  // 避免"清空→异步拉取期间→injectCarousel读到空→显示loading占位→_carouselInited被锁死"的竞态。
-
   try {
-    // [lc-546] 复用 hotUpdates 的全量库索引（ensureLibraryIndex），
-    // 替代原来的隐藏 iframe 抓 /v/list/all（首屏不滚动→只拿到部分库的条目）。
-    // 库索引通过全屏 iframe + 滚动到底触发懒加载，能拿到所有媒体库的全量条目。
-    // 按媒体库全部顺序从头到尾，取最前面（列表顶部）的 10 个条目，再逐个拉 API 取封面。
+    // [lc-553] 纯 DOM 方案：复用 hotUpdates 的全量库索引（DOM 已有封面+标题+链接），
+    // 直接构建轮播数据，**不调任何 API**（之前 lc-551 的 fetchOne IPC/fetch 经常卡死导致白屏）。
     const libItems: LibItem[] = await ensureLibraryIndex();
     log('library index:', libItems.length, 'items total');
 
-    // [lc-551] 飞牛「全部」页已按「最新更新在上」排好序。从上到下扫描，直接剔除无真实封面的
-    // （直播电视/无图项）——个人视频 href 为 /v/video/ 已被 ensureLibraryIndex 选择器排除。
-    // 取前 10 个有真实封面的 tv/movie 项作为最终候选（不再取 50 再去过滤）。
-    const candidates: any[] = [];
+    // 标题清理：去掉评分前缀/季数后缀/年份范围
+    const cleanTitle = (raw: string): string =>
+      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+
+    // 从头扫描，取前 10 个有真实封面的 tv/movie（无封面=直播电视/个人视频→剔除）
+    const newShows: any[] = [];
     const seen = new Set<string>();
     for (const item of libItems) {
-      if (candidates.length >= 10) break;
-      if (!item.poster) continue;            // 无真实封面（直播电视/无图）→ 剔除
+      if (newShows.length >= 10) break;
+      if (!item.poster) continue;  // 无封面 → 跳过（直播电视等）
       const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
       if (!hrefMatch || seen.has(hrefMatch[2])) continue;
       seen.add(hrefMatch[2]);
-      candidates.push({
+      newShows.push({
         id: hrefMatch[2],
-        title: item.title,
+        title: cleanTitle(item.title),
         poster: item.poster,
+        backdrop: item.poster,   // backdrop 同用封面图（DOM 无单独 backdrop）
+        desc: '',                // DOM 无简介，留空
         mediaType: hrefMatch[1],
+        // 以下字段 DOM 不可用，留默认值（轮播 UI 会自动隐藏空字段）
+        tmdbId: 0, totalEps: 0, localEps: 0,
+        totalSeasons: 0, localSeasons: 0, year: 0,
+        rating: 0, statusText: '', genres: [] as string[],
       });
     }
-    log('selected', candidates.length, 'carousel candidates (top-down, with poster), first:', candidates[0]?.title?.substring(0, 20));
 
-    if (candidates.length === 0) { _apiLoading = false; return _apiShows; }
+    log('pure-DOM carousel:', newShows.length, 'shows, first:', newShows[0]?.title?.substring(0, 20));
 
-    // 用局部变量收集新数据, 成功后整体替换 _apiShows(避免重拉期间旧数据被清空导致竞态)
-    const newShows: any[] = [];
-
-    // [lc-551] 仅给最终入选的 ≤10 个候选调 API 丰富（desc/评分/状态/类型/年份/季数）。
-    // 与旧逻辑(取 50 候选全调 API)不同：现在只调确定的 10 个，且 poster 已由 DOM 阶段确保存在 →
-    // 即使 API 失败/超时也回退 DOM 封面+干净标题，绝不卡白屏。
-    const pickImg = (v: any): string => {
-      let s = '';
-      if (typeof v === 'string') s = v;
-      else if (Array.isArray(v) && v.length) { const it = v[0]; s = typeof it === 'string' ? it : (it?.url || it?.path || it?.image || it?.src || ''); }
-      if (!s) return '';
-      if (s.startsWith('http') || s.includes('sys/img')) return s;
-      return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
-    };
-    const cleanTitleOf = (raw: string): string =>
-      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
-
-    const fetchOne = async (show: any): Promise<any> => {
-      const domPoster = show.poster;
-      const domTitle = cleanTitleOf(show.title);
-      try {
-        const { ipcRenderer } = require('electron');
-        const path = `/v/api/v1/item/${show.id}`;
-        const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
-        const ctrl = new AbortController();
-        const to = setTimeout(() => { try { ctrl.abort(); } catch (e) {} }, 5000);
-        let resp: Response;
-        try {
-          resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
-        } finally { clearTimeout(to); }
-        if (!resp.ok) return { id: show.id, title: domTitle, poster: domPoster, backdrop: domPoster, desc: '', mediaType: show.mediaType };
-        const json = await resp.json();
-        const data = json?.data || {};
-        const itemType = (data.type || data.item?.type) as string | undefined;
-        const apiPoster = pickImg(data.posters) || domPoster;
-        const backdrop = pickImg(data.backdrops) || apiPoster;
-        const apiTitle = (data.title || data.name || '').trim();
-        const cleanTitle = apiTitle || domTitle;
-        const tmdbId = extractTmdbId(data);
-        const totalEps = (data.number_of_episodes as number) || 0;
-        const localEps = (data.local_number_of_episodes as number) || 0;
-        // [lc-548] 季数：总季数优先，回退本地季数；用于胶囊徽标「X季Y集」
-        const totalSeasons = (data.number_of_seasons as number) || 0;
-        const localSeasons = (data.local_number_of_seasons as number) || 0;
-        const rawYear = (data.production_year as any) || ((data.premiere_date as string) || (data.air_date as string) || '').slice(0, 4);
-        const year = Number(rawYear) || 0;
-        // [lc-551] 诊断：确认 vote_average/status/genres 是否可用
-        if (show.id === candidates[0]?.id) {
-          log('[lc-551] 1st item data keys:', Object.keys(data).join(','));
-          log('[lc-551] rating=', data.vote_average, '| status=', data.status, '| genres=', JSON.stringify((data as any).genres));
-        }
-        // [lc-549] 丰富展示字段：评分(vote_average 字符串→数字)、状态(status→中文)、类型标签(genres 数组)
-        const rawRating = parseFloat(String(data.vote_average || '').trim());
-        const rating = isNaN(rawRating) ? 0 : rawRating;
-        const statusRaw = (data.status || '').trim();
-        let statusText = '';
-        if (statusRaw) {
-          // fnOS 状态值映射为中文简称（兼容性：已是中文则原样保留）
-          const s = statusRaw.toLowerCase();
-          if (s.includes('continu') || s.includes('更新') || s.includes('连载')) statusText = '连载中';
-          else if (s.includes('end') || s.includes('完结') || s.includes('完')) statusText = '已完结';
-          else if (s.includes('releas') || s.includes('上映') || s.includes('发行')) statusText = '已上映';
-          else statusText = statusRaw; // 其他未知状态原样显示
-        }
-        // genres 可能为 [{name}] / [string] / "动作,剧情" 等多种形态，统一规整为字符串数组
-        let genres: string[] = [];
-        const g = (data as any).genres;
-        if (Array.isArray(g)) {
-          genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || ''))).filter(Boolean);
-        } else if (typeof g === 'string' && g.trim()) {
-          genres = g.split(/[,，/、]/).map((s: string) => s.trim()).filter(Boolean);
-        }
-        return {
-          id: show.id, title: cleanTitle,
-          poster: apiPoster, backdrop,
-          desc: data.overview || '',
-          mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
-          tmdbId, totalEps, localEps, totalSeasons, localSeasons, year, rating, statusText, genres
-        };
-      } catch (e) {
-        // DOM 兜底：至少能显示封面 + 干净标题，绝不卡白屏
-        return { id: show.id, title: domTitle, poster: domPoster, backdrop: domPoster, desc: '', mediaType: show.mediaType };
-      }
-    };
-    // 候选已确保 ≤10 个且有真实封面，并行拉取（5s 超时），fetchOne 永不返回 null → 直接有序入列
-    log('fetching', candidates.length, 'candidate details in parallel...');
-    const results = await Promise.all(candidates.map((c) => fetchOne(c)));
-    newShows.push(...results);
-    log('parallel fetch done:', results.length, 'shows (poster-guaranteed)');
-
-    // 仅在新数据确实拉到内容时才替换(空数据保留旧的不变)
     if (newShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, newShows);
-    } else if (candidates.length > 0) {
-      log('all carousel candidates dropped (', candidates.length, 'candidates, 0 shows) — 检查封面过滤逻辑');
     }
     _apiLoaded = true;
-    log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
-    log('total', _apiShows.length, 'shows from DOM+API');
-  } catch (e) { log('iframe error:', e); }
+    log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,80));
+    log('total', _apiShows.length, 'shows (pure DOM, zero API)');
+  } catch (e) { log('fetch error:', e); }
   _apiLoading = false;
   return _apiShows;
 }
