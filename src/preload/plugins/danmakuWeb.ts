@@ -33,6 +33,78 @@ const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32}
 const LS_KEY = 'fntv_danmaku_enabled';
 const LS_STYLE_KEY = 'fntv_danmaku_style';
 
+// ═══ [lc-544] 播放页顶部标题栏美化 ═══
+// 飞牛原生播放页顶部的页面级 header（返回箭头+标题+窗口控件）在视频上方很突兀。
+// 注入半透明毛玻璃 + 鼠标不动自动隐藏，跟现代播放器控制栏风格一致。
+const PLAYER_HEADER_STYLE_ID = 'fntv-player-header-style';
+let _headerStyleInjected = false;
+let _headerHideTimer: ReturnType<typeof setTimeout> | null = null;
+const HEADER_HIDE_DELAY = 2500; // 鼠标不动 2.5s 后自动隐藏
+
+/** 注入播放页顶部标题栏美化 CSS（仅执行一次） */
+function injectPlayerHeaderStyle(): void {
+    if (_headerStyleInjected) return;
+    const css = `
+/* ── 播放页顶部标题栏：毛玻璃 + 自动隐藏 ──
+   目标：fnOS 页面级 header（含返回箭头+标题文字），非 xgplayer 自身控件 */
+html:has(video) header,
+html:has(video) nav,
+html:has(video) [role="banner"],
+html:has(video) [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    background: rgba(0, 0, 0, .45) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
+    transition: opacity .35s ease, transform .35s ease !important;
+}
+/* 自动隐藏状态：鼠标不动一段时间后淡出上滑 */
+html.fntv-ph-hidden header,
+html.fntv-ph-hidden nav,
+html.fntv-ph-hidden [role="banner"],
+html.fntv-ph-hidden [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(-8px) !important;
+}
+`;
+    const el = document.createElement('style');
+    el.id = PLAYER_HEADER_STYLE_ID;
+    el.textContent = css;
+    (document.head || document.documentElement).appendChild(el);
+    _headerStyleInjected = true;
+    log.info('[danmakuWeb] 播放页顶部标题栏美化 CSS 已注入');
+}
+
+/** 重置隐藏计时器：鼠标活动时显示标题栏，静止后自动隐藏 */
+function resetHeaderHideTimer(): void {
+    if (!isPlayerPage()) return;
+    document.documentElement.classList.remove('fntv-ph-hidden');
+    if (_headerHideTimer) clearTimeout(_headerHideTimer);
+    _headerHideTimer = setTimeout(() => {
+        if (isPlayerPage()) document.documentElement.classList.add('fntv-ph-hidden');
+    }, HEADER_HIDE_DELAY);
+}
+
+/** 绑定播放页标题栏自动隐藏的鼠标事件（仅绑定一次） */
+let _headerAutoHideBound = false;
+function bindHeaderAutoHide(): void {
+    if (_headerAutoHideBound || !isPlayerPage()) return;
+    _headerAutoHideBound = true;
+    document.addEventListener('mousemove', resetHeaderHideTimer, { passive: true });
+    document.addEventListener('touchstart', resetHeaderHideTimer, { passive: true });
+    // 初始显示，延迟开始倒计时
+    setTimeout(resetHeaderHideTimer, 600);
+    log.info('[danmakuWeb] 播放页标题栏自动隐藏已启用 (' + HEADER_HIDE_DELAY + 'ms)');
+}
+
 interface DanmakuItem {
     time: number;   // 秒
     type: number;   // 1/2/3=滚动 4=底部 5=顶部
@@ -838,6 +910,11 @@ function closeStylePanel(): void {
 
 function maybeSetup(): void {
     if (!isPlayerPage()) return;
+
+    // [lc-544] 播放页顶部标题栏美化（毛玻璃 + 自动隐藏）
+    injectPlayerHeaderStyle();
+    bindHeaderAutoHide();
+
     try {
         const saved = localStorage.getItem(LS_KEY);
         enabled = saved !== '0';
