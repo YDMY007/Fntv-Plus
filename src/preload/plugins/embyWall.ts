@@ -607,6 +607,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (!detail) return !!(fromDom);
         // 仅填充 API 有值的字段(0/空保留 DOM 兜底值)
         if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
+        if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
         if (detail.totalEps) s.totalEps = detail.totalEps;
         if (detail.localEps) s.localEps = detail.localEps;
         if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
@@ -773,6 +774,9 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     };
     const rel = pickImg(d.backdrops);
     const backdrop = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
+    // [lc-570] 飞牛自带 logo(详情页 hero 用的同一个): item API 的 data.logos 数组, 与 backdrops/posters 同构
+    const relLogo = pickImg(d.logos);
+    const logo = relLogo ? (relLogo.startsWith('http') ? relLogo : base + '/v/api/v1/' + relLogo) : '';
     // [lc-569] 集数/季数(local=本地已更新, total=总规模), 年份, 评分, 状态, 类型, 简介
     const totalEps = Number(d.number_of_episodes) || 0;
     const localEps = Number(d.local_number_of_episodes) || 0;
@@ -795,7 +799,7 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || ''))).filter(Boolean);
     else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、]/).map((s: string) => s.trim()).filter(Boolean);
     return {
-      backdrop,
+      backdrop, logo,
       totalEps, localEps, totalSeasons, localSeasons,
       year: rawYear, rating, statusText, genres,
       desc: (d.overview || '').trim(),
@@ -1385,7 +1389,18 @@ function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void 
   shows.forEach((show, i) => {
     const info = infos[i];
     if (!info) return;
-    if (show.tmdbId || show.title) {
+    // [lc-570] 优先用飞牛自带 logo(item API 的 data.logos, 与详情页 hero 一致, 不会匹配错)；
+    // 没有飞牛 logo 才走 TMDB 标题/ID 匹配(可能不准确)。
+    if (show.logo) {
+      setTimeout(async () => {
+        try {
+          const full = show.logo.startsWith('http') ? show.logo : `${base}/v/api/v1/${show.logo}`;
+          const b = await fetchImageAuth(full);
+          if (b) { swapTitleToLogo(info, b); log('fnOS logo applied:', show.title); }
+          else log('fnOS logo fetch fail:', show.title);
+        } catch (e) { log('local logo err:', show.title, e); }
+      }, i * 600);
+    } else if (show.tmdbId || show.title) {
       // API 真实条目 → TMDB 透明 logo（主进程已按「横屏」筛选并返回候选列表；此处再排除纯白 PNG）
       setTimeout(async () => {
         try {
