@@ -593,18 +593,25 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _carouselInited = false;
       injectCarousel();  // 立即注入(左侧大图先用竖版 poster 兜底, 横版大海报异步补齐后重建)
 
-      // [lc-566] 并行补横版大海报(backdrop): 当前页 DOM 只有竖版卡片海报, 横版图只能从 item API 拿。
-      // 并行 10 条 + 单条 4s 超时(AbortController), 不阻塞首屏; 补成功后重建轮播, 失败保留竖版兜底。
-      log('[lc-566] fetching landscape backdrops for', newShows.length, 'items (parallel, 4s timeout)...');
+      // [lc-567] 并行补横版大海报(backdrop): 优先级 = ①当前页已加载横版图(scrapeLandscapeBackdrops, 用户可见的横版卡片)
+      // ②item API(fetchItemBackdrop, 字段多源+诊断日志)。均失败保留竖版模糊兜底。
+      // 并行 10 条 + 单条 4s 超时(AbortController), 不阻塞首屏; 补成功后重建轮播。
+      log('[lc-567] fetching landscape backdrops for', newShows.length, 'items (live-DOM + API)...');
+      const domLand = scrapeLandscapeBackdrops(); // 当前页已加载横版图(如"继续观看"横版卡片)
+      log('[lc-567] live landscape backdrops by id:', domLand.size, 'available');
       Promise.all(newShows.map(async (s: any) => {
+        // ① DOM 横版图(最快最稳, 用户确认飞牛自带)
+        const fromDom = domLand.get(s.id);
+        if (fromDom) { s.backdrop = fromDom; return true; }
+        // ② item API
         const bd = await fetchItemBackdrop(base, s.id);
         if (bd) { s.backdrop = bd; return true; }
         return false;
       })).then((results) => {
         const got = results.filter(Boolean).length;
-        log('[lc-566] backdrops got', got, '/', newShows.length, '; rebuilding carousel');
+        log('[lc-567] backdrops got', got, '/', newShows.length, '; rebuilding carousel');
         if (got > 0) { _carouselInited = false; injectCarousel(); }
-      }).catch((e) => log('[lc-566] backdrop fetch error:', e));
+      }).catch((e) => log('[lc-567] backdrop fetch error:', e));
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
@@ -744,17 +751,67 @@ async function fetchItemBackdrop(base: string, id: string): Promise<string> {
     if (!resp.ok) return '';
     const json: any = await resp.json();
     const d = (json && json.data) || {};
+    // [lc-567] 诊断: 打印 item API 返回的 key 与图片相关值, 便于确认飞牛横屏图真实字段
+    try {
+      const keys = Object.keys(d);
+      log('[lc-567] item API keys:', keys.join(','));
+      const imgVals: any = {};
+      keys.forEach((k: string) => {
+        const v = d[k];
+        if (typeof v === 'string' && (v.includes('/sys/img/') || v.includes('http'))) imgVals[k] = v.substring(0, 70);
+      });
+      log('[lc-567] item API img fields:', JSON.stringify(imgVals));
+      if (d.images && typeof d.images === 'object') log('[lc-567] item API images:', JSON.stringify(d.images).substring(0, 400));
+    } catch (e) { /* ignore */ }
+    // 候选字段: 常见横屏字段 + images 数组/对象里的 backdrops
     const cands: string[] = [
       d.backdrop, d.landscape, d.big_backdrop, d.fanart, d.bg, d.backdrop_path,
-      d.poster_backdrop, d.images && d.images.backdrop, d.big_pic, d.bigPic,
+      d.poster_backdrop, d.big_pic, d.bigPic, d.banner, d.hero, d.wide, d.widescreen,
+      d.images && d.images.backdrop, d.images && d.images.backdrops,
     ];
     for (const c of cands) {
       if (typeof c === 'string' && c && (c.includes('/sys/img/') || c.startsWith('http'))) {
         return c.startsWith('/') ? base + c : c;
       }
     }
+    // images 数组: 遍历找第一个含横屏语义的图
+    if (Array.isArray(d.images)) {
+      for (const im of d.images) {
+        const src = (im && (im.file_path || im.src || im.url || im.backdrop || im.poster)) || '';
+        const type = (im && (im.type || im.kind || '')) || '';
+        if (src && (type.includes('backdrop') || type.includes('landscape') || type.includes('bg') || /横|背景/.test(String(type)))) {
+          const s = String(src);
+          if (s.includes('/sys/img/') || s.startsWith('http')) return s.startsWith('/') ? base + s : s;
+        }
+      }
+    }
     return '';
   } catch (e) { return ''; }
+}
+
+/** [lc-567] 从当前页已渲染 DOM 抓**已加载的横版图**(naturalWidth>naturalHeight, 如"继续观看"等横版卡片)按 id 建表。
+ *  用户确认飞牛页面里自带横屏图——横版卡片 img 已真实加载(用户可见), 无需 API。
+ *  仅收集已加载(宽高已知)且横版(nw > nh*1.3)的图, 排除竖版。 */
+function scrapeLandscapeBackdrops(): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const base = location.origin;
+    const links = document.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
+    for (const a of Array.from(links)) {
+      const href = a.getAttribute('href') || '';
+      const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+      if (!m || map.has(m[2])) continue;
+      const img = a.querySelector('img') as HTMLImageElement | null;
+      if (!img) continue;
+      const nw = img.naturalWidth || 0, nh = img.naturalHeight || 0;
+      if (!(nw > 0 && nh > 0 && nw > nh * 1.3)) continue; // 只收已加载且明显横版
+      const s = img.currentSrc || img.src || img.getAttribute('src') || '';
+      if (s && (s.includes('/sys/img/') || s.startsWith('http'))) {
+        map.set(m[2], s.startsWith('/') ? base + s : s);
+      }
+    }
+  } catch (e) { /* ignore */ }
+  return map;
 }
 
 let _carouselInited = false;
