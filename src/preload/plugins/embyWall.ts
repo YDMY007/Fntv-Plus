@@ -473,115 +473,129 @@ function scrapeVisibleCards(): any[] {
   return Array.from(map.values());
 }
 
-/** [lc-555] 用独立隐藏 iframe 加载「全部」页(/v/list/all)，按其 DOM 自然顺序读取卡片。
- *  不依赖 ensureLibraryIndex 的共享状态机制（该机制有 pending 问题导致白屏）。
- *  返回的卡片顺序 = 全部页从左到右、从上到下的视觉顺序（即用户期望的正确顺序）。 */
+/** [lc-557] 用独立隐藏 iframe 加载「全部」页(/v/list/all)，按其 DOM 自然顺序读取卡片。
+ *  不依赖 ensureLibraryIndex 的共享状态机制（该机制有 promise pending 导致白屏）。
+ *  返回的卡片顺序 = 全部页从左到右、从上到下的视觉顺序（即用户期望的正确顺序）。
+ *
+ *  [lc-557 修复] 之前 lc-555 用 1px 小 iframe → 飞牛列表是虚拟滚动/懒加载,
+ *  1px 视口下不渲染卡片 + IntersectionObserver 判不可见 → onload 后读不到链接 → 卡死。
+ *  改用全屏尺寸 iframe(同 hotUpdates.lc-457-fix) + poll 轮询(飞牛 SPA onload 不可靠),
+ *  每 500ms 检查 contentDocument 是否有卡片, 拿到满 10 个即 finish, timeoutMs 兜底。 */
 async function scrapeAllPageCards(timeoutMs = 12000): Promise<any[]> {
   return new Promise((resolve) => {
     const cleanTitleOf = (raw: string): string =>
       raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
 
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;border:none;';
+    // [lc-557] 必须全屏(而非1px)隐藏: 飞牛列表是滚动懒加载/虚拟滚动, 1px 视口下
+    // 仅渲染首屏约19项且 IntersectionObserver 判不可见不加载后续; 全屏+opacity:0
+    // 放背后(z-index:-1, pointer-events:none)既不影响用户视图, 又能让飞牛正常渲染卡片。
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:0;border:none;pointer-events:none;';
     document.body.appendChild(iframe);
-
-    const timer = setTimeout(() => {
-      log('[lc-555] all-page iframe timeout(', timeoutMs, 'ms), got', map.size, 'cards');
-      cleanup();
-      resolve(Array.from(map.values()));
-    }, timeoutMs);
 
     const map = new Map<string, any>();
     let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const cleanup = () => {
+    const cleanup = (): void => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       try { iframe.remove(); } catch (e) { /* ignore */ }
     };
 
-    iframe.onload = () => {
-      try {
-        const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
-        if (!doc) { cleanup(); resolve([]); return; }
+    const finish = (reason: string): void => {
+      if (done) return;
+      log('[lc-557] scraped', map.size, 'cards from all-page (' + reason + '), first:', (map.values().next().value?.title || '').substring(0, 20));
+      cleanup();
+      resolve(Array.from(map.values()));
+    };
 
-        // 按全部页 DOM 自然顺序（左→右, 上→下）扫描卡片
-        const links = doc.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
-        log('[lc-555] all-page loaded, found', links.length, 'links total');
+    const collect = (doc: any): void => {
+      // 按全部页 DOM 自然顺序（左→右, 上→下）扫描卡片
+      const links = doc.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
+      for (let i = 0; i < links.length && map.size < 10; i++) {
+        const a = links[i] as HTMLElement;
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+        if (!m || map.has(m[2])) continue;
 
-        for (let i = 0; i < links.length && map.size < 10; i++) {
-          const a = links[i] as HTMLElement;
-          const href = a.getAttribute('href') || '';
-          const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-          if (!m || map.has(m[2])) continue;
-
-          // 提取封面
-          let poster = '';
-          const img = a.querySelector('img');
-          if (img) {
-            const s = (img as HTMLImageElement).currentSrc || (img as HTMLImageElement).src || img.getAttribute('src') || '';
-            // 相对路径 → 绝对路径（iframe 内的相对路径需基于 fnOS origin）
-            if (s && (s.includes('/v/api/v1/sys/img/') || s.includes('sys/img') || /^https?:/i.test(s))) {
-              poster = s.startsWith('/') ? (location.origin + s) : s;
-            }
+        // 提取封面
+        let poster = '';
+        const img = a.querySelector('img');
+        if (img) {
+          const s = (img as HTMLImageElement).currentSrc || (img as HTMLImageElement).src || img.getAttribute('src') || '';
+          if (s && (s.includes('/v/api/v1/sys/img/') || s.includes('sys/img') || /^https?:/i.test(s))) {
+            poster = s.startsWith('/') ? (location.origin + s) : s;
           }
-          if (!poster) continue;  // 无封面（直播电视等）→ 跳过
-
-          // 提取标题：取卡片底部标题文本（通常在 a 内或紧邻的兄弟元素中）
-          let title = '';
-          // 策略：找 a 内最长的非空文本节点（通常是标题行）
-          const walk = (el: HTMLElement): void => {
-            for (const node of Array.from(el.childNodes)) {
-              if (title) return;
-              if (node.nodeType === Node.TEXT_NODE) {
-                const t = (node.textContent || '').trim();
-                if (t.length >= 2) { title = t; return; }
-              } else if (node.nodeType === Node.ELEMENT_NODE) {
-                walk(node as HTMLElement);
-              }
-            }
-          };
-          walk(a);
-          // 如果 a 内文本太短（可能只是图片 alt），尝试取父级卡片容器的标题区
-          if (!title || title.length < 3) {
-            let parent = a.parentElement;
-            for (let d = 0; d < 4 && parent; d++) {
-              const t = (parent.textContent || '').trim().replace(/\s+/g, ' ');
-              // 卡片容器 textContent 通常包含"标题 + 季数 + 年份"，取较长的那段
-              if (t.length > 6 && t.length < 80) { title = t; break; }
-              parent = parent.parentElement;
-            }
-          }
-          if (!title) title = (a.getAttribute('title') || '').trim();
-          if (!title) continue;
-
-          map.set(m[2], {
-            id: m[2], title: cleanTitleOf(title), poster, backdrop: poster,
-            desc: '', mediaType: m[1],
-            tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
-            year: 0, rating: 0, statusText: '', genres: [] as string[],
-          });
         }
+        if (!poster) continue;  // 无封面（直播电视等）→ 跳过
 
-        log('[lc-555] scraped', map.size, 'cards from all-page, first:', (map.values().next().value?.title || '').substring(0, 20));
-        cleanup();
-        resolve(Array.from(map.values()));
-      } catch (e) {
-        log('[lc-555] all-page scrape error:', e);
-        cleanup();
-        resolve(Array.from(map.values()));
+        // 提取标题：取卡片底部标题文本（通常在 a 内或紧邻的兄弟元素中）
+        let title = '';
+        const walk = (el: HTMLElement): void => {
+          for (const node of Array.from(el.childNodes)) {
+            if (title) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+              const t = (node.textContent || '').trim();
+              if (t.length >= 2) { title = t; return; }
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              walk(node as HTMLElement);
+            }
+          }
+        };
+        walk(a);
+        // 如果 a 内文本太短（可能只是图片 alt），尝试取父级卡片容器的标题区
+        if (!title || title.length < 3) {
+          let parent = a.parentElement;
+          for (let d = 0; d < 4 && parent; d++) {
+            const t = (parent.textContent || '').trim().replace(/\s+/g, ' ');
+            if (t.length > 6 && t.length < 80) { title = t; break; }
+            parent = parent.parentElement;
+          }
+        }
+        if (!title) title = (a.getAttribute('title') || '').trim();
+        if (!title) continue;
+
+        map.set(m[2], {
+          id: m[2], title: cleanTitleOf(title), poster, backdrop: poster,
+          desc: '', mediaType: m[1],
+          tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+          year: 0, rating: 0, statusText: '', genres: [] as string[],
+        });
       }
     };
 
-    iframe.onerror = () => {
-      log('[lc-555] all-page iframe error');
-      cleanup();
-      resolve([]);
+    timer = setTimeout(() => finish('timeout-' + timeoutMs + 'ms'), timeoutMs);
+
+    // [lc-557] poll 轮询(不依赖 onload, 飞牛 SPA onload 不可靠):
+    // 每 500ms 检查 iframe.contentDocument 是否有卡片, 拿到满 10 个即 finish。
+    const poll = (): void => {
+      if (done) return;
+      try {
+        const doc: any = iframe.contentDocument || iframe.contentWindow?.document;
+        if (!doc) { setTimeout(poll, 400); return; }
+        collect(doc);
+        if (map.size >= 10) { finish('got-10'); return; }
+        // 不足 10 个有封面项: 滚动触发懒加载更多, 继续轮询
+        try {
+          const w: any = doc.defaultView || doc.parentWindow;
+          if (w) w.scrollTo(0, 1e9);
+        } catch { /* ignore */ }
+        const els = doc.querySelectorAll('*');
+        els.forEach((el: any) => { try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = el.scrollHeight; } catch { /* ignore */ } });
+        setTimeout(poll, 500);
+      } catch (e) {
+        setTimeout(poll, 400);
+      }
     };
 
+    iframe.onerror = () => { log('[lc-557] all-page iframe error'); finish('iframe-error'); };
+
     // 加载全部页（飞牛已按"最新更新在上"排好序）
-    iframe.src = '/v/list/all';
+    iframe.src = location.origin + '/v/list/all';
+    // 启动轮询(稍延迟等 iframe 开始加载)
+    setTimeout(poll, 300);
   });
 }
 
