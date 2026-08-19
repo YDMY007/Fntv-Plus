@@ -575,15 +575,20 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
       try { markInLibrary(document); } catch { /* ignore */ }
       resolve(idx);
     };
-    // 在 iframe 文档内把各可滚动容器滚到底部, 触发飞牛懒加载下一页/渲染后续项
+    // [lc-580] 分段滚动: 每次只滚 1500px, 逐步触发飞牛虚拟滚动懒加载。
+    // 旧实现一次 scrollTo(0, 1e9) 滚到底只触发一次加载 → 索引不全(88项只是首屏+1页),
+    // 库里后排的剧(每日放送新番等)没被收录 →「已入库」漏标。
+    let scrollStep = 0;
     const scrollAll = (doc: any): void => {
+      scrollStep++;
+      const px = scrollStep * 1500; // 每轮向下 1500px, 逐步滚动触发分批加载
       try {
         const w: any = doc.defaultView || doc.parentWindow;
-        if (w) w.scrollTo(0, 1e9);
+        if (w) w.scrollTo(0, px);
       } catch { /* ignore */ }
       const els = doc.querySelectorAll('*');
       els.forEach((el: any) => {
-        try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = el.scrollHeight; } catch { /* ignore */ }
+        try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = px; } catch { /* ignore */ }
       });
     };
     const poll = (): void => {
@@ -642,9 +647,9 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
   });
 }
 
-/** [lc-578] 标题归一化：去空白/分隔符/评分星号/评分数字/季数/年份等脏文本，便于中文/原名模糊匹配。
+/** [lc-578][lc-580] 标题归一化：去空白/分隔符/评分/季数/年份/副标题符号等脏文本，便于中文/原名模糊匹配。
  *  ensureLibraryIndex 提取的标题是"最长 textContent"(如"8.4 龙之家族 共3季 2022-2026"),
- *  若不去评分/年份/季数, 双向包含在边界情况会失配 →「已入库」漏标。 */
+ *  每日放送标题常带季数(如"无职转生 第三季 ～xxx～")而库标题不带 → 需统一去除后匹配。 */
 function normalizeTitle(s: string): string {
   return (s || '')
     .toLowerCase()
@@ -653,10 +658,13 @@ function normalizeTitle(s: string): string {
     .replace(/[★☆⭐]/g, '')                          // 评分星号
     .replace(/^\d+(\.\d+)?\s*分?\s*/g, '')            // 评分"8.4分"前缀
     .replace(/共\s*\d+\s*季/g, '')                    // 共X季
-    .replace(/第\s*\d+\s*季/g, '')                    // 第X季
+    .replace(/第\s*[一二三四五六七八九十\d]+\s*季/g, '') // 第三季/第3季(中文数字)
+    .replace(/season\s*[一二三四五六七八九十\d]+/gi, '') // Season 2
+    .replace(/[一二三四五六七八九十\d]+\s*(季|期|シーズン)/g, '') // 3季/第三期/シーズン2
+    .replace(/[·・]s\d+\b/g, '')                      // ·S2
     .replace(/\b\d{4}[-–]\d{4}\b/g, '')               // 年份范围 2022-2026
     .replace(/\b(19|20)\d{2}\b/g, '')                 // 单年份
-    .replace(/[《》「」『』【】]/g, '');                // 书名号
+    .replace(/[《》「」『』【】（）()]/g, '');           // 书名号/括号
 }
 
 /** 用番剧名(中/原)在库索引中匹配；精确优先，其次双向包含；无则返回 null */
