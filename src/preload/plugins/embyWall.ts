@@ -593,25 +593,36 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _carouselInited = false;
       injectCarousel();  // 立即注入(左侧大图先用竖版 poster 兜底, 横版大海报异步补齐后重建)
 
-      // [lc-567] 并行补横版大海报(backdrop): 优先级 = ①当前页已加载横版图(scrapeLandscapeBackdrops, 用户可见的横版卡片)
-      // ②item API(fetchItemBackdrop, 字段多源+诊断日志)。均失败保留竖版模糊兜底。
+      // [lc-569] 并行补 item API 详情(横版大海报 backdrop + 集数/季数/年份/评分/状态/类型/简介):
+      // 优先级: 横版图 ①当前页已加载横版图(scrapeLandscapeBackdrops) ②item API(fetchItemDetail)
+      // 其余字段(local/total 集数季数等)全部从 item API 拿 → 重建后胶囊能显示真实数据。
       // 并行 10 条 + 单条 4s 超时(AbortController), 不阻塞首屏; 补成功后重建轮播。
-      log('[lc-567] fetching landscape backdrops for', newShows.length, 'items (live-DOM + API)...');
+      log('[lc-569] fetching item details for', newShows.length, 'items (live-DOM landscape + API)...');
       const domLand = scrapeLandscapeBackdrops(); // 当前页已加载横版图(如"继续观看"横版卡片)
-      log('[lc-567] live landscape backdrops by id:', domLand.size, 'available');
+      log('[lc-569] live landscape backdrops by id:', domLand.size, 'available');
       Promise.all(newShows.map(async (s: any) => {
-        // ① DOM 横版图(最快最稳, 用户确认飞牛自带)
         const fromDom = domLand.get(s.id);
-        if (fromDom) { s.backdrop = fromDom; return true; }
-        // ② item API
-        const bd = await fetchItemBackdrop(base, s.id);
-        if (bd) { s.backdrop = bd; return true; }
-        return false;
-      })).then((results) => {
-        const got = results.filter(Boolean).length;
-        log('[lc-567] backdrops got', got, '/', newShows.length, '; rebuilding carousel');
-        if (got > 0) { _carouselInited = false; injectCarousel(); }
-      }).catch((e) => log('[lc-567] backdrop fetch error:', e));
+        if (fromDom) s.backdrop = fromDom; // ① DOM 横版图(最快最稳)
+        const detail = await fetchItemDetail(base, s.id); // ② item API 全字段
+        if (!detail) return !!(fromDom);
+        // 仅填充 API 有值的字段(0/空保留 DOM 兜底值)
+        if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
+        if (detail.totalEps) s.totalEps = detail.totalEps;
+        if (detail.localEps) s.localEps = detail.localEps;
+        if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
+        if (detail.localSeasons) s.localSeasons = detail.localSeasons;
+        if (detail.year) s.year = detail.year;
+        if (detail.rating) s.rating = detail.rating;
+        if (detail.statusText) s.statusText = detail.statusText;
+        if (detail.genres && detail.genres.length) s.genres = detail.genres;
+        if (detail.desc) s.desc = detail.desc;
+        if (detail.title) s.title = detail.title;
+        return true;
+      })).then(() => {
+        const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop).length;
+        log('[lc-569] item details enriched:', withData, '/', newShows.length, '; rebuilding carousel');
+        if (withData > 0) { _carouselInited = false; injectCarousel(); }
+      }).catch((e) => log('[lc-569] item detail fetch error:', e));
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
@@ -733,11 +744,11 @@ async function fetchImageAuth(fullUrl: string): Promise<string | null> {
   } catch (e) { log('fetchImg err', String(e).substring(0, 90)); return null; }
 }
 
-/** [lc-566] 从飞牛 item API 拿横版大海报(backdrop) URL:
- *  当前页 DOM 只有竖版卡片海报, 横版背景图只能从 /v/api/v1/item/{id} 拿。
- *  带 Authx 签名 + AbortController 4s 超时; 失败返回空字符串(由调用方用竖版 poster 兜底)。
- *  字段多源兜底: backdrop / landscape / bg / fanart / big_backdrop / 图片URL */
-async function fetchItemBackdrop(base: string, id: string): Promise<string> {
+/** [lc-569] 从飞牛 item API 一次性补齐轮播展示字段:
+ *  横版大海报(backdrop) + 集数/季数(local/total) + 年份 + 评分 + 状态 + 类型 + 简介。
+ *  字段名以 lc-552 fetchOne 历史实现为准(已验证可用)。
+ *  带 Authx 签名 + AbortController 4s 超时; 失败返回 null(由调用方保留 DOM 兜底)。 */
+async function fetchItemDetail(base: string, id: string): Promise<any | null> {
   try {
     const { ipcRenderer } = require('electron');
     const path = `/v/api/v1/item/${id}`;
@@ -748,11 +759,10 @@ async function fetchItemBackdrop(base: string, id: string): Promise<string> {
     try {
       resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
     } finally { clearTimeout(timer); }
-    if (!resp.ok) return '';
+    if (!resp.ok) return null;
     const json: any = await resp.json();
     const d = (json && json.data) || {};
-    // [lc-568] 查历史 lc-552 的 fetchOne 确认: 飞牛 item API 的横版大海报字段 = data.backdrops(数组),
-    // 竖版海报 = data.posters(数组)。pickImg: 数组取第一项(字符串或 {url/path/image/src}), 补 sys/img 前缀。
+    // [lc-568] 飞牛 item API: 横版大海报 = data.backdrops(数组), 竖版 = data.posters(数组)
     const pickImg = (v: any): string => {
       let s = '';
       if (typeof v === 'string') s = v;
@@ -761,11 +771,37 @@ async function fetchItemBackdrop(base: string, id: string): Promise<string> {
       if (s.startsWith('http') || s.includes('sys/img')) return s;
       return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
     };
-    const rel = pickImg(d.backdrops); // 横版大海报(核心字段, lc-552 已验证可用)
-    if (!rel) return '';
-    if (rel.startsWith('http')) return rel;
-    return base + '/v/api/v1/' + rel; // sys/img/... → http://host/v/api/v1/sys/img/...
-  } catch (e) { return ''; }
+    const rel = pickImg(d.backdrops);
+    const backdrop = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
+    // [lc-569] 集数/季数(local=本地已更新, total=总规模), 年份, 评分, 状态, 类型, 简介
+    const totalEps = Number(d.number_of_episodes) || 0;
+    const localEps = Number(d.local_number_of_episodes) || 0;
+    const totalSeasons = Number(d.number_of_seasons) || 0;
+    const localSeasons = Number(d.local_number_of_seasons) || 0;
+    const rawYear = Number(d.production_year) || Number(String((d.premiere_date || d.air_date || '')).slice(0, 4)) || 0;
+    const rawRating = parseFloat(String(d.vote_average || '').trim());
+    const rating = isNaN(rawRating) ? 0 : rawRating;
+    const statusRaw = (d.status || '').trim();
+    let statusText = '';
+    if (statusRaw) {
+      const s = statusRaw.toLowerCase();
+      if (s.includes('continu') || s.includes('更新') || s.includes('连载')) statusText = '连载中';
+      else if (s.includes('end') || s.includes('完结')) statusText = '已完结';
+      else if (s.includes('releas') || s.includes('上映') || s.includes('发行')) statusText = '已上映';
+      else statusText = statusRaw;
+    }
+    let genres: string[] = [];
+    const g = (d as any).genres;
+    if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || ''))).filter(Boolean);
+    else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、]/).map((s: string) => s.trim()).filter(Boolean);
+    return {
+      backdrop,
+      totalEps, localEps, totalSeasons, localSeasons,
+      year: rawYear, rating, statusText, genres,
+      desc: (d.overview || '').trim(),
+      title: (d.title || d.name || '').trim(),
+    };
+  } catch (e) { return null; }
 }
 
 /** [lc-567] 从当前页已渲染 DOM 抓**已加载的横版图**(naturalWidth>naturalHeight, 如"继续观看"等横版卡片)按 id 建表。
@@ -1023,7 +1059,10 @@ function injectCarousel(): void {
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
-    // [lc-548] 胶囊徽标：剧集显示「X季Y集」（总季数+总集数），不再显示「更新至N集」这类抓不准是否更新完的信息；电影显示「年份 · 电影」
+    // [lc-569] 胶囊徽标（用户确认方案）：
+    //   - 剧集·连载中（本地集数 < 总集数，还在更新）→ 「共X季 · 看到第N集」
+    //   - 剧集·已完结（本地集数 ≥ 总集数，更新完）→ 「共X季 · 全N集」
+    //   - 电影 → 「年份 · 电影」
     const totalEps = (show as any).totalEps || 0;
     const localEps = (show as any).localEps || 0;
     const totalSeasons = (show as any).totalSeasons || 0;
@@ -1033,15 +1072,17 @@ function injectCarousel(): void {
     if (show.mediaType === 'movie') {
       pillText = (year ? year + ' · ' : '') + '电影';
     } else {
-      // 季数：总季数优先，回退本地季数；集数：总集数优先，回退本地集数
       const seasons = totalSeasons || localSeasons;
       const eps = totalEps || localEps;
+      const local = localEps;
+      const done = (show as any).statusText === '已完结' || (local > 0 && eps > 0 && local >= eps); // 更新完
+      const ongoing = (show as any).statusText === '连载中' || (local > 0 && eps > 0 && local < eps); // 还在更新
       if (seasons > 0 && eps > 0) {
-        pillText = `${seasons}季 ${eps}集`;
+        pillText = (done || !ongoing) ? `共${seasons}季 · 全${eps}集` : `共${seasons}季 · 看到第${local}集`;
       } else if (eps > 0) {
-        pillText = `${eps}集`;
+        pillText = (done || !ongoing) ? `全${eps}集` : `看到第${local}集`;
       } else if (seasons > 0) {
-        pillText = `${seasons}季`;
+        pillText = `共${seasons}季`;
       } else {
         pillText = '✨ 最近更新';
       }
