@@ -560,6 +560,12 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
           log('skip non-syncable carousel item:', show.id, 'type=', itemType);
           continue;
         }
+        // [lc-545] M3U8/电视直播剔除：即使 type 通过白名单(如 TV/TvSeries)，
+        // is_m3u8=true 的项无封面图（poster/backdrop 为空），会导致轮播加载失败/白屏。
+        if (data.is_m3u8) {
+          log('skip m3u8/live-tv carousel item:', show.id, 'is_m3u8=true');
+          continue;
+        }
         // posters/backdrops是短路径字符串(如"/a9/06/xxx.webp"), 需补sys/img前缀
         const pickImg = (v: any): string => {
           let s = '';
@@ -572,6 +578,11 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const poster = pickImg(data.posters) || (show as any).poster || '';
         const backdrop = pickImg(data.backdrops) || poster;
         if (show.id === shows[0]?.id) log('1st backdrop:', backdrop.substring(0, 60), '| poster:', poster.substring(0, 60));
+        // [lc-545] 无封面图防御：poster 和 backdrop 都为空的项无法渲染轮播，直接跳过。
+        if (!backdrop) {
+          log('skip no-image carousel item:', show.id, 'no poster/backdrop');
+          continue;
+        }
         // [lc-408] 提取 tmdb id + mediaType，供轮播图标题替换为 TMDB 透明 logo
         const tmdbId = extractTmdbId(data);
         if (show.id === shows[0]?.id) log('1st tmdbId:', tmdbId || '(none)', '| mediaType:', show.mediaType || 'tv');
