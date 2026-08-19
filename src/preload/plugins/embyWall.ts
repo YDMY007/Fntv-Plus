@@ -3,8 +3,9 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-// [lc-561] 轮播数据源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确），
-// 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。
+// [lc-563] 轮播数据源 = 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex（稳定构建 97 项），取 Map 前 10 项 = 首屏 DOM 顺序 = 最近更新在前。
+// 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。绝不在隐藏 iframe 内强制要求 poster（fnOS 懒加载图永远没真实 URL → 跳过 → 0 个）。
+import { ensureLibraryIndex } from './hotUpdates';
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -475,167 +476,57 @@ function scrapeVisibleCards(root?: Document | Element): any[] {
   return Array.from(map.values());
 }
 
-/** [lc-561] 用全屏隐藏 iframe 加载「全部剧集列表」(/v/list/all)，【只读首屏、绝不滚动到底】按 DOM 文档顺序读取
- *  首屏前 10 个有真实封面的 tv/movie 卡片。
+/** [lc-563] 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex 拿「全部剧集列表」(/v/list/all) 首屏数据。
  *  关键事实（用户确认 + fnOS 默认排序）：/v/list/all 默认「最近更新在上」，首屏 DOM 文档顺序 = 视觉顺序 = 正确顺序。
- *  因此绝不滚动到底(滚动会触发飞牛虚拟滚动异步加载更旧条目、打乱顺序)；只做温和滚动(向下400px再回顶)触发首屏懒加载。
- *  模型化 hotUpdates.ts 已验证可行的 ensureLibraryIndex：全屏 iframe + 轮询 contentDocument。
- *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。
+ *  ensureLibraryIndex 已证明稳定构建（截图日志「97 项」），其内部全屏 iframe + scrollAll 滚动到底收集全量，
+ *  但 **Map 前 10 项 = 首屏 DOM 顺序插入 = 最近更新在前**（后续滚动加载的追加项插入到 Map 后面）。
+ *  关键修复（vs lc-561/562 失败版）：不强制要求 poster —— 隐藏 iframe 内 fnOS 懒加载图永远没真实 URL，
+ *  若 `if(!poster)continue` 会全部跳过（这就是之前 0 个的根因）。ensureLibraryIndex 也允许 poster 为空。
+ *  标题重新清洗（ensureLibraryIndex 提取的 title 含评分/年份，需 cleanTitleOf 清理）。
  *  绝对不使用硬编码数据。 */
 async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: number) => void): Promise<any[]> {
-  return new Promise((resolve) => {
-    const base = location.origin;
-    const iframe = document.createElement('iframe');
-    // 全屏隐藏(同 ensureLibraryIndex 的 lc-457-fix): 飞牛虚拟滚动在 1px 视口不渲染卡片, 全屏才正常渲染首屏
-    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:0;border:none;pointer-events:none';
-    iframe.src = base + '/v/list/all';
+  const cleanTitleOf = (raw: string): string => {
+    let t = (raw || '').replace(/\s+/g, ' ').trim();
+    t = t.replace(/共\s*\d+\s*季[^\n,]*/g, '');
+    t = t.replace(/第?\s*\d+\s*季/g, '');
+    t = t.replace(/[·—\-~]\s*\d{4}[-–]\d{4}/g, '');
+    t = t.replace(/\b(19|20)\d{2}\b/g, '');
+    t = t.replace(/\b\d+(\.\d+)?\s*分?\b/g, '');
+    t = t.replace(/^\d+(\.\d+)?\s*/, '');
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  try {
+    log('[lc-563] reusing ensureLibraryIndex (proven iframe /v/list/all scraper)...');
+    // [lc-563] 复用 ensureLibraryIndex: 同源全屏 iframe + 滚动到底 + 单例缓存; 已稳定构建 97 项
+    const libIndex = await ensureLibraryIndex();
+    log('[lc-563] ensureLibraryIndex returned', libIndex.length, 'items');
     const cards: any[] = [];
     const seen = new Set<string>();
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let linkCount = 0;
-
-    const cleanTitleOf = (raw: string): string => {
-      let t = (raw || '').replace(/\s+/g, ' ').trim();
-      t = t.replace(/共\s*\d+\s*季[^\n,]*/g, '');
-      t = t.replace(/第?\s*\d+\s*季/g, '');
-      t = t.replace(/[·—\-~]\s*\d{4}[-–]\d{4}/g, '');
-      t = t.replace(/\b(19|20)\d{2}\b/g, '');
-      t = t.replace(/\b\d+(\.\d+)?\s*分?\b/g, '');
-      t = t.replace(/^\d+(\.\d+)?\s*/, '');
-      return t.replace(/\s+/g, ' ').trim();
-    };
-
-    const pickTitle = (a: HTMLElement): string => {
-      const dt = (a.getAttribute('data-title') || '').trim();
-      if (dt && dt.length >= 2) return cleanTitleOf(dt);
-      const tEl = a.querySelector('[class*="title"],[class*="name"],[class*="Title"],[class*="Name"]') as HTMLElement | null;
-      if (tEl && (tEl.textContent || '').trim().length >= 2) return cleanTitleOf(tEl.textContent || '');
-      let best = '';
-      a.querySelectorAll('*').forEach((el: any) => {
-        const t = (el.textContent || '').trim();
-        if (t.length >= 2 && t.length <= 30 && el.children.length === 0) {
-          if (!best || t.length < best.length) best = t;
-        }
+    for (let i = 0; i < libIndex.length && cards.length < 10; i++) {
+      const item = libIndex[i];
+      const idMatch = (item.href || '').match(/([a-f0-9]{32})/);
+      const id = idMatch ? idMatch[1] : '';
+      if (!id || seen.has(id)) continue;
+      const title = cleanTitleOf(item.title || '');
+      if (!title) continue;
+      const poster = item.poster || '';
+      // [lc-563] 关键: 不强制要求 poster —— 隐藏 iframe 内 fnOS 懒加载图可能无 URL, 但 carousel 仍渲染标题+按钮
+      seen.add(id);
+      cards.push({
+        id, title, poster, backdrop: poster,
+        desc: '', mediaType: item.mediaType || 'tv',
+        tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+        year: 0, rating: 0, statusText: '', genres: [] as string[],
       });
-      if (best) return cleanTitleOf(best);
-      const full = (a.textContent || '').trim().replace(/\s+/g, ' ');
-      if (full.length > 4) return cleanTitleOf(full);
-      return (a.getAttribute('title') || '').trim();
-    };
-
-    // [lc-561] 强制触发 iframe 内懒加载封面: fnOS 卡片图多为 data-src + 滚动监听懒加载,
-    // 隐藏 iframe 内若不滚动, img.src 仍是空/占位 → 抓取 0 图。此处主动把 data-src 写入 src、设 loading=eager,
-    // 并做温和滚动(向下400px再回顶)让 IntersectionObserver 判定首屏卡片"可见"而加载真实图, 使首屏封面立即拥有真实 URL。
-    const forceLoadImages = (doc: any): void => {
-      try {
-        doc.querySelectorAll('img').forEach((img: any) => {
-          const cur = img.currentSrc || img.src || '';
-          const loaded = cur && !cur.startsWith('data:') && (cur.includes('/v/api/v1/sys/img/') || /^https?:/i.test(cur));
-          if (!loaded) {
-            const ds = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || (img.dataset && img.dataset.src) || '';
-            if (ds) img.src = ds.startsWith('/') ? base + ds : ds;
-          }
-          try { img.loading = 'eager'; } catch (e) { /* ignore */ }
-        });
-        // 温和滚动: 向下 400px 再回顶, 触发首屏卡片的 IntersectionObserver(不改首屏 DOM 顺序)
-        try {
-          const w: any = doc.defaultView || doc.parentWindow;
-          if (w) { w.scrollTo(0, 400); w.scrollTo(0, 0); }
-        } catch (e) { /* ignore */ }
-        // 触发 fnOS 的滚动懒加载监听(部分实现监听 window/documentElement scroll)
-        try { doc.documentElement.dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
-        try { (doc.defaultView || window).dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
-        const sc = doc.querySelector('[class*="scroll"],[class*="overflow"],[class*="list"],[class*="content"]') as any;
-        if (sc) { try { sc.dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ } }
-      } catch (e) { /* ignore */ }
-    };
-
-    const pickPoster = (a: HTMLElement): string => {
-      const trySrc = (s: string): string => {
-        if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) return s.startsWith('/') ? base + s : s;
-        return '';
-      };
-      const img = a.querySelector('img') as HTMLImageElement | null;
-      if (img) {
-        let p = trySrc(img.currentSrc || img.src || '');
-        if (!p) {
-          const ds = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || (img.dataset && img.dataset.src) || '';
-          p = trySrc(ds);
-        }
-        if (p) return p;
-      }
-      // 卡片背景图兜底
-      const bg = (a.getAttribute('style') || '');
-      const mm = bg.match(/url\(['"]?([^'")]*\/sys\/img\/[^'")]+)['"]?\)/);
-      if (mm) return mm[1].startsWith('/') ? base + mm[1] : mm[1];
-      return '';
-    };
-
-    const collect = (doc: any): void => {
-      const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
-      linkCount = links.length;
-      for (let i = 0; i < links.length && cards.length < 10; i++) {
-        const a = links[i] as HTMLElement;
-        const href = a.getAttribute('href') || '';
-        const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-        if (!m || seen.has(m[2])) continue;
-        const poster = pickPoster(a);
-        if (!poster) continue;  // 无封面（直播电视/个人视频）→ 跳过
-        const title = pickTitle(a);
-        if (!title) continue;
-        seen.add(m[2]);
-        cards.push({
-          id: m[2], title, poster, backdrop: poster,
-          desc: '', mediaType: m[1],
-          tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
-          year: 0, rating: 0, statusText: '', genres: [] as string[],
-        });
-      }
       // [lc-561] 实时回传已加载卡片数(供骨架显示"已加载 N 个")
       try { if (onProgress) onProgress(cards.length); } catch (e) { /* ignore */ }
-    };
-
-    const finish = (reason: string): void => {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      try { iframe.remove(); } catch { /* ignore */ }
-      log('[lc-561] all-page first-screen scrape done (' + reason + '):', cards.length, 'cards; links=' + linkCount + '; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
-      resolve(cards);
-    };
-
-    let attempts = 0;
-    const poll = (): void => {
-      attempts++;
-      try {
-        const doc: any = iframe.contentDocument || (iframe.contentWindow as any)?.document;
-        if (!doc || !doc.body) {
-          if (attempts < 40) setTimeout(poll, 400);
-          else finish('no-doc');
-          return;
-        }
-        // 等首屏至少渲染出 10 个链接(飞牛 SPA 启动 + 虚拟滚动首屏渲染), 否则继续等
-        const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
-        if (links.length < 10 && attempts < 30) { setTimeout(poll, 400); return; }
-        forceLoadImages(doc);   // 每轮强制懒加载封面, 确保 img.src 已是真实 URL
-        collect(doc);
-        if (cards.length >= 10) { finish('got-10'); return; }   // 首屏已够 → 立即结束, 绝不滚动到底
-        // 给页面启动 + 图片 URL 填充留时间: 持续触发懒加载直到满 10 或轮次耗尽
-        if (attempts >= 18) { finish('first-screen-' + cards.length); return; }
-        setTimeout(poll, 400);
-      } catch (e) {
-        if (attempts < 40) setTimeout(poll, 400);
-        else finish('error');
-      }
-    };
-
-    iframe.onload = (): void => { setTimeout(poll, 500); };
-    iframe.onerror = (): void => finish('iframe-error');
-    timer = setTimeout(() => finish('timeout-' + timeoutMs), timeoutMs);
-    document.body.appendChild(iframe);
-    setTimeout(poll, 800);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
-  });
+    }
+    log('[lc-563] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+    return cards;
+  } catch (e) {
+    log('[lc-563] ensureLibraryIndex error:', e);
+    return [];
+  }
 }
 
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
