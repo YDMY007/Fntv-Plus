@@ -482,7 +482,7 @@ function scrapeVisibleCards(root?: Document | Element): any[] {
  *  模型化 hotUpdates.ts 已验证可行的 ensureLibraryIndex：全屏 iframe + 轮询 contentDocument。
  *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。
  *  绝对不使用硬编码数据。 */
-async function scrapeAllPageFirstScreen(timeoutMs = 18000): Promise<any[]> {
+async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: number) => void): Promise<any[]> {
   return new Promise((resolve) => {
     const base = location.origin;
     const iframe = document.createElement('iframe');
@@ -592,6 +592,8 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000): Promise<any[]> {
           year: 0, rating: 0, statusText: '', genres: [] as string[],
         });
       }
+      // [lc-561] 实时回传已加载卡片数(供骨架显示"已加载 N 个")
+      try { if (onProgress) onProgress(cards.length); } catch (e) { /* ignore */ }
     };
 
     const finish = (reason: string): void => {
@@ -653,8 +655,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   try {
     // [lc-561] 主源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确）。
     // 兜底 = 当前首页已渲染 DOM 真实卡片（非硬编码）。绝对不用硬编码数据。
+    // onProgress: 抓取过程中实时回传已加载卡片数, 更新骨架"已加载 N 个"数字。
     log('[lc-561] scraping /v/list/all first screen (primary source)...');
-    let newShows: any[] = await scrapeAllPageFirstScreen(18000);
+    let newShows: any[] = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
     log('[lc-561] all-page scrape returned', newShows.length, 'cards');
 
     // 兜底: iframe 抓 0 张时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
@@ -662,6 +665,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       log('[lc-561] all-page scrape 0 cards, fallback: scrape current page live DOM');
       newShows = scrapeVisibleCards().slice(0, 10);
       log('[lc-561] live-DOM fallback got', newShows.length, 'cards');
+      if (newShows.length > 0) updateCarouselProgress(newShows.length);
     }
 
     log('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
@@ -673,7 +677,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _carouselInited = false;
       injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
     } else {
+      // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
+      const txt = _carouselProgressEl?.parentElement?.querySelector('.fnos-ph-text') as HTMLElement | null;
+      if (txt) txt.textContent = '加载失败，请检查媒体库或刷新重试';
     }
   } catch (e) { log('[lc-561] fetch error:', e); }
   _apiLoading = false;
@@ -798,6 +805,9 @@ let _carouselPosterStrip: HTMLElement | null = null; // [lc-439] 右侧竖向海
 // 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
 // injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
 let _placeholderInited = false;
+// [lc-561] 骨架加载进度: 抓取过程中实时显示"已加载 N 个", 避免用户干等
+let _carouselProgressEl: HTMLElement | null = null; // 骨架上的数字元素
+let _carouselProgressCount = 0; // 当前已加载卡片数
 
 // [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
 // 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
@@ -879,16 +889,22 @@ function injectCarousel(): void {
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
-  // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(不再用硬编码 demo 无职转生)
+  // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(骨架 + 加载进度数字), 不让用户干等
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
-    // [lc-560] 空数据时不破坏性地清空 section: 保留 fnOS 原生媒体库(可见海报),
-    // 杜绝"清空→iframe 抓取失败→永远空白"的死链。数据到位后 injectCarousel 会清空并重建为轮播。
-    log('api not ready, leaving native media library visible (non-destructive)');
+    // [lc-561] 显示骨架占位(带"已加载 N 个"数字)。_placeholderInited 守卫: 占位只构建一次,
+    // 避免 MutationObserver 反复触发 injectCarousel → 反复清空重建占位 → 死循环(见 lc-100)。
+    // 数据到位后 injectCarousel 会清空 section 并重建为真实轮播(占位自然被替换)。
+    if (!_placeholderInited) {
+      log('api not ready, building loading skeleton with progress count');
+      buildLoadingPlaceholder(target);
+      _placeholderInited = true;
+    }
     return;
   }
   // 真实数据到达: 复位占位守卫, 以便将来数据清空时可再次显示占位
   _placeholderInited = false;
+  _carouselProgressEl = null; // 占位已替换, 数字元素失效
 
   _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
   _carouselUpdatedAt = Date.now(); // 记录"最近更新"板块数据就绪时刻, 供标题旁更新时间显示
@@ -1222,16 +1238,20 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   poster.style.cssText = 'width:118px;height:168px;border-radius:14px';
   container.appendChild(poster);
 
-  // 右侧: 文字骨架 + 提示
+  // 右侧: 文字骨架 + 提示(含加载进度数字)
   const box = document.createElement('div');
   box.style.cssText = 'display:flex;flex-direction:column;gap:14px;max-width:300px';
   box.innerHTML = `
     <div class="fnos-ph-skel" style="width:200px;height:26px;border-radius:8px"></div>
     <div class="fnos-ph-skel" style="width:262px;height:14px;border-radius:6px"></div>
     <div class="fnos-ph-skel" style="width:230px;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-tip" style="margin-top:8px;font-size:15px;color:rgba(70,55,95,.72);letter-spacing:1px">正在加载精彩内容…</div>
+    <div class="fnos-ph-tip" style="margin-top:8px;font-size:15px;color:rgba(70,55,95,.72);letter-spacing:1px"><span class="fnos-ph-count" style="font-weight:700;color:rgba(120,90,160,.95);font-variant-numeric:tabular-nums">0</span> 个 · <span class="fnos-ph-text">正在加载精彩内容…</span></div>
   `;
   container.appendChild(box);
+
+  // [lc-561] 记录数字元素, 供 fetchShowsViaIPC 抓取过程中实时更新"已加载 N 个"
+  _carouselProgressEl = container.querySelector('.fnos-ph-count') as HTMLElement | null;
+  _carouselProgressCount = 0;
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
@@ -1239,12 +1259,20 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   // 若真实片库始终未加载(如 NAS 未连接/接口超时), 一段时间后温和提示, 避免"正在加载"永久卡住
   const phTimer = window.setTimeout(() => {
     if (_apiShows.length === 0 && _carouselContainer === container && document.body.contains(container)) {
-      const tip = container.querySelector('.fnos-ph-tip') as HTMLElement | null;
-      if (tip) tip.textContent = '加载较慢，请确认 NAS 已连接';
+      const txt = container.querySelector('.fnos-ph-text') as HTMLElement | null;
+      if (txt) txt.textContent = '加载较慢，请确认 NAS 已连接';
     }
   }, 16000);
   // 占位被重建替换后, 该定时器留在原地无害(条件判断已失效)
   void phTimer;
+}
+
+/** [lc-561] 更新骨架上的"已加载 N 个"数字 */
+function updateCarouselProgress(count: number): void {
+  _carouselProgressCount = count;
+  if (_carouselProgressEl && document.body.contains(_carouselProgressEl)) {
+    _carouselProgressEl.textContent = String(count);
+  }
 }
 
 /* 自动从API获取缺失的简介(IPC主进程签名→渲染进程fetch→带cookie鉴权) */
