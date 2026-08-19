@@ -534,12 +534,38 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const localSeasons = (data.local_number_of_seasons as number) || 0;
         const rawYear = (data.production_year as any) || ((data.premiere_date as string) || (data.air_date as string) || '').slice(0, 4);
         const year = Number(rawYear) || 0;
+        // [lc-549] 诊断：打印首个候选的 data 顶层字段，确认 vote_average/status/genres 是否可用
+        if (show.id === candidates[0]?.id) {
+          log('[lc-549] 1st item data keys:', Object.keys(data).join(','));
+          log('[lc-549] rating=', data.vote_average, '| status=', data.status, '| genres=', JSON.stringify((data as any).genres));
+        }
+        // [lc-549] 丰富展示字段：评分(vote_average 字符串→数字)、状态(status→中文)、类型标签(genres 数组)
+        const rawRating = parseFloat(String(data.vote_average || '').trim());
+        const rating = isNaN(rawRating) ? 0 : rawRating;
+        const statusRaw = (data.status || '').trim();
+        let statusText = '';
+        if (statusRaw) {
+          // fnOS 状态值映射为中文简称（兼容性：已是中文则原样保留）
+          const s = statusRaw.toLowerCase();
+          if (s.includes('continu') || s.includes('更新') || s.includes('连载')) statusText = '连载中';
+          else if (s.includes('end') || s.includes('完结') || s.includes('完')) statusText = '已完结';
+          else if (s.includes('releas') || s.includes('上映') || s.includes('发行')) statusText = '已上映';
+          else statusText = statusRaw; // 其他未知状态原样显示
+        }
+        // genres 可能为 [{name}] / [string] / "动作,剧情" 等多种形态，统一规整为字符串数组
+        let genres: string[] = [];
+        const g = (data as any).genres;
+        if (Array.isArray(g)) {
+          genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || ''))).filter(Boolean);
+        } else if (typeof g === 'string' && g.trim()) {
+          genres = g.split(/[,，/、]/).map((s: string) => s.trim()).filter(Boolean);
+        }
         return {
           id: show.id, title: cleanTitle,
           poster, backdrop,
           desc: data.overview || '',
           mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
-          tmdbId, totalEps, localEps, totalSeasons, localSeasons, year
+          tmdbId, totalEps, localEps, totalSeasons, localSeasons, year, rating, statusText, genres
         };
       } catch (e) { return null; }
     };
@@ -891,10 +917,25 @@ function injectCarousel(): void {
         pillText = '✨ 最近更新';
       }
     }
+    // [lc-549] meta 行：评分(⭐) / 年份 / 状态，仅显示有值的项，用分隔点连接
+    const metaParts: string[] = [];
+    if ((show as any).rating > 0) metaParts.push(`<span style="display:inline-flex;align-items:center;gap:3px;color:#ffcf6b;font-weight:700"><svg width="13" height="13" viewBox="0 0 24 24" style="flex-shrink:0"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#ffcf6b"/></svg>${(show as any).rating.toFixed(1)}</span>`);
+    if (year > 0) metaParts.push(`<span>${year}</span>`);
+    if ((show as any).statusText) metaParts.push(`<span>${(show as any).statusText}</span>`);
+    const metaHtml = metaParts.length
+      ? `<div class="fnos-meta" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;font-size:13px;font-weight:600;color:var(--fnos-hero-desc);letter-spacing:.5px">${metaParts.join('<span style="opacity:.4">·</span>')}</div>`
+      : '';
+    // [lc-549] 类型标签 chips：多标签横向排列
+    const genreArr: string[] = (show as any).genres || [];
+    const genreHtml = genreArr.length
+      ? `<div class="fnos-genres" style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${genreArr.slice(0, 4).map((g: string) => `<span style="padding:3px 10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);border-radius:12px;font-size:11.5px;font-weight:600;color:var(--fnos-hero-desc);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${g}</span>`).join('')}</div>`
+      : '';
     info.innerHTML = `
       <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${pillText}</div>
+      ${metaHtml}
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
+        ${genreHtml}
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
