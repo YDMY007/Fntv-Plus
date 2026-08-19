@@ -1063,42 +1063,28 @@ function injectCarousel(): void {
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
-    // [lc-569] 胶囊徽标（用户确认方案）：
-    //   - 剧集·连载中（本地集数 < 总集数，还在更新）→ 「共X季 · 看到第N集」
-    //   - 剧集·已完结（本地集数 ≥ 总集数，更新完）→ 「共X季 · 全N集」
-    //   - 电影 → 「年份 · 电影」
+    // [lc-571] 胶囊徽标（用户确认）：直接「X季 Y集」，评分并进胶囊，不再单独开一行 meta
+    //   - 剧集 → 「⭐8.4 · 3季 26集」（无评分则省略前缀）
+    //   - 电影 → 「⭐8.4 · 2024 · 电影」
     const totalEps = (show as any).totalEps || 0;
     const localEps = (show as any).localEps || 0;
     const totalSeasons = (show as any).totalSeasons || 0;
     const localSeasons = (show as any).localSeasons || 0;
     const year = (show as any).year || 0;
+    const rating = (show as any).rating || 0;
+    const ratingHtml = rating > 0 ? `<span style="color:#ffcf6b;font-weight:700">⭐${rating.toFixed(1)}</span> · ` : '';
     let pillText: string;
     if (show.mediaType === 'movie') {
-      pillText = (year ? year + ' · ' : '') + '电影';
+      pillText = ratingHtml + (year ? year + ' · ' : '') + '电影';
     } else {
       const seasons = totalSeasons || localSeasons;
       const eps = totalEps || localEps;
-      const local = localEps;
-      const done = (show as any).statusText === '已完结' || (local > 0 && eps > 0 && local >= eps); // 更新完
-      const ongoing = (show as any).statusText === '连载中' || (local > 0 && eps > 0 && local < eps); // 还在更新
-      if (seasons > 0 && eps > 0) {
-        pillText = (done || !ongoing) ? `共${seasons}季 · 全${eps}集` : `共${seasons}季 · 看到第${local}集`;
-      } else if (eps > 0) {
-        pillText = (done || !ongoing) ? `全${eps}集` : `看到第${local}集`;
-      } else if (seasons > 0) {
-        pillText = `共${seasons}季`;
-      } else {
-        pillText = '✨ 最近更新';
-      }
+      if (seasons > 0 && eps > 0) pillText = ratingHtml + `${seasons}季 ${eps}集`;
+      else if (eps > 0) pillText = ratingHtml + `${eps}集`;
+      else if (seasons > 0) pillText = ratingHtml + `${seasons}季`;
+      else pillText = ratingHtml + '✨ 最近更新';
     }
-    // [lc-549] meta 行：评分(⭐) / 年份 / 状态，仅显示有值的项，用分隔点连接
-    const metaParts: string[] = [];
-    if ((show as any).rating > 0) metaParts.push(`<span style="display:inline-flex;align-items:center;gap:3px;color:#ffcf6b;font-weight:700"><svg width="13" height="13" viewBox="0 0 24 24" style="flex-shrink:0"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#ffcf6b"/></svg>${(show as any).rating.toFixed(1)}</span>`);
-    if (year > 0) metaParts.push(`<span>${year}</span>`);
-    if ((show as any).statusText) metaParts.push(`<span>${(show as any).statusText}</span>`);
-    const metaHtml = metaParts.length
-      ? `<div class="fnos-meta" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0;font-size:13px;font-weight:600;color:var(--fnos-hero-desc);letter-spacing:.5px">${metaParts.join('<span style="opacity:.4">·</span>')}</div>`
-      : '';
+    // [lc-571] meta 行已移除（评分并入胶囊，不再单独一行）
     // [lc-549] 类型标签 chips：多标签横向排列
     const genreArr: string[] = (show as any).genres || [];
     const genreHtml = genreArr.length
@@ -1106,7 +1092,6 @@ function injectCarousel(): void {
       : '';
     info.innerHTML = `
       <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${pillText}</div>
-      ${metaHtml}
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
         ${genreHtml}
