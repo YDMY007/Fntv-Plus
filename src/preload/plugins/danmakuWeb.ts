@@ -107,24 +107,16 @@ function bindHeaderAutoHide(): void {
 
 /** 播放器全屏时给 html 打 fntv-video-fullscreen 标记, 由 mainwin.ts 的 ACRYLIC_CSS
     在命中该 class(或原生 :fullscreen)时去掉窗口圆角/clip-path, 使视频4角变直角。
-    [lc-550] 飞牛 xgplayer 多数走伪全屏(给 .xgplayer 容器加 xgplayer-fullscreen 并铺满视口),
-    此时 html 并非 :fullscreen, 须靠本检测打标; 浏览器原生全屏则由 :fullscreen 直接覆盖。 */
+    [lc-552] 重构检测策略: 不再依赖 ResizeObserver+尺寸阈值(时序不稳定→圆角时灵时不灵),
+    改为直接监听 xgplayer 自身的 xgplayer-fullscreen class(MutationObserver),
+    这是最可靠的全屏信号——xgplayer 进入/退出伪全屏时立即添加/移除该 class。 */
 let _fsFixBound = false;
 function applyVideoFullscreenClass(): void {
-    let fs = !!document.fullscreenElement;
-    if (!fs) {
-        // 飞牛 xgplayer 伪全屏: 播放器根容器(.xgplayer)铺满视口即视为全屏
-        const player = document.querySelector('.xgplayer') as HTMLElement | null;
-        if (player && player.offsetParent !== null) {
-            const r = player.getBoundingClientRect();
-            if (r.width >= window.innerWidth * 0.97 &&
-                r.height >= window.innerHeight * 0.95 &&
-                r.top <= 4 && r.left <= 4) {
-                fs = true;
-            }
-        }
-    }
-    document.documentElement.classList.toggle('fntv-video-fullscreen', fs);
+    // ① 浏览器原生全屏（最高优先级）
+    const nativeFs = !!document.fullscreenElement;
+    // ② 飞牛 xgplayer 伪全屏：直接检查 xgplayer-fullscreen class（xgplayer 自身管理）
+    const pseudoFs = !!document.querySelector('.xgplayer.xgplayer-fullscreen');
+    document.documentElement.classList.toggle('fntv-video-fullscreen', nativeFs || pseudoFs);
 }
 function bindVideoFullscreenFix(): void {
     if (!isPlayerPage()) return;
@@ -132,20 +124,32 @@ function bindVideoFullscreenFix(): void {
     if (_fsFixBound) { applyVideoFullscreenClass(); return; }
     _fsFixBound = true;
     const update = () => applyVideoFullscreenClass();
+    // 浏览器原生全屏事件
     document.addEventListener('fullscreenchange', update, { passive: true });
-    window.addEventListener('resize', update, { passive: true });
-    // 持续观察播放器根容器尺寸变化(伪全屏时 .xgplayer 会突然铺满)
-    const tryObserve = () => {
+    // [lc-552] 核心：MutationObserver 监听 .xgplayer 容器的 class 变化
+    // xgplayer 进入伪全屏时立即加 xgplayer-fullscreen、退出时移除，比尺寸检测可靠得多
+    const tryObservePlayerClass = () => {
         const player = document.querySelector('.xgplayer') as HTMLElement | null;
-        if (player) {
-            const ro = new ResizeObserver(() => update());
-            ro.observe(player);
+        if (player && !player.dataset.fntvFsObserved) {
+            player.dataset.fntvFsObserved = '1';
+            new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    if (m.type === 'attributes' && m.attributeName === 'class') {
+                        update();
+                        break; // 一个 mutation 就够了
+                    }
+                }
+            }).observe(player, { attributes: true, attributeFilter: ['class'] });
         }
     };
-    tryObserve();
-    setTimeout(tryObserve, 2000); // 播放器可能稍后渲染, 延迟再尝试挂载
+    // 立即尝试 + 延迟重试（播放器可能稍后渲染）
+    tryObservePlayerClass();
+    setTimeout(tryObservePlayerClass, 1000);
+    setTimeout(tryObservePlayerClass, 3000);
+    // resize 兜底（处理窗口大小变化等边缘情况）
+    window.addEventListener('resize', update, { passive: true });
     applyVideoFullscreenClass();
-    log.info('[danmakuWeb] 播放器全屏去圆角检测已启用');
+    log.info('[danmakuWeb] 播放器全屏去圆角检测已启用 (MutationObserver+xgplayer-fullscreen)');
 }
 
 interface DanmakuItem {
