@@ -3,10 +3,10 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-import { ensureLibraryIndex, LibItem } from './hotUpdates';
-// [lc-558] 回归复用 hotUpdates.ensureLibraryIndex() 获取全量库索引(DOM 已含 poster+title, 按 /v/list/all 顺序)。
-// 该机制自建全屏 iframe 加载 /v/list/all 且与当前页 pathname 无关, 已验证健壮(日志"构建完成 N 项")。
-// 不再使用 lc-555/557 的 scrapeAllPageCards(独立 iframe+poll 不可靠, 常卡死)。
+// [lc-559] 轮播数据改为"不滚动读取全部页首屏 DOM 顺序"，不再依赖 ensureLibraryIndex 的全量滚动收集
+// （全量滚动会让飞牛虚拟滚动异步加载更旧条目、Map 插入顺序打乱视觉顺序 → 顺序变为"很久以前"）。
+// 改用 scrapeAllPageFirstScreen(): 全屏隐藏 iframe 加载 /v/list/all, 只读首屏前 10 个有封面卡片,
+// 顺序 = 全部页从上到下视觉顺序, 标题精准提取(data-title / [class*=title] 元素, 不再混评分年份)。
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -476,6 +476,116 @@ function scrapeVisibleCards(): any[] {
   return Array.from(map.values());
 }
 
+/** [lc-559] 用全屏隐藏 iframe 加载「全部」页(/v/list/all)，【不滚动】直接按 DOM 文档顺序读取
+ *  首屏前 10 个有真实封面的 tv/movie 卡片。
+ *  关键：不滚动 scrollAll —— 滚动会触发飞牛虚拟滚动异步加载更旧的条目并以 Map 插入顺序覆盖，
+ *  导致轮播顺序变成"滚动加载顺序"而非用户在全部页看到的视觉顺序。首屏 DOM 顺序 = 视觉顺序。
+ *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。 */
+async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
+  return new Promise((resolve) => {
+    const base = location.origin;
+    const iframe = document.createElement('iframe');
+    // 全屏隐藏(同 ensureLibraryIndex 的 lc-457-fix): 飞牛虚拟滚动在 1px 视口不渲染卡片, 全屏才正常渲染首屏
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:0;border:none;pointer-events:none';
+    iframe.src = base + '/v/list/all';
+    const cards: any[] = [];
+    const seen = new Set<string>();
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanTitleOf = (raw: string): string => {
+      let t = (raw || '').replace(/\s+/g, ' ').trim();
+      t = t.replace(/共\s*\d+\s*季[^\n,]*/g, '');       // 共3季...
+      t = t.replace(/第?\s*\d+\s*季/g, '');              // 第3季/3季
+      t = t.replace(/[·—\-~]\s*\d{4}[-–]\d{4}/g, '');    // —2024-2025
+      t = t.replace(/\b(19|20)\d{2}\b/g, '');            // 年份 2024
+      t = t.replace(/\b\d+(\.\d+)?\s*分?\b/g, '');       // 8.5/8.5分
+      t = t.replace(/^\d+(\.\d+)?\s*/, '');              // 开头评分
+      return t.replace(/\s+/g, ' ').trim();
+    };
+
+    const pickTitle = (a: HTMLElement): string => {
+      const dt = (a.getAttribute('data-title') || '').trim();
+      if (dt && dt.length >= 2) return cleanTitleOf(dt);
+      const tEl = a.querySelector('[class*="title"],[class*="name"],[class*="Title"],[class*="Name"]') as HTMLElement | null;
+      if (tEl && (tEl.textContent || '').trim().length >= 2) return cleanTitleOf(tEl.textContent || '');
+      // 兜底：卡片内最短且有意义的叶子文本（标题通常比"年份+评分"行短且独立）
+      let best = '';
+      a.querySelectorAll('*').forEach((el: any) => {
+        const t = (el.textContent || '').trim();
+        if (t.length >= 2 && t.length <= 30 && el.children.length === 0) {
+          if (!best || t.length < best.length) best = t;
+        }
+      });
+      if (best) return cleanTitleOf(best);
+      const full = (a.textContent || '').trim().replace(/\s+/g, ' ');
+      if (full.length > 4) return cleanTitleOf(full);
+      return (a.getAttribute('title') || '').trim();
+    };
+
+    const collect = (doc: any): void => {
+      const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
+      for (let i = 0; i < links.length && cards.length < 10; i++) {
+        const a = links[i] as HTMLElement;
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+        if (!m || seen.has(m[2])) continue;
+        let poster = '';
+        const img = a.querySelector('img') as HTMLImageElement | null;
+        if (img) {
+          const s = img.currentSrc || img.src || img.getAttribute('src') || '';
+          if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) poster = s.startsWith('/') ? base + s : s;
+        }
+        if (!poster) continue;  // 无封面（直播电视/个人视频）→ 跳过
+        const title = pickTitle(a);
+        if (!title) continue;
+        seen.add(m[2]);
+        cards.push({
+          id: m[2], title, poster, backdrop: poster,
+          desc: '', mediaType: m[1],
+          tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+          year: 0, rating: 0, statusText: '', genres: [] as string[],
+        });
+      }
+    };
+
+    const finish = (reason: string): void => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      try { iframe.remove(); } catch { /* ignore */ }
+      log('[lc-559] first-screen scrape done (' + reason + '):', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+      resolve(cards);
+    };
+
+    let attempts = 0;
+    const poll = (): void => {
+      attempts++;
+      try {
+        const doc: any = iframe.contentDocument || (iframe.contentWindow as any)?.document;
+        if (!doc) {
+          if (attempts < 40) setTimeout(poll, 400);
+          else finish('no-doc');
+          return;
+        }
+        collect(doc);
+        if (cards.length >= 10) { finish('got-10'); return; }   // 首屏已够 → 立即结束, 绝不滚动
+        if (attempts >= 12) { finish('first-screen-' + cards.length); return; }
+        setTimeout(poll, 400);
+      } catch (e) {
+        if (attempts < 40) setTimeout(poll, 400);
+        else finish('error');
+      }
+    };
+
+    iframe.onload = (): void => { setTimeout(poll, 500); };
+    iframe.onerror = (): void => finish('iframe-error');
+    timer = setTimeout(() => finish('timeout-' + timeoutMs), timeoutMs);
+    document.body.appendChild(iframe);
+    setTimeout(poll, 800);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
+  });
+}
+
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return _apiShows;
@@ -491,34 +601,17 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   _apiLoading = true;
 
   try {
-    // [lc-558] 回归复用已验证的 ensureLibraryIndex(): 返回全量 LibItem(含 poster+title, 按 /v/list/all 顺序)。
-    // 该 promise 健壮——已构建则同步返回缓存; 构建中则轮询等待(4s 超时兜底); 首次则自建全屏 iframe 构建。
-    // 绝不会永远 pending(不再有 lc-555/557 的"独立 iframe+poll"卡死问题)。
-    log('[lc-558] fetching carousel via ensureLibraryIndex()...');
-    const libItems: LibItem[] = await ensureLibraryIndex();
-    log('[lc-558] library index ready:', libItems.length, 'items');
+    // [lc-559] 改用 scrapeAllPageFirstScreen(): 全屏隐藏 iframe 加载 /v/list/all, 不滚动,
+    // 直接按首屏 DOM 文档顺序读取前 10 个有真实封面的 tv/movie。顺序 = 全部页从上到下视觉顺序,
+    // 标题已在该函数内精准提取并清理(不再混入评分/年份/季数)。绝不卡死(15s 超时 + poll 不依赖 onload)。
+    log('[lc-559] fetching carousel via scrapeAllPageFirstScreen() (no-scroll, visual order)...');
+    const cards = await scrapeAllPageFirstScreen(15000);
+    log('[lc-559] first-screen cards ready:', cards.length, 'items');
 
-    const cleanTitleOf = (raw: string): string =>
-      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+    // [lc-559] cards 已是成品: 全部页首屏 DOM 顺序、标题已清理、有真实封面、前 10 个 tv/movie。
+    const newShows: any[] = cards.slice(0, 10);
 
-    // 按全部页顺序取前 10 个有真实封面的 tv/movie(无封面=直播电视/个人视频→剔除)
-    const newShows: any[] = [];
-    const seen = new Set<string>();
-    for (const item of libItems) {
-      if (newShows.length >= 10) break;
-      if (!item.poster) continue;
-      const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-      if (!hrefMatch || seen.has(hrefMatch[2])) continue;
-      seen.add(hrefMatch[2]);
-      newShows.push({
-        id: hrefMatch[2], title: cleanTitleOf(item.title), poster: item.poster,
-        backdrop: item.poster, desc: '', mediaType: hrefMatch[1],
-        tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
-        year: 0, rating: 0, statusText: '', genres: [] as string[],
-      });
-    }
-
-    log('[lc-558] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
+    log('[lc-559] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
 
     if (newShows.length > 0) {
       _apiShows.length = 0;
@@ -527,7 +620,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _carouselInited = false;
       injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
     } else {
-      log('[lc-558] ensureLibraryIndex returned 0 usable items, fallback to visible cards');
+      log('[lc-559] scrapeAllPageFirstScreen returned 0 usable items, fallback to visible cards');
       const fallback = scrapeVisibleCards();
       if (fallback.length > 0) {
         _apiShows.length = 0;
