@@ -438,11 +438,12 @@ function extractTmdbId(data: any): string | undefined {
 /** [lc-554] 直接读当前页面可见的媒体库卡片（同步、零网络、零 iframe，绝不卡白屏）。
     飞牛首页"最近更新"等板块的卡片自带真实封面与 /v/tv|movie/{guid} 链接，直接抓即可。
     这是彻底绕开会卡死的 ensureLibraryIndex 后台 iframe+滚动轮询机制的最终方案。 */
-function scrapeVisibleCards(): any[] {
+function scrapeVisibleCards(root?: Document | Element): any[] {
   const cleanTitleOf = (raw: string): string =>
     raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
   const map = new Map<string, any>();
-  const links = document.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
+  const scope: any = root || document;
+  const links = scope.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
   for (let i = 0; i < links.length && map.size < 10; i++) {
     const a = links[i] as any;
     const href = a.getAttribute('href') || '';
@@ -481,7 +482,7 @@ function scrapeVisibleCards(): any[] {
  *  关键：不滚动 scrollAll —— 滚动会触发飞牛虚拟滚动异步加载更旧的条目并以 Map 插入顺序覆盖，
  *  导致轮播顺序变成"滚动加载顺序"而非用户在全部页看到的视觉顺序。首屏 DOM 顺序 = 视觉顺序。
  *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。 */
-async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
+async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
   return new Promise((resolve) => {
     const base = location.origin;
     const iframe = document.createElement('iframe');
@@ -495,12 +496,12 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
 
     const cleanTitleOf = (raw: string): string => {
       let t = (raw || '').replace(/\s+/g, ' ').trim();
-      t = t.replace(/共\s*\d+\s*季[^\n,]*/g, '');       // 共3季...
-      t = t.replace(/第?\s*\d+\s*季/g, '');              // 第3季/3季
-      t = t.replace(/[·—\-~]\s*\d{4}[-–]\d{4}/g, '');    // —2024-2025
-      t = t.replace(/\b(19|20)\d{2}\b/g, '');            // 年份 2024
-      t = t.replace(/\b\d+(\.\d+)?\s*分?\b/g, '');       // 8.5/8.5分
-      t = t.replace(/^\d+(\.\d+)?\s*/, '');              // 开头评分
+      t = t.replace(/共\s*\d+\s*季[^\n,]*/g, '');
+      t = t.replace(/第?\s*\d+\s*季/g, '');
+      t = t.replace(/[·—\-~]\s*\d{4}[-–]\d{4}/g, '');
+      t = t.replace(/\b(19|20)\d{2}\b/g, '');
+      t = t.replace(/\b\d+(\.\d+)?\s*分?\b/g, '');
+      t = t.replace(/^\d+(\.\d+)?\s*/, '');
       return t.replace(/\s+/g, ' ').trim();
     };
 
@@ -509,7 +510,6 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
       if (dt && dt.length >= 2) return cleanTitleOf(dt);
       const tEl = a.querySelector('[class*="title"],[class*="name"],[class*="Title"],[class*="Name"]') as HTMLElement | null;
       if (tEl && (tEl.textContent || '').trim().length >= 2) return cleanTitleOf(tEl.textContent || '');
-      // 兜底：卡片内最短且有意义的叶子文本（标题通常比"年份+评分"行短且独立）
       let best = '';
       a.querySelectorAll('*').forEach((el: any) => {
         const t = (el.textContent || '').trim();
@@ -523,6 +523,49 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
       return (a.getAttribute('title') || '').trim();
     };
 
+    // [lc-560] 强制触发 iframe 内懒加载封面: fnOS 卡片图多为 data-src + 滚动监听懒加载,
+    // 隐藏 iframe 内若不滚动, img.src 仍是空/占位 → 抓取 0 图。此处主动把 data-src 写入 src、设 loading=eager、
+    // 派发 scroll 事件, 使首屏封面立即拥有真实 URL(抓取只需 URL 字符串, 无需图片真的加载完)。
+    const forceLoadImages = (doc: any): void => {
+      try {
+        doc.querySelectorAll('img').forEach((img: any) => {
+          const cur = img.currentSrc || img.src || '';
+          const loaded = cur && !cur.startsWith('data:') && (cur.includes('/v/api/v1/sys/img/') || /^https?:/i.test(cur));
+          if (!loaded) {
+            const ds = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || (img.dataset && img.dataset.src) || '';
+            if (ds) img.src = ds.startsWith('/') ? base + ds : ds;
+          }
+          try { img.loading = 'eager'; } catch (e) { /* ignore */ }
+        });
+        // 触发 fnOS 的滚动懒加载监听(部分实现监听 window/documentElement scroll)
+        try { doc.documentElement.dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
+        try { (doc.defaultView || window).dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
+        const sc = doc.querySelector('[class*="scroll"],[class*="overflow"],[class*="list"],[class*="content"]') as any;
+        if (sc) { try { sc.dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ } }
+      } catch (e) { /* ignore */ }
+    };
+
+    const pickPoster = (a: HTMLElement): string => {
+      const trySrc = (s: string): string => {
+        if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) return s.startsWith('/') ? base + s : s;
+        return '';
+      };
+      const img = a.querySelector('img') as HTMLImageElement | null;
+      if (img) {
+        let p = trySrc(img.currentSrc || img.src || '');
+        if (!p) {
+          const ds = img.getAttribute('data-src') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || (img.dataset && img.dataset.src) || '';
+          p = trySrc(ds);
+        }
+        if (p) return p;
+      }
+      // 卡片背景图兜底
+      const bg = (a.getAttribute('style') || '');
+      const mm = bg.match(/url\(['"]?([^'")]*\/sys\/img\/[^'")]+)['"]?\)/);
+      if (mm) return mm[1].startsWith('/') ? base + mm[1] : mm[1];
+      return '';
+    };
+
     const collect = (doc: any): void => {
       const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
       for (let i = 0; i < links.length && cards.length < 10; i++) {
@@ -530,12 +573,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
         const href = a.getAttribute('href') || '';
         const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
         if (!m || seen.has(m[2])) continue;
-        let poster = '';
-        const img = a.querySelector('img') as HTMLImageElement | null;
-        if (img) {
-          const s = img.currentSrc || img.src || img.getAttribute('src') || '';
-          if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) poster = s.startsWith('/') ? base + s : s;
-        }
+        const poster = pickPoster(a);
         if (!poster) continue;  // 无封面（直播电视/个人视频）→ 跳过
         const title = pickTitle(a);
         if (!title) continue;
@@ -554,7 +592,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
       done = true;
       if (timer) clearTimeout(timer);
       try { iframe.remove(); } catch { /* ignore */ }
-      log('[lc-559] first-screen scrape done (' + reason + '):', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+      log('[lc-560] first-screen scrape done (' + reason + '):', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
       resolve(cards);
     };
 
@@ -563,26 +601,28 @@ async function scrapeAllPageFirstScreen(timeoutMs = 15000): Promise<any[]> {
       attempts++;
       try {
         const doc: any = iframe.contentDocument || (iframe.contentWindow as any)?.document;
-        if (!doc) {
-          if (attempts < 40) setTimeout(poll, 400);
+        if (!doc || !doc.body) {
+          if (attempts < 50) setTimeout(poll, 400);
           else finish('no-doc');
           return;
         }
+        forceLoadImages(doc);   // [lc-560] 每轮强制懒加载封面, 确保 img.src 已是真实 URL
         collect(doc);
         if (cards.length >= 10) { finish('got-10'); return; }   // 首屏已够 → 立即结束, 绝不滚动
-        if (attempts >= 12) { finish('first-screen-' + cards.length); return; }
+        // 给页面启动 + 图片 URL 填充留时间: 持续触发懒加载直到满 10 或轮次耗尽
+        if (attempts >= 20) { finish('first-screen-' + cards.length); return; }
         setTimeout(poll, 400);
       } catch (e) {
-        if (attempts < 40) setTimeout(poll, 400);
+        if (attempts < 50) setTimeout(poll, 400);
         else finish('error');
       }
     };
 
-    iframe.onload = (): void => { setTimeout(poll, 500); };
+    iframe.onload = (): void => { setTimeout(poll, 600); };
     iframe.onerror = (): void => finish('iframe-error');
     timer = setTimeout(() => finish('timeout-' + timeoutMs), timeoutMs);
     document.body.appendChild(iframe);
-    setTimeout(poll, 800);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
+    setTimeout(poll, 900);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
   });
 }
 
@@ -606,12 +646,24 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     // 标题已在该函数内精准提取并清理(不再混入评分/年份/季数)。绝不卡死(15s 超时 + poll 不依赖 onload)。
     log('[lc-559] fetching carousel via scrapeAllPageFirstScreen() (no-scroll, visual order)...');
     const cards = await scrapeAllPageFirstScreen(15000);
-    log('[lc-559] first-screen cards ready:', cards.length, 'items');
+    log('[lc-560] first-screen cards ready:', cards.length, 'items');
 
-    // [lc-559] cards 已是成品: 全部页首屏 DOM 顺序、标题已清理、有真实封面、前 10 个 tv/movie。
-    const newShows: any[] = cards.slice(0, 10);
+    // [lc-560] cards 已是成品: 全部页首屏 DOM 顺序、标题已清理、有真实封面、前 10 个 tv/movie。
+    let newShows: any[] = cards.slice(0, 10);
 
-    log('[lc-559] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
+    // [lc-560] 兜底: iframe 抓取 0 张时, 从当前页「媒体库」section 直接抓(该 section 现在不会被清空,
+    // 图已真实加载; 顺序=section DOM 顺序, 比空白强)。这是防止"图不显示"的最后保险。
+    if (newShows.length === 0) {
+      log('[lc-560] iframe scrape 0 cards, fallback: scrape live media-library section');
+      const sec = findMediaLibrarySection();
+      const fb = sec ? scrapeVisibleCards(sec) : scrapeVisibleCards();
+      if (fb.length > 0) {
+        log('[lc-560] live-section fallback got', fb.length, 'cards');
+        newShows = fb.slice(0, 10);
+      }
+    }
+
+    log('[lc-560] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
 
     if (newShows.length > 0) {
       _apiShows.length = 0;
@@ -620,15 +672,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _carouselInited = false;
       injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
     } else {
-      log('[lc-559] scrapeAllPageFirstScreen returned 0 usable items, fallback to visible cards');
-      const fallback = scrapeVisibleCards();
-      if (fallback.length > 0) {
-        _apiShows.length = 0;
-        Array.prototype.push.apply(_apiShows, fallback);
-        _apiLoaded = true;
-        _carouselInited = false;
-        injectCarousel();
-      }
+      log('[lc-560] both iframe and live-section scrape returned 0 — leaving native media library visible');
     }
   } catch (e) { log('[lc-558] fetch error:', e); }
   _apiLoading = false;
@@ -849,12 +893,9 @@ function injectCarousel(): void {
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(不再用硬编码 demo 无职转生)
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
-    log('api not ready, showing loading placeholder');
-    // [lc-100 修复] 占位只构建一次: 下方 MutationObserver 监听 document.body 任意变更,
-    // 若每次都重建占位(清空+追加会触发 DOM 变更), 会再次唤醒 observer → 无限重建 → 渲染线程卡死白屏。
-    if (_placeholderInited) return;
-    buildLoadingPlaceholder(target);
-    _placeholderInited = true;
+    // [lc-560] 空数据时不破坏性地清空 section: 保留 fnOS 原生媒体库(可见海报),
+    // 杜绝"清空→iframe 抓取失败→永远空白"的死链。数据到位后 injectCarousel 会清空并重建为轮播。
+    log('api not ready, leaving native media library visible (non-destructive)');
     return;
   }
   // 真实数据到达: 复位占位守卫, 以便将来数据清空时可再次显示占位
