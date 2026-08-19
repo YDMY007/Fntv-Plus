@@ -531,7 +531,7 @@ function applyHotTheme(): void {
 //   实现：后台隐藏 iframe 抓 /v/list/all 全量条目(标题+详情页 hash)，去重缓存；
 //        点击时用番剧名(中/原)与库索引做匹配。库索引只在首次懒加载一次。
 // ═══════════════════════════════════════════════════════════════════════════
-export interface LibItem { title: string; href: string; mediaType: string; }
+export interface LibItem { title: string; href: string; mediaType: string; poster?: string; }
 let _libIndex: LibItem[] | null = null;
 let _libLoading = false;
 let _libWaiters: ((v: LibItem[]) => void)[] = [];
@@ -602,7 +602,23 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
           }
           if (!title) title = (a.getAttribute('title') || '').trim();
           if (!title) return;
-          map.set(m[2], { title, href: base + '/v/' + m[1] + '/' + m[2], mediaType: m[1] });
+          // [lc-551] 提取真实封面（卡片内 img 的 sys/img 绝对路径），供首页轮播直接复用、无需二次 API
+          let poster = '';
+          const collectImg = (root: any): string => {
+            const im: any = root && root.querySelector ? root.querySelector('img') : null;
+            if (im) {
+              const s = im.currentSrc || im.src || im.getAttribute('src') || '';
+              if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) return s;
+            }
+            return '';
+          };
+          poster = collectImg(a);
+          if (!poster) {
+            let p: any = a.parentElement;
+            for (let d = 0; d < 12 && !poster; d++) { poster = collectImg(p); p = p && p.parentElement; }
+          }
+          if (poster && poster.startsWith('/')) poster = base + poster;
+          map.set(m[2], { title, href: base + '/v/' + m[1] + '/' + m[2], mediaType: m[1], poster });
         });
         scrollAll(doc);  // 滚动触发后续渲染/分页加载
         const nowCount = map.size;

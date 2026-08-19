@@ -3,7 +3,6 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-import { isSyncableItemType } from '../../modules/fn_api/types';
 import { ensureLibraryIndex, LibItem } from './hotUpdates';
 
 const LOG = '[EmbyWall]';
@@ -454,34 +453,34 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     const libItems: LibItem[] = await ensureLibraryIndex();
     log('library index:', libItems.length, 'items total');
 
-    // 从全量索引头部依次扫描，取前 N 个有 tv/movie href 的条目作为候选。
-    // [lc-546-fix] 前面可能有大量 M3U8 直播频道（如 CCTV 新闻/财经等），
-    // 它们的 href 也是 /v/tv/{guid} 格式会进入候选，但在后续并行 API 阶段被 is_m3u8 过滤掉。
-    // 故多取候选（50 个）确保直播被过滤后仍能剩 10 个有效作品进入轮播。
+    // [lc-551] 飞牛「全部」页已按「最新更新在上」排好序。从上到下扫描，直接剔除无真实封面的
+    // （直播电视/无图项）——个人视频 href 为 /v/video/ 已被 ensureLibraryIndex 选择器排除。
+    // 取前 10 个有真实封面的 tv/movie 项作为最终候选（不再取 50 再去过滤）。
     const candidates: any[] = [];
     const seen = new Set<string>();
-    for (let i = 0; i < libItems.length && candidates.length < 50; i++) {
-      const item = libItems[i];
+    for (const item of libItems) {
+      if (candidates.length >= 10) break;
+      if (!item.poster) continue;            // 无真实封面（直播电视/无图）→ 剔除
       const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
       if (!hrefMatch || seen.has(hrefMatch[2])) continue;
       seen.add(hrefMatch[2]);
       candidates.push({
         id: hrefMatch[2],
         title: item.title,
-        poster: '',
+        poster: item.poster,
         mediaType: hrefMatch[1],
       });
     }
-    log('selected', candidates.length, 'candidates from index (first:', candidates[0]?.title?.substring(0, 20), ')');
+    log('selected', candidates.length, 'carousel candidates (top-down, with poster), first:', candidates[0]?.title?.substring(0, 20));
 
     if (candidates.length === 0) { _apiLoading = false; return _apiShows; }
 
     // 用局部变量收集新数据, 成功后整体替换 _apiShows(避免重拉期间旧数据被清空导致竞态)
     const newShows: any[] = [];
 
-    // 步骤2: 并行用item/{guid}获取每个候选的poster+overview（5s 短超时），一次性拿全部结果后过滤
-    // [lc-546-fix] 改为并行而非串行：串行时每个直播电视候选占 8s 超时，30 个候选最坏 240s → 轮播一直卡「加载中」白屏。
-    // 并行后无论多少候选，总时间≈单条超时(5s)，且 is_m3u8/类型/无封面 三道过滤直接剔掉直播电视，取前 10 个有效项。
+    // [lc-551] 仅给最终入选的 ≤10 个候选调 API 丰富（desc/评分/状态/类型/年份/季数）。
+    // 与旧逻辑(取 50 候选全调 API)不同：现在只调确定的 10 个，且 poster 已由 DOM 阶段确保存在 →
+    // 即使 API 失败/超时也回退 DOM 封面+干净标题，绝不卡白屏。
     const pickImg = (v: any): string => {
       let s = '';
       if (typeof v === 'string') s = v;
@@ -490,7 +489,12 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       if (s.startsWith('http') || s.includes('sys/img')) return s;
       return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
     };
-    const fetchOne = async (show: any): Promise<any | null> => {
+    const cleanTitleOf = (raw: string): string =>
+      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+
+    const fetchOne = async (show: any): Promise<any> => {
+      const domPoster = show.poster;
+      const domTitle = cleanTitleOf(show.title);
       try {
         const { ipcRenderer } = require('electron');
         const path = `/v/api/v1/item/${show.id}`;
@@ -501,31 +505,14 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         try {
           resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
         } finally { clearTimeout(to); }
-        if (!resp.ok) return null;
+        if (!resp.ok) return { id: show.id, title: domTitle, poster: domPoster, backdrop: domPoster, desc: '', mediaType: show.mediaType };
         const json = await resp.json();
         const data = json?.data || {};
         const itemType = (data.type || data.item?.type) as string | undefined;
-        // 类型白名单：仅电影/电视节目/混合影片(作品类)进入轮播
-        if (itemType && !isSyncableItemType(itemType)) {
-          log('skip non-syncable carousel item:', show.id, 'type=', itemType);
-          return null;
-        }
-        // [lc-545] M3U8/电视直播剔除：is_m3u8=true 的项无封面图，直接剔掉
-        if (data.is_m3u8) {
-          log('skip m3u8/live-tv carousel item:', show.id, 'is_m3u8=true');
-          return null;
-        }
-        const poster = pickImg(data.posters) || (show as any).poster || '';
-        const backdrop = pickImg(data.backdrops) || poster;
-        // 无封面图防御：poster 和 backdrop 都为空的项无法渲染轮播，跳过
-        if (!backdrop) {
-          log('skip no-image carousel item:', show.id, 'no poster/backdrop');
-          return null;
-        }
-        // [lc-547] 标题优先用 API 返回的干净字段（data.title/name），
-        // 库索引的 item.title 是 textContent 抓的全文本（含评分8.4/季数/年份等垃圾前缀）。
+        const apiPoster = pickImg(data.posters) || domPoster;
+        const backdrop = pickImg(data.backdrops) || apiPoster;
         const apiTitle = (data.title || data.name || '').trim();
-        const cleanTitle = apiTitle || show.title.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+        const cleanTitle = apiTitle || domTitle;
         const tmdbId = extractTmdbId(data);
         const totalEps = (data.number_of_episodes as number) || 0;
         const localEps = (data.local_number_of_episodes as number) || 0;
@@ -534,10 +521,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const localSeasons = (data.local_number_of_seasons as number) || 0;
         const rawYear = (data.production_year as any) || ((data.premiere_date as string) || (data.air_date as string) || '').slice(0, 4);
         const year = Number(rawYear) || 0;
-        // [lc-549] 诊断：打印首个候选的 data 顶层字段，确认 vote_average/status/genres 是否可用
+        // [lc-551] 诊断：确认 vote_average/status/genres 是否可用
         if (show.id === candidates[0]?.id) {
-          log('[lc-549] 1st item data keys:', Object.keys(data).join(','));
-          log('[lc-549] rating=', data.vote_average, '| status=', data.status, '| genres=', JSON.stringify((data as any).genres));
+          log('[lc-551] 1st item data keys:', Object.keys(data).join(','));
+          log('[lc-551] rating=', data.vote_average, '| status=', data.status, '| genres=', JSON.stringify((data as any).genres));
         }
         // [lc-549] 丰富展示字段：评分(vote_average 字符串→数字)、状态(status→中文)、类型标签(genres 数组)
         const rawRating = parseFloat(String(data.vote_average || '').trim());
@@ -562,32 +549,32 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         }
         return {
           id: show.id, title: cleanTitle,
-          poster, backdrop,
+          poster: apiPoster, backdrop,
           desc: data.overview || '',
           mediaType: show.mediaType || (itemType === 'Movie' ? 'movie' : 'tv'),
           tmdbId, totalEps, localEps, totalSeasons, localSeasons, year, rating, statusText, genres
         };
-      } catch (e) { return null; }
+      } catch (e) {
+        // DOM 兜底：至少能显示封面 + 干净标题，绝不卡白屏
+        return { id: show.id, title: domTitle, poster: domPoster, backdrop: domPoster, desc: '', mediaType: show.mediaType };
+      }
     };
-    // 并行拉取全部候选（保留顺序），再过滤掉 null（直播/非作品类/无封面），取前 10 个
+    // 候选已确保 ≤10 个且有真实封面，并行拉取（5s 超时），fetchOne 永不返回 null → 直接有序入列
     log('fetching', candidates.length, 'candidate details in parallel...');
     const results = await Promise.all(candidates.map((c) => fetchOne(c)));
-    const valid = results.filter((x: any) => x);
-    newShows.push(...valid.slice(0, 10));
-    log('parallel fetch done:', results.length, 'fetched,', valid.length, 'valid, took first', newShows.length);
+    newShows.push(...results);
+    log('parallel fetch done:', results.length, 'shows (poster-guaranteed)');
 
     // 仅在新数据确实拉到内容时才替换(空数据保留旧的不变)
     if (newShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, newShows);
     } else if (candidates.length > 0) {
-      // [lc-181] iframe 提取到条目, 但全部因「非3类型」被过滤 → 首页没有其他作品类内容可展示。
-      // 记一条诊断, 便于区分「白屏是卡死」还是「确实没有可展示的作品类」。
-      log('all extracted items filtered out as non-syncable (', candidates.length, 'extracted, 0 kept) — 首页无可展示的作品类轮播');
+      log('all carousel candidates dropped (', candidates.length, 'candidates, 0 shows) — 检查封面过滤逻辑');
     }
     _apiLoaded = true;
     log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,100));
-    log('total', _apiShows.length, 'shows from iframe+API (new=' + newShows.length + ')');
+    log('total', _apiShows.length, 'shows from DOM+API');
   } catch (e) { log('iframe error:', e); }
   _apiLoading = false;
   return _apiShows;
