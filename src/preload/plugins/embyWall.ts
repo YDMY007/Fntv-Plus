@@ -3,7 +3,7 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-import { ensureLibraryIndex, LibItem } from './hotUpdates';
+// [lc-555] 轮播数据改为独立隐藏 iframe 加载 /v/list/all，不再依赖 hotUpdates 的 ensureLibraryIndex 共享状态
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -473,65 +473,155 @@ function scrapeVisibleCards(): any[] {
   return Array.from(map.values());
 }
 
+/** [lc-555] 用独立隐藏 iframe 加载「全部」页(/v/list/all)，按其 DOM 自然顺序读取卡片。
+ *  不依赖 ensureLibraryIndex 的共享状态机制（该机制有 pending 问题导致白屏）。
+ *  返回的卡片顺序 = 全部页从左到右、从上到下的视觉顺序（即用户期望的正确顺序）。 */
+async function scrapeAllPageCards(timeoutMs = 12000): Promise<any[]> {
+  return new Promise((resolve) => {
+    const cleanTitleOf = (raw: string): string =>
+      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;border:none;';
+    document.body.appendChild(iframe);
+
+    const timer = setTimeout(() => {
+      log('[lc-555] all-page iframe timeout(', timeoutMs, 'ms), got', map.size, 'cards');
+      cleanup();
+      resolve(Array.from(map.values()));
+    }, timeoutMs);
+
+    const map = new Map<string, any>();
+    let done = false;
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { iframe.remove(); } catch (e) { /* ignore */ }
+    };
+
+    iframe.onload = () => {
+      try {
+        const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
+        if (!doc) { cleanup(); resolve([]); return; }
+
+        // 按全部页 DOM 自然顺序（左→右, 上→下）扫描卡片
+        const links = doc.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
+        log('[lc-555] all-page loaded, found', links.length, 'links total');
+
+        for (let i = 0; i < links.length && map.size < 10; i++) {
+          const a = links[i] as HTMLElement;
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+          if (!m || map.has(m[2])) continue;
+
+          // 提取封面
+          let poster = '';
+          const img = a.querySelector('img');
+          if (img) {
+            const s = (img as HTMLImageElement).currentSrc || (img as HTMLImageElement).src || img.getAttribute('src') || '';
+            // 相对路径 → 绝对路径（iframe 内的相对路径需基于 fnOS origin）
+            if (s && (s.includes('/v/api/v1/sys/img/') || s.includes('sys/img') || /^https?:/i.test(s))) {
+              poster = s.startsWith('/') ? (location.origin + s) : s;
+            }
+          }
+          if (!poster) continue;  // 无封面（直播电视等）→ 跳过
+
+          // 提取标题：取卡片底部标题文本（通常在 a 内或紧邻的兄弟元素中）
+          let title = '';
+          // 策略：找 a 内最长的非空文本节点（通常是标题行）
+          const walk = (el: HTMLElement): void => {
+            for (const node of Array.from(el.childNodes)) {
+              if (title) return;
+              if (node.nodeType === Node.TEXT_NODE) {
+                const t = (node.textContent || '').trim();
+                if (t.length >= 2) { title = t; return; }
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                walk(node as HTMLElement);
+              }
+            }
+          };
+          walk(a);
+          // 如果 a 内文本太短（可能只是图片 alt），尝试取父级卡片容器的标题区
+          if (!title || title.length < 3) {
+            let parent = a.parentElement;
+            for (let d = 0; d < 4 && parent; d++) {
+              const t = (parent.textContent || '').trim().replace(/\s+/g, ' ');
+              // 卡片容器 textContent 通常包含"标题 + 季数 + 年份"，取较长的那段
+              if (t.length > 6 && t.length < 80) { title = t; break; }
+              parent = parent.parentElement;
+            }
+          }
+          if (!title) title = (a.getAttribute('title') || '').trim();
+          if (!title) continue;
+
+          map.set(m[2], {
+            id: m[2], title: cleanTitleOf(title), poster, backdrop: poster,
+            desc: '', mediaType: m[1],
+            tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+            year: 0, rating: 0, statusText: '', genres: [] as string[],
+          });
+        }
+
+        log('[lc-555] scraped', map.size, 'cards from all-page, first:', (map.values().next().value?.title || '').substring(0, 20));
+        cleanup();
+        resolve(Array.from(map.values()));
+      } catch (e) {
+        log('[lc-555] all-page scrape error:', e);
+        cleanup();
+        resolve(Array.from(map.values()));
+      }
+    };
+
+    iframe.onerror = () => {
+      log('[lc-555] all-page iframe error');
+      cleanup();
+      resolve([]);
+    };
+
+    // 加载全部页（飞牛已按"最新更新在上"排好序）
+    iframe.src = '/v/list/all';
+  });
+}
+
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return _apiShows;
-  // [lc-554] 仅首页(/v)抓取可见卡片，避免详情页"相关推荐"等卡片污染轮播
+  // [lc-555] 仅首页抓取轮播数据，避免详情页误触发
   const p = location.pathname;
-  if (p !== '/v' && p !== '/v/') return _apiShows;
+  if (p !== '/v' && p !== '/') return _apiShows;
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
 
   try {
-    // [lc-554] 彻底绕开会卡死的 ensureLibraryIndex 后台 iframe+滚动轮询机制。
-    // 优先：同步读当前页可见卡片（首页"最近更新"等板块），零延迟、零网络，首屏立即可见真实数据。
-    const domShows = scrapeVisibleCards();
+    // [lc-555] 核心改动：用独立隐藏 iframe 加载 /v/list/all（全部页），
+    // 按 DOM 自然顺序读取前 10 个有封面的 tv/movie 卡片。
+    // 这保证了顺序与用户在「全部」页面看到的完全一致（左→右, 上→下）。
+    // 不依赖 ensureLibraryIndex 共享状态（该机制有 promise pending 导致白屏的历史问题）。
+    log('[lc-555] loading carousel from /v/list/all via dedicated iframe...');
+    const domShows = await scrapeAllPageCards(15000);  // 15s 超时（页面+图片加载）
+
     if (domShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, domShows);
       _apiLoaded = true;
-      log('carousel from visible DOM:', domShows.length, 'shows, first:', domShows[0]?.title?.substring(0, 20));
-      _carouselInited = false;
-      injectCarousel();  // 首屏立即重建，绝不白屏
-      _apiLoading = false;
-      return _apiShows;
-    }
-    // 当前页无可见卡片（罕见）：后台索引补充，带 6s 超时兜底，绝不无限白屏
-    log('no visible cards on current page, trying background index (6s timeout)...');
-    const libItems: LibItem[] = await Promise.race([
-      ensureLibraryIndex().catch(() => [] as LibItem[]),
-      new Promise<LibItem[]>((r) => setTimeout(() => r([] as LibItem[]), 6000)),
-    ]);
-    if (libItems.length === 0) {
-      log('index empty/timeout → carousel remains loading (will retry on next nav)');
-      _apiLoading = false;
-      return _apiShows;
-    }
-    const newShows: any[] = [];
-    const seen = new Set<string>();
-    const cleanTitleOf = (raw: string): string =>
-      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
-    for (const item of libItems) {
-      if (newShows.length >= 10) break;
-      if (!item.poster) continue;
-      const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-      if (!hrefMatch || seen.has(hrefMatch[2])) continue;
-      seen.add(hrefMatch[2]);
-      newShows.push({
-        id: hrefMatch[2], title: cleanTitleOf(item.title), poster: item.poster,
-        backdrop: item.poster, desc: '', mediaType: hrefMatch[1],
-        tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
-        year: 0, rating: 0, statusText: '', genres: [] as string[],
-      });
-    }
-    if (newShows.length > 0) {
-      _apiShows.length = 0;
-      Array.prototype.push.apply(_apiShows, newShows);
-      _apiLoaded = true;
-      log('carousel from index:', newShows.length, 'shows');
+      log('carousel from all-page DOM:', domShows.length, 'shows, first:', domShows[0]?.title?.substring(0, 20));
+      log('order check:', domShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
       _carouselInited = false;
       injectCarousel();
+    } else {
+      log('[lc-555] all-page iframe returned 0 shows, fallback: scrape current page visible cards');
+      // 极端情况（iframe 加载失败）：回退到当前页可见卡片
+      const fallback = scrapeVisibleCards();
+      if (fallback.length > 0) {
+        _apiShows.length = 0;
+        Array.prototype.push.apply(_apiShows, fallback);
+        _apiLoaded = true;
+        _carouselInited = false;
+        injectCarousel();
+      }
     }
   } catch (e) { log('fetch error:', e); }
   _apiLoading = false;
