@@ -516,6 +516,15 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
     // [lc-564] 用带重试的 waitLibIndex 替代直接 await: 解决 ensureLibraryIndex 内部 4s 轮询超时竞态
     const libIndex = await waitLibIndex(timeoutMs);
     log('[lc-564] library index ready:', libIndex.length, 'items');
+
+    // [lc-565] 混合抓图: ensureLibraryIndex 提供 id+title 顺序(最近更新在前), 但隐藏 iframe 内 fnOS 懒加载图永远加载不出,
+    // 它的 poster 字段几乎全空; scrapeVisibleCards 抓当前页已渲染 DOM, 那些卡片是用户可见的, img 已真实加载,
+    // 因此按 id 取其 poster 补图(同时保留 libIndex 自带 poster 作为兜底)。
+    const liveCards = scrapeVisibleCards();
+    const posterById = new Map<string, string>();
+    for (const c of liveCards) { if (c && c.id && c.poster) posterById.set(c.id, c.poster); }
+    log('[lc-565] live-page posters by id:', posterById.size, 'available (for poster merge)');
+
     const cards: any[] = [];
     const seen = new Set<string>();
     for (let i = 0; i < libIndex.length && cards.length < 10; i++) {
@@ -525,8 +534,8 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
       if (!id || seen.has(id)) continue;
       const title = cleanTitleOf(item.title || '');
       if (!title) continue;
-      const poster = item.poster || '';
-      // [lc-563] 关键: 不强制要求 poster —— 隐藏 iframe 内 fnOS 懒加载图可能无 URL, 但 carousel 仍渲染标题+按钮
+      // [lc-565] 优先用当前页真实已加载的封面, 没有则用 libIndex 自带(可能空), 都没有留空字符串由 UI 兜底
+      const poster = posterById.get(id) || item.poster || '';
       seen.add(id);
       cards.push({
         id, title, poster, backdrop: poster,
@@ -537,7 +546,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
       // [lc-561] 实时回传已加载卡片数(供骨架显示"已加载 N 个")
       try { if (onProgress) onProgress(cards.length); } catch (e) { /* ignore */ }
     }
-    log('[lc-564] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+    log('[lc-565] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
     return cards;
   } catch (e) {
     log('[lc-564] ensureLibraryIndex error:', e);
