@@ -1270,7 +1270,7 @@ function injectCarousel(): void {
 /* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
 // 真实片库未就绪时显示; 一旦 fetchShowsViaIPC 拉到数据, 上层 rebuild 机制会自动替换为真实轮播
 function buildLoadingPlaceholder(target: HTMLElement): void {
-  // shimmer 动画样式只注入一次
+  // shimmer / spinner 动画样式只注入一次
   if (!document.getElementById('fnos-ph-style')) {
     const st = document.createElement('style');
     st.id = 'fnos-ph-style';
@@ -1278,6 +1278,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 @keyframes fnos-ph-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .fnos-ph-skel{position:relative;overflow:hidden;background:var(--fnos-skel-bg)}
 .fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
+@keyframes fnos-ph-spin{to{transform:rotate(360deg)}}
+.fnos-ph-spinner{width:38px;height:38px;border-radius:50%;border:3px solid rgba(150,120,200,.22);border-top-color:rgba(170,140,235,.95);animation:fnos-ph-spin .85s linear infinite}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -1292,33 +1294,43 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
   _carouselWrapper = wrapper;
 
+  // [lc-577] 骨架容器: 与真实轮播同尺寸同圆角, 左 80% 大图 shimmer + 右 20% 信息面板骨架
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex;align-items:center;justify-content:center;gap:30px';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex';
   _carouselContainer = container;
 
-  // 左侧: 海报骨架(粉紫流光)
-  const poster = document.createElement('div');
-  poster.className = 'fnos-ph-skel';
-  poster.style.cssText = 'width:118px;height:168px;border-radius:14px';
-  container.appendChild(poster);
-
-  // 右侧: 文字骨架 + 提示(含加载进度数字)
-  const box = document.createElement('div');
-  box.style.cssText = 'display:flex;flex-direction:column;gap:14px;max-width:300px';
-  box.innerHTML = `
-    <div class="fnos-ph-skel" style="width:200px;height:26px;border-radius:8px"></div>
-    <div class="fnos-ph-skel" style="width:262px;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-skel" style="width:230px;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-tip" style="margin-top:8px;font-size:15px;color:rgba(70,55,95,.72);letter-spacing:1px"><span class="fnos-ph-count" style="font-weight:700;color:rgba(120,90,160,.95);font-variant-numeric:tabular-nums">0</span> 个 · <span class="fnos-ph-text">正在加载精彩内容…</span></div>
+  // 左侧 80%: 大图 shimmer 区 + 中央 spinner + 进度数字
+  const leftEl = document.createElement('div');
+  leftEl.className = 'fnos-ph-skel';
+  leftEl.style.cssText = 'position:relative;width:80%;height:100%;flex-shrink:0;overflow:hidden';
+  const center = document.createElement('div');
+  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:2';
+  center.innerHTML = `
+    <div class="fnos-ph-spinner"></div>
+    <div class="fnos-ph-tip" style="font-size:15px;color:rgba(225,218,245,.9);letter-spacing:1px;font-weight:600"><span class="fnos-ph-count" style="font-weight:800;color:#c9a7f0;font-variant-numeric:tabular-nums">0</span> 个 · <span class="fnos-ph-text">正在加载精彩内容…</span></div>
   `;
-  container.appendChild(box);
+  leftEl.appendChild(center);
+  container.appendChild(leftEl);
+
+  // 右侧 20%: 信息面板骨架(胶囊/标题/简介/按钮线条), 与真实轮播右面板同风格
+  const rightPanel = document.createElement('div');
+  rightPanel.style.cssText = 'position:relative;width:20%;height:100%;flex-shrink:0;background:var(--fnos-hero-panel);display:flex;flex-direction:column;padding:24px 22px;gap:14px;align-items:flex-start';
+  rightPanel.innerHTML = `
+    <div class="fnos-ph-skel" style="width:92px;height:24px;border-radius:20px"></div>
+    <div class="fnos-ph-skel" style="width:100%;height:30px;border-radius:8px;margin-top:4px"></div>
+    <div class="fnos-ph-skel" style="width:82%;height:14px;border-radius:6px"></div>
+    <div class="fnos-ph-skel" style="width:68%;height:14px;border-radius:6px"></div>
+    <div class="fnos-ph-skel" style="width:74%;height:14px;border-radius:6px"></div>
+    <div class="fnos-ph-skel" style="width:120px;height:40px;border-radius:12px;margin-top:auto"></div>
+  `;
+  container.appendChild(rightPanel);
+
+  wrapper.appendChild(container);
+  target.appendChild(wrapper);
 
   // [lc-561] 记录数字元素, 供 fetchShowsViaIPC 抓取过程中实时更新"已加载 N 个"
   _carouselProgressEl = container.querySelector('.fnos-ph-count') as HTMLElement | null;
   _carouselProgressCount = 0;
-
-  wrapper.appendChild(container);
-  target.appendChild(wrapper);
 
   // 若真实片库始终未加载(如 NAS 未连接/接口超时), 一段时间后温和提示, 避免"正在加载"永久卡住
   const phTimer = window.setTimeout(() => {
