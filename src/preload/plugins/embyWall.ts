@@ -3,7 +3,10 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-// [lc-555] 轮播数据改为独立隐藏 iframe 加载 /v/list/all，不再依赖 hotUpdates 的 ensureLibraryIndex 共享状态
+import { ensureLibraryIndex, LibItem } from './hotUpdates';
+// [lc-558] 回归复用 hotUpdates.ensureLibraryIndex() 获取全量库索引(DOM 已含 poster+title, 按 /v/list/all 顺序)。
+// 该机制自建全屏 iframe 加载 /v/list/all 且与当前页 pathname 无关, 已验证健壮(日志"构建完成 N 项")。
+// 不再使用 lc-555/557 的 scrapeAllPageCards(独立 iframe+poll 不可靠, 常卡死)。
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -473,161 +476,58 @@ function scrapeVisibleCards(): any[] {
   return Array.from(map.values());
 }
 
-/** [lc-557] 用独立隐藏 iframe 加载「全部」页(/v/list/all)，按其 DOM 自然顺序读取卡片。
- *  不依赖 ensureLibraryIndex 的共享状态机制（该机制有 promise pending 导致白屏）。
- *  返回的卡片顺序 = 全部页从左到右、从上到下的视觉顺序（即用户期望的正确顺序）。
- *
- *  [lc-557 修复] 之前 lc-555 用 1px 小 iframe → 飞牛列表是虚拟滚动/懒加载,
- *  1px 视口下不渲染卡片 + IntersectionObserver 判不可见 → onload 后读不到链接 → 卡死。
- *  改用全屏尺寸 iframe(同 hotUpdates.lc-457-fix) + poll 轮询(飞牛 SPA onload 不可靠),
- *  每 500ms 检查 contentDocument 是否有卡片, 拿到满 10 个即 finish, timeoutMs 兜底。 */
-async function scrapeAllPageCards(timeoutMs = 12000): Promise<any[]> {
-  return new Promise((resolve) => {
-    const cleanTitleOf = (raw: string): string =>
-      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
-
-    const iframe = document.createElement('iframe');
-    // [lc-557] 必须全屏(而非1px)隐藏: 飞牛列表是滚动懒加载/虚拟滚动, 1px 视口下
-    // 仅渲染首屏约19项且 IntersectionObserver 判不可见不加载后续; 全屏+opacity:0
-    // 放背后(z-index:-1, pointer-events:none)既不影响用户视图, 又能让飞牛正常渲染卡片。
-    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:-1;opacity:0;border:none;pointer-events:none;';
-    document.body.appendChild(iframe);
-
-    const map = new Map<string, any>();
-    let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const cleanup = (): void => {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      try { iframe.remove(); } catch (e) { /* ignore */ }
-    };
-
-    const finish = (reason: string): void => {
-      if (done) return;
-      log('[lc-557] scraped', map.size, 'cards from all-page (' + reason + '), first:', (map.values().next().value?.title || '').substring(0, 20));
-      cleanup();
-      resolve(Array.from(map.values()));
-    };
-
-    const collect = (doc: any): void => {
-      // 按全部页 DOM 自然顺序（左→右, 上→下）扫描卡片
-      const links = doc.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
-      for (let i = 0; i < links.length && map.size < 10; i++) {
-        const a = links[i] as HTMLElement;
-        const href = a.getAttribute('href') || '';
-        const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
-        if (!m || map.has(m[2])) continue;
-
-        // 提取封面
-        let poster = '';
-        const img = a.querySelector('img');
-        if (img) {
-          const s = (img as HTMLImageElement).currentSrc || (img as HTMLImageElement).src || img.getAttribute('src') || '';
-          if (s && (s.includes('/v/api/v1/sys/img/') || s.includes('sys/img') || /^https?:/i.test(s))) {
-            poster = s.startsWith('/') ? (location.origin + s) : s;
-          }
-        }
-        if (!poster) continue;  // 无封面（直播电视等）→ 跳过
-
-        // 提取标题：取卡片底部标题文本（通常在 a 内或紧邻的兄弟元素中）
-        let title = '';
-        const walk = (el: HTMLElement): void => {
-          for (const node of Array.from(el.childNodes)) {
-            if (title) return;
-            if (node.nodeType === Node.TEXT_NODE) {
-              const t = (node.textContent || '').trim();
-              if (t.length >= 2) { title = t; return; }
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-              walk(node as HTMLElement);
-            }
-          }
-        };
-        walk(a);
-        // 如果 a 内文本太短（可能只是图片 alt），尝试取父级卡片容器的标题区
-        if (!title || title.length < 3) {
-          let parent = a.parentElement;
-          for (let d = 0; d < 4 && parent; d++) {
-            const t = (parent.textContent || '').trim().replace(/\s+/g, ' ');
-            if (t.length > 6 && t.length < 80) { title = t; break; }
-            parent = parent.parentElement;
-          }
-        }
-        if (!title) title = (a.getAttribute('title') || '').trim();
-        if (!title) continue;
-
-        map.set(m[2], {
-          id: m[2], title: cleanTitleOf(title), poster, backdrop: poster,
-          desc: '', mediaType: m[1],
-          tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
-          year: 0, rating: 0, statusText: '', genres: [] as string[],
-        });
-      }
-    };
-
-    timer = setTimeout(() => finish('timeout-' + timeoutMs + 'ms'), timeoutMs);
-
-    // [lc-557] poll 轮询(不依赖 onload, 飞牛 SPA onload 不可靠):
-    // 每 500ms 检查 iframe.contentDocument 是否有卡片, 拿到满 10 个即 finish。
-    const poll = (): void => {
-      if (done) return;
-      try {
-        const doc: any = iframe.contentDocument || iframe.contentWindow?.document;
-        if (!doc) { setTimeout(poll, 400); return; }
-        collect(doc);
-        if (map.size >= 10) { finish('got-10'); return; }
-        // 不足 10 个有封面项: 滚动触发懒加载更多, 继续轮询
-        try {
-          const w: any = doc.defaultView || doc.parentWindow;
-          if (w) w.scrollTo(0, 1e9);
-        } catch { /* ignore */ }
-        const els = doc.querySelectorAll('*');
-        els.forEach((el: any) => { try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = el.scrollHeight; } catch { /* ignore */ } });
-        setTimeout(poll, 500);
-      } catch (e) {
-        setTimeout(poll, 400);
-      }
-    };
-
-    iframe.onerror = () => { log('[lc-557] all-page iframe error'); finish('iframe-error'); };
-
-    // 加载全部页（飞牛已按"最新更新在上"排好序）
-    iframe.src = location.origin + '/v/list/all';
-    // 启动轮询(稍延迟等 iframe 开始加载)
-    setTimeout(poll, 300);
-  });
-}
-
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return _apiShows;
-  // [lc-555] 仅首页抓取轮播数据，避免详情页误触发
-  const p = location.pathname;
-  if (p !== '/v' && p !== '/') return _apiShows;
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
+  // [lc-558] 不在首页(如 /v/login)时不预热: 未登录时 /v/list/all 抓空且会被 ensureLibraryIndex 缓存,
+  // 导致后续永不重拉(白屏死锁)。改为注册 watcher, 等路由到达首页(/v)再真正拉取。
+  const p = location.pathname;
+  if (p !== '/v' && p !== '/v/' && p !== '/') {
+    watchHomeThenFetch(base);
+    return _apiShows;
+  }
   _apiLoading = true;
 
   try {
-    // [lc-555] 核心改动：用独立隐藏 iframe 加载 /v/list/all（全部页），
-    // 按 DOM 自然顺序读取前 10 个有封面的 tv/movie 卡片。
-    // 这保证了顺序与用户在「全部」页面看到的完全一致（左→右, 上→下）。
-    // 不依赖 ensureLibraryIndex 共享状态（该机制有 promise pending 导致白屏的历史问题）。
-    log('[lc-555] loading carousel from /v/list/all via dedicated iframe...');
-    const domShows = await scrapeAllPageCards(15000);  // 15s 超时（页面+图片加载）
+    // [lc-558] 回归复用已验证的 ensureLibraryIndex(): 返回全量 LibItem(含 poster+title, 按 /v/list/all 顺序)。
+    // 该 promise 健壮——已构建则同步返回缓存; 构建中则轮询等待(4s 超时兜底); 首次则自建全屏 iframe 构建。
+    // 绝不会永远 pending(不再有 lc-555/557 的"独立 iframe+poll"卡死问题)。
+    log('[lc-558] fetching carousel via ensureLibraryIndex()...');
+    const libItems: LibItem[] = await ensureLibraryIndex();
+    log('[lc-558] library index ready:', libItems.length, 'items');
 
-    if (domShows.length > 0) {
+    const cleanTitleOf = (raw: string): string =>
+      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+
+    // 按全部页顺序取前 10 个有真实封面的 tv/movie(无封面=直播电视/个人视频→剔除)
+    const newShows: any[] = [];
+    const seen = new Set<string>();
+    for (const item of libItems) {
+      if (newShows.length >= 10) break;
+      if (!item.poster) continue;
+      const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+      if (!hrefMatch || seen.has(hrefMatch[2])) continue;
+      seen.add(hrefMatch[2]);
+      newShows.push({
+        id: hrefMatch[2], title: cleanTitleOf(item.title), poster: item.poster,
+        backdrop: item.poster, desc: '', mediaType: hrefMatch[1],
+        tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+        year: 0, rating: 0, statusText: '', genres: [] as string[],
+      });
+    }
+
+    log('[lc-558] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
+
+    if (newShows.length > 0) {
       _apiShows.length = 0;
-      Array.prototype.push.apply(_apiShows, domShows);
+      Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
-      log('carousel from all-page DOM:', domShows.length, 'shows, first:', domShows[0]?.title?.substring(0, 20));
-      log('order check:', domShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
       _carouselInited = false;
-      injectCarousel();
+      injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
     } else {
-      log('[lc-555] all-page iframe returned 0 shows, fallback: scrape current page visible cards');
-      // 极端情况（iframe 加载失败）：回退到当前页可见卡片
+      log('[lc-558] ensureLibraryIndex returned 0 usable items, fallback to visible cards');
       const fallback = scrapeVisibleCards();
       if (fallback.length > 0) {
         _apiShows.length = 0;
@@ -637,9 +537,28 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         injectCarousel();
       }
     }
-  } catch (e) { log('fetch error:', e); }
+  } catch (e) { log('[lc-558] fetch error:', e); }
   _apiLoading = false;
   return _apiShows;
+}
+
+/** [lc-558] 登录页/非首页时 fetchShowsViaIPC 提前返回, 此处注册一次性的"到达首页再拉"监听, 打破 pathname 死锁。 */
+let _carouselWatchArmed = false;
+function watchHomeThenFetch(base: string): void {
+  if (_carouselWatchArmed) return;
+  _carouselWatchArmed = true;
+  const trigger = (): void => {
+    const hp = location.pathname;
+    if ((hp === '/v' || hp === '/v/' || hp === '/') && !_apiLoaded && !_apiLoading) {
+      fetchShowsViaIPC(base);
+    }
+  };
+  window.addEventListener('popstate', trigger);
+  // 轮询兜底: 飞牛登录跳转常不触发 history hook, 用轻量轮询探测到达首页
+  const iv = setInterval(() => {
+    const hp = location.pathname;
+    if (hp === '/v' || hp === '/v/' || hp === '/') { clearInterval(iv); trigger(); }
+  }, 1500);
 }
 
 /* ========== 拦截matchMedia ========== */
