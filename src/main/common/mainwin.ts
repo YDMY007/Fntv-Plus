@@ -82,6 +82,41 @@ const ACRYLIC_CSS = `
         -webkit-clip-path:inset(0 round 16px)!important;
     }
 
+    /* ── ①b 播放器全屏时去掉窗口圆角（视频4角变直角）──
+       两种全屏都要处理:
+         · 浏览器原生全屏 → 命中 html:fullscreen 伪类;
+         · 飞牛 xgplayer 伪全屏(多数情况) → 命中 html.fntv-video-fullscreen,
+           该 class 由 preload(danmakuWeb) 检测播放器根容器(.xgplayer)铺满视口时打标。
+       全屏时窗口应是不透明的直角全屏, 不再需要圆角/clip-path,
+       否则视频四角被裁成圆角、露出透明桌面。 */
+    html:fullscreen,
+    html.fntv-video-fullscreen{
+        border-radius:0!important;
+        clip-path:none!important;
+        -webkit-clip-path:none!important;
+    }
+    html:fullscreen body,
+    html.fntv-video-fullscreen body{
+        border-radius:0!important;
+        padding-top:0!important;   /* 全屏时去掉顶部 32px 安全区, 视频铺满顶边 */
+    }
+    html:fullscreen .fnos-tv-page body,
+    html.fntv-video-fullscreen .fnos-tv-page body{
+        border-radius:0!important;
+    }
+    html:fullscreen [style*="position:fixed"][style*="inset:0"],
+    html.fntv-video-fullscreen [style*="position:fixed"][style*="inset:0"],
+    html:fullscreen .fixed.inset-0,
+    html.fntv-video-fullscreen .fixed.inset-0,
+    html:fullscreen [class*="fixed"][class*="inset-0"],
+    html.fntv-video-fullscreen [class*="fixed"][class*="inset-0"],
+    html:fullscreen [id="fnos-page-veil"],
+    html.fntv-video-fullscreen [id="fnos-page-veil"]{
+        border-radius:0!important;
+        clip-path:none!important;
+        -webkit-clip-path:none!important;
+    }
+
     /* ── ② Body: 亚克力底板 (粉紫半透+模糊桌面) ──
        透明度 --fnos-alpha / 模糊 --fnos-blur 由侧栏滑块实时控制 */
     /* body 基础(全局): 仅保留无边框透明窗口必需的顶部安全区 + 防溢出。

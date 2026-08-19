@@ -105,6 +105,49 @@ function bindHeaderAutoHide(): void {
     log.info('[danmakuWeb] 播放页标题栏自动隐藏已启用 (' + HEADER_HIDE_DELAY + 'ms)');
 }
 
+/** 播放器全屏时给 html 打 fntv-video-fullscreen 标记, 由 mainwin.ts 的 ACRYLIC_CSS
+    在命中该 class(或原生 :fullscreen)时去掉窗口圆角/clip-path, 使视频4角变直角。
+    [lc-550] 飞牛 xgplayer 多数走伪全屏(给 .xgplayer 容器加 xgplayer-fullscreen 并铺满视口),
+    此时 html 并非 :fullscreen, 须靠本检测打标; 浏览器原生全屏则由 :fullscreen 直接覆盖。 */
+let _fsFixBound = false;
+function applyVideoFullscreenClass(): void {
+    let fs = !!document.fullscreenElement;
+    if (!fs) {
+        // 飞牛 xgplayer 伪全屏: 播放器根容器(.xgplayer)铺满视口即视为全屏
+        const player = document.querySelector('.xgplayer') as HTMLElement | null;
+        if (player && player.offsetParent !== null) {
+            const r = player.getBoundingClientRect();
+            if (r.width >= window.innerWidth * 0.97 &&
+                r.height >= window.innerHeight * 0.95 &&
+                r.top <= 4 && r.left <= 4) {
+                fs = true;
+            }
+        }
+    }
+    document.documentElement.classList.toggle('fntv-video-fullscreen', fs);
+}
+function bindVideoFullscreenFix(): void {
+    if (!isPlayerPage()) return;
+    // 非播放页(如路由切走)也要清理残留标记, 避免影响首页圆角
+    if (_fsFixBound) { applyVideoFullscreenClass(); return; }
+    _fsFixBound = true;
+    const update = () => applyVideoFullscreenClass();
+    document.addEventListener('fullscreenchange', update, { passive: true });
+    window.addEventListener('resize', update, { passive: true });
+    // 持续观察播放器根容器尺寸变化(伪全屏时 .xgplayer 会突然铺满)
+    const tryObserve = () => {
+        const player = document.querySelector('.xgplayer') as HTMLElement | null;
+        if (player) {
+            const ro = new ResizeObserver(() => update());
+            ro.observe(player);
+        }
+    };
+    tryObserve();
+    setTimeout(tryObserve, 2000); // 播放器可能稍后渲染, 延迟再尝试挂载
+    applyVideoFullscreenClass();
+    log.info('[danmakuWeb] 播放器全屏去圆角检测已启用');
+}
+
 interface DanmakuItem {
     time: number;   // 秒
     type: number;   // 1/2/3=滚动 4=底部 5=顶部
@@ -909,11 +952,15 @@ function closeStylePanel(): void {
 // ─── 初始化 ───
 
 function maybeSetup(): void {
+    // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
+    applyVideoFullscreenClass();
     if (!isPlayerPage()) return;
 
     // [lc-544] 播放页顶部标题栏美化（毛玻璃 + 自动隐藏）
     injectPlayerHeaderStyle();
     bindHeaderAutoHide();
+    // [lc-550] 播放器全屏去圆角检测
+    bindVideoFullscreenFix();
 
     try {
         const saved = localStorage.getItem(LS_KEY);
