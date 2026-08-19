@@ -1299,15 +1299,32 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex';
   _carouselContainer = container;
 
-  // 左侧 80%: 大图 shimmer 区 + 中央 spinner + 进度数字
+  // 左侧 80%: 大图区(紫色渐变 + 装饰海报占位 + shimmer) + 中央 spinner + 进度数字
   const leftEl = document.createElement('div');
-  leftEl.className = 'fnos-ph-skel';
-  leftEl.style.cssText = 'position:relative;width:80%;height:100%;flex-shrink:0;overflow:hidden';
+  leftEl.style.cssText = 'position:relative;width:80%;height:100%;flex-shrink:0;overflow:hidden;background:linear-gradient(155deg,rgba(145,115,215,.20),rgba(70,50,120,.32))';
+  // [lc-579] 装饰海报占位块(错落摆放, 增加内容感, 避免大图区纯空白)
+  const deco = (l: string, t: string, r: string): HTMLElement => {
+    const d = document.createElement('div');
+    d.style.cssText = `position:absolute;left:${l};top:${t};width:104px;height:152px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);transform:rotate(${r})`;
+    return d;
+  };
+  leftEl.appendChild(deco('5%', '12%', '-7deg'));
+  leftEl.appendChild(deco('14%', '24%', '4deg'));
+  leftEl.appendChild(deco('22%', '13%', '-2deg'));
+  // shimmer 覆盖层(半透明, 不遮中央内容)
+  const shimmer = document.createElement('div');
+  shimmer.className = 'fnos-ph-skel';
+  shimmer.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:1';
+  leftEl.appendChild(shimmer);
+  // 中央内容: spinner + 主文字 + 进度数字(两行, 大图区正中)
   const center = document.createElement('div');
-  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:2';
+  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:2';
   center.innerHTML = `
-    <div class="fnos-ph-spinner"></div>
-    <div class="fnos-ph-tip" style="font-size:15px;color:rgba(225,218,245,.9);letter-spacing:1px;font-weight:600"><span class="fnos-ph-count" style="font-weight:800;color:#c9a7f0;font-variant-numeric:tabular-nums">0</span> 个 · <span class="fnos-ph-text">正在加载精彩内容…</span></div>
+    <div class="fnos-ph-spinner" style="width:46px;height:46px;border-width:4px"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <div class="fnos-ph-text" style="font-size:16px;color:rgba(240,236,255,.95);letter-spacing:1.5px;font-weight:700">正在加载精彩内容…</div>
+      <div style="font-size:13px;color:rgba(225,218,245,.75);letter-spacing:.5px">已加载 <span class="fnos-ph-count" style="font-weight:800;color:#c9a7f0;font-variant-numeric:tabular-nums">0</span> 个</div>
+    </div>
   `;
   leftEl.appendChild(center);
   container.appendChild(leftEl);
