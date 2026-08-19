@@ -3,10 +3,8 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-// [lc-559] 轮播数据改为"不滚动读取全部页首屏 DOM 顺序"，不再依赖 ensureLibraryIndex 的全量滚动收集
-// （全量滚动会让飞牛虚拟滚动异步加载更旧条目、Map 插入顺序打乱视觉顺序 → 顺序变为"很久以前"）。
-// 改用 scrapeAllPageFirstScreen(): 全屏隐藏 iframe 加载 /v/list/all, 只读首屏前 10 个有封面卡片,
-// 顺序 = 全部页从上到下视觉顺序, 标题精准提取(data-title / [class*=title] 元素, 不再混评分年份)。
+// [lc-561] 轮播数据三级策略：①当前页已渲染DOM直接抓（最快最稳）→ ②iframe异步抓/v/list/all增强排序 → ③RECENT_SHOWS硬编码兜底。
+// 不再依赖 iframe 作为唯一数据源（lc-560 证明 iframe 因 fnOS 虚拟滚动/懒加载可能返回0张 → 轮播消失）。
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -641,29 +639,42 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   _apiLoading = true;
 
   try {
-    // [lc-559] 改用 scrapeAllPageFirstScreen(): 全屏隐藏 iframe 加载 /v/list/all, 不滚动,
-    // 直接按首屏 DOM 文档顺序读取前 10 个有真实封面的 tv/movie。顺序 = 全部页从上到下视觉顺序,
-    // 标题已在该函数内精准提取并清理(不再混入评分/年份/季数)。绝不卡死(15s 超时 + poll 不依赖 onload)。
-    log('[lc-559] fetching carousel via scrapeAllPageFirstScreen() (no-scroll, visual order)...');
-    const cards = await scrapeAllPageFirstScreen(15000);
-    log('[lc-560] first-screen cards ready:', cards.length, 'items');
+    // [lc-561] 三级数据源策略（确保轮播永不空白）：
+    //   Tier 1: 当前页已渲染 DOM 直接抓取（最快最稳，截图证明首页有大量可见卡片）
+    //   Tier 2: iframe 抓 /v/list/all 首屏（顺序更好，但可能因虚拟滚动/懒加载返回 0）
+    //   Tier 3: RECENT_SHOWS 硬编码兜底（比显示原生页面好）
+    let newShows: any[] = [];
 
-    // [lc-560] cards 已是成品: 全部页首屏 DOM 顺序、标题已清理、有真实封面、前 10 个 tv/movie。
-    let newShows: any[] = cards.slice(0, 10);
-
-    // [lc-560] 兜底: iframe 抓取 0 张时, 从当前页「媒体库」section 直接抓(该 section 现在不会被清空,
-    // 图已真实加载; 顺序=section DOM 顺序, 比空白强)。这是防止"图不显示"的最后保险。
-    if (newShows.length === 0) {
-      log('[lc-560] iframe scrape 0 cards, fallback: scrape live media-library section');
-      const sec = findMediaLibrarySection();
-      const fb = sec ? scrapeVisibleCards(sec) : scrapeVisibleCards();
-      if (fb.length > 0) {
-        log('[lc-560] live-section fallback got', fb.length, 'cards');
-        newShows = fb.slice(0, 10);
-      }
+    // Tier 1: 从当前首页已渲染的 DOM 直接抓卡片（100% 可用，无跨域/时序问题）
+    log('[lc-561] Tier1: scraping current page live DOM...');
+    const liveCards = scrapeVisibleCards();
+    log('[lc-561] Tier1 got', liveCards.length, 'cards from live DOM');
+    if (liveCards.length > 0) {
+      newShows = liveCards.slice(0, 10);
     }
 
-    log('[lc-560] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
+    // Tier 2: 异步尝试 iframe 抓「全部」页（不阻塞，若成功则替换为更好的排序）
+    // 注意：这里不再 await 阻塞主流程。iframe 抓取作为增强，成功则更新；失败不影响 Tier1/3
+    scrapeAllPageFirstScreen(12000).then((iframeCards) => {
+      log('[lc-561] Tier2 iframe returned', iframeCards.length, 'cards');
+      if (iframeCards.length >= Math.min(5, newShows.length)) {
+        // iframe 结果足够多且质量可信 → 替换为 iframe 数据（排序更接近"全部页"视觉顺序）
+        log('[lc-561] Tier2 replacing with iframe data (better order)');
+        _apiShows.length = 0;
+        Array.prototype.push.apply(_apiShows, iframeCards.slice(0, 10));
+        _carouselInited = false;  // 触发重建
+        injectCarousel();
+      }
+      // iframe 数据不足 → 保持 Tier1/3 的结果不变
+    }).catch(() => { /* iframe 失败静默忽略 */ });
+
+    // Tier 3 兜底：如果当前页也没抓到卡片 → 用硬编码数据（绝不让轮播消失）
+    if (newShows.length === 0) {
+      log('[lc-561] Tier3: using RECENT_SHOWS hardcoded fallback');
+      newShows = RECENT_SHOWS.slice(0, 10);
+    }
+
+    log('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
 
     if (newShows.length > 0) {
       _apiShows.length = 0;
@@ -671,10 +682,8 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _apiLoaded = true;
       _carouselInited = false;
       injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
-    } else {
-      log('[lc-560] both iframe and live-section scrape returned 0 — leaving native media library visible');
     }
-  } catch (e) { log('[lc-558] fetch error:', e); }
+  } catch (e) { log('[lc-561] fetch error:', e); }
   _apiLoading = false;
   return _apiShows;
 }
