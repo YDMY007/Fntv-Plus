@@ -591,7 +591,20 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
+      injectCarousel();  // 立即注入(左侧大图先用竖版 poster 兜底, 横版大海报异步补齐后重建)
+
+      // [lc-566] 并行补横版大海报(backdrop): 当前页 DOM 只有竖版卡片海报, 横版图只能从 item API 拿。
+      // 并行 10 条 + 单条 4s 超时(AbortController), 不阻塞首屏; 补成功后重建轮播, 失败保留竖版兜底。
+      log('[lc-566] fetching landscape backdrops for', newShows.length, 'items (parallel, 4s timeout)...');
+      Promise.all(newShows.map(async (s: any) => {
+        const bd = await fetchItemBackdrop(base, s.id);
+        if (bd) { s.backdrop = bd; return true; }
+        return false;
+      })).then((results) => {
+        const got = results.filter(Boolean).length;
+        log('[lc-566] backdrops got', got, '/', newShows.length, '; rebuilding carousel');
+        if (got > 0) { _carouselInited = false; injectCarousel(); }
+      }).catch((e) => log('[lc-566] backdrop fetch error:', e));
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
@@ -711,6 +724,37 @@ async function fetchImageAuth(fullUrl: string): Promise<string | null> {
     const blob = await resp.blob();
     return URL.createObjectURL(blob);
   } catch (e) { log('fetchImg err', String(e).substring(0, 90)); return null; }
+}
+
+/** [lc-566] 从飞牛 item API 拿横版大海报(backdrop) URL:
+ *  当前页 DOM 只有竖版卡片海报, 横版背景图只能从 /v/api/v1/item/{id} 拿。
+ *  带 Authx 签名 + AbortController 4s 超时; 失败返回空字符串(由调用方用竖版 poster 兜底)。
+ *  字段多源兜底: backdrop / landscape / bg / fanart / big_backdrop / 图片URL */
+async function fetchItemBackdrop(base: string, id: string): Promise<string> {
+  try {
+    const { ipcRenderer } = require('electron');
+    const path = `/v/api/v1/item/${id}`;
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000); // 单条 4s 硬超时, 避免 API 挂起卡轮播
+    let resp: Response;
+    try {
+      resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
+    } finally { clearTimeout(timer); }
+    if (!resp.ok) return '';
+    const json: any = await resp.json();
+    const d = (json && json.data) || {};
+    const cands: string[] = [
+      d.backdrop, d.landscape, d.big_backdrop, d.fanart, d.bg, d.backdrop_path,
+      d.poster_backdrop, d.images && d.images.backdrop, d.big_pic, d.bigPic,
+    ];
+    for (const c of cands) {
+      if (typeof c === 'string' && c && (c.includes('/sys/img/') || c.startsWith('http'))) {
+        return c.startsWith('/') ? base + c : c;
+      }
+    }
+    return '';
+  } catch (e) { return ''; }
 }
 
 let _carouselInited = false;
@@ -891,13 +935,39 @@ function injectCarousel(): void {
     // 左: 图片面板(占 ~80%, 撑满无白边)
     const leftEl = document.createElement('div');
     leftEl.style.cssText = 'position:relative;width:80%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
+    // [lc-566] 模糊背景层: 竖版海报兜底时模糊放大铺底(影视 app 风格), 前景 contain 居中; 横版 backdrop 时隐藏
+    const blurBg = document.createElement('div');
+    blurBg.style.cssText = 'position:absolute;inset:-40px;background-size:cover;background-position:center;filter:blur(32px) saturate(130%);transform:scale(1.25);opacity:.9;display:none';
+    leftEl.appendChild(blurBg);
     const imgEl = document.createElement('img');
     // [v337] 改 cover 撑满左面板(上下无白边); 仅裁左右一点点, 左对齐保持(替代 v336 的 contain+22px白边)
-    imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center';
+    imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;z-index:1';
     leftEl.appendChild(imgEl);
     const pic = imgUrl(show.backdrop); // 不带?w, 避免与签名path不一致
     if (shows === _apiShows && i === 0) log('SLIDE0 img src:', pic.substring(0, 80));
-    fetchImageAuth(pic).then((b) => { if (b) imgEl.src = b; });
+    fetchImageAuth(pic).then((b) => {
+      if (!b) return;
+      imgEl.src = b;
+      // [lc-566] 加载后判断宽高比: 竖版海报(高>宽, 如 item API 拿不到横版 backdrop 时的兜底)
+      // → 前景 contain 居中显示海报, 背景用同图模糊铺底(不拉伸变形); 横版 → 正常 cover 铺满, 隐藏模糊层
+      imgEl.onload = () => {
+        try {
+          const nw = imgEl.naturalWidth || 0, nh = imgEl.naturalHeight || 0;
+          if (nw > 0 && nh > 0 && nw < nh) {
+            imgEl.style.objectFit = 'contain';
+            imgEl.style.width = 'auto';
+            imgEl.style.height = '100%';
+            imgEl.style.left = '50%';
+            imgEl.style.transform = 'translateX(-50%)';
+            blurBg.style.backgroundImage = 'url(' + b + ')';
+            blurBg.style.display = 'block';
+          } else {
+            blurBg.style.display = 'none';
+          }
+        } catch (e) { /* ignore */ }
+      };
+      try { if (imgEl.complete) imgEl.onload(null as any); } catch (e) { /* ignore */ }
+    });
     // 右边缘渐隐, 与右侧文字面板自然融合
     const edgeFade = document.createElement('div');
     edgeFade.style.cssText = 'position:absolute;inset:0;background:var(--fnos-hero-edge)';
