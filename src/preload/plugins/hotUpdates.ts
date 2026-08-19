@@ -536,12 +536,14 @@ let _libIndex: LibItem[] | null = null;
 let _libLoading = false;
 let _libWaiters: ((v: LibItem[]) => void)[] = [];
 
-/** 懒加载飞牛影视库索引（/v/list/all 全量去重条目）；并发调用只真正抓一次 */
+/** 懒加载飞牛影视库索引（/v/list/all 全量去重条目）；并发调用只真正抓一次
+ *  [lc-576] 修复：空数组 _libIndex=[] 不再命中缓存(truthy bug) —— 某次构建失败缓存空后,
+ *  matchLibrary 永远返回 null →「已入库」徽标永久失效; 改为仅非空缓存命中, 空结果下次重建自愈。 */
 export function ensureLibraryIndex(): Promise<LibItem[]> {
-  if (_libIndex) return Promise.resolve(_libIndex);
+  if (_libIndex && _libIndex.length) return Promise.resolve(_libIndex);
   if (_libLoading) {
     return new Promise((resolve) => {
-      const t = setInterval(() => { if (_libIndex) { clearInterval(t); resolve(_libIndex); } }, 200);
+      const t = setInterval(() => { if (_libIndex && _libIndex.length) { clearInterval(t); resolve(_libIndex); } }, 200);
       setTimeout(() => { clearInterval(t); resolve(_libIndex || []); }, 4000);
     });
   }
@@ -563,7 +565,9 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
     const finish = (): void => {
       try { iframe.remove(); } catch { /* ignore */ }
       const idx: LibItem[] = Array.from(map.values());
-      _libIndex = idx;
+      // [lc-576] 构建空结果不缓存为永久空(_libIndex=[] 会命中 truthy 缓存 → 已入库失效);
+      // 空库(罕见)下次重建自愈, 非空正常缓存。
+      _libIndex = idx.length ? idx : null;
       _libLoading = false;
       _libWaiters.forEach((r) => r(idx)); _libWaiters = [];
       logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项 (rounds=' + attempts + ')');
@@ -630,7 +634,8 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
     iframe.onload = () => setTimeout(poll, 500);
     iframe.onerror = () => {
       try { iframe.remove(); } catch { /* ignore */ }
-      _libIndex = []; _libLoading = false; _libWaiters.forEach((r) => r([])); _libWaiters = [];
+      // [lc-576] 失败不缓存空数组(null 下次可重建自愈)
+      _libIndex = null; _libLoading = false; _libWaiters.forEach((r) => r([])); _libWaiters = [];
       resolve([]);
     };
     document.body.appendChild(iframe);
@@ -660,10 +665,15 @@ function matchLibrary(titleCn: string, titleOrig: string): string | null {
  *  库索引异步构建，故需在 render 后 与 索引就绪后 各调用一次，覆盖两种时序。 */
 function markInLibrary(root: ParentNode): void {
   const cards = root.querySelectorAll('.fntv-hot-card');
+  // [lc-576] 诊断: 每次标注打印卡片数与索引状态, 便于定位"已入库失效"
+  logger.info('[hotUpdates] markInLibrary: cards=' + cards.length + ', libIndex=' + (_libIndex ? _libIndex.length + ' items' : 'null'));
   cards.forEach((c: any) => {
     const titleCn = c.getAttribute('data-title-cn') || '';
     const titleOrig = c.getAttribute('data-title') || '';
     const hit = matchLibrary(titleCn, titleOrig);
+    // [lc-576] 诊断: 打印每卡片命中结果(中文名→库索引匹配)
+    if (hit) logger.info('[hotUpdates] 已入库命中:', (titleCn || titleOrig).substring(0, 30));
+    else logger.info('[hotUpdates] 未命中:', (titleCn || titleOrig).substring(0, 30), '| libTitleSample=' + (_libIndex && _libIndex.length ? _libIndex[0].title.substring(0, 20) : ''));
     let badge = c.querySelector('.fntv-hot-inlib') as HTMLElement | null;
     if (hit) {
       if (!badge) {
