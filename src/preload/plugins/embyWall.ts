@@ -543,7 +543,9 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
         tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
         year: 0, rating: 0, statusText: '', genres: [] as string[],
       });
-      // [lc-561] 实时回传已加载卡片数(供骨架显示"已加载 N 个")
+      // [lc-582] 逐项异步渲染进度: 每收集一张让浏览器渲染一帧(80ms),
+      // 骨架"已加载 N 个"数字 0→10 逐帧可见, 而不是同步瞬间跳变(之前 UI 只看到最终帧)
+      await new Promise((r) => setTimeout(r, 80));
       try { if (onProgress) onProgress(cards.length); } catch (e) { /* ignore */ }
     }
     log('[lc-565] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
@@ -976,8 +978,12 @@ function injectCarousel(): void {
   }
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
+  // [lc-582] 加载完成后淡入, 不再"直接闪出全部"(骨架→轮播平滑过渡)
+  container.style.opacity = '0';
+  container.style.transition = 'opacity .45s ease';
   wrapper.appendChild(container);
   _carouselContainer = container;
+  requestAnimationFrame(() => { container.style.opacity = '1'; });
 
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
@@ -1294,29 +1300,27 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
   _carouselWrapper = wrapper;
 
-  // [lc-577] 骨架容器: 与真实轮播同尺寸同圆角, 左 80% 大图 shimmer + 右 20% 信息面板骨架
+  // [lc-582] 骨架融合为单一整体: 不分左右栏, 整块 16:9 圆角区域内
+  // 紫色渐变 + 装饰海报占位 + shimmer + 中央 spinner/进度文字, 简洁统一
   const container = document.createElement('div');
-  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex';
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
   _carouselContainer = container;
 
-  // 左侧 80%: 大图区(紫色渐变 + 装饰海报占位 + shimmer) + 中央 spinner + 进度数字
-  const leftEl = document.createElement('div');
-  leftEl.style.cssText = 'position:relative;width:80%;height:100%;flex-shrink:0;overflow:hidden;background:linear-gradient(155deg,rgba(145,115,215,.20),rgba(70,50,120,.32))';
-  // [lc-579] 装饰海报占位块(错落摆放, 增加内容感, 避免大图区纯空白)
+  // 装饰海报占位块(错落摆放, 增加内容感, 不空白)
   const deco = (l: string, t: string, r: string): HTMLElement => {
     const d = document.createElement('div');
     d.style.cssText = `position:absolute;left:${l};top:${t};width:104px;height:152px;border-radius:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);transform:rotate(${r})`;
     return d;
   };
-  leftEl.appendChild(deco('5%', '12%', '-7deg'));
-  leftEl.appendChild(deco('14%', '24%', '4deg'));
-  leftEl.appendChild(deco('22%', '13%', '-2deg'));
+  container.appendChild(deco('6%', '14%', '-7deg'));
+  container.appendChild(deco('14%', '26%', '4deg'));
+  container.appendChild(deco('22%', '15%', '-2deg'));
   // shimmer 覆盖层(半透明, 不遮中央内容)
   const shimmer = document.createElement('div');
   shimmer.className = 'fnos-ph-skel';
   shimmer.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:1';
-  leftEl.appendChild(shimmer);
-  // 中央内容: spinner + 主文字 + 进度数字(两行, 大图区正中)
+  container.appendChild(shimmer);
+  // 中央内容: spinner + 主文字 + 进度数字(整体正中)
   const center = document.createElement('div');
   center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:2';
   center.innerHTML = `
@@ -1326,21 +1330,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       <div style="font-size:13px;color:rgba(225,218,245,.75);letter-spacing:.5px">已加载 <span class="fnos-ph-count" style="font-weight:800;color:#c9a7f0;font-variant-numeric:tabular-nums">0</span> 个</div>
     </div>
   `;
-  leftEl.appendChild(center);
-  container.appendChild(leftEl);
-
-  // 右侧 20%: 信息面板骨架(胶囊/标题/简介/按钮线条), 与真实轮播右面板同风格
-  const rightPanel = document.createElement('div');
-  rightPanel.style.cssText = 'position:relative;width:20%;height:100%;flex-shrink:0;background:var(--fnos-hero-panel);display:flex;flex-direction:column;padding:24px 22px;gap:14px;align-items:flex-start';
-  rightPanel.innerHTML = `
-    <div class="fnos-ph-skel" style="width:92px;height:24px;border-radius:20px"></div>
-    <div class="fnos-ph-skel" style="width:100%;height:30px;border-radius:8px;margin-top:4px"></div>
-    <div class="fnos-ph-skel" style="width:82%;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-skel" style="width:68%;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-skel" style="width:74%;height:14px;border-radius:6px"></div>
-    <div class="fnos-ph-skel" style="width:120px;height:40px;border-radius:12px;margin-top:auto"></div>
-  `;
-  container.appendChild(rightPanel);
+  container.appendChild(center);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
