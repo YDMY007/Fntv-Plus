@@ -1179,7 +1179,8 @@ function injectCarousel(): void {
       const pUrl = imgUrl(show.poster);
       fetchImageAuth(pUrl).then((b) => { if (b) pImg.src = b; });
       const pTitle = document.createElement('div');
-      pTitle.style.cssText = 'font-size:11px;color:rgba(20,35,70,.7);text-align:center;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;line-height:1.3';
+      // [lc-574] 标题浅色化: 深蓝黑→近白浅紫, 加字重/字距/阴影, 配合暗色磨砂背景更好看
+      pTitle.style.cssText = 'font-size:11.5px;font-weight:600;color:rgba(240,236,255,.95);text-align:center;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;line-height:1.35;letter-spacing:.3px;text-shadow:0 1px 4px rgba(0,0,0,.35)';
       pTitle.textContent = show.title;
       item.appendChild(pImg);
       item.appendChild(pTitle);
