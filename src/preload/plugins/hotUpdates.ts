@@ -642,9 +642,21 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
   });
 }
 
-/** 标题归一化：去空白、去常见分隔符，便于中文/原名模糊匹配 */
+/** [lc-578] 标题归一化：去空白/分隔符/评分星号/评分数字/季数/年份等脏文本，便于中文/原名模糊匹配。
+ *  ensureLibraryIndex 提取的标题是"最长 textContent"(如"8.4 龙之家族 共3季 2022-2026"),
+ *  若不去评分/年份/季数, 双向包含在边界情况会失配 →「已入库」漏标。 */
 function normalizeTitle(s: string): string {
-  return (s || '').toLowerCase().replace(/\s+/g, '').replace(/[：:·・\-—~～]/g, '');
+  return (s || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[：:·・\-—~～]/g, '')
+    .replace(/[★☆⭐]/g, '')                          // 评分星号
+    .replace(/^\d+(\.\d+)?\s*分?\s*/g, '')            // 评分"8.4分"前缀
+    .replace(/共\s*\d+\s*季/g, '')                    // 共X季
+    .replace(/第\s*\d+\s*季/g, '')                    // 第X季
+    .replace(/\b\d{4}[-–]\d{4}\b/g, '')               // 年份范围 2022-2026
+    .replace(/\b(19|20)\d{2}\b/g, '')                 // 单年份
+    .replace(/[《》「」『』【】]/g, '');                // 书名号
 }
 
 /** 用番剧名(中/原)在库索引中匹配；精确优先，其次双向包含；无则返回 null */
@@ -937,7 +949,12 @@ function buildPanel(): void {
       loadBg();
     }
     // [lc-457] 展开浮层时后台预建飞牛影视库索引，供卡片点击联动（懒加载，仅一次）
-    if (open) ensureLibraryIndex().catch(() => {});
+    // [lc-578] 保险: 索引就绪后对浮层内卡片强制补标「已入库」(覆盖"打开时索引仍在构建"的时序)
+    if (open) {
+      ensureLibraryIndex().then(() => {
+        try { markInLibrary(panel); } catch { /* ignore */ }
+      }).catch(() => {});
+    }
     // [lc-543] 展开时按当前系统深浅模式套用对应配色
     if (open) applyHotTheme();
   };
