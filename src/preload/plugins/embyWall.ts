@@ -432,55 +432,107 @@ function extractTmdbId(data: any): string | undefined {
   return undefined;
 }
 
+/** [lc-554] 直接读当前页面可见的媒体库卡片（同步、零网络、零 iframe，绝不卡白屏）。
+    飞牛首页"最近更新"等板块的卡片自带真实封面与 /v/tv|movie/{guid} 链接，直接抓即可。
+    这是彻底绕开会卡死的 ensureLibraryIndex 后台 iframe+滚动轮询机制的最终方案。 */
+function scrapeVisibleCards(): any[] {
+  const cleanTitleOf = (raw: string): string =>
+    raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
+  const map = new Map<string, any>();
+  const links = document.querySelectorAll('a[href*="/v/tv/"], a[href*="/v/movie/"]');
+  for (let i = 0; i < links.length && map.size < 10; i++) {
+    const a = links[i] as any;
+    const href = a.getAttribute('href') || '';
+    const m = href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+    if (!m || map.has(m[2])) continue;
+    // 封面（卡片内 img 的 sys/img 绝对路径）
+    let poster = '';
+    const img = a.querySelector('img');
+    if (img) {
+      const s = img.currentSrc || img.src || img.getAttribute('src') || '';
+      if (s && (s.includes('/v/api/v1/sys/img/') || /^https?:/i.test(s))) poster = s.startsWith('/') ? location.origin + s : s;
+    }
+    if (!poster) continue;
+    // 标题：向上遍历几层取文本
+    let title = '';
+    let el: any = a;
+    for (let d = 0; d < 6 && !title; d++) {
+      const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (t.length > 4) title = t;
+      el = el.parentElement;
+    }
+    if (!title) title = (a.getAttribute('title') || '').trim();
+    if (!title) continue;
+    map.set(m[2], {
+      id: m[2], title: cleanTitleOf(title), poster, backdrop: poster,
+      desc: '', mediaType: m[1],
+      tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+      year: 0, rating: 0, statusText: '', genres: [] as string[],
+    });
+  }
+  return Array.from(map.values());
+}
+
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return _apiShows;
+  // [lc-554] 仅首页(/v)抓取可见卡片，避免详情页"相关推荐"等卡片污染轮播
+  const p = location.pathname;
+  if (p !== '/v' && p !== '/v/') return _apiShows;
   if (_apiLoaded) return _apiShows;
   if (_apiLoading) return _apiShows;
   _apiLoading = true;
 
   try {
-    // [lc-553] 纯 DOM 方案：复用 hotUpdates 的全量库索引（DOM 已有封面+标题+链接），
-    // 直接构建轮播数据，**不调任何 API**（之前 lc-551 的 fetchOne IPC/fetch 经常卡死导致白屏）。
-    const libItems: LibItem[] = await ensureLibraryIndex();
-    log('library index:', libItems.length, 'items total');
-
-    // 标题清理：去掉评分前缀/季数后缀/年份范围
-    const cleanTitle = (raw: string): string =>
-      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
-
-    // 从头扫描，取前 10 个有真实封面的 tv/movie（无封面=直播电视/个人视频→剔除）
+    // [lc-554] 彻底绕开会卡死的 ensureLibraryIndex 后台 iframe+滚动轮询机制。
+    // 优先：同步读当前页可见卡片（首页"最近更新"等板块），零延迟、零网络，首屏立即可见真实数据。
+    const domShows = scrapeVisibleCards();
+    if (domShows.length > 0) {
+      _apiShows.length = 0;
+      Array.prototype.push.apply(_apiShows, domShows);
+      _apiLoaded = true;
+      log('carousel from visible DOM:', domShows.length, 'shows, first:', domShows[0]?.title?.substring(0, 20));
+      _carouselInited = false;
+      injectCarousel();  // 首屏立即重建，绝不白屏
+      _apiLoading = false;
+      return _apiShows;
+    }
+    // 当前页无可见卡片（罕见）：后台索引补充，带 6s 超时兜底，绝不无限白屏
+    log('no visible cards on current page, trying background index (6s timeout)...');
+    const libItems: LibItem[] = await Promise.race([
+      ensureLibraryIndex().catch(() => [] as LibItem[]),
+      new Promise<LibItem[]>((r) => setTimeout(() => r([] as LibItem[]), 6000)),
+    ]);
+    if (libItems.length === 0) {
+      log('index empty/timeout → carousel remains loading (will retry on next nav)');
+      _apiLoading = false;
+      return _apiShows;
+    }
     const newShows: any[] = [];
     const seen = new Set<string>();
+    const cleanTitleOf = (raw: string): string =>
+      raw.replace(/^[0-9.]+\s*/, '').replace(/共\s*\d+\s*季[^\n]*/g, '').replace(/\s*[·—]\s*\d{4}[-–]\d{4}\s*$/, '').trim();
     for (const item of libItems) {
       if (newShows.length >= 10) break;
-      if (!item.poster) continue;  // 无封面 → 跳过（直播电视等）
+      if (!item.poster) continue;
       const hrefMatch = item.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
       if (!hrefMatch || seen.has(hrefMatch[2])) continue;
       seen.add(hrefMatch[2]);
       newShows.push({
-        id: hrefMatch[2],
-        title: cleanTitle(item.title),
-        poster: item.poster,
-        backdrop: item.poster,   // backdrop 同用封面图（DOM 无单独 backdrop）
-        desc: '',                // DOM 无简介，留空
-        mediaType: hrefMatch[1],
-        // 以下字段 DOM 不可用，留默认值（轮播 UI 会自动隐藏空字段）
-        tmdbId: 0, totalEps: 0, localEps: 0,
-        totalSeasons: 0, localSeasons: 0, year: 0,
-        rating: 0, statusText: '', genres: [] as string[],
+        id: hrefMatch[2], title: cleanTitleOf(item.title), poster: item.poster,
+        backdrop: item.poster, desc: '', mediaType: hrefMatch[1],
+        tmdbId: 0, totalEps: 0, localEps: 0, totalSeasons: 0, localSeasons: 0,
+        year: 0, rating: 0, statusText: '', genres: [] as string[],
       });
     }
-
-    log('pure-DOM carousel:', newShows.length, 'shows, first:', newShows[0]?.title?.substring(0, 20));
-
     if (newShows.length > 0) {
       _apiShows.length = 0;
       Array.prototype.push.apply(_apiShows, newShows);
+      _apiLoaded = true;
+      log('carousel from index:', newShows.length, 'shows');
+      _carouselInited = false;
+      injectCarousel();
     }
-    _apiLoaded = true;
-    log('final 1st title:', _apiShows[0]?.title?.substring(0,15), 'poster:', (_apiShows[0]?.poster||'NONE').substring(0,80));
-    log('total', _apiShows.length, 'shows (pure DOM, zero API)');
   } catch (e) { log('fetch error:', e); }
   _apiLoading = false;
   return _apiShows;
