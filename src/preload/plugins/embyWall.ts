@@ -476,6 +476,22 @@ function scrapeVisibleCards(root?: Document | Element): any[] {
   return Array.from(map.values());
 }
 
+/** [lc-564] 等待库索引就绪(带重试): ensureLibraryIndex 内部若正在构建会走"轮询 _libIndex"分支,
+ *  但该分支超时仅 4 秒, 而 hotUpdates 完整构建需 ~4.5-5s(8轮×500ms) → embyWall 总是 4s 超时拿到空数组 → 兜底也 0 → "加载失败"。
+ *  这里循环重试: 构建完成后 hotUpdates 会缓存 _libIndex, 下一次 ensureLibraryIndex() 调用即同步返回真实数据。
+ *  @param maxWaitMs 最长等待(默认 20s, 超过则返回当前状态, 由上层兜底) */
+async function waitLibIndex(maxWaitMs = 20000): Promise<any[]> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    // ensureLibraryIndex: 已构建→同步缓存返回; 构建中→内部轮询(4s超时可能空); 未开始→触发构建并等待完成
+    const idx = await ensureLibraryIndex();
+    if (idx && idx.length > 0) return idx; // 拿到真实数据 → 立即返回
+    // 空数组: 可能是"构建中 4s 超时"或"构建失败" → 等 1s 后重试(构建完成后 _libIndex 已缓存, 下次调用立即返回)
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return ensureLibraryIndex(); // 超时兜底: 返回当前状态(可能仍为空, 由上层 scrapeVisibleCards 兜底)
+}
+
 /** [lc-563] 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex 拿「全部剧集列表」(/v/list/all) 首屏数据。
  *  关键事实（用户确认 + fnOS 默认排序）：/v/list/all 默认「最近更新在上」，首屏 DOM 文档顺序 = 视觉顺序 = 正确顺序。
  *  ensureLibraryIndex 已证明稳定构建（截图日志「97 项」），其内部全屏 iframe + scrollAll 滚动到底收集全量，
@@ -496,10 +512,10 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
     return t.replace(/\s+/g, ' ').trim();
   };
   try {
-    log('[lc-563] reusing ensureLibraryIndex (proven iframe /v/list/all scraper)...');
-    // [lc-563] 复用 ensureLibraryIndex: 同源全屏 iframe + 滚动到底 + 单例缓存; 已稳定构建 97 项
-    const libIndex = await ensureLibraryIndex();
-    log('[lc-563] ensureLibraryIndex returned', libIndex.length, 'items');
+    log('[lc-564] waiting for library index (retry loop, max', timeoutMs, 'ms)...');
+    // [lc-564] 用带重试的 waitLibIndex 替代直接 await: 解决 ensureLibraryIndex 内部 4s 轮询超时竞态
+    const libIndex = await waitLibIndex(timeoutMs);
+    log('[lc-564] library index ready:', libIndex.length, 'items');
     const cards: any[] = [];
     const seen = new Set<string>();
     for (let i = 0; i < libIndex.length && cards.length < 10; i++) {
@@ -521,10 +537,10 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
       // [lc-561] 实时回传已加载卡片数(供骨架显示"已加载 N 个")
       try { if (onProgress) onProgress(cards.length); } catch (e) { /* ignore */ }
     }
-    log('[lc-563] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+    log('[lc-564] all-page first-screen scrape done:', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
     return cards;
   } catch (e) {
-    log('[lc-563] ensureLibraryIndex error:', e);
+    log('[lc-564] ensureLibraryIndex error:', e);
     return [];
   }
 }
