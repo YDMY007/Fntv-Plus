@@ -1066,37 +1066,43 @@ function injectCarousel(): void {
     // 信息卡: 占满面板高度, 自顶向下分层(徽标→标题/logo→细分隔→弹性简介→锚底按钮); 字体整体放大
     const info = document.createElement('div');
     info.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;gap:14px;width:100%;height:100%;overflow:hidden;opacity:0;transform:translateY(28px);transition:all .7s cubic-bezier(.16,1,.3,1) .15s';
-    // [lc-571] 胶囊徽标（用户确认）：直接「X季 Y集」，评分并进胶囊，不再单独开一行 meta
-    //   - 剧集 → 「⭐8.4 · 3季 26集」（无评分则省略前缀）
-    //   - 电影 → 「⭐8.4 · 2024 · 电影」
-    // [lc-572] 类型标签也并进胶囊（取前 2 个，用 / 分隔）：「⭐8.4 · 3季 26集 · 动画/科幻」
+    // [lc-573] 徽标行（用户确认优化）：独立胶囊横向排列，评分金色加粗最醒目
+    //   [⭐ 8.4] [3季 26集] [动画 / 科幻]   ← 同一行 flex，各自独立胶囊
     const totalEps = (show as any).totalEps || 0;
     const localEps = (show as any).localEps || 0;
     const totalSeasons = (show as any).totalSeasons || 0;
     const localSeasons = (show as any).localSeasons || 0;
     const year = (show as any).year || 0;
     const rating = (show as any).rating || 0;
-    const ratingHtml = rating > 0 ? `<span style="color:#ffcf6b;font-weight:700">⭐${rating.toFixed(1)}</span> · ` : '';
-    let pillText: string;
+    // ① 评分胶囊（金色、加粗、字稍大）
+    const ratingPill = rating > 0
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(255,207,107,.16);border:1px solid rgba(255,207,107,.42);border-radius:20px;color:#ffcf6b;font-size:13px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">⭐ ${rating.toFixed(1)}</span>`
+      : '';
+    // ② 类型/集数胶囊（紫灰）
+    let epsText: string;
     if (show.mediaType === 'movie') {
-      pillText = ratingHtml + (year ? year + ' · ' : '') + '电影';
+      epsText = (year ? year + ' · ' : '') + '电影';
     } else {
       const seasons = totalSeasons || localSeasons;
       const eps = totalEps || localEps;
-      if (seasons > 0 && eps > 0) pillText = ratingHtml + `${seasons}季 ${eps}集`;
-      else if (eps > 0) pillText = ratingHtml + `${eps}集`;
-      else if (seasons > 0) pillText = ratingHtml + `${seasons}季`;
-      else pillText = ratingHtml + '✨ 最近更新';
+      if (seasons > 0 && eps > 0) epsText = `${seasons}季 ${eps}集`;
+      else if (eps > 0) epsText = `${eps}集`;
+      else if (seasons > 0) epsText = `${seasons}季`;
+      else epsText = '✨ 最近更新';
     }
-    // [lc-572] 类型标签并进胶囊（取前 2 个，用 / 分隔）
+    const epsPill = `<span style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${epsText}</span>`;
+    // ③ 类型标签胶囊（浅色，取前 2 个）
     const genreArr: string[] = (show as any).genres || [];
-    if (genreArr.length) pillText += ' · ' + genreArr.slice(0, 2).join('/');
+    const tagPill = genreArr.length
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:20px;color:var(--fnos-hero-desc);font-size:11.5px;font-weight:600;letter-spacing:1px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${genreArr.slice(0, 2).join(' / ')}</span>`
+      : '';
+    const pillRow = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0">${ratingPill}${epsPill}${tagPill}</div>`;
     // [lc-549] 类型标签 chips：多标签横向排列（标题下方，显示全部最多 4 个）
     const genreHtml = genreArr.length
       ? `<div class="fnos-genres" style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${genreArr.slice(0, 4).map((g: string) => `<span style="padding:3px 10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);border-radius:12px;font-size:11.5px;font-weight:600;color:var(--fnos-hero-desc);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${g}</span>`).join('')}</div>`
       : '';
     info.innerHTML = `
-      <div class="fnos-pill" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:rgba(150,120,200,.16);border:1px solid rgba(170,150,220,.30);border-radius:20px;color:#c4b6e3;font-size:11.5px;font-weight:600;letter-spacing:1px;align-self:flex-start;flex-shrink:0;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${pillText}</div>
+      ${pillRow}
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
         <div class="fnos-title" style="font-size:clamp(28px,3.4vh,40px);font-weight:800;color:var(--fnos-hero-title);line-height:1.2;letter-spacing:.5px;word-break:break-word;text-shadow:var(--fnos-hero-shadow)">${show.title}</div>
         ${genreHtml}
