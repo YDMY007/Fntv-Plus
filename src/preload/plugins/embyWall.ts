@@ -751,41 +751,20 @@ async function fetchItemBackdrop(base: string, id: string): Promise<string> {
     if (!resp.ok) return '';
     const json: any = await resp.json();
     const d = (json && json.data) || {};
-    // [lc-567] 诊断: 打印 item API 返回的 key 与图片相关值, 便于确认飞牛横屏图真实字段
-    try {
-      const keys = Object.keys(d);
-      log('[lc-567] item API keys:', keys.join(','));
-      const imgVals: any = {};
-      keys.forEach((k: string) => {
-        const v = d[k];
-        if (typeof v === 'string' && (v.includes('/sys/img/') || v.includes('http'))) imgVals[k] = v.substring(0, 70);
-      });
-      log('[lc-567] item API img fields:', JSON.stringify(imgVals));
-      if (d.images && typeof d.images === 'object') log('[lc-567] item API images:', JSON.stringify(d.images).substring(0, 400));
-    } catch (e) { /* ignore */ }
-    // 候选字段: 常见横屏字段 + images 数组/对象里的 backdrops
-    const cands: string[] = [
-      d.backdrop, d.landscape, d.big_backdrop, d.fanart, d.bg, d.backdrop_path,
-      d.poster_backdrop, d.big_pic, d.bigPic, d.banner, d.hero, d.wide, d.widescreen,
-      d.images && d.images.backdrop, d.images && d.images.backdrops,
-    ];
-    for (const c of cands) {
-      if (typeof c === 'string' && c && (c.includes('/sys/img/') || c.startsWith('http'))) {
-        return c.startsWith('/') ? base + c : c;
-      }
-    }
-    // images 数组: 遍历找第一个含横屏语义的图
-    if (Array.isArray(d.images)) {
-      for (const im of d.images) {
-        const src = (im && (im.file_path || im.src || im.url || im.backdrop || im.poster)) || '';
-        const type = (im && (im.type || im.kind || '')) || '';
-        if (src && (type.includes('backdrop') || type.includes('landscape') || type.includes('bg') || /横|背景/.test(String(type)))) {
-          const s = String(src);
-          if (s.includes('/sys/img/') || s.startsWith('http')) return s.startsWith('/') ? base + s : s;
-        }
-      }
-    }
-    return '';
+    // [lc-568] 查历史 lc-552 的 fetchOne 确认: 飞牛 item API 的横版大海报字段 = data.backdrops(数组),
+    // 竖版海报 = data.posters(数组)。pickImg: 数组取第一项(字符串或 {url/path/image/src}), 补 sys/img 前缀。
+    const pickImg = (v: any): string => {
+      let s = '';
+      if (typeof v === 'string') s = v;
+      else if (Array.isArray(v) && v.length) { const it = v[0]; s = typeof it === 'string' ? it : (it?.url || it?.path || it?.image || it?.src || ''); }
+      if (!s) return '';
+      if (s.startsWith('http') || s.includes('sys/img')) return s;
+      return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
+    };
+    const rel = pickImg(d.backdrops); // 横版大海报(核心字段, lc-552 已验证可用)
+    if (!rel) return '';
+    if (rel.startsWith('http')) return rel;
+    return base + '/v/api/v1/' + rel; // sys/img/... → http://host/v/api/v1/sys/img/...
   } catch (e) { return ''; }
 }
 
