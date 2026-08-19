@@ -3,8 +3,8 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-// [lc-561] 轮播数据三级策略：①当前页已渲染DOM直接抓（最快最稳）→ ②iframe异步抓/v/list/all增强排序 → ③RECENT_SHOWS硬编码兜底。
-// 不再依赖 iframe 作为唯一数据源（lc-560 证明 iframe 因 fnOS 虚拟滚动/懒加载可能返回0张 → 轮播消失）。
+// [lc-561] 轮播数据源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确），
+// 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。
 
 const LOG = '[EmbyWall]';
 // EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
@@ -475,12 +475,14 @@ function scrapeVisibleCards(root?: Document | Element): any[] {
   return Array.from(map.values());
 }
 
-/** [lc-559] 用全屏隐藏 iframe 加载「全部」页(/v/list/all)，【不滚动】直接按 DOM 文档顺序读取
+/** [lc-561] 用全屏隐藏 iframe 加载「全部剧集列表」(/v/list/all)，【只读首屏、绝不滚动到底】按 DOM 文档顺序读取
  *  首屏前 10 个有真实封面的 tv/movie 卡片。
- *  关键：不滚动 scrollAll —— 滚动会触发飞牛虚拟滚动异步加载更旧的条目并以 Map 插入顺序覆盖，
- *  导致轮播顺序变成"滚动加载顺序"而非用户在全部页看到的视觉顺序。首屏 DOM 顺序 = 视觉顺序。
- *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。 */
-async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
+ *  关键事实（用户确认 + fnOS 默认排序）：/v/list/all 默认「最近更新在上」，首屏 DOM 文档顺序 = 视觉顺序 = 正确顺序。
+ *  因此绝不滚动到底(滚动会触发飞牛虚拟滚动异步加载更旧条目、打乱顺序)；只做温和滚动(向下400px再回顶)触发首屏懒加载。
+ *  模型化 hotUpdates.ts 已验证可行的 ensureLibraryIndex：全屏 iframe + 轮询 contentDocument。
+ *  标题提取优先 data-title / [class*="title"] 元素，避免 ensureLibraryIndex 的"最长 textContent"混入评分年份。
+ *  绝对不使用硬编码数据。 */
+async function scrapeAllPageFirstScreen(timeoutMs = 18000): Promise<any[]> {
   return new Promise((resolve) => {
     const base = location.origin;
     const iframe = document.createElement('iframe');
@@ -491,6 +493,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
     const seen = new Set<string>();
     let done = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let linkCount = 0;
 
     const cleanTitleOf = (raw: string): string => {
       let t = (raw || '').replace(/\s+/g, ' ').trim();
@@ -521,9 +524,9 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
       return (a.getAttribute('title') || '').trim();
     };
 
-    // [lc-560] 强制触发 iframe 内懒加载封面: fnOS 卡片图多为 data-src + 滚动监听懒加载,
-    // 隐藏 iframe 内若不滚动, img.src 仍是空/占位 → 抓取 0 图。此处主动把 data-src 写入 src、设 loading=eager、
-    // 派发 scroll 事件, 使首屏封面立即拥有真实 URL(抓取只需 URL 字符串, 无需图片真的加载完)。
+    // [lc-561] 强制触发 iframe 内懒加载封面: fnOS 卡片图多为 data-src + 滚动监听懒加载,
+    // 隐藏 iframe 内若不滚动, img.src 仍是空/占位 → 抓取 0 图。此处主动把 data-src 写入 src、设 loading=eager,
+    // 并做温和滚动(向下400px再回顶)让 IntersectionObserver 判定首屏卡片"可见"而加载真实图, 使首屏封面立即拥有真实 URL。
     const forceLoadImages = (doc: any): void => {
       try {
         doc.querySelectorAll('img').forEach((img: any) => {
@@ -535,6 +538,11 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
           }
           try { img.loading = 'eager'; } catch (e) { /* ignore */ }
         });
+        // 温和滚动: 向下 400px 再回顶, 触发首屏卡片的 IntersectionObserver(不改首屏 DOM 顺序)
+        try {
+          const w: any = doc.defaultView || doc.parentWindow;
+          if (w) { w.scrollTo(0, 400); w.scrollTo(0, 0); }
+        } catch (e) { /* ignore */ }
         // 触发 fnOS 的滚动懒加载监听(部分实现监听 window/documentElement scroll)
         try { doc.documentElement.dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
         try { (doc.defaultView || window).dispatchEvent(new Event('scroll')); } catch (e) { /* ignore */ }
@@ -566,6 +574,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
 
     const collect = (doc: any): void => {
       const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
+      linkCount = links.length;
       for (let i = 0; i < links.length && cards.length < 10; i++) {
         const a = links[i] as HTMLElement;
         const href = a.getAttribute('href') || '';
@@ -590,7 +599,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
       done = true;
       if (timer) clearTimeout(timer);
       try { iframe.remove(); } catch { /* ignore */ }
-      log('[lc-560] first-screen scrape done (' + reason + '):', cards.length, 'cards; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
+      log('[lc-561] all-page first-screen scrape done (' + reason + '):', cards.length, 'cards; links=' + linkCount + '; order:', cards.map((c) => c.title.substring(0, 8)).join(' → '));
       resolve(cards);
     };
 
@@ -600,27 +609,30 @@ async function scrapeAllPageFirstScreen(timeoutMs = 20000): Promise<any[]> {
       try {
         const doc: any = iframe.contentDocument || (iframe.contentWindow as any)?.document;
         if (!doc || !doc.body) {
-          if (attempts < 50) setTimeout(poll, 400);
+          if (attempts < 40) setTimeout(poll, 400);
           else finish('no-doc');
           return;
         }
-        forceLoadImages(doc);   // [lc-560] 每轮强制懒加载封面, 确保 img.src 已是真实 URL
+        // 等首屏至少渲染出 10 个链接(飞牛 SPA 启动 + 虚拟滚动首屏渲染), 否则继续等
+        const links = doc.querySelectorAll('a[href*="/v/tv/"],a[href*="/v/movie/"]');
+        if (links.length < 10 && attempts < 30) { setTimeout(poll, 400); return; }
+        forceLoadImages(doc);   // 每轮强制懒加载封面, 确保 img.src 已是真实 URL
         collect(doc);
-        if (cards.length >= 10) { finish('got-10'); return; }   // 首屏已够 → 立即结束, 绝不滚动
+        if (cards.length >= 10) { finish('got-10'); return; }   // 首屏已够 → 立即结束, 绝不滚动到底
         // 给页面启动 + 图片 URL 填充留时间: 持续触发懒加载直到满 10 或轮次耗尽
-        if (attempts >= 20) { finish('first-screen-' + cards.length); return; }
+        if (attempts >= 18) { finish('first-screen-' + cards.length); return; }
         setTimeout(poll, 400);
       } catch (e) {
-        if (attempts < 50) setTimeout(poll, 400);
+        if (attempts < 40) setTimeout(poll, 400);
         else finish('error');
       }
     };
 
-    iframe.onload = (): void => { setTimeout(poll, 600); };
+    iframe.onload = (): void => { setTimeout(poll, 500); };
     iframe.onerror = (): void => finish('iframe-error');
     timer = setTimeout(() => finish('timeout-' + timeoutMs), timeoutMs);
     document.body.appendChild(iframe);
-    setTimeout(poll, 900);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
+    setTimeout(poll, 800);  // 不依赖 onload 直接启动 poll（防飞牛 SPA onload 不可靠）
   });
 }
 
@@ -639,39 +651,17 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
   _apiLoading = true;
 
   try {
-    // [lc-561] 三级数据源策略（确保轮播永不空白）：
-    //   Tier 1: 当前页已渲染 DOM 直接抓取（最快最稳，截图证明首页有大量可见卡片）
-    //   Tier 2: iframe 抓 /v/list/all 首屏（顺序更好，但可能因虚拟滚动/懒加载返回 0）
-    //   Tier 3: RECENT_SHOWS 硬编码兜底（比显示原生页面好）
-    let newShows: any[] = [];
+    // [lc-561] 主源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确）。
+    // 兜底 = 当前首页已渲染 DOM 真实卡片（非硬编码）。绝对不用硬编码数据。
+    log('[lc-561] scraping /v/list/all first screen (primary source)...');
+    let newShows: any[] = await scrapeAllPageFirstScreen(18000);
+    log('[lc-561] all-page scrape returned', newShows.length, 'cards');
 
-    // Tier 1: 从当前首页已渲染的 DOM 直接抓卡片（100% 可用，无跨域/时序问题）
-    log('[lc-561] Tier1: scraping current page live DOM...');
-    const liveCards = scrapeVisibleCards();
-    log('[lc-561] Tier1 got', liveCards.length, 'cards from live DOM');
-    if (liveCards.length > 0) {
-      newShows = liveCards.slice(0, 10);
-    }
-
-    // Tier 2: 异步尝试 iframe 抓「全部」页（不阻塞，若成功则替换为更好的排序）
-    // 注意：这里不再 await 阻塞主流程。iframe 抓取作为增强，成功则更新；失败不影响 Tier1/3
-    scrapeAllPageFirstScreen(12000).then((iframeCards) => {
-      log('[lc-561] Tier2 iframe returned', iframeCards.length, 'cards');
-      if (iframeCards.length >= Math.min(5, newShows.length)) {
-        // iframe 结果足够多且质量可信 → 替换为 iframe 数据（排序更接近"全部页"视觉顺序）
-        log('[lc-561] Tier2 replacing with iframe data (better order)');
-        _apiShows.length = 0;
-        Array.prototype.push.apply(_apiShows, iframeCards.slice(0, 10));
-        _carouselInited = false;  // 触发重建
-        injectCarousel();
-      }
-      // iframe 数据不足 → 保持 Tier1/3 的结果不变
-    }).catch(() => { /* iframe 失败静默忽略 */ });
-
-    // Tier 3 兜底：如果当前页也没抓到卡片 → 用硬编码数据（绝不让轮播消失）
+    // 兜底: iframe 抓 0 张时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
     if (newShows.length === 0) {
-      log('[lc-561] Tier3: using RECENT_SHOWS hardcoded fallback');
-      newShows = RECENT_SHOWS.slice(0, 10);
+      log('[lc-561] all-page scrape 0 cards, fallback: scrape current page live DOM');
+      newShows = scrapeVisibleCards().slice(0, 10);
+      log('[lc-561] live-DOM fallback got', newShows.length, 'cards');
     }
 
     log('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
@@ -682,6 +672,8 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       _apiLoaded = true;
       _carouselInited = false;
       injectCarousel();  // 数据就绪即尝试注入(当前在 /v 立即显示; 否则 injectCarousel 内部静默跳过)
+    } else {
+      log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
     }
   } catch (e) { log('[lc-561] fetch error:', e); }
   _apiLoading = false;
@@ -774,19 +766,7 @@ function wheelToScroll(): void {
   });
 }
 
-/* ========== 轮播图(硬编码+API双数据源) ========== */
-const RECENT_SHOWS: {id:string;title:string;poster:string;backdrop:string;logo?:string;desc?:string}[] = [
-  {id:"600e702357d6422f99570302a557c179",title:"无职转生：到了异世界就拿出真本事",poster:"sys/img/6d/20/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLryIhtiEh0kUa5C9ALsxThuxVJHAuAsMr9AqShrEtMmd.webp",backdrop:"sys/img/b5/09/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxY8oi8MB7PGRxO9uahSFWEogko18H7l5d0vFKgNjCZ.webp",logo:"sys/img/36/19/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrufzkvII9rBvj5Zncvfx8X9omwarNU6AHS1wMD3y0oR.webp",desc:"我要在这个异世界拿出真本事！34岁童贞且无职的家里蹲男子，在父母的葬礼当天被赶出家门后，在路上被一辆卡车所撞死。意识清醒后，他发现自己居然作为一个刚出生的婴儿转生到了剑与魔法的异世界！像废物一样活过了前世的男子，发誓要作为少年·鲁迪乌斯在异世界以认真的态度好好活下去！"},
-  {id:"f0489bd203224933a4346d899967cb3c",title:"黑猫与魔女的教室",poster:"sys/img/6e/10/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLry0pfI5ZmtCQVddZ3eD8kMb2trAbSWnam4na8Ya5KPn.webp",backdrop:"sys/img/05/14/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLry85pmDsiFggSDzRP7T1O9odmC4rdcZw5H6dmxoCS0N.webp",desc:"见习魔女丝碧卡·瓦戈以考上王立戴安娜魔法学校并成为一等魔法师为目标，却一直无法成功使用魔法。某天，一只会讲人话还会操纵魔法的神秘黑猫出现在她的面前！想要学习魔法的丝碧卡和想要解除诅咒的黑猫想法完全一致！他们就此结成了秘密的师徒关系！"},
-  {id:"5c6608e53f804cc3adfb7f8dbafa742d",title:"石纪元",poster:"sys/img/2a/06/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrucjx8YQ2wvgwN09d2clhpz20SO6PG7phAQaU6Vb8eF.webp",backdrop:"sys/img/86/11/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxfYGnuuP36Ph0e7k357DOXckP3SyMAmmM1ZrBEOnsF.webp",desc:"全人类被神奇的现象一瞬间石化后过了几千年——拥有超人般头脑、天生的科学少年·千空苏醒了。在文明遭到毁灭的石之世界里，千空决定用科学的力量夺回世界。集结伙伴的力量，不断创造出从石器时代到现代文明的科学发明，一部前所未闻的创世冒险故事就此展开！"},
-  {id:"25463bef86494794b71bcbcdd3907bae",title:"最强王者的第二人生",poster:"sys/img/cb/12/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLruLZsV5Ro61WX9XbEeaYoqknr82WIpePXGRg5OnHIHv.webp",backdrop:"sys/img/cf/18/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxH6MjA3f8iD4PPxqPAD9N8iMlQWwCt2aa0mJcXfWH1.webp",desc:"曾经的一国之君意外身亡，穿越到魔法世界却成为手无缚鸡之力的婴儿？好吧，在壮阔而神秘的世界从零开始！比修炼更重要的是，他要先学会如何自己上厕所…离开襁褓成为强者，失去了尊贵王冠的他，用利剑为自己加冕！"},
-  {id:"d1c6fbc986af40528fe47ddee80ecf75",title:"朱音落语",poster:"sys/img/fc/14/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxmNkSdSojZJ693vP4raUPda0ea0wEV569rrrHxJJUV.webp",backdrop:"sys/img/9b/20/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLruZJymtMoWXrbWw9guuVbLQ4ymKMWKIirTco9fydX55.webp",desc:"以其身及文字来诠释故事的一切，说话艺术的极致——落语。被这究极的表演方法迷住的是落语家·阿良川志太及其女儿·朱音。见证父亲在落语晋级考试的努力后，朱音将踏上自己的落语家之道——落语家的故事正式开幕！"},
-  {id:"6b046b0ebf1f4f76a0c8a1cc8d6564dd",title:"杖与剑的魔剑谭",poster:"sys/img/45/19/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrucxlCydGCPNrTWzk3V04WDDCrsvMFO2sqTd5dslY4V.webp",backdrop:"sys/img/0f/19/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxmJUsf2r2SMcZv8D2Kxg3CcWVB0oaT0tgaHr8rYlyZ.webp"},
-  {id:"4920d43f6eea4426b0d5f3c1f8196f3f",title:"异世界悠闲农家",poster:"sys/img/2d/01/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLruKw9X99lQ8WfBlogbl8DPexx7i74MaQK6n6dr0tVAN.webp",backdrop:"sys/img/04/20/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLryTVusVIAsfc4IIwdtPA8zMrgI4smAYirgltrlzzzJH.webp",desc:"在黑企业过度使用身体，与疾病斗争后丧命的青年街尾火乐，拿着神赐予的万能农具，在异世界与吸血鬼、天使、精灵等相遇，度过第二人生的异世界种田流奇幻故事。"},
-  {id:"39d134b62ed1430a8574b04d63d5bb3f",title:"双人独自露营",poster:"sys/img/2d/06/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLruZAGStvLFD2kMNgqOTfuU1uPW0TmO63BECEFRNopkt.webp",backdrop:"sys/img/da/04/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxfaCue7v3Cdfe5EMA9ByLudVwpWLLifRVFTGebitGx.webp",desc:"树乃仓严，34岁。这位独爱孤独的露营高手，正像往常一样享受着单人露营的宁静。然而，一次意外让他遇见了超级露营新手——草野雫。尽管不情愿，严还是和雫开始了两人的单人露营！严平静的露营生活将会如何发展？"},
-  {id:"6e5f44da0b9d45ad9f2cbb28e2b06a29",title:"弱弱老师",poster:"sys/img/81/17/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrx6GZ5Zmae9ZLLSilFowqVvZUn4WVOc7KyfAf5tn7aB.webp",backdrop:"sys/img/2b/13/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxD1e7HXIfJtLPn71QSzbxjFUySekMujr90V8vjjNsl.webp",desc:"新学期，成为升上高二的男高中生阿比仓同学他们班主任的是，传言一旦心情不佳就会诅咒人的俗称咒恨老师的，鶸村日和老师！在一天放学后，目击了这样的咒恨老师背后一面的阿比仓同学他……意想不到的反差让人扭成蛆！挑起你的保护欲的弱弱恋爱喜剧开幕！"},
-  {id:"65a0c386f4aa4de18ddfd4e44d55e7fe",title:"不良少女",poster:"sys/img/a1/13/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxKBiEBCHGfr2gG8AuKgcw6whYyVXbYx0eszkTz5Zqx.webp",backdrop:"sys/img/dd/08/RXFg9YOlYYTNwMynBkZifbn3VpVnzd401lk1CjS099E0CKLrxqb4QO0xItzvJrBxw8AxccXYEDsJ6SYqZCvm9IhYZz.webp",desc:"锐利的眼神、显眼的耳环，再加上一头超吸睛的双色头发——高一学生·优谷优。她是出了名的不良少女，连路人见了都会自动让路……才不是那样！本性其实是超级好孩子的优，脑袋里总是塞满了校园女神——水鸟亚鸟的身影。为了引起担任风纪委员长的她的注意，优每天都在努力奋斗！"},
-];
+/* ========== 轮播图(纯真实数据源, 不用硬编码) ========== */
 
 /* ========== 鉴权拉取图片→blob URL(绕开<img>无法带Authx头的问题) ========== */
 async function fetchImageAuth(fullUrl: string): Promise<string | null> {
@@ -914,10 +894,10 @@ function injectCarousel(): void {
   _carouselUpdatedAt = Date.now(); // 记录"最近更新"板块数据就绪时刻, 供标题旁更新时间显示
   log('carousel data ready at', new Date(_carouselUpdatedAt).toLocaleString('zh-CN'));
 
-  // 数据: API优先(动态/自动/最新排序); 仅当真实片库为空才兜底(上面已拦截空数据)
-  // 注意: 只要真实片库 >0 条就只用真实内容, 不再回退硬编码 demo(避免无职转生兜底出现)
-  const shows = _apiShows.length > 0 ? _apiShows : RECENT_SHOWS;
-  log('injecting', shows.length, 'shows (api:', _apiShows.length, 'hardcoded:', RECENT_SHOWS.length, ')');
+  // 数据: 只用真实片库(前面 895 行已拦截 _apiShows.length===0 的空数据, 走到这里必有数据)
+  // 注意: 绝不回退硬编码 demo(用户明确要求不用硬编码)。
+  const shows = _apiShows;
+  log('injecting', shows.length, 'shows (api:', _apiShows.length, ')');
 
   const base = location.origin;
   let currentIdx = 0;
