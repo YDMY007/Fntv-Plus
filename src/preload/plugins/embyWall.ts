@@ -794,10 +794,13 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
       else if (s.includes('releas') || s.includes('上映') || s.includes('发行')) statusText = '已上映';
       else statusText = statusRaw;
     }
+    // [lc-572] 类型标签: 多字段兜底(genres/genre/types/categories/tags) + 多形态兼容
+    // (数组[{name}]/[string]/逗号分隔字符串), 并打印诊断确认字段可用
     let genres: string[] = [];
-    const g = (d as any).genres;
-    if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || ''))).filter(Boolean);
-    else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、]/).map((s: string) => s.trim()).filter(Boolean);
+    const g: any = d.genres || d.genre || d.types || d.categories || d.tags;
+    if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || x?.title || ''))).filter(Boolean);
+    else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、|]/).map((s: string) => s.trim()).filter(Boolean);
+    log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', JSON.stringify(g).substring(0, 100), ')');
     return {
       backdrop, logo,
       totalEps, localEps, totalSeasons, localSeasons,
@@ -1066,6 +1069,7 @@ function injectCarousel(): void {
     // [lc-571] 胶囊徽标（用户确认）：直接「X季 Y集」，评分并进胶囊，不再单独开一行 meta
     //   - 剧集 → 「⭐8.4 · 3季 26集」（无评分则省略前缀）
     //   - 电影 → 「⭐8.4 · 2024 · 电影」
+    // [lc-572] 类型标签也并进胶囊（取前 2 个，用 / 分隔）：「⭐8.4 · 3季 26集 · 动画/科幻」
     const totalEps = (show as any).totalEps || 0;
     const localEps = (show as any).localEps || 0;
     const totalSeasons = (show as any).totalSeasons || 0;
@@ -1084,9 +1088,10 @@ function injectCarousel(): void {
       else if (seasons > 0) pillText = ratingHtml + `${seasons}季`;
       else pillText = ratingHtml + '✨ 最近更新';
     }
-    // [lc-571] meta 行已移除（评分并入胶囊，不再单独一行）
-    // [lc-549] 类型标签 chips：多标签横向排列
+    // [lc-572] 类型标签并进胶囊（取前 2 个，用 / 分隔）
     const genreArr: string[] = (show as any).genres || [];
+    if (genreArr.length) pillText += ' · ' + genreArr.slice(0, 2).join('/');
+    // [lc-549] 类型标签 chips：多标签横向排列（标题下方，显示全部最多 4 个）
     const genreHtml = genreArr.length
       ? `<div class="fnos-genres" style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${genreArr.slice(0, 4).map((g: string) => `<span style="padding:3px 10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);border-radius:12px;font-size:11.5px;font-weight:600;color:var(--fnos-hero-desc);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${g}</span>`).join('')}</div>`
       : '';
