@@ -593,9 +593,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      // [lc-583] 进度条直接跳 100%, 短暂停留 450ms 让用户看到"完成"后重建轮播(平滑淡入, 不再闪现)
+      // [lc-597] 进度条直接跳 100%, 短暂停留 250ms 让用户看到"完成"后重建轮播(平滑淡入)
       completeCarouselProgress();
-      setTimeout(() => { _carouselInited = false; injectCarousel(); }, 450);
+      setTimeout(() => { _carouselInited = false; injectCarousel(); }, 250);
 
       // [lc-569] 并行补 item API 详情(横版大海报 backdrop + 集数/季数/年份/评分/状态/类型/简介):
       // 优先级: 横版图 ①当前页已加载横版图(scrapeLandscapeBackdrops) ②item API(fetchItemDetail)
@@ -1346,17 +1346,17 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   center.appendChild(barWrap);
   center.appendChild(pctEl);
   container.appendChild(center);
-  // [lc-587] 记录进度条元素 + 慢速匀速伪进度: 每 180ms 固定 +1.2%, 到 99% 停(≈15s 走完,
-  //  适配大媒体库滚动耗时较长的场景; 真实完成后跳 100)
+  // [lc-597] 伪进度提速: 每 150ms +3.5%(≈4.3s 到 99%), 数据就位后 completeCarouselProgress 立即跳 100%
+  //  —— 数据快(磁盘缓存读盘)时进度条快速跟进, 不再"轮播早好但条还慢慢涨"
   _carouselBarFill = barFill;
   _carouselPctEl = pctEl;
   _carouselProgressPct = 0;
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   _carouselProgressTimer = window.setInterval(() => {
-    _carouselProgressPct = Math.min(99, _carouselProgressPct + 1.2);
+    _carouselProgressPct = Math.min(99, _carouselProgressPct + 3.5);
     barFill.style.width = _carouselProgressPct + '%';
     pctEl.textContent = Math.round(_carouselProgressPct) + '%';
-  }, 180);
+  }, 150);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
