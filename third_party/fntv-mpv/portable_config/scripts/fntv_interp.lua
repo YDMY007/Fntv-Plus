@@ -118,10 +118,13 @@ local function apply(on)
 end
 
 -- 文件加载后：按默认开关设定初始「高亮态 + 插帧开关」
+-- [lc-612] 同时同步内部开关状态 interp_on，供右键菜单 toggle 从正确状态起算
+local interp_on = false
 mp.register_event('file-loaded', function()
     local init = conf.default_on and 'yes' or 'no'
     set_uosc(init)
     apply(init == 'yes')
+    interp_on = init == 'yes'
 end)
 
 -- 监听 uosc 控制栏按钮（cycle:...@fntv_interp）点击：
@@ -130,7 +133,16 @@ mp.register_script_message('set', function(prop, value)
     if prop ~= EXT then return end
     local on = (value == 'yes' or value == true)
     apply(on)
+    interp_on = on
     set_uosc(value) -- 回写，确保 uosc 显示态与真实状态一致
+end)
+
+-- [lc-612] 右键菜单「插帧开关」切换入口（input.conf #menu: 项调用）：
+-- 点击即翻转内部开关状态（不再依赖 uosc cycle 按钮）。
+mp.register_script_message('toggle', function()
+    interp_on = not interp_on
+    apply(interp_on)
+    set_uosc(interp_on and 'yes' or 'no')
 end)
 
 mp.log('info', '[fntv_interp] 已加载 (engine=' .. tostring(conf.engine) .. ', default_on=' .. tostring(conf.default_on) .. ')')
