@@ -4034,7 +4034,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             });
 
             const card = document.createElement('div');
-            card.style.cssText = 'width:320px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
+            card.style.cssText = 'width:300px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
                 + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
                 + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
                 + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
@@ -4133,7 +4133,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 if (e.target === modal && modal.getAttribute('data-closable') === '1') closeTestPatchWizard();
             });
             const card = document.createElement('div');
-            card.style.cssText = 'width:360px;border-radius:16px;padding:22px;color:var(--fnos-ui-text);'
+            card.style.cssText = 'width:300px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
                 + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
                 + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
                 + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
