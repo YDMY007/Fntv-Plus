@@ -4002,33 +4002,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         body.innerHTML = '';
 
         if (state === 'unlock') {
-            body.appendChild(centerText('版号切换', '16px', 'var(--fnos-ui-text)', 'font-weight:800;margin-bottom:4px;'));
-            body.appendChild(centerText('请输入解锁码以自定义软件版本号', '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:14px;'));
-            const input = document.createElement('input');
-            input.type = 'password';
-            input.placeholder = '解锁码';
-            input.id = 'fntv-version-switch-code-input';
-            input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
-                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
-            body.appendChild(input);
-            body.appendChild(actionRow([
-                { label: '取消', primary: false, onClick: () => closeVersionSwitchModal() },
-                { label: '下一步', primary: true, onClick: () => {
-                    const code = (input.value || '').trim();
-                    if (!code) { showPatchToast('请输入解锁码'); return; }
-                    ipcRenderer.invoke('settings:verify-unlock-code', code).then((r: any) => {
-                        if (r && r.ok) {
-                            _verSwitchCode = code;
-                            renderVersionSwitchState('input');
-                        } else {
-                            renderVersionSwitchState('error', { message: '解锁代码错误，无法切换版本号' });
-                        }
-                    }).catch(() => {
-                        renderVersionSwitchState('error', { message: '解锁码验证失败，请重试' });
-                    });
-                }},
-            ]));
-            setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+            // [lc-643] 改调共享 renderUnlockState——与测试更新弹窗的 unlock 阶段
+            //   同一函数同一渲染输出, 标题/副标题/输入框/按钮完全一致(只是文字不同)
+            renderUnlockState(body, {
+                title: '版号切换',
+                subtitle: '请输入解锁码以自定义软件版本号',
+                onVerified: (code) => {
+                    _verSwitchCode = code;
+                    renderVersionSwitchState('input');
+                },
+                onCancel: () => closeVersionSwitchModal(),
+            });
             return;
         }
 
@@ -4153,6 +4137,51 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         //   设置面板由用户自行点遮罩/✕/ESC 关闭, 与 应用补丁/版号切换 弹窗行为一致。
     }
 
+    // [lc-643] 共享「解锁码输入」渲染（测试更新 + 版号切换通用）。
+    // 完全统一两弹窗的标题/副标题/输入框/按钮样式——同一函数同一渲染输出, 真正"直接复用"。
+    // 用户反馈版号切换弹窗"样式跟测试更新要一模一样, 解锁码都是一样的"。
+    function renderUnlockState(body: HTMLElement, opts: {
+        title: string;
+        subtitle: string;
+        onVerified: (code: string) => void;
+        onCancel: () => void;
+    }): void {
+        body.innerHTML = '';
+        body.appendChild(centerText(opts.title, '16px', 'var(--fnos-ui-pill-text)', 'font-weight:800;margin-bottom:4px;'));
+        body.appendChild(centerText(opts.subtitle, '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:14px;'));
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.placeholder = '解锁码';
+        input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
+            + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
+        body.appendChild(input);
+        body.appendChild(actionRow([
+            { label: '取消', primary: false, onClick: opts.onCancel },
+            { label: '下一步', primary: true, onClick: () => {
+                const code = (input.value || '').trim();
+                if (!code) { showPatchToast('请输入解锁码'); return; }
+                ipcRenderer.invoke('settings:verify-unlock-code', code).then((r: any) => {
+                    if (r && r.ok) {
+                        opts.onVerified(code);
+                    } else {
+                        // 错码: 同弹窗内显示错误(同 lc-641/lc-642 错误页结构)
+                        body.innerHTML = '';
+                        body.appendChild(centerText('⚠', '24px', '#ff7a7a', 'font-weight:800;margin-bottom:6px;'));
+                        body.appendChild(centerText('解锁代码错误', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
+                        body.appendChild(centerText('解锁码错误, 无法获取测试补丁列表', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
+                        body.appendChild(actionRow([
+                            { label: '重试', primary: false, onClick: () => renderUnlockState(body, opts) },
+                            { label: '关闭', primary: true, onClick: opts.onCancel },
+                        ]));
+                    }
+                }).catch(() => {
+                    showPatchToast('解锁码验证失败，请重试');
+                });
+            }},
+        ]));
+        setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+    }
+
     // 测试补丁向导渲染：unlock(解锁码) / listing / select / empty / error / downloading / applying / done
     function renderTestState(state: string, info: any): void {
         const modal = _testWizardModal;
@@ -4164,33 +4193,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         body.innerHTML = '';
 
         // [lc-642] 阶段1: 解锁码输入(集成进 360px 大弹窗, 与版号切换一致)
+        // [lc-643] 改调共享 renderUnlockState(标题/副标题/输入框/按钮 完全复用)
         if (state === 'unlock') {
-            body.appendChild(centerText('🔧 开发者测试更新', '16px', 'var(--fnos-ui-pill-text)', 'font-weight:800;margin-bottom:4px;'));
-            body.appendChild(centerText('请输入解锁码以获取 Gitee 测试补丁', '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:14px;'));
-            const input = document.createElement('input');
-            input.type = 'password';
-            input.placeholder = '解锁码';
-            input.id = 'fntv-test-unlock-input';
-            input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
-                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
-            body.appendChild(input);
-            body.appendChild(actionRow([
-                { label: '取消', primary: false, onClick: () => closeTestPatchWizard() },
-                { label: '下一步', primary: true, onClick: () => {
-                    const code = (input.value || '').trim();
-                    if (!code) { showPatchToast('请输入解锁码'); return; }
-                    ipcRenderer.invoke('settings:verify-unlock-code', code).then((r: any) => {
-                        if (r && r.ok) {
-                            startTestPatchList(code);
-                        } else {
-                            renderTestState('error', { message: '解锁代码错误，无法获取测试补丁' });
-                        }
-                    }).catch(() => {
-                        renderTestState('error', { message: '解锁码验证失败，请重试' });
-                    });
-                }},
-            ]));
-            setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+            renderUnlockState(body, {
+                title: '🔧 开发者测试更新',
+                subtitle: '请输入解锁码以获取 Gitee 测试补丁',
+                onVerified: (code) => startTestPatchList(code),
+                onCancel: () => closeTestPatchWizard(),
+            });
             return;
         }
         if (state === 'listing') {
