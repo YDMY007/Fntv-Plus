@@ -1087,23 +1087,23 @@ function injectCarousel(): void {
     const localSeasons = (show as any).localSeasons || 0;
     const year = (show as any).year || 0;
     const rating = (show as any).rating || 0;
-    // ① 评分胶囊（[lc-585] SVG 星形图标 + 金色渐变背景 + 外发光, 更醒目）
+    // ① 评分胶囊（[lc-587] 加深金色底+更亮文字, 解决浅底对比度不足）
     const ratingPill = rating > 0
-      ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(135deg,rgba(255,207,107,.30),rgba(255,180,90,.16));border:1px solid rgba(255,207,107,.60);border-radius:20px;color:#ffd97a;font-size:14px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:0 0 12px rgba(255,207,107,.25),inset 0 1px 0 rgba(255,255,255,.18)"><svg width="14" height="14" viewBox="0 0 24 24" style="flex-shrink:0"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#ffd97a"/></svg>${rating.toFixed(1)}</span>`
+      ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 15px;background:linear-gradient(135deg,rgba(255,207,107,.46),rgba(255,180,90,.28));border:1px solid rgba(255,214,130,.72);border-radius:20px;color:#ffe9a8;font-size:15px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:0 0 14px rgba(255,207,107,.35),inset 0 1px 0 rgba(255,255,255,.25)"><svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#ffe9a8"/></svg>${rating.toFixed(1)}</span>`
       : '';
-    // ② 类型/集数胶囊（[lc-585] 数字大、单位小(下标风), 颜色提亮)
+    // ② 类型/集数胶囊（[lc-587] 加深紫底+更亮文字, 数字大单位小）
     let epsText: string;
     if (show.mediaType === 'movie') {
       epsText = (year ? year + ' · ' : '') + '电影';
     } else {
       const seasons = totalSeasons || localSeasons;
       const eps = totalEps || localEps;
-      if (seasons > 0 && eps > 0) epsText = `${seasons}<span style="font-size:10px;opacity:.8">季</span> ${eps}<span style="font-size:10px;opacity:.8">集</span>`;
-      else if (eps > 0) epsText = `${eps}<span style="font-size:10px;opacity:.8">集</span>`;
-      else if (seasons > 0) epsText = `${seasons}<span style="font-size:10px;opacity:.8">季</span>`;
+      if (seasons > 0 && eps > 0) epsText = `${seasons}<span style="font-size:10.5px;opacity:.85">季</span> ${eps}<span style="font-size:10.5px;opacity:.85">集</span>`;
+      else if (eps > 0) epsText = `${eps}<span style="font-size:10.5px;opacity:.85">集</span>`;
+      else if (seasons > 0) epsText = `${seasons}<span style="font-size:10.5px;opacity:.85">季</span>`;
       else epsText = '✨ 最近更新';
     }
-    const epsPill = `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:6px 14px;background:rgba(150,120,200,.22);border:1px solid rgba(170,150,220,.45);border-radius:20px;color:#dcc9ff;font-size:12.5px;font-weight:700;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${epsText}</span>`;
+    const epsPill = `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:6px 15px;background:rgba(150,120,200,.38);border:1px solid rgba(190,170,240,.60);border-radius:20px;color:#efe6ff;font-size:13px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:inset 0 1px 0 rgba(255,255,255,.14)">${epsText}</span>`;
     // ③ 类型标签胶囊（浅色，取前 2 个）
     const genreArr: string[] = (show as any).genres || [];
     const tagPill = genreArr.length
@@ -1346,16 +1346,17 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   center.appendChild(barWrap);
   center.appendChild(pctEl);
   container.appendChild(center);
-  // [lc-584] 记录进度条元素 + 匀速伪进度: 每 160ms 固定 +2.5%, 到 99% 停(真实完成后跳 100)
+  // [lc-587] 记录进度条元素 + 慢速匀速伪进度: 每 180ms 固定 +1.2%, 到 99% 停(≈15s 走完,
+  //  适配大媒体库滚动耗时较长的场景; 真实完成后跳 100)
   _carouselBarFill = barFill;
   _carouselPctEl = pctEl;
   _carouselProgressPct = 0;
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   _carouselProgressTimer = window.setInterval(() => {
-    _carouselProgressPct = Math.min(99, _carouselProgressPct + 2.5);
+    _carouselProgressPct = Math.min(99, _carouselProgressPct + 1.2);
     barFill.style.width = _carouselProgressPct + '%';
     pctEl.textContent = Math.round(_carouselProgressPct) + '%';
-  }, 160);
+  }, 180);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
