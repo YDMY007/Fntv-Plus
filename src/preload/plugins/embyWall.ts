@@ -3852,10 +3852,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [lc-516] 设置面板「应用补丁」与更新弹窗共用模块级 fntvOpenPatchApplyPopup（不依赖 injectSettingsUI 时机）。
     // [lc-644] 测试更新恢复小弹窗流程(用户要求"原来测试更新的那种小弹窗"):
     //   300px 解锁码小弹窗(promptUnlockCode) → 验证 → 360px 列表弹窗(openTestPatchWizard)
+    // [lc-645] 解锁码验证移入 promptUnlockCode 内部(onVerify): 错码在 300px 小弹窗内提示,
+    //   不再弹出 360px 大错误弹窗(用户反馈"错误弹窗大小和第一个弹窗不适配")
     testBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (testBtn.disabled) return;
-        const code = await promptUnlockCode();
+        const code = await promptUnlockCode({
+            title: '🔧 开发者测试更新',
+            subtitle: '请输入解锁码以获取 Gitee 测试补丁',
+            onVerify: (c) => ipcRenderer.invoke('settings:verify-unlock-code', c).then((r: any) => !!r.ok),
+        });
         if (code === null) return; // 用户取消
         openTestPatchWizard(code);
     });
@@ -3867,21 +3873,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // [lc-644] 版号切换恢复小弹窗流程(与测试更新一致):
     //   300px 解锁码小弹窗(promptUnlockCode) → 主进程验证 → 320px 版本号输入弹窗(openVersionSwitchModal)
+    // [lc-645] 解锁码验证移入 promptUnlockCode 内部(onVerify), 错码在 300px 小弹窗内提示
     verSwitchBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (verSwitchBtn.disabled) return;
-        const code = await promptUnlockCode();
+        const code = await promptUnlockCode({
+            title: '版号切换',
+            subtitle: '请输入解锁码以自定义软件版本号',
+            onVerify: (c) => ipcRenderer.invoke('settings:verify-unlock-code', c).then((r: any) => !!r.ok),
+        });
         if (code === null) return; // 用户取消
-        try {
-            const vr = await ipcRenderer.invoke('settings:verify-unlock-code', code);
-            if (vr && vr.ok) {
-                openVersionSwitchModal(code);
-            } else {
-                showPatchToast('解锁代码错误，无法切换版本号');
-            }
-        } catch {
-            showPatchToast('解锁码验证失败，请重试');
-        }
+        openVersionSwitchModal(code);
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
@@ -3902,8 +3904,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     }
 
     // [lc-481] 解锁码输入弹窗：返回输入的解锁码；用户取消返回 null。复用现有 modal 样式；可重复调用（resolve 用模块级变量避免重复绑定）。
+    // [lc-645] 支持 options 参数:
+    //   - title/subtitle: 自定义弹窗标题/副标题(测试更新/版号切换各自文案)
+    //   - onVerify(code): 可选——确定时先主进程验证解锁码, 通过才关闭弹窗返回 code;
+    //     错码直接在 300px 小弹窗内显示「解锁代码错误」(弹窗不关闭, 无大错误弹窗,
+    //     解决用户反馈"输错码弹出错误弹窗大小和第一个弹窗不适配")。
     let _unlockResolve: ((v: string | null) => void) | null = null;
-    function promptUnlockCode(): Promise<string | null> {
+    function promptUnlockCode(opts?: { title?: string; subtitle?: string; onVerify?: (code: string) => Promise<boolean> }): Promise<string | null> {
         return new Promise((resolve) => {
             let modal = document.getElementById('fntv-unlock-modal') as HTMLElement | null;
             if (!modal) {
@@ -3920,9 +3927,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                     + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
                     + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
                     + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
-                card.innerHTML = ''
-                    + '<div style="font-size:16px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">🔧 开发者测试更新</div>'
-                    + '<div style="font-size:12px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:14px;">请输入解锁码以获取 Gitee 测试补丁</div>';
+                // 标题/副标题/错误提示: 用独立元素, 每次打开时按 opts 动态更新
+                const titleEl = document.createElement('div');
+                titleEl.id = 'fntv-unlock-title';
+                titleEl.style.cssText = 'font-size:16px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;';
+                card.appendChild(titleEl);
+                const subEl = document.createElement('div');
+                subEl.id = 'fntv-unlock-subtitle';
+                subEl.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:14px;';
+                card.appendChild(subEl);
+                // 错误提示(默认隐藏, 错码时显示, 弹窗不关闭)
+                const errEl = document.createElement('div');
+                errEl.id = 'fntv-unlock-err';
+                errEl.style.cssText = 'display:none;font-size:11.5px;color:#ff7a7a;font-weight:600;margin:-6px 0 8px;';
+                card.appendChild(errEl);
 
                 const input = document.createElement('input');
                 input.type = 'password';
@@ -3942,8 +3960,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 const okBtn = document.createElement('button');
                 okBtn.type = 'button';
                 okBtn.textContent = '确定';
-                okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
-                    + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
+                // [lc-640] 主按钮实色紫底白字(与其他弹窗一致)
+                okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;'
+                    + 'background:linear-gradient(135deg,#8a6dd6,#6b4ec8)!important;color:#fff!important;'
+                    + 'border:1px solid rgba(255,255,255,.28)!important;box-shadow:0 4px 14px rgba(107,78,200,.38);';
                 row.appendChild(cancelBtn);
                 row.appendChild(okBtn);
                 card.appendChild(row);
@@ -3951,14 +3971,41 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 document.body.appendChild(modal);
 
                 const doClose = (val: string | null) => { modal!.remove(); if (_unlockResolve) { _unlockResolve(val); _unlockResolve = null; } };
+                const doSubmit = (): void => {
+                    const code = (input.value || '').trim();
+                    if (!code) { showPatchToast('请输入解锁码'); return; }
+                    if (opts && opts.onVerify) {
+                        // [lc-645] 先验证: 通过才关闭, 错码在弹窗内提示(不关闭, 保持同尺寸)
+                        opts.onVerify(code).then((ok) => {
+                            if (ok) {
+                                doClose(code);
+                            } else {
+                                errEl.style.display = 'block';
+                                errEl.textContent = '解锁代码错误，请重新输入';
+                            }
+                        }).catch(() => {
+                            errEl.style.display = 'block';
+                            errEl.textContent = '解锁码验证失败，请重试';
+                        });
+                    } else {
+                        doClose(code);
+                    }
+                };
                 cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(null); });
-                okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(input.value); });
+                okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doSubmit(); });
                 input.addEventListener('keydown', (e: KeyboardEvent) => {
                     e.stopPropagation();
-                    if (e.key === 'Enter') doClose(input.value);
+                    if (e.key === 'Enter') doSubmit();
                     else if (e.key === 'Escape') doClose(null);
                 });
             }
+            // [lc-645] 每次打开更新标题/副标题/清错误提示
+            const tEl = modal.querySelector('#fntv-unlock-title') as HTMLElement | null;
+            if (tEl) tEl.textContent = (opts && opts.title) || '🔧 开发者测试更新';
+            const sEl = modal.querySelector('#fntv-unlock-subtitle') as HTMLElement | null;
+            if (sEl) sEl.textContent = (opts && opts.subtitle) || '请输入解锁码以获取 Gitee 测试补丁';
+            const eEl = modal.querySelector('#fntv-unlock-err') as HTMLElement | null;
+            if (eEl) { eEl.style.display = 'none'; eEl.textContent = ''; }
             _unlockResolve = resolve;
             modal.style.display = 'flex';
             const inp = modal.querySelector('#fntv-unlock-input') as HTMLInputElement | null;
