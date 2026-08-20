@@ -138,8 +138,8 @@ function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | 
     });
 }
 
-// 从DOM获取id（兼容详情页与首页卡片）
-export const GUID_RE = /\/v\/(?:movie|tv)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
+// [lc-602] 支持 /v/video/（个人视频/未刮削视频详情页）：之前只认 movie|tv → 个人视频播放按钮拿不到 guid
+export const GUID_RE = /\/v\/(?:movie|tv|video)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
 export function getItemGuidFromDOM(button: HTMLElement): string | null {
     try {
         // 1) 详情页: data-id="details" 容器内的 季/集/电影 链接
