@@ -3850,12 +3850,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         fntvOpenPatchApplyPopup(false);
     });
     // [lc-516] 设置面板「应用补丁」与更新弹窗共用模块级 fntvOpenPatchApplyPopup（不依赖 injectSettingsUI 时机）。
-    testBtn.addEventListener('click', async (e: Event) => {
+    // [lc-642] 测试更新: 直接打开两阶段大弹窗(解锁码输入集成弹窗内), 不再先弹 300px 解锁码小弹窗
+    testBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         if (testBtn.disabled) return;
-        const code = await promptUnlockCode();
-        if (code === null) return; // 用户取消
-        openTestPatchWizard(code);
+        openTestPatchWizard();
     });
     // [lc-511] 回滚补丁：调用主进程清除补丁覆盖并重启回原版
     rollbackBtn.addEventListener('click', (e: Event) => {
@@ -4098,8 +4097,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     let _lastTestCode = '';
     let _testSelectedVersion: string | null = null;
 
-    function openTestPatchWizard(code: string): void {
-        _lastTestCode = code;
+    // [lc-642] 测试更新改为两阶段大弹窗(与版号切换 lc-639 一致):
+    //   弹窗内先解锁码输入(unlock) → 验证通过 → listing/select...
+    //   —— 不再先弹 300px 解锁码小弹窗(promptUnlockCode)再跳 360px 大弹窗,
+    //     输错码的错误页也保持 360px 同尺寸(用户反馈"输错码弹出的新弹窗应该跟原来一样大")。
+    function openTestPatchWizard(): void {
         if (!_testWizardModal) {
             const modal = document.createElement('div');
             modal.id = 'fntv-test-wizard';
@@ -4123,6 +4125,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
         _testWizardModal.style.display = 'flex';
         _testWizardModal.setAttribute('data-closable', '1');
+        renderTestState('unlock', null);
+    }
+
+    // [lc-642] 解锁码验证通过后：拉取 -test 补丁列表（原 openTestPatchWizard 后半段）
+    function startTestPatchList(code: string): void {
+        _lastTestCode = code;
         renderTestState('listing', null);
         ipcRenderer.invoke('settings:list-test-patches', code).then((res: any) => {
             if (res && res.ok) {
@@ -4145,16 +4153,46 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         //   设置面板由用户自行点遮罩/✕/ESC 关闭, 与 应用补丁/版号切换 弹窗行为一致。
     }
 
-    // 测试补丁向导渲染：listing / select / empty / error / downloading / applying / done
+    // 测试补丁向导渲染：unlock(解锁码) / listing / select / empty / error / downloading / applying / done
     function renderTestState(state: string, info: any): void {
         const modal = _testWizardModal;
         if (!modal) return;
         const body = modal.querySelector('#fntv-test-body') as HTMLElement;
         if (!body) return;
-        const closable = (state === 'listing' || state === 'select' || state === 'empty' || state === 'error');
+        const closable = (state === 'unlock' || state === 'listing' || state === 'select' || state === 'empty' || state === 'error');
         modal.setAttribute('data-closable', closable ? '1' : '0');
         body.innerHTML = '';
 
+        // [lc-642] 阶段1: 解锁码输入(集成进 360px 大弹窗, 与版号切换一致)
+        if (state === 'unlock') {
+            body.appendChild(centerText('🔧 开发者测试更新', '16px', 'var(--fnos-ui-pill-text)', 'font-weight:800;margin-bottom:4px;'));
+            body.appendChild(centerText('请输入解锁码以获取 Gitee 测试补丁', '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:14px;'));
+            const input = document.createElement('input');
+            input.type = 'password';
+            input.placeholder = '解锁码';
+            input.id = 'fntv-test-unlock-input';
+            input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
+                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
+            body.appendChild(input);
+            body.appendChild(actionRow([
+                { label: '取消', primary: false, onClick: () => closeTestPatchWizard() },
+                { label: '下一步', primary: true, onClick: () => {
+                    const code = (input.value || '').trim();
+                    if (!code) { showPatchToast('请输入解锁码'); return; }
+                    ipcRenderer.invoke('settings:verify-unlock-code', code).then((r: any) => {
+                        if (r && r.ok) {
+                            startTestPatchList(code);
+                        } else {
+                            renderTestState('error', { message: '解锁代码错误，无法获取测试补丁' });
+                        }
+                    }).catch(() => {
+                        renderTestState('error', { message: '解锁码验证失败，请重试' });
+                    });
+                }},
+            ]));
+            setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+            return;
+        }
         if (state === 'listing') {
             body.appendChild(spinnerEl());
             body.appendChild(centerText('正在检测测试补丁列表…', '14px', 'var(--fnos-ui-text)', 'margin-top:14px;font-weight:600;'));
@@ -4172,15 +4210,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             body.appendChild(centerText('出错了', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
             body.appendChild(centerText((info && info.message) || '未知错误', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
             body.appendChild(actionRow([
-                // [lc-641] 重试 = 关测试更新弹窗 → 重新打开解锁码输入 → 输对后再次进入测试更新。
-                //   旧实现直接复用 _lastTestCode 重试列表(错码不变还是错, 没意义)。
-                { label: '重试', primary: false, onClick: () => {
-                    (async () => {
-                        closeTestPatchWizard();
-                        const code = await promptUnlockCode();
-                        if (code !== null) openTestPatchWizard(code);
-                    })();
-                } },
+                // [lc-642] 重试 = 同一 360px 弹窗内回 unlock(重新输入解锁码),
+                //   不再关弹窗跳 300px 解锁码小弹窗(用户反馈弹窗大小应一致)
+                { label: '重试', primary: false, onClick: () => renderTestState('unlock', null) },
                 { label: '关闭', primary: true, onClick: () => closeTestPatchWizard() },
             ]));
             return;
