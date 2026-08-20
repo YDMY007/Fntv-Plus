@@ -535,10 +535,22 @@ export interface LibItem { title: string; href: string; mediaType: string; poste
 let _libIndex: LibItem[] | null = null;
 let _libLoading = false;
 let _libWaiters: ((v: LibItem[]) => void)[] = [];
+// [lc-586] 索引持久化: 首次先读磁盘缓存(立即有值, 已入库立即可标), 后台重建后写盘; 跨重启复用
+let _diskInit = false;
 
-/** 懒加载飞牛影视库索引（/v/list/all 全量去重条目）；并发调用只真正抓一次
- *  [lc-576] 修复：空数组 _libIndex=[] 不再命中缓存(truthy bug) —— 某次构建失败缓存空后,
- *  matchLibrary 永远返回 null →「已入库」徽标永久失效; 改为仅非空缓存命中, 空结果下次重建自愈。 */
+/** 读磁盘索引缓存(可能 null) */
+function readIndexFromDisk(): Promise<LibItem[] | null> {
+  return ipcRenderer.invoke('library-index:read')
+    .then((r) => (r && r.ok && Array.isArray(r.items) && r.items.length ? r.items as LibItem[] : null))
+    .catch(() => null);
+}
+/** 写索引到磁盘(重建完成后) */
+function writeIndexToDisk(items: LibItem[]): void {
+  ipcRenderer.invoke('library-index:write', items).catch(() => {});
+}
+
+/** [lc-586] 飞牛影视库索引(持久化): 首次先读磁盘缓存(立即有值, 已入库立即可标),
+ *  后台异步重建保证最新并写盘; 无磁盘缓存才走 iframe 滚动构建。跨重启复用, 不再每次打开重新抓。 */
 export function ensureLibraryIndex(): Promise<LibItem[]> {
   if (_libIndex && _libIndex.length) return Promise.resolve(_libIndex);
   if (_libLoading) {
@@ -547,7 +559,62 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
       setTimeout(() => { clearInterval(t); resolve(_libIndex || []); }, 4000);
     });
   }
+  // [lc-586] 首次调用: 先读磁盘缓存(立即返回, 不阻塞) → 后台重建更新+写盘
+  if (!_diskInit) {
+    _diskInit = true;
+    _libLoading = true;
+    return new Promise((resolve) => {
+      readIndexFromDisk().then((cached) => {
+        if (cached && cached.length) {
+          _libIndex = cached;
+          _libLoading = false;
+          _libWaiters.forEach((r) => r(_libIndex as LibItem[])); _libWaiters = [];
+          logger.info('[hotUpdates] 索引从磁盘缓存加载', cached.length, '项, 后台异步重建更新中…');
+          try { markInLibrary(document); } catch { /* ignore */ }
+          rebuildIndexAsync(); // 后台重建(滚动抓全量) → 更新内存+写盘+补标
+          resolve(_libIndex as LibItem[]);
+        } else {
+          _libLoading = false;
+          resolve(ensureLibraryIndex()); // 无磁盘缓存 → 正常构建
+        }
+      }).catch(() => {
+        _libLoading = false;
+        resolve(ensureLibraryIndex());
+      });
+    });
+  }
+  // 正常构建路径: iframe 滚动抓全量
   _libLoading = true;
+  return new Promise((resolve) => {
+    buildIndex().then((items) => {
+      _libIndex = items.length ? items : null;
+      _libLoading = false;
+      _libWaiters.forEach((r) => r(items)); _libWaiters = [];
+      if (items.length) {
+        writeIndexToDisk(items); // [lc-586] 构建完成写盘, 下次启动直接读盘
+        try { markInLibrary(document); } catch { /* ignore */ }
+      }
+      resolve(items);
+    });
+  });
+}
+
+/** [lc-586] 后台重建索引(不影响已就绪的内存/磁盘缓存), 完成后更新内存 + 写盘 + 补标 */
+function rebuildIndexAsync(): void {
+  _libLoading = true;
+  buildIndex().then((items) => {
+    _libLoading = false;
+    if (items.length) {
+      _libIndex = items;
+      writeIndexToDisk(items);
+      logger.info('[hotUpdates] 后台重建索引完成:', items.length, '项, 已写盘');
+      try { markInLibrary(document); } catch { /* ignore */ }
+    }
+  }).catch(() => { _libLoading = false; });
+}
+
+/** 用隐藏全屏 iframe 滚动抓 /v/list/all 全量条目(不设置 _libIndex/_libLoading, 由调用方处理) */
+function buildIndex(): Promise<LibItem[]> {
   return new Promise((resolve) => {
     const base = location.origin; // 当前即飞牛影视页，iframe 同源可读
     const iframe = document.createElement('iframe');
@@ -560,19 +627,12 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
     let attempts = 0;
     let lastCount = 0;
     let stableRounds = 0;
-    const MAX_ROUNDS = 80;      // 80*500ms=40s 硬上限, 避免极端情况死循环
+    const MAX_ROUNDS = 150;     // [lc-586] 80→150: 更大库也能滚完(150*500ms=75s 硬上限)
     const STABLE_ROUNDS = 5;    // 连续5轮无新增 GUID 视为已滚到列表底部(全量)
     const finish = (): void => {
       try { iframe.remove(); } catch { /* ignore */ }
       const idx: LibItem[] = Array.from(map.values());
-      // [lc-576] 构建空结果不缓存为永久空(_libIndex=[] 会命中 truthy 缓存 → 已入库失效);
-      // 空库(罕见)下次重建自愈, 非空正常缓存。
-      _libIndex = idx.length ? idx : null;
-      _libLoading = false;
-      _libWaiters.forEach((r) => r(idx)); _libWaiters = [];
       logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项 (rounds=' + attempts + ')');
-      // [lc-460] 索引就绪后，对当前已渲染的每日放送卡片补标「已入库」（覆盖「渲染先于索引就绪」的时序）
-      try { markInLibrary(document); } catch { /* ignore */ }
       resolve(idx);
     };
     // [lc-580] 分段滚动: 每次只滚 1500px, 逐步触发飞牛虚拟滚动懒加载。
@@ -639,8 +699,6 @@ export function ensureLibraryIndex(): Promise<LibItem[]> {
     iframe.onload = () => setTimeout(poll, 500);
     iframe.onerror = () => {
       try { iframe.remove(); } catch { /* ignore */ }
-      // [lc-576] 失败不缓存空数组(null 下次可重建自愈)
-      _libIndex = null; _libLoading = false; _libWaiters.forEach((r) => r([])); _libWaiters = [];
       resolve([]);
     };
     document.body.appendChild(iframe);
