@@ -743,11 +743,13 @@ function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayIt
     const it: any = (info && info.item) || {};
     // [lc-631] 直播: 优先用 live_channels 可播线路的 path 作为播放链接
     let playLink = getProxyUrl(cfg, info.guid);
+    let rawLink = false;
     const chans = (info && info.live_channels) || [];
     if (chans.length > 0) {
         const usable = chans.find((c) => (c.can_play === undefined || c.can_play === 1) && c.path) || chans[0];
         if (usable && usable.path) {
             playLink = usable.path;
+            rawLink = true; // [lc-632] 直播: 直链(1905 网关 + 外部 CDN m3u8)绕过 PotPlayer shim 反代
             log.info(`[lc-631] 直播线路: ${usable.file_name || '线路'} → ${String(usable.path).substring(0, 90)}`);
         }
     }
@@ -760,6 +762,7 @@ function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayIt
         ts: info.ts || 0,
         duration: it.duration || 0,
         playLink,
+        rawLink,
         trimId: it.trim_id || '',
         type: it.type || info.type || '',
     };
