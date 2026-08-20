@@ -3864,22 +3864,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
 
     // [lc-634] 版号切换：解锁码验证通过 → 输入自定义版本号(留空=恢复默认) → 主进程保存并生效
-    // [lc-638] 进入版本号输入页前先主进程验证解锁码——空码/错码立即拒绝，不再"不输码也能进"
-    verSwitchBtn.addEventListener('click', async (e: Event) => {
+    // [lc-638] 解锁码验证前置(进入输入页前) + 弹窗置顶
+    // [lc-639] 改为两阶段大弹窗(仿测试更新 openTestPatchWizard)——解锁码输入 → 验证通过 → 版本号输入
+    verSwitchBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         if (verSwitchBtn.disabled) return;
-        const code = await promptUnlockCode();
-        if (code === null) return; // 用户取消
-        try {
-            const vr = await ipcRenderer.invoke('settings:verify-unlock-code', code);
-            if (vr && vr.ok) {
-                openVersionSwitchModal(code);
-            } else {
-                showPatchToast('解锁代码错误，无法切换版本号');
-            }
-        } catch {
-            showPatchToast('解锁码验证失败，请重试');
-        }
+        openVersionSwitchModal();
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
@@ -3964,86 +3954,132 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         });
     }
 
-    // [lc-634] 版号切换输入弹窗：解锁码已通过，输入自定义版本号(留空=恢复默认) → 主进程保存生效
-    function openVersionSwitchModal(code: string): void {
-        let modal = document.getElementById('fntv-version-switch-modal') as HTMLElement | null;
-        if (!modal) {
-            modal = document.createElement('div');
+    // [lc-634] 版号切换：解锁码验证通过 → 输入自定义版本号(留空=恢复默认) → 主进程保存并生效
+    // [lc-639] 重写为两阶段大弹窗(完全仿测试更新 openTestPatchWizard):
+    //   卡片 360px 同款样式/z-index → 阶段1 解锁码输入 → 主进程验证 →
+    //   阶段2 版本号输入(留空=恢复默认) → 提交保存。彻底解决"黑色弹窗看不到"。
+    let _verSwitchModal: HTMLElement | null = null;
+    let _verSwitchCode = '';
+    function openVersionSwitchModal(): void {
+        if (!_verSwitchModal) {
+            const modal = document.createElement('div');
             modal.id = 'fntv-version-switch-modal';
             modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
             modal.style.cssText = 'position:fixed;z-index:2147483711;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
             modal.addEventListener('click', (e: Event) => {
-                if (e.target === modal) modal!.remove();
+                // 仅非进行中状态允许点遮罩关闭
+                if (e.target === modal && modal.getAttribute('data-closable') === '1') closeVersionSwitchModal();
             });
-
             const card = document.createElement('div');
-            card.style.cssText = 'width:320px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
+            card.style.cssText = 'width:360px;border-radius:16px;padding:22px;color:var(--fnos-ui-text);'
                 + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
                 + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
                 + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
-            card.innerHTML = ''
-                + '<div style="font-size:16px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">版号切换</div>'
-                + '<div style="font-size:12px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:6px;">输入自定义版本号（如 9.9.9）模拟新旧版本，测试更新检测 / 覆盖安装</div>'
-                + '<div style="font-size:11px;line-height:1.5;color:var(--fnos-ui-muted);opacity:.7;margin-bottom:12px;">留空并确定 = 恢复安装包真实版本</div>';
+            const body = document.createElement('div');
+            body.id = 'fntv-version-switch-body';
+            card.appendChild(body);
+            modal.appendChild(card);
+            document.body.appendChild(modal);
+            _verSwitchModal = modal;
+        }
+        _verSwitchModal.style.display = 'flex';
+        _verSwitchModal.setAttribute('data-closable', '1');
+        renderVersionSwitchState('unlock');
+    }
 
+    function closeVersionSwitchModal(): void {
+        if (_verSwitchModal) { _verSwitchModal.remove(); _verSwitchModal = null; }
+        _verSwitchCode = '';
+    }
+
+    // 版号切换两阶段渲染：unlock(解锁码) / input(版本号) / error(错误)
+    function renderVersionSwitchState(state: string, info?: any): void {
+        const modal = _verSwitchModal;
+        if (!modal) return;
+        const body = modal.querySelector('#fntv-version-switch-body') as HTMLElement | null;
+        if (!body) return;
+        const closable = (state === 'unlock' || state === 'input' || state === 'error');
+        modal.setAttribute('data-closable', closable ? '1' : '0');
+        body.innerHTML = '';
+
+        if (state === 'unlock') {
+            body.appendChild(centerText('版号切换', '16px', 'var(--fnos-ui-text)', 'font-weight:800;margin-bottom:4px;'));
+            body.appendChild(centerText('请输入解锁码以自定义软件版本号', '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:14px;'));
+            const input = document.createElement('input');
+            input.type = 'password';
+            input.placeholder = '解锁码';
+            input.id = 'fntv-version-switch-code-input';
+            input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
+                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
+            body.appendChild(input);
+            body.appendChild(actionRow([
+                { label: '取消', primary: false, onClick: () => closeVersionSwitchModal() },
+                { label: '下一步', primary: true, onClick: () => {
+                    const code = (input.value || '').trim();
+                    if (!code) { showPatchToast('请输入解锁码'); return; }
+                    ipcRenderer.invoke('settings:verify-unlock-code', code).then((r: any) => {
+                        if (r && r.ok) {
+                            _verSwitchCode = code;
+                            renderVersionSwitchState('input');
+                        } else {
+                            renderVersionSwitchState('error', { message: '解锁代码错误，无法切换版本号' });
+                        }
+                    }).catch(() => {
+                        renderVersionSwitchState('error', { message: '解锁码验证失败，请重试' });
+                    });
+                }},
+            ]));
+            setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+            return;
+        }
+
+        if (state === 'input') {
+            body.appendChild(centerText('版号切换', '16px', 'var(--fnos-ui-text)', 'font-weight:800;margin-bottom:4px;'));
+            body.appendChild(centerText('输入自定义版本号（如 9.9.9）模拟新旧版本，测试更新检测 / 覆盖安装', '12px', 'var(--fnos-ui-muted)', 'opacity:.8;margin-bottom:6px;'));
+            body.appendChild(centerText('留空并确定 = 恢复安装包真实版本', '11px', 'var(--fnos-ui-muted)', 'opacity:.7;margin-bottom:14px;'));
             const input = document.createElement('input');
             input.type = 'text';
             input.placeholder = '例如 9.9.9';
             input.id = 'fntv-version-switch-input';
             input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
                 + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
-            card.appendChild(input);
-
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
-            const cancelBtn = document.createElement('button');
-            cancelBtn.type = 'button';
-            cancelBtn.textContent = '取消';
-            cancelBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
-                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-btn-text);';
-            const okBtn = document.createElement('button');
-            okBtn.type = 'button';
-            okBtn.textContent = '确定';
-            okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
-                + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
-            row.appendChild(cancelBtn);
-            row.appendChild(okBtn);
-            card.appendChild(row);
-            modal.appendChild(card);
-            document.body.appendChild(modal);
-
-            const doClose = () => { modal!.remove(); };
-            const doSubmit = () => {
+            body.appendChild(input);
+            const submit = (): void => {
                 const v = (input.value || '').trim();
-                const btn = okBtn;
-                btn.disabled = true;
-                btn.textContent = '提交中…';
-                ipcRenderer.invoke('settings:set-custom-version', code, v).then((r: any) => {
-                    doClose();
+                const btn = body.querySelector('[data-submit]') as HTMLButtonElement | null;
+                if (btn) { btn.disabled = true; btn.textContent = '提交中…'; }
+                ipcRenderer.invoke('settings:set-custom-version', _verSwitchCode, v).then((r: any) => {
+                    closeVersionSwitchModal();
                     if (r && r.ok) {
                         showPatchToast(`版号已切换为 ${r.displayVersion || '(默认)'}${v ? '（重启后版本显示同步）' : ''}`);
-                        // 刷新版本显示（设置面板「关于」等监听 version-info 的地方自动更新）
-                        ipcRenderer.send('get-version');
+                        ipcRenderer.send('get-version'); // 刷新版本显示
                     } else {
                         showPatchToast('版号切换失败：' + ((r && r.message) || '未知错误'));
                     }
                 }).catch(() => {
-                    btn.disabled = false;
-                    btn.textContent = '确定';
+                    if (btn) { btn.disabled = false; btn.textContent = '确定'; }
                     showPatchToast('版号切换失败：主进程无响应');
                 });
             };
-            cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(); });
-            okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doSubmit(); });
-            input.addEventListener('keydown', (e: KeyboardEvent) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') doSubmit();
-                else if (e.key === 'Escape') doClose();
-            });
+            const row2 = actionRow([
+                { label: '返回', primary: false, onClick: () => renderVersionSwitchState('unlock') },
+                { label: '确定', primary: true, onClick: submit },
+            ]);
+            const okBtn = row2.querySelector('button:last-child') as HTMLButtonElement | null;
+            if (okBtn) okBtn.setAttribute('data-submit', '1');
+            body.appendChild(row2);
+            setTimeout(() => { try { input.focus(); } catch { /* ignore */ } }, 50);
+            return;
         }
-        modal.style.display = 'flex';
-        const inp = modal.querySelector('#fntv-version-switch-input') as HTMLInputElement | null;
-        if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+
+        // error
+        body.appendChild(centerText('⚠', '24px', '#ff7a7a', 'font-weight:800;margin-bottom:6px;'));
+        body.appendChild(centerText('无法切换版本号', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
+        body.appendChild(centerText((info && info.message) || '未知错误', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
+        body.appendChild(actionRow([
+            { label: '返回', primary: false, onClick: () => renderVersionSwitchState('unlock') },
+            { label: '关闭', primary: true, onClick: () => closeVersionSwitchModal() },
+        ]));
     }
 
     // [lc-483] 热补丁「应用补丁」向导弹窗：
