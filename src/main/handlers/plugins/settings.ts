@@ -528,7 +528,7 @@ async function handleOpenLog(): Promise<{ ok: boolean; error?: string }> {
     try {
         const logFile = log.getLogFile();
         if (!logFile) return { ok: false, error: '无法定位日志文件路径' };
-        if (!fs.existsSync(logFile)) return { ok: false, error: '日志文件尚未生成' };
+        if (!fs.existsSync(logFile)) return { ok: false, error: `日志文件尚未生成（预期路径: ${logFile}）` };
         // Electron 原生：用系统默认程序打开文件；失败则回退 notepad
         const errMsg = await shell.openPath(logFile);
         if (errMsg) {
@@ -550,7 +550,7 @@ async function handleOpenErrorLog(): Promise<{ ok: boolean; error?: string }> {
         const errFile = log.getErrorLogFile();
         if (!errFile) return { ok: false, error: '无法定位日志文件路径' };
         const target = fs.existsSync(errFile) ? errFile : log.getLogFile();
-        if (!target || !fs.existsSync(target)) return { ok: false, error: '日志文件尚未生成' };
+        if (!target || !fs.existsSync(target)) return { ok: false, error: `报错日志尚未生成（预期路径: ${errFile}）` };
         const errMsg = await shell.openPath(target);
         if (errMsg) {
             log.warn('shell.openPath 打开报错日志失败，回退 notepad:', errMsg);
@@ -574,7 +574,7 @@ async function handleOpenMpvLog(): Promise<{ ok: boolean; error?: string }> {
         if (!logDir) return { ok: false, error: '无法定位日志目录' };
         const mpvLogFile = path.join(logDir, 'mpv.log');
         if (!fs.existsSync(mpvLogFile)) {
-            return { ok: false, error: 'MPV 日志尚未生成（请先用 MPV 播放一次后再试）' };
+            return { ok: false, error: `MPV 日志尚未生成（请先用 MPV 播放一次；预期路径: ${mpvLogFile}）` };
         }
         const errMsg = await shell.openPath(mpvLogFile);
         if (errMsg) {
@@ -594,12 +594,14 @@ async function handleExportLog(): Promise<{ ok: boolean; error?: string; savedPa
     try {
         const logFile = log.getLogFile();
         if (!logFile) return { ok: false, error: '无法定位日志文件路径' };
-        if (!fs.existsSync(logFile)) return { ok: false, error: '日志文件尚未生成' };
+        if (!fs.existsSync(logFile)) return { ok: false, error: `日志文件尚未生成（预期路径: ${logFile}）` };
         const win = getMainWindow();
         const ext = path.extname(logFile) || '.log';
         const base = path.basename(logFile, ext);
+        // 默认文件名带应用版本，便于区分不同版本导出的日志
+        const ver = (() => { try { return app.getVersion(); } catch { return ''; } })();
         const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-        const defaultName = `${base}-${stamp}${ext}`;
+        const defaultName = ver ? `${base}-v${ver}-${stamp}${ext}` : `${base}-${stamp}${ext}`;
         const result = await dialog.showSaveDialog(win || (undefined as any), {
             title: '导出日志文件',
             defaultPath: defaultName,
