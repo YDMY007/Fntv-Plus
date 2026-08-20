@@ -770,15 +770,33 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     const json: any = await resp.json();
     const d = (json && json.data) || {};
     // [lc-568] 飞牛 item API: 横版大海报 = data.backdrops(数组), 竖版 = data.posters(数组)
-    const pickImg = (v: any): string => {
+    // [lc-599] 选最大尺寸的 backdrop: 数组第一项经常是竖版小缩略图, 大横版(1920x1080)通常在后面
+    const pickImg = (v: any, preferLargest = false): string => {
       let s = '';
+      const extract = (it: any): string => {
+        if (typeof it === 'string') return it;
+        if (!it || typeof it !== 'object') return '';
+        return it.file_path || it.url || it.path || it.image || it.src || '';
+      };
       if (typeof v === 'string') s = v;
-      else if (Array.isArray(v) && v.length) { const it = v[0]; s = typeof it === 'string' ? it : (it?.url || it?.path || it?.image || it?.src || ''); }
+      else if (Array.isArray(v) && v.length) {
+        let best = v[0];
+        if (preferLargest) {
+          let bestSize = 0;
+          for (const it of v) {
+            const w = (it && (it.width || it.w)) || 0;
+            const h = (it && (it.height || it.h)) || 0;
+            const sz = w * h;
+            if (sz > bestSize) { bestSize = sz; best = it; }
+          }
+        }
+        s = extract(best);
+      }
       if (!s) return '';
       if (s.startsWith('http') || s.includes('sys/img')) return s;
       return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
     };
-    const rel = pickImg(d.backdrops);
+    const rel = pickImg(d.backdrops, true); // [lc-599] 优先选 width*height 最大的横版
     const backdrop = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
     // [lc-570] 飞牛自带 logo(详情页 hero 用的同一个): item API 的 data.logos 数组, 与 backdrops/posters 同构
     const relLogo = pickImg(d.logos);
