@@ -15,22 +15,12 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
     const domResult = sendPlayEventToMain(button, player);
 
     if (!domResult) {
-        // [lc-603] DOM 方法失败 → 先复用 skipInject 已拦截的 item_guid（最可靠）:
-        // 个人视频/未刮削视频详情页 URL 无 guid 且按钮 DOM 无 guid 链接时,
-        // skipInject 的 fetch/XHR 拦截会在播放请求发出时捕获到 play/info 请求体的 item_guid。
-        const skipGuid = getInterceptedGuid();
-        if (skipGuid) {
-            logger.info('Reusing skipInject intercepted item_guid:', skipGuid);
-            const token = getCookie('Trim-MC-token');
-            if (token) {
-                const playData: PlayMovieData = { id: skipGuid, token, sourceIndex: 0, player };
-                ipcRenderer.send('play-movie', playData);
-                return;
-            }
-            logger.error('No token found for skipInject guid');
-        }
-
-        // DOM 方法失败，使用拦截方法作为 fallback
+        // [lc-613] 顺序修正: 必须先 tryGetItemGuidFromOriginalLogic(拦截【本次点击】触发的
+        // play/info 请求 → 一定是当前视频), 再 getInterceptedGuid() 兜底。
+        // 根因(lc-603 回归): getInterceptedGuid() 是 skipInject 缓存的【上一次播放】的
+        // item_guid——第一次点新视频时读到的还是旧视频(或 null) → 发 play-movie 失败
+        // → 飞牛原生兜底 → 原生发 play/info(新) 更新缓存 → 第二次点击才成功。
+        // 而 tryGetItemGuidFromOriginalLogic 拦截的是【本次点击】派发的请求, 每次都是当前视频。
         logger.info('DOM method failed, trying original logic interception...');
         const itemGuid = await tryGetItemGuidFromOriginalLogic(button);
 
@@ -40,12 +30,26 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
             if (token) {
                 const playData: PlayMovieData = { id: itemGuid, token: token, sourceIndex: 0, player };
                 ipcRenderer.send('play-movie', playData);
-            } else {
-                logger.error('No token found');
+                return;
             }
-        } else {
-            logger.error('All methods failed to get item_guid');
+            logger.error('No token found');
+            return;
         }
+
+        // [lc-613] 最后才用 skipInject 的滞后缓存兜底(可能是上一个视频, 仅当完全无 guid 时)
+        const skipGuid = getInterceptedGuid();
+        if (skipGuid) {
+            logger.warn('Reusing skipInject intercepted item_guid (可能滞后):', skipGuid);
+            const token = getCookie('Trim-MC-token');
+            if (token) {
+                const playData: PlayMovieData = { id: skipGuid, token, sourceIndex: 0, player };
+                ipcRenderer.send('play-movie', playData);
+                return;
+            }
+            logger.error('No token found for skipInject guid');
+        }
+
+        logger.error('All methods failed to get item_guid');
     } else {
         logger.info('Successfully used DOM method to get item_guid');
     }

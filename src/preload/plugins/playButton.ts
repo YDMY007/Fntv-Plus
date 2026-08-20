@@ -17,11 +17,11 @@ function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 
     // 复用 playMaskButton 的 getItemGuidFromDOM(兼容详情页/首页卡片/浮层菜单)。
     let id = button ? getItemGuidFromDOM(button) : '';
 
-    // [lc-603] DOM 提取失败 → 复用 skipInject 已拦截的 item_guid(个人视频/未刮削详情页无 URL guid 时唯一可靠来源)
+    // [lc-613] DOM 提取失败 → skipInject 兜底(可能是上一次播放的 guid, 仅最后手段)
     if (!id) {
         const skipGuid = getInterceptedGuid();
         if (skipGuid) {
-            logger.info('[lc-603] Reusing skipInject intercepted item_guid:', skipGuid);
+            logger.warn('[lc-613] Reusing skipInject intercepted item_guid (可能滞后于当前点击):', skipGuid);
             id = skipGuid;
         }
     }
