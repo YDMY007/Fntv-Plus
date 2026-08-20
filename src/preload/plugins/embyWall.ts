@@ -628,34 +628,30 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (detail.title) s.title = detail.title;
         return true;
       }));
-      // [lc-620] 详情补完总超时 2.2s: 到时无论补完与否都渲染(骨架停留足够横条展示完整动画)
+      // [lc-622] 渲染去重: 详情补完(横版 backdrop)是首选渲染时机; 超时仅兜底。
+      //   超时设 5s(单条 abort 4s + 余量) → 绝大多数情况走"详情补完 → 一次渲染横版",
+      //   不会出现"先竖版后横版"两次渲染闪屏。超时兜底渲染后, revealOnce 防二次渲染。
+      const revealOnce = (): void => {
+        if (_carouselRevealed) { log('[lc-622] carousel already revealed, skip re-render'); return; }
+        _carouselRevealed = true;
+        _carouselInited = false;
+        injectCarousel();
+      };
       const revealTimer = setTimeout(() => {
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
-        log('[lc-620] detail fetch timeout, revealing carousel (withData=', withData, ')');
-        completeCarouselProgress(() => {
-          _carouselRevealed = true;
-          _carouselInited = false;
-          injectCarousel();
-        });
-      }, 2200);
+        log('[lc-622] detail fetch timeout(5s), revealing carousel with fallback (withData=', withData, ')');
+        completeCarouselProgress(revealOnce);
+      }, 5000);
       detailsPromise.then(() => {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
         log('[lc-569] item details enriched:', withData, '/', newShows.length, '; revealing carousel once');
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
-        completeCarouselProgress(() => {
-          _carouselRevealed = true;
-          _carouselInited = false;
-          injectCarousel();
-        });
+        completeCarouselProgress(revealOnce);
       }).catch((e) => {
         clearTimeout(revealTimer);
         log('[lc-569] item detail fetch error:', e);
-        completeCarouselProgress(() => {
-          _carouselRevealed = true;
-          _carouselInited = false;
-          injectCarousel();
-        });
+        completeCarouselProgress(revealOnce);
       });
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
@@ -6426,15 +6422,16 @@ function handle(): void {
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
 
-  // 1) 首屏: 硬编码数据立即渲染
+  // 1) 首屏: 立即注入(数据未到显示骨架占位)
   injectCarousel();
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
+  // [lc-622] 不再无条件重建: fetchShowsViaIPC 内部(lc-620)详情就绪后已统一渲染,
+  //   此处 only 兜底(若内部因故未注入——如 early return——则补一次)
   fetchShowsViaIPC(base).then(() => {
     if (_apiShows.length === 0) { log('API empty'); return; }
-    log('got', _apiShows.length, 'shows from API, rebuilding');
-    _carouselInited = false;
-    injectCarousel();
+    log('got', _apiShows.length, 'shows from API (carousel already injected by fetchShowsViaIPC)');
+    if (!_carouselInited) { _carouselInited = false; injectCarousel(); }
   }).catch(e => log('fetch error:', e));
 
   // 3) 定时自动刷新轮播内容(无需退出重开):
@@ -6450,9 +6447,9 @@ function handle(): void {
     log('carousel auto-refresh: re-fetching');
     fetchShowsViaIPC(base).then(() => {
       if (_apiShows.length === 0) return;
-      log('carousel auto-refresh: got', _apiShows.length, 'shows, rebuilding');
-      _carouselInited = false;
-      injectCarousel();
+      log('carousel auto-refresh: got', _apiShows.length, 'shows (injected by fetchShowsViaIPC)');
+      // [lc-622] 兜底: fetchShowsViaIPC 内部已渲染则跳过, 防止重复渲染闪屏
+      if (!_carouselInited) { _carouselInited = false; injectCarousel(); }
     }).catch(e => log('carousel auto-refresh error:', e));
   }, CAROUSEL_REFRESH_MS);
 
