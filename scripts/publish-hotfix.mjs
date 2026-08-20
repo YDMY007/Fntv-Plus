@@ -36,19 +36,43 @@ const api = (p, opts = {}) => fetch(`https://gitee.com/api/v5/repos/${OWNER}/${R
 });
 const apiQ = (p) => `${p}${p.includes('?') ? '&' : '?'}access_token=${GITEE_TOKEN}`;
 
-// 1) 收集 dest 下所有插件文件
+// 1) 收集 dest 下所有插件文件（modules/ 为子目录结构，需递归）
 const collected = [];
-for (const sub of ['main/handlers/plugins', 'preload/plugins']) {
-    const dir = path.join(root, 'dest', sub);
-    if (!fs.existsSync(dir)) continue;
-    for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.js')) {
-            const abs = path.join(dir, f);
-            const rel = `${sub}/${f}`.replace(/\\/g, '/');
+const collectJs = (absDir, relPrefix) => {
+    for (const f of fs.readdirSync(absDir)) {
+        const abs = path.join(absDir, f);
+        const rel = `${relPrefix}/${f}`.replace(/\\/g, '/');
+        const st = fs.statSync(abs);
+        if (st.isDirectory()) {
+            collectJs(abs, rel);
+        } else if (f.endsWith('.js')) {
             collected.push({ target: rel, b64: fs.readFileSync(abs).toString('base64') });
         }
     }
+};
+for (const sub of ['main/handlers/plugins', 'preload/plugins', 'modules']) {
+    const dir = path.join(root, 'dest', sub);
+    if (!fs.existsSync(dir)) continue;
+    collectJs(dir, sub);
 }
+
+// [lc-653] --include-proxy：附带 Go 代理二进制覆盖层（bin/proxy(.exe)），默认不带（二进制较大）
+const includeProxy = argv.includes('--include-proxy');
+if (includeProxy) {
+    const proxyCandidates = [
+        path.join(root, 'third_party', 'proxy', 'proxy.exe'),
+        path.join(root, 'third_party', 'proxy', 'proxy'),
+    ];
+    const proxyBin = proxyCandidates.find((p) => fs.existsSync(p));
+    if (proxyBin) {
+        const target = proxyBin.endsWith('.exe') ? 'bin/proxy.exe' : 'bin/proxy';
+        collected.push({ target, b64: fs.readFileSync(proxyBin).toString('base64') });
+        console.log(`[publish-hotfix] 附带二进制覆盖层: ${target} (${fs.statSync(proxyBin).size} bytes)`);
+    } else {
+        console.warn('[publish-hotfix] --include-proxy 但未找到 proxy 二进制，跳过');
+    }
+}
+
 if (!collected.length) {
     console.error('未收集到任何插件文件');
     process.exit(1);

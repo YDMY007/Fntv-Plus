@@ -379,7 +379,9 @@ async function downloadText(url: string, onProgress?: (loaded: number, total: nu
 // 路径安全校验：仅允许 preload/ 或 main/ 下的相对路径，禁止 .. 与绝对路径
 function sanitizeTarget(target: string): string | null {
     const t = (target || '').replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!/^(preload|main)\//.test(t)) return null;
+    // [lc-653] 覆盖层范围扩展：除 preload/main 插件外，支持 modules/（模块代码，如 logger）与
+    // bin/（二进制覆盖层，如 proxy 可执行文件）。仍严格防目录穿越。
+    if (!/^(preload|main|modules|bin)\//.test(t)) return null;
     if (t.split('/').some((seg) => seg === '..' || seg === '')) return null;
     return t;
 }

@@ -2,6 +2,8 @@ import { app, BrowserWindow, Notification, dialog } from 'electron';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+// [lc-653] 必须第一行：在 logger 等模块被 require 之前安装文件级覆盖钩子（支持 modules/ 热补丁）
+import './patchOverlay';
 import { registerAllPlugins } from './handlers';
 import { getInstance as getUpdateChecker } from '../modules/updater/updateChecker';
 import * as winctrl from './common/winctrl';

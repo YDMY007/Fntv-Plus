@@ -49,6 +49,20 @@ function probePort(port: number, timeoutMs: number): Promise<boolean> {
 
 // 获取应用中的proxy可执行文件路径
 function getProxyExecPath(): string {
+    // [lc-653] 二进制覆盖层：热补丁若写入 userData/patches/bin/proxy(.exe)，
+    // 优先使用覆盖层版本（Go 代理修复可经热补丁生效，无需全量包）。
+    try {
+        const overlayBin = process.env.FNTV_PATCHES_DIR
+            || path.join(app.getPath('userData'), 'patches');
+        const overlayExe = process.platform === 'win32'
+            ? path.join(overlayBin, 'bin', 'proxy.exe')
+            : path.join(overlayBin, 'bin', 'proxy');
+        if (fs.existsSync(overlayExe)) {
+            log.info(`[proxy] 使用覆盖层二进制: ${overlayExe}`);
+            return overlayExe;
+        }
+    } catch { /* 覆盖层不可用时回退安装目录 */ }
+
     // 检查是否在开发环境（未打包）
     if (!app.isPackaged) {
         // 未打包时使用相对路径
