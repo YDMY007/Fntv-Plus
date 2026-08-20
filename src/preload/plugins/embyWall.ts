@@ -911,6 +911,7 @@ let _carouselProgressCount = 0; // 当前已加载卡片数
 let _carouselProgressTimer: number | null = null; // 进度条动画 interval
 let _carouselBarFill: HTMLElement | null = null;  // 进度条填充元素
 let _carouselPctEl: HTMLElement | null = null;    // 百分比文本元素
+let _carouselStatusEl: HTMLElement | null = null; // [lc-621] 状态文字(加载中/加载完成)
 let _carouselProgressPct = 0;                     // 当前百分比
 
 // [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
@@ -1368,10 +1369,11 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 @keyframes fnos-ph-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .fnos-ph-skel{position:relative;overflow:hidden;background:var(--fnos-skel-bg)}
 .fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-/* [lc-617] 滑动加载横条: 一条短横条在轨道里反复从左滑到右(indeterminate, 像 YouTube 顶部加载条) */
-@keyframes fnos-ph-slide{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
-.fnos-ph-slide-track{width:220px;height:4px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden;position:relative;margin-top:2px}
-.fnos-ph-slide-bar{position:absolute;top:0;left:0;height:100%;width:44%;border-radius:999px;background:linear-gradient(90deg,transparent,rgba(185,157,240,.95),rgba(201,167,240,.95),transparent);animation:fnos-ph-slide 1.15s ease-in-out infinite}
+/* [lc-621] 实时进度模拟器样式(用户参考) — 渐变进度条 + 大百分比 + 状态文字, 无 emoji */
+.fnos-ph-track{width:280px;height:8px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden;position:relative}
+.fnos-ph-fill{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#8f6fe8,#c9a7f0);transition:width .25s ease}
+.fnos-ph-percent{font-size:30px;font-weight:700;color:rgba(240,236,255,.98);font-variant-numeric:tabular-nums;letter-spacing:.5px;line-height:1}
+.fnos-ph-status{font-size:12.5px;color:rgba(225,218,245,.85);padding:4px 14px;border-radius:30px;background:rgba(255,255,255,.09);font-weight:600;letter-spacing:.5px;transition:background .15s}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -1406,19 +1408,45 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   shimmer.className = 'fnos-ph-skel';
   shimmer.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:1';
   container.appendChild(shimmer);
-  // 中央内容: [lc-617] page-loading 形式——居中主文字 + 下方滑动加载横条(indeterminate)
+  // 中央内容: [lc-621] 实时进度模拟器形式——渐变进度条 + 大百分比数字 + 状态文字(无 emoji)
   const center = document.createElement('div');
-  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:2';
-  center.innerHTML = `
-    <div class="fnos-ph-text" style="font-size:16px;color:rgba(240,236,255,.95);letter-spacing:1.5px;font-weight:700">正在加载精彩内容…</div>
-    <div class="fnos-ph-slide-track"><div class="fnos-ph-slide-bar"></div></div>
-  `;
+  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:2';
+  const percentEl = document.createElement('div');
+  percentEl.className = 'fnos-ph-percent';
+  percentEl.textContent = '0%';
+  const trackEl = document.createElement('div');
+  trackEl.className = 'fnos-ph-track';
+  const fillEl = document.createElement('div');
+  fillEl.className = 'fnos-ph-fill';
+  trackEl.appendChild(fillEl);
+  const statusEl = document.createElement('div');
+  statusEl.className = 'fnos-ph-status';
+  statusEl.textContent = '加载中';
+  const textEl = document.createElement('div');
+  textEl.className = 'fnos-ph-text';
+  textEl.style.cssText = 'font-size:15px;color:rgba(240,236,255,.9);letter-spacing:1.2px;font-weight:600';
+  textEl.textContent = '正在加载精彩内容';
+  center.appendChild(percentEl);
+  center.appendChild(trackEl);
+  center.appendChild(statusEl);
+  center.appendChild(textEl);
   container.appendChild(center);
-  // [lc-616] 长条进度条已废弃: 改 page-loading 居中动画, 无需进度定时器/补完动画
-  _carouselBarFill = null;
-  _carouselPctEl = null;
+  // [lc-621] 伪进度: 前快后慢(参考模拟器增量策略), 每 120ms tick; 数据就绪后 completeCarouselProgress 补 100
+  _carouselBarFill = fillEl;
+  _carouselPctEl = percentEl;
+  _carouselStatusEl = statusEl;
   _carouselProgressPct = 0;
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+  _carouselProgressTimer = window.setInterval(() => {
+    const p = _carouselProgressPct;
+    let inc: number;
+    if (p < 30) inc = 1.4 + Math.random() * 1.2;       // 前段快
+    else if (p < 70) inc = 0.9 + Math.random() * 0.9;  // 中段中速
+    else inc = 0.4 + Math.random() * 0.5;              // 后段慢(等待详情补完)
+    _carouselProgressPct = Math.min(99, p + inc);
+    fillEl.style.width = _carouselProgressPct + '%';
+    percentEl.textContent = Math.round(_carouselProgressPct) + '%';
+  }, 120);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
@@ -1438,14 +1466,29 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   void phTimer;
 }
 
-/** [lc-616] 数据加载完成(page-loading 形式): 无进度条可补, 停掉残留定时器后立即回调 onDone(注入轮播) */
+/** [lc-621] 数据加载完成: 进度条从当前值快速补到 100%(ease-out 缓动, 约 600ms),
+ *  完成后状态文字变「加载完成」→ 回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
 function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  // [lc-620] 最小停留 ~700ms: 保证滑动横条至少展示大半轮动画(1.15s/轮),
-  // 数据快时(详情补完 ~500ms)也不会一闪而过。随后骨架淡出 → 轮播淡入。
-  window.setTimeout(() => {
-    if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
-  }, 700);
+  const start = _carouselProgressPct;
+  const totalMs = 600;
+  const stepMs = 30;
+  const steps = Math.max(1, Math.ceil(totalMs / stepMs));
+  let i = 0;
+  _carouselProgressTimer = window.setInterval(() => {
+    i++;
+    const t = i / steps;                       // 0→1
+    const eased = 1 - Math.pow(1 - t, 3);      // ease-out: 前快后慢
+    const pct = Math.min(100, start + (100 - start) * eased);
+    _carouselProgressPct = pct;
+    if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
+    if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
+    if (i >= steps) {
+      if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+      if (_carouselStatusEl) _carouselStatusEl.textContent = '加载完成';
+      if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
+    }
+  }, stepMs);
 }
 
 /** [lc-616] 更新骨架上的"已加载 N 个"数字（[lc-616] 已改 page-loading, 数字废弃, 空操作兼容调用方） */
