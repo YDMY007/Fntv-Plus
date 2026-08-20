@@ -4291,8 +4291,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         for (const a of actions) {
             const b = mkBtn(a.label, !a.primary);
             if (a.primary) {
+                // [lc-640] 主按钮改实色紫底白字(高对比, 两主题统一)——
+                //   旧 var(--fnos-ui-pill-bg)=rgba(150,120,200,.22) 浅紫透明 + pill-text=#cbb8ef 浅紫字
+                //   对比度极差(版号切换用户反馈「按钮显示有问题」)。
                 b.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;'
-                    + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
+                    + 'background:linear-gradient(135deg,#8a6dd6,#6b4ec8)!important;'
+                    + 'color:#fff!important;border:1px solid rgba(255,255,255,.28)!important;'
+                    + 'box-shadow:0 4px 14px rgba(107,78,200,.38);letter-spacing:.3px;';
             }
             b.addEventListener('click', (e: Event) => { e.stopPropagation(); a.onClick(); });
             row.appendChild(b);
