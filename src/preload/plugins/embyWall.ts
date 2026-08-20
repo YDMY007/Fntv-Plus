@@ -6434,12 +6434,14 @@ function handle(): void {
   injectCarousel();
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
-  // [lc-622] 不再无条件重建: fetchShowsViaIPC 内部(lc-620)详情就绪后已统一渲染,
-  //   此处 only 兜底(若内部因故未注入——如 early return——则补一次)
+  // [lc-625] 不再无条件重建: fetchShowsViaIPC 内部(lc-624)详情就绪→revealOnce 统一渲染。
+  //   ⚠️ 此 .then 在 fetchShowsViaIPC 同步返回后立即执行(不等详情), 若用 !_carouselInited 判断
+  //   必为 true(此时 revealOnce 还没跑) → 会用未补详情的竖版数据直接渲染 → 进度条 20% 就出图!
+  //   修复: 仅当 _carouselRevealed(内部已渲染完成) 才允许兜底重建; 未完成则交给内部 revealOnce。
   fetchShowsViaIPC(base).then(() => {
     if (_apiShows.length === 0) { log('API empty'); return; }
-    log('got', _apiShows.length, 'shows from API (carousel already injected by fetchShowsViaIPC)');
-    if (!_carouselInited) { _carouselInited = false; injectCarousel(); }
+    log('got', _apiShows.length, 'shows from API (carousel revealed by fetchShowsViaIPC)');
+    if (!_carouselInited && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
   }).catch(e => log('fetch error:', e));
 
   // 3) 定时自动刷新轮播内容(无需退出重开):
@@ -6452,12 +6454,14 @@ function handle(): void {
     if (document.hidden) return; // 后台标签页跳过(iframe/fetch 会被浏览器节流, 必然失败/超时)
     if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
     _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
+    _carouselRevealed = false; // [lc-625] 允许自动刷新后内部 revealOnce 重新渲染
     log('carousel auto-refresh: re-fetching');
     fetchShowsViaIPC(base).then(() => {
       if (_apiShows.length === 0) return;
       log('carousel auto-refresh: got', _apiShows.length, 'shows (injected by fetchShowsViaIPC)');
-      // [lc-622] 兜底: fetchShowsViaIPC 内部已渲染则跳过, 防止重复渲染闪屏
-      if (!_carouselInited) { _carouselInited = false; injectCarousel(); }
+      // [lc-625] 兜底: 内部 revealOnce 已渲染则跳过(自动刷新时 _carouselRevealed 已重置为 false,
+      //   内部会重新渲染; 此处仅防内部异常未渲染时的兜底)
+      if (!_carouselInited && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
     }).catch(e => log('carousel auto-refresh error:', e));
   }, CAROUSEL_REFRESH_MS);
 
