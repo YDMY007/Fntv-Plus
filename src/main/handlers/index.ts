@@ -19,35 +19,38 @@ function loadPlugins(): void {
     const patchesDir = process.env.FNTV_PATCHES_DIR || '';
     const mainPatchDir = patchesDir ? path.join(patchesDir, 'main', 'handlers', 'plugins') : '';
 
-    // [lc-474] 主进程热补丁文件的同级 require 回退到原 bundled 目录（仅需覆盖被修文件）
+    // [lc-474][fix] 主进程热补丁文件位于 userData/patches，无 node_modules 与相对依赖上下文，
+    // 导致其内部 require 无法解析裸模块(axios 等)与正确相对的 ../modules/*.
+    // 做法：当请求来自「被补文件」时，把该文件在 asar 中的原始同名路径作为解析上下文(parent)，
+    // 这样裸模块会沿 asar 的 node_modules 向上找到 axios，相对 require 也按原文件位置解析。
+    // 此前仅对「相对 require」做了回退，裸模块名被漏掉，导致 media.js 等依赖 axios 的 main 补丁全部加载失败。
     const Module = require('module');
     const _origResolve = Module._resolveFilename;
+    // patchesDir/main 与 app.asar/dest/main 互为镜像，被补文件相对 main 的路径一致，便于映射回 asar 原始位置
+    const patchMainRoot = mainPatchDir ? path.dirname(path.dirname(mainPatchDir)) : ''; // .../patches/main
+    const asarMainRoot = path.dirname(path.dirname(bundledDir)); // .../dest/main
     function requireMainPatch(file: string): Plugin {
         Module._resolveFilename = function (request: string, parent: any, ...rest: any[]): string {
-            try {
-                return _origResolve.call(this, request, parent, ...rest);
-            } catch (e) {
-                if (mainPatchDir && parent && typeof parent.filename === 'string'
-                    && parent.filename.startsWith(mainPatchDir)
-                    && typeof request === 'string' && request.startsWith('.')) {
-                    // [fix] 同 preload/index.ts：用 stub-parent 走 _origResolve 自动补扩展名，
-                    //   旧 path.resolve + fs.existsSync(无扩展名) 必为 false，导致 main/* 补丁依赖回退失效。
-                    const stubParent = {
-                        filename: path.join(bundledDir, '_patch_stub_.js'),
-                        id: path.join(bundledDir, '_patch_stub_.js'),
-                        paths: [],
-                    };
-                    try {
-                        return _origResolve.call(this, request, stubParent as any, ...rest);
-                    } catch {
-                        // bundled 中也缺失该依赖，保留原错误
-                    }
+            if (mainPatchDir && patchMainRoot && parent && typeof parent.filename === 'string'
+                && parent.filename.startsWith(mainPatchDir)) {
+                // 还原该补丁文件在 asar 中的原始路径，作为 require 解析起点（文件不必真实存在，仅取其目录用于解析）
+                const relPath = parent.filename.slice(patchMainRoot.length).replace(/^[\\/]/, '');
+                const asarOriginal = path.join(asarMainRoot, relPath);
+                const stubParent = {
+                    filename: asarOriginal,
+                    id: asarOriginal,
+                    paths: [],
+                };
+                try {
+                    return _origResolve.call(this, request, stubParent as any, ...rest);
+                } catch {
+                    // 原上下文也缺失该依赖，回退到默认 parent 解析（保留原始错误）
                 }
-                throw e;
             }
+            return _origResolve.call(this, request, parent, ...rest);
         };
         try {
-            return require(path.join(mainPatchDir, file)) as Plugin;
+            return require(path.join(mainPatchDir, (file))) as Plugin;
         } finally {
             Module._resolveFilename = _origResolve;
         }

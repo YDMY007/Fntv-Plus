@@ -4,6 +4,11 @@ import { registerHandler } from '../core/ipcHandler';
 import { getAppliedPatchVersion, getCustomVersion, setCustomVersion } from '../../../modules/fn_config/config';
 import * as log from '../../../modules/logger';
 
+// [fix] 兼容旧 base：若 base 的 config 未导出 getCustomVersion/setCustomVersion（如 3.4.0），
+// 导入绑定为 undefined，直接调用会抛 TypeError。这里统一做防御，避免版号切换插件在旧 base 上崩溃。
+const safeGetCustomVersion = (): string => (typeof getCustomVersion === 'function' ? getCustomVersion() : '');
+const safeSetCustomVersion = (v: string): void => { if (typeof setCustomVersion === 'function') setCustomVersion(v); };
+
 /**
  * 更新管理插件
  * 处理应用更新检查功能
@@ -33,7 +38,7 @@ async function handleAutoCheckUpdate(event: IpcMainEvent): Promise<void> {
 // [lc-634] 版号切换：开发者自定义版本号(customVersion)优先于安装包版本。
 //   优先级: appliedPatch > customVersion > app.getVersion()
 function handleGetVersion(event: IpcMainEvent): void {
-    const displayVersion = getAppliedPatchVersion() || getCustomVersion() || app.getVersion();
+    const displayVersion = getAppliedPatchVersion() || safeGetCustomVersion() || app.getVersion();
     event.reply('version-info', {
         version: displayVersion,
         name: app.getName()
@@ -52,10 +57,10 @@ async function handleSetCustomVersion(_event: IpcMainInvokeEvent, code?: string,
         return { ok: false, message: '解锁代码错误，无法切换版本号' };
     }
     const v = (version || '').trim();
-    setCustomVersion(v);
+    safeSetCustomVersion(v);
     updateChecker.setCurrentVersion(v || '');
-    const current = getAppliedPatchVersion() || getCustomVersion() || app.getVersion();
-    log.info(`[update] 版号已切换: customVersion=${getCustomVersion() || '(默认)'} 生效显示=${current}`);
+    const current = getAppliedPatchVersion() || safeGetCustomVersion() || app.getVersion();
+    log.info(`[update] 版号已切换: customVersion=${safeGetCustomVersion() || '(默认)'} 生效显示=${current}`);
     return { ok: true, version: v, displayVersion: current };
 }
 
@@ -70,7 +75,7 @@ async function handleVerifyUnlockCode(_event: IpcMainInvokeEvent, code?: string)
 // 注册更新相关处理器
 function init(): void {
     // [lc-634] 启动时若有自定义版本号(版号切换残留)，同步到 updateChecker baseline
-    const custom = getCustomVersion();
+    const custom = safeGetCustomVersion();
     if (custom) {
         updateChecker.setCurrentVersion(custom);
         log.info(`[update] 启动加载自定义版本号: ${custom}`);
