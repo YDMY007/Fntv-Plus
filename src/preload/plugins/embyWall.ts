@@ -6465,7 +6465,10 @@ function handle(): void {
       _carouselContainer = null;
       _carouselInited = false;
     }
-    if (!_carouselInited) injectCarousel();
+    // [lc-623] 数据已到达但未 reveal(详情补完流程进行中)时不抢先渲染——
+    // 否则 MutationObserver 会用竖版 backdrop 渲染一次, 之后 revealOnce 再渲染横版
+    // → '先竖版后横版'闪屏。只有骨架阶段(_apiShows 空)或已 reveal 后才允许注入。
+    if (!_carouselInited && !(_apiLoaded && !_carouselRevealed)) injectCarousel();
   }).observe(document.body, { childList: true, subtree: true });
 
   setInterval(() => {
