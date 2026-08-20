@@ -69,11 +69,21 @@ const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32}
 /** 通过 fetch/XHR 拦截捕获的 guid（最可靠，优先使用） */
 let interceptedGuid: string | null = null;
 
+/** [lc-614] 外部播放流程标记：playMaskButton/playButton 在 tryGetItemGuidFromOriginalLogic
+ *  dispatchEvent 触发原按钮点击前置为 true → 本拦截器拦到 play/info 时记录 guid 并
+ *  返回假响应（阻止飞牛原生播放器被这次合成点击启动 = 防"外部播放 + 原生网页"双播）。 */
+let externalPlayActive = false;
+
+/** [lc-614] 设置/清除外部播放流程标记（playMaskButton/playButton 调用） */
+export function setExternalPlayActive(active: boolean): void {
+    externalPlayActive = active;
+}
+
 /** [lc-603] 导出最近一次拦截到的 item_guid——供 playMaskButton 外部播放兜底复用：
  *  skipInject 的 fetch/XHR 拦截在用户点播放按钮时会可靠抓到 play/info 请求体里的
  *  item_guid（个人视频/未刮削视频详情页 URL 无 guid 时，这是唯一可靠来源）。 */
 export function getInterceptedGuid(): string | null {
-  return interceptedGuid;
+    return interceptedGuid;
 }
 
 /**
@@ -224,6 +234,14 @@ function setupInterceptors(): void {
                     }
                 }
             } catch { /* 非 JSON body，忽略 */ }
+        }
+        // [lc-614] 外部播放流程中的 play/info：已拿到 guid 且阻止原生播放器启动（防双播）
+        if (externalPlayActive && url.includes('/play/info')) {
+            log.info('[skipInject] 外部播放流程: 拦截 play/info 阻止原生播放器启动');
+            return new Response(JSON.stringify({ success: false, message: 'intercepted for external player' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
         }
         // [lc-421] 捕获飞牛元数据保存接口（含响应体）
         if (CAPTURE_API_RE.test(url)) {

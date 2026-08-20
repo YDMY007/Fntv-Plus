@@ -6,25 +6,17 @@ import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { getPlayButtonConfig, createPlayModal, PlayButtonConfig } from './playChoice';
-import { getItemGuidFromDOM } from './playMaskButton';
-// [lc-603] 复用 skipInject 的 fetch/XHR 拦截 guid（个人视频等无 URL guid 场景的唯一可靠来源）
-import { getInterceptedGuid } from './skipInject';
+import { getItemGuidFromDOM, tryGetItemGuidFromOriginalLogic } from './playMaskButton';
 
 // 发送播放信息到主进程
 function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
     // [lc-224] 从按钮(及其祖先链接)提取真实 item guid, 不再用 window.location.href 末段:
     // 首页 path=/v 时末段是 "v", 会令 getPlayInfo("v") 404 → 播放器打不开。
     // 复用 playMaskButton 的 getItemGuidFromDOM(兼容详情页/首页卡片/浮层菜单)。
-    let id = button ? getItemGuidFromDOM(button) : '';
-
-    // [lc-613] DOM 提取失败 → skipInject 兜底(可能是上一次播放的 guid, 仅最后手段)
-    if (!id) {
-        const skipGuid = getInterceptedGuid();
-        if (skipGuid) {
-            logger.warn('[lc-613] Reusing skipInject intercepted item_guid (可能滞后于当前点击):', skipGuid);
-            id = skipGuid;
-        }
-    }
+    // [lc-614] 不再用 getInterceptedGuid() 兜底: 它是【上一次播放】的 guid, 可能滞后导致
+    // 播错视频且"误报成功"(返回旧 id 让调用方跳过拦截兜底)。DOM 提取失败一律返回 null,
+    // 由调用方走 tryGetItemGuidFromOriginalLogic 实时拦截【本次点击】的 guid。
+    const id = button ? getItemGuidFromDOM(button) : '';
 
     if (!id) {
         logger.error('Failed to extract item guid from button/DOM');
@@ -254,7 +246,18 @@ async function injectCustomPlayBtn(): Promise<void> {
     } else {
         // 未隐藏原生按钮：在详情页主播放按钮旁克隆一个外部播放器按钮（两个并排，各播各的）
         const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
-        clonePlayBtnAndInject((button) => sendPlayEventToMain(button, config.defaultPlayer), label);
+        // [lc-614] 回调改 async: DOM 提取失败(个人视频/特殊页面)时走 tryGetItemGuidFromOriginalLogic
+        // (dispatchEvent 触发飞牛发 play/info → skipInject 拦截当前 guid), 不再静默失败
+        clonePlayBtnAndInject(async (button) => {
+            const id = sendPlayEventToMain(button, config.defaultPlayer);
+            if (id) return;
+            const itemGuid = await tryGetItemGuidFromOriginalLogic(button);
+            if (!itemGuid) { logger.error('[lc-614] 克隆按钮 DOM+拦截均未取得 guid'); return; }
+            const token = getCookie('Trim-MC-token');
+            if (!token) { logger.error('[lc-614] 无 token'); return; }
+            const playData: PlayMovieData = { id: itemGuid, token, sourceIndex: 0, player: config.defaultPlayer };
+            ipcRenderer.send('play-movie', playData);
+        }, label);
     }
 }
 

@@ -7,7 +7,8 @@ import type { PlayMovieData } from '../core/types';
 import { HookType } from '../core/hooks';
 import { getPlayButtonConfig, createPlayModal } from './playChoice';
 // [lc-603] 复用 skipInject 的 fetch/XHR 拦截 guid（个人视频等无 URL guid 场景的唯一可靠来源）
-import { getInterceptedGuid } from './skipInject';
+// [lc-614] setExternalPlayActive: 外部播放流程标记, 拦 play/info 防原生双播
+import { getInterceptedGuid, setExternalPlayActive } from './skipInject';
 
 // 调用播放器的公共方法（player 指定 mpv / potplayer）
 async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'): Promise<void> {
@@ -55,104 +56,61 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
     }
 }
 
-// 尝试通过执行原有逻辑获取 item_guid
-function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | null> {
+// 尝试通过触发原逻辑获取 item_guid
+// [lc-614] 重写: 旧实现自己包装 window.fetch/XHR 想拦 play/info 的 body —— 但飞牛代码
+// 缓存了 fetch 引用(不走 window.fetch 动态查找), 旧拦截器永远拦不到 → 恒超时失败。
+// 正确做法: 设置 skipInject 的外部播放标记(它会拦 play/info 并返回假响应防原生双播),
+// 然后 dispatchEvent 触发原按钮点击 → 飞牛发 play/info → skipInject 拦到并更新
+// interceptedGuid → 轮询 getInterceptedGuid() 变化(记录点击前值, 等它变成新值)。
+// [lc-614] export: playButton.ts 的克隆播放按钮失败兜底也复用此函数。
+export function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | null> {
     return new Promise((resolve) => {
         try {
-            // 创建一个临时的网络请求拦截器
-            const originalFetch = window.fetch;
-            const originalXHROpen = XMLHttpRequest.prototype.open;
-            const originalXHRSend = XMLHttpRequest.prototype.send;
-
-            let interceptedGuid: string | null = null;
-            const timeout = setTimeout(() => {
-                // 恢复原有方法
-                window.fetch = originalFetch;
-                XMLHttpRequest.prototype.open = originalXHROpen;
-                XMLHttpRequest.prototype.send = originalXHRSend;
-                resolve(null);
-            }, 2000);
-
-            // 拦截 fetch 请求
-            window.fetch = function (url: RequestInfo | URL, options?: RequestInit): Promise<Response> {
-                logger.info('Intercepted fetch request:', url, options);
-                if (typeof url === 'string' && url.includes('/api/v1/play/info') && options && options.body) {
-                    try {
-                        const body = JSON.parse(options.body as string);
-                        if (body.item_guid) {
-                            interceptedGuid = body.item_guid;
-                            logger.info('Found item_guid in fetch request:', interceptedGuid);
-                        }
-                    } catch (e) {
-                        logger.error('Error parsing fetch body:', e);
-                    }
-                }
-                // 不执行实际的播放请求，直接返回一个假的 Promise
-                if (typeof url === 'string' && url.includes('/api/v1/play/info')) {
-                    return Promise.resolve({
-                        ok: false,
-                        status: 200,
-                        json: () => Promise.resolve({ success: false, message: 'Intercepted for guid extraction' })
-                    } as Response);
-                }
-                return originalFetch.apply(this, arguments as any);
+            const before = getInterceptedGuid();
+            // [lc-614] 开启 skipInject 外部播放标记: 拦 play/info 返回假响应(阻止原生播放器启动)
+            setExternalPlayActive(true);
+            let done = false;
+            const cleanup = (): void => {
+                if (done) return;
+                done = true;
+                setExternalPlayActive(false);
+                button.removeAttribute('data-allow-original-play');
             };
+            const timeout = setTimeout(() => { cleanup(); resolve(null); }, 2500);
 
-            // 拦截 XMLHttpRequest
-            XMLHttpRequest.prototype.open = function (method: string, url: string | URL): void {
-                (this as any)._url = url;
-                return originalXHROpen.apply(this, arguments as any);
-            };
-
-            XMLHttpRequest.prototype.send = function (data?: Document | XMLHttpRequestBodyInit | null): void {
-                const thisXHR = this as any;
-                if (thisXHR._url && typeof thisXHR._url === 'string' && thisXHR._url.includes('/api/v1/play/info') && data) {
-                    try {
-                        const parsedData = JSON.parse(data as string);
-                        if (parsedData.item_guid) {
-                            interceptedGuid = parsedData.item_guid;
-                            logger.info('Found item_guid in XHR request:', interceptedGuid);
-                        }
-                    } catch (e) {
-                        logger.error('Error parsing XHR data:', e);
-                    }
-                    // 不发送实际请求，模拟一个错误响应
-                    setTimeout(() => {
-                        if (this.onreadystatechange) {
-                            (this as any).readyState = 4;
-                            (this as any).status = 404;
-                            (this as any).responseText = JSON.stringify({ success: false, message: 'Intercepted for guid extraction' });
-                            this.onreadystatechange(new Event('readystatechange'));
-                        }
-                    }, 100);
-                    return;
-                }
-                return originalXHRSend.apply(this, arguments as any);
-            };
-
-            // 触发原有点击事件
+            // 触发原有点击事件(带 data-allow-original-play 放行, 让飞牛 handler 执行并发 play/info)
             button.setAttribute('data-allow-original-play', 'true');
             setTimeout(() => {
-                const clickEvent = new MouseEvent('click', {
-                    view: window,
-                    bubbles: true,
-                    cancelable: true
-                });
-                button.dispatchEvent(clickEvent);
-
-                // 检查是否获取到了 guid
-                setTimeout(() => {
-                    clearTimeout(timeout);
-                    // 恢复原有方法
-                    window.fetch = originalFetch;
-                    XMLHttpRequest.prototype.open = originalXHROpen;
-                    XMLHttpRequest.prototype.send = originalXHRSend;
-                    button.removeAttribute('data-allow-original-play');
-                    resolve(interceptedGuid);
-                }, 1000);
+                try {
+                    const clickEvent = new MouseEvent('click', {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    button.dispatchEvent(clickEvent);
+                } catch { /* ignore */ }
+                // 轮询 skipInject 拦截结果: 直到 guid 变化(变成当前视频)或超时
+                const pollStart = Date.now();
+                const poll = (): void => {
+                    if (done) return;
+                    const cur = getInterceptedGuid();
+                    if (cur && cur !== before) {
+                        cleanup();
+                        logger.info('[lc-614] 从 skipInject 拦截到当前 item_guid:', cur);
+                        resolve(cur);
+                        return;
+                    }
+                    if (Date.now() - pollStart > 2500) {
+                        cleanup();
+                        resolve(null);
+                        return;
+                    }
+                    setTimeout(poll, 150);
+                };
+                setTimeout(poll, 200);
             }, 50);
-
         } catch (error) {
+            setExternalPlayActive(false);
             logger.error('Error in tryGetItemGuidFromOriginalLogic:', error);
             resolve(null);
         }
