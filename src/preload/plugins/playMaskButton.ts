@@ -202,6 +202,18 @@ export function getItemGuidFromDOM(button: HTMLElement): string | null {
             if (m && m[1]) { logger.info('Found guid in card anchor:', m[1]); return m[1]; }
         }
 
+        // [lc-628] 通用海报 URL 提取: 任意卡片内 img src 含 poster-{32hex} 即为 item guid。
+        // 覆盖「分类-其他」文件夹列表页的个人视频卡片(链接指向 /v/folder/ 无 guid,
+        // 但海报 URL 是 poster-{guid}.webp, 与 continue-card 同构)——避免走
+        // tryGetItemGuidFromOriginalLogic 的 dispatchEvent(触发飞牛前端弹"播放失败")。
+        try {
+            const imgs = scope.querySelectorAll('img');
+            for (const im of Array.from(imgs) as HTMLImageElement[]) {
+                const m = (im.currentSrc || im.src || im.getAttribute('src') || '').match(/poster-([a-f0-9]{32})/i);
+                if (m && m[1]) { logger.info('Found guid in card poster:', m[1]); return m[1]; }
+            }
+        } catch { /* ignore */ }
+
         // 3) URL 兜底(详情页等)
         const url = window.location.href;
         const urlMatch = url.match(GUID_RE);
