@@ -593,21 +593,19 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      // [lc-598] 进度条平滑补到 100% → 完成后置 revealed 标志并重建轮播(淡入)
-      completeCarouselProgress(() => {
-        _carouselRevealed = true; // [lc-615] 进度条走完才标记揭示
-        _carouselInited = false;
-        injectCarousel();
-      });
+      // [lc-620] 不再先渲染再补详情(会闪两次): 先并行补 item API 详情, 全部就绪后
+      // 一次性 completeCarouselProgress → injectCarousel(只渲染一次, 不闪)。
+      // 详情补完总超时 2.2s(单条 4s AbortController 太慢, 会拖长骨架), 到时无论
+      // 详情是否补完都渲染——骨架停留时间足够横条动画完整展示。
 
       // [lc-569] 并行补 item API 详情(横版大海报 backdrop + 集数/季数/年份/评分/状态/类型/简介):
       // 优先级: 横版图 ①当前页已加载横版图(scrapeLandscapeBackdrops) ②item API(fetchItemDetail)
-      // 其余字段(local/total 集数季数等)全部从 item API 拿 → 重建后胶囊能显示真实数据。
+      // 其余字段(local/total 集数季数等)全部从 item API 拿 → 渲染后胶囊能显示真实数据。
       // 并行 10 条 + 单条 4s 超时(AbortController), 不阻塞首屏; 补成功后重建轮播。
       log('[lc-569] fetching item details for', newShows.length, 'items (live-DOM landscape + API)...');
       const domLand = scrapeLandscapeBackdrops(); // 当前页已加载横版图(如"继续观看"横版卡片)
       log('[lc-569] live landscape backdrops by id:', domLand.size, 'available');
-      Promise.all(newShows.map(async (s: any) => {
+      const detailsPromise = Promise.all(newShows.map(async (s: any) => {
         const fromDom = domLand.get(s.id);
         if (fromDom) s.backdrop = fromDom; // ① DOM 横版图(最快最稳)
         const detail = await fetchItemDetail(base, s.id); // ② item API 全字段
@@ -629,13 +627,36 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (detail.desc) s.desc = detail.desc;
         if (detail.title) s.title = detail.title;
         return true;
-      })).then(() => {
+      }));
+      // [lc-620] 详情补完总超时 2.2s: 到时无论补完与否都渲染(骨架停留足够横条展示完整动画)
+      const revealTimer = setTimeout(() => {
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
-        log('[lc-569] item details enriched:', withData, '/', newShows.length, '; rebuilding carousel');
-        // [lc-615] 仅当轮播已揭示(进度条走完)才重建: 否则跳过——进度条完成时的
-        //   首次重建已注入 _apiShows(含刚补的详情), 无需二次重建, 避免绕过进度条提前出图
-        if (withData > 0 && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
-      }).catch((e) => log('[lc-569] item detail fetch error:', e));
+        log('[lc-620] detail fetch timeout, revealing carousel (withData=', withData, ')');
+        completeCarouselProgress(() => {
+          _carouselRevealed = true;
+          _carouselInited = false;
+          injectCarousel();
+        });
+      }, 2200);
+      detailsPromise.then(() => {
+        clearTimeout(revealTimer);
+        const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
+        log('[lc-569] item details enriched:', withData, '/', newShows.length, '; revealing carousel once');
+        // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
+        completeCarouselProgress(() => {
+          _carouselRevealed = true;
+          _carouselInited = false;
+          injectCarousel();
+        });
+      }).catch((e) => {
+        clearTimeout(revealTimer);
+        log('[lc-569] item detail fetch error:', e);
+        completeCarouselProgress(() => {
+          _carouselRevealed = true;
+          _carouselInited = false;
+          injectCarousel();
+        });
+      });
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
@@ -1420,10 +1441,11 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 /** [lc-616] 数据加载完成(page-loading 形式): 无进度条可补, 停掉残留定时器后立即回调 onDone(注入轮播) */
 function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  // 短暂停留让 spinner 有一个"完成"瞬间(120ms), 然后骨架淡出 → 轮播淡入
+  // [lc-620] 最小停留 ~700ms: 保证滑动横条至少展示大半轮动画(1.15s/轮),
+  // 数据快时(详情补完 ~500ms)也不会一闪而过。随后骨架淡出 → 轮播淡入。
   window.setTimeout(() => {
     if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
-  }, 120);
+  }, 700);
 }
 
 /** [lc-616] 更新骨架上的"已加载 N 个"数字（[lc-616] 已改 page-loading, 数字废弃, 空操作兼容调用方） */
