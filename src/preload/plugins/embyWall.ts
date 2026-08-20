@@ -3265,10 +3265,12 @@ function handle(): void {
         + 'color:#fff;font-size:12px;user-select:none;';
       panel.appendChild(ctrl);
     }
-    // [lc-371] "切换系统页面"按钮: 置于 #fnos-sidebar-actions 容器内部最顶部(设置按钮之上),
+    // [lc-371] "切换系统页面"按钮: 置于 #fnos-sidebar-actions 容器内部(设置按钮旁),
     //   点击后整窗导航到飞牛原生 NAS 系统页(根路径 `/`); 原生页由 injectNativeReturnButton 提供返回。
-    // [lc-373-fix] 必须放进 ctrl 容器内部(prepend), 不能 insertBefore 到容器外——
+    // [lc-373-fix] 必须放进 ctrl 容器内部, 不能 insertBefore 到容器外——
     //   容器外的位置可能被面板布局推出可视区/被遮挡导致不可见。
+    // [lc-633] 顺序调整: 用户要求"设置"第一、"切换系统页面"第二——这里先 append 占位,
+    //   下方设置按钮块用 prepend 插到最前 → 最终顺序: 设置 → 切换系统页面 → 软件反馈建议。
     if (!ctrl.querySelector('#fnos-switch-system-btn')) {
       const swBtn = document.createElement('button');
       swBtn.id = 'fnos-switch-system-btn';
@@ -3286,7 +3288,7 @@ function handle(): void {
         //   主进程导航守卫(lc-203)的 did-navigate 在标记生效前就把 / 纠正回 /v
         ipcRenderer.send('fntv:enter-system-page');
       });
-      ctrl.prepend(swBtn);  // 放进容器内部最顶部 → 一定在"设置"按钮上方可见
+      ctrl.appendChild(swBtn);  // [lc-633] 占位(设置按钮块稍后 prepend 到最前)
     }
 
     if (ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
@@ -3305,7 +3307,7 @@ function handle(): void {
       if (ov && ov.style.display === 'flex') ov.style.display = 'none'; // 再次点击=收起
       else openSettingsPanel(panel);
     });
-    ctrl.appendChild(btn);
+    ctrl.prepend(btn); // [lc-633] 设置按钮置顶 → 最终顺序: 设置 → 切换系统页面 → 软件反馈建议
 
     // [lc-361] 合并"问卷反馈"与"Q群反馈"为单个"软件反馈建议"按钮(点击弹出选择弹窗)
     if (!ctrl.querySelector('#fnos-feedback-choice-btn')) {
