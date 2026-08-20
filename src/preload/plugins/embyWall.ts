@@ -2564,9 +2564,12 @@ function injectVideoPreviewExternalPlay(): void {
   /** 用外部播放器打开: 抓 video 直链 → external-play → 关闭原生预览 */
   function launchExternal(modal: HTMLElement): void {
     const video = modal.querySelector('video') as HTMLVideoElement | null;
-    const url = video?.currentSrc || video?.src || '';
+    let url = video?.currentSrc || video?.src || '';
+    // [lc-594] 相对路径补全: 飞牛预览 video src 常为 /download/... 相对路径(自鉴权直链),
+    // 之前只接受 http(s) 开头 → 未刮削的个人视频预览永远"未能获取视频直链" → 外部播放无法调用。
+    if (url && url.startsWith('/')) url = location.origin + url;
     if (!url || !/^https?:\/\//i.test(url)) {
-      log('[视频预览外放] 未取到有效直链');
+      log('[视频预览外放] 未取到有效直链:', url);
       alert('未能获取视频直链，无法外部打开');
       return;
     }
