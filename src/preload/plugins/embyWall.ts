@@ -1116,8 +1116,8 @@ function injectCarousel(): void {
       : '';
     info.innerHTML = `
       ${pillRow}
-      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:12px;flex-shrink:0;justify-content:flex-start;margin-top:2px">
-        <div class="fnos-title" style="font-size:clamp(30px,3.8vh,44px);font-weight:900;line-height:1.16;letter-spacing:1.2px;word-break:break-word;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)">${show.title}</div>
+      <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:flex-start;margin-top:16px;padding-left:2px">
+        <div class="fnos-title" style="font-size:clamp(28px,3.6vh,42px);font-weight:900;line-height:1.18;letter-spacing:1px;word-break:break-word;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)">${show.title}</div>
         ${genreHtml}
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
@@ -2269,8 +2269,8 @@ function injectUiThemeStyle(): void {
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(243,235,250,.85) 100%);
   --fnos-hero-dot:rgba(0,0,0,.16);
   --fnos-hero-title:#0f1c3f;
-  --fnos-hero-title-grad:linear-gradient(120deg,#00d4ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变(青→蓝→粉→橙→金) */
-  --fnos-hero-title-glow:drop-shadow(0 0 5px rgba(0,212,255,.45)) drop-shadow(0 0 12px rgba(255,92,208,.35)) drop-shadow(0 1px 3px rgba(120,80,200,.25)); /* [lc-591] 霓虹彩色光晕(浅色主题) */
+  --fnos-hero-title-grad:linear-gradient(120deg,#00d4ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变 */
+  --fnos-hero-title-glow:drop-shadow(0 1px 0 rgba(255,255,255,.5)); /* [lc-593] 去掉彩色霓虹光晕(用户要求不做阴影), 仅极弱白色描边保证可读 */
   --fnos-hero-desc:rgba(20,35,70,.82);
   --fnos-hero-shadow:0 1px 10px rgba(255,255,255,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);
@@ -2348,8 +2348,8 @@ html.dark{
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(60,50,84,.92) 100%);
   --fnos-hero-dot:rgba(200,195,215,.35);
   --fnos-hero-title:#f0ecff;
-  --fnos-hero-title-grad:linear-gradient(120deg,#00e5ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变(深色主题同款) */
-  --fnos-hero-title-glow:drop-shadow(0 0 7px rgba(0,229,255,.55)) drop-shadow(0 0 16px rgba(255,92,208,.45)) drop-shadow(0 0 28px rgba(255,150,60,.35)) drop-shadow(0 1px 3px rgba(0,0,0,.4)); /* [lc-591] 霓虹彩色光晕(深色主题, 更强) */
+  --fnos-hero-title-grad:linear-gradient(120deg,#00e5ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变 */
+  --fnos-hero-title-glow:drop-shadow(0 1px 2px rgba(0,0,0,.35)); /* [lc-593] 去掉彩色霓虹光晕(用户要求不做阴影), 仅极弱深色近影保证可读 */
   --fnos-hero-desc:rgba(225,218,245,.88);
   --fnos-hero-shadow:0 1px 10px rgba(0,0,0,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(140,160,255,.6),transparent);
