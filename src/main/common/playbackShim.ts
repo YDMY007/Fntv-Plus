@@ -347,7 +347,19 @@ class PlaybackShim {
         runBiliDanmaku(title, ep, out, threshold, season).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku] ✅ 弹幕就绪 | count=${r.danmaku_count} source=${r.source} cid=${r.cid}`);
-                this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, cid: r.cid });
+                // [lc-607] 透传 bvid/matched_title: MPV 配置面板「匹配来源」需显示 BV(视频区)/标题,
+                //   之前只回 source/cid → 显示"UP主搬运 (cid:xxx)"而非"UP主搬运 (BV:xxx)"
+                this.json(res, 200, {
+                    ok: true,
+                    danmaku_count: r.danmaku_count,
+                    source: r.source,
+                    cid: r.cid,
+                    bvid: r.bvid || null,
+                    title: r.title || title,
+                    matched_title: r.matched_title || null,
+                    season_id: r.season_id || null,
+                    epid: r.epid || null,
+                });
             } else {
                 log.warn(`[playbackShim][danmaku] ❌ 弹幕获取失败: ${r.error}`);
                 this.json(res, 200, { ok: false, error: r.error });

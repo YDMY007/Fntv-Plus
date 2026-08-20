@@ -28,6 +28,9 @@ export interface BiliDanmakuResult {
     aggregated_from?: any;
     cookie_status?: string;   // 'valid' | 'expired' | 'missing'，由 bili_danmaku.js run() 透传
     error?: string;
+    // [lc-607] 番剧区(正版)无 bvid, 透传 season_id/epid 供 MPV 配置面板显示 ep_id
+    season_id?: string | number | null;
+    epid?: string | number | null;
 }
 
 export interface BiliCandidate {
