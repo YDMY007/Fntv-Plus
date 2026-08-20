@@ -386,6 +386,57 @@ function sanitizeTarget(target: string): string | null {
     return t;
 }
 
+/**
+ * [lc-654] 应用新补丁前，清理覆盖层中「新清单未包含」的过时文件，保证每次覆盖干净生效。
+ *
+ * 背景：若不清理，旧补丁独有的文件会残留在 userData/patches，继续影子覆盖 asar 原文件，
+ * 导致新旧补丁混杂（例如新版 base 删除了某插件文件，但旧补丁覆盖层仍保留并加载它）。
+ *
+ * 清理规则（按前缀区分）：
+ *  - JS 覆盖（preload/ main/ modules/）：发布脚本生成的是【全量快照】（每次收集 dest 全部 JS），
+ *    故「新清单未包含」= 新版已移除/过时 → 删除，避免残留。
+ *  - 二进制覆盖（bin/）：发布脚本【默认不带】（仅 --include-proxy 时附带），
+ *    「新清单未包含」≠ 不要，而是本次未携带 → 【保留】，沿用上次的二进制修复
+ *    （否则一个纯 JS 补丁会把 lc-652 的 proxy 覆盖层删掉，导致修复回退）。
+ *  - 空目录一并清理。
+ */
+function pruneStalePatchFiles(patchesDir: string, manifest: PatchManifest): void {
+    try {
+        if (!fs.existsSync(patchesDir)) return;
+        const targets = new Set<string>((manifest.files || []).map(f => sanitizeTarget(f.target)).filter((t): t is string => !!t));
+
+        const walk = (dir: string): void => {
+            let entries: string[];
+            try { entries = fs.readdirSync(dir); } catch { return; }
+            for (const name of entries) {
+                const full = path.join(dir, name);
+                let stat: fs.Stats;
+                try { stat = fs.statSync(full); } catch { continue; }
+                if (stat.isDirectory()) {
+                    walk(full);
+                    // 清理空的残留子目录
+                    try {
+                        if (fs.readdirSync(full).length === 0) fs.rmdirSync(full);
+                    } catch { /* ignore */ }
+                    continue;
+                }
+                const rel = path.relative(patchesDir, full).replace(/\\/g, '/');
+                if (targets.has(rel)) continue;   // 新清单包含 → 保留（随后覆盖写入）
+                if (rel.startsWith('bin/')) continue; // 二进制覆盖：本次未带则保留
+                try {
+                    fs.unlinkSync(full);
+                    log.info(`[patch] 已清理过时补丁文件: ${rel}`);
+                } catch (e: any) {
+                    log.warn(`[patch] 清理过时补丁文件失败: ${rel}`, e?.message || e);
+                }
+            }
+        };
+        walk(patchesDir);
+    } catch (e: any) {
+        log.warn('[patch] 清理过时补丁文件异常:', e?.message || e);
+    }
+}
+
 function compareVersions(a: string, b: string): number {
     const pa = a.split('.').map(Number);
     const pb = b.split('.').map(Number);
@@ -664,6 +715,9 @@ export async function applyTestPatch(opts?: PatchApplyOptions, targetVersion?: s
     const patchesDir = getPatchesDir();
     if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
 
+    // [lc-654] 应用新补丁前清理过时覆盖文件：保证每次覆盖都能干净生效（详见 pruneStalePatchFiles）
+    pruneStalePatchFiles(patchesDir, manifest);
+
     if (onProgress) onProgress({ phase: 'applying', percent: 100, message: `正在应用测试补丁 v${testVersion}` });
     let count = 0;
     let needsRestart = false;
@@ -723,6 +777,10 @@ async function applyManifestFiles(manifest: PatchManifest, version: string, onPr
     }
     const patchesDir = getPatchesDir();
     if (!fs.existsSync(patchesDir)) fs.mkdirSync(patchesDir, { recursive: true });
+
+    // [lc-654] 应用新补丁前清理过时覆盖文件（正式补丁路径同样适用）
+    pruneStalePatchFiles(patchesDir, manifest);
+
     if (onProgress) onProgress({ phase: 'applying', percent: 100, message: `正在应用补丁 v${version}` });
     let count = 0;
     let needsRestart = false;
