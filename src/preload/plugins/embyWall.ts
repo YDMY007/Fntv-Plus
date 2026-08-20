@@ -1087,11 +1087,11 @@ function injectCarousel(): void {
     const localSeasons = (show as any).localSeasons || 0;
     const year = (show as any).year || 0;
     const rating = (show as any).rating || 0;
-    // ① 评分胶囊（[lc-587] 加深金色底+更亮文字, 解决浅底对比度不足）
+    // ① 评分胶囊（[lc-589] 浅紫白面板上用**深色实底+亮字**(此前半透明叠加隐形), 对比度拉满)
     const ratingPill = rating > 0
-      ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 15px;background:linear-gradient(135deg,rgba(255,207,107,.46),rgba(255,180,90,.28));border:1px solid rgba(255,214,130,.72);border-radius:20px;color:#ffe9a8;font-size:15px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:0 0 14px rgba(255,207,107,.35),inset 0 1px 0 rgba(255,255,255,.25)"><svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#ffe9a8"/></svg>${rating.toFixed(1)}</span>`
+      ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 15px;background:linear-gradient(135deg,rgba(80,55,10,.95),rgba(50,35,5,.92));border:1px solid rgba(255,214,130,.85);border-radius:20px;color:#fff3b8;font-size:15px;font-weight:900;letter-spacing:.5px;box-shadow:0 0 16px rgba(255,180,60,.6),0 2px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,240,180,.4)"><svg width="15" height="15" viewBox="0 0 24 24" style="flex-shrink:0;filter:drop-shadow(0 0 4px rgba(255,210,120,.8))"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z" fill="#fff3b8"/></svg>${rating.toFixed(1)}</span>`
       : '';
-    // ② 类型/集数胶囊（[lc-587] 加深紫底+更亮文字, 数字大单位小）
+    // ② 类型/集数胶囊（[lc-589] 深紫实底+亮白字, 数字大单位小）
     let epsText: string;
     if (show.mediaType === 'movie') {
       epsText = (year ? year + ' · ' : '') + '电影';
@@ -1103,7 +1103,7 @@ function injectCarousel(): void {
       else if (seasons > 0) epsText = `${seasons}<span style="font-size:10.5px;opacity:.85">季</span>`;
       else epsText = '✨ 最近更新';
     }
-    const epsPill = `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:6px 15px;background:rgba(150,120,200,.38);border:1px solid rgba(190,170,240,.60);border-radius:20px;color:#efe6ff;font-size:13px;font-weight:800;letter-spacing:.5px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);box-shadow:inset 0 1px 0 rgba(255,255,255,.14)">${epsText}</span>`;
+    const epsPill = `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:6px 15px;background:linear-gradient(135deg,rgba(50,35,90,.95),rgba(30,20,65,.92));border:1px solid rgba(190,170,240,.75);border-radius:20px;color:#ffffff;font-size:13px;font-weight:900;letter-spacing:.5px;box-shadow:0 2px 4px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.2)">${epsText}</span>`;
     // ③ 类型标签胶囊（浅色，取前 2 个）
     const genreArr: string[] = (show as any).genres || [];
     const tagPill = genreArr.length
