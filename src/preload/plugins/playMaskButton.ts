@@ -157,8 +157,41 @@ function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | 
 
 // [lc-602] 支持 /v/video/（个人视频/未刮削视频详情页）：之前只认 movie|tv → 个人视频播放按钮拿不到 guid
 export const GUID_RE = /\/v\/(?:movie|tv|video)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
+
+// [lc-604] 从「继续观看」卡片提取 item guid：卡片是 div(无 button/a 链接),
+// 但海报 URL 含 guid —— /v/api/v1/sys/img/xx/yy/poster-{32hex}.webp
+function getGuidFromContinueCard(card: Element): string | null {
+    try {
+        // 1) 海报 img src / currentSrc 里的 poster-{32hex}
+        const imgs = card.querySelectorAll('img');
+        for (const im of Array.from(imgs) as HTMLImageElement[]) {
+            const m = (im.currentSrc || im.src || im.getAttribute('src') || '').match(/poster-([a-f0-9]{32})/i);
+            if (m && m[1]) return m[1];
+        }
+        // 2) 任意 style background-image 含 {32hex}
+        const all = card.querySelectorAll('[style*="background"]');
+        for (const el of Array.from(all)) {
+            const m = (el.getAttribute('style') || '').match(/([a-f0-9]{32})/i);
+            if (m && m[1]) return m[1];
+        }
+        // 3) 卡片自身 data 属性(排除 fv_ 文件夹 id)
+        const g = card.getAttribute('data-guid') || card.getAttribute('data-item-id') || card.getAttribute('data-id') || '';
+        const gm = g.match(/[a-f0-9]{32}/i);
+        if (gm && gm[0] && !/^fv_/.test(gm[0])) return gm[0];
+    } catch { /* ignore */ }
+    return null;
+}
+
 export function getItemGuidFromDOM(button: HTMLElement): string | null {
     try {
+        // [lc-604] 「继续观看」卡片(div): 海报 URL poster-{32hex} 提取
+        const continueCard = button.classList && button.classList.contains('continue-card-root')
+            ? button
+            : button.closest('.continue-card-root');
+        if (continueCard) {
+            const g = getGuidFromContinueCard(continueCard);
+            if (g) { logger.info('Found guid in continue-card poster:', g); return g; }
+        }
         // 1) 详情页: data-id="details" 容器内的 季/集/电影 链接
         let container: Element | null = button;
         while (container && container !== document.body) {
@@ -305,6 +338,20 @@ function isPlayLabel(text: string): boolean {
 function findHomeCardPlay(target: HTMLElement): HTMLElement | null {
     const path = (location.pathname || '').replace(/\/+$/, '');
     if (path !== '/v' && path !== '') return null;
+
+    // [lc-604] 「继续观看」卡片: 整卡是 <div class="continue-card-root">(非 button/a),
+    // 点击卡片任意处 → 直接拦截走外部播放器。海报 URL 含 item guid(poster-{32hex}.webp)。
+    const continueCard = target.closest('.continue-card-root') as HTMLElement | null;
+    if (continueCard) {
+        const hasGuid = !!getGuidFromContinueCard(continueCard);
+        if (hasGuid) {
+            logger.info('[lc-604] 继续观看卡片点击拦截(海报 guid 提取成功)');
+            return continueCard;
+        }
+        // 卡片内链接指向 /v/folder/...(文件夹), 无 item guid → 放行原生跳转
+        logger.info('[lc-604] 继续观看卡片无 guid, 放行原生');
+        return null;
+    }
 
     const el = target.closest('button, a, [role="button"]') as HTMLElement | null;
     if (!el) return null;
