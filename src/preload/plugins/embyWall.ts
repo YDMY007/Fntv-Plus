@@ -1347,8 +1347,10 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 @keyframes fnos-ph-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .fnos-ph-skel{position:relative;overflow:hidden;background:var(--fnos-skel-bg)}
 .fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-@keyframes fnos-ph-spin{to{transform:rotate(360deg)}}
-.fnos-ph-spinner{width:38px;height:38px;border-radius:50%;border:3px solid rgba(150,120,200,.22);border-top-color:rgba(170,140,235,.95);animation:fnos-ph-spin .85s linear infinite}
+/* [lc-617] 滑动加载横条: 一条短横条在轨道里反复从左滑到右(indeterminate, 像 YouTube 顶部加载条) */
+@keyframes fnos-ph-slide{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
+.fnos-ph-slide-track{width:220px;height:4px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden;position:relative;margin-top:2px}
+.fnos-ph-slide-bar{position:absolute;top:0;left:0;height:100%;width:44%;border-radius:999px;background:linear-gradient(90deg,transparent,rgba(185,157,240,.95),rgba(201,167,240,.95),transparent);animation:fnos-ph-slide 1.15s ease-in-out infinite}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -1383,12 +1385,12 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   shimmer.className = 'fnos-ph-skel';
   shimmer.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:1';
   container.appendChild(shimmer);
-  // 中央内容: [lc-616] page-loading 形式——居中旋转 spinner + 主文字(无长条进度条)
+  // 中央内容: [lc-617] page-loading 形式——居中主文字 + 下方滑动加载横条(indeterminate)
   const center = document.createElement('div');
-  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:2';
+  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:2';
   center.innerHTML = `
-    <div class="fnos-ph-spinner" style="width:52px;height:52px;border-width:4px"></div>
     <div class="fnos-ph-text" style="font-size:16px;color:rgba(240,236,255,.95);letter-spacing:1.5px;font-weight:700">正在加载精彩内容…</div>
+    <div class="fnos-ph-slide-track"><div class="fnos-ph-slide-bar"></div></div>
   `;
   container.appendChild(center);
   // [lc-616] 长条进度条已废弃: 改 page-loading 居中动画, 无需进度定时器/补完动画
