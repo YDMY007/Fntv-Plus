@@ -67,6 +67,12 @@ export class Logger {
         // 初始化时检查并清理旧的日志文件
         this.cleanupOldLogs();
 
+        // 清理过旧的应用版本日志目录（仅保留最近几个版本）
+        this.cleanupOldVersionDirs();
+
+        // 迁移升级前遗留的旧格式日志（基础目录根下的 app*.log / mpv.log）到 v-legacy/
+        this.migrateLegacyLogs();
+
         // 重复日志合并定时器：窗口结束后若停止写入则结算摘要；unref 避免阻止进程退出
         this.dedupEnabled = logConfig.dedupEnabled;
         this.dedupWindowMs = logConfig.dedupWindowMs || 3000;
@@ -77,9 +83,9 @@ export class Logger {
     }
 
     /**
-     * 获取日志目录路径
+     * 获取日志基础目录路径（不含版本子目录）
      */
-    private getLogDirectory(): string {
+    private getBaseLogDirectory(): string {
         if (app) {
             // 在Electron环境中，优先使用用户数据目录，这样重装不会丢失日志
             const isPackaged = app.isPackaged;
@@ -98,6 +104,32 @@ export class Logger {
             // 非Electron环境，使用当前工作目录的log文件夹
             return path.join(process.cwd(), 'log');
         }
+    }
+
+    /**
+     * 获取应用版本号（用于日志按版本分目录）；获取失败时回退 'unknown'
+     */
+    private getAppVersion(): string {
+        try {
+            if (app && typeof app.getVersion === 'function') {
+                const v = app.getVersion();
+                if (v) return v;
+            }
+        } catch { /* ignore */ }
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+            if (pkg && pkg.version) return pkg.version;
+        } catch { /* ignore */ }
+        return 'unknown';
+    }
+
+    /**
+     * 获取日志目录路径：基础目录 + 版本子目录（如 <base>/v3.4.1/），
+     * 不同版本日志互不混杂，便于按版本排查问题。
+     */
+    private getLogDirectory(): string {
+        const baseDir = this.getBaseLogDirectory();
+        return path.join(baseDir, `v${this.getAppVersion()}`);
     }
 
     /**
@@ -194,6 +226,69 @@ export class Logger {
         } catch (error) {
             console.error('清理旧日志文件失败:', (error as Error).message);
         }
+    }
+
+    /**
+     * 清理过旧的「版本日志目录」（如 v3.3.4/ v3.4.0/ v3.4.1/），
+     * 仅保留最近 maxVersionDirs 个，避免长期升级后目录无限堆积。
+     * 目录名形如 vX.Y.Z（可能带后缀如 v3.4.1-hotfix），按 mtime 新旧判断。
+     */
+    private cleanupOldVersionDirs(): void {
+        try {
+            const baseDir = this.getBaseLogDirectory();
+            if (!fs.existsSync(baseDir)) return;
+            const maxVersionDirs = 5; // 保留最近 5 个版本目录
+
+            const dirs: FileInfo[] = fs.readdirSync(baseDir)
+                .filter(name => /^v\d+\.\d+\.\d+/.test(name)) // 仅版本目录（v3.4.1 / v3.4.1-hotfix 等）
+                .map(name => {
+                    try {
+                        const full = path.join(baseDir, name);
+                        const stat = fs.statSync(full);
+                        if (!stat.isDirectory()) return null;
+                        return { name, path: full, mtime: stat.mtime };
+                    } catch { return null; }
+                })
+                .filter((d): d is FileInfo => d !== null)
+                .sort((a, b) => b.mtime.getTime() - a.mtime.getTime()); // 新的在前
+
+            if (dirs.length > maxVersionDirs) {
+                const toDelete = dirs.slice(maxVersionDirs);
+                toDelete.forEach(dir => {
+                    try {
+                        fs.rmSync(dir.path, { recursive: true, force: true });
+                        console.log(`[logger] 已清理过旧版本日志目录: ${dir.name}`);
+                    } catch (error) {
+                        console.error(`删除旧版本日志目录失败: ${dir.name}`, (error as Error).message);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('清理旧版本日志目录失败:', (error as Error).message);
+        }
+    }
+
+    /**
+     * 迁移升级前遗留的旧格式日志：基础目录根下的 app*.log / mpv.log（旧版本直接写在 logs/ 根目录）
+     * 统一收进 v-legacy/ 子目录，避免与新版版本目录混在一起。
+     */
+    private migrateLegacyLogs(): void {
+        try {
+            const baseDir = this.getBaseLogDirectory();
+            if (!baseDir || baseDir === this.logDir || !fs.existsSync(baseDir)) return;
+            const legacyDir = path.join(baseDir, 'v-legacy');
+            const legacyFiles = fs.readdirSync(baseDir).filter(f => {
+                if (f === 'mpv.log') return true;
+                return /^app(-error)?(-[0-9TZ:-]+)?\.log$/.test(f);
+            });
+            if (legacyFiles.length === 0) return;
+            fs.mkdirSync(legacyDir, { recursive: true });
+            for (const f of legacyFiles) {
+                try {
+                    fs.renameSync(path.join(baseDir, f), path.join(legacyDir, f));
+                } catch { /* 文件被占用等，跳过，下次再试 */ }
+            }
+        } catch { /* ignore */ }
     }
 
     /**
