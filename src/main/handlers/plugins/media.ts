@@ -735,8 +735,22 @@ function processEpisodeMedia(cfg: fnConfig.Config, info: fn.PlayListItem): ply.P
 // 处理单个待播放媒体信息
 // [lc-630] 防御: 电视直播(Live)等类型的 play/info 返回的 item 可能为 null 或字段不全
 // (直播无刮削元数据), 用 info 顶层字段兜底, 避免 info.item.title 抛 TypeError 导致播放静默失败。
+// [lc-631] 直播(LiveChannel)特殊处理: play/info 返回 live_channels[].path(如
+//   http://192.168.31.170:1905/{streamId}, 网关 302 → 外部 CDN HLS m3u8)。
+//   直播不走 Go 代理 playvideo(Go 代理对直播 500 失败, 见 playvideo.go:91 获取播放信息失败),
+//   MPV/PotPlayer 直接播 path 即可。选第一条 can_play=1 的线路。
 function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayItem {
     const it: any = (info && info.item) || {};
+    // [lc-631] 直播: 优先用 live_channels 可播线路的 path 作为播放链接
+    let playLink = getProxyUrl(cfg, info.guid);
+    const chans = (info && info.live_channels) || [];
+    if (chans.length > 0) {
+        const usable = chans.find((c) => (c.can_play === undefined || c.can_play === 1) && c.path) || chans[0];
+        if (usable && usable.path) {
+            playLink = usable.path;
+            log.info(`[lc-631] 直播线路: ${usable.file_name || '线路'} → ${String(usable.path).substring(0, 90)}`);
+        }
+    }
     return {
         itemGuid: info.guid,
         title: it.title || it.name || '',
@@ -745,7 +759,7 @@ function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayIt
         episodeNumber: it.episode_number || 0,
         ts: info.ts || 0,
         duration: it.duration || 0,
-        playLink: getProxyUrl(cfg, info.guid),
+        playLink,
         trimId: it.trim_id || '',
         type: it.type || info.type || '',
     };

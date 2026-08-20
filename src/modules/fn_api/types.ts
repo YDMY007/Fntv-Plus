@@ -178,6 +178,19 @@ export interface PlayInfo {
         /** 逻辑类型标识 */
         logic_type: number;
     };
+    /**
+     * [lc-630] 直播频道线路列表（type=LiveChannel 时返回）。
+     * 直播不走 media/range 普通视频流——Go 代理 playvideo 对它 500 失败；
+     * 直播流地址在 live_channels[].path（如 http://192.168.31.170:1905/{streamId}，
+     * 该网关 302 重定向到外部 CDN HLS m3u8）。外部播放器需直接用 path 播。
+     */
+    live_channels?: Array<{
+        guid: string;
+        path: string;
+        file_name?: string;
+        can_play?: number;
+        play_error?: string;
+    }>;
 }
 
 /**
