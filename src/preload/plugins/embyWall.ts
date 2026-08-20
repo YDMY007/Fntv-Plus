@@ -593,8 +593,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      // [lc-598] 进度条平滑补到 100%(500ms 动画) → 完成后立即重建轮播(淡入), 不再 30% 就闪现
+      // [lc-598] 进度条平滑补到 100% → 完成后置 revealed 标志并重建轮播(淡入)
       completeCarouselProgress(() => {
+        _carouselRevealed = true; // [lc-615] 进度条走完才标记揭示
         _carouselInited = false;
         injectCarousel();
       });
@@ -631,7 +632,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       })).then(() => {
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
         log('[lc-569] item details enriched:', withData, '/', newShows.length, '; rebuilding carousel');
-        if (withData > 0) { _carouselInited = false; injectCarousel(); }
+        // [lc-615] 仅当轮播已揭示(进度条走完)才重建: 否则跳过——进度条完成时的
+        //   首次重建已注入 _apiShows(含刚补的详情), 无需二次重建, 避免绕过进度条提前出图
+        if (withData > 0 && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
       }).catch((e) => log('[lc-569] item detail fetch error:', e));
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
@@ -870,6 +873,9 @@ function scrapeLandscapeBackdrops(): Map<string, string> {
 }
 
 let _carouselInited = false;
+// [lc-615] 轮播是否已揭示(进度条走完): 详情补完的二次重建只有在已揭示后才执行,
+// 否则会绕过进度条提前出图(用户看到"进度条 20% 就闪出轮播")。
+let _carouselRevealed = false;
 let _carouselContainer: HTMLElement | null = null;
 let _carouselUpdatedAt = 0; // 最近更新板块数据就绪(轮播注入)时间戳, 用于标题旁显示更新时间
 let _carouselWrapper: HTMLElement | null = null;
@@ -1434,29 +1440,28 @@ function updateCarouselProgress(count: number): void {
 /** [lc-598] 数据加载完成: 进度条从当前值平滑补到 100%(不瞬间跳变), 完成后回调 onDone(注入轮播) */
 function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  // [lc-610] 数据就位但进度条可能还在低位(如 20%, 读盘太快)。直接从此补完很突兀
-  // (用户看到"20% 一闪到 100%")。先快速推进到 78%(视觉上"接近完成"), 再平滑补到 100%,
-  // 让"加载 → 完成"的过渡自然: 用户看到的是进度条稳步走完 → 轮播淡入, 而非低位突变。
+  // [lc-615] 加速补完: 数据就位后无论当前多少, 都尽快走完(总时长 ~0.7s), 不再 1.2s 慢补。
+  // 低位(<70%)先快速跳到 90%(2 步, 每步 40ms = 视觉"基本完成"), 再 500ms ease-out 补满。
   let start = _carouselProgressPct;
   if (start < 70) {
-    // 低位 → 先快速跳到 78%(分 3 步, 每步 60ms), 再进入正常补完
-    const jumpSteps = 3;
+    // 低位 → 先快速跳到 90%(2 步, 每步 40ms), 再进入快速补完
+    const jumpSteps = 2;
     let i = 0;
     _carouselProgressTimer = window.setInterval(() => {
       i++;
-      const pct = Math.min(78, start + (78 - start) * (i / jumpSteps));
+      const pct = Math.min(90, start + (90 - start) * (i / jumpSteps));
       _carouselProgressPct = pct;
       if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
       if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
       if (i >= jumpSteps) {
         if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-        completeCarouselProgress(onDone); // 递归: 从 78% 平滑补完
+        completeCarouselProgress(onDone); // 递归: 从 90% 快速补完
       }
-    }, 60);
+    }, 40);
     return;
   }
-  // 高位(≥70%)或已接近完成: 直接用 ~1.2s ease-out 补完剩余
-  const totalMs = 1200;
+  // 高位(≥70%)或已接近完成: 用 ~500ms ease-out 补完剩余
+  const totalMs = 500;
   const stepMs = 30;
   const steps = Math.max(1, Math.ceil(totalMs / stepMs));
   let i = 0;
