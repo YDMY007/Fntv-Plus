@@ -1346,16 +1346,16 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   center.appendChild(barWrap);
   center.appendChild(pctEl);
   container.appendChild(center);
-  // [lc-583] 记录进度条元素 + 启动伪进度动画: 每 200ms 随机递增, 到 90% 停(真实完成后跳 100)
+  // [lc-584] 记录进度条元素 + 匀速伪进度: 每 160ms 固定 +2.5%, 到 99% 停(真实完成后跳 100)
   _carouselBarFill = barFill;
   _carouselPctEl = pctEl;
   _carouselProgressPct = 0;
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   _carouselProgressTimer = window.setInterval(() => {
-    _carouselProgressPct = Math.min(90, _carouselProgressPct + 2 + Math.random() * 5);
+    _carouselProgressPct = Math.min(99, _carouselProgressPct + 2.5);
     barFill.style.width = _carouselProgressPct + '%';
     pctEl.textContent = Math.round(_carouselProgressPct) + '%';
-  }, 200);
+  }, 160);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
