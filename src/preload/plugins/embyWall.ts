@@ -628,20 +628,37 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (detail.title) s.title = detail.title;
         return true;
       }));
-      // [lc-622] 渲染去重: 详情补完(横版 backdrop)是首选渲染时机; 超时仅兜底。
-      //   超时设 5s(单条 abort 4s + 余量) → 绝大多数情况走"详情补完 → 一次渲染横版",
-      //   不会出现"先竖版后横版"两次渲染闪屏。超时兜底渲染后, revealOnce 防二次渲染。
+      // [lc-624] 渲染时机: 只有横版 backdrop 就绪才 reveal——用户明确不要"竖屏先渲染"
+      // 再变横屏。revealOnce 前检查: 若 backdrop 仍是竖版(poster)或空, 说明详情未补全,
+      // 继续保留骨架(进度条), 等详情补完(或总超时 8s 兜底)再 reveal。
+      // 注: 无法预知图片宽高比(URL 无信息), 用"是否有 poster 前缀之外的 backdrop"粗判:
+      //   竖版 poster URL 形如 poster-{32hex}.webp; 横版 backdrop URL 通常无 poster- 前缀。
+      const isLandscapeBackdrop = (s: any): boolean => {
+        const b = (s && s.backdrop) || '';
+        return !!b && !/poster-|poster\/|\/poster/i.test(b);
+      };
+      let revealAttempts = 0;
       const revealOnce = (): void => {
         if (_carouselRevealed) { log('[lc-622] carousel already revealed, skip re-render'); return; }
+        // [lc-624] 横版就绪检查: 竖版兜底不再渲染(用户要求); 未就绪则延迟重试(最多 ~8s)
+        const landscapeCount = newShows.filter(isLandscapeBackdrop).length;
+        if (landscapeCount === 0 && revealAttempts < 3) {
+          revealAttempts++;
+          log('[lc-624] 无横版 backdrop 就绪(', landscapeCount, '/', newShows.length, '), 延迟 reveal (attempt', revealAttempts, ')');
+          window.setTimeout(revealOnce, 1500);
+          return;
+        }
+        if (landscapeCount === 0) {
+          log('[lc-624] 始终无横版 backdrop, 强制 reveal(将显示占位背景而非竖版海报)');
+        }
         _carouselRevealed = true;
         _carouselInited = false;
         injectCarousel();
       };
       const revealTimer = setTimeout(() => {
-        const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
-        log('[lc-622] detail fetch timeout(5s), revealing carousel with fallback (withData=', withData, ')');
+        log('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
         completeCarouselProgress(revealOnce);
-      }, 5000);
+      }, 8000);
       detailsPromise.then(() => {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
@@ -1080,34 +1097,25 @@ function injectCarousel(): void {
     // 左: 图片面板(占 ~80%, 撑满无白边)
     const leftEl = document.createElement('div');
     leftEl.style.cssText = 'position:relative;width:80%;height:100%;overflow:hidden;flex-shrink:0;background:transparent';
-    // [lc-566] 模糊背景层: 竖版海报兜底时模糊放大铺底(影视 app 风格), 前景 contain 居中; 横版 backdrop 时隐藏
-    const blurBg = document.createElement('div');
-    blurBg.style.cssText = 'position:absolute;inset:-40px;background-size:cover;background-position:center;filter:blur(32px) saturate(130%);transform:scale(1.25);opacity:.9;display:none';
-    leftEl.appendChild(blurBg);
+    // [lc-624] 删除竖版海报兜底(lc-566 blurBg/contain 居中): 用户明确不要竖屏渲染。
+    // 仅横版 backdrop 才显示图片; 竖版(数据未补全/无横版图) → 图片隐藏, 保留渐变背景。
     const imgEl = document.createElement('img');
-    // [v337] 改 cover 撑满左面板(上下无白边); 仅裁左右一点点, 左对齐保持(替代 v336 的 contain+22px白边)
-    imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;z-index:1';
+    imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;z-index:1;display:none';
     leftEl.appendChild(imgEl);
     const pic = imgUrl(show.backdrop); // 不带?w, 避免与签名path不一致
     if (shows === _apiShows && i === 0) log('SLIDE0 img src:', pic.substring(0, 80));
     fetchImageAuth(pic).then((b) => {
       if (!b) return;
       imgEl.src = b;
-      // [lc-566] 加载后判断宽高比: 竖版海报(高>宽, 如 item API 拿不到横版 backdrop 时的兜底)
-      // → 前景 contain 居中显示海报, 背景用同图模糊铺底(不拉伸变形); 横版 → 正常 cover 铺满, 隐藏模糊层
+      // [lc-624] 加载后判断宽高比: 仅横版(nw>nh)才显示图片; 竖版(海报兜底)隐藏
+      // —— 用户明确要求: 没有横版数据就不要渲染出来, 杜绝"先竖屏再横屏"闪动。
       imgEl.onload = () => {
         try {
           const nw = imgEl.naturalWidth || 0, nh = imgEl.naturalHeight || 0;
           if (nw > 0 && nh > 0 && nw < nh) {
-            imgEl.style.objectFit = 'contain';
-            imgEl.style.width = 'auto';
-            imgEl.style.height = '100%';
-            imgEl.style.left = '50%';
-            imgEl.style.transform = 'translateX(-50%)';
-            blurBg.style.backgroundImage = 'url(' + b + ')';
-            blurBg.style.display = 'block';
+            imgEl.style.display = 'none'; // 竖版 → 不显示
           } else {
-            blurBg.style.display = 'none';
+            imgEl.style.display = 'block'; // 横版 → 显示
           }
         } catch (e) { /* ignore */ }
       };
