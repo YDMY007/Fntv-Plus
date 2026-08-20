@@ -63,6 +63,35 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
 // 然后 dispatchEvent 触发原按钮点击 → 飞牛发 play/info → skipInject 拦到并更新
 // interceptedGuid → 轮询 getInterceptedGuid() 变化(记录点击前值, 等它变成新值)。
 // [lc-614] export: playButton.ts 的克隆播放按钮失败兜底也复用此函数。
+// [lc-629] 弹窗抑制: dispatchEvent 会让飞牛跳转播放页→play/info 被拦→弹「播放失败/
+// 未知错误」Semi 弹窗(用户反馈调用成功仍弹)。本函数触发后启动 MutationObserver,
+// 检测到标题为「播放失败」/「未知错误」的 Semi 弹窗自动点「确定」关闭(兜底)。
+let _playErrorModalObs: MutationObserver | null = null;
+function suppressFnosPlayErrorModal(): void {
+  if (_playErrorModalObs) return;
+  const tryClose = (): void => {
+    try {
+      const modal = Array.from(document.querySelectorAll('.semi-modal, [role="dialog"]'))
+        .find((el) => {
+          const t = (el.textContent || '').trim();
+          return (t.includes('播放失败') || t.includes('未知错误')) && el.querySelector('.semi-button-primary');
+        }) as HTMLElement | null;
+      if (modal) {
+        const okBtn = modal.querySelector('.semi-button-primary') as HTMLElement | null;
+        if (okBtn) { (okBtn as HTMLElement).click(); }
+        logger.info('[lc-629] 已自动关闭飞牛「播放失败」弹窗');
+      }
+    } catch { /* ignore */ }
+  };
+  _playErrorModalObs = new MutationObserver(() => { tryClose(); });
+  _playErrorModalObs.observe(document.body, { childList: true, subtree: true });
+  tryClose();
+  // 5s 后停止监听(避免长期驻留)
+  setTimeout(() => {
+    try { if (_playErrorModalObs) { _playErrorModalObs.disconnect(); _playErrorModalObs = null; } } catch { /* ignore */ }
+  }, 5000);
+}
+
 export function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<string | null> {
     return new Promise((resolve) => {
         try {
@@ -80,6 +109,8 @@ export function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<st
 
             // 触发原有点击事件(带 data-allow-original-play 放行, 让飞牛 handler 执行并发 play/info)
             button.setAttribute('data-allow-original-play', 'true');
+            // [lc-629] 提前启用弹窗抑制: dispatchEvent 可能让飞牛弹「播放失败」, 自动关闭
+            suppressFnosPlayErrorModal();
             setTimeout(() => {
                 try {
                     const clickEvent = new MouseEvent('click', {
