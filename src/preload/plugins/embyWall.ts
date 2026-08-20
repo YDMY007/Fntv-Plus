@@ -2269,8 +2269,8 @@ function injectUiThemeStyle(): void {
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(243,235,250,.85) 100%);
   --fnos-hero-dot:rgba(0,0,0,.16);
   --fnos-hero-title:#0f1c3f;
-  --fnos-hero-title-grad:linear-gradient(135deg,#0f1c3f 0%,#3a2d75 45%,#8b5fd6 82%,#b997ff 100%); /* [lc-590] 浅色主题大标题渐变(末端高光) */
-  --fnos-hero-title-glow:drop-shadow(0 1px 3px rgba(255,255,255,.6)) drop-shadow(0 3px 12px rgba(110,80,190,.32)); /* [lc-590] 浅色主题双层发光 */
+  --fnos-hero-title-grad:linear-gradient(120deg,#00d4ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变(青→蓝→粉→橙→金) */
+  --fnos-hero-title-glow:drop-shadow(0 0 5px rgba(0,212,255,.45)) drop-shadow(0 0 12px rgba(255,92,208,.35)) drop-shadow(0 1px 3px rgba(120,80,200,.25)); /* [lc-591] 霓虹彩色光晕(浅色主题) */
   --fnos-hero-desc:rgba(20,35,70,.82);
   --fnos-hero-shadow:0 1px 10px rgba(255,255,255,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(91,140,255,.55),transparent);
@@ -2348,8 +2348,8 @@ html.dark{
   --fnos-hero-edge:linear-gradient(90deg,transparent 66%,rgba(60,50,84,.92) 100%);
   --fnos-hero-dot:rgba(200,195,215,.35);
   --fnos-hero-title:#f0ecff;
-  --fnos-hero-title-grad:linear-gradient(135deg,#ffffff 15%,#f2e9ff 45%,#dcc3ff 75%,#b78aff 100%); /* [lc-590] 深色主题大标题渐变(更丰富) */
-  --fnos-hero-title-glow:drop-shadow(0 1px 2px rgba(0,0,0,.45)) drop-shadow(0 3px 16px rgba(140,105,230,.5)); /* [lc-590] 深色主题双层发光 */
+  --fnos-hero-title-grad:linear-gradient(120deg,#00e5ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%); /* [lc-591] 炫彩霓虹渐变(深色主题同款) */
+  --fnos-hero-title-glow:drop-shadow(0 0 7px rgba(0,229,255,.55)) drop-shadow(0 0 16px rgba(255,92,208,.45)) drop-shadow(0 0 28px rgba(255,150,60,.35)) drop-shadow(0 1px 3px rgba(0,0,0,.4)); /* [lc-591] 霓虹彩色光晕(深色主题, 更强) */
   --fnos-hero-desc:rgba(225,218,245,.88);
   --fnos-hero-shadow:0 1px 10px rgba(0,0,0,.5);
   --fnos-hero-divider:linear-gradient(90deg,transparent,rgba(140,160,255,.6),transparent);
