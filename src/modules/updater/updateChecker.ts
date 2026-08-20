@@ -48,6 +48,17 @@ export class UpdateChecker {
     }
 
     /**
+     * [lc-634] 运行时修改当前版本号（版号切换：开发者自定义版本号，测试更新检测/覆盖安装）。
+     * 传入空值恢复为 app.getVersion()。
+     */
+    setCurrentVersion(v: string): void {
+        this.currentVersion = (v && String(v).trim())
+            ? String(v).trim()
+            : (app ? app.getVersion() : 'unknown');
+        log.info(`[update] 当前版本号已切换为: ${this.currentVersion}`);
+    }
+
+    /**
      * 检查是否有新版本（默认策略）。
      * [lc-476] 更新检测**只走国内 Gitee**（剥离旧版 GitHub 镜像检测路径）。
      * Gitee 不托管大文件，故：

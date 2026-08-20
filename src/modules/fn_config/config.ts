@@ -93,6 +93,10 @@ export interface Config {
     // [lc-520] 应用补丁时的安装包签名（可执行文件 mtime）：用于启动对账——若安装包被重装/升级(签名变化)，
     // 旧补丁覆盖层已失效，应清除以回退到安装包真实版本，避免"覆盖安装官方版仍显示旧 hotfix 版本"。
     appliedPatchSignature?: string;
+    // [lc-634] 开发者「版号切换」自定义版本号（设置-通用-检查更新-版号切换，需解锁码 ydmy007）。
+    // 非空时整个软件版本号/更新检测 baseline 都优先用它（用于测试更新检测、覆盖安装等）。
+    // 空/undefined = 使用安装包真实版本(app.getVersion())。
+    customVersion?: string;
     // TMDB 免梯子直连自定义 IP（可选覆盖内置快照）：api=api.themoviedb.org，img=image.tmdb.org
     tmdbDirectIp?: { api?: string; img?: string };
     // TMDB 免梯子直连 IP 上次更新时间戳（ms，自动/手动更新都会写入）：用于每日自动跟随 CheckTMDB 刷新判断
@@ -281,6 +285,23 @@ export function getAppliedPatchSignature(): string {
 export function setAppliedPatchSignature(signature: string): void {
     const config: Config = readConfig() || {};
     config.appliedPatchSignature = signature;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// [lc-634] 读取/写入开发者自定义版本号（设置-通用-检查更新-版号切换，需解锁码）
+// 非空时更新检测 baseline / 版本显示优先用它；空 = 恢复安装包真实版本
+export function getCustomVersion(): string {
+    const config = readConfig();
+    return (config && config.customVersion) || '';
+}
+
+export function setCustomVersion(version: string): void {
+    const config: Config = readConfig() || {};
+    if (version && String(version).trim()) {
+        config.customVersion = String(version).trim();
+    } else {
+        delete config.customVersion; // 空值 = 清除恢复默认
+    }
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

@@ -3814,11 +3814,14 @@ function handle(): void {
     const testBtn = mkBtn('测试更新', true);
     // [lc-511] 回滚补丁：清除已应用补丁覆盖并重启回原版
     const rollbackBtn = mkBtn('回滚补丁', true);
+    // [lc-634] 版号切换：开发者输入解锁码后自定义整个软件版本号(测试更新检测/覆盖安装)
+    const verSwitchBtn = mkBtn('版号切换', true);
     updGrid.appendChild(updBtn);
     updGrid.appendChild(updHistoryBtn);
     updGrid.appendChild(patchBtn);
     updGrid.appendChild(testBtn);
     updGrid.appendChild(rollbackBtn);
+    updGrid.appendChild(verSwitchBtn);
     updFooter.appendChild(updGrid);
 
     const testHint = document.createElement('div');
@@ -3845,6 +3848,15 @@ function handle(): void {
     rollbackBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         ipcRenderer.invoke('settings:rollback-patch');
+    });
+
+    // [lc-634] 版号切换：解锁码验证通过 → 输入自定义版本号(留空=恢复默认) → 主进程保存并生效
+    verSwitchBtn.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        if (verSwitchBtn.disabled) return;
+        const code = await promptUnlockCode();
+        if (code === null) return; // 用户取消
+        openVersionSwitchModal(code);
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
@@ -3927,6 +3939,88 @@ function handle(): void {
             const inp = modal.querySelector('#fntv-unlock-input') as HTMLInputElement | null;
             if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
         });
+    }
+
+    // [lc-634] 版号切换输入弹窗：解锁码已通过，输入自定义版本号(留空=恢复默认) → 主进程保存生效
+    function openVersionSwitchModal(code: string): void {
+        let modal = document.getElementById('fntv-version-switch-modal') as HTMLElement | null;
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'fntv-version-switch-modal';
+            modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
+            modal.style.cssText = 'position:fixed;z-index:2147483706;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+            modal.addEventListener('click', (e: Event) => {
+                if (e.target === modal) modal!.remove();
+            });
+
+            const card = document.createElement('div');
+            card.style.cssText = 'width:320px;border-radius:16px;padding:20px;color:var(--fnos-ui-text);'
+                + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+                + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+                + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);text-align:center;';
+            card.innerHTML = ''
+                + '<div style="font-size:16px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">版号切换</div>'
+                + '<div style="font-size:12px;line-height:1.6;color:var(--fnos-ui-text);opacity:.8;margin-bottom:6px;">输入自定义版本号（如 9.9.9）模拟新旧版本，测试更新检测 / 覆盖安装</div>'
+                + '<div style="font-size:11px;line-height:1.5;color:var(--fnos-ui-muted);opacity:.7;margin-bottom:12px;">留空并确定 = 恢复安装包真实版本</div>';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = '例如 9.9.9';
+            input.id = 'fntv-version-switch-input';
+            input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
+                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
+            card.appendChild(input);
+
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = '取消';
+            cancelBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
+                + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-btn-text);';
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.textContent = '确定';
+            okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
+                + 'background:var(--fnos-ui-pill-bg)!important;color:var(--fnos-ui-pill-text);border:1px solid var(--fnos-ui-pill-border);';
+            row.appendChild(cancelBtn);
+            row.appendChild(okBtn);
+            card.appendChild(row);
+            modal.appendChild(card);
+            document.body.appendChild(modal);
+
+            const doClose = () => { modal!.remove(); };
+            const doSubmit = () => {
+                const v = (input.value || '').trim();
+                const btn = okBtn;
+                btn.disabled = true;
+                btn.textContent = '提交中…';
+                ipcRenderer.invoke('settings:set-custom-version', code, v).then((r: any) => {
+                    doClose();
+                    if (r && r.ok) {
+                        showPatchToast(`版号已切换为 ${r.displayVersion || '(默认)'}${v ? '（重启后版本显示同步）' : ''}`);
+                        // 刷新版本显示（设置面板「关于」等监听 version-info 的地方自动更新）
+                        ipcRenderer.send('get-version');
+                    } else {
+                        showPatchToast('版号切换失败：' + ((r && r.message) || '未知错误'));
+                    }
+                }).catch(() => {
+                    btn.disabled = false;
+                    btn.textContent = '确定';
+                    showPatchToast('版号切换失败：主进程无响应');
+                });
+            };
+            cancelBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doClose(); });
+            okBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); doSubmit(); });
+            input.addEventListener('keydown', (e: KeyboardEvent) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') doSubmit();
+                else if (e.key === 'Escape') doClose();
+            });
+        }
+        modal.style.display = 'flex';
+        const inp = modal.querySelector('#fntv-version-switch-input') as HTMLInputElement | null;
+        if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
     }
 
     // [lc-483] 热补丁「应用补丁」向导弹窗：
