@@ -3259,7 +3259,7 @@ function handle(): void {
       ctrl = document.createElement('div');
       ctrl.id = 'fnos-sidebar-actions';
       ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
-        + 'padding:14px 14px 16px;border-radius:14px;display:flex;flex-direction:column;'
+        + 'padding:14px 14px 16px;border-radius:14px;display:flex;flex-direction:column;gap:6px;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
         + 'color:#fff;font-size:12px;user-select:none;';
@@ -3276,8 +3276,8 @@ function handle(): void {
       swBtn.id = 'fnos-switch-system-btn';
       swBtn.type = 'button';
       swBtn.textContent = '切换系统页面';
-      swBtn.style.cssText = 'box-sizing:border-box;margin:0 0 10px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
-        + 'background:rgba(160,140,180,.35)!important;color:#fff;font-size:13px;font-weight:600;'
+      swBtn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;'
         + 'backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
       swBtn.addEventListener('click', (e: Event) => {
@@ -3297,10 +3297,10 @@ function handle(): void {
     btn.id = 'fnos-settings-btn';
     btn.type = 'button';
     btn.textContent = '⚙ 设置';
-    btn.style.cssText = 'box-sizing:border-box;margin-top:0;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
-      + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
-      + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
-      + 'box-shadow:0 4px 16px rgba(0,0,0,.18);';
+btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+        + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
+        + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'box-shadow:0 4px 16px rgba(0,0,0,.18);';
     btn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       const ov = document.getElementById('fnos-settings-panel');
@@ -3315,7 +3315,7 @@ function handle(): void {
       fbChoiceBtn.id = 'fnos-feedback-choice-btn';
       fbChoiceBtn.type = 'button';
       fbChoiceBtn.textContent = '软件反馈建议';
-      fbChoiceBtn.style.cssText = 'box-sizing:border-box;margin-top:8px;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
+      fbChoiceBtn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-radius:12px;cursor:pointer;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:13px;font-weight:600;'
         + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'box-shadow:0 4px 16px rgba(0,0,0,.18);text-align:center;';
