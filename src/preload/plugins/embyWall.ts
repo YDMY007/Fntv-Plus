@@ -613,6 +613,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (!detail) return !!(fromDom);
         // 仅填充 API 有值的字段(0/空保留 DOM 兜底值)
         if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
+        // [lc-606] 竖版海报补全: DOM 抓图(scrapeAllPageFirstScreen)可能为空(磁盘缓存化后
+        //   item.poster 常空), item API 的 data.posters 是权威竖版源 → 右侧海报条稳定显示
+        if (detail.poster && !s.poster) s.poster = detail.poster;
         if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
         if (detail.totalEps) s.totalEps = detail.totalEps;
         if (detail.localEps) s.localEps = detail.localEps;
@@ -626,7 +629,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         if (detail.title) s.title = detail.title;
         return true;
       })).then(() => {
-        const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop).length;
+        const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
         log('[lc-569] item details enriched:', withData, '/', newShows.length, '; rebuilding carousel');
         if (withData > 0) { _carouselInited = false; injectCarousel(); }
       }).catch((e) => log('[lc-569] item detail fetch error:', e));
@@ -798,6 +801,12 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     };
     const rel = pickImg(d.backdrops, true); // [lc-599] 优先选 width*height 最大的横版
     const backdrop = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
+    // [lc-606] 竖版海报: 右侧海报条(posterStrip)用的 show.poster 一直没被 API 补过。
+    //   scrapeAllPageFirstScreen 只从 libIndex(iframe 懒加载图常空) + 当前页 DOM 抓,
+    //   磁盘缓存(lc-586)化后 item.poster 也常空 → 右侧海报全变占位「暂无海报」。
+    //   data.posters 是 item API 权威竖版源(lc-568 已验证), 补全后右侧海报稳定显示。
+    const relPoster = pickImg(d.posters, true);
+    const poster = relPoster ? (relPoster.startsWith('http') ? relPoster : base + '/v/api/v1/' + relPoster) : '';
     // [lc-570] 飞牛自带 logo(详情页 hero 用的同一个): item API 的 data.logos 数组, 与 backdrops/posters 同构
     const relLogo = pickImg(d.logos);
     const logo = relLogo ? (relLogo.startsWith('http') ? relLogo : base + '/v/api/v1/' + relLogo) : '';
@@ -826,7 +835,7 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、|]/).map((s: string) => s.trim()).filter(Boolean);
     log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', JSON.stringify(g).substring(0, 100), ')');
     return {
-      backdrop, logo,
+      backdrop, poster, logo, // [lc-606] poster = 竖版(item API data.posters, 右侧海报条用)
       totalEps, localEps, totalSeasons, localSeasons,
       year: rawYear, rating, statusText, genres,
       desc: (d.overview || '').trim(),
