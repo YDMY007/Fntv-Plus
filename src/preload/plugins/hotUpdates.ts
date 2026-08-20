@@ -627,28 +627,28 @@ function buildIndex(): Promise<LibItem[]> {
     let attempts = 0;
     let lastCount = 0;
     let stableRounds = 0;
-    const MAX_ROUNDS = 150;     // [lc-586] 80→150: 更大库也能滚完(150*500ms=75s 硬上限)
-    const STABLE_ROUNDS = 5;    // 连续5轮无新增 GUID 视为已滚到列表底部(全量)
+    const MAX_ROUNDS = 200;     // [lc-588] 150→200: 更大库也能滚完(200*400ms=80s 硬上限)
+    const STABLE_ROUNDS = 6;    // 连续6轮无新增 GUID 视为已滚到列表底部(全量)
     const finish = (): void => {
       try { iframe.remove(); } catch { /* ignore */ }
       const idx: LibItem[] = Array.from(map.values());
       logger.info('[hotUpdates] 飞牛影视库索引构建完成', idx.length, '项 (rounds=' + attempts + ')');
       resolve(idx);
     };
-    // [lc-580] 分段滚动: 每次只滚 1500px, 逐步触发飞牛虚拟滚动懒加载。
-    // 旧实现一次 scrollTo(0, 1e9) 滚到底只触发一次加载 → 索引不全(88项只是首屏+1页),
-    // 库里后排的剧(每日放送新番等)没被收录 →「已入库」漏标。
-    let scrollStep = 0;
+    // [lc-588] 增量滚动: 每轮 scrollBy 400px(模拟用户滚轮, 触发 scroll 事件+IntersectionObserver
+    // 逐批加载)。旧实现绝对 scrollTo(0, px) 跳 1500px 只触发一次加载, 且超过容器可滚动高度后
+    // scrollTo 被 clamp 不再触发事件 → 大库只抓到首屏(27项) →「已入库」大面积漏标。
+    const SCROLL_STEP = 400;
     const scrollAll = (doc: any): void => {
-      scrollStep++;
-      const px = scrollStep * 1500; // 每轮向下 1500px, 逐步滚动触发分批加载
       try {
         const w: any = doc.defaultView || doc.parentWindow;
-        if (w) w.scrollTo(0, px);
+        if (w) w.scrollBy(0, SCROLL_STEP);
       } catch { /* ignore */ }
       const els = doc.querySelectorAll('*');
       els.forEach((el: any) => {
-        try { if (el.scrollHeight > el.clientHeight + 8) el.scrollTop = px; } catch { /* ignore */ }
+        try {
+          if (el.scrollHeight > el.clientHeight + 8) el.scrollTop += SCROLL_STEP;
+        } catch { /* ignore */ }
       });
     };
     const poll = (): void => {
@@ -689,11 +689,11 @@ function buildIndex(): Promise<LibItem[]> {
           if (poster && poster.startsWith('/')) poster = base + poster;
           map.set(m[2], { title, href: base + '/v/' + m[1] + '/' + m[2], mediaType: m[1], poster });
         });
-        scrollAll(doc);  // 滚动触发后续渲染/分页加载
+        scrollAll(doc);  // 增量滚动触发后续渲染/分页加载
         const nowCount = map.size;
         if (nowCount === lastCount) stableRounds++; else { stableRounds = 0; lastCount = nowCount; }
         if (stableRounds >= STABLE_ROUNDS || attempts >= MAX_ROUNDS) finish();
-        else setTimeout(poll, 500);
+        else setTimeout(poll, 400); // [lc-588] 400ms/轮配合增量滚动节奏
       } catch (e) { if (attempts < 30) setTimeout(poll, 400); else finish(); }
     };
     iframe.onload = () => setTimeout(poll, 500);
