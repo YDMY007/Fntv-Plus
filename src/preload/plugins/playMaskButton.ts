@@ -6,6 +6,8 @@ import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { HookType } from '../core/hooks';
 import { getPlayButtonConfig, createPlayModal } from './playChoice';
+// [lc-603] 复用 skipInject 的 fetch/XHR 拦截 guid（个人视频等无 URL guid 场景的唯一可靠来源）
+import { getInterceptedGuid } from './skipInject';
 
 // 调用播放器的公共方法（player 指定 mpv / potplayer）
 async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'): Promise<void> {
@@ -13,6 +15,21 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
     const domResult = sendPlayEventToMain(button, player);
 
     if (!domResult) {
+        // [lc-603] DOM 方法失败 → 先复用 skipInject 已拦截的 item_guid（最可靠）:
+        // 个人视频/未刮削视频详情页 URL 无 guid 且按钮 DOM 无 guid 链接时,
+        // skipInject 的 fetch/XHR 拦截会在播放请求发出时捕获到 play/info 请求体的 item_guid。
+        const skipGuid = getInterceptedGuid();
+        if (skipGuid) {
+            logger.info('Reusing skipInject intercepted item_guid:', skipGuid);
+            const token = getCookie('Trim-MC-token');
+            if (token) {
+                const playData: PlayMovieData = { id: skipGuid, token, sourceIndex: 0, player };
+                ipcRenderer.send('play-movie', playData);
+                return;
+            }
+            logger.error('No token found for skipInject guid');
+        }
+
         // DOM 方法失败，使用拦截方法作为 fallback
         logger.info('DOM method failed, trying original logic interception...');
         const itemGuid = await tryGetItemGuidFromOriginalLogic(button);

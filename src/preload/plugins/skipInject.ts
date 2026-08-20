@@ -69,6 +69,13 @@ const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32}
 /** 通过 fetch/XHR 拦截捕获的 guid（最可靠，优先使用） */
 let interceptedGuid: string | null = null;
 
+/** [lc-603] 导出最近一次拦截到的 item_guid——供 playMaskButton 外部播放兜底复用：
+ *  skipInject 的 fetch/XHR 拦截在用户点播放按钮时会可靠抓到 play/info 请求体里的
+ *  item_guid（个人视频/未刮削视频详情页 URL 无 guid 时，这是唯一可靠来源）。 */
+export function getInterceptedGuid(): string | null {
+  return interceptedGuid;
+}
+
 /**
  * 从当前页面 URL 提取 itemGuid。
  * 使用 fnOS 标准 GUID 正则（32 位十六进制），与 playMaskButton.ts 的 GUID_RE 一致。

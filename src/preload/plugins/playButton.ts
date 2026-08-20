@@ -7,13 +7,24 @@ import { getCookie } from '../core/utils';
 import type { PlayMovieData } from '../core/types';
 import { getPlayButtonConfig, createPlayModal, PlayButtonConfig } from './playChoice';
 import { getItemGuidFromDOM } from './playMaskButton';
+// [lc-603] 复用 skipInject 的 fetch/XHR 拦截 guid（个人视频等无 URL guid 场景的唯一可靠来源）
+import { getInterceptedGuid } from './skipInject';
 
 // 发送播放信息到主进程
 function sendPlayEventToMain(button: HTMLElement | null = null, player: 'mpv' | 'potplayer' = 'mpv'): string | null {
     // [lc-224] 从按钮(及其祖先链接)提取真实 item guid, 不再用 window.location.href 末段:
     // 首页 path=/v 时末段是 "v", 会令 getPlayInfo("v") 404 → 播放器打不开。
     // 复用 playMaskButton 的 getItemGuidFromDOM(兼容详情页/首页卡片/浮层菜单)。
-    const id = button ? getItemGuidFromDOM(button) : '';
+    let id = button ? getItemGuidFromDOM(button) : '';
+
+    // [lc-603] DOM 提取失败 → 复用 skipInject 已拦截的 item_guid(个人视频/未刮削详情页无 URL guid 时唯一可靠来源)
+    if (!id) {
+        const skipGuid = getInterceptedGuid();
+        if (skipGuid) {
+            logger.info('[lc-603] Reusing skipInject intercepted item_guid:', skipGuid);
+            id = skipGuid;
+        }
+    }
 
     if (!id) {
         logger.error('Failed to extract item guid from button/DOM');
