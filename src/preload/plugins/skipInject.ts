@@ -235,10 +235,14 @@ function setupInterceptors(): void {
                 }
             } catch { /* 非 JSON body，忽略 */ }
         }
-        // [lc-614] 外部播放流程中的 play/info：已拿到 guid 且阻止原生播放器启动（防双播）
+        // [lc-626] 外部播放流程中的 play/info：已拿到 guid 且阻止原生播放器启动（防双播）。
+        // ⚠️ 不能返回 success:false——飞牛前端收到失败会弹「未知错误」提示
+        // (用户反馈: MPV 已正常播放但仍弹未知错误)。改为 success:true + data:null:
+        // 飞牛前端常见守卫 `if (res.success && res.data)` 会静默跳过(不弹错、不启动原生),
+        // 而 skipInject 已捕获 guid, play-movie 由外部播放流程自行发出。
         if (externalPlayActive && url.includes('/play/info')) {
-            log.info('[skipInject] 外部播放流程: 拦截 play/info 阻止原生播放器启动');
-            return new Response(JSON.stringify({ success: false, message: 'intercepted for external player' }), {
+            log.info('[skipInject] 外部播放流程: 拦截 play/info(静默), 阻止原生播放器启动');
+            return new Response(JSON.stringify({ success: true, data: null, message: '' }), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' },
             });
