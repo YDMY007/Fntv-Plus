@@ -37,19 +37,11 @@ async function playWithPlayer(button: HTMLElement, player: 'mpv' | 'potplayer'):
             return;
         }
 
-        // [lc-613] 最后才用 skipInject 的滞后缓存兜底(可能是上一个视频, 仅当完全无 guid 时)
-        const skipGuid = getInterceptedGuid();
-        if (skipGuid) {
-            logger.warn('Reusing skipInject intercepted item_guid (可能滞后):', skipGuid);
-            const token = getCookie('Trim-MC-token');
-            if (token) {
-                const playData: PlayMovieData = { id: skipGuid, token, sourceIndex: 0, player };
-                ipcRenderer.send('play-movie', playData);
-                return;
-            }
-            logger.error('No token found for skipInject guid');
-        }
-
+        // [lc-630] 删除 getInterceptedGuid() 旧缓存兜底!
+        // 它是 skipInject 缓存的【上一次播放】的 guid——直播/个人视频 DOM 提取失败 +
+        // tryGetItemGuid 超时(null)后, 用它发 play-movie 会【打开上次播放的视频】,
+        // 用户反馈"点直播显示播放失败后又打开上次的MPV视频"正是此 bug。
+        // 宁可不播也不播错: 提取不到当前 guid 就直接失败提示。
         logger.error('All methods failed to get item_guid');
     } else {
         logger.info('Successfully used DOM method to get item_guid');
@@ -149,7 +141,10 @@ export function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<st
 }
 
 // [lc-602] 支持 /v/video/（个人视频/未刮削视频详情页）：之前只认 movie|tv → 个人视频播放按钮拿不到 guid
-export const GUID_RE = /\/v\/(?:movie|tv|video)\/(?:season\/|episode\/)?([a-f0-9]{32})/i;
+// [lc-630] 支持 /v/live/（电视直播）：直播频道 ID 是 64 位 hex（如 /v/live/e7c0e9b1...15c），
+//   而普通 item guid 是 32 位。直播 DOM 提取失败 → dispatchEvent → 飞牛弹「播放失败」+
+//   旧缓存兜底播上次视频。故 GUID_RE 加 live 路径 + 量词 {32,64} 兼容两种长度。
+export const GUID_RE = /\/v\/(?:movie|tv|video|live)\/(?:season\/|episode\/)?([a-f0-9]{32,64})/i;
 
 // [lc-604] 从「继续观看」卡片提取 item guid：卡片是 div(无 button/a 链接),
 // 但海报 URL 含 guid —— /v/api/v1/sys/img/xx/yy/poster-{32hex}.webp
@@ -237,11 +232,14 @@ export function getItemGuidFromDOM(button: HTMLElement): string | null {
         // 覆盖「分类-其他」文件夹列表页的个人视频卡片(链接指向 /v/folder/ 无 guid,
         // 但海报 URL 是 poster-{guid}.webp, 与 continue-card 同构)——避免走
         // tryGetItemGuidFromOriginalLogic 的 dispatchEvent(触发飞牛前端弹"播放失败")。
+        // [lc-630] 直播频道海报是 resource_{64hex}(如 resource_c89b5f23...), 一并支持。
+        // ⚠️ 注意: 不匹配 upload_poster_{32hex}(那是图片资源 ID, 不等于 item guid, 误提取会播错)。
         try {
             const imgs = scope.querySelectorAll('img');
             for (const im of Array.from(imgs) as HTMLImageElement[]) {
-                const m = (im.currentSrc || im.src || im.getAttribute('src') || '').match(/poster-([a-f0-9]{32})/i);
-                if (m && m[1]) { logger.info('Found guid in card poster:', m[1]); return m[1]; }
+                const src = im.currentSrc || im.src || im.getAttribute('src') || '';
+                const m = src.match(/(?:poster|resource)[-_]([a-f0-9]{32,64})/i);
+                if (m && m[1]) { logger.info('Found guid in card poster:', m[1].substring(0, 20)); return m[1]; }
             }
         } catch { /* ignore */ }
 

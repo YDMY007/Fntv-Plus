@@ -733,18 +733,21 @@ function processEpisodeMedia(cfg: fnConfig.Config, info: fn.PlayListItem): ply.P
 }
 
 // 处理单个待播放媒体信息
+// [lc-630] 防御: 电视直播(Live)等类型的 play/info 返回的 item 可能为 null 或字段不全
+// (直播无刮削元数据), 用 info 顶层字段兜底, 避免 info.item.title 抛 TypeError 导致播放静默失败。
 function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayItem {
+    const it: any = (info && info.item) || {};
     return {
         itemGuid: info.guid,
-        title: info.item.title,
-        tvTitle: info.item.tv_title,
-        seasonNumber: info.item.season_number,
-        episodeNumber: info.item.episode_number,
-        ts: info.ts,
-        duration: info.item.duration,
+        title: it.title || it.name || '',
+        tvTitle: it.tv_title || '',
+        seasonNumber: it.season_number || 0,
+        episodeNumber: it.episode_number || 0,
+        ts: info.ts || 0,
+        duration: it.duration || 0,
         playLink: getProxyUrl(cfg, info.guid),
-        trimId: info.item.trim_id,
-        type: info.item.type,
+        trimId: it.trim_id || '',
+        type: it.type || info.type || '',
     };
 }
 
