@@ -593,7 +593,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      injectCarousel();  // 立即注入(左侧大图先用竖版 poster 兜底, 横版大海报异步补齐后重建)
+      // [lc-583] 进度条直接跳 100%, 短暂停留 450ms 让用户看到"完成"后重建轮播(平滑淡入, 不再闪现)
+      completeCarouselProgress();
+      setTimeout(() => { _carouselInited = false; injectCarousel(); }, 450);
 
       // [lc-569] 并行补 item API 详情(横版大海报 backdrop + 集数/季数/年份/评分/状态/类型/简介):
       // 优先级: 横版图 ①当前页已加载横版图(scrapeLandscapeBackdrops) ②item API(fetchItemDetail)
@@ -629,7 +631,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
-      const txt = _carouselProgressEl?.parentElement?.querySelector('.fnos-ph-text') as HTMLElement | null;
+      const txt = _carouselContainer ? _carouselContainer.querySelector('.fnos-ph-text') as HTMLElement | null : null;
       if (txt) txt.textContent = '加载失败，请检查媒体库或刷新重试';
     }
   } catch (e) { log('[lc-561] fetch error:', e); }
@@ -849,6 +851,11 @@ let _placeholderInited = false;
 // [lc-561] 骨架加载进度: 抓取过程中实时显示"已加载 N 个", 避免用户干等
 let _carouselProgressEl: HTMLElement | null = null; // 骨架上的数字元素
 let _carouselProgressCount = 0; // 当前已加载卡片数
+// [lc-583] 0~100 长条加载动画: 伪进度递增(0→90%), 数据完成后 completeCarouselProgress 跳 100
+let _carouselProgressTimer: number | null = null; // 进度条动画 interval
+let _carouselBarFill: HTMLElement | null = null;  // 进度条填充元素
+let _carouselPctEl: HTMLElement | null = null;    // 百分比文本元素
+let _carouselProgressPct = 0;                     // 当前百分比
 
 // [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
 // 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
@@ -1320,23 +1327,41 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   shimmer.className = 'fnos-ph-skel';
   shimmer.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:1';
   container.appendChild(shimmer);
-  // 中央内容: spinner + 主文字 + 进度数字(整体正中)
+  // 中央内容: spinner + 主文字 + 0~100 长条加载动画(整体正中)
   const center = document.createElement('div');
-  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:2';
+  center.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:2';
+  // [lc-583] 长条进度条(外层轨道 + 内层紫色渐变填充) + 百分比
+  const barWrap = document.createElement('div');
+  barWrap.style.cssText = 'width:300px;height:7px;border-radius:999px;background:rgba(255,255,255,.13);overflow:hidden;margin-top:2px';
+  const barFill = document.createElement('div');
+  barFill.style.cssText = 'width:0%;height:100%;border-radius:999px;background:linear-gradient(90deg,#8f6fe8,#c9a7f0);transition:width .32s ease';
+  barWrap.appendChild(barFill);
+  const pctEl = document.createElement('div');
+  pctEl.style.cssText = 'font-size:12.5px;color:rgba(225,218,245,.85);font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px';
+  pctEl.textContent = '0%';
   center.innerHTML = `
-    <div class="fnos-ph-spinner" style="width:46px;height:46px;border-width:4px"></div>
-    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
-      <div class="fnos-ph-text" style="font-size:16px;color:rgba(240,236,255,.95);letter-spacing:1.5px;font-weight:700">正在加载精彩内容…</div>
-      <div style="font-size:13px;color:rgba(225,218,245,.75);letter-spacing:.5px">已加载 <span class="fnos-ph-count" style="font-weight:800;color:#c9a7f0;font-variant-numeric:tabular-nums">0</span> 个</div>
-    </div>
+    <div class="fnos-ph-spinner" style="width:44px;height:44px;border-width:4px"></div>
+    <div class="fnos-ph-text" style="font-size:16px;color:rgba(240,236,255,.95);letter-spacing:1.5px;font-weight:700">正在加载精彩内容…</div>
   `;
+  center.appendChild(barWrap);
+  center.appendChild(pctEl);
   container.appendChild(center);
+  // [lc-583] 记录进度条元素 + 启动伪进度动画: 每 200ms 随机递增, 到 90% 停(真实完成后跳 100)
+  _carouselBarFill = barFill;
+  _carouselPctEl = pctEl;
+  _carouselProgressPct = 0;
+  if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+  _carouselProgressTimer = window.setInterval(() => {
+    _carouselProgressPct = Math.min(90, _carouselProgressPct + 2 + Math.random() * 5);
+    barFill.style.width = _carouselProgressPct + '%';
+    pctEl.textContent = Math.round(_carouselProgressPct) + '%';
+  }, 200);
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
 
   // [lc-561] 记录数字元素, 供 fetchShowsViaIPC 抓取过程中实时更新"已加载 N 个"
-  _carouselProgressEl = container.querySelector('.fnos-ph-count') as HTMLElement | null;
+  _carouselProgressEl = null; // [lc-583] 已改用长条进度, 数字元素废弃
   _carouselProgressCount = 0;
 
   // 若真实片库始终未加载(如 NAS 未连接/接口超时), 一段时间后温和提示, 避免"正在加载"永久卡住
@@ -1350,12 +1375,17 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   void phTimer;
 }
 
-/** [lc-561] 更新骨架上的"已加载 N 个"数字 */
+/** [lc-561] 更新骨架上的"已加载 N 个"数字（[lc-583] 已改用长条进度, 数字元素废弃, 此函数保留为空操作兼容调用方） */
 function updateCarouselProgress(count: number): void {
   _carouselProgressCount = count;
-  if (_carouselProgressEl && document.body.contains(_carouselProgressEl)) {
-    _carouselProgressEl.textContent = String(count);
-  }
+}
+
+/** [lc-583] 数据加载完成: 进度条直接跳 100%, 停止伪进度动画(短暂停留后由调用方重建轮播) */
+function completeCarouselProgress(): void {
+  if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+  _carouselProgressPct = 100;
+  if (_carouselBarFill) _carouselBarFill.style.width = '100%';
+  if (_carouselPctEl) _carouselPctEl.textContent = '100%';
 }
 
 /* 自动从API获取缺失的简介(IPC主进程签名→渲染进程fetch→带cookie鉴权) */
