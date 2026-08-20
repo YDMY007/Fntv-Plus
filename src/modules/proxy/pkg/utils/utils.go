@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"proxy/pkg/logger"
@@ -174,7 +176,22 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		// 打印相应头
 		logger.Infof("响应状态: %s, 头部: %v", resp.Status, resp.Header)
-		// 可以在这里修改响应头部或内容
+		// [lc-652] STRM/网盘直链 HLS：m3u8 分片常为相对路径（如 media-xxx-549.ts?auth_key=...）。
+		// 若不重写，播放器会基于「本地 playvideo 代理 URL」拼接分片 → 请求打回本地代理、
+		// 却只有网盘签名参数(缺 domain/token/account) → Go 侧 parseQueryParam 400 → 整集跳过。
+		// 故把相对分片/URI 重写为基于上游 m3u8 地址(target)的绝对 URL，让播放器直连网盘 CDN。
+		if resp != nil && isM3U8Response(resp) {
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+			if err == nil {
+				rewritten, nChanged := rewriteM3U8(string(body), target)
+				if nChanged > 0 {
+					resp.Body = io.NopCloser(bytes.NewReader(rewritten))
+					resp.ContentLength = int64(len(rewritten))
+					resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
+					logger.Infof("[m3u8] 已重写 %d 行相对分片/URI 为绝对 URL(基于 %s)", nChanged, target.Host+target.Path)
+				}
+			}
+		}
 		return nil
 	}
 
@@ -191,4 +208,121 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 
 	// 执行代理
 	proxy.ServeHTTP(c.Writer, c.Request)
+}
+
+// isM3U8Response 判断上游响应是否为 HLS 播放列表(m3u8)
+func isM3U8Response(resp *http.Response) bool {
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.Contains(ct, "mpegurl") || strings.Contains(ct, "mpeg-url") {
+		return true
+	}
+	// 有些网盘不返回标准 Content-Type，通过 body 前缀兜底判断
+	if ct == "" || strings.Contains(ct, "text/plain") || strings.Contains(ct, "application/octet-stream") || strings.Contains(ct, "binary") {
+		// 只读一小段探测（注意：不能消费 Body，需恢复）
+		probe, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+		if err == nil {
+			// 恢复 body（探测字节 + 剩余流）
+			rest, _ := io.ReadAll(resp.Body)
+			combined := append(probe, rest...)
+			resp.Body = io.NopCloser(bytes.NewReader(combined))
+			resp.ContentLength = int64(len(combined))
+			return bytes.HasPrefix(probe, []byte("#EXTM3U"))
+		}
+	}
+	return false
+}
+
+// rewriteM3U8 将 m3u8 播放列表中的相对分片/URI 重写为基于 base 的绝对 URL。
+// 支持三种形态：
+//  1. 纯相对路径行（如 media-xxx-549.ts?auth_key=...）
+//  2. #EXT-X-KEY / #EXT-X-MAP 等标签中的 URI="..."（可能是相对路径）
+//  3. 绝对 URL 行（http(s)://...）—— 保持不变
+// 返回重写后的内容与发生变化的行数。
+func rewriteM3U8(content string, base *url.URL) ([]byte, int) {
+	if base == nil {
+		return []byte(content), 0
+	}
+	lines := strings.Split(content, "\n")
+	changed := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// 注释行：检查是否含 URI="..."（EXT-X-KEY / EXT-X-MAP 等）
+		if strings.HasPrefix(trimmed, "#") {
+			if strings.Contains(trimmed, `URI="`) {
+				newLine := rewriteURIInTag(trimmed, base)
+				if newLine != line {
+					lines[i] = newLine
+					changed++
+				}
+			}
+			continue
+		}
+		// 普通分片行：绝对 URL 跳过；相对路径则基于 base 解析
+		if isAbsoluteURL(trimmed) {
+			continue
+		}
+		abs := resolveRelative(trimmed, base)
+		if abs != "" && abs != trimmed {
+			lines[i] = abs
+			changed++
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), changed
+}
+
+// rewriteURIInTag 重写标签行内 URI="..." 的相对路径（仅当相对时）
+func rewriteURIInTag(line string, base *url.URL) string {
+	return regexReplaceURIAttr(line, func(uri string) string {
+		if isAbsoluteURL(uri) {
+			return uri
+		}
+		abs := resolveRelative(uri, base)
+		if abs != "" {
+			return abs
+		}
+		return uri
+	})
+}
+
+// regexReplaceURIAttr 替换行内 URI="..." 的值（保留引号）
+func regexReplaceURIAttr(line string, fn func(string) string) string {
+	var sb strings.Builder
+	rest := line
+	for {
+		idx := strings.Index(rest, `URI="`)
+		if idx < 0 {
+			sb.WriteString(rest)
+			break
+		}
+		sb.WriteString(rest[:idx+5]) // 含 URI="
+		rest = rest[idx+5:]
+		end := strings.IndexByte(rest, '"')
+		if end < 0 {
+			sb.WriteString(rest)
+			break
+		}
+		uri := rest[:end]
+		sb.WriteString(fn(uri))
+		sb.WriteString(`"`)
+		rest = rest[end+1:]
+	}
+	return sb.String()
+}
+
+// isAbsoluteURL 判断是否为绝对 URL
+func isAbsoluteURL(s string) bool {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// resolveRelative 将相对 URL 基于 base 解析为绝对 URL；解析失败返回空串
+func resolveRelative(ref string, base *url.URL) string {
+	u, err := url.Parse(strings.TrimSpace(ref))
+	if err != nil {
+		return ""
+	}
+	return base.ResolveReference(u).String()
 }
