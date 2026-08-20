@@ -3797,35 +3797,48 @@ function handle(): void {
     themeRow.appendChild(seg);
     secBody1.appendChild(themeRow);
 
-    // ===== 底部操作栏：更新相关操作（2×2 等宽栅格，清晰对齐）=====
+    // ===== 底部操作栏：更新相关操作（lc-635 分组排版）=====
+    // 布局: 用户常用(检查更新/历史版本)一行宽按钮 → 细分隔线 →
+    //       维护/开发者(应用补丁/回滚补丁/测试更新/版号切换) 2×2 网格
     const updFooter = document.createElement('div');
     updFooter.style.cssText = 'padding:12px;flex-shrink:0;';
     const updDivider = document.createElement('div');
     updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 10px;';
     updFooter.appendChild(updDivider);
 
+    // ① 用户常用：检查更新 + 历史版本（一行等宽）
     const updGrid = document.createElement('div');
     updGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
     const updBtn = mkBtn('检查更新', true);
     const updHistoryBtn = mkBtn('历史版本', true);
-    // [lc-474] 一键应用热补丁：应用内直接拉取并填补小 bug 修复，不跳浏览器手动下载
-    const patchBtn = mkBtn('应用补丁', true);
-    // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
-    const testBtn = mkBtn('测试更新', true);
-    // [lc-511] 回滚补丁：清除已应用补丁覆盖并重启回原版
-    const rollbackBtn = mkBtn('回滚补丁', true);
-    // [lc-634] 版号切换：开发者输入解锁码后自定义整个软件版本号(测试更新检测/覆盖安装)
-    const verSwitchBtn = mkBtn('版号切换', true);
     updGrid.appendChild(updBtn);
     updGrid.appendChild(updHistoryBtn);
-    updGrid.appendChild(patchBtn);
-    updGrid.appendChild(testBtn);
-    updGrid.appendChild(rollbackBtn);
-    updGrid.appendChild(verSwitchBtn);
     updFooter.appendChild(updGrid);
 
+    // ② 维护/开发者分组：应用补丁 / 回滚补丁 / 测试更新 / 版号切换（2×2，前两个维护类、后两个需解锁码）
+    const devSep = document.createElement('div');
+    devSep.style.cssText = 'display:flex;align-items:center;gap:8px;margin:12px 0 8px;color:var(--fnos-ui-muted);font-size:10.5px;opacity:.7;user-select:none;';
+    devSep.innerHTML = '<span style="flex-shrink:0;">维护 / 开发者</span><span style="flex:1;height:1px;background:var(--fnos-ui-border);"></span>';
+    updFooter.appendChild(devSep);
+
+    const devGrid = document.createElement('div');
+    devGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+    // [lc-474] 一键应用热补丁：应用内直接拉取并填补小 bug 修复，不跳浏览器手动下载
+    const patchBtn = mkBtn('应用补丁', true);
+    // [lc-511] 回滚补丁：清除已应用补丁覆盖并重启回原版
+    const rollbackBtn = mkBtn('回滚补丁', true);
+    // [lc-481] 开发者测试更新：点击需输入解锁码，验证通过后从 Gitee 拉取 -test 补丁并应用（普通用户无码，永远拿不到）
+    const testBtn = mkBtn('测试更新', true);
+    // [lc-634] 版号切换：开发者输入解锁码后自定义整个软件版本号(测试更新检测/覆盖安装)
+    const verSwitchBtn = mkBtn('版号切换', true);
+    devGrid.appendChild(patchBtn);
+    devGrid.appendChild(rollbackBtn);
+    devGrid.appendChild(testBtn);
+    devGrid.appendChild(verSwitchBtn);
+    updFooter.appendChild(devGrid);
+
     const testHint = document.createElement('div');
-    testHint.textContent = '🔧 测试更新：开发者测试通道，需解锁码（普通用户无需操作）';
+    testHint.textContent = '🔧 测试更新 / 版号切换：开发者测试通道，需解锁码（普通用户无需操作）';
     testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.75;text-align:center;margin-top:9px;line-height:1.5;';
     updFooter.appendChild(testHint);
 
