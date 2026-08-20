@@ -4172,7 +4172,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             body.appendChild(centerText('出错了', '15px', 'var(--fnos-ui-text)', 'font-weight:700;margin-bottom:8px;'));
             body.appendChild(centerText((info && info.message) || '未知错误', '12px', 'var(--fnos-ui-muted)', 'opacity:.85;line-height:1.6;margin-bottom:16px;word-break:break-word;'));
             body.appendChild(actionRow([
-                { label: '重试', primary: false, onClick: () => { if (_testWizardModal) _testWizardModal.style.display = 'none'; openTestPatchWizard(_lastTestCode); } },
+                // [lc-641] 重试 = 关测试更新弹窗 → 重新打开解锁码输入 → 输对后再次进入测试更新。
+                //   旧实现直接复用 _lastTestCode 重试列表(错码不变还是错, 没意义)。
+                { label: '重试', primary: false, onClick: () => {
+                    (async () => {
+                        closeTestPatchWizard();
+                        const code = await promptUnlockCode();
+                        if (code !== null) openTestPatchWizard(code);
+                    })();
+                } },
                 { label: '关闭', primary: true, onClick: () => closeTestPatchWizard() },
             ]));
             return;
@@ -4290,6 +4298,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         row.style.cssText = 'display:flex;gap:8px;';
         for (const a of actions) {
             const b = mkBtn(a.label, !a.primary);
+            // [lc-641] 两个按钮等宽：主次都 flex:1，避免次按钮窄主按钮宽视觉不平衡
+            b.style.flex = '1';
             if (a.primary) {
                 // [lc-640] 主按钮改实色紫底白字(高对比, 两主题统一)——
                 //   旧 var(--fnos-ui-pill-bg)=rgba(150,120,200,.22) 浅紫透明 + pill-text=#cbb8ef 浅紫字
@@ -4298,6 +4308,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                     + 'background:linear-gradient(135deg,#8a6dd6,#6b4ec8)!important;'
                     + 'color:#fff!important;border:1px solid rgba(255,255,255,.28)!important;'
                     + 'box-shadow:0 4px 14px rgba(107,78,200,.38);letter-spacing:.3px;';
+            } else {
+                // [lc-641] 次按钮也 padding 对齐主按钮(原 mkBtn small 样式 padding:7px 12px,
+                //   视觉比主按钮 9px 0 矮, 加上 flex:1 后宽度一致但高度不齐)
+                b.style.padding = '9px 12px';
             }
             b.addEventListener('click', (e: Event) => { e.stopPropagation(); a.onClick(); });
             row.appendChild(b);
