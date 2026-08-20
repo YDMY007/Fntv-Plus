@@ -916,7 +916,15 @@ mp.register_event("file-loaded", function()
         -- 季数：从 media-title（fnOS 注入的 S{season}E{episode}）或文件名提取，用于精确匹配 B站 季。
         local _, snum, _ = parse_title()
         local bseason = (snum and tonumber(snum) and tonumber(snum) > 0) and tonumber(snum) or 0
-        if bt and be then
+        -- ⚠️【lc-608】个人视频守卫：fnOS 对剧集注入 media-title = "番名 - S4E16: 副标题"（含
+        -- S{season}E{episode} 结构）；未刮削个人视频的 media-title 是纯文件名（如
+        -- "5_6122739080338869769.mp4"），无季集标记也解析不出集数 → 不自动搜 B站弹幕
+        -- （避免拿随机文件名去 B站 搜索浪费时间/误导）。电影同判（非剧集无自动弹幕需求，
+        -- 如需可手动搜索）。判定：media-title 含 S\d+E\d+（剧集）或解析出集数（本地剧集文件）→ 自动。
+        local mtitle_episodic = (mp.get_property("media-title") or ""):match("[Ss]%d+[Ee]%d+")
+        if not mtitle_episodic and not (be and be > 0) then
+            msg.warn(("个人视频/非剧集（media-title=%q 无季集标记且无集数），跳过自动 B站弹幕；如需弹幕请手动搜索"):format(parse_target))
+        elseif bt and be then
             bili_auto_triggered = true
             msg.warn(("B站优先：极速解析 %s 第%s集（策略:%s season=%s），触发 B站 弹幕"):format(bt, be, bmethod, tostring(bseason)))
             auto_search_extra(bt, be, bseason)
