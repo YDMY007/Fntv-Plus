@@ -497,26 +497,16 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
         }
     } 
     else if (type === 'Video' && parentGuid) {
-        log.info('当前为其他视频，添加到播放列表');
-        const req: ItemListRequest = {
-            parent_guid: parentGuid,
-            exclude_folder: 1,
-            sort_column: 'sort_title',
-            sort_type: 'ASC',
-        };
-
-        const mediaList = await fnapi.getItemList(req);
-        log.info('获取媒体列表响应:', mediaList);
-        if (!mediaList.success || !mediaList.data || !mediaList.data.list) {
-            log.error('获取媒体列表失败:', mediaList ? mediaList.message : '未知错误');
-            return;
-        }
-
-        for (const media of mediaList.data.list) {
-            const mediaItem = processEpisodeMedia(config, media);
-            playList.push(mediaItem);
-            log.info('添加剧集到播放列表:', mediaItem);
-        }
+        // [lc-609] 个人视频(未刮削, 侧边栏「分类-其他」文件夹里的视频) → 单播, 不拉文件夹合集!
+        // 根因: 旧实现 getItemList(parent_guid) 拉取整个文件夹所有视频塞进播放列表,
+        // 但 getItemList 返回的 guid 与 getPlayInfo(id) 的 itemGuid 不一致 →
+        // currentIndex 匹配失败(-1) → 静默从列表第 1 个(上次播放的那个)开始 →
+        // 用户"点新的个人视频却播放的是上次的视频"。
+        // 个人视频彼此独立(非剧集), 点击哪个就播哪个: 直接单播, 与电影分支一致。
+        log.info('当前为其他视频(个人视频)，单播:', itemGuid);
+        const mediaItem = processSingleMedia(config, response.data);
+        playList.push(mediaItem);
+        log.info('添加个人视频到播放列表:', mediaItem);
     }
     else {
         const mediaItem = processSingleMedia(config, response.data);
