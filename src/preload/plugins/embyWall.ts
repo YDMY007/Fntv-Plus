@@ -4094,7 +4094,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     function closeTestPatchWizard(): void {
         if (_testWizardModal) { _testWizardModal.remove(); _testWizardModal = null; }
         if (_testProgHandler) { ipcRenderer.removeListener('settings:patch-progress', _testProgHandler); _testProgHandler = null; }
-        closeSettingsPanel();
+        // [lc-637] 修正分层: 关闭测试更新弹窗只退一层——回到设置面板大弹窗,
+        //   不再连带 closeSettingsPanel()(旧 lc-492 设计"关闭即退出设置面板"被用户否掉)。
+        //   设置面板由用户自行点遮罩/✕/ESC 关闭, 与 应用补丁/版号切换 弹窗行为一致。
     }
 
     // 测试补丁向导渲染：listing / select / empty / error / downloading / applying / done
@@ -6222,14 +6224,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       if (overlay.contains(t)) return;
       const sb = document.getElementById('fnos-settings-btn');
       if (sb && sb.contains(t)) return;
-      // 落在其他自建设置弹窗(检查更新 fnosDialog / 反馈 / B站登录)内时,
-      // 不连带关闭设置面板, 实现\"一层一层关\"的层级交互。
+      // 落在其他自建设置弹窗(检查更新 fnosDialog / 反馈 / B站登录 / 应用补丁 / 测试更新 /
+      // 版号切换 / 解锁码 / 历史版本)内时, 不连带关闭设置面板, 实现"一层一层关"的层级交互。
+      // [lc-637] 补齐 应用补丁(fntv-patch-apply-popup) / 测试更新(fntv-test-wizard) /
+      //   版号切换(fntv-version-switch-modal) / 解锁码(fntv-unlock-modal):
+      //   否则点这些弹窗任意位置(含"确认/关闭"按钮) document 捕获会先把设置面板关掉,
+      //   弹窗关掉后直接"全部没了"而非回到设置面板。
       if (t instanceof Element) {
         const withinOtherUi = t.closest('#fnos-dialog-overlay')
           || t.closest('#fnos-feedback-modal')
           || t.closest('#fnos-qq-group-modal')
           || t.closest('#fnos-bili-modal')
-          || t.closest('#fnos-history-overlay');
+          || t.closest('#fnos-history-overlay')
+          || t.closest('#fntv-patch-apply-popup')
+          || t.closest('#fntv-test-wizard')
+          || t.closest('#fntv-version-switch-modal')
+          || t.closest('#fntv-unlock-modal');
         if (withinOtherUi) return;
       }
       overlay.style.display = 'none';
