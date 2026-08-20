@@ -2744,11 +2744,15 @@ function injectVideoPreviewExternalPlay(): void {
       btn.title = '用 MPV 播放器打开此视频';
       btn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        const src = video.currentSrc || video.src || '';
-        const m = src.match(/\/v\/api\/v1\/media\/range\/([a-f0-9]{32})/i);
-        if (!m) { alert('未能从播放器提取视频 ID'); return; }
-        log('[播放页 MPV] 打开:', m[1]);
-        ipcRenderer.send('play-movie', { id: m[1], token: '', sourceIndex: 0, player: 'mpv' });
+        // [lc-600] 修正: 必须是 item GUID(走 fnapi.getPlayInfo)而非 media file GUID。
+        // - 正确: 从 location.pathname 提取(/v/video/{32hex} / /v/tv/{32hex} / /v/movie/{32hex})
+        // - 错误(旧 lc-596): 从 video.src 提 media/range/{32hex} 走 getPlayInfo 找不到 item, 失败
+        const path = (location.pathname || '').replace(/\/+$/, '');
+        const m = path.match(/\/v\/(?:movie|tv|video)\/(?:season\/|episode\/)?([a-f0-9]{32})/i);
+        if (!m) { alert('未能从当前页面提取视频 ID(URL=' + path + ')'); return; }
+        const itemGuid = m[1];
+        log('[播放页 MPV] 打开 item:', itemGuid);
+        ipcRenderer.send('play-movie', { id: itemGuid, token: '', sourceIndex: 0, player: 'mpv' });
       });
       bar.appendChild(btn);
       log('[播放页 MPV] 控制栏按钮已注入');
