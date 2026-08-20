@@ -3864,12 +3864,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
 
     // [lc-634] 版号切换：解锁码验证通过 → 输入自定义版本号(留空=恢复默认) → 主进程保存并生效
+    // [lc-638] 进入版本号输入页前先主进程验证解锁码——空码/错码立即拒绝，不再"不输码也能进"
     verSwitchBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         if (verSwitchBtn.disabled) return;
         const code = await promptUnlockCode();
         if (code === null) return; // 用户取消
-        openVersionSwitchModal(code);
+        try {
+            const vr = await ipcRenderer.invoke('settings:verify-unlock-code', code);
+            if (vr && vr.ok) {
+                openVersionSwitchModal(code);
+            } else {
+                showPatchToast('解锁代码错误，无法切换版本号');
+            }
+        } catch {
+            showPatchToast('解锁码验证失败，请重试');
+        }
     });
 
     // [lc-474] 轻量提示条（应用补丁结果反馈，2.4s 后自动消失）
@@ -3898,7 +3908,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 modal = document.createElement('div');
                 modal.id = 'fntv-unlock-modal';
                 modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
-                modal.style.cssText = 'position:fixed;z-index:2147483703;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+                modal.style.cssText = 'position:fixed;z-index:2147483710;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
                 modal.addEventListener('click', (e: Event) => {
                     if (e.target === modal) { modal!.remove(); if (_unlockResolve) { _unlockResolve(null); _unlockResolve = null; } }
                 });
@@ -3961,7 +3971,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             modal = document.createElement('div');
             modal.id = 'fntv-version-switch-modal';
             modal.setAttribute('data-fnos-ui', '1'); // 免疫白底清除器
-            modal.style.cssText = 'position:fixed;z-index:2147483706;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
+            modal.style.cssText = 'position:fixed;z-index:2147483711;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.5);';
             modal.addEventListener('click', (e: Event) => {
                 if (e.target === modal) modal!.remove();
             });

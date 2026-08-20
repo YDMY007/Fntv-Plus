@@ -59,6 +59,14 @@ async function handleSetCustomVersion(_event: IpcMainInvokeEvent, code?: string,
     return { ok: true, version: v, displayVersion: current };
 }
 
+/**
+ * [lc-638] 解锁码验证（渲染端进入「版号切换」输入页前调用）。
+ * 空码/错码立即拒绝——防止用户"不输入代码也直接进入自定义版本号页面"。
+ */
+async function handleVerifyUnlockCode(_event: IpcMainInvokeEvent, code?: string): Promise<any> {
+    return { ok: !!code && code === DEV_UNLOCK_CODE };
+}
+
 // 注册更新相关处理器
 function init(): void {
     // [lc-634] 启动时若有自定义版本号(版号切换残留)，同步到 updateChecker baseline
@@ -71,6 +79,7 @@ function init(): void {
     registerHandler('auto-check-update', handleAutoCheckUpdate);
     registerHandler('get-version', handleGetVersion);
     registerHandler('settings:set-custom-version', handleSetCustomVersion, { useHandle: true });
+    registerHandler('settings:verify-unlock-code', handleVerifyUnlockCode, { useHandle: true });
 }
 
 export {
