@@ -305,6 +305,21 @@ function findHomeCardPlay(target: HTMLElement): HTMLElement | null {
     // 点击卡片任意处 → 直接拦截走外部播放器。海报 URL 含 item guid(poster-{32hex}.webp)。
     const continueCard = target.closest('.continue-card-root') as HTMLElement | null;
     if (continueCard) {
+        // [lc-618] 排除卡片内的小操作按钮(标记看过/标记收藏/省略号更多等):
+        // 只拦截"卡片主体"(海报/标题区域, 想播放)的点击; 点内部操作按钮 → 放行飞牛原生处理。
+        // 注意: 不能排除 a[href](海报/标题本身是 <a>, 指向 /v/folder/ 文件夹),
+        // 只排除 button / [role=button] / 带 aria-label 的可点图标。
+        const innerBtn = target.closest('button, [role="button"]') as HTMLElement | null;
+        if (innerBtn) {
+            logger.info('[lc-618] 继续观看卡片内操作按钮点击, 放行原生:', (innerBtn.getAttribute('aria-label') || innerBtn.textContent || '').trim().substring(0, 30));
+            return null;
+        }
+        // 兜底: 无 button 结构但点了图标按钮区域(部分版本用 div 模拟), 通过 aria-label 识别
+        const labeled = target.closest('[aria-label]') as HTMLElement | null;
+        if (labeled && labeled !== continueCard && /看过|收藏|更多|删除|标记|menu|more|favorite|watched/i.test(labeled.getAttribute('aria-label') || '')) {
+            logger.info('[lc-618] 继续观看卡片内带语义标签按钮点击, 放行原生:', labeled.getAttribute('aria-label'));
+            return null;
+        }
         const hasGuid = !!getGuidFromContinueCard(continueCard);
         if (hasGuid) {
             logger.info('[lc-604] 继续观看卡片点击拦截(海报 guid 提取成功)');
