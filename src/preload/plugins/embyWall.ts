@@ -3973,7 +3973,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 const doClose = (val: string | null) => { modal!.remove(); if (_unlockResolve) { _unlockResolve(val); _unlockResolve = null; } };
                 const doSubmit = (): void => {
                     const code = (input.value || '').trim();
-                    if (!code) { showPatchToast('请输入解锁码'); return; }
+                    if (!code) {
+                        // [lc-646] 空码: 弹窗内红字提示(不用 toast, 顶部 toast 用户容易忽略以为"没反应")
+                        errEl.style.display = 'block';
+                        errEl.textContent = '请输入解锁码';
+                        return;
+                    }
                     if (opts && opts.onVerify) {
                         // [lc-645] 先验证: 通过才关闭, 错码在弹窗内提示(不关闭, 保持同尺寸)
                         opts.onVerify(code).then((ok) => {
