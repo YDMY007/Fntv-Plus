@@ -1208,9 +1208,30 @@ function injectCarousel(): void {
       item.dataset.idx = String(pi);
       const pImg = document.createElement('img');
       pImg.alt = show.title;
+      // [lc-601] 占位 SVG: show.poster 为空 / fetchImageAuth 失败时显示「无海报」图,
+      //   避免 src="" 触发浏览器默认裂开图标。
+      const placeholderSvg = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="170" viewBox="0 0 120 170">' +
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+        '<stop offset="0" stop-color="rgba(180,160,210,.45)"/><stop offset="1" stop-color="rgba(120,100,160,.45)"/>' +
+        '</linearGradient></defs>' +
+        '<rect width="120" height="170" rx="10" fill="url(#g)"/>' +
+        '<g transform="translate(60 75)" fill="rgba(255,255,255,.55)">' +
+        '<rect x="-22" y="-30" width="44" height="60" rx="6" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/>' +
+        '<circle cx="0" cy="-10" r="9" fill="rgba(255,255,255,.55)"/>' +
+        '<path d="M-22 30 L-6 12 L8 26 L22 8 L22 30 Z" fill="rgba(255,255,255,.55)"/>' +
+        '</g>' +
+        '<text x="60" y="148" text-anchor="middle" font-size="11" font-family="sans-serif" fill="rgba(255,255,255,.7)" font-weight="600">暂无海报</text>' +
+        '</svg>'
+      );
+      pImg.src = placeholderSvg; // 先占位, 成功后再切到真实 URL(防裂开)
       pImg.style.cssText = 'width:120px;height:170px;object-fit:cover;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.18);display:block;background:rgba(200,190,220,.25)';
+      // [lc-601] onerror 兜底: 即便 src 切到真实 URL 后 404, 也回退到占位(永不裂开)
+      pImg.onerror = () => { if (pImg.src !== placeholderSvg) pImg.src = placeholderSvg; };
       const pUrl = imgUrl(show.poster);
-      fetchImageAuth(pUrl).then((b) => { if (b) pImg.src = b; });
+      if (pUrl) {
+        fetchImageAuth(pUrl).then((b) => { if (b) pImg.src = b; });
+      }
       const pTitle = document.createElement('div');
       // [lc-574] 标题浅色化: 深蓝黑→近白浅紫, 加字重/字距/阴影, 配合暗色磨砂背景更好看
       pTitle.style.cssText = 'font-size:11.5px;font-weight:600;color:rgba(240,236,255,.95);text-align:center;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;line-height:1.35;letter-spacing:.3px;text-shadow:0 1px 4px rgba(0,0,0,.35)';
