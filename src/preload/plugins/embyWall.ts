@@ -1434,14 +1434,37 @@ function updateCarouselProgress(count: number): void {
 /** [lc-598] 数据加载完成: 进度条从当前值平滑补到 100%(不瞬间跳变), 完成后回调 onDone(注入轮播) */
 function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  const start = _carouselProgressPct;
-  const totalMs = 500;          // 补完动画时长
-  const stepMs = 30;            // 每步间隔
+  // [lc-610] 数据就位但进度条可能还在低位(如 20%, 读盘太快)。直接从此补完很突兀
+  // (用户看到"20% 一闪到 100%")。先快速推进到 78%(视觉上"接近完成"), 再平滑补到 100%,
+  // 让"加载 → 完成"的过渡自然: 用户看到的是进度条稳步走完 → 轮播淡入, 而非低位突变。
+  let start = _carouselProgressPct;
+  if (start < 70) {
+    // 低位 → 先快速跳到 78%(分 3 步, 每步 60ms), 再进入正常补完
+    const jumpSteps = 3;
+    let i = 0;
+    _carouselProgressTimer = window.setInterval(() => {
+      i++;
+      const pct = Math.min(78, start + (78 - start) * (i / jumpSteps));
+      _carouselProgressPct = pct;
+      if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
+      if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
+      if (i >= jumpSteps) {
+        if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+        completeCarouselProgress(onDone); // 递归: 从 78% 平滑补完
+      }
+    }, 60);
+    return;
+  }
+  // 高位(≥70%)或已接近完成: 直接用 ~1.2s ease-out 补完剩余
+  const totalMs = 1200;
+  const stepMs = 30;
   const steps = Math.max(1, Math.ceil(totalMs / stepMs));
   let i = 0;
   _carouselProgressTimer = window.setInterval(() => {
     i++;
-    const pct = Math.min(100, start + (100 - start) * (i / steps));
+    const t = i / steps;                       // 0→1
+    const eased = 1 - Math.pow(1 - t, 3);      // ease-out: 前快后慢
+    const pct = Math.min(100, start + (100 - start) * eased);
     _carouselProgressPct = pct;
     if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
     if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
