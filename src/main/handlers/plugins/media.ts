@@ -455,13 +455,14 @@ function eventHandler(fnapi: fn.ApiService) {
 }
 
 // 处理播放事件
-async function handlePlayMovie(event: IpcMainEvent, { id, token, sourceIndex, player }: PlayRequest): Promise<void> {
-    log.info('Play movie event received id:', id, ' with token:', token, ' index:', sourceIndex);
-
+async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourceIndex, player }: PlayRequest): Promise<void> {
     const config = fnConfig.readConfig();
     if (!config || !config.domain) {
         throw new Error('无法找到服务器地址配置');
     }
+    // [lc-596] token 兜底: 播放页按钮可能拿不到 cookie token, 回退配置 token(已登录必存)
+    const token = (reqToken && String(reqToken).trim()) || config.token || '';
+    log.info('Play movie event received id:', id, ' with token:', token, ' index:', sourceIndex);
 
     // [lc-295] 播放前刷新一次会话 Cookie, getProxyUrl 会将其编入代理 URL 传给 Go 代理
     await refreshSessionCookie(config.domain);

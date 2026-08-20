@@ -2561,20 +2561,34 @@ function injectVideoPreviewExternalPlay(): void {
     try { video.play().catch(() => {}); } catch (_) { /* ignore */ }
   }
 
-  /** 用外部播放器打开: 抓 video 直链 → external-play → 关闭原生预览 */
+  /** 用外部播放器打开: 优先走 fnOS 完整播放链路(代理注入鉴权), 兜底直链 */
   function launchExternal(modal: HTMLElement): void {
     const video = modal.querySelector('video') as HTMLVideoElement | null;
-    let url = video?.currentSrc || video?.src || '';
-    // [lc-594] 相对路径补全: 飞牛预览 video src 常为 /download/... 相对路径(自鉴权直链),
-    // 之前只接受 http(s) 开头 → 未刮削的个人视频预览永远"未能获取视频直链" → 外部播放无法调用。
+    const rawUrl = video?.currentSrc || video?.src || '';
+    const titleEl = modal.querySelector('.trim-ui__app-layout--header-title span');
+    const title = (titleEl?.textContent || 'fnOS 视频').trim();
+    // [lc-595] 飞牛预览 video src 是 /v/api/v1/media/range/{guid}(需 Authx/cookie 鉴权),
+    // 直接给 MPV 会 403; 提取 guid 走 kind='fnos' 由 handlePlayMovie 经 Go 代理注入 cookie 播放。
+    const m = rawUrl.match(/\/v\/api\/v1\/media\/range\/([a-f0-9]{32})/i);
+    if (m) {
+      log('[视频预览外放] 走 fnOS 播放链路:', title, m[1]);
+      ipcRenderer.send('external-play', { kind: 'fnos', id: m[1], title });
+      // 关闭原生预览(轻微延迟, 让外部播放器先启动)
+      setTimeout(() => {
+        const closeBtn = modal.querySelector('.app-layout-header-close') as HTMLElement | null;
+        if (closeBtn) closeBtn.click();
+        else modal.style.display = 'none';
+      }, 200);
+      return;
+    }
+    // 兜底: 其他 http(s) 直链(相对路径补全, [lc-594])
+    let url = rawUrl;
     if (url && url.startsWith('/')) url = location.origin + url;
     if (!url || !/^https?:\/\//i.test(url)) {
       log('[视频预览外放] 未取到有效直链:', url);
       alert('未能获取视频直链，无法外部打开');
       return;
     }
-    const titleEl = modal.querySelector('.trim-ui__app-layout--header-title span');
-    const title = (titleEl?.textContent || 'fnOS 视频').trim();
     log('[视频预览外放] 外部打开:', title, url);
     ipcRenderer.send('external-play', { kind: 'url', url, title });
     // 关闭原生预览(轻微延迟, 让外部播放器先启动)
@@ -2678,6 +2692,38 @@ function injectVideoPreviewExternalPlay(): void {
 
   // 首次注入时也扫一遍(模态可能已存在)
   document.querySelectorAll('.trim-ui__app-layout--window').forEach((m) => handleModal(m as HTMLElement));
+
+  // [lc-596] 影视播放页(xgplayer)控制栏注入「🎬 MPV」按钮:
+  // 未刮削个人视频在详情页可能没有标准"播放"按钮导致 playButton 注入不了,
+  // 用户打开原生网页播放后这里提供 MPV 出口——从 video src(media/range/{guid}) 提取
+  // guid 走 play-movie(fnOS 代理链路, 主进程 config.token 兜底鉴权)。
+  const mpvBtnInjected = (): void => {
+    try {
+      const video = document.querySelector('video[src*="/v/api/v1/media/range/"], xgplayer video') as HTMLVideoElement | null;
+      if (!video || !video.offsetParent) return;
+      if (video.closest('.trim-ui__app-layout--window')) return; // 文件预览 modal 由上面的弹窗逻辑处理
+      const bar = document.querySelector('xg-right-grid') as HTMLElement | null;
+      if (!bar || bar.querySelector('.fntv-playerbar-mpv')) return;
+      const btn = document.createElement('div');
+      btn.className = 'fntv-playerbar-mpv';
+      btn.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:0 12px;cursor:pointer;color:var(--semi-color-text-1,#e8e8ee);font-size:13px;font-weight:600;white-space:nowrap;user-select:none';
+      btn.textContent = '🎬 MPV';
+      btn.title = '用 MPV 播放器打开此视频';
+      btn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        const src = video.currentSrc || video.src || '';
+        const m = src.match(/\/v\/api\/v1\/media\/range\/([a-f0-9]{32})/i);
+        if (!m) { alert('未能从播放器提取视频 ID'); return; }
+        log('[播放页 MPV] 打开:', m[1]);
+        ipcRenderer.send('play-movie', { id: m[1], token: '', sourceIndex: 0, player: 'mpv' });
+      });
+      bar.appendChild(btn);
+      log('[播放页 MPV] 控制栏按钮已注入');
+    } catch (e) { /* ignore */ }
+  };
+  const mpvObs = new MutationObserver(mpvBtnInjected);
+  mpvObs.observe(document.body, { childList: true, subtree: true });
+  mpvBtnInjected();
 
   log('[视频预览外放] 已注入(自动弹窗选择 + 标题栏外部打开按钮)');
 }
