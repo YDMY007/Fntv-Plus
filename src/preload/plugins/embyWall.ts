@@ -593,9 +593,11 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
-      // [lc-597] 进度条直接跳 100%, 短暂停留 250ms 让用户看到"完成"后重建轮播(平滑淡入)
-      completeCarouselProgress();
-      setTimeout(() => { _carouselInited = false; injectCarousel(); }, 250);
+      // [lc-598] 进度条平滑补到 100%(500ms 动画) → 完成后立即重建轮播(淡入), 不再 30% 就闪现
+      completeCarouselProgress(() => {
+        _carouselInited = false;
+        injectCarousel();
+      });
 
       // [lc-569] 并行补 item API 详情(横版大海报 backdrop + 集数/季数/年份/评分/状态/类型/简介):
       // 优先级: 横版图 ①当前页已加载横版图(scrapeLandscapeBackdrops) ②item API(fetchItemDetail)
@@ -1381,12 +1383,25 @@ function updateCarouselProgress(count: number): void {
   _carouselProgressCount = count;
 }
 
-/** [lc-583] 数据加载完成: 进度条直接跳 100%, 停止伪进度动画(短暂停留后由调用方重建轮播) */
-function completeCarouselProgress(): void {
+/** [lc-598] 数据加载完成: 进度条从当前值平滑补到 100%(不瞬间跳变), 完成后回调 onDone(注入轮播) */
+function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  _carouselProgressPct = 100;
-  if (_carouselBarFill) _carouselBarFill.style.width = '100%';
-  if (_carouselPctEl) _carouselPctEl.textContent = '100%';
+  const start = _carouselProgressPct;
+  const totalMs = 500;          // 补完动画时长
+  const stepMs = 30;            // 每步间隔
+  const steps = Math.max(1, Math.ceil(totalMs / stepMs));
+  let i = 0;
+  _carouselProgressTimer = window.setInterval(() => {
+    i++;
+    const pct = Math.min(100, start + (100 - start) * (i / steps));
+    _carouselProgressPct = pct;
+    if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
+    if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
+    if (i >= steps) {
+      if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+      if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
+    }
+  }, stepMs);
 }
 
 /* 自动从API获取缺失的简介(IPC主进程签名→渲染进程fetch→带cookie鉴权) */
