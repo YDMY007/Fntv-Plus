@@ -956,6 +956,9 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         danmaku_count: final.length,
         source: source,
         cid: best_cid,
+        // [lc-604] 番剧区(正版)没有 bvid, 只有 season_id/epid —— 透传给配置面板显示 ep_id 而非裸 cid
+        season_id: (best_info && best_info.season_id) || null,
+        epid: (best_info && best_info.epid) || null,
     };
     if (agg_count) result.aggregated_from = agg_count;
     result.cookie_status = (cv && cv.ok) ? 'valid' : ((cv && cv.reason === 'expired_or_invalid') ? 'expired' : 'missing');

@@ -308,10 +308,14 @@ function open_bili_config_menu()
                 table.insert(items, { title = "  💬 弹幕数：" .. tostring(BILI_INFO.danmaku_count) .. " 条", keep_open = true, selectable = false })
             end
             local src_label = ({ bangumi = "番剧区（正版）", video = "视频区（UP主搬运）" })[BILI_INFO.source] or BILI_INFO.source or "未知"
-            -- 匹配来源后追加 BV 号（官方番剧区 bvid 为空时显示 cid）
+            -- 匹配来源标识: 视频区显示 BV 号; 番剧区(正版)无 bvid 但有 ep_id(剧集 ID)更友好
             local src_extra = ""
             if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
                 src_extra = "  (BV:" .. BILI_INFO.bvid .. ")"
+            elseif BILI_INFO.epid and BILI_INFO.epid ~= "" then
+                src_extra = "  (ep_id:" .. tostring(BILI_INFO.epid) .. ")"
+            elseif BILI_INFO.season_id and BILI_INFO.season_id ~= "" then
+                src_extra = "  (season_id:" .. tostring(BILI_INFO.season_id) .. ")"
             elseif BILI_INFO.cid then
                 src_extra = "  (cid:" .. tostring(BILI_INFO.cid) .. ")"
             end
