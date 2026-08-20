@@ -1470,8 +1470,10 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   void phTimer;
 }
 
-/** [lc-621] 数据加载完成: 进度条从当前值快速补到 100%(ease-out 缓动, 约 600ms),
- *  完成后状态文字变「加载完成」→ 回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
+/** [lc-627] 数据加载完成: 进度条从当前值快速补到 100%(ease-out 缓动, 约 600ms),
+ *  完成后先【强制填满】(取消 transition 直接 100%, 避免 .25s 过渡动画未走完就被
+ *  替换 DOM → 用户看到条停在 ~70%), 再延迟一帧让满条渲染, 状态文字「加载完成」,
+ *  然后回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
 function completeCarouselProgress(onDone?: () => void): void {
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   const start = _carouselProgressPct;
@@ -1489,8 +1491,17 @@ function completeCarouselProgress(onDone?: () => void): void {
     if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
     if (i >= steps) {
       if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+      // [lc-627] 强制填满: 取消 transition 直接 100%, 确保条真正满格再切画面
+      if (_carouselBarFill) {
+        _carouselBarFill.style.transition = 'none';
+        _carouselBarFill.style.width = '100%';
+      }
+      if (_carouselPctEl) _carouselPctEl.textContent = '100%';
       if (_carouselStatusEl) _carouselStatusEl.textContent = '加载完成';
-      if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
+      // 延迟 60ms 让满条渲染一帧(骨架替换时用户看到的是满格条), 再回调
+      window.setTimeout(() => {
+        if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
+      }, 60);
     }
   }, stepMs);
 }
