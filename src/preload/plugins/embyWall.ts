@@ -5649,6 +5649,154 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 读取初始值（默认关闭）
     ipcRenderer.invoke('settings:get-smart-skip-enabled').then((v: boolean) => { swSkip.checked = !!v; }).catch(() => { swSkip.checked = false; });
 
+    // ===== 分组: 手柄设置（独立标签页；自定义手柄按键映射）=====
+    const secGamepad = section('手柄设置');
+    const secBodyGamepad = secGamepad.body;
+    secBodyGamepad.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    const gpDesc = document.createElement('div');
+    gpDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    gpDesc.textContent = '支持使用手柄（Xbox/PS/通用）遥控：播放中控制播放器（播放暂停/快退快进/倍速/下一集），未播放时在影视界面导航（方向键/确认/返回）。可自定义各功能对应的按键。';
+    secBodyGamepad.appendChild(gpDesc);
+
+    // 总开关
+    const gpToggleRow = document.createElement('label');
+    gpToggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;';
+    const gpToggleSpan = document.createElement('span');
+    gpToggleSpan.textContent = '启用手柄控制';
+    gpToggleSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const gpToggle = document.createElement('input');
+    gpToggle.type = 'checkbox';
+    gpToggle.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    gpToggleRow.appendChild(gpToggleSpan); gpToggleRow.appendChild(gpToggle);
+    secBodyGamepad.appendChild(gpToggleRow);
+
+    // 功能 → 按键 选择行容器
+    const gpRows: { id: string; select: HTMLSelectElement }[] = [];
+
+    // 可选手柄按键列表（标准布局）
+    const gpBtnOptions: { value: string; label: string }[] = [
+        { value: 'A', label: 'A' },
+        { value: 'B', label: 'B' },
+        { value: 'X', label: 'X' },
+        { value: 'Y', label: 'Y' },
+        { value: 'LB', label: 'LB（左肩键）' },
+        { value: 'RB', label: 'RB（右肩键）' },
+        { value: 'LT', label: 'LT（左扳机）' },
+        { value: 'RT', label: 'RT（右扳机）' },
+        { value: 'START', label: 'Start' },
+        { value: 'BACK', label: 'Back / Select' },
+    ];
+
+    // 构建一个功能映射行
+    const gpBuildRow = (label: string, funcId: string, select: HTMLSelectElement): void => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-radius:6px;';
+        const span = document.createElement('span');
+        span.textContent = label;
+        span.style.cssText = 'color:var(--fnos-ui-text);font-size:12.5px;';
+        select.style.cssText = 'width:150px;height:28px;font-size:11.5px;color:var(--fnos-ui-text);'
+            + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:2px 6px;box-sizing:border-box;';
+        row.appendChild(span); row.appendChild(select);
+        secBodyGamepad.appendChild(row);
+        gpRows.push({ id: funcId, select });
+    };
+
+    // 播放控制组
+    const gpPlayTitle = document.createElement('div');
+    gpPlayTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;';
+    gpPlayTitle.textContent = '播放控制（播放中生效）';
+    secBodyGamepad.appendChild(gpPlayTitle);
+
+    const gpSelect = (): HTMLSelectElement => {
+        const s = document.createElement('select');
+        for (const o of gpBtnOptions) {
+            const op = document.createElement('option');
+            op.value = o.value; op.textContent = o.label;
+            s.appendChild(op);
+        }
+        return s;
+    };
+
+    // 播放控制：播放暂停 / 快退 / 快进 / 倍速- / 倍速+ / 下一集
+    const gpPlayPauseSel = gpSelect(); gpBuildRow('播放 / 暂停', 'playPause', gpPlayPauseSel);
+    const gpSeekBackSel = gpSelect(); gpBuildRow('快退 (5s)', 'seekBack', gpSeekBackSel);
+    const gpSeekFwdSel = gpSelect(); gpBuildRow('快进 (5s)', 'seekFwd', gpSeekFwdSel);
+    const gpSpeedDownSel = gpSelect(); gpBuildRow('倍速 -', 'speedDown', gpSpeedDownSel);
+    const gpSpeedUpSel = gpSelect(); gpBuildRow('倍速 +', 'speedUp', gpSpeedUpSel);
+    const gpNextSel = gpSelect(); gpBuildRow('下一集', 'next', gpNextSel);
+
+    // 界面导航组
+    const gpNavTitle = document.createElement('div');
+    gpNavTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;';
+    gpNavTitle.textContent = '界面导航（未播放时生效）';
+    secBodyGamepad.appendChild(gpNavTitle);
+
+    const gpBackSel = gpSelect(); gpBuildRow('返回 / 关闭', 'navBack', gpBackSel);
+    const gpSelectSel = gpSelect(); gpBuildRow('勾选 / 开关', 'navSelect', gpSelectSel);
+
+    // 按钮行
+    const gpBtns = document.createElement('div');
+    gpBtns.style.cssText = 'display:flex;gap:6px;margin-top:12px;';
+    const gpSaveBtn = mkBtn('保存', true);
+    const gpResetBtn = mkBtn('恢复默认', true);
+    gpBtns.appendChild(gpSaveBtn); gpBtns.appendChild(gpResetBtn);
+    secBodyGamepad.appendChild(gpBtns);
+
+    const gpStatus = document.createElement('div');
+    gpStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyGamepad.appendChild(gpStatus);
+
+    // 读取当前配置并回填下拉
+    const gpApplyConfig = (cfg: any): void => {
+        if (!cfg) return;
+        gpToggle.checked = !!cfg.enabled;
+        const bind = (cfg.bindings || {}) as Record<string, string>;
+        for (const r of gpRows) {
+            const val = bind[r.id] || '';
+            // 默认值回退由 gamepad 侧处理；下拉只回填已保存值
+            if (gpBtnOptions.some(o => o.value === val)) r.select.value = val;
+            else r.select.selectedIndex = 0;
+        }
+    };
+    (window as any).fntvGamepad = (window as any).fntvGamepad || {};
+    const gpApi = (window as any).fntvGamepad;
+    if (gpApi && gpApi.getConfig) gpApplyConfig(gpApi.getConfig());
+
+    gpSaveBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        try {
+            const cfg = gpApi && gpApi.getConfig ? gpApi.getConfig() : { enabled: true, bindings: {} };
+            const bindings: Record<string, string> = { ...(cfg.bindings || {}) };
+            for (const r of gpRows) bindings[r.id] = r.select.value;
+            const next = { enabled: gpToggle.checked, bindings };
+            if (gpApi && gpApi.saveConfig) {
+                gpApi.saveConfig(next);
+                gpStatus.textContent = '已保存 ✓ 立即生效';
+                gpStatus.style.color = 'var(--fnos-ui-ok)';
+            } else {
+                gpStatus.textContent = '保存失败：手柄插件未就绪';
+                gpStatus.style.color = 'var(--fnos-ui-warn)';
+            }
+        } catch (err) {
+            gpStatus.textContent = '保存失败：' + String((err as Error)?.message || err);
+            gpStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+    });
+
+    gpResetBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        try {
+            if (gpApi && gpApi.resetConfig) gpApi.resetConfig();
+            if (gpApi && gpApi.getConfig) gpApplyConfig(gpApi.getConfig());
+            gpStatus.textContent = '已恢复默认 ✓';
+            gpStatus.style.color = 'var(--fnos-ui-ok)';
+        } catch (err) {
+            gpStatus.textContent = '重置失败：' + String((err as Error)?.message || err);
+            gpStatus.style.color = 'var(--fnos-ui-warn)';
+        }
+    });
+
     // ===== 分组: 关于（独立标签页；原侧栏"关于"按钮迁入设置面板）=====
     const secAbout = section();
     const secBodyAbout = secAbout.body;
@@ -5974,6 +6122,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el, secCarousel.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el] },
+      { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
