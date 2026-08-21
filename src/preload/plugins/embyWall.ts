@@ -2955,7 +2955,9 @@ function handle(): void {
     // ② class 关键字匹配(常见 UI 框架命名)
     const cls = el.className || '';
     if (typeof cls === 'string') {
-      const overlayKw = ['dropdown', 'popover', 'menu-', '-menu', 'modal', 'tooltip', 'sheet-', 'select-', 'popup', 'flyout', 'context-menu', 'command-palette'];
+      // [lc-657] 增加 datepicker/date-picker: 编辑元数据日期选择器弹层内部元素(日期格/导航)
+      //   为白色, 若被白底清除器清成 transparent 会"全白"; 改为保护 + 专属深色适配(_forceDatePickerDark).
+      const overlayKw = ['dropdown', 'popover', 'menu-', '-menu', 'modal', 'tooltip', 'sheet-', 'select-', 'popup', 'flyout', 'context-menu', 'command-palette', 'datepicker', 'date-picker', 'datepicker-month'];
       const lower = cls.toLowerCase();
       for (const kw of overlayKw) { if (lower.includes(kw)) return true; }
     }
@@ -2986,6 +2988,53 @@ function handle(): void {
   };
 
   let _whitewashPasses = 0;
+
+  /**
+   * [lc-657] 日期选择器弹层深色适配（深色模式下）。
+   * fnOS 编辑元数据用 Semi Design DatePicker：弹层(.semi-datepicker)及日期格默认白色，
+   * 且导航按钮被 fnOS 内联白色 style（rgba(255,255,255,.55) + 深字）——深色模式下整体"全白"。
+   * 此处仅在深色模式强制：深色背景 + 浅色文字 + 覆盖内联白色按钮样式。
+   * 浅色模式不干预（保持原生）。
+   */
+  const _forceDatePickerDark = (): void => {
+    if (!getEffectiveDark()) return;
+    const picks = Array.from(document.querySelectorAll('.semi-datepicker, .semi-datepicker-container, [class*="datepicker"][class*="month"]'));
+    if (!picks.length) return;
+    for (const pickRaw of picks) {
+      const pick = pickRaw as HTMLElement;
+      // 深色背景（弹层容器/月网格）
+      pick.style.setProperty('background', 'rgba(28, 26, 38, 0.97)', 'important');
+      pick.style.setProperty('background-color', 'rgba(28, 26, 38, 0.97)', 'important');
+      pick.style.setProperty('color', '#e8e6f0', 'important');
+      // 覆盖整棵子树的白底
+      const sub = Array.from(pick.querySelectorAll('*'));
+      for (let i = 0; i < sub.length; i++) {
+        const e = sub[i] as HTMLElement;
+        const cs = getComputedStyle(e);
+        const bg = cs.backgroundColor;
+        if (_isOpaqueLight(bg)) {
+          e.style.setProperty('background', 'transparent', 'important');
+          e.style.setProperty('background-color', 'transparent', 'important');
+          e.dataset.fnosClear = '1';
+        }
+      }
+    }
+    // 导航/日期格文字与内联白色按钮修正
+    const navBtns = Array.from(document.querySelectorAll('.semi-datepicker-navigation button, .semi-datepicker-month button'));
+    for (let i = 0; i < navBtns.length; i++) {
+      const b = navBtns[i] as HTMLElement;
+      b.style.setProperty('background', 'rgba(255,255,255,0.08)', 'important');
+      b.style.setProperty('background-color', 'rgba(255,255,255,0.08)', 'important');
+      b.style.setProperty('border', '1px solid rgba(255,255,255,0.14)', 'important');
+      b.style.setProperty('color', '#e8e6f0', 'important');
+      b.style.setProperty('box-shadow', 'none', 'important');
+    }
+    const cells = Array.from(document.querySelectorAll('.semi-datepicker-day, .semi-datepicker-weekday-item, .semi-datepicker-month-grid'));
+    for (let i = 0; i < cells.length; i++) {
+      (cells[i] as HTMLElement).style.setProperty('color', '#cfcbe0', 'important');
+    }
+  };
+
   const _globalWhitewashRemover = () => {
     _whitewashPasses++;
     let fixedCount = 0;
@@ -3094,17 +3143,23 @@ function handle(): void {
   const _rcInterval = setInterval(_globalRoundedCornerEnforcer, 6000);
 
   // 三重触发: 立即一次 + MutationObserver(DOM变化时) + 定时巡检(兜底漏网)
-  setTimeout(_globalWhitewashRemover, 500);
-  setTimeout(_globalWhitewashRemover, 2000);
-  setTimeout(_globalWhitewashRemover, 4000);
+  setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 500);
+  setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 2000);
+  setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 4000);
   let _wwTimer = 0;
   const _wwObs = new MutationObserver(() => {
     clearTimeout(_wwTimer);
-    _wwTimer = window.setTimeout(_globalWhitewashRemover, 200);
+    _wwTimer = window.setTimeout(() => {
+      _globalWhitewashRemover();
+      _forceDatePickerDark(); // [lc-657] 日期选择器弹层深色适配随白底清除器一同触发
+    }, 200);
   });
   _wwObs.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('beforeunload', () => _wwObs.disconnect());
-  setInterval(_globalWhitewashRemover, 6000); // 每6秒兜底扫一次
+  setInterval(() => {
+    _globalWhitewashRemover(); // 每6秒兜底扫一次
+    _forceDatePickerDark(); // [lc-657] 同步巡检日期选择器弹层
+  }, 6000);
 
   // [v374] 窗口拖动已改为原生 -webkit-app-region:drag (见 titlebar.ts / mainwin.ts CSS),
   //   不再用 JS setPosition —— transparent 窗口下 setPosition 会触发 DWM 异常放大.
