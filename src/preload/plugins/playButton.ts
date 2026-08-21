@@ -140,10 +140,15 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
 
-    // 仅在详情页「带文字的主播放按钮」旁注入 MPV 按钮;
-    // 跳过播放控制栏里的纯图标按钮(播放/暂停, 只有 svg 无文字), 否则原生播放页控制栏会出现多余的 MPV 按钮
+    // 仅在详情页「主播放按钮」旁注入 MPV 按钮;
+    // 跳过播放控制栏里的纯图标按钮(播放/暂停, 只有 svg 无文字), 否则原生播放页控制栏会出现多余的 MPV 按钮。
+    // [lc-660] 个人视频详情页(/v/video/)主播放按钮形态与剧集页一致(semi-button-primary + !min-w-[150px]),
+    //   但其可视文字可能因 DOM 结构(图标按钮 + aria-label)导致 innerText 取空而被 hasText 误杀 → 漏注入外部播放按钮。
+    //   改为按「主按钮形态」放行(primary 或 !min-w-[150px]); 仅对真正的纯图标小按钮(控制栏播放/暂停)才要求文字。
+    const isMainButtonShape = referenceButton.classList.contains('semi-button-primary')
+        || (referenceButton.getAttribute('class') || '').includes('!min-w-[150px]');
     const hasText = (referenceButton.innerText || '').trim().length > 0;
-    if (!hasText) return;
+    if (!isMainButtonShape && !hasText) return;
 
     logger.info('Detected inject page, injecting play button...');
 
