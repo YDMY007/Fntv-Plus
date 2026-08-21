@@ -80,7 +80,7 @@ if (!collected.length) {
 
 const manifest = { version, minAppVersion, files: collected };
 const outName = `patch-${version}.json`;
-const outPath = path.join(root, outName);
+const outPath = path.join(root, 'patches', outName);
 fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2));
 console.log(`[publish-hotfix] 已生成 ${outName}（${collected.length} 个文件）`);
 

@@ -75,3 +75,14 @@ build-gui.js
 # 注意：resource/wiki 下 CHANGELOG_vX.Y.Z.md 仍按上方 CHANGELOG*.md 约定不入库（发 Release 用）
 !resource/docs/
 !resource/docs/**
+
+# 热补丁统一目录 patches/：保留正式 hotfix，忽略测试补丁（含带 proxy 的超大临时产物）
+patches/patch-*-test*.json
+
+# third_party/potplayer 由 copy-potplayer.js 运行时从本机复制，不入库
+third_party/potplayer/
+
+# 根目录调试/验证临时产物（可重生成，不入库）
+__v5_check.py
+p5.json
+test3_verify_report.html
