@@ -799,11 +799,30 @@ function init(): void {
 
     registerHandler('play-movie', handlePlayMovie);
     registerHandler('external-play', handleExternalPlay);
+    // [lc-655] 手柄/远程控制统一入口：转发到 controlCurrentPlayer(action)
+    registerHandler('media:control', handleMediaControl, { useHandle: true });
 
     registerAppHook('beforeQuit', handleBeforeQuit);
 
     // 异步预准备内置 PotPlayer 的隔离副本（首次复制 209MB，避免播放时阻塞）
     setImmediate(prepareBundledPotPlayer);
+}
+
+/**
+ * [lc-655] 手柄/远程控制 IPC：media:control <action> → controlCurrentPlayer(action)。
+ * 白名单校验 action，防止任意字符串注入播放器命令。
+ */
+const CONTROL_ACTIONS: ply.PlayerControlAction[] = [
+    'playpause', 'play', 'pause', 'seek-back', 'seek-fwd',
+    'speed-up', 'speed-down', 'next', 'prev', 'stop',
+];
+async function handleMediaControl(_event: any, action: string): Promise<{ ok: boolean; handled?: boolean }> {
+    if (!CONTROL_ACTIONS.includes(action as ply.PlayerControlAction)) {
+        log.warn(`[media:control] 非法动作: ${action}`);
+        return { ok: false };
+    }
+    const handled = controlCurrentPlayer(action as ply.PlayerControlAction);
+    return { ok: true, handled };
 }
 
 /**
