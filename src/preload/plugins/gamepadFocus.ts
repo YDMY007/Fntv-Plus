@@ -98,6 +98,8 @@ function isAuxElement(el: HTMLElement): boolean {
     // 但【保留汉堡键容器】(lg:!hidden, embyWall 强制常显+开合抽屉) 不被误排除。
     const inTopBar = el.closest('div.relative.z-20.flex.items-center.justify-between');
     if (inTopBar && !el.closest('[class*="lg:!hidden"]')) return true;
+    // [lc-672] embyWall 注入的「刷新页面」按钮(顶栏, location.reload) = 纯辅助工具, 排除
+    if (el.closest('#fnos-refresh-btn')) return true;
     if (el.closest('.play-mask__btn--play')) return true;
     const r = el.getBoundingClientRect();
     if (r.width === 90 && r.height === 90 && el.classList.contains('cursor-pointer')) return true;
