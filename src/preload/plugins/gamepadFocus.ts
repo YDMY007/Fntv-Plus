@@ -57,7 +57,10 @@ function ensureFrame(): HTMLDivElement {
     frameEl.style.cssText = [
         'position:fixed', 'left:0', 'top:0',
         'pointer-events:none',
-        'z-index:2147483000',
+        // [lc-683] z-index 提到最高(2147483647)：设置面板 z=2147483600、二级弹窗遮罩
+        //   (embyWall 里 2147483700+, 浏览器 clamp 到 2147483647) 都高于旧值 2147483000,
+        //   导致白框被画在面板/遮罩背后→看不见也控制不到。
+        'z-index:2147483647',
         'border:3px solid #fff',
         'border-radius:12px',
         // [lc-668] 更优雅：220ms easeOutCubic 缓动 + 呼吸光晕
@@ -76,7 +79,8 @@ function showHint(): void {
     hintEl.textContent = '手柄导航：摇杆/方向键移动 · A 确认 · B 返回';
     hintEl.style.cssText = [
         'position:fixed', 'left:50%', 'bottom:36px', 'transform:translateX(-50%)',
-        'z-index:2147483001', 'background:rgba(0,0,0,.78)', 'color:#fff',
+        // [lc-683] 同提到最高层级, 弹窗打开时提示条也可见
+        'z-index:2147483647', 'background:rgba(0,0,0,.78)', 'color:#fff',
         'padding:8px 18px', 'border-radius:10px', 'font-size:14px',
         'letter-spacing:.5px', 'border:1px solid rgba(255,255,255,.35)',
         'pointer-events:none', 'transition:opacity .6s ease',
@@ -236,6 +240,10 @@ function focusEl(el: HTMLElement): void {
     focusedEl = el;
     active = true;
     const f = ensureFrame();
+    // [lc-683] 重新挂到 body 末尾：弹窗遮罩(embyWall) z-index 也被 clamp 到 2147483647,
+    //   与白框同级 → 绘制顺序决定谁在上。把白框移到末尾保证永远绘制在弹窗遮罩之上,
+    //   否则二级弹窗打开后白框会被遮罩盖住(仍"控制不到")。
+    if (f.parentNode === document.body) document.body.appendChild(f);
     const r = el.getBoundingClientRect();
     f.style.left = r.left + 'px';
     f.style.top = r.top + 'px';
