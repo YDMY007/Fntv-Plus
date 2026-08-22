@@ -85,7 +85,11 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
         .filter(b => !b.hasAttribute('data-mpv-btn') && !b.hasAttribute('data-custom-play')
             // [lc-231] 排除我们自建 UI(设置面板等, 带 data-fnos-ui 标记)内的按钮:
             // 否则「播放器」导航按钮会被误判为播放键并挂捕获拦截, 吃掉点击导致分类打不开
-            && !(b.closest && b.closest('[data-fnos-ui]')));
+            && !(b.closest && b.closest('[data-fnos-ui]'))
+            // [lc-661] 排除隐藏/离屏按钮: 个人视频详情页(/v/other/)初始渲染存在瞬态隐藏的
+            //   「播放」副本(display:none, offsetParent=null), 命中它会把克隆体插进隐藏子树
+            //   → 注入的 MPV 按钮永远不可见。剧集页(/v/tv|movie/)无此副本故一直正常。
+            && b.offsetParent !== null);
     if (buttons.length === 0) return null;
 
     // 1) 主播放按钮：primary 样式 + 播放语义文本（电影/详情页主按钮最常见形态）
@@ -136,6 +140,11 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
         existing.remove();
         const ref = findReferenceButton();
         if (ref) ref.removeAttribute('data-mpv-btn'); // 清除占用标记，允许重新注入新播放器按钮
+    } else {
+        // [lc-661] 克隆被 React 重渲染移除(无 [data-custom-play] 残留)时: 清除可见参考按钮上的
+        //   占用标记, 否则下一轮 findReferenceButton 会跳过它(且已无隐藏副本可 fallback)→ 按钮永久消失。
+        const marked = document.querySelector('button[data-mpv-btn]') as HTMLButtonElement | null;
+        if (marked && marked.offsetParent !== null) marked.removeAttribute('data-mpv-btn');
     }
     const referenceButton = findReferenceButton();
     if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;

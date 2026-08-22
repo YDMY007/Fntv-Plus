@@ -140,11 +140,13 @@ export function tryGetItemGuidFromOriginalLogic(button: HTMLElement): Promise<st
     });
 }
 
-// [lc-602] 支持 /v/video/（个人视频/未刮削视频详情页）：之前只认 movie|tv → 个人视频播放按钮拿不到 guid
+// [lc-602] 支持 /v/video/（未刮削视频详情页）：之前只认 movie|tv → 视频播放按钮拿不到 guid
 // [lc-630] 支持 /v/live/（电视直播）：直播频道 ID 是 64 位 hex（如 /v/live/e7c0e9b1...15c），
 //   而普通 item guid 是 32 位。直播 DOM 提取失败 → dispatchEvent → 飞牛弹「播放失败」+
 //   旧缓存兜底播上次视频。故 GUID_RE 加 live 路径 + 量词 {32,64} 兼容两种长度。
-export const GUID_RE = /\/v\/(?:movie|tv|video|live)\/(?:season\/|episode\/)?([a-f0-9]{32,64})/i;
+// [lc-661] 支持 /v/other/（个人视频详情页，归在「其他」分类下）：之前漏掉 → 个人视频播放按钮
+//   克隆出来后点击取不到 guid 无法播放。实测个人视频详情页路由为 /v/other/<guid>。
+export const GUID_RE = /\/v\/(?:movie|tv|video|live|other)\/(?:season\/|episode\/)?([a-f0-9]{32,64})/i;
 
 // [lc-604] 从「继续观看」卡片提取 item guid：卡片是 div(无 button/a 链接),
 // 但海报 URL 含 guid —— /v/api/v1/sys/img/xx/yy/poster-{32hex}.webp

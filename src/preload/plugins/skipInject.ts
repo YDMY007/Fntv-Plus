@@ -64,7 +64,7 @@ const triggeredGuids = new Set<string>();
  * fnOS 标准 GUID 正则（32 位十六进制，无连字符）。
  * 与 playMaskButton.ts 的 GUID_RE 保持一致。
  */
-const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
+const GUID_RE = /\/v\/(?:movie|tv|video|other)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
 
 /** 通过 fetch/XHR 拦截捕获的 guid（最可靠，优先使用） */
 let interceptedGuid: string | null = null;

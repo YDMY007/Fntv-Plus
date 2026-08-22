@@ -2837,7 +2837,7 @@ function injectVideoPreviewExternalPlay(): void {
         // - 正确: 从 location.pathname 提取(/v/video/{32hex} / /v/tv/{32hex} / /v/movie/{32hex})
         // - 错误(旧 lc-596): 从 video.src 提 media/range/{32hex} 走 getPlayInfo 找不到 item, 失败
         const path = (location.pathname || '').replace(/\/+$/, '');
-        const m = path.match(/\/v\/(?:movie|tv|video)\/(?:season\/|episode\/)?([a-f0-9]{32})/i);
+        const m = path.match(/\/v\/(?:movie|tv|video|other)\/(?:season\/|episode\/)?([a-f0-9]{32})/i);
         if (!m) { alert('未能从当前页面提取视频 ID(URL=' + path + ')'); return; }
         const itemGuid = m[1];
         log('[播放页 MPV] 打开 item:', itemGuid);
