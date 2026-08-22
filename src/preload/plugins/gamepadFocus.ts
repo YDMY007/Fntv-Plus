@@ -131,10 +131,17 @@ function isVisible(el: HTMLElement): boolean {
 }
 
 function collectCandidates(): HTMLElement[] {
+    // [lc-676] 侧边栏抽屉打开时：候选范围【限定在抽屉内】，白框框死侧边栏，
+    //   不收集当前页面其他内容(避免白框跳出侧边栏选到页面卡片/顶栏元素)。
+    //   scope = 抽屉元素(.fixed.inset-0[class*="lg:!hidden"] 且含 drawer-open class)
+    //   或整页 document。embyWall 抽屉开合用 drawer-open class 驱动，以此判定。
+    const drawerEl = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
+    const scope: Document | HTMLElement =
+        drawerEl && drawerEl.classList.contains('drawer-open') ? (drawerEl as HTMLElement) : document;
     const map = new Map<HTMLElement, boolean>();
     for (const sel of CANDIDATE_SELECTORS) {
         let nodes: NodeListOf<Element> | null = null;
-        try { nodes = document.querySelectorAll(sel); } catch { continue; }
+        try { nodes = scope.querySelectorAll(sel); } catch { continue; }
         nodes.forEach((n) => {
             const el = n as HTMLElement;
             if (!el || isInOurUI(el) || !isVisible(el)) return;
