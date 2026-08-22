@@ -35,6 +35,14 @@ const CANDIDATE_SELECTORS = [
     //    ≡ svg 冒泡到容器, embyWall capture hook 拦截→开合抽屉。
     'a.fnos-play',
     '[class*="lg:!hidden"]:not([class*="inset-0"]) svg.cursor-pointer',
+    // [lc-685] 设置面板/原生表单控件纳入焦点候选:
+    //  - label:has(input) 整行开关(点击整行即切换内部 checkbox/radio)
+    //  - 裸 input[checkbox/radio] / select 自身(作为兜底; 含在 label 内时由去重保留外层 label)
+    //  复选框(38x21)低于 isVisible 24px 下限, 故不单独聚焦裸 checkbox, 改聚焦整行 label。
+    'label',
+    'input[type="checkbox"]',
+    'input[type="radio"]',
+    'select',
 ];
 
 let frameEl: HTMLDivElement | null = null;
@@ -208,6 +216,8 @@ function collectCandidates(overlayArg?: HTMLElement | null): HTMLElement[] {
             if (!el || (isInOurUI(el) && !inScopedOverlay) || !isVisible(el)) return;
             // [lc-670] 排除辅助/装饰元素(顶栏图标按钮、hero 右侧 90x90 小缩略图)
             if (isAuxElement(el)) return;
+            // [lc-685] label 只聚焦"包裹了控件"的(整行开关); 纯文字 label 无交互意义, 跳过。
+            if (el.tagName === 'LABEL' && !(el as HTMLLabelElement).querySelector('input,select,textarea')) return;
             map.set(el, true);
         });
     }
@@ -244,15 +254,19 @@ function focusEl(el: HTMLElement): void {
     //   与白框同级 → 绘制顺序决定谁在上。把白框移到末尾保证永远绘制在弹窗遮罩之上,
     //   否则二级弹窗打开后白框会被遮罩盖住(仍"控制不到")。
     if (f.parentNode === document.body) document.body.appendChild(f);
+    // [lc-685] 先就近滚动"最近的滚动容器"(面板内 rightContent/leftNav 或整页),
+    //   让目标元素进入可见区; 再按滚动后的位置定位白框。
+    //   旧逻辑仅在元素"超出窗口视口"时才 scrollIntoView —— 但固定在屏幕中央的设置面板里,
+    //   元素可能"仍在窗口内"却"被面板内容区 overflow 裁剪不可见" → 白框画在裁剪区外、
+    //   继续下移时又误触发整页滚动。scrollIntoView({block:'nearest'}) 只滚需要的那一层容器,
+    //   不会误滚整页。用即时滚动(非 smooth)以便紧接着用滚动后的 rect 定位白框。
+    try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* ignore */ }
     const r = el.getBoundingClientRect();
     f.style.left = r.left + 'px';
     f.style.top = r.top + 'px';
     f.style.width = r.width + 'px';
     f.style.height = r.height + 'px';
     f.style.display = 'block';
-    if (r.top < 0 || r.bottom > window.innerHeight || r.left < 0 || r.right > window.innerWidth) {
-        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch { /* ignore */ }
-    }
 }
 
 function hide(): void {
@@ -390,6 +404,9 @@ try {
     window.addEventListener('mousemove', () => { if (active) hide(); }, { passive: true });
     window.addEventListener('mousedown', () => { if (active) hide(); }, { passive: true });
     // 滚动/尺寸变化时重贴白框（防抖）
+    // [lc-685] 用捕获阶段监听 scroll: 面板内 rightContent/leftNav 等内层滚动容器
+    //   的 scroll 事件不冒泡, 普通 window 监听收不到 → 白框不跟手。捕获阶段可截获
+    //   任意滚动容器的 scroll 事件, 保证内层滚动时白框同步重贴。
     let scrollTimer = 0;
     window.addEventListener('scroll', () => {
         if (!active || !focusedEl) return;
@@ -404,6 +421,6 @@ try {
                 f.style.height = r.height + 'px';
             }
         }, 80);
-    }, { passive: true });
+    }, { passive: true, capture: true });
     window.addEventListener('resize', () => { if (active && focusedEl && focusedEl.isConnected) focusEl(focusedEl); });
 } catch { /* ignore */ }
