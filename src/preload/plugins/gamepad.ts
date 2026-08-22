@@ -238,12 +238,13 @@ function poll(): void {
     }
 
     const btnStates: boolean[] = (pad.buttons || []).map((b: any) => (typeof b === 'boolean' ? b : !!(b && b.pressed)));
+    // [lc-669] 降低死区(0.30)/方向阈值(0.40)：轻推摇杆也能触发
     const axes: number[] = (pad.axes || []).map((a: any) => {
         const v = typeof a === 'number' ? a : ((a && a.value) || 0);
-        return Math.abs(v) < 0.35 ? 0 : v;
+        return Math.abs(v) < 0.30 ? 0 : v;
     });
 
-    const joyDead = 0.5;
+    const joyDead = 0.40;
     const joyUp = axes[1] !== undefined && axes[1] < -joyDead;
     const joyDown = axes[1] !== undefined && axes[1] > joyDead;
     const joyLeft = axes[0] !== undefined && axes[0] < -joyDead;
@@ -259,19 +260,31 @@ function poll(): void {
         }
     }
 
-    // [lc-667] 统一方向输入（十字键 12-15 + 左摇杆）：激活/移动白色焦点框；
-    //   播放中左/右仍 seek；长按 >320ms 后每 130ms 连续移动（仅焦点模式）。
+    // [lc-669] 方向输入——关键修复：恢复「边沿检测」。
+    //   lc-667 重写时把十字键/摇杆并入 activeDir 却丢了边沿，导致按住期间每 50ms 重复 move
+    //   → 十字键不能精准一个一跳、摇杆要很轻地"点"一下才单跳。
+    //   现在：十字键=按下沿(prevButtons false→true)，摇杆=轴从 0→非0 沿(prevAxes)，只触发一次；
+    //   长按 >320ms 后每 130ms 才进入连跳（仅焦点模式）。
     const isDpadDown = (i: number): boolean => !!(pad.buttons[i] && pad.buttons[i].pressed);
+    const dpadUp = isDpadDown(12), dpadDown = isDpadDown(13), dpadLeft = isDpadDown(14), dpadRight = isDpadDown(15);
+
+    const edgeDir: 'up' | 'down' | 'left' | 'right' | null =
+        ((dpadUp && !prevButtons[12]) || (joyUp && prevAxes[1] === 0)) ? 'up' :
+        ((dpadDown && !prevButtons[13]) || (joyDown && prevAxes[1] === 0)) ? 'down' :
+        ((dpadLeft && !prevButtons[14]) || (joyLeft && prevAxes[0] === 0)) ? 'left' :
+        ((dpadRight && !prevButtons[15]) || (joyRight && prevAxes[0] === 0)) ? 'right' : null;
+    if (edgeDir) dirInput(edgeDir);
+
+    // 当前按住的方向（用于长按连跳）
     const activeDir: 'up' | 'down' | 'left' | 'right' | null =
-        (joyUp || isDpadDown(12)) ? 'up' :
-        (joyDown || isDpadDown(13)) ? 'down' :
-        (joyLeft || isDpadDown(14)) ? 'left' :
-        (joyRight || isDpadDown(15)) ? 'right' : null;
+        (joyUp || dpadUp) ? 'up' :
+        (joyDown || dpadDown) ? 'down' :
+        (joyLeft || dpadLeft) ? 'left' :
+        (joyRight || dpadRight) ? 'right' : null;
 
     if (activeDir) {
         const now = Date.now();
         if (heldDir !== activeDir) { heldDir = activeDir; dirFirstAt = now; dirLastRepeat = 0; }
-        dirInput(activeDir);
         if (focusNav.isActive() && now - dirFirstAt > 320 && now - dirLastRepeat > 130) {
             dirLastRepeat = now;
             focusNav.move(activeDir);
