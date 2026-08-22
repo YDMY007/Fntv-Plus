@@ -199,8 +199,8 @@ export class UpdateChecker {
         // 确保：① 开发者测试版版本号再高也不会挡住官方更新；② 用户已应用热补丁后，正式版(全量包)更新总能直接盖过。
         const baseline = (updateType === 'hotfix' && applied && /-hotfix\d*$/i.test(applied)) ? applied : this.currentVersion;
 
-        // 注意: semver 把 -hotfix 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
-        // 故统一走自定义 versionGreater(把 -hotfix 后缀视为高于同 base 的正式版)。
+        // 注意: semver 把 -hotfix/-full 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
+        // 故统一走自定义 versionGreater：无后缀最低(0)，hotfix(2) > 无后缀，full(3) > hotfix，test(1) 最低。
         const hasUpdate = !isTest && this.versionGreater(ver, baseline);
         log.info(`[update-debug] checkGitee: ver=${ver} type=${updateType} applied=${applied} baseline=${baseline} hasUpdate=${hasUpdate}`);
 
@@ -249,10 +249,10 @@ export class UpdateChecker {
 
     /**
      * 解析版本号中的类型后缀为可比较的 rank。
-     * 无后缀=0；`-test`/`-testN`=1xx；`-full`/`-fullN`=2xx；`-hotfix`/`-hotfixN`=3xx（xx=序号）。
-     * 关键：[lc-501] `-hotfix` 权重高于 `-full`：同一 base 版本下，
-     *   已装该 base 的用户应优先收到「热补丁」提示（无需重下全量包），
-     *   而不是被全量发布盖掉导致热补丁永远推不到。
+     * 无后缀=0；`-test`/`-testN`=1xx；`-hotfix`/`-hotfixN`=2xx；`-full`/`-fullN`=3xx（xx=序号）。
+     * [lc-661] 反转 full/hotfix：full(3) > hotfix(2) > test(1) > 无后缀(0)。
+     *   典型场景：安装「全量包」的用户应用内显示 3.4.1-full，不应再收到同版本 3.4.1-hotfix 热补丁提示；
+     *   选择「无后缀」的用户基线为 3.4.1，会正常收到 3.4.1-hotfix 热补丁。
      *   跨版本升级仍由 base 比较决定（base 高者优先），不受 rank 影响。
      *   `-test` 权重最低，开发者测试版绝不向普通用户推送。
      */
@@ -260,8 +260,8 @@ export class UpdateChecker {
         const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
         if (m) {
             const suffix = m[0].toLowerCase();
-            // hotfix=3 > full=2 > test=1：同 base 下热补丁优先于全量包
-            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 2 : 3);
+            // full=3 > hotfix=2 > test=1：同 base 下全量包高于热补丁
+            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 3 : 2);
             const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
             return { base: m[1], rank: typeRank * 100 + idx };
         }
@@ -282,8 +282,9 @@ export class UpdateChecker {
 
     /**
      * 版本比较：base 优先，base 相同则比 rank（类型/序号）。
-     * 关键修正：`-hotfix` 视为高于同 base 的正式版；`-test` 低于真实 hotfix/full 但高于无后缀同 base。
-     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true；versionGreater('1.2.3-hotfix','1.2.3-test') === true。
+     * [lc-661] rank: full(3) > hotfix(2) > test(1) > 无后缀(0)。
+     *   故「无后缀」用户会收到同版本 -hotfix 热补丁；而 -full 用户同版本不再收 -hotfix（全量轨道优先）。
+     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true；versionGreater('1.2.3-hotfix','1.2.3-full') === false。
      */
     private versionGreater(latest: string, baseline: string): boolean {
         const a = this.parseVersion(latest);

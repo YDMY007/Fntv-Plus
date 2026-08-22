@@ -1,7 +1,7 @@
 import { app, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { registerHandler } from '../core/ipcHandler';
-import { getAppliedPatchVersion, getCustomVersion, setCustomVersion } from '../../../modules/fn_config/config';
+import { getAppliedPatchVersion, getCustomVersion, setCustomVersion, getAppDisplayVersion } from '../../../modules/fn_config/config';
 import * as log from '../../../modules/logger';
 
 // [fix] 兼容旧 base：若 base 的 config 未导出 getCustomVersion/setCustomVersion（如 3.4.0），
@@ -36,9 +36,10 @@ async function handleAutoCheckUpdate(event: IpcMainEvent): Promise<void> {
 // [lc-495] 已应用热补丁后，显示的「当前版本」应同步为补丁版本（如 3.3.7-test1），
 //   而非安装包版本；取 applied 版本为优先，未打补丁时回退安装版本。
 // [lc-634] 版号切换：开发者自定义版本号(customVersion)优先于安装包版本。
-//   优先级: appliedPatch > customVersion > app.getVersion()
+// [lc-661] 应用内显示版本号(appDisplayVersion，构建时写入)优先于安装包纯净版本。
+//   优先级: appliedPatch > customVersion > appDisplayVersion > app.getVersion()
 function handleGetVersion(event: IpcMainEvent): void {
-    const displayVersion = getAppliedPatchVersion() || safeGetCustomVersion() || app.getVersion();
+    const displayVersion = getAppliedPatchVersion() || safeGetCustomVersion() || getAppDisplayVersion() || app.getVersion();
     event.reply('version-info', {
         version: displayVersion,
         name: app.getName()
@@ -74,7 +75,14 @@ async function handleVerifyUnlockCode(_event: IpcMainInvokeEvent, code?: string)
 
 // 注册更新相关处理器
 function init(): void {
-    // [lc-634] 启动时若有自定义版本号(版号切换残留)，同步到 updateChecker baseline
+    // [lc-661] 更新检测基线优先级: 自定义版号(customVersion) > 应用内显示版号(appDisplayVersion) > 安装包版本(app.getVersion())
+    //   应用内显示版号反映构建时选定的后缀轨道(-full/-hotfix/无后缀)，决定更新接收策略。
+    const appDisplay = getAppDisplayVersion();
+    if (appDisplay) {
+        updateChecker.setCurrentVersion(appDisplay);
+        log.info(`[update] 启动加载应用内显示版本号: ${appDisplay}`);
+    }
+    // [lc-634] 启动时若有自定义版本号(版号切换残留)，同步到 updateChecker baseline（优先级高于 appDisplayVersion）
     const custom = safeGetCustomVersion();
     if (custom) {
         updateChecker.setCurrentVersion(custom);

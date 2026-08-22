@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import axios from 'axios';
-import { getAppliedPatchVersion, setAppliedPatchVersion, getAppliedPatchSignature, setAppliedPatchSignature } from '../fn_config/config';
+import { getAppliedPatchVersion, setAppliedPatchVersion, getAppliedPatchSignature, setAppliedPatchSignature, getAppDisplayVersion } from '../fn_config/config';
 import log from '../logger';
 
 /**
@@ -450,21 +450,24 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-full=2xx；-hotfix=3xx（xx=序号, 如 -hotfix2=302）
-// [lc-501] hotfix rank > full rank：同 base 下热补丁优先于全量包，避免全量发布盖掉热补丁导致已装用户收不到热补丁提示
+// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-full=3xx；-hotfix=2xx（xx=序号, 如 -hotfix2=202）
+// [lc-661] 反转 full/hotfix：full(3) > hotfix(2) > test(1) > 无后缀(0)。
+//   典型场景：应用内显示 3.4.1-full 的全量包用户同版本不再收 3.4.1-hotfix 热补丁；
+//   无后缀(3.4.1)用户则会正常收到 3.4.1-hotfix 热补丁。
 function parseVersion(v: string): { base: string; rank: number } {
     const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
     if (m) {
         const suffix = m[0].toLowerCase();
-        // hotfix=3 > full=2 > test=1：同 base 下热补丁优先
-        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 2 : 3);
+        // full=3 > hotfix=2 > test=1：同 base 下全量包高于热补丁
+        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 3 : 2);
         const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
         return { base: m[1], rank: typeRank * 100 + idx };
     }
     return { base: v || '0', rank: 0 };
 }
 
-// 版本比较：base 优先，base 相同比 rank（类型/序号）。-test 视为低于真实 hotfix/full，但高于无后缀同 base
+// 版本比较：base 优先，base 相同比 rank（类型/序号）。[lc-661] full(3) > hotfix(2) > test(1) > 无后缀(0)。
+// -full 用户同版本不再收 -hotfix；-hotfix 用户链式递进；无后缀(基线=安装版本)会收同版本 -hotfix。
 function versionGreater(latest: string, baseline: string): boolean {
     const a = parseVersion(latest);
     const b = parseVersion(baseline);
@@ -543,10 +546,9 @@ async function finalizeAfterApply(result: ApplyResult): Promise<ApplyResult> {
  */
 export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
     const applied = getAppliedPatchVersion();
-    // [fix] 基线取「已应用补丁版本」或「应用安装版本」，不可为空。
-    //   原逻辑 applied 为空时 `!applied` 直接判有新更新，且 versionGreater 把空基线当 0，
-    //   导致「从未应用过补丁」也误报「发现新热补丁」。
-    const baseline = applied || app.getVersion();
+    // [lc-661] 基线优先级: 已应用补丁版本 > 应用内显示版本(appDisplayVersion) > 安装包版本(app.getVersion())。
+    //   与 updateChecker 保持一致：选 -full 轨道的用户同版本不再提示热补丁。
+    const baseline = applied || getAppDisplayVersion() || app.getVersion();
     const currentVersion = baseline;
     try {
         // [lc-506] 优先走国内 Gitee 公开 raw（无 token）
@@ -823,8 +825,8 @@ async function applyManifestFiles(manifest: PatchManifest, version: string, onPr
 export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
     const onProgress = opts && opts.onProgress;
     const applied = getAppliedPatchVersion();
-    // [fix] 与 checkLatestPatchInfo 一致：基线取已应用版本或安装版本，避免空基线误判
-    const baseline = applied || app.getVersion();
+    // [lc-661] 与 checkLatestPatchInfo 一致：基线 = 已应用版本 > 应用内显示版本 > 安装版本
+    const baseline = applied || getAppDisplayVersion() || app.getVersion();
     log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}, 基线版本: ${baseline}`);
 
     // [lc-506] 优先走国内 Gitee 公开 raw（无 token）：读 update-check.json 拿版本 + 补丁包直链

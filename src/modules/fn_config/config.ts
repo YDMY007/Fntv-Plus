@@ -305,6 +305,21 @@ export function setCustomVersion(version: string): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// [lc-661] 读取 package.json 的 appDisplayVersion（一键构建时写入）。
+// 形如 3.4.1-full / 3.4.1-hotfix / 3.4.1（无后缀）；用作「应用内版本显示」与「更新检测基线」。
+// 区别于 package.json.version（始终干净 x.y.z，作产物安装包版本与 git tag）。
+// 存量旧包无此字段 → 返回 ''，调用方回退 app.getVersion()。
+export function getAppDisplayVersion(): string {
+    try {
+        const pkgPath = path.join(app.getAppPath(), 'package.json');
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const v = pkg && pkg.appDisplayVersion;
+        return (typeof v === 'string' && v.trim()) ? v.trim() : '';
+    } catch {
+        return '';
+    }
+}
+
 // 添加历史记录（域名、账号、加密密码、HTTPS设置）
 export function addHistory({ domain, account, password, useHttps, loginType, fnId }: AddHistoryParams): void {
     const config: Config = readConfig() || {};
@@ -1066,5 +1081,7 @@ Object.assign(module.exports, {
     // 登录背景图路径
     getLoginBgPath, setLoginBgPath,
     // fnOS 系统桌面地址（切换系统页面用，留空=自动）
-    getSystemPageUrl, setSystemPageUrl
+    getSystemPageUrl, setSystemPageUrl,
+    // [lc-661] 应用内显示版本号（构建时写入 package.json.appDisplayVersion）
+    getAppDisplayVersion
 });
