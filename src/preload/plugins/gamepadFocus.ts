@@ -133,18 +133,26 @@ function isVisible(el: HTMLElement): boolean {
 function collectCandidates(): HTMLElement[] {
     // [lc-676] 侧边栏抽屉打开时：候选范围【限定在抽屉内】，白框框死侧边栏，
     //   不收集当前页面其他内容(避免白框跳出侧边栏选到页面卡片/顶栏元素)。
-    //   scope = 抽屉元素(.fixed.inset-0[class*="lg:!hidden"] 且含 drawer-open class)
-    //   或整页 document。embyWall 抽屉开合用 drawer-open class 驱动，以此判定。
+    // [lc-677] 自建设置面板(#fnos-settings-panel, display:flex)打开时：候选限定面板内，
+    //   支持手柄操作设置面板控件；设置面板优先于抽屉(它是模态覆盖层)。
+    //   scope = 对应容器或整页 document。
     const drawerEl = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
+    const drawerOpen = !!drawerEl && drawerEl.classList.contains('drawer-open');
+    const settingsPanel = document.getElementById('fnos-settings-panel') as HTMLElement | null;
+    const settingsOpen = !!settingsPanel && settingsPanel.style.display === 'flex';
     const scope: Document | HTMLElement =
-        drawerEl && drawerEl.classList.contains('drawer-open') ? (drawerEl as HTMLElement) : document;
+        settingsOpen ? settingsPanel : (drawerOpen ? (drawerEl as HTMLElement) : document);
+    // [lc-677] 抽屉/设置面板等自建 overlay 内部的控件(data-fnos-ui)需要可聚焦
+    //   (侧栏底部"设置/切换系统页面/软件反馈"按钮、设置面板内全部按钮/开关)；
+    //   整页模式仍排除 data-fnos-ui，避免自建 UI 干扰页面导航。
+    const inScopedOverlay = scope !== document;
     const map = new Map<HTMLElement, boolean>();
     for (const sel of CANDIDATE_SELECTORS) {
         let nodes: NodeListOf<Element> | null = null;
         try { nodes = scope.querySelectorAll(sel); } catch { continue; }
         nodes.forEach((n) => {
             const el = n as HTMLElement;
-            if (!el || isInOurUI(el) || !isVisible(el)) return;
+            if (!el || (isInOurUI(el) && !inScopedOverlay) || !isVisible(el)) return;
             // [lc-670] 排除辅助/装饰元素(顶栏图标按钮、hero 右侧 90x90 小缩略图)
             if (isAuxElement(el)) return;
             map.set(el, true);
