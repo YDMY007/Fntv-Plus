@@ -5714,6 +5714,36 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     gpDesc.textContent = '支持使用手柄（Xbox/PS/通用）遥控：播放中控制播放器（播放暂停/快退快进/倍速/下一集），未播放时在影视界面导航（方向键/确认/返回）。可自定义各功能对应的按键。';
     secBodyGamepad.appendChild(gpDesc);
 
+    // [lc-680] 手柄连接状态：检测按钮 + 实时状态
+    const gpConnRow = document.createElement('div');
+    gpConnRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 8px;border-radius:8px;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);';
+    const gpConnDot = document.createElement('span');
+    gpConnDot.style.cssText = 'width:9px;height:9px;border-radius:50%;background:var(--fnos-ui-warn);flex-shrink:0;';
+    const gpConnText = document.createElement('span');
+    gpConnText.style.cssText = 'font-size:11px;color:var(--fnos-ui-text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    gpConnText.textContent = '未检测到手柄（先按一下手柄任意键激活）';
+    const gpDetectBtn = mkBtn('检测', true);
+    gpDetectBtn.style.cssText = (gpDetectBtn.style.cssText || '') + ';flex-shrink:0;';
+    gpConnRow.appendChild(gpConnDot); gpConnRow.appendChild(gpConnText); gpConnRow.appendChild(gpDetectBtn);
+    secBodyGamepad.appendChild(gpConnRow);
+
+    const gpUpdateConn = (): void => {
+      try {
+        const gpApi2 = (window as any).fntvGamepad;
+        const r = gpApi2 && gpApi2.detectGamepad ? gpApi2.detectGamepad() : null;
+        if (r && r.connected) {
+          gpConnDot.style.background = 'var(--fnos-ui-ok)';
+          gpConnText.textContent = '已连接：' + String(r.id || '手柄').slice(0, 60);
+        } else {
+          gpConnDot.style.background = 'var(--fnos-ui-warn)';
+          gpConnText.textContent = '未检测到手柄（先按一下手柄任意键激活）';
+        }
+      } catch { /* ignore */ }
+    };
+    gpDetectBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); gpUpdateConn(); });
+    gpUpdateConn();
+
     // 总开关
     const gpToggleRow = document.createElement('label');
     gpToggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;';
@@ -5725,6 +5755,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     gpToggle.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
     gpToggleRow.appendChild(gpToggleSpan); gpToggleRow.appendChild(gpToggle);
     secBodyGamepad.appendChild(gpToggleRow);
+
+    // [lc-680] 方向键固定说明（十字键/摇杆不可改映射）
+    const gpDirNote = document.createElement('div');
+    gpDirNote.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);line-height:1.6;margin:2px 6px 6px;padding:6px 8px;'
+      + 'border-left:3px solid var(--fnos-ui-accent);background:var(--fnos-ui-input-bg)!important;border-radius:4px;';
+    gpDirNote.innerHTML = '固定控制：<b style="color:var(--fnos-ui-text)">十字键 / 左摇杆</b> = 界面方向移动（播放中左右 = 快退/快进 5s），<b style="color:var(--fnos-ui-text)">A</b> = 确认/播放暂停，<b style="color:var(--fnos-ui-text)">B</b> = 返回。以下按键映射可自定义：';
+    secBodyGamepad.appendChild(gpDirNote);
 
     // 功能 → 按键 选择行容器
     const gpRows: { id: string; select: HTMLSelectElement }[] = [];
@@ -5744,11 +5781,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     ];
 
     // 构建一个功能映射行
-    const gpBuildRow = (label: string, funcId: string, select: HTMLSelectElement): void => {
+    const gpBuildRow = (label: string, funcId: string, select: HTMLSelectElement, defaultBtn?: string): void => {
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-radius:6px;';
         const span = document.createElement('span');
-        span.textContent = label;
+        // [lc-680] 显示默认值提示
+        span.textContent = defaultBtn ? label + `（默认 ${defaultBtn}）` : label;
         span.style.cssText = 'color:var(--fnos-ui-text);font-size:12.5px;';
         select.style.cssText = 'width:150px;height:28px;font-size:11.5px;color:var(--fnos-ui-text);'
             + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:2px 6px;box-sizing:border-box;';
@@ -5774,12 +5812,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     };
 
     // 播放控制：播放暂停 / 快退 / 快进 / 倍速- / 倍速+ / 下一集
-    const gpPlayPauseSel = gpSelect(); gpBuildRow('播放 / 暂停', 'playPause', gpPlayPauseSel);
-    const gpSeekBackSel = gpSelect(); gpBuildRow('快退 (5s)', 'seekBack', gpSeekBackSel);
-    const gpSeekFwdSel = gpSelect(); gpBuildRow('快进 (5s)', 'seekFwd', gpSeekFwdSel);
-    const gpSpeedDownSel = gpSelect(); gpBuildRow('倍速 -', 'speedDown', gpSpeedDownSel);
-    const gpSpeedUpSel = gpSelect(); gpBuildRow('倍速 +', 'speedUp', gpSpeedUpSel);
-    const gpNextSel = gpSelect(); gpBuildRow('下一集', 'next', gpNextSel);
+    const gpPlayPauseSel = gpSelect(); gpBuildRow('播放 / 暂停', 'playPause', gpPlayPauseSel, 'A');
+    const gpSeekBackSel = gpSelect(); gpBuildRow('快退 (5s)', 'seekBack', gpSeekBackSel, 'LB');
+    const gpSeekFwdSel = gpSelect(); gpBuildRow('快进 (5s)', 'seekFwd', gpSeekFwdSel, 'RB');
+    const gpSpeedDownSel = gpSelect(); gpBuildRow('倍速 -', 'speedDown', gpSpeedDownSel, 'LT');
+    const gpSpeedUpSel = gpSelect(); gpBuildRow('倍速 +', 'speedUp', gpSpeedUpSel, 'RT');
+    const gpNextSel = gpSelect(); gpBuildRow('下一集', 'next', gpNextSel, 'Y');
 
     // 界面导航组
     const gpNavTitle = document.createElement('div');
@@ -5787,8 +5825,51 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     gpNavTitle.textContent = '界面导航（未播放时生效）';
     secBodyGamepad.appendChild(gpNavTitle);
 
-    const gpBackSel = gpSelect(); gpBuildRow('返回 / 关闭', 'navBack', gpBackSel);
-    const gpSelectSel = gpSelect(); gpBuildRow('勾选 / 开关', 'navSelect', gpSelectSel);
+    const gpBackSel = gpSelect(); gpBuildRow('返回 / 关闭', 'navBack', gpBackSel, 'B');
+    const gpSelectSel = gpSelect(); gpBuildRow('勾选 / 开关', 'navSelect', gpSelectSel, 'X');
+
+    // [lc-680] 高级设置（摇杆灵敏度 / 连跳节奏，可折叠）
+    const gpAdvParams: { key: string; label: string; min: number; max: number; step: number; fmt: (v: number) => string }[] = [
+        { key: 'stickDeadzone', label: '摇杆死区（归零阈值）', min: 0.10, max: 0.50, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { key: 'directionThreshold', label: '方向触发阈值', min: 0.20, max: 0.80, step: 0.05, fmt: (v) => v.toFixed(2) },
+        { key: 'repeatDelay', label: '长按连跳延迟 (ms)', min: 100, max: 800, step: 20, fmt: (v) => String(Math.round(v)) },
+        { key: 'repeatInterval', label: '连跳间隔 (ms)', min: 50, max: 400, step: 10, fmt: (v) => String(Math.round(v)) },
+    ];
+    const gpAdvTitle = document.createElement('div');
+    gpAdvTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;cursor:pointer;user-select:none;';
+    gpAdvTitle.textContent = '▶ 高级设置（灵敏度 / 连跳）';
+    const gpAdvBody = document.createElement('div');
+    gpAdvBody.style.cssText = 'display:none;';
+    gpAdvTitle.addEventListener('click', () => {
+        const show = gpAdvBody.style.display !== 'block';
+        gpAdvBody.style.display = show ? 'block' : 'none';
+        gpAdvTitle.textContent = (show ? '▼' : '▶') + ' 高级设置（灵敏度 / 连跳）';
+    });
+    secBodyGamepad.appendChild(gpAdvTitle);
+    secBodyGamepad.appendChild(gpAdvBody);
+    const gpAdvRanges: Record<string, HTMLInputElement> = {};
+    const gpAdvVals: Record<string, HTMLSpanElement> = {};
+    for (const it of gpAdvParams) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;';
+        const span = document.createElement('span');
+        span.textContent = it.label;
+        span.style.cssText = 'color:var(--fnos-ui-text);font-size:11.5px;flex:1;min-width:0;';
+        const val = document.createElement('span');
+        val.style.cssText = 'color:var(--fnos-ui-sec);font-size:11px;min-width:36px;text-align:right;';
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = String(it.min); range.max = String(it.max); range.step = String(it.step);
+        range.style.cssText = 'width:110px;accent-color:var(--fnos-ui-accent);';
+        range.addEventListener('input', () => { val.textContent = it.fmt(parseFloat(range.value)); });
+        row.appendChild(span); row.appendChild(range); row.appendChild(val);
+        gpAdvBody.appendChild(row);
+        gpAdvRanges[it.key] = range; gpAdvVals[it.key] = val;
+    }
+    const gpAdvHint = document.createElement('div');
+    gpAdvHint.style.cssText = 'font-size:10px;color:var(--fnos-ui-sub);margin:2px 6px 0;line-height:1.5;';
+    gpAdvHint.textContent = '死区越大摇杆需推越大力才响应；方向阈值同理。长按延迟/连跳间隔控制白框连续移动节奏（仅焦点导航时）。保存后立即生效。';
+    gpAdvBody.appendChild(gpAdvHint);
 
     // 按钮行
     const gpBtns = document.createElement('div');
@@ -5813,6 +5894,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             if (gpBtnOptions.some(o => o.value === val)) r.select.value = val;
             else r.select.selectedIndex = 0;
         }
+        // [lc-680] 高级参数回填滑块
+        for (const it of gpAdvParams) {
+            const v = (cfg as any)[it.key];
+            const def = gpApi && gpApi.advDefaults ? (gpApi.advDefaults as any)[it.key] : undefined;
+            const val = typeof v === 'number' && Number.isFinite(v) ? v : (typeof def === 'number' ? def : (it.min + it.max) / 2);
+            const clamped = Math.min(it.max, Math.max(it.min, val));
+            gpAdvRanges[it.key].value = String(clamped);
+            gpAdvVals[it.key].textContent = it.fmt(clamped);
+        }
     };
     (window as any).fntvGamepad = (window as any).fntvGamepad || {};
     const gpApi = (window as any).fntvGamepad;
@@ -5824,11 +5914,33 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             const cfg = gpApi && gpApi.getConfig ? gpApi.getConfig() : { enabled: true, bindings: {} };
             const bindings: Record<string, string> = { ...(cfg.bindings || {}) };
             for (const r of gpRows) bindings[r.id] = r.select.value;
-            const next = { enabled: gpToggle.checked, bindings };
+            // [lc-680] 按键冲突检测：同一按键绑定多个功能时告警并中止保存
+            const byBtn: Record<string, string[]> = {};
+            for (const [id, btn] of Object.entries(bindings)) {
+                (byBtn[btn] = byBtn[btn] || []).push(id);
+            }
+            const conflicts = Object.entries(byBtn).filter(([, ids]) => ids.length > 1);
+            if (conflicts.length) {
+                const names = (window as any).fntvGamepad && (window as any).fntvGamepad.funcs
+                    ? (window as any).fntvGamepad.funcs
+                    : [];
+                const desc = conflicts.map(([btn, ids]) => {
+                    const labels = ids.map(id => (names.find((f: any) => f.id === id) || {}).label || id);
+                    return `【${btn}】${labels.join(' / ')}`;
+                }).join('；');
+                gpStatus.textContent = '⚠ 按键冲突：' + desc + '。请改绑后再保存。';
+                gpStatus.style.color = 'var(--fnos-ui-warn)';
+                return;
+            }
+            // [lc-680] 收集高级参数
+            const adv: Record<string, number> = {};
+            for (const it of gpAdvParams) adv[it.key] = parseFloat(gpAdvRanges[it.key].value);
+            const next = { enabled: gpToggle.checked, bindings, ...adv };
             if (gpApi && gpApi.saveConfig) {
                 gpApi.saveConfig(next);
                 gpStatus.textContent = '已保存 ✓ 立即生效';
                 gpStatus.style.color = 'var(--fnos-ui-ok)';
+                gpUpdateConn();
             } else {
                 gpStatus.textContent = '保存失败：手柄插件未就绪';
                 gpStatus.style.color = 'var(--fnos-ui-warn)';

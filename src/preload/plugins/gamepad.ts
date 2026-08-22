@@ -55,15 +55,42 @@ export interface GamepadConfig {
     enabled: boolean;
     // 功能 id -> 按键名；未配置的功能用默认
     bindings: Partial<Record<string, PadBtnName>>;
+    // [lc-680] 高级参数（设置面板可调，缺省用默认值）
+    stickDeadzone?: number;      // 摇杆死区(轴归零阈值) 默认 0.30，范围 0.10~0.50
+    directionThreshold?: number; // 摇杆方向触发阈值 默认 0.40，范围 0.20~0.80
+    repeatDelay?: number;        // 长按连跳延迟 ms 默认 320，范围 100~800
+    repeatInterval?: number;     // 连跳间隔 ms 默认 130，范围 50~400
 }
 
 const CONFIG_KEY = 'fntvGamepad.config';
 const CONFIG_EVT = 'fntv-gamepad-config-changed';
 
+// [lc-680] 高级参数默认值 + 范围（设置面板滑块用，运行时 clamp 兜底）
+export const GAMEPAD_ADV_DEFAULTS = {
+    stickDeadzone: 0.30, directionThreshold: 0.40, repeatDelay: 320, repeatInterval: 130,
+} as const;
+const ADV_RANGE: Record<string, { min: number; max: number }> = {
+    stickDeadzone: { min: 0.10, max: 0.50 },
+    directionThreshold: { min: 0.20, max: 0.80 },
+    repeatDelay: { min: 100, max: 800 },
+    repeatInterval: { min: 50, max: 400 },
+};
+function clampAdv(key: string, v: number): number {
+    const r = ADV_RANGE[key];
+    if (!r) return v;
+    return Math.min(r.max, Math.max(r.min, v));
+}
+
 function defaultConfig(): GamepadConfig {
     const bindings: GamepadConfig['bindings'] = {};
     for (const f of GAMEPAD_FUNCS) bindings[f.id] = f.defaultBtn;
-    return { enabled: true, bindings };
+    return {
+        enabled: true, bindings,
+        stickDeadzone: GAMEPAD_ADV_DEFAULTS.stickDeadzone,
+        directionThreshold: GAMEPAD_ADV_DEFAULTS.directionThreshold,
+        repeatDelay: GAMEPAD_ADV_DEFAULTS.repeatDelay,
+        repeatInterval: GAMEPAD_ADV_DEFAULTS.repeatInterval,
+    };
 }
 
 function loadConfig(): GamepadConfig {
@@ -79,6 +106,11 @@ function loadConfig(): GamepadConfig {
                 if (b && typeof PAD_BTN[b] === 'number') cfg.bindings[id] = b;
             }
         }
+        // [lc-680] 高级参数（数值合法性 + 范围 clamp）
+        for (const key of Object.keys(GAMEPAD_ADV_DEFAULTS)) {
+            const v = (parsed as any)[key];
+            if (typeof v === 'number' && Number.isFinite(v)) (cfg as any)[key] = clampAdv(key, v);
+        }
         return cfg;
     } catch { return defaultConfig(); }
 }
@@ -91,11 +123,14 @@ export function getConfig(): GamepadConfig { return config; }
 
 /**
  * [lc-656] 供设置面板调用的配置 API（通过 window.fntvGamepad 全局暴露）。
- * saveConfig: 保存并广播刷新；resetConfig: 恢复默认。
+ * saveConfig: 与当前配置 merge 后保存并广播刷新（未传字段保留现值）；
+ * resetConfig: 恢复默认。
  */
-export function saveConfig(next: GamepadConfig): void {
+export function saveConfig(next: Partial<GamepadConfig>): void {
     try {
-        localStorage.setItem(CONFIG_KEY, JSON.stringify(next));
+        const cur = loadConfig();
+        const merged: GamepadConfig = { ...cur, ...next, bindings: { ...cur.bindings, ...(next.bindings || {}) } };
+        localStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
     } catch { /* ignore */ }
     window.dispatchEvent(new CustomEvent(CONFIG_EVT));
     config = loadConfig();
@@ -108,13 +143,28 @@ export function resetConfig(): void {
     funcIndex = buildIndex(config);
 }
 
+/**
+ * [lc-680] 检测当前手柄连接状态（供设置面板显示）。
+ * 返回首个已连接手柄的设备 id（可能为空，需用户先按一下激活 Gamepad API）。
+ */
+export function detectGamepad(): { connected: boolean; id: string | null } {
+    try {
+        const pads = getGamepads();
+        const pad = pads.find((p) => p && p.connected) as any;
+        if (pad) return { connected: true, id: String(pad.id) };
+    } catch { /* ignore */ }
+    return { connected: false, id: null };
+}
+
 // 暴露到 window，供设置面板（embyWall）读取/保存；避免插件间直接 import
 try {
     (window as any).fntvGamepad = {
         funcs: GAMEPAD_FUNCS,
+        advDefaults: GAMEPAD_ADV_DEFAULTS,
         getConfig: () => getConfig(),
         saveConfig,
         resetConfig,
+        detectGamepad,
     };
 } catch { /* ignore */ }
 
@@ -316,12 +366,13 @@ function poll(): void {
 
     const btnStates: boolean[] = (pad.buttons || []).map((b: any) => (typeof b === 'boolean' ? b : !!(b && b.pressed)));
     // [lc-669] 降低死区(0.30)/方向阈值(0.40)：轻推摇杆也能触发
+    // [lc-680] 死区/阈值改为配置项(设置面板可调)：stickDeadzone / directionThreshold
     const axes: number[] = (pad.axes || []).map((a: any) => {
         const v = typeof a === 'number' ? a : ((a && a.value) || 0);
-        return Math.abs(v) < 0.30 ? 0 : v;
+        return Math.abs(v) < (config.stickDeadzone ?? GAMEPAD_ADV_DEFAULTS.stickDeadzone) ? 0 : v;
     });
 
-    const joyDead = 0.40;
+    const joyDead = config.directionThreshold ?? GAMEPAD_ADV_DEFAULTS.directionThreshold;
     const joyUp = axes[1] !== undefined && axes[1] < -joyDead;
     const joyDown = axes[1] !== undefined && axes[1] > joyDead;
     const joyLeft = axes[0] !== undefined && axes[0] < -joyDead;
@@ -362,7 +413,10 @@ function poll(): void {
     if (activeDir) {
         const now = Date.now();
         if (heldDir !== activeDir) { heldDir = activeDir; dirFirstAt = now; dirLastRepeat = 0; }
-        if (focusNav.isActive() && now - dirFirstAt > 320 && now - dirLastRepeat > 130) {
+        // [lc-680] 长按延迟/连跳间隔改为配置项：repeatDelay / repeatInterval
+        const repDelay = config.repeatDelay ?? GAMEPAD_ADV_DEFAULTS.repeatDelay;
+        const repInt = config.repeatInterval ?? GAMEPAD_ADV_DEFAULTS.repeatInterval;
+        if (focusNav.isActive() && now - dirFirstAt > repDelay && now - dirLastRepeat > repInt) {
             dirLastRepeat = now;
             focusNav.move(activeDir);
         }
