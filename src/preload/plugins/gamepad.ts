@@ -205,12 +205,20 @@ async function handleFuncHit(hit: FuncHit): Promise<void> {
 }
 
 /**
- * [lc-667] A(Enter)→焦点确认(模拟点击)；B(Escape)→退出焦点框(交还鼠标)。
+ * [lc-667] A(Enter)→焦点确认(模拟点击)；B(Escape)→返回/关闭。
  * 返回 true 表示已由焦点导航消费，调用方无需再 dispatch 键盘事件。
+ * [lc-674] 修复「侧边栏展开时 B 键返回失效」：旧逻辑在白框激活时 back() 只
+ * hide() 并吞掉 Escape，抽屉/弹窗收不回去。现在无论白框是否激活，关闭白框后
+ * 都把 Escape 派发给页面，由 fnOS 原生逻辑关闭抽屉/弹窗/返回导航
+ * （用户连续按 B 返回根目录本就依赖这个 Escape 派发）。
  */
 function tryFocusAction(navKey: string): boolean {
     if (navKey === 'Enter') return focusNav.select();
-    if (navKey === 'Escape') return focusNav.back();
+    if (navKey === 'Escape') {
+        focusNav.back();
+        dispatchKey('Escape', 'Escape');
+        return true;
+    }
     return false;
 }
 

@@ -27,10 +27,14 @@ const CANDIDATE_SELECTORS = [
     '[class*="card-root"]',
     // [lc-670] 用户自加/强制显示的入口：
     //  - a.fnos-play = embyWall 注入的 hero「开始观看」主按钮(SPA 导航到详情)
-    //  - [class*="lg:!hidden"]:not([class*="inset-0"]) = fnOS 汉堡键容器整体
-    //    (🏠首页+≡菜单, embyWall 强制常显 + capture click 接管抽屉开合; 容器本身可点击)
+    //  - [lc-674] 汉堡键容器不再整体选(之前 🏠 与 ≡ 合并成一个候选框)，
+    //    改为容器内可点击元素各自独立聚焦：
+    //      · 🏠 首页链接 = 通用 a[href] 选择器已命中(容器内 isVisible 放行小尺寸)
+    //      · ≡ 菜单 = svg.cursor-pointer(纯SVG非a/button, 需显式选择器)
+    //    select() 点击时: 🏠 冒泡到容器, embyWall hook 判定 closest('a') 放行→回首页导航;
+    //    ≡ svg 冒泡到容器, embyWall capture hook 拦截→开合抽屉。
     'a.fnos-play',
-    '[class*="lg:!hidden"]:not([class*="inset-0"])',
+    '[class*="lg:!hidden"]:not([class*="inset-0"]) svg.cursor-pointer',
 ];
 
 let frameEl: HTMLDivElement | null = null;
@@ -99,10 +103,10 @@ function isAuxElement(el: HTMLElement): boolean {
     //   撤销 lc-672 的排除；且必须放在顶栏排除之前放行(它插在汉堡键旁、也在 z-20 顶栏内,
     //   否则会被下方 inTopBar 分支误杀)。
     if (el.closest('#fnos-refresh-btn')) return false;
-    // 顶栏 z-20 内的图标按钮(搜索/用户/设置)是辅助工具栏, 排除；
-    // 但【保留汉堡键容器】(lg:!hidden, embyWall 强制常显+开合抽屉) 不被误排除。
-    const inTopBar = el.closest('div.relative.z-20.flex.items-center.justify-between');
-    if (inTopBar && !el.closest('[class*="lg:!hidden"]')) return true;
+    // [lc-674] 撤销 lc-670 的「顶栏 z-20 整栏排除」：搜索/用户/设置等顶栏按钮
+    //   恢复为焦点候选(用户要求手柄能选到它们)。激活默认落点已有「刷新按钮/
+    //   开始观看」优先，不会被顶栏按钮抢走；方向键可正常导航到顶栏。
+    //   仍排除的纯装饰：播放蒙层按钮、hero 右侧 90x90 分集缩略图。
     if (el.closest('.play-mask__btn--play')) return true;
     const r = el.getBoundingClientRect();
     if (r.width === 90 && r.height === 90 && el.classList.contains('cursor-pointer')) return true;
@@ -272,18 +276,11 @@ export const focusNav = {
     select(): boolean {
         if (!active || !focusedEl) return false;
         const el = focusedEl;
-        // [lc-671] 汉堡键容器：直接点击容器本身（embyWall capture hook 开合抽屉），
-        //   不能点内层 🏠 <a>（那会触发回首页导航而不是开抽屉）
-        if (el.closest('[class*="lg:!hidden"]') && !el.closest('[class*="inset-0"]')) {
-            try {
-                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                log.info('[gamepadFocus] 确认点击: 汉堡键(开合抽屉)');
-            } catch (e: any) {
-                log.warn('[gamepadFocus] 汉堡键模拟点击失败:', e?.message || e);
-            }
-            lastMoveTime = Date.now();
-            return true;
-        }
+        // [lc-674] 汉堡键已拆为独立候选, 走通用逻辑即可正确区分：
+        //   · 🏠 首页链接(焦点即 a[href], 自身无子链接) → target=自身, 点击冒泡到容器,
+        //     embyWall hook 判定 e.target.closest('a') 放行 → 回首页导航
+        //   · ≡ 菜单(焦点即 svg, 无子链接) → target=svg, 点击冒泡到容器,
+        //     embyWall capture hook 拦截(stopImmediatePropagation) → 开合抽屉
         // 卡片内含链接则点链接（continue-card-root 的 a 才是导航目标）
         const link = el.querySelector('a[href]') as HTMLAnchorElement | null;
         const target = link || el;
