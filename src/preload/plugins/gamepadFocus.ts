@@ -94,12 +94,15 @@ function isInOurUI(el: HTMLElement): boolean {
  * 这些元素存在但属于 UI 装饰/工具栏，把它们混进网格导航会让白框落在无意义位置。
  */
 function isAuxElement(el: HTMLElement): boolean {
+    // [lc-673] embyWall 注入的「刷新页面」按钮(首页导航栏, location.reload)：
+    //   用户明确要求它作为焦点候选，且为【首页默认落点】(按 B 返回根目录后白框落刷新按钮)。
+    //   撤销 lc-672 的排除；且必须放在顶栏排除之前放行(它插在汉堡键旁、也在 z-20 顶栏内,
+    //   否则会被下方 inTopBar 分支误杀)。
+    if (el.closest('#fnos-refresh-btn')) return false;
     // 顶栏 z-20 内的图标按钮(搜索/用户/设置)是辅助工具栏, 排除；
     // 但【保留汉堡键容器】(lg:!hidden, embyWall 强制常显+开合抽屉) 不被误排除。
     const inTopBar = el.closest('div.relative.z-20.flex.items-center.justify-between');
     if (inTopBar && !el.closest('[class*="lg:!hidden"]')) return true;
-    // [lc-672] embyWall 注入的「刷新页面」按钮(顶栏, location.reload) = 纯辅助工具, 排除
-    if (el.closest('#fnos-refresh-btn')) return true;
     if (el.closest('.play-mask__btn--play')) return true;
     const r = el.getBoundingClientRect();
     if (r.width === 90 && r.height === 90 && el.classList.contains('cursor-pointer')) return true;
@@ -192,6 +195,14 @@ export const focusNav = {
         if (hasOpenModal()) return;
         const cands = collectCandidates();
         if (!cands.length) return;
+        // [lc-673] 首页(根路径 /v)激活时默认落点 = embyWall 注入的「刷新页面」按钮。
+        //   用户要求: 连续按 B 返回根目录后，白框默认落在首页刷新按钮上(方便一键刷新首页内容)。
+        //   仅首页生效；其他页面仍走「开始观看」/视口中心逻辑。
+        const isRoot = location.pathname === '/' || /^\/v\/?$/i.test(location.pathname);
+        if (isRoot) {
+            const refreshBtn = cands.find((el) => el.id === 'fnos-refresh-btn' || !!el.closest('#fnos-refresh-btn'));
+            if (refreshBtn) { focusEl(refreshBtn); showHint(); return; }
+        }
         // [lc-670] 优先 hero「开始观看」主按钮（embyWall 注入的 a.fnos-play），
         //   它是用户最想用 A 键直达的入口；无则回退视口中心最近。
         const startWatch = cands.find((el) => el.classList.contains('fnos-play'));
