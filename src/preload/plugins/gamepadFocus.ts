@@ -25,6 +25,11 @@ const CANDIDATE_SELECTORS = [
     '[class*="poster"]',
     '[class*="swiper-slide"]',
     '[class*="card-root"]',
+    // [lc-670] 用户自加/强制显示的入口：
+    //  - a.fnos-play = embyWall 注入的 hero「开始观看」主按钮(SPA 导航到详情)
+    //  - [class*="lg:!hidden"] 内可点击元素 = fnOS 汉堡键(首页+≡菜单, embyWall 强制常显)
+    'a.fnos-play',
+    '[class*="lg:!hidden"] a, [class*="lg:!hidden"] button, [class*="lg:!hidden"] [role="button"]',
 ];
 
 let frameEl: HTMLDivElement | null = null;
@@ -80,6 +85,21 @@ function isInOurUI(el: HTMLElement): boolean {
     return !!el.closest('[data-fnos-ui]');
 }
 
+/**
+ * [lc-670] 是否属于"辅助/装饰"元素——不应作为游戏手柄主焦点候选：
+ *  - 顶栏 z-20 容器内的按钮（搜索/用户/设置等辅助工具栏）
+ *  - hero 右侧 90x90 cursor-pointer 小缩略图(分集预览切换装饰)
+ *  - play-mask__btn--play 播放蒙层按钮
+ * 这些元素存在但属于 UI 装饰/工具栏，把它们混进网格导航会让白框落在无意义位置。
+ */
+function isAuxElement(el: HTMLElement): boolean {
+    if (el.closest('div.relative.z-20.flex.items-center.justify-between')) return true;
+    if (el.closest('.play-mask__btn--play')) return true;
+    const r = el.getBoundingClientRect();
+    if (r.width === 90 && r.height === 90 && el.classList.contains('cursor-pointer')) return true;
+    return false;
+}
+
 function hasOpenModal(): boolean {
     return !!document.querySelector('.semi-modal-content, .semi-modal, [role="dialog"]');
 }
@@ -101,6 +121,8 @@ function collectCandidates(): HTMLElement[] {
         nodes.forEach((n) => {
             const el = n as HTMLElement;
             if (!el || isInOurUI(el) || !isVisible(el)) return;
+            // [lc-670] 排除辅助/装饰元素(顶栏图标按钮、hero 右侧 90x90 小缩略图)
+            if (isAuxElement(el)) return;
             map.set(el, true);
         });
     }
@@ -160,6 +182,10 @@ export const focusNav = {
         if (hasOpenModal()) return;
         const cands = collectCandidates();
         if (!cands.length) return;
+        // [lc-670] 优先 hero「开始观看」主按钮（embyWall 注入的 a.fnos-play），
+        //   它是用户最想用 A 键直达的入口；无则回退视口中心最近。
+        const startWatch = cands.find((el) => el.classList.contains('fnos-play'));
+        if (startWatch) { focusEl(startWatch); showHint(); return; }
         // 初始焦点：视口中心最近者
         const vcx = window.innerWidth / 2;
         const vcy = window.innerHeight / 2;
