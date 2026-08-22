@@ -221,11 +221,12 @@ func isM3U8Response(resp *http.Response) bool {
 		// 只读一小段探测（注意：不能消费 Body，需恢复）
 		probe, err := io.ReadAll(io.LimitReader(resp.Body, 64))
 		if err == nil {
-			// 恢复 body（探测字节 + 剩余流）
-			rest, _ := io.ReadAll(resp.Body)
-			combined := append(probe, rest...)
-			resp.Body = io.NopCloser(bytes.NewReader(combined))
-			resp.ContentLength = int64(len(combined))
+			// [lc-666] 恢复 body 用 io.MultiReader（探测字节 + 剩余流），只消费 64 字节！
+			//   旧实现 `rest, _ := io.ReadAll(resp.Body)` 会把剩余流整块读进内存：
+			//   视频流 Content-Type 恰为 application/octet-stream → 整个视频文件(如 378MB)
+			//   被缓冲完才发给播放器 → 外部播放黑屏 3.8 秒（lc-652 引入，3.4.0 之前秒开）。
+			//   MultiReader 下 ContentLength 保持不变（未消费任何字节），勿覆盖。
+			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(probe), resp.Body))
 			return bytes.HasPrefix(probe, []byte("#EXTM3U"))
 		}
 	}
