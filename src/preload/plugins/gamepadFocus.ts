@@ -91,15 +91,19 @@ function isInOurUI(el: HTMLElement): boolean {
 }
 
 /**
- * [lc-678] 找到当前活动的 data-fnos-ui overlay（最高 z-index 的可见 fixed/absolute 元素）。
- *   用于 collectCandidates scope 判定——自动覆盖设置面板/反馈选择/历史版本/
- *   补丁应用/B站登录/密码设置等所有 embyWall 自建弹窗，避免白框跑出弹窗到底层界面。
- * [lc-681] 排除"小悬浮元素"：① #fnos-native-return(原生系统页残留的"返回影视"浮动按钮,
- *   z-index 2147483647 高于设置面板, 若不排除会被误选为 scope → 白框跑飞);
- *   ② 尺寸 < 200x100 的固定元素(真正的 overlay 覆盖大部分界面, 小元素是按钮/状态条)。
+ * [lc-678] 找到当前活动的 overlay（最高 z-index 的可见 fixed/absolute 元素）作为焦点 scope。
+ *   覆盖范围：
+ *    ① 所有 embyWall 自建 data-fnos-ui 弹窗（设置面板 / 反馈 / B站登录 / 历史版本 /
+ *       补丁应用 / 测试更新 / 版号切换 / 解锁码 / 密码设置等）；
+ *    ② 飞牛原生模态（.semi-modal / .semi-modal-content / [role="dialog"] / #fnos-dialog-overlay），
+ *       这些无 data-fnos-ui，旧逻辑会漏选 → 白框跑到最底层界面。
+ * [lc-681] 排除 #fnos-native-return（原生"返回影视"浮动按钮，z-index 最高但只是个小按钮）。
+ * [lc-682] 尺寸下限只用于甄别"非容器的纯悬浮元素"：data-fnos-ui 与已知模态选择器命中的
+ *   元素本身就是承载控件的容器，不再做 200x100 下限（防止小弹窗被误杀 → 回退到底层）。
  */
 function findActiveOverlay(): HTMLElement | null {
-    const els = document.querySelectorAll('[data-fnos-ui]');
+    const sel = '[data-fnos-ui], .semi-modal, .semi-modal-content, [role="dialog"], #fnos-dialog-overlay';
+    const els = document.querySelectorAll(sel);
     let best: HTMLElement | null = null;
     let bestZ = -Infinity;
     for (let i = 0; i < els.length; i++) {
@@ -110,7 +114,11 @@ function findActiveOverlay(): HTMLElement | null {
         const pos = st.position;
         if (pos !== 'fixed' && pos !== 'absolute') continue;
         const r = el.getBoundingClientRect();
-        if (r.width < 200 || r.height < 100) continue;
+        // 容器类元素(data-fnos-ui / 已知模态)本身就是承载控件的层, 不做尺寸下限;
+        // 其余元素需 ≥120x60 才视为 overlay(排除纯小悬浮按钮/状态条)
+        const isContainer = el.hasAttribute('data-fnos-ui')
+            || el.matches('.semi-modal, [role="dialog"], #fnos-dialog-overlay');
+        if (!isContainer && (r.width < 120 || r.height < 60)) continue;
         const z = parseInt(st.zIndex, 10);
         if (Number.isFinite(z) && z > bestZ) { bestZ = z; best = el; }
     }
@@ -141,7 +149,18 @@ function isAuxElement(el: HTMLElement): boolean {
 }
 
 function hasOpenModal(): boolean {
-    return !!document.querySelector('.semi-modal-content, .semi-modal, [role="dialog"]');
+    // [lc-682] 只认「可见」模态：fnOS 页面常驻隐藏的 .semi-modal(display:none) 不应误判为
+    //   弹窗打开 → 否则主界面手柄焦点会被错误拦截。仅当存在可见且非 0 尺寸的模态才返回 true。
+    const els = document.querySelectorAll('.semi-modal-content, .semi-modal, [role="dialog"]');
+    for (let i = 0; i < els.length; i++) {
+        const el = els[i] as HTMLElement;
+        const st = getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 5 || r.height < 5) continue;
+        return true;
+    }
+    return false;
 }
 
 function isVisible(el: HTMLElement): boolean {
@@ -157,15 +176,17 @@ function isVisible(el: HTMLElement): boolean {
     return true;
 }
 
-function collectCandidates(): HTMLElement[] {
+function collectCandidates(overlayArg?: HTMLElement | null): HTMLElement[] {
     // [lc-676] 侧边栏抽屉打开时：候选范围【限定在抽屉内】，白框框死侧边栏。
     // [lc-677] 自建设置面板(#fnos-settings-panel)打开时：候选限定面板内。
     // [lc-678] 任意【data-fnos-ui 自建 overlay】打开时：候选限定该 overlay 内(覆盖
     //   设置面板/反馈选择/历史版本/补丁应用/B站登录/密码设置等所有插件弹窗)。
-    //   实现: findActiveOverlay() 选 z-index 最高的可见 fixed/absolute data-fnos-ui
-    //   overlay 作为 scope; 抽屉(drawer 不带 data-fnos-ui)走 drawerOpen 检测兜底;
+    // [lc-682] scope 可由调用方显式传入(activate 已算好的 overlay)，避免重复计算/不一致；
+    //   未传则回退 findActiveOverlay()。
+    //   实现: overlay 选 z-index 最高的可见 fixed/absolute 自建/原生模态作为 scope;
+    //   抽屉(drawer 不带 data-fnos-ui)走 drawerOpen 检测兜底;
     //   都没有 → 整页 document。设置面板/二级弹窗共享此机制, 自动覆盖。
-    const overlayEl = findActiveOverlay();
+    const overlayEl = overlayArg !== undefined ? overlayArg : findActiveOverlay();
     const drawerEl = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
     const drawerOpen = !!drawerEl && drawerEl.classList.contains('drawer-open');
     const scope: Document | HTMLElement = overlayEl
@@ -239,8 +260,11 @@ export const focusNav = {
     activate(): void {
         if (active) return;
         if (isPlayingInPage()) return;
-        if (hasOpenModal()) return;
-        const cands = collectCandidates();
+        const overlay = findActiveOverlay();
+        // [lc-682] 有模态/弹窗打开但 findActiveOverlay 仍未能定位到 scope(如原生模态无显式
+        //   z-index、或置于无法触及的层)时, 不激活白框, 避免白框落到最底层界面。
+        if (!overlay && hasOpenModal()) return;
+        const cands = collectCandidates(overlay);
         if (!cands.length) return;
         // [lc-673] 首页(根路径 /v)激活时默认落点 = embyWall 注入的「刷新页面」按钮。
         //   用户要求: 连续按 B 返回根目录后，白框默认落在首页刷新按钮上(方便一键刷新首页内容)。
