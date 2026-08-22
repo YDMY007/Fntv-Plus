@@ -16,6 +16,7 @@
 import { ipcRenderer } from 'electron';
 import logger from '../core/logger';
 import { HookType, registerHook } from '../core/hooks';
+import { focusNav } from './gamepadFocus';
 
 const log = logger;
 
@@ -137,6 +138,12 @@ let funcIndex = buildIndex(config);
 let prevButtons: boolean[] = [];
 let prevAxes: number[] = [];
 let polling = false;
+// [lc-667] 方向长按重复（焦点导航连移）+ 手柄检测诊断
+let heldDir: 'up' | 'down' | 'left' | 'right' | null = null;
+let dirFirstAt = 0;
+let dirLastRepeat = 0;
+let lastNoPadLog = 0;
+let padLogged = false;
 
 // 检测手柄是否连接（Gamepad API：浏览器要求页面有交互后才暴露，但 preload 注入环境通常可用）
 function getGamepads(): (Gamepad | null)[] {
@@ -184,13 +191,27 @@ async function handleFuncHit(hit: FuncHit): Promise<void> {
     try {
         if (hit.playAction) {
             const handled = await playerControl(hit.playAction);
-            if (!handled && hit.navKey) dispatchKey(hit.navCode || hit.navKey, hit.navKey);
+            if (!handled && hit.navKey) {
+                if (tryFocusAction(hit.navKey)) return;
+                dispatchKey(hit.navCode || hit.navKey, hit.navKey);
+            }
         } else if (hit.navKey) {
+            if (tryFocusAction(hit.navKey)) return;
             dispatchKey(hit.navCode || hit.navKey, hit.navKey);
         }
     } finally {
         handling = false;
     }
+}
+
+/**
+ * [lc-667] A(Enter)→焦点确认(模拟点击)；B(Escape)→退出焦点框(交还鼠标)。
+ * 返回 true 表示已由焦点导航消费，调用方无需再 dispatch 键盘事件。
+ */
+function tryFocusAction(navKey: string): boolean {
+    if (navKey === 'Enter') return focusNav.select();
+    if (navKey === 'Escape') return focusNav.back();
+    return false;
 }
 
 /**
@@ -200,7 +221,21 @@ function poll(): void {
     if (!config.enabled) return;
     const pads = getGamepads();
     const pad = pads.find((p) => p && p.connected) as any;
-    if (!pad) return;
+    if (!pad) {
+        // [lc-667] 诊断：手柄未检测到时每 5s 提醒一次（避免用户以为功能坏了）
+        if (Date.now() - lastNoPadLog > 5000) {
+            lastNoPadLog = Date.now();
+            log.warn('[gamepad] 未检测到手柄（getGamepads 为空）——请确认手柄已连接，并在窗口内按任意键激活');
+        }
+        prevButtons = [];
+        prevAxes = [];
+        heldDir = null;
+        return;
+    }
+    if (!padLogged) {
+        padLogged = true;
+        log.info(`[gamepad] 检测到手柄: ${pad.id} buttons=${(pad.buttons || []).length} axes=${(pad.axes || []).length}`);
+    }
 
     const btnStates: boolean[] = (pad.buttons || []).map((b: any) => (typeof b === 'boolean' ? b : !!(b && b.pressed)));
     const axes: number[] = (pad.axes || []).map((a: any) => {
@@ -224,34 +259,52 @@ function poll(): void {
         }
     }
 
-    // 十字键：方向（上/下固定走界面导航，左/右播放中 seek）
+    // [lc-667] 统一方向输入（十字键 12-15 + 左摇杆）：激活/移动白色焦点框；
+    //   播放中左/右仍 seek；长按 >320ms 后每 130ms 连续移动（仅焦点模式）。
     const isDpadDown = (i: number): boolean => !!(pad.buttons[i] && pad.buttons[i].pressed);
-    if (isDpadDown(12) && !prevButtons[12]) dispatchKey('ArrowUp', 'ArrowUp');
-    if (isDpadDown(13) && !prevButtons[13]) dispatchKey('ArrowDown', 'ArrowDown');
-    if (isDpadDown(14) && !prevButtons[14]) handlePadSeekOrNav('seek-back', 'ArrowLeft', 'ArrowLeft');
-    if (isDpadDown(15) && !prevButtons[15]) handlePadSeekOrNav('seek-fwd', 'ArrowRight', 'ArrowRight');
+    const activeDir: 'up' | 'down' | 'left' | 'right' | null =
+        (joyUp || isDpadDown(12)) ? 'up' :
+        (joyDown || isDpadDown(13)) ? 'down' :
+        (joyLeft || isDpadDown(14)) ? 'left' :
+        (joyRight || isDpadDown(15)) ? 'right' : null;
 
-    // 左摇杆方向（边沿：仅从 0 → 非 0 触发一次）
-    if (joyUp && prevAxes[1] === 0) dispatchKey('ArrowUp', 'ArrowUp');
-    if (joyDown && prevAxes[1] === 0) dispatchKey('ArrowDown', 'ArrowDown');
-    if (joyLeft && prevAxes[0] === 0) handlePadSeekOrNav('seek-back', 'ArrowLeft', 'ArrowLeft');
-    if (joyRight && prevAxes[0] === 0) handlePadSeekOrNav('seek-fwd', 'ArrowRight', 'ArrowRight');
+    if (activeDir) {
+        const now = Date.now();
+        if (heldDir !== activeDir) { heldDir = activeDir; dirFirstAt = now; dirLastRepeat = 0; }
+        dirInput(activeDir);
+        if (focusNav.isActive() && now - dirFirstAt > 320 && now - dirLastRepeat > 130) {
+            dirLastRepeat = now;
+            focusNav.move(activeDir);
+        }
+    } else {
+        heldDir = null;
+    }
 
     prevButtons = btnStates;
     prevAxes = axes;
 }
 
-// 十字键左/右 与 左摇杆左右：播放中 seek；未播放走界面方向键
-async function handlePadSeekOrNav(playAction: string, navKey: string, navCode: string): Promise<void> {
-    if (handling) return;
-    handling = true;
-    try {
-        const handled = await playerControl(playAction);
-        if (!handled) dispatchKey(navCode, navKey);
-    } finally {
-        handling = false;
+/**
+ * [lc-667] 一次方向输入：焦点框已激活 → 直接移动；
+ * 未激活时：左/右先试播放 seek（在播则让给播放器），否则激活/移动焦点框。
+ */
+function dirInput(dir: 'up' | 'down' | 'left' | 'right'): void {
+    if (focusNav.isActive()) {
+        focusNav.move(dir);
+        return;
     }
+    if (dir === 'left' || dir === 'right') {
+        playerControl(dir === 'left' ? 'seek-back' : 'seek-fwd').then((handled) => {
+            if (!handled) focusNav.move(dir);
+        });
+        return;
+    }
+    focusNav.move(dir); // 上/下 → 直接进入焦点导航（激活白框）
 }
+
+// 十字键左/右 与 左摇杆左右：播放中 seek；未播放走界面方向键
+// [lc-667] 已由 dirInput() 替代（统一走焦点导航），此函数移除。
+
 
 /**
  * 启动手柄轮询（幂等）。
