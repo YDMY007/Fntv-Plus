@@ -53,16 +53,17 @@ let currentPlayer: ply.BasePlayer | null = null;
 let cachedSessionCookie = '';
 // [lc-663] MPV 网络流缓冲参数：开启 cache 且不在缓存不足时暂停，首片到手即出画，
 // 根治经 Go 代理(playvideo)拉原始大文件时「黑屏 5-6 秒才出画」的问题。
-// 个人视频是用户上传的原始文件(无 HLS 切片)，代理起流慢，无 cache 时会卡到缓冲足才放。
-// ⚠️ [lc-664] 不要加 --demuxer-cache-wait=0！该选项在 mpv 是布尔开关(yes/no)，
-//   传 0 会报 Invalid parameter → mpv 启动即退出 → node-mpv-2 start() 静默挂死(点播放没反应)。
-//   其默认值即为「不等待缓存填充」，无需显式设置。
+// ⚠️ [lc-665] --demuxer-cache-wait 是布尔开关(yes/no)且**默认 yes**——mpv 会等缓存填满
+//   (cache-secs 秒的视频量)才启动 demux/出画。mpv.conf 里 cache-secs=120 + 下载慢 → 黑屏等数秒。
+//   必须显式 =no：不等待缓存填充，首片数据一到就开播（该视频码率仅 ~266KB/s，2MB/s 下载足够平滑）。
+//   ⚠️ 千万别传 =0：报 Invalid parameter → mpv 启动即退出 → node-mpv-2 start() 静默挂死(lc-664 教训)。
 const MPV_NETWORK_ARGS = [
     '--force-window=immediate',
     '--network-timeout=180',
     '--cache=yes',
     '--cache-secs=30',
     '--cache-pause=no',
+    '--demuxer-cache-wait=no',
 ];
 
 async function refreshSessionCookie(domain: string): Promise<void> {
