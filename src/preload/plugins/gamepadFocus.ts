@@ -94,6 +94,9 @@ function isInOurUI(el: HTMLElement): boolean {
  * [lc-678] 找到当前活动的 data-fnos-ui overlay（最高 z-index 的可见 fixed/absolute 元素）。
  *   用于 collectCandidates scope 判定——自动覆盖设置面板/反馈选择/历史版本/
  *   补丁应用/B站登录/密码设置等所有 embyWall 自建弹窗，避免白框跑出弹窗到底层界面。
+ * [lc-681] 排除"小悬浮元素"：① #fnos-native-return(原生系统页残留的"返回影视"浮动按钮,
+ *   z-index 2147483647 高于设置面板, 若不排除会被误选为 scope → 白框跑飞);
+ *   ② 尺寸 < 200x100 的固定元素(真正的 overlay 覆盖大部分界面, 小元素是按钮/状态条)。
  */
 function findActiveOverlay(): HTMLElement | null {
     const els = document.querySelectorAll('[data-fnos-ui]');
@@ -101,10 +104,13 @@ function findActiveOverlay(): HTMLElement | null {
     let bestZ = -Infinity;
     for (let i = 0; i < els.length; i++) {
         const el = els[i] as HTMLElement;
+        if (el.id === 'fnos-native-return') continue;
         const st = getComputedStyle(el);
         if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) continue;
         const pos = st.position;
         if (pos !== 'fixed' && pos !== 'absolute') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 200 || r.height < 100) continue;
         const z = parseInt(st.zIndex, 10);
         if (Number.isFinite(z) && z > bestZ) { bestZ = z; best = el; }
     }

@@ -432,7 +432,22 @@ function poll(): void {
  * [lc-667] 一次方向输入：焦点框已激活 → 直接移动；
  * 未激活时：左/右先试播放 seek（在播则让给播放器），否则激活/移动焦点框。
  */
+/**
+ * [lc-681] 播放页(xgplayer)任何方向输入先调起控制栏+顶部栏。
+ * 实测: p.controls.show() 会同时显示底部控制栏和顶部返回栏(xg-top-bar)。
+ * 若顶部栏隐藏(autohide), 返回按钮 rect=0 被候选收集过滤 → 白框到不了顶部;
+ * 上/下方向走 focusNav 不经过 playerControl(不会自动 show), 故在 dirInput 统一调起。
+ */
+function wakeXgControls(): void {
+    try {
+        const p = getXgPlayer();
+        if (p && p.controls && typeof p.controls.show === 'function') p.controls.show();
+    } catch { /* ignore */ }
+}
+
 function dirInput(dir: 'up' | 'down' | 'left' | 'right'): void {
+    // [lc-681] 播放页方向输入先调起控制栏/顶部栏(顶部返回按钮才可聚焦)
+    wakeXgControls();
     if (focusNav.isActive()) {
         focusNav.move(dir);
         return;
