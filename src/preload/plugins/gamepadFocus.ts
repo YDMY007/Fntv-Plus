@@ -35,6 +35,13 @@ let lastMoveTime = 0;
 
 function ensureFrame(): HTMLDivElement {
     if (frameEl && frameEl.isConnected) return frameEl;
+    // [lc-668] 注入呼吸光晕关键帧
+    if (!document.getElementById('fntv-focus-style')) {
+        const style = document.createElement('style');
+        style.id = 'fntv-focus-style';
+        style.textContent = '@keyframes fntv-focus-pulse{0%,100%{box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 0 12px rgba(255,255,255,.55),inset 0 0 8px rgba(255,255,255,.16)}50%{box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 0 26px rgba(255,255,255,.95),inset 0 0 14px rgba(255,255,255,.32)}}';
+        (document.head || document.documentElement).appendChild(style);
+    }
     frameEl = document.createElement('div');
     frameEl.id = 'fntv-focus-frame';
     frameEl.style.cssText = [
@@ -43,8 +50,10 @@ function ensureFrame(): HTMLDivElement {
         'z-index:2147483000',
         'border:3px solid #fff',
         'border-radius:12px',
-        'box-shadow:0 0 0 1.5px rgba(0,0,0,.55), 0 0 18px rgba(255,255,255,.85), inset 0 0 8px rgba(255,255,255,.25)',
-        'transition:left .12s ease-out, top .12s ease-out, width .12s ease-out, height .12s ease-out',
+        // [lc-668] 更优雅：220ms easeOutCubic 缓动 + 呼吸光晕
+        'transition:left .22s cubic-bezier(.22,.61,.36,1), top .22s cubic-bezier(.22,.61,.36,1), width .22s cubic-bezier(.22,.61,.36,1), height .22s cubic-bezier(.22,.61,.36,1)',
+        'animation:fntv-focus-pulse 1.8s ease-in-out infinite',
+        'will-change:left,top,width,height',
         'display:none',
     ].join(';');
     document.body.appendChild(frameEl);
@@ -173,28 +182,41 @@ export const focusNav = {
         const cur = focusedEl;
         const cr = cur
             ? cur.getBoundingClientRect()
-            : { left: window.innerWidth / 2 - 5, top: window.innerHeight / 2 - 5, width: 10, height: 10 };
+            : { left: window.innerWidth / 2 - 5, top: window.innerHeight / 2 - 5, width: 10, height: 10, bottom: window.innerHeight / 2 + 5, right: window.innerWidth / 2 + 5 };
+        const curTop = cr.top;
+        const curBottom = cr.bottom;
+        const curLeft = cr.left;
+        const curRight = cr.right;
         const curCx = cr.left + cr.width / 2;
         const curCy = cr.top + cr.height / 2;
+
         let best: HTMLElement | null = null;
         let bestScore = Infinity;
+
+        // [lc-668] 同排/同列绝对优先：水平移动优先「y 投影重叠」的同排候选（按边缘间距最近），
+        //   无同排才跨行（重罚 dy）；垂直移动对称。修复旧算法 score=dx+|dy|*0.6 下，
+        //   更宽的下一行卡片中心偏右 23px 就击败同行相邻卡片 → 隔一个/跳行的问题。
         for (const el of cands) {
             if (cur && el === cur) continue;
             const r = el.getBoundingClientRect();
-            const cx = r.left + r.width / 2;
-            const cy = r.top + r.height / 2;
-            const dx = cx - curCx;
-            const dy = cy - curCy;
-            let inDir = false, primary = 0, secondary = 0;
-            switch (dir) {
-                case 'right': inDir = dx > 4; primary = dx; secondary = Math.abs(dy); break;
-                case 'left': inDir = dx < -4; primary = -dx; secondary = Math.abs(dy); break;
-                case 'down': inDir = dy > 4; primary = dy; secondary = Math.abs(dx); break;
-                case 'up': inDir = dy < -4; primary = -dy; secondary = Math.abs(dx); break;
+            if (dir === 'left' || dir === 'right') {
+                const inDir = dir === 'right' ? r.left > curRight + 2 : r.right < curLeft - 2;
+                if (!inDir) continue;
+                const sameRow = r.top < curBottom && curTop < r.bottom;
+                const gap = dir === 'right' ? r.left - curRight : curLeft - r.right;
+                const dyCenter = Math.abs((r.top + r.bottom) / 2 - curCy);
+                // 同排恒优先（gap 按间距比较）；跨行重罚 dyCenter×20 使其只在无同排时胜出
+                const score = sameRow ? gap : (dyCenter * 20 + gap);
+                if (score < bestScore) { bestScore = score; best = el; }
+            } else {
+                const inDir = dir === 'down' ? r.top > curBottom + 2 : r.bottom < curTop - 2;
+                if (!inDir) continue;
+                const sameCol = r.left < curRight && curLeft < r.right;
+                const gap = dir === 'down' ? r.top - curBottom : curTop - r.bottom;
+                const dxCenter = Math.abs((r.left + r.right) / 2 - curCx);
+                const score = sameCol ? gap : (dxCenter * 20 + gap);
+                if (score < bestScore) { bestScore = score; best = el; }
             }
-            if (!inDir) continue;
-            const score = primary + secondary * 0.6;
-            if (score < bestScore) { bestScore = score; best = el; }
         }
         if (best) focusEl(best);
         lastMoveTime = Date.now();
