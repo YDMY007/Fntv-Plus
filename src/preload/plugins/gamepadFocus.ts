@@ -27,9 +27,10 @@ const CANDIDATE_SELECTORS = [
     '[class*="card-root"]',
     // [lc-670] 用户自加/强制显示的入口：
     //  - a.fnos-play = embyWall 注入的 hero「开始观看」主按钮(SPA 导航到详情)
-    //  - [class*="lg:!hidden"] 内可点击元素 = fnOS 汉堡键(首页+≡菜单, embyWall 强制常显)
+    //  - [class*="lg:!hidden"]:not([class*="inset-0"]) = fnOS 汉堡键容器整体
+    //    (🏠首页+≡菜单, embyWall 强制常显 + capture click 接管抽屉开合; 容器本身可点击)
     'a.fnos-play',
-    '[class*="lg:!hidden"] a, [class*="lg:!hidden"] button, [class*="lg:!hidden"] [role="button"]',
+    '[class*="lg:!hidden"]:not([class*="inset-0"])',
 ];
 
 let frameEl: HTMLDivElement | null = null;
@@ -93,7 +94,10 @@ function isInOurUI(el: HTMLElement): boolean {
  * 这些元素存在但属于 UI 装饰/工具栏，把它们混进网格导航会让白框落在无意义位置。
  */
 function isAuxElement(el: HTMLElement): boolean {
-    if (el.closest('div.relative.z-20.flex.items-center.justify-between')) return true;
+    // 顶栏 z-20 内的图标按钮(搜索/用户/设置)是辅助工具栏, 排除；
+    // 但【保留汉堡键容器】(lg:!hidden, embyWall 强制常显+开合抽屉) 不被误排除。
+    const inTopBar = el.closest('div.relative.z-20.flex.items-center.justify-between');
+    if (inTopBar && !el.closest('[class*="lg:!hidden"]')) return true;
     if (el.closest('.play-mask__btn--play')) return true;
     const r = el.getBoundingClientRect();
     if (r.width === 90 && r.height === 90 && el.classList.contains('cursor-pointer')) return true;
@@ -106,7 +110,11 @@ function hasOpenModal(): boolean {
 
 function isVisible(el: HTMLElement): boolean {
     const r = el.getBoundingClientRect();
-    if (r.width < 24 || r.height < 24) return false;
+    // [lc-671] 汉堡键容器整体(22px 图标条)放行小尺寸；其余元素保持最小 24px
+    //   （避免把过小装饰混入候选，但汉堡键是用户明确要聚焦的入口）
+    const isBurger = !!el.closest('[class*="lg:!hidden"]') && !el.closest('[class*="inset-0"]');
+    const minSize = isBurger ? 10 : 24;
+    if (r.width < minSize || r.height < minSize) return false;
     const st = getComputedStyle(el);
     if (st.display === 'none' || st.visibility === 'hidden') return false;
     if (st.opacity === '0') return false;
@@ -251,6 +259,18 @@ export const focusNav = {
     select(): boolean {
         if (!active || !focusedEl) return false;
         const el = focusedEl;
+        // [lc-671] 汉堡键容器：直接点击容器本身（embyWall capture hook 开合抽屉），
+        //   不能点内层 🏠 <a>（那会触发回首页导航而不是开抽屉）
+        if (el.closest('[class*="lg:!hidden"]') && !el.closest('[class*="inset-0"]')) {
+            try {
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                log.info('[gamepadFocus] 确认点击: 汉堡键(开合抽屉)');
+            } catch (e: any) {
+                log.warn('[gamepadFocus] 汉堡键模拟点击失败:', e?.message || e);
+            }
+            lastMoveTime = Date.now();
+            return true;
+        }
         // 卡片内含链接则点链接（continue-card-root 的 a 才是导航目标）
         const link = el.querySelector('a[href]') as HTMLAnchorElement | null;
         const target = link || el;
