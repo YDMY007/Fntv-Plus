@@ -44,6 +44,7 @@ export class MpvPlayer extends BasePlayer {
      */
     async playList(infos: PlayItem[], pos: number, args?: string[]): Promise<boolean> {
         try {
+            const t0 = Date.now();
             // 构建 MPV 参数
             const mpvArgs: string[] = [];
 
@@ -90,6 +91,7 @@ export class MpvPlayer extends BasePlayer {
 
             // 启动 MPV 并加载媒体
             await this.mpvInstance.start()
+            log.info(`[perf] MPV 进程启动耗时 ${Date.now() - t0}ms`);
 
             // 开始 tail mpv.log，把弹幕脚本日志转发进 app.log
             this.startMpvLogTail();
@@ -117,6 +119,7 @@ export class MpvPlayer extends BasePlayer {
 
             // 将所有的infos按顺序加入播放列表，并且播放第pos个视频
             await this.loadPlaylistItems(infos, pos);
+            log.info(`[perf] MPV 播放列表加载完成, 启动流程共耗时 ${Date.now() - t0}ms`);
 
             if (this.config.debug) {
                 log.debug('MPV 实例启动成功');

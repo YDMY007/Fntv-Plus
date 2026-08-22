@@ -27,8 +27,10 @@ const log = logger;
 /** 已拉取过的 guid（切集去重，避免重复请求 B站） */
 const loadedGuids = new Set<string>();
 
-/** 播放页 URL 正则（电影 / 剧集 / 视频 / 个人视频） */
-const GUID_RE = /\/v\/(?:movie|tv|video|other)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
+/** 播放页 URL 正则（电影 / 剧集 / 视频）。
+ * [lc-662→回退] 不含 other：个人视频(/v/other/)不是 B站内容，不应触发弹幕匹配。
+ *   之前误加 other 会让个人视频详情页发起无谓的 B站弹幕搜索。 */
+const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
 
 const LS_KEY = 'fntv_danmaku_enabled';
 const LS_STYLE_KEY = 'fntv_danmaku_style';

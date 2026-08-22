@@ -51,6 +51,20 @@ let currentPlayer: ply.BasePlayer | null = null;
 // 的 cookie 查询参数传给 Go 代理, 由它在调 NAS 接口(/v/api/v1/stream/*)与转发媒体流时一并带上,
 // 避免代理被弹回登录页 HTML(表现为 playvideo 返回 500 / 解析 JSON 失败 '<')。
 let cachedSessionCookie = '';
+// [lc-663] MPV 网络流缓冲参数：开启 cache 且不在缓存不足时暂停，首片到手即出画，
+// 根治经 Go 代理(playvideo)拉原始大文件时「黑屏 5-6 秒才出画」的问题。
+// 个人视频是用户上传的原始文件(无 HLS 切片)，代理起流慢，无 cache 时会卡到缓冲足才放。
+// ⚠️ [lc-664] 不要加 --demuxer-cache-wait=0！该选项在 mpv 是布尔开关(yes/no)，
+//   传 0 会报 Invalid parameter → mpv 启动即退出 → node-mpv-2 start() 静默挂死(点播放没反应)。
+//   其默认值即为「不等待缓存填充」，无需显式设置。
+const MPV_NETWORK_ARGS = [
+    '--force-window=immediate',
+    '--network-timeout=180',
+    '--cache=yes',
+    '--cache-secs=30',
+    '--cache-pause=no',
+];
+
 async function refreshSessionCookie(domain: string): Promise<void> {
     try {
         cachedSessionCookie = await getSessionCookieHeader(domain);
@@ -463,13 +477,16 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     // [lc-596] token 兜底: 播放页按钮可能拿不到 cookie token, 回退配置 token(已登录必存)
     const token = (reqToken && String(reqToken).trim()) || config.token || '';
     log.info('Play movie event received id:', id, ' with token:', token, ' index:', sourceIndex);
+    const t0 = Date.now();
 
     // [lc-295] 播放前刷新一次会话 Cookie, getProxyUrl 会将其编入代理 URL 传给 Go 代理
     await refreshSessionCookie(config.domain);
+    log.info(`[perf] refreshSessionCookie 耗时 ${Date.now() - t0}ms`);
 
     const fnapi = new fn.ApiService(config.domain, token);
 
     const response = await fnapi.getPlayInfo(id);
+    log.info(`[perf] getPlayInfo 耗时 ${Date.now() - t0}ms (自点击)`);
     if (!response.success || !response.data) {
         log.error('获取播放信息失败:', response ? response.message : '未知错误');
         return;
@@ -568,11 +585,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
         // headers: {
         //     Authorization: token,
         // },
-        extraArgs: wantPot ? [] : [
-            '--force-window=immediate',
-            '--network-timeout=180',
-            // "--user-agent=Lavf/59.27.100",
-        ],
+        extraArgs: wantPot ? [] : MPV_NETWORK_ARGS,
         debug: true,
         onEvent: eventHandler(fnapi)
     };
@@ -608,6 +621,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     currentPlayer = playerInstance;
 
     // 开始播放
+    log.info(`[perf] 进入 MPV 启动前, 自点击累计 ${Date.now() - t0}ms`);
     playerInstance.playList(playList, currentIndex);
 }
 
@@ -694,7 +708,7 @@ async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Pr
     }
     const playerInstance = ply.PlayerFactory.createPlayer(playerType, {
         fnapi, playerPath,
-        extraArgs: wantPot ? [] : ['--force-window=immediate', '--network-timeout=180'],
+        extraArgs: wantPot ? [] : MPV_NETWORK_ARGS,
         debug: true, onEvent: eventHandler(fnapi),
     } as ply.Config);
     currentPlayer = playerInstance;
