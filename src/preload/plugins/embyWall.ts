@@ -3701,7 +3701,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     overlay.id = 'fnos-settings-panel';
     overlay.setAttribute('data-fnos-ui', '1'); // 保护自建设备 UI 不被白底清除器误清(含内部卡片底色)
     overlay.style.cssText = 'position:fixed;z-index:2147483600;display:none;flex-direction:column;width:min(680px,calc(100vw - 80px));'
-      + 'max-height:calc(100vh - 120px);overflow:hidden;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
+      // [lc-684] 固定面板高度: 切换分类时面板尺寸稳定不跳动(各分类内容量差异大,
+      //   height:auto 会导致面板随内容伸缩)。固定高度 + bodyRow flex:1 + 右内容区
+      //   overflow-y:auto 实现"面板恒定、内容内部滚动"。
+      + 'height:min(820px,calc(100vh - 100px));max-height:calc(100vh - 100px);overflow:hidden;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
       + 'background:var(--fnos-ui-panel-bg)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14),inset 0 1px 0 rgba(255,255,255,.6);'
@@ -6665,8 +6668,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     overlay.style.bottom = 'auto';
     overlay.style.transform = 'translate(-50%, -50%)';
     overlay.style.width = 'min(680px, calc(100vw - 80px))';
-    overlay.style.height = 'auto'; // 高度自适应内容
-    overlay.style.maxHeight = (window.innerHeight - 120) + 'px'; // 超高则内部滚动
+    // [lc-684] 固定面板高度: 此处曾写 height='auto' 导致切换分类时面板随内容伸缩跳动。
+    //   改为固定高度(取 820px 与视口可用高度较小值), 配合 bodyRow flex:1 + 右内容区
+    //   overflow-y:auto 实现"面板恒定、内容内部滚动"。
+    overlay.style.height = Math.min(820, window.innerHeight - 100) + 'px';
+    overlay.style.maxHeight = (window.innerHeight - 100) + 'px';
     overlay.style.display = 'flex';
     const mask = document.getElementById('fnos-settings-mask');
     if (mask) mask.style.display = 'block';
