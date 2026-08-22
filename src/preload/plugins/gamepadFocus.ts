@@ -91,6 +91,27 @@ function isInOurUI(el: HTMLElement): boolean {
 }
 
 /**
+ * [lc-678] 找到当前活动的 data-fnos-ui overlay（最高 z-index 的可见 fixed/absolute 元素）。
+ *   用于 collectCandidates scope 判定——自动覆盖设置面板/反馈选择/历史版本/
+ *   补丁应用/B站登录/密码设置等所有 embyWall 自建弹窗，避免白框跑出弹窗到底层界面。
+ */
+function findActiveOverlay(): HTMLElement | null {
+    const els = document.querySelectorAll('[data-fnos-ui]');
+    let best: HTMLElement | null = null;
+    let bestZ = -Infinity;
+    for (let i = 0; i < els.length; i++) {
+        const el = els[i] as HTMLElement;
+        const st = getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) continue;
+        const pos = st.position;
+        if (pos !== 'fixed' && pos !== 'absolute') continue;
+        const z = parseInt(st.zIndex, 10);
+        if (Number.isFinite(z) && z > bestZ) { bestZ = z; best = el; }
+    }
+    return best;
+}
+
+/**
  * [lc-670] 是否属于"辅助/装饰"元素——不应作为游戏手柄主焦点候选：
  *  - 顶栏 z-20 容器内的按钮（搜索/用户/设置等辅助工具栏）
  *  - hero 右侧 90x90 cursor-pointer 小缩略图(分集预览切换装饰)
@@ -131,20 +152,21 @@ function isVisible(el: HTMLElement): boolean {
 }
 
 function collectCandidates(): HTMLElement[] {
-    // [lc-676] 侧边栏抽屉打开时：候选范围【限定在抽屉内】，白框框死侧边栏，
-    //   不收集当前页面其他内容(避免白框跳出侧边栏选到页面卡片/顶栏元素)。
-    // [lc-677] 自建设置面板(#fnos-settings-panel, display:flex)打开时：候选限定面板内，
-    //   支持手柄操作设置面板控件；设置面板优先于抽屉(它是模态覆盖层)。
-    //   scope = 对应容器或整页 document。
+    // [lc-676] 侧边栏抽屉打开时：候选范围【限定在抽屉内】，白框框死侧边栏。
+    // [lc-677] 自建设置面板(#fnos-settings-panel)打开时：候选限定面板内。
+    // [lc-678] 任意【data-fnos-ui 自建 overlay】打开时：候选限定该 overlay 内(覆盖
+    //   设置面板/反馈选择/历史版本/补丁应用/B站登录/密码设置等所有插件弹窗)。
+    //   实现: findActiveOverlay() 选 z-index 最高的可见 fixed/absolute data-fnos-ui
+    //   overlay 作为 scope; 抽屉(drawer 不带 data-fnos-ui)走 drawerOpen 检测兜底;
+    //   都没有 → 整页 document。设置面板/二级弹窗共享此机制, 自动覆盖。
+    const overlayEl = findActiveOverlay();
     const drawerEl = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
     const drawerOpen = !!drawerEl && drawerEl.classList.contains('drawer-open');
-    const settingsPanel = document.getElementById('fnos-settings-panel') as HTMLElement | null;
-    const settingsOpen = !!settingsPanel && settingsPanel.style.display === 'flex';
-    const scope: Document | HTMLElement =
-        settingsOpen ? settingsPanel : (drawerOpen ? (drawerEl as HTMLElement) : document);
-    // [lc-677] 抽屉/设置面板等自建 overlay 内部的控件(data-fnos-ui)需要可聚焦
-    //   (侧栏底部"设置/切换系统页面/软件反馈"按钮、设置面板内全部按钮/开关)；
-    //   整页模式仍排除 data-fnos-ui，避免自建 UI 干扰页面导航。
+    const scope: Document | HTMLElement = overlayEl
+        ? overlayEl
+        : (drawerOpen ? (drawerEl as HTMLElement) : document);
+    // [lc-677] 抽屉/overlay 等自建 overlay 内部的控件(data-fnos-ui)需要可聚焦;
+    //   整页模式仍排除 data-fnos-ui 避免自建 UI 干扰页面导航。
     const inScopedOverlay = scope !== document;
     const map = new Map<HTMLElement, boolean>();
     for (const sel of CANDIDATE_SELECTORS) {
