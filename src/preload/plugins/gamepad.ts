@@ -172,13 +172,72 @@ function dispatchKey(code: string, key: string, repeat = false): void {
 
 /**
  * 播放控制：invoke media:control，返回是否被播放器处理（handled）。
+ * [lc-679] 原生网页播放器(xgplayer)优先：fnOS 网页播放器是 xgplayer，
+ *   实测它【不响应任何键盘事件】(合成/真实空格/方向键均无效, 未启用 keyboard 插件)
+ *   → 手柄 dispatch 键盘事件对它完全失效(用户反馈"手柄控制失效"的根因)。
+ *   改为直接操作 xgplayer 实例(经 React fiber 获取), 并顺带调起控制栏。
  */
 async function playerControl(action: string): Promise<boolean> {
+    if (controlXgPlayer(action)) return true;
     try {
         const r = await ipcRenderer.invoke('media:control', action);
         return !!(r && r.ok && r.handled);
     } catch (e: any) {
         log.warn('[gamepad] media:control 失败:', e?.message || e);
+        return false;
+    }
+}
+
+// [lc-679] xgplayer 实例缓存(经 React fiber 获取)
+let _xgPlayer: any = null;
+function getXgPlayer(): any {
+    if (_xgPlayer) return _xgPlayer;
+    try {
+        const root = document.querySelector('[class*=xgplayer]') as any;
+        if (!root) return null;
+        const key = Object.keys(root).find((k) => k.startsWith('__reactFiber$'));
+        if (!key) return null;
+        let node = root[key];
+        let depth = 0;
+        while (node && depth < 15) {
+            const p = node.memoizedProps && node.memoizedProps.player;
+            if (p) { _xgPlayer = p; return p; }
+            node = node.return;
+            depth++;
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+/**
+ * [lc-679] 手柄功能 → xgplayer 原生控制；返回是否消费。
+ * 任何控制动作后都调 controls.show()——解决"控制栏自动隐藏后无法手柄调起"。
+ * 播放器销毁/重建时实例失效 → catch 中清缓存, 下次重新查找。
+ */
+function controlXgPlayer(action: string): boolean {
+    const p = getXgPlayer();
+    if (!p) return false;
+    try {
+        switch (action) {
+            case 'playpause': {
+                const v = document.querySelector('video');
+                const paused = typeof p.paused === 'boolean' ? p.paused : !!(v && v.paused);
+                if (paused) p.play(); else p.pause();
+                break;
+            }
+            case 'seek-back': p.seek(Math.max(0, (p.currentTime || 0) - 5)); break;
+            case 'seek-fwd': p.seek((p.currentTime || 0) + 5); break;
+            case 'speed-up': p.playbackRate = Math.min(2, (p.playbackRate || 1) + 0.25); break;
+            case 'speed-down': p.playbackRate = Math.max(0.5, (p.playbackRate || 1) - 0.25); break;
+            default: return false; // next 等无对应 API, 交还 MPV 链路
+        }
+        // 调起控制栏(自动隐藏后可重新显示)
+        if (p.controls && typeof p.controls.show === 'function') p.controls.show();
+        log.info('[gamepad] xgplayer 控制:', action);
+        return true;
+    } catch (e: any) {
+        _xgPlayer = null; // 实例失效, 下次重查
+        log.warn('[gamepad] xgplayer 控制失败:', e?.message || e);
         return false;
     }
 }
