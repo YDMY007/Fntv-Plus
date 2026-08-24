@@ -6832,6 +6832,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      // [lc-699] 手动刷新：先即时刷新首页海报(轮播), 再整页刷新, 确保新片库立刻可见
+      try { refreshCarouselPosters(); } catch { /* ignore */ }
       location.reload();
     });
     // 插入到锚点元素（「首页」或汉堡键）的后面
@@ -6989,22 +6991,26 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //    库数据变化(新增/改名/排序)后, 留在首页即可看到最新轮播。
   //    仅在轮播当前可见(处于首页)时重拉, 避免后台无意义 iframe 轮询;
   //    非首页时安全跳过(注入逻辑找不到"媒体库"节点会自动 return)。
-  const CAROUSEL_REFRESH_MS = 5 * 60 * 1000;
-  setInterval(() => {
+  //    [lc-699] 抽成 refreshCarouselPosters() 供"自动定时"与"手动刷新按钮"共用;
+  //    间隔由 5 分钟改为 10 分钟(启动软件后每 10 分钟刷一次首页海报)。
+  function refreshCarouselPosters(): void {
     if (_apiLoading) return;
     if (document.hidden) return; // 后台标签页跳过(iframe/fetch 会被浏览器节流, 必然失败/超时)
     if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
     _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
     _carouselRevealed = false; // [lc-625] 允许自动刷新后内部 revealOnce 重新渲染
-    log('carousel auto-refresh: re-fetching');
+    const base = location.origin;
+    log('carousel refresh: re-fetching');
     fetchShowsViaIPC(base).then(() => {
       if (_apiShows.length === 0) return;
-      log('carousel auto-refresh: got', _apiShows.length, 'shows (injected by fetchShowsViaIPC)');
+      log('carousel refresh: got', _apiShows.length, 'shows');
       // [lc-625] 兜底: 内部 revealOnce 已渲染则跳过(自动刷新时 _carouselRevealed 已重置为 false,
       //   内部会重新渲染; 此处仅防内部异常未渲染时的兜底)
       if (!_carouselInited && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
-    }).catch(e => log('carousel auto-refresh error:', e));
-  }, CAROUSEL_REFRESH_MS);
+    }).catch(e => log('carousel refresh error:', e));
+  }
+  const CAROUSEL_REFRESH_MS = 10 * 60 * 1000;
+  setInterval(refreshCarouselPosters, CAROUSEL_REFRESH_MS);
 
   wheelToScroll();
   [2000, 4000, 8000].forEach(ms => setTimeout(wheelToScroll, ms));

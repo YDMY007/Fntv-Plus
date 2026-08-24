@@ -1008,8 +1008,7 @@ function closePanel(): void {
     if (isFntvTvPage()) {
         const p = (location.pathname || '').replace(/\/+$/, '');
         if (p === '/v') {
-            // 已在影视首页：刷新复位侧栏展开态
-            try { location.reload(); } catch { /* ignore */ }
+            // 已在影视首页：直接关闭面板即可，不再整页刷新（避免关闭观影记录时首页闪烁重排）
         } else {
             // 影视子页（/v/movie|tv|...）：回影视首页
             try { location.href = location.origin + '/v'; } catch { /* ignore */ }
