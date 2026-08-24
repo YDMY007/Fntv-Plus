@@ -291,9 +291,9 @@ const WH_CSS = `
 #${PANEL_ID} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
   display:none;align-items:center;justify-content:center;z-index:50}
 #${PANEL_ID} .wh-detail-overlay.show{display:flex}
-#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;height:82vh;max-height:82vh;overflow:hidden;
+#${PANEL_ID} .wh-detail{width:1000px;max-width:94vw;height:82vh;max-height:82vh;overflow:hidden;
   background:#161618;border:1px solid var(--wh-line);border-radius:24px;
-  display:grid;grid-template-columns:380px 1fr;align-items:stretch;
+  display:grid;grid-template-columns:6fr 4fr;align-items:stretch;
   box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
 #${PANEL_ID}.light .wh-detail{background:#fff}
 #${PANEL_ID} .wh-detail .hero{position:relative;height:100%;background:#1a1a1c;
