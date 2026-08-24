@@ -288,16 +288,25 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
-#${PANEL_ID} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(8px);
+#${PANEL_ID} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
   display:none;align-items:center;justify-content:center;z-index:50}
 #${PANEL_ID} .wh-detail-overlay.show{display:flex}
-#${PANEL_ID} .wh-detail{width:880px;max-width:94vw;max-height:90vh;overflow:hidden;background:var(--wh-detail);
-  border:1px solid var(--wh-line);border-radius:24px;display:grid;grid-template-columns:300px 1fr;box-shadow:0 40px 90px rgba(0,0,0,.7)}
-#${PANEL_ID} .wh-detail .hero{position:relative;min-height:440px;background:#222}
-#${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0}
-#${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;background:linear-gradient(to top,var(--wh-detail),rgba(0,0,0,0) 60%)}
-#${PANEL_ID} .wh-detail .body{padding:26px 30px;overflow-y:auto;max-height:90vh}
-#${PANEL_ID} .wh-detail .d-name{font-size:26px;font-weight:700}
+#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;max-height:88vh;overflow:hidden;
+  background:var(--wh-detail);border:1px solid var(--wh-line);border-radius:24px;
+  display:grid;grid-template-columns:400px 1fr;box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
+#${PANEL_ID} .wh-detail .hero{position:relative;min-height:100%;background:#1a1a1c;
+  /* 海报圆角只做左上/左下，与外卡片对齐 */
+  border-radius:24px 0 0 24px;overflow:hidden}
+#${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
+  background-size:cover;background-position:center}
+#${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
+  background:linear-gradient(to top,var(--wh-detail) 0%,rgba(0,0,0,0) 55%),
+             linear-gradient(to bottom,rgba(0,0,0,.35) 0%,transparent 30%);
+  pointer-events:none}
+#${PANEL_ID} .wh-detail .body{padding:28px 32px 28px 28px;overflow-y:auto;max-height:88vh;
+  /* 右侧信息区底色更实、不透 */
+  background:var(--wh-detail)}
+#${PANEL_ID} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
 #${PANEL_ID} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 #${PANEL_ID} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
 #${PANEL_ID} .wh-detail .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
@@ -325,8 +334,11 @@ const WH_CSS = `
 #${PANEL_ID} .wh-sess{display:flex;justify-content:space-between;font-size:13px;color:var(--wh-text2);
   padding:6px 0;border-bottom:1px solid var(--wh-line)}
 #${PANEL_ID} .wh-sess .pos{color:var(--wh-text)}
-#${PANEL_ID} .wh-detail .close{position:absolute;top:16px;right:20px;color:#fff;background:rgba(0,0,0,.5);
-  border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;z-index:5}
+#${PANEL_ID} .wh-detail .close{position:absolute;top:14px;right:16px;color:var(--wh-text2);
+  background:var(--wh-surface);border:1px solid var(--wh-line);
+  border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:16px;z-index:10;transition:background .15s,color .15s}
+#${PANEL_ID} .wh-detail .close:hover{background:var(--wh-surface2);color:var(--wh-text)}
 #${PANEL_ID} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
   background:var(--wh-tip);border:1px solid var(--wh-line);padding:12px 22px;border-radius:14px;font-size:14px;
   opacity:0;transition:.25s;z-index:80}
