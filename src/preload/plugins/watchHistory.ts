@@ -291,21 +291,27 @@ const WH_CSS = `
 #${PANEL_ID} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
   display:none;align-items:center;justify-content:center;z-index:50}
 #${PANEL_ID} .wh-detail-overlay.show{display:flex}
-#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;max-height:88vh;overflow:hidden;
-  background:var(--wh-detail);border:1px solid var(--wh-line);border-radius:24px;
-  display:grid;grid-template-columns:400px 1fr;box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
+#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;height:86vh;max-height:86vh;overflow:hidden;
+  /* 具体不透明色值（非 var）：杜绝变量解析失败导致右半边变透明、文字压在模糊背景上看不清 */
+  background:#161618;border:1px solid var(--wh-line);border-radius:24px;
+  display:grid;grid-template-columns:400px 1fr;align-items:stretch;
+  box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
+#${PANEL_ID}.light .wh-detail{background:#fff}
 #${PANEL_ID} .wh-detail .hero{position:relative;min-height:100%;background:#1a1a1c;
   /* 海报圆角只做左上/左下，与外卡片对齐 */
   border-radius:24px 0 0 24px;overflow:hidden}
 #${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
   background-size:cover;background-position:center}
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
-  background:linear-gradient(to top,var(--wh-detail) 0%,rgba(0,0,0,0) 55%),
+  /* 渐变收尾色用具体色值，与卡片底色一致（深 #161618 / 浅 #fff） */
+  background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%),
              linear-gradient(to bottom,rgba(0,0,0,.35) 0%,transparent 30%);
   pointer-events:none}
-#${PANEL_ID} .wh-detail .body{padding:28px 32px 28px 28px;overflow-y:auto;max-height:88vh;
-  /* 右侧信息区底色更实、不透 */
-  background:var(--wh-detail)}
+#${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%),
+             linear-gradient(to bottom,rgba(0,0,0,.2) 0%,transparent 30%)}
+#${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
+  /* 透明即可：卡片本身已是不透明具体色，文字落在实底上清晰可读；高度固定→评语框拉长只在内滚动，不撑高整卡 */
+  background:transparent}
 #${PANEL_ID} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
 #${PANEL_ID} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 #${PANEL_ID} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
