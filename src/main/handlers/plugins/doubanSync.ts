@@ -551,18 +551,32 @@ async function getWatchedItems(): Promise<any[]> {
             log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
         }
         const watched = list.filter((it: any) => it && it.watched === 1);
-        // 映射为 processWatchedList 所需的字段
-        const items = watched.map((it: any) => ({
-            guid: it.guid,
-            parent_guid: it.parent_guid,
-            douban_id: it.douban_id || 0,
-            title: it.title,
-            tv_title: it.tv_title,
-            parent_title: it.parent_title,
-            type: it.type,
-            air_date: it.air_date,
-            release_date: it.release_date,
-            watched: 1,
+        // 并发计算每部作品总时长：剧集=各集 runtime(分钟)之和；电影/其他=自身 runtime(分钟)兜底。
+        // 同时带回 last_played（watched_ts 秒→ms）与进度，供前端观影记录直接展示，无需前端再猜接口。
+        const items = await Promise.all(watched.map(async (it: any) => {
+            let totalMin = 0;
+            try {
+                const ep = await fnapi.getEpisodeListCached(it.guid);
+                if (ep && ep.success && Array.isArray(ep.data) && ep.data.length) {
+                    for (const e of ep.data) totalMin += Number(e.runtime) || 0;
+                }
+            } catch { /* ignore */ }
+            if (!totalMin) totalMin = Number(it.runtime) || 0; // 电影/无分集兜底
+            return {
+                guid: it.guid,
+                parent_guid: it.parent_guid,
+                douban_id: it.douban_id || 0,
+                title: it.title,
+                tv_title: it.tv_title,
+                parent_title: it.parent_title,
+                type: it.type,
+                air_date: it.air_date,
+                release_date: it.release_date,
+                watched: 1,
+                last_played: it.watched_ts ? Number(it.watched_ts) * 1000 : 0, // 秒→ms
+                progress: 1,
+                total_runtime_ms: Math.round(totalMin * 60000), // 分钟→ms
+            };
         }));
         log.info(`[豆瓣] 已观看列表: 根库 ${list.length} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
         return items;
