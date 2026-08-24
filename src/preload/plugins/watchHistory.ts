@@ -925,11 +925,14 @@ function closePanel(): void {
     if (detail) detail.classList.remove('show');
     // 复位可能的卡片选中态
     root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
-    // 收起后直接返回 fnOS 影视首页（/v），而非停留在任意子页面
-    // （与 embyWall 的"回首页"同款写法；已在首页则不复载，避免抖动）
+    // 收起后强制返回 fnOS 影视首页（/v）并复位侧栏/页面状态，杜绝"偶发停在子页面或侧栏展开态"
+    // 之前只在非首页才导航，已在 /v 时跳过→侧栏状态不复位→表现为"没正常返回"。
+    // 现在：非首页走 location.href=/v（整页重载，稳定）；已在首页则 location.reload() 复位侧栏展开态。
     const path = (location.pathname || '').replace(/\/+$/, '');
-    const isHome = path === '' || path === '/' || path === '/v';
-    if (!isHome) {
+    const onHome = path === '' || path === '/' || path === '/v';
+    if (onHome) {
+        try { location.reload(); } catch { /* ignore */ }
+    } else {
         try { location.href = location.origin + '/v'; } catch { /* ignore */ }
     }
 }
