@@ -291,30 +291,23 @@ const WH_CSS = `
 #${PANEL_ID} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
   display:none;align-items:center;justify-content:center;z-index:50}
 #${PANEL_ID} .wh-detail-overlay.show{display:flex}
-#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;height:86vh;max-height:86vh;overflow:hidden;
-  /* 具体不透明色值（非 var）：杜绝变量解析失败导致右半边变透明、文字压在模糊背景上看不清 */
+#${PANEL_ID} .wh-detail{width:960px;max-width:92vw;height:82vh;max-height:82vh;overflow:hidden;
   background:#161618;border:1px solid var(--wh-line);border-radius:24px;
-  display:grid;grid-template-columns:400px 1fr;align-items:stretch;
+  display:grid;grid-template-columns:380px 1fr;align-items:stretch;
   box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
 #${PANEL_ID}.light .wh-detail{background:#fff}
-#${PANEL_ID} .wh-detail .hero{position:relative;background:#1a1a1c;
-  /* 不再用 min-height:100% 被卡高撑大；改为按海报自然比例(2:3)定高，封面不变形 */
-  height:100%;border-radius:24px 0 0 24px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+#${PANEL_ID} .wh-detail .hero{position:relative;height:100%;background:#1a1a1c;
+  border-radius:24px 0 0 24px;overflow:hidden}
+/* 海报用 <img> + object-fit:cover：浏览器原生等比裁切，无拉伸、无黑边（优于 CSS background-size） */
 #${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
-  /* contain 而非 cover：保持原始比例，不拉伸变形；超出部分由 overflow:hidden 裁切 */
-  background-size:contain;background-position:center;background-repeat:no-repeat;
-  /* 容器比海报更高时，上下留暗色填充而非拉伸 */
-  background-color:#111}
+  width:100%;height:100%;object-fit:cover;object-position:center;display:block}
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
-  /* 渐变收尾色用具体色值，与卡片底色一致（深 #161618 / 浅 #fff） */
   background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%),
              linear-gradient(to bottom,rgba(0,0,0,.35) 0%,transparent 30%);
   pointer-events:none}
 #${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%),
              linear-gradient(to bottom,rgba(0,0,0,.2) 0%,transparent 30%)}
-#${PANEL_ID}.light .wh-detail .hero .poster{background-color:#f0f0f2}
 #${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
-  /* 右侧信息区也用具体不透明色值，不再依赖卡片透底（防 CSS 优先级被盖） */
   background:#161618}
 #${PANEL_ID}.light .wh-detail .body{background:#fff}
 #${PANEL_ID} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
@@ -421,7 +414,7 @@ function buildPanel(): void {
       <div class="wh-detail-overlay" id="wh-detail">
         <div class="wh-detail">
           <div class="hero">
-            <div class="poster" id="wh-d-poster"></div>
+            <img class="poster" id="wh-d-poster" alt="" />
             <div class="scrim"></div>
             <div class="close" id="wh-d-close">✕</div>
           </div>
@@ -638,11 +631,16 @@ function openDetail(idx: number): void {
     const it = curData[idx];
     const set = (id: string, v: string) => { const e = $(id); if (e) e.textContent = v; };
     const setH = (id: string, v: string) => { const e = $(id); if (e) e.innerHTML = v; };
-    const poster = $('wh-d-poster');
+    const poster = $('wh-d-poster') as HTMLImageElement | null;
     if (poster) {
-        const pe = poster as HTMLElement;
-        pe.style.background = it.art; // 渐变兜底
-        if (it.poster) { pe.style.backgroundImage = `url('${it.poster}')`; pe.style.backgroundSize = 'contain'; pe.style.backgroundPosition = 'center'; pe.style.backgroundRepeat = 'no-repeat'; }
+        if (it.poster) {
+            poster.src = it.poster;
+            poster.style.display = 'block';
+            poster.onerror = () => { poster.style.display = 'none'; }; // 图像加载失败→隐藏，露出 hero 渐变兜底
+        } else {
+            poster.src = '';
+            poster.style.display = 'none'; // 无真实海报→隐藏，hero 背景渐变兜底
+        }
     }
     set('wh-d-name', it.name);
     set('wh-d-year', `${it.fn.year} · ${it.type}`);
