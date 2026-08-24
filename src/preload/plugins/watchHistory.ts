@@ -510,13 +510,12 @@ function buildPanel(): void {
     });
     ($('wh-d-sync') as HTMLElement).addEventListener('click', syncFnos);
 
-    // 键盘：Esc 先关详情，再关面板
+    // 键盘：Esc 先关详情，再关面板（关面板统一走 closePanel，确保彻底复位）
     document.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return;
         const detail = $('wh-detail');
         if (detail && detail.classList.contains('show')) { detail.classList.remove('show'); return; }
-        const root = $(PANEL_ID);
-        if (root && root.classList.contains('show')) root.classList.remove('show');
+        if ($(PANEL_ID) && ($(PANEL_ID) as HTMLElement).classList.contains('show')) closePanel();
     });
 }
 
@@ -823,23 +822,43 @@ function toast(msg: string): void {
     setTimeout(() => t.classList.remove('show'), 1800);
 }
 
+/** 强制不透明底色（与 dialogUI.ts 弹窗 / embyWall 设置面板同款：具体色值 + 行内 !important，不用 var()）。
+ *  fnOS 标准面板色：深 #1c1c1e / 浅 #f5f5f7；并强制 backdrop-filter:none 杜绝玻璃渗透。
+ *  多处调用（开面板 / 显示后 rAF / 数据加载后）以抵御 Glass UI 异步重注入导致的偶发透明。 */
+function paintBg(root: HTMLElement): void {
+    const light = root.classList.contains('light');
+    root.style.setProperty('background', light ? '#f5f5f7' : '#1c1c1e', 'important');
+    root.style.setProperty('background-color', light ? '#f5f5f7' : '#1c1c1e', 'important');
+    root.style.setProperty('backdrop-filter', 'none', 'important');
+    root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+}
+
+// 玻璃 UI 可能在面板显示后异步重注入 body>div{background:transparent!important}，
+// 一次性重涂会被覆盖 → 偶发透明。故在面板可见期间用 rAF 循环持续兜底重涂，关闭时取消。
+let _paintRAF = 0;
+function paintLoop(root: HTMLElement): void {
+    paintBg(root);
+    _paintRAF = requestAnimationFrame(() => paintLoop(root));
+}
+
 function openPanel(): void {
     try {
         buildPanel();
         const root = $(PANEL_ID) as HTMLElement;
         const light = detectLight();
         root.classList.toggle('light', light);
-        // 强制不透明底色（fnOS 标准面板色，具体色值 + 行内 !important，杜绝透明/玻璃渗透）
-        root.style.setProperty('background', light ? '#f5f5f7' : '#1c1c1e', 'important');
-        root.style.setProperty('background-color', light ? '#f5f5f7' : '#1c1c1e', 'important');
-        root.style.setProperty('backdrop-filter', 'none', 'important');
-        root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        paintBg(root);
         root.classList.add('show');
+        // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
+        cancelAnimationFrame(_paintRAF);
+        _paintRAF = requestAnimationFrame(() => paintLoop(root));
         renderChart();
 
         // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）
         loadWatchData().then((result) => {
             renderWall();
+            // 数据刷新后再次兜底重涂底色（renderWall 重写 innerHTML 可能触发重排）
+            requestAnimationFrame(() => paintBg(root));
             const sub = $('wh-sub');
             const done = curData.filter((i) => i.prog >= 1).length;
             if (sub) sub.textContent = `${curData.length} 部作品`
@@ -861,7 +880,17 @@ function openPanel(): void {
 
 function closePanel(): void {
     const root = $(PANEL_ID);
-    if (root) root.classList.remove('show');
+    if (!root) return;
+    // 取消持续重涂循环，避免面板隐藏后仍空转
+    cancelAnimationFrame(_paintRAF);
+    _paintRAF = 0;
+    // 收起整面板
+    root.classList.remove('show');
+    // 顺便清掉详情浮层（若曾点开详情再点 ✕ 关闭，否则下次重开详情浮层会残留 .show 变成「难展开」）
+    const detail = root.querySelector('#wh-detail') as HTMLElement | null;
+    if (detail) detail.classList.remove('show');
+    // 复位可能的卡片选中态
+    root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
 }
 
 // ───────────────────────── OnReady 入口 ─────────────────────────
