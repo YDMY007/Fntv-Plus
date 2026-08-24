@@ -297,11 +297,14 @@ const WH_CSS = `
   display:grid;grid-template-columns:400px 1fr;align-items:stretch;
   box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
 #${PANEL_ID}.light .wh-detail{background:#fff}
-#${PANEL_ID} .wh-detail .hero{position:relative;min-height:100%;background:#1a1a1c;
-  /* 海报圆角只做左上/左下，与外卡片对齐 */
-  border-radius:24px 0 0 24px;overflow:hidden}
+#${PANEL_ID} .wh-detail .hero{position:relative;background:#1a1a1c;
+  /* 不再用 min-height:100% 被卡高撑大；改为按海报自然比例(2:3)定高，封面不变形 */
+  height:100%;border-radius:24px 0 0 24px;overflow:hidden;display:flex;align-items:center;justify-content:center}
 #${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
-  background-size:cover;background-position:center}
+  /* contain 而非 cover：保持原始比例，不拉伸变形；超出部分由 overflow:hidden 裁切 */
+  background-size:contain;background-position:center;background-repeat:no-repeat;
+  /* 容器比海报更高时，上下留暗色填充而非拉伸 */
+  background-color:#111}
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
   /* 渐变收尾色用具体色值，与卡片底色一致（深 #161618 / 浅 #fff） */
   background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%),
@@ -309,9 +312,11 @@ const WH_CSS = `
   pointer-events:none}
 #${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%),
              linear-gradient(to bottom,rgba(0,0,0,.2) 0%,transparent 30%)}
+#${PANEL_ID}.light .wh-detail .hero .poster{background-color:#f0f0f2}
 #${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
-  /* 透明即可：卡片本身已是不透明具体色，文字落在实底上清晰可读；高度固定→评语框拉长只在内滚动，不撑高整卡 */
-  background:transparent}
+  /* 右侧信息区也用具体不透明色值，不再依赖卡片透底（防 CSS 优先级被盖） */
+  background:#161618}
+#${PANEL_ID}.light .wh-detail .body{background:#fff}
 #${PANEL_ID} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
 #${PANEL_ID} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 #${PANEL_ID} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
@@ -637,7 +642,7 @@ function openDetail(idx: number): void {
     if (poster) {
         const pe = poster as HTMLElement;
         pe.style.background = it.art; // 渐变兜底
-        if (it.poster) { pe.style.backgroundImage = `url('${it.poster}')`; pe.style.backgroundSize = 'cover'; pe.style.backgroundPosition = 'center'; }
+        if (it.poster) { pe.style.backgroundImage = `url('${it.poster}')`; pe.style.backgroundSize = 'contain'; pe.style.backgroundPosition = 'center'; pe.style.backgroundRepeat = 'no-repeat'; }
     }
     set('wh-d-name', it.name);
     set('wh-d-year', `${it.fn.year} · ${it.type}`);
@@ -652,6 +657,17 @@ function openDetail(idx: number): void {
     const sess = (it.sessions || []).map((s) => `<div class="wh-sess"><span>${s[0]}</span><span class="pos">${s[1]}</span></div>`).join('')
         || '<div class="wh-sess"><span>暂无分段记录</span></div>';
     setH('wh-d-sessions', sess);
+    // 行内 !important 封死详情卡片底色（同 lc-686 铁律：具体色值 + !important，杜绝 Glass UI / 优先级覆盖导致右半边变透）
+    const panelRoot = $(PANEL_ID) as HTMLElement | null;
+    if (panelRoot) {
+        const detailCard = panelRoot.querySelector('.wh-detail') as HTMLElement | null;
+        if (detailCard) {
+            const isLight = panelRoot.classList.contains('light');
+            detailCard.style.setProperty('background', isLight ? '#fff' : '#161618', 'important');
+            const body = detailCard.querySelector('.body') as HTMLElement | null;
+            if (body) body.style.setProperty('background', isLight ? '#fff' : '#161618', 'important');
+        }
+    }
     ($('wh-detail') as HTMLElement).classList.add('show');
 }
 
