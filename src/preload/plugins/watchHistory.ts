@@ -44,6 +44,7 @@ interface ShowItem {
     prog: number;
     art: string;        // 渐变兜底背景（无真实海报时显示）
     poster?: string;    // 真实竖版海报 URL（飞牛 item API data.posters，空/缺=用渐变兜底）
+    lastPlayedAt?: number; // 真实"最近一次播放"时间戳(ms)；用于活跃度按天分桶（真实数据经 loadWatchData 填充，SAMPLE 由 sessions 解析兜底）
     fn: FnMeta;
     myRating: number;
     myReview: string;
@@ -380,7 +381,7 @@ function buildPanel(): void {
         <section class="wh-section">
           <div class="wh-section-head">
             <div class="wh-section-title">观影活跃度</div>
-            <div class="wh-section-hint">近 30 天 · 每天观看时长</div>
+            <div class="wh-section-hint">近 30 天 · 有播放记录的天数</div>
           </div>
           <div class="wh-chart-card">
             <div class="wh-chart-top">
@@ -389,9 +390,9 @@ function buildPanel(): void {
                 <div class="cs" id="wh-chart-cs"></div>
               </div>
               <div class="wh-stat">
-                <div><b>146</b><span>小时·累计</span></div>
-                <div><b>18</b><span>小时·本月</span></div>
-                <div><b>61%</b><span>看完率</span></div>
+                <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
+                <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
+                <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
               </div>
             </div>
             <div class="wh-chart-wrap" id="wh-chart-wrap">
@@ -579,7 +580,7 @@ function renderWall(): void {
     });
     const done = curData.filter((i) => i.prog >= 1).length;
     const sub = $('wh-sub');
-    if (sub) sub.textContent = `${curData.length} 部作品 · 累计观看 146 小时 · 本月 18 小时 · 已看完 ${done} 部（示例）`;
+    if (sub) sub.textContent = `${curData.length} 部作品 · 已看完 ${done} 部（示例）`;
 }
 
 function renderChart(): void {
@@ -588,29 +589,34 @@ function renderChart(): void {
     const tip = $('wh-chart-tip');
     const wrap = $('wh-chart-wrap');
     if (!barsEl || !axisEl || !tip || !wrap) return;
-    const today = new Date();
-    const daily: { label: string; min: number; today: boolean }[] = [];
-    for (let i = 29; i >= 0; i--) {
-        const d = new Date(today); d.setDate(d.getDate() - i);
-        const mm = d.getMonth() + 1, dd = d.getDate();
-        const seed = (i * 37 + 13) % 100;
-        let min = seed < 28 ? 0 : Math.round(25 + (seed % 130));
-        if (i === 0) min = 82;
-        if (i === 6) min = 0;
-        daily.push({ label: `${mm}/${dd}`, min, today: i === 0 });
+
+    // 真实分桶：近 30 天，每天统计"当天有播放记录的作品数"（基于各作品最近一次播放日）
+    const dayMs = 86400000;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const buckets = new Array(30).fill(0); // 索引 0=最旧(29天前) … 29=今天
+    for (const it of curData) {
+        const ts = lastPlayedTs(it);
+        if (!ts) continue;
+        const d = new Date(ts); d.setHours(0, 0, 0, 0);
+        const diff = Math.round((today.getTime() - d.getTime()) / dayMs);
+        if (diff >= 0 && diff < 30) buckets[29 - diff] += 1;
     }
-    const maxMin = Math.max(...daily.map((d) => d.min), 1);
+    const activeDays = buckets.filter((c) => c > 0).length;
+    const maxC = Math.max(1, ...buckets);
+
     barsEl.innerHTML = '';
     axisEl.innerHTML = '';
-    daily.forEach((d, i) => {
+    buckets.forEach((c, i) => {
+        const isToday = i === 29;
         const bar = document.createElement('div');
-        bar.className = 'wh-bar' + (d.min > 0 ? ' has' : '') + (d.today ? ' today' : '');
-        bar.style.height = Math.max(4, (d.min / maxMin) * 100) + '%';
-        const lbl = d.today ? '今天' : d.label;
+        bar.className = 'wh-bar' + (c > 0 ? ' has' : '') + (isToday ? ' today' : '');
+        bar.style.height = Math.max(4, (c / maxC) * 100) + '%';
+        const d = new Date(today.getTime() + (i - 29) * dayMs);
+        const lbl = isToday ? '今天' : `${d.getMonth() + 1}/${d.getDate()}`;
         bar.addEventListener('mouseenter', (e: MouseEvent) => {
             const r = (e.target as HTMLElement).getBoundingClientRect();
             const wr = wrap.getBoundingClientRect();
-            tip.innerHTML = `${lbl} · <b>${Math.floor(d.min / 60)}小时${d.min % 60}分</b>`;
+            tip.innerHTML = c > 0 ? `${lbl} · <b>${c} 部作品</b>` : `${lbl} · 未观看`;
             tip.style.left = (r.left - wr.left + r.width / 2) + 'px';
             tip.style.top = (r.top - wr.top - 8) + 'px';
             tip.classList.add('show');
@@ -618,13 +624,27 @@ function renderChart(): void {
         bar.addEventListener('mouseleave', () => tip.classList.remove('show'));
         barsEl.appendChild(bar);
         const ax = document.createElement('span');
-        ax.textContent = (i % 5 === 0 || i === 29) ? d.label : '';
+        ax.textContent = (i % 5 === 0 || i === 29) ? lbl : '';
         axisEl.appendChild(ax);
     });
-    const total = daily.reduce((s, d) => s + d.min, 0);
+
+    // 顶部统计（真实可算指标）
+    const total = curData.length;
+    const done = curData.filter((i) => i.prog >= 1).length;
+    const doneRate = total ? Math.round((done / total) * 100) : 0;
+    const now = new Date();
+    const monthCount = curData.filter((it) => {
+        const ts = lastPlayedTs(it); if (!ts) return false;
+        const d = new Date(ts);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }).length;
+
     const ct = $('wh-chart-ct'); const cs = $('wh-chart-cs');
-    if (ct) ct.textContent = `最近一个月你看了约 ${Math.round(total / 60)} 小时`;
-    if (cs) cs.textContent = `平均每天约 ${Math.floor(total / 30 / 60)}小时${Math.floor(total / 30) % 60}分`;
+    if (ct) ct.textContent = `近 30 天在 ${activeDays} 天里有过观看`;
+    if (cs) cs.textContent = `共 ${total} 部 · 本月 ${monthCount} 部`;
+    const elDays = $('wh-stat-days'); if (elDays) elDays.textContent = String(activeDays);
+    const elMonth = $('wh-stat-month'); if (elMonth) elMonth.textContent = String(monthCount);
+    const elRate = $('wh-stat-rate'); if (elRate) elRate.textContent = doneRate + '%';
 }
 
 function openDetail(idx: number): void {
@@ -761,11 +781,20 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             log.info(LOG, '飞牛返回空/失败，保留示例数据');
             return { count: 0, from: 'sample' };
         }
-        const mapped: ShowItem[] = items.map((it: any, i: number) => ({
+        const mapped: ShowItem[] = items.map((it: any, i: number) => {
+            // 真实"最近播放"时间戳（ms）：兼容 ISO 字符串与秒级/毫秒级数字
+            let lpMs = 0;
+            const lp = it.last_played;
+            if (lp) {
+                if (typeof lp === 'number') lpMs = lp < 1e12 ? lp * 1000 : lp;
+                else { const p = Date.parse(lp); if (!Number.isNaN(p)) lpMs = p; }
+            }
+            return {
             guid: it.guid || '',
             name: it.title || '未知作品',
             type: mapType(it.type),
-            last: it.last_played ? formatAgo(it.last_played) : '未知时间',
+            last: lpMs ? formatAgo(lpMs) : '未记录时间',
+            lastPlayedAt: lpMs,
             prog: typeof it.progress === 'number' ? Math.min(1, Math.max(0, it.progress)) : (it.watched ? 1 : 0),
             art: artForName(it.title || `item-${i}`),
             poster: '',
@@ -779,8 +808,9 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             },
             myRating: 0,
             myReview: '',
-            sessions: it.last_played ? [[formatDate(it.last_played), '']] : [],
-        }));
+            sessions: lpMs ? [[formatDate(lpMs), '']] : [],
+            };
+        });
         // 并发拉取真实竖版海报（与首页轮播图同款 item API 机制），按 guid 取 data.posters
         const CHUNK = 4;
         for (let i = 0; i < mapped.length; i += CHUNK) {
@@ -834,11 +864,45 @@ function formatDate(ts: string | number): string {
     } catch { return ''; }
 }
 
+/** 解析播放会话日期字符串为时间戳（ms）。
+ *  支持：ISO 字符串（飞牛/真实，含完整年份）与 SAMPLE 的 "MM-DD HH:MM"（缺年份→用当前年）。 */
+function parseSessionDate(s: string): number {
+    if (!s) return 0;
+    // 先尝试标准 ISO / 完整日期解析
+    const direct = Date.parse(s);
+    if (!Number.isNaN(direct)) {
+        const d = new Date(direct);
+        if (d.getFullYear() > 2000) return direct; // 年份合理，直接采用
+    }
+    // 退路：解析 "MM-DD HH:MM"（SAMPLE 格式，补当前年）
+    const m = s.match(/(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
+    if (m) {
+        const d = new Date();
+        d.setMonth(parseInt(m[1], 10) - 1, parseInt(m[2], 10));
+        d.setHours(parseInt(m[3], 10), parseInt(m[4], 10), 0, 0);
+        return d.getTime();
+    }
+    return 0;
+}
+
+/** 取某作品的真实"最近一次播放"时间戳（ms）。
+ *  优先用显式 lastPlayedAt（真实数据），否则从 sessions 解析（SAMPLE 亦可用）。无→0。 */
+function lastPlayedTs(it: ShowItem): number {
+    if (it.lastPlayedAt) return it.lastPlayedAt;
+    let best = 0;
+    for (const s of it.sessions || []) {
+        const t = parseSessionDate(s[0]);
+        if (t > best) best = t;
+    }
+    return best;
+}
+
 async function syncFnos(): Promise<void> {
     toast('正在同步飞牛影视数据…');
     const result = await loadWatchData();
     if (result.from === 'real') {
         renderWall();
+        renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
         const sub = $('wh-sub');
         if (sub) sub.textContent = `${curData.length} 部作品 · 来自飞牛影视 · 已看完 ${curData.filter(i => i.prog >= 1).length} 部`;
         toast(`已同步 ${result.count} 部真实观看记录`);
@@ -892,6 +956,7 @@ function openPanel(): void {
         // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）
         loadWatchData().then((result) => {
             renderWall();
+            renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
             // 数据刷新后再次兜底重涂底色（renderWall 重写 innerHTML 可能触发重排）
             requestAnimationFrame(() => paintBg(root));
             const sub = $('wh-sub');
