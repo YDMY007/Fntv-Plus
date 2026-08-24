@@ -22,6 +22,7 @@
 import { registerHook, HookType } from '../core/hooks';
 import { ipcRenderer } from 'electron';
 import log from '../core/logger';
+import { isFntvTvPage } from '../core/pageMode';
 
 const LOG = '[WatchHistory]';
 const ENTRY_ID = 'fntv-wh-entry';
@@ -925,16 +926,20 @@ function closePanel(): void {
     if (detail) detail.classList.remove('show');
     // 复位可能的卡片选中态
     root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
-    // 收起后强制返回 fnOS 影视首页（/v）并复位侧栏/页面状态，杜绝"偶发停在子页面或侧栏展开态"
-    // 之前只在非首页才导航，已在 /v 时跳过→侧栏状态不复位→表现为"没正常返回"。
-    // 现在：非首页走 location.href=/v（整页重载，稳定）；已在首页则 location.reload() 复位侧栏展开态。
-    const path = (location.pathname || '').replace(/\/+$/, '');
-    const onHome = path === '' || path === '/' || path === '/v';
-    if (onHome) {
-        try { location.reload(); } catch { /* ignore */ }
-    } else {
-        try { location.href = location.origin + '/v'; } catch { /* ignore */ }
+    // 关闭后是否"回影视首页"：仅当用户当前处于【影视 App】(isFntvTvPage: /v 及其子页) 内才回首页；
+    // 飞牛原生 NAS 页 / 仪表盘 / 其他 fnOS 系统页一律【不导航】，保留用户当前所在页，
+    // 避免关闭时把正在用 NAS 的用户强行拽到影视首页（呼应"非首页守卫不影响 NAS 用户"）。
+    if (isFntvTvPage()) {
+        const p = (location.pathname || '').replace(/\/+$/, '');
+        if (p === '/v') {
+            // 已在影视首页：刷新复位侧栏展开态
+            try { location.reload(); } catch { /* ignore */ }
+        } else {
+            // 影视子页（/v/movie|tv|...）：回影视首页
+            try { location.href = location.origin + '/v'; } catch { /* ignore */ }
+        }
     }
+    // 非影视 App（原生 NAS 页等）：不导航，仅收起面板，用户停留在原页面
 }
 
 // ───────────────────────── OnReady 入口 ─────────────────────────
