@@ -528,6 +528,78 @@ function getFnapiFresh(): any {
  * 调用 item/list(parent_guid='' 表示根媒体库, exclude_folder=1 排除文件夹)，
  * 过滤 watched===1 的条目。实证：根库共 133 项，其中已观看 3 项。
  */
+/**
+ * 计算单个已看条目（电视剧/电影）的总时长（毫秒）。
+ *
+ * fnOS 影视层级实测为三级：电视剧(TV) → 季(Season) → 单集(Episode)。
+ *   - 电视剧 / 季 两级条目【没有】 runtime / duration 字段（实测 Object.keys 无此键），
+ *     直接读 it.runtime / it.duration 恒为 0；
+ *   - 只有"单集(Episode)"才带 duration(秒) 与 runtime(分钟)。
+ *   - 电影(Movie)自身带 runtime(分钟)、duration=0。
+ *
+ * 因此时长必须向下钻取：电视剧/剧集类先用 item/list(parent_guid=本剧) 取子级（季/单集），
+ * 遇 Season 再钻到 episode/list/{季guid} 取单集，逐集累加 duration(秒)，缺失时以
+ * runtime(分钟)×60 兜底；电影直接取自身字段。最终仍无果才回退到本条目 runtime。
+ *
+ * 注：lc-696 曾把"电视剧 guid"直接喂给 episode/list（返回 0 集），又 fallback 到不存在的
+ * it.runtime，导致全部总时长=0。本实现已在真实 fnOS API 上验证（3 部已看剧均得非零时长）。
+ */
+async function sumRuntimeMsForItem(fnapi: any, it: any): Promise<number> {
+    let totalSec = 0;
+    const addLeaf = (leaf: any): void => {
+        if (!leaf) return;
+        const dur = Number(leaf.duration) || 0; // 秒
+        const rt = Number(leaf.runtime) || 0;   // 分钟
+        if (dur > 0) totalSec += dur;
+        else if (rt > 0) totalSec += rt * 60;
+    };
+    const type = (it && it.type || '').toLowerCase();
+    if (type === 'movie') {
+        addLeaf(it);
+    } else {
+        let found = false;
+        try {
+            // 向下取子级：电视剧 → 季(Season)；部分条目可能直接是单集/Movie
+            const childResp: any = await fnapi.getItemListCached({
+                parent_guid: it.guid,
+                exclude_folder: 1,
+                sort_column: 'sort_title',
+                sort_type: 'ASC',
+            });
+            const children: any[] = (childResp && childResp.data && Array.isArray(childResp.data.list))
+                ? childResp.data.list
+                : [];
+            for (const c of children) {
+                const ct = (c.type || '').toLowerCase();
+                if (ct === 'episode' || ct === 'movie') {
+                    addLeaf(c);
+                    found = true;
+                } else {
+                    // Season 季：再钻到 episode/list/{季guid}
+                    try {
+                        const ep: any = await fnapi.getEpisodeListCached(c.guid);
+                        const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
+                        if (eps.length) {
+                            for (const e of eps) addLeaf(e);
+                            found = true;
+                        }
+                    } catch { /* ignore */ }
+                }
+            }
+        } catch { /* ignore */ }
+        // 兜底：子级钻取无果时，仍尝试 episode/list/{本条目guid}（兼容单层剧集/异常结构）
+        if (!found) {
+            try {
+                const ep: any = await fnapi.getEpisodeListCached(it.guid);
+                const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
+                for (const e of eps) addLeaf(e);
+            } catch { /* ignore */ }
+        }
+    }
+    if (!totalSec) totalSec = (Number(it && it.runtime) || 0) * 60; // 最终兜底：本条目自身 runtime(分钟)
+    return Math.round(totalSec * 1000);
+}
+
 async function getWatchedItems(): Promise<any[]> {
     const fnapi = getFnapiFresh();
     if (!fnapi) {
@@ -551,17 +623,10 @@ async function getWatchedItems(): Promise<any[]> {
             log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
         }
         const watched = list.filter((it: any) => it && it.watched === 1);
-        // 并发计算每部作品总时长：剧集=各集 runtime(分钟)之和；电影/其他=自身 runtime(分钟)兜底。
+        // 并发计算每部作品总时长：电视剧向下钻取 季→单集 累加 duration/runtime；电影取自身。
         // 同时带回 last_played（watched_ts 秒→ms）与进度，供前端观影记录直接展示，无需前端再猜接口。
         const items = await Promise.all(watched.map(async (it: any) => {
-            let totalMin = 0;
-            try {
-                const ep = await fnapi.getEpisodeListCached(it.guid);
-                if (ep && ep.success && Array.isArray(ep.data) && ep.data.length) {
-                    for (const e of ep.data) totalMin += Number(e.runtime) || 0;
-                }
-            } catch { /* ignore */ }
-            if (!totalMin) totalMin = Number(it.runtime) || 0; // 电影/无分集兜底
+            const total_runtime_ms = await sumRuntimeMsForItem(fnapi, it);
             return {
                 guid: it.guid,
                 parent_guid: it.parent_guid,
@@ -575,7 +640,7 @@ async function getWatchedItems(): Promise<any[]> {
                 watched: 1,
                 last_played: it.watched_ts ? Number(it.watched_ts) * 1000 : 0, // 秒→ms
                 progress: 1,
-                total_runtime_ms: Math.round(totalMin * 60000), // 分钟→ms
+                total_runtime_ms,
             };
         }));
         log.info(`[豆瓣] 已观看列表: 根库 ${list.length} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
