@@ -45,6 +45,7 @@ interface ShowItem {
     art: string;        // 渐变兜底背景（无真实海报时显示）
     poster?: string;    // 真实竖版海报 URL（飞牛 item API data.posters，空/缺=用渐变兜底）
     lastPlayedAt?: number; // 真实"最近一次播放"时间戳(ms)；用于活跃度按天分桶（真实数据经 loadWatchData 填充，SAMPLE 由 sessions 解析兜底）
+    totalRuntimeMs?: number; // 作品总时长(ms)：剧集=各集 runtime 之和，电影/单集=自身 runtime；用于替代"未记录时间"与详情页展示
     fn: FnMeta;
     myRating: number;
     myReview: string;
@@ -392,6 +393,7 @@ function buildPanel(): void {
               <div class="wh-stat">
                 <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
                 <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
+                <div><b id="wh-stat-total">0</b><span>小时·累计时长</span></div>
                 <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
               </div>
             </div>
@@ -554,7 +556,11 @@ function filteredData(): ShowItem[] {
 
 function cardHTML(item: ShowItem, idx: number): string {
     const pct = Math.round(item.prog * 100);
-    const sub = item.myRating ? `${item.type} · 我的评分 ${item.myRating}/5` : `${item.type} · ${item.last}`;
+    let sub: string;
+    if (item.myRating) sub = `${item.type} · 我的评分 ${item.myRating}/5`;
+    else if (item.last && item.last !== '未记录时间') sub = `${item.type} · ${item.last}`;
+    else if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
+    else sub = `${item.type} · 未记录时间`;
     const bar = item.prog >= 1
         ? `<div class="badge">已看完</div>`
         : `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`;
@@ -642,8 +648,11 @@ function renderChart(): void {
     const ct = $('wh-chart-ct'); const cs = $('wh-chart-cs');
     if (ct) ct.textContent = `近 30 天在 ${activeDays} 天里有过观看`;
     if (cs) cs.textContent = `共 ${total} 部 · 本月 ${monthCount} 部`;
+    const totalMs = curData.reduce((s, i) => s + (i.totalRuntimeMs || 0), 0);
+    const totalH = Math.round(totalMs / 3600000);
     const elDays = $('wh-stat-days'); if (elDays) elDays.textContent = String(activeDays);
     const elMonth = $('wh-stat-month'); if (elMonth) elMonth.textContent = String(monthCount);
+    const elTotal = $('wh-stat-total'); if (elTotal) elTotal.textContent = String(totalH);
     const elRate = $('wh-stat-rate'); if (elRate) elRate.textContent = doneRate + '%';
 }
 
@@ -664,7 +673,7 @@ function openDetail(idx: number): void {
         }
     }
     set('wh-d-name', it.name);
-    set('wh-d-year', `${it.fn.year} · ${it.type}`);
+    set('wh-d-year', `${it.fn.year} · ${it.type}${it.totalRuntimeMs ? ' · 总时长 ' + fmtDur(it.totalRuntimeMs) : ''}`);
     setH('wh-d-chips', it.fn.genres.map((g) => `<span class="chip">${g}</span>`).join(''));
     setH('wh-d-douban', `飞牛影视评分 <b>${it.fn.douban.toFixed(1)}</b> · 豆瓣`);
     set('wh-d-overview', it.fn.overview);
@@ -710,6 +719,7 @@ function artForName(name: string): string {
 //   （credentials:'include'）→ 取 data.posters（竖版，选最大尺寸）→ 拼 base + '/v/api/v1/' + rel。
 // 这样观看记录的竖版海报与首页轮播图来源完全一致（飞牛 item API 权威竖版源），不再用假渐变占位。
 const _posterCache = new Map<string, string>();
+const _runtimeCache = new Map<string, number>(); // guid → 总时长(ms)，避免每次打开重复拉取
 
 function pickImg(v: any, preferLargest = false): string {
     let s = '';
@@ -756,6 +766,74 @@ async function fetchItemPoster(guid: string): Promise<string> {
         if (!rel) return '';
         return rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel;
     } catch { return ''; }
+}
+
+/** 从任意 fnOS 条目对象里尽力抽取时长(ms)。兼容多种字段/单位：
+ *  - 分钟（fnOS episode.item.runtime / 原始 runtime）：<5000 → 视为分钟
+ *  - 秒 / 毫秒：按量级区分
+ *  - emby 风格 RunTimeTicks（100ns）：>1e8 → /10000
+ *  - 嵌套 .item.runtime（fnos-tv-clone 结构） / MediaSources[].RunTimeTicks
+ * 抽不到返回 0。 */
+function extractRuntimeMs(o: any): number {
+    if (!o || typeof o !== 'object') return 0;
+    // 嵌套结构（如 episode.list 各项的 .item）
+    if (o.item && typeof o.item === 'object') {
+        const nested = extractRuntimeMs(o.item);
+        if (nested > 0) return nested;
+    }
+    const ms = o.MediaSources;
+    if (Array.isArray(ms) && ms[0]) {
+        const mt = ms[0].RunTimeTicks ?? ms[0].runTimeTicks;
+        if (typeof mt === 'number' && mt > 0) return Math.round(mt / 10000);
+    }
+    const t = o.RunTimeTicks ?? o.runTimeTicks;
+    if (typeof t === 'number' && t > 0) return Math.round(t / 10000);
+    const v = o.runtime ?? o.Runtime ?? o.duration ?? o.Duration;
+    if (typeof v === 'number' && v > 0) {
+        if (v > 1e8) return Math.round(v / 10000);   // ticks
+        if (v > 1e6) return v;                         // 毫秒
+        if (v > 5000) return Math.round(v * 1000);     // 秒
+        return Math.round(v * 60000);                  // 分钟
+    }
+    return 0;
+}
+
+/** 取作品总时长(ms)：剧集→各集 runtime 之和；电影/单集/其他→自身 runtime。失败返回 0。 */
+async function fetchTotalRuntime(guid: string, type: string): Promise<number> {
+    if (!guid) return 0;
+    try {
+        const base = location.origin;
+        const isSeries = /series|剧集|season/i.test(type) || type === '2';
+        const path = isSeries ? `/v/api/v1/episode/list/${guid}` : `/v/api/v1/item/${guid}`;
+        const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5000);
+        let resp: Response;
+        try {
+            resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
+        } finally { clearTimeout(timer); }
+        if (!resp.ok) return 0;
+        const json: any = await resp.json();
+        if (isSeries) {
+            const list = Array.isArray(json) ? json : (json.data || json.Data || json.items || json.Items || []);
+            if (!Array.isArray(list)) return 0;
+            let total = 0;
+            for (const ep of list) { const r = extractRuntimeMs(ep); if (r > 0) total += r; }
+            return total;
+        }
+        const d = (json && json.data) || json;
+        return extractRuntimeMs(d);
+    } catch { return 0; }
+}
+
+/** 时长(ms) → 人类可读，如 "2小时15分" / "45分" / "1小时"。 */
+function fmtDur(ms: number): string {
+    if (!ms || ms < 60000) return '';
+    const totalMin = Math.round(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h > 0) return m > 0 ? `${h}小时${m}分` : `${h}小时`;
+    return `${m}分`;
 }
 
 /** 类型映射：fnOS item type → 显示用中文 */
@@ -817,11 +895,23 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             const slice = mapped.slice(i, i + CHUNK);
             await Promise.all(slice.map(async (m) => {
                 if (!m.guid) return;
+                // 海报
                 const cached = _posterCache.get(m.guid);
-                if (cached) { m.poster = cached; return; }
-                const url = await fetchItemPoster(m.guid);
-                m.poster = url;
-                if (url) _posterCache.set(m.guid, url);
+                if (cached) { m.poster = cached; }
+                else {
+                    const url = await fetchItemPoster(m.guid);
+                    m.poster = url;
+                    if (url) _posterCache.set(m.guid, url);
+                }
+                // 总时长：剧集取各集之和、其他取自身；优先用缓存
+                if (m.totalRuntimeMs == null) {
+                    const rc = _runtimeCache.get(m.guid);
+                    if (rc != null) m.totalRuntimeMs = rc;
+                    else {
+                        m.totalRuntimeMs = await fetchTotalRuntime(m.guid, m.type);
+                        if (m.totalRuntimeMs) _runtimeCache.set(m.guid, m.totalRuntimeMs);
+                    }
+                }
             }));
         }
         // 合并用户已有的评分/评语（按 name 匹配旧数据）
