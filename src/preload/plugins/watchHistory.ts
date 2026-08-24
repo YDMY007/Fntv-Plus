@@ -855,6 +855,8 @@ function paintLoop(root: HTMLElement): void {
 
 function openPanel(): void {
     try {
+        // 若面板元素曾被 fnOS 路由切换清掉（DOM 重建），重置标记让其重新创建
+        if (!$(PANEL_ID)) panelBuilt = false;
         buildPanel();
         const root = $(PANEL_ID) as HTMLElement;
         const light = detectLight();
@@ -903,6 +905,13 @@ function closePanel(): void {
     if (detail) detail.classList.remove('show');
     // 复位可能的卡片选中态
     root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
+    // 收起后直接返回 fnOS 影视首页（/v），而非停留在任意子页面
+    // （与 embyWall 的"回首页"同款写法；已在首页则不复载，避免抖动）
+    const path = (location.pathname || '').replace(/\/+$/, '');
+    const isHome = path === '' || path === '/' || path === '/v';
+    if (!isHome) {
+        try { location.href = location.origin + '/v'; } catch { /* ignore */ }
+    }
 }
 
 // ───────────────────────── OnReady 入口 ─────────────────────────
