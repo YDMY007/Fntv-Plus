@@ -305,11 +305,9 @@ const WH_CSS = `
 #${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;object-position:center;display:block}
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
-  background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%),
-             linear-gradient(to bottom,rgba(0,0,0,.35) 0%,transparent 30%);
+  background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%);
   pointer-events:none}
-#${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%),
-             linear-gradient(to bottom,rgba(0,0,0,.2) 0%,transparent 30%)}
+#${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%)}
 #${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
   background:#161618}
 #${PANEL_ID}.light .wh-detail .body{background:#fff}
@@ -341,11 +339,6 @@ const WH_CSS = `
 #${PANEL_ID} .wh-sess{display:flex;justify-content:space-between;font-size:13px;color:var(--wh-text2);
   padding:6px 0;border-bottom:1px solid var(--wh-line)}
 #${PANEL_ID} .wh-sess .pos{color:var(--wh-text)}
-#${PANEL_ID} .wh-detail .close{position:absolute;top:14px;right:16px;color:var(--wh-text2);
-  background:var(--wh-surface);border:1px solid var(--wh-line);
-  border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
-  cursor:pointer;font-size:16px;z-index:10;transition:background .15s,color .15s}
-#${PANEL_ID} .wh-detail .close:hover{background:var(--wh-surface2);color:var(--wh-text)}
 #${PANEL_ID} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
   background:var(--wh-tip);border:1px solid var(--wh-line);padding:12px 22px;border-radius:14px;font-size:14px;
   opacity:0;transition:.25s;z-index:80}
@@ -420,7 +413,6 @@ function buildPanel(): void {
           <div class="hero">
             <img class="poster" id="wh-d-poster" alt="" />
             <div class="scrim"></div>
-            <div class="close" id="wh-d-close">✕</div>
           </div>
           <div class="body">
             <div class="d-name" id="wh-d-name"></div>
@@ -485,10 +477,6 @@ function buildPanel(): void {
     const closeBtn = root.querySelector('#wh-close') as HTMLElement | null;
     if (closeBtn) {
         closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
-    }
-    const dClose = root.querySelector('#wh-d-close') as HTMLElement | null;
-    if (dClose) {
-        dClose.addEventListener('click', () => { (root.querySelector('#wh-detail') as HTMLElement)?.classList.remove('show'); });
     }
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
