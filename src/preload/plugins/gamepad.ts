@@ -192,7 +192,6 @@ let polling = false;
 let heldDir: 'up' | 'down' | 'left' | 'right' | null = null;
 let dirFirstAt = 0;
 let dirLastRepeat = 0;
-let lastNoPadLog = 0;
 let padLogged = false;
 
 // 检测手柄是否连接（Gamepad API：浏览器要求页面有交互后才暴露，但 preload 注入环境通常可用）
@@ -349,11 +348,8 @@ function poll(): void {
     const pads = getGamepads();
     const pad = pads.find((p) => p && p.connected) as any;
     if (!pad) {
-        // [lc-667] 诊断：手柄未检测到时每 5s 提醒一次（避免用户以为功能坏了）
-        if (Date.now() - lastNoPadLog > 5000) {
-            lastNoPadLog = Date.now();
-            log.warn('[gamepad] 未检测到手柄（getGamepads 为空）——请确认手柄已连接，并在窗口内按任意键激活');
-        }
+        // 未检测到手柄是多数用户的常态（并非人人都一直连着手柄），不应刷警告日志。
+        // 手柄接入会触发 gamepadconnected 事件并打 info 日志；设置面板也实时显示连接状态。
         prevButtons = [];
         prevAxes = [];
         heldDir = null;

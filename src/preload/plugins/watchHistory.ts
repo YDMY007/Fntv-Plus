@@ -208,10 +208,12 @@ let curRating = 0;
 const WH_CSS = `
 #${PANEL_ID}{position:fixed;inset:0;z-index:2147483640;display:none;overflow:hidden;
   font-family:-apple-system,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
-  -webkit-font-smoothing:antialiased;color:var(--wh-text);background:var(--wh-bg)}
+  -webkit-font-smoothing:antialiased;color:var(--wh-text);
+  background:#1c1c1e!important;background-color:#1c1c1e!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
 #${PANEL_ID}.show{display:block}
 #${PANEL_ID} *{box-sizing:border-box}
-#${PANEL_ID}{--wh-accent:#2997ff;--wh-bg:#000;--wh-surface:rgba(255,255,255,.06);
+#${PANEL_ID}{--wh-accent:#2997ff;--wh-bg:#1c1c1e;--wh-surface:rgba(255,255,255,.06);
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
   --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
@@ -449,6 +451,15 @@ function buildPanel(): void {
     //    必须逐个打标记，否则透明亚克力会渗进面板。动态生成的卡片在 cardHTML 里也加了此属性。 ──
     root.setAttribute('data-fntv-glass-exclude', '');
     root.querySelectorAll('*').forEach((e) => e.setAttribute('data-fntv-glass-exclude', ''));
+
+    // ── 背景不透明（与 dialogUI.ts 弹窗 / embyWall 设置面板同款：行内 !important + 具体色值，不用 var()）──
+    //    Glass UI 规则①b: html[data-fntv-glass] .fnos-tv-page body > div { background:transparent!important }
+    //    #fntv-wh 是 body > div → 被强制透明。行内 style !important（具体色值，非 var）优先级 > 样式表 !important，彻底封死。
+    //    底色取 fnOS 标准深灰面板色 #1c1c1e（非纯黑），浅色模式在 openPanel 里切 #f5f5f7。
+    root.style.setProperty('background', '#1c1c1e', 'important');
+    root.style.setProperty('background-color', '#1c1c1e', 'important');
+    root.style.setProperty('backdrop-filter', 'none', 'important');
+    root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
     // ── 关闭：✕ 按钮 + 背景点击 + Esc（三路关闭）──
     const closeBtn = root.querySelector('#wh-close') as HTMLElement | null;
@@ -816,7 +827,13 @@ function openPanel(): void {
     try {
         buildPanel();
         const root = $(PANEL_ID) as HTMLElement;
-        root.classList.toggle('light', detectLight());
+        const light = detectLight();
+        root.classList.toggle('light', light);
+        // 强制不透明底色（fnOS 标准面板色，具体色值 + 行内 !important，杜绝透明/玻璃渗透）
+        root.style.setProperty('background', light ? '#f5f5f7' : '#1c1c1e', 'important');
+        root.style.setProperty('background-color', light ? '#f5f5f7' : '#1c1c1e', 'important');
+        root.style.setProperty('backdrop-filter', 'none', 'important');
+        root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
         root.classList.add('show');
         renderChart();
 
