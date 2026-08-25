@@ -1172,6 +1172,42 @@ function saveRatings(): void {
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
 
+// 本地观看记录：主进程在「真正开始播放」时回传（不依赖 fnOS 的 watched_ts）。
+// 把当天记进持久化台账，热力图/活跃度即时点亮，重启后也不丢。
+ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; ts?: number }) => {
+    try {
+        const ts = (d && typeof d.ts === 'number') ? d.ts : Date.now();
+        const dd = new Date(ts); dd.setHours(0, 0, 0, 0);
+        const key = `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`;
+        _dayCountCache.set(key, (_dayCountCache.get(key) || 0) + 1);
+        // 同步更新对应作品的 lastPlayedAt，使首次实时渲染与后续真实同步都更准确
+        if (d && d.guid) {
+            const it = curData.find((i) => i.guid === d.guid);
+            if (it) it.lastPlayedAt = ts;
+        }
+        saveDayCount(_dayCountCache);
+        // 若面板当前已打开，立即刷新热力图（renderChart 内部对未挂载有保护）
+        if ($('wh-chart-wrap')) renderChart();
+    } catch (e: any) { log.warn('[watchHistory] 记录本地观看失败:', e?.message || e); }
+});
+
+// 页面内原生 fnOS 播放器（不走 Fntv-Plus 外部播放）同样点亮热力图：
+// 捕获 video 的 play 事件，按元素去重后本地记一笔当日观看（与 play-movie 路径互斥，不会重复计数）。
+const _recordedVideos = new WeakSet<Element>();
+document.addEventListener('play', (ev: Event) => {
+    const v = ev.target as Element;
+    if (!v || v.tagName !== 'VIDEO' || _recordedVideos.has(v)) return;
+    _recordedVideos.add(v);
+    try {
+        const ts = Date.now();
+        const dd = new Date(ts); dd.setHours(0, 0, 0, 0);
+        const key = `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`;
+        _dayCountCache.set(key, (_dayCountCache.get(key) || 0) + 1);
+        saveDayCount(_dayCountCache);
+        if ($('wh-chart-wrap')) renderChart();
+    } catch (e: any) { log.warn('[watchHistory] 记录原生播放失败:', e?.message || e); }
+}, true);
+
 function pickImg(v: any, preferLargest = false): string {
     let s = '';
     const extract = (it: any): string => {

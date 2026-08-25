@@ -469,6 +469,13 @@ function eventHandler(fnapi: fn.ApiService) {
     };
 }
 
+// 回传「已开始播放」事件给渲染进程（观影记录面板用：本地记一笔当日观看，不依赖 fnOS watched_ts）
+function recordWatchEvent(event: IpcMainEvent, guid: string): void {
+    try {
+        event.sender.send('fntv:watch-recorded', { guid: guid || '', ts: Date.now() });
+    } catch (e: any) { log.warn('[play-movie] 回传观看记录失败:', e?.message || e); }
+}
+
 // 处理播放事件
 async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourceIndex, player }: PlayRequest): Promise<void> {
     const config = fnConfig.readConfig();
@@ -601,6 +608,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
                 const ok = await currentPlayer.switchTo(playList, currentIndex);
                 if (ok) {
                     log.info('✅ 已原地切换到新内容（未重新拉起 PotPlayer 窗口）');
+                    recordWatchEvent(event, itemGuid);
                     return;
                 }
                 log.warn('[PotPlayer] 原地切换失败，回退为停止后重新播放');
@@ -624,6 +632,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     // 开始播放
     log.info(`[perf] 进入 MPV 启动前, 自点击累计 ${Date.now() - t0}ms`);
     playerInstance.playList(playList, currentIndex);
+    recordWatchEvent(event, itemGuid);
 }
 
 // [lc-467] strm 解析辅助：.strm 本质是文本文件（每行一个真实播放 URL）。
