@@ -207,7 +207,6 @@ function startKeepAlive(): void {
 
 // ───────────────────────── 面板 ─────────────────────────
 let panelBuilt = false;
-let _onFiltersClick: ((e: MouseEvent) => void) | null = null; // 筛选点击处理：每次打开面板重绑前先移除旧监听，杜绝重复绑定
 let curData: ShowItem[] = SAMPLE.slice();
 let curFilter = '全部';
 let curIdx = 0;
@@ -233,12 +232,12 @@ const WH_CSS = `
 
 #${PANEL_ID} .wh-main{position:absolute;inset:0;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
-  padding:26px 40px 8px}
+  padding:26px 40px 8px;position:relative;z-index:60;pointer-events:auto}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
 #${PANEL_ID} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
   background:linear-gradient(135deg,var(--wh-accent),#7b5bff);flex-shrink:0}
 #${PANEL_ID} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:6px}
-#${PANEL_ID} .wh-filters{display:flex;gap:9px;align-items:center}
+#${PANEL_ID} .wh-filters{display:flex;gap:9px;align-items:center;position:relative;z-index:61;pointer-events:auto}
 #${PANEL_ID} .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
 #${PANEL_ID} .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
@@ -503,10 +502,8 @@ function buildPanel(): void {
     `;
     document.body.appendChild(root);
     panelBuilt = true;
-    // 筛选 + 立即同步监听：建面板那一刻就绑到「当前存活」的 .wh-filters 节点（函数声明提升，可在此调用）。
-    // 与 openPanel 末尾的 bindFilters 调用共用同一 _onFiltersClick 引用 → 幂等，整生命周期「恰好一个」监听。
-    // 这样即便 openPanel 后续逻辑因故未跑到 bindFilters，筛选监听也已就位，杜绝电影/剧集/动漫「点不动」。
-    bindFilters(root);
+    // 筛选 / 同步 / 关闭的点击统一委托在 document.body（见 bindGlobalPanelClicks，由 handle() 在插件加载时只绑一次），
+    // 不在此处绑定——避免绑到可能被 fnOS / Glass UI 重建的 .wh-filters 节点导致监听丢失（电影/剧集/动漫"点不动"）。
 
     // ── 玻璃豁免：整面板所有元素打 data-fntv-glass-exclude（与设置面板/顶栏同款排除机制）。
     //    Glass UI 规则 ② 命中 [class*="card"]（含 .wh-card / .wh-chart-card）并加亚克力，
@@ -523,26 +520,14 @@ function buildPanel(): void {
     root.style.setProperty('backdrop-filter', 'none', 'important');
     root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
-    // ── 关闭：✕ 按钮（事件委托，避免绑定到失效节点导致偶发需点两次）+ 背景点击 + Esc（三路关闭）──
+    // ── 关闭：详情浮层背景点击关闭 + Esc（三路关闭；✕关闭/立即同步/分类筛选/空白背景关闭统一在
+    //    bindGlobalPanelClicks 的 document.body 委托里处理，避免绑定到失效节点导致"点不动"）──
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
         detailOverlay.addEventListener('click', (e: MouseEvent) => {
             if ((e.target as HTMLElement).id === 'wh-detail') detailOverlay.classList.remove('show');
         });
     }
-    // 点击面板主内容区背景（非交互元素）也可关闭
-    root.addEventListener('click', (e: MouseEvent) => {
-        const tgt = e.target as HTMLElement;
-        // ✕ 关闭按钮：委托判定（命中 .wh-close 或其内部）即关，且不依赖具体元素引用，杜绝偶发需点两次
-        if (tgt.closest('#wh-close')) { e.stopPropagation(); closePanel(); return; }
-        // 只有点到 .wh-main 本身或其直接空白子元素才关（不误杀卡片/按钮点击）
-        if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
-    });
-
-    // 筛选 + 立即同步监听：建面板时(buildPanel)与每次打开面板时(openPanel)各调一次 bindFilters()
-    // （见 bindFilters）。bindFilters 内部先 removeEventListener 再 addEventListener（同一 _onFiltersClick
-    // 引用 → 幂等），无论调几次整生命周期都「恰好一个」监听，且始终绑在当前存活的 .wh-filters 节点——
-    // 彻底免疫 fnOS 路由切换导致的 DOM 重建/旧节点监听失效（即反复出现的电影/剧集/动漫"点不动"根因）。
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
@@ -584,26 +569,35 @@ function filteredData(): ShowItem[] {
     return curData.filter((i) => i.type === curFilter);
 }
 
-/** 每次打开面板时（重新）绑定筛选 + 立即同步的点击事件委托。
- *  重绑前先 removeEventListener 移除旧监听（同一函数引用，幂等 → 整生命周期「恰好一个」），
- *  且绑定到「当前存活」的 .wh-filters 节点——彻底免疫 fnOS 路由切换导致的 DOM 重建 /
- *  旧节点监听失效（电影/剧集/动漫"点不动"的根因）。 */
-function bindFilters(root: HTMLElement): void {
-    const filtersEl = root.querySelector('.wh-filters') as HTMLElement | null;
-    if (!filtersEl) return;
-    if (_onFiltersClick) filtersEl.removeEventListener('click', _onFiltersClick);
-    _onFiltersClick = (e: MouseEvent) => {
-        const tgt = e.target as HTMLElement;
-        // 立即同步按钮：立刻重拉飞牛观看数据（含 TMDB 标签）
+/** 全局点击委托（只绑一次，挂在 document.body 上，永不被面板内部 DOM 重建影响）。
+ *  统一处理：✕关闭 / 立即同步 / 分类筛选 / 点击空白背景关闭。
+ *  用 e.target.closest() 判定——无论面板内部节点如何被 fnOS SPA / Glass UI 异步重建，
+ *  点击都会冒泡到 body 被这里捕获，彻底根治「电影/剧集/动漫点不动 / 点多次才反应一次」。 */
+let _globalClickBound = false;
+function bindGlobalPanelClicks(): void {
+    if (_globalClickBound) return;
+    _globalClickBound = true;
+    document.body.addEventListener('click', (e: MouseEvent) => {
+        const tgt = e.target as HTMLElement | null;
+        if (!tgt) return;
+        const root = $(PANEL_ID) as HTMLElement | null;
+        if (!root) return; // 面板未注入则不处理
+        // ✕ 关闭按钮
+        if (tgt.closest('#wh-close')) { closePanel(); return; }
+        // 立即同步：立刻重拉飞牛观看数据（含 TMDB 标签）
         if (tgt.closest('#wh-sync')) { syncFnos(); return; }
+        // 分类筛选：全部 / 电影 / 剧集 / 动漫
         const pill = tgt.closest('.wh-pill') as HTMLElement | null;
-        if (!pill) return;
-        root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
-        pill.classList.add('active');
-        curFilter = (pill as HTMLElement).dataset.f || '全部';
-        renderWall();
-    };
-    filtersEl.addEventListener('click', _onFiltersClick);
+        if (pill) {
+            root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
+            pill.classList.add('active');
+            curFilter = (pill as HTMLElement).dataset.f || '全部';
+            renderWall();
+            return;
+        }
+        // 点击面板主内容区空白背景（非交互元素）也可关闭
+        if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
+    });
 }
 
 // mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
@@ -1078,8 +1072,8 @@ function openPanel(): void {
         root.classList.toggle('light', light);
         paintBg(root);
         root.classList.add('show');
-        // 每次打开自愈式重绑筛选监听（免疫 fnOS 路由切换导致的旧节点监听失效 → 电影/剧集/动漫"点不动"）
-        bindFilters(root);
+        // 筛选/同步/关闭点击委托已在 handle() 加载时统一绑到 document.body（bindGlobalPanelClicks），
+        // 此处无需再绑——彻底免疫面板内部 DOM 重建导致的监听丢失。
         // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
         cancelAnimationFrame(_paintRAF);
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
@@ -1153,6 +1147,7 @@ function handle(): void {
             obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
         }
         startKeepAlive();
+        bindGlobalPanelClicks(); // ✅ 只绑一次的全局点击委托（筛选/同步/关闭），免疫面板 DOM 重建
         log.info(LOG, '插件已加载');
     } catch (err) {
         log.error(LOG, 'handle failed', err);
