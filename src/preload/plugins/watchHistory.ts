@@ -973,7 +973,7 @@ function renderChart(): void {
     let CELL = CAL_CELL, GAP = CAL_GAP;
     // 周/月/季格子相对年视图（12px 基准）放大：周 250% / 月 175% / 季 150%
     if (_heatRange === 'week') { CELL = 30; GAP = 5; }        // 12 * 250% = 30
-    else if (_heatRange === 'month') { CELL = 21; GAP = 4; }  // 12 * 175% = 21
+    else if (_heatRange === 'month') { CELL = 27; GAP = 4; }  // 12 * 225% = 27
     else if (_heatRange === 'quarter') { CELL = 18; GAP = 4; } // 12 * 150% = 18
     const STEP = CELL + GAP; // 月份标签横向偏移（按实际格子步长）
     const weeks: { date: Date; count: number; future: boolean }[][] = [];
