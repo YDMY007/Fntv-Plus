@@ -224,11 +224,14 @@ const WH_CSS = `
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
   --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
-  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.07);--wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353}
+  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.1);
+  --wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353;
+  --wh-cell-border:rgba(255,255,255,.14)}
 #${PANEL_ID}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
   --wh-text:#1d1d1f;--wh-text2:#515154;--wh-text3:#86868b;--wh-line:rgba(0,0,0,.1);
   --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:#fff;
-  --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39}
+  --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
+  --wh-cell-border:rgba(27,31,35,.12)}
 
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
@@ -303,13 +306,14 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
 #${PANEL_ID} .wh-heat-cols{display:flex;gap:4px}
 #${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,12px);gap:4px}
-#${PANEL_ID} .wh-cell{width:12px;height:12px;border-radius:2px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s;flex-shrink:0}
+#${PANEL_ID} .wh-cell{width:12px;height:12px;border-radius:2px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s;flex-shrink:0;
+  box-shadow:inset 0 0 0 1px var(--wh-cell-border)}
 #${PANEL_ID} .wh-cell.l1{background:var(--wh-hm-1)}
 #${PANEL_ID} .wh-cell.l2{background:var(--wh-hm-2)}
 #${PANEL_ID} .wh-cell.l3{background:var(--wh-hm-3)}
 #${PANEL_ID} .wh-cell.l4{background:var(--wh-hm-4)}
-/* 未来日期：显示空格（同 level-0）但不响应 hover/tooltip */
-#${PANEL_ID} .wh-cell.future{background:var(--wh-hm-0);cursor:default;opacity:.35}
+/* 未来日期：与空格同色（有清晰描边），明显可见但不响应 hover/tooltip */
+#${PANEL_ID} .wh-cell.future{background:var(--wh-hm-0);cursor:default}
 #${PANEL_ID} .wh-cell:hover{transform:scale(1.3);outline:1px solid var(--wh-line);outline-offset:1px}
 #${PANEL_ID} .wh-cell.future:hover{transform:none;outline:none}
 #${PANEL_ID} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
@@ -567,6 +571,11 @@ function buildPanel(): void {
             if ((e.target as HTMLElement).id === 'wh-detail') closeDetail();
         });
     }
+
+    // ✕ 关闭：直接绑在按钮上（独立于 document 捕获委托，双重保险，确保顶栏关闭按钮 100% 可点）。
+    //   buildPanel 仅执行一次且 #wh-close 为静态元素（不会被 innerHTML 重建），此监听不会丢失。
+    const closeBtn = root.querySelector('#wh-close') as HTMLElement | null;
+    if (closeBtn) closeBtn.addEventListener('click', (e: MouseEvent) => { e.preventDefault(); closePanel(); });
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
