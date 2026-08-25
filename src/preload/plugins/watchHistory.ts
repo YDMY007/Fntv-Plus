@@ -230,9 +230,10 @@ const WH_CSS = `
   --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:#fff;
   --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee}
 
-#${PANEL_ID} .wh-main{position:absolute;inset:0;overflow-y:auto;padding:0 0 60px}
+#${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
-  padding:26px 40px 8px;position:relative;z-index:60;pointer-events:auto}
+  padding:26px 40px 8px;position:sticky;top:0;z-index:70;pointer-events:auto;
+  background:inherit}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
 #${PANEL_ID} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
   background:linear-gradient(135deg,var(--wh-accent),#7b5bff);flex-shrink:0}
@@ -395,22 +396,23 @@ function buildPanel(): void {
     const root = document.createElement('div');
     root.id = PANEL_ID;
     root.innerHTML = `
-      <div class="wh-main">
-        <div class="wh-topbar">
-          <div>
-            <div class="wh-title">Fntv-Plus · 观影记录</div>
-            <div class="wh-subtitle" id="wh-sub"></div>
-          </div>
-          <div class="wh-filters">
-            <div class="wh-pill active" data-f="全部">全部</div>
-            <div class="wh-pill" data-f="电影">电影</div>
-            <div class="wh-pill" data-f="剧集">剧集</div>
-            <div class="wh-pill" data-f="动漫">动漫</div>
-            <div class="wh-sync" id="wh-sync" title="立即从飞牛影视拉取最新观看数据">立即同步</div>
-            <div class="wh-close" id="wh-close" title="关闭（Esc）">✕</div>
-          </div>
+      <!-- 顶部栏：独立于 wh-main，z-index 高于 detail-overlay(z:50)，打开详情时仍可见可操作 -->
+      <div class="wh-topbar">
+        <div>
+          <div class="wh-title">Fntv-Plus · 观影记录</div>
+          <div class="wh-subtitle" id="wh-sub"></div>
         </div>
+        <div class="wh-filters">
+          <div class="wh-pill active" data-f="全部">全部</div>
+          <div class="wh-pill" data-f="电影">电影</div>
+          <div class="wh-pill" data-f="剧集">剧集</div>
+          <div class="wh-pill" data-f="动漫">动漫</div>
+          <div class="wh-sync" id="wh-sync" title="立即从飞牛影视拉取最新观看数据">立即同步</div>
+          <div class="wh-close" id="wh-close" title="关闭（Esc）">✕</div>
+        </div>
+      </div>
 
+      <div class="wh-main">
         <section class="wh-section">
           <div class="wh-section-head">
             <div class="wh-section-title">观影活跃度</div>
@@ -579,15 +581,19 @@ function fmtVotes(v: number): string {
     return v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v);
 }
 
-/** 多平台评分条：飞牛影视(fnOS 刮削) + TMDB(直连)，各自一格；无评分显示「暂无」避免 0.0。 */
+/** 多平台评分条：TMDB（飞牛刮削缓存）+ TMDB（直连校验），各自一格。
+ *  飞牛 vote_average 的真实数据源就是 TMDB（飞牛从 TMDB 刮削缓存），故第一张卡标注「TMDB」；
+ *  第二张卡为 TMDB API 直连实时值（独立二次获取，可验证缓存是否滞后）。
+ *  无论直连是否取到值，双卡始终同时展示（无值显示「暂无」）。 */
 function renderRatings(r: { fnos: number; tmdb: number; tmdbVotes: number }): string {
     const cell = (label: string, score: number, sub?: string) =>
         `<div class="wh-rating"><div class="rl">${label}</div>` +
         `<div class="rs">${score > 0 ? score.toFixed(1) : '暂无'}</div>` +
         (sub ? `<div class="rc">${sub}</div>` : '') + `</div>`;
-    let h = cell('飞牛影视', r.fnos);
+    // 始终渲染双卡：第一张=飞牛缓存的 TMDB 分，第二张=TMDB 直连实时分
+    let h = cell('TMDB', r.fnos, r.fnos > 0 ? '飞牛缓存' : '');
     const vc = fmtVotes(r.tmdbVotes);
-    if (r.tmdb > 0) h += cell('TMDB', r.tmdb, vc ? `${vc} 人评` : '');
+    h += cell('TMDB', r.tmdb, r.tmdb > 0 ? (vc ? `${vc} 人评` : '直连') : '');
     return h;
 }
 
