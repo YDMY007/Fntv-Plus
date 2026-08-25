@@ -230,11 +230,13 @@ const WH_CSS = `
   --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
   --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.1);
   --wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353;
+  --wh-hm-1a:#1a6b46;--wh-hm-2a:#0c9c49;--wh-hm-3a:#3fd56a;--wh-hm-4a:#6cf080;
   --wh-cell-border:rgba(255,255,255,.14)}
 #${PANEL_ID}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
   --wh-text:#1d1d1f;--wh-text2:#515154;--wh-text3:#86868b;--wh-line:rgba(0,0,0,.1);
   --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:#fff;
   --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
+  --wh-hm-1a:#b6f0c2;--wh-hm-2a:#5fd07e;--wh-hm-3a:#3fae5e;--wh-hm-4a:#2a7d49;
   --wh-cell-border:rgba(27,31,35,.12)}
 
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px;z-index:10}
@@ -358,7 +360,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-range-btn:hover{color:var(--wh-text)}
 #${PANEL_ID} .wh-range-btn.active{background:var(--wh-accent);color:#fff}
 #${PANEL_ID} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
-#${PANEL_ID} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:2px}
+#${PANEL_ID} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:3px}
 #${PANEL_ID} .wh-heat-body{display:flex;gap:10px;align-items:flex-start;height:136px}
 #${PANEL_ID} .wh-heat-body.wh-heat-body--flow{display:block}
 #${PANEL_ID} .wh-heat-days{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);font-size:10px;color:var(--wh-text3);flex:none;margin-top:22px}
@@ -377,20 +379,35 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-cal-head span{font-size:10px;color:var(--wh-text3);text-align:center}
 #${PANEL_ID} .wh-heat-cal-grid{display:grid;gap:4px;flex:1;min-height:0}
 #${PANEL_ID} .wh-heat-cal .wh-cell{width:auto;height:auto}
-#${PANEL_ID} .wh-cell--day{display:flex;align-items:flex-start;justify-content:flex-end;padding:2px 4px;border-radius:4px}
-#${PANEL_ID} .wh-cell--day .wh-cell-d{font-size:10px;line-height:1;font-variant-numeric:tabular-nums;color:var(--wh-text2)}
-#${PANEL_ID} .wh-cell--day.l1 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l2 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l3 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l4 .wh-cell-d{color:#fff}
-#${PANEL_ID} .wh-cell--day.future .wh-cell-d{color:transparent}
-#${PANEL_ID} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s;flex-shrink:0;
-  box-shadow:inset 0 0 0 1px var(--wh-cell-border)}
-#${PANEL_ID} .wh-cell.l1{background:var(--wh-hm-1)}
-#${PANEL_ID} .wh-cell.l2{background:var(--wh-hm-2)}
-#${PANEL_ID} .wh-cell.l3{background:var(--wh-hm-3)}
-#${PANEL_ID} .wh-cell.l4{background:var(--wh-hm-4)}
-/* 未来日期：与空格同色（有清晰描边），明显可见但不响应 hover/tooltip */
-#${PANEL_ID} .wh-cell.future{background:var(--wh-hm-0);cursor:default}
-#${PANEL_ID} .wh-cell:hover{transform:scale(1.3);outline:1px solid var(--wh-line);outline-offset:1px}
-#${PANEL_ID} .wh-cell.future:hover{transform:none;outline:none}
+#${PANEL_ID} .wh-cell--day{display:flex;align-items:flex-start;justify-content:flex-start;
+  padding:4px 5px;border-radius:8px;font-size:10px;font-weight:600;line-height:1;color:var(--wh-text2);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.05);
+  transition:transform .15s ease, box-shadow .15s ease}
+#${PANEL_ID} .wh-cell--day.l1{background:linear-gradient(135deg,var(--wh-hm-1a),var(--wh-hm-1));color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 1px 3px rgba(0,0,0,.3)}
+#${PANEL_ID} .wh-cell--day.l2{background:linear-gradient(135deg,var(--wh-hm-2a),var(--wh-hm-2));color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 1px 3px rgba(0,0,0,.3)}
+#${PANEL_ID} .wh-cell--day.l3{background:linear-gradient(135deg,var(--wh-hm-3a),var(--wh-hm-3));color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 1px 3px rgba(0,0,0,.3)}
+#${PANEL_ID} .wh-cell--day.l4{background:linear-gradient(135deg,var(--wh-hm-4a),var(--wh-hm-4));color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22), 0 1px 3px rgba(0,0,0,.3)}
+#${PANEL_ID} .wh-cell--day .wh-cell-d{font-size:10px;font-variant-numeric:tabular-nums;color:inherit;font-weight:600}
+#${PANEL_ID} .wh-cell--day.future{background:var(--wh-hm-0);color:transparent;box-shadow:none;opacity:.5;cursor:default}
+#${PANEL_ID} .wh-cell--day:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:5}
+#${PANEL_ID} .wh-cell--day.future:hover{transform:none;box-shadow:none}
+/* 季（密集无数字）：干净圆角色块，呈现真正的热力图质感 */
+#${PANEL_ID} .wh-heat-cal-grid.tiles .wh-cell--day{border-radius:5px;padding:0;align-items:center;justify-content:center}
+#${PANEL_ID} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);
+  cursor:pointer;flex-shrink:0;position:relative;
+  transition:transform .15s ease, box-shadow .15s ease, filter .15s ease}
+#${PANEL_ID} .wh-cell.l1{background:linear-gradient(135deg,var(--wh-hm-1a),var(--wh-hm-1))}
+#${PANEL_ID} .wh-cell.l2{background:linear-gradient(135deg,var(--wh-hm-2a),var(--wh-hm-2))}
+#${PANEL_ID} .wh-cell.l3{background:linear-gradient(135deg,var(--wh-hm-3a),var(--wh-hm-3))}
+#${PANEL_ID} .wh-cell.l4{background:linear-gradient(135deg,var(--wh-hm-4a),var(--wh-hm-4))}
+/* 未来日期：与空格同色但更淡，清晰可辨但不响应 hover/tooltip */
+#${PANEL_ID} .wh-cell.future{background:var(--wh-hm-0);cursor:default;opacity:.5}
+#${PANEL_ID} .wh-cell:hover{transform:scale(1.28);box-shadow:0 3px 10px rgba(0,0,0,.45);z-index:5}
+#${PANEL_ID} .wh-cell.future:hover{transform:none;box-shadow:none}
 #${PANEL_ID} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
   border:1px solid var(--wh-line);padding:7px 11px;border-radius:10px;font-size:12px;pointer-events:none;
   opacity:0;transition:.12s;white-space:nowrap;z-index:20}
@@ -1078,7 +1095,7 @@ function renderChart(): void {
         <div class="wh-heat-cal">
           ${monthsHTML}
           <div class="wh-heat-cal-head">${wkHead}</div>
-          <div class="wh-heat-cal-grid" style="grid-template-columns:repeat(${COLS},1fr);grid-template-rows:repeat(${rows},1fr)">${cells}</div>
+          <div class="wh-heat-cal-grid${showNum ? '' : ' tiles'}" style="grid-template-columns:repeat(${COLS},1fr);grid-template-rows:repeat(${rows},1fr)">${cells}</div>
         </div>`;
         // 紧凑模式格子由 grid 1fr 自适应铺满，变量维持年视图默认值即可
     }
