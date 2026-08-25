@@ -228,7 +228,7 @@ const WH_CSS = `
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
   --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
-  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.1);
+  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.16);
   --wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353;
   --wh-hm-1a:#1a6b46;--wh-hm-2a:#0c9c49;--wh-hm-3a:#3fd56a;--wh-hm-4a:#6cf080;
   --wh-cell-border:rgba(255,255,255,.14)}
@@ -372,6 +372,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-cols{display:flex;gap:var(--wh-gap,4px)}
 #${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px)}
 #${PANEL_ID} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);
+  box-shadow:inset 0 0 0 1px var(--wh-cell-border);
   cursor:pointer;flex-shrink:0;position:relative;
   transition:transform .15s ease, box-shadow .15s ease, filter .15s ease}
 #${PANEL_ID} .wh-cell.l1{background:linear-gradient(135deg,var(--wh-hm-1a),var(--wh-hm-1))}
@@ -966,7 +967,10 @@ function renderChart(): void {
     const calendar = (_heatRange === 'year' || _heatRange === 'all');
     // 所有范围统一正方形格子（GitHub 风格竖列）。周/月/季略放大并贴合 136 高。
     let CELL = CAL_CELL, GAP = CAL_GAP;
-    if (!calendar) { CELL = 14; GAP = 4; }
+    // 周/月/季格子相对年视图（12px 基准）放大：150% / 175% / 200%
+    if (_heatRange === 'week') { CELL = 18; GAP = 4; }       // 12 * 150% = 18
+    else if (_heatRange === 'month') { CELL = 21; GAP = 4; }  // 12 * 175% = 21
+    else if (_heatRange === 'quarter') { CELL = 24; GAP = 5; } // 12 * 200% = 24
     const STEP = CELL + GAP; // 月份标签横向偏移（按实际格子步长）
     const weeks: { date: Date; count: number; future: boolean }[][] = [];
     const cursor = new Date(start);
