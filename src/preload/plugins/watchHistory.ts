@@ -318,14 +318,20 @@ const WH_CSS = `
 #${PANEL_ID} .wh-section-title{font-size:22px;font-weight:600}
 #${PANEL_ID} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
 
-#${PANEL_ID} .wh-chart-card{background:var(--wh-surface);border:1px solid var(--wh-line);
-  border-radius:22px;padding:26px 28px 20px}
-/* 顶部两栏布局：左侧统计面板 / 右侧热力图，各占一半 */
-#${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:stretch}
-#${PANEL_ID} .wh-stats-panel{display:flex;flex-direction:column;gap:18px;padding:6px 0}
-#${PANEL_ID} .wh-stats-panel .ct{font-size:20px;font-weight:700;color:var(--wh-text);letter-spacing:.2px}
-#${PANEL_ID} .wh-stats-panel .cs{font-size:13px;color:var(--wh-text3);margin-top:2px}
-/* 统计数字：无框卡片，2x2 网格撑满左栏高度（与右侧热力图等高），数字居中 + 标签 + accent 短横线锚点 */
+/* 顶部两栏布局：左侧统计大盒子 / 右侧热力图盒子，各占一半，等高 */
+#${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
+/* 左侧统计盒子（包含观影活跃度标题 + 库存统计 + 趋势 + 4 数字） */
+#${PANEL_ID} .wh-stats-panel{background:var(--wh-surface);border:1px solid var(--wh-line);
+  border-radius:22px;padding:24px 26px;display:flex;flex-direction:column;gap:18px;min-width:0}
+#${PANEL_ID} .wh-stats-title{font-size:22px;font-weight:700;color:var(--wh-text);letter-spacing:.3px;
+  display:flex;align-items:center;gap:10px}
+#${PANEL_ID} .wh-stats-title::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--wh-accent)}
+#${PANEL_ID} .wh-stats-sub{font-size:13px;color:var(--wh-text2);line-height:1.7;word-break:break-word}
+/* 趋势标题（过去一年·活跃 0 天） */
+#${PANEL_ID} .wh-stats-head .ct{font-size:15px;font-weight:600;color:var(--wh-text)}
+#${PANEL_ID} .wh-stats-head .cs{font-size:12px;color:var(--wh-text3);margin-top:2px}
+/* 统计数字：2x2 网格撑满盒子高度，数字居中 + 标签 + accent 短横线锚点 */
 #${PANEL_ID} .wh-stat{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
   gap:14px 24px;flex:1;min-height:0}
 #${PANEL_ID} .wh-stat div{display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -334,7 +340,10 @@ const WH_CSS = `
 #${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2)}
 #${PANEL_ID} .wh-stat div::after{content:'';display:block;width:26px;height:3px;border-radius:2px;
   background:var(--wh-accent);opacity:.55;margin-top:3px}
-#${PANEL_ID} .wh-chart-wrap{position:relative;min-width:0;align-self:center}
+/* 右侧热力图盒子（对称样式：背景/边框/圆角） */
+#${PANEL_ID} .wh-chart-wrap{position:relative;min-width:0;align-self:stretch;
+  background:var(--wh-surface);border:1px solid var(--wh-line);border-radius:22px;
+  padding:24px 26px;display:flex;flex-direction:column;justify-content:flex-start}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
 #${PANEL_ID} .wh-heat{margin-top:0}
 #${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
@@ -478,33 +487,31 @@ function buildPanel(): void {
       <!-- 顶部栏：仅左半标题区；打开详情(wh-detail-open)时隐藏，避免浮在详情页上遮挡 -->
       <div class="wh-topbar">
         <div class="wh-tb-left">
-          <div class="wh-title-row">
-            <div class="wh-title">Fntv-Plus · 观影记录</div>
-            <span class="wh-active-badge">观影活跃度</span>
-          </div>
-          <div class="wh-subtitle" id="wh-sub"></div>
+          <div class="wh-title">Fntv-Plus · 观影记录</div>
         </div>
       </div>
 
       <div class="wh-main">
         <section class="wh-section">
-          <div class="wh-chart-card">
-            <!-- 左右各半：左侧=统计面板（趋势标题+库存/活跃度/时长等数字），右侧=观影活跃度热力图 -->
-            <div class="wh-chart-split">
-              <div class="wh-stats-panel">
+          <!-- 左右各半：左侧=统计大盒子（观影活跃度+subtitle 库存统计+趋势+4 数字），右侧=观影活跃度热力图盒子 -->
+          <div class="wh-chart-split">
+            <div class="wh-stats-panel">
+              <div class="wh-stats-title">观影活跃度</div>
+              <div class="wh-stats-sub" id="wh-sub"></div>
+              <div class="wh-stats-head">
                 <div class="ct" id="wh-chart-ct"></div>
                 <div class="cs" id="wh-chart-cs"></div>
-                <div class="wh-stat">
-                  <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
-                  <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
-                  <div><b id="wh-stat-total">0</b><span>小时·累计时长</span></div>
-                  <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
-                </div>
               </div>
-              <div class="wh-chart-wrap" id="wh-chart-wrap">
-                <div class="wh-heat" id="wh-heat"></div>
-                <div class="wh-chart-tip" id="wh-chart-tip"></div>
+              <div class="wh-stat">
+                <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
+                <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
+                <div><b id="wh-stat-total">0</b><span>小时·累计时长</span></div>
+                <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
               </div>
+            </div>
+            <div class="wh-chart-wrap" id="wh-chart-wrap">
+              <div class="wh-heat" id="wh-heat"></div>
+              <div class="wh-chart-tip" id="wh-chart-tip"></div>
             </div>
           </div>
         </section>
