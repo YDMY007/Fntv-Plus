@@ -319,7 +319,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
 
 /* 顶部两栏布局：左侧统计大盒子 / 右侧热力图盒子，各占一半，等高 */
-#${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:16px;align-items:stretch}
+#${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
 /* 左侧统计盒子（包含观影活跃度标题 + 库存统计 + 趋势 + 4 数字） */
 #${PANEL_ID} .wh-stats-panel{background:var(--wh-surface);border:1px solid var(--wh-line);
   border-radius:22px;padding:24px;display:flex;flex-direction:column;justify-content:center;gap:18px;min-width:0}
