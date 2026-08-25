@@ -397,7 +397,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
   background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%);
   pointer-events:none}
-#${PANEL_ID}.light .wh-detail .hero .scrim{background:linear-gradient(to top,#fff 0%,rgba(0,0,0,0) 55%)}
+#${PANEL_ID}.light .wh-detail .hero .scrim{background:transparent} /* 用户要求：删除浅色模式海报底部白色辉光渐变 */
 #${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
   background:#161618}
 #${PANEL_ID}.light .wh-detail .body{background:#fff}
