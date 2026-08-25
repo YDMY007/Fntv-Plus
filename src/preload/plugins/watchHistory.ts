@@ -279,37 +279,39 @@ const WH_CSS = `
 #${PANEL_ID} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
 
 #${PANEL_ID} .wh-chart-card{background:var(--wh-surface);border:1px solid var(--wh-line);
-  border-radius:22px;padding:24px 26px 18px}
-#${PANEL_ID} .wh-chart-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
+  border-radius:22px;padding:26px 28px 20px}
+#${PANEL_ID} .wh-chart-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px}
 #${PANEL_ID} .wh-chart-top .ct{font-size:14px;font-weight:600;color:var(--wh-text)}
 #${PANEL_ID} .wh-chart-top .cs{font-size:12px;color:var(--wh-text3);margin-top:2px}
-#${PANEL_ID} .wh-stat{display:flex;gap:26px}
+#${PANEL_ID} .wh-stat{display:flex;gap:30px}
 #${PANEL_ID} .wh-stat b{font-size:22px;font-weight:700}
 #${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2);margin-left:3px}
 #${PANEL_ID} .wh-chart-wrap{position:relative}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
-#${PANEL_ID} .wh-heat{margin-top:4px}
-#${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+#${PANEL_ID} .wh-heat{margin-top:8px}
+#${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 #${PANEL_ID} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
 #${PANEL_ID} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
 #${PANEL_ID} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
-#${PANEL_ID} .wh-heat-legend .wh-cell{width:11px;height:11px;border-radius:2px}
-#${PANEL_ID} .wh-heat-body{display:flex;gap:8px;align-items:flex-start}
-#${PANEL_ID} .wh-heat-days{display:grid;grid-template-rows:repeat(7,11px);gap:3px;font-size:10px;color:var(--wh-text3);flex:none;margin-top:18px}
+#${PANEL_ID} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:2px}
+#${PANEL_ID} .wh-heat-body{display:flex;gap:10px;align-items:flex-start}
+#${PANEL_ID} .wh-heat-days{display:grid;grid-template-rows:repeat(7,12px);gap:4px;font-size:10px;color:var(--wh-text3);flex:none;margin-top:18px}
 #${PANEL_ID} .wh-heat-days span{line-height:11px;height:11px;visibility:hidden}
 #${PANEL_ID} .wh-heat-days span.show{visibility:visible}
-#${PANEL_ID} .wh-heat-scroll{overflow-x:auto;flex:1;padding-bottom:4px}
-#${PANEL_ID} .wh-heat-months{position:relative;height:14px;margin-bottom:4px;white-space:nowrap}
-#${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3)}
-#${PANEL_ID} .wh-heat-cols{display:flex;gap:3px}
-#${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,11px);gap:3px}
-#${PANEL_ID} .wh-cell{width:11px;height:11px;border-radius:2px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s}
+#${PANEL_ID} .wh-heat-scroll{overflow-x:auto;flex:1;padding-bottom:6px}
+#${PANEL_ID} .wh-heat-months{position:relative;height:16px;margin-bottom:6px;white-space:nowrap;overflow:hidden}
+#${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
+#${PANEL_ID} .wh-heat-cols{display:flex;gap:4px}
+#${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,12px);gap:4px}
+#${PANEL_ID} .wh-cell{width:12px;height:12px;border-radius:2px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s;flex-shrink:0}
 #${PANEL_ID} .wh-cell.l1{background:var(--wh-hm-1)}
 #${PANEL_ID} .wh-cell.l2{background:var(--wh-hm-2)}
 #${PANEL_ID} .wh-cell.l3{background:var(--wh-hm-3)}
 #${PANEL_ID} .wh-cell.l4{background:var(--wh-hm-4)}
-#${PANEL_ID} .wh-cell.future{background:transparent;cursor:default}
+/* 未来日期：显示空格（同 level-0）但不响应 hover/tooltip */
+#${PANEL_ID} .wh-cell.future{background:var(--wh-hm-0);cursor:default;opacity:.35}
 #${PANEL_ID} .wh-cell:hover{transform:scale(1.3);outline:1px solid var(--wh-line);outline-offset:1px}
+#${PANEL_ID} .wh-cell.future:hover{transform:none;outline:none}
 #${PANEL_ID} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
   border:1px solid var(--wh-line);padding:7px 11px;border-radius:10px;font-size:12px;pointer-events:none;
   opacity:0;transition:.12s;white-space:nowrap;z-index:20}
@@ -795,7 +797,7 @@ function renderChart(): void {
     const start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
     start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
     const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
-    const STEP = 14; // 单元格 11px + 间距 3px（月份标签 left 偏移以此对齐）
+    const STEP = 16; // 单元格 12px + 间距 4px（月份标签 left 偏移以此对齐）
     const weeks: { date: Date; count: number; future: boolean }[][] = [];
     const cursor = new Date(start);
     let yearTotal = 0, yearActive = 0;
@@ -815,14 +817,18 @@ function renderChart(): void {
     // 颜色档位：0=空 1=1部 2=2~3部 3=4~5部 4=6部+
     const level = (c: number) => (c <= 0 ? 0 : c === 1 ? 1 : c <= 3 ? 2 : c <= 5 ? 3 : 4);
 
-    // 月份标签：每列取该周首日(周日)的月份，月份变化时打一个标签
+    // 月份标签：每 2 个月打一个（避免 53 周挤在一起），格式简化为「X月」
     const monthLabels: { left: number; text: string }[] = [];
     let lastMonth = -1;
+    let monthSkip = 0;
     weeks.forEach((wk, wi) => {
         const m = wk[0].date.getMonth();
         if (m !== lastMonth) {
-            monthLabels.push({ left: wi * STEP, text: `${wk[0].date.getFullYear()}年${m + 1}月` });
+            if (monthSkip % 2 === 0) { // 每 2 个月打一个标签
+                monthLabels.push({ left: wi * STEP, text: `${m + 1}月` });
+            }
             lastMonth = m;
+            monthSkip++;
         }
     });
 
@@ -842,7 +848,7 @@ function renderChart(): void {
     let daysHTML = '';
     for (let i = 0; i < 7; i++) {
         const show = (i === 1 || i === 3 || i === 5); // 仅显示 一/三/五
-        daysHTML += `<span class="${show ? 'show' : ''}">${WEEKDAYS[i]}</span>`;
+        daysHTML += `<span class="${show ? 'show' : ''}" style="line-height:12px;height:12px">${WEEKDAYS[i]}</span>`;
     }
 
     heat.innerHTML = `
