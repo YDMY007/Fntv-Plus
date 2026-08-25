@@ -28,6 +28,9 @@ const LOG = '[WatchHistory]';
 const ENTRY_ID = 'fntv-wh-entry';
 const PANEL_ID = 'fntv-wh';
 
+// 模块加载标记（用户可用 fnOS 页面 devtools 控制台确认是否运行 lc-723 产物）
+try { console.log('[WatchHistory] 插件脚本已加载 (lc-723, 右上角按钮=body级浮层+window捕获委托)'); } catch { /* ignore */ }
+
 // ───────────────────────── 类型 ─────────────────────────
 interface FnMeta {
     year: number;
@@ -689,6 +692,13 @@ function buildTopBtns(): HTMLElement {
       <button class="wh-close" id="wh-close" type="button" title="关闭（Esc）">✕</button>
     `;
     bar.setAttribute('data-fntv-glass-exclude', '');
+    // 兜底通道：按钮上的 pointerup 直接绑定（独立于 window 捕获链；正常路径 window 捕获已处理并短路，
+    // 此处仅在「window 监听未注册/事件未走捕获链」等极端场景下生效，重复触发由幂等/busy 防护）
+    bar.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('pointerup', (e: Event) => {
+            if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); }
+        });
+    });
     document.body.appendChild(bar);
     return bar;
 }
@@ -710,6 +720,8 @@ function handleTopBtnAction(e: Event): boolean {
     if (!tgt || !tgt.closest('#' + TOPBTN_ID)) return false;
     const el = tgt.closest('button') as HTMLButtonElement | null;
     if (!el) return true; // 点击浮层容器空白（padding 区）：吞掉，不关面板
+    // 命中诊断（用户可用 devtools 控制台确认事件是否到达本层）
+    try { console.log('[WatchHistory] 右上角按钮命中:', el.id || el.dataset.f || el.className); } catch { /* ignore */ }
     if (el.id === 'wh-close') { closePanel(); return true; }
     if (el.id === 'wh-sync') { void syncFnos(); return true; }
     if (el.classList.contains('wh-pill')) {
@@ -722,13 +734,19 @@ function handleTopBtnAction(e: Event): boolean {
     return true;
 }
 
-/** 统一入口（只绑一次）：window 捕获 click + pointerdown 双通道。
- *  click：6 按钮 + 面板空白背景关闭；pointerdown：仅 6 按钮（不处理空白，避免拖拽滚动误关）。 */
+/** 统一入口（只绑一次）：window 捕获 click / pointerdown / mouseup 三通道 + 按钮直接 pointerup 兜底。
+ *  click：6 按钮 + 面板空白背景关闭；pointerdown / mouseup：仅 6 按钮（不处理空白，避免拖拽滚动误关）。
+ *  多事件类型 = 多条独立通道：fnOS 若只拦 click 链，pointerdown/mouseup 仍能触发；全灭则按钮直接绑定兜底。 */
 function bindWindowTopBtns(): void {
     if (_winTopBound) return;
     _winTopBound = true;
+    try { console.log('[WatchHistory] lc-723 window 捕获委托已挂载(click/pointerdown/mouseup)'); } catch { /* ignore */ }
+    const topAction = (e: Event) => {
+        if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); return true; }
+        return false;
+    };
     window.addEventListener('click', (e: Event) => {
-        if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+        if (topAction(e)) return;
         // 面板空白背景关闭（范围保护：仅面板内、且非浮层/非交互）
         const root = $(PANEL_ID) as HTMLElement | null;
         const tgt = e.target as HTMLElement | null;
@@ -741,9 +759,8 @@ function bindWindowTopBtns(): void {
             e.preventDefault();
         }
     }, true);
-    window.addEventListener('pointerdown', (e: Event) => {
-        if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); }
-    }, true);
+    window.addEventListener('pointerdown', topAction, true);
+    window.addEventListener('mouseup', topAction, true);
 }
 
 // mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
@@ -1433,14 +1450,16 @@ function closePanel(): void {
 // ───────────────────────── OnReady 入口 ─────────────────────────
 function handle(): void {
     try {
-        // ① 先尝试直接注入（embyWall 可能已先于本插件执行 OnReady）
+        // ① 事件通道最先注册（最外层 window 捕获 + 多事件类型），前置任何可能抛错的注入逻辑，
+        //    确保右上角按钮委托永不因 injectEntry / keepAlive 异常而缺失
+        bindWindowTopBtns();
+        // ② 先尝试直接注入（embyWall 可能已先于本插件执行 OnReady）
         if (!injectEntry()) {
-            // ② 兜底：监听 DOM 变化，等 embyWall 创建 #fnos-sidebar-actions 后注入
+            // ③ 兜底：监听 DOM 变化，等 embyWall 创建 #fnos-sidebar-actions 后注入
             const obs = new MutationObserver(() => { if (injectEntry()) obs.disconnect(); });
             obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
         }
         startKeepAlive();
-        bindWindowTopBtns(); // ✅ 只绑一次：window 捕获阶段处理右上角 6 按钮 + 面板空白背景关闭
         log.info(LOG, '插件已加载');
     } catch (err) {
         log.error(LOG, 'handle failed', err);
