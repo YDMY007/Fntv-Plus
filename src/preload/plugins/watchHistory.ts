@@ -252,25 +252,33 @@ const WH_CSS = `
 #${PANEL_ID} .wh-stat-item i{font-size:12px;font-style:normal;color:var(--wh-text3)}
 #${PANEL_ID} .wh-stat-sep{color:var(--wh-line);font-size:12px;margin:0 2px}
 
-/* 右上角操作按钮栏（独立层，直接挂载在 #fntv-wh 下、z-index 最高，杜绝被内容/浮层盖住导致点不动）
-   含：全部/电影/剧集/动漫 筛选 + 立即同步 + 关闭 ✕，共 6 个按钮，全部原生 <button> 直接绑定 click */
-#${PANEL_ID} .wh-topbtns{position:absolute;top:22px;right:28px;z-index:300;
-  display:flex;align-items:center;gap:9px;pointer-events:auto}
-#${PANEL_ID} .wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
+/* ══ 右上角操作浮层（body 级独立层，不属面板 DOM）══
+   含：全部/电影/剧集/动漫 筛选 + 立即同步 + 关闭 ✕，共 6 个原生 <button>。
+   position:fixed + z-index 2147483641（比面板 #fntv-wh 的 2147483640 还高 1，绝对最上层）；
+   不在面板 DOM 树内 → 面板任何样式/覆盖/事件链均影响不到它。
+   事件绑定在 window 捕获阶段（见 bindWindowTopBtns），最外层先执行，免疫 fnOS 页面层拦截。
+   浮层自带主题变量（面板外取不到 #fntv-wh 上的 --wh-*），明暗由 openPanel 同步 .light 类。 */
+#fntv-wh-topbtns{--wh-surface:#17171a;--wh-surface2:#232327;--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
+  position:fixed;top:22px;right:28px;z-index:2147483641;
+  display:flex;align-items:center;gap:9px;pointer-events:auto;
+  background:var(--wh-surface);border:1px solid rgba(128,128,128,.18);border-radius:24px;
+  padding:8px 10px;box-shadow:0 10px 30px rgba(0,0,0,.35);
+  opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s}
+#fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3}
+#fntv-wh-topbtns.show{opacity:1;visibility:visible;transform:none}
+#fntv-wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#${PANEL_ID} .wh-topbtns .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
-#${PANEL_ID} .wh-topbtns .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
-#${PANEL_ID} .wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 10px;
+#fntv-wh-topbtns .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
+#fntv-wh-topbtns .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
+#fntv-wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 10px;
   font-size:20px;line-height:1;color:var(--wh-text2);
   display:flex;align-items:center;justify-content:center;
   user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s;background:none;border:none;font-family:inherit}
-#${PANEL_ID} .wh-topbtns .wh-close:hover{color:var(--wh-text)}
-#${PANEL_ID} .wh-topbtns .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
+#fntv-wh-topbtns .wh-close:hover{color:var(--wh-text)}
+#fntv-wh-topbtns .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
   background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s;font-family:inherit}
-#${PANEL_ID} .wh-topbtns .wh-sync:hover{background:var(--wh-accent);color:#fff}
-#${PANEL_ID} .wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
-/* 详情为模态浮层：打开(wh-detail-open)时隐藏右上角操作栏，避免浮在详情页最上层遮挡内容 */
-#${PANEL_ID}.wh-detail-open .wh-topbtns{opacity:0;visibility:hidden;pointer-events:none}
+#fntv-wh-topbtns .wh-sync:hover{background:var(--wh-accent);color:#fff}
+#fntv-wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
 /* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
 #${PANEL_ID} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
   overflow:hidden;background:var(--wh-card-bg)}
@@ -445,16 +453,6 @@ function buildPanel(): void {
         </div>
       </div>
 
-      <!-- 右上角操作栏：6 个按钮（筛选×4 + 立即同步 + 关闭 ✕），独立层 z-index 最高，原生 button 直接绑定 click -->
-      <div class="wh-topbtns" id="wh-topbtns">
-        <button class="wh-pill active" data-f="全部" type="button">全部</button>
-        <button class="wh-pill" data-f="电影" type="button">电影</button>
-        <button class="wh-pill" data-f="剧集" type="button">剧集</button>
-        <button class="wh-pill" data-f="动漫" type="button">动漫</button>
-        <button class="wh-sync" id="wh-sync" type="button" title="立即从飞牛影视拉取最新观看数据">立即同步</button>
-        <button class="wh-close" id="wh-close" type="button" title="关闭（Esc）">✕</button>
-      </div>
-
       <div class="wh-main">
         <section class="wh-section">
           <div class="wh-chart-card">
@@ -551,9 +549,11 @@ function buildPanel(): void {
     `;
     document.body.appendChild(root);
     panelBuilt = true;
-    // 右上角 6 个按钮（筛选×4 + 立即同步 + 关闭）采用原生 <button> + buildPanel 内【直接绑定 click】，
-    // 不再依赖全局 document 委托（委托在 fnOS 捕获拦截 / 面板 DOM 重建时易整体失效，导致"全部点没反应"）。
-    // 详见下方「右上角按钮直接绑定」段落。空白背景点击关闭仍由 bindGlobalPanelClicks 统一处理。
+    // 右上角 6 个按钮已重做为 body 级独立浮层 #fntv-wh-topbtns（见 buildTopBtns / bindWindowTopBtns）：
+    //   - 浮层不属面板 DOM，position:fixed + z-index 2147483641 绝对最上层，无任何覆盖层能挡住；
+    //   - 事件在 window 捕获阶段统一委托处理（+ pointerdown 兜底），最外层先执行，
+    //     免疫 fnOS 页面在 document/body/html 层的任何 stopPropagation 拦截（此前"点没反应"根因）。
+    // 本面板内不再绑定/内嵌任何筛选/同步/关闭按钮。
 
     // ── 玻璃豁免：整面板所有元素打 data-fntv-glass-exclude（与设置面板/顶栏同款排除机制）。
     //    Glass UI 规则 ② 命中 [class*="card"]（含 .wh-card / .wh-chart-card）并加亚克力，
@@ -570,32 +570,13 @@ function buildPanel(): void {
     root.style.setProperty('backdrop-filter', 'none', 'important');
     root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
-    // ── 关闭：详情浮层背景点击关闭 + Esc（三路关闭；空白背景关闭在 bindGlobalPanelClicks 委托里处理）──
+    // ── 关闭：详情浮层背景点击关闭 + Esc（三路关闭；空白背景关闭在 bindWindowTopBtns 的 window 委托里处理）──
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
         detailOverlay.addEventListener('click', (e: MouseEvent) => {
             if ((e.target as HTMLElement).id === 'wh-detail') closeDetail();
         });
     }
-
-    // ── 右上角按钮直接绑定（原生 <button>，buildPanel 仅执行一次，节点静态不重建，监听永不丢失）──
-    //   彻底抛弃全局 document 委托，专治"全部点没反应"。每个按钮各自独立处理，互不干扰。
-    const topBtns = root.querySelectorAll('.wh-topbtns button');
-    topBtns.forEach((b) => {
-        const el = b as HTMLButtonElement;
-        el.addEventListener('click', (e: MouseEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (el.id === 'wh-close') { closePanel(); return; }
-            if (el.id === 'wh-sync') { syncFnos(); return; }
-            if (el.classList.contains('wh-pill')) {
-                root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
-                el.classList.add('active');
-                curFilter = el.dataset.f || '全部';
-                renderWall();
-            }
-        });
-    });
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
@@ -678,28 +659,90 @@ function filteredData(): ShowItem[] {
     return curData.filter((i) => i.type === curFilter);
 }
 
-/** 全局点击委托（只绑一次，capture 阶段挂 document）。
- *  现仅负责「点击面板空白背景关闭」这一条。
- *  右上角 6 个按钮（筛选×4 / 立即同步 / 关闭）已改为原生 <button> + buildPanel 内【直接绑定 click】
- *  （见 buildPanel 的「右上角按钮直接绑定」段落），不再依赖此委托——
- *  彻底根治此前委托被 fnOS 捕获拦截 / 面板 DOM 重建导致的「全部点没反应」。
- *  范围保护（closest(#fntv-wh)）确保面板外点击不干扰 fnOS 页面自身交互。 */
-let _globalClickBound = false;
-function bindGlobalPanelClicks(): void {
-    if (_globalClickBound) return;
-    _globalClickBound = true;
-    document.addEventListener('click', (e: MouseEvent) => {
-        const tgt = e.target as HTMLElement | null;
-        if (!tgt) return;
-        // 范围保护：仅处理面板内的点击（面板外点击全部忽略，不影响 fnOS 页面自身交互）
-        if (!tgt.closest('#' + PANEL_ID)) return;
+// ══ 右上角 6 按钮 = body 级独立浮层 + window 捕获委托 ══
+// 根因（lc-723）：此前按钮嵌在面板内，即使原生 <button> + 直接绑定，真实 fnOS 里依然"全部点没反应"——
+// 因为 fnOS 页面层在 document/body/html 上注册了捕获拦截（stopPropagation），事件在到达按钮（target 阶段）之前
+// 就被终止，target 上的直接监听根本收不到事件。重做方案：
+//   1) 浮层 #fntv-wh-topbtns 挂在 document.body 下（不属面板 DOM，任何面板样式/覆盖影响不到），
+//      position:fixed + z-index 2147483641（比面板还高 1），绝对最上层、无覆盖层可挡；
+//   2) 事件处理挂在 window 捕获阶段——window 是事件传播最外层，先于 document/body/html 的任何监听执行；
+//      命中 6 按钮后 stopImmediatePropagation()，即使后续页面层拦截也拦不住已完成的动作；
+//   3) 再叠加 pointerdown 兜底（独立事件通道），click 即使被页面整体吞掉，pointerdown 也能触发。
+const TOPBTN_ID = 'fntv-wh-topbtns';
+let _winTopBound = false;
+
+function topBtnsBar(): HTMLElement | null {
+    return document.getElementById(TOPBTN_ID);
+}
+
+function buildTopBtns(): HTMLElement {
+    const old = document.getElementById(TOPBTN_ID);
+    if (old) return old;
+    const bar = document.createElement('div');
+    bar.id = TOPBTN_ID;
+    bar.innerHTML = `
+      <button class="wh-pill active" data-f="全部" type="button">全部</button>
+      <button class="wh-pill" data-f="电影" type="button">电影</button>
+      <button class="wh-pill" data-f="剧集" type="button">剧集</button>
+      <button class="wh-pill" data-f="动漫" type="button">动漫</button>
+      <button class="wh-sync" id="wh-sync" type="button" title="立即从飞牛影视拉取最新观看数据">立即同步</button>
+      <button class="wh-close" id="wh-close" type="button" title="关闭（Esc）">✕</button>
+    `;
+    bar.setAttribute('data-fntv-glass-exclude', '');
+    document.body.appendChild(bar);
+    return bar;
+}
+
+function showTopBtns(): void {
+    const bar = buildTopBtns();
+    bar.classList.add('show');
+}
+function hideTopBtns(): void {
+    const bar = topBtnsBar();
+    if (bar) bar.classList.remove('show');
+}
+
+/** 命中 6 按钮则处理并返回 true（调用方负责 stopImmediatePropagation） */
+function handleTopBtnAction(e: Event): boolean {
+    const bar = topBtnsBar();
+    if (!bar || !bar.classList.contains('show')) return false;
+    const tgt = e.target as HTMLElement | null;
+    if (!tgt || !tgt.closest('#' + TOPBTN_ID)) return false;
+    const el = tgt.closest('button') as HTMLButtonElement | null;
+    if (!el) return true; // 点击浮层容器空白（padding 区）：吞掉，不关面板
+    if (el.id === 'wh-close') { closePanel(); return true; }
+    if (el.id === 'wh-sync') { void syncFnos(); return true; }
+    if (el.classList.contains('wh-pill')) {
+        bar.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
+        el.classList.add('active');
+        curFilter = el.dataset.f || '全部';
+        renderWall();
+        return true;
+    }
+    return true;
+}
+
+/** 统一入口（只绑一次）：window 捕获 click + pointerdown 双通道。
+ *  click：6 按钮 + 面板空白背景关闭；pointerdown：仅 6 按钮（不处理空白，避免拖拽滚动误关）。 */
+function bindWindowTopBtns(): void {
+    if (_winTopBound) return;
+    _winTopBound = true;
+    window.addEventListener('click', (e: Event) => {
+        if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+        // 面板空白背景关闭（范围保护：仅面板内、且非浮层/非交互）
         const root = $(PANEL_ID) as HTMLElement | null;
-        if (!root) return;
-        // 点击面板主内容区空白背景（非交互元素、非右上角按钮栏）关闭面板
+        const tgt = e.target as HTMLElement | null;
+        if (!root || !tgt) return;
+        if (!root.classList.contains('show')) return;
+        if (!tgt.closest('#' + PANEL_ID)) return;
         if (tgt === root || tgt.classList.contains('wh-main') || tgt.classList.contains('wh-topbar')) {
-            if (tgt.closest('.wh-topbtns')) return; // 按钮栏内（含按钮/间隙）不触发关闭
             closePanel();
+            e.stopImmediatePropagation();
+            e.preventDefault();
         }
+    }, true);
+    window.addEventListener('pointerdown', (e: Event) => {
+        if (handleTopBtnAction(e)) { e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
 }
 
@@ -768,13 +811,13 @@ function showSkeleton(n: number = 8): void {
 /** 真实分类计数：把 全部/电影/剧集/动漫 各 pill 文案改写为「名称 (数量)」，
  *  让筛选按钮"做成真实的"——既点得动、也能一眼看出每类到底有几部（0 部时点击后墙为空也说得通）。 */
 function updatePillCounts(): void {
-    const root = $(PANEL_ID) as HTMLElement | null;
-    if (!root) return;
+    const bar = topBtnsBar();
+    if (!bar) return;
     const counts: Record<string, number> = { '全部': curData.length, '电影': 0, '剧集': 0, '动漫': 0 };
     for (const it of curData) {
         if (it.type === '电影' || it.type === '剧集' || it.type === '动漫') counts[it.type]++;
     }
-    root.querySelectorAll('.wh-pill').forEach((p) => {
+    bar.querySelectorAll('.wh-pill').forEach((p) => {
         const f = (p as HTMLElement).dataset.f || '';
         if (counts[f] !== undefined) p.textContent = `${f} (${counts[f]})`;
     });
@@ -972,6 +1015,7 @@ function openDetail(idx: number): void {
     // 详情为模态浮层：隐藏顶栏（全部/电影/剧集/动漫/立即同步/✕），避免其浮在详情页最上层遮挡内容
     const pr = $(PANEL_ID) as HTMLElement | null;
     if (pr) pr.classList.add('wh-detail-open');
+    hideTopBtns(); // 浮层在面板外，需显式隐藏（否则 z-index 高于详情会浮在详情上）
 }
 
 /** 关闭详情浮层：移除 .show 并清除 wh-detail-open（恢复顶栏显示）。所有关闭路径统一走这里。 */
@@ -980,6 +1024,8 @@ function closeDetail(): void {
     if (detail) detail.classList.remove('show');
     const pr = $(PANEL_ID) as HTMLElement | null;
     if (pr) pr.classList.remove('wh-detail-open');
+    // 详情关闭后恢复右上角浮层（仅当面板仍开着）
+    if (pr && pr.classList.contains('show')) showTopBtns();
 }
 
 /** 预设渐变色盘（按名称 hash 稳定取色，避免每次随机） */
@@ -1245,6 +1291,7 @@ function lastPlayedTs(it: ShowItem): number {
 
 async function syncFnos(): Promise<void> {
     const sb = $('wh-sync') as HTMLElement | null;
+    if (sb && sb.classList.contains('busy')) return; // 已在同步中（pointerdown+click 双通道防重）
     if (sb) sb.classList.add('busy'); // 加载中禁用，防止重复点击
     try {
         toast('正在从飞牛影视同步最新观看数据…');
@@ -1309,8 +1356,12 @@ function openPanel(): void {
         root.classList.toggle('light', light);
         paintBg(root);
         root.classList.add('show');
-        // 右上角 6 个按钮在 buildPanel 内已直接绑定 click（原生 <button>），
-        // 此处无需再绑；空白背景关闭由 bindGlobalPanelClicks 的 document 委托统一处理。
+        // 右上角 6 按钮（body 级独立浮层）跟随面板显示 + 明暗同步
+        showTopBtns();
+        const tb = topBtnsBar();
+        if (tb) tb.classList.toggle('light', light);
+        // 右上角 6 按钮 = body 级独立浮层（buildTopBtns/showTopBtns），
+        // 事件处理在 window 捕获阶段（bindWindowTopBtns），此处仅负责显示。
         // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
         cancelAnimationFrame(_paintRAF);
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
@@ -1356,6 +1407,8 @@ function closePanel(): void {
     _paintRAF = 0;
     // 收起整面板
     root.classList.remove('show');
+    // 右上角 6 按钮浮层同步隐藏
+    hideTopBtns();
     // 顺便清掉详情浮层（若曾点开详情再点 ✕ 关闭，否则下次重开详情浮层会残留 .show 变成「难展开」）
     const detail = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detail) detail.classList.remove('show');
@@ -1387,7 +1440,7 @@ function handle(): void {
             obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
         }
         startKeepAlive();
-        bindGlobalPanelClicks(); // ✅ 只绑一次的全局点击委托（筛选/同步/关闭），免疫面板 DOM 重建
+        bindWindowTopBtns(); // ✅ 只绑一次：window 捕获阶段处理右上角 6 按钮 + 面板空白背景关闭
         log.info(LOG, '插件已加载');
     } catch (err) {
         log.error(LOG, 'handle failed', err);
