@@ -914,14 +914,12 @@ function renderChart(): void {
     const STEP = 16; // 单元格 12px + 间距 4px（月份标签 left 偏移以此对齐）
     const weeks: { date: Date; count: number; future: boolean }[][] = [];
     const cursor = new Date(start);
-    let yearTotal = 0, yearActive = 0;
     while (cursor <= today) {
         const col: { date: Date; count: number; future: boolean }[] = [];
         for (let dow = 0; dow < 7; dow++) {
             const future = cursor > today;
             const key = `${cursor.getFullYear()}-${cursor.getMonth()}-${cursor.getDate()}`;
             const count = dayCount.get(key) || 0;
-            if (!future && count > 0) { yearTotal += count; yearActive++; }
             col.push({ date: new Date(cursor), count: future ? 0 : count, future });
             cursor.setDate(cursor.getDate() + 1);
         }
@@ -967,7 +965,7 @@ function renderChart(): void {
 
     heat.innerHTML = `
       <div class="wh-heat-head">
-        <div class="wh-heat-total">过去一年 共观看 <b>${yearTotal}</b> 部 · 活跃 <b>${yearActive}</b> 天</div>
+        <div class="wh-heat-total">观影活动热力图</div>
         <div class="wh-heat-legend">少
           <span class="wh-cell l1" style="pointer-events:none"></span>
           <span class="wh-cell l2" style="pointer-events:none"></span>
