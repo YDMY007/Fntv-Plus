@@ -327,7 +327,7 @@ const WH_CSS = `
   display:flex;align-items:center;gap:10px}
 #${PANEL_ID} .wh-stats-title::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;
   background:var(--wh-accent)}
-#${PANEL_ID} .wh-stats-hero{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 14px}
+#${PANEL_ID} .wh-stats-hero{display:flex;flex-direction:column;gap:8px}
 #${PANEL_ID} .wh-stats-sub{font-size:13px;color:var(--wh-text2);line-height:1.7;word-break:break-word}
 /* 统计数字：单条横行 4 等分，左侧 accent 竖条锚点 + 大数字 + 单位 + 短标签 */
 #${PANEL_ID} .wh-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 10px;min-width:0}
