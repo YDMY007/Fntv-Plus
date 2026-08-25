@@ -901,7 +901,7 @@ function updatePillCounts(): void {
 let _heatTipBound = false;
 // 热力图时间范围：周(当周) / 月(≈5周) / 季(≈14周) / 年(53周) / 全部(数据最早年份→今天)
 type HeatRange = 'week' | 'month' | 'quarter' | 'year' | 'all';
-let _heatRange: HeatRange = 'week';
+let _heatRange: HeatRange = 'year';
 
 function renderChart(): void {
     const wrap = $('wh-chart-wrap');
@@ -940,6 +940,7 @@ function renderChart(): void {
     // 计算起点：先确定结束(含今天)与起点周数
     let NUM_WEEKS: number;
     let start: Date;
+    let end: Date = new Date(today.getTime()); // 默认结束于今天
     if (_heatRange === 'week') {
         NUM_WEEKS = 1; // 当周（周日→周六，单列 7 格）
         start = new Date(today.getTime());
@@ -962,11 +963,17 @@ function renderChart(): void {
         const days = Math.round((today.getTime() - start.getTime()) / dayMs) + 1;
         NUM_WEEKS = Math.ceil(days / 7);
     } else {
-        NUM_WEEKS = 53; // 默认一年
-        start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+        // 年视图：展示整年（当年 1 月 1 日 → 12 月 31 日），按周对齐到周日列/周六列
+        const y = today.getFullYear();
+        start = new Date(y, 0, 1);
+        start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
+        end = new Date(y, 11, 31);
+        end.setDate(end.getDate() + (6 - end.getDay())); // 对齐到周六(行 6)
+        const days = Math.round((end.getTime() - start.getTime()) / dayMs) + 1;
+        NUM_WEEKS = Math.ceil(days / 7);
     }
     start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
+    start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)，年/全部分支已是周日则无变化
     const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
     // 周/月：横排（行=周、列=星期），格子放大并贴合 136 高；季/年/全部：GitHub 竖列（列=周）
     const CAL_CELL = 12, CAL_GAP = 4;
@@ -979,7 +986,7 @@ function renderChart(): void {
     const STEP = CELL + GAP; // 月份标签横向偏移（按实际格子步长）
     const weeks: { date: Date; count: number; future: boolean }[][] = [];
     const cursor = new Date(start);
-    while (cursor <= today) {
+    while (cursor <= end) {
         const col: { date: Date; count: number; future: boolean }[] = [];
         for (let dow = 0; dow < 7; dow++) {
             const future = cursor > today;
@@ -1010,7 +1017,10 @@ function renderChart(): void {
 
     // 范围标签：起始年.月 → 今天年.月
     const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
-    const rangeLabel = `${start.getFullYear()}.${pad(start.getMonth() + 1)} – ${today.getFullYear()}.${pad(today.getMonth() + 1)}`;
+    // 范围标签：年视图显示整年（1月–12月）；其余显示起止年月
+    const rangeLabel = (_heatRange === 'year')
+        ? `${today.getFullYear()}年 1月 – 12月`
+        : `${start.getFullYear()}.${pad(start.getMonth() + 1)} – ${today.getFullYear()}.${pad(today.getMonth() + 1)}`;
     const RANGES: { k: HeatRange; t: string }[] = [
         { k: 'week', t: '周' }, { k: 'month', t: '月' }, { k: 'quarter', t: '季' }, { k: 'year', t: '年' }, { k: 'all', t: '全部' },
     ];
