@@ -888,9 +888,9 @@ function updatePillCounts(): void {
 }
 
 let _heatTipBound = false;
-// 热力图时间范围：月(≈5周) / 季(≈14周) / 年(53周) / 全部(数据最早年份→今天)
-type HeatRange = 'month' | 'quarter' | 'year' | 'all';
-let _heatRange: HeatRange = 'year';
+// 热力图时间范围：周(当周) / 月(≈5周) / 季(≈14周) / 年(53周) / 全部(数据最早年份→今天)
+type HeatRange = 'week' | 'month' | 'quarter' | 'year' | 'all';
+let _heatRange: HeatRange = 'week';
 
 function renderChart(): void {
     const wrap = $('wh-chart-wrap');
@@ -929,7 +929,10 @@ function renderChart(): void {
     // 计算起点：先确定结束(含今天)与起点周数
     let NUM_WEEKS: number;
     let start: Date;
-    if (_heatRange === 'month') {
+    if (_heatRange === 'week') {
+        NUM_WEEKS = 1; // 当周（周日→周六，单列 7 格）
+        start = new Date(today.getTime());
+    } else if (_heatRange === 'month') {
         NUM_WEEKS = 5; // 约一个月
         start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
     } else if (_heatRange === 'quarter') {
@@ -1010,7 +1013,7 @@ function renderChart(): void {
     const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
     const rangeLabel = `${start.getFullYear()}.${pad(start.getMonth() + 1)} – ${today.getFullYear()}.${pad(today.getMonth() + 1)}`;
     const RANGES: { k: HeatRange; t: string }[] = [
-        { k: 'month', t: '月' }, { k: 'quarter', t: '季' }, { k: 'year', t: '年' }, { k: 'all', t: '全部' },
+        { k: 'week', t: '周' }, { k: 'month', t: '月' }, { k: 'quarter', t: '季' }, { k: 'year', t: '年' }, { k: 'all', t: '全部' },
     ];
     const rangeBtns = RANGES.map((r) =>
         `<button type="button" class="wh-range-btn${_heatRange === r.k ? ' active' : ''}" data-range="${r.k}">${r.t}</button>`
