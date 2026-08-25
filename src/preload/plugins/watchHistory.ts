@@ -183,6 +183,9 @@ function injectEntry(): boolean {
         e.preventDefault();
         e.stopPropagation();
         openPanel();
+        // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起 fnOS 抽屉侧栏（观影记录面板挂在 body，不受影响）
+        const closeSb = (window as any).fntvCloseSidebar;
+        if (typeof closeSb === 'function') closeSb();
     });
 
     // ④ 插入：有设置按钮就插在它后面，否则 prepend 到容器顶部

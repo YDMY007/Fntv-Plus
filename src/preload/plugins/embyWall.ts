@@ -3342,6 +3342,8 @@ function handle(): void {
         // [lc-375] 改由主进程执行跳转: 先置 _systemPageMode 再 loadURL('/'), 避免
         //   主进程导航守卫(lc-203)的 did-navigate 在标记生效前就把 / 纠正回 /v
         ipcRenderer.send('fntv:enter-system-page');
+        // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉
+        (window as any).fntvCloseSidebar?.();
       });
       ctrl.appendChild(swBtn);  // [lc-633] 占位(设置按钮块稍后 prepend 到最前)
     }
@@ -3361,6 +3363,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const ov = document.getElementById('fnos-settings-panel');
       if (ov && ov.style.display === 'flex') ov.style.display = 'none'; // 再次点击=收起
       else openSettingsPanel(panel);
+      // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉（设置面板挂在 body，不受影响）
+      (window as any).fntvCloseSidebar?.();
     });
     ctrl.prepend(btn); // [lc-633] 设置按钮置顶 → 最终顺序: 设置 → 切换系统页面 → 软件反馈建议
 
@@ -3377,6 +3381,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       fbChoiceBtn.addEventListener('click', (e: Event) => {
         e.stopPropagation();
         openFeedbackChoiceModal();
+        // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉（反馈弹窗挂在 body，不受影响）
+        (window as any).fntvCloseSidebar?.();
       });
       ctrl.appendChild(fbChoiceBtn);
     }
@@ -6777,6 +6783,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   // 立即执行一次 + 定时巡检
   ensureBurgerVisible();
   [800, 2000, 4000].forEach(t => setTimeout(ensureBurgerVisible, t));
+
+  // [lc-705] 暴露"收起侧边栏"全局钩子：侧栏底部 4 个自定义按钮（设置 / 切换系统页面 /
+  //   软件反馈建议 / 观影记录）点击后调用它，复刻飞牛原生类目按钮"点一下侧栏自动收起"的效果。
+  //   设置/反馈/观影记录 等面板均挂载在 document.body，与抽屉无关，收起侧栏不会把它们一起藏掉。
+  (window as any).fntvCloseSidebar = function (): void {
+    const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
+    if (drawer && drawer.classList.contains('drawer-open')) animateCloseDrawer(drawer);
+  };
 
   // ═══ 首页导航栏刷新按钮 ═══
   // 在飞牛原生导航栏「首页」标签右侧注入刷新按钮，点击后 reload 页面。
