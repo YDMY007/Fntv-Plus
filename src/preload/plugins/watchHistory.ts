@@ -12,7 +12,7 @@
 //      （飞牛影视刮削数据 + 我的评分/评语 + 同步飞牛）。
 //   3) 主题：检测 fnOS 当前深/浅色，面板同步切换（不另设切换按钮，跟随系统）。
 //
-// 数据策略（v1）：面板内置示例数据集（标注「示例」），保证 UI 完整可演示；「同步飞牛影视」
+// 数据策略（v1）：面板内置示例数据集（标注「示例」），保证 UI 完整可演示；「立即同步」
 //   按钮已接真实 IPC `douban:get-watched-items`（主进程走 fnOS item/list 拉已观看，带 token），
 //   作为首个真实数据接入点。后续把播放进度/分段/刮削元数据接入同一 loadWatchData() 即可。
 //
@@ -243,6 +243,18 @@ const WH_CSS = `
   display:flex;align-items:center;justify-content:center;
   user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s}
 #${PANEL_ID} .wh-close:hover{color:var(--wh-text)}
+/* 立即同步按钮（原"已看完"筛选位）：强调蓝，点击即重拉飞牛数据 */
+#${PANEL_ID} .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
+  background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s}
+#${PANEL_ID} .wh-sync:hover{background:var(--wh-accent);color:#fff}
+/* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
+#${PANEL_ID} .wh-skel{position:relative;flex:none;width:180px;height:270px;border-radius:var(--wh-radius);
+  overflow:hidden;background:var(--wh-card-bg)}
+#${PANEL_ID} .wh-skel::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.08) 50%,transparent 100%);
+  transform:translateX(-100%);animation:wh-shimmer 1.2s infinite}
+#${PANEL_ID}.light .wh-skel::after{background:linear-gradient(90deg,transparent 0%,rgba(0,0,0,.06) 50%,transparent 100%)}
+@keyframes wh-shimmer{100%{transform:translateX(100%)}}
 
 #${PANEL_ID} .wh-section{margin-top:30px;padding:0 40px}
 #${PANEL_ID} .wh-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
@@ -367,7 +379,7 @@ function buildPanel(): void {
             <div class="wh-pill" data-f="电影">电影</div>
             <div class="wh-pill" data-f="剧集">剧集</div>
             <div class="wh-pill" data-f="动漫">动漫</div>
-            <div class="wh-pill" data-f="已看完">已看完</div>
+            <div class="wh-sync" id="wh-sync" title="立即从飞牛影视拉取最新观看数据">立即同步</div>
             <div class="wh-close" id="wh-close" title="关闭（Esc）">✕</div>
           </div>
         </div>
@@ -400,11 +412,11 @@ function buildPanel(): void {
 
         <section class="wh-section">
           <div class="wh-section-head">
-            <div class="wh-section-title">看过的剧</div>
+            <div class="wh-section-title">影视清单</div>
             <div class="wh-section-hint">点击查看详情并评分</div>
           </div>
           <div class="wh-row" id="wh-row"></div>
-          <div class="wh-sample">* 当前为示例数据；点击「同步飞牛影视」可拉取真实已观看记录</div>
+          <div class="wh-sample">* 当前为示例数据；点击「立即同步」可拉取真实已观看记录</div>
         </section>
       </div>
 
@@ -437,7 +449,7 @@ function buildPanel(): void {
             <textarea class="wh-review" id="wh-d-review" placeholder="写下你对这部剧的看法…"></textarea>
             <div class="wh-actions">
               <button class="wh-btn primary" id="wh-d-save">保存我的评价</button>
-              <button class="wh-btn ghost" id="wh-d-sync">同步飞牛影视</button>
+              <button class="wh-btn ghost" id="wh-d-sync">立即同步</button>
             </div>
             <div class="wh-divider"></div>
             <div class="wh-sessions">
@@ -489,15 +501,22 @@ function buildPanel(): void {
         if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
     });
 
-    // 筛选
-    root.querySelectorAll('.wh-pill').forEach((p) => {
-        p.addEventListener('click', () => {
+    // 筛选 + 立即同步：统一在 .wh-filters 上做事件委托（与关闭按钮同款修复，
+    //   杜绝 fnOS 路由切换导致面板 DOM 重建后、原 per-pill 监听绑到失效节点、电影/剧集/动漫"点不动"的问题）
+    const filtersEl = root.querySelector('.wh-filters') as HTMLElement | null;
+    if (filtersEl) {
+        filtersEl.addEventListener('click', (e: MouseEvent) => {
+            const tgt = e.target as HTMLElement;
+            // 立即同步按钮：立刻重拉飞牛观看数据（含 TMDB 标签）
+            if (tgt.closest('#wh-sync')) { syncFnos(); return; }
+            const pill = tgt.closest('.wh-pill') as HTMLElement | null;
+            if (!pill) return;
             root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
-            p.classList.add('active');
-            curFilter = (p as HTMLElement).dataset.f || '全部';
+            pill.classList.add('active');
+            curFilter = (pill as HTMLElement).dataset.f || '全部';
             renderWall();
         });
-    });
+    }
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
@@ -536,7 +555,6 @@ function renderStars(r: number): void {
 
 function filteredData(): ShowItem[] {
     if (curFilter === '全部') return curData;
-    if (curFilter === '已看完') return curData.filter((i) => i.prog >= 1);
     return curData.filter((i) => i.type === curFilter);
 }
 
@@ -571,8 +589,17 @@ function renderWall(): void {
         c.addEventListener('click', () => openDetail(parseInt((c as HTMLElement).dataset.idx || '0', 10)));
     });
     const done = curData.filter((i) => i.prog >= 1).length;
-    const sub = $('wh-sub');
+        const sub = $('wh-sub');
     if (sub) sub.textContent = `${curData.length} 部作品 · 已看完 ${done} 部（示例）`;
+}
+
+/** 数据加载占位：在 #wh-row 填充若干骨架卡片，避免飞牛+TMDB 拉取期间海报墙空白闪烁。 */
+function showSkeleton(n: number = 8): void {
+    const row = $('wh-row');
+    if (!row) return;
+    let h = '';
+    for (let i = 0; i < n; i++) h += '<div class="wh-skel"></div>';
+    row.innerHTML = h;
 }
 
 function renderChart(): void {
@@ -911,7 +938,8 @@ function lastPlayedTs(it: ShowItem): number {
 }
 
 async function syncFnos(): Promise<void> {
-    toast('正在同步飞牛影视数据…');
+    toast('正在从飞牛影视同步最新观看数据…');
+    showSkeleton(); // 重拉前先铺骨架占位，避免卡片瞬间清空/空白
     const result = await loadWatchData();
     if (result.from === 'real') {
         renderWall();
@@ -967,6 +995,7 @@ function openPanel(): void {
         renderChart();
 
         // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）
+        showSkeleton(); // 拉取期间先铺骨架占位，避免海报墙空白闪烁
         loadWatchData().then((result) => {
             renderWall();
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
@@ -981,8 +1010,8 @@ function openPanel(): void {
             const sampleHint = root.querySelector('.wh-sample') as HTMLElement | null;
             if (sampleHint) {
                 sampleHint.textContent = result.from === 'real'
-                    ? '* 数据来自飞牛影视 · 点击「同步飞牛影视」可刷新'
-                    : '* 当前为示例数据；点击「同步飞牛影视」可拉取真实记录';
+                    ? '* 数据来自飞牛影视 · 点击「立即同步」可刷新'
+                    : '* 当前为示例数据；点击「立即同步」可拉取真实记录';
                 if (result.from === 'real') sampleHint.style.opacity = '0.6';
             }
         });
