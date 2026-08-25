@@ -402,7 +402,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .meta{position:absolute;left:13px;right:13px;bottom:11px}
 #${PANEL_ID} .wh-card .name{font-size:15px;font-weight:600;line-height:1.25;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #${PANEL_ID} .wh-card .sub{font-size:12px;color:rgba(255,255,255,.75);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#${PANEL_ID} .wh-card .stars{display:flex;gap:2px;margin-top:6px}
+#${PANEL_ID} .wh-card .stars{display:flex;gap:2px;margin-bottom:6px}
 #${PANEL_ID} .wh-card .stars svg{width:13px;height:13px;fill:#ffd60a}
 #${PANEL_ID} .wh-card .stars svg.off{fill:var(--wh-star-empty)}
 #${PANEL_ID} .wh-card .pbar{position:absolute;left:13px;right:13px;bottom:0;height:4px;border-radius:2px;background:rgba(255,255,255,.22)}
@@ -802,9 +802,8 @@ function bindWindowTopBtns(): void {
 function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string {
     const pct = Math.round(item.prog * 100);
     let sub: string;
-    if (item.myRating) sub = `${item.type} · 我的评分 ${item.myRating}/5`;
+    if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
     else if (item.last && item.last !== '未记录时间') sub = `${item.type} · ${item.last}`;
-    else if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
     else sub = `${item.type} · 未记录时间`;
     // 状态徽标/进度条：已看完列不放（列头已说明）；在观看列用进度条或"在观看"徽标表达
     let bar = '';
@@ -821,7 +820,7 @@ function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string
     return `<div class="wh-card poster" data-fntv-glass-exclude="" data-idx="${idx}" data-name="${item.name}" data-sub="${sub}" data-prog="${item.prog}">
         <div class="art" style="${artStyle}"></div>
         <div class="scrim"></div>${bar}
-        <div class="meta"><div class="name">${item.name}</div><div class="sub">${sub}</div>${stars}</div>
+        <div class="meta">${stars}<div class="name">${item.name}</div><div class="sub">${sub}</div></div>
       </div>`;
 }
 
