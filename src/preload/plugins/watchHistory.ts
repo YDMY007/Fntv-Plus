@@ -42,6 +42,7 @@ interface ShowItem {
     type: string;
     last: string;
     prog: number;
+    started?: boolean;  // 有观看痕迹但未看完（"在观看"标记；电影无精确百分比时 prog=0）
     art: string;        // 渐变兜底背景（无真实海报时显示）
     poster?: string;    // 真实竖版海报 URL（飞牛 item API data.posters，空/缺=用渐变兜底）
     lastPlayedAt?: number; // 真实"最近一次播放"时间戳(ms)；用于活跃度按天分桶（真实数据经 loadWatchData 填充，SAMPLE 由 sessions 解析兜底）
@@ -300,6 +301,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .pfill{height:100%;border-radius:2px;background:var(--wh-accent)}
 #${PANEL_ID} .wh-card .badge{position:absolute;top:10px;left:10px;font-size:11px;font-weight:600;padding:3px 8px;
   border-radius:8px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.15)}
+#${PANEL_ID} .wh-card .badge.watching{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.55);color:#ffb340}
 #${PANEL_ID} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
@@ -565,8 +567,11 @@ function cardHTML(item: ShowItem, idx: number): string {
     else if (item.last && item.last !== '未记录时间') sub = `${item.type} · ${item.last}`;
     else if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
     else sub = `${item.type} · 未记录时间`;
-    const bar = item.prog >= 1
-        ? `<div class="badge">已看完</div>`
+    let badge = '';
+    if (item.prog >= 1) badge = `<div class="badge">已看完</div>`;
+    else if (item.started) badge = `<div class="badge watching">在观看</div>`;
+    const bar = (item.prog >= 1 || item.started)
+        ? badge
         : `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`;
     const stars = item.myRating ? `<div class="stars">${starsSVG(item.myRating)}</div>` : '';
     // 有真实海报用缩略图铺满；否则用按名称生成的渐变兜底（与首页轮播图缺图时的兜底同源）
@@ -588,9 +593,6 @@ function renderWall(): void {
     row.querySelectorAll('.wh-card').forEach((c) => {
         c.addEventListener('click', () => openDetail(parseInt((c as HTMLElement).dataset.idx || '0', 10)));
     });
-    const done = curData.filter((i) => i.prog >= 1).length;
-        const sub = $('wh-sub');
-    if (sub) sub.textContent = `${curData.length} 部作品 · 已看完 ${done} 部（示例）`;
 }
 
 /** 数据加载占位：在 #wh-row 填充若干骨架卡片，避免飞牛+TMDB 拉取期间海报墙空白闪烁。 */
@@ -821,9 +823,9 @@ function mapType(t: string | number | undefined): string {
  *   过滤 watched===1 → 返回 [{guid,title,type,thumbnail_url,overview,year,genres,cast,
  *          douban_id,douban_rating,watched,progress,last_played}, ...]
  */
-async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'; libraryTotal: number }> {
+async function loadWatchData(force = false): Promise<{ count: number; from: 'real' | 'sample'; libraryTotal: number }> {
     try {
-        const resp = await ipcRenderer.invoke('douban:get-watched-items').catch(() => null);
+        const resp = await ipcRenderer.invoke('douban:get-watched-items', force).catch(() => null);
         // 兼容两种返回形态：旧版直接返回数组；新版返回 { items, libraryTotal }
         const items = (resp && Array.isArray(resp.items)) ? resp.items : (Array.isArray(resp) ? resp : null);
         const libraryTotal = (resp && typeof resp.libraryTotal === 'number') ? resp.libraryTotal : 0;
@@ -849,6 +851,7 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             lastPlayedAt: lpMs,
             totalRuntimeMs: (typeof it.total_runtime_ms === 'number' && it.total_runtime_ms > 0) ? it.total_runtime_ms : 0,
             prog: typeof it.progress === 'number' ? Math.min(1, Math.max(0, it.progress)) : (it.watched ? 1 : 0),
+            started: it.started ? true : false,
             art: artForName(it.title || `item-${i}`),
             poster: '',
             fn: {
@@ -958,16 +961,17 @@ function lastPlayedTs(it: ShowItem): number {
 async function syncFnos(): Promise<void> {
     toast('正在从飞牛影视同步最新观看数据…');
     showSkeleton(); // 重拉前先铺骨架占位，避免卡片瞬间清空/空白
-    const result = await loadWatchData();
+    const result = await loadWatchData(true); // 立即同步：绕过 10 分钟缓存，即时拉取最新观看数据
     if (result.from === 'real') {
         renderWall();
         renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
         updatePillCounts(); // 刷新筛选按钮上的真实分类计数
         const sub = $('wh-sub');
-        const total = result.libraryTotal || curData.length; // 库内真实作品数（用户要求）
+        const total = result.libraryTotal || curData.length; // 库内真实作品总数（用户要求）
         const done = curData.filter(i => i.prog >= 1).length;
-        if (sub) sub.textContent = `${total} 部作品 · 来自飞牛影视 · 已看完 ${done} 部`;
-        toast(`已同步 ${result.count} 部真实观看记录`);
+        const partial = curData.length - done;
+        if (sub) sub.textContent = `库内 ${total} 部 · 已看完 ${done} · 看到一半 ${partial}`;
+        toast(`已同步 ${result.count} 部观看记录（含部分看）`);
     } else {
         toast('同步失败：未能获取飞牛数据（可能未登录或网络问题）');
     }
@@ -1015,9 +1019,9 @@ function openPanel(): void {
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
         renderChart();
 
-        // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）
+        // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）；用缓存（force=false）加速开面板
         showSkeleton(); // 拉取期间先铺骨架占位，避免海报墙空白闪烁
-        loadWatchData().then((result) => {
+        loadWatchData(false).then((result) => {
             renderWall();
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
             // 数据刷新后再次兜底重涂底色（renderWall 重写 innerHTML 可能触发重排）
@@ -1025,11 +1029,12 @@ function openPanel(): void {
             updatePillCounts(); // 刷新筛选按钮上的真实分类计数
             const sub = $('wh-sub');
             const done = curData.filter((i) => i.prog >= 1).length;
-            // 顶部"X 部作品"用库内真实总数（libraryTotal）；示例数据回落到 curData.length
+            const partial = curData.length - done;
+            // 顶部用库内真实总数（libraryTotal）；示例数据回落到 curData.length
             const total = result.from === 'real' ? (result.libraryTotal || curData.length) : curData.length;
-            if (sub) sub.textContent = `${total} 部作品`
-                + (result.from === 'real' ? ' · 来自飞牛影视' : '（示例数据）')
-                + ` · 已看完 ${done} 部`;
+            if (sub) sub.textContent = result.from === 'real'
+                ? `库内 ${total} 部 · 已看完 ${done} · 看到一半 ${partial}`
+                : `示例数据 · ${curData.length} 部（点击「立即同步」拉取真实记录）`;
             // 隐藏/更新示例提示
             const sampleHint = root.querySelector('.wh-sample') as HTMLElement | null;
             if (sampleHint) {

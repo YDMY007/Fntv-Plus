@@ -545,60 +545,111 @@ function getFnapiFresh(): any {
  * 注：lc-696 曾把"电视剧 guid"直接喂给 episode/list（返回 0 集），又 fallback 到不存在的
  * it.runtime，导致全部总时长=0。本实现已在真实 fnOS API 上验证（3 部已看剧均得非零时长）。
  */
-async function sumRuntimeMsForItem(fnapi: any, it: any): Promise<number> {
+/**
+ * 分析单部作品：总时长 + 观看进度 + 是否纳入「影视清单」。
+ *
+ * fnOS 观看模型（已在真实 API 上逐条验证，库内 162 项）：
+ *   - 整部看完 → 条目 watched===1（电影），或 全部单集 watched===1（电视剧）。
+ *   - 部分看   → 电视剧仅"部分单集 watched===1"，条目本身 watched 仍为 0；
+ *               电影无精确百分比，仅有 watched_ts>0 的播放痕迹。
+ *   - 完全没看 → watched===0 且无任何单集/痕迹。
+ *
+ * 因此"影视清单"必须向下钻取 季→单集 统计已看集数，才能把"看了一些没看完"的剧纳入
+ * 并给出真实进度——否则只会显示整部看完的 9 部，漏掉 11 部部分看 + 1 部部分看电影。
+ *
+ * @param force true=绕过 10 分钟缓存（立即同步用）；false=用缓存（开面板自动加载用）。
+ */
+interface AnalyzeResult {
+    total_runtime_ms: number;
+    progress: number;        // 0..1：电视剧=已看集数/总集数；电影=1(看完)或0(仅痕迹)
+    anyWatch: boolean;       // 是否纳入清单（看完 / 部分看 / 已开始）
+    started: boolean;        // 有观看痕迹但未看完（前端显示"在观看"）
+    last_played: number;     // ms（取自 watched_ts，无则 0）
+}
+async function analyzeItem(fnapi: any, it: any, force = false): Promise<AnalyzeResult> {
+    const empty: AnalyzeResult = { total_runtime_ms: 0, progress: 0, anyWatch: false, started: false, last_played: 0 };
+    const type = (it && it.type || '').toLowerCase();
+    const itemListFn = force ? fnapi.getItemList.bind(fnapi) : fnapi.getItemListCached.bind(fnapi);
+    const epListFn = force ? fnapi.getEpisodeList.bind(fnapi) : fnapi.getEpisodeListCached.bind(fnapi);
+    const lpMs = it.watched_ts ? Number(it.watched_ts) * 1000 : 0;
+
+    // 电影：单文件，自身字段即总时长
+    if (type === 'movie') {
+        const dur = Number(it.duration) || 0;
+        const rt = Number(it.runtime) || 0;
+        const totalSec = dur > 0 ? dur : (rt > 0 ? rt * 60 : 0);
+        if (it.watched === 1) {
+            return { total_runtime_ms: Math.round(totalSec * 1000), progress: 1, anyWatch: true, started: false, last_played: lpMs };
+        }
+        if (it.watched_ts > 0) {
+            // 有播放痕迹但没标看完 → 记为"在观看"（飞牛电影部分看无精确百分比）
+            return { total_runtime_ms: Math.round(totalSec * 1000), progress: 0, anyWatch: true, started: true, last_played: lpMs };
+        }
+        return empty; // 完全没看
+    }
+
+    // 电视剧 / 其他：向下钻取 季→单集，累加时长 + 统计已看集数
     let totalSec = 0;
+    let totalEp = 0;
+    let watchedEp = 0;
+    let found = false;
     const addLeaf = (leaf: any): void => {
         if (!leaf) return;
-        const dur = Number(leaf.duration) || 0; // 秒
-        const rt = Number(leaf.runtime) || 0;   // 分钟
+        const dur = Number(leaf.duration) || 0;
+        const rt = Number(leaf.runtime) || 0;
         if (dur > 0) totalSec += dur;
         else if (rt > 0) totalSec += rt * 60;
+        totalEp++;
+        if (leaf.watched === 1) watchedEp++;
     };
-    const type = (it && it.type || '').toLowerCase();
-    if (type === 'movie') {
-        addLeaf(it);
-    } else {
-        let found = false;
-        try {
-            // 向下取子级：电视剧 → 季(Season)；部分条目可能直接是单集/Movie
-            const childResp: any = await fnapi.getItemListCached({
-                parent_guid: it.guid,
-                exclude_folder: 1,
-                sort_column: 'sort_title',
-                sort_type: 'ASC',
-            });
-            const children: any[] = (childResp && childResp.data && Array.isArray(childResp.data.list))
-                ? childResp.data.list
-                : [];
-            for (const c of children) {
-                const ct = (c.type || '').toLowerCase();
-                if (ct === 'episode' || ct === 'movie') {
-                    addLeaf(c);
-                    found = true;
-                } else {
-                    // Season 季：再钻到 episode/list/{季guid}
-                    try {
-                        const ep: any = await fnapi.getEpisodeListCached(c.guid);
-                        const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
-                        if (eps.length) {
-                            for (const e of eps) addLeaf(e);
-                            found = true;
-                        }
-                    } catch { /* ignore */ }
-                }
+    try {
+        const childResp: any = await itemListFn({
+            parent_guid: it.guid,
+            exclude_folder: 1,
+            sort_column: 'sort_title',
+            sort_type: 'ASC',
+        });
+        const children: any[] = (childResp && childResp.data && Array.isArray(childResp.data.list))
+            ? childResp.data.list
+            : [];
+        for (const c of children) {
+            const ct = (c.type || '').toLowerCase();
+            if (ct === 'episode' || ct === 'movie') {
+                addLeaf(c);
+                found = true;
+            } else {
+                try {
+                    const ep: any = await epListFn(c.guid);
+                    const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
+                    if (eps.length) {
+                        for (const e of eps) addLeaf(e);
+                        found = true;
+                    }
+                } catch { /* ignore */ }
             }
-        } catch { /* ignore */ }
-        // 兜底：子级钻取无果时，仍尝试 episode/list/{本条目guid}（兼容单层剧集/异常结构）
-        if (!found) {
-            try {
-                const ep: any = await fnapi.getEpisodeListCached(it.guid);
-                const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
-                for (const e of eps) addLeaf(e);
-            } catch { /* ignore */ }
         }
+    } catch { /* ignore */ }
+    // 兜底：子级钻取无果时，仍尝试 episode/list/{本条目guid}（兼容单层剧集/异常结构）
+    if (!found) {
+        try {
+            const ep: any = await epListFn(it.guid);
+            const eps: any[] = (ep && ep.success && Array.isArray(ep.data)) ? ep.data : [];
+            for (const e of eps) addLeaf(e);
+        } catch { /* ignore */ }
     }
-    if (!totalSec) totalSec = (Number(it && it.runtime) || 0) * 60; // 最终兜底：本条目自身 runtime(分钟)
-    return Math.round(totalSec * 1000);
+
+    const total_runtime_ms = totalSec > 0 ? Math.round(totalSec * 1000)
+        : (Number(it && it.runtime) || 0) * 60; // 最终兜底：本条目自身 runtime(分钟)
+
+    // 是否纳入「影视清单」
+    if (it.watched === 1 || (totalEp > 0 && watchedEp === totalEp)) {
+        return { total_runtime_ms, progress: 1, anyWatch: true, started: false, last_played: lpMs };
+    }
+    if (watchedEp > 0) {
+        const progress = totalEp > 0 ? watchedEp / totalEp : 0;
+        return { total_runtime_ms, progress, anyWatch: true, started: true, last_played: lpMs };
+    }
+    return empty; // 完全没看
 }
 
 /**
@@ -644,7 +695,7 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
     return { category, genres };
 }
 
-async function getWatchedItems(): Promise<{ items: any[]; libraryTotal: number }> {
+async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTotal: number }> {
     const fnapi = getFnapiFresh();
     if (!fnapi) {
         log.warn('[豆瓣] 缺少 fnOS 配置（domain/token），无法拉取已观看列表');
@@ -658,7 +709,7 @@ async function getWatchedItems(): Promise<{ items: any[]; libraryTotal: number }
             sort_type: 'ASC',
         });
         if (!resp.success || !resp.data || !Array.isArray(resp.data.list)) {
-            log.warn('[豆瓣] 拉取已观看列表失败:', resp && resp.message);
+            log.warn('[豆瓣] 拉取列表失败:', resp && resp.message);
             return { items: [], libraryTotal: 0 };
         }
         const total = resp.data.total;
@@ -666,13 +717,19 @@ async function getWatchedItems(): Promise<{ items: any[]; libraryTotal: number }
         // libraryTotal = 库内作品总数（已看+未看），用于前端"X 部作品"展示（用户要求显示库内真实作品数）
         const libraryTotal = typeof total === 'number' ? total : list.length;
         if (typeof total === 'number' && list.length < total) {
-            log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
+            log.warn(`[豆瓣] 列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
         }
-        const watched = list.filter((it: any) => it && it.watched === 1);
-        // 并发计算每部作品总时长 + TMDB 分类/类型标签（并发受限，避免触发 TMDB 429）。
-        // 同时带回 last_played（watched_ts 秒→ms）与进度，供前端观影记录直接展示，无需前端再猜接口。
-        const items = await mapLimit(watched, 4, async (it: any) => {
-            const total_runtime_ms = await sumRuntimeMsForItem(fnapi, it);
+        // 第一步：并发向下钻取分析每部作品（总时长 + 已看进度），仅保留有观看记录者。
+        // 这一步必须扫全部 162 项——因为"部分看"的剧在条目级 watched 仍为 0，只有钻到单集才能发现，
+        // 否则"影视清单"只会剩整部看完的 9 部，漏掉 11 部部分看 + 1 部部分看电影。
+        const analyzed = await mapLimit(list, 6, async (it: any) => {
+            const a = await analyzeItem(fnapi, it, force);
+            return a.anyWatch ? { it, a } : null;
+        });
+        const kept = analyzed.filter((x: any) => x !== null);
+        // 第二步：仅对保留的（含部分看）条目补 TMDB 分类/类型标签，避免对 122 部未看剧浪费 TMDB 配额。
+        const items = await mapLimit(kept, 4, async (pair: any) => {
+            const { it, a } = pair;
             const { category, genres } = await enrichWithTmdb(it);
             return {
                 guid: it.guid,
@@ -686,13 +743,16 @@ async function getWatchedItems(): Promise<{ items: any[]; libraryTotal: number }
                 genres,   // TMDB 中文类型标签（无则空数组，前端回退"未分类"）
                 air_date: it.air_date,
                 release_date: it.release_date,
-                watched: 1,
-                last_played: it.watched_ts ? Number(it.watched_ts) * 1000 : 0, // 秒→ms
-                progress: 1,
-                total_runtime_ms,
+                watched: it.watched === 1 ? 1 : 0,
+                started: a.started ? 1 : 0,
+                last_played: a.last_played, // ms
+                progress: a.progress,       // 0..1：电视剧=已看集数/总集数
+                total_runtime_ms: a.total_runtime_ms,
             };
         });
-        log.info(`[豆瓣] 已观看列表: 库内共 ${libraryTotal} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
+        const done = items.filter((x: any) => x.progress >= 1).length;
+        const partial = items.length - done;
+        log.info(`[豆瓣] 库内共 ${libraryTotal} 项 → 有观看记录 ${items.length} 部（看完 ${done} / 部分看 ${partial}）`);
         return { items, libraryTotal };
     } catch (e: any) {
         log.warn('[豆瓣] getWatchedItems 异常:', e && e.message);
@@ -954,8 +1014,9 @@ export function init(): void {
     }, { useHandle: true });
 
     // 主进程直接从 fnOS API 拉「已观看」列表（替代渲染进程点击 DOM，稳定可靠）
-    registerHandler('douban:get-watched-items', async () => {
-        return await getWatchedItems();
+    // 第二个参数 force=true 时绕过 10 分钟缓存，用于「立即同步」即时拉取最新观看数据。
+    registerHandler('douban:get-watched-items', async (_e: any, force?: boolean) => {
+        return await getWatchedItems(force === true);
     }, { useHandle: true });
 
     // 手动触发扫描：主进程请求渲染进程扫描，等待回传结果（超时 25s）
