@@ -362,6 +362,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
 #${PANEL_ID} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:3px}
 #${PANEL_ID} .wh-heat-body{display:flex;gap:10px;align-items:flex-start;min-height:136px}
+#${PANEL_ID} .wh-heat-body.is-h{justify-content:center}
 #${PANEL_ID} .wh-heat-days{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);font-size:10px;color:var(--wh-text3);flex:none;margin-top:22px}
 #${PANEL_ID} .wh-heat-days span{line-height:var(--wh-cell,12px);height:var(--wh-cell,12px);visibility:hidden}
 #${PANEL_ID} .wh-heat-days span.show{visibility:visible}
@@ -972,7 +973,7 @@ function renderChart(): void {
     const vertical = (_heatRange === 'year' || _heatRange === 'all' || _heatRange === 'quarter');
     let CELL = CAL_CELL, GAP = CAL_GAP;
     // 周/月/季格子相对年视图（12px 基准）放大：周 250% / 月 175% / 季 150%
-    if (_heatRange === 'week') { CELL = 30; GAP = 5; }        // 12 * 250% = 30
+    if (_heatRange === 'week') { CELL = 36; GAP = 6; }        // 12 * 300% = 36
     else if (_heatRange === 'month') { CELL = 27; GAP = 4; }  // 12 * 225% = 27
     else if (_heatRange === 'quarter') { CELL = 18; GAP = 4; } // 12 * 150% = 18
     const STEP = CELL + GAP; // 月份标签横向偏移（按实际格子步长）
@@ -1079,7 +1080,7 @@ function renderChart(): void {
           </div>
         </div>
       </div>
-      <div class="wh-heat-body">${bodyHTML}</div>`;
+      <div class="wh-heat-body${vertical ? '' : ' is-h'}">${bodyHTML}</div>`;
 
     // 单元格尺寸写入 CSS 变量（ descendants 用 var 继承）
     heat.style.setProperty('--wh-cell', CELL + 'px');
