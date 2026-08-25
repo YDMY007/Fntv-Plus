@@ -805,7 +805,44 @@ async function fetchDoubanRating(it: any, fnapi: any): Promise<{ rating: number;
     }
 }
 
+// ── 观影记录完整结果磁盘缓存（跨重启持久化，根治每次重启全量钻取刷日志）──
+const WATCH_CACHE_FILE = (() => {
+    try { return path.join(app.getPath('userData'), 'watch_history_cache.json'); } catch { return ''; }
+})();
+const WATCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
+
+/** 读取磁盘缓存（未过期）：返回 { items, libraryTotal } 或 null。 */
+function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number } | null {
+    if (!WATCH_CACHE_FILE) return null;
+    try {
+        if (!fs.existsSync(WATCH_CACHE_FILE)) return null;
+        const obj = JSON.parse(fs.readFileSync(WATCH_CACHE_FILE, 'utf8'));
+        if (!obj || !Array.isArray(obj.items)) return null;
+        if (!staleOk && typeof obj.savedAt === 'number' && Date.now() - obj.savedAt > WATCH_CACHE_TTL_MS) return null;
+        return { items: obj.items, libraryTotal: typeof obj.libraryTotal === 'number' ? obj.libraryTotal : 0 };
+    } catch { return null; }
+}
+
+/** 写入磁盘缓存（覆盖式）。失败仅告警，不影响主流程。 */
+function writeWatchCache(result: { items: any[]; libraryTotal: number }): void {
+    if (!WATCH_CACHE_FILE) return;
+    try {
+        fs.writeFileSync(WATCH_CACHE_FILE, JSON.stringify({ savedAt: Date.now(), ...result }), 'utf8');
+    } catch (e: any) {
+        log.warn('[豆瓣] 写入观影记录缓存失败:', e && e.message);
+    }
+}
+
 async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTotal: number }> {
+    // 命中磁盘缓存（30 分钟内）→ 直接返回，跳过 162 部钻取 + TMDB + 豆瓣，
+    // 开面板秒开、重启进程不刷日志；点「立即同步」(force=true) 才绕过缓存重拉。
+    if (!force) {
+        const cached = readWatchCache();
+        if (cached) {
+            log.info(`[豆瓣] 观影记录命中磁盘缓存（${cached.items.length} 部），跳过全量钻取`);
+            return cached;
+        }
+    }
     const fnapi = getFnapiFresh();
     if (!fnapi) {
         log.warn('[豆瓣] 缺少 fnOS 配置（domain/token），无法拉取已观看列表');
@@ -873,9 +910,13 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
         const done = items.filter((x: any) => x.progress >= 1).length;
         const partial = items.length - done;
         log.info(`[豆瓣] 库内共 ${libraryTotal} 项 → 有观看记录 ${items.length} 部（看完 ${done} / 部分看 ${partial}）`);
+        writeWatchCache({ items, libraryTotal });
         return { items, libraryTotal };
     } catch (e: any) {
         log.warn('[豆瓣] getWatchedItems 异常:', e && e.message);
+        // 异常时降级返回过期缓存（若有），避免面板空白；否则返回空
+        const stale = readWatchCache(true);
+        if (stale) { log.info(`[豆瓣] 降级使用过期磁盘缓存（${stale.items.length} 部）`); return stale; }
         return { items: [], libraryTotal: 0 };
     }
 }

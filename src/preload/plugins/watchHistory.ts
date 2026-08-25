@@ -863,6 +863,27 @@ function artForName(name: string): string {
 // 这样观看记录的竖版海报与首页轮播图来源完全一致（飞牛 item API 权威竖版源），不再用假渐变占位；
 // 同时顺手拿到 overview 解决剧集详情页"暂无简介"问题。
 const _posterCache = new Map<string, { poster: string; overview: string }>();
+// 海报+简介跨重启持久化：落 localStorage（同 fnOS 网页 origin，electron 自动落盘），
+// 避免每次重启 dev.cmd 都重新拉取 /v/api/v1/item/{guid}。仅存小字符串 URL/简介，体积可忽略。
+const _POSTER_LS_KEY = 'fntv_wh_poster_cache_v1';
+let _posterCacheLoaded = false;
+function loadPosterCache(): void {
+    if (_posterCacheLoaded) return;
+    _posterCacheLoaded = true;
+    try {
+        const raw = localStorage.getItem(_POSTER_LS_KEY);
+        if (!raw) return;
+        const obj = JSON.parse(raw) as Record<string, { poster: string; overview: string }>;
+        for (const k in obj) _posterCache.set(k, obj[k]);
+    } catch { /* 解析失败则忽略，走实时拉取 */ }
+}
+function savePosterCache(): void {
+    try {
+        const obj: Record<string, { poster: string; overview: string }> = {};
+        _posterCache.forEach((v, k) => { obj[k] = v; });
+        localStorage.setItem(_POSTER_LS_KEY, JSON.stringify(obj));
+    } catch { /* 配额/隐私模式失败时忽略，下次实时拉取 */ }
+}
 
 function pickImg(v: any, preferLargest = false): string {
     let s = '';
@@ -990,6 +1011,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             };
         });
         // 并发拉取真实竖版海报（与首页轮播图同款 item API 机制），按 guid 取 data.posters
+        loadPosterCache(); // 重启后从 localStorage 恢复海报+简介，避免重复拉取
         const CHUNK = 4;
         for (let i = 0; i < mapped.length; i += CHUNK) {
             const slice = mapped.slice(i, i + CHUNK);
@@ -1006,6 +1028,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
                 }
             }));
         }
+        savePosterCache(); // 落盘持久化（含本次新拉取的海报+简介）
         // 合并用户已有的评分/评语（按 name 匹配旧数据）
         for (const m of mapped) {
             const old = curData.find((o) => o.name === m.name);
