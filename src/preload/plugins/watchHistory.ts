@@ -266,7 +266,7 @@ const WH_CSS = `
    事件绑定在 window 捕获阶段（见 bindWindowTopBtns），最外层先执行，免疫 fnOS 页面层拦截。
    浮层自带主题变量（面板外取不到 #fntv-wh 上的 --wh-*），明暗由 openPanel 同步 .light 类。 */
 #fntv-wh-topbtns{--wh-surface:#17171a;--wh-surface2:#232327;--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
-  position:fixed;top:18px;right:28px;z-index:2147483641;
+  position:fixed;top:28px;right:28px;z-index:2147483641;
   display:flex;align-items:center;gap:8px;pointer-events:auto;
   background:#17171a;border:1px solid rgba(128,128,128,.18);border-radius:22px;
   padding:5px 9px;box-shadow:0 10px 30px rgba(0,0,0,.35);
