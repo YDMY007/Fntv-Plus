@@ -244,7 +244,12 @@ const WH_CSS = `
 #${PANEL_ID} .wh-active-badge{font-size:13px;font-weight:500;color:var(--wh-accent);
   background:rgba(41,151,255,.1);border:1px solid rgba(41,151,255,.25);
   padding:3px 12px;border-radius:20px;white-space:nowrap;align-self:center;margin-top:6px}
-#${PANEL_ID} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:4px}
+#${PANEL_ID} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:4px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;line-height:1.6}
+#${PANEL_ID} .wh-stat-item{display:inline-flex;align-items:baseline;gap:2px;white-space:nowrap}
+#${PANEL_ID} .wh-stat-item b{font-size:17px;font-weight:700;color:var(--wh-text);font-variant-numeric:tabular-nums}
+#${PANEL_ID} .wh-stat-item i{font-size:12px;font-style:normal;color:var(--wh-text3)}
+#${PANEL_ID} .wh-stat-sep{color:var(--wh-line);font-size:12px;margin:0 2px}
 #${PANEL_ID} .wh-filters{display:flex;gap:9px;align-items:center;position:relative;z-index:61;pointer-events:auto}
 #${PANEL_ID} .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
@@ -275,9 +280,9 @@ const WH_CSS = `
 
 #${PANEL_ID} .wh-chart-card{background:var(--wh-surface);border:1px solid var(--wh-line);
   border-radius:22px;padding:24px 26px 18px}
-#${PANEL_ID} .wh-chart-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:18px}
-#${PANEL_ID} .wh-chart-top .ct{font-size:16px;font-weight:600}
-#${PANEL_ID} .wh-chart-top .cs{font-size:12px;color:var(--wh-text3)}
+#${PANEL_ID} .wh-chart-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
+#${PANEL_ID} .wh-chart-top .ct{font-size:14px;font-weight:600;color:var(--wh-text)}
+#${PANEL_ID} .wh-chart-top .cs{font-size:12px;color:var(--wh-text3);margin-top:2px}
 #${PANEL_ID} .wh-stat{display:flex;gap:26px}
 #${PANEL_ID} .wh-stat b{font-size:22px;font-weight:700}
 #${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2);margin-left:3px}
@@ -587,6 +592,25 @@ function fmtVotes(v: number): string {
     return v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v);
 }
 
+/** 顶部统计条：把散落的库存/看完/在看/活跃天数整合为一行紧凑横排统计项。
+ *  数字高亮(b 17px bold)、单位/标签收敛(i 12px dimmed)、分隔符细点。 */
+function buildSubtitleHTML(total: number, done: number, partial: number, activeDays: number, monthCount: number, isSample: boolean): string {
+    if (isSample) {
+        return `<span class="wh-stat-item">示例数据 <b>${total}</b><i>部</i></span>
+            <span class="wh-stat-sep">·</span>
+            <span class="wh-stat-item" style="color:var(--wh-text3)">点击「立即同步」拉取真实记录</span>`;
+    }
+    return `<span class="wh-stat-item"><b>${total}</b><i>部</i> 库存</span>
+        <span class="wh-stat-sep">·</span>
+        <span class="wh-stat-item"><b>${done}</b><i>部</i> 已看完</span>
+        <span class="wh-stat-sep">·</span>
+        <span class="wh-stat-item"><b>${partial}</b><i>部</i> 在看</span>
+        <span class="wh-stat-sep">·</span>
+        <span class="wh-stat-item"><b>${activeDays}</b><i>天</i>/30天活跃</span>
+        <span class="wh-stat-sep">·</span>
+        <span class="wh-stat-item">本月 <b>${monthCount}</b><i>部</i></span>`;
+}
+
 /** 多平台评分条：TMDB（飞牛刮削缓存）+ 豆瓣（主进程现取），各自一格。
  *  TMDB 卡=飞牛影视已刮削缓存的 vote_average（直接可用，源自 TMDB）；
  *  豆瓣卡=飞牛不提供，主进程现取豆瓣评分。两卡始终同时展示，无值显示「暂无」。 */
@@ -777,8 +801,8 @@ function renderChart(): void {
     }).length;
 
     const ct = $('wh-chart-ct'); const cs = $('wh-chart-cs');
-    if (ct) ct.textContent = `近 30 天在 ${activeDays} 天里有过观看`;
-    if (cs) cs.textContent = `共 ${total} 部 · 本月 ${monthCount} 部`;
+    if (ct) ct.textContent = '近 30 天观看趋势';
+    if (cs) cs.textContent = activeDays > 0 ? `${activeDays} 天有观看` : '近 30 天暂无观看';
     const totalMs = curData.reduce((s, i) => s + (i.totalRuntimeMs || 0), 0);
     const totalH = Math.round(totalMs / 3600000);
     const elDays = $('wh-stat-days'); if (elDays) elDays.textContent = String(activeDays);
@@ -1114,7 +1138,11 @@ async function syncFnos(): Promise<void> {
         const total = result.libraryTotal || curData.length; // 库内真实作品总数（用户要求）
         const done = curData.filter(i => i.prog >= 1).length;
         const partial = curData.length - done;
-        if (sub) sub.textContent = `库内 ${total} 部 · 已看完 ${done} · 看到一半 ${partial}`;
+        const activeDaysEl = $('wh-stat-days');
+        const activeDays = activeDaysEl ? parseInt(activeDaysEl.textContent || '0', 10) : 0;
+        const monthCountEl = $('wh-stat-month');
+        const monthCount = monthCountEl ? parseInt(monthCountEl.textContent || '0', 10) : 0;
+        if (sub) sub.innerHTML = buildSubtitleHTML(total, done, partial, activeDays, monthCount, false);
         toast(`已同步 ${result.count} 部观看记录（含部分看）`);
     } else {
         toast('同步失败：未能获取飞牛数据（可能未登录或网络问题）');
@@ -1178,9 +1206,11 @@ function openPanel(): void {
             const partial = curData.length - done;
             // 顶部用库内真实总数（libraryTotal）；示例数据回落到 curData.length
             const total = result.from === 'real' ? (result.libraryTotal || curData.length) : curData.length;
-            if (sub) sub.textContent = result.from === 'real'
-                ? `库内 ${total} 部 · 已看完 ${done} · 看到一半 ${partial}`
-                : `示例数据 · ${curData.length} 部（点击「立即同步」拉取真实记录）`;
+            const activeDaysEl = $('wh-stat-days');
+            const activeDays = activeDaysEl ? parseInt(activeDaysEl.textContent || '0', 10) : 0;
+            const monthCountEl = $('wh-stat-month');
+            const monthCount = monthCountEl ? parseInt(monthCountEl.textContent || '0', 10) : 0;
+            if (sub) sub.innerHTML = buildSubtitleHTML(total, done, partial, activeDays, monthCount, result.from !== 'real');
             // 隐藏/更新示例提示
             const sampleHint = root.querySelector('.wh-sample') as HTMLElement | null;
             if (sampleHint) {
