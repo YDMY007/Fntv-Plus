@@ -371,6 +371,11 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
 #${PANEL_ID} .wh-heat-cols{display:flex;gap:var(--wh-gap,4px)}
 #${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px)}
+/* 横排模式（周/月）：顶部星期标签 + 7 列网格（行=周） */
+#${PANEL_ID} .wh-heat-hdays{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);
+  font-size:10px;color:var(--wh-text3);margin-bottom:5px}
+#${PANEL_ID} .wh-heat-hdays span{text-align:center;line-height:1}
+#${PANEL_ID} .wh-heat-hgrid{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));grid-auto-rows:var(--wh-cell,12px);gap:var(--wh-gap,4px)}
 #${PANEL_ID} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);
   box-shadow:inset 0 0 0 1px var(--wh-cell-border);
   cursor:pointer;flex-shrink:0;position:relative;
@@ -962,13 +967,12 @@ function renderChart(): void {
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
     const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
-    // 容器高度锁定为年视图高度（136px）：calendar 模式 12px 紧凑竖向网格；flow 模式（周/月/季）横向铺满、格子放大
+    // 周/月：横排（行=周、列=星期），格子放大并贴合 136 高；季/年/全部：GitHub 竖列（列=周）
     const CAL_CELL = 12, CAL_GAP = 4;
-    const calendar = (_heatRange === 'year' || _heatRange === 'all');
-    // 所有范围统一正方形格子（GitHub 风格竖列）。周/月/季略放大并贴合 136 高。
+    const vertical = (_heatRange === 'year' || _heatRange === 'all' || _heatRange === 'quarter');
     let CELL = CAL_CELL, GAP = CAL_GAP;
-    // 周/月/季格子相对年视图（12px 基准）放大：150% / 175% / 200%
-    if (_heatRange === 'week') { CELL = 24; GAP = 5; }       // 12 * 200% = 24
+    // 周/月/季格子相对年视图（12px 基准）放大：周 250% / 月 175% / 季 150%
+    if (_heatRange === 'week') { CELL = 30; GAP = 5; }        // 12 * 250% = 30
     else if (_heatRange === 'month') { CELL = 21; GAP = 4; }  // 12 * 175% = 21
     else if (_heatRange === 'quarter') { CELL = 18; GAP = 4; } // 12 * 150% = 18
     const STEP = CELL + GAP; // 月份标签横向偏移（按实际格子步长）
@@ -1013,34 +1017,50 @@ function renderChart(): void {
         `<button type="button" class="wh-range-btn${_heatRange === r.k ? ' active' : ''}" data-range="${r.k}">${r.t}</button>`
     ).join('');
 
-    // 统一渲染：列=周、行=星期(日→六)，正方形格子（GitHub 风格）。
-    // 周/月/季在此框下仍是正方形小格子；年/全部为其同款（略小以容纳更多周）。
+    // 渲染：周/月 = 横排（行=周、列=星期，顶部单行星期标签）；季/年/全部 = GitHub 竖列（列=周、左列星期标签）
     let bodyHTML: string;
-    let cellsHTML = '';
-    weeks.forEach((wk) => {
-        let colHTML = '<div class="wh-heat-week">';
-        for (const cell of wk) {
-            const lv = cell.future ? -1 : level(cell.count);
-            const cls = 'wh-cell' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
-            const ds = `${cell.date.getFullYear()}-${cell.date.getMonth() + 1}-${cell.date.getDate()}`;
-            colHTML += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}"></div>`;
+    if (!vertical) {
+        // 横排：顶部星期标签 + 7 列网格，按周平铺（每周一行）
+        let hdays = '<div class="wh-heat-hdays">';
+        for (let i = 0; i < 7; i++) hdays += `<span>${WEEKDAYS[i]}</span>`;
+        hdays += '</div>';
+        let cellsHTML = '';
+        weeks.forEach((wk) => {
+            for (const cell of wk) {
+                const lv = cell.future ? -1 : level(cell.count);
+                const cls = 'wh-cell' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
+                const ds = `${cell.date.getFullYear()}-${cell.date.getMonth() + 1}-${cell.date.getDate()}`;
+                cellsHTML += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}"></div>`;
+            }
+        });
+        bodyHTML = `<div class="wh-heat-h">${hdays}<div class="wh-heat-hgrid">${cellsHTML}</div></div>`;
+    } else {
+        let cellsHTML = '';
+        weeks.forEach((wk) => {
+            let colHTML = '<div class="wh-heat-week">';
+            for (const cell of wk) {
+                const lv = cell.future ? -1 : level(cell.count);
+                const cls = 'wh-cell' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
+                const ds = `${cell.date.getFullYear()}-${cell.date.getMonth() + 1}-${cell.date.getDate()}`;
+                colHTML += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}"></div>`;
+            }
+            cellsHTML += colHTML + '</div>';
+        });
+        const monthsHTML = monthLabels.map((m) => `<span class="wh-heat-month" style="left:${m.left}px">${m.text}</span>`).join('');
+        let daysHTML = '';
+        for (let i = 0; i < 7; i++) {
+            const show = (i === 1 || i === 3 || i === 5); // 仅显示 一/三/五
+            daysHTML += `<span class="${show ? 'show' : ''}">${WEEKDAYS[i]}</span>`;
         }
-        cellsHTML += colHTML + '</div>';
-    });
-    const monthsHTML = monthLabels.map((m) => `<span class="wh-heat-month" style="left:${m.left}px">${m.text}</span>`).join('');
-    let daysHTML = '';
-    for (let i = 0; i < 7; i++) {
-        const show = (i === 1 || i === 3 || i === 5); // 仅显示 一/三/五
-        daysHTML += `<span class="${show ? 'show' : ''}">${WEEKDAYS[i]}</span>`;
+        bodyHTML = `
+        <div class="wh-heat-days">${daysHTML}</div>
+        <div class="wh-heat-scroll">
+          <div class="wh-heat-inner">
+            <div class="wh-heat-months">${monthsHTML}</div>
+            <div class="wh-heat-cols">${cellsHTML}</div>
+          </div>
+        </div>`;
     }
-    bodyHTML = `
-    <div class="wh-heat-days">${daysHTML}</div>
-    <div class="wh-heat-scroll">
-      <div class="wh-heat-inner">
-        <div class="wh-heat-months">${monthsHTML}</div>
-        <div class="wh-heat-cols">${cellsHTML}</div>
-      </div>
-    </div>`;
 
     heat.innerHTML = `
       <div class="wh-heat-head">
