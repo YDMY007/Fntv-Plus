@@ -233,12 +233,10 @@ const WH_CSS = `
   --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
   --wh-cell-border:rgba(27,31,35,.12)}
 
-#${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
-#${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
-  padding:26px 40px 14px;position:sticky;top:0;z-index:70;pointer-events:auto;
+#${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px;z-index:10}
+#${PANEL_ID} .wh-topbar{display:flex;align-items:flex-start;justify-content:flex-start;gap:24px;
+  padding:26px 40px 14px;position:sticky;top:0;z-index:60;pointer-events:auto;
   background:inherit;transition:opacity .12s}
-/* 详情为模态浮层：打开(wh-detail-open)时隐藏顶栏，避免「全部/立即同步」浮在详情页最上层遮挡内容 */
-#${PANEL_ID}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
 #${PANEL_ID} .wh-tb-left{display:flex;flex-direction:column;gap:2px}
 #${PANEL_ID} .wh-title-row{display:flex;align-items:center;gap:14px}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
@@ -253,20 +251,26 @@ const WH_CSS = `
 #${PANEL_ID} .wh-stat-item b{font-size:17px;font-weight:700;color:var(--wh-text);font-variant-numeric:tabular-nums}
 #${PANEL_ID} .wh-stat-item i{font-size:12px;font-style:normal;color:var(--wh-text3)}
 #${PANEL_ID} .wh-stat-sep{color:var(--wh-line);font-size:12px;margin:0 2px}
-#${PANEL_ID} .wh-filters{display:flex;gap:9px;align-items:center;position:relative;z-index:61;pointer-events:auto}
-#${PANEL_ID} .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
-  background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
-#${PANEL_ID} .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
-#${PANEL_ID} .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
-#${PANEL_ID} .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 8px;
+
+/* 右上角操作按钮栏（独立层，直接挂载在 #fntv-wh 下、z-index 最高，杜绝被内容/浮层盖住导致点不动）
+   含：全部/电影/剧集/动漫 筛选 + 立即同步 + 关闭 ✕，共 6 个按钮，全部原生 <button> 直接绑定 click */
+#${PANEL_ID} .wh-topbtns{position:absolute;top:22px;right:28px;z-index:300;
+  display:flex;align-items:center;gap:9px;pointer-events:auto}
+#${PANEL_ID} .wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
+  background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
+#${PANEL_ID} .wh-topbtns .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
+#${PANEL_ID} .wh-topbtns .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
+#${PANEL_ID} .wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 10px;
   font-size:20px;line-height:1;color:var(--wh-text2);
   display:flex;align-items:center;justify-content:center;
-  user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s}
-#${PANEL_ID} .wh-close:hover{color:var(--wh-text)}
-/* 立即同步按钮（原"已看完"筛选位）：强调蓝，点击即重拉飞牛数据 */
-#${PANEL_ID} .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
-  background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s}
-#${PANEL_ID} .wh-sync:hover{background:var(--wh-accent);color:#fff}
+  user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s;background:none;border:none;font-family:inherit}
+#${PANEL_ID} .wh-topbtns .wh-close:hover{color:var(--wh-text)}
+#${PANEL_ID} .wh-topbtns .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
+  background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s;font-family:inherit}
+#${PANEL_ID} .wh-topbtns .wh-sync:hover{background:var(--wh-accent);color:#fff}
+#${PANEL_ID} .wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
+/* 详情为模态浮层：打开(wh-detail-open)时隐藏右上角操作栏，避免浮在详情页最上层遮挡内容 */
+#${PANEL_ID}.wh-detail-open .wh-topbtns{opacity:0;visibility:hidden;pointer-events:none}
 /* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
 #${PANEL_ID} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
   overflow:hidden;background:var(--wh-card-bg)}
@@ -415,7 +419,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-sess .pos{color:var(--wh-text)}
 #${PANEL_ID} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
   background:var(--wh-tip);border:1px solid var(--wh-line);padding:12px 22px;border-radius:14px;font-size:14px;
-  opacity:0;transition:.25s;z-index:80}
+  opacity:0;transition:.25s;z-index:80;pointer-events:none}
 #${PANEL_ID} .wh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #${PANEL_ID} .wh-sample{font-size:11px;color:var(--wh-text3);margin-top:8px}
 `;
@@ -430,7 +434,7 @@ function buildPanel(): void {
     const root = document.createElement('div');
     root.id = PANEL_ID;
     root.innerHTML = `
-      <!-- 顶部栏：独立于 wh-main（始终在最上层）；打开详情(wh-detail-open)时隐藏，避免浮在详情页上遮挡 -->
+      <!-- 顶部栏：仅左半标题区；打开详情(wh-detail-open)时隐藏，避免浮在详情页上遮挡 -->
       <div class="wh-topbar">
         <div class="wh-tb-left">
           <div class="wh-title-row">
@@ -439,14 +443,16 @@ function buildPanel(): void {
           </div>
           <div class="wh-subtitle" id="wh-sub"></div>
         </div>
-        <div class="wh-filters">
-          <div class="wh-pill active" data-f="全部">全部</div>
-          <div class="wh-pill" data-f="电影">电影</div>
-          <div class="wh-pill" data-f="剧集">剧集</div>
-          <div class="wh-pill" data-f="动漫">动漫</div>
-          <div class="wh-sync" id="wh-sync" title="立即从飞牛影视拉取最新观看数据">立即同步</div>
-          <div class="wh-close" id="wh-close" title="关闭（Esc）">✕</div>
-        </div>
+      </div>
+
+      <!-- 右上角操作栏：6 个按钮（筛选×4 + 立即同步 + 关闭 ✕），独立层 z-index 最高，原生 button 直接绑定 click -->
+      <div class="wh-topbtns" id="wh-topbtns">
+        <button class="wh-pill active" data-f="全部" type="button">全部</button>
+        <button class="wh-pill" data-f="电影" type="button">电影</button>
+        <button class="wh-pill" data-f="剧集" type="button">剧集</button>
+        <button class="wh-pill" data-f="动漫" type="button">动漫</button>
+        <button class="wh-sync" id="wh-sync" type="button" title="立即从飞牛影视拉取最新观看数据">立即同步</button>
+        <button class="wh-close" id="wh-close" type="button" title="关闭（Esc）">✕</button>
       </div>
 
       <div class="wh-main">
@@ -545,8 +551,9 @@ function buildPanel(): void {
     `;
     document.body.appendChild(root);
     panelBuilt = true;
-    // 筛选 / 同步 / 关闭的点击统一委托在 document.body（见 bindGlobalPanelClicks，由 handle() 在插件加载时只绑一次），
-    // 不在此处绑定——避免绑到可能被 fnOS / Glass UI 重建的 .wh-filters 节点导致监听丢失（电影/剧集/动漫"点不动"）。
+    // 右上角 6 个按钮（筛选×4 + 立即同步 + 关闭）采用原生 <button> + buildPanel 内【直接绑定 click】，
+    // 不再依赖全局 document 委托（委托在 fnOS 捕获拦截 / 面板 DOM 重建时易整体失效，导致"全部点没反应"）。
+    // 详见下方「右上角按钮直接绑定」段落。空白背景点击关闭仍由 bindGlobalPanelClicks 统一处理。
 
     // ── 玻璃豁免：整面板所有元素打 data-fntv-glass-exclude（与设置面板/顶栏同款排除机制）。
     //    Glass UI 规则 ② 命中 [class*="card"]（含 .wh-card / .wh-chart-card）并加亚克力，
@@ -563,8 +570,7 @@ function buildPanel(): void {
     root.style.setProperty('backdrop-filter', 'none', 'important');
     root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
-    // ── 关闭：详情浮层背景点击关闭 + Esc（三路关闭；✕关闭/立即同步/分类筛选/空白背景关闭统一在
-    //    bindGlobalPanelClicks 的 document.body 委托里处理，避免绑定到失效节点导致"点不动"）──
+    // ── 关闭：详情浮层背景点击关闭 + Esc（三路关闭；空白背景关闭在 bindGlobalPanelClicks 委托里处理）──
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
         detailOverlay.addEventListener('click', (e: MouseEvent) => {
@@ -572,10 +578,24 @@ function buildPanel(): void {
         });
     }
 
-    // ✕ 关闭：直接绑在按钮上（独立于 document 捕获委托，双重保险，确保顶栏关闭按钮 100% 可点）。
-    //   buildPanel 仅执行一次且 #wh-close 为静态元素（不会被 innerHTML 重建），此监听不会丢失。
-    const closeBtn = root.querySelector('#wh-close') as HTMLElement | null;
-    if (closeBtn) closeBtn.addEventListener('click', (e: MouseEvent) => { e.preventDefault(); closePanel(); });
+    // ── 右上角按钮直接绑定（原生 <button>，buildPanel 仅执行一次，节点静态不重建，监听永不丢失）──
+    //   彻底抛弃全局 document 委托，专治"全部点没反应"。每个按钮各自独立处理，互不干扰。
+    const topBtns = root.querySelectorAll('.wh-topbtns button');
+    topBtns.forEach((b) => {
+        const el = b as HTMLButtonElement;
+        el.addEventListener('click', (e: MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (el.id === 'wh-close') { closePanel(); return; }
+            if (el.id === 'wh-sync') { syncFnos(); return; }
+            if (el.classList.contains('wh-pill')) {
+                root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
+                el.classList.add('active');
+                curFilter = el.dataset.f || '全部';
+                renderWall();
+            }
+        });
+    });
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
@@ -658,12 +678,12 @@ function filteredData(): ShowItem[] {
     return curData.filter((i) => i.type === curFilter);
 }
 
-/** 全局点击委托（只绑一次，capture 阶段挂 document，永不被面板内部 DOM 重建影响）。
- *  统一处理：✕关闭 / 立即同步 / 分类筛选 / 点击空白背景关闭。
- *  用 e.target.closest() 判定——无论面板内部节点如何被 fnOS SPA / Glass UI 异步重建，
- *  点击都会在捕获阶段先被这里处理，彻底根治「电影/剧集/动漫点不动 / 点多次才反应一次」。
- *  capture 阶段先于页面任何冒泡/捕获监听执行，即使 fnOS 页面自身有 stopPropagation 拦截也不受影响；
- *  范围保护（closest(#fntv-wh)）确保面板外点击不干扰页面交互。 */
+/** 全局点击委托（只绑一次，capture 阶段挂 document）。
+ *  现仅负责「点击面板空白背景关闭」这一条。
+ *  右上角 6 个按钮（筛选×4 / 立即同步 / 关闭）已改为原生 <button> + buildPanel 内【直接绑定 click】
+ *  （见 buildPanel 的「右上角按钮直接绑定」段落），不再依赖此委托——
+ *  彻底根治此前委托被 fnOS 捕获拦截 / 面板 DOM 重建导致的「全部点没反应」。
+ *  范围保护（closest(#fntv-wh)）确保面板外点击不干扰 fnOS 页面自身交互。 */
 let _globalClickBound = false;
 function bindGlobalPanelClicks(): void {
     if (_globalClickBound) return;
@@ -675,21 +695,11 @@ function bindGlobalPanelClicks(): void {
         if (!tgt.closest('#' + PANEL_ID)) return;
         const root = $(PANEL_ID) as HTMLElement | null;
         if (!root) return;
-        // ✕ 关闭按钮
-        if (tgt.closest('#wh-close')) { closePanel(); return; }
-        // 立即同步：立刻重拉飞牛观看数据（含 TMDB 标签）
-        if (tgt.closest('#wh-sync')) { syncFnos(); return; }
-        // 分类筛选：全部 / 电影 / 剧集 / 动漫
-        const pill = tgt.closest('.wh-pill') as HTMLElement | null;
-        if (pill) {
-            root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
-            pill.classList.add('active');
-            curFilter = (pill as HTMLElement).dataset.f || '全部';
-            renderWall();
-            return;
+        // 点击面板主内容区空白背景（非交互元素、非右上角按钮栏）关闭面板
+        if (tgt === root || tgt.classList.contains('wh-main') || tgt.classList.contains('wh-topbar')) {
+            if (tgt.closest('.wh-topbtns')) return; // 按钮栏内（含按钮/间隙）不触发关闭
+            closePanel();
         }
-        // 点击面板主内容区空白背景（非交互元素）也可关闭
-        if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
     }, true);
 }
 
@@ -1234,25 +1244,31 @@ function lastPlayedTs(it: ShowItem): number {
 }
 
 async function syncFnos(): Promise<void> {
-    toast('正在从飞牛影视同步最新观看数据…');
-    showSkeleton(); // 重拉前先铺骨架占位，避免卡片瞬间清空/空白
-    const result = await loadWatchData(true); // 立即同步：绕过 10 分钟缓存，即时拉取最新观看数据
-    if (result.from === 'real') {
-        renderWall();
-        renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
-        updatePillCounts(); // 刷新筛选按钮上的真实分类计数
-        const sub = $('wh-sub');
-        const total = result.libraryTotal || curData.length; // 库内真实作品总数（用户要求）
-        const done = curData.filter(i => i.prog >= 1).length;
-        const partial = curData.length - done;
-        const activeDaysEl = $('wh-stat-days');
-        const activeDays = activeDaysEl ? parseInt(activeDaysEl.textContent || '0', 10) : 0;
-        const monthCountEl = $('wh-stat-month');
-        const monthCount = monthCountEl ? parseInt(monthCountEl.textContent || '0', 10) : 0;
-        if (sub) sub.innerHTML = buildSubtitleHTML(total, done, partial, activeDays, monthCount, false);
-        toast(`已同步 ${result.count} 部观看记录（含部分看）`);
-    } else {
-        toast('同步失败：未能获取飞牛数据（可能未登录或网络问题）');
+    const sb = $('wh-sync') as HTMLElement | null;
+    if (sb) sb.classList.add('busy'); // 加载中禁用，防止重复点击
+    try {
+        toast('正在从飞牛影视同步最新观看数据…');
+        showSkeleton(); // 重拉前先铺骨架占位，避免卡片瞬间清空/空白
+        const result = await loadWatchData(true); // 立即同步：绕过 10 分钟缓存，即时拉取最新观看数据
+        if (result.from === 'real') {
+            renderWall();
+            renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
+            updatePillCounts(); // 刷新筛选按钮上的真实分类计数
+            const sub = $('wh-sub');
+            const total = result.libraryTotal || curData.length; // 库内真实作品总数（用户要求）
+            const done = curData.filter(i => i.prog >= 1).length;
+            const partial = curData.length - done;
+            const activeDaysEl = $('wh-stat-days');
+            const activeDays = activeDaysEl ? parseInt(activeDaysEl.textContent || '0', 10) : 0;
+            const monthCountEl = $('wh-stat-month');
+            const monthCount = monthCountEl ? parseInt(monthCountEl.textContent || '0', 10) : 0;
+            if (sub) sub.innerHTML = buildSubtitleHTML(total, done, partial, activeDays, monthCount, false);
+            toast(`已同步 ${result.count} 部观看记录（含部分看）`);
+        } else {
+            toast('同步失败：未能获取飞牛数据（可能未登录或网络问题）');
+        }
+    } finally {
+        if (sb) sb.classList.remove('busy');
     }
 }
 
@@ -1293,8 +1309,8 @@ function openPanel(): void {
         root.classList.toggle('light', light);
         paintBg(root);
         root.classList.add('show');
-        // 筛选/同步/关闭点击委托已在 handle() 加载时统一绑到 document.body（bindGlobalPanelClicks），
-        // 此处无需再绑——彻底免疫面板内部 DOM 重建导致的监听丢失。
+        // 右上角 6 个按钮在 buildPanel 内已直接绑定 click（原生 <button>），
+        // 此处无需再绑；空白背景关闭由 bindGlobalPanelClicks 的 document 委托统一处理。
         // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
         cancelAnimationFrame(_paintRAF);
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
