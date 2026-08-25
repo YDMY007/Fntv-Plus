@@ -274,7 +274,7 @@ async function searchDoubanByTitle(query: string, wantType: 'movie' | 'tv', year
     };
     // 1) 自动补全接口（JSON）
     try {
-        const r1 = await axios.get(`https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(query)}`, { headers, timeout: 12000 });
+        const r1 = await doubanGate(() => axios.get(`https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(query)}`, { headers, timeout: 12000 }));
         const picked = pickBestSubject(Array.isArray(r1.data) ? r1.data : [], query, wantType, year);
         if (picked) return picked;
     } catch (e: any) {
@@ -282,10 +282,10 @@ async function searchDoubanByTitle(query: string, wantType: 'movie' | 'tv', year
     }
     // 2) 兜底：搜索页 HTML，正则提取 subject 链接里的数字 id
     try {
-        const r2 = await axios.get(`https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}`, {
+        const r2 = await doubanGate(() => axios.get(`https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}`, {
             headers: { ...headers, 'X-Requested-With': undefined },
             timeout: 12000,
-        });
+        }));
         const html = typeof r2.data === 'string' ? r2.data : '';
         const m = html.match(/movie\.douban\.com\/subject\/(\d+)/);
         if (m && m[1]) {
@@ -415,7 +415,7 @@ let _cachedCk = '';
  */
 async function fetchCkForMarking(subjectId: string, cookie: string): Promise<string> {
     try {
-        const r = await axios.get(`https://movie.douban.com/subject/${subjectId}/`, {
+        const r = await doubanGate(() => axios.get(`https://movie.douban.com/subject/${subjectId}/`, {
             headers: {
                 Cookie: cookie,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
@@ -423,7 +423,7 @@ async function fetchCkForMarking(subjectId: string, cookie: string): Promise<str
             },
             timeout: 12000,
             maxRedirects: 5,
-        });
+        }));
         // 1) 响应头 Set-Cookie 里的 ck（已登录用户访问 movie 页服务端会下发）
         const sc = r.headers && r.headers['set-cookie'];
         if (Array.isArray(sc)) {
@@ -702,6 +702,49 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
 }
 
 /**
+ * 豆瓣全局限速闸门：所有对 movie.douban.com / search.douban.com 的出站请求都经此串行化，
+ * 最小间隔 + 429 指数退避重试，从根上避免「首次同步集中打几十个 subject 页」触发风控(429)。
+ *   - 用一条 Promise 链把所有请求串行排队（天然错峰，不会并发叠加打豆瓣）；
+ *   - 两次请求强制间隔 DOUBAN_MIN_GAP_MS，远低于豆瓣网页接口的限流阈值；
+ *   - 遇 HTTP 429 按 1s→2s→4s（封顶 8s）指数退避重试，耗尽后才上抛交由调用方降级。
+ * 这样「立即同步」首次虽稍慢（每个 douban_id 当天只真抓一次，之后命中 dailyCache 秒回），
+ * 但绝不会再因并发 429 导致整批评分拿不到。
+ */
+let _doubanGateChain: Promise<void> = Promise.resolve();
+let _doubanLastReqTs = 0;
+const DOUBAN_MIN_GAP_MS = 800;   // 两次豆瓣请求最小间隔
+const DOUBAN_MAX_RETRY = 3;      // 429 最大重试次数
+
+async function doubanGate<T>(fn: () => Promise<T>): Promise<T> {
+    const run = _doubanGateChain.then(async () => {
+        const wait = DOUBAN_MIN_GAP_MS - (Date.now() - _doubanLastReqTs);
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        let lastErr: any = null;
+        for (let attempt = 0; attempt <= DOUBAN_MAX_RETRY; attempt++) {
+            try {
+                _doubanLastReqTs = Date.now();
+                return await fn();
+            } catch (e: any) {
+                lastErr = e;
+                const status = e && e.response && e.response.status;
+                if (status === 429) {
+                    const backoff = Math.min(8000, 1000 * Math.pow(2, attempt)) + Math.floor(Math.random() * 400);
+                    log.warn('[豆瓣] 触发限流 429，退避 ' + backoff + 'ms 后重试 (' + (attempt + 1) + '/' + (DOUBAN_MAX_RETRY + 1) + ')');
+                    await new Promise((r) => setTimeout(r, backoff));
+                    _doubanLastReqTs = Date.now(); // 退避结束后重置间隔基线
+                    continue;
+                }
+                throw e; // 非 429（网络/解析等）直接上抛，交由调用方降级
+            }
+        }
+        throw lastErr;
+    });
+    // 不把错误传播到链上，避免一个失败阻塞后续排队请求
+    _doubanGateChain = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+/**
  * 取豆瓣评分（0~10）+ 参评人数。飞牛影视本身不提供豆瓣评分，故此函数现取：
  *  1) 解析豆瓣条目 id：优先用飞牛已刮削的 it.douban_id；否则复用 getDoubanId（标题搜豆瓣，公开搜索页无需登录）；
  *  2) 拉条目页 HTML（公开，无需 cookie）抠 rating_num（评分）与 property="v:votes"（参评人数）；
@@ -723,13 +766,13 @@ async function fetchDoubanRating(it: any, fnapi: any): Promise<{ rating: number;
     try {
         const r = await getDailyCached(cacheKey, async () => {
             const url = `https://movie.douban.com/subject/${doubanId}/`;
-            const resp = await axios.get(url, {
+            const resp = await doubanGate(() => axios.get(url, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
                     'Referer': 'https://movie.douban.com/',
                 },
                 timeout: 12000,
-            });
+            }));
             const html = typeof resp.data === 'string' ? resp.data : '';
             let rating = 0, votes = 0;
             // 1) 优先解析条目页内嵌的 JSON-LD（aggregateRating，结构最稳）
