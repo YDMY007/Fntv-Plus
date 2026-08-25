@@ -252,7 +252,7 @@ const WH_CSS = `
   background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s}
 #${PANEL_ID} .wh-sync:hover{background:var(--wh-accent);color:#fff}
 /* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
-#${PANEL_ID} .wh-skel{position:relative;flex:none;width:180px;height:270px;border-radius:var(--wh-radius);
+#${PANEL_ID} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
   overflow:hidden;background:var(--wh-card-bg)}
 #${PANEL_ID} .wh-skel::after{content:'';position:absolute;inset:0;
   background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.08) 50%,transparent 100%);
@@ -287,8 +287,11 @@ const WH_CSS = `
 #${PANEL_ID} .wh-chart-tip.show{opacity:1}
 #${PANEL_ID} .wh-chart-tip b{color:var(--wh-accent)}
 
-#${PANEL_ID} .wh-row{display:flex;gap:20px;overflow-x:auto;padding:14px 4px 24px;scrollbar-width:none}
-#${PANEL_ID} .wh-row::-webkit-scrollbar{display:none}
+/* 影视清单：已看完 / 在观看 双栏等宽拆分（各占一半空间）。
+   每列内部由"横向滚动条"改为自适应换行网格：海报随列宽等比缩放、多行自动换行，
+   整个面板只走纵向滚动（单一滚动轴，规避嵌套横向滚动的体验问题）。 */
+#${PANEL_ID} .wh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:16px 14px;padding:4px 4px 10px;align-content:start}
 /* 影视清单：已看完 / 在观看 双栏等宽拆分（各占一半空间） */
 #${PANEL_ID} .wh-split{display:flex;gap:26px}
 #${PANEL_ID} .wh-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
@@ -298,13 +301,14 @@ const WH_CSS = `
 #${PANEL_ID} .wh-col.done .wh-col-title::before{background:#34c759}
 #${PANEL_ID} .wh-col.watching .wh-col-title::before{background:#ff9f0a}
 #${PANEL_ID} .wh-col-count{font-size:12px;color:var(--wh-text3);background:var(--wh-surface);border:1px solid var(--wh-line);padding:2px 10px;border-radius:11px}
-#${PANEL_ID} .wh-col-empty{min-height:270px;flex:1;display:flex;align-items:center;justify-content:center;
+#${PANEL_ID} .wh-col-empty{grid-column:1/-1;min-height:200px;flex:1;display:flex;align-items:center;justify-content:center;
   color:var(--wh-text3);font-size:13px;text-align:center;background:var(--wh-surface);
   border:1px dashed var(--wh-line);border-radius:14px;margin:4px}
 @media (max-width:900px){#${PANEL_ID} .wh-split{flex-direction:column}}
 #${PANEL_ID} .wh-card{position:relative;flex:none;border-radius:var(--wh-radius);overflow:hidden;cursor:pointer;
   background:var(--wh-card-bg);transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;outline:none}
-#${PANEL_ID} .wh-card.poster{width:180px;height:270px}
+#${PANEL_ID} .wh-card.poster{width:100%;aspect-ratio:2/3;height:auto}
+#${PANEL_ID} .wh-card:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(0,0,0,.55)}
 #${PANEL_ID} .wh-card .art{position:absolute;inset:0}
 #${PANEL_ID} .wh-card .scrim{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.85) 6%,rgba(0,0,0,0) 50%)}
 #${PANEL_ID} .wh-card .meta{position:absolute;left:13px;right:13px;bottom:11px}
@@ -439,14 +443,14 @@ function buildPanel(): void {
                 <span class="wh-col-title">已看完</span>
                 <span class="wh-col-count" id="wh-done-count">0</span>
               </div>
-              <div class="wh-row" id="wh-row-done"></div>
+              <div class="wh-grid" id="wh-row-done"></div>
             </div>
             <div class="wh-col watching">
               <div class="wh-col-head">
                 <span class="wh-col-title">在观看</span>
                 <span class="wh-col-count" id="wh-partial-count">0</span>
               </div>
-              <div class="wh-row" id="wh-row-partial"></div>
+              <div class="wh-grid" id="wh-row-partial"></div>
             </div>
           </div>
           <div class="wh-sample">* 当前为示例数据；点击「立即同步」可拉取真实已观看记录</div>
