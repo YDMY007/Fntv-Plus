@@ -644,11 +644,11 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
     return { category, genres };
 }
 
-async function getWatchedItems(): Promise<any[]> {
+async function getWatchedItems(): Promise<{ items: any[]; libraryTotal: number }> {
     const fnapi = getFnapiFresh();
     if (!fnapi) {
         log.warn('[豆瓣] 缺少 fnOS 配置（domain/token），无法拉取已观看列表');
-        return [];
+        return { items: [], libraryTotal: 0 };
     }
     try {
         const resp: any = await fnapi.getItemList({
@@ -659,10 +659,12 @@ async function getWatchedItems(): Promise<any[]> {
         });
         if (!resp.success || !resp.data || !Array.isArray(resp.data.list)) {
             log.warn('[豆瓣] 拉取已观看列表失败:', resp && resp.message);
-            return [];
+            return { items: [], libraryTotal: 0 };
         }
         const total = resp.data.total;
         const list: any[] = resp.data.list;
+        // libraryTotal = 库内作品总数（已看+未看），用于前端"X 部作品"展示（用户要求显示库内真实作品数）
+        const libraryTotal = typeof total === 'number' ? total : list.length;
         if (typeof total === 'number' && list.length < total) {
             log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
         }
@@ -690,11 +692,11 @@ async function getWatchedItems(): Promise<any[]> {
                 total_runtime_ms,
             };
         });
-        log.info(`[豆瓣] 已观看列表: 根库 ${list.length} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
-        return items;
+        log.info(`[豆瓣] 已观看列表: 库内共 ${libraryTotal} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
+        return { items, libraryTotal };
     } catch (e: any) {
         log.warn('[豆瓣] getWatchedItems 异常:', e && e.message);
-        return [];
+        return { items: [], libraryTotal: 0 };
     }
 }
 

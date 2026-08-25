@@ -18,11 +18,13 @@ export async function scanWatchedShows(): Promise<any[]> {
     if (_scanning) return [];
     _scanning = true;
     try {
-        const items = await ipcRenderer.invoke('douban:get-watched-items').catch((e: any) => {
+        const resp = await ipcRenderer.invoke('douban:get-watched-items').catch((e: any) => {
             logger.warn('[watchedSync] 拉取已观看列表失败:', String((e && e.message) || e));
             return [];
         });
-        return Array.isArray(items) ? items : [];
+        // 兼容两种返回形态：旧版直接返回数组；新版返回 { items, libraryTotal }
+        const items = Array.isArray(resp) ? resp : (resp && Array.isArray(resp.items) ? resp.items : []);
+        return items;
     } finally {
         _scanning = false;
     }

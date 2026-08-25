@@ -602,6 +602,21 @@ function showSkeleton(n: number = 8): void {
     row.innerHTML = h;
 }
 
+/** 真实分类计数：把 全部/电影/剧集/动漫 各 pill 文案改写为「名称 (数量)」，
+ *  让筛选按钮"做成真实的"——既点得动、也能一眼看出每类到底有几部（0 部时点击后墙为空也说得通）。 */
+function updatePillCounts(): void {
+    const root = $(PANEL_ID) as HTMLElement | null;
+    if (!root) return;
+    const counts: Record<string, number> = { '全部': curData.length, '电影': 0, '剧集': 0, '动漫': 0 };
+    for (const it of curData) {
+        if (it.type === '电影' || it.type === '剧集' || it.type === '动漫') counts[it.type]++;
+    }
+    root.querySelectorAll('.wh-pill').forEach((p) => {
+        const f = (p as HTMLElement).dataset.f || '';
+        if (counts[f] !== undefined) p.textContent = `${f} (${counts[f]})`;
+    });
+}
+
 function renderChart(): void {
     const barsEl = $('wh-chart-bars');
     const axisEl = $('wh-chart-axis');
@@ -806,12 +821,15 @@ function mapType(t: string | number | undefined): string {
  *   过滤 watched===1 → 返回 [{guid,title,type,thumbnail_url,overview,year,genres,cast,
  *          douban_id,douban_rating,watched,progress,last_played}, ...]
  */
-async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample' }> {
+async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'; libraryTotal: number }> {
     try {
-        const items = await ipcRenderer.invoke('douban:get-watched-items').catch(() => null);
-        if (!Array.isArray(items) || items.length === 0) {
+        const resp = await ipcRenderer.invoke('douban:get-watched-items').catch(() => null);
+        // 兼容两种返回形态：旧版直接返回数组；新版返回 { items, libraryTotal }
+        const items = (resp && Array.isArray(resp.items)) ? resp.items : (Array.isArray(resp) ? resp : null);
+        const libraryTotal = (resp && typeof resp.libraryTotal === 'number') ? resp.libraryTotal : 0;
+        if (!items || items.length === 0) {
             log.info(LOG, '飞牛返回空/失败，保留示例数据');
-            return { count: 0, from: 'sample' };
+            return { count: 0, from: 'sample', libraryTotal: 0 };
         }
         const mapped: ShowItem[] = items.map((it: any, i: number) => {
             // 真实"最近播放"时间戳（ms）：兼容 ISO 字符串与秒级/毫秒级数字
@@ -871,10 +889,10 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
         }
         curData = mapped;
         log.info(LOG, `已加载 ${mapped.length} 条飞牛真实观看记录`);
-        return { count: mapped.length, from: 'real' };
+        return { count: mapped.length, from: 'real', libraryTotal };
     } catch (e: any) {
         log.warn(LOG, 'loadWatchData 失败:', e && e.message);
-        return { count: 0, from: 'sample' };
+        return { count: 0, from: 'sample', libraryTotal: 0 };
     }
 }
 
@@ -944,8 +962,11 @@ async function syncFnos(): Promise<void> {
     if (result.from === 'real') {
         renderWall();
         renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
+        updatePillCounts(); // 刷新筛选按钮上的真实分类计数
         const sub = $('wh-sub');
-        if (sub) sub.textContent = `${curData.length} 部作品 · 来自飞牛影视 · 已看完 ${curData.filter(i => i.prog >= 1).length} 部`;
+        const total = result.libraryTotal || curData.length; // 库内真实作品数（用户要求）
+        const done = curData.filter(i => i.prog >= 1).length;
+        if (sub) sub.textContent = `${total} 部作品 · 来自飞牛影视 · 已看完 ${done} 部`;
         toast(`已同步 ${result.count} 部真实观看记录`);
     } else {
         toast('同步失败：未能获取飞牛数据（可能未登录或网络问题）');
@@ -1001,9 +1022,12 @@ function openPanel(): void {
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
             // 数据刷新后再次兜底重涂底色（renderWall 重写 innerHTML 可能触发重排）
             requestAnimationFrame(() => paintBg(root));
+            updatePillCounts(); // 刷新筛选按钮上的真实分类计数
             const sub = $('wh-sub');
             const done = curData.filter((i) => i.prog >= 1).length;
-            if (sub) sub.textContent = `${curData.length} 部作品`
+            // 顶部"X 部作品"用库内真实总数（libraryTotal）；示例数据回落到 curData.length
+            const total = result.from === 'real' ? (result.libraryTotal || curData.length) : curData.length;
+            if (sub) sub.textContent = `${total} 部作品`
                 + (result.from === 'real' ? ' · 来自飞牛影视' : '（示例数据）')
                 + ` · 已看完 ${done} 部`;
             // 隐藏/更新示例提示
