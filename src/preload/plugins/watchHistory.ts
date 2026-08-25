@@ -233,7 +233,9 @@ const WH_CSS = `
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
   padding:26px 40px 8px;position:sticky;top:0;z-index:70;pointer-events:auto;
-  background:inherit}
+  background:inherit;transition:opacity .12s}
+/* 详情为模态浮层：打开(wh-detail-open)时隐藏顶栏，避免「全部/立即同步」浮在详情页最上层遮挡内容 */
+#${PANEL_ID}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
 #${PANEL_ID} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
   background:linear-gradient(135deg,var(--wh-accent),#7b5bff);flex-shrink:0}
@@ -396,7 +398,7 @@ function buildPanel(): void {
     const root = document.createElement('div');
     root.id = PANEL_ID;
     root.innerHTML = `
-      <!-- 顶部栏：独立于 wh-main，z-index 高于 detail-overlay(z:50)，打开详情时仍可见可操作 -->
+      <!-- 顶部栏：独立于 wh-main（始终在最上层）；打开详情(wh-detail-open)时隐藏，避免浮在详情页上遮挡 -->
       <div class="wh-topbar">
         <div>
           <div class="wh-title">Fntv-Plus · 观影记录</div>
@@ -536,7 +538,7 @@ function buildPanel(): void {
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
         detailOverlay.addEventListener('click', (e: MouseEvent) => {
-            if ((e.target as HTMLElement).id === 'wh-detail') detailOverlay.classList.remove('show');
+            if ((e.target as HTMLElement).id === 'wh-detail') closeDetail();
         });
     }
 
@@ -561,7 +563,7 @@ function buildPanel(): void {
     document.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return;
         const detail = $('wh-detail');
-        if (detail && detail.classList.contains('show')) { detail.classList.remove('show'); return; }
+        if (detail && detail.classList.contains('show')) { closeDetail(); return; }
         if ($(PANEL_ID) && ($(PANEL_ID) as HTMLElement).classList.contains('show')) closePanel();
     });
 }
@@ -602,19 +604,23 @@ function filteredData(): ShowItem[] {
     return curData.filter((i) => i.type === curFilter);
 }
 
-/** 全局点击委托（只绑一次，挂在 document.body 上，永不被面板内部 DOM 重建影响）。
+/** 全局点击委托（只绑一次，capture 阶段挂 document，永不被面板内部 DOM 重建影响）。
  *  统一处理：✕关闭 / 立即同步 / 分类筛选 / 点击空白背景关闭。
  *  用 e.target.closest() 判定——无论面板内部节点如何被 fnOS SPA / Glass UI 异步重建，
- *  点击都会冒泡到 body 被这里捕获，彻底根治「电影/剧集/动漫点不动 / 点多次才反应一次」。 */
+ *  点击都会在捕获阶段先被这里处理，彻底根治「电影/剧集/动漫点不动 / 点多次才反应一次」。
+ *  capture 阶段先于页面任何冒泡/捕获监听执行，即使 fnOS 页面自身有 stopPropagation 拦截也不受影响；
+ *  范围保护（closest(#fntv-wh)）确保面板外点击不干扰页面交互。 */
 let _globalClickBound = false;
 function bindGlobalPanelClicks(): void {
     if (_globalClickBound) return;
     _globalClickBound = true;
-    document.body.addEventListener('click', (e: MouseEvent) => {
+    document.addEventListener('click', (e: MouseEvent) => {
         const tgt = e.target as HTMLElement | null;
         if (!tgt) return;
+        // 范围保护：仅处理面板内的点击（面板外点击全部忽略，不影响 fnOS 页面自身交互）
+        if (!tgt.closest('#' + PANEL_ID)) return;
         const root = $(PANEL_ID) as HTMLElement | null;
-        if (!root) return; // 面板未注入则不处理
+        if (!root) return;
         // ✕ 关闭按钮
         if (tgt.closest('#wh-close')) { closePanel(); return; }
         // 立即同步：立刻重拉飞牛观看数据（含 TMDB 标签）
@@ -630,7 +636,7 @@ function bindGlobalPanelClicks(): void {
         }
         // 点击面板主内容区空白背景（非交互元素）也可关闭
         if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
-    });
+    }, true);
 }
 
 // mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
@@ -818,6 +824,17 @@ function openDetail(idx: number): void {
         }
     }
     ($('wh-detail') as HTMLElement).classList.add('show');
+    // 详情为模态浮层：隐藏顶栏（全部/电影/剧集/动漫/立即同步/✕），避免其浮在详情页最上层遮挡内容
+    const pr = $(PANEL_ID) as HTMLElement | null;
+    if (pr) pr.classList.add('wh-detail-open');
+}
+
+/** 关闭详情浮层：移除 .show 并清除 wh-detail-open（恢复顶栏显示）。所有关闭路径统一走这里。 */
+function closeDetail(): void {
+    const detail = $('wh-detail');
+    if (detail) detail.classList.remove('show');
+    const pr = $(PANEL_ID) as HTMLElement | null;
+    if (pr) pr.classList.remove('wh-detail-open');
 }
 
 /** 预设渐变色盘（按名称 hash 稳定取色，避免每次随机） */
@@ -1157,6 +1174,7 @@ function closePanel(): void {
     // 顺便清掉详情浮层（若曾点开详情再点 ✕ 关闭，否则下次重开详情浮层会残留 .show 变成「难展开」）
     const detail = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detail) detail.classList.remove('show');
+    root.classList.remove('wh-detail-open');
     // 复位可能的卡片选中态
     root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
     // 关闭后是否"回影视首页"：仅当用户当前处于【影视 App】(isFntvTvPage: /v 及其子页) 内才回首页；
