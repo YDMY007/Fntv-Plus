@@ -503,6 +503,10 @@ function buildPanel(): void {
     `;
     document.body.appendChild(root);
     panelBuilt = true;
+    // 筛选 + 立即同步监听：建面板那一刻就绑到「当前存活」的 .wh-filters 节点（函数声明提升，可在此调用）。
+    // 与 openPanel 末尾的 bindFilters 调用共用同一 _onFiltersClick 引用 → 幂等，整生命周期「恰好一个」监听。
+    // 这样即便 openPanel 后续逻辑因故未跑到 bindFilters，筛选监听也已就位，杜绝电影/剧集/动漫「点不动」。
+    bindFilters(root);
 
     // ── 玻璃豁免：整面板所有元素打 data-fntv-glass-exclude（与设置面板/顶栏同款排除机制）。
     //    Glass UI 规则 ② 命中 [class*="card"]（含 .wh-card / .wh-chart-card）并加亚克力，
@@ -535,9 +539,10 @@ function buildPanel(): void {
         if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
     });
 
-    // 筛选 + 立即同步的事件委托改由 openPanel 调 bindFilters() 在「每次打开面板」时重新绑定
-    // （见 bindFilters）。原因：fnOS 是 SPA，路由切换可能重建 .wh-filters 节点，若只在 buildPanel
-    // 绑一次，旧监听会绑到失效节点 → 电影/剧集/动漫"点不动"。改为每次打开自愈式重绑，杜绝该问题。
+    // 筛选 + 立即同步监听：建面板时(buildPanel)与每次打开面板时(openPanel)各调一次 bindFilters()
+    // （见 bindFilters）。bindFilters 内部先 removeEventListener 再 addEventListener（同一 _onFiltersClick
+    // 引用 → 幂等），无论调几次整生命周期都「恰好一个」监听，且始终绑在当前存活的 .wh-filters 节点——
+    // 彻底免疫 fnOS 路由切换导致的 DOM 重建/旧节点监听失效（即反复出现的电影/剧集/动漫"点不动"根因）。
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
