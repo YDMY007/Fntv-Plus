@@ -289,6 +289,19 @@ const WH_CSS = `
 
 #${PANEL_ID} .wh-row{display:flex;gap:20px;overflow-x:auto;padding:14px 4px 24px;scrollbar-width:none}
 #${PANEL_ID} .wh-row::-webkit-scrollbar{display:none}
+/* 影视清单：已看完 / 在观看 双栏等宽拆分（各占一半空间） */
+#${PANEL_ID} .wh-split{display:flex;gap:26px}
+#${PANEL_ID} .wh-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+#${PANEL_ID} .wh-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-left:4px}
+#${PANEL_ID} .wh-col-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+#${PANEL_ID} .wh-col-title::before{content:'';width:8px;height:8px;border-radius:3px;flex:none}
+#${PANEL_ID} .wh-col.done .wh-col-title::before{background:#34c759}
+#${PANEL_ID} .wh-col.watching .wh-col-title::before{background:#ff9f0a}
+#${PANEL_ID} .wh-col-count{font-size:12px;color:var(--wh-text3);background:var(--wh-surface);border:1px solid var(--wh-line);padding:2px 10px;border-radius:11px}
+#${PANEL_ID} .wh-col-empty{min-height:270px;flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--wh-text3);font-size:13px;text-align:center;background:var(--wh-surface);
+  border:1px dashed var(--wh-line);border-radius:14px;margin:4px}
+@media (max-width:900px){#${PANEL_ID} .wh-split{flex-direction:column}}
 #${PANEL_ID} .wh-card{position:relative;flex:none;border-radius:var(--wh-radius);overflow:hidden;cursor:pointer;
   background:var(--wh-card-bg);transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;outline:none}
 #${PANEL_ID} .wh-card.poster{width:180px;height:270px}
@@ -420,7 +433,22 @@ function buildPanel(): void {
             <div class="wh-section-title">影视清单</div>
             <div class="wh-section-hint">点击查看详情并评分</div>
           </div>
-          <div class="wh-row" id="wh-row"></div>
+          <div class="wh-split">
+            <div class="wh-col done">
+              <div class="wh-col-head">
+                <span class="wh-col-title">已看完</span>
+                <span class="wh-col-count" id="wh-done-count">0</span>
+              </div>
+              <div class="wh-row" id="wh-row-done"></div>
+            </div>
+            <div class="wh-col watching">
+              <div class="wh-col-head">
+                <span class="wh-col-title">在观看</span>
+                <span class="wh-col-count" id="wh-partial-count">0</span>
+              </div>
+              <div class="wh-row" id="wh-row-partial"></div>
+            </div>
+          </div>
           <div class="wh-sample">* 当前为示例数据；点击「立即同步」可拉取真实已观看记录</div>
         </section>
       </div>
@@ -563,19 +591,21 @@ function filteredData(): ShowItem[] {
     return curData.filter((i) => i.type === curFilter);
 }
 
-function cardHTML(item: ShowItem, idx: number): string {
+// mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
+function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string {
     const pct = Math.round(item.prog * 100);
     let sub: string;
     if (item.myRating) sub = `${item.type} · 我的评分 ${item.myRating}/5`;
     else if (item.last && item.last !== '未记录时间') sub = `${item.type} · ${item.last}`;
     else if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
     else sub = `${item.type} · 未记录时间`;
-    let badge = '';
-    if (item.prog >= 1) badge = `<div class="badge">已看完</div>`;
-    else if (item.started) badge = `<div class="badge watching">在观看</div>`;
-    const bar = (item.prog >= 1 || item.started)
-        ? badge
-        : `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`;
+    // 状态徽标/进度条：已看完列不放（列头已说明）；在观看列用进度条或"在观看"徽标表达
+    let bar = '';
+    if (mode === 'partial') {
+        bar = item.prog > 0
+            ? `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`
+            : `<div class="badge watching">在观看</div>`;
+    }
     const stars = item.myRating ? `<div class="stars">${starsSVG(item.myRating)}</div>` : '';
     // 有真实海报用缩略图铺满；否则用按名称生成的渐变兜底（与首页轮播图缺图时的兜底同源）
     const artStyle = item.poster
@@ -589,22 +619,38 @@ function cardHTML(item: ShowItem, idx: number): string {
 }
 
 function renderWall(): void {
-    const row = $('wh-row');
-    if (!row) return;
+    const doneRow = $('wh-row-done');
+    const partialRow = $('wh-row-partial');
+    if (!doneRow || !partialRow) return;
     const list = filteredData();
-    row.innerHTML = list.map((i, idx) => cardHTML(i, curData.indexOf(i))).join('');
-    row.querySelectorAll('.wh-card').forEach((c) => {
-        c.addEventListener('click', () => openDetail(parseInt((c as HTMLElement).dataset.idx || '0', 10)));
+    // 按状态拆分：已看完(prog>=1) / 在观看(prog<1，含观看痕迹但未完结)
+    const done = list.filter((i) => i.prog >= 1);
+    const partial = list.filter((i) => i.prog < 1);
+    doneRow.innerHTML = done.length
+        ? done.map((i) => cardHTML(i, curData.indexOf(i), 'done')).join('')
+        : '<div class="wh-col-empty">暂无已看完的作品</div>';
+    partialRow.innerHTML = partial.length
+        ? partial.map((i) => cardHTML(i, curData.indexOf(i), 'partial')).join('')
+        : '<div class="wh-col-empty">暂无在观看的作品</div>';
+    // 列头计数
+    const dc = $('wh-done-count'); if (dc) dc.textContent = String(done.length);
+    const pc = $('wh-partial-count'); if (pc) pc.textContent = String(partial.length);
+    // 卡片点击 → 详情（用 curData 全局索引，与 openDetail 约定一致）
+    [doneRow, partialRow].forEach((row) => {
+        row.querySelectorAll('.wh-card').forEach((c) => {
+            c.addEventListener('click', () => openDetail(parseInt((c as HTMLElement).dataset.idx || '0', 10)));
+        });
     });
 }
 
-/** 数据加载占位：在 #wh-row 填充若干骨架卡片，避免飞牛+TMDB 拉取期间海报墙空白闪烁。 */
+/** 数据加载占位：在双栏 #wh-row-done / #wh-row-partial 各填充若干骨架卡片，避免飞牛+TMDB 拉取期间海报墙空白闪烁。 */
 function showSkeleton(n: number = 8): void {
-    const row = $('wh-row');
-    if (!row) return;
+    const doneRow = $('wh-row-done');
+    const partialRow = $('wh-row-partial');
     let h = '';
     for (let i = 0; i < n; i++) h += '<div class="wh-skel"></div>';
-    row.innerHTML = h;
+    if (doneRow) doneRow.innerHTML = h;
+    if (partialRow) partialRow.innerHTML = h;
 }
 
 /** 真实分类计数：把 全部/电影/剧集/动漫 各 pill 文案改写为「名称 (数量)」，
