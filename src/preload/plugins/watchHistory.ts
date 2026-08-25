@@ -320,15 +320,19 @@ const WH_CSS = `
 
 #${PANEL_ID} .wh-chart-card{background:var(--wh-surface);border:1px solid var(--wh-line);
   border-radius:22px;padding:26px 28px 20px}
-#${PANEL_ID} .wh-chart-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px}
-#${PANEL_ID} .wh-chart-top .ct{font-size:14px;font-weight:600;color:var(--wh-text)}
-#${PANEL_ID} .wh-chart-top .cs{font-size:12px;color:var(--wh-text3);margin-top:2px}
-#${PANEL_ID} .wh-stat{display:flex;gap:30px}
-#${PANEL_ID} .wh-stat b{font-size:22px;font-weight:700}
-#${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2);margin-left:3px}
-#${PANEL_ID} .wh-chart-wrap{position:relative}
+/* 顶部两栏布局：左侧统计面板 / 右侧热力图，各占一半 */
+#${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:stretch}
+#${PANEL_ID} .wh-stats-panel{display:flex;flex-direction:column;justify-content:center;gap:18px;padding:6px 0}
+#${PANEL_ID} .wh-stats-panel .ct{font-size:20px;font-weight:700;color:var(--wh-text);letter-spacing:.2px}
+#${PANEL_ID} .wh-stats-panel .cs{font-size:13px;color:var(--wh-text3);margin-top:2px}
+#${PANEL_ID} .wh-stat{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px}
+#${PANEL_ID} .wh-stat div{background:var(--wh-surface2);border:1px solid var(--wh-line);
+  border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}
+#${PANEL_ID} .wh-stat b{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px}
+#${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2)}
+#${PANEL_ID} .wh-chart-wrap{position:relative;min-width:0;align-self:center}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
-#${PANEL_ID} .wh-heat{margin-top:8px}
+#${PANEL_ID} .wh-heat{margin-top:0}
 #${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
 #${PANEL_ID} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
 #${PANEL_ID} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
@@ -481,21 +485,22 @@ function buildPanel(): void {
       <div class="wh-main">
         <section class="wh-section">
           <div class="wh-chart-card">
-            <div class="wh-chart-top">
-              <div>
+            <!-- 左右各半：左侧=统计面板（趋势标题+库存/活跃度/时长等数字），右侧=观影活跃度热力图 -->
+            <div class="wh-chart-split">
+              <div class="wh-stats-panel">
                 <div class="ct" id="wh-chart-ct"></div>
                 <div class="cs" id="wh-chart-cs"></div>
+                <div class="wh-stat">
+                  <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
+                  <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
+                  <div><b id="wh-stat-total">0</b><span>小时·累计时长</span></div>
+                  <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
+                </div>
               </div>
-              <div class="wh-stat">
-                <div><b id="wh-stat-days">0</b><span>天·近30天</span></div>
-                <div><b id="wh-stat-month">0</b><span>部·本月</span></div>
-                <div><b id="wh-stat-total">0</b><span>小时·累计时长</span></div>
-                <div><b id="wh-stat-rate">0%</b><span>看完率</span></div>
+              <div class="wh-chart-wrap" id="wh-chart-wrap">
+                <div class="wh-heat" id="wh-heat"></div>
+                <div class="wh-chart-tip" id="wh-chart-tip"></div>
               </div>
-            </div>
-            <div class="wh-chart-wrap" id="wh-chart-wrap">
-              <div class="wh-heat" id="wh-heat"></div>
-              <div class="wh-chart-tip" id="wh-chart-tip"></div>
             </div>
           </div>
         </section>
