@@ -207,6 +207,7 @@ function startKeepAlive(): void {
 
 // ───────────────────────── 面板 ─────────────────────────
 let panelBuilt = false;
+let _onFiltersClick: ((e: MouseEvent) => void) | null = null; // 筛选点击处理：每次打开面板重绑前先移除旧监听，杜绝重复绑定
 let curData: ShowItem[] = SAMPLE.slice();
 let curFilter = '全部';
 let curIdx = 0;
@@ -534,22 +535,9 @@ function buildPanel(): void {
         if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
     });
 
-    // 筛选 + 立即同步：统一在 .wh-filters 上做事件委托（与关闭按钮同款修复，
-    //   杜绝 fnOS 路由切换导致面板 DOM 重建后、原 per-pill 监听绑到失效节点、电影/剧集/动漫"点不动"的问题）
-    const filtersEl = root.querySelector('.wh-filters') as HTMLElement | null;
-    if (filtersEl) {
-        filtersEl.addEventListener('click', (e: MouseEvent) => {
-            const tgt = e.target as HTMLElement;
-            // 立即同步按钮：立刻重拉飞牛观看数据（含 TMDB 标签）
-            if (tgt.closest('#wh-sync')) { syncFnos(); return; }
-            const pill = tgt.closest('.wh-pill') as HTMLElement | null;
-            if (!pill) return;
-            root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
-            pill.classList.add('active');
-            curFilter = (pill as HTMLElement).dataset.f || '全部';
-            renderWall();
-        });
-    }
+    // 筛选 + 立即同步的事件委托改由 openPanel 调 bindFilters() 在「每次打开面板」时重新绑定
+    // （见 bindFilters）。原因：fnOS 是 SPA，路由切换可能重建 .wh-filters 节点，若只在 buildPanel
+    // 绑一次，旧监听会绑到失效节点 → 电影/剧集/动漫"点不动"。改为每次打开自愈式重绑，杜绝该问题。
 
     // 评分交互
     const rate = $('wh-d-rate') as HTMLElement;
@@ -589,6 +577,28 @@ function renderStars(r: number): void {
 function filteredData(): ShowItem[] {
     if (curFilter === '全部') return curData;
     return curData.filter((i) => i.type === curFilter);
+}
+
+/** 每次打开面板时（重新）绑定筛选 + 立即同步的点击事件委托。
+ *  重绑前先 removeEventListener 移除旧监听（同一函数引用，幂等 → 整生命周期「恰好一个」），
+ *  且绑定到「当前存活」的 .wh-filters 节点——彻底免疫 fnOS 路由切换导致的 DOM 重建 /
+ *  旧节点监听失效（电影/剧集/动漫"点不动"的根因）。 */
+function bindFilters(root: HTMLElement): void {
+    const filtersEl = root.querySelector('.wh-filters') as HTMLElement | null;
+    if (!filtersEl) return;
+    if (_onFiltersClick) filtersEl.removeEventListener('click', _onFiltersClick);
+    _onFiltersClick = (e: MouseEvent) => {
+        const tgt = e.target as HTMLElement;
+        // 立即同步按钮：立刻重拉飞牛观看数据（含 TMDB 标签）
+        if (tgt.closest('#wh-sync')) { syncFnos(); return; }
+        const pill = tgt.closest('.wh-pill') as HTMLElement | null;
+        if (!pill) return;
+        root.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
+        pill.classList.add('active');
+        curFilter = (pill as HTMLElement).dataset.f || '全部';
+        renderWall();
+    };
+    filtersEl.addEventListener('click', _onFiltersClick);
 }
 
 // mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
@@ -1063,6 +1073,8 @@ function openPanel(): void {
         root.classList.toggle('light', light);
         paintBg(root);
         root.classList.add('show');
+        // 每次打开自愈式重绑筛选监听（免疫 fnOS 路由切换导致的旧节点监听失效 → 电影/剧集/动漫"点不动"）
+        bindFilters(root);
         // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
         cancelAnimationFrame(_paintRAF);
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
