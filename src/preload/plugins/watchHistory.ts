@@ -370,7 +370,17 @@ const WH_CSS = `
 #${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
 #${PANEL_ID} .wh-heat-cols{display:flex;gap:var(--wh-gap,4px)}
 #${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px)}
-#${PANEL_ID} .wh-heat-flow{height:100%;display:grid;align-content:center;justify-content:center;gap:var(--wh-gap,4px);grid-auto-flow:row}
+#${PANEL_ID} .wh-heat-cal{height:100%;display:flex;flex-direction:column;min-height:0}
+#${PANEL_ID} .wh-heat-cal-months{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:3px}
+#${PANEL_ID} .wh-heat-cal-months span{font-size:10px;color:var(--wh-text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#${PANEL_ID} .wh-heat-cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
+#${PANEL_ID} .wh-heat-cal-head span{font-size:10px;color:var(--wh-text3);text-align:center}
+#${PANEL_ID} .wh-heat-cal-grid{display:grid;gap:4px;flex:1;min-height:0}
+#${PANEL_ID} .wh-heat-cal .wh-cell{width:auto;height:auto}
+#${PANEL_ID} .wh-cell--day{display:flex;align-items:flex-start;justify-content:flex-end;padding:2px 4px;border-radius:4px}
+#${PANEL_ID} .wh-cell--day .wh-cell-d{font-size:10px;line-height:1;font-variant-numeric:tabular-nums;color:var(--wh-text2)}
+#${PANEL_ID} .wh-cell--day.l1 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l2 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l3 .wh-cell-d,#${PANEL_ID} .wh-cell--day.l4 .wh-cell-d{color:#fff}
+#${PANEL_ID} .wh-cell--day.future .wh-cell-d{color:transparent}
 #${PANEL_ID} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s;flex-shrink:0;
   box-shadow:inset 0 0 0 1px var(--wh-cell-border)}
 #${PANEL_ID} .wh-cell.l1{background:var(--wh-hm-1)}
@@ -1039,25 +1049,38 @@ function renderChart(): void {
           </div>
         </div>`;
     } else {
-        // flow 模式：容器高度锁定为年视图高度，按范围决定行数 R 与格子尺寸（横向铺排、放大、居中）
-        const H = 136;
-        let R: number, cap = 999;
-        if (_heatRange === 'week') { R = 1; GAP = 10; cap = 30; }
-        else if (_heatRange === 'month') { R = 5; GAP = 6; }
-        else { R = 7; GAP = 6; } // quarter
-        const C = Math.ceil(dayList.length / R);
-        CELL = Math.min(cap, Math.floor((H - (R - 1) * GAP) / R));
-        let flowCells = '';
+        // 紧凑模式（周/月/季）：7 列星期对齐的日历网格，铺满锁定高度的盒子；
+        // 不再强制格子尺寸（去掉居中留白），由 grid 1fr 自适应铺满；格子内显示日期数字，月份标签按列对齐
+        const COLS = 7;
+        const rows = Math.ceil(dayList.length / COLS);
+        const showNum = rows <= 8; // 周/月显示日期数字；季太密则隐藏（hover 看具体日期）
+        let cells = '';
         for (const cell of dayList) {
             const lv = cell.future ? -1 : level(cell.count);
-            const cls = 'wh-cell' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
+            const cls = 'wh-cell wh-cell--day' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
             const ds = `${cell.date.getFullYear()}-${cell.date.getMonth() + 1}-${cell.date.getDate()}`;
-            flowCells += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}"></div>`;
+            const dn = cell.future ? '' : String(cell.date.getDate());
+            cells += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}">${showNum ? `<span class="wh-cell-d">${dn}</span>` : ''}</div>`;
+        }
+        const wkHead = WEEKDAYS.map((w) => `<span>${w}</span>`).join('');
+        // 月份标签（月/季显示）：按列对齐到月份起始列
+        let monthsHTML = '';
+        if (rows > 1) {
+            const labelCols: string[] = new Array(COLS).fill('');
+            let lastM = -1;
+            dayList.forEach((c, i) => {
+                const m = c.date.getMonth();
+                if (m !== lastM) { labelCols[i % COLS] = `${m + 1}月`; lastM = m; }
+            });
+            monthsHTML = `<div class="wh-heat-cal-months">${labelCols.map((t) => `<span>${t}</span>`).join('')}</div>`;
         }
         bodyHTML = `
-        <div class="wh-heat-flow" style="grid-template-rows:repeat(${R},var(--wh-cell));grid-template-columns:repeat(${C},var(--wh-cell))">
-          ${flowCells}
+        <div class="wh-heat-cal">
+          ${monthsHTML}
+          <div class="wh-heat-cal-head">${wkHead}</div>
+          <div class="wh-heat-cal-grid" style="grid-template-columns:repeat(${COLS},1fr);grid-template-rows:repeat(${rows},1fr)">${cells}</div>
         </div>`;
+        // 紧凑模式格子由 grid 1fr 自适应铺满，变量维持年视图默认值即可
     }
 
     heat.innerHTML = `
