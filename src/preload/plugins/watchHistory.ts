@@ -268,13 +268,13 @@ const WH_CSS = `
 #fntv-wh-topbtns{--wh-surface:#17171a;--wh-surface2:#232327;--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
   position:fixed;top:28px;right:28px;z-index:2147483641;
   display:flex;align-items:center;gap:8px;pointer-events:auto;
-  background:#17171a;border:1px solid rgba(128,128,128,.18);border-radius:29px;
+  background:#17171a !important;border:1px solid rgba(128,128,128,.18);border-radius:29px;
   padding:0 12px;height:57px;box-sizing:border-box; /* 高度与左侧"观影记录"标题盒子(57px)对齐，按钮垂直居中 */
   box-shadow:0 10px 30px rgba(0,0,0,.35);
   opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s;
   -webkit-app-region:no-drag} /* ⚠️ 关键：fnOS 无边框窗口顶部是 drag 拖拽区，浮层若不 no-drag，点击会被系统劫持为"拖动窗口"而非按钮点击（hover 正常但 click 永不触发） */
 #fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3;
-  background:#fff}
+  background:#fff !important} /* !important 封死 fnOS/Glass UI 对 body>div 的 background:transparent 覆盖 */
 #fntv-wh-topbtns.show{opacity:1;visibility:visible;transform:none}
 #fntv-wh-topbtns button{-webkit-app-region:no-drag} /* 按钮逐个 no-drag 双保险（drag 不继承，子元素需显式声明） */
 /* ⚠️ 浮层颜色全部【硬编码】，不依赖 var()——fnOS 环境下变量级联/覆盖异常会导致
@@ -283,14 +283,14 @@ const WH_CSS = `
    ⚠️ CSS 顺序：light 模式规则必须排在 dark 规则【之前】——否则 light 容器下 .light .wh-pill{background:#f0f0f2}
    与 .wh-pill.active{background:#0071e3} 特异性相同(1,2,0)，源码后者胜出→active 背景被 light 默认覆盖→白字看不见。
    排在前面后，active 永远在 light 默认之后胜出（dark 模式无 .light 类，dark active 直接命中）。 */
-#fntv-wh-topbtns.light .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#f0f0f2;border:1px solid transparent;color:#6e6e73;
+#fntv-wh-topbtns.light .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#f0f0f2 !important;border:1px solid transparent;color:#6e6e73 !important;
   cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#fntv-wh-topbtns.light .wh-pill:hover{background:#e4e4e8;color:#1d1d1f}
-#fntv-wh-topbtns.light .wh-pill.active{background:#0071e3;border-color:#0071e3;color:#fff;font-weight:600}
-#fntv-wh-topbtns .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#232327;border:1px solid transparent;color:#a1a1a6;
+#fntv-wh-topbtns.light .wh-pill:hover{background:#e4e4e8 !important;color:#1d1d1f !important}
+#fntv-wh-topbtns.light .wh-pill.active{background:#0071e3 !important;border-color:#0071e3 !important;color:#fff !important;font-weight:600}
+#fntv-wh-topbtns .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#232327 !important;border:1px solid transparent;color:#a1a1a6 !important;
   cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#fntv-wh-topbtns .wh-pill:hover{background:#2e2e33;color:#f5f5f7}
-#fntv-wh-topbtns .wh-pill.active{background:#0071e3;border-color:#0071e3;color:#fff;font-weight:600}
+#fntv-wh-topbtns .wh-pill:hover{background:#2e2e33 !important;color:#f5f5f7 !important}
+#fntv-wh-topbtns .wh-pill.active{background:#0071e3 !important;border-color:#0071e3 !important;color:#fff !important;font-weight:600}
 #fntv-wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:8px 10px;
   font-size:20px;line-height:1;color:#a1a1a6;
   display:flex;align-items:center;justify-content:center;
@@ -299,10 +299,10 @@ const WH_CSS = `
 #fntv-wh-topbtns.light .wh-close{color:#6e6e73}
 #fntv-wh-topbtns.light .wh-close:hover{color:#1d1d1f}
 #fntv-wh-topbtns .wh-sync{padding:9px 16px;border-radius:22px;font-size:14px;font-weight:600;cursor:pointer;
-  background:rgba(41,151,255,.12);border:1px solid #2997ff;color:#2997ff;white-space:nowrap;transition:.15s;font-family:inherit}
-#fntv-wh-topbtns .wh-sync:hover{background:#2997ff;color:#fff}
-#fntv-wh-topbtns.light .wh-sync{background:rgba(0,113,227,.1);border-color:#0071e3;color:#0071e3}
-#fntv-wh-topbtns.light .wh-sync:hover{background:#0071e3;color:#fff}
+  background:rgba(41,151,255,.12) !important;border:1px solid #2997ff !important;color:#2997ff !important;white-space:nowrap;transition:.15s;font-family:inherit}
+#fntv-wh-topbtns .wh-sync:hover{background:#2997ff !important;color:#fff !important}
+#fntv-wh-topbtns.light .wh-sync{background:rgba(0,113,227,.1) !important;border-color:#0071e3 !important;color:#0071e3 !important}
+#fntv-wh-topbtns.light .wh-sync:hover{background:#0071e3 !important;color:#fff !important}
 #fntv-wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
 /* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
 #${PANEL_ID} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
