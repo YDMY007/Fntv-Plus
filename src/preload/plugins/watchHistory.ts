@@ -626,8 +626,12 @@ function buildPanel(): void {
 
     // 保存 / 同步
     ($('wh-d-save') as HTMLElement).addEventListener('click', () => {
-        curData[curIdx].myRating = curRating;
-        curData[curIdx].myReview = (($('wh-d-review') as HTMLTextAreaElement).value || '').trim();
+        const it = curData[curIdx];
+        it.myRating = curRating;
+        it.myReview = (($('wh-d-review') as HTMLTextAreaElement).value || '').trim();
+        // 落盘持久化（按 guid，缺则 name），重启后仍保留
+        _ratingCache.set(it.guid || it.name, { r: it.myRating, rv: it.myReview });
+        saveRatings();
         renderWall();
         toast('已保存你的评价');
     });
@@ -886,24 +890,27 @@ function renderChart(): void {
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
     // ① 每部作品按"最近一次播放"分桶到天（真实 lastPlayedAt 优先，否则解析 sessions 日期）
-    const dayCount = new Map<string, number>(); // key = `${年}-${月}-${日}`
+    const freshCount = new Map<string, number>(); // key = `${年}-${月}-${日}`
     for (const it of curData) {
         const ts = lastPlayedTs(it);
         if (!ts) continue;
         const d = new Date(ts); d.setHours(0, 0, 0, 0);
         const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        dayCount.set(key, (dayCount.get(key) || 0) + 1);
+        freshCount.set(key, (freshCount.get(key) || 0) + 1);
     }
+    // 合并本地持久化台账：每天取 max（历史不丢，也能被更完整的同步覆盖）；落盘累积
+    const dayCount = new Map<string, number>();
+    const mergeKeys = new Set<string>([...freshCount.keys(), ..._dayCountCache.keys()]);
+    for (const k of mergeKeys) dayCount.set(k, Math.max(freshCount.get(k) || 0, _dayCountCache.get(k) || 0));
+    saveDayCount(dayCount);
 
-    // ② 近 30 天活跃天数（顶部统计条沿用旧口径）
-    const buckets30 = new Array(30).fill(0);
-    for (const it of curData) {
-        const ts = lastPlayedTs(it); if (!ts) continue;
-        const d = new Date(ts); d.setHours(0, 0, 0, 0);
-        const diff = Math.round((today.getTime() - d.getTime()) / dayMs);
-        if (diff >= 0 && diff < 30) buckets30[29 - diff] += 1;
+    // ② 近 30 天活跃天数（基于合并后的台账，fnOS 空白也能保留历史活跃度）
+    let activeDays = 0;
+    for (let i = 0; i < 30; i++) {
+        const d = new Date(today.getTime() - i * dayMs);
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        if ((dayCount.get(key) || 0) > 0) activeDays++;
     }
-    const activeDays = buckets30.filter((c) => c > 0).length;
 
     // ③ GitHub 风格热力图：过去 53 周（≈一年），列=周、行=星期(日→六)
     const NUM_WEEKS = 53;
@@ -1119,6 +1126,52 @@ function savePosterCache(): void {
     } catch { /* 配额/隐私模式失败时忽略，下次实时拉取 */ }
 }
 
+// ── 每日观看台账（热力图数据源的本地持久化）──
+// 键 = `${年}-${月}-${日}`，值 = 当天观看作品部数。跨重启累积，
+// 即使 fnOS 同步返回空/失败，热力图仍能显示历史，不会变空白。
+const _dayCountCache = new Map<string, number>();
+const _DAYCOUNT_LS_KEY = 'fntv_wh_daycount_v1';
+let _dayCountLoaded = false;
+function loadPersistedDayCount(): void {
+    if (_dayCountLoaded) return;
+    _dayCountLoaded = true;
+    try {
+        const raw = localStorage.getItem(_DAYCOUNT_LS_KEY);
+        if (!raw) return;
+        const obj = JSON.parse(raw) as Record<string, number>;
+        for (const k in obj) if (typeof obj[k] === 'number') _dayCountCache.set(k, obj[k]);
+    } catch { /* 解析失败则忽略，走实时数据 */ }
+}
+function saveDayCount(map: Map<string, number>): void {
+    try {
+        const obj: Record<string, number> = {};
+        map.forEach((v, k) => { obj[k] = v; });
+        localStorage.setItem(_DAYCOUNT_LS_KEY, JSON.stringify(obj));
+    } catch { /* 配额/隐私模式失败时忽略 */ }
+}
+
+// ── 用户评分/评语（跨重启持久化，按 guid 存，缺 guid 回退 name）──
+const _ratingCache = new Map<string, { r: number; rv: string }>();
+const _RATING_LS_KEY = 'fntv_wh_ratings_v1';
+let _ratingCacheLoaded = false;
+function loadPersistedRatings(): void {
+    if (_ratingCacheLoaded) return;
+    _ratingCacheLoaded = true;
+    try {
+        const raw = localStorage.getItem(_RATING_LS_KEY);
+        if (!raw) return;
+        const obj = JSON.parse(raw) as Record<string, { r: number; rv: string }>;
+        for (const k in obj) if (obj[k] && typeof obj[k].r === 'number') _ratingCache.set(k, obj[k]);
+    } catch { /* 解析失败则忽略 */ }
+}
+function saveRatings(): void {
+    try {
+        const obj: Record<string, { r: number; rv: string }> = {};
+        _ratingCache.forEach((v, k) => { obj[k] = v; });
+        localStorage.setItem(_RATING_LS_KEY, JSON.stringify(obj));
+    } catch { /* 配额/隐私模式失败时忽略 */ }
+}
+
 function pickImg(v: any, preferLargest = false): string {
     let s = '';
     const extract = (it: any): string => {
@@ -1263,10 +1316,10 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             }));
         }
         savePosterCache(); // 落盘持久化（含本次新拉取的海报+简介）
-        // 合并用户已有的评分/评语（按 name 匹配旧数据）
+        // 合并用户已有的评分/评语：优先本地持久化缓存（按 guid，缺则 name），重启也不丢
         for (const m of mapped) {
-            const old = curData.find((o) => o.name === m.name);
-            if (old && old.myRating > 0) { m.myRating = old.myRating; m.myReview = old.myReview; }
+            const saved = (m.guid && _ratingCache.get(m.guid)) || _ratingCache.get(m.name);
+            if (saved && saved.r > 0) { m.myRating = saved.r; m.myReview = saved.rv; }
         }
         curData = mapped;
         log.info(LOG, `已加载 ${mapped.length} 条飞牛真实观看记录`);
@@ -1412,6 +1465,9 @@ function openPanel(): void {
         // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
         cancelAnimationFrame(_paintRAF);
         _paintRAF = requestAnimationFrame(() => paintLoop(root));
+        // 渲染前先恢复本地持久化数据（每日观看台账 + 评分/评语），避免热力图/评分因 fnOS 空白而丢失
+        loadPersistedDayCount();
+        loadPersistedRatings();
         renderChart();
 
         // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）；用缓存（force=false）加速开面板
