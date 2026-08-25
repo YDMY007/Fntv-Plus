@@ -544,6 +544,59 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
     }
 }
 
+/**
+ * 按标题 + 媒体类型从 TMDB 拉取「类型(genre)标签」与「媒体分类」。
+ * 供「观影记录」详情展示：详情 chip 用 genres（中文，language=zh-CN），卡片/详情分类标签用 category。
+ *   - movie → 电影
+ *   - tv + 含"动画/动漫"类型 → 动漫；tv 其余 → 剧集
+ * 按 `mt:title` 做每日磁盘缓存（getDailyCached），避免重复打 TMDB；首次也降低压力。
+ * 无 Key / 搜索无果 / 网络失败 → 返回 null，由调用方自行兜底（类型映射 / "未分类"）。
+ */
+export async function tmdbGenresFor(
+    title: string,
+    opts: { mediaType?: 'movie' | 'tv'; year?: string } = {}
+): Promise<{ genres: string[]; category: string; rating: number; votes: number } | null> {
+    const key = fnConfig.getTmdbApiKey();
+    if (!key || !title) return null;
+    const mt: 'movie' | 'tv' = opts.mediaType === 'movie' ? 'movie' : 'tv';
+    const cacheKey = 'genres_' + mt + '_' + title;
+    try {
+        const r = await getDailyCached(cacheKey, async () => {
+            const client = http();
+            const a = key ? authFor(key) : { headers: {} as Record<string, string> };
+            const baseParams: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
+            const sParams: any = { ...baseParams, query: title, page: 1 };
+            if (opts.year) {
+                if (mt === 'movie') sParams.year = opts.year;
+                else sParams.first_air_date_year = opts.year;
+            }
+            const sResp = await getWithRetry(client, `/search/${mt}`, { params: sParams });
+            const results = (sResp?.data?.results || []) as any[];
+            if (!results.length) return { genres: [] as string[], rating: 0, votes: 0 };
+            const top = results[0];
+            const id = top.id;
+            const dResp = await getWithRetry(client, `/${mt}/${id}`, { params: baseParams });
+            const genres = ((dResp?.data?.genres) || []).map((g: any) => g.name).filter((x: any) => !!x);
+            // 评分顺带取自搜索结果首条（与类型标签同一次 TMDB 调用，零额外配额）：
+            //   vote_average = TMDB 评分(0~10)；vote_count = 参评人数。
+            const rating = typeof top.vote_average === 'number' ? top.vote_average : 0;
+            const votes = typeof top.vote_count === 'number' ? top.vote_count : 0;
+            return { genres: genres as string[], rating, votes };
+        }, DEFAULT_TTL_MS, false);
+        const genres = (r.data && r.data.genres) || [];
+        let category: string;
+        if (mt === 'movie') category = '电影';
+        else {
+            const isAnime = genres.some((g: string) => /动画|动漫|Animation|Anime/i.test(g));
+            category = isAnime ? '动漫' : '剧集';
+        }
+        return { genres, category, rating: (r.data && r.data.rating) || 0, votes: (r.data && r.data.votes) || 0 };
+    } catch (e: any) {
+        log.warn('[TMDB诊断] genres 获取失败（' + title + '）：' + (e?.message || e));
+        return null;
+    }
+}
+
 function init(): void {
     registerHandler('tmdb:discover', async (_e: any, force?: boolean) => {
         try {
@@ -574,6 +627,11 @@ function init(): void {
     }, { useHandle: true });
     registerHandler('tmdb:image', async (_e: any, url: string) => {
         return fetchImageAsDataUrl(url);
+    }, { useHandle: true });
+    // 「观影记录」标签：渲染进程传入 {title, mediaType?, year?}，主进程查 TMDB 取中文类型标签 + 媒体分类。
+    // 结果按 title+mediaType 每日磁盘缓存（getDailyCached），避免每次打开面板都打 TMDB 接口。
+    registerHandler('tmdb:genres', async (_e: any, arg: { title: string; mediaType?: 'movie' | 'tv'; year?: string }) => {
+        return tmdbGenresFor(arg?.title || '', { mediaType: arg?.mediaType, year: arg?.year });
     }, { useHandle: true });
     // [lc-416] 轮播图透明 logo：渲染进程传入 {id?,title?,mediaType?}，主进程查 TMDB images 取 logo 路径。
     // 结果按 id/title 持久化缓存(默认 24h)，避免每次轮播渲染都请求 TMDB 接口（既省流量也防 429）。

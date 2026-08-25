@@ -675,13 +675,15 @@ async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T, i: number) => 
  *   - TMDB（有 key 且命中）可把 TV 升级为"动漫"（检测到动画类型），并带回中文 genres
  *   - 无 key / 未命中 / 网络失败 → 维持 base 分类、genres 留空（前端回退"未分类"）
  */
-async function enrichWithTmdb(it: any): Promise<{ category: string; genres: string[] }> {
+async function enrichWithTmdb(it: any): Promise<{ category: string; genres: string[]; tmdbRating: number; tmdbVotes: number }> {
     const rawType = (it && it.type || '').toLowerCase();
     const mediaType: 'movie' | 'tv' = rawType === 'movie' ? 'movie' : 'tv';
     const baseCat = mediaType === 'movie' ? '电影' : '剧集';
     const year = String(it && (it.release_date || it.air_date) || '').slice(0, 4);
     let category = baseCat;
     let genres: string[] = [];
+    let tmdbRating = 0;
+    let tmdbVotes = 0;
     try {
         const r = await tmdbGenresFor(it && it.title || '', {
             mediaType,
@@ -690,9 +692,12 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
         if (r) {
             if (r.category) category = r.category;
             if (Array.isArray(r.genres)) genres = r.genres;
+            // tmdbGenresFor 已在同一次 TMDB 搜索里带回评分(0~10)与参评人数
+            tmdbRating = typeof r.rating === 'number' ? r.rating : 0;
+            tmdbVotes = typeof r.votes === 'number' ? r.votes : 0;
         }
     } catch { /* ignore：TMDB 异常不影响主流程 */ }
-    return { category, genres };
+    return { category, genres, tmdbRating, tmdbVotes };
 }
 
 async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTotal: number }> {
@@ -730,7 +735,9 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
         // 第二步：仅对保留的（含部分看）条目补 TMDB 分类/类型标签，避免对 122 部未看剧浪费 TMDB 配额。
         const items = await mapLimit(kept, 4, async (pair: any) => {
             const { it, a } = pair;
-            const { category, genres } = await enrichWithTmdb(it);
+            const enr = await enrichWithTmdb(it);
+            // fnOS 列表项自带 vote_average（字符串，飞牛从 TMDB 刮削并缓存的评分）——即"飞牛自动获取的评分"
+            const va = parseFloat(String(it.vote_average || '0'));
             return {
                 guid: it.guid,
                 parent_guid: it.parent_guid,
@@ -739,8 +746,8 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
                 tv_title: it.tv_title,
                 parent_title: it.parent_title,
                 type: it.type,
-                category, // 电影 / 剧集 / 动漫（前端用其替换"其他"）
-                genres,   // TMDB 中文类型标签（无则空数组，前端回退"未分类"）
+                category: enr.category, // 电影 / 剧集 / 动漫（前端用其替换"其他"）
+                genres: enr.genres,   // TMDB 中文类型标签（无则空数组，前端回退"未分类"）
                 air_date: it.air_date,
                 release_date: it.release_date,
                 watched: it.watched === 1 ? 1 : 0,
@@ -748,6 +755,10 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
                 last_played: a.last_played, // ms
                 progress: a.progress,       // 0..1：电视剧=已看集数/总集数
                 total_runtime_ms: a.total_runtime_ms,
+                // 多平台评分：fnos_rating=飞牛影视(源自 TMDB 刮削) / tmdb_rating+tmdb_votes=TMDB 直连(独立二次获取)
+                fnos_rating: isNaN(va) ? 0 : va,
+                tmdb_rating: enr.tmdbRating,
+                tmdb_votes: enr.tmdbVotes,
             };
         });
         const done = items.filter((x: any) => x.progress >= 1).length;
