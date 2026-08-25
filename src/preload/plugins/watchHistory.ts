@@ -268,25 +268,36 @@ const WH_CSS = `
 #fntv-wh-topbtns{--wh-surface:#17171a;--wh-surface2:#232327;--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
   position:fixed;top:22px;right:28px;z-index:2147483641;
   display:flex;align-items:center;gap:9px;pointer-events:auto;
-  background:var(--wh-surface);border:1px solid rgba(128,128,128,.18);border-radius:24px;
+  background:#17171a;border:1px solid rgba(128,128,128,.18);border-radius:24px;
   padding:8px 10px;box-shadow:0 10px 30px rgba(0,0,0,.35);
   opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s;
   -webkit-app-region:no-drag} /* ⚠️ 关键：fnOS 无边框窗口顶部是 drag 拖拽区，浮层若不 no-drag，点击会被系统劫持为"拖动窗口"而非按钮点击（hover 正常但 click 永不触发） */
-#fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3}
+#fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3;
+  background:#fff}
 #fntv-wh-topbtns.show{opacity:1;visibility:visible;transform:none}
 #fntv-wh-topbtns button{-webkit-app-region:no-drag} /* 按钮逐个 no-drag 双保险（drag 不继承，子元素需显式声明） */
-#fntv-wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
-  background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#fntv-wh-topbtns .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
-#fntv-wh-topbtns .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
+/* ⚠️ 浮层颜色全部【硬编码】，不依赖 var()——fnOS 环境下变量级联/覆盖异常会导致
+   background:var(--wh-accent) 解析失败→背景回退浅色→白字看不见（用户反馈"选中标签字体全白"）。
+   选中态统一深蓝底+白字，明暗模式都清晰。 */
+#fntv-wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;background:#232327;border:1px solid transparent;color:#a1a1a6;
+  cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
+#fntv-wh-topbtns .wh-pill:hover{background:#2e2e33;color:#f5f5f7}
+#fntv-wh-topbtns .wh-pill.active{background:#0071e3;border-color:#0071e3;color:#fff;font-weight:600}
+#fntv-wh-topbtns.light .wh-pill{background:#f0f0f2;color:#6e6e73}
+#fntv-wh-topbtns.light .wh-pill:hover{background:#e4e4e8;color:#1d1d1f}
+#fntv-wh-topbtns.light .wh-pill.active{background:#0071e3;border-color:#0071e3;color:#fff;font-weight:600}
 #fntv-wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 10px;
-  font-size:20px;line-height:1;color:var(--wh-text2);
+  font-size:20px;line-height:1;color:#a1a1a6;
   display:flex;align-items:center;justify-content:center;
   user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s;background:none;border:none;font-family:inherit}
-#fntv-wh-topbtns .wh-close:hover{color:var(--wh-text)}
+#fntv-wh-topbtns .wh-close:hover{color:#f5f5f7}
+#fntv-wh-topbtns.light .wh-close{color:#6e6e73}
+#fntv-wh-topbtns.light .wh-close:hover{color:#1d1d1f}
 #fntv-wh-topbtns .wh-sync{padding:8px 16px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;
-  background:rgba(41,151,255,.12);border:1px solid var(--wh-accent);color:var(--wh-accent);white-space:nowrap;transition:.15s;font-family:inherit}
-#fntv-wh-topbtns .wh-sync:hover{background:var(--wh-accent);color:#fff}
+  background:rgba(41,151,255,.12);border:1px solid #2997ff;color:#2997ff;white-space:nowrap;transition:.15s;font-family:inherit}
+#fntv-wh-topbtns .wh-sync:hover{background:#2997ff;color:#fff}
+#fntv-wh-topbtns.light .wh-sync{background:rgba(0,113,227,.1);border-color:#0071e3;color:#0071e3}
+#fntv-wh-topbtns.light .wh-sync:hover{background:#0071e3;color:#fff}
 #fntv-wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
 /* 骨架屏：拉取飞牛+TMDB 数据期间在海报墙占位，避免空白闪烁 */
 #${PANEL_ID} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
@@ -728,7 +739,7 @@ function handleTopBtnAction(e: Event): boolean {
     if (!el) return true; // 点击浮层容器空白（padding 区）：吞掉，不关面板
     // 命中诊断（用户可用 devtools 控制台确认事件是否到达本层）
     try { console.log('[WatchHistory] 右上角按钮命中:', el.id || el.dataset.f || el.className); } catch { /* ignore */ }
-    if (el.id === 'wh-close') { closePanel(); return true; }
+    if (el.id === 'wh-close') { closePanel(true); return true; } // 只有 ✕ 才回首页
     if (el.id === 'wh-sync') { void syncFnos(); return true; }
     if (el.classList.contains('wh-pill')) {
         bar.querySelectorAll('.wh-pill').forEach((x) => x.classList.remove('active'));
@@ -1422,7 +1433,10 @@ function openPanel(): void {
     }
 }
 
-function closePanel(): void {
+/** 关闭观影记录面板。
+ *  @param goHome 是否"回影视首页"——【只有点右上角 ✕ 时传 true】；
+ *   空白背景点击 / Esc / 其他路径关闭一律不导航（用户要求：仅 ✕ 才回首页）。 */
+function closePanel(goHome = false): void {
     const root = $(PANEL_ID);
     if (!root) return;
     // 取消持续重涂循环，避免面板隐藏后仍空转
@@ -1438,17 +1452,15 @@ function closePanel(): void {
     root.classList.remove('wh-detail-open');
     // 复位可能的卡片选中态
     root.querySelectorAll('.wh-card.focused').forEach((c) => c.classList.remove('focused'));
-    // 关闭后是否"回影视首页"：仅当用户当前处于【影视 App】(isFntvTvPage: /v 及其子页) 内才回首页；
-    // 飞牛原生 NAS 页 / 仪表盘 / 其他 fnOS 系统页一律【不导航】，保留用户当前所在页，
-    // 避免关闭时把正在用 NAS 的用户强行拽到影视首页（呼应"非首页守卫不影响 NAS 用户"）。
-    if (isFntvTvPage()) {
+    // 回影视首页仅发生在 goHome=true（点 ✕）且当前处于影视 App 子页时；
+    // 空白/Esc 关闭一律原地收起（用户要求：只有点 ✕ 才返回首页）
+    if (goHome && isFntvTvPage()) {
         const p = (location.pathname || '').replace(/\/+$/, '');
-        if (p === '/v') {
-            // 已在影视首页：直接关闭面板即可，不再整页刷新（避免关闭观影记录时首页闪烁重排）
-        } else {
+        if (p !== '/v') {
             // 影视子页（/v/movie|tv|...）：回影视首页
             try { location.href = location.origin + '/v'; } catch { /* ignore */ }
         }
+        // 已在影视首页：直接关闭面板即可，不再整页刷新（避免关闭观影记录时首页闪烁重排）
     }
     // 非影视 App（原生 NAS 页等）：不导航，仅收起面板，用户停留在原页面
 }
