@@ -587,7 +587,7 @@ function buildPanel(): void {
             <textarea class="wh-review" id="wh-d-review" placeholder="写下你对这部剧的看法…"></textarea>
             <div class="wh-actions">
               <button class="wh-btn primary" id="wh-d-save">保存我的评价</button>
-              <button class="wh-btn ghost" id="wh-d-sync">立即同步</button>
+              <button class="wh-btn ghost" id="wh-d-view">查看详情</button>
             </div>
             <div class="wh-divider"></div>
             <div class="wh-sessions">
@@ -655,7 +655,15 @@ function buildPanel(): void {
         renderWall();
         toast('已保存你的评价');
     });
-    ($('wh-d-sync') as HTMLElement).addEventListener('click', syncFnos);
+    // 「查看详情」：跳转到飞牛影视内对应的作品详情/播放页（/v/{movie|tv|other}/{guid}）
+    const dView = $('wh-d-view');
+    if (dView) dView.addEventListener('click', () => {
+        const it = curData[curIdx];
+        if (it && it.guid) {
+            closePanel(); // 先收起浮层，避免残留到新页面
+            viewItemInFnos(it);
+        }
+    });
 
     // 键盘：Esc 先关详情，再关面板（关面板统一走 closePanel，确保彻底复位）
     document.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -1195,6 +1203,21 @@ function closeDetail(): void {
     if (pr) pr.classList.remove('wh-detail-open');
     // 详情关闭后恢复右上角浮层（仅当面板仍开着）
     if (pr && pr.classList.contains('show')) showTopBtns();
+}
+
+/** 跳转到飞牛影视内对应的作品详情/播放页：/v/{movie|tv|other}/{guid}。
+ *  路由前缀由类型决定：电影→movie，剧集/动漫→tv，其他(个人视频)→other。 */
+function fnosRoutePrefix(type: string): string {
+    if (type === '电影') return 'movie';
+    if (type === '剧集' || type === '动漫') return 'tv';
+    if (type === '其他') return 'other';
+    return 'movie';
+}
+function viewItemInFnos(item: ShowItem): void {
+    if (!item.guid) return;
+    const prefix = fnosRoutePrefix(item.type);
+    const url = `${location.origin}/v/${prefix}/${item.guid}`;
+    try { location.href = url; } catch { /* ignore */ }
 }
 
 /** 预设渐变色盘（按名称 hash 稳定取色，避免每次随机） */
