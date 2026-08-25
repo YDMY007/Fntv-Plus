@@ -322,14 +322,18 @@ const WH_CSS = `
   border-radius:22px;padding:26px 28px 20px}
 /* 顶部两栏布局：左侧统计面板 / 右侧热力图，各占一半 */
 #${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:stretch}
-#${PANEL_ID} .wh-stats-panel{display:flex;flex-direction:column;justify-content:center;gap:18px;padding:6px 0}
+#${PANEL_ID} .wh-stats-panel{display:flex;flex-direction:column;gap:18px;padding:6px 0}
 #${PANEL_ID} .wh-stats-panel .ct{font-size:20px;font-weight:700;color:var(--wh-text);letter-spacing:.2px}
 #${PANEL_ID} .wh-stats-panel .cs{font-size:13px;color:var(--wh-text3);margin-top:2px}
-#${PANEL_ID} .wh-stat{display:grid;grid-template-columns:1fr 1fr;gap:20px 28px}
-#${PANEL_ID} .wh-stat div{background:var(--wh-surface2);border:1px solid var(--wh-line);
-  border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}
-#${PANEL_ID} .wh-stat b{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px}
+/* 统计数字：无框卡片，2x2 网格撑满左栏高度（与右侧热力图等高），数字居中 + 标签 + accent 短横线锚点 */
+#${PANEL_ID} .wh-stat{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
+  gap:14px 24px;flex:1;min-height:0}
+#${PANEL_ID} .wh-stat div{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;text-align:center;position:relative}
+#${PANEL_ID} .wh-stat b{font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px;line-height:1.1}
 #${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2)}
+#${PANEL_ID} .wh-stat div::after{content:'';display:block;width:26px;height:3px;border-radius:2px;
+  background:var(--wh-accent);opacity:.55;margin-top:3px}
 #${PANEL_ID} .wh-chart-wrap{position:relative;min-width:0;align-self:center}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
 #${PANEL_ID} .wh-heat{margin-top:0}
