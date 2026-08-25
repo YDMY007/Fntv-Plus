@@ -232,14 +232,19 @@ const WH_CSS = `
 
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
-  padding:26px 40px 8px;position:sticky;top:0;z-index:70;pointer-events:auto;
+  padding:26px 40px 14px;position:sticky;top:0;z-index:70;pointer-events:auto;
   background:inherit;transition:opacity .12s}
 /* 详情为模态浮层：打开(wh-detail-open)时隐藏顶栏，避免「全部/立即同步」浮在详情页最上层遮挡内容 */
 #${PANEL_ID}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
+#${PANEL_ID} .wh-tb-left{display:flex;flex-direction:column;gap:2px}
+#${PANEL_ID} .wh-title-row{display:flex;align-items:center;gap:14px}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
 #${PANEL_ID} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
   background:linear-gradient(135deg,var(--wh-accent),#7b5bff);flex-shrink:0}
-#${PANEL_ID} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:6px}
+#${PANEL_ID} .wh-active-badge{font-size:13px;font-weight:500;color:var(--wh-accent);
+  background:rgba(41,151,255,.1);border:1px solid rgba(41,151,255,.25);
+  padding:3px 12px;border-radius:20px;white-space:nowrap;align-self:center;margin-top:6px}
+#${PANEL_ID} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:4px}
 #${PANEL_ID} .wh-filters{display:flex;gap:9px;align-items:center;position:relative;z-index:61;pointer-events:auto}
 #${PANEL_ID} .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
@@ -263,7 +268,7 @@ const WH_CSS = `
 #${PANEL_ID}.light .wh-skel::after{background:linear-gradient(90deg,transparent 0%,rgba(0,0,0,.06) 50%,transparent 100%)}
 @keyframes wh-shimmer{100%{transform:translateX(100%)}}
 
-#${PANEL_ID} .wh-section{margin-top:30px;padding:0 40px}
+#${PANEL_ID} .wh-section{margin-top:20px;padding:0 40px}
 #${PANEL_ID} .wh-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
 #${PANEL_ID} .wh-section-title{font-size:22px;font-weight:600}
 #${PANEL_ID} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
@@ -400,8 +405,11 @@ function buildPanel(): void {
     root.innerHTML = `
       <!-- 顶部栏：独立于 wh-main（始终在最上层）；打开详情(wh-detail-open)时隐藏，避免浮在详情页上遮挡 -->
       <div class="wh-topbar">
-        <div>
-          <div class="wh-title">Fntv-Plus · 观影记录</div>
+        <div class="wh-tb-left">
+          <div class="wh-title-row">
+            <div class="wh-title">Fntv-Plus · 观影记录</div>
+            <span class="wh-active-badge">观影活跃度</span>
+          </div>
           <div class="wh-subtitle" id="wh-sub"></div>
         </div>
         <div class="wh-filters">
@@ -416,10 +424,6 @@ function buildPanel(): void {
 
       <div class="wh-main">
         <section class="wh-section">
-          <div class="wh-section-head">
-            <div class="wh-section-title">观影活跃度</div>
-            <div class="wh-section-hint">近 30 天 · 有播放记录的天数</div>
-          </div>
           <div class="wh-chart-card">
             <div class="wh-chart-top">
               <div>
@@ -852,11 +856,13 @@ function artForName(name: string): string {
     return grad(a, b);
 }
 
-// ───────────────────────── 真实海报拉取（与首页轮播图同款机制）─────────────────────────
+// ───────────────────────── 真实海报+简介拉取（与首页轮播图同款机制）─────────────────────────
 // 复用 embyWall.fetchItemDetail 的取图逻辑：经主进程生成 Authx 头 → GET /v/api/v1/item/${guid}
-//   （credentials:'include'）→ 取 data.posters（竖版，选最大尺寸）→ 拼 base + '/v/api/v1/' + rel。
-// 这样观看记录的竖版海报与首页轮播图来源完全一致（飞牛 item API 权威竖版源），不再用假渐变占位。
-const _posterCache = new Map<string, string>();
+//   （credentials:'include'）→ 取 data.posters（竖版，选最大尺寸）+ overview（简介）
+//   → 拼 base + '/v/api/v1/' + rel。
+// 这样观看记录的竖版海报与首页轮播图来源完全一致（飞牛 item API 权威竖版源），不再用假渐变占位；
+// 同时顺手拿到 overview 解决剧集详情页"暂无简介"问题。
+const _posterCache = new Map<string, { poster: string; overview: string }>();
 
 function pickImg(v: any, preferLargest = false): string {
     let s = '';
@@ -884,8 +890,8 @@ function pickImg(v: any, preferLargest = false): string {
     return 'sys/img' + (s.startsWith('/') ? s : '/' + s);
 }
 
-/** 取某飞牛 item 的竖版海报 URL（与首页右侧海报条同源）。失败/无图返回 ''。 */
-async function fetchItemPoster(guid: string): Promise<string> {
+/** 取某飞牛 item 的竖版海报 URL + 简介（与首页右侧海报条同源）。失败返回 { poster:'', overview:'' }。 */
+async function fetchItemPoster(guid: string): Promise<{ poster: string; overview: string }> {
     try {
         const base = location.origin;
         const path = `/v/api/v1/item/${guid}`;
@@ -896,13 +902,15 @@ async function fetchItemPoster(guid: string): Promise<string> {
         try {
             resp = await fetch(`${base}${path}`, { credentials: 'include', headers: { 'Authx': authx }, signal: ctrl.signal });
         } finally { clearTimeout(timer); }
-        if (!resp.ok) return '';
+        if (!resp.ok) return { poster: '', overview: '' };
         const json: any = await resp.json();
         const d = (json && json.data) || {};
         const rel = pickImg(d.posters, true);
-        if (!rel) return '';
-        return rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel;
-    } catch { return ''; }
+        const poster = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
+        // 与首页轮播图一致：overview > tv_overview > parent_overview
+        const overview = (d.overview || d.tv_overview || d.parent_overview || '') as string;
+        return { poster, overview };
+    } catch { return { poster: '', overview: '' }; }
 }
 
 /** 时长(ms) → 人类可读，如 "2小时15分" / "45分" / "1小时"。 */
@@ -987,13 +995,14 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             const slice = mapped.slice(i, i + CHUNK);
             await Promise.all(slice.map(async (m) => {
                 if (!m.guid) return;
-                // 海报（总时长已由主进程 getWatchedItems 计算并随数据下发，前端不再单独拉取）
+                // 海报+简介（总时长已由主进程 getWatchedItems 计算并随数据下发，前端不再单独拉取）
                 const cached = _posterCache.get(m.guid);
-                if (cached) { m.poster = cached; }
+                if (cached) { m.poster = cached.poster; if (cached.overview && !m.fn.overview) m.fn.overview = cached.overview; }
                 else {
-                    const url = await fetchItemPoster(m.guid);
-                    m.poster = url;
-                    if (url) _posterCache.set(m.guid, url);
+                    const res = await fetchItemPoster(m.guid);
+                    m.poster = res.poster;
+                    if (res.overview) m.fn.overview = res.overview;
+                    if (res.poster || res.overview) _posterCache.set(m.guid, res);
                 }
             }));
         }
