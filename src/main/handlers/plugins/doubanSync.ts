@@ -9,6 +9,7 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import * as fn from '../../../modules/fn_api/api';
 import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
+import { tmdbGenresFor } from './tmdbSync';
 const log = logger.component('douban');
 
 /**
@@ -600,6 +601,49 @@ async function sumRuntimeMsForItem(fnapi: any, it: any): Promise<number> {
     return Math.round(totalSec * 1000);
 }
 
+/**
+ * 并发受限的 map（避免一次性对 TMDB 发起过多请求触发 429）。
+ */
+async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {
+    const results: R[] = new Array(arr.length);
+    let cursor = 0;
+    async function worker(): Promise<void> {
+        while (cursor < arr.length) {
+            const idx = cursor++;
+            results[idx] = await fn(arr[idx], idx);
+        }
+    }
+    const n = Math.max(1, Math.min(limit, arr.length));
+    await Promise.all(Array.from({ length: n }, () => worker()));
+    return results;
+}
+
+/**
+ * 为「观影记录」补充分类标签(category)与 TMDB 中文类型(genres)：
+ *   - base：Movie→电影；TV→剧集（fnOS 的 TV 在 mapType 下原会落到"其他"，这里直接给到剧集/电影）
+ *   - TMDB（有 key 且命中）可把 TV 升级为"动漫"（检测到动画类型），并带回中文 genres
+ *   - 无 key / 未命中 / 网络失败 → 维持 base 分类、genres 留空（前端回退"未分类"）
+ */
+async function enrichWithTmdb(it: any): Promise<{ category: string; genres: string[] }> {
+    const rawType = (it && it.type || '').toLowerCase();
+    const mediaType: 'movie' | 'tv' = rawType === 'movie' ? 'movie' : 'tv';
+    const baseCat = mediaType === 'movie' ? '电影' : '剧集';
+    const year = String(it && (it.release_date || it.air_date) || '').slice(0, 4);
+    let category = baseCat;
+    let genres: string[] = [];
+    try {
+        const r = await tmdbGenresFor(it && it.title || '', {
+            mediaType,
+            year: year || undefined,
+        });
+        if (r) {
+            if (r.category) category = r.category;
+            if (Array.isArray(r.genres)) genres = r.genres;
+        }
+    } catch { /* ignore：TMDB 异常不影响主流程 */ }
+    return { category, genres };
+}
+
 async function getWatchedItems(): Promise<any[]> {
     const fnapi = getFnapiFresh();
     if (!fnapi) {
@@ -623,10 +667,11 @@ async function getWatchedItems(): Promise<any[]> {
             log.warn(`[豆瓣] 已观看列表可能被服务端截断: 返回 ${list.length} / 总计 ${total}`);
         }
         const watched = list.filter((it: any) => it && it.watched === 1);
-        // 并发计算每部作品总时长：电视剧向下钻取 季→单集 累加 duration/runtime；电影取自身。
+        // 并发计算每部作品总时长 + TMDB 分类/类型标签（并发受限，避免触发 TMDB 429）。
         // 同时带回 last_played（watched_ts 秒→ms）与进度，供前端观影记录直接展示，无需前端再猜接口。
-        const items = await Promise.all(watched.map(async (it: any) => {
+        const items = await mapLimit(watched, 4, async (it: any) => {
             const total_runtime_ms = await sumRuntimeMsForItem(fnapi, it);
+            const { category, genres } = await enrichWithTmdb(it);
             return {
                 guid: it.guid,
                 parent_guid: it.parent_guid,
@@ -635,6 +680,8 @@ async function getWatchedItems(): Promise<any[]> {
                 tv_title: it.tv_title,
                 parent_title: it.parent_title,
                 type: it.type,
+                category, // 电影 / 剧集 / 动漫（前端用其替换"其他"）
+                genres,   // TMDB 中文类型标签（无则空数组，前端回退"未分类"）
                 air_date: it.air_date,
                 release_date: it.release_date,
                 watched: 1,
@@ -642,7 +689,7 @@ async function getWatchedItems(): Promise<any[]> {
                 progress: 1,
                 total_runtime_ms,
             };
-        }));
+        });
         log.info(`[豆瓣] 已观看列表: 根库 ${list.length} 项 → 已观看 ${watched.length} 项 → 回传 ${items.length} 条`);
         return items;
     } catch (e: any) {

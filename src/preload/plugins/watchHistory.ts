@@ -797,7 +797,9 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             return {
             guid: it.guid || '',
             name: it.title || '未知作品',
-            type: mapType(it.type),
+            // 分类标签：主进程已按 fnOS 类型给出 电影/剧集（TV 基分类），TMDB 命中时可升级为 动漫；
+            // 缺字段时回退到 mapType（仍可能落到"其他"，仅极罕见未知类型）。
+            type: (typeof it.category === 'string' && it.category) ? it.category : mapType(it.type),
             last: lpMs ? formatAgo(lpMs) : '未记录时间',
             lastPlayedAt: lpMs,
             totalRuntimeMs: (typeof it.total_runtime_ms === 'number' && it.total_runtime_ms > 0) ? it.total_runtime_ms : 0,
@@ -806,7 +808,9 @@ async function loadWatchData(): Promise<{ count: number; from: 'real' | 'sample'
             poster: '',
             fn: {
                 year: it.year || new Date().getFullYear(),
-                genres: Array.isArray(it.genres) ? it.genres : (typeof it.genre === 'string' ? [it.genre] : ['未分类']),
+                // TMDB 中文类型标签；主进程已尽力获取，空则回退"未分类"（满足"获取不到显示未分类"）。
+                genres: (Array.isArray(it.genres) && it.genres.length) ? it.genres
+                    : (typeof it.genre === 'string' ? [it.genre] : ['未分类']),
                 cast: Array.isArray(it.cast) ? it.cast : [],
                 douban: typeof it.douban_rating === 'number' ? it.douban_rating :
                     (typeof it.douban_score === 'number' ? it.douban_score : 0),
