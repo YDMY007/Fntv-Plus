@@ -224,11 +224,11 @@ const WH_CSS = `
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
   --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
-  --wh-card-bg:#1a1a1d;--wh-radius:18px}
+  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.07);--wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353}
 #${PANEL_ID}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
   --wh-text:#1d1d1f;--wh-text2:#515154;--wh-text3:#86868b;--wh-line:rgba(0,0,0,.1);
   --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:#fff;
-  --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee}
+  --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39}
 
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
@@ -287,13 +287,29 @@ const WH_CSS = `
 #${PANEL_ID} .wh-stat b{font-size:22px;font-weight:700}
 #${PANEL_ID} .wh-stat span{font-size:12px;color:var(--wh-text2);margin-left:3px}
 #${PANEL_ID} .wh-chart-wrap{position:relative}
-#${PANEL_ID} .wh-chart-bars{display:flex;align-items:flex-end;gap:5px;height:170px;padding-top:6px}
-#${PANEL_ID} .wh-bar{flex:1;border-radius:6px 6px 2px 2px;background:var(--wh-bar-empty);
-  min-height:4px;transition:.15s;cursor:pointer;position:relative}
-#${PANEL_ID} .wh-bar.has{background:linear-gradient(180deg,var(--wh-accent),#1d5fa8)}
-#${PANEL_ID} .wh-bar.today{background:linear-gradient(180deg,#7bbcff,#2997ff);box-shadow:0 0 14px rgba(41,151,255,.5)}
-#${PANEL_ID} .wh-bar:hover{filter:brightness(1.2)}
-#${PANEL_ID} .wh-chart-axis{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--wh-text3)}
+/* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
+#${PANEL_ID} .wh-heat{margin-top:4px}
+#${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+#${PANEL_ID} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
+#${PANEL_ID} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
+#${PANEL_ID} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
+#${PANEL_ID} .wh-heat-legend .wh-cell{width:11px;height:11px;border-radius:2px}
+#${PANEL_ID} .wh-heat-body{display:flex;gap:8px;align-items:flex-start}
+#${PANEL_ID} .wh-heat-days{display:grid;grid-template-rows:repeat(7,11px);gap:3px;font-size:10px;color:var(--wh-text3);flex:none;margin-top:18px}
+#${PANEL_ID} .wh-heat-days span{line-height:11px;height:11px;visibility:hidden}
+#${PANEL_ID} .wh-heat-days span.show{visibility:visible}
+#${PANEL_ID} .wh-heat-scroll{overflow-x:auto;flex:1;padding-bottom:4px}
+#${PANEL_ID} .wh-heat-months{position:relative;height:14px;margin-bottom:4px;white-space:nowrap}
+#${PANEL_ID} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3)}
+#${PANEL_ID} .wh-heat-cols{display:flex;gap:3px}
+#${PANEL_ID} .wh-heat-week{display:grid;grid-template-rows:repeat(7,11px);gap:3px}
+#${PANEL_ID} .wh-cell{width:11px;height:11px;border-radius:2px;background:var(--wh-hm-0);cursor:pointer;transition:transform .1s}
+#${PANEL_ID} .wh-cell.l1{background:var(--wh-hm-1)}
+#${PANEL_ID} .wh-cell.l2{background:var(--wh-hm-2)}
+#${PANEL_ID} .wh-cell.l3{background:var(--wh-hm-3)}
+#${PANEL_ID} .wh-cell.l4{background:var(--wh-hm-4)}
+#${PANEL_ID} .wh-cell.future{background:transparent;cursor:default}
+#${PANEL_ID} .wh-cell:hover{transform:scale(1.3);outline:1px solid var(--wh-line);outline-offset:1px}
 #${PANEL_ID} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
   border:1px solid var(--wh-line);padding:7px 11px;border-radius:10px;font-size:12px;pointer-events:none;
   opacity:0;transition:.12s;white-space:nowrap;z-index:20}
@@ -443,8 +459,7 @@ function buildPanel(): void {
               </div>
             </div>
             <div class="wh-chart-wrap" id="wh-chart-wrap">
-              <div class="wh-chart-bars" id="wh-chart-bars"></div>
-              <div class="wh-chart-axis" id="wh-chart-axis"></div>
+              <div class="wh-heat" id="wh-heat"></div>
               <div class="wh-chart-tip" id="wh-chart-tip"></div>
             </div>
           </div>
@@ -744,50 +759,128 @@ function updatePillCounts(): void {
     });
 }
 
+let _heatTipBound = false;
 function renderChart(): void {
-    const barsEl = $('wh-chart-bars');
-    const axisEl = $('wh-chart-axis');
-    const tip = $('wh-chart-tip');
     const wrap = $('wh-chart-wrap');
-    if (!barsEl || !axisEl || !tip || !wrap) return;
+    const tip = $('wh-chart-tip');
+    const heat = $('wh-heat');
+    const ct = $('wh-chart-ct'); const cs = $('wh-chart-cs');
+    if (!wrap || !tip || !heat) return;
 
-    // 真实分桶：近 30 天，每天统计"当天有播放记录的作品数"（基于各作品最近一次播放日）
     const dayMs = 86400000;
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const buckets = new Array(30).fill(0); // 索引 0=最旧(29天前) … 29=今天
+
+    // ① 每部作品按"最近一次播放"分桶到天（真实 lastPlayedAt 优先，否则解析 sessions 日期）
+    const dayCount = new Map<string, number>(); // key = `${年}-${月}-${日}`
     for (const it of curData) {
         const ts = lastPlayedTs(it);
         if (!ts) continue;
         const d = new Date(ts); d.setHours(0, 0, 0, 0);
-        const diff = Math.round((today.getTime() - d.getTime()) / dayMs);
-        if (diff >= 0 && diff < 30) buckets[29 - diff] += 1;
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        dayCount.set(key, (dayCount.get(key) || 0) + 1);
     }
-    const activeDays = buckets.filter((c) => c > 0).length;
-    const maxC = Math.max(1, ...buckets);
 
-    barsEl.innerHTML = '';
-    axisEl.innerHTML = '';
-    buckets.forEach((c, i) => {
-        const isToday = i === 29;
-        const bar = document.createElement('div');
-        bar.className = 'wh-bar' + (c > 0 ? ' has' : '') + (isToday ? ' today' : '');
-        bar.style.height = Math.max(4, (c / maxC) * 100) + '%';
-        const d = new Date(today.getTime() + (i - 29) * dayMs);
-        const lbl = isToday ? '今天' : `${d.getMonth() + 1}/${d.getDate()}`;
-        bar.addEventListener('mouseenter', (e: MouseEvent) => {
-            const r = (e.target as HTMLElement).getBoundingClientRect();
-            const wr = wrap.getBoundingClientRect();
-            tip.innerHTML = c > 0 ? `${lbl} · <b>${c} 部作品</b>` : `${lbl} · 未观看`;
+    // ② 近 30 天活跃天数（顶部统计条沿用旧口径）
+    const buckets30 = new Array(30).fill(0);
+    for (const it of curData) {
+        const ts = lastPlayedTs(it); if (!ts) continue;
+        const d = new Date(ts); d.setHours(0, 0, 0, 0);
+        const diff = Math.round((today.getTime() - d.getTime()) / dayMs);
+        if (diff >= 0 && diff < 30) buckets30[29 - diff] += 1;
+    }
+    const activeDays = buckets30.filter((c) => c > 0).length;
+
+    // ③ GitHub 风格热力图：过去 53 周（≈一年），列=周、行=星期(日→六)
+    const NUM_WEEKS = 53;
+    const start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+    start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
+    const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+    const STEP = 14; // 单元格 11px + 间距 3px（月份标签 left 偏移以此对齐）
+    const weeks: { date: Date; count: number; future: boolean }[][] = [];
+    const cursor = new Date(start);
+    let yearTotal = 0, yearActive = 0;
+    while (cursor <= today) {
+        const col: { date: Date; count: number; future: boolean }[] = [];
+        for (let dow = 0; dow < 7; dow++) {
+            const future = cursor > today;
+            const key = `${cursor.getFullYear()}-${cursor.getMonth()}-${cursor.getDate()}`;
+            const count = dayCount.get(key) || 0;
+            if (!future && count > 0) { yearTotal += count; yearActive++; }
+            col.push({ date: new Date(cursor), count: future ? 0 : count, future });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        weeks.push(col);
+    }
+
+    // 颜色档位：0=空 1=1部 2=2~3部 3=4~5部 4=6部+
+    const level = (c: number) => (c <= 0 ? 0 : c === 1 ? 1 : c <= 3 ? 2 : c <= 5 ? 3 : 4);
+
+    // 月份标签：每列取该周首日(周日)的月份，月份变化时打一个标签
+    const monthLabels: { left: number; text: string }[] = [];
+    let lastMonth = -1;
+    weeks.forEach((wk, wi) => {
+        const m = wk[0].date.getMonth();
+        if (m !== lastMonth) {
+            monthLabels.push({ left: wi * STEP, text: `${wk[0].date.getFullYear()}年${m + 1}月` });
+            lastMonth = m;
+        }
+    });
+
+    // 单元格 HTML（列=周）
+    let cellsHTML = '';
+    weeks.forEach((wk) => {
+        let colHTML = '<div class="wh-heat-week">';
+        for (const cell of wk) {
+            const lv = cell.future ? -1 : level(cell.count);
+            const cls = 'wh-cell' + (cell.future ? ' future' : (lv > 0 ? ' l' + lv : ''));
+            const ds = `${cell.date.getFullYear()}-${cell.date.getMonth() + 1}-${cell.date.getDate()}`;
+            colHTML += `<div class="${cls}" data-date="${ds}" data-cnt="${cell.future ? 0 : cell.count}"></div>`;
+        }
+        cellsHTML += colHTML + '</div>';
+    });
+    const monthsHTML = monthLabels.map((m) => `<span class="wh-heat-month" style="left:${m.left}px">${m.text}</span>`).join('');
+    let daysHTML = '';
+    for (let i = 0; i < 7; i++) {
+        const show = (i === 1 || i === 3 || i === 5); // 仅显示 一/三/五
+        daysHTML += `<span class="${show ? 'show' : ''}">${WEEKDAYS[i]}</span>`;
+    }
+
+    heat.innerHTML = `
+      <div class="wh-heat-head">
+        <div class="wh-heat-total">过去一年 共观看 <b>${yearTotal}</b> 部 · 活跃 <b>${yearActive}</b> 天</div>
+        <div class="wh-heat-legend">少
+          <span class="wh-cell l1" style="pointer-events:none"></span>
+          <span class="wh-cell l2" style="pointer-events:none"></span>
+          <span class="wh-cell l3" style="pointer-events:none"></span>
+          <span class="wh-cell l4" style="pointer-events:none"></span>
+          多
+        </div>
+      </div>
+      <div class="wh-heat-body">
+        <div class="wh-heat-days">${daysHTML}</div>
+        <div class="wh-heat-scroll">
+          <div class="wh-heat-months">${monthsHTML}</div>
+          <div class="wh-heat-cols">${cellsHTML}</div>
+        </div>
+      </div>`;
+
+    // tooltip：事件委托挂在 heat 容器上，仅绑定一次（免疫 innerHTML 重建）
+    if (!_heatTipBound) {
+        _heatTipBound = true;
+        heat.addEventListener('mouseover', (e: Event) => {
+            const t = (e.target as HTMLElement);
+            if (!t.classList || !t.classList.contains('wh-cell') || t.classList.contains('future')) return;
+            const cnt = parseInt(t.dataset.cnt || '0', 10);
+            const ds = t.dataset.date || '';
+            tip.innerHTML = cnt > 0 ? `${ds} · <b>${cnt} 部作品</b>` : `${ds} · 未观看`;
+            const r = t.getBoundingClientRect();
+            const wr = (wrap as HTMLElement).getBoundingClientRect();
             tip.style.left = (r.left - wr.left + r.width / 2) + 'px';
-            tip.style.top = (r.top - wr.top - 8) + 'px';
+            tip.style.top = (r.top - wr.top - 6) + 'px';
             tip.classList.add('show');
         });
-        bar.addEventListener('mouseleave', () => tip.classList.remove('show'));
-        barsEl.appendChild(bar);
-        const ax = document.createElement('span');
-        ax.textContent = (i % 5 === 0 || i === 29) ? lbl : '';
-        axisEl.appendChild(ax);
-    });
+        heat.addEventListener('mouseout', () => tip.classList.remove('show'));
+    }
 
     // 顶部统计（真实可算指标）
     const total = curData.length;
@@ -800,9 +893,8 @@ function renderChart(): void {
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     }).length;
 
-    const ct = $('wh-chart-ct'); const cs = $('wh-chart-cs');
-    if (ct) ct.textContent = '近 30 天观看趋势';
-    if (cs) cs.textContent = activeDays > 0 ? `${activeDays} 天有观看` : '近 30 天暂无观看';
+    if (ct) ct.textContent = '观影活跃度';
+    if (cs) cs.textContent = `过去一年 · 活跃 ${yearActive} 天`;
     const totalMs = curData.reduce((s, i) => s + (i.totalRuntimeMs || 0), 0);
     const totalH = Math.round(totalMs / 3600000);
     const elDays = $('wh-stat-days'); if (elDays) elDays.textContent = String(activeDays);
