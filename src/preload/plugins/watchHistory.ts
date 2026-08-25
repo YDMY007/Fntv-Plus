@@ -345,9 +345,18 @@ const WH_CSS = `
   padding:24px 26px;display:flex;flex-direction:column;justify-content:flex-start}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
 #${PANEL_ID} .wh-heat{margin-top:0}
-#${PANEL_ID} .wh-heat-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+#${PANEL_ID} .wh-heat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+#${PANEL_ID} .wh-heat-title-wrap{display:flex;flex-direction:column;gap:4px;min-width:0}
 #${PANEL_ID} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
 #${PANEL_ID} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
+#${PANEL_ID} .wh-heat-range-label{font-size:11px;color:var(--wh-text3);font-variant-numeric:tabular-nums;letter-spacing:.2px}
+#${PANEL_ID} .wh-heat-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;flex:none}
+#${PANEL_ID} .wh-heat-range{display:inline-flex;background:var(--wh-surface2);border:1px solid var(--wh-line);
+  border-radius:9px;padding:2px;gap:2px}
+#${PANEL_ID} .wh-range-btn{border:none;background:transparent;color:var(--wh-text2);font-size:12px;font-weight:600;
+  padding:4px 11px;border-radius:7px;cursor:pointer;transition:background .15s,color .15s;font-family:inherit;line-height:1.4}
+#${PANEL_ID} .wh-range-btn:hover{color:var(--wh-text)}
+#${PANEL_ID} .wh-range-btn.active{background:var(--wh-accent);color:#fff}
 #${PANEL_ID} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
 #${PANEL_ID} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:2px}
 #${PANEL_ID} .wh-heat-body{display:flex;gap:10px;align-items:flex-start}
@@ -879,6 +888,10 @@ function updatePillCounts(): void {
 }
 
 let _heatTipBound = false;
+// 热力图时间范围：月(≈5周) / 季(≈14周) / 年(53周) / 全部(数据最早年份→今天)
+type HeatRange = 'month' | 'quarter' | 'year' | 'all';
+let _heatRange: HeatRange = 'year';
+
 function renderChart(): void {
     const wrap = $('wh-chart-wrap');
     const tip = $('wh-chart-tip');
@@ -912,9 +925,33 @@ function renderChart(): void {
         if ((dayCount.get(key) || 0) > 0) activeDays++;
     }
 
-    // ③ GitHub 风格热力图：过去 53 周（≈一年），列=周、行=星期(日→六)
-    const NUM_WEEKS = 53;
-    const start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+    // ③ GitHub 风格热力图：列=周、行=星期(日→六)，按所选范围决定起止
+    // 计算起点：先确定结束(含今天)与起点周数
+    let NUM_WEEKS: number;
+    let start: Date;
+    if (_heatRange === 'month') {
+        NUM_WEEKS = 5; // 约一个月
+        start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+    } else if (_heatRange === 'quarter') {
+        NUM_WEEKS = 14; // 约一个季度
+        start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+    } else if (_heatRange === 'all') {
+        // 从台账里最早的年份 1 月 1 日开始（对齐周日），保证 2025 等历史年份都能显示
+        let minYear = today.getFullYear();
+        for (const k of dayCount.keys()) {
+            const y = parseInt(k.split('-')[0], 10);
+            if (!isNaN(y) && y < minYear) minYear = y;
+        }
+        start = new Date(minYear, 0, 1);
+        // 补齐到周日列
+        start.setDate(start.getDate() - start.getDay());
+        const days = Math.round((today.getTime() - start.getTime()) / dayMs) + 1;
+        NUM_WEEKS = Math.ceil(days / 7);
+    } else {
+        NUM_WEEKS = 53; // 默认一年
+        start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
+    }
+    start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - start.getDay()); // 对齐到周日(行 0)
     const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
     const STEP = 16; // 单元格 12px + 间距 4px（月份标签 left 偏移以此对齐）
@@ -969,15 +1006,31 @@ function renderChart(): void {
         daysHTML += `<span class="${show ? 'show' : ''}" style="line-height:12px;height:12px">${WEEKDAYS[i]}</span>`;
     }
 
+    // 范围标签：起始年.月 → 今天年.月
+    const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
+    const rangeLabel = `${start.getFullYear()}.${pad(start.getMonth() + 1)} – ${today.getFullYear()}.${pad(today.getMonth() + 1)}`;
+    const RANGES: { k: HeatRange; t: string }[] = [
+        { k: 'month', t: '月' }, { k: 'quarter', t: '季' }, { k: 'year', t: '年' }, { k: 'all', t: '全部' },
+    ];
+    const rangeBtns = RANGES.map((r) =>
+        `<button type="button" class="wh-range-btn${_heatRange === r.k ? ' active' : ''}" data-range="${r.k}">${r.t}</button>`
+    ).join('');
+
     heat.innerHTML = `
       <div class="wh-heat-head">
-        <div class="wh-heat-total">观影活动热力图</div>
-        <div class="wh-heat-legend">少
-          <span class="wh-cell l1" style="pointer-events:none"></span>
-          <span class="wh-cell l2" style="pointer-events:none"></span>
-          <span class="wh-cell l3" style="pointer-events:none"></span>
-          <span class="wh-cell l4" style="pointer-events:none"></span>
-          多
+        <div class="wh-heat-title-wrap">
+          <div class="wh-heat-total">观影活动热力图</div>
+          <div class="wh-heat-range-label" id="wh-heat-range-label">${rangeLabel}</div>
+        </div>
+        <div class="wh-heat-tools">
+          <div class="wh-heat-range" id="wh-heat-range">${rangeBtns}</div>
+          <div class="wh-heat-legend">少
+            <span class="wh-cell l1" style="pointer-events:none"></span>
+            <span class="wh-cell l2" style="pointer-events:none"></span>
+            <span class="wh-cell l3" style="pointer-events:none"></span>
+            <span class="wh-cell l4" style="pointer-events:none"></span>
+            多
+          </div>
         </div>
       </div>
       <div class="wh-heat-body">
@@ -988,7 +1041,7 @@ function renderChart(): void {
         </div>
       </div>`;
 
-    // tooltip：事件委托挂在 heat 容器上，仅绑定一次（免疫 innerHTML 重建）
+    // 事件委托挂在 heat 容器上，仅绑定一次（免疫 innerHTML 重建）
     if (!_heatTipBound) {
         _heatTipBound = true;
         heat.addEventListener('mouseover', (e: Event) => {
@@ -1004,6 +1057,13 @@ function renderChart(): void {
             tip.classList.add('show');
         });
         heat.addEventListener('mouseout', () => tip.classList.remove('show'));
+        // 范围切换（月/季/年/全部）：委托在 heat 上，按钮随 innerHTML 重建也不丢监听
+        heat.addEventListener('click', (e: Event) => {
+            const b = (e.target as HTMLElement).closest('.wh-range-btn') as HTMLElement | null;
+            if (!b) return;
+            const r = b.dataset.range as HeatRange;
+            if (r && r !== _heatRange) { _heatRange = r; renderChart(); }
+        });
     }
 
     // 顶部统计（真实可算指标）
