@@ -33,7 +33,7 @@ interface FnMeta {
     year: number;
     genres: string[];
     cast: string[];
-    ratings: { fnos: number; tmdb: number; tmdbVotes: number }; // 多平台评分：飞牛影视 / TMDB(直连)
+    ratings: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number }; // 多平台评分：TMDB(飞牛缓存) / 豆瓣(现取)
     overview: string;
 }
 interface ShowItem {
@@ -105,47 +105,47 @@ function starsSVG(r: number): string {
 // 标注：v1 为示例数据，真实数据后续由 loadWatchData() 接入 fnOS。
 const SAMPLE: ShowItem[] = [
     { name: '沙丘 2', type: '电影', last: '3 天前', prog: 0.68, art: grad('#3a2a1a', '#120c08'),
-      fn: { year: 2024, genres: ['科幻', '冒险'], cast: ['提莫西·查拉梅', '赞达亚'], ratings: { fnos: 8.0, tmdb: 8.1, tmdbVotes: 4321 },
+      fn: { year: 2024, genres: ['科幻', '冒险'], cast: ['提莫西·查拉梅', '赞达亚'], ratings: { tmdb: 8.0, tmdbVotes: 4321, douban: 8.0, doubanVotes: 350000 },
         overview: '保罗·厄崔迪联合契妮与弗雷曼人，踏上复仇与拯救宇宙之路，在沙漠星球的权谋与信仰间抉择。' },
       myRating: 4, myReview: '视效封神，沙丘美学拉满，中段节奏偏慢但收尾有力。',
       sessions: [['08-21 22:14', '01:02:11 / 01:46:00'], ['08-19 21:40', '00:38:00 / 01:46:00']] },
     { name: '繁花', type: '剧集', last: '5 天前', prog: 0.34, art: grad('#3a1a2a', '#140810'),
-      fn: { year: 2023, genres: ['剧情', '年代'], cast: ['胡歌', '马伊琍', '唐嫣'], ratings: { fnos: 8.4, tmdb: 8.4, tmdbVotes: 3098 },
+      fn: { year: 2023, genres: ['剧情', '年代'], cast: ['胡歌', '马伊琍', '唐嫣'], ratings: { tmdb: 8.4, tmdbVotes: 3098, douban: 8.4, doubanVotes: 120000 },
         overview: '上世纪九十年代的上海，阿宝从街头小贩成长为商界巨擘，在时代浪潮与儿女情长中沉浮。' },
       myRating: 5, myReview: '沪语版味道绝了，王家卫的腔调扑面而来。',
       sessions: [['08-19 20:50', '00:14:20 / 00:45:00'], ['08-18 21:10', '00:00:00 / 00:45:00']] },
     { name: '周处除三害', type: '电影', last: '4 天前', prog: 0.91, art: grad('#1a2a3a', '#081018'),
-      fn: { year: 2023, genres: ['动作', '犯罪'], cast: ['阮经天'], ratings: { fnos: 8.1, tmdb: 8.2, tmdbVotes: 2765 },
+      fn: { year: 2023, genres: ['动作', '犯罪'], cast: ['阮经天'], ratings: { tmdb: 8.1, tmdbVotes: 2765, douban: 8.2, doubanVotes: 600000 },
         overview: '通缉犯陈桂林在生命尽头决定铲除排在自己之前的两名头号罪犯，完成一场血色救赎。' },
       myRating: 5, myReview: '爽。高潮戏段落堪称年度名场面。',
       sessions: [['08-20 23:30', '01:45:00 / 01:54:00']] },
     { name: '葬送的芙莉莲', type: '动漫', last: '上周', prog: 0.45, art: grad('#2a1a3a', '#100818'),
-      fn: { year: 2023, genres: ['奇幻', '冒险'], cast: ['原菜乃羽', '小林亲弘'], ratings: { fnos: 9.0, tmdb: 8.9, tmdbVotes: 5120 },
+      fn: { year: 2023, genres: ['奇幻', '冒险'], cast: ['原菜乃羽', '小林亲弘'], ratings: { tmdb: 9.0, tmdbVotes: 5120, douban: 9.3, doubanVotes: 200000 },
         overview: '人类魔法使与精灵战士芙莉莲踏上重温已故勇者足迹的旅程，追问生命与遗忘的意义。' },
       myRating: 4, myReview: '把"时间"讲得这么温柔的冒险番不多见。',
       sessions: [['08-14 19:00', '00:13:00 / 00:24:00']] },
     { name: '奥本海默', type: '电影', last: '上周', prog: 0.12, art: grad('#2a2a1a', '#101008'),
-      fn: { year: 2023, genres: ['传记', '历史'], cast: ['基里安·墨菲'], ratings: { fnos: 8.8, tmdb: 8.6, tmdbVotes: 6410 },
+      fn: { year: 2023, genres: ['传记', '历史'], cast: ['基里安·墨菲'], ratings: { tmdb: 8.8, tmdbVotes: 6410, douban: 8.9, doubanVotes: 500000 },
         overview: '原子弹之父奥本海默在荣耀与良知、政治与科学之间被撕扯的一生。' },
       myRating: 0, myReview: '',
       sessions: [['08-13 21:00', '00:14:00 / 03:00:00']] },
     { name: '流浪地球 2', type: '电影', last: '2 周前', prog: 1, art: grad('#10283a', '#04101c'),
-      fn: { year: 2023, genres: ['科幻', '灾难'], cast: ['吴京', '刘德华', '李雪健'], ratings: { fnos: 8.3, tmdb: 8.3, tmdbVotes: 8844 },
+      fn: { year: 2023, genres: ['科幻', '灾难'], cast: ['吴京', '刘德华', '李雪健'], ratings: { tmdb: 8.3, tmdbVotes: 8844, douban: 8.3, doubanVotes: 800000 },
         overview: '太阳危机来临前，人类启动带着地球逃离的方舟计划，在分裂与团结间赌上文明存续。' },
       myRating: 5, myReview: '中国科幻的天花板，太空电梯那段值回票价。',
       sessions: [['08-08 20:00', '03:00:00 / 03:00:00']] },
     { name: '庆余年', type: '剧集', last: '2 周前', prog: 0.78, art: grad('#2a2410', '#100c04'),
-      fn: { year: 2019, genres: ['古装', '权谋'], cast: ['张若昀', '李沁'], ratings: { fnos: 7.9, tmdb: 7.8, tmdbVotes: 1533 },
+      fn: { year: 2019, genres: ['古装', '权谋'], cast: ['张若昀', '李沁'], ratings: { tmdb: 7.9, tmdbVotes: 1533, douban: 7.9, doubanVotes: 400000 },
         overview: '现代青年魂穿架空王朝，以才学与机变在波谲云诡的朝堂中走出自己的人生。' },
       myRating: 4, myReview: '轻松又带脑，二刷依旧上头。',
       sessions: [['08-07 21:30', '00:35:00 / 00:45:00']] },
     { name: '间谍过家家', type: '动漫', last: '3 周前', prog: 0.56, art: grad('#3a2010', '#140a04'),
-      fn: { year: 2022, genres: ['搞笑', '日常'], cast: ['江口拓也', '种崎敦美'], ratings: { fnos: 9.0, tmdb: 8.9, tmdbVotes: 5120 },
+      fn: { year: 2022, genres: ['搞笑', '日常'], cast: ['江口拓也', '种崎敦美'], ratings: { tmdb: 9.0, tmdbVotes: 5120, douban: 9.0, doubanVotes: 150000 },
         overview: '间谍、杀手与读心超能力少女，为各自任务伪装成一家人，却意外收获真正的温暖。' },
       myRating: 5, myReview: '阿尼亚表情包本包，全家最萌。',
       sessions: [['08-01 18:00', '00:13:00 / 00:24:00']] },
     { name: '满江红', type: '电影', last: '上月', prog: 1, art: grad('#3a1010', '#140404'),
-      fn: { year: 2023, genres: ['剧情', '悬疑'], cast: ['沈腾', '易烊千玺'], ratings: { fnos: 7.0, tmdb: 7.1, tmdbVotes: 2207 },
+      fn: { year: 2023, genres: ['剧情', '悬疑'], cast: ['沈腾', '易烊千玺'], ratings: { tmdb: 7.0, tmdbVotes: 2207, douban: 7.0, doubanVotes: 450000 },
         overview: '南宋绍兴年间，一场刺杀引爆层层阴谋，小兵与宰相在封闭宅院里上演生死博弈。' },
       myRating: 4, myReview: '反转密集，最后全军诵词那刻鸡皮疙瘩起来了。',
       sessions: [['07-20 19:00', '02:40:00 / 02:40:00']] },
@@ -581,19 +581,19 @@ function fmtVotes(v: number): string {
     return v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v);
 }
 
-/** 多平台评分条：TMDB（飞牛刮削缓存）+ TMDB（直连校验），各自一格。
- *  飞牛 vote_average 的真实数据源就是 TMDB（飞牛从 TMDB 刮削缓存），故第一张卡标注「TMDB」；
- *  第二张卡为 TMDB API 直连实时值（独立二次获取，可验证缓存是否滞后）。
- *  无论直连是否取到值，双卡始终同时展示（无值显示「暂无」）。 */
-function renderRatings(r: { fnos: number; tmdb: number; tmdbVotes: number }): string {
+/** 多平台评分条：TMDB（飞牛刮削缓存）+ 豆瓣（主进程现取），各自一格。
+ *  TMDB 卡=飞牛影视已刮削缓存的 vote_average（直接可用，源自 TMDB）；
+ *  豆瓣卡=飞牛不提供，主进程现取豆瓣评分。两卡始终同时展示，无值显示「暂无」。 */
+function renderRatings(r: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number }): string {
     const cell = (label: string, score: number, sub?: string) =>
         `<div class="wh-rating"><div class="rl">${label}</div>` +
         `<div class="rs">${score > 0 ? score.toFixed(1) : '暂无'}</div>` +
         (sub ? `<div class="rc">${sub}</div>` : '') + `</div>`;
-    // 始终渲染双卡：第一张=飞牛缓存的 TMDB 分，第二张=TMDB 直连实时分
-    let h = cell('TMDB', r.fnos, r.fnos > 0 ? '飞牛缓存' : '');
-    const vc = fmtVotes(r.tmdbVotes);
-    h += cell('TMDB', r.tmdb, r.tmdb > 0 ? (vc ? `${vc} 人评` : '直连') : '');
+    // 飞牛有的直接用：TMDB 卡取 fnOS 缓存的 vote_average；豆瓣卡取主进程现拉的真实豆瓣评分
+    const tv = fmtVotes(r.tmdbVotes);
+    const dv = fmtVotes(r.doubanVotes);
+    let h = cell('TMDB', r.tmdb, r.tmdb > 0 ? (tv ? `${tv} 人评` : '飞牛缓存') : '');
+    h += cell('豆瓣', r.douban, r.douban > 0 ? (dv ? `${dv} 人评` : '实时') : '');
     return h;
 }
 
@@ -952,9 +952,10 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
                     : (typeof it.genre === 'string' ? [it.genre] : ['未分类']),
                 cast: Array.isArray(it.cast) ? it.cast : [],
                 ratings: {
-                    fnos: typeof it.fnos_rating === 'number' ? it.fnos_rating : 0,
-                    tmdb: typeof it.tmdb_rating === 'number' ? it.tmdb_rating : 0,
+                    tmdb: typeof it.fnos_rating === 'number' ? it.fnos_rating : 0,
                     tmdbVotes: typeof it.tmdb_votes === 'number' ? it.tmdb_votes : 0,
+                    douban: typeof it.douban_rating === 'number' ? it.douban_rating : 0,
+                    doubanVotes: typeof it.douban_votes === 'number' ? it.douban_votes : 0,
                 },
                 overview: it.overview || '暂无简介（来自飞牛影视）',
             },

@@ -10,6 +10,7 @@ import * as fn from '../../../modules/fn_api/api';
 import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
 import { tmdbGenresFor } from './tmdbSync';
+import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
 const log = logger.component('douban');
 
 /**
@@ -700,6 +701,67 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
     return { category, genres, tmdbRating, tmdbVotes };
 }
 
+/**
+ * 取豆瓣评分（0~10）+ 参评人数。飞牛影视本身不提供豆瓣评分，故此函数现取：
+ *  1) 解析豆瓣条目 id：优先用飞牛已刮削的 it.douban_id；否则复用 getDoubanId（标题搜豆瓣，公开搜索页无需登录）；
+ *  2) 拉条目页 HTML（公开，无需 cookie）抠 rating_num（评分）与 property="v:votes"（参评人数）；
+ *  3) 按 douban_id 每日磁盘缓存（getDailyCached），避免每次开面板都打豆瓣、也防限流；失败/无值返回 0/0。
+ */
+async function fetchDoubanRating(it: any, fnapi: any): Promise<{ rating: number; votes: number }> {
+    let doubanId = '';
+    const raw = it && it.douban_id;
+    if (raw && /^\d+$/.test(String(raw))) doubanId = String(raw);
+    if (!doubanId) {
+        try {
+            doubanId = await getDoubanId(it && it.guid ? String(it.guid) : '', { item: it }, fnapi);
+        } catch (e: any) {
+            log.warn('[豆瓣] 评分：解析 douban_id 失败', String(e && e.message || e));
+        }
+    }
+    if (!doubanId) return { rating: 0, votes: 0 };
+    const cacheKey = 'douban_rating_' + doubanId;
+    try {
+        const r = await getDailyCached(cacheKey, async () => {
+            const url = `https://movie.douban.com/subject/${doubanId}/`;
+            const resp = await axios.get(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+                    'Referer': 'https://movie.douban.com/',
+                },
+                timeout: 12000,
+            });
+            const html = typeof resp.data === 'string' ? resp.data : '';
+            let rating = 0, votes = 0;
+            // 1) 优先解析条目页内嵌的 JSON-LD（aggregateRating，结构最稳）
+            const ld = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/);
+            if (ld) {
+                try {
+                    const obj = JSON.parse(ld[1]);
+                    const ar = obj && obj.aggregateRating;
+                    if (ar) {
+                        if (ar.ratingValue != null) rating = parseFloat(String(ar.ratingValue));
+                        if (ar.ratingCount != null) votes = parseInt(String(ar.ratingCount).replace(/,/g, ''), 10);
+                    }
+                } catch (e: any) { /* JSON-LD 解析失败则走正则兜底 */ }
+            }
+            // 2) 兜底：rating_num 类 + v:votes 属性
+            if (!rating) {
+                const m = html.match(/<strong[^>]*class="[^"]*rating_num[^"]*"[^>]*>([\d.]+)<\/strong>/);
+                if (m) rating = parseFloat(m[1]);
+            }
+            if (!votes) {
+                const v = html.match(/<span[^>]*property="v:votes"[^>]*>([\d,]+)<\/span>/);
+                if (v) votes = parseInt(String(v[1]).replace(/,/g, ''), 10);
+            }
+            return { rating, votes };
+        }, DEFAULT_TTL_MS, false);
+        return { rating: (r.data && r.data.rating) || 0, votes: (r.data && r.data.votes) || 0 };
+    } catch (e: any) {
+        log.warn('[豆瓣] 评分拉取失败', doubanId, String(e && e.message || e));
+        return { rating: 0, votes: 0 };
+    }
+}
+
 async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTotal: number }> {
     const fnapi = getFnapiFresh();
     if (!fnapi) {
@@ -733,10 +795,12 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
         });
         const kept = analyzed.filter((x: any) => x !== null);
         // 第二步：仅对保留的（含部分看）条目补 TMDB 分类/类型标签，避免对 122 部未看剧浪费 TMDB 配额。
-        const items = await mapLimit(kept, 4, async (pair: any) => {
+        const items = await mapLimit(kept, 3, async (pair: any) => {
             const { it, a } = pair;
             const enr = await enrichWithTmdb(it);
-            // fnOS 列表项自带 vote_average（字符串，飞牛从 TMDB 刮削并缓存的评分）——即"飞牛自动获取的评分"
+            // 豆瓣评分：飞牛不提供，主进程现取（按 douban_id 每日缓存，防限流）
+            const db = await fetchDoubanRating(it, fnapi);
+            // fnOS 列表项自带 vote_average（字符串，飞牛从 TMDB 刮削并缓存的评分）——即"飞牛自动获取的 TMDB 评分"
             const va = parseFloat(String(it.vote_average || '0'));
             return {
                 guid: it.guid,
@@ -755,10 +819,12 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
                 last_played: a.last_played, // ms
                 progress: a.progress,       // 0..1：电视剧=已看集数/总集数
                 total_runtime_ms: a.total_runtime_ms,
-                // 多平台评分：fnos_rating=飞牛影视(源自 TMDB 刮削) / tmdb_rating+tmdb_votes=TMDB 直连(独立二次获取)
+                // 多平台评分：fnos_rating=飞牛影视缓存的 TMDB 评分(直接可用) / douban_rating+douban_votes=主进程现取豆瓣评分
                 fnos_rating: isNaN(va) ? 0 : va,
                 tmdb_rating: enr.tmdbRating,
                 tmdb_votes: enr.tmdbVotes,
+                douban_rating: db.rating,
+                douban_votes: db.votes,
             };
         });
         const done = items.filter((x: any) => x.progress >= 1).length;
