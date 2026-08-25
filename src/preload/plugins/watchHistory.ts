@@ -238,11 +238,11 @@ const WH_CSS = `
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap}
 #${PANEL_ID} .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
 #${PANEL_ID} .wh-pill.active{background:var(--wh-accent);color:#fff;font-weight:600}
-#${PANEL_ID} .wh-close{width:40px;height:40px;flex:none;border-radius:50%;cursor:pointer;
-  border:1px solid var(--wh-line);background:var(--wh-surface);color:var(--wh-text);
-  font-size:18px;display:flex;align-items:center;justify-content:center;transition:.15s;
-  user-select:none;-webkit-user-select:none}
-#${PANEL_ID} .wh-close:hover{background:var(--wh-surface2);border-color:var(--wh-accent);color:var(--wh-accent)}
+#${PANEL_ID} .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:6px 8px;
+  font-size:20px;line-height:1;color:var(--wh-text2);
+  display:flex;align-items:center;justify-content:center;
+  user-select:none;-webkit-user-select:none;pointer-events:auto;transition:color .15s}
+#${PANEL_ID} .wh-close:hover{color:var(--wh-text)}
 
 #${PANEL_ID} .wh-section{margin-top:30px;padding:0 40px}
 #${PANEL_ID} .wh-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
@@ -473,11 +473,7 @@ function buildPanel(): void {
     root.style.setProperty('backdrop-filter', 'none', 'important');
     root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 
-    // ── 关闭：✕ 按钮 + 背景点击 + Esc（三路关闭）──
-    const closeBtn = root.querySelector('#wh-close') as HTMLElement | null;
-    if (closeBtn) {
-        closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closePanel(); });
-    }
+    // ── 关闭：✕ 按钮（事件委托，避免绑定到失效节点导致偶发需点两次）+ 背景点击 + Esc（三路关闭）──
     const detailOverlay = root.querySelector('#wh-detail') as HTMLElement | null;
     if (detailOverlay) {
         detailOverlay.addEventListener('click', (e: MouseEvent) => {
@@ -487,6 +483,8 @@ function buildPanel(): void {
     // 点击面板主内容区背景（非交互元素）也可关闭
     root.addEventListener('click', (e: MouseEvent) => {
         const tgt = e.target as HTMLElement;
+        // ✕ 关闭按钮：委托判定（命中 .wh-close 或其内部）即关，且不依赖具体元素引用，杜绝偶发需点两次
+        if (tgt.closest('#wh-close')) { e.stopPropagation(); closePanel(); return; }
         // 只有点到 .wh-main 本身或其直接空白子元素才关（不误杀卡片/按钮点击）
         if (tgt === root || tgt.classList.contains('wh-main')) closePanel();
     });
