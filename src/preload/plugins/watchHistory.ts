@@ -1287,6 +1287,54 @@ function saveRatings(): void {
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
 
+// 上次真实观影数据（curData）跨重启持久化：开面板时先秒显，后台再静默刷新。
+// 仅持久化真实数据的关键字段（封面/简介复用于 _posterCache，不重复落盘），控制体积。
+const _CURDATA_LS_KEY = 'fntv_wh_curdata_v1';
+function saveCurData(): void {
+    try {
+        const slim = curData
+            .filter((i) => i.guid)
+            .map((i) => ({
+                guid: i.guid, name: i.name, type: i.type,
+                last: i.last, lastPlayedAt: i.lastPlayedAt,
+                totalRuntimeMs: i.totalRuntimeMs, prog: i.prog,
+                started: i.started,
+                myRating: i.myRating, myReview: i.myReview,
+                fn: { year: i.fn.year, genres: i.fn.genres, cast: i.fn.cast, ratings: i.fn.ratings, overview: i.fn.overview },
+            }));
+        localStorage.setItem(_CURDATA_LS_KEY, JSON.stringify(slim));
+    } catch (e: any) { log.warn(LOG, 'saveCurData 失败:', e?.message || e); }
+}
+function restoreCurData(): boolean {
+    try {
+        const raw = localStorage.getItem(_CURDATA_LS_KEY);
+        if (!raw) return false;
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || !arr.length) return false;
+        curData = arr.map((it: any, i: number): ShowItem => {
+            // 封面/简介从已加载的 _posterCache 补回（按 guid），避免重复持久化
+            const pc = it.guid ? _posterCache.get(it.guid) : undefined;
+            return {
+                guid: it.guid || '',
+                name: it.name || '未知作品',
+                type: it.type || '其他',
+                last: it.last || '未记录时间',
+                lastPlayedAt: it.lastPlayedAt || 0,
+                totalRuntimeMs: it.totalRuntimeMs || 0,
+                prog: typeof it.prog === 'number' ? it.prog : 0,
+                started: !!it.started,
+                art: artForName(it.name || `item-${i}`),
+                poster: (pc && pc.poster) || '',
+                fn: it.fn || { year: new Date().getFullYear(), genres: ['未分类'], cast: [], ratings: { tmdb: 0, tmdbVotes: 0, douban: 0, doubanVotes: 0 }, overview: '暂无简介（来自飞牛影视）' },
+                myRating: it.myRating || 0,
+                myReview: it.myReview || '',
+                sessions: it.lastPlayedAt ? [[formatDate(it.lastPlayedAt), '']] : [],
+            };
+        });
+        return true;
+    } catch (e: any) { log.warn(LOG, 'restoreCurData 失败:', e?.message || e); return false; }
+}
+
 // 本地观看记录：主进程在「真正开始播放」时回传（不依赖 fnOS 的 watched_ts）。
 // 把当天记进持久化台账，热力图/活跃度即时点亮，重启后也不丢。
 ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; ts?: number }) => {
@@ -1549,6 +1597,7 @@ async function syncFnos(): Promise<void> {
         showSkeleton(); // 重拉前先铺骨架占位，避免卡片瞬间清空/空白
         const result = await loadWatchData(true); // 立即同步：绕过 10 分钟缓存，即时拉取最新观看数据
         if (result.from === 'real') {
+            saveCurData(); // 同步后也持久化，保证下次秒开即为最新
             renderWall();
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
             updatePillCounts(); // 刷新筛选按钮上的真实分类计数
@@ -1621,9 +1670,23 @@ function openPanel(): void {
         loadPersistedRatings();
         renderChart();
 
-        // 自动加载飞牛真实数据（异步，不阻塞 UI 渲染）；用缓存（force=false）加速开面板
-        showSkeleton(); // 拉取期间先铺骨架占位，避免海报墙空白闪烁
+        // 缓存优先：先秒显上次真实数据（含封面/评分/进度），后台再静默刷新到最新
+        loadPosterCache(); // 早加载海报缓存，供即时渲染直接取封面
+        const hadCache = restoreCurData();
+        if (hadCache) {
+            renderWall();           // 即时显示上次的墙，不再等网络
+            renderChart();
+            updatePillCounts();
+            const done = curData.filter((i) => i.prog >= 1).length;
+            const partial = curData.length - done;
+            const sub = $('wh-sub');
+            if (sub) sub.innerHTML = buildSubtitleHTML(curData.length, done, partial, 0, 0, false);
+        } else {
+            showSkeleton();         // 首次无缓存才铺骨架占位
+        }
+        // 后台静默刷新（不阻塞首屏）：用缓存（force=false）加速；返回后更新并增量重绘
         loadWatchData(false).then((result) => {
+            saveCurData(); // 持久化本次真实数据，供下次秒开
             renderWall();
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
             // 数据刷新后再次兜底重涂底色（renderWall 重写 innerHTML 可能触发重排）
