@@ -220,7 +220,8 @@ const WH_CSS = `
   font-family:-apple-system,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;color:var(--wh-text);
   background:#1c1c1e!important;background-color:#1c1c1e!important;
-  backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  -webkit-app-region:no-drag} /* fnOS 无边框窗口顶部 drag 区劫持命中测试，面板整体 no-drag 防点击被拖窗口吞掉 */
 #${PANEL_ID}.show{display:block}
 #${PANEL_ID} *{box-sizing:border-box}
 #${PANEL_ID}{--wh-accent:#2997ff;--wh-bg:#1c1c1e;--wh-surface:rgba(255,255,255,.06);
@@ -239,7 +240,10 @@ const WH_CSS = `
 #${PANEL_ID} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px;z-index:10}
 #${PANEL_ID} .wh-topbar{display:flex;align-items:flex-start;justify-content:flex-start;gap:24px;
   padding:26px 40px 14px;position:sticky;top:0;z-index:60;pointer-events:auto;
-  background:inherit;transition:opacity .12s}
+  background:inherit;transition:opacity .12s;
+  -webkit-app-region:no-drag} /* fnOS 无边框窗口顶部是 drag 拖拽区，面板顶栏必须 no-drag 才能点击 */
+/* 详情为模态浮层：打开(wh-detail-open)时隐藏面板内左上角标题区，避免浮在详情页最上层遮挡内容 */
+#${PANEL_ID}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
 #${PANEL_ID} .wh-tb-left{display:flex;flex-direction:column;gap:2px}
 #${PANEL_ID} .wh-title-row{display:flex;align-items:center;gap:14px}
 #${PANEL_ID} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
@@ -266,9 +270,11 @@ const WH_CSS = `
   display:flex;align-items:center;gap:9px;pointer-events:auto;
   background:var(--wh-surface);border:1px solid rgba(128,128,128,.18);border-radius:24px;
   padding:8px 10px;box-shadow:0 10px 30px rgba(0,0,0,.35);
-  opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s}
+  opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s;
+  -webkit-app-region:no-drag} /* ⚠️ 关键：fnOS 无边框窗口顶部是 drag 拖拽区，浮层若不 no-drag，点击会被系统劫持为"拖动窗口"而非按钮点击（hover 正常但 click 永不触发） */
 #fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3}
 #fntv-wh-topbtns.show{opacity:1;visibility:visible;transform:none}
+#fntv-wh-topbtns button{-webkit-app-region:no-drag} /* 按钮逐个 no-drag 双保险（drag 不继承，子元素需显式声明） */
 #fntv-wh-topbtns .wh-pill{padding:8px 16px;border-radius:20px;font-size:13px;color:var(--wh-text2);
   background:var(--wh-surface);border:1px solid transparent;cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
 #fntv-wh-topbtns .wh-pill:hover{background:var(--wh-surface2);color:var(--wh-text)}
