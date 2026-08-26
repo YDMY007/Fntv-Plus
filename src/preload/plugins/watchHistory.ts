@@ -54,6 +54,7 @@ interface ShowItem {
     myRating: number;
     myReview: string;
     sessions: [string, string][];
+    viaPlayer?: string;  // 本地播放来源（'mpv' | 'potplayer' | '内置'），有值则在卡片上显示播放器徽标
 }
 
 // ───────────────────────── 工具 ─────────────────────────
@@ -430,6 +431,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .badge{position:absolute;top:10px;left:10px;font-size:11px;font-weight:600;padding:3px 8px;
   border-radius:8px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.15)}
 #${PANEL_ID} .wh-card .badge.watching{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.55);color:#ffb340}
+#${PANEL_ID} .wh-card .badge.via{top:10px;left:auto;right:10px;background:rgba(10,132,255,.28);border-color:rgba(10,132,255,.6);color:#7fd0ff}
 #${PANEL_ID} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
@@ -845,13 +847,15 @@ function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string
             : `<div class="badge watching">在观看</div>`;
     }
     const stars = item.myRating ? `<div class="stars">${starsSVG(item.myRating)}</div>` : '';
+    // 本地播放来源徽标（MPV / PotPlayer / 内置），置于右上角，与左上「在观看」徽标错开
+    const via = item.viaPlayer ? `<div class="badge via">${playerLabel(item.viaPlayer)}</div>` : '';
     // 有真实海报用缩略图铺满；否则用按名称生成的渐变兜底（与首页轮播图缺图时的兜底同源）
     const artStyle = item.poster
         ? `background:${item.art};background-image:url('${item.poster}');background-size:cover;background-position:center;`
         : `background:${item.art};`;
     return `<div class="wh-card poster" data-fntv-glass-exclude="" data-idx="${idx}" data-name="${item.name}" data-sub="${sub}" data-prog="${item.prog}">
         <div class="art" style="${artStyle}"></div>
-        <div class="scrim"></div>${bar}
+        <div class="scrim"></div>${bar}${via}
         <div class="meta">${stars}<div class="name">${item.name}</div><div class="sub">${sub}</div></div>
       </div>`;
 }
@@ -1288,6 +1292,48 @@ function saveDayCount(map: Map<string, number>): void {
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
 
+// ── 本地播放记录（观影记录面板补充数据源）──
+// 客户端本地发起的播放（含 MPV / PotPlayer 外链、本地文件 / 直链），只要经 Fntv-Plus 启动播放就记一笔，
+// 持久化到本地；面板加载时合并进列表，使「飞牛已观看」之外的本地播放也可见。
+// 与飞牛已观看列表去重：有 guid 的飞牛条目若已出现在 fnOS 列表则跳过；无 guid 的本地文件/直链永远并入。
+interface LocalWatchItem {
+    key: string;          // 去重键：飞牛条目=guid；本地文件/直链=播放链接或标题
+    guid?: string;
+    name: string;
+    type: string;         // 电影/剧集/动漫/其他
+    player: string;       // 'mpv' | 'potplayer' | '内置'
+    lastPlayedAt: number;
+}
+const _localWatchItems = new Map<string, LocalWatchItem>();
+const _LOCAL_LS_KEY = 'fntv_wh_local_v1';
+let _localWatchLoaded = false;
+function loadLocalWatch(): void {
+    if (_localWatchLoaded) return;
+    _localWatchLoaded = true;
+    try {
+        const raw = localStorage.getItem(_LOCAL_LS_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw) as LocalWatchItem[];
+        if (Array.isArray(arr)) for (const it of arr) if (it && it.key) _localWatchItems.set(it.key, it);
+    } catch { /* 解析失败则忽略，走实时数据 */ }
+}
+function saveLocalWatch(): void {
+    try {
+        const arr: LocalWatchItem[] = [];
+        _localWatchItems.forEach((v) => arr.push(v));
+        localStorage.setItem(_LOCAL_LS_KEY, JSON.stringify(arr));
+    } catch { /* 配额/隐私模式失败时忽略 */ }
+}
+
+// 播放器来源 → 展示文案
+function playerLabel(p: string): string {
+    if (p === 'potplayer') return 'PotPlayer';
+    if (p === 'mpv') return 'MPV';
+    if (p === '内置') return '内置播放';
+    if (p) return p;
+    return '本地播放';
+}
+
 // ── 用户评分/评语（跨重启持久化，按 guid 存，缺 guid 回退 name）──
 const _ratingCache = new Map<string, { r: number; rv: string }>();
 const _RATING_LS_KEY = 'fntv_wh_ratings_v1';
@@ -1359,13 +1405,27 @@ function restoreCurData(): boolean {
 }
 
 // 本地观看记录：主进程在「真正开始播放」时回传（不依赖 fnOS 的 watched_ts）。
-// 把当天记进持久化台账，热力图/活跃度即时点亮，重启后也不丢。
-ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; ts?: number }) => {
+// 把当天记进持久化台账（热力图），并写入本地播放记录（供面板合并展示），重启后也不丢。
+ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: string; type?: string; player?: string; ts?: number }) => {
     try {
         const ts = (d && typeof d.ts === 'number') ? d.ts : Date.now();
         const dd = new Date(ts); dd.setHours(0, 0, 0, 0);
         const key = `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`;
         _dayCountCache.set(key, (_dayCountCache.get(key) || 0) + 1);
+        // 写入本地播放记录（按 guid 去重飞牛条目；本地文件/直链按标题/链接去重）
+        const lk = (d && d.guid) ? d.guid : ((d && d.title) || '');
+        if (lk) {
+            const prev = _localWatchItems.get(lk);
+            _localWatchItems.set(lk, {
+                key: lk,
+                guid: (d && d.guid) || (prev && prev.guid) || undefined,
+                name: (d && d.title) || (prev && prev.name) || (d && d.guid) || '未知作品',
+                type: (d && d.type) ? mapType(d.type) : (prev && prev.type) || '其他',
+                player: (d && d.player) || (prev && prev.player) || '',
+                lastPlayedAt: ts,
+            });
+            saveLocalWatch();
+        }
         // 同步更新对应作品的 lastPlayedAt，使首次实时渲染与后续真实同步都更准确
         if (d && d.guid) {
             const it = curData.find((i) => i.guid === d.guid);
@@ -1543,8 +1603,31 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             const saved = (m.guid && _ratingCache.get(m.guid)) || _ratingCache.get(m.name);
             if (saved && saved.r > 0) { m.myRating = saved.r; m.myReview = saved.rv; }
         }
+        // 合并本地播放记录（MPV/PotPlayer 外链、本地文件/直链）：
+        // 有 guid 的飞牛条目若已出现在 fnOS 列表则跳过(避免重复)；无 guid 的本地文件/直链永远并入。
+        loadLocalWatch();
+        const fnosKeys = new Set(mapped.map((m) => m.guid).filter(Boolean));
+        for (const lw of _localWatchItems.values()) {
+            if (lw.guid && fnosKeys.has(lw.guid)) continue; // 飞牛已记录，不重复
+            const lpMs = lw.lastPlayedAt;
+            mapped.push({
+                guid: lw.guid || '',
+                name: lw.name || '未知作品',
+                type: lw.type || '其他',
+                last: lpMs ? formatAgo(lpMs) : '未记录时间',
+                lastPlayedAt: lpMs,
+                prog: 0,                 // 本地仅记「播放过」，精确进度以飞牛回传为准
+                started: true,           // 有播放痕迹 → 归「在观看」列（飞牛已标看完则走 fnOS 条目）
+                art: grad('#241a30', '#0c0814'),
+                poster: '',
+                fn: { year: new Date().getFullYear(), genres: ['未分类'], cast: [], ratings: { tmdb: 0, tmdbVotes: 0, douban: 0, doubanVotes: 0 }, overview: `通过 ${playerLabel(lw.player)} 本地播放` },
+                myRating: 0, myReview: '',
+                sessions: lpMs ? [[formatDate(lpMs), '']] : [],
+                viaPlayer: lw.player,
+            });
+        }
         curData = mapped;
-        log.info(LOG, `已加载 ${mapped.length} 条飞牛真实观看记录`);
+        log.info(LOG, `已加载 ${mapped.length} 条观看记录（飞牛 ${fnosKeys.size} + 本地合并 ${mapped.length - fnosKeys.size}）`);
         return { count: mapped.length, from: 'real', libraryTotal };
     } catch (e: any) {
         log.warn(LOG, 'loadWatchData 失败:', e && e.message);

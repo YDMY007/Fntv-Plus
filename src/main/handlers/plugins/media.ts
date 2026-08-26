@@ -469,10 +469,23 @@ function eventHandler(fnapi: fn.ApiService) {
     };
 }
 
-// 回传「已开始播放」事件给渲染进程（观影记录面板用：本地记一笔当日观看，不依赖 fnOS watched_ts）
-function recordWatchEvent(event: IpcMainEvent, guid: string): void {
+// 回传「已开始播放」事件给渲染进程（观影记录面板用：本地记一笔当日观看，不依赖 fnOS watched_ts）。
+// 携带更完整字段（标题/类型/播放器），让面板把 MPV / PotPlayer 外链播放也列进观影记录。
+interface WatchRecordPayload {
+    guid?: string;
+    title?: string;
+    type?: string;       // fnOS item type（movie/series/...）
+    player?: string;     // 'mpv' | 'potplayer' | '内置'
+}
+function recordWatchEvent(event: IpcMainEvent, p: WatchRecordPayload): void {
     try {
-        event.sender.send('fntv:watch-recorded', { guid: guid || '', ts: Date.now() });
+        event.sender.send('fntv:watch-recorded', {
+            guid: p.guid || '',
+            title: p.title || '',
+            type: p.type || '',
+            player: p.player || '',
+            ts: Date.now(),
+        });
     } catch (e: any) { log.warn('[play-movie] 回传观看记录失败:', e?.message || e); }
 }
 
@@ -505,6 +518,10 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     const type = response.data.type;
     const parentGuid = response.data.parent_guid;
     const itemGuid = response.data.guid;
+    // [观影记录] 记录用元数据：标题优先取 item.title/name，否则顶层 title；播放器缺省取默认播放器
+    const recTitle = (response.data.item && (response.data.item.title || (response.data.item as any).name)) || '';
+    const recType = type || '';
+    const recPlayer = player || fnConfig.getDefaultPlayer();
 
     let playList: ply.PlayItem[] = [];
     if (type === 'Episode' && parentGuid) {
@@ -608,7 +625,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
                 const ok = await currentPlayer.switchTo(playList, currentIndex);
                 if (ok) {
                     log.info('✅ 已原地切换到新内容（未重新拉起 PotPlayer 窗口）');
-                    recordWatchEvent(event, itemGuid);
+                    recordWatchEvent(event, { guid: itemGuid, title: recTitle, type: recType, player: recPlayer });
                     return;
                 }
                 log.warn('[PotPlayer] 原地切换失败，回退为停止后重新播放');
@@ -632,7 +649,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     // 开始播放
     log.info(`[perf] 进入 MPV 启动前, 自点击累计 ${Date.now() - t0}ms`);
     playerInstance.playList(playList, currentIndex);
-    recordWatchEvent(event, itemGuid);
+    recordWatchEvent(event, { guid: itemGuid, title: recTitle, type: recType, player: recPlayer });
 }
 
 // [lc-467] strm 解析辅助：.strm 本质是文本文件（每行一个真实播放 URL）。
@@ -723,6 +740,8 @@ async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Pr
     } as ply.Config);
     currentPlayer = playerInstance;
     playerInstance.playList(playList, 0);
+    // [观影记录] 本地文件 / 直链经 MPV / PotPlayer 外链播放也记一笔（飞牛无对应 item，不会出现在已观看列表）
+    recordWatchEvent(_event, { guid: itemGuid, title, type: '', player: wantPot ? 'potplayer' : 'mpv' });
 }
 
 // 生成代理URL
