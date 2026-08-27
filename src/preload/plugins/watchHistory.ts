@@ -55,6 +55,7 @@ interface ShowItem {
     myReview: string;
     sessions: [string, string][];
     viaPlayer?: string;  // 本地播放来源（'mpv' | 'potplayer' | '内置'），有值则在卡片上显示播放器徽标
+    airStatus?: string;  // TMDB 剧集完结状态（Ended/Canceled/Returning Series…），用于"已完结/连载中"徽标
 }
 
 // ───────────────────────── 工具 ─────────────────────────
@@ -430,8 +431,9 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .pfill{height:100%;border-radius:2px;background:var(--wh-accent)}
 #${PANEL_ID} .wh-card .badge{position:absolute;top:10px;left:10px;font-size:11px;font-weight:600;padding:3px 8px;
   border-radius:8px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.15)}
-#${PANEL_ID} .wh-card .badge.watching{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.55);color:#ffb340}
 #${PANEL_ID} .wh-card .badge.via{top:10px;left:auto;right:10px;background:rgba(10,132,255,.28);border-color:rgba(10,132,255,.6);color:#7fd0ff}
+#${PANEL_ID} .wh-card .badge.air.ended{background:rgba(48,209,88,.22);border-color:rgba(48,209,88,.6);color:#5be584}
+#${PANEL_ID} .wh-card .badge.air.ongoing{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.6);color:#ffb340}
 #${PANEL_ID} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
@@ -832,20 +834,33 @@ function bindWindowTopBtns(): void {
     window.addEventListener('mouseup', topAction, true);
 }
 
-// mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示进度条，无精确进度则显示"在观看"徽标）
+// TMDB 剧集完结状态 → 中文徽标文案 / 样式类（电影永远"已完结"；状态未知则不显示）
+function airStatusBadge(item: ShowItem): string {
+    let label = '';
+    let cls = '';
+    if (item.airStatus) {
+        const s = item.airStatus.toLowerCase();
+        if (s === 'ended' || s === 'canceled') { label = '已完结'; cls = 'ended'; }
+        else { label = '连载中'; cls = 'ongoing'; }
+    } else if (item.type === '电影') {
+        label = '已完结'; cls = 'ended';
+    }
+    return label ? `<div class="badge air ${cls}">${label}</div>` : '';
+}
+
+// mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示底部进度条）
 function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string {
     const pct = Math.round(item.prog * 100);
     let sub: string;
     if (item.totalRuntimeMs) sub = `${item.type} · 总时长 ${fmtDur(item.totalRuntimeMs)}`;
     else if (item.last && item.last !== '未记录时间') sub = `${item.type} · ${item.last}`;
     else sub = `${item.type} · 未记录时间`;
-    // 状态徽标/进度条：已看完列不放（列头已说明）；在观看列用进度条或"在观看"徽标表达
-    let bar = '';
-    if (mode === 'partial') {
-        bar = item.prog > 0
-            ? `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`
-            : `<div class="badge watching">在观看</div>`;
-    }
+    // 底部进度条（在观看列、有精确进度时）；左上角"在观看"状态徽标已移除，改为 TMDB 完结状态徽标
+    const pbar = (mode === 'partial' && item.prog > 0)
+        ? `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`
+        : '';
+    // 左上角：TMDB 完结状态徽标（已完结/连载中），取代原"在观看"状态
+    const air = airStatusBadge(item);
     const stars = item.myRating ? `<div class="stars">${starsSVG(item.myRating)}</div>` : '';
     // 本地播放来源徽标（MPV / PotPlayer / 内置），置于右上角，与左上「在观看」徽标错开
     const via = item.viaPlayer ? `<div class="badge via">${playerLabel(item.viaPlayer)}</div>` : '';
@@ -855,7 +870,7 @@ function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string
         : `background:${item.art};`;
     return `<div class="wh-card poster" data-fntv-glass-exclude="" data-idx="${idx}" data-name="${item.name}" data-sub="${sub}" data-prog="${item.prog}">
         <div class="art" style="${artStyle}"></div>
-        <div class="scrim"></div>${bar}${via}
+        <div class="scrim"></div>${air}${via}${pbar}
         <div class="meta">${stars}<div class="name">${item.name}</div><div class="sub">${sub}</div></div>
       </div>`;
 }
@@ -1379,6 +1394,7 @@ function saveCurData(): void {
                 totalRuntimeMs: i.totalRuntimeMs, prog: i.prog,
                 started: i.started,
                 myRating: i.myRating, myReview: i.myReview,
+                airStatus: i.airStatus,
                 fn: { year: i.fn.year, genres: i.fn.genres, cast: i.fn.cast, ratings: i.fn.ratings, overview: i.fn.overview },
             }));
         localStorage.setItem(_CURDATA_LS_KEY, JSON.stringify(slim));
@@ -1588,6 +1604,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             myRating: 0,
             myReview: '',
             sessions: lpMs ? [[formatDate(lpMs), '']] : [],
+            airStatus: typeof it.air_status === 'string' ? it.air_status : undefined,
             };
         });
         // 并发拉取真实竖版海报（与首页轮播图同款 item API 机制），按 guid 取 data.posters

@@ -555,7 +555,7 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
 export async function tmdbGenresFor(
     title: string,
     opts: { mediaType?: 'movie' | 'tv'; year?: string } = {}
-): Promise<{ genres: string[]; category: string; rating: number; votes: number } | null> {
+): Promise<{ genres: string[]; category: string; rating: number; votes: number; status?: string } | null> {
     const key = fnConfig.getTmdbApiKey();
     if (!key || !title) return null;
     const mt: 'movie' | 'tv' = opts.mediaType === 'movie' ? 'movie' : 'tv';
@@ -581,7 +581,10 @@ export async function tmdbGenresFor(
             //   vote_average = TMDB 评分(0~10)；vote_count = 参评人数。
             const rating = typeof top.vote_average === 'number' ? top.vote_average : 0;
             const votes = typeof top.vote_count === 'number' ? top.vote_count : 0;
-            return { genres: genres as string[], rating, votes };
+            // 剧集完结状态：TMDB /tv/{id} 详情的 status 字段（Ended/Returning Series/Canceled…），
+            // 与类型标签同一次详情调用取得，零额外配额；电影无此字段→undefined。
+            const status = (mt === 'tv' && dResp?.data?.status) ? String(dResp.data.status) : undefined;
+            return { genres: genres as string[], rating, votes, status };
         }, DEFAULT_TTL_MS, false);
         const genres = (r.data && r.data.genres) || [];
         let category: string;
@@ -590,7 +593,7 @@ export async function tmdbGenresFor(
             const isAnime = genres.some((g: string) => /动画|动漫|Animation|Anime/i.test(g));
             category = isAnime ? '动漫' : '剧集';
         }
-        return { genres, category, rating: (r.data && r.data.rating) || 0, votes: (r.data && r.data.votes) || 0 };
+        return { genres, category, rating: (r.data && r.data.rating) || 0, votes: (r.data && r.data.votes) || 0, status: r.data?.status };
     } catch (e: any) {
         log.warn('[TMDB诊断] genres 获取失败（' + title + '）：' + (e?.message || e));
         return null;

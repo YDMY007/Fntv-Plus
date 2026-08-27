@@ -676,7 +676,7 @@ async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T, i: number) => 
  *   - TMDB（有 key 且命中）可把 TV 升级为"动漫"（检测到动画类型），并带回中文 genres
  *   - 无 key / 未命中 / 网络失败 → 维持 base 分类、genres 留空（前端回退"未分类"）
  */
-async function enrichWithTmdb(it: any): Promise<{ category: string; genres: string[]; tmdbRating: number; tmdbVotes: number }> {
+async function enrichWithTmdb(it: any): Promise<{ category: string; genres: string[]; tmdbRating: number; tmdbVotes: number; airStatus?: string }> {
     const rawType = (it && it.type || '').toLowerCase();
     const mediaType: 'movie' | 'tv' = rawType === 'movie' ? 'movie' : 'tv';
     const baseCat = mediaType === 'movie' ? '电影' : '剧集';
@@ -685,6 +685,7 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
     let genres: string[] = [];
     let tmdbRating = 0;
     let tmdbVotes = 0;
+    let airStatus: string | undefined;
     try {
         const r = await tmdbGenresFor(it && it.title || '', {
             mediaType,
@@ -696,9 +697,11 @@ async function enrichWithTmdb(it: any): Promise<{ category: string; genres: stri
             // tmdbGenresFor 已在同一次 TMDB 搜索里带回评分(0~10)与参评人数
             tmdbRating = typeof r.rating === 'number' ? r.rating : 0;
             tmdbVotes = typeof r.votes === 'number' ? r.votes : 0;
+            // 剧集完结状态（TMDB status）：Ended/Canceled→已完结；Returning Series 等→连载中
+            if (r.status) airStatus = r.status;
         }
     } catch { /* ignore：TMDB 异常不影响主流程 */ }
-    return { category, genres, tmdbRating, tmdbVotes };
+    return { category, genres, tmdbRating, tmdbVotes, airStatus };
 }
 
 /**
@@ -903,6 +906,7 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
                 fnos_rating: isNaN(va) ? 0 : va,
                 tmdb_rating: enr.tmdbRating,
                 tmdb_votes: enr.tmdbVotes,
+                air_status: enr.airStatus, // TMDB 剧集完结状态（Ended/Canceled/Returning Series…），前端用于"已完结/连载中"徽标
                 douban_rating: db.rating,
                 douban_votes: db.votes,
             };
