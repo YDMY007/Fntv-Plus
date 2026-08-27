@@ -813,6 +813,7 @@ const WATCH_CACHE_FILE = (() => {
     try { return path.join(app.getPath('userData'), 'watch_history_cache.json'); } catch { return ''; }
 })();
 const WATCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
+const WATCH_CACHE_SCHEMA = 2; // 缓存结构版本：观影记录字段变更(如新增 air_status)时 +1，使旧缓存失效强制重拉
 
 /** 读取磁盘缓存（未过期）：返回 { items, libraryTotal } 或 null。 */
 function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number } | null {
@@ -821,6 +822,7 @@ function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number }
         if (!fs.existsSync(WATCH_CACHE_FILE)) return null;
         const obj = JSON.parse(fs.readFileSync(WATCH_CACHE_FILE, 'utf8'));
         if (!obj || !Array.isArray(obj.items)) return null;
+        if (obj.schema !== WATCH_CACHE_SCHEMA) return null; // 结构版本不符→视为失效，强制重拉（避免旧缓存缺 air_status 等字段）
         if (!staleOk && typeof obj.savedAt === 'number' && Date.now() - obj.savedAt > WATCH_CACHE_TTL_MS) return null;
         return { items: obj.items, libraryTotal: typeof obj.libraryTotal === 'number' ? obj.libraryTotal : 0 };
     } catch { return null; }
@@ -830,7 +832,7 @@ function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number }
 function writeWatchCache(result: { items: any[]; libraryTotal: number }): void {
     if (!WATCH_CACHE_FILE) return;
     try {
-        fs.writeFileSync(WATCH_CACHE_FILE, JSON.stringify({ savedAt: Date.now(), ...result }), 'utf8');
+        fs.writeFileSync(WATCH_CACHE_FILE, JSON.stringify({ schema: WATCH_CACHE_SCHEMA, savedAt: Date.now(), ...result }), 'utf8');
     } catch (e: any) {
         log.warn('[豆瓣] 写入观影记录缓存失败:', e && e.message);
     }

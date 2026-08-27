@@ -1637,7 +1637,10 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
         const fnosKeys = new Set(mapped.map((m) => m.guid).filter(Boolean));
         for (const lw of _localWatchItems.values()) {
             if (lw.guid && fnosKeys.has(lw.guid)) continue; // 飞牛已记录，不重复
-            // 个人视频/本地文件：无 guid 且标题像 GUID 乱码 → 不展示（无意义黑卡片）
+            // 仅并入「剧集/电影/动漫」本地记录；个人视频/本地文件多为「其他」分类，按需求不展示
+            const lt = lw.type || '';
+            if (lt !== '剧集' && lt !== '电影' && lt !== '动漫') continue;
+            // 防御：无 guid 且标题像 GUID 乱码（兜底，正常已被上面 type 过滤拦掉）
             if (!lw.guid && isGuidLike(lw.name)) continue;
             const lpMs = lw.lastPlayedAt;
             mapped.push({
