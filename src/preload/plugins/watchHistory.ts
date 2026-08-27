@@ -1294,6 +1294,16 @@ function saveDayCount(map: Map<string, number>): void {
 
 // ── 本地播放记录（观影记录面板补充数据源）──
 // 客户端本地发起的播放（含 MPV / PotPlayer 外链、本地文件 / 直链），只要经 Fntv-Plus 启动播放就记一笔，
+// 判断标题是否像 GUID/UUID 乱码（个人视频/本地文件通常拿不到有意义标题，回退成 guid 字符串）
+function isGuidLike(s: string): boolean {
+    if (!s || s.length < 20) return false;
+    // UUID 格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+    // 纯十六进制长串（32 位以上，典型 fnOS guid）
+    if (/^[0-9a-f]{20,}$/i.test(s)) return true;
+    return false;
+}
+
 // 持久化到本地；面板加载时合并进列表，使「飞牛已观看」之外的本地播放也可见。
 // 与飞牛已观看列表去重：有 guid 的飞牛条目若已出现在 fnOS 列表则跳过；无 guid 的本地文件/直链永远并入。
 interface LocalWatchItem {
@@ -1413,8 +1423,9 @@ ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: 
         const key = `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`;
         _dayCountCache.set(key, (_dayCountCache.get(key) || 0) + 1);
         // 写入本地播放记录（按 guid 去重飞牛条目；本地文件/直链按标题/链接去重）
+        // 个人视频/本地文件拿不到有意义标题时 name 会回退成 guid 乱码，直接跳过不入面板
         const lk = (d && d.guid) ? d.guid : ((d && d.title) || '');
-        if (lk) {
+        if (lk && !(isGuidLike(lk) && !(d && d.guid))) {
             const prev = _localWatchItems.get(lk);
             _localWatchItems.set(lk, {
                 key: lk,
@@ -1609,6 +1620,8 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
         const fnosKeys = new Set(mapped.map((m) => m.guid).filter(Boolean));
         for (const lw of _localWatchItems.values()) {
             if (lw.guid && fnosKeys.has(lw.guid)) continue; // 飞牛已记录，不重复
+            // 个人视频/本地文件：无 guid 且标题像 GUID 乱码 → 不展示（无意义黑卡片）
+            if (!lw.guid && isGuidLike(lw.name)) continue;
             const lpMs = lw.lastPlayedAt;
             mapped.push({
                 guid: lw.guid || '',
