@@ -527,7 +527,7 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
 
     const cards: any[] = [];
     const seen = new Set<string>();
-    for (let i = 0; i < libIndex.length && cards.length < 10; i++) {
+    for (let i = 0; i < libIndex.length && cards.length < CAROUSEL_SCRAPE_CAP; i++) {
       const item = libIndex[i];
       const idMatch = (item.href || '').match(/([a-f0-9]{32})/);
       const id = idMatch ? idMatch[1] : '';
@@ -594,6 +594,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       Array.prototype.push.apply(_apiShows, newShows);
       _apiLoaded = true;
       _carouselInited = false;
+      _carouselLoadedButNone = false; // [lc-768] 新一轮拉取，重置「全 STR 失败」标记
       // [lc-620] 不再先渲染再补详情(会闪两次): 先并行补 item API 详情, 全部就绪后
       // 一次性 completeCarouselProgress → injectCarousel(只渲染一次, 不闪)。
       // 详情补完总超时 2.2s(单条 4s AbortController 太慢, 会拖长骨架), 到时无论
@@ -664,10 +665,28 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         log('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
         completeCarouselProgress(revealOnce, 'revealTimer-8s-timeout');
       }, 8000);
-      detailsPromise.then(() => {
+      detailsPromise.then(async () => {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
-        log('[lc-569] item details enriched:', withData, '/', newShows.length, '; revealing carousel once');
+        log('[lc-569] item details enriched:', withData, '/', newShows.length);
+        // [lc-768] 兜底：STR/网盘海报加载不到 → 跳过并尝试后续候选，凑齐 CAROUSEL_TARGET 个横版；全失败则主页提示
+        const pool = newShows.slice();
+        const settled = await Promise.all(pool.map(async (s: any) => ({ s, blob: await resolveShowBackdrop(s, base) })));
+        const picked: any[] = [];
+        for (const x of settled) {
+          if (picked.length >= CAROUSEL_TARGET) break;
+          if (x.blob) { x.s._backdropBlob = x.blob; picked.push(x.s); }
+          else log('[lc-768] 跳过无法加载海报的项(疑似 STR/网盘):', (x.s.title || '').substring(0, 16), x.s.strmTag || '');
+        }
+        if (picked.length === 0) {
+          log('[lc-768] 全部候选项海报均无法加载(疑似均为 STR/网盘)，主页显示「暂未支持STRM海报」');
+        } else {
+          log('[lc-768] 轮播候选取齐', picked.length, '/', CAROUSEL_TARGET, '个可加载海报');
+        }
+        _carouselLoadedButNone = picked.length === 0;
+        // [lc-768] 用.splice 原地替换(不重新赋值 const 数组)：清除旧候选，写入「可加载海报」的子集
+        _apiShows.length = 0;
+        Array.prototype.push.apply(_apiShows, picked);
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
         completeCarouselProgress(revealOnce, 'details-ready');
       }).catch((e) => {
@@ -776,11 +795,15 @@ function wheelToScroll(): void {
 
 /* ========== 鉴权拉取图片→blob URL(绕开<img>无法带Authx头的问题) ========== */
 // [DIAG] 增强：label=来源说明, isStrm=是否网盘STRM；记录耗时、识别跨域(网盘/远程直链)、失败给出明确日志
-async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?: boolean }): Promise<string | null> {
+async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?: boolean; timeoutMs?: number }): Promise<string | null> {
   const label = opts?.label || 'img';
   const isStrm = !!opts?.isStrm;
+  // [lc-768] 超时兜底: 网盘/远程直链极易长时间挂起(导致轮播卡 99%)；STRM 用更短超时，同源稍宽。
+  const timeoutMs = opts?.timeoutMs ?? (isStrm ? 8000 : 15000);
   if (!fullUrl) { if (isStrm) log('[DIAG] fetchImg 跳过(空URL) label=', label, 'isStrm=true'); return null; }
   const t0 = Date.now();
+  const controller = new AbortController();
+  const to = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const { ipcRenderer } = require('electron');
     // 提取path(含query)用于签名, 必须与fetch的URL完全一致
@@ -790,7 +813,7 @@ async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?:
     // 跨域(非 fnOS 同源)图片：通常是网盘/远程直链，加载慢或失败的高风险源
     const crossOrigin = m ? (new URL(fullUrl).origin !== location.origin) : false;
     const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
-    const resp = await fetch(fullUrl, { credentials: 'include', headers: { 'Authx': authx } });
+    const resp = await fetch(fullUrl, { credentials: 'include', headers: { 'Authx': authx }, signal: controller.signal });
     const ct = resp.headers.get('content-type') || '';
     const ms = Date.now() - t0;
     log('[DIAG] fetchImg', label, 'status', resp.status, 'ct', ct.substring(0, 24), 'crossOrigin', crossOrigin, 'isStrm', isStrm, 'ms', ms, 'path', path.substring(0, 50));
@@ -800,11 +823,37 @@ async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?:
     }
     const blob = await resp.blob();
     return URL.createObjectURL(blob);
-  } catch (e) {
+  } catch (e: any) {
     const ms = Date.now() - t0;
-    log('[DIAG] fetchImg err', label, 'isStrm', isStrm, 'ms', ms, String(e).substring(0, 120));
+    if (e && e.name === 'AbortError') log('[DIAG] fetchImg 超时(被 abort) label=', label, 'isStrm', isStrm, 'timeoutMs', timeoutMs, 'ms', ms);
+    else log('[DIAG]  fetchImg err', label, 'isStrm', isStrm, 'ms', ms, String(e).substring(0, 120));
     return null;
+  } finally {
+    clearTimeout(to);
   }
+}
+
+// [lc-768] 预加载并校验某剧集横版 backdrop：成功返回 blobURL(并写入 s._backdropBlob 复用)，失败(含 STR/网盘挂起、非横版)返回 null。
+// 用于「凑齐 10 个」选片：加载不到的海报直接跳过，往后取下一个候选。
+async function resolveShowBackdrop(show: any, base: string): Promise<string | null> {
+  let pic = '';
+  if (show && show.backdrop) {
+    if ((show.backdrop as string).startsWith('http') || (show.backdrop as string).startsWith('/v/api/')) pic = show.backdrop;
+    else pic = `${base}/v/api/v1/${show.backdrop}`;
+  }
+  if (!pic) return null;
+  const b = await fetchImageAuth(pic, { label: 'pick:' + ((show.title || '').substring(0, 10)), isStrm: !!show.strmTag, timeoutMs: 8000 });
+  if (!b) return null;
+  // 仅横版(nw>=nh)才用于轮播主图；竖版/解码失败一律视为不可用 → 跳过该候选
+  const ok = await new Promise<boolean>((resolve) => {
+    const im = new Image();
+    const imTo = window.setTimeout(() => resolve(false), 6000);
+    im.onload = () => { clearTimeout(imTo); const w = im.naturalWidth || 0, h = im.naturalHeight || 0; resolve(w > 0 && h > 0 && w >= h); };
+    im.onerror = () => { clearTimeout(imTo); resolve(false); };
+    im.src = b;
+  });
+  if (!ok) { try { URL.revokeObjectURL(b); } catch { /* ignore */ } return null; }
+  return b;
 }
 
 // [DIAG] 识别 item 是否为「网盘 STRM / 远程 / 云存储」来源——用于在轮播海报加载失败时定位是否 STR 媒体导致。
@@ -977,6 +1026,11 @@ let _carouselBarFill: HTMLElement | null = null;  // 进度条填充元素
 let _carouselPctEl: HTMLElement | null = null;    // 百分比文本元素
 let _carouselStatusEl: HTMLElement | null = null; // [lc-621] 状态文字(加载中/加载完成)
 let _carouselProgressPct = 0;                     // 当前百分比
+// [lc-768] 轮播目标展示数；候选池上限(多于目标，便于 STR/网盘海报失败「往后延」凑齐)
+const CAROUSEL_TARGET = 10;
+const CAROUSEL_SCRAPE_CAP = 18;
+// [lc-768] 详情拉取完成但「可用横版海报」为 0(疑似全部 STR/网盘无法加载) → 主页显示「暂未支持STRM海报」
+let _carouselLoadedButNone = false;
 // [DIAG] 99% 卡死看门狗状态（仅用于诊断日志，不改变任何行为）
 let _diagStuckTicks = 0;       // 进度条停在 99% 的 tick 计数
 let _diagStuckSince = 0;       // 首次到达 99% 的时间戳
@@ -1066,6 +1120,15 @@ function injectCarousel(): void {
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(骨架 + 加载进度数字), 不让用户干等
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
+    // [lc-768] 拉取已完成但可用海报为 0(全是 STR/网盘且加载不到) → 主页提示而非骨架死等
+    if (_carouselLoadedButNone) {
+      if (!_placeholderInited) {
+        log('all candidates unloadable(STR/网盘), showing 暂未支持STRM海报 tip');
+        buildStrmUnsupportedTip(target);
+        _placeholderInited = true;
+      }
+      return;
+    }
     // [lc-561] 显示骨架占位(带"已加载 N 个"数字)。_placeholderInited 守卫: 占位只构建一次,
     // 避免 MutationObserver 反复触发 injectCarousel → 反复清空重建占位 → 死循环(见 lc-100)。
     // 数据到位后 injectCarousel 会清空 section 并重建为真实轮播(占位自然被替换)。
@@ -1159,32 +1222,37 @@ function injectCarousel(): void {
     imgEl.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;object-position:left center;z-index:1;display:none';
     leftEl.appendChild(imgEl);
     const pic = imgUrl(show.backdrop); // 不带?w, 避免与签名path不一致
-    if (shows === _apiShows && i === 0) log('SLIDE0 img src:', pic.substring(0, 80));
+    const blob = (show as any)._backdropBlob as string | undefined; // [lc-768] 预加载成功的 blob 复用，跳过二次网络请求
+    if (shows === _apiShows && i === 0) log('SLIDE0 src:', (blob || pic).substring(0, 80));
     const isSlideStrm = !!show.strmTag;
-    fetchImageAuth(pic, { label: 'slide#' + i + ':' + (show.title || '').substring(0, 10), isStrm: isSlideStrm }).then((b) => {
-      if (!b) {
-        if (isSlideStrm) log('[DIAG] 轮播主图 fetchImageAuth 返回空(STRM item 海报加载失败):', (show.title || '').substring(0, 16), pic.substring(0, 60));
-        return;
-      }
-      // [DIAG] 先挂 onerror 再设 src，捕获 blob 解码/加载失败（STRM/网盘图片极易失败且此前无任何报错）
-      imgEl.onerror = () => {
-        log('[DIAG] 轮播主图加载失败(img.onerror):', (show.title || '').substring(0, 16), 'strmTag=', show.strmTag || '-', pic.substring(0, 60));
-      };
-      imgEl.src = b;
-      // [lc-624] 加载后判断宽高比: 仅横版(nw>nh)才显示图片; 竖版(海报兜底)隐藏
-      // —— 用户明确要求: 没有横版数据就不要渲染出来, 杜绝"先竖屏再横屏"闪动。
-      imgEl.onload = () => {
-        try {
-          const nw = imgEl.naturalWidth || 0, nh = imgEl.naturalHeight || 0;
-          if (nw > 0 && nh > 0 && nw < nh) {
-            imgEl.style.display = 'none'; // 竖版 → 不显示
-          } else {
-            imgEl.style.display = 'block'; // 横版 → 显示
-          }
-        } catch (e) { /* ignore */ }
-      };
-      try { if (imgEl.complete) imgEl.onload(null as any); } catch (e) { /* ignore */ }
-    });
+    const applyLandscapeCheck = () => {
+      try {
+        const nw = imgEl.naturalWidth || 0, nh = imgEl.naturalHeight || 0;
+        if (nw > 0 && nh > 0 && nw < nh) {
+          imgEl.style.display = 'none'; // 竖版 → 不显示
+        } else {
+          imgEl.style.display = 'block'; // 横版 → 显示
+        }
+      } catch (e) { /* ignore */ }
+    };
+    if (blob) {
+      imgEl.onerror = () => { log('[DIAG] 轮播主图(blob缓存)加载失败:', (show.title || '').substring(0, 16)); };
+      imgEl.src = blob;
+      try { if (imgEl.complete) applyLandscapeCheck(); } catch (e) { /* ignore */ }
+    } else {
+      fetchImageAuth(pic, { label: 'slide#' + i + ':' + (show.title || '').substring(0, 10), isStrm: isSlideStrm }).then((b) => {
+        if (!b) {
+          if (isSlideStrm) log('[DIAG] 轮播主图 fetchImageAuth 返回空(STRM item 海报加载失败):', (show.title || '').substring(0, 16), pic.substring(0, 60));
+          return;
+        }
+        imgEl.onerror = () => {
+          log('[DIAG] 轮播主图加载失败(img.onerror):', (show.title || '').substring(0, 16), 'strmTag=', show.strmTag || '-', pic.substring(0, 60));
+        };
+        imgEl.onload = applyLandscapeCheck;
+        imgEl.src = b;
+        try { if (imgEl.complete) applyLandscapeCheck(); } catch (e) { /* ignore */ }
+      });
+    }
     // 右边缘渐隐, 与右侧文字面板自然融合
     const edgeFade = document.createElement('div');
     edgeFade.style.cssText = 'position:absolute;inset:0;background:var(--fnos-hero-edge)';
@@ -1553,6 +1621,34 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   }, 16000);
   // 占位被重建替换后, 该定时器留在原地无害(条件判断已失效)
   void phTimer;
+}
+
+/** [lc-768] 候选海报全部无法加载(疑似 STR/网盘)时, 主页轮播区显示温和提示而非无限骨架。 */
+function buildStrmUnsupportedTip(target: HTMLElement): void {
+  target.innerHTML = '';
+  target.style.borderTop = 'none';
+  target.style.boxShadow = 'none';
+  target.style.marginTop = '0';
+  target.style.background = 'transparent';
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
+  _carouselWrapper = wrapper;
+  const container = document.createElement('div');
+  container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.18),rgba(70,50,120,.30));backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex;align-items:center;justify-content:center';
+  const tip = document.createElement('div');
+  tip.style.cssText = 'font-size:18px;color:rgba(240,236,255,.92);letter-spacing:1.5px;font-weight:600;text-align:center;padding:0 24px';
+  tip.textContent = '暂未支持 STRm 海报';
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:13px;color:rgba(225,218,245,.7);margin-top:10px;letter-spacing:.5px';
+  sub.textContent = '当前片库以网盘 STRm 为主，海报暂无法加载';
+  const col = document.createElement('div');
+  col.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px';
+  col.appendChild(tip);
+  col.appendChild(sub);
+  container.appendChild(col);
+  wrapper.appendChild(container);
+  target.appendChild(wrapper);
+  log('[lc-768] 已渲染「暂未支持 STRm 海报」主页提示');
 }
 
 /** [lc-627] 数据加载完成: 进度条从当前值快速补到 100%(ease-out 缓动, 约 600ms),
