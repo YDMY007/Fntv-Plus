@@ -1039,6 +1039,8 @@ function renderChart(): void {
     const dayCount = new Map<string, number>();
     const mergeKeys = new Set<string>([...freshCount.keys(), ..._dayCountCache.keys()]);
     for (const k of mergeKeys) dayCount.set(k, Math.max(freshCount.get(k) || 0, _dayCountCache.get(k) || 0));
+    // 把合并结果同步回内存台账，确保后续增量记账基于完整历史（而非仅当日）
+    for (const [k, v] of dayCount) _dayCountCache.set(k, v);
     saveDayCount(dayCount);
 
     // ② 近 30 天活跃天数（基于合并后的台账，fnOS 空白也能保留历史活跃度）
@@ -1377,18 +1379,26 @@ const _DAYCOUNT_LS_KEY = 'fntv_wh_daycount_v1';
 let _dayCountLoaded = false;
 function loadPersistedDayCount(): void {
     if (_dayCountLoaded) return;
-    _dayCountLoaded = true;
     try {
         const raw = localStorage.getItem(_DAYCOUNT_LS_KEY);
-        if (!raw) return;
+        if (!raw) { _dayCountLoaded = true; return; }
         const obj = JSON.parse(raw) as Record<string, number>;
         for (const k in obj) if (typeof obj[k] === 'number') _dayCountCache.set(k, obj[k]);
-    } catch { /* 解析失败则忽略，走实时数据 */ }
+        _dayCountLoaded = true; // 仅解析成功才置位；失败则允许下次重试，且不污染内存
+    } catch {
+        // 解析失败(如 localStorage 偶发损坏)：不置 _dayCountLoaded，下次 openPanel 可重试；
+        // 内存 _dayCountCache 保持原状，绝不清空。
+    }
 }
 function saveDayCount(map: Map<string, number>): void {
     try {
+        // 合并语义：读取磁盘已有台账，逐键取 max，避免「内存缓存为空时整体替换」把历史清空。
+        // 这是修复「热力图历史偶发丢失」的关键——即便本次内存 _dayCountCache 为空，也不会抹掉 localStorage 里的历史台账。
+        const prevRaw = localStorage.getItem(_DAYCOUNT_LS_KEY);
+        const prev: Record<string, number> = prevRaw ? (JSON.parse(prevRaw) as Record<string, number>) : {};
         const obj: Record<string, number> = {};
-        map.forEach((v, k) => { obj[k] = v; });
+        for (const k in prev) if (typeof prev[k] === 'number') obj[k] = prev[k];
+        map.forEach((v, k) => { obj[k] = Math.max(obj[k] || 0, v); });
         localStorage.setItem(_DAYCOUNT_LS_KEY, JSON.stringify(obj));
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
