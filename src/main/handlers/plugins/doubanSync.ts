@@ -813,7 +813,7 @@ const WATCH_CACHE_FILE = (() => {
     try { return path.join(app.getPath('userData'), 'watch_history_cache.json'); } catch { return ''; }
 })();
 const WATCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
-const WATCH_CACHE_SCHEMA = 2; // 缓存结构版本：观影记录字段变更(如新增 air_status)时 +1，使旧缓存失效强制重拉
+const WATCH_CACHE_SCHEMA = 3; // 缓存结构版本：观影记录字段变更(如新增 air_status)时 +1，使旧缓存失效强制重拉。lc-764 升 3：配合 tmdbGenresFor 缓存版本化，确保重拉拿到完结状态
 
 /** 读取磁盘缓存（未过期）：返回 { items, libraryTotal } 或 null。 */
 function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number } | null {

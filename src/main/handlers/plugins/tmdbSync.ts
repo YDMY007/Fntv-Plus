@@ -58,6 +58,10 @@ const TMDB_IP_REFRESH_INTERVAL = 24 * 3600 * 1000;
 const TMDB_TIMEOUT = 25000;   // 单请求超时（原 12s，换网络环境极易触发）
 const TMDB_RETRIES = 2;       // 网络类错误自动重试次数（指数退避 1s / 2s）
 
+/** 观影记录「完结状态」相关缓存版本：结构变动(如 lc-762 新增 status 字段)时 +1，使旧(无 status)缓存失效、强制重拉，
+ *  避免「部分剧集显示已完结/部分不显示」的脏缓存现象。 */
+const TMDB_GENRES_CACHE_VER = 2;
+
 /** 当前生效的直连 IP：用户自定义优先，否则内置快照 */
 function directIp(): { api: string; img: string } {
     const cfg = fnConfig.getTmdbDirectIp();
@@ -559,19 +563,27 @@ export async function tmdbGenresFor(
     const key = fnConfig.getTmdbApiKey();
     if (!key || !title) return null;
     const mt: 'movie' | 'tv' = opts.mediaType === 'movie' ? 'movie' : 'tv';
-    const cacheKey = 'genres_' + mt + '_' + title;
+    // 缓存键带版本号：lc-762 给本函数增加 status(完结状态) 字段；旧缓存(无 status)会使徽标不显示。
+    // 升级版本使所有旧缓存失效、强制重拉，根治「部分剧集显示/部分不显示」的脏缓存。
+    const cacheKey = 'genres_v' + TMDB_GENRES_CACHE_VER + '_' + mt + '_' + title;
     try {
         const r = await getDailyCached(cacheKey, async () => {
             const client = http();
             const a = key ? authFor(key) : { headers: {} as Record<string, string> };
             const baseParams: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
-            const sParams: any = { ...baseParams, query: title, page: 1 };
-            if (opts.year) {
-                if (mt === 'movie') sParams.year = opts.year;
-                else sParams.first_air_date_year = opts.year;
-            }
-            const sResp = await getWithRetry(client, `/search/${mt}`, { params: sParams });
-            const results = (sResp?.data?.results || []) as any[];
+            // TMDB 标题搜索：先带年份(更精确)，无果则放宽到不带年份再试一次，提升中文剧名匹配覆盖。
+            // fnOS 年份与 TMDB 首播年偶尔不一致，带年份会被 TMDB 过滤掉导致漏匹配 → 拿不到完结状态。
+            const doSearch = async (year?: string): Promise<any[]> => {
+                const sParams: any = { ...baseParams, query: title, page: 1 };
+                if (year) {
+                    if (mt === 'movie') sParams.year = year;
+                    else sParams.first_air_date_year = year;
+                }
+                const sResp = await getWithRetry(client, `/search/${mt}`, { params: sParams });
+                return (sResp?.data?.results || []) as any[];
+            };
+            let results = await doSearch(opts.year);
+            if (!results.length && opts.year) results = await doSearch(undefined); // 年份不一致时放宽重试
             if (!results.length) return { genres: [] as string[], rating: 0, votes: 0 };
             const top = results[0];
             const id = top.id;
@@ -601,6 +613,17 @@ export async function tmdbGenresFor(
 }
 
 function init(): void {
+    // [lc-764] 清理 lc-762 之前写入的旧(无 status)剧集类型缓存文件，避免与新版本键共存造成混淆/脏数据
+    try {
+        const dir = path.join(app.getPath('userData'), 'cache');
+        if (fs.existsSync(dir)) {
+            for (const f of fs.readdirSync(dir)) {
+                if (/^genres_(tv|movie)_/.test(f)) {
+                    try { fs.unlinkSync(path.join(dir, f)); } catch { /* 忽略单个删除失败 */ }
+                }
+            }
+        }
+    } catch { /* 忽略目录读取失败 */ }
     registerHandler('tmdb:discover', async (_e: any, force?: boolean) => {
         try {
             // [lc-581] onRefreshed: 过期缓存立即返回(秒见旧数据), 后台刷新成功后推送给渲染进程无感更新
