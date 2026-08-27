@@ -834,17 +834,23 @@ function bindWindowTopBtns(): void {
     window.addEventListener('mouseup', topAction, true);
 }
 
-// TMDB 剧集完结状态 → 中文徽标文案 / 样式类（电影永远"已完结"；状态未知则不显示）
-function airStatusBadge(item: ShowItem): string {
+// TMDB 剧集完结状态 → 中文徽标文案 / 样式类
+//   - Ended / Canceled → 已完结
+//   - Returning Series → 连载中
+//   - 其余状态(Planned / In Production / Pilot / 未知) → 不显示，避免把"未开播/制作中"等误标成"连载中"
+//   - 电影永远"已完结"（原约定）
+// mode==='done'（已看完列）时不再显示"连载中"，避免与"已看完"矛盾（已完结仍显示）
+function airStatusBadge(item: ShowItem, mode?: 'done' | 'partial'): string {
     let label = '';
     let cls = '';
     if (item.airStatus) {
         const s = item.airStatus.toLowerCase();
         if (s === 'ended' || s === 'canceled') { label = '已完结'; cls = 'ended'; }
-        else { label = '连载中'; cls = 'ongoing'; }
+        else if (s === 'returning series') { label = '连载中'; cls = 'ongoing'; }
     } else if (item.type === '电影') {
         label = '已完结'; cls = 'ended';
     }
+    if (mode === 'done' && cls === 'ongoing') return '';
     return label ? `<div class="badge air ${cls}">${label}</div>` : '';
 }
 
@@ -860,7 +866,7 @@ function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string
         ? `<div class="pbar"><div class="pfill" style="width:${pct}%"></div></div>`
         : '';
     // 左上角：TMDB 完结状态徽标（已完结/连载中），取代原"在观看"状态
-    const air = airStatusBadge(item);
+    const air = airStatusBadge(item, mode);
     const stars = item.myRating ? `<div class="stars">${starsSVG(item.myRating)}</div>` : '';
     // 本地播放来源徽标（MPV / PotPlayer / 内置），置于右上角，与左上「在观看」徽标错开
     const via = item.viaPlayer ? `<div class="badge via">${playerLabel(item.viaPlayer)}</div>` : '';
