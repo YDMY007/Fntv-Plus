@@ -865,13 +865,15 @@ function airStatusBadge(item: ShowItem, mode?: 'done' | 'partial'): string {
     } else if (item.type === '电影') {
         label = '已完结'; cls = 'ended'; // 电影默认已完结（可被覆盖）
     }
-    if (mode === 'done' && cls === 'ongoing' && !item.airStatusOverride) return '';
+    // 已看完列：自动判定的「连载中」不与「已看完」强绑定显示；清空后落入下方「设置状态」占位，
+    // 保留手动修正入口（否则被 TMDB 误标连载中、实际已完结的剧集在已看完列无任何可点胶囊，无法改回）。
+    if (mode === 'done' && cls === 'ongoing' && !item.airStatusOverride) { label = ''; cls = ''; }
     if (label) {
         const ov = item.airStatusOverride ? ' ov' : '';
         return `<div class="badge air ${cls} air-btn${ov}" data-air-btn="" role="button" tabindex="0" title="点击设置完结状态">${label}</div>`;
     }
-    // 无状态：剧集/动漫显示低调可点击占位，便于手动设置（电影默认已完结不会到这）
-    if (item.type === '剧集' || item.type === '动漫') {
+    // 无状态：任何非电影影视（剧集/动漫/其它类型）显示低调可点击占位，便于手动设置；电影默认已完结不显示
+    if (item.type !== '电影') {
         return `<div class="badge air air-empty air-btn" data-air-btn="" role="button" tabindex="0" title="点击设置完结状态">设置状态</div>`;
     }
     return '';
