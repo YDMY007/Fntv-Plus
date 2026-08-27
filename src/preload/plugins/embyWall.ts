@@ -576,6 +576,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     // onProgress: 抓取过程中实时回传已加载卡片数, 更新骨架"已加载 N 个"数字。
     log('[lc-561] scraping /v/list/all first screen (primary source)...');
     let newShows: any[] = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
+    _diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
     log('[lc-561] all-page scrape returned', newShows.length, 'cards');
 
     // 兜底: iframe 抓 0 张时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
@@ -616,6 +617,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         //   item.poster 常空), item API 的 data.posters 是权威竖版源 → 右侧海报条稳定显示
         if (detail.poster && !s.poster) s.poster = detail.poster;
         if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
+        if (detail.strmTag) s.strmTag = detail.strmTag; // [DIAG] 携带来源标签
         if (detail.totalEps) s.totalEps = detail.totalEps;
         if (detail.localEps) s.localEps = detail.localEps;
         if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
@@ -650,6 +652,9 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         }
         if (landscapeCount === 0) {
           log('[lc-624] 始终无横版 backdrop, 强制 reveal(将显示占位背景而非竖版海报)');
+          // [DIAG] 列出缺横版 backdrop 的项（重点看是否都是 STRM/网盘导致海报出不来）
+          const miss = newShows.filter((s: any) => !isLandscapeBackdrop(s)).map((s: any) => `${(s.title || '').substring(0, 12)}${s.strmTag ? '(STRM:' + s.strmTag + ')' : ''}`);
+          log('[DIAG] 无横版backdrop的项:', miss.length ? miss.join(', ') : '(无)');
         }
         _carouselRevealed = true;
         _carouselInited = false;
@@ -657,18 +662,18 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       };
       const revealTimer = setTimeout(() => {
         log('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
-        completeCarouselProgress(revealOnce);
+        completeCarouselProgress(revealOnce, 'revealTimer-8s-timeout');
       }, 8000);
       detailsPromise.then(() => {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
         log('[lc-569] item details enriched:', withData, '/', newShows.length, '; revealing carousel once');
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
-        completeCarouselProgress(revealOnce);
+        completeCarouselProgress(revealOnce, 'details-ready');
       }).catch((e) => {
         clearTimeout(revealTimer);
         log('[lc-569] item detail fetch error:', e);
-        completeCarouselProgress(revealOnce);
+        completeCarouselProgress(revealOnce, 'details-error');
       });
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
@@ -770,25 +775,67 @@ function wheelToScroll(): void {
 /* ========== 轮播图(纯真实数据源, 不用硬编码) ========== */
 
 /* ========== 鉴权拉取图片→blob URL(绕开<img>无法带Authx头的问题) ========== */
-async function fetchImageAuth(fullUrl: string): Promise<string | null> {
-  if (!fullUrl) return null;
+// [DIAG] 增强：label=来源说明, isStrm=是否网盘STRM；记录耗时、识别跨域(网盘/远程直链)、失败给出明确日志
+async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?: boolean }): Promise<string | null> {
+  const label = opts?.label || 'img';
+  const isStrm = !!opts?.isStrm;
+  if (!fullUrl) { if (isStrm) log('[DIAG] fetchImg 跳过(空URL) label=', label, 'isStrm=true'); return null; }
+  const t0 = Date.now();
   try {
     const { ipcRenderer } = require('electron');
     // 提取path(含query)用于签名, 必须与fetch的URL完全一致
     let path = fullUrl;
     const m = fullUrl.match(/^https?:\/\/[^/]+(\/.*)$/);
     if (m) path = m[1];
+    // 跨域(非 fnOS 同源)图片：通常是网盘/远程直链，加载慢或失败的高风险源
+    const crossOrigin = m ? (new URL(fullUrl).origin !== location.origin) : false;
     const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
     const resp = await fetch(fullUrl, { credentials: 'include', headers: { 'Authx': authx } });
     const ct = resp.headers.get('content-type') || '';
-    log('fetchImg', path.substring(0, 46), 'status', resp.status, 'ct', ct.substring(0, 24));
+    const ms = Date.now() - t0;
+    log('[DIAG] fetchImg', label, 'status', resp.status, 'ct', ct.substring(0, 24), 'crossOrigin', crossOrigin, 'isStrm', isStrm, 'ms', ms, 'path', path.substring(0, 50));
     if (!resp.ok || !ct.startsWith('image/')) {
-      try { const t = await resp.text(); log('fetchImg body:', t.substring(0, 90)); } catch (e) {}
+      try { const t = await resp.text(); log('[DIAG] fetchImg 非图片/失败 body:', t.substring(0, 120)); } catch (e) {}
       return null;
     }
     const blob = await resp.blob();
     return URL.createObjectURL(blob);
-  } catch (e) { log('fetchImg err', String(e).substring(0, 90)); return null; }
+  } catch (e) {
+    const ms = Date.now() - t0;
+    log('[DIAG] fetchImg err', label, 'isStrm', isStrm, 'ms', ms, String(e).substring(0, 120));
+    return null;
+  }
+}
+
+// [DIAG] 识别 item 是否为「网盘 STRM / 远程 / 云存储」来源——用于在轮播海报加载失败时定位是否 STR 媒体导致。
+// 仅做启发式扫描，不改动任何数据；命中返回形如 "STRM"、"STRM+CLOUD"、"WEBDAV"、"REMOTE" 的标签，否则空串。
+function detectStrmOrCloud(d: any): string {
+  if (!d || typeof d !== 'object') return '';
+  const hay: string[] = [];
+  for (const k of ['path', 'file_path', 'filepath', 'Path', 'FilePath', 'media_path', 'source', 'type', 'media_type', 'library_type', 'strm', 'is_strm', 'protocol']) {
+    const v = d[k];
+    if (typeof v === 'string') hay.push(v);
+  }
+  const arr = d.media_sources || d.mediaSources || d.media_stream || d.MediaSources || d.streams || d.play_info || d.sources || [];
+  if (Array.isArray(arr)) {
+    for (const it of arr) {
+      if (!it) continue;
+      if (typeof it === 'string') hay.push(it);
+      else if (typeof it === 'object') {
+        for (const kk of ['path', 'file_path', 'url', 'src', 'download_url', 'DownloadURL', 'Path', 'Url', 'protocol']) {
+          const v = it[kk];
+          if (typeof v === 'string') hay.push(v);
+        }
+      }
+    }
+  }
+  const joined = hay.join(' ');
+  const tags: string[] = [];
+  if (/\.strm(\?|$|#)/i.test(joined)) tags.push('STRM');
+  if (/webdav|web-dav/i.test(joined)) tags.push('WEBDAV');
+  if (/cloudstor|cloud_storage|cloudstorage|115|aliyun|quark|uc\.|pan\./i.test(joined)) tags.push('CLOUD');
+  if (/^https?:\/\//i.test(joined) && !/(sys\/img|fnos|fntv|\/v\/api)/i.test(joined)) tags.push('REMOTE');
+  return tags.join('+');
 }
 
 /** [lc-569] 从飞牛 item API 一次性补齐轮播展示字段:
@@ -809,6 +856,9 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
     if (!resp.ok) return null;
     const json: any = await resp.json();
     const d = (json && json.data) || {};
+    // [DIAG] STRM/网盘来源识别 + 关键字段记录（不改行为）：定位海报加载失败是否由网盘 STR 媒体引起
+    const strmTag = detectStrmOrCloud(d);
+    if (strmTag) log('[DIAG] item', id, '疑似来源:', strmTag, '| 候选路径=', String(d.path || d.file_path || '').substring(0, 90));
     // [lc-568] 飞牛 item API: 横版大海报 = data.backdrops(数组), 竖版 = data.posters(数组)
     // [lc-599] 选最大尺寸的 backdrop: 数组第一项经常是竖版小缩略图, 大横版(1920x1080)通常在后面
     const pickImg = (v: any, preferLargest = false): string => {
@@ -877,6 +927,7 @@ async function fetchItemDetail(base: string, id: string): Promise<any | null> {
       year: rawYear, rating, statusText, genres,
       desc: (d.overview || '').trim(),
       title: (d.title || d.name || '').trim(),
+      strmTag, // [DIAG] 携带来源标签，供轮播渲染/看门狗诊断
     };
   } catch (e) { return null; }
 }
@@ -926,6 +977,11 @@ let _carouselBarFill: HTMLElement | null = null;  // 进度条填充元素
 let _carouselPctEl: HTMLElement | null = null;    // 百分比文本元素
 let _carouselStatusEl: HTMLElement | null = null; // [lc-621] 状态文字(加载中/加载完成)
 let _carouselProgressPct = 0;                     // 当前百分比
+// [DIAG] 99% 卡死看门狗状态（仅用于诊断日志，不改变任何行为）
+let _diagStuckTicks = 0;       // 进度条停在 99% 的 tick 计数
+let _diagStuckSince = 0;       // 首次到达 99% 的时间戳
+let _diagStuckLogged = false;  // 看门狗日志是否已输出（只输出一次）
+let _diagLastShows: any[] = []; // [DIAG] 最近一次轮播数据源（供看门狗/异常日志定位；仅诊断用）
 
 // [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
 // 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
@@ -1104,8 +1160,16 @@ function injectCarousel(): void {
     leftEl.appendChild(imgEl);
     const pic = imgUrl(show.backdrop); // 不带?w, 避免与签名path不一致
     if (shows === _apiShows && i === 0) log('SLIDE0 img src:', pic.substring(0, 80));
-    fetchImageAuth(pic).then((b) => {
-      if (!b) return;
+    const isSlideStrm = !!show.strmTag;
+    fetchImageAuth(pic, { label: 'slide#' + i + ':' + (show.title || '').substring(0, 10), isStrm: isSlideStrm }).then((b) => {
+      if (!b) {
+        if (isSlideStrm) log('[DIAG] 轮播主图 fetchImageAuth 返回空(STRM item 海报加载失败):', (show.title || '').substring(0, 16), pic.substring(0, 60));
+        return;
+      }
+      // [DIAG] 先挂 onerror 再设 src，捕获 blob 解码/加载失败（STRM/网盘图片极易失败且此前无任何报错）
+      imgEl.onerror = () => {
+        log('[DIAG] 轮播主图加载失败(img.onerror):', (show.title || '').substring(0, 16), 'strmTag=', show.strmTag || '-', pic.substring(0, 60));
+      };
       imgEl.src = b;
       // [lc-624] 加载后判断宽高比: 仅横版(nw>nh)才显示图片; 竖版(海报兜底)隐藏
       // —— 用户明确要求: 没有横版数据就不要渲染出来, 杜绝"先竖屏再横屏"闪动。
@@ -1268,10 +1332,15 @@ function injectCarousel(): void {
       pImg.src = placeholderSvg; // 先占位, 成功后再切到真实 URL(防裂开)
       pImg.style.cssText = 'width:120px;height:170px;object-fit:cover;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.18);display:block;background:rgba(200,190,220,.25)';
       // [lc-601] onerror 兜底: 即便 src 切到真实 URL 后 404, 也回退到占位(永不裂开)
-      pImg.onerror = () => { if (pImg.src !== placeholderSvg) pImg.src = placeholderSvg; };
+      pImg.onerror = () => {
+        log('[DIAG] 右侧海报条加载失败(img.onerror):', (show.title || '').substring(0, 16), 'strmTag=', show.strmTag || '-', pUrl ? pUrl.substring(0, 60) : '');
+        if (pImg.src !== placeholderSvg) pImg.src = placeholderSvg;
+      };
       const pUrl = imgUrl(show.poster);
       if (pUrl) {
-        fetchImageAuth(pUrl).then((b) => { if (b) pImg.src = b; });
+        fetchImageAuth(pUrl, { label: 'poster:' + (show.title || '').substring(0, 10), isStrm: !!show.strmTag }).then((b) => { if (b) pImg.src = b; });
+      } else if (show.strmTag) {
+        log('[DIAG] 右侧海报条无 poster URL(STRM item):', (show.title || '').substring(0, 16), 'strmTag=', show.strmTag);
       }
       const pTitle = document.createElement('div');
       // [lc-574] 标题浅色化: 深蓝黑→近白浅紫, 加字重/字距/阴影, 配合暗色磨砂背景更好看
@@ -1440,6 +1509,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   _carouselPctEl = percentEl;
   _carouselStatusEl = statusEl;
   _carouselProgressPct = 0;
+  _diagStuckTicks = 0; _diagStuckSince = 0; _diagStuckLogged = false; // [DIAG] 看门狗复位
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   _carouselProgressTimer = window.setInterval(() => {
     const p = _carouselProgressPct;
@@ -1450,6 +1520,21 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     _carouselProgressPct = Math.min(99, p + inc);
     fillEl.style.width = _carouselProgressPct + '%';
     percentEl.textContent = Math.round(_carouselProgressPct) + '%';
+    // [DIAG] 99% 卡死看门狗：进度条封顶 99% 后若 ~15s(≈125 tick @120ms)仍未调用 completeCarouselProgress(跳 100)，记录诊断
+    if (_carouselProgressPct >= 99) {
+      if (_diagStuckTicks === 0) _diagStuckSince = Date.now();
+      _diagStuckTicks++;
+      if (_diagStuckTicks > 125 && !_diagStuckLogged) {
+        _diagStuckLogged = true;
+        const landCnt = (_apiShows || []).filter((s: any) => s && s.backdrop && !/poster-|poster\/|\/poster/i.test(s.backdrop)).length;
+        const strmCnt = (_apiShows || []).filter((s: any) => s && s.strmTag).length;
+        log('[DIAG][WATCHDOG] 轮播进度卡在 99% 已超 15s，completeCarouselProgress 未触发 → 轮播不会显示。' +
+            ` apiShows=${_apiShows.length} 有横版backdrop=${landCnt} 疑似STRM项数=${strmCnt}` +
+            ` diagLastShows=${_diagLastShows.length}`);
+      }
+    } else {
+      _diagStuckTicks = 0;
+    }
   }, 120);
 
   wrapper.appendChild(container);
@@ -1474,7 +1559,10 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
  *  完成后先【强制填满】(取消 transition 直接 100%, 避免 .25s 过渡动画未走完就被
  *  替换 DOM → 用户看到条停在 ~70%), 再延迟一帧让满条渲染, 状态文字「加载完成」,
  *  然后回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
-function completeCarouselProgress(onDone?: () => void): void {
+function completeCarouselProgress(onDone?: () => void, reason?: string): void {
+  // [DIAG] 记录触发来源，便于排查「卡在 99%」到底哪条路径没到（revealTimer-8s-timeout / details-ready / details-error）
+  log('[DIAG] completeCarouselProgress 触发, reason=', reason || 'unknown', 'startPct=', Math.round(_carouselProgressPct), 'apiShows=', _apiShows.length);
+  _diagStuckTicks = 0; _diagStuckLogged = false; // [DIAG] 看门狗复位：进度已推进到完成阶段
   if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
   const start = _carouselProgressPct;
   const totalMs = 600;
