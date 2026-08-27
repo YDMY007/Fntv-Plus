@@ -56,6 +56,7 @@ interface ShowItem {
     sessions: [string, string][];
     viaPlayer?: string;  // 本地播放来源（'mpv' | 'potplayer' | '内置'），有值则在卡片上显示播放器徽标
     airStatus?: string;  // TMDB 剧集完结状态（Ended/Canceled/Returning Series…），用于"已完结/连载中"徽标
+    airStatusOverride?: 'ended' | 'ongoing'; // 用户对完结状态的人工覆盖，优先级高于 airStatus，持久化保存
 }
 
 // ───────────────────────── 工具 ─────────────────────────
@@ -434,6 +435,19 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .badge.via{top:10px;left:auto;right:10px;background:rgba(10,132,255,.28);border-color:rgba(10,132,255,.6);color:#7fd0ff}
 #${PANEL_ID} .wh-card .badge.air.ended{background:rgba(48,209,88,.22);border-color:rgba(48,209,88,.6);color:#5be584}
 #${PANEL_ID} .wh-card .badge.air.ongoing{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.6);color:#ffb340}
+#${PANEL_ID} .wh-card .badge.air.air-btn{cursor:pointer;user-select:none}
+#${PANEL_ID} .wh-card .badge.air.air-btn:hover{filter:brightness(1.18)}
+#${PANEL_ID} .wh-card .badge.air.air-btn.ov{box-shadow:0 0 0 1px rgba(255,255,255,.5) inset}
+#${PANEL_ID} .wh-card .badge.air.air-empty{background:rgba(255,255,255,.08);border:1px dashed rgba(255,255,255,.4);color:rgba(255,255,255,.65);opacity:.72;font-weight:500}
+.wh-air-menu{position:fixed;min-width:132px;background:#1c1c1e;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:5px;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:13px;color:#fff;font-family:inherit}
+.wh-air-menu .wh-air-opt{padding:7px 12px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:9px}
+.wh-air-menu .wh-air-opt:hover{background:rgba(255,255,255,.1)}
+.wh-air-menu .wh-air-opt.sel{background:rgba(41,151,255,.2)}
+.wh-air-menu .wh-air-opt .dot{width:8px;height:8px;border-radius:50%;background:#888;flex:none}
+.wh-air-menu .wh-air-opt.ended .dot{background:#5be584}
+.wh-air-menu .wh-air-opt.ongoing .dot{background:#ffb340}
+.wh-air-menu .wh-air-clear{margin-top:4px;padding:7px 12px;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);cursor:pointer;font-size:12px}
+.wh-air-menu .wh-air-clear:hover{color:#fff}
 #${PANEL_ID} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
@@ -834,24 +848,81 @@ function bindWindowTopBtns(): void {
     window.addEventListener('mouseup', topAction, true);
 }
 
-// TMDB 剧集完结状态 → 中文徽标文案 / 样式类
+// 左上角完结状态徽标（可点击设置）。人工覆盖优先于 TMDB 自动值；无状态时对剧集/动漫显示低调占位胶囊。
 //   - Ended / Canceled → 已完结
 //   - Returning Series → 连载中
 //   - 其余状态(Planned / In Production / Pilot / 未知) → 不显示，避免把"未开播/制作中"等误标成"连载中"
-//   - 电影永远"已完结"（原约定）
-// mode==='done'（已看完列）时不再显示"连载中"，避免与"已看完"矛盾（已完结仍显示）
+//   - 电影永远"已完结"（仍可被人工覆盖）
+// mode==='done'（已看完列）时自动判定的"连载中"不显示(避免矛盾)；人工指定则尊重用户
 function airStatusBadge(item: ShowItem, mode?: 'done' | 'partial'): string {
+    const eff = item.airStatusOverride || item.airStatus; // 人工覆盖优先
     let label = '';
     let cls = '';
-    if (item.airStatus) {
-        const s = item.airStatus.toLowerCase();
+    if (eff) {
+        const s = eff.toLowerCase();
         if (s === 'ended' || s === 'canceled') { label = '已完结'; cls = 'ended'; }
         else if (s === 'returning series') { label = '连载中'; cls = 'ongoing'; }
     } else if (item.type === '电影') {
-        label = '已完结'; cls = 'ended';
+        label = '已完结'; cls = 'ended'; // 电影默认已完结（可被覆盖）
     }
-    if (mode === 'done' && cls === 'ongoing') return '';
-    return label ? `<div class="badge air ${cls}">${label}</div>` : '';
+    if (mode === 'done' && cls === 'ongoing' && !item.airStatusOverride) return '';
+    if (label) {
+        const ov = item.airStatusOverride ? ' ov' : '';
+        return `<div class="badge air ${cls} air-btn${ov}" data-air-btn="" role="button" tabindex="0" title="点击设置完结状态">${label}</div>`;
+    }
+    // 无状态：剧集/动漫显示低调可点击占位，便于手动设置（电影默认已完结不会到这）
+    if (item.type === '剧集' || item.type === '动漫') {
+        return `<div class="badge air air-empty air-btn" data-air-btn="" role="button" tabindex="0" title="点击设置完结状态">设置状态</div>`;
+    }
+    return '';
+}
+
+// ── 完结状态手动设置弹层 ──
+let _airMenu: HTMLElement | null = null;
+function closeAirMenu(): void {
+    if (_airMenu) { _airMenu.remove(); _airMenu = null; }
+    document.removeEventListener('click', onDocClickCloseAir, true);
+}
+function onDocClickCloseAir(e: Event): void {
+    if (_airMenu && !_airMenu.contains(e.target as Node)) closeAirMenu();
+}
+function openAirMenu(badge: HTMLElement, item: ShowItem): void {
+    closeAirMenu();
+    const k = airOverrideKey(item);
+    if (!k) return;
+    const rect = badge.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.className = 'wh-air-menu';
+    const cur = item.airStatusOverride || item.airStatus || '';
+    const opt = (v: string, label: string, cls: string): string =>
+        `<div class="wh-air-opt ${cls}${cur === v ? ' sel' : ''}" data-v="${v}"><span class="dot"></span>${label}</div>`;
+    menu.innerHTML =
+        opt('ended', '已完结', 'ended') +
+        opt('ongoing', '连载中', 'ongoing') +
+        `<div class="wh-air-clear">清除（跟随 TMDB 自动）</div>`;
+    menu.style.position = 'fixed';
+    menu.style.left = Math.round(rect.left) + 'px';
+    menu.style.top = Math.round(rect.bottom + 6) + 'px';
+    menu.style.zIndex = '2147483647';
+    document.body.appendChild(menu);
+    _airMenu = menu;
+    menu.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        const o = t.closest('[data-v]') as HTMLElement | null;
+        if (o && (o.dataset.v === 'ended' || o.dataset.v === 'ongoing')) setAirOverride(item, o.dataset.v);
+        else if (t.classList.contains('wh-air-clear')) setAirOverride(item, null);
+        closeAirMenu();
+    });
+    // 延迟挂载外部点击关闭，避免本次 opening click 立刻触发
+    setTimeout(() => document.addEventListener('click', onDocClickCloseAir, true), 0);
+}
+function setAirOverride(item: ShowItem, v: 'ended' | 'ongoing' | null): void {
+    const k = airOverrideKey(item);
+    if (!k) return;
+    if (v) _airOverride.set(k, v); else _airOverride.delete(k);
+    item.airStatusOverride = v || undefined;
+    saveAirOverride();
+    renderWall(); // 按当前筛选/列重绘徽标
 }
 
 // mode: 'done' = 已看完列（干净无徽标，列头已说明状态）；'partial' = 在观看列（有进度则显示底部进度条）
@@ -874,7 +945,7 @@ function cardHTML(item: ShowItem, idx: number, mode: 'done' | 'partial'): string
     const artStyle = item.poster
         ? `background:${item.art};background-image:url('${item.poster}');background-size:cover;background-position:center;`
         : `background:${item.art};`;
-    return `<div class="wh-card poster" data-fntv-glass-exclude="" data-idx="${idx}" data-name="${item.name}" data-sub="${sub}" data-prog="${item.prog}">
+    return `<div class="wh-card poster" data-fntv-glass-exclude="" data-idx="${idx}" data-guid="${item.guid}" data-name="${item.name}" data-sub="${sub}" data-prog="${item.prog}">
         <div class="art" style="${artStyle}"></div>
         <div class="scrim"></div>${air}${via}${pbar}
         <div class="meta">${stars}<div class="name">${item.name}</div><div class="sub">${sub}</div></div>
@@ -901,7 +972,14 @@ function renderWall(): void {
     // 卡片点击 → 详情（用 curData 全局索引，与 openDetail 约定一致）
     [doneRow, partialRow].forEach((row) => {
         row.querySelectorAll('.wh-card').forEach((c) => {
-            c.addEventListener('click', () => openDetail(parseInt((c as HTMLElement).dataset.idx || '0', 10)));
+            const idx = parseInt((c as HTMLElement).dataset.idx || '0', 10);
+            c.addEventListener('click', () => openDetail(idx));
+            // 完结状态徽标点击 → 弹层设置（阻止冒泡，不打开详情）
+            const badge = c.querySelector('.badge.air.air-btn') as HTMLElement | null;
+            if (badge) badge.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openAirMenu(badge, curData[idx]);
+            });
         });
     });
 }
@@ -1387,6 +1465,35 @@ function saveRatings(): void {
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
 
+// ── 完结状态人工覆盖（跨重启持久化；优先级高于 TMDB 自动值，TMDB 重拉不覆盖）──
+const _airOverride = new Map<string, 'ended' | 'ongoing'>();
+const _AIR_OVERRIDE_LS_KEY = 'fntv_wh_air_override_v1';
+let _airOverrideLoaded = false;
+function loadAirOverride(): void {
+    if (_airOverrideLoaded) return;
+    _airOverrideLoaded = true;
+    try {
+        const raw = localStorage.getItem(_AIR_OVERRIDE_LS_KEY);
+        if (!raw) return;
+        const obj = JSON.parse(raw) as Record<string, string>;
+        for (const k in obj) if (obj[k] === 'ended' || obj[k] === 'ongoing') _airOverride.set(k, obj[k]);
+    } catch { /* 解析失败则忽略 */ }
+}
+function saveAirOverride(): void {
+    try {
+        const obj: Record<string, string> = {};
+        _airOverride.forEach((v, k) => { obj[k] = v; });
+        localStorage.setItem(_AIR_OVERRIDE_LS_KEY, JSON.stringify(obj));
+    } catch { /* 配额/隐私模式失败时忽略 */ }
+}
+// 覆盖键：优先 guid，缺则 name（无两者的本地条目无法稳定覆盖，跳过）
+function airOverrideKey(it: ShowItem): string { return it.guid || it.name || ''; }
+// 将已持久化的覆盖写回数据项（loadWatchData / restoreCurData 合并时用）
+function applyAirOverride(it: ShowItem): void {
+    const k = airOverrideKey(it);
+    if (k && _airOverride.has(k)) it.airStatusOverride = _airOverride.get(k);
+}
+
 // 上次真实观影数据（curData）跨重启持久化：开面板时先秒显，后台再静默刷新。
 // 仅持久化真实数据的关键字段（封面/简介复用于 _posterCache，不重复落盘），控制体积。
 const _CURDATA_LS_KEY = 'fntv_wh_curdata_v1';
@@ -1430,8 +1537,10 @@ function restoreCurData(): boolean {
                 myRating: it.myRating || 0,
                 myReview: it.myReview || '',
                 sessions: it.lastPlayedAt ? [[formatDate(it.lastPlayedAt), '']] : [],
+                airStatus: it.airStatus,
             };
         });
+        curData.forEach(applyAirOverride); // 用持久化的人工覆盖覆盖 TMDB 自动值
         return true;
     } catch (e: any) { log.warn(LOG, 'restoreCurData 失败:', e?.message || e); return false; }
 }
@@ -1665,6 +1774,8 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
                 viaPlayer: lw.player,
             });
         }
+        // 合并用户人工覆盖的完结状态（按 guid，缺则 name），TMDB 重拉不覆盖它
+        for (const m of mapped) applyAirOverride(m);
         curData = mapped;
         log.info(LOG, `已加载 ${mapped.length} 条观看记录（飞牛 ${fnosKeys.size} + 本地合并 ${mapped.length - fnosKeys.size}）`);
         return { count: mapped.length, from: 'real', libraryTotal };
@@ -1813,6 +1924,7 @@ function openPanel(): void {
         // 渲染前先恢复本地持久化数据（每日观看台账 + 评分/评语），避免热力图/评分因 fnOS 空白而丢失
         loadPersistedDayCount();
         loadPersistedRatings();
+        loadAirOverride(); // 完结状态人工覆盖（须在 restoreCurData/loadWatchData 之前加载）
         renderChart();
 
         // 缓存优先：先秒显上次真实数据（含封面/评分/进度），后台再静默刷新到最新
