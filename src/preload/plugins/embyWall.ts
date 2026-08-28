@@ -1281,6 +1281,14 @@ function injectCarousel(): void {
   _carouselContainer = container;
   requestAnimationFrame(() => { container.style.opacity = '1'; });
 
+  // [lc-781] 样式 2（滑动切换 + 进度条）：早期分支，复用已建好的 container/wrapper，
+  //   跳过下方样式 1 的 track / posterStrip / 竖向轮播逻辑，改走 buildCarouselStyle2。
+  if (_cs === 2) {
+    buildCarouselStyle2(container, wrapper, shows, base, rebuild);
+    if (!rebuild) target.appendChild(wrapper);
+    return;
+  }
+
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
   wrapper.style.alignItems = 'flex-start';
@@ -1610,6 +1618,301 @@ function injectCarousel(): void {
   applyTitleLogo(base, shows, infos);
 
   log('carousel injected');
+}
+
+/* ========== [lc-781] 轮播样式 2：滑动切换式 + 底部进度条/指示点 ==========
+ * 结构/交互照抄用户给的「海外剧场」demo，数据接入真实片库(shows)。
+ * 仅当容器 data-fntv-carousel-style="2" 时由 injectCarousel 早期分支调用。 */
+function buildCarouselStyle2(
+  container: HTMLElement,
+  wrapper: HTMLElement,
+  shows: any[],
+  base: string,
+  rebuild: boolean
+): void {
+  const log2 = (...a: any[]) => log('[s2]', ...a);
+
+  const imgUrl = (p: string, w?: number) => {
+    if (!p) return '';
+    if (p.startsWith('http') || p.startsWith('/v/api/')) return p + (w ? '?w=' + w : '');
+    return `${base}/v/api/v1/${p}` + (w ? '?w=' + w : '');
+  };
+
+  // 一次性注入样式（scoped 到样式 2）
+  if (!document.getElementById('fnos-carousel-style2-style')) {
+    const st = document.createElement('style');
+    st.id = 'fnos-carousel-style2-style';
+    st.textContent = `
+[data-fntv-carousel-style="2"] .fnos-slide-track{position:relative;width:100%;height:100%}
+[data-fntv-carousel-style="2"] .fnos-slide-item{
+  position:absolute;inset:0;border-radius:24px;overflow:hidden;
+  opacity:0;visibility:hidden;
+  transition:opacity .8s ease,transform .8s cubic-bezier(.25,.8,.3,1);
+  transform:translateX(60px);z-index:1;
+}
+[data-fntv-carousel-style="2"] .fnos-slide-item.active{opacity:1;visibility:visible;transform:translateX(0);z-index:2}
+[data-fntv-carousel-style="2"] .fnos-slide-item.exit-left{opacity:0;visibility:visible;transform:translateX(-80px);z-index:1;transition:opacity .7s ease,transform .7s ease}
+[data-fntv-carousel-style="2"] .fnos-slide-item.pre-enter{opacity:0;visibility:hidden;transform:translateX(80px);z-index:0}
+[data-fntv-carousel-style="2"] .fnos-slide-bg{position:absolute;inset:0;background-size:cover;background-position:center 25%}
+[data-fntv-carousel-style="2"] .fnos-slide-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.7) 25%,rgba(0,0,0,.3) 55%,rgba(0,0,0,.1) 75%,rgba(0,0,0,.02) 100%)}
+[data-fntv-carousel-style="2"] .fnos-series-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none}
+[data-fntv-carousel-style="2"] .fnos-series-logo .logo-text{font-size:1.1rem;font-weight:700;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:.35rem 1rem;border-radius:30px;border:1px solid rgba(255,215,150,.5);display:inline-block;white-space:nowrap}
+[data-fntv-carousel-style="2"] .fnos-slide-content{position:relative;z-index:3;height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 2.2rem;color:#fff}
+[data-fntv-carousel-style="2"] .fnos-slide-meta{font-size:.75rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.5rem;text-transform:uppercase}
+[data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.6rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 20px rgba(0,0,0,.8);margin-bottom:.6rem;line-height:1.2}
+[data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:1rem;color:#e8ddd0;line-height:1.6;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:600px;margin-bottom:1.5rem}
+[data-fntv-carousel-style="2"] .fnos-slide-actions{display:flex;gap:.8rem;flex-wrap:wrap}
+[data-fntv-carousel-style="2"] .fnos-s2-play{
+  padding:.85rem 1.8rem;border-radius:50px;font-weight:600;font-size:.95rem;cursor:pointer;
+  letter-spacing:1px;transition:all .3s ease;border:none;display:inline-flex;align-items:center;gap:.5rem;white-space:nowrap;
+  background:linear-gradient(135deg,#f0b85c,#d49a3a);color:#1a120a;
+  box-shadow:0 8px 24px rgba(212,160,76,.45);
+}
+[data-fntv-carousel-style="2"] .fnos-s2-play:hover{background:linear-gradient(135deg,#f7c66e,#dfa844);transform:translateY(-3px);box-shadow:0 14px 30px rgba(212,160,76,.6)}
+[data-fntv-carousel-style="2"] .fnos-s2-detail{
+  padding:.85rem 1.8rem;border-radius:50px;font-weight:600;font-size:.95rem;cursor:pointer;
+  letter-spacing:1px;transition:all .3s ease;border:1.5px solid rgba(210,180,140,.7);display:inline-flex;align-items:center;gap:.5rem;white-space:nowrap;
+  background:rgba(20,15,10,.6);color:#f0e3ce;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+[data-fntv-carousel-style="2"] .fnos-s2-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
+[data-fntv-carousel-style="2"] .fnos-s2-play:active,.fnos-s2-detail:active{transform:translateY(0) scale(.97)}
+[data-fntv-carousel-style="2"] .fnos-s2-detail.is-loading{opacity:.6;pointer-events:none}
+[data-fntv-carousel-style="2"] .fnos-slider-footer{width:100%;display:flex;align-items:center;gap:1.2rem;margin-top:.4rem}
+[data-fntv-carousel-style="2"] .fnos-progress-bar{flex:1;height:4px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;cursor:pointer;position:relative}
+[data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transition:width .1s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
+[data-fntv-carousel-style="2"] .fnos-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
+[data-fntv-carousel-style="2"] .fnos-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
+[data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+[data-fntv-carousel-style="2"] .fnos-auto-hint{color:#8f7e68;font-size:.7rem;letter-spacing:1px;flex:0 0 auto}
+@media (max-width:800px){
+  [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:1.8rem}
+  [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:.85rem;max-width:90%}
+  [data-fntv-carousel-style="2"] .fnos-slide-content{padding:1.5rem}
+  [data-fntv-carousel-style="2"] .fnos-series-logo{top:.8rem;left:1rem}
+  [data-fntv-carousel-style="2"] .fnos-series-logo .logo-text{font-size:.85rem;padding:.25rem .7rem}
+}
+@media (prefers-reduced-motion: reduce){
+  [data-fntv-carousel-style="2"] .fnos-slide-item,[data-fntv-carousel-style="2"] .fnos-slide-item.exit-left{transition:opacity .2s ease}
+  [data-fntv-carousel-style="2"] .fnos-slide-item.active,[data-fntv-carousel-style="2"] .fnos-slide-item.exit-left,[data-fntv-carousel-style="2"] .fnos-slide-item.pre-enter{transform:none}
+  [data-fntv-carousel-style="2"] .fnos-s2-play,[data-fntv-carousel-style="2"] .fnos-s2-detail{transition:background-color .15s ease}
+  [data-fntv-carousel-style="2"] .fnos-s2-play:hover,[data-fntv-carousel-style="2"] .fnos-s2-detail:hover{transform:none}
+}
+`;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  // 容器：补 demo 的细边框 + 柔和浮起阴影（仅样式 2），覆盖容器默认的 box-shadow:none
+  container.style.border = '1px solid rgba(255,255,255,.06)';
+  container.style.boxShadow = '0 22px 48px rgba(0,0,0,.45)';
+
+  // 每片主题色（按 demo 的五色循环，给顶部 logo 胶囊上色）
+  const accents = [
+    { border: '#6eb5ff', text: '#eaf4ff' },
+    { border: '#d69b6a', text: '#fcead8' },
+    { border: '#b08fe0', text: '#f0e6ff' },
+    { border: '#5fb0a8', text: '#e0fcf7' },
+    { border: '#e08585', text: '#ffe8e8' },
+  ];
+
+  const track = document.createElement('div');
+  track.className = 'fnos-slide-track';
+  container.appendChild(track);
+
+  const slides: HTMLElement[] = [];
+  const dotsEls: HTMLElement[] = [];
+
+  shows.forEach((show, i) => {
+    const accent = accents[i % accents.length];
+    const slide = document.createElement('div');
+    slide.className = 'fnos-slide-item' + (i === 0 ? ' active' : ' pre-enter');
+    slide.setAttribute('data-index', String(i));
+
+    // 背景：先渐变兜底，真实 backdrop 加载成功后替换
+    const slideBg = document.createElement('div');
+    slideBg.className = 'fnos-slide-bg';
+    slideBg.style.backgroundImage = `linear-gradient(160deg, ${accent.border}55, #0b1219)`;
+    slide.appendChild(slideBg);
+
+    // 顶部左侧 logo 胶囊（评分优先，否则类型）
+    const seriesLogo = document.createElement('div');
+    seriesLogo.className = 'fnos-series-logo';
+    const rating = (show as any).rating || 0;
+    const genreArr: string[] = (show as any).genres || [];
+    const logoText = rating > 0 ? `★ ${rating.toFixed(1)}` : (genreArr[0] || '精选');
+    const logoSpan = document.createElement('span');
+    logoSpan.className = 'logo-text';
+    logoSpan.textContent = logoText;
+    logoSpan.style.borderColor = accent.border;
+    logoSpan.style.color = accent.text;
+    seriesLogo.appendChild(logoSpan);
+    slide.appendChild(seriesLogo);
+
+    // 内容区（标题/简介用 textContent，避免 HTML 注入）
+    const content = document.createElement('div');
+    content.className = 'fnos-slide-content';
+    const meta = [ (genreArr[0] || '').toUpperCase(), (show as any).year ? String((show as any).year) : '' ].filter(Boolean).join(' · ');
+    const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
+    content.innerHTML =
+      '<div class="fnos-slide-meta"></div>' +
+      '<div class="fnos-slide-title"></div>' +
+      '<div class="fnos-slide-desc"></div>' +
+      '<div class="fnos-slide-actions">' +
+        '<button class="fnos-s2-play" type="button">开始播放</button>' +
+        '<button class="fnos-s2-detail" type="button">更多详情</button>' +
+      '</div>';
+    (content.querySelector('.fnos-slide-meta') as HTMLElement).textContent = meta;
+    (content.querySelector('.fnos-slide-title') as HTMLElement).textContent = (show as any).title || '';
+    (content.querySelector('.fnos-slide-desc') as HTMLElement).textContent = (show as any).desc || '';
+    slide.appendChild(content);
+    track.appendChild(slide);
+    slides.push(slide);
+
+    // 真实背景图（与样式 1 同链路：fetchImageAuth → blob）
+    const pic = imgUrl((show as any).backdrop);
+    if (pic) {
+      fetchImageAuth(pic, { label: 's2-slide#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
+        if (b) slideBg.style.backgroundImage = `url("${b}")`;
+      });
+    }
+
+    // 按钮行为（沿用飞牛 SPA 路由）
+    const playBtn = content.querySelector('.fnos-s2-play') as HTMLElement | null;
+    const detailBtn = content.querySelector('.fnos-s2-detail') as HTMLElement | null;
+    const spaNav = (href: string): void => {
+      history.pushState({}, '', href);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      setTimeout(() => {
+        const detailReady = !!document.querySelector('button[aria-label="返回"]');
+        if (!detailReady) location.href = href;
+      }, 600);
+    };
+    if (playBtn) playBtn.addEventListener('click', () => { spaNav(detailHref); });
+    if (detailBtn) detailBtn.addEventListener('click', () => {
+      detailBtn.classList.add('is-loading');
+      resolveSeasonHref(show).then((href) => { detailBtn.classList.remove('is-loading'); spaNav(href); });
+    });
+  });
+
+  // 底部 footer：进度条 + 指示点 + 提示
+  const footer = document.createElement('div');
+  footer.className = 'fnos-slider-footer';
+  const progressBar = document.createElement('div');
+  progressBar.className = 'fnos-progress-bar';
+  const progressFill = document.createElement('div');
+  progressFill.className = 'fnos-progress-fill';
+  progressBar.appendChild(progressFill);
+  const dots = document.createElement('div');
+  dots.className = 'fnos-dots';
+  slides.forEach((_, i) => {
+    const d = document.createElement('span');
+    d.className = 'fnos-dot' + (i === 0 ? ' active' : '');
+    d.setAttribute('data-index', String(i));
+    dots.appendChild(d);
+    dotsEls.push(d);
+  });
+  const hint = document.createElement('div');
+  hint.className = 'fnos-auto-hint';
+  hint.textContent = '自动播放中 · 悬停可暂停';
+  footer.appendChild(progressBar);
+  footer.appendChild(dots);
+  footer.appendChild(hint);
+  wrapper.appendChild(footer);
+
+  // ---------- 交互逻辑（移植自 demo）----------
+  let currentIndex = 0;
+  let autoTimer: number | null = null;
+  let progressInterval: number | null = null;
+  let progress = 0;
+  let isPaused = false;
+  const AUTO_DELAY = 6000;
+
+  const updateSlides = (): void => {
+    slides.forEach((slide, idx) => {
+      slide.classList.remove('active', 'exit-left', 'pre-enter');
+      if (idx === currentIndex) slide.classList.add('active');
+      else if (idx < currentIndex || (currentIndex === 0 && idx === slides.length - 1)) slide.classList.add('exit-left');
+      else slide.classList.add('pre-enter');
+    });
+    dotsEls.forEach((d, idx) => d.classList.toggle('active', idx === currentIndex));
+    progress = 0;
+    progressFill.style.width = '0%';
+  };
+
+  const goTo = (idx: number): void => {
+    let n = idx;
+    if (n < 0) n = slides.length - 1;
+    if (n >= slides.length) n = 0;
+    currentIndex = n;
+    updateSlides();
+    if (!isPaused) startProgress();
+  };
+  const nextSlide = (): void => goTo(currentIndex + 1);
+  const prevSlide = (): void => goTo(currentIndex - 1);
+
+  const startProgress = (): void => {
+    if (progressInterval) clearInterval(progressInterval);
+    progress = 0;
+    progressFill.style.width = '0%';
+    const stepTime = 50;
+    const increment = 100 / (AUTO_DELAY / stepTime);
+    progressInterval = window.setInterval(() => {
+      if (isPaused) return;
+      progress += increment;
+      if (progress >= 100) {
+        progress = 100;
+        progressFill.style.width = '100%';
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        nextSlide();
+      } else {
+        progressFill.style.width = progress + '%';
+      }
+    }, stepTime);
+  };
+  const startAuto = (): void => {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = window.setInterval(() => { if (!isPaused) nextSlide(); }, AUTO_DELAY);
+    startProgress();
+  };
+  const stopAuto = (): void => {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+  };
+
+  dotsEls.forEach((d) => {
+    d.addEventListener('click', () => {
+      const idx = parseInt(d.getAttribute('data-index') || '0', 10);
+      goTo(idx);
+      if (!isPaused) { stopAuto(); startAuto(); }
+    });
+  });
+  progressBar.addEventListener('click', (e: MouseEvent) => {
+    const rect = progressBar.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    const targetIdx = Math.floor(percent * slides.length);
+    goTo(Math.min(Math.max(targetIdx, 0), slides.length - 1));
+    if (!isPaused) { stopAuto(); startAuto(); }
+  });
+  container.addEventListener('mouseenter', () => { isPaused = true; stopAuto(); });
+  container.addEventListener('mouseleave', () => { isPaused = false; startAuto(); });
+  let touchX = 0;
+  container.addEventListener('touchstart', (e: TouchEvent) => { touchX = e.changedTouches[0].screenX; isPaused = true; stopAuto(); }, { passive: true });
+  container.addEventListener('touchend', (e: TouchEvent) => {
+    const diff = touchX - e.changedTouches[0].screenX;
+    if (Math.abs(diff) > 40) { if (diff > 0) nextSlide(); else prevSlide(); }
+    isPaused = false; startAuto();
+  }, { passive: true });
+  const keyHandler = (e: KeyboardEvent): void => {
+    if (!document.body.contains(container)) { window.removeEventListener('keydown', keyHandler); return; }
+    const rect = container.getBoundingClientRect();
+    if (rect.top >= window.innerHeight || rect.bottom <= 0) return; // 仅在轮播可见时响应
+    if (e.key === 'ArrowRight') { nextSlide(); if (!isPaused) { stopAuto(); startAuto(); } }
+    else if (e.key === 'ArrowLeft') { prevSlide(); if (!isPaused) { stopAuto(); startAuto(); } }
+  };
+  window.addEventListener('keydown', keyHandler);
+
+  updateSlides();
+  startAuto();
+  log2('样式2 轮播注入完成, slides=', slides.length);
 }
 
 /* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
@@ -3191,12 +3494,17 @@ function handle(): void {
   //   避免文件管理/设置等系统页的缩略图容器背景被误杀变黑框.
   document.documentElement.classList.add('fnos-tv-page');
 
-  // [lc-780] 轮播图样式切换实时生效：设置面板改值后更新根容器属性（2/3/4 占位期间视觉不变，仅属性切换）
+  // [lc-780/lc-781] 轮播图样式切换：更新根容器属性，并实时重建轮播（无需刷新页面即可在样式 1 ↔ 2 间切换）
   try {
     window.addEventListener('fntv:carousel-style', (e: any) => {
-      const s = e?.detail?.style;
-      if (!s) return;
+      const s = (e && e.detail && typeof e.detail.style === 'number') ? e.detail.style
+        : parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
       if (_carouselContainer) _carouselContainer.setAttribute('data-fntv-carousel-style', String(s));
+      // [lc-781] 实时重建：旧样式 DOM 会被清空并按新样式重渲染（data-fntv-carousel-style 已持久化到 localStorage）
+      if (_carouselInited) {
+        _carouselInited = false;
+        try { injectCarousel(); } catch (err) { log('[s2] rebuild err', err); }
+      }
     });
   } catch (_) { /* ignore */ }
 
@@ -3605,7 +3913,7 @@ function handle(): void {
       try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
 
-    // [lc-780] 首页轮播图样式切换（设置面板"外观"）：4 个占位，样式 1 = 当前样式，2/3/4 待实现
+    // [lc-780/lc-781] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 玻璃风(当前)，样式 2 = 滑动切换+进度条(已实装)，3/4 占位
     const getCs = (): number => {
       const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
       return (v >= 1 && v <= 4) ? v : 1;
@@ -3619,7 +3927,7 @@ function handle(): void {
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
-    const csLabels = ['样式 1（当前）', '样式 2', '样式 3', '样式 4'];
+    const csLabels = ['样式 1（玻璃）', '样式 2（滑动）', '样式 3', '样式 4'];
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -3635,7 +3943,7 @@ function handle(): void {
     csWrap.appendChild(csSeg);
     const csHint = document.createElement('div');
     csHint.style.cssText = 'font-size:11px;opacity:.7;margin-top:6px;line-height:1.4;';
-    csHint.textContent = '样式 1 为当前样式；样式 2 / 3 / 4 为占位，即将推出。';
+    csHint.textContent = '样式 1 为玻璃风；样式 2 为滑动切换 + 进度条（已上线）；样式 3 / 4 即将推出。切换后实时生效。';
     csWrap.appendChild(csHint);
     const paintCs = (): void => {
       const cur = getCs();
