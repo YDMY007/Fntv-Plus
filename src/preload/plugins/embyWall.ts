@@ -1891,6 +1891,7 @@ function buildCarouselStyle2(
   let progressInterval: number | null = null;
   let progress = 0;
   let isPaused = false;
+  let retracting = false;
   const AUTO_DELAY = 6000;
 
   const updateSlides = (): void => {
@@ -1901,8 +1902,8 @@ function buildCarouselStyle2(
       else slide.classList.add('pre-enter');
     });
     dotsEls.forEach((d, idx) => d.classList.toggle('active', idx === currentIndex));
-    progress = 0;
-    progressFill.style.width = '0%';
+    // [lc-793] 不在此重置进度条 DOM：交给 startProgress / playRetract 统一管理，
+    //           避免回缩动画进行中被 updateSlides 的宽度重置打断，导致进度条与封面脱节
   };
 
   const goTo = (idx: number): void => {
@@ -1916,8 +1917,10 @@ function buildCarouselStyle2(
   const nextSlide = (): void => goTo(currentIndex + 1);
   const prevSlide = (): void => goTo(currentIndex - 1);
 
-  // [lc-789] 满格后弹性慢缩回：transform scaleX 做带回弹的收缩动画(0.8s)，结束再切下一页
+  // [lc-793] 满格后弹性慢缩回：transform scaleX 做带回弹的收缩动画(0.8s)。
+  //           与封面切换并行（见 startProgress 满格分支），回缩结束后再重新填充——节奏一致。
   const playRetract = (): void => {
+    retracting = true;
     progressFill.style.transition = 'none';
     progressFill.style.transform = 'scaleX(1)';
     progressFill.style.width = '100%';
@@ -1927,15 +1930,17 @@ function buildCarouselStyle2(
   progressFill.addEventListener('animationend', () => {
     if (!progressFill.classList.contains('fnos-progress-retract')) return;
     progressFill.classList.remove('fnos-progress-retract');
+    retracting = false;
     progressFill.style.transition = 'none';
     progressFill.style.transform = 'scaleX(1)';
     progressFill.style.width = '0%';
     void progressFill.offsetWidth;
     progressFill.style.transition = 'width .1s linear';
-    if (!isPaused) nextSlide(); // goTo 内部会 startProgress 继续加载
+    if (!isPaused) startProgress(); // [lc-793] 回缩完重新填充（封面已在回缩时切换）
   });
 
   const startProgress = (): void => {
+    if (retracting) return; // [lc-793] 回缩进行中：nextSlide 触发的 startProgress 跳过，避免打断回缩动画
     if (progressInterval) clearInterval(progressInterval);
     progressFill.classList.remove('fnos-progress-retract');
     progress = 0;
@@ -1953,7 +1958,9 @@ function buildCarouselStyle2(
         progress = 100;
         progressFill.style.width = '100%';
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        playRetract(); // [lc-789] 满格→弹性收缩→动画结束再切下一页
+        // [lc-793] 先播放回缩（满格→弹性缩回 0），同时切封面——两者并行，节奏对齐不再脱节
+        playRetract();
+        nextSlide(); // goTo 内 startProgress 因 retracting=true 跳过，不会打断回缩动画
       } else {
         progressFill.style.width = progress + '%';
       }
