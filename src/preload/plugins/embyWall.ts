@@ -1657,9 +1657,9 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-slide-item.pre-enter{opacity:0;visibility:hidden;transform:translateX(80px);z-index:0}
 [data-fntv-carousel-style="2"] .fnos-slide-bg{position:absolute;inset:0;background-size:cover;background-position:center 25%}
 [data-fntv-carousel-style="2"] .fnos-slide-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.7) 25%,rgba(0,0,0,.3) 55%,rgba(0,0,0,.1) 75%,rgba(0,0,0,.02) 100%)}
-[data-fntv-carousel-style="2"] .fnos-series-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none}
-[data-fntv-carousel-style="2"] .fnos-series-logo .logo-text{font-size:1.1rem;font-weight:700;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:.35rem 1rem;border-radius:30px;border:1px solid rgba(255,215,150,.5);display:inline-block;white-space:nowrap}
-[data-fntv-carousel-style="2"] .fnos-slide-content{position:relative;z-index:3;height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 2.2rem;color:#fff}
+[data-fntv-carousel-style="2"] .fnos-series-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:6;pointer-events:none}
+[data-fntv-carousel-style="2"] .fnos-series-logo-img{max-height:46px;max-width:240px;width:auto;height:auto;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
+[data-fntv-carousel-style="2"] .fnos-slide-content{position:relative;z-index:3;height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3.6rem;color:#fff}
 [data-fntv-carousel-style="2"] .fnos-slide-meta{font-size:.75rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.5rem;text-transform:uppercase}
 [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.6rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 20px rgba(0,0,0,.8);margin-bottom:.6rem;line-height:1.2}
 [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:1rem;color:#e8ddd0;line-height:1.6;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:600px;margin-bottom:1.5rem}
@@ -1679,18 +1679,19 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-s2-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="2"] .fnos-s2-play:active,.fnos-s2-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="2"] .fnos-s2-detail.is-loading{opacity:.6;pointer-events:none}
-[data-fntv-carousel-style="2"] .fnos-slider-footer{width:100%;display:flex;align-items:center;gap:1.2rem;margin-top:.4rem}
+[data-fntv-carousel-style="2"] .fnos-slider-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 14px}
 [data-fntv-carousel-style="2"] .fnos-progress-bar{flex:1;height:4px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;cursor:pointer;position:relative}
 [data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transition:width .1s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
 [data-fntv-carousel-style="2"] .fnos-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 [data-fntv-carousel-style="2"] .fnos-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+[data-fntv-carousel-style="2"] .fnos-carousel-frame{position:absolute;inset:0;border-radius:24px;pointer-events:none;z-index:6;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);-webkit-mask-image:radial-gradient(130% 100% at 50% 112%,#000 48%,transparent 100%);mask-image:radial-gradient(130% 100% at 50% 112%,#000 48%,transparent 100%)}
 @media (max-width:800px){
   [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:1.8rem}
   [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:.85rem;max-width:90%}
-  [data-fntv-carousel-style="2"] .fnos-slide-content{padding:1.5rem}
+  [data-fntv-carousel-style="2"] .fnos-slide-content{padding:1.5rem 1.5rem 3.2rem}
   [data-fntv-carousel-style="2"] .fnos-series-logo{top:.8rem;left:1rem}
-  [data-fntv-carousel-style="2"] .fnos-series-logo .logo-text{font-size:.85rem;padding:.25rem .7rem}
+  [data-fntv-carousel-style="2"] .fnos-series-logo-img{max-height:34px;max-width:170px}
 }
 @media (prefers-reduced-motion: reduce){
   [data-fntv-carousel-style="2"] .fnos-slide-item,[data-fntv-carousel-style="2"] .fnos-slide-item.exit-left{transition:opacity .2s ease}
@@ -1702,27 +1703,24 @@ function buildCarouselStyle2(
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // [lc-784] 样式 2 布局：把 wrapper 作为"高度预算容器"(flex column)，
-  //   - wrapper 高度锁在 calc(100vh - 150px)（预留顶部导航+区块标题+底部余量）
-  //   - container 用 flex:1 占满剩余高度，footer(进度条+轮播点)固定高度排在底部
-  //   → 无论海报多高，"海报+进度条+轮播点"整体都落在预算内、底部留余量，
-  //     轮播点/进度条永远不会被推到屏外（这之前是作为容器兄弟节点追加，导致溢出）。
-  //   想让整体更高/更低就调小/调大 wrapper 的 -150px。
-  wrapper.style.display = 'flex';
-  wrapper.style.flexDirection = 'column';
-  wrapper.style.gap = '0';
-  wrapper.style.height = 'calc(100vh - 150px)';
-  // 容器：撑满宽度、占满剩余高度（不再单独设 height，由 flex 分配），顶部不要阴影
+  // [lc-785] 布局：容器自定高度(撑满视口-预留量)，海报满铺、底部叠加进度条/轮播点。
+  //   footer 改为【绝对定位叠在容器内底部】(z-index:7)，保证永不被推到屏外/被区块裁掉
+  //   （之前作为 wrapper 兄弟节点追加，在高容器下被挤出可视区 → 进度条/轮播点"消失"）。
+  //   顶部/左右去掉硬边框(接缝源)，仅保留底部柔和投影；frame 叠层做顶/侧渐影。
   container.style.width = '100%';
-  container.style.flex = '1 1 auto';
-  container.style.height = 'auto';
+  container.style.height = 'calc(100vh - 160px)';
   container.style.minHeight = '0';
-  container.style.border = '1px solid rgba(255,255,255,.06)';
-  // 容器顶部不要阴影，仅保留底部/两侧柔和投影（贴合 hero 悬浮感，不把顶边"框"住）
-  container.style.boxShadow = '0 22px 48px rgba(0,0,0,.45)';
+  container.style.border = 'none';
+  // 仅底部柔和投影：负扩散(-12px)把光往下压，减少向上/左右溢出 → 顶/侧不再有"框"感
+  container.style.boxShadow = '0 26px 60px -12px rgba(0,0,0,.55)';
   container.style.aspectRatio = 'auto';
   container.style.maxHeight = 'none';
   container.style.margin = '0';
+  container.style.background = 'transparent';
+  // frame 叠层：底部可见、顶/侧渐隐的描边(替代原硬边框)，实现"渐影消掉"
+  const frame = document.createElement('div');
+  frame.className = 'fnos-carousel-frame';
+  container.appendChild(frame);
 
   // 每片主题色（按 demo 的五色循环，给顶部 logo 胶囊上色）
   const accents = [
@@ -1752,17 +1750,16 @@ function buildCarouselStyle2(
     slideBg.style.backgroundImage = `linear-gradient(160deg, ${accent.border}55, #0b1219)`;
     slide.appendChild(slideBg);
 
-    // 顶部左侧 logo：显示对应剧集的名称(作为 logo 标识)，按 demo 五色循环上色
+    // 顶部左侧 logo：复用原版(样式1)取图链路 —— 优先飞牛自带 logo(show.logo)，否则 TMDB 透明 logo
     const seriesLogo = document.createElement('div');
     seriesLogo.className = 'fnos-series-logo';
-    const logoText = (show as any).title || '精选';
-    const logoSpan = document.createElement('span');
-    logoSpan.className = 'logo-text';
-    logoSpan.textContent = logoText;
-    logoSpan.style.borderColor = accent.border;
-    logoSpan.style.color = accent.text;
-    seriesLogo.appendChild(logoSpan);
+    const logoImg = document.createElement('img');
+    logoImg.className = 'fnos-series-logo-img';
+    logoImg.alt = (show as any).title || '';
+    logoImg.style.display = 'none';
+    seriesLogo.appendChild(logoImg);
     slide.appendChild(seriesLogo);
+    resolveShowLogo(show, base).then((src) => { if (src) { logoImg.src = src; logoImg.style.display = 'block'; } });
 
     // 内容区（标题/简介用 textContent，避免 HTML 注入）
     const content = document.createElement('div');
@@ -1830,7 +1827,7 @@ function buildCarouselStyle2(
   });
   footer.appendChild(progressBar);
   footer.appendChild(dots);
-  wrapper.appendChild(footer);
+  container.appendChild(footer); // [lc-785] 绝对定位叠在容器内底部，永不被推走
 
   // ---------- 交互逻辑（移植自 demo）----------
   let currentIndex = 0;
@@ -2166,6 +2163,42 @@ function autoFetchDescs(base: string, shows: any[], infos: HTMLElement[]): void 
  * - API 真实条目：优先用 show.tmdbId 查 logo；无 tmdbId 时退用 show.title 标题匹配查 TMDB → tmdb:image 代理转 base64
  * - 硬编码兜底条目（show.logo 本地 sys/img）：经 fetchImageAuth 取本地 logo
  * 获取成功才在左侧海报左下角显示 logo；右侧文字标题始终保留不隐藏；任一环节失败则保留文字标题（静默降级）。 */
+/* [lc-785] 复用于样式 2 左上角 logo 取图：与原版(样式1) applyTitleLogo 同一套逻辑
+ *   - 优先飞牛自带 logo(show.logo)，无则 TMDB 透明 logo(含纯白兜底)
+ *   返回可直接作 <img src> 的 blob/dataURL，取不到返回 null。 */
+async function resolveShowLogo(show: any, base: string): Promise<string | null> {
+  try {
+    if (show.logo) {
+      const full = show.logo.startsWith('http') ? show.logo : `${base}/v/api/v1/${show.logo}`;
+      const b = await fetchImageAuth(full);
+      if (b) return b;
+    }
+    if (show.tmdbId || show.title) {
+      const { ipcRenderer } = require('electron');
+      const logoArg: any = { mediaType: show.mediaType || 'tv' };
+      if (show.tmdbId) logoArg.id = show.tmdbId; else logoArg.title = show.title;
+      const r = await ipcRenderer.invoke('tmdb:logo', logoArg);
+      if (!r || !r.ok) return null;
+      const paths = (r.logoPaths && r.logoPaths.length) ? r.logoPaths : (r.logoPath ? [r.logoPath] : []);
+      let whiteFallback: string | null = null;
+      for (const p of paths) {
+        try {
+          const url = 'https://image.tmdb.org/t/p/w500' + p;
+          const img = await ipcRenderer.invoke('tmdb:image', url);
+          if (!img || !img.ok || !img.dataUrl) continue;
+          if (await isPureWhitePng(img.dataUrl)) {
+            if (!whiteFallback) whiteFallback = img.dataUrl;
+            continue;
+          }
+          return img.dataUrl;
+        } catch (e) { /* 试下一个候选 */ }
+      }
+      if (whiteFallback) return whiteFallback;
+    }
+    return null;
+  } catch (e) { log('resolveShowLogo err:', (show && show.title) || '', e); return null; }
+}
+
 function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
   // [lc-409] 开关关闭时完全跳过（既不拉取也不替换），保留文字标题
   if (!_carouselLogoEnabled) return;
