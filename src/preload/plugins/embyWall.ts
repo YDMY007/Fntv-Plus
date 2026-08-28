@@ -1169,7 +1169,7 @@ function injectCarousel(): void {
   text-decoration:none;white-space:nowrap;cursor:pointer;
   -webkit-user-select:none;user-select:none;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;  /* 去点击闪蓝 / 300ms 延迟 */
-  transition:transform .22s cubic-bezier(.2,.8,.3,1),background-color .22s ease,box-shadow .22s ease,opacity .18s ease;
+  transition:transform .22s cubic-bezier(.2,.8,.3,1),background-color .22s ease,opacity .18s ease;
 }
 .fnos-play{
   gap:10px;padding:0 30px;
@@ -1178,9 +1178,8 @@ function injectCarousel(): void {
   color:var(--fnos-hero-play-text);
   font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
-  box-shadow:0 4px 18px rgba(20,12,40,.22),inset 0 .5px 0 rgba(255,255,255,.25);
 }
-.fnos-play:hover{transform:translateY(-1px);background:var(--fnos-hero-play-hover);box-shadow:0 8px 26px rgba(20,12,40,.28),inset 0 .5px 0 rgba(255,255,255,.35)}
+.fnos-play:hover{transform:translateY(-1px);background:var(--fnos-hero-play-hover)}
 .fnos-more{
   gap:6px;padding:0 20px;
   background:rgba(255,255,255,.10);
@@ -1188,9 +1187,8 @@ function injectCarousel(): void {
   color:var(--fnos-hero-desc);
   font-size:15px;font-weight:600;letter-spacing:.3px;
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
-  box-shadow:inset 0 .5px 0 rgba(255,255,255,.16);
 }
-.fnos-more:hover{transform:translateY(-1px);background:rgba(255,255,255,.17);box-shadow:inset 0 .5px 0 rgba(255,255,255,.24)}
+.fnos-more:hover{transform:translateY(-1px);background:rgba(255,255,255,.17)}
 .fnos-play:active,.fnos-more:active{transform:scale(.97)}   /* 按压反馈 */
 .fnos-play:focus-visible,.fnos-more:focus-visible{outline:2px solid var(--fnos-ui-accent,#8f6fe8);outline-offset:3px}
 .fnos-more.is-loading{opacity:.6;pointer-events:none}        /* 解析季路由时的加载态 */
