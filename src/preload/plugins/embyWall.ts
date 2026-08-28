@@ -1307,6 +1307,9 @@ function injectCarousel(): void {
     const genreHtml = genreArr.length
       ? `<div class="fnos-genres" style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${genreArr.slice(0, 4).map((g: string) => `<span style="padding:3px 10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);border-radius:12px;font-size:11.5px;font-weight:600;color:var(--fnos-hero-desc);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)">${g}</span>`).join('')}</div>`
       : '';
+    // [lc-771] 详情页路由按类型分流：电影 /v/movie/<id>、剧集 /v/tv/<id>。
+    //   原「开始观看」硬编码 /v/tv/，电影项会跳到错误路由；More 按钮与它共用同一路由。
+    const detailHref = '/v/' + (show.mediaType === 'movie' ? 'movie' : 'tv') + '/' + show.id;
     info.innerHTML = `
       ${pillRow}
       <div class="fnos-title-wrap" style="display:flex;flex-direction:column;gap:10px;flex-shrink:0;justify-content:flex-start;margin-top:16px;padding-left:2px">
@@ -1315,10 +1318,14 @@ function injectCarousel(): void {
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
-      <div class="fnos-action" style="flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:14px;padding-top:6px">
-        <a class="fnos-play" href="/v/tv/${show.id}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;padding:15px 34px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:16.5px;font-weight:600;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 22px rgba(80,60,140,.22),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease">
+      <div class="fnos-action" style="flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:12px;padding-top:6px">
+        <a class="fnos-play" href="${detailHref}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;padding:15px 34px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:16.5px;font-weight:600;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 22px rgba(80,60,140,.22),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease">
           <svg width="19" height="19" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
           开始观看
+        </a>
+        <a class="fnos-more" href="${detailHref}" title="查看详情" style="display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:15px 20px;background:rgba(255,255,255,.07);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-desc);font-size:14px;font-weight:600;text-decoration:none;letter-spacing:1px;opacity:.92;box-shadow:inset 0 .5px 0 rgba(255,255,255,.18);transition:all .22s ease">
+          More
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
         </a>
       </div>`;
     rightPanel.appendChild(info);
@@ -1327,34 +1334,54 @@ function injectCarousel(): void {
     // [v323] 让"开始观看"走飞牛原生SPA路由(与列表项<a>一致), 避免整页导航导致详情页侧栏按钮失效
     // 轮播<a>不在飞牛React树内, 原生点击会触发整页导航(full page load) → 详情页头部重建 → 我们的click hook丢失
     // 改为手动pushState+popstate(飞牛history模式SPA基于此), 保留头部DOM, 与列表点击同路径
-    const playBtn = info.querySelector('a');
+    const spaNav = (href: string, tag: string): void => {
+      log(tag + ' -> SPA navigate', href);
+      history.pushState({}, '', href);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      // [v323兜底] 若飞牛未响应popstate(详情页未渲染), 600ms后退化整页导航;
+      //   详情页加载后 MutationObserver 会兜底重绑汉堡键 hook
+      setTimeout(() => {
+        const detailReady = !!document.querySelector('button[aria-label="返回"]');
+        if (!detailReady) {
+          log(tag + ' fallback -> full page nav (popstate not handled)', href);
+          location.href = href;
+        }
+      }, 600);
+    };
+    const playBtn = info.querySelector('a.fnos-play') as HTMLElement | null;
+    const moreBtn = info.querySelector('a.fnos-more') as HTMLElement | null;
     if (playBtn) {
       playBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
-        const href = '/v/tv/' + show.id;
-        log('PLAY btn -> SPA navigate', href);
-        history.pushState({}, '', href);
-        window.dispatchEvent(new PopStateEvent('popstate'));
-        // [v323兜底] 若飞牛未响应popstate(详情页未渲染), 600ms后退化整页导航;
-        //   详情页加载后 MutationObserver 会兜底重绑汉堡键 hook
-        setTimeout(() => {
-          const detailReady = !!document.querySelector('button[aria-label="返回"]');
-          if (!detailReady) {
-            log('PLAY fallback -> full page nav (popstate not handled)', href);
-            location.href = href;
-          }
-        }, 600);
+        spaNav(detailHref, 'PLAY btn');
       });
       // 悬停效果: 主题色提亮 + 轻微上浮
       playBtn.addEventListener('mouseenter', () => {
-        (playBtn as HTMLElement).style.background = 'var(--fnos-hero-play-hover)';
-        (playBtn as HTMLElement).style.boxShadow = '0 6px 24px rgba(100,80,180,.28),inset 0 .5px 0 rgba(255,255,255,.35)';
-        (playBtn as HTMLElement).style.transform = 'translateY(-1px)';
+        playBtn.style.background = 'var(--fnos-hero-play-hover)';
+        playBtn.style.boxShadow = '0 6px 24px rgba(100,80,180,.28),inset 0 .5px 0 rgba(255,255,255,.35)';
+        playBtn.style.transform = 'translateY(-1px)';
       });
       playBtn.addEventListener('mouseleave', () => {
-        (playBtn as HTMLElement).style.background = 'var(--fnos-hero-play-bg)';
-        (playBtn as HTMLElement).style.boxShadow = '0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25)';
-        (playBtn as HTMLElement).style.transform = '';
+        playBtn.style.background = 'var(--fnos-hero-play-bg)';
+        playBtn.style.boxShadow = '0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25)';
+        playBtn.style.transform = '';
+      });
+    }
+    // [lc-771] More：右侧次要按钮，跳同一部作品的二级详情页（与「开始观看」同路由、同 SPA 跳法）
+    if (moreBtn) {
+      moreBtn.addEventListener('click', (e: Event) => {
+        e.preventDefault();
+        spaNav(detailHref, 'MORE btn');
+      });
+      moreBtn.addEventListener('mouseenter', () => {
+        moreBtn.style.background = 'rgba(255,255,255,.14)';
+        moreBtn.style.opacity = '1';
+        moreBtn.style.transform = 'translateY(-1px)';
+      });
+      moreBtn.addEventListener('mouseleave', () => {
+        moreBtn.style.background = 'rgba(255,255,255,.07)';
+        moreBtn.style.opacity = '.92';
+        moreBtn.style.transform = '';
       });
     }
     track.appendChild(slide);
