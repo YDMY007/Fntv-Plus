@@ -1153,6 +1153,55 @@ function injectCarousel(): void {
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
+  // [lc-773] 轮播行动按钮样式（Apple 风格）只注入一次。
+  //   伪类(:hover/:active/:focus-visible)与 @media 无法写进内联 style，故用注入的 <style> 统一声明，
+  //   HTML 只留 class，JS 不再用 mouseenter/mouseleave 模拟悬停。
+  if (!document.getElementById('fnos-hero-action-style')) {
+    const actSt = document.createElement('style');
+    actSt.id = 'fnos-hero-action-style';
+    actSt.textContent = `
+/* 每行只有一个主 CTA(开始观看)；次要动作(More)以「更低的填充层级」从属，不靠 opacity 压暗文字 */
+.fnos-action{display:flex;align-items:center;gap:12px;padding-top:6px;flex-shrink:0;margin-top:auto}
+.fnos-play,.fnos-more{
+  display:inline-flex;align-items:center;justify-content:center;
+  box-sizing:border-box;min-height:48px;            /* ≥44pt 触控区 */
+  border-radius:999px;                               /* 胶囊形，Apple CTA 语言 */
+  text-decoration:none;white-space:nowrap;cursor:pointer;
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;  /* 去点击闪蓝 / 300ms 延迟 */
+  transition:transform .22s cubic-bezier(.2,.8,.3,1),background-color .22s ease,box-shadow .22s ease,opacity .18s ease;
+}
+.fnos-play{
+  gap:10px;padding:0 30px;
+  background:var(--fnos-hero-play-bg);
+  border:1px solid var(--fnos-hero-play-border);
+  color:var(--fnos-hero-play-text);
+  font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
+  backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
+  box-shadow:0 4px 18px rgba(20,12,40,.22),inset 0 .5px 0 rgba(255,255,255,.25);
+}
+.fnos-play:hover{transform:translateY(-1px);background:var(--fnos-hero-play-hover);box-shadow:0 8px 26px rgba(20,12,40,.28),inset 0 .5px 0 rgba(255,255,255,.35)}
+.fnos-more{
+  gap:6px;padding:0 20px;
+  background:rgba(255,255,255,.10);
+  border:1px solid var(--fnos-hero-play-border);
+  color:var(--fnos-hero-desc);
+  font-size:15px;font-weight:600;letter-spacing:.3px;
+  backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
+  box-shadow:inset 0 .5px 0 rgba(255,255,255,.16);
+}
+.fnos-more:hover{transform:translateY(-1px);background:rgba(255,255,255,.17);box-shadow:inset 0 .5px 0 rgba(255,255,255,.24)}
+.fnos-play:active,.fnos-more:active{transform:scale(.97)}   /* 按压反馈 */
+.fnos-play:focus-visible,.fnos-more:focus-visible{outline:2px solid var(--fnos-ui-accent,#8f6fe8);outline-offset:3px}
+.fnos-more.is-loading{opacity:.6;pointer-events:none}        /* 解析季路由时的加载态 */
+@media (prefers-reduced-motion: reduce){                     /* 尊重系统「减弱动态效果」 */
+  .fnos-play,.fnos-more{transition:background-color .15s ease}
+  .fnos-play:hover,.fnos-more:hover,.fnos-play:active,.fnos-more:active{transform:none}
+}
+`;
+    (document.head || document.documentElement).appendChild(actSt);
+  }
+
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(骨架 + 加载进度数字), 不让用户干等
   // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
   if (_apiShows.length === 0) {
@@ -1354,14 +1403,14 @@ function injectCarousel(): void {
       </div>
       <div style="width:100%;height:1px;background:var(--fnos-hero-divider);margin:16px 0 14px;flex-shrink:0;border-radius:1px;opacity:.85"></div>
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
-      <div class="fnos-action" style="flex-shrink:0;margin-top:auto;display:flex;align-items:center;gap:12px;padding-top:6px">
-        <a class="fnos-play" href="${detailHref}" style="display:inline-flex;align-items:center;justify-content:center;gap:11px;padding:15px 34px;background:var(--fnos-hero-play-bg);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-play-text);font-size:16.5px;font-weight:600;text-decoration:none;letter-spacing:1.5px;box-shadow:0 6px 22px rgba(80,60,140,.22),inset 0 .5px 0 rgba(255,255,255,.25);transition:all .22s ease">
-          <svg width="19" height="19" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+      <div class="fnos-action">
+        <a class="fnos-play" href="${detailHref}" aria-label="开始观看">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
           开始观看
         </a>
-        <a class="fnos-more" href="${detailHref}" title="查看分季详情" style="display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:15px 20px;background:rgba(255,255,255,.07);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-desc);font-size:14px;font-weight:600;text-decoration:none;letter-spacing:1px;opacity:.92;box-shadow:inset 0 .5px 0 rgba(255,255,255,.18);transition:all .22s ease">
+        <a class="fnos-more" href="${detailHref}" title="查看分季详情" aria-label="查看分季详情">
           More
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </a>
       </div>`;
     rightPanel.appendChild(info);
@@ -1386,21 +1435,12 @@ function injectCarousel(): void {
     };
     const playBtn = info.querySelector('a.fnos-play') as HTMLElement | null;
     const moreBtn = info.querySelector('a.fnos-more') as HTMLElement | null;
+    // [lc-773] 悬停 / 按压 / 焦点环全部由注入的 CSS(.fnos-play / .fnos-more 伪类)处理，
+    //   此处只绑定行为，不再用 mouseenter/mouseleave 改内联样式(避免与 CSS 打架、也减少监听)。
     if (playBtn) {
       playBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
         spaNav(detailHref, 'PLAY btn');
-      });
-      // 悬停效果: 主题色提亮 + 轻微上浮
-      playBtn.addEventListener('mouseenter', () => {
-        playBtn.style.background = 'var(--fnos-hero-play-hover)';
-        playBtn.style.boxShadow = '0 6px 24px rgba(100,80,180,.28),inset 0 .5px 0 rgba(255,255,255,.35)';
-        playBtn.style.transform = 'translateY(-1px)';
-      });
-      playBtn.addEventListener('mouseleave', () => {
-        playBtn.style.background = 'var(--fnos-hero-play-bg)';
-        playBtn.style.boxShadow = '0 4px 20px rgba(80,60,140,.20),inset 0 .5px 0 rgba(255,255,255,.25)';
-        playBtn.style.transform = '';
       });
     }
     // [lc-772] More：右侧次要按钮 → 跳「季」详情页(三级 /v/(tv|movie)/season/<季guid>)。
@@ -1408,21 +1448,11 @@ function injectCarousel(): void {
     if (moreBtn) {
       moreBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
-        moreBtn.style.opacity = '.55'; // 轻加载态
+        moreBtn.classList.add('is-loading'); // 加载态(样式在 CSS，不改行内 opacity)
         resolveSeasonHref(show).then((href) => {
-          moreBtn.style.opacity = '';
+          moreBtn.classList.remove('is-loading');
           spaNav(href, 'MORE btn');
         });
-      });
-      moreBtn.addEventListener('mouseenter', () => {
-        moreBtn.style.background = 'rgba(255,255,255,.14)';
-        moreBtn.style.opacity = '1';
-        moreBtn.style.transform = 'translateY(-1px)';
-      });
-      moreBtn.addEventListener('mouseleave', () => {
-        moreBtn.style.background = 'rgba(255,255,255,.07)';
-        moreBtn.style.opacity = '.92';
-        moreBtn.style.transform = '';
       });
     }
     track.appendChild(slide);
