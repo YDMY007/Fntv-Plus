@@ -1270,6 +1270,10 @@ function injectCarousel(): void {
   }
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
+  // [lc-780] 轮播图样式开关：默认样式 1（=下方当前渲染，baseline）；2/3/4 为占位，待后续实现。
+  //   后续样式通过 [data-fntv-carousel-style="2|3|4"] 区分（CSS 或 JS 分支），当前整段 hero 渲染即样式 1。
+  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10); return (v >= 1 && v <= 4) ? v : 1; })();
+  container.setAttribute('data-fntv-carousel-style', String(_cs));
   // [lc-582] 加载完成后淡入, 不再"直接闪出全部"(骨架→轮播平滑过渡)
   container.style.opacity = '0';
   container.style.transition = 'opacity .45s ease';
@@ -3187,6 +3191,15 @@ function handle(): void {
   //   避免文件管理/设置等系统页的缩略图容器背景被误杀变黑框.
   document.documentElement.classList.add('fnos-tv-page');
 
+  // [lc-780] 轮播图样式切换实时生效：设置面板改值后更新根容器属性（2/3/4 占位期间视觉不变，仅属性切换）
+  try {
+    window.addEventListener('fntv:carousel-style', (e: any) => {
+      const s = e?.detail?.style;
+      if (!s) return;
+      if (_carouselContainer) _carouselContainer.setAttribute('data-fntv-carousel-style', String(s));
+    });
+  } catch (_) { /* ignore */ }
+
   // 导航诊断: 记录每次URL变化, 排查"返回落到全部剧集而非首页"
   const logNav = (label: string) => log('NAV', label, location.href);
   logNav('init');
@@ -3591,6 +3604,58 @@ function handle(): void {
       paintDaily();
       try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
+
+    // [lc-780] 首页轮播图样式切换（设置面板"外观"）：4 个占位，样式 1 = 当前样式，2/3/4 待实现
+    const getCs = (): number => {
+      const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
+      return (v >= 1 && v <= 4) ? v : 1;
+    };
+    const csWrap = document.createElement('div');
+    csWrap.style.cssText = 'margin-top:20px;';
+    const csTitle = document.createElement('div');
+    csTitle.style.cssText = 'font-weight:600;letter-spacing:.5px;margin-bottom:8px;';
+    csTitle.textContent = '首页轮播图样式';
+    csWrap.appendChild(csTitle);
+    const csSeg = document.createElement('div');
+    csSeg.id = 'fnos-carousel-style-seg';
+    csSeg.style.cssText = 'display:flex;gap:6px;';
+    const csLabels = ['样式 1（当前）', '样式 2', '样式 3', '样式 4'];
+    csLabels.forEach((lab, idx) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.style = String(idx + 1);
+      b.textContent = lab;
+      const active = (idx + 1) === getCs();
+      b.style.cssText = 'flex:1 1 0;padding:8px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;'
+        + 'box-sizing:border-box;border:1px solid ' + (active ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-border)') + ';'
+        + 'background:' + (active ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-input-bg)') + ';'
+        + 'color:' + (active ? '#fff' : 'var(--fnos-ui-text)') + ';transition:.15s;';
+      csSeg.appendChild(b);
+    });
+    csWrap.appendChild(csSeg);
+    const csHint = document.createElement('div');
+    csHint.style.cssText = 'font-size:11px;opacity:.7;margin-top:6px;line-height:1.4;';
+    csHint.textContent = '样式 1 为当前样式；样式 2 / 3 / 4 为占位，即将推出。';
+    csWrap.appendChild(csHint);
+    const paintCs = (): void => {
+      const cur = getCs();
+      csSeg.querySelectorAll('button').forEach((btn) => {
+        const on = parseInt((btn as HTMLElement).dataset.style || '1', 10) === cur;
+        btn.style.borderColor = on ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-border)';
+        btn.style.background = on ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-input-bg)';
+        btn.style.color = on ? '#fff' : 'var(--fnos-ui-text)';
+      });
+    };
+    csSeg.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const s = parseInt((btn as HTMLElement).dataset.style || '1', 10);
+        localStorage.setItem('fnos-carousel-style', String(s));
+        paintCs();
+        try { window.dispatchEvent(new CustomEvent('fntv:carousel-style', { detail: { style: s } })); } catch (_) {}
+      });
+    });
+    wrap.appendChild(csWrap);
+
     return wrap;
   }
 
