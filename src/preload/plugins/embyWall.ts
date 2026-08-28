@@ -1088,6 +1088,42 @@ function fmtCarouselUpdated(ts: number): string {
   return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
+/** [lc-772] 剧集/电影的「季」详情页路由（三级）：/v/(tv|movie)/season/<季guid>
+ *
+ *  fnOS 层级实测为三级：TV → Season → Episode，【季有独立 guid】，与剧集 guid 不同，
+ *  故不能拿 show.id 直接拼 season 路由（那样会跳到不存在的资源）。
+ *  取法：item/list(parent_guid=本剧) 拿子级，其中 type 不是 episode/movie 的子级即「季」，
+ *  取其 c.guid 拼出三级路由；取不到（电影无季 / 接口异常）则回退二级详情页。
+ *
+ *  结果按 show.id 缓存，避免每次点击都发请求。
+ */
+const _seasonHrefCache = new Map<string, string>();
+async function resolveSeasonHref(show: any): Promise<string> {
+  const kind = show && show.mediaType === 'movie' ? 'movie' : 'tv';
+  const fallback = '/v/' + kind + '/' + show.id;
+  const id = String(show.id || '');
+  if (!id) return fallback;
+  const cached = _seasonHrefCache.get(id);
+  if (cached) return cached;
+  try {
+    const { ipcRenderer } = require('electron');
+    // 走主进程 fnapi（带 token，与豆瓣同步同一调用方式，已在真实 fnOS API 验证）；
+    // 不用渲染进程 Authx fetch——POST body 参与签名，未经实测，风险高。
+    const r: any = await ipcRenderer.invoke('media:season-guid', id);
+    if (r && r.ok && r.guid) {
+      const href = '/v/' + kind + '/season/' + r.guid;
+      log('[lc-772] More -> 三级季页', href);
+      _seasonHrefCache.set(id, href);
+      return href;
+    }
+    log('[lc-772] More -> 无季子级, 回退二级', fallback, r && r.error ? r.error : '');
+  } catch (e) {
+    log('[lc-772] More -> 取季失败, 回退二级', String(e).substring(0, 90));
+  }
+  _seasonHrefCache.set(id, fallback);
+  return fallback;
+}
+
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
@@ -1323,7 +1359,7 @@ function injectCarousel(): void {
           <svg width="19" height="19" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
           开始观看
         </a>
-        <a class="fnos-more" href="${detailHref}" title="查看详情" style="display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:15px 20px;background:rgba(255,255,255,.07);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-desc);font-size:14px;font-weight:600;text-decoration:none;letter-spacing:1px;opacity:.92;box-shadow:inset 0 .5px 0 rgba(255,255,255,.18);transition:all .22s ease">
+        <a class="fnos-more" href="${detailHref}" title="查看分季详情" style="display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:15px 20px;background:rgba(255,255,255,.07);backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);border:1px solid var(--fnos-hero-play-border);border-radius:14px;color:var(--fnos-hero-desc);font-size:14px;font-weight:600;text-decoration:none;letter-spacing:1px;opacity:.92;box-shadow:inset 0 .5px 0 rgba(255,255,255,.18);transition:all .22s ease">
           More
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
         </a>
@@ -1367,11 +1403,16 @@ function injectCarousel(): void {
         playBtn.style.transform = '';
       });
     }
-    // [lc-771] More：右侧次要按钮，跳同一部作品的二级详情页（与「开始观看」同路由、同 SPA 跳法）
+    // [lc-772] More：右侧次要按钮 → 跳「季」详情页(三级 /v/(tv|movie)/season/<季guid>)。
+    //   季 guid 需异步查 item/list 子级；失败/无季自动回退二级详情页，不会点了没反应。
     if (moreBtn) {
       moreBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
-        spaNav(detailHref, 'MORE btn');
+        moreBtn.style.opacity = '.55'; // 轻加载态
+        resolveSeasonHref(show).then((href) => {
+          moreBtn.style.opacity = '';
+          spaNav(href, 'MORE btn');
+        });
       });
       moreBtn.addEventListener('mouseenter', () => {
         moreBtn.style.background = 'rgba(255,255,255,.14)';
