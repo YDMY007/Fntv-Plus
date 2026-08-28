@@ -1197,7 +1197,7 @@ function injectCarousel(): void {
   font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-play:hover{transform:translateY(-3px);background:#0f172a;color:#fff;box-shadow:0 0 22px rgba(56,189,248,.45),0 0 44px rgba(167,139,250,.28)}
+.fnos-play:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:rgba(255,255,255,.16);box-shadow:0 0 26px rgba(56,189,248,.40),0 0 52px rgba(167,139,250,.24),0 0 86px rgba(244,114,182,.13)}
 .fnos-more{
   gap:6px;padding:0 20px;
   background:rgba(255,255,255,.10);
@@ -1206,7 +1206,7 @@ function injectCarousel(): void {
   font-size:15px;font-weight:600;letter-spacing:.3px;
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-more:hover{transform:translateY(-3px);background:#0f172a;color:#fff;box-shadow:0 0 22px rgba(56,189,248,.45),0 0 44px rgba(167,139,250,.28)}
+.fnos-more:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:rgba(255,255,255,.16);box-shadow:0 0 26px rgba(56,189,248,.40),0 0 52px rgba(167,139,250,.24),0 0 86px rgba(244,114,182,.13)}
 .fnos-play span,.fnos-more span{position:relative;z-index:2;display:inline-flex;align-items:center;transition:text-shadow .3s ease}
 .fnos-play span{gap:8px}
 .fnos-more span{gap:6px}
