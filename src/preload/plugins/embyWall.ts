@@ -1121,6 +1121,39 @@ function restoreResume(): void {
   });
 }
 
+// [lc-796] 样式 2 下把「每日放送」按钮锚定到 .fnos-slide-actions（开始播放/更多详情）容器的右边缘、同一水平带
+function positionDailyTabByActions(): void {
+  const tab = document.getElementById('fntv-hot-tab');
+  if (!tab) return;
+  const actions = (document.querySelector('.fnos-slide-item.active .fnos-slide-actions') as HTMLElement | null)
+    || (document.querySelector('.fnos-slide-actions') as HTMLElement | null);
+  if (!actions) return;
+  const r = actions.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const left = Math.round(r.right + 16);   // 紧贴播放按钮容器右侧
+  const bottom = Math.round(vh - r.bottom); // 与播放按钮同一水平带
+  tab.style.position = 'fixed';
+  tab.style.left = left + 'px';
+  tab.style.right = 'auto';
+  tab.style.top = 'auto';
+  tab.style.bottom = bottom + 'px';
+  const panel = document.getElementById('fntv-hot-panel');
+  if (panel) {
+    panel.style.position = 'fixed';
+    panel.style.left = left + 'px';
+    panel.style.right = 'auto';
+    panel.style.top = 'auto';
+    panel.style.bottom = (bottom + 56) + 'px';
+  }
+}
+
+function clearDailyTabPosition(): void {
+  const tab = document.getElementById('fntv-hot-tab');
+  const panel = document.getElementById('fntv-hot-panel');
+  if (tab) { tab.style.left = ''; tab.style.right = ''; tab.style.top = ''; tab.style.bottom = ''; }
+  if (panel) { panel.style.left = ''; panel.style.right = ''; panel.style.top = ''; panel.style.bottom = ''; }
+}
+
 // [lc-183] 判断当前是否有 fnOS 弹窗/对话框打开。
 // 这些弹窗是 SPA 模态框(打开时 URL 仍是 /v, lc-182 路径守卫拦不住),
 // 且弹窗内(如"创建媒体库"标题)也含"媒体库"文字 → findMediaLibrarySection 会误匹配到弹窗内部
@@ -1342,6 +1375,7 @@ function injectCarousel(): void {
   }
 
   restoreResume(); // [lc-790] 非样式 2 时恢复「继续观看」区块（清掉样式 2 可能加的下移间距）
+  clearDailyTabPosition(); // [lc-796] 非样式 2 时清除「每日放送」锚定内联样式，恢复默认位置
 
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
@@ -2015,6 +2049,11 @@ function buildCarouselStyle2(
   updateSlides();
   startAuto();
   log2('样式2 轮播注入完成, slides=', slides.length);
+
+  // [lc-796] 「每日放送」锚定到播放按钮容器右边缘（布局异步，重试确保拿到真实位置）
+  requestAnimationFrame(positionDailyTabByActions);
+  setTimeout(positionDailyTabByActions, 200);
+  setTimeout(positionDailyTabByActions, 700);
 }
 
 /* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
