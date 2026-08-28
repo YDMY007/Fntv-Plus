@@ -1291,8 +1291,10 @@ function injectCarousel(): void {
 
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'row';   // [lc-784] 重置：若此前是样式 2 的 column，切回样式 1 须恢复
   wrapper.style.alignItems = 'flex-start';
   wrapper.style.gap = '12px';
+  wrapper.style.height = '';             // [lc-784] 重置样式 2 的高度预算，避免约束样式 1 布局
 
   // Slide track (纵向: 上→下切换)
   const track = document.createElement('div');
@@ -1700,17 +1702,25 @@ function buildCarouselStyle2(
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // 容器：补 demo 的细边框 + 柔和浮起阴影（仅样式 2），覆盖容器默认的 box-shadow:none
+  // [lc-784] 样式 2 布局：把 wrapper 作为"高度预算容器"(flex column)，
+  //   - wrapper 高度锁在 calc(100vh - 150px)（预留顶部导航+区块标题+底部余量）
+  //   - container 用 flex:1 占满剩余高度，footer(进度条+轮播点)固定高度排在底部
+  //   → 无论海报多高，"海报+进度条+轮播点"整体都落在预算内、底部留余量，
+  //     轮播点/进度条永远不会被推到屏外（这之前是作为容器兄弟节点追加，导致溢出）。
+  //   想让整体更高/更低就调小/调大 wrapper 的 -150px。
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.gap = '0';
+  wrapper.style.height = 'calc(100vh - 150px)';
+  // 容器：撑满宽度、占满剩余高度（不再单独设 height，由 flex 分配），顶部不要阴影
+  container.style.width = '100%';
+  container.style.flex = '1 1 auto';
+  container.style.height = 'auto';
+  container.style.minHeight = '0';
   container.style.border = '1px solid rgba(255,255,255,.06)';
   // 容器顶部不要阴影，仅保留底部/两侧柔和投影（贴合 hero 悬浮感，不把顶边"框"住）
   container.style.boxShadow = '0 22px 48px rgba(0,0,0,.45)';
-  // [lc-783] 样式 2：海报图 width:100% 撑满整个可用宽度（占满右侧、无两侧留白）；
-  //   同时用 height 驱动（取消 aspect-ratio），把整体高度限制到视口内，
-  //   使「轮播 + 底部进度条/轮播点」刚好完整显示、底部留一点余量（不溢出、不过长）。
-  //   背景 cover 裁切，宽屏下不再两侧留白。下方 -150px 即"顶部导航+底部余量"的预留，
-  //   想让海报更高/更低就调小/调大这个数字。
   container.style.aspectRatio = 'auto';
-  container.style.height = 'calc(100vh - 150px)';
   container.style.maxHeight = 'none';
   container.style.margin = '0';
 
@@ -1742,12 +1752,10 @@ function buildCarouselStyle2(
     slideBg.style.backgroundImage = `linear-gradient(160deg, ${accent.border}55, #0b1219)`;
     slide.appendChild(slideBg);
 
-    // 顶部左侧 logo 胶囊（评分优先，否则类型）
+    // 顶部左侧 logo：显示对应剧集的名称(作为 logo 标识)，按 demo 五色循环上色
     const seriesLogo = document.createElement('div');
     seriesLogo.className = 'fnos-series-logo';
-    const rating = (show as any).rating || 0;
-    const genreArr: string[] = (show as any).genres || [];
-    const logoText = rating > 0 ? `★ ${rating.toFixed(1)}` : (genreArr[0] || '精选');
+    const logoText = (show as any).title || '精选';
     const logoSpan = document.createElement('span');
     logoSpan.className = 'logo-text';
     logoSpan.textContent = logoText;
@@ -1759,6 +1767,7 @@ function buildCarouselStyle2(
     // 内容区（标题/简介用 textContent，避免 HTML 注入）
     const content = document.createElement('div');
     content.className = 'fnos-slide-content';
+    const genreArr: string[] = (show as any).genres || [];
     const meta = [ (genreArr[0] || '').toUpperCase(), (show as any).year ? String((show as any).year) : '' ].filter(Boolean).join(' · ');
     const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
     content.innerHTML =
