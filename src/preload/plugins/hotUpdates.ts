@@ -96,8 +96,8 @@ function injectStyle(): void {
   const css = `
 /* ===== 宫灯按钮 —— 悬浮发光、脉冲呼吸、一眼可见 ===== */
 #fntv-hot-tab {
-  /* [lc-788] 撤回 lc-787 左上角方案：改为屏幕底部居中、与轮播「开始播放」按钮同一条水平带（居中对称） */
-  position: fixed; left: 50%; top: auto; right: auto; bottom: 150px; transform: translateX(-50%); z-index: 99998;
+  /* [lc-791] 右下角：对齐轮播容器右下角（进度条/轮播点右侧），红框位置 */
+  position: fixed; left: auto; right: 28px; top: auto; bottom: 150px; z-index: 99998;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 18px; border-radius: 16px; cursor: pointer; user-select: none;
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .5px;
@@ -125,7 +125,7 @@ function injectStyle(): void {
     0 8px 36px rgba(0,0,0,.40), inset 0 1px 0 rgba(255,255,255,.55); }
 }
 #fntv-hot-tab:hover {
-  transform: translateX(-50%) translateY(-3px) scale(1.04);
+  transform: translateY(-3px) scale(1.04);
   box-shadow:
     0 0 28px rgba(255,107,53,.58), 0 0 68px rgba(247,65,143,.42),
     0 12px 40px rgba(0,0,0,.40), inset 0 1px 0 rgba(255,255,255,.55);
@@ -135,19 +135,19 @@ function injectStyle(): void {
 #fntv-hot-tab svg { width: 16px; height: 16px; display: block; filter: drop-shadow(0 0 4px rgba(255,255,255,.6)); }
 
 @keyframes fntv-gongdeng-enter {
-  0%   { opacity: 0; transform: translateX(-50%) translateY(20px) scale(.7); }
-  60%  { opacity: 1; transform: translateX(-50%) translateY(-4px) scale(1.03); }
-  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  0%   { opacity: 0; transform: translateY(20px) scale(.7); }
+  60%  { opacity: 1; transform: translateY(-4px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 #fntv-hot-tab.entering { animation: fntv-gongdeng-enter .5s ease forwards; }
 
 /* ===== 液态玻璃面板 ===== */
 #fntv-hot-panel {
-  /* [lc-788] 跟随按钮：底部居中，点开在按钮正上方展开（避免飞回角落） */
-  position: fixed; left: 50%; top: auto; right: auto; bottom: 200px; z-index: 99999;
+  /* [lc-791] 跟随按钮：右下角，点开在按钮正上方展开 */
+  position: fixed; left: auto; right: 28px; top: auto; bottom: 200px; z-index: 99999;
   width: 340px; max-height: 74vh; display: flex; flex-direction: column;
   border-radius: 20px; overflow: hidden; pointer-events: none;
-  opacity: 0; visibility: hidden; transform: translateX(-50%) translateY(14px) scale(.97);
+  opacity: 0; visibility: hidden; transform: translateY(14px) scale(.97);
   transition: opacity .25s ease, transform .25s ease, visibility .25s ease;
   /* [lc-369] 彻底移除 backdrop-filter：透明窗口下 blur/saturate 是 GPU 崩溃元凶，
      fnOS/Electron 组合即使 blur(18px) 放一会也会未响应。改用高不透明度纯色背景，
