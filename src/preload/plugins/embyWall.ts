@@ -1681,7 +1681,9 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-s2-detail.is-loading{opacity:.6;pointer-events:none}
 [data-fntv-carousel-style="2"] .fnos-slider-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 14px}
 [data-fntv-carousel-style="2"] .fnos-progress-bar{flex:1;height:4px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;cursor:pointer;position:relative}
-[data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transition:width .1s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
+[data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transform-origin:left center;transition:width .1s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
+@keyframes fnos-progress-retract{0%{transform:scaleX(1)}45%{transform:scaleX(0)}70%{transform:scaleX(.14)}85%{transform:scaleX(.02)}100%{transform:scaleX(0)}}
+[data-fntv-carousel-style="2"] .fnos-progress-retract{animation:fnos-progress-retract .8s cubic-bezier(.22,.61,.36,1) forwards}
 [data-fntv-carousel-style="2"] .fnos-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 [data-fntv-carousel-style="2"] .fnos-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
@@ -1860,10 +1862,34 @@ function buildCarouselStyle2(
   const nextSlide = (): void => goTo(currentIndex + 1);
   const prevSlide = (): void => goTo(currentIndex - 1);
 
+  // [lc-789] 满格后弹性慢缩回：transform scaleX 做带回弹的收缩动画(0.8s)，结束再切下一页
+  const playRetract = (): void => {
+    progressFill.style.transition = 'none';
+    progressFill.style.transform = 'scaleX(1)';
+    progressFill.style.width = '100%';
+    void progressFill.offsetWidth; // 强制回流，确保动画从头播放
+    progressFill.classList.add('fnos-progress-retract');
+  };
+  progressFill.addEventListener('animationend', () => {
+    if (!progressFill.classList.contains('fnos-progress-retract')) return;
+    progressFill.classList.remove('fnos-progress-retract');
+    progressFill.style.transition = 'none';
+    progressFill.style.transform = 'scaleX(1)';
+    progressFill.style.width = '0%';
+    void progressFill.offsetWidth;
+    progressFill.style.transition = 'width .1s linear';
+    if (!isPaused) nextSlide(); // goTo 内部会 startProgress 继续加载
+  });
+
   const startProgress = (): void => {
     if (progressInterval) clearInterval(progressInterval);
+    progressFill.classList.remove('fnos-progress-retract');
     progress = 0;
+    progressFill.style.transition = 'none';
+    progressFill.style.transform = 'scaleX(1)';
     progressFill.style.width = '0%';
+    void progressFill.offsetWidth;
+    progressFill.style.transition = 'width .1s linear';
     const stepTime = 50;
     const increment = 100 / (AUTO_DELAY / stepTime);
     progressInterval = window.setInterval(() => {
@@ -1873,15 +1899,16 @@ function buildCarouselStyle2(
         progress = 100;
         progressFill.style.width = '100%';
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        nextSlide();
+        playRetract(); // [lc-789] 满格→弹性收缩→动画结束再切下一页
       } else {
         progressFill.style.width = progress + '%';
       }
     }, stepTime);
   };
   const startAuto = (): void => {
-    if (autoTimer) clearInterval(autoTimer);
-    autoTimer = window.setInterval(() => { if (!isPaused) nextSlide(); }, AUTO_DELAY);
+    // [lc-789] 由进度条驱动切换：不再用独立 autoTimer 抢在满格前重置（会导致进度条永远走不到 100%、回缩动画没机会播），
+    //           满格后的弹性回缩 + 切页统一由 startProgress → playRetract → animationend 完成。
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
     startProgress();
   };
   const stopAuto = (): void => {
