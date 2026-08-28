@@ -1163,18 +1163,31 @@ function injectCarousel(): void {
 /* 每行只有一个主 CTA(开始观看)；次要动作(More)以「更低的填充层级」从属，不靠 opacity 压暗文字 */
 .fnos-action{display:flex;align-items:center;gap:12px;padding-top:6px;flex-shrink:0;margin-top:auto}
 .fnos-play,.fnos-more{
+  position:relative;overflow:hidden;isolation:isolate;   /* 流光裁切在胶囊内 + 独立层叠 */
   display:inline-flex;align-items:center;justify-content:center;
   box-sizing:border-box;min-height:48px;            /* ≥44pt 触控区 */
-  border-radius:999px;                               /* 胶囊形，Apple CTA 语言 */
+  border:none;                                        /* 无描边 */
+  border-radius:999px;                               /* 胶囊形 */
   text-decoration:none;white-space:nowrap;cursor:pointer;
   -webkit-user-select:none;user-select:none;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;  /* 去点击闪蓝 / 300ms 延迟 */
   transition:transform .22s cubic-bezier(.2,.8,.3,1),background-color .22s ease,opacity .18s ease;
 }
+/* 流光：常驻于胶囊内，hover 时从左扫到右（无描边、无阴影） */
+.fnos-play::before,.fnos-more::before{
+  content:'';position:absolute;top:0;left:-75%;width:50%;height:100%;
+  background:linear-gradient(115deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,.22) 50%,
+    rgba(255,255,255,0) 100%);
+  transform:skewX(-18deg);
+  transition:left .75s cubic-bezier(.25,.8,.4,1);
+  z-index:-1;pointer-events:none;
+}
+.fnos-play:hover::before,.fnos-more:hover::before{left:130%}
 .fnos-play{
   gap:10px;padding:0 30px;
   background:var(--fnos-hero-play-bg);
-  border:1px solid var(--fnos-hero-play-border);
   color:var(--fnos-hero-play-text);
   font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
@@ -1183,7 +1196,6 @@ function injectCarousel(): void {
 .fnos-more{
   gap:6px;padding:0 20px;
   background:rgba(255,255,255,.10);
-  border:1px solid var(--fnos-hero-play-border);
   color:var(--fnos-hero-desc);
   font-size:15px;font-weight:600;letter-spacing:.3px;
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
@@ -1195,6 +1207,7 @@ function injectCarousel(): void {
 @media (prefers-reduced-motion: reduce){                     /* 尊重系统「减弱动态效果」 */
   .fnos-play,.fnos-more{transition:background-color .15s ease}
   .fnos-play:hover,.fnos-more:hover,.fnos-play:active,.fnos-more:active{transform:none}
+  .fnos-play::before,.fnos-more::before,.fnos-play:hover::before,.fnos-more:hover::before{transition:none;left:-75%}
 }
 `;
     (document.head || document.documentElement).appendChild(actSt);
