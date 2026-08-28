@@ -1770,8 +1770,8 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-slider-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 14px}
 [data-fntv-carousel-style="2"] .fnos-progress-bar{flex:1;height:4px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;cursor:pointer;position:relative}
 [data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transform-origin:left center;transition:width .1s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
-@keyframes fnos-progress-retract{0%{transform:scaleX(1)}45%{transform:scaleX(0)}70%{transform:scaleX(.14)}85%{transform:scaleX(.02)}100%{transform:scaleX(0)}}
-[data-fntv-carousel-style="2"] .fnos-progress-retract{animation:fnos-progress-retract .8s cubic-bezier(.22,.61,.36,1) forwards}
+@keyframes fnos-progress-retract{0%{transform:scaleX(1)}100%{transform:scaleX(0)}}
+[data-fntv-carousel-style="2"] .fnos-progress-retract{animation:fnos-progress-retract .7s cubic-bezier(.16,1,.3,1) both}
 [data-fntv-carousel-style="2"] .fnos-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 [data-fntv-carousel-style="2"] .fnos-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
@@ -1973,7 +1973,8 @@ function buildCarouselStyle2(
     progressFill.style.width = '0%';
     void progressFill.offsetWidth;
     progressFill.style.transition = 'width .1s linear';
-    if (!isPaused) startProgress(); // [lc-793] 回缩完重新填充（封面已在回缩时切换）
+    // [lc-797] 回缩结束再切封面 + 重新加载：页面切换与加载起点同步，整轮节奏 = 填充(6s) + 回缩(.7s)
+    if (!isPaused) nextSlide();
   });
 
   const startProgress = (): void => {
@@ -1995,9 +1996,8 @@ function buildCarouselStyle2(
         progress = 100;
         progressFill.style.width = '100%';
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        // [lc-793] 先播放回缩（满格→弹性缩回 0），同时切封面——两者并行，节奏对齐不再脱节
+        // [lc-797] 满格后只播回缩（当前封面），封面切换延迟到回缩结束(animationend)再发生，与重新加载同步
         playRetract();
-        nextSlide(); // goTo 内 startProgress 因 retracting=true 跳过，不会打断回缩动画
       } else {
         progressFill.style.width = progress + '%';
       }
