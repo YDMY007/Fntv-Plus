@@ -1895,6 +1895,7 @@ function buildCarouselStyle2(
   let progress = 0;
   let isPaused = false;
   let retracting = false;
+  let pendingStart = false; // [lc-803] 回缩期间若触发 startProgress，延后到回缩结束再真正开始填充
   const AUTO_DELAY = 6000;
 
   const updateSlides = (): void => {
@@ -1939,12 +1940,12 @@ function buildCarouselStyle2(
     progressFill.style.width = '0%';
     void progressFill.offsetWidth;
     progressFill.style.transition = 'width .1s linear';
-    // [lc-797] 回缩结束再切封面 + 重新加载：页面切换与加载起点同步，整轮节奏 = 填充(6s) + 回缩(.7s)
-    if (!isPaused) nextSlide();
+    // [lc-803] 封面已在满格瞬间同步切换；回缩结束只负责重新开始填充（若期间被触发过）
+    if (pendingStart) { pendingStart = false; startProgress(); }
   });
 
   const startProgress = (): void => {
-    if (retracting) return; // [lc-793] 回缩进行中：nextSlide 触发的 startProgress 跳过，避免打断回缩动画
+    if (retracting) { pendingStart = true; return; } // [lc-803] 回缩进行中：延后到回缩结束再开始填充（封面已切，不阻塞）
     if (progressInterval) clearInterval(progressInterval);
     progressFill.classList.remove('fnos-progress-retract');
     progress = 0;
@@ -1962,8 +1963,10 @@ function buildCarouselStyle2(
         progress = 100;
         progressFill.style.width = '100%';
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        // [lc-797] 满格后只播回缩（当前封面），封面切换延迟到回缩结束(animationend)再发生，与重新加载同步
+        // [lc-803] 满格瞬间：先播回缩(设 retracting=true)，再同步切页(nextSlide 经 pendingStart 延后填充)，
+        //          封面与进度条满格严格同步，回缩仅作进度条归零过渡，不再阻塞切换
         playRetract();
+        nextSlide();
       } else {
         progressFill.style.width = progress + '%';
       }
