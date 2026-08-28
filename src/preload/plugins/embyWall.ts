@@ -1715,7 +1715,7 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-series-logo-img{max-height:46px;max-width:240px;width:auto;height:auto;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
 [data-fntv-carousel-style="2"] .fnos-slide-content{position:relative;z-index:3;height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3.6rem;color:#fff}
 [data-fntv-carousel-style="2"] .fnos-slide-meta{font-size:.75rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.5rem;text-transform:uppercase}
-[data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.6rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 20px rgba(0,0,0,.8);margin-bottom:.6rem;line-height:1.2}
+[data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.6rem;font-weight:900;letter-spacing:1px;line-height:1.18;word-break:break-word;margin-bottom:.6rem;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)}
 [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:1rem;color:#e8ddd0;line-height:1.6;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:600px;margin-bottom:1.5rem}
 [data-fntv-carousel-style="2"] .fnos-slide-actions{display:flex;gap:.8rem;flex-wrap:wrap}
 [data-fntv-carousel-style="2"] .fnos-s2-play{
