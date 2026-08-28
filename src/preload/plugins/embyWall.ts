@@ -1683,7 +1683,6 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 [data-fntv-carousel-style="2"] .fnos-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
-[data-fntv-carousel-style="2"] .fnos-auto-hint{color:#8f7e68;font-size:.7rem;letter-spacing:1px;flex:0 0 auto}
 @media (max-width:800px){
   [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:1.8rem}
   [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:.85rem;max-width:90%}
@@ -1704,6 +1703,9 @@ function buildCarouselStyle2(
   // 容器：补 demo 的细边框 + 柔和浮起阴影（仅样式 2），覆盖容器默认的 box-shadow:none
   container.style.border = '1px solid rgba(255,255,255,.06)';
   container.style.boxShadow = '0 22px 48px rgba(0,0,0,.45)';
+  // [lc-782] 样式 2：去掉 max-height 上限与居中，让海报图撑满整个可用宽度（占满右侧，不再两侧留白）
+  container.style.maxHeight = 'none';
+  container.style.margin = '0';
 
   // 每片主题色（按 demo 的五色循环，给顶部 logo 胶囊上色）
   const accents = [
@@ -1793,7 +1795,7 @@ function buildCarouselStyle2(
     });
   });
 
-  // 底部 footer：进度条 + 指示点 + 提示
+  // 底部 footer：进度条 + 指示点（样式 2 不显示自动播放提示文字）
   const footer = document.createElement('div');
   footer.className = 'fnos-slider-footer';
   const progressBar = document.createElement('div');
@@ -1810,12 +1812,8 @@ function buildCarouselStyle2(
     dots.appendChild(d);
     dotsEls.push(d);
   });
-  const hint = document.createElement('div');
-  hint.className = 'fnos-auto-hint';
-  hint.textContent = '自动播放中 · 悬停可暂停';
   footer.appendChild(progressBar);
   footer.appendChild(dots);
-  footer.appendChild(hint);
   wrapper.appendChild(footer);
 
   // ---------- 交互逻辑（移植自 demo）----------
