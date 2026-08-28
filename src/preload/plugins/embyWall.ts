@@ -1180,13 +1180,15 @@ function injectCarousel(): void {
   z-index:1;pointer-events:none;mix-blend-mode:overlay;
 }
 .fnos-play:hover::before,.fnos-more:hover::before{left:140%}
-/* 动态渐变变色背景层：默认隐藏，hover 显示并流动 */
+/* 动态渐变变色背景层：默认隐藏，hover 显示并流动；边缘羽化消除硬胶囊框感 */
 .fnos-play::after,.fnos-more::after{
   content:'';position:absolute;inset:0;border-radius:999px;
   background:linear-gradient(120deg,#2dd4bf 0%,#38bdf8 30%,#a78bfa 55%,#f472b6 80%,#fb923c 100%);
   background-size:250% 250%;background-position:0% 30%;
   opacity:0;transition:opacity .5s ease,background-position .8s ease;
   z-index:-1;pointer-events:none;
+  -webkit-mask-image:radial-gradient(ellipse at center,black 60%,transparent 95%);
+  mask-image:radial-gradient(ellipse at center,black 60%,transparent 95%);
 }
 .fnos-play:hover::after,.fnos-more:hover::after{opacity:1;background-position:100% 70%}
 .fnos-play{
@@ -1197,7 +1199,7 @@ function injectCarousel(): void {
   font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-play:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:rgba(255,255,255,.16);box-shadow:0 0 26px rgba(56,189,248,.40),0 0 52px rgba(167,139,250,.24),0 0 86px rgba(244,114,182,.13)}
+.fnos-play:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:transparent;box-shadow:0 0 28px rgba(56,189,248,.38),0 0 58px rgba(167,139,250,.22),0 0 96px rgba(244,114,182,.12)}
 .fnos-more{
   gap:6px;padding:0 20px;
   background:rgba(255,255,255,.10);
@@ -1206,7 +1208,7 @@ function injectCarousel(): void {
   font-size:15px;font-weight:600;letter-spacing:.3px;
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-more:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:rgba(255,255,255,.16);box-shadow:0 0 26px rgba(56,189,248,.40),0 0 52px rgba(167,139,250,.24),0 0 86px rgba(244,114,182,.13)}
+.fnos-more:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:transparent;box-shadow:0 0 28px rgba(56,189,248,.38),0 0 58px rgba(167,139,250,.22),0 0 96px rgba(244,114,182,.12)}
 .fnos-play span,.fnos-more span{position:relative;z-index:2;display:inline-flex;align-items:center;transition:text-shadow .3s ease}
 .fnos-play span{gap:8px}
 .fnos-more span{gap:6px}
