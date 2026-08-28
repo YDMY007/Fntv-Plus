@@ -1281,18 +1281,6 @@ function injectCarousel(): void {
   _carouselContainer = container;
   requestAnimationFrame(() => { container.style.opacity = '1'; });
 
-  // [lc-786] 非样式 2 时恢复「继续观看」区域（样式 2 可能之前隐藏了它）
-  if (_cs !== 2) {
-    const sections = document.querySelectorAll('section');
-    for (const sec of Array.from(sections)) {
-      if (sec.textContent?.includes('继续观看')) {
-        sec.style.marginTop = '';
-        sec.style.position = '';
-        sec.style.zIndex = '';
-      }
-    }
-  }
-
   // [lc-781] 样式 2（滑动切换 + 进度条）：早期分支，复用已建好的 container/wrapper，
   //   跳过下方样式 1 的 track / posterStrip / 竖向轮播逻辑，改走 buildCarouselStyle2。
   if (_cs === 2) {
@@ -1840,23 +1828,6 @@ function buildCarouselStyle2(
   footer.appendChild(progressBar);
   footer.appendChild(dots);
   container.appendChild(footer); // [lc-785] 绝对定位叠在容器内底部，永不被推走
-
-  // [lc-786] 样式 2 激活时隐藏「继续观看」区域（推到视口外），避免与全高轮播重叠
-  const hideResumeSection = (): void => {
-    // 飞牛原生「继续观看」通常是 target 之后的兄弟 section，标题含"继续观看"文字
-    const sections = document.querySelectorAll('section');
-    for (const sec of Array.from(sections)) {
-      if (sec.textContent?.includes('继续观看')) {
-        sec.style.marginTop = 'calc(-100vh - 9999px)';
-        sec.style.position = 'relative';
-        sec.style.zIndex = '-1';
-      }
-    }
-  };
-  // 立即执行 + 延迟重试（飞牛异步渲染继续观看区块）
-  hideResumeSection();
-  setTimeout(hideResumeSection, 800);
-  setTimeout(hideResumeSection, 2500);
 
   // ---------- 交互逻辑（移植自 demo）----------
   let currentIndex = 0;

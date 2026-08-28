@@ -96,7 +96,7 @@ function injectStyle(): void {
   const css = `
 /* ===== 宫灯按钮 —— 悬浮发光、脉冲呼吸、一眼可见 ===== */
 #fntv-hot-tab {
-  position: fixed; right: 20px; bottom: 24px; z-index: 99998;
+  position: fixed; left: 24px; top: 80px; right: auto; bottom: auto; z-index: 99998;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 18px; border-radius: 16px; cursor: pointer; user-select: none;
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .5px;
@@ -142,7 +142,7 @@ function injectStyle(): void {
 
 /* ===== 液态玻璃面板 ===== */
 #fntv-hot-panel {
-  position: fixed; right: 20px; bottom: 78px; z-index: 99999;
+  position: fixed; left: 24px; top: 132px; right: auto; bottom: auto; z-index: 99999;
   width: 340px; max-height: 74vh; display: flex; flex-direction: column;
   border-radius: 20px; overflow: hidden; pointer-events: none;
   opacity: 0; visibility: hidden; transform: translateY(14px) scale(.97);
