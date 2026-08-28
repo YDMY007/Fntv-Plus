@@ -1702,8 +1702,15 @@ function buildCarouselStyle2(
 
   // 容器：补 demo 的细边框 + 柔和浮起阴影（仅样式 2），覆盖容器默认的 box-shadow:none
   container.style.border = '1px solid rgba(255,255,255,.06)';
+  // 容器顶部不要阴影，仅保留底部/两侧柔和投影（贴合 hero 悬浮感，不把顶边"框"住）
   container.style.boxShadow = '0 22px 48px rgba(0,0,0,.45)';
-  // [lc-782] 样式 2：去掉 max-height 上限与居中，让海报图撑满整个可用宽度（占满右侧，不再两侧留白）
+  // [lc-783] 样式 2：海报图 width:100% 撑满整个可用宽度（占满右侧、无两侧留白）；
+  //   同时用 height 驱动（取消 aspect-ratio），把整体高度限制到视口内，
+  //   使「轮播 + 底部进度条/轮播点」刚好完整显示、底部留一点余量（不溢出、不过长）。
+  //   背景 cover 裁切，宽屏下不再两侧留白。下方 -150px 即"顶部导航+底部余量"的预留，
+  //   想让海报更高/更低就调小/调大这个数字。
+  container.style.aspectRatio = 'auto';
+  container.style.height = 'calc(100vh - 150px)';
   container.style.maxHeight = 'none';
   container.style.margin = '0';
 
