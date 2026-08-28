@@ -1160,37 +1160,17 @@ function injectCarousel(): void {
     const actSt = document.createElement('style');
     actSt.id = 'fnos-hero-action-style';
     actSt.textContent = `
-/* 每行只有一个主 CTA(开始观看)；次要动作(More)同样走「导光变色」，不靠 opacity 压暗文字 */
+/* 每行只有一个主 CTA(开始观看)；次要动作(More)以「更低的填充层级」从属，不靠 opacity 压暗文字 */
 .fnos-action{display:flex;align-items:center;gap:12px;padding-top:6px;flex-shrink:0;margin-top:auto}
 .fnos-play,.fnos-more{
-  position:relative;isolation:isolate;overflow:hidden;   /* 独立层叠 + 裁掉导光溢出 */
   display:inline-flex;align-items:center;justify-content:center;
   box-sizing:border-box;min-height:48px;            /* ≥44pt 触控区 */
   border-radius:999px;                               /* 胶囊形，Apple CTA 语言 */
   text-decoration:none;white-space:nowrap;cursor:pointer;
   -webkit-user-select:none;user-select:none;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;  /* 去点击闪蓝 / 300ms 延迟 */
-  transition:transform .35s cubic-bezier(.2,.8,.3,1),background-color .35s ease,box-shadow .35s ease,color .3s ease;
+  transition:transform .22s cubic-bezier(.2,.8,.3,1),background-color .22s ease,opacity .18s ease;
 }
-/* 导光层：常驻微弱流光，hover 从左扫到右 */
-.fnos-play::before,.fnos-more::before{
-  content:'';position:absolute;top:-50%;left:-60%;width:60%;height:200%;
-  background:linear-gradient(115deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.12) 30%,rgba(255,255,255,.32) 50%,rgba(255,255,255,.12) 70%,rgba(255,255,255,0) 100%);
-  transform:skewX(-18deg);transition:left .7s cubic-bezier(.25,.8,.4,1);
-  z-index:1;pointer-events:none;mix-blend-mode:overlay;
-}
-.fnos-play:hover::before,.fnos-more:hover::before{left:140%}
-/* 动态渐变变色背景层：默认隐藏，hover 显示并流动；边缘羽化消除硬胶囊框感 */
-.fnos-play::after,.fnos-more::after{
-  content:'';position:absolute;inset:0;border-radius:999px;
-  background:linear-gradient(120deg,#2dd4bf 0%,#38bdf8 30%,#a78bfa 55%,#f472b6 80%,#fb923c 100%);
-  background-size:250% 250%;background-position:0% 30%;
-  opacity:0;transition:opacity .5s ease,background-position .8s ease;
-  z-index:-1;pointer-events:none;
-  -webkit-mask-image:radial-gradient(ellipse at center,black 60%,transparent 95%);
-  mask-image:radial-gradient(ellipse at center,black 60%,transparent 95%);
-}
-.fnos-play:hover::after,.fnos-more:hover::after{opacity:1;background-position:100% 70%}
 .fnos-play{
   gap:10px;padding:0 30px;
   background:var(--fnos-hero-play-bg);
@@ -1199,7 +1179,7 @@ function injectCarousel(): void {
   font-size:16px;font-weight:600;letter-spacing:.3px;   /* 中文不用大字距 */
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-play:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:transparent;box-shadow:0 0 28px rgba(56,189,248,.38),0 0 58px rgba(167,139,250,.22),0 0 96px rgba(244,114,182,.12)}
+.fnos-play:hover{transform:translateY(-1px);background:var(--fnos-hero-play-hover)}
 .fnos-more{
   gap:6px;padding:0 20px;
   background:rgba(255,255,255,.10);
@@ -1208,18 +1188,13 @@ function injectCarousel(): void {
   font-size:15px;font-weight:600;letter-spacing:.3px;
   backdrop-filter:blur(14px) saturate(130%);-webkit-backdrop-filter:blur(14px) saturate(130%);
 }
-.fnos-more:hover{transform:translateY(-3px);background:#0f172a;color:#fff;border-color:transparent;box-shadow:0 0 28px rgba(56,189,248,.38),0 0 58px rgba(167,139,250,.22),0 0 96px rgba(244,114,182,.12)}
-.fnos-play span,.fnos-more span{position:relative;z-index:2;display:inline-flex;align-items:center;transition:text-shadow .3s ease}
-.fnos-play span{gap:8px}
-.fnos-more span{gap:6px}
-.fnos-play:hover span,.fnos-more:hover span{text-shadow:0 0 12px rgba(255,255,255,.9),0 0 28px rgba(56,189,248,.8)}
-.fnos-play:active,.fnos-more:active{transform:translateY(-1px) scale(.97)}   /* 按压反馈 */
-.fnos-play:focus-visible,.fnos-more:focus-visible{outline:2px solid #f472b6;outline-offset:3px}
+.fnos-more:hover{transform:translateY(-1px);background:rgba(255,255,255,.17)}
+.fnos-play:active,.fnos-more:active{transform:scale(.97)}   /* 按压反馈 */
+.fnos-play:focus-visible,.fnos-more:focus-visible{outline:2px solid var(--fnos-ui-accent,#8f6fe8);outline-offset:3px}
 .fnos-more.is-loading{opacity:.6;pointer-events:none}        /* 解析季路由时的加载态 */
 @media (prefers-reduced-motion: reduce){                     /* 尊重系统「减弱动态效果」 */
-  .fnos-play,.fnos-more{transition:background-color .15s ease,color .15s ease}
+  .fnos-play,.fnos-more{transition:background-color .15s ease}
   .fnos-play:hover,.fnos-more:hover,.fnos-play:active,.fnos-more:active{transform:none}
-  .fnos-play::before,.fnos-more::before{display:none}
 }
 `;
     (document.head || document.documentElement).appendChild(actSt);
@@ -1428,10 +1403,12 @@ function injectCarousel(): void {
       <div class="fnos-desc" style="flex:1 1 auto;min-height:0;-webkit-line-clamp:5;display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;font-size:14.5px;line-height:1.75;color:var(--fnos-hero-desc);letter-spacing:.4px;font-weight:500;text-indent:2em;mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%);-webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,1) 80%,rgba(0,0,0,0) 100%)">${show.desc||''}</div>
       <div class="fnos-action">
         <a class="fnos-play" href="${detailHref}" aria-label="开始观看">
-          <span class="fnos-btn-label"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>开始观看</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          开始观看
         </a>
         <a class="fnos-more" href="${detailHref}" title="查看分季详情" aria-label="查看分季详情">
-          <span class="fnos-btn-label">More<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
+          More
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </a>
       </div>`;
     rightPanel.appendChild(info);
