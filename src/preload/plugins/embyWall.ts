@@ -1711,11 +1711,11 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-slide-item.pre-enter{opacity:0;visibility:hidden;transform:translateX(80px);z-index:0}
 [data-fntv-carousel-style="2"] .fnos-slide-bg{position:absolute;inset:0;background-size:cover;background-position:center 25%}
 [data-fntv-carousel-style="2"] .fnos-slide-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.7) 25%,rgba(0,0,0,.3) 55%,rgba(0,0,0,.1) 75%,rgba(0,0,0,.02) 100%)}
-[data-fntv-carousel-style="2"] .fnos-series-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:6;pointer-events:none}
-[data-fntv-carousel-style="2"] .fnos-series-logo-img{max-height:46px;max-width:240px;width:auto;height:auto;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
 [data-fntv-carousel-style="2"] .fnos-slide-content{position:relative;z-index:3;height:100%;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3.6rem;color:#fff}
 [data-fntv-carousel-style="2"] .fnos-slide-meta{font-size:.75rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.5rem;text-transform:uppercase}
-[data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.6rem;font-weight:900;letter-spacing:1px;line-height:1.18;word-break:break-word;margin-bottom:.6rem;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)}
+[data-fntv-carousel-style="2"] .fnos-slide-title{font-size:3.3rem;font-weight:900;letter-spacing:1px;line-height:1.15;word-break:break-word;margin-bottom:.6rem;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)}
+[data-fntv-carousel-style="2"] .fnos-slide-title--logo{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:initial;color:#fff;filter:none;display:flex;align-items:flex-end;margin-bottom:.4rem}
+[data-fntv-carousel-style="2"] .fnos-slide-title-logo-img{max-height:130px;max-width:62%;width:auto;height:auto;display:block;object-fit:contain;filter:drop-shadow(0 4px 18px rgba(0,0,0,.7))}
 [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:1rem;color:#e8ddd0;line-height:1.6;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:600px;margin-bottom:1.5rem}
 [data-fntv-carousel-style="2"] .fnos-slide-actions{display:flex;gap:.8rem;flex-wrap:wrap}
 [data-fntv-carousel-style="2"] .fnos-s2-play{
@@ -1743,11 +1743,10 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 [data-fntv-carousel-style="2"] .fnos-carousel-frame{position:absolute;inset:0;border-radius:24px;pointer-events:none;z-index:6;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);-webkit-mask-image:radial-gradient(130% 100% at 50% 112%,#000 48%,transparent 100%);mask-image:radial-gradient(130% 100% at 50% 112%,#000 48%,transparent 100%)}
 @media (max-width:800px){
-  [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:1.8rem}
+  [data-fntv-carousel-style="2"] .fnos-slide-title{font-size:2.2rem}
   [data-fntv-carousel-style="2"] .fnos-slide-desc{font-size:.85rem;max-width:90%}
   [data-fntv-carousel-style="2"] .fnos-slide-content{padding:1.5rem 1.5rem 3.2rem}
-  [data-fntv-carousel-style="2"] .fnos-series-logo{top:.8rem;left:1rem}
-  [data-fntv-carousel-style="2"] .fnos-series-logo-img{max-height:34px;max-width:170px}
+  [data-fntv-carousel-style="2"] .fnos-slide-title-logo-img{max-height:84px;max-width:75%}
 }
 @media (prefers-reduced-motion: reduce){
   [data-fntv-carousel-style="2"] .fnos-slide-item,[data-fntv-carousel-style="2"] .fnos-slide-item.exit-left{transition:opacity .2s ease}
@@ -1806,22 +1805,12 @@ function buildCarouselStyle2(
     slideBg.style.backgroundImage = `linear-gradient(160deg, ${accent.border}55, #0b1219)`;
     slide.appendChild(slideBg);
 
-    // 顶部左侧 logo：复用原版(样式1)取图链路 —— 优先飞牛自带 logo(show.logo)，否则 TMDB 透明 logo
-    const seriesLogo = document.createElement('div');
-    seriesLogo.className = 'fnos-series-logo';
-    const logoImg = document.createElement('img');
-    logoImg.className = 'fnos-series-logo-img';
-    logoImg.alt = (show as any).title || '';
-    logoImg.style.display = 'none';
-    seriesLogo.appendChild(logoImg);
-    slide.appendChild(seriesLogo);
-    resolveShowLogo(show, base).then((src) => { if (src) { logoImg.src = src; logoImg.style.display = 'block'; } });
-
     // 内容区（标题/简介用 textContent，避免 HTML 注入）
     const content = document.createElement('div');
     content.className = 'fnos-slide-content';
     const genreArr: string[] = (show as any).genres || [];
-    const meta = [ (genreArr[0] || '').toUpperCase(), (show as any).year ? String((show as any).year) : '' ].filter(Boolean).join(' · ');
+    // [lc-795] 标题上方不再显示年份，仅保留类型标签
+    const meta = (genreArr[0] || '').toUpperCase();
     const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
     content.innerHTML =
       '<div class="fnos-slide-meta"></div>' +
@@ -1831,10 +1820,24 @@ function buildCarouselStyle2(
         '<button class="fnos-s2-play" type="button">开始播放</button>' +
         '<button class="fnos-s2-detail" type="button">更多详情</button>' +
       '</div>';
+    const titleEl = content.querySelector('.fnos-slide-title') as HTMLElement;
     (content.querySelector('.fnos-slide-meta') as HTMLElement).textContent = meta;
-    (content.querySelector('.fnos-slide-title') as HTMLElement).textContent = (show as any).title || '';
+    (content.querySelector('.fnos-slide-meta') as HTMLElement).style.display = meta ? '' : 'none';
+    titleEl.textContent = (show as any).title || '';
     (content.querySelector('.fnos-slide-desc') as HTMLElement).textContent = (show as any).desc || '';
     slide.appendChild(content);
+
+    // [lc-795] 有剧集 logo 时直接替换标题文字为 logo 图；无则保留放大后的文字标题
+    resolveShowLogo(show, base).then((src) => {
+      if (!src) return;
+      titleEl.textContent = '';
+      titleEl.classList.add('fnos-slide-title--logo');
+      const logoImg = document.createElement('img');
+      logoImg.className = 'fnos-slide-title-logo-img';
+      logoImg.alt = (show as any).title || '';
+      logoImg.src = src;
+      titleEl.appendChild(logoImg);
+    });
     track.appendChild(slide);
     slides.push(slide);
 
