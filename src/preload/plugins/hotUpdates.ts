@@ -96,8 +96,8 @@ function injectStyle(): void {
   const css = `
 /* ===== 宫灯按钮 —— 悬浮发光、脉冲呼吸、一眼可见 ===== */
 #fntv-hot-tab {
-  /* 右下角固定：距右边 102px、距底部 84px（lc-800 基础上左移14px/上移12px） */
-  position: fixed; left: auto; right: 102px; top: auto; bottom: 84px; z-index: 99998;
+  /* 右下角固定：距右边 95px、距底部 98px（lc-801 基础上右移7px/上移14px） */
+  position: fixed; left: auto; right: 95px; top: auto; bottom: 98px; z-index: 99998;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 18px; border-radius: 16px; cursor: pointer; user-select: none;
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .5px;
