@@ -96,8 +96,8 @@ function injectStyle(): void {
   const css = `
 /* ===== 宫灯按钮 —— 悬浮发光、脉冲呼吸、一眼可见 ===== */
 #fntv-hot-tab {
-  /* [lc-794] 硬编码：镜像「开始播放」按钮位置（其距左 280px → 镜像距右 280px），同一条水平带 bottom:150px */
-  position: fixed; left: auto; right: 280px; top: auto; bottom: 150px; z-index: 99998;
+  /* [lc-798] 右下角固定：距右边 88px、距底部 48px */
+  position: fixed; left: auto; right: 88px; top: auto; bottom: 48px; z-index: 99998;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 18px; border-radius: 16px; cursor: pointer; user-select: none;
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .5px;
@@ -143,8 +143,8 @@ function injectStyle(): void {
 
 /* ===== 液态玻璃面板 ===== */
 #fntv-hot-panel {
-  /* [lc-794] 跟随按钮：镜像位（距右 280px），点开在按钮正上方展开 */
-  position: fixed; left: auto; right: 280px; top: auto; bottom: 200px; z-index: 99999;
+  /* [lc-798] 跟随按钮：右下角，点开在按钮正上方展开 */
+  position: fixed; left: auto; right: 88px; top: auto; bottom: 108px; z-index: 99999;
   width: 340px; max-height: 74vh; display: flex; flex-direction: column;
   border-radius: 20px; overflow: hidden; pointer-events: none;
   opacity: 0; visibility: hidden; transform: translateY(14px) scale(.97);
