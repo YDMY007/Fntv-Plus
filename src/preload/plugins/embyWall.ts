@@ -3525,13 +3525,13 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
  *  Hero 圆角沉浸卡；选集由横向滚动改为「缩略图左 + 信息右」的纵向卡片列表；标题强调。
  *  仅作用于 .fnos-immersive-season（由 applySeasonImmersiveDetail 在季详情页挂到 body）。
  *  与「关闭背景框」(_detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
-const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左) + 侧栏(右 320px)，参照 season-immersive-preview.html */
+const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) */
 .fnos-immersive-season .fnos-season-2col{
   display:grid !important;
   width:100% !important;
   box-sizing:border-box !important;
-  grid-template-columns:1fr 320px !important;
-  gap:24px !important;
+  grid-template-columns:64% 36% !important;
+  gap:20px !important;
   align-items:start !important;
 }
 .fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; }
@@ -3621,22 +3621,21 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左) + 侧栏(右 320px)�
   overflow:visible !important; white-space:normal !important; padding-left:0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:10px !important;
+  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:4px !important;
 }
-/* 单个演员：头像(左) + 姓名/角色(右)，清爽横排卡片 */
+/* 单个演员：头像(左) + 姓名/角色(右)，紧凑行（无框无背景） */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item{
   display:flex !important; flex-direction:row !important; align-items:center !important;
-  gap:12px !important; width:100% !important; padding:8px 10px !important;
-  background:var(--semi-color-fill-1,#f6f6f8) !important; border-radius:12px !important; margin-bottom:8px !important;
+  gap:10px !important; width:100% !important; padding:6px 0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{
-  width:48px !important; height:48px !important; flex:0 0 48px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
+  width:40px !important; height:40px !important; flex:0 0 40px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; justify-content:center !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:auto !important; text-align:left !important; white-space:normal !important; line-height:1.35 !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:14px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:12px !important; color:var(--semi-color-text-2,#86868b) !important; margin-top:2px !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; justify-content:center !important; gap:1px !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:auto !important; text-align:left !important; white-space:normal !important; line-height:1.3 !important; margin:0 !important; padding:0 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:13px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:11px !important; color:var(--semi-color-text-2,#86868b) !important; }
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
@@ -3681,10 +3680,21 @@ function extractDuration(card: Element | null): string {
   return durP ? (durP.textContent || '').trim() : '';
 }
 
-/** 统计所有分集的「分秒」时长，返回总秒数（fnOS 原生只暴露每集时长，需自行累加） */
+/** 只筛选「真正的选集卡片」（含"第X集"标题或时长文本），排除推荐/精选等杂卡 */
+function getRealEpisodeCards(): Element[] {
+  return Array.from(document.querySelectorAll('[data-id="details"]')).filter((card) => {
+    const a = findCardTitleLink(card);
+    if (!a) return false;
+    const text = a.textContent || '';
+    // 匹配 "第 1 集"、"第2集" 等中文集数格式，或有分秒时长
+    return /第\s*\d+\s*集/.test(text) || /(\d+)\s*分钟\s*(\d+)\s*秒/.test(text);
+  });
+}
+
+/** 统计所有真正分集的「分秒」时长，返回总秒数 */
 function sumEpisodeSeconds(): number {
   let total = 0;
-  document.querySelectorAll('[data-id="details"]').forEach((card) => {
+  getRealEpisodeCards().forEach((card) => {
     const a = findCardTitleLink(card);
     if (!a) return;
     const p = Array.from(a.querySelectorAll('p')).find((el) =>
@@ -3713,7 +3723,8 @@ function formatSeconds(total: number): string {
 /** 刷新「剧集信息」卡中的集数 / 总时长 / 首播（随选集懒加载补全而更新） */
 function updateSeasonInfoStats(): void {
   if (!_infoCard) return;
-  const count = document.querySelectorAll('[data-id="details"]').length;
+  const episodes = getRealEpisodeCards();
+  const count = episodes.length;
   const total = formatSeconds(sumEpisodeSeconds());
   const yearEl = Array.from(document.querySelectorAll('*')).find(
     (e) => e.children.length === 0 && /^((19|20)\d{2})\s*年?$/.test((e.textContent || '').trim())
