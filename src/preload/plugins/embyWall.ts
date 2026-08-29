@@ -3521,7 +3521,102 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃 */
+/** 沉浸式季详情样式表（参照 season-immersive-preview.html 模板）：
+ *  Hero 圆角沉浸卡；选集由横向滚动改为「缩略图左 + 信息右」的纵向卡片列表；标题强调。
+ *  仅作用于 .fnos-immersive-season（由 applySeasonImmersiveDetail 在季详情页挂到 body）。
+ *  与「关闭背景框」(_detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
+const IMMERSIVE_SEASON_CSS = `
+/* ===== Fntv-Plus 沉浸式季详情（参照 season-immersive-preview 模板） ===== */
+.fnos-immersive-season .semi-always-dark.h-\\[470px\\]{
+  border-radius:20px !important;
+  overflow:hidden !important;
+  box-shadow:0 30px 60px rgba(0,0,0,.18) !important;
+  margin:0 16px !important;
+}
+.fnos-immersive-season .semi-always-dark.h-\\[470px\\]::after{
+  content:'' !important;
+  position:absolute !important;
+  inset:0 !important;
+  z-index:0 !important;
+  pointer-events:none !important;
+  background:linear-gradient( 90deg, rgba(0,0,0,.02) 0%, rgba(0,0,0,.2) 45%, rgba(0,0,0,.55) 100%) !important;
+}
+.fnos-immersive-season strong{
+  font-size:1.25rem !important;
+  font-weight:700 !important;
+  letter-spacing:-.3px !important;
+}
+/* 选集：横向滚动 -> 纵向列表，每行一张横向卡片（缩略图左 + 信息右） */
+.fnos-immersive-season .ms-container[class*="overflow-x-scroll"]{
+  overflow:visible !important;
+  white-space:normal !important;
+}
+.fnos-immersive-season .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
+  flex-direction:column !important;
+  flex-wrap:nowrap !important;
+  align-items:stretch !important;
+  width:100% !important;
+  height:auto !important;
+  column-gap:0 !important;
+}
+.fnos-immersive-season [data-id="details"]{
+  display:flex !important;
+  flex-direction:row !important;
+  align-items:center !important;
+  width:100% !important;
+  max-width:none !important;
+  max-height:none !important;
+  gap:16px !important;
+  background:var(--semi-color-bg-0,#fff) !important;
+  border:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
+  border-radius:14px !important;
+  box-shadow:0 2px 10px rgba(0,0,0,.06) !important;
+  padding:12px 14px !important;
+  margin-bottom:12px !important;
+  cursor:pointer !important;
+  transition:transform .28s cubic-bezier(.25,.1,.25,1), box-shadow .28s ease !important;
+}
+.fnos-immersive-season [data-id="details"]:hover{
+  transform:translateX(6px) !important;
+  box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
+}
+.fnos-immersive-season [data-id="details"] > div:first-child{
+  width:160px !important;
+  height:90px !important;
+  flex:0 0 160px !important;
+  margin:0 !important;
+  border-radius:8px !important;
+}
+.fnos-immersive-season [data-id="details"] > a{
+  flex:1 1 auto !important;
+  min-width:0 !important;
+}
+`;
+
+let _immersiveSeasonStyleInjected = false;
+function injectImmersiveSeasonStyle(): void {
+  if (_immersiveSeasonStyleInjected) return;
+  if (document.getElementById('fnos-immersive-season-style')) { _immersiveSeasonStyleInjected = true; return; }
+  const style = document.createElement('style');
+  style.id = 'fnos-immersive-season-style';
+  style.textContent = IMMERSIVE_SEASON_CSS;
+  (document.head || document.documentElement).appendChild(style);
+  _immersiveSeasonStyleInjected = true;
+}
+
+/** 对 Season 详情页 (/v/tv/season/:id) 应用沉浸式样式（参照 season-immersive-preview 模板） */
+function applySeasonImmersiveDetail(): void {
+  injectImmersiveSeasonStyle();
+  if (_detailBoxless) {
+    document.body.classList.remove('fnos-immersive-season');
+    return;
+  }
+  document.body.classList.add('fnos-immersive-season');
+  // 补齐每集简介（Bangumi），复用既有逻辑
+  fillEpisodeDescsFromBangumi();
+}
+
+/** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃（保留以备回退） */
 function applySeasonDetailGlass(): void {
   // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
   const seasonNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
@@ -3824,9 +3919,12 @@ function applyDetailLiquidGlass(): void {
   }
 
   if (/\/v\/(tv|movie)\/season\//.test(location.href)) {
-    applySeasonDetailGlass();
-  } else if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
-    applyTvDetailGlass();
+    applySeasonImmersiveDetail();
+  } else {
+    document.body.classList.remove('fnos-immersive-season');
+    if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
+      applyTvDetailGlass();
+    }
   }
   _detailGlassInited = true;
   log('detail liquid glass applied for', location.href.substring(location.href.lastIndexOf('/v/')));
