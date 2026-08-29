@@ -2025,16 +2025,16 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-stack{position:relative;width:100%;height:100%;perspective:1600px;perspective-origin:50% 40%}
 [data-fntv-carousel-style="3"] .fntv-s3-card{
   position:absolute;inset:0;border-radius:24px;overflow:hidden;
-  box-shadow:0 30px 50px rgba(0,0,0,.6);
-  transition:transform .85s cubic-bezier(.22,1,.36,1),opacity .7s cubic-bezier(.4,0,.2,1),filter .7s ease,box-shadow .7s ease;
+  box-shadow:none;
+  transition:transform .85s cubic-bezier(.22,1,.36,1),opacity .7s cubic-bezier(.4,0,.2,1),filter .7s ease;
   opacity:0;transform:translateY(80px) scale(.85) rotateX(8deg);transform-origin:center bottom;
   z-index:1;will-change:transform,opacity,filter;
   border:1px solid rgba(255,255,255,.1);background:#1e1b17;cursor:pointer;
 }
 [data-fntv-carousel-style="3"] .fntv-s3-card.active{
   opacity:1;transform:translateY(0) scale(1) rotateX(0deg);z-index:10;filter:brightness(1);
-  box-shadow:0 40px 60px rgba(0,0,0,.7),0 0 30px rgba(210,165,80,.1);
-  transition:transform .9s cubic-bezier(.22,1,.36,1),opacity .7s ease,filter .7s ease,box-shadow .7s ease;
+  box-shadow:none;
+  transition:transform .9s cubic-bezier(.22,1,.36,1),opacity .7s ease,filter .7s ease;
 }
 [data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:.55;transform:translateY(20px) translateX(-70px) scale(.92) rotateZ(-2.5deg) rotateX(4deg);z-index:7;filter:blur(1px) brightness(.75)}
 [data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:.55;transform:translateY(20px) translateX(70px) scale(.92) rotateZ(2.5deg) rotateX(4deg);z-index:7;filter:blur(1px) brightness(.75)}
