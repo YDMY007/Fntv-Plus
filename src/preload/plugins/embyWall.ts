@@ -3534,6 +3534,8 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   grid-template-columns:minmax(0,64fr) minmax(0,36fr) !important;
   gap:20px !important;
   align-items:start !important;
+  /* 右侧留白：避免侧栏卡片贴上容器右缘（祖先 overflow:hidden）被误判为裁切 */
+  padding-right:24px !important;
 }
 .fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; overflow:visible !important; }
 .fnos-immersive-season .fnos-season-aside{ min-width:0 !important; overflow:visible !important; max-width:none !important; }
