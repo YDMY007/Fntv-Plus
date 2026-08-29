@@ -2004,30 +2004,28 @@ function buildCarouselStyle3(
     st.id = 'fnos-carousel-style3-style';
     st.textContent = `
 [data-fntv-carousel-style="3"] .fntv-s3-stack{position:relative;width:100%;height:100%}
-/* [lc-819] 底部卡片堆叠感：deck 装饰层从 active 卡下方探出，营造一摞卡片的既视感 */
-[data-fntv-carousel-style="3"] .fntv-s3-stack::before,
+/* [lc-819] 侧向卡片堆叠：active 居中；prev 往左退去；behind 向右下扇出、左右倾斜；右侧渐变阴影(渐影) */
 [data-fntv-carousel-style="3"] .fntv-s3-stack::after{
-  content:'';position:absolute;left:50%;
-  transform:translateX(-50%);
-  border-radius:24px;
-  background:linear-gradient(180deg,#241f18,#14110c);
-  border:1px solid rgba(255,255,255,.07);
-  box-shadow:0 22px 44px rgba(0,0,0,.45);
-  z-index:0;pointer-events:none;
+  content:'';position:absolute;top:0;right:0;bottom:0;width:42%;
+  background:linear-gradient(to right,rgba(0,0,0,0) 0%,rgba(0,0,0,.3) 100%);
+  z-index:4;pointer-events:none;
 }
-[data-fntv-carousel-style="3"] .fntv-s3-stack::before{width:94%;height:54px;bottom:-16px}
-[data-fntv-carousel-style="3"] .fntv-s3-stack::after{width:86%;height:54px;bottom:-30px}
 [data-fntv-carousel-style="3"] .fntv-s3-card{
   position:absolute;inset:0;border-radius:24px;overflow:hidden;
   box-shadow:0 30px 50px rgba(0,0,0,.6);
   transition:transform .75s cubic-bezier(.2,.8,.3,1),opacity .7s ease,filter .7s ease;
-  opacity:0;transform:scale(.8) translateY(60px);
+  opacity:0;transform:scale(.8) translateX(40px) translateY(20px);
   border:1px solid rgba(255,255,255,.1);background:#1e1b17;cursor:pointer;
 }
 [data-fntv-carousel-style="3"] .fntv-s3-card.active{opacity:1;transform:scale(1) translateY(0);z-index:5;box-shadow:0 40px 60px rgba(0,0,0,.7),0 0 30px rgba(210,165,80,.1)}
-[data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:.4;transform:scale(.88) translateY(0) translateX(-40px) rotateZ(-3deg);z-index:3;filter:blur(1.5px) brightness(.7)}
-[data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:.4;transform:scale(.88) translateY(0) translateX(40px) rotateZ(3deg);z-index:3;filter:blur(1.5px) brightness(.7)}
-[data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateY(60px) translateX(20px);z-index:1;pointer-events:none}
+/* 上一卡：往左退去（飞向左、微旋） */
+[data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:.35;transform:scale(.9) translateX(-26%) translateY(-2%) rotateZ(-5deg);z-index:3;filter:blur(1.2px) brightness(.7)}
+/* 右下扇出的堆叠卡（depth 1~3）：逐层右移、下移、缩小并左右倾斜 */
+[data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:.55;transform:translateX(9%) translateY(5%) scale(.92) rotateZ(3deg);z-index:4;filter:brightness(.82)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.behind1{opacity:.42;transform:translateX(15%) translateY(10%) scale(.86) rotateZ(5deg);z-index:3;filter:brightness(.7)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.behind2{opacity:.3;transform:translateX(20%) translateY(14%) scale(.8) rotateZ(6deg);z-index:2;filter:brightness(.6)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.behind3{opacity:.2;transform:translateX(24%) translateY(17%) scale(.74) rotateZ(7deg);z-index:1;filter:brightness(.52)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateX(28%) translateY(20%);z-index:0;pointer-events:none}
 [data-fntv-carousel-style="3"] .fntv-s3-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
 [data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
 [data-fntv-carousel-style="3"] .fntv-s3-info h3.fntv-s3-title--logo{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:initial;color:#fff;filter:none;display:block;margin-bottom:.4rem;line-height:1.1}
@@ -2063,7 +2061,8 @@ function buildCarouselStyle3(
 }
 @media (prefers-reduced-motion: reduce){
   [data-fntv-carousel-style="3"] .fntv-s3-card{transition:opacity .2s ease}
-  [data-fntv-carousel-style="3"] .fntv-s3-card.active,[data-fntv-carousel-style="3"] .fntv-s3-card.prev,[data-fntv-carousel-style="3"] .fntv-s3-card.next,[data-fntv-carousel-style="3"] .fntv-s3-card.behind{transform:none}
+  [data-fntv-carousel-style="3"] .fntv-s3-card.active,[data-fntv-carousel-style="3"] .fntv-s3-card.prev,[data-fntv-carousel-style="3"] .fntv-s3-card.next,[data-fntv-carousel-style="3"] .fntv-s3-card.behind,[data-fntv-carousel-style="3"] .fntv-s3-card.behind1,[data-fntv-carousel-style="3"] .fntv-s3-card.behind2,[data-fntv-carousel-style="3"] .fntv-s3-card.behind3{transform:none}
+  [data-fntv-carousel-style="3"] .fntv-s3-card.prev,[data-fntv-carousel-style="3"] .fntv-s3-card.next,[data-fntv-carousel-style="3"] .fntv-s3-card.behind1,[data-fntv-carousel-style="3"] .fntv-s3-card.behind2,[data-fntv-carousel-style="3"] .fntv-s3-card.behind3{opacity:0}
   [data-fntv-carousel-style="3"] .fntv-s3-play,[data-fntv-carousel-style="3"] .fntv-s3-detail{transition:background-color .15s ease}
   [data-fntv-carousel-style="3"] .fntv-s3-play:hover,[data-fntv-carousel-style="3"] .fntv-s3-detail:hover{transform:none}
 }
@@ -2190,10 +2189,14 @@ function buildCarouselStyle3(
 
   const updatePositions = (): void => {
     cards.forEach((card, idx) => {
-      card.classList.remove('active', 'prev', 'next', 'behind');
-      if (idx === currentIndex) card.classList.add('active');
-      else if (idx === (currentIndex - 1 + cards.length) % cards.length) card.classList.add('prev');
-      else if (idx === (currentIndex + 1) % cards.length) card.classList.add('next');
+      card.classList.remove('active', 'prev', 'next', 'behind', 'behind1', 'behind2', 'behind3');
+      const depth = (idx - currentIndex + cards.length) % cards.length; // 0=当前, 1=下一卡, n-1=上一卡(往左退)
+      if (depth === 0) card.classList.add('active');
+      else if (depth === cards.length - 1) card.classList.add('prev');
+      else if (depth === 1) card.classList.add('next');
+      else if (depth === 2) card.classList.add('behind1');
+      else if (depth === 3) card.classList.add('behind2');
+      else if (depth === 4) card.classList.add('behind3');
       else card.classList.add('behind');
     });
     dotsEls.forEach((d, idx) => d.classList.toggle('active', idx === currentIndex));
