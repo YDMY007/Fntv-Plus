@@ -2250,26 +2250,13 @@ function buildCarouselStyle3(
 
 /* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
 // 真实片库未就绪时显示; 一旦 fetchShowsViaIPC 拉到数据, 上层 rebuild 机制会自动替换为真实轮播
-function buildCarouselStyle4(
-  container: HTMLElement,
-  wrapper: HTMLElement,
-  shows: any[],
-  base: string,
-  rebuild: boolean
-): void {
-  const log4 = (...a: any[]) => log('[s4]', ...a);
-
-  const imgUrl = (p: string, w?: number) => {
-    if (!p) return '';
-    if (p.startsWith('http') || p.startsWith('/v/api/')) return p + (w ? '?w=' + w : '');
-    return `${base}/v/api/v1/${p}` + (w ? '?w=' + w : '');
-  };
-
-  // 一次性注入样式（scoped 到样式 4：3D 旋转木马）
-  if (!document.getElementById('fnos-carousel-style4-style')) {
-    const st = document.createElement('style');
-    st.id = 'fnos-carousel-style4-style';
-    st.textContent = `
+// [lc-839+] 样式4 真实 CSS 提取为可重入函数: 真实轮播(buildCarouselStyle4) 与 加载骨架(buildLoadingPlaceholder 的 _cs===4 分支) 共用同一份,
+// 避免骨架阶段 style4 css 尚未注入导致复用 .fntv-s4-* 类无样式。
+function ensureStyle4Css(): void {
+  if (document.getElementById('fnos-carousel-style4-style')) return;
+  const st = document.createElement('style');
+  st.id = 'fnos-carousel-style4-style';
+  st.textContent = `
 [data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1600px}
 [data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.2,1.1)}
 [data-fntv-carousel-style="4"] .fntv-s4-card{
@@ -2331,8 +2318,26 @@ function buildCarouselStyle4(
   [data-fntv-carousel-style="4"] .fntv-s4-play:hover,[data-fntv-carousel-style="4"] .fntv-s4-detail:hover{transform:none}
 }
 `;
-    (document.head || document.documentElement).appendChild(st);
-  }
+  (document.head || document.documentElement).appendChild(st);
+}
+
+function buildCarouselStyle4(
+  container: HTMLElement,
+  wrapper: HTMLElement,
+  shows: any[],
+  base: string,
+  rebuild: boolean
+): void {
+  const log4 = (...a: any[]) => log('[s4]', ...a);
+
+  const imgUrl = (p: string, w?: number) => {
+    if (!p) return '';
+    if (p.startsWith('http') || p.startsWith('/v/api/')) return p + (w ? '?w=' + w : '');
+    return `${base}/v/api/v1/${p}` + (w ? '?w=' + w : '');
+  };
+
+  // [lc-839+] 注入(或复用)样式4 真实 CSS —— 抽成 ensureStyle4Css(), 骨架阶段也会调用
+  ensureStyle4Css();
 
   // 布局：3D 旋转木马舞台（高度与样式1/2/3 一致：calc(100vh - 380px)，避免加载完高度跳变；海报内部底部留白(见 .fntv-s4-card)负责与下方模块拉开间距）
   wrapper.style.cssText = 'display:block;padding:0;margin:0';
@@ -2588,28 +2593,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
 .fntv-ph-l-dot.active{background:#e0a24c;transform:scale(1.4);border-color:#fff}
 .fntv-ph-l-text{color:#5a5448}
-/* [lc-839] 样式4 骨架: 模拟「有数据的样式4轮播」视觉 —— 中间暖灰海报占位(非纯黑) + 底部渐变遮罩 + 可见的内容占位条(meta/title/desc/btn) + 左右3D侧卡 */
-.fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#2c2824}
-.fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-/* 中间主卡: 暖灰色底(模拟未加载海报图, 非纯黑), 让 shimmer 和内部占位条都可见 */
-.fntv-ph-s4-card{position:absolute;left:22%;top:6%;width:56%;height:88%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#2c2824;box-shadow:0 25px 45px rgba(0,0,0,.55);z-index:3}
-/* 左右侧卡: 暖灰底(比主卡略深), 明显露出约 1/4 张 */
-.fntv-ph-s4-peek{position:absolute;top:12%;height:76%;width:52%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:#242019;opacity:.6;filter:blur(.8px) brightness(.78);z-index:1}
-.fntv-ph-s4-peek.left{left:1%;transform:perspective(1000px) rotateY(34deg);transform-origin:right center}
-.fntv-ph-s4-peek.right{right:1%;transform:perspective(1000px) rotateY(-34deg);transform-origin:left center}
-/* 底部渐变遮罩: 压暗程度降低(.95→.72), 让 meta/title/desc/btn 占位条清晰可见 */
-.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.72) 0%,rgba(0,0,0,.38) 40%,rgba(0,0,0,.10) 70%,transparent 100%);z-index:2;pointer-events:none}
-.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:1.6rem 1.8rem 2.4rem;gap:.65rem;box-sizing:border-box}
-/* 内容占位条: 提高亮度(原 .14~.20 → .22~.30), 在 #2c2824 底上清晰可辨 */
-.fntv-ph-s4-meta{width:80px;height:11px;border-radius:6px;background:rgba(255,255,255,.26)}
-.fntv-ph-s4-title{width:54%;height:40px;border-radius:12px;background:rgba(255,255,255,.30)}
-.fntv-ph-s4-desc{width:64%;height:11px;border-radius:6px;background:rgba(255,255,255,.22)}
-.fntv-ph-s4-desc.s2{width:44%}
-.fntv-ph-s4-actions{display:flex;gap:.7rem;margin-top:.65rem}
-.fntv-ph-s4-btn{width:104px;height:38px;border-radius:50px;background:rgba(255,255,255,.25)}
-.fntv-ph-s4-dots{position:absolute;left:22%;right:22%;bottom:28px;z-index:6;display:flex;justify-content:center;gap:8px}
-.fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
-.fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+/* [lc-839+] 样式4 骨架不再自创 CSS: 直接复用真实样式4 轮播的 .fntv-s4-* 类(同款 DOM 结构 + 同款 CSS, 由 ensureStyle4Css() 注入),
+   仅把真实图片/文字替换为 shimmer 占位块, 呈现"暂停态空轮播" —— 加载完视觉零跳变。故此处无 .fntv-ph-s4-* 规则。 */
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -2739,36 +2724,58 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     container.appendChild(s3BarBox);
     statusEl = tip; // 居中"加载中…"作为状态/诊断文本(供超时提示覆盖)
   } else if (_cs === 4) {
-    // [lc-830] 样式4 骨架: 契合 3D 旋转木马 —— 透明无框容器 + 中央海报占位 + 左右侧卡peek(3D纵深) + 底部指示点 + 底部进度
-    // 左右侧卡 peek(藏在中央海报后方, 露肩营造 3D 纵深)
-    const peekL = document.createElement('div'); peekL.className = 'fntv-ph-s4-peek left';
-    const peekLShine = document.createElement('div'); peekLShine.className = 'fntv-ph-s4-shine'; peekL.appendChild(peekLShine);
-    const peekR = document.createElement('div'); peekR.className = 'fntv-ph-s4-peek right';
-    const peekRShine = document.createElement('div'); peekRShine.className = 'fntv-ph-s4-shine'; peekR.appendChild(peekRShine);
-    container.appendChild(peekL); container.appendChild(peekR);
-    // 中央海报占位(暗底 + shimmer + 底部内容占位 + 指示点)
-    const card4 = document.createElement('div'); card4.className = 'fntv-ph-s4-card';
-    const cardShine = document.createElement('div'); cardShine.className = 'fntv-ph-s4-shine'; card4.appendChild(cardShine);
-    const overlay4 = document.createElement('div'); overlay4.className = 'fntv-ph-s4-overlay'; card4.appendChild(overlay4);
-    const content4 = document.createElement('div'); content4.className = 'fntv-ph-s4-content';
-    const m4 = document.createElement('div'); m4.className = 'fntv-ph-s4-meta';
-    const t4 = document.createElement('div'); t4.className = 'fntv-ph-s4-title';
-    const d41 = document.createElement('div'); d41.className = 'fntv-ph-s4-desc';
-    const d42 = document.createElement('div'); d42.className = 'fntv-ph-s4-desc s2';
-    const acts4 = document.createElement('div'); acts4.className = 'fntv-ph-s4-actions';
-    const b41 = document.createElement('div'); b41.className = 'fntv-ph-s4-btn';
-    const b42 = document.createElement('div'); b42.className = 'fntv-ph-s4-btn';
-    acts4.appendChild(b41); acts4.appendChild(b42);
-    content4.appendChild(m4); content4.appendChild(t4); content4.appendChild(d41); content4.appendChild(d42); content4.appendChild(acts4);
-    card4.appendChild(content4);
-    container.appendChild(card4);
-    // 底部指示点(居中, 贴在海报内)
-    const dots4 = document.createElement('div'); dots4.className = 'fntv-ph-s4-dots';
-    for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-ph-s4-dot' + (i === 0 ? ' active' : ''); dots4.appendChild(d); }
+    // [lc-839+] 样式4 骨架 = 真实轮播的「暂停态空壳」: 直接复用 ensureStyle4Css() 注入的 .fntv-s4-* 真实类构建同款 DOM,
+    // 仅把真实图片/文字替换为 shimmer 占位块。视觉与加载完成后的真实轮播零跳变。
+    ensureStyle4Css();
+    // 3D 舞台(track) + 三张卡(中间 active + 左右 prev/next, 与真实一致, 侧卡被 overflow:hidden 裁掉只露肩)
+    const track = document.createElement('div');
+    track.className = 'fntv-s4-track';
+    const mkS4Card = (cls: string): HTMLElement => {
+      const card = document.createElement('div');
+      card.className = 'fntv-s4-card' + (cls ? ' ' + cls : '');
+      // 背景占位: 暗底 + 整卡 shimmer(模拟未加载的海报图)
+      const bg = document.createElement('div');
+      bg.className = 'fntv-s4-bg';
+      bg.style.backgroundImage = 'none';
+      bg.style.background = '#1e1b17';
+      const shine = document.createElement('div');
+      shine.className = 'fnos-ph-skel';
+      shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';
+      bg.appendChild(shine);
+      // 信息区占位: 复用 .fntv-s4-info 真实类(定位/渐变遮罩同真实), 内部放占位条
+      const info = document.createElement('div');
+      info.className = 'fntv-s4-info';
+      const mkBar = (w: string, h: string, extra = '') => {
+        const b = document.createElement('div');
+        b.className = 'fnos-ph-skel';
+        b.style.cssText = `width:${w};height:${h};border-radius:${h === '11px' ? '6px' : '12px'};margin-bottom:.7rem;${extra}`;
+        return b;
+      };
+      info.appendChild(mkBar('80px', '11px'));
+      info.appendChild(mkBar('54%', '38px'));
+      info.appendChild(mkBar('64%', '11px'));
+      info.appendChild(mkBar('44%', '11px', 'margin-bottom:1rem'));
+      const acts = document.createElement('div');
+      acts.className = 'fntv-s4-actions';
+      const b1 = document.createElement('div'); b1.className = 'fnos-ph-skel'; b1.style.cssText = 'width:104px;height:38px;border-radius:50px';
+      const b2 = document.createElement('div'); b2.className = 'fnos-ph-skel'; b2.style.cssText = 'width:104px;height:38px;border-radius:50px';
+      acts.appendChild(b1); acts.appendChild(b2);
+      info.appendChild(acts);
+      card.appendChild(bg); card.appendChild(info);
+      return card;
+    };
+    const prevC = mkS4Card('prev');
+    const nextC = mkS4Card('next');
+    const activeC = mkS4Card('active');
+    track.appendChild(prevC); track.appendChild(nextC); track.appendChild(activeC);
+    container.appendChild(track);
+    // 指示点(真实 .fntv-s4-dots, 居中贴在海报内)
+    const dots4 = document.createElement('div'); dots4.className = 'fntv-s4-dots';
+    for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-s4-dot' + (i === 0 ? ' active' : ''); dots4.appendChild(d); }
     container.appendChild(dots4);
     // [lc-816] 底部居中进度条: 套用样式1 的 .fnos-ph-track/.fnos-ph-fill(紫色渐变药丸) + 百分比 + 加载中
     const s4BarBox = document.createElement('div');
-    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:14px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
+    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:14px;z-index:20;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
     const tip4 = document.createElement('div');
     tip4.className = 'fnos-ph-text';
     tip4.style.cssText = 'font-size:12.5px;color:rgba(225,218,245,.85);letter-spacing:.5px;font-weight:600;text-align:center';
