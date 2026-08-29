@@ -3525,7 +3525,17 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
  *  Hero 圆角沉浸卡；选集由横向滚动改为「缩略图左 + 信息右」的纵向卡片列表；标题强调。
  *  仅作用于 .fnos-immersive-season（由 applySeasonImmersiveDetail 在季详情页挂到 body）。
  *  与「关闭背景框」(_detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
-const IMMERSIVE_SEASON_CSS = `/* 选集容器：横向滚动 -> 纵向列表（每张卡片为一行：缩略图 + 标题） */
+const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左) + 侧栏(右 320px)，参照 season-immersive-preview.html */
+.fnos-immersive-season .fnos-season-2col{
+  display:grid !important;
+  grid-template-columns:1fr 320px !important;
+  gap:24px !important;
+  align-items:start !important;
+}
+.fnos-immersive-season .fnos-season-main{ min-width:0 !important; }
+.fnos-immersive-season .fnos-season-aside{ min-width:0 !important; }
+
+/* 选集容器：横向滚动 -> 纵向列表 */
 .fnos-immersive-season .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]){
   overflow:visible !important;
   white-space:normal !important;
@@ -3538,7 +3548,7 @@ const IMMERSIVE_SEASON_CSS = `/* 选集容器：横向滚动 -> 纵向列表（�
   height:auto !important;
   column-gap:0 !important;
 }
-/* 单集卡片：缩略图(左) + 标题(右)，整行卡片 */
+/* 单集卡片：缩略图(左) + 信息(中) + 时长/状态(右) */
 .fnos-immersive-season [data-id="details"]{
   display:flex !important;
   flex-direction:row !important;
@@ -3548,12 +3558,12 @@ const IMMERSIVE_SEASON_CSS = `/* 选集容器：横向滚动 -> 纵向列表（�
   max-height:none !important;
   gap:16px !important;
   padding:10px 16px !important;
-  background:var(--semi-color-bg-0,#fff) !important;
+  margin-bottom:12px !important;
+  background:var(--semi-color-bg-2,#fff) !important;
   border:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
   border-radius:14px !important;
   box-shadow:0 2px 10px rgba(0,0,0,.06) !important;
-  overflow:hidden !important;
-  margin-bottom:12px !important;
+  overflow:visible !important;
   cursor:pointer !important;
   transition:transform .28s cubic-bezier(.25,.1,.25,1), box-shadow .28s ease !important;
 }
@@ -3562,56 +3572,69 @@ const IMMERSIVE_SEASON_CSS = `/* 选集容器：横向滚动 -> 纵向列表（�
   box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
 }
 .fnos-immersive-season [data-id="details"] > div:first-child{
-  width:220px !important;
-  height:124px !important;
-  flex:0 0 220px !important;
-  border-radius:8px !important;
+  width:160px !important;
+  height:90px !important;
+  flex:0 0 160px !important;
+  border-radius:10px !important;
   overflow:hidden !important;
 }
 .fnos-immersive-season [data-id="details"] > div:first-child img{
-  width:100% !important;
-  height:100% !important;
-  object-fit:cover !important;
-  display:block !important;
+  width:100% !important; height:100% !important; object-fit:cover !important; display:block !important;
 }
 .fnos-immersive-season [data-id="details"] > a{
+  display:flex !important;
+  flex-direction:column !important;
+  justify-content:center !important;
   flex:1 1 auto !important;
   min-width:0 !important;
 }
-/* 两栏：选集(左 70%) + 演职人员(右 30%) */
-.fnos-season-2col{
-  display:flex !important;
-  gap:24px !important;
-  align-items:flex-start !important;
+.fnos-immersive-season [data-id="details"] .fnos-ep-meta{
+  display:flex !important; flex-direction:column !important; align-items:flex-end !important;
+  gap:6px !important; flex:0 0 auto !important; margin-left:auto !important;
 }
-.fnos-season-main{
-  flex:1 1 70% !important;
-  min-width:0 !important;
+.fnos-immersive-season [data-id="details"] .fnos-ep-duration{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; white-space:nowrap !important; }
+.fnos-immersive-season [data-id="details"] .fnos-ep-badge{
+  font-size:11px !important; font-weight:600 !important; padding:.2rem .7rem; border-radius:20px; white-space:nowrap !important;
+  background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important;
 }
-.fnos-season-aside{
-  flex:0 0 30% !important;
-  min-width:0 !important;
-}
-/* 演职人员：横向滚动 -> 竖向列表（演员一条竖下来） */
-.fnos-season-aside .ms-container[class*="overflow-x-scroll"]{
-  overflow:visible !important;
-  white-space:normal !important;
-}
-.fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important;
-  width:100% !important;
-  height:auto !important;
-  column-gap:0 !important;
-  align-items:center !important;
-  row-gap:14px !important;
-}
-.fnos-season-aside .w-\[120px\]{
-  width:100% !important;
-  max-width:180px !important;
-  flex:0 0 auto !important;
-}
-`;
 
+/* 右侧信息卡 */
+.fnos-immersive-season .fnos-info-card{
+  background:var(--semi-color-bg-2,#fff) !important;
+  border-radius:14px !important;
+  padding:1.2rem !important;
+  box-shadow:0 2px 10px rgba(0,0,0,.05) !important;
+  margin-bottom:.9rem !important;
+  border:1px solid var(--semi-color-border, rgba(0,0,0,.04)) !important;
+}
+.fnos-immersive-season .fnos-info-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.8rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-info-card p{ font-size:.82rem !important; color:var(--semi-color-text-1,#424245) !important; line-height:1.6 !important; margin-bottom:.25rem !important; }
+.fnos-immersive-season .fnos-info-card a{ color:var(--semi-color-primary,#007aff) !important; text-decoration:none !important; }
+.fnos-immersive-season .fnos-tag-list{ display:flex !important; flex-wrap:wrap !important; gap:.4rem !important; }
+.fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+
+/* 演职人员（侧栏内）：隐藏原生标题 & 横向滚动，圆形头像 + 姓名/角色 */
+.fnos-immersive-season .fnos-season-aside p:has(strong){ display:none !important; }
+.fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"]{
+  overflow:visible !important; white-space:normal !important; padding-left:0 !important;
+}
+.fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
+  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:10px !important;
+}
+.fnos-immersive-season .fnos-season-aside .w-[120px]{
+  width:100% !important; height:auto !important; flex:0 0 auto !important;
+  flex-direction:row !important; align-items:center !important; justify-content:flex-start !important;
+  gap:12px !important; overflow:visible !important;
+}
+.fnos-immersive-season .fnos-season-aside .w-[120px] > a{
+  display:flex !important; flex-direction:row !important; align-items:center !important; gap:12px !important; width:100% !important;
+}
+.fnos-immersive-season .fnos-season-aside .w-[120px] > a > div:first-child{
+  width:48px !important; height:48px !important; flex:0 0 48px !important; margin:0 !important; border-radius:50% !important;
+}
+.fnos-immersive-season .fnos-season-aside .w-[120px] p{ width:auto !important; text-align:left !important; white-space:normal !important; }
+.fnos-immersive-season .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; }
+`;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
 
@@ -3637,20 +3660,116 @@ function findSeasonCastParent(): HTMLElement | null {
   return null;
 }
 
-/** 把「选集(左 70%) + 演职人员(右 30%)」布局成两栏（幂等，免疫 SPA 重建） */
+/** 从单集卡片里提取「分秒」时长（fnOS 把时长放在标题链接内的段落里；注意卡片内第一个 a 是播放遮罩，需挑带 <p> 的标题链接） */
+function findCardTitleLink(card: Element | null): HTMLElement | null {
+  if (!card) return null;
+  const a = Array.from(card.querySelectorAll('a')).find((el) => el.querySelector('p')) as HTMLElement | undefined;
+  return a || null;
+}
+
+/** 从单集卡片里提取「分秒」时长（fnOS 把时长放在卡片内的 .semi-typography-small 段落） */
+function extractDuration(card: Element | null): string {
+  const a = findCardTitleLink(card);
+  if (!a) return '';
+  const durP = Array.from(a.querySelectorAll('p')).find((p) =>
+    /(\d+)\s*分钟\s*(\d+)\s*秒/.test(p.textContent || '')
+  );
+  return durP ? (durP.textContent || '').trim() : '';
+}
+
+/** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
 function layoutSeasonTwoPane(): void {
   if (document.querySelector('.fnos-season-2col')) return;
   const ep = findSeasonEpParent();
   const cast = findSeasonCastParent();
   const root = ep ? ep.parentElement : null;
-  if (!ep || !cast || !root) return;
+  if (!ep || !root) return;
+
   const wrap = document.createElement('div');
   wrap.className = 'fnos-season-2col';
-  root.insertBefore(wrap, ep);
+
+  // 左侧：选集
   ep.classList.add('fnos-season-main');
-  cast.classList.add('fnos-season-aside');
+
+  // 右侧：信息侧栏
+  const aside = document.createElement('aside');
+  aside.className = 'fnos-season-aside';
+
+  // 剧集信息（仅展示 fnOS 真实暴露的字段：集数 / 单集时长 / 首播）
+  const epCount = document.querySelectorAll('[data-id="details"]').length;
+  const duration = extractDuration(document.querySelector('[data-id="details"]'));
+  const yearEl = Array.from(document.querySelectorAll('*')).find(
+    (e) => e.children.length === 0 && /^((19|20)\d{2})\s*年?$/.test((e.textContent || '').trim())
+  );
+  const info = document.createElement('div');
+  info.className = 'fnos-info-card';
+  let infoHTML = '<h4>剧集信息</h4>';
+  if (epCount) infoHTML += `<p>集数：${epCount} 集</p>`;
+  if (duration) infoHTML += `<p>单集时长：${duration}</p>`;
+  if (yearEl) infoHTML += `<p>首播：${(yearEl.textContent || '').trim()}</p>`;
+  info.innerHTML = infoHTML;
+  aside.appendChild(info);
+
+  // 主要配音演员（借用 fnOS 原生演职人员，竖向列表 + 圆形头像 + 姓名/角色）
+  if (cast) {
+    restyleCastItems(cast);
+    aside.appendChild(cast);
+  }
+
+  // 外部链接（fnOS 暴露的 IMDB 等）
+  const link = Array.from(document.querySelectorAll('a')).find(
+    (a) => /imdb|douban|bangumi|tvmaze|anilist/i.test(a.getAttribute('href') || a.textContent || '')
+  );
+  if (link) {
+    const linkCard = document.createElement('div');
+    linkCard.className = 'fnos-info-card';
+    linkCard.innerHTML = `<h4>外部链接</h4><p><a href="${link.getAttribute('href')}" target="_blank" rel="noopener">${link.textContent.trim()} →</a></p>`;
+    aside.appendChild(linkCard);
+  }
+
+  // 组装两栏
+  root.insertBefore(wrap, ep);
   wrap.appendChild(ep);
-  wrap.appendChild(cast);
+  wrap.appendChild(aside);
+
+  // 给每集卡片补齐「时长 / 状态」meta
+  injectEpisodeMeta();
+}
+
+/** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」竖排（只处理真正的演职人员项） */
+function restyleCastItems(container: HTMLElement): void {
+  const items = Array.from(container.querySelectorAll('.w-\\[120px\\]')) as HTMLElement[];
+  items.forEach((it) => {
+    const a = it.querySelector('a[href^="/v/person/"]') as HTMLElement | null;
+    if (!a || a.classList.contains('fnos-cast-item')) return;
+    const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
+    if (ps.length) {
+      const info = document.createElement('div');
+      info.className = 'fnos-cast-info';
+      ps.forEach((p) => info.appendChild(p));
+      a.appendChild(info);
+    }
+    a.classList.add('fnos-cast-item');
+  });
+}
+
+/** 给每集卡片补齐「时长 / 状态」meta（幂等，并隐藏 fnOS 原生的时长行避免重复） */
+function injectEpisodeMeta(): void {
+  document.querySelectorAll('[data-id="details"]').forEach((card) => {
+    if (card.querySelector('.fnos-ep-meta')) return;
+    const a = findCardTitleLink(card);
+    let dur = '—';
+    if (a) {
+      const durP = Array.from(a.querySelectorAll('p')).find((p) =>
+        /(\d+)\s*分钟\s*(\d+)\s*秒/.test(p.textContent || '')
+      );
+      if (durP) { dur = (durP.textContent || '').trim(); durP.style.display = 'none'; }
+    }
+    const meta = document.createElement('div');
+    meta.className = 'fnos-ep-meta';
+    meta.innerHTML = `<span class="fnos-ep-duration">${dur}</span><span class="fnos-ep-badge">高清</span>`;
+    card.appendChild(meta);
+  });
 }
 
 /** fnOS SPA 重渲染选集/演职人员时，若两栏被拆散则自动补做 */
@@ -3678,15 +3797,17 @@ function unlayoutSeasonTwoPane(): void {
   const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
   if (!wrap) return;
   const ep = wrap.querySelector('.fnos-season-main') as HTMLElement | null;
-  const cast = wrap.querySelector('.fnos-season-aside') as HTMLElement | null;
+  const aside = wrap.querySelector('.fnos-season-aside') as HTMLElement | null;
   const parent = wrap.parentElement;
   if (ep && parent) { ep.classList.remove('fnos-season-main'); parent.insertBefore(ep, wrap); }
-  if (cast && parent) { cast.classList.remove('fnos-season-aside'); parent.appendChild(cast); }
+  if (aside && parent) { parent.appendChild(aside); }
   wrap.remove();
+  // 清理散落在卡片上的 meta（避免无样式残留）
+  document.querySelectorAll('.fnos-ep-meta').forEach((n) => n.remove());
 }
 function injectImmersiveSeasonStyle(): void {
   if (_immersiveSeasonStyleInjected) return;
-  if (document.getElementById('fnos-immersive-season-style')) { _immersiveSeasonStyleInjected = true; return; }
+  if (  document.getElementById('fnos-immersive-season-style')) { _immersiveSeasonStyleInjected = true; return; }
   const style = document.createElement('style');
   style.id = 'fnos-immersive-season-style';
   style.textContent = IMMERSIVE_SEASON_CSS;
@@ -3703,12 +3824,9 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
-  layoutSeasonTwoPane();         // 选集(左70%) + 演职人员(右30%) 两栏
+  layoutSeasonTwoPane();         // 选集(左) + 侧栏(右 320px) 两栏
   observeSeasonTwoPane();         // fnOS SPA 重建时自动补做两栏
-}
-
-/** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃（保留以备回退） */
-function applySeasonDetailGlass(): void {
+}function applySeasonDetailGlass(): void {
   // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
   const seasonNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
   if (seasonNav) {
