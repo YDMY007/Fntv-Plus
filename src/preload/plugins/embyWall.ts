@@ -2273,7 +2273,7 @@ function buildCarouselStyle4(
 [data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1600px}
 [data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.2,1.1)}
 [data-fntv-carousel-style="4"] .fntv-s4-card{
-  position:absolute;left:9%;top:4%;width:82%;height:92%;
+  position:absolute;left:9%;top:2%;width:82%;height:96%;
   border-radius:22px;overflow:hidden;
   box-shadow:0 25px 45px rgba(0,0,0,.7);
   transition:all .75s cubic-bezier(.25,.8,.3,1);
@@ -2328,12 +2328,12 @@ function buildCarouselStyle4(
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // 布局：3D 旋转木马舞台（高度与样式1/2/3 一致，避免加载完高度跳变）
+  // 布局：3D 旋转木马舞台（比 1/2/3 矮 60px：预留 380→440，避免把下方「继续观看」顶下去导致底字不安全）
   wrapper.style.cssText = 'display:block;padding:0;margin:0';
   container.style.width = '100%';
   container.style.height = '';
   container.style.minHeight = '0';
-  container.style.maxHeight = 'calc(100vh - 380px)';
+  container.style.maxHeight = 'calc(100vh - 440px)';
   container.style.aspectRatio = '16 / 9';
   container.style.margin = '0';
   container.style.overflow = 'hidden'; // [s4] 舞台裁剪 3D 场景（无背景无边框，卡片自身带完整视觉）
