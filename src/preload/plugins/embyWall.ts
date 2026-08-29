@@ -2753,7 +2753,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       const bg = document.createElement('div');
       bg.className = 'fntv-s4-skelbg'; // [lc-842] 不复用 .fntv-s4-bg(其 ::before 写死黑色渐变遮罩, 会把浅色卡片压成深色); 仅作纯色占位 + shimmer
       bg.style.backgroundImage = 'none';
-      bg.style.background = _isDark ? '#1e1b17' : '#ffffff'; // [lc-843] 浅色模式用白底(fnos浅色主题是白, 不用灰); 深色保留 #1e1b17
+      bg.style.background = _isDark ? '#1e1b17' : '#e8f0fe'; // [lc-843→844] 浅色模式用淡蓝底(非灰非纯白); 深色保留 #1e1b17
       const shine = document.createElement('div');
       shine.className = 'fntv-s4-skel';
       shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';
@@ -2792,7 +2792,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     container.appendChild(dots4);
     // [lc-816/lc-841] 底部居中进度: 紧凑(文字+百分比一行 + 进度条), 置于指示点上方
     const s4BarBox = document.createElement('div');
-    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;z-index:20;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none';
+    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:76px;z-index:20;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none';
     const s4TextRow = document.createElement('div');
     s4TextRow.style.cssText = 'display:flex;align-items:baseline;gap:8px;justify-content:center';
     const tip4 = document.createElement('div');
