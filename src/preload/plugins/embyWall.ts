@@ -2588,23 +2588,25 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
 .fntv-ph-l-dot.active{background:#e0a24c;transform:scale(1.4);border-color:#fff}
 .fntv-ph-l-text{color:#5a5448}
-/* [lc-836] 样式4 骨架: 真正 3D 旋转木马 —— 中间大卡 + 左右两张明显露出的 3D 侧卡(rotateY 纵深), 一眼区别于 2/3 的「单海报」 */
-.fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
-.fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-/* 中间主卡: 收窄到 56% 居中, 让两侧卡明显露出来 */
-.fntv-ph-s4-card{position:absolute;left:22%;top:6%;width:56%;height:88%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#1e1b17;box-shadow:0 25px 45px rgba(0,0,0,.7);z-index:3}
-/* 左右侧卡: 各 52% 宽贴在两侧, 以近边为轴 rotateY 旋转 → 真实 3D 纵深; 明显露出约 1/4 张 */
-.fntv-ph-s4-peek{position:absolute;top:12%;height:76%;width:52%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.5;filter:blur(1px) brightness(.7);z-index:1}
+/* [lc-839] 样式4 骨架: 模拟「有数据的样式4轮播」视觉 —— 中间暖灰海报占位(非纯黑) + 底部渐变遮罩 + 可见的内容占位条(meta/title/desc/btn) + 左右3D侧卡 */
+.fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#2c2824}
+.fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
+/* 中间主卡: 暖灰色底(模拟未加载海报图, 非纯黑), 让 shimmer 和内部占位条都可见 */
+.fntv-ph-s4-card{position:absolute;left:22%;top:6%;width:56%;height:88%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:#2c2824;box-shadow:0 25px 45px rgba(0,0,0,.55);z-index:3}
+/* 左右侧卡: 暖灰底(比主卡略深), 明显露出约 1/4 张 */
+.fntv-ph-s4-peek{position:absolute;top:12%;height:76%;width:52%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.07);background:#242019;opacity:.6;filter:blur(.8px) brightness(.78);z-index:1}
 .fntv-ph-s4-peek.left{left:1%;transform:perspective(1000px) rotateY(34deg);transform-origin:right center}
 .fntv-ph-s4-peek.right{right:1%;transform:perspective(1000px) rotateY(-34deg);transform-origin:left center}
-.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.1) 70%,transparent 100%);z-index:2;pointer-events:none}
-.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:1.6rem 1.8rem 2.4rem;gap:.6rem;box-sizing:border-box}
-.fntv-ph-s4-meta{width:80px;height:11px;border-radius:6px;background:rgba(255,255,255,.16)}
-.fntv-ph-s4-title{width:54%;height:40px;border-radius:12px;background:rgba(255,255,255,.2)}
-.fntv-ph-s4-desc{width:64%;height:11px;border-radius:6px;background:rgba(255,255,255,.14)}
+/* 底部渐变遮罩: 压暗程度降低(.95→.72), 让 meta/title/desc/btn 占位条清晰可见 */
+.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.72) 0%,rgba(0,0,0,.38) 40%,rgba(0,0,0,.10) 70%,transparent 100%);z-index:2;pointer-events:none}
+.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:1.6rem 1.8rem 2.4rem;gap:.65rem;box-sizing:border-box}
+/* 内容占位条: 提高亮度(原 .14~.20 → .22~.30), 在 #2c2824 底上清晰可辨 */
+.fntv-ph-s4-meta{width:80px;height:11px;border-radius:6px;background:rgba(255,255,255,.26)}
+.fntv-ph-s4-title{width:54%;height:40px;border-radius:12px;background:rgba(255,255,255,.30)}
+.fntv-ph-s4-desc{width:64%;height:11px;border-radius:6px;background:rgba(255,255,255,.22)}
 .fntv-ph-s4-desc.s2{width:44%}
-.fntv-ph-s4-actions{display:flex;gap:.7rem;margin-top:.6rem}
-.fntv-ph-s4-btn{width:104px;height:38px;border-radius:50px;background:rgba(255,255,255,.18)}
+.fntv-ph-s4-actions{display:flex;gap:.7rem;margin-top:.65rem}
+.fntv-ph-s4-btn{width:104px;height:38px;border-radius:50px;background:rgba(255,255,255,.25)}
 .fntv-ph-s4-dots{position:absolute;left:22%;right:22%;bottom:28px;z-index:6;display:flex;justify-content:center;gap:8px}
 .fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
 .fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
