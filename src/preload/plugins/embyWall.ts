@@ -1268,7 +1268,7 @@ function injectCarousel(): void {
     target.style.marginTop = '0';
     target.style.background = 'transparent';
     wrapper = document.createElement('div');
-    wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
+    wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
     _carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
@@ -2093,7 +2093,7 @@ function buildCarouselStyle3(
 
   // 布局：堆叠卡片容器（高度与样式1/2 一致，避免加载完高度跳变）
   // [lc-807 同款] 与样式1/2 同样 max-height:calc(100vh-380px);aspect-ratio:16/9；overflow:visible 让 prev/next 在左右后方露出堆叠感
-  wrapper.style.cssText = 'display:block;padding:0 44px;margin-top:0;margin-bottom:-8px';
+  wrapper.style.cssText = 'display:block;padding:0 44px;margin-top:0;margin-bottom:0';
   container.style.width = '100%';
   container.style.height = '';
   container.style.minHeight = '0';
@@ -2647,7 +2647,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   target.style.marginTop = '0';
   target.style.background = 'transparent';
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
+  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
   _carouselWrapper = wrapper;
 
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
@@ -2940,7 +2940,7 @@ function buildStrmUnsupportedTip(target: HTMLElement): void {
   target.style.marginTop = '0';
   target.style.background = 'transparent';
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
+  wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
   _carouselWrapper = wrapper;
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.18),rgba(70,50,120,.30));backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex;align-items:center;justify-content:center';
