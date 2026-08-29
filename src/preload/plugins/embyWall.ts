@@ -2287,22 +2287,23 @@ function ensureStyle4Css(): void {
   const st = document.createElement('style');
   st.id = 'fnos-carousel-style4-style';
   st.textContent = `
-[data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1600px}
-[data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.2,1.1)}
+[data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1700px}
+[data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.22,1,.36,1)}
 [data-fntv-carousel-style="4"] .fntv-s4-card{
-  position:absolute;left:7%;top:3%;width:86%;height:94%;
+  position:absolute;left:7%;top:4%;width:86%;height:92%;
   border-radius:22px;overflow:hidden;
-  box-shadow:0 25px 45px rgba(0,0,0,.7);
-  transition:all .75s cubic-bezier(.25,.8,.3,1);
-  opacity:0;visibility:hidden;
-  transform:scale(.85) translateX(60px) rotateY(12deg);
-  border:1px solid rgba(255,255,255,.1);background:#1e1b17;cursor:pointer;
+  box-shadow:0 30px 60px rgba(0,0,0,.42);
+  transition:transform .85s cubic-bezier(.22,1,.36,1),opacity .7s ease,filter .7s ease,box-shadow .7s ease,visibility .7s;
+  opacity:0;visibility:hidden;will-change:transform,opacity,filter;
+  transform:scale(.82) translateX(42px) rotateY(10deg);
+  border:1px solid rgba(255,255,255,.07);background:#1e1b17;cursor:pointer;
 }
-[data-fntv-carousel-style="4"] .fntv-s4-card.active{opacity:1;visibility:visible;transform:scale(1) translateX(0) rotateY(0deg);z-index:10;box-shadow:0 40px 60px rgba(0,0,0,.8),0 0 35px rgba(210,165,80,.15)}
-[data-fntv-carousel-style="4"] .fntv-s4-card.prev{opacity:.35;visibility:visible;transform:scale(.75) translateX(-105%) rotateY(18deg);z-index:5;filter:blur(2px) brightness(.7)}
-[data-fntv-carousel-style="4"] .fntv-s4-card.next{opacity:.35;visibility:visible;transform:scale(.75) translateX(105%) rotateY(-18deg);z-index:5;filter:blur(2px) brightness(.7)}
-[data-fntv-carousel-style="4"] .fntv-s4-card.far-left,[data-fntv-carousel-style="4"] .fntv-s4-card.far-right{opacity:0;visibility:hidden;transform:scale(.5) translateX(160%) rotateY(25deg);z-index:1}
-[data-fntv-carousel-style="4"] .fntv-s4-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active{opacity:1;visibility:visible;transform:scale(1) translateX(0) rotateY(0deg);z-index:10;box-shadow:0 34px 80px rgba(0,0,0,.5)}
+[data-fntv-carousel-style="4"] .fntv-s4-card.prev{opacity:.5;visibility:visible;transform:scale(.8) translateX(-72%) rotateY(30deg);z-index:5;filter:blur(1.5px) brightness(.82)}
+[data-fntv-carousel-style="4"] .fntv-s4-card.next{opacity:.5;visibility:visible;transform:scale(.8) translateX(72%) rotateY(-30deg);z-index:5;filter:blur(1.5px) brightness(.82)}
+[data-fntv-carousel-style="4"] .fntv-s4-card.far-left,[data-fntv-carousel-style="4"] .fntv-s4-card.far-right{opacity:0;visibility:hidden;transform:scale(.55) translateX(135%) rotateY(38deg);z-index:1}
+[data-fntv-carousel-style="4"] .fntv-s4-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem;transform:scale(1.08);transition:transform 3.6s cubic-bezier(.2,.7,.2,1)}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active .fntv-s4-bg{transform:scale(1)}
 [data-fntv-carousel-style="4"] .fntv-s4-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.1) 70%,rgba(0,0,0,.02) 100%)}
 [data-fntv-carousel-style="4"] .fntv-s4-info h3.fntv-s4-title--logo{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:initial;color:#fff;filter:none;display:block;margin-bottom:.4rem;line-height:1.1}
 [data-fntv-carousel-style="4"] .fntv-s4-title-logo-img{max-height:100px;max-width:64%;width:auto;height:auto;display:block;object-fit:contain;filter:drop-shadow(0 4px 18px rgba(0,0,0,.7))}
@@ -2310,6 +2311,12 @@ function ensureStyle4Css(): void {
 [data-fntv-carousel-style="4"] .fntv-s4-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
 [data-fntv-carousel-style="4"] .fntv-s4-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;margin-bottom:.4rem;line-height:1.15;word-break:break-word;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)}
 [data-fntv-carousel-style="4"] .fntv-s4-info .desc{font-size:.95rem;color:#e2d7c5;line-height:1.55;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:520px;margin-bottom:1rem}
+/* [lc-855] 文字逐级上浮(苹果式错峰入场): 元素基态微下移+透明, active 时依次归位 */
+[data-fntv-carousel-style="4"] .fntv-s4-info .meta,[data-fntv-carousel-style="4"] .fntv-s4-info h3,[data-fntv-carousel-style="4"] .fntv-s4-info .desc,[data-fntv-carousel-style="4"] .fntv-s4-actions{opacity:0;transform:translateY(20px);transition:opacity .6s ease,transform .75s cubic-bezier(.22,1,.36,1)}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active .fntv-s4-info .meta{opacity:1;transform:translateY(0);transition-delay:.18s}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active .fntv-s4-info h3{opacity:1;transform:translateY(0);transition-delay:.26s}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active .fntv-s4-info .desc{opacity:1;transform:translateY(0);transition-delay:.34s}
+[data-fntv-carousel-style="4"] .fntv-s4-card.active .fntv-s4-actions{opacity:1;transform:translateY(0);transition-delay:.42s}
 [data-fntv-carousel-style="4"] .fntv-s4-actions{display:flex;gap:.7rem;flex-wrap:wrap}
 [data-fntv-carousel-style="4"] .fntv-s4-play{padding:.8rem 1.6rem;border-radius:50px;font-weight:600;font-size:.9rem;cursor:pointer;letter-spacing:.8px;transition:all .3s ease;border:none;display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;background:linear-gradient(135deg,#f0b85c,#d49a3a);color:#1a120a;box-shadow:0 6px 18px rgba(212,160,76,.4)}
 [data-fntv-carousel-style="4"] .fntv-s4-play:hover{background:linear-gradient(135deg,#f7c66e,#dfa844);transform:translateY(-2px);box-shadow:0 10px 24px rgba(212,160,76,.55)}
@@ -2317,9 +2324,9 @@ function ensureStyle4Css(): void {
 [data-fntv-carousel-style="4"] .fntv-s4-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="4"] .fntv-s4-play:active,[data-fntv-carousel-style="4"] .fntv-s4-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="4"] .fntv-s4-detail.is-loading{opacity:.6;pointer-events:none}
-[data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:12;display:flex;justify-content:center;gap:10px}
-[data-fntv-carousel-style="4"] .fntv-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
-[data-fntv-carousel-style="4"] .fntv-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+[data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:12;display:flex;justify-content:center;gap:9px}
+[data-fntv-carousel-style="4"] .fntv-s4-dot{width:7px;height:7px;border-radius:99px;background:rgba(160,140,110,.45);cursor:pointer;transition:width .45s cubic-bezier(.22,1,.36,1),background-color .4s ease,box-shadow .4s ease}
+[data-fntv-carousel-style="4"] .fntv-s4-dot.active{background:#f0b85c;width:24px;box-shadow:0 0 12px rgba(240,184,92,.5)}
 /* [lc-829] 左右切换：海报两侧空白处的浅色 大于号/小于号 按钮 */
 [data-fntv-carousel-style="4"] .fntv-s4-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:14;cursor:pointer;border:none;background:transparent;padding:0;display:flex;align-items:center;justify-content:center;width:46px;height:72px;border-radius:16px;font-size:2.4rem;font-weight:700;line-height:1;font-family:system-ui,sans-serif;user-select:none;-webkit-user-select:none;color:var(--fntv-s4-nav-color,rgba(255,255,255,.5));text-shadow:0 2px 10px rgba(0,0,0,.45);transition:color .25s ease,background-color .25s ease,transform .25s ease;opacity:.55}
 [data-fntv-carousel-style="4"] .fntv-s4-nav:hover{opacity:1;color:var(--fntv-s4-nav-color-hover,#fff);background:rgba(255,255,255,.08)}
@@ -2344,6 +2351,8 @@ function ensureStyle4Css(): void {
   [data-fntv-carousel-style="4"] .fntv-s4-card{transition:opacity .2s ease}
   [data-fntv-carousel-style="4"] .fntv-s4-card.active,[data-fntv-carousel-style="4"] .fntv-s4-card.prev,[data-fntv-carousel-style="4"] .fntv-s4-card.next,[data-fntv-carousel-style="4"] .fntv-s4-card.far-left,[data-fntv-carousel-style="4"] .fntv-s4-card.far-right{transform:none}
   [data-fntv-carousel-style="4"] .fntv-s4-card.prev,[data-fntv-carousel-style="4"] .fntv-s4-card.next,[data-fntv-carousel-style="4"] .fntv-s4-card.far-left,[data-fntv-carousel-style="4"] .fntv-s4-card.far-right{opacity:0}
+  [data-fntv-carousel-style="4"] .fntv-s4-bg{transform:none!important;transition:none}
+  [data-fntv-carousel-style="4"] .fntv-s4-info .meta,[data-fntv-carousel-style="4"] .fntv-s4-info h3,[data-fntv-carousel-style="4"] .fntv-s4-info .desc,[data-fntv-carousel-style="4"] .fntv-s4-actions{opacity:1!important;transform:none!important;transition:none}
   [data-fntv-carousel-style="4"] .fntv-s4-play,[data-fntv-carousel-style="4"] .fntv-s4-detail{transition:background-color .15s ease}
   [data-fntv-carousel-style="4"] .fntv-s4-play:hover,[data-fntv-carousel-style="4"] .fntv-s4-detail:hover{transform:none}
 }
@@ -2480,7 +2489,7 @@ function buildCarouselStyle4(
   // ---------- 交互逻辑（借鉴 demo：3D 旋转木马）----------
   let currentIndex = 0;
   let autoTimer: number | null = null;
-  const AUTO_DELAY = 4500;
+  const AUTO_DELAY = 5000;
 
   const updatePositions = (): void => {
     const n = cards.length;
