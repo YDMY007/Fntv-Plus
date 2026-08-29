@@ -2595,6 +2595,16 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-text{color:#5a5448}
 /* [lc-839+] 样式4 骨架不再自创 CSS: 直接复用真实样式4 轮播的 .fntv-s4-* 类(同款 DOM 结构 + 同款 CSS, 由 ensureStyle4Css() 注入),
    仅把真实图片/文字替换为 shimmer 占位块, 呈现"暂停态空轮播" —— 加载完视觉零跳变。故此处无 .fntv-ph-s4-* 规则。 */
+/* [lc-841] 样式4 骨架深浅适配: 占位条 / 指示点 / 进度条随主题切换 —— 由 container[data-fntv-skel] 控制 */
+.fntv-s4-skel{position:relative;overflow:hidden}
+.fntv-s4-skel::after{content:'';position:absolute;inset:0;transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite;pointer-events:none}
+[data-fntv-skel="dark"] .fntv-s4-skel{background:rgba(255,255,255,.20)}
+[data-fntv-skel="dark"] .fntv-s4-skel::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent)}
+[data-fntv-skel="light"] .fntv-s4-skel{background:rgba(60,50,40,.15)}
+[data-fntv-skel="light"] .fntv-s4-skel::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.75),transparent)}
+[data-fntv-skel="light"] .fntv-s4-dot{background:rgba(120,110,95,.35);border-color:rgba(60,50,40,.25)}
+[data-fntv-skel="light"] .fntv-s4-dot.active{background:#e0a24c;border-color:#fff}
+[data-fntv-skel="light"] .fnos-ph-track{background:rgba(60,50,40,.12)}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -2727,6 +2737,11 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     // [lc-839+] 样式4 骨架 = 真实轮播的「暂停态空壳」: 直接复用 ensureStyle4Css() 注入的 .fntv-s4-* 真实类构建同款 DOM,
     // 仅把真实图片/文字替换为 shimmer 占位块。视觉与加载完成后的真实轮播零跳变。
     ensureStyle4Css();
+    container.setAttribute('data-fntv-skel', _isDark ? 'dark' : 'light');
+    // 深浅配色(占位条/指示点/进度条文字): 深色模式用浅色文字, 浅色模式用深棕文字
+    const sk = _isDark
+      ? { tip: 'rgba(225,218,245,.85)', pct: 'rgba(232,221,208,.92)' }
+      : { tip: 'rgba(96,88,74,.92)', pct: 'rgba(60,50,40,.92)' };
     // 3D 舞台(track) + 三张卡(中间 active + 左右 prev/next, 与真实一致, 侧卡被 overflow:hidden 裁掉只露肩)
     const track = document.createElement('div');
     track.className = 'fntv-s4-track';
@@ -2737,17 +2752,18 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       const bg = document.createElement('div');
       bg.className = 'fntv-s4-bg';
       bg.style.backgroundImage = 'none';
-      bg.style.background = '#1e1b17';
+      bg.style.background = _isDark ? '#1e1b17' : '#e9e4db';
       const shine = document.createElement('div');
-      shine.className = 'fnos-ph-skel';
+      shine.className = 'fntv-s4-skel';
       shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';
       bg.appendChild(shine);
       // 信息区占位: 复用 .fntv-s4-info 真实类(定位/渐变遮罩同真实), 内部放占位条
       const info = document.createElement('div');
       info.className = 'fntv-s4-info';
+      info.style.padding = '2rem 2rem 4.5rem'; // [lc-841] 抬高按钮行, 给底部「进度条 + 指示点」留出空间
       const mkBar = (w: string, h: string, extra = '') => {
         const b = document.createElement('div');
-        b.className = 'fnos-ph-skel';
+        b.className = 'fntv-s4-skel';
         b.style.cssText = `width:${w};height:${h};border-radius:${h === '11px' ? '6px' : '12px'};margin-bottom:.7rem;${extra}`;
         return b;
       };
@@ -2757,8 +2773,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       info.appendChild(mkBar('44%', '11px', 'margin-bottom:1rem'));
       const acts = document.createElement('div');
       acts.className = 'fntv-s4-actions';
-      const b1 = document.createElement('div'); b1.className = 'fnos-ph-skel'; b1.style.cssText = 'width:104px;height:38px;border-radius:50px';
-      const b2 = document.createElement('div'); b2.className = 'fnos-ph-skel'; b2.style.cssText = 'width:104px;height:38px;border-radius:50px';
+      const b1 = document.createElement('div'); b1.className = 'fntv-s4-skel'; b1.style.cssText = 'width:104px;height:38px;border-radius:50px';
+      const b2 = document.createElement('div'); b2.className = 'fntv-s4-skel'; b2.style.cssText = 'width:104px;height:38px;border-radius:50px';
       acts.appendChild(b1); acts.appendChild(b2);
       info.appendChild(acts);
       card.appendChild(bg); card.appendChild(info);
@@ -2773,23 +2789,26 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     const dots4 = document.createElement('div'); dots4.className = 'fntv-s4-dots';
     for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-s4-dot' + (i === 0 ? ' active' : ''); dots4.appendChild(d); }
     container.appendChild(dots4);
-    // [lc-816] 底部居中进度条: 套用样式1 的 .fnos-ph-track/.fnos-ph-fill(紫色渐变药丸) + 百分比 + 加载中
+    // [lc-816/lc-841] 底部居中进度: 紧凑(文字+百分比一行 + 进度条), 置于指示点上方
     const s4BarBox = document.createElement('div');
-    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:14px;z-index:20;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
+    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:56px;z-index:20;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none';
+    const s4TextRow = document.createElement('div');
+    s4TextRow.style.cssText = 'display:flex;align-items:baseline;gap:8px;justify-content:center';
     const tip4 = document.createElement('div');
     tip4.className = 'fnos-ph-text';
-    tip4.style.cssText = 'font-size:12.5px;color:rgba(225,218,245,.85);letter-spacing:.5px;font-weight:600;text-align:center';
+    tip4.style.cssText = 'font-size:12.5px;color:' + sk.tip + ';letter-spacing:.5px;font-weight:600';
     tip4.textContent = '加载中…';
     percentEl = document.createElement('div');
-    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums;letter-spacing:.5px';
+    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:' + sk.pct + ';font-variant-numeric:tabular-nums;letter-spacing:.5px';
     percentEl.textContent = '0%';
+    s4TextRow.appendChild(tip4);
+    s4TextRow.appendChild(percentEl);
     const s4Track = document.createElement('div');
     s4Track.className = 'fnos-ph-track';
     fillEl = document.createElement('div');
     fillEl.className = 'fnos-ph-fill';
     s4Track.appendChild(fillEl);
-    s4BarBox.appendChild(tip4);
-    s4BarBox.appendChild(percentEl);
+    s4BarBox.appendChild(s4TextRow);
     s4BarBox.appendChild(s4Track);
     container.appendChild(s4BarBox);
     statusEl = tip4;
