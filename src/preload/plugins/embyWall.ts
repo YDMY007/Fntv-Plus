@@ -2592,9 +2592,9 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
 .fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
 .fntv-ph-s4-card{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#1e1b17;box-shadow:0 25px 45px rgba(0,0,0,.7);z-index:2}
-.fntv-ph-s4-peek{position:absolute;top:3%;height:94%;width:42%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.4;z-index:0}
-.fntv-ph-s4-peek.left{left:3%;transform:perspective(700px) rotateY(16deg)}
-.fntv-ph-s4-peek.right{right:3%;transform:perspective(700px) rotateY(-16deg)}
+.fntv-ph-s4-peek{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.35;filter:blur(2px) brightness(.7);z-index:0}
+.fntv-ph-s4-peek.left{transform:perspective(1200px) scale(.75) translateX(-105%) rotateY(18deg)}
+.fntv-ph-s4-peek.right{transform:perspective(1200px) scale(.75) translateX(105%) rotateY(-18deg)}
 .fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.1) 70%,transparent 100%);z-index:2;pointer-events:none}
 .fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3rem;gap:.7rem;box-sizing:border-box}
 .fntv-ph-s4-meta{width:96px;height:12px;border-radius:6px;background:rgba(255,255,255,.16)}
