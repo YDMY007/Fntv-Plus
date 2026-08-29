@@ -2282,10 +2282,10 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-desc.s2{width:42%}
 .fntv-ph-l-actions{display:flex;gap:.8rem;margin-top:.7rem}
 .fntv-ph-l-btn{width:124px;height:44px;border-radius:50px;background:#cdd5e1}
-.fntv-ph-l-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 16px}
+.fntv-ph-l-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:1.2rem;padding:0 2.5rem 16px}
 .fntv-ph-l-status{font-size:12.5px;color:rgba(96,88,74,.9);letter-spacing:.5px;flex:0 0 auto;white-space:nowrap;font-weight:600}
 .fntv-ph-l-pct{font-size:12.5px;color:#c8923a;letter-spacing:.5px;flex:0 0 auto;font-variant-numeric:tabular-nums;font-weight:700}
-.fntv-ph-l-pbar{flex:1;height:4px;background:rgba(20,30,60,.12);border-radius:4px;overflow:hidden;position:relative}
+.fntv-ph-l-pbar{width:280px;max-width:60%;flex:0 0 auto;height:4px;background:rgba(20,30,60,.12);border-radius:4px;overflow:hidden;position:relative}
 .fntv-ph-l-pfill{height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,#d4a04c,#f0b85c);transition:width .25s ease}
 .fntv-ph-l-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 .fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
@@ -2371,18 +2371,25 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     actions.appendChild(btn1); actions.appendChild(btn2);
     content.appendChild(meta); content.appendChild(title); content.appendChild(desc1); content.appendChild(desc2); content.appendChild(actions);
     container.appendChild(content);
-    // 底部 footer: 状态 + 百分比 + 进度条 + 指示点(与样式2 轮播 footer 布局一致)
-    const footer = document.createElement('div');
-    footer.className = 'fntv-ph-s2-footer';
-    statusEl = document.createElement('div'); statusEl.className = 'fntv-ph-s2-status fnos-ph-text'; statusEl.textContent = '加载中…';
-    percentEl = document.createElement('div'); percentEl.className = 'fntv-ph-s2-pct'; percentEl.textContent = '0%';
-    const pbar = document.createElement('div'); pbar.className = 'fntv-ph-s2-pbar';
-    fillEl = document.createElement('div'); fillEl.className = 'fntv-ph-s2-pfill';
-    pbar.appendChild(fillEl);
-    const dots = document.createElement('div'); dots.className = 'fntv-ph-s2-dots';
-    for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-ph-s2-dot' + (i === 0 ? ' active' : ''); dots.appendChild(d); }
-    footer.appendChild(statusEl); footer.appendChild(percentEl); footer.appendChild(pbar); footer.appendChild(dots);
-    container.appendChild(footer);
+    // [lc-816] 底部居中进度条: 套用样式1 的 .fnos-ph-track/.fnos-ph-fill(紫色渐变药丸), 与样式1 视觉一致
+    const s2BarBox = document.createElement('div');
+    s2BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:18px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
+    statusEl = document.createElement('div');
+    statusEl.className = 'fnos-ph-text';
+    statusEl.style.cssText = 'font-size:12.5px;color:rgba(225,218,245,.85);letter-spacing:.5px;font-weight:600;text-align:center';
+    statusEl.textContent = '加载中…';
+    percentEl = document.createElement('div');
+    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums;letter-spacing:.5px';
+    percentEl.textContent = '0%';
+    const s2Track = document.createElement('div');
+    s2Track.className = 'fnos-ph-track';
+    fillEl = document.createElement('div');
+    fillEl.className = 'fnos-ph-fill';
+    s2Track.appendChild(fillEl);
+    s2BarBox.appendChild(statusEl);
+    s2BarBox.appendChild(percentEl);
+    s2BarBox.appendChild(s2Track);
+    container.appendChild(s2BarBox);
   } else if (_cs === 3) {
     // [lc-811+] 样式3 骨架: 暗底 + 整体 shimmer + 居中"加载中"文字, 无进度条/百分比/指示点(与样式2 区分)
     const shimmer = document.createElement('div');
@@ -2394,10 +2401,21 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     tip.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;color:rgba(232,221,208,.85);letter-spacing:1.2px;font-weight:600;z-index:2';
     tip.textContent = '加载中…';
     container.appendChild(tip);
-    // 伪进度仍驱动变量(避免空引用报错), 但不显示进度条
-    fillEl = document.createElement('div');
+    // [lc-816] 底部居中进度条: 套用样式1 的 .fnos-ph-track/.fnos-ph-fill(紫色渐变药丸)
+    const s3BarBox = document.createElement('div');
+    s3BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:18px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
     percentEl = document.createElement('div');
-    statusEl = document.createElement('div');
+    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums;letter-spacing:.5px';
+    percentEl.textContent = '0%';
+    const s3Track = document.createElement('div');
+    s3Track.className = 'fnos-ph-track';
+    fillEl = document.createElement('div');
+    fillEl.className = 'fnos-ph-fill';
+    s3Track.appendChild(fillEl);
+    s3BarBox.appendChild(percentEl);
+    s3BarBox.appendChild(s3Track);
+    container.appendChild(s3BarBox);
+    statusEl = tip; // 居中"加载中…"作为状态/诊断文本(供超时提示覆盖)
   } else {
     // [lc-582] 样式1 骨架: 紫色渐变 + 装饰海报占位 + 中央进度(原逻辑, 保持不变)
     const deco = (l: string, t: string, r: string): HTMLElement => {
