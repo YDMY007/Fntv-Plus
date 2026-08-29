@@ -4814,7 +4814,7 @@ function handle(): void {
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
-    const csLabels = ['样式 1（竖向轮播）', '样式 2（横向轮播）', '样式 3（堆叠切换）', '样式 4（立体堆叠）'];
+    const csLabels = ['竖向轮播', '横向轮播', '堆叠切换', '立体堆叠'];
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';
