@@ -2753,7 +2753,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       const bg = document.createElement('div');
       bg.className = 'fntv-s4-skelbg'; // [lc-842] 不复用 .fntv-s4-bg(其 ::before 写死黑色渐变遮罩, 会把浅色卡片压成深色); 仅作纯色占位 + shimmer
       bg.style.backgroundImage = 'none';
-      bg.style.background = _isDark ? '#1e1b17' : '#e9e4db';
+      bg.style.background = _isDark ? '#1e1b17' : '#ffffff'; // [lc-843] 浅色模式用白底(fnos浅色主题是白, 不用灰); 深色保留 #1e1b17
       const shine = document.createElement('div');
       shine.className = 'fntv-s4-skel';
       shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';
