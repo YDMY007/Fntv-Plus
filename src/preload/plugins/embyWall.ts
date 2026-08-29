@@ -2017,8 +2017,8 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateY(60px) translateX(20px);z-index:1;pointer-events:none}
 [data-fntv-carousel-style="3"] .fntv-s3-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
 [data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
-[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.1rem;font-weight:700;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:.35rem 1rem;border-radius:30px;border:1px solid rgba(255,215,150,.5);display:inline-block;white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis}
-[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:30px;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
+[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.5rem;font-weight:800;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,.8);display:inline-block;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis}
+[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:44px;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
 [data-fntv-carousel-style="3"] .fntv-s3-info{position:absolute;left:0;right:0;bottom:0;z-index:3;color:#fff;padding:2rem 2rem 3rem;box-sizing:border-box}
 [data-fntv-carousel-style="3"] .fntv-s3-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
 [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 15px rgba(0,0,0,.8);margin-bottom:.4rem;line-height:1.15;word-break:break-word}
@@ -2033,12 +2033,12 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-dots{position:absolute;left:0;right:0;bottom:14px;z-index:6;display:flex;justify-content:center;gap:10px}
 [data-fntv-carousel-style="3"] .fntv-s3-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="3"] .fntv-s3-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
-[data-fntv-carousel-style="3"] .fntv-s3-hint{color:#8f7e68;font-size:.75rem;letter-spacing:1px;text-align:center;margin-top:.2rem}
+/* [lc-811] .fntv-s3-hint 已弃用(底部"自动轮播中"提示移除) */
 @media (max-width:800px){
   [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.5rem 1.5rem 2.4rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.5rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.85rem}
-  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:.9rem;padding:.25rem .8rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:1.1rem}
   [data-fntv-carousel-style="3"] .fntv-s3-bg{padding:1.5rem}
 }
 @media (max-width:500px){
@@ -2167,10 +2167,7 @@ function buildCarouselStyle3(
     dotsEls.push(d);
   });
   stack.appendChild(dotsRow);
-  const hint = document.createElement('div');
-  hint.className = 'fntv-s3-hint';
-  hint.textContent = '自动轮播中';
-  wrapper.appendChild(hint);
+  // [lc-811] 底部"自动轮播中"提示已移除
 
   // ---------- 交互逻辑（移植自 demo：堆叠卡片）----------
   let currentIndex = 0;
@@ -2307,8 +2304,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 
-  if (_cs === 2 || _cs === 3) {
-    // [lc-805/lc-809] 样式2/3 骨架: 暗底 + 底部内容占位(标题/简介/按钮) + 底部进度条/指示点, 与样式2/3 暗色轮播视觉一致
+  if (_cs === 2) {
+    // [lc-805/lc-809] 样式2 骨架: 暗底 + 底部内容占位(标题/简介/按钮) + 底部进度条/指示点, 与样式2 暗色轮播视觉一致
     const overlay = document.createElement('div');
     overlay.className = 'fntv-ph-s2-overlay';
     container.appendChild(overlay);
@@ -2336,6 +2333,21 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-ph-s2-dot' + (i === 0 ? ' active' : ''); dots.appendChild(d); }
     footer.appendChild(statusEl); footer.appendChild(percentEl); footer.appendChild(pbar); footer.appendChild(dots);
     container.appendChild(footer);
+  } else if (_cs === 3) {
+    // [lc-811+] 样式3 骨架: 暗底 + 整体 shimmer + 居中"加载中"文字, 无进度条/百分比/指示点(与样式2 区分)
+    const shimmer = document.createElement('div');
+    shimmer.className = 'fnos-ph-skel';
+    shimmer.style.cssText = 'position:absolute;inset:0;opacity:.45;z-index:1';
+    container.appendChild(shimmer);
+    const tip = document.createElement('div');
+    tip.className = 'fnos-ph-text';
+    tip.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;color:rgba(232,221,208,.85);letter-spacing:1.2px;font-weight:600;z-index:2';
+    tip.textContent = '加载中…';
+    container.appendChild(tip);
+    // 伪进度仍驱动变量(避免空引用报错), 但不显示进度条
+    fillEl = document.createElement('div');
+    percentEl = document.createElement('div');
+    statusEl = document.createElement('div');
   } else {
     // [lc-582] 样式1 骨架: 紫色渐变 + 装饰海报占位 + 中央进度(原逻辑, 保持不变)
     const deco = (l: string, t: string, r: string): HTMLElement => {
