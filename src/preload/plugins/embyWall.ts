@@ -3528,11 +3528,13 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
 const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左) + 侧栏(右 320px)，参照 season-immersive-preview.html */
 .fnos-immersive-season .fnos-season-2col{
   display:grid !important;
+  width:100% !important;
+  box-sizing:border-box !important;
   grid-template-columns:1fr 320px !important;
   gap:24px !important;
   align-items:start !important;
 }
-.fnos-immersive-season .fnos-season-main{ min-width:0 !important; }
+.fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; }
 .fnos-immersive-season .fnos-season-aside{ min-width:0 !important; }
 
 /* 选集容器：横向滚动 -> 纵向列表 */
@@ -3621,22 +3623,24 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左) + 侧栏(右 320px)�
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
   flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:10px !important;
 }
-.fnos-immersive-season .fnos-season-aside .w-[120px]{
-  width:100% !important; height:auto !important; flex:0 0 auto !important;
-  flex-direction:row !important; align-items:center !important; justify-content:flex-start !important;
-  gap:12px !important; overflow:visible !important;
+/* 单个演员：头像(左) + 姓名/角色(右)，清爽横排卡片 */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-item{
+  display:flex !important; flex-direction:row !important; align-items:center !important;
+  gap:12px !important; width:100% !important; padding:8px 10px !important;
+  background:var(--semi-color-fill-1,#f6f6f8) !important; border-radius:12px !important; margin-bottom:8px !important;
 }
-.fnos-immersive-season .fnos-season-aside .w-[120px] > a{
-  display:flex !important; flex-direction:row !important; align-items:center !important; gap:12px !important; width:100% !important;
+.fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{
+  width:48px !important; height:48px !important; flex:0 0 48px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
-.fnos-immersive-season .fnos-season-aside .w-[120px] > a > div:first-child{
-  width:48px !important; height:48px !important; flex:0 0 48px !important; margin:0 !important; border-radius:50% !important;
-}
-.fnos-immersive-season .fnos-season-aside .w-[120px] p{ width:auto !important; text-align:left !important; white-space:normal !important; }
-.fnos-immersive-season .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; justify-content:center !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:auto !important; text-align:left !important; white-space:normal !important; line-height:1.35 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:14px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:12px !important; color:var(--semi-color-text-2,#86868b) !important; margin-top:2px !important; }
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
+let _infoCard: HTMLElement | null = null;
 
 /** 找「选集」容器：包含 [data-id="details"] 的那个 .relative.w-full */
 function findSeasonEpParent(): HTMLElement | null {
@@ -3677,6 +3681,50 @@ function extractDuration(card: Element | null): string {
   return durP ? (durP.textContent || '').trim() : '';
 }
 
+/** 统计所有分集的「分秒」时长，返回总秒数（fnOS 原生只暴露每集时长，需自行累加） */
+function sumEpisodeSeconds(): number {
+  let total = 0;
+  document.querySelectorAll('[data-id="details"]').forEach((card) => {
+    const a = findCardTitleLink(card);
+    if (!a) return;
+    const p = Array.from(a.querySelectorAll('p')).find((el) =>
+      /(\d+)\s*分钟\s*(\d+)\s*秒/.test(el.textContent || '')
+    );
+    if (!p) return;
+    const m = (p.textContent || '').match(/(\d+)\s*分钟\s*(\d+)\s*秒/);
+    if (m) total += parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  });
+  return total;
+}
+
+/** 把总秒数格式化为「X 小时 Y 分钟」 */
+function formatSeconds(total: number): string {
+  if (!total) return '';
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  let str = '';
+  if (h > 0) str += `${h} 小时 `;
+  str += `${m} 分钟`;
+  if (s > 0 && h === 0) str += ` ${s} 秒`;
+  return str.trim();
+}
+
+/** 刷新「剧集信息」卡中的集数 / 总时长 / 首播（随选集懒加载补全而更新） */
+function updateSeasonInfoStats(): void {
+  if (!_infoCard) return;
+  const count = document.querySelectorAll('[data-id="details"]').length;
+  const total = formatSeconds(sumEpisodeSeconds());
+  const yearEl = Array.from(document.querySelectorAll('*')).find(
+    (e) => e.children.length === 0 && /^((19|20)\d{2})\s*年?$/.test((e.textContent || '').trim())
+  ) as HTMLElement | null;
+  let html = '<h4>剧集信息</h4>';
+  if (count) html += `<p>集数：<b>${count}</b> 集</p>`;
+  if (total) html += `<p>总时长：${total}</p>`;
+  if (yearEl) html += `<p>首播：${(yearEl.textContent || '').trim()}</p>`;
+  _infoCard.innerHTML = html;
+}
+
 /** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
 function layoutSeasonTwoPane(): void {
   if (document.querySelector('.fnos-season-2col')) return;
@@ -3695,20 +3743,13 @@ function layoutSeasonTwoPane(): void {
   const aside = document.createElement('aside');
   aside.className = 'fnos-season-aside';
 
-  // 剧集信息（仅展示 fnOS 真实暴露的字段：集数 / 单集时长 / 首播）
-  const epCount = document.querySelectorAll('[data-id="details"]').length;
-  const duration = extractDuration(document.querySelector('[data-id="details"]'));
-  const yearEl = Array.from(document.querySelectorAll('*')).find(
-    (e) => e.children.length === 0 && /^((19|20)\d{2})\s*年?$/.test((e.textContent || '').trim())
-  );
+  // 剧集信息（仅展示 fnOS 真实暴露的字段：集数 / 总时长 / 首播）
   const info = document.createElement('div');
   info.className = 'fnos-info-card';
-  let infoHTML = '<h4>剧集信息</h4>';
-  if (epCount) infoHTML += `<p>集数：${epCount} 集</p>`;
-  if (duration) infoHTML += `<p>单集时长：${duration}</p>`;
-  if (yearEl) infoHTML += `<p>首播：${(yearEl.textContent || '').trim()}</p>`;
-  info.innerHTML = infoHTML;
+  info.setAttribute('data-fntv-season-info', '');
   aside.appendChild(info);
+  _infoCard = info;
+  updateSeasonInfoStats();
 
   // 主要配音演员（借用 fnOS 原生演职人员，竖向列表 + 圆形头像 + 姓名/角色）
   if (cast) {
@@ -3736,13 +3777,13 @@ function layoutSeasonTwoPane(): void {
   injectEpisodeMeta();
 }
 
-/** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」竖排（只处理真正的演职人员项） */
+/** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
 function restyleCastItems(container: HTMLElement): void {
-  const items = Array.from(container.querySelectorAll('.w-\\[120px\\]')) as HTMLElement[];
-  items.forEach((it) => {
-    const a = it.querySelector('a[href^="/v/person/"]') as HTMLElement | null;
-    if (!a || a.classList.contains('fnos-cast-item')) return;
+  const items = Array.from(container.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
+  items.forEach((a) => {
+    if (a.classList.contains('fnos-cast-item')) return;
     const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
+    ps.forEach((p) => p.classList.remove('w-[120px]'));
     if (ps.length) {
       const info = document.createElement('div');
       info.className = 'fnos-cast-info';
@@ -3784,7 +3825,10 @@ function observeSeasonTwoPane(): void {
     const castNow = findSeasonCastParent();
     if (!epNow || !castNow) return;
     const epInWrap = wrap ? (wrap.querySelector('.fnos-season-main') as HTMLElement | null) : null;
-    if (wrap && epInWrap && epInWrap === epNow) return; // 已就位
+    if (wrap && epInWrap && epInWrap === epNow) {
+      updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
+      return;
+    }
     if (wrap) wrap.remove();
     layoutSeasonTwoPane();
   });
@@ -3794,6 +3838,7 @@ function observeSeasonTwoPane(): void {
 /** 关闭背景框 / 离开季页时还原两栏结构 */
 function unlayoutSeasonTwoPane(): void {
   if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
+  _infoCard = null;
   const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
   if (!wrap) return;
   const ep = wrap.querySelector('.fnos-season-main') as HTMLElement | null;
