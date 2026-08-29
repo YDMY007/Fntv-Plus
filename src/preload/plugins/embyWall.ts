@@ -2588,22 +2588,24 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
 .fntv-ph-l-dot.active{background:#e0a24c;transform:scale(1.4);border-color:#fff}
 .fntv-ph-l-text{color:#5a5448}
-/* [lc-830] 样式4 骨架: 契合 3D 旋转木马(透明无框容器 + 中央海报占位 + 左右侧卡peek + 底部指示点 + 底部进度) */
+/* [lc-836] 样式4 骨架: 真正 3D 旋转木马 —— 中间大卡 + 左右两张明显露出的 3D 侧卡(rotateY 纵深), 一眼区别于 2/3 的「单海报」 */
 .fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
 .fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-.fntv-ph-s4-card{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#1e1b17;box-shadow:0 25px 45px rgba(0,0,0,.7);z-index:2}
-.fntv-ph-s4-peek{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.35;filter:blur(2px) brightness(.7);z-index:0}
-.fntv-ph-s4-peek.left{transform:perspective(1200px) scale(.75) translateX(-105%) rotateY(18deg)}
-.fntv-ph-s4-peek.right{transform:perspective(1200px) scale(.75) translateX(105%) rotateY(-18deg)}
+/* 中间主卡: 收窄到 56% 居中, 让两侧卡明显露出来 */
+.fntv-ph-s4-card{position:absolute;left:22%;top:6%;width:56%;height:88%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#1e1b17;box-shadow:0 25px 45px rgba(0,0,0,.7);z-index:3}
+/* 左右侧卡: 各 52% 宽贴在两侧, 以近边为轴 rotateY 旋转 → 真实 3D 纵深; 明显露出约 1/4 张 */
+.fntv-ph-s4-peek{position:absolute;top:12%;height:76%;width:52%;border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.5;filter:blur(1px) brightness(.7);z-index:1}
+.fntv-ph-s4-peek.left{left:1%;transform:perspective(1000px) rotateY(34deg);transform-origin:right center}
+.fntv-ph-s4-peek.right{right:1%;transform:perspective(1000px) rotateY(-34deg);transform-origin:left center}
 .fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.1) 70%,transparent 100%);z-index:2;pointer-events:none}
-.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3rem;gap:.7rem;box-sizing:border-box}
-.fntv-ph-s4-meta{width:96px;height:12px;border-radius:6px;background:rgba(255,255,255,.16)}
-.fntv-ph-s4-title{width:48%;height:46px;border-radius:12px;background:rgba(255,255,255,.2)}
-.fntv-ph-s4-desc{width:62%;height:12px;border-radius:6px;background:rgba(255,255,255,.14)}
-.fntv-ph-s4-desc.s2{width:42%}
-.fntv-ph-s4-actions{display:flex;gap:.8rem;margin-top:.7rem}
-.fntv-ph-s4-btn{width:124px;height:44px;border-radius:50px;background:rgba(255,255,255,.18)}
-.fntv-ph-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:6;display:flex;justify-content:center;gap:8px}
+.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:1.6rem 1.8rem 2.4rem;gap:.6rem;box-sizing:border-box}
+.fntv-ph-s4-meta{width:80px;height:11px;border-radius:6px;background:rgba(255,255,255,.16)}
+.fntv-ph-s4-title{width:54%;height:40px;border-radius:12px;background:rgba(255,255,255,.2)}
+.fntv-ph-s4-desc{width:64%;height:11px;border-radius:6px;background:rgba(255,255,255,.14)}
+.fntv-ph-s4-desc.s2{width:44%}
+.fntv-ph-s4-actions{display:flex;gap:.7rem;margin-top:.6rem}
+.fntv-ph-s4-btn{width:104px;height:38px;border-radius:50px;background:rgba(255,255,255,.18)}
+.fntv-ph-s4-dots{position:absolute;left:22%;right:22%;bottom:28px;z-index:6;display:flex;justify-content:center;gap:8px}
 .fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
 .fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 `;
