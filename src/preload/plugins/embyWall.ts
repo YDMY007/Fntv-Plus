@@ -2646,8 +2646,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 
-  if (!_isDark) {
-    // [lc-815] 浅色模式骨架: 统一浅色设计(复用 .fnos-ph-skel 的浅色微光, var 随 html.dark 自动切换), 布局与暗色样式2 一致
+  if (!_isDark && _cs !== 4) {
+    // [lc-815] 浅色模式骨架: 统一浅色设计(复用 .fnos-ph-skel 的浅色微光, var 随 html.dark 自动切换), 布局与暗色样式2 一致; 样式4 例外(见下方 _cs===4 分支, 自带暗色 3D 骨架不受主题影响)
     const overlay = document.createElement('div');
     overlay.className = 'fntv-ph-l-overlay';
     container.appendChild(overlay);
