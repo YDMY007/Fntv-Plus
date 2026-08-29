@@ -3546,7 +3546,7 @@ const IMMERSIVE_SEASON_CSS = `
   font-weight:700 !important;
   letter-spacing:-.3px !important;
 }
-/* 选集：横向滚动 -> 纵向列表，每行一张横向卡片（缩略图左 + 信息右） */
+/* 选集：横向滚动 -> 纵向列表；每行卡片拆为「左 70% 剧集(缩略图+标题) + 右 30% 信息标签」 */
 .fnos-immersive-season .ms-container[class*="overflow-x-scroll"]{
   overflow:visible !important;
   white-space:normal !important;
@@ -3562,16 +3562,16 @@ const IMMERSIVE_SEASON_CSS = `
 .fnos-immersive-season [data-id="details"]{
   display:flex !important;
   flex-direction:row !important;
-  align-items:center !important;
+  align-items:stretch !important;
   width:100% !important;
   max-width:none !important;
   max-height:none !important;
-  gap:16px !important;
+  gap:0 !important;
   background:var(--semi-color-bg-0,#fff) !important;
   border:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
   border-radius:14px !important;
   box-shadow:0 2px 10px rgba(0,0,0,.06) !important;
-  padding:12px 14px !important;
+  overflow:hidden !important;
   margin-bottom:12px !important;
   cursor:pointer !important;
   transition:transform .28s cubic-bezier(.25,.1,.25,1), box-shadow .28s ease !important;
@@ -3580,20 +3580,149 @@ const IMMERSIVE_SEASON_CSS = `
   transform:translateX(6px) !important;
   box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
 }
-.fnos-immersive-season [data-id="details"] > div:first-child{
-  width:160px !important;
-  height:90px !important;
-  flex:0 0 160px !important;
+/* 左栏：剧集本体（缩略图 + 标题）占 7 分 */
+.fnos-immersive-season [data-id="details"] > .fnos-ep-left{
+  flex:1 1 70% !important;
+  min-width:0 !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:16px !important;
+  padding:12px 16px !important;
+}
+.fnos-immersive-season [data-id="details"] > .fnos-ep-left > div:first-child{
+  width:200px !important;
+  height:112px !important;
+  flex:0 0 200px !important;
   margin:0 !important;
   border-radius:8px !important;
+  overflow:hidden !important;
 }
-.fnos-immersive-season [data-id="details"] > a{
+.fnos-immersive-season [data-id="details"] > .fnos-ep-left > div:first-child img{
+  width:100% !important;
+  height:100% !important;
+  object-fit:cover !important;
+  display:block !important;
+}
+.fnos-immersive-season [data-id="details"] > .fnos-ep-left > a{
   flex:1 1 auto !important;
   min-width:0 !important;
+}
+/* 右栏：具体信息标签占 3 分 */
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right{
+  flex:0 0 30% !important;
+  max-width:30% !important;
+  min-width:0 !important;
+  display:flex !important;
+  flex-direction:column !important;
+  justify-content:center !important;
+  gap:8px !important;
+  padding:12px 16px !important;
+  border-left:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
+  background:var(--semi-color-fill-0, rgba(0,0,0,.02)) !important;
+}
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-ep-tag{
+  align-self:flex-start !important;
+  font-size:12px !important;
+  line-height:1 !important;
+  padding:5px 11px !important;
+  border-radius:999px !important;
+  background:var(--semi-color-primary-light-default, #e8f3ff) !important;
+  color:var(--semi-color-primary, #0064f4) !important;
+  white-space:nowrap !important;
+}
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-ep-info,
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-ep-desc-filled{
+  font-size:13px !important;
+  line-height:1.6 !important;
+  color:var(--semi-color-text-2, #5c6066) !important;
+  display:-webkit-box !important;
+  -webkit-box-orient:vertical !important;
+  -webkit-line-clamp:3 !important;
+  overflow:hidden !important;
+  margin:0 !important;
 }
 `;
 
 let _immersiveSeasonStyleInjected = false;
+let _seasonEpObserver: MutationObserver | null = null;
+
+/** 把每张选集卡片拆成「左 70% 剧集(缩略图+标题) + 右 30% 信息标签」两栏（幂等，免疫 SPA 重建） */
+function restructureSeasonEpisodes(): void {
+  const cards = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
+  cards.forEach((card) => {
+    if (card.querySelector(':scope > .fnos-ep-left')) return; // 已重构过
+    // 上一轮 apply 留下的 Bangumi 简介（挂在 card 直接子级）先取出，避免重复
+    const existingDesc = card.querySelector(':scope > .fnos-ep-desc-filled') as HTMLElement | null;
+    let prefillDesc = '';
+    if (existingDesc) { prefillDesc = existingDesc.textContent?.trim() || ''; existingDesc.remove(); }
+
+    const kids = Array.from(card.children) as HTMLElement[];
+    const left = document.createElement('div');
+    left.className = 'fnos-ep-left';
+    const right = document.createElement('div');
+    right.className = 'fnos-ep-right';
+
+    // 左栏：原缩略图 + 标题链接
+    kids.forEach((k) => left.appendChild(k));
+
+    // 从标题链接文本提取时长作为标签（如 "24分钟13秒"）
+    const aEl = left.querySelector('a') as HTMLElement | null;
+    const aText = aEl ? (aEl.textContent || '') : '';
+    const durM = aText.match(/(\d+\s*分钟\s*\d*\s*秒?|\d+\s*min)/i);
+    if (durM) {
+      const pill = document.createElement('span');
+      pill.className = 'fnos-ep-tag';
+      pill.textContent = durM[1].replace(/\s+/g, '');
+      right.appendChild(pill);
+    }
+
+    // 右栏信息：优先用 Bangumi 简介（prefill 或稍后异步回填）
+    if (prefillDesc) {
+      const info = document.createElement('div');
+      info.className = 'fnos-ep-desc-filled fnos-ep-info';
+      info.textContent = prefillDesc;
+      right.appendChild(info);
+    }
+
+    card.appendChild(left);
+    card.appendChild(right);
+    if (right.childElementCount === 0) right.style.display = 'none'; // 暂无信息则收起右栏，左栏占满
+  });
+}
+
+/** 监听选集容器，SPA 动态插入的新卡片自动补做 70/30 拆分 */
+function observeSeasonEpisodes(): void {
+  if (_seasonEpObserver) return;
+  const inner = document.querySelector('.ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max') as HTMLElement | null;
+  const target = inner || (document.querySelector('.ms-container[class*="overflow-x-scroll"]') as HTMLElement | null);
+  if (!target) return;
+  _seasonEpObserver = new MutationObserver((muts) => {
+    let need = false;
+    for (const m of muts) {
+      m.addedNodes.forEach((n) => {
+        if (n instanceof HTMLElement && (n.matches('[data-id="details"]') || n.querySelector('[data-id="details"]'))) need = true;
+      });
+    }
+    if (need) restructureSeasonEpisodes();
+  });
+  _seasonEpObserver.observe(target, { childList: true });
+}
+
+/** 关闭背景框 / 离开季页时还原原生卡片结构（并断开 observer） */
+function unrestructureSeasonEpisodes(): void {
+  if (_seasonEpObserver) { _seasonEpObserver.disconnect(); _seasonEpObserver = null; }
+  const cards = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
+  cards.forEach((card) => {
+    const left = card.querySelector(':scope > .fnos-ep-left') as HTMLElement | null;
+    const right = card.querySelector(':scope > .fnos-ep-right') as HTMLElement | null;
+    if (!left && !right) return;
+    if (left) Array.from(left.children).forEach((c) => card.appendChild(c));
+    if (right) Array.from(right.children).forEach((c) => card.appendChild(c));
+    if (left) left.remove();
+    if (right) right.remove();
+  });
+}
+
 function injectImmersiveSeasonStyle(): void {
   if (_immersiveSeasonStyleInjected) return;
   if (document.getElementById('fnos-immersive-season-style')) { _immersiveSeasonStyleInjected = true; return; }
@@ -3609,11 +3738,13 @@ function applySeasonImmersiveDetail(): void {
   injectImmersiveSeasonStyle();
   if (_detailBoxless) {
     document.body.classList.remove('fnos-immersive-season');
+    unrestructureSeasonEpisodes(); // 还原原生结构
     return;
   }
   document.body.classList.add('fnos-immersive-season');
-  // 补齐每集简介（Bangumi），复用既有逻辑
-  fillEpisodeDescsFromBangumi();
+  restructureSeasonEpisodes();   // 选集卡片拆 70/30 两栏
+  observeSeasonEpisodes();        // SPA 动态插入的卡片自动拆分
+  fillEpisodeDescsFromBangumi();  // 补齐每集简介（Bangumi），落右栏
 }
 
 /** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃（保留以备回退） */
@@ -3896,10 +4027,16 @@ function fillEpisodeDescsFromBangumi(): void {
         if (walkText(card).length > 20) continue; // 已有简介
         if (card.querySelector('.fnos-ep-desc-filled')) continue; // 已填过
         const descEl = document.createElement('div');
-        descEl.className = 'fnos-ep-desc-filled';
-        descEl.style.cssText = descStyle;
+        descEl.className = 'fnos-ep-desc-filled fnos-ep-info';
         descEl.textContent = desc;
-        card.appendChild(descEl);
+        const right = card.querySelector(':scope > .fnos-ep-right') as HTMLElement | null;
+        if (right) {
+          right.appendChild(descEl);
+          right.style.display = 'flex'; // 之前可能为空被收起，补信息后展开
+        } else {
+          descEl.style.cssText = descStyle; // 非沉浸式（无右栏）走原样式
+          card.appendChild(descEl);
+        }
         filled++;
       }
       if (filled) log('fillEpisodeDescsFromBangumi: 回填 Bangumi 简介', filled, '张卡片 (subject', result.subjectId, ')');
@@ -3922,6 +4059,7 @@ function applyDetailLiquidGlass(): void {
     applySeasonImmersiveDetail();
   } else {
     document.body.classList.remove('fnos-immersive-season');
+    if (_seasonEpObserver) { _seasonEpObserver.disconnect(); _seasonEpObserver = null; }
     if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
       applyTvDetailGlass();
     }
