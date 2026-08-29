@@ -2303,6 +2303,12 @@ function buildCarouselStyle4(
 [data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:12;display:flex;justify-content:center;gap:10px}
 [data-fntv-carousel-style="4"] .fntv-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="4"] .fntv-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+/* [lc-829] 左右切换：海报两侧空白处的浅色 大于号/小于号 按钮 */
+[data-fntv-carousel-style="4"] .fntv-s4-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:14;cursor:pointer;border:none;background:transparent;padding:0;display:flex;align-items:center;justify-content:center;width:46px;height:72px;border-radius:16px;font-size:2.4rem;font-weight:700;line-height:1;font-family:system-ui,sans-serif;user-select:none;-webkit-user-select:none;color:var(--fntv-s4-nav-color,rgba(255,255,255,.5));text-shadow:0 2px 10px rgba(0,0,0,.45);transition:color .25s ease,background-color .25s ease,transform .25s ease;opacity:.55}
+[data-fntv-carousel-style="4"] .fntv-s4-nav:hover{opacity:1;color:var(--fntv-s4-nav-color-hover,#fff);background:rgba(255,255,255,.08)}
+[data-fntv-carousel-style="4"] .fntv-s4-nav:active{transform:translateY(-50%) scale(.92)}
+[data-fntv-carousel-style="4"] .fntv-s4-nav.prev{left:0}
+[data-fntv-carousel-style="4"] .fntv-s4-nav.next{right:0}
 @media (max-width:800px){
   [data-fntv-carousel-style="4"] .fntv-s4-info{padding:1.5rem 1.5rem 2.4rem}
   [data-fntv-carousel-style="4"] .fntv-s4-info h3{font-size:1.5rem}
@@ -2486,6 +2492,28 @@ function buildCarouselStyle4(
       resetAuto();
     });
   });
+
+  // [lc-829] 左右切换按钮（海报两侧空白处，浅色 小于号/大于号）
+  const isDarkS4 = getEffectiveDark();
+  container.style.setProperty('--fntv-s4-nav-color', isDarkS4 ? 'rgba(255,255,255,.5)' : 'rgba(60,48,36,.5)');
+  container.style.setProperty('--fntv-s4-nav-color-hover', isDarkS4 ? '#fff' : '#3a2e20');
+  const mkNav = (dir: 'prev' | 'next', glyph: string): HTMLElement => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fntv-s4-nav ' + dir;
+    b.textContent = glyph;
+    b.setAttribute('aria-label', dir === 'prev' ? '上一张' : '下一张');
+    b.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      goTo(currentIndex + (dir === 'prev' ? -1 : 1));
+      resetAuto();
+    });
+    return b;
+  };
+  const navPrev = mkNav('prev', '‹'); // 小于号
+  const navNext = mkNav('next', '›'); // 大于号
+  container.appendChild(navPrev);
+  container.appendChild(navNext);
 
   // 触摸滑动
   let touchX = 0;
