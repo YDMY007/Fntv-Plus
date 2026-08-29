@@ -704,8 +704,30 @@ function buildGlassControls(): HTMLElement {
   hint.textContent = '提示：切换开启后，请回到首页点击左上角的「刷新」按钮刷新一遍，效果才能正确应用。';
   block.appendChild(hint);
 
+  // [lc-818] 云母增强的具体组件设置默认折叠：点击折叠头展开/收起，默认收起
+  const foldHead = document.createElement('div');
+  foldHead.style.cssText = 'display:flex;align-items:center;gap:6px;margin:8px 0 2px;cursor:pointer;user-select:none;'
+    + 'font-size:12px;font-weight:600;color:var(--fnos-ui-text,#222);';
+  const foldCaret = document.createElement('span');
+  foldCaret.textContent = '▶';
+  foldCaret.style.cssText = 'display:inline-block;transition:transform .15s;font-size:10px;';
+  const foldLabel = document.createElement('span');
+  foldLabel.textContent = '组件细节设置';
+  foldHead.appendChild(foldCaret);
+  foldHead.appendChild(foldLabel);
+  const foldBody = document.createElement('div');
+  foldBody.style.cssText = 'display:none;flex-direction:column;';
+  foldHead.addEventListener('click', () => {
+    const collapsed = foldBody.style.display === 'none';
+    foldBody.style.display = collapsed ? 'flex' : 'none';
+    foldCaret.style.transform = collapsed ? 'rotate(90deg)' : 'rotate(0deg)';
+  });
+  block.appendChild(foldHead);
+  block.appendChild(foldBody);
+
+  // [lc-818] 以下具体组件设置全部收入折叠区 foldBody（默认收起）
   // 模式
-  block.appendChild(selectRow('玻璃模式', [
+  foldBody.appendChild(selectRow('玻璃模式', [
     { value: 'mica', label: 'Mica（浅冷白）' },
     { value: 'compat', label: 'Compat（深灰低透）' },
     { value: 'custom', label: '自定义颜色' },
@@ -713,20 +735,20 @@ function buildGlassControls(): HTMLElement {
 
   // 玻璃色调（仅自定义模式显示）
   const tintRow = colorRow('玻璃色调', s.tint, (v) => { setStr(K.tint, v); applyGlass(); });
-  block.appendChild(tintRow);
+  foldBody.appendChild(tintRow);
 
   // 背景源（仅保留 无 / 流体动态）
-  block.appendChild(selectRow('背景层', [
+  foldBody.appendChild(selectRow('背景层', [
     { value: 'none', label: '无（透桌面）' },
     { value: 'fluid', label: '流体动态' },
   ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); }));
 
   // 模糊 / 磨砂 / 饱和度 / 亮度 / 流体速度
-  block.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
-  block.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
-  block.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
-  block.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
-  block.appendChild(rangeRow('流体速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('流体速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
 
   // 边框 / 阴影（控制"廉价感"的关键）
   const borderTog = mkToggle();
@@ -737,9 +759,9 @@ function buildGlassControls(): HTMLElement {
     paintToggle(borderTog, borderTog.input.checked);
     applyGlass();
   });
-  block.appendChild(row('玻璃边框', borderTog.wrap));
-  block.appendChild(rangeRow('边框浓度', 0, 100, 1, Math.round(s.borderAlpha * 100), '%', (v) => { setStr(K.borderAlpha, String(v / 100)); applyGlass(); }));
-  block.appendChild(rangeRow('阴影浓度', 0, 100, 1, Math.round(s.shadow * 100), '%', (v) => { setStr(K.shadow, String(v / 100)); applyGlass(); }));
+  foldBody.appendChild(row('玻璃边框', borderTog.wrap));
+  foldBody.appendChild(rangeRow('边框浓度', 0, 100, 1, Math.round(s.borderAlpha * 100), '%', (v) => { setStr(K.borderAlpha, String(v / 100)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('阴影浓度', 0, 100, 1, Math.round(s.shadow * 100), '%', (v) => { setStr(K.shadow, String(v / 100)); applyGlass(); }));
 
   // 磨砂噪点 / 暗角（提升质感）
   const noiseTog = mkToggle();
@@ -750,7 +772,7 @@ function buildGlassControls(): HTMLElement {
     paintToggle(noiseTog, noiseTog.input.checked);
     applyGlass();
   });
-  block.appendChild(row('磨砂噪点', noiseTog.wrap));
+  foldBody.appendChild(row('磨砂噪点', noiseTog.wrap));
   const vigTog = mkToggle();
   paintToggle(vigTog, s.vignette);
   vigTog.input.checked = s.vignette;
@@ -759,7 +781,7 @@ function buildGlassControls(): HTMLElement {
     paintToggle(vigTog, vigTog.input.checked);
     applyGlass();
   });
-  block.appendChild(row('背景暗角', vigTog.wrap));
+  foldBody.appendChild(row('背景暗角', vigTog.wrap));
 
   // 粒子效果
   const particleTog = mkToggle();
@@ -770,7 +792,7 @@ function buildGlassControls(): HTMLElement {
     paintToggle(particleTog, particleTog.input.checked);
     applyGlass();
   });
-  block.appendChild(row('粒子效果', particleTog.wrap));
+  foldBody.appendChild(row('粒子效果', particleTog.wrap));
 
   // 显隐依赖字段（函数声明，提升，供上方 change 回调安全引用）
   function refreshModeDepFields(): void {
