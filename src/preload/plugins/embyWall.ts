@@ -2588,6 +2588,24 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
 .fntv-ph-l-dot.active{background:#e0a24c;transform:scale(1.4);border-color:#fff}
 .fntv-ph-l-text{color:#5a5448}
+/* [lc-830] 样式4 骨架: 契合 3D 旋转木马(透明无框容器 + 中央海报占位 + 左右侧卡peek + 底部指示点 + 底部进度) */
+.fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
+.fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
+.fntv-ph-s4-card{position:absolute;left:9%;top:3%;width:82%;height:92%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#1b1814;box-shadow:0 24px 44px rgba(0,0,0,.5);z-index:2}
+.fntv-ph-s4-peek{position:absolute;top:9%;height:82%;width:46%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.38;z-index:0}
+.fntv-ph-s4-peek.left{left:1%;transform:rotate(-5deg) translateY(8px)}
+.fntv-ph-s4-peek.right{right:1%;transform:rotate(5deg) translateY(8px)}
+.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.55) 30%,rgba(0,0,0,.12) 62%,transparent 100%);z-index:2;pointer-events:none}
+.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 4.4rem;gap:.7rem;box-sizing:border-box}
+.fntv-ph-s4-meta{width:96px;height:12px;border-radius:6px;background:rgba(255,255,255,.16)}
+.fntv-ph-s4-title{width:48%;height:46px;border-radius:12px;background:rgba(255,255,255,.2)}
+.fntv-ph-s4-desc{width:62%;height:12px;border-radius:6px;background:rgba(255,255,255,.14)}
+.fntv-ph-s4-desc.s2{width:42%}
+.fntv-ph-s4-actions{display:flex;gap:.8rem;margin-top:.7rem}
+.fntv-ph-s4-btn{width:124px;height:44px;border-radius:50px;background:rgba(255,255,255,.18)}
+.fntv-ph-s4-dots{position:absolute;left:9%;right:9%;bottom:40px;z-index:6;display:flex;justify-content:center;gap:8px}
+.fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
+.fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -2610,12 +2628,15 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   const container = document.createElement('div');
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   const _blur = 'backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%)';
-  if (!_isDark) {
-    // [lc-815] 浅色模式: 统一浅色容器(适配 fnOS 浅色主题)
+  if (!_isDark && _cs !== 4) {
+    // [lc-815] 浅色模式: 统一浅色容器(适配 fnOS 浅色主题); 样式4 例外(透明无框, 见下方分支, 与真实样式4 一致)
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,#eef1f6,#dde3ec);${_blur};margin:0 auto;box-shadow:0 18px 50px -14px rgba(40,50,80,.18)`;
-  } else if (_cs === 2 || _cs === 3 || _cs === 4) {
-    // 样式2/3/4 暗色骨架: 高度与样式1/真实轮播一致, 满铺暗底, 避免加载完高度跳变
+  } else if (_cs === 2 || _cs === 3) {
+    // 样式2/3 暗色骨架: 高度与真实轮播一致, 满铺暗底, 避免加载完高度跳变
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
+  } else if (_cs === 4) {
+    // [lc-830] 样式4 骨架容器: 透明无框(与真实样式4 一致, 无背景无边框); 高度走 calc(100vh - 440px) 与真实样式4 一致, 避免加载完高度跳变
+    container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 440px);aspect-ratio:16/9;border-radius:24px;background:transparent;margin:0 auto;box-shadow:none`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
@@ -2687,8 +2708,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     s2BarBox.appendChild(percentEl);
     s2BarBox.appendChild(s2Track);
     container.appendChild(s2BarBox);
-  } else if (_cs === 3 || _cs === 4) {
-    // [lc-811+] 样式3/4 骨架: 暗底 + 整体 shimmer + 居中"加载中"文字, 无进度条/百分比/指示点(与样式2 区分)
+  } else if (_cs === 3) {
+    // [lc-811+] 样式3 骨架: 暗底 + 整体 shimmer + 居中"加载中"文字, 无进度条/百分比/指示点(与样式2 区分)
     const shimmer = document.createElement('div');
     shimmer.className = 'fnos-ph-skel';
     shimmer.style.cssText = 'position:absolute;inset:0;opacity:.45;z-index:1';
@@ -2713,6 +2734,54 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     s3BarBox.appendChild(s3Track);
     container.appendChild(s3BarBox);
     statusEl = tip; // 居中"加载中…"作为状态/诊断文本(供超时提示覆盖)
+  } else if (_cs === 4) {
+    // [lc-830] 样式4 骨架: 契合 3D 旋转木马 —— 透明无框容器 + 中央海报占位 + 左右侧卡peek(3D纵深) + 底部指示点 + 底部进度
+    // 左右侧卡 peek(藏在中央海报后方, 露肩营造 3D 纵深)
+    const peekL = document.createElement('div'); peekL.className = 'fntv-ph-s4-peek left';
+    const peekLShine = document.createElement('div'); peekLShine.className = 'fntv-ph-s4-shine'; peekL.appendChild(peekLShine);
+    const peekR = document.createElement('div'); peekR.className = 'fntv-ph-s4-peek right';
+    const peekRShine = document.createElement('div'); peekRShine.className = 'fntv-ph-s4-shine'; peekR.appendChild(peekRShine);
+    container.appendChild(peekL); container.appendChild(peekR);
+    // 中央海报占位(暗底 + shimmer + 底部内容占位 + 指示点)
+    const card4 = document.createElement('div'); card4.className = 'fntv-ph-s4-card';
+    const cardShine = document.createElement('div'); cardShine.className = 'fntv-ph-s4-shine'; card4.appendChild(cardShine);
+    const overlay4 = document.createElement('div'); overlay4.className = 'fntv-ph-s4-overlay'; card4.appendChild(overlay4);
+    const content4 = document.createElement('div'); content4.className = 'fntv-ph-s4-content';
+    const m4 = document.createElement('div'); m4.className = 'fntv-ph-s4-meta';
+    const t4 = document.createElement('div'); t4.className = 'fntv-ph-s4-title';
+    const d41 = document.createElement('div'); d41.className = 'fntv-ph-s4-desc';
+    const d42 = document.createElement('div'); d42.className = 'fntv-ph-s4-desc s2';
+    const acts4 = document.createElement('div'); acts4.className = 'fntv-ph-s4-actions';
+    const b41 = document.createElement('div'); b41.className = 'fntv-ph-s4-btn';
+    const b42 = document.createElement('div'); b42.className = 'fntv-ph-s4-btn';
+    acts4.appendChild(b41); acts4.appendChild(b42);
+    content4.appendChild(m4); content4.appendChild(t4); content4.appendChild(d41); content4.appendChild(d42); content4.appendChild(acts4);
+    card4.appendChild(content4);
+    container.appendChild(card4);
+    // 底部指示点(居中, 贴在海报内)
+    const dots4 = document.createElement('div'); dots4.className = 'fntv-ph-s4-dots';
+    for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-ph-s4-dot' + (i === 0 ? ' active' : ''); dots4.appendChild(d); }
+    container.appendChild(dots4);
+    // [lc-816] 底部居中进度条: 套用样式1 的 .fnos-ph-track/.fnos-ph-fill(紫色渐变药丸) + 百分比 + 加载中
+    const s4BarBox = document.createElement('div');
+    s4BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:14px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none';
+    const tip4 = document.createElement('div');
+    tip4.className = 'fnos-ph-text';
+    tip4.style.cssText = 'font-size:12.5px;color:rgba(225,218,245,.85);letter-spacing:.5px;font-weight:600;text-align:center';
+    tip4.textContent = '加载中…';
+    percentEl = document.createElement('div');
+    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums;letter-spacing:.5px';
+    percentEl.textContent = '0%';
+    const s4Track = document.createElement('div');
+    s4Track.className = 'fnos-ph-track';
+    fillEl = document.createElement('div');
+    fillEl.className = 'fnos-ph-fill';
+    s4Track.appendChild(fillEl);
+    s4BarBox.appendChild(tip4);
+    s4BarBox.appendChild(percentEl);
+    s4BarBox.appendChild(s4Track);
+    container.appendChild(s4BarBox);
+    statusEl = tip4;
   } else {
     // [lc-582] 样式1 骨架: 紫色渐变 + 装饰海报占位 + 中央进度(原逻辑, 保持不变)
     const deco = (l: string, t: string, r: string): HTMLElement => {
