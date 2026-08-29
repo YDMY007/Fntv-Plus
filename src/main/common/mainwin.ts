@@ -309,8 +309,8 @@ const ACRYLIC_CSS = `
     .ms-thumb,.ms-track,.ms-track-box{display:none!important}
 
     /* ── ⑥ 页面容器边距归零（列表页由 ⑪ 统一接管）── */
-    div.relative.flex.flex-col.gap-6.pb-6.pr-4{padding-right:0!important}
-    div.relative.flex.flex-col.gap-6.pb-6{padding-left:0!important}
+    div.relative.flex.flex-col.gap-6.pb-6.pr-4{padding-right:0!important;gap:12px!important}
+    div.relative.flex.flex-col.gap-6.pb-6{padding-left:0!important;gap:12px!important}
     /* 注意: .ms-container.pl-[44px] 的 padding 已移至 ⑪ 统一管理，避免 !important 冲突 */
 
     /* ── ⑦ 导航栏: 极淡融合条 + 原生拖动 ──
