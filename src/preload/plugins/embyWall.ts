@@ -1273,9 +1273,9 @@ function injectCarousel(): void {
   }
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
-  // [lc-780] 轮播图样式开关：默认样式 1（=下方当前渲染，baseline）；2/3/4 为占位，待后续实现。
-  //   后续样式通过 [data-fntv-carousel-style="2|3|4"] 区分（CSS 或 JS 分支），当前整段 hero 渲染即样式 1。
-  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10); return (v >= 1 && v <= 4) ? v : 1; })();
+  // [lc-780→lc-856] 轮播图样式开关：默认样式 4（立体堆叠）；1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，用户可在设置面板"外观"切换。
+  //   样式通过 [data-fntv-carousel-style="1|2|3|4"] 区分（CSS 或 JS 分支）。
+  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10); return (v >= 1 && v <= 4) ? v : 4; })();
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   // [lc-582] 加载完成后淡入, 不再"直接闪出全部"(骨架→轮播平滑过渡)
   container.style.opacity = '0';
@@ -2661,7 +2661,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
-  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10); return (v >= 1 && v <= 4) ? v : 1; })();
+  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10); return (v >= 1 && v <= 4) ? v : 4; })();
   const _isDark = getEffectiveDark(); // [lc-815] 跟随 fnOS 明暗主题
 
   const container = document.createElement('div');
@@ -4841,8 +4841,8 @@ function handle(): void {
 
     // [lc-780/lc-781→lc-845→lc-846] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 竖向轮播，样式 2 = 横向轮播，样式 3 = 堆叠切换，样式 4 = 立体堆叠；点击后整页重载回首页并刷新(见下方 click 处理)
     const getCs = (): number => {
-      const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
-      return (v >= 1 && v <= 4) ? v : 1;
+      const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10);
+      return (v >= 1 && v <= 4) ? v : 4;
     };
     const csWrap = document.createElement('div');
     csWrap.style.cssText = 'margin-top:20px;';
