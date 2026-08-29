@@ -3547,11 +3547,11 @@ const IMMERSIVE_SEASON_CSS = `
   letter-spacing:-.3px !important;
 }
 /* 选集：横向滚动 -> 纵向列表；每行卡片拆为「左 70% 剧集(缩略图+标题) + 右 30% 信息标签」 */
-.fnos-immersive-season .ms-container[class*="overflow-x-scroll"]{
+.fnos-immersive-season .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]){
   overflow:visible !important;
   white-space:normal !important;
 }
-.fnos-immersive-season .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
+.fnos-immersive-season .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]) > div.flex.h-full.w-max{
   flex-direction:column !important;
   flex-wrap:nowrap !important;
   align-items:stretch !important;
@@ -3630,6 +3630,19 @@ const IMMERSIVE_SEASON_CSS = `
   color:var(--semi-color-primary, #0064f4) !important;
   white-space:nowrap !important;
 }
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-cast-wrap{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  gap:6px !important;
+  align-self:stretch !important;
+  max-height:152px !important;
+  overflow-y:auto !important;
+  padding-right:2px !important;
+}
+.fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-cast-wrap .fnos-ep-tag{
+  background:var(--semi-color-fill-1, rgba(0,0,0,.04)) !important;
+  color:var(--semi-color-text-1, #1c2026) !important;
+}
 .fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-ep-info,
 .fnos-immersive-season [data-id="details"] > .fnos-ep-right .fnos-ep-desc-filled{
   font-size:13px !important;
@@ -3645,6 +3658,10 @@ const IMMERSIVE_SEASON_CSS = `
 
 let _immersiveSeasonStyleInjected = false;
 let _seasonEpObserver: MutationObserver | null = null;
+let _seasonCast: { name: string; role: string }[] = [];
+let _seasonCastDone = false;
+let _castSeasonGuid = '';
+let _castRetry = false;
 
 /** 把每张选集卡片拆成「左 70% 剧集(缩略图+标题) + 右 30% 信息标签」两栏（幂等，免疫 SPA 重建） */
 function restructureSeasonEpisodes(): void {
@@ -3676,7 +3693,7 @@ function restructureSeasonEpisodes(): void {
       right.appendChild(pill);
     }
 
-    // 右栏信息：优先用 Bangumi 简介（prefill 或稍后异步回填）
+    // 上一轮遗留的 Bangumi 简介（已不再用于沉浸式右栏，仅防御性清除）
     if (prefillDesc) {
       const info = document.createElement('div');
       info.className = 'fnos-ep-desc-filled fnos-ep-info';
@@ -3703,7 +3720,7 @@ function observeSeasonEpisodes(): void {
         if (n instanceof HTMLElement && (n.matches('[data-id="details"]') || n.querySelector('[data-id="details"]'))) need = true;
       });
     }
-    if (need) restructureSeasonEpisodes();
+    if (need) { restructureSeasonEpisodes(); if (_seasonCastDone) injectCastIntoCards(); }
   });
   _seasonEpObserver.observe(target, { childList: true });
 }
@@ -3721,6 +3738,127 @@ function unrestructureSeasonEpisodes(): void {
     if (left) left.remove();
     if (right) right.remove();
   });
+}
+
+/** 从 fnOS 原生「演职人员」区块读取演职人员（直接读取页面 DOM，不依赖 Bangumi）。
+ *  DOM 结构（已实测）：
+ *    <div class="relative"><p>...<strong>演职人员</strong>...</p>
+ *      <div class="ms-container !overflow-x-scroll ...">
+ *        <div class="flex h-full w-max">
+ *          <div class="w-[120px] ...">
+ *            <a href="/v/person/{guid}">
+ *              <div><img alt="姓名"></div>
+ *              <p class="...text-base...">姓名</p>
+ *              <p class="...text-xs...">饰 XXX (voice)</p>
+ *            </a>
+ */
+function readCastFromDom(): { name: string; role: string }[] {
+  const strongs = Array.from(document.querySelectorAll('strong')) as HTMLElement[];
+  const castStrong = strongs.find(
+    (s) => (s.textContent || '').trim().includes('演职人员') || (s.textContent || '').trim().includes('演职员')
+  );
+  if (!castStrong) return [];
+  // 上溯到包含演职人员 person 链接的容器（通常是 .relative）
+  let container: HTMLElement | null = null;
+  let p: HTMLElement | null = castStrong;
+  while (p && p !== document.body) {
+    if (p.querySelector('a[href^="/v/person/"]')) { container = p; break; }
+    p = p.parentElement;
+  }
+  if (!container) return [];
+  const links = Array.from(container.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
+  const out: { name: string; role: string }[] = [];
+  for (const a of links) {
+    const img = a.querySelector('img') as HTMLImageElement | null;
+    const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
+    const nameFromImg = img && img.alt ? img.alt.trim() : '';
+    const name = nameFromImg || (ps[0] ? (ps[0].textContent || '').trim() : '');
+    let role = '';
+    if (ps.length >= 2) role = (ps[ps.length - 1].textContent || '').trim();
+    else if (nameFromImg && ps.length === 1) role = (ps[0].textContent || '').trim();
+    if (name) out.push({ name, role });
+  }
+  return out;
+}
+
+/** 清空所有已注入的演职人员标签（换季或还原时调用） */
+function clearCastFromCards(): void {
+  document
+    .querySelectorAll('[data-id="details"] > .fnos-ep-right > .fnos-cast-wrap')
+    .forEach((w) => { (w as HTMLElement).innerHTML = ''; });
+}
+
+/** 把已缓存的 _seasonCast 注入到每张选集卡片右栏的 .fnos-cast-wrap（幂等，避免重复注入） */
+function injectCastIntoCards(): void {
+  if (_seasonCast.length === 0) return;
+  const cards = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
+  for (const card of cards) {
+    const right = card.querySelector(':scope > .fnos-ep-right') as HTMLElement | null;
+    if (!right) continue;
+    let wrap = right.querySelector(':scope > .fnos-cast-wrap') as HTMLElement | null;
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.className = 'fnos-cast-wrap';
+      right.appendChild(wrap);
+    }
+    if (wrap.childElementCount > 0) continue; // 已注入过
+    for (const c of _seasonCast) {
+      const tag = document.createElement('span');
+      tag.className = 'fnos-ep-tag';
+      tag.textContent = c.name;
+      if (c.role) tag.title = c.role; // 角色/职务挂到 hover 提示，pill 主体只显示姓名，保持紧凑
+      wrap.appendChild(tag);
+    }
+    right.style.display = 'flex'; // 之前若因空被收起，注入后展开
+  }
+}
+
+/** 提取 fnOS 原生演职人员并注入选集卡片右栏（带 SPA 渲染时序重试） */
+function extractFnosCast(): void {
+  const m = location.href.match(/\/season\/([a-f0-9]{32})/) || location.href.match(/\/tv\/([a-f0-9]{32})/);
+  const guid = m && m[1];
+  if (!guid) return;
+  // 进入新一季 → 重置缓存并清空旧标签
+  if (_castSeasonGuid && _castSeasonGuid !== guid) {
+    _seasonCast = [];
+    _seasonCastDone = false;
+    _castRetry = false;
+    clearCastFromCards();
+  }
+  // 已有该季缓存 → 直接（重新）注入到当前卡片（如 SPA 重建后补做）
+  if (_seasonCastDone && _castSeasonGuid === guid) {
+    injectCastIntoCards();
+    return;
+  }
+  if (_castRetry && _castSeasonGuid === guid) return; // 已在重试链中，避免重复链
+  const cast = readCastFromDom();
+  if (cast.length > 0) {
+    _seasonCast = cast;
+    _seasonCastDone = true;
+    _castSeasonGuid = guid;
+    injectCastIntoCards();
+    log('extractFnosCast: 命中 fnOS 原生演职人员', cast.length, '人 (季', guid, ')');
+    return;
+  }
+  // 演职人员区块可能晚于选集渲染 → 短时重试（最多约 5s）
+  _castSeasonGuid = guid;
+  _castRetry = true;
+  let tries = 0;
+  const tick = () => {
+    if (_castSeasonGuid !== guid) return; // 已切换到其他季，废弃本次重试链
+    const c = readCastFromDom();
+    if (c.length > 0) {
+      _seasonCast = c;
+      _seasonCastDone = true;
+      _castRetry = false;
+      injectCastIntoCards();
+      log('extractFnosCast: 重试命中 fnOS 原生演职人员', c.length, '人');
+      return;
+    }
+    if (tries++ < 16) setTimeout(tick, 300);
+    else { _castRetry = false; log('extractFnosCast: 未找到演职人员区块（页面可能未渲染或该季无演职人员）'); }
+  };
+  setTimeout(tick, 300);
 }
 
 function injectImmersiveSeasonStyle(): void {
@@ -3742,9 +3880,9 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
-  restructureSeasonEpisodes();   // 选集卡片拆 70/30 两栏
+  restructureSeasonEpisodes();   // 选集卡片拆 70/30 两栏（右栏含空 .fnos-cast-wrap）
   observeSeasonEpisodes();        // SPA 动态插入的卡片自动拆分
-  fillEpisodeDescsFromBangumi();  // 补齐每集简介（Bangumi），落右栏
+  extractFnosCast();             // 提取 fnOS 原生「演职人员」注入右栏（不再使用 Bangumi）
 }
 
 /** 对 Season 详情页 (/v/tv/season/:id) 应用液态玻璃（保留以备回退） */
