@@ -3621,21 +3621,23 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   overflow:visible !important; white-space:normal !important; padding-left:0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:4px !important;
+  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:6px !important;
 }
-/* 单个演员：头像(左) + 姓名/角色(右)，紧凑行（无框无背景） */
+/* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
+.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.6rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+/* 单个演员：头像(左) + 姓名/角色(右) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item{
   display:flex !important; flex-direction:row !important; align-items:center !important;
-  gap:10px !important; width:100% !important; padding:6px 0 !important;
+  gap:12px !important; width:100% !important; padding:8px 0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{
-  width:40px !important; height:40px !important; flex:0 0 40px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
+  width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; min-width:0 !important; justify-content:center !important; gap:1px !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:auto !important; text-align:left !important; white-space:normal !important; line-height:1.3 !important; margin:0 !important; padding:0 !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:13px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:11px !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:100% !important; max-width:none !important; text-align:left !important; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; line-height:1.35 !important; margin:0 !important; padding:0 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
@@ -3762,10 +3764,16 @@ function layoutSeasonTwoPane(): void {
   _infoCard = info;
   updateSeasonInfoStats();
 
-  // 主要配音演员（借用 fnOS 原生演职人员，竖向列表 + 圆形头像 + 姓名/角色）
+  // 主要配音演员（借用 fnOS 原生演职人员，整块卡片 + 圆形头像 + 姓名/角色）
   if (cast) {
     restyleCastItems(cast);
-    aside.appendChild(cast);
+    const castCard = document.createElement('div');
+    castCard.className = 'fnos-info-card fnos-cast-card';
+    const castTitle = document.createElement('h4');
+    castTitle.textContent = '主要配音演员';
+    castCard.appendChild(castTitle);
+    castCard.appendChild(cast);
+    aside.appendChild(castCard);
   }
 
   // 外部链接（fnOS 暴露的 IMDB 等）
