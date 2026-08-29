@@ -1096,25 +1096,58 @@ function findResumeSection(hero: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+// [lc-806] 自愈状态：持续监听「继续观看」区块（fnOS 异步渲染/重渲染会清掉我们加的 marginTop，
+//   导致它回到首屏）。上一版仅靠 600/1500ms 重试，区块常在数秒后才出现 → 漏推。
+//   现改为 MutationObserver 对 hero 父容器做 childList 监听，区块出现或被重建即重推。
+let _resumePushObserver: MutationObserver | null = null;
+let _resumePushDebounce: number | null = null;
+
 function pushResumeDown(hero: HTMLElement | null): void {
   const apply = (): void => {
     const r = findResumeSection(hero);
-    if (!r || r.offsetParent === null) return; // 区块未渲染/不可见时跳过，待重试
-    r.style.marginTop = ''; // 先复位，避免重复叠加
+    if (!r) return; // 区块尚未渲染：等 observer/重试触发
+    // 已推且仍落在首屏外 → 不重复操作，避免每次 mutation 抖动
+    if (r.getAttribute('data-fntv-resume-pushed') === '1' && r.offsetParent !== null) {
+      const t = r.getBoundingClientRect().top;
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      if (t >= vh) return; // 仍安全在首屏外
+    }
+    r.style.marginTop = ''; // 先复位，从原始位置重算
     const top = r.getBoundingClientRect().top;
     const vh = window.innerHeight || document.documentElement.clientHeight;
     if (top < vh) {
       // 当前仍在首屏内 → 推到首屏之外，并留 24px 间隙
       r.style.marginTop = (vh - top + 24) + 'px';
       r.setAttribute('data-fntv-resume-pushed', '1');
+    } else {
+      r.removeAttribute('data-fntv-resume-pushed');
     }
   };
+
+  // 断开旧 observer（rebuild/重复注入时避免叠加多个监听）
+  if (_resumePushObserver) { _resumePushObserver.disconnect(); _resumePushObserver = null; }
+  if (_resumePushDebounce) { clearTimeout(_resumePushDebounce); _resumePushDebounce = null; }
+
   apply();
-  setTimeout(apply, 600);   // fnOS 区块常异步渲染，重试定位
+  // 保留短重试作为即时兜底（区块偶尔在 observer 绑定前闪现）
+  setTimeout(apply, 600);
   setTimeout(apply, 1500);
+
+  // 持续自愈：监听 hero 父容器子树变化（fnOS 异步插入/重渲染「继续观看」时触发）
+  const parent = hero && hero.parentElement;
+  if (parent) {
+    _resumePushObserver = new MutationObserver(() => {
+      if (_resumePushDebounce) clearTimeout(_resumePushDebounce);
+      _resumePushDebounce = window.setTimeout(apply, 350);
+    });
+    _resumePushObserver.observe(parent, { childList: true, subtree: true });
+  }
 }
 
 function restoreResume(): void {
+  // [lc-806] 切回非样式 2 时：停掉自愈监听并清掉所有已推标记
+  if (_resumePushObserver) { _resumePushObserver.disconnect(); _resumePushObserver = null; }
+  if (_resumePushDebounce) { clearTimeout(_resumePushDebounce); _resumePushDebounce = null; }
   document.querySelectorAll('[data-fntv-resume-pushed]').forEach((el) => {
     (el as HTMLElement).style.marginTop = '';
     el.removeAttribute('data-fntv-resume-pushed');
