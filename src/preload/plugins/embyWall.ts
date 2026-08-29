@@ -2596,6 +2596,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 /* [lc-839+] 样式4 骨架不再自创 CSS: 直接复用真实样式4 轮播的 .fntv-s4-* 类(同款 DOM 结构 + 同款 CSS, 由 ensureStyle4Css() 注入),
    仅把真实图片/文字替换为 shimmer 占位块, 呈现"暂停态空轮播" —— 加载完视觉零跳变。故此处无 .fntv-ph-s4-* 规则。 */
 /* [lc-841] 样式4 骨架深浅适配: 占位条 / 指示点 / 进度条随主题切换 —— 由 container[data-fntv-skel] 控制 */
+.fntv-s4-skelbg{position:relative;width:100%;height:100%;overflow:hidden}
 .fntv-s4-skel{position:relative;overflow:hidden}
 .fntv-s4-skel::after{content:'';position:absolute;inset:0;transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite;pointer-events:none}
 [data-fntv-skel="dark"] .fntv-s4-skel{background:rgba(255,255,255,.20)}
@@ -2750,7 +2751,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
       card.className = 'fntv-s4-card' + (cls ? ' ' + cls : '');
       // 背景占位: 暗底 + 整卡 shimmer(模拟未加载的海报图)
       const bg = document.createElement('div');
-      bg.className = 'fntv-s4-bg';
+      bg.className = 'fntv-s4-skelbg'; // [lc-842] 不复用 .fntv-s4-bg(其 ::before 写死黑色渐变遮罩, 会把浅色卡片压成深色); 仅作纯色占位 + shimmer
       bg.style.backgroundImage = 'none';
       bg.style.background = _isDark ? '#1e1b17' : '#e9e4db';
       const shine = document.createElement('div');
