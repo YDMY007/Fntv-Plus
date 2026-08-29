@@ -4800,7 +4800,7 @@ function handle(): void {
       try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
 
-    // [lc-780/lc-781→lc-845] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 玻璃风，样式 2 = 滑动切换+进度条，样式 3 = 堆叠卡片，样式 4 = 3D 旋转木马；点击后整页重载回首页并刷新(见下方 click 处理)
+    // [lc-780/lc-781→lc-845→lc-846] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 竖向轮播，样式 2 = 横向轮播，样式 3 = 堆叠切换，样式 4 = 立体堆叠；点击后整页重载回首页并刷新(见下方 click 处理)
     const getCs = (): number => {
       const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
       return (v >= 1 && v <= 4) ? v : 1;
@@ -4814,7 +4814,7 @@ function handle(): void {
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
-    const csLabels = ['样式 1（玻璃）', '样式 2（滑动）', '样式 3（堆叠）', '样式 4（3D 旋转）'];
+    const csLabels = ['样式 1（竖向轮播）', '样式 2（横向轮播）', '样式 3（堆叠切换）', '样式 4（立体堆叠）'];
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';
