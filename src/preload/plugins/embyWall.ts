@@ -1292,6 +1292,13 @@ function injectCarousel(): void {
     return;
   }
 
+  // [lc-809] 样式 3（堆叠卡片）：照抄 demo 的堆叠卡片交互方式，复用真实片库数据与导航。
+  if (_cs === 3) {
+    buildCarouselStyle3(container, wrapper, shows, base, rebuild);
+    if (!rebuild) target.appendChild(wrapper);
+    return;
+  }
+
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
   wrapper.style.flexDirection = 'row';   // [lc-784] 重置：若此前是样式 2 的 column，切回样式 1 须恢复
@@ -1970,6 +1977,274 @@ function buildCarouselStyle2(
   log2('样式2 轮播注入完成, slides=', slides.length);
 }
 
+// [lc-809] 样式 3：堆叠卡片式轮播（照抄 demo 的卡片交互方式）。
+//   视觉：所有卡片 position:absolute;inset:0 叠放，靠 .active/.prev/.next/.behind 类切换
+//        前后卡片在左右后方倾斜露出的堆叠感；容器 overflow:visible 让 prev/next 露出。
+//   交互：自动轮播(setInterval) + 指示点 + 悬停暂停 + 触摸滑动 + 键盘左右（均移植自 demo）。
+//   数据/导航：复用真实片库 shows、fetchImageAuth 拉横版背景、resolveShowLogo 取剧集 logo、
+//            spaNav(飞牛 SPA 路由)。高度与样式1/2 一致，避免加载完高度跳变。
+function buildCarouselStyle3(
+  container: HTMLElement,
+  wrapper: HTMLElement,
+  shows: any[],
+  base: string,
+  rebuild: boolean
+): void {
+  const log3 = (...a: any[]) => log('[s3]', ...a);
+
+  const imgUrl = (p: string, w?: number) => {
+    if (!p) return '';
+    if (p.startsWith('http') || p.startsWith('/v/api/')) return p + (w ? '?w=' + w : '');
+    return `${base}/v/api/v1/${p}` + (w ? '?w=' + w : '');
+  };
+
+  // 一次性注入样式（scoped 到样式 3）
+  if (!document.getElementById('fnos-carousel-style3-style')) {
+    const st = document.createElement('style');
+    st.id = 'fnos-carousel-style3-style';
+    st.textContent = `
+[data-fntv-carousel-style="3"] .fntv-s3-stack{position:relative;width:100%;height:100%}
+[data-fntv-carousel-style="3"] .fntv-s3-card{
+  position:absolute;inset:0;border-radius:24px;overflow:hidden;
+  box-shadow:0 30px 50px rgba(0,0,0,.6);
+  transition:transform .75s cubic-bezier(.2,.8,.3,1),opacity .7s ease,filter .7s ease;
+  opacity:0;transform:scale(.8) translateY(60px);
+  border:1px solid rgba(255,255,255,.1);background:#1e1b17;cursor:pointer;
+}
+[data-fntv-carousel-style="3"] .fntv-s3-card.active{opacity:1;transform:scale(1) translateY(0);z-index:5;box-shadow:0 40px 60px rgba(0,0,0,.7),0 0 30px rgba(210,165,80,.1)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:.4;transform:scale(.88) translateY(0) translateX(-40px) rotateZ(-3deg);z-index:3;filter:blur(1.5px) brightness(.7)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:.4;transform:scale(.88) translateY(0) translateX(40px) rotateZ(3deg);z-index:3;filter:blur(1.5px) brightness(.7)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateY(60px) translateX(20px);z-index:1;pointer-events:none}
+[data-fntv-carousel-style="3"] .fntv-s3-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
+[data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
+[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.1rem;font-weight:700;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:.35rem 1rem;border-radius:30px;border:1px solid rgba(255,215,150,.5);display:inline-block;white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis}
+[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:30px;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
+[data-fntv-carousel-style="3"] .fntv-s3-info{position:relative;z-index:3;color:#fff;width:100%;padding:0 1rem 0 0}
+[data-fntv-carousel-style="3"] .fntv-s3-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
+[data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 15px rgba(0,0,0,.8);margin-bottom:.4rem;line-height:1.15;word-break:break-word}
+[data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.95rem;color:#e2d7c5;line-height:1.55;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:520px;margin-bottom:1rem}
+[data-fntv-carousel-style="3"] .fntv-s3-actions{display:flex;gap:.7rem;flex-wrap:wrap}
+[data-fntv-carousel-style="3"] .fntv-s3-play{padding:.8rem 1.6rem;border-radius:50px;font-weight:600;font-size:.9rem;cursor:pointer;letter-spacing:.8px;transition:all .3s ease;border:none;display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;background:linear-gradient(135deg,#f0b85c,#d49a3a);color:#1a120a;box-shadow:0 6px 18px rgba(212,160,76,.4)}
+[data-fntv-carousel-style="3"] .fntv-s3-play:hover{background:linear-gradient(135deg,#f7c66e,#dfa844);transform:translateY(-2px);box-shadow:0 10px 24px rgba(212,160,76,.55)}
+[data-fntv-carousel-style="3"] .fntv-s3-detail{padding:.8rem 1.6rem;border-radius:50px;font-weight:600;font-size:.9rem;cursor:pointer;letter-spacing:.8px;transition:all .3s ease;border:1.5px solid rgba(210,180,140,.7);display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;background:rgba(20,15,10,.6);color:#f0e3ce;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+[data-fntv-carousel-style="3"] .fntv-s3-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
+[data-fntv-carousel-style="3"] .fntv-s3-play:active,[data-fntv-carousel-style="3"] .fntv-s3-detail:active{transform:translateY(0) scale(.97)}
+[data-fntv-carousel-style="3"] .fntv-s3-detail.is-loading{opacity:.6;pointer-events:none}
+[data-fntv-carousel-style="3"] .fntv-s3-dots{display:flex;justify-content:center;gap:10px;margin-top:.8rem}
+[data-fntv-carousel-style="3"] .fntv-s3-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
+[data-fntv-carousel-style="3"] .fntv-s3-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+[data-fntv-carousel-style="3"] .fntv-s3-hint{color:#8f7e68;font-size:.75rem;letter-spacing:1px;text-align:center;margin-top:.2rem}
+@media (max-width:800px){
+  [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.5rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.85rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:.9rem;padding:.25rem .8rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-bg{padding:1.5rem}
+}
+@media (max-width:500px){
+  [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.3rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-actions{flex-direction:column;align-items:flex-start}
+  [data-fntv-carousel-style="3"] .fntv-s3-play,[data-fntv-carousel-style="3"] .fntv-s3-detail{padding:.6rem 1.2rem;font-size:.8rem}
+}
+@media (prefers-reduced-motion: reduce){
+  [data-fntv-carousel-style="3"] .fntv-s3-card{transition:opacity .2s ease}
+  [data-fntv-carousel-style="3"] .fntv-s3-card.active,[data-fntv-carousel-style="3"] .fntv-s3-card.prev,[data-fntv-carousel-style="3"] .fntv-s3-card.next,[data-fntv-carousel-style="3"] .fntv-s3-card.behind{transform:none}
+  [data-fntv-carousel-style="3"] .fntv-s3-play,[data-fntv-carousel-style="3"] .fntv-s3-detail{transition:background-color .15s ease}
+  [data-fntv-carousel-style="3"] .fntv-s3-play:hover,[data-fntv-carousel-style="3"] .fntv-s3-detail:hover{transform:none}
+}
+`;
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  // 布局：堆叠卡片容器（高度与样式1/2 一致，避免加载完高度跳变）
+  // [lc-807 同款] 与样式1/2 同样 max-height:calc(100vh-380px);aspect-ratio:16/9；overflow:visible 让 prev/next 在左右后方露出堆叠感
+  wrapper.style.cssText = 'display:block;padding:0 44px;margin-top:0;margin-bottom:-8px';
+  container.style.width = '100%';
+  container.style.height = '';
+  container.style.minHeight = '0';
+  container.style.maxHeight = 'calc(100vh - 380px)';
+  container.style.border = 'none';
+  container.style.boxShadow = '0 26px 60px -12px rgba(0,0,0,.55)';
+  container.style.aspectRatio = '16 / 9';
+  container.style.margin = '0';
+  container.style.background = 'transparent';
+  container.style.overflow = 'visible'; // [s3] 让 prev/next 在左右后方露出堆叠感
+
+  const accents = ['#6eb5ff', '#d69b6a', '#b08fe0', '#5fb0a8', '#e08585'];
+
+  const stack = document.createElement('div');
+  stack.className = 'fntv-s3-stack';
+  container.appendChild(stack);
+
+  const cards: HTMLElement[] = [];
+  const dotsEls: HTMLElement[] = [];
+
+  shows.forEach((show, i) => {
+    const accent = accents[i % accents.length];
+    const card = document.createElement('div');
+    card.className = 'fntv-s3-card' + (i === 0 ? ' active' : ' behind');
+    card.setAttribute('data-index', String(i));
+
+    // 背景：先渐变兜底，真实 backdrop 加载成功后替换
+    const bg = document.createElement('div');
+    bg.className = 'fntv-s3-bg';
+    bg.style.backgroundImage = `linear-gradient(160deg, ${accent}55, #0b1219)`;
+    card.appendChild(bg);
+
+    // 顶部 logo 胶囊：有 logo 图显示图，无则文字胶囊（照抄 demo 的 badge 胶囊）
+    const genreArr: string[] = (show as any).genres || [];
+    const logo = document.createElement('div');
+    logo.className = 'fntv-s3-logo';
+    logo.textContent = (genreArr[0] || '精选剧场').toUpperCase();
+    card.appendChild(logo);
+    resolveShowLogo(show, base).then((src) => {
+      if (!src) return;
+      logo.textContent = '';
+      const img = document.createElement('img');
+      img.alt = (show as any).title || '';
+      img.src = src;
+      logo.appendChild(img);
+    });
+
+    // 内容区（标题/简介用 textContent，避免 HTML 注入）
+    const info = document.createElement('div');
+    info.className = 'fntv-s3-info';
+    const meta = (genreArr[0] || '').toUpperCase();
+    const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
+    info.innerHTML =
+      '<div class="meta"></div>' +
+      '<h3></h3>' +
+      '<div class="desc"></div>' +
+      '<div class="fntv-s3-actions">' +
+        '<button class="fntv-s3-play" type="button">开始播放</button>' +
+        '<button class="fntv-s3-detail" type="button">更多详情</button>' +
+      '</div>';
+    (info.querySelector('.meta') as HTMLElement).textContent = meta;
+    (info.querySelector('.meta') as HTMLElement).style.display = meta ? '' : 'none';
+    (info.querySelector('h3') as HTMLElement).textContent = (show as any).title || '';
+    (info.querySelector('.desc') as HTMLElement).textContent = (show as any).desc || '';
+    card.appendChild(info);
+
+    // 真实背景图（与样式1/2 同链路：fetchImageAuth → blob）
+    const pic = imgUrl((show as any).backdrop);
+    if (pic) {
+      fetchImageAuth(pic, { label: 's3-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
+        if (b) bg.style.backgroundImage = `url("${b}")`;
+      });
+    }
+
+    // 按钮行为（沿用飞牛 SPA 路由）
+    const playBtn = info.querySelector('.fntv-s3-play') as HTMLElement | null;
+    const detailBtn = info.querySelector('.fntv-s3-detail') as HTMLElement | null;
+    const spaNav = (href: string): void => {
+      history.pushState({}, '', href);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      setTimeout(() => {
+        const detailReady = !!document.querySelector('button[aria-label="返回"]');
+        if (!detailReady) location.href = href;
+      }, 600);
+    };
+    if (playBtn) playBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); spaNav(detailHref); });
+    if (detailBtn) detailBtn.addEventListener('click', (e: MouseEvent) => {
+      e.stopPropagation();
+      detailBtn.classList.add('is-loading');
+      resolveSeasonHref(show).then((href) => { detailBtn.classList.remove('is-loading'); spaNav(href); });
+    });
+
+    stack.appendChild(card);
+    cards.push(card);
+  });
+
+  // 指示点（容器外部下方，照抄 demo 的 dots-row）
+  const dotsRow = document.createElement('div');
+  dotsRow.className = 'fntv-s3-dots';
+  cards.forEach((_, i) => {
+    const d = document.createElement('span');
+    d.className = 'fntv-s3-dot' + (i === 0 ? ' active' : '');
+    d.setAttribute('data-index', String(i));
+    dotsRow.appendChild(d);
+    dotsEls.push(d);
+  });
+  wrapper.appendChild(dotsRow);
+  const hint = document.createElement('div');
+  hint.className = 'fntv-s3-hint';
+  hint.textContent = '自动轮播中 · 悬停可暂停';
+  wrapper.appendChild(hint);
+
+  // ---------- 交互逻辑（移植自 demo：堆叠卡片）----------
+  let currentIndex = 0;
+  let autoTimer: number | null = null;
+  const AUTO_DELAY = 4500;
+
+  const updatePositions = (): void => {
+    cards.forEach((card, idx) => {
+      card.classList.remove('active', 'prev', 'next', 'behind');
+      if (idx === currentIndex) card.classList.add('active');
+      else if (idx === (currentIndex - 1 + cards.length) % cards.length) card.classList.add('prev');
+      else if (idx === (currentIndex + 1) % cards.length) card.classList.add('next');
+      else card.classList.add('behind');
+    });
+    dotsEls.forEach((d, idx) => d.classList.toggle('active', idx === currentIndex));
+  };
+
+  const goTo = (idx: number): void => {
+    let n = idx;
+    if (n < 0) n = cards.length - 1;
+    if (n >= cards.length) n = 0;
+    currentIndex = n;
+    updatePositions();
+  };
+
+  const resetAuto = (): void => {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = window.setInterval(() => {
+      // [s3] rebuild/卸载后自动停，避免旧闭包 interval 泄漏
+      if (!document.body.contains(container)) {
+        if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+        return;
+      }
+      currentIndex = (currentIndex + 1) % cards.length;
+      updatePositions();
+    }, AUTO_DELAY);
+  };
+  const stopAuto = (): void => {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  };
+
+  dotsEls.forEach((d) => {
+    d.addEventListener('click', () => {
+      goTo(parseInt(d.getAttribute('data-index') || '0', 10));
+      resetAuto();
+    });
+  });
+
+  // 悬停暂停
+  container.addEventListener('mouseenter', stopAuto);
+  container.addEventListener('mouseleave', resetAuto);
+
+  // 触摸滑动
+  let touchX = 0;
+  container.addEventListener('touchstart', (e: TouchEvent) => { touchX = e.changedTouches[0].screenX; stopAuto(); }, { passive: true });
+  container.addEventListener('touchend', (e: TouchEvent) => {
+    const diff = touchX - e.changedTouches[0].screenX;
+    if (Math.abs(diff) > 40) { if (diff > 0) goTo(currentIndex + 1); else goTo(currentIndex - 1); }
+    resetAuto();
+  }, { passive: true });
+
+  // 键盘导航（仅在轮播可见时响应，移除后自动解绑）
+  const keyHandler = (e: KeyboardEvent): void => {
+    if (!document.body.contains(container)) { window.removeEventListener('keydown', keyHandler); return; }
+    const rect = container.getBoundingClientRect();
+    if (rect.top >= window.innerHeight || rect.bottom <= 0) return;
+    if (e.key === 'ArrowRight') { goTo(currentIndex + 1); resetAuto(); }
+    else if (e.key === 'ArrowLeft') { goTo(currentIndex - 1); resetAuto(); }
+  };
+  window.addEventListener('keydown', keyHandler);
+
+  updatePositions();
+  resetAuto();
+  log3('样式3 堆叠卡片轮播注入完成, cards=', cards.length);
+}
+
 /* ========== 预加载优雅占位(替代硬编码 demo 无职转生) ========== */
 // 真实片库未就绪时显示; 一旦 fetchShowsViaIPC 拉到数据, 上层 rebuild 机制会自动替换为真实轮播
 function buildLoadingPlaceholder(target: HTMLElement): void {
@@ -2024,8 +2299,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   const container = document.createElement('div');
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   const _blur = 'backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%)';
-  if (_cs === 2) {
-    // 样式2 骨架: 高度与样式1/真实样式2 轮播一致(max-height:calc(100vh-380px);aspect-ratio:16/9), 满铺暗底, 避免加载完高度跳变
+  if (_cs === 2 || _cs === 3) {
+    // 样式2/3 骨架: 高度与样式1/真实轮播一致(max-height:calc(100vh-380px);aspect-ratio:16/9), 满铺暗底, 避免加载完高度跳变
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
@@ -2034,8 +2309,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 
-  if (_cs === 2) {
-    // [lc-805] 样式2 骨架: 暗底 + 底部内容占位(标题/简介/按钮) + 底部进度条/指示点, 与样式2 轮播 footer 视觉一致
+  if (_cs === 2 || _cs === 3) {
+    // [lc-805/lc-809] 样式2/3 骨架: 暗底 + 底部内容占位(标题/简介/按钮) + 底部进度条/指示点, 与样式2/3 暗色轮播视觉一致
     const overlay = document.createElement('div');
     overlay.className = 'fntv-ph-s2-overlay';
     container.appendChild(overlay);
