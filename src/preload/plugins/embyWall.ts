@@ -4393,23 +4393,7 @@ function handle(): void {
   //   避免文件管理/设置等系统页的缩略图容器背景被误杀变黑框.
   document.documentElement.classList.add('fnos-tv-page');
 
-  // [lc-780/lc-781] 轮播图样式切换：更新根容器属性，并实时重建轮播（无需刷新页面即可在样式 1 ↔ 2 间切换）
-  try {
-    window.addEventListener('fntv:carousel-style', (e: any) => {
-      const s = (e && e.detail && typeof e.detail.style === 'number') ? e.detail.style
-        : parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
-      if (_carouselContainer) _carouselContainer.setAttribute('data-fntv-carousel-style', String(s));
-      // [lc-781] 实时重建：旧样式 DOM 会被清空并按新样式重渲染（data-fntv-carousel-style 已持久化到 localStorage）
-      if (_carouselInited) {
-        _carouselInited = false;
-        try { injectCarousel(); } catch (err) { log('[s2] rebuild err', err); }
-      } else if (_apiShows.length === 0 && _carouselWrapper && document.body.contains(_carouselWrapper)) {
-        // [lc-805] 仍处骨架阶段: 按新样式重建占位, 避免样式切换后骨架仍是旧样式的突兀跳变
-        _placeholderInited = false;
-        try { injectCarousel(); } catch (err) { log('[s2] rebuild err', err); }
-      }
-    });
-  } catch (_) { /* ignore */ }
+  // [lc-845] 旧「实时重建」机制已废弃: 样式切换改为设置面板点击后整页重载回首页(见 buildSettingsPanel 的 csSeg 点击处理), 故此处不再监听 fntv:carousel-style 事件。
 
   // 导航诊断: 记录每次URL变化, 排查"返回落到全部剧集而非首页"
   const logNav = (label: string) => log('NAV', label, location.href);
@@ -4816,7 +4800,7 @@ function handle(): void {
       try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
 
-    // [lc-780/lc-781] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 玻璃风(当前)，样式 2 = 滑动切换+进度条(已实装)，3/4 占位
+    // [lc-780/lc-781→lc-845] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 玻璃风，样式 2 = 滑动切换+进度条，样式 3 = 堆叠卡片，样式 4 = 3D 旋转木马；点击后整页重载回首页并刷新(见下方 click 处理)
     const getCs = (): number => {
       const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
       return (v >= 1 && v <= 4) ? v : 1;
@@ -4830,7 +4814,7 @@ function handle(): void {
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
-    const csLabels = ['样式 1（玻璃）', '样式 2（滑动）', '样式 3', '样式 4'];
+    const csLabels = ['样式 1（玻璃）', '样式 2（滑动）', '样式 3（堆叠）', '样式 4（3D 旋转）'];
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -4846,7 +4830,7 @@ function handle(): void {
     csWrap.appendChild(csSeg);
     const csHint = document.createElement('div');
     csHint.style.cssText = 'font-size:11px;opacity:.7;margin-top:6px;line-height:1.4;';
-    csHint.textContent = '样式 1 为玻璃风；样式 2 为滑动切换 + 进度条（已上线）；样式 3 / 4 即将推出。切换后实时生效。';
+    csHint.textContent = '切换样式后将自动回到首页并刷新，立即应用新样式。';
     csWrap.appendChild(csHint);
     const paintCs = (): void => {
       const cur = getCs();
@@ -4862,7 +4846,8 @@ function handle(): void {
         const s = parseInt((btn as HTMLElement).dataset.style || '1', 10);
         localStorage.setItem('fnos-carousel-style', String(s));
         paintCs();
-        try { window.dispatchEvent(new CustomEvent('fntv:carousel-style', { detail: { style: s } })); } catch (_) {}
+        // [lc-845] 切换样式后强制回到首页并刷新整个首页: 整页重载到 /v(新样式已从 localStorage 读取, 干净生效, 避免 live-rebuild 跨样式残留/不彻底)
+        try { window.location.href = (window.location.origin || '') + '/v'; } catch (_) { try { window.location.reload(); } catch (__){} }
       });
     });
     wrap.appendChild(csWrap);
