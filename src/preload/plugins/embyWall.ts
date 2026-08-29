@@ -2334,12 +2334,12 @@ function buildCarouselStyle4(
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // 布局：3D 旋转木马舞台（比 1/2/3 矮 60px：预留 380→440，避免把下方「继续观看」顶下去导致底字不安全）
+  // 布局：3D 旋转木马舞台（高度与样式1/2/3 一致：calc(100vh - 380px)，避免加载完高度跳变；海报内部底部留白(见 .fntv-s4-card)负责与下方模块拉开间距）
   wrapper.style.cssText = 'display:block;padding:0;margin:0';
   container.style.width = '100%';
   container.style.height = '';
   container.style.minHeight = '0';
-  container.style.maxHeight = 'calc(100vh - 440px)';
+  container.style.maxHeight = 'calc(100vh - 380px)';
   container.style.aspectRatio = '16 / 9';
   container.style.margin = '0';
   container.style.overflow = 'hidden'; // [s4] 舞台裁剪 3D 场景（无背景无边框，卡片自身带完整视觉）
@@ -2591,19 +2591,19 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 /* [lc-830] 样式4 骨架: 契合 3D 旋转木马(透明无框容器 + 中央海报占位 + 左右侧卡peek + 底部指示点 + 底部进度) */
 .fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
 .fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-.fntv-ph-s4-card{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#1b1814;box-shadow:0 24px 44px rgba(0,0,0,.5);z-index:2}
-.fntv-ph-s4-peek{position:absolute;top:3%;height:94%;width:46%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.38;z-index:0}
-.fntv-ph-s4-peek.left{left:1%;transform:rotate(-5deg) translateY(8px)}
-.fntv-ph-s4-peek.right{right:1%;transform:rotate(5deg) translateY(8px)}
-.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.55) 30%,rgba(0,0,0,.12) 62%,transparent 100%);z-index:2;pointer-events:none}
-.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 4.4rem;gap:.7rem;box-sizing:border-box}
+.fntv-ph-s4-card{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#1e1b17;box-shadow:0 25px 45px rgba(0,0,0,.7);z-index:2}
+.fntv-ph-s4-peek{position:absolute;top:3%;height:94%;width:42%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.4;z-index:0}
+.fntv-ph-s4-peek.left{left:3%;transform:perspective(700px) rotateY(16deg)}
+.fntv-ph-s4-peek.right{right:3%;transform:perspective(700px) rotateY(-16deg)}
+.fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.95) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.1) 70%,transparent 100%);z-index:2;pointer-events:none}
+.fntv-ph-s4-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 3rem;gap:.7rem;box-sizing:border-box}
 .fntv-ph-s4-meta{width:96px;height:12px;border-radius:6px;background:rgba(255,255,255,.16)}
 .fntv-ph-s4-title{width:48%;height:46px;border-radius:12px;background:rgba(255,255,255,.2)}
 .fntv-ph-s4-desc{width:62%;height:12px;border-radius:6px;background:rgba(255,255,255,.14)}
 .fntv-ph-s4-desc.s2{width:42%}
 .fntv-ph-s4-actions{display:flex;gap:.8rem;margin-top:.7rem}
 .fntv-ph-s4-btn{width:124px;height:44px;border-radius:50px;background:rgba(255,255,255,.18)}
-.fntv-ph-s4-dots{position:absolute;left:7%;right:7%;bottom:40px;z-index:6;display:flex;justify-content:center;gap:8px}
+.fntv-ph-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:6;display:flex;justify-content:center;gap:8px}
 .fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
 .fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 `;
@@ -2635,8 +2635,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
     // 样式2/3 暗色骨架: 高度与真实轮播一致, 满铺暗底, 避免加载完高度跳变
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
   } else if (_cs === 4) {
-    // [lc-830] 样式4 骨架容器: 透明无框(与真实样式4 一致, 无背景无边框); 高度走 calc(100vh - 440px) 与真实样式4 一致, 避免加载完高度跳变
-    container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 440px);aspect-ratio:16/9;border-radius:24px;background:transparent;margin:0 auto;box-shadow:none`;
+    // [lc-834] 样式4 骨架容器: 透明无框(与真实样式4 一致, 无背景无边框); 高度走 calc(100vh - 380px) 与真实样式4/样式1 一致, 避免加载完高度跳变
+    container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:transparent;margin:0 auto;box-shadow:none`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
