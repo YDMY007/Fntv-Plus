@@ -2273,6 +2273,24 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-s2-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
 .fntv-ph-s2-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
 .fntv-ph-s2-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
+/* [lc-815] 浅色模式骨架(适配 fnOS 浅色主题): 统一浅色设计, 复用 .fnos-ph-skel 的浅色微光(var 随主题切换) */
+.fntv-ph-l-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(255,255,255,.9) 0%,rgba(255,255,255,.55) 26%,rgba(255,255,255,.18) 58%,rgba(255,255,255,.04) 78%,transparent 100%);z-index:1;pointer-events:none}
+.fntv-ph-l-content{position:absolute;left:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem 2.5rem 4.6rem;gap:.7rem;box-sizing:border-box}
+.fntv-ph-l-meta{width:96px;height:12px;border-radius:6px;background:#cfd6e2}
+.fntv-ph-l-title{width:48%;height:48px;border-radius:12px;background:#c6cedb}
+.fntv-ph-l-desc{width:62%;height:12px;border-radius:6px;background:#d2d9e4}
+.fntv-ph-l-desc.s2{width:42%}
+.fntv-ph-l-actions{display:flex;gap:.8rem;margin-top:.7rem}
+.fntv-ph-l-btn{width:124px;height:44px;border-radius:50px;background:#cdd5e1}
+.fntv-ph-l-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 16px}
+.fntv-ph-l-status{font-size:12.5px;color:rgba(96,88,74,.9);letter-spacing:.5px;flex:0 0 auto;white-space:nowrap;font-weight:600}
+.fntv-ph-l-pct{font-size:12.5px;color:#c8923a;letter-spacing:.5px;flex:0 0 auto;font-variant-numeric:tabular-nums;font-weight:700}
+.fntv-ph-l-pbar{flex:1;height:4px;background:rgba(20,30,60,.12);border-radius:4px;overflow:hidden;position:relative}
+.fntv-ph-l-pfill{height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,#d4a04c,#f0b85c);transition:width .25s ease}
+.fntv-ph-l-dots{display:flex;gap:8px;align-items:center;flex:0 0 auto}
+.fntv-ph-l-dot{width:8px;height:8px;border-radius:50%;background:rgba(120,110,95,.3);border:1px solid rgba(60,50,40,.18)}
+.fntv-ph-l-dot.active{background:#e0a24c;transform:scale(1.4);border-color:#fff}
+.fntv-ph-l-text{color:#5a5448}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
@@ -2287,15 +2305,19 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:-8px';
   _carouselWrapper = wrapper;
 
-  // [lc-805] 按当前轮播样式渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
-  //   避免"先样式1 紫底骨架→加载完才切样式2"的突兀跳变。
+  // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
+  //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
   const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10); return (v >= 1 && v <= 4) ? v : 1; })();
+  const _isDark = getEffectiveDark(); // [lc-815] 跟随 fnOS 明暗主题
 
   const container = document.createElement('div');
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   const _blur = 'backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%)';
-  if (_cs === 2 || _cs === 3) {
-    // 样式2/3 骨架: 高度与样式1/真实轮播一致(max-height:calc(100vh-380px);aspect-ratio:16/9), 满铺暗底, 避免加载完高度跳变
+  if (!_isDark) {
+    // [lc-815] 浅色模式: 统一浅色容器(适配 fnOS 浅色主题)
+    container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,#eef1f6,#dde3ec);${_blur};margin:0 auto;box-shadow:0 18px 50px -14px rgba(40,50,80,.18)`;
+  } else if (_cs === 2 || _cs === 3) {
+    // 样式2/3 暗色骨架: 高度与样式1/真实轮播一致, 满铺暗底, 避免加载完高度跳变
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
@@ -2304,7 +2326,35 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 
-  if (_cs === 2) {
+  if (!_isDark) {
+    // [lc-815] 浅色模式骨架: 统一浅色设计(复用 .fnos-ph-skel 的浅色微光, var 随 html.dark 自动切换), 布局与暗色样式2 一致
+    const overlay = document.createElement('div');
+    overlay.className = 'fntv-ph-l-overlay';
+    container.appendChild(overlay);
+    const content = document.createElement('div');
+    content.className = 'fntv-ph-l-content';
+    const meta = document.createElement('div'); meta.className = 'fnos-ph-skel fntv-ph-l-meta';
+    const title = document.createElement('div'); title.className = 'fnos-ph-skel fntv-ph-l-title';
+    const desc1 = document.createElement('div'); desc1.className = 'fnos-ph-skel fntv-ph-l-desc';
+    const desc2 = document.createElement('div'); desc2.className = 'fnos-ph-skel fntv-ph-l-desc s2';
+    const actions = document.createElement('div'); actions.className = 'fntv-ph-l-actions';
+    const btn1 = document.createElement('div'); btn1.className = 'fnos-ph-skel fntv-ph-l-btn';
+    const btn2 = document.createElement('div'); btn2.className = 'fnos-ph-skel fntv-ph-l-btn';
+    actions.appendChild(btn1); actions.appendChild(btn2);
+    content.appendChild(meta); content.appendChild(title); content.appendChild(desc1); content.appendChild(desc2); content.appendChild(actions);
+    container.appendChild(content);
+    const footer = document.createElement('div');
+    footer.className = 'fntv-ph-l-footer';
+    statusEl = document.createElement('div'); statusEl.className = 'fntv-ph-l-status fnos-ph-text'; statusEl.textContent = '加载中…';
+    percentEl = document.createElement('div'); percentEl.className = 'fntv-ph-l-pct'; percentEl.textContent = '0%';
+    const pbar = document.createElement('div'); pbar.className = 'fntv-ph-l-pbar';
+    fillEl = document.createElement('div'); fillEl.className = 'fntv-ph-l-pfill';
+    pbar.appendChild(fillEl);
+    const dots = document.createElement('div'); dots.className = 'fntv-ph-l-dots';
+    for (let i = 0; i < 5; i++) { const d = document.createElement('span'); d.className = 'fntv-ph-l-dot' + (i === 0 ? ' active' : ''); dots.appendChild(d); }
+    footer.appendChild(statusEl); footer.appendChild(percentEl); footer.appendChild(pbar); footer.appendChild(dots);
+    container.appendChild(footer);
+  } else if (_cs === 2) {
     // [lc-805/lc-809] 样式2 骨架: 暗底 + 底部内容占位(标题/简介/按钮) + 底部进度条/指示点, 与样式2 暗色轮播视觉一致
     const overlay = document.createElement('div');
     overlay.className = 'fntv-ph-s2-overlay';
