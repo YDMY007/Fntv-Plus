@@ -2591,8 +2591,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 /* [lc-830] 样式4 骨架: 契合 3D 旋转木马(透明无框容器 + 中央海报占位 + 左右侧卡peek + 底部指示点 + 底部进度) */
 .fntv-ph-s4-shine{position:absolute;inset:0;overflow:hidden;background:#1b1814}
 .fntv-ph-s4-shine::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
-.fntv-ph-s4-card{position:absolute;left:9%;top:3%;width:82%;height:92%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#1b1814;box-shadow:0 24px 44px rgba(0,0,0,.5);z-index:2}
-.fntv-ph-s4-peek{position:absolute;top:9%;height:82%;width:46%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.38;z-index:0}
+.fntv-ph-s4-card{position:absolute;left:7%;top:3%;width:86%;height:94%;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#1b1814;box-shadow:0 24px 44px rgba(0,0,0,.5);z-index:2}
+.fntv-ph-s4-peek{position:absolute;top:3%;height:94%;width:46%;border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.05);background:#16130f;opacity:.38;z-index:0}
 .fntv-ph-s4-peek.left{left:1%;transform:rotate(-5deg) translateY(8px)}
 .fntv-ph-s4-peek.right{right:1%;transform:rotate(5deg) translateY(8px)}
 .fntv-ph-s4-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.55) 30%,rgba(0,0,0,.12) 62%,transparent 100%);z-index:2;pointer-events:none}
@@ -2603,7 +2603,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
 .fntv-ph-s4-desc.s2{width:42%}
 .fntv-ph-s4-actions{display:flex;gap:.8rem;margin-top:.7rem}
 .fntv-ph-s4-btn{width:124px;height:44px;border-radius:50px;background:rgba(255,255,255,.18)}
-.fntv-ph-s4-dots{position:absolute;left:9%;right:9%;bottom:40px;z-index:6;display:flex;justify-content:center;gap:8px}
+.fntv-ph-s4-dots{position:absolute;left:7%;right:7%;bottom:40px;z-index:6;display:flex;justify-content:center;gap:8px}
 .fntv-ph-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3)}
 .fntv-ph-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 `;
