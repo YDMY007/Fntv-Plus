@@ -2270,7 +2270,7 @@ function buildCarouselStyle4(
     const st = document.createElement('style');
     st.id = 'fnos-carousel-style4-style';
     st.textContent = `
-[data-fntv-carousel-style="4"]{background:rgba(20,18,16,.75);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid #2a2622;overflow:hidden;border-radius:24px;perspective:1600px}
+[data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1600px}
 [data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.2,1.1)}
 [data-fntv-carousel-style="4"] .fntv-s4-card{
   position:absolute;left:11%;top:9%;width:78%;height:82%;
@@ -2334,10 +2334,9 @@ function buildCarouselStyle4(
   container.style.height = '';
   container.style.minHeight = '0';
   container.style.maxHeight = 'calc(100vh - 380px)';
-  container.style.boxShadow = '0 26px 60px -12px rgba(0,0,0,.55)';
   container.style.aspectRatio = '16 / 9';
   container.style.margin = '0';
-  container.style.overflow = 'hidden'; // [s4] 舞台裁剪 3D 场景（background/border/perspective 交给 scoped CSS 的舞台样式）
+  container.style.overflow = 'hidden'; // [s4] 舞台裁剪 3D 场景（无背景无边框，卡片自身带完整视觉）
   container.style.perspective = '1600px';
 
   const accents = ['#6eb5ff', '#d69b6a', '#b08fe0', '#5fb0a8', '#e08585'];
