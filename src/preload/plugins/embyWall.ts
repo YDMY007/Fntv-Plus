@@ -3530,7 +3530,8 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   display:grid !important;
   width:100% !important;
   box-sizing:border-box !important;
-  grid-template-columns:64% 36% !important;
+  /* 用 fr 而非 %：fr 会先扣除 gap 再按比例分配，避免 64%+36%+gap 总和超 100% 被祖先 overflow:hidden 裁切 */
+  grid-template-columns:minmax(0,64fr) minmax(0,36fr) !important;
   gap:20px !important;
   align-items:start !important;
 }
