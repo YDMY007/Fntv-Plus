@@ -113,9 +113,6 @@ function injectStyle(): void {
   transition: transform .2s ease, box-shadow .2s ease, right .3s ease, bottom .3s ease;
 }
 
-/* [lc-804] 样式 2 时「每日放送」按钮使用当前位置（距右 95px / 距底 98px），面板随之 */
-body.fntv-cs-2 #fntv-hot-tab { right: 95px; bottom: 98px; }
-body.fntv-cs-2 #fntv-hot-panel { right: 88px; bottom: 108px; }
 @keyframes fntv-gongdeng-grad {
   0%,100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
@@ -1156,14 +1153,7 @@ function initHotUpdates(): void {
   // 兜底：某些导航可能绕过 history API（如整页加载/特殊路由），定时核对一次首页状态
   setInterval(syncHomeVisibility, 3000);
 
-  // [lc-804] 「每日放送」按钮位置跟随轮播样式：样式 2 用当前位置、样式 1(及其它)用最初右下角。
-  // 仅切一个 body class，位置全部交给 CSS（避免运行时计算/内联样式覆盖）。
-  const applyHotTabStyle = (): void => {
-    const cs = parseInt(localStorage.getItem('fnos-carousel-style') || '1', 10);
-    document.body.classList.toggle('fntv-cs-2', cs === 2);
-  };
-  applyHotTabStyle(); // 初次挂载即同步一次（localStorage 已是样式真值）
-  window.addEventListener('fntv:carousel-style', applyHotTabStyle as EventListener);
+  // 每日放送按钮固定使用样式1 右下角位置（与轮播样式无关），见 #fntv-hot-tab 默认 CSS。
 
   // [lc-457-fix] 首页挂载即静默预建飞牛影视库索引, 用户展开浮层/点卡片前通常早已滚完就绪,
   // 避免「刚展开就点」时索引仍在构建(仅首屏项)而误判为库内无该剧 → 错误跳外链。

@@ -1070,89 +1070,8 @@ function findMediaLibrarySection(): HTMLElement | null {
   return null;
 }
 
-// [lc-790] 样式 2 专属：将 hero（媒体库）之后的「继续观看」区块下移到首屏之外（仅加间距，不隐藏）。
-//   定位思路（非全页文字扫描）：
-//     1) 取 hero 的后续兄弟节点，找第一个「含标题且含多个媒体卡片」的内容区块（fnOS 首页顺序：
-//        媒体库(hero) → 继续观看 → 最近添加…，故 hero 之后第一个内容区块即继续观看）；
-//     2) 以标题含「继续观看」做确认，避免「无观看记录时首块是最近添加」被误下移。
-//   只改 marginTop 把整块推过首屏底部（留 24px 间隙），不 display:none（用户明确不要隐藏）。
-function findResumeSection(hero: HTMLElement | null): HTMLElement | null {
-  if (!hero) return null;
-  const parent = hero.parentElement;
-  if (!parent) return null;
-  let sib = hero.nextElementSibling as HTMLElement | null;
-  while (sib) {
-    const titleEl = sib.querySelector('strong,h2,h3');
-    const title = (titleEl && (titleEl.textContent || '')) || '';
-    const cardCount = sib.querySelectorAll('img').length;
-    if (title && cardCount > 2) {
-      // 命中第一个内容区块：仅当标题确为「继续观看」才视为目标
-      if (/继续观看|继续播放|观看记录|resume|continue/i.test(title)) return sib;
-      // 否则（如首块是最近添加）→ 无观看记录可下移，直接放弃
-      return null;
-    }
-    sib = sib.nextElementSibling as HTMLElement | null;
-  }
-  return null;
-}
-
-// [lc-806] 自愈状态：持续监听「继续观看」区块（fnOS 异步渲染/重渲染会清掉我们加的 marginTop，
-//   导致它回到首屏）。上一版仅靠 600/1500ms 重试，区块常在数秒后才出现 → 漏推。
-//   现改为 MutationObserver 对 hero 父容器做 childList 监听，区块出现或被重建即重推。
-let _resumePushObserver: MutationObserver | null = null;
-let _resumePushDebounce: number | null = null;
-
-function pushResumeDown(hero: HTMLElement | null): void {
-  const apply = (): void => {
-    const r = findResumeSection(hero);
-    if (!r) return; // 区块尚未渲染：等 observer/重试触发
-    // 已推且仍落在首屏外 → 不重复操作，避免每次 mutation 抖动
-    if (r.getAttribute('data-fntv-resume-pushed') === '1' && r.offsetParent !== null) {
-      const t = r.getBoundingClientRect().top;
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      if (t >= vh) return; // 仍安全在首屏外
-    }
-    r.style.marginTop = ''; // 先复位，从原始位置重算
-    const top = r.getBoundingClientRect().top;
-    const vh = window.innerHeight || document.documentElement.clientHeight;
-    if (top < vh) {
-      // 当前仍在首屏内 → 推到首屏之外，并留 24px 间隙
-      r.style.marginTop = (vh - top + 24) + 'px';
-      r.setAttribute('data-fntv-resume-pushed', '1');
-    } else {
-      r.removeAttribute('data-fntv-resume-pushed');
-    }
-  };
-
-  // 断开旧 observer（rebuild/重复注入时避免叠加多个监听）
-  if (_resumePushObserver) { _resumePushObserver.disconnect(); _resumePushObserver = null; }
-  if (_resumePushDebounce) { clearTimeout(_resumePushDebounce); _resumePushDebounce = null; }
-
-  apply();
-  // 保留短重试作为即时兜底（区块偶尔在 observer 绑定前闪现）
-  setTimeout(apply, 600);
-  setTimeout(apply, 1500);
-
-  // 持续自愈：监听 hero 父容器子树变化（fnOS 异步插入/重渲染「继续观看」时触发）
-  const parent = hero && hero.parentElement;
-  if (parent) {
-    _resumePushObserver = new MutationObserver(() => {
-      if (_resumePushDebounce) clearTimeout(_resumePushDebounce);
-      _resumePushDebounce = window.setTimeout(apply, 350);
-    });
-    _resumePushObserver.observe(parent, { childList: true, subtree: true });
-  }
-}
-
-function restoreResume(): void {
-  // [lc-806] 切回非样式 2 时：停掉自愈监听并清掉所有已推标记
-  if (_resumePushObserver) { _resumePushObserver.disconnect(); _resumePushObserver = null; }
-  if (_resumePushDebounce) { clearTimeout(_resumePushDebounce); _resumePushDebounce = null; }
-  document.querySelectorAll('[data-fntv-resume-pushed]').forEach((el) => {
-    (el as HTMLElement).style.marginTop = '';
-    el.removeAttribute('data-fntv-resume-pushed');
-  });
-}
+// [lc-808] 「继续观看」模块不再做特殊下移处理，保持与样式 1 一致的普通位置展示。
+//   （原 findResumeSection/pushResumeDown/restoreResume 逻辑已移除。）
 
 // [lc-183] 判断当前是否有 fnOS 弹窗/对话框打开。
 // 这些弹窗是 SPA 模态框(打开时 URL 仍是 /v, lc-182 路径守卫拦不住),
@@ -1370,11 +1289,8 @@ function injectCarousel(): void {
   if (_cs === 2) {
     buildCarouselStyle2(container, wrapper, shows, base, rebuild);
     if (!rebuild) target.appendChild(wrapper);
-    pushResumeDown(target); // [lc-790] 样式 2：将「继续观看」下移到首屏之外（仅加间距，不隐藏）
     return;
   }
-
-  restoreResume(); // [lc-790] 非样式 2 时恢复「继续观看」区块（清掉样式 2 可能加的下移间距）
 
   // [lc-442] wrapper 改为 flex 并排：左轮播容器 + 右侧独立海报条容器
   wrapper.style.display = 'flex';
