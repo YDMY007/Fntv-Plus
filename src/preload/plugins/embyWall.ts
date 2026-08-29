@@ -2004,6 +2004,19 @@ function buildCarouselStyle3(
     st.id = 'fnos-carousel-style3-style';
     st.textContent = `
 [data-fntv-carousel-style="3"] .fntv-s3-stack{position:relative;width:100%;height:100%}
+/* [lc-819] 底部卡片堆叠感：deck 装饰层从 active 卡下方探出，营造一摞卡片的既视感 */
+[data-fntv-carousel-style="3"] .fntv-s3-stack::before,
+[data-fntv-carousel-style="3"] .fntv-s3-stack::after{
+  content:'';position:absolute;left:50%;
+  transform:translateX(-50%);
+  border-radius:24px;
+  background:linear-gradient(180deg,#241f18,#14110c);
+  border:1px solid rgba(255,255,255,.07);
+  box-shadow:0 22px 44px rgba(0,0,0,.45);
+  z-index:0;pointer-events:none;
+}
+[data-fntv-carousel-style="3"] .fntv-s3-stack::before{width:94%;height:54px;bottom:-16px}
+[data-fntv-carousel-style="3"] .fntv-s3-stack::after{width:86%;height:54px;bottom:-30px}
 [data-fntv-carousel-style="3"] .fntv-s3-card{
   position:absolute;inset:0;border-radius:24px;overflow:hidden;
   box-shadow:0 30px 50px rgba(0,0,0,.6);
