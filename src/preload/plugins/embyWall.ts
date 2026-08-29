@@ -3534,8 +3534,9 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   gap:20px !important;
   align-items:start !important;
 }
-.fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; }
-.fnos-immersive-season .fnos-season-aside{ min-width:0 !important; }
+.fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; overflow:visible !important; }
+.fnos-immersive-season .fnos-season-aside{ min-width:0 !important; overflow:visible !important; max-width:none !important; }
+.fnos-immersive-season .fnos-season-aside > *{ overflow:visible !important; max-width:none !important; }
 
 /* 选集容器：横向滚动 -> 纵向列表 */
 .fnos-immersive-season .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]){
@@ -3634,8 +3635,16 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p{ width:100% !important; max-width:none !important; text-align:left !important; white-space:normal !important; overflow:visible !important; text-overflow:clip !important; line-height:1.35 !important; margin:0 !important; padding:0 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; overflow:visible !important; }
+/* 彻底干掉 fnOS 的 truncate（演员姓名/角色文字必须完整显示） */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p,
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p.truncate{
+  width:100% !important; max-width:none !important; min-width:0 !important;
+  text-align:left !important; white-space:normal !important;
+  overflow:visible !important; text-overflow:clip !important;
+  line-height:1.35 !important; margin:0 !important; padding:0 !important;
+  display:block !important;
+}
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
 `;
@@ -3802,7 +3811,7 @@ function restyleCastItems(container: HTMLElement): void {
   items.forEach((a) => {
     if (a.classList.contains('fnos-cast-item')) return;
     const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
-    ps.forEach((p) => p.classList.remove('w-[120px]'));
+    ps.forEach((p) => { p.classList.remove('w-[120px]', 'truncate'); });
     if (ps.length) {
       const info = document.createElement('div');
       info.className = 'fnos-cast-info';
