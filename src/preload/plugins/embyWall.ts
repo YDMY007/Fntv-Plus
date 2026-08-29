@@ -2017,8 +2017,8 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateY(60px) translateX(20px);z-index:1;pointer-events:none}
 [data-fntv-carousel-style="3"] .fntv-s3-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
 [data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
-[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.5rem;font-weight:800;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 10px rgba(0,0,0,.8);display:inline-block;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis}
-[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:44px;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
+[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.9rem;font-weight:800;letter-spacing:1.5px;color:#fff;display:inline-block;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis}
+[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:60px;max-width:100%;object-fit:contain;display:block}
 [data-fntv-carousel-style="3"] .fntv-s3-info{position:absolute;left:0;right:0;bottom:0;z-index:3;color:#fff;padding:2rem 2rem 3rem;box-sizing:border-box}
 [data-fntv-carousel-style="3"] .fntv-s3-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
 [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 15px rgba(0,0,0,.8);margin-bottom:.4rem;line-height:1.15;word-break:break-word}
@@ -2038,7 +2038,7 @@ function buildCarouselStyle3(
   [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.5rem 1.5rem 2.4rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.5rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.85rem}
-  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:1.1rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:1.4rem}
   [data-fntv-carousel-style="3"] .fntv-s3-bg{padding:1.5rem}
 }
 @media (max-width:500px){
