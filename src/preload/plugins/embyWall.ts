@@ -2036,8 +2036,8 @@ function buildCarouselStyle3(
   box-shadow:none;
   transition:transform .9s cubic-bezier(.22,1,.36,1),opacity .7s ease,filter .7s ease;
 }
-[data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:.55;transform:translateY(20px) translateX(-70px) scale(.92) rotateZ(-2.5deg) rotateX(4deg);z-index:7;filter:blur(1px) brightness(.75)}
-[data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:.55;transform:translateY(20px) translateX(70px) scale(.92) rotateZ(2.5deg) rotateX(4deg);z-index:7;filter:blur(1px) brightness(.75)}
+[data-fntv-carousel-style="3"] .fntv-s3-card.prev{opacity:0;transform:translateX(-40px) scale(.92);z-index:7;filter:blur(2px) brightness(.6);pointer-events:none}
+[data-fntv-carousel-style="3"] .fntv-s3-card.next{opacity:0;transform:translateX(40px) scale(.92);z-index:7;filter:blur(2px) brightness(.6);pointer-events:none}
 [data-fntv-carousel-style="3"] .fntv-s3-card.behind1{opacity:.4;transform:translateY(-48px) scale(.9) rotateX(-5deg);transform-origin:center top;z-index:5;filter:blur(1.5px) brightness(.65)}
 [data-fntv-carousel-style="3"] .fntv-s3-card.behind2{opacity:.3;transform:translateY(-82px) scale(.83) rotateX(-7deg);transform-origin:center top;z-index:4;filter:blur(2px) brightness(.55)}
 [data-fntv-carousel-style="3"] .fntv-s3-card.deep{opacity:.2;transform:translateY(-110px) scale(.78) rotateX(-9deg);transform-origin:center top;z-index:3;filter:blur(2.5px) brightness(.45);pointer-events:none}
