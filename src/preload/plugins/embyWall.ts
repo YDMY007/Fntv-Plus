@@ -2017,8 +2017,8 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-card.behind{opacity:0;transform:scale(.7) translateY(60px) translateX(20px);z-index:1;pointer-events:none}
 [data-fntv-carousel-style="3"] .fntv-s3-bg{width:100%;height:100%;background-size:cover;background-position:center;position:relative;display:flex;align-items:flex-end;padding:2rem}
 [data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
-[data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.9rem;font-weight:800;letter-spacing:1.5px;color:#fff;display:inline-block;white-space:nowrap;max-width:70%;overflow:hidden;text-overflow:ellipsis}
-[data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:60px;max-width:100%;object-fit:contain;display:block}
+[data-fntv-carousel-style="3"] .fntv-s3-info h3.fntv-s3-title--logo{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:initial;color:#fff;filter:none;display:block;margin-bottom:.4rem;line-height:1.1}
+[data-fntv-carousel-style="3"] .fntv-s3-title-logo-img{max-height:100px;max-width:64%;width:auto;height:auto;display:block;object-fit:contain;filter:drop-shadow(0 4px 18px rgba(0,0,0,.7))}
 [data-fntv-carousel-style="3"] .fntv-s3-info{position:absolute;left:0;right:0;bottom:0;z-index:3;color:#fff;padding:2rem 2rem 3rem;box-sizing:border-box}
 [data-fntv-carousel-style="3"] .fntv-s3-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
 [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;margin-bottom:.4rem;line-height:1.15;word-break:break-word;background:var(--fnos-hero-title-grad);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;filter:var(--fnos-hero-title-glow)}
@@ -2038,12 +2038,13 @@ function buildCarouselStyle3(
   [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.5rem 1.5rem 2.4rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.5rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.85rem}
-  [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:1.4rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-title-logo-img{max-height:84px}
   [data-fntv-carousel-style="3"] .fntv-s3-bg{padding:1.5rem}
 }
 @media (max-width:500px){
   [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.2rem 1.2rem 2rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.3rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-title-logo-img{max-height:64px}
   [data-fntv-carousel-style="3"] .fntv-s3-actions{flex-direction:column;align-items:flex-start}
   [data-fntv-carousel-style="3"] .fntv-s3-play,[data-fntv-carousel-style="3"] .fntv-s3-detail{padding:.6rem 1.2rem;font-size:.8rem}
 }
@@ -2092,20 +2093,7 @@ function buildCarouselStyle3(
     bg.style.backgroundImage = `linear-gradient(160deg, ${accent}55, #0b1219)`;
     card.appendChild(bg);
 
-    // 顶部 logo 胶囊：有 logo 图显示图，无则文字胶囊（照抄 demo 的 badge 胶囊）
     const genreArr: string[] = (show as any).genres || [];
-    const logo = document.createElement('div');
-    logo.className = 'fntv-s3-logo';
-    logo.textContent = (genreArr[0] || '精选剧场').toUpperCase();
-    card.appendChild(logo);
-    resolveShowLogo(show, base).then((src) => {
-      if (!src) return;
-      logo.textContent = '';
-      const img = document.createElement('img');
-      img.alt = (show as any).title || '';
-      img.src = src;
-      logo.appendChild(img);
-    });
 
     // 内容区（标题/简介用 textContent，避免 HTML 注入）
     const info = document.createElement('div');
@@ -2122,9 +2110,22 @@ function buildCarouselStyle3(
       '</div>';
     (info.querySelector('.meta') as HTMLElement).textContent = meta;
     (info.querySelector('.meta') as HTMLElement).style.display = meta ? '' : 'none';
-    (info.querySelector('h3') as HTMLElement).textContent = (show as any).title || '';
+    const titleEl = info.querySelector('h3') as HTMLElement;
+    titleEl.textContent = (show as any).title || '';
     (info.querySelector('.desc') as HTMLElement).textContent = (show as any).desc || '';
     card.appendChild(info);
+
+    // [lc-817] 标题用 logo 替换，跟样式2 一致：有 logo 则清空文字、塞 logo 图；无 logo 则保留彩色渐变文字标题
+    resolveShowLogo(show, base).then((src) => {
+      if (!src) return;
+      titleEl.textContent = '';
+      titleEl.classList.add('fntv-s3-title--logo');
+      const logoImg = document.createElement('img');
+      logoImg.className = 'fntv-s3-title-logo-img';
+      logoImg.alt = (show as any).title || '';
+      logoImg.src = src;
+      titleEl.appendChild(logoImg);
+    });
 
     // 真实背景图（与样式1/2 同链路：fetchImageAuth → blob）
     const pic = imgUrl((show as any).backdrop);
