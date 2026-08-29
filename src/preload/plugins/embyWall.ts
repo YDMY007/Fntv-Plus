@@ -2273,7 +2273,7 @@ function buildCarouselStyle4(
 [data-fntv-carousel-style="4"]{background:transparent;overflow:hidden;border-radius:24px;perspective:1600px}
 [data-fntv-carousel-style="4"] .fntv-s4-track{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-style:preserve-3d;transition:transform .7s cubic-bezier(.3,.7,.2,1.1)}
 [data-fntv-carousel-style="4"] .fntv-s4-card{
-  position:absolute;left:9%;top:3%;width:82%;height:92%;
+  position:absolute;left:7%;top:3%;width:86%;height:94%;
   border-radius:22px;overflow:hidden;
   box-shadow:0 25px 45px rgba(0,0,0,.7);
   transition:all .75s cubic-bezier(.25,.8,.3,1);
