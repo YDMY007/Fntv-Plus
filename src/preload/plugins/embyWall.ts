@@ -2300,7 +2300,7 @@ function buildCarouselStyle4(
 [data-fntv-carousel-style="4"] .fntv-s4-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="4"] .fntv-s4-play:active,[data-fntv-carousel-style="4"] .fntv-s4-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="4"] .fntv-s4-detail.is-loading{opacity:.6;pointer-events:none}
-[data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:30px;z-index:12;display:flex;justify-content:center;gap:10px}
+[data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:12;display:flex;justify-content:center;gap:10px}
 [data-fntv-carousel-style="4"] .fntv-s4-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="4"] .fntv-s4-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 @media (max-width:800px){
