@@ -2019,7 +2019,7 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-bg::before{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.92) 0%,rgba(0,0,0,.5) 40%,rgba(0,0,0,.15) 70%,rgba(0,0,0,.03) 100%)}
 [data-fntv-carousel-style="3"] .fntv-s3-logo{position:absolute;top:1.5rem;left:1.8rem;z-index:5;pointer-events:none;font-size:1.1rem;font-weight:700;letter-spacing:1.5px;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.7);background:rgba(0,0,0,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:.35rem 1rem;border-radius:30px;border:1px solid rgba(255,215,150,.5);display:inline-block;white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis}
 [data-fntv-carousel-style="3"] .fntv-s3-logo img{max-height:30px;max-width:100%;object-fit:contain;display:block;filter:drop-shadow(0 2px 8px rgba(0,0,0,.7))}
-[data-fntv-carousel-style="3"] .fntv-s3-info{position:absolute;left:0;right:0;bottom:0;z-index:3;color:#fff;padding:2rem 2rem 1.6rem;box-sizing:border-box}
+[data-fntv-carousel-style="3"] .fntv-s3-info{position:absolute;left:0;right:0;bottom:0;z-index:3;color:#fff;padding:2rem 2rem 3rem;box-sizing:border-box}
 [data-fntv-carousel-style="3"] .fntv-s3-info .meta{font-size:.72rem;letter-spacing:2px;color:#d4b48c;margin-bottom:.4rem;text-transform:uppercase}
 [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:2rem;font-weight:700;letter-spacing:1px;text-shadow:0 4px 15px rgba(0,0,0,.8);margin-bottom:.4rem;line-height:1.15;word-break:break-word}
 [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.95rem;color:#e2d7c5;line-height:1.55;text-shadow:0 2px 8px rgba(0,0,0,.7);max-width:520px;margin-bottom:1rem}
@@ -2030,19 +2030,19 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="3"] .fntv-s3-play:active,[data-fntv-carousel-style="3"] .fntv-s3-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="3"] .fntv-s3-detail.is-loading{opacity:.6;pointer-events:none}
-[data-fntv-carousel-style="3"] .fntv-s3-dots{display:flex;justify-content:center;gap:10px;margin-top:.8rem}
+[data-fntv-carousel-style="3"] .fntv-s3-dots{position:absolute;left:0;right:0;bottom:14px;z-index:6;display:flex;justify-content:center;gap:10px}
 [data-fntv-carousel-style="3"] .fntv-s3-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease}
 [data-fntv-carousel-style="3"] .fntv-s3-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
 [data-fntv-carousel-style="3"] .fntv-s3-hint{color:#8f7e68;font-size:.75rem;letter-spacing:1px;text-align:center;margin-top:.2rem}
 @media (max-width:800px){
-  [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.5rem 1.5rem 1.2rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.5rem 1.5rem 2.4rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.5rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info .desc{font-size:.85rem}
   [data-fntv-carousel-style="3"] .fntv-s3-logo{font-size:.9rem;padding:.25rem .8rem}
   [data-fntv-carousel-style="3"] .fntv-s3-bg{padding:1.5rem}
 }
 @media (max-width:500px){
-  [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.2rem 1.2rem 1rem}
+  [data-fntv-carousel-style="3"] .fntv-s3-info{padding:1.2rem 1.2rem 2rem}
   [data-fntv-carousel-style="3"] .fntv-s3-info h3{font-size:1.3rem}
   [data-fntv-carousel-style="3"] .fntv-s3-actions{flex-direction:column;align-items:flex-start}
   [data-fntv-carousel-style="3"] .fntv-s3-play,[data-fntv-carousel-style="3"] .fntv-s3-detail{padding:.6rem 1.2rem;font-size:.8rem}
@@ -2156,7 +2156,7 @@ function buildCarouselStyle3(
     cards.push(card);
   });
 
-  // 指示点（容器外部下方，照抄 demo 的 dots-row）
+  // 指示点（海报容器内部、居中最下方；挂在 stack 内绝对定位贴底）
   const dotsRow = document.createElement('div');
   dotsRow.className = 'fntv-s3-dots';
   cards.forEach((_, i) => {
@@ -2166,7 +2166,7 @@ function buildCarouselStyle3(
     dotsRow.appendChild(d);
     dotsEls.push(d);
   });
-  wrapper.appendChild(dotsRow);
+  stack.appendChild(dotsRow);
   const hint = document.createElement('div');
   hint.className = 'fntv-s3-hint';
   hint.textContent = '自动轮播中';
