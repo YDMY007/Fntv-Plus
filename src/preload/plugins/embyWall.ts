@@ -1791,18 +1791,19 @@ function buildCarouselStyle2(
     (document.head || document.documentElement).appendChild(st);
   }
 
-  // [lc-785] 布局：容器自定高度(撑满视口-预留量)，海报满铺、底部叠加进度条/轮播点。
+  // [lc-785] 布局：海报满铺、底部叠加进度条/轮播点。
   //   footer 改为【绝对定位叠在容器内底部】(z-index:7)，保证永不被推到屏外/被区块裁掉
   //   （之前作为 wrapper 兄弟节点追加，在高容器下被挤出可视区 → 进度条/轮播点"消失"）。
   //   顶部/左右去掉硬边框(接缝源)，仅保留底部柔和投影；frame 叠层做顶/侧渐影。
+  // [lc-807] 高度与样式 1 一致(max-height:calc(100vh - 380px);aspect-ratio:16/9)，宽度不变(100%)
   container.style.width = '100%';
-  container.style.height = 'calc(100vh - 160px)';
+  container.style.height = '';
   container.style.minHeight = '0';
+  container.style.maxHeight = 'calc(100vh - 380px)';
   container.style.border = 'none';
   // 仅底部柔和投影：负扩散(-12px)把光往下压，减少向上/左右溢出 → 顶/侧不再有"框"感
   container.style.boxShadow = '0 26px 60px -12px rgba(0,0,0,.55)';
-  container.style.aspectRatio = 'auto';
-  container.style.maxHeight = 'none';
+  container.style.aspectRatio = '16 / 9';
   container.style.margin = '0';
   container.style.background = 'transparent';
   // frame 叠层：底部可见、顶/侧渐隐的描边(替代原硬边框)，实现"渐影消掉"
@@ -2108,8 +2109,8 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   const _blur = 'backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%)';
   if (_cs === 2) {
-    // 样式2 骨架: 高度与真实样式2 轮播一致(calc(100vh-160px)), 满铺暗底, 不写死 16:9, 避免加载完高度跳变
-    container.style.cssText = `position:relative;overflow:hidden;width:100%;height:calc(100vh - 160px);min-height:0;aspect-ratio:auto;max-height:none;margin:0;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
+    // 样式2 骨架: 高度与样式1/真实样式2 轮播一致(max-height:calc(100vh-380px);aspect-ratio:16/9), 满铺暗底, 避免加载完高度跳变
+    container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
