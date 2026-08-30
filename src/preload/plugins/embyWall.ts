@@ -3554,7 +3554,7 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   height:auto !important;
   column-gap:0 !important;
 }
-/* 单集卡片：Netflix 暗色电影感 —— 缩略图(左) + 信息(中) + 时长/状态(右) */
+/* 单集卡片：缩略图(左) + 信息(中) + 时长/状态(右) —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
 .fnos-immersive-season [data-id="details"]{
   display:flex !important;
   flex-direction:row !important;
@@ -3564,85 +3564,78 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   max-height:none !important;
   gap:16px !important;
   padding:10px 16px !important;
-  margin-bottom:10px !important;
-  background:rgba(22,22,26,.72) !important;
-  border:1px solid rgba(255,255,255,.07) !important;
-  border-radius:12px !important;
+  margin-bottom:12px !important;
+  background:var(--semi-color-bg-2,#fff) !important;
+  border:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
+  border-radius:14px !important;
+  box-shadow:0 2px 10px rgba(0,0,0,.06) !important;
   overflow:visible !important;
   cursor:pointer !important;
-  transition:background .25s ease, transform .28s cubic-bezier(.16,1,.3,1), border-color .25s ease !important;
+  transition:transform .28s cubic-bezier(.25,.1,.25,1), box-shadow .28s ease !important;
 }
 .fnos-immersive-season [data-id="details"]:hover{
-  background:rgba(38,38,44,.92) !important;
-  border-color:rgba(255,255,255,.16) !important;
   transform:translateX(6px) !important;
+  box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
 }
 .fnos-immersive-season [data-id="details"] > div:first-child{
   width:160px !important;
   height:90px !important;
   flex:0 0 160px !important;
-  border-radius:8px !important;
+  border-radius:10px !important;
   overflow:hidden !important;
-  background:#000 !important;
 }
 .fnos-immersive-season [data-id="details"] > div:first-child img{
   width:100% !important; height:100% !important; object-fit:cover !important; display:block !important;
-  transition:transform .4s ease !important;
 }
-.fnos-immersive-season [data-id="details"]:hover > div:first-child img{ transform:scale(1.06) !important; }
 .fnos-immersive-season [data-id="details"] > a{
   display:flex !important;
   flex-direction:column !important;
   justify-content:center !important;
   flex:1 1 auto !important;
   min-width:0 !important;
-  color:#f5f5f7 !important;
 }
-.fnos-immersive-season [data-id="details"] > a > *{ color:#9a9aa0 !important; font-weight:400 !important; font-size:13px !important; }
-.fnos-immersive-season [data-id="details"] > a > *:first-child{ color:#f5f5f7 !important; font-weight:600 !important; font-size:15px !important; }
 .fnos-immersive-season [data-id="details"] .fnos-ep-meta{
   display:flex !important; flex-direction:column !important; align-items:flex-end !important;
   gap:6px !important; flex:0 0 auto !important; margin-left:auto !important;
 }
-.fnos-immersive-season [data-id="details"] .fnos-ep-duration{ font-size:13px !important; color:#9a9aa0 !important; white-space:nowrap !important; }
+.fnos-immersive-season [data-id="details"] .fnos-ep-duration{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; white-space:nowrap !important; }
 .fnos-immersive-season [data-id="details"] .fnos-ep-badge{
-  font-size:11px !important; font-weight:700 !important; padding:.2rem .7rem; border-radius:4px; white-space:nowrap !important;
-  background:#E50914 !important; color:#fff !important; letter-spacing:.5px;
+  font-size:11px !important; font-weight:600 !important; padding:.2rem .7rem; border-radius:20px; white-space:nowrap !important;
+  background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important;
 }
 
-/* 右侧信息卡：Netflix 暗色玻璃卡片 */
+/* 右侧信息卡 —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
 .fnos-immersive-season .fnos-info-card{
-  background:rgba(22,22,26,.72) !important;
-  border:1px solid rgba(255,255,255,.07) !important;
-  border-radius:12px !important;
-  padding:1.1rem 1.2rem !important;
+  background:var(--semi-color-bg-2,#fff) !important;
+  border-radius:14px !important;
+  padding:1.2rem !important;
+  box-shadow:0 2px 10px rgba(0,0,0,.05) !important;
   margin-bottom:.9rem !important;
+  border:1px solid var(--semi-color-border, rgba(0,0,0,.04)) !important;
 }
-.fnos-immersive-season .fnos-info-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:.8rem !important; color:#808080 !important; }
-.fnos-immersive-season .fnos-info-card p{ font-size:.85rem !important; color:#c9c9cf !important; line-height:1.65 !important; margin-bottom:.3rem !important; }
-.fnos-immersive-season .fnos-info-card a{ color:#E50914 !important; text-decoration:none !important; font-weight:600 !important; }
+.fnos-immersive-season .fnos-info-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.8rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-info-card p{ font-size:.82rem !important; color:var(--semi-color-text-1,#424245) !important; line-height:1.6 !important; margin-bottom:.25rem !important; }
+.fnos-immersive-season .fnos-info-card a{ color:var(--semi-color-primary,#007aff) !important; text-decoration:none !important; }
 .fnos-immersive-season .fnos-tag-list{ display:flex !important; flex-wrap:wrap !important; gap:.4rem !important; }
-.fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
+.fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 
-/* 演职人员（侧栏内）：隐藏原生标题 & 横向滚动，圆形头像 + 姓名/角色 */
+/* 演职人员（侧栏内）：隐藏原生标题 & 横向滚动，圆形头像 + 姓名/角色 —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
 .fnos-immersive-season .fnos-season-aside p:has(strong){ display:none !important; }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"]{
   overflow:visible !important; white-space:normal !important; padding-left:0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:4px !important;
+  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:6px !important;
 }
 /* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
-.fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:.6rem !important; color:#808080 !important; }
-/* 单个演员：头像(左) + 姓名/角色(右)；hover 微亮 */
+.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.6rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+/* 单个演员：头像(左) + 姓名/角色(右) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item{
   display:flex !important; flex-direction:row !important; align-items:center !important;
-  gap:12px !important; width:100% !important; padding:8px 6px !important; border-radius:8px !important;
-  transition:background .2s ease !important;
+  gap:12px !important; width:100% !important; padding:8px 0 !important;
 }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{
-  width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important; border:1px solid rgba(255,255,255,.12) !important;
+  width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; overflow:visible !important; }
@@ -3655,11 +3648,52 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   line-height:1.35 !important; margin:0 !important; padding:0 !important;
   display:block !important;
 }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:#f5f5f7 !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:#9a9aa0 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
 
-/* Hero（沉浸式头部 .semi-always-dark）：Netflix 风大标题 + 红色播放按钮 + 灰信息 */
+/* Hero（沉浸式头部 .semi-always-dark 永远暗色）：大标题 + 黑色字影（浅色/深色通用，因 hero 背景恒为暗） */
 .fnos-immersive-season .semi-always-dark h2{ font-size:clamp(28px,3vw,44px) !important; font-weight:900 !important; color:#fff !important; letter-spacing:.5px !important; text-shadow:0 2px 20px rgba(0,0,0,.6) !important; line-height:1.15 !important; }
+
+/* ===== 深色模式覆盖：奈飞暗色电影感（仅 html.dark 生效；浅色模式回退上方 fnOS 原生浅色） ===== */
+html.dark .fnos-immersive-season [data-id="details"]{
+  background:rgba(22,22,26,.72) !important;
+  border:1px solid rgba(255,255,255,.07) !important;
+  border-radius:12px !important;
+  box-shadow:none !important;
+  transition:background .25s ease, transform .28s cubic-bezier(.16,1,.3,1), border-color .25s ease !important;
+}
+html.dark .fnos-immersive-season [data-id="details"]:hover{
+  background:rgba(38,38,44,.92) !important;
+  border-color:rgba(255,255,255,.16) !important;
+  transform:translateX(6px) !important;
+}
+html.dark .fnos-immersive-season [data-id="details"] > div:first-child{ border-radius:8px !important; background:#000 !important; }
+html.dark .fnos-immersive-season [data-id="details"] > div:first-child img{ transition:transform .4s ease !important; }
+html.dark .fnos-immersive-season [data-id="details"]:hover > div:first-child img{ transform:scale(1.06) !important; }
+html.dark .fnos-immersive-season [data-id="details"] > a{ color:#f5f5f7 !important; }
+html.dark .fnos-immersive-season [data-id="details"] > a > *{ color:#9a9aa0 !important; font-weight:400 !important; font-size:13px !important; }
+html.dark .fnos-immersive-season [data-id="details"] > a > *:first-child{ color:#f5f5f7 !important; font-weight:600 !important; font-size:15px !important; }
+html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-duration{ color:#9a9aa0 !important; }
+html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-badge{
+  background:#E50914 !important; color:#fff !important; border-radius:4px !important; font-weight:700 !important; letter-spacing:.5px !important;
+}
+html.dark .fnos-immersive-season .fnos-info-card{
+  background:rgba(22,22,26,.72) !important;
+  border:1px solid rgba(255,255,255,.07) !important;
+  border-radius:12px !important;
+  box-shadow:none !important;
+  padding:1.1rem 1.2rem !important;
+}
+html.dark .fnos-immersive-season .fnos-info-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
+html.dark .fnos-immersive-season .fnos-info-card p{ font-size:.85rem !important; color:#c9c9cf !important; line-height:1.65 !important; }
+html.dark .fnos-immersive-season .fnos-info-card a{ color:#E50914 !important; font-weight:600 !important; }
+html.dark .fnos-immersive-season .fnos-tag{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
+html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:8px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{ border:1px solid rgba(255,255,255,.12) !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
