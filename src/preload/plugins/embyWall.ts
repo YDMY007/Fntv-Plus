@@ -3409,7 +3409,8 @@ function applyCarouselLogoNow(): void {
 let _detailGlassInited = false;
 
 // [lc-879] 二级(TV/Movie)详情页全屏底图: 横屏海报铺满视口作为背景, 降低一点点透明度
-let _tvBackdropImg: HTMLDivElement | null = null;     // 全屏背景图层(承载横屏海报)
+let _tvBackdropImg: HTMLDivElement | null = null;
+let _tvHeaderEl: HTMLElement | null = null;     // 全屏背景图层(承载横屏海报)
 let _tvBackdropScrim: HTMLDivElement | null = null;   // 全屏渐变蒙版(保证文字可读)
 let _tvBlurImg: HTMLImageElement | null = null;       // 被隐藏的原生横幅背景 img(离开时恢复)
 let _tvBgEl: HTMLElement | null = null;               // 被清 background-image 的原生底图元素(离开时恢复)
@@ -3438,9 +3439,6 @@ function applyTvDetailGlass(): void {
     nativeNav.style.setProperty('border', 'none', 'important');
     log('detail -> native nav immersive (transparent)');
   }
-
-  // ⓪.④ 横屏海报 → 全屏底图: 把详情页背景剧照铺满整个视口作为底图, 降低一点点透明度
-  ensureFullscreenBackdrop(header);
 
   // ① 头部渐变遮罩: 极轻量 — 保持背景图清晰可见,仅底部做淡淡过渡
   const gradient = header.querySelector('.gradient') as HTMLElement | null;
@@ -3568,79 +3566,87 @@ function applyTvDetailGlass(): void {
 /** [lc-879] 二级(TV/Movie)详情页: 把 header 内的横屏海报(背景剧照)铺满视口作为全屏底图,
  *  降低一点点透明度(opacity:.9), 并叠一层轻渐变蒙版保证标题/简介/选集文字可读。
  *  仅创建一次 DOM, 之后仅在图片变化时更新 background-image; 离开详情页由 removeFullscreenBackdrop 清理。 */
-function ensureFullscreenBackdrop(header: HTMLElement): void {
+/** [lc-883] 全屏底图: 自包含(不依赖子函数 header 检测), 全局搜索横屏海报。
+ *  从 applyDetailLiquidGlass 统一调用, tv/season 两条路径都走这里。 */
+function ensureFullscreenBackdrop(): void {
   // ① 定位横屏海报(背景剧照)的来源与 URL。fnOS 不同版本/页面渲染方式不一, 多路回退:
-  //    a) header 内 img[style*="blur"] (与 Season 详情页同一套结构, 最常见)
-  //    b) header 自身 background-image
-  //    c) header 内某子元素带「接近全宽」的 background-image(横幅底图 div)
-  //    d) header 内大尺寸 <img>(宽>header 50% 且高>120px, 排除缩略图)
-  //    e) header 父级/兄弟元素的背景图(fnOS 可能把底图放 header 外)
+  //    a) 全局 img[style*="blur"] (TV/Movie 与 Season 详情页同一套结构, 最常见)
+  //    b) 常见 header/hero 候选选择器自身的 background-image
+  //    c) header 候选内子元素带「接近全宽」的 background-image(横幅底图 div)
+  //    d) 全局大尺寸 <img>(宽>视口40% 且高>150px, 排除缩略图)
+  //    e) document.body 背景图(兜底, fnOS 可能把底图放 body 上)
   let imgUrl: string | null = null;
   let fromImg: HTMLImageElement | null = null;
   let bgEl: HTMLElement | null = null;
 
-  // 路径 a: 模糊背景图 img
-  const blurImg = header.querySelector('img[style*="blur"]') as HTMLImageElement | null;
-  if (blurImg) {
-    const u = blurImg.getAttribute('src') || (blurImg as any).currentSrc || '';
-    if (u) { imgUrl = u; fromImg = blurImg; log('ensureFullscreenBackdrop: 路径a命中 img[style*="blur"]'); }
-  }
-  // 路径 b: header 自身 backgroundImage
-  if (!imgUrl) {
-    const hcs = getComputedStyle(header);
-    const m = (hcs.backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/);
-    if (m && m[1] && m[1] !== 'none') { imgUrl = m[1]; bgEl = header; log('ensureFullscreenBackdrop: 路径b命中 header backgroundImage'); }
-  }
-  // 路径 c: 子元素大尺寸 backgroundImage
-  if (!imgUrl) {
-    const cands = header.querySelectorAll('div, section, span, a, img') as NodeListOf<HTMLElement>;
-    for (const c of Array.from(cands)) {
-      const cs = getComputedStyle(c);
-      const mm = (cs.backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/);
-      if (mm && mm[1] && mm[1] !== 'none' && cs.backgroundSize !== 'contain' && cs.backgroundSize !== 'auto') {
-        const r = c.getBoundingClientRect();
-        if (r.width > header.offsetWidth * 0.6) { imgUrl = mm[1]; bgEl = c; log('ensureFullscreenBackdrop: 路径c命中子元素bg(w=' + Math.round(r.width) + ')'); break; }
-      }
+  const bgUrlOf = (cs: CSSStyleDeclaration): string | null => {
+    const m = (cs.backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/);
+    return (m && m[1] && m[1] !== 'none') ? m[1] : null;
+  };
+
+  // 路径 a: 全局模糊背景图 img
+  const blurImgs = document.querySelectorAll('img[style*="blur"]') as NodeListOf<HTMLImageElement>;
+  for (const bi of Array.from(blurImgs)) {
+    const u = bi.getAttribute('src') || (bi as any).currentSrc || '';
+    if (u && bi.getBoundingClientRect().width > 200) {
+      imgUrl = u; fromImg = bi; _tvHeaderEl = bi;
+      log('ensureFullscreenBackdrop: 路径a命中 img[style*="blur"]');
+      break;
     }
   }
-  // 路径 d: header 内大尺寸 <img>(横屏剧照常以普通 img 渲染)
+
+  // 路径 b: 常见 header/hero 候选选择器自身 background-image
   if (!imgUrl) {
-    const imgs = header.querySelectorAll('img') as NodeListOf<HTMLImageElement>;
-    for (const im of Array.from(imgs)) {
-      if (im === fromImg) continue;
+    const hdrCands = document.querySelectorAll('.trim-mc__details--key-version,.semi-always-dark.relative.box-border.flex.h-\[470px\],header,[class*="hero"],[class*="details--key"],[class*="backdrop"]') as NodeListOf<HTMLElement>;
+    for (const c of Array.from(hdrCands)) {
+      const m = bgUrlOf(getComputedStyle(c));
+      if (m) { imgUrl = m; bgEl = c; _tvHeaderEl = c; log('ensureFullscreenBackdrop: 路径b命中 header bg(c=' + (c.className || '').substring(0, 60) + ')'); break; }
+    }
+  }
+
+  // 路径 c: header 候选内子元素大尺寸 background-image(横幅底图 div)
+  if (!imgUrl) {
+    const hdrCands2 = document.querySelectorAll('.trim-mc__details--key-version,.semi-always-dark.relative.box-border.flex.h-\[470px\],header,[class*="hero"],[class*="details--key"],[class*="backdrop"]') as NodeListOf<HTMLElement>;
+    for (const c of Array.from(hdrCands2)) {
+      const subs = c.querySelectorAll('div,section,span,a,p') as NodeListOf<HTMLElement>;
+      for (const sub of Array.from(subs)) {
+        const cs = getComputedStyle(sub);
+        const mm = bgUrlOf(cs);
+        if (mm && cs.backgroundSize !== 'contain' && cs.backgroundSize !== 'auto') {
+          const r = sub.getBoundingClientRect();
+          if (r.width > Math.max((c.offsetWidth || 400) * 0.6, 300)) {
+            imgUrl = mm; bgEl = sub; _tvHeaderEl = c;
+            log('ensureFullscreenBackdrop: 路径c命中子元素bg(w=' + Math.round(r.width) + ')');
+            break;
+          }
+        }
+      }
+      if (imgUrl) break;
+    }
+  }
+
+  // 路径 d: 全局大尺寸 <img>
+  if (!imgUrl) {
+    const allImgs = document.querySelectorAll('img') as NodeListOf<HTMLImageElement>;
+    for (const im of Array.from(allImgs)) {
       const r = im.getBoundingClientRect();
       const u = im.getAttribute('src') || im.currentSrc || '';
-      if (u && r.width > header.offsetWidth * 0.5 && r.height > 120) {
-        imgUrl = u; fromImg = im;
+      if (u && r.width > Math.max(400, window.innerWidth * 0.4) && r.height > 150) {
+        imgUrl = u; fromImg = im; _tvHeaderEl = im;
         log('ensureFullscreenBackdrop: 路径d命中大img(w=' + Math.round(r.width) + ' h=' + Math.round(r.height) + ')');
         break;
       }
     }
   }
-  // 路径 e: header 的父容器或相邻兄弟的背景图(fnOS 可能把底图放在 header 外层)
+
+  // 路径 e: document.body 背景图(兜底)
   if (!imgUrl) {
-    const parent = header.parentElement;
-    if (parent) {
-      const pcs = getComputedStyle(parent);
-      const pm = (pcs.backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/);
-      if (pm && pm[1] && pm[1] !== 'none') { imgUrl = pm[1]; bgEl = parent; log('ensureFullscreenBackdrop: 路径e命中父容器bg'); }
-    }
-    if (!imgUrl && parent) {
-      for (const sib of Array.from(parent.children)) {
-        if (sib === header) continue;
-        const el = sib as HTMLElement;
-        const scs = getComputedStyle(el);
-        const sm = (scs.backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/);
-        if (sm && sm[1] && sm[1] !== 'none') {
-          const sr = el.getBoundingClientRect();
-          if (sr.width > 400) { imgUrl = sm[1]; bgEl = el; log('ensureFullscreenBackdrop: 路径e命中兄弟bg(w=' + Math.round(sr.width) + ')'); break; }
-        }
-      }
-    }
+    const bodyUrl = bgUrlOf(getComputedStyle(document.body));
+    if (bodyUrl) { imgUrl = bodyUrl; bgEl = document.body; _tvHeaderEl = document.body; log('ensureFullscreenBackdrop: 路径e命中 body bg'); }
   }
 
   if (!imgUrl) {
-    log('ensureFullscreenBackdrop: ⚠️ 全部 5 路回退均未找到横屏海报! header=', header.className?.substring(0, 80), 'childImgCount=', header.querySelectorAll('img').length);
+    log('ensureFullscreenBackdrop: ⚠️ 全部 5 路回退均未找到横屏海报! childImgCount=', document.querySelectorAll('img').length);
     return;
   }
   log('ensureFullscreenBackdrop: 找到海报URL, 长度=', imgUrl.length, ', 来源=', fromImg ? 'img' : bgEl ? 'bgEl' : '?');
@@ -3658,7 +3664,6 @@ function ensureFullscreenBackdrop(header: HTMLElement): void {
 
     _tvBackdropScrim = document.createElement('div');
     _tvBackdropScrim.className = 'fnos-tv-backdrop-scrim';
-    // 蒙版跟随明暗主题: 深色模式用暗色电影感渐变; 浅色模式用偏白渐变(避免压脏浅色详情页)
     const _isDark = document.documentElement.classList.contains('dark');
     const _scrim = _isDark
       ? 'linear-gradient(to bottom,rgba(8,10,18,.22) 0%,rgba(8,10,18,.08) 38%,rgba(8,10,18,.45) 100%)'
@@ -3671,9 +3676,7 @@ function ensureFullscreenBackdrop(header: HTMLElement): void {
   }
   _tvBackdropImg.style.setProperty('background-image', `url("${imgUrl}")`, 'important');
 
-  // [lc-881] 兜底: 同时设 document.body 背景图(attachment:fixed 全屏固定)。
-  //   z-index:-1 固定层可能被 fnOS 不透明内容容器盖住; body bg 是 CSS 绘制最底层,
-  //   只要 body 可见就一定透出海报, 不受中间 stacking-context 影响。
+  // [lc-881] 兜底: 同时设 document.body 背景图(attachment:fixed 全屏固定)
   if (!_tvBodyBgSet) {
     const _isDark2 = document.documentElement.classList.contains('dark');
     const _scrim2 = _isDark2
@@ -3688,7 +3691,6 @@ function ensureFullscreenBackdrop(header: HTMLElement): void {
     _tvBodyBgSet = true;
     log('ensureFullscreenBackdrop: ✅ 已设 body 背景图兜底 (theme=' + (_isDark2 ? 'dark' : 'light') + ')');
   } else {
-    // 已创建过: 仅更新图片 URL（蒙版不变）
     const cur = document.body.style.getPropertyValue('background-image') || '';
     const m = cur.match(/url\(["']?([^"')]+)["']?\)/);
     if (!m || m[1] !== imgUrl) {
@@ -3707,8 +3709,6 @@ function ensureFullscreenBackdrop(header: HTMLElement): void {
     _tvBgEl = bgEl;
   }
 }
-
-/** [lc-879] 离开二级详情页时清理全屏底图层, 并恢复被隐藏/清除的原生底图 */
 function removeFullscreenBackdrop(): void {
   if (_tvBackdropImg) { _tvBackdropImg.remove(); _tvBackdropImg = null; }
   if (_tvBackdropScrim) { _tvBackdropScrim.remove(); _tvBackdropScrim = null; }
@@ -4587,19 +4587,15 @@ function applyDetailLiquidGlass(): void {
 
   if (/\/v\/(tv|movie)\/season\//.test(location.href)) {
     applySeasonImmersiveDetail();
-    // [lc-881] season 页也创建全屏横屏底图(与 TV 详情页一致): 取 season header → ensureFullscreenBackdrop
-    const sHdr = document.querySelector('.semi-always-dark.relative.box-border.flex.h-\\[470px\\]')
-      || ((): HTMLElement | null => {
-        const headers = document.querySelectorAll('.semi-always-dark');
-        for (const h of Array.from(headers)) { const el = h as HTMLElement; if (el.offsetHeight > 350 && el.querySelector('img[alt][style*="blur"]')) return el; }
-        return null;
-      })();
-    if (sHdr) ensureFullscreenBackdrop(sHdr as HTMLElement);
+    // [lc-883] 全屏底图改为自包含(全局搜索横屏海报), 不再依赖子函数 header 检测
+    ensureFullscreenBackdrop();
   } else {
     document.body.classList.remove('fnos-immersive-season');
     if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
     if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
       applyTvDetailGlass();
+      // [lc-883] TV/Movie 详情页全屏底图(与 season 一致, 自包含全局搜索)
+      ensureFullscreenBackdrop();
     }
   }
   _detailGlassInited = true;
