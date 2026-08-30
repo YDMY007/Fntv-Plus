@@ -3651,8 +3651,7 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
 
-/* Hero（沉浸式头部 .semi-always-dark 永远暗色）：大标题 + 黑色字影（浅色/深色通用，因 hero 背景恒为暗） */
-.fnos-immersive-season .semi-always-dark h2{ font-size:clamp(28px,3vw,44px) !important; font-weight:900 !important; color:#fff !important; letter-spacing:.5px !important; text-shadow:0 2px 20px rgba(0,0,0,.6) !important; line-height:1.15 !important; }
+/* Hero h2 样式已由下方沉浸式头部块统一接管（彩色渐变标题） */
 
 /* ===== 深色模式覆盖：奈飞暗色电影感（仅 html.dark 生效；浅色模式回退上方 fnOS 原生浅色） ===== */
 html.dark .fnos-immersive-season [data-id="details"]{
@@ -3695,17 +3694,22 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
 
-/* ===== 沉浸式头部：无遮罩全幅横版海报 + 文字列紧凑编排（hero 恒暗，深浅通用） ===== */
+/* ===== 沉浸式头部：无遮罩全幅清晰横版海报 + 彩色渐变标题（hero 恒暗，深浅通用） ===== */
 /* 头部容器：相对定位 + 溢出隐藏 + 内容靠左下对齐 + 最小高度 */
 .fnos-immersive-season .semi-always-dark{
   position:relative !important; overflow:hidden !important;
   justify-content:flex-end !important; align-items:flex-start !important;
   padding:0 48px 36px !important; min-height:340px !important;
 }
-/* 横版底图：取原生模糊背景图，改为清晰全幅覆盖 */
+/* 横版底图：清晰全幅覆盖（强制去模糊） */
 .fnos-immersive-season .semi-always-dark img[style*="blur"]{
   position:absolute !important; inset:0 !important; width:100% !important; height:100% !important;
-  object-fit:cover !important; filter:none !important; transform:none !important; z-index:0 !important;
+  object-fit:cover !important; filter:none !important; blur(0px) !important;
+  -webkit-filter:none !important; transform:none !important; z-index:0 !important;
+}
+/* 兜底：去掉所有子 img 的模糊（防 fnOS 用其他方式加 blur） */
+.fnos-immersive-season .semi-always-dark > img{
+  filter:none !important; -webkit-filter:none !important;
 }
 /* 去掉竖屏海报卡片容器 */
 .fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
@@ -3713,22 +3717,28 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 /* 遮罩全部去掉：.gradient-for-full 完全隐藏 */
 .fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; }
 
-/* ── 文字内容列：左侧窄幅深色半透明底托（非全幅遮罩，仅托文字） ── */
+/* ── 文字内容列：左侧窄幅半透明底托（非全幅遮罩，仅托文字） ── */
 .fnos-immersive-season .semi-always-dark > div:not([class]):not([style]){
   position:relative !important; z-index:2 !important;
   max-width:680px !important; width:auto !important;
-  background:rgba(0,0,0,.48) !important; border-radius:14px !important;
+  background:rgba(0,0,0,.42) !important; border-radius:14px !important;
   padding:22px 28px 18px !important; margin:0 !important;
   backdrop-filter:blur(12px) saturate(140%) !important;
   -webkit-backdrop-filter:blur(12px) saturate(140%) !important;
 }
 
-/* 标题：大字号 + 紧行高 + 强字影保证去遮罩后可读 */
+/* 标题：轮播样式一彩色渐变标题（无字影、无阴影） */
 .fnos-immersive-season .semi-always-dark h2{
-  font-size:clamp(24px,2.6vw,38px) !important; font-weight:800 !important;
-  color:#fff !important; line-height:1.2 !important; margin:0 0 6px !important;
-  text-shadow:0 1px 3px rgba(0,0,0,.9),0 2px 8px rgba(0,0,0,.7),0 8px 24px rgba(0,0,0,.5) !important;
-  letter-spacing:.3px !important; word-break:break-word !important;
+  font-size:clamp(24px,2.6vw,38px) !important; font-weight:900 !important;
+  line-height:1.18 !important; margin:0 0 6px !important;
+  letter-spacing:1px !important; word-break:break-word !important;
+  /* 炫彩霓虹渐变文字（与首页轮播样式一一致） */
+  background:var(--fnos-hero-title-grad, linear-gradient(120deg,#00d4ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%)) !important;
+  -webkit-background-clip:text !important; background-clip:text !important;
+  color:transparent !important; -webkit-text-fill-color:transparent !important;
+  /* 极弱白描边保证可读（与 --fnos-hero-title-glow 一致） */
+  filter:drop-shadow(0 1px 0 rgba(255,255,255,.5)) !important;
+  text-shadow:none !important;
 }
 
 /* 副标题（季号等）：弱化小字 */
@@ -3776,7 +3786,7 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
   margin:10px 0 0 !important; max-width:600px !important;
   display:-webkit-box !important; -webkit-line-clamp:2 !important;
   -webkit-box-orient:vertical !important; overflow:hidden !important;
-  text-shadow:0 1px 4px rgba(0,0,0,.6) !important;
+  text-shadow:none !important;
 }
 `;
 let _immersiveSeasonStyleInjected = false;
