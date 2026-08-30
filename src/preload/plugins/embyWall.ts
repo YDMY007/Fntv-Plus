@@ -3695,27 +3695,88 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
 
-/* ===== 沉浸式头部：奈飞风全幅横版海报 + 信息左移（hero 恒暗，深浅通用） ===== */
-/* 头部容器：相对定位 + 溢出隐藏 + 内容靠左 */
-.fnos-immersive-season .semi-always-dark{ position:relative !important; overflow:hidden !important; justify-content:flex-start !important; text-align:left !important; }
-/* 横版底图：取原生模糊背景图，改为清晰全幅覆盖（去掉竖屏海报后作背景） */
+/* ===== 沉浸式头部：无遮罩全幅横版海报 + 文字列紧凑编排（hero 恒暗，深浅通用） ===== */
+/* 头部容器：相对定位 + 溢出隐藏 + 内容靠左下对齐 + 最小高度 */
+.fnos-immersive-season .semi-always-dark{
+  position:relative !important; overflow:hidden !important;
+  justify-content:flex-end !important; align-items:flex-start !important;
+  padding:0 48px 36px !important; min-height:340px !important;
+}
+/* 横版底图：取原生模糊背景图，改为清晰全幅覆盖 */
 .fnos-immersive-season .semi-always-dark img[style*="blur"]{
   position:absolute !important; inset:0 !important; width:100% !important; height:100% !important;
   object-fit:cover !important; filter:none !important; transform:none !important; z-index:0 !important;
 }
-/* 去掉竖屏海报卡片容器（透明竖屏海报不要） */
+/* 去掉竖屏海报卡片容器 */
 .fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
 .fnos-immersive-season .semi-always-dark .overflow-hidden.rounded-xl{ display:none !important; }
-/* 渐变层：左暗右透，托住左侧文字（用户点名的 .gradient-for-full 元素） */
-.fnos-immersive-season .semi-always-dark .gradient-for-full{
-  z-index:1 !important;
-  background:linear-gradient(90deg, rgba(0,0,0,.78) 0%, rgba(0,0,0,.42) 42%, rgba(0,0,0,0) 80%) !important;
-  backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+/* 遮罩全部去掉：.gradient-for-full 完全隐藏 */
+.fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; }
+
+/* ── 文字内容列：左侧窄幅深色半透明底托（非全幅遮罩，仅托文字） ── */
+.fnos-immersive-season .semi-always-dark > div:not([class]):not([style]){
+  position:relative !important; z-index:2 !important;
+  max-width:680px !important; width:auto !important;
+  background:rgba(0,0,0,.48) !important; border-radius:14px !important;
+  padding:22px 28px 18px !important; margin:0 !important;
+  backdrop-filter:blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter:blur(12px) saturate(140%) !important;
 }
-/* 标题 + 信息左移、白字、压在渐变之上 */
+
+/* 标题：大字号 + 紧行高 + 强字影保证去遮罩后可读 */
 .fnos-immersive-season .semi-always-dark h2{
-  position:relative !important; z-index:2 !important; text-align:left !important;
-  color:#fff !important; text-shadow:0 2px 20px rgba(0,0,0,.6) !important;
+  font-size:clamp(24px,2.6vw,38px) !important; font-weight:800 !important;
+  color:#fff !important; line-height:1.2 !important; margin:0 0 6px !important;
+  text-shadow:0 1px 3px rgba(0,0,0,.9),0 2px 8px rgba(0,0,0,.7),0 8px 24px rgba(0,0,0,.5) !important;
+  letter-spacing:.3px !important; word-break:break-word !important;
+}
+
+/* 副标题（季号等）：弱化小字 */
+.fnos-immersive-season .semi-always-dark p:first-of-type,
+.fnos-immersive-season .semi-always-dark h2 + p,
+.fnos-immersive-season .semi-always-dark h2 + *{ color:#c8c8d0 !important; font-size:13px !important; margin:0 0 12px !important; }
+
+/* 按钮组：紧凑横排 + 统一样式 */
+.fnos-immersive-season .semi-always-dark button,
+.fnos-immersive-season .semi-always-dark [role="button"],
+.fnos-immersive-season .semi-always-dark a[class*="button"],
+.fnos-immersive-season .semi-always-dark .semi-button{
+  display:inline-flex !important; align-items:center !important;
+  padding:7px 18px !important; border-radius:999px !important;
+  font-size:13px !important; font-weight:600 !important;
+  margin:0 8px 0 0 !important; transition:all .2s ease !important;
+  border:none !important; cursor:pointer !important;
+  text-shadow:none !important;
+}
+/* 主操作按钮（看N集）：实心 */
+.fnos-immersive-season .semi-always-dark button:first-of-type,
+.fnos-immersive-season .semi-always-dark [role="button"]:first-of-type{
+  background:#E50914 !important; color:#fff !important;
+  box-shadow:0 2px 10px rgba(229,9,20,.35) !important;
+}
+.fnos-immersive-season .semi-always-dark button:first-of-type:hover,
+.fnos-immersive-season .semi-always-dark [role="button"]:first-of-type:hover{
+  background:#f40616 !important; transform:scale(1.04) !important;
+}
+/* 次要按钮（MPV播放等）：描边 */
+.fnos-immersive-season .semi-always-dark button:nth-of-type(2),
+.fnos-immersive-season .semi-always-dark [role="button"]:nth-of-type(2){
+  background:rgba(255,255,255,.12) !important; color:#fff !important;
+  border:1px solid rgba(255,255,255,.25) !important;
+  box-shadow:none !important;
+}
+.fnos-immersive-season .semi-always-dark button:nth-of-type(2):hover,
+.fnos-immersive-season .semi-always-dark [role="button"]:nth-of-type(2):hover{
+  background:rgba(255,255,255,.22) !important; border-color:rgba(255,255,255,.4) !important;
+}
+
+/* 简介/描述文字：限宽 + 截断 + 弱化 */
+.fnos-immersive-season .semi-always-dark p:not(:first-of-type):not(h2 + p){
+  color:#a0a0ab !important; font-size:13px !important; line-height:1.55 !important;
+  margin:10px 0 0 !important; max-width:600px !important;
+  display:-webkit-box !important; -webkit-line-clamp:2 !important;
+  -webkit-box-orient:vertical !important; overflow:hidden !important;
+  text-shadow:0 1px 4px rgba(0,0,0,.6) !important;
 }
 `;
 let _immersiveSeasonStyleInjected = false;
