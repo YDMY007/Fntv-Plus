@@ -9345,8 +9345,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   };
   try {
     const _ps = history.pushState, _rs = history.replaceState;
-    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
-    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    // [lc-887] pushState/replaceState: 仅在「离开详情页」时同步清理(防 body bg 泄漏闪一下)。
+    //   「进入详情页」不能同步调用 applyDetailLiquidGlass —— 此时 URL 已变但 DOM 仍是旧页面,
+    //   同步执行会把详情页样式套到首页/其他页 DOM 上导致布局错乱。
+    //   进入详情页的应用交给已有的 MutationObserver(200ms debounce) + setTimeout(600/1500/3000ms) 重试链。
+    const _wasDetail = (): boolean => /\/v\/(tv|movie)\//.test(location.href);
+    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
