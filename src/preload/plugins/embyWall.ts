@@ -3718,14 +3718,12 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 /* 遮罩全部去掉：.gradient-for-full 完全隐藏 */
 .fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; }
 
-/* ── 文字内容列：左侧窄幅半透明底托（非全幅遮罩，仅托文字） ── */
+/* ── 文字内容列：全透明（无底托、无遮罩，直接叠在清晰背景图上） ── */
 .fnos-immersive-season .semi-always-dark > div:not([class]):not([style]){
   position:relative !important; z-index:2 !important;
   max-width:680px !important; width:auto !important;
-  background:rgba(0,0,0,.42) !important; border-radius:14px !important;
+  background:transparent !important;
   padding:22px 28px 18px !important; margin:0 !important;
-  backdrop-filter:blur(12px) saturate(140%) !important;
-  -webkit-backdrop-filter:blur(12px) saturate(140%) !important;
 }
 
 /* 标题：轮播样式一彩色渐变标题（无字影、无阴影） */
