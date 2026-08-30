@@ -1031,6 +1031,20 @@ const CAROUSEL_TARGET = 10;
 const CAROUSEL_SCRAPE_CAP = 18;
 // [lc-768] 详情拉取完成但「可用横版海报」为 0(疑似全部 STR/网盘无法加载) → 主页显示「暂未支持STRM海报」
 let _carouselLoadedButNone = false;
+
+// [lc-876] 样式2/3/4 轮播清理句柄：SPA导航离开/重建前必须清理旧timer/event listener，
+//   否则 progressInterval 继续操作已移除DOM、keydown监听器堆积 → 返回后乱套。
+let _carouselCleanup: (() => void) | null = null; // 当前活跃轮播的统一清理函数
+
+/** [lc-876] 销毁当前轮播的所有 timer + event listener（重建/导航离开前调用）。
+ *  各 buildCarouselStyleX 在创建timer/listener时将清理逻辑注册到 _carouselCleanup。 */
+function destroyCarousel(): void {
+  if (_carouselCleanup) {
+    try { _carouselCleanup(); } catch { /* ignore */ }
+    _carouselCleanup = null;
+  }
+}
+
 // [DIAG] 99% 卡死看门狗状态（仅用于诊断日志，不改变任何行为）
 let _diagStuckTicks = 0;       // 进度条停在 99% 的 tick 计数
 let _diagStuckSince = 0;       // 首次到达 99% 的时间戳
@@ -1130,6 +1144,9 @@ async function resolveSeasonHref(show: any): Promise<string> {
 function injectCarousel(): void {
   log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
   if (_carouselInited) return;
+
+  // [lc-876] 重建前先销毁旧轮播的 timer/event listener，防止泄漏导致返回后乱套
+  destroyCarousel();
 
   // [lc-182] 路径守卫: 轮播仅注入首页(/v 或 /v/)。
   const p = location.pathname;
@@ -1993,6 +2010,20 @@ function buildCarouselStyle2(
 
   updateSlides();
   startAuto();
+  // [lc-876] 页面隐藏时暂停进度条timer（fnOS SPA导航可能只隐藏不销毁首页视图），
+  //   防止隐藏期间 progressInterval 继续跑 → 满格切页 → 回来后状态错乱
+  const visHandler = (): void => {
+    if (document.hidden) { isPaused = true; stopAuto(); }
+    else { isPaused = false; startAuto(); }
+  };
+  document.addEventListener('visibilitychange', visHandler);
+  // [lc-876] 注册清理句柄：SPA导航离开/重建前销毁所有timer + event listener
+  _carouselCleanup = (): void => {
+    stopAuto(); // 清 autoTimer + progressInterval
+    window.removeEventListener('keydown', keyHandler);
+    document.removeEventListener('visibilitychange', visHandler);
+    log2('cleanup: style2 timers & listeners destroyed');
+  };
   log2('样式2 轮播注入完成, slides=', slides.length);
 }
 
@@ -2275,6 +2306,16 @@ function buildCarouselStyle3(
 
   updatePositions();
   resetAuto();
+  // [lc-876] 页面隐藏时暂停自动轮播
+  const visHandler = (): void => { if (document.hidden) stopAuto(); else resetAuto(); };
+  document.addEventListener('visibilitychange', visHandler);
+  // [lc-876] 注册清理句柄
+  _carouselCleanup = (): void => {
+    stopAuto(); // 清 autoTimer
+    window.removeEventListener('keydown', keyHandler);
+    document.removeEventListener('visibilitychange', visHandler);
+    log3('cleanup: style3 timer & listeners destroyed');
+  };
   log3('样式3 堆叠卡片轮播注入完成, cards=', cards.length);
 }
 
@@ -2580,6 +2621,16 @@ function buildCarouselStyle4(
 
   updatePositions();
   resetAuto();
+  // [lc-876] 页面隐藏时暂停自动轮播
+  const visHandler = (): void => { if (document.hidden) stopAuto(); else resetAuto(); };
+  document.addEventListener('visibilitychange', visHandler);
+  // [lc-876] 注册清理句柄
+  _carouselCleanup = (): void => {
+    stopAuto(); // 清 autoTimer
+    window.removeEventListener('keydown', keyHandler);
+    document.removeEventListener('visibilitychange', visHandler);
+    log4('cleanup: style4 timer & listeners destroyed');
+  };
   log4('样式4 3D旋转木马轮播注入完成, cards=', cards.length);
 }
 
@@ -9183,6 +9234,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     _wtsTimer = window.setTimeout(wheelToScroll, 350);
     if (_carouselContainer && !document.body.contains(_carouselContainer)) {
       log('carousel lost, re-inject');
+      destroyCarousel(); // [lc-876] 清理旧timer/listener再重建
       _carouselContainer = null;
       _carouselInited = false;
     }
@@ -9196,6 +9248,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     wheelToScroll();
     if (_carouselContainer && !document.body.contains(_carouselContainer)) {
       log('watchdog: carousel lost');
+      destroyCarousel(); // [lc-876] 清理旧timer/listener
       _carouselContainer = null;
       _carouselInited = false;
       injectCarousel();
