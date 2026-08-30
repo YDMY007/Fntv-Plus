@@ -3694,6 +3694,29 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ backg
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{ border:1px solid rgba(255,255,255,.12) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
+
+/* ===== 沉浸式头部：奈飞风全幅横版海报 + 信息左移（hero 恒暗，深浅通用） ===== */
+/* 头部容器：相对定位 + 溢出隐藏 + 内容靠左 */
+.fnos-immersive-season .semi-always-dark{ position:relative !important; overflow:hidden !important; justify-content:flex-start !important; text-align:left !important; }
+/* 横版底图：取原生模糊背景图，改为清晰全幅覆盖（去掉竖屏海报后作背景） */
+.fnos-immersive-season .semi-always-dark img[style*="blur"]{
+  position:absolute !important; inset:0 !important; width:100% !important; height:100% !important;
+  object-fit:cover !important; filter:none !important; transform:none !important; z-index:0 !important;
+}
+/* 去掉竖屏海报卡片容器（透明竖屏海报不要） */
+.fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
+.fnos-immersive-season .semi-always-dark .overflow-hidden.rounded-xl{ display:none !important; }
+/* 渐变层：左暗右透，托住左侧文字（用户点名的 .gradient-for-full 元素） */
+.fnos-immersive-season .semi-always-dark .gradient-for-full{
+  z-index:1 !important;
+  background:linear-gradient(90deg, rgba(0,0,0,.78) 0%, rgba(0,0,0,.42) 42%, rgba(0,0,0,0) 80%) !important;
+  backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+}
+/* 标题 + 信息左移、白字、压在渐变之上 */
+.fnos-immersive-season .semi-always-dark h2{
+  position:relative !important; z-index:2 !important; text-align:left !important;
+  color:#fff !important; text-shadow:0 2px 20px rgba(0,0,0,.6) !important;
+}
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
