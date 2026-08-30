@@ -4572,7 +4572,7 @@ function applyDetailLiquidGlass(): void {
   //   导致 class 残留污染"继续观看"/"剧集列表"等区块 —— 故非详情页优先移除。
   if (!isDetailPage()) {
     document.body.classList.remove('fnos-immersive-season');
-    if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
+    unlayoutSeasonTwoPane(); // [lc-884] 清理注入的 .fnos-ep-meta(含"高清"badge), 防泄漏到首页
     _detailGlassInited = false; // 重置, 下次进详情页重新初始化
     removeFullscreenBackdrop(); // [lc-879] 离开详情页清理全屏底图
     return;
@@ -4591,7 +4591,7 @@ function applyDetailLiquidGlass(): void {
     ensureFullscreenBackdrop();
   } else {
     document.body.classList.remove('fnos-immersive-season');
-    if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
+    unlayoutSeasonTwoPane(); // [lc-884] 从 season 切到 tv/movie 时清理注入 DOM
     if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
       applyTvDetailGlass();
       // [lc-883] TV/Movie 详情页全屏底图(与 season 一致, 自包含全局搜索)
