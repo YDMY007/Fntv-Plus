@@ -3569,6 +3569,18 @@ function applyTvDetailGlass(): void {
  *  仅创建一次 DOM, 之后仅在图片变化时更新 background-image; 离开详情页由 removeFullscreenBackdrop 清理。 */
 /** [lc-883] 全屏底图: 自包含(不依赖子函数 header 检测), 全局搜索横屏海报。
  *  从 applyDetailLiquidGlass 统一调用, tv/season 两条路径都走这里。 */
+
+/** [lc-892] 安全选择器: 任何无效选择器(如含未转义括号的 Tailwind class)都不抛出,
+ *  仅记日志返回空结果, 避免单个坏选择器 abort 整个全屏底图逻辑(此前此类 SyntaxError 直接中断函数)。 */
+function safeSelectAll<T extends Element = Element>(sel: string): NodeListOf<T> {
+  try { return document.querySelectorAll(sel) as NodeListOf<T>; }
+  catch (e) { log('safeSelectAll: 跳过无效选择器 ' + sel.substring(0, 50)); return document.createElement('div').querySelectorAll('*') as NodeListOf<T>; }
+}
+function safeSelect<T extends Element = Element>(sel: string): T | null {
+  try { return document.querySelector(sel) as T | null; }
+  catch (e) { log('safeSelect: 跳过无效选择器 ' + sel.substring(0, 50)); return null; }
+}
+
 function ensureFullscreenBackdrop(): void {
   // ① 定位横屏海报(背景剧照)的来源与 URL。fnOS 不同版本/页面渲染方式不一, 多路回退:
   //    a) 全局 img[style*="blur"] (TV/Movie 与 Season 详情页同一套结构, 最常见)
@@ -3586,7 +3598,7 @@ function ensureFullscreenBackdrop(): void {
   };
 
   // 路径 a: 全局模糊背景图 img
-  const blurImgs = document.querySelectorAll('img[style*="blur"]') as NodeListOf<HTMLImageElement>;
+  const blurImgs = safeSelectAll<HTMLImageElement>('img[style*="blur"]');
   for (const bi of Array.from(blurImgs)) {
     const u = bi.getAttribute('src') || (bi as any).currentSrc || '';
     if (u && bi.getBoundingClientRect().width > 200) {
@@ -3598,7 +3610,7 @@ function ensureFullscreenBackdrop(): void {
 
   // 路径 b: 常见 header/hero 候选选择器自身 background-image
   if (!imgUrl) {
-    const hdrCands = document.querySelectorAll('.trim-mc__details--key-version,.semi-always-dark.relative.box-border.flex.h-\[470px\],header,[class*="hero"],[class*="details--key"],[class*="backdrop"]') as NodeListOf<HTMLElement>;
+    const hdrCands = safeSelectAll<HTMLElement>('.trim-mc__details--key-version,.semi-always-dark,header,[class*="hero"],[class*="details--key"],[class*="backdrop"]');
     for (const c of Array.from(hdrCands)) {
       const m = bgUrlOf(getComputedStyle(c));
       if (m) { imgUrl = m; bgEl = c; _tvHeaderEl = c; log('ensureFullscreenBackdrop: 路径b命中 header bg(c=' + (c.className || '').substring(0, 60) + ')'); break; }
@@ -3607,7 +3619,7 @@ function ensureFullscreenBackdrop(): void {
 
   // 路径 c: header 候选内子元素大尺寸 background-image(横幅底图 div)
   if (!imgUrl) {
-    const hdrCands2 = document.querySelectorAll('.trim-mc__details--key-version,.semi-always-dark.relative.box-border.flex.h-\[470px\],header,[class*="hero"],[class*="details--key"],[class*="backdrop"]') as NodeListOf<HTMLElement>;
+    const hdrCands2 = safeSelectAll<HTMLElement>('.trim-mc__details--key-version,.semi-always-dark,header,[class*="hero"],[class*="details--key"],[class*="backdrop"]');
     for (const c of Array.from(hdrCands2)) {
       const subs = c.querySelectorAll('div,section,span,a,p') as NodeListOf<HTMLElement>;
       for (const sub of Array.from(subs)) {
@@ -3628,7 +3640,7 @@ function ensureFullscreenBackdrop(): void {
 
   // 路径 d: 全局大尺寸 <img>
   if (!imgUrl) {
-    const allImgs = document.querySelectorAll('img') as NodeListOf<HTMLImageElement>;
+    const allImgs = safeSelectAll<HTMLImageElement>('img');
     for (const im of Array.from(allImgs)) {
       const r = im.getBoundingClientRect();
       const u = im.getAttribute('src') || im.currentSrc || '';
@@ -3643,7 +3655,7 @@ function ensureFullscreenBackdrop(): void {
   // 路径 f: 任意带 background-image 的大尺寸元素(兜底, fnOS 可能把横屏海报放在某个 div 的 background 上)
   if (!imgUrl) {
     let best: { url: string; area: number } | null = null;
-    const allEls = document.querySelectorAll('div,section,header,main,article,aside') as NodeListOf<HTMLElement>;
+    const allEls = safeSelectAll<HTMLElement>('div,section,header,main,article,aside');
     for (const el of Array.from(allEls)) {
       const m = bgUrlOf(getComputedStyle(el));
       if (!m) continue;
@@ -4315,7 +4327,7 @@ function applySeasonImmersiveDetail(): void {
   }
 
   // ① 头部信息区 (470px高, 含模糊背景+海报+标题)
-  const header = document.querySelector('.semi-always-dark.relative.box-border.flex.h-\\[470px\\]') as HTMLElement | null;
+  const header = safeSelect<HTMLElement>('.semi-always-dark');
   if (!header) {
     // fallback: 用高度和模糊背景图来定位
     const headers = document.querySelectorAll('.semi-always-dark');
