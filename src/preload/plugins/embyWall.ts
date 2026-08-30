@@ -3968,31 +3968,29 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
 
-/* ===== 沉浸式头部：无遮罩全幅清晰横版海报 + 彩色渐变标题（hero 恒暗，深浅通用） ===== */
-/* 头部容器：相对定位 + 溢出隐藏 + 内容靠左下对齐 + 最小高度 */
+/* ===== [lc-894] 季详情头部：保留原始 fnOS 布局（左竖屏海报 + 右信息栏） ===== */
+/* 头部容器：保持 fnOS 原始 flex 布局（不再强制全宽底图） */
 .fnos-immersive-season .semi-always-dark{
   position:relative !important; overflow:hidden !important;
-  justify-content:flex-end !important; align-items:flex-start !important;
+  /* 保持 fnOS 原始 justify-content/align-items，不覆盖为 flex-end/flex-start */
   padding:0 48px 36px !important; min-height:340px !important;
 }
-/* 横版底图：fnOS 原生用 img.blur-[10px]（Tailwind 类）加模糊，非内联 style
-   → 直接对 hero 内所有 img 强制去模糊，覆盖 .blur-[10px] 类 */
+/* [lc-894] 恢复竖屏海报卡片可见（之前 display:none 把它隐藏了） */
+.fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
+.fnos-immersive-season .semi-always-dark .overflow-hidden.rounded-xl{ display:block !important; }
+/* 横版底图保持 fnOS 原生模糊，不去除 filter */
 .fnos-immersive-season .semi-always-dark img{
-  filter:none !important; -webkit-filter:none !important;
-  transform:none !important; object-fit:cover !important;
+  /* 不再强制 filter:none，保留 fnOS 原生 blur-[10px] */
+  object-fit:cover !important;
 }
-/* 底图全幅填充（wrapper .absolute.size-full 已做定位，这里保底尺寸） */
 .fnos-immersive-season .semi-always-dark .absolute img,
 .fnos-immersive-season .semi-always-dark > div > img{
   width:100% !important; height:100% !important;
 }
-/* 去掉竖屏海报卡片容器 */
-.fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
-.fnos-immersive-season .semi-always-dark .overflow-hidden.rounded-xl{ display:none !important; }
-/* 遮罩全部去掉：.gradient-for-full 完全隐藏 */
-.fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; }
+/* 渐变遮罩保留（保证文字在海报上可读） */
+/* .fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; } */
 
-/* ── 文字内容列：全透明（无底托、无遮罩，直接叠在清晰背景图上） ── */
+/* ── 文字内容列：叠在原始布局上微调 ── */
 .fnos-immersive-season .semi-always-dark > div:not([class]):not([style]){
   position:relative !important; z-index:2 !important;
   max-width:680px !important; width:auto !important;
@@ -4000,16 +3998,14 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
   padding:22px 28px 18px !important; margin:0 !important;
 }
 
-/* 标题：轮播样式一彩色渐变标题（无字影、无阴影） */
+/* 标题：彩色渐变（与轮播一致） */
 .fnos-immersive-season .semi-always-dark h2{
   font-size:clamp(24px,2.6vw,38px) !important; font-weight:900 !important;
   line-height:1.18 !important; margin:0 0 6px !important;
   letter-spacing:1px !important; word-break:break-word !important;
-  /* 炫彩霓虹渐变文字（与首页轮播样式一一致） */
   background:var(--fnos-hero-title-grad, linear-gradient(120deg,#00d4ff 0%,#4da3ff 22%,#ff5cd0 55%,#ffb347 82%,#ffd166 100%)) !important;
   -webkit-background-clip:text !important; background-clip:text !important;
   color:transparent !important; -webkit-text-fill-color:transparent !important;
-  /* 极弱白描边保证可读（与 --fnos-hero-title-glow 一致） */
   filter:drop-shadow(0 1px 0 rgba(255,255,255,.5)) !important;
   text-shadow:none !important;
 }
@@ -4658,8 +4654,8 @@ function applyDetailLiquidGlass(): void {
 
   if (/\/v\/(tv|movie)\/season\//.test(location.href)) {
     applySeasonImmersiveDetail();
-    // [lc-883] 全屏底图改为自包含(全局搜索横屏海报), 不再依赖子函数 header 检测
-    ensureFullscreenBackdrop();
+    // [lc-894] 季详情页顶部改回原始「左竖屏海报+右信息栏」布局, 不再使用全屏底图
+    // ensureFullscreenBackdrop(); // lc-894 已禁用: 不再创建 position:fixed 全屏底图层
   } else {
     document.body.classList.remove('fnos-immersive-season');
     unlayoutSeasonTwoPane(); // [lc-884] 从 season 切到 tv/movie 时清理注入 DOM
