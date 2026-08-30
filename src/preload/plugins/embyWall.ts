@@ -3408,6 +3408,11 @@ function applyCarouselLogoNow(): void {
 /* ========== 详情页苹果液态玻璃 (TV详情 / Season详情) ========== */
 let _detailGlassInited = false;
 
+// [lc-879] 二级(TV/Movie)详情页全屏底图: 横屏海报铺满视口作为背景, 降低一点点透明度
+let _tvBackdropImg: HTMLDivElement | null = null;     // 全屏背景图层(承载横屏海报)
+let _tvBackdropScrim: HTMLDivElement | null = null;   // 全屏渐变蒙版(保证文字可读)
+let _tvBlurImg: HTMLImageElement | null = null;       // 被隐藏的原生横幅背景图(离开时恢复)
+
 /** 检测当前URL是否为需要液态玻璃的详情页 */
 function isDetailPage(): boolean {
   return /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)/.test(location.href)
@@ -3431,6 +3436,9 @@ function applyTvDetailGlass(): void {
     nativeNav.style.setProperty('border', 'none', 'important');
     log('detail -> native nav immersive (transparent)');
   }
+
+  // ⓪.④ 横屏海报 → 全屏底图: 把详情页背景剧照铺满整个视口作为底图, 降低一点点透明度
+  ensureFullscreenBackdrop(header);
 
   // ① 头部渐变遮罩: 极轻量 — 保持背景图清晰可见,仅底部做淡淡过渡
   const gradient = header.querySelector('.gradient') as HTMLElement | null;
@@ -3552,6 +3560,74 @@ function applyTvDetailGlass(): void {
       el.style.setProperty('border-color', 'rgba(255,255,255,.35)', 'important');
       el.style.setProperty('box-shadow', '0 1px 6px rgba(0,0,0,.08)', 'important');
     }, { once: false });
+  }
+}
+
+/** [lc-879] 二级(TV/Movie)详情页: 把 header 内的横屏海报(背景剧照)铺满视口作为全屏底图,
+ *  降低一点点透明度(opacity:.9), 并叠一层轻渐变蒙版保证标题/简介/选集文字可读。
+ *  仅创建一次 DOM, 之后仅在图片变化时更新 background-image; 离开详情页由 removeFullscreenBackdrop 清理。 */
+function ensureFullscreenBackdrop(header: HTMLElement): void {
+  // ① 取横屏海报 URL: 优先 header 内的模糊背景图 img[style*="blur"]
+  //   (与 Season 详情页同一套 fnOS 结构), 回退到 header 自身 background-image。
+  let imgUrl: string | null = null;
+  let fromImg: HTMLImageElement | null = null;
+  const blurImg = header.querySelector('img[style*="blur"]') as HTMLImageElement | null;
+  if (blurImg) {
+    const u = blurImg.getAttribute('src') || (blurImg as any).currentSrc || '';
+    if (u) { imgUrl = u; fromImg = blurImg; }
+  }
+  if (!imgUrl) {
+    const cs = getComputedStyle(header);
+    const bi = cs.backgroundImage || '';
+    const m = bi.match(/url\(["']?([^"')]+)["']?\)/);
+    if (m && m[1] && m[1] !== 'none') imgUrl = m[1];
+  }
+  if (!imgUrl) {
+    log('ensureFullscreenBackdrop: 未找到横屏海报 URL, 跳过');
+    return;
+  }
+
+  // ② 全屏底图层(只创建一次, 之后仅更新图片)
+  if (!_tvBackdropImg) {
+    _tvBackdropImg = document.createElement('div');
+    _tvBackdropImg.className = 'fnos-tv-backdrop-img';
+    _tvBackdropImg.style.cssText =
+      'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
+      'background-repeat:no-repeat;background-size:cover;background-position:center;' +
+      'opacity:.9;filter:blur(2px) saturate(110%) brightness(.95);' +
+      'transition:opacity .3s ease;';
+    document.body.appendChild(_tvBackdropImg);
+
+    _tvBackdropScrim = document.createElement('div');
+    _tvBackdropScrim.className = 'fnos-tv-backdrop-scrim';
+    _tvBackdropScrim.style.cssText =
+      'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
+      'background:linear-gradient(to bottom,' +
+      'rgba(8,10,18,.30) 0%,rgba(8,10,18,.10) 36%,rgba(8,10,18,.52) 100%);';
+    document.body.appendChild(_tvBackdropScrim);
+    log('ensureFullscreenBackdrop: 创建全屏底图层');
+  }
+  _tvBackdropImg.style.setProperty('background-image', `url("${imgUrl}")`, 'important');
+
+  // ③ 隐藏原始横幅背景, 避免双重显示(仅当已成功拿到 URL 才动原生元素)
+  if (fromImg) {
+    fromImg.style.setProperty('opacity', '0', 'important');
+    fromImg.style.setProperty('visibility', 'hidden', 'important');
+    _tvBlurImg = fromImg;
+  } else {
+    // URL 来自 header background-image: 清掉 header 自身背景, 由全屏层承担
+    header.style.setProperty('background-image', 'none', 'important');
+  }
+}
+
+/** [lc-879] 离开二级详情页时清理全屏底图层, 并恢复被隐藏的原生横幅背景图 */
+function removeFullscreenBackdrop(): void {
+  if (_tvBackdropImg) { _tvBackdropImg.remove(); _tvBackdropImg = null; }
+  if (_tvBackdropScrim) { _tvBackdropScrim.remove(); _tvBackdropScrim = null; }
+  if (_tvBlurImg) {
+    _tvBlurImg.style.removeProperty('opacity');
+    _tvBlurImg.style.removeProperty('visibility');
+    _tvBlurImg = null;
   }
 }
 
@@ -4397,6 +4473,7 @@ function applyDetailLiquidGlass(): void {
     document.body.classList.remove('fnos-immersive-season');
     if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
     _detailGlassInited = false; // 重置, 下次进详情页重新初始化
+    removeFullscreenBackdrop(); // [lc-879] 离开详情页清理全屏底图
     return;
   }
 
@@ -4408,6 +4485,7 @@ function applyDetailLiquidGlass(): void {
   }
 
   if (/\/v\/(tv|movie)\/season\//.test(location.href)) {
+    removeFullscreenBackdrop(); // [lc-879] season 页用自身背景, 清掉 TV 底图
     applySeasonImmersiveDetail();
   } else {
     document.body.classList.remove('fnos-immersive-season');
