@@ -3658,7 +3658,7 @@ function ensureFullscreenBackdrop(): void {
     _tvBackdropImg.style.cssText =
       'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
       'background-repeat:no-repeat;background-size:cover;background-position:center;' +
-      'opacity:.9;filter:blur(2px) saturate(110%) brightness(.95);' +
+      'opacity:.88;filter:blur(35px) saturate(110%) brightness(.96);' +
       'transition:opacity .3s ease;';
     document.body.appendChild(_tvBackdropImg);
 
