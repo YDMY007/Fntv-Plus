@@ -3408,13 +3408,13 @@ function applyCarouselLogoNow(): void {
 /* ========== 详情页苹果液态玻璃 (TV详情 / Season详情) ========== */
 let _detailGlassInited = false;
 
-// [lc-879] 二级(TV/Movie)详情页全屏底图: 横屏海报铺满视口作为背景, 降低一点点透明度
+// [lc-879] 二级(TV/Movie)详情页全屏底图: 横屏海报铺满视口作为背景
 let _tvBackdropImg: HTMLDivElement | null = null;
-let _tvHeaderEl: HTMLElement | null = null;     // 全屏背景图层(承载横屏海报)
+let _tvHeaderEl: HTMLElement | null = null;     // 命中海报来源元素(诊断用)
 let _tvBackdropScrim: HTMLDivElement | null = null;   // 全屏渐变蒙版(保证文字可读)
-let _tvBlurImg: HTMLImageElement | null = null;       // 被隐藏的原生横幅背景 img(离开时恢复)
-let _tvBgEl: HTMLElement | null = null;               // 被清 background-image 的原生底图元素(离开时恢复)
-let _tvBodyBgSet = false;                             // [lc-881] 是否已设置 document.body 背景图(离开时恢复)
+let _tvBlurImg: HTMLImageElement | null = null;       // 预留(当前不隐藏原图)
+let _tvBgEl: HTMLElement | null = null;               // 预留(当前不隐藏原图)
+let _tvBackdropStyle: HTMLStyleElement | null = null; // [lc-890] 透明化页面背景的 <style>
 
 /** 检测当前URL是否为需要液态玻璃的详情页 */
 function isDetailPage(): boolean {
@@ -3658,7 +3658,7 @@ function ensureFullscreenBackdrop(): void {
     _tvBackdropImg.style.cssText =
       'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
       'background-repeat:no-repeat;background-size:cover;background-position:center;' +
-      'opacity:.88;filter:blur(35px) saturate(110%) brightness(.96);' +
+      'opacity:.92;filter:blur(48px) saturate(120%) brightness(.92);' +
       'transition:opacity .3s ease;';
     document.body.appendChild(_tvBackdropImg);
 
@@ -3666,8 +3666,8 @@ function ensureFullscreenBackdrop(): void {
     _tvBackdropScrim.className = 'fnos-tv-backdrop-scrim';
     const _isDark = document.documentElement.classList.contains('dark');
     const _scrim = _isDark
-      ? 'linear-gradient(to bottom,rgba(8,10,18,.22) 0%,rgba(8,10,18,.08) 38%,rgba(8,10,18,.45) 100%)'
-      : 'linear-gradient(to bottom,rgba(255,255,255,.30) 0%,rgba(255,255,255,.12) 38%,rgba(255,255,255,.55) 100%)';
+      ? 'linear-gradient(to bottom,rgba(8,10,18,.46) 0%,rgba(8,10,18,.30) 32%,rgba(8,10,18,.62) 100%)'
+      : 'linear-gradient(to bottom,rgba(255,255,255,.46) 0%,rgba(255,255,255,.30) 32%,rgba(255,255,255,.62) 100%)';
     _tvBackdropScrim.style.cssText =
       'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
       'background:' + _scrim + ';';
@@ -3676,33 +3676,35 @@ function ensureFullscreenBackdrop(): void {
   }
   _tvBackdropImg.style.setProperty('background-image', `url("${imgUrl}")`, 'important');
 
-  // [lc-881] 兜底: 同时设 document.body 背景图(attachment:fixed 全屏固定)
-  if (!_tvBodyBgSet) {
-    const _isDark2 = document.documentElement.classList.contains('dark');
-    const _scrim2 = _isDark2
-      ? 'linear-gradient(to bottom,rgba(8,10,18,.22) 0%,rgba(8,10,18,.08) 38%,rgba(8,10,18,.45) 100%)'
-      : 'linear-gradient(to bottom,rgba(255,255,255,.30) 0%,rgba(255,255,255,.12) 38%,rgba(255,255,255,.55) 100%)';
-    document.body.style.setProperty('background-image',
-      `${_scrim2}, url("${imgUrl}")`, 'important');
-    document.body.style.setProperty('background-size', 'cover, cover', 'important');
-    document.body.style.setProperty('background-position', 'center, center', 'important');
-    document.body.style.setProperty('background-repeat', 'no-repeat, no-repeat', 'important');
-    document.body.style.setProperty('background-attachment', 'fixed, fixed', 'important');
-    _tvBodyBgSet = true;
-    log('ensureFullscreenBackdrop: ✅ 已设 body 背景图兜底 (theme=' + (_isDark2 ? 'dark' : 'light') + ')');
-  } else {
-    const cur = document.body.style.getPropertyValue('background-image') || '';
-    const m = cur.match(/url\(["']?([^"')]+)["']?\)/);
-    if (!m || m[1] !== imgUrl) {
-      document.body.style.setProperty('background-image',
-        cur.replace(/url\([^)]+\)/, `url("${imgUrl}")`), 'important');
-    }
-  }
-
-  // [lc-885] 不再隐藏原始横幅背景。原图(含 fnOS 自带模糊)保留原位显示,
-  //   全屏底图作为底层叠加(z-index:-1 + body bg), 两者不冲突。
-  //   旧逻辑隐藏原图会导致 header 区域变黑块(替代层被不透明容器遮挡)。
+  // [lc-890] 关键修复: 仅加 z-index:-1 固定层会被 fnOS 不透明页面背景(html/body/内容容器)
+  //   完全遮挡 → 用户看到"海报没全屏"。这里把详情页所有页面级不透明背景透明化,
+  //   让全屏底图真正透出; 本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮等)
+  //   优先级更高会保留, 仅 fnOS 原生纯色背景被清掉。离开详情页移除 body 类即自动还原。
+  ensureDetailBackdropTransparency();
 }
+
+/** [lc-890] 让全屏底图(z-index:-1 固定层)真正透出: 清除 fnOS 详情页的页面级不透明背景。
+ *  机制: 给 html/body 加 .fnos-detail-backdrop 类, 注入一条
+ *    html.fnos-detail-backdrop, body.fnos-detail-backdrop, body.fnos-detail-backdrop * { background-color: transparent !important; }
+ *  规则。fnOS 原生的页面/内容容器背景多为 class 设定的纯色(非 !important),
+ *  会被清成透明 → 底图透出; 本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮)优先级更高保留。
+ *  离开详情页移除类即全部还原。 */
+function ensureDetailBackdropTransparency(): void {
+  if (!_tvBackdropStyle) {
+    _tvBackdropStyle = document.createElement('style');
+    _tvBackdropStyle.className = 'fnos-detail-backdrop-style';
+    _tvBackdropStyle.textContent =
+      'html.fnos-detail-backdrop,' +
+      'body.fnos-detail-backdrop,' +
+      'body.fnos-detail-backdrop *' +
+      '{ background-color: transparent !important; }';
+    (document.head || document.documentElement).appendChild(_tvBackdropStyle);
+    log('ensureDetailBackdropTransparency: 已注入透明背景样式');
+  }
+  document.documentElement.classList.add('fnos-detail-backdrop');
+  document.body.classList.add('fnos-detail-backdrop');
+}
+
 function removeFullscreenBackdrop(): void {
   if (_tvBackdropImg) { _tvBackdropImg.remove(); _tvBackdropImg = null; }
   if (_tvBackdropScrim) { _tvBackdropScrim.remove(); _tvBackdropScrim = null; }
@@ -3715,15 +3717,10 @@ function removeFullscreenBackdrop(): void {
     _tvBgEl.style.removeProperty('background-image');
     _tvBgEl = null;
   }
-  // [lc-881] 恢复 document.body 背景图
-  if (_tvBodyBgSet) {
-    document.body.style.removeProperty('background-image');
-    document.body.style.removeProperty('background-size');
-    document.body.style.removeProperty('background-position');
-    document.body.style.removeProperty('background-repeat');
-    document.body.style.removeProperty('background-attachment');
-    _tvBodyBgSet = false;
-  }
+  // [lc-890] 还原: 移除透明化类(页面级背景自动还原), 并移除注入的 <style>
+  document.documentElement.classList.remove('fnos-detail-backdrop');
+  document.body.classList.remove('fnos-detail-backdrop');
+  if (_tvBackdropStyle) { _tvBackdropStyle.remove(); _tvBackdropStyle = null; }
 }
 
 /** 查找简介区域的辅助函数 */
