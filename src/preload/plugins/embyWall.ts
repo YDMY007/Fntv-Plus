@@ -9159,7 +9159,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const _ps = history.pushState, _rs = history.replaceState;
     (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
     (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
-    window.addEventListener('popstate', () => { logNav('popstate'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); });
+    window.addEventListener('popstate', () => { logNav('popstate'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); applyDetailLiquidGlass(); }); // [lc-877] 导航回首页必须移除 fnos-immersive-season
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
@@ -9181,7 +9181,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) { applyDetailLiquidGlass(); backfillDetailLogo(); }
+      applyDetailLiquidGlass(); // [lc-877] 无条件调用：内部按URL分发(详情页添加/非详情页移除 fnos-immersive-season)
+      if (isDetailPage()) backfillDetailLogo();
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
