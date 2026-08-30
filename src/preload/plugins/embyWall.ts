@@ -4217,6 +4217,11 @@ function layoutSeasonTwoPane(): void {
 
   // 给每集卡片补齐「时长 / 状态」meta（仅限两栏容器内, 防泄漏到首页）
   injectEpisodeMeta(wrap);
+
+  // [lc-893] 右侧信息卡顶边对齐首集卡片(选集可能懒加载, 多延迟重试)
+  alignInfoCardWithFirstEpisode();
+  setTimeout(alignInfoCardWithFirstEpisode, 300);
+  setTimeout(alignInfoCardWithFirstEpisode, 1000);
 }
 
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
@@ -4257,6 +4262,23 @@ function injectEpisodeMeta(root?: HTMLElement): void {
   });
 }
 
+/** [lc-893] 把右侧信息卡(.fnos-season-aside)的顶边, 对齐到左侧第一张选集卡片
+ *  (.fnos-season-main 内首个 [data-id="details"])的顶边。fnOS 左侧「选集」等标题会占去
+ *  一定高度, 导致右侧信息卡比首集卡片高 → 视觉起点不齐。这里运行时测量首集卡片相对
+ *  两栏容器的偏移, 把 aside 的 marginTop 设为该偏移, 抵消标题高度, 两侧顶边齐平。
+ *  幂等: 每次都按当前实测覆盖 marginTop, 不会叠加。 */
+function alignInfoCardWithFirstEpisode(): void {
+  const col = document.querySelector('.fnos-season-2col') as HTMLElement | null;
+  const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
+  const firstCard = document.querySelector('.fnos-season-main [data-id="details"]') as HTMLElement | null;
+  if (!col || !aside || !firstCard) return;
+  const colTop = col.getBoundingClientRect().top;
+  const cardTop = firstCard.getBoundingClientRect().top;
+  const offset = Math.max(0, Math.round(cardTop - colTop));
+  aside.style.marginTop = offset + 'px';
+  log('alignInfoCardWithFirstEpisode: aside marginTop=' + offset + 'px (对齐首集卡片顶边)');
+}
+
 /** fnOS SPA 重渲染选集/演职人员时，若两栏被拆散则自动补做 */
 function observeSeasonTwoPane(): void {
   if (_season2colObserver) return;
@@ -4271,6 +4293,7 @@ function observeSeasonTwoPane(): void {
     const epInWrap = wrap ? (wrap.querySelector('.fnos-season-main') as HTMLElement | null) : null;
     if (wrap && epInWrap && epInWrap === epNow) {
       updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
+      alignInfoCardWithFirstEpisode(); // [lc-893] 首集卡片懒加载后位置可能变动, 重对齐
       return;
     }
     if (wrap) wrap.remove();
