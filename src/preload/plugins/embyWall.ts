@@ -8848,6 +8848,33 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     window.setTimeout(() => { if (!d.classList.contains('drawer-open')) d.style.removeProperty('display'); }, 340);
   };
 
+  /** [lc-875] 顶栏(汉堡键所在的导航栏, 含飞牛影视 logo)强制全透明:
+   *  去掉 fnOS 原生半透明/毛玻璃底, 让桌面亚克力/壁纸透出, 实现沉浸式顶栏。
+   *  只遍历汉堡键的祖先链(不动兄弟/子节点) → logo、导航项、按钮、文字均不受影响;
+   *  命中最近的"带底色"祖先即停, 不向上误伤 app 外壳背景。 */
+  const applyTopNavTransparent = (): void => {
+    const burger = document.querySelector('[class*="lg:!hidden"]:not([class*="inset-0"])') as HTMLElement | null;
+    if (!burger) return;
+    let el: HTMLElement | null = burger.parentElement;
+    for (let i = 0; i < 4 && el; i++) {
+      const bg = getComputedStyle(el).backgroundColor;
+      const m = bg.match(/rgba?\(([^)]+)\)/);
+      if (m) {
+        const parts = m[1].split(',').map(s => parseFloat(s.trim()));
+        const a = parts.length >= 4 ? parts[3] : 1;
+        if (a > 0) { // 命中带底色的顶栏容器 → 透明化 + 去模糊, 仅处理最近的一个即停
+          el.style.setProperty('background', 'transparent', 'important');
+          el.style.setProperty('background-color', 'transparent', 'important');
+          el.style.setProperty('backdrop-filter', 'none', 'important');
+          el.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+          log('[lc-875] top-nav transparentized:', (el.className || el.tagName).slice(0, 60));
+          break;
+        }
+      }
+      el = el.parentElement;
+    }
+  };
+
   const ensureBurgerVisible = () => {
     // ① 强制可见: 宽屏下汉堡键被Tailwind @media钉死display:none, 强制显示(不影响布局/抽屉)
     const burger = document.querySelector('[class*="lg:!hidden"]:not([class*="inset-0"])') as HTMLElement | null;
@@ -8899,6 +8926,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }, true); // capture 阶段
       log('MASK click-close-hook installed (capture+stop)');
     }
+    applyTopNavTransparent(); // [lc-875] 顶栏(汉堡键+飞牛影视 logo)强制全透明
   };
   // 立即执行一次 + 定时巡检
   ensureBurgerVisible();
