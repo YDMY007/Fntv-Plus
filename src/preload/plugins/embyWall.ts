@@ -4163,8 +4163,8 @@ function layoutSeasonTwoPane(): void {
   wrap.appendChild(ep);
   wrap.appendChild(aside);
 
-  // 给每集卡片补齐「时长 / 状态」meta
-  injectEpisodeMeta();
+  // 给每集卡片补齐「时长 / 状态」meta（仅限两栏容器内, 防泄漏到首页）
+  injectEpisodeMeta(wrap);
 }
 
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
@@ -4184,9 +4184,11 @@ function restyleCastItems(container: HTMLElement): void {
   });
 }
 
-/** 给每集卡片补齐「时长 / 状态」meta（幂等，并隐藏 fnOS 原生的时长行避免重复） */
-function injectEpisodeMeta(): void {
-  document.querySelectorAll('[data-id="details"]').forEach((card) => {
+/** 给每集卡片补齐「时长 / 状态」meta（幂等，并隐藏 fnOS 原生的时长行避免重复）
+ *  [lc-886] root 限定作用域: 仅在传入容器内查询 [data-id="details"],
+ *  防止 fnOS SPA 全局 DOM 共存时误匹配首页/其他页面的卡片(导致"高清"泄漏)。 */
+function injectEpisodeMeta(root?: HTMLElement): void {
+  (root || document).querySelectorAll('[data-id="details"]').forEach((card) => {
     if (card.querySelector('.fnos-ep-meta')) return;
     const a = findCardTitleLink(card);
     let dur = '—';
@@ -9343,8 +9345,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   };
   try {
     const _ps = history.pushState, _rs = history.replaceState;
-    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
-    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
