@@ -3699,15 +3699,9 @@ function ensureFullscreenBackdrop(): void {
     }
   }
 
-  // ③ 隐藏原始横幅背景, 避免双重显示(仅当已成功拿到 URL 才动原生元素)
-  if (fromImg) {
-    fromImg.style.setProperty('opacity', '0', 'important');
-    fromImg.style.setProperty('visibility', 'hidden', 'important');
-    _tvBlurImg = fromImg;
-  } else if (bgEl) {
-    bgEl.style.setProperty('background-image', 'none', 'important');
-    _tvBgEl = bgEl;
-  }
+  // [lc-885] 不再隐藏原始横幅背景。原图(含 fnOS 自带模糊)保留原位显示,
+  //   全屏底图作为底层叠加(z-index:-1 + body bg), 两者不冲突。
+  //   旧逻辑隐藏原图会导致 header 区域变黑块(替代层被不透明容器遮挡)。
 }
 function removeFullscreenBackdrop(): void {
   if (_tvBackdropImg) { _tvBackdropImg.remove(); _tvBackdropImg = null; }
