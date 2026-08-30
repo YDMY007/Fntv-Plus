@@ -9343,6 +9343,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const d = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
     if (d && d.classList.contains('drawer-open')) { animateCloseDrawer(d); log('NAV -> DRAWER CLOSED (anim)'); }
   };
+  // [lc-889] 返回首页时强制重注入轮播: 轮播详情按钮经 spaNav(pushState+手动dispatch popstate)
+  //   导航后, fnOS 视图栈可能不一致, 回来时落到未增强的原生 /v; 此时轮播守卫
+  //   !(_apiLoaded && !_carouselRevealed) 在某些情况下会拦截重注入。这里在返回首页时
+  //   显式重置并重建轮播, 确保看到的是 Fntv-Plus 增强页而非飞牛原生影视。
+  const ensureHomepageEnhanced = (): void => {
+    if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
+    if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return; // 已在, 跳过
+    if (_carouselContainer && !document.body.contains(_carouselContainer)) { destroyCarousel(); _carouselContainer = null; }
+    _carouselInited = false;
+    _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
+    injectCarousel();
+    log('ensureHomepageEnhanced: 已强制重注入轮播');
+  };
+
   try {
     const _ps = history.pushState, _rs = history.replaceState;
     // [lc-887] pushState/replaceState: 仅在「离开详情页」时同步清理(防 body bg 泄漏闪一下)。
@@ -9350,8 +9364,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   同步执行会把详情页样式套到首页/其他页 DOM 上导致布局错乱。
     //   进入详情页的应用交给已有的 MutationObserver(200ms debounce) + setTimeout(600/1500/3000ms) 重试链。
     const _wasDetail = (): boolean => /\/v\/(tv|movie)\//.test(location.href);
-    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
-    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
+    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
+    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
@@ -9360,6 +9374,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(hideStaleViews, 400);
       // [lc-877] 导航回首页必须移除 fnos-immersive-season（[lc-878] 已修复 applyDetailLiquidGlass 在非详情页提前 return 的 bug，现在能正确移除）
       applyDetailLiquidGlass();
+      setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
