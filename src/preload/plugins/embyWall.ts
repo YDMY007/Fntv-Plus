@@ -4390,6 +4390,16 @@ function fillEpisodeDescsFromBangumi(): void {
 
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 function applyDetailLiquidGlass(): void {
+  // [lc-878] 非详情页(首页/系统页): 必须无条件移除 fnos-immersive-season。
+  //   原逻辑中 _detailGlassInited=true 时在首页找不到 .trim-mc__details--key-version 直接 return,
+  //   导致 class 残留污染"继续观看"/"剧集列表"等区块 —— 故非详情页优先移除。
+  if (!isDetailPage()) {
+    document.body.classList.remove('fnos-immersive-season');
+    if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
+    _detailGlassInited = false; // 重置, 下次进详情页重新初始化
+    return;
+  }
+
   if (_detailGlassInited && !location.href.includes('/season/')) {
     // TV详情页只做一次; season可能独立导航需重试
     const recheck = document.querySelector('.trim-mc__details--key-version')
@@ -9159,7 +9169,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const _ps = history.pushState, _rs = history.replaceState;
     (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); logNav('pushState'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
     (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); };
-    window.addEventListener('popstate', () => { logNav('popstate'); pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); applyDetailLiquidGlass(); }); // [lc-877] 导航回首页必须移除 fnos-immersive-season
+    window.addEventListener('popstate', () => {
+      logNav('popstate');
+      pageTransition();
+      setTimeout(ensureBurgerVisible, 300);
+      setTimeout(closeDrawer, 300);
+      setTimeout(hideStaleViews, 400);
+      // [lc-877] 导航回首页必须移除 fnos-immersive-season（[lc-878] 已修复 applyDetailLiquidGlass 在非详情页提前 return 的 bug，现在能正确移除）
+      applyDetailLiquidGlass();
+    });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
