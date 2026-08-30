@@ -3415,6 +3415,7 @@ let _tvBackdropScrim: HTMLDivElement | null = null;   // 全屏渐变蒙版(保�
 let _tvBlurImg: HTMLImageElement | null = null;       // 预留(当前不隐藏原图)
 let _tvBgEl: HTMLElement | null = null;               // 预留(当前不隐藏原图)
 let _tvBackdropStyle: HTMLStyleElement | null = null; // [lc-890] 透明化页面背景的 <style>
+let _tvBackdropDiagDone = false;                      // [lc-891] 残留不透明元素诊断(每详情页只跑一次)
 
 /** 检测当前URL是否为需要液态玻璃的详情页 */
 function isDetailPage(): boolean {
@@ -3639,6 +3640,22 @@ function ensureFullscreenBackdrop(): void {
     }
   }
 
+  // 路径 f: 任意带 background-image 的大尺寸元素(兜底, fnOS 可能把横屏海报放在某个 div 的 background 上)
+  if (!imgUrl) {
+    let best: { url: string; area: number } | null = null;
+    const allEls = document.querySelectorAll('div,section,header,main,article,aside') as NodeListOf<HTMLElement>;
+    for (const el of Array.from(allEls)) {
+      const m = bgUrlOf(getComputedStyle(el));
+      if (!m) continue;
+      const r = el.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (r.width > Math.max(300, window.innerWidth * 0.3) && (!best || area > best.area)) {
+        best = { url: m, area }; bgEl = el; _tvHeaderEl = el;
+      }
+    }
+    if (best) { imgUrl = best.url; log('ensureFullscreenBackdrop: 路径f命中 background-image 大元素(w=' + Math.round((bgEl as HTMLElement).getBoundingClientRect().width) + ')'); }
+  }
+
   // 路径 e: document.body 背景图(兜底)
   if (!imgUrl) {
     const bodyUrl = bgUrlOf(getComputedStyle(document.body));
@@ -3681,14 +3698,37 @@ function ensureFullscreenBackdrop(): void {
   //   让全屏底图真正透出; 本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮等)
   //   优先级更高会保留, 仅 fnOS 原生纯色背景被清掉。离开详情页移除 body 类即自动还原。
   ensureDetailBackdropTransparency();
+
+  // [lc-891] 诊断: 每详情页只跑一次, 列出仍不透明的全宽元素 + body/root 背景, 便于真机反馈定位
+  if (!_tvBackdropDiagDone) {
+    _tvBackdropDiagDone = true;
+    const root2 = document.getElementById('root');
+    log('ensureFullscreenBackdrop: diag bodyBg=' + getComputedStyle(document.body).backgroundColor
+      + ' rootBg=' + (root2 ? getComputedStyle(root2).backgroundColor : 'n/a'));
+    const stuck: string[] = [];
+    document.querySelectorAll('body *').forEach((e) => {
+      const el = e as HTMLElement;
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const opaqueColor = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent';
+      const opaqueImg = !!cs.backgroundImage && cs.backgroundImage !== 'none';
+      if (r.width > window.innerWidth * 0.5 && (opaqueColor || opaqueImg)) {
+        stuck.push((el.className || '').toString().substring(0, 40) + '|bc=' + cs.backgroundColor + '|bi=' + (cs.backgroundImage || '').substring(0, 24));
+      }
+    });
+    if (stuck.length) log('ensureFullscreenBackdrop: ⚠️ 仍不透明全宽元素(前6)= ' + stuck.slice(0, 6).join(' || '));
+    else log('ensureFullscreenBackdrop: ✅ 未检测到残留不透明全宽元素');
+  }
 }
 
-/** [lc-890] 让全屏底图(z-index:-1 固定层)真正透出: 清除 fnOS 详情页的页面级不透明背景。
+/** [lc-890/891] 让全屏底图(z-index:-1 固定层)真正透出: 清除 fnOS 详情页的页面级不透明背景。
  *  机制: 给 html/body 加 .fnos-detail-backdrop 类, 注入一条
- *    html.fnos-detail-backdrop, body.fnos-detail-backdrop, body.fnos-detail-backdrop * { background-color: transparent !important; }
- *  规则。fnOS 原生的页面/内容容器背景多为 class 设定的纯色(非 !important),
- *  会被清成透明 → 底图透出; 本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮)优先级更高保留。
- *  离开详情页移除类即全部还原。 */
+ *    html.fnos-detail-backdrop, body.fnos-detail-backdrop, body.fnos-detail-backdrop * (含 ::before/::after)
+ *    { background-color: transparent !important; background-image: none !important; }
+ *  规则。fnOS 详情页的不透明遮罩多为「渐变 background-image」(非纯色)或伪元素, 仅清 background-color(lc-890)无效,
+ *  故 lc-891 改为连 background-image 与伪元素一并清空 → 底图透出。
+ *  本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮/底图层自身)优先级更高保留;
+ *  hero 头部的原生海报是 <img>(非 CSS 背景)不受影响。离开详情页移除类即全部还原。 */
 function ensureDetailBackdropTransparency(): void {
   if (!_tvBackdropStyle) {
     _tvBackdropStyle = document.createElement('style');
@@ -3696,8 +3736,10 @@ function ensureDetailBackdropTransparency(): void {
     _tvBackdropStyle.textContent =
       'html.fnos-detail-backdrop,' +
       'body.fnos-detail-backdrop,' +
-      'body.fnos-detail-backdrop *' +
-      '{ background-color: transparent !important; }';
+      'body.fnos-detail-backdrop *,' +
+      'body.fnos-detail-backdrop *::before,' +
+      'body.fnos-detail-backdrop *::after' +
+      '{ background-color: transparent !important; background-image: none !important; }';
     (document.head || document.documentElement).appendChild(_tvBackdropStyle);
     log('ensureDetailBackdropTransparency: 已注入透明背景样式');
   }
@@ -3721,6 +3763,7 @@ function removeFullscreenBackdrop(): void {
   document.documentElement.classList.remove('fnos-detail-backdrop');
   document.body.classList.remove('fnos-detail-backdrop');
   if (_tvBackdropStyle) { _tvBackdropStyle.remove(); _tvBackdropStyle = null; }
+  _tvBackdropDiagDone = false; // [lc-891] 允许下次进详情页重新诊断
 }
 
 /** 查找简介区域的辅助函数 */
