@@ -3701,15 +3701,16 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
   justify-content:flex-end !important; align-items:flex-start !important;
   padding:0 48px 36px !important; min-height:340px !important;
 }
-/* 横版底图：清晰全幅覆盖（强制去模糊） */
-.fnos-immersive-season .semi-always-dark img[style*="blur"]{
-  position:absolute !important; inset:0 !important; width:100% !important; height:100% !important;
-  object-fit:cover !important; filter:none !important; blur(0px) !important;
-  -webkit-filter:none !important; transform:none !important; z-index:0 !important;
-}
-/* 兜底：去掉所有子 img 的模糊（防 fnOS 用其他方式加 blur） */
-.fnos-immersive-season .semi-always-dark > img{
+/* 横版底图：fnOS 原生用 img.blur-[10px]（Tailwind 类）加模糊，非内联 style
+   → 直接对 hero 内所有 img 强制去模糊，覆盖 .blur-[10px] 类 */
+.fnos-immersive-season .semi-always-dark img{
   filter:none !important; -webkit-filter:none !important;
+  transform:none !important; object-fit:cover !important;
+}
+/* 底图全幅填充（wrapper .absolute.size-full 已做定位，这里保底尺寸） */
+.fnos-immersive-season .semi-always-dark .absolute img,
+.fnos-immersive-season .semi-always-dark > div > img{
+  width:100% !important; height:100% !important;
 }
 /* 去掉竖屏海报卡片容器 */
 .fnos-immersive-season .semi-always-dark .rounded-xl.overflow-hidden,
