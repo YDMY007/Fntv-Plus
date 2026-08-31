@@ -3840,6 +3840,16 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   align-items:start !important;
   /* 右侧留白：避免侧栏卡片贴上容器右缘（祖先 overflow:hidden）被误判为裁切 */
   padding-right:24px !important;
+  /* [lc-919] 高度不自限: 祖先链多层 h-full+overflow-hidden 会把超长内容裁切导致页面无法滚动。
+   *   grid 容器必须 height:auto 让内容撑开高度, 由更上层的 overflow-auto 祖先接管滚动。 */
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+}
+/* [lc-919] 两栏容器的直接父级(通常是 gap-6 pb-6 pr-4 的 flex-col): 确保它能被内容撑开、不锁死高度 */
+.fnos-immersive-season .fnos-season-2col{ height:auto !important; }
+html.fnos-tv-page .fnos-immersive-season .flex.flex-col.gap-6:has(.fnos-season-2col){
+  height:auto !important; min-height:0 !important; max-height:none !important; overflow:visible !important;
 }
 .fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; overflow:visible !important; }
 .fnos-immersive-season .fnos-season-aside{ min-width:0 !important; overflow:visible !important; max-width:none !important; }
@@ -4170,6 +4180,15 @@ function findShowContentColumn(): HTMLElement | null {
     const cls = el.className.toString();
     if (cls.includes('px-[44px]') && cls.includes('flex-col') && cls.includes('w-full')) {
       if (el.querySelector('[data-id="details"]') || el.querySelector('.card-root')) {
+        // [lc-919] 二级页(px-[44px] 内容列)包含 Hero(海报+标题+播放按钮)作为第一个子节点,
+        //   若把整列塞进左栏 → Hero 被切割侵入。故向下找「含 .card-root 的最内层子容器」,
+        //   仅包裹选集/季卡片区域, 让 Hero 保持原样不受两栏影响。
+        const narrow = findNarrowCardContainer(el);
+        if (narrow && narrow !== el) {
+          dlog('findShowContentColumn: 精细化锚点(跳过Hero) cls=' + (narrow.className||'').toString().substring(0,60));
+          _showColCache = narrow;
+          return narrow;
+        }
         _showColCache = el;
         return el;
       }
@@ -4177,6 +4196,30 @@ function findShowContentColumn(): HTMLElement | null {
   }
   _showColCache = null;
   return null;
+}
+
+/** [lc-919] 在容器内向下找「含卡片(.card-root/[data-id=details])的最内层子容器」,
+ *  用于二级页跳过 Hero 区域, 仅对选集/季卡片区域建两栏。 */
+function findNarrowCardContainer(root: HTMLElement): HTMLElement | null {
+  // BFS 向下找: 取直接子节点中含卡片的那个, 递归直到无法更窄
+  let best: HTMLElement | null = root;
+  let depth = 0;
+  const MAX_DEPTH = 6; // 防止无限递归
+  while (best && depth < MAX_DEPTH) {
+    let foundChild: HTMLElement | null = null;
+    for (let i = 0; i < best.children.length; i++) {
+      const c = best.children[i] as HTMLElement;
+      if (c.querySelector('.card-root') || c.querySelector('[data-id="details"]')) {
+        foundChild = c;
+        break; // 取第一个含卡片的子节点
+      }
+    }
+    if (!foundChild || foundChild === best) break;
+    // 若找到的子节点就是 root 本身或无进展, 停止
+    best = foundChild;
+    depth++;
+  }
+  return best !== root ? best : null;
 }
 
 /** [lc-912] 找「选集 / 剧集 / 分集 / Episodes」小标题节点(叶子节点, 短文本)。
