@@ -3909,20 +3909,21 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   overflow:visible !important; white-space:normal !important; padding-left:0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:6px !important;
+  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:2px !important;
 }
 /* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
-.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.6rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.4rem !important; color:var(--semi-color-text-2,#86868b) !important; }
 /* 单个演员：头像(左) + 姓名/角色(右) */
+/* [lc-901] 演员列表收紧: 每项上下内边距 8px→4px, 头像-文字间距 12px→10px, 文字左对齐贴齐头像(原 center 显空) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item{
   display:flex !important; flex-direction:row !important; align-items:center !important;
-  gap:12px !important; width:100% !important; padding:8px 0 !important;
+  gap:10px !important; width:100% !important; padding:4px 0 !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{
   width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:auto !important; justify-content:center !important; gap:2px !important; overflow:visible !important; align-items:center !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:auto !important; justify-content:center !important; gap:2px !important; overflow:visible !important; align-items:flex-start !important; }
 /* [lc-896→897] 演员姓名/角色单行, 不换行也不截断(完整显示) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p,
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p.truncate{
@@ -3972,7 +3973,7 @@ html.dark .fnos-immersive-season .fnos-info-card p{ font-size:.85rem !important;
 html.dark .fnos-immersive-season .fnos-info-card a{ color:#E50914 !important; font-weight:600 !important; }
 html.dark .fnos-immersive-season .fnos-tag{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
 html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
-html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:8px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
+html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:4px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{ border:1px solid rgba(255,255,255,.12) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
