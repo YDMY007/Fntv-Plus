@@ -3912,7 +3912,7 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   width:44px !important; height:44px !important; flex:0 0 44px !important; margin:0 !important; border-radius:50% !important; overflow:hidden !important;
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; overflow:visible !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:auto !important; justify-content:center !important; gap:2px !important; overflow:visible !important; align-items:center !important; }
 /* [lc-896→897] 演员姓名/角色单行, 不换行也不截断(完整显示) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p,
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p.truncate{
@@ -4236,6 +4236,15 @@ function restyleCastItems(container: HTMLElement): void {
     if (a.classList.contains('fnos-cast-item')) return;
     const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
     ps.forEach((p) => { p.classList.remove('w-[120px]', 'truncate'); });
+    // [lc-898] 外层 w-[120px] overflow-hidden 才是真正裁切演员文字的元凶: 去掉固定宽度+overflow, 让姓名/角色完整显示
+    const wrap = a.parentElement as HTMLElement | null;
+    if (wrap) {
+      wrap.classList.remove('w-[120px]', 'overflow-hidden');
+      wrap.style.width = 'auto';
+      wrap.style.minWidth = '120px';
+      wrap.style.maxWidth = 'none';
+      wrap.style.overflow = 'visible';
+    }
     if (ps.length) {
       const info = document.createElement('div');
       info.className = 'fnos-cast-info';
