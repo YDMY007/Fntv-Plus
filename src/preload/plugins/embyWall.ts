@@ -1224,6 +1224,7 @@ function injectCarousel(): void {
 .fnos-play:active,.fnos-more:active{transform:scale(.97)}   /* 按压反馈 */
 .fnos-play:focus-visible,.fnos-more:focus-visible{outline:2px solid var(--fnos-ui-accent,#8f6fe8);outline-offset:3px}
 .fnos-more.is-loading{opacity:.6;pointer-events:none}        /* 解析季路由时的加载态 */
+.fnos-play.is-loading{opacity:.6;pointer-events:none}         /* [lc-900] PLAY 也走二级路由, 解析时加载态 */
 @media (prefers-reduced-motion: reduce){                     /* 尊重系统「减弱动态效果」 */
   .fnos-play,.fnos-more{transition:background-color .15s ease}
   .fnos-play:hover,.fnos-more:hover,.fnos-play:active,.fnos-more:active{transform:none}
@@ -1496,10 +1497,16 @@ function injectCarousel(): void {
     const moreBtn = info.querySelector('a.fnos-more') as HTMLElement | null;
     // [lc-773] 悬停 / 按压 / 焦点环全部由注入的 CSS(.fnos-play / .fnos-more 伪类)处理，
     //   此处只绑定行为，不再用 mouseenter/mouseleave 改内联样式(避免与 CSS 打架、也减少监听)。
+    // [lc-900] PLAY 按钮默认进二级详情页(/v/(tv|movie)/season/<季guid>)，与 MORE 同构；
+    //   季 guid 异步查，失败/无季 resolveSeasonHref 内部回退到一级详情页。
     if (playBtn) {
       playBtn.addEventListener('click', (e: Event) => {
         e.preventDefault();
-        spaNav(detailHref, 'PLAY btn');
+        playBtn.classList.add('is-loading');
+        resolveSeasonHref(show).then((href) => {
+          playBtn.classList.remove('is-loading');
+          spaNav(href, 'PLAY btn');
+        });
       });
     }
     // [lc-772] More：右侧次要按钮 → 跳「季」详情页(三级 /v/(tv|movie)/season/<季guid>)。
@@ -1724,6 +1731,7 @@ function buildCarouselStyle2(
 [data-fntv-carousel-style="2"] .fnos-s2-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="2"] .fnos-s2-play:active,.fnos-s2-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="2"] .fnos-s2-detail.is-loading{opacity:.6;pointer-events:none}
+[data-fntv-carousel-style="2"] .fnos-s2-play.is-loading{opacity:.6;pointer-events:none}  /* [lc-900] PLAY 走二级路由加载态 */
 [data-fntv-carousel-style="2"] .fnos-slider-footer{position:absolute;left:0;right:0;bottom:0;z-index:7;width:100%;box-sizing:border-box;display:flex;align-items:center;gap:1.2rem;padding:0 2.5rem 14px}
 [data-fntv-carousel-style="2"] .fnos-progress-bar{flex:1;height:4px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;cursor:pointer;position:relative}
 [data-fntv-carousel-style="2"] .fnos-progress-fill{height:100%;background:linear-gradient(90deg,#d4a04c,#f0b85c);border-radius:4px;width:0%;transform-origin:left center;transition:width .15s linear;box-shadow:0 0 10px rgba(240,184,92,.5)}
@@ -1804,7 +1812,6 @@ function buildCarouselStyle2(
     const genreArr: string[] = (show as any).genres || [];
     // [lc-795] 标题上方不再显示年份，仅保留类型标签
     const meta = (genreArr[0] || '').toUpperCase();
-    const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
     content.innerHTML =
       '<div class="fnos-slide-meta"></div>' +
       '<div class="fnos-slide-title"></div>' +
@@ -1853,7 +1860,8 @@ function buildCarouselStyle2(
         if (!detailReady) location.href = href;
       }, 600);
     };
-    if (playBtn) playBtn.addEventListener('click', () => { spaNav(detailHref); });
+    // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
+    if (playBtn) playBtn.addEventListener('click', () => { playBtn.classList.add('is-loading'); resolveSeasonHref(show).then((href) => { playBtn.classList.remove('is-loading'); spaNav(href); }); });
     if (detailBtn) detailBtn.addEventListener('click', () => {
       detailBtn.classList.add('is-loading');
       resolveSeasonHref(show).then((href) => { detailBtn.classList.remove('is-loading'); spaNav(href); });
@@ -2093,6 +2101,7 @@ function buildCarouselStyle3(
 [data-fntv-carousel-style="3"] .fntv-s3-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="3"] .fntv-s3-play:active,[data-fntv-carousel-style="3"] .fntv-s3-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="3"] .fntv-s3-detail.is-loading{opacity:.6;pointer-events:none}
+[data-fntv-carousel-style="3"] .fntv-s3-play.is-loading{opacity:.6;pointer-events:none}  /* [lc-900] PLAY 走二级路由加载态 */
 [data-fntv-carousel-style="3"] .fntv-s3-dots{position:absolute;left:0;right:0;bottom:14px;z-index:11;display:flex;justify-content:center;gap:10px}
 [data-fntv-carousel-style="3"] .fntv-s3-dot{width:8px;height:8px;border-radius:50%;background:rgba(160,140,110,.4);border:1px solid rgba(255,255,255,.3);cursor:pointer;transition:all .35s cubic-bezier(.22,1,.36,1)}
 [data-fntv-carousel-style="3"] .fntv-s3-dot.active{background:#f0b85c;transform:scale(1.4);box-shadow:0 0 10px rgba(240,184,92,.6);border-color:#fff}
@@ -2163,7 +2172,6 @@ function buildCarouselStyle3(
     const info = document.createElement('div');
     info.className = 'fntv-s3-info';
     const meta = (genreArr[0] || '').toUpperCase();
-    const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
     info.innerHTML =
       '<div class="meta"></div>' +
       '<h3></h3>' +
@@ -2210,7 +2218,8 @@ function buildCarouselStyle3(
         if (!detailReady) location.href = href;
       }, 600);
     };
-    if (playBtn) playBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); spaNav(detailHref); });
+    // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
+    if (playBtn) playBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); playBtn.classList.add('is-loading'); resolveSeasonHref(show).then((href) => { playBtn.classList.remove('is-loading'); spaNav(href); }); });
     if (detailBtn) detailBtn.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation();
       detailBtn.classList.add('is-loading');
@@ -2365,6 +2374,7 @@ function ensureStyle4Css(): void {
 [data-fntv-carousel-style="4"] .fntv-s4-detail:hover{background:rgba(184,155,106,.25);border-color:#e3c08a;color:#fff7e8;transform:translateY(-2px)}
 [data-fntv-carousel-style="4"] .fntv-s4-play:active,[data-fntv-carousel-style="4"] .fntv-s4-detail:active{transform:translateY(0) scale(.97)}
 [data-fntv-carousel-style="4"] .fntv-s4-detail.is-loading{opacity:.6;pointer-events:none}
+[data-fntv-carousel-style="4"] .fntv-s4-play.is-loading{opacity:.6;pointer-events:none}  /* [lc-900] PLAY 走二级路由加载态 */
 [data-fntv-carousel-style="4"] .fntv-s4-dots{position:absolute;left:9%;right:9%;bottom:44px;z-index:12;display:flex;justify-content:center;gap:9px}
 [data-fntv-carousel-style="4"] .fntv-s4-dot{width:7px;height:7px;border-radius:99px;background:rgba(160,140,110,.45);cursor:pointer;transition:width .45s cubic-bezier(.22,1,.36,1),background-color .4s ease,box-shadow .4s ease}
 [data-fntv-carousel-style="4"] .fntv-s4-dot.active{background:#f0b85c;width:24px;box-shadow:0 0 12px rgba(240,184,92,.5)}
@@ -2457,7 +2467,6 @@ function buildCarouselStyle4(
     const info = document.createElement('div');
     info.className = 'fntv-s4-info';
     const meta = (genreArr[0] || '').toUpperCase();
-    const detailHref = '/v/' + ((show as any).mediaType === 'movie' ? 'movie' : 'tv') + '/' + (show as any).id;
     info.innerHTML =
       '<div class="meta"></div>' +
       '<h3></h3>' +
@@ -2504,7 +2513,8 @@ function buildCarouselStyle4(
         if (!detailReady) location.href = href;
       }, 600);
     };
-    if (playBtn) playBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); spaNav(detailHref); });
+    // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
+    if (playBtn) playBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); playBtn.classList.add('is-loading'); resolveSeasonHref(show).then((href) => { playBtn.classList.remove('is-loading'); spaNav(href); }); });
     if (detailBtn) detailBtn.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation();
       detailBtn.classList.add('is-loading');
