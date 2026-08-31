@@ -3989,6 +3989,13 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 }
 /* 渐变遮罩保留（保证文字在海报上可读） */
 /* .fnos-immersive-season .semi-always-dark .gradient-for-full{ display:none !important; } */
+/* [lc-894] 海报栏下方的彩色渐变: 显式写死, 不依赖 applySeasonGlassToHeader(该函数从未被调用, 属死代码)
+   用 --fnos-detail-season-grad(深浅主题各自定义), 顶部透出原图、底部做彩色过渡, 既是遮罩也是装饰 */
+.fnos-immersive-season .semi-always-dark .gradient-for-full{
+  display:block !important;
+  background:var(--fnos-detail-season-grad) !important;
+  pointer-events:none !important;
+}
 
 /* ── 文字内容列：叠在原始布局上微调 ── */
 .fnos-immersive-season .semi-always-dark > div:not([class]):not([style]){
