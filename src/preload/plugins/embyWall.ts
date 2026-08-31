@@ -4946,7 +4946,8 @@ function injectImmersiveSeasonStyle(): void {
   //   给两栏关键元素加高对比度 outline, 直接在页面上看到 grid 容器/左栏/右栏的实际位置和尺寸,
   //   无需依赖 DevTools 或 dump 文件即可判断「grid 是否真的分栏渲染」。
   try {
-    if (localStorage.getItem('fntvSeasonLayoutDebug') !== '0') {
+    // [lc-916] 调试描边: 仅当 localStorage.fntvSeasonLayoutDebug === '1' 时才注入(默认关闭, 需手动开启)
+    if (localStorage.getItem('fntvSeasonLayoutDebug') === '1') {
       css += `
 /* [lc-916 debug outlines] */
 .fnos-immersive-season .fnos-season-2col{ outline:3px dashed #ff0000 !important; }
