@@ -4162,26 +4162,34 @@ function findShowContentColumn(): HTMLElement | null {
  *  返回该标题节点 + 它所在 section 里实际使用的集卡片选择器, 供调用方按标题锚定 section 根。
  *  ⚠️ 只接受「祖先链 8 层内能找到集卡片」的标题, 排除推荐位等同名短文本。 */
 function findEpisodeSectionHeading(): { head: HTMLElement; sel: string } | null {
+  const _dbgAllTexts: string[] = [];
   for (const sel of ['[data-id="details"]', '.card-root']) {
     const cands = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
     for (const el of cands) {
       if (el.children.length > 0) continue;
       const t = (el.textContent || '').trim();
-      if (!/^(选集|剧集|分集|episodes?)$/i.test(t)) continue;
+      if (!/^(选集|剧集|分集|episodes?)$/i.test(t)) { if (/选|剧|分|ep/i.test(t)) _dbgAllTexts.push(t); continue; }
       let p: HTMLElement | null = el.parentElement;
       for (let i = 0; i < 8 && p && p !== document.body; i++) {
-        if (p.querySelector(sel)) return { head: el, sel };
+        if (p.querySelector(sel)) {
+          log('findEpisodeSectionHeading: 命中标题="' + t + '" sel=' + sel
+            + ' 标签=' + el.tagName + ' 父cls=' + ((el.parentElement?.className||'').toString().substring(0,60)));
+          return { head: el, sel };
+        }
         p = p.parentElement;
       }
     }
   }
+  log('findEpisodeSectionHeading: 未命中。候选文本(含选/剧/分/ep): ' + (_dbgAllTexts.length ? _dbgAllTexts.join(',') : '(无)'));
   return null;
 }
 
 function findSeasonEpParent(): HTMLElement | null {
   const _dbgCardRoot = document.querySelectorAll('.card-root').length;
   const _dbgDetails = document.querySelectorAll('[data-id="details"]').length;
-  log('findSeasonEpParent: 入口 card-root=' + _dbgCardRoot + ' details=' + _dbgDetails);
+  log('findSeasonEpParent: === 入口 === pathname=' + location.pathname
+    + ' card-root=' + _dbgCardRoot + ' details=' + _dbgDetails
+    + ' body.cls=' + (document.body.className||'').toString().substring(0,80));
   // [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/)专属策略(全部重做):
   //   飞牛原生二级详情页本质是「季概览页」——仅 1 个 [data-id="details"] 卡片(或若干 .card-root 季卡片),
   //   没有像季页那样的「选集横滚行 + 演职人员区」结构。lc-910 误以为"≥2 个 details 才算选集网格",
@@ -4206,17 +4214,29 @@ function findSeasonEpParent(): HTMLElement | null {
     const h = findEpisodeSectionHeading();
     if (h) {
       let el: HTMLElement | null = h.head.parentElement;
+      let _step = 0;
       while (el && el !== document.body) {
-        if (el.querySelector(h.sel)) {
-          log('findSeasonEpParent: [季页] 命中选集 section sel=' + h.sel
-            + ' cls=' + (el.className || '').toString().substring(0, 70));
+        _step++;
+        const hasSel = el.querySelector(h.sel) ? 'Y' : 'N';
+        log('findSeasonEpParent: [季页] 向上第' + _step + '步 cls='
+          + (el.className||'').toString().substring(0,70) + ' 含' + h.sel + '=' + hasSel
+          + ' kids=' + el.childElementCount);
+        if (hasSel === 'Y') {
+          const r = el.getBoundingClientRect();
+          log('findSeasonEpParent: [季页] ✅ 命中选集 section sel=' + h.sel
+            + ' step=' + _step + ' cls=' + (el.className||'').toString().substring(0,70)
+            + ' w=' + Math.round(r.width) + ' h=' + Math.round(r.height)
+            + ' tag=' + el.tagName);
           return el;
         }
         el = el.parentElement;
       }
+      log('findSeasonEpParent: [季页] ⚠️ 标题找到但向上遍历到 body 仍未命中 sel=' + h.sel);
+    } else {
+      log('findSeasonEpParent: [季页] findEpisodeSectionHeading 返回 null(无选集标题)');
     }
     if (_dbgDetails === 0 && _dbgCardRoot === 0) {
-      log('findSeasonEpParent: [季页] 集卡片尚未渲染, 返回 null 等待重试(不用 .card-root 猜锚点)');
+      log('findSeasonEpParent: [季页] 集卡片尚未渲染(details=0 cardRoot=0), 返回 null 等重试');
       return null;
     }
     // 有集卡片但页面没有「选集」标题 → 退化为旧路径 a(向上找 relative.w-full)
@@ -4284,19 +4304,24 @@ let _castParentCache: HTMLElement | null = null;
 function findSeasonCastParent(): HTMLElement | null {
   if (_castParentCache && document.body.contains(_castParentCache)
       && _castParentCache.querySelector('a[href^="/v/person/"]')) {
+    log('findSeasonCastParent: 命中缓存 cls=' + (_castParentCache.className||'').toString().substring(0,60));
     return _castParentCache;
   }
   const strongs = Array.from(document.querySelectorAll('strong')) as HTMLElement[];
   const cs = strongs.find((s) => (s.textContent || '').trim().includes('演职人员'));
+  log('findSeasonCastParent: strong「演职人员」=' + (cs ? '找到' : '未找到')
+    + ' (总strong数=' + strongs.length + ')');
   let p: HTMLElement | null = cs || null;
   while (p && p !== document.body) {
-    if (p.querySelector('a[href^="/v/person/"]')) { _castParentCache = p; return p; }
+    if (p.querySelector('a[href^="/v/person/"]')) {
+      log('findSeasonCastParent: ✅ 路径1(标题+person链接)命中 cls=' + (p.className||'').toString().substring(0,60));
+      _castParentCache = p; return p;
+    }
     p = p.parentElement;
   }
-  // [lc-910] 兜底: show 页等可能无"演职人员"标题(标签不同或无), 直接定位含 /v/person/ 链接的
-  //   【最内层】区块(取 DOM 中第一个 person 链接向上找首个含 ≥4 个 person 链接的祖先 = 演员列表本身)。
-  //   要求 ≥4 个以确保是真实演员区而非零散人物链接; 仅从第一个链接出发, 避免把推荐位等也卷进来。
+  // [lc-910] 兜底
   const personLinks = Array.from(document.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
+  log('findSeasonCastParent: 路径2 person链接数=' + personLinks.length);
   if (personLinks.length >= 4) {
     let el: HTMLElement | null = personLinks[0];
     while (el && el !== document.body) {
@@ -4457,28 +4482,31 @@ function restyleCastIfNeeded(container: HTMLElement): void {
 /** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
 let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSeasonTwoPane 可能被连续触发, 防止嵌套重排卡死
 function layoutSeasonTwoPane(): void {
-  if (_seasonLaying) return;
-  if (document.querySelector('.fnos-season-2col')) return;
+  if (_seasonLaying) { log('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
+  if (document.querySelector('.fnos-season-2col')) { log('layoutSeasonTwoPane: 已有两栏, 跳过'); return; }
   _seasonLaying = true;
   try {
+  log('layoutSeasonTwoPane: === 开始建两栏 === pathname=' + location.pathname);
   const ep = findSeasonEpParent();
   const cast = findSeasonCastParent();
   const root = ep ? ep.parentElement : null;
-  if (!ep || !root) return;
+  log('layoutSeasonTwoPane: ep=' + (ep ? ep.tagName+'.'+(ep.className||'').toString().substring(0,50) : 'NULL')
+    + ' root=' + (root ? root.tagName+'.'+(root.className||'').toString().substring(0,50) : 'NULL')
+    + ' cast=' + (cast ? cast.tagName+'.'+(cast.className||'').toString().substring(0,50) : 'NULL'));
+  if (!ep || !root) { log('layoutSeasonTwoPane: ❌ ep或root为空, 返回'); return; }
   // [lc-909] 安全护栏: 容器若定位到 body/html/过宽的顶层节点, 会把整页塞进左栏导致布局彻底错乱
-  //   (表现为"看起来没变化")。此时宁可不建两栏, 并打日志, 也绝不强行重排。
   if (ep === document.body || ep === document.documentElement || !document.body.contains(ep)) {
     log('layoutSeasonTwoPane: ⚠️ 主内容容器非法(body/html/已脱离DOM), 跳过两栏');
     return;
   }
-  // [lc-911] 安全护栏: 仅当 ep 直接挂在 body/html(页面级顶层包裹)时才放弃, 避免把整页塞进左栏。
-  //   不再用原始「宽度 > 视口 98%」阈值——二级 show 页内容列在 Fntv-Plus 内因侧边栏隐藏而接近满宽(≈1922px),
-  //   但那正是要拆成 60:40 的左栏, 绝不能因宽度而放弃(否则"没变化")。结构判定足以拦截真正的顶层节点。
   const epParent = ep.parentElement;
   if (epParent === document.body || epParent === document.documentElement) {
     log('layoutSeasonTwoPane: ⚠️ 主内容容器直接挂在页面根, 疑似顶层节点, 跳过两栏');
     return;
   }
+  log('layoutSeasonTwoPane: ✅ 护栏通过. epParent=' + (epParent?.tagName||'?') + '.' + ((epParent?.className||'').toString().substring(0,60))
+    + ' epParent.kids=' + (epParent?.childElementCount||0)
+    + ' ep在parent中的idx=' + (epParent ? Array.prototype.indexOf.call(epParent.children, ep) : -1));
 
   const wrap = document.createElement('div');
   wrap.className = 'fnos-season-2col';
@@ -4532,6 +4560,42 @@ function layoutSeasonTwoPane(): void {
   root.insertBefore(wrap, ep);
   wrap.appendChild(ep);
   wrap.appendChild(aside);
+
+  log('layoutSeasonTwoPane: ✅ 两栏DOM已建. wrap.parent=' + (wrap.parentElement?.tagName||'?')
+    + '.' + ((wrap.parentElement?.className||'').toString().substring(0,60))
+    + ' wrap.idx=' + (wrap.parentElement ? Array.prototype.indexOf.call(wrap.parentElement.children, wrap) : -1)
+    + ' ep在wrap内idx=' + Array.prototype.indexOf.call(wrap.children, ep)
+    + ' aside在wrap内idx=' + Array.prototype.indexOf.call(wrap.children, aside));
+
+  // [lc-912] 关键: 立即检查 CSS computed style, 确认 grid 是否真的生效
+  try {
+    const csWrap = getComputedStyle(wrap);
+    const csEp = getComputedStyle(ep);
+    const csAside = getComputedStyle(aside);
+    const csRoot = getComputedStyle(root);
+    log('layoutSeasonTwoPane: [CSS] wrap.display=' + csWrap.display
+      + ' gridTemplateColumns=' + csWrap.gridTemplateColumns
+      + ' wrap.w=' + csWrap.width + ' wrap.overflow=' + csWrap.overflow
+      + ' | ep.display=' + csEp.display + ' ep.w=' + csEp.width
+      + ' | aside.display=' + csAside.display + ' aside.w=' + csAside.width
+      + ' | root.display=' + csRoot.display + ' root.w=' + csRoot.width
+      + ' root.overflow=' + csRoot.overflow
+      + ' root.overflowX=' + csRoot.overflowX
+      + ' | body.fnos-immersive-season=' + document.body.classList.contains('fnos-immersive-season'));
+    // 向上查 5 层祖先的 overflow/width/display
+    let _anc: HTMLElement | null = wrap;
+    for (let ai = 0; ai < 6 && _anc && _anc !== document.body; ai++) {
+      const aCs = getComputedStyle(_anc);
+      log('layoutSeasonTwoPane: [CSS-ANC' + ai + '] tag=' + _anc.tagName
+        + ' cls=' + (_anc.className||'').toString().substring(0,50)
+        + ' display=' + aCs.display + ' overflow=' + aCs.overflow
+        + ' overflowX=' + aCs.overflowX + ' w=' + aCs.width
+        + ' maxW=' + aCs.maxWidth + ' flexW=' + aCs.flexWrap);
+      _anc = _anc.parentElement;
+    }
+  } catch (_csErr) {
+    log('layoutSeasonTwoPane: [CSS] computed style 检查异常: ' + (_csErr as Error).message);
+  }
 
   // 给每集卡片补齐「时长 / 状态」meta（仅限两栏容器内, 防泄漏到首页）
   injectEpisodeMeta(wrap);
@@ -4661,9 +4725,11 @@ function alignInfoCardWithFirstEpisode(): void {
 
 /** fnOS SPA 重渲染选集/演职人员时，若两栏被拆散则自动补做 */
 function observeSeasonTwoPane(): void {
-  if (_season2colObserver) return;
+  if (_season2colObserver) { log('observeSeasonTwoPane: 已有observer, 跳过'); return; }
   const ep = findSeasonEpParent();
   const target = (ep && ep.parentElement) as HTMLElement | null;
+  log('observeSeasonTwoPane: ep=' + (ep ? 'found('+ep.tagName+'.'+(ep.className||'').toString().substring(0,40)+')' : 'NULL')
+    + ' target=' + (target ? target.tagName+'.'+(target.className||'').toString().substring(0,50) : 'NULL'));
   if (!target) {
     // [lc-908] 二级页 DOM 可能尚未渲染出主内容容器 → 延迟重试(不放弃, 因为后续 fnOS 异步填充一定会产生)
     setTimeout(observeSeasonTwoPane, 800);
@@ -4832,6 +4898,9 @@ function dumpSeasonDOMToFile(stage?: string): void {
 }
 
 function applySeasonImmersiveDetail(): void {
+  log('applySeasonImmersiveDetail: === 入口 === pathname=' + location.pathname
+    + ' _detailBoxless=' + _detailBoxless
+    + ' body.cls=' + (document.body.className||'').toString().substring(0,80));
   injectImmersiveSeasonStyle();
   if (_detailBoxless) {
     document.body.classList.remove('fnos-immersive-season');
@@ -4839,6 +4908,8 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
+  log('applySeasonImmersiveDetail: body已加 fnos-immersive-season, 当前body.cls='
+    + (document.body.className||'').toString().substring(0,100));
   // [lc-909] 诊断(仅前 3 次): 详细 dump「选集」标题及其祖先链/兄弟结构, 真机实测反馈时定位"两栏为何没建立"
   if (_seasonDiagCount < 3) {
     _seasonDiagCount++;
