@@ -4644,6 +4644,24 @@ function layoutSeasonTwoPane(): void {
     }
   } catch (_shErr) { /* ignore */ }
 
+  // [lc-916] 几何诊断: 输出 wrap/main/aside 的 getBoundingClientRect, 精确到像素。
+  //   若 aside.w=0 或 aside 在视口外 → 视觉上「右栏消失」; 若 wrap.w=0 → 整个两栏容器未参与布局。
+  try {
+    const wr = wrap.getBoundingClientRect();
+    const mr = ep.getBoundingClientRect();
+    const ar = aside.getBoundingClientRect();
+    dlog('layoutSeasonTwoPane: [GEO] wrap={t:' + Math.round(wr.top) + ',l:' + Math.round(wr.left)
+      + ',w:' + Math.round(wr.width) + ',h:' + Math.round(wr.height) + '}'
+      + ' main={t:' + Math.round(mr.top) + ',l:' + Math.round(mr.left)
+      + ',w:' + Math.round(mr.width) + ',h:' + Math.round(mr.height) + '}'
+      + ' aside={t:' + Math.round(ar.top) + ',l:' + Math.round(ar.left)
+      + ',w:' + Math.round(ar.width) + ',h:' + Math.round(ar.height) + '}'
+      + ' aside.kids=' + aside.childElementCount + ' aside.oh=' + aside.offsetHeight
+      + ' viewport=' + window.innerWidth + 'x' + window.innerHeight);
+  } catch (_geoErr) {
+    dlog('layoutSeasonTwoPane: [GEO] error: ' + (_geoErr as Error).message);
+  }
+
   // 给每集卡片补齐「时长 / 状态」meta（仅限两栏容器内, 防泄漏到首页）
   injectEpisodeMeta(wrap);
 
@@ -4865,7 +4883,21 @@ function injectImmersiveSeasonStyle(): void {
   if (  document.getElementById('fnos-immersive-season-style')) { _immersiveSeasonStyleInjected = true; return; }
   const style = document.createElement('style');
   style.id = 'fnos-immersive-season-style';
-  style.textContent = IMMERSIVE_SEASON_CSS;
+  let css = IMMERSIVE_SEASON_CSS;
+  // [lc-916] 调试描边: 当 localStorage.fntvSeasonLayoutDebug !== '0' 时(默认开),
+  //   给两栏关键元素加高对比度 outline, 直接在页面上看到 grid 容器/左栏/右栏的实际位置和尺寸,
+  //   无需依赖 DevTools 或 dump 文件即可判断「grid 是否真的分栏渲染」。
+  try {
+    if (localStorage.getItem('fntvSeasonLayoutDebug') !== '0') {
+      css += `
+/* [lc-916 debug outlines] */
+.fnos-immersive-season .fnos-season-2col{ outline:3px dashed #ff0000 !important; }
+.fnos-immersive-season .fnos-season-main{ outline:3px solid #00ff00 !important; }
+.fnos-immersive-season .fnos-season-aside{ outline:3px solid #0088ff !important; background:rgba(0,100,255,.08) !important; }
+`;
+    }
+  } catch (_) { /* ignore */ }
+  style.textContent = css;
   (document.head || document.documentElement).appendChild(style);
   _immersiveSeasonStyleInjected = true;
 }
@@ -4931,7 +4963,7 @@ function dumpSeasonDOMToFile(stage?: string): void {
       details0Chain: chainOf(q('[data-id="details"]')),
       card0Chain: chainOf(q('.card-root')),
       headings,
-      // [lc-915] 记录两栏容器真实 computed style, 确认 grid 是否真生效(无需 CMD 日志即可定位根因)
+      // [lc-915] 记录两栏容器真实 computed style + 几何位置, 确认 grid 是否真生效(无需 CMD 日志即可定位根因)
       layoutCSS: (() => {
         const _w = q('.fnos-season-2col') as HTMLElement | null;
         const _styleInjected = !!document.getElementById('fnos-immersive-season-style');
@@ -4939,6 +4971,21 @@ function dumpSeasonDOMToFile(stage?: string): void {
         const _cs = getComputedStyle(_w);
         const _m = q('.fnos-season-main') as HTMLElement | null;
         const _a = q('.fnos-season-aside') as HTMLElement | null;
+        // [lc-916] 几何: getBoundingClientRect 精确到像素, 判断元素是否在视口内/是否被裁切/是否有实际尺寸
+        const _wr = _w.getBoundingClientRect();
+        const _mr = _m ? _m.getBoundingClientRect() : null;
+        const _ar = _a ? _a.getBoundingClientRect() : null;
+        // aside 内容详情: 子节点数 / offsetHeight(0=高度坍塌) / innerHTML 长度 / 首个子节点标签
+        const _asideDetail = _a ? {
+          childCount: _a.childElementCount,
+          offsetHeight: _a.offsetHeight,
+          scrollHeight: _a.scrollHeight,
+          innerHTMLLen: _a.innerHTML.length,
+          firstChildTag: _a.firstElementChild ? _a.firstElementChild.tagName : null,
+          firstChildCls: _a.firstElementChild ? (_a.firstElementChild.className || '').toString().substring(0, 60) : null,
+          bgCs: getComputedStyle(_a).backgroundColor,
+          colorCs: getComputedStyle(_a).color,
+        } : null;
         return {
           styleInjected: _styleInjected,
           wrapDisplay: _cs.display,
@@ -4947,6 +4994,11 @@ function dumpSeasonDOMToFile(stage?: string): void {
           mainDisplay: _m ? getComputedStyle(_m).display : null,
           asideDisplay: _a ? getComputedStyle(_a).display : null,
           inlineDisplay: _w.style.display || '(空)',
+          // [lc-916] 几何数据
+          wrapRect: { top: Math.round(_wr.top), left: Math.round(_wr.left), w: Math.round(_wr.width), h: Math.round(_wr.height) },
+          mainRect: _mr ? { top: Math.round(_mr.top), left: Math.round(_mr.left), w: Math.round(_mr.width), h: Math.round(_mr.height) } : null,
+          asideRect: _ar ? { top: Math.round(_ar.top), left: Math.round(_ar.left), w: Math.round(_ar.width), h: Math.round(_ar.height) } : null,
+          asideDetail: _asideDetail,
         };
       })(),
     };
