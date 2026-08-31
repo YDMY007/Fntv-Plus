@@ -4121,36 +4121,58 @@ function resetSeasonObsState(): void {
   _obsRelayoutTicks = 0;
   _seasonYearText = ''; // 换页后首播年份需重新解析
   _castParentCache = null; // 换页后演职人员容器需重新定位
+  _showColCache = null; // 换页后二级页内容列需重新定位
 }
 
 /** 找两栏布局的「主内容」容器（左栏）。
- *  ① 季详情页: 包含 [data-id="details"](选集卡片) 的那个 .relative.w-full
- *  ② [lc-908] TV/Movie 二级页: 主内容是「季/集」卡片列表(.card-root 或 [data-id="details"]),
- *     用多路回退定位, 使二级页也能套两栏:
- *     a) 含 [data-id="details"] 的 relative+w-full 祖先(季页原逻辑)
- *     b) 含 ≥2 个 .card-root 的最近区块级祖先(二级页季卡片网格)
- *     c) "选集"标题(strong)的下一个兄弟元素容器(通用兜底)
+ *  ① 季详情页(/v/tv/season/:id): 含 [data-id="details"](选集卡片) 的那个 .relative.w-full 祖先。
+ *  ② [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/): 飞牛原生是「季概览页」,
+ *     主内容 = 带 px-[44px] 内边距的 flex-col 内容列(findShowContentColumn, 直接返回, 不再要求 ≥2 个 details)。
+ *  ③ 其余回退(兼容历史): a) 含 [data-id="details"] 的 relative+w-full 祖先;
+ *     b) 含 ≥2 个 .card-root 的最近区块级祖先; c) "选集"标题(strong)的下一个兄弟元素容器。
  */
+
+/** [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/)内容列缓存: 内容列在 SPA 换页时被替换,
+ *  用 document.body.contains 判断失效即重扫。 */
+let _showColCache: HTMLElement | null = null;
+
+/** [lc-911] 二级 show 页内容列定位:
+ *  飞牛原生二级详情页的内容列是带水平内边距(px-[44px])的 flex-col 列(div.relative.box-border.flex.w-full.flex-col.px-[44px]),
+ *  内含 [data-id="details"] 选集卡片或 .card-root 季卡片。该列在 Fntv-Plus 中因侧边栏被隐藏而接近满宽(≈1922px),
+ *  故不能要求"≥2 个 details",也不能用宽度护栏排除——直接返回它作为左栏主内容。
+ *  用类名「包含匹配」(而非 CSS 选择器)规避 Tailwind 任意值类 px-[44px] 的选择器转义问题;
+ *  querySelectorAll 按文档顺序返回, 含卡片的最外层该列最先命中, 正是我们要包裹的左栏。 */
+function findShowContentColumn(): HTMLElement | null {
+  if (_showColCache && document.body.contains(_showColCache)) return _showColCache;
+  const all = Array.from(document.querySelectorAll('div')) as HTMLElement[];
+  for (const el of all) {
+    const cls = el.className.toString();
+    if (cls.includes('px-[44px]') && cls.includes('flex-col') && cls.includes('w-full')) {
+      if (el.querySelector('[data-id="details"]') || el.querySelector('.card-root')) {
+        _showColCache = el;
+        return el;
+      }
+    }
+  }
+  _showColCache = null;
+  return null;
+}
+
 function findSeasonEpParent(): HTMLElement | null {
   const _dbgCardRoot = document.querySelectorAll('.card-root').length;
   const _dbgDetails = document.querySelectorAll('[data-id="details"]').length;
   log('findSeasonEpParent: 入口 card-root=' + _dbgCardRoot + ' details=' + _dbgDetails);
-  // [lc-910] 剧集/电影 show 页(/v/tv|movie/<32hex>, 不含 /season/)专属策略:
-  //   该页 [data-id="details"] 卡片在一个 flex-wrap 网格里, 其直接父容器(.flex.flex-wrap...)即「选集」网格;
-  //   而首个 relative w-full 祖先是满宽内容列(实测宽≈1922px≈视口宽), 若当作 ep 会触发
-  //   layoutSeasonTwoPane 的过宽护栏(>视口97%)→ 两栏永不建立(正是"选集占满整宽、右侧信息栏缺失"的根因)。
-  //   故直接返回【最内层】含 ≥2 个 [data-id="details"] 的祖先(选集网格本身)作为左栏主内容。
+  // [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/)专属策略(全部重做):
+  //   飞牛原生二级详情页本质是「季概览页」——仅 1 个 [data-id="details"] 卡片(或若干 .card-root 季卡片),
+  //   没有像季页那样的「选集横滚行 + 演职人员区」结构。lc-910 误以为"≥2 个 details 才算选集网格",
+  //   导致该页永远返回 null → 两栏永不建立("没变化")。
+  //   现直接返回内容列(findShowContentColumn)作为左栏主内容; 该列在 app 内因侧边栏隐藏接近满宽(≈1922px),
+  //   过宽护栏已在 layoutSeasonTwoPane 中改为「仅当直接挂在 body/html 才放弃」, 故此处可放心返回。
   if (/^\/v\/(tv|movie)\/[a-f0-9]{32}([\/?#]|$)/.test(location.pathname) && !/\/season\//.test(location.pathname)) {
-    const firstDet = document.querySelector('[data-id="details"]') as HTMLElement | null;
-    if (firstDet) {
-      let el: HTMLElement | null = firstDet.parentElement;
-      while (el && el !== document.body) {
-        if (el.querySelectorAll('[data-id="details"]').length >= 2) {
-          log('findSeasonEpParent: [show页] 命中选集网格容器 cls=' + (el.className || '').toString().substring(0, 50));
-          return el;
-        }
-        el = el.parentElement;
-      }
+    const col = findShowContentColumn();
+    if (col) {
+      log('findSeasonEpParent: [show页] 命中内容列 cls=' + (col.className || '').toString().substring(0, 50));
+      return col;
     }
   }
   // 路径 a: 季页选集卡片
@@ -4381,9 +4403,12 @@ function layoutSeasonTwoPane(): void {
     log('layoutSeasonTwoPane: ⚠️ 主内容容器非法(body/html/已脱离DOM), 跳过两栏');
     return;
   }
-  const epRect = ep.getBoundingClientRect();
-  if (epRect.width > window.innerWidth * 0.98) {
-    log('layoutSeasonTwoPane: ⚠️ 主内容容器过宽(' + Math.round(epRect.width) + 'px), 疑似顶层节点, 跳过两栏');
+  // [lc-911] 安全护栏: 仅当 ep 直接挂在 body/html(页面级顶层包裹)时才放弃, 避免把整页塞进左栏。
+  //   不再用原始「宽度 > 视口 98%」阈值——二级 show 页内容列在 Fntv-Plus 内因侧边栏隐藏而接近满宽(≈1922px),
+  //   但那正是要拆成 60:40 的左栏, 绝不能因宽度而放弃(否则"没变化")。结构判定足以拦截真正的顶层节点。
+  const epParent = ep.parentElement;
+  if (epParent === document.body || epParent === document.documentElement) {
+    log('layoutSeasonTwoPane: ⚠️ 主内容容器直接挂在页面根, 疑似顶层节点, 跳过两栏');
     return;
   }
 
