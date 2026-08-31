@@ -4184,6 +4184,9 @@ function findShowContentColumn(): HTMLElement | null {
  *  ⚠️ 只接受「祖先链 8 层内能找到集卡片」的标题, 排除推荐位等同名短文本。 */
 function findEpisodeSectionHeading(): { head: HTMLElement; sel: string } | null {
   const _dbgAllTexts: string[] = [];
+  // [lc-917] 收集全部候选(可能同时存在于可见 --exclude 与隐藏 --cache 两套路由副本),
+  //  末尾优先返回「可见」section 对应的标题, 避免把两栏建进隐藏缓存副本(display:none → 整块不可见)。
+  const candidates: { head: HTMLElement; sel: string; section: HTMLElement }[] = [];
   for (const sel of ['[data-id="details"]', '.card-root']) {
     const cands = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
     for (const el of cands) {
@@ -4193,16 +4196,41 @@ function findEpisodeSectionHeading(): { head: HTMLElement; sel: string } | null 
       let p: HTMLElement | null = el.parentElement;
       for (let i = 0; i < 8 && p && p !== document.body; i++) {
         if (p.querySelector(sel)) {
-          dlog('findEpisodeSectionHeading: 命中标题="' + t + '" sel=' + sel
-            + ' 标签=' + el.tagName + ' 父cls=' + ((el.parentElement?.className||'').toString().substring(0,60)));
-          return { head: el, sel };
+          candidates.push({ head: el, sel, section: p });
+          break;
         }
         p = p.parentElement;
       }
     }
   }
-  dlog('findEpisodeSectionHeading: 未命中。候选文本(含选/剧/分/ep): ' + (_dbgAllTexts.length ? _dbgAllTexts.join(',') : '(无)'));
+  if (candidates.length === 0) {
+    dlog('findEpisodeSectionHeading: 未命中。候选文本(含选/剧/分/ep): ' + (_dbgAllTexts.length ? _dbgAllTexts.join(',') : '(无)'));
+    return null;
+  }
+  const visible = candidates.find((c) => !isHiddenByAncestor(c.section));
+  if (visible) {
+    dlog('findEpisodeSectionHeading: 命中可见标题="' + (visible.head.textContent || '').trim() + '" sel=' + visible.sel
+      + ' 标签=' + visible.head.tagName + ' 父cls=' + ((visible.head.parentElement?.className || '').toString().substring(0, 60)));
+    return visible;
+  }
+  dlog('findEpisodeSectionHeading: 仅命中隐藏(缓存)section, 返回 null 等可见副本渲染。候选数=' + candidates.length);
   return null;
+}
+
+/** [lc-917] 判断元素是否处于「不可见」子树: 任一祖先 display:none, 或带 Tailwind hidden / fnOS 路由缓存 --cache 类。
+ *  根因: fnOS 路由缓存会把旧页塞进 trim-ui__cache-outlet--cache ... hidden(display:none) 副本,
+ *  两栏若建在那里会整块不可见(computed style 仍报 grid, 但 getBoundingClientRect 全 0, 表现为"选集占满整宽")。 */
+function isHiddenByAncestor(el: HTMLElement | null): boolean {
+  if (!el) return true;
+  let p: HTMLElement | null = el;
+  while (p && p !== document.body) {
+    const cs = getComputedStyle(p);
+    if (cs.display === 'none') return true;
+    const cls = (p.className || '').toString();
+    if (/\bhidden\b/.test(cls) || /--cache\b/.test(cls)) return true;
+    p = p.parentElement;
+  }
+  return false;
 }
 
 function findSeasonEpParent(): HTMLElement | null {
@@ -4224,6 +4252,10 @@ function findSeasonEpParent(): HTMLElement | null {
   if (/^\/v\/(tv|movie)\/[a-f0-9]{32}([\/?#]|$)/.test(location.pathname) && !/\/season\//.test(location.pathname)) {
     const col = findShowContentColumn();
     if (col) {
+      if (isHiddenByAncestor(col)) {
+        dlog('findSeasonEpParent: [show页] ⚠️ 命中内容列但在隐藏(缓存)副本, 返回 null 等可见副本渲染');
+        return null;
+      }
       dlog('findSeasonEpParent: [show页] 命中内容列 cls=' + (col.className || '').toString().substring(0, 50));
       return col;
     }
@@ -4255,6 +4287,11 @@ function findSeasonEpParent(): HTMLElement | null {
             + ' step=' + _step + ' cls=' + (el.className||'').toString().substring(0,70)
             + ' w=' + Math.round(r.width) + ' h=' + Math.round(r.height)
             + ' tag=' + el.tagName);
+          // [lc-917] 命中但处于隐藏(缓存)副本 → 不建两栏, 返回 null 等可见副本渲染
+          if (isHiddenByAncestor(el)) {
+            dlog('findSeasonEpParent: [季页] ⚠️ 选集 section 在隐藏(缓存)副本, 返回 null 等可见副本');
+            return null;
+          }
           return el;
         }
         el = el.parentElement;
@@ -4270,11 +4307,18 @@ function findSeasonEpParent(): HTMLElement | null {
     // 有集卡片但页面没有「选集」标题 → 退化为旧路径 a(向上找 relative.w-full)
     dlog('findSeasonEpParent: [季页] 无选集标题, 退化旧路径a');
   }
-  // 路径 a: 季页选集卡片
-  let n = document.querySelector('[data-id="details"]') as HTMLElement | null;
-  while (n && n !== document.body) {
-    if (n.classList && n.classList.contains('relative') && n.classList.contains('w-full')) return n;
-    n = n.parentElement;
+  // 路径 a: 季页选集卡片 —— [lc-917] 遍历全部 details, 优先返回「可见」副本的 relative.w-full 祖先
+  //   (原 document.querySelector 取首个匹配, 可能命中 fnOS 路由缓存的隐藏 --cache 副本 → 两栏建进去不可见)
+  const allDetails = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
+  for (const d of allDetails) {
+    let n: HTMLElement | null = d;
+    while (n && n !== document.body) {
+      if (n.classList && n.classList.contains('relative') && n.classList.contains('w-full')) {
+        if (!isHiddenByAncestor(n)) return n; // 可见 → 用这个
+        break; // 隐藏副本 → 停止本支, 试下一个 details
+      }
+      n = n.parentElement;
+    }
   }
   // 路径 b: 二级页季/集卡片(.card-root) —— 取共同祖先(含最多卡片的那个)
   const cards = document.querySelectorAll('.card-root');
@@ -4294,9 +4338,15 @@ function findSeasonEpParent(): HTMLElement | null {
         el = el.parentElement;
       }
     }
-    if (best) { dlog('findSeasonEpParent: 路径b命中, cards=', cards.length); return best; }
+    if (best) {
+      if (isHiddenByAncestor(best)) {
+        dlog('findSeasonEpParent: 路径b命中但在隐藏副本, 跳过');
+      } else {
+        dlog('findSeasonEpParent: 路径b命中, cards=', cards.length); return best;
+      }
+    }
   }
-  // 路径 c: "选集"标题的下一个兄弟容器
+  // 路径 c: "选集"标题的下一个兄弟容器 —— [lc-917] 仅当容器可见时才命中(排除隐藏缓存副本)
   const headings = Array.from(document.querySelectorAll('strong,h2,h3,h4,.semi-typography-heading'));
   for (const h of headings) {
     const t = (h.textContent || '').trim();
@@ -4304,14 +4354,14 @@ function findSeasonEpParent(): HTMLElement | null {
     let sibling = h.nextElementSibling as HTMLElement | null;
     // 跳过纯文本/空白节点, 找到第一个元素容器
     while (sibling && sibling.nodeType === Node.TEXT_NODE) sibling = sibling.nextElementSibling as HTMLElement | null;
-    if (sibling && sibling.getBoundingClientRect().width > 200) {
-      dlog('findSeasonEpParent: 路径c命中 选集标题兄弟');
+    if (sibling && sibling.getBoundingClientRect().width > 200 && !isHiddenByAncestor(sibling)) {
+      dlog('findSeasonEpParent: 路径c命中 选集标题兄弟(可见)');
       return sibling;
     }
     // 如果没有 nextSibling 或太小, 就用父容器
     const parent = h.parentElement;
-    if (parent && parent.getBoundingClientRect().width > 300) {
-      dlog('findSeasonEpParent: 路径c命中 选集标题父容器');
+    if (parent && parent.getBoundingClientRect().width > 300 && !isHiddenByAncestor(parent)) {
+      dlog('findSeasonEpParent: 路径c命中 选集标题父容器(可见)');
       return parent;
     }
   }
@@ -4511,7 +4561,17 @@ function restyleCastIfNeeded(container: HTMLElement): void {
 let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSeasonTwoPane 可能被连续触发, 防止嵌套重排卡死
 function layoutSeasonTwoPane(): void {
   if (_seasonLaying) { dlog('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
-  if (document.querySelector('.fnos-season-2col')) { dlog('layoutSeasonTwoPane: 已有两栏, 跳过'); return; }
+  // [lc-917] 若已存在两栏 wrap: 仅当它在「可见」位置时才跳过; 若它被建进了 fnOS 路由缓存的隐藏 --cache 副本
+  //   (display:none → 整块不可见), 必须先移除这个僵尸 wrap, 才能在可见副本里正确重建, 否则会永远"跳过"导致选集占满整宽。
+  const _existing = document.querySelector('.fnos-season-2col') as HTMLElement | null;
+  if (_existing) {
+    if (isHiddenByAncestor(_existing)) {
+      dlog('layoutSeasonTwoPane: ⚠️ 发现隐藏(缓存)副本里的僵尸两栏, 先移除再重建到可见副本');
+      _existing.remove();
+    } else {
+      dlog('layoutSeasonTwoPane: 已有两栏(可见), 跳过'); return;
+    }
+  }
   _seasonLaying = true;
   try {
   dlog('layoutSeasonTwoPane: === 开始建两栏 === pathname=' + location.pathname);
@@ -4792,14 +4852,12 @@ function alignInfoCardWithFirstEpisode(): void {
 function observeSeasonTwoPane(): void {
   if (_season2colObserver) { dlog('observeSeasonTwoPane: 已有observer, 跳过'); return; }
   const ep = findSeasonEpParent();
-  const target = (ep && ep.parentElement) as HTMLElement | null;
+  // [lc-917] 监听目标改为 document.body: fnOS 路由缓存会把可见页在 --exclude / --cache 两套 outlet 间切换,
+  //   原 target=ep.parentElement 可能落在隐藏(缓存)副本, 切换后观察不到可见副本的变更 → 两栏停在隐藏副本不可见。
+  //   改监听 body 子树(配合 runObserverWork 的 _obsWorking 自喂抑制 + 指纹稳态退避, 不会卡死), 捕捉 outlet 切换。
+  const target: HTMLElement = document.body;
   dlog('observeSeasonTwoPane: ep=' + (ep ? 'found('+ep.tagName+'.'+(ep.className||'').toString().substring(0,40)+')' : 'NULL')
-    + ' target=' + (target ? target.tagName+'.'+(target.className||'').toString().substring(0,50) : 'NULL'));
-  if (!target) {
-    // [lc-908] 二级页 DOM 可能尚未渲染出主内容容器 → 延迟重试(不放弃, 因为后续 fnOS 异步填充一定会产生)
-    setTimeout(observeSeasonTwoPane, 800);
-    return;
-  }
+    + ' target=document.body(捕捉 outlet 切换)');
   // [lc-905] 防抖 + [lc-906] 自喂抑制 / 稳态退避:
   //   ⚠️ 真正的卡死根因(lc-905 仅降频未根治): 本 observer 的观察范围(target 子树)就包含我们自建的两栏容器
   //   (.fnos-season-2col 挂在 target 下), 而 runObserverWork 内部又往该容器写 DOM(信息卡 innerHTML)、
