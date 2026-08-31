@@ -4085,12 +4085,27 @@ let _season2colObserver: MutationObserver | null = null;
 let _castRestyleTimer: ReturnType<typeof setInterval> | null = null; // [lc-903] 详情页存续期间周期性重跑 restyle 的兜底定时器
 let _obsTimer: ReturnType<typeof setTimeout> | null = null; // [lc-905] observer 防抖定时器
 let _obsMaxTimer: ReturnType<typeof setTimeout> | null = null; // [lc-905] observer maxWait 兜底定时器
+let _obsWorking = false; // [lc-906] observer 重活执行中: 期间产生的 mutation 全是自身写入, 一律忽略(断自喂)
+let _obsFingerprint = ''; // [lc-906] 布局指纹(集数/已处理演员数/两栏状态), 用于稳态退避判定
+let _obsStableTicks = 0; // [lc-906] 指纹连续未变化的轮数
+let _obsRelayoutTicks = 0; // [lc-906] 两栏被 fnOS 拆散而重建的次数, 频繁则退避
 let _infoCard: HTMLElement | null = null;
 
 /** [lc-905] 清理 observer 防抖/maxWait 定时器, 离开季页或已处理完一轮时调用, 防止残留定时器在页面销毁后误重建两栏 */
 function clearSeasonObsTimers(): void {
   if (_obsTimer) { clearTimeout(_obsTimer); _obsTimer = null; }
   if (_obsMaxTimer) { clearTimeout(_obsMaxTimer); _obsMaxTimer = null; }
+}
+
+/** [lc-906] 重置 observer 稳态退避状态(进入新季页时调用, 避免沿用上一页的"已稳定"判定) */
+function resetSeasonObsState(): void {
+  clearSeasonObsTimers();
+  _obsWorking = false;
+  _obsFingerprint = '';
+  _obsStableTicks = 0;
+  _obsRelayoutTicks = 0;
+  _seasonYearText = ''; // 换页后首播年份需重新解析
+  _castParentCache = null; // 换页后演职人员容器需重新定位
 }
 
 /** 找「选集」容器：包含 [data-id="details"] 的那个 .relative.w-full */
@@ -4103,15 +4118,24 @@ function findSeasonEpParent(): HTMLElement | null {
   return null;
 }
 
+/** [lc-906] 演职人员容器缓存: 原实现每次调用都全文档 querySelectorAll('strong') 再逐个读 textContent,
+ *  而它被 600ms 巡检定时器与 observer 高频调用 → 累积成显著开销。找到后缓存, 仅当节点脱离 DOM 或
+ *  内部已无演员链接时才重新定位(换页由 resetSeasonObsState 清空)。 */
+let _castParentCache: HTMLElement | null = null;
 /** 找「演职人员」容器：含 /v/person/ 链接的最近祖先 */
 function findSeasonCastParent(): HTMLElement | null {
+  if (_castParentCache && document.body.contains(_castParentCache)
+      && _castParentCache.querySelector('a[href^="/v/person/"]')) {
+    return _castParentCache;
+  }
   const strongs = Array.from(document.querySelectorAll('strong')) as HTMLElement[];
   const cs = strongs.find((s) => (s.textContent || '').trim().includes('演职人员'));
   let p: HTMLElement | null = cs || null;
   while (p && p !== document.body) {
-    if (p.querySelector('a[href^="/v/person/"]')) return p;
+    if (p.querySelector('a[href^="/v/person/"]')) { _castParentCache = p; return p; }
     p = p.parentElement;
   }
+  _castParentCache = null;
   return null;
 }
 
@@ -4143,10 +4167,10 @@ function getRealEpisodeCards(): Element[] {
   });
 }
 
-/** 统计所有真正分集的「分秒」时长，返回总秒数 */
-function sumEpisodeSeconds(): number {
+/** 统计所有真正分集的「分秒」时长，返回总秒数（复用已取到的卡片数组，避免重复全文档查询） */
+function sumEpisodeSeconds(cards?: Element[]): number {
   let total = 0;
-  getRealEpisodeCards().forEach((card) => {
+  (cards || getRealEpisodeCards()).forEach((card) => {
     const a = findCardTitleLink(card);
     if (!a) return;
     const p = Array.from(a.querySelectorAll('p')).find((el) =>
@@ -4172,20 +4196,63 @@ function formatSeconds(total: number): string {
   return str.trim();
 }
 
-/** 刷新「剧集信息」卡中的集数 / 总时长 / 首播（随选集懒加载补全而更新） */
+/** [lc-906] 首播年份缓存: 年份不会随懒加载变化, 找到一次即可永久复用(每页只算一次) */
+let _seasonYearText = '';
+/** [lc-906] 找首播年份文本。
+ *  ⚠️ 原实现用 document.querySelectorAll('*') 全文档扫描(详情页常上万节点)逐个读 textContent+正则,
+ *  而它被 observer 高频调用 → 单次就足以拖垮主线程。
+ *  现改为: 先查缓存; 未命中则只在详情页头部区块(.semi-always-dark / 详情头部容器)内搜索,
+ *  且叶子节点扫描设 2000 个上限; 仍找不到就返回空(宁缺毋滥, 绝不做无上限全文档扫描)。 */
+function findSeasonYearText(): string {
+  if (_seasonYearText) return _seasonYearText;
+  const scope = (document.querySelector('.semi-always-dark')
+    || document.querySelector('.trim-mc__details--key-version')
+    || document.querySelector('header')) as HTMLElement | null;
+  if (!scope) return '';
+  const leaves = scope.querySelectorAll('*');
+  const limit = Math.min(leaves.length, 2000);
+  for (let i = 0; i < limit; i++) {
+    const e = leaves[i];
+    if (e.children.length !== 0) continue;
+    const t = (e.textContent || '').trim();
+    if (/^((19|20)\d{2})\s*年?$/.test(t)) { _seasonYearText = t; return t; }
+  }
+  return '';
+}
+
+/** 刷新「剧集信息」卡中的集数 / 总时长 / 首播（随选集懒加载补全而更新）
+ *  [lc-906] 加了内容 diff: html 未变化则不写 innerHTML。
+ *  ⚠️ 无脑写 innerHTML 会替换整卡子节点 → childList mutation → 触发 observeSeasonTwoPane 的
+ *  MutationObserver(其观察范围包含信息卡) → 再次跑到本函数 → 无限自喂, 是整软件卡死的核心环路之一。 */
 function updateSeasonInfoStats(): void {
   if (!_infoCard) return;
   const episodes = getRealEpisodeCards();
   const count = episodes.length;
-  const total = formatSeconds(sumEpisodeSeconds());
-  const yearEl = Array.from(document.querySelectorAll('*')).find(
-    (e) => e.children.length === 0 && /^((19|20)\d{2})\s*年?$/.test((e.textContent || '').trim())
-  ) as HTMLElement | null;
+  const total = formatSeconds(sumEpisodeSeconds(episodes)); // [lc-906] 复用 cards, 省一次全文档扫描
+  const year = findSeasonYearText();
   let html = '<h4>剧集信息</h4>';
   if (count) html += `<p>集数：<b>${count}</b> 集</p>`;
   if (total) html += `<p>总时长：${total}</p>`;
-  if (yearEl) html += `<p>首播：${(yearEl.textContent || '').trim()}</p>`;
+  if (year) html += `<p>首播：${year}</p>`;
+  if (_infoCard.innerHTML === html) return; // [lc-906] 内容未变 → 不触碰 DOM, 切断自喂
   _infoCard.innerHTML = html;
+}
+
+/** [lc-906] 仅当演职人员里存在「尚未处理」的锚点时才跑完整 restyle。
+ *  restyleCastItems 会递归遍历整棵 cast 子树并对每个节点调用 getComputedStyle(强制样式重算),
+ *  无条件调用 = 每次 observer 触发都全量重排, 开销极高。稳态下(全部已处理)直接跳过 → 零开销。 */
+function restyleCastIfNeeded(container: HTMLElement): void {
+  const anchors = Array.from(container.querySelectorAll('a')).filter((a) => {
+    const href = a.getAttribute('href') || '';
+    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
+  });
+  if (anchors.length === 0) return;
+  for (let i = 0; i < anchors.length; i++) {
+    if (!(anchors[i] as HTMLElement).classList.contains('fnos-cast-item')) {
+      restyleCastItems(container);
+      return;
+    }
+  }
 }
 
 /** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
@@ -4278,18 +4345,7 @@ function scheduleCastRestyle(): void {
 function restyleCastOnce(): void {
   const c = findSeasonCastParent();
   if (!c) return;
-  // [lc-903+] 与 restyleCastItems 同款放宽匹配: 含 /v/person/ 或带头像 img 的 a
-  const anchors = Array.from(c.querySelectorAll('a')).filter((a) => {
-    const href = a.getAttribute('href') || '';
-    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
-  });
-  if (anchors.length === 0) return;
-  for (let i = 0; i < anchors.length; i++) {
-    if (!((anchors[i] as HTMLElement).classList.contains('fnos-cast-item'))) {
-      restyleCastItems(c);
-      return;
-    }
-  }
+  restyleCastIfNeeded(c); // [lc-906] 与 observer 共用同一套"有未处理锚点才跑重活"的守卫
 }
 
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排
@@ -4392,32 +4448,61 @@ function observeSeasonTwoPane(): void {
   const ep = findSeasonEpParent();
   const target = (ep && ep.parentElement) as HTMLElement | null;
   if (!target) return;
-  // [lc-905] 防抖: fnOS 打开/填充二级页时持续异步重渲染(选集/演职人员节点大量变更),
-  //   MutationObserver(subtree:true) 若每次 mutation 都同步跑重活(updateSeasonInfoStats 全文档 querySelectorAll('*')
-  //   + restyleCastItems 递归 getComputedStyle 清零间距), 会与 fnOS 重渲染自喂成风暴 → 打满主线程 → 整软件卡死.
-  //   防抖使连续 mutation 在稳定后只处理一次; 另加 maxWait 兜底, 即便持续重渲染也至少每 500ms 跑一次, 保证布局不永久中断.
+  // [lc-905] 防抖 + [lc-906] 自喂抑制 / 稳态退避:
+  //   ⚠️ 真正的卡死根因(lc-905 仅降频未根治): 本 observer 的观察范围(target 子树)就包含我们自建的两栏容器
+  //   (.fnos-season-2col 挂在 target 下), 而 runObserverWork 内部又往该容器写 DOM(信息卡 innerHTML)、
+  //   递归改写 cast 子树样式 → 每次执行都会产生新的 childList mutation → 立刻再次唤醒自己, 形成
+  //   「永不停止的自喂循环」; 叠加单次重活(全文档 querySelectorAll('*') + 整棵子树 getComputedStyle)
+  //   → 主线程被持续打满 → 整个软件卡死。
+  //   三重修复:
+  //   ① 自喂抑制: 执行期间置 _obsWorking, 回调直接忽略; 执行结束 takeRecords() 丢弃自身写入产生的记录。
+  //   ② 内容 diff: 信息卡 html 未变不写 DOM; cast 无未处理锚点则跳过整棵子树 restyle(见 lc-906 对应函数)。
+  //   ③ 稳态退避: 连续多轮指纹(集数/已处理演员数/两栏存在性)不变 → 判定布局已稳定,
+  //      把防抖从 150ms 放宽到 1200ms 并停掉 maxWait 兜底, 稳态下几乎零开销; 指纹一变立即恢复灵敏。
   const OBS_DEBOUNCE = 150;
+  const OBS_DEBOUNCE_IDLE = 1200;
+  const OBS_DEBOUNCE_THRASH = 2000; // 两栏反复被拆散时的大退避间隔
   const OBS_MAXWAIT = 500;
+  const OBS_STABLE_THRESHOLD = 3;
+  const OBS_RELAYOUT_THRESHOLD = 4;
   const runObserverWork = (): void => {
     clearSeasonObsTimers();
-    const wrap = document.querySelector('.fnos-season-2col');
-    const epNow = findSeasonEpParent();
-    const castNow = findSeasonCastParent();
-    if (!epNow || !castNow) return;
-    const epInWrap = wrap ? (wrap.querySelector('.fnos-season-main') as HTMLElement | null) : null;
-    if (wrap && epInWrap && epInWrap === epNow) {
-      updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
-      alignInfoCardWithFirstEpisode(); // [lc-893] 首集卡片懒加载后位置可能变动, 重对齐
-      if (castNow) restyleCastItems(castNow); // [lc-903] SPA 异步补全/重渲染演职人员后, 新节点需重新收紧
-      return;
+    _obsWorking = true; // ① 抑制本轮自身 DOM 写入引发的回调
+    try {
+      const wrap = document.querySelector('.fnos-season-2col');
+      const epNow = findSeasonEpParent();
+      const castNow = findSeasonCastParent();
+      if (!epNow || !castNow) return;
+      const epInWrap = wrap ? (wrap.querySelector('.fnos-season-main') as HTMLElement | null) : null;
+      if (wrap && epInWrap && epInWrap === epNow) {
+        _obsRelayoutTicks = 0; // 结构完好 → 解除重建限流
+        updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
+        alignInfoCardWithFirstEpisode(); // [lc-893] 首集卡片懒加载后位置可能变动, 重对齐
+        if (castNow) restyleCastIfNeeded(castNow); // [lc-906] 仅在存在未处理演员节点时才跑重活
+      } else {
+        _obsRelayoutTicks++; // [lc-906] 两栏被 fnOS 拆散: 计入重建次数, 频繁则退避, 避免与 fnOS 抢 DOM
+        if (wrap) wrap.remove();
+        layoutSeasonTwoPane();
+      }
+      // ③ 指纹: 集数 / 已处理演员数 / 两栏是否已建好 —— 任一项变化说明有真实新内容
+      const fp = document.querySelectorAll('[data-id="details"]').length + ':'
+        + document.querySelectorAll('.fnos-cast-item').length + ':'
+        + (document.querySelector('.fnos-season-2col') ? '1' : '0');
+      if (fp === _obsFingerprint) _obsStableTicks++; else { _obsStableTicks = 0; _obsFingerprint = fp; }
+    } finally {
+      _obsWorking = false;
+      // ① 丢弃本轮自身写入产生的积压记录, 彻底切断自喂(外部 fnOS 的新变更仍会在后续触发)
+      try { if (_season2colObserver) _season2colObserver.takeRecords(); } catch (_) { /* ignore */ }
     }
-    if (wrap) wrap.remove();
-    layoutSeasonTwoPane();
   };
   const scheduleObserverWork = (): void => {
+    if (_obsWorking) return; // ① 本轮执行中: 一律忽略(均为自身写入所致)
     if (_obsTimer) clearTimeout(_obsTimer);
-    if (_obsMaxTimer === null) _obsMaxTimer = setTimeout(runObserverWork, OBS_MAXWAIT); // 风暴期兜底, 至少每 500ms 跑一次
-    _obsTimer = setTimeout(runObserverWork, OBS_DEBOUNCE);
+    const idle = _obsStableTicks >= OBS_STABLE_THRESHOLD;          // 布局已稳定 → 低频巡检
+    const thrash = _obsRelayoutTicks >= OBS_RELAYOUT_THRESHOLD;    // 两栏被反复拆散 → 大幅退避
+    if (!idle && !thrash && _obsMaxTimer === null) _obsMaxTimer = setTimeout(runObserverWork, OBS_MAXWAIT); // 风暴期兜底
+    const delay = thrash ? OBS_DEBOUNCE_THRASH : (idle ? OBS_DEBOUNCE_IDLE : OBS_DEBOUNCE);
+    _obsTimer = setTimeout(runObserverWork, delay);
   };
   _season2colObserver = new MutationObserver(() => { scheduleObserverWork(); });
   _season2colObserver.observe(target, { childList: true, subtree: true }); // [lc-903] subtree 捕获深层异步填充的演职人员节点
@@ -4425,7 +4510,7 @@ function observeSeasonTwoPane(): void {
 
 /** 关闭背景框 / 离开季页时还原两栏结构 */
 function unlayoutSeasonTwoPane(): void {
-  clearSeasonObsTimers(); // [lc-905] 离开季页时清掉 observer 防抖/maxWait 定时器, 防止页面销毁后误重建两栏
+  resetSeasonObsState(); // [lc-906] 离开季页: 清定时器 + 重置稳态判定/年份缓存, 防止页面销毁后误重建两栏
   if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
   if (_castRestyleTimer) { clearInterval(_castRestyleTimer); _castRestyleTimer = null; } // [lc-903] 停止持续兜底定时器
   _infoCard = null;
@@ -4759,8 +4844,15 @@ function fillEpisodeDescsFromBangumi(): void {
   })();
 }
 
+/** [lc-906] 最近一次处理的详情页 URL: 用于识别"换了另一个详情页", 从而重置 observer 稳态判定。
+ *  ⚠️ 不能在每次 applyDetailLiquidGlass 调用时重置 —— 它被 _detailObs 以 200ms 防抖持续调用,
+ *  无条件重置会让稳态退避永远无法生效。 */
+let _lastDetailHref = '';
+
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 function applyDetailLiquidGlass(): void {
+  // [lc-906] 换页(含 season→season 直接切换)时重置季页 observer 稳态/年份缓存, 保证新页面重新灵敏处理
+  if (location.href !== _lastDetailHref) { _lastDetailHref = location.href; resetSeasonObsState(); }
   // [lc-878] 非详情页(首页/系统页): 必须无条件移除 fnos-immersive-season。
   //   原逻辑中 _detailGlassInited=true 时在首页找不到 .trim-mc__details--key-version 直接 return,
   //   导致 class 残留污染"继续观看"/"剧集列表"等区块 —— 故非详情页优先移除。
@@ -9570,8 +9662,18 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(applyDetailLiquidGlass, 60);
       [400, 1000, 2000].forEach(ms => setTimeout(applyDetailLiquidGlass, ms));
     };
-    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
-    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
+    // [lc-906] 离开首页(从轮播/列表进入详情页)时立即停掉轮播的自动播放 timer 与事件监听:
+    //   此前要等 5s 看门狗才清理, 这 5s 内轮播仍在空转操作已脱离 DOM 的节点,
+    //   与详情页自身的重活(两栏布局/演员 restyle)叠加, 是从"首页轮播打开二级页"卡死更明显的原因之一。
+    const _stopCarouselOffHome = (newHref: string | undefined): void => {
+      const h = newHref || location.href;
+      let p = '';
+      try { p = new URL(h, location.origin).pathname; } catch (_) { p = location.pathname; }
+      if (p === '/v' || p === '/v/') return;
+      try { destroyCarousel(); } catch (_) { /* ignore */ }
+    };
+    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); };
+    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
@@ -9651,10 +9753,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   wheelToScroll();
   [2000, 4000, 8000].forEach(ms => setTimeout(wheelToScroll, ms));
 
+  // [lc-906] 轮播只属于首页: 进入详情页/其他页面后, 下方 observer 与 watchdog 曾继续为"丢失的轮播"
+  //   反复调用 injectCarousel(每次都会先 destroyCarousel 再被路径守卫挡回), 与详情页自身的重活叠加,
+  //   是从"首页轮播图打开二级详情页"这条路径才卡死、从剧集列表进入却正常的关键差异。
+  //   非首页一律跳过轮播重建(回到首页时 pushState/popstate 钩子会重新注入)。
+  const _isHomePath = (): boolean => { const p = location.pathname; return p === '/v' || p === '/v/'; };
+
   let _wtsTimer = 0;
   new MutationObserver(() => {
     clearTimeout(_wtsTimer);
     _wtsTimer = window.setTimeout(wheelToScroll, 350);
+    if (!_isHomePath()) return; // [lc-906] 非首页: 不做任何轮播重建, 只保留横滑滚轮
     if (_carouselContainer && !document.body.contains(_carouselContainer)) {
       log('carousel lost, re-inject');
       destroyCarousel(); // [lc-876] 清理旧timer/listener再重建
@@ -9669,6 +9778,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
   setInterval(() => {
     wheelToScroll();
+    if (!_isHomePath()) return; // [lc-906] 同上: 非首页不折腾轮播
     if (_carouselContainer && !document.body.contains(_carouselContainer)) {
       log('watchdog: carousel lost');
       destroyCarousel(); // [lc-876] 清理旧timer/listener
