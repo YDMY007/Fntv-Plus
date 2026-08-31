@@ -4342,6 +4342,17 @@ function layoutSeasonTwoPane(): void {
   const cast = findSeasonCastParent();
   const root = ep ? ep.parentElement : null;
   if (!ep || !root) return;
+  // [lc-909] 安全护栏: 容器若定位到 body/html/过宽的顶层节点, 会把整页塞进左栏导致布局彻底错乱
+  //   (表现为"看起来没变化")。此时宁可不建两栏, 并打日志, 也绝不强行重排。
+  if (ep === document.body || ep === document.documentElement || !document.body.contains(ep)) {
+    log('layoutSeasonTwoPane: ⚠️ 主内容容器非法(body/html/已脱离DOM), 跳过两栏');
+    return;
+  }
+  const epRect = ep.getBoundingClientRect();
+  if (epRect.width > window.innerWidth * 0.97) {
+    log('layoutSeasonTwoPane: ⚠️ 主内容容器过宽(' + Math.round(epRect.width) + 'px), 疑似顶层节点, 跳过两栏');
+    return;
+  }
 
   const wrap = document.createElement('div');
   wrap.className = 'fnos-season-2col';
@@ -4629,6 +4640,19 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
+  // [lc-909] 诊断: 记录主内容容器定位结果, 便于真机反馈时定位"两栏为何没建立"
+  try {
+    const _ep = findSeasonEpParent();
+    const _cast = findSeasonCastParent();
+    const _r = _ep ? _ep.getBoundingClientRect() : null;
+    log('applySeasonImmersiveDetail: url=' + location.pathname
+      + ' | boxless=' + _detailBoxless
+      + ' | ep=' + (_ep ? (_ep.className || '').toString().substring(0, 40) : 'NULL')
+      + ' | epW=' + (_r ? Math.round(_r.width) : '-')
+      + ' | cast=' + (_cast ? 'YES' : 'NULL')
+      + ' | cards=' + document.querySelectorAll('[data-id="details"]').length
+      + '/' + document.querySelectorAll('.card-root').length);
+  } catch (_) { /* ignore */ }
   // [lc-908] 立即尝试建立两栏; 二级页 DOM 可能异步渲染, 首次 findSeasonEpParent 可能返回 null → 延迟重试
   layoutSeasonTwoPane();
   if (!document.querySelector('.fnos-season-2col')) {
@@ -4971,12 +4995,12 @@ function applyDetailLiquidGlass(): void {
     return;
   }
 
-  if (_detailGlassInited && !location.href.includes('/season/')) {
-    // TV详情页只做一次; season可能独立导航需重试
-    const recheck = document.querySelector('.trim-mc__details--key-version')
-      || document.querySelector('.gradient-for-full');
-    if (!recheck) return;
-  }
+  // [lc-909] 已移除旧的「TV详情页只做一次」早退守卫(_detailGlassInited && !/season/)。
+  //   该守卫是给已被停用的 applyTvDetailGlass 设计的, lc-907 统一视觉后成为致命 bug:
+  //   二级页 URL 不含 '/season/' → 一旦 DOM 尚未渲染出 .trim-mc__details--key-version(SPA 异步渲染,
+  //   或刚从季页导航过来 _detailGlassInited 已为 true)就整轮 return → applySeasonImmersiveDetail
+  //   永不执行 → 两栏永不建立, 表现为"选集占满整宽、右侧信息栏缺失"。
+  //   而 _detailObs 以 200ms 防抖反复调用本函数, 只要该守卫存在, 每次都会被同样的条件挡回。
 
   // [lc-907] 所有二级详情页统一为「第一种」视觉(即首页轮播「查看详情」进入的那套):
   //   此前 season 三级页走 applySeasonImmersiveDetail(沉浸式两栏), tv/movie 二级页走 applyTvDetailGlass
