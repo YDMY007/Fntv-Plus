@@ -3888,6 +3888,22 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important;
 }
 
+/* [lc-907] 二级 TV/Movie 页主内容是「季」卡片(.card-root)网格, 而非 [data-id="details"] 选集卡片。
+   这里不给它套上面那套"横排缩略图+信息+时长"布局(结构不同, 套了会乱), 只统一**卡片材质观感**:
+   同样的背景/边框/圆角/阴影/hover 位移, 使二级页与季页视觉语言一致。背景走 fnOS 主题变量, 深浅模式自适应。 */
+.fnos-immersive-season .fnos-season-main .card-root{
+  background:var(--semi-color-bg-2,#fff) !important;
+  border:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important;
+  border-radius:14px !important;
+  box-shadow:0 2px 10px rgba(0,0,0,.06) !important;
+  overflow:hidden !important;
+  transition:transform .28s cubic-bezier(.25,.1,.25,1), box-shadow .28s ease !important;
+}
+.fnos-immersive-season .fnos-season-main .card-root:hover{
+  transform:translateY(-4px) !important;
+  box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
+}
+
 /* 右侧信息卡 —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
 .fnos-immersive-season .fnos-info-card{
   background:var(--semi-color-bg-2,#fff) !important;
@@ -4108,14 +4124,26 @@ function resetSeasonObsState(): void {
   _castParentCache = null; // 换页后演职人员容器需重新定位
 }
 
-/** 找「选集」容器：包含 [data-id="details"] 的那个 .relative.w-full */
+/** 找两栏布局的「主内容」容器（左栏）。
+ *  ① 季详情页: 包含 [data-id="details"](选集卡片) 的那个 .relative.w-full
+ *  ② [lc-907] TV/Movie 二级页: 没有 [data-id="details"], 主内容是「季」卡片列表(.card-root),
+ *     回退取这些卡片的共同父容器(向上找第一个带 relative+w-full 的祖先), 使二级页也能套两栏。 */
 function findSeasonEpParent(): HTMLElement | null {
   let n = document.querySelector('[data-id="details"]') as HTMLElement | null;
   while (n && n !== document.body) {
     if (n.classList && n.classList.contains('relative') && n.classList.contains('w-full')) return n;
     n = n.parentElement;
   }
-  return null;
+  // [lc-907] 回退: 二级页的季/集卡片（.card-root）
+  const cards = document.querySelectorAll('.card-root');
+  if (cards.length === 0) return null;
+  let c: HTMLElement | null = cards[0].parentElement as HTMLElement | null;
+  const first = c;
+  while (c && c !== document.body) {
+    if (c.classList && c.classList.contains('relative') && c.classList.contains('w-full')) return c;
+    c = c.parentElement;
+  }
+  return first; // 仍找不到就直接用卡片的直接父容器
 }
 
 /** [lc-906] 演职人员容器缓存: 原实现每次调用都全文档 querySelectorAll('strong') 再逐个读 textContent,
@@ -4230,8 +4258,16 @@ function updateSeasonInfoStats(): void {
   const count = episodes.length;
   const total = formatSeconds(sumEpisodeSeconds(episodes)); // [lc-906] 复用 cards, 省一次全文档扫描
   const year = findSeasonYearText();
+  // [lc-907] 二级 TV 页没有「选集」卡片, 主内容是「季」卡片列表 → 信息卡改显示季数, 保持与季页同样的信息密度
+  let countHtml = '';
+  if (count) {
+    countHtml = `<p>集数：<b>${count}</b> 集</p>`;
+  } else if (/\/v\/tv\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
+    const seasons = document.querySelectorAll('.card-root').length;
+    if (seasons) countHtml = `<p>季数：<b>${seasons}</b> 季</p>`;
+  }
   let html = '<h4>剧集信息</h4>';
-  if (count) html += `<p>集数：<b>${count}</b> 集</p>`;
+  if (countHtml) html += countHtml;
   if (total) html += `<p>总时长：${total}</p>`;
   if (year) html += `<p>首播：${year}</p>`;
   if (_infoCard.innerHTML === html) return; // [lc-906] 内容未变 → 不触碰 DOM, 切断自喂
@@ -4472,7 +4508,8 @@ function observeSeasonTwoPane(): void {
       const wrap = document.querySelector('.fnos-season-2col');
       const epNow = findSeasonEpParent();
       const castNow = findSeasonCastParent();
-      if (!epNow || !castNow) return;
+      // [lc-907] 演职人员区块在部分二级页可能缺失, 不能再因 castNow 为空就整轮放弃(否则两栏无法维持)
+      if (!epNow) return;
       const epInWrap = wrap ? (wrap.querySelector('.fnos-season-main') as HTMLElement | null) : null;
       if (wrap && epInWrap && epInWrap === epNow) {
         _obsRelayoutTicks = 0; // 结构完好 → 解除重建限流
@@ -4849,6 +4886,19 @@ function fillEpisodeDescsFromBangumi(): void {
  *  无条件重置会让稳态退避永远无法生效。 */
 let _lastDetailHref = '';
 
+/** [lc-907] 详情页导航栏沉浸: 全透明 + 去模糊/阴影/边框, 让全屏底图在页面顶部完整透出。
+ *  原先只有 tv/movie 二级页做(applyTvDetailGlass ₀), 季页没有 → 两套页面顶部观感不一致;
+ *  现在统一处理, 与「全部统一为第一种 + 保留全屏底图」配套。 */
+function applyDetailNavImmersive(): void {
+  const nativeNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
+  if (!nativeNav) return;
+  nativeNav.style.setProperty('background', 'transparent', 'important');
+  nativeNav.style.setProperty('backdrop-filter', 'none', 'important');
+  nativeNav.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+  nativeNav.style.setProperty('box-shadow', 'none', 'important');
+  nativeNav.style.setProperty('border', 'none', 'important');
+}
+
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 function applyDetailLiquidGlass(): void {
   // [lc-906] 换页(含 season→season 直接切换)时重置季页 observer 稳态/年份缓存, 保证新页面重新灵敏处理
@@ -4871,18 +4921,18 @@ function applyDetailLiquidGlass(): void {
     if (!recheck) return;
   }
 
-  if (/\/v\/(tv|movie)\/season\//.test(location.href)) {
-    applySeasonImmersiveDetail();
-    // [lc-894] 季详情页顶部改回原始「左竖屏海报+右信息栏」布局, 不再使用全屏底图
-    // ensureFullscreenBackdrop(); // lc-894 已禁用: 不再创建 position:fixed 全屏底图层
+  // [lc-907] 所有二级详情页统一为「第一种」视觉(即首页轮播「查看详情」进入的那套):
+  //   此前 season 三级页走 applySeasonImmersiveDetail(沉浸式两栏), tv/movie 二级页走 applyTvDetailGlass
+  //   (全屏底图 + 头部/卡片/按钮玻璃化), 两套并存 → 从不同入口进入同一部剧样式不一致。
+  //   现统一走 applySeasonImmersiveDetail(原生顶部「左竖屏海报+右信息栏」+ 主内容/侧栏两栏),
+  //   并统一启用 ensureFullscreenBackdrop —— 保留原本只属于 tv/movie 页的全屏模糊海报底图与大渐变遮罩。
+  applySeasonImmersiveDetail();
+  // [lc-907] 「关闭背景框」开关: 开启(恢复 fnOS 原生外观)时不铺全屏底图、不动导航栏, 与季页原逻辑一致
+  if (_detailBoxless) {
+    removeFullscreenBackdrop();
   } else {
-    document.body.classList.remove('fnos-immersive-season');
-    unlayoutSeasonTwoPane(); // [lc-884] 从 season 切到 tv/movie 时清理注入 DOM
-    if (/\/v\/(tv|movie)\/[a-f0-9]{32}($|\?|#)/.test(location.href)) {
-      applyTvDetailGlass();
-      // [lc-883] TV/Movie 详情页全屏底图(与 season 一致, 自包含全局搜索)
-      ensureFullscreenBackdrop();
-    }
+    applyDetailNavImmersive();  // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
+    ensureFullscreenBackdrop(); // 恢复季页全屏底图(lc-894 曾禁用), 使两种页面背景观感一致
   }
   _detailGlassInited = true;
   log('detail liquid glass applied for', location.href.substring(location.href.lastIndexOf('/v/')));
