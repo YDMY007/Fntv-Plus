@@ -3809,14 +3809,13 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
  *  Hero 圆角沉浸卡；选集由横向滚动改为「缩略图左 + 信息右」的纵向卡片列表；标题强调。
  *  仅作用于 .fnos-immersive-season（由 applySeasonImmersiveDetail 在季详情页挂到 body）。
  *  与「关闭背景框」(_detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
-const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) */
+const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) [lc-908] 从 64:36 调整为用户要求的 60:40 */
 .fnos-immersive-season .fnos-season-2col{
   display:grid !important;
   width:100% !important;
   box-sizing:border-box !important;
-  /* 用 fr 而非 %：fr 会先扣除 gap 再按比例分配，避免 64%+36%+gap 总和超 100% 被祖先 overflow:hidden 裁切 */
-  grid-template-columns:minmax(0,64fr) minmax(0,36fr) !important;
-  gap:20px !important;
+  grid-template-columns:minmax(0,60fr) minmax(0,40fr) !important;
+  gap:24px !important;
   align-items:start !important;
   /* 右侧留白：避免侧栏卡片贴上容器右缘（祖先 overflow:hidden）被误判为裁切 */
   padding-right:24px !important;
@@ -4126,24 +4125,65 @@ function resetSeasonObsState(): void {
 
 /** 找两栏布局的「主内容」容器（左栏）。
  *  ① 季详情页: 包含 [data-id="details"](选集卡片) 的那个 .relative.w-full
- *  ② [lc-907] TV/Movie 二级页: 没有 [data-id="details"], 主内容是「季」卡片列表(.card-root),
- *     回退取这些卡片的共同父容器(向上找第一个带 relative+w-full 的祖先), 使二级页也能套两栏。 */
+ *  ② [lc-908] TV/Movie 二级页: 主内容是「季/集」卡片列表(.card-root 或 [data-id="details"]),
+ *     用多路回退定位, 使二级页也能套两栏:
+ *     a) 含 [data-id="details"] 的 relative+w-full 祖先(季页原逻辑)
+ *     b) 含 ≥2 个 .card-root 的最近区块级祖先(二级页季卡片网格)
+ *     c) "选集"标题(strong)的下一个兄弟元素容器(通用兜底)
+ */
 function findSeasonEpParent(): HTMLElement | null {
+  // 路径 a: 季页选集卡片
   let n = document.querySelector('[data-id="details"]') as HTMLElement | null;
   while (n && n !== document.body) {
     if (n.classList && n.classList.contains('relative') && n.classList.contains('w-full')) return n;
     n = n.parentElement;
   }
-  // [lc-907] 回退: 二级页的季/集卡片（.card-root）
+  // 路径 b: 二级页季/集卡片(.card-root) —— 取共同祖先(含最多卡片的那个)
   const cards = document.querySelectorAll('.card-root');
-  if (cards.length === 0) return null;
-  let c: HTMLElement | null = cards[0].parentElement as HTMLElement | null;
-  const first = c;
-  while (c && c !== document.body) {
-    if (c.classList && c.classList.contains('relative') && c.classList.contains('w-full')) return c;
-    c = c.parentElement;
+  if (cards.length >= 2) {
+    // 用所有 card-root 的最近公共祖先(LCA)近似: 从第一个卡片向上, 找第一个包含全部/大部分卡片的区块容器
+    let best: HTMLElement | null = null;
+    let bestCount = 0;
+    for (const card of Array.from(cards)) {
+      let el: HTMLElement | null = card.parentElement as HTMLElement | null;
+      while (el && el !== document.body) {
+        const count = el.querySelectorAll('.card-root').length;
+        if (count > bestCount && count >= cards.length * 0.5) {
+          // 确保是块级容器(有宽度)
+          const r = el.getBoundingClientRect();
+          if (r.width > 200) { bestCount = count; best = el; }
+        }
+        el = el.parentElement;
+      }
+    }
+    if (best) { log('findSeasonEpParent: 路径b命中, cards=', cards.length); return best; }
   }
-  return first; // 仍找不到就直接用卡片的直接父容器
+  // 路径 c: "选集"标题的下一个兄弟容器
+  const headings = Array.from(document.querySelectorAll('strong,h2,h3,h4,.semi-typography-heading'));
+  for (const h of headings) {
+    const t = (h.textContent || '').trim();
+    if (!/^选集$|^剧集$|^分集$|^Episodes$/i.test(t)) continue;
+    let sibling = h.nextElementSibling as HTMLElement | null;
+    // 跳过纯文本/空白节点, 找到第一个元素容器
+    while (sibling && sibling.nodeType === Node.TEXT_NODE) sibling = sibling.nextElementSibling as HTMLElement | null;
+    if (sibling && sibling.getBoundingClientRect().width > 200) {
+      log('findSeasonEpParent: 路径c命中 选集标题兄弟');
+      return sibling;
+    }
+    // 如果没有 nextSibling 或太小, 就用父容器
+    const parent = h.parentElement;
+    if (parent && parent.getBoundingClientRect().width > 300) {
+      log('findSeasonEpParent: 路径c命中 选集标题父容器');
+      return parent;
+    }
+  }
+  // 最终回退: 直接用第一个 .card-root 的父容器
+  if (cards.length > 0) {
+    const p = cards[0].parentElement as HTMLElement | null;
+    if (p) { log('findSeasonEpParent: 最终回退 card-root parent'); return p; }
+  }
+  log('findSeasonEpParent: ⚠️ 所有路径均未找到主内容容器');
+  return null;
 }
 
 /** [lc-906] 演职人员容器缓存: 原实现每次调用都全文档 querySelectorAll('strong') 再逐个读 textContent,
@@ -4461,16 +4501,20 @@ function injectEpisodeMeta(root?: HTMLElement): void {
   });
 }
 
-/** [lc-893] 把右侧信息卡(.fnos-season-aside)的顶边, 对齐到左侧第一张选集卡片
- *  (.fnos-season-main 内首个 [data-id="details"])的顶边。fnOS 左侧「选集」等标题会占去
- *  一定高度, 导致右侧信息卡比首集卡片高 → 视觉起点不齐。这里运行时测量首集卡片相对
- *  两栏容器的偏移, 把 aside 的 marginTop 设为该偏移, 抵消标题高度, 两侧顶边齐平。
- *  幂等: 每次都按当前实测覆盖 marginTop, 不会叠加。 */
+/** [lc-893] 把右侧信息卡(.fnos-season-aside)的顶边, 对齐到左侧第一张内容卡片
+ *  (.fnos-season-main 内的首个 [data-id="details"] 或 .card-root)的顶边。
+ *  fnOS 左侧「选集」等标题会占去一定高度, 导致右侧信息卡比首集卡片高 → 视觉起点不齐。
+ *  运行时测量首集卡片相对两栏容器的偏移, 把 aside 的 marginTop 设为该偏移, 抵消标题高度。
+ *  [lc-908] 兼容二级页: 首卡回退到 .card-root(季页是 [data-id="details"])。 */
 function alignInfoCardWithFirstEpisode(): void {
   const col = document.querySelector('.fnos-season-2col') as HTMLElement | null;
   const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
-  const firstCard = document.querySelector('.fnos-season-main [data-id="details"]') as HTMLElement | null;
-  if (!col || !aside || !firstCard) return;
+  const main = document.querySelector('.fnos-season-main') as HTMLElement | null;
+  if (!col || !aside || !main) return;
+  // 优先季页选集卡片, 回退二级页 .card-root
+  let firstCard = main.querySelector('[data-id="details"]') as HTMLElement | null;
+  if (!firstCard) firstCard = main.querySelector('.card-root') as HTMLElement | null;
+  if (!firstCard) return;
   const colTop = col.getBoundingClientRect().top;
   const cardTop = firstCard.getBoundingClientRect().top;
   const offset = Math.max(0, Math.round(cardTop - colTop));
@@ -4483,7 +4527,11 @@ function observeSeasonTwoPane(): void {
   if (_season2colObserver) return;
   const ep = findSeasonEpParent();
   const target = (ep && ep.parentElement) as HTMLElement | null;
-  if (!target) return;
+  if (!target) {
+    // [lc-908] 二级页 DOM 可能尚未渲染出主内容容器 → 延迟重试(不放弃, 因为后续 fnOS 异步填充一定会产生)
+    setTimeout(observeSeasonTwoPane, 800);
+    return;
+  }
   // [lc-905] 防抖 + [lc-906] 自喂抑制 / 稳态退避:
   //   ⚠️ 真正的卡死根因(lc-905 仅降频未根治): 本 observer 的观察范围(target 子树)就包含我们自建的两栏容器
   //   (.fnos-season-2col 挂在 target 下), 而 runObserverWork 内部又往该容器写 DOM(信息卡 innerHTML)、
@@ -4581,7 +4629,16 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
-  layoutSeasonTwoPane();         // 选集(左) + 侧栏(右 320px) 两栏
+  // [lc-908] 立即尝试建立两栏; 二级页 DOM 可能异步渲染, 首次 findSeasonEpParent 可能返回 null → 延迟重试
+  layoutSeasonTwoPane();
+  if (!document.querySelector('.fnos-season-2col')) {
+    // 两栏未建立 → 二级页 DOM 可能还没渲染完, 延迟重试(覆盖 fnOS 懒加载/异步填充)
+    [400, 1000, 2000, 3500].forEach((ms) => setTimeout(() => {
+      if (!document.querySelector('.fnos-season-2col') && document.body.classList.contains('fnos-immersive-season')) {
+        layoutSeasonTwoPane();
+      }
+    }, ms));
+  }
   observeSeasonTwoPane();         // fnOS SPA 重建时自动补做两栏
 }function applySeasonDetailGlass(): void {
   // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
