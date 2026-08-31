@@ -3913,12 +3913,12 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; overflow:visible !important; }
-/* 彻底干掉 fnOS 的 truncate（演员姓名/角色文字必须完整显示） */
+/* [lc-896] 演员姓名/角色单行显示, 不换行(过长用省略号截断, 完整文本见 title 悬停提示) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p,
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p.truncate{
   width:100% !important; max-width:none !important; min-width:0 !important;
-  text-align:left !important; white-space:normal !important;
-  overflow:visible !important; text-overflow:clip !important;
+  text-align:left !important; white-space:nowrap !important;
+  overflow:hidden !important; text-overflow:ellipsis !important;
   line-height:1.35 !important; margin:0 !important; padding:0 !important;
   display:block !important;
 }
