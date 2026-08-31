@@ -4082,6 +4082,7 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 `;
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
+let _castRestyleTimer: ReturnType<typeof setInterval> | null = null; // [lc-903] 详情页存续期间周期性重跑 restyle 的兜底定时器
 let _infoCard: HTMLElement | null = null;
 
 /** 找「选集」容器：包含 [data-id="details"] 的那个 .relative.w-full */
@@ -4208,6 +4209,9 @@ function layoutSeasonTwoPane(): void {
   // 主要配音演员（借用 fnOS 原生演职人员，整块卡片 + 圆形头像 + 姓名/角色）
   if (cast) {
     scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
+    // [lc-903] 持续兜底: 详情页存续期间每 600ms 巡检一次, 任何时机填入/替换的演员节点都会在 600ms 内被收紧
+    if (_castRestyleTimer) clearInterval(_castRestyleTimer);
+    _castRestyleTimer = setInterval(restyleCastOnce, 600);
     const castCard = document.createElement('div');
     castCard.className = 'fnos-info-card fnos-cast-card';
     const castTitle = document.createElement('h4');
@@ -4252,6 +4256,21 @@ function scheduleCastRestyle(): void {
   const doRestyle = (): void => { const c = findSeasonCastParent(); if (c) restyleCastItems(c); };
   doRestyle();
   [200, 600, 1200, 2500].forEach((ms) => setTimeout(doRestyle, ms));
+}
+
+/** [lc-903] 廉价巡检: 仅当 cast 内仍有未加 fnos-cast-item 类的演员锚点时, 才跑完整 restyle(含递归清零);
+ *  全部已处理则直接跳过, 使详情页持续运行的 interval 在稳态下零开销。不依赖任何时机假设, fnOS 何时填充/替换节点都能兜住。 */
+function restyleCastOnce(): void {
+  const c = findSeasonCastParent();
+  if (!c) return;
+  const anchors = c.querySelectorAll('a[href^="/v/person/"]');
+  if (anchors.length === 0) return;
+  for (let i = 0; i < anchors.length; i++) {
+    if (!((anchors[i] as HTMLElement).classList.contains('fnos-cast-item'))) {
+      restyleCastItems(c);
+      return;
+    }
+  }
 }
 
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
@@ -4363,6 +4382,7 @@ function observeSeasonTwoPane(): void {
 /** 关闭背景框 / 离开季页时还原两栏结构 */
 function unlayoutSeasonTwoPane(): void {
   if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
+  if (_castRestyleTimer) { clearInterval(_castRestyleTimer); _castRestyleTimer = null; } // [lc-903] 停止持续兜底定时器
   _infoCard = null;
   const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
   if (!wrap) return;
