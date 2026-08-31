@@ -3913,12 +3913,12 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child img{ width:100% !important; height:100% !important; object-fit:cover !important; display:block !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info{ display:flex !important; flex-direction:column !important; flex:1 1 auto !important; min-width:0 !important; justify-content:center !important; gap:2px !important; overflow:visible !important; }
-/* [lc-896] 演员姓名/角色单行显示, 不换行(过长用省略号截断, 完整文本见 title 悬停提示) */
+/* [lc-896→897] 演员姓名/角色单行, 不换行也不截断(完整显示) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p,
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p.truncate{
-  width:100% !important; max-width:none !important; min-width:0 !important;
+  width:auto !important; max-width:none !important; min-width:0 !important;
   text-align:left !important; white-space:nowrap !important;
-  overflow:hidden !important; text-overflow:ellipsis !important;
+  overflow:visible !important; text-overflow:clip !important;
   line-height:1.35 !important; margin:0 !important; padding:0 !important;
   display:block !important;
 }
@@ -3971,7 +3971,7 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 /* ===== [lc-894] 季详情头部：保留原始 fnOS 布局（左竖屏海报 + 右信息栏） ===== */
 /* 头部容器：保持 fnOS 原始 flex 布局（不再强制全宽底图） */
 .fnos-immersive-season .semi-always-dark{
-  position:relative !important; overflow:hidden !important;
+  position:relative !important; /* [lc-897] 去掉 overflow:hidden: 原始布局下裁掉简介 */
   /* 保持 fnOS 原始 justify-content/align-items，不覆盖为 flex-end/flex-start */
   padding:0 48px 36px !important; min-height:340px !important;
 }
@@ -3995,6 +3995,8 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
   display:block !important;
   background:var(--fnos-detail-season-grad) !important;
   pointer-events:none !important;
+  /* [lc-897] 确保渐变层在文字下方, 不遮挡简介 */
+  position:absolute !important; z-index:0 !important;
 }
 
 /* ── 文字内容列：叠在原始布局上微调 ── */
@@ -4056,12 +4058,12 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
   background:rgba(255,255,255,.22) !important; border-color:rgba(255,255,255,.4) !important;
 }
 
-/* 简介/描述文字：限宽 + 截断 + 弱化 */
+/* [lc-897] 简介/描述文字：确保可见, 不隐藏 */
 .fnos-immersive-season .semi-always-dark p:not(:first-of-type):not(h2 + p){
+  display:block !important; visibility:visible !important;
   color:#a0a0ab !important; font-size:13px !important; line-height:1.55 !important;
   margin:10px 0 0 !important; max-width:600px !important;
-  display:-webkit-box !important; -webkit-line-clamp:2 !important;
-  -webkit-box-orient:vertical !important; overflow:hidden !important;
+  -webkit-line-clamp:unset !important;
   text-shadow:none !important;
 }
 `;
