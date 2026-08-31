@@ -9453,8 +9453,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   同步执行会把详情页样式套到首页/其他页 DOM 上导致布局错乱。
     //   进入详情页的应用交给已有的 MutationObserver(200ms debounce) + setTimeout(600/1500/3000ms) 重试链。
     const _wasDetail = (): boolean => /\/v\/(tv|movie)\//.test(location.href);
-    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
-    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
+    const _isDetailHref = (h: string | undefined): boolean => /\/v\/(tv|movie)\//.test(h || '');
+    // [lc-899] 轮播从首页进入详情页时 was=false, 同步 applyDetailLiquidGlass 被跳过, 仅靠 popstate+Observer 兜底不稳
+    //   (实测轮播入口渐变/两栏不生效, 剧集列表入口正常)。故: 新 URL 是详情页时, 也调度 applyDetailLiquidGlass + 重试链。
+    const _scheduleDetailGlass = (newHref: string | undefined): void => {
+      if (!_isDetailHref(newHref)) return;
+      setTimeout(applyDetailLiquidGlass, 60);
+      [400, 1000, 2000].forEach(ms => setTimeout(applyDetailLiquidGlass, ms));
+    };
+    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
+    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
