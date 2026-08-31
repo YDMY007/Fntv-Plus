@@ -4263,7 +4263,11 @@ function scheduleCastRestyle(): void {
 function restyleCastOnce(): void {
   const c = findSeasonCastParent();
   if (!c) return;
-  const anchors = c.querySelectorAll('a[href^="/v/person/"]');
+  // [lc-903+] 与 restyleCastItems 同款放宽匹配: 含 /v/person/ 或带头像 img 的 a
+  const anchors = Array.from(c.querySelectorAll('a')).filter((a) => {
+    const href = a.getAttribute('href') || '';
+    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
+  });
   if (anchors.length === 0) return;
   for (let i = 0; i < anchors.length; i++) {
     if (!((anchors[i] as HTMLElement).classList.contains('fnos-cast-item'))) {
@@ -4273,9 +4277,14 @@ function restyleCastOnce(): void {
   }
 }
 
-/** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
+/** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排
+ *  [lc-903+] 演员锚点匹配放宽: 原仅 a[href^="/v/person/"], 若飞牛改了 href 格式会整批漏掉而"完全不生效";
+ *  现同时接纳"含头像 <img> 的 <a>"(演员行必有头像), 提高命中率。 */
 function restyleCastItems(container: HTMLElement): void {
-  const items = Array.from(container.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
+  const items = Array.from(container.querySelectorAll('a')).filter((a) => {
+    const href = a.getAttribute('href') || '';
+    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
+  }) as HTMLElement[];
   items.forEach((a) => {
     if (a.classList.contains('fnos-cast-item')) return;
     const ps = Array.from(a.querySelectorAll('p')) as HTMLElement[];
@@ -4310,6 +4319,13 @@ function restyleCastItems(container: HTMLElement): void {
     el.style.margin = '0';
     el.style.padding = '0';
     el.style.minHeight = '0';
+    // [lc-903+] 飞牛可能用固定 height 撑开每项(而非 margin), 需清 height/maxHeight 才能真正收紧;
+    //   但跳过"直接含 <img> 的元素"(头像容器需保留 44px 圆形头像, 不能 auto 高度)
+    const directImg = Array.from(el.children).some((c) => (c as HTMLElement).tagName === 'IMG');
+    if (!directImg) {
+      el.style.height = 'auto';
+      el.style.maxHeight = 'none';
+    }
     const fd = getComputedStyle(el).flexDirection;
     if (fd === 'column' || fd === 'column-reverse') el.style.gap = '2px';
     Array.from(el.children).forEach((c) => zeroSpacing(c as HTMLElement));
