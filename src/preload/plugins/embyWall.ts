@@ -4207,7 +4207,7 @@ function layoutSeasonTwoPane(): void {
 
   // 主要配音演员（借用 fnOS 原生演职人员，整块卡片 + 圆形头像 + 姓名/角色）
   if (cast) {
-    restyleCastItems(cast);
+    scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
     const castCard = document.createElement('div');
     castCard.className = 'fnos-info-card fnos-cast-card';
     const castTitle = document.createElement('h4');
@@ -4246,6 +4246,14 @@ function layoutSeasonTwoPane(): void {
   setTimeout(alignInfoCardWithFirstEpisode, 1000);
 }
 
+/** [lc-903] 演员数据常异步填充 / fnOS 重渲染替换节点, 单次 restyle 可能扑空(节点尚未生成或被换新);
+ *  故立即 + 多次延迟重试, 每次都重新定位当前 cast 容器, 确保异步补全后的新节点也被收紧。 */
+function scheduleCastRestyle(): void {
+  const doRestyle = (): void => { const c = findSeasonCastParent(); if (c) restyleCastItems(c); };
+  doRestyle();
+  [200, 600, 1200, 2500].forEach((ms) => setTimeout(doRestyle, ms));
+}
+
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排（只处理真正的演职人员链接） */
 function restyleCastItems(container: HTMLElement): void {
   const items = Array.from(container.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
@@ -4276,6 +4284,18 @@ function restyleCastItems(container: HTMLElement): void {
     a.style.padding = '0';
     a.classList.add('fnos-cast-item');
   });
+  // [lc-902b] 递归强制清零 fnOS 原生各层间距: 中间包装层/ms-container 可能带大 margin/padding/min-height,
+  //   普通 CSS !important 可能被 fnOS 更深层(含内联)选择器覆盖, 故遍历所有后代用 inline 兜底。
+  //   对纵向 flex 容器(演员项之间的包裹层)设紧凑 gap=2px; 行向 flex(头像-文字横排)不动, 保留 CSS 的 10px。
+  const zeroSpacing = (el: HTMLElement): void => {
+    el.style.margin = '0';
+    el.style.padding = '0';
+    el.style.minHeight = '0';
+    const fd = getComputedStyle(el).flexDirection;
+    if (fd === 'column' || fd === 'column-reverse') el.style.gap = '2px';
+    Array.from(el.children).forEach((c) => zeroSpacing(c as HTMLElement));
+  };
+  zeroSpacing(container);
 }
 
 /** 给每集卡片补齐「时长 / 状态」meta（幂等，并隐藏 fnOS 原生的时长行避免重复）
@@ -4331,12 +4351,13 @@ function observeSeasonTwoPane(): void {
     if (wrap && epInWrap && epInWrap === epNow) {
       updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
       alignInfoCardWithFirstEpisode(); // [lc-893] 首集卡片懒加载后位置可能变动, 重对齐
+      if (castNow) restyleCastItems(castNow); // [lc-903] SPA 异步补全/重渲染演职人员后, 新节点需重新收紧
       return;
     }
     if (wrap) wrap.remove();
     layoutSeasonTwoPane();
   });
-  _season2colObserver.observe(target, { childList: true });
+  _season2colObserver.observe(target, { childList: true, subtree: true }); // [lc-903] subtree 捕获深层异步填充的演职人员节点
 }
 
 /** 关闭背景框 / 离开季页时还原两栏结构 */
