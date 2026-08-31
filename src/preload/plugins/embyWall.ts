@@ -4083,7 +4083,15 @@ html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child
 let _immersiveSeasonStyleInjected = false;
 let _season2colObserver: MutationObserver | null = null;
 let _castRestyleTimer: ReturnType<typeof setInterval> | null = null; // [lc-903] 详情页存续期间周期性重跑 restyle 的兜底定时器
+let _obsTimer: ReturnType<typeof setTimeout> | null = null; // [lc-905] observer 防抖定时器
+let _obsMaxTimer: ReturnType<typeof setTimeout> | null = null; // [lc-905] observer maxWait 兜底定时器
 let _infoCard: HTMLElement | null = null;
+
+/** [lc-905] 清理 observer 防抖/maxWait 定时器, 离开季页或已处理完一轮时调用, 防止残留定时器在页面销毁后误重建两栏 */
+function clearSeasonObsTimers(): void {
+  if (_obsTimer) { clearTimeout(_obsTimer); _obsTimer = null; }
+  if (_obsMaxTimer) { clearTimeout(_obsMaxTimer); _obsMaxTimer = null; }
+}
 
 /** 找「选集」容器：包含 [data-id="details"] 的那个 .relative.w-full */
 function findSeasonEpParent(): HTMLElement | null {
@@ -4181,8 +4189,12 @@ function updateSeasonInfoStats(): void {
 }
 
 /** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
+let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSeasonTwoPane 可能被连续触发, 防止嵌套重排卡死
 function layoutSeasonTwoPane(): void {
+  if (_seasonLaying) return;
   if (document.querySelector('.fnos-season-2col')) return;
+  _seasonLaying = true;
+  try {
   const ep = findSeasonEpParent();
   const cast = findSeasonCastParent();
   const root = ep ? ep.parentElement : null;
@@ -4248,6 +4260,9 @@ function layoutSeasonTwoPane(): void {
   alignInfoCardWithFirstEpisode();
   setTimeout(alignInfoCardWithFirstEpisode, 300);
   setTimeout(alignInfoCardWithFirstEpisode, 1000);
+  } finally {
+    _seasonLaying = false;
+  }
 }
 
 /** [lc-903] 演员数据常异步填充 / fnOS 重渲染替换节点, 单次 restyle 可能扑空(节点尚未生成或被换新);
@@ -4377,7 +4392,14 @@ function observeSeasonTwoPane(): void {
   const ep = findSeasonEpParent();
   const target = (ep && ep.parentElement) as HTMLElement | null;
   if (!target) return;
-  _season2colObserver = new MutationObserver(() => {
+  // [lc-905] 防抖: fnOS 打开/填充二级页时持续异步重渲染(选集/演职人员节点大量变更),
+  //   MutationObserver(subtree:true) 若每次 mutation 都同步跑重活(updateSeasonInfoStats 全文档 querySelectorAll('*')
+  //   + restyleCastItems 递归 getComputedStyle 清零间距), 会与 fnOS 重渲染自喂成风暴 → 打满主线程 → 整软件卡死.
+  //   防抖使连续 mutation 在稳定后只处理一次; 另加 maxWait 兜底, 即便持续重渲染也至少每 500ms 跑一次, 保证布局不永久中断.
+  const OBS_DEBOUNCE = 150;
+  const OBS_MAXWAIT = 500;
+  const runObserverWork = (): void => {
+    clearSeasonObsTimers();
     const wrap = document.querySelector('.fnos-season-2col');
     const epNow = findSeasonEpParent();
     const castNow = findSeasonCastParent();
@@ -4391,12 +4413,19 @@ function observeSeasonTwoPane(): void {
     }
     if (wrap) wrap.remove();
     layoutSeasonTwoPane();
-  });
+  };
+  const scheduleObserverWork = (): void => {
+    if (_obsTimer) clearTimeout(_obsTimer);
+    if (_obsMaxTimer === null) _obsMaxTimer = setTimeout(runObserverWork, OBS_MAXWAIT); // 风暴期兜底, 至少每 500ms 跑一次
+    _obsTimer = setTimeout(runObserverWork, OBS_DEBOUNCE);
+  };
+  _season2colObserver = new MutationObserver(() => { scheduleObserverWork(); });
   _season2colObserver.observe(target, { childList: true, subtree: true }); // [lc-903] subtree 捕获深层异步填充的演职人员节点
 }
 
 /** 关闭背景框 / 离开季页时还原两栏结构 */
 function unlayoutSeasonTwoPane(): void {
+  clearSeasonObsTimers(); // [lc-905] 离开季页时清掉 observer 防抖/maxWait 定时器, 防止页面销毁后误重建两栏
   if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
   if (_castRestyleTimer) { clearInterval(_castRestyleTimer); _castRestyleTimer = null; } // [lc-903] 停止持续兜底定时器
   _infoCard = null;
