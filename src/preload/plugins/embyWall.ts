@@ -4132,6 +4132,9 @@ function resetSeasonObsState(): void {
  *     c) "选集"标题(strong)的下一个兄弟元素容器(通用兜底)
  */
 function findSeasonEpParent(): HTMLElement | null {
+  const _dbgCardRoot = document.querySelectorAll('.card-root').length;
+  const _dbgDetails = document.querySelectorAll('[data-id="details"]').length;
+  log('findSeasonEpParent: 入口 card-root=' + _dbgCardRoot + ' details=' + _dbgDetails);
   // 路径 a: 季页选集卡片
   let n = document.querySelector('[data-id="details"]') as HTMLElement | null;
   while (n && n !== document.body) {
@@ -4266,6 +4269,7 @@ function formatSeconds(total: number): string {
 
 /** [lc-906] 首播年份缓存: 年份不会随懒加载变化, 找到一次即可永久复用(每页只算一次) */
 let _seasonYearText = '';
+let _seasonDiagCount = 0; // [lc-909] 详情页布局诊断日志计数(最多打 3 次)
 /** [lc-906] 找首播年份文本。
  *  ⚠️ 原实现用 document.querySelectorAll('*') 全文档扫描(详情页常上万节点)逐个读 textContent+正则,
  *  而它被 observer 高频调用 → 单次就足以拖垮主线程。
@@ -4640,19 +4644,37 @@ function applySeasonImmersiveDetail(): void {
     return;
   }
   document.body.classList.add('fnos-immersive-season');
-  // [lc-909] 诊断: 记录主内容容器定位结果, 便于真机反馈时定位"两栏为何没建立"
-  try {
-    const _ep = findSeasonEpParent();
-    const _cast = findSeasonCastParent();
-    const _r = _ep ? _ep.getBoundingClientRect() : null;
-    log('applySeasonImmersiveDetail: url=' + location.pathname
-      + ' | boxless=' + _detailBoxless
-      + ' | ep=' + (_ep ? (_ep.className || '').toString().substring(0, 40) : 'NULL')
-      + ' | epW=' + (_r ? Math.round(_r.width) : '-')
-      + ' | cast=' + (_cast ? 'YES' : 'NULL')
-      + ' | cards=' + document.querySelectorAll('[data-id="details"]').length
-      + '/' + document.querySelectorAll('.card-root').length);
-  } catch (_) { /* ignore */ }
+  // [lc-909] 诊断(仅前 3 次): 详细 dump「选集」标题及其祖先链/兄弟结构, 真机实测反馈时定位"两栏为何没建立"
+  if (_seasonDiagCount < 3) {
+    _seasonDiagCount++;
+    try {
+      const details = document.querySelectorAll('[data-id="details"]').length;
+      const cards = document.querySelectorAll('.card-root').length;
+      // 找"选集/剧集"标题
+      let selHeading: HTMLElement | null = null;
+      for (const h of Array.from(document.querySelectorAll('strong,h2,h3,h4,p,span,div'))) {
+        const t = (h.textContent || '').trim();
+        if (/^选集$|^剧集$|^分集$|episodes?$/i.test(t)) { selHeading = h as HTMLElement; break; }
+      }
+      let info = 'url=' + location.pathname + ' | details=' + details + ' cardRoot=' + cards;
+      if (selHeading) {
+        const txt = (selHeading.textContent || '').trim();
+        let chain: string[] = [];
+        let p = selHeading;
+        for (let i = 0; i < 7 && p; i++) { chain.push((p.className || '').toString().substring(0, 36) || p.tagName.toLowerCase()); p = p.parentElement as HTMLElement; }
+        info += ' | sel="' + txt + '" chain=' + chain.join(' < ');
+        let sib = selHeading.nextElementSibling as HTMLElement | null;
+        if (sib) {
+          info += ' | sibClass=' + ((sib.className || '').toString().substring(0, 50)) + ' sibKids=' + sib.children.length;
+          const gc = sib.children[0] as HTMLElement;
+          if (gc) info += ' | sibKid0=' + ((gc.className || '').toString().substring(0, 50)) + ' kid0Href=' + (gc.getAttribute('href') || '');
+        } else { info += ' | NO_NEXT_SIBLING'; }
+      } else { info += ' | NO_SEL_HEADING'; }
+      const ep = findSeasonEpParent();
+      info += ' | epResult=' + (ep ? (ep.className || '').toString().substring(0, 40) : 'NULL');
+      log('[DIAG-SEASON] ' + info);
+    } catch (_) { /* ignore */ }
+  }
   // [lc-908] 立即尝试建立两栏; 二级页 DOM 可能异步渲染, 首次 findSeasonEpParent 可能返回 null → 延迟重试
   layoutSeasonTwoPane();
   if (!document.querySelector('.fnos-season-2col')) {
@@ -9598,6 +9620,46 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   (window as any).fntvCloseSidebar = function (): void {
     const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
     if (drawer && drawer.classList.contains('drawer-open')) animateCloseDrawer(drawer);
+  };
+
+  // [lc-908] 诊断: 在二级详情页 Console 执行 fntvDumpSeasonDOM() 即可把选集区域真实结构打出来,
+  // 用于定位 findSeasonEpParent 在该页面为何拿不到主内容容器(二级页两栏建不起来的根因)。
+  (window as any).fntvDumpSeasonDOM = function (): any {
+    const info: any = {
+      cardRoot: document.querySelectorAll('.card-root').length,
+      details: document.querySelectorAll('[data-id="details"]').length,
+      msContainer: document.querySelectorAll('.ms-container').length,
+      bodyClass: document.body.className,
+      has2col: !!document.querySelector('.fnos-season-2col'),
+      url: location.href,
+      strongs: Array.from(document.querySelectorAll('strong,h2,h3,h4'))
+        .map((s) => (s.textContent || '').trim()).filter(Boolean).slice(0, 30),
+    };
+    const first = document.querySelector('.card-root, [data-id="details"]') as HTMLElement | null;
+    if (first) {
+      info.firstCardClass = first.className;
+      const chain: string[] = [];
+      let p: HTMLElement | null = first.parentElement;
+      for (let i = 0; i < 6 && p; i++) {
+        const r = p.getBoundingClientRect();
+        chain.push(`${(p.className || p.tagName).toString().substring(0, 50)} | w=${Math.round(r.width)} | ${(p.classList.contains('relative') ? 'relative ' : '') + (p.classList.contains('w-full') ? 'w-full' : '')}`);
+        p = p.parentElement;
+      }
+      info.firstCardParentChain = chain;
+    }
+    // 列出所有疑似"选集标题"后的兄弟容器
+    const cand: string[] = [];
+    for (const s of Array.from(document.querySelectorAll('strong,h2,h3,h4,.semi-typography-heading'))) {
+      const t = (s.textContent || '').trim();
+      if (/选集|剧集|分集|Episodes|episodes/i.test(t)) {
+        const sb = s.nextElementSibling as HTMLElement | null;
+        cand.push(`标题"${t}" next=${sb ? (sb.className || sb.tagName).toString().substring(0, 40) : 'null'} parent=${(s.parentElement?.className || '').toString().substring(0, 40)}`);
+      }
+    }
+    info.seasonTitleCandidates = cand;
+    console.log('[fntvDumpSeasonDOM]', JSON.stringify(info, null, 2));
+    log('[fntvDumpSeasonDOM] ' + JSON.stringify(info));
+    return info;
   };
 
   // ═══ 首页导航栏刷新按钮 ═══
