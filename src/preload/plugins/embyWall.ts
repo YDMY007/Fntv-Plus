@@ -3912,6 +3912,8 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左64%) + 侧栏(右36%) 
   flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:2px !important;
 }
 /* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
+/* [lc-901b] cast 容器(fnOS 原生 ms-container)本身必须清零, 否则原生 padding/margin 导致巨大间隔 */
+.fnos-immersive-season .fnos-cast-card > *{ padding:0 !important; margin:0 !important; }
 .fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.4rem !important; color:var(--semi-color-text-2,#86868b) !important; }
 /* 单个演员：头像(左) + 姓名/角色(右) */
 /* [lc-901] 演员列表收紧: 每项上下内边距 8px→4px, 头像-文字间距 12px→10px, 文字左对齐贴齐头像(原 center 显空) */
@@ -4212,6 +4214,10 @@ function layoutSeasonTwoPane(): void {
     castTitle.textContent = '主要配音演员';
     castCard.appendChild(castTitle);
     castCard.appendChild(cast);
+    // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
+    cast.style.padding = '0';
+    cast.style.margin = '0';
+    cast.style.gap = '2px';
     aside.appendChild(castCard);
   }
 
@@ -4255,6 +4261,9 @@ function restyleCastItems(container: HTMLElement): void {
       wrap.style.minWidth = '120px';
       wrap.style.maxWidth = 'none';
       wrap.style.overflow = 'visible';
+      // [lc-901b] 清除 fnOS 原生外边距(每项之间大间隔的来源之一)
+      wrap.style.margin = '0';
+      wrap.style.padding = '0';
     }
     if (ps.length) {
       const info = document.createElement('div');
@@ -4262,6 +4271,9 @@ function restyleCastItems(container: HTMLElement): void {
       ps.forEach((p) => info.appendChild(p));
       a.appendChild(info);
     }
+    // [lc-901b] 清除 fnOS 原生链接的块级 margin/padding
+    a.style.margin = '0';
+    a.style.padding = '0';
     a.classList.add('fnos-cast-item');
   });
 }
