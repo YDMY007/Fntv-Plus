@@ -7,10 +7,56 @@ import (
 	"proxy/pkg/logger"
 	"proxy/pkg/utils"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
+
+// fetchPlayInfo [lc-904] 带自愈合重试地获取播放信息。并发/竞态下单个 fnOS 请求可能瞬态失败(超时或业务错误),
+// 直接 500 会被 node-mpv 捕获为"加载播放列表失败"。这里最多重试 3 次, 仅首次走缓存, 后续绕过缓存避免命中瞬时空/错结果。
+func fetchPlayInfo(fnApi *fnapi.ApiService, itemGuid string) (*fnapi.ApiResponse[fnapi.StreamListResponse], error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		var resp *fnapi.ApiResponse[fnapi.StreamListResponse]
+		var err error
+		if attempt == 0 {
+			resp, err = fnApi.GetStreamListCached(itemGuid)
+		} else {
+			resp, err = fnApi.GetStreamList(itemGuid)
+		}
+		if err == nil && resp != nil && resp.Success && len(resp.Data.VideoStreams) > 0 {
+			return resp, nil
+		}
+		lastErr = err
+		if attempt < 2 {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	return nil, lastErr
+}
+
+// fetchStream [lc-904] 同上, 带自愈合重试地获取视频流地址。
+func fetchStream(fnApi *fnapi.ApiService, mediaGuid, account string) (*fnapi.ApiResponse[fnapi.StreamResponse], error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		var resp *fnapi.ApiResponse[fnapi.StreamResponse]
+		var err error
+		if attempt == 0 {
+			resp, err = fnApi.GetStreamCached(mediaGuid, account)
+		} else {
+			resp, err = fnApi.GetStream(mediaGuid, utils.StringToUUID(account))
+		}
+		if err == nil && resp != nil && resp.Success {
+			return resp, nil
+		}
+		lastErr = err
+		if attempt < 2 {
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
+	return nil, lastErr
+}
 
 var (
 	// 115盘请求速率限制器，1s/次
@@ -86,8 +132,8 @@ func PlayVideoHandler(c *gin.Context) {
 	}
 
 	fnApi := fnapi.NewApiService(params.Domain, params.Token, params.SkipVerify == 1, params.Cookie)
-	resp, err := fnApi.GetStreamListCached(params.ItemGuid)
-	if err != nil || !resp.Success || len(resp.Data.VideoStreams) == 0 {
+	resp, err := fetchPlayInfo(fnApi, params.ItemGuid)
+	if err != nil || resp == nil || !resp.Success || len(resp.Data.VideoStreams) == 0 {
 		logger.Errorf("获取播放信息失败或为空: %v", err)
 		c.JSON(500, gin.H{"error": "Failed to get play info"})
 		return
@@ -101,8 +147,8 @@ func PlayVideoHandler(c *gin.Context) {
 	}
 
 	// 获取流地址信息
-	streamResp, err := fnApi.GetStreamCached(targetMediaGuid, params.Account)
-	if err != nil || !streamResp.Success {
+	streamResp, err := fetchStream(fnApi, targetMediaGuid, params.Account)
+	if err != nil || streamResp == nil || !streamResp.Success {
 		logger.Errorf("获取视频流失败: %v", err)
 		c.JSON(500, gin.H{"error": "Failed to get stream"})
 		return

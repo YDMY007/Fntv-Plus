@@ -83,7 +83,7 @@ func GenFnAuthx(url string, data interface{}) string {
 	return fmt.Sprintf("nonce=%s&timestamp=%d&sign=%s", nonce, timestamp, finalSign)
 }
 
-const DefaultTimeout = 10000 // 默认超时时间（毫秒）
+const DefaultTimeout = 30000 // 默认超时时间（毫秒）。[lc-904] 远程/隧道(CGNAT, 如 100.66.x.x) fnOS 下 stream/list 偶发 >10s, 旧值 10s 会直接超时 500, 提到 30s 吸收冷请求延迟
 
 // Request 发送API请求
 func Request[T any](client *http.Client, baseURL, url string, method HttpMethod, token string, data interface{}, extraHeaders map[string]string, timeout, tryTimes int, sessionCookie string) (*ApiResponse[T], error) {
