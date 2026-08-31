@@ -4158,6 +4158,26 @@ function findShowContentColumn(): HTMLElement | null {
   return null;
 }
 
+/** [lc-912] 找「选集 / 剧集 / 分集 / Episodes」小标题节点(叶子节点, 短文本)。
+ *  返回该标题节点 + 它所在 section 里实际使用的集卡片选择器, 供调用方按标题锚定 section 根。
+ *  ⚠️ 只接受「祖先链 8 层内能找到集卡片」的标题, 排除推荐位等同名短文本。 */
+function findEpisodeSectionHeading(): { head: HTMLElement; sel: string } | null {
+  for (const sel of ['[data-id="details"]', '.card-root']) {
+    const cands = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
+    for (const el of cands) {
+      if (el.children.length > 0) continue;
+      const t = (el.textContent || '').trim();
+      if (!/^(选集|剧集|分集|episodes?)$/i.test(t)) continue;
+      let p: HTMLElement | null = el.parentElement;
+      for (let i = 0; i < 8 && p && p !== document.body; i++) {
+        if (p.querySelector(sel)) return { head: el, sel };
+        p = p.parentElement;
+      }
+    }
+  }
+  return null;
+}
+
 function findSeasonEpParent(): HTMLElement | null {
   const _dbgCardRoot = document.querySelectorAll('.card-root').length;
   const _dbgDetails = document.querySelectorAll('[data-id="details"]').length;
@@ -4174,6 +4194,33 @@ function findSeasonEpParent(): HTMLElement | null {
       log('findSeasonEpParent: [show页] 命中内容列 cls=' + (col.className || '').toString().substring(0, 50));
       return col;
     }
+  }
+  // [lc-912] 季页(/v/tv/season/<guid>)专属策略:
+  //   旧实现先逐层向上找 .relative.w-full(会越过 section 边界命中更高层容器), 找不到再用 .card-root 的
+  //   最近公共祖先"猜"。后者在【集卡片尚未渲染】时必然命中整页内容列(div.flex.w-full.flex-col) →
+  //   两栏被建在错误的锚点上: 左栏塞进整页内容, 而真正的「选集」section 反而被留在两栏之外,
+  //   表现为"布局错乱 / 看着不像左6集数据右4信息"。
+  //   现改为: 以「选集」小标题为锚, 取【最内层同时含标题与集卡片】的祖先 = 选集 section 根;
+  //   集卡片还没渲染出来时返回 null(交给重试/observer), 绝不用 .card-root LCA 猜。
+  if (/\/season\//.test(location.pathname)) {
+    const h = findEpisodeSectionHeading();
+    if (h) {
+      let el: HTMLElement | null = h.head.parentElement;
+      while (el && el !== document.body) {
+        if (el.querySelector(h.sel)) {
+          log('findSeasonEpParent: [季页] 命中选集 section sel=' + h.sel
+            + ' cls=' + (el.className || '').toString().substring(0, 70));
+          return el;
+        }
+        el = el.parentElement;
+      }
+    }
+    if (_dbgDetails === 0 && _dbgCardRoot === 0) {
+      log('findSeasonEpParent: [季页] 集卡片尚未渲染, 返回 null 等待重试(不用 .card-root 猜锚点)');
+      return null;
+    }
+    // 有集卡片但页面没有「选集」标题 → 退化为旧路径 a(向上找 relative.w-full)
+    log('findSeasonEpParent: [季页] 无选集标题, 退化旧路径a');
   }
   // 路径 a: 季页选集卡片
   let n = document.querySelector('[data-id="details"]') as HTMLElement | null;
@@ -4255,6 +4302,27 @@ function findSeasonCastParent(): HTMLElement | null {
     while (el && el !== document.body) {
       if (el.querySelectorAll('a[href^="/v/person/"]').length >= 4) { _castParentCache = el; return el; }
       el = el.parentElement;
+    }
+  }
+  // [lc-912] 兜底: 部分条目 fnOS 只渲染演员头像(无 /v/person/ 链接) → 上面三条路径全部扑空,
+  //   右栏「主要配音演员」整块消失。改按「演职人员/演员/声优/配音」标题定位, 取最内层含 ≥3 个
+  //   带头像 <a> 的祖先(演员行必有头像; 要求 ≥3 以排除零星头像块)。标题必须精确匹配, 避免误抓推荐位。
+  const heads = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
+  for (const el of heads) {
+    if (el.children.length > 0) continue;
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 12) continue;
+    if (!/^(演职人员|主要演员|演员表|演员|声优|配音演员|cast)$/i.test(t)) continue;
+    let up: HTMLElement | null = el.parentElement;
+    for (let i = 0; i < 6 && up && up !== document.body; i++) {
+      const avatarLinks = Array.from(up.querySelectorAll('a')).filter((a) => a.querySelector('img') !== null).length;
+      if (avatarLinks >= 3) {
+        log('findSeasonCastParent: [lc-912兜底] 按标题"' + t + '"命中演员区(无person链接) cls='
+          + (up.className || '').toString().substring(0, 60));
+        _castParentCache = up;
+        return up;
+      }
+      up = up.parentElement;
     }
   }
   _castParentCache = null;
@@ -4694,72 +4762,69 @@ function injectImmersiveSeasonStyle(): void {
 // 免去依赖 DevTools Console 手动执行(用户侧 contextIsolation=false 但手动执行易遗漏/不可用)。
 // 文件名按 pathname 区分, 轮播页(正常)与二级页(异常)两份都保留, 由 AI 直接读取以精准修复 findSeasonEpParent。
 let _lastDiagSig = '';
-function dumpSeasonDOMToFile(): void {
+/** [lc-912] 升级为完整结构树: 除各锚点的祖先链外, 额外输出每层的「兄弟序号 idx / 子节点数 kids」,
+ *  可据此精确重建页面分区树(判断选集 section 与其它分区是否同级), 不再靠猜。 */
+/** @param stage 传入分阶段标签(如 't0'/'t400')时: 强制写盘且文件名带阶段后缀, 便于对比两栏建立前后 */
+function dumpSeasonDOMToFile(stage?: string): void {
   try {
     const fs = require('fs');
     const os = require('os');
     const path = require('path');
     const key = (location.pathname || 'x').replace(/[^a-z0-9]/gi, '-').replace(/-+/g, '-').substring(0, 42);
-    const outPath = path.join(os.tmpdir(), 'embyWall-diag-' + key + '.json');
-    const detailsEls = Array.from(document.querySelectorAll('[data-id="details"]')) as HTMLElement[];
-    const cardRoots = Array.from(document.querySelectorAll('.card-root')) as HTMLElement[];
-    const strongs = Array.from(document.querySelectorAll('strong,h2,h3,h4')) as HTMLElement[];
-    const chainOf = (el: HTMLElement | null, depth = 9): any[] => {
+    const outPath = path.join(os.tmpdir(), 'embyWall-diag-' + key + (stage ? '-' + stage : '') + '.json');
+    const force = !!stage;
+    const q = (s: string): HTMLElement | null => document.querySelector(s) as HTMLElement | null;
+    // 祖先链: 每级记 tag / 完整类名 / 子节点数 / 在父节点中的兄弟序号
+    const chainOf = (el: HTMLElement | null, depth = 14): any[] => {
       const out: any[] = [];
       let p: HTMLElement | null = el;
-      for (let i = 0; i < depth && p && p !== document.body; i++) {
-        const cls = (p.className || p.tagName).toString();
-        const r = p.getBoundingClientRect();
+      for (let i = 0; i < depth && p && p.tagName !== 'BODY'; i++) {
+        const par: HTMLElement | null = p.parentElement;
         out.push({
           tag: p.tagName.toLowerCase(),
-          cls: cls.substring(0, 90),
-          w: Math.round(r.width),
-          rel: p.classList ? p.classList.contains('relative') : false,
-          wfull: p.classList ? p.classList.contains('w-full') : false,
+          cls: (p.className || p.tagName).toString().substring(0, 160),
+          kids: p.childElementCount,
+          idx: par ? Array.prototype.indexOf.call(par.children, p) : -1,
         });
-        p = p.parentElement;
+        p = par;
       }
       return out;
     };
-    const seasonTitles: any[] = [];
-    for (const s of strongs) {
-      const t = (s.textContent || '').trim();
-      if (!/^选集$|^剧集$|^分集$|^Episodes$/i.test(t)) continue;
-      const sb = s.nextElementSibling as HTMLElement | null;
-      seasonTitles.push({
-        text: t,
-        cls: (s.className || '').toString().substring(0, 70),
-        parentCls: (s.parentElement?.className || '').toString().substring(0, 70),
-        sibCls: sb ? (sb.className || '').toString().substring(0, 70) : null,
-        sibKids: sb ? sb.children.length : 0,
-        chain: chainOf(s.parentElement, 6),
-      });
+    // 页面上所有「分区短标题」(叶子节点 / 文本≤12字 / 命中分区关键词)及其祖先链
+    const headings: any[] = [];
+    for (const el of Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div'))) {
+      if (headings.length >= 30) break;
+      if (el.children.length > 0) continue;
+      const t = (el.textContent || '').trim();
+      if (!t || t.length > 12) continue;
+      if (!/选集|剧集|分集|演职|演员|声优|职员|推荐|相关|相似|喜欢|评论|花絮|详情|简介|Episodes|Cast/i.test(t)) continue;
+      headings.push({ text: t, chain: chainOf(el as HTMLElement, 6) });
     }
-    const firstDetail = detailsEls[0] || null;
-    const firstCard = cardRoots[0] || null;
     const info: any = {
       ts: Date.now(),
       url: location.href,
       pathname: location.pathname,
       bodyClass: document.body.className,
       htmlClass: document.documentElement.className,
-      has2col: !!document.querySelector('.fnos-season-2col'),
-      detailsCount: detailsEls.length,
-      cardRootCount: cardRoots.length,
-      personLinkCount: Array.from(document.querySelectorAll('a[href^="/v/person/"]')).length,
-      firstDetailChain: firstDetail ? chainOf(firstDetail, 9) : null,
-      firstCardChain: firstCard ? chainOf(firstCard, 9) : null,
-      seasonTitles,
-      castHeading: (() => {
-        const c = strongs.find((s) => (s.textContent || '').trim().includes('演职人员'));
-        return c ? { cls: (c.className || '').toString().substring(0, 70), chain: chainOf(c.parentElement, 6) } : null;
-      })(),
+      has2col: !!q('.fnos-season-2col'),
+      detailsCount: document.querySelectorAll('[data-id="details"]').length,
+      cardRootCount: document.querySelectorAll('.card-root').length,
+      personLinkCount: document.querySelectorAll('a[href^="/v/person/"]').length,
+      epChain: chainOf(findSeasonEpParent()),
+      castChain: chainOf(findSeasonCastParent()),
+      twoColChain: chainOf(q('.fnos-season-2col')),
+      mainChain: chainOf(q('.fnos-season-main')),
+      asideChain: chainOf(q('.fnos-season-aside')),
+      details0Chain: chainOf(q('[data-id="details"]')),
+      card0Chain: chainOf(q('.card-root')),
+      headings,
     };
-    const sig = info.url + '|' + info.detailsCount + '|' + info.cardRootCount + '|' + info.has2col;
-    if (sig !== _lastDiagSig) {
+    const sig = [info.url, info.detailsCount, info.cardRootCount, info.has2col, info.personLinkCount].join('|');
+    if (force || sig !== _lastDiagSig) {
       _lastDiagSig = sig;
       fs.writeFileSync(outPath, JSON.stringify(info, null, 2), 'utf8');
-      log('[DIAG-FILE] wrote ' + outPath + ' path=' + location.pathname + ' details=' + info.detailsCount + ' cards=' + info.cardRootCount + ' 2col=' + info.has2col);
+      log('[DIAG-FILE] wrote ' + outPath + ' path=' + location.pathname + ' details=' + info.detailsCount
+        + ' cards=' + info.cardRootCount + ' persons=' + info.personLinkCount + ' 2col=' + info.has2col);
     }
   } catch (e) {
     log('[DIAG-FILE] error ' + (e as Error).message);
@@ -4817,8 +4882,12 @@ function applySeasonImmersiveDetail(): void {
   }
   observeSeasonTwoPane();         // fnOS SPA 重建时自动补做两栏
   // [lc-910] 自动 dump 真实 DOM 到临时文件(按 pathname 分文件), 供 AI 直接读取定位 findSeasonEpParent 问题
-  dumpSeasonDOMToFile();
-  setTimeout(dumpSeasonDOMToFile, 3700); // 捕捉 3500ms 重试后的稳态结构
+  // [lc-912] 分阶段强制 dump: t0(首次) / t400 / t1000 / t2000 / t3500 / t6000(稳态), 便于对比两栏建立前后
+  const stages: Array<[number, string]> = [[0, 't0'], [550, 't400'], [1150, 't1000'], [2150, 't2000'], [3650, 't3500'], [6000, 't6000']];
+  stages.forEach(([ms, tag]) => {
+    if (ms === 0) dumpSeasonDOMToFile(tag);
+    else setTimeout(() => dumpSeasonDOMToFile(tag), ms);
+  });
 }function applySeasonDetailGlass(): void {
   // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
   const seasonNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;
