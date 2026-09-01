@@ -802,10 +802,14 @@ function navigateToDetail(href: string): void {
   try {
     history.pushState({}, '', href);
     window.dispatchEvent(new PopStateEvent('popstate'));
-    // [兜底] 若飞牛未响应 popstate(详情页未渲染)，600ms 后退化整页导航
+    // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转(同 embyWall spaNav 修复)。
+    // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢会误判 → location.href 整页刷新重置模块状态。
+    // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管。
     setTimeout(() => {
-      const ready = !!document.querySelector('button[aria-label="返回"]');
-      if (!ready) location.href = href;
+      const backBtn = !!document.querySelector('button[aria-label="返回"]');
+      const c = document.querySelector('[data-fntv-carousel-style]') as HTMLElement | null;
+      const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
+      if ((carouselVisible || !c) && !backBtn) location.href = href;
     }, 600);
   } catch (e) { try { location.href = href; } catch { /* ignore */ } }
 }

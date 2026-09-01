@@ -1568,11 +1568,16 @@ function injectCarousel(): void {
       log(tag + ' -> SPA navigate', href);
       history.pushState({}, '', href);
       window.dispatchEvent(new PopStateEvent('popstate'));
-      // [v323兜底] 若飞牛未响应popstate(详情页未渲染), 600ms后退化整页导航;
-      //   详情页加载后 MutationObserver 会兜底重绑汉堡键 hook
+      // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转(见下方双重判定)。
       setTimeout(() => {
-        const detailReady = !!document.querySelector('button[aria-label="返回"]');
-        if (!detailReady) {
+        // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
+        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
+        // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
+        const c = _carouselContainer;
+        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
+        const backBtn = !!document.querySelector('button[aria-label="返回"]');
+        if ((carouselVisible || !c) && !backBtn) {
           log(tag + ' fallback -> full page nav (popstate not handled)', href);
           location.href = href;
         }
@@ -1936,8 +1941,15 @@ function buildCarouselStyle2(
       history.pushState({}, '', href);
       window.dispatchEvent(new PopStateEvent('popstate'));
       setTimeout(() => {
-        const detailReady = !!document.querySelector('button[aria-label="返回"]');
-        if (!detailReady) location.href = href;
+        // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
+        // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
+        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
+        // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
+        const c = _carouselContainer;
+        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
+        const backBtn = !!document.querySelector('button[aria-label="返回"]');
+        if ((carouselVisible || !c) && !backBtn) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
@@ -2289,8 +2301,15 @@ function buildCarouselStyle3(
       history.pushState({}, '', href);
       window.dispatchEvent(new PopStateEvent('popstate'));
       setTimeout(() => {
-        const detailReady = !!document.querySelector('button[aria-label="返回"]');
-        if (!detailReady) location.href = href;
+        // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
+        // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
+        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
+        // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
+        const c = _carouselContainer;
+        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
+        const backBtn = !!document.querySelector('button[aria-label="返回"]');
+        if ((carouselVisible || !c) && !backBtn) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
@@ -2579,8 +2598,15 @@ function buildCarouselStyle4(
       history.pushState({}, '', href);
       window.dispatchEvent(new PopStateEvent('popstate'));
       setTimeout(() => {
-        const detailReady = !!document.querySelector('button[aria-label="返回"]');
-        if (!detailReady) location.href = href;
+        // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
+        // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
+        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
+        // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
+        const c = _carouselContainer;
+        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
+        const backBtn = !!document.querySelector('button[aria-label="返回"]');
+        if ((carouselVisible || !c) && !backBtn) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
