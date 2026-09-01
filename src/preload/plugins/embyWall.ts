@@ -1119,6 +1119,7 @@ let _carouselLoadedButNone = false;
 // [lc-876] 样式2/3/4 轮播清理句柄：SPA导航离开/重建前必须清理旧timer/event listener，
 //   否则 progressInterval 继续操作已移除DOM、keydown监听器堆积 → 返回后乱套。
 let _carouselCleanup: (() => void) | null = null; // 当前活跃轮播的统一清理函数
+let _carouselResume: (() => void) | null = null;  // [lc-946] 复用轮播时重启自动轮播的钩子(各 buildCarouselStyleX 注册)
 
 /** [lc-876] 销毁当前轮播的所有 timer + event listener（重建/导航离开前调用）。
  *  各 buildCarouselStyleX 在创建timer/listener时将清理逻辑注册到 _carouselCleanup。 */
@@ -1127,6 +1128,15 @@ function destroyCarousel(): void {
     try { _carouselCleanup(); } catch { /* ignore */ }
     _carouselCleanup = null;
   }
+  // [lc-946] 注意: 此处不置空 _carouselResume。离开首页(_stopCarouselOffHome→destroyCarousel)后,
+  //   返回首页需靠它重启自动轮播; 该闭包自带 document.body.contains(container) 守卫, 指向已游离轮播时自动 no-op, 保留安全。
+}
+
+/** [lc-946] 轮播仍健康(挂载+已初始化)时返回首页: 不销毁重建 DOM, 仅重启被 _stopCarouselOffHome 停掉的自动轮播,
+ *  避免"返回首页轮播重载 + 海报闪烁/丢失"。钩子由各 buildCarouselStyleX 在创建 timer 时注册到 _carouselResume。 */
+function resumeCarousel(): void {
+  if (!(_carouselContainer && document.body.contains(_carouselContainer))) return;
+  if (_carouselResume) { try { _carouselResume(); } catch (e) { log('[lc-946] resumeCarousel error: ' + String(e).substring(0, 80)); } }
 }
 
 // [DIAG] 99% 卡死看门狗状态（仅用于诊断日志，不改变任何行为）
@@ -2132,6 +2142,8 @@ function buildCarouselStyle2(
     document.removeEventListener('visibilitychange', visHandler);
     log2('cleanup: style2 timers & listeners destroyed');
   };
+  // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
+  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); startAuto(); };
   log2('样式2 轮播注入完成, slides=', slides.length);
 }
 
@@ -2433,6 +2445,8 @@ function buildCarouselStyle3(
     document.removeEventListener('visibilitychange', visHandler);
     log3('cleanup: style3 timer & listeners destroyed');
   };
+  // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
+  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
   log3('样式3 堆叠卡片轮播注入完成, cards=', cards.length);
 }
 
@@ -2757,6 +2771,8 @@ function buildCarouselStyle4(
     document.removeEventListener('visibilitychange', visHandler);
     log4('cleanup: style4 timer & listeners destroyed');
   };
+  // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
+  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
   log4('样式4 3D旋转木马轮播注入完成, cards=', cards.length);
 }
 
@@ -11996,9 +12012,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
-    // 仍在首页且轮播健康、且本次会话未离开过首页 → 跳过(避免 in-home 的 replaceState 反复重建)
+    // [lc-946] 轮播仍健康(已挂载+已初始化)→ 直接复用, 绝不销毁重建(根治"返回首页轮播重载/海报丢失")。
+    //   仅重启被 _stopCarouselOffHome 停掉的自动轮播(钩子由各样式注册到 _carouselResume), DOM/海报原样保留。
+    //   此前的 _leftHome 强制重建是 lc-941 整页刷新根因的临时补丁, lc-941 已修复根因, 不再需要, 反而会引回"重载"。
     const healthy = !!(_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited);
-    if (healthy && !_leftHome) return;
+    if (healthy) { _leftHome = false; resumeCarousel(); return; }
     _leftHome = false; // 本次返回/重建后复位
     // ① 清理旧 timer/listener
     try { destroyCarousel(); } catch (_) { /* ignore */ }
