@@ -877,6 +877,29 @@ async function resolveShowBackdrop(show: any, base: string): Promise<string | nu
   return b;
 }
 
+// [lc-933] 统一「横版主图」渲染(供样式 2/3/4 共用):
+//   ① 优先复用首拉时已校验横版的 _backdropBlob —— 零网络, 且彻底规避 s.backdrop 二次拉取时
+//     可能解析成竖版/错位图(这正是 [lc-932] 移除 revalidateBackdropsOnReturn 后, 返回首页出现
+//     「轮播错乱 / 竖屏海报」的根因: 同名 URL 二次拉取返回了不同(竖版/张冠李戴)的图);
+//   ② 仅在无 blob 时回退 fetchImageAuth(s.backdrop), 且加载后做横版校验, 竖版一律不显示。
+function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): void {
+  const blob = show && (show as any)._backdropBlob as string | undefined;
+  if (blob) { target.style.backgroundImage = `url("${blob}")`; return; }
+  if (show && (show as any)._backdropIsPortrait) return; // 已知竖版 → 不拉(保留渐变兜底)
+  const p = (show && (show as any).backdrop) || '';
+  if (!p) return;
+  const pic = p.startsWith('http') || p.startsWith('/v/api/') ? p : `${base}/v/api/v1/${p}`;
+  fetchImageAuth(pic, { label: 'cb:' + ((show && (show as any).title) || '').substring(0, 8), isStrm: !!(show && (show as any).strmTag) }).then((b) => {
+    if (!b) return;
+    // 横版校验: 竖版不显示(避免「竖屏海报」), 横版才上背景
+    const im = new Image();
+    const to = window.setTimeout(() => { target.style.backgroundImage = `url("${b}")`; }, 4000); // 超时按横版放行
+    im.onload = () => { clearTimeout(to); const w = im.naturalWidth || 0, h = im.naturalHeight || 0; if (w > 0 && h > 0 && w < h) return; target.style.backgroundImage = `url("${b}")`; };
+    im.onerror = () => { clearTimeout(to); };
+    im.src = b;
+  });
+}
+
 // [DIAG] 识别 item 是否为「网盘 STRM / 远程 / 云存储」来源——用于在轮播海报加载失败时定位是否 STR 媒体导致。
 // 仅做启发式扫描，不改动任何数据；命中返回形如 "STRM"、"STRM+CLOUD"、"WEBDAV"、"REMOTE" 的标签，否则空串。
 function detectStrmOrCloud(d: any): string {
@@ -1930,16 +1953,8 @@ function buildCarouselStyle2(
     track.appendChild(slide);
     slides.push(slide);
 
-    // 真实背景图（与样式 1 同链路：fetchImageAuth → blob）
-    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
-    if (!(show as any)._backdropIsPortrait) {
-      const pic = imgUrl((show as any).backdrop);
-      if (pic) {
-        fetchImageAuth(pic, { label: 's2-slide#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-          if (b) slideBg.style.backgroundImage = `url("${b}")`;
-        });
-      }
-    }
+    // [lc-933] 复用首拉已校验横版的 _backdropBlob(零网络, 规避 s.backdrop 二次拉取返回竖版/错位图)
+    applyCarouselBackdrop(show, slideBg, base);
 
     // 按钮行为（沿用飞牛 SPA 路由）
     const playBtn = content.querySelector('.fnos-s2-play') as HTMLElement | null;
@@ -2291,16 +2306,8 @@ function buildCarouselStyle3(
       titleEl.appendChild(logoImg);
     });
 
-    // 真实背景图（与样式1/2 同链路：fetchImageAuth → blob）
-    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
-    if (!(show as any)._backdropIsPortrait) {
-      const pic = imgUrl((show as any).backdrop);
-      if (pic) {
-        fetchImageAuth(pic, { label: 's3-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-          if (b) bg.style.backgroundImage = `url("${b}")`;
-        });
-      }
-    }
+    // [lc-933] 复用首拉已校验横版的 _backdropBlob(零网络, 规避 s.backdrop 二次拉取返回竖版/错位图)
+    applyCarouselBackdrop(show, bg, base);
 
     // 按钮行为（沿用飞牛 SPA 路由）
     const playBtn = info.querySelector('.fntv-s3-play') as HTMLElement | null;
@@ -2589,16 +2596,8 @@ function buildCarouselStyle4(
       titleEl.appendChild(logoImg);
     });
 
-    // 真实背景图（与样式1/2/3 同链路：fetchImageAuth → blob）
-    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
-    if (!(show as any)._backdropIsPortrait) {
-      const pic = imgUrl((show as any).backdrop);
-      if (pic) {
-        fetchImageAuth(pic, { label: 's4-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-          if (b) bg.style.backgroundImage = `url("${b}")`;
-        });
-      }
-    }
+    // [lc-933] 复用首拉已校验横版的 _backdropBlob(零网络, 规避 s.backdrop 二次拉取返回竖版/错位图)
+    applyCarouselBackdrop(show, bg, base);
 
     // 按钮行为（沿用飞牛 SPA 路由）
     const playBtn = info.querySelector('.fntv-s4-play') as HTMLElement | null;
