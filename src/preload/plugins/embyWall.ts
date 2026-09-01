@@ -888,6 +888,16 @@ async function resolveShowBackdrop(show: any, base: string): Promise<string | nu
 function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): void {
   const blob = show && (show as any)._backdropBlob as string | undefined;
   const title = (show && (show as any).title || '').substring(0, 10);
+  const portrait = !!(show && (show as any)._backdropIsPortrait);
+  const sBack = (show && (show as any).backdrop) || '';
+  // [lc-935][DIAG] 入口诊断: 打印关键字段, 便于复现"返回首页海报不显示"时定位
+  log('[lc-935][DIAG] applyCarouselBackdrop', JSON.stringify({
+    title,
+    hasBlob: !!blob,
+    blobHead: blob ? blob.substring(0, 40) : '',
+    portrait,
+    sBackHead: sBack ? sBack.substring(0, 40) : '',
+  }));
   if (blob) {
     // 先设 blob(零延迟显示), 同时启动 probe 检测有效性
     target.style.backgroundImage = `url("${blob}")`;
@@ -898,7 +908,7 @@ function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): vo
       log('[lc-935] backdrop blob probe 超时, 启动 fetch fallback:', title);
       startFetchFallback(show, target, base, title);
     }, 3000);
-    probe.onload = () => { clearTimeout(probeTo); }; // blob 有效 → 无需操作
+    probe.onload = () => { clearTimeout(probeTo); log('[lc-935] blob probe OK(有效):', title); }; // blob 有效 → 无需操作
     probe.onerror = () => {
       clearTimeout(probeTo);
       log('[lc-935] backdrop blob 失效(onerror), 启动 fetch fallback:', title, blob.substring(0, 60));
@@ -907,7 +917,8 @@ function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): vo
     probe.src = blob;
     return;
   }
-  if (show && (show as any)._backdropIsPortrait) return; // 已知竖版 → 不拉(保留渐变兜底)
+  if (portrait) { log('[lc-935] 已知竖版, 跳过:', title); return; } // 已知竖版 → 不拉(保留渐变兜底)
+  if (!sBack) { log('[lc-935] 无 blob 且 s.backdrop 为空, 无法 fallback:', title); return; }
   startFetchFallback(show, target, base, title);
 }
 
@@ -916,8 +927,10 @@ function startFetchFallback(show: any, target: HTMLElement, base: string, title:
   const p = (show && (show as any).backdrop) || '';
   if (!p) return;
   const pic = p.startsWith('http') || p.startsWith('/v/api/') ? p : `${base}/v/api/v1/${p}`;
+  log('[lc-935][DIAG] fetch fallback 启动:', title, 'pic=', pic.substring(0, 50));
   fetchImageAuth(pic, { label: 'cb:' + title, isStrm: !!(show && (show as any).strmTag) }).then((b) => {
-    if (!b) return;
+    if (!b) { log('[lc-935][DIAG] fetch fallback 失败(null):', title); return; }
+    log('[lc-935][DIAG] fetch fallback 成功, 写背景:', title);
     // 横版校验: 竖版不显示(避免「竖屏海报」), 横版才上背景
     const im = new Image();
     const to = window.setTimeout(() => { target.style.backgroundImage = `url("${b}")`; }, 4000); // 超时按横版放行
@@ -11891,6 +11904,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     if (_carouselContainer && !document.body.contains(_carouselContainer)) { destroyCarousel(); _carouselContainer = null; }
     _carouselInited = false;
     _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
+    // [lc-935][DIAG] 重建前打印 _apiShows 关键状态: 若 hasBlob 全 false 说明数据本身丢了(非 blob GC)
+    const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
+    log('[lc-935][DIAG] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
     injectCarousel(); // 立即重建(用当前缓存, 无网络重拉); 返回首页不再做 backdrop 网络重校验
     log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新, 数据新鲜度由每 10 分钟整页重载保证)');
   };
