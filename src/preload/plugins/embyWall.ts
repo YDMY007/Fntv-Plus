@@ -854,7 +854,7 @@ async function fetchImageAuth(fullUrl: string, opts?: { label?: string; isStrm?:
   }
 }
 
-// [lc-768] 预加载并校验某剧集横版 backdrop：成功返回 blobURL(并写入 s._backdropBlob 复用)，失败(含 STR/网盘挂起、非横版)返回 null。
+// [lc-768] 预加载并校验某剧集横版 backdrop：成功返回 base64 data URL(写入 s._backdropBlob 复用，[lc-935] 起改为 data URL 以根治 SPA 返回后旧 blob 失效问题)，失败(含 STR/网盘挂起、非横版)返回 null。
 // 用于「凑齐 10 个」选片：加载不到的海报直接跳过，往后取下一个候选。
 async function resolveShowBackdrop(show: any, base: string): Promise<string | null> {
   let pic = '';
@@ -874,65 +874,66 @@ async function resolveShowBackdrop(show: any, base: string): Promise<string | nu
     im.src = b;
   });
   if (!ok) { try { URL.revokeObjectURL(b); } catch { /* ignore */ } return null; }
-  return b;
+  // [lc-935] 转 base64 data URL: 自包含字符串, 不依赖 blob 注册表/文档生命周期,
+  //   SPA 返回首页(旧文档 blob 失效)等场景下依然 100% 有效, 根治"返回后轮播海报不显示"。
+  //   转换完成后 revoke 中间 blob 释放内存。
+  const dataUrl = await blobToDataURL(b);
+  try { URL.revokeObjectURL(b); } catch { /* ignore */ }
+  return dataUrl;
+}
+
+// [lc-935] blob URL → base64 data URL: data URL 是自包含字符串, 不依赖 blob 注册表/文档生命周期,
+//   在 SPA 返回首页(旧文档 blob 失效)等场景下依然 100% 有效。fetch 是本地同源读取, 无网络开销。
+async function blobToDataURL(blobUrl: string): Promise<string> {
+  try {
+    const resp = await fetch(blobUrl);
+    const blob = await resp.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return blobUrl; // 转换失败则退回原 blob URL(不阻断显示)
+  }
 }
 
 // [lc-935] 统一「横版主图」渲染(供样式 2/3/4 共用):
-//   ① 优先复用首拉时已校验横版的 _backdropBlob —— 零网络, 且彻底规避 s.backdrop 二次拉取时
-//     可能解析成竖版/错位图(这正是 [lc-932] 移除 revalidateBackdropsOnReturn 后, 返回首页出现
-//     「轮播错乱 / 竖屏海报」的根因: 同名 URL 二次拉取返回了不同(竖版/张冠李戴)的图);
-//   ② 竞态安全网(lc-935): 设 blob 后启动 probe Image 检测其是否仍可加载;
-//      若 blob 失效(onerror/超时), 自动 fallback 到 fetchImageAuth(s.backdrop)+横版校验。
+//   ① 优先复用首拉时已校验横版的 _backdropBlob —— 该值现已是 base64 data URL(见 resolveShowBackdrop),
+//      零网络且任何导航/重建下都有效(根治「SPA 返回后旧 blob 失效 → 图片不显示」);
+//   ② 完全无 _backdropBlob 时, 回退 fetchImageAuth(s.backdrop)+横版校验(同 lc-933 意图)。
 //      这解决了「返回首页重建轮播时旧 DOM 已销毁 → blob 底层数据可能被回收 → 有URL字符串但图片不显示」的问题。
 //   ③ 完全无 blob 时(首屏数据未就绪等): 直接走 fetch fallback。
 function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): void {
-  const blob = show && (show as any)._backdropBlob as string | undefined;
+  // [lc-935] _backdropBlob 已是 base64 data URL(自包含字符串, 任何导航/重建下均有效),
+  //   彻底规避"旧 blob URL 在 SPA 返回后失效 → 图片不显示"的问题。直接设置即可, 无需 probe。
+  const dataUrl = show && (show as any)._backdropBlob as string | undefined;
   const title = (show && (show as any).title || '').substring(0, 10);
-  const portrait = !!(show && (show as any)._backdropIsPortrait);
-  const sBack = (show && (show as any).backdrop) || '';
-  // [lc-935][DIAG] 入口诊断 + 即时回读验证
-  log('[lc-935][DIAG] applyCarouselBackdrop', JSON.stringify({ title, hasBlob: !!blob, blobLen: blob?.length || 0, portrait, sBackLen: sBack.length }));
-  if (blob) {
-    // 先设 blob(零延迟显示), 同时启动 probe 检测有效性
-    target.style.backgroundImage = `url("${blob}")`;
-    // [lc-935][DIAG] 设完后立即回读确认 style 是否真的写入了
-    const readBack = getComputedStyle(target).backgroundImage;
-    log('[lc-935][DIAG] 设 blob 后 computed bg=', readBack.substring(0, 80), 'target=', target.className);
-    // probe: 若 blob URL 已失效(底层 blob 数据被 GC 回收等), onerror 触发 fallback
-    const probe = new Image();
-    const probeTo = window.setTimeout(() => {
-      log('[lc-935] backdrop blob probe 超时(3s), 启动 fetch fallback:', title);
-      startFetchFallback(show, target, base, title);
-    }, 3000);
-    probe.onload = () => { clearTimeout(probeTo); log('[lc-935] blob probe OK(有效):', title); };
-    probe.onerror = () => {
-      clearTimeout(probeTo);
-      log('[lc-935] backdrop blob 失效(onerror), 启动 fetch fallback:', title, blob.substring(0, 60));
-      startFetchFallback(show, target, base, title);
-    };
-    probe.src = blob;
+  if (dataUrl) {
+    target.style.backgroundImage = `url("${dataUrl}")`;
     return;
   }
-  if (portrait) { log('[lc-935] 已知竖版, 跳过:', title); return; }
-  if (!sBack) { log('[lc-935] 无 blob 且 s.backdrop 为空, 无法 fallback:', title); return; }
+  if (show && (show as any)._backdropIsPortrait) return; // 已知竖版 → 不拉(保留渐变兜底)
   startFetchFallback(show, target, base, title);
 }
 
-/** [lc-935] applyCarouselBackdrop 的 fetch fallback: 拉 s.backdrop + 横版校验, 成功则写目标背景 */
+/** [lc-935] applyCarouselBackdrop 的 fetch fallback: 拉 s.backdrop + 横版校验, 成功则写目标背景(同样转 data URL 防失效) */
 function startFetchFallback(show: any, target: HTMLElement, base: string, title: string): void {
   const p = (show && (show as any).backdrop) || '';
   if (!p) return;
   const pic = p.startsWith('http') || p.startsWith('/v/api/') ? p : `${base}/v/api/v1/${p}`;
-  log('[lc-935][DIAG] fetch fallback 启动:', title, 'pic=', pic.substring(0, 50));
-  fetchImageAuth(pic, { label: 'cb:' + title, isStrm: !!(show && (show as any).strmTag) }).then((b) => {
-    if (!b) { log('[lc-935][DIAG] fetch fallback 失败(null):', title); return; }
-    log('[lc-935][DIAG] fetch fallback 成功, 写背景:', title);
+  fetchImageAuth(pic, { label: 'cb:' + title, isStrm: !!(show && (show as any).strmTag) }).then(async (b) => {
+    if (!b) return;
+    // [lc-935] 转 base64 data URL, 避免 fallback 拉回的 blob 也有生命周期问题(SPA 返回后同样会失效)
+    const dataUrl = await blobToDataURL(b);
+    try { URL.revokeObjectURL(b); } catch { /* ignore */ }
     // 横版校验: 竖版不显示(避免「竖屏海报」), 横版才上背景
     const im = new Image();
-    const to = window.setTimeout(() => { target.style.backgroundImage = `url("${b}")`; }, 4000); // 超时按横版放行
-    im.onload = () => { clearTimeout(to); const w = im.naturalWidth || 0, h = im.naturalHeight || 0; if (w > 0 && h > 0 && w < h) return; target.style.backgroundImage = `url("${b}")`; };
+    const to = window.setTimeout(() => { target.style.backgroundImage = `url("${dataUrl}")`; }, 4000); // 超时按横版放行
+    im.onload = () => { clearTimeout(to); const w = im.naturalWidth || 0, h = im.naturalHeight || 0; if (w > 0 && h > 0 && w < h) return; target.style.backgroundImage = `url("${dataUrl}")`; };
     im.onerror = () => { clearTimeout(to); };
-    im.src = b;
+    im.src = dataUrl;
   });
 }
 
