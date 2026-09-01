@@ -11923,25 +11923,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   导航后, fnOS 视图栈可能不一致, 回来时落到未增强的原生 /v; 此时轮播守卫
   //   !(_apiLoaded && !_carouselRevealed) 在某些情况下会拦截重注入。这里在返回首页时
   //   显式重置并重建轮播, 确保看到的是 Fntv-Plus 增强页而非飞牛原生影视。
-  //   [lc-924] 返回前先校验每个 show.backdrop 是否仍是横版: 详情→首页路径下, 缓存的 URL 可能因
-  //   fnOS 服务端按场景返回不同尺寸 / domLand 首次抓取的 URL 已非最优, 导致轮播背景被替换成竖版海报。
+  //   [lc-924→lc-932] 原「返回前先校验每个 show.backdrop 是否横版(防竖版海报)」的逻辑已移除:
+  //   该网络重校验正是"返回首页时轮播被重拉刷新"的根源。现改为返回首页仅用缓存重建轮播(无网络重拉),
+  //   数据新鲜度由 [lc-932] 启动后每 10 分钟整页重载一次保证。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
     if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return; // 已在, 跳过
     if (_carouselContainer && !document.body.contains(_carouselContainer)) { destroyCarousel(); _carouselContainer = null; }
     _carouselInited = false;
     _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
-    injectCarousel(); // 立即重建(用当前缓存), 用户先看到上一帧; 校验完后若有变更再二次重建
-    log('ensureHomepageEnhanced: 已强制重注入轮播');
-    // [lc-924] 异步校验背景图(不阻塞首屏渲染): 检出竖版→ 改用 domLand 横版/标记 hide
-    void revalidateBackdropsOnReturn().then(() => {
-      const fixed = _apiShows.some((s: any) => s && s._backdropRevalidated);
-      if (!fixed) return;
-      log('ensureHomepageEnhanced: backdrop 校验完成, 含变更, 二次重建');
-      _carouselInited = false;
-      _carouselRevealed = true;
-      injectCarousel();
-    });
+    injectCarousel(); // 立即重建(用当前缓存, 无网络重拉); 返回首页不再做 backdrop 网络重校验
+    log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新, 数据新鲜度由每 10 分钟整页重载保证)');
   };
 
   try {
@@ -12047,6 +12039,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   }
   const CAROUSEL_REFRESH_MS = 10 * 60 * 1000;
   setInterval(refreshCarouselPosters, CAROUSEL_REFRESH_MS);
+
+  // [lc-932] 启动软件后每 10 分钟整页重载一次(取代"返回首页时重拉轮播"的旧行为):
+  //   后台隐藏页 / 正在播放视频时跳过, 避免无意义重载或打断播放。
+  const AUTO_RELOAD_MS = 10 * 60 * 1000;
+  setInterval(() => {
+    if (document.hidden) return;                         // 后台标签页跳过
+    const vid = document.querySelector('video');
+    if (vid && !(vid as HTMLVideoElement).paused) return; // 正在播放视频时不重载
+    log('[lc-932] 定时整页重载(每 10 分钟)');
+    try { location.reload(); } catch (_) { /* ignore */ }
+  }, AUTO_RELOAD_MS);
 
   wheelToScroll();
   [2000, 4000, 8000].forEach(ms => setTimeout(wheelToScroll, ms));
