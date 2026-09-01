@@ -1,4 +1,14 @@
 // preload/plugins/embyWall.ts
+//
+// ─── 这个文件是「入口编排层」，不是功能实现层 ───
+// 原 12496 行巨石文件已按职责拆分到 ./embyWall/ 目录下（见 ./embyWall/README.md 拆分说明书）。
+// 本文件保留三样东西：
+//   ① 全局一次性初始化（登录页背景、自动跳影视、matchMedia 拦截、调试过滤）
+//   ② 各功能模块的 import 装配
+//   ③ handle() 主流程编排：把导航/轮播/详情/设置面板/顶栏等模块按事件串起来
+//
+// 改功能的正确姿势：先进 ./embyWall/ 找对应模块，不要在入口文件里加实现。
+// 唯一例外：跨模块的「编排逻辑」（比如"进详情页要先停轮播再上玻璃背景"）属于本文件。
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
@@ -7,34 +17,11 @@ import { isFntvTvPage } from '../core/pageMode';
 // 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。绝不在隐藏 iframe 内强制要求 poster（fnOS 懒加载图永远没真实 URL → 跳过 → 0 个）。
 import { ensureLibraryIndex } from './hotUpdates';
 
+// ── 拆分后的子模块 ──
+import { S, CAROUSEL_TARGET, CAROUSEL_SCRAPE_CAP } from './embyWall/state';
+import { log, dlog, isSeasonLayoutDebugOn } from './embyWall/log';
+
 const LOG = '[EmbyWall]';
-// EmbyWall 渲染日志独立开关：由主进程调试过滤下发，默认关闭(安静)。
-// 关闭时 log() 完全不输出(终端 console.log 与上报主进程的 IPC 都跳过)，
-// 因此既能清掉 CMD 刷屏，也能避免写入 app.log 文件。
-let _embyWallLogEnabled = false;
-// 详情页「关闭背景框」开关的运行时缓存：false=保留玻璃背景框(默认)，true=恢复 fnOS 原生外观
-let _detailBoxless = false;
-// 鼠标滚轮横向滚动开关的运行时缓存：true=开启(默认，竖向滚轮转横向滑动)；false=关闭(恢复飞牛原生上下滚)
-let _wheelHScrollEnabled = false;
-// 「热门剧更新」数据源运行时缓存（'tmdb' / 'douban'），默认豆瓣；由启动时 settings:get 回填
-let _hotSource: 'tmdb' | 'douban' = 'douban';
-// 轮播图标题替换为 TMDB 透明 Logo 开关的运行时缓存：true=替换(默认)，false=保留文字标题
-let _carouselLogoEnabled = true;
-// 当前已渲染轮播的引用，供设置切换时即时应用/还原（无需等下次导航/重建）
-let _carouselInfos: HTMLElement[] = [];
-let _carouselShows: any[] = [];
-let _carouselBase = '';
-
-function _applyEmbyWallDebugFilter(payload: { enabled?: boolean; components?: Record<string, boolean> } | undefined): void {
-  const enabled = !!payload?.enabled;
-  const comps = payload?.components || {};
-  // 调试总开关开启 且 EmbyWall 组件未被显式关闭(默认开启) → 显示
-  _embyWallLogEnabled = enabled && comps['embywall'] !== false;
-}
-
-ipcRenderer.on('debug-filter', (_e: any, payload: any) => _applyEmbyWallDebugFilter(payload));
-// 页面加载时主动向主进程索取当前调试过滤(异步返回前默认安静)
-try { ipcRenderer.send('debug-filter-request'); } catch (e) {}
 
 // [lc-516] 「应用补丁」向导弹窗监听：模块顶层注册，直接唤起自包含的补丁应用弹窗。
 // ===== [lc-516] 模块级、自包含的补丁应用弹窗 =====
@@ -239,52 +226,26 @@ function fntvStartPatchApply(): void {
 try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
     if (s && typeof s.detailBoxless === 'boolean') {
-      _detailBoxless = s.detailBoxless;
+      S.detailBoxless = s.detailBoxless;
       if (isDetailPage()) applyDetailLiquidGlass();
     }
     // 鼠标滚轮横向滚动开关：false=关闭(恢复飞牛原生上下滚)，缺失/true=开启
     if (s && typeof s.wheelHScroll === 'boolean') {
-      _wheelHScrollEnabled = s.wheelHScroll;
+      S.wheelHScrollEnabled = s.wheelHScroll;
     }
     // 轮播图标题替换为 Logo 开关：缺失/true=开启(替换)，false=保留文字标题
     if (s && typeof s.carouselLogoEnabled === 'boolean') {
-      _carouselLogoEnabled = s.carouselLogoEnabled;
+      S.carouselLogoEnabled = s.carouselLogoEnabled;
     }
     // 立即按开关状态应用/清除横向滚动劫持（偏好可能与默认值不同）
     wheelToScroll();
     // 回填「热门剧更新」数据源（供设置面板 TMDB 区块初始显隐 TMDB 设置）
-    if (s && (s.hotSource === 'tmdb' || s.hotSource === 'douban')) _hotSource = s.hotSource;
+    if (s && (s.hotSource === 'tmdb' || s.hotSource === 'douban')) S.hotSource = s.hotSource;
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) applyLoginBgVar(s.loginBg);
   });
 } catch (e) {}
 
-function log(...a: any[]) {
-  if (!_embyWallLogEnabled) return; // 独立开关关闭 → 完全静默
-  emitLog('[EmbyWall] ' + a.join(' '));
-}
-
-/** [lc-914] 日志实际发送: 双通道。
- *  ① IPC(log-message): 主进程按 embywall 组件过滤后写 app.log;
- *  ② console.log: 由主进程 console-message 捕获, 输出为 `[Renderer:INFO] ...`, **不受组件过滤**,
- *     必定出现在 CMD 日志窗口。
- *  原实现只用 require('electron').ipcRenderer.invoke —— require 在本上下文若不可用会抛异常被 catch 吞掉,
- *  叠加 renderer 端 _embyWallLogEnabled 默认 false, 导致「代码在跑但 CMD 一条日志都没有」。
- *  现改用模块顶层已 import 的 ipcRenderer, 并补 console 通道兜底。 */
-function emitLog(msg: string): void {
-  try { ipcRenderer.invoke('log-message', 'info', msg); } catch (e) {}
-  try { console.log(msg); } catch (e) {}
-}
-
-/** [lc-914] 强制诊断日志: 完全绕过 _embyWallLogEnabled 开关, 专用于「详情页两栏布局」排查。
- *  由 localStorage `fntvSeasonLayoutDebug` 控制(默认开启), 调试结束后设为 '0' 即可静默。 */
-function isSeasonLayoutDebugOn(): boolean {
-  try { return localStorage.getItem('fntvSeasonLayoutDebug') !== '0'; } catch (e) { return true; }
-}
-function dlog(...a: any[]): void {
-  if (!isSeasonLayoutDebugOn()) return;
-  emitLog('[EmbyWall][LAYOUT] ' + a.join(' '));
-}
 
 // [lc-473] 登录后自动跳影视(精准 pathname 检测版, 取代 lc-205 关键词检测):
 //   判定完全基于 pathname(isFntvTvPage), 绝不扫页面文字关键词 → 不会误命中影视主页造成死循环。
@@ -428,9 +389,6 @@ const LOGO_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAACDQAAAJYCAM
 
 
 /* ========== 通过IPC主进程签名→自主调用API获取剧集(全自动) ========== */
-const _apiShows: any[] = [];
-let _apiLoaded = false;
-let _apiLoading = false;
 
 /**
  * [lc-408] 从 fnOS item 数据中多字段兜底提取 TMDB id（用于拉取 TMDB 透明 logo）。
@@ -579,17 +537,17 @@ async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (count: 
 
 async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
-  if (location.protocol === 'file:') return _apiShows;
-  if (_apiLoaded) return _apiShows;
-  if (_apiLoading) return _apiShows;
+  if (location.protocol === 'file:') return S.apiShows;
+  if (S.apiLoaded) return S.apiShows;
+  if (S.apiLoading) return S.apiShows;
   // [lc-558] 不在首页(如 /v/login)时不预热: 未登录时 /v/list/all 抓空且会被 ensureLibraryIndex 缓存,
   // 导致后续永不重拉(白屏死锁)。改为注册 watcher, 等路由到达首页(/v)再真正拉取。
   const p = location.pathname;
   if (p !== '/v' && p !== '/v/' && p !== '/') {
     watchHomeThenFetch(base);
-    return _apiShows;
+    return S.apiShows;
   }
-  _apiLoading = true;
+  S.apiLoading = true;
 
   try {
     // [lc-561] 主源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确）。
@@ -597,7 +555,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     // onProgress: 抓取过程中实时回传已加载卡片数, 更新骨架"已加载 N 个"数字。
     log('[lc-561] scraping /v/list/all first screen (primary source)...');
     let newShows: any[] = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
-    _diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
+    S.diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
     log('[lc-561] all-page scrape returned', newShows.length, 'cards');
 
     // 兜底: iframe 抓 0 张时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
@@ -611,11 +569,11 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     log('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
 
     if (newShows.length > 0) {
-      _apiShows.length = 0;
-      Array.prototype.push.apply(_apiShows, newShows);
-      _apiLoaded = true;
-      _carouselInited = false;
-      _carouselLoadedButNone = false; // [lc-768] 新一轮拉取，重置「全 STR 失败」标记
+      S.apiShows.length = 0;
+      Array.prototype.push.apply(S.apiShows, newShows);
+      S.apiLoaded = true;
+      S.carouselInited = false;
+      S.carouselLoadedButNone = false; // [lc-768] 新一轮拉取，重置「全 STR 失败」标记
       // [lc-620] 不再先渲染再补详情(会闪两次): 先并行补 item API 详情, 全部就绪后
       // 一次性 completeCarouselProgress → injectCarousel(只渲染一次, 不闪)。
       // 详情补完总超时 2.2s(单条 4s AbortController 太慢, 会拖长骨架), 到时无论
@@ -663,7 +621,7 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
       };
       let revealAttempts = 0;
       const revealOnce = (): void => {
-        if (_carouselRevealed) { log('[lc-622] carousel already revealed, skip re-render'); return; }
+        if (S.carouselRevealed) { log('[lc-622] carousel already revealed, skip re-render'); return; }
         // [lc-624] 横版就绪检查: 竖版兜底不再渲染(用户要求); 未就绪则延迟重试(最多 ~8s)
         const landscapeCount = newShows.filter(isLandscapeBackdrop).length;
         if (landscapeCount === 0 && revealAttempts < 3) {
@@ -678,8 +636,8 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
           const miss = newShows.filter((s: any) => !isLandscapeBackdrop(s)).map((s: any) => `${(s.title || '').substring(0, 12)}${s.strmTag ? '(STRM:' + s.strmTag + ')' : ''}`);
           log('[DIAG] 无横版backdrop的项:', miss.length ? miss.join(', ') : '(无)');
         }
-        _carouselRevealed = true;
-        _carouselInited = false;
+        S.carouselRevealed = true;
+        S.carouselInited = false;
         injectCarousel();
       };
       const revealTimer = setTimeout(() => {
@@ -704,10 +662,10 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
         } else {
           log('[lc-768] 轮播候选取齐', picked.length, '/', CAROUSEL_TARGET, '个可加载海报');
         }
-        _carouselLoadedButNone = picked.length === 0;
+        S.carouselLoadedButNone = picked.length === 0;
         // [lc-768] 用.splice 原地替换(不重新赋值 const 数组)：清除旧候选，写入「可加载海报」的子集
-        _apiShows.length = 0;
-        Array.prototype.push.apply(_apiShows, picked);
+        S.apiShows.length = 0;
+        Array.prototype.push.apply(S.apiShows, picked);
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
         completeCarouselProgress(revealOnce, 'details-ready');
       }).catch((e) => {
@@ -718,12 +676,12 @@ async function fetchShowsViaIPC(base: string): Promise<any[]> {
     } else {
       // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
       log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
-      const txt = _carouselContainer ? _carouselContainer.querySelector('.fnos-ph-text') as HTMLElement | null : null;
+      const txt = S.carouselContainer ? S.carouselContainer.querySelector('.fnos-ph-text') as HTMLElement | null : null;
       if (txt) txt.textContent = '加载失败，请检查媒体库或刷新重试';
     }
   } catch (e) { log('[lc-561] fetch error:', e); }
-  _apiLoading = false;
-  return _apiShows;
+  S.apiLoading = false;
+  return S.apiShows;
 }
 
 /** [lc-558] 登录页/非首页时 fetchShowsViaIPC 提前返回, 此处注册一次性的"到达首页再拉"监听, 打破 pathname 死锁。 */
@@ -733,7 +691,7 @@ function watchHomeThenFetch(base: string): void {
   _carouselWatchArmed = true;
   const trigger = (): void => {
     const hp = location.pathname;
-    if ((hp === '/v' || hp === '/v/' || hp === '/') && !_apiLoaded && !_apiLoading) {
+    if ((hp === '/v' || hp === '/v/' || hp === '/') && !S.apiLoaded && !S.apiLoading) {
       fetchShowsViaIPC(base);
     }
   };
@@ -767,7 +725,7 @@ const _wtsBound = new WeakMap<HTMLElement, (ev: WheelEvent) => void>();
 function wheelToScroll(): void {
   // 关闭开关 → 解绑所有劫持监听，并清除我们附加在飞牛原生横滑箭头上的样式，
   // 把 display/opacity/pointer-events 全部交还 fnOS 原生逻辑（箭头照常显示）。
-  if (!_wheelHScrollEnabled) {
+  if (!S.wheelHScrollEnabled) {
     document.querySelectorAll('[data-ws="1"]').forEach((e) => {
       const he = e as HTMLElement;
       const h = _wtsBound.get(he);
@@ -1087,63 +1045,25 @@ function scrapeLandscapeBackdrops(): Map<string, string> {
   return map;
 }
 
-let _carouselInited = false;
-// [lc-615] 轮播是否已揭示(进度条走完): 详情补完的二次重建只有在已揭示后才执行,
-// 否则会绕过进度条提前出图(用户看到"进度条 20% 就闪出轮播")。
-let _carouselRevealed = false;
-// [lc-937] 是否「离开过首页」: 离开首页(spaNav/原生链接进详情)时置 true, 返回首页后强制干净重建轮播,
-//   重建完成后复位。用于避免 in-home 的 replaceState 反复重建, 同时保证「轮播按钮(spaNav)打开的详情返回首页」必定重建。
-let _leftHome = false;
-let _carouselContainer: HTMLElement | null = null;
-let _carouselUpdatedAt = 0; // 最近更新板块数据就绪(轮播注入)时间戳, 用于标题旁显示更新时间
-let _carouselWrapper: HTMLElement | null = null;
-let _carouselPosterStrip: HTMLElement | null = null; // [lc-439] 右侧竖向海报条
-// 占位只需构建一次: 否则下方 MutationObserver 会在每次占位 DOM 变更后再次调用
-// injectCarousel → 反复清空重建占位 → 渲染线程死循环 → 白屏卡死(见 lc-100)
-let _placeholderInited = false;
-// [lc-561] 骨架加载进度: 抓取过程中实时显示"已加载 N 个", 避免用户干等
-let _carouselProgressEl: HTMLElement | null = null; // 骨架上的数字元素
-let _carouselProgressCount = 0; // 当前已加载卡片数
-// [lc-583] 0~100 长条加载动画: 伪进度递增(0→90%), 数据完成后 completeCarouselProgress 跳 100
-let _carouselProgressTimer: number | null = null; // 进度条动画 interval
-let _carouselBarFill: HTMLElement | null = null;  // 进度条填充元素
-let _carouselPctEl: HTMLElement | null = null;    // 百分比文本元素
-let _carouselStatusEl: HTMLElement | null = null; // [lc-621] 状态文字(加载中/加载完成)
-let _carouselProgressPct = 0;                     // 当前百分比
-// [lc-768] 轮播目标展示数；候选池上限(多于目标，便于 STR/网盘海报失败「往后延」凑齐)
-const CAROUSEL_TARGET = 10;
-const CAROUSEL_SCRAPE_CAP = 18;
-// [lc-768] 详情拉取完成但「可用横版海报」为 0(疑似全部 STR/网盘无法加载) → 主页显示「暂未支持STRM海报」
-let _carouselLoadedButNone = false;
-
-// [lc-876] 样式2/3/4 轮播清理句柄：SPA导航离开/重建前必须清理旧timer/event listener，
-//   否则 progressInterval 继续操作已移除DOM、keydown监听器堆积 → 返回后乱套。
-let _carouselCleanup: (() => void) | null = null; // 当前活跃轮播的统一清理函数
-let _carouselResume: (() => void) | null = null;  // [lc-946] 复用轮播时重启自动轮播的钩子(各 buildCarouselStyleX 注册)
 
 /** [lc-876] 销毁当前轮播的所有 timer + event listener（重建/导航离开前调用）。
- *  各 buildCarouselStyleX 在创建timer/listener时将清理逻辑注册到 _carouselCleanup。 */
+ *  各 buildCarouselStyleX 在创建timer/listener时将清理逻辑注册到 S.carouselCleanup。 */
 function destroyCarousel(): void {
-  if (_carouselCleanup) {
-    try { _carouselCleanup(); } catch { /* ignore */ }
-    _carouselCleanup = null;
+  if (S.carouselCleanup) {
+    try { S.carouselCleanup(); } catch { /* ignore */ }
+    S.carouselCleanup = null;
   }
-  // [lc-946] 注意: 此处不置空 _carouselResume。离开首页(_stopCarouselOffHome→destroyCarousel)后,
+  // [lc-946] 注意: 此处不置空 S.carouselResume。离开首页(_stopCarouselOffHome→destroyCarousel)后,
   //   返回首页需靠它重启自动轮播; 该闭包自带 document.body.contains(container) 守卫, 指向已游离轮播时自动 no-op, 保留安全。
 }
 
 /** [lc-946] 轮播仍健康(挂载+已初始化)时返回首页: 不销毁重建 DOM, 仅重启被 _stopCarouselOffHome 停掉的自动轮播,
- *  避免"返回首页轮播重载 + 海报闪烁/丢失"。钩子由各 buildCarouselStyleX 在创建 timer 时注册到 _carouselResume。 */
+ *  避免"返回首页轮播重载 + 海报闪烁/丢失"。钩子由各 buildCarouselStyleX 在创建 timer 时注册到 S.carouselResume。 */
 function resumeCarousel(): void {
-  if (!(_carouselContainer && document.body.contains(_carouselContainer))) return;
-  if (_carouselResume) { try { _carouselResume(); } catch (e) { log('[lc-946] resumeCarousel error: ' + String(e).substring(0, 80)); } }
+  if (!(S.carouselContainer && document.body.contains(S.carouselContainer))) return;
+  if (S.carouselResume) { try { S.carouselResume(); } catch (e) { log('[lc-946] resumeCarousel error: ' + String(e).substring(0, 80)); } }
 }
 
-// [DIAG] 99% 卡死看门狗状态（仅用于诊断日志，不改变任何行为）
-let _diagStuckTicks = 0;       // 进度条停在 99% 的 tick 计数
-let _diagStuckSince = 0;       // 首次到达 99% 的时间戳
-let _diagStuckLogged = false;  // 看门狗日志是否已输出（只输出一次）
-let _diagLastShows: any[] = []; // [DIAG] 最近一次轮播数据源（供看门狗/异常日志定位；仅诊断用）
 
 // [B 项] 健壮查找"媒体库"section: 原逻辑写死 Tailwind 类名(.relative.flex.flex-col.gap-6 > div)
 // 且要求 strong 含"媒体库", 一旦目标 fnOS 布局的 class/文案不同就 sections found:0 → no target(轮播缺失)。
@@ -1236,8 +1156,8 @@ async function resolveSeasonHref(show: any): Promise<string> {
 }
 
 function injectCarousel(): void {
-  log('injectCarousel called, _carouselInited=', _carouselInited, '_apiShows.length=', _apiShows.length);
-  if (_carouselInited) return;
+  log('injectCarousel called, S.carouselInited=', S.carouselInited, 'S.apiShows.length=', S.apiShows.length);
+  if (S.carouselInited) return;
 
   // [lc-876] 重建前先销毁旧轮播的 timer/event listener，防止泄漏导致返回后乱套
   destroyCarousel();
@@ -1256,8 +1176,8 @@ function injectCarousel(): void {
   // 找"媒体库"section: 首屏用DOM搜索, 重建复用已有wrapper的parent(避免wrapper嵌套)
   let target: HTMLElement | null = null;
   let rebuild = false;
-  if (_carouselWrapper && document.body.contains(_carouselWrapper)) {
-    target = _carouselWrapper.parentElement; // section
+  if (S.carouselWrapper && document.body.contains(S.carouselWrapper)) {
+    target = S.carouselWrapper.parentElement; // section
     rebuild = true;
     log('rebuild: reusing section(parent of existing wrapper)');
   } else {
@@ -1329,39 +1249,39 @@ function injectCarousel(): void {
   }
 
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(骨架 + 加载进度数字), 不让用户干等
-  // 注意: 此处不设 _carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
-  if (_apiShows.length === 0) {
+  // 注意: 此处不设 S.carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
+  if (S.apiShows.length === 0) {
     // [lc-768] 拉取已完成但可用海报为 0(全是 STR/网盘且加载不到) → 主页提示而非骨架死等
-    if (_carouselLoadedButNone) {
-      if (!_placeholderInited) {
+    if (S.carouselLoadedButNone) {
+      if (!S.placeholderInited) {
         log('all candidates unloadable(STR/网盘), showing 暂未支持STRM海报 tip');
         buildStrmUnsupportedTip(target);
-        _placeholderInited = true;
+        S.placeholderInited = true;
       }
       return;
     }
-    // [lc-561] 显示骨架占位(带"已加载 N 个"数字)。_placeholderInited 守卫: 占位只构建一次,
+    // [lc-561] 显示骨架占位(带"已加载 N 个"数字)。S.placeholderInited 守卫: 占位只构建一次,
     // 避免 MutationObserver 反复触发 injectCarousel → 反复清空重建占位 → 死循环(见 lc-100)。
     // 数据到位后 injectCarousel 会清空 section 并重建为真实轮播(占位自然被替换)。
-    if (!_placeholderInited) {
+    if (!S.placeholderInited) {
       log('api not ready, building loading skeleton with progress count');
       buildLoadingPlaceholder(target);
-      _placeholderInited = true;
+      S.placeholderInited = true;
     }
     return;
   }
   // 真实数据到达: 复位占位守卫, 以便将来数据清空时可再次显示占位
-  _placeholderInited = false;
-  _carouselProgressEl = null; // 占位已替换, 数字元素失效
+  S.placeholderInited = false;
+  S.carouselProgressEl = null; // 占位已替换, 数字元素失效
 
-  _carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
-  _carouselUpdatedAt = Date.now(); // 记录"最近更新"板块数据就绪时刻, 供标题旁更新时间显示
-  log('carousel data ready at', new Date(_carouselUpdatedAt).toLocaleString('zh-CN'));
+  S.carouselInited = true; // 仅在真实数据注入后才标记(避免 loading 占位锁死重建)
+  S.carouselUpdatedAt = Date.now(); // 记录"最近更新"板块数据就绪时刻, 供标题旁更新时间显示
+  log('carousel data ready at', new Date(S.carouselUpdatedAt).toLocaleString('zh-CN'));
 
-  // 数据: 只用真实片库(前面 895 行已拦截 _apiShows.length===0 的空数据, 走到这里必有数据)
+  // 数据: 只用真实片库(前面 895 行已拦截 S.apiShows.length===0 的空数据, 走到这里必有数据)
   // 注意: 绝不回退硬编码 demo(用户明确要求不用硬编码)。
-  const shows = _apiShows;
-  log('injecting', shows.length, 'shows (api:', _apiShows.length, ')');
+  const shows = S.apiShows;
+  log('injecting', shows.length, 'shows (api:', S.apiShows.length, ')');
 
   const base = location.origin;
   let currentIdx = 0;
@@ -1369,8 +1289,8 @@ function injectCarousel(): void {
 
   // 统一容器: 重建时复用已有wrapper(保留padding:0 44px), 避免嵌套叠加导致宽度变宽
   let wrapper: HTMLElement;
-  if (rebuild && _carouselWrapper) {
-    wrapper = _carouselWrapper;
+  if (rebuild && S.carouselWrapper) {
+    wrapper = S.carouselWrapper;
     wrapper.innerHTML = ''; // 清空旧container(我们自己的节点, 不影响飞牛DOM), 内部重建
   } else {
     target.innerHTML = ''; // 首屏清空section原内容(媒体库标题+卡片)
@@ -1381,7 +1301,7 @@ function injectCarousel(): void {
     target.style.background = 'transparent';
     wrapper = document.createElement('div');
     wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
-    _carouselWrapper = wrapper;
+    S.carouselWrapper = wrapper;
   }
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
@@ -1393,7 +1313,7 @@ function injectCarousel(): void {
   container.style.opacity = '0';
   container.style.transition = 'opacity .45s ease';
   wrapper.appendChild(container);
-  _carouselContainer = container;
+  S.carouselContainer = container;
   requestAnimationFrame(() => { container.style.opacity = '1'; });
 
   // [lc-781] 样式 2（滑动切换 + 进度条）：早期分支，复用已建好的 container/wrapper，
@@ -1436,7 +1356,7 @@ function injectCarousel(): void {
   posterStrip.className = 'fnos-poster-strip';
   posterStrip.style.cssText = 'width:150px;flex-shrink:0;height:100%;max-height:calc(100vh - 380px);overflow:hidden;display:block;padding:0 8px;background:rgba(255,255,255,.12);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);border-radius:24px;border:none';
   wrapper.appendChild(posterStrip);
-  _carouselPosterStrip = posterStrip;
+  S.carouselPosterStrip = posterStrip;
 
   // 轮播点已移除(lc-441, 用户不需要)
 
@@ -1462,7 +1382,7 @@ function injectCarousel(): void {
     leftEl.appendChild(imgEl);
     const pic = imgUrl(show.backdrop); // 不带?w, 避免与签名path不一致
     const blob = (show as any)._backdropBlob as string | undefined; // [lc-768] 预加载成功的 blob 复用，跳过二次网络请求
-    if (shows === _apiShows && i === 0) log('SLIDE0 src:', (blob || pic).substring(0, 80));
+    if (shows === S.apiShows && i === 0) log('SLIDE0 src:', (blob || pic).substring(0, 80));
     const isSlideStrm = !!show.strmTag;
     const applyLandscapeCheck = () => {
       try {
@@ -1581,7 +1501,7 @@ function injectCarousel(): void {
       // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转(见下方双重判定)。
       setTimeout(() => {
         // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
-        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 导致返回首页时模块重载、S.apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
@@ -1635,8 +1555,8 @@ function injectCarousel(): void {
   });
 
   // [lc-439] 填充右侧竖向海报条：全部10个剧的竖向poster，自动滚动+点击跳转
-  if (_carouselPosterStrip && shows.length > 0) {
-    _carouselPosterStrip.innerHTML = '';
+  if (S.carouselPosterStrip && shows.length > 0) {
+    S.carouselPosterStrip.innerHTML = '';
     const pInner = document.createElement('div');
     pInner.className = 'fnos-ps-inner';
     pInner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;padding:20px 0;position:relative;transition:transform .4s ease';
@@ -1693,11 +1613,11 @@ function injectCarousel(): void {
       });
       pInner.appendChild(item);
     });
-    _carouselPosterStrip.appendChild(pInner);
+    S.carouselPosterStrip.appendChild(pInner);
 
     // [lc-448] 右侧海报不自滚动：选中项自动居中并放大, 与左侧主轮播联动
     function centerPoster(idx: number) {
-      const strip = _carouselPosterStrip;
+      const strip = S.carouselPosterStrip;
       if (!strip) return;
       const target = pInner.children[idx] as HTMLElement | undefined;
       if (!target) return;
@@ -1709,7 +1629,7 @@ function injectCarousel(): void {
     }
 
     // 高亮当前slide对应的海报：选中项放大+不透明并居中, 其余缩小+半透明（goTo 里同步调用）
-    (_carouselPosterStrip as any)._highlight = (idx: number) => {
+    (S.carouselPosterStrip as any)._highlight = (idx: number) => {
       const items = pInner.children;
       for (let k = 0; k < items.length; k++) {
         const el = items[k] as HTMLElement;
@@ -1723,7 +1643,7 @@ function injectCarousel(): void {
   if (infos.length > 0) {
     infos[0].style.opacity = '1';
     infos[0].style.transform = 'translateY(0)';
-    if (_carouselPosterStrip && (_carouselPosterStrip as any)._highlight) (_carouselPosterStrip as any)._highlight(0);
+    if (S.carouselPosterStrip && (S.carouselPosterStrip as any)._highlight) (S.carouselPosterStrip as any)._highlight(0);
   }
 
   function goTo(idx: number) {
@@ -1731,7 +1651,7 @@ function injectCarousel(): void {
     track.style.transform = `translateY(-${idx * 100}%)`;
     infos.forEach((el, j) => { el.style.opacity = j === idx ? '1' : '0'; el.style.transform = j === idx ? 'translateY(0)' : 'translateY(20px)'; });
     // [lc-439] 同步高亮右侧海报条
-    if (_carouselPosterStrip && (_carouselPosterStrip as any)._highlight) (_carouselPosterStrip as any)._highlight(idx);
+    if (S.carouselPosterStrip && (S.carouselPosterStrip as any)._highlight) (S.carouselPosterStrip as any)._highlight(idx);
   }
 
   let timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
@@ -1757,9 +1677,9 @@ function injectCarousel(): void {
 
   /* [lc-408] 异步把右侧文字标题替换为 TMDB 透明 logo（获取成功才替换，否则保留文字） */
   // [lc-409] 记录当前轮播引用，供设置开关即时生效
-  _carouselInfos = infos;
-  _carouselShows = shows;
-  _carouselBase = base;
+  S.carouselInfos = infos;
+  S.carouselShows = shows;
+  S.carouselBase = base;
   applyTitleLogo(base, shows, infos);
 
   log('carousel injected');
@@ -1955,7 +1875,7 @@ function buildCarouselStyle2(
       setTimeout(() => {
         // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
         // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
-        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 导致返回首页时模块重载、S.apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
@@ -2136,14 +2056,14 @@ function buildCarouselStyle2(
   };
   document.addEventListener('visibilitychange', visHandler);
   // [lc-876] 注册清理句柄：SPA导航离开/重建前销毁所有timer + event listener
-  _carouselCleanup = (): void => {
+  S.carouselCleanup = (): void => {
     stopAuto(); // 清 autoTimer + progressInterval
     window.removeEventListener('keydown', keyHandler);
     document.removeEventListener('visibilitychange', visHandler);
     log2('cleanup: style2 timers & listeners destroyed');
   };
   // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
-  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); startAuto(); };
+  S.carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); startAuto(); };
   log2('样式2 轮播注入完成, slides=', slides.length);
 }
 
@@ -2323,7 +2243,7 @@ function buildCarouselStyle3(
       setTimeout(() => {
         // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
         // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
-        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 导致返回首页时模块重载、S.apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
@@ -2439,14 +2359,14 @@ function buildCarouselStyle3(
   const visHandler = (): void => { if (document.hidden) stopAuto(); else resetAuto(); };
   document.addEventListener('visibilitychange', visHandler);
   // [lc-876] 注册清理句柄
-  _carouselCleanup = (): void => {
+  S.carouselCleanup = (): void => {
     stopAuto(); // 清 autoTimer
     window.removeEventListener('keydown', keyHandler);
     document.removeEventListener('visibilitychange', visHandler);
     log3('cleanup: style3 timer & listeners destroyed');
   };
   // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
-  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
+  S.carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
   log3('样式3 堆叠卡片轮播注入完成, cards=', cards.length);
 }
 
@@ -2628,7 +2548,7 @@ function buildCarouselStyle4(
       setTimeout(() => {
         // [lc-941] 仅当 fnOS 确实未接管导航时才兜底整页跳转。
         // 旧逻辑用「返回按钮是否存在」单一判定: 详情页加载慢(>600ms 才出返回键)会误判为未接管 → location.href 整页刷新,
-        // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
+        // 导致返回首页时模块重载、S.apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
@@ -2765,14 +2685,14 @@ function buildCarouselStyle4(
   const visHandler = (): void => { if (document.hidden) stopAuto(); else resetAuto(); };
   document.addEventListener('visibilitychange', visHandler);
   // [lc-876] 注册清理句柄
-  _carouselCleanup = (): void => {
+  S.carouselCleanup = (): void => {
     stopAuto(); // 清 autoTimer
     window.removeEventListener('keydown', keyHandler);
     document.removeEventListener('visibilitychange', visHandler);
     log4('cleanup: style4 timer & listeners destroyed');
   };
   // [lc-946] 复用轮播时重启自动轮播(返回首页不重建 DOM); 同时补回被 cleanup 移除的键盘/可见性监听器(同引用 addEventListener 去重)
-  _carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
+  S.carouselResume = (): void => { if (!document.body.contains(container)) return; window.addEventListener('keydown', keyHandler); document.addEventListener('visibilitychange', visHandler); resetAuto(); };
   log4('样式4 3D旋转木马轮播注入完成, cards=', cards.length);
 }
 
@@ -2850,7 +2770,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   target.style.background = 'transparent';
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
-  _carouselWrapper = wrapper;
+  S.carouselWrapper = wrapper;
 
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
@@ -2872,7 +2792,7 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
-  _carouselContainer = container;
+  S.carouselContainer = container;
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 
@@ -3084,35 +3004,35 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   }
 
   // [lc-621] 伪进度: 前快后慢(参考模拟器增量策略), 每 120ms tick; 数据就绪后 completeCarouselProgress 补 100
-  _carouselBarFill = fillEl;
-  _carouselPctEl = percentEl;
-  _carouselStatusEl = statusEl;
-  _carouselProgressPct = 0;
-  _diagStuckTicks = 0; _diagStuckSince = 0; _diagStuckLogged = false; // [DIAG] 看门狗复位
-  if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  _carouselProgressTimer = window.setInterval(() => {
-    const p = _carouselProgressPct;
+  S.carouselBarFill = fillEl;
+  S.carouselPctEl = percentEl;
+  S.carouselStatusEl = statusEl;
+  S.carouselProgressPct = 0;
+  S.diagStuckTicks = 0; S.diagStuckSince = 0; S.diagStuckLogged = false; // [DIAG] 看门狗复位
+  if (S.carouselProgressTimer) { clearInterval(S.carouselProgressTimer); S.carouselProgressTimer = null; }
+  S.carouselProgressTimer = window.setInterval(() => {
+    const p = S.carouselProgressPct;
     let inc: number;
     if (p < 30) inc = 1.4 + Math.random() * 1.2;       // 前段快
     else if (p < 70) inc = 0.9 + Math.random() * 0.9;  // 中段中速
     else inc = 0.4 + Math.random() * 0.5;              // 后段慢(等待详情补完)
-    _carouselProgressPct = Math.min(99, p + inc);
-    fillEl.style.width = _carouselProgressPct + '%';
-    percentEl.textContent = Math.round(_carouselProgressPct) + '%';
+    S.carouselProgressPct = Math.min(99, p + inc);
+    fillEl.style.width = S.carouselProgressPct + '%';
+    percentEl.textContent = Math.round(S.carouselProgressPct) + '%';
     // [DIAG] 99% 卡死看门狗：进度条封顶 99% 后若 ~15s(≈125 tick @120ms)仍未调用 completeCarouselProgress(跳 100)，记录诊断
-    if (_carouselProgressPct >= 99) {
-      if (_diagStuckTicks === 0) _diagStuckSince = Date.now();
-      _diagStuckTicks++;
-      if (_diagStuckTicks > 125 && !_diagStuckLogged) {
-        _diagStuckLogged = true;
-        const landCnt = (_apiShows || []).filter((s: any) => s && s.backdrop && !/poster-|poster\/|\/poster/i.test(s.backdrop)).length;
-        const strmCnt = (_apiShows || []).filter((s: any) => s && s.strmTag).length;
+    if (S.carouselProgressPct >= 99) {
+      if (S.diagStuckTicks === 0) S.diagStuckSince = Date.now();
+      S.diagStuckTicks++;
+      if (S.diagStuckTicks > 125 && !S.diagStuckLogged) {
+        S.diagStuckLogged = true;
+        const landCnt = (S.apiShows || []).filter((s: any) => s && s.backdrop && !/poster-|poster\/|\/poster/i.test(s.backdrop)).length;
+        const strmCnt = (S.apiShows || []).filter((s: any) => s && s.strmTag).length;
         log('[DIAG][WATCHDOG] 轮播进度卡在 99% 已超 15s，completeCarouselProgress 未触发 → 轮播不会显示。' +
-            ` apiShows=${_apiShows.length} 有横版backdrop=${landCnt} 疑似STRM项数=${strmCnt}` +
-            ` diagLastShows=${_diagLastShows.length}`);
+            ` apiShows=${S.apiShows.length} 有横版backdrop=${landCnt} 疑似STRM项数=${strmCnt}` +
+            ` diagLastShows=${S.diagLastShows.length}`);
       }
     } else {
-      _diagStuckTicks = 0;
+      S.diagStuckTicks = 0;
     }
   }, 120);
 
@@ -3120,12 +3040,12 @@ function buildLoadingPlaceholder(target: HTMLElement): void {
   target.appendChild(wrapper);
 
   // [lc-561] 记录数字元素, 供 fetchShowsViaIPC 抓取过程中实时更新"已加载 N 个"
-  _carouselProgressEl = null; // [lc-583] 已改用长条进度, 数字元素废弃
-  _carouselProgressCount = 0;
+  S.carouselProgressEl = null; // [lc-583] 已改用长条进度, 数字元素废弃
+  S.carouselProgressCount = 0;
 
   // 若真实片库始终未加载(如 NAS 未连接/接口超时), 一段时间后温和提示, 避免"正在加载"永久卡住
   const phTimer = window.setTimeout(() => {
-    if (_apiShows.length === 0 && _carouselContainer === container && document.body.contains(container)) {
+    if (S.apiShows.length === 0 && S.carouselContainer === container && document.body.contains(container)) {
       const txt = container.querySelector('.fnos-ph-text') as HTMLElement | null;
       if (txt) txt.textContent = '加载较慢，请确认 NAS 已连接';
     }
@@ -3143,7 +3063,7 @@ function buildStrmUnsupportedTip(target: HTMLElement): void {
   target.style.background = 'transparent';
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'padding:0 44px;margin-top:0;margin-bottom:0';
-  _carouselWrapper = wrapper;
+  S.carouselWrapper = wrapper;
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.18),rgba(70,50,120,.30));backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none;display:flex;align-items:center;justify-content:center';
   const tip = document.createElement('div');
@@ -3168,31 +3088,31 @@ function buildStrmUnsupportedTip(target: HTMLElement): void {
  *  然后回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
 function completeCarouselProgress(onDone?: () => void, reason?: string): void {
   // [DIAG] 记录触发来源，便于排查「卡在 99%」到底哪条路径没到（revealTimer-8s-timeout / details-ready / details-error）
-  log('[DIAG] completeCarouselProgress 触发, reason=', reason || 'unknown', 'startPct=', Math.round(_carouselProgressPct), 'apiShows=', _apiShows.length);
-  _diagStuckTicks = 0; _diagStuckLogged = false; // [DIAG] 看门狗复位：进度已推进到完成阶段
-  if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
-  const start = _carouselProgressPct;
+  log('[DIAG] completeCarouselProgress 触发, reason=', reason || 'unknown', 'startPct=', Math.round(S.carouselProgressPct), 'apiShows=', S.apiShows.length);
+  S.diagStuckTicks = 0; S.diagStuckLogged = false; // [DIAG] 看门狗复位：进度已推进到完成阶段
+  if (S.carouselProgressTimer) { clearInterval(S.carouselProgressTimer); S.carouselProgressTimer = null; }
+  const start = S.carouselProgressPct;
   const totalMs = 600;
   const stepMs = 30;
   const steps = Math.max(1, Math.ceil(totalMs / stepMs));
   let i = 0;
-  _carouselProgressTimer = window.setInterval(() => {
+  S.carouselProgressTimer = window.setInterval(() => {
     i++;
     const t = i / steps;                       // 0→1
     const eased = 1 - Math.pow(1 - t, 3);      // ease-out: 前快后慢
     const pct = Math.min(100, start + (100 - start) * eased);
-    _carouselProgressPct = pct;
-    if (_carouselBarFill) _carouselBarFill.style.width = pct + '%';
-    if (_carouselPctEl) _carouselPctEl.textContent = Math.round(pct) + '%';
+    S.carouselProgressPct = pct;
+    if (S.carouselBarFill) S.carouselBarFill.style.width = pct + '%';
+    if (S.carouselPctEl) S.carouselPctEl.textContent = Math.round(pct) + '%';
     if (i >= steps) {
-      if (_carouselProgressTimer) { clearInterval(_carouselProgressTimer); _carouselProgressTimer = null; }
+      if (S.carouselProgressTimer) { clearInterval(S.carouselProgressTimer); S.carouselProgressTimer = null; }
       // [lc-627] 强制填满: 取消 transition 直接 100%, 确保条真正满格再切画面
-      if (_carouselBarFill) {
-        _carouselBarFill.style.transition = 'none';
-        _carouselBarFill.style.width = '100%';
+      if (S.carouselBarFill) {
+        S.carouselBarFill.style.transition = 'none';
+        S.carouselBarFill.style.width = '100%';
       }
-      if (_carouselPctEl) _carouselPctEl.textContent = '100%';
-      if (_carouselStatusEl) _carouselStatusEl.textContent = '加载完成';
+      if (S.carouselPctEl) S.carouselPctEl.textContent = '100%';
+      if (S.carouselStatusEl) S.carouselStatusEl.textContent = '加载完成';
       // 延迟 60ms 让满条渲染一帧(骨架替换时用户看到的是满格条), 再回调
       window.setTimeout(() => {
         if (onDone) { try { onDone(); } catch (e) { /* ignore */ } }
@@ -3203,7 +3123,7 @@ function completeCarouselProgress(onDone?: () => void, reason?: string): void {
 
 /** [lc-616] 更新骨架上的"已加载 N 个"数字（[lc-616] 已改 page-loading, 数字废弃, 空操作兼容调用方） */
 function updateCarouselProgress(count: number): void {
-  _carouselProgressCount = count;
+  S.carouselProgressCount = count;
 }
 
 /* 自动从API获取缺失的简介(IPC主进程签名→渲染进程fetch→带cookie鉴权) */
@@ -3285,7 +3205,7 @@ async function resolveShowLogo(show: any, base: string): Promise<string | null> 
 
 function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[]): void {
   // [lc-409] 开关关闭时完全跳过（既不拉取也不替换），保留文字标题
-  if (!_carouselLogoEnabled) return;
+  if (!S.carouselLogoEnabled) return;
   shows.forEach((show, i) => {
     const info = infos[i];
     if (!info) return;
@@ -3443,7 +3363,7 @@ async function saveEditDetail(origin: string, data: any, logoHashPath: string): 
 }
 
 function backfillDetailLogo(): void {
-  if (!_carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
+  if (!S.carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
   if (!isDetailPage()) return;
   const m = location.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
   if (!m) return;
@@ -3535,11 +3455,11 @@ function isPureWhitePng(dataUrl: string): Promise<boolean> {
 
 /** 设置开关变更后即时作用于当前已渲染的轮播：开→拉取 logo 替换；关→还原文字标题 */
 function applyCarouselLogoNow(): void {
-  if (!_carouselInfos.length) return;
-  if (_carouselLogoEnabled) {
-    applyTitleLogo(_carouselBase, _carouselShows, _carouselInfos);
+  if (!S.carouselInfos.length) return;
+  if (S.carouselLogoEnabled) {
+    applyTitleLogo(S.carouselBase, S.carouselShows, S.carouselInfos);
   } else {
-    _carouselInfos.forEach((info) => {
+    S.carouselInfos.forEach((info) => {
       const slide = info.closest('.fnos-slide') as HTMLElement | null;
       const l = slide?.querySelector('.fnos-logo') as HTMLImageElement | null;
       if (l) { l.style.display = 'none'; l.src = ''; }
@@ -3624,7 +3544,7 @@ function applyTvDetailGlass(): void {
   const cards = header.parentElement?.querySelectorAll('.card-root');
   cards?.forEach((card) => {
     const el = card as HTMLElement;
-    if (_detailBoxless) {
+    if (S.detailBoxless) {
       // 关闭背景框：移除全部注入的玻璃样式，回退到 fnOS 原生外观
       el.style.removeProperty('background');
       el.style.removeProperty('backdrop-filter');
@@ -3648,14 +3568,14 @@ function applyTvDetailGlass(): void {
     el.style.setProperty('transition', 'transform .25s ease, box-shadow .25s ease', 'important');
 
     el.addEventListener('mouseenter', () => {
-      if (_detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
+      if (S.detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
       el.style.setProperty('transform', 'translateY(-3px) scale(1.015)', 'important');
       el.style.setProperty('box-shadow',
         '0 10px 32px rgba(91,140,255,.12),0 1px 0 rgba(255,255,255,.6)',
         'important');
     });
     el.addEventListener('mouseleave', () => {
-      if (_detailBoxless) return;
+      if (S.detailBoxless) return;
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-1)',
@@ -3940,7 +3860,7 @@ function findDescArea(header: HTMLElement): HTMLElement | null {
 /** 沉浸式季详情样式表（参照 season-immersive-preview.html 模板）：
  *  Hero 圆角沉浸卡；选集由横向滚动改为「缩略图左 + 信息右」的纵向卡片列表；标题强调。
  *  仅作用于 .fnos-immersive-season（由 applySeasonImmersiveDetail 在季详情页挂到 body）。
- *  与「关闭背景框」(_detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
+ *  与「关闭背景框」(S.detailBoxless) 互斥：开启时仅移除 body 类，还原 fnOS 原生外观。 */
 const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) [lc-908] 从 64:36 调整为用户要求的 60:40 */
 .fnos-immersive-season .fnos-season-2col{
   display:grid !important;
@@ -6514,10 +6434,10 @@ function applySeasonImmersiveDetail(): void {
   //   (embyWall.js:6708) 导致整条沉浸式链路中断、两栏不再建立。必须先挡住。
   if (!document.body) { dlog('applySeasonImmersiveDetail: ⚠️ document.body 尚不存在, 跳过'); return; }
   dlog('applySeasonImmersiveDetail: === 入口 === pathname=' + location.pathname
-    + ' _detailBoxless=' + _detailBoxless
+    + ' S.detailBoxless=' + S.detailBoxless
     + ' body.cls=' + (document.body.className||'').toString().substring(0,80));
   injectImmersiveSeasonStyle();
-  if (_detailBoxless) {
+  if (S.detailBoxless) {
     document.body.classList.remove('fnos-immersive-season');
     unlayoutSeasonTwoPane(); // 还原两栏结构
     return;
@@ -6665,7 +6585,7 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
       const wrap = s.parentElement;
       if (wrap) {
         const w = wrap as HTMLElement;
-        if (_detailBoxless) {
+        if (S.detailBoxless) {
           // 关闭背景框：移除注入的玻璃标签样式，回退到 fnOS 原生标题栏
           w.style.removeProperty('background');
           w.style.removeProperty('backdrop-filter');
@@ -6694,7 +6614,7 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
   const episodeCards = document.querySelectorAll('[data-id="details"]');
   episodeCards.forEach((card) => {
     const el = card as HTMLElement;
-    if (_detailBoxless) {
+    if (S.detailBoxless) {
       // 关闭背景框：移除注入的玻璃卡片样式，回退到 fnOS 原生卡片
       el.style.removeProperty('background');
       el.style.removeProperty('backdrop-filter');
@@ -6718,14 +6638,14 @@ function applySeasonGlassToHeader(header: HTMLElement): void {
     el.style.setProperty('transition', 'transform .28s ease, box-shadow .28s ease', 'important');
 
     el.addEventListener('mouseenter', () => {
-      if (_detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
+      if (S.detailBoxless) return; // 关闭背景框时悬停不再加玻璃阴影
       el.style.setProperty('transform', 'translateY(-5px) scale(1.025)', 'important');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-3)',
         'important');
     });
     el.addEventListener('mouseleave', () => {
-      if (_detailBoxless) return;
+      if (S.detailBoxless) return;
       el.style.removeProperty('transform');
       el.style.setProperty('box-shadow',
         'var(--fnos-detail-shadow-2)',
@@ -6911,7 +6831,7 @@ function applyDetailLiquidGlass(): void {
     _lastEntryLogTs = _now;
     dlog('applyDetailLiquidGlass: === 入口 === pathname=' + location.pathname
       + ' isDetailPage=' + isDetailPage() + ' _detailGlassInited=' + _detailGlassInited
-      + ' _detailBoxless=' + _detailBoxless + ' 已有2col=' + _has2col);
+      + ' S.detailBoxless=' + S.detailBoxless + ' 已有2col=' + _has2col);
   }
   // [lc-906] 换页(含 season→season 直接切换)时重置季页 observer 稳态/年份缓存, 保证新页面重新灵敏处理
   if (location.href !== _lastDetailHref) { _lastDetailHref = location.href; resetSeasonObsState(); }
@@ -6941,7 +6861,7 @@ function applyDetailLiquidGlass(): void {
   //   并统一启用 ensureFullscreenBackdrop —— 保留原本只属于 tv/movie 页的全屏模糊海报底图与大渐变遮罩。
   applySeasonImmersiveDetail();
   // [lc-907] 「关闭背景框」开关: 开启(恢复 fnOS 原生外观)时不铺全屏底图、不动导航栏, 与季页原逻辑一致
-  if (_detailBoxless) {
+  if (S.detailBoxless) {
     removeFullscreenBackdrop();
   } else {
     applyDetailNavImmersive();  // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
@@ -6955,7 +6875,6 @@ function applyDetailLiquidGlass(): void {
  *  用 CSS 变量(--fnos-ui-*) 驱动所有自建设备 UI, html.dark 类切换即整体换肤(含已打开面板实时生效). */
 type UiThemeMode = 'light' | 'dark' | 'system';
 const UI_THEME_KEY = 'fnos-ui-theme';
-let _refreshThemeSeg: (() => void) | null = null; // 设置面板内分段控件的刷新回调
 
 function getUiTheme(): UiThemeMode {
   try {
@@ -6998,7 +6917,7 @@ function applyThemeToFnos(isDark: boolean): void {
 /** 应用当前 UI 主题偏好(含已打开面板分段控件刷新) */
 function applyUiTheme(): void {
   applyThemeToFnos(getEffectiveDark());
-  if (_refreshThemeSeg) { try { _refreshThemeSeg(); } catch (e) {} }
+  if (S.refreshThemeSeg) { try { S.refreshThemeSeg(); } catch (e) {} }
 }
 
 /** 设置并持久化 UI 主题(供开关/分段控件调用) */
@@ -8523,16 +8442,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     swHide.addEventListener('change', () => { log('[开关保存] swHide=' + swHide.checked); ipcRenderer.invoke('settings:set-hide-play', swHide.checked).catch((e) => log('set-hide-play failed', e)); });
     swNas.addEventListener('change', () => { log('[开关保存] swNas=' + swNas.checked); ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked).catch((e) => log('set-nas-proxy failed', e)); });
     swBoxless.addEventListener('change', () => {
-      _detailBoxless = swBoxless.checked;
+      S.detailBoxless = swBoxless.checked;
       log('[开关保存] swBoxless=' + swBoxless.checked);
       ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked).catch((e) => log('set-detail-boxless failed', e));
       // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
       if (isDetailPage()) applyDetailLiquidGlass();
     });
     // 鼠标滚轮横向滚动：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
-    swWheel.checked = _wheelHScrollEnabled;
+    swWheel.checked = S.wheelHScrollEnabled;
     swWheel.addEventListener('change', () => {
-      _wheelHScrollEnabled = swWheel.checked;
+      S.wheelHScrollEnabled = swWheel.checked;
       log('[开关保存] swWheel=' + swWheel.checked);
       ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked).catch((e) => log('set-wheel-hscroll failed', e));
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
@@ -8555,7 +8474,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       b.dataset.mode = mode;
       b.style.cssText = 'border:none;cursor:pointer;font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:7px;'
         + 'background:transparent;color:var(--fnos-ui-btn-text);transition:all .15s;white-space:nowrap;';
-      b.addEventListener('click', (e: Event) => { e.stopPropagation(); setUiTheme(mode); if (_refreshThemeSeg) _refreshThemeSeg(); });
+      b.addEventListener('click', (e: Event) => { e.stopPropagation(); setUiTheme(mode); if (S.refreshThemeSeg) S.refreshThemeSeg(); });
       seg.appendChild(b);
       themeBtns.push(b);
     });
@@ -8567,7 +8486,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         b.style.color = on ? '#fff' : 'var(--fnos-ui-btn-text)';
       });
     };
-    _refreshThemeSeg = refreshThemeSeg;
+    S.refreshThemeSeg = refreshThemeSeg;
     refreshThemeSeg();
     themeRow.appendChild(themeLabel);
     themeRow.appendChild(seg);
@@ -9826,7 +9745,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // 用户点击选择数据源：写盘 + 同步内存 + 刷新 UI
     const setDs = (val: 'tmdb' | 'douban'): void => {
-      _hotSource = val;
+      S.hotSource = val;
       try { ipcRenderer.invoke('settings:set-hot-source', val).catch(() => {}); } catch { /* ignore */ }
       reflectDs(val);
     };
@@ -9837,15 +9756,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secBodyTmdb.appendChild(doubanHint);
 
     // 初始状态：异步从「磁盘真值」回填 UI（不写盘！）
-    // 关键修复：此前这里用同步 setDs(_hotSource)，而 _hotSource 要到 settings:get 异步回填(行55)才就绪，
-    // 构建期若早于回填执行，_hotSource 仍是默认 'douban'，会把磁盘上已存的 'tmdb' 错误写回 'douban'，
+    // 关键修复：此前这里用同步 setDs(S.hotSource)，而 S.hotSource 要到 settings:get 异步回填(行55)才就绪，
+    // 构建期若早于回填执行，S.hotSource 仍是默认 'douban'，会把磁盘上已存的 'tmdb' 错误写回 'douban'，
     // 表现为「选了 TMDB → 关掉设置/导航后变回豆瓣」。改为只读磁盘真值 reflect，杜绝启动期 clobber。
     try {
       ipcRenderer.invoke('settings:get-hot-source').then((s: string) => {
-        _hotSource = (s === 'tmdb') ? 'tmdb' : 'douban';
-        reflectDs(_hotSource);
-      }).catch(() => { reflectDs(_hotSource); });
-    } catch { reflectDs(_hotSource); }
+        S.hotSource = (s === 'tmdb') ? 'tmdb' : 'douban';
+        reflectDs(S.hotSource);
+      }).catch(() => { reflectDs(S.hotSource); });
+    } catch { reflectDs(S.hotSource); }
 
     // ===== 分组: TMDB 免梯子直连（实验）（从账号同步的 TMDB API Key 区迁出，独立放入「插件」标签页）=====
     const secTmdbDirect = section('TMDB 免梯子直连（实验）');
@@ -10991,9 +10910,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     swLogoSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     swLogoRow.appendChild(swLogoSpan); swLogoRow.appendChild(swLogo);
     secBodyCarousel.appendChild(swLogoRow);
-    swLogo.checked = _carouselLogoEnabled;
+    swLogo.checked = S.carouselLogoEnabled;
     swLogo.addEventListener('change', () => {
-      _carouselLogoEnabled = swLogo.checked;
+      S.carouselLogoEnabled = swLogo.checked;
       ipcRenderer.invoke('settings:set-carousel-logo', swLogo.checked);
       // 立即对当前已渲染轮播生效（开→拉取 logo 替换；关→还原文字标题）
       applyCarouselLogoNow();
@@ -11253,13 +11172,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
         swBoxless.checked = !!s.detailBoxless;
-        _detailBoxless = !!s.detailBoxless;
-        // [lc-418] 补回滚轮开关回填：此前只在构建期按 _wheelHScrollEnabled 赋值,
+        S.detailBoxless = !!s.detailBoxless;
+        // [lc-418] 补回滚轮开关回填：此前只在构建期按 S.wheelHScrollEnabled 赋值,
         // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
         swWheel.checked = !!s.wheelHScroll;
-        _wheelHScrollEnabled = !!s.wheelHScroll;
+        S.wheelHScrollEnabled = !!s.wheelHScroll;
         swLogo.checked = !!s.carouselLogoEnabled;
-        _carouselLogoEnabled = !!s.carouselLogoEnabled;
+        S.carouselLogoEnabled = !!s.carouselLogoEnabled;
         // [lc-418] 诊断日志：面板每次打开记录开关回填值, 便于核对"配置文件 vs 面板显示"是否一致
         log('[开关回填] swProxy=' + swProxy.checked + ' swHide=' + swHide.checked + ' swNas=' + swNas.checked
           + ' swBoxless=' + swBoxless.checked + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
@@ -12002,39 +11921,39 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   // [lc-889→lc-937→lc-939] 返回首页时强制重注入轮播。
   //   轮播详情按钮经 spaNav(pushState+手动dispatch popstate) 导航后, fnOS 视图栈可能不一致:
   //   返回首页时旧轮播可能「仍挂载却处于坏状态」(或不挂载), 旧守卫
-  //   `if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return;`
+  //   `if (S.carouselContainer && document.body.contains(S.carouselContainer) && S.carouselInited) return;`
   //   会令其永不重建 → 海报不显示(这正是"轮播按钮打开的详情返回后图片不加载"的根因;
   //   而原生链接路径 A 落地 fnOS 状态一致, 重建成功, 故正常)。
   //   现改为三级策略, 确保两条路径返回首页都能正确重建并显示横版海报(base64 data URL, 与导航无关):
-  //   ② 若注入的 _carouselWrapper 仍挂载(fnOS 缓存了含轮播的 home DOM), 直接复用它重建 —— 不依赖 findMediaLibrarySection;
+  //   ② 若注入的 S.carouselWrapper 仍挂载(fnOS 缓存了含轮播的 home DOM), 直接复用它重建 —— 不依赖 findMediaLibrarySection;
   //   ③ 若 wrapper 已游离(fnOS 重渲染了 home), 移除复位后重试 findMediaLibrarySection(上限 ~1.5s), 命中即建;
-  //   ④ 若 _apiShows 为空(整页重载), 重置 _apiLoaded 重新拉取。
+  //   ④ 若 S.apiShows 为空(整页重载), 重置 S.apiLoaded 重新拉取。
   //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
     // [lc-946] 轮播仍健康(已挂载+已初始化)→ 直接复用, 绝不销毁重建(根治"返回首页轮播重载/海报丢失")。
-    //   仅重启被 _stopCarouselOffHome 停掉的自动轮播(钩子由各样式注册到 _carouselResume), DOM/海报原样保留。
-    //   此前的 _leftHome 强制重建是 lc-941 整页刷新根因的临时补丁, lc-941 已修复根因, 不再需要, 反而会引回"重载"。
-    const healthy = !!(_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited);
-    if (healthy) { _leftHome = false; resumeCarousel(); return; }
-    _leftHome = false; // 本次返回/重建后复位
+    //   仅重启被 _stopCarouselOffHome 停掉的自动轮播(钩子由各样式注册到 S.carouselResume), DOM/海报原样保留。
+    //   此前的 S.leftHome 强制重建是 lc-941 整页刷新根因的临时补丁, lc-941 已修复根因, 不再需要, 反而会引回"重载"。
+    const healthy = !!(S.carouselContainer && document.body.contains(S.carouselContainer) && S.carouselInited);
+    if (healthy) { S.leftHome = false; resumeCarousel(); return; }
+    S.leftHome = false; // 本次返回/重建后复位
     // ① 清理旧 timer/listener
     try { destroyCarousel(); } catch (_) { /* ignore */ }
     // ② 复用仍挂载的轮播 wrapper(fnOS 返回首页时若缓存了含轮播的 home DOM, 旧 wrapper 仍挂载):
     //   直接复用它重建, 完全不依赖 findMediaLibrarySection —— 这是「spaNav 返回后媒体库区块找不到」时仍能保住轮播的关键。
-    if (_carouselWrapper && document.body.contains(_carouselWrapper)) {
-      _carouselInited = false;
-      _carouselRevealed = true;
-      injectCarousel(); // rebuild 分支: 复用 _carouselWrapper(清空 innerHTML 重建)
+    if (S.carouselWrapper && document.body.contains(S.carouselWrapper)) {
+      S.carouselInited = false;
+      S.carouselRevealed = true;
+      injectCarousel(); // rebuild 分支: 复用 S.carouselWrapper(清空 innerHTML 重建)
       log('ensureHomepageEnhanced: 复用已挂载的轮播 wrapper 重建');
       return;
     }
     // ③ wrapper 已游离(返回时 fnOS 重新渲染了 home): 移除并复位, 再经 findMediaLibrarySection 重试挂载
-    if (_carouselWrapper) { try { _carouselWrapper.remove(); } catch (_) { /* ignore */ } }
-    _carouselContainer = null;
-    _carouselWrapper = null;
-    _carouselInited = false;
-    _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
+    if (S.carouselWrapper) { try { S.carouselWrapper.remove(); } catch (_) { /* ignore */ } }
+    S.carouselContainer = null;
+    S.carouselWrapper = null;
+    S.carouselInited = false;
+    S.carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
     // ②' 重试注入: 返回首页时 fnOS 可能仍在(重新)渲染媒体库区块, 一次 inject 可能找不到 section;
     //   多次重试, 命中即建, 上限 ~1.5s 后仍无则放弃并告警(避免无限重试)。
     let _tries = 0;
@@ -12049,16 +11968,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         log('[lc-939] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建; diag headings=' + heads + ' knownLayoutDivs=' + known + ' pathname=' + location.pathname);
         return;
       }
-      const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
-      log('[lc-939] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
+      const diagShows = (S.apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
+      log('[lc-939] ensureHomepageEnhanced 重建前 S.apiShows.len=', S.apiShows.length, 'sample=', JSON.stringify(diagShows));
       injectCarousel(); // 用当前缓存(含 base64 data URL 横版主图), 无网络重拉
       log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新)');
     };
     rebuild();
-    // ④ 数据兜底: 若整页重载等导致 _apiShows 为空(无缓存), 重新拉取(内部 revealOnce 会渲染)
-    if (_apiShows.length === 0) {
-      _apiLoaded = false;      // 解除"只拉一次"守卫, 允许重拉
-      _carouselRevealed = false; // 允许 fetchShowsViaIPC 内部 revealOnce 重新渲染
+    // ④ 数据兜底: 若整页重载等导致 S.apiShows 为空(无缓存), 重新拉取(内部 revealOnce 会渲染)
+    if (S.apiShows.length === 0) {
+      S.apiLoaded = false;      // 解除"只拉一次"守卫, 允许重拉
+      S.carouselRevealed = false; // 允许 fetchShowsViaIPC 内部 revealOnce 重新渲染
       fetchShowsViaIPC(location.origin).then(() => {
         // 内部 revealOnce 处理渲染, 无需此处再 inject
       }).catch(e => log('[lc-939] ensureHomepageEnhanced 重新拉取异常:', e));
@@ -12101,7 +12020,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       //   仅当 newHref 非空(空 url 表示沿用当前路径, 不算离开)才判定。
       if ((prevPath === '/v' || prevPath === '/v/') && newHref) {
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
-        if (np !== '/v' && np !== '/v/') _leftHome = true;
+        if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
       pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
     };
@@ -12111,10 +12030,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
       logNav('replaceState');
-      // [lc-937] 同 pushState: 离开首页时标记 _leftHome(空 url 不算离开)
+      // [lc-937] 同 pushState: 离开首页时标记 S.leftHome(空 url 不算离开)
       if ((prevPath === '/v' || prevPath === '/v/') && newHref) {
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
-        if (np !== '/v' && np !== '/v/') _leftHome = true;
+        if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
       pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
     };
@@ -12161,13 +12080,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
   // [lc-625] 不再无条件重建: fetchShowsViaIPC 内部(lc-624)详情就绪→revealOnce 统一渲染。
-  //   ⚠️ 此 .then 在 fetchShowsViaIPC 同步返回后立即执行(不等详情), 若用 !_carouselInited 判断
+  //   ⚠️ 此 .then 在 fetchShowsViaIPC 同步返回后立即执行(不等详情), 若用 !S.carouselInited 判断
   //   必为 true(此时 revealOnce 还没跑) → 会用未补详情的竖版数据直接渲染 → 进度条 20% 就出图!
-  //   修复: 仅当 _carouselRevealed(内部已渲染完成) 才允许兜底重建; 未完成则交给内部 revealOnce。
+  //   修复: 仅当 S.carouselRevealed(内部已渲染完成) 才允许兜底重建; 未完成则交给内部 revealOnce。
   fetchShowsViaIPC(base).then(() => {
-    if (_apiShows.length === 0) { log('API empty'); return; }
-    log('got', _apiShows.length, 'shows from API (carousel revealed by fetchShowsViaIPC)');
-    if (!_carouselInited && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
+    if (S.apiShows.length === 0) { log('API empty'); return; }
+    log('got', S.apiShows.length, 'shows from API (carousel revealed by fetchShowsViaIPC)');
+    if (!S.carouselInited && S.carouselRevealed) { S.carouselInited = false; injectCarousel(); }
   }).catch(e => log('fetch error:', e));
 
   // 3) 定时自动刷新轮播内容(无需退出重开):
@@ -12177,19 +12096,19 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //    [lc-699] 抽成 refreshCarouselPosters() 供"自动定时"与"手动刷新按钮"共用;
   //    间隔由 5 分钟改为 10 分钟(启动软件后每 10 分钟刷一次首页海报)。
   function refreshCarouselPosters(): void {
-    if (_apiLoading) return;
+    if (S.apiLoading) return;
     if (document.hidden) return; // 后台标签页跳过(iframe/fetch 会被浏览器节流, 必然失败/超时)
-    if (!_carouselContainer || !document.body.contains(_carouselContainer)) return; // 仅首页可见时刷新
-    _apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
-    _carouselRevealed = false; // [lc-625] 允许自动刷新后内部 revealOnce 重新渲染
+    if (!S.carouselContainer || !document.body.contains(S.carouselContainer)) return; // 仅首页可见时刷新
+    S.apiLoaded = false; // 解除"只拉一次"守卫, 允许重拉
+    S.carouselRevealed = false; // [lc-625] 允许自动刷新后内部 revealOnce 重新渲染
     const base = location.origin;
     log('carousel refresh: re-fetching');
     fetchShowsViaIPC(base).then(() => {
-      if (_apiShows.length === 0) return;
-      log('carousel refresh: got', _apiShows.length, 'shows');
-      // [lc-625] 兜底: 内部 revealOnce 已渲染则跳过(自动刷新时 _carouselRevealed 已重置为 false,
+      if (S.apiShows.length === 0) return;
+      log('carousel refresh: got', S.apiShows.length, 'shows');
+      // [lc-625] 兜底: 内部 revealOnce 已渲染则跳过(自动刷新时 S.carouselRevealed 已重置为 false,
       //   内部会重新渲染; 此处仅防内部异常未渲染时的兜底)
-      if (!_carouselInited && _carouselRevealed) { _carouselInited = false; injectCarousel(); }
+      if (!S.carouselInited && S.carouselRevealed) { S.carouselInited = false; injectCarousel(); }
     }).catch(e => log('carousel refresh error:', e));
   }
   const CAROUSEL_REFRESH_MS = 10 * 60 * 1000;
@@ -12220,40 +12139,40 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     clearTimeout(_wtsTimer);
     _wtsTimer = window.setTimeout(wheelToScroll, 350);
     if (!_isHomePath()) return; // [lc-906] 非首页: 不做任何轮播重建, 只保留横滑滚轮
-    if (_carouselContainer && !document.body.contains(_carouselContainer)) {
+    if (S.carouselContainer && !document.body.contains(S.carouselContainer)) {
       log('carousel lost, re-inject');
       destroyCarousel(); // [lc-876] 清理旧timer/listener再重建
-      _carouselContainer = null;
-      _carouselInited = false;
+      S.carouselContainer = null;
+      S.carouselInited = false;
     }
     // [lc-623] 数据已到达但未 reveal(详情补完流程进行中)时不抢先渲染——
     // 否则 MutationObserver 会用竖版 backdrop 渲染一次, 之后 revealOnce 再渲染横版
-    // → '先竖版后横版'闪屏。只有骨架阶段(_apiShows 空)或已 reveal 后才允许注入。
-    if (!_carouselInited && !(_apiLoaded && !_carouselRevealed)) injectCarousel();
+    // → '先竖版后横版'闪屏。只有骨架阶段(S.apiShows 空)或已 reveal 后才允许注入。
+    if (!S.carouselInited && !(S.apiLoaded && !S.carouselRevealed)) injectCarousel();
   }).observe(document.body, { childList: true, subtree: true });
 
   setInterval(() => {
     wheelToScroll();
     if (!_isHomePath()) return; // [lc-906] 同上: 非首页不折腾轮播
-    if (_carouselContainer && !document.body.contains(_carouselContainer)) {
+    if (S.carouselContainer && !document.body.contains(S.carouselContainer)) {
       log('watchdog: carousel lost');
       destroyCarousel(); // [lc-876] 清理旧timer/listener
-      _carouselContainer = null;
-      _carouselInited = false;
+      S.carouselContainer = null;
+      S.carouselInited = false;
       injectCarousel();
     }
   }, 5000);
 
   // [lc-935][DIAG] 暴露内部状态到 window, 便于 DevTools 控制台直接检查(无需改源码)
   (window as any)._fntvDiag = {
-    get apiShows() { return _apiShows; },
-    get apiLoaded() { return _apiLoaded; },
-    get carouselInited() { return _carouselInited; },
-    get carouselRevealed() { return _carouselRevealed; },
-    get carouselContainer() { return _carouselContainer; },
-    get leftHome() { return _leftHome; },
+    get apiShows() { return S.apiShows; },
+    get apiLoaded() { return S.apiLoaded; },
+    get carouselInited() { return S.carouselInited; },
+    get carouselRevealed() { return S.carouselRevealed; },
+    get carouselContainer() { return S.carouselContainer; },
+    get leftHome() { return S.leftHome; },
     get onHome() { return /^\/v\/?($|\?|#)/.test(location.pathname); },
-    get carouselWrapper() { return _carouselWrapper; },
+    get carouselWrapper() { return S.carouselWrapper; },
     get mediaLibrarySectionFound() { return !!findMediaLibrarySection(); },
     // [lc-940] 手动强制重建轮播: 若复现「路径B返回首页不显示」后调用它仍修不好 → 是重建逻辑/数据问题;
     //   若调用后修好了 → 是「返回首页未触发重建」(触发器问题), 二者对症不同。
@@ -12262,16 +12181,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     rebuildSnapshot: () => ({
       pathname: location.pathname,
       onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
-      leftHome: _leftHome,
-      apiShowsLen: (_apiShows || []).length,
-      apiShowsWithBlob: (_apiShows || []).filter((s: any) => !!s._backdropBlob).length,
-      carouselInited: _carouselInited,
-      carouselContainerAttached: !!(_carouselContainer && document.body.contains(_carouselContainer)),
-      carouselWrapperAttached: !!(_carouselWrapper && document.body.contains(_carouselWrapper)),
+      leftHome: S.leftHome,
+      apiShowsLen: (S.apiShows || []).length,
+      apiShowsWithBlob: (S.apiShows || []).filter((s: any) => !!s._backdropBlob).length,
+      carouselInited: S.carouselInited,
+      carouselContainerAttached: !!(S.carouselContainer && document.body.contains(S.carouselContainer)),
+      carouselWrapperAttached: !!(S.carouselWrapper && document.body.contains(S.carouselWrapper)),
       mediaLibrarySectionFound: !!findMediaLibrarySection(),
       isModalOpen: isModalOpen(),
     }),
-    dumpBackdropState: () => (_apiShows || []).map((s: any) => ({
+    dumpBackdropState: () => (S.apiShows || []).map((s: any) => ({
       t: (s.title || '').substring(0, 10),
       hasBlob: !!s._backdropBlob,
       blobHead: (s._backdropBlob || '').substring(0, 50),
