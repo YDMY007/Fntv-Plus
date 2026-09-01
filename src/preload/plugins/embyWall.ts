@@ -877,19 +877,46 @@ async function resolveShowBackdrop(show: any, base: string): Promise<string | nu
   return b;
 }
 
-// [lc-933] 统一「横版主图」渲染(供样式 2/3/4 共用):
+// [lc-935] 统一「横版主图」渲染(供样式 2/3/4 共用):
 //   ① 优先复用首拉时已校验横版的 _backdropBlob —— 零网络, 且彻底规避 s.backdrop 二次拉取时
 //     可能解析成竖版/错位图(这正是 [lc-932] 移除 revalidateBackdropsOnReturn 后, 返回首页出现
 //     「轮播错乱 / 竖屏海报」的根因: 同名 URL 二次拉取返回了不同(竖版/张冠李戴)的图);
-//   ② 仅在无 blob 时回退 fetchImageAuth(s.backdrop), 且加载后做横版校验, 竖版一律不显示。
+//   ② 竞态安全网(lc-935): 设 blob 后启动 probe Image 检测其是否仍可加载;
+//      若 blob 失效(onerror/超时), 自动 fallback 到 fetchImageAuth(s.backdrop)+横版校验。
+//      这解决了「返回首页重建轮播时旧 DOM 已销毁 → blob 底层数据可能被回收 → 有URL字符串但图片不显示」的问题。
+//   ③ 完全无 blob 时(首屏数据未就绪等): 直接走 fetch fallback。
 function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): void {
   const blob = show && (show as any)._backdropBlob as string | undefined;
-  if (blob) { target.style.backgroundImage = `url("${blob}")`; return; }
+  const title = (show && (show as any).title || '').substring(0, 10);
+  if (blob) {
+    // 先设 blob(零延迟显示), 同时启动 probe 检测有效性
+    target.style.backgroundImage = `url("${blob}")`;
+    // probe: 若 blob URL 已失效(底层 blob 数据被 GC 回收等), onerror 触发 fallback
+    const probe = new Image();
+    const probeTo = window.setTimeout(() => {
+      // probe 超时(3s 未回调): blob 可能卡住了, 启动 fetch 兜底
+      log('[lc-935] backdrop blob probe 超时, 启动 fetch fallback:', title);
+      startFetchFallback(show, target, base, title);
+    }, 3000);
+    probe.onload = () => { clearTimeout(probeTo); }; // blob 有效 → 无需操作
+    probe.onerror = () => {
+      clearTimeout(probeTo);
+      log('[lc-935] backdrop blob 失效(onerror), 启动 fetch fallback:', title, blob.substring(0, 60));
+      startFetchFallback(show, target, base, title);
+    };
+    probe.src = blob;
+    return;
+  }
   if (show && (show as any)._backdropIsPortrait) return; // 已知竖版 → 不拉(保留渐变兜底)
+  startFetchFallback(show, target, base, title);
+}
+
+/** [lc-935] applyCarouselBackdrop 的 fetch fallback: 拉 s.backdrop + 横版校验, 成功则写目标背景 */
+function startFetchFallback(show: any, target: HTMLElement, base: string, title: string): void {
   const p = (show && (show as any).backdrop) || '';
   if (!p) return;
   const pic = p.startsWith('http') || p.startsWith('/v/api/') ? p : `${base}/v/api/v1/${p}`;
-  fetchImageAuth(pic, { label: 'cb:' + ((show && (show as any).title) || '').substring(0, 8), isStrm: !!(show && (show as any).strmTag) }).then((b) => {
+  fetchImageAuth(pic, { label: 'cb:' + title, isStrm: !!(show && (show as any).strmTag) }).then((b) => {
     if (!b) return;
     // 横版校验: 竖版不显示(避免「竖屏海报」), 横版才上背景
     const im = new Image();
