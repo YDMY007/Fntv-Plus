@@ -4276,7 +4276,11 @@ function findEpisodeSectionHeading(): { head: HTMLElement; sel: string } | null 
 
 /** [lc-917] 判断元素是否处于「不可见」子树: 任一祖先 display:none, 或带 Tailwind hidden / fnOS 路由缓存 --cache 类。
  *  根因: fnOS 路由缓存会把旧页塞进 trim-ui__cache-outlet--cache ... hidden(display:none) 副本,
- *  两栏若建在那里会整块不可见(computed style 仍报 grid, 但 getBoundingClientRect 全 0, 表现为"选集占满整宽")。 */
+ *  两栏若建在那里会整块不可见(computed style 仍报 grid, 但 getBoundingClientRect 全 0, 表现为"选集占满整宽")。
+ *  [lc-922] 修复: 原 /\bhidden\b/ 正则会误匹配 overflow-hidden / overflow-y-hidden / overflow-x-hidden
+ *   等 Tailwind 工具类(它们的 className 里包含 'hidden' 子串, 但不是 display:none), 导致详情页几乎所有
+ *   容器都被误判为「隐藏」→ findSeasonEpParent 走标题路径时永远命中"隐藏副本"返回 null, 两栏永不建立。
+ *   改为按空白拆分类名后精确匹配独立的 'hidden' 类名(仅 Tailwind 的 .hidden { display:none } 才算)。 */
 function isHiddenByAncestor(el: HTMLElement | null): boolean {
   if (!el) return true;
   let p: HTMLElement | null = el;
@@ -4284,7 +4288,13 @@ function isHiddenByAncestor(el: HTMLElement | null): boolean {
     const cs = getComputedStyle(p);
     if (cs.display === 'none') return true;
     const cls = (p.className || '').toString();
-    if (/\bhidden\b/.test(cls) || /--cache\b/.test(cls)) return true;
+    const classes = cls.split(/\s+/);
+    // [lc-922] 精确匹配独立的 'hidden' Tailwind 类(display:none), 排除 overflow-hidden 等误匹配
+    if (classes.indexOf('hidden') >= 0) return true;
+    // fnOS 路由缓存的隐藏 outlet: trim-ui__cache-outlet--cache (含 --cache 类, 排除 --exclude)
+    for (let i = 0; i < classes.length; i++) {
+      if (classes[i].indexOf('--cache') >= 0 && classes[i].indexOf('--exclude') < 0) return true;
+    }
     p = p.parentElement;
   }
   return false;
