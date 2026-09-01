@@ -4425,78 +4425,71 @@ function findSeasonEpParent(): HTMLElement | null {
  *  而它被 600ms 巡检定时器与 observer 高频调用 → 累积成显著开销。找到后缓存, 仅当节点脱离 DOM 或
  *  内部已无演员链接时才重新定位(换页由 resetSeasonObsState 清空)。 */
 let _castParentCache: HTMLElement | null = null;
-/** 找「演职人员」容器：优先 person 链接(兼容 hash 路由 #/v/person/), 兜底头像链接共同祖先。
+/** [lc-921] findSeasonCastParent 上次命中的路线(仅用于诊断, 确认是"精准结构抓取"而非标题文字匹配) */
+let _castLastRoute = '';
+/** 找「演职人员」容器。
  *  [lc-920] 重写: 旧实现仅匹配 a[href^="/v/person/"], 而 fnOS SPA 用 hash 路由(#/v/person/xxx)导致
  *   整批漏掉 → personLinkCount 恒为 0、右栏演员整块消失。现改 includes('/v/person/') 兼容两种路由;
- *   并新增"全文档 ≥4 头像 <a> → 取最小共同祖先"兜底, 只要 fnOS 渲染了演员头像行就能命中, 不依赖标题文本/链接格式。 */
+ *  [lc-921] 进一步去除「标题文字匹配」(原路径1/路径4 用 /演职|演员|配音|声优|cast|staff|…/ 扫描分区标题),
+ *   改为完全由「真实数据」定位: 演员数据是「人物页链接(/v/person/)」或「头像人物卡(含 <img> + 短名字)」,
+ *   直接以这些数据本体反推其所在容器, 不再读任何分区标题文本 → 精准、无歧义、不会误命中其它区块。 */
 function findSeasonCastParent(): HTMLElement | null {
   const PERSON_SEL = 'a[href*="/v/person/"]';
-  const isCastAnchor = (a: Element): boolean => {
-    const href = a.getAttribute('href') || '';
-    return href.includes('/v/person/') || a.querySelector('img') !== null;
-  };
-  // 缓存命中: 容器仍在 DOM 且仍含演员锚点
+  // 缓存命中: 容器仍在 DOM 且仍含演员链接(路线A 数据仍在)
   if (_castParentCache && document.body.contains(_castParentCache)
       && _castParentCache.querySelectorAll(PERSON_SEL).length >= 1) {
     return _castParentCache;
   }
-  // 路径1: 含"演员/演职/配音/声优"等关键词的标题 → 向上找含 person 链接或 ≥4 头像链接的祖先
-  const heads = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
-  for (const el of heads) {
-    if (el.children.length > 0) continue;
-    const t = (el.textContent || '').trim();
-    if (!t || t.length > 16) continue;
-    if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv/i.test(t)) continue;
-    let up: HTMLElement | null = el.parentElement;
-    for (let i = 0; i < 6 && up && up !== document.body; i++) {
-      if (up.querySelector(PERSON_SEL)
-          || Array.from(up.querySelectorAll('a')).filter(isCastAnchor).length >= 4) {
-        dlog('findSeasonCastParent: ✅ 路径1(标题+演员锚点)命中 cls=' + (up.className||'').toString().substring(0,60));
-        _castParentCache = up; return up;
-      }
-      up = up.parentElement;
-    }
-  }
-  // 路径2: ≥4 个 person 链接 → 取共同祖先
-  const personLinks = Array.from(document.querySelectorAll(PERSON_SEL)) as HTMLElement[];
-  if (personLinks.length >= 4) {
-    let el: HTMLElement | null = personLinks[0];
+  // [lc-921] 精准结构抓取(彻底去除标题文字匹配):
+  //   演员数据是「人物页链接 /v/person/ 」或「头像人物卡(含 img + 短名字)」, 直接以数据本体定位容器,
+  //   不再扫描"演职/演员/配音/声优…"等分区标题(那类做法是模糊文本匹配, 易误命中/漏抓)。
+  //
+  // 路线A(主, 数据驱动): fnOS 渲染了人物页链接 → 取「包含全部 person 链接的最小共同祖先」即演职人员整块容器。
+  const persons = Array.from(document.querySelectorAll(PERSON_SEL)) as HTMLElement[];
+  if (persons.length >= 3) {
+    let best: HTMLElement | null = null;
+    let el: HTMLElement | null = persons[0];
     while (el && el !== document.body) {
-      if (el.querySelectorAll(PERSON_SEL).length >= 4) { _castParentCache = el; return el; }
+      if (el.querySelectorAll(PERSON_SEL).length >= persons.length) { best = el; break; }
       el = el.parentElement;
     }
-  }
-  // 路径3(兜底): 全文档 ≥4 个头像 <a> → 取含全部(≥4)头像链接的最小共同祖先
-  const avs = Array.from(document.querySelectorAll('a')).filter(isCastAnchor);
-  if (avs.length >= 4) {
-    let el: HTMLElement | null = avs[0].parentElement as HTMLElement | null;
-    while (el && el !== document.body) {
-      const cnt = Array.from(el.querySelectorAll('a')).filter(isCastAnchor).length;
-      if (cnt >= 4) {
-        dlog('findSeasonCastParent: ✅ 路径3(头像LCA)命中 cls=' + (el.className||'').toString().substring(0,60) + ' avs=' + cnt);
-        _castParentCache = el; return el;
+    if (!best) { // 退化: 含 ≥3 个 person 链接的最小祖先(容忍个别链接不在同一子树)
+      el = persons[0].parentElement;
+      while (el && el !== document.body) {
+        if (el.querySelectorAll(PERSON_SEL).length >= 3) { best = el; break; }
+        el = el.parentElement;
       }
+    }
+    if (best) {
+      _castLastRoute = 'A-personLinks';
+      dlog('findSeasonCastParent: ✅ 路线A(person链接共同祖先)命中 cls=' + (best.className || '').toString().substring(0, 60) + ' persons=' + persons.length);
+      _castParentCache = best; return best;
+    }
+  }
+  // 路线B(兜底·纯结构): fnOS 未渲染 /v/person/ 链接(仅头像人物卡)时,
+  //   找「含 ≥3 个头像人物卡」的最内层容器。人物卡 = 含 <img> + 短文字名, 且排除选集卡(data-id)/推荐卡(.card-root), 不读任何标题文本。
+  const personCards = Array.from(document.querySelectorAll('a,div')).filter((c: Element) => {
+    if (c.hasAttribute('data-id')) return false;                       // 排除选集卡片
+    if ((c as HTMLElement).classList && (c as HTMLElement).classList.contains('card-root')) return false; // 排除推荐卡
+    if (!c.querySelector('img')) return false;                         // 必须有头像
+    const t = (c.textContent || '').trim();
+    return t.length > 0 && t.length < 20;                             // 头像 + 短名字(人物名)
+  }) as HTMLElement[];
+  if (personCards.length >= 3) {
+    let best: HTMLElement | null = null;
+    let el: HTMLElement | null = personCards[0].parentElement;
+    while (el && el !== document.body) {
+      const cnt = personCards.filter((c) => el!.contains(c) && el !== c).length;
+      if (cnt >= 3) best = el;   // 自底向上, 末次命中即最内层满足的祖先
       el = el.parentElement;
     }
-  }
-  // 路径4(兜底, [lc-921] 按标题定位): 命中"演员/演职/配音/声优/主要演员/角色/CV"等标题 →
-  //   向上找「含 ≥3 个带头像(<img>)卡片」的最小祖先作为演职人员容器。
-  //   覆盖 fnOS 不渲染 /v/person/ 链接(只有头像)、或演员卡片非 <a> 包裹的情况(此前路径1/3 均依赖 <a>)。
-  for (const el of Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[]) {
-    if (el.children.length > 0) continue;
-    const t = (el.textContent || '').trim();
-    if (!t || t.length > 16) continue;
-    if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv|艺人|明星|班底/i.test(t)) continue;
-    let up: HTMLElement | null = el.parentElement;
-    for (let i = 0; i < 8 && up && up !== document.body; i++) {
-      const imgCards = Array.from(up.children).filter((c) => c.querySelector('img'));
-      if (imgCards.length >= 3) {
-        dlog('findSeasonCastParent: ✅ 路径4(标题+≥3头像卡片)命中 cls=' + (up.className||'').toString().substring(0,60) + ' imgCards=' + imgCards.length);
-        _castParentCache = up; return up;
-      }
-      up = up.parentElement;
+    if (best) {
+      _castLastRoute = 'B-avatarCards';
+      dlog('findSeasonCastParent: ✅ 路线B(≥3头像人物卡)命中 cls=' + (best.className || '').toString().substring(0, 60) + ' imgCards=' + personCards.length);
+      _castParentCache = best; return best;
     }
   }
+  _castLastRoute = 'none';
   _castParentCache = null;
   return null;
 }
@@ -5138,19 +5131,12 @@ function dumpSeasonDOMToFile(stage?: string): void {
       personLinkCount: document.querySelectorAll('a[href^="/v/person/"]').length,
       epChain: chainOf(findSeasonEpParent()),
       castChain: chainOf(findSeasonCastParent()),
-      // [lc-921] 即便 findSeasonCastParent 返回 null, 也尝试定位演职人员标题及其父容器(含头像卡片数),
-      //   便于真机实测时确认"二级页原生演员区"真实结构, 避免再次出现 findSeasonCastParent 漏抓。
-      castProbe: (() => {
-        for (const el of Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div'))) {
-          if (el.children.length > 0) continue;
-          const t = (el.textContent || '').trim();
-          if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv|艺人|明星|班底/i.test(t)) continue;
-          const par = el.parentElement as HTMLElement | null;
-          const imgCards = par ? Array.from(par.children).filter((c) => c.querySelector('img')).length : 0;
-          return { text: t, parentCls: (par?.className||'').toString().substring(0,80), parentImgCards: imgCards, chain: chainOf(par, 6) };
-        }
-        return null;
-      })(),
+      // [lc-921] 精准结构诊断(无文字匹配): 记录 findSeasonCastParent 命中的路线与 person 链接数,
+      //   用于确认"二级页原生演员区"是经「数据驱动的结构抓取」定位, 而非标题文本匹配。
+      castDiag: {
+        route: _castLastRoute,
+        personLinks: document.querySelectorAll('a[href*="/v/person/"]').length,
+      },
       twoColChain: chainOf(q('.fnos-season-2col')),
       mainChain: chainOf(q('.fnos-season-main')),
       asideChain: chainOf(q('.fnos-season-aside')),
