@@ -3836,24 +3836,38 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   width:100% !important;
   box-sizing:border-box !important;
   grid-template-columns:minmax(0,60fr) minmax(0,40fr) !important;
+  grid-template-rows:minmax(0,1fr) !important; /* [lc-921] 单行占满高度, 两栏各自内部滚动 */
   gap:24px !important;
-  align-items:start !important;
+  align-items:stretch !important; /* [lc-921] 两栏撑满行高(替代 start, 否则列高不随网格受限 → 整页被撑开无法滚动) */
   /* 右侧留白：避免侧栏卡片贴上容器右缘（祖先 overflow:hidden）被误判为裁切 */
   padding-right:24px !important;
-  /* [lc-919] 高度不自限: 祖先链多层 h-full+overflow-hidden 会把超长内容裁切导致页面无法滚动。
-   *   grid 容器必须 height:auto 让内容撑开高度, 由更上层的 overflow-auto 祖先接管滚动。 */
-  height:auto !important;
+  /* [lc-921] 网格限高占满视口(具体高度由 layoutSeasonTwoPane 内联 calc(100vh - top) 兜底,
+   *   不依赖祖先链 h-full 是否确定解析): 祖先 overflow-hidden 只裁切溢出, 网格自身被限高 →
+   *   左右两栏 overflow-y:auto 在栏内独立滚动, 彻底解决"打开二级详情页无法下滑"。 */
+  height:100% !important;
   min-height:0 !important;
-  max-height:none !important;
+  max-height:100% !important;
+  overflow:hidden !important;
 }
-/* [lc-919] 两栏容器的直接父级(通常是 gap-6 pb-6 pr-4 的 flex-col): 确保它能被内容撑开、不锁死高度 */
-.fnos-immersive-season .fnos-season-2col{ height:auto !important; }
-html.fnos-tv-page .fnos-immersive-season .flex.flex-col.gap-6:has(.fnos-season-2col){
-  height:auto !important; min-height:0 !important; max-height:none !important; overflow:visible !important;
+.fnos-immersive-season .fnos-season-main{
+  width:auto !important; min-width:0 !important;
+  height:100% !important; max-height:100% !important; min-height:0 !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
 }
-.fnos-immersive-season .fnos-season-main{ width:auto !important; min-width:0 !important; overflow:visible !important; }
-.fnos-immersive-season .fnos-season-aside{ min-width:0 !important; overflow:visible !important; max-width:none !important; }
+.fnos-immersive-season .fnos-season-aside{
+  min-width:0 !important; max-width:none !important;
+  height:100% !important; max-height:100% !important; min-height:0 !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
+}
 .fnos-immersive-season .fnos-season-aside > *{ overflow:visible !important; max-width:none !important; }
+/* 解除左栏内部 fnOS 固定高度/裁剪锁(仅针对已知布局包裹层, 不动选集卡片自身), 让选集内容在左栏内自然撑开并滚动 */
+.fnos-immersive-season .fnos-season-main [class*="cache-outlet"],
+.fnos-immersive-season .fnos-season-main .ms-container,
+.fnos-immersive-season .fnos-season-main [class*="overflow-hidden"],
+.fnos-immersive-season .fnos-season-main [class*="h-0"]{
+  height:auto !important; min-height:0 !important; max-height:none !important;
+  overflow:visible !important; flex:0 0 auto !important;
+}
 
 /* 选集容器：横向滚动 -> 纵向列表 */
 .fnos-immersive-season .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]){
@@ -4156,10 +4170,10 @@ function resetSeasonObsState(): void {
 }
 
 /** 找两栏布局的「主内容」容器（左栏）。
- *  ① 季详情页(/v/tv/season/:id): 含 [data-id="details"](选集卡片) 的那个 .relative.w-full 祖先。
- *  ② [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/): 飞牛原生是「季概览页」,
- *     主内容 = 带 px-[44px] 内边距的 flex-col 内容列(findShowContentColumn, 直接返回, 不再要求 ≥2 个 details)。
- *  ③ 其余回退(兼容历史): a) 含 [data-id="details"] 的 relative+w-full 祖先;
+ *  ⚠️ [lc-920] 仅对季页(/v/tv/season/:id)生效; 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)一律返回 null 保持原生。
+ *  ① 季详情页(/v/tv/season/:id): 以「选集」小标题为锚, 取最内层同时含标题与集卡片的祖先 = 选集 section 根;
+ *     集卡片尚未渲染时返回 null(交 observer 重试), 绝不用 .card-root LCA 猜。
+ *  ② 其余回退(兼容历史): a) 含 [data-id="details"] 的 relative+w-full 祖先;
  *     b) 含 ≥2 个 .card-root 的最近区块级祖先; c) "选集"标题(strong)的下一个兄弟元素容器。
  */
 
@@ -4286,22 +4300,12 @@ function findSeasonEpParent(): HTMLElement | null {
       + ' card-root=' + _dbgCardRoot + ' details=' + _dbgDetails
       + ' body.cls=' + (document.body.className||'').toString().substring(0,80));
   }
-  // [lc-911] 二级 show 页(/v/tv|movie/<32hex>, 不含 /season/)专属策略(全部重做):
-  //   飞牛原生二级详情页本质是「季概览页」——仅 1 个 [data-id="details"] 卡片(或若干 .card-root 季卡片),
-  //   没有像季页那样的「选集横滚行 + 演职人员区」结构。lc-910 误以为"≥2 个 details 才算选集网格",
-  //   导致该页永远返回 null → 两栏永不建立("没变化")。
-  //   现直接返回内容列(findShowContentColumn)作为左栏主内容; 该列在 app 内因侧边栏隐藏接近满宽(≈1922px),
-  //   过宽护栏已在 layoutSeasonTwoPane 中改为「仅当直接挂在 body/html 才放弃」, 故此处可放心返回。
-  if (/^\/v\/(tv|movie)\/[a-f0-9]{32}([\/?#]|$)/.test(location.pathname) && !/\/season\//.test(location.pathname)) {
-    const col = findShowContentColumn();
-    if (col) {
-      if (isHiddenByAncestor(col)) {
-        dlog('findSeasonEpParent: [show页] ⚠️ 命中内容列但在隐藏(缓存)副本, 返回 null 等可见副本渲染');
-        return null;
-      }
-      dlog('findSeasonEpParent: [show页] 命中内容列 cls=' + (col.className || '').toString().substring(0, 50));
-      return col;
-    }
+  // [lc-920] 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)不建两栏: 保持 fnOS 原生外观,
+  //   与用户标准一致(一级不动 / 二级分栏)。两栏仅对季页(/v/tv/season/<guid>)生效,
+  //   由 layoutSeasonTwoPane 顶部的路由护栏统一拦截(非 /season/ 直接 return 并清理残留僵尸两栏)。
+  if (!/\/season\//.test(location.pathname)) {
+    dlog('findSeasonEpParent: [一级详情页] 非季页, 不建两栏, 返回 null');
+    return null;
   }
   // [lc-912] 季页(/v/tv/season/<guid>)专属策略:
   //   旧实现先逐层向上找 .relative.w-full(会越过 section 边界命中更高层容器), 找不到再用 .card-root 的
@@ -4421,52 +4425,74 @@ function findSeasonEpParent(): HTMLElement | null {
  *  而它被 600ms 巡检定时器与 observer 高频调用 → 累积成显著开销。找到后缓存, 仅当节点脱离 DOM 或
  *  内部已无演员链接时才重新定位(换页由 resetSeasonObsState 清空)。 */
 let _castParentCache: HTMLElement | null = null;
-/** 找「演职人员」容器：含 /v/person/ 链接的最近祖先 */
+/** 找「演职人员」容器：优先 person 链接(兼容 hash 路由 #/v/person/), 兜底头像链接共同祖先。
+ *  [lc-920] 重写: 旧实现仅匹配 a[href^="/v/person/"], 而 fnOS SPA 用 hash 路由(#/v/person/xxx)导致
+ *   整批漏掉 → personLinkCount 恒为 0、右栏演员整块消失。现改 includes('/v/person/') 兼容两种路由;
+ *   并新增"全文档 ≥4 头像 <a> → 取最小共同祖先"兜底, 只要 fnOS 渲染了演员头像行就能命中, 不依赖标题文本/链接格式。 */
 function findSeasonCastParent(): HTMLElement | null {
+  const PERSON_SEL = 'a[href*="/v/person/"]';
+  const isCastAnchor = (a: Element): boolean => {
+    const href = a.getAttribute('href') || '';
+    return href.includes('/v/person/') || a.querySelector('img') !== null;
+  };
+  // 缓存命中: 容器仍在 DOM 且仍含演员锚点
   if (_castParentCache && document.body.contains(_castParentCache)
-      && _castParentCache.querySelector('a[href^="/v/person/"]')) {
-    // [lc-914] 缓存命中不打日志: 本函数被 600ms 巡检定时器反复调用, 命中分支会持续刷屏
+      && _castParentCache.querySelectorAll(PERSON_SEL).length >= 1) {
     return _castParentCache;
   }
-  const strongs = Array.from(document.querySelectorAll('strong')) as HTMLElement[];
-  const cs = strongs.find((s) => (s.textContent || '').trim().includes('演职人员'));
-  dlog('findSeasonCastParent: strong「演职人员」=' + (cs ? '找到' : '未找到')
-    + ' (总strong数=' + strongs.length + ')');
-  let p: HTMLElement | null = cs || null;
-  while (p && p !== document.body) {
-    if (p.querySelector('a[href^="/v/person/"]')) {
-      dlog('findSeasonCastParent: ✅ 路径1(标题+person链接)命中 cls=' + (p.className||'').toString().substring(0,60));
-      _castParentCache = p; return p;
-    }
-    p = p.parentElement;
-  }
-  // [lc-910] 兜底
-  const personLinks = Array.from(document.querySelectorAll('a[href^="/v/person/"]')) as HTMLElement[];
-  dlog('findSeasonCastParent: 路径2 person链接数=' + personLinks.length);
-  if (personLinks.length >= 4) {
-    let el: HTMLElement | null = personLinks[0];
-    while (el && el !== document.body) {
-      if (el.querySelectorAll('a[href^="/v/person/"]').length >= 4) { _castParentCache = el; return el; }
-      el = el.parentElement;
-    }
-  }
-  // [lc-912] 兜底: 部分条目 fnOS 只渲染演员头像(无 /v/person/ 链接) → 上面三条路径全部扑空,
-  //   右栏「主要配音演员」整块消失。改按「演职人员/演员/声优/配音」标题定位, 取最内层含 ≥3 个
-  //   带头像 <a> 的祖先(演员行必有头像; 要求 ≥3 以排除零星头像块)。标题必须精确匹配, 避免误抓推荐位。
+  // 路径1: 含"演员/演职/配音/声优"等关键词的标题 → 向上找含 person 链接或 ≥4 头像链接的祖先
   const heads = Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[];
   for (const el of heads) {
     if (el.children.length > 0) continue;
     const t = (el.textContent || '').trim();
-    if (!t || t.length > 12) continue;
-    if (!/^(演职人员|主要演员|演员表|演员|声优|配音演员|cast)$/i.test(t)) continue;
+    if (!t || t.length > 16) continue;
+    if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv/i.test(t)) continue;
     let up: HTMLElement | null = el.parentElement;
     for (let i = 0; i < 6 && up && up !== document.body; i++) {
-      const avatarLinks = Array.from(up.querySelectorAll('a')).filter((a) => a.querySelector('img') !== null).length;
-      if (avatarLinks >= 3) {
-        dlog('findSeasonCastParent: [lc-912兜底] 按标题"' + t + '"命中演员区(无person链接) cls='
-          + (up.className || '').toString().substring(0, 60));
-        _castParentCache = up;
-        return up;
+      if (up.querySelector(PERSON_SEL)
+          || Array.from(up.querySelectorAll('a')).filter(isCastAnchor).length >= 4) {
+        dlog('findSeasonCastParent: ✅ 路径1(标题+演员锚点)命中 cls=' + (up.className||'').toString().substring(0,60));
+        _castParentCache = up; return up;
+      }
+      up = up.parentElement;
+    }
+  }
+  // 路径2: ≥4 个 person 链接 → 取共同祖先
+  const personLinks = Array.from(document.querySelectorAll(PERSON_SEL)) as HTMLElement[];
+  if (personLinks.length >= 4) {
+    let el: HTMLElement | null = personLinks[0];
+    while (el && el !== document.body) {
+      if (el.querySelectorAll(PERSON_SEL).length >= 4) { _castParentCache = el; return el; }
+      el = el.parentElement;
+    }
+  }
+  // 路径3(兜底): 全文档 ≥4 个头像 <a> → 取含全部(≥4)头像链接的最小共同祖先
+  const avs = Array.from(document.querySelectorAll('a')).filter(isCastAnchor);
+  if (avs.length >= 4) {
+    let el: HTMLElement | null = avs[0].parentElement as HTMLElement | null;
+    while (el && el !== document.body) {
+      const cnt = Array.from(el.querySelectorAll('a')).filter(isCastAnchor).length;
+      if (cnt >= 4) {
+        dlog('findSeasonCastParent: ✅ 路径3(头像LCA)命中 cls=' + (el.className||'').toString().substring(0,60) + ' avs=' + cnt);
+        _castParentCache = el; return el;
+      }
+      el = el.parentElement;
+    }
+  }
+  // 路径4(兜底, [lc-921] 按标题定位): 命中"演员/演职/配音/声优/主要演员/角色/CV"等标题 →
+  //   向上找「含 ≥3 个带头像(<img>)卡片」的最小祖先作为演职人员容器。
+  //   覆盖 fnOS 不渲染 /v/person/ 链接(只有头像)、或演员卡片非 <a> 包裹的情况(此前路径1/3 均依赖 <a>)。
+  for (const el of Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div')) as HTMLElement[]) {
+    if (el.children.length > 0) continue;
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 16) continue;
+    if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv|艺人|明星|班底/i.test(t)) continue;
+    let up: HTMLElement | null = el.parentElement;
+    for (let i = 0; i < 8 && up && up !== document.body; i++) {
+      const imgCards = Array.from(up.children).filter((c) => c.querySelector('img'));
+      if (imgCards.length >= 3) {
+        dlog('findSeasonCastParent: ✅ 路径4(标题+≥3头像卡片)命中 cls=' + (up.className||'').toString().substring(0,60) + ' imgCards=' + imgCards.length);
+        _castParentCache = up; return up;
       }
       up = up.parentElement;
     }
@@ -4589,7 +4615,7 @@ function updateSeasonInfoStats(): void {
 function restyleCastIfNeeded(container: HTMLElement): void {
   const anchors = Array.from(container.querySelectorAll('a')).filter((a) => {
     const href = a.getAttribute('href') || '';
-    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
+    return href.includes('/v/person/') || a.querySelector('img') !== null;
   });
   if (anchors.length === 0) return;
   for (let i = 0; i < anchors.length; i++) {
@@ -4602,8 +4628,48 @@ function restyleCastIfNeeded(container: HTMLElement): void {
 
 /** 把「选 集(左) + 侧栏(右)」布局成两栏（幂等，免疫 SPA 重建） */
 let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSeasonTwoPane 可能被连续触发, 防止嵌套重排卡死
+
+/** [lc-920] 把 fnOS 原生演职人员整块移入右侧栏(仅一次)。建栏时与 observer 持续巡检时都调用:
+ *  - 右栏已有 .fnos-cast-card → 仅确保 restyle(覆盖 fnOS 异步补填的演员节点), 不重复塞入;
+ *  - 找到 cast 但右栏还没有 → 创建卡片并移入, 同时启动 600ms 兜底 restyle 定时器;
+ *  - 未找到 cast → 直接返回(等 fnOS 异步填充后下次巡检再试)。 */
+function ensureCastInAside(aside: HTMLElement): void {
+  const existing = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+  const cast = findSeasonCastParent();
+  if (!cast) {
+    if (!existing) dlog('ensureCastInAside: 暂未找到 cast(演员可能尚未异步填充)');
+    return;
+  }
+  if (existing) {
+    restyleCastIfNeeded(cast); // 已存在: 仅对新增/替换的演员节点收紧, 零重复 DOM 写入
+    return;
+  }
+  dlog('ensureCastInAside: 找到 cast, 移入右侧栏 cls=' + (cast.className||'').toString().substring(0,60));
+  scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
+  if (_castRestyleTimer) clearInterval(_castRestyleTimer);
+  _castRestyleTimer = setInterval(restyleCastOnce, 600); // [lc-903] 每 600ms 兜底巡检
+  const castCard = document.createElement('div');
+  castCard.className = 'fnos-info-card fnos-cast-card';
+  const castTitle = document.createElement('h4');
+  castTitle.textContent = '主要配音演员';
+  castCard.appendChild(castTitle);
+  castCard.appendChild(cast);
+  // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
+  cast.style.padding = '0';
+  cast.style.margin = '0';
+  cast.style.gap = '2px';
+  aside.appendChild(castCard);
+}
+
 function layoutSeasonTwoPane(): void {
   if (_seasonLaying) { dlog('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
+  // [lc-920] 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)不建两栏, 保持 fnOS 原生外观。
+  //   若从历史季页返回一级页, 旧两栏 DOM 一般已被 fnOS 路由替换; 此处仍兜底清理可能的残留僵尸两栏。
+  if (!/\/season\//.test(location.pathname)) {
+    const _stale = document.querySelector('.fnos-season-2col') as HTMLElement | null;
+    if (_stale) { dlog('layoutSeasonTwoPane: [一级页] 清理残留两栏'); _stale.remove(); }
+    return;
+  }
   // [lc-917] 若已存在两栏 wrap: 仅当它在「可见」位置时才跳过; 若它被建进了 fnOS 路由缓存的隐藏 --cache 副本
   //   (display:none → 整块不可见), 必须先移除这个僵尸 wrap, 才能在可见副本里正确重建, 否则会永远"跳过"导致选集占满整宽。
   const _existing = document.querySelector('.fnos-season-2col') as HTMLElement | null;
@@ -4657,24 +4723,9 @@ function layoutSeasonTwoPane(): void {
   _infoCard = info;
   updateSeasonInfoStats();
 
-  // 主要配音演员（借用 fnOS 原生演职人员，整块卡片 + 圆形头像 + 姓名/角色）
-  if (cast) {
-    scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
-    // [lc-903] 持续兜底: 详情页存续期间每 600ms 巡检一次, 任何时机填入/替换的演员节点都会在 600ms 内被收紧
-    if (_castRestyleTimer) clearInterval(_castRestyleTimer);
-    _castRestyleTimer = setInterval(restyleCastOnce, 600);
-    const castCard = document.createElement('div');
-    castCard.className = 'fnos-info-card fnos-cast-card';
-    const castTitle = document.createElement('h4');
-    castTitle.textContent = '主要配音演员';
-    castCard.appendChild(castTitle);
-    castCard.appendChild(cast);
-    // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
-    cast.style.padding = '0';
-    cast.style.margin = '0';
-    cast.style.gap = '2px';
-    aside.appendChild(castCard);
-  }
+  // [lc-920] 主要配音演员(借用 fnOS 原生演职人员): 抽成 ensureCastInAside, 建栏时与 observer 持续巡检时复用,
+  //   解决"演员数据异步填充后才出现、但两栏只在首次建立时塞过一次 → 右栏永远缺演员"的问题。
+  ensureCastInAside(aside);
 
   // 外部链接（fnOS 暴露的 IMDB 等）
   const link = Array.from(document.querySelectorAll('a')).find(
@@ -4741,10 +4792,30 @@ function layoutSeasonTwoPane(): void {
       wrap.style.setProperty('width', '100%', 'important');
       wrap.style.setProperty('box-sizing', 'border-box', 'important');
       wrap.style.setProperty('gap', '24px', 'important');
-      wrap.style.setProperty('align-items', 'start', 'important');
+      wrap.style.setProperty('align-items', 'stretch', 'important');
     } else {
       dlog('layoutSeasonTwoPane: ✅ grid 已生效(display=grid, gridCols=' + _cs.gridTemplateColumns + ')');
     }
+    // [lc-921] 滚动兜底(内联 !important, 不依赖作用域 CSS): 网格占满视口(减去真实顶部偏移),
+    //   左右两栏 height:100% + overflow-y:auto 各自内部滚动, 彻底修复"二级详情页无法下滑"。
+    const _top = Math.max(0, Math.round(wrap.getBoundingClientRect().top));
+    const _colH = `calc(${window.innerHeight}px - ${_top}px)`;
+    wrap.style.setProperty('height', _colH, 'important');
+    wrap.style.setProperty('max-height', _colH, 'important');
+    wrap.style.setProperty('min-height', '0', 'important');
+    wrap.style.setProperty('overflow', 'hidden', 'important');
+    wrap.style.setProperty('grid-template-rows', 'minmax(0, 1fr)', 'important');
+    wrap.style.setProperty('align-items', 'stretch', 'important');
+    ep.style.setProperty('height', '100%', 'important');
+    ep.style.setProperty('max-height', '100%', 'important');
+    ep.style.setProperty('min-height', '0', 'important');
+    ep.style.setProperty('overflow-y', 'auto', 'important');
+    ep.style.setProperty('overflow-x', 'hidden', 'important');
+    aside.style.setProperty('height', '100%', 'important');
+    aside.style.setProperty('max-height', '100%', 'important');
+    aside.style.setProperty('min-height', '0', 'important');
+    aside.style.setProperty('overflow-y', 'auto', 'important');
+    aside.style.setProperty('overflow-x', 'hidden', 'important');
   } catch (_shErr) { /* ignore */ }
 
   // [lc-916] 几何诊断: 输出 wrap/main/aside 的 getBoundingClientRect, 精确到像素。
@@ -4799,7 +4870,7 @@ function restyleCastOnce(): void {
 function restyleCastItems(container: HTMLElement): void {
   const items = Array.from(container.querySelectorAll('a')).filter((a) => {
     const href = a.getAttribute('href') || '';
-    return href.startsWith('/v/person/') || a.querySelector('img') !== null;
+    return href.includes('/v/person/') || a.querySelector('img') !== null;
   }) as HTMLElement[];
   items.forEach((a) => {
     if (a.classList.contains('fnos-cast-item')) return;
@@ -4894,6 +4965,11 @@ function alignInfoCardWithFirstEpisode(): void {
 /** fnOS SPA 重渲染选集/演职人员时，若两栏被拆散则自动补做 */
 function observeSeasonTwoPane(): void {
   if (_season2colObserver) { dlog('observeSeasonTwoPane: 已有observer, 跳过'); return; }
+  // [lc-920] 仅季页(/season/)需要两栏 observer; 一级详情页(show 页)不建两栏, 跳过观察器避免无谓开销与误建。
+  if (!/\/season\//.test(location.pathname)) {
+    dlog('observeSeasonTwoPane: 非季页(一级详情页), 跳过');
+    return;
+  }
   const ep = findSeasonEpParent();
   // [lc-917] 监听目标改为 document.body: fnOS 路由缓存会把可见页在 --exclude / --cache 两套 outlet 间切换,
   //   原 target=ep.parentElement 可能落在隐藏(缓存)副本, 切换后观察不到可见副本的变更 → 两栏停在隐藏副本不可见。
@@ -4933,6 +5009,9 @@ function observeSeasonTwoPane(): void {
         updateSeasonInfoStats(); // 集数/总时长可能随懒加载补全，刷新即可
         alignInfoCardWithFirstEpisode(); // [lc-893] 首集卡片懒加载后位置可能变动, 重对齐
         if (castNow) restyleCastIfNeeded(castNow); // [lc-906] 仅在存在未处理演员节点时才跑重活
+        // [lc-920] 演员数据可能晚于两栏建立才异步填充: 每次稳态巡检都尝试把 cast 移入右栏(已存在则仅 restyle)
+        const asideNow = wrap.querySelector('.fnos-season-aside') as HTMLElement | null;
+        if (asideNow) ensureCastInAside(asideNow);
       } else {
         _obsRelayoutTicks++; // [lc-906] 两栏被 fnOS 拆散: 计入重建次数, 频繁则退避, 避免与 fnOS 抢 DOM
         if (wrap) wrap.remove();
@@ -5059,6 +5138,19 @@ function dumpSeasonDOMToFile(stage?: string): void {
       personLinkCount: document.querySelectorAll('a[href^="/v/person/"]').length,
       epChain: chainOf(findSeasonEpParent()),
       castChain: chainOf(findSeasonCastParent()),
+      // [lc-921] 即便 findSeasonCastParent 返回 null, 也尝试定位演职人员标题及其父容器(含头像卡片数),
+      //   便于真机实测时确认"二级页原生演员区"真实结构, 避免再次出现 findSeasonCastParent 漏抓。
+      castProbe: (() => {
+        for (const el of Array.from(document.querySelectorAll('strong,h2,h3,h4,span,p,div'))) {
+          if (el.children.length > 0) continue;
+          const t = (el.textContent || '').trim();
+          if (!/演职|演员|配音|声优|cast|staff|credits|主创|嘉宾|角色|cv|艺人|明星|班底/i.test(t)) continue;
+          const par = el.parentElement as HTMLElement | null;
+          const imgCards = par ? Array.from(par.children).filter((c) => c.querySelector('img')).length : 0;
+          return { text: t, parentCls: (par?.className||'').toString().substring(0,80), parentImgCards: imgCards, chain: chainOf(par, 6) };
+        }
+        return null;
+      })(),
       twoColChain: chainOf(q('.fnos-season-2col')),
       mainChain: chainOf(q('.fnos-season-main')),
       asideChain: chainOf(q('.fnos-season-aside')),
@@ -5159,6 +5251,15 @@ function applySeasonImmersiveDetail(): void {
       info += ' | epResult=' + (ep ? (ep.className || '').toString().substring(0, 40) : 'NULL');
       log('[DIAG-SEASON] ' + info);
     } catch (_) { /* ignore */ }
+  }
+  // [lc-921] 仅季页(/season/)建两栏; 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)保持 fnOS 原生外观(不建两栏、不变分栏)。
+  //   此前仅 layoutSeasonTwoPane 内部有护栏, 但 SPA 切换残留 / observer 误触发仍可能把两栏建进一级页,
+  //   故在此统一拦截: 一级页清理任何可能残留/误建的两栏并断开 observer, 仅季页才进入建栏流程。
+  if (!/\/season\//.test(location.pathname)) {
+    dlog('applySeasonImmersiveDetail: [一级详情页] 不建两栏, 清理残留并 return');
+    unlayoutSeasonTwoPane(); // 还原任何残留两栏 + 断开 observer, 保证一级页回归原生单栏
+    // 仍保留沉浸式背景框(用户未反对背景框, 仅反对分栏); 不调用 observeSeasonTwoPane 避免误建两栏。
+    return;
   }
   // [lc-908] 立即尝试建立两栏; 二级页 DOM 可能异步渲染, 首次 findSeasonEpParent 可能返回 null → 延迟重试
   layoutSeasonTwoPane();
