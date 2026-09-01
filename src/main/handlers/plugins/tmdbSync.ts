@@ -682,7 +682,9 @@ async function resolveShowId(
     if (arg.tmdbId != null && /^\d+$/.test(String(arg.tmdbId).trim())) {
         return parseInt(String(arg.tmdbId).trim(), 10);
     }
-    const title = (arg.title || '').trim();
+    let title = (arg.title || '').trim();
+    // [lc-945] 去掉标题尾部「第N季 / Season N / S01」等季号，避免污染 TMDB 搜索(季号由 seasonNumber 单独传)
+    title = title.replace(/\s*(第\s*[0-9一二三四五六七八九十百]+\s*季|season\s*\d{1,3}|s\s*\d{1,3})\s*$/i, '').trim();
     if (!title) return null;
     const yearGap = (r: any): number => {
         const y = parseInt(String(arg.year || '').slice(0, 4), 10);

@@ -4861,7 +4861,19 @@ function detailHeaderScope(): HTMLElement | null {
     || document.querySelector('header')) as HTMLElement | null;
 }
 
-/** 季页剧名：取头部作用域内「字号最大」的可见文本节点；再退到 document.title。 */
+/** [lc-945] 系统/品牌名黑名单：详情页头部或顶栏可能含「飞牛影视」等站点名(APP_NAME)，
+ *  绝不能当作剧名提取——否则 TMDB 搜「飞牛影视」必然零结果(报"未找到匹配条目")。 */
+const _SYS_TITLE_DENY = ['飞牛影视', 'fnos'];
+function _isSysTitle(t: string): boolean {
+  const s = (t || '').trim().toLowerCase();
+  if (!s) return true;
+  for (const d of _SYS_TITLE_DENY) {
+    if (s === d.toLowerCase() || s.includes(d.toLowerCase())) return true;
+  }
+  return false;
+}
+
+/** 季页剧名：取头部作用域内「字号最大」的非品牌可见文本节点；再退到 document.title(兼容两种顺序)。 */
 function findSeasonShowTitle(): string {
   if (_seasonShowTitle) return _seasonShowTitle;
   const scope = detailHeaderScope();
@@ -4875,6 +4887,7 @@ function findSeasonShowTitle(): string {
       if (e.children.length !== 0) continue;
       const t = (e.textContent || '').trim();
       if (!t || t.length > 60) continue;
+      if (_isSysTitle(t)) continue;              // [lc-945] 跳过品牌/系统名(如「飞牛影视」)
       const r = e.getBoundingClientRect();
       if (r.width < 1 || r.height < 1) continue; // 隐藏(路由缓存副本)元素跳过
       const size = parseFloat(getComputedStyle(e).fontSize) || 0;
@@ -4882,8 +4895,16 @@ function findSeasonShowTitle(): string {
     }
   }
   if (!best && document.title) {
-    // document.title 形如 "权力的游戏 第一季 - 飞牛影视"
-    best = document.title.split(/\s+[-–|]\s+/)[0].trim().replace(/第\s*[0-9一二三四五六七八九十百]+\s*季\s*$/, '').trim();
+    // [lc-945] fnOS 标题可能是「剧名 - 飞牛影视」也可能是「飞牛影视 - 剧名」(站点名在前更常见)，
+    //   需剔除品牌段、取剩余最长段作剧名，再剥掉尾部「第N季」。
+    const parts = document.title.split(/\s*[-–—|]\s*/).map((p) => p.trim()).filter((p) => p && !_isSysTitle(p));
+    if (parts.length) {
+      best = parts.sort((a, b) => b.length - a.length)[0];
+    } else {
+      // 整段都是品牌(极端情况)：退一步去掉品牌词后取剩余
+      best = document.title.replace(/飞牛影视/g, '').replace(/\s*[-–—|]\s*/g, ' ').trim();
+    }
+    best = best.replace(/第\s*[0-9一二三四五六七八九十百]+\s*季\s*$/, '').trim();
   }
   if (best) _seasonShowTitle = best;
   return best;
@@ -4937,6 +4958,11 @@ async function loadShowMeta(): Promise<{
     const data = await fnosGetEditDetail(location.origin, page.guid);
     if (data) {
       title = String(data.title || data.name || '').trim();
+      // [lc-945] getEditDetail 偶尔返回站点/品牌名(如「飞牛影视」)而非真实剧名 → 丢弃改由页面解析
+      if (_isSysTitle(title)) {
+        dlog('[lc-926] getEditDetail 返回疑似品牌名 title=' + JSON.stringify(title) + ', 丢弃改由页面解析');
+        title = '';
+      }
       const yRaw = data.year || data.production_year || data.first_aired || data.premiere_date || data.date_created || '';
       const ym = String(yRaw).match(/(\d{4})/);
       if (ym) year = ym[1];
