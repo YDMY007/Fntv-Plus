@@ -294,9 +294,13 @@ html.dark .fnos-immersive-season [data-id="details"]:hover{
 html.dark .fnos-immersive-season [data-id="details"] > div:first-child{ border-radius:8px !important; background:#000 !important; }
 html.dark .fnos-immersive-season [data-id="details"] > div:first-child img{ transition:transform .4s ease !important; }
 html.dark .fnos-immersive-season [data-id="details"]:hover > div:first-child img{ transform:scale(1.06) !important; }
-html.dark .fnos-immersive-season [data-id="details"] > a{ color:#f5f5f7 !important; }
-html.dark .fnos-immersive-season [data-id="details"] > a > *{ color:#9a9aa0 !important; font-weight:400 !important; font-size:13px !important; }
-html.dark .fnos-immersive-season [data-id="details"] > a > *:first-child{ color:#f5f5f7 !important; font-weight:600 !important; font-size:15px !important; }
+/* [lc-952] 选集卡文字：暗色模式下统一用浅字。标题(链接内首子树)纯白加粗，其余描述/链接子节点浅灰，
+ *   不再依赖 '> a > *' 这种只命中直接子的结构(fnOS 实际会把标题包在 div/span 里)。 */
+html.dark .fnos-immersive-season [data-id="details"] > a,
+html.dark .fnos-immersive-season [data-id="details"] > a > *:first-child,
+html.dark .fnos-immersive-season [data-id="details"] > a > *:first-child *{ color:#f5f5f7 !important; font-weight:600 !important; font-size:15px !important; }
+html.dark .fnos-immersive-season [data-id="details"] > a *:not(:first-child),
+html.dark .fnos-immersive-season [data-id="details"] > a > *:not(:first-child) *{ color:#9a9aa0 !important; font-weight:400 !important; font-size:13px !important; }
 html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-duration{ color:#9a9aa0 !important; }
 html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-badge{
   background:#E50914 !important; color:#fff !important; border-radius:4px !important; font-weight:700 !important; letter-spacing:.5px !important;
@@ -312,6 +316,14 @@ html.dark .fnos-immersive-season .fnos-season-aside{
 html.dark .fnos-immersive-season .fnos-tag{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
 /* [lc-930] 深色模式信息卡边框(仅边框, 不动背景, 背景仍走 var(--semi-color-bg-2) 保留渐变) */
 html.dark .fnos-immersive-season .fnos-info-card{ border:1px solid rgba(255,255,255,.08) !important; }
+/* [lc-952] 暗色模式兜底: 右栏文字变量强制切浅字。html.dark 下 aside 背景透明，坐在深色页面上，
+ *   若 applySeasonAsideContrast 采样失败/未跑，默认的深字变量会完全消失 → 信息卡文字全黑。 */
+html.dark .fnos-immersive-season .fnos-season-aside,
+html.dark .fnos-immersive-season .fnos-season-aside[data-fntv-text]{ /* 覆盖 data 属性同等优先级, 用靠后位置取胜 */
+  --fntv-info-h4:#aeaeb2; --fntv-info-p:#f5f5f7; --fntv-info-a:#4da3ff;
+  --fntv-cast-h4:#aeaeb2; --fntv-cast-p1:#f5f5f7; --fntv-cast-p2:#9a9aa0;
+  --fntv-text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
 /* [lc-926] 季页 TMDB 详情区(深色)：与上方 .fnos-info-card 深色块同款奈飞暗色电影感 */
 html.dark .fnos-immersive-season .fnos-info-tmdb{ margin-top:.5rem !important; }
 html.dark .fnos-immersive-season .fnos-tmdb-title{ color:#f5f5f7 !important; }
@@ -1827,7 +1839,9 @@ function _relLum(r: number, g: number, b: number): number {
 function _parseRgb(bc: string): [number, number, number, number] | null {
   const m = bc.match(/rgba?\(([^)]+)\)/i);
   if (!m) return null;
-  const p = m[1].split(',').map((s) => parseFloat(s));
+  // [lc-952] 兼容现代 CSS 颜色语法: rgb(255 0 0 / 50%) → 用 / 和空格都能解析
+  const normalized = m[1].replace(/\//g, ',').replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
+  const p = normalized.split(',').map((s) => parseFloat(s));
   if (p.length < 3) return null;
   return [p[0], p[1], p[2], p.length >= 4 ? p[3] : 1];
 }
@@ -1914,7 +1928,12 @@ function applySeasonAsideContrast(): void {
   }
   // 背景全是透明(渐变写在 backgroundImage 上, getComputedStyle 读不到实色)→ 退回主题:
   //   暗色主题背景偏暗 → 用浅字; 浅色主题背景偏亮 → 用深字。
-  if (lum < 0) lum = document.documentElement.classList.contains('dark') ? 0.08 : 0.92;
+  // [lc-952] 兜底增强: 只要 html.dark 或页面存在 .semi-always-dark(沉浸式暗色封面), 就认为背景偏暗, 默认浅字。
+  if (lum < 0) {
+    const darkContext = document.documentElement.classList.contains('dark')
+      || !!document.querySelector('.semi-always-dark');
+    lum = darkContext ? 0.12 : 0.92;
+  }
   // 对比度择优: 深字(#1d1d1f, L≈0.03) 与 浅字(#f5f5f7, L≈0.95) 哪个对当前背景对比度更高就用哪个
   const Ld = 0.03, Ll = 0.95;
   const crDark = (Math.max(lum, Ld) + 0.05) / (Math.min(lum, Ld) + 0.05);
