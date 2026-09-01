@@ -890,25 +890,21 @@ function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): vo
   const title = (show && (show as any).title || '').substring(0, 10);
   const portrait = !!(show && (show as any)._backdropIsPortrait);
   const sBack = (show && (show as any).backdrop) || '';
-  // [lc-935][DIAG] 入口诊断: 打印关键字段, 便于复现"返回首页海报不显示"时定位
-  log('[lc-935][DIAG] applyCarouselBackdrop', JSON.stringify({
-    title,
-    hasBlob: !!blob,
-    blobHead: blob ? blob.substring(0, 40) : '',
-    portrait,
-    sBackHead: sBack ? sBack.substring(0, 40) : '',
-  }));
+  // [lc-935][DIAG] 入口诊断 + 即时回读验证
+  log('[lc-935][DIAG] applyCarouselBackdrop', JSON.stringify({ title, hasBlob: !!blob, blobLen: blob?.length || 0, portrait, sBackLen: sBack.length }));
   if (blob) {
     // 先设 blob(零延迟显示), 同时启动 probe 检测有效性
     target.style.backgroundImage = `url("${blob}")`;
+    // [lc-935][DIAG] 设完后立即回读确认 style 是否真的写入了
+    const readBack = getComputedStyle(target).backgroundImage;
+    log('[lc-935][DIAG] 设 blob 后 computed bg=', readBack.substring(0, 80), 'target=', target.className);
     // probe: 若 blob URL 已失效(底层 blob 数据被 GC 回收等), onerror 触发 fallback
     const probe = new Image();
     const probeTo = window.setTimeout(() => {
-      // probe 超时(3s 未回调): blob 可能卡住了, 启动 fetch 兜底
-      log('[lc-935] backdrop blob probe 超时, 启动 fetch fallback:', title);
+      log('[lc-935] backdrop blob probe 超时(3s), 启动 fetch fallback:', title);
       startFetchFallback(show, target, base, title);
     }, 3000);
-    probe.onload = () => { clearTimeout(probeTo); log('[lc-935] blob probe OK(有效):', title); }; // blob 有效 → 无需操作
+    probe.onload = () => { clearTimeout(probeTo); log('[lc-935] blob probe OK(有效):', title); };
     probe.onerror = () => {
       clearTimeout(probeTo);
       log('[lc-935] backdrop blob 失效(onerror), 启动 fetch fallback:', title, blob.substring(0, 60));
@@ -917,7 +913,7 @@ function applyCarouselBackdrop(show: any, target: HTMLElement, base: string): vo
     probe.src = blob;
     return;
   }
-  if (portrait) { log('[lc-935] 已知竖版, 跳过:', title); return; } // 已知竖版 → 不拉(保留渐变兜底)
+  if (portrait) { log('[lc-935] 已知竖版, 跳过:', title); return; }
   if (!sBack) { log('[lc-935] 无 blob 且 s.backdrop 为空, 无法 fallback:', title); return; }
   startFetchFallback(show, target, base, title);
 }
@@ -12063,6 +12059,24 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       injectCarousel();
     }
   }, 5000);
+
+  // [lc-935][DIAG] 暴露内部状态到 window, 便于 DevTools 控制台直接检查(无需改源码)
+  (window as any)._fntvDiag = {
+    get apiShows() { return _apiShows; },
+    get apiLoaded() { return _apiLoaded; },
+    get carouselInited() { return _carouselInited; },
+    get carouselRevealed() { return _carouselRevealed; },
+    get carouselContainer() { return _carouselContainer; },
+    dumpBackdropState: () => (_apiShows || []).map((s: any) => ({
+      t: (s.title || '').substring(0, 10),
+      hasBlob: !!s._backdropBlob,
+      blobHead: (s._backdropBlob || '').substring(0, 50),
+      portrait: !!s._backdropIsPortrait,
+      hasBack: !!s.backdrop,
+      backHead: (s.backdrop || '').substring(0, 50),
+    })),
+  };
+  log('[lc-935][DIAG] window._fntvDiag 已暴露, 使用: _fntvDiag.dumpBackdropState()');
 
   // [lc-279] 播放页打标: 页面存在 <video> 时给 <html> 加 fnos-video-active,
   // 使 mainwin.ts 注入的 ACRYLIC_CSS 中 lc-179 的 modal 例外规则(白底 #fff/#2b2a33)在播放页整体失效,
