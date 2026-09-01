@@ -3935,8 +3935,12 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   min-width:0 !important; max-width:none !important;
   height:100% !important; max-height:100% !important; min-height:0 !important;
   overflow-y:auto !important; overflow-x:hidden !important;
+  /* [lc-928] 右栏底部留白, 避免最后一张卡片(如演员墙末行)贴底被截断/遮挡滚动条 */
+  padding-bottom:32px !important;
 }
 .fnos-immersive-season .fnos-season-aside > *{ overflow:visible !important; max-width:none !important; }
+/* [lc-928] 右栏内各 info-card 不被 flex 压缩(防御: 若将来右栏用 flex 布局, 卡片被压会丢演员/简介尾部) */
+.fnos-immersive-season .fnos-season-aside > .fnos-info-card{ flex-shrink:0 !important; min-height:0 !important; }
 /* 解除左栏内部 fnOS 固定高度/裁剪锁(仅针对已知布局包裹层, 不动选集卡片自身), 让选集内容在左栏内自然撑开并滚动 */
 .fnos-immersive-season .fnos-season-main [class*="cache-outlet"],
 .fnos-immersive-season .fnos-season-main .ms-container,
@@ -5368,6 +5372,98 @@ function hideNativeCastSections(): number {
   return _nativeCastHidden;
 }
 
+/** [lc-928] 隐藏 fnOS 详情页**原生页脚**(含「演职人员」+ 演员横滚行 + 「链接：IMDb链接」等冗余块)。
+ *
+ *  背景: lc-927 隐藏的是页面**内容区**里的演员残留, 但用户反馈「原生这里的就不要」+「IMDb
+ *  链接移动到剧集信息卡」指的其实是 fnOS 详情页**底部原生页脚**(始终在 body 直接子,
+ *  跟我们的 .fnos-season-2col wrap 平级或更外层, lc-927 完全碰不到):
+ *    · 页脚里有「演职人员」section + 演员头像横滚行(带左右箭头)→ 跟右栏演员卡重复;
+ *    · 页脚里有「链接：IMDb链接 豆瓣链接 …」一行 → 跟 lc-927 已并入的 IMDb 重复。
+ *
+ *  ⚠️ 纯结构判定, 不读"演职/演员/链接"等任何标题文字(遵守 lc-921 铁律延伸):
+ *     ① 优先语义选择器 <footer> / [role="contentinfo"], 找不到再退 body.lastElementChild;
+ *     ② 验证: 含 ≥3 个 <img>(演员头像候选) 或 包含 IMDb/Douban/Bangumi/TMDb/TVDB 外部链接 → 才视为详情页页脚;
+ *     ③ 不动 .fnos-season-2col 内任何节点(我们的两栏 wrap);
+ *     ④ 仅在已建两栏时才动手(避免误伤其他页面, 如一级 show 页 / 首页 / 视频预览);
+ *     ⑤ data-fntv-season-footer-hidden 标记做幂等, observer 反复触发不自喂。 */
+function hideNativeSeasonFooter(): number {
+  if (!document.querySelector('.fnos-season-2col')) return 0;
+  const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
+  // ① 找页脚范围
+  let footer: HTMLElement | null =
+    (document.querySelector('footer') as HTMLElement | null) ||
+    (document.querySelector('[role="contentinfo"]') as HTMLElement | null);
+  if (!footer) {
+    // 兜底: body 的最后一个直接子元素(fnOS 详情页通常将页脚挂在这里)
+    footer = document.body.lastElementChild as HTMLElement | null;
+  }
+  if (!footer || !document.body.contains(footer)) return 0;
+  if (footer === document.body || footer === document.documentElement) return 0;
+  // ③ 我们的两栏 wrap 内部的元素不算页脚
+  if (wrap && wrap.contains(footer)) return 0;
+  // ② 验证是 fnOS 详情页页脚: 含 ≥3 <img>(演员头像) 或 含 IMDb/Douban/Bangumi/TMDb/TVDB 外部链接
+  const imgCount = footer.querySelectorAll('img').length;
+  const hasLinks = !!footer.querySelector(
+    'a[href*="imdb.com"],a[href*="douban.com"],a[href*="bangumi.tv"],a[href*="themoviedb.org"],a[href*="thetvdb.com"]'
+  );
+  if (imgCount < 3 && !hasLinks) return 0;
+  if (footer.getAttribute('data-fntv-season-footer-hidden')) return 0;
+  footer.setAttribute('data-fntv-season-footer-hidden', '1');
+  footer.style.setProperty('display', 'none', 'important');
+  dlog('hideNativeSeasonFooter: 🚫 隐藏 fnOS 详情页原生页脚 tag=' + footer.tagName
+    + ' cls=' + (footer.className || '').toString().substring(0, 60)
+    + ' imgCount=' + imgCount + ' hasLinks=' + hasLinks);
+  return 1;
+}
+
+/** [lc-928] 诊断: 打印两栏 wrap / 左栏(选集) / 右栏(剧集信息+演员) 的真实高度、overflow
+ *  与 fnOS 原生页脚是否已隐藏, 帮助定位「右栏滚动底部被截断」的根因。
+ *  用户在 DevTools Console 执行 `fntvSeasonScrollDiag()` 即可查看, 把输出发回来。 */
+function fntvSeasonScrollDiag(): void {
+  try {
+    const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
+    const ep = document.querySelector('.fnos-season-main') as HTMLElement | null;
+    const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
+    const footer = (document.querySelector('footer') || document.querySelector('[role="contentinfo"]')
+      || document.body.lastElementChild) as HTMLElement | null;
+    const dump = (label: string, el: HTMLElement | null) => {
+      if (!el) { dlog('Diag[' + label + ']: NULL'); return; }
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      dlog('Diag[' + label + ']: display=' + cs.display + ' h=' + cs.height + ' maxH=' + cs.maxHeight
+        + ' minH=' + cs.minHeight + ' overflowY=' + cs.overflowY + ' overflow=' + cs.overflow
+        + ' | rect w=' + Math.round(r.width) + ' h=' + Math.round(r.height)
+        + ' top=' + Math.round(r.top) + ' bottom=' + Math.round(r.bottom)
+        + ' scrollH=' + el.scrollHeight + ' clientH=' + el.clientHeight);
+    };
+    dlog('=== fntvSeasonScrollDiag === vh=' + window.innerHeight + ' pathname=' + location.pathname);
+    dump('wrap', wrap); dump('ep', ep); dump('aside', aside);
+    if (aside) {
+      const r = aside.getBoundingClientRect();
+      dlog('Diag[aside-scrollMath]: 内容总高=' + aside.scrollHeight + ' 可视=' + aside.clientHeight
+        + ' 溢出=' + Math.max(0, aside.scrollHeight - aside.clientHeight)
+        + ' 当前 scrollTop=' + aside.scrollTop
+        + ' (rect.bottom 距 vh=' + (window.innerHeight - r.bottom) + ')');
+    }
+    if (footer) {
+      dlog('Diag[footer]: tag=' + footer.tagName + ' cls=' + (footer.className||'').toString().substring(0, 60)
+        + ' hidden=' + !!footer.getAttribute('data-fntv-season-footer-hidden')
+        + ' display=' + getComputedStyle(footer).display
+        + ' rect.top=' + Math.round(footer.getBoundingClientRect().top));
+    }
+    // 列出右栏内各卡片高度, 看谁撑高了右栏
+    const cards = document.querySelectorAll('.fnos-season-aside > *') as NodeListOf<HTMLElement>;
+    cards.forEach((c, i) => {
+      const r = c.getBoundingClientRect();
+      dlog('Diag[aside-card#' + i + ']: tag=' + c.tagName + ' cls=' + (c.className||'').toString().substring(0, 50)
+        + ' rect h=' + Math.round(r.height) + ' scrollH=' + c.scrollHeight);
+    });
+    dlog('=== fntvSeasonScrollDiag END ===');
+  } catch (e) { dlog('fntvSeasonScrollDiag error: ' + (e as Error).message); }
+}
+// [lc-928] 暴露给 DevTools Console 诊断
+(window as any).fntvSeasonScrollDiag = fntvSeasonScrollDiag;
+
 function layoutSeasonTwoPane(): void {
   if (_seasonLaying) { dlog('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
   // [lc-920] 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)不建两栏, 保持 fnOS 原生外观。
@@ -5448,6 +5544,9 @@ function layoutSeasonTwoPane(): void {
   ensureCastInAside(aside);
   // [lc-927] 演员已搬进右栏 → 隐藏 fnOS 原生位置残留的那份(SPA 重建/空壳标题), 页面上只保留右栏一份。
   hideNativeCastSections();
+  // [lc-928] 同时隐藏 fnOS 详情页底部原生页脚(里面包含重复的「演职人员」+ 演员横滚行 + 「链接：IMDb链接」),
+  //   这块在 body 直接子层, 跟 .fnos-season-2col 平级, 上面 hideNativeCastSections 碰不到。
+  hideNativeSeasonFooter();
 
   // [lc-927] 原「外部链接」独立卡片已取消: IMDb 链接并入「剧集信息」卡显示
   //   (TMDB 的 externalIds.imdb 优先, 无 TMDB 数据时用 fnOS 原生链接兜底, 见 renderTmdbShowInfo)。
@@ -5785,6 +5884,8 @@ function observeSeasonTwoPane(): void {
         if (asideNow) ensureCastInAside(asideNow);
         // [lc-927] fnOS SPA 重建可能在原生位置再长出一份演职人员 → 每次稳态巡检顺手清掉(幂等, 无残留时零开销)
         hideNativeCastSections();
+        // [lc-928] 同样的兜底: SPA 重建可能让原生页脚也复活, 顺手再清一次
+        hideNativeSeasonFooter();
       } else {
         _obsRelayoutTicks++; // [lc-906] 两栏被 fnOS 拆散: 计入重建次数, 频繁则退避, 避免与 fnOS 抢 DOM
         if (wrap) wrap.remove();
