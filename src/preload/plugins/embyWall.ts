@@ -4040,6 +4040,36 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
 .fnos-immersive-season .fnos-tag-list{ display:flex !important; flex-wrap:wrap !important; gap:.4rem !important; }
 .fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 
+/* [lc-926] 季页「剧集信息」卡内 TMDB 详情区样式（与 .fnos-info-card 同款材质，深浅模式自适应） */
+.fnos-immersive-season .fnos-info-tmdb{ display:block !important; margin-top:.5rem !important; }
+.fnos-immersive-season .fnos-tmdb-title{ font-size:1rem !important; font-weight:700 !important; color:var(--semi-color-text-0,#1d1d1f) !important; line-height:1.35 !important; margin-bottom:.3rem !important; word-break:break-word; }
+.fnos-immersive-season .fnos-tmdb-orig{ font-size:.8rem !important; font-weight:400 !important; color:var(--semi-color-text-3,#b0b0b5) !important; margin-left:.4rem !important; }
+.fnos-immersive-season .fnos-tmdb-tagline{ font-size:.8rem !important; font-style:italic !important; color:var(--semi-color-text-3,#b0b0b5) !important; line-height:1.45 !important; margin-bottom:.5rem !important; }
+.fnos-immersive-season .fnos-tmdb-rating{ font-size:.95rem !important; color:var(--semi-color-text-1,#424245) !important; margin-bottom:.5rem !important; }
+.fnos-immersive-season .fnos-tmdb-rating b{ color:#E50914 !important; font-size:1.15rem !important; }
+.fnos-immersive-season .fnos-tmdb-rating-max{ font-size:.75rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; }
+.fnos-immersive-season .fnos-tmdb-votes{ font-size:.72rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; margin-left:.4rem !important; }
+.fnos-immersive-season .fnos-tmdb-row{ display:flex !important; gap:.5rem !important; font-size:.8rem !important; line-height:1.5 !important; margin-bottom:.3rem !important; }
+.fnos-immersive-season .fnos-tmdb-k{ flex:0 0 3.4rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; }
+.fnos-immersive-season .fnos-tmdb-v{ flex:1 1 auto !important; min-width:0 !important; color:var(--semi-color-text-1,#424245) !important; }
+.fnos-immersive-season .fnos-tmdb-v .fnos-tag-list{ margin:0 !important; }
+.fnos-immersive-season .fnos-tmdb-cast{ display:inline-flex !important; align-items:baseline !important; gap:.3rem !important; }
+.fnos-immersive-season .fnos-tmdb-char{ font-size:.66rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; font-weight:400 !important; }
+.fnos-immersive-season .fnos-tmdb-overview{ font-size:.78rem !important; color:var(--semi-color-text-2,#86868b) !important; line-height:1.55 !important; margin:.5rem 0 !important; cursor:pointer !important; }
+.fnos-immersive-season .fnos-tmdb-clamp{ max-height:4.6em !important; overflow:hidden !important; position:relative !important; }
+.fnos-immersive-season .fnos-tmdb-clamp::after{ content:''; position:absolute; right:0; bottom:0; width:45%; height:1.5em; background:linear-gradient(90deg,transparent,var(--semi-color-bg-2,#fff)); }
+.fnos-immersive-season .fnos-tmdb-links{ display:flex !important; flex-wrap:wrap !important; gap:.5rem !important; font-size:.78rem !important; margin-top:.4rem !important; }
+.fnos-immersive-season .fnos-tmdb-links a{ color:var(--semi-color-primary,#007aff) !important; text-decoration:none !important; }
+.fnos-immersive-season .fnos-tmdb-sep{ color:var(--semi-color-border, rgba(0,0,0,.2)) !important; }
+.fnos-immersive-season .fnos-tmdb-loading{ font-size:.8rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; padding:.4rem 0 !important; }
+.fnos-immersive-season .fnos-tmdb-error{ font-size:.8rem !important; color:#c0392b !important; padding:.4rem 0 !important; }
+.fnos-immersive-season .fnos-tmdb-error-inline{ margin-top:.3rem !important; }
+.fnos-immersive-season .fnos-tmdb-foot{ display:flex !important; align-items:center !important; justify-content:space-between !important; gap:.5rem !important; margin-top:.6rem !important; padding-top:.5rem !important; border-top:1px solid var(--semi-color-border, rgba(0,0,0,.06)) !important; }
+.fnos-immersive-season .fnos-tmdb-src{ font-size:.7rem !important; color:var(--semi-color-text-3,#b0b0b5) !important; }
+.fnos-immersive-season .fnos-tmdb-refresh{ font-size:.72rem !important; font-weight:600 !important; padding:.3rem .7rem; border-radius:8px; border:1px solid var(--semi-color-border, rgba(0,0,0,.1)); background:var(--semi-color-fill-2,#f5f5f7); color:var(--semi-color-text-0,#1d1d1f); cursor:pointer !important; transition:background .15s ease, transform .15s ease; }
+.fnos-immersive-season .fnos-tmdb-refresh:hover{ background:var(--semi-color-fill-1,#ececef) !important; }
+.fnos-immersive-season .fnos-tmdb-refresh:active{ transform:scale(.96) !important; }
+
 /* 演职人员（侧栏内）：隐藏原生标题 & 横向滚动，圆形头像 + 姓名/角色 —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
 .fnos-immersive-season .fnos-season-aside p:has(strong){ display:none !important; }
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"]{
@@ -4163,6 +4193,26 @@ html.dark .fnos-immersive-season .fnos-info-card h4{ font-size:.78rem !important
 html.dark .fnos-immersive-season .fnos-info-card p{ font-size:.85rem !important; color:#c9c9cf !important; line-height:1.65 !important; }
 html.dark .fnos-immersive-season .fnos-info-card a{ color:#E50914 !important; font-weight:600 !important; }
 html.dark .fnos-immersive-season .fnos-tag{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
+/* [lc-926] 季页 TMDB 详情区(深色)：与上方 .fnos-info-card 深色块同款奈飞暗色电影感 */
+html.dark .fnos-immersive-season .fnos-info-tmdb{ margin-top:.5rem !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-title{ color:#f5f5f7 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-orig{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-tagline{ color:#8a8a92 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-rating{ color:#c9c9cf !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-rating b{ color:#E50914 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-rating-max, html.dark .fnos-immersive-season .fnos-tmdb-votes{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-k{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-v{ color:#c9c9cf !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-char{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-overview{ color:#9a9aa0 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-clamp::after{ background:linear-gradient(90deg,transparent,rgba(22,22,26,.78)) !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-links a{ color:#E50914 !important; font-weight:600 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-sep{ color:rgba(255,255,255,.2) !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-loading{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-error{ color:#ff6b6b !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-src{ color:#7a7a82 !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-refresh{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.14) !important; }
+html.dark .fnos-immersive-season .fnos-tmdb-refresh:hover{ background:rgba(255,255,255,.16) !important; }
 html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:4px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
@@ -4299,6 +4349,7 @@ function resetSeasonObsState(): void {
   _seasonYearText = ''; // 换页后首播年份需重新解析
   _castParentCache = null; // 换页后演职人员容器需重新定位
   _showColCache = null; // 换页后二级页内容列需重新定位
+  resetTmdbShowInfo(); // [lc-926] 换页后剧集元信息/TMDB 数据需重新取（主进程有磁盘缓存，重取不发网络请求）
 }
 
 /** 找两栏布局的「主内容」容器（左栏）。
@@ -4718,12 +4769,382 @@ function findSeasonYearText(): string {
   return '';
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   [lc-926] 季页「剧集信息」接入 TMDB
+   ───────────────────────────────────────────────────────────────────────────
+   需求：尽可能多地从 TMDB 取剧集信息；本地持久化；同一部剧只在第一次打开时拉一次；
+        提供手动刷新按钮；显示「更新于 …」。
+   数据流：
+     ① fnOS getEditDetail(guid) → title / year / tmdbId（最准；拿不到则退回页面 DOM 解析）
+     ② 主进程 tmdb:show（详情 + append_to_response 一次取回演职员/外链/关键词/分级/别名/
+        图/预告/播放平台，再补 /tv/{id}/season/{n} 本季信息；磁盘缓存 10 年，force 才重拉）
+     ③ renderTmdbShowInfo() 写进右栏「剧集信息」卡的 .fnos-info-tmdb 子容器
+   ⚠️ 自喂防护：本地统计(.fnos-info-local) 与 TMDB 数据(.fnos-info-tmdb) 分两个子容器，
+      各自做 innerHTML 内容 diff，绝不整卡覆盖（observer 观察范围包含信息卡）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+let _infoLocalEl: HTMLElement | null = null;  // 本地统计容器（集数/总时长/首播）
+let _infoTmdbEl: HTMLElement | null = null;   // TMDB 数据容器
+let _tmdbInfoGuid = '';                       // 当前已加载的季 guid（同页不重复请求）
+let _tmdbInfoData: any = null;                // 已获取的 TMDB 数据（fnOS 重建 aside 时直接复用渲染）
+let _tmdbInfoFetchedAt = 0;                   // 数据抓取时间戳（显示「更新于」）
+let _tmdbInfoLoading = false;                 // 请求进行中（防并发重复拉）
+let _tmdbInfoError = '';                      // 最近一次失败原因
+let _tmdbMetaCache: { guid: string; title: string; year: string; tmdbId: string; mediaType: 'tv' | 'movie'; seasonNumber: number | null } | null = null;
+let _seasonShowTitle = '';                    // 页面解析出的剧名（换页重置）
+let _seasonNumberCache: number | null = null; // 页面解析出的季号（换页重置）
+
+/** 换页/离开季页时清空 TMDB 状态。磁盘缓存仍在主进程，重新打开同一季仍是「零 TMDB 请求」。 */
+function resetTmdbShowInfo(): void {
+  _tmdbInfoGuid = '';
+  _tmdbInfoData = null;
+  _tmdbInfoFetchedAt = 0;
+  _tmdbInfoLoading = false;
+  _tmdbInfoError = '';
+  _tmdbMetaCache = null;
+  _seasonShowTitle = '';
+  _seasonNumberCache = null;
+}
+
+/** 从 URL 取当前季/影视 guid 与媒体类型（/v/tv/season/<guid> → tv） */
+function getSeasonPageGuid(): { guid: string; mediaType: 'tv' | 'movie' } | null {
+  const m = location.pathname.match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
+  if (!m) return null;
+  return { guid: m[2], mediaType: m[1] === 'movie' ? 'movie' : 'tv' };
+}
+
+/** 详情页头部作用域（与 findSeasonYearText 同款，避免全文档扫描） */
+function detailHeaderScope(): HTMLElement | null {
+  return (document.querySelector('.semi-always-dark')
+    || document.querySelector('.trim-mc__details--key-version')
+    || document.querySelector('header')) as HTMLElement | null;
+}
+
+/** 季页剧名：取头部作用域内「字号最大」的可见文本节点；再退到 document.title。 */
+function findSeasonShowTitle(): string {
+  if (_seasonShowTitle) return _seasonShowTitle;
+  const scope = detailHeaderScope();
+  let best = '';
+  let bestSize = 0;
+  if (scope) {
+    const leaves = scope.querySelectorAll('*');
+    const limit = Math.min(leaves.length, 1500);
+    for (let i = 0; i < limit; i++) {
+      const e = leaves[i] as HTMLElement;
+      if (e.children.length !== 0) continue;
+      const t = (e.textContent || '').trim();
+      if (!t || t.length > 60) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue; // 隐藏(路由缓存副本)元素跳过
+      const size = parseFloat(getComputedStyle(e).fontSize) || 0;
+      if (size > bestSize) { bestSize = size; best = t; }
+    }
+  }
+  if (!best && document.title) {
+    // document.title 形如 "权力的游戏 第一季 - 飞牛影视"
+    best = document.title.split(/\s+[-–|]\s+/)[0].trim().replace(/第\s*[0-9一二三四五六七八九十百]+\s*季\s*$/, '').trim();
+  }
+  if (best) _seasonShowTitle = best;
+  return best;
+}
+
+/** 中文数字（一~九十九）转 int，用于「第 三 季」这类写法 */
+function cnNumToInt(s: string): number {
+  const map: Record<string, number> = { 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (s === '十') return 10;
+  const m1 = s.match(/^十([一二三四五六七八九])$/);
+  if (m1) return 10 + map[m1[1]];
+  const m2 = s.match(/^([一二三四五六七八九])十([一二三四五六七八九])?$/);
+  if (m2) return map[m2[1]] * 10 + (m2[2] ? map[m2[2]] : 0);
+  return NaN;
+}
+
+/** 季号：头部作用域内匹配「第 N 季 / Season N / S01」；取不到返回 null（则只拉 TV 级信息，不查本季） */
+function findSeasonNumber(): number | null {
+  if (_seasonNumberCache !== null) return _seasonNumberCache;
+  const scope = detailHeaderScope();
+  if (scope) {
+    const leaves = scope.querySelectorAll('*');
+    const limit = Math.min(leaves.length, 1500);
+    for (let i = 0; i < limit; i++) {
+      const e = leaves[i];
+      if (e.children.length !== 0) continue;
+      const t = (e.textContent || '').trim();
+      const m = t.match(/^第\s*([0-9一二三四五六七八九十]+)\s*季$/) || t.match(/^Season\s*(\d{1,3})$/i) || t.match(/^S(\d{1,3})$/);
+      if (m) {
+        const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : cnNumToInt(m[1]);
+        if (!isNaN(n)) { _seasonNumberCache = n; return n; }
+      }
+    }
+  }
+  return null;
+}
+
+/** [lc-926] 取当前页剧集的 TMDB 查询入参：优先 fnOS 元数据（title/year/tmdbId 最准），
+ *  拿不到再退到页面 DOM 解析（标题字号最大值 + 首播年 + 「第 N 季」）。同一 guid 结果缓存。 */
+async function loadShowMeta(): Promise<{
+  guid: string; title: string; year: string; tmdbId: string; mediaType: 'tv' | 'movie'; seasonNumber: number | null;
+} | null> {
+  const page = getSeasonPageGuid();
+  if (!page) return null;
+  if (_tmdbMetaCache && _tmdbMetaCache.guid === page.guid) return _tmdbMetaCache;
+  let title = '';
+  let year = '';
+  let tmdbId = '';
+  try {
+    const data = await fnosGetEditDetail(location.origin, page.guid);
+    if (data) {
+      title = String(data.title || data.name || '').trim();
+      const yRaw = data.year || data.production_year || data.first_aired || data.premiere_date || data.date_created || '';
+      const ym = String(yRaw).match(/(\d{4})/);
+      if (ym) year = ym[1];
+      tmdbId = extractTmdbId(data) || '';
+      // 季号优先取 fnOS 元数据（二级季页的 item 通常带 index/index_number）
+      if (_seasonNumberCache === null) {
+        const sn = data.index_number ?? data.IndexNumber ?? data.index ?? data.season_number;
+        if (typeof sn === 'number' && !isNaN(sn)) _seasonNumberCache = sn;
+      }
+    }
+  } catch (e) {
+    dlog('[lc-926] getEditDetail 失败, 退回页面解析: ' + String(e).substring(0, 60));
+  }
+  if (!title) title = findSeasonShowTitle();
+  if (!year) year = findSeasonYearText().replace(/\D/g, '').slice(0, 4);
+  const meta = {
+    guid: page.guid,
+    title,
+    year,
+    tmdbId,
+    mediaType: page.mediaType,
+    seasonNumber: findSeasonNumber(),
+  };
+  _tmdbMetaCache = meta;
+  dlog('[lc-926] loadShowMeta: ' + JSON.stringify(meta));
+  return meta;
+}
+
+/** [lc-926] 确保「剧集信息」卡里的 TMDB 数据已加载。
+ *  同一 guid 只真正请求一次（后续 fnOS 重建 aside 时直接复用 _tmdbInfoData 重渲染，零请求）；
+ *  点「刷新」按钮 → force=true 强制重拉。 */
+function ensureTmdbShowInfo(force = false): void {
+  if (!_infoTmdbEl) return;
+  const page = getSeasonPageGuid();
+  if (!page) return;
+  if (!force && _tmdbInfoGuid === page.guid && _tmdbInfoData) { renderTmdbShowInfo(); return; }
+  if (_tmdbInfoLoading) return;
+  _tmdbInfoLoading = true;
+  _tmdbInfoGuid = page.guid;
+  if (force) _tmdbInfoError = '';
+  renderTmdbShowInfo(); // 先渲染「正在获取…」
+  void (async () => {
+    try {
+      const meta = await loadShowMeta();
+      if (!meta) {
+        _tmdbInfoLoading = false;
+        _tmdbInfoError = '当前页面不是季/详情路由';
+        renderTmdbShowInfo();
+        return;
+      }
+      const r = await ipcRenderer.invoke('tmdb:show', {
+        tmdbId: meta.tmdbId || undefined,
+        title: meta.title || undefined,
+        year: meta.year || undefined,
+        mediaType: meta.mediaType,
+        seasonNumber: meta.seasonNumber === null ? undefined : meta.seasonNumber,
+        force: !!force,
+      });
+      if (r && r.ok && r.data) {
+        _tmdbInfoData = r.data;
+        _tmdbInfoFetchedAt = r.fetchedAt || Date.now();
+        _tmdbInfoError = '';
+        log('[lc-926] TMDB 剧集信息就绪: ' + (r.data.title || '') + ' 更新于 ' + new Date(_tmdbInfoFetchedAt).toLocaleString('zh-CN'));
+      } else {
+        _tmdbInfoError = (r && r.error) || 'TMDB 获取失败';
+        log('[lc-926] TMDB 剧集信息失败: ' + _tmdbInfoError);
+      }
+    } catch (e) {
+      _tmdbInfoError = String(e).substring(0, 120);
+    } finally {
+      _tmdbInfoLoading = false;
+      renderTmdbShowInfo();
+    }
+  })();
+}
+
+/* —— TMDB 信息渲染 —— */
+function tmdbEsc(s: any): string {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function tmdbFmtTime(ts: number): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const p = (n: number): string => (n < 10 ? '0' + n : String(n));
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function tmdbRuntime(min: number): string {
+  if (!min) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h ? (h + ' 小时 ' + m + ' 分') : (m + ' 分钟');
+}
+const TMDB_STATUS_CN: Record<string, string> = {
+  'Returning Series': '连载中',
+  'Ended': '已完结',
+  'Canceled': '已取消',
+  'In Production': '制作中',
+  'Planned': '计划中',
+  'Pilot': '试播集',
+  'Released': '已上映',
+  'Post Production': '后期制作',
+  'Rumored': '传闻中',
+};
+
+/** 生成「剧集信息」卡中 TMDB 部分的 HTML（不含底部「更新于 + 刷新」） */
+function buildTmdbInfoHtml(d: any): string {
+  const out: string[] = [];
+  const row = (k: string, v: string): void => {
+    if (v) out.push(`<div class="fnos-tmdb-row"><span class="fnos-tmdb-k">${tmdbEsc(k)}</span><span class="fnos-tmdb-v">${v}</span></div>`);
+  };
+  const tags = (list: any[], max = 24): string => (Array.isArray(list) && list.length)
+    ? `<span class="fnos-tag-list">${list.slice(0, max).map((t) => `<span class="fnos-tag">${tmdbEsc(t)}</span>`).join('')}</span>`
+    : '';
+  const link = (href: string, text: string): string =>
+    (href && text) ? `<a href="${tmdbEsc(href)}" target="_blank" rel="noopener">${tmdbEsc(text)}</a>` : '';
+
+  // 标题 + 原名 + 标语
+  const nameLine = [tmdbEsc(d.title || '')];
+  if (d.originalTitle && d.originalTitle !== d.title) {
+    nameLine.push(`<span class="fnos-tmdb-orig">${tmdbEsc(d.originalTitle)}</span>`);
+  }
+  out.push(`<div class="fnos-tmdb-title">${nameLine.join(' ')}</div>`);
+  if (d.tagline) out.push(`<div class="fnos-tmdb-tagline">${tmdbEsc(d.tagline)}</div>`);
+
+  // 评分
+  if (d.rating) {
+    const votes = d.votes ? `<span class="fnos-tmdb-votes">${Number(d.votes).toLocaleString('zh-CN')} 人评分</span>` : '';
+    out.push(`<div class="fnos-tmdb-rating"><b>${Number(d.rating).toFixed(1)}</b><span class="fnos-tmdb-rating-max"> / 10</span>${votes}</div>`);
+  }
+
+  // 状态 / 播出日期
+  const st = TMDB_STATUS_CN[d.status] || d.status || '';
+  const dateParts: string[] = [];
+  if (d.airDate) dateParts.push('首播 ' + d.airDate);
+  if (d.lastAirDate && d.lastAirDate !== d.airDate) dateParts.push('完结 ' + d.lastAirDate);
+  if (st || dateParts.length) {
+    row('状态', [tmdbEsc(st), tmdbEsc(dateParts.join(' · '))].filter(Boolean).join(' · '));
+  }
+
+  // 季 / 集 / 本季
+  const cntParts: string[] = [];
+  if (d.seasons) cntParts.push(d.seasons + ' 季');
+  if (d.episodes) cntParts.push(d.episodes + ' 集');
+  if (cntParts.length) row('规模', tmdbEsc(cntParts.join(' · ')));
+  if (d.season) {
+    const sp: string[] = [];
+    if (d.season.episodeCount) sp.push(d.season.episodeCount + ' 集');
+    if (d.season.airDate) sp.push('首播 ' + d.season.airDate);
+    row('第 ' + d.season.seasonNumber + ' 季', [tmdbEsc(d.season.name), tmdbEsc(sp.join(' · '))].filter(Boolean).join(' · '));
+  }
+
+  // 单集时长
+  if (d.runtimeAvg) {
+    const rt = d.runtimeMin && d.runtimeMax && d.runtimeMin !== d.runtimeMax
+      ? `${tmdbRuntime(d.runtimeMin)} ~ ${tmdbRuntime(d.runtimeMax)}`
+      : tmdbRuntime(d.runtimeAvg);
+    row('单集', tmdbEsc(rt));
+  }
+
+  row('类型', tags(d.genres));
+  row('地区', tmdbEsc(Array.isArray(d.countries) ? d.countries.join(' / ') : ''));
+  row('语言', tmdbEsc(Array.isArray(d.languages) ? d.languages.join(' / ') : ''));
+  if (Array.isArray(d.networks) && d.networks.length) row('首播平台', tmdbEsc(d.networks.join(' / ')));
+  if (Array.isArray(d.providers) && d.providers.length) row('在线播放', tags(d.providers, 8));
+  if (Array.isArray(d.companies) && d.companies.length) row('出品', tags(d.companies, 8));
+  if (Array.isArray(d.createdBy) && d.createdBy.length) row('主创', tmdbEsc(d.createdBy.join(' / ')));
+  if (Array.isArray(d.directors) && d.directors.length) row('导演', tmdbEsc(d.directors.join(' / ')));
+  if (Array.isArray(d.writers) && d.writers.length) row('编剧', tmdbEsc(d.writers.join(' / ')));
+  if (Array.isArray(d.composers) && d.composers.length) row('配乐', tmdbEsc(d.composers.join(' / ')));
+  if (d.certification) row('分级', tmdbEsc(d.certification));
+  if (Array.isArray(d.aliases) && d.aliases.length) row('别名', tmdbEsc(d.aliases.join(' / ')));
+
+  // 主演
+  if (Array.isArray(d.cast) && d.cast.length) {
+    const chips = d.cast.slice(0, 12).map((c: any) => {
+      const nm = tmdbEsc(c.name || '');
+      const ch = c.character ? `<span class="fnos-tmdb-char">${tmdbEsc(c.character)}</span>` : '';
+      return `<span class="fnos-tag fnos-tmdb-cast">${nm}${ch}</span>`;
+    }).join('');
+    out.push(`<div class="fnos-tmdb-row"><span class="fnos-tmdb-k">主演</span><span class="fnos-tmdb-v"><span class="fnos-tag-list">${chips}</span></span></div>`);
+  }
+
+  if (Array.isArray(d.keywords) && d.keywords.length) row('关键词', tags(d.keywords, 16));
+
+  // 简介（长文本折叠，点「展开」切换）
+  if (d.overview) {
+    out.push(`<div class="fnos-tmdb-overview fnos-tmdb-clamp">${tmdbEsc(d.overview)}</div>`);
+  }
+
+  // 外部链接
+  const links: string[] = [];
+  if (d.url) links.push(link(d.url, 'TMDB'));
+  if (d.externalIds && d.externalIds.imdb) links.push(link('https://www.imdb.com/title/' + d.externalIds.imdb, 'IMDb'));
+  if (d.externalIds && d.externalIds.tvdb) links.push(link('https://thetvdb.com/?id=' + d.externalIds.tvdb, 'TVDb'));
+  if (d.externalIds && d.externalIds.wikidata) links.push(link('https://www.wikidata.org/wiki/' + d.externalIds.wikidata, 'Wikidata'));
+  if (d.trailerKey) links.push(link('https://www.youtube.com/watch?v=' + d.trailerKey, '预告片' + (d.trailerName ? '（' + d.trailerName + '）' : '')));
+  if (d.homepage) links.push(link(d.homepage, '官网'));
+  if (links.length) out.push(`<div class="fnos-tmdb-links">${links.join('<span class="fnos-tmdb-sep">·</span>')}</div>`);
+
+  return out.join('');
+}
+
+/** 把 TMDB 数据 / 加载中 / 错误 状态渲染进 .fnos-info-tmdb（带内容 diff 防 observer 自喂） */
+function renderTmdbShowInfo(): void {
+  const box = _infoTmdbEl;
+  if (!box) return;
+  let body = '';
+  if (_tmdbInfoData) {
+    body = buildTmdbInfoHtml(_tmdbInfoData);
+  } else if (_tmdbInfoLoading) {
+    body = '<div class="fnos-tmdb-loading">正在从 TMDB 获取剧集信息…</div>';
+  } else if (_tmdbInfoError) {
+    body = `<div class="fnos-tmdb-error">${tmdbEsc(_tmdbInfoError)}</div>`;
+  }
+  const errNote = (_tmdbInfoData && _tmdbInfoError)
+    ? `<div class="fnos-tmdb-error fnos-tmdb-error-inline">${tmdbEsc(_tmdbInfoError)}</div>` : '';
+  const when = _tmdbInfoFetchedAt ? (' 更新于 ' + tmdbFmtTime(_tmdbInfoFetchedAt)) : '';
+  const foot = `<div class="fnos-tmdb-foot">`
+    + `<span class="fnos-tmdb-src">TMDB${tmdbEsc(when)}</span>`
+    + `<button type="button" class="fnos-tmdb-refresh" title="从 TMDB 重新获取本剧信息">${_tmdbInfoLoading ? '获取中…' : '⟳ 刷新'}</button>`
+    + `</div>`;
+  const next = body + errNote + foot;
+  if (box.innerHTML === next) return; // 内容未变 → 不触碰 DOM, 切断自喂
+  box.innerHTML = next;
+
+  const ov = box.querySelector('.fnos-tmdb-overview') as HTMLElement | null;
+  if (ov) {
+    ov.addEventListener('click', () => { ov.classList.toggle('fnos-tmdb-clamp'); });
+  }
+  const btn = box.querySelector('.fnos-tmdb-refresh') as HTMLElement | null;
+  if (btn) {
+    btn.addEventListener('click', (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (_tmdbInfoLoading) return;
+      ensureTmdbShowInfo(true);
+    });
+  }
+}
+
 /** 刷新「剧集信息」卡中的集数 / 总时长 / 首播（随选集懒加载补全而更新）
  *  [lc-906] 加了内容 diff: html 未变化则不写 innerHTML。
  *  ⚠️ 无脑写 innerHTML 会替换整卡子节点 → childList mutation → 触发 observeSeasonTwoPane 的
  *  MutationObserver(其观察范围包含信息卡) → 再次跑到本函数 → 无限自喂, 是整软件卡死的核心环路之一。 */
 function updateSeasonInfoStats(): void {
-  if (!_infoCard) return;
+  // [lc-926] 写进专属子容器 .fnos-info-local（与 TMDB 数据的 .fnos-info-tmdb 互不覆盖）
+  const target = _infoLocalEl || _infoCard;
+  if (!target) return;
   const episodes = getRealEpisodeCards();
   const count = episodes.length;
   const total = formatSeconds(sumEpisodeSeconds(episodes)); // [lc-906] 复用 cards, 省一次全文档扫描
@@ -4736,12 +5157,12 @@ function updateSeasonInfoStats(): void {
     const seasons = document.querySelectorAll('.card-root').length;
     if (seasons) countHtml = `<p>季数：<b>${seasons}</b> 季</p>`;
   }
-  let html = '<h4>剧集信息</h4>';
+  let html = '';
   if (countHtml) html += countHtml;
   if (total) html += `<p>总时长：${total}</p>`;
   if (year) html += `<p>首播：${year}</p>`;
-  if (_infoCard.innerHTML === html) return; // [lc-906] 内容未变 → 不触碰 DOM, 切断自喂
-  _infoCard.innerHTML = html;
+  if (target.innerHTML === html) return; // [lc-906] 内容未变 → 不触碰 DOM, 切断自喂
+  target.innerHTML = html;
 }
 
 /** [lc-906] 仅当演职人员里存在「尚未处理」的锚点时才跑完整 restyle。
@@ -4852,13 +5273,25 @@ function layoutSeasonTwoPane(): void {
   const aside = document.createElement('aside');
   aside.className = 'fnos-season-aside';
 
-  // 剧集信息（仅展示 fnOS 真实暴露的字段：集数 / 总时长 / 首播）
+  // 剧集信息 = 本地统计(fnOS 真实暴露的集数/总时长/首播) + [lc-926] TMDB 详情
   const info = document.createElement('div');
   info.className = 'fnos-info-card';
   info.setAttribute('data-fntv-season-info', '');
+  const infoTitle = document.createElement('h4');
+  infoTitle.textContent = '剧集信息';
+  const infoLocal = document.createElement('div');
+  infoLocal.className = 'fnos-info-local';
+  const infoTmdb = document.createElement('div');
+  infoTmdb.className = 'fnos-info-tmdb';
+  info.appendChild(infoTitle);
+  info.appendChild(infoLocal);
+  info.appendChild(infoTmdb);
   aside.appendChild(info);
   _infoCard = info;
+  _infoLocalEl = infoLocal;
+  _infoTmdbEl = infoTmdb;
   updateSeasonInfoStats();
+  ensureTmdbShowInfo(); // [lc-926] 首次打开该季 → 拉一次 TMDB（本地有磁盘缓存则秒回，零网络请求）
 
   // [lc-920] 主要配音演员(借用 fnOS 原生演职人员): 抽成 ensureCastInAside, 建栏时与 observer 持续巡检时复用,
   //   解决"演员数据异步填充后才出现、但两栏只在首次建立时塞过一次 → 右栏永远缺演员"的问题。
@@ -5241,6 +5674,8 @@ function unlayoutSeasonTwoPane(): void {
   if (_season2colObserver) { _season2colObserver.disconnect(); _season2colObserver = null; }
   if (_castRestyleTimer) { clearInterval(_castRestyleTimer); _castRestyleTimer = null; } // [lc-903] 停止持续兜底定时器
   _infoCard = null;
+  _infoLocalEl = null;
+  _infoTmdbEl = null;
   const wrap = document.querySelector('.fnos-season-2col') as HTMLElement | null;
   if (!wrap) return;
   const ep = wrap.querySelector('.fnos-season-main') as HTMLElement | null;

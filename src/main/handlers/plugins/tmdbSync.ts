@@ -632,6 +632,244 @@ export async function tmdbGenresFor(
     }
 }
 
+/** 季页「剧集信息」详情缓存版本：字段结构变动时 +1，使旧缓存失效、强制重拉。 */
+const TMDB_SHOW_CACHE_VER = 1;
+/** 剧集信息缓存有效期 ≈ 永久（10 年）。用户要求「第一次打开对应剧集才获取一次」，
+ *  之后只读本地磁盘缓存；只有点卡片上的「刷新」按钮（force=true）才重新拉取。 */
+const TMDB_SHOW_TTL_MS = 3650 * 24 * 60 * 60 * 1000;
+
+/** 取数组里每个对象的 name 字段，去重去空 */
+function namesOf(list: any, field = 'name'): string[] {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const it of list) {
+        const v = it && it[field];
+        if (typeof v === 'string' && v.trim() && !seen.has(v)) { seen.add(v); out.push(v.trim()); }
+    }
+    return out;
+}
+
+/** 从 crew 里按 job 取人名（去重） */
+function crewByJob(crew: any[], job: string): string[] {
+    if (!Array.isArray(crew)) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of crew) {
+        if (!c || c.job !== job) continue;
+        const n = typeof c.name === 'string' ? c.name.trim() : '';
+        if (n && !seen.has(n)) { seen.add(n); out.push(n); }
+    }
+    return out;
+}
+
+function titleSlug(title: string): string {
+    return crypto.createHash('md5').update(String(title || '')).digest('hex').slice(0, 12);
+}
+
+function yearOfAny(date: any): string {
+    return typeof date === 'string' && date.length >= 4 ? date.slice(0, 4) : '';
+}
+
+/**
+ * 解析 TMDB 条目 id：优先用 fnOS 元数据里带的 tmdbId；没有则按标题(+年份)搜索，
+ * 复用 tmdbGenresFor 中已验证的「年份接近度挑选」逻辑，避免同名不同剧误匹配。
+ */
+async function resolveShowId(
+    client: AxiosInstance, baseParams: any, mt: 'tv' | 'movie',
+    arg: { tmdbId?: string | number; title?: string; year?: string }
+): Promise<number | null> {
+    if (arg.tmdbId != null && /^\d+$/.test(String(arg.tmdbId).trim())) {
+        return parseInt(String(arg.tmdbId).trim(), 10);
+    }
+    const title = (arg.title || '').trim();
+    if (!title) return null;
+    const yearGap = (r: any): number => {
+        const y = parseInt(String(arg.year || '').slice(0, 4), 10);
+        if (isNaN(y)) return 0;
+        const rd = (mt === 'movie' ? r.release_date : r.first_air_date) || '';
+        const ry = parseInt(String(rd).slice(0, 4), 10);
+        return isNaN(ry) ? 4 : Math.abs(ry - y);
+    };
+    const pickBest = (list: any[]): any => {
+        if (!list || !list.length) return null;
+        let best = list[0]; let bestGap = yearGap(best);
+        for (const r of list) { const g = yearGap(r); if (g < bestGap) { bestGap = g; best = r; } }
+        return best;
+    };
+    const doSearch = async (year?: string): Promise<any[]> => {
+        const p: any = { ...baseParams, query: title, page: 1 };
+        if (year) { if (mt === 'movie') p.year = year; else p.first_air_date_year = year; }
+        const r = await getWithRetry(client, `/search/${mt}`, { params: p });
+        return (r?.data?.results || []) as any[];
+    };
+    let top = pickBest(await doSearch(arg.year));
+    if ((!top || yearGap(top) > 3) && arg.year) {
+        const relaxed = pickBest(await doSearch(undefined));
+        if (relaxed && yearGap(relaxed) <= 3) top = relaxed;
+    }
+    return top && top.id ? Number(top.id) : null;
+}
+
+/** 归一化 TMDB 详情 + append_to_response 的多个子响应为「剧集信息」渲染所需的扁平结构 */
+function normalizeShow(d: any, mt: 'tv' | 'movie', id: number, season: any): any {
+    const title = (mt === 'movie' ? (d.title || d.original_title) : (d.name || d.original_name)) || '';
+    const original = (mt === 'movie' ? d.original_title : d.original_name) || '';
+    const airDate = mt === 'movie' ? d.release_date : d.first_air_date;
+    const agg = d.aggregate_credits || {};
+    const crew: any[] = Array.isArray(d.credits?.crew) ? d.credits.crew : (Array.isArray(agg.crew) ? agg.crew : []);
+    const castRaw: any[] = Array.isArray(agg.cast) && agg.cast.length
+        ? agg.cast
+        : (Array.isArray(d.credits?.cast) ? d.credits.cast : []);
+    const cast = castRaw.slice(0, 20).map((c: any) => ({
+        name: c.name || '',
+        character: c.character || (Array.isArray(c.roles) && c.roles[0] ? c.roles[0].character : '') || '',
+        profile: c.profile_path || '',
+        order: typeof c.order === 'number' ? c.order : 999,
+    })).sort((a: any, b: any) => a.order - b.order);
+    // 集数 / 时长：tv 用 episode_run_time(数组) + number_of_episodes；movie 用 runtime
+    const runtimes: number[] = Array.isArray(d.episode_run_time) ? d.episode_run_time.filter((n: any) => typeof n === 'number' && n > 0) : [];
+    if (!runtimes.length && mt === 'movie' && typeof d.runtime === 'number' && d.runtime > 0) runtimes.push(d.runtime);
+    const runtimeAvg = runtimes.length ? Math.round(runtimes.reduce((a, b) => a + b, 0) / runtimes.length) : 0;
+    // 分级：tv → content_ratings(US)；movie → release_dates(US)
+    let certification = '';
+    if (mt === 'tv') {
+        const cr = Array.isArray(d.content_ratings?.results) ? d.content_ratings.results : [];
+        const us = cr.find((r: any) => r.iso_3166_1 === 'US') || cr[0];
+        certification = us?.rating || '';
+    } else {
+        const rd = Array.isArray(d.release_dates?.results) ? d.release_dates.results : [];
+        const us = rd.find((r: any) => r.iso_3166_1 === 'US');
+        certification = us?.release_dates?.[0]?.certification || '';
+    }
+    // 预告片：优先 YouTube 官方 Trailer
+    const vids = Array.isArray(d.videos?.results) ? d.videos.results : [];
+    const trailer = vids.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer')
+        || vids.find((v: any) => v.site === 'YouTube') || null;
+    // 别名：tv 用 results、movie 用 titles
+    const altRaw = mt === 'tv' ? d.alternative_titles?.results : d.alternative_titles?.titles;
+    const aliases = namesOf(altRaw, 'title').filter((t) => t && t !== title && t !== original).slice(0, 8);
+    // 播放平台：watch/providers 的中国区 flatrate
+    const wp = d['watch/providers']?.results || {};
+    const cnProviders = namesOf((wp.CN || wp.HK || wp.TW || wp.US || {}).flatrate).slice(0, 6);
+    // 关键词
+    const kwRaw = mt === 'tv' ? d.keywords?.results : d.keywords?.keywords;
+    const keywords = namesOf(kwRaw).slice(0, 16);
+    // 图：海报 / 背景（只存路径，真实图片由 tmdb:image 代理转 dataURL）
+    const posterPath = typeof d.poster_path === 'string' ? d.poster_path : '';
+    const backdropPath = typeof d.backdrop_path === 'string' ? d.backdrop_path : '';
+    const backdrops = (Array.isArray(d.images?.backdrops) ? d.images.backdrops : [])
+        .map((b: any) => (typeof b?.file_path === 'string' ? b.file_path : ''))
+        .filter(Boolean).slice(0, 6);
+
+    return {
+        tmdbId: id,
+        mediaType: mt,
+        url: `https://www.themoviedb.org/${mt}/${id}`,
+        title,
+        originalTitle: original,
+        tagline: d.tagline || '',
+        overview: d.overview || '',
+        year: yearOfAny(airDate),
+        airDate: airDate || '',
+        lastAirDate: d.last_air_date || '',
+        status: d.status || '',
+        inProduction: !!d.in_production,
+        seasons: typeof d.number_of_seasons === 'number' ? d.number_of_seasons : 0,
+        episodes: typeof d.number_of_episodes === 'number' ? d.number_of_episodes : 0,
+        runtimeAvg,
+        runtimeMin: runtimes.length ? Math.min(...runtimes) : 0,
+        runtimeMax: runtimes.length ? Math.max(...runtimes) : 0,
+        genres: namesOf(d.genres),
+        // tv 的 origin_country 是国别码字符串数组（['US','GB']）；movie 的 production_countries 是对象数组
+        countries: (mt === 'tv'
+            ? (Array.isArray(d.origin_country) ? d.origin_country.filter((x: any) => typeof x === 'string' && x) : [])
+            : namesOf(d.production_countries)) as string[],
+        languages: (Array.isArray(d.spoken_languages) ? d.spoken_languages : [])
+            .map((l: any) => l?.english_name || l?.name || '').filter(Boolean).slice(0, 8),
+        networks: namesOf(d.networks),
+        companies: namesOf(d.production_companies).slice(0, 8),
+        createdBy: namesOf(d.created_by).slice(0, 6),
+        directors: crewByJob(crew, 'Director').slice(0, 6),
+        writers: crewByJob(crew, 'Writer').slice(0, 8),
+        composers: crewByJob(crew, 'Original Music Composer').slice(0, 4),
+        producers: crewByJob(crew, 'Producer').slice(0, 6),
+        cast,
+        rating: typeof d.vote_average === 'number' ? d.vote_average : 0,
+        votes: typeof d.vote_count === 'number' ? d.vote_count : 0,
+        popularity: typeof d.popularity === 'number' ? d.popularity : 0,
+        certification,
+        homepage: d.homepage || '',
+        externalIds: {
+            imdb: d.external_ids?.imdb_id || '',
+            tvdb: d.external_ids?.tvdb_id ? String(d.external_ids.tvdb_id) : '',
+            wikidata: d.external_ids?.wikidata_id || '',
+            instagram: d.external_ids?.instagram_id || '',
+            twitter: d.external_ids?.twitter_id || '',
+        },
+        trailerKey: trailer?.key || '',
+        trailerName: trailer?.name || '',
+        posterPath,
+        backdropPath,
+        backdrops,
+        keywords,
+        aliases,
+        providers: cnProviders,
+        season: season || null,
+    };
+}
+
+function normalizeSeason(s: any, seasonNumber: number): any {
+    if (!s || !s.id) return null;
+    return {
+        seasonNumber,
+        name: s.name || '',
+        overview: s.overview || '',
+        airDate: s.air_date || '',
+        episodeCount: (Array.isArray(s.episodes) ? s.episodes.length : (typeof s.episodes === 'number' ? s.episodes : 0)),
+        posterPath: typeof s.poster_path === 'string' ? s.poster_path : '',
+    };
+}
+
+/**
+ * 拉取单部影视的【完整详情】（季页「剧集信息」卡使用）。
+ * 一次主请求 + append_to_response 合并取回演职员 / 外链 / 关键词 / 分级 / 别名 / 图片 / 预告 / 播放平台，
+ * 季页再补一次 /tv/{id}/season/{n} 取本季集数与首播日。
+ */
+async function fetchShowDetails(arg: {
+    tmdbId?: string | number; title?: string; year?: string;
+    mediaType?: 'tv' | 'movie'; seasonNumber?: number | null;
+}): Promise<{ ok: boolean; data?: any; error?: string }> {
+    const key = fnConfig.getTmdbApiKey();
+    if (!key) return { ok: false, error: '未配置 TMDB API Key，请在设置面板填写。' };
+    const mt: 'tv' | 'movie' = arg.mediaType === 'movie' ? 'movie' : 'tv';
+    try {
+        const client = http();
+        const a = authFor(key);
+        const baseParams: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
+        const id = await resolveShowId(client, baseParams, mt, arg);
+        if (!id) return { ok: false, error: 'TMDB 未找到匹配条目：' + (arg.title || arg.tmdbId || '(无标题)') };
+        const append = mt === 'tv'
+            ? 'aggregate_credits,credits,external_ids,keywords,content_ratings,alternative_titles,images,videos,watch/providers'
+            : 'credits,external_ids,keywords,alternative_titles,images,videos,release_dates,watch/providers';
+        const dResp = await getWithRetry(client, `/${mt}/${id}`, { params: { ...baseParams, append_to_response: append } });
+        let season: any = null;
+        if (mt === 'tv' && typeof arg.seasonNumber === 'number' && arg.seasonNumber >= 0) {
+            try {
+                const sResp = await getWithRetry(client, `/tv/${id}/season/${arg.seasonNumber}`, { params: baseParams });
+                season = normalizeSeason(sResp?.data || null, arg.seasonNumber);
+            } catch (e: any) {
+                log.warn('[TMDB] 季详情获取失败（season=' + arg.seasonNumber + '）：' + String(e?.message || e));
+            }
+        }
+        log.info('[TMDB] 详情获取成功：' + mt + '/' + id + ' ' + (arg.title || '') + (season ? (' 含第' + arg.seasonNumber + '季') : ''));
+        return { ok: true, data: normalizeShow(dResp?.data || {}, mt, id, season) };
+    } catch (e: any) {
+        log.warn('[TMDB] 详情获取失败（' + (arg.title || arg.tmdbId || '') + '）：' + dumpErr(e));
+        return { ok: false, error: describeTmdbError(e) };
+    }
+}
+
 function init(): void {
     // [lc-765] 清理旧版本剧集类型缓存文件（非当前版本键），避免与新版本键共存造成混淆/脏数据
     try {
@@ -695,6 +933,33 @@ function init(): void {
             return r.data;
         } catch (e: any) {
             log.warn('[TMDB图片缓存] logo 获取失败：' + (e?.message || e));
+            return { ok: false, error: String((e && e.message) || e) };
+        }
+    }, { useHandle: true });
+    // [lc-926] 季页「剧集信息」：一次取回完整详情（详情 + 演职员 + 外链 + 关键词 + 分级 + 别名 + 图 + 预告 + 平台 + 本季信息）。
+    //   缓存 ≈ 永久（10 年）：同一部剧只在第一次打开时真正请求 TMDB，之后一律读本地磁盘缓存；
+    //   只有用户在卡片上点「刷新」（force=true）才重拉。返回 fetchedAt 供前端显示「更新于 …」。
+    registerHandler('tmdb:show', async (_e: any, arg: {
+        tmdbId?: string | number; title?: string; year?: string;
+        mediaType?: 'tv' | 'movie'; seasonNumber?: number | null; force?: boolean;
+    }) => {
+        const mt = arg?.mediaType === 'movie' ? 'movie' : 'tv';
+        const idPart = (arg?.tmdbId != null && /^\d+$/.test(String(arg.tmdbId).trim()))
+            ? ('id' + String(arg.tmdbId).trim())
+            : ('t' + titleSlug(arg?.title || ''));
+        const key = 'show_v' + TMDB_SHOW_CACHE_VER + '_' + mt + '_' + idPart + '_s' + (arg?.seasonNumber ?? 'x');
+        try {
+            const r = await getDailyCached(key, async () => {
+                const res = await fetchShowDetails({
+                    tmdbId: arg?.tmdbId, title: arg?.title, year: arg?.year,
+                    mediaType: mt, seasonNumber: arg?.seasonNumber ?? null,
+                });
+                if (!res.ok) throw new Error(res.error || '详情获取失败');
+                return res.data;
+            }, TMDB_SHOW_TTL_MS, !!arg?.force);
+            log.info('[TMDB] 剧集信息' + (r.fromCache ? '来自磁盘缓存(未请求TMDB)' : '已向TMDB刷新') + ' key=' + key);
+            return { ok: true, data: r.data, fetchedAt: r.fetchedAt, fromCache: r.fromCache };
+        } catch (e: any) {
             return { ok: false, error: String((e && e.message) || e) };
         }
     }, { useHandle: true });
