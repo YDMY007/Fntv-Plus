@@ -1091,6 +1091,9 @@ let _carouselInited = false;
 // [lc-615] 轮播是否已揭示(进度条走完): 详情补完的二次重建只有在已揭示后才执行,
 // 否则会绕过进度条提前出图(用户看到"进度条 20% 就闪出轮播")。
 let _carouselRevealed = false;
+// [lc-937] 是否「离开过首页」: 离开首页(spaNav/原生链接进详情)时置 true, 返回首页后强制干净重建轮播,
+//   重建完成后复位。用于避免 in-home 的 replaceState 反复重建, 同时保证「轮播按钮(spaNav)打开的详情返回首页」必定重建。
+let _leftHome = false;
 let _carouselContainer: HTMLElement | null = null;
 let _carouselUpdatedAt = 0; // 最近更新板块数据就绪(轮播注入)时间戳, 用于标题旁显示更新时间
 let _carouselWrapper: HTMLElement | null = null;
@@ -11888,24 +11891,54 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const d = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
     if (d && d.classList.contains('drawer-open')) { animateCloseDrawer(d); log('NAV -> DRAWER CLOSED (anim)'); }
   };
-  // [lc-889] 返回首页时强制重注入轮播: 轮播详情按钮经 spaNav(pushState+手动dispatch popstate)
-  //   导航后, fnOS 视图栈可能不一致, 回来时落到未增强的原生 /v; 此时轮播守卫
-  //   !(_apiLoaded && !_carouselRevealed) 在某些情况下会拦截重注入。这里在返回首页时
-  //   显式重置并重建轮播, 确保看到的是 Fntv-Plus 增强页而非飞牛原生影视。
-  //   [lc-924→lc-932] 原「返回前先校验每个 show.backdrop 是否横版(防竖版海报)」的逻辑已移除:
-  //   该网络重校验正是"返回首页时轮播被重拉刷新"的根源。现改为返回首页仅用缓存重建轮播(无网络重拉),
-  //   数据新鲜度由 [lc-932] 启动后每 10 分钟整页重载一次保证。
+  // [lc-889→lc-937] 返回首页时强制重注入轮播。
+  //   轮播详情按钮经 spaNav(pushState+手动dispatch popstate) 导航后, fnOS 视图栈可能不一致:
+  //   返回首页时旧轮播可能「仍挂载却处于坏状态」(或不挂载), 旧守卫
+  //   `if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return;`
+  //   会令其永不重建 → 海报不显示(这正是"轮播按钮打开的详情返回后图片不加载"的根因;
+  //   而原生链接路径 A 落地 fnOS 状态一致, 重建成功, 故正常)。
+  //   现改为: 只要「离开过首页」(_leftHome) 或轮播不健康, 就先彻底销毁(含移除注入的 wrapper),
+  //   再重试注入(返回首页时 fnOS 可能仍在渲染媒体库区块, 一次 inject 找不到 section),
+  //   确保两条路径返回首页都能正确重建并显示横版海报(base64 data URL, 与导航无关)。
+  //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
-    if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return; // 已在, 跳过
-    if (_carouselContainer && !document.body.contains(_carouselContainer)) { destroyCarousel(); _carouselContainer = null; }
+    // 仍在首页且轮播健康、且本次会话未离开过首页 → 跳过(避免 in-home 的 replaceState 反复重建)
+    const healthy = !!(_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited);
+    if (healthy && !_leftHome) return;
+    _leftHome = false; // 本次返回/重建后复位
+    // ① 彻底清理: 销毁 timer/listener + 移除注入的 wrapper + 复位状态(无论旧节点是否仍挂载)
+    try { destroyCarousel(); } catch (_) { /* ignore */ }
+    if (_carouselWrapper) { try { if (_carouselWrapper.parentElement) _carouselWrapper.remove(); } catch (_) { /* ignore */ } }
+    _carouselContainer = null;
+    _carouselWrapper = null;
     _carouselInited = false;
     _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
-    // [lc-935][DIAG] 重建前打印 _apiShows 关键状态: 若 hasBlob 全 false 说明数据本身丢了(非 blob GC)
-    const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
-    log('[lc-935][DIAG] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
-    injectCarousel(); // 立即重建(用当前缓存, 无网络重拉); 返回首页不再做 backdrop 网络重校验
-    log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新, 数据新鲜度由每 10 分钟整页重载保证)');
+    // ② 重试注入: 返回首页时 fnOS 可能仍在(重新)渲染媒体库区块, 一次 inject 可能找不到 section;
+    //   多次重试, 命中即建, 上限 ~1.5s 后仍无则放弃并告警(避免无限重试)。
+    let _tries = 0;
+    const rebuild = (): void => {
+      _tries++;
+      const target = findMediaLibrarySection();
+      if (!target) {
+        if (_tries <= 6) { setTimeout(rebuild, 250); return; }
+        log('[lc-937] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建');
+        return;
+      }
+      const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
+      log('[lc-937] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
+      injectCarousel(); // 用当前缓存(含 base64 data URL 横版主图), 无网络重拉
+      log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新)');
+    };
+    rebuild();
+    // ③ 数据兜底: 若整页重载等导致 _apiShows 为空(无缓存), 重新拉取(内部 revealOnce 会渲染)
+    if (_apiShows.length === 0) {
+      _apiLoaded = false;      // 解除"只拉一次"守卫, 允许重拉
+      _carouselRevealed = false; // 允许 fetchShowsViaIPC 内部 revealOnce 重新渲染
+      fetchShowsViaIPC(location.origin).then(() => {
+        // 内部 revealOnce 处理渲染, 无需此处再 inject
+      }).catch(e => log('[lc-937] ensureHomepageEnhanced 重新拉取异常:', e));
+    }
   };
 
   try {
@@ -11933,8 +11966,33 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       if (p === '/v' || p === '/v/') return;
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
-    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav(); };
-    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav(); };
+    (history as any).pushState = function (...a: any[]) {
+      const was = _wasDetail();
+      const prevPath = location.pathname;
+      const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
+      _ps.apply(this, a as any);
+      logNav('pushState');
+      // [lc-937] 标记「离开过首页」: pushState 执行前 location 仍是旧路径; 旧路径是 /v 而新路径不是 → 离开首页。
+      //   返回首页时据此强制干净重建轮播(修复「轮播按钮 spaNav 打开详情页返回后海报不显示」)。
+      if (prevPath === '/v' || prevPath === '/v/') {
+        const np = (newHref && newHref.indexOf('?') >= 0) ? newHref.split('?')[0] : (newHref || '');
+        if (np !== '/v' && np !== '/v/') _leftHome = true;
+      }
+      pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+    };
+    (history as any).replaceState = function (...a: any[]) {
+      const was = _wasDetail();
+      const prevPath = location.pathname;
+      const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
+      _rs.apply(this, a as any);
+      logNav('replaceState');
+      // [lc-937] 同 pushState: 离开首页时标记 _leftHome
+      if (prevPath === '/v' || prevPath === '/v/') {
+        const np = (newHref && newHref.indexOf('?') >= 0) ? newHref.split('?')[0] : (newHref || '');
+        if (np !== '/v' && np !== '/v/') _leftHome = true;
+      }
+      pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+    };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
