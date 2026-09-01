@@ -16,6 +16,41 @@ let onShowsReady: (() => void) | null = null;
 /** 由入口注册：fetchShowsViaIPC 内部详情补完、需要揭示轮播时回调（= injectCarousel）。 */
 export function setOnShowsReady(fn: () => void): void { onShowsReady = fn; }
 
+// [lc-950] 轮播数据缓存: 把 S.apiShows(含 base64 data URL 横版海报 + 简介等)序列化到 sessionStorage,
+//   跨整页重载/模块重启持久化。返回首页重建时若 S.apiShows 已空(整页刷新), 可零网络即时恢复海报/简介,
+//   根治「返回首页重载 + 海报图/剧集简介丢失」。仅在数据完整(已带 _backdropBlob)时落盘。
+const SHOWS_CACHE_KEY = 'fntv-carousel-shows-v1';
+const persistShows = (): void => {
+  try {
+    if (!S.apiShows.length) return;
+    const snap = S.apiShows.map((s: any) => ({
+      id: s.id, title: s.title, desc: s.desc, backdrop: s.backdrop,
+      _backdropBlob: s._backdropBlob, poster: s.poster, logo: s.logo,
+      genres: s.genres, rating: s.rating, year: s.year,
+      totalEps: s.totalEps, localEps: s.localEps, totalSeasons: s.totalSeasons,
+      localSeasons: s.localSeasons, statusText: s.statusText, mediaType: s.mediaType,
+      strmTag: s.strmTag, _backdropIsPortrait: s._backdropIsPortrait,
+    }));
+    sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(snap));
+  } catch (_) { /* 配额/序列化异常: 忽略, 不影响主流程 */ }
+};
+const restoreShows = (): void => {
+  if (S.apiShows.length > 0) return; // 已有数据不覆盖
+  try {
+    const raw = sessionStorage.getItem(SHOWS_CACHE_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) {
+      S.apiShows.length = 0;
+      Array.prototype.push.apply(S.apiShows, arr);
+      S.carouselLoadedButNone = arr.length === 0;
+      log('[lc-950] 从 sessionStorage 恢复轮播缓存', arr.length, '项(含横版海报 data URL + 简介)');
+    }
+  } catch (_) { /* 解析异常: 忽略 */ }
+};
+// 模块加载即恢复(整页重载场景下 S.apiShows 为空, 先于任何 injectCarousel 兜底数据)
+restoreShows();
+
 // ⚠️ 以下状态已下沉到 S：apiShows/apiLoaded/apiLoading/diagLastShows（数据层），
 //   carouselInited/carouselRevealed/carouselLoadedButNone/carouselContainer（渲染层）。
 //   _carouselWatchArmed 仅本模块 watchHomeThenFetch 使用，保留为模块私有。
@@ -295,6 +330,7 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         // [lc-768] 用.splice 原地替换(不重新赋值 const 数组)：清除旧候选，写入「可加载海报」的子集
         S.apiShows.length = 0;
         Array.prototype.push.apply(S.apiShows, picked);
+        persistShows(); // [lc-950] 落盘完整快照(含 _backdropBlob + desc), 供整页重载后零网络恢复
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
         completeCarouselProgress(revealOnce, 'details-ready');
       }).catch((e: any) => {
