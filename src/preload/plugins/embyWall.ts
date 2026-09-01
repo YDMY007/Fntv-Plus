@@ -11922,7 +11922,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const target = findMediaLibrarySection();
       if (!target) {
         if (_tries <= 6) { setTimeout(rebuild, 250); return; }
-        log('[lc-937] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建');
+        // 放弃前输出可定位的诊断, 便于真机复核 fnOS 返回首页后的真实 DOM 结构
+        const heads = document.querySelectorAll('strong,h2,h3').length;
+        const known = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div').length;
+        log('[lc-937] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建; diag headings=' + heads + ' knownLayoutDivs=' + known + ' pathname=' + location.pathname);
         return;
       }
       const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
@@ -11974,8 +11977,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       logNav('pushState');
       // [lc-937] 标记「离开过首页」: pushState 执行前 location 仍是旧路径; 旧路径是 /v 而新路径不是 → 离开首页。
       //   返回首页时据此强制干净重建轮播(修复「轮播按钮 spaNav 打开详情页返回后海报不显示」)。
-      if (prevPath === '/v' || prevPath === '/v/') {
-        const np = (newHref && newHref.indexOf('?') >= 0) ? newHref.split('?')[0] : (newHref || '');
+      //   仅当 newHref 非空(空 url 表示沿用当前路径, 不算离开)才判定。
+      if ((prevPath === '/v' || prevPath === '/v/') && newHref) {
+        const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') _leftHome = true;
       }
       pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
@@ -11986,9 +11990,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
       logNav('replaceState');
-      // [lc-937] 同 pushState: 离开首页时标记 _leftHome
-      if (prevPath === '/v' || prevPath === '/v/') {
-        const np = (newHref && newHref.indexOf('?') >= 0) ? newHref.split('?')[0] : (newHref || '');
+      // [lc-937] 同 pushState: 离开首页时标记 _leftHome(空 url 不算离开)
+      if ((prevPath === '/v' || prevPath === '/v/') && newHref) {
+        const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') _leftHome = true;
       }
       pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
