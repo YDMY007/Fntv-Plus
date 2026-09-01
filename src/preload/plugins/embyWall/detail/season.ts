@@ -1818,6 +1818,8 @@ function fntvSeasonScrollDiag(): void {
 // [lc-930] 右栏文字对比度自适应: 采样卡片实际背景亮度, 在 .fnos-season-aside 上挂
 //   data-fntv-text="light|dark"(light=浅色文字用于暗背景, dark=深色文字用于亮背景),
 //   由 CSS 用 --fntv-info-*/--fntv-cast-* 变量驱动文字色。卡片的 --semi-color-bg-2 动态渐变(随封面主题染色)保持不动。
+// [lc-951] 背景亮度采样同时解析 background-image 渐变停靠点(封面主题染色写在渐变上, 实色读不到 → 此前永远按主题猜,
+//   浅色主题染深渐变会误选深字导致字体消失); 并挂 MutationObserver 兜住异步染色/主题切换。
 function _relLum(r: number, g: number, b: number): number {
   const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
@@ -1828,6 +1830,55 @@ function _parseRgb(bc: string): [number, number, number, number] | null {
   const p = m[1].split(',').map((s) => parseFloat(s));
   if (p.length < 3) return null;
   return [p[0], p[1], p[2], p.length >= 4 ? p[3] : 1];
+}
+function _parseHex(hex: string): [number, number, number, number] | null {
+  const h = hex.replace('#', '');
+  const read = (s: string) => parseInt(s, 16);
+  if (h.length === 3 || h.length === 4) {
+    const r = read(h[0] + h[0]), g = read(h[1] + h[1]), b = read(h[2] + h[2]);
+    const a = h.length === 4 ? read(h[3] + h[3]) / 255 : 1;
+    return [r, g, b, a];
+  }
+  if (h.length === 6 || h.length === 8) {
+    const r = read(h.slice(0, 2)), g = read(h.slice(2, 4)), b = read(h.slice(4, 6));
+    const a = h.length === 8 ? read(h.slice(6, 8)) / 255 : 1;
+    return [r, g, b, a];
+  }
+  return null;
+}
+function _parseAnyColor(c: string): [number, number, number, number] | null {
+  if (c.startsWith('#')) return _parseHex(c);
+  return _parseRgb(c);
+}
+/** [lc-951] 解析渐变(background-image)的颜色停靠点, 求均值相对亮度。
+ *   封面主题染色写在渐变上, getComputedStyle 读不到实色 → 必须解析颜色停靠点才能知道背景到底多暗。
+ *   透明停靠点(alpha<0.1)露出底层不计入; 取实色停靠点均值亮度。 */
+function _gradientLum(bgImage: string): number | null {
+  if (!bgImage || bgImage === 'none') return null;
+  const re = /(rgba?\([^)]+\)|hsla?\([^)]+\)|#[0-9a-fA-F]{3,8})/g;
+  const cols: [number, number, number, number][] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(bgImage))) {
+    const p = _parseAnyColor(m[1]);
+    if (p) cols.push(p);
+  }
+  if (cols.length === 0) return null;
+  const solid = cols.filter((c) => c[3] >= 0.1);
+  const use = solid.length ? solid : cols;
+  let sum = 0;
+  for (const c of use) sum += _relLum(c[0], c[1], c[2]);
+  return sum / use.length;
+}
+let _contrastObs: MutationObserver | null = null;
+/** [lc-951] 监听右栏卡片/子节点样式·类变化 + <html> 主题类/变量变化, 延迟重算对比度,
+ *   兜住 fnOS 异步注入封面主题渐变、或切换明暗主题后才更新背景的时序问题。 */
+function observeSeasonAsideContrast(aside: HTMLElement): void {
+  if (_contrastObs) _contrastObs.disconnect();
+  let t: number | null = null;
+  const schedule = (): void => { if (t != null) clearTimeout(t); t = window.setTimeout(applySeasonAsideContrast, 160); };
+  _contrastObs = new MutationObserver(schedule);
+  _contrastObs.observe(aside, { attributes: true, attributeFilter: ['style', 'class'], subtree: true });
+  _contrastObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 }
 function applySeasonAsideContrast(): void {
   const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
@@ -1849,6 +1900,14 @@ function applySeasonAsideContrast(): void {
         const c = _parseRgb(bc);
         if (c && c[3] > 0.06) { lum = _relLum(c[0], c[1], c[2]); break; }
       }
+      // [lc-951] 封面主题染色写在 background-image 渐变上, getComputedStyle 读不到实色 →
+      //   解析颜色停靠点求均值亮度, 使"渐变色成深色"时也能正确切到浅字(此前恒回落到主题猜测,
+      //   浅色主题下被染成深渐变会误选深字 → 字体消失)。
+      const bi = cs.backgroundImage;
+      if (lum < 0 && bi && bi !== 'none') {
+        const gl = _gradientLum(bi);
+        if (gl != null) { lum = gl; break; }
+      }
       cur = cur.parentElement;
     }
     if (lum >= 0) break;
@@ -1864,6 +1923,7 @@ function applySeasonAsideContrast(): void {
   if (aside.getAttribute('data-fntv-text') !== text) {
     aside.setAttribute('data-fntv-text', text);
   }
+  observeSeasonAsideContrast(aside); // [lc-951] 监听动态染色/主题切换, 兜底重算
   dlog('applySeasonAsideContrast: bgLum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
     + ' crDark=' + crDark.toFixed(2) + ' crLight=' + crLight.toFixed(2) + ' -> data-fntv-text=' + text);
 }
@@ -2102,6 +2162,10 @@ function layoutSeasonTwoPane(): void {
   applySeasonAsideContrast();
   setTimeout(applySeasonAsideContrast, 400);
   setTimeout(applySeasonAsideContrast, 1200);
+  // [lc-951] 再补两档: 部分封面主题染色经 <style> 规则异步注入(不触发元素 style 变更),
+  //   仅靠 MutationObserver 抓不到, 用更晚的复跑兜底采到最终渐变亮度。
+  setTimeout(applySeasonAsideContrast, 2000);
+  setTimeout(applySeasonAsideContrast, 3500);
   } finally {
     _seasonLaying = false;
   }
