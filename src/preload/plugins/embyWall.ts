@@ -3968,8 +3968,13 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"]{
   overflow:visible !important; white-space:normal !important; padding-left:0 !important;
 }
+/* [lc-923] 原生横向滚动条改成「自动换行」的行容器。
+   旧实现强制 flex-direction:column → 每个演员独占一整行(竖向排到底), 右栏被拉得极长。
+   现改回 row + wrap, 一行放多个, 宽度不够自动换行(具体格宽由下方 .fnos-cast-row/.fnos-cast-cell 接管)。 */
 .fnos-immersive-season .fnos-season-aside .ms-container[class*="overflow-x-scroll"] > div.flex.h-full.w-max{
-  flex-direction:column !important; width:100% !important; height:auto !important; column-gap:0 !important; row-gap:2px !important;
+  flex-direction:row !important; flex-wrap:wrap !important; align-items:flex-start !important;
+  width:100% !important; max-width:100% !important; height:auto !important;
+  column-gap:8px !important; row-gap:10px !important;
 }
 /* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
 /* [lc-901b] cast 容器(fnOS 原生 ms-container)本身必须清零, 否则原生 padding/margin 导致巨大间隔 */
@@ -3997,6 +4002,53 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
 }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
+
+/* ===== [lc-923] 演员墙：一行多个 + 自动换行；每格内「头像在上、姓名/角色在下(居中)」 =====
+   旧版是「每人独占一整行」的竖向列表(头像左 + 文字右, width:100%), 右栏被 10 来个演员拉得极长。
+   现改为定宽格(104px)自动换行: 750px 右栏 ≈ 6 列, 10 个演员只要 2 行。
+   行容器/格子由 JS(restyleCastItems → applyCastWallLayout)纯结构打标, 不依赖任何类名猜测。 */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-row{
+  display:flex !important; flex-direction:row !important; flex-wrap:wrap !important;
+  align-items:flex-start !important; justify-content:flex-start !important;
+  width:100% !important; max-width:100% !important; height:auto !important; min-height:0 !important;
+  column-gap:8px !important; row-gap:10px !important; margin:0 !important; padding:0 !important;
+}
+/* 行内的非演员子节点(如分区标题/“查看全部”)独占一整行, 不挤占演员格 */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-row > .fnos-cast-row-full{
+  flex:0 0 100% !important; width:100% !important;
+}
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell{
+  flex:0 0 104px !important; width:104px !important; min-width:0 !important; max-width:104px !important;
+  display:flex !important; flex-direction:column !important; align-items:center !important;
+  margin:0 !important; padding:0 !important; height:auto !important; min-height:0 !important; max-height:none !important;
+}
+/* 演员项本身就是行容器直接子节点时(无外层包裹), 类同时落在 <a> 上 */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell.fnos-cast-item{
+  display:flex !important; flex-direction:column !important; align-items:center !important; justify-content:flex-start !important;
+  gap:6px !important; width:104px !important; max-width:104px !important;
+  margin:0 !important; padding:0 !important; text-align:center !important;
+}
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item{
+  display:flex !important; flex-direction:column !important; align-items:center !important; justify-content:flex-start !important;
+  gap:6px !important; width:100% !important; max-width:100% !important;
+  margin:0 !important; padding:0 !important; text-align:center !important;
+}
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item > div:first-child,
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell.fnos-cast-item > div:first-child{
+  width:64px !important; height:64px !important; flex:0 0 64px !important; margin:0 !important;
+  border-radius:50% !important; overflow:hidden !important;
+}
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info{
+  align-items:center !important; justify-content:flex-start !important; text-align:center !important;
+  width:100% !important; min-width:0 !important; gap:1px !important;
+}
+/* 格内姓名/角色允许换行(不再 nowrap), 居中显示 */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p,
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p.truncate{
+  white-space:normal !important; text-align:center !important; max-width:104px !important;
+}
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:first-child{ font-size:13px !important; font-weight:600 !important; line-height:1.25 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:last-child{ font-size:12px !important; line-height:1.25 !important; }
 
 /* Hero h2 样式已由下方沉浸式头部块统一接管（彩色渐变标题） */
 
@@ -4038,6 +4090,9 @@ html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:4px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{ border:1px solid rgba(255,255,255,.12) !important; }
+/* [lc-923] 演员墙格子的 hover 高亮(浅色模式同款, 走 --semi-color-fill-* 变量) */
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item{ border-radius:10px !important; padding:4px 0 !important; transition:background .2s ease !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item:hover{ background:var(--semi-color-fill-0,rgba(120,120,128,.08)) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
 
@@ -4661,6 +4716,8 @@ function ensureCastInAside(aside: HTMLElement): void {
   cast.style.padding = '0';
   cast.style.margin = '0';
   cast.style.gap = '2px';
+  // [lc-923] 上面这行 gap 会覆盖"cast 容器本身即演员行容器"时的行列间距, 建完卡片后补一次演员墙布局
+  applyCastWallLayout(cast);
   aside.appendChild(castCard);
 }
 
@@ -4865,6 +4922,61 @@ function restyleCastOnce(): void {
   const c = findSeasonCastParent();
   if (!c) return;
   restyleCastIfNeeded(c); // [lc-906] 与 observer 共用同一套"有未处理锚点才跑重活"的守卫
+  // [lc-923] 行容器可能被 fnOS 重渲染/替换掉(类与内联样式随之丢失), 每次巡检重新打标(幂等, 开销极小)
+  applyCastWallLayout(c);
+}
+
+/** [lc-923] 演员墙布局：一行多个 + 自动换行。
+ *  背景：旧实现把 fnOS 原生的演员横向滚动条强制成 flex-direction:column，结果每个演员独占一整行、
+ *        右栏被 10 来个演员拉得极长（用户反馈"每个人都独占一横，竖向排列"）。
+ *  定位：纯结构，不读任何标题文本、不猜类名 —— 对每个演员锚点自底向上找「直接子节点中 ≥2 个子节点
+ *        各自是/含演员项」的最深容器，即为真正的演员行容器；再把这些子节点打成定宽格 .fnos-cast-cell。
+ *  幂等：类标记 + 内联样式，重复调用零副作用（可被 600ms 巡检 / observer 反复调用）。 */
+function applyCastWallLayout(container: HTMLElement): void {
+  const anchors = Array.from(container.querySelectorAll('a.fnos-cast-item')) as HTMLElement[];
+  if (anchors.length < 2) return; // 只有 1 个演员时保持原样(无需成墙)
+  const hasCast = (el: Element): boolean =>
+    (el as HTMLElement).classList.contains('fnos-cast-item') || el.querySelector('a.fnos-cast-item') !== null;
+
+  const rows: HTMLElement[] = [];
+  for (let i = 0; i < anchors.length; i++) {
+    let el: HTMLElement | null = anchors[i].parentElement;
+    while (el && container.contains(el)) {
+      const kids = Array.from(el.children) as HTMLElement[];
+      let hit = 0;
+      for (let k = 0; k < kids.length; k++) if (hasCast(kids[k])) hit++;
+      if (hit >= 2) { if (rows.indexOf(el) < 0) rows.push(el); break; }
+      el = el.parentElement;
+    }
+  }
+  if (!rows.length) return;
+  rows.forEach((row) => {
+    if (!row.classList.contains('fnos-cast-row')) row.classList.add('fnos-cast-row');
+    // 行容器：横向 + 自动换行（CSS 已有 !important 兜底，这里再补内联，双保险防 fnOS 深层选择器覆盖）
+    row.style.display = 'flex';
+    row.style.flexDirection = 'row';
+    row.style.flexWrap = 'wrap';
+    row.style.alignItems = 'flex-start';
+    row.style.width = '100%';
+    row.style.maxWidth = '100%';
+    row.style.height = 'auto';
+    row.style.columnGap = '8px';
+    row.style.rowGap = '10px';
+    const kids = Array.from(row.children) as HTMLElement[];
+    for (let k = 0; k < kids.length; k++) {
+      const kid = kids[k];
+      if (hasCast(kid)) {
+        if (!kid.classList.contains('fnos-cast-cell')) kid.classList.add('fnos-cast-cell');
+      } else {
+        // 非演员节点(分区标题/"查看全部"等): 独占一整行, 不挤占演员格; 完全空的占位(无高度无文本)直接忽略
+        const cs = getComputedStyle(kid);
+        if (cs.display === 'none') continue;
+        if (kid.offsetHeight > 0 || (kid.textContent || '').trim().length > 0) {
+          if (!kid.classList.contains('fnos-cast-row-full')) kid.classList.add('fnos-cast-row-full');
+        }
+      }
+    }
+  });
 }
 
 /** 将 fnOS 原生演职人员项改成「头像 + 姓名/角色」横排
@@ -4921,6 +5033,8 @@ function restyleCastItems(container: HTMLElement): void {
     Array.from(el.children).forEach((c) => zeroSpacing(c as HTMLElement));
   };
   zeroSpacing(container);
+  // [lc-923] 最后再排一次版: 把演员行容器改成横向自动换行的"演员墙"(zeroSpacing 里的 gap 内联在此被覆盖)
+  applyCastWallLayout(container);
 }
 
 /** 给每集卡片补齐「时长 / 状态」meta（幂等，并隐藏 fnOS 原生的时长行避免重复）
@@ -5147,6 +5261,36 @@ function dumpSeasonDOMToFile(stage?: string): void {
         route: _castLastRoute,
         personLinks: document.querySelectorAll('a[href*="/v/person/"]').length,
       },
+      // [lc-923] 演员墙诊断: 行容器/格子数量 + 真实 computed + 几何,
+      //   用 distinctTops(不同 top 值个数) 与 perRow(每行平均个数) 直接判定是"一行多个"还是"每人独占一整行"。
+      wallDiag: (() => {
+        const _rows = Array.from(document.querySelectorAll('.fnos-cast-row')) as HTMLElement[];
+        const _cells = Array.from(document.querySelectorAll('.fnos-cast-cell')) as HTMLElement[];
+        const _items = document.querySelectorAll('.fnos-cast-item').length;
+        if (!_rows.length) return { rows: 0, cells: _cells.length, items: _items, note: 'NO_CAST_ROW' };
+        const _r = _rows[0];
+        const _cs = getComputedStyle(_r);
+        const _rr = _r.getBoundingClientRect();
+        const tops: number[] = [];
+        _cells.forEach((c) => { tops.push(Math.round(c.getBoundingClientRect().top)); });
+        const uniqTops = tops.filter((t, i) => tops.indexOf(t) === i);
+        const _c0 = _cells.length ? _cells[0].getBoundingClientRect() : null;
+        return {
+          rows: _rows.length,
+          cells: _cells.length,
+          items: _items,
+          rowCls: (_r.className || '').toString().substring(0, 60),
+          rowDisplay: _cs.display,
+          rowFlexDir: _cs.flexDirection,
+          rowWrap: _cs.flexWrap,
+          rowGap: _cs.rowGap + '/' + _cs.columnGap,
+          rowRect: { top: Math.round(_rr.top), w: Math.round(_rr.width), h: Math.round(_rr.height) },
+          cellW: _c0 ? Math.round(_c0.width) : 0,
+          cellH: _c0 ? Math.round(_c0.height) : 0,
+          distinctTops: uniqTops.length,
+          perRow: uniqTops.length ? Math.round(_cells.length / uniqTops.length) : 0,
+        };
+      })(),
       twoColChain: chainOf(q('.fnos-season-2col')),
       mainChain: chainOf(q('.fnos-season-main')),
       asideChain: chainOf(q('.fnos-season-aside')),
