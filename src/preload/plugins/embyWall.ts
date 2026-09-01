@@ -10432,10 +10432,273 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       log('MASK click-close-hook installed (capture+stop)');
     }
     applyTopNavTransparent(); // [lc-875] 顶栏(汉堡键+飞牛影视 logo)强制全透明
+    scheduleTopLeftIconContrast(500); // [lc-925] 顶栏透明后图标直接压在页面上 → 采样背景亮度自适应反色
   };
+
+  // ═══ [lc-925] 左上角图标自适应反色 ═══
+  // 背景: [lc-875] 把顶栏强制透明后, 详情页左上角图标(原生「返回」/ 汉堡键 ☰ / 我们注入的刷新按钮)
+  //   直接压在剧集 backdrop 之上。backdrop 多为暗色调 → 恒为黑色的图标几乎不可见。
+  // 方案: 采样图标"背后那一层"的真实亮度 —— 沿 elementsFromPoint 栈自顶向下找第一个
+  //   「不是图标自身祖先」且「有实心背景色 / 背景图 / 是 <img>」的元素, 背景图与 <img>
+  //   用 canvas 取【左上角区域】的平均亮度(详情页 hero 顶左即图标所处位置)。
+  //   暗底(lum < 140) → 图标转近白 + 深色投影; 亮底 → 保持近黑 + 白色投影。
+  //   采样失败/跨域污染 → 按页面类型兜底(详情页按暗底, 其余按亮底)。
+  const _TL_SIDEBAR_SEL = 'aside, [class*="sidebar"], [class*="drawer"], [class*="offcanvas"], [id*="sidebar"], [id*="drawer"]';
+  const _TL_DARK_THRESHOLD = 140; // 背景平均亮度低于此值即判为「暗底」→ 图标反白
+  let _tlTimer = 0;
+  let _tlBusy = false;
+  let _tlLastApply = 0;
+  let _tlLum: number | null = null;
+  let _tlLumTs = 0;
+  const _tlImgCache = new Map<string, number | null>();
+
+  /** 采集左上角需要反色的元素: 详情页原生「返回」+ 汉堡键 ☰ + 刷新按钮 + 同排导航文字(「首页」等) */
+  function collectTopLeftIcons(): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    const push = (el: Element | null | undefined): void => {
+      const h = el as HTMLElement | null;
+      if (!h || out.indexOf(h) >= 0) return;
+      const r = h.getBoundingClientRect();
+      if (r.width < 6 || r.height < 6 || r.height > 64) return;  // 未渲染/零尺寸/过大容器
+      if (r.top > 160 || r.left > 360) return;                   // 只认左上角
+      if (h.closest(_TL_SIDEBAR_SEL)) return;                    // 排除侧边栏内的同名元素
+      if (getComputedStyle(h).visibility === 'hidden') return;
+      out.push(h);
+    };
+    push(document.querySelector('button[aria-label="返回"]'));                  // 详情页原生返回
+    push(document.querySelector('[class*="lg:!hidden"]:not([class*="inset-0"])')); // 汉堡键 ☰
+    push(document.getElementById('fnos-refresh-btn'));                          // 我们注入的刷新
+    // 同一条顶栏里的导航文字(「首页」链接等): 与三个按钮同排, 一并反色才协调。
+    // 只取「叶子文本节点」(无子元素且有文字), 避免父子重复叠加 filter。
+    const burger = document.querySelector('[class*="lg:!hidden"]:not([class*="inset-0"])');
+    const navBar = burger ? burger.parentElement : null;
+    if (navBar) {
+      const items = navBar.querySelectorAll('a, span, p');
+      for (let i = 0; i < items.length && i < 60; i++) {
+        const it = items[i] as HTMLElement;
+        if (it.children.length > 0) continue;
+        if (!(it.textContent || '').trim()) continue;
+        push(it);
+      }
+    }
+    return out;
+  }
+
+  function _lumOf(r: number, g: number, b: number): number {
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  /** 取一张图「左上角区域」的平均亮度(0~255)。跨域图会污染 canvas → getImageData 抛错 → 返回 null 交兜底。 */
+  function imageTopLeftLuminance(url: string): Promise<number | null> {
+    const cached = _tlImgCache.get(url);
+    if (cached !== undefined) return Promise.resolve(cached);
+    return new Promise<number | null>((resolve) => {
+      let done = false;
+      const finish = (v: number | null): void => {
+        if (done) return;
+        done = true;
+        _tlImgCache.set(url, v);
+        if (_tlImgCache.size > 64) _tlImgCache.clear(); // 防无限增长
+        resolve(v);
+      };
+      window.setTimeout(() => finish(null), 4500);
+      let im: HTMLImageElement;
+      try {
+        im = new Image();
+        im.crossOrigin = 'anonymous'; // 同源图无副作用; 跨域图加载失败 → null
+      } catch (_) { finish(null); return; }
+      im.onload = () => {
+        try {
+          const W = 24, H = 24;
+          const c = document.createElement('canvas');
+          c.width = W; c.height = H;
+          const ctx = c.getContext('2d') as CanvasRenderingContext2D | null;
+          if (!ctx) { finish(null); return; }
+          const sw = Math.max(1, Math.floor((im.naturalWidth || 1) * 0.45));
+          const sh = Math.max(1, Math.floor((im.naturalHeight || 1) * 0.45));
+          ctx.drawImage(im, 0, 0, sw, sh, 0, 0, W, H);
+          const d = ctx.getImageData(0, 0, W, H).data;
+          let sum = 0, n = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i + 3] < 16) continue;
+            sum += _lumOf(d[i], d[i + 1], d[i + 2]);
+            n++;
+          }
+          finish(n ? sum / n : null);
+        } catch (_) { finish(null); } // 典型: SecurityError(跨域污染)
+      };
+      im.onerror = () => finish(null);
+      im.src = url;
+    });
+  }
+
+  /** 采样某个图标"背后那一层"的亮度。返回 null 表示拿不到(交上层兜底)。 */
+  async function detectBehindLuminance(icon: HTMLElement): Promise<number | null> {
+    const r = icon.getBoundingClientRect();
+    const x = Math.min(Math.max(r.left + r.width / 2, 2), window.innerWidth - 2);
+    const y = Math.min(Math.max(r.top + r.height / 2, 2), window.innerHeight - 2);
+    const anyDoc = document as any;
+    if (typeof anyDoc.elementsFromPoint !== 'function') return null;
+    let stack: HTMLElement[];
+    try { stack = (Array.from(anyDoc.elementsFromPoint(x, y)) as HTMLElement[]).filter(Boolean); }
+    catch (_) { return null; }
+    // ⚠️ 不跳过"图标的祖先容器": elementsFromPoint 已是【自顶向下】的绘制顺序,
+    //   后出现的元素就是更靠后的层; 只要某祖先真的画了底色/底图, 它即为图标所见背景, 必须采它。
+    //   (lc-875 已把顶栏透明化 → 顶栏不会被采到, 会继续往下命中详情页 hero。)
+    //   只跳过图标自身与其后代(svg/path 绘制在图标之上, 属于"前景")。
+    const overlays: { l: number; a: number }[] = []; // 半透明层(0.05 ≤ a < 0.5): 记下来与底层做 alpha 混合
+    const blend = (base: number): number => {
+      let L = base;
+      for (let i = overlays.length - 1; i >= 0; i--) L = L * (1 - overlays[i].a) + overlays[i].l * overlays[i].a;
+      return L;
+    };
+    for (const el of stack) {
+      if (el === icon || icon.contains(el)) continue;
+      let cs: CSSStyleDeclaration;
+      try { cs = getComputedStyle(el); } catch (_) { continue; }
+      // ① 背景色: 实心直接返回; 半透明先记下继续往下找底层; 全透明跳过
+      const m = (cs.backgroundColor || '').match(/rgba?\(([^)]+)\)/);
+      if (m) {
+        const p = m[1].split(',').map(s => parseFloat(s.trim()));
+        const a = p.length >= 4 ? p[3] : 1;
+        if (!isNaN(p[0]) && !isNaN(p[1]) && !isNaN(p[2])) {
+          if (a >= 0.5) return blend(_lumOf(p[0], p[1], p[2]));
+          if (a >= 0.05) overlays.push({ l: _lumOf(p[0], p[1], p[2]), a });
+        }
+      }
+      // ② 背景图(纯渐变无 url() 会自动跳过, 继续往下找)
+      const bi = cs.backgroundImage || '';
+      if (bi && bi !== 'none') {
+        const u = bi.match(/url\(["']?([^"')]+)["']?\)/);
+        if (u && u[1]) {
+          const l = await imageTopLeftLuminance(u[1]);
+          if (l != null) return blend(l);
+        }
+      }
+      // ③ <img> 元素
+      if (el.tagName === 'IMG') {
+        const src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || '';
+        if (src) {
+          const l = await imageTopLeftLuminance(src);
+          if (l != null) return blend(l);
+        }
+      }
+    }
+    return null;
+  }
+
+  /** 按亮度把左上角图标刷成「与背景对比」的颜色 + 反向投影(中间调也保证可辨) */
+  function paintTopLeftIcons(icons: HTMLElement[], lum: number): void {
+    const dark = lum < _TL_DARK_THRESHOLD;
+    const color = dark ? 'rgba(255,255,255,.96)' : 'rgba(22,18,32,.92)';
+    const shadow = dark
+      ? 'drop-shadow(0 1px 3px rgba(0,0,0,.65)) drop-shadow(0 0 2px rgba(0,0,0,.45))'
+      : 'drop-shadow(0 1px 2px rgba(255,255,255,.85))';
+    for (const ic of icons) {
+      ic.style.setProperty('color', color, 'important');
+      ic.style.setProperty('-webkit-text-fill-color', color, 'important');
+      ic.style.setProperty('filter', shadow, 'important');
+      ic.dataset.fntvTlIcon = dark ? 'light' : 'dark';
+      // svg: 只用 currentColor 重着色, 绝不改 fill="none" 的描边型图标(会把线稿填成实心块)
+      const svgs: SVGElement[] = ic.tagName.toLowerCase() === 'svg'
+        ? [ic as unknown as SVGElement]
+        : (Array.from(ic.querySelectorAll('svg')) as SVGElement[]);
+      for (const sv of svgs) {
+        sv.style.setProperty('color', color, 'important');
+        const targets: Element[] = [sv as Element].concat(Array.from(sv.querySelectorAll('*')) as Element[]);
+        for (const t of targets) {
+          const attrs = ['fill', 'stroke'] as const;
+          for (const attr of attrs) {
+            const v = t.getAttribute(attr);
+            // 仅改写"硬编码颜色值"的 fill/stroke; none / currentColor / url(#...) 一律不动
+            if (v && v !== 'none' && !/^currentcolor$/i.test(v) && !/^url\(/i.test(v)) {
+              t.setAttribute(attr, 'currentColor');
+            }
+          }
+        }
+      }
+    }
+    log(`[lc-925] 左上角图标反色: lum=${Math.round(lum)} → ${dark ? '浅色(暗底)' : '深色(亮底)'}, ${icons.length} 个元素`);
+  }
+
+  async function applyTopLeftIconContrast(): Promise<void> {
+    if (_tlBusy) return; // 防重入(observer 高频触发时最多一次采样)
+    _tlBusy = true;
+    try {
+      const icons = collectTopLeftIcons();
+      if (!icons.length) return;
+      const need = icons.some(i => !i.dataset.fntvTlIcon); // fnOS 重渲染出新 DOM → 标记丢失 → 必须重刷
+      const now = Date.now();
+      if (!need && now - _tlLastApply < 1500) return;      // 已处理且刚处理过 → 跳过, 保护高频 observer
+      let lum: number | null = (_tlLum != null && now - _tlLumTs < 8000) ? _tlLum : null;
+      if (lum == null) {
+        for (const ic of icons) {
+          lum = await detectBehindLuminance(ic);
+          if (lum != null) break;
+        }
+        if (lum == null) lum = isDetailPage() ? 60 : 235;  // 兜底: 详情页按暗底, 其余按亮底
+        _tlLum = lum;
+        _tlLumTs = now;
+      }
+      paintTopLeftIcons(icons, lum);
+      _tlLastApply = Date.now();
+    } catch (e) {
+      log('[lc-925] 左上角反色异常: ' + String(e).substring(0, 80));
+    } finally { _tlBusy = false; }
+  }
+
+  function scheduleTopLeftIconContrast(delay = 400): void {
+    window.clearTimeout(_tlTimer);
+    _tlTimer = window.setTimeout(() => { void applyTopLeftIconContrast(); }, delay);
+  }
+
+  /** 路由切换/背景图变化时清缓存 → 强制重新采样 */
+  function resetTopLeftIconContrast(): void {
+    _tlLum = null; _tlLumTs = 0; _tlLastApply = 0;
+  }
+  /** 导航后重算: 先清缓存, 再按 700/1600/3200ms 三拍重试(详情页 hero 图异步加载) */
+  const _scheduleTopLeftAfterNav = (): void => {
+    resetTopLeftIconContrast();
+    scheduleTopLeftIconContrast(700);
+    [1600, 3200].forEach(ms => window.setTimeout(() => { void applyTopLeftIconContrast(); }, ms));
+  };
+  // 诊断: Console 执行 fntvTopLeftIconDiag() 打印当前采样到的亮度与各图标颜色
+  (window as any).fntvTopLeftIconDiag = function (): any {
+    const icons = collectTopLeftIcons();
+    const info: any = {
+      url: location.href,
+      cachedLum: _tlLum,
+      count: icons.length,
+      icons: icons.map(i => ({
+        tag: i.tagName,
+        id: i.id || '',
+        cls: (i.className || '').toString().slice(0, 50),
+        text: (i.textContent || '').trim().slice(0, 12),
+        mode: i.dataset.fntvTlIcon || '(未处理)',
+        color: i.style.color || '',
+        rect: `${Math.round(i.getBoundingClientRect().left)},${Math.round(i.getBoundingClientRect().top)}`,
+      })),
+    };
+    console.log('[fntvTopLeftIconDiag]', JSON.stringify(info, null, 2));
+    log('[fntvTopLeftIconDiag] ' + JSON.stringify(info));
+    return info;
+  };
+
   // 立即执行一次 + 定时巡检
   ensureBurgerVisible();
   [800, 2000, 4000].forEach(t => setTimeout(ensureBurgerVisible, t));
+  // [lc-925] 左上角反色: 首屏 + 延迟重试(hero/backdrop 图异步加载完成后需重新采样)
+  scheduleTopLeftIconContrast(700);
+  [1500, 3500, 7000].forEach(t => window.setTimeout(() => { void applyTopLeftIconContrast(); }, t));
+  // [lc-925] 滚动/改窗口大小会让顶栏背后换成完全不同的一块画面(详情页 hero 滑走后是浅色内容区)
+  //   → 停手 500ms 后清缓存重新采样, 保证图标始终与"当前实际背景"对比。
+  let _tlScrollTimer = 0;
+  const _tlOnScrollOrResize = (): void => {
+    window.clearTimeout(_tlScrollTimer);
+    _tlScrollTimer = window.setTimeout(() => { resetTopLeftIconContrast(); void applyTopLeftIconContrast(); }, 500);
+  };
+  window.addEventListener('scroll', _tlOnScrollOrResize, { passive: true });
+  window.addEventListener('resize', _tlOnScrollOrResize, { passive: true });
 
   // [lc-705] 暴露"收起侧边栏"全局钩子：侧栏底部 4 个自定义按钮（设置 / 切换系统页面 /
   //   软件反馈建议 / 观影记录）点击后调用它，复刻飞牛原生类目按钮"点一下侧栏自动收起"的效果。
@@ -10699,14 +10962,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       if (p === '/v' || p === '/v/') return;
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
-    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); };
-    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); };
+    (history as any).pushState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _ps.apply(this, a as any); logNav('pushState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav(); };
+    (history as any).replaceState = function (...a: any[]) { const was = _wasDetail(); const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href; _rs.apply(this, a as any); logNav('replaceState'); pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav(); };
     window.addEventListener('popstate', () => {
       logNav('popstate');
       pageTransition();
       setTimeout(ensureBurgerVisible, 300);
       setTimeout(closeDrawer, 300);
       setTimeout(hideStaleViews, 400);
+      _scheduleTopLeftAfterNav(); // [lc-925] 背景换了 → 重采样左上角图标亮度
       // [lc-877] 导航回首页必须移除 fnos-immersive-season（[lc-878] 已修复 applyDetailLiquidGlass 在非详情页提前 return 的 bug，现在能正确移除）
       applyDetailLiquidGlass();
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
