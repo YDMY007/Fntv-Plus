@@ -4029,18 +4029,32 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   box-shadow:0 8px 25px rgba(0,0,0,.12) !important;
 }
 
-/* 右侧信息卡 —— 浅色模式用 fnOS 原生浅色变量；深色模式见末尾 html.dark 覆盖块 */
+/* 右侧信息卡 —— [lc-930] 文字对比度自适应
+ *   卡片背景 var(--semi-color-bg-2) 是随封面主题动态染色的(红橙动漫主题下被染红), 用户要求**保留该动态渐变不动**。
+ *   可读性改由 JS applySeasonAsideContrast() 采样卡片实际背景亮度, 在 .fnos-season-aside 上挂
+ *   data-fntv-text="light"(暗背景→浅字) / "dark"(亮背景→深字), 下方用 --fntv-info-*/--fntv-cast-* 变量驱动文字色。
+ *   默认(无 data 属性, 浅色主题)走深字基准色。 */
+.fnos-immersive-season .fnos-season-aside{
+  --fntv-info-h4:#6e6e73; --fntv-info-p:#1d1d1f; --fntv-info-a:#0066cc;
+  --fntv-cast-h4:#6e6e73; --fntv-cast-p1:#1d1d1f; --fntv-cast-p2:#6e6e73;
+  --fntv-text-shadow:none;
+}
+.fnos-immersive-season .fnos-season-aside[data-fntv-text="light"]{
+  --fntv-info-h4:#aeaeb2; --fntv-info-p:#f5f5f7; --fntv-info-a:#4da3ff;
+  --fntv-cast-h4:#aeaeb2; --fntv-cast-p1:#f5f5f7; --fntv-cast-p2:#9a9aa0;
+  --fntv-text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
 .fnos-immersive-season .fnos-info-card{
-  background:var(--semi-color-bg-2,#fff) !important;
+  background:var(--semi-color-bg-2,#fff) !important; /* [lc-930] 保留动态渐变, 绝不动 */
   border-radius:14px !important;
   padding:1.2rem !important;
   box-shadow:0 2px 10px rgba(0,0,0,.05) !important;
   margin-bottom:.9rem !important;
   border:1px solid var(--semi-color-border, rgba(0,0,0,.04)) !important;
 }
-.fnos-immersive-season .fnos-info-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.8rem !important; color:var(--semi-color-text-2,#86868b) !important; }
-.fnos-immersive-season .fnos-info-card p{ font-size:.82rem !important; color:var(--semi-color-text-1,#424245) !important; line-height:1.6 !important; margin-bottom:.25rem !important; }
-.fnos-immersive-season .fnos-info-card a{ color:var(--semi-color-primary,#007aff) !important; text-decoration:none !important; }
+.fnos-immersive-season .fnos-info-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.8rem !important; color:var(--fntv-info-h4,#6e6e73) !important; }
+.fnos-immersive-season .fnos-info-card p{ font-size:.82rem !important; color:var(--fntv-info-p,#1d1d1f) !important; line-height:1.6 !important; margin-bottom:.25rem !important; text-shadow:var(--fntv-text-shadow,none) !important; }
+.fnos-immersive-season .fnos-info-card a{ color:var(--fntv-info-a,#0066cc) !important; text-decoration:none !important; }
 .fnos-immersive-season .fnos-tag-list{ display:flex !important; flex-wrap:wrap !important; gap:.4rem !important; }
 .fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 
@@ -4090,7 +4104,7 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
 /* 演职人员整块卡片容器（与「剧集信息」同款卡片） */
 /* [lc-901b] cast 容器(fnOS 原生 ms-container)本身必须清零, 否则原生 padding/margin 导致巨大间隔 */
 .fnos-immersive-season .fnos-cast-card > *{ padding:0 !important; margin:0 !important; }
-.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.4rem !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-cast-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.4rem !important; color:var(--fntv-cast-h4,#6e6e73) !important; }
 /* 单个演员：头像(左) + 姓名/角色(右) */
 /* [lc-901] 演员列表收紧: 每项上下内边距 8px→4px, 头像-文字间距 12px→10px, 文字左对齐贴齐头像(原 center 显空) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-item{
@@ -4111,8 +4125,8 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   line-height:1.35 !important; margin:0 !important; padding:0 !important;
   display:block !important;
 }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ font-size:15px !important; font-weight:600 !important; color:var(--fntv-cast-p1,#1d1d1f) !important; text-shadow:var(--fntv-text-shadow,none) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ font-size:13px !important; color:var(--fntv-cast-p2,#6e6e73) !important; text-shadow:var(--fntv-text-shadow,none) !important; }
 
 /* ===== [lc-923] 演员墙：一行多个 + 自动换行；每格内「头像在上、姓名/角色在下(居中)」 =====
    旧版是「每人独占一整行」的竖向列表(头像左 + 文字右, width:100%), 右栏被 10 来个演员拉得极长。
@@ -4158,8 +4172,8 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
 .fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p.truncate{
   white-space:normal !important; text-align:center !important; max-width:104px !important;
 }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:first-child{ font-size:13px !important; font-weight:600 !important; line-height:1.25 !important; }
-.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:last-child{ font-size:12px !important; line-height:1.25 !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:first-child{ font-size:13px !important; font-weight:600 !important; line-height:1.25 !important; color:var(--fntv-cast-p1,#1d1d1f) !important; text-shadow:var(--fntv-text-shadow,none) !important; }
+.fnos-immersive-season .fnos-season-aside .fnos-cast-cell .fnos-cast-info p:last-child{ font-size:12px !important; line-height:1.25 !important; color:var(--fntv-cast-p2,#6e6e73) !important; text-shadow:var(--fntv-text-shadow,none) !important; }
 
 /* Hero h2 样式已由下方沉浸式头部块统一接管（彩色渐变标题） */
 
@@ -4186,17 +4200,17 @@ html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-duration{ color:#9
 html.dark .fnos-immersive-season [data-id="details"] .fnos-ep-badge{
   background:#E50914 !important; color:#fff !important; border-radius:4px !important; font-weight:700 !important; letter-spacing:.5px !important;
 }
-html.dark .fnos-immersive-season .fnos-info-card{
-  background:rgba(22,22,26,.72) !important;
-  border:1px solid rgba(255,255,255,.07) !important;
-  border-radius:12px !important;
-  box-shadow:none !important;
-  padding:1.1rem 1.2rem !important;
+html.dark .fnos-immersive-season .fnos-season-aside{
+  /* [lc-930] 去掉不透明实色底(原 rgba(28,28,30,.94) 会盖掉动态渐变/海报染色), 改为透明, 卡片自身带 --semi-color-bg-2 */
+  background:transparent !important;
+  border-radius:14px !important;
+  padding:14px !important;
 }
-html.dark .fnos-immersive-season .fnos-info-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
-html.dark .fnos-immersive-season .fnos-info-card p{ font-size:.85rem !important; color:#c9c9cf !important; line-height:1.65 !important; }
-html.dark .fnos-immersive-season .fnos-info-card a{ color:#E50914 !important; font-weight:600 !important; }
+/* [lc-930] 深色模式信息卡不再写死 #1c1c1e 实色: 改回与浅色同款的 var(--semi-color-bg-2)(深色主题下即深色,
+ *   但保留 fnOS 随封面染色的渐变), 文字色由 .fnos-season-aside 的 data-fntv-text 对比度变量统一驱动。 */
 html.dark .fnos-immersive-season .fnos-tag{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.1) !important; }
+/* [lc-930] 深色模式信息卡边框(仅边框, 不动背景, 背景仍走 var(--semi-color-bg-2) 保留渐变) */
+html.dark .fnos-immersive-season .fnos-info-card{ border:1px solid rgba(255,255,255,.08) !important; }
 /* [lc-926] 季页 TMDB 详情区(深色)：与上方 .fnos-info-card 深色块同款奈飞暗色电影感 */
 html.dark .fnos-immersive-season .fnos-info-tmdb{ margin-top:.5rem !important; }
 html.dark .fnos-immersive-season .fnos-tmdb-title{ color:#f5f5f7 !important; }
@@ -4217,15 +4231,15 @@ html.dark .fnos-immersive-season .fnos-tmdb-error{ color:#ff6b6b !important; }
 html.dark .fnos-immersive-season .fnos-tmdb-src{ color:#7a7a82 !important; }
 html.dark .fnos-immersive-season .fnos-tmdb-refresh{ background:rgba(255,255,255,.08) !important; color:#e5e5e7 !important; border:1px solid rgba(255,255,255,.14) !important; }
 html.dark .fnos-immersive-season .fnos-tmdb-refresh:hover{ background:rgba(255,255,255,.16) !important; }
-html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; color:#808080 !important; }
+html.dark .fnos-immersive-season .fnos-cast-card h4{ font-size:.78rem !important; font-weight:700 !important; letter-spacing:1.5px; text-transform:uppercase; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item{ padding:4px 6px !important; border-radius:8px !important; transition:background .2s ease !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item:hover{ background:rgba(255,255,255,.06) !important; }
 html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-item > div:first-child{ border:1px solid rgba(255,255,255,.12) !important; }
+/* [lc-930] 演员文字色改由 .fnos-season-aside 的 data-fntv-text 对比度变量统一驱动(上方 .fnos-cast-info p 已用 var), 此处不再写死 */
 /* [lc-923] 演员墙格子的 hover 高亮(浅色模式同款, 走 --semi-color-fill-* 变量) */
 .fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item{ border-radius:10px !important; padding:4px 0 !important; transition:background .2s ease !important; }
 .fnos-immersive-season .fnos-season-aside .fnos-cast-cell > .fnos-cast-item:hover{ background:var(--semi-color-fill-0,rgba(120,120,128,.08)) !important; }
-html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:first-child{ color:#f5f5f7 !important; }
-html.dark .fnos-immersive-season .fnos-season-aside .fnos-cast-info p:last-child{ color:#9a9aa0 !important; }
+/* [lc-930] 演员文字色改由 .fnos-season-aside 的 data-fntv-text 对比度变量统一驱动(上方 .fnos-cast-info p 已用 var), 此处不再写死 */
 
 /* ===== [lc-894] 季详情头部：保留原始 fnOS 布局（左竖屏海报 + 右信息栏） ===== */
 /* 头部容器：保持 fnOS 原始 flex 布局（不再强制全宽底图） */
@@ -5637,6 +5651,61 @@ function fntvSeasonScrollDiag(): void {
 // [lc-928] 暴露给 DevTools Console 诊断
 (window as any).fntvSeasonScrollDiag = fntvSeasonScrollDiag;
 
+// [lc-930] 右栏文字对比度自适应: 采样卡片实际背景亮度, 在 .fnos-season-aside 上挂
+//   data-fntv-text="light|dark"(light=浅色文字用于暗背景, dark=深色文字用于亮背景),
+//   由 CSS 用 --fntv-info-*/--fntv-cast-* 变量驱动文字色。卡片的 --semi-color-bg-2 动态渐变(随封面主题染色)保持不动。
+function _relLum(r: number, g: number, b: number): number {
+  const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function _parseRgb(bc: string): [number, number, number, number] | null {
+  const m = bc.match(/rgba?\(([^)]+)\)/i);
+  if (!m) return null;
+  const p = m[1].split(',').map((s) => parseFloat(s));
+  if (p.length < 3) return null;
+  return [p[0], p[1], p[2], p.length >= 4 ? p[3] : 1];
+}
+function applySeasonAsideContrast(): void {
+  const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
+  if (!aside) return;
+  // 依次采样: 信息卡 / 演员卡 / 右栏自身, 向上爬找第一个有实色(alpha>0.06)背景的元素取亮度
+  const samples: HTMLElement[] = [];
+  const infoCard = aside.querySelector('.fnos-info-card') as HTMLElement | null;
+  const castCard = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+  if (infoCard) samples.push(infoCard);
+  if (castCard) samples.push(castCard);
+  samples.push(aside);
+  let lum = -1;
+  for (const el of samples) {
+    let cur: HTMLElement | null = el;
+    while (cur && cur !== document.body) {
+      const cs = getComputedStyle(cur);
+      const bc = cs.backgroundColor;
+      if (bc && bc !== 'transparent' && bc !== 'rgba(0, 0, 0, 0)') {
+        const c = _parseRgb(bc);
+        if (c && c[3] > 0.06) { lum = _relLum(c[0], c[1], c[2]); break; }
+      }
+      cur = cur.parentElement;
+    }
+    if (lum >= 0) break;
+  }
+  // 背景全是透明(渐变写在 backgroundImage 上, getComputedStyle 读不到实色)→ 退回主题:
+  //   暗色主题背景偏暗 → 用浅字; 浅色主题背景偏亮 → 用深字。
+  if (lum < 0) lum = document.documentElement.classList.contains('dark') ? 0.08 : 0.92;
+  // 对比度择优: 深字(#1d1d1f, L≈0.03) 与 浅字(#f5f5f7, L≈0.95) 哪个对当前背景对比度更高就用哪个
+  const Ld = 0.03, Ll = 0.95;
+  const crDark = (Math.max(lum, Ld) + 0.05) / (Math.min(lum, Ld) + 0.05);
+  const crLight = (Math.max(lum, Ll) + 0.05) / (Math.min(lum, Ll) + 0.05);
+  const text = crLight > crDark ? 'light' : 'dark';
+  if (aside.getAttribute('data-fntv-text') !== text) {
+    aside.setAttribute('data-fntv-text', text);
+  }
+  dlog('applySeasonAsideContrast: bgLum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
+    + ' crDark=' + crDark.toFixed(2) + ' crLight=' + crLight.toFixed(2) + ' -> data-fntv-text=' + text);
+}
+// [lc-930] 暴露给 DevTools Console 手动触发
+(window as any).fntvSeasonContrast = applySeasonAsideContrast;
+
 function layoutSeasonTwoPane(): void {
   if (_seasonLaying) { dlog('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
   // [lc-920] 一级详情页(show 页 /v/tv/<32hex>, 不含 /season/)不建两栏, 保持 fnOS 原生外观。
@@ -5864,6 +5933,11 @@ function layoutSeasonTwoPane(): void {
   alignInfoCardWithFirstEpisode();
   setTimeout(alignInfoCardWithFirstEpisode, 300);
   setTimeout(alignInfoCardWithFirstEpisode, 1000);
+  // [lc-930] 右栏文字对比度自适应: 建栏后立即跑一次, 并延迟复跑(封面主题染色 / 海报主色可能异步注入,
+  //   首次 computed style 还没拿到最终背景色 → 复跑才能采到真实亮度)。
+  applySeasonAsideContrast();
+  setTimeout(applySeasonAsideContrast, 400);
+  setTimeout(applySeasonAsideContrast, 1200);
   } finally {
     _seasonLaying = false;
   }
