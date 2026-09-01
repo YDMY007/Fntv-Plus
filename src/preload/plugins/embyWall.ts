@@ -12141,6 +12141,26 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     get carouselInited() { return _carouselInited; },
     get carouselRevealed() { return _carouselRevealed; },
     get carouselContainer() { return _carouselContainer; },
+    get leftHome() { return _leftHome; },
+    get onHome() { return /^\/v\/?($|\?|#)/.test(location.pathname); },
+    get carouselWrapper() { return _carouselWrapper; },
+    get mediaLibrarySectionFound() { return !!findMediaLibrarySection(); },
+    // [lc-940] 手动强制重建轮播: 若复现「路径B返回首页不显示」后调用它仍修不好 → 是重建逻辑/数据问题;
+    //   若调用后修好了 → 是「返回首页未触发重建」(触发器问题), 二者对症不同。
+    forceRebuild: () => { try { ensureHomepageEnhanced(); return 'ok'; } catch (e) { return String(e); } },
+    // [lc-940] 一键快照: 返回首页后轮播为什么没显示, 看这一份即可定位
+    rebuildSnapshot: () => ({
+      pathname: location.pathname,
+      onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
+      leftHome: _leftHome,
+      apiShowsLen: (_apiShows || []).length,
+      apiShowsWithBlob: (_apiShows || []).filter((s: any) => !!s._backdropBlob).length,
+      carouselInited: _carouselInited,
+      carouselContainerAttached: !!(_carouselContainer && document.body.contains(_carouselContainer)),
+      carouselWrapperAttached: !!(_carouselWrapper && document.body.contains(_carouselWrapper)),
+      mediaLibrarySectionFound: !!findMediaLibrarySection(),
+      isModalOpen: isModalOpen(),
+    }),
     dumpBackdropState: () => (_apiShows || []).map((s: any) => ({
       t: (s.title || '').substring(0, 10),
       hasBlob: !!s._backdropBlob,
@@ -12150,7 +12170,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       backHead: (s.backdrop || '').substring(0, 50),
     })),
   };
-  log('[lc-935][DIAG] window._fntvDiag 已暴露, 使用: _fntvDiag.dumpBackdropState()');
+  log('[lc-940][DIAG] window._fntvDiag 已暴露, 使用: _fntvDiag.rebuildSnapshot() / _fntvDiag.dumpBackdropState()');
 
   // [lc-279] 播放页打标: 页面存在 <video> 时给 <html> 加 fnos-video-active,
   // 使 mainwin.ts 注入的 ACRYLIC_CSS 中 lc-179 的 modal 例外规则(白底 #fff/#2b2a33)在播放页整体失效,
