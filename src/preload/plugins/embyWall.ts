@@ -1027,6 +1027,73 @@ function scrapeLandscapeBackdrops(): Map<string, string> {
   return map;
 }
 
+/** [lc-924] 规范化 backdrop 字段为完整可 fetch 的 URL(支持全 http / 绝对路径 / 相对路径 三种形态) */
+function normalizeBackdropUrl(p: string): string {
+  if (!p) return '';
+  if (/^https?:/i.test(p)) return p;
+  if (p.startsWith('/v/api/')) return p;
+  return `${location.origin}/v/api/v1/${p.replace(/^\//, '')}`;
+}
+
+/** [lc-924] 异步校验 URL 实际响应的图像是否为横版(nw>=nh)。失败/超时/非图 返回 false */
+async function checkLandscapeUrl(url: string, timeoutMs = 3500): Promise<boolean> {
+  if (!url) return false;
+  const b = await fetchImageAuth(url, { label: 'rev-chk', timeoutMs });
+  if (!b) return false;
+  const ok = await new Promise<boolean>((resolve) => {
+    const im = new Image();
+    const to = window.setTimeout(() => resolve(false), 3000);
+    im.onload = () => { clearTimeout(to); const w = im.naturalWidth || 0, h = im.naturalHeight || 0; resolve(w > 0 && h > 0 && w >= h); };
+    im.onerror = () => { clearTimeout(to); resolve(false); };
+    im.src = b;
+  });
+  try { URL.revokeObjectURL(b); } catch { /* ignore */ }
+  return ok;
+}
+
+/** [lc-924] 返回首页时校验 _apiShows 每个 show 的 backdrop 是否仍为横版。
+ *  详情→首页路径下, 缓存 URL 实际响应可能变成竖版海报(症状: 轮播显示竖屏海报)。
+ *  修复流程:
+ *    ① 对每个 show.backdrop 实际拉一次 + 校验宽高比;
+ *    ② 变成竖版 → 实时重抓 domLand(fnOS 重渲染后 DOM 已更新), 用 domLand 横版兜底;
+ *    ③ 仍无横版 → 标 _backdropIsPortrait=true, injectCarousel 时隐藏该 slide;
+ *    ④ 清掉 _backdropBlob 让下次渲染重新走 fetchImageAuth 校验流程。
+ *  校验完成后由 ensureHomepageEnhanced 触发二次 injectCarousel 反映新数据。 */
+async function revalidateBackdropsOnReturn(): Promise<void> {
+  if (!_apiShows.length) return;
+  const domLand = scrapeLandscapeBackdrops(); // 实时重抓, fnOS 重新渲染后 DOM 已更新
+  let portrait = 0, swapped = 0;
+  await Promise.all(_apiShows.map(async (s: any) => {
+    if (!s) return;
+    s._backdropIsPortrait = false; // 先重置, 校验后再决定
+    if (!s.backdrop) return;
+    const url = normalizeBackdropUrl(s.backdrop);
+    if (!url) return;
+    const ok = await checkLandscapeUrl(url, 3500);
+    if (ok) return;
+    // 实际响应是竖版 → 尝试 domLand 兜底
+    const alt = domLand.get(s.id);
+    if (alt) {
+      const altOk = await checkLandscapeUrl(alt, 3500);
+      if (altOk) {
+        try { URL.revokeObjectURL(s._backdropBlob); } catch { /* ignore */ }
+        s.backdrop = alt;
+        s._backdropBlob = undefined;
+        s._backdropRevalidated = true;
+        swapped++;
+        log('[lc-924] backdrop 变竖版→ domland 横版:', (s.title || '').substring(0, 12), '→', alt.substring(0, 50));
+        return;
+      }
+    }
+    // 实在没有横版 → 标记隐藏
+    s._backdropIsPortrait = true;
+    s._backdropRevalidated = true;
+    portrait++;
+    log('[lc-924] backdrop 仍竖屏, 该 slide 将隐藏:', (s.title || '').substring(0, 12), url.substring(0, 50));
+  }));
+  if (swapped || portrait) log(`[lc-924] 返回首页校验: 竖版 ${portrait} 个, 替换为横版 ${swapped} 个`);
+}
+
 let _carouselInited = false;
 // [lc-615] 轮播是否已揭示(进度条走完): 详情补完的二次重建只有在已揭示后才执行,
 // 否则会绕过进度条提前出图(用户看到"进度条 20% 就闪出轮播")。
@@ -1405,7 +1472,8 @@ function injectCarousel(): void {
       imgEl.onerror = () => { log('[DIAG] 轮播主图(blob缓存)加载失败:', (show.title || '').substring(0, 16)); };
       imgEl.src = blob;
       try { if (imgEl.complete) applyLandscapeCheck(); } catch (e) { /* ignore */ }
-    } else {
+    } else if (!(show as any)._backdropIsPortrait) {
+      // [lc-924] 返回首页校验发现 backdrop 是竖版 → 不拉图, 保留默认隐藏(img 已是 display:none)
       fetchImageAuth(pic, { label: 'slide#' + i + ':' + (show.title || '').substring(0, 10), isStrm: isSlideStrm }).then((b) => {
         if (!b) {
           if (isSlideStrm) log('[DIAG] 轮播主图 fetchImageAuth 返回空(STRM item 海报加载失败):', (show.title || '').substring(0, 16), pic.substring(0, 60));
@@ -1863,11 +1931,14 @@ function buildCarouselStyle2(
     slides.push(slide);
 
     // 真实背景图（与样式 1 同链路：fetchImageAuth → blob）
-    const pic = imgUrl((show as any).backdrop);
-    if (pic) {
-      fetchImageAuth(pic, { label: 's2-slide#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-        if (b) slideBg.style.backgroundImage = `url("${b}")`;
-      });
+    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
+    if (!(show as any)._backdropIsPortrait) {
+      const pic = imgUrl((show as any).backdrop);
+      if (pic) {
+        fetchImageAuth(pic, { label: 's2-slide#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
+          if (b) slideBg.style.backgroundImage = `url("${b}")`;
+        });
+      }
     }
 
     // 按钮行为（沿用飞牛 SPA 路由）
@@ -2221,11 +2292,14 @@ function buildCarouselStyle3(
     });
 
     // 真实背景图（与样式1/2 同链路：fetchImageAuth → blob）
-    const pic = imgUrl((show as any).backdrop);
-    if (pic) {
-      fetchImageAuth(pic, { label: 's3-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-        if (b) bg.style.backgroundImage = `url("${b}")`;
-      });
+    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
+    if (!(show as any)._backdropIsPortrait) {
+      const pic = imgUrl((show as any).backdrop);
+      if (pic) {
+        fetchImageAuth(pic, { label: 's3-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
+          if (b) bg.style.backgroundImage = `url("${b}")`;
+        });
+      }
     }
 
     // 按钮行为（沿用飞牛 SPA 路由）
@@ -2516,11 +2590,14 @@ function buildCarouselStyle4(
     });
 
     // 真实背景图（与样式1/2/3 同链路：fetchImageAuth → blob）
-    const pic = imgUrl((show as any).backdrop);
-    if (pic) {
-      fetchImageAuth(pic, { label: 's4-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
-        if (b) bg.style.backgroundImage = `url("${b}")`;
-      });
+    // [lc-924] 返回首页校验发现 backdrop 是竖版海报 → 不渲染背景图, 保留渐变兜底
+    if (!(show as any)._backdropIsPortrait) {
+      const pic = imgUrl((show as any).backdrop);
+      if (pic) {
+        fetchImageAuth(pic, { label: 's4-card#' + i, isStrm: !!((show as any).strmTag) }).then((b) => {
+          if (b) bg.style.backgroundImage = `url("${b}")`;
+        });
+      }
     }
 
     // 按钮行为（沿用飞牛 SPA 路由）
@@ -10576,14 +10653,25 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   导航后, fnOS 视图栈可能不一致, 回来时落到未增强的原生 /v; 此时轮播守卫
   //   !(_apiLoaded && !_carouselRevealed) 在某些情况下会拦截重注入。这里在返回首页时
   //   显式重置并重建轮播, 确保看到的是 Fntv-Plus 增强页而非飞牛原生影视。
+  //   [lc-924] 返回前先校验每个 show.backdrop 是否仍是横版: 详情→首页路径下, 缓存的 URL 可能因
+  //   fnOS 服务端按场景返回不同尺寸 / domLand 首次抓取的 URL 已非最优, 导致轮播背景被替换成竖版海报。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
     if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return; // 已在, 跳过
     if (_carouselContainer && !document.body.contains(_carouselContainer)) { destroyCarousel(); _carouselContainer = null; }
     _carouselInited = false;
     _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
-    injectCarousel();
+    injectCarousel(); // 立即重建(用当前缓存), 用户先看到上一帧; 校验完后若有变更再二次重建
     log('ensureHomepageEnhanced: 已强制重注入轮播');
+    // [lc-924] 异步校验背景图(不阻塞首屏渲染): 检出竖版→ 改用 domLand 横版/标记 hide
+    void revalidateBackdropsOnReturn().then(() => {
+      const fixed = _apiShows.some((s: any) => s && s._backdropRevalidated);
+      if (!fixed) return;
+      log('ensureHomepageEnhanced: backdrop 校验完成, 含变更, 二次重建');
+      _carouselInited = false;
+      _carouselRevealed = true;
+      injectCarousel();
+    });
   };
 
   try {
