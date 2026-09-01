@@ -4792,6 +4792,10 @@ let _tmdbInfoError = '';                      // 最近一次失败原因
 let _tmdbMetaCache: { guid: string; title: string; year: string; tmdbId: string; mediaType: 'tv' | 'movie'; seasonNumber: number | null } | null = null;
 let _seasonShowTitle = '';                    // 页面解析出的剧名（换页重置）
 let _seasonNumberCache: number | null = null; // 页面解析出的季号（换页重置）
+/** [lc-927] fnOS 原生详情页暴露的 IMDb 链接（页面上指向 imdb.com/title/ 的 <a>）。
+ *  并入「剧集信息」卡显示：TMDB 返回了 externalIds.imdb 时以 TMDB 为准，否则用它兜底，避免同一页出现两个 IMDb。 */
+let _nativeImdb: { href: string; text: string } | null = null;
+let _nativeCastHidden = 0;                    // [lc-927] 已隐藏的原生演职人员残留区块数（诊断用）
 
 /** 换页/离开季页时清空 TMDB 状态。磁盘缓存仍在主进程，重新打开同一季仍是「零 TMDB 请求」。 */
 function resetTmdbShowInfo(): void {
@@ -4803,6 +4807,8 @@ function resetTmdbShowInfo(): void {
   _tmdbMetaCache = null;
   _seasonShowTitle = '';
   _seasonNumberCache = null;
+  _nativeImdb = null;      // [lc-927] 原生 IMDb 随换页重置，避免沿用上一页的链接
+  _nativeCastHidden = 0;
 }
 
 /** 从 URL 取当前季/影视 guid 与媒体类型（/v/tv/season/<guid> → tv） */
@@ -5099,6 +5105,27 @@ function buildTmdbInfoHtml(d: any): string {
   return out.join('');
 }
 
+/** [lc-927] 采集 fnOS 原生详情页暴露的 IMDb 链接（页面上指向 imdb.com/title/ 的 <a>）。
+ *  原「外部链接」独立卡片已取消，IMDb 统一并入「剧集信息」卡显示：
+ *  TMDB 数据里有 externalIds.imdb 时以 TMDB 为准，没有时才用这条原生链接兜底。 */
+function collectNativeImdb(): { href: string; text: string } | null {
+  try {
+    const a = Array.from(document.querySelectorAll('a')).find((el) => {
+      const h = el.getAttribute('href') || '';
+      return /imdb\.com\/title\//i.test(h);
+    }) as HTMLElement | null | undefined;
+    if (!a) { _nativeImdb = null; return null; }
+    const href = (a.getAttribute('href') || '').trim();
+    const text = ((a.textContent || '').trim() || 'IMDb').substring(0, 40);
+    _nativeImdb = { href, text };
+    dlog('collectNativeImdb: ✅ 命中 fnOS 原生 IMDb href=' + href);
+    return _nativeImdb;
+  } catch (_e) {
+    _nativeImdb = null;
+    return null;
+  }
+}
+
 /** 把 TMDB 数据 / 加载中 / 错误 状态渲染进 .fnos-info-tmdb（带内容 diff 防 observer 自喂） */
 function renderTmdbShowInfo(): void {
   const box = _infoTmdbEl;
@@ -5110,6 +5137,11 @@ function renderTmdbShowInfo(): void {
     body = '<div class="fnos-tmdb-loading">正在从 TMDB 获取剧集信息…</div>';
   } else if (_tmdbInfoError) {
     body = `<div class="fnos-tmdb-error">${tmdbEsc(_tmdbInfoError)}</div>`;
+  }
+  // [lc-927] 原生 IMDb 兜底：仅当 TMDB 数据里没有 IMDb 时才补，避免同一页面出现两个 IMDb 链接
+  const tmdbHasImdb = !!(_tmdbInfoData && _tmdbInfoData.externalIds && _tmdbInfoData.externalIds.imdb);
+  if (_nativeImdb && !tmdbHasImdb) {
+    body += `<div class="fnos-tmdb-links"><a href="${tmdbEsc(_nativeImdb.href)}" target="_blank" rel="noopener">${tmdbEsc(_nativeImdb.text)} ↗</a></div>`;
   }
   const errNote = (_tmdbInfoData && _tmdbInfoError)
     ? `<div class="fnos-tmdb-error fnos-tmdb-error-inline">${tmdbEsc(_tmdbInfoError)}</div>` : '';
@@ -5201,6 +5233,7 @@ function ensureCastInAside(aside: HTMLElement): void {
     return;
   }
   dlog('ensureCastInAside: 找到 cast, 移入右侧栏 cls=' + (cast.className||'').toString().substring(0,60));
+  const castOriginParent = cast.parentElement; // [lc-927] 记录原父容器, 搬走后用于清理「只剩标题的空壳」
   scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
   if (_castRestyleTimer) clearInterval(_castRestyleTimer);
   _castRestyleTimer = setInterval(restyleCastOnce, 600); // [lc-903] 每 600ms 兜底巡检
@@ -5208,6 +5241,14 @@ function ensureCastInAside(aside: HTMLElement): void {
   castCard.className = 'fnos-info-card fnos-cast-card';
   const castTitle = document.createElement('h4');
   castTitle.textContent = '主要配音演员';
+  // [lc-927] 若这份 cast 落在我们此前隐藏过的原生残留容器里(SPA 重建后复用了同一节点),
+  //   必须先解除隐藏, 否则移进右栏也照样看不见(右栏演员"消失"就是这么来的)。
+  const hiddenAnc = cast.closest('[data-fntv-native-cast-hidden]') as HTMLElement | null;
+  if (hiddenAnc) {
+    hiddenAnc.removeAttribute('data-fntv-native-cast-hidden');
+    hiddenAnc.style.removeProperty('display');
+    dlog('ensureCastInAside: ♻️ 解除此前隐藏的原生演职人员祖先, 避免移入右栏后不可见');
+  }
   castCard.appendChild(castTitle);
   castCard.appendChild(cast);
   // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
@@ -5217,6 +5258,114 @@ function ensureCastInAside(aside: HTMLElement): void {
   // [lc-923] 上面这行 gap 会覆盖"cast 容器本身即演员行容器"时的行列间距, 建完卡片后补一次演员墙布局
   applyCastWallLayout(cast);
   aside.appendChild(castCard);
+  // [lc-927] 演员已脱离原位置 → 清掉原位置可能剩下的「演职人员」标题空壳
+  pruneCastOriginShell(castOriginParent);
+}
+
+/** [lc-927] 演员整块被搬进右栏后，原位置的父容器常常只剩一个「演职人员」标题（或彻底空掉），
+ *  留在页面上就是一条孤零零的空壳区块。这里把它一并隐藏。
+ *  ⚠️ 条件极其保守 —— 只有「除了被搬走的 cast 之外几乎没有其它实质内容」时才动手：
+ *     ① 不含选集卡 [data-id="details"]；② 不含推荐卡 .card-root；③ 不含任何 <img>；
+ *     ④ 剩余可见文本 < 60 字；⑤ 不是两栏容器本身。
+ *  任何一条不满足就原样保留 —— 宁可留个空壳，也绝不能把整页内容列隐藏掉。 */
+function pruneCastOriginShell(originParent: HTMLElement | null): void {
+  if (!originParent || originParent === document.body || originParent === document.documentElement) return;
+  if (!document.body.contains(originParent)) return;
+  const cls = originParent.classList;
+  if (cls.contains('fnos-season-2col') || cls.contains('fnos-season-main')
+    || cls.contains('fnos-season-aside') || cls.contains('fnos-cast-card')) return;
+  if (originParent.getAttribute('data-fntv-native-cast-hidden')) return; // 幂等
+  if (originParent.querySelector('[data-id="details"]')) return;
+  if (originParent.querySelector('.card-root')) return;
+  if (originParent.querySelector('img')) return;             // 还有图 → 不是空壳
+  let restText = '';
+  const kids = Array.from(originParent.children) as HTMLElement[];
+  for (let i = 0; i < kids.length; i++) {
+    if (kids[i].getAttribute('data-fntv-native-cast-hidden')) continue; // 已隐藏的子不计入
+    restText += kids[i].textContent || '';
+  }
+  if (restText.trim().length > 60) return;                   // 还有别的文字内容 → 保留
+  originParent.setAttribute('data-fntv-native-cast-hidden', '1');
+  originParent.style.setProperty('display', 'none', 'important');
+  dlog('pruneCastOriginShell: 🚫 隐藏演职人员原位置空壳 tag=' + originParent.tagName
+    + ' cls=' + (originParent.className || '').toString().substring(0, 50)
+    + ' restText=' + JSON.stringify(restText.trim().substring(0, 40)));
+}
+
+/** [lc-927] 隐藏「未被移入右栏」的 fnOS 原生演职人员区块。
+ *
+ *  背景：ensureCastInAside 是把原生演职人员整块 appendChild 进右栏（DOM 移动，非复制）。
+ *  但 fnOS 是 SPA，路由/数据更新后可能在原位置再生成一份（或留下带标题的空壳容器），
+ *  于是页面上出现两份演职人员——用户要的就是"原生这里的不要"。
+ *
+ *  ⚠️ 遵守 lc-921 铁律：全程纯结构定位（人物链接 /v/person/），绝不扫描「演职/演员/配音…」标题文字。
+ *  ⚠️ 安全护栏（缺一不可，否则会把整页内容列误判成演职人员并隐藏）：
+ *     ① 只在右栏已存在 .fnos-cast-card 时才动手（否则原生那份还没搬走，隐藏就等于永久弄丢演员）；
+ *     ② 候选祖先内出现选集卡 [data-id="details"] / 推荐卡 .card-root / 两栏容器 一律跳过；
+ *     ③ 位于隐藏祖先内（路由缓存副本）的链接跳过——本来就不可见，别污染以后可能变可见的副本；
+ *     ④ 只取「最内层」满足条件的祖先，避免一路向上选到整页。
+ *  ⚠️ 幂等：已隐藏的元素打 data-fntv-native-cast-hidden 标记并跳过，observer 反复触发也不会自喂。
+ */
+function hideNativeCastSections(): number {
+  const PERSON_SEL = 'a[href*="/v/person/"]';
+  const moved = document.querySelector('.fnos-cast-card');
+  if (!moved) return _nativeCastHidden; // ① 右栏还没演员卡 → 绝不隐藏原生那份
+  const persons = Array.from(document.querySelectorAll(PERSON_SEL)) as HTMLElement[];
+  if (!persons.length) return _nativeCastHidden;
+  // ② 稳态快退：所有人物链接都已在右栏 → 无残留，零开销返回
+  const stray: HTMLElement[] = [];
+  for (let i = 0; i < persons.length; i++) {
+    const p = persons[i];
+    if (moved.contains(p)) continue;
+    if (isHiddenByAncestor(p)) continue;                            // ③ 路由缓存副本里的，不管
+    if (p.closest('[data-fntv-native-cast-hidden]')) continue;      // ④ 已处理过
+    stray.push(p);
+  }
+  if (stray.length < 3) return _nativeCastHidden; // 零散人物链接(<3)不构成演职人员区块, 不处理
+  const straySet = new Set<Element>(stray);
+  for (let i = 0; i < stray.length; i++) {
+    const p = stray[i];
+    if (!document.body.contains(p)) continue;
+    if (p.closest('[data-fntv-native-cast-hidden]')) continue;      // 可能被同批前面的动作覆盖
+    // 自底向上找「最内层」满足条件：含 ≥3 个 stray 人物链接，且不含选集卡/推荐卡，且不是两栏容器
+    let target: HTMLElement | null = null;
+    let el: HTMLElement | null = p;
+    while (el && el !== document.body) {
+      const cnt = Array.from(el.querySelectorAll(PERSON_SEL)).filter((x) => straySet.has(x)).length;
+      const cls = el.classList;
+      const isLayout = cls.contains('fnos-season-2col') || cls.contains('fnos-season-main')
+        || cls.contains('fnos-season-aside') || cls.contains('fnos-cast-card')
+        || cls.contains('fnos-info-card');
+      if (cnt >= 3
+        && el.querySelector('[data-id="details"]') === null
+        && el.querySelector('.card-root') === null
+        && !isLayout) { target = el; break; }
+      el = el.parentElement;
+    }
+    if (!target) continue;
+    // 若父容器除本区块外只剩「标题级」短文本兄弟(如「演职人员」标题)，连父容器一起隐藏，避免留下孤零零一行标题
+    let hideEl: HTMLElement = target;
+    const par = target.parentElement;
+    if (par && par !== document.body && !par.classList.contains('fnos-season-2col')
+      && !par.classList.contains('fnos-season-main')) {
+      const sibs = Array.from(par.children).filter((c) => c !== target) as HTMLElement[];
+      const allTitleLike = sibs.length > 0 && sibs.every((s) => {
+        const t = (s.textContent || '').trim();
+        return t.length > 0 && t.length < 60
+          && s.querySelector('img') === null
+          && s.querySelector('[data-id="details"]') === null
+          && s.querySelector('.card-root') === null;
+      });
+      if (allTitleLike) hideEl = par;
+    }
+    hideEl.setAttribute('data-fntv-native-cast-hidden', '1');
+    hideEl.style.setProperty('display', 'none', 'important');
+    _nativeCastHidden++;
+    dlog('hideNativeCastSections: 🚫 隐藏原生演职人员残留 #' + _nativeCastHidden
+      + ' tag=' + hideEl.tagName + ' cls=' + (hideEl.className || '').toString().substring(0, 50)
+      + ' persons=' + stray.length);
+  }
+  return _nativeCastHidden;
 }
 
 function layoutSeasonTwoPane(): void {
@@ -5290,23 +5439,18 @@ function layoutSeasonTwoPane(): void {
   _infoCard = info;
   _infoLocalEl = infoLocal;
   _infoTmdbEl = infoTmdb;
+  collectNativeImdb();   // [lc-927] 先采集 fnOS 原生 IMDb，供「剧集信息」卡在 TMDB 无 IMDb 时兜底
   updateSeasonInfoStats();
   ensureTmdbShowInfo(); // [lc-926] 首次打开该季 → 拉一次 TMDB（本地有磁盘缓存则秒回，零网络请求）
 
   // [lc-920] 主要配音演员(借用 fnOS 原生演职人员): 抽成 ensureCastInAside, 建栏时与 observer 持续巡检时复用,
   //   解决"演员数据异步填充后才出现、但两栏只在首次建立时塞过一次 → 右栏永远缺演员"的问题。
   ensureCastInAside(aside);
+  // [lc-927] 演员已搬进右栏 → 隐藏 fnOS 原生位置残留的那份(SPA 重建/空壳标题), 页面上只保留右栏一份。
+  hideNativeCastSections();
 
-  // 外部链接（fnOS 暴露的 IMDB 等）
-  const link = Array.from(document.querySelectorAll('a')).find(
-    (a) => /imdb|douban|bangumi|tvmaze|anilist/i.test(a.getAttribute('href') || a.textContent || '')
-  );
-  if (link) {
-    const linkCard = document.createElement('div');
-    linkCard.className = 'fnos-info-card';
-    linkCard.innerHTML = `<h4>外部链接</h4><p><a href="${link.getAttribute('href')}" target="_blank" rel="noopener">${link.textContent.trim()} →</a></p>`;
-    aside.appendChild(linkCard);
-  }
+  // [lc-927] 原「外部链接」独立卡片已取消: IMDb 链接并入「剧集信息」卡显示
+  //   (TMDB 的 externalIds.imdb 优先, 无 TMDB 数据时用 fnOS 原生链接兜底, 见 renderTmdbShowInfo)。
 
   // 组装两栏
   root.insertBefore(wrap, ep);
@@ -5639,6 +5783,8 @@ function observeSeasonTwoPane(): void {
         // [lc-920] 演员数据可能晚于两栏建立才异步填充: 每次稳态巡检都尝试把 cast 移入右栏(已存在则仅 restyle)
         const asideNow = wrap.querySelector('.fnos-season-aside') as HTMLElement | null;
         if (asideNow) ensureCastInAside(asideNow);
+        // [lc-927] fnOS SPA 重建可能在原生位置再长出一份演职人员 → 每次稳态巡检顺手清掉(幂等, 无残留时零开销)
+        hideNativeCastSections();
       } else {
         _obsRelayoutTicks++; // [lc-906] 两栏被 fnOS 拆散: 计入重建次数, 频繁则退避, 避免与 fnOS 抢 DOM
         if (wrap) wrap.remove();
