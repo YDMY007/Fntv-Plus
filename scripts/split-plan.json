@@ -1,0 +1,77 @@
+[
+  {
+    "range": [11912, 12101],
+    "out": "embyWall/modals/feedback.ts",
+    "doc": "反馈弹窗组：问卷反馈 / 反馈方式选择 / QQ 交流群（三层可返回的模态框）"
+  },
+  {
+    "range": [6800, 7118],
+    "out": "embyWall/nav/inject.ts",
+    "doc": "导航注入：原生返回按钮、外置播放器按钮、视频预览外置播放"
+  },
+  {
+    "range": [6562, 6799],
+    "out": "embyWall/theme.ts",
+    "doc": "UI 主题：light/dark/system 三态切换、深色模式落地到 fnOS、主题样式注入"
+  },
+  {
+    "range": [6498, 6561],
+    "out": "embyWall/detail/immersive.ts",
+    "doc": "详情页沉浸式编排：导航沉浸式 + 液态玻璃总入口（组合 glass 与 season 两侧能力）"
+  },
+  {
+    "range": [3550, 6497],
+    "out": "embyWall/detail/season.ts",
+    "doc": "季详情页：两栏布局、演职员墙、TMDB 信息卡、集数时长统计、简介补全、相关 CSS"
+  },
+  {
+    "range": [3156, 3549],
+    "out": "embyWall/detail/glass.ts",
+    "doc": "详情页苹果液态玻璃：全屏底图、蒙版、透明化、安全选择器"
+  },
+  {
+    "range": [2859, 3155],
+    "out": "embyWall/carousel/logo.ts",
+    "doc": "轮播/详情页 LOGO：TMDB 透明 logo 拉取、标题替换为 logo、回写飞牛媒体库"
+  },
+  {
+    "range": [2385, 2858],
+    "out": "embyWall/carousel/progress.ts",
+    "doc": "轮播骨架屏与加载进度：占位构建、进度条推进、完成收尾、STRM 不支持提示"
+  },
+  {
+    "range": [1377, 2384],
+    "out": "embyWall/carousel/styles.ts",
+    "doc": "轮播样式构建：style2 / style3 / style4 三套皮肤 + 公共 CSS 注入"
+  },
+  {
+    "range": [737, 1376],
+    "out": "embyWall/carousel/render.ts",
+    "doc": "轮播渲染：injectCarousel 主体、媒体库定位、销毁/恢复、季链接解析"
+  },
+  {
+    "range": [461, 736],
+    "out": "embyWall/carousel/images.ts",
+    "doc": "图片获取：带鉴权头拉图转 blob URL、backdrop 解析、item 详情抓取、STRM 探测"
+  },
+  {
+    "range": [392, 458],
+    "out": "embyWall/nav/scroll.ts",
+    "doc": "滚动与视口适配：matchMedia 拦截（窄屏模式）、横向滚轮滚动"
+  },
+  {
+    "range": [388, 390],
+    "out": "embyWall/carousel/logoAsset.ts",
+    "doc": "内嵌 base64 LOGO 资源（单独成文件，避免超长常量污染逻辑代码）"
+  },
+  {
+    "range": [250, 386],
+    "out": "embyWall/login.ts",
+    "doc": "登录页增强：登录后自动跳影视、/v/login 账号自动填充、登录页自定义背景"
+  },
+  {
+    "range": [27, 249],
+    "out": "embyWall/modals/patch.ts",
+    "doc": "补丁应用向导弹窗（lc-516）：自包含的进度展示与用户确认流程"
+  }
+]

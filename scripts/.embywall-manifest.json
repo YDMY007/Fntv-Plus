@@ -1,0 +1,662 @@
+{
+  "embyWall/modals/feedback.ts": {
+    "exports": [
+      {
+        "name": "ABOUT_LINK_URL",
+        "uses": 2,
+        "writes": 0
+      },
+      {
+        "name": "openFeedbackChoiceModal",
+        "uses": 1,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "ipcRenderer",
+        "n": 3
+      }
+    ],
+    "srcRange": [
+      11912,
+      12101
+    ],
+    "title": "[恢复v381] 反馈弹窗",
+    "doc": "反馈弹窗组：问卷反馈 / 反馈方式选择 / QQ 交流群（三层可返回的模态框）"
+  },
+  "embyWall/nav/inject.ts": {
+    "exports": [
+      {
+        "name": "injectNativeReturnButton",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "injectExternalPlayButton",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "injectVideoPreviewExternalPlay",
+        "uses": 1,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "log",
+        "n": 7
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 6
+      }
+    ],
+    "srcRange": [
+      6800,
+      7118
+    ],
+    "title": "入口",
+    "doc": "导航注入：原生返回按钮、外置播放器按钮、视频预览外置播放"
+  },
+  "embyWall/theme.ts": {
+    "exports": [
+      {
+        "name": "UiThemeMode",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "getUiTheme",
+        "uses": 2,
+        "writes": 0
+      },
+      {
+        "name": "getEffectiveDark",
+        "uses": 3,
+        "writes": 0
+      },
+      {
+        "name": "applyUiTheme",
+        "uses": 3,
+        "writes": 0
+      },
+      {
+        "name": "setUiTheme",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "injectUiThemeStyle",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "removeThemeModeSetting",
+        "uses": 2,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 4
+      }
+    ],
+    "srcRange": [
+      6562,
+      6799
+    ],
+    "title": "",
+    "doc": "UI 主题：light/dark/system 三态切换、深色模式落地到 fnOS、主题样式注入"
+  },
+  "embyWall/detail/immersive.ts": {
+    "exports": [
+      {
+        "name": "applyDetailLiquidGlass",
+        "uses": 10,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 6
+      },
+      {
+        "id": "_detailGlassInited",
+        "n": 4
+      },
+      {
+        "id": "isDetailPage",
+        "n": 3
+      },
+      {
+        "id": "dlog",
+        "n": 2
+      },
+      {
+        "id": "_lastDetailHref",
+        "n": 2
+      },
+      {
+        "id": "removeFullscreenBackdrop",
+        "n": 2
+      },
+      {
+        "id": "resetSeasonObsState",
+        "n": 1
+      },
+      {
+        "id": "unlayoutSeasonTwoPane",
+        "n": 1
+      },
+      {
+        "id": "applySeasonImmersiveDetail",
+        "n": 1
+      },
+      {
+        "id": "ensureFullscreenBackdrop",
+        "n": 1
+      },
+      {
+        "id": "log",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      6498,
+      6561
+    ],
+    "title": "",
+    "doc": "详情页沉浸式编排：导航沉浸式 + 液态玻璃总入口（组合 glass 与 season 两侧能力）"
+  },
+  "embyWall/detail/season.ts": {
+    "exports": [
+      {
+        "name": "resetSeasonObsState",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "unlayoutSeasonTwoPane",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "applySeasonImmersiveDetail",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "_lastDetailHref",
+        "uses": 2,
+        "writes": 1
+      }
+    ],
+    "deps": [
+      {
+        "id": "dlog",
+        "n": 81
+      },
+      {
+        "id": "S",
+        "n": 17
+      },
+      {
+        "id": "log",
+        "n": 8
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 3
+      },
+      {
+        "id": "fnosGetEditDetail",
+        "n": 1
+      },
+      {
+        "id": "safeSelect",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      3550,
+      6497
+    ],
+    "title": "[lc-923] 演员墙：一行多个 + 自动换行；每格内「头像在上、姓名/角色在下(居中)」",
+    "doc": "季详情页：两栏布局、演职员墙、TMDB 信息卡、集数时长统计、简介补全、相关 CSS"
+  },
+  "embyWall/detail/glass.ts": {
+    "exports": [
+      {
+        "name": "_detailGlassInited",
+        "uses": 4,
+        "writes": 3
+      },
+      {
+        "name": "isDetailPage",
+        "uses": 9,
+        "writes": 1
+      },
+      {
+        "name": "safeSelect",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "ensureFullscreenBackdrop",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "removeFullscreenBackdrop",
+        "uses": 2,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "log",
+        "n": 17
+      },
+      {
+        "id": "S",
+        "n": 6
+      }
+    ],
+    "srcRange": [
+      3156,
+      3549
+    ],
+    "title": "详情页苹果液态玻璃 (TV详情 / Season详情)",
+    "doc": "详情页苹果液态玻璃：全屏底图、蒙版、透明化、安全选择器"
+  },
+  "embyWall/carousel/logo.ts": {
+    "exports": [
+      {
+        "name": "resolveShowLogo",
+        "uses": 3,
+        "writes": 0
+      },
+      {
+        "name": "applyTitleLogo",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "fnosGetEditDetail",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "backfillDetailLogo",
+        "uses": 3,
+        "writes": 0
+      },
+      {
+        "name": "swapTitleToLogo",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "applyCarouselLogoNow",
+        "uses": 1,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "log",
+        "n": 31
+      },
+      {
+        "id": "S",
+        "n": 16
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 15
+      },
+      {
+        "id": "fetchImageAuth",
+        "n": 3
+      },
+      {
+        "id": "isDetailPage",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      2859,
+      3155
+    ],
+    "title": "",
+    "doc": "轮播/详情页 LOGO：TMDB 透明 logo 拉取、标题替换为 logo、回写飞牛媒体库"
+  },
+  "embyWall/carousel/progress.ts": {
+    "exports": [
+      {
+        "name": "buildLoadingPlaceholder",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "buildStrmUnsupportedTip",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "autoFetchDescs",
+        "uses": 1,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 118
+      },
+      {
+        "id": "log",
+        "n": 5
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 2
+      },
+      {
+        "id": "getEffectiveDark",
+        "n": 1
+      },
+      {
+        "id": "ensureStyle4Css",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      2385,
+      2858
+    ],
+    "title": "",
+    "doc": "轮播骨架屏与加载进度：占位构建、进度条推进、完成收尾、STRM 不支持提示"
+  },
+  "embyWall/carousel/styles.ts": {
+    "exports": [
+      {
+        "name": "buildCarouselStyle2",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "buildCarouselStyle3",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "ensureStyle4Css",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "buildCarouselStyle4",
+        "uses": 1,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 12
+      },
+      {
+        "id": "resolveSeasonHref",
+        "n": 6
+      },
+      {
+        "id": "log",
+        "n": 3
+      },
+      {
+        "id": "resolveShowLogo",
+        "n": 3
+      },
+      {
+        "id": "applyCarouselBackdrop",
+        "n": 3
+      },
+      {
+        "id": "getEffectiveDark",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      1377,
+      2384
+    ],
+    "title": "预加载优雅占位(替代硬编码 demo 无职转生)",
+    "doc": "轮播样式构建：style2 / style3 / style4 三套皮肤 + 公共 CSS 注入"
+  },
+  "embyWall/carousel/render.ts": {
+    "exports": [
+      {
+        "name": "destroyCarousel",
+        "uses": 4,
+        "writes": 0
+      },
+      {
+        "name": "resumeCarousel",
+        "uses": 1,
+        "writes": 0
+      },
+      {
+        "name": "findMediaLibrarySection",
+        "uses": 3,
+        "writes": 0
+      },
+      {
+        "name": "isModalOpen",
+        "uses": 2,
+        "writes": 0
+      },
+      {
+        "name": "resolveSeasonHref",
+        "uses": 6,
+        "writes": 0
+      },
+      {
+        "name": "injectCarousel",
+        "uses": 7,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 96
+      },
+      {
+        "id": "log",
+        "n": 22
+      },
+      {
+        "id": "fetchImageAuth",
+        "n": 3
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 2
+      },
+      {
+        "id": "buildStrmUnsupportedTip",
+        "n": 1
+      },
+      {
+        "id": "buildLoadingPlaceholder",
+        "n": 1
+      },
+      {
+        "id": "buildCarouselStyle2",
+        "n": 1
+      },
+      {
+        "id": "buildCarouselStyle3",
+        "n": 1
+      },
+      {
+        "id": "buildCarouselStyle4",
+        "n": 1
+      },
+      {
+        "id": "swapTitleToLogo",
+        "n": 1
+      },
+      {
+        "id": "autoFetchDescs",
+        "n": 1
+      },
+      {
+        "id": "applyTitleLogo",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      737,
+      1376
+    ],
+    "title": "[lc-781] 轮播样式 2：滑动切换式 + 底部进度条/指示点",
+    "doc": "轮播渲染：injectCarousel 主体、媒体库定位、销毁/恢复、季链接解析"
+  },
+  "embyWall/carousel/images.ts": {
+    "exports": [
+      {
+        "name": "fetchImageAuth",
+        "uses": 6,
+        "writes": 0
+      },
+      {
+        "name": "applyCarouselBackdrop",
+        "uses": 3,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "log",
+        "n": 7
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 4
+      }
+    ],
+    "srcRange": [
+      461,
+      736
+    ],
+    "title": "鉴权拉取图片→blob URL(绕开<img>无法带Authx头的问题)",
+    "doc": "图片获取：带鉴权头拉图转 blob URL、backdrop 解析、item 详情抓取、STRM 探测"
+  },
+  "embyWall/nav/scroll.ts": {
+    "exports": [
+      {
+        "name": "wheelToScroll",
+        "uses": 6,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 2
+      }
+    ],
+    "srcRange": [
+      392,
+      458
+    ],
+    "title": "拦截matchMedia",
+    "doc": "滚动与视口适配：matchMedia 拦截（窄屏模式）、横向滚轮滚动"
+  },
+  "embyWall/carousel/logoAsset.ts": {
+    "exports": [],
+    "deps": [],
+    "srcRange": [
+      388,
+      390
+    ],
+    "title": "",
+    "doc": "内嵌 base64 LOGO 资源（单独成文件，避免超长常量污染逻辑代码）"
+  },
+  "embyWall/login.ts": {
+    "exports": [
+      {
+        "name": "applyLoginBgVar",
+        "uses": 3,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "log",
+        "n": 8
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 4
+      },
+      {
+        "id": "isFntvTvPage",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      250,
+      386
+    ],
+    "title": "",
+    "doc": "登录页增强：登录后自动跳影视、/v/login 账号自动填充、登录页自定义背景"
+  },
+  "embyWall/modals/patch.ts": {
+    "exports": [
+      {
+        "name": "fntvOpenPatchApplyPopup",
+        "uses": 2,
+        "writes": 0
+      }
+    ],
+    "deps": [
+      {
+        "id": "S",
+        "n": 8
+      },
+      {
+        "id": "ipcRenderer",
+        "n": 7
+      },
+      {
+        "id": "isDetailPage",
+        "n": 1
+      },
+      {
+        "id": "applyDetailLiquidGlass",
+        "n": 1
+      },
+      {
+        "id": "wheelToScroll",
+        "n": 1
+      },
+      {
+        "id": "applyLoginBgVar",
+        "n": 1
+      }
+    ],
+    "srcRange": [
+      27,
+      249
+    ],
+    "title": "[lc-516] 模块级、自包含的补丁应用弹窗",
+    "doc": "补丁应用向导弹窗（lc-516）：自包含的进度展示与用户确认流程"
+  }
+}
