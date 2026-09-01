@@ -11891,15 +11891,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const d = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
     if (d && d.classList.contains('drawer-open')) { animateCloseDrawer(d); log('NAV -> DRAWER CLOSED (anim)'); }
   };
-  // [lc-889→lc-937] 返回首页时强制重注入轮播。
+  // [lc-889→lc-937→lc-939] 返回首页时强制重注入轮播。
   //   轮播详情按钮经 spaNav(pushState+手动dispatch popstate) 导航后, fnOS 视图栈可能不一致:
   //   返回首页时旧轮播可能「仍挂载却处于坏状态」(或不挂载), 旧守卫
   //   `if (_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited) return;`
   //   会令其永不重建 → 海报不显示(这正是"轮播按钮打开的详情返回后图片不加载"的根因;
   //   而原生链接路径 A 落地 fnOS 状态一致, 重建成功, 故正常)。
-  //   现改为: 只要「离开过首页」(_leftHome) 或轮播不健康, 就先彻底销毁(含移除注入的 wrapper),
-  //   再重试注入(返回首页时 fnOS 可能仍在渲染媒体库区块, 一次 inject 找不到 section),
-  //   确保两条路径返回首页都能正确重建并显示横版海报(base64 data URL, 与导航无关)。
+  //   现改为三级策略, 确保两条路径返回首页都能正确重建并显示横版海报(base64 data URL, 与导航无关):
+  //   ② 若注入的 _carouselWrapper 仍挂载(fnOS 缓存了含轮播的 home DOM), 直接复用它重建 —— 不依赖 findMediaLibrarySection;
+  //   ③ 若 wrapper 已游离(fnOS 重渲染了 home), 移除复位后重试 findMediaLibrarySection(上限 ~1.5s), 命中即建;
+  //   ④ 若 _apiShows 为空(整页重载), 重置 _apiLoaded 重新拉取。
   //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
     if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
@@ -11907,14 +11908,24 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const healthy = !!(_carouselContainer && document.body.contains(_carouselContainer) && _carouselInited);
     if (healthy && !_leftHome) return;
     _leftHome = false; // 本次返回/重建后复位
-    // ① 彻底清理: 销毁 timer/listener + 移除注入的 wrapper + 复位状态(无论旧节点是否仍挂载)
+    // ① 清理旧 timer/listener
     try { destroyCarousel(); } catch (_) { /* ignore */ }
-    if (_carouselWrapper) { try { if (_carouselWrapper.parentElement) _carouselWrapper.remove(); } catch (_) { /* ignore */ } }
+    // ② 复用仍挂载的轮播 wrapper(fnOS 返回首页时若缓存了含轮播的 home DOM, 旧 wrapper 仍挂载):
+    //   直接复用它重建, 完全不依赖 findMediaLibrarySection —— 这是「spaNav 返回后媒体库区块找不到」时仍能保住轮播的关键。
+    if (_carouselWrapper && document.body.contains(_carouselWrapper)) {
+      _carouselInited = false;
+      _carouselRevealed = true;
+      injectCarousel(); // rebuild 分支: 复用 _carouselWrapper(清空 innerHTML 重建)
+      log('ensureHomepageEnhanced: 复用已挂载的轮播 wrapper 重建');
+      return;
+    }
+    // ③ wrapper 已游离(返回时 fnOS 重新渲染了 home): 移除并复位, 再经 findMediaLibrarySection 重试挂载
+    if (_carouselWrapper) { try { _carouselWrapper.remove(); } catch (_) { /* ignore */ } }
     _carouselContainer = null;
     _carouselWrapper = null;
     _carouselInited = false;
     _carouselRevealed = true; // 数据此前已揭示过, 跳过竖版防护直接重建
-    // ② 重试注入: 返回首页时 fnOS 可能仍在(重新)渲染媒体库区块, 一次 inject 可能找不到 section;
+    // ②' 重试注入: 返回首页时 fnOS 可能仍在(重新)渲染媒体库区块, 一次 inject 可能找不到 section;
     //   多次重试, 命中即建, 上限 ~1.5s 后仍无则放弃并告警(避免无限重试)。
     let _tries = 0;
     const rebuild = (): void => {
@@ -11925,22 +11936,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         // 放弃前输出可定位的诊断, 便于真机复核 fnOS 返回首页后的真实 DOM 结构
         const heads = document.querySelectorAll('strong,h2,h3').length;
         const known = document.querySelectorAll('.relative.flex.flex-col.gap-6 > div').length;
-        log('[lc-937] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建; diag headings=' + heads + ' knownLayoutDivs=' + known + ' pathname=' + location.pathname);
+        log('[lc-939] ensureHomepageEnhanced: 重试 6 次仍未找到媒体库区块, 放弃重建; diag headings=' + heads + ' knownLayoutDivs=' + known + ' pathname=' + location.pathname);
         return;
       }
       const diagShows = (_apiShows || []).slice(0, 12).map((s: any) => ({ t: (s.title || '').substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!(s.backdrop) }));
-      log('[lc-937] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
+      log('[lc-939] ensureHomepageEnhanced 重建前 _apiShows.len=', _apiShows.length, 'sample=', JSON.stringify(diagShows));
       injectCarousel(); // 用当前缓存(含 base64 data URL 横版主图), 无网络重拉
       log('ensureHomepageEnhanced: 已强制重注入轮播(返回首页不再触发 backdrop 网络重拉/刷新)');
     };
     rebuild();
-    // ③ 数据兜底: 若整页重载等导致 _apiShows 为空(无缓存), 重新拉取(内部 revealOnce 会渲染)
+    // ④ 数据兜底: 若整页重载等导致 _apiShows 为空(无缓存), 重新拉取(内部 revealOnce 会渲染)
     if (_apiShows.length === 0) {
       _apiLoaded = false;      // 解除"只拉一次"守卫, 允许重拉
       _carouselRevealed = false; // 允许 fetchShowsViaIPC 内部 revealOnce 重新渲染
       fetchShowsViaIPC(location.origin).then(() => {
         // 内部 revealOnce 处理渲染, 无需此处再 inject
-      }).catch(e => log('[lc-937] ensureHomepageEnhanced 重新拉取异常:', e));
+      }).catch(e => log('[lc-939] ensureHomepageEnhanced 重新拉取异常:', e));
     }
   };
 
