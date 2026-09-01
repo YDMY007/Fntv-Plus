@@ -5254,6 +5254,16 @@ function ensureCastInAside(aside: HTMLElement): void {
     restyleCastIfNeeded(cast); // 已就位: 仅对新增/替换的演员节点收紧, 零重复 DOM 写入
     return;
   }
+  // [lc-942] 🛡️ 防御 HierarchyRequestError(白屏):
+  //   cast 与 aside 若互为祖先(如 SPA 过渡期 fnOS DOM 错乱 / findSeasonCastParent 临时返回了过高层容器,
+  //   而 wrap/aside 又被插在 ep 的父链上 → cast 成了 aside 的祖先), 把 cast 移入右栏必然形成循环 DOM,
+  //   随后 appendChild 抛 "new child element contains the parent" → 整页白屏(lc-941 改 SPA 导航后新暴露)。
+  //   此刻直接放弃本次搬移, 等 DOM 稳定后下次巡检再试 —— 绝不抛未捕获异常。
+  if (cast === aside || cast.contains(aside) || aside.contains(cast)) {
+    dlog('ensureCastInAside: ⚠️ cast 与 aside 存在包含关系(cast.contains(aside)=' + cast.contains(aside)
+      + ', aside.contains(cast)=' + aside.contains(cast) + '), 跳过搬移避免 HierarchyRequestError 白屏');
+    return;
+  }
   dlog('ensureCastInAside: 找到 cast, 移入右侧栏 cls=' + (cast.className||'').toString().substring(0,60)
     + (existing ? ' (复用已有 cast 卡: live cast 不在其中)' : ' (新建 cast 卡)'));
   const castOriginParent = cast.parentElement; // [lc-927] 记录原父容器, 搬走后用于清理「只剩标题的空壳」
@@ -5283,14 +5293,16 @@ function ensureCastInAside(aside: HTMLElement): void {
     hiddenAnc.style.removeProperty('display');
     dlog('ensureCastInAside: ♻️ 解除此前隐藏的原生演职人员祖先, 避免移入右栏后不可见');
   }
-  castCard.appendChild(cast);
+  // [lc-942] 双保险: 仅当不产生循环且不重复时才 append(上面已拦截互为祖先, 这里防任何残余边界)
+  if (!castCard.contains(cast) && !cast.contains(castCard)) castCard.appendChild(cast);
   // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
   cast.style.padding = '0';
   cast.style.margin = '0';
   cast.style.gap = '2px';
   // [lc-923] 上面这行 gap 会覆盖"cast 容器本身即演员行容器"时的行列间距, 建完卡片后补一次演员墙布局
   applyCastWallLayout(cast);
-  if (!existing) aside.appendChild(castCard);
+  // [lc-942] 双保险: 仅当 aside 内尚无该卡、且不会形成循环时才 append
+  if (!existing && !aside.contains(castCard) && !castCard.contains(aside)) aside.appendChild(castCard);
   // [lc-927] 演员已脱离原位置 → 清掉原位置可能剩下的「演职人员」标题空壳
   pruneCastOriginShell(castOriginParent);
 }
