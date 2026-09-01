@@ -5240,25 +5240,43 @@ let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSe
  *  - 找到 cast 但右栏还没有 → 创建卡片并移入, 同时启动 600ms 兜底 restyle 定时器;
  *  - 未找到 cast → 直接返回(等 fnOS 异步填充后下次巡检再试)。 */
 function ensureCastInAside(aside: HTMLElement): void {
-  const existing = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
   const cast = findSeasonCastParent();
   if (!cast) {
-    if (!existing) dlog('ensureCastInAside: 暂未找到 cast(演员可能尚未异步填充)');
+    const existing0 = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+    if (!existing0) dlog('ensureCastInAside: 暂未找到 cast(演员可能尚未异步填充)');
     return;
   }
-  if (existing) {
-    restyleCastIfNeeded(cast); // 已存在: 仅对新增/替换的演员节点收紧, 零重复 DOM 写入
+  const existing = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+  // [lc-931] ⚠️ 关键修正: 不能仅凭 ".fnos-cast-card 存在" 就跳过。
+  //   fnOS/React 异步重渲染时可能把已被我们移入右栏的 cast 节点重新挂回原位置(原位置复活一份),
+  //   此时 aside 里的 .fnos-cast-card 仍在(可能已空)但 live cast 并不在里面 →
+  //   旧逻辑 if(existing) return 误判"已就位"什么都不做 → 演员被留在原位置("跑回原处")。
+  //   正确判定: 仅当 live cast 真正位于 aside 的 cast 卡内才跳过; 否则一律重新移入。
+  if (existing && existing.contains(cast)) {
+    restyleCastIfNeeded(cast); // 已就位: 仅对新增/替换的演员节点收紧, 零重复 DOM 写入
     return;
   }
-  dlog('ensureCastInAside: 找到 cast, 移入右侧栏 cls=' + (cast.className||'').toString().substring(0,60));
+  dlog('ensureCastInAside: 找到 cast, 移入右侧栏 cls=' + (cast.className||'').toString().substring(0,60)
+    + (existing ? ' (复用已有 cast 卡: live cast 不在其中)' : ' (新建 cast 卡)'));
   const castOriginParent = cast.parentElement; // [lc-927] 记录原父容器, 搬走后用于清理「只剩标题的空壳」
   scheduleCastRestyle(); // [lc-903] 立即 + 重试 restyle, 覆盖 fnOS 异步填充的演职人员节点
   if (_castRestyleTimer) clearInterval(_castRestyleTimer);
   _castRestyleTimer = setInterval(restyleCastOnce, 600); // [lc-903] 每 600ms 兜底巡检
-  const castCard = document.createElement('div');
-  castCard.className = 'fnos-info-card fnos-cast-card';
-  const castTitle = document.createElement('h4');
-  castTitle.textContent = '主要配音演员';
+  // [lc-931] 复用已有 .fnos-cast-card(没有才新建), 避免右栏出现两个 cast 卡导致 hideNativeCastSections 误判
+  let castCard = existing;
+  if (!castCard) {
+    castCard = document.createElement('div');
+    castCard.className = 'fnos-info-card fnos-cast-card';
+    const castTitle = document.createElement('h4');
+    castTitle.textContent = '主要配音演员';
+    castCard.appendChild(castTitle);
+  } else {
+    // 已有卡但 live cast 不在里面: 清掉卡内残留的陈旧 cast 节点(只保留 h4 标题), 再把 live cast 移入
+    Array.from(castCard.children).forEach((ch) => {
+      if (ch.tagName === 'H4' || ch === cast) return;
+      (ch as HTMLElement).remove();
+    });
+  }
   // [lc-927] 若这份 cast 落在我们此前隐藏过的原生残留容器里(SPA 重建后复用了同一节点),
   //   必须先解除隐藏, 否则移进右栏也照样看不见(右栏演员"消失"就是这么来的)。
   const hiddenAnc = cast.closest('[data-fntv-native-cast-hidden]') as HTMLElement | null;
@@ -5267,7 +5285,6 @@ function ensureCastInAside(aside: HTMLElement): void {
     hiddenAnc.style.removeProperty('display');
     dlog('ensureCastInAside: ♻️ 解除此前隐藏的原生演职人员祖先, 避免移入右栏后不可见');
   }
-  castCard.appendChild(castTitle);
   castCard.appendChild(cast);
   // [lc-901b] 强制清零 fnOS 原生容器的 padding/margin(原生 ms-container 带大间距, CSS !important 兜底可能被更深层选择器覆盖)
   cast.style.padding = '0';
@@ -5275,7 +5292,7 @@ function ensureCastInAside(aside: HTMLElement): void {
   cast.style.gap = '2px';
   // [lc-923] 上面这行 gap 会覆盖"cast 容器本身即演员行容器"时的行列间距, 建完卡片后补一次演员墙布局
   applyCastWallLayout(cast);
-  aside.appendChild(castCard);
+  if (!existing) aside.appendChild(castCard);
   // [lc-927] 演员已脱离原位置 → 清掉原位置可能剩下的「演职人员」标题空壳
   pruneCastOriginShell(castOriginParent);
 }
