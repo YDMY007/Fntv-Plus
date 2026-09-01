@@ -1574,10 +1574,12 @@ function injectCarousel(): void {
         // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
-        const c = _carouselContainer;
-        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
-        if ((carouselVisible || !c) && !backBtn) {
+        // [lc-944] 兜底判据改为「季页内容是否真渲染」, 修复 lc-941 引入的白屏(同构于其余样式)
+        const seasonRendered = !!document.querySelector('[data-id="details"]')
+          || !!document.querySelector('.fnos-season-2col')
+          || !!document.querySelector('a[href*="/v/person/"]');
+        if (!backBtn && !seasonRendered) {
           log(tag + ' fallback -> full page nav (popstate not handled)', href);
           location.href = href;
         }
@@ -1946,10 +1948,16 @@ function buildCarouselStyle2(
         // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
-        const c = _carouselContainer;
-        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
-        if ((carouselVisible || !c) && !backBtn) location.href = href;
+        // [lc-944] 兜底判据改为「季页内容是否真渲染」, 修复 lc-941 引入的白屏:
+        //   fnOS 收合成 popstate 后可能进入半死状态(首页被隐藏→轮播尺寸归零, 但季页内容未渲染、返回键也未出现),
+        //   旧 carouselVisible 判定此时为 false → 兜底不触发 → 整页卡白屏。
+        //   现以「返回键 或 季页内容(选集卡/演职人员/剧集信息卡)任一存在」作为 fnOS 已接管的判据:
+        //   已接管→不整页刷新(保留轮播数据); 未接管(两者皆无)→整页跳转救活, 杜绝白屏。
+        const seasonRendered = !!document.querySelector('[data-id="details"]')
+          || !!document.querySelector('.fnos-season-2col')
+          || !!document.querySelector('a[href*="/v/person/"]');
+        if (!backBtn && !seasonRendered) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
@@ -2306,10 +2314,16 @@ function buildCarouselStyle3(
         // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
-        const c = _carouselContainer;
-        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
-        if ((carouselVisible || !c) && !backBtn) location.href = href;
+        // [lc-944] 兜底判据改为「季页内容是否真渲染」, 修复 lc-941 引入的白屏:
+        //   fnOS 收合成 popstate 后可能进入半死状态(首页被隐藏→轮播尺寸归零, 但季页内容未渲染、返回键也未出现),
+        //   旧 carouselVisible 判定此时为 false → 兜底不触发 → 整页卡白屏。
+        //   现以「返回键 或 季页内容(选集卡/演职人员/剧集信息卡)任一存在」作为 fnOS 已接管的判据:
+        //   已接管→不整页刷新(保留轮播数据); 未接管(两者皆无)→整页跳转救活, 杜绝白屏。
+        const seasonRendered = !!document.querySelector('[data-id="details"]')
+          || !!document.querySelector('.fnos-season-2col')
+          || !!document.querySelector('a[href*="/v/person/"]');
+        if (!backBtn && !seasonRendered) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)
@@ -2603,10 +2617,16 @@ function buildCarouselStyle4(
         // 导致返回首页时模块重载、_apiShows/_backdropBlob 被重置 → 轮播海报不显示(原生卡片进详情不经此路径故正常)。
         // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管; fnOS 已接管后 hideStaleViews 会把首页视图
         // display:none, 轮播 getBoundingClientRect 为 0 → 绝不整页刷新。
-        const c = _carouselContainer;
-        const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
         const backBtn = !!document.querySelector('button[aria-label="返回"]');
-        if ((carouselVisible || !c) && !backBtn) location.href = href;
+        // [lc-944] 兜底判据改为「季页内容是否真渲染」, 修复 lc-941 引入的白屏:
+        //   fnOS 收合成 popstate 后可能进入半死状态(首页被隐藏→轮播尺寸归零, 但季页内容未渲染、返回键也未出现),
+        //   旧 carouselVisible 判定此时为 false → 兜底不触发 → 整页卡白屏。
+        //   现以「返回键 或 季页内容(选集卡/演职人员/剧集信息卡)任一存在」作为 fnOS 已接管的判据:
+        //   已接管→不整页刷新(保留轮播数据); 未接管(两者皆无)→整页跳转救活, 杜绝白屏。
+        const seasonRendered = !!document.querySelector('[data-id="details"]')
+          || !!document.querySelector('.fnos-season-2col')
+          || !!document.querySelector('a[href*="/v/person/"]');
+        if (!backBtn && !seasonRendered) location.href = href;
       }, 600);
     };
     // [lc-900] PLAY 默认进二级详情页(与 DETAIL 同构)

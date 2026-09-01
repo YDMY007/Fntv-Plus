@@ -807,9 +807,13 @@ function navigateToDetail(href: string): void {
     // 现改双重判定「首页轮播仍可见 且 详情返回键未出现」才视为未接管。
     setTimeout(() => {
       const backBtn = !!document.querySelector('button[aria-label="返回"]');
-      const c = document.querySelector('[data-fntv-carousel-style]') as HTMLElement | null;
-      const carouselVisible = !!c && (() => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; })();
-      if ((carouselVisible || !c) && !backBtn) location.href = href;
+      // [lc-944] 兜底判据改为「季页内容是否真渲染」, 修复 lc-941 引入的白屏(同 embyWall spaNav):
+      //   fnOS 收合成 popstate 后可能进入半死状态(首页隐藏→轮播尺寸归零, 但季页内容未渲染、返回键也未出现),
+      //   旧 carouselVisible 判定此时为 false → 兜底不触发 → 整页卡白屏。现以「返回键 或 季页内容已渲染」为接管判据。
+      const seasonRendered = !!document.querySelector('[data-id="details"]')
+        || !!document.querySelector('.fnos-season-2col')
+        || !!document.querySelector('a[href*="/v/person/"]');
+      if (!backBtn && !seasonRendered) location.href = href;
     }, 600);
   } catch (e) { try { location.href = href; } catch { /* ignore */ } }
 }
