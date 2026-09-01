@@ -5238,7 +5238,9 @@ let _seasonLaying = false; // [lc-905] 重入保护: observer 风暴期 layoutSe
  *  - 找到 cast 但右栏还没有 → 创建卡片并移入, 同时启动 600ms 兜底 restyle 定时器;
  *  - 未找到 cast → 直接返回(等 fnOS 异步填充后下次巡检再试)。 */
 function ensureCastInAside(aside: HTMLElement): void {
-  const cast = findSeasonCastParent();
+  let cast: HTMLElement | null = null;
+  try {
+    cast = findSeasonCastParent();
   if (!cast) {
     const existing0 = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
     if (!existing0) dlog('ensureCastInAside: 暂未找到 cast(演员可能尚未异步填充)');
@@ -5305,6 +5307,12 @@ function ensureCastInAside(aside: HTMLElement): void {
   if (!existing && !aside.contains(castCard) && !castCard.contains(aside)) aside.appendChild(castCard);
   // [lc-927] 演员已脱离原位置 → 清掉原位置可能剩下的「演职人员」标题空壳
   pruneCastOriginShell(castOriginParent);
+  } catch (e) {
+    // [lc-943] 🛡️ 终极兜底: 搬移过程任何意外(含残余的循环 DOM)都只记日志、绝不抛未捕获异常 → 永不白屏。
+    //   退化表现: 右栏演员可能缺失(下次稳态巡检会重试), 但页面其它功能完全不受影响。
+    dlog('ensureCastInAside: ⚠️ 搬移异常(已捕获, 不白屏) ' + ((e && (e as Error).message) || e)
+      + ' | cast?' + (cast ? 'cast.contains(aside)=' + cast.contains(aside) + ', aside.contains(cast)=' + aside.contains(cast) : 'null'));
+  }
 }
 
 /** [lc-927] 演员整块被搬进右栏后，原位置的父容器常常只剩一个「演职人员」标题（或彻底空掉），
