@@ -1939,12 +1939,15 @@ function applySeasonAsideContrast(): void {
   const crDark = (Math.max(lum, Ld) + 0.05) / (Math.min(lum, Ld) + 0.05);
   const crLight = (Math.max(lum, Ll) + 0.05) / (Math.min(lum, Ll) + 0.05);
   const text = crLight > crDark ? 'light' : 'dark';
-  if (aside.getAttribute('data-fntv-text') !== text) {
+  // [lc-951] 仅在对比度结果(data-fntv-text)实际变化时落日志: MutationObserver 每次 DOM 抖动都会
+  //   延迟重调本函数, 若无条件 dlog 会刷屏 cmd。无变化时静默(仅更新属性/续接监听)。
+  const prevText = aside.getAttribute('data-fntv-text');
+  if (prevText !== text) {
     aside.setAttribute('data-fntv-text', text);
+    dlog('applySeasonAsideContrast: bgLum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
+      + ' crDark=' + crDark.toFixed(2) + ' crLight=' + crLight.toFixed(2) + ' -> data-fntv-text=' + text);
   }
   observeSeasonAsideContrast(aside); // [lc-951] 监听动态染色/主题切换, 兜底重算
-  dlog('applySeasonAsideContrast: bgLum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
-    + ' crDark=' + crDark.toFixed(2) + ' crLight=' + crLight.toFixed(2) + ' -> data-fntv-text=' + text);
 }
 // [lc-930] 暴露给 DevTools Console 手动触发
 (window as any).fntvSeasonContrast = applySeasonAsideContrast;
