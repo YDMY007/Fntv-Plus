@@ -495,11 +495,10 @@ async function getTmdbLogo(arg: { id?: number | string; title?: string; mediaTyp
 
         let id = arg.id;
         if (!id && arg.title) {
-            // 无 tmdb id：用标题搜索（中文标题也能命中，TMDB 含别名索引）
-            const sResp = await getWithRetry(client, `/search/${mediaType}`, { params: { ...baseParams, query: arg.title, page: 1 } });
-            const results = (sResp?.data?.results || []) as any[];
-            if (!results.length) return { ok: false, error: 'TMDB 搜索无结果: ' + arg.title };
-            id = results[0].id;
+            // [lc-947] 无 tmdb id：用标题搜索（多策略，兼容长 Descriptive 中文标题 / 全角标点）
+            const found = await tmdbSearchBest(client, baseParams, mediaType, arg.title);
+            if (!found) return { ok: false, error: 'TMDB 搜索无结果: ' + arg.title };
+            id = found.id;
             log.info('[TMDB诊断] logo 搜索 "' + arg.title + '" → tmdb id ' + id);
         }
         if (!id) return { ok: false, error: '缺少 tmdb id 且无法从标题搜索' };
@@ -572,47 +571,16 @@ export async function tmdbGenresFor(
             const a = key ? authFor(key) : { headers: {} as Record<string, string> };
             const baseParams: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
             // 候选年份接近度：首播/上映年 与 fnOS 年之差的绝对值；无年份参考不惩罚，缺年份候选给中等惩罚(4)
-            const yearGap = (r: any, year?: string): number => {
-                const y = year ? parseInt(String(year).slice(0, 4), 10) : NaN;
-                if (isNaN(y)) return 0;
-                const rd = (mt === 'movie' ? r.release_date : r.first_air_date) || '';
-                const ry = parseInt(String(rd).slice(0, 4), 10);
-                return isNaN(ry) ? 4 : Math.abs(ry - y);
-            };
-            // 从候选列表挑年份最接近者（无参考年则取首条），避免「同名不同剧」误匹配把完结状态标错
-            const pickBest = (list: any[], year?: string): any => {
-                if (!list || !list.length) return null;
-                let best = list[0]; let bestGap = yearGap(best, year);
-                for (const r of list) {
-                    const g = yearGap(r, year);
-                    if (g < bestGap) { bestGap = g; best = r; }
-                }
-                return best;
-            };
-            const doSearch = async (year?: string): Promise<any[]> => {
-                const sParams: any = { ...baseParams, query: title, page: 1 };
-                if (year) {
-                    if (mt === 'movie') sParams.year = year;
-                    else sParams.first_air_date_year = year;
-                }
-                const sResp = await getWithRetry(client, `/search/${mt}`, { params: sParams });
-                return (sResp?.data?.results || []) as any[];
-            };
-            // 先带年份搜索并挑最接近者；若带年份无接近匹配，再放宽到不带年份重试一次（提升中文剧名覆盖），
-            // 但只接受 ±3 年内的候选，否则宁可视为未匹配(无徽标)，也不误把一部同名不同剧标成「连载中」。
-            let top = pickBest(await doSearch(opts.year), opts.year);
-            if ((!top || yearGap(top, opts.year) > 3) && opts.year) {
-                const relaxed = pickBest(await doSearch(undefined), opts.year);
-                if (relaxed && yearGap(relaxed, opts.year) <= 3) top = relaxed;
-            }
+            // [lc-947] 多策略标题搜索(全角标点转半角 + 递进缩短)，年份接近度优选在 tmdbSearchBest 内完成
+            const top = await tmdbSearchBest(client, baseParams, mt, title, opts.year);
             if (!top) return { genres: [] as string[], rating: 0, votes: 0 };
-            const id = top.id;
+            const id = top.raw.id;
             const dResp = await getWithRetry(client, `/${mt}/${id}`, { params: baseParams });
             const genres = ((dResp?.data?.genres) || []).map((g: any) => g.name).filter((x: any) => !!x);
             // 评分顺带取自搜索结果首条（与类型标签同一次 TMDB 调用，零额外配额）：
             //   vote_average = TMDB 评分(0~10)；vote_count = 参评人数。
-            const rating = typeof top.vote_average === 'number' ? top.vote_average : 0;
-            const votes = typeof top.vote_count === 'number' ? top.vote_count : 0;
+            const rating = typeof top.raw.vote_average === 'number' ? top.raw.vote_average : 0;
+            const votes = typeof top.raw.vote_count === 'number' ? top.raw.vote_count : 0;
             // 剧集完结状态：TMDB /tv/{id} 详情的 status 字段（Ended/Returning Series/Canceled…），
             // 与类型标签同一次详情调用取得，零额外配额；电影无此字段→undefined。
             const status = (mt === 'tv' && dResp?.data?.status) ? String(dResp.data.status) : undefined;
@@ -671,9 +639,78 @@ function yearOfAny(date: any): string {
     return typeof date === 'string' && date.length >= 4 ? date.slice(0, 4) : '';
 }
 
+/** [lc-947] 长 Descriptive 中文标题(如「转学后班上的清纯可爱美少女，竟是小时候玩在一起的哥们儿」)
+ *  TMDB /search 对过长的整句标题匹配很差。生成递进缩短的候选查询：
+ *   1) 按中/英文标点切分取首段(去掉描述性后缀，如「，竟是…」) —— 首段即核心剧名；
+ *   2) 长度递进截断(16/12/8 字)兜底，匹配核心词。 */
+function buildRelaxedTitles(title: string): string[] {
+    const out: string[] = [];
+    const segs = title.split(/[，,、；;：:！!？?。.\s…—\-]/).map((s) => s.trim()).filter(Boolean);
+    if (segs.length > 1) {
+        out.push(segs[0]);
+        if (segs.length >= 2 && segs[0].length + segs[1].length <= 20) out.push(segs[0] + segs[1]);
+    }
+    for (const n of [16, 12, 8]) {
+        if (title.length > n) {
+            const t = title.slice(0, n).trim();
+            if (t && !out.includes(t)) out.push(t);
+        }
+    }
+    return out;
+}
+
+/** [lc-947] 按标题在 TMDB 搜索并挑最佳匹配。多策略查询避免长 Descriptive 中文标题匹配失败：
+ *  ① 全角标点转半角(修「X，Y」vs TMDB「X,Y」因标点形态不同整句匹配失败)；
+ *  ② 全文；③ 递进缩短(去描述性后缀/截断)兜底。
+ *  year 用于年份接近度优选；无 year 时取搜索引擎返回的首条(已按相关度排序)。返回 {id, raw} 或 null。 */
+async function tmdbSearchBest(
+    client: AxiosInstance, baseParams: any, mt: 'tv' | 'movie',
+    title: string, year?: string
+): Promise<{ id: number; raw: any } | null> {
+    const normPunct = (s: string): string => s
+        .replace(/[，、；：！？—…・･]/g, (c) => (
+            { '，': ',', '、': ',', '；': ';', '：': ':', '！': '!', '？': '?', '—': '-', '…': '...', '・': '·', '･': '·' } as Record<string, string>
+        )[c] || c)
+        .replace(/　/g, ' ');
+    const doSearch = async (q: string, y?: string): Promise<any[]> => {
+        const p: any = { ...baseParams, query: q, page: 1 };
+        if (y) { if (mt === 'movie') p.year = y; else p.first_air_date_year = y; }
+        const r = await getWithRetry(client, `/search/${mt}`, { params: p });
+        return (r?.data?.results || []) as any[];
+    };
+    const tryQuery = async (q: string): Promise<any[]> => {
+        const a = await doSearch(q, year);
+        if (a.length) return a;
+        return await doSearch(q, undefined);
+    };
+    const queries: string[] = [];
+    const norm = normPunct(title);
+    if (norm !== title) queries.push(norm);
+    queries.push(title);
+    for (const q of buildRelaxedTitles(title)) {
+        if (q !== title && q !== norm && !queries.includes(q)) queries.push(q);
+    }
+    let all: any[] = [];
+    for (const q of queries) {
+        const r = await tryQuery(q);
+        if (r.length) { all = r; log.info('[TMDB][lc-947] 搜索命中 q=' + JSON.stringify(q) + ' results=' + r.length); break; }
+    }
+    if (!all.length) { log.warn('[TMDB][lc-947] 搜索无果 title=' + JSON.stringify(title)); return null; }
+    const y = parseInt(String(year || '').slice(0, 4), 10);
+    const yearGap = (r: any): number => {
+        if (isNaN(y)) return 0;
+        const rd = (mt === 'movie' ? r.release_date : r.first_air_date) || '';
+        const ry = parseInt(String(rd).slice(0, 4), 10);
+        return isNaN(ry) ? 4 : Math.abs(ry - y);
+    };
+    let best = all[0]; let bestGap = yearGap(best);
+    for (const r of all) { const g = yearGap(r); if (g < bestGap) { bestGap = g; best = r; } }
+    return best && best.id != null ? { id: Number(best.id), raw: best } : null;
+}
+
 /**
  * 解析 TMDB 条目 id：优先用 fnOS 元数据里带的 tmdbId；没有则按标题(+年份)搜索，
- * 复用 tmdbGenresFor 中已验证的「年份接近度挑选」逻辑，避免同名不同剧误匹配。
+ * 复用 tmdbSearchBest（[lc-947] 多策略查询 + 年份接近度挑选），避免同名不同剧误匹配。
  */
 async function resolveShowId(
     client: AxiosInstance, baseParams: any, mt: 'tv' | 'movie',
@@ -686,31 +723,8 @@ async function resolveShowId(
     // [lc-945] 去掉标题尾部「第N季 / Season N / S01」等季号，避免污染 TMDB 搜索(季号由 seasonNumber 单独传)
     title = title.replace(/\s*(第\s*[0-9一二三四五六七八九十百]+\s*季|season\s*\d{1,3}|s\s*\d{1,3})\s*$/i, '').trim();
     if (!title) return null;
-    const yearGap = (r: any): number => {
-        const y = parseInt(String(arg.year || '').slice(0, 4), 10);
-        if (isNaN(y)) return 0;
-        const rd = (mt === 'movie' ? r.release_date : r.first_air_date) || '';
-        const ry = parseInt(String(rd).slice(0, 4), 10);
-        return isNaN(ry) ? 4 : Math.abs(ry - y);
-    };
-    const pickBest = (list: any[]): any => {
-        if (!list || !list.length) return null;
-        let best = list[0]; let bestGap = yearGap(best);
-        for (const r of list) { const g = yearGap(r); if (g < bestGap) { bestGap = g; best = r; } }
-        return best;
-    };
-    const doSearch = async (year?: string): Promise<any[]> => {
-        const p: any = { ...baseParams, query: title, page: 1 };
-        if (year) { if (mt === 'movie') p.year = year; else p.first_air_date_year = year; }
-        const r = await getWithRetry(client, `/search/${mt}`, { params: p });
-        return (r?.data?.results || []) as any[];
-    };
-    let top = pickBest(await doSearch(arg.year));
-    if ((!top || yearGap(top) > 3) && arg.year) {
-        const relaxed = pickBest(await doSearch(undefined));
-        if (relaxed && yearGap(relaxed) <= 3) top = relaxed;
-    }
-    return top && top.id ? Number(top.id) : null;
+    const best = await tmdbSearchBest(client, baseParams, mt, title, arg.year);
+    return best ? best.id : null;
 }
 
 /** 归一化 TMDB 详情 + append_to_response 的多个子响应为「剧集信息」渲染所需的扁平结构 */
