@@ -2631,6 +2631,11 @@ let _lastDiagSig = '';
  *  可据此精确重建页面分区树(判断选集 section 与其它分区是否同级), 不再靠猜。 */
 /** @param stage 传入分阶段标签(如 't0'/'t400')时: 强制写盘且文件名带阶段后缀, 便于对比两栏建立前后 */
 function dumpSeasonDOMToFile(stage?: string): void {
+  // [lc-975] 诊断转储是纯排查工具(全文档 querySelectorAll 扫描 + getComputedStyle/getBoundingClientRect + fs.writeFileSync 同步写盘),
+  //   每次进详情页会分 6 个阶段(t0/400/1000/2000/3500/6000)各跑一次。此前无条件执行 → 普通用户进详情页时主线程被
+  //   同步磁盘写反复冻结(表现为"开启二级详情页美化后跳转详情页非常卡顿")。现门控到真正的调试总开关 S.logEnabled
+  //   (由主进程 debug-filter 下发, 默认关闭): 关闭时直接 no-op, 仅在显式开启 embywall 调试日志时才转储。
+  if (!S.logEnabled) return;
   try {
     const fs = require('fs');
     const os = require('os');
@@ -2842,7 +2847,7 @@ export function applySeasonImmersiveDetail(): void {
   // [lc-912] 分阶段强制 dump: t0(首次) / t400 / t1000 / t2000 / t3500 / t6000(稳态), 便于对比两栏建立前后
   // [lc-972] 仅每个 href 排一次: lc-969 让 applySeasonImmersiveDetail 每 200ms observer tick 都跑, 若每次都排 6 个
   //   dumpSeasonDOMToFile(整页 DOM 序列化写文件)定时器 → 主线程被持续打满 → 详情页疯狂卡顿/闪烁。一次排够即可。
-  if (_dumpedForHref !== location.href) {
+  if (S.logEnabled && _dumpedForHref !== location.href) {
     _dumpedForHref = location.href;
     const stages: Array<[number, string]> = [[0, 't0'], [550, 't400'], [1150, 't1000'], [2150, 't2000'], [3650, 't3500'], [6000, 't6000']];
     stages.forEach(([ms, tag]) => {
