@@ -16,6 +16,18 @@ function applyDetailNavImmersive(): void {
   nativeNav.style.setProperty('border', 'none', 'important');
 }
 
+/** [lc-958] 详情页内容是否已渲染: 用于防御「空白页被刷成白屏」。
+ *  集卡片([data-id="details"])/季卡片(.card-root)/演员链接(person)任一存在即视为内容已就绪;
+ *  .fnos-season-2col 存在说明两栏已建(内容必然曾就绪)。
+ *  仅当内容就绪才套沉浸式(全屏底图 + 整页背景透明化); 否则 fnOS SPA 首帧空白会被
+ *  ensureFullscreenBackdrop 的浅色 scrim + ensureDetailBackdropTransparency 刷成纯白。 */
+function detailContentRendered(): boolean {
+  return !!document.querySelector('[data-id="details"]')
+    || !!document.querySelector('.card-root')
+    || !!document.querySelector('a[href*="/v/person/"]')
+    || !!document.querySelector('.fnos-season-2col');
+}
+
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 /** [lc-914] applyDetailLiquidGlass 入口日志节流时间戳(本函数被 _detailObs 以 200ms 防抖持续调用) */
 let _lastEntryLogTs = 0;
@@ -56,6 +68,17 @@ export function applyDetailLiquidGlass(): void {
   //   (全屏底图 + 头部/卡片/按钮玻璃化), 两套并存 → 从不同入口进入同一部剧样式不一致。
   //   现统一走 applySeasonImmersiveDetail(原生顶部「左竖屏海报+右信息栏」+ 主内容/侧栏两栏),
   //   并统一启用 ensureFullscreenBackdrop —— 保留原本只属于 tv/movie 页的全屏模糊海报底图与大渐变遮罩。
+  // [lc-958] 白屏修复: 详情页 DOM 尚未渲染出任何内容时, 绝不套沉浸式。
+  //   原因: ensureFullscreenBackdrop 在浅色主题下铺白色渐变 scrim(z-index:-1), 且 ensureDetailBackdropTransparency
+  //   把 body.fnos-detail-backdrop * 背景全部清透明 → 空白页会透出白色 scrim = 纯白屏
+  //   (「继续观看」等 fnOS 原生卡片走 SPA, 首帧常为空白, 表现为「点卡→白屏进不去对应详情页」)。
+  //   等 fnOS 把内容渲染出来后, 下方重试链(初始化 [600,1500,3000] / _scheduleDetailGlass / MutationObserver 200ms 防抖)会再触发本函数并正常套用。
+  if (!detailContentRendered()) {
+    dlog('applyDetailLiquidGlass: ⚠️ 详情页内容尚未渲染(details=0 cardRoot=0 persons=0), 跳过沉浸式, 等 DOM 就绪');
+    document.body.classList.remove('fnos-immersive-season'); // 清理可能残留(如 season→season 切换瞬间旧内容已清空)
+    removeFullscreenBackdrop();
+    return;
+  }
   applySeasonImmersiveDetail();
   // [lc-907] 「关闭背景框」开关: 开启(恢复 fnOS 原生外观)时不铺全屏底图、不动导航栏, 与季页原逻辑一致
   if (S.detailBoxless) {
