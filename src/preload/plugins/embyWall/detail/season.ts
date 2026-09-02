@@ -319,7 +319,7 @@ html.dark .fnos-immersive-season .fnos-info-card{ border:1px solid rgba(255,255,
 /* [lc-952] 暗色模式兜底: 右栏文字变量强制切浅字。html.dark 下 aside 背景透明，坐在深色页面上，
  *   若 applySeasonAsideContrast 采样失败/未跑，默认的深字变量会完全消失 → 信息卡文字全黑。 */
 html.dark .fnos-immersive-season .fnos-season-aside,
-html.dark .fnos-immersive-season .fnos-season-aside[data-fntv-text]{ /* 覆盖 data 属性同等优先级, 用靠后位置取胜 */
+html.dark .fnos-immersive-season .fnos-season-aside{ /* [lc-952] 不依赖 data-fntv-text 属性: 暗色主题下直接浅字兜底, 即便 applySeasonAsideContrast 未跑也防黑字消失 */
   --fntv-info-h4:#aeaeb2; --fntv-info-p:#f5f5f7; --fntv-info-a:#4da3ff;
   --fntv-cast-h4:#aeaeb2; --fntv-cast-p1:#f5f5f7; --fntv-cast-p2:#9a9aa0;
   --fntv-text-shadow:0 1px 3px rgba(0,0,0,.5);
@@ -1905,6 +1905,7 @@ function applySeasonAsideContrast(): void {
   if (castCard) samples.push(castCard);
   samples.push(aside);
   let lum = -1;
+  let sawBgImage = false; // [lc-952] 任何祖先含 background-image(封面图/染色渐变)→ 视觉偏深, 兜底用浅字防黑字消失
   for (const el of samples) {
     let cur: HTMLElement | null = el;
     while (cur && cur !== document.body) {
@@ -1918,6 +1919,7 @@ function applySeasonAsideContrast(): void {
       //   解析颜色停靠点求均值亮度, 使"渐变色成深色"时也能正确切到浅字(此前恒回落到主题猜测,
       //   浅色主题下被染成深渐变会误选深字 → 字体消失)。
       const bi = cs.backgroundImage;
+      if (bi && bi !== 'none') sawBgImage = true;
       if (lum < 0 && bi && bi !== 'none') {
         const gl = _gradientLum(bi);
         if (gl != null) { lum = gl; break; }
@@ -1926,13 +1928,13 @@ function applySeasonAsideContrast(): void {
     }
     if (lum >= 0) break;
   }
-  // 背景全是透明(渐变写在 backgroundImage 上, getComputedStyle 读不到实色)→ 退回主题:
-  //   暗色主题背景偏暗 → 用浅字; 浅色主题背景偏亮 → 用深字。
-  // [lc-952] 兜底增强: 只要 html.dark 或页面存在 .semi-always-dark(沉浸式暗色封面), 就认为背景偏暗, 默认浅字。
+  // [lc-952] 背景采样失败(透明 / 封面图 url 染色 / _gradientLum 解析不到)→ 兜底:
+  //   染色通常是封面图或渐变(视觉偏深), 或处于暗色上下文 → 一律浅字, 杜绝"黑字叠深背景消失"。
+  //   仅当卡片彻底透明、无任何 background-image 染色信号、且非暗色上下文(纯浅色无底)才回落深字。
   if (lum < 0) {
     const darkContext = document.documentElement.classList.contains('dark')
       || !!document.querySelector('.semi-always-dark');
-    lum = darkContext ? 0.12 : 0.92;
+    lum = (darkContext || sawBgImage) ? 0.12 : 0.92;
   }
   // 对比度择优: 深字(#1d1d1f, L≈0.03) 与 浅字(#f5f5f7, L≈0.95) 哪个对当前背景对比度更高就用哪个
   const Ld = 0.03, Ll = 0.95;
@@ -1951,6 +1953,33 @@ function applySeasonAsideContrast(): void {
 }
 // [lc-930] 暴露给 DevTools Console 手动触发
 (window as any).fntvSeasonContrast = applySeasonAsideContrast;
+// [lc-952] 手动诊断: DevTools Console 跑 fntvSeasonDiag() 打印右栏对比度采样上下文(背景色/背景图/暗色信号/当前 data), 便于精修字体对比度。不自动触发, 不刷屏。
+(window as any).fntvSeasonDiag = function (): void {
+  const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
+  if (!aside) { dlog('fntvSeasonDiag: 未找到 .fnos-season-aside'); return; }
+  const infoCard = aside.querySelector('.fnos-info-card') as HTMLElement | null;
+  const castCard = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+  const dump = (label: string, el: HTMLElement | null): void => {
+    if (!el) { dlog('fntvSeasonDiag: ' + label + ' = NULL'); return; }
+    const cs = getComputedStyle(el);
+    dlog('fntvSeasonDiag: ' + label + ' bgColor=' + cs.backgroundColor + ' bgImage=' + cs.backgroundImage.slice(0, 120));
+  };
+  dump('aside', aside);
+  dump('infoCard', infoCard);
+  dump('castCard', castCard);
+  let cur: HTMLElement | null = infoCard || aside;
+  for (let i = 0; i < 5 && cur && cur !== document.body; i++) {
+    const cs = getComputedStyle(cur);
+    if (cs.backgroundImage && cs.backgroundImage !== 'none') {
+      dlog('fntvSeasonDiag: ancestor[' + i + '] ' + cur.tagName + '.' + (cur.className || '').toString().substring(0, 40) + ' bgImage=' + cs.backgroundImage.slice(0, 140));
+    }
+    cur = cur.parentElement;
+  }
+  dlog('fntvSeasonDiag: html.dark=' + document.documentElement.classList.contains('dark')
+    + ' semi-always-dark=' + !!document.querySelector('.semi-always-dark')
+    + ' data-fntv-text=' + aside.getAttribute('data-fntv-text'));
+  applySeasonAsideContrast();
+};
 
 function layoutSeasonTwoPane(): void {
   if (_seasonLaying) { dlog('layoutSeasonTwoPane: 🔒 重入保护, 跳过(_seasonLaying=true)'); return; }
@@ -2069,17 +2098,7 @@ function layoutSeasonTwoPane(): void {
       + ' root.overflow=' + csRoot.overflow
       + ' root.overflowX=' + csRoot.overflowX
       + ' | body.fnos-immersive-season=' + document.body.classList.contains('fnos-immersive-season'));
-    // 向上查 5 层祖先的 overflow/width/display
-    let _anc: HTMLElement | null = wrap;
-    for (let ai = 0; ai < 6 && _anc && _anc !== document.body; ai++) {
-      const aCs = getComputedStyle(_anc);
-      dlog('layoutSeasonTwoPane: [CSS-ANC' + ai + '] tag=' + _anc.tagName
-        + ' cls=' + (_anc.className||'').toString().substring(0,50)
-        + ' display=' + aCs.display + ' overflow=' + aCs.overflow
-        + ' overflowX=' + aCs.overflowX + ' w=' + aCs.width
-        + ' maxW=' + aCs.maxWidth + ' flexW=' + aCs.flexWrap);
-      _anc = _anc.parentElement;
-    }
+    // [lc-952] 删除祖先链逐层 dlog(原每次建栏打 6 行, SPA 频繁重建时刷屏); 布局已稳定, 不再需要逐层诊断。
   } catch (_csErr) {
     dlog('layoutSeasonTwoPane: [CSS] computed style 检查异常: ' + (_csErr as Error).message);
   }
