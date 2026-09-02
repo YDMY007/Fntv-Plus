@@ -113,6 +113,12 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   font-size:11px !important; font-weight:600 !important; padding:.2rem .7rem; border-radius:20px; white-space:nowrap !important;
   background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important;
 }
+/* [lc-957] 浅色主题下左侧选集卡文字同步右栏对比度：JS 会把 data-fntv-text 同步到 .fnos-season-main，
+ *   当左上角返回按钮为白色(暗背景需浅字)时，把选集标题/时长/badge 统一染浅，避免 semi-typography 原生深色字叠在暗背景上看不清。 */
+.fnos-season-main[data-fntv-text="light"] [data-id="details"] > a,
+.fnos-season-main[data-fntv-text="light"] [data-id="details"] > a * { color:#f5f5f7 !important; font-weight:600 !important; }
+.fnos-season-main[data-fntv-text="light"] [data-id="details"] .fnos-ep-duration { color:#9a9aa0 !important; font-weight:400 !important; }
+.fnos-season-main[data-fntv-text="light"] [data-id="details"] .fnos-ep-badge { background:#E50914 !important; color:#fff !important; border-radius:4px !important; font-weight:700 !important; letter-spacing:.5px !important; }
 
 /* [lc-907] 二级 TV/Movie 页主内容是「季」卡片(.card-root)网格, 而非 [data-id="details"] 选集卡片。
    这里不给它套上面那套"横排缩略图+信息+时长"布局(结构不同, 套了会乱), 只统一**卡片材质观感**:
@@ -1998,6 +2004,9 @@ function applySeasonAsideContrast(): void {
   const prevText = aside.getAttribute('data-fntv-text');
   if (prevText !== text) {
     aside.setAttribute('data-fntv-text', text);
+    // [lc-957] 左侧选集主内容区同步用同一对比度信号, 以便 CSS 把选集卡文字也随背景反色。
+    const main = document.querySelector('.fnos-season-main') as HTMLElement | null;
+    if (main) main.setAttribute('data-fntv-text', text);
     dlog('applySeasonAsideContrast: src=' + (useBtn ? 'btn' : 'sample') + ' lum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
       + ' -> data-fntv-text=' + text);
   }
@@ -2027,10 +2036,12 @@ function applySeasonAsideContrast(): void {
     }
     cur = cur.parentElement;
   }
+  const main = document.querySelector('.fnos-season-main') as HTMLElement | null;
   dlog('fntvSeasonDiag: html.dark=' + document.documentElement.classList.contains('dark')
     + ' semi-always-dark=' + !!document.querySelector('.semi-always-dark')
     + ' body.fnos-immersive-season=' + document.body.classList.contains('fnos-immersive-season')
-    + ' data-fntv-text=' + aside.getAttribute('data-fntv-text'));
+    + ' aside.data-fntv-text=' + aside.getAttribute('data-fntv-text')
+    + ' main.data-fntv-text=' + (main ? main.getAttribute('data-fntv-text') : 'NULL'));
   // [lc-953] 打印左上角返回按钮(反色真值源)的 color 与推导结果, 便于核对同步是否生效
   const btn = findTopLeftButton();
   if (btn) {
