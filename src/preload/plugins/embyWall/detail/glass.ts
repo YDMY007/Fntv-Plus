@@ -183,6 +183,27 @@ export function safeSelect<T extends Element = Element>(sel: string): T | null {
   catch (e) { log('safeSelect: 跳过无效选择器 ' + sel.substring(0, 50)); return null; }
 }
 
+/** [lc-970] 详情视图是否已独占视口: 仅当全屏 absolute 非注入视图 ≤1 个(首页已隐藏)时才允许透明化 body。
+ *   进入详情页瞬间 fnOS 往往尚未卸载首页(首页与原生详情视图并存于视图栈), 此时若透明化 body 会把
+ *   「仍挂载的首页」刷透明 → 表现为「点卡片第一下卡住/空白」(lc-969 早期透明化引入的回归)。
+ *   故透明化(让全屏底图透出)必须等首页隐藏、详情视图独占后再做; 早于此只建底图层(在首页不透明内容之下无害)。 */
+function _detailViewExclusive(): boolean {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const all = document.querySelectorAll<HTMLElement>('*');
+  let n = 0;
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'absolute') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < vw * 0.8 || r.height < vh * 0.8) continue;
+    if (el.id && el.id.startsWith('fnos-')) continue; // 我们的注入层跳过
+    n++;
+    if (n >= 2) return false; // 已有 2 个全屏视图(首页 + 详情)→ 首页未隐藏, 非独占
+  }
+  return true; // ≤1 个 → 详情独占(或空白), 可安全透明化
+}
+
 export function ensureFullscreenBackdrop(): void {
   // ① 定位横屏海报(背景剧照)的来源与 URL。fnOS 不同版本/页面渲染方式不一, 多路回退:
   //    a) 全局 img[style*="blur"] (TV/Movie 与 Season 详情页同一套结构, 最常见)
@@ -310,7 +331,9 @@ export function ensureFullscreenBackdrop(): void {
     _tvBackdropImg.style.setProperty('filter', 'none', 'important');
     _tvBackdropImg.style.setProperty('opacity', '1', 'important');
     _tvBackdropScrim!.style.setProperty('background', 'transparent', 'important');
-    ensureDetailBackdropTransparency();
+    // [lc-970] 仅当详情视图独占(首页已隐藏)才透明化, 否则会把仍挂载的首页刷透明 → 卡住
+    if (_detailViewExclusive()) ensureDetailBackdropTransparency();
+    else log('ensureFullscreenBackdrop: 首页仍在(详情未独占), 暂缓透明化避免首页被刷透明 → 卡住');
     return;
   }
   log('ensureFullscreenBackdrop: 找到海报URL, 长度=', imgUrl.length, ', 来源=', fromImg ? 'img' : bgEl ? 'bgEl' : '?');
@@ -326,7 +349,9 @@ export function ensureFullscreenBackdrop(): void {
   //   完全遮挡 → 用户看到"海报没全屏"。这里把详情页所有页面级不透明背景透明化,
   //   让全屏底图真正透出; 本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮等)
   //   优先级更高会保留, 仅 fnOS 原生纯色背景被清掉。离开详情页移除 body 类即自动还原。
-  ensureDetailBackdropTransparency();
+  // [lc-970] 仅当详情视图独占(首页已隐藏)才透明化, 否则会把仍挂载的首页刷透明 → 卡住
+  if (_detailViewExclusive()) ensureDetailBackdropTransparency();
+  else log('ensureFullscreenBackdrop: 首页仍在(详情未独占), 暂缓透明化避免首页被刷透明 → 卡住');
 
   // [lc-891] 诊断: 每详情页只跑一次, 列出仍不透明的全宽元素 + body/root 背景, 便于真机反馈定位
   if (!_tvBackdropDiagDone) {

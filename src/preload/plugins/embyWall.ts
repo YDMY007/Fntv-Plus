@@ -4548,6 +4548,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
       }
     }
+    // [lc-970] 首页已隐藏(被 display:none)→ 立即重跑详情沉浸, 让全屏底图透明化尽早生效,
+    //   避免等下一轮 schedule(400/1000ms)才透出(减少「先原生页后闪烁」的窗口)。仅详情页才重跑。
+    if (isDetailPage()) applyDetailLiquidGlass();
   };
 
   // 导航时关闭抽屉(菜单项跳转/路由切换后不应残留打开的抽屉)
