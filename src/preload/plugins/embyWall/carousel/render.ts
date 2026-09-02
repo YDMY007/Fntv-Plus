@@ -18,6 +18,15 @@ export function destroyCarousel(): void {
   }
   // [lc-946] 注意: 此处不置空 S.carouselResume。离开首页(_stopCarouselOffHome→destroyCarousel)后,
   //   返回首页需靠它重启自动轮播; 该闭包自带 document.body.contains(container) 守卫, 指向已游离轮播时自动 no-op, 保留安全。
+  // [lc-967] 若轮播 DOM 已脱离文档(父容器在离开首页时被 fnOS 移除, 而非仅 display:none 隐藏),
+  //   必须重置 inited 与各 DOM 引用, 否则下次 injectCarousel 因 S.carouselInited===true 提前 return → 轮播永久消失, 直到下次数据拉取。
+  if (S.carouselContainer && !document.body.contains(S.carouselContainer)) {
+    S.carouselInited = false;
+    S.carouselContainer = null;
+    S.carouselWrapper = null;
+    S.carouselPosterStrip = null;
+    // carouselInfos/Shows/Base 为数据字段(非 DOM 引用), injectCarousel 重建时会重新赋值, 无需置空
+  }
 }
 
 /** [lc-946] 轮播仍健康(挂载+已初始化)时返回首页: 不销毁重建 DOM, 仅重启被 _stopCarouselOffHome 停掉的自动轮播,
