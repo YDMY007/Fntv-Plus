@@ -2028,6 +2028,18 @@ function applySeasonAsideContrast(): void {
   } else {
     dlog('fntvSeasonDiag: topLeftBtn=NULL(无返回按钮, 回退背景采样)');
   }
+  // [lc-955] 真值校验(实打实, 不靠猜): ① isDetailPage 是否把本页判为详情页 —— 决定 applyDetailLiquidGlass 是否会走 !isDetailPage 摘除 body.fnos-immersive-season;
+  //   ② 取右栏一个真实文字元素, 打印其 computed color, 直接看本项目 CSS 到底有没有命中(命中则浅字 #f5f5f7, 否则仍是深色兜底)。
+  const isDetail = /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)|\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(location.href);
+  dlog('fntvSeasonDiag: isDetailPage()=' + isDetail + ' pathname=' + location.pathname);
+  const probe = (aside.querySelector('.fnos-info-card p') || aside.querySelector('.fnos-cast-info p')
+    || aside.querySelector('p') || aside) as HTMLElement;
+  const pcs = getComputedStyle(probe).color;
+  const ppc = _parseRgb(pcs) || _parseHex(pcs);
+  const pl = ppc ? _relLum(ppc[0], ppc[1], ppc[2]) : -1;
+  dlog('fntvSeasonDiag: 真实文字元素=' + ((probe.className || '').toString().substring(0, 40) || probe.tagName)
+    + ' computedColor=' + pcs + ' lum=' + (pl >= 0 ? pl.toFixed(3) : 'n/a')
+    + ' => ' + (pl > 0.4 ? '浅字(应可读)' : '深字(可能看不清)'));
   applySeasonAsideContrast();
 };
 
