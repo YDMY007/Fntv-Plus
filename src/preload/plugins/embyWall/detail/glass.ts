@@ -343,13 +343,18 @@ function ensureDetailBackdropTransparency(): void {
   if (!_tvBackdropStyle) {
     _tvBackdropStyle = document.createElement('style');
     _tvBackdropStyle.className = 'fnos-detail-backdrop-style';
+    // [lc-959] 收窄透明规则: 仅清「页面级不透明背景」(html/body + 浅层结构容器)让全屏底图透出,
+    //   不再把 background-image:none 作用到所有后代 —— 旧规则会误删 fnOS 用 CSS background-image 承载的
+    //   缩略图/海报(部分 fnOS 版本), 表现为详情页图全空。内容卡片只清 background-color(坐玻璃透出底图,
+    //   卡片自身更高 specificity 的 bg 规则会覆盖, 不受影响); 排除本项目注入的底层图层(fnos-tv-backdrop-*)与所有 fnos-* 元素。
     _tvBackdropStyle.textContent =
       'html.fnos-detail-backdrop,' +
       'body.fnos-detail-backdrop,' +
-      'body.fnos-detail-backdrop *,' +
-      'body.fnos-detail-backdrop *::before,' +
-      'body.fnos-detail-backdrop *::after' +
-      '{ background-color: transparent !important; background-image: none !important; }';
+      'body.fnos-detail-backdrop > *:not(.fnos-tv-backdrop-img):not(.fnos-tv-backdrop-scrim),' +
+      'body.fnos-detail-backdrop > * > *:not([class*="fnos-"])' +
+      '{ background-color: transparent !important; background-image: none !important; }' +
+      'body.fnos-detail-backdrop *' +
+      '{ background-color: transparent !important; }';
     (document.head || document.documentElement).appendChild(_tvBackdropStyle);
     log('ensureDetailBackdropTransparency: 已注入透明背景样式');
   }
