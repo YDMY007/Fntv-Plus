@@ -431,7 +431,10 @@ export function injectCarousel(): void {
     // [v323] 让"开始观看"走飞牛原生SPA路由(与列表项<a>一致), 避免整页导航导致详情页侧栏按钮失效
     // 轮播<a>不在飞牛React树内, 原生点击会触发整页导航(full page load) → 详情页头部重建 → 我们的click hook丢失
     // 改为手动pushState+popstate(飞牛history模式SPA基于此), 保留头部DOM, 与列表点击同路径
+    let _navigating = false;
     const spaNav = (href: string, tag: string): void => {
+      if (_navigating) { log(tag + ' -> ignored, navigation in progress'); return; } // [lc-968] 防快速双击导致双重导航/整页刷新
+      _navigating = true;
       log(tag + ' -> SPA navigate', href);
       history.pushState({}, '', href);
       window.dispatchEvent(new PopStateEvent('popstate'));
@@ -446,10 +449,16 @@ export function injectCarousel(): void {
         const seasonRendered = !!document.querySelector('[data-id="details"]')
           || !!document.querySelector('.fnos-season-2col')
           || !!document.querySelector('a[href*="/v/person/"]');
-        if (!backBtn && !seasonRendered) {
+        // [lc-968] 补上注释承诺的判据: 首页轮播已不可见(被 fnOS 接管导航, hideStaleViews 将其 display:none 或已移除)即视为导航成功。
+        //   否则电影详情页(无 .fnos-season-2col 且返回键/详情标记未及时出现)会被误判未接管 → 整页刷新清空模块状态。
+        //   仅用 getBoundingClientRect 宽度/高度=0 或脱离文档判定"不可见", 避免 fixed/absolute 定位造成的误判。
+        const _cc = S.carouselContainer;
+        const homeGone = !!_cc && (!document.body.contains(_cc) || _cc.getBoundingClientRect().width === 0 || _cc.getBoundingClientRect().height === 0);
+        if (!backBtn && !seasonRendered && !homeGone) {
           log(tag + ' fallback -> full page nav (popstate not handled)', href);
           location.href = href;
         }
+        _navigating = false;
       }, 600);
     };
     const playBtn = info.querySelector('a.fnos-play') as HTMLElement | null;
