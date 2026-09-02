@@ -86,3 +86,14 @@ third_party/potplayer/
 __v5_check.py
 p5.json
 test3_verify_report.html
+
+# ⚠️ 根目录个人文档（本机维护，不入库；非项目源码）
+# 模块拆分说明 + 项目交接文档：仅本机参考，严禁推送 GitHub
+EmbyWall 模块化拆分说明书.md
+Fntv-Plus_交接文档.md
+
+# ⚠️ 个人构建/分发脚本（参赛作品版工具，不入库）
+# 注意：sync_packages_to_gitee.py 内硬编码 Gitee access_token，【严禁提交】，否则泄露凭证
+scripts/build_intro_pdf.py
+scripts/package_source.py
+scripts/sync_packages_to_gitee.py
