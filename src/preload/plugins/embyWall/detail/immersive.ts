@@ -59,6 +59,11 @@ let _lastEntryLogTs = 0;
  *  根治 lc-969 引入的"详情页疯狂闪烁/卡顿"(applySeasonImmersiveDetail 内含 dumpSeasonDOMToFile 整页 DOM 序列化写文件,
  *  每 tick 重跑把主线程打满)。切换 href 时由下方重置。 */
 let _glassSettledForHref: string | null = null;
+/** [lc-978] 进入新详情 href 的时刻(Date.now())。用于在 SPA 过渡窗口(旧页仍挂载)冻结"重型 DOM 改写"
+ *  (applySeasonImmersiveDetail: 给 body 挂 fnos-immersive-season + layoutSeasonTwoPane 搬运/重排 DOM),
+ *  避免把详情页样式套到仍挂载的旧页(首页/剧集列表)上 → 排版错乱; 也避免点击瞬间的重活打满主线程 → 要点两次。
+ *  底图(ensureFullscreenBackdrop)与瞬间加载层(lc-971)不冻结, 照常立即铺 → 保留 lc-975 的秒出观感与透明化时序。 */
+let _detailNavTs = 0;
 export function applyDetailLiquidGlass(): void {
   // [lc-914] 上游入口诊断: 确认本函数是否被调用、isDetailPage() 判定结果(排查"两栏为何没建"必须先查上游)
   //   ⚠️ 本函数被 200ms 防抖观察器持续调用 → 入口日志必须节流(2s 一次或换页时), 否则 CMD 被刷爆
@@ -71,7 +76,7 @@ export function applyDetailLiquidGlass(): void {
       + ' S.detailBoxless=' + S.detailBoxless + ' 已有2col=' + _has2col);
   }
   // [lc-906] 换页(含 season→season 直接切换)时重置季页 observer 稳态/年份缓存, 保证新页面重新灵敏处理
-  if (location.href !== S.lastDetailHref) { S.lastDetailHref = location.href; resetSeasonObsState(); _glassSettledForHref = null; }
+  if (location.href !== S.lastDetailHref) { S.lastDetailHref = location.href; resetSeasonObsState(); _glassSettledForHref = null; _detailNavTs = _now; }
   // [lc-878] 非详情页(首页/系统页): 必须无条件移除 fnos-immersive-season。
   //   原逻辑中 S.detailGlassInited=true 时在首页找不到 .trim-mc__details--key-version 直接 return,
   //   导致 class 残留污染"继续观看"/"剧集列表"等区块 —— 故非详情页优先移除。
@@ -127,9 +132,24 @@ export function applyDetailLiquidGlass(): void {
     applySeasonImmersiveDetail(); // 内部移除 fnos-immersive-season + 还原两栏(恢复 fnOS 原生外观)
     removeFullscreenBackdrop();
   } else {
-    applySeasonImmersiveDetail();
+    // [lc-978] 过渡窗口冻结(进入新 href 后 ~450ms): 此刻旧页(首页/剧集列表)仍与详情视图并存于 fnOS 视图栈
+    //   (hideStaleViews 400ms 才把旧页 display:none)。这期间只跑"不改旧页结构"的轻量部分 —— 透明导航 + 全屏底图
+    //   (瞬间加载层已在上方铺好); 跳过 applySeasonImmersiveDetail(给 body 挂 fnos-immersive-season + layoutSeasonTwoPane
+    //   搬运/重排 DOM), 否则会把详情页样式套到仍挂载的旧页上 → 用户看到的「当前页排版错乱成详情页样式」;
+    //   且该重活(多次全文档 querySelectorAll + getComputedStyle + DOM 搬移)被 observer 每 200ms tick 反复跑 →
+    //   点击瞬间主线程被打满 → 「点卡片要点两次 / 进页卡顿」。底图与加载层不冻结 → 保留 lc-975 秒出观感与透明化时序
+    //   (不引入 lc-976 因等"详情视图独占"而变慢 + 下半部透明的回归)。450ms 后 observer 与重试链会再调本函数正常套用。
+    const inTransition = (_now - _detailNavTs) < 450;
+    if (!inTransition) applySeasonImmersiveDetail();
     applyDetailNavImmersive();   // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
     ensureFullscreenBackdrop();  // 无海报→中性占位; 有海报→真实模糊底图 + 主题 scrim
+    if (inTransition) {
+      // 过渡期绝不进入 settle: 旧页的 .card-root/[data-id=details] 会让 detailContentRendered() 误判为真 →
+      //   提前 settle + 淡出加载层 + 标记 _glassSettledForHref → 之后每 tick 早退, 真正详情页永不套用。故直接 return。
+      scheduleDetailRenderRecovery(); // 仍在空白期, 保留自愈(内部按 href 去重, 不重复排)
+      S.detailGlassInited = true;
+      return;
+    }
   }
   // 空白(内容未渲染)才排自愈; 正常页内容已渲染则取消挂起的自愈定时器(lc-961, 防离开空白页后误整页重载)
   if (detailContentRendered()) {
