@@ -44,7 +44,7 @@ function scheduleDetailRenderRecovery(): void {
       const key = 'fntvRecover:' + href;
       let n = 0;
       try { n = parseInt(sessionStorage.getItem(key) || '0', 10); } catch (_) { /* ignore */ }
-      if (n >= 1) { dlog('applyDetailLiquidGlass: [lc-960] 该 href 已自愈过仍空白, 放弃: ' + href); return; }
+      if (n >= 1) { clearTimeout(_recoverTimer); _recoverScheduledFor = null; dlog('applyDetailLiquidGlass: [lc-960] 该 href 已自愈过仍空白, 放弃: ' + href); return; }
       try { sessionStorage.setItem(key, '1'); } catch (_) { /* ignore */ }
       dlog('applyDetailLiquidGlass: [lc-960] 详情页 3.5s 仍空白, 整页重载自愈: ' + href);
       location.href = href;
@@ -77,6 +77,7 @@ export function applyDetailLiquidGlass(): void {
     unlayoutSeasonTwoPane(); // [lc-884] 清理注入的 .fnos-ep-meta(含"高清"badge), 防泄漏到首页
     S.detailGlassInited = false; // 重置, 下次进详情页重新初始化
     removeFullscreenBackdrop(); // [lc-879] 离开详情页清理全屏底图
+    clearTimeout(_recoverTimer); _recoverScheduledFor = null; // [lc-964] 离开时清理挂起的空白自愈定时器(防残留定时器 + 该 href 自愈被禁用)
     return;
   }
 
