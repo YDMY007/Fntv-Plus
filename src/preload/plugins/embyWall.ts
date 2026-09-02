@@ -557,6 +557,42 @@ function handle(): void {
     });
     wrap.appendChild(csWrap);
 
+    // [lc-973] 剧集详情页美化开关（设置面板"外观"）：开启=注入沉浸式美化(默认);
+    //   关闭=恢复飞牛原生详情页(不铺底图/不透明化/不建两栏/不加玻璃/不铺加载层), 用于排查美化引起的闪烁/卡顿。
+    //   复用既有 detailBoxless 状态(与"功能开关"页旧开关同源), 仅新增外观页入口, 不做平行开关。
+    const dbWrap = document.createElement('div');
+    dbWrap.style.cssText = 'margin-top:20px;';
+    const dbTitle = document.createElement('div');
+    dbTitle.style.cssText = 'font-weight:600;letter-spacing:.5px;margin-bottom:8px;';
+    dbTitle.textContent = '剧集详情页美化';
+    dbWrap.appendChild(dbTitle);
+    const dbRow = document.createElement('label');
+    dbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;';
+    const dbHint = document.createElement('span');
+    dbHint.style.cssText = 'font-size:11px;opacity:.72;line-height:1.4;';
+    dbHint.textContent = '关闭后使用飞牛原生详情页（排查美化引起的闪烁/卡顿）';
+    const dbInput = document.createElement('input');
+    dbInput.type = 'checkbox';
+    dbInput.id = 'fnos-detail-beautify';
+    dbInput.style.cssText = 'width:38px;height:21px;cursor:pointer;flex-shrink:0;accent-color:var(--fnos-ui-accent);';
+    dbRow.appendChild(dbHint);
+    dbRow.appendChild(dbInput);
+    dbWrap.appendChild(dbRow);
+    wrap.appendChild(dbWrap);
+
+    // 开关"开"=美化=detailBoxless=false; "关"=原生=detailBoxless=true
+    dbInput.checked = !S.detailBoxless;
+    dbInput.addEventListener('change', () => {
+      S.detailBoxless = !dbInput.checked;
+      log('[开关保存] 剧集详情页美化=' + dbInput.checked + ' (detailBoxless=' + S.detailBoxless + ')');
+      ipcRenderer.invoke('settings:set-detail-boxless', S.detailBoxless).catch((e) => log('set-detail-boxless failed', e));
+      // 同步"功能开关"页旧开关显示(同一状态, 经 DOM 查询避免跨函数作用域引用)
+      const sbEl = document.getElementById('fnos-sw-boxless') as HTMLInputElement | null;
+      if (sbEl) sbEl.checked = dbInput.checked;
+      // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
+      if (isDetailPage()) applyDetailLiquidGlass();
+    });
+
     return wrap;
   }
 
@@ -1065,6 +1101,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const swHide = addToggle('隐藏原始播放按钮');
     const swNas = addToggle('NAS 本地网盘代理');
     const swBoxless = addToggle('关闭详情页选集/演职人员背景框');
+    swBoxless.id = 'fnos-sw-boxless'; // [lc-973] 供外观页"剧集详情页美化"开关经 DOM 查询双向同步(两开关共用 detailBoxless 状态)
     const swWheel = addToggle('鼠标滚轮横向滚动');
     swProxy.addEventListener('change', () => { log('[开关保存] swProxy=' + swProxy.checked); ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked).catch((e) => log('set-download-proxy failed', e)); });
     swHide.addEventListener('change', () => { log('[开关保存] swHide=' + swHide.checked); ipcRenderer.invoke('settings:set-hide-play', swHide.checked).catch((e) => log('set-hide-play failed', e)); });
@@ -1075,6 +1112,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked).catch((e) => log('set-detail-boxless failed', e));
       // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
       if (isDetailPage()) applyDetailLiquidGlass();
+      // [lc-973] 同步外观页"剧集详情页美化"开关显示(同一状态, 经 DOM 查询)
+      const dbEl2 = overlay.querySelector('#fnos-detail-beautify') as HTMLInputElement | null;
+      if (dbEl2) dbEl2.checked = swBoxless.checked;
     });
     // 鼠标滚轮横向滚动：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
     swWheel.checked = S.wheelHScrollEnabled;
@@ -3801,6 +3841,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         swNas.checked = !!s.nasProxyEnabled;
         swBoxless.checked = !!s.detailBoxless;
         S.detailBoxless = !!s.detailBoxless;
+        // [lc-973] 外观页"剧集详情页美化"开关同步回填(原生 checkbox 改 checked 即更新, 无需 paint)
+        const dbEl = overlay.querySelector('#fnos-detail-beautify') as HTMLInputElement | null;
+        if (dbEl) dbEl.checked = !S.detailBoxless;
         // [lc-418] 补回滚轮开关回填：此前只在构建期按 S.wheelHScrollEnabled 赋值,
         // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
         swWheel.checked = !!s.wheelHScroll;
