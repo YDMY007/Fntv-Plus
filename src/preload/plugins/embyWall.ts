@@ -4532,10 +4532,19 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     for (const [parent, views] of byParent) {
       if (views.length < 2) continue;                      // 只有一个视图无需处理
       // DOM 末尾的视图=当前活跃页, 隐藏其余(非important, fnOS 返回可恢复)
+      // [lc-965] 保护真实详情内容: 若某待隐藏视图包含详情主内容([data-id="details"]/.fnos-season-2col/.card-root),
+      //   且同组内"末尾视图"不含详情内容(说明它是过渡层/浮层而非活跃页), 则跳过不隐藏——
+      //   否则会 display:none 掉真正的详情页 → 白屏。末尾视图也含详情内容时(详情↔详情切换)仍按原逻辑隐藏旧视图。
+      const _lastHasDetail = !!views[views.length - 1].querySelector('[data-id="details"], .fnos-season-2col, .card-root');
       for (let i = 0; i < views.length - 1; i++) {
-        if (getComputedStyle(views[i]).display !== 'none') {
-          views[i].style.display = 'none';
-          log('hideStaleViews: hid stacked view', i + 1, '/', views.length, '| class=', views[i].className.slice(0, 40));
+        const _v = views[i];
+        if (!_lastHasDetail && _v.querySelector('[data-id="details"], .fnos-season-2col, .card-root')) {
+          log('hideStaleViews: SKIP — 视图含真实详情内容, 避免白屏 | class=', _v.className.slice(0, 40));
+          continue;
+        }
+        if (getComputedStyle(_v).display !== 'none') {
+          _v.style.display = 'none';
+          log('hideStaleViews: hid stacked view', i + 1, '/', views.length, '| class=', _v.className.slice(0, 40));
         }
       }
     }
