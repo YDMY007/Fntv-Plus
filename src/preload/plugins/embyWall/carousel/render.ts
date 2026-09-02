@@ -583,20 +583,41 @@ export function injectCarousel(): void {
   }
 
   let timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
-  container.addEventListener('mouseenter', () => clearInterval(timer));
-  container.addEventListener('mouseleave', () => { timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000); });
+  const _onEnter = (): void => { clearInterval(timer); };
+  const _onLeave = (): void => { clearInterval(timer); timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000); };
+  container.addEventListener('mouseenter', _onEnter);
+  container.addEventListener('mouseleave', _onLeave);
   // [lc-442] 海报条独立容器，悬停也暂停主轮播
-  posterStrip.addEventListener('mouseenter', () => clearInterval(timer));
-  posterStrip.addEventListener('mouseleave', () => { timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000); });
+  posterStrip.addEventListener('mouseenter', _onEnter);
+  posterStrip.addEventListener('mouseleave', _onLeave);
 
   let startY = 0, dragging = false;
-  container.addEventListener('mousedown', (e) => { startY = e.clientY; dragging = true; });
-  container.addEventListener('mouseup', (e) => {
+  const _onDown = (e: MouseEvent): void => { startY = e.clientY; dragging = true; };
+  const _onUp = (e: MouseEvent): void => {
     if (!dragging) return; dragging = false;
     const dy = e.clientY - startY;
     if (dy < -50) goTo((currentIdx + 1) % shows.length);
     else if (dy > 50) goTo((currentIdx - 1 + shows.length) % shows.length);
-  });
+  };
+  container.addEventListener('mousedown', _onDown);
+  container.addEventListener('mouseup', _onUp);
+
+  // [lc-966] 注册销毁/恢复钩子: style-1 原漏注册 → destroyCarousel 对 style1 是 no-op,
+  //   离开首页后 6s 定时器仍在脱离 DOM 上持续触发(后台自动翻页) + 监听泄漏。现与 styles 2/3/4 对齐。
+  S.carouselCleanup = () => {
+    clearInterval(timer);
+    container.removeEventListener('mouseenter', _onEnter);
+    container.removeEventListener('mouseleave', _onLeave);
+    posterStrip.removeEventListener('mouseenter', _onEnter);
+    posterStrip.removeEventListener('mouseleave', _onLeave);
+    container.removeEventListener('mousedown', _onDown);
+    container.removeEventListener('mouseup', _onUp);
+  };
+  S.carouselResume = () => {
+    if (!document.body.contains(container)) return; // 容器已游离则 no-op
+    clearInterval(timer);
+    timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
+  };
 
   if (!rebuild) target.appendChild(wrapper);
 
