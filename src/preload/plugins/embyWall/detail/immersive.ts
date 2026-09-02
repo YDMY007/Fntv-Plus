@@ -28,6 +28,30 @@ function detailContentRendered(): boolean {
     || !!document.querySelector('.fnos-season-2col');
 }
 
+/** [lc-960] 详情页空白自愈: 若详情页 DOM 长时间(3.5s)仍未渲染任何内容, 多半是 fnOS SPA 进入「半死状态」
+ *   (与 lc-944 轮播 spaNav 兜底同款), 整页重载一次救活。每 href 最多自愈一次(sessionStorage 跨重载计数, 防循环);
+ *   若重载后仍空白(如续看项 id 非有效季 id), 放弃, 交由 fnOS 原生空态, 本项目不再刷白(lc-958)。
+ *   正常导航内容均在 <3.5s 内渲染, 不会误触发。 */
+let _recoverScheduledFor: string | null = null;
+let _recoverTimer = 0;
+function scheduleDetailRenderRecovery(): void {
+  const href = location.href;
+  if (_recoverScheduledFor === href) return; // 已为该 href 排过定时器, 不重复排(防 MutationObserver 每次重置)
+  _recoverScheduledFor = href;
+  clearTimeout(_recoverTimer);
+  _recoverTimer = window.setTimeout(() => {
+    if (!detailContentRendered() && isDetailPage() && !document.querySelector('video')) {
+      const key = 'fntvRecover:' + href;
+      let n = 0;
+      try { n = parseInt(sessionStorage.getItem(key) || '0', 10); } catch (_) { /* ignore */ }
+      if (n >= 1) { dlog('applyDetailLiquidGlass: [lc-960] 该 href 已自愈过仍空白, 放弃: ' + href); return; }
+      try { sessionStorage.setItem(key, '1'); } catch (_) { /* ignore */ }
+      dlog('applyDetailLiquidGlass: [lc-960] 详情页 3.5s 仍空白, 整页重载自愈: ' + href);
+      location.href = href;
+    }
+  }, 3500);
+}
+
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 /** [lc-914] applyDetailLiquidGlass 入口日志节流时间戳(本函数被 _detailObs 以 200ms 防抖持续调用) */
 let _lastEntryLogTs = 0;
@@ -77,6 +101,7 @@ export function applyDetailLiquidGlass(): void {
     dlog('applyDetailLiquidGlass: ⚠️ 详情页内容尚未渲染(details=0 cardRoot=0 persons=0), 跳过沉浸式, 等 DOM 就绪');
     document.body.classList.remove('fnos-immersive-season'); // 清理可能残留(如 season→season 切换瞬间旧内容已清空)
     removeFullscreenBackdrop();
+    scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(整页重载救活 fnOS 半死状态), 防循环
     return;
   }
   applySeasonImmersiveDetail();
