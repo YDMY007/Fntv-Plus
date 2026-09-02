@@ -190,7 +190,7 @@ export function safeSelect<T extends Element = Element>(sel: string): T | null {
  *   进入详情页瞬间 fnOS 往往尚未卸载首页(首页与原生详情视图并存于视图栈), 此时若透明化 body 会把
  *   「仍挂载的首页」刷透明 → 表现为「点卡片第一下卡住/空白」(lc-969 早期透明化引入的回归)。
  *   故透明化(让全屏底图透出)必须等首页隐藏、详情视图独占后再做; 早于此只建底图层(在首页不透明内容之下无害)。 */
-export function _detailViewExclusive(): boolean {
+function _detailViewExclusive(): boolean {
   const vw = window.innerWidth, vh = window.innerHeight;
   const all = document.querySelectorAll<HTMLElement>('*');
   let n = 0;

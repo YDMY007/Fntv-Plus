@@ -1,7 +1,7 @@
 import { S } from '../state';
 import { applySeasonImmersiveDetail, resetSeasonObsState, unlayoutSeasonTwoPane } from './season';
 import { dlog, log } from '../log';
-import { ensureFullscreenBackdrop, hideInstantLoadingLayer, isDetailPage, removeFullscreenBackdrop, showInstantLoadingLayer, _detailViewExclusive } from './glass';
+import { ensureFullscreenBackdrop, hideInstantLoadingLayer, isDetailPage, removeFullscreenBackdrop, showInstantLoadingLayer } from './glass';
 
 // embyWall/detail/immersive.ts — 详情页沉浸式编排：导航沉浸式 + 液态玻璃总入口（组合 glass 与 season 两侧能力）
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
@@ -127,18 +127,6 @@ export function applyDetailLiquidGlass(): void {
     applySeasonImmersiveDetail(); // 内部移除 fnos-immersive-season + 还原两栏(恢复 fnOS 原生外观)
     removeFullscreenBackdrop();
   } else {
-    // [lc-976] 详情视图尚未独占(来源页/首页仍与详情视图并存于 fnOS 视图栈, SPA 过渡期)时, 绝不套沉浸式:
-    //   applySeasonImmersiveDetail 会给 body 挂 fnos-immersive-season 并 layoutSeasonTwoPane 搬运/重排 DOM,
-    //   套到"仍挂载的旧页面"上 → 用户看到的「点卡片后当前页排版错乱成详情页样式」; 且这套重活(多次全文档
-    //   querySelectorAll + getComputedStyle + DOM 搬移)被 _detailObs 每个 200ms tick + 60/400/1000/2000ms 重试链
-    //   反复触发, 在 fnOS 拉数据的 2-3s 内持续打满主线程 → 「要点两次才进、进详情页非常卡顿」。
-    //   此刻 lc-971 的瞬间加载层已盖住屏幕(秒出观感保留), 直接早退不碰 DOM;
-    //   hideStaleViews(400ms)把旧视图 display:none 后会立即重跑本函数(embyWall.ts), 届时详情独占 → 一次性套用。
-    if (!_detailViewExclusive()) {
-      dlog('applyDetailLiquidGlass: [lc-976] 详情视图未独占(旧页仍挂载), 跳过沉浸式套用, 等 hideStaleViews 后重跑');
-      S.detailGlassInited = true;
-      return;
-    }
     applySeasonImmersiveDetail();
     applyDetailNavImmersive();   // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
     ensureFullscreenBackdrop();  // 无海报→中性占位; 有海报→真实模糊底图 + 主题 scrim
