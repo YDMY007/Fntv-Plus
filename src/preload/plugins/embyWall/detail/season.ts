@@ -154,8 +154,22 @@ const IMMERSIVE_SEASON_CSS = `/* 整体两栏：选集(左60%) + 侧栏(右40%) 
   border:1px solid var(--semi-color-border, rgba(0,0,0,.04)) !important;
 }
 .fnos-season-aside .fnos-info-card h4{ font-size:.82rem !important; font-weight:600 !important; letter-spacing:1px; text-transform:uppercase; margin-bottom:.8rem !important; color:var(--fntv-info-h4,#6e6e73) !important; }
-.fnos-season-aside .fnos-info-card p{ font-size:.82rem !important; color:var(--fntv-info-p,#1d1d1f) !important; line-height:1.6 !important; margin-bottom:.25rem !important; text-shadow:var(--fntv-text-shadow,none) !important; }
-.fnos-season-aside .fnos-info-card a{ color:var(--fntv-info-a,#0066cc) !important; text-decoration:none !important; }
+/* [lc-956] 剧集信息正文颜色作用到 <p> 以及 .fnos-info-local 内所有文字后代。
+ *  之前只写 .fnos-info-card p，fnOS 实际可能把部分正文塞进 <div>/<span>/<b> 等非 <p> 标签，
+ *  或者其 semi-typography 对 <p> 的深色规则后载覆盖 → 标题浅色、正文仍深色。
+ *  现在把颜色规则扩展到 .fnos-info-local 全部后代；h4/a 保持单独覆盖，避免链接被 p 色污染。 */
+.fnos-season-aside .fnos-info-card p,
+.fnos-season-aside .fnos-info-card .fnos-info-local,
+.fnos-season-aside .fnos-info-card .fnos-info-local * { color:var(--fntv-info-p,#1d1d1f) !important; text-shadow:var(--fntv-text-shadow,none) !important; }
+.fnos-season-aside .fnos-info-card p{ font-size:.82rem !important; line-height:1.6 !important; margin-bottom:.25rem !important; }
+.fnos-season-aside .fnos-info-card a,
+.fnos-season-aside .fnos-info-card .fnos-info-local a { color:var(--fntv-info-a,#0066cc) !important; text-decoration:none !important; }
+/* [lc-956] 浅色模式再提一阶 specificity，确保覆盖 fnOS semi-typography 对 <p> 的深色兜底规则。 */
+.fnos-season-aside[data-fntv-text="light"] .fnos-info-card p,
+.fnos-season-aside[data-fntv-text="light"] .fnos-info-card .fnos-info-local,
+.fnos-season-aside[data-fntv-text="light"] .fnos-info-card .fnos-info-local * { color:var(--fntv-info-p,#f5f5f7) !important; }
+.fnos-season-aside[data-fntv-text="light"] .fnos-info-card a,
+.fnos-season-aside[data-fntv-text="light"] .fnos-info-card .fnos-info-local a { color:var(--fntv-info-a,#4da3ff) !important; }
 .fnos-immersive-season .fnos-tag-list{ display:flex !important; flex-wrap:wrap !important; gap:.4rem !important; }
 .fnos-immersive-season .fnos-tag{ font-size:.72rem !important; padding:.25rem .7rem; border-radius:20px; background:var(--semi-color-fill-2,#f5f5f7) !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 
@@ -2032,7 +2046,9 @@ function applySeasonAsideContrast(): void {
   //   ② 取右栏一个真实文字元素, 打印其 computed color, 直接看本项目 CSS 到底有没有命中(命中则浅字 #f5f5f7, 否则仍是深色兜底)。
   const isDetail = /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)|\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(location.href);
   dlog('fntvSeasonDiag: isDetailPage()=' + isDetail + ' pathname=' + location.pathname);
-  const probe = (aside.querySelector('.fnos-info-card p') || aside.querySelector('.fnos-cast-info p')
+  const probe = (aside.querySelector('.fnos-info-local p') || aside.querySelector('.fnos-info-local span')
+    || aside.querySelector('.fnos-info-local div') || aside.querySelector('.fnos-info-local b')
+    || aside.querySelector('.fnos-info-card p') || aside.querySelector('.fnos-cast-info p')
     || aside.querySelector('p') || aside) as HTMLElement;
   const pcs = getComputedStyle(probe).color;
   const ppc = _parseRgb(pcs) || _parseHex(pcs);
