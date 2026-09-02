@@ -14,6 +14,9 @@ let _tvBlurImg: HTMLImageElement | null = null;       // 预留(当前不隐藏�
 let _tvBgEl: HTMLElement | null = null;               // 预留(当前不隐藏原图)
 let _tvBackdropStyle: HTMLStyleElement | null = null; // [lc-890] 透明化页面背景的 <style>
 let _tvBackdropDiagDone = false;                      // [lc-891] 残留不透明元素诊断(每详情页只跑一次)
+let _tvInstantLayer: HTMLDivElement | null = null;    // [lc-971] 进详情页瞬间的全屏加载层(缓存海报 + 骨架屏), 盖住 fnOS 原生白屏, 实现秒出
+let _tvInstantHideTimer = 0;                          // [lc-971] 加载层淡出后移除定时器
+let _tvInstantAutoHide = 0;                           // [lc-971] 兜底: 内容始终未渲染时也自动淡出, 绝不长期遮挡视图
 
 /** 检测当前URL是否为需要液态玻璃的详情页。
  *  [lc-963] 统一与导航 hook(_wasDetail/_isDetailHref)的判定: 先剥离 ?query/#fragment 再匹配,
@@ -204,6 +207,103 @@ function _detailViewExclusive(): boolean {
   return true; // ≤1 个 → 详情独占(或空白), 可安全透明化
 }
 
+/** [lc-971] 从轮播缓存(S.apiShows)按当前详情页 guid 取横版海报, 进详情页瞬间即可铺底图, 无需等 fnOS 渲染 hero。
+ *  SPA 进详情页需 2-3s 拉数据渲染 hero(网络), 期间原生页空白 → 白屏; 缓存海报是同步、零网络的, 可立即用。 */
+function cachedBackdropForCurrentDetail(): string | null {
+  const m = location.pathname.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+  if (!m) return null;
+  const guid = m[2];
+  for (let i = 0; i < S.apiShows.length; i++) {
+    const s: any = S.apiShows[i];
+    if (s && s.id === guid) {
+      const u = s.backdrop || s.poster || '';
+      return u ? u : null;
+    }
+  }
+  return null;
+}
+
+/** [lc-971] 进详情页瞬间铺一层「缓存海报模糊底图 + 骨架屏」, 盖住 fnOS 原生白屏, 实现秒出。
+ *  导航 hook 首帧(~60ms)即创建(applyDetailLiquidGlass 调用), 用轮播缓存的横版海报(同步、零网络)模糊铺底 + 骨架 shimmer,
+ *  内容渲染(detailContentRendered)后由 hideInstantLoadingLayer 淡出移除, 露出真实沉浸式页。幂等(只建一次)。 */
+export function showInstantLoadingLayer(): void {
+  if (_tvInstantLayer) return;
+  const cached = cachedBackdropForCurrentDetail();
+  const _isDark = document.documentElement.classList.contains('dark');
+  const layer = document.createElement('div');
+  layer.id = 'fnos-instant-loading';
+  layer.style.cssText =
+    'position:fixed;inset:0;z-index:50;pointer-events:none;overflow:hidden;' +
+    'transition:opacity .28s ease;';
+  // 底图: 缓存海报模糊(秒出) 或 中性渐变(无缓存)
+  const bg = cached
+    ? `url("${cached}")`
+    : (_isDark
+      ? 'linear-gradient(135deg,#15171e 0%,#1c2030 60%,#10131b 100%)'
+      : 'linear-gradient(135deg,#e9ebf1 0%,#f1f3f8 60%,#dfe2ea 100%)');
+  const bgFilter = cached ? 'blur(48px) saturate(120%) brightness(.92)' : 'none';
+  const bgOpacity = cached ? '.92' : '1';
+  const base = _isDark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.05)';
+  const veil = _isDark
+    ? 'linear-gradient(to bottom,rgba(8,10,18,.50) 0%,rgba(8,10,18,.32) 32%,rgba(8,10,18,.66) 100%)'
+    : 'linear-gradient(to bottom,rgba(255,255,255,.50) 0%,rgba(255,255,255,.32) 32%,rgba(255,255,255,.66) 100%)';
+  // [lc-971-fix] 所有 background 加 !important: 加载层是 body 的直接/二级子节点, 一旦详情独占后
+  //   ensureDetailBackdropTransparency 注入的 `body.fnos-detail-backdrop > * > *:not([class*=fnos-]){background-image:none!important}`
+  //   与 `body.fnos-detail-backdrop *{background-color:transparent!important}` 会清掉海报/蒙版/骨架底色 → 加载层 ~400ms 后变透明 → 还是白屏。
+  //   内联 !important 优先级高于样式表 !important, 故加载层视觉对透明化规则免疫。
+  layer.innerHTML =
+    '<div style="position:absolute;inset:0;background:' + bg + ' !important;background-size:cover;background-position:center;' +
+    'filter:' + bgFilter + ';opacity:' + bgOpacity + ';"></div>' +
+    '<div style="position:absolute;inset:0;background:' + veil + ' !important;"></div>' +
+    '<div style="position:absolute;left:0;right:0;bottom:0;padding:48px 64px;display:flex;flex-direction:column;gap:18px;">' +
+      '<div class="fnos-sk" style="width:38%;height:34px;border-radius:10px;background:' + base + ' !important;"></div>' +
+      '<div class="fnos-sk" style="width:62%;height:16px;border-radius:8px;background:' + base + ' !important;"></div>' +
+      '<div style="display:flex;gap:14px;margin-top:10px;">' +
+        '<div class="fnos-sk" style="width:220px;height:124px;border-radius:14px;background:' + base + ' !important;"></div>' +
+        '<div style="display:flex;flex-direction:column;gap:10px;flex:1;">' +
+          '<div class="fnos-sk" style="width:100%;height:14px;border-radius:7px;background:' + base + ' !important;"></div>' +
+          '<div class="fnos-sk" style="width:86%;height:14px;border-radius:7px;background:' + base + ' !important;"></div>' +
+          '<div class="fnos-sk" style="width:72%;height:14px;border-radius:7px;background:' + base + ' !important;"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:12px;margin-top:6px;">' +
+        '<div class="fnos-sk" style="width:96px;height:140px;border-radius:12px;background:' + base + ' !important;"></div>' +
+        '<div class="fnos-sk" style="width:96px;height:140px;border-radius:12px;background:' + base + ' !important;"></div>' +
+        '<div class="fnos-sk" style="width:96px;height:140px;border-radius:12px;background:' + base + ' !important;"></div>' +
+        '<div class="fnos-sk" style="width:96px;height:140px;border-radius:12px;background:' + base + ' !important;"></div>' +
+      '</div>' +
+    '</div>';
+  const styleEl = document.createElement('style');
+  styleEl.textContent =
+    '#fnos-instant-loading .fnos-sk{position:relative;overflow:hidden;}' +
+    '#fnos-instant-loading .fnos-sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);' +
+    'background:linear-gradient(90deg,transparent,rgba(255,255,255,.20),transparent) !important;' +
+    'animation:fnos-sk-shimmer 1.2s infinite;}' +
+    '@keyframes fnos-sk-shimmer{100%{transform:translateX(100%);}}';
+  layer.appendChild(styleEl);
+  document.body.appendChild(layer);
+  _tvInstantLayer = layer;
+  // [lc-971] 兜底自动淡出: 若内容始终未渲染(如 fnOS SPA 半死态且已自愈过一次),
+  //   6s 后淡出, 绝不长期遮挡视图(即便 pointer-events:none 也不该一直盖着)。
+  clearTimeout(_tvInstantAutoHide);
+  _tvInstantAutoHide = window.setTimeout(() => hideInstantLoadingLayer(), 6000);
+  log('showInstantLoadingLayer: ✅ 瞬间加载层已铺(缓存海报=' + (cached ? 'yes' : 'no') + ', theme=' + (_isDark ? 'dark' : 'light') + ')');
+}
+
+/** [lc-971] 内容渲染就绪 → 淡出并移除瞬间加载层, 露出真实沉浸式详情页。幂等(已移除则 no-op)。 */
+export function hideInstantLoadingLayer(): void {
+  if (!_tvInstantLayer) return;
+  const layer = _tvInstantLayer;
+  _tvInstantLayer = null;
+  clearTimeout(_tvInstantAutoHide);
+  clearTimeout(_tvInstantHideTimer);
+  layer.style.opacity = '0';
+  _tvInstantHideTimer = window.setTimeout(() => {
+    if (layer.parentNode) layer.parentNode.removeChild(layer);
+    log('hideInstantLoadingLayer: ✅ 瞬间加载层已移除(内容就绪)');
+  }, 320);
+}
+
 export function ensureFullscreenBackdrop(): void {
   // ① 定位横屏海报(背景剧照)的来源与 URL。fnOS 不同版本/页面渲染方式不一, 多路回退:
   //    a) 全局 img[style*="blur"] (TV/Movie 与 Season 详情页同一套结构, 最常见)
@@ -295,6 +395,14 @@ export function ensureFullscreenBackdrop(): void {
   if (!imgUrl) {
     const bodyUrl = bgUrlOf(getComputedStyle(document.body));
     if (bodyUrl) { imgUrl = bodyUrl; bgEl = document.body; _tvHeaderEl = document.body; log('ensureFullscreenBackdrop: 路径e命中 body bg'); }
+  }
+
+  // 路径 g: [lc-971] 轮播缓存横版海报(进详情页瞬间即可用, 零网络) — fnOS 尚未渲染 hero 时即时铺底图, 消除白屏候等。
+  //   优先级低于 a~e(真实 fnOS hero 一旦渲染即采用), 仅在 fnOS 2-3s 拉数据期间兜底为真实模糊海报(非中性占位),
+  //   与上方 showInstantLoadingLayer 的缓存海报一致 → 加载层淡出时无跳变。
+  if (!imgUrl) {
+    const cached = cachedBackdropForCurrentDetail();
+    if (cached) { imgUrl = cached; _tvHeaderEl = null; log('ensureFullscreenBackdrop: 路径g命中缓存横版海报(秒出)'); }
   }
 
   // ② 全屏底图层(只创建一次); 之后仅更新图片/占位(海报就绪前先用中性占位遮住 fnOS 原生背景)
@@ -422,6 +530,7 @@ export function removeFullscreenBackdrop(): void {
   document.documentElement.classList.remove('fnos-detail-backdrop');
   document.body.classList.remove('fnos-detail-backdrop');
   if (_tvBackdropStyle) { _tvBackdropStyle.remove(); _tvBackdropStyle = null; }
+  hideInstantLoadingLayer(); // [lc-971] 离开详情页同步移除瞬间加载层
   _tvBackdropDiagDone = false; // [lc-891] 允许下次进详情页重新诊断
 }
 

@@ -1,7 +1,7 @@
 import { S } from '../state';
 import { applySeasonImmersiveDetail, resetSeasonObsState, unlayoutSeasonTwoPane } from './season';
 import { dlog, log } from '../log';
-import { ensureFullscreenBackdrop, isDetailPage, removeFullscreenBackdrop } from './glass';
+import { ensureFullscreenBackdrop, hideInstantLoadingLayer, isDetailPage, removeFullscreenBackdrop, showInstantLoadingLayer } from './glass';
 
 // embyWall/detail/immersive.ts — 详情页沉浸式编排：导航沉浸式 + 液态玻璃总入口（组合 glass 与 season 两侧能力）
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
@@ -81,6 +81,10 @@ export function applyDetailLiquidGlass(): void {
     return;
   }
 
+  // [lc-971] 进详情页瞬间铺「缓存海报 + 骨架屏」加载层, 盖住 fnOS 原生 2-3s 白屏, 实现秒出。
+  //   仅非 boxless(用户未关闭沉浸式)时铺; boxless 走原生外观, 不叠加本项目加载层。
+  if (!S.detailBoxless) showInstantLoadingLayer();
+
   // [lc-909] 已移除旧的「TV详情页只做一次」早退守卫(S.detailGlassInited && !/season/)。
   //   该守卫是给已被停用的 applyTvDetailGlass 设计的, lc-907 统一视觉后成为致命 bug:
   //   二级页 URL 不含 '/season/' → 一旦 DOM 尚未渲染出 .trim-mc__details--key-version(SPA 异步渲染,
@@ -115,6 +119,7 @@ export function applyDetailLiquidGlass(): void {
   if (detailContentRendered()) {
     clearTimeout(_recoverTimer);
     _recoverScheduledFor = null;
+    hideInstantLoadingLayer(); // [lc-971] 内容就绪 → 淡出瞬间加载层, 露出真实沉浸式页
   } else {
     scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(仅空白触发, 防循环)
   }
