@@ -15,10 +15,14 @@ let _tvBgEl: HTMLElement | null = null;               // 预留(当前不隐藏�
 let _tvBackdropStyle: HTMLStyleElement | null = null; // [lc-890] 透明化页面背景的 <style>
 let _tvBackdropDiagDone = false;                      // [lc-891] 残留不透明元素诊断(每详情页只跑一次)
 
-/** 检测当前URL是否为需要液态玻璃的详情页 */
+/** 检测当前URL是否为需要液态玻璃的详情页。
+ *  [lc-963] 统一与导航 hook(_wasDetail/_isDetailHref)的判定: 先剥离 ?query/#fragment 再匹配,
+ *  否则带参数的详情链接(如 /v/tv/<id>?autoplay=1 深链/分享链接)会被判为非详情页 →
+ *  沉浸式被静默丢弃(走非详情分支移除 fnos-immersive-season + 全屏底图), 且永不触发空白自愈(lc-960)。 */
 export function isDetailPage(): boolean {
-  return /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)/.test(location.href)
-    || /\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(location.href);
+  const _href = location.href.split(/[?#]/)[0];
+  return /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)/.test(_href)
+    || /\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(_href);
 }
 
 /** 对 TV/Movie 详情页 (/v/tv/:id, /v/movie/:id) 应用液态玻璃 — 通透轻量版 */
