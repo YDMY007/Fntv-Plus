@@ -1884,72 +1884,99 @@ function _gradientLum(bgImage: string): number | null {
   return sum / use.length;
 }
 let _contrastObs: MutationObserver | null = null;
-/** [lc-951] 监听右栏卡片/子节点样式·类变化 + <html> 主题类/变量变化, 延迟重算对比度,
- *   兜住 fnOS 异步注入封面主题渐变、或切换明暗主题后才更新背景的时序问题。 */
-function observeSeasonAsideContrast(aside: HTMLElement): void {
+/** [lc-953] 定位左上角返回按钮(fnOS 原生反色逻辑真值源): fnOS 已算好它在当前背景下该用浅/深字。
+ *   优先 button[aria-label="返回"](carousel/styles.ts 等多处用它检测 fnOS 接管详情页); 否则 [aria-label*="返回"];
+ *   兜底探查视口左上角(顶≤90px / 左≤150px)最近可见 button/[role=button]。 */
+function findTopLeftButton(): HTMLElement | null {
+  const byAria = document.querySelector('button[aria-label="返回"]') as HTMLElement | null;
+  if (byAria) return byAria;
+  const byAriaLike = document.querySelector('button[aria-label*="返回"]') as HTMLElement | null;
+  if (byAriaLike) return byAriaLike;
+  let best: HTMLElement | null = null, bestD = Infinity;
+  const cands = Array.from(document.querySelectorAll('button,[role="button"]')) as HTMLElement[];
+  for (const el of cands) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4 || r.top > 90 || r.left > 150) continue;
+    const d = r.top + r.left;
+    if (d < bestD) { bestD = d; best = el; }
+  }
+  return best;
+}
+/** [lc-953] 监听右栏 + 左上角按钮(fnOS 反色信号)变化, 延迟重算。按钮 color 由 fnOS 反色驱动, 监听它即同步。 */
+function observeSeasonAsideContrast(aside: HTMLElement, btn: HTMLElement | null): void {
   if (_contrastObs) _contrastObs.disconnect();
   let t: number | null = null;
-  const schedule = (): void => { if (t != null) clearTimeout(t); t = window.setTimeout(applySeasonAsideContrast, 160); };
+  const schedule = (): void => { if (t != null) clearTimeout(t); t = window.setTimeout(applySeasonAsideContrast, 140); };
   _contrastObs = new MutationObserver(schedule);
   _contrastObs.observe(aside, { attributes: true, attributeFilter: ['style', 'class'], subtree: true });
   _contrastObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+  if (btn) _contrastObs.observe(btn, { attributes: true, attributeFilter: ['style', 'class'] });
 }
 function applySeasonAsideContrast(): void {
   const aside = document.querySelector('.fnos-season-aside') as HTMLElement | null;
   if (!aside) return;
-  // 依次采样: 信息卡 / 演员卡 / 右栏自身, 向上爬找第一个有实色(alpha>0.06)背景的元素取亮度
-  const samples: HTMLElement[] = [];
-  const infoCard = aside.querySelector('.fnos-info-card') as HTMLElement | null;
-  const castCard = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
-  if (infoCard) samples.push(infoCard);
-  if (castCard) samples.push(castCard);
-  samples.push(aside);
-  let lum = -1;
-  let sawBgImage = false; // [lc-952] 任何祖先含 background-image(封面图/染色渐变)→ 视觉偏深, 兜底用浅字防黑字消失
-  for (const el of samples) {
-    let cur: HTMLElement | null = el;
-    while (cur && cur !== document.body) {
-      const cs = getComputedStyle(cur);
-      const bc = cs.backgroundColor;
-      if (bc && bc !== 'transparent' && bc !== 'rgba(0, 0, 0, 0)') {
-        const c = _parseRgb(bc);
-        if (c && c[3] > 0.06) { lum = _relLum(c[0], c[1], c[2]); break; }
-      }
-      // [lc-951] 封面主题染色写在 background-image 渐变上, getComputedStyle 读不到实色 →
-      //   解析颜色停靠点求均值亮度, 使"渐变色成深色"时也能正确切到浅字(此前恒回落到主题猜测,
-      //   浅色主题下被染成深渐变会误选深字 → 字体消失)。
-      const bi = cs.backgroundImage;
-      if (bi && bi !== 'none') sawBgImage = true;
-      if (lum < 0 && bi && bi !== 'none') {
-        const gl = _gradientLum(bi);
-        if (gl != null) { lum = gl; break; }
-      }
-      cur = cur.parentElement;
+  let text: 'light' | 'dark' = 'dark';
+  let useBtn = false;
+  let lum = -1; // 仅诊断日志用
+  // [lc-953] 主路径: 同步左上角返回按钮的 fnOS 原生反色(它的 color 就是 fnOS 认为当前该用浅/深字的真值)。
+  //   读其 computed color, 亮(白)字 → 浅字态, 暗(黑)字 → 深字态。比自己采样背景亮度可靠得多。
+  const btn = findTopLeftButton();
+  if (btn) {
+    const bc = getComputedStyle(btn).color;
+    const pc = _parseRgb(bc) || _parseHex(bc);
+    if (pc) {
+      const lb = _relLum(pc[0], pc[1], pc[2]);
+      text = lb > 0.4 ? 'light' : 'dark';
+      lum = lb;
+      useBtn = true;
     }
-    if (lum >= 0) break;
   }
-  // [lc-952] 背景采样失败(透明 / 封面图 url 染色 / _gradientLum 解析不到)→ 兜底:
-  //   染色通常是封面图或渐变(视觉偏深), 或处于暗色上下文 → 一律浅字, 杜绝"黑字叠深背景消失"。
-  //   仅当卡片彻底透明、无任何 background-image 染色信号、且非暗色上下文(纯浅色无底)才回落深字。
-  if (lum < 0) {
-    const darkContext = document.documentElement.classList.contains('dark')
-      || !!document.querySelector('.semi-always-dark');
-    lum = (darkContext || sawBgImage) ? 0.12 : 0.92;
+  // [lc-952] 回退: 无返回按钮或 color 解析失败, 退化到背景采样(lc-951 渐变 + url 染色 sawBgImage 兜底)。
+  if (!useBtn) {
+    const samples: HTMLElement[] = [];
+    const infoCard = aside.querySelector('.fnos-info-card') as HTMLElement | null;
+    const castCard = aside.querySelector('.fnos-cast-card') as HTMLElement | null;
+    if (infoCard) samples.push(infoCard);
+    if (castCard) samples.push(castCard);
+    samples.push(aside);
+    let sawBgImage = false;
+    for (const el of samples) {
+      let cur: HTMLElement | null = el;
+      while (cur && cur !== document.body) {
+        const cs = getComputedStyle(cur);
+        const bc = cs.backgroundColor;
+        if (bc && bc !== 'transparent' && bc !== 'rgba(0, 0, 0, 0)') {
+          const c = _parseRgb(bc);
+          if (c && c[3] > 0.06) { lum = _relLum(c[0], c[1], c[2]); break; }
+        }
+        const bi = cs.backgroundImage;
+        if (bi && bi !== 'none') sawBgImage = true;
+        if (lum < 0 && bi && bi !== 'none') {
+          const gl = _gradientLum(bi);
+          if (gl != null) { lum = gl; break; }
+        }
+        cur = cur.parentElement;
+      }
+      if (lum >= 0) break;
+    }
+    if (lum < 0) {
+      const darkContext = document.documentElement.classList.contains('dark')
+        || !!document.querySelector('.semi-always-dark');
+      lum = (darkContext || sawBgImage) ? 0.12 : 0.92;
+    }
+    const Ld = 0.03, Ll = 0.95;
+    const crDark = (Math.max(lum, Ld) + 0.05) / (Math.min(lum, Ld) + 0.05);
+    const crLight = (Math.max(lum, Ll) + 0.05) / (Math.min(lum, Ll) + 0.05);
+    text = crLight > crDark ? 'light' : 'dark';
   }
-  // 对比度择优: 深字(#1d1d1f, L≈0.03) 与 浅字(#f5f5f7, L≈0.95) 哪个对当前背景对比度更高就用哪个
-  const Ld = 0.03, Ll = 0.95;
-  const crDark = (Math.max(lum, Ld) + 0.05) / (Math.min(lum, Ld) + 0.05);
-  const crLight = (Math.max(lum, Ll) + 0.05) / (Math.min(lum, Ll) + 0.05);
-  const text = crLight > crDark ? 'light' : 'dark';
-  // [lc-951] 仅在对比度结果(data-fntv-text)实际变化时落日志: MutationObserver 每次 DOM 抖动都会
-  //   延迟重调本函数, 若无条件 dlog 会刷屏 cmd。无变化时静默(仅更新属性/续接监听)。
+  // [lc-951] 仅在对比度结果(data-fntv-text)实际变化时落日志: MutationObserver 延迟重调本函数, 无条件 dlog 会刷屏。
   const prevText = aside.getAttribute('data-fntv-text');
   if (prevText !== text) {
     aside.setAttribute('data-fntv-text', text);
-    dlog('applySeasonAsideContrast: bgLum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
-      + ' crDark=' + crDark.toFixed(2) + ' crLight=' + crLight.toFixed(2) + ' -> data-fntv-text=' + text);
+    dlog('applySeasonAsideContrast: src=' + (useBtn ? 'btn' : 'sample') + ' lum=' + (lum >= 0 ? lum.toFixed(3) : 'n/a')
+      + ' -> data-fntv-text=' + text);
   }
-  observeSeasonAsideContrast(aside); // [lc-951] 监听动态染色/主题切换, 兜底重算
+  observeSeasonAsideContrast(aside, btn); // [lc-953] 监听动态染色 / 左上角按钮反色, 兜底重算
 }
 // [lc-930] 暴露给 DevTools Console 手动触发
 (window as any).fntvSeasonContrast = applySeasonAsideContrast;
@@ -1978,6 +2005,17 @@ function applySeasonAsideContrast(): void {
   dlog('fntvSeasonDiag: html.dark=' + document.documentElement.classList.contains('dark')
     + ' semi-always-dark=' + !!document.querySelector('.semi-always-dark')
     + ' data-fntv-text=' + aside.getAttribute('data-fntv-text'));
+  // [lc-953] 打印左上角返回按钮(反色真值源)的 color 与推导结果, 便于核对同步是否生效
+  const btn = findTopLeftButton();
+  if (btn) {
+    const bcs = getComputedStyle(btn).color;
+    const bpc = _parseRgb(bcs) || _parseHex(bcs);
+    const bl = bpc ? _relLum(bpc[0], bpc[1], bpc[2]) : -1;
+    dlog('fntvSeasonDiag: topLeftBtn=' + (btn.getAttribute('aria-label') || (btn.tagName + '.' + (btn.className || '').toString().substring(0, 30)))
+      + ' color=' + bcs + ' lum=' + (bl >= 0 ? bl.toFixed(3) : 'n/a') + ' => text=' + (bl > 0.4 ? 'light' : 'dark'));
+  } else {
+    dlog('fntvSeasonDiag: topLeftBtn=NULL(无返回按钮, 回退背景采样)');
+  }
   applySeasonAsideContrast();
 };
 
