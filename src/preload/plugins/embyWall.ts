@@ -1,7 +1,6 @@
 import { ABOUT_LINK_URL, openFeedbackChoiceModal } from './embyWall/modals/feedback';
 import { UiThemeMode, applyUiTheme, getEffectiveDark, getUiTheme, injectUiThemeStyle, removeThemeModeSetting, setUiTheme } from './embyWall/theme';
 import { applyCarouselLogoNow, backfillDetailLogo } from './embyWall/carousel/logo';
-import { applyDetailLiquidGlass } from './embyWall/detail/immersive';
 import { applyLoginBgVar } from './embyWall/login';
 import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, resumeCarousel } from './embyWall/carousel/render';
 import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
@@ -53,9 +52,7 @@ const LOG = '[EmbyWall]';
 // ===== 已迁移到 ./embyWall/carousel/styles.ts（预加载优雅占位(替代硬编码 demo 无职转生)） =====
 // ===== 已迁移到 ./embyWall/carousel/progress.ts =====
 // ===== 已迁移到 ./embyWall/carousel/logo.ts =====
-// ===== 已迁移到 ./embyWall/detail/glass.ts（详情页苹果液态玻璃 (TV详情 / Season详情)） =====
-// ===== 已迁移到 ./embyWall/detail/season.ts（[lc-923] 演员墙：一行多个 + 自动换行；每格内「头像在上、姓名/角色在下(居中)」） =====
-// ===== 已迁移到 ./embyWall/detail/immersive.ts =====
+// ===== 已迁移到 ./embyWall/detail/glass.ts（仅保留 isDetailPage 工具；详情页美化于 lc-979 移除, 待重写） =====
 // ===== 已迁移到 ./embyWall/theme.ts =====
 // ===== 已迁移到 ./embyWall/nav/inject.ts（入口） =====
 function handle(): void {
@@ -557,41 +554,7 @@ function handle(): void {
     });
     wrap.appendChild(csWrap);
 
-    // [lc-973] 剧集详情页美化开关（设置面板"外观"）：开启=注入沉浸式美化(默认);
-    //   关闭=恢复飞牛原生详情页(不铺底图/不透明化/不建两栏/不加玻璃/不铺加载层), 用于排查美化引起的闪烁/卡顿。
-    //   复用既有 detailBoxless 状态(与"功能开关"页旧开关同源), 仅新增外观页入口, 不做平行开关。
-    const dbWrap = document.createElement('div');
-    dbWrap.style.cssText = 'margin-top:20px;';
-    const dbTitle = document.createElement('div');
-    dbTitle.style.cssText = 'font-weight:600;letter-spacing:.5px;margin-bottom:8px;';
-    dbTitle.textContent = '剧集详情页美化';
-    dbWrap.appendChild(dbTitle);
-    const dbRow = document.createElement('label');
-    dbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;cursor:pointer;';
-    const dbHint = document.createElement('span');
-    dbHint.style.cssText = 'font-size:11px;opacity:.72;line-height:1.4;';
-    dbHint.textContent = '关闭后使用飞牛原生详情页（排查美化引起的闪烁/卡顿）';
-    const dbInput = document.createElement('input');
-    dbInput.type = 'checkbox';
-    dbInput.id = 'fnos-detail-beautify';
-    dbInput.style.cssText = 'width:38px;height:21px;cursor:pointer;flex-shrink:0;accent-color:var(--fnos-ui-accent);';
-    dbRow.appendChild(dbHint);
-    dbRow.appendChild(dbInput);
-    dbWrap.appendChild(dbRow);
-    wrap.appendChild(dbWrap);
-
-    // 开关"开"=美化=detailBoxless=false; "关"=原生=detailBoxless=true
-    dbInput.checked = !S.detailBoxless;
-    dbInput.addEventListener('change', () => {
-      S.detailBoxless = !dbInput.checked;
-      log('[开关保存] 剧集详情页美化=' + dbInput.checked + ' (detailBoxless=' + S.detailBoxless + ')');
-      ipcRenderer.invoke('settings:set-detail-boxless', S.detailBoxless).catch((e) => log('set-detail-boxless failed', e));
-      // 同步"功能开关"页旧开关显示(同一状态, 经 DOM 查询避免跨函数作用域引用)
-      const sbEl = document.getElementById('fnos-sw-boxless') as HTMLInputElement | null;
-      if (sbEl) sbEl.checked = dbInput.checked;
-      // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
-      if (isDetailPage()) applyDetailLiquidGlass();
-    });
+    // [lc-979] 「剧集详情页美化」外观开关已移除: 详情页美化功能整体删除, 待重写。
 
     return wrap;
   }
@@ -1100,22 +1063,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const swProxy = addToggle('下载代理');
     const swHide = addToggle('隐藏原始播放按钮');
     const swNas = addToggle('NAS 本地网盘代理');
-    const swBoxless = addToggle('关闭详情页选集/演职人员背景框');
-    swBoxless.id = 'fnos-sw-boxless'; // [lc-973] 供外观页"剧集详情页美化"开关经 DOM 查询双向同步(两开关共用 detailBoxless 状态)
     const swWheel = addToggle('鼠标滚轮横向滚动');
     swProxy.addEventListener('change', () => { log('[开关保存] swProxy=' + swProxy.checked); ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked).catch((e) => log('set-download-proxy failed', e)); });
     swHide.addEventListener('change', () => { log('[开关保存] swHide=' + swHide.checked); ipcRenderer.invoke('settings:set-hide-play', swHide.checked).catch((e) => log('set-hide-play failed', e)); });
     swNas.addEventListener('change', () => { log('[开关保存] swNas=' + swNas.checked); ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked).catch((e) => log('set-nas-proxy failed', e)); });
-    swBoxless.addEventListener('change', () => {
-      S.detailBoxless = swBoxless.checked;
-      log('[开关保存] swBoxless=' + swBoxless.checked);
-      ipcRenderer.invoke('settings:set-detail-boxless', swBoxless.checked).catch((e) => log('set-detail-boxless failed', e));
-      // 立即对当前详情页生效（无需等下次导航/MutationObserver 触发）
-      if (isDetailPage()) applyDetailLiquidGlass();
-      // [lc-973] 同步外观页"剧集详情页美化"开关显示(同一状态, 经 DOM 查询)
-      const dbEl2 = overlay.querySelector('#fnos-detail-beautify') as HTMLInputElement | null;
-      if (dbEl2) dbEl2.checked = swBoxless.checked;
-    });
     // 鼠标滚轮横向滚动：开启=竖向滚轮在横向容器内转左右滑动；关闭=恢复飞牛原生（鼠标只上下滚）
     swWheel.checked = S.wheelHScrollEnabled;
     swWheel.addEventListener('change', () => {
@@ -3839,11 +3790,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         swProxy.checked = dl;
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
-        swBoxless.checked = !!s.detailBoxless;
-        S.detailBoxless = !!s.detailBoxless;
-        // [lc-973] 外观页"剧集详情页美化"开关同步回填(原生 checkbox 改 checked 即更新, 无需 paint)
-        const dbEl = overlay.querySelector('#fnos-detail-beautify') as HTMLInputElement | null;
-        if (dbEl) dbEl.checked = !S.detailBoxless;
+        S.detailBoxless = !!s.detailBoxless; // [lc-979] 美化开关已移除, 仅保留休眠状态供后续重写复用
         // [lc-418] 补回滚轮开关回填：此前只在构建期按 S.wheelHScrollEnabled 赋值,
         // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
         swWheel.checked = !!s.wheelHScroll;
@@ -3852,7 +3799,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         S.carouselLogoEnabled = !!s.carouselLogoEnabled;
         // [lc-418] 诊断日志：面板每次打开记录开关回填值, 便于核对"配置文件 vs 面板显示"是否一致
         log('[开关回填] swProxy=' + swProxy.checked + ' swHide=' + swHide.checked + ' swNas=' + swNas.checked
-          + ' swBoxless=' + swBoxless.checked + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
+          + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
       });
       seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
@@ -4591,9 +4538,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
       }
     }
-    // [lc-970] 首页已隐藏(被 display:none)→ 立即重跑详情沉浸, 让全屏底图透明化尽早生效,
-    //   避免等下一轮 schedule(400/1000ms)才透出(减少「先原生页后闪烁」的窗口)。仅详情页才重跑。
-    if (isDetailPage()) applyDetailLiquidGlass();
   };
 
   // 导航时关闭抽屉(菜单项跳转/路由切换后不应残留打开的抽屉)
@@ -4686,19 +4630,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
   try {
     const _ps = history.pushState, _rs = history.replaceState;
-    // [lc-887] pushState/replaceState: 仅在「离开详情页」时同步清理(防 body bg 泄漏闪一下)。
-    //   「进入详情页」不能同步调用 applyDetailLiquidGlass —— 此时 URL 已变但 DOM 仍是旧页面,
-    //   同步执行会把详情页样式套到首页/其他页 DOM 上导致布局错乱。
-    //   进入详情页的应用交给已有的 MutationObserver(200ms debounce) + setTimeout(600/1500/3000ms) 重试链。
-    const _wasDetail = (): boolean => /\/v\/(tv|movie)\//.test(location.href);
-    const _isDetailHref = (h: string | undefined): boolean => /\/v\/(tv|movie)\//.test(h || '');
-    // [lc-899] 轮播从首页进入详情页时 was=false, 同步 applyDetailLiquidGlass 被跳过, 仅靠 popstate+Observer 兜底不稳
-    //   (实测轮播入口渐变/两栏不生效, 剧集列表入口正常)。故: 新 URL 是详情页时, 也调度 applyDetailLiquidGlass + 重试链。
-    const _scheduleDetailGlass = (newHref: string | undefined): void => {
-      if (!_isDetailHref(newHref)) return;
-      setTimeout(applyDetailLiquidGlass, 60);
-      [400, 1000, 2000].forEach(ms => setTimeout(applyDetailLiquidGlass, ms));
-    };
     // [lc-906] 离开首页(从轮播/列表进入详情页)时立即停掉轮播的自动播放 timer 与事件监听:
     //   此前要等 5s 看门狗才清理, 这 5s 内轮播仍在空转操作已脱离 DOM 的节点,
     //   与详情页自身的重活(两栏布局/演员 restyle)叠加, 是从"首页轮播打开二级页"卡死更明显的原因之一。
@@ -4710,7 +4641,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
     (history as any).pushState = function (...a: any[]) {
-      const was = _wasDetail();
       const prevPath = location.pathname;
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _ps.apply(this, a as any);
@@ -4722,10 +4652,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
-      pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
     };
     (history as any).replaceState = function (...a: any[]) {
-      const was = _wasDetail();
       const prevPath = location.pathname;
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
@@ -4735,7 +4664,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
-      pageTransition(); if (was) applyDetailLiquidGlass(); _scheduleDetailGlass(newHref); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -4744,8 +4673,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(closeDrawer, 300);
       setTimeout(hideStaleViews, 400);
       _scheduleTopLeftAfterNav(); // [lc-925] 背景换了 → 重采样左上角图标亮度
-      // [lc-877] 导航回首页必须移除 fnos-immersive-season（[lc-878] 已修复 applyDetailLiquidGlass 在非详情页提前 return 的 bug，现在能正确移除）
-      applyDetailLiquidGlass();
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
@@ -4753,23 +4680,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
 
 
-  // 详情页液态玻璃: 检测URL→分发到TV详情/Season详情
+  // [lc-979] 详情页美化功能已整体移除(待重写); 此处仅保留轮播 Logo 回填(backfillDetailLogo, 属轮播 logo 功能)。
   if (isDetailPage()) {
-    applyDetailLiquidGlass();
     backfillDetailLogo();
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { applyDetailLiquidGlass(); backfillDetailLogo(); }, ms));
-    // 导航切换时重新检测
-    const _origPush = (history as any).pushState;
-    const _origReplace = (history as any).replaceState;
-    // 已在上面hook过, 只需添加detail glass重触发
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); }, ms));
   }
-  // MutationObserver 也覆盖详情页DOM变化
+  // MutationObserver 覆盖详情页DOM变化 → 回填 Logo
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      applyDetailLiquidGlass(); // [lc-877] 无条件调用：内部按URL分发(详情页添加/非详情页移除 fnos-immersive-season)
       if (isDetailPage()) backfillDetailLogo();
     }, 200);
   });

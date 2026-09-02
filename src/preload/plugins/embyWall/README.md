@@ -62,9 +62,7 @@ embyWall/
 | `carousel/progress.ts` | `buildLoadingPlaceholder`、`buildStrmUnsupportedTip`、`autoFetchDescs`、`completeCarouselProgress`、`updateCarouselProgress` |
 | `carousel/images.ts` | `fetchImageAuth`、`applyCarouselBackdrop`、`fetchItemDetail`、`resolveShowBackdrop`、`scrapeLandscapeBackdrops` |
 | `carousel/logo.ts` | `resolveShowLogo`、`applyTitleLogo`、`applyCarouselLogoNow`、`backfillDetailLogo`、`swapTitleToLogo`、`fnosGetEditDetail` |
-| `detail/glass.ts` | `isDetailPage`、`safeSelect`、`ensureFullscreenBackdrop`、`removeFullscreenBackdrop` |
-| `detail/immersive.ts` | `applyDetailLiquidGlass` |
-| `detail/season.ts` | `applySeasonImmersiveDetail`、`resetSeasonObsState`、`unlayoutSeasonTwoPane` |
+| `detail/glass.ts` | `isDetailPage`（详情页美化 immersive.ts/season.ts 已于 lc-979 移除, 待重写） |
 | `nav/inject.ts` | `injectExternalPlayButton`、`injectNativeReturnButton`、`injectVideoPreviewExternalPlay` |
 | `nav/scroll.ts` | `wheelToScroll` |
 | `modals/feedback.ts` | `ABOUT_LINK_URL`、`openFeedbackChoiceModal` |
@@ -80,8 +78,7 @@ embyWall/
 embyWall.ts(入口)
    ├─> carousel/api.ts ──> carousel/progress.ts, carousel/images.ts, state.ts, log.ts, ../../hotUpdates
    ├─> carousel/render.ts ──> carousel/{href,logo,progress,styles,images}.ts, state.ts, log.ts
-   ├─> detail/immersive.ts ──> detail/{glass,season}.ts, state.ts, log.ts
-   ├─> detail/season.ts ──> carousel/{logo,api}.ts, detail/glass.ts, state.ts, log.ts
+   ├─> detail/glass.ts ──> (仅 isDetailPage, 无业务依赖)
    ├─> theme.ts, login.ts, nav/*, modals/* ──> state.ts, log.ts, electron, core/*
    └─> state.ts / log.ts / logoAsset.ts / href.ts  ← 叶子，不依赖任何业务模块
 ```
@@ -127,7 +124,7 @@ setOnShowsReady(injectCarousel);
 | `carouselContainer` / `carouselWrapper` / `carouselProgressEl`… | `carousel/render.ts`、`carousel/progress.ts` | 渲染层、入口 |
 | `carouselCleanup` / `carouselResume` | `carousel/styles.ts`、`carousel/render.ts` | 渲染层 |
 | `leftHome` | 入口（导航 hook） | 轮播渲染重建 |
-| `lastDetailHref` / `detailGlassInited` | `detail/immersive.ts`、`detail/season.ts` | 详情层 |
+| `lastDetailHref` / `detailGlassInited` | （lc-979 休眠: 美化模块已删, 无读写方, 留待重写） | 详情层 |
 | `hotSource` / `carouselLogoEnabled` / `wheelHScrollEnabled` / `detailBoxless` | 设置面板 | 对应功能模块 |
 
 > ⚠️ 仅本模块自用的状态（如 `api.ts` 的 `_carouselWatchArmed`）留在模块内 `let`，**不要**搬进 `S`。
@@ -155,9 +152,8 @@ setOnShowsReady(injectCarousel);
 | TMDB 透明 logo、标题换 logo、回写媒体库 | `carousel/logo.ts` |
 | 内嵌 base64 logo 资源 | `carousel/logoAsset.ts` |
 | 季详情路由解析（TV→Season→Episode） | `carousel/href.ts` |
-| 详情页苹果液态玻璃底图/蒙版 | `detail/glass.ts` |
-| 详情页沉浸式总编排 | `detail/immersive.ts` |
-| 季详情两栏布局、信息卡、集数统计、简介 | `detail/season.ts` |
+| 详情页 URL 判定工具（isDetailPage） | `detail/glass.ts` |
+| 详情页美化（lc-979 已移除, 待重写） | —— |
 | 主题切换、暗色判定 | `theme.ts` |
 | 登录页背景 / 自动跳影视 | `login.ts` |
 | 外置播放按钮、原生返回、视频预览外置 | `nav/inject.ts` |

@@ -1,8 +1,6 @@
 import { S } from '../state';
-import { applyDetailLiquidGlass } from '../detail/immersive';
 import { applyLoginBgVar } from '../login';
 import { ipcRenderer } from 'electron';
-import { isDetailPage } from '../detail/glass';
 import { wheelToScroll } from '../nav/scroll';
 
 // embyWall/modals/patch.ts — 补丁应用向导弹窗（lc-516）：自包含的进度展示与用户确认流程
@@ -206,12 +204,12 @@ function fntvStartPatchApply(): void {
     });
 }
 
-// 启动时拉取「关闭详情页背景框」偏好，使已保存设置无需打开设置面板即生效
+// 启动时拉取「详情页美化」偏好(detailBoxless)保留为休眠状态, 供后续重写美化功能复用。
+// lc-979: 美化渲染管线已移除, 此处不再调用 applyDetailLiquidGlass。
 try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
     if (s && typeof s.detailBoxless === 'boolean') {
       S.detailBoxless = s.detailBoxless;
-      if (isDetailPage()) applyDetailLiquidGlass();
     }
     // 鼠标滚轮横向滚动开关：false=关闭(恢复飞牛原生上下滚)，缺失/true=开启
     if (s && typeof s.wheelHScroll === 'boolean') {

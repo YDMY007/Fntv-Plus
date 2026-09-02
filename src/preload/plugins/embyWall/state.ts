@@ -100,7 +100,7 @@ export const S: {
    *  写：settings/panel.ts(构建控件时注册)；读：theme.ts(切换主题后回刷 UI) */
   refreshThemeSeg: (() => void) | null;
 
-  // ── 详情页导航（写：detail/immersive.ts；读：detail/immersive.ts、detail/season.ts）──
+  // ── 详情页导航（lc-979: 美化模块 immersive.ts/season.ts 已移除, 以下字段休眠保留供重写复用）──
   /** 上一次处理的详情页 href，用于识别「换了一部片子」从而重置季布局观察器 */
   lastDetailHref: string;
   /** 液态玻璃是否已初始化（详情页 → 首页时置 false，见 immersive.ts） */
