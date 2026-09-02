@@ -333,8 +333,8 @@ export function ensureFullscreenBackdrop(): void {
 
 /** [lc-890/891] 让全屏底图(z-index:-1 固定层)真正透出: 清除 fnOS 详情页的页面级不透明背景。
  *  机制: 给 html/body 加 .fnos-detail-backdrop 类, 注入一条
- *    html.fnos-detail-backdrop, body.fnos-detail-backdrop, body.fnos-detail-backdrop * (含 ::before/::after)
- *    { background-color: transparent !important; background-image: none !important; }
+ *    规则(经 lc-959 收窄): 页面级不透明背景(html/body + body 浅层结构容器, 排除本项目注入层与 fnos-* 元素)清
+ *    background-color + background-image 让底图透出; 其余后代只清 background-color, 不清 background-image(避免误删 fnOS CSS 背景图)。
  *  规则。fnOS 详情页的不透明遮罩多为「渐变 background-image」(非纯色)或伪元素, 仅清 background-color(lc-890)无效,
  *  故 lc-891 改为连 background-image 与伪元素一并清空 → 底图透出。
  *  本插件用 inline!important 设置的玻璃元素(导航/卡片/简介/按钮/底图层自身)优先级更高保留;
