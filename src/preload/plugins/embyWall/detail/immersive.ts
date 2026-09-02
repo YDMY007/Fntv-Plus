@@ -104,6 +104,9 @@ export function applyDetailLiquidGlass(): void {
     scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(整页重载救活 fnOS 半死状态), 防循环
     return;
   }
+  // [lc-961] 内容已就绪: 取消挂起的空白自愈定时器(防离开空白页后该定时器在别的页误触发整页重载, 把人拽回旧 href)
+  clearTimeout(_recoverTimer);
+  _recoverScheduledFor = null;
   applySeasonImmersiveDetail();
   // [lc-907] 「关闭背景框」开关: 开启(恢复 fnOS 原生外观)时不铺全屏底图、不动导航栏, 与季页原逻辑一致
   if (S.detailBoxless) {
