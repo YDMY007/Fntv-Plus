@@ -98,23 +98,25 @@ export function applyDetailLiquidGlass(): void {
   //   把 body.fnos-detail-backdrop * 背景全部清透明 → 空白页会透出白色 scrim = 纯白屏
   //   (「继续观看」等 fnOS 原生卡片走 SPA, 首帧常为空白, 表现为「点卡→白屏进不去对应详情页」)。
   //   等 fnOS 把内容渲染出来后, 下方重试链(初始化 [600,1500,3000] / _scheduleDetailGlass / MutationObserver 200ms 防抖)会再触发本函数并正常套用。
-  if (!detailContentRendered()) {
-    dlog('applyDetailLiquidGlass: ⚠️ 详情页内容尚未渲染(details=0 cardRoot=0 persons=0), 跳过沉浸式, 等 DOM 就绪');
-    document.body.classList.remove('fnos-immersive-season'); // 清理可能残留(如 season→season 切换瞬间旧内容已清空)
-    removeFullscreenBackdrop();
-    scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(整页重载救活 fnOS 半死状态), 防循环
-    return;
-  }
-  // [lc-961] 内容已就绪: 取消挂起的空白自愈定时器(防离开空白页后该定时器在别的页误触发整页重载, 把人拽回旧 href)
-  clearTimeout(_recoverTimer);
-  _recoverScheduledFor = null;
-  applySeasonImmersiveDetail();
-  // [lc-907] 「关闭背景框」开关: 开启(恢复 fnOS 原生外观)时不铺全屏底图、不动导航栏, 与季页原逻辑一致
+  // [lc-969] 提前套用沉浸式, 消除「先原生页、过会闪烁成自定义页」:
+  //   进入详情页立即挂 fnos-immersive-season + 透明导航 + 全屏底图。底图在「无海报(首帧/半死)」时
+  //   由 ensureFullscreenBackdrop 铺中性占位(非白)遮住 fnOS 原生背景, 故 fnOS 原生页基本不会被看到 → 无闪烁;
+  //   白屏根因(lc-958)已隔离在 ensureFullscreenBackdrop 内: 无海报只建中性占位、不建白 scrim。
+  //   两栏布局(layoutSeasonTwoPane)内部仍按 [data-id=details] 内容判定补建, 内容未就绪时会自行重试。
   if (S.detailBoxless) {
+    applySeasonImmersiveDetail(); // 内部移除 fnos-immersive-season + 还原两栏(恢复 fnOS 原生外观)
     removeFullscreenBackdrop();
   } else {
-    applyDetailNavImmersive();  // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
-    ensureFullscreenBackdrop(); // 恢复季页全屏底图(lc-894 曾禁用), 使两种页面背景观感一致
+    applySeasonImmersiveDetail();
+    applyDetailNavImmersive();   // 导航栏统一沉浸(全透明), 让全屏底图在顶部完整透出
+    ensureFullscreenBackdrop();  // 无海报→中性占位; 有海报→真实模糊底图 + 主题 scrim
+  }
+  // 空白(内容未渲染)才排自愈; 正常页内容已渲染则取消挂起的自愈定时器(lc-961, 防离开空白页后误整页重载)
+  if (detailContentRendered()) {
+    clearTimeout(_recoverTimer);
+    _recoverScheduledFor = null;
+  } else {
+    scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(仅空白触发, 防循环)
   }
   S.detailGlassInited = true;
   log('detail liquid glass applied for', location.href.substring(location.href.lastIndexOf('/v/')));

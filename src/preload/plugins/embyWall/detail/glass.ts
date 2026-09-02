@@ -276,13 +276,8 @@ export function ensureFullscreenBackdrop(): void {
     if (bodyUrl) { imgUrl = bodyUrl; bgEl = document.body; _tvHeaderEl = document.body; log('ensureFullscreenBackdrop: 路径e命中 body bg'); }
   }
 
-  if (!imgUrl) {
-    log('ensureFullscreenBackdrop: ⚠️ 全部 5 路回退均未找到横屏海报! childImgCount=', document.querySelectorAll('img').length);
-    return;
-  }
-  log('ensureFullscreenBackdrop: 找到海报URL, 长度=', imgUrl.length, ', 来源=', fromImg ? 'img' : bgEl ? 'bgEl' : '?');
-
-  // ② 全屏底图层(只创建一次, 之后仅更新图片)
+  // ② 全屏底图层(只创建一次); 之后仅更新图片/占位(海报就绪前先用中性占位遮住 fnOS 原生背景)
+  const _isDark = document.documentElement.classList.contains('dark');
   if (!_tvBackdropImg) {
     _tvBackdropImg = document.createElement('div');
     _tvBackdropImg.className = 'fnos-tv-backdrop-img';
@@ -290,22 +285,42 @@ export function ensureFullscreenBackdrop(): void {
       'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
       'background-repeat:no-repeat;background-size:cover;background-position:center;' +
       'opacity:.92;filter:blur(48px) saturate(120%) brightness(.92);' +
-      'transition:opacity .3s ease;';
+      'transition:opacity .35s ease;';
     document.body.appendChild(_tvBackdropImg);
 
     _tvBackdropScrim = document.createElement('div');
     _tvBackdropScrim.className = 'fnos-tv-backdrop-scrim';
-    const _isDark = document.documentElement.classList.contains('dark');
-    const _scrim = _isDark
-      ? 'linear-gradient(to bottom,rgba(8,10,18,.46) 0%,rgba(8,10,18,.30) 32%,rgba(8,10,18,.62) 100%)'
-      : 'linear-gradient(to bottom,rgba(255,255,255,.46) 0%,rgba(255,255,255,.30) 32%,rgba(255,255,255,.62) 100%)';
     _tvBackdropScrim.style.cssText =
       'position:fixed;inset:0;z-index:-1;pointer-events:none;' +
-      'background:' + _scrim + ';';
+      'background:transparent;';
     document.body.appendChild(_tvBackdropScrim);
     log('ensureFullscreenBackdrop: ✅ 创建全屏底图层 (theme=' + (_isDark ? 'dark' : 'light') + ')');
   }
+
+  // [lc-969] 无海报(详情页首帧空白 / fnOS SPA 半死态): 铺中性占位底图 + 透明化,
+  //   既遮住 fnOS 原生背景(用户看到的是本项目"加载中"占位而非原生页 → 消除「先原生页后闪烁」),
+  //   又绝不使用白 scrim → 不会把空白页刷成白屏(lc-958 白屏根因已隔离在本函数: 无海报只建占位、不建白 scrim)。
+  //   海报就绪(poster 出现 / observer 下一轮重跑本函数)即被真实模糊海报 + 主题 scrim 替换。
+  if (!imgUrl) {
+    log('ensureFullscreenBackdrop: 未找到横屏海报, 铺中性占位底图(非白) childImgCount=', document.querySelectorAll('img').length);
+    const _ph = _isDark
+      ? 'linear-gradient(135deg,#15171e 0%,#1c2030 60%,#10131b 100%)'
+      : 'linear-gradient(135deg,#e9ebf1 0%,#f1f3f8 60%,#dfe2ea 100%)';
+    _tvBackdropImg.style.setProperty('background-image', _ph, 'important');
+    _tvBackdropImg.style.setProperty('filter', 'none', 'important');
+    _tvBackdropImg.style.setProperty('opacity', '1', 'important');
+    _tvBackdropScrim!.style.setProperty('background', 'transparent', 'important');
+    ensureDetailBackdropTransparency();
+    return;
+  }
+  log('ensureFullscreenBackdrop: 找到海报URL, 长度=', imgUrl.length, ', 来源=', fromImg ? 'img' : bgEl ? 'bgEl' : '?');
   _tvBackdropImg.style.setProperty('background-image', `url("${imgUrl}")`, 'important');
+  _tvBackdropImg.style.setProperty('filter', 'blur(48px) saturate(120%) brightness(.92)', 'important');
+  _tvBackdropImg.style.setProperty('opacity', '.92', 'important');
+  const _scrim = _isDark
+    ? 'linear-gradient(to bottom,rgba(8,10,18,.46) 0%,rgba(8,10,18,.30) 32%,rgba(8,10,18,.62) 100%)'
+    : 'linear-gradient(to bottom,rgba(255,255,255,.46) 0%,rgba(255,255,255,.30) 32%,rgba(255,255,255,.62) 100%)';
+  _tvBackdropScrim!.style.setProperty('background', _scrim, 'important');
 
   // [lc-890] 关键修复: 仅加 z-index:-1 固定层会被 fnOS 不透明页面背景(html/body/内容容器)
   //   完全遮挡 → 用户看到"海报没全屏"。这里把详情页所有页面级不透明背景透明化,
