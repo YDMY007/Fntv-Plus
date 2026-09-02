@@ -482,6 +482,7 @@ let _obsFingerprint = ''; // [lc-906] 布局指纹(集数/已处理演员数/两
 let _obsStableTicks = 0; // [lc-906] 指纹连续未变化的轮数
 let _obsRelayoutTicks = 0; // [lc-906] 两栏被 fnOS 拆散而重建的次数, 频繁则退避
 let _infoCard: HTMLElement | null = null;
+let _dumpedForHref: string | null = null; // [lc-972] dumpSeasonDOMToFile 已为该 href 排过定时器, 防止 lc-969 让 applySeasonImmersiveDetail 每 tick 重跑时反复排整页 DOM 序列化写文件(主线程打满→闪烁)
 
 /** [lc-905] 清理 observer 防抖/maxWait 定时器, 离开季页或已处理完一轮时调用, 防止残留定时器在页面销毁后误重建两栏 */
 function clearSeasonObsTimers(): void {
@@ -2839,11 +2840,16 @@ export function applySeasonImmersiveDetail(): void {
   observeSeasonTwoPane();         // fnOS SPA 重建时自动补做两栏
   // [lc-910] 自动 dump 真实 DOM 到临时文件(按 pathname 分文件), 供 AI 直接读取定位 findSeasonEpParent 问题
   // [lc-912] 分阶段强制 dump: t0(首次) / t400 / t1000 / t2000 / t3500 / t6000(稳态), 便于对比两栏建立前后
-  const stages: Array<[number, string]> = [[0, 't0'], [550, 't400'], [1150, 't1000'], [2150, 't2000'], [3650, 't3500'], [6000, 't6000']];
-  stages.forEach(([ms, tag]) => {
-    if (ms === 0) dumpSeasonDOMToFile(tag);
-    else setTimeout(() => dumpSeasonDOMToFile(tag), ms);
-  });
+  // [lc-972] 仅每个 href 排一次: lc-969 让 applySeasonImmersiveDetail 每 200ms observer tick 都跑, 若每次都排 6 个
+  //   dumpSeasonDOMToFile(整页 DOM 序列化写文件)定时器 → 主线程被持续打满 → 详情页疯狂卡顿/闪烁。一次排够即可。
+  if (_dumpedForHref !== location.href) {
+    _dumpedForHref = location.href;
+    const stages: Array<[number, string]> = [[0, 't0'], [550, 't400'], [1150, 't1000'], [2150, 't2000'], [3650, 't3500'], [6000, 't6000']];
+    stages.forEach(([ms, tag]) => {
+      if (ms === 0) dumpSeasonDOMToFile(tag);
+      else setTimeout(() => dumpSeasonDOMToFile(tag), ms);
+    });
+  }
 }function applySeasonDetailGlass(): void {
   // ₀ 原生导航栏沉浸: 全透明+无模糊, 不遮挡背景剧照
   const seasonNav = document.querySelector('div.relative.z-20.flex.items-center.justify-between.px-11.py-5') as HTMLElement | null;

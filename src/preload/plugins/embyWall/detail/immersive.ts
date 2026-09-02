@@ -55,6 +55,10 @@ function scheduleDetailRenderRecovery(): void {
 /** 统一入口: 检测URL→分发到对应页面的液态玻璃函数 */
 /** [lc-914] applyDetailLiquidGlass 入口日志节流时间戳(本函数被 _detailObs 以 200ms 防抖持续调用) */
 let _lastEntryLogTs = 0;
+/** [lc-972] 当前 href 是否已稳定套用沉浸式(内容已渲染)。一旦置位, 后续 tick 早退, 停止每 200ms 重型重套,
+ *  根治 lc-969 引入的"详情页疯狂闪烁/卡顿"(applySeasonImmersiveDetail 内含 dumpSeasonDOMToFile 整页 DOM 序列化写文件,
+ *  每 tick 重跑把主线程打满)。切换 href 时由下方重置。 */
+let _glassSettledForHref: string | null = null;
 export function applyDetailLiquidGlass(): void {
   // [lc-914] 上游入口诊断: 确认本函数是否被调用、isDetailPage() 判定结果(排查"两栏为何没建"必须先查上游)
   //   ⚠️ 本函数被 200ms 防抖观察器持续调用 → 入口日志必须节流(2s 一次或换页时), 否则 CMD 被刷爆
@@ -67,7 +71,7 @@ export function applyDetailLiquidGlass(): void {
       + ' S.detailBoxless=' + S.detailBoxless + ' 已有2col=' + _has2col);
   }
   // [lc-906] 换页(含 season→season 直接切换)时重置季页 observer 稳态/年份缓存, 保证新页面重新灵敏处理
-  if (location.href !== S.lastDetailHref) { S.lastDetailHref = location.href; resetSeasonObsState(); }
+  if (location.href !== S.lastDetailHref) { S.lastDetailHref = location.href; resetSeasonObsState(); _glassSettledForHref = null; }
   // [lc-878] 非详情页(首页/系统页): 必须无条件移除 fnos-immersive-season。
   //   原逻辑中 S.detailGlassInited=true 时在首页找不到 .trim-mc__details--key-version 直接 return,
   //   导致 class 残留污染"继续观看"/"剧集列表"等区块 —— 故非详情页优先移除。
@@ -78,6 +82,18 @@ export function applyDetailLiquidGlass(): void {
     S.detailGlassInited = false; // 重置, 下次进详情页重新初始化
     removeFullscreenBackdrop(); // [lc-879] 离开详情页清理全屏底图
     clearTimeout(_recoverTimer); _recoverScheduledFor = null; // [lc-964] 离开时清理挂起的空白自愈定时器(防残留定时器 + 该 href 自愈被禁用)
+    return;
+  }
+
+  // [lc-972] 已为该 href 稳定套用(内容已渲染)→ 跳过沉重的每 tick 重套, 回到 lc-969 前"内容就绪即停"的轻量行为。
+  //   根因: lc-969 让本函数每 200ms observer tick 都跑 applySeasonImmersiveDetail + ensureFullscreenBackdrop,
+  //   而 applySeasonImmersiveDetail 内部又会排 6 个 dumpSeasonDOMToFile(整页 DOM 序列化写文件)定时器 →
+  //   主线程被持续打满 → 进详情页后疯狂卡顿/闪烁。这里内容一渲染就停重套(两栏由 observeSeasonTwoPane 自己维护),
+  //   仅在内容未渲染期(进页+首页隐藏+两栏建立)持续重套, 切换 href 自动重置。boxless 走原生外观、每 tick 便宜, 不早退。
+  if (!S.detailBoxless && _glassSettledForHref === location.href) {
+    clearTimeout(_recoverTimer); _recoverScheduledFor = null; // [lc-964] 离开空白页后清理挂起自愈定时器
+    hideInstantLoadingLayer(); // [lc-971] 内容已就绪, 确保加载层已淡出(幂等, 无操作则 no-op)
+    S.detailGlassInited = true;
     return;
   }
 
@@ -120,6 +136,7 @@ export function applyDetailLiquidGlass(): void {
     clearTimeout(_recoverTimer);
     _recoverScheduledFor = null;
     hideInstantLoadingLayer(); // [lc-971] 内容就绪 → 淡出瞬间加载层, 露出真实沉浸式页
+    _glassSettledForHref = location.href; // [lc-972] 标记本 href 已稳定套用, 后续 tick 早退, 避免每 tick 重套闪烁
   } else {
     scheduleDetailRenderRecovery(); // [lc-960] 空白超时自愈(仅空白触发, 防循环)
   }
