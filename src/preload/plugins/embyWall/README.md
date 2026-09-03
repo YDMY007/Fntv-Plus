@@ -33,10 +33,12 @@ embyWall/
 │   ├── images.ts            ← 鉴权拉图转 blob、backdrop 解析、item 详情、STRM 探测
 │   ├── logo.ts              ← TMDB 透明 logo 拉取、标题换 logo、回写媒体库
 │   └── logoAsset.ts         ← 内嵌 base64 logo 常量（无依赖叶子）
-├── detail/                  ← 详情页（glass 玻璃 / immersive 编排 / season 季详情）
-│   ├── glass.ts             ← 苹果液态玻璃：全屏底图、蒙版、透明化、安全选择器
-│   ├── immersive.ts         ← 详情页沉浸式总入口（组合 glass + season）
-│   └── season.ts            ← 季详情两栏布局、信息卡、集数统计、简介补全
+├── detail/                  ← 详情页美化（lc-980 重写：CSS-first 加法式，零节点搬运）
+│   ├── glass.ts             ← 精准触发判定：isDetailPage / 活跃视图 / hero / 背景剧照定位（纯工具，无副作用）
+│   ├── beautifyStyle.ts     ← 单份 <style>：两栏 Grid、磨砂卡、透明化、底图/加载层/信息卡样式（含暗色覆盖）
+│   ├── backdrop.ts          ← 全屏底图 + 瞬间加载层 + 海报 localStorage 缓存（复用 hero 已加载剧照，无新网络）
+│   ├── immersive.ts         ← 编排层：三闸触发 + 一次性限域 observer + apply/teardown（O(1) per 导航）
+│   └── tmdbCard.ts          ← TMDB 信息卡：纯函数 salvaged + 延后异步注入（非阻塞，失败静默）
 ├── nav/                     ← SPA 导航注入
 │   ├── inject.ts            ← 外置播放按钮 / 原生返回按钮 / 视频预览外置播放
 │   └── scroll.ts            ← 横滑滚轮 wheelToScroll
@@ -62,7 +64,11 @@ embyWall/
 | `carousel/progress.ts` | `buildLoadingPlaceholder`、`buildStrmUnsupportedTip`、`autoFetchDescs`、`completeCarouselProgress`、`updateCarouselProgress` |
 | `carousel/images.ts` | `fetchImageAuth`、`applyCarouselBackdrop`、`fetchItemDetail`、`resolveShowBackdrop`、`scrapeLandscapeBackdrops` |
 | `carousel/logo.ts` | `resolveShowLogo`、`applyTitleLogo`、`applyCarouselLogoNow`、`backfillDetailLogo`、`swapTitleToLogo`、`fnosGetEditDetail` |
-| `detail/glass.ts` | `isDetailPage`（详情页美化 immersive.ts/season.ts 已于 lc-979 移除, 待重写） |
+| `detail/glass.ts` | `isDetailPage`、`findActiveDetailView`、`findDetailHero`、`findHeroBackdropImg`、`DETAIL_HERO_SEL`、`ACTIVE_VIEW_SEL` |
+| `detail/beautifyStyle.ts` | `injectBeautifyStyle`、`removeBeautifyStyle`、`BEAUTIFY_CSS`、`STYLE_ID` |
+| `detail/backdrop.ts` | `injectBackdrop`、`removeBackdrop`、`cacheHeroImages`、`showInstantLayer`、`hideInstantLayer`、`clearInstantLayer` |
+| `detail/immersive.ts` | `applyDetailBeautify`、`teardownDetailBeautify` |
+| `detail/tmdbCard.ts` | `scheduleTmdbCard`、`removeTmdbCard` |
 | `nav/inject.ts` | `injectExternalPlayButton`、`injectNativeReturnButton`、`injectVideoPreviewExternalPlay` |
 | `nav/scroll.ts` | `wheelToScroll` |
 | `modals/feedback.ts` | `ABOUT_LINK_URL`、`openFeedbackChoiceModal` |
@@ -78,8 +84,11 @@ embyWall/
 embyWall.ts(入口)
    ├─> carousel/api.ts ──> carousel/progress.ts, carousel/images.ts, state.ts, log.ts, ../../hotUpdates
    ├─> carousel/render.ts ──> carousel/{href,logo,progress,styles,images}.ts, state.ts, log.ts
-   ├─> detail/glass.ts ──> (仅 isDetailPage, 无业务依赖)
+   ├─> detail/immersive.ts ──> detail/{glass,beautifyStyle,backdrop,tmdbCard}.ts, state.ts, log.ts
+   │      └─ detail/tmdbCard.ts ──> carousel/logo.ts(fnosGetEditDetail), carousel/api.ts(extractTmdbId), detail/glass.ts, log.ts, electron
+   │      └─ detail/backdrop.ts ──> detail/glass.ts    ·    detail/{glass,beautifyStyle}.ts ← 叶子(无业务依赖)
    ├─> theme.ts, login.ts, nav/*, modals/* ──> state.ts, log.ts, electron, core/*
+   │      └─ modals/patch.ts ──> detail/immersive.ts（启动 seed reconcile）
    └─> state.ts / log.ts / logoAsset.ts / href.ts  ← 叶子，不依赖任何业务模块
 ```
 
@@ -124,7 +133,7 @@ setOnShowsReady(injectCarousel);
 | `carouselContainer` / `carouselWrapper` / `carouselProgressEl`… | `carousel/render.ts`、`carousel/progress.ts` | 渲染层、入口 |
 | `carouselCleanup` / `carouselResume` | `carousel/styles.ts`、`carousel/render.ts` | 渲染层 |
 | `leftHome` | 入口（导航 hook） | 轮播渲染重建 |
-| `lastDetailHref` / `detailGlassInited` | （lc-979 休眠: 美化模块已删, 无读写方, 留待重写） | 详情层 |
+| `detailGlassInited` | `detail/immersive.ts`（_apply 置 true / teardown 置 false） | 暂无（美化生命周期标记；`lastDetailHref` 已于 lc-980 删除） |
 | `hotSource` / `carouselLogoEnabled` / `wheelHScrollEnabled` / `detailBoxless` | 设置面板 | 对应功能模块 |
 
 > ⚠️ 仅本模块自用的状态（如 `api.ts` 的 `_carouselWatchArmed`）留在模块内 `let`，**不要**搬进 `S`。
@@ -152,8 +161,11 @@ setOnShowsReady(injectCarousel);
 | TMDB 透明 logo、标题换 logo、回写媒体库 | `carousel/logo.ts` |
 | 内嵌 base64 logo 资源 | `carousel/logoAsset.ts` |
 | 季详情路由解析（TV→Season→Episode） | `carousel/href.ts` |
-| 详情页 URL 判定工具（isDetailPage） | `detail/glass.ts` |
-| 详情页美化（lc-979 已移除, 待重写） | —— |
+| 详情页精准触发判定（URL/活跃视图/hero/背景剧照） | `detail/glass.ts` |
+| 详情页美化样式（两栏 Grid/磨砂卡/透明化/底图/加载层/信息卡/暗色） | `detail/beautifyStyle.ts` |
+| 全屏底图、瞬间加载层、海报 localStorage 缓存 | `detail/backdrop.ts` |
+| 美化编排（三闸触发/一次性 observer/apply/teardown） | `detail/immersive.ts` |
+| TMDB 信息卡（延后异步注入） | `detail/tmdbCard.ts` |
 | 主题切换、暗色判定 | `theme.ts` |
 | 登录页背景 / 自动跳影视 | `login.ts` |
 | 外置播放按钮、原生返回、视频预览外置 | `nav/inject.ts` |

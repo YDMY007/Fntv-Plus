@@ -2,6 +2,7 @@ import { S } from '../state';
 import { applyLoginBgVar } from '../login';
 import { ipcRenderer } from 'electron';
 import { wheelToScroll } from '../nav/scroll';
+import { applyDetailBeautify } from '../detail/immersive';
 
 // embyWall/modals/patch.ts — 补丁应用向导弹窗（lc-516）：自包含的进度展示与用户确认流程
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
@@ -204,13 +205,16 @@ function fntvStartPatchApply(): void {
     });
 }
 
-// 启动时拉取「详情页美化」偏好(detailBoxless)保留为休眠状态, 供后续重写美化功能复用。
-// lc-979: 美化渲染管线已移除, 此处不再调用 applyDetailLiquidGlass。
+// 启动时拉取「详情页美化」偏好(detailBoxless)并 reconcile。
+// [lc-980] 此处 .then 异步解析, 晚于入口文件同步执行的初始 applyDetailBeautify(那时用的是默认值)。
+//   拿到持久化真值后必须再调一次 applyDetailBeautify: boxless=true → teardown 入口按默认误套的美化;
+//   boxless=false 且正在详情页 → 幂等套用/arm。applyDetailBeautify 幂等, 值与默认相同也无副作用。
 try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
     if (s && typeof s.detailBoxless === 'boolean') {
       S.detailBoxless = s.detailBoxless;
     }
+    applyDetailBeautify();
     // 鼠标滚轮横向滚动开关：false=关闭(恢复飞牛原生上下滚)，缺失/true=开启
     if (s && typeof s.wheelHScroll === 'boolean') {
       S.wheelHScrollEnabled = s.wheelHScroll;

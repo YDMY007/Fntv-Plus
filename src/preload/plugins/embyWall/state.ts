@@ -25,8 +25,9 @@ export const S: {
   logEnabled: boolean;
 
   // ── 功能开关（用户可在设置面板切换，运行时缓存）────────────────────────────
-  /** 详情页「关闭背景框」：true=恢复 fnOS 原生外观；false=保留玻璃背景框(默认)。
-   *  写：settings/*；读：detail/* */
+  /** 详情页「关闭美化」（设置面板「剧集详情页美化」开关的持久化反值）：
+   *  true=关闭美化, 恢复 fnOS 原生外观；false=套用美化(沉浸底图/两栏/磨砂卡, 默认)。
+   *  写：embyWall.ts(swBeautify 开关)、modals/patch.ts(启动 seed)；读：detail/immersive.ts */
   detailBoxless: boolean;
   /** 鼠标滚轮横向滚动：true=开启(默认)；false=恢复飞牛原生上下滚。
    *  写：settings/*；读：carousel/index.ts(wheelToScroll) */
@@ -100,10 +101,8 @@ export const S: {
    *  写：settings/panel.ts(构建控件时注册)；读：theme.ts(切换主题后回刷 UI) */
   refreshThemeSeg: (() => void) | null;
 
-  // ── 详情页导航（lc-979: 美化模块 immersive.ts/season.ts 已移除, 以下字段休眠保留供重写复用）──
-  /** 上一次处理的详情页 href，用于识别「换了一部片子」从而重置季布局观察器 */
-  lastDetailHref: string;
-  /** 液态玻璃是否已初始化（详情页 → 首页时置 false，见 immersive.ts） */
+  // ── 详情页美化（lc-980 重写：immersive.ts 编排，三闸触发 + 一次性 observer）──
+  /** 美化是否已套用到当前详情页。写：detail/immersive.ts(_apply 置 true / teardown 置 false)；读：暂无（生命周期标记） */
   detailGlassInited: boolean;
 } = {
   logEnabled: false,
@@ -150,7 +149,6 @@ export const S: {
 
   refreshThemeSeg: null,
 
-  lastDetailHref: '',
   detailGlassInited: false,
 };
 

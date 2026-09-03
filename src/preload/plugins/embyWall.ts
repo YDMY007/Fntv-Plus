@@ -6,6 +6,7 @@ import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, 
 import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
+import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
 import { wheelToScroll } from './embyWall/nav/scroll';
 import { fetchShowsViaIPC, setOnShowsReady } from './embyWall/carousel/api';
 
@@ -1075,6 +1076,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked).catch((e) => log('set-wheel-hscroll failed', e));
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
       wheelToScroll();
+    });
+    // [lc-980] 剧集详情页美化开关：开=套用美化(沉浸底图/两栏/磨砂卡)；关=恢复 fnOS 原生外观。
+    //   语义反转：detailBoxless=true 表示「关闭背景框/走原生」，故 checked = !detailBoxless。
+    const swBeautify = addToggle('剧集详情页美化');
+    swBeautify.checked = !S.detailBoxless;
+    swBeautify.addEventListener('change', () => {
+      S.detailBoxless = !swBeautify.checked;
+      log('[开关保存] swBeautify=' + swBeautify.checked + ' → detailBoxless=' + S.detailBoxless);
+      ipcRenderer.invoke('settings:set-detail-boxless', S.detailBoxless).catch((e) => log('set-detail-boxless failed', e));
+      // 立即应用：关→teardown 恢复原生；开→若正在详情页立即套用
+      if (S.detailBoxless) teardownDetailBeautify(); else applyDetailBeautify();
     });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
@@ -3790,7 +3802,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         swProxy.checked = dl;
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
-        S.detailBoxless = !!s.detailBoxless; // [lc-979] 美化开关已移除, 仅保留休眠状态供后续重写复用
+        // [lc-980] 美化开关回填: swBeautify.checked = !detailBoxless (detailBoxless=true 表示关闭美化/走原生外观)
+        S.detailBoxless = !!s.detailBoxless;
+        swBeautify.checked = !S.detailBoxless;
         // [lc-418] 补回滚轮开关回填：此前只在构建期按 S.wheelHScrollEnabled 赋值,
         // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
         swWheel.checked = !!s.wheelHScroll;
@@ -3799,7 +3813,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         S.carouselLogoEnabled = !!s.carouselLogoEnabled;
         // [lc-418] 诊断日志：面板每次打开记录开关回填值, 便于核对"配置文件 vs 面板显示"是否一致
         log('[开关回填] swProxy=' + swProxy.checked + ' swHide=' + swHide.checked + ' swNas=' + swNas.checked
-          + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
+          + ' swBeautify=' + swBeautify.checked + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
       });
       seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';
@@ -4653,6 +4667,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
       pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -4665,6 +4680,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
       pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      applyDetailBeautify(); // [lc-980] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -4674,15 +4690,18 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(hideStaleViews, 400);
       _scheduleTopLeftAfterNav(); // [lc-925] 背景换了 → 重采样左上角图标亮度
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
+      applyDetailBeautify(); // [lc-980] 前进/后退到详情页也套美化；退回首页则 teardown
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
 
 
-  // [lc-979] 详情页美化功能已整体移除(待重写); 此处仅保留轮播 Logo 回填(backfillDetailLogo, 属轮播 logo 功能)。
+  // [lc-980] 详情页美化重写：初始/深链直达详情页时也套一次(内部三闸判定, hero 未就绪则 arm 一次性 observer)。
+  //   backfillDetailLogo 属轮播 logo 功能, 与美化正交, 保留。
   if (isDetailPage()) {
     backfillDetailLogo();
+    applyDetailBeautify();
     // 延迟重试: SPA渲染可能分批加载DOM
     [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); }, ms));
   }
