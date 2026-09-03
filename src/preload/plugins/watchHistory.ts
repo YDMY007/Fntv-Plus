@@ -57,6 +57,7 @@ interface ShowItem {
     viaPlayer?: string;  // 本地播放来源（'mpv' | 'potplayer' | '内置'），有值则在卡片上显示播放器徽标
     airStatus?: string;  // TMDB 剧集完结状态（Ended/Canceled/Returning Series…），用于"已完结/连载中"徽标
     airStatusOverride?: 'ended' | 'ongoing'; // 用户对完结状态的人工覆盖，优先级高于 airStatus，持久化保存
+    douban_id?: string | number; // 飞牛已刮削的豆瓣条目 id，详情按需补全时直接复用，避免再搜一次豆瓣
 }
 
 // ───────────────────────── 工具 ─────────────────────────
@@ -1300,6 +1301,8 @@ function openDetail(idx: number): void {
     const pr = $(PANEL_ID) as HTMLElement | null;
     if (pr) pr.classList.add('wh-detail-open');
     hideTopBtns(); // 浮层在面板外，需显式隐藏（否则 z-index 高于详情会浮在详情上）
+    // 点开详情才按需补 TMDB 分类 + 豆瓣评分（列表页绝不查，避免卡加载页；单条查询不卡）
+    enrichDetailOnDemand(idx);
 }
 
 /** 关闭详情浮层：移除 .show 并清除 wh-detail-open（恢复顶栏显示）。所有关闭路径统一走这里。 */
@@ -1588,8 +1591,50 @@ ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: 
         saveDayCount(_dayCountCache);
         // 若面板当前已打开，立即刷新热力图（renderChart 内部对未挂载有保护）
         if ($('wh-chart-wrap')) renderChart();
-    } catch (e: any) { log.warn('[watchHistory] 记录本地观看失败:', e?.message || e); }
-});
+        } catch (e: any) { log.warn('[watchHistory] 记录本地观看失败:', e?.message || e); }
+    });
+
+// 主进程后台静默补全观影记录（TMDB 分类/类型 + 豆瓣评分）完成后推送，增量合并进 curData 并就地刷新，
+// 避免补全搜索阻塞首屏（否则豆瓣 429 退避会让面板一直卡骨架屏）。详见 doubanSync.ts getWatchedItems。
+/**
+ * 点开观影记录某部详情时按需补全：向主进程 douban:enrich-one 查询该部作品的
+ * TMDB 分类/类型/评分 + 豆瓣评分（单条查询，绝不拖住列表页；走每日缓存 + 全局闸门）。
+ * 返回后就地合并进 curData[idx] 并重绘详情浮层里的类型 chips 与评分条；
+ * 若用户已切到另一部(idx 已变)则放弃重绘，避免串台。
+ */
+function enrichDetailOnDemand(idx: number): void {
+    const it = curData[idx];
+    if (!it || !it.guid) return;
+    ipcRenderer.invoke('douban:enrich-one', {
+        guid: it.guid,
+        douban_id: (it as any).douban_id || 0,
+        title: it.name,
+        type: it.type,
+        release_date: '',
+        air_date: '',
+        vote_average: it.fn.ratings.tmdb,
+    }).then((e: any) => {
+        if (!e) return;
+        const m = curData[idx];
+        if (!m) return;
+        if (Array.isArray(e.genres) && e.genres.length) m.fn.genres = e.genres;
+        if (typeof e.category === 'string' && e.category) m.type = e.category; // 升级为「动漫」等
+        if (typeof e.air_status === 'string') m.airStatus = e.air_status;
+        if (typeof e.tmdb_rating === 'number' && e.tmdb_rating > 0) m.fn.ratings.tmdb = e.tmdb_rating;
+        else if (typeof e.fnos_rating === 'number' && e.fnos_rating > 0) m.fn.ratings.tmdb = e.fnos_rating;
+        if (typeof e.tmdb_votes === 'number') m.fn.ratings.tmdbVotes = e.tmdb_votes;
+        if (typeof e.douban_rating === 'number') m.fn.ratings.douban = e.douban_rating;
+        if (typeof e.douban_votes === 'number') m.fn.ratings.doubanVotes = e.douban_votes;
+        applyAirOverride(m); // 用户人工覆盖优先于 TMDB 自动值
+        saveCurData();       // 持久化补全结果，下次秒开
+        // 仅当详情浮层仍展示同一部作品时才重绘类型/评分（防止快速切换串台）
+        if (curIdx === idx && $('wh-detail') && ($('wh-detail') as HTMLElement).classList.contains('show')) {
+            const setH = (id: string, v: string) => { const el = $(id); if (el) el.innerHTML = v; };
+            setH('wh-d-chips', m.fn.genres.map((g: string) => `<span class="chip">${g}</span>`).join(''));
+            setH('wh-d-ratings', renderRatings(m.fn.ratings));
+        }
+    }).catch(() => {});
+}
 
 // 页面内原生 fnOS 播放器（不走 Fntv-Plus 外部播放）同样点亮热力图：
 // 捕获 video 的 play 事件，按元素去重后本地记一笔当日观看（与 play-movie 路径互斥，不会重复计数）。
@@ -1732,6 +1777,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             myReview: '',
             sessions: lpMs ? [[formatDate(lpMs), '']] : [],
             airStatus: typeof it.air_status === 'string' ? it.air_status : undefined,
+            douban_id: (it.douban_id || 0) as (string | number),
             };
         });
         // 并发拉取真实竖版海报（与首页轮播图同款 item API 机制），按 guid 取 data.posters

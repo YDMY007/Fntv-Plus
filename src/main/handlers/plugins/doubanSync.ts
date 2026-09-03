@@ -879,44 +879,14 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
             return a.anyWatch ? { it, a } : null;
         });
         const kept = analyzed.filter((x: any) => x !== null);
-        // 第二步：仅对保留的（含部分看）条目补 TMDB 分类/类型标签，避免对 122 部未看剧浪费 TMDB 配额。
-        const items = await mapLimit(kept, 3, async (pair: any) => {
-            const { it, a } = pair;
-            const enr = await enrichWithTmdb(it);
-            // 豆瓣评分：飞牛不提供，主进程现取（按 douban_id 每日缓存，防限流）
-            const db = await fetchDoubanRating(it, fnapi);
-            // fnOS 列表项自带 vote_average（字符串，飞牛从 TMDB 刮削并缓存的评分）——即"飞牛自动获取的 TMDB 评分"
-            const va = parseFloat(String(it.vote_average || '0'));
-            return {
-                guid: it.guid,
-                parent_guid: it.parent_guid,
-                douban_id: it.douban_id || 0,
-                title: it.title,
-                tv_title: it.tv_title,
-                parent_title: it.parent_title,
-                type: it.type,
-                category: enr.category, // 电影 / 剧集 / 动漫（前端用其替换"其他"）
-                genres: enr.genres,   // TMDB 中文类型标签（无则空数组，前端回退"未分类"）
-                air_date: it.air_date,
-                release_date: it.release_date,
-                watched: it.watched === 1 ? 1 : 0,
-                started: a.started ? 1 : 0,
-                last_played: a.last_played, // ms
-                progress: a.progress,       // 0..1：电视剧=已看集数/总集数
-                total_runtime_ms: a.total_runtime_ms,
-                // 多平台评分：fnos_rating=飞牛影视缓存的 TMDB 评分(直接可用) / douban_rating+douban_votes=主进程现取豆瓣评分
-                fnos_rating: isNaN(va) ? 0 : va,
-                tmdb_rating: enr.tmdbRating,
-                tmdb_votes: enr.tmdbVotes,
-                air_status: enr.airStatus, // TMDB 剧集完结状态（Ended/Canceled/Returning Series…），前端用于"已完结/连载中"徽标
-                douban_rating: db.rating,
-                douban_votes: db.votes,
-            };
-        });
+        // 第二步：仅用飞牛本地字段构建条目（封面/标题/进度/最近播放/类型/飞牛缓存的 TMDB 评分）。
+        // 【不】查询 TMDB / 豆瓣——观影记录列表页只展示本地播放记录，绝不因豆瓣 429 退避卡加载页；
+        // 单部作品的 TMDB 分类 + 豆瓣评分改为「点开详情」时才按需查询（见 douban:enrich-one，单条不卡）。
+        const items = kept.map((pair: any) => buildLocalWatchItem(pair));
         const done = items.filter((x: any) => x.progress >= 1).length;
         const partial = items.length - done;
-        log.info(`[豆瓣] 库内共 ${libraryTotal} 项 → 有观看记录 ${items.length} 部（看完 ${done} / 部分看 ${partial}）`);
-        writeWatchCache({ items, libraryTotal });
+        log.info(`[豆瓣] 库内共 ${libraryTotal} 项 → 本地有观看记录 ${items.length} 部（看完 ${done} / 部分看 ${partial}），仅返回本地记录（不查 TMDB/豆瓣）`);
+        writeWatchCache({ items, libraryTotal }); // 本地结果落磁盘缓存，下次打开秒显且仍不查外部
         return { items, libraryTotal };
     } catch (e: any) {
         log.warn('[豆瓣] getWatchedItems 异常:', e && e.message);
@@ -926,6 +896,40 @@ async function getWatchedItems(force = false): Promise<{ items: any[]; libraryTo
         return { items: [], libraryTotal: 0 };
     }
 }
+
+/** 仅用飞牛本地字段构建观影记录条目（封面/标题/进度/最近播放/类型/飞牛缓存 TMDB 评分），不触发任何外部搜索。 */
+function buildLocalWatchItem(pair: { it: any; a: any }): any {
+    const { it, a } = pair;
+    const va = parseFloat(String(it.vote_average || '0'));
+    return {
+        guid: it.guid,
+        parent_guid: it.parent_guid,
+        douban_id: it.douban_id || 0,
+        title: it.title,
+        tv_title: it.tv_title,
+        parent_title: it.parent_title,
+        type: it.type,
+        category: '',                       // 留空，渲染侧 mapType 兜底；后台补全升级为「动漫」
+        genres: Array.isArray(it.genres) ? it.genres : (typeof it.genre === 'string' ? [it.genre] : []),
+        air_date: it.air_date,
+        release_date: it.release_date,
+        watched: it.watched === 1 ? 1 : 0,
+        started: a.started ? 1 : 0,
+        last_played: a.last_played,         // ms
+        progress: a.progress,               // 0..1
+        total_runtime_ms: a.total_runtime_ms,
+        fnos_rating: isNaN(va) ? 0 : va,    // 飞牛影视已刮削缓存的 TMDB 评分（直接可用）
+        tmdb_rating: 0,
+        tmdb_votes: 0,
+        air_status: undefined,
+        douban_rating: 0,
+        douban_votes: 0,
+    };
+}
+
+// 注：旧版「列表页后台静默补全」(enrichWatchItemsAsync) 已于 lc-975 移除——
+// 观影记录列表页只展示本地播放记录，绝不查 TMDB/豆瓣（避免豆瓣 429 退避拖垮单次 IPC 卡加载页）。
+// 单部作品的 TMDB 分类 + 豆瓣评分改由前端「点开详情」时按需 invoke douban:enrich-one 查询（见下）。
 
 /**
  * 播放进度回调 → 同步到豆瓣。被 media.ts 的 PROGRESS 事件每秒调用。
@@ -1184,6 +1188,31 @@ export function init(): void {
     // 第二个参数 force=true 时绕过 10 分钟缓存，用于「立即同步」即时拉取最新观看数据。
     registerHandler('douban:get-watched-items', async (_e: any, force?: boolean) => {
         return await getWatchedItems(force === true);
+    }, { useHandle: true });
+
+    // 单部作品按需补全：前端点开观影记录某部详情浮层时才调用（列表页绝不查，避免豆瓣 429 退避卡加载页）。
+    // 入参为单部作品的本地字段 → enrichWithTmdb 补 TMDB 分类/类型/评分 + fetchDoubanRating 补豆瓣评分（走每日缓存 + 全局闸门）；
+    // 单条查询，绝不拖住列表。失败/缺参返回 null，由前端静默忽略。
+    registerHandler('douban:enrich-one', async (_e: any, item: any) => {
+        if (!item || !item.guid) return null;
+        try {
+            const fnapi = getFnapiFresh();
+            const enr = await enrichWithTmdb(item);
+            const db = fnapi ? await fetchDoubanRating(item, fnapi) : { rating: 0, votes: 0 };
+            return {
+                guid: item.guid,
+                category: enr.category,
+                genres: enr.genres,
+                air_status: enr.airStatus,
+                tmdb_rating: enr.tmdbRating,
+                tmdb_votes: enr.tmdbVotes,
+                douban_rating: db.rating,
+                douban_votes: db.votes,
+            };
+        } catch (e: any) {
+            log.warn('[豆瓣] enrich-one 单条补全失败:', e && e.message);
+            return null;
+        }
     }, { useHandle: true });
 
     // 手动触发扫描：主进程请求渲染进程扫描，等待回传结果（超时 25s）
