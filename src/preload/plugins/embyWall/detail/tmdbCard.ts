@@ -216,12 +216,76 @@ const STATUS_CN: Record<string, string> = {
   'Planned': '计划中', 'Pilot': '试播集', 'Released': '已上映', 'Post Production': '后期制作', 'Rumored': '传闻中',
 };
 
-function buildCardHtml(d: any): string {
+/** 剧集形式（TMDB tv.type）。 */
+const TYPE_CN: Record<string, string> = {
+  Scripted: '剧本剧', Reality: '真人秀', Talk: '访谈', Documentary: '纪录片',
+  Miniseries: '限定剧', News: '新闻', Kids: '少儿',
+};
+
+/** 地区 ISO 3166-1 → 中文。TMDB 的 production_countries.name 不随 language=zh-CN 翻译（恒为英文），
+ *  origin_country 又只有码 → 用码表映射，未命中回退原值（宁显示英文也不留空）。 */
+const COUNTRY_CN: Record<string, string> = {
+  JP: '日本', KR: '韩国', US: '美国', GB: '英国', CN: '中国', HK: '中国香港', TW: '中国台湾',
+  FR: '法国', DE: '德国', ES: '西班牙', IT: '意大利', CA: '加拿大', AU: '澳大利亚', NZ: '新西兰',
+  RU: '俄罗斯', IN: '印度', TH: '泰国', VN: '越南', ID: '印度尼西亚', MY: '马来西亚', SG: '新加坡', PH: '菲律宾',
+  BR: '巴西', MX: '墨西哥', AR: '阿根廷', CL: '智利', SE: '瑞典', NO: '挪威', DK: '丹麦', FI: '芬兰',
+  NL: '荷兰', BE: '比利时', CH: '瑞士', AT: '奥地利', PL: '波兰', CZ: '捷克', HU: '匈牙利', GR: '希腊',
+  PT: '葡萄牙', IE: '爱尔兰', TR: '土耳其', UA: '乌克兰', IL: '以色列', SA: '沙特阿拉伯', AE: '阿联酋',
+  EG: '埃及', ZA: '南非', IS: '冰岛', RO: '罗马尼亚', BG: '保加利亚', HR: '克罗地亚', RS: '塞尔维亚', SK: '斯洛伐克',
+};
+
+/** 语言 ISO 639-1 → 中文（TMDB 的 english_name 在中文界面里显示成「Korean」）。
+ *  注意 TMDB 用非标准码 cn 表示粤语、zh 表示普通话。 */
+const LANG_CN: Record<string, string> = {
+  ja: '日语', ko: '韩语', zh: '普通话', cn: '粤语', en: '英语', fr: '法语', de: '德语', es: '西班牙语',
+  it: '意大利语', pt: '葡萄牙语', ru: '俄语', th: '泰语', vi: '越南语', id: '印尼语', ms: '马来语',
+  hi: '印地语', ar: '阿拉伯语', tr: '土耳其语', pl: '波兰语', nl: '荷兰语', sv: '瑞典语', no: '挪威语',
+  da: '丹麦语', fi: '芬兰语', cs: '捷克语', hu: '匈牙利语', el: '希腊语', he: '希伯来语', uk: '乌克兰语',
+  ro: '罗马尼亚语', bg: '保加利亚语', sr: '塞尔维亚语', hr: '克罗地亚语', sk: '斯洛伐克语',
+  sl: '斯洛文尼亚语', et: '爱沙尼亚语', lv: '拉脱维亚语', lt: '立陶宛语', is: '冰岛语', ca: '加泰罗尼亚语',
+  eu: '巴斯克语', gl: '加利西亚语', la: '拉丁语', bn: '孟加拉语', ta: '泰米尔语', te: '泰卢固语',
+  ur: '乌尔都语', fa: '波斯语', sw: '斯瓦希里语', fil: '菲律宾语', my: '缅甸语', km: '高棉语', lo: '老挝语',
+  mn: '蒙古语', ne: '尼泊尔语', si: '僧伽罗语', ka: '格鲁吉亚语', hy: '亚美尼亚语', az: '阿塞拜疆语',
+  kk: '哈萨克语', uz: '乌兹别克语', ku: '库尔德语', mt: '马耳他语', mk: '马其顿语', sq: '阿尔巴尼亚语',
+  bs: '波斯尼亚语', af: '南非荷兰语',
+};
+
+/** 码表映射：优先用码（形态稳定），码缺失时退回英文名数组；未命中回退原值，去重限量。 */
+function mapList(codes: any[], table: Record<string, string>, fallback: any[], max = 6): string[] {
+  const src = (Array.isArray(codes) && codes.length) ? codes : (Array.isArray(fallback) ? fallback : []);
+  const out: string[] = [];
+  for (let i = 0; i < src.length && out.length < max; i++) {
+    const raw = String(src[i] == null ? '' : src[i]).trim();
+    if (!raw) continue;
+    const v = table[raw] || table[raw.toLowerCase()] || table[raw.toUpperCase()] || raw;
+    if (out.indexOf(v) === -1) out.push(v);
+  }
+  return out;
+}
+
+/** 社交账号名白名单：这些 id 来自 TMDB 网络响应，会被拼进 URL 路径，只放行安全字符集。 */
+function handle(v: any): string {
+  const s = String(v == null ? '' : v).trim();
+  return /^[A-Za-z0-9_.\-]{1,60}$/.test(s) ? s : '';
+}
+
+/** 剧照：主进程已返回 backdrops 路径（此前从未使用）。图片本体走 tmdb:image 代理异步取，
+ *  渲染阶段只放占位 img（不给 src → 不会产生任何请求，也不会出现破图标）。 */
+const STILL_MAX = 3;
+const IMG_BASE = 'https://image.tmdb.org/t/p/w500';
+
+export function buildCardHtml(d: any): string {
   const blocks: string[] = [];
   const inline = (list: any[], max = 8): string =>
     (Array.isArray(list) && list.length) ? esc(list.slice(0, max).filter(Boolean).join(' · ')) : '';
+  /** 一行「窄 label + 值」。v 必须是已 esc 的 HTML。 */
+  const rowHtml = (k: string, v: string): string =>
+    `<div class="fnos-showinfo__row"><span class="fnos-showinfo__k">${esc(k)}</span><span class="fnos-showinfo__v">${v}</span></div>`;
+  /** 带发丝线与小标题的分节（节内只有纯文本行，不套任何内部框）。 */
+  const sec = (title: string, body: string): string =>
+    `<div class="fnos-showinfo__block fnos-showinfo__sec"><div class="fnos-showinfo__sec-t">${esc(title)}</div>${body}</div>`;
 
-  // ① 评分块：右栏唯一的视觉锚。旧版 17px 与 13px 正文行几乎无层级差 → 评分被埋没。
+  // ① 评分块：右栏唯一的视觉锚。
   if (d.rating) {
     const r = Number(d.rating);
     const votes = d.votes
@@ -234,19 +298,25 @@ function buildCardHtml(d: any): string {
     );
   }
 
-  // ② meta 串：无 label 的两行灰字，取代旧版「状态/规模/类型/单集」四行 label-value。
-  //    label 本身不携带信息，只把真正的值推到右边一列让眼睛来回横跳 —— 这是表单味的根源。
-  //    地区刻意不进串：tmdbSync 对 tv 取 origin_country(ISO 码「JP」)、对 movie 取英文名(「Japan」)，
-  //    两种形态不一致，中文界面里会显示成突兀缩写；且它是本串价值最低的字段。
+  // ② 标语：TMDB tagline，一句话，比简介更早给出这部剧的调性。
+  if (d.tagline && String(d.tagline).trim() && d.tagline !== d.overview) {
+    blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__tag">${esc(d.tagline)}</div>`);
+  }
+
+  // ③ meta 串：无 label 的两行灰字（年份/类型 + 规模/状态/单集时长）。
   const metaMain: string[] = [];
   if (d.year) metaMain.push(String(d.year));
-  if (Array.isArray(d.genres) && d.genres.length) metaMain.push(...d.genres.slice(0, 3).map(String).filter(Boolean));
+  if (Array.isArray(d.genres) && d.genres.length) metaMain.push(...d.genres.slice(0, 4).map(String).filter(Boolean));
   const metaSub: string[] = [];
   if (d.seasons) metaSub.push(d.seasons + ' 季');
   if (d.episodes) metaSub.push(d.episodes + ' 集');
   const st = STATUS_CN[d.status] || d.status || '';
   if (st) metaSub.push(String(st));
-  if (d.runtimeAvg) metaSub.push('单集 ' + runtime(d.runtimeAvg));
+  if (d.runtimeAvg) {
+    const lo = Number(d.runtimeMin) || Number(d.runtimeAvg);
+    const hi = Number(d.runtimeMax) || Number(d.runtimeAvg);
+    metaSub.push(lo !== hi && hi <= 90 ? ('单集 ' + lo + '–' + hi + ' 分') : ('单集 ' + runtime(Number(d.runtimeAvg))));
+  }
   if (metaMain.length || metaSub.length) {
     blocks.push(
       '<div class="fnos-showinfo__block fnos-showinfo__meta">'
@@ -256,37 +326,156 @@ function buildCardHtml(d: any): string {
     );
   }
 
-  // ③ 事实区：只留 hero 与 meta 串都没承载的字段。完整日期/平台/主创/语言/分级/原名。
+  // ④ 简介：hero 里那段来自 fnOS，常为空或被截断；TMDB 的 overview 通常完整得多。
+  if (d.overview && String(d.overview).trim()) {
+    blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__ov">${esc(d.overview)}</div>`);
+  }
+
+  // ⑤ 事实区（播出与规格）：窄 label 列，组内靠 4px padding 分行，无横线。
   const rows: string[] = [];
-  const row = (k: string, v: string): void => {
-    if (v) rows.push(`<div class="fnos-showinfo__row"><span class="fnos-showinfo__k">${esc(k)}</span><span class="fnos-showinfo__v">${v}</span></div>`);
-  };
+  const row = (k: string, v: string): void => { if (v) rows.push(rowHtml(k, v)); };
   const dates: string[] = [];
   if (d.airDate) dates.push(String(d.airDate));
   if (d.lastAirDate && d.lastAirDate !== d.airDate) dates.push(String(d.lastAirDate));
   row('首播', esc(dates.join(' — ')));
-  row('平台', inline(d.networks, 3));
-  row('主创', inline(d.createdBy, 4));
-  row('语言', inline(d.languages, 3));
-  if (d.certification) row('分级', esc(d.certification));
-  // 原名降到事实区末行：它很长（日文原名常占两三行），放顶部会把评分块和 meta 串的节奏冲散。
+  if (d.nextEpisode) {
+    const ne = d.nextEpisode;
+    const bits: string[] = [];
+    if (ne.episodeNumber) bits.push('第 ' + ne.episodeNumber + ' 集');
+    if (ne.airDate) bits.push(String(ne.airDate));
+    // 集名与集号等价时不要再包《》：TMDB 上大量条目(盗墓王实测 name="第 10 集")的集名就是
+    //   「第 N 集」本身，无条件加会渲染成「第 10 集 · 2026-09-09 · 《第 10 集》」——同一件事说两遍。
+    const nm = String(ne.name || '').trim();
+    if (nm && !/^(第\s*\d+\s*[集话話期]|episode\s*\d+|#\d+|\d+)$/i.test(nm)) bits.push('《' + nm + '》');
+    row('下一集', esc(bits.join(' · ')));
+  }
+  row('平台', inline(d.networks, 4));
+  if (d.showType) row('形式', esc(TYPE_CN[d.showType] || d.showType));
+  const ctry = mapList(d.countryCodes, COUNTRY_CN, d.countries, 5);
+  if (ctry.length) row('地区', esc(ctry.join(' · ')));
+  const langs = mapList(d.languageCodes, LANG_CN, d.languages, 5);
+  if (langs.length) row('语言', esc(langs.join(' · ')));
+  const certs = (Array.isArray(d.certifications) ? d.certifications : []).filter((c: any) => c && c.rating);
+  if (certs.length) {
+    row('分级', esc(certs.slice(0, 4).map((c: any) => (c.region ? c.region + ' ' : '') + c.rating).join(' · ')));
+  } else if (d.certification) {
+    row('分级', esc(d.certification));
+  }
+  // 原名降到事实区末行：日文/韩文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏。
   if (d.originalTitle && d.originalTitle !== d.title) row('原名', esc(d.originalTitle));
   if (rows.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__facts">${rows.join('')}</div>`);
 
-  // ④ 外链
+  // ⑥ 主创：原生「演职人员」区实机确认只有配音演员（无导演/编剧分工），这里补齐不重复。
+  //    cast 名单刻意不渲染 —— 那才真的和原生区撞车。
+  const crew: string[] = [];
+  const crow = (k: string, list: any[], max: number): void => {
+    const v = inline(list, max);
+    if (v) crew.push(rowHtml(k, v));
+  };
+  crow('创作者', d.createdBy, 4);
+  crow('导演', d.directors, 4);
+  crow('编剧', d.writers, 6);
+  crow('作曲', d.composers, 3);
+  crow('制片', d.producers, 4);
+  crow('设计', d.designers, 4);
+  crow('制作', d.companies, 4);
+  if (crew.length) blocks.push(sec('主创', `<div class="fnos-showinfo__facts">${crew.join('')}</div>`));
+
+  // ⑦ 本季：季详情单独一次请求取回（集数/首播/评分/本季简介）。
+  const sn = d.season;
+  if (sn && (sn.episodeCount || sn.airDate || sn.overview || sn.voteAverage)) {
+    const bits: string[] = [];
+    if (sn.episodeCount) bits.push(sn.episodeCount + ' 集');
+    if (sn.airDate) bits.push('首播 ' + sn.airDate);
+    if (sn.voteAverage) bits.push('评分 ' + Number(sn.voteAverage).toFixed(1));
+    const t = (typeof sn.seasonNumber === 'number') ? ('第 ' + sn.seasonNumber + ' 季') : (sn.name || '本季');
+    blocks.push(sec(t,
+      (bits.length ? `<div class="fnos-showinfo__meta-sub">${esc(bits.join(' · '))}</div>` : '')
+      + (sn.overview ? `<div class="fnos-showinfo__ov">${esc(sn.overview)}</div>` : '')));
+  }
+
+  // ⑧ 剧照：占位 img，src 由 _fillStills 异步填（全部失败则整节移除）。
+  const stills = (Array.isArray(d.backdrops) ? d.backdrops : []).filter(Boolean).slice(0, STILL_MAX);
+  if (stills.length) {
+    blocks.push('<div class="fnos-showinfo__block fnos-showinfo__sec fnos-showinfo__stills-sec">'
+      + '<div class="fnos-showinfo__sec-t">剧照</div><div class="fnos-showinfo__stills">'
+      + stills.map(() => '<img class="fnos-showinfo__still" alt="" decoding="async">').join('')
+      + '</div></div>');
+  }
+
+  // ⑨ 相似剧集：与主请求同一次 append_to_response 取回，零额外网络往返。
+  const recs = (Array.isArray(d.recommendations) ? d.recommendations : []).filter((r: any) => r && r.title);
+  if (recs.length) {
+    const items = recs.slice(0, 8).map((r: any) => {
+      const u = safeUrl(r.url);
+      const label = esc(r.title + (r.year ? ' (' + r.year + ')' : ''));
+      return u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${label}</a>` : label;
+    });
+    blocks.push(sec('相似剧集', `<div class="fnos-showinfo__recs">${items.join('<i>·</i>')}</div>`));
+  }
+
+  // ⑩ 更多：关键词/别名/在线观看/热度/外部编号 —— 价值低于上面各节，收在末尾一节里。
+  const more: string[] = [];
+  const mrow = (k: string, v: string): void => { if (v) more.push(rowHtml(k, v)); };
+  mrow('别名', inline(d.aliases, 6));
+  mrow('关键词', inline(d.keywords, 12));
+  mrow('在线看', inline(d.providers, 6));
+  if (d.popularity) mrow('热度', esc(Math.round(Number(d.popularity)).toLocaleString('zh-CN')));
+  const ex0 = d.externalIds || {};
+  const ids: string[] = [];
+  if (d.tmdbId) ids.push('TMDB ' + d.tmdbId);
+  if (ex0.tvdb) ids.push('TVDB ' + ex0.tvdb);
+  if (ex0.wikidata) ids.push(String(ex0.wikidata));
+  if (ids.length) mrow('编号', esc(ids.join(' · ')));
+  if (more.length) blocks.push(sec('更多', `<div class="fnos-showinfo__facts">${more.join('')}</div>`));
+
+  // ⑪ 外链
   const links: string[] = [];
   const link = (href: string, text: string): void => {
     const u = safeUrl(href);
     if (u && text) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(text)}</a>`);
   };
   if (d.url) link(d.url, 'TMDB');
-  const imdb = (d.externalIds && d.externalIds.imdb) ? 'https://www.imdb.com/title/' + d.externalIds.imdb : (_nativeImdb ? _nativeImdb.href : '');
+  const ex = d.externalIds || {};
+  const imdb = ex.imdb ? 'https://www.imdb.com/title/' + ex.imdb : (_nativeImdb ? _nativeImdb.href : '');
   if (imdb) link(imdb, 'IMDb');
   if (d.trailerKey) link('https://www.youtube.com/watch?v=' + d.trailerKey, '预告片');
   if (d.homepage) link(d.homepage, '官网');
+  const ig = handle(ex.instagram); if (ig) link('https://www.instagram.com/' + ig, 'Instagram');
+  const tw = handle(ex.twitter); if (tw) link('https://x.com/' + tw, 'X');
+  const fb = handle(ex.facebook); if (fb) link('https://www.facebook.com/' + fb, 'Facebook');
+  const wd = /^Q\d{1,12}$/.test(String(ex.wikidata || '')) ? String(ex.wikidata) : '';
+  if (wd) link('https://www.wikidata.org/wiki/' + wd, 'Wikidata');
+  const tvdb = /^\d{1,12}$/.test(String(ex.tvdb || '')) ? String(ex.tvdb) : '';
+  if (tvdb) link('https://thetvdb.com/dereferrer/series/' + tvdb, 'TVDB');
   if (links.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__links">${links.join('<span>·</span>')}</div>`);
 
   return blocks.join('');
+}
+
+/** 剧照异步填充：走主进程 tmdb:image 代理（内存+磁盘缓存，规避渲染进程 DNS 污染）。
+ *  并发取、单张失败只删自己；全部失败则把整节移除，不留一排空位。
+ *  每次写回前检查节点是否还在文档里 —— teardown/换页后卡已被摘掉，不能再写。 */
+async function _fillStills(card: HTMLElement, paths: string[]): Promise<void> {
+  const imgs = Array.from(card.querySelectorAll<HTMLImageElement>('.fnos-showinfo__still'));
+  if (!imgs.length) return;
+  const ok = await Promise.all(imgs.map(async (img, i) => {
+    const p = paths[i];
+    if (!p) return false;
+    try {
+      const r: any = await ipcRenderer.invoke('tmdb:image', IMG_BASE + p);
+      if (r && r.ok && r.dataUrl && document.body.contains(img)) {
+        img.src = r.dataUrl;
+        img.classList.add('is-ready');
+        return true;
+      }
+    } catch (_) { /* 单张失败静默 */ }
+    if (document.body.contains(img) && img.parentNode) img.parentNode.removeChild(img);
+    return false;
+  }));
+  if (ok.some(Boolean)) return;
+  const s = card.querySelector('.fnos-showinfo__stills-sec');
+  if (s && s.parentNode) s.parentNode.removeChild(s);
 }
 
 // ── 卡片节点定位/渲染/调度 ──
@@ -325,6 +514,11 @@ function _renderCard(): void {
   const next = body + foot;
   if (card.innerHTML === next) return; // 内容未变 → 不触碰 DOM
   card.innerHTML = next;
+
+  // 剧照走异步代理取图：占位 img 已在 HTML 里，这里只负责填 src（全失败则由 _fillStills 摘掉整节）。
+  if (_tmdbInfoData && Array.isArray(_tmdbInfoData.backdrops) && _tmdbInfoData.backdrops.length) {
+    void _fillStills(card, _tmdbInfoData.backdrops);
+  }
 
   const btn = card.querySelector('.fnos-showinfo__refresh') as HTMLElement | null;
   if (btn) btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); if (!_tmdbInfoLoading) _fetch(true); });

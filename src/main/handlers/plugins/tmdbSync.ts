@@ -600,8 +600,17 @@ export async function tmdbGenresFor(
     }
 }
 
-/** 季页「剧集信息」详情缓存版本：字段结构变动时 +1，使旧缓存失效、强制重拉。 */
-const TMDB_SHOW_CACHE_VER = 1;
+/** 季页「剧集信息」详情缓存版本：字段结构变动时 +1，使旧缓存失效、强制重拉。
+ *  v2(lc-988)：normalizeShow 新增 type / nextEpisode / lastEpisode / certifications / originalLanguage /
+ *  facebook / recommendations / designers，countries 由 ISO 码统一为带名字的形态；
+ *  并修了四处「字段一直存在但值恒为空」的真缺陷（均经直接打 TMDB API 实证）：
+ *    ① 缺 include_image_language → append 回来的 images 被 language=zh-CN 过滤成 0 张，剧照永远没有；
+ *    ② crewByJob 只匹配好莱坞职位名 → 动画/日剧的 Series Director / Original Story 全落空，主创永远空白；
+ *    ③ aggregate_credits.crew 的职位在 jobs[] 数组而非 job 字段 → 回退路径一个人都取不到；
+ *    ④ watch/providers 里字段叫 provider_name 而不是 name → namesOf 默认取 name 恒得空数组，
+ *      「在线看」一行从来没显示过（实测 KR.flatrate[0] = {provider_id:8, provider_name:"Netflix"}）。
+ *  TTL 是 10 年，不 bump 老缓存永不刷新（磁盘上现存 16 个 show_v1_* 文件全部会作废重拉）。 */
+const TMDB_SHOW_CACHE_VER = 2;
 /** 剧集信息缓存有效期 ≈ 永久（10 年）。用户要求「第一次打开对应剧集才获取一次」，
  *  之后只读本地磁盘缓存；只有点卡片上的「刷新」按钮（force=true）才重新拉取。 */
 const TMDB_SHOW_TTL_MS = 3650 * 24 * 60 * 60 * 1000;
@@ -618,18 +627,55 @@ function namesOf(list: any, field = 'name'): string[] {
     return out;
 }
 
-/** 从 crew 里按 job 取人名（去重） */
-function crewByJob(crew: any[], job: string): string[] {
+/** 从 crew 里按职位取人名（去重）。
+ *  ⚠ 实证修正(lc-988, 直接打 TMDB API 量到)：
+ *   ① 职位名必须传**别名组**而不是单个精确值。旧写法 crewByJob(crew,'Director') 对动画/日剧恒为空——
+ *     tv/297826(盗墓王) 的 credits.crew 实际职位是 Series Director / Original Story / Character Designer /
+ *     Animation Director / Art Direction / Color Designer，tv/274671 还有 Series Composition / Music Producer，
+ *     一个都不等于 'Director'/'Writer'/'Original Music Composer'/'Producer' → 主创区永远空白。
+ *   ② 必须同时读 c.job 与 c.jobs[].job。credits.crew 成员带 job(字符串)；
+ *     aggregate_credits.crew 成员**没有 job**，职位在 jobs:[{job,episode_count}] 数组里
+ *     (实测 tv/297826 的 aggregate crew 首条 = {jobs:[{job:"Art Direction"}], department:"Art"})。
+ *     旧写法只读 c.job → 一旦回退到 aggregate_credits 就一个人都取不到。 */
+function crewByJob(crew: any[], job: string | readonly string[]): string[] {
     if (!Array.isArray(crew)) return [];
+    const want = new Set<string>(
+        (Array.isArray(job) ? [...job] : [job]).map((j) => String(j || '').trim()).filter(Boolean));
+    if (!want.size) return [];
     const seen = new Set<string>();
     const out: string[] = [];
     for (const c of crew) {
-        if (!c || c.job !== job) continue;
+        if (!c) continue;
+        const jobs: string[] = typeof c.job === 'string' ? [c.job] : [];
+        if (Array.isArray(c.jobs)) for (const j of c.jobs) if (j && typeof j.job === 'string') jobs.push(j.job);
+        if (!jobs.some((j) => want.has(j.trim()))) continue;
         const n = typeof c.name === 'string' ? c.name.trim() : '';
         if (n && !seen.has(n)) { seen.add(n); out.push(n); }
     }
     return out;
 }
+
+/** 主创各行的 TMDB 职位别名组。
+ *  清单不是凭空列的 —— 取自 lc-988 实测的两部真实动画：
+ *    tv/297826(盗墓王) credits.crew 职位 = Original Story / Series Director / Character Designer /
+ *      Animation Director×2 / Art Direction / Color Designer，created_by 为空；
+ *    tv/274671 credits.crew(24 条) 另含 Series Composition / Original Music Composer / Music Producer /
+ *      Production Supervisor / Executive Producer×12 / Producer×3。
+ *  只写 'Director'/'Writer' 这类好莱坞职位名会全数落空，故每个语义行都收全别名。
+ *  「设计」行专收动画/美术部门职位(角色设计・作画监督・色彩设计・美术指导)，
+ *    这些在 TMDB 里分属 Visual Effects / Art 两个 department，中文语境下统称设计类主创。 */
+const CREW_JOBS = {
+    director: ['Director', 'Series Director', 'Co-Director', 'Assistant Director', 'Episode Director'],
+    writer: ['Writer', 'Screenplay', 'Story', 'Original Story', 'Series Composition', 'Scenario Writer',
+        'Script Editor', 'Novel', 'Comic Book', 'Head Writer', 'Storyboard'],
+    composer: ['Original Music Composer', 'Music Director', 'Music Producer', 'Music', 'Theme Song Performance',
+        'Sound Director'],
+    producer: ['Producer', 'Executive Producer', 'Co-Producer', 'Co-Executive Producer', 'Line Producer',
+        'Supervising Producer', 'Animation Producer', 'Production Supervisor', 'Associate Producer'],
+    designer: ['Character Designer', 'Chief Animation Director', 'Animation Director', 'Color Designer',
+        'Art Direction', 'Production Design', 'Art Department Coordinator', 'Background Designer',
+        'Set Decoration', 'Costume Design', 'VFX Supervisor', '3D Director', 'CGI Director'],
+} as const;
 
 function titleSlug(title: string): string {
     return crypto.createHash('md5').update(String(title || '')).digest('hex').slice(0, 12);
@@ -747,17 +793,51 @@ function normalizeShow(d: any, mt: 'tv' | 'movie', id: number, season: any): any
     const runtimes: number[] = Array.isArray(d.episode_run_time) ? d.episode_run_time.filter((n: any) => typeof n === 'number' && n > 0) : [];
     if (!runtimes.length && mt === 'movie' && typeof d.runtime === 'number' && d.runtime > 0) runtimes.push(d.runtime);
     const runtimeAvg = runtimes.length ? Math.round(runtimes.reduce((a, b) => a + b, 0) / runtimes.length) : 0;
-    // 分级：tv → content_ratings(US)；movie → release_dates(US)
+    // 分级：tv → content_ratings；movie → release_dates。主值仍取 US（与既有渲染兼容），
+    //   另收全地区列表：同一部剧各地区分级不同（US=TV-MA / JP=13 / KR=15…），信息卡可一并展示。
     let certification = '';
+    const certifications: { region: string; rating: string }[] = [];
     if (mt === 'tv') {
         const cr = Array.isArray(d.content_ratings?.results) ? d.content_ratings.results : [];
         const us = cr.find((r: any) => r.iso_3166_1 === 'US') || cr[0];
         certification = us?.rating || '';
+        for (const r of cr) {
+            if (r && typeof r.iso_3166_1 === 'string' && r.rating) certifications.push({ region: r.iso_3166_1, rating: String(r.rating) });
+        }
     } else {
         const rd = Array.isArray(d.release_dates?.results) ? d.release_dates.results : [];
         const us = rd.find((r: any) => r.iso_3166_1 === 'US');
         certification = us?.release_dates?.[0]?.certification || '';
+        for (const r of rd) {
+            const c = r?.release_dates?.[0]?.certification;
+            if (r && typeof r.iso_3166_1 === 'string' && c) certifications.push({ region: r.iso_3166_1, rating: String(c) });
+        }
     }
+    // 上一集 / 下一集：tv 详情自带 last_episode_to_air / next_episode_to_air（连载中时「下一集」价值最高）
+    const epBrief = (e: any): any => {
+        if (!e || e.id == null) return null;
+        return {
+            seasonNumber: typeof e.season_number === 'number' ? e.season_number : 0,
+            episodeNumber: typeof e.episode_number === 'number' ? e.episode_number : 0,
+            name: e.name || '',
+            airDate: e.air_date || '',
+            overview: e.overview || '',
+            runtime: typeof e.runtime === 'number' ? e.runtime : 0,
+            voteAverage: typeof e.vote_average === 'number' ? e.vote_average : 0,
+            stillPath: typeof e.still_path === 'string' ? e.still_path : '',
+        };
+    };
+    // 相似剧集：走同一次 append_to_response，零额外网络请求
+    const recRaw = Array.isArray(d.recommendations?.results) ? d.recommendations.results : [];
+    const recommendations = recRaw
+        .map((r: any) => ({
+            tmdbId: r?.id,
+            title: String((mt === 'movie' ? (r?.title || r?.original_title) : (r?.name || r?.original_name)) || ''),
+            year: yearOfAny(mt === 'movie' ? r?.release_date : r?.first_air_date),
+            url: r?.id != null ? `https://www.themoviedb.org/${mt}/${r.id}` : '',
+        }))
+        .filter((r: any) => r.tmdbId != null && r.title)
+        .slice(0, 8);
     // 预告片：优先 YouTube 官方 Trailer
     const vids = Array.isArray(d.videos?.results) ? d.videos.results : [];
     const trailer = vids.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer')
@@ -765,18 +845,37 @@ function normalizeShow(d: any, mt: 'tv' | 'movie', id: number, season: any): any
     // 别名：tv 用 results、movie 用 titles
     const altRaw = mt === 'tv' ? d.alternative_titles?.results : d.alternative_titles?.titles;
     const aliases = namesOf(altRaw, 'title').filter((t) => t && t !== title && t !== original).slice(0, 8);
-    // 播放平台：watch/providers 的中国区 flatrate
+    // 播放平台：watch/providers 的 flatrate（订阅流媒体）。
+    //   旧写法 `wp.CN || wp.HK || wp.TW || wp.US` 只取第一个存在的地区 → 漏掉其它地区的平台；改为六区合并去重。
     const wp = d['watch/providers']?.results || {};
-    const cnProviders = namesOf((wp.CN || wp.HK || wp.TW || wp.US || {}).flatrate).slice(0, 6);
+    const provSeen = new Set<string>();
+    const cnProviders: string[] = [];
+    for (const region of ['CN', 'HK', 'TW', 'JP', 'KR', 'US']) {
+        // ⚠ 字段名是 provider_name 而不是 name（lc-988 实测：KR.flatrate[0] =
+        //   {logo_path, provider_id:8, provider_name:"Netflix", display_priority:0}）。
+        //   namesOf 默认取 name → 旧写法在这里恒返回空数组，「在线看」一行从来没显示过。
+        for (const n of namesOf((wp[region] || {}).flatrate, 'provider_name')) {
+            // 广告档是同一服务的重复条目（实测盗墓王 KR 给了 Netflix + Netflix Standard with Ads，
+            // JP 给了 Amazon Prime Video + Amazon Prime Video with Ads）→ 只保留正档。
+            if (/ with Ads$/i.test(n)) continue;
+            if (!provSeen.has(n)) { provSeen.add(n); cnProviders.push(n); }
+        }
+    }
     // 关键词
     const kwRaw = mt === 'tv' ? d.keywords?.results : d.keywords?.keywords;
     const keywords = namesOf(kwRaw).slice(0, 16);
     // 图：海报 / 背景（只存路径，真实图片由 tmdb:image 代理转 dataURL）
     const posterPath = typeof d.poster_path === 'string' ? d.poster_path : '';
     const backdropPath = typeof d.backdrop_path === 'string' ? d.backdrop_path : '';
+    // 剧照排序：TMDB 返回的 backdrops 是乱序的，按 vote_average 降序取社区评价最高的几张；
+    //   排除 backdropPath（页面已把它当全屏底图用，实测盗墓王投票最高的两张里就有它 → 会重复出现）；
+    //   滤掉宽度 < 400 的小图（16:9 缩到右栏三分之一仍需清晰度）。
     const backdrops = (Array.isArray(d.images?.backdrops) ? d.images.backdrops : [])
-        .map((b: any) => (typeof b?.file_path === 'string' ? b.file_path : ''))
-        .filter(Boolean).slice(0, 6);
+        .filter((b: any) => b && typeof b.file_path === 'string' && b.file_path && b.file_path !== backdropPath
+            && (typeof b.width !== 'number' || b.width >= 400))
+        .sort((x: any, y: any) => (Number(y?.vote_average) || 0) - (Number(x?.vote_average) || 0))
+        .map((b: any) => b.file_path as string)
+        .slice(0, 6);
 
     return {
         tmdbId: id,
@@ -797,31 +896,46 @@ function normalizeShow(d: any, mt: 'tv' | 'movie', id: number, season: any): any
         runtimeMin: runtimes.length ? Math.min(...runtimes) : 0,
         runtimeMax: runtimes.length ? Math.max(...runtimes) : 0,
         genres: namesOf(d.genres),
-        // tv 的 origin_country 是国别码字符串数组（['US','GB']）；movie 的 production_countries 是对象数组
-        countries: (mt === 'tv'
-            ? (Array.isArray(d.origin_country) ? d.origin_country.filter((x: any) => typeof x === 'string' && x) : [])
-            : namesOf(d.production_countries)) as string[],
+        // 剧集形式（tv 专有：Scripted / Reality / Talk / Documentary…）与原始语言
+        showType: typeof d.type === 'string' ? d.type : '',
+        originalLanguage: typeof d.original_language === 'string' ? d.original_language : '',
+        // 地区：tv 与 movie 的 production_countries 都是 [{iso_3166_1,name}]，统一取名字。
+        //   lc-985 弃用地区正是因为旧写法 tv 取 origin_country 得到 ISO 码「JP」、movie 取英文名「Japan」，
+        //   两种形态在中文界面里不一致；另存 countryCodes 供前端映射成中文国名（TMDB 的 name 不随 language 翻译）。
+        countries: namesOf(d.production_countries).slice(0, 6),
+        countryCodes: (Array.isArray(d.origin_country)
+            ? d.origin_country.filter((x: any) => typeof x === 'string' && x)
+            : []) as string[],
         languages: (Array.isArray(d.spoken_languages) ? d.spoken_languages : [])
             .map((l: any) => l?.english_name || l?.name || '').filter(Boolean).slice(0, 8),
         networks: namesOf(d.networks),
         companies: namesOf(d.production_companies).slice(0, 8),
         createdBy: namesOf(d.created_by).slice(0, 6),
-        directors: crewByJob(crew, 'Director').slice(0, 6),
-        writers: crewByJob(crew, 'Writer').slice(0, 8),
-        composers: crewByJob(crew, 'Original Music Composer').slice(0, 4),
-        producers: crewByJob(crew, 'Producer').slice(0, 6),
+        // 职位一律走 CREW_JOBS 别名组：实测 tv/297826 只有 Series Director / Original Story 等别名，
+        // 旧的 crewByJob(crew,'Director') 四行全空，主创区从来不显示任何人。
+        directors: crewByJob(crew, CREW_JOBS.director).slice(0, 6),
+        writers: crewByJob(crew, CREW_JOBS.writer).slice(0, 8),
+        composers: crewByJob(crew, CREW_JOBS.composer).slice(0, 4),
+        producers: crewByJob(crew, CREW_JOBS.producer).slice(0, 6),
+        designers: crewByJob(crew, CREW_JOBS.designer).slice(0, 6),
         cast,
         rating: typeof d.vote_average === 'number' ? d.vote_average : 0,
         votes: typeof d.vote_count === 'number' ? d.vote_count : 0,
         popularity: typeof d.popularity === 'number' ? d.popularity : 0,
         certification,
+        certifications,
+        // 语言 ISO 码：TMDB 的 english_name 在中文界面里显示成「Korean」，前端用码表映射成「韩语」
+        languageCodes: (Array.isArray(d.spoken_languages) ? d.spoken_languages : [])
+            .map((l: any) => (typeof l?.iso_639_1 === 'string' ? l.iso_639_1 : '')).filter(Boolean).slice(0, 8),
         homepage: d.homepage || '',
         externalIds: {
-            imdb: d.external_ids?.imdb_id || '',
+            // tv 详情的 external_ids 偶有缺失，顶层 imdb_id 是同一份数据的另一个出口 → 回退
+            imdb: d.external_ids?.imdb_id || d.imdb_id || '',
             tvdb: d.external_ids?.tvdb_id ? String(d.external_ids.tvdb_id) : '',
             wikidata: d.external_ids?.wikidata_id || '',
             instagram: d.external_ids?.instagram_id || '',
             twitter: d.external_ids?.twitter_id || '',
+            facebook: d.external_ids?.facebook_id || '',
         },
         trailerKey: trailer?.key || '',
         trailerName: trailer?.name || '',
@@ -830,7 +944,10 @@ function normalizeShow(d: any, mt: 'tv' | 'movie', id: number, season: any): any
         backdrops,
         keywords,
         aliases,
-        providers: cnProviders,
+        providers: cnProviders.slice(0, 8),
+        recommendations,
+        lastEpisode: epBrief(d.last_episode_to_air),
+        nextEpisode: epBrief(d.next_episode_to_air),
         season: season || null,
     };
 }
@@ -844,6 +961,8 @@ function normalizeSeason(s: any, seasonNumber: number): any {
         airDate: s.air_date || '',
         episodeCount: (Array.isArray(s.episodes) ? s.episodes.length : (typeof s.episodes === 'number' ? s.episodes : 0)),
         posterPath: typeof s.poster_path === 'string' ? s.poster_path : '',
+        voteAverage: typeof s.vote_average === 'number' ? s.vote_average : 0,
+        voteCount: typeof s.vote_count === 'number' ? s.vote_count : 0,
     };
 }
 
@@ -866,9 +985,15 @@ async function fetchShowDetails(arg: {
         const id = await resolveShowId(client, baseParams, mt, arg);
         if (!id) return { ok: false, error: 'TMDB 未找到匹配条目：' + (arg.title || arg.tmdbId || '(无标题)') };
         const append = mt === 'tv'
-            ? 'aggregate_credits,credits,external_ids,keywords,content_ratings,alternative_titles,images,videos,watch/providers'
-            : 'credits,external_ids,keywords,alternative_titles,images,videos,release_dates,watch/providers';
-        const dResp = await getWithRetry(client, `/${mt}/${id}`, { params: { ...baseParams, append_to_response: append } });
+            ? 'aggregate_credits,credits,external_ids,keywords,content_ratings,alternative_titles,images,videos,watch/providers,recommendations'
+            : 'credits,external_ids,keywords,alternative_titles,images,videos,release_dates,watch/providers,recommendations';
+        // ⚠ include_image_language 不可省（lc-988 实测）：baseParams 带 language=zh-CN 时，TMDB 会把
+        //   append 回来的 images 子响应**按语言过滤**，而 backdrop 的 iso_639_1 多为 null/en →
+        //   tv/297826 直接量到 backdrops=0 posters=0 logos=0（剧照节因此永远不渲染）。
+        //   加上 include_image_language=zh-CN,en,null 后同一请求 backdrops=6 posters=7 logos=3。
+        //   它只作用于 images 子响应，标题/简介等的中文翻译仍由 language 决定，两者不冲突。
+        const detailParams: any = { ...baseParams, append_to_response: append, include_image_language: 'zh-CN,en,null' };
+        const dResp = await getWithRetry(client, `/${mt}/${id}`, { params: detailParams });
         let season: any = null;
         if (mt === 'tv' && typeof arg.seasonNumber === 'number' && arg.seasonNumber >= 0) {
             try {

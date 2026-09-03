@@ -53,7 +53,7 @@ html.dark body.fnos-beautify{
 body.fnos-beautify ${COL}{
   display:grid !important;
   grid-template-columns:minmax(0,60fr) minmax(0,40fr) !important;
-  grid-template-rows:auto auto auto !important;
+  grid-template-rows:auto auto !important;
   column-gap:32px !important;
   row-gap:20px !important;
   align-items:start !important;
@@ -77,8 +77,18 @@ body.fnos-beautify ${COL} > :nth-child(3) > *:not(.fnos-beautify-card){
   background:transparent !important;
   border:none !important; box-shadow:none !important;
 }
-/* 链接(IMDB)：全宽 footer row3 */
-body.fnos-beautify ${COL} > :nth-child(4){ grid-area:3 / 1 / 4 / 3 !important; min-width:0 !important; }
+/* 原生「链接：IMDB链接」区块：隐藏（用户明确要求去掉）。
+   实机 DOM(盗墓王季页)：它是内容列第 4 个子节点 DIV.box-border.w-full.px-[46px]，
+   内部只有一个 a[href*=imdb.com/title/]，没有 person 链接。
+   ⚠ 双保险缺一不可：只按 nth-child(4) 会在某些季页少一个节点时误伤别的东西；
+     只按「含 imdb 链接」则可能命中演职人员区里的外链。两条都要满足「有外链 且 无人物链接」。
+   ⚠ 用 display:none 而不是删节点：节点归 React 所有，删了会在下次重渲染时炸；
+     且 collectNativeImdb() 靠 querySelectorAll('a') 取 IMDb 做回退，display:none 不影响它。
+   ⚠ grid-template-rows 必须同步收成两行(auto auto)：留第三行的话，隐藏后会多出一条 20px row-gap。 */
+body.fnos-beautify ${COL} > :nth-child(4):has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])),
+body.fnos-beautify ${COL} > div[class*="px-[46px]"]:has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
+  display:none !important;
+}
 
 /* ===== B. 页面背景透明化：让注入的全屏底图透出（仅详情页 body.fnos-beautify 生效）===== */
 body.fnos-beautify [class*="bg-[var(--semi-color-bg-1)]"]{ background-color:transparent !important; }
@@ -231,11 +241,20 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 @keyframes fnos-instant-shimmer{ 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 
 /* ===== I. 延后注入的 TMDB 剧集信息卡（tmdbCard.ts，追加进右列）=====
-   排版范式(lc-985 重写)：对标 Netflix / Apple TV+ / TMDB 侧栏，弃用后台表单式 label-value 双列。
-   分段：评分块(视觉锚) → meta 串(无 label) → 事实区(窄 label) → 外链 → 来源行。
-   去重：标题/简介/主演不再渲染 —— hero 已有标题与带「更多」的简介，下方原生「演职人员」区已有头像+姓名横滑；
-     原名降到事实区末行(日文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏)。
-   分组只靠留白，组内零横线(用户明确要求「内部文字不要加线框」)。
+   排版范式(lc-985 立、lc-988 扩)：对标 Netflix / Apple TV+ / TMDB 侧栏，弃用后台表单式 label-value 双列。
+   分段(lc-988，11 段)：评分块(视觉锚) → 标语 → meta 串(无 label) → 简介 → 事实区(窄 label)
+     → 主创 → 本季 → 剧照 → 相似剧集 → 更多(别名/关键词/在线看/热度/编号) → 外链 → 来源行。
+   为什么这么长：飞牛原生季页**完全没有**这些数据，全是本插件从 TMDB 补的；
+     用户明确要求「尽可能多获取和显示」。∴ 内容以「原生没有的」为界，不做删减。
+     ⚠ 实机量过的硬证据(lc-988, /v/tv/season/盗墓王)：hero 的 innerText 只有 20 个字符
+       「盗墓王 第 1 季 第 1 集 2026」；整个内容列除去「选集」区(每集标题+集简介+时长)后
+       再无任何剧集简介/评分/主创/平台/分级/外链。**特别是剧集简介：原生一个字都没有**，
+       卡内的简介段是唯一来源 —— 别照「hero 已有带更多的简介」这种印象把它当重复删掉。
+   去重(仍然成立)：标题不渲染(hero 已有)；主演 cast 不渲染(原生「演职人员」区实机确认有头像+姓名横滑)，
+     但主创分工(创作者/导演/编剧/作曲/制片/制作)原生区没有 → 补；
+     原名降到事实区末行(日文/韩文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏)。
+   分组只靠留白 + 发丝线(__sec 的 border-top) + 11px 小标题，**节内零容器**(用户明确要求
+     「只要一个大的容器包起来，内部的各小标题文字都不要有容器包裹」)。
 
    ⚠ 命名硬约束(lc-987, 用户明确要求「只要一个大的容器包起来，内部的各小标题文字都不要有容器包裹」)：
      glassUI.ts 的组件级玻璃规则写作 [class*="card"] —— 那是**子串**匹配。内部块原先叫
@@ -292,6 +311,35 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
   flex:1 1 auto !important; min-width:0 !important; font-size:12.5px !important; line-height:1.6 !important;
   color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important;
 }
+/* ③b 分节(lc-988 扩字段后新增)：一条发丝线 + 11px 小标题，节内**零容器**(用户明确要求
+     「只要一个大的容器包起来，内部的各小标题文字都不要有容器包裹」)。
+     节间距沿用既有 __block 相邻规则(18px)，__sec 自身只补 padding-top 让线不贴字。
+     ⚠ 类名严禁含 glassUI 子串 token(card/panel/search/navbar/z-10/z-20/list-head…)：
+       sec / sec-t / tag / ov / stills / still / recs 均已逐个核对过清单，安全。 */
+.fnos-showinfo__sec{ padding-top:14px !important; border-top:1px solid var(--fnos-hairline-soft) !important; }
+.fnos-showinfo__sec-t{
+  font-size:11px !important; letter-spacing:.06em !important; line-height:1 !important;
+  color:var(--fnos-muted) !important; margin-bottom:8px !important;
+}
+/* 标语：比简介更早给出调性，弱化到灰字一级。 */
+.fnos-showinfo__tag{ font-size:12.5px !important; line-height:1.6 !important; color:var(--fnos-muted) !important; }
+/* 简介：TMDB overview，正文级行高(1.75)让它成为卡里最易读的一段。 */
+.fnos-showinfo__ov{ font-size:12.5px !important; line-height:1.75 !important; color:var(--semi-color-text-1,#3c3c43) !important; word-break:break-word !important; }
+/* 剧照：3 张等宽 16:9。img 初始 opacity 0 + 无 src(渲染阶段零请求)，
+   取到 dataUrl 后由 _fillStills 加 is-ready 淡入；取不到的单张会被摘掉，不留空位。
+   aspect-ratio 而非 height：宽度是 calc 出来的百分比，写死 height 在窄栏会变形。 */
+.fnos-showinfo__stills{ display:flex !important; gap:8px !important; }
+.fnos-showinfo__still{
+  width:calc((100% - 16px) / 3) !important; aspect-ratio:16 / 9 !important; object-fit:cover !important;
+  border-radius:8px !important; background:var(--fnos-hairline-soft) !important;
+  opacity:0 !important; transition:opacity .3s ease !important;
+}
+.fnos-showinfo__still.is-ready{ opacity:1 !important; }
+/* 相似剧集：纯文本链接流(· 分隔)，不是海报墙 —— 海报墙会引入一排新框。 */
+.fnos-showinfo__recs{ font-size:12.5px !important; line-height:1.8 !important; }
+.fnos-showinfo__recs a{ color:var(--semi-color-text-0,#1d1d1f) !important; text-decoration:none !important; }
+.fnos-showinfo__recs a:hover{ color:var(--fnos-accent) !important; text-decoration:underline !important; }
+.fnos-showinfo__recs i{ font-style:normal !important; color:var(--semi-color-text-3,#c7c7cc) !important; margin:0 6px !important; }
 /* ④ 外链：组间距统一由 __block 相邻规则给，这里不再自带 margin-top。 */
 .fnos-showinfo__links{ display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
 .fnos-showinfo__links a{ color:var(--fnos-accent) !important; text-decoration:none !important; font-weight:500 !important; }
