@@ -128,30 +128,49 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]{
   border-radius:12px !important;
   transition:background .2s ease !important;
 }
-/* 缩略图 = 卡片首子节点（原生 flex-col 海报式：图在顶）→ 固定左列并跨行居中；
-   其余文本子节点由 Grid 自动流入右列逐行堆叠，无需知道其类名/顺序。
-   ⚠ 必须清掉原生给它的高度约束(定高/aspect 类)：否则容器比 16:9 图高出一截，
-     内部 absolute 的清晰度角标(1080)/播放按钮会掉到图片下方空白处 → 角标错位。 */
+/* 缩略图 = 卡片首子节点（原生 div.rounded-lg.relative.mb-3.flex.h-[146px].w-full.shrink-0.overflow-hidden）
+   → 固定左列并跨行居中；其余文本子节点由 Grid 自动流入右列逐行堆叠。
+   ⚠ 塌陷坑(lc-986, 用户实机 DOM 实证): 这个容器**内部没有任何在文档流里撑高的东西**——
+     · 图片链 div.box-border > div.relative.size-full > div.size-full > picture > img 中，
+       picture/img 带内联 position:absolute + width/height:100%（absolute 不参与父高计算），
+       中间层是 size-full = height:100%，父高为 auto 时百分比解析不出来 → 0；
+     · 另外三个直接子节点(观看进度条 / 底部渐变层 / hover overlay)全是 absolute。
+     所以一旦用 height:auto 清掉原生 h-[146px]，容器就塌成 border 的约 2px =「细成一条线」。
+     给内部 img 补 aspect-ratio 也救不了：它的内联 position:absolute 没被覆盖，absolute 撑不开父级。
+   正解：不给 height，给容器 aspect-ratio。width 已定 180px → 自动算出 101.25px，
+     内部 absolute 链的 height:100% 随之有了确定参照 → 图片正常填满。
+   (原生 h-[146px] 本就是 260px 宽的 16:9: 260×9/16=146.25 → 16/9 是还原原生比例，不是新发明。) */
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child{
   grid-column:1 !important; grid-row:1 / span 3 !important;
   align-self:center !important; justify-self:start !important;
   width:180px !important; max-width:180px !important;
   height:auto !important; min-height:0 !important; max-height:none !important;
+  aspect-ratio:16 / 9 !important;
+  margin:0 !important;              /* 原生 mb-3 会在 Grid 单元里额外顶出 12px */
   position:relative !important;
-}
-body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child img{
-  display:block !important; width:100% !important; height:auto !important;
-  aspect-ratio:16 / 9 !important; object-fit:cover !important;
   border-radius:10px !important;
+  /* 阴影打在容器上：容器自带 overflow-hidden，打在内部 img 上会被自己裁掉 */
   box-shadow:0 2px 12px rgba(0,0,0,.16) !important;
+}
+/* 缩略图本体 img：原生已带内联 position:absolute + width/height:100% 与 object-cover，
+   **尺寸什么都不用改**，只加 hover 过渡。
+   ⚠ 别写 width/height/aspect-ratio：height:auto 会废掉 absolute 的 100% 填满，图片会按固有比例乱窜。
+   ⚠ 必须用 picture 收窄：容器内还有清晰度标识位图(data:image/png;base64)等小图，
+     写成「> :first-child img」会把它们一起拉成 16:9 满宽并套上圆角阴影(lc-983 实际发生过)。 */
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child picture img{
   transition:transform .34s cubic-bezier(.25,.1,.25,1) !important;
+}
+/* 底部渐变层原生 h-[76px] 配 146px 容器 ≈ 52%；容器缩到 101px 后不动它就会盖住 3/4 缩略图
+   (底部一片死黑)。等比缩到 52px 保持原生观感。清晰度标识在 bottom-2.5，不受影响。 */
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child [class*="bg-gradient-to-t"]{
+  height:52px !important;
 }
 /* 行间发丝分隔（相邻卡）+ 悬停微底色 & 缩略图微放大（克制，无 lift/无大阴影） */
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="details"]{
   border-top:1px solid var(--fnos-hairline-soft) !important;
 }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
-body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child img{ transform:scale(1.035) !important; }
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child picture img{ transform:scale(1.035) !important; }
 
 /* ===== E. 演职人员 / 人物项：去 lift，仅透明度反馈（右列原生横滑，保持不动）===== */
 body.fnos-beautify a[href*="/v/person/"]{
@@ -268,19 +287,23 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 }
 .fnos-beautify-card__refresh:hover{ color:var(--fnos-accent) !important; }
 
-/* ===== J. 清晰度标识：原生角标(贴缩略图, 竖排后错位) → 集标题后小胶囊（epResolution.ts 注入）=====
-   隐藏走 class 而非删节点: 原生角标只被加标记, DOM 位置/属性/文本全不动, teardown 摘掉即复原。 */
+/* ===== J. 清晰度标识：原生角标(贴缩略图右下) → 集标题后的小图（epResolution.ts 注入）=====
+   ⚠ 实证纠正(lc-986, 用户提供的真实 DOM): 原生清晰度标识**不是文本**，是一张 base64 位图——
+     缩略图容器 > div.absolute.bottom-0(底部渐变层) > div.absolute.bottom-2.5.right-2.5.flex.gap-1.5
+       > div.flex.h-[22px].items-center > img[src^="data:image/png;base64"][alt=""]
+     所以 lc-984 的「文本叶子 + 清晰度词表」永远失配，那版胶囊一次都没注入成功。
+   现在改为克隆这张位图：图里画的是什么(1080/4K/HDR…)读不成文字，克隆是唯一保真做法。
+   隐藏走 class 而非删节点: 原生角标只被加标记, DOM 位置/属性/src 全不动, teardown 摘掉即复原。 */
 body.fnos-beautify .fnos-res-native-hidden{ display:none !important; }
-/* 胶囊：inline span 追加在标题 p 内 → 天然紧跟标题文字。克制版(发丝细边+弱化灰字)，不用实心色块。 */
+/* 标题后的标识：裸图，不套框不加底色。位图本身已是不透明色块(palette PNG 无 alpha)，
+   再包一层 pill 就成了「框里套框」。 */
 body.fnos-beautify .fnos-ep-res{
-  display:inline-block !important; margin-left:7px !important; padding:0 6px !important;
-  font-size:10.5px !important; font-weight:600 !important; line-height:16px !important;
-  letter-spacing:.02em !important; white-space:nowrap !important; vertical-align:1.5px !important;
-  color:var(--fnos-muted) !important;
-  border:1px solid var(--fnos-hairline) !important; border-radius:999px !important;
-  background:transparent !important;
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif !important;
-  -webkit-font-smoothing:antialiased !important;
+  display:inline-block !important; margin-left:7px !important;
+  vertical-align:middle !important; line-height:0 !important; white-space:nowrap !important;
+}
+body.fnos-beautify .fnos-ep-res-img{
+  display:block !important; height:15px !important; width:auto !important;  /* 保持位图固有比例 */
+  border-radius:3px !important;
 }
 /* 胶囊 append 在标题 p 末尾: 若该 p 带 truncate(nowrap+ellipsis) 或 line-clamp, 长集标题会把胶囊裁没。
    用 :has 精准只解禁「真收到了胶囊的那个 p」, 不影响其它段落。 */
