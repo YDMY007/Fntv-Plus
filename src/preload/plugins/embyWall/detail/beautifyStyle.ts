@@ -29,6 +29,7 @@ body.fnos-beautify{
   --fnos-hairline:rgba(0,0,0,.10);
   --fnos-hairline-soft:rgba(0,0,0,.055);
   --fnos-row-hover:rgba(0,0,0,.035);
+  --fnos-panel-fill:rgba(0,0,0,.038);
   --fnos-muted:#86868b;
   --fnos-backdrop-img-opacity:.30;
   --fnos-scrim-top:rgba(250,250,252,.62);
@@ -40,6 +41,7 @@ html.dark body.fnos-beautify{
   --fnos-hairline:rgba(255,255,255,.14);
   --fnos-hairline-soft:rgba(255,255,255,.075);
   --fnos-row-hover:rgba(255,255,255,.06);
+  --fnos-panel-fill:rgba(255,255,255,.07);
   --fnos-muted:#98989d;
   --fnos-backdrop-img-opacity:.42;
   --fnos-scrim-top:rgba(10,10,12,.32);
@@ -65,10 +67,13 @@ body.fnos-beautify ${COL} > ${HERO}{ grid-area:1 / 1 / 2 / 3 !important; }
 body.fnos-beautify ${COL} > :nth-child(2){ grid-area:2 / 1 / 3 / 2 !important; min-width:0 !important; }
 /* 演职人员 + 注入的剧集信息卡：右列 row2（占 4 成，顶部对齐） */
 body.fnos-beautify ${COL} > :nth-child(3){ grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important; }
-/* 右列清框：原生容器若带 border/底色/阴影，会与卡内分隔线拼出「半闭合框」→ 一律抹掉，
-   右栏只保留排版（标题/评分/label+value/链接），不出现任何盒子。 */
+/* 右列清框：原生容器若带 border/底色/阴影，会与卡内分隔线拼出「半闭合框」→ 一律抹掉。
+   唯一豁免 .fnos-beautify-card（我们注入的 TMDB 信息卡）：用户要求右栏「只要一个大的容器包起来」，
+   那个容器就是它。若不豁免，这条规则的特异性(COL 的 :has 链 + body.fnos-beautify = 0,5,1)会压过
+   I 段卡本身的 (0,1,0)，玻璃模式关闭时卡会被打成全透明 → 一个容器都不剩。
+   同理，豁免走 :not() 让选择器根本不匹配，而不是再写一条更高特异性的规则去对抗。 */
 body.fnos-beautify ${COL} > :nth-child(3),
-body.fnos-beautify ${COL} > :nth-child(3) > *{
+body.fnos-beautify ${COL} > :nth-child(3) > *:not(.fnos-beautify-card){
   background:transparent !important;
   border:none !important; box-shadow:none !important;
 }
@@ -230,62 +235,82 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
    分段：评分块(视觉锚) → meta 串(无 label) → 事实区(窄 label) → 外链 → 来源行。
    去重：标题/简介/主演不再渲染 —— hero 已有标题与带「更多」的简介，下方原生「演职人员」区已有头像+姓名横滑；
      原名降到事实区末行(日文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏)。
-   分组只靠留白，组内零横线(用户明确要求「内部文字不要加线框」)。 */
+   分组只靠留白，组内零横线(用户明确要求「内部文字不要加线框」)。
+
+   ⚠ 命名硬约束(lc-987, 用户明确要求「只要一个大的容器包起来，内部的各小标题文字都不要有容器包裹」)：
+     glassUI.ts 的组件级玻璃规则写作 [class*="card"] —— 那是**子串**匹配。内部块原先叫
+     fnos-beautify-card__*，全都含 card 子串 → 评分块/meta/事实区/外链/来源行乃至每一个 __row
+     都被各自套上 background + backdrop-filter:blur(14px) + border + box-shadow，一层层小玻璃框
+     叠在大框里(还顺带违背本文件「全表零 backdrop-filter」的低 GPU 约束)。
+     修法选「改名让选择器根本不匹配」而不是写更高特异性 !important 去对抗 ——
+     依据是 glassUI.ts 自己的教训注释「事后排除规则 !important 对抗不稳定」。
+     ∴ 内部一律用 fnos-showinfo__ 前缀(不含 glassUI 任何子串 token)；
+       外层**刻意保留** fnos-beautify-card 这个名字，让它成为全站玻璃规则唯一命中的元素 = 那个大容器。
+     往内部块加新 class 时，必须先确认名字里不含 card/Card/panel/Panel/search/Search/navbar/topbar/
+     appbar/toolbar/playbar/control-bar/z-10/z-20/header-bar/nav-bar/page-header/list-head 任一子串。 */
+/* 大容器本体。玻璃模式开：glassUI 的规则特异性更高，会把下面的 background/border/box-shadow
+   换成磨砂面板(它从不设 border-radius/padding，故圆角与内边距始终由本规则决定)。
+   玻璃模式关：glassUI 整组规则要求 html[data-fntv-glass]，不匹配 → 只有本规则生效，
+   靠半透明填充 + 发丝边框给出同等的「浮起面板」观感，两种模式下都恰好一个大容器。
+   前提：A 段的右列清框规则已用 :not(.fnos-beautify-card) 豁免本卡，否则它 (0,5,1) 会压掉这里 (0,1,0)。 */
 .fnos-beautify-card{
-  background:transparent !important;
-  border:none !important; box-shadow:none !important; border-radius:0 !important;
-  padding:0 !important; margin:0 0 10px !important;
+  background:var(--fnos-panel-fill) !important;
+  border:1px solid var(--fnos-hairline-soft) !important;
+  box-shadow:none !important;
+  border-radius:14px !important;
+  padding:16px 18px !important; margin:0 0 10px !important;
+  box-sizing:border-box !important;
   color:var(--semi-color-text-0,#1d1d1f) !important;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif !important;
   font-size:13px !important; line-height:1.6 !important;
   -webkit-font-smoothing:antialiased !important;
 }
 /* 组间距由「相邻块」一条规则统一承担：任何一段因数据缺失而不渲染时，间距都不会塌陷。 */
-.fnos-beautify-card__block + .fnos-beautify-card__block{ margin-top:18px !important; }
+.fnos-showinfo__block + .fnos-showinfo__block{ margin-top:18px !important; }
 /* ① 评分块：34px 大数字是右栏唯一的视觉锚（旧版 17px 与 13px 正文行几乎无层级差 → 评分被埋没）。 */
-.fnos-beautify-card__rating{ display:flex !important; align-items:baseline !important; }
-.fnos-beautify-card__num{
+.fnos-showinfo__rating{ display:flex !important; align-items:baseline !important; }
+.fnos-showinfo__num{
   font-size:34px !important; font-weight:700 !important; line-height:1 !important;
   letter-spacing:-.03em !important; font-variant-numeric:tabular-nums !important;
   color:var(--semi-color-text-0,#1d1d1f) !important;
 }
-.fnos-beautify-card__outof{ margin-left:4px !important; font-size:12px !important; font-weight:500 !important; color:var(--fnos-muted) !important; }
-.fnos-beautify-card__rsub{ display:flex !important; align-items:center !important; gap:9px !important; margin-top:7px !important; }
+.fnos-showinfo__outof{ margin-left:4px !important; font-size:12px !important; font-weight:500 !important; color:var(--fnos-muted) !important; }
+.fnos-showinfo__rsub{ display:flex !important; align-items:center !important; gap:9px !important; margin-top:7px !important; }
 /* 半星：底层灰星 + 顶层金星按 inline width 裁切。纯 CSS，无 SVG、无环形进度(那会引入新的「框」)。 */
-.fnos-beautify-card__stars{ position:relative !important; display:inline-block !important; font-size:12px !important; line-height:1 !important; letter-spacing:1.5px !important; }
-.fnos-beautify-card__stars-bg{ color:var(--fnos-hairline) !important; }
-.fnos-beautify-card__stars-fg{ position:absolute !important; left:0 !important; top:0 !important; overflow:hidden !important; white-space:nowrap !important; color:#ff9f0a !important; }
-.fnos-beautify-card__votes{ font-size:11.5px !important; color:var(--fnos-muted) !important; }
+.fnos-showinfo__stars{ position:relative !important; display:inline-block !important; font-size:12px !important; line-height:1 !important; letter-spacing:1.5px !important; }
+.fnos-showinfo__stars-bg{ color:var(--fnos-hairline) !important; }
+.fnos-showinfo__stars-fg{ position:absolute !important; left:0 !important; top:0 !important; overflow:hidden !important; white-space:nowrap !important; color:#ff9f0a !important; }
+.fnos-showinfo__votes{ font-size:11.5px !important; color:var(--fnos-muted) !important; }
 /* ② meta 串：无 label 的两行灰字，取代旧版「状态/规模/类型/单集」四行 label-value。 */
-.fnos-beautify-card__meta{ font-size:12.5px !important; line-height:1.7 !important; color:var(--semi-color-text-1,#3c3c43) !important; }
-.fnos-beautify-card__meta-sub{ font-size:12px !important; color:var(--fnos-muted) !important; }
+.fnos-showinfo__meta{ font-size:12.5px !important; line-height:1.7 !important; color:var(--semi-color-text-1,#3c3c43) !important; }
+.fnos-showinfo__meta-sub{ font-size:12px !important; color:var(--fnos-muted) !important; }
 /* ③ 事实区：label 列 3.4em(旧版 62px 太宽，把 value 推得过远，四个中文字宽刚好)保证 value 左缘对齐；
      组内靠 4px padding 分行，无横线。 */
-.fnos-beautify-card__row{ display:flex !important; gap:12px !important; align-items:baseline !important; padding:4px 0 !important; }
-.fnos-beautify-card__k{ flex:0 0 3.4em !important; font-size:12px !important; color:var(--fnos-muted) !important; }
-.fnos-beautify-card__v{
+.fnos-showinfo__row{ display:flex !important; gap:12px !important; align-items:baseline !important; padding:4px 0 !important; }
+.fnos-showinfo__k{ flex:0 0 3.4em !important; font-size:12px !important; color:var(--fnos-muted) !important; }
+.fnos-showinfo__v{
   flex:1 1 auto !important; min-width:0 !important; font-size:12.5px !important; line-height:1.6 !important;
   color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important;
 }
 /* ④ 外链：组间距统一由 __block 相邻规则给，这里不再自带 margin-top。 */
-.fnos-beautify-card__links{ display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
-.fnos-beautify-card__links a{ color:var(--fnos-accent) !important; text-decoration:none !important; font-weight:500 !important; }
-.fnos-beautify-card__links a:hover{ text-decoration:underline !important; }
-.fnos-beautify-card__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
-.fnos-beautify-card__loading,.fnos-beautify-card__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
+.fnos-showinfo__links{ display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
+.fnos-showinfo__links a{ color:var(--fnos-accent) !important; text-decoration:none !important; font-weight:500 !important; }
+.fnos-showinfo__links a:hover{ text-decoration:underline !important; }
+.fnos-showinfo__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
+.fnos-showinfo__loading,.fnos-showinfo__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
 /* ⑤ 来源行：全卡最弱一级(10.5px)。刷新默认灰、hover 才染 accent ——
      它是开发者视角的操作，不该和 TMDB/IMDb 外链抢同一级视觉权重。 */
-.fnos-beautify-card__foot{
+.fnos-showinfo__foot{
   margin-top:16px !important;
   display:flex !important; justify-content:space-between !important; align-items:center !important; gap:10px !important;
   font-size:10.5px !important; color:var(--fnos-muted) !important;
 }
-.fnos-beautify-card__refresh{
+.fnos-showinfo__refresh{
   background:transparent !important; border:none !important; padding:0 2px !important; cursor:pointer !important;
   color:var(--fnos-muted) !important; font-size:12px !important; line-height:1 !important; font-family:inherit !important;
   transition:color .18s ease !important;
 }
-.fnos-beautify-card__refresh:hover{ color:var(--fnos-accent) !important; }
+.fnos-showinfo__refresh:hover{ color:var(--fnos-accent) !important; }
 
 /* ===== J. 清晰度标识：原生角标(贴缩略图右下) → 集标题后的小图（epResolution.ts 注入）=====
    ⚠ 实证纠正(lc-986, 用户提供的真实 DOM): 原生清晰度标识**不是文本**，是一张 base64 位图——

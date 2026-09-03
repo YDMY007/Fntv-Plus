@@ -175,7 +175,7 @@ function collectNativeImdb(): { href: string; text: string } | null {
   } catch (_) { _nativeImdb = null; return null; }
 }
 
-// ── HTML 构建（简化轻量版：只留关键字段，用 .fnos-beautify-card__* 类）──
+// ── HTML 构建（简化轻量版：只留关键字段，用 .fnos-showinfo__* 类）──
 
 function esc(s: any): string {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -198,9 +198,9 @@ function runtime(min: number): string {
  *  TMDB 是 0~10 分制 → 金星宽度 = rating/10。 */
 function starsHtml(rating: number): string {
   const pct = Math.max(0, Math.min(100, (rating / 10) * 100));
-  return '<span class="fnos-beautify-card__stars">'
-    + '<span class="fnos-beautify-card__stars-bg">★★★★★</span>'
-    + `<span class="fnos-beautify-card__stars-fg" style="width:${pct.toFixed(1)}%">★★★★★</span>`
+  return '<span class="fnos-showinfo__stars">'
+    + '<span class="fnos-showinfo__stars-bg">★★★★★</span>'
+    + `<span class="fnos-showinfo__stars-fg" style="width:${pct.toFixed(1)}%">★★★★★</span>`
     + '</span>';
 }
 
@@ -225,11 +225,11 @@ function buildCardHtml(d: any): string {
   if (d.rating) {
     const r = Number(d.rating);
     const votes = d.votes
-      ? `<span class="fnos-beautify-card__votes">${esc(Number(d.votes).toLocaleString('zh-CN'))} 人评分</span>` : '';
+      ? `<span class="fnos-showinfo__votes">${esc(Number(d.votes).toLocaleString('zh-CN'))} 人评分</span>` : '';
     blocks.push(
-      '<div class="fnos-beautify-card__block fnos-beautify-card__score">'
-      + `<div class="fnos-beautify-card__rating"><span class="fnos-beautify-card__num">${r.toFixed(1)}</span><span class="fnos-beautify-card__outof">⁄10</span></div>`
-      + `<div class="fnos-beautify-card__rsub">${starsHtml(r)}${votes}</div>`
+      '<div class="fnos-showinfo__block fnos-showinfo__score">'
+      + `<div class="fnos-showinfo__rating"><span class="fnos-showinfo__num">${r.toFixed(1)}</span><span class="fnos-showinfo__outof">⁄10</span></div>`
+      + `<div class="fnos-showinfo__rsub">${starsHtml(r)}${votes}</div>`
       + '</div>'
     );
   }
@@ -249,9 +249,9 @@ function buildCardHtml(d: any): string {
   if (d.runtimeAvg) metaSub.push('单集 ' + runtime(d.runtimeAvg));
   if (metaMain.length || metaSub.length) {
     blocks.push(
-      '<div class="fnos-beautify-card__block fnos-beautify-card__meta">'
+      '<div class="fnos-showinfo__block fnos-showinfo__meta">'
       + (metaMain.length ? `<div>${esc(metaMain.join(' · '))}</div>` : '')
-      + (metaSub.length ? `<div class="fnos-beautify-card__meta-sub">${esc(metaSub.join(' · '))}</div>` : '')
+      + (metaSub.length ? `<div class="fnos-showinfo__meta-sub">${esc(metaSub.join(' · '))}</div>` : '')
       + '</div>'
     );
   }
@@ -259,7 +259,7 @@ function buildCardHtml(d: any): string {
   // ③ 事实区：只留 hero 与 meta 串都没承载的字段。完整日期/平台/主创/语言/分级/原名。
   const rows: string[] = [];
   const row = (k: string, v: string): void => {
-    if (v) rows.push(`<div class="fnos-beautify-card__row"><span class="fnos-beautify-card__k">${esc(k)}</span><span class="fnos-beautify-card__v">${v}</span></div>`);
+    if (v) rows.push(`<div class="fnos-showinfo__row"><span class="fnos-showinfo__k">${esc(k)}</span><span class="fnos-showinfo__v">${v}</span></div>`);
   };
   const dates: string[] = [];
   if (d.airDate) dates.push(String(d.airDate));
@@ -271,7 +271,7 @@ function buildCardHtml(d: any): string {
   if (d.certification) row('分级', esc(d.certification));
   // 原名降到事实区末行：它很长（日文原名常占两三行），放顶部会把评分块和 meta 串的节奏冲散。
   if (d.originalTitle && d.originalTitle !== d.title) row('原名', esc(d.originalTitle));
-  if (rows.length) blocks.push(`<div class="fnos-beautify-card__block fnos-beautify-card__facts">${rows.join('')}</div>`);
+  if (rows.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__facts">${rows.join('')}</div>`);
 
   // ④ 外链
   const links: string[] = [];
@@ -284,7 +284,7 @@ function buildCardHtml(d: any): string {
   if (imdb) link(imdb, 'IMDb');
   if (d.trailerKey) link('https://www.youtube.com/watch?v=' + d.trailerKey, '预告片');
   if (d.homepage) link(d.homepage, '官网');
-  if (links.length) blocks.push(`<div class="fnos-beautify-card__block fnos-beautify-card__links">${links.join('<span>·</span>')}</div>`);
+  if (links.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__links">${links.join('<span>·</span>')}</div>`);
 
   return blocks.join('');
 }
@@ -317,16 +317,16 @@ function _renderCard(): void {
   if (!card) return;
   let body = '';
   if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData);
-  else if (_tmdbInfoLoading) body = '<div class="fnos-beautify-card__loading">正在从 TMDB 获取剧集信息…</div>';
-  else if (_tmdbInfoError) body = `<div class="fnos-beautify-card__error">${esc(_tmdbInfoError)}</div>`;
+  else if (_tmdbInfoLoading) body = '<div class="fnos-showinfo__loading">正在从 TMDB 获取剧集信息…</div>';
+  else if (_tmdbInfoError) body = `<div class="fnos-showinfo__error">${esc(_tmdbInfoError)}</div>`;
   const when = _tmdbInfoFetchedAt ? shortTime(_tmdbInfoFetchedAt) : '';
-  const foot = `<div class="fnos-beautify-card__foot"><span>数据来源 TMDB${when ? ' · ' + esc(when) : ''}</span>`
-    + `<button type="button" class="fnos-beautify-card__refresh" title="从 TMDB 重新获取本剧信息">${_tmdbInfoLoading ? '获取中…' : '⟳'}</button></div>`;
+  const foot = `<div class="fnos-showinfo__foot"><span>数据来源 TMDB${when ? ' · ' + esc(when) : ''}</span>`
+    + `<button type="button" class="fnos-showinfo__refresh" title="从 TMDB 重新获取本剧信息">${_tmdbInfoLoading ? '获取中…' : '⟳'}</button></div>`;
   const next = body + foot;
   if (card.innerHTML === next) return; // 内容未变 → 不触碰 DOM
   card.innerHTML = next;
 
-  const btn = card.querySelector('.fnos-beautify-card__refresh') as HTMLElement | null;
+  const btn = card.querySelector('.fnos-showinfo__refresh') as HTMLElement | null;
   if (btn) btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); if (!_tmdbInfoLoading) _fetch(true); });
 }
 
