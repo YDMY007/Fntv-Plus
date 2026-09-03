@@ -438,6 +438,11 @@ function handle(): void {
    *  - 透明度滑块(0~100): 值越大越透(桌面透出越多). 反向映射到 body 背景 alpha(0.95→0.05)
    *  - 模糊滑块(0~100px): 调节 backdrop-filter 模糊强度
    *  - 写入 localStorage, 重启后仍生效 */
+  // [lc-980] 「剧集详情页美化」外观开关引用: 在 buildAppearanceControls 内创建,
+  //   设置回填(seg('switches'))在持久化设置异步 resolve 后据此同步勾选态并重绘。
+  let _beautifyToggle: HTMLInputElement | null = null;
+  let _beautifyPaint: (() => void) | null = null;
+
   function buildAppearanceControls(): HTMLElement {
     // [lc-119] 首次登录(无 localStorage)默认: 透明度滑块=30%(对应 alpha 0.68), 背景模糊滑块=30px
     const storedAlpha = parseFloat(localStorage.getItem('fnos-glass-alpha') || '0.68');
@@ -555,7 +560,54 @@ function handle(): void {
     });
     wrap.appendChild(csWrap);
 
-    // [lc-979] 「剧集详情页美化」外观开关已移除: 详情页美化功能整体删除, 待重写。
+    // [lc-980] 「剧集详情页美化」开关(外观页, 复刻 lc-973 位置): 开=套用美化(沉浸底图/两栏/磨砂卡), 关=恢复 fnOS 原生详情页。
+    //   语义: detailBoxless=true 表示关闭美化/走原生, 故 checked = !detailBoxless。
+    const beautifyRow = document.createElement('div');
+    beautifyRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-top:18px;gap:12px;';
+    const beautifyTextWrap = document.createElement('div');
+    beautifyTextWrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;min-width:0;';
+    const beautifyTitle = document.createElement('span');
+    beautifyTitle.style.cssText = 'font-weight:600;letter-spacing:.5px;';
+    beautifyTitle.textContent = '剧集详情页美化';
+    const beautifyHint = document.createElement('span');
+    beautifyHint.style.cssText = 'font-size:11px;opacity:.7;line-height:1.4;';
+    beautifyHint.textContent = '沉浸底图 / 两栏布局 / 磨砂卡片；关闭即恢复飞牛原生详情页。';
+    beautifyTextWrap.appendChild(beautifyTitle);
+    beautifyTextWrap.appendChild(beautifyHint);
+    const beautifyLabel = document.createElement('label');
+    beautifyLabel.style.cssText = 'position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;flex-shrink:0;';
+    const beautifyInput = document.createElement('input');
+    beautifyInput.id = 'fnos-sw-beautify';
+    beautifyInput.type = 'checkbox';
+    beautifyInput.style.cssText = 'position:absolute;opacity:0;width:0;height:0;';
+    const beautifyTrack = document.createElement('span');
+    beautifyTrack.style.cssText = 'position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;';
+    const beautifyKnob = document.createElement('span');
+    beautifyKnob.style.cssText = 'position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);';
+    beautifyLabel.appendChild(beautifyInput);
+    beautifyLabel.appendChild(beautifyTrack);
+    beautifyLabel.appendChild(beautifyKnob);
+    beautifyRow.appendChild(beautifyTextWrap);
+    beautifyRow.appendChild(beautifyLabel);
+    wrap.appendChild(beautifyRow);
+
+    const paintBeautify = (): void => {
+      beautifyTrack.style.background = beautifyInput.checked ? 'var(--fnos-ui-accent)' : 'rgba(140,140,160,.45)';
+      beautifyKnob.style.left = beautifyInput.checked ? '21.5px' : '2.5px';
+    };
+    beautifyInput.checked = !S.detailBoxless;
+    paintBeautify();
+    beautifyInput.addEventListener('change', () => {
+      S.detailBoxless = !beautifyInput.checked;
+      log('[开关保存] 剧集详情页美化=' + beautifyInput.checked + ' (detailBoxless=' + S.detailBoxless + ')');
+      ipcRenderer.invoke('settings:set-detail-boxless', S.detailBoxless).catch((e) => log('set-detail-boxless failed', e));
+      paintBeautify();
+      // 立即应用: 关→teardown 恢复原生; 开→若正在详情页立即套用
+      if (S.detailBoxless) teardownDetailBeautify(); else applyDetailBeautify();
+    });
+    // 暴露给设置回填(持久化设置异步 resolve 后同步勾选态并重绘)
+    _beautifyToggle = beautifyInput;
+    _beautifyPaint = paintBeautify;
 
     return wrap;
   }
@@ -1076,17 +1128,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       ipcRenderer.invoke('settings:set-wheel-hscroll', swWheel.checked).catch((e) => log('set-wheel-hscroll failed', e));
       // 立即应用：开启→重新绑定劫持；关闭→解绑并恢复飞牛原生横滑箭头
       wheelToScroll();
-    });
-    // [lc-980] 剧集详情页美化开关：开=套用美化(沉浸底图/两栏/磨砂卡)；关=恢复 fnOS 原生外观。
-    //   语义反转：detailBoxless=true 表示「关闭背景框/走原生」，故 checked = !detailBoxless。
-    const swBeautify = addToggle('剧集详情页美化');
-    swBeautify.checked = !S.detailBoxless;
-    swBeautify.addEventListener('change', () => {
-      S.detailBoxless = !swBeautify.checked;
-      log('[开关保存] swBeautify=' + swBeautify.checked + ' → detailBoxless=' + S.detailBoxless);
-      ipcRenderer.invoke('settings:set-detail-boxless', S.detailBoxless).catch((e) => log('set-detail-boxless failed', e));
-      // 立即应用：关→teardown 恢复原生；开→若正在详情页立即套用
-      if (S.detailBoxless) teardownDetailBeautify(); else applyDetailBeautify();
     });
     // [v400] 主题模式: 浅色 / 深色 / 跟随系统 三选一(同步飞牛原生主题 + 持久化)
     const themeRow = document.createElement('div');
@@ -3802,9 +3843,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         swProxy.checked = dl;
         swHide.checked = !!s.hideOriginalPlayButton;
         swNas.checked = !!s.nasProxyEnabled;
-        // [lc-980] 美化开关回填: swBeautify.checked = !detailBoxless (detailBoxless=true 表示关闭美化/走原生外观)
+        // [lc-980] 美化开关回填(外观页 #fnos-sw-beautify): checked = !detailBoxless (detailBoxless=true=关闭美化/走原生)
         S.detailBoxless = !!s.detailBoxless;
-        swBeautify.checked = !S.detailBoxless;
+        if (_beautifyToggle) { _beautifyToggle.checked = !S.detailBoxless; if (_beautifyPaint) _beautifyPaint(); }
         // [lc-418] 补回滚轮开关回填：此前只在构建期按 S.wheelHScrollEnabled 赋值,
         // 若面板被 SPA 重建且早于启动 seed 完成, 会显示默认态导致"关掉再开变回未勾选"。
         swWheel.checked = !!s.wheelHScroll;
@@ -3813,7 +3854,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         S.carouselLogoEnabled = !!s.carouselLogoEnabled;
         // [lc-418] 诊断日志：面板每次打开记录开关回填值, 便于核对"配置文件 vs 面板显示"是否一致
         log('[开关回填] swProxy=' + swProxy.checked + ' swHide=' + swHide.checked + ' swNas=' + swNas.checked
-          + ' swBeautify=' + swBeautify.checked + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
+          + ' 美化=' + (!!_beautifyToggle && _beautifyToggle.checked) + ' swWheel=' + swWheel.checked + ' swLogo=' + swLogo.checked);
       });
       seg('players', () => {
         mpvPath.textContent = s.mpvPath || '应用内置（已随安装包分发，无需本机安装）';

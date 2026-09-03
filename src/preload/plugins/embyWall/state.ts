@@ -25,9 +25,9 @@ export const S: {
   logEnabled: boolean;
 
   // ── 功能开关（用户可在设置面板切换，运行时缓存）────────────────────────────
-  /** 详情页「关闭美化」（设置面板「剧集详情页美化」开关的持久化反值）：
+  /** 详情页「关闭美化」（设置面板「外观」页「剧集详情页美化」开关 #fnos-sw-beautify 的持久化反值）：
    *  true=关闭美化, 恢复 fnOS 原生外观；false=套用美化(沉浸底图/两栏/磨砂卡, 默认)。
-   *  写：embyWall.ts(swBeautify 开关)、modals/patch.ts(启动 seed)；读：detail/immersive.ts */
+   *  写：embyWall.ts(buildAppearanceControls 外观开关)、modals/patch.ts(启动 seed)；读：detail/immersive.ts */
   detailBoxless: boolean;
   /** 鼠标滚轮横向滚动：true=开启(默认)；false=恢复飞牛原生上下滚。
    *  写：settings/*；读：carousel/index.ts(wheelToScroll) */
