@@ -9,13 +9,19 @@
 //   3. 语义 token 明暗两套（--fnos-*）：accent / hairline / row-hover / scrim 一处切换，
 //      文本色沿用 Semi 主题变量 → 浅色=通透白磨砂(Apple Light)，深色=沉浸暗背景(Apple TV)。
 //   4. 确定性对比度：backdrop scrim 随主题自适应，保证文本永远落在可读背景上。
-//      lc-990 起 hero 上部两层遮罩改为「封面取色」（heroTint.ts 一次性 canvas 取主色，非常驻采样），
+//      lc-990 起 hero 上部遮罩改为「封面取色」（heroTint.ts 一次性 canvas 取主色，非常驻采样），
 //      lc-992 起窗口标题栏(32px 安全区)也跟随同一支 tint（M 段）。对比度仍不靠运行时判定，
 //      而由两个标定常量锁死：暗化亮度上限 L<=0.20 + 顶栏/标题栏图标区 tint alpha 顶值 1。
 //      活体实测（/v/tv/season/<id>）：三个图标 10.83~11.00、右侧按钮组 9.72、标题 8.92；
 //      标题栏白图标 11.06~11.32（12 种环境一致），且 y=31/y=32 两行逐像素恒等 → 接缝 1.0000。
+//      lc-993 起遮罩换色覆盖**两种形态**：Season/Movie 页的 .gradient-for-full（一个元素两层渐变、
+//      铺满整块 hero）与 Series 一级页的 .gradient（一层 0deg、贴底 45% 高），色标与 alpha 均照抄原生。
 //   5. 悬停用 CSS :hover（微底色 / 缩略图微放大），不用 JS 逐卡绑定，也不用 lift+大阴影。
-//   6. 两栏门控 `:has([data-id="details"])`：仅 season 页(有选集)走两栏；movie/tv 自动降级单列。
+//   6. 两栏门控三个条件同时成立才启用：hero 是**直接**子节点 + 内含选集卡 [data-id="details"]
+//      + 至少有第 3 个直接子节点。∴ 只有 Season 二级页走两栏（实机 4 个子节点）；
+//      Series 一级页（hero 外多一层 wrapper、内容列只有 2 个子节点）与 Movie 页自动降级单列。
+//      lc-993 扩容 HERO 后，Series 一级页开始吃到 B/C/E/F/K/L/M 段（背景透明化、导航栏沉浸、
+//      顶栏玻璃条取色、标题栏取色），A/D/I/J 段（两栏、选集竖排、TMDB 卡、清晰度标识）仍 no-op。
 //   7. 低 GPU：全表 backdrop-filter 只有一处 —— L 段顶栏那条 820x80 的 ::before（lc-990 破例）。
 //      M 段的标题栏底色**刻意不加**磨砂：它是 alpha 1 的纯 tint，模糊贡献恒为零，加了只是白烧 GPU。
 //      其余磨砂观感仍靠半透明 scrim + 一次性模糊底图，不做实时滤镜；该处也不随滚动重算。
@@ -23,11 +29,34 @@
 
 const STYLE_ID = 'fnos-beautify-css';
 
-/** hero 精准选择器（与 glass.ts DETAIL_HERO_SEL 一致）：`.semi-always-dark` 全文档 5 个，
- *  只有 hero 带 h-[470px]；用属性子串避开 Tailwind 任意值转义。 */
-const HERO = '.semi-always-dark[class*="h-[470px]"]';
-/** 内容列（hero 的直接父列 .mb-[46px].flex.flex-col.gap-3），且含选集卡才启用两栏。 */
-const COL = `:has(> ${HERO}):has([data-id="details"])`;
+/** hero 精准选择器。**必须与 glass.ts 的 DETAIL_HERO_SEL 逐字一致**（两处各存一份是刻意的：
+ *  这边要参与 CSS 字符串拼接、那边要参与 querySelector，共享常量会把纯 CSS 文件拽进运行时依赖）。
+ *  三种详情页 hero 的类名互不相同（lc-993 从 NAS 的 JS 产物逐个挖出原文，非推测）：
+ *  · Season 二级页（组件 de）与竖版海报的 Movie 一级页（组件 Q）：带 h-[470px]
+ *  · 横版海报的 Movie 一级页（同一个 Q）：高度是条件式 isLandscapePoster ? min-h-[390px] : h-[470px]
+ *    → 横版海报时**没有** h-[470px]
+ *  · Series 一级页 /v/tv|movie/<id>（组件 Zse）：trim-mc__details--key-version，
+ *    **一个 Tailwind 高度类都没有**，高度来自同名 CSS 类（560px；按视口分档 576/470/48vh/700）。
+ *    旧写法只认 h-[470px] → 该页从 lc-980 起结构性永不匹配，美化一次都没真正套用过。
+ *  两个书写约束：① 用属性子串 class*= 避开 Tailwind 任意值的 CSS 方括号转义；
+ *  ② 必须用 :is() 包裹，不能用裸逗号列表 —— 下面会把它拼进「body.fnos-beautify HERO img[...]」
+ *     这类规则，裸列表的逗号会把规则后半截劈成一条独立选择器（F 段就会中招）。
+ *     :is() 的特异性取参数中最高者 = (0,2,0)，与旧的单分支写法完全相同
+ *     → 与 A / F / I / L 段既有规则之间的层叠关系一字未变。 */
+const HERO = ':is('
+  + '.semi-always-dark[class*="h-[470px]"],'
+  + '.semi-always-dark[class*="min-h-[390px]"],'
+  + '.trim-mc__details--key-version'
+  + ')';
+/** 内容列（hero 的直接父列 .mb-[46px].flex.flex-col.gap-3），且含选集卡才启用两栏。
+ *  lc-993 追加第三个条件「至少要有第 3 个直接子节点」：HERO 扩容后，Series 一级页的
+ *  div.relative.w-full（Zse wrapper）也把 hero 当**直接子节点**，第一个条件对它成立了。
+ *  它只有 2 个子节点（hero + 进度条/按钮组），而 Season 页的内容列实机有 4 个
+ *  （hero + 选集 + 演职人员 + IMDB 外链块，A 段的 nth-child(4) 规则就是按后者写的）。
+ *  用子节点数量一刀切掉 wrapper，比去论证 wrapper 内会不会出现 [data-id="details"] 更硬。
+ *  代价：「只有 2 个子节点的 Season 页」会降级成单列 —— 那种页面右栏本来就是空的，
+ *  两栏只会白留 40% 宽的空白列，单列反而更好，是可接受的降级而非回归。 */
+const COL = `:has(> ${HERO}):has([data-id="details"]):has(> :nth-child(3))`;
 
 export const BEAUTIFY_CSS = `
 /* ===== 0. 语义设计 token（明/暗两套；文本色沿用 Semi 主题变量，无需在此重复）===== */
@@ -463,9 +492,10 @@ body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][cl
 
    ⚠ 选择器安全性：首页实测**不存在** div[class*="h-[80px]"][class*="top-0"]
      (首页顶栏是另一个元素 relative.z-[2].h-[80px].bg-[var(--semi-color-bg-1)]，实心白底、不带 top-0)，
-     .gradient-for-full 在首页数为 0、470px hero 也不存在 → 再叠加 body.fnos-beautify 门控 = 双重安全。
+     两个遮罩类 .gradient-for-full / .gradient 在首页数均为 0、三种 hero 也都不存在
+     → 再叠加 body.fnos-beautify 门控(首页无 hero，该 class 永不会加) = 双重安全。
    ⚠ 不新增任何 class 名(全走 ::before + 既有属性选择器) → 无需过 glassUI 的子串 token 清单。
-   ⚠ 刻意不碰 hero 本体底色 bg-[var(--semi-color-bg-1)] = rgb(25,25,26)：它被 820x470 的不透明剧照
+   ⚠ 刻意不碰 hero 本体底色 bg-[var(--semi-color-bg-1)] = rgb(25,25,26)：它被整块不透明剧照
      100% 覆盖，改了看不出区别；而 .semi-always-dark 全文档有 5 个(另 4 个是 36x36 小图标)，
      多一条 !important 去覆盖 Semi 全局 token 有误伤风险。tint 缺失时 fallback 恰好也是 25,25,26。
    ⚠ 这是本文件**唯一**一处 backdrop-filter(破例说明见文件头第 7 条)：面积仅 820x80、只在详情页、
@@ -499,6 +529,28 @@ body.fnos-beautify ${HERO} .gradient-for-full{
       rgba(var(--fnos-hero-tint, 25,25,26), .94) 22%,
       rgba(var(--fnos-hero-tint, 25,25,26), .76) 54%,
       rgba(var(--fnos-hero-tint, 25,25,26), .18) 100%) !important;
+}
+/* Series 一级页的遮罩是**另一个类名**：.gradient（组件 Zse 渲染的
+   div.gradient.absolute.bottom-0.left-0.h-[45%].w-full）。三点都与上面那条不同 ——
+   类名不同、只有一层渐变（不是两层）、几何是贴底 45% 高（不是 size-full 整块 hero）
+   → 必须单独一条规则，上面那条对它零命中。
+   色标位置与 alpha 形状照抄飞牛原生 CSS 原文一字不改：
+     .gradient{background:linear-gradient(0deg, rgba(var(--semi-grey-1),1) 0%, 1 18%, .92 42%, .64 72%, 0 100%)}
+   只把 var(--semi-grey-1) 换成 tint。--semi-grey-1 在 hero 子树里恒解析为 25,25,26
+   （.semi-always-dark 强制暗色 token，浅色主题下也是，lc-990 活体实测已证）→ fallback 值一致。
+   标题落点已核算：标题块在 bottom-[30px]（logo h-84 + gap-30 + h2 text-60），
+   换算到这条 252px 高的渐变里，h2 处于 alpha .92~1 的区段；tint 的 HSL 亮度锁在 L<=0.20
+   → 白标题对比度 >=8.9，与 lc-990 对 Season 页标定的 8.92 同档。
+   ⚠ 类名选择器 .gradient 必须留在 ${HERO} 后代位置：它太通用，脱离 hero 作用域会误伤别处。
+   ⚠ 用 background-image 覆盖原生的 background 简写（!important 只压简写里的 image 分量），
+     与上面那条 .gradient-for-full 的写法一致，那条已活体实测生效。 */
+body.fnos-beautify ${HERO} .gradient{
+  background-image:linear-gradient(0deg,
+    rgba(var(--fnos-hero-tint, 25,25,26), 1) 0%,
+    rgba(var(--fnos-hero-tint, 25,25,26), 1) 18%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .92) 42%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .64) 72%,
+    rgba(var(--fnos-hero-tint, 25,25,26), 0) 100%) !important;
 }
 
 /* ===== M. 窗口标题栏(32px 安全区)跟随封面取色（lc-992）=====

@@ -99,10 +99,35 @@ function _readCache(href: string): { bg: string; poster: string } | null {
 
 // ── 瞬间加载层 ──────────────────────────────────────────────────────────────
 
-/** 进详情瞬间铺加载层：缓存海报(有则秒出) + 骨架 shimmer，盖住 fnOS 原生白屏。构建一次。 */
+/** 进详情瞬间铺加载层：缓存海报(有则秒出) + 骨架 shimmer，盖住 fnOS 原生白屏。构建一次。
+ *
+ *  [lc-993] 没有缓存**海报**就整体不铺层 —— 这是「一级详情页灰色骨架屏遮罩」的第二重成因。
+ *  两重成因（第一重在 embyWall.ts 的 hideStaleViews，已修）：
+ *   · 第一重：hideStaleViews 把本层的无 id 子节点(__bg / __scrim)当成残留视图 display:none，
+ *     海报背景被打掉，只剩灰 scrim + shimmer 骨架。真机日志 89 次隐藏里 82 次打的是自己人。
+ *   · 第二重(本处)：海报缓存只由 _apply() → cacheHeroImages() 写入，而一级详情页在 lc-993 之前
+ *     从来没有 _apply() 成功过(hero 选择器失配) → 缓存恒为 null → __bg 没有 backgroundImage
+ *     (blur(40px) 作用在空背景上等于全透明) → 层本体的 --semi-color-bg-0(浅色主题近白)
+ *     叠 rgba(0,0,0,.2→.6) 的 __scrim，合成出一张纯灰全屏罩 + 214x320 灰海报块 + 5 条 shimmer 线，
+ *     z-index 2147483000 盖满 2 秒。∴ 一级页**每次**都是灰的(Season 页第二次起有缓存才不灰)，
+ *     与用户只在一级页抱怨完全对上。
+ *
+ *  判据取 poster 而不是 bg，因为 Series 一级页(/v/tv|movie/<id> 且非 isVideo)的 hero
+ *  **结构上就没有海报**：组件 Zse 只渲染背景剧照 + .gradient 遮罩 + 底部 logo/标题，
+ *  海报组件 Xse(214x320)只在 Season 页与 Movie 页(组件 Q)出现。这种页 cacheHeroImages()
+ *  写进缓存的 poster 恒为空串 → 本层的版式(左 214x320 海报 + 右文本行，__lines 还带 padding-top:116px
+ *  去对齐海报顶)对它完全是错的形状，铺出来就是「一张海报形状的灰块压在根本没有海报的页面上」
+ *  = 用户报的那个东西，只是背后多了张模糊剧照。∴ 宁可让飞牛自己的原生骨架顶上
+ *  (该页是 trim-skeleton-main !h-screen，飞牛按这一页的版式设计的)。
+ *
+ *  对 Season 页与 Movie 一级页**零回归**：两者 hero 内都有 Xse 海报(实测 214x320，
+ *  正好落在下面的 offsetHeight 200~400 / offsetWidth<300 过滤区间) → 第二次访问起缓存里有 poster
+ *  → 照常秒出，版式也对得上。首次访问(无缓存)本来就没有艺术可秒出，不铺层只是把加载态
+ *  交还给原生骨架，不会出现「先灰罩再内容」的双段闪烁。 */
 export function showInstantLayer(href: string): void {
   if (document.getElementById(INSTANT_ID)) return; // 已在，不重复构建
   const cache = _readCache(href);
+  if (!cache || !cache.poster) return;             // [lc-993] 无海报可秒出 → 不铺灰罩
 
   const layer = document.createElement('div');
   layer.id = INSTANT_ID;
@@ -110,7 +135,7 @@ export function showInstantLayer(href: string): void {
 
   const bg = document.createElement('div');
   bg.className = 'fnos-instant-layer__bg';
-  if (cache && cache.bg) bg.style.backgroundImage = `url("${cache.bg}")`;
+  if (cache.bg) bg.style.backgroundImage = `url("${cache.bg}")`;
   layer.appendChild(bg);
 
   const scrim = document.createElement('div');
@@ -120,17 +145,12 @@ export function showInstantLayer(href: string): void {
   const body = document.createElement('div');
   body.className = 'fnos-instant-layer__body';
 
-  if (cache && cache.poster) {
-    const poster = document.createElement('img');
-    poster.className = 'fnos-instant-layer__poster';
-    poster.src = cache.poster;
-    poster.alt = '';
-    body.appendChild(poster);
-  } else {
-    const posterPh = document.createElement('div');
-    posterPh.className = 'fnos-instant-layer__poster fnos-instant-skel';
-    body.appendChild(posterPh);
-  }
+  // 走到这里 cache.poster 必非空(见上面的早退) → 恒有真海报，不再需要骨架占位块那条分支
+  const poster = document.createElement('img');
+  poster.className = 'fnos-instant-layer__poster';
+  poster.src = cache.poster;
+  poster.alt = '';
+  body.appendChild(poster);
 
   const lines = document.createElement('div');
   lines.className = 'fnos-instant-layer__lines';

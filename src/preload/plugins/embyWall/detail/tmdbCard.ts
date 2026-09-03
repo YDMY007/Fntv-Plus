@@ -11,7 +11,7 @@ import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
-import { DETAIL_HERO_SEL } from './glass';
+import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
 
 const CARD_ID = 'fnos-beautify-tmdb-card';
 
@@ -43,8 +43,19 @@ function _resetState(): void {
 
 // ── 纯解析函数（salvage；作用域收敛到精准 hero）──
 
+/** [lc-993] 取「当前活跃视图内」的 hero，而不是全文档第一个匹配的 hero。
+ *  fnOS 的视图栈(cache-outlet)切页后**不移除**旧视图，只在 --exclude(活跃)/--cache(隐藏)之间切换；
+ *  DETAIL_HERO_SEL 扩容到三种 hero 后，裸 document.querySelector 会按文档顺序先命中上一页残留的
+ *  hero(Series→Season 导航时旧 Series 视图就在前面) → 读到上一页的标题/年份/季号去查 TMDB → 卡内容张冠李戴。
+ *  findActiveDetailView() 是 immersive.ts 三闸里同一个判定(从后往前 + offsetParent!==null + 内含 hero)，
+ *  epResolution.ts 早已这么用。 */
+function _activeHero(): HTMLElement | null {
+  const view = findActiveDetailView();
+  return view ? view.querySelector<HTMLElement>(DETAIL_HERO_SEL) : null;
+}
+
 function detailHeaderScope(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(DETAIL_HERO_SEL) || document.querySelector<HTMLElement>('header');
+  return _activeHero() || document.querySelector<HTMLElement>('header');
 }
 
 function getSeasonPageGuid(): { guid: string; mediaType: 'tv' | 'movie' } | null {
@@ -480,12 +491,19 @@ async function _fillStills(card: HTMLElement, paths: string[]): Promise<void> {
 
 // ── 卡片节点定位/渲染/调度 ──
 
-/** 右栏容器：内容列(hero.parentElement)的第 3 个子节点(演职人员)；取不到则退回内容列本身。 */
+/** 右栏容器：内容列(hero.parentElement)的第 3 个子节点(演职人员)。
+ *  [lc-993] 取不到就返回 null，**不再回落到内容列本身** —— 那个回落是错位的根源：
+ *  一级详情页的内容列只有 2 个子节点(hero + 流选择/简介/演职人员)，回落后 _ensureCardEl()
+ *  的 insertBefore(card, host.firstChild) 会把卡插到 hero **上方**，一张为 40fr 窄栏设计的卡
+ *  铺满全宽压在封面顶上。返回 null 让卡整体不挂载，比挂错位置好。
+ *  对 Season 页也是自愈的：settle 时演职人员可能还没渲染(children[2] 暂缺) → 本轮不挂；
+ *  fetch resolve 后 _renderCard() 会再走一次 _ensureCardEl()，那时右栏已在 → 正常挂载。
+ *  旧代码在这条竞态下会把卡永久插到 hero 上方(卡一旦挂上，后续都走 getElementById 命中、不再重定位)。 */
 function _rightColumn(): HTMLElement | null {
-  const hero = document.querySelector<HTMLElement>(DETAIL_HERO_SEL);
+  const hero = _activeHero();
   if (!hero || !hero.parentElement) return null;
   const col = hero.parentElement;
-  return (col.children[2] as HTMLElement) || col;
+  return (col.children[2] as HTMLElement) || null;
 }
 
 function _ensureCardEl(): HTMLElement | null {
@@ -564,10 +582,24 @@ function _fetch(force = false): void {
   })();
 }
 
+/** [lc-993] 本卡只服务 Season 二级页；一级详情页(/v/tv|movie/<32hex>，路径里没有 season 段)整体跳过。
+ *  三条理由，每条都有一手依据：
+ *  ① 结构上没有右栏可挂 —— 一级页组件 fe 的内容列只有 2 个子节点(hero + 流选择/简介/演职人员)，
+ *     而 Season 页实机有 4 个；_rightColumn() 拿不到 children[2]。
+ *  ② 内容上冗余 —— fe 的 props 原生就带 overview 与 persons(JS 产物原文可查)，
+ *     而这张卡的存在理由是「Season 页飞牛原生一个字段都没有」(见 beautifyStyle.ts I 段的实机取证)。
+ *  ③ 版式不匹配 —— 卡的 34px 评分块 + 3.4em 窄 label 列是为 40fr 右栏设计的，铺满全宽会散架。
+ *  ⚠ 必须按**路由**判定，不能按 DOM(即不能直接调 _rightColumn())：settle 那一刻 Season 页的
+ *     演职人员也可能还没渲染出来，DOM 判定会把 Season 页一起误伤成永久不出卡。 */
+function _isSeasonRoute(): boolean {
+  return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(location.pathname);
+}
+
 /** settle 后调度：同一 href 只排一次；追加卡片占位并异步拉取。非阻塞。 */
 export function scheduleTmdbCard(_view: HTMLElement): void {
   const href = location.href;
   if (_scheduledFor === href) return;
+  if (!_isSeasonRoute()) return;   // [lc-993] 一级页不出卡，也省掉一次无用的 TMDB 请求
   _scheduledFor = href;
   _fetch(false);
 }

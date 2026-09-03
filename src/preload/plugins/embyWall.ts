@@ -4554,7 +4554,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   // 修复: 导航后隐藏视图栈里非活跃的下层页面(用非important的 display:none, 允许 fnOS 返回时恢复),
   //       让活跃页的透明区直接落到 body(桌面亚克力).
   // 启发式: 仅针对 position:absolute 且占满视口的直接兄弟(视图通常在 relative 容器内 absolute 堆叠);
-  //        排除 fixed 覆盖层(抽屉/遮罩)、我们的 fnos-* 注入、导航栏等.
+  //        排除 fixed 覆盖层(抽屉/遮罩)、我们的 fnos-*/fntv-* 注入(含其子节点)、导航栏等.
+  // [lc-993] 上一行"排除我们的注入"从 lc-153 起就没兑现过: 原判断只查 el.id 自身, 而注入层的子节点
+  //        (.fnos-instant-layer__bg / __scrim, .fnos-detail-backdrop__img / __scrim) 一律**没有 id**
+  //        → 逃过豁免 → 又因为它们是同父的两个满视口 absolute, 正好凑成下面的"视图栈"判定 → 被 display:none。
+  //        真机日志实证(log/v3.5.0/app.log, 89 次 hid stacked view):
+  //          82 次(92%) 打的是自己人 —— fnos-instant-layer__bg 42 次 + fnos-detail-backdrop__img 40 次;
+  //          只有 7 次是它本该处理的真飞牛残留视图; 保护性 SKIP 日志 0 次。
+  //        两个可见后果: ① 加载层的海报背景被打掉, 只剩灰 scrim + shimmer 骨架
+  //          = 用户报的"一级详情页灰色骨架屏遮罩"(一级页从首页进入时美化永不套用, 靠 2s 兜底才淡出);
+  //          ② lc-980 的全屏沉浸底图每次导航 ~400ms 后被永久打掉, 直到下次导航才重建。
+  //        修法用 closest('[id^=…]'): 它会检查自身, 故一条即可替换原判断, 并把整棵注入子树一次性豁免。
   const hideStaleViews = (): void => {
     const vw = window.innerWidth, vh = window.innerHeight;
 
@@ -4579,7 +4589,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       if (cs.position !== 'absolute') continue;           // 视图是 absolute 堆叠; fixed 是覆盖层, 跳过
       const rect = el.getBoundingClientRect();
       if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
-      if (el.id && el.id.startsWith('fnos-')) continue;    // 我们的注入层跳过
+      if (el.closest('[id^="fnos-"], [id^="fntv-"]')) continue;  // [lc-993] 我们的注入层**及其全部子节点**跳过
       if (el.classList.contains('absolute')) continue;     // 抽屉遮罩类跳过
       if (el.querySelector('video')) continue;             // [lc-278] 含视频的视图绝不隐藏(双保险)
       candidates.push(el);

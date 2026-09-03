@@ -6,13 +6,19 @@
 //   飞牛详情页上部有**两层**遮罩，色值全是硬编码中性色，而且左右明暗严重不均——
 //     ① 顶栏 80px 条 div.z-[2].h-[80px].!absolute.top-0.w-full（是 hero 的**兄弟**，不在 hero 内）
 //        linear-gradient(rgba(0,0,0,.5) 0%, rgba(0,0,0,0) 100%)
-//     ② hero 内 .gradient-for-full（一个元素两层渐变，覆盖整块 820x470）
+//     ② hero 内 .gradient-for-full（一个元素两层渐变，覆盖整块 hero）
 //        linear-gradient(90deg, rgba(25,25,26,.96) 0%, .74 28%, .38 58%, .08 100%)
 //        linear-gradient(0deg,  rgb(25,25,26) 0%,  .94 22%, .76 54%, .18 100%)
 //   同一行 y=41 上：左侧图标区 12.23（封面色被吃到死黑），右侧按钮组只剩 4.50（几乎没压暗）。
 //   本文件从 hero 剧照取主色、暗化后写成 CSS 变量 --fnos-hero-tint，
 //   交给 beautifyStyle.ts 的 L 段消费（顶栏磨砂玻璃条 + hero 遮罩同色系换色）。
 //   换色后同一批采样点收敛到 9.72~11.00，标题「第 1 季」8.92。
+//
+//   [lc-993] 第 ② 层在 Series 一级页是**另一个类名**：.gradient（一层 0deg、absolute bottom-0
+//   h-[45%] 贴底，色标 1@0% / 1@18% / .92@42% / .64@72% / 0@100%）。本文件**代码零改动**即可覆盖它
+//   —— 取色只认 findHeroBackdropImg()，而 Series hero(组件 Zse)内的剧照由 TD 渲染成
+//   img.pointer-events-none.size-full.object-cover.object-center，正好命中它的 img.size-full 首选分支。
+//   换色那一侧由 beautifyStyle.ts 的 L 段单独加了一条 .gradient 规则承担。
 //
 // 硬约束（每条都有实测依据，改这个文件前先读）：
 //   · 零新网络请求、零 IPC：剧照是同源 /v/api/v1/sys/img/<2hex>/<2hex>/...，

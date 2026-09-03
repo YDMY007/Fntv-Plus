@@ -10,7 +10,10 @@
 //        无写文件、无 setInterval、无 getComputedStyle 风暴、无 DOM 搬运。
 //
 // 判定锚点(实测见 memory/fnos-detail-dom.md)：
-//   活跃视图 .trim-ui__cache-outlet--exclude(末尾可见)；hero .semi-always-dark[class*="h-[470px]"](详情独有, 首页无)。
+//   活跃视图 .trim-ui__cache-outlet--exclude(末尾可见)；hero 由 glass.ts 的 DETAIL_HERO_SEL 定义
+//   —— [lc-993] 该选择器已扩容到三种详情页 hero(Season 二级页 / Movie 一级页 / Series 一级页)，
+//   本编排层**代码零改动**即自动覆盖一级页：三闸、observer、teardown 全是围绕这个常量写的。
+//   扩容前 Series 一级页(/v/tv|movie/<32hex>)结构性永不匹配 → 美化从 lc-980 起一次都没套用过。
 // ─────────────────────────────────────────────────────────────────────────────
 import { S } from '../state';
 import { dlog } from '../log';
