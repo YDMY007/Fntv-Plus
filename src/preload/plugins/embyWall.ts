@@ -7,6 +7,7 @@ import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
+import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
 import { fetchShowsViaIPC, setOnShowsReady } from './embyWall/carousel/api';
 
@@ -4879,6 +4880,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       hasBack: !!s.backdrop,
       backHead: (s.backdrop || '').substring(0, 50),
     })),
+    // [lc-984] 清晰度胶囊诊断: 标题后没出现胶囊时跑它, 看原生角标是否被文本启发式命中、标题 p 是谁
+    epResolution: () => epResolutionDiag(),
   };
   log('[lc-940][DIAG] window._fntvDiag 已暴露, 使用: _fntvDiag.rebuildSnapshot() / _fntvDiag.dumpBackdropState()');
 

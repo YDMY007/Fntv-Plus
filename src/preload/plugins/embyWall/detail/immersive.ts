@@ -18,6 +18,7 @@ import { isDetailPage, findActiveDetailView, findDetailHero } from './glass';
 import { injectBeautifyStyle } from './beautifyStyle';
 import { injectBackdrop, removeBackdrop, hideInstantLayer, clearInstantLayer, showInstantLayer, cacheHeroImages } from './backdrop';
 import { scheduleTmdbCard, removeTmdbCard } from './tmdbCard';
+import { scheduleEpResolution, removeEpResolution } from './epResolution';
 
 /** observer 硬上限生命周期(ms)：超时强制断开，绝不变永久轮询(旧版病根)。 */
 const OBS_MAX_LIFE = 4000;
@@ -43,6 +44,7 @@ function _apply(view: HTMLElement, hero: HTMLElement): void {
   hideInstantLayer();                    // 内容就绪 → 淡出瞬间加载层
   cacheHeroImages(location.href, hero);  // 存海报/剧照供下次进同页秒出
   scheduleTmdbCard(view);                // 延后异步注入信息卡（非阻塞，失败静默）
+  scheduleEpResolution();                // 清晰度角标 → 标题后胶囊（内部有上限重试链，等选集卡到达）
   _settledHref = location.href;
   S.detailGlassInited = true;
   _disconnectObs();                      // 一次性：命中即断开
@@ -77,6 +79,7 @@ function _softReset(): void {
   _settledHref = null;
   removeBackdrop();
   removeTmdbCard();
+  removeEpResolution();
 }
 
 /** arm 一次性限域 observer：只等 hero 出现，命中即套用+disconnect；硬上限 OBS_MAX_LIFE 后自断。 */
@@ -119,6 +122,7 @@ export function teardownDetailBeautify(): void {
   document.body.classList.remove('fnos-beautify');
   removeBackdrop();
   removeTmdbCard();
+  removeEpResolution();
   clearInstantLayer();
   S.detailGlassInited = false;
 }

@@ -250,6 +250,28 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
   transition:opacity .18s ease !important;
 }
 .fnos-beautify-card__refresh:hover{ opacity:.6 !important; }
+
+/* ===== J. 清晰度标识：原生角标(贴缩略图, 竖排后错位) → 集标题后小胶囊（epResolution.ts 注入）=====
+   隐藏走 class 而非删节点: 原生角标只被加标记, DOM 位置/属性/文本全不动, teardown 摘掉即复原。 */
+body.fnos-beautify .fnos-res-native-hidden{ display:none !important; }
+/* 胶囊：inline span 追加在标题 p 内 → 天然紧跟标题文字。克制版(发丝细边+弱化灰字)，不用实心色块。 */
+body.fnos-beautify .fnos-ep-res{
+  display:inline-block !important; margin-left:7px !important; padding:0 6px !important;
+  font-size:10.5px !important; font-weight:600 !important; line-height:16px !important;
+  letter-spacing:.02em !important; white-space:nowrap !important; vertical-align:1.5px !important;
+  color:var(--fnos-muted) !important;
+  border:1px solid var(--fnos-hairline) !important; border-radius:999px !important;
+  background:transparent !important;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif !important;
+  -webkit-font-smoothing:antialiased !important;
+}
+/* 胶囊 append 在标题 p 末尾: 若该 p 带 truncate(nowrap+ellipsis) 或 line-clamp, 长集标题会把胶囊裁没。
+   用 :has 精准只解禁「真收到了胶囊的那个 p」, 不影响其它段落。 */
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] p:has(> .fnos-ep-res){
+  display:block !important; white-space:normal !important;
+  overflow:visible !important; text-overflow:clip !important;
+  -webkit-line-clamp:unset !important;
+}
 `;
 
 /** 注入美化样式表（幂等：已存在则跳过）。全程只注入这一份 <style>，一次成型。 */
