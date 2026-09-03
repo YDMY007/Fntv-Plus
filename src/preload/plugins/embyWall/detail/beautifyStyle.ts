@@ -10,11 +10,14 @@
 //      文本色沿用 Semi 主题变量 → 浅色=通透白磨砂(Apple Light)，深色=沉浸暗背景(Apple TV)。
 //   4. 确定性对比度：backdrop scrim 随主题自适应，保证文本永远落在可读背景上。
 //      lc-990 起 hero 上部两层遮罩改为「封面取色」（heroTint.ts 一次性 canvas 取主色，非常驻采样），
-//      但对比度仍不靠运行时判定，而由两个标定常量锁死：暗化亮度上限 L<=0.20 + 顶栏图标区 alpha .92。
-//      活体实测（/v/tv/season/<id>）：三个图标 10.83~11.00、右侧按钮组 9.72、标题 8.92。
+//      lc-992 起窗口标题栏(32px 安全区)也跟随同一支 tint（M 段）。对比度仍不靠运行时判定，
+//      而由两个标定常量锁死：暗化亮度上限 L<=0.20 + 顶栏/标题栏图标区 tint alpha 顶值 1。
+//      活体实测（/v/tv/season/<id>）：三个图标 10.83~11.00、右侧按钮组 9.72、标题 8.92；
+//      标题栏白图标 11.06~11.32（12 种环境一致），且 y=31/y=32 两行逐像素恒等 → 接缝 1.0000。
 //   5. 悬停用 CSS :hover（微底色 / 缩略图微放大），不用 JS 逐卡绑定，也不用 lift+大阴影。
 //   6. 两栏门控 `:has([data-id="details"])`：仅 season 页(有选集)走两栏；movie/tv 自动降级单列。
 //   7. 低 GPU：全表 backdrop-filter 只有一处 —— L 段顶栏那条 820x80 的 ::before（lc-990 破例）。
+//      M 段的标题栏底色**刻意不加**磨砂：它是 alpha 1 的纯 tint，模糊贡献恒为零，加了只是白烧 GPU。
 //      其余磨砂观感仍靠半透明 scrim + 一次性模糊底图，不做实时滤镜；该处也不随滚动重算。
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -444,9 +447,15 @@ body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][cl
       若把 mask 加在 bar 本体上，图标下沿会被一起淡出。伪元素的 mask 只裁它自己。
       另 ::before 是 z-auto，而 bar 的内容容器带 z-20 → 磨砂在内容之下，图标不会被模糊。
    ② 用 mask 渐隐，而不是让 background 的 alpha 渐隐到 0：
-      图标区(y=23..59)的 tint alpha 因此恒定在 .92，对比度从早前标定的 4.23 提升到 10.83。
+      图标区(y=23..59)的 tint alpha 因此恒定在顶值，对比度从早前标定的 4.23 提升到两位数。
       若沿用 alpha .72→0 那种形状，图标中心只剩 .351，亮剧照透上来 → 对比度暴跌到 1.80~1.92。
-      渐隐区实测平滑单调(10.03 → 7.28 → 5.47 → 4.62) → 玻璃条下沿无硬边。
+      顶值取 **1** 而不是 .92，是 lc-992 的接缝要求(见 M 段)：y=0..31 的标题栏铺同色系底色后，
+      只有条首行(y=32)也是纯 tint，两行才能对任意 x 恒等 → 接缝 1.0000(现状白条是 9.8232)。
+      任何 <1 的顶值都会让接缝随封面明暗漂移(实测 .98→1.0306、.96→1.0623)。
+      代价是净收益：图标行 y=41 白字对比度从 9.35~10.62(1.14x 落差)收敛到 **11.06~11.32(1.02x)**，
+      12 种环境(明暗 × 玻璃开关 × 桌面黑/中灰/白)完全一致；玻璃条外观最大改变仅 15/255。
+      渐隐段(y=78..110)逐行亮度剖面的最大逆向步长 0.0449，而底层封面自身在同一段就有 0.0574
+      → 逆向起伏是封面内容继承来的，tint 覆盖反而把它压平了；顶值 .92→1 对它的影响只有 0.0001。
    ③ bar 本体只清 background-image，**不动 background-color**(它本来就是 rgba(0,0,0,0))：
       embyWall.ts 的 [lc-925] 图标反色靠 elementsFromPoint 逐层读 backgroundColor / backgroundImage
       采样背景亮度，而伪元素不参与 elementsFromPoint → 采样路径与本段改动之前完全一致，
@@ -468,7 +477,7 @@ body.fnos-beautify div[class*="h-[80px]"][class*="top-0"]{
 body.fnos-beautify div[class*="h-[80px]"][class*="top-0"]::before{
   content:''; position:absolute; inset:0; pointer-events:none;
   background-image:linear-gradient(to bottom,
-    rgba(var(--fnos-hero-tint, 25,25,26), .92) 0%,
+    rgba(var(--fnos-hero-tint, 25,25,26), 1) 0%,
     rgba(var(--fnos-hero-tint, 25,25,26), .86) 100%);
   backdrop-filter:blur(18px) saturate(1.5);
   -webkit-backdrop-filter:blur(18px) saturate(1.5);
@@ -490,6 +499,57 @@ body.fnos-beautify ${HERO} .gradient-for-full{
       rgba(var(--fnos-hero-tint, 25,25,26), .94) 22%,
       rgba(var(--fnos-hero-tint, 25,25,26), .76) 54%,
       rgba(var(--fnos-hero-tint, 25,25,26), .18) 100%) !important;
+}
+
+/* ===== M. 窗口标题栏(32px 安全区)跟随封面取色（lc-992）=====
+   诉求(用户原话)：「整个软件顶部的控件样式跟随取色，不要一直为白色」，并附截图指明对象是
+   Electron 右上角 min/max/close 控制栏(titlebar.ts 注入的 #custom-titlebar，y=0..31)。
+
+   「一直为白色」是量得出来的，而且比用户描述的更严重：
+   · titlebar.ts 旧版把条的 background **无条件**写死 transparent(沉浸/非沉浸两态都一样)，
+     于是这 32px 透出来的是主进程 ACRYLIC_CSS 硬编码的近白亚克力 rgba(250,244,250,.68)
+     + blur(30px)(mainwin.ts:134，**不分主题**)，再叠 G 段 __scrim 的 --fnos-scrim-top
+     (浅色 rgba(250,250,252,.62)) —— 两层都是白的。B 段只清飞牛自己的 bg-1，从来没碰过这层。
+   · 而旧版 setImmersive 又把图标写死 #ffffff → 白图标压在近白亚克力上实测对比度 **1.02**，
+     即三个窗口控件在详情页实际上是看不见的。
+   · 另有一处真 bug：titlebar.ts 私有的 isDetailPage() 显式排除 /season/，而 detail/glass.ts
+     的同名函数包含它 → season 页(本段主战场)美化已套用、L 段 tint 玻璃条从 y=32 铺起，
+     标题栏却走非沉浸分支，白条正好压在深色玻璃正上方，实测接缝 **9.8232**。
+
+   修法(方案 C；12 种环境 × 6 个候选扫参后选定)：标题栏铺**纯 tint**(alpha 1)，
+   L 段条首行 alpha 同步抬到 1 → y=31 与 y=32 对任意 x 恒等，接缝 **1.0000**。
+   这是唯一精确解：要让两行恒等，就必须让两侧都不依赖背后的像素；任何一侧 <1 都会随封面
+   明暗漂移(实测 .98 → 1.0306、.96 → 1.0623，均超 1.03 的大平坦色块 Weber 阈)。
+   白图标对比度 **11.06~11.32**(1.02x 落差，全部高于 AAA 7)。
+
+   ⚠ 三个实现要点，改动前务必读：
+   ① 底色画在 ::before，不画在条本体：glassUI.ts 的
+      html[data-fntv-glass] .fnos-tv-page body > div{background:transparent!important}
+      直接命中 #custom-titlebar(它就是 body 的直接子 div)，玻璃模式下会把本体刷成透明。
+      伪元素不被那条规则匹配 —— 与 glassUI.ts:142 自己记的 lc-526~530 教训一致：
+      让选择器根本不匹配，而不是写更高特异性的 !important 去对抗。
+   ② 选择器锚 data-fntv-tb(titlebar.ts 打的标记)而不是锚 id：原生页分支复用同一个
+      #custom-titlebar，形态却是右上角浮动圆形按钮组(自带深色磨砂底)。injectTitleBar 只在
+      OnReady 跑一次且被 getElementById 挡住，所以「开机停在登录页 → 登录后进 TV 页」这条路径上
+      条根本不会再建，只认 id 就会把浮动按钮组当条来刷。
+   ③ **刻意不加 backdrop-filter**：底色已是 alpha 1 的纯 tint，模糊贡献恒为零，加了只是白烧 GPU。
+      全文档 backdrop-filter 仍恰好 1 层(L 段那条)，守住文件头第 7 条的低 GPU 约束。
+
+   图标色与 hover 不在这里写死颜色，而是重定义 theme.ts 那批 --fnos-titlebar-* 变量：
+   变量声明在 body 上、按继承就近生效，压过 theme.ts 声明在 :root / html.dark 上的同名变量，
+   titlebar.ts 注入的样式表消费同名变量即自动跟随 → 零特异性对抗、明暗双主题同一条规则。
+   tint 恒为暗色(heroTint.ts 把 HSL 亮度上限锁在 L<=0.20)，故图标恒白、hover 恒白系，不分主题。
+   取色失败时 --fnos-hero-tint 不存在 → 精确回落 25,25,26，与 L 段的降级路径完全一致。 */
+body.fnos-beautify{
+  --fnos-titlebar-icon:#fff;
+  --fnos-titlebar-hover-minmax:rgba(255,255,255,.14);
+  --fnos-titlebar-hover-close-bg:rgba(232,17,35,.55);
+  --fnos-titlebar-hover-close-icon:#fff;
+}
+body.fnos-beautify #custom-titlebar[data-fntv-tb]::before{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  border-top-left-radius:16px; border-top-right-radius:16px;
+  background:rgba(var(--fnos-hero-tint, 25,25,26), 1);
 }
 `;
 

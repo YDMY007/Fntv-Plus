@@ -136,7 +136,6 @@ export function injectUiThemeStyle(): void {
   --fnos-qr-bg:#fff;
   --fnos-modal-overlay:rgba(40,30,60,.42);
   --fnos-modal-inner-shadow:inset 0 1px 0 rgba(255,255,255,.6);
-  --fnos-titlebar-bg:transparent;
   --fnos-titlebar-icon:#444;
   --fnos-titlebar-hover-minmax:rgba(0,0,0,.05);
   --fnos-titlebar-hover-close-bg:rgba(232,17,35,.10);
@@ -215,7 +214,6 @@ html.dark{
   --fnos-qr-bg:rgba(220,215,230,.95);
   --fnos-modal-overlay:rgba(0,0,0,.60);
   --fnos-modal-inner-shadow:inset 0 1px 0 rgba(255,255,255,.10);
-  --fnos-titlebar-bg:transparent;
   --fnos-titlebar-icon:#c4b6e3;
   --fnos-titlebar-hover-minmax:rgba(255,255,255,.08);
   --fnos-titlebar-hover-close-bg:rgba(232,17,35,.18);

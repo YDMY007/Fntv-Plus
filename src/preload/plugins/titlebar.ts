@@ -19,12 +19,6 @@ try {
   logger.error('Failed to load local logo file', String(e));
 }
 
-/** 检测当前是否在一级详情页(TV/Movie 详情, 非 Season/播放) */
-function isDetailPage(): boolean {
-  const href = location.href.toLowerCase();
-  return /\/v\/(tv|movie)\//.test(href) && !/\/season\//.test(href);
-}
-
 function injectTitleBar(): void {
   logger.info('Injecting custom title bar...');
   if (document.getElementById('custom-titlebar')) return;
@@ -109,111 +103,67 @@ function injectTitleBar(): void {
     return; // 原生页不需要标题栏/logo/沉浸模式
   }
 
-  /* ═══ TV 页：Mica 标题栏条 ═══ */
+  /* ═══ TV 页：Mica 标题栏条 ═══
+     [lc-992] data-fntv-tb 是「这是 TV 页那条 32px 拖拽条」的唯一判别标记：
+     原生页分支复用同一个 id #custom-titlebar，形态却是右上角浮动圆形按钮组(自带深色磨砂底)，
+     CSS 只认 id 会在「开机停在登录页 → 登录后进 TV 页」这条路径上把浮动按钮组当条来刷。
+     用 data-* 而不是新增 class 名：glassUI 的组件级玻璃规则全靠 [class*="card"] 之类子串匹配，
+     data 属性它一个都不匹配 → 不需要过那份 token 清单。
+     条本身刻意不设 background：详情页的底色由 beautifyStyle.ts 的 M 段画在 ::before 上
+     (glassUI 的 html[data-fntv-glass] .fnos-tv-page body > div{background:transparent!important}
+      会直接命中本条，画在伪元素上就根本不被那条规则匹配)。圆角恒 16px：fixed 层不受 html
+     的 overflow/clip-path 裁剪(见 mainwin.ts ACRYLIC_CSS 注释)，条一旦有不透明底色就必须自己圆角。 */
   const bar = document.createElement('div');
   bar.id = 'custom-titlebar';
+  bar.dataset.fntvTb = 'bar';
   bar.style.cssText = `height:32px;width:100%;position:fixed;top:0;left:0;z-index:99999;pointer-events:auto;
     -webkit-app-region:drag;app-region:drag;
-    border-top-left-radius:16px;border-top-right-radius:16px;
-    background:var(--fnos-titlebar-bg,transparent);
-    border:none;transition:background .25s ease,border-radius .25s ease;`;
+    border-top-left-radius:16px;border-top-right-radius:16px;`;
 
   /* 窗口控制右对齐 (no-drag 保证可点击) */
   const ctrls = document.createElement('div');
   ctrls.style.cssText = 'position:absolute;top:0;right:0;height:32px;display:flex;align-items:center;pointer-events:auto;-webkit-app-region:no-drag;app-region:no-drag;padding-right:4px;gap:2px';
   const tvBtnIds = ['min-btn', 'max-btn', 'close-btn'];
+  const tvBtnSvgs = [minSvg, maxSvg, closeSvg];
   tvBtnIds.forEach(function (id, i) {
-    const svgs = [minSvg, maxSvg, closeSvg];
     const btn = document.createElement('button');
     btn.id = id;
     btn.type = 'button';
-    btn.innerHTML = svgs[i];
-    btn.style.cssText = 'background:transparent;border:none;width:46px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;transition:background .12s;color:var(--fnos-titlebar-icon,#444);';
+    btn.innerHTML = tvBtnSvgs[i];
     ctrls.appendChild(btn);
   });
   bar.appendChild(ctrls);
   document.body.appendChild(bar);
 
-  /* ═══ 沉浸模式状态管理 ═══ */
-  let _immersive = false;
-
-  /** 切换标题栏沉浸模式(详情页全透明+白图标 vs 普通页半透Mica+深色图标) */
-  const setImmersive = function (on: boolean): void {
-    if (_immersive === on) return;
-    _immersive = on;
-    // 背景 & 圆角: 标题栏保持透明, 直接透出与下方窗口一致的亚克力底(消除顶部白条色差)
-    bar.style.background = 'transparent';
-    bar.style.borderTopLeftRadius = on ? '0' : '16px';
-    bar.style.borderTopRightRadius = on ? '0' : '16px';
-    // 图标颜色
-    const iconColor = on ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
-    ctrls.querySelectorAll('svg').forEach(function (svg) {
-      svg.querySelectorAll('rect, path').forEach(function (el) {
-        if (el instanceof SVGElement) {
-          if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
-            el.setAttribute('fill', iconColor);
-          if (el.hasAttribute('stroke'))
-            el.setAttribute('stroke', iconColor);
-        }
-      });
-    });
-    logger.info(`titlebar immersive=${on}`);
-  };
-
-  /** 统一 hover 逻辑: 根据 _immersive 状态动态选择颜色 */
-  const setupButtonHover = function (): void {
-    const minBtn = document.getElementById('min-btn');
-    const maxBtn = document.getElementById('max-btn');
-    const closeBtn = document.getElementById('close-btn');
-    if (!minBtn || !maxBtn || !closeBtn) return;
-
-    const onEnter = function (btn: HTMLElement): void {
-      if (_immersive) {
-        btn.style.background = btn.id === 'close-btn' ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.15)';
-      } else {
-        btn.style.background = btn.id === 'close-btn'
-          ? 'var(--fnos-titlebar-hover-close-bg,rgba(232,17,35,.10))'
-          : 'var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05))';
-      }
-      // close hover 时图标变红(普通模式) / 保持白(沉浸模式)
-      if (btn.id === 'close-btn' && !_immersive) {
-        btn.querySelectorAll('svg path, svg rect').forEach(function (e) {
-          (e as SVGElement).setAttribute('fill', 'var(--fnos-titlebar-hover-close-icon,#e81123)');
-        });
-      }
-    };
-    const onLeave = function (btn: HTMLElement): void {
-      btn.style.background = 'transparent';
-      // 恢复基础图标颜色
-      const ic = _immersive ? '#ffffff' : 'var(--fnos-titlebar-icon,#444)';
-      btn.querySelectorAll('svg rect, svg path').forEach(function (el) {
-        if (el instanceof SVGElement) {
-          if (el.hasAttribute('fill') && el.getAttribute('fill') !== 'none')
-            el.setAttribute('fill', ic);
-          if (el.hasAttribute('stroke'))
-            el.setAttribute('stroke', ic);
-        }
-      });
-    };
-    [minBtn, maxBtn, closeBtn].forEach(function (btn) {
-      btn.addEventListener('mouseenter', function () { onEnter(btn); });
-      btn.addEventListener('mouseleave', function () { onLeave(btn); });
-    });
-  };
-
-  // 初始应用沉浸状态
-  setImmersive(isDetailPage());
-  setupButtonHover();
-
-  // 路由切换时同步
-  const syncTitleBarStyle = function (): void { setImmersive(isDetailPage()); };
-  try {
-    const _ps = history.pushState, _rs = history.replaceState;
-    (history as any).pushState = function (...a: any[]) { _ps.apply(this, a as any); syncTitleBarStyle(); };
-    (history as any).replaceState = function (...a: any[]) { _rs.apply(this, a as any); syncTitleBarStyle(); };
-    window.addEventListener('popstate', syncTitleBarStyle);
-    window.addEventListener('hashchange', syncTitleBarStyle);
-  } catch (e) { logger.error('titlebar nav hook err', String(e).substring(0, 60)); }
+  /* ═══ [lc-992] 标题栏配色样式表：CSS 独占配色权，JS 只负责建节点 ═══
+     旧版为何必须删：setImmersive 用 setAttribute 改 SVG 的 fill|stroke、setupButtonHover 用
+     style.background 改 hover 底色 —— presentation attribute 和 inline style 的优先级都高于样式表，
+     CSS 想让控件跟随封面取色就得和 JS 对打(embyWall.ts 的 [lc-925] 已经栽过一次：
+     它写的 inline !important 直接压过 lc-989 的 stylesheet !important)。
+     顺带修掉一个从来没生效过的真 bug：close hover 想变红，却去给 closeSvg 的
+     「M2 2L8 8M8 2L2 8」开放描边路径设 fill —— 开放路径填色不可见，正确做法是改 color
+     让 stroke="currentColor" 跟着变。
+     基础色/hover 全走 theme.ts 的 --fnos-titlebar-* 变量：详情页只需在 body.fnos-beautify 上
+     重定义同一批变量(beautifyStyle.ts 的 M 段)即可整体跟随封面取色，零 !important 对抗、
+     零时序问题，关掉「详情页美化」开关或离开详情页时随 class 移除自动回落。 */
+  const tbStyle = document.createElement('style');
+  tbStyle.id = 'fntv-titlebar-css';
+  tbStyle.textContent = `
+#custom-titlebar[data-fntv-tb] button{
+  background:transparent;border:none;width:46px;height:32px;padding:0;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:4px;
+  transition:background-color .12s ease,color .12s ease;
+  color:var(--fnos-titlebar-icon,#444);
+}
+#custom-titlebar[data-fntv-tb] button:hover{
+  background:var(--fnos-titlebar-hover-minmax,rgba(0,0,0,.05));
+}
+#custom-titlebar[data-fntv-tb] #close-btn:hover{
+  background:var(--fnos-titlebar-hover-close-bg,rgba(232,17,35,.10));
+  color:var(--fnos-titlebar-hover-close-icon,#e81123);
+}
+`;
+  (document.head || document.documentElement).appendChild(tbStyle);
 
   // 窗口控制点击事件
   document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });
