@@ -180,75 +180,113 @@ function collectNativeImdb(): { href: string; text: string } | null {
 function esc(s: any): string {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-function fmtTime(ts: number): string {
+/** 来源行时间：省略年份（这一级信息最弱，「09-03 11:05」已足够）。 */
+function shortTime(ts: number): string {
   if (!ts) return '';
   const d = new Date(ts);
   const p = (n: number): string => (n < 10 ? '0' + n : String(n));
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
+/** 短时长：进 meta 串用，「23 分」比「23 分钟」省一个字宽。 */
 function runtime(min: number): string {
   if (!min) return '';
   const h = Math.floor(min / 60), m = min % 60;
-  return h ? (h + ' 小时 ' + m + ' 分') : (m + ' 分钟');
+  return h ? (h + ' 小时' + (m ? ' ' + m + ' 分' : '')) : (m + ' 分');
 }
+
+/** 5 星图形：底层灰星 + 顶层金星按 inline width 裁切。纯 CSS，无 SVG、无环形进度（那会引入新的「框」）。
+ *  TMDB 是 0~10 分制 → 金星宽度 = rating/10。 */
+function starsHtml(rating: number): string {
+  const pct = Math.max(0, Math.min(100, (rating / 10) * 100));
+  return '<span class="fnos-beautify-card__stars">'
+    + '<span class="fnos-beautify-card__stars-bg">★★★★★</span>'
+    + `<span class="fnos-beautify-card__stars-fg" style="width:${pct.toFixed(1)}%">★★★★★</span>`
+    + '</span>';
+}
+
+/** URL 协议白名单：卡片走 innerHTML 渲染，`esc()` 只转义引号尖括号，挡不住 `javascript:` 这类
+ *  点击即执行的协议。homepage 来自 TMDB 网络响应、IMDB href 来自页面 DOM，都是不可信外部数据。 */
+function safeUrl(u: any): string {
+  const s = String(u == null ? '' : u).trim();
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
 const STATUS_CN: Record<string, string> = {
   'Returning Series': '连载中', 'Ended': '已完结', 'Canceled': '已取消', 'In Production': '制作中',
   'Planned': '计划中', 'Pilot': '试播集', 'Released': '已上映', 'Post Production': '后期制作', 'Rumored': '传闻中',
 };
 
 function buildCardHtml(d: any): string {
-  const out: string[] = [];
-  // 信息行：纯文本 label+value，无 pill / 无 chip；分隔与留白交给 CSS（发丝线 + padding）。
-  const row = (k: string, v: string): void => {
-    if (v) out.push(`<div class="fnos-beautify-card__row"><span class="fnos-beautify-card__k">${esc(k)}</span><span class="fnos-beautify-card__v">${v}</span></div>`);
-  };
-  // 列表 → 「 · 」分隔的纯文本（取代旧版圆角 pill，根治「太多小框」）。
+  const blocks: string[] = [];
   const inline = (list: any[], max = 8): string =>
     (Array.isArray(list) && list.length) ? esc(list.slice(0, max).filter(Boolean).join(' · ')) : '';
 
-  const nameLine = [esc(d.title || '')];
-  if (d.originalTitle && d.originalTitle !== d.title) nameLine.push(`<span class="fnos-beautify-card__orig">${esc(d.originalTitle)}</span>`);
-  out.push(`<div class="fnos-beautify-card__title">${nameLine.join(' ')}</div>`);
-
+  // ① 评分块：右栏唯一的视觉锚。旧版 17px 与 13px 正文行几乎无层级差 → 评分被埋没。
   if (d.rating) {
-    const votes = d.votes ? `<span class="fnos-beautify-card__votes">${Number(d.votes).toLocaleString('zh-CN')} 人评分</span>` : '';
-    out.push(`<div class="fnos-beautify-card__rating"><span class="fnos-beautify-card__star">★</span><b class="fnos-beautify-card__score">${Number(d.rating).toFixed(1)}</b>${votes}</div>`);
+    const r = Number(d.rating);
+    const votes = d.votes
+      ? `<span class="fnos-beautify-card__votes">${esc(Number(d.votes).toLocaleString('zh-CN'))} 人评分</span>` : '';
+    blocks.push(
+      '<div class="fnos-beautify-card__block fnos-beautify-card__score">'
+      + `<div class="fnos-beautify-card__rating"><span class="fnos-beautify-card__num">${r.toFixed(1)}</span><span class="fnos-beautify-card__outof">⁄10</span></div>`
+      + `<div class="fnos-beautify-card__rsub">${starsHtml(r)}${votes}</div>`
+      + '</div>'
+    );
   }
 
+  // ② meta 串：无 label 的两行灰字，取代旧版「状态/规模/类型/单集」四行 label-value。
+  //    label 本身不携带信息，只把真正的值推到右边一列让眼睛来回横跳 —— 这是表单味的根源。
+  //    地区刻意不进串：tmdbSync 对 tv 取 origin_country(ISO 码「JP」)、对 movie 取英文名(「Japan」)，
+  //    两种形态不一致，中文界面里会显示成突兀缩写；且它是本串价值最低的字段。
+  const metaMain: string[] = [];
+  if (d.year) metaMain.push(String(d.year));
+  if (Array.isArray(d.genres) && d.genres.length) metaMain.push(...d.genres.slice(0, 3).map(String).filter(Boolean));
+  const metaSub: string[] = [];
+  if (d.seasons) metaSub.push(d.seasons + ' 季');
+  if (d.episodes) metaSub.push(d.episodes + ' 集');
   const st = STATUS_CN[d.status] || d.status || '';
-  const dateParts: string[] = [];
-  if (d.airDate) dateParts.push('首播 ' + d.airDate);
-  if (d.lastAirDate && d.lastAirDate !== d.airDate) dateParts.push('完结 ' + d.lastAirDate);
-  if (st || dateParts.length) row('状态', esc([st, dateParts.join(' · ')].filter(Boolean).join(' · ')));
-
-  // 规模：季 / 集 + 本季集数合并为一行（去掉旧版重复的「第 N 季」独立行）。
-  const cntParts: string[] = [];
-  if (d.seasons) cntParts.push(d.seasons + ' 季');
-  if (d.episodes) cntParts.push(d.episodes + ' 集');
-  if (d.season && d.season.episodeCount) cntParts.push('本季 ' + d.season.episodeCount + ' 集');
-  if (cntParts.length) row('规模', esc(cntParts.join(' · ')));
-
-  if (d.runtimeAvg) {
-    const rt = d.runtimeMin && d.runtimeMax && d.runtimeMin !== d.runtimeMax ? `${runtime(d.runtimeMin)} ~ ${runtime(d.runtimeMax)}` : runtime(d.runtimeAvg);
-    row('单集', esc(rt));
+  if (st) metaSub.push(String(st));
+  if (d.runtimeAvg) metaSub.push('单集 ' + runtime(d.runtimeAvg));
+  if (metaMain.length || metaSub.length) {
+    blocks.push(
+      '<div class="fnos-beautify-card__block fnos-beautify-card__meta">'
+      + (metaMain.length ? `<div>${esc(metaMain.join(' · '))}</div>` : '')
+      + (metaSub.length ? `<div class="fnos-beautify-card__meta-sub">${esc(metaSub.join(' · '))}</div>` : '')
+      + '</div>'
+    );
   }
-  row('类型', inline(d.genres));
-  if (Array.isArray(d.networks) && d.networks.length) row('首播平台', esc(d.networks.join(' / ')));
-  if (Array.isArray(d.createdBy) && d.createdBy.length) row('主创', esc(d.createdBy.join(' / ')));
-  // 主演：姓名「 · 」分隔纯文本（去掉旧版最多 10 个圆角 chip；角色/头像见下方原生「演职人员」区）。
-  if (Array.isArray(d.cast) && d.cast.length) row('主演', inline(d.cast.map((c: any) => c && c.name).filter(Boolean), 8));
-  if (d.overview) out.push(`<div class="fnos-beautify-card__desc fnos-beautify-card__clamp">${esc(d.overview)}</div>`);
 
+  // ③ 事实区：只留 hero 与 meta 串都没承载的字段。完整日期/平台/主创/语言/分级/原名。
+  const rows: string[] = [];
+  const row = (k: string, v: string): void => {
+    if (v) rows.push(`<div class="fnos-beautify-card__row"><span class="fnos-beautify-card__k">${esc(k)}</span><span class="fnos-beautify-card__v">${v}</span></div>`);
+  };
+  const dates: string[] = [];
+  if (d.airDate) dates.push(String(d.airDate));
+  if (d.lastAirDate && d.lastAirDate !== d.airDate) dates.push(String(d.lastAirDate));
+  row('首播', esc(dates.join(' — ')));
+  row('平台', inline(d.networks, 3));
+  row('主创', inline(d.createdBy, 4));
+  row('语言', inline(d.languages, 3));
+  if (d.certification) row('分级', esc(d.certification));
+  // 原名降到事实区末行：它很长（日文原名常占两三行），放顶部会把评分块和 meta 串的节奏冲散。
+  if (d.originalTitle && d.originalTitle !== d.title) row('原名', esc(d.originalTitle));
+  if (rows.length) blocks.push(`<div class="fnos-beautify-card__block fnos-beautify-card__facts">${rows.join('')}</div>`);
+
+  // ④ 外链
   const links: string[] = [];
-  const link = (href: string, text: string): void => { if (href && text) links.push(`<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`); };
+  const link = (href: string, text: string): void => {
+    const u = safeUrl(href);
+    if (u && text) links.push(`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(text)}</a>`);
+  };
   if (d.url) link(d.url, 'TMDB');
   const imdb = (d.externalIds && d.externalIds.imdb) ? 'https://www.imdb.com/title/' + d.externalIds.imdb : (_nativeImdb ? _nativeImdb.href : '');
   if (imdb) link(imdb, 'IMDb');
   if (d.trailerKey) link('https://www.youtube.com/watch?v=' + d.trailerKey, '预告片');
   if (d.homepage) link(d.homepage, '官网');
-  if (links.length) out.push(`<div class="fnos-beautify-card__links">${links.join('<span>·</span>')}</div>`);
+  if (links.length) blocks.push(`<div class="fnos-beautify-card__block fnos-beautify-card__links">${links.join('<span>·</span>')}</div>`);
 
-  return out.join('');
+  return blocks.join('');
 }
 
 // ── 卡片节点定位/渲染/调度 ──
@@ -281,15 +319,13 @@ function _renderCard(): void {
   if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData);
   else if (_tmdbInfoLoading) body = '<div class="fnos-beautify-card__loading">正在从 TMDB 获取剧集信息…</div>';
   else if (_tmdbInfoError) body = `<div class="fnos-beautify-card__error">${esc(_tmdbInfoError)}</div>`;
-  const when = _tmdbInfoFetchedAt ? (' 更新于 ' + fmtTime(_tmdbInfoFetchedAt)) : '';
-  const foot = `<div class="fnos-beautify-card__foot"><span>TMDB${esc(when)}</span>`
-    + `<button type="button" class="fnos-beautify-card__refresh" title="从 TMDB 重新获取本剧信息">${_tmdbInfoLoading ? '获取中…' : '⟳ 刷新'}</button></div>`;
+  const when = _tmdbInfoFetchedAt ? shortTime(_tmdbInfoFetchedAt) : '';
+  const foot = `<div class="fnos-beautify-card__foot"><span>数据来源 TMDB${when ? ' · ' + esc(when) : ''}</span>`
+    + `<button type="button" class="fnos-beautify-card__refresh" title="从 TMDB 重新获取本剧信息">${_tmdbInfoLoading ? '获取中…' : '⟳'}</button></div>`;
   const next = body + foot;
   if (card.innerHTML === next) return; // 内容未变 → 不触碰 DOM
   card.innerHTML = next;
 
-  const desc = card.querySelector('.fnos-beautify-card__desc') as HTMLElement | null;
-  if (desc) desc.addEventListener('click', () => desc.classList.toggle('fnos-beautify-card__clamp'));
   const btn = card.querySelector('.fnos-beautify-card__refresh') as HTMLElement | null;
   if (btn) btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); if (!_tmdbInfoLoading) _fetch(true); });
 }

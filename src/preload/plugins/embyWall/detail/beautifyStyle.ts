@@ -206,50 +206,67 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-instant-skel{ border-radius:8px !important; background:linear-gradient(90deg,rgba(255,255,255,.07) 25%,rgba(255,255,255,.16) 37%,rgba(255,255,255,.07) 63%) !important; background-size:400% 100% !important; animation:fnos-instant-shimmer 1.3s ease infinite !important; }
 @keyframes fnos-instant-shimmer{ 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 
-/* ===== I. 延后注入的 TMDB 剧集信息卡（tmdbCard.ts，追加进右列）：Apple 排版主导，透明无框 ===== */
+/* ===== I. 延后注入的 TMDB 剧集信息卡（tmdbCard.ts，追加进右列）=====
+   排版范式(lc-985 重写)：对标 Netflix / Apple TV+ / TMDB 侧栏，弃用后台表单式 label-value 双列。
+   分段：评分块(视觉锚) → meta 串(无 label) → 事实区(窄 label) → 外链 → 来源行。
+   去重：标题/简介/主演不再渲染 —— hero 已有标题与带「更多」的简介，下方原生「演职人员」区已有头像+姓名横滑；
+     原名降到事实区末行(日文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏)。
+   分组只靠留白，组内零横线(用户明确要求「内部文字不要加线框」)。 */
 .fnos-beautify-card{
   background:transparent !important;
   border:none !important; box-shadow:none !important; border-radius:0 !important;
-  padding:2px 0 0 !important; margin:0 0 6px !important;
+  padding:0 !important; margin:0 0 10px !important;
   color:var(--semi-color-text-0,#1d1d1f) !important;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif !important;
   font-size:13px !important; line-height:1.6 !important;
   -webkit-font-smoothing:antialiased !important;
 }
-.fnos-beautify-card__title{
-  font-size:21px !important; font-weight:600 !important; letter-spacing:-.022em !important;
-  line-height:1.22 !important; margin:0 0 3px !important; color:var(--semi-color-text-0,#1d1d1f) !important;
+/* 组间距由「相邻块」一条规则统一承担：任何一段因数据缺失而不渲染时，间距都不会塌陷。 */
+.fnos-beautify-card__block + .fnos-beautify-card__block{ margin-top:18px !important; }
+/* ① 评分块：34px 大数字是右栏唯一的视觉锚（旧版 17px 与 13px 正文行几乎无层级差 → 评分被埋没）。 */
+.fnos-beautify-card__rating{ display:flex !important; align-items:baseline !important; }
+.fnos-beautify-card__num{
+  font-size:34px !important; font-weight:700 !important; line-height:1 !important;
+  letter-spacing:-.03em !important; font-variant-numeric:tabular-nums !important;
+  color:var(--semi-color-text-0,#1d1d1f) !important;
 }
-.fnos-beautify-card__orig{
-  display:block !important; font-size:12.5px !important; font-weight:400 !important;
-  letter-spacing:0 !important; color:var(--fnos-muted) !important; margin-top:3px !important;
+.fnos-beautify-card__outof{ margin-left:4px !important; font-size:12px !important; font-weight:500 !important; color:var(--fnos-muted) !important; }
+.fnos-beautify-card__rsub{ display:flex !important; align-items:center !important; gap:9px !important; margin-top:7px !important; }
+/* 半星：底层灰星 + 顶层金星按 inline width 裁切。纯 CSS，无 SVG、无环形进度(那会引入新的「框」)。 */
+.fnos-beautify-card__stars{ position:relative !important; display:inline-block !important; font-size:12px !important; line-height:1 !important; letter-spacing:1.5px !important; }
+.fnos-beautify-card__stars-bg{ color:var(--fnos-hairline) !important; }
+.fnos-beautify-card__stars-fg{ position:absolute !important; left:0 !important; top:0 !important; overflow:hidden !important; white-space:nowrap !important; color:#ff9f0a !important; }
+.fnos-beautify-card__votes{ font-size:11.5px !important; color:var(--fnos-muted) !important; }
+/* ② meta 串：无 label 的两行灰字，取代旧版「状态/规模/类型/单集」四行 label-value。 */
+.fnos-beautify-card__meta{ font-size:12.5px !important; line-height:1.7 !important; color:var(--semi-color-text-1,#3c3c43) !important; }
+.fnos-beautify-card__meta-sub{ font-size:12px !important; color:var(--fnos-muted) !important; }
+/* ③ 事实区：label 列 3.4em(旧版 62px 太宽，把 value 推得过远，四个中文字宽刚好)保证 value 左缘对齐；
+     组内靠 4px padding 分行，无横线。 */
+.fnos-beautify-card__row{ display:flex !important; gap:12px !important; align-items:baseline !important; padding:4px 0 !important; }
+.fnos-beautify-card__k{ flex:0 0 3.4em !important; font-size:12px !important; color:var(--fnos-muted) !important; }
+.fnos-beautify-card__v{
+  flex:1 1 auto !important; min-width:0 !important; font-size:12.5px !important; line-height:1.6 !important;
+  color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important;
 }
-.fnos-beautify-card__rating{ display:flex !important; align-items:baseline !important; gap:7px !important; margin:12px 0 4px !important; }
-.fnos-beautify-card__star{ color:#ff9f0a !important; font-size:13px !important; line-height:1 !important; }
-.fnos-beautify-card__score{ font-size:17px !important; font-weight:600 !important; letter-spacing:-.01em !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
-.fnos-beautify-card__votes{ font-size:12px !important; color:var(--fnos-muted) !important; }
-/* 信息行：label + value，纯留白分隔（无横线——用户明确要求「内部文字不要加线框」） */
-.fnos-beautify-card__row{ display:flex !important; gap:14px !important; align-items:baseline !important; padding:5px 0 !important; }
-.fnos-beautify-card__k{ flex:0 0 62px !important; font-size:12.5px !important; color:var(--fnos-muted) !important; }
-.fnos-beautify-card__v{ flex:1 1 auto !important; min-width:0 !important; font-size:13px !important; color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important; }
-.fnos-beautify-card__desc{ margin-top:14px !important; font-size:13px !important; line-height:1.72 !important; color:var(--semi-color-text-1,#3c3c43) !important; cursor:pointer !important; }
-.fnos-beautify-card__clamp{ display:-webkit-box !important; -webkit-line-clamp:4 !important; -webkit-box-orient:vertical !important; overflow:hidden !important; }
-.fnos-beautify-card__links{ margin-top:16px !important; display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
+/* ④ 外链：组间距统一由 __block 相邻规则给，这里不再自带 margin-top。 */
+.fnos-beautify-card__links{ display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
 .fnos-beautify-card__links a{ color:var(--fnos-accent) !important; text-decoration:none !important; font-weight:500 !important; }
 .fnos-beautify-card__links a:hover{ text-decoration:underline !important; }
 .fnos-beautify-card__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
 .fnos-beautify-card__loading,.fnos-beautify-card__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
+/* ⑤ 来源行：全卡最弱一级(10.5px)。刷新默认灰、hover 才染 accent ——
+     它是开发者视角的操作，不该和 TMDB/IMDb 外链抢同一级视觉权重。 */
 .fnos-beautify-card__foot{
-  margin-top:18px !important;
-  display:flex !important; justify-content:space-between !important; align-items:center !important;
-  font-size:11px !important; color:var(--fnos-muted) !important;
+  margin-top:16px !important;
+  display:flex !important; justify-content:space-between !important; align-items:center !important; gap:10px !important;
+  font-size:10.5px !important; color:var(--fnos-muted) !important;
 }
 .fnos-beautify-card__refresh{
-  background:transparent !important; border:none !important; padding:2px 0 !important; cursor:pointer !important;
-  color:var(--fnos-accent) !important; font-size:11.5px !important; font-weight:500 !important; font-family:inherit !important;
-  transition:opacity .18s ease !important;
+  background:transparent !important; border:none !important; padding:0 2px !important; cursor:pointer !important;
+  color:var(--fnos-muted) !important; font-size:12px !important; line-height:1 !important; font-family:inherit !important;
+  transition:color .18s ease !important;
 }
-.fnos-beautify-card__refresh:hover{ opacity:.6 !important; }
+.fnos-beautify-card__refresh:hover{ color:var(--fnos-accent) !important; }
 
 /* ===== J. 清晰度标识：原生角标(贴缩略图, 竖排后错位) → 集标题后小胶囊（epResolution.ts 注入）=====
    隐藏走 class 而非删节点: 原生角标只被加标记, DOM 位置/属性/文本全不动, teardown 摘掉即复原。 */
