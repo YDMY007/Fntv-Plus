@@ -31,6 +31,7 @@ body.fnos-beautify{
   --fnos-row-hover:rgba(0,0,0,.035);
   --fnos-panel-fill:rgba(0,0,0,.038);
   --fnos-muted:#86868b;
+  --fnos-topbar-fg:rgba(255,255,255,.8);   /* 详情页顶栏背景恒暗(见 K 段), 前景色故不分主题 */
   --fnos-backdrop-img-opacity:.30;
   --fnos-scrim-top:rgba(250,250,252,.62);
   --fnos-scrim-mid:rgba(250,250,252,.82);
@@ -43,6 +44,7 @@ html.dark body.fnos-beautify{
   --fnos-row-hover:rgba(255,255,255,.06);
   --fnos-panel-fill:rgba(255,255,255,.07);
   --fnos-muted:#98989d;
+  --fnos-topbar-fg:rgba(255,255,255,.8);   /* 与浅色同值: 顶栏恒暗背景由飞牛铺, 与主题无关 */
   --fnos-backdrop-img-opacity:.42;
   --fnos-scrim-top:rgba(10,10,12,.32);
   --fnos-scrim-mid:rgba(10,10,12,.55);
@@ -384,6 +386,40 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] p:has(> .fnos-ep-r
   display:block !important; white-space:normal !important;
   overflow:visible !important; text-overflow:clip !important;
   -webkit-line-clamp:unset !important;
+}
+
+/* ===== K. 顶栏左上角图标按钮配色补齐（home / hamburger；lc-989）=====
+   ⚠ 这是**飞牛原生自己的 bug**，我们只是补齐它已经用在「返回」按钮上的同等语义。
+   实测（活体 NAS /v/tv/season/<id>，浅色主题 = 用户默认，elementsFromPoint 于按钮中心 (74,41)）:
+     详情页顶栏背景由三层叠成、且**恒暗**（与主题无关）:
+       ① div.z-[2].h-[80px].top-0.w-full  → linear-gradient(rgba(0,0,0,.5) → rgba(0,0,0,0))
+       ② div.gradient-for-full            → linear-gradient(90deg, rgba(25,25,26,.96) 0%, .74 28%, …)
+       ③ div.semi-always-dark.h-[470px]   → background-color: rgb(25,25,26)
+     飞牛只给「返回」按钮单独包了 .semi-always-dark → 恒白 rgb(255,255,255)，对比度 19.2:1，正确。
+     却**漏了它左边的 home 与 hamburger**: 两者走 text-[var(--semi-color-text-1)]，浅色主题下
+     computed color = rgba(0,0,0,.8)（home 的 svg fill 实测 rgb(0,0,0)）→ 深图标压在恒暗背景上。
+   量化: 背景合成 rgb(18.9)（① 在 y=41 处 alpha 0.244）→ 修正前对比度 **1.10:1**
+     （WCAG 非文本最低门槛 3:1，等于看不见）；修正后 **12.03:1**。
+     /v/tv/<id>（非 season）详情页背景为纯 rgb(25,25,26) → before 1.16:1 / after 11.53:1，同一结论。
+     旁证: 右上角搜索/用户/设置三个 .semi-button-content 在浅色主题下实测也已是 rgba(255,255,255,.8)
+     ——飞牛同样按恒暗处理，只有 home/hamburger 是漏网的两个。
+   取值: --fnos-topbar-fg = rgba(255,255,255,.8)，正是暗色主题下 --semi-color-text-1 的原生值。
+     不发明新的颜色关系，只是让浅色主题与暗色主题观感一致（最小干预）。
+   ⚠ 必须带 svg 后代选择器: home 的 svg 自身 class 也含 text-[var(--semi-color-text-1)]
+     （h-[22px] cursor-pointer align-top leading-sm text-[var(--semi-color-text-1)]），
+     只改外层 div / a 会被它自己那一层压回去；实测三层齐上 + !important 才真的生效。
+   ⚠ 只改 color 不写 fill: 三个图标的 svg 根都是 fill="currentColor"，子元素(path/g/rect/defs/clipPath)
+     无 fill 属性 → 改 color 即全链继承（实测内部 path/g/rect 全部跟随变白）。
+   ⚠ 不动「返回」按钮: 它已被飞牛的 .semi-always-dark 保证恒白，本段选择器也命不中它。
+   ⚠ 必须用 body.fnos-beautify 门控（= 仅详情页）: 首页顶栏实测**没有**那层黑渐变
+     （背景是 bg-[var(--semi-color-bg-1)]，浅色主题下为白），深图标配白底是正确的，全局改会改坏首页。
+   ⚠ 与 glassUI 无冲突: 玻璃模式对顶栏是排除/透明化规则（[data-fnos-clear=1] / [class*=z-20] / z-10），
+     不会给顶栏加浅色磨砂 → 恒暗背景在玻璃开关两种状态下都成立。
+   选择器用属性子串（class*="h-[80px]"）而非 .h-\[80px\]: 避开 Tailwind 任意值的方括号转义。 */
+body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][class*="lg:!hidden"],
+body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][class*="lg:!hidden"] a,
+body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][class*="lg:!hidden"] svg{
+  color:var(--fnos-topbar-fg) !important;
 }
 `;
 
