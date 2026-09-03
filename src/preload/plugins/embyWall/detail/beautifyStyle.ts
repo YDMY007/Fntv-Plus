@@ -65,6 +65,13 @@ body.fnos-beautify ${COL} > ${HERO}{ grid-area:1 / 1 / 2 / 3 !important; }
 body.fnos-beautify ${COL} > :nth-child(2){ grid-area:2 / 1 / 3 / 2 !important; min-width:0 !important; }
 /* 演职人员 + 注入的剧集信息卡：右列 row2（占 4 成，顶部对齐） */
 body.fnos-beautify ${COL} > :nth-child(3){ grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important; }
+/* 右列清框：原生容器若带 border/底色/阴影，会与卡内分隔线拼出「半闭合框」→ 一律抹掉，
+   右栏只保留排版（标题/评分/label+value/链接），不出现任何盒子。 */
+body.fnos-beautify ${COL} > :nth-child(3),
+body.fnos-beautify ${COL} > :nth-child(3) > *{
+  background:transparent !important;
+  border:none !important; box-shadow:none !important;
+}
 /* 链接(IMDB)：全宽 footer row3 */
 body.fnos-beautify ${COL} > :nth-child(4){ grid-area:3 / 1 / 4 / 3 !important; min-width:0 !important; }
 
@@ -84,24 +91,29 @@ body.fnos-beautify div.relative.z-20.flex.items-center.justify-between.px-11.py-
    原生结构: .ms-container[!overflow-x-scroll whitespace-nowrap] > .flex.w-max > [data-id=details]
              每张卡 = .relative.flex.flex-col.w-[260px].max-h-[260px]（3 子；海报式，缩略图在顶）
    目标: 列表竖排；每行 = 180px 16:9 缩略图(左，首子节点) + 文本(右，其余子节点自动堆叠)。
-   仅作用于两栏列(${COL})内，避免误伤首页「继续观看」等同名卡。 */
+   ⚠ 坑1(lc-982 实测): 本段每条规则都必须用「> :nth-child(2)」收窄到选集区。
+     右栏「演职人员」的横滑容器带完全相同的 .ms-container[overflow-x-scroll] > .w-max 结构，
+     写成 COL 后代选择器会把演员一起改成竖排(单个竖向排列)。
+   ⚠ 坑2: img 规则必须限定在「> :first-child img」(缩略图内)。写成「[data-id=details] img」
+     会把清晰度角标/播放按钮等小图也强制拉成 16:9 满宽。
+   ⚠ 坑3: 本文件 CSS 整体是反引号模板字符串，注释里绝不能出现反引号，否则模板提前闭合(tsc TS1109)。 */
 /* 选集区(nth-child 2)及其直接 .relative 包裹层：原生为定高横滑带，可能带 overflow/max-h
    会裁掉竖排后变高的列表 → 强制 auto 高度 + visible，让列表自然展开、页面正常滚动。 */
 body.fnos-beautify ${COL} > :nth-child(2),
 body.fnos-beautify ${COL} > :nth-child(2) > .relative{
   height:auto !important; max-height:none !important; overflow:visible !important;
 }
-body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"]{
+body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"]{
   overflow:visible !important;
   white-space:normal !important;
   max-height:none !important; height:auto !important;
   padding:0 44px !important;   /* 与「选集」标题 px-11(44px) 左右对齐 */
 }
-body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"] > [class*="w-max"]{
+body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"] > [class*="w-max"]{
   display:flex !important; flex-direction:column !important;
   width:100% !important; height:auto !important; gap:0 !important;
 }
-body.fnos-beautify ${COL} [data-id="details"]{
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]{
   display:grid !important;
   grid-template-columns:180px minmax(0,1fr) !important;
   grid-auto-rows:min-content !important;
@@ -116,14 +128,18 @@ body.fnos-beautify ${COL} [data-id="details"]{
   border-radius:12px !important;
   transition:background .2s ease !important;
 }
-/* 缩略图 = 卡片首个子节点（原生 flex-col 海报式：图在顶）→ 固定左列并跨行居中；
-   其余文本子节点由 Grid 自动流入右列逐行堆叠，无需知道其类名/顺序。 */
-body.fnos-beautify ${COL} [data-id="details"] > :first-child{
+/* 缩略图 = 卡片首子节点（原生 flex-col 海报式：图在顶）→ 固定左列并跨行居中；
+   其余文本子节点由 Grid 自动流入右列逐行堆叠，无需知道其类名/顺序。
+   ⚠ 必须清掉原生给它的高度约束(定高/aspect 类)：否则容器比 16:9 图高出一截，
+     内部 absolute 的清晰度角标(1080)/播放按钮会掉到图片下方空白处 → 角标错位。 */
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child{
   grid-column:1 !important; grid-row:1 / span 3 !important;
   align-self:center !important; justify-self:start !important;
   width:180px !important; max-width:180px !important;
+  height:auto !important; min-height:0 !important; max-height:none !important;
+  position:relative !important;
 }
-body.fnos-beautify ${COL} [data-id="details"] img{
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] > :first-child img{
   display:block !important; width:100% !important; height:auto !important;
   aspect-ratio:16 / 9 !important; object-fit:cover !important;
   border-radius:10px !important;
@@ -131,11 +147,11 @@ body.fnos-beautify ${COL} [data-id="details"] img{
   transition:transform .34s cubic-bezier(.25,.1,.25,1) !important;
 }
 /* 行间发丝分隔（相邻卡）+ 悬停微底色 & 缩略图微放大（克制，无 lift/无大阴影） */
-body.fnos-beautify ${COL} [data-id="details"] + [data-id="details"]{
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="details"]{
   border-top:1px solid var(--fnos-hairline-soft) !important;
 }
-body.fnos-beautify ${COL} [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
-body.fnos-beautify ${COL} [data-id="details"]:hover img{ transform:scale(1.035) !important; }
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
+body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child img{ transform:scale(1.035) !important; }
 
 /* ===== E. 演职人员 / 人物项：去 lift，仅透明度反馈（右列原生横滑，保持不动）===== */
 body.fnos-beautify a[href*="/v/person/"]{
@@ -212,9 +228,8 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-beautify-card__star{ color:#ff9f0a !important; font-size:13px !important; line-height:1 !important; }
 .fnos-beautify-card__score{ font-size:17px !important; font-weight:600 !important; letter-spacing:-.01em !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
 .fnos-beautify-card__votes{ font-size:12px !important; color:var(--fnos-muted) !important; }
-/* 信息行：label + value，行间发丝线（Apple 设置式列表，非盒子） */
-.fnos-beautify-card__row{ display:flex !important; gap:14px !important; align-items:baseline !important; padding:9px 0 !important; }
-.fnos-beautify-card__row + .fnos-beautify-card__row{ border-top:1px solid var(--fnos-hairline-soft) !important; }
+/* 信息行：label + value，纯留白分隔（无横线——用户明确要求「内部文字不要加线框」） */
+.fnos-beautify-card__row{ display:flex !important; gap:14px !important; align-items:baseline !important; padding:5px 0 !important; }
 .fnos-beautify-card__k{ flex:0 0 62px !important; font-size:12.5px !important; color:var(--fnos-muted) !important; }
 .fnos-beautify-card__v{ flex:1 1 auto !important; min-width:0 !important; font-size:13px !important; color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important; }
 .fnos-beautify-card__desc{ margin-top:14px !important; font-size:13px !important; line-height:1.72 !important; color:var(--semi-color-text-1,#3c3c43) !important; cursor:pointer !important; }
@@ -225,7 +240,7 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-beautify-card__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
 .fnos-beautify-card__loading,.fnos-beautify-card__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
 .fnos-beautify-card__foot{
-  margin-top:16px !important; padding-top:11px !important; border-top:1px solid var(--fnos-hairline) !important;
+  margin-top:18px !important;
   display:flex !important; justify-content:space-between !important; align-items:center !important;
   font-size:11px !important; color:var(--fnos-muted) !important;
 }
