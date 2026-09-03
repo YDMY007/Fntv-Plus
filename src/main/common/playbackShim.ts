@@ -289,13 +289,19 @@ class PlaybackShim {
 
     /**
      * 解析应回写给 PotPlayer 的 Content-Type。
-     * - 上游已给出明确的 video/* 时原样保留；
-     * - 否则按 URL 扩展名（shim URL 恒为 .mp4）回写为标准 video/* MIME，
-     *   规避 fnOS 返回 application/octet-stream 时 PotPlayer 拒绝打开的问题。
+     * - 上游已给出明确的 video/* 或 HLS 播放列表(application/vnd.apple.mpegurl 等)时原样保留；
+     * - 否则（如 fnOS 本地 NAS range 返回 application/octet-stream）才按 shim URL 扩展名（恒为 .mp4）
+     *   回写为标准 video/* MIME，规避 PotPlayer 因 octet-stream 拒绝打开。
+     * ⚠️ 不能因为 shim 自身 URL 恒为 .mp4 就把上游真实的 HLS 播放列表(m3u8)改写成 video/mp4：
+     *   PotPlayer 信任 Content-Type，看到 video/mp4 会把播放列表当单文件解封装而失败；
+     *   MPV 按内容探测故不受影响——这正是「strm(MPV 能播 / PotPlayer 失败)」的根因(lc-995)。
      */
     private resolveContentType(targetUrl: string, reqPath: string, upstreamType?: string): string | undefined {
-        if (upstreamType && /^video\//i.test(upstreamType as string)) {
-            return upstreamType as string;
+        const ut = (upstreamType || '').toLowerCase();
+        const isHls = /mpegurl|mpeg\+url|x-mpegurl|vnd\.apple\.mpegurl/i.test(ut)
+            || /\.m3u8?(\?|#|$)/i.test(targetUrl || '');
+        if ((ut && /^video\//i.test(ut)) || isHls) {
+            return upstreamType || 'application/vnd.apple.mpegurl';
         }
         const path = reqPath || targetUrl;
         const ext = (path.split('?')[0].split('#')[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
