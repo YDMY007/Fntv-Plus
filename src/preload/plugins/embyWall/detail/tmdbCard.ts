@@ -198,11 +198,13 @@ const STATUS_CN: Record<string, string> = {
 
 function buildCardHtml(d: any): string {
   const out: string[] = [];
+  // 信息行：纯文本 label+value，无 pill / 无 chip；分隔与留白交给 CSS（发丝线 + padding）。
   const row = (k: string, v: string): void => {
     if (v) out.push(`<div class="fnos-beautify-card__row"><span class="fnos-beautify-card__k">${esc(k)}</span><span class="fnos-beautify-card__v">${v}</span></div>`);
   };
-  const tags = (list: any[], max = 8): string => (Array.isArray(list) && list.length)
-    ? `<span class="fnos-beautify-card__tags">${list.slice(0, max).map((t) => `<span class="fnos-beautify-card__tag">${esc(t)}</span>`).join('')}</span>` : '';
+  // 列表 → 「 · 」分隔的纯文本（取代旧版圆角 pill，根治「太多小框」）。
+  const inline = (list: any[], max = 8): string =>
+    (Array.isArray(list) && list.length) ? esc(list.slice(0, max).filter(Boolean).join(' · ')) : '';
 
   const nameLine = [esc(d.title || '')];
   if (d.originalTitle && d.originalTitle !== d.title) nameLine.push(`<span class="fnos-beautify-card__orig">${esc(d.originalTitle)}</span>`);
@@ -210,36 +212,31 @@ function buildCardHtml(d: any): string {
 
   if (d.rating) {
     const votes = d.votes ? `<span class="fnos-beautify-card__votes">${Number(d.votes).toLocaleString('zh-CN')} 人评分</span>` : '';
-    out.push(`<div class="fnos-beautify-card__rating"><b class="fnos-beautify-card__score">${Number(d.rating).toFixed(1)}</b><span> / 10</span> ${votes}</div>`);
+    out.push(`<div class="fnos-beautify-card__rating"><span class="fnos-beautify-card__star">★</span><b class="fnos-beautify-card__score">${Number(d.rating).toFixed(1)}</b>${votes}</div>`);
   }
 
   const st = STATUS_CN[d.status] || d.status || '';
   const dateParts: string[] = [];
   if (d.airDate) dateParts.push('首播 ' + d.airDate);
   if (d.lastAirDate && d.lastAirDate !== d.airDate) dateParts.push('完结 ' + d.lastAirDate);
-  if (st || dateParts.length) row('状态', [esc(st), esc(dateParts.join(' · '))].filter(Boolean).join(' · '));
+  if (st || dateParts.length) row('状态', esc([st, dateParts.join(' · ')].filter(Boolean).join(' · ')));
 
+  // 规模：季 / 集 + 本季集数合并为一行（去掉旧版重复的「第 N 季」独立行）。
   const cntParts: string[] = [];
   if (d.seasons) cntParts.push(d.seasons + ' 季');
   if (d.episodes) cntParts.push(d.episodes + ' 集');
+  if (d.season && d.season.episodeCount) cntParts.push('本季 ' + d.season.episodeCount + ' 集');
   if (cntParts.length) row('规模', esc(cntParts.join(' · ')));
-  if (d.season) {
-    const sp: string[] = [];
-    if (d.season.episodeCount) sp.push(d.season.episodeCount + ' 集');
-    if (d.season.airDate) sp.push('首播 ' + d.season.airDate);
-    row('第 ' + d.season.seasonNumber + ' 季', [esc(d.season.name), esc(sp.join(' · '))].filter(Boolean).join(' · '));
-  }
+
   if (d.runtimeAvg) {
     const rt = d.runtimeMin && d.runtimeMax && d.runtimeMin !== d.runtimeMax ? `${runtime(d.runtimeMin)} ~ ${runtime(d.runtimeMax)}` : runtime(d.runtimeAvg);
     row('单集', esc(rt));
   }
-  row('类型', tags(d.genres));
+  row('类型', inline(d.genres));
   if (Array.isArray(d.networks) && d.networks.length) row('首播平台', esc(d.networks.join(' / ')));
   if (Array.isArray(d.createdBy) && d.createdBy.length) row('主创', esc(d.createdBy.join(' / ')));
-  if (Array.isArray(d.cast) && d.cast.length) {
-    const chips = d.cast.slice(0, 10).map((c: any) => `<span class="fnos-beautify-card__tag">${esc(c.name || '')}${c.character ? `<i class="fnos-beautify-card__char">${esc(c.character)}</i>` : ''}</span>`).join('');
-    row('主演', `<span class="fnos-beautify-card__tags">${chips}</span>`);
-  }
+  // 主演：姓名「 · 」分隔纯文本（去掉旧版最多 10 个圆角 chip；角色/头像见下方原生「演职人员」区）。
+  if (Array.isArray(d.cast) && d.cast.length) row('主演', inline(d.cast.map((c: any) => c && c.name).filter(Boolean), 8));
   if (d.overview) out.push(`<div class="fnos-beautify-card__desc fnos-beautify-card__clamp">${esc(d.overview)}</div>`);
 
   const links: string[] = [];

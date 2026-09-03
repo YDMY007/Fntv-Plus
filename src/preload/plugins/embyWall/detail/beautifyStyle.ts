@@ -1,15 +1,17 @@
-// embyWall/detail/beautifyStyle.ts — 详情页美化样式表（lc-980 重写）
+// embyWall/detail/beautifyStyle.ts — 详情页美化样式表（lc-982 Apple/HIG 重写）
 // ─────────────────────────────────────────────────────────────────────────────
-// 设计原则（根治旧版卡顿/错乱）：
-//   1. CSS 优先、零节点搬运：两栏布局用 CSS Grid 直接作用在原生内容列上
-//      （`:has(> hero)` 唯一命中 hero 的父列，再用 `> :nth-child(n)` 分区），
-//      绝不移动/重排任何 React 原生节点 → React 重渲染时选择器自动重新匹配，不再打架。
-//   2. 只增不改：全表只依赖 body.fnos-beautify 作用域；backdrop / 加载层 / TMDB 卡是注入节点。
-//   3. 确定性对比度：靠注入底图的固定暗渐变 scrim 保证文字可读，无运行时亮度采样。
-//   4. 悬停用 CSS :hover，不用 JS 逐卡绑定监听器。
-//   5. 两栏门控 `:has([data-id="details"])`：仅 season 页(有选集)走两栏；
-//      movie/tv 无集卡 → 自动降级为原生单列 + 底图 + 磨砂，纯 CSS 无需 JS 判定。
-// 视觉：简化轻量版——实心磨砂卡片(少 backdrop-filter)、克制圆角/阴影/过渡。
+// 设计原则（根治 lc-980「太多小框」的盒子堆砌，转向 Apple 排版主导）：
+//   1. CSS 优先、零节点搬运：两栏 Grid + 选集竖排全部作用在原生节点上
+//      （`:has(> hero)` 唯一命中 hero 父列，`> :nth-child(n)` 分区），
+//      绝不移动/重排任何 React 原生节点 → React 重渲染时选择器自动重新匹配。
+//   2. 去盒化：靠「留白 + 发丝线 + 排版层级」承载结构，不用边框/阴影/圆角 pill 包一切。
+//      信息面板透明无框；类型/主演为「 · 」分隔纯文本（不再是 chip）。
+//   3. 语义 token 明暗两套（--fnos-*）：accent / hairline / row-hover / scrim 一处切换，
+//      文本色沿用 Semi 主题变量 → 浅色=通透白磨砂(Apple Light)，深色=沉浸暗背景(Apple TV)。
+//   4. 确定性对比度：backdrop scrim 随主题自适应，保证文本永远落在可读背景上，无运行时亮度采样。
+//   5. 悬停用 CSS :hover（微底色 / 缩略图微放大），不用 JS 逐卡绑定，也不用 lift+大阴影。
+//   6. 两栏门控 `:has([data-id="details"])`：仅 season 页(有选集)走两栏；movie/tv 自动降级单列。
+//   7. 低 GPU：全表零 backdrop-filter（磨砂观感靠半透明 scrim + 模糊底图，不实时滤镜）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STYLE_ID = 'fnos-beautify-css';
@@ -21,13 +23,37 @@ const HERO = '.semi-always-dark[class*="h-[470px]"]';
 const COL = `:has(> ${HERO}):has([data-id="details"])`;
 
 export const BEAUTIFY_CSS = `
+/* ===== 0. 语义设计 token（明/暗两套；文本色沿用 Semi 主题变量，无需在此重复）===== */
+body.fnos-beautify{
+  --fnos-accent:#0071e3;
+  --fnos-hairline:rgba(0,0,0,.10);
+  --fnos-hairline-soft:rgba(0,0,0,.055);
+  --fnos-row-hover:rgba(0,0,0,.035);
+  --fnos-muted:#86868b;
+  --fnos-backdrop-img-opacity:.30;
+  --fnos-scrim-top:rgba(250,250,252,.62);
+  --fnos-scrim-mid:rgba(250,250,252,.82);
+  --fnos-scrim-bot:rgba(250,250,252,.92);
+}
+html.dark body.fnos-beautify{
+  --fnos-accent:#0a84ff;
+  --fnos-hairline:rgba(255,255,255,.14);
+  --fnos-hairline-soft:rgba(255,255,255,.075);
+  --fnos-row-hover:rgba(255,255,255,.06);
+  --fnos-muted:#98989d;
+  --fnos-backdrop-img-opacity:.42;
+  --fnos-scrim-top:rgba(10,10,12,.32);
+  --fnos-scrim-mid:rgba(10,10,12,.55);
+  --fnos-scrim-bot:rgba(10,10,12,.78);
+}
+
 /* ===== A. 两栏 Grid（仅 season 页；零节点搬运，React-proof）===== */
 body.fnos-beautify ${COL}{
   display:grid !important;
   grid-template-columns:minmax(0,60fr) minmax(0,40fr) !important;
   grid-template-rows:auto auto auto !important;
-  column-gap:24px !important;
-  row-gap:16px !important;
+  column-gap:32px !important;
+  row-gap:20px !important;
   align-items:start !important;
   align-content:start !important;
   width:100% !important;
@@ -35,9 +61,9 @@ body.fnos-beautify ${COL}{
 }
 /* hero 跨全宽(row1) */
 body.fnos-beautify ${COL} > ${HERO}{ grid-area:1 / 1 / 2 / 3 !important; }
-/* 选集：左列 row2 */
+/* 选集：左列 row2（竖向列表，占 6 成） */
 body.fnos-beautify ${COL} > :nth-child(2){ grid-area:2 / 1 / 3 / 2 !important; min-width:0 !important; }
-/* 演职人员：右列 row2（与选集并排，顶部对齐） */
+/* 演职人员 + 注入的剧集信息卡：右列 row2（占 4 成，顶部对齐） */
 body.fnos-beautify ${COL} > :nth-child(3){ grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important; }
 /* 链接(IMDB)：全宽 footer row3 */
 body.fnos-beautify ${COL} > :nth-child(4){ grid-area:3 / 1 / 4 / 3 !important; min-width:0 !important; }
@@ -54,48 +80,94 @@ body.fnos-beautify div.relative.z-20.flex.items-center.justify-between.px-11.py-
   border:none !important;
 }
 
-/* ===== D. 选集卡：实心磨砂 + 克制悬停（简化轻量版，不用 backdrop-filter）===== */
-body.fnos-beautify [data-id="details"]{
-  background:var(--semi-color-bg-2,#fff) !important;
-  border:1px solid var(--semi-color-border,rgba(0,0,0,.07)) !important;
-  border-radius:14px !important;
-  box-shadow:0 2px 10px rgba(0,0,0,.05) !important;
-  transition:transform .22s cubic-bezier(.25,.1,.25,1), box-shadow .22s ease, border-color .22s ease !important;
+/* ===== D. 选集：横向滚动 → Apple TV+ 式竖向行（CSS-only，零节点搬运）=====
+   原生结构: .ms-container[!overflow-x-scroll whitespace-nowrap] > .flex.w-max > [data-id=details]
+             每张卡 = .relative.flex.flex-col.w-[260px].max-h-[260px]（3 子；海报式，缩略图在顶）
+   目标: 列表竖排；每行 = 180px 16:9 缩略图(左，首子节点) + 文本(右，其余子节点自动堆叠)。
+   仅作用于两栏列(${COL})内，避免误伤首页「继续观看」等同名卡。 */
+/* 选集区(nth-child 2)及其直接 .relative 包裹层：原生为定高横滑带，可能带 overflow/max-h
+   会裁掉竖排后变高的列表 → 强制 auto 高度 + visible，让列表自然展开、页面正常滚动。 */
+body.fnos-beautify ${COL} > :nth-child(2),
+body.fnos-beautify ${COL} > :nth-child(2) > .relative{
+  height:auto !important; max-height:none !important; overflow:visible !important;
 }
-body.fnos-beautify [data-id="details"]:hover{
-  transform:translateY(-2px) !important;
-  box-shadow:0 10px 26px rgba(0,0,0,.11) !important;
-  border-color:var(--semi-color-border,rgba(0,0,0,.12)) !important;
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"]{
+  overflow:visible !important;
+  white-space:normal !important;
+  max-height:none !important; height:auto !important;
+  padding:0 44px !important;   /* 与「选集」标题 px-11(44px) 左右对齐 */
 }
-body.fnos-beautify [data-id="details"] img{ border-radius:10px !important; }
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"] > [class*="w-max"]{
+  display:flex !important; flex-direction:column !important;
+  width:100% !important; height:auto !important; gap:0 !important;
+}
+body.fnos-beautify ${COL} [data-id="details"]{
+  display:grid !important;
+  grid-template-columns:180px minmax(0,1fr) !important;
+  grid-auto-rows:min-content !important;
+  align-items:center !important;
+  gap:3px 18px !important;
+  width:100% !important; max-width:none !important;
+  height:auto !important; min-height:0 !important; max-height:none !important;
+  padding:14px 0 !important;
+  white-space:normal !important;
+  background:transparent !important;
+  border:none !important; box-shadow:none !important;
+  border-radius:12px !important;
+  transition:background .2s ease !important;
+}
+/* 缩略图 = 卡片首个子节点（原生 flex-col 海报式：图在顶）→ 固定左列并跨行居中；
+   其余文本子节点由 Grid 自动流入右列逐行堆叠，无需知道其类名/顺序。 */
+body.fnos-beautify ${COL} [data-id="details"] > :first-child{
+  grid-column:1 !important; grid-row:1 / span 3 !important;
+  align-self:center !important; justify-self:start !important;
+  width:180px !important; max-width:180px !important;
+}
+body.fnos-beautify ${COL} [data-id="details"] img{
+  display:block !important; width:100% !important; height:auto !important;
+  aspect-ratio:16 / 9 !important; object-fit:cover !important;
+  border-radius:10px !important;
+  box-shadow:0 2px 12px rgba(0,0,0,.16) !important;
+  transition:transform .34s cubic-bezier(.25,.1,.25,1) !important;
+}
+/* 行间发丝分隔（相邻卡）+ 悬停微底色 & 缩略图微放大（克制，无 lift/无大阴影） */
+body.fnos-beautify ${COL} [data-id="details"] + [data-id="details"]{
+  border-top:1px solid var(--fnos-hairline-soft) !important;
+}
+body.fnos-beautify ${COL} [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
+body.fnos-beautify ${COL} [data-id="details"]:hover img{ transform:scale(1.035) !important; }
 
-/* ===== E. 演职人员/人物项：轻量磨砂 ===== */
+/* ===== E. 演职人员 / 人物项：去 lift，仅透明度反馈（右列原生横滑，保持不动）===== */
 body.fnos-beautify a[href*="/v/person/"]{
   border-radius:14px !important;
-  transition:transform .22s cubic-bezier(.25,.1,.25,1) !important;
+  transition:opacity .2s ease !important;
 }
-body.fnos-beautify a[href*="/v/person/"]:hover{ transform:translateY(-2px) !important; }
+body.fnos-beautify a[href*="/v/person/"]:hover{ opacity:.8 !important; }
 body.fnos-beautify a[href*="/v/person/"] img{ border-radius:12px !important; }
 
 /* ===== F. hero 海报微投影（hero 整体保持原生，只让海报更立体）===== */
 body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .shrink-0 img{
-  box-shadow:0 12px 34px rgba(0,0,0,.32) !important;
+  box-shadow:0 16px 44px rgba(0,0,0,.34) !important;
 }
 
-/* ===== G. 注入的全屏底图层（backdrop.ts 创建）===== */
+/* ===== G. 注入的全屏底图层（backdrop.ts 创建）：明暗自适应 scrim ===== */
 .fnos-detail-backdrop{
   position:fixed !important; inset:0 !important; z-index:-1 !important;
   pointer-events:none !important; overflow:hidden !important;
 }
 .fnos-detail-backdrop__img{
   position:absolute !important; inset:-8% !important;
-  background-size:cover !important; background-position:center 20% !important;
-  filter:blur(46px) saturate(1.25) !important;
-  transform:scale(1.12) !important; opacity:.55 !important;
+  background-size:cover !important; background-position:center 18% !important;
+  filter:blur(52px) saturate(1.22) !important;
+  transform:scale(1.12) !important;
+  opacity:var(--fnos-backdrop-img-opacity,.30) !important;
 }
 .fnos-detail-backdrop__scrim{
   position:absolute !important; inset:0 !important;
-  background:linear-gradient(to bottom,rgba(0,0,0,.18) 0%,rgba(0,0,0,.34) 42%,rgba(0,0,0,.62) 100%) !important;
+  background:linear-gradient(to bottom,
+    var(--fnos-scrim-top) 0%,
+    var(--fnos-scrim-mid) 42%,
+    var(--fnos-scrim-bot) 100%) !important;
 }
 
 /* ===== H. 瞬间加载层（backdrop.ts 创建）：缓存海报 + 骨架 shimmer，盖住 fnOS 原生白屏 ===== */
@@ -118,61 +190,51 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-instant-skel{ border-radius:8px !important; background:linear-gradient(90deg,rgba(255,255,255,.07) 25%,rgba(255,255,255,.16) 37%,rgba(255,255,255,.07) 63%) !important; background-size:400% 100% !important; animation:fnos-instant-shimmer 1.3s ease infinite !important; }
 @keyframes fnos-instant-shimmer{ 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 
-/* ===== I. 延后注入的 TMDB 信息卡（tmdbCard.ts 创建，追加进右栏）===== */
+/* ===== I. 延后注入的 TMDB 剧集信息卡（tmdbCard.ts，追加进右列）：Apple 排版主导，透明无框 ===== */
 .fnos-beautify-card{
-  background:var(--semi-color-bg-2,#fff) !important;
-  border:1px solid var(--semi-color-border,rgba(0,0,0,.07)) !important;
-  border-radius:16px !important;
-  box-shadow:0 3px 16px rgba(0,0,0,.06) !important;
-  padding:18px 20px !important; margin-bottom:16px !important;
+  background:transparent !important;
+  border:none !important; box-shadow:none !important; border-radius:0 !important;
+  padding:2px 0 0 !important; margin:0 0 6px !important;
   color:var(--semi-color-text-0,#1d1d1f) !important;
-  font-size:13px !important; line-height:1.7 !important;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","HarmonyOS Sans SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif !important;
+  font-size:13px !important; line-height:1.6 !important;
+  -webkit-font-smoothing:antialiased !important;
 }
-.fnos-beautify-card__title{ font-size:16px !important; font-weight:700 !important; margin-bottom:8px !important; line-height:1.35 !important; }
-.fnos-beautify-card__orig{ font-size:12px !important; font-weight:400 !important; color:var(--semi-color-text-2,#86868b) !important; margin-left:6px !important; }
-.fnos-beautify-card__rating{ margin-bottom:10px !important; font-size:13px !important; color:var(--semi-color-text-2,#86868b) !important; }
-.fnos-beautify-card__score{ color:#f5a623 !important; font-weight:800 !important; font-size:20px !important; }
-.fnos-beautify-card__votes{ margin-left:6px !important; font-size:12px !important; }
-.fnos-beautify-card__row{ display:flex !important; gap:8px !important; margin-bottom:5px !important; align-items:baseline !important; }
-.fnos-beautify-card__k{ color:var(--semi-color-text-2,#86868b) !important; flex:0 0 56px !important; }
-.fnos-beautify-card__v{ color:var(--semi-color-text-0,#1d1d1f) !important; min-width:0 !important; flex:1 1 auto !important; }
-.fnos-beautify-card__tags{ display:inline-flex !important; flex-wrap:wrap !important; gap:5px !important; }
-.fnos-beautify-card__tag{
-  display:inline-flex !important; align-items:center !important; gap:4px !important;
-  padding:1px 9px !important; border-radius:20px !important; font-size:11px !important;
-  background:var(--semi-color-fill-1,#f5f5f7) !important; color:var(--semi-color-text-1,#3c3c43) !important;
-  border:1px solid var(--semi-color-border,rgba(0,0,0,.05)) !important;
+.fnos-beautify-card__title{
+  font-size:21px !important; font-weight:600 !important; letter-spacing:-.022em !important;
+  line-height:1.22 !important; margin:0 0 3px !important; color:var(--semi-color-text-0,#1d1d1f) !important;
 }
-.fnos-beautify-card__char{ font-style:normal !important; color:var(--semi-color-text-2,#86868b) !important; }
-.fnos-beautify-card__char::before{ content:'· ' !important; }
-.fnos-beautify-card__desc{ margin-top:10px !important; color:var(--semi-color-text-1,#3c3c43) !important; cursor:pointer !important; }
-.fnos-beautify-card__clamp{ display:-webkit-box !important; -webkit-line-clamp:3 !important; -webkit-box-orient:vertical !important; overflow:hidden !important; }
-.fnos-beautify-card__links{ margin-top:12px !important; display:flex !important; flex-wrap:wrap !important; gap:6px !important; align-items:center !important; font-size:12px !important; }
-.fnos-beautify-card__links a{ color:#4a7fe0 !important; text-decoration:none !important; }
+.fnos-beautify-card__orig{
+  display:block !important; font-size:12.5px !important; font-weight:400 !important;
+  letter-spacing:0 !important; color:var(--fnos-muted) !important; margin-top:3px !important;
+}
+.fnos-beautify-card__rating{ display:flex !important; align-items:baseline !important; gap:7px !important; margin:12px 0 4px !important; }
+.fnos-beautify-card__star{ color:#ff9f0a !important; font-size:13px !important; line-height:1 !important; }
+.fnos-beautify-card__score{ font-size:17px !important; font-weight:600 !important; letter-spacing:-.01em !important; color:var(--semi-color-text-0,#1d1d1f) !important; }
+.fnos-beautify-card__votes{ font-size:12px !important; color:var(--fnos-muted) !important; }
+/* 信息行：label + value，行间发丝线（Apple 设置式列表，非盒子） */
+.fnos-beautify-card__row{ display:flex !important; gap:14px !important; align-items:baseline !important; padding:9px 0 !important; }
+.fnos-beautify-card__row + .fnos-beautify-card__row{ border-top:1px solid var(--fnos-hairline-soft) !important; }
+.fnos-beautify-card__k{ flex:0 0 62px !important; font-size:12.5px !important; color:var(--fnos-muted) !important; }
+.fnos-beautify-card__v{ flex:1 1 auto !important; min-width:0 !important; font-size:13px !important; color:var(--semi-color-text-0,#1d1d1f) !important; word-break:break-word !important; }
+.fnos-beautify-card__desc{ margin-top:14px !important; font-size:13px !important; line-height:1.72 !important; color:var(--semi-color-text-1,#3c3c43) !important; cursor:pointer !important; }
+.fnos-beautify-card__clamp{ display:-webkit-box !important; -webkit-line-clamp:4 !important; -webkit-box-orient:vertical !important; overflow:hidden !important; }
+.fnos-beautify-card__links{ margin-top:16px !important; display:flex !important; flex-wrap:wrap !important; gap:4px 12px !important; align-items:center !important; font-size:12.5px !important; }
+.fnos-beautify-card__links a{ color:var(--fnos-accent) !important; text-decoration:none !important; font-weight:500 !important; }
 .fnos-beautify-card__links a:hover{ text-decoration:underline !important; }
-.fnos-beautify-card__links span{ color:var(--semi-color-text-2,#86868b) !important; }
-.fnos-beautify-card__loading,.fnos-beautify-card__error{ color:var(--semi-color-text-2,#86868b) !important; font-size:12px !important; padding:4px 0 !important; }
+.fnos-beautify-card__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
+.fnos-beautify-card__loading,.fnos-beautify-card__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
 .fnos-beautify-card__foot{
-  margin-top:12px !important; padding-top:10px !important; border-top:1px solid var(--semi-color-border,rgba(0,0,0,.06)) !important;
+  margin-top:16px !important; padding-top:11px !important; border-top:1px solid var(--fnos-hairline) !important;
   display:flex !important; justify-content:space-between !important; align-items:center !important;
-  font-size:11px !important; color:var(--semi-color-text-2,#86868b) !important;
+  font-size:11px !important; color:var(--fnos-muted) !important;
 }
 .fnos-beautify-card__refresh{
-  background:var(--semi-color-fill-1,#f5f5f7) !important; border:1px solid var(--semi-color-border,rgba(0,0,0,.08)) !important;
-  border-radius:8px !important; padding:2px 10px !important; cursor:pointer !important;
-  color:var(--semi-color-text-1,#3c3c43) !important; font-size:11px !important; transition:background .18s ease !important;
+  background:transparent !important; border:none !important; padding:2px 0 !important; cursor:pointer !important;
+  color:var(--fnos-accent) !important; font-size:11.5px !important; font-weight:500 !important; font-family:inherit !important;
+  transition:opacity .18s ease !important;
 }
-.fnos-beautify-card__refresh:hover{ background:var(--semi-color-fill-2,#e9e9ec) !important; }
-
-/* ===== J. 暗色模式覆盖 ===== */
-html.dark body.fnos-beautify [data-id="details"],
-html.dark body.fnos-beautify .fnos-beautify-card{
-  background:var(--semi-color-bg-2,#1c1c1e) !important;
-  border-color:rgba(255,255,255,.08) !important;
-  box-shadow:0 2px 12px rgba(0,0,0,.4) !important;
-}
-html.dark body.fnos-beautify [data-id="details"]:hover{ box-shadow:0 10px 28px rgba(0,0,0,.55) !important; }
-html.dark body.fnos-beautify .fnos-detail-backdrop__img{ opacity:.42 !important; }
+.fnos-beautify-card__refresh:hover{ opacity:.6 !important; }
 `;
 
 /** 注入美化样式表（幂等：已存在则跳过）。全程只注入这一份 <style>，一次成型。 */
