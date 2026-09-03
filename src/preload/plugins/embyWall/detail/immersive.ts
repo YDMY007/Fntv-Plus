@@ -19,6 +19,7 @@ import { injectBeautifyStyle } from './beautifyStyle';
 import { injectBackdrop, removeBackdrop, hideInstantLayer, clearInstantLayer, showInstantLayer, cacheHeroImages } from './backdrop';
 import { scheduleTmdbCard, removeTmdbCard } from './tmdbCard';
 import { scheduleEpResolution, removeEpResolution } from './epResolution';
+import { applyHeroTint, clearHeroTint } from './heroTint';
 
 /** observer 硬上限生命周期(ms)：超时强制断开，绝不变永久轮询(旧版病根)。 */
 const OBS_MAX_LIFE = 4000;
@@ -41,6 +42,7 @@ function _apply(view: HTMLElement, hero: HTMLElement): void {
   injectBeautifyStyle();                 // 幂等，全程只一份 <style>
   document.body.classList.add('fnos-beautify');
   injectBackdrop(hero);                  // 复用 hero 已加载剧照，无新网络请求
+  applyHeroTint(hero);                   // 从同一张剧照取主色 → 顶栏玻璃条 + hero 遮罩的同色系底色
   hideInstantLayer();                    // 内容就绪 → 淡出瞬间加载层
   cacheHeroImages(location.href, hero);  // 存海报/剧照供下次进同页秒出
   scheduleTmdbCard(view);                // 延后异步注入信息卡（非阻塞，失败静默）
@@ -49,13 +51,13 @@ function _apply(view: HTMLElement, hero: HTMLElement): void {
   S.detailGlassInited = true;
   _disconnectObs();                      // 一次性：命中即断开
 
-  // hero 剧照可能晚于 settle 才解码/懒加载 → 一次性延迟刷新底图(非轮询)
+  // hero 剧照可能晚于 settle 才解码/懒加载 → 一次性延迟刷新底图与 tint(非轮询)
   clearTimeout(_backdropRefreshTimer);
   _backdropRefreshTimer = window.setTimeout(() => {
     if (_settledHref !== location.href) return;
     const v = findActiveDetailView();
     const h = v && findDetailHero(v);
-    if (h) injectBackdrop(h);
+    if (h) { injectBackdrop(h); applyHeroTint(h); }
   }, BACKDROP_REFRESH_DELAY);
 
   dlog('beautify: 套用完成 href=' + location.pathname);
@@ -78,6 +80,7 @@ function _softReset(): void {
   clearTimeout(_backdropRefreshTimer);
   _settledHref = null;
   removeBackdrop();
+  clearHeroTint();
   removeTmdbCard();
   removeEpResolution();
 }
@@ -121,6 +124,7 @@ export function teardownDetailBeautify(): void {
   _settledHref = null;
   document.body.classList.remove('fnos-beautify');
   removeBackdrop();
+  clearHeroTint();
   removeTmdbCard();
   removeEpResolution();
   clearInstantLayer();

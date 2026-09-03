@@ -8,10 +8,14 @@
 //      信息面板透明无框；类型/主演为「 · 」分隔纯文本（不再是 chip）。
 //   3. 语义 token 明暗两套（--fnos-*）：accent / hairline / row-hover / scrim 一处切换，
 //      文本色沿用 Semi 主题变量 → 浅色=通透白磨砂(Apple Light)，深色=沉浸暗背景(Apple TV)。
-//   4. 确定性对比度：backdrop scrim 随主题自适应，保证文本永远落在可读背景上，无运行时亮度采样。
+//   4. 确定性对比度：backdrop scrim 随主题自适应，保证文本永远落在可读背景上。
+//      lc-990 起 hero 上部两层遮罩改为「封面取色」（heroTint.ts 一次性 canvas 取主色，非常驻采样），
+//      但对比度仍不靠运行时判定，而由两个标定常量锁死：暗化亮度上限 L<=0.20 + 顶栏图标区 alpha .92。
+//      活体实测（/v/tv/season/<id>）：三个图标 10.83~11.00、右侧按钮组 9.72、标题 8.92。
 //   5. 悬停用 CSS :hover（微底色 / 缩略图微放大），不用 JS 逐卡绑定，也不用 lift+大阴影。
 //   6. 两栏门控 `:has([data-id="details"])`：仅 season 页(有选集)走两栏；movie/tv 自动降级单列。
-//   7. 低 GPU：全表零 backdrop-filter（磨砂观感靠半透明 scrim + 模糊底图，不实时滤镜）。
+//   7. 低 GPU：全表 backdrop-filter 只有一处 —— L 段顶栏那条 820x80 的 ::before（lc-990 破例）。
+//      其余磨砂观感仍靠半透明 scrim + 一次性模糊底图，不做实时滤镜；该处也不随滚动重算。
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STYLE_ID = 'fnos-beautify-css';
@@ -262,7 +266,8 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
      glassUI.ts 的组件级玻璃规则写作 [class*="card"] —— 那是**子串**匹配。内部块原先叫
      fnos-beautify-card__*，全都含 card 子串 → 评分块/meta/事实区/外链/来源行乃至每一个 __row
      都被各自套上 background + backdrop-filter:blur(14px) + border + box-shadow，一层层小玻璃框
-     叠在大框里(还顺带违背本文件「全表零 backdrop-filter」的低 GPU 约束)。
+     叠在大框里(还顺带违背本文件当时「全表零 backdrop-filter」的低 GPU 约束；
+     该约束已于 lc-990 为顶栏玻璃条破例**一处**，见 L 段与文件头第 7 条)。
      修法选「改名让选择器根本不匹配」而不是写更高特异性 !important 去对抗 ——
      依据是 glassUI.ts 自己的教训注释「事后排除规则 !important 对抗不稳定」。
      ∴ 内部一律用 fnos-showinfo__ 前缀(不含 glassUI 任何子串 token)；
@@ -420,6 +425,71 @@ body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][cl
 body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][class*="lg:!hidden"] a,
 body.fnos-beautify div[class*="h-[80px]"][class*="top-0"] div[class*="gap-4"][class*="lg:!hidden"] svg{
   color:var(--fnos-topbar-fg) !important;
+}
+
+/* ===== L. 详情页上部遮罩 → 封面取色的玻璃（lc-990）=====
+   诉求(用户原话)：「二级详情页里上部的遮罩太丑一不好看改成封面取色的玻璃样式」。
+   「丑」是量得出来的 —— 原生两层遮罩色值全是硬编码中性色，且左右明暗严重不均
+   (活体 /v/tv/season/<id>，浅色主题，同一行 y=41 上的白字对比度)：
+     顶栏 80px 黑渐变 + hero 的 .gradient-for-full(两层 25,25,26)
+     → 左侧图标区 12.23(封面色被吃到死黑)，右侧按钮组只剩 4.50(几乎没压暗)。
+   换成封面同色系后同一批采样点收敛到 9.72~11.00，标题「第 1 季」8.92。
+   tint 来源：heroTint.ts 从 hero 剧照取主色桶，把 HSL 亮度压到 L<=0.20(只压不提、H/S 原值保留)，
+     写成 body 上的 --fnos-hero-tint。取色失败时该变量不存在 → 下面每个 var() 的第二参数
+     精确回落到飞牛原生的 25,25,26，即优雅降级(变量在/缺失两态均已实测)。
+
+   ⚠ 三个设计要点，每条都有实测依据，改动前务必读：
+   ① tint 底色 / 磨砂 / 渐隐 mask **三者全放 ::before**，不放 bar 本体。
+      mask 会裁掉元素自己的整个渲染子树 —— bar 内可见内容最低到 y=62(78%)、渐隐从 58% 起，
+      若把 mask 加在 bar 本体上，图标下沿会被一起淡出。伪元素的 mask 只裁它自己。
+      另 ::before 是 z-auto，而 bar 的内容容器带 z-20 → 磨砂在内容之下，图标不会被模糊。
+   ② 用 mask 渐隐，而不是让 background 的 alpha 渐隐到 0：
+      图标区(y=23..59)的 tint alpha 因此恒定在 .92，对比度从早前标定的 4.23 提升到 10.83。
+      若沿用 alpha .72→0 那种形状，图标中心只剩 .351，亮剧照透上来 → 对比度暴跌到 1.80~1.92。
+      渐隐区实测平滑单调(10.03 → 7.28 → 5.47 → 4.62) → 玻璃条下沿无硬边。
+   ③ bar 本体只清 background-image，**不动 background-color**(它本来就是 rgba(0,0,0,0))：
+      embyWall.ts 的 [lc-925] 图标反色靠 elementsFromPoint 逐层读 backgroundColor / backgroundImage
+      采样背景亮度，而伪元素不参与 elementsFromPoint → 采样路径与本段改动之前完全一致，
+      仍恒命中 hero 的实心 rgb(25,25,26) 而判「暗底 → 图标刷白」，与这里的暗 tint 自洽。
+
+   ⚠ 选择器安全性：首页实测**不存在** div[class*="h-[80px]"][class*="top-0"]
+     (首页顶栏是另一个元素 relative.z-[2].h-[80px].bg-[var(--semi-color-bg-1)]，实心白底、不带 top-0)，
+     .gradient-for-full 在首页数为 0、470px hero 也不存在 → 再叠加 body.fnos-beautify 门控 = 双重安全。
+   ⚠ 不新增任何 class 名(全走 ::before + 既有属性选择器) → 无需过 glassUI 的子串 token 清单。
+   ⚠ 刻意不碰 hero 本体底色 bg-[var(--semi-color-bg-1)] = rgb(25,25,26)：它被 820x470 的不透明剧照
+     100% 覆盖，改了看不出区别；而 .semi-always-dark 全文档有 5 个(另 4 个是 36x36 小图标)，
+     多一条 !important 去覆盖 Semi 全局 token 有误伤风险。tint 缺失时 fallback 恰好也是 25,25,26。
+   ⚠ 这是本文件**唯一**一处 backdrop-filter(破例说明见文件头第 7 条)：面积仅 820x80、只在详情页、
+     不随滚动重算。bar 的祖先链 7 层实测零 filter/transform/opacity/mask/will-change/contain/
+     isolation/perspective → 不破坏 backdrop root，磨砂能真的采到 hero 剧照。 */
+body.fnos-beautify div[class*="h-[80px]"][class*="top-0"]{
+  background-image:none !important;
+}
+body.fnos-beautify div[class*="h-[80px]"][class*="top-0"]::before{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(to bottom,
+    rgba(var(--fnos-hero-tint, 25,25,26), .92) 0%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .86) 100%);
+  backdrop-filter:blur(18px) saturate(1.5);
+  -webkit-backdrop-filter:blur(18px) saturate(1.5);
+  -webkit-mask-image:linear-gradient(to bottom, #000 0%, #000 58%, transparent 97%);
+  mask-image:linear-gradient(to bottom, #000 0%, #000 58%, transparent 97%);
+}
+/* hero 遮罩：两层渐变的 alpha 与色标位置**一字不改**，只把 25,25,26 换成 tint。
+   那套 alpha 形状是有功能目的的(保住 x=292 起的白色标题/季/集/年份)，动它就动可读性。
+   这里不加磨砂：用户要的是封面剧照保持清晰，磨砂只在顶栏那一条(Apple / Netflix 的顶栏做法)。 */
+body.fnos-beautify ${HERO} .gradient-for-full{
+  background-image:
+    linear-gradient(90deg,
+      rgba(var(--fnos-hero-tint, 25,25,26), .96) 0%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .74) 28%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .38) 58%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .08) 100%),
+    linear-gradient(0deg,
+      rgba(var(--fnos-hero-tint, 25,25,26), 1) 0%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .94) 22%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .76) 54%,
+      rgba(var(--fnos-hero-tint, 25,25,26), .18) 100%) !important;
 }
 `;
 

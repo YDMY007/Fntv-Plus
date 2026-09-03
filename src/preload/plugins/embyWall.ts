@@ -4310,6 +4310,23 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const need = icons.some(i => !i.dataset.fntvTlIcon); // fnOS 重渲染出新 DOM → 标记丢失 → 必须重刷
       const now = Date.now();
       if (!need && now - _tlLastApply < 1500) return;      // 已处理且刚处理过 → 跳过, 保护高频 observer
+      // [lc-990] 详情页美化已套用 → 顶栏是「封面取色的暗化玻璃条」(heroTint.ts 把主色的 HSL 亮度
+      //   压到 L<=0.20 → 底色亮度 <=51)，恒为暗底 → 直接短路，不采样。
+      //   为什么必须短路：detectBehindLuminance 只认 backgroundColor / url() 背景图 / <img>，
+      //   纯 linear-gradient 被它自己跳过(其注释原文「纯渐变无 url() 会自动跳过」)，
+      //   而顶栏那两层遮罩全是渐变；hero 剧照与海报又都带 pointer-events-none
+      //   → elementsFromPoint 永不返回它们。详情页因此恒命中 hero 的实心 rgb(25,25,26)
+      //   而判暗底(实测 lum=25.07)，本来就没错；但 hero 就绪**之前**的那几拍
+      //   (导航后 700/1600/3200ms 重试链)可能命中瞬间加载层或亮背景而误判亮底
+      //   → 图标被刷成 rgba(22,18,32,.92) + 白色发光，压在暗玻璃上实测对比度仅 **1.69** → 不可读。
+      //   ⚠ 只能在本函数内解决：这里写的是 inline !important，优先级高于 beautifyStyle.ts K 段的
+      //     stylesheet !important，K 段压不住它。body 上的 fnos-beautify 由 teardownDetailBeautify
+      //     摘除 → 关掉详情页美化开关或离开详情页后，下面的原采样逻辑自动恢复。
+      if (document.body.classList.contains('fnos-beautify')) {
+        paintTopLeftIcons(icons, 0);
+        _tlLastApply = Date.now();
+        return;
+      }
       let lum: number | null = (_tlLum != null && now - _tlLumTs < 8000) ? _tlLum : null;
       if (lum == null) {
         for (const ic of icons) {
