@@ -12,6 +12,16 @@ export async function fetchImageAuth(fullUrl: string, opts?: { label?: string; i
   // [lc-768] 超时兜底: 网盘/远程直链极易长时间挂起(导致轮播卡 99%)；STRM 用更短超时，同源稍宽。
   const timeoutMs = opts?.timeoutMs ?? (isStrm ? 8000 : 15000);
   if (!fullUrl) { if (isStrm) log('[DIAG] fetchImg 跳过(空URL) label=', label, 'isStrm=true'); return null; }
+  // [lc-992] strm/远程源易瞬断(网盘限流、Authx 偶发失效、偶发 429)：失败/超时重试 1 次(更短超时)，
+  //   提高出图率、降低「卡加载」；同源图片不重试(本就快，重试只加倍耗时且无收益)。
+  const first = await fetchImageOnce(fullUrl, timeoutMs, label, isStrm);
+  if (first || !isStrm) return first;
+  log('[DIAG] fetchImg STRm 首次失败, 重试 1 次 label=', label);
+  return await fetchImageOnce(fullUrl, Math.min(timeoutMs, 6000), label, isStrm);
+}
+
+/** 单次带鉴权拉图→blob URL(绕开<img>无法带Authx头的问题)。[lc-992] 从 fetchImageAuth 抽出，便于 strm 重试。 */
+async function fetchImageOnce(fullUrl: string, timeoutMs: number, label: string, isStrm: boolean): Promise<string | null> {
   const t0 = Date.now();
   const controller = new AbortController();
   const to = window.setTimeout(() => controller.abort(), timeoutMs);
