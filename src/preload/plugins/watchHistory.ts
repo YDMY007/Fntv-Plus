@@ -223,23 +223,34 @@ const WH_CSS = `
 #${PANEL_ID}{position:fixed;inset:0;z-index:2147483640;display:none;overflow:hidden;
   font-family:-apple-system,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;color:var(--wh-text);
-  background:#1c1c1e!important;background-color:#1c1c1e!important;
-  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  /* [lc-1013] 面板底 = 玻璃材质：tint 半透底 + 165deg 亮度光泽渐变 + 真实 backdrop blur
+     （模糊的是面板后方的 fnOS 页面/桌面）。paintBg() 会以同款行内 !important 重涂，
+     JS/CSS 双份保持一致；深浅两套取值在下方 --wh-glass-* 变量。 */
+  background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1,.05)),rgba(255,255,255,var(--wh-sheen2,.012)))!important;
+  background-color:var(--wh-glass-tint,rgba(15,15,20,.78))!important;
+  backdrop-filter:blur(42px) saturate(150%) brightness(var(--wh-glass-bright,.82))!important;
+  -webkit-backdrop-filter:blur(42px) saturate(150%) brightness(var(--wh-glass-bright,.82))!important;
   -webkit-app-region:no-drag} /* fnOS 无边框窗口顶部 drag 区劫持命中测试，面板整体 no-drag 防点击被拖窗口吞掉 */
 #${PANEL_ID}.show{display:block}
 #${PANEL_ID} *{box-sizing:border-box}
 #${PANEL_ID}{--wh-accent:#2997ff;--wh-bg:#1c1c1e;--wh-surface:rgba(255,255,255,.06);
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
-  --wh-track:rgba(255,255,255,.16);--wh-tip:#1c1c1e;--wh-detail:#161618;--wh-star-empty:#3a3a3e;
-  --wh-card-bg:#1a1a1d;--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.16);
+  --wh-track:rgba(255,255,255,.16);--wh-tip:rgba(24,24,30,.85);--wh-detail:rgba(20,20,26,.78);--wh-star-empty:#3a3a3e;
+  --wh-card-bg:rgba(255,255,255,.07);--wh-radius:18px;--wh-hm-0:rgba(255,255,255,.16);
+  --wh-glass-tint:rgba(15,15,20,.78);--wh-sheen1:.05;--wh-sheen2:.012;--wh-glass-bright:.82;
+  --wh-glass-shadow:.38;--wh-card-glass:rgba(255,255,255,.055);
+  --wh-ring:rgba(255,255,255,.07);--wh-hi:rgba(255,255,255,.10);
   --wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353;
   --wh-hm-1a:#1a6b46;--wh-hm-2a:#0c9c49;--wh-hm-3a:#3fd56a;--wh-hm-4a:#6cf080;
   --wh-cell-border:rgba(255,255,255,.14)}
 #${PANEL_ID}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
   --wh-text:#1d1d1f;--wh-text2:#515154;--wh-text3:#86868b;--wh-line:rgba(0,0,0,.1);
-  --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:#fff;
-  --wh-detail:#fff;--wh-star-empty:#d2d2d7;--wh-card-bg:#e9e9ee;--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
+  --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:rgba(255,255,255,.85);
+  --wh-detail:rgba(250,250,254,.78);--wh-star-empty:#d2d2d7;--wh-card-bg:rgba(255,255,255,.55);--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
+  --wh-glass-tint:rgba(246,246,251,.66);--wh-sheen1:.10;--wh-sheen2:.028;--wh-glass-bright:1;
+  --wh-glass-shadow:.16;--wh-card-glass:rgba(255,255,255,.5);
+  --wh-ring:rgba(22,18,34,.08);--wh-hi:rgba(255,255,255,.55);
   --wh-hm-1a:#b6f0c2;--wh-hm-2a:#5fd07e;--wh-hm-3a:#3fae5e;--wh-hm-4a:#2a7d49;
   --wh-cell-border:rgba(27,31,35,.12)}
 
@@ -271,16 +282,17 @@ const WH_CSS = `
    不在面板 DOM 树内 → 面板任何样式/覆盖/事件链均影响不到它。
    事件绑定在 window 捕获阶段（见 bindWindowTopBtns），最外层先执行，免疫 fnOS 页面层拦截。
    浮层自带主题变量（面板外取不到 #fntv-wh 上的 --wh-*），明暗由 openPanel 同步 .light 类。 */
-#fntv-wh-topbtns{--wh-surface:#17171a;--wh-surface2:#232327;--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
+#fntv-wh-topbtns{--wh-surface:rgba(255,255,255,.07);--wh-surface2:rgba(255,255,255,.14);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;--wh-accent:#2997ff;
   position:fixed;top:28px;right:28px;z-index:2147483641;
   display:flex;align-items:center;gap:8px;pointer-events:auto;
-  background:#17171a !important;border:1px solid rgba(128,128,128,.18);border-radius:29px;
+  background:rgba(18,18,23,.62) !important;border:1px solid rgba(255,255,255,.09);border-radius:29px;
   padding:0 12px;height:57px;box-sizing:border-box; /* 高度与左侧"观影记录"标题盒子(57px)对齐，按钮垂直居中 */
+  backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);
   box-shadow:0 10px 30px rgba(0,0,0,.35);
   opacity:0;visibility:hidden;transform:translateY(-6px);transition:.15s;
   -webkit-app-region:no-drag} /* ⚠️ 关键：fnOS 无边框窗口顶部是 drag 拖拽区，浮层若不 no-drag，点击会被系统劫持为"拖动窗口"而非按钮点击（hover 正常但 click 永不触发） */
-#fntv-wh-topbtns.light{--wh-surface:#fff;--wh-surface2:#f0f0f2;--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3;
-  background:#fff !important} /* !important 封死 fnOS/Glass UI 对 body>div 的 background:transparent 覆盖 */
+#fntv-wh-topbtns.light{--wh-surface:rgba(255,255,255,.55);--wh-surface2:rgba(255,255,255,.78);--wh-text:#1d1d1f;--wh-text2:#6e6e73;--wh-text3:#86868b;--wh-accent:#0071e3;
+  background:rgba(250,250,253,.62) !important} /* [lc-1013] 玻璃化：半透 tint + blur 取代实心，行内 !important 仍封死 Glass UI 对 body>div 的 transparent 覆盖 */
 #fntv-wh-topbtns.show{opacity:1;visibility:visible;transform:none}
 #fntv-wh-topbtns button{-webkit-app-region:no-drag} /* 按钮逐个 no-drag 双保险（drag 不继承，子元素需显式声明） */
 /* ⚠️ 浮层颜色全部【硬编码】，不依赖 var()——fnOS 环境下变量级联/覆盖异常会导致
@@ -289,13 +301,13 @@ const WH_CSS = `
    ⚠️ CSS 顺序：light 模式规则必须排在 dark 规则【之前】——否则 light 容器下 .light .wh-pill{background:#f0f0f2}
    与 .wh-pill.active{background:#0071e3} 特异性相同(1,2,0)，源码后者胜出→active 背景被 light 默认覆盖→白字看不见。
    排在前面后，active 永远在 light 默认之后胜出（dark 模式无 .light 类，dark active 直接命中）。 */
-#fntv-wh-topbtns.light .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#f0f0f2 !important;border:1px solid transparent;color:#6e6e73 !important;
+#fntv-wh-topbtns.light .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:rgba(255,255,255,.55) !important;border:1px solid transparent;color:#6e6e73 !important;
   cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#fntv-wh-topbtns.light .wh-pill:hover{background:#e4e4e8 !important;color:#1d1d1f !important}
+#fntv-wh-topbtns.light .wh-pill:hover{background:rgba(255,255,255,.78) !important;color:#1d1d1f !important}
 #fntv-wh-topbtns.light .wh-pill.active{background:#0071e3 !important;border-color:#0071e3 !important;color:#fff !important;font-weight:600}
-#fntv-wh-topbtns .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:#232327 !important;border:1px solid transparent;color:#a1a1a6 !important;
-  cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit}
-#fntv-wh-topbtns .wh-pill:hover{background:#2e2e33 !important;color:#f5f5f7 !important}
+#fntv-wh-topbtns .wh-pill{padding:9px 16px;border-radius:22px;font-size:14px;background:rgba(255,255,255,.08) !important;border:1px solid transparent;color:#a1a1a6 !important;
+  cursor:pointer;transition:.15s;white-space:nowrap;font-family:inherit;backdrop-filter:blur(18px) saturate(150%);-webkit-backdrop-filter:blur(18px) saturate(150%)}
+#fntv-wh-topbtns .wh-pill:hover{background:rgba(255,255,255,.15) !important;color:#f5f5f7 !important}
 #fntv-wh-topbtns .wh-pill.active{background:#0071e3 !important;border-color:#0071e3 !important;color:#fff !important;font-weight:600}
 #fntv-wh-topbtns .wh-close{position:relative;z-index:5;flex:none;cursor:pointer;padding:8px 10px;
   font-size:20px;line-height:1;color:#a1a1a6;
@@ -327,7 +339,13 @@ const WH_CSS = `
 /* 顶部两栏布局：左侧统计大盒子 / 右侧热力图盒子，各占一半，等高 */
 #${PANEL_ID} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-top:40px}
 /* 左侧统计盒子（包含观影活跃度标题 + 库存统计 + 趋势 + 4 数字） */
-#${PANEL_ID} .wh-stats-panel{background:var(--wh-surface);border:1px solid var(--wh-line);
+/* [lc-1013] 玻璃卡片材质（与 lc-1012 云母增强同一配方）：tint 卡玻璃 + 光泽渐变 +
+   厚度环/顶缘高光/大软阴影三层 box-shadow，弃 1px 实线边框；自身再 blur 一层(叠在面板玻璃上) */
+#${PANEL_ID} .wh-stats-panel{
+  background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-card-glass)!important;
+  backdrop-filter:blur(26px) saturate(150%)!important;-webkit-backdrop-filter:blur(26px) saturate(150%)!important;
+  border:none!important;
+  box-shadow:inset 0 0 0 1px var(--wh-ring),inset 0 1px 0 var(--wh-hi),0 16px 40px -8px rgba(0,0,0,var(--wh-glass-shadow))!important;
   border-radius:22px;padding:24px;display:flex;flex-direction:column;justify-content:center;gap:18px;min-width:0}
 #${PANEL_ID} .wh-stats-title{font-size:22px;font-weight:700;color:var(--wh-text);letter-spacing:.3px;
   display:flex;align-items:center;gap:10px}
@@ -345,9 +363,13 @@ const WH_CSS = `
 #${PANEL_ID} .wh-stat-row b{font-size:27px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px;color:var(--wh-text)}
 #${PANEL_ID} .wh-stat-row .u{font-size:12px;font-style:normal;font-weight:600;color:var(--wh-text3)}
 #${PANEL_ID} .wh-stat-row .l{font-size:11px;color:var(--wh-text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-/* 右侧热力图盒子（对称样式：背景/边框/圆角） */
+/* 右侧热力图盒子（对称玻璃材质，同 .wh-stats-panel） */
 #${PANEL_ID} .wh-chart-wrap{position:relative;min-width:0;align-self:stretch;
-  background:var(--wh-surface);border:1px solid var(--wh-line);border-radius:22px;
+  background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-card-glass)!important;
+  backdrop-filter:blur(26px) saturate(150%)!important;-webkit-backdrop-filter:blur(26px) saturate(150%)!important;
+  border:none!important;
+  box-shadow:inset 0 0 0 1px var(--wh-ring),inset 0 1px 0 var(--wh-hi),0 16px 40px -8px rgba(0,0,0,var(--wh-glass-shadow))!important;
+  border-radius:22px;
   padding:24px 26px;display:flex;flex-direction:column;justify-content:flex-start}
 /* GitHub 风格观影活跃度贡献热力图：列=周、行=星期，颜色深浅=当天观看作品数 */
 #${PANEL_ID} .wh-heat{margin-top:0}
@@ -440,7 +462,7 @@ const WH_CSS = `
 #${PANEL_ID} .wh-card .badge.air.air-btn:hover{filter:brightness(1.18)}
 #${PANEL_ID} .wh-card .badge.air.air-btn.ov{box-shadow:0 0 0 1px rgba(255,255,255,.5) inset}
 #${PANEL_ID} .wh-card .badge.air.air-empty{background:rgba(255,255,255,.08);border:1px dashed rgba(255,255,255,.4);color:rgba(255,255,255,.65);opacity:.72;font-weight:500}
-.wh-air-menu{position:fixed;min-width:132px;background:#1c1c1e;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:5px;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:13px;color:#fff;font-family:inherit}
+.wh-air-menu{position:fixed;min-width:132px;background:rgba(22,22,28,.88);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:5px;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:13px;color:#fff;font-family:inherit}
 .wh-air-menu .wh-air-opt{padding:7px 12px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:9px}
 .wh-air-menu .wh-air-opt:hover{background:rgba(255,255,255,.1)}
 .wh-air-menu .wh-air-opt.sel{background:rgba(41,151,255,.2)}
@@ -456,22 +478,24 @@ const WH_CSS = `
   display:none;align-items:center;justify-content:center;z-index:50}
 #${PANEL_ID} .wh-detail-overlay.show{display:flex}
 #${PANEL_ID} .wh-detail{width:1000px;max-width:94vw;height:82vh;max-height:82vh;overflow:hidden;
-  background:#161618;border:1px solid var(--wh-line);border-radius:24px;
+  /* [lc-1013] 详情弹窗玻璃化：tint 半透(--wh-detail) + 光泽渐变 + backdrop blur，
+     厚度环/顶缘高光走 box-shadow，弹窗后方是详情遮罩(自带 rgba(0,0,0,.65)+blur(12px)) */
+  background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-detail)!important;
+  backdrop-filter:blur(36px) saturate(150%)!important;-webkit-backdrop-filter:blur(36px) saturate(150%)!important;
+  border:none!important;border-radius:24px;
   display:grid;grid-template-columns:6fr 4fr;align-items:stretch;
-  box-shadow:0 40px 100px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.06) inset}
-#${PANEL_ID}.light .wh-detail{background:#fff}
-#${PANEL_ID} .wh-detail .hero{position:relative;height:100%;background:#1a1a1c;
+  box-shadow:0 40px 100px rgba(0,0,0,.55),inset 0 0 0 1px var(--wh-ring),inset 0 1px 0 var(--wh-hi)!important}
+#${PANEL_ID} .wh-detail .hero{position:relative;height:100%;background:transparent;
   border-radius:24px 0 0 24px;overflow:hidden}
 /* 海报用 <img> + object-fit:cover：浏览器原生等比裁切，无拉伸、无黑边（优于 CSS background-size） */
 #${PANEL_ID} .wh-detail .hero .poster{position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;object-position:center;display:block}
 #${PANEL_ID} .wh-detail .hero .scrim{position:absolute;inset:0;
-  background:linear-gradient(to top,#161618 0%,rgba(0,0,0,0) 55%);
+  background:linear-gradient(to top,rgba(16,16,21,.92) 0%,rgba(0,0,0,0) 55%);
   pointer-events:none}
 #${PANEL_ID}.light .wh-detail .hero .scrim{background:transparent} /* 用户要求：删除浅色模式海报底部白色辉光渐变 */
 #${PANEL_ID} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
-  background:#161618}
-#${PANEL_ID}.light .wh-detail .body{background:#fff}
+  background:transparent}
 #${PANEL_ID} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
 #${PANEL_ID} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 #${PANEL_ID} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
@@ -506,7 +530,8 @@ const WH_CSS = `
   padding:6px 0;border-bottom:1px solid var(--wh-line)}
 #${PANEL_ID} .wh-sess .pos{color:var(--wh-text)}
 #${PANEL_ID} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
-  background:var(--wh-tip);border:1px solid var(--wh-line);padding:12px 22px;border-radius:14px;font-size:14px;
+  background:var(--wh-tip);border:1px solid var(--wh-line);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);
+  padding:12px 22px;border-radius:14px;font-size:14px;
   opacity:0;transition:.25s;z-index:80;pointer-events:none}
 #${PANEL_ID} .wh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #${PANEL_ID} .wh-sample{font-size:11px;color:var(--wh-text3);margin-top:8px}
@@ -1944,12 +1969,22 @@ function toast(msg: string): void {
 /** 强制不透明底色（与 dialogUI.ts 弹窗 / embyWall 设置面板同款：具体色值 + 行内 !important，不用 var()）。
  *  fnOS 标准面板色：深 #1c1c1e / 浅 #f5f5f7；并强制 backdrop-filter:none 杜绝玻璃渗透。
  *  多处调用（开面板 / 显示后 rAF / 数据加载后）以抵御 Glass UI 异步重注入导致的偶发透明。 */
+/* [lc-1013] 玻璃底色重涂（与 dialogUI.ts 弹窗 / embyWall 设置面板的实心策略不同：
+ *  观影记录面板按用户要求整体玻璃化——tint 半透底 + 亮度光泽渐变 + 真实 backdrop blur）。
+ *  仍用行内 !important：一是压过 fnOS 自身 body 底色，二是保住面板不被 Glass UI 的
+ *  body>div{background:transparent} 异步重注入清成全透（历史偶发透明问题的防御保留，
+ *  只是涂的从实心换成了玻璃材质）。多处调用（开面板 / 显示后 rAF / 数据加载后）幂等。 */
 function paintBg(root: HTMLElement): void {
     const light = root.classList.contains('light');
-    root.style.setProperty('background', light ? '#f5f5f7' : '#1c1c1e', 'important');
-    root.style.setProperty('background-color', light ? '#f5f5f7' : '#1c1c1e', 'important');
-    root.style.setProperty('backdrop-filter', 'none', 'important');
-    root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    const tint = light ? 'rgba(246,246,251,.66)' : 'rgba(15,15,20,.78)';
+    const sheen1 = light ? '.10' : '.05';
+    const sheen2 = light ? '.028' : '.012';
+    const blur = light ? 'blur(42px) saturate(150%)' : 'blur(42px) saturate(150%) brightness(.82)';
+    root.style.setProperty('background',
+        `linear-gradient(165deg,rgba(255,255,255,${sheen1}) 0%,rgba(255,255,255,${sheen2}) 100%),${tint}`, 'important');
+    root.style.setProperty('background-color', tint, 'important');
+    root.style.setProperty('backdrop-filter', blur, 'important');
+    root.style.setProperty('-webkit-backdrop-filter', blur, 'important');
 }
 
 // 玻璃 UI 可能在面板显示后异步重注入 body>div{background:transparent!important}，
