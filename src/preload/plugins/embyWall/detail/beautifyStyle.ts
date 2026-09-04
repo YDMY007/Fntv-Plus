@@ -144,6 +144,23 @@ body.fnos-beautify ${COL} > div[class*="px-[46px]"]:has(a[href*="imdb.com"], a[h
   display:none !important;
 }
 
+/* ===== A2. 两栏内容入场过渡（lc-1011，轻微）=====
+   美化套用瞬间(settle 时 body.fnos-beautify 挂上, 两栏 Grid 同时生效)给选集列/右栏一个
+   轻微淡入上移, 与 N 段系列页面板(fnos-series-panel-in)同一手感; TMDB 卡是 settle 后异步
+   插入的新节点, 挂载时各自播放。仅 opacity+translateY(合成器属性, 不触发布局);
+   teardown 摘 body class → 再进详情页重放, 每次导航恰好一次, 零常驻开销。
+   ⚠ 不动 hero(row1): veil 已有页面级过渡, 再叠会显拖沓。 */
+@media (prefers-reduced-motion: no-preference){
+  body.fnos-beautify ${COL} > :nth-child(2),
+  body.fnos-beautify ${COL} > :nth-child(3){
+    animation:fnos-series-panel-in .42s cubic-bezier(.22,.61,.36,1) both;
+  }
+  body.fnos-beautify ${COL} > :nth-child(3){ animation-delay:.06s; }
+  body.fnos-beautify ${COL} .fnos-beautify-card{
+    animation:fnos-series-panel-in .45s cubic-bezier(.22,.61,.36,1) both;
+  }
+}
+
 /* ===== B. 页面背景透明化：让注入的全屏底图透出（仅详情页 body.fnos-beautify 生效）===== */
 body.fnos-beautify [class*="bg-[var(--semi-color-bg-1)]"]{ background-color:transparent !important; }
 

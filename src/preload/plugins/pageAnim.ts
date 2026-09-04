@@ -211,8 +211,14 @@ function setupObservers(): void {
   try {
     const obs = new MutationObserver((muts) => {
       if (!isFntvTvPage()) return;          // 系统页/登录页不介入
+      // [lc-1011] 仅「有元素插入」才收集: 纯文本/注释变更(计时器、进度文字等高频更新)从不产生新卡片,
+      //   旧写法让这类变更也触发 rAF 后的文档级 querySelectorAll —— 高频页面上的无谓开销。
       for (const m of muts) {
-        if (m.type === 'childList') { scheduleCollect(); break; }
+        if (m.type !== 'childList') continue;
+        const an = m.addedNodes;
+        for (let i = 0; i < an.length; i++) {
+          if (an[i].nodeType === 1) { scheduleCollect(); return; }
+        }
       }
     });
     obs.observe(document.body, { childList: true, subtree: true });

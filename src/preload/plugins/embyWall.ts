@@ -147,8 +147,10 @@ function handle(): void {
     return r >= 220 && g >= 220 && b >= 220; // 白/浅灰系(阈值从235降到220)
   };
 
-  /** 判断一个元素是否是「应该保留背景的交互性浮层」→ 跳过不清除 */
-  const _isProtectedOverlay = (el: HTMLElement): boolean => {
+  /** 判断一个元素是否是「应该保留背景的交互性浮层」→ 跳过不清除。
+   *  [lc-1011] cs 由调用方传入(全量扫描/增量扫描各自已算过一次), 不再内部重复 getComputedStyle ——
+   *  旧版每元素至少算两遍计算样式, 乘以扫描频率就是持续掉帧(用户反馈卡顿的热点之一)。 */
+  const _isProtectedOverlay = (el: HTMLElement, cs: CSSStyleDeclaration): boolean => {
     // ⓪ 自建设置面板及其所有后代 → 永远保护(浅色卡片不被白底清除器误杀)
     if (el.id === 'fnos-settings-panel') return true;
     if (typeof el.closest === 'function' && el.closest('#fnos-settings-panel')) return true;
@@ -168,7 +170,6 @@ function handle(): void {
     }
 
     // ③ 绝对/固定定位的小型浮层(通常是 dropdown/tooltip, 不是页面容器)
-    const cs = getComputedStyle(el);
     const pos = cs.position;
     if (pos === 'absolute' || pos === 'fixed') {
       const rect = el.getBoundingClientRect();
@@ -190,6 +191,41 @@ function handle(): void {
     }
 
     return false;
+  };
+
+  const _WW_SKIP_TAGS = new Set(['HTML', 'HEAD', 'SCRIPT', 'STYLE', 'LINK', 'META', 'SVG', 'PATH', 'CANVAS', 'IMG', 'VIDEO', 'IFRAME', 'BODY']);
+  /** 单元素白底判定+清除。返回 'fixed'(清了) | 'skip'(保护/跳过) | 'keep'(不是白底)。
+   *  [lc-1011] 从 _globalWhitewashRemover 内联逻辑抽出: 计算样式只取一次, 供全量与增量两条路径共用。 */
+  const _whitewashCheck = (el: HTMLElement): 'fixed' | 'skip' | 'keep' => {
+    if (_WW_SKIP_TAGS.has(el.tagName)) return 'skip';
+    if (el.dataset.fnosClear === '1') return 'keep';
+    // [v397] 跳过所有自建设置弹窗(检查更新/关于/反馈/B站登录): 它们标了 data-fnos-ui='1',
+    //   且子树内卡片背景为浅粉不透 → 若被白底清除器误清成 transparent!important, 整窗会"全透明"看不见.
+    //   用 closest 保护整棵子树(卡片是 position:relative, 自身不会被 fixed 浮层保护规则覆盖).
+    if (el.dataset.fnosUi === '1' || (typeof el.closest === 'function' && el.closest('[data-fnos-ui="1"]'))) return 'skip';
+    try {
+      const cs = getComputedStyle(el);
+      // [v367] 先检查是否受保护的交互浮层
+      if (_isProtectedOverlay(el, cs)) return 'skip';
+      if (_isOpaqueLight(cs.backgroundColor)) {
+        el.style.setProperty('background', 'transparent', 'important');
+        el.style.setProperty('background-color', 'transparent', 'important');
+        el.dataset.fnosClear = '1';
+        return 'fixed';
+      }
+    } catch (_) { /* 跨域等安全异常跳过 */ }
+    return 'keep';
+  };
+
+  /** [lc-1011] 增量白底清除: 只扫「本次插入的元素子树」(root 自身 + 后代)。 */
+  const _whitewashSubtree = (root: HTMLElement): number => {
+    let fixed = 0;
+    if (_whitewashCheck(root) === 'fixed') fixed++;
+    const sub = root.querySelectorAll<HTMLElement>('*');
+    for (let i = 0; i < sub.length; i++) {
+      if (_whitewashCheck(sub[i]) === 'fixed') fixed++;
+    }
+    return fixed;
   };
 
   let _whitewashPasses = 0;
@@ -244,36 +280,11 @@ function handle(): void {
     _whitewashPasses++;
     let fixedCount = 0;
     let skippedCount = 0;
-    const skipTags = new Set(['HTML', 'HEAD', 'SCRIPT', 'STYLE', 'LINK', 'META', 'SVG', 'PATH', 'CANVAS', 'IMG', 'VIDEO', 'IFRAME', 'BODY']);
     const all = document.querySelectorAll<HTMLElement>('*');
     for (let i = 0; i < all.length; i++) {
-      const el = all[i];
-      if (skipTags.has(el.tagName)) continue;
-      if (el.dataset.fnosClear === '1') continue;
-      // [v397] 跳过所有自建设置弹窗(检查更新/关于/反馈/B站登录): 它们标了 data-fnos-ui='1',
-      //   且子树内卡片背景为浅粉不透 → 若被白底清除器误清成 transparent!important, 整窗会"全透明"看不见.
-      //   用 closest 保护整棵子树(卡片是 position:relative, 自身不会被 fixed 浮层保护规则覆盖).
-      if (el.dataset.fnosUi === '1' || (typeof el.closest === 'function' && el.closest('[data-fnos-ui="1"]'))) {
-        skippedCount++;
-        continue;
-      }
-
-      // [v367] 先检查是否受保护的交互浮层
-      if (_isProtectedOverlay(el)) {
-        skippedCount++;
-        continue;
-      }
-
-      try {
-        const cs = getComputedStyle(el);
-        const bg = cs.backgroundColor;
-        if (_isOpaqueLight(bg)) {
-          el.style.setProperty('background', 'transparent', 'important');
-          el.style.setProperty('background-color', 'transparent', 'important');
-          el.dataset.fnosClear = '1';
-          fixedCount++;
-        }
-      } catch (_) { /* 跨域等安全异常跳过 */ }
+      const r = _whitewashCheck(all[i]);
+      if (r === 'fixed') fixedCount++;
+      else if (r === 'skip') skippedCount++;
     }
     if (_whitewashPasses % 20 === 1 || fixedCount > 0) {
       log('whitewash pass', _whitewashPasses, 'fixed', fixedCount, 'skipped-overlay', skippedCount);
@@ -284,87 +295,122 @@ function handle(): void {
   //        其 Tailwind 类名(如 fixed.top-0.left-0.w-full.h-full)不被 ACRYLIC_CSS
   //        fixed.inset-0 选择器覆盖 → 四个角变方. JS 扫描所有 fixed 元素, 近全屏则强制圆角.
   let _rcPasses = 0;
+  /** 单元素圆角强制判定+处理。[lc-1011] 从全扫循环抽出, 供全量与增量共用。 */
+  const _roundedCheck = (el: HTMLElement): boolean => {
+    // body/html 由 mainwin.ts 的 injectAcrylicCSS 统一处理(登录页灰底/主界面亚克力),
+    // 此处跳过以免把登录页的 #f5f5f5 灰底误清成 transparent(用户要求登录页不透明).
+    if (el === document.body || el === document.documentElement) return false;
+    try {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed') return false;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const rect = el.getBoundingClientRect();
+      // 覆盖 ≥80% 视口的元素才加圆角(避免误伤小弹窗/按钮)
+      if (rect.width < vw * 0.8 || rect.height < vh * 0.8) return false;
+      // 跳过已标记的
+      if (el.dataset.fnosRounded === '1') return false;
+      el.style.setProperty('border-radius', '16px', 'important');
+      el.style.setProperty('overflow', 'hidden', 'important');
+      el.style.setProperty('clip-path', 'inset(0 round 16px)', 'important');
+      el.style.setProperty('-webkit-clip-path', 'inset(0 round 16px)', 'important');
+      // 同步清除白底: 全屏固定层的白底挡住 body 亚克力玻璃+桌面透出圆角
+      // [v384] 同时清除 background-image(渐变/图片): getComputedStyle 的 backgroundColor
+      //        对渐变返回 transparent, 导致白底漏网.
+      const bgImg = cs.backgroundImage;
+      if (bgImg && bgImg !== 'none') {
+        el.style.setProperty('background-image', 'none', 'important');
+      }
+      const bg = cs.backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)') {
+        const bm = bg.match(/rgba?\(([^)]+)\)/);
+        if (bm) {
+          const parts = bm[1].split(',').map(s => parseFloat(s.trim()));
+          if (parts[0] > 200 && parts[1] > 200 && parts[2] > 200 && (parts[3] ?? 1) > 0.1) {
+            el.style.setProperty('background', 'transparent', 'important');
+            el.style.setProperty('background-color', 'transparent', 'important');
+          }
+        }
+      }
+      el.dataset.fnosRounded = '1';
+      return true;
+    } catch (_) { /* skip */ }
+    return false;
+  };
   const _globalRoundedCornerEnforcer = () => {
     _rcPasses++;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
     let fixedCount = 0;
     // 只扫描 fixed 元素(数量远少于全 DOM)
     const all = document.querySelectorAll<HTMLElement>('*');
     for (let i = 0; i < all.length; i++) {
-      const el = all[i];
-      // body/html 由 mainwin.ts 的 injectAcrylicCSS 统一处理(登录页灰底/主界面亚克力),
-      // 此处跳过以免把登录页的 #f5f5f5 灰底误清成 transparent(用户要求登录页不透明).
-      if (el === document.body || el === document.documentElement) continue;
-      try {
-        const cs = getComputedStyle(el);
-        if (cs.position !== 'fixed') continue;
-        const rect = el.getBoundingClientRect();
-        // 覆盖 ≥80% 视口的元素才加圆角(避免误伤小弹窗/按钮)
-        if (rect.width < vw * 0.8 || rect.height < vh * 0.8) continue;
-        // 跳过已标记的
-        if (el.dataset.fnosRounded === '1') continue;
-        el.style.setProperty('border-radius', '16px', 'important');
-        el.style.setProperty('overflow', 'hidden', 'important');
-        el.style.setProperty('clip-path', 'inset(0 round 16px)', 'important');
-        el.style.setProperty('-webkit-clip-path', 'inset(0 round 16px)', 'important');
-        // 同步清除白底: 全屏固定层的白底挡住 body 亚克力玻璃+桌面透出圆角
-        // [v384] 同时清除 background-image(渐变/图片): getComputedStyle 的 backgroundColor
-        //        对渐变返回 transparent, 导致白底漏网.
-        const bgImg = cs.backgroundImage;
-        if (bgImg && bgImg !== 'none') {
-          el.style.setProperty('background-image', 'none', 'important');
-        }
-        const bg = cs.backgroundColor;
-        if (bg && bg !== 'rgba(0, 0, 0, 0)') {
-          const bm = bg.match(/rgba?\(([^)]+)\)/);
-          if (bm) {
-            const parts = bm[1].split(',').map(s => parseFloat(s.trim()));
-            if (parts[0] > 200 && parts[1] > 200 && parts[2] > 200 && (parts[3] ?? 1) > 0.1) {
-              el.style.setProperty('background', 'transparent', 'important');
-              el.style.setProperty('background-color', 'transparent', 'important');
-            }
-          }
-        }
-        el.dataset.fnosRounded = '1';
-        fixedCount++;
-      } catch (_) { /* skip */ }
+      if (_roundedCheck(all[i])) fixedCount++;
     }
     if (_rcPasses % 20 === 1 || fixedCount > 0) {
       log('rounded-corner pass', _rcPasses, 'fixed-fullscreen', fixedCount);
     }
   };
-  // 与白底清除器共用触发机制: 立即+延迟+DOM变化+定时巡检
+  // [lc-1011] 增量扫描架构(用户反馈卡顿的性能修复):
+  //   旧版 = 「任何 childList 变更 → 200ms 后全 DOM getComputedStyle 扫描」× 2 个清除器
+  //          + 每 6s 无条件全扫 —— 轮播/React 重渲染期间持续触发, 弱机上就是持续掉帧。
+  //   新版 = MO 回调里只把「本次插入的元素节点」入队, 去抖后只扫这些子树;
+  //          语义不变: 旧观察者本就只监听 childList(subtree), 纯样式/文本变更从不触发扫描,
+  //          故「插入子树」正是旧全扫在每次触发时实际可能改动的全部范围。
+  //   全扫保留为兜底: 启动 3 次 + 心跳降频 6s → 20s(防 CSSOM 动态样式等不入 DOM 的漏网)。
   setTimeout(_globalRoundedCornerEnforcer, 800);
   setTimeout(_globalRoundedCornerEnforcer, 2500);
   setTimeout(_globalRoundedCornerEnforcer, 4500);
+  const _pendingClear: HTMLElement[] = [];
+  const _pendingRound: HTMLElement[] = [];
+  const _collectAdded = (muts: MutationRecord[], sink: HTMLElement[]): void => {
+    for (let i = 0; i < muts.length; i++) {
+      const an = muts[i].addedNodes;
+      for (let j = 0; j < an.length; j++) {
+        if (an[j].nodeType === 1) sink.push(an[j] as HTMLElement);
+      }
+    }
+  };
   let _rcTimer = 0;
-  const _rcObs = new MutationObserver(() => {
+  const _rcObs = new MutationObserver((muts) => {
+    _collectAdded(muts, _pendingRound);
     clearTimeout(_rcTimer);
-    _rcTimer = window.setTimeout(_globalRoundedCornerEnforcer, 200);
+    _rcTimer = window.setTimeout(() => {
+      const batch = _pendingRound.splice(0, _pendingRound.length);
+      let fixed = 0;
+      for (const root of batch) {
+        if (_roundedCheck(root)) fixed++;
+        const sub = root.querySelectorAll<HTMLElement>('*');
+        for (let i = 0; i < sub.length; i++) { if (_roundedCheck(sub[i])) fixed++; }
+      }
+      if (fixed > 0) log('rounded-corner incremental fixed', fixed);
+    }, 200);
   });
   _rcObs.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('beforeunload', () => { _rcObs.disconnect(); clearInterval(_rcInterval); });
-  const _rcInterval = setInterval(_globalRoundedCornerEnforcer, 6000);
+  const _rcInterval = setInterval(_globalRoundedCornerEnforcer, 20000);
 
   // 三重触发: 立即一次 + MutationObserver(DOM变化时) + 定时巡检(兜底漏网)
   setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 500);
   setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 2000);
   setTimeout(() => { _globalWhitewashRemover(); _forceDatePickerDark(); }, 4000);
   let _wwTimer = 0;
-  const _wwObs = new MutationObserver(() => {
+  const _wwObs = new MutationObserver((muts) => {
+    // [lc-1011] 增量: 只收集本次插入的元素子树, 去抖后只扫这些子树(语义同旧全扫, 见上方圆角处注释)
+    _collectAdded(muts, _pendingClear);
     clearTimeout(_wwTimer);
     _wwTimer = window.setTimeout(() => {
-      _globalWhitewashRemover();
+      const batch = _pendingClear.splice(0, _pendingClear.length);
+      let fixed = 0;
+      for (const root of batch) fixed += _whitewashSubtree(root);
+      if (fixed > 0) log('whitewash incremental fixed', fixed);
       _forceDatePickerDark(); // [lc-657] 日期选择器弹层深色适配随白底清除器一同触发
     }, 200);
   });
   _wwObs.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('beforeunload', () => _wwObs.disconnect());
   setInterval(() => {
-    _globalWhitewashRemover(); // 每6秒兜底扫一次
+    _globalWhitewashRemover(); // 心跳兜底全扫(lc-1011: 6s → 20s, 常驻全扫是卡顿热点)
     _forceDatePickerDark(); // [lc-657] 同步巡检日期选择器弹层
-  }, 6000);
+  }, 20000);
 
   // [v374] 窗口拖动已改为原生 -webkit-app-region:drag (见 titlebar.ts / mainwin.ts CSS),
   //   不再用 JS setPosition —— transparent 窗口下 setPosition 会触发 DWM 异常放大.
@@ -1015,6 +1061,18 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     };
 
     // ===== 主面板 =====
+    // [lc-1011] 面板/遮罩入场动画: display:none→flex 会让 CSS 动画在每次打开时重放,
+    //   无需 JS 重触发。仅 opacity(0.2s), 不动 transform —— 面板靠内联 translate(-50%,-50%) 居中,
+    //   动画若带 transform 会在播放期顶掉居中定位。
+    if (!document.getElementById('fnos-panel-anim-style')) {
+      const animSt = document.createElement('style');
+      animSt.id = 'fnos-panel-anim-style';
+      animSt.textContent = '@media (prefers-reduced-motion: no-preference){'
+        + '@keyframes fnos-panel-in{from{opacity:0}to{opacity:1}}'
+        + '#fnos-settings-panel{animation:fnos-panel-in .2s ease-out both}'
+        + '#fnos-settings-mask{animation:fnos-panel-in .28s ease-out both}}';
+      (document.head || document.documentElement).appendChild(animSt);
+    }
     const overlay = document.createElement('div');
     overlay.id = 'fnos-settings-panel';
     overlay.setAttribute('data-fnos-ui', '1'); // 保护自建设备 UI 不被白底清除器误清(含内部卡片底色)
