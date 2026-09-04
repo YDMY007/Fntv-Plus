@@ -153,6 +153,17 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 		}
 	}
 
+	// [lc-1000] 旁路小范围请求（弹幕脚本 curl --range 0-16777215 算文件 hash）优先走
+	// 文件头缓存：视频流转发时已把前 16MB 存进内存，这里直接返回，**零网络开销**。
+	// 否则它会与视频流抢带宽 —— 网盘经隧道时带宽≈码率，抢一点就让 MPV 缓冲净流失
+	// 触发 --cache-pause 暂停（表现为"卡加载一直转圈"）。
+	rangeStart, rangeEnd, hasEnd, rangeOK := parseRangeHeader(c.Request.Header.Get("Range"))
+	if rangeOK && hasEnd && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
+		if tryServeHeadFromCache(c, targetNoUser.String(), rangeStart, rangeEnd) {
+			return
+		}
+	}
+
 	upstream, err := buildUpstream(targetNoUser.String(), bodyReader)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Invalid target URL"})
@@ -230,11 +241,60 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 			c.Writer.Header().Add(key, value)
 		}
 	}
+
+	// [lc-1000] 本次响应若从文件头附近开始（<=16MB），转发时顺带把前 16MB 灌进文件头缓存，
+	// 供后续弹幕 hash 的旁路请求复用（零网络开销）。200 时数据从 0 开始；206 时从 Range 起点。
+	var headT *headTee
+	if (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) && rangeStart < headCacheBytes {
+		hb := getHeadBuffer(targetNoUser.String())
+		if !hb.isFull() {
+			if cr := resp.Header.Get("Content-Range"); cr != "" {
+				hb.setTotal(parseTotalFromContentRange(cr))
+			}
+			startOff := int64(0)
+			if resp.StatusCode == http.StatusPartialContent && hasEnd { // 206：数据从 Range 起点开始
+				startOff = rangeStart
+			}
+			headT = &headTee{hb: hb, offset: startOff}
+		}
+	}
+
 	c.Writer.WriteHeader(resp.StatusCode)
 
 	// HEAD 请求无响应体；其余流式拷贝（边读边 flush，保证 MPV 秒开首帧）
 	if c.Request.Method != http.MethodHead {
-		copyStreaming(c.Writer, resp.Body)
+		copyStreaming(c.Writer, resp.Body, headT)
+	}
+}
+
+// copyStreaming 流式拷贝响应体，每 100ms 主动 flush 一次，
+// 避免大视频流被 Go 的写缓冲攒住导致播放器起播慢。tee 非 nil 时同步写入文件头缓存。
+func copyStreaming(dst http.ResponseWriter, src io.Reader, tee *headTee) error {
+	buf := make([]byte, 32*1024)
+	lastFlush := time.Now()
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			if _, ew := dst.Write(buf[:nr]); ew != nil {
+				return ew
+			}
+			if tee != nil {
+				_, _ = tee.Write(buf[:nr])
+			}
+			if time.Since(lastFlush) > 100*time.Millisecond {
+				if f, ok := dst.(http.Flusher); ok {
+					f.Flush()
+				}
+			lastFlush = time.Now()
+		}
+		}
+		if er != nil {
+			if er == io.EOF {
+				return nil
+			}
+			// 客户端断开（播放器停止/拖动）是常态，不算错误
+			return er
+		}
 	}
 }
 
@@ -246,34 +306,6 @@ func isHopByHopHeader(key string) bool {
 		return true
 	}
 	return false
-}
-
-// copyStreaming 流式拷贝响应体，每 100ms 主动 flush 一次，
-// 避免大视频流被 Go 的写缓冲攒住导致播放器起播慢。
-func copyStreaming(dst http.ResponseWriter, src io.Reader) error {
-	buf := make([]byte, 32*1024)
-	lastFlush := time.Now()
-	for {
-		nr, er := src.Read(buf)
-		if nr > 0 {
-			if _, ew := dst.Write(buf[:nr]); ew != nil {
-				return ew
-			}
-			if time.Since(lastFlush) > 100*time.Millisecond {
-				if f, ok := dst.(http.Flusher); ok {
-					f.Flush()
-				}
-				lastFlush = time.Now()
-			}
-		}
-		if er != nil {
-			if er == io.EOF {
-				return nil
-			}
-			// 客户端断开（播放器停止/拖动）是常态，不算错误
-			return er
-		}
-	}
 }
 
 // isM3U8Response 判断上游响应是否为 HLS 播放列表(m3u8)
