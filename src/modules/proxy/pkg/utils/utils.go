@@ -6,9 +6,9 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -120,94 +120,160 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	targetNoUser := *target
 	targetNoUser.User = nil
 
-	// 创建反向代理
-	proxy := httputil.NewSingleHostReverseProxy(&targetNoUser)
-
-	// 设置超时时间
-	proxy.Transport = &http.Transport{
-		ResponseHeaderTimeout: 120 * time.Second,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: skipVerify,
-		},
-	}
-
-	// 修改请求前的处理
-	proxy.Director = func(req *http.Request) {
-		// 设置原始请求信息
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.URL.Path = target.Path
-		req.URL.RawQuery = target.RawQuery
-		req.Host = target.Host
-
-		// 复制原始请求的头部
+	// 构建上游请求。复制客户端头 + extraHeaders（网盘 UA 等签名相关头必须保留，
+	// 因为云盘签名 URL 与 User-Agent 绑定，跟随重定向时也不能丢）。
+	buildUpstream := func(rawURL string, body io.Reader) (*http.Request, error) {
+		req, err := http.NewRequest(c.Request.Method, rawURL, body)
+		if err != nil {
+			return nil, err
+		}
 		for key, values := range c.Request.Header {
 			for _, value := range values {
-				req.Header.Set(key, value)
+				req.Header.Add(key, value)
 			}
 		}
-
-		// 添加额外的头部信息
 		for key, value := range extraHeaders {
 			req.Header.Set(key, value)
 		}
-
-		logger.Infof("method:%s path:%s query:%s, header:%v", req.Method, req.URL.Path, req.URL.RawQuery, req.Header)
-
 		// 如果客户端没带 Authorization，但 URL 有 userinfo，就补上 BasicAuth
 		if req.Header.Get("Authorization") == "" && hasUser {
 			req.SetBasicAuth(uName, uPass)
 		}
+		req.Host = target.Host
+		return req, nil
+	}
 
-		// 设置请求方法
-		req.Method = c.Request.Method
-
-		// 如果有请求体，复制它
-		if c.Request.Body != nil {
-			bodyBytes, err := io.ReadAll(c.Request.Body)
-			if err == nil {
-				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-				req.ContentLength = int64(len(bodyBytes))
-			}
+	// 首个请求：若有请求体先缓冲（播放场景为 GET/HEAD 通常无 body；缓冲是为了
+	// 跟随重定向时能重放 body）
+	var bodyReader io.Reader
+	if c.Request.Body != nil && c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		bodyBytes, err := io.ReadAll(io.LimitReader(c.Request.Body, 8<<20))
+		if err == nil && len(bodyBytes) > 0 {
+			bodyReader = bytes.NewReader(bodyBytes)
 		}
 	}
 
-	// 修改响应后的处理
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		// 打印相应头
-		logger.Infof("响应状态: %s, 头部: %v", resp.Status, resp.Header)
-		// [lc-652] STRM/网盘直链 HLS：m3u8 分片常为相对路径（如 media-xxx-549.ts?auth_key=...）。
-		// 若不重写，播放器会基于「本地 playvideo 代理 URL」拼接分片 → 请求打回本地代理、
-		// 却只有网盘签名参数(缺 domain/token/account) → Go 侧 parseQueryParam 400 → 整集跳过。
-		// 故把相对分片/URI 重写为基于上游 m3u8 地址(target)的绝对 URL，让播放器直连网盘 CDN。
-		if resp != nil && isM3U8Response(resp) {
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-			if err == nil {
-				rewritten, nChanged := rewriteM3U8(string(body), target)
-				if nChanged > 0 {
-					resp.Body = io.NopCloser(bytes.NewReader(rewritten))
-					resp.ContentLength = int64(len(rewritten))
-					resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
-					logger.Infof("[m3u8] 已重写 %d 行相对分片/URI 为绝对 URL(基于 %s)", nChanged, target.Host+target.Path)
-				}
-			}
-		}
-		return nil
+	upstream, err := buildUpstream(targetNoUser.String(), bodyReader)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Invalid target URL"})
+		return
 	}
 
-	// 处理错误 - 修复：避免重复写入响应头
-	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
-		// 检查响应是否已经开始写入
+	// [lc-999] 手动跟随 3xx 重定向（原 httputil.ReverseProxy 会把 302 原样透传给播放器）。
+	// 场景：百度网盘对 bytes=0- 返回 302 做 CDN 调度(Location 指向 *.jomodns.com 签名 URL)，
+	// MPV 收到 302 后用自己的默认 UA 去跟 → UA 与签名不匹配 → 仍 302 → 重试耗尽报
+	// "Unable to load file or stream"。必须在代理侧用**原始 UA + Range** 跟随重定向，
+	// 把最终的 200/206 视频流交给播放器。
+	const maxRedirects = 5
+	client := &http.Client{
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 120 * time.Second,
+			// 视频流不做自动 gzip（避免 Transport 偷偷解压破坏 Range/Content-Length 语义）
+			DisableCompression: true,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: skipVerify,
+			},
+		},
+		// 不设整体 Timeout：长视频流式响应不能被整体超时切断
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			}
+			// Go 跨主机重定向默认剥离 Authorization；网盘/反代场景签名可能在头里，
+			// 这里恢复首跳的值（内部代理，泄漏面可控）
+			if auth := via[0].Header.Get("Authorization"); auth != "" && req.Header.Get("Authorization") == "" {
+				req.Header.Set("Authorization", auth)
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(upstream)
+	if err != nil {
+		// client.Do 在超过重定向次数等情况下也会返回错误
 		if c.Writer.Written() {
 			logger.Debugf("代理错误，但响应已开始写入: %v", err)
 			return
 		}
-		logger.Debugf("代理错误: %v", err)
-		c.JSON(500, gin.H{"error": "Proxy error", "details": err.Error()})
+		logger.Errorf("代理上游请求失败: %v", err)
+		c.JSON(502, gin.H{"error": "Proxy error", "details": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// 打印响应头
+	logger.Infof("响应状态: %s, 头部: %v", resp.Status, resp.Header)
+
+	// [lc-652] STRM/网盘直链 HLS：m3u8 分片常为相对路径（如 media-xxx-549.ts?auth_key=...）。
+	// 若不重写，播放器会基于「本地 playvideo 代理 URL」拼接分片 → 请求打回本地代理、
+	// 却只有网盘签名参数(缺 domain/token/account) → Go 侧 parseQueryParam 400 → 整集跳过。
+	// 故把相对分片/URI 重写为基于上游 m3u8 地址(target)的绝对 URL，让播放器直连网盘 CDN。
+	if isM3U8Response(resp) {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		if err == nil {
+			rewritten, nChanged := rewriteM3U8(string(body), target)
+			if nChanged > 0 {
+				resp.Body = io.NopCloser(bytes.NewReader(rewritten))
+				resp.ContentLength = int64(len(rewritten))
+				resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
+				logger.Infof("[m3u8] 已重写 %d 行相对分片/URI 为绝对 URL(基于 %s)", nChanged, target.Host+target.Path)
+			}
+		}
 	}
 
-	// 执行代理
-	proxy.ServeHTTP(c.Writer, c.Request)
+	// 把上游响应头拷回客户端（剔除 hop-by-hop 头，ReverseProxy 原本会处理）
+	for key, values := range resp.Header {
+		if isHopByHopHeader(key) {
+			continue
+		}
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	c.Writer.WriteHeader(resp.StatusCode)
+
+	// HEAD 请求无响应体；其余流式拷贝（边读边 flush，保证 MPV 秒开首帧）
+	if c.Request.Method != http.MethodHead {
+		copyStreaming(c.Writer, resp.Body)
+	}
+}
+
+// isHopByHopHeader 判断 RFC 2616 hop-by-hop 头（代理不转发）
+func isHopByHopHeader(key string) bool {
+	switch strings.ToLower(key) {
+	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate",
+		"proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	}
+	return false
+}
+
+// copyStreaming 流式拷贝响应体，每 100ms 主动 flush 一次，
+// 避免大视频流被 Go 的写缓冲攒住导致播放器起播慢。
+func copyStreaming(dst http.ResponseWriter, src io.Reader) error {
+	buf := make([]byte, 32*1024)
+	lastFlush := time.Now()
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			if _, ew := dst.Write(buf[:nr]); ew != nil {
+				return ew
+			}
+			if time.Since(lastFlush) > 100*time.Millisecond {
+				if f, ok := dst.(http.Flusher); ok {
+					f.Flush()
+				}
+				lastFlush = time.Now()
+			}
+		}
+		if er != nil {
+			if er == io.EOF {
+				return nil
+			}
+			// 客户端断开（播放器停止/拖动）是常态，不算错误
+			return er
+		}
+	}
 }
 
 // isM3U8Response 判断上游响应是否为 HLS 播放列表(m3u8)

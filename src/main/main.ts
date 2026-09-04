@@ -30,6 +30,29 @@ app.commandLine.appendSwitch('--disable-web-security'); // 禁用web安全检查
 app.commandLine.appendSwitch('--ignore-ssl-errors-spki-list'); // 忽略SSL SPKI列表错误
 app.commandLine.appendSwitch('--ignore-ssl-errors'); // 忽略SSL错误（减少相关日志）
 
+// [lc-999] 主进程未捕获异常/未处理的 Promise 拒绝兜底。
+// 背景：MPV 进程异常退出（如网盘 302 加载失败）后，node-mpv-2 内部 socket 重连
+// \\.\pipe\mpvserver 报 ENOENT/ECONNREFUSED，无人接住 → Electron 弹
+// "A JavaScript error occurred in the main process" 原生错误窗。
+// 注册 handler 后默认弹窗行为被替换：统一记日志、进程继续运行（MPV 退出本身
+// 已由 MpvPlayer 的 crashed/quit 事件走正常清理流程，这里只是防炸主进程）。
+process.on('uncaughtException', (err: Error) => {
+    const msg = String(err && (err as any).message || err);
+    if (msg.includes('mpvserver') || msg.includes('connect ENOENT') || msg.includes('ECONNREFUSED')) {
+        log.warn('[兜底] 播放器 IPC 管道连接失败(MPV 已退出，忽略):', msg);
+        return;
+    }
+    log.error('[兜底] 主进程未捕获异常:', err && (err as any).stack || err);
+});
+process.on('unhandledRejection', (reason: any) => {
+    const msg = String(reason && reason.message || reason);
+    if (msg.includes('mpvserver') || msg.includes('connect ENOENT') || msg.includes('ECONNREFUSED')) {
+        log.warn('[兜底] 播放器 IPC 管道连接失败(MPV 已退出，忽略):', msg);
+        return;
+    }
+    log.error('[兜底] 未处理的 Promise 拒绝:', reason && reason.stack || reason);
+});
+
 let mainWindow: BrowserWindow | null = null;
 let proxyProcess: ChildProcess | null | undefined = null;
 
