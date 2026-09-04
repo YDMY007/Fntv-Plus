@@ -181,6 +181,12 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 			ResponseHeaderTimeout: 120 * time.Second,
 			// 视频流不做自动 gzip（避免 Transport 偷偷解压破坏 Range/Content-Length 语义）
 			DisableCompression: true,
+			// [lc-1003] 强制上游走 HTTP/1.1，禁用 HTTP/2。原因：Go 的 http.Transport 默认
+			// ForceAttemptHttp2=true，对百度/115 等 HTTPS 会协商成 h2；h2 单条 stream 受流控窗口
+			// (初始 64KB) 限制，在 Tailscale 隧道等高 RTT 链路上单流 bulk 下载吞吐≈窗口/RTT≈0.5~1MB/s
+			// —— 正是 MPV(经 Go proxy 22346)拉网盘直链卡在 <1MB/s、缓冲被码率吃掉而卡顿的根因。
+			// Node 兜底代理走 HTTP/1.1 无此流控 → 满速，故 PotPlayer 正常。禁用 h2 后单连接即满带宽。
+			ForceAttemptHTTP2: false,
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: skipVerify,
 			},

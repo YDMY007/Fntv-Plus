@@ -180,6 +180,11 @@ func PlayVideoHandler(c *gin.Context) {
 
 		if streamUserAgent != "" {
 			extraHeaders["User-Agent"] = streamUserAgent
+		} else {
+			// [lc-1003] 云盘未返回 UA 时，Go 默认发 "Go-http-client/1.1"，百度/115 直链常对此类
+			// 非浏览器 UA 限速或降权（即便 SVIP 也可能被按客户端类型节流）。补一个浏览器 UA，
+			// 确保拿到满速。仅当 fnOS 未下发 UA 时才生效，不会覆盖其下发的签名 UA。
+			extraHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 		}
 
 		// 选择播放策略
