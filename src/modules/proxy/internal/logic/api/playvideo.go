@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"net/url"
 	"proxy/pkg/fnapi"
 	"proxy/pkg/logger"
 	"proxy/pkg/utils"
@@ -123,6 +124,18 @@ func getStreamUserAgent(info fnapi.StreamResponse) string {
 	return ""
 }
 
+// briefURL 取 host+path（丢掉体积巨大的签名 query），用于 Info 级日志
+func briefURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		if len(raw) > 96 {
+			return raw[:96] + "…"
+		}
+		return raw
+	}
+	return u.Host + u.Path
+}
+
 func PlayVideoHandler(c *gin.Context) {
 	params, err := parseQueryParam(c)
 	if err != nil {
@@ -147,6 +160,11 @@ func PlayVideoHandler(c *gin.Context) {
 	}
 
 	// 获取流地址信息
+	// [lc-1004] 先探测直链缓存是否命中：115 的限速只应作用于「真的要去 fnOS 重新解析直链」，
+	// 而不是播放器的每个 Range/续传/拖动请求（原实现让 115 源每次拖动都白等 1s）。
+	// 同理，若起播预热已经在解析同一条直链，本请求只是搭便车等结果，也不该再排一次队。
+	freshResolve := !fnApi.HasStreamCached(targetMediaGuid, params.Account) &&
+		!fnapi.IsStreamInflight(targetMediaGuid, params.Account)
 	streamResp, err := fetchStream(fnApi, targetMediaGuid, params.Account)
 	if err != nil || streamResp == nil || !streamResp.Success {
 		logger.Errorf("获取视频流失败: %v", err)
@@ -193,7 +211,11 @@ func PlayVideoHandler(c *gin.Context) {
 			proxyType = ChunkedProxy // 夸克需要切片
 		case Cloud115Pan:
 			// 115 特殊处理：UA 和限流
-			_ = waitLimiter()
+			// [lc-1004] 仅在真的重新解析直链时限速。命中缓存说明这是播放器的续传/拖动请求，
+			// 排队 1s 只会让拖动变卡，对风控没有任何意义（并没有产生新的解析请求）。
+			if freshResolve {
+				_ = waitLimiter()
+			}
 			// 其他网盘使用默认的 TransparentProxy
 		}
 	} else {
@@ -206,7 +228,10 @@ func PlayVideoHandler(c *gin.Context) {
 	}
 
 	// 执行代理
-	logger.Infof("开始代理 | 模式: %v | URL: %s", proxyType, targetUrl)
+	// [lc-1004] 云盘直链的签名 query 常有数百字节，每请求全量打印是撑爆 stdout 管道的主因之一。
+	// Info 只留 host+path（足以判断打到了哪台 CDN），完整 URL 降到 Debug。
+	logger.Infof("开始代理 | 模式: %v | 目标: %s", proxyType, briefURL(targetUrl))
+	logger.Debugf("开始代理 | 完整目标 URL: %s", targetUrl)
 
 	switch proxyType {
 	case ChunkedProxy:

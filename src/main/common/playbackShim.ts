@@ -156,6 +156,11 @@ class PlaybackShim {
             method: req.method,
             headers,
             timeout: 30000,
+            // [lc-1004] 不复用 http.globalAgent：视频流是单个长请求，连接池没有收益可拿，
+            // 而这一跳是 loopback、握手开销可忽略；独占连接也避免与主进程其它请求共用池、
+            // 被彼此的空闲回收策略干扰。（注：曾经出现的 socket hang up 不是这里造成的，
+            // 真根因是下面 req 的 'close' 误杀上游 socket。）
+            agent: false,
         };
         if (isHttps) {
             // Node 的 https.request 直接读取顶层 rejectUnauthorized（没有 options.https 子对象）
@@ -267,7 +272,12 @@ class PlaybackShim {
                 onClientGone();
             }
         });
-        req.on('close', () => { if (!responded) onClientGone(); });
+        // [lc-1004] req 的 'close' 在 Node ≥16 是「请求已完整接收」，不是「客户端跑了」：
+        // 无 body 的 GET 收到后 ~1ms 就触发，把还在等上游响应的 socket destroy 掉，
+        // 于是每发必 ECONNRESET(socket hang up) → 误判「Go proxy 不可达」→ 恒定降级到
+        // Node 兜底代理，PotPlayer 起播 5~8s 且 Go 侧优化全部失效。
+        // 只在请求真的被中途 abort（未收完）时才收手；客户端断开由上面的 res 'close' 负责。
+        req.on('close', () => { if (!responded && !req.complete) onClientGone(); });
 
         p.on('error', (err) => {
             const code = (err as NodeJS.ErrnoException).code;
@@ -309,7 +319,10 @@ class PlaybackShim {
                 return;
             }
             const api = new ApiService(domain, token);
-            const list = await api.getStreamList(itemGuid);
+            // [lc-1004] 用带缓存的版本。兜底路径下 PotPlayer 的每个 Range/续传请求都会进到这里，
+            // 原先每次都重新串行解析直链（夸克实测单次 3.10s），而 ApiService.cache 是类级静态的、
+            // TTL 300s（与 Go 侧 GetStreamCached 一致），换用 cached 版本后重复请求直接命中。
+            const list = await api.getStreamListCached(itemGuid);
             if (!list.success || !list.data || !(list.data as any).video_streams?.length) {
                 this.fail502(res, sid, '兜底代理: 获取流列表失败 ' + (list.message || ''));
                 return;
@@ -317,7 +330,7 @@ class PlaybackShim {
             const streams = (list.data as any).video_streams;
             let mediaGuid = streams[0].media_guid;
             if (sourceIndex > 0 && sourceIndex < streams.length) mediaGuid = streams[sourceIndex].media_guid;
-            const streamResp = await api.getStream(mediaGuid, account);
+            const streamResp = await api.getStreamCached(mediaGuid, account);
             if (!streamResp.success || !streamResp.data) {
                 this.fail502(res, sid, '兜底代理: 获取流失败 ' + (streamResp.message || ''));
                 return;
@@ -486,10 +499,9 @@ class PlaybackShim {
     /**
      * [lc-996] 这份响应是否是「可由我们重写分片地址的 HLS 播放列表」。
      *
-     * 上游为本机 Go proxy(127.0.0.1:22346) 时不重写：Go 侧是透传反代（DynamicProxy /
-     * CloudStorageHandler 都不碰 m3u8 正文），真实云盘地址只存在于 Go 进程内，
-     * 相对分片 URI 在本层拿不到正确的 base，重写只会拼出错误的绝对地址 → 原样交给上游语义。
-     * 该路径的 HLS 需在 Go proxy 内部解决（当前用户环境 Go proxy 恒 ECONNRESET，实际都走 Node 兜底）。
+     * 上游为本机 Go proxy(127.0.0.1:22346) 时不重写：Go 侧已把 m3u8 里的相对分片 URI
+     * 重写成指向自己的绝对 URL（日志 [m3u8] 已重写 N 行），本层再改只会把正确地址改坏。
+     * 只有走 Node 兜底直连云盘时，相对分片才需要在本层按真实云盘地址重写。
      */
     private isRewritablePlaylist(mt: string | undefined, target: string, status?: number): boolean {
         if (!mt || !/mpegurl/i.test(mt)) return false;

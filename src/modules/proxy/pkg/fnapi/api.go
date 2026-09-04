@@ -110,6 +110,47 @@ func generateCacheKey(method, url string, params interface{}) string {
 	return key
 }
 
+// [lc-1004] 直链/流列表解析的并发去重（in-flight 合并）。
+// 场景：起播时主进程会预热直链（把 NAS 新铸直链的 ~3s 藏进播放器启动窗口），播放器紧接着
+// 又发第一个 Range 请求；两者都走到 *Cached，而缓存此刻都还是空的 —— 于是同一条直链被解析
+// 两遍，NAS/网盘侧要为同一件事付两次代价（115 还要排两次 1 req/s 的队）。
+// 合并后：第一个调用真去解析，其余调用等它的结果。
+type flight[T any] struct {
+	done chan struct{}
+	v    T
+	err  error
+}
+
+var (
+	flightsMu sync.Mutex
+	flights   = map[string]any{}
+)
+
+// doInflight 同 key 的并发调用只真跑一次 fn，其余共享其结果。
+// key 需自带类型前缀（见调用处），避免不同 T 撞同一个 key。
+// 返回的指针被所有等待者共享，调用方只读取、不得就地修改。
+func doInflight[T any](key string, fn func() (T, error)) (T, error) {
+	flightsMu.Lock()
+	if e, ok := flights[key]; ok {
+		if f, ok2 := e.(*flight[T]); ok2 {
+			flightsMu.Unlock()
+			<-f.done
+			return f.v, f.err
+		}
+	}
+	f := &flight[T]{done: make(chan struct{})}
+	flights[key] = f
+	flightsMu.Unlock()
+
+	f.v, f.err = fn()
+
+	flightsMu.Lock()
+	delete(flights, key)
+	flightsMu.Unlock()
+	close(f.done)
+	return f.v, f.err
+}
+
 // Login 用户登录
 func (s *ApiService) Login(username, password string) (*ApiResponse[interface{}], error) {
 	return Request[interface{}](s.client, s.baseURL, "/v/api/v1/login", MethodPOST, s.token, LoginData{
@@ -244,7 +285,7 @@ func (s *ApiService) GetPlayQualityCached(mediaGUID string) (*ApiResponse[PlayQu
 	return resp, err
 }
 
-// GetStreamListCached 获取流列表（带缓存）
+// GetStreamListCached 获取流列表（带缓存 + 并发去重）
 func (s *ApiService) GetStreamListCached(itemGUID string) (*ApiResponse[StreamListResponse], error) {
 	cacheKey := generateCacheKey("GET", fmt.Sprintf("/v/api/v1/stream/list/%s", itemGUID), nil)
 	var cachedResp ApiResponse[StreamListResponse]
@@ -252,33 +293,64 @@ func (s *ApiService) GetStreamListCached(itemGUID string) (*ApiResponse[StreamLi
 		return &cachedResp, nil
 	}
 
-	resp, err := s.GetStreamList(itemGUID)
-	if err == nil && resp.Success {
-		setCache(cacheKey, resp)
-	}
-	return resp, err
+	return doInflight("list:"+cacheKey, func() (*ApiResponse[StreamListResponse], error) {
+		resp, err := s.GetStreamList(itemGUID)
+		if err == nil && resp.Success {
+			setCache(cacheKey, resp)
+		}
+		return resp, err
+	})
 }
 
-// GetStreamCached 获取流信息（带缓存）
-func (s *ApiService) GetStreamCached(mediaGUID, account string) (*ApiResponse[StreamResponse], error) {
-	ip := utils.StringToUUID(account)
+// streamCacheKey 计算 GetStreamCached 使用的缓存键（抽出来供 HasStreamCached 复用）
+func streamCacheKey(mediaGUID, account string) string {
 	data := StreamRequestData{
 		Header: Header{
 			UserAgent: []string{"trim_player"},
 		},
 		Level:     1,
 		MediaGUID: mediaGUID,
-		IP:        ip,
+		IP:        utils.StringToUUID(account),
 	}
-	cacheKey := generateCacheKey("POST", "/v/api/v1/stream", data)
+	return generateCacheKey("POST", "/v/api/v1/stream", data)
+}
+
+// HasStreamCached 报告 (mediaGUID, account) 的直链是否已在缓存中。
+// [lc-1004] 用途：115 的 1 req/s 限速本意是防止**解析直链**触发风控，但它原先被放在
+// 每个 HTTP 请求（含播放器的每个 Range/续传/拖动请求）前面，导致 115 源每次拖动都白等 1s。
+// 调用方据此判断「本次是否真的要去 fnOS 重新解析」，只在真解析时付这个代价。
+func (s *ApiService) HasStreamCached(mediaGUID, account string) bool {
+	var cachedResp ApiResponse[StreamResponse]
+	exists, err := getCache(streamCacheKey(mediaGUID, account), &cachedResp)
+	return exists && err == nil
+}
+
+// GetStreamCached 获取流信息（带缓存 + 并发去重）
+func (s *ApiService) GetStreamCached(mediaGUID, account string) (*ApiResponse[StreamResponse], error) {
+	ip := utils.StringToUUID(account)
+	cacheKey := streamCacheKey(mediaGUID, account)
 	var cachedResp ApiResponse[StreamResponse]
 	if exists, err := getCache(cacheKey, &cachedResp); exists && err == nil {
 		return &cachedResp, nil
 	}
 
-	resp, err := s.GetStream(mediaGUID, ip)
-	if err == nil && resp.Success {
-		setCache(cacheKey, resp)
-	}
-	return resp, err
+	return doInflight("stream:"+cacheKey, func() (*ApiResponse[StreamResponse], error) {
+		resp, err := s.GetStream(mediaGUID, ip)
+		if err == nil && resp.Success {
+			setCache(cacheKey, resp)
+		}
+		return resp, err
+	})
+}
+
+// IsStreamInflight 报告 (mediaGUID, account) 的直链此刻是否正在被别的请求解析。
+// [lc-1004] 与 HasStreamCached 搭配：两者都为 false 才说明本次真的会触发一次新解析，
+// 115 的 1 req/s 限速只该在那时排队。起播预热已在解析时，播放器的首个请求只是搭便车等结果，
+// 再排一次队纯属白等 1s。
+func IsStreamInflight(mediaGUID, account string) bool {
+	key := "stream:" + streamCacheKey(mediaGUID, account)
+	flightsMu.Lock()
+	defer flightsMu.Unlock()
+	_, ok := flights[key]
+	return ok
 }

@@ -24,6 +24,8 @@ export class ProxyDaemon {
     private restartResetTimer: NodeJS.Timeout | null = null;
     private config: Required<ProxyDaemonConfig>;
     private onRestart?: (attempts: number) => void;
+    /** 同一个进程的退出只处理一次：'exit' 监听器与心跳轮询可能对同一具死进程各触发一次 */
+    private exitHandled = new WeakSet<ChildProcess>();
 
     constructor(config: ProxyDaemonConfig = {}) {
         this.config = {
@@ -43,11 +45,12 @@ export class ProxyDaemon {
         this.onRestart = onRestart;
 
         // 监听进程异常退出
-        this.proxyProcess.on('exit', (code, signal) => {
-            this.handleProcessExit(code, signal);
+        const p = process;
+        p.on('exit', (code, signal) => {
+            this.handleProcessExit(code, signal, p);
         });
 
-        this.proxyProcess.on('error', (error) => {
+        p.on('error', (error) => {
             log.error('Proxy进程错误:', error.message);
         });
 
@@ -62,10 +65,15 @@ export class ProxyDaemon {
     /**
      * 处理进程退出事件
      */
-    private handleProcessExit(code: number | null, signal: string | null): void {
+    private handleProcessExit(code: number | null, signal: string | null, proc?: ChildProcess | null): void {
         if (this.isShuttingDown) {
             log.info('Proxy进程正常关闭，退出码:', code);
             return;
+        }
+
+        if (proc) {
+            if (this.exitHandled.has(proc)) return;
+            this.exitHandled.add(proc);
         }
 
         log.warn(`Proxy进程意外退出 - 退出码: ${code}, 信号: ${signal}`);
@@ -132,17 +140,19 @@ export class ProxyDaemon {
 
     /**
      * 启动心跳检测
+     * [lc-1004] 原来判据是 proxyProcess.killed —— 该字段只有「我们自己调过 kill()」才为 true，
+     * proxy.exe 崩溃 / 被外部（任务管理器、杀软）杀掉时恒为 false，心跳等于形同虚设，
+     * 22346 死了也永不重启。改为查真实退出状态 exitCode / signalCode。
      */
     private startHeartbeat(): void {
         this.stopHeartbeat();
 
         this.heartbeatTimer = setInterval(() => {
-            if (this.proxyProcess && !this.isShuttingDown) {
-                // 检查进程是否仍在运行
-                if (this.proxyProcess.killed) {
-                    log.warn('心跳检测：Proxy进程已被杀死');
-                    this.handleProcessExit(null, 'SIGKILL');
-                }
+            const p = this.proxyProcess;
+            if (!p || this.isShuttingDown) return;
+            if (p.exitCode !== null || p.signalCode !== null) {
+                log.warn(`心跳检测：Proxy进程已退出 (exitCode=${p.exitCode}, signalCode=${p.signalCode})`);
+                this.handleProcessExit(p.exitCode, p.signalCode, p);
             }
         }, this.config.heartbeatInterval);
     }
@@ -160,34 +170,13 @@ export class ProxyDaemon {
     /**
      * 更新进程实例（用于重启后）
      */
-    public updateProcess(process: ChildProcess): void {
+    public updateProcess(process: ChildProcess, onRestart?: (attempts: number) => void): void {
         if (this.proxyProcess) {
             this.proxyProcess.removeAllListeners();
         }
 
-        this.proxyProcess = process;
-        this.setupProcessListeners();
-
-        if (this.config.enableHeartbeat && !this.heartbeatTimer) {
-            this.startHeartbeat();
-        }
-
+        this.watchProcess(process, onRestart ?? this.onRestart);
         log.info('Proxy进程实例已更新');
-    }
-
-    /**
-     * 设置进程监听器
-     */
-    private setupProcessListeners(): void {
-        if (!this.proxyProcess) return;
-
-        this.proxyProcess.on('exit', (code, signal) => {
-            this.handleProcessExit(code, signal);
-        });
-
-        this.proxyProcess.on('error', (error) => {
-            log.error('Proxy进程错误:', error.message);
-        });
     }
 
     /**
@@ -203,21 +192,25 @@ export class ProxyDaemon {
             clearTimeout(this.restartResetTimer);
         }
 
-        if (this.proxyProcess && !this.proxyProcess.killed) {
+        // [lc-1004] 用真实退出状态判活。原来用 !killed：进程已崩溃时 killed 仍为 false，
+        // 会挂一个永不触发的 'exit' 监听、白等满 5s 超时再去 kill 一具死进程，拖慢退出。
+        const alive = this.proxyProcess && this.proxyProcess.exitCode === null && this.proxyProcess.signalCode === null;
+        if (alive) {
+            const proc = this.proxyProcess!;
             return new Promise<void>((resolve) => {
                 const timeout = setTimeout(() => {
                     log.warn('Proxy进程关闭超时，强制杀死进程');
-                    this.proxyProcess?.kill('SIGKILL');
+                    proc.kill('SIGKILL');
                     resolve();
                 }, 5000);
 
-                this.proxyProcess!.on('exit', () => {
+                proc.on('exit', () => {
                     clearTimeout(timeout);
                     resolve();
                 });
 
                 // 先尝试温和关闭
-                this.proxyProcess?.kill('SIGTERM');
+                proc.kill('SIGTERM');
             });
         }
 

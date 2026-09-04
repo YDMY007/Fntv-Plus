@@ -2,7 +2,6 @@ package utils
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,14 +96,11 @@ func NewCloudStorageHandler(targetURL string, headers map[string]string, skipVer
 		targetURL:  targetURL,
 		headers:    headers,
 		skipVerify: skipVerify,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: skipVerify,
-				},
-			},
-		},
+		// [lc-1004] 复用全局 Client（连接池 + HTTP/1.1 + 无整体超时）。
+		// 原先每请求新建 Transport：每个 Range 请求都重做一次 TLS 握手并泄漏 goroutine；
+		// 而且原来的 60s 整体 Timeout 会覆盖**响应体的全部读取**，去掉 10MiB 截断后
+		// 长视频流必然在 60s 处被硬生生掐断。
+		client: upstreamClient(skipVerify),
 	}
 }
 
@@ -267,21 +263,24 @@ func (h *CloudStorageHandler) serveMPVRangeSimple(c *gin.Context) {
 		return
 	}
 
-	// 固定只回 10MiB：end = min(start + 10MiB - 1, total-1)
-	end := start + ChunkSize - 1
-	if end >= info.Size {
+	// [lc-1004] 原实现在这里无条件把响应截到 10MiB（end = start + ChunkSize - 1）。
+	// 后果：播放器拿到 206 后必须自己发起续传，而每个续传请求在旧代码里都要新建
+	// http.Client 重做一次 TLS 握手 —— 3MB/s 下每 ~3.5s 就卡一下，正是"能播但很慢"的
+	// 典型形态；对不主动续传的播放器则直接表现为提前 EOF。
+	// 现在按客户端请求的 Range 原样透传，与其它网盘的 DynamicProxy 行为一致。
+	end := rr.End // -1 表示客户端要求"一直到文件末尾"
+	if end < 0 || end >= info.Size {
 		end = info.Size - 1
 	}
+	length := end - start + 1
 
-	// 3) 直连上游（仅调整我们发给上游的 Range）
+	// 3) 直连上游（Range 原样透传）
 	req, _ := http.NewRequest("GET", h.targetURL, nil)
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 
-	// 建议：拉长超时或置 0 以适配慢速网络的小机器
-	// 若你保持原有 h.client 30s 也可，因为 10MiB 通常很快
 	resp, err := h.client.Do(req)
 	if err != nil {
 		logger.Errorf("upstream error: %v", err)
@@ -289,6 +288,9 @@ func (h *CloudStorageHandler) serveMPVRangeSimple(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
+
+	logger.Infof("[quark] 上游响应 %s, len=%s, range=%s (客户端请求 %d-%d)",
+		resp.Status, resp.Header.Get("Content-Length"), resp.Header.Get("Content-Range"), start, end)
 
 	// 4) 透传：优先保持上游行为（状态码 + 关键头）
 	switch resp.StatusCode {
@@ -298,36 +300,55 @@ func (h *CloudStorageHandler) serveMPVRangeSimple(c *gin.Context) {
 		c.Status(http.StatusPartialContent)
 
 	case http.StatusOK:
-		// 少数后端忽略 Range，兜底构造 206 + Content-Range
-		// Content-Type 仍来自上游
+		// [lc-1004] 上游忽略了 Range 返回整份文件。旧实现在这里声明
+		// `Content-Range: bytes start-end/total` 却把**从 0 开始**的响应体原样发出去 ——
+		// 播放器会按错误的偏移解释数据（画面错位 / 解码失败 / Invalid NAL unit size）。
+		// 现在必须真的跳过前 start 字节、并且只发 length 字节。
+		// start 过大时"下载后丢弃"的代价不可接受，明确报 502 而不是静默发坏数据。
+		if start > ChunkSize {
+			logger.Errorf("[quark] 上游忽略 Range 返回 200，且 start=%d 过大，无法定位（拒发错位数据）", start)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "upstream ignored Range"})
+			return
+		}
+		if start > 0 {
+			if _, derr := io.CopyN(io.Discard, resp.Body, start); derr != nil {
+				logger.Errorf("[quark] 跳过前 %d 字节失败: %v", start, derr)
+				c.JSON(http.StatusBadGateway, gin.H{"error": "upstream short body"})
+				return
+			}
+		}
 		if v := resp.Header.Get("Content-Type"); v != "" {
 			c.Header("Content-Type", v)
 		} else {
 			c.Header("Content-Type", "application/octet-stream")
 		}
-		length := end - start + 1
 		c.Header("Accept-Ranges", "bytes")
 		c.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, info.Size))
 		c.Header("Content-Length", fmt.Sprintf("%d", length))
 		c.Status(http.StatusPartialContent)
+		// 只发客户端要的这一段，多出来的截掉
+		_, _ = io.CopyN(c.Writer, resp.Body, length)
+		return
 
 	default:
 		// 其它状态直接转发（如 4xx/5xx）
-		// 也可以改为 502，以隐藏上游细节
 		logger.Warnf("unexpected upstream status: %d", resp.StatusCode)
-		// 尽量把上游错误信息传递回去
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), body)
 		return
 	}
 
-	// 5) 流式转发响应体（无缓存，无拼接）
-	if f, ok := c.Writer.(http.Flusher); ok {
-		f.Flush()
+	// 5) 流式转发响应体：32KB 缓冲 + 每 100ms flush，保证播放器秒开首帧；
+	//    顺带把前 16MB 灌进文件头缓存，供弹幕 hash 的旁路请求零网络开销复用。
+	var headT *headTee
+	if start < headCacheBytes {
+		hb := getHeadBuffer(h.targetURL)
+		if !hb.isFull() {
+			if cr := resp.Header.Get("Content-Range"); cr != "" {
+				hb.setTotal(parseTotalFromContentRange(cr))
+			}
+			headT = &headTee{hb: hb, offset: start}
+		}
 	}
-	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-		// 客户端中断通常会到这里，不必视作错误
-		logger.Debugf("client closed / copy ended: %v", err)
-		return
-	}
+	_ = copyStreaming(c.Writer, resp.Body, headT)
 }

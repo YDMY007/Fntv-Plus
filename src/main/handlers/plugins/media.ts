@@ -9,6 +9,8 @@ const log = logger.component('media');
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
+import { fileURLToPath } from 'url';
 import { PlayStatusData, ItemListRequest } from '../../../modules/fn_api/types';
 import { escape } from 'querystring';
 import { isTrusted } from '../../../modules/cert_trust';
@@ -594,6 +596,10 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
         playList[currentIndex].playLink = getProxyUrl(config, playList[currentIndex].itemGuid, sourceIndex);
     }
 
+    // [lc-1004] 播放链接已定，立刻预热直链：让 Go 铸直链的 ~3s 与后面
+    // 「播放器检测 → 抢占/关闭残留 PotPlayer → 拉起播放器进程」这段窗口重叠，而不是串行等。
+    prewarmPlayLink(playList[currentIndex] && playList[currentIndex].playLink);
+
     // 决定使用的播放器类型与路径
     const wantPot = (player || fnConfig.getDefaultPlayer()) === 'potplayer';
     const playerType = wantPot ? ply.PlayerType.POTPLAYER : ply.PlayerType.MPV;
@@ -667,15 +673,8 @@ async function resolveStrm(raw: string): Promise<string> {
     const pathPart = raw.split('?')[0].toLowerCase();
     if (!pathPart.endsWith('.strm')) return raw;
     log.info('[strm] 检测到 .strm 链接，尝试解析内部真实 URL:', raw);
-    const fetchFn = (globalThis as any).fetch;
-    const AbortControllerCtor = (globalThis as any).AbortController;
-    if (!fetchFn) { log.warn('[strm] 运行环境无 fetch，跳过解析'); return raw; }
-    const ctrl = AbortControllerCtor ? new AbortControllerCtor() : null;
-    const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
-    const resp = await fetchFn(raw, ctrl ? { signal: ctrl.signal } : {});
-    if (timer) clearTimeout(timer);
-    if (!resp.ok) { log.warn('[strm] 下载 strm 失败 status=' + resp.status + '，回退原链接'); return raw; }
-    const text = await resp.text();
+    const text = await readStrmText(raw);
+    if (text === null) return raw;
     const lines = String(text).split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
     for (const line of lines) {
       if (/^https?:\/\//i.test(line)) { log.info('[strm] 解析到真实播放 URL:', line); return line; }
@@ -685,6 +684,39 @@ async function resolveStrm(raw: string): Promise<string> {
   } catch (e: any) {
     log.warn('[strm] 解析异常，回退原链接:', e?.message || e);
     return raw;
+  }
+}
+
+/**
+ * 读取 .strm 正文；读不出来返回 null（调用方回退原链接）。
+ *
+ * [lc-1004] 本地路径必须走 fs：fetch('D:\media\x.strm') 会直接抛 TypeError(Invalid URL)，
+ * 于是解析静默失败、回退原链接，播放器拿到一份纯文本 → 必然播不了。
+ * 而 handleExternalPlay 的 kind='file' 正是用户在文件对话框里选的本地路径。
+ */
+async function readStrmText(raw: string): Promise<string | null> {
+  if (!/^https?:\/\//i.test(raw)) {
+    try {
+      const p = /^file:\/\//i.test(raw) ? fileURLToPath(raw) : raw;
+      const text = await fs.promises.readFile(p, 'utf8');
+      log.info('[strm] 本地文件读取成功:', p);
+      return text;
+    } catch (e: any) {
+      log.warn('[strm] 本地文件读取失败，回退原链接:', e?.message || e);
+      return null;
+    }
+  }
+  const fetchFn = (globalThis as any).fetch;
+  const AbortControllerCtor = (globalThis as any).AbortController;
+  if (!fetchFn) { log.warn('[strm] 运行环境无 fetch，跳过解析'); return null; }
+  const ctrl = AbortControllerCtor ? new AbortControllerCtor() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+  try {
+    const resp = await fetchFn(raw, ctrl ? { signal: ctrl.signal } : {});
+    if (!resp.ok) { log.warn('[strm] 下载 strm 失败 status=' + resp.status + '，回退原链接'); return null; }
+    return await resp.text();
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -761,6 +793,58 @@ function getProxyUrl(cfg: fnConfig.Config, itemGuid: string, sourceIndex: number
     const cookieParam = cachedSessionCookie ? `&cookie=${encodeURIComponent(cachedSessionCookie)}` : '';
     // const skipVerify = '1'; // 永远跳过证书验证
     return `http://127.0.0.1:22346/api/v1/playvideo/${itemGuid}?token=${cfg.token}&skipVerify=${skipVerify}&account=${cfg.account}&domain=${domain}&useNasLocal=${useNasLocal}&sourceIndex=${sourceIndex}${cookieParam}`;
+}
+
+/**
+ * [lc-1004] 起播预热：拉起播放器之前先替它向 Go proxy 要一次直链。
+ *
+ * 网盘直链不是现成的 —— NAS 每次都得向云盘新铸一条（夸克实测首次 3.2~3.9s，NAS 侧缓存后仅 ~0.7s），
+ * 而播放器进程启动本身也要 1~2s。串行做就是 5s 以上起播；把解析塞进播放器启动窗口并行做，
+ * 等播放器发第一个请求时直链已在 Go 侧缓存好（或正与预热共享同一次 in-flight 解析），起播压到 2~3s。
+ *
+ * 只预热本机 Go proxy 地址：strm / 外部直链走 rawLink 不经 Go，预热没有意义。
+ * 失败一律静默 —— 预热只是加速，不在播放路径上。
+ *
+ * 要读满 8MB 而不是拿到首个数据块就断开：Go 侧的文件头缓存(headcache.go)攒够前缀就能直供
+ * 播放器的起播探测（门槛只有 64KB，但攒得越多、能离线直供的容器头就越长）。灌够之后
+ * PotPlayer 那 ~7 发不带 Range 的探测、MPV 的 `bytes=0-`，全部从内存拿首字节，
+ * 每发省掉一次 ~270ms 的云盘往返（实测是 t_meta=3.9s 的主导项）。
+ */
+const PREWARM_BYTES = 8 << 20;
+const PREWARM_DEADLINE_MS = 15000;
+
+function prewarmPlayLink(playLink: string | undefined): void {
+    if (!playLink || !/^http:\/\/127\.0\.0\.1:\d+\//.test(playLink)) return;
+    const t = Date.now();
+    try {
+        let got = 0, firstByteLogged = false;
+        const req = http.get(playLink, { headers: { Range: `bytes=0-${PREWARM_BYTES - 1}` }, timeout: 20000 }, (res) => {
+            res.on('error', () => { /* noop */ });
+            res.on('data', (chunk: Buffer) => {
+                if (!firstByteLogged) {
+                    firstByteLogged = true;
+                    log.info(`[预热] 直链已就绪 status=${res.statusCode} 首字节=${Date.now() - t}ms`);
+                }
+                got += chunk.length;
+                // 灌够就收手，剩下的 16MB 文件头由播放流自己的 headTee 接着填
+                if (got >= PREWARM_BYTES) res.destroy();
+            });
+            res.once('end', () => {
+                log.info(`[预热] 文件头预热完成 ${got} 字节，耗时=${Date.now() - t}ms`);
+                res.destroy();
+            });
+        });
+        // 云盘只给涓流时 socket 的 inactivity timeout 不会触发，必须有硬上限，否则白占一条连接
+        const deadline = setTimeout(() => {
+            log.debug(`[预热] 达硬上限中止，已预热 ${got} 字节`);
+            req.destroy();
+        }, PREWARM_DEADLINE_MS);
+        req.on('close', () => clearTimeout(deadline));
+        req.on('error', (e: any) => { log.debug(`[预热] 失败(不影响播放): ${e?.code || e?.message || e}`); });
+        req.on('timeout', () => { req.destroy(); });
+    } catch (e: any) {
+        log.debug(`[预热] 异常(不影响播放): ${e?.message || e}`);
+    }
 }
 
 // 处理当前播放的媒体信息

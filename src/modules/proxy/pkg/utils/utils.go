@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"proxy/pkg/logger"
@@ -75,6 +76,63 @@ func PassthroughHeaders(req *http.Request) map[string]string {
 
 	return headers
 }
+
+// [lc-1004] 上游 http.Client 必须**全局复用**。http.Transport 自带连接池，每请求新建会：
+//   - 丢掉全部连接复用，播放器的每个 Range/续传/拖动请求都要重做一次 TCP + TLS 握手；
+//   - 泄漏每连接一对 readLoop/writeLoop goroutine 与一个本地临时端口，跑久了资源耗尽。
+//
+// 原先 DynamicProxy 与 cloud.go 的 NewCloudStorageHandler 都在函数内部新建 Transport。
+// 按 skipVerify 分成两个池（TLS 配置不同不能混用）。
+var (
+	upstreamClients   = map[bool]*http.Client{}
+	upstreamClientsMu sync.Mutex
+)
+
+func upstreamClient(skipVerify bool) *http.Client {
+	upstreamClientsMu.Lock()
+	defer upstreamClientsMu.Unlock()
+	if c, ok := upstreamClients[skipVerify]; ok {
+		return c
+	}
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 120 * time.Second,
+			// 视频流不做自动 gzip（避免 Transport 偷偷解压破坏 Range/Content-Length 语义）
+			DisableCompression: true,
+			// [lc-1003] 强制上游走 HTTP/1.1，禁用 HTTP/2。原因：Go 的 http.Transport 默认
+			// ForceAttemptHttp2=true，对百度/115 等 HTTPS 会协商成 h2；h2 单条 stream 受流控窗口
+			// (初始 64KB) 限制，在 Tailscale 隧道等高 RTT 链路上单流 bulk 下载吞吐≈窗口/RTT≈0.5~1MB/s
+			// —— 正是 MPV(经 Go proxy 22346)拉网盘直链卡在 <1MB/s、缓冲被码率吃掉而卡顿的根因。
+			// Node 兜底代理走 HTTP/1.1 无此流控 → 满速，故 PotPlayer 正常。禁用 h2 后单连接即满带宽。
+			ForceAttemptHTTP2: false,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: skipVerify,
+			},
+			// 长视频流会长时间独占连接，放宽空闲池上限，让续传/拖动能复用同一条连接
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 16,
+			IdleConnTimeout:     90 * time.Second,
+		},
+		// 不设整体 Timeout：长视频流式响应不能被整体超时切断
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxUpstreamRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxUpstreamRedirects)
+			}
+			// Go 跨主机重定向默认剥离 Authorization；网盘/反代场景签名可能在头里，
+			// 这里恢复首跳的值（内部代理，泄漏面可控）
+			if auth := via[0].Header.Get("Authorization"); auth != "" && req.Header.Get("Authorization") == "" {
+				req.Header.Set("Authorization", auth)
+			}
+			return nil
+		},
+	}
+	upstreamClients[skipVerify] = c
+	return c
+}
+
+// maxUpstreamRedirects 跟随上游重定向的最大跳数
+const maxUpstreamRedirects = 5
 
 // DynamicProxy 透明代理
 func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]string, skipVerify bool) {
@@ -164,6 +222,21 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 		}
 	}
 
+	// [lc-1004] 起播探测直供 + 续拉(splice)。
+	// 实测 PotPlayer 起播会串行发 ~7 个不带 Range 的 GET、MPV 则一律发 `bytes=0-`，
+	// 每发都要 Go 重新与云盘 CDN 建连（上一发被读几百 KB 就掐断，连接无法回池），
+	// 每发 ≈270ms，7 发 ≈1.9s 纯等待，时长要等最后一发才出来（实测 t_meta=3.9s）。
+	// 缓存里已有内容就先立刻写出去，再从缓存末尾向上游续拉，首字节从 ~270ms 降到 ~0。
+	// 门禁取「起点 0 且不限终点」：这两种请求要的都是整份文件，可以用缓存前缀 + 续拉
+	// 拼出与 CDN 逐字节等价的应答（带 Range 的回 206+Content-Range，故可 seek 性不变）。
+	// 带终点的区间请求（如弹幕 hash 的 0-16777215）由上面的 tryServeHeadFromCache 负责。
+	if c.Request.Method == http.MethodGet && rangeOK && rangeStart == 0 && !hasEnd {
+		wantPartial := strings.TrimSpace(c.Request.Header.Get("Range")) != ""
+		if serveHeadThenSplice(c, targetNoUser.String(), buildUpstream, skipVerify, wantPartial) {
+			return
+		}
+	}
+
 	upstream, err := buildUpstream(targetNoUser.String(), bodyReader)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Invalid target URL"})
@@ -175,35 +248,8 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	// MPV 收到 302 后用自己的默认 UA 去跟 → UA 与签名不匹配 → 仍 302 → 重试耗尽报
 	// "Unable to load file or stream"。必须在代理侧用**原始 UA + Range** 跟随重定向，
 	// 把最终的 200/206 视频流交给播放器。
-	const maxRedirects = 5
-	client := &http.Client{
-		Transport: &http.Transport{
-			ResponseHeaderTimeout: 120 * time.Second,
-			// 视频流不做自动 gzip（避免 Transport 偷偷解压破坏 Range/Content-Length 语义）
-			DisableCompression: true,
-			// [lc-1003] 强制上游走 HTTP/1.1，禁用 HTTP/2。原因：Go 的 http.Transport 默认
-			// ForceAttemptHttp2=true，对百度/115 等 HTTPS 会协商成 h2；h2 单条 stream 受流控窗口
-			// (初始 64KB) 限制，在 Tailscale 隧道等高 RTT 链路上单流 bulk 下载吞吐≈窗口/RTT≈0.5~1MB/s
-			// —— 正是 MPV(经 Go proxy 22346)拉网盘直链卡在 <1MB/s、缓冲被码率吃掉而卡顿的根因。
-			// Node 兜底代理走 HTTP/1.1 无此流控 → 满速，故 PotPlayer 正常。禁用 h2 后单连接即满带宽。
-			ForceAttemptHTTP2: false,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: skipVerify,
-			},
-		},
-		// 不设整体 Timeout：长视频流式响应不能被整体超时切断
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				return fmt.Errorf("stopped after %d redirects", maxRedirects)
-			}
-			// Go 跨主机重定向默认剥离 Authorization；网盘/反代场景签名可能在头里，
-			// 这里恢复首跳的值（内部代理，泄漏面可控）
-			if auth := via[0].Header.Get("Authorization"); auth != "" && req.Header.Get("Authorization") == "" {
-				req.Header.Set("Authorization", auth)
-			}
-			return nil
-		},
-	}
+	// [lc-1004] Client/Transport 改为全局复用（见 upstreamClient），重定向策略一并上移。
+	client := upstreamClient(skipVerify)
 
 	resp, err := client.Do(upstream)
 	if err != nil {
@@ -218,8 +264,11 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	}
 	defer resp.Body.Close()
 
-	// 打印响应头
-	logger.Infof("响应状态: %s, 头部: %v", resp.Status, resp.Header)
+	// [lc-1004] 每请求打印完整响应头会产出 500-800B 日志，是撑爆 stdout 管道的主因之一。
+	// Info 级只留状态码与关键的长度/区间信息，完整头部降到 Debug（默认 INFO 不输出）。
+	logger.Infof("响应状态: %s, len=%s, range=%s",
+		resp.Status, resp.Header.Get("Content-Length"), resp.Header.Get("Content-Range"))
+	logger.Debugf("响应头部: %v", resp.Header)
 
 	// [lc-652] STRM/网盘直链 HLS：m3u8 分片常为相对路径（如 media-xxx-549.ts?auth_key=...）。
 	// 若不重写，播放器会基于「本地 playvideo 代理 URL」拼接分片 → 请求打回本地代理、
@@ -253,10 +302,23 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 	var headT *headTee
 	if (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) && rangeStart < headCacheBytes {
 		hb := getHeadBuffer(targetNoUser.String())
-		if !hb.isFull() {
-			if cr := resp.Header.Get("Content-Range"); cr != "" {
-				hb.setTotal(parseTotalFromContentRange(cr))
+		// [lc-1004] 记下直供/splice 需要的元信息。不带 Range 的 200 没有 Content-Range，
+		// 文件总大小只能从 Content-Length 取；缺了 total，serveHeadThenSplice 会被永久禁用。
+		// 上游真的回了 206 本身就是「认 Range」的最强证据，有些 CDN 回 206 却不带 Accept-Ranges 头。
+		// Content-Encoding 非空（CDN 会 gzip m3u8 这类文本响应）时不记 meta：缓存里存的是压缩字节，
+		// 而直供时无法回对 Content-Encoding → 播放器解出来必坏，宁可禁用 splice。
+		if resp.Header.Get("Content-Encoding") == "" {
+			hb.setMeta(resp.Header.Get("Content-Type"),
+				resp.StatusCode == http.StatusPartialContent || strings.EqualFold(resp.Header.Get("Accept-Ranges"), "bytes"))
+		}
+		if cr := resp.Header.Get("Content-Range"); cr != "" {
+			hb.setTotal(parseTotalFromContentRange(cr))
+		} else if resp.StatusCode == http.StatusOK && rangeStart == 0 {
+			if cl, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64); err == nil && cl > 0 {
+				hb.setTotal(cl)
 			}
+		}
+		if !hb.isFull() {
 			startOff := int64(0)
 			if resp.StatusCode == http.StatusPartialContent && hasEnd { // 206：数据从 Range 起点开始
 				startOff = rangeStart
