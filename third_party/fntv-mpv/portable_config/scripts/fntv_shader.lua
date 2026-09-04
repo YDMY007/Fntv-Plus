@@ -55,20 +55,30 @@ local function apply(on)
     set_uosc(on and 'yes' or 'no')
 end
 
--- 文件加载后：按默认开关设定初始「高亮态 + 着色器开关」
+-- [lc-1007] 高亮态一律以真实 glsl-shaders 属性为准，不再用 conf.default_on 猜：
+--   面板预设(mpv-user.conf 的 glsl-shaders-append) / Ctrl+1~9 临时切换 / 按钮开关
+--   都会改 glsl-shaders，observer 捕获后统一回写 uosc 高亮，杜绝「面板选了默认但按钮不同步」。
+local function sync_btn()
+    local cur = mp.get_property('glsl-shaders') or ''
+    set_uosc((cur ~= '' and cur ~= 'no') and 'yes' or 'no')
+end
+mp.observe_property('glsl-shaders', 'string', function() sync_btn() end)
+
+-- 文件加载后：仅当当前无着色器且 default_on 时应用一次；随后 sync_btn 兜底初始高亮
 mp.register_event('file-loaded', function()
-    local init = conf.default_on and 'yes' or 'no'
-    set_uosc(init)
-    if conf.default_on then apply(true) end
+    if conf.default_on and (mp.get_property('glsl-shaders') or '') == '' then
+        apply(true)
+    end
+    sync_btn()
 end)
 
 -- 监听 uosc 控制栏按钮（cycle:...@fntv_shader）点击：
--- uosc 算出下一值后回传 set 消息，本脚本据此应用着色器并回写高亮态。
+-- uosc 算出下一值后回传 set 消息，本脚本据此应用着色器。
+-- 高亮态不再无条件回写，改由 apply() 成功路径 + glsl-shaders observer 统一保证一致，
+-- 避免 apply 失败（如着色器文件缺失）时按钮仍误翻到高亮。
 mp.register_script_message('set', function(prop, value)
     if prop ~= EXT then return end
-    local on = (value == 'yes' or value == true)
-    apply(on)
-    set_uosc(value) -- 回写，确保 uosc 显示态与真实状态一致
+    apply(value == 'yes' or value == true)
 end)
 
 mp.log('info', '[fntv_shader] 已加载 (shaders=' .. tostring(conf.shaders) .. ', default_on=' .. tostring(conf.default_on) .. ')')
