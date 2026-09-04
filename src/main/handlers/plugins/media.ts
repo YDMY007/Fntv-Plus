@@ -57,12 +57,18 @@ let cachedSessionCookie = '';
 //   (cache-secs 秒的视频量)才启动 demux/出画。mpv.conf 里 cache-secs=120 + 下载慢 → 黑屏等数秒。
 //   必须显式 =no：不等待缓存填充，首片数据一到就开播（该视频码率仅 ~266KB/s，2MB/s 下载足够平滑）。
 //   ⚠️ 千万别传 =0：报 Invalid parameter → mpv 启动即退出 → node-mpv-2 start() 静默挂死(lc-664 教训)。
+// ⚠️ [lc-998] --cache-pause 与 --demuxer-cache-wait 各管一段，**不要一起关**：
+//   - --demuxer-cache-wait=no 管「开播」：不等缓存填满，首片到手即出画（治黑屏，必须保留 no）。
+//   - --cache-pause 管「播放中」：缓存耗尽时是否暂停等待。lc-663 为治黑屏把它一起设成 no,
+//     结果是播放中缓冲一空就硬播 —— 网盘直链/隧道带宽跟不上码率时表现为**持续一卡一卡**
+//     (实测 17GB/5397s ≈ 3.15MB/s 码率走 Tailscale 隧道拉网盘直链时必卡)。
+//     恢复默认 yes：开播依旧秒出画(由上一项保证)，播放中缓冲耗尽则暂停补缓冲 —— 宁可转一下也不卡。
 const MPV_NETWORK_ARGS = [
     '--force-window=immediate',
     '--network-timeout=180',
     '--cache=yes',
     '--cache-secs=30',
-    '--cache-pause=no',
+    '--cache-pause=yes',
     '--demuxer-cache-wait=no',
 ];
 
