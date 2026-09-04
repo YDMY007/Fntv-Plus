@@ -141,6 +141,13 @@ class PlaybackShim {
         delete headers.origin;
         delete headers.referer;
         for (const k of Object.keys(extraHeaders)) headers[k] = extraHeaders[k];
+        // [lc-1001] 请求头也可能含非 ASCII（如客户端传入的非 ASCII 字段），Node http.request 同样会抛错；
+        // 统一按响应头同套规则清洗（content-disposition 在此路径几乎不出现，仅剔除非 ASCII/控制字符）。
+        for (const k of Object.keys(headers)) {
+            const v = headers[k];
+            if (Array.isArray(v)) headers[k] = v.map((x: any) => this.sanitizeHeaderValue(k, String(x)));
+            else if (typeof v === 'string') headers[k] = this.sanitizeHeaderValue(k, v);
+        }
         const options: any = {
             protocol: t.protocol || 'http:',
             host: t.hostname,
@@ -175,9 +182,12 @@ class PlaybackShim {
                 this.reverseProxyTo(next, req, res, sid, extraHeaders, skipVerify, depth + 1, onConnectFail);
                 return;
             }
-            const outHeaders: http.IncomingHttpHeaders = { ...pres.headers };
-            delete (outHeaders as any).connection;
-            delete (outHeaders as any)['keep-alive'];
+            // [lc-1001] 上游响应头可能含非 ASCII（如百度/115 的中文 Content-Disposition），
+            // 直接展开会在 writeHead 抛 ERR_INVALID_CHAR 导致响应写不出、PotPlayer 转圈。
+            // 先统一清洗（中文文件名按 RFC 5987 编码保留，其余剔除非 ASCII/控制字符）。
+            const outHeaders: any = this.sanitizeOutgoingHeaders(pres.headers);
+            delete outHeaders.connection;
+            delete outHeaders['keep-alive'];
             const upstreamType = pres.headers['content-type'];
             const mt = this.resolveContentType(target, req.url || '', upstreamType as string | undefined,
                 pres.headers['content-disposition'] as string | undefined);
@@ -343,6 +353,49 @@ class PlaybackShim {
         log.warn(`[playbackShim][${sid || '?'}] ✗ 返回 502 | ${detail}`);
         res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Bad Gateway: ' + detail + '\n\n请检查:\n1. fnOS 服务是否正常运行\n2. 本机与 fnOS 网络是否连通、防火墙是否放行\n3. 重启应用后再试');
+    }
+
+    /**
+     * [lc-1001] 清洗上游响应头，杜绝 Node res.writeHead 因非 ASCII / 控制字符抛
+     * ERR_INVALID_CHAR（百度/115 等云盘常返回含中文文件名的 Content-Disposition，
+     * 未清洗会让 PotPlayer 响应写不出、一直转圈）。
+     * - content-disposition：中文文件名按 RFC 5987 编码为 filename*=UTF-8''<percent>，ASCII 安全且保留原名
+     * - 其余头值：剔除非 ASCII 与控制字符，确保 writeHead 不抛错
+     */
+    private sanitizeOutgoingHeaders(headers: http.IncomingHttpHeaders): Record<string, string | string[]> {
+        const out: Record<string, string | string[]> = {};
+        for (const key of Object.keys(headers)) {
+            const raw = (headers as any)[key];
+            if (raw === undefined) continue;
+            if (Array.isArray(raw)) {
+                out[key] = raw.map((v: any) => this.sanitizeHeaderValue(key, String(v)));
+            } else {
+                out[key] = this.sanitizeHeaderValue(key, String(raw));
+            }
+        }
+        return out;
+    }
+
+    private sanitizeHeaderValue(name: string, value: string): string {
+        if (name.toLowerCase() === 'content-disposition') {
+            const enc = this.encodeDispositionFilename(value);
+            if (enc) return enc;
+        }
+        // 其余头值：仅保留可打印 ASCII（0x20-0x7e），剔除非 ASCII 与控制字符，避免 writeHead 抛错
+        return value.replace(/[^\x20-\x7e]/g, '');
+    }
+
+    /** 把 content-disposition 的中文文件名按 RFC 5987 编码；无文件名或本就纯 ASCII 时返回原值清洗版。 */
+    private encodeDispositionFilename(value: string): string | null {
+        const m = /filename\*?=(?:"([^"]*)"|'([^']*)'|([^;]+))/i.exec(value);
+        if (!m) return null;
+        const fname = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+        if (!fname) return null;
+        if (/^[\x20-\x7e]*$/.test(value)) return value; // 已是纯 ASCII，无需编码
+        const encoded = encodeURIComponent(fname);
+        const base = value.replace(/filename\*?=(?:"[^"]*"|'[^']*'|[^;]+)/i, '').replace(/;\s*$/, '').trim();
+        const prefix = base ? base + '; ' : '';
+        return `${prefix}filename*=UTF-8''${encoded}`;
     }
 
     /**
