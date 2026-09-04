@@ -179,8 +179,9 @@ class PlaybackShim {
             delete (outHeaders as any).connection;
             delete (outHeaders as any)['keep-alive'];
             const upstreamType = pres.headers['content-type'];
-            const mt = this.resolveContentType(target, req.url || '', upstreamType as string | undefined);
-            const mimeRewritten = !!mt && mt !== upstreamType;
+            const mt = this.resolveContentType(target, req.url || '', upstreamType as string | undefined,
+                pres.headers['content-disposition'] as string | undefined);
+            let mimeRewritten = !!mt && mt !== upstreamType;
             if (mt) (outHeaders as any)['content-type'] = mt;
             const cl = pres.headers['content-length'];
             log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} type=${upstreamType || '(无)'} -> ${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} len=${cl || '(chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
@@ -190,14 +191,63 @@ class PlaybackShim {
                 this.rewritePlaylist(pres, res, outHeaders, target, sid, markResponded, (n) => { upstreamBytes += n; });
                 return;
             }
-            markResponded();
-            res.writeHead(pres.statusCode || 502, outHeaders as any);
-            pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
-            pres.on('end', () => {
+
+            const endLog = (): void => {
                 const complete = cl ? upstreamBytes >= Number(cl) : true;
                 log.key(`[playbackShim][${sid || '?'}] ✓ 上游流结束 | 已转发 ${upstreamBytes} 字节 status=${pres.statusCode} ${cl ? `(目标 ${cl}, ${complete ? '完整' : '不完整'})` : '(流式)'}`);
+            };
+
+            // [lc-997] 上游未给出可信 media 类型时，先扣住响应头，用首包魔数嗅探真实容器再回写。
+            //   仅当 Range 从 0 开始(能拿到文件头)时可行；拖动产生的后续 Range 请求沿用既有判定。
+            const ut0 = (upstreamType || '').toLowerCase();
+            const upstreamTrustworthy = /^(video|audio)\//.test(ut0) || /mpegurl/.test(ut0);
+            const rangeStart = (() => {
+                const m = /bytes=(\d+)-/.exec(String(req.headers['range'] || ''));
+                return m ? parseInt(m[1], 10) : 0;
+            })();
+            if (upstreamTrustworthy || rangeStart !== 0) {
+                markResponded();
+                res.writeHead(pres.statusCode || 502, outHeaders as any);
+                pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
+                pres.on('end', endLog);
+                pres.pipe(res);
+                return;
+            }
+
+            let headSent = false;
+            const startStream = (sniffed?: string): void => {
+                if (headSent) return;
+                headSent = true;
+                if (sniffed) {
+                    (outHeaders as any)['content-type'] = sniffed;
+                    mimeRewritten = sniffed !== upstreamType;
+                    log.info(`[playbackShim][${sid || '?'}] 🔍 魔数嗅探 | 真实容器=${sniffed} (上游 type=${upstreamType || '无'}，已覆盖)`);
+                } else {
+                    log.info(`[playbackShim][${sid || '?'}] 🔍 魔数嗅探 | 未识别，沿用 ${(outHeaders as any)['content-type'] || '(无)'}`);
+                }
+                markResponded();
+                res.writeHead(pres.statusCode || 502, outHeaders as any);
+            };
+            // 首包通常数十 KB，远大于魔数所需的十几字节；流极短(未触发 data)时由 end 分支兜底，不丢数据。
+            const onFirstChunk = (c: Buffer): void => {
+                pres.removeListener('data', onFirstChunk);
+                upstreamBytes += c.length;
+                startStream(this.sniffMime(c));
+                res.write(c);
+                pres.on('data', (d: Buffer) => {
+                    upstreamBytes += d.length;
+                    if (res.write(d) === false) { // 背压：暂停上游，等客户端排空再继续
+                        pres.pause();
+                        res.once('drain', () => { try { pres.resume(); } catch { /* noop */ } });
+                    }
+                });
+            };
+            pres.on('data', onFirstChunk);
+            pres.on('end', () => {
+                startStream();
+                endLog();
+                res.end();
             });
-            pres.pipe(res);
         });
 
         const onClientGone = () => { try { p.destroy(); } catch { /* noop */ } };
@@ -304,15 +354,13 @@ class PlaybackShim {
      *   PotPlayer 信任 Content-Type，看到 video/mp4 会把播放列表当单文件解封装而失败；
      *   MPV 按内容探测故不受影响——这正是「strm(MPV 能播 / PotPlayer 失败)」的根因(lc-995)。
      */
-    private resolveContentType(targetUrl: string, reqPath: string, upstreamType?: string): string | undefined {
+    private resolveContentType(targetUrl: string, reqPath: string, upstreamType?: string, disposition?: string): string | undefined {
         const ut = (upstreamType || '').toLowerCase();
         const isHls = /mpegurl|mpeg\+url|x-mpegurl|vnd\.apple\.mpegurl/i.test(ut)
             || /\.m3u8?(\?|#|$)/i.test(targetUrl || '');
         if ((ut && /^video\//i.test(ut)) || isHls) {
             return upstreamType || 'application/vnd.apple.mpegurl';
         }
-        const path = reqPath || targetUrl;
-        const ext = (path.split('?')[0].split('#')[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
         const map: Record<string, string> = {
             mp4: 'video/mp4',
             m4v: 'video/mp4',
@@ -329,7 +377,57 @@ class PlaybackShim {
             aac: 'audio/aac',
             flac: 'audio/flac',
         };
-        return ext ? map[ext] : undefined;
+        // [lc-997] 兜底扩展名的取值顺序：Content-Disposition 文件名 > 真实上游地址 > shim 自身路径。
+        //   ⚠️ 绝不能再把 shim 自身路径(恒为 /p/<id>/xxx.mp4)当首选：那会让 MKV/AVI/TS 一律被标成
+        //   video/mp4，PotPlayer 信任 Content-Type 按 MP4 解封装 → 直接打开失败
+        //   (MPV 按内容探测故不受影响，正是「云盘视频 MPV 能播 / PotPlayer 失败」的根因)。
+        //   真实容器改由 sniffMime 按流魔数判定，这里只是嗅探也失败时的次级兜底。
+        const fname = (() => {
+            const m = /filename\*?=(?:[A-Za-z0-9-]+'')?"?([^";]+)"?/i.exec(disposition || '');
+            return m ? m[1] : '';
+        })();
+        for (const src of [fname, targetUrl, reqPath]) {
+            if (!src) continue;
+            const e = (src.split('?')[0].split('#')[0].match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+            if (e && map[e]) return map[e];
+        }
+        return undefined;
+    }
+
+    /**
+     * [lc-997] 按流头部魔数嗅探真实容器格式（content sniffing）。
+     *
+     * 为什么必须有它：云盘直链（115 / 夸克等）普遍返回 `application/octet-stream`，
+     * 且经 Go proxy 时 URL 形如 `/api/v1/playvideo/<guid>?...` —— **没有任何扩展名可用**。
+     * 于是「按扩展名兜底」只能拿到 shim 自身路径的 .mp4，把 MKV/AVI/TS/FLV 一律标成 video/mp4；
+     * PotPlayer 信任 Content-Type，按 MP4 解封装非 MP4 容器即失败，而 MPV 按内容探测完全不受影响。
+     * 流的前若干字节是唯一跨路径可靠（Go proxy / Node 兜底 / 直链 都成立）的判据。
+     *
+     * 仅在「上游未给出可信 video|audio|HLS 类型」且「Range 从 0 开始（能拿到文件头）」时调用。
+     */
+    private sniffMime(head: Buffer): string | undefined {
+        if (!head || head.length < 12) return undefined;
+        const at = (o: number, n: number) => head.toString('latin1', o, o + n);
+        // Matroska / WebM：EBML magic
+        if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return 'video/x-matroska';
+        // MP4 / MOV：box 长度(4B) 之后是 'ftyp'
+        if (at(4, 4) === 'ftyp') return 'video/mp4';
+        // AVI：RIFF....AVI␠
+        if (at(0, 4) === 'RIFF' && at(8, 4) === 'AVI ') return 'video/x-msvideo';
+        // FLV
+        if (at(0, 3) === 'FLV') return 'video/x-flv';
+        // RealMedia / RMVB
+        if (at(0, 4) === '.RMF') return 'application/vnd.rn-realmedia-vbr';
+        // MPEG-TS：188 字节定长包，同步字节 0x47 每包重复
+        if (head[0] === 0x47 && head.length >= 189 && head[188] === 0x47) return 'video/mp2t';
+        // ASF / WMV / WMA 头部 GUID
+        if (head[0] === 0x30 && head[1] === 0x26 && head[2] === 0xb2 && head[3] === 0x75) return 'video/x-ms-wmv';
+        // Ogg
+        if (at(0, 4) === 'OggS') return 'video/ogg';
+        // MP3：ID3 标签或帧同步
+        if (at(0, 3) === 'ID3') return 'audio/mpeg';
+        if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+        return undefined;
     }
 
     /**
