@@ -26,6 +26,8 @@ class PlaybackShim {
     private counter = 0;
     private readonly port = 22347;
     private started = false;
+    /** [lc-996] HLS 播放列表缓冲上限。正常只有几十~几百 KB（实测夸克 79215 字节 / 161 个分片）。 */
+    private static readonly PLAYLIST_MAX = 8 * 1024 * 1024;
 
     /** 启动 shim（幂等）。在 proxy 启动时一并拉起。 */
     async start(): Promise<void> {
@@ -182,6 +184,12 @@ class PlaybackShim {
             if (mt) (outHeaders as any)['content-type'] = mt;
             const cl = pres.headers['content-length'];
             log.info(`[playbackShim][${sid || '?'}] ◀ 上游响应 | status=${pres.statusCode} type=${upstreamType || '(无)'} -> ${mt || '(不变)'} mimeRewritten=${mimeRewritten ? '是' : '否'} len=${cl || '(chunked)'} acceptRanges=${pres.headers['accept-ranges'] || '(无)'}`);
+            // [lc-996] HLS 播放列表不能直筒透传：其中的分片是相对地址，播放器会拿 shim 自身 URL 当 base
+            // 回来请求分片，而 shim 路由只认 id、忽略其后路径 → 又把整份播放列表回给它，永远开不了播。
+            if (this.isRewritablePlaylist(mt, target, pres.statusCode)) {
+                this.rewritePlaylist(pres, res, outHeaders, target, sid, markResponded, (n) => { upstreamBytes += n; });
+                return;
+            }
             markResponded();
             res.writeHead(pres.statusCode || 502, outHeaders as any);
             pres.on('data', (c: Buffer) => { upstreamBytes += c.length; });
@@ -322,6 +330,107 @@ class PlaybackShim {
             flac: 'audio/flac',
         };
         return ext ? map[ext] : undefined;
+    }
+
+    /**
+     * [lc-996] 这份响应是否是「可由我们重写分片地址的 HLS 播放列表」。
+     *
+     * 上游为本机 Go proxy(127.0.0.1:22346) 时不重写：Go 侧是透传反代（DynamicProxy /
+     * CloudStorageHandler 都不碰 m3u8 正文），真实云盘地址只存在于 Go 进程内，
+     * 相对分片 URI 在本层拿不到正确的 base，重写只会拼出错误的绝对地址 → 原样交给上游语义。
+     * 该路径的 HLS 需在 Go proxy 内部解决（当前用户环境 Go proxy 恒 ECONNRESET，实际都走 Node 兜底）。
+     */
+    private isRewritablePlaylist(mt: string | undefined, target: string, status?: number): boolean {
+        if (!mt || !/mpegurl/i.test(mt)) return false;
+        if (status !== undefined && status !== 200) return false;
+        const h = (url.parse(target).hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+        return h !== '127.0.0.1' && h !== 'localhost' && h !== '::1';
+    }
+
+    /**
+     * [lc-996] 缓冲整份播放列表 → 重写分片地址 → 重算 Content-Length 后一次性回给播放器。
+     * 播放列表是小文件（实测 79215 字节），缓冲不影响起播；超过 PLAYLIST_MAX 说明体积异常，
+     * 放弃重写、把已收部分原样写出后转为直筒透传，避免无上限吃内存。
+     */
+    private rewritePlaylist(
+        pres: http.IncomingMessage,
+        res: http.ServerResponse,
+        outHeaders: http.IncomingHttpHeaders,
+        baseUrl: string,
+        sid: string,
+        markResponded: () => void,
+        onBytes: (n: number) => void,
+    ): void {
+        const chunks: Buffer[] = [];
+        let total = 0;
+        let passthrough = false;
+        const onData = (c: Buffer) => {
+            onBytes(c.length);
+            if (passthrough) return; // 已转直筒，数据由 pipe 负责
+            total += c.length;
+            if (total > PlaybackShim.PLAYLIST_MAX) {
+                passthrough = true;
+                pres.removeListener('data', onData);
+                log.warn(`[playbackShim][${sid}] ⚠ 播放列表超 ${PlaybackShim.PLAYLIST_MAX >> 20}MB，跳过重写直接透传`);
+                markResponded();
+                res.writeHead(pres.statusCode || 200, outHeaders as any);
+                res.write(Buffer.concat(chunks));
+                pres.pipe(res);
+                return;
+            }
+            chunks.push(c);
+        };
+        pres.on('data', onData);
+        pres.on('end', () => {
+            if (passthrough) return;
+            const raw = Buffer.concat(chunks).toString('utf8');
+            const rw = this.rewriteHlsPlaylist(raw, baseUrl);
+            const body = Buffer.from(rw.body, 'utf8');
+            const h: any = { ...outHeaders };
+            h['content-length'] = String(body.length); // 重写后长度必变，沿用上游值会被播放器判定为截断
+            delete h['transfer-encoding'];
+            markResponded();
+            res.writeHead(pres.statusCode || 200, h);
+            res.end(body);
+            log.key(`[playbackShim][${sid}] ✓ HLS 播放列表已重写 | ${rw.n} 条分片相对地址 → 绝对上游地址 | ${raw.length} → ${body.length} 字节`);
+        });
+        pres.on('error', (e: Error) => {
+            if (passthrough) return;
+            markResponded();
+            log.warn(`[playbackShim][${sid}] ✗ 播放列表读取中断: ${e.message}`);
+            this.fail502(res, sid, '播放列表读取中断');
+        });
+    }
+
+    /**
+     * [lc-996] 把播放列表里的相对分片 URI 解析成绝对上游地址。
+     *
+     * 为什么必须重写：shim 路由只取 /p/<id>/ 里的 id、忽略其后路径。播放器识别出 HLS 后按相对 URI
+     * 回来请求 /p/<id>/media-xxx-0.ts，shim 会把它当成同一个 id 的播放列表请求 → 再次解析上游 →
+     * 又回一份 79215 字节的 m3u8 给它。实测 PotPlayer 如此连发 176 次分片请求、duration 恒为 0。
+     * 重写成绝对地址后播放器直连云盘拉分片，实测 duration=794680ms、position 正常递增；
+     * 云盘分片不校验 UA/Referer（无 UA 亦 200）且支持 Range（→206），故拖动同样可用。
+     */
+    private rewriteHlsPlaylist(text: string, baseUrl: string): { body: string; n: number } {
+        let n = 0;
+        const isAbs = (u: string) => /^[a-z][a-z0-9+.-]*:\/\//i.test(u) || u.startsWith('//');
+        const abs = (u: string) => { try { return new URL(u, baseUrl).href; } catch { return u; } };
+        const body = text.split(/\r?\n/).map((line) => {
+            const t = line.trim();
+            if (!t) return line;
+            if (t.charAt(0) === '#') {
+                // #EXT-X-KEY / #EXT-X-MAP 的 URI="..."（加密流密钥、fMP4 初始化段）同样可能是相对地址
+                return line.replace(/URI="([^"]+)"/g, (m, u: string) => {
+                    if (isAbs(u)) return m;
+                    n++;
+                    return 'URI="' + abs(u) + '"';
+                });
+            }
+            if (isAbs(t)) return line;
+            n++;
+            return abs(t);
+        }).join('\n');
+        return { body, n };
     }
 
     // ===================== B站弹幕端点（/danmaku）=====================
