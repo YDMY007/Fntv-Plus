@@ -337,11 +337,6 @@ export function buildCardHtml(d: any): string {
     );
   }
 
-  // ④ 简介：hero 里那段来自 fnOS，常为空或被截断；TMDB 的 overview 通常完整得多。
-  if (d.overview && String(d.overview).trim()) {
-    blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__ov">${esc(d.overview)}</div>`);
-  }
-
   // ⑤ 事实区（播出与规格）：窄 label 列，组内靠 4px padding 分行，无横线。
   const rows: string[] = [];
   const row = (k: string, v: string): void => { if (v) rows.push(rowHtml(k, v)); };
@@ -392,17 +387,15 @@ export function buildCardHtml(d: any): string {
   crow('制作', d.companies, 4);
   if (crew.length) blocks.push(sec('主创', `<div class="fnos-showinfo__facts">${crew.join('')}</div>`));
 
-  // ⑦ 本季：季详情单独一次请求取回（集数/首播/评分/本季简介）。
+  // ⑦ 本季：季详情单独一次请求取回（集数/首播/评分）。本季简介不再渲染——与顶部 hero 简介重复(lc-1006)。
   const sn = d.season;
-  if (sn && (sn.episodeCount || sn.airDate || sn.overview || sn.voteAverage)) {
+  if (sn && (sn.episodeCount || sn.airDate || sn.voteAverage)) {
     const bits: string[] = [];
     if (sn.episodeCount) bits.push(sn.episodeCount + ' 集');
     if (sn.airDate) bits.push('首播 ' + sn.airDate);
     if (sn.voteAverage) bits.push('评分 ' + Number(sn.voteAverage).toFixed(1));
     const t = (typeof sn.seasonNumber === 'number') ? ('第 ' + sn.seasonNumber + ' 季') : (sn.name || '本季');
-    blocks.push(sec(t,
-      (bits.length ? `<div class="fnos-showinfo__meta-sub">${esc(bits.join(' · '))}</div>` : '')
-      + (sn.overview ? `<div class="fnos-showinfo__ov">${esc(sn.overview)}</div>` : '')));
+    blocks.push(sec(t, `<div class="fnos-showinfo__meta-sub">${esc(bits.join(' · '))}</div>`));
   }
 
   // ⑧ 剧照：占位 img，src 由 _fillStills 异步填（全部失败则整节移除）。

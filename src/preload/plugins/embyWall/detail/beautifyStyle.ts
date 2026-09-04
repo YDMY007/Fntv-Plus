@@ -280,14 +280,15 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 
 /* ===== I. 延后注入的 TMDB 剧集信息卡（tmdbCard.ts，追加进右列）=====
    排版范式(lc-985 立、lc-988 扩)：对标 Netflix / Apple TV+ / TMDB 侧栏，弃用后台表单式 label-value 双列。
-   分段(lc-988，11 段)：评分块(视觉锚) → 标语 → meta 串(无 label) → 简介 → 事实区(窄 label)
+   分段(lc-988 立、lc-1006 去简介)：评分块(视觉锚) → 标语 → meta 串(无 label) → 事实区(窄 label)
      → 主创 → 本季 → 剧照 → 相似剧集 → 更多(别名/关键词/在线看/热度/编号) → 外链 → 来源行。
    为什么这么长：飞牛原生季页**完全没有**这些数据，全是本插件从 TMDB 补的；
      用户明确要求「尽可能多获取和显示」。∴ 内容以「原生没有的」为界，不做删减。
-     ⚠ 实机量过的硬证据(lc-988, /v/tv/season/盗墓王)：hero 的 innerText 只有 20 个字符
-       「盗墓王 第 1 季 第 1 集 2026」；整个内容列除去「选集」区(每集标题+集简介+时长)后
-       再无任何剧集简介/评分/主创/平台/分级/外链。**特别是剧集简介：原生一个字都没有**，
-       卡内的简介段是唯一来源 —— 别照「hero 已有带更多的简介」这种印象把它当重复删掉。
+     ⚠ 剧集简介(lc-1006 按用户要求移除)：卡内**不再渲染** show overview(原④)与 season overview
+       (原⑦内)。用户实测当前剧 hero 顶部已有原生简介，卡内两段属重复。**代价(已知取舍)**：
+       原生 hero 简介为空的剧将卡内也无简介 —— lc-988 实测盗墓王 hero innerText 仅
+       「盗墓王 第 1 季 第 1 集 2026」、测试/Betas 季 getEditDetail overview="" 即属此类。
+       用户已确认接受此取舍，勿再"把简介补回卡内"。
    去重(仍然成立)：标题不渲染(hero 已有)；主演 cast 不渲染(原生「演职人员」区实机确认有头像+姓名横滑)，
      但主创分工(创作者/导演/编剧/作曲/制片/制作)原生区没有 → 补；
      原名降到事实区末行(日文/韩文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏)。
@@ -360,10 +361,8 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
   font-size:11px !important; letter-spacing:.06em !important; line-height:1 !important;
   color:var(--fnos-muted) !important; margin-bottom:8px !important;
 }
-/* 标语：比简介更早给出调性，弱化到灰字一级。 */
+/* 标语：比正文更早给出调性，弱化到灰字一级。 */
 .fnos-showinfo__tag{ font-size:12.5px !important; line-height:1.6 !important; color:var(--fnos-muted) !important; }
-/* 简介：TMDB overview，正文级行高(1.75)让它成为卡里最易读的一段。 */
-.fnos-showinfo__ov{ font-size:12.5px !important; line-height:1.75 !important; color:var(--semi-color-text-1,#3c3c43) !important; word-break:break-word !important; }
 /* 剧照：3 张等宽 16:9。img 初始 opacity 0 + 无 src(渲染阶段零请求)，
    取到 dataUrl 后由 _fillStills 加 is-ready 淡入；取不到的单张会被摘掉，不留空位。
    aspect-ratio 而非 height：宽度是 calc 出来的百分比，写死 height 在窄栏会变形。 */
