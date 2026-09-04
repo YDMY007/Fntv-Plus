@@ -43,23 +43,40 @@ const K = {
 };
 
 // ── 默认值 ──
+// [lc-1012] 材质重做后默认值同步调整：blur 14→18、frost .5→.42(光泽渐变替代平涂白)、
+// sat 140→150、shadow .14→.22(更大更软)、noise 默认开(真 Acrylic 的表面颗粒签名)。
 const DEF = {
   enabled: false,
   mode: 'mica',
   tint: '#faf8fc',
-  blur: 14,
-  frost: 0.5,
-  sat: 140,
+  blur: 18,
+  frost: 0.42,
+  sat: 150,
   bright: 100,
   bg: 'fluid',
   fluidSpeed: 1,
   particles: false,
   border: true,
   borderAlpha: 0.2,
-  shadow: 0.14,
-  noise: false,
+  shadow: 0.22,
+  noise: true,
   vignette: false,
 };
+
+// [lc-1012] 视觉参数 schema：v2 材质重做后, 旧版保存的视觉参数(平涂白/彩虹流体/无噪点)
+// 会让新材质失效 → 首次升到 v2 时清空视觉键重derive新默认, 仅保留「启用」开关状态。
+const SCHEMA = 2;
+const K_SCHEMA = 'fntvGlass.schema';
+function migrateSchema(): void {
+  try {
+    const cur = parseInt(localStorage.getItem(K_SCHEMA) || '1', 10) || 1;
+    if (cur >= SCHEMA) return;
+    const visualKeys = [K.mode, K.tint, K.blur, K.frost, K.sat, K.bright, K.bg,
+      K.fluidSpeed, K.border, K.borderAlpha, K.shadow, K.noise, K.vignette];
+    for (const k of visualKeys) localStorage.removeItem(k);
+    localStorage.setItem(K_SCHEMA, String(SCHEMA));
+  } catch { /* ignore */ }
+}
 
 function getStr(k: string, d: string): string {
   try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; }
@@ -100,39 +117,78 @@ function readSettings(): GlassSettings {
 
 // ── 门控样式（一次注入，仅在 html[data-fntv-glass] 时生效）──
 // 使用 rgba(var(--fntv-glass-tint-r/g/b), alpha) 而非 color-mix，兼容更广的 Electron/Chromium。
+//
+// [lc-1012] 材质重做（用户反馈「太假了而且不美观」）。参照市面最佳实践重写：
+//   · Windows 11 真 Mica/Acrylic（Fluent 2）：低饱和环境色调 + 表面噪点(≈3%) + 亮度分层，
+//     绝无彩虹渐变/描边线圈/漂浮粒子这类「假玻璃」元素；
+//   · Linear / Arc / Raycast 的面板材质：无均匀边框，用「顶缘 1px 高光 + inset 玻璃厚度环
+//     + 大软阴影」表达悬浮厚度；玻璃本体 = tint + 165deg 亮度光泽渐变。
+//   · 流体背景 → 环境光(Ambient)背景：三团低饱和 radial 色域 + 极慢漂移缩放，明暗两套色板。
 const GATE_CSS = `
-  /* 玻璃底色：mica=浅冷白，compat=中性深灰 */
+  /* 玻璃底色 + 环境光色板：跟随 fnOS 主题(html.dark)双套 ——
+     Windows Mica 本就分深浅两套材质, 深色主题铺白磨砂是发灰的根源。 */
   html[data-fntv-glass] {
     --fntv-glass-tint-r: 250;
     --fntv-glass-tint-g: 248;
     --fntv-glass-tint-b: 252;
+    --fntv-glass-sheen-1: .10;
+    --fntv-glass-sheen-2: .028;
+    --fntv-amb-base: #eef0f7;
+    --fntv-amb-1: rgba(178, 158, 232, .40);
+    --fntv-amb-2: rgba(148, 196, 236, .36);
+    --fntv-amb-3: rgba(186, 222, 206, .32);
   }
+  html.dark[data-fntv-glass] {
+    --fntv-glass-tint-r: 30;
+    --fntv-glass-tint-g: 32;
+    --fntv-glass-tint-b: 40;
+    --fntv-glass-sheen-1: .05;
+    --fntv-glass-sheen-2: .012;
+    --fntv-amb-base: #0d0d15;
+    --fntv-amb-1: rgba(118, 84, 218, .50);
+    --fntv-amb-2: rgba(26, 106, 188, .46);
+    --fntv-amb-3: rgba(18, 126, 112, .36);
+  }
+  /* Compat 模式：明暗主题都强制深灰玻璃 */
   html[data-fntv-glass][data-fntv-glass-mode="compat"] {
-    --fntv-glass-tint-r: 34;
-    --fntv-glass-tint-g: 38;
-    --fntv-glass-tint-b: 47;
+    --fntv-glass-tint-r: 30;
+    --fntv-glass-tint-g: 32;
+    --fntv-glass-tint-b: 40;
+    --fntv-glass-sheen-1: .05;
+    --fntv-glass-sheen-2: .012;
   }
 
-  /* ① 接管 body / 页面根容器：关闭整窗亚克力（改由组件级磨砂），透明让背景层/桌面透出
-     —— 关键：fnOS 主题底色在 .fnos-tv-page 容器上，若只透 body 不透它，背景层(z-index:-1)会被盖死，
-        壁纸/流体完全透不出来（只有卡片 backdrop-filter 能模糊到一点），表现为"玻璃盖掉壁纸"。 */
-  html[data-fntv-glass] .fnos-tv-page,
-  html[data-fntv-glass] .fnos-tv-page body {
+  /* ① 接管页面根容器：关闭整窗亚克力（改由组件级磨砂），透明让背景层/桌面透出。
+     ⚠ [lc-1012] 作用域事实：.fnos-tv-page 由 embyWall.ts:98 打在 <html> 上,
+        故旧写法 html[data-fntv-glass] .fnos-tv-page(后代关系)结构性永不匹配 ——
+        这正是云母增强此前"什么都没生效"的根因之一。一律用复合选择器。
+     body 一并清掉：mainwin 的 body 亚克力(半透+backdrop-filter)在玻璃模式下
+        被环境光层盖住不可见, 但 GPU 仍在持续为它做全窗模糊(纯浪费)。 */
+  html[data-fntv-glass].fnos-tv-page,
+  html[data-fntv-glass].fnos-tv-page body {
     background: transparent !important;
     background-color: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
+  /* ①a 页面级不透明容器透明化：fnOS 主内容容器的 bg-[var(--semi-color-bg-1)](rgb 25,25,26)
+     会整块盖死背景层 → 组件磨砂采到的永远是这层死黑。玻璃模式下清掉页面级底色 token,
+     让环境光/桌面真正透出（卡片/海报内部的 bg-hover/bg-placeholder 半透覆盖层不受影响）。
+     ⚠ 匹配串必须是 "bg-[var(--semi-color-bg-1)" —— 类名是 bg-[var(--semi-color-bg-1)]，
+       此前写成 ...bg-1] 少了右括号导致 0 命中(lc-1012 预览实测)。 */
+  html[data-fntv-glass].fnos-tv-page [class*="bg-[var(--semi-color-bg-1)"],
+  html[data-fntv-glass].fnos-tv-page [class*="bg-[var(--semi-color-bg-0)"] {
+    background-color: transparent !important;
+  }
 
   /* ①b 玻璃模式下顶区全透：标题栏安全区(32px)内所有元素/根容器/#root/#app 全部透明，
      否则 fnOS 自身顶栏底色会露出来导致"最上面一条颜色不匹配" [lc-541] */
-  html[data-fntv-glass] .fnos-tv-page #root,
-  html[data-fntv-glass] .fnos-tv-page #app,
-  html[data-fntv-glass] .fnos-tv-page > div,
-  html[data-fntv-glass] .fnos-tv-page body > div,
-  html[data-fntv-glass] .fnos-tv-page body > nav,
-  html[data-fntv-glass] .fnos-tv-page body > header,
-  html[data-fntv-glass] .fnos-tv-page body > section {
+  html[data-fntv-glass].fnos-tv-page #root,
+  html[data-fntv-glass].fnos-tv-page #app,
+  html[data-fntv-glass].fnos-tv-page body > div,
+  html[data-fntv-glass].fnos-tv-page body > nav,
+  html[data-fntv-glass].fnos-tv-page body > header,
+  html[data-fntv-glass].fnos-tv-page body > section {
     background: transparent !important;
     background-color: transparent !important;
   }
@@ -140,48 +196,39 @@ const GATE_CSS = `
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
      lc-526~530 教训：事后排除规则 !important 对抗不稳定，改用 :not() 让选择器根本不匹配顶栏区域 */
-  html[data-fntv-glass] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
-    background: rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), var(--fntv-glass-frost, 0.5)) !important;
-    backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
-    -webkit-backdrop-filter: blur(var(--fntv-glass-blur, 14px)) saturate(var(--fntv-glass-sat, 140%)) !important;
-    border: calc(var(--fntv-glass-border, 1) * 1px) solid rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), calc(var(--fntv-glass-frost, 0.5) * var(--fntv-glass-border-alpha, 0.2))) !important;
-    box-shadow: 0 8px 28px rgba(0,0,0, var(--fntv-glass-shadow, 0.14)) !important;
+  html[data-fntv-glass].fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
+  html[data-fntv-glass].fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
+    /* [lc-1012] 材质 = tint 底 + 165deg 亮度光泽渐变(顶缘受光)。
+       厚度感不画均匀描边，用三层 box-shadow：inset 玻璃厚度环(随边框开关/浓度) +
+       顶缘 1px 高光 + 大软阴影(负扩散半径, Linear/Arc 式悬浮)。 */
+    background-color: rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), var(--fntv-glass-frost, 0.42)) !important;
+    background-image: linear-gradient(165deg,
+      rgba(255, 255, 255, var(--fntv-glass-sheen-1, .05)) 0%,
+      rgba(255, 255, 255, calc(var(--fntv-glass-sheen-1, .05) * .3)) 42%,
+      rgba(255, 255, 255, var(--fntv-glass-sheen-2, .012)) 100%) !important;
+    backdrop-filter: blur(var(--fntv-glass-blur, 18px)) saturate(var(--fntv-glass-sat, 150%)) !important;
+    -webkit-backdrop-filter: blur(var(--fntv-glass-blur, 18px)) saturate(var(--fntv-glass-sat, 150%)) !important;
+    border: none !important;
+    box-shadow:
+      inset 0 0 0 calc(var(--fntv-glass-border, 1) * 1px) rgba(255, 255, 255, calc(var(--fntv-glass-border, 1) * var(--fntv-glass-border-alpha, 0.2) * .9)),
+      inset 0 1px 0 rgba(255, 255, 255, calc(var(--fntv-glass-frost, 0.42) * .3)),
+      0 16px 40px -8px rgba(0, 0, 0, var(--fntv-glass-shadow, 0.22)) !important;
   }
 
-  /* ②-L 浅色模式专用卡片观感：暗底上「浅色磨砂面板+微阴影」自然立体；亮底上同款白磨砂会糊成一片、失去层次。
-     故浅色模式改用「干净白磨砂面板(rgba 白 0.72)+ 柔和投影」，制造与暗底同等的"浮起卡片"立体感，
-     且不画硬边框(避免"框线")。JS 在 applyGlass 检测页面亮度并设 data-fntv-glass-is-light。 */
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Card"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Panel"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="playbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="control-bar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="ControlBar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="navbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="topbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="appbar"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page [class*="Search"]:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page header:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]),
-  html[data-fntv-glass][data-fntv-glass-is-light="1"] .fnos-tv-page nav:not(:has([data-fnos-clear="1"])):not([data-fnos-clear="1"]):not([data-fntv-glass-exclude]) {
-    background: rgba(255, 255, 255, 0.72) !important;
-    border-color: transparent !important;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10) !important;
-  }
+  /* [lc-1012] 旧「浅色模式白磨砂特例」已删：tint/环境光/sheen 全部跟随 html.dark 双套自适应,
+     一套规则覆盖明暗两主题（浅色 = 白玻璃, 深色 = 深玻璃）。 */
 
   /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1） */
   #fntv-glass-bg, #fntv-glass-particles {
@@ -203,55 +250,37 @@ const GATE_CSS = `
     height: 100% !important;
     object-fit: cover !important;
   }
-  /* 流体动画渐变 */
+  /* [lc-1012] 环境光(Ambient)背景：三团低饱和 radial 色域铺在近黑/近白底上,
+     整体极慢漂移缩放(36s 级)。对标 Win11 聚焦壁纸/ macOS Sonoma 渐变的「氛围」,
+     替换旧版高饱和彩虹渐变+粉青光斑(假玻璃感的最大来源)。 */
   #fntv-glass-fluid {
-    background: linear-gradient(125deg, #6a5acd, #8e44ad, #3498db, #1abc9c, #6a5acd);
-    background-size: 400% 400% !important;
-    filter: saturate(1.1);
-    animation: fntvFluid calc(22s / var(--fntv-glass-fluid-speed, 1)) ease infinite;
+    background:
+      radial-gradient(42vmax 42vmax at 16% 10%, var(--fntv-amb-1) 0%, transparent 62%),
+      radial-gradient(38vmax 38vmax at 84% 18%, var(--fntv-amb-2) 0%, transparent 60%),
+      radial-gradient(48vmax 48vmax at 52% 92%, var(--fntv-amb-3) 0%, transparent 65%),
+      var(--fntv-amb-base) !important;
+    filter: blur(46px) saturate(1.12) !important;
+    transform: scale(1.1) !important;
+    animation: fntvAmbient calc(36s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite alternate !important;
   }
-  #fntv-glass-fluid::before, #fntv-glass-fluid::after {
-    content: "" !important;
-    position: absolute !important;
-    border-radius: 50% !important;
-    filter: blur(60px) !important;
-    opacity: 0.55 !important;
-  }
-  #fntv-glass-fluid::before {
-    width: 46vmax !important; height: 46vmax !important;
-    left: -8vmax !important; top: -10vmax !important;
-    background: radial-gradient(circle, #ff9ad5, transparent 70%);
-    animation: fntvBlob1 calc(18s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite;
-  }
-  #fntv-glass-fluid::after {
-    width: 40vmax !important; height: 40vmax !important;
-    right: -6vmax !important; bottom: -8vmax !important;
-    background: radial-gradient(circle, #7ee8fa, transparent 70%);
-    animation: fntvBlob2 calc(21s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite;
-  }
-  @keyframes fntvFluid {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-  }
-  @keyframes fntvBlob1 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    50% { transform: translate(8vmax, 6vmax) scale(1.15); }
-  }
-  @keyframes fntvBlob2 {
-    0%,100% { transform: translate(0,0) scale(1); }
-    50% { transform: translate(-7vmax, -5vmax) scale(1.1); }
+  @keyframes fntvAmbient {
+    0%   { transform: scale(1.1) translate(0, 0); }
+    50%  { transform: scale(1.18) translate(-1.6%, 1.2%); }
+    100% { transform: scale(1.1) translate(1.2%, -1.5%); }
   }
 
-  /* ④ 磨砂噪点层：固定铺满、置于背景与内容之间（z-index:-1），微妙颗粒增强玻璃质感 */
+  /* ④ [lc-1012] 噪点 → 表面颗粒：旧版铺在 z:-1（在卡片后方，被卡片自己的
+     backdrop-filter 模糊掉，等于没生效）。真 Acrylic 的噪点是「材质表面」的，
+     故铺在内容之上的全屏颗粒层(pointer-events:none, 2.6%, overlay 混合)：
+     平面处给材质颗粒感, 文字/海报上 2.6% 不可感知。 */
   #fntv-glass-noise {
     position: fixed !important;
     inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
-    z-index: -1 !important;
+    z-index: 2147482900 !important;
     pointer-events: none !important;
-    opacity: 0.06 !important;
+    opacity: 0.026 !important;
     mix-blend-mode: overlay !important;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") !important;
     background-size: 160px 160px !important;
@@ -272,25 +301,25 @@ const GATE_CSS = `
 
   /* ═══ 排除规则：顶部导航/标题栏区域完全透明化 ═══ */
   /* 顶栏容器本身：fnOS 透明模式下标记 data-fnos-clear="1"（class 形如 relative z-[2] h-[80px] bg-[var(--semi-color-bg-1)]） */
-  html[data-fntv-glass] .fnos-tv-page [data-fnos-clear="1"],
+  html[data-fntv-glass].fnos-tv-page [data-fnos-clear="1"],
   /* 顶栏所有祖先容器（含真正承载玻璃效果的 card/panel 包裹层）：用 :has 不限层级命中 */
-  html[data-fntv-glass] .fnos-tv-page :has([data-fnos-clear="1"]),
+  html[data-fntv-glass].fnos-tv-page :has([data-fnos-clear="1"]),
   /* 兜底：含顶栏 z-20/z-10 的容器与祖先（z-20 在更深层的内层 div，不限层级命中） */
-  html[data-fntv-glass] .fnos-tv-page [class*="z-20"],
-  html[data-fntv-glass] .fnos-tv-page [class*="z-10"],
-  html[data-fntv-glass] .fnos-tv-page :has([class*="z-20"]),
-  html[data-fntv-glass] .fnos-tv-page :has([class*="z-10"]),
+  html[data-fntv-glass].fnos-tv-page [class*="z-20"],
+  html[data-fntv-glass].fnos-tv-page [class*="z-10"],
+  html[data-fntv-glass].fnos-tv-page :has([class*="z-20"]),
+  html[data-fntv-glass].fnos-tv-page :has([class*="z-10"]),
   /* 语义标签排除 */
-  html[data-fntv-glass] .fnos-tv-page header,
-  html[data-fntv-glass] .fnos-tv-page nav,
-  html[data-fntv-glass] .fnos-tv-page [class*="navbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="topbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="appbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="header-bar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="nav-bar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="page-header"],
-  html[data-fntv-glass] .fnos-tv-page [class*="toolbar"],
-  html[data-fntv-glass] .fnos-tv-page [class*="list-head"],
+  html[data-fntv-glass].fnos-tv-page header,
+  html[data-fntv-glass].fnos-tv-page nav,
+  html[data-fntv-glass].fnos-tv-page [class*="navbar"],
+  html[data-fntv-glass].fnos-tv-page [class*="topbar"],
+  html[data-fntv-glass].fnos-tv-page [class*="appbar"],
+  html[data-fntv-glass].fnos-tv-page [class*="header-bar"],
+  html[data-fntv-glass].fnos-tv-page [class*="nav-bar"],
+  html[data-fntv-glass].fnos-tv-page [class*="page-header"],
+  html[data-fntv-glass].fnos-tv-page [class*="toolbar"],
+  html[data-fntv-glass].fnos-tv-page [class*="list-head"],
   /* 上述所有目标统一归零 */
   {
     background: transparent !important;
@@ -321,22 +350,12 @@ function tintToRgb(hex: string): { r: number; g: number; b: number } {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
-// ── 检测页面是否为浅色主题（用于自动弱化浅色模式下的边框/阴影）──
+// ── 检测页面是否为浅色主题（驱动 data-fntv-glass-is-light）──
+// [lc-1012] 改判 html.dark（fnOS 主题总开关）：旧法读 .fnos-tv-page 背景色，
+//   但玻璃模式开启后该容器已被 ① 规则清成透明 → 恒判深色, 检测失效。
 function detectLightMode(): boolean {
   try {
-    const el = document.querySelector('.fnos-tv-page') || document.body;
-    if (!el) return false;
-    const cs = getComputedStyle(el);
-    const bg = cs.backgroundColor;
-    // 解析 rgb(r, g, b) 或 rgba(r, g, b, a)
-    const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-    if (!m) return false;
-    const r = parseInt(m[1], 10) / 255;
-    const g = parseInt(m[2], 10) / 255;
-    const b = parseInt(m[3], 10) / 255;
-    // 相对亮度（ITU-R BT.709）
-    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return lum > 0.5; // 亮度 > 50% 视为浅色
+    return !document.documentElement.classList.contains('dark');
   } catch (_) { return false; }
 }
 
@@ -682,7 +701,7 @@ function buildGlassControls(): HTMLElement {
   title.textContent = '云母增强（Glass UI）';
   const sub = document.createElement('div');
   sub.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-bottom:8px;';
-  sub.textContent = '组件磨砂玻璃 + 背景层（流体动态）。默认关闭，开启后影视页组件浮于背景之上。';
+  sub.textContent = '组件磨砂玻璃 + 环境光背景（低饱和氛围色域，Win11 Mica / Linear 式材质）。默认关闭。';
   block.appendChild(title); block.appendChild(sub);
 
   // 总开关
@@ -737,18 +756,18 @@ function buildGlassControls(): HTMLElement {
   const tintRow = colorRow('玻璃色调', s.tint, (v) => { setStr(K.tint, v); applyGlass(); });
   foldBody.appendChild(tintRow);
 
-  // 背景源（仅保留 无 / 流体动态）
+  // 背景源（仅保留 无 / 环境光）
   foldBody.appendChild(selectRow('背景层', [
     { value: 'none', label: '无（透桌面）' },
-    { value: 'fluid', label: '流体动态' },
+    { value: 'fluid', label: '环境光' },
   ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); }));
 
-  // 模糊 / 磨砂 / 饱和度 / 亮度 / 流体速度
+  // 模糊 / 磨砂 / 饱和度 / 亮度 / 漂移速度
   foldBody.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
   foldBody.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
   foldBody.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
   foldBody.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
-  foldBody.appendChild(rangeRow('流体速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
+  foldBody.appendChild(rangeRow('漂移速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
 
   // 边框 / 阴影（控制"廉价感"的关键）
   const borderTog = mkToggle();
@@ -827,6 +846,7 @@ function startKeepAlive(): void {
 // ════════════════════════════════════════════════════════════════
 function handle(): void {
   try {
+    migrateSchema();
     // 1) 注入门控样式（始终存在，仅 data-fntv-glass 时生效）
     styleEl = document.createElement('style');
     styleEl.id = 'fntv-glass-style';
