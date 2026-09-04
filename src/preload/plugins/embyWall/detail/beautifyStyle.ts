@@ -22,9 +22,12 @@
 //      Series 一级页（hero 外多一层 wrapper、内容列只有 2 个子节点）与 Movie 页自动降级单列。
 //      lc-993 扩容 HERO 后，Series 一级页开始吃到 B/C/E/F/K/L/M 段（背景透明化、导航栏沉浸、
 //      顶栏玻璃条取色、标题栏取色），A/D/I/J 段（两栏、选集竖排、TMDB 卡、清晰度标识）仍 no-op。
-//   7. 低 GPU：全表 backdrop-filter 只有一处 —— L 段顶栏那条 820x80 的 ::before（lc-990 破例）。
-//      M 段的标题栏底色**刻意不加**磨砂：它是 alpha 1 的纯 tint，模糊贡献恒为零，加了只是白烧 GPU。
-//      其余磨砂观感仍靠半透明 scrim + 一次性模糊底图，不做实时滤镜；该处也不随滚动重算。
+//      [lc-1010] Series 一级页另获专属 N 段：满屏海报 + 左下角柔光玻璃聚簇（用户指定方向），
+//      由 body.fnos-series-panel 门控（tmdbCard.ts 系列路由分支加/摘），Movie 一级页与季页不加。
+//   7. 低 GPU：backdrop-filter 全表共 3 处规则 —— L 段顶栏 ::before（lc-990）、N 段信息面板与
+//      圆形按钮组（lc-1010，用户指定「高级材质柔光玻璃」，面板玻璃取代原实心 scrim 设计）。
+//      M 段的标题栏底色仍**刻意不加**磨砂：alpha 1 纯 tint，模糊贡献恒为零。
+//      三处均为静态表面，不随滚动重算；其余磨砂观感仍靠半透明 scrim + 一次性模糊底图。
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STYLE_ID = 'fnos-beautify-css';
@@ -57,6 +60,19 @@ const HERO = ':is('
  *  代价：「只有 2 个子节点的 Season 页」会降级成单列 —— 那种页面右栏本来就是空的，
  *  两栏只会白留 40% 宽的空白列，单列反而更好，是可接受的降级而非回归。 */
 const COL = `:has(> ${HERO}):has([data-id="details"]):has(> :nth-child(3))`;
+
+/** [lc-1010] Series 一级页内容面板。**必须与 tmdbCard.ts 的 SERIES_PANEL_SEL 逐字一致**
+ *  （两处各存一份是刻意的，同 HERO/DETAIL_HERO_SEL 的约定：这边参与 CSS 字符串拼接、
+ *  那边参与 querySelector，共享常量会把纯 CSS 文件拽进运行时依赖）。
+ *  结构实证（2026-09-05 活体 /v/tv/0ae81abe…，另采样 3 部剧 + 季页/电影页交叉验证）：
+ *  内容列 col(mb-[46px].flex.flex-col.gap-3) 有且仅有 2 个子节点 ——
+ *    ① wrapper(relative.w-full) = hero(trim-mc__details--key-version) + 按钮行(mt-4.px-[46px])；
+ *    ② 本面板(relative.box-border.flex.w-full.flex-col.px-[44px]) = 简介 + 季选择 + 外链行。
+ *  用**整串精确类名**匹配而非子串：px-[44px] 与季页的 px-[46px] IMDB 块只差一个字符，
+ *  子串匹配会误伤；季页/电影页实测均无此整串 → 结构性不误伤。 */
+const SERIES_PANEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+/** 按钮行（wrapper 的第 2 子节点，class 以 "mt-4 " 开头）。 */
+const SERIES_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
 
 export const BEAUTIFY_CSS = `
 /* ===== 0. 语义设计 token（明/暗两套；文本色沿用 Semi 主题变量，无需在此重复）===== */
@@ -601,6 +617,231 @@ body.fnos-beautify #custom-titlebar[data-fntv-tb]::before{
   content:''; position:absolute; inset:0; pointer-events:none;
   border-top-left-radius:16px; border-top-right-radius:16px;
   background:rgba(var(--fnos-hero-tint, 25,25,26), 1);
+}
+
+/* ===== N. Series 一级页：满屏海报 + 左下角柔光玻璃聚簇（lc-1010，用户指定方向）=====
+   诉求(用户原话)：「整个横屏海报占满全屏，剧集信息选择季数等东西都放到左下角你排列一下，
+   整体添加上高级材质，柔光玻璃样式。风格尽量趋向于苹果设计理念」，后追加：
+   「玻璃质感但是不要有线条感，左下角各容器不要有实心颜色，要半透的玻璃效果」，再追加：
+   「左下角内容区底色还是实心的，要半透效果可以看到最底下的横屏海报图；顶部有侧边栏按钮的
+   一横内容栏有框线框的感觉，做成全透的」。
+
+   布局原理（为什么必须 JS 配合一个变量）：
+   用户要的是「海报满屏 + 信息悬浮其上」，即聚簇必须**脱离文档流**悬浮在 hero 上，
+   而聚簇自下而上是 面板(高度随内容) → 按钮行 → logo —— 后两者要贴着面板顶沿排，
+   纯 CSS 无法让「上方元素」贴住「下方未知高度元素」的顶。故 tmdbCard.ts 在系列页 settle 时
+   实测面板高度写 body 级 --fnos-cluster-h（面板高 + bottom 偏移，getComputedStyle 读，
+   不重复常量），按钮行/logo 的 bottom 都用 var() 挂在它上面；简介回填、TMDB 卡挂载、
+   窗口 resize 时重测。变量缺省回落 360px（面板常见高度），JS 未跑时布局仍成立。
+
+   悬浮实现：col 加 position:relative + min-height:100vh-32px；按钮行 absolute（锚 wrapper，
+   wrapper 因按钮行脱流而恰等于 hero 高度 = 满屏）；面板 absolute（锚 col，bottom:18px）。
+   三者全部脱流/悬浮 → 页面内容只剩满屏 hero → 恰好一屏、无滚动条。
+   ⚠ 刻意用 absolute 而非 fixed：pageAnim 的页面过渡会对视图祖先加 transform，
+   fixed 祖先带 transform 时会退化为相对该祖先定位（且视口语义失效），absolute 锚定 col 不受影响。
+
+   柔光玻璃（用户点名：无线条感、无实心、半透）：
+   · 材质 = 白色高光渐变(13%→1.5% 对角) + tint 半透底(.32) + blur(40px) saturate(160%)，
+     tint 用 --fnos-hero-tint（封面取色，heroTint.ts）→ 玻璃永远和海报同色系（Apple vibrancy 思路）。
+   · 无边框：panel/circle/季卡全部 border:none；卡内 I 段分节发丝线在本页去除（N8）；
+     inset 高光也省略（1px 内描边就是「线条感」）。
+   · 面板作用域内把 Semi 文本变量重定义为浅色（材质恒暗，heroTint 锁 L<=0.20）→
+     I 段卡片样式零改动自动获得可读的浅色文字，明暗主题同一条规则。
+
+   一屏语义：原生页此时也确实只有 hero+面板两层内容（外链行隐藏，见 N7），满屏后无内容被裁。 */
+/* N1. col 满屏容器 */
+body.fnos-series-panel div[class*="mb-[46px]"][class*="flex flex-col gap-3"]:has(> div > .trim-mc__details--key-version){
+  position:relative !important;
+  min-height:calc(100vh - 32px) !important;
+  margin-bottom:0 !important;
+}
+/* N2. hero 满屏（覆盖 .trim-mc__details--key-version 类自带的 560/576/470/48vh/700 分档） */
+body.fnos-series-panel .trim-mc__details--key-version{
+  height:calc(100vh - 32px) !important;
+  min-height:0 !important; max-height:none !important;
+}
+/* 底部渐变遮罩重做（用户第二轮反馈：「半透效果可以看到最底下的横屏海报图」+「顶栏全透」）：
+   原生 .gradient 是整幅贴底横带（alpha 1→0，L 段照抄），玻璃后面全是被压黑的图 → 玻璃发闷像实心。
+   改为 25deg 对角渐隐：只护左下角聚簇文字区，右下/中部的海报完全透出。
+   ⚠ 类名写两遍：L 段同选择器(0,4,0)在本文件更早处，这里必须打平后靠源序取胜。 */
+body.fnos-series-panel .trim-mc__details--key-version.trim-mc__details--key-version .gradient{
+  height:58% !important;
+  background-image:linear-gradient(25deg,
+    rgba(var(--fnos-hero-tint, 25,25,26), .62) 0%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .34) 30%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .10) 55%,
+    rgba(var(--fnos-hero-tint, 25,25,26), 0) 75%) !important;
+}
+/* 遮罩变轻后，悬浮文字靠投影保可读（不引入新的底色/框）。
+   双层投影：小半径压亮边、大半径兜亮区（genre 行在亮部海报上单层不够）。 */
+body.fnos-series-panel ${SERIES_BTNROW} span{
+  text-shadow:0 1px 2px rgba(0,0,0,.6), 0 2px 18px rgba(0,0,0,.5) !important;
+}
+body.fnos-series-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"] img{
+  filter:drop-shadow(0 2px 14px rgba(0,0,0,.45));
+}
+/* N2b. 顶栏全透（用户第二轮反馈：「顶部有侧边栏按钮的一横内容栏有框线框的感觉」）。
+   L 段给顶栏 ::before 铺了取色玻璃条+渐隐 mask，在满屏海报上读作一条带下边缘的暗带；
+   本页玻璃面板已承载对比度，顶栏改为完全透明，图标保持 K 段白色 + drop-shadow 保可读。 */
+body.fnos-series-panel div[class*="h-[80px]"][class*="top-0"]::before{
+  content:none !important;
+}
+body.fnos-series-panel div[class*="h-[80px]"][class*="top-0"] svg{
+  filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
+}
+/* N3. logo 上移到按钮行上方（18 面板底距 + 12 间隙 + 54 按钮行 + 16 间隙 = 挂在 var 上方 100px） */
+body.fnos-series-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"][class*="bottom-[30px]"]{
+  bottom:calc(var(--fnos-cluster-h, 360px) + 100px) !important;
+}
+/* N4. 按钮行悬浮（wrapper 脱流后高度=hero，bottom:0 即视口底） */
+body.fnos-series-panel ${SERIES_BTNROW}{
+  position:absolute !important;
+  bottom:calc(var(--fnos-cluster-h, 360px) + 30px) !important;
+  left:26px !important;
+  width:min(1020px, calc(100vw - 52px)) !important;
+  padding:0 20px !important; margin:0 !important;
+  box-sizing:border-box !important; z-index:3 !important;
+}
+/* 按钮行恒暗背景（海报底部渐变）→ 文字/图标统一浅色（svg fill=currentColor 全链继承） */
+body.fnos-series-panel ${SERIES_BTNROW} span{ color:rgba(255,255,255,.78) !important; }
+body.fnos-series-panel ${SERIES_BTNROW} svg{ color:rgba(255,255,255,.92) !important; }
+/* 圆形按钮（收藏/已看/更多）：半透玻璃、无边框（原生 border+fill-0 实心底一并去掉） */
+body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]{
+  background:rgba(255,255,255,.10) !important;
+  backdrop-filter:blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
+  border:none !important;
+}
+body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]:hover{
+  background:rgba(255,255,255,.18) !important;
+}
+/* N5. 信息面板：半透柔光玻璃，无边框（用户点名，第二轮再降底色：tint .32→.16、blur 40→30，
+   让海报透过玻璃可见；可读性由 blur+saturate+浅色文字承担，不再靠压暗）。
+   无卡时 600px（正好包住左列），有卡时 1020px（:has 门控，卡挂载/撤除自动切换）。 */
+body.fnos-series-panel ${SERIES_PANEL}{
+  position:absolute !important;
+  bottom:18px !important; left:26px !important;
+  width:min(600px, calc(100vw - 52px)) !important;
+  max-height:calc(100vh - 32px - 210px) !important;
+  padding:18px 20px !important;
+  display:block !important;
+  background:linear-gradient(160deg,
+    rgba(255,255,255,.07) 0%,
+    rgba(255,255,255,.022) 45%,
+    rgba(255,255,255,.008) 100%),
+    rgba(var(--fnos-hero-tint, 25,25,26), .16) !important;
+  /* brightness 压暗玻璃后的画面而不是叠不透明色（Apple dark vibrancy 手法）——
+     海报结构透玻璃可见，白字在亮部海报上仍有对比（用户要求半透见底，禁再加 tint） */
+  backdrop-filter:blur(30px) saturate(155%) brightness(.78) !important;
+  -webkit-backdrop-filter:blur(30px) saturate(155%) brightness(.78) !important;
+  border:none !important;
+  box-shadow:0 18px 54px rgba(0,0,0,.32) !important;
+  border-radius:22px !important;
+  box-sizing:border-box !important;
+  overflow:hidden !important;
+  z-index:2 !important;
+  animation:fnos-series-panel-in .5s cubic-bezier(.22,.61,.36,1) both;
+}
+body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card){
+  width:min(1020px, calc(100vw - 52px)) !important;
+}
+@keyframes fnos-series-panel-in{
+  from{ opacity:0; transform:translateY(14px); }
+  to{ opacity:1; transform:none; }
+}
+/* 面板内恒暗材质 → Semi 文本变量重定义为浅色（I 段卡样式零改动自动跟随） */
+body.fnos-series-panel ${SERIES_PANEL}{
+  --semi-color-text-0:rgba(255,255,255,.94);
+  --semi-color-text-1:rgba(255,255,255,.72);
+  --semi-color-text-2:rgba(255,255,255,.58);
+  --semi-color-text-3:rgba(255,255,255,.42);
+}
+/* N6. 简介：全文展示（tmdbCard.ts 从 React fiber props.intro 回填，原生被截成 1 行且「更多」点击无效）。
+   回填成功后打 .fnos-intro-full 标记隐藏「更多」（全文已示，按钮无功能且 native 点击不展开）。
+   ⚠ 不能 innerHTML 整体替换：那是 React 管理的子树，替换后 React 卸载时 removeChild 会炸；
+   只改文本节点 data（截断库同款手法），库在 resize 时会按它闭包里的全文重新截断 →
+   tmdbCard.ts 的 resize 监听里重跑回填（220ms 去抖，晚于库的同步 handler，最终态必是我们）。 */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"]{
+  margin:0 !important; width:100% !important;
+  font-size:14px !important; line-height:1.7 !important;
+  color:rgba(255,255,255,.88) !important;
+  text-shadow:0 1px 8px rgba(0,0,0,.38) !important;
+}
+body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
+  width:calc(57% - 15px) !important;
+}
+body.fnos-series-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]{
+  display:none !important;
+}
+/* N7. 季选择：竖排海报墙 → Apple TV 式横滑行（16:9 横版卡）。
+   季卡 = .card-root：mainwin.ts ⑩ 会给它玻璃卡实心底+边框 → 在面板内全部去框去实心（用户点名）。 */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"]{
+  margin:14px 0 0 !important; width:100% !important;
+  display:flex !important; flex-wrap:nowrap !important;
+  overflow-x:auto !important; overflow-y:hidden !important;
+  gap:14px !important; padding:2px !important;
+  scrollbar-width:none !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"]::-webkit-scrollbar{ display:none !important; }
+body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="flex-wrap"]{
+  width:calc(57% - 15px) !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] > [data-id="details"]{
+  width:238px !important; flex:0 0 auto !important;
+  background:transparent !important; border:none !important; box-shadow:none !important;
+  backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+}
+/* 竖版海报 → 16:9 横版（poster-box 原生 2:3 比例类，内部 picture/img 是 absolute 填满链，
+   只改容器比例即可，同 lc-986 选集卡塌陷修复的结论：给容器 aspect-ratio，不给 height） */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] .poster-box{
+  aspect-ratio:16 / 9 !important;
+}
+/* 底部渐变层原生 76px 按 134px 高的横版缩到 48px（同 D 段选集卡的等比逻辑） */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > div:first-child [class*="bg-gradient-to-t"]{
+  height:48px !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p{
+  text-align:left !important; margin:5px 0 0 2px !important;
+  color:rgba(255,255,255,.9) !important;
+}
+/* 标题/副题文本块是 a.flex.flex-col.items-center → flex 居中压过 text-align，改容器对齐 */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > a[class*="items-center"]{
+  align-items:flex-start !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p + p{
+  margin:3px 0 0 2px !important;
+  color:rgba(255,255,255,.55) !important;
+}
+/* J 段会给季卡标题追加清晰度胶囊（季卡同样带 data-id=details + 角标位图，复用集卡逻辑）：
+   原生标题 p 若带 truncate 会把胶囊裁没 → 同 J 段的解禁规则，此处按面板作用域重写 */
+body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p:has(> .fnos-ep-res){
+  white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
+}
+/* N8. 原生外链行（链接：IMDB链接）隐藏 —— 与季页 A 段同一决策（lc-988 用户明确要求去掉），
+   卡内 N8b 外链区已覆盖；双条件同 A 段（有外链 且 无人物链接）。 */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex flex-col gap-4"]:has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
+  display:none !important;
+}
+/* N8b. TMDB 卡：绝对定位到右列（面板高度只由左列简介+季选驱动，卡超高时内部滚动，
+   不会像 grid 流内子项那样把整面板撑到 max-height）。卡自身无框无底 —— 玻璃就是容器（用户点名）。
+   分节发丝线在本页去除：玻璃上不再叠线条。 */
+body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card{
+  position:absolute !important;
+  top:16px !important; bottom:16px !important;
+  left:calc(57% + 6px) !important; right:16px !important;
+  width:auto !important;
+  margin:0 !important; padding:2px 10px 2px 4px !important;
+  background:transparent !important; border:none !important; box-shadow:none !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
+  scrollbar-width:thin !important;
+  scrollbar-color:rgba(255,255,255,.16) transparent !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
+body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,.16) !important; border-radius:2px !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} .fnos-showinfo__sec{
+  border-top:none !important; padding-top:12px !important;
 }
 `;
 

@@ -15,6 +15,118 @@ import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
 
 const CARD_ID = 'fnos-beautify-tmdb-card';
 
+// ── [lc-1010] Series 一级页专属 ──
+// ⚠ SERIES_PANEL_SEL 必须与 beautifyStyle.ts 的 SERIES_PANEL 逐字一致（两处各存一份是刻意的，
+//   同 HERO/DETAIL_HERO_SEL 约定：共享常量会把纯 CSS 文件拽进运行时依赖）。
+//   整串精确类名匹配，季页(px-[46px])/电影页结构性不误伤（2026-09-05 活体交叉验证）。
+const SERIES_PANEL_SEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+const SERIES_BODY_CLS = 'fnos-series-panel';
+/** 面板 settle 后可能晚于 hero 渲染 → 有上限的重试链（同 epResolution 模式，绝不变轮询）。 */
+const SERIES_RETRY_DELAYS = [0, 350, 900, 1800, 3000];
+let _seriesTimers: number[] = [];
+let _seriesResizeBound = false;
+let _seriesResizeTimer = 0;
+
+function _isSeriesRoute(): boolean {
+  // 仅 tv 一级页：电影一级页(组件 Q/Zse isVideo 分支)结构未采样验证，本轮不放开。
+  return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(location.pathname);
+}
+
+/** 当前活跃视图内的系列页内容面板（简介/季选择/外链行容器）。 */
+function _seriesPanel(): HTMLElement | null {
+  const view = findActiveDetailView();
+  if (!view) return null;
+  return view.querySelector<HTMLElement>(SERIES_PANEL_SEL);
+}
+
+/** [lc-1010] 简介全文回填。原生把简介截成 1 行（文本节点只剩前缀 + 「更多」按钮），
+ *  活体实测「更多」点击（Playwright click / CUA 坐标 / el.click()）均不展开 → 文本根本不在 DOM。
+ *  全文在 React fiber 的 props.intro 里（截断组件 ile 的 props，实测 hop=1）→ 从 fiber 取回后
+ *  写回**文本节点 data**（与截断库同一手法，不 replace/不删节点，React 卸载安全）。
+ *  幂等：已是全文（t.length === full.length）不重复写。返回是否发生了回填。 */
+function _fillSeriesIntro(): boolean {
+  const panel = _seriesPanel();
+  if (!panel) return false;
+  const ov = panel.querySelector<HTMLElement>(':scope > div[class*="text-justify"]');
+  if (!ov) return false;
+  const fiberKey = Object.keys(ov as any).find((k) => k.indexOf('__reactFiber') === 0);
+  if (!fiberKey) return false;
+  let f: any = (ov as any)[fiberKey];
+  let full = '';
+  for (let i = 0; i < 40 && f && !full; i++) {
+    const p = f && f.memoizedProps;
+    if (p && typeof p.intro === 'string' && p.intro.length > 40) full = p.intro as string;
+    f = f && f.return;
+  }
+  if (!full) return false;
+  let done = false;
+  const walker = document.createTreeWalker(ov, NodeFilter.SHOW_TEXT);
+  let tn: Node | null;
+  while ((tn = walker.nextNode()) && !done) {
+    const t = (tn.nodeValue || '').trim();
+    if (t.length > 20 && full.startsWith(t) && t.length < full.length) {
+      tn.nodeValue = full;
+      done = true;
+    }
+  }
+  if (done) ov.classList.add('fnos-intro-full'); // N6 段据此隐藏失效的「更多」按钮
+  return done;
+}
+
+/** [lc-1010] 实测面板高度 → body 级 --fnos-cluster-h（beautifyStyle.ts N3/N4 的按钮行/logo 都挂在它上）。
+ *  面板高度由左列（简介+季选）驱动；TMDB 卡是绝对定位右列，不参与撑高。 */
+function _measureSeriesPanel(): void {
+  const panel = _seriesPanel();
+  if (!panel) return;
+  const h = panel.getBoundingClientRect().height;
+  const bottom = parseFloat(getComputedStyle(panel).bottom) || 18;
+  document.body.style.setProperty('--fnos-cluster-h', Math.ceil(h + bottom) + 'px');
+}
+
+/** resize：截断库会按它闭包里的全文**重新截断**简介（活体实证）→ 回填必须重跑；
+ *  220ms 去抖晚于库的同步 handler，最终态必是全文。顺带重测聚簇高度。 */
+function _onSeriesResize(): void {
+  clearTimeout(_seriesResizeTimer);
+  _seriesResizeTimer = window.setTimeout(() => {
+    if (!_isSeriesRoute()) return;
+    _fillSeriesIntro();
+    _measureSeriesPanel();
+  }, 220);
+}
+
+function _clearSeriesTimers(): void {
+  for (let i = 0; i < _seriesTimers.length; i++) clearTimeout(_seriesTimers[i]);
+  _seriesTimers = [];
+}
+
+/** 系列页聚簇开关：body class(N 段 CSS 总闸) + 简介/高度的重试链 + resize 监听。幂等。 */
+function _armSeriesPanel(): void {
+  document.body.classList.add(SERIES_BODY_CLS);
+  if (!_seriesResizeBound) {
+    window.addEventListener('resize', _onSeriesResize, { passive: true });
+    _seriesResizeBound = true;
+  }
+  _clearSeriesTimers();
+  for (let i = 0; i < SERIES_RETRY_DELAYS.length; i++) {
+    _seriesTimers.push(window.setTimeout(() => {
+      if (!_isSeriesRoute()) return;
+      _fillSeriesIntro();
+      _measureSeriesPanel();
+    }, SERIES_RETRY_DELAYS[i]));
+  }
+}
+
+function _disarmSeriesPanel(): void {
+  _clearSeriesTimers();
+  clearTimeout(_seriesResizeTimer);
+  if (_seriesResizeBound) {
+    window.removeEventListener('resize', _onSeriesResize);
+    _seriesResizeBound = false;
+  }
+  document.body.classList.remove(SERIES_BODY_CLS);
+  document.body.style.removeProperty('--fnos-cluster-h');
+}
+
 // ── 运行时状态（换页重置）──
 let _scheduledFor: string | null = null;   // 已为哪个 href 排过注入(去重)
 let _tmdbInfoGuid = '';                    // 已加载的 guid(同页不重复请求)
@@ -484,17 +596,22 @@ async function _fillStills(card: HTMLElement, paths: string[]): Promise<void> {
 
 // ── 卡片节点定位/渲染/调度 ──
 
-/** 右栏容器：内容列(hero.parentElement)的第 3 个子节点(演职人员)。
- *  [lc-993] 取不到就返回 null，**不再回落到内容列本身** —— 那个回落是错位的根源：
- *  一级详情页的内容列只有 2 个子节点(hero + 流选择/简介/演职人员)，回落后 _ensureCardEl()
- *  的 insertBefore(card, host.firstChild) 会把卡插到 hero **上方**，一张为 40fr 窄栏设计的卡
- *  铺满全宽压在封面顶上。返回 null 让卡整体不挂载，比挂错位置好。
- *  对 Season 页也是自愈的：settle 时演职人员可能还没渲染(children[2] 暂缺) → 本轮不挂；
- *  fetch resolve 后 _renderCard() 会再走一次 _ensureCardEl()，那时右栏已在 → 正常挂载。
- *  旧代码在这条竞态下会把卡永久插到 hero 上方(卡一旦挂上，后续都走 getElementById 命中、不再重定位)。 */
-function _rightColumn(): HTMLElement | null {
+/** 卡片宿主。
+ *  · Season 二级页：内容列(hero.parentElement)的第 3 个子节点(演职人员)。
+ *    [lc-993] 取不到就返回 null，**不再回落到内容列本身** —— 那个回落是错位的根源：
+ *    一级详情页的内容列只有 2 个子节点(hero + 流选择/简介/演职人员)，回落后 _ensureCardEl()
+ *    的 insertBefore(card, host.firstChild) 会把卡插到 hero **上方**，一张为 40fr 窄栏设计的卡
+ *    铺满全宽压在封面顶上。返回 null 让卡整体不挂载，比挂错位置好。
+ *    对 Season 页也是自愈的：settle 时演职人员可能还没渲染(children[2] 暂缺) → 本轮不挂；
+ *    fetch resolve 后 _renderCard() 会再走一次 _ensureCardEl()，那时右栏已在 → 正常挂载。
+ *    旧代码在这条竞态下会把卡永久插到 hero 上方(卡一旦挂上，后续都走 getElementById 命中、不再重定位)。
+ *  · [lc-1010] Series 一级页：内容面板(SERIES_PANEL_SEL，col.children[1])本身 —— 卡由 N8b 段
+ *    绝对定位到面板右列，宿主只提供挂载点。settle 那一刻面板可能未渲染 → 返回 null，
+ *    由 _renderCard() 在 fetch resolve 后重试(与季页竞态同一自愈路径)。 */
+function _cardHost(): HTMLElement | null {
   const hero = _activeHero();
   if (!hero || !hero.parentElement) return null;
+  if (_isSeriesRoute()) return _seriesPanel();
   const col = hero.parentElement;
   return (col.children[2] as HTMLElement) || null;
 }
@@ -502,17 +619,24 @@ function _rightColumn(): HTMLElement | null {
 function _ensureCardEl(): HTMLElement | null {
   let card = document.getElementById(CARD_ID) as HTMLElement | null;
   if (card) return card;
-  const host = _rightColumn();
+  const host = _cardHost();
   if (!host) return null;
   card = document.createElement('div');
   card.id = CARD_ID;
   card.className = 'fnos-beautify-card';
-  // 追加进右栏顶部(additive，不移动任何原生节点)
-  host.insertBefore(card, host.firstChild || null);
+  if (_isSeriesRoute()) {
+    host.appendChild(card); // 系列页：追加到面板末尾，N8b 段 CSS 绝对定位到右列（不占左列流）
+  } else {
+    // 季页：追加进右栏顶部(additive，不移动任何原生节点)
+    host.insertBefore(card, host.firstChild || null);
+  }
   return card;
 }
 
 function _renderCard(): void {
+  // [lc-1010] 系列页：TMDB 失败 → 卡已被 _fetch 撤除，这里不再重建错误框
+  // （面板 :has(> .fnos-beautify-card) 失配自动收窄回 600px 单列）；季页维持错误框不变。
+  if (_isSeriesRoute() && !_tmdbInfoData && !_tmdbInfoLoading && _tmdbInfoError) return;
   const card = _ensureCardEl();
   if (!card) return;
   let body = '';
@@ -564,9 +688,18 @@ function _fetch(force = false): void {
         log('[lc-980] TMDB 卡就绪: ' + (r.data.title || ''));
       } else {
         _tmdbInfoError = (r && r.error) || 'TMDB 获取失败';
+        // [lc-1010] 系列页：失败即撤卡（面板 :has 自动收窄，不留错误框），状态仍记录供诊断
+        if (_isSeriesRoute()) {
+          const c = document.getElementById(CARD_ID);
+          if (c && c.parentNode) c.parentNode.removeChild(c);
+        }
       }
     } catch (e) {
       _tmdbInfoError = String(e).substring(0, 120);
+      if (_isSeriesRoute()) {
+        const c = document.getElementById(CARD_ID);
+        if (c && c.parentNode) c.parentNode.removeChild(c);
+      }
     } finally {
       _tmdbInfoLoading = false;
       // 异步 resolve 时可能已离开该页 → 仅当仍在详情页才渲染
@@ -583,17 +716,27 @@ function _fetch(force = false): void {
  *     而这张卡的存在理由是「Season 页飞牛原生一个字段都没有」(见 beautifyStyle.ts I 段的实机取证)。
  *  ③ 版式不匹配 —— 卡的 34px 评分块 + 3.4em 窄 label 列是为 40fr 右栏设计的，铺满全宽会散架。
  *  ⚠ 必须按**路由**判定，不能按 DOM(即不能直接调 _rightColumn())：settle 那一刻 Season 页的
- *     演职人员也可能还没渲染出来，DOM 判定会把 Season 页一起误伤成永久不出卡。 */
+ *     演职人员也可能还没渲染出来，DOM 判定会把 Season 页一起误伤成永久不出卡。
+ *  [lc-1010] 上述三条在当前 DOM 下已复核失效，tv 一级页(/v/tv/<id>，组件 Zse)放开出卡：
+ *  ① 挂载点改为内容面板(col.children[1])本身，卡由 N8b 段绝对定位到面板右列 —— 不再依赖
+ *     「现成右栏」，①的先决条件不复存在（本页实测面板内也确无演职人员区）。
+ *  ② 冗余不复存在：卡自 lc-1006 起不渲染 show overview/season overview/cast，而本页原生
+ *     没有评分/事实/主创/剧照/相似剧集任何一项 —— 卡全是净新增信息。
+ *  ③ 版式：N8b 把卡放进 43% 右列并内部滚动，正是当年设计的 40fr 窄栏场景。
+ *     电影一级页(组件 Q / Zse isVideo 分支)结构不同且未采样验证，本轮**不放开**（按路由排除）。 */
 function _isSeasonRoute(): boolean {
   return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(location.pathname);
 }
 
-/** settle 后调度：同一 href 只排一次；追加卡片占位并异步拉取。非阻塞。 */
+/** settle 后调度：同一 href 只排一次；追加卡片占位并异步拉取。非阻塞。
+ *  [lc-1010] tv 一级页额外武装聚簇面板（body class + 简介回填 + 高度测量重试链）。 */
 export function scheduleTmdbCard(_view: HTMLElement): void {
   const href = location.href;
   if (_scheduledFor === href) return;
-  if (!_isSeasonRoute()) return;   // [lc-993] 一级页不出卡，也省掉一次无用的 TMDB 请求
+  const series = _isSeriesRoute();
+  if (!series && !_isSeasonRoute()) return;
   _scheduledFor = href;
+  if (series) _armSeriesPanel();
   _fetch(false);
 }
 
@@ -602,5 +745,6 @@ export function removeTmdbCard(): void {
   const card = document.getElementById(CARD_ID);
   if (card && card.parentNode) card.parentNode.removeChild(card);
   _scheduledFor = null;
+  _disarmSeriesPanel();
   _resetState();
 }
