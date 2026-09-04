@@ -774,6 +774,11 @@ function get_danmaku_with_hash(file_name, file_path)
             "10",
             "--max-time",
             "30",
+            -- [lc-998] 限速：弹幕 hash 只要前 16MB，但它是与视频流**同一条**网盘/隧道连接上
+            -- 的第二次全速下载 —— 实测开播阶段它曾占满带宽约 15s，把视频缓冲直接拖垮(表现为一卡一卡)。
+            -- 限速把带宽优先让给视频；弹幕晚几秒出现远好过视频卡顿。可用 options.hash_limit_rate 覆盖。
+            "--limit-rate",
+            options.hash_limit_rate or "1M",
             "--range",
             "0-16777215",
             "--user-agent",
