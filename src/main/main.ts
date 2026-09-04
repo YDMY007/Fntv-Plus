@@ -30,6 +30,22 @@ app.commandLine.appendSwitch('--disable-web-security'); // 禁用web安全检查
 app.commandLine.appendSwitch('--ignore-ssl-errors-spki-list'); // 忽略SSL SPKI列表错误
 app.commandLine.appendSwitch('--ignore-ssl-errors'); // 忽略SSL错误（减少相关日志）
 
+// [lc-1014] 硬件加速开关（设置面板-外观，默认开启）。
+// 必须在 app ready 之前读 config 并挂开关：关闭时走软件合成——老核显/驱动异常机器上
+// 反而比硬解流畅的兜底；开启时补 GPU 光栅化/零拷贝，让页面过渡(veil)/卡片入场等
+// 合成器动画更顺滑。改动需重启应用才生效（settings:set-hw-accel 只写 config）。
+try {
+    if (fnConfig.getHwAccelEnabled()) {
+        app.commandLine.appendSwitch('enable-gpu-rasterization');
+        app.commandLine.appendSwitch('enable-zero-copy');
+    } else {
+        app.disableHardwareAcceleration();
+        log.info('[lc-1014] 硬件加速已关闭（软件合成模式）');
+    }
+} catch (e) {
+    log.warn('[lc-1014] 硬件加速配置读取失败，按默认(开启)处理:', e);
+}
+
 // [lc-999] 主进程未捕获异常/未处理的 Promise 拒绝兜底。
 // 背景：MPV 进程异常退出（如网盘 302 加载失败）后，node-mpv-2 内部 socket 重连
 // \\.\pipe\mpvserver 报 ENOENT/ECONNREFUSED，无人接住 → Electron 弹

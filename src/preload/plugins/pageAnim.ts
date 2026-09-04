@@ -33,6 +33,13 @@ function getAnime(): any {
   return (window as any).anime || null;
 }
 
+/** [lc-1014] 性能模式（设置面板-外观可切换，html.fnos-perf 总闸）：
+ *  低配机兜底——所有入场/弹窗动画直接跳过（元素立即可见），观感=无动画但功能完整。
+ *  读 DOM 类而非持久层：运行中切换即时生效，无需各插件订阅事件。 */
+function perfMode(): boolean {
+  try { return document.documentElement.classList.contains('fnos-perf'); } catch { return false; }
+}
+
 function reducedMotion(): boolean {
   try {
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -83,7 +90,7 @@ function toolkit() {
 function enterCards(els: any): void {
   const a = getAnime();
   if (!els || (els as any).length === 0) return;
-  if (reducedMotion() || !a) { Array.from(els as any).forEach((e: any) => (e.style.opacity = '1')); return; }
+  if (reducedMotion() || perfMode() || !a) { Array.from(els as any).forEach((e: any) => (e.style.opacity = '1')); return; }
   try {
     const list = Array.from(els as any) as HTMLElement[];
     const safeSlide = list.every((e) => {
@@ -106,7 +113,7 @@ function enterCards(els: any): void {
 function revealContent(el: any): void {
   const a = getAnime();
   if (!el) return;
-  if (reducedMotion()) { el.style.opacity = '1'; return; }
+  if (reducedMotion() || perfMode()) { el.style.opacity = '1'; return; }
   if (!a) { el.style.opacity = '1'; return; }
   try {
     a.animate(el, {
@@ -122,7 +129,7 @@ function revealContent(el: any): void {
 function modalIn(el: any): void {
   const a = getAnime();
   if (!el) return;
-  if (reducedMotion()) { el.style.opacity = '1'; return; }
+  if (reducedMotion() || perfMode()) { el.style.opacity = '1'; return; }
   if (!a) { el.style.opacity = '1'; return; }
   try {
     a.animate(el, {
@@ -159,7 +166,7 @@ function setupObservers(): void {
     const modals = pendingModals;
     pendingCards = [];
     pendingModals = [];
-    if (reducedMotion()) {
+    if (reducedMotion() || perfMode()) {
       cards.forEach((e) => (e.style.opacity = '1'));
       modals.forEach((e) => (e.style.opacity = '1'));
       return;
@@ -245,6 +252,9 @@ function setupObservers(): void {
 function initPageAnim(): void {
   // 仅在飞牛影视 TV 页注入全局动画；系统页/登录页跳过
   if (!isFntvTvPage()) return;
+  // [lc-1014] 性能模式：不注入预隐藏 CSS（卡片首帧即见, 无 FOUC 风险）也不装观察者。
+  // 若用户随后关闭性能模式, 刷新页面后动画恢复（提示文案已注明）。
+  if (perfMode()) { logger.info('[pageAnim] 性能模式开启, 跳过动画安装'); return; }
   // 注入 CSS 预隐藏规则：首帧前把网格卡片置 0，根治「点开详情页闪一下」(FOUC)。作用域限定 .fnos-tv-page。
   injectHideCSS();
   // 暴露工具出口（即便 anime 暂未就绪也先挂上，animeLib 同步注入后调用方即可用）

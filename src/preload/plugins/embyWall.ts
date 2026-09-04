@@ -61,6 +61,35 @@ function handle(): void {
   const base = location.origin;
   log('handle start');
 
+  // [lc-1014] 性能模式（设置面板-外观可切换）：localStorage 同步预读先挂总闸类
+  // （早于 patch.ts 的 settings:get 异步真值回填，二者写同一类无竞态），再注入压动画样式表。
+  try {
+    if (localStorage.getItem('fntv-perf-mode') === '1') {
+      document.documentElement.classList.add('fnos-perf');
+    }
+  } catch (_) { /* ignore */ }
+  if (!document.getElementById('fntv-perf-style')) {
+    const perfSt = document.createElement('style');
+    perfSt.id = 'fntv-perf-style';
+    perfSt.textContent = [
+      '/* [lc-1014] 性能模式总闸：低配机关掉一切合成器负担——动画/过渡压到近零, 磨砂全关 */',
+      'html.fnos-perf *{',
+      '  animation-duration:.01ms!important;',
+      '  animation-iteration-count:1!important;',
+      '  animation-delay:0ms!important;',
+      '  transition-duration:.01ms!important;',
+      '  transition-delay:0ms!important;',
+      '  scroll-behavior:auto!important;',
+      '}',
+      /* body 亚克力(mainwin .fnos-tv-page body, 特异性 0,1,1)必须被稳定压过, 故单列高特异性规则 */
+      'html.fnos-perf *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+      'html.fnos-perf .fnos-tv-page body{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+      /* 详情页全屏底图: 保留低透画面但去掉 52px 大模糊(常驻合成器大头) */
+      'html.fnos-perf .fnos-detail-backdrop__img{filter:none!important}',
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(perfSt);
+  }
+
   // [lc-371] 原生系统页守卫: 仅在飞牛影视 TV 页(/v)执行 TV 专属改造(白底清除器/主题/侧栏等);
   //   切到飞牛原生 NAS 系统页(根路径 `/`)时, 这些改造会破坏原生 UI, 故跳过, 仅注入"返回影视"浮动按钮。
   // [lc-389] 视频预览外放按钮须无条件注册: 它只 watch .trim-ui__app-layout--window 内的 <video>,
@@ -517,6 +546,29 @@ function handle(): void {
       +     '<span id="fnos-show-daily-track" style="position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;"></span>'
       +     '<span id="fnos-show-daily-knob" style="position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>'
       +   '</label>'
+      + '</div>'
+      /* [lc-1014] 性能模式（低配机）：html.fnos-perf 总闸——全局压动画/关磨砂，即时生效 */
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">'
+      +   '<span style="font-weight:600;letter-spacing:.5px;">性能模式（低配机）</span>'
+      +   '<label style="position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;">'
+      +     '<input id="fnos-perf-mode" type="checkbox" style="position:absolute;opacity:0;width:0;height:0;">'
+      +     '<span id="fnos-perf-track" style="position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;"></span>'
+      +     '<span id="fnos-perf-knob" style="position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>'
+      +   '</label>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-top:4px;">大幅减少动画、关闭磨砂模糊与全屏底图，优先保证流畅。即时生效。</div>'
+      /* [lc-1014] 硬件加速：Electron 启动级开关，改动写 config 重启后生效 */
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">'
+      +   '<span style="font-weight:600;letter-spacing:.5px;">硬件加速（优美动画）</span>'
+      +   '<label style="position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;">'
+      +     '<input id="fnos-hw-accel" type="checkbox" style="position:absolute;opacity:0;width:0;height:0;">'
+      +     '<span id="fnos-hw-track" style="position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;"></span>'
+      +     '<span id="fnos-hw-knob" style="position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>'
+      +   '</label>'
+      + '</div>'
+      + '<div id="fnos-hw-restart" style="display:none;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--fnos-ui-accent) 12%,transparent);">'
+      +   '<span style="font-size:11px;line-height:1.4;">硬件加速设置已保存，重启应用后生效。</span>'
+      +   '<button id="fnos-hw-restart-btn" style="flex:none;border:none;border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;background:var(--fnos-ui-accent);color:#fff;font-family:inherit;">立即重启</button>'
       + '</div>';
 
     const alphaInput = wrap.querySelector('#fnos-alpha') as HTMLInputElement;
@@ -554,6 +606,53 @@ function handle(): void {
       paintDaily();
       try { window.dispatchEvent(new CustomEvent('fntv:daily-toggle', { detail: { on: dailyInput.checked } })); } catch (_) {}
     });
+
+    /* ── [lc-1014] 性能模式开关：切 html.fnos-perf 总闸类（即时生效）+ localStorage 镜像
+       （embyWall handle() 与 patch.ts 启动种子据此预读/回填）+ 写 config 持久化 ── */
+    const perfInput = wrap.querySelector('#fnos-perf-mode') as HTMLInputElement;
+    const perfTrack = wrap.querySelector('#fnos-perf-track') as HTMLElement;
+    const perfKnob = wrap.querySelector('#fnos-perf-knob') as HTMLElement;
+    const paintPerf = (): void => {
+      perfTrack.style.background = perfInput.checked ? 'var(--fnos-ui-accent)' : 'rgba(140,140,160,.45)';
+      perfKnob.style.left = perfInput.checked ? '21.5px' : '2.5px';
+    };
+    perfInput.checked = document.documentElement.classList.contains('fnos-perf');
+    paintPerf();
+    perfInput.addEventListener('change', () => {
+      document.documentElement.classList.toggle('fnos-perf', perfInput.checked);
+      paintPerf();
+      try { localStorage.setItem('fntv-perf-mode', perfInput.checked ? '1' : '0'); } catch (_) {}
+      S.perfModeEnabled = perfInput.checked;
+      ipcRenderer.invoke('settings:set-perf-mode', perfInput.checked).catch(() => {});
+    });
+
+    /* ── [lc-1014] 硬件加速开关：写 config，重启后生效（主进程启动期才挂 GPU 开关）。
+       初值异步回填（config 缺失视为开启）；用户改动后出现「立即重启」提示条 ── */
+    const hwInput = wrap.querySelector('#fnos-hw-accel') as HTMLInputElement;
+    const hwTrack = wrap.querySelector('#fnos-hw-track') as HTMLElement;
+    const hwKnob = wrap.querySelector('#fnos-hw-knob') as HTMLElement;
+    const hwRestart = wrap.querySelector('#fnos-hw-restart') as HTMLElement;
+    const paintHw = (): void => {
+      hwTrack.style.background = hwInput.checked ? 'var(--fnos-ui-accent)' : 'rgba(140,140,160,.45)';
+      hwKnob.style.left = hwInput.checked ? '21.5px' : '2.5px';
+    };
+    hwInput.checked = true;
+    paintHw();
+    ipcRenderer.invoke('settings:get').then((s: any) => {
+      hwInput.checked = s ? s.hwAccelEnabled !== false : true;
+      paintHw();
+    }).catch(() => {});
+    hwInput.addEventListener('change', () => {
+      paintHw();
+      ipcRenderer.invoke('settings:set-hw-accel', hwInput.checked).catch(() => {});
+      if (hwRestart) hwRestart.style.display = 'flex';
+    });
+    const hwRestartBtn = wrap.querySelector('#fnos-hw-restart-btn') as HTMLElement;
+    if (hwRestartBtn) {
+      hwRestartBtn.addEventListener('click', () => {
+        ipcRenderer.invoke('settings:restart-app').catch(() => {});
+      });
+    }
 
     // [lc-780/lc-781→lc-845→lc-846] 首页轮播图样式切换（设置面板"外观"）：样式 1 = 竖向轮播，样式 2 = 横向轮播，样式 3 = 堆叠切换，样式 4 = 立体堆叠；点击后整页重载回首页并刷新(见下方 click 处理)
     const getCs = (): number => {
@@ -4598,6 +4697,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     return v;
   };
   const pageTransition = (): void => {
+    // [lc-1014] 性能模式：不铺过渡遮罩（路由切换瞬间直达，零合成开销）
+    if (document.documentElement.classList.contains('fnos-perf')) return;
     const v = getVeil();
     v.style.transition = 'none';
     v.style.opacity = '0.82';   // 瞬间覆盖, 挡住导航瞬间的黑/白闪

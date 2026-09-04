@@ -48,6 +48,9 @@ async function handleGetSettings(): Promise<any> {
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
         detailBoxless: fnConfig.getDetailBoxless(),
+        // [lc-1014] 硬件加速（重启生效）与性能模式（即时生效）
+        hwAccelEnabled: fnConfig.getHwAccelEnabled(),
+        perfModeEnabled: fnConfig.getPerfModeEnabled(),
         // 鼠标滚轮横向滚动开关（默认开启=true；关闭=false 恢复飞牛原生上下滚动）
         wheelHScroll: fnConfig.getWheelHScroll(),
         // 轮播图标题替换为 TMDB 透明 Logo 开关（默认开启=true；false=保留文字标题）
@@ -257,6 +260,25 @@ async function handleSetDefaultPlayer(_event: any, player: 'mpv' | 'potplayer'):
 
 async function handleSetExitMode(_event: any, mode: string): Promise<void> {
     fnConfig.setExitMode(mode as 'direct' | 'minimize' | 'ask');
+}
+
+// [lc-1014] 硬件加速开关（写 config；需重启应用生效——主进程启动期才挂 GPU 开关）
+async function handleSetHwAccel(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setHwAccelEnabled(!!enabled);
+    log.info(`硬件加速开关已设置为: ${!!enabled}（重启后生效）`);
+}
+
+// [lc-1014] 性能模式开关（写 config；渲染层同时立即切换 html.fnos-perf 类，即时生效）
+async function handleSetPerfMode(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setPerfModeEnabled(!!enabled);
+    log.info(`性能模式已设置为: ${!!enabled}`);
+}
+
+// [lc-1014] 重启应用（硬件加速开关改动后由设置面板触发；与补丁回滚同机制）
+async function handleRestartApp(): Promise<{ ok: boolean }> {
+    app.relaunch({ args: process.argv.slice(1) });
+    app.exit(0);
+    return { ok: true };
 }
 
 // 设置豆瓣同步总开关
@@ -731,6 +753,9 @@ function init(): void {
     registerHandler('settings:clear-login-bg', handleClearLoginBg, { useHandle: true });
     registerHandler('settings:set-default-player', handleSetDefaultPlayer, { useHandle: true });
     registerHandler('settings:set-exit-mode', handleSetExitMode, { useHandle: true });
+    registerHandler('settings:set-hw-accel', handleSetHwAccel, { useHandle: true });
+    registerHandler('settings:set-perf-mode', handleSetPerfMode, { useHandle: true });
+    registerHandler('settings:restart-app', handleRestartApp, { useHandle: true });
     registerHandler('settings:set-douban-enabled', handleSetDoubanEnabled, { useHandle: true });
     registerHandler('settings:set-debug-enabled', handleSetDebugEnabled, { useHandle: true });
     registerHandler('settings:set-debug-components', handleSetDebugComponents, { useHandle: true });

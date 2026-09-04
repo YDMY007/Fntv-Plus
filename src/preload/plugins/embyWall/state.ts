@@ -32,6 +32,8 @@ export const S: {
   /** 鼠标滚轮横向滚动：true=开启(默认)；false=恢复飞牛原生上下滚。
    *  写：settings/*；读：carousel/index.ts(wheelToScroll) */
   wheelHScrollEnabled: boolean;
+  /** [lc-1014] 性能模式（低配机）：html.fnos-perf 总闸——压动画/关磨砂，pageAnim 等查此类早退 */
+  perfModeEnabled: boolean;
   /** 「热门剧更新」数据源，默认豆瓣。写：settings/*；读：carousel/api.ts */
   hotSource: HotSource;
   /** 轮播标题替换成 TMDB 透明 Logo：true=替换(默认)；false=保留文字标题。
@@ -109,6 +111,7 @@ export const S: {
 
   detailBoxless: false,
   wheelHScrollEnabled: false,
+  perfModeEnabled: false,
   hotSource: 'douban',
   carouselLogoEnabled: true,
 

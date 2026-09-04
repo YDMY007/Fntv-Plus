@@ -227,6 +227,13 @@ try {
     wheelToScroll();
     // 回填「热门剧更新」数据源（供设置面板 TMDB 区块初始显隐 TMDB 设置）
     if (s && (s.hotSource === 'tmdb' || s.hotSource === 'douban')) S.hotSource = s.hotSource;
+    // [lc-1014] 性能模式：config 真值回填 S + html.fnos-perf 总闸类 + localStorage 镜像
+    // （embyWall handle() 在本异步回填前用镜像同步预读，故镜像必须在此保持最新）
+    if (s && typeof s.perfModeEnabled === 'boolean') {
+      S.perfModeEnabled = s.perfModeEnabled;
+      document.documentElement.classList.toggle('fnos-perf', s.perfModeEnabled);
+      try { localStorage.setItem('fntv-perf-mode', s.perfModeEnabled ? '1' : '0'); } catch (_) {}
+    }
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) applyLoginBgVar(s.loginBg);
   });
