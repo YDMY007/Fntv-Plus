@@ -173,7 +173,18 @@ async function enterPerson(guid: string, col?: HTMLElement): Promise<void> {
     _inflight.add(guid);
     try {
         if (!_cache.has(guid)) renderMsg(container, '正在从 TMDB 拉取完整作品…');
-        const r: any = await ipcRenderer.invoke('person:tmdb-credits', guid);
+        let r: any = null;
+        try {
+            r = await ipcRenderer.invoke('person:tmdb-credits', guid);
+        } catch (err: any) {
+            const msg = String((err && err.message) || err);
+            // [lc-1034] 主进程插件未加载（常见于只刷新了页面、主进程还是旧版）→ 给出可执行指引
+            if (msg.indexOf('No handler registered') !== -1) {
+                renderMsg(container, '主进程尚未加载本插件——请完整重启客户端（退出进程再启动，仅刷新页面无效）后重试');
+                return;
+            }
+            throw err;
+        }
         if (_currentGuid !== guid) return; // 已切页
         if (!r || r.error) { renderMsg(container, (r && r.error) || '拉取失败'); return; }
         _cache.set(guid, r);

@@ -297,6 +297,27 @@ body.fnos-beautify ${COL} > :nth-child(3) .ms-container{ scrollbar-width:none !i
 body.fnos-beautify ${COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
   width:0 !important; height:0 !important; display:none !important;
 }
+/* ②b [lc-1034] 演职人员改**竖向换行网格**（用户要求不要横滑）：
+   原生 .ms-container 定高横滑带(!overflow-x-scroll + whitespace-nowrap + w-max 行 1706px)
+   → 全部解除：容器 auto 高 + overflow visible，内容行 flex-wrap 换行，演员项(E3 卡片)
+   按右栏宽度自然折行，页面随内容向下生长。演职人员容器同时是 TMDB 卡宿主
+   (absolute top/bottom:16)，换行撑高后卡片随之变高（内部滚动），一石二鸟。 */
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container{
+  height:auto !important; max-height:none !important;
+  overflow:visible !important;
+  white-space:normal !important;
+  padding-left:0 !important; padding-right:0 !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container > div{
+  flex-wrap:wrap !important;
+  width:100% !important; max-width:none !important; height:auto !important;
+  overflow:visible !important;
+  gap:12px !important;
+  justify-content:flex-start !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container div[class*="group"]{
+  width:auto !important; height:auto !important;
+}
 /* ③ [lc-1033] E3 演员卡片化：每个演员升格为圆角小卡（semi fill 底、悬浮整卡上移+底色加深），
    头像 hover 微放大；悬浮位从「头像单独位移」改为「整卡位移」（头像在卡内单独位移显突兀）。 */
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]{
