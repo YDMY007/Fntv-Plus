@@ -10,7 +10,7 @@ import { fnosDialog } from '../../common/fnosDialog';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { clearAllPatches } from '../../../modules/patcher/patchApplier';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials } from './mpvConfig';
 import * as log from '../../../modules/logger';
 
 /**
@@ -47,6 +47,9 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
+        // [lc-1018] 弹弹play 开放 API 自定义凭证（渲染端只显示掩码，不回显明文）
+        dandanplayAppId: fnConfig.getDandanplayAppId(),
+        dandanplayAppSecret: fnConfig.getDandanplayAppSecret(),
         detailBoxless: fnConfig.getDetailBoxless(),
         // [lc-1014] 硬件加速（重启生效）与性能模式（即时生效）
         hwAccelEnabled: fnConfig.getHwAccelEnabled(),
@@ -356,6 +359,17 @@ async function handleSetMpvBiliAggregateThreshold(_event: any, threshold: number
     fnConfig.setMpvBiliAggregateThreshold(t);
     writeBiliAggregateThreshold(t);
     log.info('B站弹幕聚合阈值 →', t);
+}
+
+// [lc-1018] 设置弹弹play 开放 API 自定义凭证（写 config + 同步到 script-opts/uosc_danmaku.conf；
+// mpv 每次播放新起进程读 script-opts → 下次播放生效，无需重启应用）。
+// 两项任一为空=清除，dandanplay.lua 端回落脚本内置共享凭证。
+async function handleSetDandanplayCredentials(_event: any, payload: { appId?: string; appSecret?: string }): Promise<void> {
+    const appId = String((payload && payload.appId) || '').trim();
+    const appSecret = String((payload && payload.appSecret) || '').trim();
+    fnConfig.setDandanplayCredentials(appId, appSecret);
+    writeDandanplayCredentials(appId, appSecret);
+    log.info('弹弹play 自定义凭证 →', appId ? (appId.slice(0, 2) + '***(已保存)') : '(已清除,回落内置共享凭证)');
 }
 
 // 用系统默认浏览器打开外部链接（设置面板内的可点击链接用）
@@ -735,6 +749,12 @@ function init(): void {
     try { writeBiliSearchEnabled(fnConfig.getMpvBiliSearchEnabled()); } catch (e) { log.warn('启动同步 bili_search_enabled 失败', e); }
     // 启动时把 B站弹幕聚合阈值同步到 script-opts/uosc_danmaku.conf
     try { writeBiliAggregateThreshold(fnConfig.getMpvBiliAggregateThreshold()); } catch (e) { log.warn('启动同步 aggregate_threshold 失败', e); }
+    // [lc-1018] 启动时把弹弹play 自定义凭证同步到 script-opts/uosc_danmaku.conf（空=清键回落内置凭证）
+    try {
+        const ddId = fnConfig.getDandanplayAppId();
+        writeDandanplayCredentials(ddId, fnConfig.getDandanplayAppSecret());
+        if (ddId) log.info('启动同步弹弹play凭证:', ddId.slice(0, 2) + '***');
+    } catch (e) { log.warn('启动同步弹弹play凭证失败', e); }
     // 启动时把已保存的「默认 MPV 着色器 / ICC 校色」重新写回活动配置目录。
     // 关键修复：旧实现只在面板改着色器时写 portable_config 单一目录，而 MPV 在 Windows 标准模式下
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
@@ -774,6 +794,7 @@ function init(): void {
     registerHandler('settings:set-bangumi-sync-threshold', handleSetBangumiSyncThreshold, { useHandle: true });
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
     registerHandler('settings:set-mpv-bili-aggregate-threshold', handleSetMpvBiliAggregateThreshold, { useHandle: true });
+    registerHandler('settings:set-dandanplay-credentials', handleSetDandanplayCredentials, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
     registerHandler('settings:set-carousel-logo', handleSetCarouselLogoEnabled, { useHandle: true });

@@ -112,6 +112,10 @@ export interface Config {
     smartSkipEnabled?: boolean;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
+    // [lc-1018] 弹弹play 开放 API 自定义凭证（两项都非空才启用；写入 script-opts/uosc_danmaku.conf。
+    // 留空=脚本内置共享凭证——该共享凭证已被官方接口 403，仅作向后兼容保留）
+    dandanplayAppId?: string;
+    dandanplayAppSecret?: string;
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
     // [lc-1014] 硬件加速开关（默认开启=true）：关闭时 app.disableHardwareAcceleration() 走软件合成，
@@ -923,6 +927,24 @@ export function setMpvBiliAggregateThreshold(threshold: number): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// [lc-1018] 获取弹弹play 开放 API 自定义凭证（默认空串=用脚本内置共享凭证）
+export function getDandanplayAppId(): string {
+    const config: Config = readConfig() || {};
+    return typeof config.dandanplayAppId === 'string' ? config.dandanplayAppId : '';
+}
+export function getDandanplayAppSecret(): string {
+    const config: Config = readConfig() || {};
+    return typeof config.dandanplayAppSecret === 'string' ? config.dandanplayAppSecret : '';
+}
+
+// [lc-1018] 设置弹弹play 自定义凭证（两项都 trim；任一为空视为清除，Lua 端回落内置共享凭证）
+export function setDandanplayCredentials(appId: string, appSecret: string): void {
+    const config: Config = readConfig() || {};
+    config.dandanplayAppId = String(appId || '').trim();
+    config.dandanplayAppSecret = String(appSecret || '').trim();
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「智能跳过片头片尾」总开关（默认关闭=false：仅显示按钮不自动跳）
 export function getSmartSkipEnabled(): boolean {
     const config: Config = readConfig() || {};
@@ -1083,6 +1105,8 @@ Object.assign(module.exports, {
     setMpvBiliSearchEnabled,
     getMpvBiliAggregateThreshold,
     setMpvBiliAggregateThreshold,
+    // [lc-1018] 弹弹play 开放 API 自定义凭证
+    getDandanplayAppId, getDandanplayAppSecret, setDandanplayCredentials,
     // 智能跳过片头片尾
     getSmartSkipEnabled,
     setSmartSkipEnabled,

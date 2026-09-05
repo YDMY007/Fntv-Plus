@@ -495,6 +495,48 @@ function writeBiliAggregateThreshold(threshold: number): void {
     }
 }
 
+// [lc-1018] 写入弹弹play 开放 API 自定义凭证到 script-opts/uosc_danmaku.conf（由应用设置面板控制）。
+// 背景：脚本内置的共享 AppId 已被弹弹play官方接口整体 403（2026-09-05 实测，弹幕恒"无数据"），
+// 用户在弹弹play开放平台注册应用后，把专属 AppId+Secret 填进设置面板即可恢复。
+// ⚠️ 双写 portable_config 与用户配置目录（AppData/Roaming/mpv），同 writeBiliSearchEnabled 的 lc-094 教训。
+// 两项任一为空 → 从 conf 删除对应键（dandanplay.lua 端回落到内置共享凭证）。
+// mpv 在每次启动(每次播放拉起的新进程)读取 script-opts → 下次播放生效，无需重启应用。
+function writeDandanplayCredentials(appId: string, appSecret: string): void {
+    try {
+        const id = String(appId || '').trim();
+        const secret = String(appSecret || '').trim();
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) {
+                    fs.mkdirSync(scriptOptsDir, { recursive: true });
+                }
+                const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                // 移除已存在的凭证键及旧注释，避免重复堆叠
+                lines = lines.filter(l => !/^\s*(dandanplay_app_id|dandanplay_app_secret)\s*=/.test(l)
+                    && !/^#\s*弹弹play\s*(开放\s*API\s*)?凭证/.test(l));
+                while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+                if (id && secret) {
+                    lines.push('# 弹弹play 开放 API 自定义凭证（由应用设置面板控制；留空/清除即回落脚本内置共享凭证）');
+                    lines.push('dandanplay_app_id=' + id);
+                    lines.push('dandanplay_app_secret=' + secret);
+                }
+                fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                logger.info(`MPV 弹弹play凭证已写入: ${target} (appId=${id ? id.slice(0, 2) + '***' : '(空,回落内置)'})`);
+            } catch (e) {
+                logger.error(`写入 uosc_danmaku.conf (弹弹play凭证) 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('写入弹弹play凭证失败:', error);
+    }
+}
+
 // 写入 B站弹幕「样式与过滤」到 script-opts/uosc_danmaku.conf（覆盖 fontsize/opacity/outline/shadow/bold/displayarea/max_screen_danmaku/blacklist_path）
 // 同时把屏蔽词写入 <portable_config>/danmaku_blacklist.txt（用 ~~ 相对路径引用，MPV 自动解析到当前配置目录），
 // 把弹幕屏蔽类型写入 <portable_config>/scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.js 启动时读取并过滤）。
@@ -580,5 +622,6 @@ export {
     writeBiliSearchEnabled,
     writeSmartSkipEnabled,
     writeBiliAggregateThreshold,
-    writeBiliDanmakuStyle
+    writeBiliDanmakuStyle,
+    writeDandanplayCredentials
 };

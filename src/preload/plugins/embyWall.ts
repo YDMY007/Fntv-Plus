@@ -2854,6 +2854,86 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
     danBody.appendChild(danHint);
 
+    // ===== [lc-1018] 弹弹play 自定义凭证（开放 API AppId + Secret）=====
+    // 背景：脚本内置共享凭证已被弹弹play官方接口整体 403（2026-09-05 实测，搜索/弹幕恒"无数据"）。
+    // 用户在弹弹play开放平台注册应用后把专属 AppId+Secret 填到这里 → 写入 script-opts/uosc_danmaku.conf
+    // → dandanplay.lua 优先用自定义凭证签名；两项留空=回落内置共享凭证。mpv 每次播放新起进程 → 下次播放生效。
+    const ddCredLabel = document.createElement('div');
+    ddCredLabel.textContent = '弹弹play 凭证（开放 API AppId / Secret）';
+    ddCredLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:12px 0 5px;';
+    danBody.appendChild(ddCredLabel);
+
+    const ddHint = document.createElement('div');
+    ddHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
+    ddHint.textContent = '内置共享凭证已被弹弹play官方接口封禁（弹幕恒「无数据」）。在弹弹play开放平台注册应用后，填入专属 AppId 与 Secret 即可恢复；两项都填才生效，清除后回落内置凭证。下次 MPV 播放时生效。';
+    danBody.appendChild(ddHint);
+
+    // 掩码输入（交互同 Bangumi token：已保存显示星号，聚焦自动清空进入编辑）
+    const maskDd = (t: string): string => '*'.repeat(Math.max(0, t.length));
+    let ddRealId = '';
+    let ddRealSecret = '';
+    const mkDdInput = (placeholder: string): HTMLInputElement => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = placeholder;
+      inp.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+        + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+        + 'padding:6px 8px;box-sizing:border-box;margin-bottom:6px;';
+      inp.addEventListener('focus', () => { if (inp.readOnly) { inp.readOnly = false; inp.value = ''; } });
+      return inp;
+    };
+    const ddIdInput = mkDdInput('弹弹play AppId（如 gz2wnihj9d 形式的专属 id）');
+    const ddSecretInput = mkDdInput('弹弹play Secret（注册应用后获得，勿外传）');
+    const ddBlurMask = (inp: HTMLInputElement, real: string): void => {
+      if (inp.value.trim() === '' && real) { inp.value = maskDd(real); inp.readOnly = true; }
+    };
+    ddIdInput.addEventListener('blur', () => ddBlurMask(ddIdInput, ddRealId));
+    ddSecretInput.addEventListener('blur', () => ddBlurMask(ddSecretInput, ddRealSecret));
+    danBody.appendChild(ddIdInput);
+    danBody.appendChild(ddSecretInput);
+
+    const ddBtns = document.createElement('div');
+    ddBtns.style.cssText = 'display:flex;gap:6px;';
+    const ddSaveBtn = mkBtn('保存凭证', true);
+    const ddClearBtn = mkBtn('清除凭证', true);
+    ddBtns.appendChild(ddSaveBtn); ddBtns.appendChild(ddClearBtn);
+    danBody.appendChild(ddBtns);
+
+    const ddStatus = document.createElement('div');
+    ddStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    danBody.appendChild(ddStatus);
+
+    ddSaveBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const id = ddIdInput.value.trim();
+      const secret = ddSecretInput.value.trim();
+      if (!id || !secret) {
+        ddStatus.textContent = 'AppId 与 Secret 两项都必填（清除请用「清除凭证」）。';
+        ddStatus.style.color = 'var(--fnos-ui-warn)';
+        return;
+      }
+      ipcRenderer.invoke('settings:set-dandanplay-credentials', { appId: id, appSecret: secret })
+        .then(() => {
+          ddRealId = id; ddRealSecret = secret;
+          ddIdInput.value = maskDd(id); ddIdInput.readOnly = true;
+          ddSecretInput.value = maskDd(secret); ddSecretInput.readOnly = true;
+          ddStatus.textContent = '已保存，下次 MPV 播放时生效。';
+          ddStatus.style.color = 'var(--fnos-ui-sub)';
+        })
+        .catch((err) => { ddStatus.textContent = '保存失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+    ddClearBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('settings:set-dandanplay-credentials', { appId: '', appSecret: '' })
+        .then(() => {
+          ddRealId = ''; ddRealSecret = '';
+          ddIdInput.value = ''; ddIdInput.readOnly = false;
+          ddSecretInput.value = ''; ddSecretInput.readOnly = false;
+          ddStatus.textContent = '已清除，回落脚本内置共享凭证，下次 MPV 播放时生效。';
+        })
+        .catch((err) => { ddStatus.textContent = '清除失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+
     // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘、Node 端弹幕缓存一致：%PUBLIC%\fnos-danmaku）
     const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
     biliFolderBtn.style.marginTop = '10px';
@@ -4089,6 +4169,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const bt: string[] = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
         for (const b of blockToggles) b.input.checked = bt.includes(b.key);
         if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || '';
+        // [lc-1018] 弹弹play 凭证回填（已保存则星号掩码只读显示，不回显明文）
+        ddRealId = s.dandanplayAppId || '';
+        ddRealSecret = s.dandanplayAppSecret || '';
+        ddIdInput.value = ddRealId ? maskDd(ddRealId) : '';
+        ddIdInput.readOnly = !!ddRealId;
+        ddSecretInput.value = ddRealSecret ? maskDd(ddRealSecret) : '';
+        ddSecretInput.readOnly = !!ddRealSecret;
+        if (ddRealId) ddStatus.textContent = '已保存自定义凭证，下次 MPV 播放时生效。';
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)

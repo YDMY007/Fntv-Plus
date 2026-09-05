@@ -135,14 +135,31 @@ function make_danmaku_request_args(method, url, headers, body)
 
     if url:find("api%.dandanplay%.") then
         local time = os.time()
-        local appid = "UgjRIH45lE1BBLNmir1WKw=="
-        local app_accept = "SzuWlFZAPRMqeWf9qmfp8dcvYr3hvxuSrIRZuAeEfko="
-        table.insert(args, '-H')
-        table.insert(args, string.format('X-AppId: %s', AES.ECB.decrypt(KEY, Base64.decode(appid))))
-        table.insert(args, '-H')
-        table.insert(args, string.format('X-Signature: %s', generateXSignature(url, time, appid, app_accept)))
-        table.insert(args, '-H')
-        table.insert(args, string.format('X-Timestamp: %s', time))
+        -- [lc-1018] 优先使用用户自定义凭证（设置面板「弹幕设置→弹弹play 凭证」写入
+        -- script-opts/uosc_danmaku.conf 的 dandanplay_app_id / dandanplay_app_secret）。
+        -- 明文配置直接签名，无需内置共享凭证那套 AES 解混淆。
+        -- 内置共享凭证已被官方接口整体 403（2026-09-05 实测），仅作留空时的向后兼容保留。
+        local custom_id = tostring(options.dandanplay_app_id or ""):match("^%s*(.-)%s*$")
+        local custom_secret = tostring(options.dandanplay_app_secret or ""):match("^%s*(.-)%s*$")
+        local url_path = extract_url(url)
+        if custom_id ~= "" and custom_secret ~= "" and url_path then
+            local hash = Sha256(custom_id .. time .. url_path .. custom_secret)
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-AppId: %s', custom_id))
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-Signature: %s', Base64.encode(hex_to_bin(hash))))
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-Timestamp: %s', time))
+        else
+            local appid = "UgjRIH45lE1BBLNmir1WKw=="
+            local app_accept = "SzuWlFZAPRMqeWf9qmfp8dcvYr3hvxuSrIRZuAeEfko="
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-AppId: %s', AES.ECB.decrypt(KEY, Base64.decode(appid))))
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-Signature: %s', generateXSignature(url, time, appid, app_accept)))
+            table.insert(args, '-H')
+            table.insert(args, string.format('X-Timestamp: %s', time))
+        end
     end
 
     table.insert(args, url)
