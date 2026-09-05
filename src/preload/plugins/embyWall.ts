@@ -1162,6 +1162,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const body = document.createElement('div');
       body.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
       d.appendChild(body);
+      // [lc-1065] 搜索索引标记: 行走查按此识别内容容器(分组标题不参与匹配)
+      body.dataset.secBody = '1';
       return { el: d, body };
     };
 
@@ -1238,9 +1240,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     mask.style.cssText = 'position:fixed;inset:0;z-index:2147483599;display:none;'
       + 'background:rgba(18,14,28,.22);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);'
       + '-webkit-app-region:no-drag;app-region:no-drag;';
+    let resetSettingsSearch: (() => void) | null = null; // [lc-1065] 关面板时复位搜索态(实现见下方搜索模块)
     const closeSettingsPanel = (): void => {
       overlay.style.display = 'none';
       mask.style.display = 'none';
+      if (resetSettingsSearch) resetSettingsSearch();
     };
     mask.addEventListener('click', () => closeSettingsPanel());
     // ESC 键关闭(兜底)
@@ -4102,10 +4106,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [lc-1041] 方向感知切换动画：去往 nav 序号更大的分类从右滑入，更小的从左滑入；
     //   display:none→flex 重放 CSS 动画(lc-1011 机制)，无需 JS 重触发；只动 opacity/transform。
     let _lastCatIdx = 0;
+    let searchActive = false; // [lc-1065] 搜索态标志(selectCat 守卫用; 声明提前, 末尾首次 selectCat 调用先于搜索块初始化)
     const _reduceMotion = (): boolean => {
       try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
     };
     const selectCat = (id: string): void => {
+      // [lc-1065] 搜索态下外部入口(_selectCat/导航点击)切分类 → 先退搜索态, 避免结果区与分类 pane 同显
+      if (searchActive) setSearchMode(false);
       const nextIdx = cats.findIndex((c) => c.id === id);
       const anim = _reduceMotion() ? ''
         : (nextIdx >= _lastCatIdx ? 'fnos-cat-in-r' : 'fnos-cat-in-l') + ' .22s cubic-bezier(.25,.7,.3,1) both';
@@ -4151,6 +4158,176 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       leftNav.appendChild(btn);
     });
     selectCat(cats[0].id); // 默认显示第一个分类(通用)
+
+    // ===== [lc-1065] 设置面板搜索（VS Code 式）=====
+    //  动机: 9 分类 30+ 设置项找设置靠翻。顶部搜索框, 输入关键字实时跨分类平铺出匹配行, 点击直达。
+    //  索引不落文本快照: 每次执行搜索现走 DOM(卡片 body 由 section() 打 data-sec-body 标记,
+    //  行=body 直接子元素, 匹配文本用 row.textContent 现读)——后注入的行/异步刷新的状态文案天然最新。
+    const searchWrap = document.createElement('div');
+    searchWrap.id = 'fnos-settings-search';
+    searchWrap.style.cssText = 'flex-shrink:0;display:flex;align-items:center;gap:7px;margin:0 16px 10px;'
+      + 'padding:7px 11px;border-radius:10px;background:var(--fnos-ui-input-bg)!important;'
+      + 'box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);transition:box-shadow .15s;'
+      + '-webkit-app-region:no-drag;app-region:no-drag;';
+    const searchIcon = document.createElement('span');
+    searchIcon.textContent = '🔍';
+    searchIcon.style.cssText = 'font-size:12px;opacity:.7;flex-shrink:0;line-height:1;';
+    const searchInput = document.createElement('input');
+    searchInput.id = 'fnos-settings-search-input';
+    searchInput.type = 'text';
+    searchInput.placeholder = '搜索设置…（Ctrl+F）';
+    searchInput.spellcheck = false;
+    searchInput.style.cssText = 'flex:1;min-width:0;border:none;outline:none;background:transparent;'
+      + 'color:var(--fnos-ui-text);font-size:12.5px;';
+    const searchClear = document.createElement('button');
+    searchClear.type = 'button';
+    searchClear.textContent = '✕';
+    searchClear.style.cssText = 'display:none;width:20px;height:20px;flex-shrink:0;border:none;border-radius:50%;'
+      + 'cursor:pointer;background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text2);'
+      + 'font-size:10px;line-height:1;transition:background .15s;';
+    searchClear.onmouseenter = () => { searchClear.style.background = 'var(--fnos-ui-btn-hover)!important'; };
+    searchClear.onmouseleave = () => { searchClear.style.background = 'var(--fnos-ui-btn-bg)!important'; };
+    searchWrap.appendChild(searchIcon); searchWrap.appendChild(searchInput); searchWrap.appendChild(searchClear);
+    // 点击搜索框容器任意空白处都能聚焦输入(input 本身点击天然聚焦)
+    searchWrap.addEventListener('click', () => searchInput.focus());
+    searchInput.addEventListener('focus', () => { searchWrap.style.boxShadow = 'inset 0 0 0 1px var(--fnos-ui-accent)'; });
+    searchInput.addEventListener('blur', () => { searchWrap.style.boxShadow = 'inset 0 0 0 1px rgba(255,255,255,.14)'; });
+    overlay.insertBefore(searchWrap, bodyRow); // 头部与主体之间通栏
+
+    // 结果平铺区: 与 9 个分类 pane 同级挂在 rightContent 内, 仅搜索态显示
+    const searchPane = document.createElement('div');
+    searchPane.id = 'fnos-settings-search-pane';
+    searchPane.style.cssText = 'display:none;flex-direction:column;gap:6px;';
+    rightContent.appendChild(searchPane);
+
+    // 直达高亮: inset box-shadow 泛光脉冲, 不污染行自身 background(行底色各异, 玻璃卡面上安全)
+    if (!document.getElementById('fnos-search-hit-style')) {
+      const hitSt = document.createElement('style');
+      hitSt.id = 'fnos-search-hit-style';
+      hitSt.textContent = '#fnos-settings-panel .fnos-search-hit{animation:fnos-hit-flash 1.4s ease-out both}'
+        + '@keyframes fnos-hit-flash{0%{box-shadow:inset 0 0 0 999px rgba(76,99,224,.30)}100%{box-shadow:inset 0 0 0 999px rgba(76,99,224,0)}}';
+      (document.head || document.documentElement).appendChild(hitSt);
+    }
+
+    const norm = (s: string): string => s.replace(/\s+/g, '').toLowerCase();
+    const setSearchMode = (on: boolean): void => {
+      if (searchActive === on) return;
+      searchActive = on;
+      // 搜索态: 左导航置灰禁点(点击语义由结果行直达承担), 隐全部分类 pane 显平铺结果
+      leftNav.style.opacity = on ? '.35' : '1';
+      leftNav.style.pointerEvents = on ? 'none' : '';
+      for (const c of cats) panes[c.id].style.display = 'none';
+      searchPane.style.display = on ? 'flex' : 'none';
+      if (!on) selectCat(cats[Math.max(_lastCatIdx, 0)].id); // 退出搜索还原进搜索前的分类
+      rightContent.scrollTop = 0;
+    };
+
+    const runSearch = (): void => {
+      const raw = searchInput.value;
+      const q = norm(raw);
+      searchClear.style.display = q ? 'block' : 'none';
+      if (!q) { setSearchMode(false); return; }
+      // 实时走查: 分类→卡片(data-sec-body)→直接子级行; 自身 display:none 的行(条件隐藏)不入结果
+      const hits: { cat: Cat; row: HTMLElement; label: string }[] = [];
+      for (const cat of cats) {
+        for (const card of cat.els) {
+          const bodyEl = Array.from(card.children)
+            .find((ch) => (ch as HTMLElement).dataset && (ch as HTMLElement).dataset.secBody === '1') as HTMLElement | undefined;
+          if (!bodyEl) continue;
+          for (const row of Array.from(bodyEl.children) as HTMLElement[]) {
+            if (getComputedStyle(row).display === 'none') continue;
+            const label = (row.textContent || '').replace(/\s+/g, ' ').trim();
+            if (label.length < 2) continue;
+            if (norm(label).indexOf(q) !== -1) hits.push({ cat, row, label });
+          }
+        }
+      }
+      searchPane.textContent = '';
+      if (!hits.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'text-align:center;color:var(--fnos-ui-sub);font-size:12px;padding:26px 0;';
+        empty.textContent = '未找到与「' + raw.trim() + '」匹配的设置';
+        searchPane.appendChild(empty);
+      }
+      hits.forEach(({ cat, row, label }) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:10px;cursor:pointer;'
+          + 'background:var(--fnos-ui-input-bg)!important;'
+          + 'background-image:linear-gradient(165deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.012) 60%)!important;'
+          + 'transition:background .15s;';
+        item.onmouseenter = () => { item.style.background = 'var(--fnos-ui-row-hover)!important'; };
+        item.onmouseleave = () => { item.style.background = 'var(--fnos-ui-input-bg)!important'; };
+        const badge = document.createElement('span');
+        badge.textContent = cat.label;
+        badge.style.cssText = 'flex-shrink:0;font-size:10px;font-weight:700;color:#fff;padding:3px 8px;'
+          + 'border-radius:6px;background:var(--fnos-ui-accent)!important;letter-spacing:.3px;';
+        const txt = document.createElement('span');
+        txt.textContent = label.length > 52 ? label.slice(0, 52) + '…' : label;
+        txt.title = label;
+        txt.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fnos-ui-text);';
+        const arrow = document.createElement('span');
+        arrow.textContent = '▸';
+        arrow.style.cssText = 'flex-shrink:0;color:var(--fnos-ui-sub);font-size:11px;';
+        item.appendChild(badge); item.appendChild(txt); item.appendChild(arrow);
+        item.addEventListener('click', () => {
+          // 直达: 清搜索→退搜索态→切分类→滚动居中→高亮脉冲
+          searchInput.value = '';
+          searchClear.style.display = 'none';
+          setSearchMode(false);
+          selectCat(cat.id);
+          requestAnimationFrame(() => {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            row.classList.remove('fnos-search-hit');
+            void row.offsetWidth; // 重读布局重触发 CSS 动画(连点两条结果时前一条动画已占用类名)
+            row.classList.add('fnos-search-hit');
+            setTimeout(() => row.classList.remove('fnos-search-hit'), 1500);
+          });
+        });
+        searchPane.appendChild(item);
+      });
+      setSearchMode(true);
+    };
+
+    let searchTimer: number | undefined;
+    searchInput.addEventListener('input', () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(runSearch, 90); // 轻防抖
+    });
+    searchInput.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // 有输入: 只清搜索, 拦下事件不让面板跟着关; 空输入: 放行, ESC 落到面板兜底监听关闭面板
+        if (searchInput.value) {
+          e.stopPropagation();
+          searchInput.value = '';
+          searchClear.style.display = 'none';
+          setSearchMode(false);
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+      }
+    });
+    searchClear.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      searchInput.value = '';
+      searchClear.style.display = 'none';
+      setSearchMode(false);
+      searchInput.focus();
+    });
+    // 面板打开期间 Ctrl/Cmd+F 聚焦搜索框(VS Code 习惯)
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && overlay.style.display === 'flex') {
+        e.preventDefault();
+        e.stopPropagation();
+        searchInput.focus();
+        searchInput.select();
+      }
+    });
+    resetSettingsSearch = (): void => {
+      if (!searchActive && !searchInput.value) return;
+      searchInput.value = '';
+      searchClear.style.display = 'none';
+      if (searchActive) setSearchMode(false); // 复位时还原分类 pane(下次打开面板不落空)
+    };
 
     // 刷新豆瓣登录状态（打开面板时 / 登录变更时调用）
     const refreshDouban = async (): Promise<void> => {
