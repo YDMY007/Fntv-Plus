@@ -9,7 +9,8 @@
 //   • 瞬间加载层：进详情瞬间铺「缓存海报 + 骨架 shimmer」盖住 fnOS 原生白屏，hero 就绪即淡出，
 //     2s 兜底自动淡出，绝不长期遮挡。缓存海报来自上次访问该 href 时存下的 hero 图(localStorage)。
 // ─────────────────────────────────────────────────────────────────────────────
-import { findHeroBackdropImg } from './glass';
+import { findHeroBackdropImg, findActiveDetailView, findDetailHero } from './glass';
+import preloadLogger from '../../../core/logger';
 
 const BACKDROP_ID = 'fnos-detail-backdrop';
 const INSTANT_ID = 'fnos-instant-layer';
@@ -192,7 +193,16 @@ function _readCache(href: string): { bg: string; poster: string } | null {
 export function showInstantLayer(href: string): void {
   if (document.getElementById(INSTANT_ID)) return; // 已在，不重复构建
   const cache = _readCache(href);
-  if (!cache || !cache.poster) return;             // [lc-993] 无海报可秒出 → 不铺灰罩
+
+  // [lc-1035] Series 一级页变体：hero 结构上没有海报组件（组件 Zse 只渲染背景剧照+渐变+logo），
+  // cache.poster 恒为空 —— lc-993 因此整体不铺层，加载期露出近白环境底（玻璃模式=用户报障「白底」，
+  // 过一会/重进才正常=背景剧照解码完才消失）。但 cache.bg（背景剧照 URL）首次成功访问后就存在 →
+  // 铺「纯背景变体」：全屏模糊剧照 + scrim，无海报/骨架行，与该页最终版式同构，重进秒显。
+  // 首次访问（无任何缓存）→ 延迟补铺同款层（此时 hero img 已有 src，blur(40px) 遮住渐进加载）。
+  if (!cache || (!cache.poster && !cache.bg)) {
+    scheduleLateCover(href);
+    return;
+  }
 
   const layer = document.createElement('div');
   layer.id = INSTANT_ID;
@@ -207,33 +217,66 @@ export function showInstantLayer(href: string): void {
   scrim.className = 'fnos-instant-layer__scrim';
   layer.appendChild(scrim);
 
-  const body = document.createElement('div');
-  body.className = 'fnos-instant-layer__body';
+  if (cache.poster) {
+    const body = document.createElement('div');
+    body.className = 'fnos-instant-layer__body';
 
-  // 走到这里 cache.poster 必非空(见上面的早退) → 恒有真海报，不再需要骨架占位块那条分支
-  const poster = document.createElement('img');
-  poster.className = 'fnos-instant-layer__poster';
-  poster.src = cache.poster;
-  poster.alt = '';
-  body.appendChild(poster);
+    // 走到这里 cache.poster 必非空(见上面的早退) → 恒有真海报，不再需要骨架占位块那条分支
+    const poster = document.createElement('img');
+    poster.className = 'fnos-instant-layer__poster';
+    poster.src = cache.poster;
+    poster.alt = '';
+    body.appendChild(poster);
 
-  const lines = document.createElement('div');
-  lines.className = 'fnos-instant-layer__lines';
-  [[60, 30], [40, 18], [100, 16], [92, 16], [84, 16]].forEach(([w, h]) => {
-    const s = document.createElement('div');
-    s.className = 'fnos-instant-skel';
-    s.style.width = w + '%';
-    s.style.height = h + 'px';
-    lines.appendChild(s);
-  });
-  body.appendChild(lines);
-  layer.appendChild(body);
+    const lines = document.createElement('div');
+    lines.className = 'fnos-instant-layer__lines';
+    [[60, 30], [40, 18], [100, 16], [92, 16], [84, 16]].forEach(([w, h]) => {
+      const s = document.createElement('div');
+      s.className = 'fnos-instant-skel';
+      s.style.width = w + '%';
+      s.style.height = h + 'px';
+      lines.appendChild(s);
+    });
+    body.appendChild(lines);
+    layer.appendChild(body);
+  } // bg-only 变体：不加 body（纯背景，Season/Movie 有海报版式不受影响）
 
   document.body.appendChild(layer);
 
   // 兜底：即使 hero 始终未就绪，也在 2s 后自动淡出，绝不长期遮挡
   clearTimeout(_instantAutoTimer);
   _instantAutoTimer = window.setTimeout(() => hideInstantLayer(), INSTANT_AUTO_HIDE);
+}
+
+let _lateCoverTimer = 0;
+/** [lc-1035] 首次访问（无缓存）的延迟补铺：+650ms 时 hero img 通常已有 src 但未解码完 →
+ *  铺 bg-only 层（blur(40px) 遮住渐进加载）盖住近白环境底；已就绪/已换页则不铺。 */
+function scheduleLateCover(href: string): void {
+  clearTimeout(_lateCoverTimer);
+  _lateCoverTimer = window.setTimeout(() => {
+    if (document.getElementById(INSTANT_ID)) return;
+    if (location.href.split(/[?#]/)[0] !== href) return;      // 已换页
+    const v = findActiveDetailView();
+    const hero = v ? findDetailHero(v) : null;
+    const img = hero ? findHeroBackdropImg(hero) : null;
+    if (!img) return;
+    const src = img.currentSrc || img.src || '';
+    if (!src || img.complete) return;                          // 已就绪 → hideInstantLayer 已由 _apply 调用
+    const layer = document.createElement('div');
+    layer.id = INSTANT_ID;
+    layer.className = 'fnos-instant-layer';
+    const bg = document.createElement('div');
+    bg.className = 'fnos-instant-layer__bg';
+    bg.style.backgroundImage = `url("${src}")`;
+    layer.appendChild(bg);
+    const scrim = document.createElement('div');
+    scrim.className = 'fnos-instant-layer__scrim';
+    layer.appendChild(scrim);
+    document.body.appendChild(layer);
+    clearTimeout(_instantAutoTimer);
+    _instantAutoTimer = window.setTimeout(() => hideInstantLayer(), INSTANT_AUTO_HIDE);
+    try { preloadLogger.info('[backdrop] 首访无缓存：已补铺纯背景加载层（盖住白底）'); } catch { /* ignore */ }
+  }, 650);
 }
 
 /** 淡出并移除瞬间加载层（hero 就绪时调用；幂等，无操作则 no-op）。 */
