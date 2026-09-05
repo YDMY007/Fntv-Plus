@@ -278,7 +278,7 @@ body.fnos-beautify a[href*="/v/person/"] img{ border-radius:12px !important; }
 /* ===== E2. 演职人员精修（lc-1020，按实机 DOM 对齐）：与右栏信息卡同一套排版语言 =====
    原生形态：16px 大字标题 + 常驻横向滚动条 + 16px 人名，与上方磨砂信息卡的 11px 小标签
    层级语言不一致（用户要求演员信息展示贴合整体样式）。收敛为：小号弱化分区标签 /
-   头像柔投影替代描边（对比度靠投影不靠 tint）/ 悬浮轻抬升 / 隐藏滚动条。
+   头像无描边无投影（lc-1038 用户要求去掉柔投影）/ 悬浮轻抬升 / 隐藏滚动条。
    实机结构：宿主 COL>nth-child(3) 内 p.semi-typography(标题) + .ms-container(横滑) >
    a[href*=/v/person/] > div.size-[90px].rounded-full(头像wrapper,原生transition-all) + p 名字(text-base) + p 角色(text-xs)。
    注：TMDB 卡也插在本宿主顶部，但其 HTML 全部用 .fnos-showinfo__* 类、无 p.semi-typography，互不误伤。 */
@@ -342,7 +342,8 @@ body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-t
   width:56px !important; height:56px !important;
   margin:0 14px 0 0 !important;   /* 清掉原生 mx-auto（头像随行内容长短水平漂移）+ mb-2.5 */
   flex-shrink:0 !important;
-  box-shadow:0 6px 16px rgba(0,0,0,.22) !important;
+  /* [lc-1038] 头像投影已去掉（用户报：演员列表左下角阴影不好看）——E2 初版的
+     「柔投影替代描边」在浅色主题下每颗头像下方都拖出一团灰影，观感脏。 */
 }
 /* ④ 人名 13.5px 半粗 + 饰演角色横排跟随（12px 弱化）。
    ⚠ 原生名字/角色 p 都带 w-[120px] text-center——不清掉的话行中部出现大空隙、

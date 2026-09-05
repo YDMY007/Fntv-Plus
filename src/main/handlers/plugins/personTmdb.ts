@@ -187,13 +187,16 @@ export async function collectBrief(personGuid: string): Promise<any> {
 }
 
 export function init(): void {
+    // ⚠ preload 走 ipcRenderer.invoke，主进程必须 ipcMain.handle（useHandle:true）——
+    // 默认的 ipcMain.on 对 invoke 恒抛 No handler registered，preload 会误报「主进程未加载」，
+    // 且重启客户端也无济于事（lc-1033 漏配，lc-1038 修）。
     registerHandler('person:tmdb-brief', async (_e: any, personGuid: string) => {
         if (!personGuid || !/^[0-9a-f]{32}$/i.test(String(personGuid))) return { error: 'personGuid 无效' };
         return await collectBrief(String(personGuid).toLowerCase());
-    });
+    }, { useHandle: true });
     registerHandler('person:tmdb-credits', async (_e: any, personGuid: string) => {
         if (!personGuid || !/^[0-9a-f]{32}$/i.test(String(personGuid))) return { error: 'personGuid 无效' };
         return await collectCredits(String(personGuid).toLowerCase());
-    });
+    }, { useHandle: true });
     log.info('演员 TMDB 作品插件就绪');
 }
