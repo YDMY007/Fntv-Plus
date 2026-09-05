@@ -4077,7 +4077,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'general', label: '通用', els: [sec3.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
       { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secUX.el] },
-      { id: 'danmaku', label: '弹幕', els: [secDanmaku.el, secBili.el] },
+      { id: 'danmaku', label: '弹幕', els: [secBili.el, secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
