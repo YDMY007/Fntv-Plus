@@ -1010,7 +1010,10 @@ body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex flex-col gap-4"]:has(a
 }
 /* N8b. TMDB 卡：绝对定位到右列（面板高度只由左列简介+季选驱动，卡超高时内部滚动，
    不会像 grid 流内子项那样把整面板撑到 max-height）。卡自身无框无底 —— 玻璃就是容器（用户点名）。
-   分节发丝线在本页去除：玻璃上不再叠线条。 */
+   分节发丝线在本页去除：玻璃上不再叠线条。
+   ⚠ [lc-1037] 云母开启时本条 transparent 仍能生效的前提：tmdbCard 在一级页给卡打了
+   data-fntv-glass-exclude——否则 glassUI ② [class*="card"] 磨砂底 (0,6,1) 压过本条 (0,3,2)，
+   卡被打回磨砂白（用户报障「白点显示不稳定」的根因）。删那行 attr 本条在云母下即失效。 */
 body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card{
   position:absolute !important;
   top:16px !important; bottom:16px !important;

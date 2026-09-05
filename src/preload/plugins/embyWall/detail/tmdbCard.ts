@@ -683,8 +683,15 @@ function _ensureCardEl(): HTMLElement | null {
   card.id = CARD_ID;
   card.className = 'fnos-beautify-card';
   if (_isOneLevel()) {
+    // [lc-1037] 云母磨砂豁免：一级页卡自身无框无底（N8b/O8b background:transparent），
+    // 容器就是聚簇面板。但 glassUI ② 的 [class*="card"] 磨砂底特异性(0,6,1)压过 N8b 的
+    // (0,3,2)——云母一开透明就被打回磨砂白（用户报障「白点显示不稳定」）。用 glassUI
+    // 自带的 :not([data-fntv-glass-exclude]) 钩子让该规则根本不匹配（lc-526~530 教训：
+    // 从源头排除，不打 !important 特异性战）。季页不打：那里卡=右栏唯一大容器，磨砂保留。
+    card.setAttribute('data-fntv-glass-exclude', '1');
     host.appendChild(card); // 一级页(Series/Movie)：追加到面板末尾，N8b/O8b 段 CSS 绝对定位到右列（不占左列流）
   } else {
+    card.removeAttribute('data-fntv-glass-exclude'); // 元素被复用跨路由时按新落位还原
     // 季页：追加进右栏顶部(additive，不移动任何原生节点)
     host.insertBefore(card, host.firstChild || null);
   }
