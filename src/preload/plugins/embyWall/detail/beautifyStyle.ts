@@ -527,6 +527,40 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-showinfo__links a:hover{ text-decoration:underline !important; }
 .fnos-showinfo__links span{ color:var(--semi-color-text-3,#c7c7cc) !important; }
 .fnos-showinfo__loading,.fnos-showinfo__error{ color:var(--fnos-muted) !important; font-size:12.5px !important; padding:8px 0 !important; }
+/* [lc-1039] 季页卡骨架占位（tmdbCard.ts seasonSkeletonHtml）：数据未到时按最终版式铺灰块——
+   剧照 3 格(同 .fnos-showinfo__still 的三等分 16:9) + 分节(发丝线+小标题+3 行) + 外链行。
+   半透明 fill 随明暗主题；脉冲只动 opacity(合成器路径，零布局抖动)，错峰 delay 出呼吸感；
+   磁盘缓存命中时骨架毫秒级即被真实内容整块替换。 */
+.fnos-showinfo__skel i{
+  display:block !important;
+  background:var(--semi-color-fill-0,rgba(128,128,128,.16)) !important;
+  border-radius:6px !important;
+  animation:fnos-skel-pulse 1.5s ease-in-out infinite !important;
+}
+.fnos-showinfo__skel-stills{ display:flex !important; gap:8px !important; }
+.fnos-showinfo__skel-stills i{
+  width:calc((100% - 16px) / 3) !important; aspect-ratio:16 / 9 !important;
+  border-radius:8px !important;
+}
+.fnos-showinfo__skel-stills i:nth-child(2){ animation-delay:.22s !important; }
+.fnos-showinfo__skel-stills i:nth-child(3){ animation-delay:.44s !important; }
+.fnos-showinfo__skel-sec{
+  margin-top:18px !important; padding-top:14px !important;
+  border-top:1px solid var(--fnos-hairline-soft) !important;
+}
+.fnos-showinfo__skel-t{ width:52px !important; height:11px !important; margin-bottom:2px !important; animation-delay:.1s !important; }
+.fnos-showinfo__skel-l{ height:12px !important; margin-top:9px !important; }
+.fnos-showinfo__skel-l:nth-of-type(3){ animation-delay:.18s !important; }
+.fnos-showinfo__skel-l:nth-of-type(4){ animation-delay:.36s !important; }
+.fnos-showinfo__skel-links{ display:flex !important; gap:12px !important; margin-top:18px !important; }
+.fnos-showinfo__skel-links i{ width:40px !important; height:12px !important; }
+.fnos-showinfo__skel-links i:nth-child(2){ animation-delay:.15s !important; }
+.fnos-showinfo__skel-links i:nth-child(3){ animation-delay:.3s !important; }
+.fnos-showinfo__skel-links i:nth-child(4){ animation-delay:.45s !important; }
+@keyframes fnos-skel-pulse{ 0%,100%{ opacity:.45; } 50%{ opacity:1; } }
+@media (prefers-reduced-motion:reduce){
+  .fnos-showinfo__skel i{ animation:none !important; opacity:.5 !important; }
+}
 /* ⑤ 来源行：全卡最弱一级(10.5px)。刷新默认灰、hover 才染 accent ——
      它是开发者视角的操作，不该和 TMDB/IMDb 外链抢同一级视觉权重。 */
 .fnos-showinfo__foot{

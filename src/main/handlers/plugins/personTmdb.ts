@@ -12,11 +12,17 @@
 // TMDB 请求复用 tmdbSync 的客户端（v3/v4 鉴权 + 代理/免梯子直连 + 重试），零额外配置。
 // ─────────────────────────────────────────────────────────────────────────────
 import { registerHandler } from '../core/ipcHandler';
+import { getDailyCached } from '../../common/dailyCache';
 import * as fnConfig from '../../../modules/fn_config/config';
 import { request as fnRequest, HttpMethod } from '../../../modules/fn_api/request';
 import * as logger from '../../../modules/logger';
 import { tmdbApiGet } from './tmdbSync';
 const log = logger.component('person-tmdb');
+
+/** [lc-1039] 磁盘持久化 TTL：credits 7 天 / brief 30 天。getDailyCached 自带 stale-while-revalidate
+ *  （过期也先秒回旧值、后台静默刷新），TTL 只控制后台刷新节奏——首次之后任何打开都不阻塞等网络。 */
+const CREDITS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const BRIEF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 标题归一化：去大小写/空格/中英标点（与油猴插件 norm() 同规则，两侧标题能对上） */
 function norm(s: any): string {
@@ -38,8 +44,9 @@ interface CreditItem {
     guid?: string;
 }
 
-/** 采集单个演员的 TMDB 全量作品 + 库内标记。供 IPC 与测试复用。 */
-export async function collectCredits(personGuid: string): Promise<any> {
+/** 采集单个演员的 TMDB 全量作品 + 库内标记（uncached 真抓取；对外一律走下方带磁盘缓存的
+ *  collectCredits）。供 IPC 与测试复用。 */
+async function collectCreditsUncached(personGuid: string): Promise<any> {
     const cfg = fnConfig.readConfig();
     const domain = cfg && cfg.domain;
     const token = cfg && cfg.token;
@@ -142,15 +149,32 @@ export async function collectCredits(personGuid: string): Promise<any> {
     }
 }
 
+/** [lc-1039] 磁盘持久化包装：同一演员 7 天内只真正请求一次，其余全读 userData/cache 落盘缓存
+ *  （跨客户端重启存活），叠加 getDailyCached 内置 stale-while-revalidate——过期后也先秒回旧数据、
+ *  后台静默刷新。此前每次打开演员页都全量打飞牛(1+5 次)+TMDB(find+combined_credits)，连看几个
+ *  演员就会撞 TMDB 限流。失败结果不落盘：fetchFn 内 throw → 降级旧缓存或上抛。 */
+export async function collectCredits(personGuid: string): Promise<any> {
+    try {
+        const r = await getDailyCached('ptmdb_credits_v1_' + personGuid, async () => {
+            const inner = await collectCreditsUncached(personGuid);
+            if (!inner || inner.error) throw new Error(String((inner && inner.error) || 'collectCredits 失败'));
+            return inner;
+        }, CREDITS_TTL_MS);
+        return r.data; // ⚠ 解包 DailyCacheResult——preload/IPC 契约是顶层 {ok,items,...}
+    } catch (e: any) {
+        return { error: String(e.message || e) };
+    }
+}
+
 /** [lc-1036] 演员简报（详情页演职人员行补充信息）：职业分类/生日/代表作前二。
- *  TMDB /person/{id} + combined_credits(vote_count 排序)；会话内缓存。 */
+ *  TMDB /person/{id} + combined_credits(vote_count 排序)；uncached 真抓取，对外走下方
+ *  collectBrief（内存 L1 + 磁盘 L2）。 */
 const _briefCache = new Map<string, any>();
 const DEPT_CN: Record<string, string> = {
     Acting: '演员', Directing: '导演', Writing: '编剧', Production: '制片',
     Camera: '摄影', Sound: '音效', Art: '美术', Editing: '剪辑', 'Visual Effects': '视效',
 };
-export async function collectBrief(personGuid: string): Promise<any> {
-    if (_briefCache.has(personGuid)) return _briefCache.get(personGuid);
+async function fetchBriefUncached(personGuid: string): Promise<any> {
     const cfg = fnConfig.readConfig();
     const domain = cfg && cfg.domain;
     const token = cfg && cfg.token;
@@ -179,8 +203,25 @@ export async function collectBrief(personGuid: string): Promise<any> {
                 } catch { /* 代表作可选 */ }
             }
         }
-        _briefCache.set(personGuid, brief);
         return { ok: true, ...brief };
+    } catch (e: any) {
+        return { error: String(e.message || e) };
+    }
+}
+
+/** [lc-1039] 简报持久化：内存 L1（本次会话）+ getDailyCached 磁盘 L2（30 天 + SWR）。
+ *  季页每次进页要给最多 12 行演员拉简报，不落盘的话每次重启客户端后看过的每一页都会
+ *  全部重打一遍 TMDB（12×2+ 请求/页），正是「频繁拉取导致限流」的主源头之一。 */
+export async function collectBrief(personGuid: string): Promise<any> {
+    if (_briefCache.has(personGuid)) return _briefCache.get(personGuid);
+    try {
+        const r = await getDailyCached('ptmdb_brief_v1_' + personGuid, async () => {
+            const b = await fetchBriefUncached(personGuid);
+            if (b && b.error) throw new Error(String(b.error));
+            return b;
+        }, BRIEF_TTL_MS);
+        _briefCache.set(personGuid, r.data);
+        return r.data; // ⚠ 解包 DailyCacheResult——preload 契约是顶层 {ok,dept,...}
     } catch (e: any) {
         return { error: String(e.message || e) };
     }

@@ -627,6 +627,20 @@ export function buildCardHtml(d: any, opts?: { fromStillsOnly?: boolean }): stri
   return blocks.join('');
 }
 
+/** [lc-1039] 季页卡骨架占位：模拟 fromStillsOnly 版式（剧照 3 格 + 一条分节 + 外链行）。
+ *  纯静态 HTML（_renderCard 的 innerHTML 去重对它友好）；色块/脉冲全在 CSS（beautifyStyle I 段）。
+ *  类名沿用 fnos-showinfo__ 前缀并核对过 glassUI token 清单（skel 不含任何禁用子串）。 */
+function seasonSkeletonHtml(): string {
+  return '<div class="fnos-showinfo__skel" aria-hidden="true">'
+    + '<div class="fnos-showinfo__skel-stills"><i></i><i></i><i></i></div>'
+    + '<div class="fnos-showinfo__skel-sec"><i class="fnos-showinfo__skel-t"></i>'
+    + '<i class="fnos-showinfo__skel-l" style="width:88%"></i>'
+    + '<i class="fnos-showinfo__skel-l" style="width:62%"></i>'
+    + '<i class="fnos-showinfo__skel-l" style="width:74%"></i></div>'
+    + '<div class="fnos-showinfo__skel-links"><i></i><i></i><i></i><i></i></div>'
+    + '</div>';
+}
+
 /** 剧照异步填充：走主进程 tmdb:image 代理（内存+磁盘缓存，规避渲染进程 DNS 污染）。
  *  并发取、单张失败只删自己；全部失败则把整节移除，不留一排空位。
  *  每次写回前检查节点是否还在文档里 —— teardown/换页后卡已被摘掉，不能再写。 */
@@ -713,7 +727,10 @@ function _renderCard(): void {
   // [lc-1022] 二级(季)页只渲染「剧照」以后的分节 —— 评分/标语/meta/事实/主创/本季与一级页右栏的
   // 同一张卡逐字重复；一级页维持全量。
   if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData, { fromStillsOnly: _isSeasonRoute() });
-  else if (_tmdbInfoLoading) body = '<div class="fnos-showinfo__loading">正在从 TMDB 获取剧集信息…</div>';
+  // [lc-1039] 季页 loading 换骨架占位（用户要求「骨架图占位」）：按最终版式铺脉冲灰块而非一行文字，
+  //   数据到齐整块替换，避免右栏从「什么都没有→一行字→整卡内容」两次跳变。
+  //   磁盘缓存命中时 fetch 毫秒级返回，骨架只闪现一瞬甚至不出现。一级页维持原文字（卡在聚簇面板内，另有入场动画）。
+  else if (_tmdbInfoLoading) body = _isSeasonRoute() ? seasonSkeletonHtml() : '<div class="fnos-showinfo__loading">正在从 TMDB 获取剧集信息…</div>';
   else if (_tmdbInfoError) body = `<div class="fnos-showinfo__error">${esc(_tmdbInfoError)}</div>`;
   const when = _tmdbInfoFetchedAt ? shortTime(_tmdbInfoFetchedAt) : '';
   const foot = `<div class="fnos-showinfo__foot"><span>数据来源 TMDB${when ? ' · ' + esc(when) : ''}</span>`
