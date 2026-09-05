@@ -237,7 +237,11 @@
       "allowToChangeInstallationDirectory": true,
       "oneClick": false,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerLanguages": ["zh_CN"]
     },
     "files": [
       "dest",
