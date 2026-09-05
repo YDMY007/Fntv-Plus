@@ -669,8 +669,18 @@ body.fnos-beautify{
   --fnos-titlebar-hover-close-icon:#fff;
 }
 body.fnos-beautify #custom-titlebar[data-fntv-tb]::before{
-  content:''; position:absolute; inset:0; pointer-events:none;
-  border-top-left-radius:16px; border-top-right-radius:16px;
+  /* [lc-1027] **直角** + 外扩 2px：白弧根因 = 本条自带的 16px 圆角与窗口圆角裁剪同心
+     重叠。活体实证（红条染色实验）：mainwin ① 的 html overflow:hidden+border-radius:
+     16px 连 **fixed 后代**一起按 r16 圆角裁（给本条 radius 18 也被裁回 16 弧线），
+     于是弧线处有两条 AA 渐变带叠加——本条渐弱处透出其下粉白亚克力/L 段采样的
+     浅色 → 用户报障的「右上角圆角白线」。
+     本条改直角后覆盖在窗口内处处=1，弧线上只剩 html 裁剪这一次反走样（深 tint 对
+     透明桌面）→ 无缝。外扩 2px 防右/上边缘亚像素缝隙；底边多出的 2px 落在 L 条
+     同色 tint 区（M/L 接缝本就要求恒等），不可见。
+     ⚠ 前置修复（mainwin ②）：body 原挂的 backdrop-filter ≠ none 会把 body 变成
+       fixed 后代的包含块，body 的圆角 overflow 同样裁本条——已移除（该 blur 在
+       透明窗口里本就是空转：body 背后没有任何已画内容）。 */
+  content:''; position:absolute; inset:-2px; pointer-events:none;
   background:rgba(var(--fnos-hero-tint, 25,25,26), 1);
 }
 

@@ -127,13 +127,17 @@ const ACRYLIC_CSS = `
         padding-top:32px!important;
         overflow:hidden!important;
     }
-    /* 影视TV页: 亚克力底板 + 模糊透桌面 + 字体平滑 */
+    /* 影视TV页: 亚克力底板 + 字体平滑
+       [lc-1027] body 不再挂 backdrop-filter：① 透明窗口里 body 背后没有任何已画内容
+       (桌面不在页面合成树内), 这个全窗 blur 从来是空转(GPU 纯浪费, 与 glassUI lc-1023
+       的结论一致); ② 更关键: backdrop-filter ≠ none 会把 body 变成 fixed 后代的
+       **包含块**, body 自身的 overflow:hidden+圆角随即将 #custom-titlebar 等 fixed 层
+       裁进 body 的 16px 圆角框 —— 详情页取色条(beautifyStyle M 段)外扩消白弧的补丁
+       因此整体失效, 弧线反走样缝里透出粉白底 = 用户报障的「右上角圆角白线」。 */
     .fnos-tv-page body{
         min-height:100vh!important;
         border-radius:16px!important;
         background:rgba(250,244,250, var(--fnos-alpha,0.68))!important;
-        backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;
-        -webkit-backdrop-filter:blur(var(--fnos-blur,30px)) saturate(132%) brightness(1.03)!important;
         font-family:'Segoe UI Variable','Segoe UI',system-ui,-apple-system,sans-serif!important;
         -webkit-font-smoothing:antialiased!important;
     }
