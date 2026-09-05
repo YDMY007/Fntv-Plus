@@ -243,7 +243,8 @@
       "dest",
       "build",
       "resource/login/**/*",
-      "resource/wiki/**/*"
+      "resource/wiki/**/*",
+      "resource/logos/**/*"
     ]
   },
   "appDisplayVersion": "3.5.0"

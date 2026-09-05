@@ -7,6 +7,9 @@ import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
 import logger from '../core/logger';
+// [lc-1046] 顶部 logo 自定义：预设(流媒体平台)/上传/恢复默认。本模块只单向依赖它的解析器，
+//   把默认 logo dataURI 登记过去；设置卡片在 customLogo.ts 内自行注入(#fnos-appearance-ctrl 锚点)。
+import { registerDefaultLogo, resolveLogoSrc } from './customLogo';
 
 // [v332 fix] 用 fs.readFileSync 读取本地 logo PNG，生成真正的 base64 data URI
 //   (v327 的 LOGO_DATA_URI 是一段 blob JSON 描述字符串，不是有效图片 -> img.src 加载失败)
@@ -14,6 +17,7 @@ let LOGO_DATA_URI = '';
 try {
   const logoBuf = fs.readFileSync(path.resolve(__dirname, '../../../build/iconfntv.png'));
   LOGO_DATA_URI = `data:image/png;base64,${logoBuf.toString('base64')}`;
+  registerDefaultLogo(LOGO_DATA_URI); // [lc-1046] 「恢复默认」据此还原
   logger.info(`Logo loaded: ${Math.round(logoBuf.length / 1024)}KB`);
 } catch (e) {
   logger.error('Failed to load local logo file', String(e));
@@ -180,7 +184,8 @@ function injectTitleBar(): void {
     const logoImg = document.createElement('img');
     logoImg.id = 'tb-logo';
     logoImg.alt = '飞牛影视';
-    logoImg.src = LOGO_DATA_URI;
+    // [lc-1046] src 用自定义解析结果（默认/预设/上传；解析不出回落本文件默认图）
+    logoImg.src = resolveLogoSrc() || LOGO_DATA_URI;
     logoImg.draggable = false;
     const pinLogo = function (): void {
       logoImg.style.cssText =
