@@ -307,12 +307,73 @@ async function handleFetchAndFill(
     }
 }
 
+// ─── [lc-1063] 自动连播：查询下一集（网页播放器倒计时卡片数据源） ───
+
+interface NextEpisodeResult {
+    found: boolean;
+    guid?: string;
+    title?: string;
+    poster?: string;
+    duration?: number;
+    episode?: number;
+    message?: string;
+}
+
+async function handleNextEpisode(_event: IpcMainInvokeEvent, guid: string): Promise<NextEpisodeResult> {
+    if (!guid) return { found: false, message: '缺少 guid' };
+    try {
+        const config = fnConfig.readConfig() || {};
+        const domain = config.domain || '';
+        const token = config.token || '';
+        if (!domain || !token) return { found: false, message: '未登录' };
+        const fnapi = new fn.ApiService(domain, token);
+        const playResp = await fnapi.getPlayInfo(guid);
+        if (!playResp.success || !playResp.data) return { found: false, message: '读取播放信息失败' };
+        const info = playResp.data;
+        const item = info.item;
+        if (String(item.type || info.type || '') !== 'Episode') {
+            return { found: false, message: '非剧集内容无下一集' };
+        }
+        const seasonGuid = info.parent_guid || item.parent_guid || '';
+        if (!seasonGuid) return { found: false, message: '缺少剧季 guid' };
+
+        // 列表接口带 600s 缓存：同一季连播时后续查询零开销
+        const resp = await fnapi.getItemListCached({
+            parent_guid: seasonGuid,
+            exclude_folder: 1,
+            sort_column: 'index_number',
+            sort_type: 'ASC',
+        });
+        const list: any[] = resp?.data?.list || [];
+        const episodes = list
+            .filter((it: any) => String(it.type || '').toLowerCase() === 'episode' && it.guid)
+            .sort((a: any, b: any) => (a.index_number || 0) - (b.index_number || 0));
+        let idx = episodes.findIndex((it: any) => it.guid === guid);
+        if (idx < 0) idx = episodes.findIndex((it: any) => (it.episode_number || 0) === (item.episode_number || -1));
+        const next = idx >= 0 ? episodes[idx + 1] : null;
+        if (!next) return { found: false, message: '已是本季最后一集' };
+        return {
+            found: true,
+            guid: String(next.guid),
+            title: String(next.title || ''),
+            poster: String(next.poster || ''),
+            duration: Number(next.duration || 0),
+            episode: Number(next.episode_number || 0),
+        };
+    } catch (e) {
+        log.warn('[skip:next-episode] 查询失败:', (e as Error).message);
+        return { found: false, message: (e as Error).message };
+    }
+}
+
 // 注册插件处理器
 function init(): void {
     registerHandler('settings:get-smart-skip-enabled', handleGetSmartSkipEnabled, { useHandle: true });
     registerHandler('settings:set-smart-skip-enabled', handleSetSmartSkipEnabled, { useHandle: true });
     // [lc-316] 飞牛原生网页播放器自动填充跳过数据
     registerHandler('skip:fetch-and-fill', handleFetchAndFill, { useHandle: true });
+    // [lc-1063] 自动连播：查询下一集
+    registerHandler('skip:next-episode', handleNextEpisode, { useHandle: true });
 }
 
 export {
@@ -322,5 +383,6 @@ export {
     resolveMalId,
     aniskipFetch,
     handleFetchAndFill,
+    handleNextEpisode,
     resolveMalId as resolveMalIdForTests
 };

@@ -75,6 +75,11 @@ let interceptedGuid: string | null = null;
 let externalPlayActive = false;
 
 /** [lc-614] 设置/清除外部播放流程标记（playMaskButton/playButton 调用） */
+/** [lc-1063] 供自动连播模块(autoplayNext)提取当前集 guid */
+export function extractCurrentGuid(): string | null {
+    return extractGuidFromUrl() || extractGuidFromDom();
+}
+
 export function setExternalPlayActive(active: boolean): void {
     externalPlayActive = active;
 }
