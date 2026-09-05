@@ -74,6 +74,15 @@ const SERIES_PANEL = 'div[class="relative box-border flex w-full flex-col px-[44
 /** 按钮行（wrapper 的第 2 子节点，class 以 "mt-4 " 开头）。 */
 const SERIES_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
 
+/** [lc-1028] Movie 一级页（/v/movie/<id>，组件 Zse isVideo 分支）。活体结构 2026-09-05 实采：
+ *  col(mb-[46px] flex flex-col gap-3) 4 子节点 = wrapper(hero+按钮行) / 简介(px-[46px]) /
+ *  演职人员(mb-10) / 文件信息+IMDB(px-[46px] gap-4)。hero/渐变/logo 锚点/按钮行选择器与
+ *  Series 同族，仅面板类名不同（px-[46px] 无 gap-4——文件信息区多一个 gap-4，整串精确匹配区分，
+ *  与 SERIES_PANEL 同约定：与 tmdbCard.ts 的 MOVIE_PANEL_SEL 逐字一致）。 */
+const MOVIE_PANEL = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
+const MOVIE_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+const MOVIE_COL = 'div[class*="mb-[46px]"][class*="flex flex-col gap-3"]:has(> div > .trim-mc__details--key-version)';
+
 export const BEAUTIFY_CSS = `
 /* ===== 0. 语义设计 token（明/暗两套；文本色沿用 Semi 主题变量，无需在此重复）===== */
 body.fnos-beautify{
@@ -956,6 +965,185 @@ body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card::-webkit-scrollbar-
 body.fnos-series-panel ${SERIES_PANEL} .fnos-showinfo__sec{
   border-top:none !important; padding-top:12px !important;
 }
+
+/* ===== O. Movie 一级页：满屏海报 + 左下柔光玻璃聚簇 + TMDB 电影卡（lc-1028）=====
+   诉求（用户）：「剧集的一级和二级详情页都优化好了，但是电影的详情页没有优化，电影只要一个
+   详情页」。探查结论（dest/_verify/lc1028-explore/ 活体实采）：电影页与 Series 一级页同族同构
+   （同 col/wrapper/hero 类名/.gradient/logo 锚点/mt-4 按钮行），差异仅在 col.children[1..3]
+   = 简介(px-[46px]) / 演职人员(mb-10) / 文件信息+IMDB(px-[46px] gap-4)。
+   本段镜像 N 段的设计语言（用户已定稿），差异点：
+   · 面板 = 简介容器（O5），聚簇里没有季选 → 面板高度只剩简介驱动（--fnos-cluster-h 同名复用）；
+   · 按钮行含进度条 + 双行 meta（年份/片长/类型/地区/徽章/来源 + 字幕/音轨选择器），高于 Series
+     的单行按钮 → logo 上移量 +20px（O3 用 +120px）；
+   · fiber 全文字段是 overview 不是 intro（tmdbCard._fillSeriesIntro 双键兜底）；
+   · 演职人员/文件信息/视频信息保留在首屏折叠线以下自然滚动（电影独有数据，不隐藏）；
+   · K/L/M/背景透明化因 hero/顶栏类名同族早已覆盖本页，本段只补布局与聚簇。
+   门控 = body.fnos-movie-panel（tmdbCard._armSeriesPanel 按路由打，Movie 页不再吃 N 段）。 */
+/* O1. col 满屏容器（同 N1） */
+body.fnos-movie-panel ${MOVIE_COL}{
+  position:relative !important;
+  min-height:calc(100vh - 32px) !important;
+  margin-bottom:0 !important;
+}
+/* O2. hero 满屏 + 上提吃掉 32px 标题栏（直接采用 N2+lc-1024 的最终形态，用户已验收） */
+body.fnos-movie-panel .trim-mc__details--key-version{
+  height:100vh !important;
+  min-height:0 !important; max-height:none !important;
+  margin-top:-32px !important;
+}
+/* 底部渐变遮罩重做（同 N2：25deg 对角渐隐，只护左下聚簇文字区；双类名打平 L 段同选择器） */
+body.fnos-movie-panel .trim-mc__details--key-version.trim-mc__details--key-version .gradient{
+  height:58% !important;
+  background-image:linear-gradient(25deg,
+    rgba(var(--fnos-hero-tint, 25,25,26), .62) 0%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .34) 30%,
+    rgba(var(--fnos-hero-tint, 25,25,26), .10) 55%,
+    rgba(var(--fnos-hero-tint, 25,25,26), 0) 75%) !important;
+}
+/* O2b. 顶栏全透（同 N2b：L 段玻璃条在满屏海报上读作暗带；图标 K 段白色 + drop-shadow） */
+body.fnos-movie-panel div[class*="h-[80px]"][class*="top-0"]::before{
+  content:none !important;
+}
+body.fnos-movie-panel div[class*="h-[80px]"][class*="top-0"] svg{
+  filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
+}
+/* O2c. 标题栏(最顶 32px 窗口控制条)随顶栏一并全透（同 N2c：M 段实色条在满屏海报上是异物横条） */
+body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::before{
+  content:none !important;
+}
+body.fnos-movie-panel #custom-titlebar[data-fntv-tb] button svg{
+  filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
+}
+/* O3. logo 上移（同 N3；+120px：电影按钮行含进度条+双行 meta，比 Series 单行高 ~20px） */
+body.fnos-movie-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"][class*="bottom-[30px]"]{
+  bottom:calc(var(--fnos-cluster-h, 360px) + 120px) !important;
+}
+/* O4. 按钮行悬浮（同 N4；MOVIE_BTNROW 与 SERIES_BTNROW 同构，进度条/meta 行随行一起悬浮）*/
+body.fnos-movie-panel ${MOVIE_BTNROW}{
+  position:absolute !important;
+  bottom:calc(var(--fnos-cluster-h, 360px) + 16px) !important;
+  left:26px !important;
+  width:min(1020px, calc(100vw - 52px)) !important;
+  padding:0 20px !important; margin:0 !important;
+  box-sizing:border-box !important; z-index:3 !important;
+}
+/* 按钮/文字/图标浅色化（电影页 meta 走 div 而非 span，需补 div/divider 两类） */
+body.fnos-movie-panel ${MOVIE_BTNROW} span{
+  color:rgba(255,255,255,.78) !important;
+  text-shadow:0 1px 2px rgba(0,0,0,.6), 0 2px 18px rgba(0,0,0,.5) !important;
+}
+body.fnos-movie-panel ${MOVIE_BTNROW} svg{ color:rgba(255,255,255,.92) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="text-[var(--semi-color-text"]{ color:rgba(255,255,255,.78) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="text-[var(--semi-color-divider"]{ color:rgba(255,255,255,.35) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW} img{ filter:drop-shadow(0 1px 4px rgba(0,0,0,.45)); }
+/* 圆形按钮（收藏/已看/更多）：半透玻璃、无边框（原生 border+fill-0 实心底一并去掉） */
+body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]{
+  background:rgba(255,255,255,.10) !important;
+  backdrop-filter:blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
+  border:none !important;
+}
+body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]:hover{
+  background:rgba(255,255,255,.18) !important;
+}
+/* O5. 简介面板：半透柔光玻璃（参数=N5 用户三轮定稿值：tint .09/blur 26/brightness .86）
+   无卡 600px；有卡 1020px（:has 门控）。⚠ 整串精确类名（无 gap-4）与文件信息区区分。 */
+body.fnos-movie-panel ${MOVIE_PANEL}{
+  position:absolute !important;
+  /* [lc-1028] top 锚定而非 bottom：Series 页面板是 col 末子节点（bottom:18=贴首屏底），
+     电影页 col 在面板之后还有演职人员/文件信息（折叠线下延伸），col 底远在视口外——
+     bottom 会把面板锚到视窗外（首版真机截画面板消失的根因）。top = 100vh - 32(body
+     顶padding, 列顶随之下移) - cluster-h（cluster-h=面板高+18，JS 实测回填）恰使面板
+     底沿贴在首屏底沿上方 18px，与列高解耦（活体 geom.cjs：-32 前底沿 1014，后 982）。 */
+  top:calc(100vh - 32px - var(--fnos-cluster-h, 360px)) !important; left:26px !important;
+  width:min(600px, calc(100vw - 52px)) !important;
+  max-height:calc(100vh - 32px - 230px) !important;
+  padding:18px 20px !important;
+  display:block !important;
+  background:linear-gradient(160deg,
+    rgba(255,255,255,.05) 0%,
+    rgba(255,255,255,.014) 45%,
+    rgba(255,255,255,.005) 100%),
+    rgba(var(--fnos-hero-tint, 25,25,26), .09) !important;
+  backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
+  -webkit-backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
+  border:none !important;
+  box-shadow:0 18px 54px rgba(0,0,0,.32) !important;
+  border-radius:22px !important;
+  box-sizing:border-box !important;
+  overflow:hidden !important;
+  z-index:2 !important;
+  animation:fnos-series-panel-in .5s cubic-bezier(.22,.61,.36,1) both;
+}
+body.fnos-movie-panel ${MOVIE_PANEL}:has(> .fnos-beautify-card){
+  width:min(1020px, calc(100vw - 52px)) !important;
+}
+/* 面板内恒暗材质 → Semi 文本变量重定义为浅色（I 段卡样式零改动自动跟随） */
+body.fnos-movie-panel ${MOVIE_PANEL}{
+  --semi-color-text-0:rgba(255,255,255,.94);
+  --semi-color-text-1:rgba(255,255,255,.72);
+  --semi-color-text-2:rgba(255,255,255,.58);
+  --semi-color-text-3:rgba(255,255,255,.42);
+}
+/* O6. 简介：全文展示（tmdbCard 回填 fiber props.overview，原生截断+「更多」同款失效）+ 隐藏「更多」 */
+body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+  margin:0 !important; width:100% !important;
+  font-size:14px !important; line-height:1.7 !important;
+  color:rgba(255,255,255,.88) !important;
+  text-shadow:0 1px 8px rgba(0,0,0,.38) !important;
+}
+body.fnos-movie-panel ${MOVIE_PANEL}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
+  width:calc(57% - 15px) !important;
+}
+body.fnos-movie-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]{
+  display:none !important;
+}
+/* O8b. TMDB 电影卡：绝对定位到面板右列（同 N8b；内部滚动不撑高面板；卡自身无框无底） */
+body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+  position:absolute !important;
+  top:16px !important; bottom:16px !important;
+  left:calc(57% + 6px) !important; right:16px !important;
+  width:auto !important;
+  margin:0 !important; padding:2px 10px 2px 4px !important;
+  background:transparent !important; border:none !important; box-shadow:none !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
+  scrollbar-width:thin !important;
+  scrollbar-color:rgba(255,255,255,.16) transparent !important;
+}
+body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
+body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,.16) !important; border-radius:2px !important;
+}
+body.fnos-movie-panel ${MOVIE_PANEL} .fnos-showinfo__sec{
+  border-top:none !important; padding-top:12px !important;
+}
+/* O9. 演职人员区精修（col.children[2]，镜像 E2 四件套；scope 到电影页——E2 的 COL 要求
+   hero 是 col 直接子节点，电影页 hero 在 wrapper 内结构性不命中，无双重规则冲突）。
+   该区在满屏 hero 之下、折叠线以下自然滚动。 */
+/* ① 分区标题「演职人员」：12px 弱化字距标签 */
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography{
+  font-size:12px !important; letter-spacing:.14em !important;
+  color:var(--fnos-ui-sub) !important; font-weight:500 !important;
+}
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography strong,
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography span{
+  font-size:inherit !important; color:inherit !important;
+  font-weight:inherit !important; letter-spacing:inherit !important;
+}
+/* ② 隐藏横滑滚动条 */
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) .ms-container{ scrollbar-width:none !important; }
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
+  width:0 !important; height:0 !important; display:none !important;
+}
+/* ③ 头像柔投影 + 悬浮轻抬升 */
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type{
+  box-shadow:0 10px 26px rgba(0,0,0,.28) !important;
+}
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type{
+  transform:translateY(-3px) !important;
+}
+/* ④ 人名 13px */
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{ font-size:13px !important; }
 `;
 
 /** 注入美化样式表（幂等：已存在则跳过）。全程只注入这一份 <style>，一次成型。 */

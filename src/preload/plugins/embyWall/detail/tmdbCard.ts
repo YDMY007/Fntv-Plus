@@ -21,6 +21,10 @@ const CARD_ID = 'fnos-beautify-tmdb-card';
 //   整串精确类名匹配，季页(px-[46px])/电影页结构性不误伤（2026-09-05 活体交叉验证）。
 const SERIES_PANEL_SEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
 const SERIES_BODY_CLS = 'fnos-series-panel';
+// [lc-1028] Movie 一级页(/v/movie/<id>, 组件 Zse isVideo 分支)。面板=简介区, 与文件信息区
+//   (px-[46px] + gap-4)只差一个类 → 仍用整串精确匹配区分（活体 2026-09-05 实采）。
+const MOVIE_PANEL_SEL = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
+const MOVIE_BODY_CLS = 'fnos-movie-panel';
 /** 面板 settle 后可能晚于 hero 渲染 → 有上限的重试链（同 epResolution 模式，绝不变轮询）。 */
 const SERIES_RETRY_DELAYS = [0, 350, 900, 1800, 3000];
 let _seriesTimers: number[] = [];
@@ -32,20 +36,34 @@ function _isSeriesRoute(): boolean {
   return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(location.pathname);
 }
 
-/** 当前活跃视图内的系列页内容面板（简介/季选择/外链行容器）。 */
-function _seriesPanel(): HTMLElement | null {
+/** [lc-1028] Movie 一级页。活体结构（2026-09-05 /v/movie/36b7d8e5… 实采）：与 Series 同族——
+ *  同 col(mb-[46px] flex flex-col gap-3)、同 wrapper(relative.w-full)、同 hero 类名
+ *  (trim-mc__details--key-version + .gradient h-45% + logo 锚点)、同 mt-4 按钮行；
+ *  差异仅在 col.children[1..3] = 简介(px-[46px])/演职人员(mb-10)/文件信息+IMDB(px-[46px] gap-4)。 */
+function _isMovieRoute(): boolean {
+  return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(location.pathname);
+}
+
+/** 一级页（Series/Movie 共用行为：聚簇武装、卡片失败即撤、全量卡片内容）。 */
+function _isOneLevel(): boolean {
+  return _isSeriesRoute() || _isMovieRoute();
+}
+
+/** 当前活跃视图内的内容面板（Series=简介/季选/外链容器；Movie=简介容器）。 */
+function _pagePanel(): HTMLElement | null {
   const view = findActiveDetailView();
   if (!view) return null;
-  return view.querySelector<HTMLElement>(SERIES_PANEL_SEL);
+  return view.querySelector<HTMLElement>(_isSeriesRoute() ? SERIES_PANEL_SEL : MOVIE_PANEL_SEL);
 }
 
 /** [lc-1010] 简介全文回填。原生把简介截成 1 行（文本节点只剩前缀 + 「更多」按钮），
  *  活体实测「更多」点击（Playwright click / CUA 坐标 / el.click()）均不展开 → 文本根本不在 DOM。
- *  全文在 React fiber 的 props.intro 里（截断组件 ile 的 props，实测 hop=1）→ 从 fiber 取回后
- *  写回**文本节点 data**（与截断库同一手法，不 replace/不删节点，React 卸载安全）。
- *  幂等：已是全文（t.length === full.length）不重复写。返回是否发生了回填。 */
+ *  全文在 React fiber 的 props 里（截断组件 ile 的 props，实测 hop=1；Series=props.intro，
+ *  [lc-1028] Movie=props.overview）→ 从 fiber 取回后写回**文本节点 data**（与截断库同一手法，
+ *  不 replace/不删节点，React 卸载安全）。幂等：已是全文（t.length === full.length）不重复写。
+ *  返回是否发生了回填。 */
 function _fillSeriesIntro(): boolean {
-  const panel = _seriesPanel();
+  const panel = _pagePanel();
   if (!panel) return false;
   const ov = panel.querySelector<HTMLElement>(':scope > div[class*="text-justify"]');
   if (!ov) return false;
@@ -55,7 +73,12 @@ function _fillSeriesIntro(): boolean {
   let full = '';
   for (let i = 0; i < 40 && f && !full; i++) {
     const p = f && f.memoizedProps;
-    if (p && typeof p.intro === 'string' && p.intro.length > 40) full = p.intro as string;
+    if (p && typeof p === 'object') {
+      for (const k of ['intro', 'overview']) {
+        const v = (p as any)[k];
+        if (typeof v === 'string' && v.length > 40) { full = v; break; }
+      }
+    }
     f = f && f.return;
   }
   if (!full) return false;
@@ -69,14 +92,14 @@ function _fillSeriesIntro(): boolean {
       done = true;
     }
   }
-  if (done) ov.classList.add('fnos-intro-full'); // N6 段据此隐藏失效的「更多」按钮
+  if (done) ov.classList.add('fnos-intro-full'); // N6/O6 段据此隐藏失效的「更多」按钮
   return done;
 }
 
 /** [lc-1010] 实测面板高度 → body 级 --fnos-cluster-h（beautifyStyle.ts N3/N4 的按钮行/logo 都挂在它上）。
  *  面板高度由左列（简介+季选）驱动；TMDB 卡是绝对定位右列，不参与撑高。 */
 function _measureSeriesPanel(): void {
-  const panel = _seriesPanel();
+  const panel = _pagePanel();
   if (!panel) return;
   const h = panel.getBoundingClientRect().height;
   const bottom = parseFloat(getComputedStyle(panel).bottom) || 18;
@@ -88,7 +111,7 @@ function _measureSeriesPanel(): void {
 function _onSeriesResize(): void {
   clearTimeout(_seriesResizeTimer);
   _seriesResizeTimer = window.setTimeout(() => {
-    if (!_isSeriesRoute()) return;
+    if (!_isOneLevel()) return;
     _fillSeriesIntro();
     _measureSeriesPanel();
   }, 220);
@@ -99,9 +122,9 @@ function _clearSeriesTimers(): void {
   _seriesTimers = [];
 }
 
-/** 系列页聚簇开关：body class(N 段 CSS 总闸) + 简介/高度的重试链 + resize 监听。幂等。 */
+/** 一级页聚簇开关：body class(N/O 段 CSS 总闸) + 简介/高度的重试链 + resize 监听。幂等。 */
 function _armSeriesPanel(): void {
-  document.body.classList.add(SERIES_BODY_CLS);
+  document.body.classList.add(_isSeriesRoute() ? SERIES_BODY_CLS : MOVIE_BODY_CLS);
   if (!_seriesResizeBound) {
     window.addEventListener('resize', _onSeriesResize, { passive: true });
     _seriesResizeBound = true;
@@ -109,7 +132,7 @@ function _armSeriesPanel(): void {
   _clearSeriesTimers();
   for (let i = 0; i < SERIES_RETRY_DELAYS.length; i++) {
     _seriesTimers.push(window.setTimeout(() => {
-      if (!_isSeriesRoute()) return;
+      if (!_isOneLevel()) return;
       _fillSeriesIntro();
       _measureSeriesPanel();
     }, SERIES_RETRY_DELAYS[i]));
@@ -124,6 +147,7 @@ function _disarmSeriesPanel(): void {
     _seriesResizeBound = false;
   }
   document.body.classList.remove(SERIES_BODY_CLS);
+  document.body.classList.remove(MOVIE_BODY_CLS);
   document.body.style.removeProperty('--fnos-cluster-h');
 }
 
@@ -642,7 +666,7 @@ async function _fillStills(card: HTMLElement, paths: string[]): Promise<void> {
 function _cardHost(): HTMLElement | null {
   const hero = _activeHero();
   if (!hero || !hero.parentElement) return null;
-  if (_isSeriesRoute()) return _seriesPanel();
+  if (_isOneLevel()) return _pagePanel(); // [lc-1028] Series/Movie：卡挂进各自面板，O8b/N8b 绝对定位右列
   const col = hero.parentElement;
   return (col.children[2] as HTMLElement) || null;
 }
@@ -655,8 +679,8 @@ function _ensureCardEl(): HTMLElement | null {
   card = document.createElement('div');
   card.id = CARD_ID;
   card.className = 'fnos-beautify-card';
-  if (_isSeriesRoute()) {
-    host.appendChild(card); // 系列页：追加到面板末尾，N8b 段 CSS 绝对定位到右列（不占左列流）
+  if (_isOneLevel()) {
+    host.appendChild(card); // 一级页(Series/Movie)：追加到面板末尾，N8b/O8b 段 CSS 绝对定位到右列（不占左列流）
   } else {
     // 季页：追加进右栏顶部(additive，不移动任何原生节点)
     host.insertBefore(card, host.firstChild || null);
@@ -667,7 +691,7 @@ function _ensureCardEl(): HTMLElement | null {
 function _renderCard(): void {
   // [lc-1010] 系列页：TMDB 失败 → 卡已被 _fetch 撤除，这里不再重建错误框
   // （面板 :has(> .fnos-beautify-card) 失配自动收窄回 600px 单列）；季页维持错误框不变。
-  if (_isSeriesRoute() && !_tmdbInfoData && !_tmdbInfoLoading && _tmdbInfoError) return;
+  if (_isOneLevel() && !_tmdbInfoData && !_tmdbInfoLoading && _tmdbInfoError) return;
   const card = _ensureCardEl();
   if (!card) {
     // [lc-1020] 宿主（季页演职人员区 / 系列页面板）还没渲染 → 有界重试，不再永久放弃
@@ -726,15 +750,15 @@ function _fetch(force = false): void {
         log('[lc-980] TMDB 卡就绪: ' + (r.data.title || ''));
       } else {
         _tmdbInfoError = (r && r.error) || 'TMDB 获取失败';
-        // [lc-1010] 系列页：失败即撤卡（面板 :has 自动收窄，不留错误框），状态仍记录供诊断
-        if (_isSeriesRoute()) {
+        // [lc-1010/1028] 一级页：失败即撤卡（面板 :has 自动收窄，不留错误框），状态仍记录供诊断
+        if (_isOneLevel()) {
           const c = document.getElementById(CARD_ID);
           if (c && c.parentNode) c.parentNode.removeChild(c);
         }
       }
     } catch (e) {
       _tmdbInfoError = String(e).substring(0, 120);
-      if (_isSeriesRoute()) {
+      if (_isOneLevel()) {
         const c = document.getElementById(CARD_ID);
         if (c && c.parentNode) c.parentNode.removeChild(c);
       }
@@ -771,10 +795,10 @@ function _isSeasonRoute(): boolean {
 export function scheduleTmdbCard(_view: HTMLElement): void {
   const href = location.href;
   if (_scheduledFor === href) return;
-  const series = _isSeriesRoute();
-  if (!series && !_isSeasonRoute()) return;
+  const oneLevel = _isOneLevel();
+  if (!oneLevel && !_isSeasonRoute()) return;
   _scheduledFor = href;
-  if (series) _armSeriesPanel();
+  if (oneLevel) _armSeriesPanel();
   _fetch(false);
 }
 
