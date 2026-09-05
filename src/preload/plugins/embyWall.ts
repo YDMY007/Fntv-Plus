@@ -1198,7 +1198,18 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         + 'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);'
         + 'transition:transform .2s cubic-bezier(.3,.7,.4,1);}'
         + '#fnos-settings-panel input[type=checkbox]:checked{background:var(--fnos-ui-accent)}'
-        + '#fnos-settings-panel input[type=checkbox]:checked::after{transform:translateX(16px)}';
+        + '#fnos-settings-panel input[type=checkbox]:checked::after{transform:translateX(16px)}'
+        // [lc-1044] 紫字对比度补偿（用户报障：面板加玻璃样式后紫字看不清）。
+        //   根因: lc-1043 流光玻璃的白色光泽渐变(顶缘 .06 + 流光峰 .13)整体提亮面板表面,
+        //   浅色主题下 --fnos-ui-sec(#9575cd≈3.7:1)/--fnos-ui-accent(#b79be8≈2.4:1) 本就贴着
+        //   或跌破 AA 线(4.5:1), 玻璃上更糊 —— 分组标题/提示语/链接/状态值/手柄键位标题全命中。
+        //   修=仅在 #fnos-settings-panel 作用域重定义三枚文字色变量为深紫罗兰(全部 ≥4.7:1),
+        //   CSS 变量按计算值实时解析, 已打开的面板与后注入的卡片(手柄/插件卡)同样生效;
+        //   深色主题(sec 7.3:1/accent 8.5:1)本就达标不动, 面板外全部自建 UI 零影响。
+        + 'html:not(.dark) #fnos-settings-panel{'
+        + '--fnos-ui-sec:#7050c8;'      // 3.7→5.4:1; 豆瓣/TMDB 数据源选中底(白字)同步 3.7→5.7:1
+        + '--fnos-ui-accent:#7857d0;'  // 2.4→4.8:1; 导航选中底+白字/开关选中轨/重启按钮同受益
+        + '--fnos-ui-muted2:#75679a;}'; // 插帧开关未选中态 3.4→4.7:1
       (document.head || document.documentElement).appendChild(animSt);
     }
     const overlay = document.createElement('div');
