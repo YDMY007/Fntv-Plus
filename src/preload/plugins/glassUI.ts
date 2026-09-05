@@ -255,6 +255,17 @@ const GATE_CSS = `
       0 16px 40px -8px rgba(0, 0, 0, var(--fntv-glass-shadow, 0.22)) !important;
   }
 
+  /* ②b [lc-1042] 首页海报行底部留空位（用户报障：云母下剧集卡片底部阴影「粘连」）。
+     实测：海报行 .ms-container 为 overflow-y:hidden 且容器高=卡片高(294=294)、卡片外边距 0，
+     本 ② 规则给每张卡的 0 16px 40px 软阴影在行底被硬裁成一条黑带，与下一行标题粘连；
+     「继续观看」行(continue-card-root)天然有 12px 底部余量所以观感正常 —— 用户要求照它留空。
+     修=玻璃模式下给含卡片库/海报卡的行补 padding-bottom（overflow 裁剪边界=padding 盒，
+     阴影完整着落 + 行间自然空位）；继续观看行与详情页演员区(无 card-root)不受影响。
+     :not(:has(.continue-card-root)) 把 substring 命中 continue-card-root 的那行排除。 */
+  html[data-fntv-glass].fnos-tv-page div.ms-container:has([class*="card-root"]):not(:has(.continue-card-root)){
+    padding-bottom: 24px !important;
+  }
+
   /* [lc-1012] 旧「浅色模式白磨砂特例」已删：tint/环境光/sheen 全部跟随 html.dark 双套自适应,
      一套规则覆盖明暗两主题（浅色 = 白玻璃, 深色 = 深玻璃）。 */
 
