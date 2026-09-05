@@ -963,24 +963,24 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const st = document.createElement('style');
     st.id = 'fnos-md-style';
     st.textContent = `
-.md-body{font-size:13px;line-height:1.7;color:#3a2d4d;}
-.md-body h1{font-size:20px;font-weight:700;margin:14px 0 10px;color:#2e2340;border-bottom:1px solid rgba(139,111,209,.22);padding-bottom:6px;}
-.md-body h2{font-size:17px;font-weight:700;margin:16px 0 8px;color:#2e2340;}
-.md-body h3{font-size:15px;font-weight:600;margin:14px 0 6px;color:#3a2d4d;}
-.md-body h4{font-size:13.5px;font-weight:600;margin:12px 0 6px;color:#3a2d4d;}
+.md-body{font-size:13px;line-height:1.7;color:#3d445e;}
+.md-body h1{font-size:20px;font-weight:700;margin:14px 0 10px;color:#262c44;border-bottom:1px solid rgba(109,127,242,.22);padding-bottom:6px;}
+.md-body h2{font-size:17px;font-weight:700;margin:16px 0 8px;color:#262c44;}
+.md-body h3{font-size:15px;font-weight:600;margin:14px 0 6px;color:#3d445e;}
+.md-body h4{font-size:13.5px;font-weight:600;margin:12px 0 6px;color:#3d445e;}
 .md-body p{margin:8px 0;}
 .md-body ul,.md-body ol{margin:8px 0;padding-left:22px;}
 .md-body li{margin:3px 0;}
-.md-body code{background:rgba(139,111,209,.12);padding:1px 5px;border-radius:4px;font-family:Consolas,Menlo,monospace;font-size:12px;color:#5a3ec0;}
-.md-body pre{background:rgba(46,35,64,.06);border:1px solid rgba(139,111,209,.18);border-radius:8px;padding:12px 14px;overflow-x:auto;margin:8px 0;}
-.md-body pre code{background:none;padding:0;color:#3a2d4d;}
-.md-body blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid rgba(139,111,209,.4);background:rgba(139,111,209,.06);color:#5a4d6e;}
-.md-body a{color:#7c4dff;text-decoration:underline;}
-.md-body hr{border:none;border-top:1px solid rgba(139,111,209,.22);margin:14px 0;}
+.md-body code{background:rgba(109,127,242,.12);padding:1px 5px;border-radius:4px;font-family:Consolas,Menlo,monospace;font-size:12px;color:#3d55c8;}
+.md-body pre{background:rgba(40,48,84,.06);border:1px solid rgba(109,127,242,.18);border-radius:8px;padding:12px 14px;overflow-x:auto;margin:8px 0;}
+.md-body pre code{background:none;padding:0;color:#3d445e;}
+.md-body blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid rgba(109,127,242,.4);background:rgba(109,127,242,.06);color:#5a6480;}
+.md-body a{color:#4a6fd4;text-decoration:underline;}
+.md-body hr{border:none;border-top:1px solid rgba(109,127,242,.22);margin:14px 0;}
 .md-body strong{font-weight:700;}
 .md-body table{border-collapse:collapse;margin:10px 0;width:100%;font-size:12.5px;}
-.md-body th,.md-body td{border:1px solid rgba(139,111,209,.25);padding:6px 9px;text-align:left;}
-.md-body th{background:rgba(139,111,209,.10);font-weight:700;}
+.md-body th,.md-body td{border:1px solid rgba(109,127,242,.25);padding:6px 9px;text-align:left;}
+.md-body th{background:rgba(109,127,242,.10);font-weight:700;}
 `;
     document.head.appendChild(st);
   }
@@ -1009,30 +1009,30 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       'backdrop-filter:blur(30px) saturate(135%)', '-webkit-backdrop-filter:blur(30px) saturate(135%)',
       'border-radius:16px',
       'box-shadow:0 18px 50px rgba(80,60,110,.30), inset 0 1px 0 rgba(255,255,255,.7)',
-      'color:#3a2d4d', 'overflow:hidden',
+      'color:#3d445e', 'overflow:hidden',
       'transform:scale(.96)', 'transition:transform .18s cubic-bezier(.22,.61,.36,1)',
     ].join(';') + ';';
 
     // 头部：标题 + 关闭
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(139,111,209,.18);flex-shrink:0;';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(109,127,242,.18);flex-shrink:0;';
     const hTitle = document.createElement('div');
     hTitle.textContent = '历史版本';
-    hTitle.style.cssText = 'font-size:16px;font-weight:700;color:#2e2340;';
+    hTitle.style.cssText = 'font-size:16px;font-weight:700;color:#262c44;';
     // 历史版本下载链接
     const dlBtn = document.createElement('a');
     dlBtn.textContent = '历史版本下载';
     dlBtn.href = 'https://pan.baidu.com/s/5oy1iYKBLdfxP55pgXO5X1g';
     dlBtn.target = '_blank';
     dlBtn.rel = 'noopener';
-    dlBtn.style.cssText = 'display:inline-flex;align-items:center;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#fff;background:rgba(108,76,178,.88);text-decoration:none;letter-spacing:.3px;transition:background .18s ease;';
+    dlBtn.style.cssText = 'display:inline-flex;align-items:center;padding:6px 14px;border-radius:8px;font-size:13px;font-weight:600;color:#fff;background:rgba(78,102,220,.90);text-decoration:none;letter-spacing:.3px;transition:background .18s ease;';
     dlBtn.onmouseenter = () => { dlBtn.style.background = 'rgba(124,93,255,.95)'; };
-    dlBtn.onmouseleave = () => { dlBtn.style.background = 'rgba(108,76,178,.88)'; };
+    dlBtn.onmouseleave = () => { dlBtn.style.background = 'rgba(78,102,220,.90)'; };
     const closeBtn = document.createElement('div');
     closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;font-size:15px;color:#6a5e7e;background:rgba(139,111,209,.10);';
-    closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(139,111,209,.22)'; };
-    closeBtn.onmouseleave = () => { closeBtn.style.background = 'rgba(139,111,209,.10)'; };
+    closeBtn.style.cssText = 'width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;font-size:15px;color:#6a5e7e;background:rgba(109,127,242,.10);';
+    closeBtn.onmouseenter = () => { closeBtn.style.background = 'rgba(109,127,242,.22)'; };
+    closeBtn.onmouseleave = () => { closeBtn.style.background = 'rgba(109,127,242,.10)'; };
     closeBtn.onclick = () => closeHistory();
     header.appendChild(hTitle);
     header.appendChild(dlBtn);
@@ -1043,9 +1043,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const body = document.createElement('div');
     body.style.cssText = 'display:flex;flex:1;min-height:0;';
     const listPane = document.createElement('div');
-    listPane.style.cssText = 'width:230px;flex-shrink:0;border-right:1px solid rgba(139,111,209,.18);overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:4px;';
+    listPane.style.cssText = 'width:230px;flex-shrink:0;border-right:1px solid rgba(109,127,242,.18);overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:4px;';
     const contentPane = document.createElement('div');
-    contentPane.style.cssText = 'flex:1;min-width:0;overflow-y:auto;padding:18px 22px;color:#3a2d4d;word-break:break-word;';
+    contentPane.style.cssText = 'flex:1;min-width:0;overflow-y:auto;padding:18px 22px;color:#3d445e;word-break:break-word;';
     contentPane.innerHTML = '<div class="md-body"><p style="color:#9a8eae;font-size:13px;">请选择左侧的历史版本查看更新内容。</p></div>';
     ensureMdStyle();
     body.appendChild(listPane);
@@ -1078,7 +1078,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const row = document.createElement('div');
         row.style.cssText = 'padding:9px 11px;border-radius:9px;cursor:pointer;font-size:13px;color:#4a3d5e;transition:background .12s;';
         row.textContent = item.title || item.name;
-        row.onmouseenter = () => { if (row.dataset.active !== '1') row.style.background = 'rgba(139,111,209,.10)'; };
+        row.onmouseenter = () => { if (row.dataset.active !== '1') row.style.background = 'rgba(109,127,242,.10)'; };
         row.onmouseleave = () => { if (row.dataset.active !== '1') row.style.background = 'transparent'; };
         row.onclick = () => {
           listPane.querySelectorAll('[data-active="1"]').forEach((el) => {
@@ -1086,7 +1086,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             (el as HTMLElement).dataset.active = '0';
           });
           row.dataset.active = '1';
-          row.style.background = 'rgba(139,111,209,.20)';
+          row.style.background = 'rgba(109,127,242,.20)';
           contentPane.innerHTML = '<div class="md-body"><p style="color:#9a8eae;">加载中…</p></div>';
           contentPane.scrollTop = 0;
           ipcRenderer.invoke('settings:read-changelog', item.name).then((res: any) => {
@@ -1202,15 +1202,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         + '#fnos-settings-panel input[type=checkbox]:checked::after{transform:translateX(16px)}'
         // [lc-1044] 紫字对比度补偿（用户报障：面板加玻璃样式后紫字看不清）。
         //   根因: lc-1043 流光玻璃的白色光泽渐变(顶缘 .06 + 流光峰 .13)整体提亮面板表面,
-        //   浅色主题下 --fnos-ui-sec(#9575cd≈3.7:1)/--fnos-ui-accent(#b79be8≈2.4:1) 本就贴着
+        //   浅色主题下 --fnos-ui-sec(#4a6fd4≈3.7:1)/--fnos-ui-accent(#6d7ff2≈2.4:1) 本就贴着
         //   或跌破 AA 线(4.5:1), 玻璃上更糊 —— 分组标题/提示语/链接/状态值/手柄键位标题全命中。
         //   修=仅在 #fnos-settings-panel 作用域重定义三枚文字色变量为深紫罗兰(全部 ≥4.7:1),
         //   CSS 变量按计算值实时解析, 已打开的面板与后注入的卡片(手柄/插件卡)同样生效;
         //   深色主题(sec 7.3:1/accent 8.5:1)本就达标不动, 面板外全部自建 UI 零影响。
         + 'html:not(.dark) #fnos-settings-panel{'
-        + '--fnos-ui-sec:#7050c8;'      // 3.7→5.4:1; 豆瓣/TMDB 数据源选中底(白字)同步 3.7→5.7:1
-        + '--fnos-ui-accent:#7857d0;'  // 2.4→4.8:1; 导航选中底+白字/开关选中轨/重启按钮同受益
-        + '--fnos-ui-muted2:#75679a;}'; // 插帧开关未选中态 3.4→4.7:1
+        + '--fnos-ui-sec:#3f5ec8;'      // 4.7→5.7:1; 豆瓣/TMDB 数据源选中底(白字)同步 4.7→5.7:1
+        + '--fnos-ui-accent:#4c63e0;'  // 3.1→5.0:1; 导航选中底+白字/开关选中轨/重启按钮同受益
+        + '--fnos-ui-muted2:#5f6a8c;}'; // 插帧开关未选中态 4.0→5.3:1
       (document.head || document.documentElement).appendChild(animSt);
     }
     const overlay = document.createElement('div');

@@ -127,9 +127,9 @@ const GATE_CSS = `
   /* 玻璃底色 + 环境光色板：跟随 fnOS 主题(html.dark)双套 ——
      Windows Mica 本就分深浅两套材质, 深色主题铺白磨砂是发灰的根源。 */
   html[data-fntv-glass] {
-    --fntv-glass-tint-r: 250;
-    --fntv-glass-tint-g: 248;
-    --fntv-glass-tint-b: 252;
+    --fntv-glass-tint-r: 249;
+    --fntv-glass-tint-g: 250;
+    --fntv-glass-tint-b: 253;
     --fntv-glass-sheen-1: .10;
     --fntv-glass-sheen-2: .028;
     --fntv-amb-base: #eef0f7;
@@ -140,9 +140,9 @@ const GATE_CSS = `
     --fntv-amb-3-rgb: 186 222 206; --fntv-amb-3-a: .32;
   }
   html.dark[data-fntv-glass] {
-    --fntv-glass-tint-r: 30;
-    --fntv-glass-tint-g: 32;
-    --fntv-glass-tint-b: 40;
+    --fntv-glass-tint-r: 28;
+    --fntv-glass-tint-g: 30;
+    --fntv-glass-tint-b: 42;
     --fntv-glass-sheen-1: .05;
     --fntv-glass-sheen-2: .012;
     --fntv-amb-base: #0d0d15;
@@ -152,9 +152,9 @@ const GATE_CSS = `
   }
   /* Compat 模式：明暗主题都强制深灰玻璃 */
   html[data-fntv-glass][data-fntv-glass-mode="compat"] {
-    --fntv-glass-tint-r: 30;
-    --fntv-glass-tint-g: 32;
-    --fntv-glass-tint-b: 40;
+    --fntv-glass-tint-r: 28;
+    --fntv-glass-tint-g: 30;
+    --fntv-glass-tint-b: 42;
     --fntv-glass-sheen-1: .05;
     --fntv-glass-sheen-2: .012;
   }

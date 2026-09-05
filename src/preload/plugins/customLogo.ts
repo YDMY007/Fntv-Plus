@@ -144,10 +144,10 @@ function mkSmallBtn(text: string): HTMLButtonElement {
   b.type = 'button';
   b.textContent = text;
   b.style.cssText = 'border:none;cursor:pointer;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:600;'
-    + 'background:var(--fnos-ui-btn-bg,rgba(150,120,200,.12));color:var(--fnos-ui-btn-text,#5c4d7d);'
+    + 'background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-btn-text,#3d4a6e);'
     + 'transition:background .15s;';
-  b.addEventListener('mouseenter', () => { b.style.background = 'var(--fnos-ui-btn-hover,rgba(183,155,232,.32))'; });
-  b.addEventListener('mouseleave', () => { b.style.background = 'var(--fnos-ui-btn-bg,rgba(150,120,200,.12))'; });
+  b.addEventListener('mouseenter', () => { b.style.background = 'var(--fnos-ui-btn-hover,rgba(109,127,242,.32))'; });
+  b.addEventListener('mouseleave', () => { b.style.background = 'var(--fnos-ui-btn-bg,rgba(90,120,200,.12))'; });
   return b;
 }
 
@@ -233,7 +233,7 @@ function refreshCard(): void {
 function buildCard(): HTMLElement {
   const block = document.createElement('div');
   block.id = 'fntv-logo-ctrl';
-  block.style.cssText = 'margin-top:18px;padding-top:14px;border-top:1px solid var(--fnos-ui-border,rgba(150,120,200,.14));'
+  block.style.cssText = 'margin-top:18px;padding-top:14px;border-top:1px solid var(--fnos-ui-border,rgba(90,120,200,.14));'
     + 'display:flex;flex-direction:column;';
 
   const title = document.createElement('div');
@@ -367,7 +367,7 @@ export function openPresetPanel(): void {
 
   const panel = document.createElement('div');
   panel.style.cssText = 'width:min(660px,calc(100vw - 80px));max-height:80vh;overflow:hidden;display:flex;flex-direction:column;'
-    + 'border-radius:18px;background:var(--fnos-ui-panel-bg,linear-gradient(165deg,rgba(252,247,253,.97),rgba(244,238,251,.98)));'
+    + 'border-radius:18px;background:var(--fnos-ui-panel-bg,linear-gradient(165deg,rgba(250,251,254,.97),rgba(240,243,250,.98)));'
     + 'color:var(--fnos-ui-text,#4a3d63);box-shadow:0 18px 50px rgba(80,60,120,.30),inset 0 0 0 1px rgba(255,255,255,.22);';
 
   // 头部
@@ -379,7 +379,7 @@ export function openPresetPanel(): void {
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.textContent = '✕';
-  closeBtn.style.cssText = 'border:none;cursor:pointer;background:var(--fnos-ui-btn-bg,rgba(150,120,200,.12));color:var(--fnos-ui-btn-text2,#7a6a9a);'
+  closeBtn.style.cssText = 'border:none;cursor:pointer;background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-btn-text2,#5a6480);'
     + 'width:30px;height:30px;border-radius:9px;font-size:14px;font-weight:700;';
   closeBtn.addEventListener('click', () => closePresetPanel());
   head.appendChild(htitle);
@@ -430,7 +430,7 @@ export function openPresetPanel(): void {
   for (const g of groups) {
     const secT = document.createElement('div');
     secT.textContent = g;
-    secT.style.cssText = 'font-size:11.5px;font-weight:600;letter-spacing:.4px;color:var(--fnos-ui-sec,#9575cd);margin:8px 0 8px;';
+    secT.style.cssText = 'font-size:11.5px;font-weight:600;letter-spacing:.4px;color:var(--fnos-ui-sec,#4a6fd4);margin:8px 0 8px;';
     scroll.appendChild(secT);
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px;';
@@ -455,7 +455,7 @@ export function openPresetPanel(): void {
       nm.title = p.lightBody ? '白色主体 logo，适合深色背景' : p.name;
       chip.appendChild(img);
       chip.appendChild(nm);
-      if (p.id === curId) chip.style.borderColor = 'var(--fnos-ui-accent,#b79be8)';
+      if (p.id === curId) chip.style.borderColor = 'var(--fnos-ui-accent,#6d7ff2)';
       chip.addEventListener('mouseenter', () => { chip.style.transform = 'translateY(-1px)'; });
       chip.addEventListener('mouseleave', () => { chip.style.transform = ''; });
       chip.addEventListener('click', () => {
@@ -464,7 +464,7 @@ export function openPresetPanel(): void {
         applyLogoToDom();
         refreshCard();
         for (const el of Array.from(grid.children) as HTMLElement[]) el.style.borderColor = 'transparent';
-        chip.style.borderColor = 'var(--fnos-ui-accent,#b79be8)';
+        chip.style.borderColor = 'var(--fnos-ui-accent,#6d7ff2)';
         updatePreview(p);
         if (_closeTimer) clearTimeout(_closeTimer);
         _closeTimer = window.setTimeout(() => { _closeTimer = 0; closePresetPanel(); }, 550);

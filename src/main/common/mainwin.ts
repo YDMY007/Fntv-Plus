@@ -137,7 +137,7 @@ const ACRYLIC_CSS = `
     .fnos-tv-page body{
         min-height:100vh!important;
         border-radius:16px!important;
-        background:rgba(250,244,250, var(--fnos-alpha,0.68))!important;
+        background:rgba(246,248,253, var(--fnos-alpha,0.68))!important;
         font-family:'Segoe UI Variable','Segoe UI',system-ui,-apple-system,sans-serif!important;
         -webkit-font-smoothing:antialiased!important;
     }
@@ -321,7 +321,7 @@ const ACRYLIC_CSS = `
        v377: 几乎完全透明, 只保留微量模糊防文字抖动. 与下方 body 亚克力无缝衔接 */
     div.relative.z-20.flex.items-center.justify-between.px-11.py-5{
         height:80px!important;
-        background:rgba(250,244,250,.015)!important;
+        background:rgba(246,248,253,.015)!important;
         backdrop-filter:blur(12px) saturate(105%)!important;
         -webkit-backdrop-filter:blur(12px) saturate(105%)!important;
         border:none!important;
@@ -364,8 +364,8 @@ const ACRYLIC_CSS = `
     }
     .fixed.inset-0[class*="lg:!hidden"] > *:not(.absolute){
         background:linear-gradient(160deg,
-            rgba(250,244,250,.56) 0%,
-            rgba(243,238,247,.60) 100%)!important;
+            rgba(246,248,253,.56) 0%,
+            rgba(238,242,250,.60) 100%)!important;
         backdrop-filter:blur(56px) saturate(135%) brightness(1.02)!important;
         -webkit-backdrop-filter:blur(56px) saturate(135%) brightness(1.02)!important;
         border-right:1px solid rgba(255,255,255,.5)!important;
@@ -462,7 +462,7 @@ const ACRYLIC_CSS = `
             -8px 0 32px rgba(0,0,0,.30)!important;
     }
     html.dark .fixed.inset-0[class*="lg:!hidden"] [class*="rounded"]:hover{
-        background:rgba(150,120,200,.20)!important;
+        background:rgba(90,120,200,.20)!important;
         box-shadow:inset 0 0 0 1px rgba(180,160,220,.35)!important;
     }
     html.dark .card-root,

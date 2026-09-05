@@ -22,9 +22,9 @@ interface FnosDialogPayload {
 
 const ICON: Record<string, { chr: string; color: string }> = {
     info: { chr: 'ℹ', color: '#5b8def' },
-    question: { chr: '?', color: '#8b6fd1' },
+    question: { chr: '?', color: '#6d7ff2' },
     error: { chr: '⚠', color: '#e06a5b' },
-    none: { chr: '', color: '#8b6fd1' },
+    none: { chr: '', color: '#6d7ff2' },
 };
 
 ipcRenderer.on('fnos-dialog:open', (_event: any, payload: FnosDialogPayload) => {
@@ -50,7 +50,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     overlay.style.cssText = [
         'position:fixed', 'inset:0', 'z-index:2147483647',
         'display:flex', 'align-items:center', 'justify-content:center',
-        'background:rgba(28,20,40,.38)',
+        'background:rgba(22,26,44,.38)',
         'backdrop-filter:blur(4px)', '-webkit-backdrop-filter:blur(4px)',
         'opacity:0', 'transition:opacity .18s ease',
         'font-family:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,sans-serif',
@@ -60,11 +60,11 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     card.setAttribute('data-fnos-ui', '1');
     card.style.cssText = [
         'position:relative', 'min-width:420px', 'max-width:600px', 'width:90%',
-        'background:rgba(252,247,253,.97)!important',
+        'background:linear-gradient(165deg,rgba(250,251,254,.97),rgba(240,243,250,.98))!important',
         'backdrop-filter:blur(30px) saturate(135%)', '-webkit-backdrop-filter:blur(30px) saturate(135%)',
         'border-radius:16px',
-        'box-shadow:0 18px 50px rgba(80,60,110,.28), inset 0 1px 0 rgba(255,255,255,.7)',
-        'padding:24px 24px 18px', 'color:#3a2d4d',
+        'box-shadow:0 18px 50px rgba(40,52,110,.26), inset 0 0 0 1px rgba(255,255,255,.6), inset 0 1px 0 rgba(255,255,255,.85)',
+        'padding:24px 24px 18px', 'color:#2f3550',
         'transform:scale(.96)', 'transition:transform .18s cubic-bezier(.22,.61,.36,1)',
     ].join(';') + ';';
 
@@ -83,7 +83,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
         header.appendChild(ic);
     }
     const title = document.createElement('div');
-    title.style.cssText = 'font-size:17px;font-weight:700;color:#2e2340;line-height:1.3;';
+    title.style.cssText = 'font-size:17px;font-weight:700;color:#262c44;line-height:1.3;';
     title.textContent = payload.title || '';
     header.appendChild(title);
     card.appendChild(header);
@@ -91,16 +91,16 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     // 主体
     if (payload.message) {
         const msg = document.createElement('div');
-        msg.style.cssText = 'font-size:14px;color:#4a3d5e;line-height:1.55;margin-bottom:6px;white-space:pre-line;';
+        msg.style.cssText = 'font-size:14px;color:#3d445e;line-height:1.55;margin-bottom:6px;white-space:pre-line;';
         msg.textContent = payload.message;
         card.appendChild(msg);
     }
     if (payload.detail) {
         const detail = document.createElement('div');
         detail.style.cssText = [
-            'font-size:12.5px', 'color:#7a6e8e', 'line-height:1.6',
+            'font-size:12.5px', 'color:#737d99', 'line-height:1.6',
             'max-height:180px', 'overflow-y:auto', 'white-space:pre-line',
-            'background:rgba(255,255,255,.5)!important',
+            'background:rgba(255,255,255,.55)!important',
             'border-radius:10px', 'padding:10px 12px', 'margin-bottom:6px',
         ].join(';') + ';';
         detail.textContent = payload.detail;
@@ -112,7 +112,7 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
         const mdWrap = document.createElement('div');
         mdWrap.style.cssText = [
             'max-height:380px', 'overflow-y:auto',
-            'background:rgba(255,255,255,.5)!important',
+            'background:rgba(255,255,255,.55)!important',
             'border-radius:10px', 'padding:6px 12px', 'margin-bottom:6px',
         ].join(';') + ';';
         mdWrap.innerHTML = renderMarkdown(payload.markdown);
@@ -123,11 +123,11 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     let checked = !!payload.checkboxChecked;
     if (payload.checkboxLabel) {
         const wrap = document.createElement('label');
-        wrap.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12.5px;color:#6a5e7e;margin-top:8px;cursor:pointer;user-select:none;';
+        wrap.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12.5px;color:#5a6480;margin-top:8px;cursor:pointer;user-select:none;';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = checked;
-        cb.style.cssText = 'width:15px;height:15px;accent-color:#8b6fd1;';
+        cb.style.cssText = 'width:15px;height:15px;accent-color:#6d7ff2;';
         cb.addEventListener('change', () => { checked = cb.checked; });
         const txt = document.createElement('span');
         txt.textContent = payload.checkboxLabel;
@@ -145,13 +145,13 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
         const isDefault = index === defaultId;
         const btn = document.createElement('button');
         btn.style.cssText = [
-            'border:' + (isDefault ? 'none' : '1px solid rgba(139,111,209,.45)'),
-            'background:' + (isDefault ? 'linear-gradient(135deg,#9b7fe0,#7d5fc9)' : 'rgba(255,255,255,.6)'),
-            'color:' + (isDefault ? '#fff' : '#5a4a7a'),
+            'border:' + (isDefault ? 'none' : '1px solid rgba(109,127,242,.45)'),
+            'background:' + (isDefault ? 'linear-gradient(135deg,#6d7ff2,#8a63e8)' : 'rgba(255,255,255,.6)'),
+            'color:' + (isDefault ? '#fff' : '#3d4a6e'),
             'font-size:13px', 'font-weight:600',
             'padding:9px 18px', 'border-radius:10px', 'cursor:pointer', 'outline:none',
             'transition:transform .12s ease, box-shadow .12s ease',
-            'box-shadow:' + (isDefault ? '0 6px 16px rgba(125,95,201,.4)' : 'none'),
+            'box-shadow:' + (isDefault ? '0 6px 16px rgba(109,127,242,.4)' : 'none'),
         ].join(';') + ';';
         btn.textContent = label;
         btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-1px)'; });

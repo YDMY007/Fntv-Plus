@@ -179,10 +179,10 @@ function makeBtn(): HTMLButtonElement {
   btn.setAttribute('title', '从 TMDB 拉取本季每集的标题/简介，回填到飞牛（中文 > 英文 > 无数据）');
   btn.style.cssText = 'display:inline-flex;align-items:center;margin-left:9px;padding:3px 10px;border-radius:999px;'
     + 'font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;'
-    + 'background:var(--fnos-ui-btn-bg,rgba(150,120,200,.12));color:var(--fnos-ui-accent,#8b6fd0);'
+    + 'background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-accent,#6d7ff2);'
     + 'border:none;transition:background .15s,color .15s;flex-shrink:0;';
-  btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--fnos-ui-btn-hover,rgba(183,155,232,.32))'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = 'var(--fnos-ui-btn-bg,rgba(150,120,200,.12))'; });
+  btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--fnos-ui-btn-hover,rgba(109,127,242,.32))'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = 'var(--fnos-ui-btn-bg,rgba(90,120,200,.12))'; });
   btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); void runBackfill(btn); });
   return btn;
 }

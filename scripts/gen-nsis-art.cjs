@@ -23,7 +23,7 @@ const sharedCss = `
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; overflow:hidden; }
   .stage { position:relative; overflow:hidden;
-    background:linear-gradient(165deg,#f8f3fc 0%,#efe6f8 52%,#e6daf5 100%); }
+    background:linear-gradient(165deg,#f7f9fd 0%,#eef1fa 52%,#e3e9f6 100%); }
   .blob { position:absolute; border-radius:50%; filter:blur(2px); }
   .b1 { background:radial-gradient(circle at 35% 35%, rgba(150,120,200,.42), rgba(150,120,200,0) 70%); }
   .b2 { background:radial-gradient(circle at 60% 40%, rgba(148,196,236,.36), rgba(148,196,236,0) 70%); }
@@ -33,10 +33,10 @@ const sharedCss = `
     border:1px solid rgba(255,255,255,.65);
     box-shadow:0 10px 28px rgba(91,60,160,.16), inset 0 1px 0 rgba(255,255,255,.9); }
   .logo { object-fit:contain; }
-  .name { font-weight:800; color:#4a3d63; letter-spacing:.4px; }
-  .sub  { font-weight:600; color:#7a6a9a; }
-  .orb  { border-radius:50%; background:linear-gradient(135deg,#ff6b35,#f7418f,#c94bcb);
-          box-shadow:0 6px 18px rgba(247,65,143,.38), inset 0 1px 0 rgba(255,255,255,.5); }
+  .name { font-weight:800; color:#2f3550; letter-spacing:.4px; }
+  .sub  { font-weight:600; color:#5a6480; }
+  .orb  { border-radius:50%; background:linear-gradient(135deg,#6d7ff2,#8a63e8);
+          box-shadow:0 6px 18px rgba(109,127,242,.38), inset 0 1px 0 rgba(255,255,255,.5); }
 `;
 
 const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -52,9 +52,9 @@ const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="ut
   .sub { font-size:8.5px; text-align:center; line-height:1.5; }
   .orb { width:30px; height:30px; position:absolute; right:16px; bottom:22px; }
   .tag { position:absolute; left:0; right:0; bottom:12px; text-align:center;
-         font-size:8.5px; color:#9385ad; letter-spacing:1.2px; }
+         font-size:8.5px; color:#8a93ad; letter-spacing:1.2px; }
   .badge { position:absolute; top:34px; left:14px; right:14px; text-align:center;
-           font-size:10.5px; font-weight:800; color:${uninstall ? '#b3564d' : '#7d5fc9'}; letter-spacing:2.5px; }
+           font-size:10.5px; font-weight:800; color:${uninstall ? '#b3564d' : '#4a5fd0'}; letter-spacing:2.5px; }
 </style></head><body>
   <div class="stage">
     <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
@@ -98,12 +98,12 @@ const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf
   .name { font-size:21px; }
   .sub { font-size:11.5px; text-align:center; line-height:1.6; }
   .badge { position:absolute; top:26px; left:0; right:0; text-align:center;
-           font-size:12px; font-weight:800; color:${uninstall ? '#b3564d' : '#7d5fc9'}; letter-spacing:4px; }
+           font-size:12px; font-weight:800; color:${uninstall ? '#b3564d' : '#4a5fd0'}; letter-spacing:4px; }
   .orb { width:44px; height:44px; position:absolute; left:50%; transform:translateX(-50%); bottom:34px; }
   .orb::after { content:''; position:absolute; inset:-9px; border-radius:50%;
-                border:1.5px solid rgba(247,65,143,.35); border-radius:50%; }
+                border:1.5px solid rgba(109,127,242,.35); border-radius:50%; }
   .tag { position:absolute; left:0; right:0; bottom:12px; text-align:center;
-         font-size:9px; color:#9385ad; letter-spacing:3px; }
+         font-size:9px; color:#8a93ad; letter-spacing:3px; }
 </style></head><body>
   <div class="stage">
     <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>

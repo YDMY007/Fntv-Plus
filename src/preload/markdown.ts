@@ -95,18 +95,18 @@ export function renderMarkdown(md: string): string {
 // 同 embyWall.md-body 样式，统一维护（弹窗卡片内独立生效，浅色亚克力底色适配）。
 export const MD_BODY_CSS = `
 .md-body{font-size:13px;line-height:1.7;color:#3a2d4d;word-break:break-word;}
-.md-body h1{font-size:18px;font-weight:700;margin:12px 0 8px;color:#2e2340;border-bottom:1px solid rgba(139,111,209,.22);padding-bottom:6px;}
-.md-body h2{font-size:15.5px;font-weight:700;margin:12px 0 6px;color:#2e2340;}
+.md-body h1{font-size:18px;font-weight:700;margin:12px 0 8px;color:#262c44;border-bottom:1px solid rgba(109,127,242,.22);padding-bottom:6px;}
+.md-body h2{font-size:15.5px;font-weight:700;margin:12px 0 6px;color:#262c44;}
 .md-body h3{font-size:14px;font-weight:600;margin:10px 0 5px;color:#3a2d4d;}
 .md-body h4{font-size:13px;font-weight:600;margin:8px 0 4px;color:#3a2d4d;}
 .md-body p{margin:6px 0;}
 .md-body ul,.md-body ol{margin:6px 0;padding-left:20px;}
 .md-body li{margin:3px 0;}
-.md-body code{background:rgba(139,111,209,.12);padding:1px 5px;border-radius:4px;font-family:Consolas,Menlo,monospace;font-size:12px;color:#5a3ec0;}
-.md-body pre{background:rgba(46,35,64,.06);border:1px solid rgba(139,111,209,.18);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:6px 0;}
+.md-body code{background:rgba(109,127,242,.12);padding:1px 5px;border-radius:4px;font-family:Consolas,Menlo,monospace;font-size:12px;color:#3d55c8;}
+.md-body pre{background:rgba(40,48,84,.06);border:1px solid rgba(109,127,242,.18);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:6px 0;}
 .md-body pre code{background:none;padding:0;color:#3a2d4d;white-space:pre;}
-.md-body blockquote{margin:6px 0;padding:5px 11px;border-left:3px solid rgba(139,111,209,.4);background:rgba(139,111,209,.06);color:#5a4d6e;}
+.md-body blockquote{margin:6px 0;padding:5px 11px;border-left:3px solid rgba(109,127,242,.4);background:rgba(109,127,242,.06);color:#5a6480;}
 .md-body a{color:#7c4dff;text-decoration:underline;}
-.md-body hr{border:none;border-top:1px solid rgba(139,111,209,.22);margin:10px 0;}
+.md-body hr{border:none;border-top:1px solid rgba(109,127,242,.22);margin:10px 0;}
 .md-body strong{font-weight:700;}
 `;
