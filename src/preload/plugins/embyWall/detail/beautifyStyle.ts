@@ -309,6 +309,7 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
 .fnos-detail-backdrop{
   position:fixed !important; inset:0 !important; z-index:-1 !important;
   pointer-events:none !important; overflow:hidden !important;
+  border-radius:16px !important; /* [lc-1025] 四角随窗口圆角：light 主题 __scrim 顶部近白，方形角会露白边 */
   transition:opacity .34s ease !important;
 }
 .fnos-detail-backdrop.is-leaving{ opacity:0 !important; }
@@ -332,6 +333,7 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
   position:fixed !important; inset:0 !important; z-index:2147483000 !important;
   display:flex !important; align-items:center !important; justify-content:center !important;
   background:var(--semi-color-bg-0,#0b0b0f) !important;
+  border-radius:16px !important; /* [lc-1025] 进详情瞬间的全窗实心层，四角随窗口圆角 */
   transition:opacity .32s ease !important; overflow:hidden !important;
 }
 .fnos-instant-layer.is-hiding{ opacity:0 !important; pointer-events:none !important; }

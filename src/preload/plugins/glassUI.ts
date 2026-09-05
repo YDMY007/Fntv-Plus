@@ -193,16 +193,14 @@ const GATE_CSS = `
     background-color: transparent !important;
   }
 
-  /* ①c [lc-1023] 防全透明底座（用户报障：开云母后整个软件背景全透明直透桌面）：
-     玻璃模式会清掉 body 亚克力与页面容器底色(①/①a/①b)，唯一兜底的 #fntv-glass-bg 是
-     position:fixed + z-index:-1 + 全屏大模糊 + 无限动画的合成重层，真机一旦整层画不出
-     (GPU/合成失败)窗口就 100% 透桌面、毫无垫底。故在 html 根上铺不透明环境底色 ——
-     根背景是整棵树第 1 个作画的层(z-index:-1 动态层与所有内容都在其上)，任何上层失效
-     最多退化为纯色 Mica，绝不全透。Win11 Mica 本就是近实心材质，透桌面是
-     「背景层: 无」选项的职责，不该在环境光模式下被动发生。 */
-  html[data-fntv-glass][data-fntv-glass-bg="fluid"].fnos-tv-page {
-    background: var(--fntv-amb-base, #eef0f7) !important;
-  }
+  /* ①c [lc-1025] 防全透明底座 v2 —— 从 html 画布挪到 #fntv-glass-bg 本体。
+     [lc-1023] 曾把底色铺在 html 根上：根元素背景会**传播到画布**且画布背景恒为方形、
+     不受 html 的 border-radius/clip-path 裁剪 → 窗口 16px 圆角的四角弧外露出底色
+     （浅色主题 #eef0f7 = 用户报障的「左上/右上角细白边」）。画布背景无法圆角，
+     ∴ 底座改铺在 #fntv-glass-bg 本体：它本就是 position:fixed 圆角层（见 ③），
+     自带实心底后，即便动画流体子层整层失效也仍有纯色 Mica 垫底（lc-1023 的
+     46px 大模糊已移除，本层现为无滤镜无动画的最简 div，不存在当年的失效面）。
+     「背景层: 无」(bg=none) 时该层整个不创建，透桌面语义不变。 */
 
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
@@ -241,7 +239,10 @@ const GATE_CSS = `
   /* [lc-1012] 旧「浅色模式白磨砂特例」已删：tint/环境光/sheen 全部跟随 html.dark 双套自适应,
      一套规则覆盖明暗两主题（浅色 = 白玻璃, 深色 = 深玻璃）。 */
 
-  /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1） */
+  /* ③ 背景层 / 粒子层：固定铺满、置于内容之下（z-index:-1）
+     [lc-1025] 四角必须跟随窗口 16px 圆角：这些层几何上都是全窗方形，若不圆角，
+     弧外四角会露出层本色（玻璃暗角/噪点颗粒/粒子点）。html 的 clip-path 会裁
+     普通流与 fixed 后代，但底色画在层上就该自己圆角，不依赖那份兜底。 */
   #fntv-glass-bg, #fntv-glass-particles {
     position: fixed !important;
     inset: 0 !important;
@@ -252,8 +253,13 @@ const GATE_CSS = `
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
+    border-radius: 16px !important;
   }
-  #fntv-glass-bg { overflow: hidden !important; }
+  /* [lc-1025] 底座实心底（①c）：ID 特异性 (1,0,0) 压过 ①b 的 body>div 透明化 (0,2,3)。 */
+  #fntv-glass-bg {
+    overflow: hidden !important;
+    background: var(--fntv-amb-base, #eef0f7) !important;
+  }
   #fntv-glass-bg > * {
     position: absolute !important;
     inset: 0 !important;
@@ -272,7 +278,12 @@ const GATE_CSS = `
       var(--fntv-amb-base) !important;
     /* [lc-1023] 去掉 46px 全屏高斯模糊：radial 渐变止点(60%+ 处才触透明)本身已极软，
        大模糊让整层变成全屏高斯合成重层 —— 真机整层画不出的头号嫌疑 + 持续 GPU 烧灼，
-       软度交给渐变曲线本身。 */
+       软度交给渐变曲线本身。
+       [lc-1025] 亮度滑杆从父层 inline filter 挪到这里（CSS 变量驱动）：父层 #fntv-glass-bg
+       现承载底座实心底，必须保持零 filter/零动画的最简形态——任何 filter 都会让它变成
+       合成层，重蹈 lc-1023「复杂层画不出」的覆辙。代价仅是底座在子层失效的极端场景下
+       不跟随亮度滑杆（纯色退化态，可接受）。 */
+    filter: brightness(var(--fntv-glass-bright, 1)) !important;
     transform: scale(1.1) !important;
     animation: fntvAmbient calc(36s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite alternate !important;
   }
@@ -293,6 +304,7 @@ const GATE_CSS = `
     height: 100% !important;
     z-index: 2147482900 !important;
     pointer-events: none !important;
+    border-radius: 16px !important; /* [lc-1025] 四角随窗口圆角，颗粒不铺到弧外 */
     opacity: 0.026 !important;
     mix-blend-mode: overlay !important;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") !important;
@@ -378,7 +390,8 @@ function buildBgLayer(s: GlassSettings): void {
   if (!s.enabled || s.bg === 'none') return; // none：保留桌面透出，不加背景层
   const layer = document.createElement('div');
   layer.id = 'fntv-glass-bg';
-  layer.style.filter = `brightness(${(s.bright / 100).toFixed(3)})`;
+  // [lc-1025] 亮度不再挂父层 inline filter（挪到流体子层的 --fntv-glass-bright），
+  // 父层保持零 filter/零动画的最简实心底座形态（理由见 ③ 段 CSS 头注）。
 
   // 背景层仅保留流体动态（壁纸/视频已移除）；其余取值统一回落为流体
   const fluid = document.createElement('div');
@@ -546,6 +559,8 @@ function applyGlass(): void {
 
     // 流体动画速度倍率（>1 更快，<1 更慢）
     root.style.setProperty('--fntv-glass-fluid-speed', String(s.fluidSpeed));
+    // [lc-1025] 背景亮度：驱动流体子层的 brightness（父层底座不再挂 filter，见 ③ 段头注）
+    root.style.setProperty('--fntv-glass-bright', String(s.bright / 100));
 
     // 浅色模式检测：取 .fnos-tv-page 或 body 的背景亮度，亮底时自动弱化边框+阴影（避免"画线"感）
     const isLight = detectLightMode();
