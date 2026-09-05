@@ -1052,6 +1052,9 @@ body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]:hover{
    无卡 600px；有卡 1020px（:has 门控）。⚠ 整串精确类名（无 gap-4）与文件信息区区分。 */
 body.fnos-movie-panel ${MOVIE_PANEL}{
   position:absolute !important;
+  /* [lc-1031] min-height 让 TMDB 卡(absolute, top/bottom:16)不再被简短简介锁成矮条：
+     电影简介常只有一两行，面板随之只剩 ~150px，卡内容被裁得只剩评分+meta。 */
+  min-height:320px !important;
   /* [lc-1028] top 锚定而非 bottom：Series 页面板是 col 末子节点（bottom:18=贴首屏底），
      电影页 col 在面板之后还有演职人员/文件信息（折叠线下延伸），col 底远在视口外——
      bottom 会把面板锚到视窗外（首版真机截画面板消失的根因）。top = 100vh - 32(body
@@ -1145,40 +1148,56 @@ html[data-fntv-glass] body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::befo
   backdrop-filter:blur(18px) saturate(1.2);
   -webkit-backdrop-filter:blur(18px) saturate(1.2);
 }
-/* P2. 聚簇面板 → 玻璃色板中性磨砂（去 brightness 压暗；协调性靠 tint+blur 不靠暗化） */
+/* P2. [lc-1031] 聚簇材质极性跟**海报明暗**走（不跟主题——面板的实际观感由 blur 背后的
+   海报决定，浅色主题+深海报的组合下白磨砂+深字会看不清，用户实拍翻车）：
+   · 暗海报（默认，heroTint 实测均亮 <0.5）→ 取色深磨砂 rgba(tint,.32) + brightness(.86)
+     压暗 + 浅字（N/O 原极性；tint 与海报同色系 = 自动取色）；
+   · 亮海报（body[data-fntv-hero-bright=1]，heroTint 全图平均感知亮度 ≥0.5）→ 白磨砂
+     无压暗 + 深字（P3）。 */
 html[data-fntv-glass] body.fnos-series-panel ${SERIES_PANEL},
 html[data-fntv-glass] body.fnos-movie-panel ${MOVIE_PANEL}{
+  background:linear-gradient(160deg,
+    rgba(255,255,255,.06) 0%,
+    rgba(255,255,255,.015) 45%,
+    rgba(255,255,255,.005) 100%),
+    rgba(var(--fnos-hero-tint, 25,25,26), .32) !important;
+  backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
+  -webkit-backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
+  box-shadow:0 18px 54px rgba(0,0,0,.24) !important;
+}
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL},
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL}{
   background:linear-gradient(160deg,
     rgba(255,255,255,.10) 0%,
     rgba(255,255,255,.03) 45%,
     rgba(255,255,255,.012) 100%),
-    rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), .38) !important;
+    rgba(255,255,255,.38) !important;
   backdrop-filter:blur(26px) saturate(155%) !important;
   -webkit-backdrop-filter:blur(26px) saturate(155%) !important;
   box-shadow:0 18px 54px rgba(0,0,0,.16) !important;
 }
-/* P3. 玻璃**浅色**主题：面板文字翻深（Semi 变量 + N6/O6 显式白字 + 季卡文本 + 阴影移除）；
-   深色玻璃（html.dark）不匹配本条，维持 N/O 段的浅色文字与阴影 */
-html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL},
-html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL}{
+/* P3. 文字极性随海报：亮海报 → 面板 Semi 变量翻深 + N6/O6 显式白字翻深 + 季卡文本翻深
+   + 移除白字阴影；暗海报不匹配 = N/O 原浅字与阴影 */
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL},
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL}{
   --semi-color-text-0:rgba(28,28,30,.92);
   --semi-color-text-1:rgba(28,28,30,.72);
   --semi-color-text-2:rgba(28,28,30,.58);
   --semi-color-text-3:rgba(28,28,30,.42);
 }
-html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"],
-html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"],
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
   color:rgba(28,28,30,.88) !important; text-shadow:none !important;
 }
-html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} [data-id="details"] p{
   color:rgba(28,28,30,.9) !important; text-shadow:none !important;
 }
-html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p + p{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} [data-id="details"] p + p{
   color:rgba(28,28,30,.55) !important;
 }
-/* P4. 卡滚动条在浅磨砂上改深色可见 */
-html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card,
-html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+/* P4. 亮海报浅磨砂上卡滚动条改深色可见 */
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card,
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
   scrollbar-color:rgba(0,0,0,.22) transparent !important;
 }
 `;

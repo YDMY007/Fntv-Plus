@@ -40,6 +40,12 @@ import { findHeroBackdropImg, findActiveDetailView, findDetailHero } from './gla
 
 /** 写出的 CSS 变量名。L 段的两处渐变都以 var(--fnos-hero-tint, 25,25,26) 消费。 */
 const TINT_VAR = '--fnos-hero-tint';
+/** [lc-1031] 海报明暗标记（body[data-fntv-hero-bright]）。P 段的玻璃聚簇材质/文字极性消费：
+ *  亮海报→白磨砂+深字，暗海报→取色深磨砂+浅字。面板的实际观感由 blur 背后的海报决定，
+ *  极性必须跟海报走，跟主题走会在「浅色主题+深海报」组合下翻车（用户实拍：深底深字看不清）。 */
+const BRIGHT_ATTR = 'data-fntv-hero-bright';
+/** 明暗分界：感知亮度 (0.299R+0.587G+0.114B)/255 ≥ 0.5 视为亮海报。 */
+const BRIGHT_LUM = 0.5;
 /** canvas 采样边长。1024 像素足够把主色桶定住，drawImage + getImageData 是微秒级。 */
 const SAMPLE = 32;
 /** 亮度上限（0..1）。
@@ -56,6 +62,7 @@ type Bucket = { n: number; r: number; g: number; b: number };
 /** 上一次算过的图与结果。按 currentSrc 幂等 → SPA 内来回切同一页不重复采样。 */
 let _cacheSrc: string | null = null;
 let _cacheTint: string | null = null;
+let _cacheLum: number | null = null;
 /** 已挂了 load 监听的图，防止 immersive 的重试链在同一张图上重复挂。 */
 let _pendingImg: HTMLImageElement | null = null;
 
@@ -90,8 +97,11 @@ function hsl2rgb(h: number, s: number, l: number): [number, number, number] {
   return [Math.round((rp + m) * 255), Math.round((gp + m) * 255), Math.round((bp + m) * 255)];
 }
 
-/** 从剧照取主色并暗化，返回 "R,G,B"；任何一步拿不到就返回 null（交 CSS fallback 降级）。 */
-function tintFromImage(img: HTMLImageElement): string | null {
+/** 从剧照取主色并暗化，返回 tint("R,G,B") 与全图平均感知亮度 lum(0..1)；
+ *  任何一步拿不到就返回 null（交 CSS fallback 降级）。
+ *  [lc-1031] lum 用**全图平均**而非主色桶——亮度感知要的是整张图的明暗印象，
+ *  主色桶只代表最大色块（大片高光会把桶亮度抬得很高，与整图观感不符）。 */
+function tintFromImage(img: HTMLImageElement): { tint: string; lum: number } | null {
   const cv = document.createElement('canvas');
   cv.width = SAMPLE; cv.height = SAMPLE;
   const cx = cv.getContext('2d', { willReadFrequently: true });
@@ -105,10 +115,12 @@ function tintFromImage(img: HTMLImageElement): string | null {
   // 直接平均会得到一个谁也不是的中间灰，丢掉「这张封面是什么色调」的信息。
   const buckets = new Map<number, Bucket>();
   let used = 0;
+  let lumSum = 0;
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] < 16) continue;            // 跳过近透明像素
     used++;
     const r = data[i], g = data[i + 1], b = data[i + 2];
+    lumSum += (0.299 * r + 0.587 * g + 0.114 * b) / 255;
     const k = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
     let e = buckets.get(k);
     if (!e) { e = { n: 0, r: 0, g: 0, b: 0 }; buckets.set(k, e); }
@@ -121,7 +133,7 @@ function tintFromImage(img: HTMLImageElement): string | null {
 
   const [h, s, l] = rgb2hsl(best.r / best.n, best.g / best.n, best.b / best.n);
   const tint = l <= L_CAP ? hsl2rgb(h, s, l) : hsl2rgb(h, s, L_CAP);
-  return tint[0] + ',' + tint[1] + ',' + tint[2];
+  return { tint: tint[0] + ',' + tint[1] + ',' + tint[2], lum: lumSum / used };
 }
 
 /** 给当前 hero 算出封面 tint 并写进 body 的 CSS 变量。幂等；失败静默。
@@ -134,6 +146,7 @@ export function applyHeroTint(hero: HTMLElement): void {
 
   if (_cacheSrc === src && _cacheTint) {
     document.body.style.setProperty(TINT_VAR, _cacheTint);
+    if (_cacheLum !== null) document.body.setAttribute(BRIGHT_ATTR, _cacheLum >= BRIGHT_LUM ? '1' : '0');
     return;
   }
 
@@ -152,18 +165,21 @@ export function applyHeroTint(hero: HTMLElement): void {
     return;
   }
 
-  const tint = tintFromImage(img);
-  if (!tint) return;
+  const res = tintFromImage(img);
+  if (!res) return;
   _cacheSrc = src;
-  _cacheTint = tint;
-  document.body.style.setProperty(TINT_VAR, tint);
-  dlog('beautify: hero tint=' + tint + ' src=' + src.slice(-28));
+  _cacheTint = res.tint;
+  _cacheLum = res.lum;
+  document.body.style.setProperty(TINT_VAR, res.tint);
+  document.body.setAttribute(BRIGHT_ATTR, res.lum >= BRIGHT_LUM ? '1' : '0');
+  dlog('beautify: hero tint=' + res.tint + ' lum=' + res.lum.toFixed(2) + ' src=' + src.slice(-28));
 }
 
 /** 摘掉 tint 变量（离开详情页 / 关闭美化 / 换页软复位）。O(1)。
  *  刻意保留 _cacheSrc/_cacheTint：按 src 幂等，回到同一页时可秒出，不必重新采样。 */
 export function clearHeroTint(): void {
   document.body.style.removeProperty(TINT_VAR);
+  document.body.removeAttribute(BRIGHT_ATTR);
   _pendingImg = null;
 }
 
