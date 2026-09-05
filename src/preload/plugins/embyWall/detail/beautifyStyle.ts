@@ -742,6 +742,28 @@ body.fnos-series-panel div[class*="h-[80px]"][class*="top-0"]::before{
 body.fnos-series-panel div[class*="h-[80px]"][class*="top-0"] svg{
   filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
 }
+/* N2c [lc-1024] 标题栏(最顶 32px 窗口控制条)随顶栏一并全透 + 海报顶满窗口。
+   用户报障：「打开一级详情页时，最顶上的控制栏一横条颜色不对很突兀」。
+   根因：M 段给详情页标题栏铺的实色 tint 条是为二级页设计的 —— 彼处 L 段顶栏玻璃条
+   首行 alpha 恰为 1，y=31/32 两行对任意 x 恒等(接缝 1.0000)；本页顶栏已被 N2b 全透，
+   M 条孤悬在满屏海报上方，条色(封面取色的暗色调)与海报顶部像素无关 → 读作一条异物。
+   若只摘条不补图，y=0..31 露的是 body 近白亚克力(非玻璃态)/桌面·环境光底(玻璃态)，
+   依旧是一条横带。∴ 摘条 + 海报上提 32px 吃满安全区(height 100vh + margin-top:-32px)，
+   条区背后就是海报延续，整窗一张图真正满屏；窗口控制键沿用 M 段白色图标 +
+   N2b 同款 drop-shadow 保可读(与顶栏图标同待遇)。
+   几何零位移核算：btn row/panel 全部 bottom 锚定 wrapper/col 底(y=100vh)，hero 负 margin
+   只让其可见顶边上移(wrapper 高 = hero margin box 100vh-32 不变，hero 视觉溢出 wrapper 顶
+   32px，col/wrapper 均 overflow 可见)，悬浮聚簇位置一个像素都不动。 */
+body.fnos-series-panel #custom-titlebar[data-fntv-tb]::before{
+  content:none !important;
+}
+body.fnos-series-panel .trim-mc__details--key-version{
+  height:100vh !important;
+  margin-top:-32px !important;
+}
+body.fnos-series-panel #custom-titlebar[data-fntv-tb] button svg{
+  filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
+}
 /* N3. logo 上移到按钮行上方（18 面板底距 + 12 间隙 + 54 按钮行 + 16 间隙 = 挂在 var 上方 100px） */
 body.fnos-series-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"][class*="bottom-[30px]"]{
   bottom:calc(var(--fnos-cluster-h, 360px) + 100px) !important;
