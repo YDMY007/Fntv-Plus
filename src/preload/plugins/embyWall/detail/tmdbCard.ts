@@ -424,7 +424,11 @@ function handle(v: any): string {
 const STILL_MAX = 3;
 const IMG_BASE = 'https://image.tmdb.org/t/p/w500';
 
-export function buildCardHtml(d: any): string {
+/** fromStillsOnly：二级(季)页裁剪 [lc-1022]。一级详情页(lc-1010 放开)右栏已展示同一张 TMDB 卡的
+ *  完整内容，季页再渲染评分/标语/meta/事实/主创/本季就是整卡原样重复 → 用户指定只保留
+ *  「剧照」及以后的分节。一级页不传本开关，维持全量。 */
+export function buildCardHtml(d: any, opts?: { fromStillsOnly?: boolean }): string {
+  const full = !opts?.fromStillsOnly;
   const blocks: string[] = [];
   const inline = (list: any[], max = 8): string =>
     (Array.isArray(list) && list.length) ? esc(list.slice(0, max).filter(Boolean).join(' · ')) : '';
@@ -436,7 +440,7 @@ export function buildCardHtml(d: any): string {
     `<div class="fnos-showinfo__block fnos-showinfo__sec"><div class="fnos-showinfo__sec-t">${esc(title)}</div>${body}</div>`;
 
   // ① 评分块：右栏唯一的视觉锚。
-  if (d.rating) {
+  if (full && d.rating) {
     const r = Number(d.rating);
     const votes = d.votes
       ? `<span class="fnos-showinfo__votes">${esc(Number(d.votes).toLocaleString('zh-CN'))} 人评分</span>` : '';
@@ -449,7 +453,7 @@ export function buildCardHtml(d: any): string {
   }
 
   // ② 标语：TMDB tagline，一句话，比简介更早给出这部剧的调性。
-  if (d.tagline && String(d.tagline).trim() && d.tagline !== d.overview) {
+  if (full && d.tagline && String(d.tagline).trim() && d.tagline !== d.overview) {
     blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__tag">${esc(d.tagline)}</div>`);
   }
 
@@ -467,7 +471,7 @@ export function buildCardHtml(d: any): string {
     const hi = Number(d.runtimeMax) || Number(d.runtimeAvg);
     metaSub.push(lo !== hi && hi <= 90 ? ('单集 ' + lo + '–' + hi + ' 分') : ('单集 ' + runtime(Number(d.runtimeAvg))));
   }
-  if (metaMain.length || metaSub.length) {
+  if (full && (metaMain.length || metaSub.length)) {
     blocks.push(
       '<div class="fnos-showinfo__block fnos-showinfo__meta">'
       + (metaMain.length ? `<div>${esc(metaMain.join(' · '))}</div>` : '')
@@ -508,7 +512,7 @@ export function buildCardHtml(d: any): string {
   }
   // 原名降到事实区末行：日文/韩文原名常占两三行，放顶部会冲散评分块与 meta 串的节奏。
   if (d.originalTitle && d.originalTitle !== d.title) row('原名', esc(d.originalTitle));
-  if (rows.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__facts">${rows.join('')}</div>`);
+  if (full && rows.length) blocks.push(`<div class="fnos-showinfo__block fnos-showinfo__facts">${rows.join('')}</div>`);
 
   // ⑥ 主创：原生「演职人员」区实机确认只有配音演员（无导演/编剧分工），这里补齐不重复。
   //    cast 名单刻意不渲染 —— 那才真的和原生区撞车。
@@ -524,11 +528,11 @@ export function buildCardHtml(d: any): string {
   crow('制片', d.producers, 4);
   crow('设计', d.designers, 4);
   crow('制作', d.companies, 4);
-  if (crew.length) blocks.push(sec('主创', `<div class="fnos-showinfo__facts">${crew.join('')}</div>`));
+  if (full && crew.length) blocks.push(sec('主创', `<div class="fnos-showinfo__facts">${crew.join('')}</div>`));
 
   // ⑦ 本季：季详情单独一次请求取回（集数/首播/评分）。本季简介不再渲染——与顶部 hero 简介重复(lc-1006)。
   const sn = d.season;
-  if (sn && (sn.episodeCount || sn.airDate || sn.voteAverage)) {
+  if (full && sn && (sn.episodeCount || sn.airDate || sn.voteAverage)) {
     const bits: string[] = [];
     if (sn.episodeCount) bits.push(sn.episodeCount + ' 集');
     if (sn.airDate) bits.push('首播 ' + sn.airDate);
@@ -672,7 +676,9 @@ function _renderCard(): void {
   }
   _disarmMountRetry(); // 已挂上，重试链收队
   let body = '';
-  if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData);
+  // [lc-1022] 二级(季)页只渲染「剧照」以后的分节 —— 评分/标语/meta/事实/主创/本季与一级页右栏的
+  // 同一张卡逐字重复；一级页维持全量。
+  if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData, { fromStillsOnly: _isSeasonRoute() });
   else if (_tmdbInfoLoading) body = '<div class="fnos-showinfo__loading">正在从 TMDB 获取剧集信息…</div>';
   else if (_tmdbInfoError) body = `<div class="fnos-showinfo__error">${esc(_tmdbInfoError)}</div>`;
   const when = _tmdbInfoFetchedAt ? shortTime(_tmdbInfoFetchedAt) : '';
