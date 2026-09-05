@@ -2,6 +2,7 @@ import { ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { resolveMalId } from '../../../main/common/skipMalMap';
 import {
     BasePlayer,
     Config,
@@ -102,7 +103,7 @@ export class MpvPlayer extends BasePlayer {
             // [skip] 向 MPV 注入 theintrodb 兜底所需的元数据（guid -> tmdb/season/episode）
             // 必须在 loadPlaylistItems 之前发送，确保 smart_skip 脚本在 file-loaded 时已拿到映射
             try {
-                const skipMeta: Record<string, { tmdb: string; season?: number; episode?: number }> = {};
+                const skipMeta: Record<string, { tmdb: string; season?: number; episode?: number; mal?: number }> = {};
                 for (const it of infos) {
                     if (it.trimId) {
                         skipMeta[it.itemGuid] = {
@@ -115,6 +116,32 @@ export class MpvPlayer extends BasePlayer {
                 if (this.mpvInstance && Object.keys(skipMeta).length > 0) {
                     this.mpvInstance.command('script-message', ['skip-metadata', JSON.stringify(skipMeta)]);
                     log.debug('已发送 skip 元数据, 条目数:', Object.keys(skipMeta).length);
+                    // [lc-1059] AniSkip 需要 MAL id：后台跑标题映射链(Bangumi→Jikan/AniList, 缓存 30 天)，
+                    //   拿到后补发完整 skip-metadata(带 mal 字段)，Lua 端据此触发 AniSkip 兜底
+                    void (async () => {
+                        try {
+                            const malByTmdb = new Map<string, number>();
+                            for (const it of infos) {
+                                if (!it.trimId || !it.tvTitle || malByTmdb.has(it.trimId)) continue;
+                                const mal = await resolveMalId(it.trimId, it.tvTitle).catch(() => null);
+                                if (mal) malByTmdb.set(String(it.trimId).replace(/^tt/i, ''), mal);
+                            }
+                            if (malByTmdb.size === 0) return;
+                            let updated = 0;
+                            for (const key of Object.keys(skipMeta)) {
+                                const entry = skipMeta[key];
+                                const tmdb = String(entry.tmdb || '').replace(/^tt/i, '');
+                                const mal = malByTmdb.get(tmdb);
+                                if (mal) { entry.mal = mal; updated++; }
+                            }
+                            if (updated > 0 && this.mpvInstance) {
+                                this.mpvInstance.command('script-message', ['skip-metadata', JSON.stringify(skipMeta)]);
+                                log.info(`已补发 skip 元数据(含 MAL), 条目数: ${updated}`);
+                            }
+                        } catch (e) {
+                            log.warn('AniSkip MAL 映射失败:', e);
+                        }
+                    })();
                 }
             } catch (e) {
                 log.warn('发送 skip 元数据失败:', e);

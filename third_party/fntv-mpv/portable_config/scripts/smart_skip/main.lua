@@ -41,6 +41,9 @@ local DETECT_MODE = options.DETECT_MODE
 local skip_meta_map = {}
 local fnos_empty = false
 local pending_fallback = false
+local aniskip_intro_applied = false
+local aniskip_outro_applied = false
+local pending_aniskip = false
 
 -- 跳过按钮状态（enabled=no 时显示）
 local skip_btn = {
@@ -78,7 +81,7 @@ local function try_theintrodb_fallback()
 
         local intro = resp.intro and resp.intro[1]
         local credits = resp.credits and resp.credits[1]
-        if intro then
+        if intro and not aniskip_intro_applied then
             local s = (intro.start_ms and intro.start_ms / 1000) or 0
             local e = (intro.end_ms and intro.end_ms / 1000) or 0
             if e > s then
@@ -87,13 +90,58 @@ local function try_theintrodb_fallback()
                 msg.info(string.format("theintrodb 片头: %.0f - %.0f 秒", s, e))
             end
         end
-        if credits then
+        if credits and not aniskip_outro_applied then
             local s = (credits.start_ms and credits.start_ms / 1000) or 0
             local e = (credits.end_ms and credits.end_ms / 1000) or total_dur
             if e > s then
                 opts.manual_outro_start = s
                 opts.manual_outro_end = e
                 msg.info(string.format("theintrodb 片尾: %.0f - %.0f 秒", s, e))
+            end
+        end
+    end)
+end
+
+-- [lc-1059] AniSkip 兜底：按 MAL id 查精确 OP/ED 区间(绝对秒)，优先于 theintrodb
+--   (社区投票校准 + 动漫专项库)；MAL 由 Electron 标题映射链异步解析后随 skip-metadata 补发。
+local function try_aniskip_fallback()
+    local play_url = mp.get_property("path")
+    local id = mutils.extract_id_and_query(play_url)
+    if not id then return end
+    local meta = skip_meta_map[id]
+    if not meta or not meta.episode then return end
+    if not meta.mal then
+        -- MAL 映射由 Electron 侧异步解析，晚到后经 skip-metadata 补触发
+        if meta.tmdb then pending_aniskip = true end
+        return
+    end
+    if aniskip_intro_applied and aniskip_outro_applied then return end
+    local dur_s = mutils.dur() or 0
+    api.get_aniskip(meta.mal, meta.episode, dur_s, function(resp, err)
+        if err or not resp then return end
+        local op, ed
+        for _, r in ipairs(resp.results or {}) do
+            if r.skipType == "op" and not op then op = r end
+            if r.skipType == "ed" and not ed then ed = r end
+        end
+        if op and op.interval and not aniskip_intro_applied then
+            local s = op.interval.startTime or 0
+            local e = op.interval.endTime or 0
+            if e > s and e > 0 then
+                opts.manual_intro_start = s
+                opts.manual_intro_end = e
+                aniskip_intro_applied = true
+                msg.info(string.format("AniSkip 片头: %.1f - %.1f 秒", s, e))
+            end
+        end
+        if ed and ed.interval and not aniskip_outro_applied then
+            local s = ed.interval.startTime or 0
+            local e = ed.interval.endTime or 0
+            if e > s and e > 0 then
+                opts.manual_outro_start = s
+                opts.manual_outro_end = e
+                aniskip_outro_applied = true
+                msg.info(string.format("AniSkip 片尾: %.1f - %.1f 秒", s, e))
             end
         end
     end)
@@ -251,6 +299,7 @@ local function load_server_config()
             msg.error("获取服务器跳过时间点失败: " .. tostring(err))
             fnos_empty = true
             try_theintrodb_fallback()
+            try_aniskip_fallback()
             return
         end
         local data = resp.data
@@ -279,6 +328,7 @@ local function load_server_config()
             msg.info("fnOS 无跳过数据，尝试 theintrodb 兜底")
             fnos_empty = true
             try_theintrodb_fallback()
+            try_aniskip_fallback()
         end
     end)
 end

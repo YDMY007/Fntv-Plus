@@ -129,4 +129,48 @@ function api.get_theintrodb(tmdb_id, season, episode, duration_ms, callback)
     return true
 end
 
+
+-- [lc-1059] AniSkip 社区跳过库：按 MAL id + 集号查询 OP/ED 精确区间(绝对秒)。
+-- episodeLength 敏感(差 1 秒可能不命中) → 长度阶梯 [d, d+1, d-1, d+2] 逐档尝试。
+function api.get_aniskip(mal_id, episode, duration_s, callback)
+    if not mal_id or tostring(mal_id) == "" then
+        if callback then callback(nil, "aniskip: 缺少 mal_id") end
+        return false
+    end
+    local base = "https://api.aniskip.com/v2/skip-times/" .. tostring(mal_id) .. "/" .. tostring(episode)
+        .. "?types%5B%5D=op&types%5B%5D=ed"
+    local lens = { 0 }
+    if duration_s and tonumber(duration_s) and tonumber(duration_s) > 0 then
+        local d = math.floor(tonumber(duration_s))
+        lens = { d, d + 1, d - 1, d + 2 }
+    end
+    local try_idx = 0
+    local function try_next()
+        try_idx = try_idx + 1
+        if try_idx > #lens then
+            if callback then callback(nil, "aniskip: 各时长档位均无命中") end
+            return
+        end
+        local url = base .. "&episodeLength=" .. tostring(lens[try_idx])
+        http_async.request({
+            url = url,
+            method = "GET",
+            headers = { ["appId"] = "fntv-plus" },
+            json = true
+        }, function(resp, err)
+            if err or not resp then
+                if callback then callback(nil, err) end
+                return
+            end
+            if resp.found and resp.results and #resp.results > 0 then
+                if callback then callback(resp, nil) end
+            else
+                try_next()  -- 本档无命中 → 下一档时长
+            end
+        end)
+    end
+    try_next()
+    return true
+end
+
 return api
