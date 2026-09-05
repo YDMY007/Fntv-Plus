@@ -322,6 +322,16 @@ function isRetryableNetworkError(e: any): boolean {
         msg.includes('timeout') || msg.includes('Network Error');
 }
 
+/** [lc-1033] 供其他模块复用的 TMDB GET：继承 v3/v4 鉴权、代理/免梯子直连与网络重试。
+ *  返回响应 data（JSON）。params 由调用方给（language 等自带上）。 */
+export async function tmdbApiGet(path: string, params: Record<string, any> = {}): Promise<any> {
+    const key = fnConfig.getTmdbApiKey();
+    const a = key ? authFor(key) : { headers: {} as Record<string, string>, queryKey: '' };
+    const q: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}), ...params };
+    const r = await getWithRetry(http(), path, { params: q });
+    return r.data;
+}
+
 /** 单次 GET，遇网络类错误自动重试（指数退避） */
 async function getWithRetry(client: AxiosInstance, url: string, cfg: any): Promise<any> {
     let lastErr: any;

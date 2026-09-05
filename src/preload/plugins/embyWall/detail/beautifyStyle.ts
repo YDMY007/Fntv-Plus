@@ -297,15 +297,39 @@ body.fnos-beautify ${COL} > :nth-child(3) .ms-container{ scrollbar-width:none !i
 body.fnos-beautify ${COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
   width:0 !important; height:0 !important; display:none !important;
 }
-/* ③ 头像：柔投影替代描边；悬浮轻抬升（原生 wrapper 已带 transition-all，无需补过渡） */
+/* ③ [lc-1033] E3 演员卡片化：每个演员升格为圆角小卡（semi fill 底、悬浮整卡上移+底色加深），
+   头像 hover 微放大；悬浮位从「头像单独位移」改为「整卡位移」（头像在卡内单独位移显突兀）。 */
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]{
+  display:flex !important; flex-direction:column !important; align-items:center !important;
+  width:116px !important; padding:10px 8px 9px !important; box-sizing:border-box !important;
+  background:var(--semi-color-fill-0) !important; border-radius:16px !important;
+  transition:transform .22s ease, background .22s ease, box-shadow .22s ease !important;
+  text-decoration:none !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover{
+  transform:translateY(-4px) !important;
+  background:var(--semi-color-fill-1) !important;
+  box-shadow:0 12px 30px rgba(0,0,0,.16) !important;
+}
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type{
+  width:88px !important; height:88px !important;
   box-shadow:0 10px 26px rgba(0,0,0,.28) !important;
 }
-body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type{
-  transform:translateY(-3px) !important;
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type img{
+  transition:transform .3s ease !important;
 }
-/* ④ 人名 16px→13px（与信息卡正文同级）；角色行维持原生 12px 弱化 */
-body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{ font-size:13px !important; }
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type img{
+  transform:scale(1.07) !important;
+}
+/* ④ 人名 13px 半粗（与信息卡正文同级）；角色行 11px 弱化省略 */
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{
+  font-size:13px !important; font-weight:600 !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p:not([class*="text-base"]){
+  max-width:100px !important; overflow:hidden !important; text-overflow:ellipsis !important;
+  white-space:nowrap !important; font-size:11px !important; margin-top:2px !important;
+  color:var(--fnos-muted,#86868b) !important;
+}
 
 /* ===== F. hero 海报微投影（hero 整体保持原生，只让海报更立体）===== */
 body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .shrink-0 img{
