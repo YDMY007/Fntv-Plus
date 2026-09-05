@@ -267,6 +267,19 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="detail
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child picture img{ transform:scale(1.035) !important; }
 
+/* [lc-1049] 隐藏原生横滑翻页箭头（Semi ScrollList 的 [class*="semi-color-bg-arrow-mask"] 掩膜层）。
+   用户报障：选集列表(集数据)与剧集信息卡之间有个「页面切换标签」hover 时短暂闪现 —— 那是原生
+   横滑带的右缘翻页箭头：竖排改造后横滑带已不存在，箭头成为悬在两容器之间的游魂（Semi 原生
+   opacity 悬停逻辑让它只在鼠标经过时短暂显形）。
+   wheelToScroll 只在「滚轮横向滚动」开关开启时以行内 opacity:0 视觉隐藏它们（绝不碰 display，
+   怕破坏原生恢复逻辑）；而美化竖排后整个 COL 内已无任何合法横滑带 → 按美化作用域直接 display:none
+   即可"删掉"。关美化 = body class 摘除 → 规则失效，原生箭头完整还原；两者互不冲突（CSS !important
+   压过 wheelToScroll 的行内非重要声明，行内清不掉也不碍事）。演职人员横滑带同病同治（lc-1034
+   竖排改造后其箭头同为残留）。 */
+body.fnos-beautify ${COL} [class*="semi-color-bg-arrow-mask"]{
+  display:none !important;
+}
+
 /* ===== E. 演职人员 / 人物项：去 lift，仅透明度反馈（右列原生横滑，保持不动）===== */
 body.fnos-beautify a[href*="/v/person/"]{
   border-radius:14px !important;
