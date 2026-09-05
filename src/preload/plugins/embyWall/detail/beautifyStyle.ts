@@ -768,8 +768,10 @@ body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]{
 body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]:hover{
   background:rgba(255,255,255,.18) !important;
 }
-/* N5. 信息面板：半透柔光玻璃，无边框（用户点名，第二轮再降底色：tint .32→.16、blur 40→30，
-   让海报透过玻璃可见；可读性由 blur+saturate+浅色文字承担，不再靠压暗）。
+/* N5. 信息面板：半透柔光玻璃，无边框。
+   [lc-1010] 二轮降底色：tint .32→.16、blur 40→30。
+   [lc-1021] 用户第三轮反馈「整个左下面板透明再透一点」：tint .16→.09、白色高光梯度再降、
+   blur 30→26、brightness .78→.86（压暗减轻=更透，可读性仍由 blur+saturate+浅色文字投影承担）。
    无卡时 600px（正好包住左列），有卡时 1020px（:has 门控，卡挂载/撤除自动切换）。 */
 body.fnos-series-panel ${SERIES_PANEL}{
   position:absolute !important;
@@ -779,14 +781,14 @@ body.fnos-series-panel ${SERIES_PANEL}{
   padding:18px 20px !important;
   display:block !important;
   background:linear-gradient(160deg,
-    rgba(255,255,255,.07) 0%,
-    rgba(255,255,255,.022) 45%,
-    rgba(255,255,255,.008) 100%),
-    rgba(var(--fnos-hero-tint, 25,25,26), .16) !important;
+    rgba(255,255,255,.05) 0%,
+    rgba(255,255,255,.014) 45%,
+    rgba(255,255,255,.005) 100%),
+    rgba(var(--fnos-hero-tint, 25,25,26), .09) !important;
   /* brightness 压暗玻璃后的画面而不是叠不透明色（Apple dark vibrancy 手法）——
      海报结构透玻璃可见，白字在亮部海报上仍有对比（用户要求半透见底，禁再加 tint） */
-  backdrop-filter:blur(30px) saturate(155%) brightness(.78) !important;
-  -webkit-backdrop-filter:blur(30px) saturate(155%) brightness(.78) !important;
+  backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
+  -webkit-backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
   border:none !important;
   box-shadow:0 18px 54px rgba(0,0,0,.32) !important;
   border-radius:22px !important;
@@ -826,8 +828,19 @@ body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="
 body.fnos-series-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]{
   display:none !important;
 }
-/* N7. 季选择：竖排海报墙 → Apple TV 式横滑行（16:9 横版卡）。
-   季卡 = .card-root：mainwin.ts ⑩ 会给它玻璃卡实心底+边框 → 在面板内全部去框去实心（用户点名）。 */
+/* N7. 季选择：Apple TV 式横滑行。[lc-1021] 用户定稿：海报保持**原生竖版 2:3**（撤销 lc-1010 的
+   16:9 横版强转——实机发现强转后季行右侧出现黑块，且横版丢掉了海报原画的竖版构图）；
+   多季布局 = 卡宽 25%-11px（600/1020 两种面板宽下都恰好 4 张整卡一屏，不出现裁边碎片），
+   超出横向滑动（滚动条隐藏）。
+   季卡 = .card-root：mainwin.ts ⑩ 会给它玻璃卡实心底+边框 → 在面板内全部去框去实心（用户点名）。
+   ⚠ 黑边真凶（lc-1021 活体 CDP 实证，NAS CSS 原文）：
+     .card-root{width:var(--card-width)}
+     .card-root .poster-box{--poster-box-width:var(--card-width);
+       aspect-ratio:var(--poster-aspect-ratio,2/3); width:var(--poster-box-width);
+       border:1px solid var(--semi-color-card-border); border-radius:8px; overflow:hidden}
+   海报宽度是**变量钉死**的（不跟随卡片实际宽度）：lc-1010 把卡强撑 238px 时海报停在 ~162px
+   → 右侧 76px 空带露出深色渐变/底图 = 用户截图的黑边；反过来卡收窄后海报会溢出压到邻卡。
+   ∴ 必须把 poster-box 宽度改回 100% 跟随卡片，原生 1px 描边与「无线条」玻璃一并去框。 */
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"]{
   margin:14px 0 0 !important; width:100% !important;
   display:flex !important; flex-wrap:nowrap !important;
@@ -840,21 +853,33 @@ body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="
   width:calc(57% - 15px) !important;
 }
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] > [data-id="details"]{
-  width:238px !important; flex:0 0 auto !important;
+  width:calc(25% - 11px) !important; flex:0 0 auto !important;
   background:transparent !important; border:none !important; box-shadow:none !important;
   backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
 }
-/* 竖版海报 → 16:9 横版（poster-box 原生 2:3 比例类，内部 picture/img 是 absolute 填满链，
-   只改容器比例即可，同 lc-986 选集卡塌陷修复的结论：给容器 aspect-ratio，不给 height） */
+/* 海报竖版 2:3（原生比例）+ 宽度跟随卡片（掐掉黑边根源，见 N7 头注）+ 去原生 1px 描边：
+   容器给比例与宽度、内部 absolute 填满链不动（同 lc-986 结论） */
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] .poster-box{
-  aspect-ratio:16 / 9 !important;
+  width:100% !important;
+  aspect-ratio:2 / 3 !important;
+  border:none !important;
 }
-/* 底部渐变层原生 76px 按 134px 高的横版缩到 48px（同 D 段选集卡的等比逻辑） */
+/* [lc-1021] 季卡内层防黑块保险：原生海报容器/占位层的深色底（--semi-color-bg-placeholder）
+   在玻璃上一律透明化/弱化 —— 图片加载期间玻璃上不再闪深色块 */
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] .poster-box,
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > div:first-child{
+  background:transparent !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] [class*="bg-[var(--semi-color-bg-placeholder)]"]{
+  background:rgba(255,255,255,.06) !important;
+}
+/* 底部渐变层：竖版 198px 高给 64px（原 76px 为 2:3 设计，仅微调） */
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > div:first-child [class*="bg-gradient-to-t"]{
-  height:48px !important;
+  height:64px !important;
 }
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p{
-  text-align:left !important; margin:5px 0 0 2px !important;
+  text-align:left !important; margin:6px 0 0 1px !important;
+  font-size:12px !important;
   color:rgba(255,255,255,.9) !important;
 }
 /* 标题/副题文本块是 a.flex.flex-col.items-center → flex 居中压过 text-align，改容器对齐 */
@@ -862,7 +887,8 @@ body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="detai
   align-items:flex-start !important;
 }
 body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p + p{
-  margin:3px 0 0 2px !important;
+  margin:2px 0 0 1px !important;
+  font-size:11px !important;
   color:rgba(255,255,255,.55) !important;
 }
 /* J 段会给季卡标题追加清晰度胶囊（季卡同样带 data-id=details + 角标位图，复用集卡逻辑）：
