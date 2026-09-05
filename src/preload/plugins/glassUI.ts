@@ -266,6 +266,51 @@ const GATE_CSS = `
     padding-bottom: 24px !important;
   }
 
+  /* ②c [lc-1052] 每日放送浮层（hotUpdates 宫灯 #fntv-hot-tab + 面板 #fntv-hot-panel）玻璃适配。
+     用户报障：云母增强下点开每日放送，多处全透文字难辨。两处根因：
+     ① 宫灯/面板都挂在 body 顶层 → ①b 的 body>div 把它们的样式表背景清成透明（面板原生
+        rgba(24,26,34,.92)/浅色 rgba(255,255,255,.94)、宫灯渐变全部失效）；
+     ② 面板内列表项类名 .fntv-hot-card 含 "card" → ② 逐卡磨砂（frost .42 过透 + 每卡一个
+        backdrop-filter 合成层，GPU 白耗）。
+     浮层是文字密集弹窗，按本插件「模态浮层保持不透明可读」纪律：玻璃模式下恢复其原生
+     高不透明背景（亮暗双套跟 .fntv-hot-light），卡片恢复原生透明底 + hover 反馈。
+     注：①b 的 background 简写把 background-position 也钉成 !important，动画打不过
+     important 声明 → 宫灯渐变流光在玻璃下静止（视觉仍在，仅不再流动），可接受。 */
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-tab {
+    background-image: linear-gradient(135deg, #ff6b35, #f7418f, #c94bcb) !important;
+    background-color: #f7418f !important;
+    background-size: 200% 200% !important;
+    background-position: 0% 50% !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-tab:hover {
+    background-image: linear-gradient(135deg, #ff8c5a, #f76aa3, #d96bd6) !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel {
+    background-color: rgba(24, 26, 34, .96) !important;
+    background-image: none !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel.fntv-hot-light {
+    background-color: rgba(255, 255, 255, .96) !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel .fntv-hot-card {
+    background-color: transparent !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: 1px solid transparent !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel .fntv-hot-card:hover {
+    background-color: rgba(255, 255, 255, .09) !important;
+    border-color: rgba(255, 107, 53, .22) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .20) !important;
+  }
+  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel.fntv-hot-light .fntv-hot-card:hover {
+    background-color: rgba(0, 0, 0, .05) !important;
+    border-color: rgba(255, 107, 53, .30) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .12) !important;
+  }
+
   /* [lc-1012] 旧「浅色模式白磨砂特例」已删：tint/环境光/sheen 全部跟随 html.dark 双套自适应,
      一套规则覆盖明暗两主题（浅色 = 白玻璃, 深色 = 深玻璃）。 */
 
