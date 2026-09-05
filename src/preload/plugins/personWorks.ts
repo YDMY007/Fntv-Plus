@@ -4,6 +4,8 @@
 // 作品网格一致的语言追加到页面底部，已入库绿色角标（点击进库内详情），缺失灰化 +
 // 「缺失」角标（点击开 TMDB 页）。数据由主进程 person:tmdb-credits 提供
 // （personTmdb.ts：飞牛 person/item/list + TMDB combined_credits + owned 匹配）。
+// [lc-1040] 防限流：面板默认收起一行头，点开才触发数据查询；海报进视口才下载
+// （w342）；数据（主进程 7 天磁盘缓存+SWR）与图片（内存+磁盘）都有持久层，二次点开零网络。
 // 参考：第三方油猴插件 fnos-actor-tmdb v4.5（端点与匹配策略经其验证）。
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer, shell } from 'electron';
@@ -13,7 +15,10 @@ import { HookType } from '../core/hooks';
 
 const STYLE_ID = 'fnos-person-works-style';
 const PANEL_ID = 'fnos-person-works';
-const POSTER_BASE = 'https://image.tmdb.org/t/p/w92';
+// [lc-1040] 海报尺寸 w92→w342：卡片实际渲染 162px 宽，2x DPI 下需要 324px 源图——
+// w92 拉伸两倍就是用户报的「太糊」。w342 是 TMDB 标准档里 2x 的正解；磁盘缓存按完整 URL 存，
+// 换尺寸=换 key，首次会一次性重下（旧 w92 条目成为孤儿，无害）。
+const POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
 
 const esc = (s: any): string => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -47,6 +52,9 @@ const PANEL_CSS = `
 #${PANEL_ID} .fpw-h-sub{ font-size:12px; color:var(--semi-color-text-2); }
 #${PANEL_ID} .fpw-h-toggle{ margin-left:auto; font-size:11.5px; color:var(--semi-color-primary); cursor:pointer; user-select:none; }
 #${PANEL_ID} .fpw-h-toggle:hover{ text-decoration:underline; }
+#${PANEL_ID} .fpw-h-collapse{ color:var(--semi-color-text-2); }
+#${PANEL_ID} .fpw-head.fpw-head-click{ cursor:pointer; }
+#${PANEL_ID} .fpw-head.fpw-head-click:hover .fpw-h-title{ color:var(--semi-color-primary); }
 #${PANEL_ID} .fpw-grid{ display:flex; flex-wrap:wrap; gap:20px 20px; }
 #${PANEL_ID} .fpw-card{ width:162px; cursor:pointer; border-radius:10px; transition:transform .22s ease; }
 #${PANEL_ID} .fpw-card:hover{ transform:translateY(-3px); }
@@ -76,7 +84,8 @@ const PANEL_CSS = `
 // ── 运行时 ──
 let _styleInjected = false;
 let _onlyMissing = false;
-const _cache = new Map<string, any>();   // guid → credits 响应
+let _loadError = '';     // 最近一次加载错误——收起态显示「点击重试」
+const _cache = new Map<string, any>();   // guid → credits 响应（渲染进程会话级；持久层在主进程磁盘缓存）
 const _inflight = new Set<string>();
 let _currentGuid = '';
 let _waitingForCol = false;
@@ -119,21 +128,21 @@ function renderPanel(container: HTMLElement, data: any): void {
       <div class="fpw-head">
         <span class="fpw-h-title">TMDB 完整作品</span>
         <span class="fpw-h-sub">共 ${items.length} 部 · 库内 ${ownedCount} 部</span>
-        <span class="fpw-h-toggle">${_onlyMissing ? '显示全部' : '仅看缺失'}</span>
+        <span class="fpw-h-toggle fpw-h-collapse">收起</span>
+        <span class="fpw-h-toggle fpw-h-missing-toggle">${_onlyMissing ? '显示全部' : '仅看缺失'}</span>
       </div>`;
     const grid = `<div class="fpw-grid">${list.map(cardHtml).join('') || '<div class="fpw-msg">没有缺失作品 ✓ 全部已入库</div>'}</div>`;
     box.innerHTML = head + grid;
 
-    const toggle = box.querySelector('.fpw-h-toggle');
+    const toggle = box.querySelector('.fpw-h-missing-toggle');
     if (toggle) toggle.addEventListener('click', () => { _onlyMissing = !_onlyMissing; renderPanel(container, data); });
+    // [lc-1040] 收起：数据留在内存缓存，再点开毫秒级还原、零网络
+    const collapse = box.querySelector('.fpw-h-collapse');
+    if (collapse) collapse.addEventListener('click', () => { renderCollapsed(container); });
 
-    // 海报走主进程 tmdb:image 代理（内存+磁盘缓存，规避 DNS 污染；复用详情页 TMDB 卡管线）
-    box.querySelectorAll<HTMLImageElement>('img[data-path]').forEach((img) => {
-        const u = POSTER_BASE + img.getAttribute('data-path');
-        ipcRenderer.invoke('tmdb:image', u)
-            .then((r: any) => { if (r && r.ok && r.dataUrl && document.body.contains(img)) img.src = r.dataUrl; })
-            .catch(() => { if (document.body.contains(img)) img.src = u; }); // 代理失败退直链
-    });
+    // [lc-1040] 海报懒加载：进视口才走主进程 tmdb:image 代理（内存+磁盘缓存，规避 DNS 污染；
+    // 复用详情页 TMDB 卡管线）——不再百张齐发，滚动到哪下载到哪
+    observePosters(box);
     // 缺失卡：点击开 TMDB 页（库内卡是 <a>，由 fnOS 路由接管）
     box.querySelectorAll<HTMLElement>('.fpw-card.missing').forEach((el) => {
         el.addEventListener('click', (ev: Event) => {
@@ -152,27 +161,33 @@ function renderMsg(container: HTMLElement, msg: string): void {
     box.innerHTML = `<div class="fpw-head"><span class="fpw-h-title">TMDB 完整作品</span></div><div class="fpw-msg">${esc(msg)}</div>`;
 }
 
-/** 有界等待作品列渲染（原生「作为演员」网格就绪后再注入，避免插早被 React 冲掉） */
-function waitForColumn(guid: string, attempt: number): void {
-    if (_currentGuid !== guid) return; // 已切走
-    const col = activeCol();
-    if (col && col.children.length >= 2) {
-        const cached = _cache.get(guid);
-        if (cached) { renderPanel(col, cached); return; }
-        void enterPerson(guid, col);
-        return;
-    }
-    if (attempt >= 10) {  return; }
-    setTimeout(() => waitForColumn(guid, attempt + 1), 600);
+/** [lc-1040] 收起态：只有一行头，零网络请求（进演员页不再自动拉数据/下图片）。
+ *  点击头部才真正查询/下载；有错误时同位置显示「点击重试」。 */
+function renderCollapsed(container: HTMLElement): void {
+    ensureStyle();
+    let box = container.querySelector<HTMLDivElement>('#' + PANEL_ID);
+    if (!box) { box = document.createElement('div'); box.id = PANEL_ID; container.appendChild(box); }
+    box.dataset.guid = _currentGuid;
+    box.innerHTML = '<div class="fpw-head fpw-head-click" role="button">'
+        + '<span class="fpw-h-title">TMDB 完整作品</span>'
+        + `<span class="fpw-h-sub">${_loadError ? esc(_loadError) : '未加载 · 点击后查询 TMDB'}</span>`
+        + `<span class="fpw-h-toggle">${_loadError ? '点击重试' : '点击加载'}</span></div>`;
+    const head = box.querySelector('.fpw-head');
+    if (head) head.addEventListener('click', () => { void expandCurrent(); });
 }
 
-async function enterPerson(guid: string, col?: HTMLElement): Promise<void> {
-    const container = col || activeCol();
-    if (!container) { waitForColumn(guid, 0); return; }
-    if (_inflight.has(guid)) return;
+/** [lc-1040] 点开才触发查询/下载（用户要求防限流）：数据走主进程磁盘缓存（lc-1039，7 天+SWR），
+ *  二次点开毫秒级零网络；海报则由 observePosters 按“进视口”逐批下载。 */
+async function expandCurrent(): Promise<void> {
+    const guid = _currentGuid;
+    const container = activeCol();
+    if (!guid || !container || _inflight.has(guid)) return;
+    const cached = _cache.get(guid);
+    if (cached) { renderPanel(container, cached); return; }
     _inflight.add(guid);
+    _loadError = '';
+    renderMsg(container, '正在从 TMDB 拉取完整作品…');
     try {
-        if (!_cache.has(guid)) renderMsg(container, '正在从 TMDB 拉取完整作品…');
         let r: any = null;
         try {
             r = await ipcRenderer.invoke('person:tmdb-credits', guid);
@@ -186,15 +201,59 @@ async function enterPerson(guid: string, col?: HTMLElement): Promise<void> {
             throw err;
         }
         if (_currentGuid !== guid) return; // 已切页
-        if (!r || r.error) { renderMsg(container, (r && r.error) || '拉取失败'); return; }
+        if (!r || r.error) { _loadError = (r && r.error) || '拉取失败'; renderCollapsed(container); return; }
         _cache.set(guid, r);
         if (r.noImdb) { renderMsg(container, '该演员无 IMDb 关联，无法获取 TMDB 完整作品'); return; }
         renderPanel(container, r);
     } catch (e: any) {
-        if (_currentGuid === guid) renderMsg(container, '拉取失败: ' + (e && e.message ? e.message : e));
+        if (_currentGuid === guid) {
+            _loadError = '拉取失败: ' + (e && e.message ? e.message : e);
+            renderCollapsed(container); // 错误态回落收起头部，点击即重试
+        }
     } finally {
         _inflight.delete(guid);
     }
+}
+
+let _posterIO: IntersectionObserver | null = null;
+
+function loadPoster(img: HTMLImageElement): void {
+    const p = img.getAttribute('data-path') || '';
+    if (!p) return;
+    const u = POSTER_BASE + p;
+    ipcRenderer.invoke('tmdb:image', u)
+        .then((r: any) => { if (r && r.ok && r.dataUrl && document.body.contains(img)) img.src = r.dataUrl; })
+        .catch(() => { if (document.body.contains(img)) img.src = u; }); // 代理失败退直链
+}
+
+/** [lc-1040] 视口内才下载海报（rootMargin 预拉约一屏）；「仅看缺失」切换重渲染后对新卡重新观察。
+ *  主进程内存+磁盘双层缓存兜底：同一张图整个软件生命周期只真正下载一次。 */
+function observePosters(box: HTMLElement): void {
+    if (_posterIO) { _posterIO.disconnect(); _posterIO = null; }
+    const imgs = Array.from(box.querySelectorAll<HTMLImageElement>('img[data-path]'));
+    if (typeof IntersectionObserver === 'undefined') { imgs.forEach(loadPoster); return; }
+    _posterIO = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+            if (!en.isIntersecting) continue;
+            const img = en.target as HTMLImageElement;
+            if (_posterIO) _posterIO.unobserve(img);
+            loadPoster(img);
+        }
+    }, { rootMargin: '300px 0px' });
+    imgs.forEach((im) => { if (_posterIO) _posterIO.observe(im); });
+}
+
+/** 有界等待作品列渲染（原生「作为演员」网格就绪后再注入，避免插早被 React 冲掉）。
+ *  [lc-1040] 只注入收起态头部，不自动拉取。 */
+function waitForColumn(guid: string, attempt: number): void {
+    if (_currentGuid !== guid) return; // 已切走
+    const col = activeCol();
+    if (col && col.children.length >= 2) {
+        renderCollapsed(col);
+        return;
+    }
+    if (attempt >= 10) {  return; }
+    setTimeout(() => waitForColumn(guid, attempt + 1), 600);
 }
 
 /** [lc-1036] 二级详情页（季页）演职人员行富化：逐演员拉 TMDB 简报
@@ -244,11 +303,21 @@ function checkRoute(): void {
     // [lc-1036] 二级详情页（季页）→ 演职人员行富化
     if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(location.pathname)) enrichCast();
     const m = location.pathname.match(/\/v\/person\/([0-9a-f]{32})/i);
-    if (!m) { if (_currentGuid) { _currentGuid = ''; const b = document.getElementById(PANEL_ID); if (b && b.parentElement) b.parentElement.removeChild(b); } return; }
+    if (!m) {
+        if (_currentGuid) {
+            _currentGuid = '';
+            _loadError = '';   // [lc-1040] 换页复位；观察器随面板 DOM 移除自动失效
+            if (_posterIO) { _posterIO.disconnect(); _posterIO = null; }
+            const b = document.getElementById(PANEL_ID);
+            if (b && b.parentElement) b.parentElement.removeChild(b);
+        }
+        return;
+    }
     const guid = m[1].toLowerCase();
     if (guid === _currentGuid) return;
     _currentGuid = guid;
     _onlyMissing = false;
+    _loadError = '';   // [lc-1040] 每个演员页都从收起态开始（点开才拉）
     waitForColumn(guid, 0);
 }
 
