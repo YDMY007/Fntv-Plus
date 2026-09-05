@@ -1137,27 +1137,26 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     };
 
     // 分组卡片
+    // [lc-1041] 卡面优化（用户审美：无边框无线条、对比度靠填充明度不靠描边）：
+    //   去 1px 边框与标题下发丝线，圆角 12→14，标题改 11.5px 小写字重弱化标签；
+    //   组间距交给 pane 的 gap，卡片自身不再带 margin。
     const section = (titleText?: string): { el: HTMLElement; body: HTMLElement } => {
       const d = document.createElement('div');
-      let css = 'border-radius:12px;background:var(--fnos-ui-input-bg)!important;'
-        + 'border:1px solid var(--fnos-ui-border3);overflow:hidden;display:flex;flex-direction:column;';
-      if (titleText !== undefined) {
-        css += 'margin-bottom:10px;'; // 带标题的分组有底部间距
-      }
-      d.style.cssText = css;
+      d.style.cssText = 'border-radius:14px;background:var(--fnos-ui-input-bg)!important;'
+        + 'overflow:hidden;display:flex;flex-direction:column;';
 
       // 可选分组标题
       if (titleText) {
         const t = document.createElement('div');
         t.textContent = titleText;
-        t.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;'
-          + 'color:var(--fnos-ui-sec);padding:9px 12px 6px;border-bottom:1px solid var(--fnos-ui-border2);flex:none;';
+        t.style.cssText = 'font-size:11.5px;font-weight:600;letter-spacing:.4px;'
+          + 'color:var(--fnos-ui-sec);padding:12px 14px 0;flex:none;';
         d.appendChild(t);
       }
 
       // 内容容器
       const body = document.createElement('div');
-      body.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+      body.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
       d.appendChild(body);
       return { el: d, body };
     };
@@ -1169,10 +1168,26 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     if (!document.getElementById('fnos-panel-anim-style')) {
       const animSt = document.createElement('style');
       animSt.id = 'fnos-panel-anim-style';
+      // [lc-1041] ①分类切换动画: 方向感知横滑+淡入(selectCat 按 nav 顺序选 r/l 两套 keyframes),
+      //   display:none→flex 会重放 CSS 动画(lc-1011 同款机制), 无需 JS 重触发; 只动 opacity/transform。
+      //   ②面板内所有 checkbox 换 iOS 式胶囊开关(appearance:none + ::after 圆钮)——一处 CSS 覆盖
+      //   addToggle 与各卡片自建的开关, 不必逐个改 DOM; 语义仍是 input.checked, 存取逻辑零改动。
       animSt.textContent = '@media (prefers-reduced-motion: no-preference){'
         + '@keyframes fnos-panel-in{from{opacity:0}to{opacity:1}}'
+        + '@keyframes fnos-cat-in-r{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}'
+        + '@keyframes fnos-cat-in-l{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}'
         + '#fnos-settings-panel{animation:fnos-panel-in .2s ease-out both}'
-        + '#fnos-settings-mask{animation:fnos-panel-in .28s ease-out both}}';
+        + '#fnos-settings-mask{animation:fnos-panel-in .28s ease-out both}}'
+        + '#fnos-settings-panel input[type=checkbox]{'
+        + '-webkit-appearance:none;appearance:none;width:38px;height:22px;border-radius:11px;flex-shrink:0;margin:0;'
+        + 'background:var(--fnos-ui-border-strong,rgba(120,120,128,.32));position:relative;cursor:pointer;'
+        + 'transition:background .2s ease;}'
+        + '#fnos-settings-panel input[type=checkbox]::after{'
+        + "content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;"
+        + 'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);'
+        + 'transition:transform .2s cubic-bezier(.3,.7,.4,1);}'
+        + '#fnos-settings-panel input[type=checkbox]:checked{background:var(--fnos-ui-accent)}'
+        + '#fnos-settings-panel input[type=checkbox]:checked::after{transform:translateX(16px)}';
       (document.head || document.documentElement).appendChild(animSt);
     }
     const overlay = document.createElement('div');
@@ -1251,12 +1266,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const secDebug = section('调试日志');
     const secDebugBody = secDebug.body;
 
-    // ===== 分组1: 开关选项 =====
-    const sec1 = section('功能开关');
-    const secBody1 = sec1.body;
-    secBody1.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+    // ===== [lc-1041] 分组重组：原「功能开关」大杂烩卡按域拆成三张卡，主题模式行并入「外观」=====
+    //   网络与代理: 下载代理 + NAS 本地网盘代理（与「自定义代理」「TMDB 免梯子直连」同归网络分类）
+    //   界面与浏览: 隐藏原始播放按钮 + 鼠标滚轮横向滚动（归播放分类）
+    //   更新与维护: 检查更新/历史版本 + 维护开发者按钮（归通用分类，原嵌在开关卡底部）
+    const secNet = section('网络与代理');
+    const secBodyNet = secNet.body;
+    const secUX = section('界面与浏览');
+    const secBodyUX = secUX.body;
+    const secUpd = section('更新与维护');
+    const secBodyUpd = secUpd.body;
 
-    const addToggle = (label: string): HTMLInputElement => {
+    // 未传 targetBody 的调用（弹幕屏蔽类型/插帧：先建行再自行 parentElement 搬走）挂到游离容器
+    const _toggleHold = document.createElement('div');
+    const addToggle = (label: string, targetBody?: HTMLElement): HTMLInputElement => {
       // 用 label 包裹文字+勾选框：点整行（文字或方框）都能切换，且只触发一次 change，
       // 避免"点了文字但 checkbox 没切换"导致设置看似没保存（lc-140 修复）。
       const row = document.createElement('label');
@@ -1271,13 +1294,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       sw.type = 'checkbox';
       sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
       row.appendChild(span); row.appendChild(sw);
-      secBody1.appendChild(row);
+      (targetBody || _toggleHold).appendChild(row);
       return sw;
     };
-    const swProxy = addToggle('下载代理');
-    const swHide = addToggle('隐藏原始播放按钮');
-    const swNas = addToggle('NAS 本地网盘代理');
-    const swWheel = addToggle('鼠标滚轮横向滚动');
+    const swProxy = addToggle('下载代理', secBodyNet);
+    const swHide = addToggle('隐藏原始播放按钮', secBodyUX);
+    const swNas = addToggle('NAS 本地网盘代理', secBodyNet);
+    const swWheel = addToggle('鼠标滚轮横向滚动', secBodyUX);
     swProxy.addEventListener('change', () => { log('[开关保存] swProxy=' + swProxy.checked); ipcRenderer.invoke('settings:set-download-proxy', swProxy.checked).catch((e) => log('set-download-proxy failed', e)); });
     swHide.addEventListener('change', () => { log('[开关保存] swHide=' + swHide.checked); ipcRenderer.invoke('settings:set-hide-play', swHide.checked).catch((e) => log('set-hide-play failed', e)); });
     swNas.addEventListener('change', () => { log('[开关保存] swNas=' + swNas.checked); ipcRenderer.invoke('settings:set-nas-proxy', swNas.checked).catch((e) => log('set-nas-proxy failed', e)); });
@@ -1323,16 +1346,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     refreshThemeSeg();
     themeRow.appendChild(themeLabel);
     themeRow.appendChild(seg);
-    secBody1.appendChild(themeRow);
+    // [lc-1041] 主题模式改挂「外观」分类（secAppearance 创建处插入），不再混在功能开关里
 
-    // ===== 底部操作栏：更新相关操作（lc-635 分组排版）=====
-    // 布局: 用户常用(检查更新/历史版本)一行宽按钮 → 细分隔线 →
-    //       维护/开发者(应用补丁/回滚补丁/测试更新/版号切换) 2×2 网格
+    // ===== 底部操作栏：更新相关操作（lc-635 分组排版 → [lc-1041] 独立成「更新与维护」卡归通用）=====
+    // 布局: 用户常用(检查更新/历史版本)一行宽按钮 → 维护/开发者(应用补丁/回滚补丁/测试更新/版号切换) 2×2 网格
     const updFooter = document.createElement('div');
-    updFooter.style.cssText = 'padding:12px;flex-shrink:0;';
-    const updDivider = document.createElement('div');
-    updDivider.style.cssText = 'height:1px;background:var(--fnos-ui-border);margin:0 0 10px;';
-    updFooter.appendChild(updDivider);
+    updFooter.style.cssText = 'padding:2px 0 0;flex-shrink:0;';
 
     // ① 用户常用：检查更新 + 历史版本（一行等宽）
     const updGrid = document.createElement('div');
@@ -1370,7 +1389,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.75;text-align:center;margin-top:9px;line-height:1.5;';
     updFooter.appendChild(testHint);
 
-    sec1.el.appendChild(updFooter);
+    secBodyUpd.appendChild(updFooter);   // [lc-1041] 原 sec1.el(功能开关卡) → 独立「更新与维护」卡
     updBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); ipcRenderer.invoke('settings:check-update'); });
     updHistoryBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); openHistoryModal(); });
     patchBtn.addEventListener('click', (e: Event) => {
@@ -3748,9 +3767,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secBodyAbout.appendChild(aboutLink);
 
     // ===== 分组: 外观（独立标签页；原侧栏"亚克力透明度/背景模糊"滑块迁入设置面板）=====
-    const secAppearance = section('亚克力外观');
+    const secAppearance = section('主题与外观');
     const secBodyAppearance = secAppearance.body;
-    secBodyAppearance.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
+    secBodyAppearance.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+    // [lc-1041] 主题模式行从原「功能开关」并入本卡首位
+    themeRow.style.cssText += 'margin-bottom:6px;';
+    secBodyAppearance.appendChild(themeRow);
     secBodyAppearance.appendChild(buildAppearanceControls());
 
     // ===== 分组: 系统桌面（切换系统页面目标地址，每人 NAS 端口各异）=====
@@ -4014,17 +4036,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
 
     // ===== 统一布局：左侧分类导航 + 右侧按分类切换的卡片 pane =====
-    // 分类 -> 卡片映射(聚焦拆分: 通用 / 播放器 / 账号同步 / 弹幕屏蔽 / 诊断与日志)
+    // [lc-1041] 重分组（按任务域聚类）：
+    //   通用=退出行为/系统桌面/更新与维护 · 外观=主题模式+亚克力/轮播图Logo(原散在通用与插件)
+    //   播放=播放器/跳过片头片尾(原在插件)/插帧/界面与浏览 · 弹幕 · 账号同步(五家不变)
+    //   网络=网络与代理(原功能开关拆出)/自定义代理/TMDB免梯子直连(原在插件) · 手柄 · 诊断 · 关于
+    //   ⚠ 外部契约: _selectCat 只被 'danmaku' 引用(lc-518 catMap), fntv-open-settings 其余走
+    //   #sec-<id> scrollIntoView —— 各卡片元素与 id 均未动, 仅换分类归属。
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
-      { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
-      { id: 'player', label: '播放器', els: [sec2.el, secInterp.el] },
+      { id: 'general', label: '通用', els: [sec3.el, secSystem.el, secUpd.el] },
+      { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
+      { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secUX.el] },
+      { id: 'danmaku', label: '弹幕', els: [secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
-      { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
-      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
-      { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el, secCarousel.el] },
-      { id: 'appearance', label: '外观', els: [secAppearance.el] },
+      { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
+      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
@@ -4042,19 +4069,32 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
     // 左侧导航按钮 + 切换逻辑
     const navBtns: Record<string, HTMLButtonElement> = {};
+    // [lc-1041] 方向感知切换动画：去往 nav 序号更大的分类从右滑入，更小的从左滑入；
+    //   display:none→flex 重放 CSS 动画(lc-1011 机制)，无需 JS 重触发；只动 opacity/transform。
+    let _lastCatIdx = 0;
+    const _reduceMotion = (): boolean => {
+      try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+    };
     const selectCat = (id: string): void => {
+      const nextIdx = cats.findIndex((c) => c.id === id);
+      const anim = _reduceMotion() ? ''
+        : (nextIdx >= _lastCatIdx ? 'fnos-cat-in-r' : 'fnos-cat-in-l') + ' .22s cubic-bezier(.25,.7,.3,1) both';
+      _lastCatIdx = nextIdx;
       for (const c of cats) {
         const on = c.id === id;
         const pane = panes[c.id];
-        if (!pane) continue;
-        pane.style.display = on ? 'flex' : 'none';
+        if (pane) {
+          pane.style.display = on ? 'flex' : 'none';
+          pane.style.animation = on ? anim : 'none';
+          if (on) pane.scrollTop = 0; // 换分类回到顶部，避免停留在上一个分类的滚动深处
+        }
         const b = navBtns[c.id];
         if (!b) continue;
         if (on) {
           b.style.background = 'var(--fnos-ui-accent)!important';
           b.style.color = '#fff';
           b.style.fontWeight = '700';
-          b.style.borderColor = 'var(--fnos-ui-accent)';
+          b.style.borderColor = 'transparent';
         } else {
           b.style.background = 'transparent';
           b.style.color = 'var(--fnos-ui-text)';
@@ -4070,7 +4110,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       btn.type = 'button';
       btn.textContent = cat.label;
       btn.style.cssText = 'text-align:left;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;'
-        + 'border:1px solid transparent;background:transparent;color:var(--fnos-ui-text);transition:background .13s;'
+        + 'border:1px solid transparent;background:transparent;color:var(--fnos-ui-text);'
+        + 'transition:background .16s ease,color .16s ease;'
         + 'font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
         + '-webkit-app-region:no-drag;app-region:no-drag;';
       btn.onmouseenter = () => { if (btn.style.background.indexOf('accent') === -1) btn.style.background = 'var(--fnos-ui-row-hover)'; };
