@@ -4,7 +4,8 @@
  */
 
 import { ChildProcess } from 'child_process';
-import { app, dialog } from 'electron';
+import { app } from 'electron';
+import { appDialog } from './appDialog';
 import * as log from '../../modules/logger';
 
 interface ProxyDaemonConfig {
@@ -83,12 +84,13 @@ export class ProxyDaemon {
             const errorMsg = `Proxy进程频繁异常退出，已达到最大重启次数 (${this.config.maxRestartAttempts})，应用即将退出`;
             log.error(errorMsg);
             
-            // 显示用户友好的错误提示
-            dialog.showMessageBox({
+            // 显示用户友好的错误提示（[lc-1057] 原生 showMessageBox → 渐变玻璃 appDialog）
+            appDialog({
                 type: 'error',
                 title: '应用即将退出',
                 message: '飞牛影视的核心服务（Proxy）多次启动失败，无法继续运行。',
-                buttons: ['退出应用']
+                buttons: ['退出应用'],
+                defaultId: 0
             }).then(() => {
                 // 延迟退出，确保日志和清理操作能够完成
                 setTimeout(() => {

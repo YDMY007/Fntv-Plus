@@ -1,4 +1,5 @@
-import { BrowserWindow, IpcMainEvent, session, dialog } from 'electron';
+import { BrowserWindow, IpcMainEvent, session } from 'electron';
+import { appDialog } from '../../common/appDialog';
 import * as net from 'net';
 import { getMainWindow } from '../../common/mainwin';
 import { ApiService } from '../../../modules/fn_api/api';
@@ -542,7 +543,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         if (relayWatchdog) { clearTimeout(relayWatchdog); relayWatchdog = null; }
         if (relayPollTimer) { clearTimeout(relayPollTimer); relayPollTimer = null; }
         log.error(`[FN ID] 官方中继连接失败: ${reason}`);
-        dialog.showMessageBox({
+        appDialog({ // [lc-1057] 原生 showMessageBox → 渐变玻璃 appDialog
             type: 'error',
             title: '官方中继连接失败',
             message: '无法通过官方中继完成飞牛 ID 登录',

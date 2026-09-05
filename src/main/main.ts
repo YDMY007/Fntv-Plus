@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification, dialog } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -14,6 +14,7 @@ import * as log from '../modules/logger';
 import { getMainWindow } from './common/mainwin';
 import { isTrusted } from '../modules/cert_trust';
 import { startProxyProcess, shutdownProxyProcess } from './common/proxy';
+import { appDialog } from './common/appDialog';
 import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
 import { reconcilePatchStateOnStartup } from '../modules/patcher/patchApplier';
 
@@ -105,8 +106,8 @@ async function checkNonAsciiPathBlocking(): Promise<boolean> {
         const bad = [exe, userData].filter(p => /[^\x00-\x7F]/.test(p));
         if (bad.length === 0) return false;
         log.warn('[启动检查] 检测到安装/用户目录含非 ASCII 字符: ' + bad.join(' ; '));
-        const { response } = await dialog.showMessageBox({
-            type: 'warning',
+        const response = await appDialog({
+            type: 'warn',
             title: '安装路径不兼容',
             message: '检测到程序安装目录或系统用户目录包含中文 / 非英文字符：\n\n' + bad.join('\n') +
                 '\n\n这会导致内置代理服务或外部播放器（MPV / PotPlayer）无法启动，表现为「程序打不开」「闪退」或「无弹幕」。\n' +
@@ -115,7 +116,6 @@ async function checkNonAsciiPathBlocking(): Promise<boolean> {
             buttons: ['退出并重装到英文路径', '仍要继续运行（风险自担）'],
             defaultId: 0,
             cancelId: 1,
-            noLink: true,
         });
         // 选「退出并重装」(response===0) 才阻断; 选「继续」则放行(风险自担)
         return response === 0;
@@ -140,12 +140,12 @@ if (!gotTheLock) {
     // 仍未能获取锁: 可能是同名新版本进程残留(关窗不退进程)。给出明确提示而非静默秒退。
     log.warn('[启动] 未能获取单实例锁, 另一个实例可能仍在运行');
     app.whenReady().then(() => {
-        dialog.showMessageBox({
+        appDialog({
             type: 'info',
             title: '程序已在运行',
             message: '检测到本程序另一个实例正在运行（或旧版本进程未完全退出）。\n\n请先通过托盘图标退出，或在任务管理器结束 Fntv-Plus / FNMedia 进程后重新启动。',
             buttons: ['知道了'],
-            noLink: true,
+            defaultId: 0,
         }).then(() => app.quit());
     });
 } else {
