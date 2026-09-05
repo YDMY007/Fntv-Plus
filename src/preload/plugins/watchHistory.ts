@@ -2119,4 +2119,11 @@ function handle(): void {
 
 registerHook(HookType.OnReady, handle);
 
-export {};
+// [lc-1062] 供年度观影报告模块(watchReport.ts)读取当前数据（浅拷贝）
+export function getWatchReportData(): ShowItem[] {
+    return curData.slice();
+}
+/** 会话时间字符串 → 时间戳（复用面板内解析规则，含 SAMPLE 格式兜底） */
+export function getSessionTs(s: string): number {
+    return parseSessionDate(s);
+}
