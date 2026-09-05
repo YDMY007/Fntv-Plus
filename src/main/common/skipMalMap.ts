@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { extRequestJson } from './externalFetch';
 import log from '../../modules/logger';
 import { getDailyCached } from './dailyCache';
 
@@ -12,10 +12,10 @@ const MAP_TIMEOUT = 12000; // 每剧仅映射一次(30 天缓存)，慢一点无
 
 async function bangumiNativeTitle(title: string): Promise<string | null> {
     try {
-        const r = await axios.post('https://api.bgm.tv/v0/search/subjects?limit=3',
-            { keyword: title, filter: { type: [2] } },
-            { timeout: MAP_TIMEOUT, headers: { 'User-Agent': BGM_UA, 'Content-Type': 'application/json' } });
-        const top = r.data?.data?.[0];
+        const r = await extRequestJson('POST', 'https://api.bgm.tv/v0/search/subjects?limit=3',
+            { data: { keyword: title, filter: { type: [2] } },
+              timeout: MAP_TIMEOUT, headers: { 'User-Agent': BGM_UA, 'Content-Type': 'application/json' } });
+        const top = r?.data?.[0];
         return top?.name ? String(top.name) : null;
     } catch (e) {
         log.warn('[skip:malmap] Bangumi 搜索失败:', (e as Error).message);
@@ -25,9 +25,9 @@ async function bangumiNativeTitle(title: string): Promise<string | null> {
 
 async function jikanMalId(name: string): Promise<number | null> {
     try {
-        const r = await axios.get(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(name)}&limit=1`,
+        const r = await extRequestJson('GET', `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(name)}&limit=1`,
             { timeout: MAP_TIMEOUT, headers: { 'User-Agent': BGM_UA } });
-        const mal = r.data?.data?.[0]?.mal_id;
+        const mal = r?.data?.[0]?.mal_id;
         return typeof mal === 'number' ? mal : null;
     } catch (e) {
         log.warn('[skip:malmap] Jikan 搜索失败:', (e as Error).message);
@@ -38,10 +38,10 @@ async function jikanMalId(name: string): Promise<number | null> {
 async function anilistMalId(name: string): Promise<number | null> {
     try {
         const q = 'query($s:String){Media(search:$s,type:ANIME){id idMal}}';
-        const r = await axios.post('https://graphql.anilist.co',
-            { query: q, variables: { s: name } },
-            { timeout: MAP_TIMEOUT, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } });
-        const mal = r.data?.data?.Media?.idMal;
+        const r = await extRequestJson('POST', 'https://graphql.anilist.co',
+            { data: { query: q, variables: { s: name } },
+              timeout: MAP_TIMEOUT, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } });
+        const mal = r?.data?.Media?.idMal;
         return typeof mal === 'number' ? mal : null;
     } catch (e) {
         log.warn('[skip:malmap] AniList 搜索失败:', (e as Error).message);
