@@ -1121,14 +1121,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       b.type = 'button';
       b.textContent = text;
       if (small) {
+        // [lc-1043] 去描边：玻璃卡面上的按钮靠填充明度分层（用户审美：无边框）
         b.style.cssText = 'padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;'
-          + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text);border:1px solid var(--fnos-ui-border-strong);'
+          + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text);border:none;'
           + 'transition:background .15s;';
         b.onmouseenter = () => { b.style.background = 'var(--fnos-ui-btn-hover)!important'; };
         b.onmouseleave = () => { b.style.background = 'var(--fnos-ui-btn-bg)!important'; };
       } else {
         b.style.cssText = 'flex:1;padding:9px 10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600;'
-          + 'background:var(--fnos-ui-btn-bg2)!important;color:var(--fnos-ui-btn-text);border:1px solid var(--fnos-ui-border3);'
+          + 'background:var(--fnos-ui-btn-bg2)!important;color:var(--fnos-ui-btn-text);border:none;'
           + 'transition:background .15s;';
         b.onmouseenter = () => { b.style.background = 'var(--fnos-ui-btn-hover2)!important'; };
         b.onmouseleave = () => { b.style.background = 'var(--fnos-ui-btn-bg2)!important'; };
@@ -1142,7 +1143,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   组间距交给 pane 的 gap，卡片自身不再带 margin。
     const section = (titleText?: string): { el: HTMLElement; body: HTMLElement } => {
       const d = document.createElement('div');
+      // [lc-1043] 卡面叠 165deg 光泽渐变（glassUI ② 同配方，与面板流光玻璃统一语言）
       d.style.cssText = 'border-radius:14px;background:var(--fnos-ui-input-bg)!important;'
+        + 'background-image:linear-gradient(165deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.012) 60%)!important;'
         + 'overflow:hidden;display:flex;flex-direction:column;';
 
       // 可选分组标题
@@ -1177,7 +1180,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         + '@keyframes fnos-cat-in-r{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}'
         + '@keyframes fnos-cat-in-l{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}'
         + '#fnos-settings-panel{animation:fnos-panel-in .2s ease-out both}'
-        + '#fnos-settings-mask{animation:fnos-panel-in .28s ease-out both}}'
+        + '#fnos-settings-mask{animation:fnos-panel-in .28s ease-out both}'
+        // [lc-1043] 流光玻璃：一道 55% 宽的斜向高光带每 7s 扫过面板(z-index:-1 —— 面板有
+        //   transform 即层叠上下文，::before 落在面板底色之上、内容之下；overflow:hidden 裁圆角)。
+        + '#fnos-settings-panel::before{content:"";position:absolute;top:-12%;bottom:-12%;left:0;width:55%;'
+        + 'pointer-events:none;z-index:-1;'
+        + 'background:linear-gradient(105deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.05) 35%,'
+        + 'rgba(255,255,255,.13) 50%,rgba(255,255,255,.05) 65%,rgba(255,255,255,0) 100%);'
+        + 'transform:translateX(-160%) skewX(-14deg);animation:fnos-sheen 7s ease-in-out infinite;}'
+        + '@keyframes fnos-sheen{0%{transform:translateX(-160%) skewX(-14deg)}55%,100%{transform:translateX(310%) skewX(-14deg)}}}'
         + '#fnos-settings-panel input[type=checkbox]{'
         + '-webkit-appearance:none;appearance:none;width:38px;height:22px;border-radius:11px;flex-shrink:0;margin:0;'
         + 'background:var(--fnos-ui-border-strong,rgba(120,120,128,.32));position:relative;cursor:pointer;'
@@ -1199,9 +1210,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       //   overflow-y:auto 实现"面板恒定、内容内部滚动"。
       + 'height:min(820px,calc(100vh - 100px));max-height:calc(100vh - 100px);overflow:hidden;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
       + 'background:var(--fnos-ui-panel-bg)!important;'
+      // [lc-1043] 165deg 顶缘受光光泽渐变 —— 与 glassUI ② 卡片材质同配方，风格统一
+      + 'background-image:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.015) 45%,rgba(255,255,255,.005) 100%)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
-      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14),inset 0 1px 0 rgba(255,255,255,.6);'
-      + 'border-radius:18px;border:1px solid var(--fnos-ui-border-outer);'
+      // [lc-1043] 去 1px 描边改 inset 玻璃厚度环（glassUI ② 同款三层阴影语言；用户审美：无边框）
+      + 'box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.5),0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'border-radius:18px;'
       // 飞牛导航栏带 -webkit-app-region:drag; 若面板不声明 no-drag, 覆盖在导航栏上方时点击会被系统当成拖拽窗口吞掉
       + '-webkit-app-region:no-drag;app-region:no-drag;';
     overlay.addEventListener('click', (e: Event) => e.stopPropagation());
@@ -1223,9 +1237,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
 
     // 头部(标题+关闭)
+    // [lc-1043] 去标题下发丝线（用户审美：无线条），分区靠留白
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:15px 16px 12px;'
-      + 'border-bottom:1px solid var(--fnos-ui-border);flex-shrink:0;';
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:15px 16px 12px;flex-shrink:0;';
     const title = document.createElement('span');
     title.textContent = '⚙ 设置';
     title.style.cssText = 'font-size:15px;font-weight:700;color:var(--fnos-ui-text);letter-spacing:.3px;';
@@ -1253,8 +1267,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const bodyRow = document.createElement('div');
     bodyRow.style.cssText = 'display:flex;flex:1 1 auto;min-height:0;';
     const leftNav = document.createElement('div');
+    // [lc-1043] 去右缘发丝线，导航区靠自身浅色底区分
     leftNav.style.cssText = 'flex:0 0 30%;max-width:200px;min-width:130px;overflow-y:auto;'
-      + 'border-right:1px solid var(--fnos-ui-border);padding:10px 8px;display:flex;flex-direction:column;gap:5px;'
+      + 'padding:10px 8px;display:flex;flex-direction:column;gap:5px;'
       + 'background:var(--fnos-ui-nav-bg, rgba(125,110,160,.06));';
     const rightContent = document.createElement('div');
     rightContent.style.cssText = 'flex:1 1 auto;min-width:0;overflow-y:auto;padding:14px 16px 16px;';
@@ -2478,7 +2493,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     dcRow.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fnos-ui-text);cursor:pointer;margin-bottom:8px;';
     const dcToggle = document.createElement('input');
     dcToggle.type = 'checkbox';
-    dcToggle.style.cssText = 'width:16px;height:16px;cursor:pointer;';
+    // [lc-1043] 原内联 width:16px;height:16px 已删：inline 压掉面板全局 iOS 开关样式
+    // （38×22 轨道 + ::after 滑块），18px 滑块从 16px 轨道溢出压住「启」字（用户截图报障）。
+    // 交由 #fnos-settings-panel input[type=checkbox] 统一渲染，与其余 9 处开关同款。
     const dcToggleLabel = document.createElement('span');
     dcToggleLabel.textContent = '启用免梯子直连';
     dcRow.appendChild(dcToggle);
