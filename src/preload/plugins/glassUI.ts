@@ -54,7 +54,7 @@ const DEF = {
   sat: 150,
   bright: 100,
   bg: 'fluid',
-  fluidSpeed: 1,
+  // [lc-1026] fluidSpeed 已随漂移动画移除（K.fluidSpeed 仅供 migrateSchema 清旧值）
   particles: false,
   border: true,
   borderAlpha: 0.2,
@@ -92,7 +92,7 @@ function setStr(k: string, v: string): void { try { localStorage.setItem(k, v); 
 // ── 读取全部设置 ──
 interface GlassSettings {
   enabled: boolean; mode: string; tint: string; blur: number; frost: number; sat: number;
-  bright: number; bg: string; fluidSpeed: number; particles: boolean;
+  bright: number; bg: string; particles: boolean;
   border: boolean; borderAlpha: number; shadow: number; noise: boolean; vignette: boolean;
 }
 function readSettings(): GlassSettings {
@@ -105,7 +105,6 @@ function readSettings(): GlassSettings {
     sat: getNum(K.sat, DEF.sat),
     bright: getNum(K.bright, DEF.bright),
     bg: getStr(K.bg, DEF.bg),
-    fluidSpeed: getNum(K.fluidSpeed, DEF.fluidSpeed),
     particles: getBool(K.particles, DEF.particles),
     border: getBool(K.border, DEF.border),
     borderAlpha: getNum(K.borderAlpha, DEF.borderAlpha),
@@ -134,9 +133,11 @@ const GATE_CSS = `
     --fntv-glass-sheen-1: .10;
     --fntv-glass-sheen-2: .028;
     --fntv-amb-base: #eef0f7;
-    --fntv-amb-1: rgba(178, 158, 232, .40);
-    --fntv-amb-2: rgba(148, 196, 236, .36);
-    --fntv-amb-3: rgba(186, 222, 206, .32);
+    /* [lc-1026] 拆 rgb/alpha 分量：底座挪到 body 背景后不能再挂 filter（见 ①c），
+       「背景亮度」滑杆改为直接缩放色域 alpha（对深底=等效压暗/提亮）。 */
+    --fntv-amb-1-rgb: 178 158 232; --fntv-amb-1-a: .40;
+    --fntv-amb-2-rgb: 148 196 236; --fntv-amb-2-a: .36;
+    --fntv-amb-3-rgb: 186 222 206; --fntv-amb-3-a: .32;
   }
   html.dark[data-fntv-glass] {
     --fntv-glass-tint-r: 30;
@@ -145,9 +146,9 @@ const GATE_CSS = `
     --fntv-glass-sheen-1: .05;
     --fntv-glass-sheen-2: .012;
     --fntv-amb-base: #0d0d15;
-    --fntv-amb-1: rgba(118, 84, 218, .50);
-    --fntv-amb-2: rgba(26, 106, 188, .46);
-    --fntv-amb-3: rgba(18, 126, 112, .36);
+    --fntv-amb-1-rgb: 118 84 218; --fntv-amb-1-a: .50;
+    --fntv-amb-2-rgb: 26 106 188; --fntv-amb-2-a: .46;
+    --fntv-amb-3-rgb: 18 126 112; --fntv-amb-3-a: .36;
   }
   /* Compat 模式：明暗主题都强制深灰玻璃 */
   html[data-fntv-glass][data-fntv-glass-mode="compat"] {
@@ -164,7 +165,16 @@ const GATE_CSS = `
         这正是云母增强此前"什么都没生效"的根因之一。一律用复合选择器。
      body 一并清掉：mainwin 的 body 亚克力(半透+backdrop-filter)在玻璃模式下
         被环境光层盖住不可见, 但 GPU 仍在持续为它做全窗模糊(纯浪费)。 */
-  html[data-fntv-glass].fnos-tv-page,
+  /* ① 接管页面根容器：关闭整窗亚克力（改由组件级磨砂）。
+     [lc-1026] html 拆成独立一条且**不再纯透明**：CSS 规定 html 背景为纯透明时
+     body 背景会**传播到画布**（画布恒方形、不受圆角/clip-path 裁剪 → lc-1025
+     四角白边正是这么来的）；rgba(...,0.003) 非纯透明即阻断传播，视觉不可感知。 */
+  html[data-fntv-glass].fnos-tv-page {
+    background: rgba(255, 255, 255, 0.003) !important;
+    background-color: rgba(255, 255, 255, 0.003) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
   html[data-fntv-glass].fnos-tv-page body {
     background: transparent !important;
     background-color: transparent !important;
@@ -193,14 +203,23 @@ const GATE_CSS = `
     background-color: transparent !important;
   }
 
-  /* ①c [lc-1025] 防全透明底座 v2 —— 从 html 画布挪到 #fntv-glass-bg 本体。
-     [lc-1023] 曾把底色铺在 html 根上：根元素背景会**传播到画布**且画布背景恒为方形、
-     不受 html 的 border-radius/clip-path 裁剪 → 窗口 16px 圆角的四角弧外露出底色
-     （浅色主题 #eef0f7 = 用户报障的「左上/右上角细白边」）。画布背景无法圆角，
-     ∴ 底座改铺在 #fntv-glass-bg 本体：它本就是 position:fixed 圆角层（见 ③），
-     自带实心底后，即便动画流体子层整层失效也仍有纯色 Mica 垫底（lc-1023 的
-     46px 大模糊已移除，本层现为无滤镜无动画的最简 div，不存在当年的失效面）。
-     「背景层: 无」(bg=none) 时该层整个不创建，透桌面语义不变。 */
+  /* ①c [lc-1026] 环境光底座 v3 —— 画在 **body 背景**上，彻底弃用独立合成层。
+     用户三轮报障「经常全透、强制刷新才恢复」（lc-1023/1025 两次修复后真机依旧）：
+     z-index:-1 的 #fntv-glass-bg 是独立合成层，透明窗口 + GPU 合成下偶发整层不画，
+     强刷重建层树后才恢复（普通浏览器从未复现 → 之前两次修复都只压对了 GC 一半）。
+     body 背景走主流水线 phase-3 作画：不占合成层调度、不随导航增删层而被丢弃、
+     body 本身永不卸载 → 结构上不可能全透。代价：氛围色域改静态——漂移动画需
+     transform 合成层 = 回到失效面，弃用（漂移速度滑杆一并移除）。
+     四角：body 自带 border-radius:16px(mainwin ②) + html clip-path 裁剪，且 html
+     0.003 底(见 ①)阻断 body→画布传播，无 lc-1025 白边回归。
+     「背景层: 无」(bg=none) 时不匹配本条，body 保持透明 = 透桌面语义。 */
+  html[data-fntv-glass][data-fntv-glass-bg="fluid"].fnos-tv-page body {
+    background:
+      radial-gradient(42vmax 42vmax at 16% 10%, rgb(var(--fntv-amb-1-rgb) / calc(var(--fntv-amb-1-a) * var(--fntv-glass-bright, 1))) 0%, transparent 62%),
+      radial-gradient(38vmax 38vmax at 84% 18%, rgb(var(--fntv-amb-2-rgb) / calc(var(--fntv-amb-2-a) * var(--fntv-glass-bright, 1))) 0%, transparent 60%),
+      radial-gradient(48vmax 48vmax at 52% 92%, rgb(var(--fntv-amb-3-rgb) / calc(var(--fntv-amb-3-a) * var(--fntv-glass-bright, 1))) 0%, transparent 65%),
+      var(--fntv-amb-base, #eef0f7) !important;
+  }
 
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
@@ -243,54 +262,20 @@ const GATE_CSS = `
      [lc-1025] 四角必须跟随窗口 16px 圆角：这些层几何上都是全窗方形，若不圆角，
      弧外四角会露出层本色（玻璃暗角/噪点颗粒/粒子点）。html 的 clip-path 会裁
      普通流与 fixed 后代，但底色画在层上就该自己圆角，不依赖那份兜底。 */
-  #fntv-glass-bg, #fntv-glass-particles {
+  /* ③ [lc-1026] 粒子层：从 z:-1 提到 z:2 —— body 已承载不透明环境底（主流水线作画，
+     见 ①c），z:-1 独立合成层整条路径弃用；粒子浮在内容之上、pointer-events:none
+     不拦交互，z:2 低于 fnOS 顶栏/弹窗的 z-10/z-20。 */
+  #fntv-glass-particles {
     position: fixed !important;
     inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
-    z-index: -1 !important;
+    z-index: 2 !important;
     pointer-events: none !important;
     margin: 0 !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 16px !important;
-  }
-  /* [lc-1025] 底座实心底（①c）：ID 特异性 (1,0,0) 压过 ①b 的 body>div 透明化 (0,2,3)。 */
-  #fntv-glass-bg {
-    overflow: hidden !important;
-    background: var(--fntv-amb-base, #eef0f7) !important;
-  }
-  #fntv-glass-bg > * {
-    position: absolute !important;
-    inset: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover !important;
-  }
-  /* [lc-1012] 环境光(Ambient)背景：三团低饱和 radial 色域铺在近黑/近白底上,
-     整体极慢漂移缩放(36s 级)。对标 Win11 聚焦壁纸/ macOS Sonoma 渐变的「氛围」,
-     替换旧版高饱和彩虹渐变+粉青光斑(假玻璃感的最大来源)。 */
-  #fntv-glass-fluid {
-    background:
-      radial-gradient(42vmax 42vmax at 16% 10%, var(--fntv-amb-1) 0%, transparent 62%),
-      radial-gradient(38vmax 38vmax at 84% 18%, var(--fntv-amb-2) 0%, transparent 60%),
-      radial-gradient(48vmax 48vmax at 52% 92%, var(--fntv-amb-3) 0%, transparent 65%),
-      var(--fntv-amb-base) !important;
-    /* [lc-1023] 去掉 46px 全屏高斯模糊：radial 渐变止点(60%+ 处才触透明)本身已极软，
-       大模糊让整层变成全屏高斯合成重层 —— 真机整层画不出的头号嫌疑 + 持续 GPU 烧灼，
-       软度交给渐变曲线本身。
-       [lc-1025] 亮度滑杆从父层 inline filter 挪到这里（CSS 变量驱动）：父层 #fntv-glass-bg
-       现承载底座实心底，必须保持零 filter/零动画的最简形态——任何 filter 都会让它变成
-       合成层，重蹈 lc-1023「复杂层画不出」的覆辙。代价仅是底座在子层失效的极端场景下
-       不跟随亮度滑杆（纯色退化态，可接受）。 */
-    filter: brightness(var(--fntv-glass-bright, 1)) !important;
-    transform: scale(1.1) !important;
-    animation: fntvAmbient calc(36s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite alternate !important;
-  }
-  @keyframes fntvAmbient {
-    0%   { transform: scale(1.1) translate(0, 0); }
-    50%  { transform: scale(1.18) translate(-1.6%, 1.2%); }
-    100% { transform: scale(1.1) translate(1.2%, -1.5%); }
   }
 
   /* ④ [lc-1012] 噪点 → 表面颗粒：旧版铺在 z:-1（在卡片后方，被卡片自己的
@@ -315,12 +300,17 @@ const GATE_CSS = `
     display: block !important;
   }
 
-  /* ⑤ 背景层暗角：增强层次（仅玻璃开启 + 有背景层时） */
-  html[data-fntv-glass][data-fntv-glass-vignette="1"] #fntv-glass-bg::after {
+  /* ⑤ 背景层暗角：增强层次（仅玻璃开启 + 显式开启时）。
+     [lc-1026] 从 #fntv-glass-bg::after 挪到 body::before（bg 层已删，见 ①c）。
+     fixed+无 z-index=定位元素 phase-6 作画：在 body 底之上、非定位内容之上、
+     fnOS 的 z-10/z-20 顶栏与弹窗之下；暗角压的是画面边缘，盖内容边缘符合预期。 */
+  html[data-fntv-glass][data-fntv-glass-vignette="1"].fnos-tv-page body::before {
     content: "" !important;
-    position: absolute !important;
+    position: fixed !important;
     inset: 0 !important;
+    z-index: 5 !important;
     pointer-events: none !important;
+    border-radius: 16px !important;
     background: radial-gradient(ellipse at center, rgba(0,0,0,0) 50%, rgba(0,0,0,0.38) 100%) !important;
   }
 
@@ -361,7 +351,6 @@ const GATE_CSS = `
 
 // ── 运行时引用 ──
 let styleEl: HTMLStyleElement | null = null;
-let bgLayer: HTMLElement | null = null;
 let noiseEl: HTMLElement | null = null;
 let particleCanvas: HTMLCanvasElement | null = null;
 let particleRAF = 0;
@@ -384,28 +373,9 @@ function detectLightMode(): boolean {
   } catch (_) { return false; }
 }
 
-// ── 构建背景层（按 bg 源）──
-function buildBgLayer(s: GlassSettings): void {
-  destroyBgLayer();
-  if (!s.enabled || s.bg === 'none') return; // none：保留桌面透出，不加背景层
-  const layer = document.createElement('div');
-  layer.id = 'fntv-glass-bg';
-  // [lc-1025] 亮度不再挂父层 inline filter（挪到流体子层的 --fntv-glass-bright），
-  // 父层保持零 filter/零动画的最简实心底座形态（理由见 ③ 段 CSS 头注）。
-
-  // 背景层仅保留流体动态（壁纸/视频已移除）；其余取值统一回落为流体
-  const fluid = document.createElement('div');
-  fluid.id = 'fntv-glass-fluid';
-  layer.appendChild(fluid);
-
-  (document.body || document.documentElement).appendChild(layer);
-  bgLayer = layer;
-}
-
-function destroyBgLayer(): void {
-  if (bgLayer && bgLayer.parentElement) bgLayer.parentElement.removeChild(bgLayer);
-  bgLayer = null;
-}
+// ── [lc-1026] 背景底座已改为纯 CSS（body 背景，见 GATE_CSS ①c）——
+// 不再有任何 JS 创建/销毁的背景节点：旧 #fntv-glass-bg 独立合成层在真机透明窗口上
+// 偶发整层不画（用户三轮报障「经常全透、强刷才恢复」），整条作画路径弃用。
 
 // ── 噪点层（创建一次，display 由 data 属性控制）──
 function ensureNoiseLayer(): void {
@@ -557,9 +527,8 @@ function applyGlass(): void {
     root.style.setProperty('--fntv-glass-border-alpha', String(s.borderAlpha));
     root.style.setProperty('--fntv-glass-shadow', String(s.shadow));
 
-    // 流体动画速度倍率（>1 更快，<1 更慢）
-    root.style.setProperty('--fntv-glass-fluid-speed', String(s.fluidSpeed));
-    // [lc-1025] 背景亮度：驱动流体子层的 brightness（父层底座不再挂 filter，见 ③ 段头注）
+    // [lc-1025→1026] 背景亮度：驱动 body 环境底的色域 alpha（见 GATE_CSS ①c）。
+    // （漂移动画已随独立合成层一并移除，--fntv-glass-fluid-speed 不再使用）
     root.style.setProperty('--fntv-glass-bright', String(s.bright / 100));
 
     // 浅色模式检测：取 .fnos-tv-page 或 body 的背景亮度，亮底时自动弱化边框+阴影（避免"画线"感）
@@ -574,8 +543,10 @@ function applyGlass(): void {
       root.setAttribute('data-fntv-glass-noise', s.noise ? '1' : '0');
       root.setAttribute('data-fntv-glass-vignette', s.vignette ? '1' : '0');
       ensureNoiseLayer();
-      buildBgLayer(s);
       if (s.particles) startParticles(); else stopParticles();
+      // [lc-1026] 诊断锚点：真机再出「全透」时，控制台按此行确认 applyGlass 是否跑过、
+      // 以及 html[data-fntv-glass-bg] 属性在不在——区分「状态没应用」与「合成层没画」。
+      console.info(LOG, 'applied: mode=' + s.mode + ' bg=' + s.bg + ' root[' + s.enabled + ']');
       // JS 兜底：强制清空顶栏祖先样式（行内 > CSS !important，覆盖 mainwin.ts insertCSS）
       neutralizeTopBar();
       setTimeout(neutralizeTopBar, 800);
@@ -589,7 +560,6 @@ function applyGlass(): void {
       root.removeAttribute('data-fntv-glass-is-light');
       root.removeAttribute('data-fntv-glass-noise');
       root.removeAttribute('data-fntv-glass-vignette');
-      destroyBgLayer();
       stopParticles();
     }
   } catch (err) {
@@ -793,12 +763,12 @@ function buildGlassControls(): HTMLElement {
     { value: 'fluid', label: '环境光' },
   ], s.bg, (v) => { setStr(K.bg, v); applyGlass(); }));
 
-  // 模糊 / 磨砂 / 饱和度 / 亮度 / 漂移速度
+  // 模糊 / 磨砂 / 饱和度 / 亮度 / 边框 / 阴影
   foldBody.appendChild(rangeRow('组件模糊', 0, 40, 1, s.blur, 'px', (v) => { setStr(K.blur, String(v)); applyGlass(); }));
   foldBody.appendChild(rangeRow('玻璃浓度', 0, 100, 1, Math.round(s.frost * 100), '%', (v) => { setStr(K.frost, String(v / 100)); applyGlass(); }));
   foldBody.appendChild(rangeRow('饱和度', 100, 200, 1, s.sat, '%', (v) => { setStr(K.sat, String(v)); applyGlass(); }));
+  // [lc-1026] 「漂移速度」滑杆已随漂移动画移除；「背景亮度」现驱动环境底色域 alpha
   foldBody.appendChild(rangeRow('背景亮度', 40, 160, 1, s.bright, '%', (v) => { setStr(K.bright, String(v)); applyGlass(); }));
-  foldBody.appendChild(rangeRow('漂移速度', 0.3, 3, 0.1, s.fluidSpeed, 'x', (v) => { setStr(K.fluidSpeed, String(v)); applyGlass(); }));
 
   // 边框 / 阴影（控制"廉价感"的关键）
   const borderTog = mkToggle();
