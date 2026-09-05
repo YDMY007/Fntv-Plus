@@ -151,19 +151,82 @@ function mkSmallBtn(text: string): HTMLButtonElement {
   return b;
 }
 
-/** 深色展示底（白色主体的 logo 在浅色 UI 上看不见，统一垫深色 + 细微棋盘感）。 */
-const CHIP_BG = 'linear-gradient(165deg,rgba(28,24,38,.88),rgba(18,15,26,.92))';
+/** 深色展示底：仅白色主体的 logo（Disney+/Prime/芒果/HBO Max 字标/Hulu/Peacock 及亮色自定义图）
+ *  需要——它们在浅色玻璃面板上不可见。[lc-1050] 其余一律透明展示，不再默认垫黑（用户审美）。 */
+const CHIP_DARK = 'linear-gradient(165deg,rgba(28,24,38,.88),rgba(18,15,26,.92))';
+
+/** [lc-1050] 自定义/默认 logo 的亮度检测（预设走 lightBody 清单无需检测）：把图绘制到小画布上
+ *  求可见像素平均亮度，>0.72 视为「白色主体」→ 需要深色垫底才可见。解析/画布异常不误判（当深色处理）。
+ *  结果按 dataURL 缓存（同一 logo 反复刷新卡片不重复算）。 */
+const _lightCache = new Map<string, boolean>();
+function isLightLogoDataUrl(dataUrl: string): Promise<boolean> {
+  if (!dataUrl) return Promise.resolve(false);
+  const hit = _lightCache.get(dataUrl);
+  if (hit !== undefined) return Promise.resolve(hit);
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => {
+      try {
+        const w = im.naturalWidth, h = im.naturalHeight;
+        if (!w || !h) { _lightCache.set(dataUrl, false); resolve(false); return; }
+        const c = document.createElement('canvas');
+        c.width = Math.min(w, 64); c.height = Math.min(h, 64);
+        const ctx = c.getContext('2d');
+        if (!ctx) { _lightCache.set(dataUrl, false); resolve(false); return; }
+        ctx.drawImage(im, 0, 0, c.width, c.height);
+        const px = ctx.getImageData(0, 0, c.width, c.height).data;
+        let vis = 0, lumSum = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          if (px[i + 3] < 16) continue; // 透明像素跳过
+          vis++;
+          lumSum += (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+        }
+        const light = vis > 0 && lumSum / vis > 0.72;
+        _lightCache.set(dataUrl, light);
+        resolve(light);
+      } catch { resolve(false); }
+    };
+    im.onerror = () => resolve(false);
+    im.src = dataUrl;
+  });
+}
+
+function isLightPreset(presetId?: string): boolean {
+  if (!presetId) return false;
+  const p = PRESETS.find((x) => x.id === presetId);
+  return !!(p && p.lightBody);
+}
 
 function refreshCard(): void {
   const card = document.getElementById('fntv-logo-ctrl');
   if (!card) return;
   const label = card.querySelector('#fntv-logo-cur-label') as HTMLElement | null;
   const thumb = card.querySelector('#fntv-logo-cur-thumb') as HTMLImageElement | null;
+  const chip = card.querySelector('#fntv-logo-cur-chip') as HTMLElement | null;
   if (label) label.textContent = currentLabel();
+  const choice = getChoice();
+  const uri = currentThumbUri();
   if (thumb) {
-    const uri = currentThumbUri();
     if (uri) { thumb.src = uri; thumb.style.display = 'block'; }
     else thumb.style.display = 'none';
+  }
+  // [lc-1050] 自适应垫底：默认/普通预设(彩色或深色 logo)透明展示不垫黑；仅白色主体 logo
+  //  (lightBody 预设 / canvas 亮度检测出来的亮色自定义图)才垫深色，否则浅色面板上看不见。
+  if (chip) {
+    if (choice.type === 'preset') {
+      chip.style.background = isLightPreset(choice.presetId) ? CHIP_DARK : 'transparent';
+    } else {
+      chip.style.background = 'transparent';
+      if (uri) {
+        void isLightLogoDataUrl(uri).then((light) => {
+          // 异步回来时选项可能已切换 → 只在同选项下应用
+          const now = getChoice();
+          if ((now.type === 'custom') === (choice.type === 'custom') && chip.isConnected) {
+            chip.style.background = light ? CHIP_DARK : 'transparent';
+          }
+        });
+      }
+    }
   }
 }
 
@@ -186,8 +249,9 @@ function buildCard(): HTMLElement {
   const cur = document.createElement('div');
   cur.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:10px;';
   const thumbWrap = document.createElement('div');
-  thumbWrap.style.cssText = 'width:86px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;'
-    + 'background:' + CHIP_BG + ';';
+  thumbWrap.id = 'fntv-logo-cur-chip';
+  thumbWrap.style.cssText = 'min-width:86px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;'
+    + 'padding:0 8px;background:transparent;'; // [lc-1050] 默认透明，仅亮色 logo 异步切深色垫底
   const thumb = document.createElement('img');
   thumb.id = 'fntv-logo-cur-thumb';
   thumb.alt = '';
@@ -329,7 +393,7 @@ export function openPresetPanel(): void {
   const pvChip = document.createElement('div');
   pvChip.id = 'fntv-logo-pv-chip';
   pvChip.style.cssText = 'width:150px;height:52px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;'
-    + 'background:' + CHIP_BG + ';';
+    + 'background:transparent;'; // [lc-1050] 自适应：选中亮色 logo 时才切深色垫底
   const pvImg = document.createElement('img');
   pvImg.id = 'fntv-logo-pv-img';
   pvImg.alt = '';
@@ -360,6 +424,7 @@ export function openPresetPanel(): void {
     pvHint.textContent = p
       ? (p.lightBody ? '已应用 ✓（白色主体 logo，建议深色背景使用）' : '已应用 ✓')
       : '点击下方任意预设，立即生效并自动关闭。';
+    pvChip.style.background = (p && p.lightBody) ? CHIP_DARK : 'transparent'; // [lc-1050] 自适应垫底
   };
   const groups: PresetLogo['group'][] = ['国内平台', '国际平台'];
   for (const g of groups) {
@@ -370,11 +435,13 @@ export function openPresetPanel(): void {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:10px;';
     for (const p of PRESETS.filter((x) => x.group === g)) {
+      // [lc-1050] chips 自适应：亮色 logo 才垫深色（保持可见），其余透明融入面板，标签随底色切换
+      const light = !!p.lightBody;
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.dataset.presetId = p.id;
       chip.style.cssText = 'cursor:pointer;border:2px solid transparent;border-radius:12px;padding:10px 8px 8px;'
-        + 'display:flex;flex-direction:column;align-items:center;gap:6px;background:' + CHIP_BG + ';'
+        + 'display:flex;flex-direction:column;align-items:center;gap:6px;background:' + (light ? CHIP_DARK : 'transparent') + ';'
         + 'transition:border-color .15s,transform .15s;';
       const img = document.createElement('img');
       img.alt = p.name;
@@ -384,7 +451,7 @@ export function openPresetPanel(): void {
       img.style.cssText = 'max-width:104px;max-height:34px;object-fit:contain;';
       const nm = document.createElement('span');
       nm.textContent = p.name + (p.lightBody ? ' ⚪' : '');
-      nm.style.cssText = 'font-size:11px;font-weight:600;color:rgba(255,255,255,.82);';
+      nm.style.cssText = 'font-size:11px;font-weight:600;color:' + (light ? 'rgba(255,255,255,.82)' : 'var(--fnos-ui-text,#4a3d63)') + ';';
       nm.title = p.lightBody ? '白色主体 logo，适合深色背景' : p.name;
       chip.appendChild(img);
       chip.appendChild(nm);
