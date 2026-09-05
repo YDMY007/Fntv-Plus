@@ -34,16 +34,38 @@ function _refresh_cookie() { COOKIE = _load_cookie(); }
 
 // 真正校验 Cookie 是否有效（是否过期/失效）：调 nav 接口看 isLogin。
 // 注意：仅判断 COOKIE 非空字符串无法识别“过期”——过期 Cookie 仍非空但 isLogin=false，
-// 这会导致匿名限制（候选少/seg.so 被风控），是本机 vs 其他机器弹幕数量差异的根因之一。
+// 这会导致匿名限制（候选少/seg.so 被风控掐掉），是本机 vs 其他机器弹幕数量差异的根因之一。
 // 每次 run() 都会调用本函数，避免依赖启动时的一次性判断。
 let _cookie_verified = null; // { ok, uname, reason }
+
+// [lc-1015] nav/WBI 会话缓存：verify_cookie() 与 wbi_sign() 每次都各自请求一次 nav 接口，
+// 一次 run 里最多 3 次串行 RTT。WBI key 按天轮换、登录态短期不变 → 缓存 10 分钟足够；
+// Cookie 文件内容变化时立即失效（支持主进程内热更新 Cookie 后正确重验）。
+let _navCache = null; // { ts, cookieKey, promise }
+const NAV_CACHE_TTL = 10 * 60 * 1000;
+async function _get_nav() {
+    const key = _load_cookie() || '';
+    const now = Date.now();
+    if (_navCache && _navCache.cookieKey === key && (now - _navCache.ts) < NAV_CACHE_TTL) {
+        return _navCache.promise;
+    }
+    // 缓存 Promise 本身：并发调用（如四路搜索并跑时两个 WBI 通道同时签名）只发一次请求；
+    // 失败时清空缓存，下次调用重试。
+    const promise = jget('https://api.bilibili.com/x/web-interface/nav').catch((e) => {
+        if (_navCache && _navCache.promise === promise) _navCache = null;
+        throw e;
+    });
+    _navCache = { ts: now, cookieKey: key, promise };
+    return promise;
+}
+
 async function verify_cookie() {
     if (!COOKIE) {
         _cookie_verified = { ok: false, reason: 'missing' };
         return _cookie_verified;
     }
     try {
-        const nav = await jget('https://api.bilibili.com/x/web-interface/nav');
+        const nav = await _get_nav();
         const data = (nav && nav.data) || {};
         const isLogin = !!data.isLogin;
         _cookie_verified = {
@@ -245,7 +267,8 @@ function jget(url) {
 function wbi_sign(params) {
     // 返回 Promise<string>：已签名的 query 串（含 w_rid & wts）。
     // 复用全局 ENC 表作为 WBI mixin 排列（与 B站官方算法一致；imgKey/subKey 现各 32 字符）。
-    return jget('https://api.bilibili.com/x/web-interface/nav').then((nav) => {
+    // [lc-1015] nav 走 _get_nav() 会话缓存，与 verify_cookie 共享同一份结果，省一次串行 RTT。
+    return _get_nav().then((nav) => {
         const img = nav.data.wbi_img.img_url;
         const sub = nav.data.wbi_img.sub_url;
         const ik = img.split('/').pop().split('.')[0];
@@ -317,8 +340,11 @@ async function search_bangumi(title, ep_num, season_num) {
         const eps = anime.eps || [];
         log(`[番剧区]   候选[${i}] sim=${sim.toFixed(2)} season=${season} 总集数=${eps.length} ${JSON.stringify(t)}`);
     }
+    // [lc-1015] 候选→cid 解析并发化（批 4 个），凑够 4 个即停。
+    // 旧版对每个过阈值候选逐个 await _bangumi_cid，候选多时是 10+ 个串行 RTT。
     const results = [];
     for (const thr of [SIM_HIGH, SIM_LOW]) {
+        const tasks = [];
         for (const [sim, t, anime, season] of cands) {
             if (sim < thr) continue;
             const eps = anime.eps || [];
@@ -327,10 +353,19 @@ async function search_bangumi(title, ep_num, season_num) {
             if (!ep) continue;
             const ep_id = ep.ep_id || ep.id;
             if (!ep_id) continue;
-            const cid = await _bangumi_cid(ep_id);
-            if (cid) {
+            tasks.push([sim, t, anime, season, ep_id]);
+        }
+        for (let off = 0; off < tasks.length && results.length < 4; off += 4) {
+            const chunk = tasks.slice(off, off + 4);
+            const resolved = await mapLimit(chunk, 4, async (task) => {
+                const [sim, t, anime, season, ep_id] = task;
+                const cid = await _bangumi_cid(ep_id);
+                return [sim, t, anime, season, ep_id, cid];
+            });
+            for (const [sim, t, anime, season, ep_id, cid] of resolved) {
+                if (!cid) continue;
                 const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim, season_match: isSeasonHit(season, season_num) };
-                log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) ep序号=${ep.index} cid=${cid}`);
+                log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) ep序号=${ep_id} cid=${cid}`);
                 results.push([cid, t, info]);
             }
         }
@@ -568,12 +603,20 @@ async function search_video(title, ep_num, season_num) {
             const [sim, kind, t, bvid, vr, season] = scored[i];
             log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} season=${season} 弹幕=${vr} ${JSON.stringify(t)}`);
         }
-        // 解析 CID 并返回有效候选
+        // [lc-1015] 解析 CID 并返回有效候选：并发解析（批 5 个）、凑够 8 个即停。
+        // 旧版对全部过阈值候选逐个串行 await cid_from_bvid（搜索页常见 15-20 个候选 →
+        // 15-20 个串行 RTT，实测 ~1s+），是搜索链的主要耗时点之一。
+        const floorCands = scored.filter(([sim]) => sim >= VIDEO_SIM_FLOOR).slice(0, 24);
         const results = [];
-        for (const [sim, kind, t, bvid, vr, season] of scored) {
-            if (sim < VIDEO_SIM_FLOOR) continue;
-            const cid = await cid_from_bvid(bvid, ep_num, t);
-            if (cid) {
+        for (let off = 0; off < floorCands.length && results.length < 8; off += 5) {
+            const chunk = floorCands.slice(off, off + 5);
+            const resolved = await mapLimit(chunk, 5, async (cand) => {
+                const [sim, kind, t, bvid, vr, season] = cand;
+                const cid = await cid_from_bvid(bvid, ep_num, t);
+                return [sim, kind, t, bvid, vr, season, cid];
+            });
+            for (const [sim, kind, t, bvid, vr, season, cid] of resolved) {
+                if (!cid) continue;
                 // [lc-469] 合集/解说类(kind=2 或命中 BAD_TITLE)标记 isCompilation：
                 // 不参与「首选/聚合优选」，避免电视剧兜底时误选「一口气看完全集」之类。
                 const isCompilation = (kind === 2) || BAD_TITLE.some((k) => t.toLowerCase().indexOf(k) >= 0);
@@ -631,25 +674,31 @@ async function search_cid(title, ep_num, season_num) {
         }
     }
     log(`[search_cid] 开始匹配: title=${JSON.stringify(t)} ep_num=${ep_num} season_num=${season_num || 0}`);
-    // 优先：官方番剧（WBI 签名搜索，需 Cookie；命中即官方单集弹幕，量级远高于 UP主）
-    const bangumiWbi = await search_bangumi_wbi(t, ep_num, season_num);
+    // [lc-1015] 四路搜索并发起跑，仍按既有优先级取首个命中：
+    //   官方番剧(WBI) > 国创官方(WBI) > 番剧区 > 视频区(UP主搬运)。
+    // 旧版串行瀑布时，UP主内容（多数电视剧/个人剧集）要白等前面 2s 的 PGC 搜索失败；
+    // 并发后总耗时 = 最慢一路而非四路之和。未命中的后台搜索结果直接丢弃（无害）。
+    const pBangumiWbi = search_bangumi_wbi(t, ep_num, season_num).catch((e) => { log('番剧区WBI异常: ' + (e.message || e)); return []; });
+    const pGuochuangWbi = search_guochuang_wbi(t, ep_num, season_num).catch((e) => { log('国创区WBI异常: ' + (e.message || e)); return []; });
+    const pBangumi = search_bangumi(t, ep_num, season_num).catch((e) => { log('番剧区异常: ' + (e.message || e)); return []; });
+    const pVideo = search_video(t, ep_num, season_num).catch((e) => { log('视频区异常: ' + (e.message || e)); return []; });
+    const bangumiWbi = await pBangumiWbi;
     if (bangumiWbi.length) {
         log(`[search_cid] 官方番剧(WBI)返回 ${bangumiWbi.length} 个候选`);
         return bangumiWbi;
     }
-    // 国创官方区（WBI 签名搜索，需 Cookie；与番剧区对称，覆盖 media_ft / media_bangumi type=4）
-    const guochuangWbi = await search_guochuang_wbi(t, ep_num, season_num);
+    const guochuangWbi = await pGuochuangWbi;
     if (guochuangWbi.length) {
         log(`[search_cid] 国创官方(WBI)返回 ${guochuangWbi.length} 个候选`);
         return guochuangWbi;
     }
-    const bangumi = await search_bangumi(t, ep_num, season_num);
+    const bangumi = await pBangumi;
     if (bangumi.length) {
         log(`[search_cid] 番剧区返回 ${bangumi.length} 个候选`);
         return bangumi;
     }
     log('番剧区无结果，回退到视频区(UP主搬运)');
-    const video = await search_video(t, ep_num, season_num);
+    const video = await pVideo;
     if (video.length) {
         log(`[search_cid] 视频区返回 ${video.length} 个候选`);
         return video;
@@ -927,6 +976,12 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
             max_t = max_t / 1000.0;
             fetched.push([cid, atitle, info, all_d, max_t]);
             log(`  -> ${all_d.length} 条弹幕, 时间轴 0~${max_t.toFixed(0)}s`);
+            // [lc-1015] 聚合早停：该候选季匹配且非合集、弹幕量已达聚合阈值 →
+            // 首选必然是它且无需聚合，继续拉剩余候选纯属浪费（实测可省 1.5s+）。
+            if (info && info.season_match && !info.isCompilation && all_d.length >= agg_threshold) {
+                log(`  ✅ 弹幕量已达聚合阈值(${agg_threshold})，跳过剩余 ${Math.min(candidates.length, CAP) - idx - 1} 个候选拉取`);
+                break;
+            }
         } else {
             log(`  ⚠️ 候选[${idx + 1}] ${label} 无弹幕数据，跳过`);
         }

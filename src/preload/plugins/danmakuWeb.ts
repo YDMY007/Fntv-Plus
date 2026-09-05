@@ -212,14 +212,43 @@ let enabled = true;
 let items: DanmakuItem[] = [];
 let meta: DanmakuMeta | null = null;
 let currentGuid: string | null = null;
+// [lc-1015] currentGuid 是否来自 play/info 预取（此刻 URL 可能还停留在详情页/上一集）。
+// URL 触发的 prepareAndLoad 看到不一致的 guid 时以预取为准，避免旧 URL 把 currentGuid 拉回去。
+let currentGuidFromPrefetch = false;
+// [lc-1015] guid → 弹幕结果 的内存 LRU（上限 6 个）：详情页预取后进播放页、播放页切集再切回、
+// 同一次会话重进同一集都直接命中，不再走 IPC（IPC 虽有磁盘缓存也有 ~百毫秒开销）。
+const guidCache = new Map<string, { items: DanmakuItem[]; meta: DanmakuMeta | null }>();
+const GUID_CACHE_MAX = 6;
+
+function guidCachePut(guid: string, payload: { items: DanmakuItem[]; meta: DanmakuMeta | null }): void {
+    guidCache.delete(guid);
+    guidCache.set(guid, payload);
+    while (guidCache.size > GUID_CACHE_MAX) {
+        const oldest = guidCache.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        guidCache.delete(oldest);
+    }
+}
 let rafId = 0;
 let lastTime = -1;
 
 // canvas 渲染引擎状态
 const active = new Map<number, ActiveState>();
-const finished = new Set<number>();
+// [lc-1015] 激活游标：items 按时间升序，已激活过的下标不再重扫（旧版每帧从 0 扫到尾，
+// 万条弹幕时每帧上万次 Set 查询，低配机可感）。seek 回拖时归零。
+let cursor = 0;
+// [lc-1015] 到点后找不到空轨道的宽限：超过即丢弃（对齐 B站 高密度行为），避免迟到弹幕成堆涌入。
+const LANE_GRACE_SEC = 2.0;
+// [lc-1015] 同文本去重窗口：±1s 内重复文本直接丢弃（多源聚合已在主进程 ±2s 去重，
+// 单源内部的「前方高能」刷屏仍会成堆出现）。
+const DUP_TEXT_SEC = 1.0;
+const recentTexts = new Map<string, number>();
+// [lc-1015] 暂停时画面静止：仅在脏（进度/尺寸/样式变化）时重绘，省掉暂停期间的无谓逐帧 clear+draw。
+let renderDirty = true;
+let lastPausedDraw = false;
 let laneBusyScroll: number[] = [];   // 各轨道"滚动弹幕"占用到（video 时间）
-let laneBusyFix: number[] = [];       // 各轨道"固定弹幕"占用到
+let laneBusyTop: number[] = [];      // [lc-1015] 顶部固定弹幕独立轨道（旧版顶/底共用一池会隐形互撞）
+let laneBusyBottom: number[] = [];   // [lc-1015] 底部固定弹幕独立轨道
 let laneCount = 0;
 
 // 渲染参数（参照 B站网页弹幕引擎）
@@ -264,6 +293,7 @@ function loadStyle(): DanmakuStyle {
 
 function saveStyle(): void {
     try { localStorage.setItem(LS_STYLE_KEY, JSON.stringify(style)); } catch { /* ignore */ }
+    renderDirty = true; // [lc-1015] 样式变化后即使暂停也立即重绘生效
 }
 
 let style: DanmakuStyle = loadStyle();
@@ -422,12 +452,27 @@ function toggleDanmaku(): void {
 
 // ─── 数据拉取 ───
 
-async function prepareAndLoad(): Promise<void> {
-    const guid = getGuid();
+/**
+ * [lc-1015] 拉取指定 guid 的弹幕并进入渲染。
+ * @param targetGuid 显式 guid（来自 play/info 请求体预取）；省略时从当前 URL 解析。
+ *
+ * 时序说明：用户点播放 → fnOS POST /v/api/v1/play/info（body 含 item_guid）→
+ * installPlayInfoObserver 立刻带着 guid 调进来，此时播放器 DOM 可能还没挂载——
+ * 这正是目的：弹幕下载与视频加载并行，播放器就绪时弹幕往往已经就位。
+ */
+async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
+    const urlGuid = getGuid();
+    const guid = targetGuid || urlGuid;
     if (!guid) return;
 
     if (guid !== currentGuid) {
+        // URL 触发但 currentGuid 是更"新"的预取 guid（选集切换瞬间 URL 常仍是旧集/详情页）→ 以预取为准
+        if (!targetGuid && currentGuid && currentGuidFromPrefetch && urlGuid !== currentGuid) {
+            if (items.length && enabled) startRender();
+            return;
+        }
         currentGuid = guid;
+        currentGuidFromPrefetch = !!targetGuid && guid !== urlGuid;
         items = [];
         meta = null;
         resetRenderState();
@@ -437,21 +482,40 @@ async function prepareAndLoad(): Promise<void> {
         startRender();
         return;
     }
-    if (loadedGuids.has(guid) && items.length === 0 && meta) {
-        return;
-    }
-    // 单飞：同一 guid 只允许一个在途请求。OnReady/OnDomChange 在控制栏就绪前可能各触发一次，
+    // 单飞：同一 guid 只允许一个在途请求。OnReady/OnDomChange/预取可能几乎同时触发，
     // 没有此保护会导致同一集并发跑多个 run() → B站限流(分片重试 2s) → 整体被拖到 1 分钟。
     if (inflight) {
         log.info('[danmakuWeb] 已有弹幕请求在途，跳过重复拉取');
         return;
     }
-    inflight = true;
 
+    // [lc-1015] 会话内 LRU 命中：详情页预取过 / 切集切回来 → 直接用，不进 IPC
+    const cached = guidCache.get(guid);
+    if (cached && cached.items.length) {
+        items = cached.items;
+        meta = cached.meta;
+        loadedGuids.add(guid);
+        renderDirty = true;
+        log.info('[danmakuWeb] 会话缓存命中 ' + items.length + ' 条 guid=' + guid);
+        if (enabled) startRender();
+        return;
+    }
+    // 之前确认过「无弹幕」的集不再重复请求
+    if (loadedGuids.has(guid) && items.length === 0 && meta) {
+        return;
+    }
+
+    inflight = true;
     loading = true;
     syncToggleUI();
     try {
         const res = await ipcRenderer.invoke('danmaku:prepare', { guid }) as any;
+        // [lc-1015] 请求期间用户可能已切到别的集（currentGuid 变了）：旧响应直接丢弃，
+        // 旧版会把上一集的弹幕回写进当前集。
+        if (guid !== currentGuid) {
+            log.info('[danmakuWeb] 丢弃过期弹幕响应(已切集) guid=' + guid);
+            return;
+        }
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
             items = res.items as DanmakuItem[];
             meta = res.meta as DanmakuMeta || {
@@ -460,6 +524,8 @@ async function prepareAndLoad(): Promise<void> {
                 count: res.count || items.length,
             };
             loadedGuids.add(guid);
+            guidCachePut(guid, { items, meta });
+            renderDirty = true;
             log.info(`[danmakuWeb] 获取弹幕 ${items.length} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
             if (enabled) startRender();
         } else {
@@ -480,6 +546,75 @@ async function prepareAndLoad(): Promise<void> {
     }
 }
 
+// ─── [lc-1015] 播放启动即预取：只读观察 play/info 请求 ───
+// 旧时序要等 OnReady+1.5s / OnDomChange 防抖 0.8s、再等 video 元素和控制栏就绪才开拉
+// （实测点播 → 开拉 ~4s，是网页端弹幕"慢"的主要来源之一）。用户点播放的瞬间 fnOS 必发
+// POST /v/api/v1/play/info（body 含 item_guid），这里观察该请求立刻按 guid 预取，
+// 弹幕下载与播放器加载并行。fetch/XHR 各包一层，只读透传、不改任何请求行为。
+let _dmObserverInstalled = false;
+function installPlayInfoObserver(): void {
+    if (_dmObserverInstalled) return;
+    _dmObserverInstalled = true;
+    const PLAY_INFO_RE = /\/v\/api\/v1\/play\/info/i;
+    const extractGuid = (raw: unknown): string | null => {
+        try {
+            const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            const g = (body as any)?.item_guid ?? (body as any)?.data?.item_guid ?? (body as any)?.params?.item_guid;
+            const m = typeof g === 'string' ? g.match(/[a-f0-9]{32}/i) : null;
+            return m ? m[0] : null;
+        } catch { return null; }
+    };
+    const onPlayInfo = (guid: string | null): void => {
+        if (!guid) return;
+        // 弹幕开关：预取发生播放器挂载前（模块级 enabled 还没同步过 localStorage），直接读存储
+        try { if (localStorage.getItem(LS_KEY) === '0') return; } catch { /* ignore */ }
+        if (guid === currentGuid && (inflight || items.length)) return; // 已在拉/已就位
+        log.info('[danmakuWeb] play/info 预取弹幕 guid=' + guid);
+        void prepareAndLoad(guid);
+    };
+
+    const origFetch = window.fetch;
+    window.fetch = async function (this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request)?.url || '';
+        const isPlayInfo = PLAY_INFO_RE.test(url) && (init?.method || 'GET').toUpperCase() !== 'GET' && !!init?.body;
+        if (!isPlayInfo) return origFetch.call(this, input, init);
+        const guid = extractGuid(init!.body);
+        const resp = await origFetch.call(this, input, init);
+        // skipInject 在「外部播放器(MPV)」流程会把 play/info 伪造成 {success:true,data:null}
+        // 阻止原生播放器启动——识别出这种响应就不预取（MPV 自己会拉弹幕）。
+        // 真实 play/info 的 data 恒为对象；命中伪造特征时跳过预取。
+        try {
+            const ct = resp.headers?.get?.('content-type') || '';
+            if (ct.includes('json')) {
+                const j = await resp.clone().json();
+                if (!(j && j.success === true && j.data == null)) onPlayInfo(guid);
+            } else {
+                onPlayInfo(guid);
+            }
+        } catch {
+            onPlayInfo(guid);
+        }
+        return resp;
+    } as typeof window.fetch;
+
+    // XHR 侧兜底（fnOS 个别接口走 XHR）
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (this: any, method: string, url: string | URL, ...rest: any[]) {
+        this._fntvDmUrl = String(url);
+        this._fntvDmMethod = String(method || 'GET').toUpperCase();
+        return origOpen.apply(this, [method, url, ...rest] as any);
+    } as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = function (this: any, body?: any) {
+        const url = this._fntvDmUrl || '';
+        const method = this._fntvDmMethod || 'GET';
+        if (PLAY_INFO_RE.test(url) && method !== 'GET' && body) {
+            onPlayInfo(extractGuid(typeof body === 'string' ? body : null));
+        }
+        return origSend.call(this, body);
+    } as typeof XMLHttpRequest.prototype.send;
+}
+
 // ─── Canvas 渲染引擎（B站网页弹幕同款：逐帧重绘）───
 
 function syncCanvasRect(): void {
@@ -492,6 +627,7 @@ function syncCanvasRect(): void {
     if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
+        renderDirty = true; // [lc-1015] 画布重置后内容被清空，需立即重绘（暂停时也要）
     }
     canvas.style.left = r.left + 'px';
     canvas.style.top = r.top + 'px';
@@ -511,15 +647,20 @@ function ensureLanes(n: number): void {
     if (laneCount === n) return;
     laneCount = n;
     laneBusyScroll = new Array(n).fill(-Infinity);
-    laneBusyFix = new Array(n).fill(-Infinity);
+    laneBusyTop = new Array(n).fill(-Infinity);
+    laneBusyBottom = new Array(n).fill(-Infinity);
 }
 
 function resetRenderState(): void {
     active.clear();
-    finished.clear();
+    cursor = 0;
+    recentTexts.clear();
     laneBusyScroll = new Array(laneCount).fill(-Infinity);
-    laneBusyFix = new Array(laneCount).fill(-Infinity);
+    laneBusyTop = new Array(laneCount).fill(-Infinity);
+    laneBusyBottom = new Array(laneCount).fill(-Infinity);
     lastTime = -1;
+    renderDirty = true;
+    lastPausedDraw = false;
     if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
@@ -552,20 +693,36 @@ function render(): void {
     const t = videoEl.currentTime;
     const fixDuration = Math.max(3, style.scrollDuration * 0.6);
 
+    // [lc-1015] 暂停跳帧：进度/尺寸/样式都没变时画面是静止的，跳过 clear+draw。
+    if (t !== lastTime) renderDirty = true;
+    const paused = videoEl.paused;
+    if (paused && lastPausedDraw && !renderDirty) return;
+    lastPausedDraw = paused;
+    renderDirty = false;
+
     // 倒退（seek 回拖）→ 清空已生成集合，允许重播
     if (lastTime >= 0 && t < lastTime - 0.5) {
         active.clear();
-        finished.clear();
+        cursor = 0;
+        recentTexts.clear();
         laneBusyScroll = new Array(laneCount).fill(-Infinity);
-        laneBusyFix = new Array(laneCount).fill(-Infinity);
+        laneBusyTop = new Array(laneCount).fill(-Infinity);
+        laneBusyBottom = new Array(laneCount).fill(-Infinity);
+    } else if (lastTime >= 0 && t > lastTime + 1.5) {
+        // [lc-1015] 前向 seek：跳过区间内的弹幕（真实播放器行为，不倒灌、不堆积）
+        while (cursor < items.length && items[cursor].time <= t) {
+            recentTexts.set(items[cursor].text, items[cursor].time);
+            cursor++;
+        }
     }
     lastTime = t;
 
-    const laneH = Math.max(20, ch * LANE_RATIO);
+    // [lc-1015] 行高跟随实际字号（旧版固定 ch*0.034，调大字号后相邻行会互相压字）
+    const fontSize = Math.max(14, Math.min(48, ch * style.fontScale));
+    const laneH = Math.max(20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
     ensureLanes(n);
-    const fontSize = Math.max(14, Math.min(48, ch * style.fontScale));
     ctx.clearRect(0, 0, cw, ch);
     ctx.font = `${style.bold ? 'bold ' : ''}${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
     ctx.textBaseline = 'top';
@@ -582,46 +739,61 @@ function render(): void {
         ctx.strokeStyle = 'rgba(0,0,0,0.95)';
     }
 
-    // ① 激活到点的弹幕（只进不出，直到播完才移到 finished）
-    if (active.size < MAX_ACTIVE) {
-        for (let i = 0; i < items.length; i++) {
-            if (active.has(i) || finished.has(i)) continue;
-            if (items[i].time <= t) {
-                const isFix = items[i].type === 4 || items[i].type === 5;
-                const dur = isFix ? fixDuration : style.scrollDuration;
-                const lane = allocLane(isFix ? laneBusyFix : laneBusyScroll, t, dur);
-                if (lane < 0) continue; // 轨道占满，本帧跳过，下帧再试
-                const w = ctx.measureText(items[i].text).width;
-                active.set(i, { appear: t, lane, w, fix: isFix });
-                if (active.size >= MAX_ACTIVE) break;
-            }
+    // ① 激活到点的弹幕：游标只前进（items 按时间升序），轨道满则在宽限期内等待，
+    //    超宽限或同文本短窗重复即丢弃，不再像旧版每帧从头全量扫描。
+    while (cursor < items.length && items[cursor].time <= t) {
+        const i = cursor;
+        const d = items[i];
+        const lastT = recentTexts.get(d.text);
+        if (lastT !== undefined && Math.abs(d.time - lastT) <= DUP_TEXT_SEC) {
+            cursor++;
+            continue;
+        }
+        if (active.size >= MAX_ACTIVE) break;
+        const isBottom = d.type === 4;
+        const isFix = isBottom || d.type === 5;
+        const dur = isFix ? fixDuration : style.scrollDuration;
+        const lane = allocLane(isBottom ? laneBusyBottom : (isFix ? laneBusyTop : laneBusyScroll), t, dur);
+        if (lane >= 0) {
+            const w = ctx.measureText(d.text).width;
+            active.set(i, { appear: t, lane, w, fix: isFix });
+            recentTexts.set(d.text, d.time);
+            cursor++;
+        } else if (t - d.time > LANE_GRACE_SEC) {
+            cursor++; // 宽限期内拿不到轨道 → 丢弃，避免迟到弹幕成堆涌入
+        } else {
+            break;    // 刚到点，等下一帧再试（FIFO，不越过）
         }
     }
 
-    // ② 绘制活跃弹幕
-    const fixedY = (lane: number) => 6 + lane * laneH;
+    // ② 绘制活跃弹幕（滚动行从顶部数起；顶部固定行从顶数、底部固定行锚底）
     for (const [i, st] of active) {
         const d = items[i];
         const isFix = st.fix;
         const dur = isFix ? fixDuration : style.scrollDuration;
         const elapsed = t - st.appear;
-        if (t > d.time + dur || elapsed < 0) {
-            // 播完 → finished 并释放轨道
+        if (elapsed >= dur || elapsed < 0) {
+            // 播完（按激活后的实际滚动时长算满程）→ 释放
             active.delete(i);
-            finished.add(i);
             continue;
         }
         const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
         let x: number;
-        let y = fixedY(st.lane) + fontSize;
+        let y: number;
         let alpha = style.opacity;
         if (isFix) {
+            // [lc-1015] 修复：底部弹幕(type=4)旧版被画在顶部 —— 现在锚定画面底部；
+            // 同时去掉旧版 y 多加一整个 fontSize 的偏移 bug。
+            y = (d.type === 5)
+                ? 6 + st.lane * laneH
+                : ch - 6 - (st.lane + 1) * laneH;
             x = (cw - st.w) / 2;
             if (elapsed < 0.2) alpha = (elapsed / 0.2) * style.opacity;
             else if (elapsed > dur - 0.3) alpha = Math.max(0, (dur - elapsed) / 0.3) * style.opacity;
         } else {
             const p = elapsed / dur; // 0→1
             x = cw - p * (cw + st.w);
+            y = 6 + st.lane * laneH;
         }
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
         ctx.fillStyle = color;
@@ -655,6 +827,18 @@ function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: str
     return { text: '—', warn: false, detail: '' };
 }
 
+// [lc-1015] 弹窗玻璃材质（与 lc-1012/1013 云母/观影记录同配方）：
+// tint 半透底 + 165deg 光泽渐变 + 真实 backdrop blur（透出后方视频画面），无实心、无硬边框线。
+const GLASS_PANEL_STYLE: { [k: string]: string } = {
+    background: 'linear-gradient(165deg, rgba(255,255,255,.05), rgba(255,255,255,.012))',
+    backgroundColor: 'rgba(15,15,20,.78)',
+    backdropFilter: 'blur(42px) saturate(150%) brightness(.82)',
+    '-webkit-backdrop-filter': 'blur(42px) saturate(150%) brightness(.82)',
+    borderRadius: '18px',
+    boxShadow: '0 18px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.07), inset 0 1px 0 rgba(255,255,255,.10)',
+    fontFamily: '-apple-system, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif',
+};
+
 function ensureModal(): HTMLDivElement {
     if (modal) return modal;
     const m = document.createElement('div');
@@ -670,8 +854,10 @@ function ensureModal(): HTMLDivElement {
 
     const backdrop = document.createElement('div');
     Object.assign(backdrop.style, {
-        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.55)',
+        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.42)',
+        backdropFilter: 'blur(18px) saturate(120%)',
     } as CSSStyleDeclaration);
+    backdrop.style.setProperty('-webkit-backdrop-filter', 'blur(18px) saturate(120%)');
     backdrop.addEventListener('click', () => closeDetails());
 
     const panel = document.createElement('div');
@@ -679,20 +865,18 @@ function ensureModal(): HTMLDivElement {
         position: 'relative',
         width: 'min(560px, 92vw)',
         maxHeight: '82vh',
-        background: '#1e1e20',
-        color: '#eaeaea',
-        borderRadius: '12px',
+        color: '#f5f5f7',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        boxShadow: '0 12px 48px rgba(0,0,0,0.6)',
         fontSize: '14px',
-    } as CSSStyleDeclaration);
+    } as CSSStyleDeclaration, GLASS_PANEL_STYLE);
 
     const head = document.createElement('div');
     Object.assign(head.style, {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '12px 16px', borderBottom: '1px solid #333', fontWeight: '600', fontSize: '15px',
+        padding: '14px 18px 12px', fontWeight: '600', fontSize: '15px',
+        borderBottom: '1px solid rgba(255,255,255,.06)',
     } as CSSStyleDeclaration);
     const titleEl = document.createElement('span');
     titleEl.textContent = '弹幕来源信息';
@@ -700,6 +884,7 @@ function ensureModal(): HTMLDivElement {
     closeEl.textContent = '✕';
     closeEl.style.cursor = 'pointer';
     closeEl.style.padding = '0 4px';
+    closeEl.style.opacity = '0.7';
     closeEl.addEventListener('click', () => closeDetails());
     head.appendChild(titleEl);
     head.appendChild(closeEl);
@@ -707,7 +892,7 @@ function ensureModal(): HTMLDivElement {
     const body = document.createElement('div');
     body.id = 'fntv-dm-modal-body';
     Object.assign(body.style, {
-        overflow: 'auto', padding: '14px 16px', flex: '1',
+        overflow: 'auto', padding: '14px 18px', flex: '1',
     } as CSSStyleDeclaration);
 
     panel.appendChild(head);
@@ -769,16 +954,16 @@ function renderModalBody(): void {
     for (const [k, v] of rows) {
         const kEl = document.createElement('div');
         kEl.textContent = k;
-        kEl.style.color = '#9aa0a6';
+        kEl.style.color = 'rgba(245,245,247,.52)';
         kEl.style.flexShrink = '0';
         const vEl = document.createElement('div');
         vEl.textContent = v;
         vEl.style.wordBreak = 'break-all';
         if (k === '登录状态') {
-            vEl.style.color = cookie.warn ? '#ff5c5c' : '#5ad17a';
+            vEl.style.color = cookie.warn ? '#ff6b6b' : '#5ad17a';
             vEl.style.fontWeight = '600';
         } else {
-            vEl.style.color = '#eaeaea';
+            vEl.style.color = 'rgba(245,245,247,.92)';
         }
         grid.appendChild(kEl);
         grid.appendChild(vEl);
@@ -788,8 +973,8 @@ function renderModalBody(): void {
     const tip = document.createElement('div');
     tip.textContent = '数据来源：B站（与 MPV 弹幕同源）';
     Object.assign(tip.style, {
-        marginTop: '14px', paddingTop: '10px', borderTop: '1px solid #2a2a2a',
-        color: '#6b7075', fontSize: '12px',
+        marginTop: '14px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
+        color: 'rgba(245,245,247,.4)', fontSize: '12px',
     } as CSSStyleDeclaration);
     body.appendChild(tip);
 }
@@ -814,9 +999,9 @@ function makeSlider(label: string, min: number, max: number, step: number, value
     Object.assign(top.style, { display: 'flex', justifyContent: 'space-between', fontSize: '13px' } as CSSStyleDeclaration);
     const lab = document.createElement('span');
     lab.textContent = label;
-    lab.style.color = '#cfd3d8';
+    lab.style.color = 'rgba(245,245,247,.78)';
     const val = document.createElement('span');
-    val.style.color = '#9aa0a6';
+    val.style.color = 'rgba(245,245,247,.5)';
     val.textContent = fmt(value);
     top.appendChild(lab);
     top.appendChild(val);
@@ -827,7 +1012,7 @@ function makeSlider(label: string, min: number, max: number, step: number, value
     input.step = String(step);
     input.value = String(value);
     Object.assign(input.style, { width: '100%' } as CSSStyleDeclaration);
-    input.style.setProperty('accent-color', '#3374DB');
+    input.style.setProperty('accent-color', '#2997ff');
     input.addEventListener('input', () => {
         const v = parseFloat(input.value);
         val.textContent = fmt(v);
@@ -843,12 +1028,12 @@ function makeToggle(label: string, value: boolean, onChange: (v: boolean) => voi
     Object.assign(row.style, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' } as CSSStyleDeclaration);
     const lab = document.createElement('span');
     lab.textContent = label;
-    lab.style.color = '#cfd3d8';
+    lab.style.color = 'rgba(245,245,247,.78)';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = value;
     Object.assign(input.style, { width: '18px', height: '18px' } as CSSStyleDeclaration);
-    input.style.setProperty('accent-color', '#3374DB');
+    input.style.setProperty('accent-color', '#2997ff');
     input.addEventListener('change', () => onChange(input.checked));
     row.appendChild(lab);
     row.appendChild(input);
@@ -884,9 +1069,12 @@ function buildStyleControls(): HTMLElement {
     const reset = document.createElement('button');
     reset.textContent = '恢复默认';
     Object.assign(reset.style, {
-        marginTop: '4px', padding: '8px 12px', background: '#3374DB', color: '#fff',
-        border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '13px',
+        marginTop: '4px', padding: '9px 12px', background: 'rgba(41,151,255,.22)',
+        color: '#6cb8ff', border: '1px solid rgba(41,151,255,.35)', borderRadius: '10px',
+        cursor: 'pointer', fontSize: '13px',
     } as CSSStyleDeclaration);
+    reset.addEventListener('mouseenter', () => { reset.style.background = 'rgba(41,151,255,.32)'; });
+    reset.addEventListener('mouseleave', () => { reset.style.background = 'rgba(41,151,255,.22)'; });
     reset.addEventListener('click', () => {
         style = { ...DEFAULT_STYLE };
         saveStyle();
@@ -907,20 +1095,25 @@ function ensureStylePanel(): HTMLDivElement {
     } as CSSStyleDeclaration);
 
     const backdrop = document.createElement('div');
-    Object.assign(backdrop.style, { position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.55)' } as CSSStyleDeclaration);
+    Object.assign(backdrop.style, {
+        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.42)',
+        backdropFilter: 'blur(18px) saturate(120%)',
+    } as CSSStyleDeclaration);
+    backdrop.style.setProperty('-webkit-backdrop-filter', 'blur(18px) saturate(120%)');
     backdrop.addEventListener('click', () => closeStylePanel());
 
     const panel = document.createElement('div');
     Object.assign(panel.style, {
-        position: 'relative', width: 'min(420px, 92vw)', maxHeight: '82vh', background: '#1e1e20',
-        color: '#eaeaea', borderRadius: '12px', display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', boxShadow: '0 12px 48px rgba(0,0,0,0.6)', fontSize: '14px',
-    } as CSSStyleDeclaration);
+        position: 'relative', width: 'min(420px, 92vw)', maxHeight: '82vh',
+        color: '#f5f5f7', display: 'flex', flexDirection: 'column',
+        overflow: 'hidden', fontSize: '14px',
+    } as CSSStyleDeclaration, GLASS_PANEL_STYLE);
 
     const head = document.createElement('div');
     Object.assign(head.style, {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '12px 16px', borderBottom: '1px solid #333', fontWeight: '600', fontSize: '15px',
+        padding: '14px 18px 12px', fontWeight: '600', fontSize: '15px',
+        borderBottom: '1px solid rgba(255,255,255,.06)',
     } as CSSStyleDeclaration);
     const titleEl = document.createElement('span');
     titleEl.textContent = '弹幕样式';
@@ -928,13 +1121,14 @@ function ensureStylePanel(): HTMLDivElement {
     closeEl.textContent = '✕';
     closeEl.style.cursor = 'pointer';
     closeEl.style.padding = '0 4px';
+    closeEl.style.opacity = '0.7';
     closeEl.addEventListener('click', () => closeStylePanel());
     head.appendChild(titleEl);
     head.appendChild(closeEl);
 
     const body = document.createElement('div');
     body.id = 'fntv-dm-style-body';
-    Object.assign(body.style, { overflow: 'auto', padding: '14px 16px', flex: '1' } as CSSStyleDeclaration);
+    Object.assign(body.style, { overflow: 'auto', padding: '14px 18px', flex: '1' } as CSSStyleDeclaration);
     body.appendChild(buildStyleControls());
 
     panel.appendChild(head);
@@ -956,6 +1150,10 @@ function closeStylePanel(): void {
 }
 
 // ─── 初始化 ───
+
+// [lc-1015] 模块加载即安装 play/info 只读观察器（必须在 fnOS 页面脚本开始发请求前就位；
+// 本插件按字母序先于 skipInject 加载，包装链上它能看到原生播放流程的 play/info）。
+installPlayInfoObserver();
 
 function maybeSetup(): void {
     // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
