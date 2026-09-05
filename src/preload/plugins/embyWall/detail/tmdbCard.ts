@@ -96,14 +96,17 @@ function _fillSeriesIntro(): boolean {
   return done;
 }
 
-/** [lc-1010] 实测面板高度 → body 级 --fnos-cluster-h（beautifyStyle.ts N3/N4 的按钮行/logo 都挂在它上）。
- *  面板高度由左列（简介+季选）驱动；TMDB 卡是绝对定位右列，不参与撑高。 */
+/** [lc-1010] 实测面板高度 → body 级 --fnos-cluster-h（beautifyStyle.ts N3/N4/O3/O4 的按钮行/logo 都挂在它上）。
+ *  面板高度由左列（简介+季选/简介）驱动；TMDB 卡是绝对定位右列，不参与撑高。
+ *  [lc-1029] 底距固定为设计常量 18px，**不再读 computed bottom**——Movie 页 col 被折叠线下的
+ *  演职人员/文件信息撑高，computed bottom = col底-面板顶（数百 px）且随面板上移自我放大
+ *  （644→993→…反馈回路），cluster-h 爆炸后整个聚簇飞出视口（用户截图：纯海报无内容区）。
+ *  Series 页 computed bottom 恒为 18，常量与旧读法等价，零回归。 */
 function _measureSeriesPanel(): void {
   const panel = _pagePanel();
   if (!panel) return;
   const h = panel.getBoundingClientRect().height;
-  const bottom = parseFloat(getComputedStyle(panel).bottom) || 18;
-  document.body.style.setProperty('--fnos-cluster-h', Math.ceil(h + bottom) + 'px');
+  document.body.style.setProperty('--fnos-cluster-h', Math.ceil(h + 18) + 'px');
 }
 
 /** resize：截断库会按它闭包里的全文**重新截断**简介（活体实证）→ 回填必须重跑；

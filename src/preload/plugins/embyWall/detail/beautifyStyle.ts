@@ -1117,33 +1117,16 @@ body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card::-webkit-scrollbar-th
 body.fnos-movie-panel ${MOVIE_PANEL} .fnos-showinfo__sec{
   border-top:none !important; padding-top:12px !important;
 }
-/* O9. 演职人员区精修（col.children[2]，镜像 E2 四件套；scope 到电影页——E2 的 COL 要求
-   hero 是 col 直接子节点，电影页 hero 在 wrapper 内结构性不命中，无双重规则冲突）。
-   该区在满屏 hero 之下、折叠线以下自然滚动。 */
-/* ① 分区标题「演职人员」：12px 弱化字距标签 */
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography{
-  font-size:12px !important; letter-spacing:.14em !important;
-  color:var(--fnos-ui-sub) !important; font-weight:500 !important;
+/* O10. 一屏语义（用户指定「不要滚动页面」，lc-1029）：演职人员/文件信息/视频信息/IMDB 行
+   整体隐藏——人员信息由 TMDB 电影卡的导演/编剧/主演覆盖，文件细节（路径/大小/编码）不参与
+   浏览决策（清晰度徽章/字幕/音轨选择器已在聚簇 meta 行）。col 只剩 wrapper(100vh) +
+   面板(absolute) → 页面无滚动，与 Series 一级页同一屏语义。
+   ⚠ 取代首版 O9（演员区精修）：区已隐藏，精修无对象。演职人员索引 = col.children[2]
+     (nth-child(3))，文件信息区 = nth-child(4)。 */
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3),
+body.fnos-movie-panel ${MOVIE_COL} > :nth-child(4){
+  display:none !important;
 }
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography strong,
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) p.semi-typography span{
-  font-size:inherit !important; color:inherit !important;
-  font-weight:inherit !important; letter-spacing:inherit !important;
-}
-/* ② 隐藏横滑滚动条 */
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) .ms-container{ scrollbar-width:none !important; }
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
-  width:0 !important; height:0 !important; display:none !important;
-}
-/* ③ 头像柔投影 + 悬浮轻抬升 */
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type{
-  box-shadow:0 10px 26px rgba(0,0,0,.28) !important;
-}
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type{
-  transform:translateY(-3px) !important;
-}
-/* ④ 人名 13px */
-body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{ font-size:13px !important; }
 `;
 
 /** 注入美化样式表（幂等：已存在则跳过）。全程只注入这一份 <style>，一次成型。 */
