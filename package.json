@@ -241,7 +241,8 @@
       "installerSidebar": "build/installerSidebar.bmp",
       "uninstallerSidebar": "build/uninstallerSidebar.bmp",
       "installerHeader": "build/installerHeader.bmp",
-      "installerLanguages": ["zh_CN"]
+      "installerLanguages": ["zh_CN"],
+      "include": "build/installer.nsh"
     },
     "files": [
       "dest",

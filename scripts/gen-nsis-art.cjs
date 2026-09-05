@@ -85,6 +85,39 @@ const headerHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   </div>
 </body></html>`;
 
+// [lc-1055] 开场闪屏(AdvSplash 淡入→停留→淡出)：480×300 品牌卡, 安装/卸载双变体
+const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf-8"><style>
+  ${sharedCss}
+  .stage { width:480px; height:300px; }
+  .b1 { width:420px; height:420px; left:-120px; top:-110px; }
+  .b2 { width:360px; height:360px; right:-100px; top:40px; }
+  .b3 { width:400px; height:400px; right:60px; bottom:-160px; }
+  .glass { left:60px; right:60px; top:56px; height:188px; padding:22px 20px;
+           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:13px; }
+  .logo { width:210px; }
+  .name { font-size:21px; }
+  .sub { font-size:11.5px; text-align:center; line-height:1.6; }
+  .badge { position:absolute; top:26px; left:0; right:0; text-align:center;
+           font-size:12px; font-weight:800; color:${uninstall ? '#b3564d' : '#7d5fc9'}; letter-spacing:4px; }
+  .orb { width:44px; height:44px; position:absolute; left:50%; transform:translateX(-50%); bottom:34px; }
+  .orb::after { content:''; position:absolute; inset:-9px; border-radius:50%;
+                border:1.5px solid rgba(247,65,143,.35); border-radius:50%; }
+  .tag { position:absolute; left:0; right:0; bottom:12px; text-align:center;
+         font-size:9px; color:#9385ad; letter-spacing:3px; }
+</style></head><body>
+  <div class="stage">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="badge">${uninstall ? 'UNINSTALL WIZARD' : 'SETUP WIZARD'}</div>
+    <div class="glass">
+      <img class="logo" src="${LOGO_URI}">
+      <div class="name">Fntv-Plus</div>
+      <div class="sub">${uninstall ? '即将从本机移除 Fntv-Plus 及其组件<br>你的登录与配置不会丢失' : '飞牛影视 · 第三方增强客户端<br>正在准备安装向导…'}</div>
+    </div>
+    <div class="orb"></div>
+    <div class="tag">FNTV-PLUS</div>
+  </div>
+</body></html>`;
+
 // ── PNG(RGBA 8bit 非隔行, Chromium 截图格式) → 24bpp 底向上 BMP ──
 function pngToBmp24(png) {
   if (png.readUInt32BE(0) !== 0x89504e47) throw new Error('not a png');
@@ -169,6 +202,8 @@ async function renderBmp(page, html, width, height, outFile) {
   await renderBmp(page, sidebarHtml(false), 164, 314, Path.join(outDir, 'installerSidebar.bmp'));
   await renderBmp(page, sidebarHtml(true), 164, 314, Path.join(outDir, 'uninstallerSidebar.bmp'));
   await renderBmp(page, headerHtml, 150, 57, Path.join(outDir, 'installerHeader.bmp'));
+  await renderBmp(page, splashHtml(false), 480, 300, Path.join(outDir, 'installerSplash.bmp'));
+  await renderBmp(page, splashHtml(true), 480, 300, Path.join(outDir, 'uninstallerSplash.bmp'));
   await browser.close();
   console.log('[gen-nsis-art] done');
 })().catch((e) => { console.error(e); process.exit(1); });
