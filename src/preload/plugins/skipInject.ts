@@ -166,6 +166,8 @@ async function tryFillSkipData(): Promise<void> {
             skipEnd: number;
             source: string;
             message?: string;
+            recapStart?: number; // [lc-1060] AniSkip recap（前情回顾）绝对区间（秒）
+            recapEnd?: number;
         };
 
         if (result.filled) {
@@ -173,9 +175,77 @@ async function tryFillSkipData(): Promise<void> {
         } else {
             log.info(`[skipInject] ⏭ 无需填充或无数据 source=${result.source} msg=${result.message || ''}`);
         }
+
+        // [lc-1060] recap 命中 → 「跳过前情」按钮（Netflix 式；recap 不写回飞牛，纯前端按钮）
+        if (result.recapStart && result.recapEnd && result.recapEnd > result.recapStart) {
+            installRecapButton(guid, result.recapStart, result.recapEnd);
+        }
     } catch (e) {
         log.error('[skipInject] fetch-and-fill IPC 调用失败:', e);
     }
+}
+
+/**
+ * [lc-1060] 「跳过前情」浮动按钮：AniSkip 的 recap 区间命中时出现，点击 seek 到前情终点。
+ * 展示窗口：注入起 → 播放越过 recap 终点自动消失；每集只装一次（幂等）。
+ */
+function installRecapButton(guid: string, recapStart: number, recapEnd: number): void {
+    if (document.getElementById('fntv-recap-btn')) return;
+    log.info(`[skipInject] recap 区间 ${recapStart}-${recapEnd}s，安装跳过前情按钮`);
+
+    const btn = document.createElement('button');
+    btn.id = 'fntv-recap-btn';
+    btn.setAttribute('data-fnos-ui', '1');
+    btn.textContent = '跳过前情 ▸';
+    btn.title = '跳过本集前情回顾（数据来源 AniSkip）';
+    btn.style.cssText = [
+        'position:fixed', 'right:28px', 'bottom:96px', 'z-index:2147483000',
+        'display:flex', 'align-items:center', 'gap:6px',
+        'padding:10px 18px', 'border:none', 'border-radius:12px', 'cursor:pointer',
+        'font-size:13.5px', 'font-weight:700', 'color:#fff', 'letter-spacing:.3px',
+        'background:linear-gradient(135deg,rgba(109,127,242,.94),rgba(138,99,232,.94))',
+        'box-shadow:0 10px 28px rgba(40,52,110,.38), inset 0 1px 0 rgba(255,255,255,.4)',
+        'backdrop-filter:blur(8px)', '-webkit-backdrop-filter:blur(8px)',
+        'transition:transform .15s ease, box-shadow .15s ease, opacity .2s ease',
+        '-webkit-app-region:no-drag',
+    ].join(';') + ';';
+    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-2px)'; btn.style.boxShadow = '0 14px 34px rgba(40,52,110,.45)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.transform = ''; btn.style.boxShadow = '0 10px 28px rgba(40,52,110,.38)'; });
+
+    const removeBtn = (): void => {
+        const b = document.getElementById('fntv-recap-btn');
+        if (b && b.parentNode) b.parentNode.removeChild(b);
+        clearInterval(timer);
+    };
+
+    btn.addEventListener('click', () => {
+        const v = document.querySelector('video') as HTMLVideoElement | null;
+        if (v) {
+            try {
+                v.currentTime = recapEnd;
+                const p = v.play();
+                if (p && typeof p.catch === 'function') p.catch(() => { /* 自动播放策略忽略 */ });
+            } catch (e) {
+                log.warn('[skipInject] recap seek 失败:', String(e).substring(0, 80));
+            }
+        }
+        log.info(`[skipInject] 跳过前情 → ${recapEnd}s (guid=${guid})`);
+        removeBtn();
+    });
+
+    document.body.appendChild(btn);
+
+    // 播放越过前情终点 / 离开播放页(视频元素消失) → 自动撤按钮
+    const timer = window.setInterval(() => {
+        const b = document.getElementById('fntv-recap-btn');
+        if (!b) { clearInterval(timer); return; }
+        const v = document.querySelector('video') as HTMLVideoElement | null;
+        if (!v) return; // 播放器未挂载时保留按钮
+        if (v.currentTime >= recapEnd - 0.5) {
+            log.info('[skipInject] 已越过 recap 终点，撤按钮');
+            removeBtn();
+        }
+    }, 1000);
 }
 
 /**

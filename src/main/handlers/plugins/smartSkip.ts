@@ -48,6 +48,9 @@ interface FetchAndFillResult {
     skipEnd: number;
     source: 'fnos' | 'aniskip' | 'theintrodb' | 'none';
     message?: string;
+    /** [lc-1060] AniSkip recap（前情回顾）绝对区间（秒）；0 = 无。不写回飞牛，供网页播放器「跳过前情」按钮 */
+    recapStart: number;
+    recapEnd: number;
 }
 
 /** 已填充过的 guid 去重集合（进程生命周期内） */
@@ -66,27 +69,31 @@ function buildIntroDbQueries(raw?: string): string[] {
     return [];
 }
 
-/** AniSkip 查询：episodeLength 敏感（差 1 秒都可能 500/不命中），按 ±1/±2 阶梯重试 */
+/** AniSkip 查询：episodeLength 敏感（差 1 秒都可能 500/不命中），按 ±1/±2 阶梯重试。
+ *  [lc-1060] types 加 recap（前情回顾）——recap 不写回飞牛（fnOS 无此语义），透传给网页端「跳过前情」按钮。 */
 async function aniskipFetch(malId: number, episode: number, durationSec: number):
-    Promise<{ opStart: number; opEnd: number; edStart: number; edEnd: number } | null> {
+    Promise<{ opStart: number; opEnd: number; edStart: number; edEnd: number; recapStart: number; recapEnd: number } | null> {
     const ladder = durationSec > 0
         ? [durationSec, durationSec + 1, durationSec - 1, durationSec + 2]
         : [0];
     for (const len of ladder) {
         try {
             const u = `https://api.aniskip.com/v2/skip-times/${malId}/${episode}`
-                + `?types%5B%5D=op&types%5B%5D=ed&episodeLength=${Math.round(len)}`;
+                + `?types%5B%5D=op&types%5B%5D=ed&types%5B%5D=recap&episodeLength=${Math.round(len)}`;
             const r = await axios.get(u, { timeout: HTTP_TIMEOUT, headers: { appId: 'fntv-plus' } });
             const j = r.data;
             if (!j || j.found !== true || !Array.isArray(j.results)) continue;
             const op = j.results.find((x: any) => x.skipType === 'op');
             const ed = j.results.find((x: any) => x.skipType === 'ed');
-            if (!op && !ed) return null;
+            const recap = j.results.find((x: any) => x.skipType === 'recap');
+            if (!op && !ed && !recap) return null;
             return {
                 opStart: op ? op.interval.startTime : 0,
                 opEnd: op ? op.interval.endTime : 0,
                 edStart: ed ? ed.interval.startTime : 0,
                 edEnd: ed ? ed.interval.endTime : 0,
+                recapStart: recap ? recap.interval.startTime : 0,
+                recapEnd: recap ? recap.interval.endTime : 0,
             };
         } catch (e) {
             log.warn(`[skip:aniskip] 请求失败(len=${Math.round(len)}):`, (e as Error).message);
@@ -109,12 +116,12 @@ async function handleFetchAndFill(
     const { guid, trimId, season, episode } = params;
 
     if (!guid) {
-        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '缺少 guid' };
+        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '缺少 guid', recapStart: 0, recapEnd: 0 };
     }
 
     // 去重：同一 guid 进程内只填一次
     if (filledGuids.has(guid)) {
-        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '已填充过' };
+        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '已填充过', recapStart: 0, recapEnd: 0 };
     }
 
     const config = fnConfig.readConfig() || {};
@@ -154,6 +161,8 @@ async function handleFetchAndFill(
         // ── Step 1: 查询飞牛已有跳过数据 ──
         let skipStart = 0;
         let skipEnd = 0;
+        let recapStart = 0; // [lc-1060] 前情回顾绝对区间（秒），不写回飞牛
+        let recapEnd = 0;
         let source: 'fnos' | 'aniskip' | 'theintrodb' | 'none' = 'none';
 
         try {
@@ -176,7 +185,9 @@ async function handleFetchAndFill(
         // ── Step 2: AniSkip（动漫社区库：区间绝对秒、社区投票校准，新番覆盖远好于人工审核库）──
         // fnOS 语义换算：skipStart = 片头从 0 跳过的秒数 → 取 OP 区间终点；
         //               skipEnd = 片尾结尾跳过的秒数 → 总时长 − ED 区间起点。
-        if (source === 'none' && effectiveEpisode && effectiveEpisode > 0) {
+        // [lc-1060] 飞牛已有数据(source=fnos)时仍查询 AniSkip —— 为拿 recap（前情回顾），
+        //           但 op/ed 换算仅在飞牛无真值时进行（不覆盖服务端真值）。
+        if ((source === 'none' || source === 'fnos') && effectiveEpisode && effectiveEpisode > 0) {
             try {
                 let malId: number | null = null;
                 if (effectiveTrimId && /^\d+$/.test(String(effectiveTrimId).trim()) && showTitle) {
@@ -185,15 +196,23 @@ async function handleFetchAndFill(
                 if (malId) {
                     const seg = await aniskipFetch(malId, effectiveEpisode, effectiveTotalDur);
                     if (seg) {
-                        if (seg.opEnd > 0 && seg.opEnd < effectiveTotalDur) skipStart = Math.round(seg.opEnd);
-                        if (seg.edStart > 0 && effectiveTotalDur > 0) {
-                            const outro = Math.round(effectiveTotalDur - seg.edStart);
-                            if (outro > 0 && outro < effectiveTotalDur / 2) skipEnd = outro;
-                            else log.warn(`[skip:fetch-and-fill] AniSkip 片尾时长异常(outro=${outro}s)，仅填片头`);
+                        // recap 独立于 op/ed 采集（有总时长时做越界守卫）
+                        if (seg.recapStart > 0 && seg.recapEnd > seg.recapStart
+                            && (!effectiveTotalDur || seg.recapEnd < effectiveTotalDur)) {
+                            recapStart = Math.round(seg.recapStart);
+                            recapEnd = Math.round(seg.recapEnd);
                         }
-                        if (skipStart > 0 || skipEnd > 0) {
-                            source = 'aniskip';
-                            log.info(`[skip:fetch-and-fill] ✅ AniSkip 命中 guid=${guid} start=${skipStart} end=${skipEnd} (op ${seg.opStart}→${seg.opEnd} / ed ${seg.edStart}→${seg.edEnd})`);
+                        if (source === 'none') {
+                            if (seg.opEnd > 0 && seg.opEnd < effectiveTotalDur) skipStart = Math.round(seg.opEnd);
+                            if (seg.edStart > 0 && effectiveTotalDur > 0) {
+                                const outro = Math.round(effectiveTotalDur - seg.edStart);
+                                if (outro > 0 && outro < effectiveTotalDur / 2) skipEnd = outro;
+                                else log.warn(`[skip:fetch-and-fill] AniSkip 片尾时长异常(outro=${outro}s)，仅填片头`);
+                            }
+                            if (skipStart > 0 || skipEnd > 0) {
+                                source = 'aniskip';
+                                log.info(`[skip:fetch-and-fill] ✅ AniSkip 命中 guid=${guid} start=${skipStart} end=${skipEnd} (op ${seg.opStart}→${seg.opEnd} / ed ${seg.edStart}→${seg.edEnd})`);
+                            }
                         }
                     }
                 }
@@ -266,25 +285,25 @@ async function handleFetchAndFill(
 
                 filledGuids.add(guid);
                 log.info(`[skip:fetch-and-fill] ✅ 已写入飞牛服务端 guid=${guid} source=${source} start=${skipStart} end=${skipEnd}`);
-                return { filled: true, skipStart, skipEnd, source };
+                return { filled: true, skipStart, skipEnd, source, recapStart, recapEnd };
             } catch (e) {
                 log.error(`[skip:fetch-and-fill] 写回飞牛失败:`, (e as Error).message);
-                return { filled: false, skipStart, skipEnd, source, message: '写回飞牛服务端失败' };
+                return { filled: false, skipStart, skipEnd, source, message: '写回飞牛服务端失败', recapStart, recapEnd };
             }
         }
 
         // 飞牛已有数据：直接返回（无需写回）
         if (source === 'fnos') {
             filledGuids.add(guid);
-            return { filled: true, skipStart, skipEnd, source };
+            return { filled: true, skipStart, skipEnd, source, recapStart, recapEnd };
         }
 
         // 无可用数据
-        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '无可用跳过数据' };
+        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', recapStart, recapEnd, message: '无可用跳过数据' };
 
     } catch (e) {
         log.error(`[skip:fetch-and-fill] 异常:`, e);
-        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: (e as Error).message };
+        return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', recapStart: 0, recapEnd: 0, message: (e as Error).message };
     }
 }
 
