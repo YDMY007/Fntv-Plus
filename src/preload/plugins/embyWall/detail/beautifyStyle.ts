@@ -775,7 +775,9 @@ body.fnos-series-panel div[class*="h-[80px]"][class*="top-0"] svg{
    几何零位移核算：btn row/panel 全部 bottom 锚定 wrapper/col 底(y=100vh)，hero 负 margin
    只让其可见顶边上移(wrapper 高 = hero margin box 100vh-32 不变，hero 视觉溢出 wrapper 顶
    32px，col/wrapper 均 overflow 可见)，悬浮聚簇位置一个像素都不动。 */
-body.fnos-series-panel #custom-titlebar[data-fntv-tb]::before{
+/* [lc-1030] 摘条限定**非玻璃模式**：玻璃模式下保留 M 段自动取色条并磨砂化（P1，用户要求
+   「改成自动取色保证协调性」——裸海报+白窗控键在浅色海报上不协调），见文件末 P 段。 */
+html:not([data-fntv-glass]) body.fnos-series-panel #custom-titlebar[data-fntv-tb]::before{
   content:none !important;
 }
 body.fnos-series-panel .trim-mc__details--key-version{
@@ -1007,8 +1009,8 @@ body.fnos-movie-panel div[class*="h-[80px]"][class*="top-0"]::before{
 body.fnos-movie-panel div[class*="h-[80px]"][class*="top-0"] svg{
   filter:drop-shadow(0 1px 6px rgba(0,0,0,.4));
 }
-/* O2c. 标题栏(最顶 32px 窗口控制条)随顶栏一并全透（同 N2c：M 段实色条在满屏海报上是异物横条） */
-body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::before{
+/* O2c. 标题栏摘条限定**非玻璃模式**（同 N2c [lc-1030]；玻璃模式走 P1 磨砂取色条） */
+html:not([data-fntv-glass]) body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::before{
   content:none !important;
 }
 body.fnos-movie-panel #custom-titlebar[data-fntv-tb] button svg{
@@ -1126,6 +1128,58 @@ body.fnos-movie-panel ${MOVIE_PANEL} .fnos-showinfo__sec{
 body.fnos-movie-panel ${MOVIE_COL} > :nth-child(3),
 body.fnos-movie-panel ${MOVIE_COL} > :nth-child(4){
   display:none !important;
+}
+
+/* ===== P. 云母增强（Glass UI）联动：玻璃模式下聚簇/标题栏材质统一（lc-1030）=====
+   用户报障（玻璃开启 + 浅色海报截图）：① 左下聚簇是「海报取色深色玻璃」（heroTint 恒暗
+   L<=0.20 + brightness(.86) 压暗），压在浅色海报上读作一块暗色污渍，与全屏玻璃材质不协调；
+   ② 顶栏软件控制栏横条（N2c/O2c 摘条后=裸海报+白窗控键）不协调，要求改回自动取色。
+   方案：玻璃模式下 ① 聚簇改用**玻璃色板中性磨砂**（--fntv-glass-tint-* 随 html.dark 自适应：
+   浅色主题白磨砂/深色主题深磨砂），去掉 brightness 压暗，面板文字随玻璃主题翻深/翻白；
+   ② 标题栏取色条回归并磨砂化（半透取色 + blur，深 tint 保白图标对比度，毛玻璃边自然融入海报）。
+   非玻璃模式不匹配本段任何规则 = 已验收的取色玻璃原样。 */
+/* P1. 标题栏自动取色条回归（磨砂化；M 段实心 alpha1 在玻璃模式下被本条覆盖为半透磨砂） */
+html[data-fntv-glass] body.fnos-series-panel #custom-titlebar[data-fntv-tb]::before,
+html[data-fntv-glass] body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::before{
+  background:rgba(var(--fnos-hero-tint, 25,25,26), .45) !important;
+  backdrop-filter:blur(18px) saturate(1.2);
+  -webkit-backdrop-filter:blur(18px) saturate(1.2);
+}
+/* P2. 聚簇面板 → 玻璃色板中性磨砂（去 brightness 压暗；协调性靠 tint+blur 不靠暗化） */
+html[data-fntv-glass] body.fnos-series-panel ${SERIES_PANEL},
+html[data-fntv-glass] body.fnos-movie-panel ${MOVIE_PANEL}{
+  background:linear-gradient(160deg,
+    rgba(255,255,255,.10) 0%,
+    rgba(255,255,255,.03) 45%,
+    rgba(255,255,255,.012) 100%),
+    rgba(var(--fntv-glass-tint-r), var(--fntv-glass-tint-g), var(--fntv-glass-tint-b), .38) !important;
+  backdrop-filter:blur(26px) saturate(155%) !important;
+  -webkit-backdrop-filter:blur(26px) saturate(155%) !important;
+  box-shadow:0 18px 54px rgba(0,0,0,.16) !important;
+}
+/* P3. 玻璃**浅色**主题：面板文字翻深（Semi 变量 + N6/O6 显式白字 + 季卡文本 + 阴影移除）；
+   深色玻璃（html.dark）不匹配本条，维持 N/O 段的浅色文字与阴影 */
+html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL},
+html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL}{
+  --semi-color-text-0:rgba(28,28,30,.92);
+  --semi-color-text-1:rgba(28,28,30,.72);
+  --semi-color-text-2:rgba(28,28,30,.58);
+  --semi-color-text-3:rgba(28,28,30,.42);
+}
+html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"],
+html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+  color:rgba(28,28,30,.88) !important; text-shadow:none !important;
+}
+html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p{
+  color:rgba(28,28,30,.9) !important; text-shadow:none !important;
+}
+html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p + p{
+  color:rgba(28,28,30,.55) !important;
+}
+/* P4. 卡滚动条在浅磨砂上改深色可见 */
+html[data-fntv-glass]:not(.dark) body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card,
+html[data-fntv-glass]:not(.dark) body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+  scrollbar-color:rgba(0,0,0,.22) transparent !important;
 }
 `;
 
