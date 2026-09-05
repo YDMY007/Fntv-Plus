@@ -29,6 +29,9 @@ export class MpvPlayer extends BasePlayer {
     // 播放列表相关
     private playlistItems: PlayItem[] = [];
     private playlistFilePath: string = '';
+    // [lc-1016] 字幕挂载链路的代次号：每次 path 事件递增。异步链路（取列表→下载→挂载→重试）
+    // 在每个关键点检查代次号是否仍是最新，过期立即放弃——防止慢链路把新一集刚挂好的字幕删掉/盖掉。
+    private subLoadSeq: number = 0;
     // mpv 日志文件 tail → 转发进 app.log（弹幕脚本日志可见性）
     private mpvLogPath: string = '';
     private mpvLogTailTimer: NodeJS.Timeout | null = null;
@@ -319,37 +322,8 @@ export class MpvPlayer extends BasePlayer {
                     }
                 }
 
-                const fnapi = this.getFnApi();
-                // 获取并下载字幕（基于影片中文标题挑选正确的中文外挂字幕）
-                fnapi.getSubtitle(itemGuid, videoTitle)
-                    .then(fnapi.downloadSubtitle)
-                    .then(async (subPaths: string[]) => {
-                        // [fix] 切集时先清掉旧的外部字幕，避免第N集弹幕叠加残留（如看第3集同时加载了第2集的xml）
-                        await this.removeAllExternalSubtitles();
-                        if (subPaths.length === 0) {
-                            log.info(`[字幕] ${videoTitle} 无可用外挂字幕(跳过挂载)`);
-                            return;
-                        }
-                        log.info(`[字幕] ${videoTitle} 下载到字幕:`, subPaths.map(p => path.basename(p).split('@')[0]));
-                        // 加载新字幕：第一个为最佳匹配（已按中文优先 / 默认轨 / 标题匹配度排序），选中它显示；
-                        // 其余以 auto 方式加载，供用户在字幕菜单中手动切换，避免"错误的那条被强制显示"
-                        subPaths.forEach((subPath, idx) => {
-                            const subName = path.basename(subPath).split("@")[0]; // 获取原始字幕名称（保留中文）
-                            const flag = idx === 0 ? "select" : "auto";
-                            if (idx === 0) log.info(`[字幕] 选中显示: ${subName}`);
-                            this.mpvInstance?.addSubtitles(subPath, flag, subName).catch(err => {
-                                if (this.config.debug) {
-                                    log.debug('加载字幕失败:', err);
-                                }
-                            });
-                        });
-                    })
-                    .catch((err: any) => {
-                        // 字幕获取/下载失败不应影响播放，且必须捕获以免产生 UnhandledPromiseRejection
-                        if (this.config.debug) {
-                            log.debug('字幕获取/下载失败(可忽略):', err);
-                        }
-                    });
+                // [lc-1016] 获取并挂载 fnOS 外挂字幕（防陈旧竞态 + 空结果退避重试，见方法注释）
+                this.mountSubtitlesWithRetry(itemGuid, videoTitle);
             }
         });
 
@@ -368,6 +342,72 @@ export class MpvPlayer extends BasePlayer {
             this.saveCurrentItemStatus(st);
             this.emitEvent(EventType.PROGRESS, st);
         });
+    }
+
+    /**
+     * [lc-1016] 为当前播放的媒体挂载 fnOS 外挂字幕（自愈 + 防陈旧竞态版）。
+     *
+     * 背景（用户反馈：字幕有时自动加载、有时要手动点字幕轨才有）：
+     *   1. fnOS 刚开播时流元数据可能尚未就绪，stream/list 瞬时返回空 subtitle_streams；
+     *      旧实现拿到空列表直接放弃，之后不再补挂 → 只能手动点字幕轨。
+     *   2. 快速切集/带进度起播时（loadPlaylist 先载 item0 再 jump），多次 path 事件并行跑
+     *      字幕链路；旧一集的慢链路返回后会执行 removeAllExternalSubtitles + addSubtitles，
+     *      把当前集刚挂好的字幕删掉或盖成错误集的。
+     *   3. 下载/挂载失败只记 debug 日志，用户反馈时日志无从排查。
+     *
+     * 方案：每次 path 事件递增 subLoadSeq，整条链路绑定本次代次号；在取列表/下载/清理/
+     * 挂载每个关键点检查是否仍为最新代次，过期立即静默退出（不触碰 MPV 轨道）。
+     * 空列表/下载失败按退避（3s → 8s）重试，最多 3 次；失败日志提升到 info。
+     */
+    private mountSubtitlesWithRetry(itemGuid: string, videoTitle: string | undefined): void {
+        const fnapi = this.getFnApi();
+        const seq = ++this.subLoadSeq;
+        const isStale = () => seq !== this.subLoadSeq;
+        const label = videoTitle || itemGuid;
+        const MAX_ATTEMPTS = 3;
+        const RETRY_DELAYS_MS = [3000, 8000];
+
+        (async () => {
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+                try {
+                    const subs = await fnapi.getSubtitle(itemGuid, videoTitle);
+                    if (isStale()) return;
+                    if (subs.length > 0) {
+                        const subPaths = await fnapi.downloadSubtitle(subs);
+                        if (isStale()) return;
+                        if (subPaths.length > 0) {
+                            log.info(`[字幕] ${label} 下载到字幕:`, subPaths.map(p => path.basename(p).split('@')[0]));
+                            // 切集/重挂前先清旧外部字幕，避免旧集字幕与弹幕残留叠加
+                            await this.removeAllExternalSubtitles();
+                            if (isStale()) return;
+                            // 第一个为最佳匹配（已按中文优先 / 默认轨 / 标题匹配度排序），选中显示；
+                            // 其余以 auto 方式加载，供用户在字幕菜单中手动切换
+                            subPaths.forEach((subPath, idx) => {
+                                const subName = path.basename(subPath).split("@")[0];
+                                const flag = idx === 0 ? "select" : "auto";
+                                if (idx === 0) log.info(`[字幕] 选中显示: ${subName}`);
+                                this.mpvInstance?.addSubtitles(subPath, flag, subName).catch(err => {
+                                    log.info('[字幕] 加载字幕失败:', err);
+                                });
+                            });
+                            return;
+                        }
+                        log.info(`[字幕] ${label} 字幕下载失败(第${attempt}/${MAX_ATTEMPTS}次)`);
+                    } else if (attempt === 1) {
+                        log.info(`[字幕] ${label} 暂无外挂字幕流(可能 fnOS 元数据未就绪，稍后重试)`);
+                    }
+                } catch (err) {
+                    // 字幕获取/下载失败不应影响播放；此处必须捕获以免产生 UnhandledPromiseRejection
+                    if (isStale()) return;
+                    log.info(`[字幕] ${label} 字幕获取/下载异常(第${attempt}/${MAX_ATTEMPTS}次):`, err);
+                }
+                if (attempt < MAX_ATTEMPTS) {
+                    await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]));
+                    if (isStale()) return;
+                }
+            }
+            log.info(`[字幕] ${label} 重试${MAX_ATTEMPTS}次后仍无外挂字幕(媒体可能确实没有外挂字幕)`);
+        })().catch(() => { /* 不影响播放 */ });
     }
 
     /**
