@@ -2998,6 +2998,36 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     traSyncResult.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;line-height:1.5;';
     traBody.appendChild(traSyncResult);
 
+    // [lc-1064] 实时 scrobble 开关（播放中实时同步到 Trakt）
+    const traScrobRow = document.createElement('div');
+    traScrobRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 2px 0;margin-top:8px;';
+    const traScrobLabelWrap = document.createElement('div');
+    traScrobLabelWrap.style.cssText = 'min-width:0;';
+    const traScrobLabel = document.createElement('div');
+    traScrobLabel.style.cssText = 'font-size:12.5px;font-weight:600;color:var(--fnos-ui-text);';
+    traScrobLabel.textContent = '实时同步播放（scrobble）';
+    const traScrobSub = document.createElement('div');
+    traScrobSub.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2,#5a6480);line-height:1.5;margin-top:2px;';
+    traScrobSub.textContent = '播放时实时打点到 Trakt（开始/暂停/看完≥80% 自动记录），需先连接 Trakt。';
+    traScrobLabelWrap.appendChild(traScrobLabel); traScrobLabelWrap.appendChild(traScrobSub);
+    const traScrobBtn = mkBtn('…', true);
+    traScrobRow.appendChild(traScrobLabelWrap); traScrobRow.appendChild(traScrobBtn);
+    traBody.appendChild(traScrobRow);
+    const paintScrob = (on: boolean): void => {
+      traScrobBtn.textContent = on ? '已开启 ✓' : '已关闭';
+      traScrobBtn.style.background = on ? 'var(--fnos-ui-exit-on)' : 'var(--fnos-ui-btn-bg2)';
+      traScrobBtn.style.color = on ? '#fff' : 'var(--fnos-ui-btn-text)';
+    };
+    ipcRenderer.invoke('trakt:get-scrobble-enabled').then((r: any) => { paintScrob(!!(r && r.enabled)); }).catch(() => {});
+    traScrobBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const cur = traScrobBtn.textContent || '';
+      const next = cur.indexOf('已开启') === -1;
+      ipcRenderer.invoke('trakt:set-scrobble-enabled', next).then((r: any) => {
+        paintScrob(!!(r && r.enabled));
+      }).catch(() => {});
+    });
+
     traConnectBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       traStatus.textContent = '正在获取设备码…';

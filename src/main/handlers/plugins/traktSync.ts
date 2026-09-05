@@ -315,6 +315,67 @@ async function syncWatched(): Promise<any> {
     }
 }
 
+// ── [lc-1064] 实时 scrobble：播放中实时同步观看状态到 Trakt ──
+//   start=开始/进度打点 · pause=暂停 · stop=结束(≥80% 会计为已看)
+//   body 组装：剧集 {show:{ids:{tmdb}}, episode:{season,number}}；电影 {movie:{ids:{tmdb}}}。
+//   节流：start 每 10 分钟或进度 +5% 才发一次(Trakt 官方建议)，pause/stop 即时。
+let _scrobbleLast: { guid: string; pct: number; at: number } | null = null;
+
+function showTmdbFromTrim(trimId: string): number | null {
+    const digits = String(trimId || '').replace(/^tt/i, '').match(/^(\d+)$/);
+    return digits ? parseInt(digits[1], 10) : null;
+}
+
+export async function scrobble(action: 'start' | 'pause' | 'stop', guid: string, progressPct: number):
+    Promise<{ ok: boolean; code?: number; message?: string }> {
+    if (!fnConfig.getTraktScrobbleEnabled()) return { ok: false, message: 'scrobble 已关闭' };
+    if (!connected()) return { ok: false, message: 'Trakt 未连接' };
+    const pct = Math.max(0, Math.min(100, Math.round(progressPct)));
+
+    // start 节流：同 guid 10 分钟内且进度推进 <5% → 跳过
+    if (action === 'start' && _scrobbleLast && _scrobbleLast.guid === guid) {
+        if (Date.now() - _scrobbleLast.at < 10 * 60 * 1000 && Math.abs(pct - _scrobbleLast.pct) < 5) {
+            return { ok: true, message: '节流跳过' };
+        }
+    }
+
+    try {
+        const config = fnConfig.readConfig() || {};
+        const domain = config.domain || '';
+        const token = config.token || '';
+        if (!domain || !token) return { ok: false, message: '未登录飞牛' };
+        const fnapi = new fn.ApiService(domain, token);
+        const playResp = await fnapi.getPlayInfo(guid);
+        if (!playResp.success || !playResp.data) return { ok: false, message: '读取播放信息失败' };
+        const info = playResp.data;
+        const item = info.item;
+        const showTmdb = showTmdbFromTrim(item.trim_id);
+        const isEpisode = String(item.type || info.type || '') === 'Episode';
+
+        let body: any;
+        if (isEpisode) {
+            if (!showTmdb) return { ok: false, message: '剧集缺少 TMDB id，无法 scrobble' };
+            body = {
+                progress: pct,
+                show: { ids: { tmdb: showTmdb } },
+                episode: { season: item.season_number || 1, number: item.episode_number || 1 },
+            };
+        } else {
+            if (!showTmdb) return { ok: false, message: '电影缺少 TMDB id，无法 scrobble' };
+            body = { progress: pct, movie: { ids: { tmdb: showTmdb } } };
+        }
+
+        const r = await apiPost('/scrobble/' + action, body);
+        _scrobbleLast = { guid, pct, at: Date.now() };
+        log.info('[trakt:scrobble] ' + action + ' ' + pct + '% guid=' + guid);
+        return { ok: true, code: r.status };
+    } catch (e: any) {
+        const st = e.response && e.response.status;
+        log.warn('[trakt:scrobble] 失败(' + action + '):', st || e.message);
+        return { ok: false, code: st, message: String(e.message || e) };
+    }
+}
+
 // ── IPC ──
 export function init(): void {
     loadAuth();
@@ -372,5 +433,12 @@ export function init(): void {
         return { ok: true };
     });
     registerHandler('trakt:sync-watched', async () => await syncWatched());
+    // [lc-1064] 实时 scrobble
+    registerHandler('trakt:scrobble', (_e: any, p: { action: 'start' | 'pause' | 'stop'; guid: string; progress: number }) => {
+        const act = String((p && p.action) || 'start') as 'start' | 'pause' | 'stop';
+        return scrobble(act, String((p && p.guid) || ''), Number((p && p.progress) || 0));
+    }, { useHandle: true });
+    registerHandler('trakt:get-scrobble-enabled', () => ({ enabled: fnConfig.getTraktScrobbleEnabled() }), { useHandle: true });
+    registerHandler('trakt:set-scrobble-enabled', (_e: any, v: boolean) => { fnConfig.setTraktScrobbleEnabled(!!v); return { ok: true, enabled: !!v }; }, { useHandle: true });
     log.info('Trakt 同步插件就绪');
 }

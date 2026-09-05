@@ -280,6 +280,13 @@ export class MpvPlayer extends BasePlayer {
     /**
      * 设置事件监听器
      */
+    // [lc-1064] Trakt scrobble 节流状态
+    private scrobbleGuid: string | null = null;
+    private scrobbleLastAt = 0;
+    private scrobbleLastPct = -1;
+    private scrobbleLazy(): { scrobble: (a: 'start' | 'pause' | 'stop', g: string, p: number) => Promise<{ ok: boolean }> } | null {
+        try { return require('../../handlers/plugins/traktSync'); } catch { return null; }
+    }
     private setupEventListeners(): void {
         if (!this.mpvInstance) return;
 
@@ -313,6 +320,15 @@ export class MpvPlayer extends BasePlayer {
                 log.debug('MPV 状态变化:', status);
             }
 
+            if (status.property === 'pause' && typeof status.value === 'boolean') {
+                // [lc-1064] 暂停/恢复 → scrobble pause/start
+                try {
+                    const guid = this.scrobbleGuid;
+                    const tr = guid ? this.scrobbleLazy() : null;
+                    if (guid && tr) void tr.scrobble(status.value ? 'pause' : 'start', guid, this.scrobbleLastPct < 0 ? 0 : this.scrobbleLastPct).catch(() => {});
+                } catch { /* ignore */ }
+            
+            }
             if (status.property === 'playlist-pos' && typeof status.value === 'number') {
                 // 更新当前播放项状态
                 this.updateCurrentItemStatus(status.value);
@@ -560,6 +576,17 @@ export class MpvPlayer extends BasePlayer {
             this.saveCurrentItemStatus(progressData);
             // 更新全局状态
             this.updateGlobalStatus(progressData);
+            // [lc-1064] Trakt scrobble：每 10 分钟或进度 +5% 上报一次 start；≥80% 改 stop(Trakt 记为已看)
+            try {
+                if (this.scrobbleGuid !== itemGuid) { this.scrobbleGuid = itemGuid; this.scrobbleLastPct = -1; }
+                const tr = this.scrobbleLazy();
+                const pctNow = progressData.percentage;
+                if (tr && (Date.now() - this.scrobbleLastAt > 10 * 60 * 1000 || Math.abs(pctNow - this.scrobbleLastPct) >= 5)) {
+                    this.scrobbleLastAt = Date.now();
+                    this.scrobbleLastPct = pctNow;
+                    void tr.scrobble(pctNow >= 80 ? 'stop' : 'start', itemGuid, pctNow).catch(() => {});
+                }
+            } catch { /* ignore */ }
             // 节流处理
             const now = Date.now();
             if (now - this.lastProgressTime >= this.throttleInterval) {

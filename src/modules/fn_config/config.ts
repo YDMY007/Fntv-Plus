@@ -110,6 +110,7 @@ export interface Config {
     mpvBiliSearchEnabled?: boolean;
     // 智能跳过片头片尾总开关（默认关闭：仅显示「跳过」按钮，不自动跳；开启后自动跳过）
     smartSkipEnabled?: boolean;
+    traktScrobbleEnabled?: boolean;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
     // [lc-1018] 弹弹play 开放 API 自定义凭证（两项都非空才启用；写入 script-opts/uosc_danmaku.conf。
@@ -957,6 +958,18 @@ export function setSmartSkipEnabled(enabled: boolean): void {
     config.smartSkipEnabled = !!enabled;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
+// 获取「Trakt 实时 scrobble」开关（[lc-1064] 未设置时默认开启）
+export function getTraktScrobbleEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.traktScrobbleEnabled !== false;
+}
+
+// 设置「Trakt 实时 scrobble」开关
+export function setTraktScrobbleEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.traktScrobbleEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
 
 // 获取「关闭详情页背景框」开关（默认关闭=false，保留玻璃背景框）
 export function getDetailBoxless(): boolean {
@@ -1110,6 +1123,8 @@ Object.assign(module.exports, {
     // 智能跳过片头片尾
     getSmartSkipEnabled,
     setSmartSkipEnabled,
+    getTraktScrobbleEnabled,
+    setTraktScrobbleEnabled,
     getDetailBoxless,
     setDetailBoxless,
     getWheelHScroll,
