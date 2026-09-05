@@ -23,6 +23,7 @@ import { injectBackdrop, removeBackdrop, hideInstantLayer, clearInstantLayer, sh
 import { scheduleTmdbCard, removeTmdbCard } from './tmdbCard';
 import { scheduleEpResolution, removeEpResolution } from './epResolution';
 import { applyHeroTint, clearHeroTint } from './heroTint';
+import { releaseNavVeil } from './veil';
 
 /** observer 硬上限生命周期(ms)：超时强制断开，绝不变永久轮询(旧版病根)。 */
 const OBS_MAX_LIFE = 4000;
@@ -47,6 +48,7 @@ function _apply(view: HTMLElement, hero: HTMLElement): void {
   injectBackdrop(hero);                  // 复用 hero 已加载剧照，无新网络请求
   applyHeroTint(hero);                   // 从同一张剧照取主色 → 顶栏玻璃条 + hero 遮罩的同色系底色
   hideInstantLayer();                    // 内容就绪 → 淡出瞬间加载层
+  releaseNavVeil();                      // [lc-1017] 美化已就绪 → 释放持罩轻纱，统一淡出揭示(消除"一帧换装"闪动)
   cacheHeroImages(location.href, hero);  // 存海报/剧照供下次进同页秒出
   scheduleTmdbCard(view);                // 延后异步注入信息卡（非阻塞，失败静默）
   scheduleEpResolution();                // 清晰度角标 → 标题后胶囊（内部有上限重试链，等选集卡到达）
@@ -77,12 +79,17 @@ function _trySettle(): boolean {
   return true;
 }
 
-/** 换 href 时的轻量复位：保留 body.class + <style>(避免原生闪回)，只清底图/卡/observer，等新页重套。 */
+/** 换 href 时的轻量复位：保留 body.class + <style>(避免原生闪回)，只清卡/observer，等新页重套。
+ *  [lc-1017] **不再移除底图层**：详情↔详情(一级页→二级页)时保留旧剧照，等新 hero 就绪后
+ *  由 backdrop 的双层交叉淡入接管——旧版在这里瞬间 removeBackdrop，新底图要等 hero 渲染才回来，
+ *  中间的真空期整页透出桌面底 = 用户报的「打开二级详情页突然闪一下」。
+ *  [lc-1017] 顺带 clearInstantLayer()：快速连续切集时清掉上一页还挂着的加载层，
+ *  避免新页 showInstantLayer 早退后残留上一页的旧海报。 */
 function _softReset(): void {
   _disconnectObs();
   clearTimeout(_backdropRefreshTimer);
   _settledHref = null;
-  removeBackdrop();
+  clearInstantLayer();
   clearHeroTint();
   removeTmdbCard();
   removeEpResolution();
@@ -113,9 +120,12 @@ function _armObserver(): void {
  *  hero 已渲染 → 秒套(不铺加载层, 无闪)；hero 未就绪 → 铺瞬间加载层盖白屏 + arm 一次性 observer 等它。 */
 export function applyDetailBeautify(): void {
   if (S.detailBoxless || !isDetailPage()) { teardownDetailBeautify(); return; }
-  if (_settledHref === location.href && document.body.classList.contains('fnos-beautify')) return; // 幂等
+  if (_settledHref === location.href && document.body.classList.contains('fnos-beautify')) {
+    releaseNavVeil(); // [lc-1017] 同 href 重复导航：美化已在位，直接放行持罩(否则干等 900ms 兜底)
+    return; // 幂等
+  }
   if (_settledHref !== location.href) _softReset();
-  if (_trySettle()) return;               // hero 已在 → 立即套用，无需加载层
+  if (_trySettle()) return;               // hero 已在 → 立即套用(内部已释放 veil)，无需加载层
   showInstantLayer(location.href);        // hero 未就绪 → 铺加载层盖住 fnOS 原生白屏
   _armObserver();                         // 等 hero，命中即套用 + 淡出加载层
 }
@@ -131,5 +141,6 @@ export function teardownDetailBeautify(): void {
   removeTmdbCard();
   removeEpResolution();
   clearInstantLayer();
+  releaseNavVeil(); // [lc-1017] 无论从哪条路进来(含退回首页/关闭开关)，持罩都必须被释放
   S.detailGlassInited = false;
 }

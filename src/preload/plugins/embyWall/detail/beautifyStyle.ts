@@ -271,17 +271,21 @@ body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .sh
   box-shadow:0 16px 44px rgba(0,0,0,.34) !important;
 }
 
-/* ===== G. 注入的全屏底图层（backdrop.ts 创建）：明暗自适应 scrim ===== */
+/* ===== G. 注入的全屏底图层（backdrop.ts 创建）：明暗自适应 scrim =====
+   [lc-1017] __img 为 A/B 双层交叉淡换结构，opacity 由 backdrop.ts 逐层 inline 驱动
+   (活跃层=var(--fnos-backdrop-img-opacity,.30)，非活跃层=0)，样式表只给过渡。 */
 .fnos-detail-backdrop{
   position:fixed !important; inset:0 !important; z-index:-1 !important;
   pointer-events:none !important; overflow:hidden !important;
+  transition:opacity .34s ease !important;
 }
+.fnos-detail-backdrop.is-leaving{ opacity:0 !important; }
 .fnos-detail-backdrop__img{
   position:absolute !important; inset:-8% !important;
   background-size:cover !important; background-position:center 18% !important;
   filter:blur(52px) saturate(1.22) !important;
   transform:scale(1.12) !important;
-  opacity:var(--fnos-backdrop-img-opacity,.30) !important;
+  transition:opacity .5s ease !important;
 }
 .fnos-detail-backdrop__scrim{
   position:absolute !important; inset:0 !important;

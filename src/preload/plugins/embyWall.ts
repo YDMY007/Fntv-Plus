@@ -7,6 +7,7 @@ import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
+import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
 import { fetchShowsViaIPC, setOnShowsReady } from './embyWall/carousel/api';
@@ -86,6 +87,8 @@ function handle(): void {
       'html.fnos-perf .fnos-tv-page body{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
       /* 详情页全屏底图: 保留低透画面但去掉 52px 大模糊(常驻合成器大头) */
       'html.fnos-perf .fnos-detail-backdrop__img{filter:none!important}',
+      /* [lc-1017] 性能模式同时掐掉底图交叉淡换/整层淡出过渡, 保持零合成开销 */
+      'html.fnos-perf .fnos-detail-backdrop__img,html.fnos-perf .fnos-detail-backdrop{transition:none!important}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(perfSt);
   }
@@ -4685,27 +4688,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   _burgerObserver.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('beforeunload', () => _burgerObserver.disconnect());
 
-  // 页面切换过渡(防黑屏闪烁): 一层与背景同色的轻纱, 导航瞬间覆盖→淡出, 平滑揭示新页面
-  let _veil: HTMLElement | null = null;
-  const getVeil = (): HTMLElement => {
-    if (_veil && document.body.contains(_veil)) return _veil;
-    const v = document.createElement('div');
-    v.id = 'fnos-page-veil';
-    v.style.cssText = 'position:fixed;top:32px;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;opacity:0;background:var(--fnos-ui-veil);transition:opacity .26s ease;border-radius:0 0 16px 16px;overflow:hidden;';
-    document.body.appendChild(v);
-    _veil = v;
-    return v;
-  };
-  const pageTransition = (): void => {
-    // [lc-1014] 性能模式：不铺过渡遮罩（路由切换瞬间直达，零合成开销）
-    if (document.documentElement.classList.contains('fnos-perf')) return;
-    const v = getVeil();
-    v.style.transition = 'none';
-    v.style.opacity = '0.82';   // 瞬间覆盖, 挡住导航瞬间的黑/白闪
-    void v.offsetWidth;          // 强制回流, 让"覆盖"立即生效
-    v.style.transition = 'opacity .26s ease';
-    requestAnimationFrame(() => { v.style.opacity = '0'; }); // 淡出揭示新页面
-  };
+  // 页面切换过渡(防黑屏闪烁): 一层与背景同色的轻纱, 导航瞬间覆盖→淡出, 平滑揭示新页面。
+  // [lc-1017] 实现已迁至 detail/veil.ts：详情页导航改为「持罩待美化」——veil 不再按固定
+  // 260ms 计时淡出，而是等 applyDetailBeautify 套用完成(releaseNavVeil)再统一揭示，
+  // 消除「先看到原生页、随后一帧内整页换装」的闪一下；900ms 硬上限兜底绝不长遮。
 
   // [lc-153] 修复: 透明窗口下, fnOS 视图栈残留的旧页面透出下层内容(而非桌面)
   // 原理: fnOS(Emby系) SPA 路由切换会把旧页面保留在 DOM 里做"下层页面"(返回手势/转场用).
@@ -4894,7 +4880,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
-      pageTransition(); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      runPageTransition(isDetailPage()); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
     };
     (history as any).replaceState = function (...a: any[]) {
@@ -4907,12 +4893,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const np = newHref.indexOf('?') >= 0 ? newHref.split('?')[0] : newHref;
         if (np !== '/v' && np !== '/v/') S.leftHome = true;
       }
-      pageTransition(); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
+      runPageTransition(isDetailPage()); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
-      pageTransition();
+      runPageTransition(isDetailPage());
       setTimeout(ensureBurgerVisible, 300);
       setTimeout(closeDrawer, 300);
       setTimeout(hideStaleViews, 400);

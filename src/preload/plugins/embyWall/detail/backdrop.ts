@@ -1,8 +1,11 @@
-// embyWall/detail/backdrop.ts — 全屏底图 + 瞬间加载层（lc-980 重写）
+// embyWall/detail/backdrop.ts — 全屏底图 + 瞬间加载层（lc-980 重写，lc-1017 交叉淡入淡出）
 // ─────────────────────────────────────────────────────────────────────────────
 // 两者都是「一个注入 overlay div」关注点，全程构建一次，无 per-tick 工作：
 //   • 底图：复用 fnOS 已加载的 hero 背景剧照(无新网络请求)，fixed z-index:-1 铺在页面最底层，
 //     配合 beautifyStyle 的「页面背景透明化」透出 → 沉浸感。
+//     [lc-1017] 底图改为 **双层交叉淡入淡出**：详情↔详情(一级页→二级页)换剧照时，旧版是
+//     「backgroundImage 一帧内直接换」→ 换图瞬间旧图消失新图未解码，透出纯色底 = 闪一下。
+//     现在新图先挂到隐藏层、等解码完成再与旧图交叉淡换(.5s)，全程无真空帧。
 //   • 瞬间加载层：进详情瞬间铺「缓存海报 + 骨架 shimmer」盖住 fnOS 原生白屏，hero 就绪即淡出，
 //     2s 兜底自动淡出，绝不长期遮挡。缓存海报来自上次访问该 href 时存下的 hero 图(localStorage)。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13,41 +16,103 @@ const INSTANT_ID = 'fnos-instant-layer';
 const CACHE_PREFIX = 'fntvDetailPoster:';
 const CACHE_MAX = 24;         // localStorage 缓存条目上限(防无限增长)
 const INSTANT_AUTO_HIDE = 2000; // 兜底：内容始终未渲染也自动淡出，绝不长期遮挡
+const CROSSFADE_MS = 500;     // [lc-1017] 底图交叉淡入淡出时长
+const LEAVE_MS = 340;         // [lc-1017] 离开详情页时整层淡出时长
 
 let _instantAutoTimer = 0;
 let _instantRemoveTimer = 0;
+// [lc-1017] 底图交叉淡换状态：当前显示源 + 活跃层(A/B) + 挂起中的整层移除
+let _currentBg = '';
+let _activeIsA = true;
+let _removeTimer = 0;
 
 // ── 全屏底图 ────────────────────────────────────────────────────────────────
 
-/** 注入/更新全屏底图（幂等：src 未变则不动）。hero 背景剧照由 fnOS 已加载，直接复用其 URL。 */
-export function injectBackdrop(hero: HTMLElement): void {
-  const img = findHeroBackdropImg(hero);
-  const src = img ? (img.currentSrc || img.src || '') : '';
-  let layer = document.getElementById(BACKDROP_ID) as HTMLDivElement | null;
-  if (!layer) {
-    layer = document.createElement('div');
-    layer.id = BACKDROP_ID;
-    layer.className = 'fnos-detail-backdrop';
+function _targetOpacity(): string { return 'var(--fnos-backdrop-img-opacity,.30)'; }
+
+/** 构建底图容器：A/B 两个等价背景层(活跃层显示、非活跃层 opacity:0 供交叉淡换) + scrim。 */
+function _buildLayer(): HTMLDivElement {
+  const layer = document.createElement('div');
+  layer.id = BACKDROP_ID;
+  layer.className = 'fnos-detail-backdrop';
+  for (let i = 0; i < 2; i++) {
     const bg = document.createElement('div');
     bg.className = 'fnos-detail-backdrop__img';
-    const scrim = document.createElement('div');
-    scrim.className = 'fnos-detail-backdrop__scrim';
+    // 双层都用同一 class，谁活跃谁显示：显式写 inline opacity(样式表不再管 opacity，避免 !important 压制)
+    bg.style.opacity = i === 0 ? _targetOpacity() : '0';
     layer.appendChild(bg);
-    layer.appendChild(scrim);
-    document.body.appendChild(layer);
   }
-  const bg = layer.querySelector<HTMLDivElement>('.fnos-detail-backdrop__img');
-  if (bg) {
-    // 无图(首帧/半死)时留空 → 只有暗 scrim，绝不刷白(根治旧版白屏)
-    const next = src ? `url("${src}")` : 'none';
-    if (bg.style.backgroundImage !== next) bg.style.backgroundImage = next;
-  }
+  const scrim = document.createElement('div');
+  scrim.className = 'fnos-detail-backdrop__scrim';
+  layer.appendChild(scrim);
+  document.body.appendChild(layer);
+  _activeIsA = true;
+  _currentBg = '';
+  return layer;
 }
 
-/** 移除全屏底图（离开详情页/关闭开关；O(1)）。 */
+function _getLayer(): HTMLDivElement | null {
+  return document.getElementById(BACKDROP_ID) as HTMLDivElement | null;
+}
+
+/** 注入/更新全屏底图（幂等：src 未变则不动；变化走双层交叉淡换，先解码后淡入）。 */
+export function injectBackdrop(hero: HTMLElement): void {
+  // 若整层正处于"淡出移除"中(如 返回首页 又立即进另一详情页)，取消移除并复原
+  clearTimeout(_removeTimer);
+  let layer = _getLayer();
+  if (layer) layer.classList.remove('is-leaving');
+  if (!layer) layer = _buildLayer();
+
+  const img = findHeroBackdropImg(hero);
+  const src = img ? (img.currentSrc || img.src || '') : '';
+  if (!src) {
+    // 无图(首帧/半死)：不刷白，交叉淡出到只剩 scrim
+    if (_currentBg) _crossfade('');
+    return;
+  }
+  if (src === _currentBg) return;
+  _crossfade(src);
+}
+
+/** 双层交叉淡换：新图挂非活跃层 → 解码完成 → 两层 opacity 对调(.5s ease)。target 为空串=淡出到只剩 scrim。 */
+function _crossfade(src: string): void {
+  const layer = _getLayer();
+  if (!layer) return;
+  const layers = layer.querySelectorAll<HTMLDivElement>('.fnos-detail-backdrop__img');
+  if (layers.length < 2) return;
+  const from = layers[_activeIsA ? 0 : 1];
+  const to = layers[_activeIsA ? 1 : 0];
+
+  const activate = (): void => {
+    to.style.opacity = src ? _targetOpacity() : '0';
+    from.style.opacity = '0';
+    _activeIsA = !_activeIsA;
+    _currentBg = src;
+  };
+
+  if (!src) { activate(); return; } // 纯淡出，无需解码
+  to.style.backgroundImage = `url("${src}")`;
+  // 先解码再淡入：新图可见的第一帧就是完整像素，绝不闪"半张图/空白"
+  const pre = new Image();
+  pre.onload = () => { if (to.style.backgroundImage) activate(); };
+  pre.onerror = () => { /* 解码失败：维持旧图(或旧 scrim)，不换 */ };
+  pre.src = src;
+}
+
+/** 移除全屏底图（离开详情页/关闭开关）：整层淡出后再摘除，避免底图瞬间消失的闪动。
+ *  若期间 injectBackdrop 又建/复用了同一层，其内部会取消本计时并移除 is-leaving。 */
 export function removeBackdrop(): void {
-  const layer = document.getElementById(BACKDROP_ID);
-  if (layer && layer.parentNode) layer.parentNode.removeChild(layer);
+  const layer = _getLayer();
+  if (!layer) return;
+  if (layer.classList.contains('is-leaving')) return;
+  layer.classList.add('is-leaving');
+  clearTimeout(_removeTimer);
+  _removeTimer = window.setTimeout(() => {
+    const el = document.getElementById(BACKDROP_ID);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+    _currentBg = '';
+    _activeIsA = true;
+  }, LEAVE_MS);
 }
 
 // ── 海报缓存（供瞬间加载层秒出）──────────────────────────────────────────────
