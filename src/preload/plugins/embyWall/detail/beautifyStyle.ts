@@ -266,6 +266,38 @@ body.fnos-beautify a[href*="/v/person/"]{
 body.fnos-beautify a[href*="/v/person/"]:hover{ opacity:.8 !important; }
 body.fnos-beautify a[href*="/v/person/"] img{ border-radius:12px !important; }
 
+/* ===== E2. 演职人员精修（lc-1020，按实机 DOM 对齐）：与右栏信息卡同一套排版语言 =====
+   原生形态：16px 大字标题 + 常驻横向滚动条 + 16px 人名，与上方磨砂信息卡的 11px 小标签
+   层级语言不一致（用户要求演员信息展示贴合整体样式）。收敛为：小号弱化分区标签 /
+   头像柔投影替代描边（对比度靠投影不靠 tint）/ 悬浮轻抬升 / 隐藏滚动条。
+   实机结构：宿主 COL>nth-child(3) 内 p.semi-typography(标题) + .ms-container(横滑) >
+   a[href*=/v/person/] > div.size-[90px].rounded-full(头像wrapper,原生transition-all) + p 名字(text-base) + p 角色(text-xs)。
+   注：TMDB 卡也插在本宿主顶部，但其 HTML 全部用 .fnos-showinfo__* 类、无 p.semi-typography，互不误伤。 */
+/* ① 分区标题「演职人员」：16px 大字 → 12px 弱化字距标签（与信息卡 block label 同层级） */
+body.fnos-beautify ${COL} > :nth-child(3) p.semi-typography{
+  font-size:12px !important; letter-spacing:.14em !important;
+  color:var(--fnos-ui-sub) !important; font-weight:500 !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) p.semi-typography strong,
+body.fnos-beautify ${COL} > :nth-child(3) p.semi-typography span{
+  font-size:inherit !important; color:inherit !important;
+  font-weight:inherit !important; letter-spacing:inherit !important;
+}
+/* ② 隐藏横滑滚动条（无边框无线条；滚轮/触控板横滑仍可用） */
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container{ scrollbar-width:none !important; }
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
+  width:0 !important; height:0 !important; display:none !important;
+}
+/* ③ 头像：柔投影替代描边；悬浮轻抬升（原生 wrapper 已带 transition-all，无需补过渡） */
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type{
+  box-shadow:0 10px 26px rgba(0,0,0,.28) !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type{
+  transform:translateY(-3px) !important;
+}
+/* ④ 人名 16px→13px（与信息卡正文同级）；角色行维持原生 12px 弱化 */
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{ font-size:13px !important; }
+
 /* ===== F. hero 海报微投影（hero 整体保持原生，只让海报更立体）===== */
 body.fnos-beautify ${HERO} img[class*="rounded"], body.fnos-beautify ${HERO} .shrink-0 img{
   box-shadow:0 16px 44px rgba(0,0,0,.34) !important;

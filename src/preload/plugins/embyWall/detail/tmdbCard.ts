@@ -151,6 +151,33 @@ function _resetState(): void {
   _seasonYearText = '';
   _seasonNumberCache = null;
   _nativeImdb = null;
+  _disarmMountRetry();
+}
+
+// ── [lc-1020] 挂载竞态自愈：有界重试链 ──
+// 用户报障：二级详情页首次进入只显示演员信息、剧集信息卡要退出重进才出现。
+// 根因：季页卡片宿主 = 内容列 children[2]（演职人员区），由 fnOS **异步**渲染；而
+// _renderCard 只有两次时机（scheduleTmdbCard 时 + TMDB fetch resolve 时），TMDB 缓存命中时
+// fetch 毫秒级返回、必然早于演员区 → 两次 _ensureCardEl() 都拿不到宿主 → 永久放弃
+// （_scheduledFor 又挡住同 href 重新调度）。重进时 SPA cache-outlet 里演员区已存在 → 一次就挂上。
+// 补一条有界重试链（仿 SERIES_RETRY_DELAYS），演员区渲染出来即挂载；teardown/换页即撤。
+const MOUNT_RETRY_DELAYS = [300, 800, 1600, 2800, 4200];
+let _mountRetryTimer = 0;
+let _mountRetryIdx = 0;
+
+function _armMountRetry(): void {
+  if (_mountRetryTimer) return;
+  if (_mountRetryIdx >= MOUNT_RETRY_DELAYS.length) return; // 预算耗尽（演员区确实一直没渲染）
+  _mountRetryTimer = window.setTimeout(() => {
+    _mountRetryTimer = 0;
+    _mountRetryIdx++;
+    _renderCard();
+  }, MOUNT_RETRY_DELAYS[_mountRetryIdx]);
+}
+
+function _disarmMountRetry(): void {
+  if (_mountRetryTimer) { clearTimeout(_mountRetryTimer); _mountRetryTimer = 0; }
+  _mountRetryIdx = 0;
 }
 
 // ── 纯解析函数（salvage；作用域收敛到精准 hero）──
@@ -638,7 +665,12 @@ function _renderCard(): void {
   // （面板 :has(> .fnos-beautify-card) 失配自动收窄回 600px 单列）；季页维持错误框不变。
   if (_isSeriesRoute() && !_tmdbInfoData && !_tmdbInfoLoading && _tmdbInfoError) return;
   const card = _ensureCardEl();
-  if (!card) return;
+  if (!card) {
+    // [lc-1020] 宿主（季页演职人员区 / 系列页面板）还没渲染 → 有界重试，不再永久放弃
+    _armMountRetry();
+    return;
+  }
+  _disarmMountRetry(); // 已挂上，重试链收队
   let body = '';
   if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData);
   else if (_tmdbInfoLoading) body = '<div class="fnos-showinfo__loading">正在从 TMDB 获取剧集信息…</div>';
