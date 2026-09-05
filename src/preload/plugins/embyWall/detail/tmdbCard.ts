@@ -450,6 +450,9 @@ function handle(v: any): string {
  *  渲染阶段只放占位 img（不给 src → 不会产生任何请求，也不会出现破图标）。 */
 const STILL_MAX = 3;
 const IMG_BASE = 'https://image.tmdb.org/t/p/w500';
+/** [lc-1048] 灯箱用高清档：卡片缩略是 w500，灯箱铺到 75vw 需 w1280（tmdb:image 按完整 URL 存缓存，
+ *  换尺寸首看一次性重下，之后命中磁盘缓存毫秒级返回）。 */
+const STILL_HIRES = 'https://image.tmdb.org/t/p/w1280';
 
 /** fromStillsOnly：二级(季)页裁剪 [lc-1022]。一级详情页(lc-1010 放开)右栏已展示同一张 TMDB 卡的
  *  完整内容，季页再渲染评分/标语/meta/事实/主创/本季就是整卡原样重复 → 用户指定只保留
@@ -666,6 +669,139 @@ async function _fillStills(card: HTMLElement, paths: string[]): Promise<void> {
   if (s && s.parentNode) s.parentNode.removeChild(s);
 }
 
+// ── [lc-1048] 剧照灯箱：点击右栏剧照 → 居中 75% 大小查看 ──
+// 交互：左右圆形按钮/键盘 ←→ 切换上下张（循环），ESC/点空白/✕ 关闭，底部 n / m 计数。
+// 数据：_tmdbInfoData.backdrops 全量（≤6 张）——缩略图区只渲染 STILL_MAX=3 张，灯箱可翻到全部。
+// 加载：打开瞬间先用已加载的 w500 缩略 dataURL 占位（秒显），同时按路径拉 w1280 高清
+//  （tmdb:image 按完整 URL 缓存，一次拉取会话内 Map 复用）；第 4+ 张无缩略 → 显示加载态。
+
+let _lbKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+
+function closeStillLightbox(): void {
+  const ov = document.getElementById('fntv-still-lightbox');
+  if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  if (_lbKeyHandler) {
+    document.removeEventListener('keydown', _lbKeyHandler, true);
+    _lbKeyHandler = null;
+  }
+}
+
+function openStillLightbox(startIdx: number): void {
+  if (document.getElementById('fntv-still-lightbox')) return;
+  const paths: string[] = (_tmdbInfoData && Array.isArray(_tmdbInfoData.backdrops))
+    ? _tmdbInfoData.backdrops.filter(Boolean) : [];
+  const n = paths.length;
+  if (!n) return;
+  // 打开时刻快照（换页/强刷会 _resetState 置空 _tmdbInfoData，灯箱不依赖它存活）
+  const card = document.getElementById(CARD_ID);
+  const thumbs = card ? Array.from(card.querySelectorAll<HTMLImageElement>('img.fnos-showinfo__still')) : [];
+  // ⚠ _fillStills 会把加载失败的 img 从 DOM 摘掉 → 缩略占位按下标对位可能缺失/错位，
+  //   只影响占位显示不影响正确性（高清图按路径拉取）
+  const quick: string[] = paths.map((_, i) => (thumbs[i] && thumbs[i].src) ? thumbs[i].src : '');
+
+  const ov = document.createElement('div');
+  ov.id = 'fntv-still-lightbox';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:2147483602;display:flex;align-items:center;justify-content:center;'
+    + 'background:rgba(8,7,14,.82);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);'
+    + '-webkit-app-region:no-drag;app-region:no-drag;';
+
+  const img = document.createElement('img');
+  img.alt = '剧照';
+  img.draggable = false;
+  // 居中 75% 大小：max-width 75vw + max-height 82vh（16:9 剧照在 75vw 时高≈42vw，常规屏不超过 82vh）
+  img.style.cssText = 'max-width:75vw;max-height:82vh;width:auto;height:auto;object-fit:contain;border-radius:10px;'
+    + 'box-shadow:0 24px 80px rgba(0,0,0,.55);transition:opacity .16s ease;user-select:none;-webkit-user-drag:none;';
+  img.addEventListener('click', (e) => e.stopPropagation()); // 点图不关闭（点空白才关）
+  ov.appendChild(img);
+
+  const counter = document.createElement('div');
+  counter.style.cssText = 'position:absolute;bottom:18px;left:50%;transform:translateX(-50%);'
+    + 'padding:4px 14px;border-radius:999px;font-size:12px;font-weight:600;color:rgba(255,255,255,.88);'
+    + 'background:rgba(20,18,28,.62);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+  ov.appendChild(counter);
+
+  const loadTip = document.createElement('div');
+  loadTip.textContent = '高清加载中…';
+  loadTip.style.cssText = 'position:absolute;bottom:56px;left:50%;transform:translateX(-50%);padding:4px 14px;'
+    + 'border-radius:999px;font-size:11px;color:rgba(255,255,255,.72);background:rgba(20,18,28,.62);display:none;';
+  ov.appendChild(loadTip);
+
+  const mkNav = (side: 'left' | 'right'): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-label', side === 'left' ? '上一张' : '下一张');
+    b.style.cssText = 'position:absolute;top:50%;' + (side === 'left' ? 'left:22px;' : 'right:22px;')
+      + 'transform:translateY(-50%);width:48px;height:48px;border-radius:50%;cursor:pointer;'
+      + 'border:1px solid rgba(255,255,255,.22);background:rgba(20,18,28,.66);color:#fff;'
+      + 'display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);'
+      + 'transition:background .15s;z-index:2;';
+    b.innerHTML = side === 'left'
+      ? '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M11.5 3.5L6 9l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      : '<svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M6.5 3.5L12 9l-5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    b.addEventListener('mouseenter', () => { b.style.background = 'rgba(64,56,92,.88)'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'rgba(20,18,28,.66)'; });
+    b.addEventListener('click', (e) => { e.stopPropagation(); show(idx + (side === 'left' ? -1 : 1)); });
+    return b;
+  };
+  ov.appendChild(mkNav('left'));
+  ov.appendChild(mkNav('right'));
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', '关闭');
+  closeBtn.style.cssText = 'position:absolute;top:18px;right:22px;width:40px;height:40px;border-radius:50%;cursor:pointer;'
+    + 'border:1px solid rgba(255,255,255,.22);background:rgba(20,18,28,.66);color:#fff;font-size:15px;font-weight:700;'
+    + 'display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);'
+    + 'transition:background .15s;';
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = 'rgba(64,56,92,.88)'; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = 'rgba(20,18,28,.66)'; });
+  closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeStillLightbox(); });
+  ov.appendChild(closeBtn);
+
+  let idx = 0;
+  let seq = 0; // 切换序号：异步高清回来时已翻页则丢弃
+  const cache = new Map<number, string>();
+  const apply = (uri: string): void => {
+    img.style.opacity = '0';
+    img.onload = () => { img.style.opacity = '1'; };
+    img.src = uri;
+  };
+  const show = (i: number): void => {
+    idx = ((i % n) + n) % n; // 循环切换
+    const mySeq = ++seq;
+    counter.textContent = (idx + 1) + ' / ' + n;
+    const hit = cache.get(idx);
+    if (hit !== undefined) { loadTip.style.display = 'none'; apply(hit); return; }
+    const ph = quick[idx];
+    loadTip.style.display = ph ? 'none' : 'block';
+    if (ph) apply(ph);
+    void (async () => {
+      try {
+        const r: any = await ipcRenderer.invoke('tmdb:image', STILL_HIRES + paths[idx]);
+        if (mySeq !== seq) return; // 已翻到别的张
+        if (r && r.ok && r.dataUrl) {
+          cache.set(idx, r.dataUrl);
+          apply(r.dataUrl);
+          loadTip.style.display = 'none';
+        }
+      } catch { /* 静默：保留缩略占位 */ }
+    })();
+  };
+  ov.addEventListener('click', (e) => { if (e.target === ov) closeStillLightbox(); });
+  _lbKeyHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeStillLightbox(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); show(idx - 1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); show(idx + 1); }
+  };
+  document.addEventListener('keydown', _lbKeyHandler, true);
+
+  document.body.appendChild(ov);
+  show(Math.max(0, Math.min(startIdx, n - 1)));
+}
+
+
+
 // ── 卡片节点定位/渲染/调度 ──
 
 /** 卡片宿主。
@@ -746,6 +882,21 @@ function _renderCard(): void {
 
   const btn = card.querySelector('.fnos-showinfo__refresh') as HTMLElement | null;
   if (btn) btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); if (!_tmdbInfoLoading) _fetch(true); });
+
+  // [lc-1048] 剧照可点击放大：事件委托挂在 stills 容器（onclick 属性赋值幂等，innerHTML 重建不叠加监听器）
+  const stills = card.querySelector('.fnos-showinfo__stills') as HTMLElement | null;
+  if (stills) {
+    stills.style.cursor = 'zoom-in';
+    stills.onclick = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      const img = target ? (target.closest('img.fnos-showinfo__still') as HTMLImageElement | null) : null;
+      if (!img) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const imgs = Array.from(stills.querySelectorAll('img'));
+      openStillLightbox(Math.max(0, imgs.indexOf(img)));
+    };
+  }
 }
 
 function _fetch(force = false): void {
@@ -833,6 +984,7 @@ export function scheduleTmdbCard(_view: HTMLElement): void {
 export function removeTmdbCard(): void {
   const card = document.getElementById(CARD_ID);
   if (card && card.parentNode) card.parentNode.removeChild(card);
+  closeStillLightbox(); // [lc-1048] 换页/关美化时若灯箱还开着，一并撤掉
   _scheduledFor = null;
   _disarmSeriesPanel();
   _resetState();
