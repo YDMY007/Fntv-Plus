@@ -2806,6 +2806,188 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       return { row, ta };
     };
 
+    // ===== [lc-1032] Trakt 同步（观影记录 → trakt.tv history，OAuth Device Flow）=====
+    const secTrakt = section('Trakt 同步');
+    secTrakt.el.id = 'sec-trakt';
+    const traBody = secTrakt.body;
+    const traHint = document.createElement('div');
+    traHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
+    traHint.textContent = '把观影记录（看完的电影 / 已看的剧集集数）同步到 trakt.tv 历史。需要在 Trakt 应用管理页(trakt.tv/oauth/applications)注册应用，把 Client ID 与 Secret 填到这里，再点「连接 Trakt」完成设备授权。';
+    traBody.appendChild(traHint);
+
+    // 凭证（掩码输入，交互同 Bangumi token / 弹弹play 凭证）
+    const maskTra = (t: string): string => '*'.repeat(Math.max(0, t.length));
+    let traRealId = '';
+    let traRealSecret = '';
+    const mkTraInput = (placeholder: string): HTMLInputElement => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = placeholder;
+      inp.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+        + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+        + 'padding:6px 8px;box-sizing:border-box;margin-bottom:6px;';
+      inp.addEventListener('focus', () => { if (inp.readOnly) { inp.readOnly = false; inp.value = ''; } });
+      return inp;
+    };
+    const traIdInput = mkTraInput('Client ID（Trakt 应用设置页获取）');
+    const traSecretInput = mkTraInput('Client Secret（与 ID 同页，勿外传）');
+    const traBlurMask = (inp: HTMLInputElement, real: string): void => {
+      if (inp.value.trim() === '' && real) { inp.value = maskTra(real); inp.readOnly = true; }
+    };
+    traIdInput.addEventListener('blur', () => traBlurMask(traIdInput, traRealId));
+    traSecretInput.addEventListener('blur', () => traBlurMask(traSecretInput, traRealSecret));
+    traBody.appendChild(traIdInput);
+    traBody.appendChild(traSecretInput);
+
+    const traBtnRow1 = document.createElement('div');
+    traBtnRow1.style.cssText = 'display:flex;gap:6px;';
+    const traSaveBtn = mkBtn('保存凭证', true);
+    const traClearBtn = mkBtn('清除凭证', true);
+    traBtnRow1.appendChild(traSaveBtn); traBtnRow1.appendChild(traClearBtn);
+    traBody.appendChild(traBtnRow1);
+
+    const traStatus = document.createElement('div');
+    traStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;line-height:1.5;';
+    traBody.appendChild(traStatus);
+
+    const traRefreshStatus = async (): Promise<void> => {
+      const st: any = await ipcRenderer.invoke('trakt:get-status').catch(() => null);
+      if (st && st.connected) {
+        const exp = st.expiresAt ? '，有效期至 ' + new Date(st.expiresAt).toLocaleDateString() : '';
+        traStatus.textContent = '已连接 Trakt' + exp;
+        traStatus.style.color = 'var(--fnos-ui-ok)';
+      } else if (st && st.configured) {
+        traStatus.textContent = '凭证已保存，尚未连接。';
+        traStatus.style.color = 'var(--fnos-ui-sub)';
+      } else {
+        traStatus.textContent = '未配置。';
+        traStatus.style.color = 'var(--fnos-ui-sub)';
+      }
+    };
+
+    traSaveBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const id = traIdInput.value.trim();
+      const sec = traSecretInput.value.trim();
+      if (!id || !sec) {
+        traStatus.textContent = 'Client ID 与 Secret 均必填（清除请用「清除凭证」）。';
+        traStatus.style.color = 'var(--fnos-ui-warn)';
+        return;
+      }
+      ipcRenderer.invoke('trakt:save-credentials', id, sec)
+        .then((r: any) => {
+          if (r && r.error) throw new Error(r.error);
+          traRealId = id; traRealSecret = sec;
+          traIdInput.value = maskTra(id); traIdInput.readOnly = true;
+          traSecretInput.value = maskTra(sec); traSecretInput.readOnly = true;
+          void traRefreshStatus();
+        })
+        .catch((err) => { traStatus.textContent = '保存失败: ' + (err && err.message ? err.message : err); traStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+    traClearBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('trakt:clear-credentials').then(() => {
+        traRealId = ''; traRealSecret = '';
+        traIdInput.value = ''; traIdInput.readOnly = false;
+        traSecretInput.value = ''; traSecretInput.readOnly = false;
+        void traRefreshStatus();
+      }).catch(() => {});
+    });
+
+    // 设备流授权（连接 Trakt）
+    const traBtnRow2 = document.createElement('div');
+    traBtnRow2.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const traConnectBtn = mkBtn('连接 Trakt', true);
+    const traSyncBtn = mkBtn('立即同步观影记录', true);
+    const traDiscBtn = mkBtn('断开连接', true);
+    traBtnRow2.appendChild(traConnectBtn); traBtnRow2.appendChild(traSyncBtn); traBtnRow2.appendChild(traDiscBtn);
+    traBody.appendChild(traBtnRow2);
+
+    const traCodeBox = document.createElement('div');
+    traCodeBox.style.cssText = 'display:none;margin-top:8px;padding:8px 10px;border-radius:8px;'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);font-size:11px;line-height:1.7;';
+    traBody.appendChild(traCodeBox);
+
+    const traSyncResult = document.createElement('div');
+    traSyncResult.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;line-height:1.5;';
+    traBody.appendChild(traSyncResult);
+
+    traConnectBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      traStatus.textContent = '正在获取设备码…';
+      traStatus.style.color = 'var(--fnos-ui-sub)';
+      ipcRenderer.invoke('trakt:device-start').then((r: any) => {
+        if (r && r.error) {
+          traStatus.textContent = r.error;
+          traStatus.style.color = 'var(--fnos-ui-warn)';
+          return;
+        }
+        const url = String(r.verification_url || 'https://trakt.tv/activate');
+        const code = String(r.user_code || '');
+        traCodeBox.style.display = 'block';
+        traCodeBox.innerHTML = '';
+        const l1 = document.createElement('div');
+        l1.textContent = '1. 打开授权页：';
+        const link = document.createElement('a');
+        link.href = url; link.textContent = url; link.style.color = 'var(--fnos-ui-accent)';
+        link.addEventListener('click', (ev: Event) => { ev.preventDefault(); try { require('electron').shell.openExternal(url); } catch { /* ignore */ } });
+        l1.appendChild(link);
+        const l2 = document.createElement('div');
+        l2.textContent = '2. 输入授权码：';
+        const codeEl = document.createElement('span');
+        codeEl.textContent = code;
+        codeEl.style.cssText = 'font-size:15px;font-weight:700;letter-spacing:2px;color:var(--fnos-ui-text);user-select:all;cursor:pointer;margin-left:4px;';
+        codeEl.title = '点击复制';
+        codeEl.addEventListener('click', () => {
+          try { navigator.clipboard.writeText(code); codeEl.title = '已复制'; } catch { /* ignore */ }
+        });
+        l2.appendChild(codeEl);
+        const l3 = document.createElement('div');
+        l3.textContent = '3. 授权后本窗口自动完成连接（等待中…）';
+        traCodeBox.appendChild(l1); traCodeBox.appendChild(l2); traCodeBox.appendChild(l3);
+        traStatus.textContent = '等待授权中…';
+      }).catch((err) => { traStatus.textContent = '失败: ' + (err && err.message ? err.message : err); traStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+    ipcRenderer.on('trakt:connected', () => {
+      traCodeBox.style.display = 'none';
+      traStatus.textContent = '已连接 Trakt ✓';
+      traStatus.style.color = 'var(--fnos-ui-ok)';
+      void traRefreshStatus();
+    });
+    ipcRenderer.on('trakt:device-error', (_e: any, msg: any) => {
+      traCodeBox.style.display = 'none';
+      traStatus.textContent = String(msg || '授权失败');
+      traStatus.style.color = 'var(--fnos-ui-warn)';
+    });
+    traDiscBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ipcRenderer.invoke('trakt:device-cancel').catch(() => {});
+      ipcRenderer.invoke('trakt:disconnect').then(() => void traRefreshStatus()).catch(() => {});
+    });
+    traSyncBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      traSyncResult.textContent = '同步中…（扫描媒体库并写入 Trakt，可能需要一点时间）';
+      ipcRenderer.invoke('trakt:sync-watched').then((r: any) => {
+        if (r && r.error) {
+          traSyncResult.textContent = '同步失败: ' + (r.error === 'busy' ? '上一次同步仍在进行' : r.error);
+          traSyncResult.style.color = 'var(--fnos-ui-warn)';
+          return;
+        }
+        traSyncResult.textContent = '同步完成：新增电影 ' + (r.addedMovies || 0) + ' 部 / 剧集集数 ' + (r.addedEpisodes || 0)
+          + ' 条，未识别 ' + (r.notFound || 0) + (r.noIdMovies || r.noIdShows ? '（标题搜索未命中 ' + (r.noIdMovies || 0) + ' 部电影 / ' + (r.noIdShows || 0) + ' 部剧）' : '');
+        traSyncResult.style.color = 'var(--fnos-ui-ok)';
+      }).catch((err) => { traSyncResult.textContent = '同步失败: ' + (err && err.message ? err.message : err); traSyncResult.style.color = 'var(--fnos-ui-warn)'; });
+    });
+    // 回填凭证掩码与状态
+    ipcRenderer.invoke('trakt:get-credentials').then((r: any) => {
+      if (r && r.configured) {
+        traRealId = r.clientId || ''; traRealSecret = r.clientSecret || '';
+        traIdInput.value = maskTra(traRealId); traIdInput.readOnly = true;
+        traSecretInput.value = maskTra(traRealSecret); traSecretInput.readOnly = true;
+      }
+      void traRefreshStatus();
+    }).catch(() => {});
+
     // ===== 弹幕设置（写入 danmaku_block_types.json + 屏蔽词文件 + 弹幕文件夹管理）=====
     // [lc-215] 移除「弹幕样式」控制项（透明度/字号/描边/阴影/显示区域/同屏上限/粗体）——
     // 这些已由 MPV 底部控制栏的弹幕样式按钮管理；此处仅保留/新增「弹幕屏蔽」相关。
@@ -3837,7 +4019,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const cats: Cat[] = [
       { id: 'general', label: '通用', els: [sec1.el, sec3.el, secSystem.el] },
       { id: 'player', label: '播放器', els: [sec2.el, secInterp.el] },
-      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el] },
+      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'danmaku', label: '弹幕设置', els: [secDanmaku.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'plugins', label: '插件', els: [secSkip.el, secTmdbDirect.el, secCustomProxy.el, secCarousel.el] },
