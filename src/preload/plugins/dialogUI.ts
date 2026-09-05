@@ -141,6 +141,36 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     footer.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:18px;';
     const buttons = payload.buttons && payload.buttons.length ? payload.buttons : ['确定'];
     const defaultId = payload.defaultId ?? 0;
+    // [lc-1064] cancelId：Esc 关闭语义的落点；未指定取最后一个按钮（对话框惯例）
+    const cancelId = payload.cancelId ?? buttons.length - 1;
+    let allBtns: HTMLButtonElement[] = [];
+    // 统一关闭出口：淡出→移除→回传结果（click/Esc/Enter 三路共用；键盘路移除监听）
+    const closeWith = (index: number): void => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.style.opacity = '0';
+        card.style.transform = 'scale(.96)';
+        setTimeout(() => {
+            overlay.remove();
+            const mdStyle = document.querySelector('style[data-fnos-md="1"]');
+            if (mdStyle) mdStyle.remove();
+        }, 180);
+        ipcRenderer.send('fnos-dialog:result', payload.id, index, checked);
+    };
+    // [lc-1064] 键盘支持：Esc=取消(cancelId)、Enter=默认按钮（焦点已在按钮上时放行原生
+    // click，避免双重触发）。document 捕获监听 —— 焦点可能在 body（未移入弹层）也要能关。
+    const onKey = (e: KeyboardEvent): void => {
+        if (!overlay.isConnected) { document.removeEventListener('keydown', onKey, true); return; }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeWith(cancelId);
+        } else if (e.key === 'Enter') {
+            const ae = document.activeElement;
+            if (ae && allBtns.includes(ae as HTMLButtonElement)) return; // 原生 click 已激活
+            e.preventDefault();
+            closeWith(defaultId);
+        }
+    };
     buttons.forEach((label, index) => {
         const isDefault = index === defaultId;
         const btn = document.createElement('button');
@@ -149,29 +179,25 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
             'background:' + (isDefault ? 'linear-gradient(135deg,#6d7ff2,#8a63e8)' : 'rgba(255,255,255,.6)'),
             'color:' + (isDefault ? '#fff' : '#3d4a6e'),
             'font-size:13px', 'font-weight:600',
-            'padding:9px 18px', 'border-radius:10px', 'cursor:pointer', 'outline:none',
+            'padding:9px 18px', 'border-radius:10px', 'cursor:pointer',
             'transition:transform .12s ease, box-shadow .12s ease',
             'box-shadow:' + (isDefault ? '0 6px 16px rgba(109,127,242,.4)' : 'none'),
         ].join(';') + ';';
+        // [lc-1064] 去掉旧 inline outline:none —— 键盘焦点环由 a11y 全局规则接管
         btn.textContent = label;
         btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-1px)'; });
         btn.addEventListener('mouseleave', () => { btn.style.transform = 'translateY(0)'; });
-        btn.addEventListener('click', () => {
-            overlay.style.opacity = '0';
-            card.style.transform = 'scale(.96)';
-            setTimeout(() => {
-                overlay.remove();
-                const mdStyle = document.querySelector('style[data-fnos-md="1"]');
-                if (mdStyle) mdStyle.remove();
-            }, 180);
-            ipcRenderer.send('fnos-dialog:result', payload.id, index, checked);
-        });
+        btn.addEventListener('click', () => closeWith(index));
         footer.appendChild(btn);
+        allBtns.push(btn);
     });
     card.appendChild(footer);
 
     overlay.appendChild(card);
+    // [lc-1064] 打开即聚焦默认按钮：键盘用户可直接 Enter 确认 / Tab 换选项
+    document.addEventListener('keydown', onKey, true);
     requestAnimationFrame(() => {
+        if (allBtns[defaultId]) allBtns[defaultId].focus();
         overlay.style.opacity = '1';
         card.style.transform = 'scale(1)';
     });

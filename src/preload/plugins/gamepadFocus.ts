@@ -12,6 +12,7 @@
 //  - 鼠标活动(mousemove/mousedown)自动隐藏白框，交还鼠标；弹窗打开时不激活。
 //  - 原生网页播放器(video)播放中不激活，避免抢播放控制。
 
+import { t } from '../core/i18n';
 import logger from '../core/logger';
 const log = logger;
 
@@ -84,7 +85,7 @@ function ensureFrame(): HTMLDivElement {
 function showHint(): void {
     if (hintEl && hintEl.isConnected) { hintEl.remove(); hintEl = null; }
     hintEl = document.createElement('div');
-    hintEl.textContent = '手柄导航：摇杆/方向键移动 · A 确认 · B 返回';
+    hintEl.textContent = t('手柄导航：摇杆/方向键移动 · A 确认 · B 返回');
     hintEl.style.cssText = [
         'position:fixed', 'left:50%', 'bottom:36px', 'transform:translateX(-50%)',
         // [lc-683] 同提到最高层级, 弹窗打开时提示条也可见

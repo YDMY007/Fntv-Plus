@@ -2,6 +2,7 @@
 // 播放器选择弹窗（原生 / MPV / PotPlayer），供 playButton 与 playMaskButton 复用。
 // 这样「全部剧集」等剧集页的主播放按钮也能弹出与遮罩按钮一致的选择逻辑。
 import { ipcRenderer } from 'electron';
+import { t } from '../core/i18n';
 import logger from '../core/logger';
 
 export type PlayButtonConfig = {
@@ -98,7 +99,7 @@ export function createPlayModal(
 
     // 标题
     const title = document.createElement('h3');
-    title.textContent = '选择播放方式';
+    title.textContent = t('选择播放方式');
     title.style.cssText = `
         margin: 0 0 24px 0;
         font-size: 20px;
@@ -120,7 +121,7 @@ export function createPlayModal(
 
     // 原生播放按钮（仅在未隐藏原生播放按钮时显示）
     const nativePlayBtn = document.createElement('button');
-    nativePlayBtn.textContent = '原生播放';
+    nativePlayBtn.textContent = t('原生播放');
     nativePlayBtn.style.cssText = `
         padding: 12px 24px;
         background: rgba(255, 255, 255, 0.15);
@@ -140,7 +141,7 @@ export function createPlayModal(
     // 外部播放器按钮（默认播放器：MPV 或 PotPlayer）
     const externalPlayer: 'mpv' | 'potplayer' = config.defaultPlayer;
     const extPlayBtn = document.createElement('button');
-    extPlayBtn.textContent = externalPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
+    extPlayBtn.textContent = externalPlayer === 'potplayer' ? 'PotPlayer' : t('MPV播放');
     extPlayBtn.style.cssText = externalPlayer === 'potplayer'
         ? `
         padding: 12px 24px;
@@ -175,7 +176,7 @@ export function createPlayModal(
 
     // 取消按钮
     const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = '取消';
+    cancelBtn.textContent = t('取消');
     cancelBtn.style.cssText = `
         padding: 12px 24px;
         background: rgba(255, 255, 255, 0.1);

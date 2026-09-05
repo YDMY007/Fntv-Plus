@@ -28,6 +28,7 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
+import { getLang, setLang } from '../core/i18n'; // [lc-1065] 设置面板语言切换
 // [lc-563] 轮播数据源 = 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex（稳定构建 97 项），取 Map 前 10 项 = 首屏 DOM 顺序 = 最近更新在前。
 // 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。绝不在隐藏 iframe 内强制要求 poster（fnOS 懒加载图永远没真实 URL → 跳过 → 0 个）。
 import { ensureLibraryIndex } from './hotUpdates';
@@ -1262,6 +1263,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
+    closeBtn.setAttribute('aria-label', '关闭设置'); // [lc-1064] 纯符号按钮补读屏器可读名称
     // 放大点击热区(36×36)并加大字号, 解决"关闭按钮难点击"; 抬升 z-index + 强制可点, 防被遮挡
     closeBtn.style.cssText = 'position:relative;z-index:2;width:36px;height:36px;flex-shrink:0;box-sizing:border-box;'
       + 'border-radius:10px;cursor:pointer;pointer-events:auto;font-size:16px;font-weight:700;'
@@ -2111,6 +2113,38 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const sec3 = section('退出行为');
     const secBody3 = sec3.body;
     secBody3.style.cssText = 'padding:10px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    // ===== [lc-1065] 界面语言（i18n 框架的语言入口；仅影响 Fntv-Plus 注入的界面文案）=====
+    //   切换即写 localStorage(fntv-lang) + 整页刷新生效 —— 与轮播样式切换同一「改完重载」机制。
+    const secLang = section('语言 / Language');
+    const langRow = document.createElement('div');
+    langRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
+    const langLabel = document.createElement('span');
+    langLabel.textContent = '界面语言 / Interface language';
+    langLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;white-space:nowrap;';
+    const langSel = document.createElement('select');
+    langSel.id = 'fnos-ui-lang';
+    langSel.setAttribute('aria-label', '界面语言 / Interface language');
+    langSel.style.cssText = 'font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
+      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:5px 8px;cursor:pointer;flex-shrink:0;';
+    [['zh', '简体中文'], ['en', 'English']].forEach(([v, label]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = label;
+      langSel.appendChild(o);
+    });
+    langSel.value = getLang();
+    langSel.addEventListener('change', () => {
+      if (langSel.value !== getLang()) {
+        setLang(langSel.value as 'zh' | 'en');
+        location.reload(); // 已渲染文案随刷新统一换语言（不做运行时 DOM 回写）
+      }
+    });
+    const langHint = document.createElement('div');
+    langHint.textContent = '切换后自动刷新页面生效（仅影响 Fntv-Plus 注入的界面文案）';
+    langHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);line-height:1.5;padding:0 6px 6px;';
+    langRow.appendChild(langLabel); langRow.appendChild(langSel);
+    secLang.body.appendChild(langRow);
+    secLang.body.appendChild(langHint);
 
     const exitModes: [string, string][] = [['direct', '直接退出'], ['minimize', '最小化到托盘'], ['ask', '每次询问']];
     const exitEls: HTMLButtonElement[] = [];
@@ -4078,7 +4112,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   #sec-<id> scrollIntoView —— 各卡片元素与 id 均未动, 仅换分类归属。
     type Cat = { id: string; label: string; els: HTMLElement[] };
     const cats: Cat[] = [
-      { id: 'general', label: '通用', els: [sec3.el, secSystem.el, secUpd.el] },
+      { id: 'general', label: '通用', els: [sec3.el, secLang.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
       { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secUX.el] },
       { id: 'danmaku', label: '弹幕', els: [secBili.el, secDanmaku.el] },

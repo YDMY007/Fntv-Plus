@@ -13,6 +13,7 @@
 
 import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
+import { t } from '../core/i18n';
 import logger from '../core/logger';
 import { getCookie } from '../core/utils';
 
@@ -145,6 +146,36 @@ function extractGuidFromDom(): string | null {
 /**
  * 核心逻辑：检测到播放页后触发一次 fetch-and-fill。
  */
+let scrobbleWiredGuid = '';
+let scrobbleLastSentAt = 0;
+
+/** [lc-1064] Trakt scrobble 接线：当前集 video 元素挂 timeupdate/pause/ended 监听（每集一次） */
+function wireScrobble(guid: string): void {
+    if (scrobbleWiredGuid === guid) return;
+    const v = document.querySelector('video') as HTMLVideoElement | null;
+    if (!v) return;
+    scrobbleWiredGuid = guid;
+    const send = (action: string, pct: number): void => {
+        const now = Date.now();
+        if (action === 'start' && now - scrobbleLastSentAt < 60000) return; // 60s 节流(主进程还有 10min/+5% 节流)
+        scrobbleLastSentAt = now;
+        void ipcRenderer.invoke('trakt:scrobble', { action, guid, progress: pct }).catch(() => {});
+    };
+    v.addEventListener('timeupdate', () => {
+        if (!v.duration || !isFinite(v.duration)) return;
+        const pct = (v.currentTime / v.duration) * 100;
+        send(pct >= 80 ? 'stop' : 'start', pct);
+    });
+    v.addEventListener('pause', () => {
+        if (!v.duration) return;
+        send('pause', (v.currentTime / v.duration) * 100);
+    });
+    v.addEventListener('ended', () => {
+        void ipcRenderer.invoke('trakt:scrobble', { action: 'stop', guid, progress: 100 }).catch(() => {});
+    });
+    log.info('[skipInject] Trakt scrobble 已接线 guid=' + guid);
+}
+
 async function tryFillSkipData(): Promise<void> {
     // 先从 URL 取（最可靠）
     let guid = extractGuidFromUrl();
@@ -181,6 +212,10 @@ async function tryFillSkipData(): Promise<void> {
             log.info(`[skipInject] ⏭ 无需填充或无数据 source=${result.source} msg=${result.message || ''}`);
         }
 
+        // [lc-1064] Trakt scrobble（网页播放器）：timeupdate 节流 60s 上报 + pause/ended 即时
+        // 开关由主进程 trakt:set-scrobble-enabled 管理(读 fnConfig)；preload 侧每次发送仅一次 IPC,
+        // 主进程 scrobble() 会校验连接/开关/节流 → 这里直接接线即可
+        wireScrobble(guid);
         // [lc-1060] recap 命中 → 「跳过前情」按钮（Netflix 式；recap 不写回飞牛，纯前端按钮）
         if (result.recapStart && result.recapEnd && result.recapEnd > result.recapStart) {
             installRecapButton(guid, result.recapStart, result.recapEnd);
@@ -201,7 +236,7 @@ function installRecapButton(guid: string, recapStart: number, recapEnd: number):
     const btn = document.createElement('button');
     btn.id = 'fntv-recap-btn';
     btn.setAttribute('data-fnos-ui', '1');
-    btn.textContent = '跳过前情 ▸';
+    btn.textContent = t('跳过前情 ▸');
     btn.title = '跳过本集前情回顾（数据来源 AniSkip）';
     btn.style.cssText = [
         'position:fixed', 'right:28px', 'bottom:96px', 'z-index:2147483000',

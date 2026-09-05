@@ -1,6 +1,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
 import { extractCurrentGuid } from './skipInject';
+import { t } from '../core/i18n';
 import logger from '../core/logger';
 
 // autoplayNext.ts — [lc-1063] 自动连播 + 下一集倒计时（对标 Netflix/Disney+）
@@ -69,11 +70,11 @@ function buildCard(title: string, poster: string): HTMLElement {
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;">
             <div style="font-size:10.5px;font-weight:800;letter-spacing:2px;color:#4a5fd0;">UP NEXT</div>
             <div style="font-size:13.5px;font-weight:700;color:#262c44;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${title.replace(/"/g, '&quot;')}">${title}</div>
-            <div style="font-size:11.5px;color:#5a6480;" id="fntv-an-count">即将自动播放</div>
+            <div style="font-size:11.5px;color:#5a6480;" id="fntv-an-count">${t('即将自动播放')}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;justify-content:center;flex-shrink:0;">
-            <button id="fntv-an-play" style="border:none;cursor:pointer;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6d7ff2,#8a63e8);font-family:inherit;">立即播放</button>
-            <button id="fntv-an-cancel" style="border:none;cursor:pointer;border-radius:9px;padding:6px 12px;font-size:11.5px;font-weight:600;color:#3d4a6e;background:rgba(90,120,200,.12);font-family:inherit;">取消</button>
+            <button id="fntv-an-play" style="border:none;cursor:pointer;border-radius:9px;padding:7px 12px;font-size:12px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6d7ff2,#8a63e8);font-family:inherit;">${t('立即播放')}</button>
+            <button id="fntv-an-cancel" style="border:none;cursor:pointer;border-radius:9px;padding:6px 12px;font-size:11.5px;font-weight:600;color:#3d4a6e;background:rgba(90,120,200,.12);font-family:inherit;">${t('取消')}</button>
         </div>`;
     return card;
 }
@@ -97,7 +98,7 @@ function showCard(title: string, poster: string): void {
         removeCard();
     });
     const off = document.createElement('div');
-    off.textContent = '关闭自动连播';
+    off.textContent = t('关闭自动连播');
     off.style.cssText = 'position:absolute;top:8px;right:10px;font-size:10px;color:#8a93ad;cursor:pointer;user-select:none;';
     off.title = '关闭后可随时在卡片外重新开启（浏览器控制台 localStorage.setItem 切回 1）';
     off.addEventListener('click', (e) => {
@@ -143,13 +144,13 @@ function pollTick(): void {
     }
     if (remaining <= AUTO_AT) { goNext(); return; }
     if (remaining <= APPEAR_AT && nextInfo && nextInfo.found) {
-        const title = nextInfo.title || '下一集';
+        const title = nextInfo.title || t('下一集');
         showCard(title, nextInfo.poster || '');
         const cnt = document.getElementById('fntv-an-count');
         if (cnt) {
             cnt.textContent = remaining > AUTO_AT + 10
-                ? `本集剩余 ${Math.ceil(remaining)}s · 即将自动播放下一集`
-                : `${Math.ceil(remaining - AUTO_AT)} 秒后自动播放下一集`;
+                ? t('本集剩余 {n}s · 即将自动播放下一集', { n: Math.ceil(remaining) })
+                : t('{n} 秒后自动播放下一集', { n: Math.ceil(remaining - AUTO_AT) });
         }
     }
 }
