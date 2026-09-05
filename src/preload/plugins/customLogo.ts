@@ -13,8 +13,9 @@
 //   预读用户上传文件时超限直接拒绝并提示)。
 // 注入方式：沿用 glassUI 的非侵入锚点(#fnos-appearance-ctrl 后挂) + MutationObserver 兜底 + 4s keepalive，
 //   与设置面板 SPA 重建解耦。
-// 实时预览：弹窗面板点选预设 → 立即把新 dataURI 上到真实 #tb-logo(未持久化)；[保存]才落盘，
-//   [取消]/ESC/点遮罩回滚到打开前状态。白色主体的 logo(Disney+/Prime/芒果/HBO Max 字标/Hulu/Peacock)
+// 实时预览：[lc-1046b] 一步到位 —— 点选预设=立即持久化+上到真实 #tb-logo+面板自动关闭（约 0.55s 展示），
+//   无「保存」步骤、无残留遮罩（用户报障：旧两步式点选后遮罩挂着要再手点一下才关）。
+//   ✕/ESC/点空白=仅关闭面板（选择已生效）。白色主体的 logo(Disney+/Prime/芒果/HBO Max 字标/Hulu/Peacock)
 //   在 chips 与预览区都垫深色底，并给「适合深色背景」提示。
 // 与 titlebar 的关系：titlebar import 本模块取 resolveLogoSrc()（单向依赖，本模块绝不 import titlebar，
 //   直接操作 #tb-logo DOM）；默认 logo 的 dataURI 由 titlebar 调 registerDefaultLogo() 登记。
@@ -268,27 +269,22 @@ export function resetToDefault(): void {
   refreshCard();
 }
 
-// ── 预设选择弹窗（点选即上真 logo 实时预览；保存才持久化，取消回滚）──
+// ── 预设选择弹窗（[lc-1046b] 一步到位：点选预设=立即持久化+上真 logo+自动关面板，
+//    无「保存」步骤 —— 用户报障：旧两步式点选后遮罩一直挂着要再手点一下才关）──
 
 let _panelOpen = false;
-let _selId: string | null = null;
+let _closeTimer = 0;
 
-function closePresetPanel(save: boolean): void {
+function closePresetPanel(): void {
+  if (_closeTimer) { clearTimeout(_closeTimer); _closeTimer = 0; }
   const ov = document.getElementById('fntv-logo-preset-panel');
   if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
   _panelOpen = false;
-  if (save && _selId) {
-    setChoice({ type: 'preset', presetId: _selId });
-  } else {
-    // 回滚到打开前的状态（实时预览改的是 DOM src，未持久化 → 重新按已存选项应用即回滚）
-    applyLogoToDom();
-  }
-  refreshCard();
   document.removeEventListener('keydown', onKeydown, true);
 }
 
 function _panelEsc(e: KeyboardEvent): void {
-  if (e.key === 'Escape' && _panelOpen) { e.stopPropagation(); closePresetPanel(false); }
+  if (e.key === 'Escape' && _panelOpen) { e.stopPropagation(); closePresetPanel(); }
 }
 
 function onKeydown(e: KeyboardEvent): void { _panelEsc(e); }
@@ -296,14 +292,14 @@ function onKeydown(e: KeyboardEvent): void { _panelEsc(e); }
 export function openPresetPanel(): void {
   if (_panelOpen) return;
   _panelOpen = true;
-  _selId = getChoice().type === 'preset' ? (getChoice().presetId || null) : null;
+  const curId = getChoice().type === 'preset' ? (getChoice().presetId || null) : null;
 
   const ov = document.createElement('div');
   ov.id = 'fntv-logo-preset-panel';
   ov.style.cssText = 'position:fixed;inset:0;z-index:2147483601;display:flex;align-items:center;justify-content:center;'
     + 'background:rgba(18,14,28,.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);'
     + '-webkit-app-region:no-drag;app-region:no-drag;';
-  ov.addEventListener('click', (e) => { if (e.target === ov) closePresetPanel(false); });
+  ov.addEventListener('click', (e) => { if (e.target === ov) closePresetPanel(); });
 
   const panel = document.createElement('div');
   panel.style.cssText = 'width:min(660px,calc(100vw - 80px));max-height:80vh;overflow:hidden;display:flex;flex-direction:column;'
@@ -321,7 +317,7 @@ export function openPresetPanel(): void {
   closeBtn.textContent = '✕';
   closeBtn.style.cssText = 'border:none;cursor:pointer;background:var(--fnos-ui-btn-bg,rgba(150,120,200,.12));color:var(--fnos-ui-btn-text2,#7a6a9a);'
     + 'width:30px;height:30px;border-radius:9px;font-size:14px;font-weight:700;';
-  closeBtn.addEventListener('click', () => closePresetPanel(false));
+  closeBtn.addEventListener('click', () => closePresetPanel());
   head.appendChild(htitle);
   head.appendChild(closeBtn);
   panel.appendChild(head);
@@ -362,8 +358,8 @@ export function openPresetPanel(): void {
     if (uri) { pvImg.src = uri; pvImg.style.display = 'block'; } else pvImg.style.display = 'none';
     pvName.textContent = p ? p.name : '未选择';
     pvHint.textContent = p
-      ? (p.lightBody ? '该 logo 官方形态为白色主体，适合深色背景。' : '点选后已在首页顶部实时生效，点「保存」保留。')
-      : '点击下方任意预设，首页顶部 logo 会立即实时切换。';
+      ? (p.lightBody ? '已应用 ✓（白色主体 logo，建议深色背景使用）' : '已应用 ✓')
+      : '点击下方任意预设，立即生效并自动关闭。';
   };
   const groups: PresetLogo['group'][] = ['国内平台', '国际平台'];
   for (const g of groups) {
@@ -392,15 +388,19 @@ export function openPresetPanel(): void {
       nm.title = p.lightBody ? '白色主体 logo，适合深色背景' : p.name;
       chip.appendChild(img);
       chip.appendChild(nm);
-      if (p.id === _selId) chip.style.borderColor = 'var(--fnos-ui-accent,#b79be8)';
+      if (p.id === curId) chip.style.borderColor = 'var(--fnos-ui-accent,#b79be8)';
       chip.addEventListener('mouseenter', () => { chip.style.transform = 'translateY(-1px)'; });
       chip.addEventListener('mouseleave', () => { chip.style.transform = ''; });
       chip.addEventListener('click', () => {
-        _selId = p.id;
+        // [lc-1046b] 一步到位：点选=持久化+上真 logo+刷新卡片，短暂停留展示结果后面板自动关闭
+        setChoice({ type: 'preset', presetId: p.id });
+        applyLogoToDom();
+        refreshCard();
         for (const el of Array.from(grid.children) as HTMLElement[]) el.style.borderColor = 'transparent';
         chip.style.borderColor = 'var(--fnos-ui-accent,#b79be8)';
         updatePreview(p);
-        applyLogoToDom({ type: 'preset', presetId: p.id }); // 实时预览：直接上真实顶部 logo（未持久化）
+        if (_closeTimer) clearTimeout(_closeTimer);
+        _closeTimer = window.setTimeout(() => { _closeTimer = 0; closePresetPanel(); }, 550);
       });
       grid.appendChild(chip);
     }
@@ -408,19 +408,10 @@ export function openPresetPanel(): void {
   }
   panel.appendChild(scroll);
 
-  // 底部操作
+  // 底部提示（无「保存/取消」步骤 —— 点选即生效并自动关闭，✕/ESC/点空白=仅关闭）
   const foot = document.createElement('div');
-  foot.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;padding:12px 16px 14px;flex-shrink:0;';
-  const cancelBtn = mkSmallBtn('取消');
-  const saveBtn = mkSmallBtn('保存');
-  saveBtn.style.background = 'var(--fnos-ui-accent,#b79be8)';
-  saveBtn.style.color = '#fff';
-  saveBtn.addEventListener('mouseenter', () => { saveBtn.style.background = 'var(--fnos-ui-accent,#b79be8)'; saveBtn.style.filter = 'brightness(1.06)'; });
-  saveBtn.addEventListener('mouseleave', () => { saveBtn.style.background = 'var(--fnos-ui-accent,#b79be8)'; saveBtn.style.filter = ''; });
-  cancelBtn.addEventListener('click', () => closePresetPanel(false));
-  saveBtn.addEventListener('click', () => closePresetPanel(true));
-  foot.appendChild(cancelBtn);
-  foot.appendChild(saveBtn);
+  foot.style.cssText = 'padding:10px 16px 14px;flex-shrink:0;font-size:11px;color:var(--fnos-ui-muted2,#8778a5);';
+  foot.textContent = '点击预设立即生效并自动关闭；当前选择会记住，可随时回来换或「恢复默认」。';
   panel.appendChild(foot);
 
   ov.appendChild(panel);
@@ -428,7 +419,7 @@ export function openPresetPanel(): void {
   document.addEventListener('keydown', onKeydown, true);
 
   // 初始预览：当前选中项（或提示未选择）
-  updatePreview(PRESETS.find((x) => x.id === _selId) || null);
+  updatePreview(PRESETS.find((x) => x.id === curId) || null);
 }
 
 // ── 锚点注入（glassUI 同款：观察器 + keepalive）──
