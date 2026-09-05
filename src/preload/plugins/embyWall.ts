@@ -4069,6 +4069,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   通用=退出行为/系统桌面/更新与维护 · 外观=主题模式+亚克力/轮播图Logo(原散在通用与插件)
     //   播放=播放器/跳过片头片尾(原在插件)/插帧/界面与浏览 · 弹幕 · 账号同步(五家不变)
     //   网络=网络与代理(原功能开关拆出)/自定义代理/TMDB免梯子直连(原在插件) · 手柄 · 诊断 · 关于
+    //   [lc-1051] 用户要求：B站弹幕登录卡从「账号同步」移入「弹幕」分类页（登录与弹幕设置同域）。
     //   ⚠ 外部契约: _selectCat 只被 'danmaku' 引用(lc-518 catMap), fntv-open-settings 其余走
     //   #sec-<id> scrollIntoView —— 各卡片元素与 id 均未动, 仅换分类归属。
     type Cat = { id: string; label: string; els: HTMLElement[] };
@@ -4076,8 +4077,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'general', label: '通用', els: [sec3.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
       { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secUX.el] },
-      { id: 'danmaku', label: '弹幕', els: [secDanmaku.el] },
-      { id: 'account', label: '账号同步', els: [secBili.el, secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
+      { id: 'danmaku', label: '弹幕', els: [secDanmaku.el, secBili.el] },
+      { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
