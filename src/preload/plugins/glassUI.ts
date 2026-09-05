@@ -193,6 +193,17 @@ const GATE_CSS = `
     background-color: transparent !important;
   }
 
+  /* ①c [lc-1023] 防全透明底座（用户报障：开云母后整个软件背景全透明直透桌面）：
+     玻璃模式会清掉 body 亚克力与页面容器底色(①/①a/①b)，唯一兜底的 #fntv-glass-bg 是
+     position:fixed + z-index:-1 + 全屏大模糊 + 无限动画的合成重层，真机一旦整层画不出
+     (GPU/合成失败)窗口就 100% 透桌面、毫无垫底。故在 html 根上铺不透明环境底色 ——
+     根背景是整棵树第 1 个作画的层(z-index:-1 动态层与所有内容都在其上)，任何上层失效
+     最多退化为纯色 Mica，绝不全透。Win11 Mica 本就是近实心材质，透桌面是
+     「背景层: 无」选项的职责，不该在环境光模式下被动发生。 */
+  html[data-fntv-glass][data-fntv-glass-bg="fluid"].fnos-tv-page {
+    background: var(--fntv-amb-base, #eef0f7) !important;
+  }
+
   /* ② 组件级玻璃：卡片/面板/控制栏 浮在背景层上做磨砂
      关键：每个选择器带 :not() 排除顶栏(data-fnos-clear 锚点)，从源头避免误伤。
      lc-526~530 教训：事后排除规则 !important 对抗不稳定，改用 :not() 让选择器根本不匹配顶栏区域 */
@@ -259,7 +270,9 @@ const GATE_CSS = `
       radial-gradient(38vmax 38vmax at 84% 18%, var(--fntv-amb-2) 0%, transparent 60%),
       radial-gradient(48vmax 48vmax at 52% 92%, var(--fntv-amb-3) 0%, transparent 65%),
       var(--fntv-amb-base) !important;
-    filter: blur(46px) saturate(1.12) !important;
+    /* [lc-1023] 去掉 46px 全屏高斯模糊：radial 渐变止点(60%+ 处才触透明)本身已极软，
+       大模糊让整层变成全屏高斯合成重层 —— 真机整层画不出的头号嫌疑 + 持续 GPU 烧灼，
+       软度交给渐变曲线本身。 */
     transform: scale(1.1) !important;
     animation: fntvAmbient calc(36s / var(--fntv-glass-fluid-speed, 1)) ease-in-out infinite alternate !important;
   }
@@ -541,6 +554,8 @@ function applyGlass(): void {
     if (s.enabled) {
       root.setAttribute('data-fntv-glass', '');
       root.setAttribute('data-fntv-glass-mode', s.mode);
+      // [lc-1023] 底座开关随背景源：fluid=html 铺不透明环境底(①c)，none=保留透桌面
+      root.setAttribute('data-fntv-glass-bg', s.bg === 'none' ? 'none' : 'fluid');
       root.setAttribute('data-fntv-glass-noise', s.noise ? '1' : '0');
       root.setAttribute('data-fntv-glass-vignette', s.vignette ? '1' : '0');
       ensureNoiseLayer();
@@ -555,6 +570,7 @@ function applyGlass(): void {
     } else {
       root.removeAttribute('data-fntv-glass');
       root.removeAttribute('data-fntv-glass-mode');
+      root.removeAttribute('data-fntv-glass-bg');
       root.removeAttribute('data-fntv-glass-is-light');
       root.removeAttribute('data-fntv-glass-noise');
       root.removeAttribute('data-fntv-glass-vignette');
