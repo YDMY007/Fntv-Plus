@@ -625,6 +625,10 @@ const TMDB_SHOW_CACHE_VER = 2;
  *  之后只读本地磁盘缓存；只有点卡片上的「刷新」按钮（force=true）才重新拉取。 */
 const TMDB_SHOW_TTL_MS = 3650 * 24 * 60 * 60 * 1000;
 
+/** [lc-1045] 季分集双语数据缓存 7 天：分集标题/简介会随 TMDB 社区翻译更新（集名占位→正式中文），
+ *  不能像剧集信息那样永久缓存；getDailyCached 自带 SWR（过期秒回旧值后台刷新），重拉由按钮 force 驱动。 */
+const TMDB_SEASON_EPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** 取数组里每个对象的 name 字段，去重去空 */
 function namesOf(list: any, field = 'name'): string[] {
     if (!Array.isArray(list)) return [];
@@ -1114,8 +1118,63 @@ function init(): void {
             return { ok: false, error: String((e && e.message) || e) };
         }
     }, { useHandle: true });
-    // 启动自动跟随 CheckTMDB 每日刷新直连 IP（用户开启免梯子直连时生效）
-    scheduleAutoIpRefresh();
+    // [lc-1045] 季页「选集」分集信息回填：一次取回本季全部集的 标题+简介 双语值（zh-CN / en-US 各一次请求）。
+    //   回填优先级（渲染进程裁决）：中文 > 英文 > 无数据 —— TMDB language=zh-CN 对缺失翻译会回落英文原文，
+    //   所以 zh 值必须经 CJK 检测才当"中文"用（渲染端 pickBestText 负责，这里只交付双语原料）。
+    //   缓存 7 天（getDailyCached 内置 SWR：过期先秒回旧值后台静默刷新）；重拉由 force 驱动。
+    registerHandler('tmdb:season-episodes', async (_e: any, arg: {
+        tmdbId?: string | number; title?: string; year?: string;
+        seasonNumber?: number | null; force?: boolean;
+    }) => {
+        const sn = typeof arg?.seasonNumber === 'number' && arg.seasonNumber >= 0 ? arg.seasonNumber : null;
+        if (sn === null) return { ok: false, error: '缺少季号，无法定位 TMDB 分季。' };
+        const key = fnConfig.getTmdbApiKey();
+        if (!key) return { ok: false, error: '未配置 TMDB API Key，请在设置面板填写。' };
+        try {
+            const client = http();
+            const a = authFor(key);
+            const baseParams: any = { language: 'zh-CN', ...(a.queryKey ? { api_key: a.queryKey } : {}) };
+            const id = await resolveShowId(client, baseParams, 'tv', {
+                tmdbId: arg?.tmdbId, title: arg?.title, year: arg?.year,
+            });
+            if (!id) return { ok: false, error: 'TMDB 未找到匹配条目：' + (arg?.title || arg?.tmdbId || '(无标题)') };
+            const cacheKey = 'season_eps_v1_' + id + '_s' + sn;
+            const r = await getDailyCached(cacheKey, async () => {
+                const pull = async (lang: string): Promise<any[]> => {
+                    const resp = await getWithRetry(client, `/tv/${id}/season/${sn}`, { params: { ...baseParams, language: lang } });
+                    return Array.isArray(resp?.data?.episodes) ? resp.data.episodes : [];
+                };
+                // 双语两次请求并行；zh 缺翻译时 TMDB 回落英文原文 → 渲染端按 CJK 检测降级使用
+                const [zhEps, enEps] = await Promise.all([pull('zh-CN'), pull('en-US')]);
+                const enByNum = new Map<number, any>();
+                for (const e of enEps) {
+                    if (e && typeof e.episode_number === 'number') enByNum.set(e.episode_number, e);
+                }
+                return {
+                    showTmdbId: id,
+                    seasonNumber: sn,
+                    episodes: zhEps
+                        .filter((e: any) => e && typeof e.episode_number === 'number')
+                        .map((e: any) => {
+                            const en = enByNum.get(e.episode_number) || null;
+                            return {
+                                episodeNumber: e.episode_number,
+                                nameZh: typeof e.name === 'string' ? e.name : '',
+                                overviewZh: typeof e.overview === 'string' ? e.overview : '',
+                                nameEn: en && typeof en.name === 'string' ? en.name : '',
+                                overviewEn: en && typeof en.overview === 'string' ? en.overview : '',
+                            };
+                        }),
+                };
+            }, TMDB_SEASON_EPS_TTL_MS, !!arg?.force);
+            log.info('[TMDB] 季分集' + (r.fromCache ? '来自磁盘缓存(未请求TMDB)' : '已向TMDB刷新') + ' key=' + cacheKey
+                + ' eps=' + ((r.data && r.data.episodes && r.data.episodes.length) || 0));
+            return { ok: true, data: r.data, fetchedAt: r.fetchedAt, fromCache: r.fromCache };
+        } catch (e: any) {
+            log.warn('[TMDB] 季分集获取失败（' + (arg?.title || arg?.tmdbId || '') + ' S' + sn + '）：' + dumpErr(e));
+            return { ok: false, error: describeTmdbError(e) };
+        }
+    }, { useHandle: true });
     log.info('TMDB 数据源插件已加载');
 }
 

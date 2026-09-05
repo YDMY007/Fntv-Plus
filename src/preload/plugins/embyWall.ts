@@ -7,6 +7,7 @@ import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
+import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackfill';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
@@ -5221,6 +5222,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       runPageTransition(isDetailPage()); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
+      scheduleEpBackfill(); // [lc-1045] 季页「选集」TMDB 回填按钮：非季页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -5234,6 +5236,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       runPageTransition(isDetailPage()); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 同 pushState
+      scheduleEpBackfill(); // [lc-1045] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -5244,6 +5247,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       _scheduleTopLeftAfterNav(); // [lc-925] 背景换了 → 重采样左上角图标亮度
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
       applyDetailBeautify(); // [lc-980] 前进/后退到详情页也套美化；退回首页则 teardown
+      scheduleEpBackfill(); // [lc-1045] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
@@ -5255,15 +5259,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   if (isDetailPage()) {
     backfillDetailLogo();
     applyDetailBeautify();
+    scheduleEpBackfill(); // [lc-1045] 初始/深链直达季页也挂「选集」回填按钮
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); }, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); }, ms));
   }
-  // MutationObserver 覆盖详情页DOM变化 → 回填 Logo
+  // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) backfillDetailLogo();
+      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); }
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
