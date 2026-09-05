@@ -6,15 +6,19 @@ import axios from 'axios';
 import log from '../../../modules/logger';
 import { getSessionCookieHeader } from '../../../modules/fn_api/request';
 import * as fn from '../../../modules/fn_api/api';
+import { getDailyCached } from '../../common/dailyCache';
 
 /**
- * 智能跳过片头片尾插件（smart_skip）
- * - 把「跳过片头/片尾」的控制面从 MPV uosc 菜单抽出来，改为应用「插件」设置面板统一管理。
- * - 真正的跳过逻辑仍在打包的 MPV Lua 套件 smart_skip/ 里；本插件只负责：
- *   1) 持久化总开关到 config.json（get/set-smart-skip-enabled）；
- *   2) 把开关双写到 smart_skip.conf 的 enabled（便携 + 标准两种 mpv 模式都生效）；
- *   3) [lc-316] 为飞牛原生网页播放器自动填充跳过数据（fetch-and-fill）：
- *      先查 fnOS 服务端 skipinfo → 为空则 theintrodb 兜底 → 写回飞牛服务端。
+ * 智能跳过片头片尾插件（smart_skip）— [lc-1058] 多源聚合重写
+ * - 旧逻辑：fnOS skipinfo → theintrodb 兜底。theintrodb 靠人工审核，新番覆盖极稀疏，体验差。
+ * - 新逻辑：四段源链，逐段兜底、全程磁盘缓存：
+ *     ① fnOS skipinfo（服务端真值，用户手动标记优先）
+ *     ② AniSkip（社区kip 时长库，动漫数据最全、区间为绝对秒且经社区投票校准；
+ *        需 MAL id → 标题映射链：Bangumi 中文搜索(最强中文索引)取日文名
+ *          → Jikan / AniList 双路搜日文名拿 idMal，映射结果按 TMDB id 缓存 30 天）
+ *     ③ theintrodb（通用兜底，覆盖非动画剧集）
+ *     → 拿到数据写回飞牛服务端（网页播放器面板直接有值）
+ * - MPV 本地播放的静音检测 Lua（smart_skip/）保持不变，本插件只管数据管道。
  */
 
 // ─── 读取总开关（MPV 路径，原有） ───
@@ -33,7 +37,7 @@ function handleSetSmartSkipEnabled(_event: IpcMainInvokeEvent, enabled: boolean)
 
 interface FetchAndFillParams {
     guid: string;
-    trimId?: string;       // TMDB id（用于 theintrodb 兜底）
+    trimId?: string;       // TMDB id（用于 AniSkip 映射与 theintrodb）
     season?: number;
     episode?: number;
 }
@@ -42,39 +46,126 @@ interface FetchAndFillResult {
     filled: boolean;
     skipStart: number;
     skipEnd: number;
-    source: 'fnos' | 'theintrodb' | 'none';
+    source: 'fnos' | 'aniskip' | 'theintrodb' | 'none';
     message?: string;
 }
 
 /** 已填充过的 guid 去重集合（进程生命周期内） */
 const filledGuids = new Set<string>();
 
-/**
- * 把飞牛 trim_id 转换成 theintrodb 查询参数候选列表。
- * 飞牛的 trim_id 形态不定：
- *   - 纯数字 → TMDB id（如 94997）
- *   - "tt" + 数字 → 多为飞牛把 TMDB 数字 id 错加 tt 前缀（如 tt94997 → 实为 TMDB 94997）
- *   - 真实 IMDb id → tt + 7 位以上数字
- * 策略：优先用 tmdb_id（剥离 tt 前缀），失败再试 imdb_id。
- */
+const HTTP_TIMEOUT = 8000;
+const BGM_UA = 'fntv-plus/lc-1058 (https://github.com/YDMY007/Fntv-Plus)';
+
+/** 把飞牛 trim_id 转换成 theintrodb 查询参数候选（tmdb_id 优先，剥离误加的 tt 前缀，真 IMDb 兜底） */
 function buildIntroDbQueries(raw?: string): string[] {
     if (!raw) return [];
     const s = String(raw).trim();
-    if (/^\d+$/.test(s)) {
-        return [`tmdb_id=${s}`];
-    }
+    if (/^\d+$/.test(s)) return [`tmdb_id=${s}`];
     const m = s.match(/^tt(\d+)$/i);
-    if (m) {
-        return [`tmdb_id=${m[1]}`, `imdb_id=${s}`];
-    }
+    if (m) return [`tmdb_id=${m[1]}`, `imdb_id=${s}`];
     return [];
 }
 
+// ─── MAL id 映射链（AniSkip 前置）：结果按 TMDB id 缓存 30 天，链上任一环成功即止 ───
+
+async function bangumiNativeTitle(title: string): Promise<string | null> {
+    try {
+        const r = await axios.post('https://api.bgm.tv/v0/search/subjects?limit=3',
+            { keyword: title, filter: { type: [2] } },
+            { timeout: 12000, headers: { 'User-Agent': BGM_UA, 'Content-Type': 'application/json' } });
+        const top = r.data?.data?.[0];
+        return top?.name ? String(top.name) : null; // 日文原名（Bangumi 中文名索引最强）
+    } catch (e) {
+        log.warn('[skip:malmap] Bangumi 搜索失败:', (e as Error).message);
+        return null;
+    }
+}
+
+async function jikanMalId(name: string): Promise<number | null> {
+    try {
+        const r = await axios.get(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(name)}&limit=1`,
+            { timeout: 12000, headers: { 'User-Agent': BGM_UA } });
+        const mal = r.data?.data?.[0]?.mal_id;
+        return typeof mal === 'number' ? mal : null;
+    } catch (e) {
+        log.warn('[skip:malmap] Jikan 搜索失败:', (e as Error).message);
+        return null;
+    }
+}
+
+async function anilistMalId(name: string): Promise<number | null> {
+    try {
+        const q = 'query($s:String){Media(search:$s,type:ANIME){id idMal}}';
+        const r = await axios.post('https://graphql.anilist.co',
+            { query: q, variables: { s: name } },
+            { timeout: 12000, headers: { 'Content-Type': 'application/json', Accept: 'application/json' } });
+        const mal = r.data?.data?.Media?.idMal;
+        return typeof mal === 'number' ? mal : null;
+    } catch (e) {
+        log.warn('[skip:malmap] AniList 搜索失败:', (e as Error).message);
+        return null;
+    }
+}
+
+/** 标题 → MAL id：Bangumi(中文→日文名) → Jikan/AniList 双路互备；失败 throw（不落盘坏值） */
+async function resolveMalId(tmdbKey: string, title: string): Promise<number | null> {
+    const key = `skip_malmap_v1_${/^\d+$/.test(tmdbKey) ? tmdbKey : 't_' + tmdbKey}`;
+    const r = await getDailyCached(key, async () => {
+        const nativeName = await bangumiNativeTitle(title);
+        const candidates: string[] = [];
+        if (nativeName) candidates.push(nativeName);
+        candidates.push(title); // 原标题兜底（可能本身是日文）
+        for (const name of candidates) {
+            const viaJikan = await jikanMalId(name);
+            if (viaJikan) return { malId: viaJikan, via: 'jikan:' + name };
+            const viaAnilist = await anilistMalId(name);
+            if (viaAnilist) return { malId: viaAnilist, via: 'anilist:' + name };
+        }
+        throw new Error('no mal mapping');
+    }, 30 * 24 * 60 * 60 * 1000);
+    const data = r?.data as { malId: number; via: string } | null | undefined;
+    if (data && data.malId) {
+        log.info(`[skip:malmap] ${tmdbKey} → MAL ${data.malId} (${data.via})`);
+        return data.malId;
+    }
+    return null;
+}
+
+/** AniSkip 查询：episodeLength 敏感（差 1 秒都可能 500/不命中），按 ±1/±2 阶梯重试 */
+async function aniskipFetch(malId: number, episode: number, durationSec: number):
+    Promise<{ opStart: number; opEnd: number; edStart: number; edEnd: number } | null> {
+    const ladder = durationSec > 0
+        ? [durationSec, durationSec + 1, durationSec - 1, durationSec + 2]
+        : [0];
+    for (const len of ladder) {
+        try {
+            const u = `https://api.aniskip.com/v2/skip-times/${malId}/${episode}`
+                + `?types%5B%5D=op&types%5B%5D=ed&episodeLength=${Math.round(len)}`;
+            const r = await axios.get(u, { timeout: HTTP_TIMEOUT, headers: { appId: 'fntv-plus' } });
+            const j = r.data;
+            if (!j || j.found !== true || !Array.isArray(j.results)) continue;
+            const op = j.results.find((x: any) => x.skipType === 'op');
+            const ed = j.results.find((x: any) => x.skipType === 'ed');
+            if (!op && !ed) return null;
+            return {
+                opStart: op ? op.interval.startTime : 0,
+                opEnd: op ? op.interval.endTime : 0,
+                edStart: ed ? ed.interval.startTime : 0,
+                edEnd: ed ? ed.interval.endTime : 0,
+            };
+        } catch (e) {
+            log.warn(`[skip:aniskip] 请求失败(len=${Math.round(len)}):`, (e as Error).message);
+        }
+    }
+    return null;
+}
+
 /**
- * 核心流程：
- * 1. GET /api/v1/skipinfo/:guid → 查飞牛是否已有数据
- * 2. 若 SkipStart/SkipEnd 均为 0 → 调 theintrodb 兜底
- * 3. 有有效数据 → POST /api/v1/skipinfo 写回飞牛服务端
+ * 核心流程（[lc-1058] 多源重写）：
+ * 1. GET /api/v1/skipinfo/:guid → 查飞牛已有数据（服务端真值优先）
+ * 2. 无数据 → AniSkip（动漫区间精确；需 MAL id → 标题映射链，映射缓存 30 天）
+ * 3. 仍无 → theintrodb 兜底（非动画剧集）
+ * 4. 拿到数据 → POST /api/v1/skipinfo 写回飞牛服务端
  */
 async function handleFetchAndFill(
     _event: IpcMainInvokeEvent,
@@ -96,12 +187,12 @@ async function handleFetchAndFill(
     const token = config.token || '';
     const proxyBase = 'http://127.0.0.1:22346';
 
-    // ── 从 fnOS PlayInfo 补查 trimId / season / episode / 总时长 ──
-    // 始终查询：既补全元数据，又拿到视频总时长（片尾时长换算需要）
+    // ── 从 fnOS PlayInfo 补查 trimId / season / episode / 总时长 / 剧名 ──
     let effectiveTrimId = trimId;
     let effectiveSeason = season;
     let effectiveEpisode = episode;
     let effectiveTotalDur = 0;
+    let showTitle = '';
 
     if (domain && token) {
         try {
@@ -113,7 +204,11 @@ async function handleFetchAndFill(
                 if (!effectiveSeason && item?.season_number) effectiveSeason = item.season_number;
                 if (!effectiveEpisode && item?.episode_number) effectiveEpisode = item.episode_number;
                 effectiveTotalDur = item?.duration || 0;
-                log.info(`[skip:fetch-and-fill] 从 PlayInfo 补到元数据 guid=${guid} tmdb=${effectiveTrimId} s=${effectiveSeason} e=${effectiveEpisode} dur=${effectiveTotalDur}s`);
+                // 剧名：parent_title = 所属剧集名（映射用它，不用集标题）
+                showTitle = String((item && (item.parent_title || item.title)) || '').trim();
+                // 集标题剥掉「第 N 集/话」前缀，尽量还原剧名供映射使用
+                showTitle = showTitle.replace(/^第\s*\d+\s*[集话話期]\s*/, '').trim();
+                log.info(`[skip:fetch-and-fill] PlayInfo 元数据 guid=${guid} tmdb=${effectiveTrimId} s=${effectiveSeason} e=${effectiveEpisode} dur=${effectiveTotalDur}s title=${showTitle}`);
             }
         } catch (e) {
             log.warn(`[skip:fetch-and-fill] 查询 PlayInfo 失败:`, (e as Error).message);
@@ -124,13 +219,13 @@ async function handleFetchAndFill(
         // ── Step 1: 查询飞牛已有跳过数据 ──
         let skipStart = 0;
         let skipEnd = 0;
-        let source: 'fnos' | 'theintrodb' | 'none' = 'none';
+        let source: 'fnos' | 'aniskip' | 'theintrodb' | 'none' = 'none';
 
         try {
             let cookie = '';
             try { cookie = await getSessionCookieHeader(domain); } catch (_) { /* 无 cookie 不阻断 */ }
             const getUrl = `${proxyBase}/api/v1/skipinfo/${guid}?token=${encodeURIComponent(token)}&domain=${encodeURIComponent(domain)}${cookie ? '&cookie=' + encodeURIComponent(cookie) : ''}`;
-            const getResp = await axios.get(getUrl, { timeout: 8000 });
+            const getResp = await axios.get(getUrl, { timeout: HTTP_TIMEOUT });
             if (getResp.data?.code === 0 && getResp.data?.data) {
                 skipStart = getResp.data.data.skipStart || 0;
                 skipEnd = getResp.data.data.skipEnd || 0;
@@ -143,16 +238,43 @@ async function handleFetchAndFill(
             log.warn(`[skip:fetch-and-fill] 查询飞牛 skipinfo 失败:`, (e as Error).message);
         }
 
-        // ── Step 2: 飞牛无数据 → theintrodb 兜底 ──
-        // 飞牛 skipStart/skipEnd 语义 = 时长（秒）：片头从 0 跳过的秒数 / 片尾结尾跳过的秒数。
-        // theintrodb intro.end_ms = 片头结束绝对位置（≈片头时长，因片头从 0 开始）；
-        // credits.start_ms = 片尾开始绝对位置，片尾时长 = 总时长 − credits.start_ms。
+        // ── Step 2: AniSkip（动漫社区库：区间绝对秒、社区投票校准，新番覆盖远好于人工审核库）──
+        // fnOS 语义换算：skipStart = 片头从 0 跳过的秒数 → 取 OP 区间终点；
+        //               skipEnd = 片尾结尾跳过的秒数 → 总时长 − ED 区间起点。
+        if (source === 'none' && effectiveEpisode && effectiveEpisode > 0) {
+            try {
+                let malId: number | null = null;
+                if (effectiveTrimId && /^\d+$/.test(String(effectiveTrimId).trim()) && showTitle) {
+                    malId = await resolveMalId(String(effectiveTrimId).trim(), showTitle);
+                }
+                if (malId) {
+                    const seg = await aniskipFetch(malId, effectiveEpisode, effectiveTotalDur);
+                    if (seg) {
+                        if (seg.opEnd > 0 && seg.opEnd < effectiveTotalDur) skipStart = Math.round(seg.opEnd);
+                        if (seg.edStart > 0 && effectiveTotalDur > 0) {
+                            const outro = Math.round(effectiveTotalDur - seg.edStart);
+                            if (outro > 0 && outro < effectiveTotalDur / 2) skipEnd = outro;
+                            else log.warn(`[skip:fetch-and-fill] AniSkip 片尾时长异常(outro=${outro}s)，仅填片头`);
+                        }
+                        if (skipStart > 0 || skipEnd > 0) {
+                            source = 'aniskip';
+                            log.info(`[skip:fetch-and-fill] ✅ AniSkip 命中 guid=${guid} start=${skipStart} end=${skipEnd} (op ${seg.opStart}→${seg.opEnd} / ed ${seg.edStart}→${seg.edEnd})`);
+                        }
+                    }
+                }
+            } catch (e) {
+                log.warn('[skip:fetch-and-fill] AniSkip 分支异常:', (e as Error).message);
+            }
+        }
+
+        // ── Step 3: theintrodb 兜底（通用库，非动画剧集仍有价值）──
+        // fnOS skipStart/skipEnd 语义 = 时长（秒）：片头从 0 跳过的秒数 / 片尾结尾跳过的秒数。
+        // theintrodb intro.end_ms = 片头结束绝对位置；credits.start_ms = 片尾开始绝对位置。
         if (source === 'none') {
             const queries = buildIntroDbQueries(effectiveTrimId);
             for (const q of queries) {
                 try {
-                    // [lc-338] theintrodb v2 -> v3 迁移（v2 将于 2027-01-18 废弃）。
-                    // 端点改为 /v3/media，并尽可能附带 duration_ms 以匹配正确的发行版本（影院版/加长版等）。
+                    // [lc-338] theintrodb v3 /media，附带 duration_ms 匹配正确发行版本
                     let tidUrl = `https://api.theintrodb.org/v3/media?${q}`;
                     if (effectiveSeason && effectiveSeason > 0) {
                         tidUrl += `&season=${effectiveSeason}`;
@@ -161,18 +283,16 @@ async function handleFetchAndFill(
                     if (effectiveTotalDur > 0) {
                         tidUrl += `&duration_ms=${Math.round(effectiveTotalDur * 1000)}`;
                     }
-                    const tidResp = await axios.get(tidUrl, { timeout: 8000 });
+                    const tidResp = await axios.get(tidUrl, { timeout: HTTP_TIMEOUT });
                     const data = tidResp.data;
                     if (!data || data.error) {
                         log.warn(`[skip:fetch-and-fill] theintrodb (${q}) 无数据: ${data?.error || '空响应'}`);
-                        continue; // 试下一个候选（tmdb → imdb）
+                        continue;
                     }
-                    // 片头：intro[0].end_ms（绝对结束位置 ≈ 片头时长）
                     if (data?.intro?.[0]?.end_ms) {
                         const introEnd = Math.round(data.intro[0].end_ms / 1000);
                         if (introEnd > 0) skipStart = introEnd;
                     }
-                    // 片尾：总时长 − credits[0].start_ms（需视频总时长）
                     if (data?.credits?.[0]?.start_ms) {
                         if (effectiveTotalDur > 0) {
                             const credStart = Math.round(data.credits[0].start_ms / 1000);
@@ -197,8 +317,8 @@ async function handleFetchAndFill(
             }
         }
 
-        // ── Step 3: theintrodb 兜底拿到数据 → 写回飞牛服务端 ──
-        if (source === 'theintrodb' && (skipStart > 0 || skipEnd > 0)) {
+        // ── Step 4: 外部源拿到数据 → 写回飞牛服务端 ──
+        if (source !== 'none' && source !== 'fnos' && (skipStart > 0 || skipEnd > 0)) {
             try {
                 let cookie = '';
                 try { cookie = await getSessionCookieHeader(domain); } catch (_) { /* ignore */ }
@@ -207,7 +327,7 @@ async function handleFetchAndFill(
                     guid,
                     skipStart,
                     skipEnd,
-                }, { timeout: 8000 });
+                }, { timeout: HTTP_TIMEOUT });
 
                 filledGuids.add(guid);
                 log.info(`[skip:fetch-and-fill] ✅ 已写入飞牛服务端 guid=${guid} source=${source} start=${skipStart} end=${skipEnd}`);
@@ -220,6 +340,7 @@ async function handleFetchAndFill(
 
         // 飞牛已有数据：直接返回（无需写回）
         if (source === 'fnos') {
+            filledGuids.add(guid);
             return { filled: true, skipStart, skipEnd, source };
         }
 
@@ -243,5 +364,8 @@ function init(): void {
 export {
     init,
     handleGetSmartSkipEnabled,
-    handleSetSmartSkipEnabled
+    handleSetSmartSkipEnabled,
+    resolveMalId,
+    aniskipFetch,
+    handleFetchAndFill
 };
