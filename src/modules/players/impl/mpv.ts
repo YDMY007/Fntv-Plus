@@ -88,6 +88,16 @@ export class MpvPlayer extends BasePlayer {
             // [lc-201] 让 mpv 子进程(Lua 弹幕脚本)能定位 Electron userData 目录，用于写"打开设置面板"的文件信号
             try { process.env.FNTV_USERDATA = app.getPath('userData'); } catch {}
 
+            // [lc-1068] thumbfast.conf：告知 thumbfast 子进程 mpv 二进制位置
+            //   (uosc 进度条悬停缩略图依赖 thumbfast；playerPath 为空时用默认 'mpv' 不写 conf)
+            try {
+                const playerPath = this.config.playerPath;
+                if (playerPath && playerPath.length > 0) {
+                    const mpvConfigMod = require('../../handlers/plugins/mpvConfig');
+                    mpvConfigMod.writeThumbfastConf(playerPath);
+                }
+            } catch (e: any) { log.warn('写入 thumbfast.conf 失败:', e && e.message); }
+
             this.mpvInstance = new NodeMpv(mpvOptions, mpvArgs);
 
             // 设置事件监听器

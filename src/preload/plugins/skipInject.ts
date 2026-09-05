@@ -220,8 +220,6 @@ async function tryFillSkipData(): Promise<void> {
         if (result.recapStart && result.recapEnd && result.recapEnd > result.recapStart) {
             installRecapButton(guid, result.recapStart, result.recapEnd);
         }
-        // [lc-1064] Trakt scrobble（网页播放器）：timeupdate 节流 60s 上报 + pause/ended 即时
-        wireScrobble(guid);
     } catch (e) {
         log.error('[skipInject] fetch-and-fill IPC 调用失败:', e);
     }
@@ -288,36 +286,6 @@ function installRecapButton(guid: string, recapStart: number, recapEnd: number):
             removeBtn();
         }
     }, 1000);
-}
-
-let scrobbleWiredGuid = '';
-let scrobbleLastSentAt = 0;
-
-/** [lc-1064] Trakt scrobble 接线：当前集 video 元素挂 timeupdate/pause/ended 监听（每集一次） */
-function wireScrobble(guid: string): void {
-    if (scrobbleWiredGuid === guid) return;
-    const v = document.querySelector('video') as HTMLVideoElement | null;
-    if (!v) return;
-    scrobbleWiredGuid = guid;
-    const send = (action: string, pct: number): void => {
-        const now = Date.now();
-        if (action === 'start' && now - scrobbleLastSentAt < 60000) return;
-        scrobbleLastSentAt = now;
-        void ipcRenderer.invoke('trakt:scrobble', { action, guid, progress: pct }).catch(() => {});
-    };
-    v.addEventListener('timeupdate', () => {
-        if (!v.duration || !isFinite(v.duration)) return;
-        const pct = (v.currentTime / v.duration) * 100;
-        send(pct >= 80 ? 'stop' : 'start', pct);
-    });
-    v.addEventListener('pause', () => {
-        if (!v.duration) return;
-        send('pause', (v.currentTime / v.duration) * 100);
-    });
-    v.addEventListener('ended', () => {
-        void ipcRenderer.invoke('trakt:scrobble', { action: 'stop', guid, progress: 100 }).catch(() => {});
-    });
-    log.info('[skipInject] Trakt scrobble 已接线 guid=' + guid);
 }
 
 /**

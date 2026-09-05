@@ -433,6 +433,27 @@ function writeBiliSearchEnabled(enabled: boolean): void {
     }
 }
 
+// [lc-1068] 写入 thumbfast.conf：mpv_path 指向实际 mpv 二进制（uosc 进度条悬停缩略图
+//   依赖 thumbfast 子进程用同款 mpv 生成预览帧；双写 portable + 用户配置目录，与 smart_skip 策略一致）
+function writeThumbfastConf(playerPath: string): void {
+    try {
+        const conf = 'mpv_path=' + playerPath;
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) fs.mkdirSync(scriptOptsDir, { recursive: true });
+                fs.writeFileSync(path.join(scriptOptsDir, 'thumbfast.conf'), conf, 'utf8');
+                logger.log('thumbfast.conf 已写入: ' + path.join(scriptOptsDir, 'thumbfast.conf') + ' (mpv_path=' + playerPath + ')');
+            } catch (e: any) {
+                logger.error('写入 thumbfast.conf 失败 (' + dir + '):', e && e.message);
+            }
+        }
+    } catch (error) {
+        logger.error('写入 thumbfast.conf 失败:', error);
+    }
+}
+
 // 写入智能跳过片头片尾开关到 script-opts/smart_skip.conf（由应用「插件」面板控制）
 // ⚠️ 同样双写 portable_config 与用户配置目录（AppData/Roaming/mpv），
 //   确保 mpv 在便携/标准两种模式下都读到正确的 enabled（lc-094 教训）。
@@ -621,6 +642,7 @@ export {
     writeMpvUserConfig,
     writeBiliSearchEnabled,
     writeSmartSkipEnabled,
+    writeThumbfastConf,
     writeBiliAggregateThreshold,
     writeBiliDanmakuStyle,
     writeDandanplayCredentials
