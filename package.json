@@ -83,6 +83,7 @@
           "to": "third_party/fntv-mpv",
           "filter": [
             "**/*",
+            "!**/bili_cookie.txt",
             "!**/portable_config/cache/**",
             "!**/portable_config/.cache/**",
             "!**/portable_config/mpv.log",
@@ -137,6 +138,7 @@
           "to": "third_party/fntv-mpv/portable_config",
           "filter": [
             "**/*",
+            "!**/bili_cookie.txt",
             "!**/cache/**",
             "!**/.cache/**",
             "!**/mpv.log",
@@ -206,6 +208,7 @@
           "to": "third_party/fntv-mpv/portable_config",
           "filter": [
             "**/*",
+            "!**/bili_cookie.txt",
             "!**/cache/**",
             "!**/.cache/**",
             "!**/mpv.log",

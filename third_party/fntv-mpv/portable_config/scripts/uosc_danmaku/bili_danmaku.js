@@ -244,9 +244,8 @@ function fetch_seg(cid, seg) {
     let last = Buffer.alloc(0);
     const doTry = (attempt) => {
         return fetch(url, true).then((raw) => {
-            if (raw.length >= 20) return raw;
-            // 短响应(<20字节) = 该段无弹幕 / 已到弹幕末尾，直接当结束处理，不再重试（避免无谓等待）
-            last = raw;
+            // 「空段」的形态是 ~195 字节、0 条弹幕条目的合法 protobuf（非短字节串），
+            // 是否复核由调用方 try_fetch_danmaku 按「extract 是否为 0 条 + 批内位置」决定
             return raw;
         }).catch((e) => {
             log(`段${seg}下载失败(重试${attempt + 1}/3): ${e.message || e}`);
@@ -603,14 +602,14 @@ async function search_video(title, ep_num, season_num) {
             const [sim, kind, t, bvid, vr, season] = scored[i];
             log(`[视频区]   候选[${i}]${tagmap[kind] || '?'} sim=${sim.toFixed(2)} season=${season} 弹幕=${vr} ${JSON.stringify(t)}`);
         }
-        // [lc-1015] 解析 CID 并返回有效候选：并发解析（批 5 个）、凑够 8 个即停。
-        // 旧版对全部过阈值候选逐个串行 await cid_from_bvid（搜索页常见 15-20 个候选 →
-        // 15-20 个串行 RTT，实测 ~1s+），是搜索链的主要耗时点之一。
-        const floorCands = scored.filter(([sim]) => sim >= VIDEO_SIM_FLOOR).slice(0, 24);
+        // [lc-1015] 解析 CID 并返回有效候选：并发解析、凑够 8 个即停。
+        // [lc-1019] 突发收敛：并发 5→3、候选上限 24→16——这是搜索阶段最大的请求突发源
+        // （风控按近期请求总量触发，到 seg 阶段已被限流掏空；砍掉长尾候选解析）。
+        const floorCands = scored.filter(([sim]) => sim >= VIDEO_SIM_FLOOR).slice(0, 16);
         const results = [];
-        for (let off = 0; off < floorCands.length && results.length < 8; off += 5) {
-            const chunk = floorCands.slice(off, off + 5);
-            const resolved = await mapLimit(chunk, 5, async (cand) => {
+        for (let off = 0; off < floorCands.length && results.length < 8; off += 3) {
+            const chunk = floorCands.slice(off, off + 3);
+            const resolved = await mapLimit(chunk, 3, async (cand) => {
                 const [sim, kind, t, bvid, vr, season] = cand;
                 const cid = await cid_from_bvid(bvid, ep_num, t);
                 return [sim, kind, t, bvid, vr, season, cid];
@@ -724,21 +723,49 @@ async function mapLimit(arr, limit, fn) {
     return out;
 }
 
-// 并行批量拉取弹幕分片（每批 6 段、批内并发 4），显著快于原先逐段顺序 await。
-// 命中「空响应(<20字节)」即判定到弹幕末尾并停止（与旧逻辑一致）。
-async function try_fetch_danmaku(cid) {
+// 并行批量拉取弹幕分片（每批 6 段、批内并发 3），显著快于原先逐段顺序 await。
+// [lc-1019] 「空段」判据从字节数改为 **extract 出 0 条弹幕**（2026-09-05 实测修正）：
+//   旧判据「<20字节」在今天的 seg.so 上永不命中——真·末尾段与风控空响应都是 ~195 字节的
+//   合法 protobuf（0 条弹幕条目），旧代码对这类候选从不走短响应路径，直接整候选误判"无弹幕数据"。
+//   「0 条弹幕」有两种含义：① 真·弹幕末尾（确定性，重试也空）；② 风控概率性掏空（隔一会再请求
+//   就有数据，实测官方计数 198 条的视频脚本请求时为空、几分钟后同 cid 返回 4317 字节 39 条）。
+//   判定规则（对每个 0 条段）：
+//   · 本批【后面还有非空段】→ 中段被风控掏空（自然末段之后不可能再有满段）→ 退避 1.5s 复核一次；
+//   · 整个视频一条未收到且是第1段 → 该候选被判"无弹幕"的代价最高 → 复核 1 次；
+//     首个候选(escalate)再多给一轮 3s 复核（全库风控时最先尝试的候选最值得等）；
+//   · 其余（边界批：本批无非空段且已收到弹幕）→ 自然边界，立即停——零额外开销，不拖慢片尾。
+// [lc-1019] 拉取并发 4→3：收敛同账号突发请求特征（风控以突发为信号之一）。
+async function try_fetch_danmaku(cid, escalate) {
     const all_d = [];
     const BATCH = 6;
     const MAX_SEG = 40;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const countOf = (raw) => (raw && raw.length) ? extract(raw).length : 0;
     let seg = 1;
     while (seg <= MAX_SEG) {
         const nums = [];
         for (let k = 0; k < BATCH; k++) nums.push(seg + k);
-        const raws = await mapLimit(nums, 4, (n) => fetch_seg(cid, n));
+        const raws = await mapLimit(nums, 3, (n) => fetch_seg(cid, n));
         let stop = false;
-        for (const raw of raws) {
-            if (!raw || raw.length < 20) { stop = true; break; }
-            const dm = extract(raw);
+        for (let i = 0; i < raws.length; i++) {
+            const raw = raws[i];
+            let dm = raw && raw.length ? extract(raw) : [];
+            if (!dm.length) {
+                const laterFull = raws.slice(i + 1).some((r) => countOf(r) > 0);
+                const videoEmptySoFar = all_d.length === 0;
+                if (!laterFull && !(videoEmptySoFar && seg === 1)) { stop = true; break; }
+                const retries = (videoEmptySoFar && seg === 1 && escalate) ? 2 : 1;
+                // [lc-1019] 实测风控按「近期请求总量」触发：脚本跑完搜索突发后 seg 段被掏空，
+                // 1.5s 内重试仍在限流窗口里 → 复核间隔取 2.5s/5s，给账号降温时间
+                const delays = [2500, 5000];
+                for (let r = 0; r < retries; r++) {
+                    await sleep(delays[Math.min(r, delays.length - 1)]);
+                    const again = await fetch_seg(cid, seg + i);
+                    const dm2 = again && again.length ? extract(again) : [];
+                    if (dm2.length) { dm = dm2; break; }
+                }
+                if (!dm.length) { stop = true; break; }
+            }
             for (const d of dm) all_d.push(d);
         }
         if (stop) break;
@@ -969,7 +996,8 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         const [cid, atitle, info] = candidates[idx];
         const label = (info && info.bvid) || atitle || `候选#${idx + 1}`;
         log(`[${idx + 1}/${candidates.length}] 尝试 cid=${cid} (${label})`);
-        const [ok, all_d] = await try_fetch_danmaku(cid);
+        // [lc-1019] 首个候选多给一轮 seg.so 空响应复核（全库风控时最先尝试的候选最值得等）
+        const [ok, all_d] = await try_fetch_danmaku(cid, idx === 0);
         if (ok && all_d.length) {
             let max_t = 0;
             for (const [pr] of all_d) if (pr > max_t) max_t = pr;
@@ -1078,7 +1106,8 @@ async function run_candidates(title, bvid, out, threshold) {
     log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out}`);
     const cid = await cid_from_bvid(bvid, 0, title);
     if (!cid) return { ok: false, error: `无法解析 bvid=${bvid} 的 cid` };
-    const [ok, all_d] = await try_fetch_danmaku(cid);
+    // [lc-1019] 用户手动选定的视频：值得多等一轮复核
+    const [ok, all_d] = await try_fetch_danmaku(cid, true);
     if (!ok || !all_d.length) return { ok: false, error: `bvid=${bvid} 无弹幕数据` };
     const block_types = _load_block_types();
     let final = all_d;
