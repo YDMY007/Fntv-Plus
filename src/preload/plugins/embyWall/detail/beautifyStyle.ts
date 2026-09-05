@@ -297,59 +297,76 @@ body.fnos-beautify ${COL} > :nth-child(3) .ms-container{ scrollbar-width:none !i
 body.fnos-beautify ${COL} > :nth-child(3) .ms-container::-webkit-scrollbar{
   width:0 !important; height:0 !important; display:none !important;
 }
-/* ②b [lc-1034] 演职人员改**竖向换行网格**（用户要求不要横滑）：
-   原生 .ms-container 定高横滑带(!overflow-x-scroll + whitespace-nowrap + w-max 行 1706px)
-   → 全部解除：容器 auto 高 + overflow visible，内容行 flex-wrap 换行，演员项(E3 卡片)
-   按右栏宽度自然折行，页面随内容向下生长。演职人员容器同时是 TMDB 卡宿主
-   (absolute top/bottom:16)，换行撑高后卡片随之变高（内部滚动），一石二鸟。 */
+/* ②b [lc-1036] 演职人员改**竖向列表**（用户指定：单个横向展示、不要方框、每行间微小细线）：
+   原生 .ms-container 定高横滑带全部解除（auto 高/overflow visible/white-space normal/去 pl-44），
+   内容行改块级堆叠——每个演员一行：头像(56px 圆) 左 + 名字/饰演角色横排 + 右缘补充信息槽，
+   行与行之间 hairline 细线（--fnos-hairline-soft 随明暗主题）。容器同时是 TMDB 卡宿主，
+   列表撑高后卡随之变高（内部滚动）。 */
 body.fnos-beautify ${COL} > :nth-child(3) .ms-container{
   height:auto !important; max-height:none !important;
   overflow:visible !important;
   white-space:normal !important;
   padding-left:0 !important; padding-right:0 !important;
 }
+/* ⚠ [lc-1036] 只收窄到「行 wrapper」层（.ms-container > div > div.group）：
+   头像 div 类名里也带 group-hover: 工具类，宽匹配 div[class*="group"] 会连头像一起
+   width/height:auto !important，与 ③ 的 56px 打成 important 对 important。
+   wrapper 原生 w-[120px] h-[145px]（120x145 竖卡）需在此解除成行宽。 */
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container > div > div[class*="group"]{
+  width:auto !important; height:auto !important; max-width:none !important;
+  flex:0 0 auto !important;
+}
 body.fnos-beautify ${COL} > :nth-child(3) .ms-container > div{
-  flex-wrap:wrap !important;
+  display:block !important;
   width:100% !important; max-width:none !important; height:auto !important;
   overflow:visible !important;
-  gap:12px !important;
-  justify-content:flex-start !important;
 }
-body.fnos-beautify ${COL} > :nth-child(3) .ms-container div[class*="group"]{
-  width:auto !important; height:auto !important;
-}
-/* ③ [lc-1033] E3 演员卡片化：每个演员升格为圆角小卡（semi fill 底、悬浮整卡上移+底色加深），
-   头像 hover 微放大；悬浮位从「头像单独位移」改为「整卡位移」（头像在卡内单独位移显突兀）。 */
+/* ③ 行布局：头像左 + 名字/饰演横排 + 细线分隔；悬浮轻微底色（无方框）。
+   ⚠ [lc-1036] 细线挂在 a 上时 :last-of-type 会全量命中——每个 a 都是自己 wrapper
+   （div.group）里唯一的 a，12 行边框全被「末行豁免」掐掉。末行豁免必须按 wrapper
+   层级（div:last-child > a）表达。 */
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]{
-  display:flex !important; flex-direction:column !important; align-items:center !important;
-  width:116px !important; padding:10px 8px 9px !important; box-sizing:border-box !important;
-  background:var(--semi-color-fill-0) !important; border-radius:16px !important;
-  transition:transform .22s ease, background .22s ease, box-shadow .22s ease !important;
-  text-decoration:none !important;
+  display:flex !important; flex-direction:row !important; align-items:center !important;
+  width:100% !important; padding:9px 12px 9px 4px !important; box-sizing:border-box !important;
+  background:transparent !important; border-radius:0 !important;
+  border-bottom:1px solid var(--fnos-hairline-soft, rgba(128,128,128,.14)) !important;
+  transition:background .18s ease !important;
 }
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover{
-  transform:translateY(-4px) !important;
-  background:var(--semi-color-fill-1) !important;
-  box-shadow:0 12px 30px rgba(0,0,0,.16) !important;
+  background:var(--semi-color-fill-0) !important;
+}
+body.fnos-beautify ${COL} > :nth-child(3) .ms-container > div > div[class*="group"]:last-child > a[href*="/v/person/"]{
+  border-bottom:none !important;
 }
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type{
-  width:88px !important; height:88px !important;
-  box-shadow:0 10px 26px rgba(0,0,0,.28) !important;
+  width:56px !important; height:56px !important;
+  margin:0 14px 0 0 !important;   /* 清掉原生 mx-auto（头像随行内容长短水平漂移）+ mb-2.5 */
+  flex-shrink:0 !important;
+  box-shadow:0 6px 16px rgba(0,0,0,.22) !important;
 }
-body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] > div:first-of-type img{
-  transition:transform .3s ease !important;
-}
-body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"]:hover > div:first-of-type img{
-  transform:scale(1.07) !important;
-}
-/* ④ 人名 13px 半粗（与信息卡正文同级）；角色行 11px 弱化省略 */
+/* ④ 人名 13.5px 半粗 + 饰演角色横排跟随（12px 弱化）。
+   ⚠ 原生名字/角色 p 都带 w-[120px] text-center——不清掉的话行中部出现大空隙、
+   文字在固定宽盒子里居中，视觉上「偏移散乱」。 */
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p[class*="text-base"]{
-  font-size:13px !important; font-weight:600 !important;
+  font-size:13.5px !important; font-weight:600 !important;
+  margin:0 !important; flex-shrink:0 !important;
+  width:auto !important; text-align:left !important;
 }
 body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] p:not([class*="text-base"]){
-  max-width:100px !important; overflow:hidden !important; text-overflow:ellipsis !important;
-  white-space:nowrap !important; font-size:11px !important; margin-top:2px !important;
+  font-size:12px !important; margin:0 0 0 10px !important;
   color:var(--fnos-muted,#86868b) !important;
+  width:auto !important; text-align:left !important;
+  flex:0 1 auto !important; min-width:0 !important;
+  white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important;
+}
+/* ④b [lc-1036] TMDB/本地补充信息槽（右缘对齐；personWorks 逐演员异步注入）：
+   职业分类 / 生日 / 代表作（取 TMDB 人物资讯与热门作品）。可收缩（min-width:0），
+   行内拥挤时先于名字让位并省略，不会顶到容器右缘外。 */
+body.fnos-beautify ${COL} > :nth-child(3) a[href*="/v/person/"] .fn-cast-extra{
+  margin-left:auto !important; flex:0 1 auto !important; min-width:0 !important;
+  font-size:11px !important; color:var(--fnos-muted,#86868b) !important;
+  white-space:nowrap !important; overflow:hidden !important; text-overflow:ellipsis !important;
+  max-width:44% !important; text-align:right !important;
 }
 
 /* ===== F. hero 海报微投影（hero 整体保持原生，只让海报更立体）===== */

@@ -142,7 +142,55 @@ export async function collectCredits(personGuid: string): Promise<any> {
     }
 }
 
+/** [lc-1036] 演员简报（详情页演职人员行补充信息）：职业分类/生日/代表作前二。
+ *  TMDB /person/{id} + combined_credits(vote_count 排序)；会话内缓存。 */
+const _briefCache = new Map<string, any>();
+const DEPT_CN: Record<string, string> = {
+    Acting: '演员', Directing: '导演', Writing: '编剧', Production: '制片',
+    Camera: '摄影', Sound: '音效', Art: '美术', Editing: '剪辑', 'Visual Effects': '视效',
+};
+export async function collectBrief(personGuid: string): Promise<any> {
+    if (_briefCache.has(personGuid)) return _briefCache.get(personGuid);
+    const cfg = fnConfig.readConfig();
+    const domain = cfg && cfg.domain;
+    const token = cfg && cfg.token;
+    if (!domain || !token) return { error: '缺少 fnOS 配置（domain/token）' };
+    try {
+        const pd: any = await fnRequest(domain, '/v/api/v1/person/' + personGuid, HttpMethod.GET, token);
+        const person = pd && pd.data ? pd.data : null;
+        const imdbId = person ? String(person.imdbId || person.imdb_id || '') : '';
+        const brief: any = { name: person ? String(person.name || '') : '' };
+        if (imdbId) {
+            const find: any = await tmdbApiGet('/find/' + imdbId, { external_source: 'imdb_id' });
+            const pid = find && Array.isArray(find.person_results) && find.person_results[0] ? find.person_results[0].id : null;
+            if (pid) {
+                const per: any = await tmdbApiGet('/person/' + pid, {});
+                brief.dept = DEPT_CN[String(per.known_for_department || '')] || String(per.known_for_department || '') || undefined;
+                brief.birthday = String(per.birthday || '') || undefined;
+                brief.place = String(per.place_of_birth || '') || undefined;
+                try {
+                    const cr: any = await tmdbApiGet('/person/' + pid + '/combined_credits', {});
+                    const cast = (cr && Array.isArray(cr.cast)) ? cr.cast : [];
+                    brief.top = cast.slice()
+                        .sort((a: any, b: any) => (b.vote_count || 0) - (a.vote_count || 0))
+                        .slice(0, 2)
+                        .map((m: any) => String(m.title || m.name || ''))
+                        .filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i);
+                } catch { /* 代表作可选 */ }
+            }
+        }
+        _briefCache.set(personGuid, brief);
+        return { ok: true, ...brief };
+    } catch (e: any) {
+        return { error: String(e.message || e) };
+    }
+}
+
 export function init(): void {
+    registerHandler('person:tmdb-brief', async (_e: any, personGuid: string) => {
+        if (!personGuid || !/^[0-9a-f]{32}$/i.test(String(personGuid))) return { error: 'personGuid 无效' };
+        return await collectBrief(String(personGuid).toLowerCase());
+    });
     registerHandler('person:tmdb-credits', async (_e: any, personGuid: string) => {
         if (!personGuid || !/^[0-9a-f]{32}$/i.test(String(personGuid))) return { error: 'personGuid 无效' };
         return await collectCredits(String(personGuid).toLowerCase());

@@ -197,7 +197,52 @@ async function enterPerson(guid: string, col?: HTMLElement): Promise<void> {
     }
 }
 
+/** [lc-1036] 二级详情页（季页）演职人员行富化：逐演员拉 TMDB 简报
+ *  （职业分类/生日/代表作前二），注入行右缘补充信息槽（beautifyStyle E2 ④b 槽位）。 */
+const _castEnrichBusy = { v: false };
+function enrichCast(): void {
+    if (_castEnrichBusy.v) return;
+    const views = document.querySelectorAll('.trim-ui__cache-outlet--exclude');
+    let view: HTMLElement | null = null;
+    for (let i = views.length - 1; i >= 0; i--) {
+        const v = views[i] as HTMLElement;
+        if (v && v.offsetParent !== null && v.querySelector('a[href*="/v/person/"]')) { view = v; break; }
+    }
+    if (!view) return;
+    const links = Array.from(view.querySelectorAll('a[href*="/v/person/"]')) as HTMLAnchorElement[];
+    const todo = links.filter((a) => !a.dataset.fpwEnriched);
+    if (!todo.length) return;
+    _castEnrichBusy.v = true;
+    todo.forEach((a, i) => {
+        a.dataset.fpwEnriched = String(i);
+        const m = (a.getAttribute('href') || '/').match(/([0-9a-f]{32})/i);
+        if (!m) return;
+        const guid = m[1].toLowerCase();
+        setTimeout(() => {
+            ipcRenderer.invoke('person:tmdb-brief', guid).then((b: any) => {
+                if (!b || b.error || !document.body.contains(a)) return;
+                const parts: string[] = [];
+                // [lc-1036] 原生角色文案已含职业分类（如角色 p 就是「演员」）时不重复推送
+                const roleEl = a.querySelector('p:not([class*="text-base"])');
+                const roleTxt = roleEl ? (roleEl.textContent || '').trim() : '';
+                if (b.dept && roleTxt.indexOf(b.dept) === -1) parts.push(b.dept);
+                if (b.birthday) parts.push(b.birthday);
+                if (b.top && b.top.length) parts.push(b.top.join('、'));
+                if (!parts.length) return;
+                const span = document.createElement('span');
+                span.className = 'fn-cast-extra';
+                span.textContent = parts.join(' · ');
+                span.title = span.textContent;
+                a.appendChild(span);
+            }).catch(() => {});
+        }, i * 180);
+    });
+    setTimeout(() => { _castEnrichBusy.v = false; }, 900);
+}
+
 function checkRoute(): void {
+    // [lc-1036] 二级详情页（季页）→ 演职人员行富化
+    if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(location.pathname)) enrichCast();
     const m = location.pathname.match(/\/v\/person\/([0-9a-f]{32})/i);
     if (!m) { if (_currentGuid) { _currentGuid = ''; const b = document.getElementById(PANEL_ID); if (b && b.parentElement) b.parentElement.removeChild(b); } return; }
     const guid = m[1].toLowerCase();
