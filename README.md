@@ -1,5 +1,15 @@
 # Fntv-Plus 飞牛影视桌面客户端 · 增强版
 
+## 🌟 Star 趋势
+
+> 如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下，也感谢每一位点过 Star 的朋友！🙏：
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date&theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
+</picture>
+
 > ### ⚠️ 重要警告与声明
 >
 > **🧪 这是作者个人的练习 / 学习作品，不代表任何官方立场，与飞牛影视官方无任何关联或合作关系。**
@@ -372,14 +382,3 @@ npm run build:linux   # Linux
 - **原项目版权**：Copyright (c) 原作者 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron)
 - **本仓库修改署名**：YDMY007（Fork 修改版，含冷调渐变玻璃 / 云母增强界面 / 沉浸式剧集详情页 / 3D 首页轮播 / 侧栏设置面板 / 豆瓣 · Bangumi · Trakt 同步 / B 站弹幕 / 手柄控制 / 观影记录 / 年度观影报告等增强）
 
----
-
-## 🌟 Star 趋势
-
-> 如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下，也感谢每一位点过 Star 的朋友！🙏：
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date&theme=dark" />
-  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
-  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
-</picture>
