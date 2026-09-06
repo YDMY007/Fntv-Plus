@@ -418,10 +418,80 @@ function handleMaskPlay(mask: HTMLElement): void {
 }
 
 let _playClickInstalled = false;
+
+// [lc-1076] 统一识别「播放」入口(供 press 拦截与 click 行动共用):
+//   在 pointerdown/mousedown/pointerup/mouseup/click 的捕获阶段用同一判定, 确保无论 fnOS 在哪一类
+//   事件上发起路由转场(点击播放→飞牛跳视频页→该页未套用深色主题前先以白底挂载 = 整页白闪),
+//   都能被我们挡在前面。preload 早于 fnOS 脚本注册 → 我们的 window 捕获监听先执行。
+type PlayHit =
+    | { kind: 'mask'; el: HTMLElement }
+    | { kind: 'card'; el: HTMLElement }
+    | { kind: 'ep'; el: HTMLElement; guid: string }
+    | { kind: 'next'; el: HTMLElement; guid: string }
+    | null;
+
+function detectPlayTarget(target: HTMLElement): PlayHit {
+    if (!target || typeof target.closest !== 'function') return null;
+    // 放行: 原生播放回退的合成点击 / 自家 UI(含弹窗内部按钮)
+    if (target.closest('[data-allow-original-play="true"]')) return null;
+    if (target.closest('[data-fnos-ui]')) return null;
+
+    // 1) 遮罩播放按钮 .play-mask__btn--play
+    const mask = target.closest('.play-mask__btn--play') as HTMLElement | null;
+    if (mask) return { kind: 'mask', el: mask };
+
+    // 2) 首页卡片封面播放图标(非 .play-mask__btn--play 的其它播放入口)
+    const cardPlay = findHomeCardPlay(target);
+    if (cardPlay) return { kind: 'card', el: cardPlay };
+
+    // 3)/4) 详情页选集链接 / 下一集按钮
+    const detailPath = (location.pathname || '').replace(/\/+$/, '');
+    if (/^\/v\/(tv|movie)\//.test(detailPath) && !/\/season\//.test(detailPath)) {
+        const epAnchor = target.closest('a[href]') as HTMLAnchorElement | null;
+        if (epAnchor && epAnchor.href && !/season\//i.test(epAnchor.href)) {
+            const em = epAnchor.href.match(GUID_RE);
+            if (em && em[1]) {
+                // 已交给 playButton.ts 处理的播放按钮不重复拦截
+                if (target.closest('[data-mpv-btn],[data-custom-play],[data-mask-intercepted],[data-mpv-intercepted]')) return null;
+                const curGuid = (detailPath.match(GUID_RE) || [])[1];
+                if (em[1] !== curGuid) return { kind: 'ep', el: epAnchor as HTMLElement, guid: em[1] };
+            }
+        }
+        const clickable = target.closest('button, [role="button"], a') as HTMLElement | null;
+        if (clickable) {
+            const label = (clickable.getAttribute('aria-label') || clickable.textContent || '').trim();
+            if (/下一集|下一話|next\s*episode/i.test(label)) {
+                const nextGuid = findNextEpisodeGuid();
+                if (nextGuid) return { kind: 'next', el: clickable, guid: nextGuid };
+            }
+        }
+    }
+    return null;
+}
+
 function installPlayClickInterceptor(): void {
     if (_playClickInstalled) return;
     _playClickInstalled = true;
 
+    // [lc-1076] press 阶段拦截: fnOS 常在 pointerdown/mousedown/pointerup 就发起路由转场(跳视频页),
+    //   该页未套用深色主题前会先以白底挂载 → 用户看到「点播放→整页白闪」, 而我们的 click 拦截
+    //   此时已来不及(preventDefault 拦不住已经开始的跳转)。preload 早于 fnOS 脚本注册 → 我们的
+    //   捕获监听在同层级(window)中先执行, stopImmediatePropagation 即可阻断 fnOS 的 press 处理。
+    //   ⚠ 只用 stopImmediatePropagation(不 preventDefault): pointerdown/mousedown 上 preventDefault 会
+    //     抑制后续 click 合成 → 选择弹窗不出现; 我们只需挡掉 fnOS 的 press 转场, click 仍照常派发给下方 onClick。
+    const blockPress = (e: Event): void => {
+        const target = e.target as HTMLElement | null;
+        if (!target || typeof target.closest !== 'function') return;
+        if (detectPlayTarget(target)) {
+            e.stopImmediatePropagation();
+        }
+    };
+    window.addEventListener('pointerdown', blockPress, true);
+    window.addEventListener('mousedown', blockPress, true);
+    window.addEventListener('pointerup', blockPress, true);
+    window.addEventListener('mouseup', blockPress, true);
+
+    // click 阶段: 真正拦截 + 执行(弹窗/外部播放)。preload 注册优先 → 先于 fnOS 的 click 委托。
     window.addEventListener('click', (e: Event) => {
         const target = e.target as HTMLElement | null;
         if (!target || typeof (target as any).closest !== 'function') return;
@@ -429,65 +499,25 @@ function installPlayClickInterceptor(): void {
         // 放行由「原生播放」按钮 / guid 兜底回退 触发的合成点击(带 data-allow-original-play)
         if (target.closest('[data-allow-original-play="true"]')) return;
 
-        // 1) 遮罩播放按钮 .play-mask__btn--play
-        const mask = target.closest('.play-mask__btn--play') as HTMLElement | null;
-        if (mask) {
-            mask.setAttribute('data-mask-intercepted', 'true'); // 兼容 playButton.ts 互检
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            handleMaskPlay(mask);
-            return;
-        }
+        const hit = detectPlayTarget(target);
+        if (!hit) return;
 
-        // 2) 首页卡片封面播放图标(非 .play-mask__btn--play 的其它播放入口)
-        const cardPlay = findHomeCardPlay(target);
-        if (cardPlay) {
-            cardPlay.setAttribute('data-home-intercepted', 'true');
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        if (hit.kind === 'mask') {
+            hit.el.setAttribute('data-mask-intercepted', 'true'); // 兼容 playButton.ts 互检
+            handleMaskPlay(hit.el);
+        } else if (hit.kind === 'card') {
+            hit.el.setAttribute('data-home-intercepted', 'true');
             (async () => {
                 const config = await getPlayButtonConfig();
                 logger.info('Home card play icon intercepted, playing with', config.defaultPlayer);
-                await playWithPlayer(cardPlay, config.defaultPlayer);
+                await playWithPlayer(hit.el, config.defaultPlayer);
             })();
-            return;
-        }
-
-        // 3) 详情页选集 / 相关推荐：点击集数链接 → 切换外部播放器到该集(不导航, 避免走 fnOS 内置播放)
-        const detailPath = (location.pathname || '').replace(/\/+$/, '');
-        if (/^\/v\/(tv|movie)\//.test(detailPath) && !/\/season\//.test(detailPath)) {
-            const epAnchor = target.closest('a[href]') as HTMLAnchorElement | null;
-            if (epAnchor && epAnchor.href && !/season\//i.test(epAnchor.href)) {
-                const em = epAnchor.href.match(GUID_RE);
-                if (em && em[1]) {
-                    // 已交给 playButton.ts 处理的播放按钮不重复拦截
-                    if (target.closest('[data-mpv-btn],[data-custom-play],[data-mask-intercepted],[data-mpv-intercepted]')) return;
-                    const curGuid = (detailPath.match(GUID_RE) || [])[1];
-                    if (em[1] === curGuid) return; // 点的是当前集, 放行
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    (async () => { await playEpisodeByGuid(em[1]); })();
-                    return;
-                }
-            }
-            // 4) 详情页「下一集」按钮(非链接形态)：找出下一集 guid 并切换外部播放器
-            const clickable = target.closest('button, [role="button"], a') as HTMLElement | null;
-            if (clickable) {
-                const label = (clickable.getAttribute('aria-label') || clickable.textContent || '').trim();
-                if (/下一集|下一話|next\s*episode/i.test(label)) {
-                    const nextGuid = findNextEpisodeGuid();
-                    if (nextGuid) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        (async () => { await playEpisodeByGuid(nextGuid); })();
-                        return;
-                    }
-                }
-            }
+        } else if (hit.kind === 'ep' || hit.kind === 'next') {
+            (async () => { await playEpisodeByGuid(hit.guid); })();
         }
     }, true);
 }
