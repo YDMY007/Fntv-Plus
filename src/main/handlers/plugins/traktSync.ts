@@ -377,13 +377,17 @@ export async function scrobble(action: 'start' | 'pause' | 'stop', guid: string,
 }
 
 // ── IPC ──
+// [lc-1088] 全部通道必须注册为 handle(useHandle:true): 渲染进程(embyWall 设置面板 / skipInject scrobble)
+//   一律用 ipcRenderer.invoke 调用。旧代码只有 scrobble 与两个 scrobble-enabled 传了 useHandle,
+//   其余 8 个落到 ipcMain.on → invoke 侧报 "No handler registered for 'trakt:get-credentials'"
+//   (dev 实测日志), 各 handler 的返回值也被 on 语义丢弃 → Trakt 面板每个按钮都是死的。
 export function init(): void {
     loadAuth();
     registerHandler('trakt:get-status', () => ({
         configured: !!getCreds(),
         connected: connected(),
         expiresAt: (_auth && _auth.expiresAt) || 0,
-    }));
+    }), { useHandle: true });
     registerHandler('trakt:save-credentials', (_e: any, clientId: string, clientSecret: string) => {
         const id = String(clientId || '').trim();
         const sec = String(clientSecret || '').trim();
@@ -395,17 +399,17 @@ export function init(): void {
         _auth = { clientId: id, clientSecret: sec, ...prev };
         saveAuth();
         return { ok: true };
-    });
+    }, { useHandle: true });
     registerHandler('trakt:get-credentials', () => {
         if (!_auth) return { configured: false };
         return { configured: true, clientId: _auth.clientId, clientSecret: _auth.clientSecret };
-    });
+    }, { useHandle: true });
     registerHandler('trakt:clear-credentials', () => {
         _auth = null;
         stopPolling();
         if (AUTH_FILE && fs.existsSync(AUTH_FILE)) { try { fs.unlinkSync(AUTH_FILE); } catch { /* ignore */ } }
         return { ok: true };
-    });
+    }, { useHandle: true });
     registerHandler('trakt:device-start', async () => {
         const cred = getCreds();
         if (!cred) return { error: '请先填写并保存 Client ID / Secret' };
@@ -426,13 +430,13 @@ export function init(): void {
             }
             return { error: '获取设备码失败: ' + (st ? 'HTTP ' + st + (desc ? ' ' + desc : '') : String(e.message || e)) };
         }
-    });
-    registerHandler('trakt:device-cancel', () => { stopPolling(); return { ok: true }; });
+    }, { useHandle: true });
+    registerHandler('trakt:device-cancel', () => { stopPolling(); return { ok: true }; }, { useHandle: true });
     registerHandler('trakt:disconnect', () => {
         if (_auth) { _auth.accessToken = undefined; _auth.refreshToken = undefined; _auth.expiresAt = undefined; saveAuth(); }
         return { ok: true };
-    });
-    registerHandler('trakt:sync-watched', async () => await syncWatched());
+    }, { useHandle: true });
+    registerHandler('trakt:sync-watched', async () => await syncWatched(), { useHandle: true });
     // [lc-1064] 实时 scrobble
     registerHandler('trakt:scrobble', (_e: any, p: { action: 'start' | 'pause' | 'stop'; guid: string; progress: number }) => {
         const act = String((p && p.action) || 'start') as 'start' | 'pause' | 'stop';
