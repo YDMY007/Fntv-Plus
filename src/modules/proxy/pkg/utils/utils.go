@@ -319,9 +319,20 @@ func DynamicProxy(c *gin.Context, targetURL string, extraHeaders map[string]stri
 			}
 		}
 		if !hb.isFull() {
+			// [lc-1090] 206 的正文起点一律取上游 Content-Range 里的 start（缺失才退回客户端
+			// Range 起点），**不能**要求客户端 Range 带终点。
+			// 原实现是 `if 206 && hasEnd { startOff = rangeStart }`，而 MPV seek/续拉发的
+			// 恰恰是无终点的 `bytes=8523-`（实测日志: 响应状态 206, range=bytes 8523-680776773/680776774）
+			// → hasEnd=false → startOff 被当成 0 → 文件中段的字节被 copy 进缓存头部并推进 filled。
+			// 之后任何 `bytes=0-` 请求走 serveHeadThenSplice 就会把这段错位内容当"文件头"直供，
+			// 播放器解不出容器（mpv: "Failed to recognize file format."）——「重新播放」在 EOF
+			// 后重载必然踩到，普通起播只要 seek 过一次也会踩到。
 			startOff := int64(0)
-			if resp.StatusCode == http.StatusPartialContent && hasEnd { // 206：数据从 Range 起点开始
+			if resp.StatusCode == http.StatusPartialContent {
 				startOff = rangeStart
+				if s, ok := parseStartFromContentRange(resp.Header.Get("Content-Range")); ok {
+					startOff = s
+				}
 			}
 			headT = &headTee{hb: hb, offset: startOff}
 		}

@@ -231,6 +231,26 @@ func parseTotalFromContentRange(v string) int64 {
 	return total
 }
 
+// parseStartFromContentRange 从 "bytes s-e/total" 取起点 s。
+//
+// [lc-1090] 上游的 Content-Range 才是「这段正文从文件哪个偏移开始」的权威答案：
+// 写文件头缓存时必须用它定位，否则中段字节会被当成文件头存进去（详见 utils.go 的 headTee）。
+func parseStartFromContentRange(v string) (int64, bool) {
+	body := strings.TrimSpace(v)
+	if !strings.HasPrefix(body, "bytes ") {
+		return 0, false
+	}
+	body = strings.TrimPrefix(body, "bytes ")
+	if idx := strings.IndexAny(body, "-/"); idx >= 0 {
+		body = body[:idx]
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(body), 10, 64)
+	if err != nil || start < 0 {
+		return 0, false
+	}
+	return start, true
+}
+
 // tryServeHeadFromCache 命中文件头缓存则直接写回响应并返回 true。
 //
 // [lc-1004] 只认弹幕脚本 hash 的**精确特征**请求（dandanplay.lua:782-783 的
