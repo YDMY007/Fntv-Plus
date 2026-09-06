@@ -490,7 +490,13 @@ const ACRYLIC_CSS = `
     }
     html.dark:not(.fnos-video-active) .semi-modal-content,
     html.dark:not(.fnos-video-active) [class*="modal-content"],
-    html.dark:not(.fnos-video-active) [class*="dialog-content"]{
+    html.dark:not(.fnos-video-active) [class*="dialog-content"],
+    /* [lc-1091] 必须带这条高特异性选择器: 3f 浅色兜底里 lc-1078 追加的
+       [role="dialog"]:not(...):not([data-fnos-ui]) 是 (0,4,1), 而 Semi 的
+       .semi-modal-content 自身就带 role="dialog"(实测 DOM), 深色下会把本段
+       (0,3,1) 的三条压过去 → 弹窗被钉成 #fff(用户报「深色下所有弹窗发白」)。
+       这里补同构选择器(多一个 .dark = (0,5,1))反压回去; 两个 :not 豁免与 3f 保持一致。 */
+    html.dark:not(.fnos-video-active) [role="dialog"]:not([style*="background:transparent"]):not([data-fnos-ui]){
         background:#2b2a33!important;
         background-color:#2b2a33!important;
     }
