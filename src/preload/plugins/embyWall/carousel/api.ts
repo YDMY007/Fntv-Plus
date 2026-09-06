@@ -5,6 +5,7 @@
 //   而是通过 onShowsReady 钩子回调（依赖倒置）。否则 api.ts ↔ render.ts 会成环。
 //   接线由入口（组合根）完成：setOnShowsReady(injectCarousel)。
 
+import { ipcRenderer } from 'electron';
 import { S, CAROUSEL_SCRAPE_CAP, CAROUSEL_TARGET } from '../state';
 import { log } from '../log';
 import { ensureLibraryIndex } from '../../hotUpdates';
@@ -199,6 +200,71 @@ export async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (
   }
 }
 
+/** [lc-1083] 主源(稳定 API): POST /v/api/v1/item/list，tags.type 白名单 ['Movie','TV'] —— 服务端直接排除
+ *  电视直播(LiveChannel)/个人视频(Video)/飞牛未识别项(Directory 等)，一次请求即拿到「最近更新在前」的已识别作品。
+ *  活体实测: page_size 给到 2000 也一次返全量; 返回 guid 与 DOM /v/(tv|movie)/{32hex} 同族(首项一致)，
+ *  故下游 fetchItemDetail(/v/api/v1/item/{guid})、resolveShowBackdrop、More 跳季页全部不用改。
+ *  poster 是相对路径，真图 URL = base + '/v/api/v1/sys/img' + poster(缺 sys/img 段实测返回 501)。
+ *  取代「隐藏 iframe 滚 DOM 抓链接」: 未识别视频排在列表前面时旧路径会抓空 → 骨架永久卡 99%。 */
+const ITEM_LIST_PATH = '/v/api/v1/item/list';
+export async function fetchRecognizedShows(base: string, cap = CAROUSEL_SCRAPE_CAP, timeoutMs = 6000): Promise<any[]> {
+  const body = {
+    tags: { type: ['Movie', 'TV'] },                 // 白名单: 只要已识别的电影/剧集
+    sort_type: 'DESC', sort_column: 'create_time',   // 与 /v/list/all 默认「最近更新」同序(实测首项一致)
+    exclude_grouped_video: 1, page: 1,
+    page_size: cap * 2,   // 多取一倍: 无海报/海报加载失败的候选要跳过(lc-768)，需余量凑够 CAROUSEL_TARGET
+  };
+  try {
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', ITEM_LIST_PATH, body).catch(() => '');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authx) headers.Authx = String(authx);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let json: any = null;
+    try {
+      const resp = await fetch(base + ITEM_LIST_PATH, {
+        method: 'POST', credentials: 'include', signal: ctrl.signal,
+        headers,
+        body: JSON.stringify(body),
+      });
+      json = await resp.json().catch(() => null);
+    } finally { clearTimeout(timer); }
+    if (!json || json.code !== 0 || !json.data || !Array.isArray(json.data.list)) {
+      log('[lc-1083] item/list 无有效响应 code=', json && json.code, (json && (json.message || json.msg)) || '', '→ 降级 DOM 抓取');
+      return [];
+    }
+    const raw: any[] = json.data.list;
+    // 有 poster 的排前面(稳定分区，不打乱「最近更新」相对顺序)，再截到 cap
+    const ordered = raw.filter((it) => it && it.poster).concat(raw.filter((it) => it && !it.poster));
+    const shows = ordered.slice(0, cap).map((it: any) => {
+      const rawRating = parseFloat(String(it.vote_average || '').trim());
+      const p = String(it.poster || '');
+      return {
+        id: String(it.guid || ''),
+        title: String(it.title || '').trim(),
+        poster: p ? base + '/v/api/v1/sys/img' + (p.startsWith('/') ? p : '/' + p) : '',
+        backdrop: '',                                  // 横版大图仍由 fetchItemDetail(data.backdrops) 补
+        desc: String(it.overview || '').trim(),
+        mediaType: String(it.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv',
+        tmdbId: 0,
+        totalEps: Number(it.number_of_episodes) || 0,
+        localEps: Number(it.local_number_of_episodes) || 0,
+        totalSeasons: Number(it.number_of_seasons) || 0,
+        localSeasons: Number(it.local_number_of_seasons) || 0,
+        year: Number(String(it.release_date || it.air_date || '').slice(0, 4)) || 0,
+        rating: isNaN(rawRating) ? 0 : rawRating,
+        statusText: '',                                // 由 fetchItemDetail 归一化(连载中/已完结)
+        genres: [] as string[],
+      };
+    }).filter((s: any) => s.id && s.title);
+    log('[lc-1083] item/list 已识别作品', shows.length, '/', raw.length, '(total=', json.data.total, ') 顺序:', shows.map((s: any) => s.title.substring(0, 8)).join(' → '));
+    return shows;
+  } catch (e: any) {
+    log('[lc-1083] item/list 异常 → 降级 DOM 抓取:', String((e && e.message) || e).substring(0, 120));
+    return [];
+  }
+}
+
 export async function fetchShowsViaIPC(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return S.apiShows;
@@ -213,16 +279,39 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
   }
   S.apiLoading = true;
 
-  try {
-    // [lc-561] 主源 = 飞牛「全部剧集列表」/v/list/all 首屏（默认最近更新在上，顺序正确）。
-    // 兜底 = 当前首页已渲染 DOM 真实卡片（非硬编码）。绝对不用硬编码数据。
-    // onProgress: 抓取过程中实时回传已加载卡片数, 更新骨架"已加载 N 个"数字。
-    log('[lc-561] scraping /v/list/all first screen (primary source)...');
-    let newShows: any[] = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
-    S.diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
-    log('[lc-561] all-page scrape returned', newShows.length, 'cards');
+  // [lc-1083] 空结果收尾: 假进度封顶 99%, 只有 completeCarouselProgress 能推到 100% → 任何"拿不到片源"的
+  //   路径都必须调用它, 否则骨架永久停在 99%(旧实现的 else/catch 分支就漏了这一步)。
+  const finishEmpty = (msg: string, reason: string): void => {
+    const setText = (): void => {
+      const txt = S.carouselContainer ? S.carouselContainer.querySelector('.fnos-ph-text') as HTMLElement | null : null;
+      if (txt) txt.textContent = msg;
+    };
+    setText();
+    completeCarouselProgress(() => {
+      // 样式3 骨架里 statusEl 与 .fnos-ph-text 是同一元素 → 先改状态再写原因, 让原因文案胜出
+      if (S.carouselStatusEl) S.carouselStatusEl.textContent = '未加载到内容';
+      setText();
+    }, reason);
+  };
 
-    // 兜底: iframe 抓 0 张时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
+  try {
+    // [lc-1083] 主源 = item/list API(tags.type 白名单 Movie/TV): 服务端已排除电视直播/个人视频/未识别视频,
+    //   且排序就是「最近更新在前」, 一次请求到手 → 不再依赖隐藏 iframe 滚 DOM(未识别项占前排时旧路径必抓空)。
+    // 兜底1 = 旧的 /v/list/all 首屏 DOM 抓取(老版 fnOS 无此接口/签名失败时)。
+    // 兜底2 = 当前首页已渲染 DOM 真实卡片（非硬编码）。绝对不用硬编码数据。
+    log('[lc-1083] fetching recognized shows via item/list API (primary source)...');
+    let newShows: any[] = await fetchRecognizedShows(base, CAROUSEL_SCRAPE_CAP);
+    S.diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
+    if (newShows.length > 0) updateCarouselProgress(newShows.length);
+
+    if (newShows.length === 0) {
+      log('[lc-1083] item/list 返回 0, 兜底1: scraping /v/list/all first screen...');
+      newShows = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
+      S.diagLastShows = newShows;
+      log('[lc-561] all-page scrape returned', newShows.length, 'cards');
+    }
+
+    // 兜底2: 仍为 0 时, 从当前首页已渲染的 DOM 直接抓真实卡片(非硬编码; 顺序=首页 DOM 顺序, 比空白强)
     if (newShows.length === 0) {
       log('[lc-561] all-page scrape 0 cards, fallback: scrape current page live DOM');
       newShows = scrapeVisibleCards().slice(0, 10);
@@ -339,12 +428,11 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         completeCarouselProgress(revealOnce, 'details-error');
       });
     } else {
-      // [lc-561] 两源皆空: 更新骨架提示, 避免"正在加载"永久卡住(数字停在 0)
-      log('[lc-561] both all-page and live-DOM scrape returned 0 — leaving native media library visible');
-      const txt = S.carouselContainer ? S.carouselContainer.querySelector('.fnos-ph-text') as HTMLElement | null : null;
-      if (txt) txt.textContent = '加载失败，请检查媒体库或刷新重试';
+      // [lc-1083] 三源皆空: 必须收尾进度条(假进度封顶 99%, 不调用 complete 就永久卡 99%), 并写明原因
+      log('[lc-561] all sources returned 0 — leaving native media library visible');
+      finishEmpty('媒体库暂无已识别的影视，或加载失败，请刷新重试', 'no-shows');
     }
-  } catch (e: any) { log('[lc-561] fetch error:', e); }
+  } catch (e: any) { log('[lc-561] fetch error:', e); finishEmpty('加载失败，请刷新重试', 'fetch-error'); }
   S.apiLoading = false;
   return S.apiShows;
 }
