@@ -1,10 +1,10 @@
 # Fntv-Plus 飞牛影视桌面客户端 · 增强版
 
-&emsp;&emsp;Fntv-Plus 是一款基于飞牛影视 Web 端、用 Electron 打造的第三方桌面客户端，在原生体验之上叠加了冷调渐变玻璃 / 云母增强界面、沉浸式剧集详情页、3D 首页轮播、Trakt 同步、手柄控制、观影记录、弹幕 / 豆瓣 / Bangumi 同步等大量增强功能，支持 Windows / macOS / Linux 三平台。
+&emsp;&emsp;Fntv-Plus 是一款基于飞牛影视 Web 端、用 Electron 打造的第三方桌面客户端。在原生体验之上，它叠加了冷调渐变玻璃与云母增强界面、沉浸式剧集详情页、3D 首页轮播、Trakt 同步、手柄控制、观影记录，以及弹幕 / 豆瓣 / Bangumi 同步等大量增强功能，并完整支持 Windows / macOS / Linux 三平台。
 
 <div align="center">
-  <img src="resource/docs/Home.png" width="100%" alt="">
-  <p><em>图：飞牛影视桌面客户端主界面</em></p>
+  <img src="resource/docs/Home123.png" width="100%" alt="">
+  <p><em>图：三种不同样式海报轮播墙</em></p>
 </div>
 
 <div align="center">
@@ -29,6 +29,11 @@
 
 <div align="center">
   <img src="resource/docs/Potplayer.png" width="100%" alt="">
+  <p><em>图：美化一二级详情页</em></p>
+</div>
+
+<div align="center">
+  <img src="resource/docs/Details12.png" width="100%" alt="">
   <p><em>图：支持调用 PotPlayer / MPV 外链播放</em></p>
 </div>
 
@@ -38,7 +43,7 @@
 </div>
 
 <div align="center">
-  <img src="resource/docs/Watchhistory..png" width="100%" alt="">
+  <img src="resource/docs/Watchhistory.png" width="100%" alt="">
   <p><em>图：本地化记录观影历史</em></p>
 </div>
 
