@@ -46,7 +46,7 @@ const K = {
 // [lc-1012] 材质重做后默认值同步调整：blur 14→18、frost .5→.42(光泽渐变替代平涂白)、
 // sat 140→150、shadow .14→.22(更大更软)、noise 默认开(真 Acrylic 的表面颗粒签名)。
 const DEF = {
-  enabled: false,
+  enabled: true, // [lc-1019] 默认开启云母增强（出厂即开；用户可在设置面板关闭）
   mode: 'mica',
   tint: '#faf8fc',
   blur: 18,
@@ -758,7 +758,7 @@ function buildGlassControls(): HTMLElement {
   title.textContent = '云母增强（Glass UI）';
   const sub = document.createElement('div');
   sub.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-bottom:8px;';
-  sub.textContent = '组件磨砂玻璃 + 环境光背景（低饱和氛围色域，Win11 Mica / Linear 式材质）。默认关闭。';
+  sub.textContent = '组件磨砂玻璃 + 环境光背景（低饱和氛围色域，Win11 Mica / Linear 式材质）。默认开启。';
   block.appendChild(title); block.appendChild(sub);
 
   // 总开关

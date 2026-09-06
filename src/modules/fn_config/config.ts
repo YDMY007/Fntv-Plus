@@ -784,10 +784,10 @@ export function setTmdbApiKey(key: string | null): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
-// 获取 TMDB 免梯子直连开关（默认 false）
+// 获取 TMDB 免梯子直连开关（[lc-1019] 默认开启：未显式关闭即视为开，零配置直连 TMDB）
 export function getTmdbDirectConnect(): boolean {
     const config: Config = readConfig() || {};
-    return !!config.tmdbDirectConnect;
+    return config.tmdbDirectConnect !== false;
 }
 
 // 设置 TMDB 免梯子直连开关
