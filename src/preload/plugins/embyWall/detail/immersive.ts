@@ -35,6 +35,8 @@ let _rafId = 0;
 let _obsBornAt = 0;
 let _settledHref: string | null = null;
 let _backdropRefreshTimer = 0;
+/** [lc-1086] body 未解析时把本次 apply 推迟到 DOMContentLoaded 重跑，防重复挂监听。 */
+let _deferredApply = false;
 
 function _disconnectObs(): void {
   if (_obs) { _obs.disconnect(); _obs = null; }
@@ -112,6 +114,7 @@ function _armObserver(): void {
     _rafId = requestAnimationFrame(check);
   });
   // 此刻活跃详情视图可能尚未渲染, 无法定位子树 → 观察 body, 但命中即断、有硬上限, 与旧版永久全文档轮询本质不同
+  // (body 一定存在: 唯一调用方 applyDetailBeautify 已在入口挡住 body 未解析的时机)
   _obs.observe(document.body, { childList: true, subtree: true });
 }
 
@@ -119,6 +122,19 @@ function _armObserver(): void {
  *  非详情页或关闭开关 → teardown；已在当前 href 套好 → 幂等早退；
  *  hero 已渲染 → 秒套(不铺加载层, 无闪)；hero 未就绪 → 铺瞬间加载层盖白屏 + arm 一次性 observer 等它。 */
 export function applyDetailBeautify(): void {
+  // [lc-1086] preload 可能早于 <body> 解析执行(入口 embyWall.ts 的初始 apply、modals/patch.ts 的 .then 补调
+  //   都可能落在这个窗口)。此时整条链路无处下手: 本文件的 document.body.classList、heroTint 的
+  //   document.body.style 会直接抛 TypeError, 而且抛在 promise 里无人接(用户 v3.6.0 实测日志:
+  //   Uncaught (in promise) TypeError: Cannot read properties of null (reading 'classList') @ immersive.js:152),
+  //   后续清理被整体跳过。body 都还没有 → 我们注入的任何层都不可能存在, 推迟到 DOMContentLoaded 后重跑一次即可。
+  if (!document.body) {
+    if (_deferredApply) return;
+    _deferredApply = true;
+    const rerun = (): void => { _deferredApply = false; applyDetailBeautify(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rerun, { once: true });
+    else window.setTimeout(rerun, 0);
+    return;
+  }
   if (S.detailBoxless || !isDetailPage()) { teardownDetailBeautify(); return; }
   if (_settledHref === location.href && document.body.classList.contains('fnos-beautify')) {
     releaseNavVeil(); // [lc-1017] 同 href 重复导航：美化已在位，直接放行持罩(否则干等 900ms 兜底)
@@ -135,6 +151,11 @@ export function teardownDetailBeautify(): void {
   _disconnectObs();
   clearTimeout(_backdropRefreshTimer);
   _settledHref = null;
+  S.detailGlassInited = false;
+  // [lc-1086] body 尚未解析 → 底图/tint/信息卡/持罩一个都不存在, 没有 DOM 可清, 复位完自身状态即可返回。
+  //   旧版下一行就抛 TypeError, 连带 removeBackdrop/clearHeroTint/removeTmdbCard/clearInstantLayer/
+  //   releaseNavVeil 全部跳过(lc-1017 的持罩会残留在页面上)。
+  if (!document.body) return;
   document.body.classList.remove('fnos-beautify');
   removeBackdrop();
   clearHeroTint();
@@ -142,5 +163,4 @@ export function teardownDetailBeautify(): void {
   removeEpResolution();
   clearInstantLayer();
   releaseNavVeil(); // [lc-1017] 无论从哪条路进来(含退回首页/关闭开关)，持罩都必须被释放
-  S.detailGlassInited = false;
 }

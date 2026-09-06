@@ -205,6 +205,22 @@ function fntvStartPatchApply(): void {
     });
 }
 
+/** [lc-1086] 把 DOM 触达推迟到 <html> 存在。
+ *  本文件的 settings:get 回调可能落在 document_start 窗口里(documentElement 仍为 null),
+ *  实测: 重载后 193ms 抛 Uncaught (in promise) TypeError: Cannot read properties of null (reading 'classList')
+ *  @ dest/preload/plugins/embyWall/modals/patch.js:252。抛在 .then 里 → 外层 try/catch 接不住,
+ *  同一回调后面的 applyLoginBgVar 等被整体跳过。
+ *  状态回填(S.*)与 localStorage 镜像不碰 DOM, 照旧同步执行; <html> 还不存在时页面什么都画不出来,
+ *  推迟这两个 DOM 动作没有任何闪烁风险。 */
+function whenRootReady(fn: () => void): void {
+  if (document.documentElement) { fn(); return; }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { fn(); }, { once: true });
+  } else {
+    window.setTimeout(() => { fn(); }, 0);
+  }
+}
+
 // 启动时拉取「详情页美化」偏好(detailBoxless)并 reconcile。
 // [lc-980] 此处 .then 异步解析, 晚于入口文件同步执行的初始 applyDetailBeautify(那时用的是默认值)。
 //   拿到持久化真值后必须再调一次 applyDetailBeautify: boxless=true → teardown 入口按默认误套的美化;
@@ -231,11 +247,13 @@ try {
     // （embyWall handle() 在本异步回填前用镜像同步预读，故镜像必须在此保持最新）
     if (s && typeof s.perfModeEnabled === 'boolean') {
       S.perfModeEnabled = s.perfModeEnabled;
-      document.documentElement.classList.toggle('fnos-perf', s.perfModeEnabled);
+      // 镜像必须立刻写: embyWall handle() 在本异步回填前就同步预读它(lc-1014)
       try { localStorage.setItem('fntv-perf-mode', s.perfModeEnabled ? '1' : '0'); } catch (_) {}
+      const perf = s.perfModeEnabled;
+      whenRootReady(() => { document.documentElement.classList.toggle('fnos-perf', perf); });
     }
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
-    if (s && s.loginBg) applyLoginBgVar(s.loginBg);
+    if (s && s.loginBg) whenRootReady(() => applyLoginBgVar(s.loginBg));
   });
 } catch (e) {}
 
