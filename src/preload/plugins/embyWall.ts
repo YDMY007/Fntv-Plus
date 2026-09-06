@@ -351,18 +351,23 @@ function handle(): void {
       // 同步清除白底: 全屏固定层的白底挡住 body 亚克力玻璃+桌面透出圆角
       // [v384] 同时清除 background-image(渐变/图片): getComputedStyle 的 backgroundColor
       //        对渐变返回 transparent, 导致白底漏网.
-      const bgImg = cs.backgroundImage;
-      if (bgImg && bgImg !== 'none') {
-        el.style.setProperty('background-image', 'none', 'important');
-      }
-      const bg = cs.backgroundColor;
-      if (bg && bg !== 'rgba(0, 0, 0, 0)') {
-        const bm = bg.match(/rgba?\(([^)]+)\)/);
-        if (bm) {
-          const parts = bm[1].split(',').map(s => parseFloat(s.trim()));
-          if (parts[0] > 200 && parts[1] > 200 && parts[2] > 200 && (parts[3] ?? 1) > 0.1) {
-            el.style.setProperty('background', 'transparent', 'important');
-            el.style.setProperty('background-color', 'transparent', 'important');
+      // [lc-1078] 自建 UI(data-fnos-ui, 与 _whitewashCheck 豁免同源)跳过清底:
+      //   播放选择弹窗的全屏遮罩自带不透明深靛渐变, 被清成 transparent 后整页不再压暗,
+      //   且插入瞬间被 ACRYLIC_CSS 刷的白底会直接透给用户(整屏白闪). 圆角/clip 仍保留.
+      if (el.dataset.fnosUi !== '1') {
+        const bgImg = cs.backgroundImage;
+        if (bgImg && bgImg !== 'none') {
+          el.style.setProperty('background-image', 'none', 'important');
+        }
+        const bg = cs.backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)') {
+          const bm = bg.match(/rgba?\(([^)]+)\)/);
+          if (bm) {
+            const parts = bm[1].split(',').map(s => parseFloat(s.trim()));
+            if (parts[0] > 200 && parts[1] > 200 && parts[2] > 200 && (parts[3] ?? 1) > 0.1) {
+              el.style.setProperty('background', 'transparent', 'important');
+              el.style.setProperty('background-color', 'transparent', 'important');
+            }
           }
         }
       }

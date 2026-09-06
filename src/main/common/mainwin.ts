@@ -275,7 +275,10 @@ const ACRYLIC_CSS = `
     html:not(.fnos-video-active) .semi-modal-content,
     html:not(.fnos-video-active) [class*="modal-content"],
     html:not(.fnos-video-active) [class*="dialog-content"],
-    html:not(.fnos-video-active) [role="dialog"]:not([style*="background:transparent"]){
+    /* [lc-1078] 自建 UI(data-fnos-ui, 含播放选择弹窗全屏遮罩)豁免: 本规则曾把
+       role=dialog 的全屏遮罩强制刷成 #fff → 整屏白闪 ~500ms, 随后又被圆角扫描清成
+       transparent → 遮罩彻底失效。自建弹层自带不透明底色, 不需要这里兜底。 */
+    html:not(.fnos-video-active) [role="dialog"]:not([style*="background:transparent"]):not([data-fnos-ui]){
         background:#fff!important;
         background-color:#fff!important;
     }
