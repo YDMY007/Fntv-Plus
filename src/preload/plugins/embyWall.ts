@@ -91,6 +91,23 @@ function handle(): void {
       'html.fnos-perf .fnos-detail-backdrop__img{filter:none!important}',
       /* [lc-1017] 性能模式同时掐掉底图交叉淡换/整层淡出过渡, 保持零合成开销 */
       'html.fnos-perf .fnos-detail-backdrop__img,html.fnos-perf .fnos-detail-backdrop{transition:none!important}',
+      /* [lc-1079] 性能模式关掉磨砂(backdrop-filter)后, 页面赖以可读的磨砂没了, 若底色本身透明就整页全透:
+         玻璃「背景层:无」(data-fntv-glass-bg=none)时 body 被 glassUI 清成 transparent(透桌面语义),
+         非玻璃低透明度(--fnos-alpha 拖到 0)时 body 也近乎透明 —— 二者在磨砂被关后都=全透。
+         性能模式补不透明底色: 玻璃模式画在 html 上(特异度高于 glassUI 的 html 0.003 底), 透明 body 之下即有底,
+         且 bg=fluid 时 body 的流体渐变仍叠在该底之上不受影响; 非玻璃直接给 body 实底(明暗双套)。 */
+      'html.fnos-perf[data-fntv-glass].fnos-tv-page{',
+      '  background:var(--fntv-amb-base,#eef0f7)!important;',
+      '  background-color:var(--fntv-amb-base,#eef0f7)!important;',
+      '}',
+      'html.fnos-perf:not([data-fntv-glass]).fnos-tv-page body{',
+      '  background:#f6f8fd!important;',
+      '  background-color:#f6f8fd!important;',
+      '}',
+      'html.fnos-perf:not([data-fntv-glass]).dark.fnos-tv-page body{',
+      '  background:#140f21!important;',
+      '  background-color:#140f21!important;',
+      '}',
     ].join('\n');
     (document.head || document.documentElement).appendChild(perfSt);
   }
