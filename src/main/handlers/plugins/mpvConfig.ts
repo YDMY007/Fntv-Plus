@@ -275,7 +275,8 @@ const MPV_SHADER_PRESETS: Record<string, string[]> = {
 
 /**
 /** [lc-1069] MPV 渲染预设：三档画质方案（写入 mpv-user.conf 的托管块，随启动重放自动生效）
- *  perf=性能优先(低端机/核显流畅) · balanced=均衡(默认, 与历史行为一致) · quality=高画质(gpu-next+高质量缩放) */
+ *  perf=性能优先(低端机/核显流畅, 仍用 legacy vo=gpu 更轻) · balanced=均衡(默认, gpu-next) · quality=高画质(gpu-next+高质量缩放)
+ *  [lc-1075] 三档均配合 mpv.conf 的 hwdec=auto（原生呈现，避免 auto-copy 回拷白屏）；vo=gpu-next 与 hwdec=auto 原生硬件帧呈现最契合。 */
 const MPV_RENDER_PRESETS: Record<string, string[]> = {
     perf: [
         'vo=gpu',
@@ -285,7 +286,7 @@ const MPV_RENDER_PRESETS: Record<string, string[]> = {
         'deband=no',
     ],
     balanced: [
-        'vo=gpu',
+        'vo=gpu-next',
         'scale=spline36',
         'dscale=mitchell',
         'cscale=spline36',
