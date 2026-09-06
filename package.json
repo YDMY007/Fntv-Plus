@@ -251,6 +251,8 @@
     },
     "files": [
       "dest",
+      "!dest/_verify",
+      "!dest/_verify/**",
       "build",
       "resource/login/**/*",
       "resource/wiki/**/*",
