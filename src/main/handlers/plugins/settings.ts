@@ -10,7 +10,7 @@ import { fnosDialog } from '../../common/fnosDialog';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { clearAllPatches } from '../../../modules/patcher/patchApplier';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials, applyRenderPreset, ensureStatsKeyBinding } from './mpvConfig';
 import * as log from '../../../modules/logger';
 
 /**
@@ -760,6 +760,8 @@ function init(): void {
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
     // 这里再在启动时补一次重放，确保用户「之前已选过但没生效」的着色器立即生效（无需重新手动选择）。
     try { writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false); } catch (e) { log.warn('启动重放默认着色器失败', e); }
+    // [lc-1069] 启动补写视频统计面板快捷键(F, 幂等)
+    try { ensureStatsKeyBinding(); } catch (e) { log.warn('补写 stats 快捷键失败', e); }
     registerHandler('settings:get', handleGetSettings, { useHandle: true });
     registerHandler('settings:set-download-proxy', handleSetDownloadProxy, { useHandle: true });
     registerHandler('settings:set-hide-play', handleSetHidePlay, { useHandle: true });
@@ -807,6 +809,12 @@ function init(): void {
         });
     }, { useHandle: false });
     registerHandler('settings:set-mpv-shader-config', handleSetMpvShaderConfig, { useHandle: true });
+    // [lc-1069] MPV 渲染预设
+    registerHandler('mpv:get-render-preset', () => ({ preset: fnConfig.getMpvRenderPreset() }), { useHandle: true });
+    registerHandler('mpv:set-render-preset', (_e: any, p: { preset: string }) => {
+        applyRenderPreset(String((p && p.preset) || 'balanced'));
+        return { ok: true, preset: fnConfig.getMpvRenderPreset() };
+    }, { useHandle: true });
     registerHandler('settings:set-bili-danmaku-style', handleSetBiliDanmakuStyle, { useHandle: true });
     registerHandler('settings:set-interp', handleSetInterp, { useHandle: true });
     registerHandler('settings:get-interp', handleGetInterp, { useHandle: true });

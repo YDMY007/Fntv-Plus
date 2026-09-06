@@ -274,6 +274,38 @@ const MPV_SHADER_PRESETS: Record<string, string[]> = {
 };
 
 /**
+/** [lc-1069] MPV 渲染预设：三档画质方案（写入 mpv-user.conf 的托管块，随启动重放自动生效）
+ *  perf=性能优先(低端机/核显流畅) · balanced=均衡(默认, 与历史行为一致) · quality=高画质(gpu-next+高质量缩放) */
+const MPV_RENDER_PRESETS: Record<string, string[]> = {
+    perf: [
+        'vo=gpu',
+        'scale=bilinear',
+        'dscale=bilinear',
+        'cscale=bilinear',
+        'deband=no',
+    ],
+    balanced: [
+        'vo=gpu',
+        'scale=spline36',
+        'dscale=mitchell',
+        'cscale=spline36',
+        'deband=yes',
+    ],
+    quality: [
+        'vo=gpu-next',
+        'scale=ewa_lanczossharp',
+        'dscale=hermite',
+        'cscale=ewa_lanczossoft',
+        'deband=yes',
+        'deband-iterations=2',
+        'hdr-compute-peak=yes',
+    ],
+};
+
+const RENDER_BLOCK_BEGIN = '# ── Fntv-Plus 渲染预设 begin ──';
+const RENDER_BLOCK_END = '# ── Fntv-Plus 渲染预设 end ──';
+
+/**
  * 将「默认 MPV 着色器 + ICC 校色」写入 portable_config/mpv-user.conf。
  * 该文件被 mpv.conf 通过 `include=~~/mpv-user.conf` 加载，作为 MPV 启动默认。
  * @param shaderKey 预设 key（'off' 表示不启用任何着色器）
@@ -294,6 +326,17 @@ function writeMpvUserConfig(shaderKey: string, iccEnabled: boolean): void {
             lines.push('glsl-shaders-append=~~/shaders/' + s);
         }
         lines.push('icc-profile-auto=' + (iccEnabled ? 'yes' : 'no'));
+
+        // [lc-1069] 追加渲染预设托管块（先剥旧块避免堆叠；预设随 fnConfig 持久化，
+        //   shader/ICC 任意重写都会带着当前预设一起写 → 面板各开关互不覆盖）
+        const presetKey = fnConfig.getMpvRenderPreset();
+        const presetLines = MPV_RENDER_PRESETS[presetKey] || MPV_RENDER_PRESETS.balanced;
+        const bIdx = lines.indexOf(RENDER_BLOCK_BEGIN);
+        const eIdx = lines.indexOf(RENDER_BLOCK_END);
+        if (bIdx >= 0 && eIdx > bIdx) lines.splice(bIdx, eIdx - bIdx + 1);
+        lines.push(RENDER_BLOCK_BEGIN, '# preset=' + presetKey);
+        for (const pl of presetLines) lines.push(pl);
+        lines.push(RENDER_BLOCK_END);
         const content = lines.join('\n') + '\n';
 
         // ⚠️ 关键修复：同时写入两个目录，确保无论 MPV 处于哪种模式都能生效：
@@ -634,6 +677,34 @@ function init(): void {
     app.on('before-quit', () => {
         stopConfigCheck();
     });
+}
+
+
+/** [lc-1069] 应用渲染预设：持久化 + 重写 mpv-user.conf(带着当前着色器/ICC 设置)。
+ *  vo 变更需 MPV 进程重启生效 → 面板提示「重启应用后生效」。 */
+export function applyRenderPreset(preset: string): void {
+    const p = preset === 'perf' || preset === 'quality' ? preset : 'balanced';
+    fnConfig.setMpvRenderPreset(p);
+    writeMpvUserConfig(fnConfig.getMpvDefaultShader(), fnConfig.getMpvIccEnabled() !== false);
+}
+
+/** [lc-1069] 确保 input.conf 含视频统计面板绑定(F 键, mpv 内置 stats 脚本)。
+ *  存量安装的 input.conf 是首启拷贝的旧版 → 幂等补一行(带 uosc 菜单注释)。 */
+export function ensureStatsKeyBinding(): void {
+    const line = 'F          script-binding stats/display-stats-toggle                                      #menu: 播放 > 视频统计信息';
+    const marker = 'script-binding stats/display-stats-toggle';
+    const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+    for (const dir of dirs) {
+        try {
+            const target = path.join(dir, 'input.conf');
+            const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf-8') : '';
+            if (existing.indexOf(marker) >= 0) continue;
+            fs.writeFileSync(target, existing.replace(/\s*$/, '') + '\n\n' + line + '\n', 'utf-8');
+            logger.info('已补写视频统计面板快捷键(F): ' + target);
+        } catch (e: any) {
+            logger.warn('补写 stats 快捷键失败 (' + dir + '):', e && e.message);
+        }
+    }
 }
 
 export {

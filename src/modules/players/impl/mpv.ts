@@ -95,6 +95,7 @@ export class MpvPlayer extends BasePlayer {
                 if (playerPath && playerPath.length > 0) {
                     const mpvConfigMod = require('../../handlers/plugins/mpvConfig');
                     mpvConfigMod.writeThumbfastConf(playerPath);
+                    mpvConfigMod.ensureStatsKeyBinding();
                 }
             } catch (e: any) { log.warn('写入 thumbfast.conf 失败:', e && e.message); }
 

@@ -111,6 +111,7 @@ export interface Config {
     // 智能跳过片头片尾总开关（默认关闭：仅显示「跳过」按钮，不自动跳；开启后自动跳过）
     smartSkipEnabled?: boolean;
     traktScrobbleEnabled?: boolean;
+    mpvRenderPreset?: string;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
     // [lc-1018] 弹弹play 开放 API 自定义凭证（两项都非空才启用；写入 script-opts/uosc_danmaku.conf。
@@ -971,6 +972,20 @@ export function setTraktScrobbleEnabled(enabled: boolean): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// 获取 MPV 渲染预设（[lc-1069] perf=性能优先 / balanced=均衡 / quality=高画质；默认 balanced）
+export function getMpvRenderPreset(): string {
+    const config: Config = readConfig() || {};
+    const v = config.mpvRenderPreset;
+    return v === 'perf' || v === 'quality' ? v : 'balanced';
+}
+
+// 设置 MPV 渲染预设
+export function setMpvRenderPreset(preset: string): void {
+    const config: Config = readConfig() || {};
+    config.mpvRenderPreset = preset;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「关闭详情页背景框」开关（默认关闭=false，保留玻璃背景框）
 export function getDetailBoxless(): boolean {
     const config: Config = readConfig() || {};
@@ -1125,6 +1140,8 @@ Object.assign(module.exports, {
     setSmartSkipEnabled,
     getTraktScrobbleEnabled,
     setTraktScrobbleEnabled,
+    getMpvRenderPreset,
+    setMpvRenderPreset,
     getDetailBoxless,
     setDetailBoxless,
     getWheelHScroll,

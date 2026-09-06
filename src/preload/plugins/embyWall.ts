@@ -3289,6 +3289,75 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     interpHint.textContent = '播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好，未安装时自动回退 MPV 内置平滑运动；选 N 卡需 RTX50+ 并在 NVIDIA App 开启「Smooth Motion（视频）」。';
     interpBody.appendChild(interpHint);
 
+    // ===== [lc-1069] 渲染画质（MPV 渲染预设三档）=====
+    //   写入 mpv-user.conf 托管块；vo 变更需 MPV 进程重启生效 → 面板明示。
+    const secRender = section('渲染画质');
+    const renderBody = secRender.body;
+
+    const renderLabel = document.createElement('div');
+    renderLabel.textContent = '渲染预设';
+    renderLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:4px 0 6px;';
+    renderBody.appendChild(renderLabel);
+
+    const renderSeg = document.createElement('div');
+    renderSeg.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+    const renderBtns: Record<string, HTMLButtonElement> = {};
+    const RENDER_PRESETS: [string, string, string][] = [
+      ['perf', '性能优先', '低配机/核显 流畅优先（双线性缩放，关闭去噪带）'],
+      ['balanced', '均衡', '默认推荐（spline36 缩放 + 去噪带）'],
+      ['quality', '高画质', 'gpu-next + EWA Lanczos 锐利缩放 + 峰值检测 HDR 映射'],
+    ];
+    const paintRender = (cur: string): void => {
+      for (const k of Object.keys(renderBtns)) {
+        const on = k === cur;
+        renderBtns[k].style.background = on ? 'var(--fnos-ui-exit-on)' : 'var(--fnos-ui-btn-bg2)';
+        renderBtns[k].style.color = on ? '#fff' : 'var(--fnos-ui-btn-text)';
+        renderBtns[k].style.borderColor = on ? 'transparent' : 'var(--fnos-ui-border)';
+      }
+    };
+    for (const [k, label] of RENDER_PRESETS.map(([k, l]) => [k, l] as [string, string])) {
+      const b = document.createElement('button');
+      b.style.cssText = 'flex:1;padding:8px 0;border:1px solid var(--fnos-ui-border);border-radius:9px;cursor:pointer;'
+        + 'font-size:12px;font-weight:600;font-family:inherit;transition:all .15s ease;';
+      b.textContent = label;
+      renderBtns[k] = b;
+      renderSeg.appendChild(b);
+    }
+    renderBody.appendChild(renderSeg);
+
+    const renderDesc = document.createElement('div');
+    renderDesc.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:6px 0 0;line-height:1.5;min-height:30px;';
+    renderBody.appendChild(renderDesc);
+
+    const renderHint = document.createElement('div');
+    renderHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:6px 0 0;line-height:1.5;';
+    renderHint.textContent = '渲染管线(vo)变更需重启应用后生效；画质档位亦可被「着色器/ICC」设置叠加。';
+    renderBody.appendChild(renderHint);
+
+    const DESCS: Record<string, string> = {};
+    for (const [k, , desc] of RENDER_PRESETS) DESCS[k] = desc;
+
+    const applyRender = (preset: string): void => {
+      paintRender(preset);
+      renderDesc.textContent = DESCS[preset] || '';
+      ipcRenderer.invoke('mpv:set-render-preset', { preset }).then((r: any) => {
+        if (r && r.ok) renderDesc.textContent = (DESCS[preset] || '') + '（已保存，重启应用后对渲染管线生效）';
+      }).catch(() => {});
+    };
+    for (const k of Object.keys(renderBtns)) {
+      renderBtns[k].addEventListener('click', (e: Event) => { e.stopPropagation(); applyRender(k); });
+    }
+    // 初始回填
+    ipcRenderer.invoke('mpv:get-render-preset').then((r: any) => {
+      const cur = (r && r.preset) || 'balanced';
+      paintRender(cur);
+      const p = RENDER_PRESETS.find((x) => x[0] === cur);
+      renderDesc.textContent = p ? p[2] : '';
+    }).catch(() => {});
+
+    secRender.el.id = 'sec-render';
+    // 移交: 插帧卡在游离容器挂的行自行搬回 —— 渲染卡直接占位, 由下方 cats 归属播放分类
+
     let _interpTimer: any = null;
     const pushInterp = (): void => {
       const payload = { enabled: interpEnabledToggle.checked, engine: engineSel.value, path: pathInput.value.trim() };
@@ -4144,7 +4213,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const cats: Cat[] = [
       { id: 'general', label: '通用', els: [sec3.el, secLang.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
-      { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secUX.el] },
+      { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secRender.el, secUX.el] },
       { id: 'danmaku', label: '弹幕', els: [secBili.el, secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
