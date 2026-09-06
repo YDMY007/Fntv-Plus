@@ -12,6 +12,7 @@ import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
 import { fetchShowsViaIPC, setOnShowsReady } from './embyWall/carousel/api';
+import { armBootCover } from './embyWall/carousel/bootCover';
 
 // preload/plugins/embyWall.ts
 //
@@ -5605,6 +5606,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
+
+  // [lc-1084] 首页强刷时原生 #root(~2.5s) 先于轮播 revealOnce(~4s) 渲染 → 原生页裸奔闪现。
+  //   启动期隐藏 #root + 铺全屏骨架遮罩, 轮播注入/STRM 提示/离开首页/12s 兜底任一命中即揭示。
+  armBootCover();
 
   // 1) 首屏: 立即注入(数据未到显示骨架占位)
   injectCarousel();
