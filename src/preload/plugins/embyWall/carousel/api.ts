@@ -5,12 +5,14 @@
 //   而是通过 onShowsReady 钩子回调（依赖倒置）。否则 api.ts ↔ render.ts 会成环。
 //   接线由入口（组合根）完成：setOnShowsReady(injectCarousel)。
 
-import { ipcRenderer } from 'electron';
 import { S, CAROUSEL_SCRAPE_CAP, CAROUSEL_TARGET } from '../state';
 import { log } from '../log';
 import { ensureLibraryIndex } from '../../hotUpdates';
 import { updateCarouselProgress, completeCarouselProgress } from './progress';
 import { scrapeLandscapeBackdrops, fetchItemDetail, resolveShowBackdrop } from './images';
+// [lc-1087] item/list 客户端已抽成叶子模块: 库索引(hotUpdates)也要用同一份数据, 而本文件 import hotUpdates,
+//   反向 import 会成环 → 依赖图保持单向: api.ts → hotUpdates → itemListApi → log/state。
+import { fetchRecognizedShows } from './itemListApi';
 
 // ── 数据就绪 → 渲染 钩子（依赖倒置，避免 api ↔ render 循环依赖）──────────────
 let onShowsReady: (() => void) | null = null;
@@ -196,71 +198,6 @@ export async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (
     return cards;
   } catch (e: any) {
     log('[lc-564] ensureLibraryIndex error:', e);
-    return [];
-  }
-}
-
-/** [lc-1083] 主源(稳定 API): POST /v/api/v1/item/list，tags.type 白名单 ['Movie','TV'] —— 服务端直接排除
- *  电视直播(LiveChannel)/个人视频(Video)/飞牛未识别项(Directory 等)，一次请求即拿到「最近更新在前」的已识别作品。
- *  活体实测: page_size 给到 2000 也一次返全量; 返回 guid 与 DOM /v/(tv|movie)/{32hex} 同族(首项一致)，
- *  故下游 fetchItemDetail(/v/api/v1/item/{guid})、resolveShowBackdrop、More 跳季页全部不用改。
- *  poster 是相对路径，真图 URL = base + '/v/api/v1/sys/img' + poster(缺 sys/img 段实测返回 501)。
- *  取代「隐藏 iframe 滚 DOM 抓链接」: 未识别视频排在列表前面时旧路径会抓空 → 骨架永久卡 99%。 */
-const ITEM_LIST_PATH = '/v/api/v1/item/list';
-export async function fetchRecognizedShows(base: string, cap = CAROUSEL_SCRAPE_CAP, timeoutMs = 6000): Promise<any[]> {
-  const body = {
-    tags: { type: ['Movie', 'TV'] },                 // 白名单: 只要已识别的电影/剧集
-    sort_type: 'DESC', sort_column: 'create_time',   // 与 /v/list/all 默认「最近更新」同序(实测首项一致)
-    exclude_grouped_video: 1, page: 1,
-    page_size: cap * 2,   // 多取一倍: 无海报/海报加载失败的候选要跳过(lc-768)，需余量凑够 CAROUSEL_TARGET
-  };
-  try {
-    const authx = await ipcRenderer.invoke('fnos-gen-authx', ITEM_LIST_PATH, body).catch(() => '');
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (authx) headers.Authx = String(authx);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    let json: any = null;
-    try {
-      const resp = await fetch(base + ITEM_LIST_PATH, {
-        method: 'POST', credentials: 'include', signal: ctrl.signal,
-        headers,
-        body: JSON.stringify(body),
-      });
-      json = await resp.json().catch(() => null);
-    } finally { clearTimeout(timer); }
-    if (!json || json.code !== 0 || !json.data || !Array.isArray(json.data.list)) {
-      log('[lc-1083] item/list 无有效响应 code=', json && json.code, (json && (json.message || json.msg)) || '', '→ 降级 DOM 抓取');
-      return [];
-    }
-    const raw: any[] = json.data.list;
-    // 有 poster 的排前面(稳定分区，不打乱「最近更新」相对顺序)，再截到 cap
-    const ordered = raw.filter((it) => it && it.poster).concat(raw.filter((it) => it && !it.poster));
-    const shows = ordered.slice(0, cap).map((it: any) => {
-      const rawRating = parseFloat(String(it.vote_average || '').trim());
-      const p = String(it.poster || '');
-      return {
-        id: String(it.guid || ''),
-        title: String(it.title || '').trim(),
-        poster: p ? base + '/v/api/v1/sys/img' + (p.startsWith('/') ? p : '/' + p) : '',
-        backdrop: '',                                  // 横版大图仍由 fetchItemDetail(data.backdrops) 补
-        desc: String(it.overview || '').trim(),
-        mediaType: String(it.type || '').toLowerCase() === 'movie' ? 'movie' : 'tv',
-        tmdbId: 0,
-        totalEps: Number(it.number_of_episodes) || 0,
-        localEps: Number(it.local_number_of_episodes) || 0,
-        totalSeasons: Number(it.number_of_seasons) || 0,
-        localSeasons: Number(it.local_number_of_seasons) || 0,
-        year: Number(String(it.release_date || it.air_date || '').slice(0, 4)) || 0,
-        rating: isNaN(rawRating) ? 0 : rawRating,
-        statusText: '',                                // 由 fetchItemDetail 归一化(连载中/已完结)
-        genres: [] as string[],
-      };
-    }).filter((s: any) => s.id && s.title);
-    log('[lc-1083] item/list 已识别作品', shows.length, '/', raw.length, '(total=', json.data.total, ') 顺序:', shows.map((s: any) => s.title.substring(0, 8)).join(' → '));
-    return shows;
-  } catch (e: any) {
-    log('[lc-1083] item/list 异常 → 降级 DOM 抓取:', String((e && e.message) || e).substring(0, 120));
     return [];
   }
 }

@@ -11,6 +11,9 @@ import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
 import logger from '../core/logger';
+// [lc-1087] 库索引主源: item/list API 客户端(叶子模块)。不能 import ./embyWall/carousel/api ——
+//   api.ts 已 import 本文件的 ensureLibraryIndex 当轮播兜底1, 反向 import 会成环。
+import { fetchLibraryItems } from './embyWall/carousel/itemListApi';
 
 const PANEL_ID = 'fntv-hot-updates';
 const STYLE_ID = 'fntv-hot-updates-style';
@@ -616,8 +619,25 @@ function rebuildIndexAsync(): void {
   }).catch(() => { _libLoading = false; });
 }
 
-/** 用隐藏全屏 iframe 滚动抓 /v/list/all 全量条目(不设置 _libIndex/_libLoading, 由调用方处理) */
+/** [lc-1087] 库索引构建: 主源 = item/list API(与轮播同源同签名), 兜底 = 旧的隐藏 iframe 滚 /v/list/all DOM 抓取。
+ *  真因(用户 v3.6.0 实测日志 10 次复现「0 项 (rounds=35)」): 库里大量未识别视频时, /v/list/all 前排卡片
+ *  渲染成 /v/folder|/v/library|/v/live 链接, 不匹配 a[href*="/v/tv/"],a[href*="/v/movie/"] →
+ *  scrapeAllViaIframe 的 links<5 分支前 30 轮直接 return(不滚动), 第 30 轮起才滚, 连续 6 轮无新增即收尾 → 恒 0 项。
+ *  后果: 宫灯浮层「已入库」永不亮、点卡片恒跳外链而非本地详情页、writeIndexToDisk 永不触发(每次启动重抓 14s)。
+ *  lc-1083 只把轮播主源换成了 API, 这里补上库索引(同一根因的第二个消费者)。 */
 function buildIndex(): Promise<LibItem[]> {
+  return fetchLibraryItems(location.origin).then((items) => {
+    if (items.length) {
+      logger.info('[hotUpdates] 飞牛影视库索引构建完成', items.length, '项 (item/list API 主源)');
+      return items;
+    }
+    logger.info('[hotUpdates] item/list 返回 0 项 → 兜底: iframe 滚动抓取 /v/list/all');
+    return scrapeAllViaIframe();
+  });
+}
+
+/** 兜底: 用隐藏全屏 iframe 滚动抓 /v/list/all 全量条目(不设置 _libIndex/_libLoading, 由调用方处理) */
+function scrapeAllViaIframe(): Promise<LibItem[]> {
   return new Promise((resolve) => {
     const base = location.origin; // 当前即飞牛影视页，iframe 同源可读
     const iframe = document.createElement('iframe');
