@@ -75,29 +75,28 @@ export function createPlayModal(
         left: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0, 0, 0, 0.3);
-        z-index: 10000;
+        background-color: rgba(0, 0, 0, 0.5);
+        z-index: 2147483600;
         display: flex;
         justify-content: center;
         align-items: center;
-        backdrop-filter: blur(15px);
-        -webkit-backdrop-filter: blur(15px);
     `;
 
     // 创建弹窗内容
     const modalContent = document.createElement('div');
+    // [lc-1076] 透明窗口(transparent:true)下 backdrop-filter 首次绘制会采样不到背景而闪一帧白底,
+    //   且是合成器卡死高发源(watchReport.ts 同结论)。改用不透明深色玻璃底 + 高光描边,
+    //   既消除白闪又保留玻璃质感, 与全项目其它弹窗(dialogUI/embyWall 各 modal 均 rgba(0,0,0,.5) 无 blur)一致。
     modalContent.style.cssText = `
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(28, 30, 46, 0.78);
         border-radius: 20px;
         padding: 32px;
         min-width: 380px;
         box-shadow:
-            0 8px 32px rgba(0, 0, 0, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2),
-            inset 0 -1px 0 rgba(0, 0, 0, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
+            0 8px 32px rgba(0, 0, 0, 0.45),
+            inset 0 1px 0 rgba(255, 255, 255, 0.25),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.22);
     `;
 
     // 标题
@@ -136,8 +135,6 @@ export function createPlayModal(
         color: #ffffff;
         transition: all 0.3s ease;
         min-width: 100px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     `;
 
@@ -158,8 +155,6 @@ export function createPlayModal(
         transition: all 0.3s ease;
         box-shadow: 0 4px 15px rgba(255, 138, 0, 0.4);
         min-width: 100px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         `
         : `
         padding: 12px 24px;
@@ -173,8 +168,6 @@ export function createPlayModal(
         transition: all 0.3s ease;
         box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         min-width: 100px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         `;
 
     // 取消按钮
@@ -191,8 +184,6 @@ export function createPlayModal(
         color: rgba(255, 255, 255, 0.8);
         transition: all 0.3s ease;
         min-width: 100px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     `;
 
