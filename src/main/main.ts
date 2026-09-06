@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { spawn, execSync, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -7,15 +7,15 @@ import './patchOverlay';
 import { registerAllPlugins } from './handlers';
 import { getInstance as getUpdateChecker } from '../modules/updater/updateChecker';
 import * as winctrl from './common/winctrl';
-import { createTray, showTrayNotification, destroyTray } from './common/tray';
-import { getMacCloseAction, setMacCloseAction, getTrayNotificationShown, setTrayNotificationShown } from './common/preferences';
+import { createTray, destroyTray } from './common/tray';
 import * as fnConfig from '../modules/fn_config/config';
 import * as log from '../modules/logger';
 import { getMainWindow } from './common/mainwin';
 import { isTrusted } from '../modules/cert_trust';
 import { startProxyProcess, shutdownProxyProcess } from './common/proxy';
 import { appDialog } from './common/appDialog';
-import { fnosDialog, initFnosDialogIpc } from './common/fnosDialog';
+import { initFnosDialogIpc } from './common/fnosDialog';
+import { handleExitIntent } from './common/exitFlow';
 import { reconcilePatchStateOnStartup } from '../modules/patcher/patchApplier';
 
 // 禁用输入法自动切换
@@ -301,115 +301,16 @@ if (!gotTheLock) {
 function setupWindowEvents(mainWindow: BrowserWindow): void {
     if (mainWindow) {
         // 监听窗口关闭事件
-        mainWindow.on('close', async (event) => {
+        // [lc-1071] 分流逻辑统一收口到 exitFlow.handleExitIntent（与标题栏 X 按钮共用）；
+        // 本事件兜底系统发起的关闭(Alt+F4 / 关机等) —— 弹询问/隐藏时仍需阻止真实关闭。
+        mainWindow.on('close', (event) => {
             if (!(app as any).isQuiting) {
                 event.preventDefault();
-
-                if (process.platform === 'darwin') {
-                    // macOS 上的特殊处理
-                    const action = getMacCloseAction();
-
-                    if (action === 'ask') {
-                        // 询问用户偏好
-                        const result = await fnosDialog(mainWindow, {
-                            type: 'question',
-                            title: '关闭窗口',
-                            message: '您希望如何处理窗口关闭？',
-                            detail: '在 macOS 上，您可以选择隐藏到状态栏或完全退出应用。',
-                            buttons: ['隐藏到状态栏', '退出应用', '取消'],
-                            defaultId: 0,
-                            cancelId: 2,
-                            checkboxLabel: '记住我的选择',
-                            checkboxChecked: false,
-                        });
-
-                        if (result.response === 0) {
-                            // 隐藏到状态栏
-                            if (result.checkboxChecked) {
-                                setMacCloseAction('minimize');
-                            }
-                            mainWindow.hide();
-                            app.dock?.hide();
-                            showMacNotification();
-                        } else if (result.response === 1) {
-                            // 退出应用
-                            if (result.checkboxChecked) {
-                                setMacCloseAction('quit');
-                            }
-                            (app as any).isQuiting = true;
-                            app.quit();
-                        }
-                        // 取消则什么都不做
-                    } else if (action === 'minimize') {
-                        // 直接隐藏到托盘
-                        mainWindow.hide();
-                        app.dock?.hide();
-                        showMacNotification();
-                    } else if (action === 'quit') {
-                        // 直接退出
-                        (app as any).isQuiting = true;
-                        app.quit();
-                    }
-                } else {
-                    // Windows 和 Linux 上根据退出模式处理
-                    const exitMode = fnConfig.getExitMode();
-
-                    if (exitMode === 'ask') {
-                        // 询问用户
-                        const result = await fnosDialog(mainWindow, {
-                            type: 'question',
-                            title: '退出确认',
-                            message: '确定要退出飞牛影视吗？',
-                            detail: '您可以选择完全退出应用或最小化到托盘。',
-                            buttons: ['退出应用', '最小化到托盘', '取消'],
-                            defaultId: 1,
-                            cancelId: 2,
-                            checkboxLabel: '记住我的选择',
-                            checkboxChecked: false,
-                        });
-
-                        if (result.response === 0) {
-                            // 退出应用
-                            if (result.checkboxChecked) {
-                                fnConfig.setExitMode('direct');
-                            }
-                            (app as any).isQuiting = true;
-                            app.quit();
-                        } else if (result.response === 1) {
-                            // 最小化到托盘
-                            if (result.checkboxChecked) {
-                                fnConfig.setExitMode('minimize');
-                            }
-                            mainWindow.hide();
-                            showTrayNotification();
-                        }
-                    } else if (exitMode === 'minimize') {
-                        // 隐藏到托盘
-                        mainWindow.hide();
-                        showTrayNotification();
-                    } else {
-                        // 直接退出
-                        (app as any).isQuiting = true;
-                        app.quit();
-                    }
-                }
+                handleExitIntent(mainWindow).catch((error: Error) => {
+                    log.error('退出意图处理失败:', error);
+                });
             }
         });
-    }
-}
-
-// macOS 通知显示函数
-function showMacNotification(): void {
-    if (!getTrayNotificationShown()) {
-        if (Notification.isSupported()) {
-            const notification = new Notification({
-                title: '飞牛影视',
-                body: '应用已隐藏到状态栏，点击状态栏图标可以恢复窗口',
-                silent: false
-            });
-            notification.show();
-        }
-        setTrayNotificationShown(true);
     }
 }
 

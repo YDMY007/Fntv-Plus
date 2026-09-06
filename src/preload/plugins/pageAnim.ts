@@ -197,6 +197,12 @@ function setupObservers(): void {
       });
     });
     document.querySelectorAll(MODAL_SEL).forEach((m: any) => {
+      // [lc-1072] 跳过自建弹层(data-fnos-ui 约定标记: 设置面板/dialogUI/播放方式/年度报告)。
+      //   它们各有自己的入场样式; 且 a11y 焦点陷阱会给可见的自建弹层动态挂 role=dialog,
+      //   令其命中 MODAL_SEL —— modalIn 的 anime 会写 transform, 覆写设置面板赖以居中的
+      //   内联 translate(-50%,-50%), 面板被钉在 top:50%/left:50% 上整体坠到屏幕右下(用户报障
+      //   「面板有时候莫名其妙跑到下面去」)。
+      if (m.dataset.fnosUi === '1') return;
       if (m.dataset.fntvAnim === '1') return;
       m.dataset.fntvAnim = '1';
       m.style.opacity = '0';
@@ -240,6 +246,7 @@ function setupObservers(): void {
         if (getComputedStyle(c).opacity === '0') { c.dataset.fntvIn = '1'; c.style.opacity = '1'; }
       });
       document.querySelectorAll(MODAL_SEL).forEach((m: any) => {
+        if (m.dataset.fnosUi === '1') return; // [lc-1072] 自建弹层不介入(见 collect 同款注释)
         if (getComputedStyle(m).opacity === '0') { m.dataset.fntvAnim = '1'; m.style.opacity = '1'; }
       });
     }, 1500);

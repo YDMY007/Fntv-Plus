@@ -66,6 +66,9 @@ export function createPlayModal(
     // 创建弹窗遮罩
     const modalOverlay = document.createElement('div');
     modalOverlay.id = 'play-choice-modal';
+    // [lc-1072] data-fnos-ui=自建 UI 约定标记: 白底清除器豁免 + pageAnim 弹窗动画跳过
+    //   (a11y 给可见弹层挂 role=dialog 后, anime 覆写 transform 会打乱弹层定位)
+    modalOverlay.setAttribute('data-fnos-ui', '1');
     modalOverlay.style.cssText = `
         position: fixed;
         top: 0;

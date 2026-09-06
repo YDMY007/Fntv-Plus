@@ -833,6 +833,9 @@ function handleTopBtnAction(e: Event): boolean {
     if (!el) return true; // 点击浮层容器空白（padding 区）：吞掉，不关面板
     // 命中诊断（用户可用 devtools 控制台确认事件是否到达本层）
     try { console.log('[WatchHistory] 右上角按钮命中:', el.id || el.dataset.f || el.className); } catch { /* ignore */ }
+    // [lc-1073] 自管按钮（带 data-self-handled，如 watchReport 的年度报告入口）自带 click
+    //   监听 → 放行事件，由其自身处理；否则末尾 return true 会把它吞掉（点没反应）。
+    if (el.dataset.selfHandled === '1') return false;
     if (el.id === 'wh-close') { closePanel(true); return true; } // 只有 ✕ 才回首页
     if (el.id === 'wh-sync') { void syncFnos(); return true; }
     if (el.classList.contains('wh-pill')) {
@@ -988,11 +991,14 @@ function renderWall(): void {
     // 按状态拆分：已看完(prog>=1) / 在观看(prog<1，含观看痕迹但未完结)
     const done = list.filter((i) => i.prog >= 1);
     const partial = list.filter((i) => i.prog < 1);
+    // [lc-1077] 索引映射取代 curData.indexOf（旧写法每张卡 O(n) 全表扫描 → 大库 O(n²) 卡顿）
+    const idxOf = new Map<ShowItem, number>();
+    curData.forEach((it, i) => { if (!idxOf.has(it)) idxOf.set(it, i); });
     doneRow.innerHTML = done.length
-        ? done.map((i) => cardHTML(i, curData.indexOf(i), 'done')).join('')
+        ? done.map((i) => cardHTML(i, idxOf.get(i) ?? 0, 'done')).join('')
         : '<div class="wh-col-empty">暂无已看完的作品</div>';
     partialRow.innerHTML = partial.length
-        ? partial.map((i) => cardHTML(i, curData.indexOf(i), 'partial')).join('')
+        ? partial.map((i) => cardHTML(i, idxOf.get(i) ?? 0, 'partial')).join('')
         : '<div class="wh-col-empty">暂无在观看的作品</div>';
     // 列头计数
     const dc = $('wh-done-count'); if (dc) dc.textContent = String(done.length);
@@ -1093,10 +1099,11 @@ function renderChart(): void {
         start = new Date(today.getTime() - (NUM_WEEKS - 1) * 7 * dayMs);
     } else if (_heatRange === 'all') {
         // 从台账里最早的年份 1 月 1 日开始（对齐周日），保证 2025 等历史年份都能显示
+        //   [lc-1075] 年份下限 2000：脏桶（1970 等）不得把「全部」范围拉出几十年（渲染卡死）
         let minYear = today.getFullYear();
         for (const k of dayCount.keys()) {
             const y = parseInt(k.split('-')[0], 10);
-            if (!isNaN(y) && y < minYear) minYear = y;
+            if (!isNaN(y) && y >= 2000 && y < minYear) minYear = y;
         }
         start = new Date(minYear, 0, 1);
         // 补齐到周日列
@@ -1411,7 +1418,13 @@ function loadPersistedDayCount(): void {
         const raw = localStorage.getItem(_DAYCOUNT_LS_KEY);
         if (!raw) { _dayCountLoaded = true; return; }
         const obj = JSON.parse(raw) as Record<string, number>;
-        for (const k in obj) if (typeof obj[k] === 'number') _dayCountCache.set(k, obj[k]);
+        // [lc-1075] 修正机制：早于 2000 年的台账桶（epoch 垃圾 / 旧版解析溢出产物）直接丢弃，
+        //   否则热力图「全部」范围会从脏年份起画几千列 → 渲染卡死（lc-1076 用户报障）。
+        for (const k in obj) {
+            const y = parseInt(k.split('-')[0], 10);
+            if (typeof obj[k] !== 'number' || isNaN(y) || y < 2000) delete obj[k];
+        }
+        for (const k in obj) _dayCountCache.set(k, obj[k]);
         _dayCountLoaded = true; // 仅解析成功才置位；失败则允许下次重试，且不污染内存
     } catch {
         // 解析失败(如 localStorage 偶发损坏)：不置 _dayCountLoaded，下次 openPanel 可重试；
@@ -1425,7 +1438,11 @@ function saveDayCount(map: Map<string, number>): void {
         const prevRaw = localStorage.getItem(_DAYCOUNT_LS_KEY);
         const prev: Record<string, number> = prevRaw ? (JSON.parse(prevRaw) as Record<string, number>) : {};
         const obj: Record<string, number> = {};
-        for (const k in prev) if (typeof prev[k] === 'number') obj[k] = prev[k];
+        // [lc-1075] 存储侧同款消毒：早于 2000 年的旧桶不再回写，让历史台账自愈
+        for (const k in prev) {
+            const y = parseInt(k.split('-')[0], 10);
+            if (typeof prev[k] === 'number' && !isNaN(y) && y >= 2000) obj[k] = prev[k];
+        }
         map.forEach((v, k) => { obj[k] = Math.max(obj[k] || 0, v); });
         localStorage.setItem(_DAYCOUNT_LS_KEY, JSON.stringify(obj));
     } catch { /* 配额/隐私模式失败时忽略 */ }
@@ -1770,6 +1787,10 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             if (lp) {
                 if (typeof lp === 'number') lpMs = lp < 1e12 ? lp * 1000 : lp;
                 else { const p = Date.parse(lp); if (!Number.isNaN(p)) lpMs = p; }
+                // [lc-1075] 数据修正：早于 2000-01-01 的时间戳是 NAS 端脏数据（epoch 0/占位值、
+                //   "1970-01-01" 字符串），会以「1970 年观看」污染最近观看列/热力图范围/年度报告
+                //   年份 → 视为未记录（条目仍保留，仅时间缺失）。
+                if (lpMs < MIN_VALID_TS) lpMs = 0;
             }
             return {
             guid: it.guid || '',
@@ -1896,21 +1917,32 @@ function formatDate(ts: string | number): string {
 
 /** 解析播放会话日期字符串为时间戳（ms）。
  *  支持：ISO 字符串（飞牛/真实，含完整年份）与 SAMPLE 的 "MM-DD HH:MM"（缺年份→用当前年）。 */
+// [lc-1075] 数据修正基准：早于此的时间戳(2000-01-01T00:00:00Z)视为 NAS 端脏数据
+//   （epoch 0/秒级占位值、"1970-01-01" 字符串），展示与聚合时一律视为「未记录时间」。
+export const MIN_VALID_TS = 946684800000;
+
 function parseSessionDate(s: string): number {
     if (!s) return 0;
-    // 先尝试标准 ISO / 完整日期解析
+    // ① 优先解析本项目 formatDate 产出的 "MM-DD HH:MM"（无年份 → 补当前年）。
+    //    [lc-1075] 必须先于 Date.parse：Chromium 对 "08-21 22:14" 会宽容解析成 2001 年
+    //    （>2000 被直采），导致真实会话全部错记到 2001 年。^ 锚定 + 月/日范围校验：
+    //    旧写法无锚点，"1970-01-01 08:00" 会命中 "70-01-01"（m1=70）→ setMonth(69) 溢出。
+    const m = s.match(/^(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
+    if (m) {
+        const mo = parseInt(m[1], 10), da = parseInt(m[2], 10);
+        if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+            const d = new Date();
+            d.setMonth(mo - 1, da);
+            d.setHours(parseInt(m[3], 10), parseInt(m[4], 10), 0, 0);
+            return d.getTime();
+        }
+        return 0;
+    }
+    // ② 完整日期（含年份）直解
     const direct = Date.parse(s);
     if (!Number.isNaN(direct)) {
         const d = new Date(direct);
         if (d.getFullYear() > 2000) return direct; // 年份合理，直接采用
-    }
-    // 退路：解析 "MM-DD HH:MM"（SAMPLE 格式，补当前年）
-    const m = s.match(/(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
-    if (m) {
-        const d = new Date();
-        d.setMonth(parseInt(m[1], 10) - 1, parseInt(m[2], 10));
-        d.setHours(parseInt(m[3], 10), parseInt(m[4], 10), 0, 0);
-        return d.getTime();
     }
     return 0;
 }
@@ -1976,27 +2008,28 @@ function toast(msg: string): void {
  *  只是涂的从实心换成了玻璃材质）。多处调用（开面板 / 显示后 rAF / 数据加载后）幂等。 */
 function paintBg(root: HTMLElement): void {
     const light = root.classList.contains('light');
-    const tint = light ? 'rgba(246,246,251,.66)' : 'rgba(15,15,20,.78)';
+    // [lc-1077] 刻意不再挂 backdrop-filter：透明窗口 + VizDisplayCompositor 被禁用（可选软件
+    //   渲染）下，全屏 blur 层在滚动/重绘时反复做 42px 软件模糊 = 面板卡死无法滑动（用户报障，
+    //   与年度报告浮层 blur(10) 卡死同类）。 tint 不透明度上调补偿，视觉几乎无差。
+    const tint = light ? 'rgba(246,246,251,.82)' : 'rgba(15,15,20,.88)';
     const sheen1 = light ? '.10' : '.05';
     const sheen2 = light ? '.028' : '.012';
-    const blur = light ? 'blur(42px) saturate(150%)' : 'blur(42px) saturate(150%) brightness(.82)';
     root.style.setProperty('background',
         `linear-gradient(165deg,rgba(255,255,255,${sheen1}) 0%,rgba(255,255,255,${sheen2}) 100%),${tint}`, 'important');
     root.style.setProperty('background-color', tint, 'important');
-    root.style.setProperty('backdrop-filter', blur, 'important');
-    root.style.setProperty('-webkit-backdrop-filter', blur, 'important');
+    root.style.setProperty('backdrop-filter', 'none', 'important');
+    root.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
 }
 
 // 玻璃 UI 可能在面板显示后异步重注入 body>div{background:transparent!important}，
-// 一次性重涂会被覆盖 → 偶发透明。故在面板可见期间用 rAF 循环持续兜底重涂，关闭时取消。
-let _paintRAF = 0;
-function paintLoop(root: HTMLElement): void {
-    paintBg(root);
-    _paintRAF = requestAnimationFrame(() => paintLoop(root));
-}
+// 一次性重涂理论上会被覆盖 —— 但 paintBg 是行内 !important，优先级高于任何样式表规则，
+// 不会被覆盖。旧版为此用 rAF 每帧重涂整面板（60 次/秒 setProperty + 全屏 blur 常驻刷新），
+// 实测把页面拖成卡死（lc-1076 用户报障），已改为 openPanel 里的 0.3/1/2.5s 定点补涂。
 
 function openPanel(): void {
     try {
+        // [lc-1077] 性能打点：面板卡顿可直接在诊断控制台看到各阶段耗时
+        const __t0 = performance.now();
         // 若面板元素曾被 fnOS 路由切换清掉（DOM 重建），重置标记让其重新创建
         if (!$(PANEL_ID)) panelBuilt = false;
         buildPanel();
@@ -2011,9 +2044,15 @@ function openPanel(): void {
         if (tb) tb.classList.toggle('light', light);
         // 右上角 6 按钮 = body 级独立浮层（buildTopBtns/showTopBtns），
         // 事件处理在 window 捕获阶段（bindWindowTopBtns），此处仅负责显示。
-        // 持续兜底：面板可见期间每帧重涂，彻底封死玻璃 UI 异步重注入导致的偶发透明
-        cancelAnimationFrame(_paintRAF);
-        _paintRAF = requestAnimationFrame(() => paintLoop(root));
+        // [lc-1076] 兜底重涂改为「一次 + 定点补涂」，绝不每帧循环：paintBg 是行内 !important，
+        //   本就压过 glassUI 样式表（透明化的根源只是样式表规则，行内不会输）。旧实现 rAF
+        //   每帧对整面板 setProperty + 全屏 blur(42px) 常驻刷新 → 60 次/秒样式重算（云母增强
+        //   下还要重算 glassUI 巨型 :has() 规则集）＝面板卡死、无法滑动（用户报障）。
+        paintBg(root);
+        [300, 1000, 2500].forEach((d) => window.setTimeout(() => {
+            const cur = $(PANEL_ID) as HTMLElement | null;
+            if (cur && cur.classList.contains('show')) paintBg(cur);
+        }, d));
         // 渲染前先恢复本地持久化数据（每日观看台账 + 评分/评语），避免热力图/评分因 fnOS 空白而丢失
         loadPersistedDayCount();
         loadPersistedRatings();
@@ -2027,6 +2066,7 @@ function openPanel(): void {
             renderWall();           // 即时显示上次的墙，不再等网络
             renderChart();
             updatePillCounts();
+            try { log.info(LOG, `[perf] 缓存首屏(curData=${curData.length}) 耗时 ${(performance.now() - __t0).toFixed(0)}ms`); } catch { /* ignore */ }
             const done = curData.filter((i) => i.prog >= 1).length;
             const partial = curData.length - done;
             const sub = $('wh-sub');
@@ -2036,6 +2076,7 @@ function openPanel(): void {
         }
         // 后台静默刷新（不阻塞首屏）：用缓存（force=false）加速；返回后更新并增量重绘
         loadWatchData(false).then((result) => {
+            try { log.info(LOG, `[perf] 数据加载 ${result.from} ${curData.length} 条，耗时 ${(performance.now() - __t0).toFixed(0)}ms`); } catch { /* ignore */ }
             saveCurData(); // 持久化本次真实数据，供下次秒开
             renderWall();
             renderChart(); // 真实数据到位后刷新活跃度（统计数字 + 柱状图均基于真实播放日期）
@@ -2072,9 +2113,6 @@ function openPanel(): void {
 function closePanel(goHome = false): void {
     const root = $(PANEL_ID);
     if (!root) return;
-    // 取消持续重涂循环，避免面板隐藏后仍空转
-    cancelAnimationFrame(_paintRAF);
-    _paintRAF = 0;
     // 收起整面板
     root.classList.remove('show');
     // 右上角 6 按钮浮层同步隐藏
@@ -2126,4 +2164,20 @@ export function getWatchReportData(): ShowItem[] {
 /** 会话时间字符串 → 时间戳（复用面板内解析规则，含 SAMPLE 格式兜底） */
 export function getSessionTs(s: string): number {
     return parseSessionDate(s);
+}
+/**
+ * [lc-1077] 导出每日观看台账（热力图同源数据），供年度报告在条目级会话缺失时回退估算。
+ * 键的月份是 0-based（与写入端 getMonth() 一致），m0 即原始 0 基月份。
+ */
+export function getWatchDayLedger(): Array<{ y: number; m0: number; d: number; count: number }> {
+    loadPersistedDayCount();
+    const out: Array<{ y: number; m0: number; d: number; count: number }> = [];
+    for (const [k, v] of _dayCountCache) {
+        if (!v || v <= 0) continue;
+        const [ys, ms, ds] = k.split('-');
+        const y = parseInt(ys, 10), m0 = parseInt(ms, 10), d = parseInt(ds, 10);
+        if (isNaN(y) || y < 2000 || isNaN(m0) || isNaN(d)) continue; // 脏桶不入
+        out.push({ y, m0, d, count: v });
+    }
+    return out;
 }

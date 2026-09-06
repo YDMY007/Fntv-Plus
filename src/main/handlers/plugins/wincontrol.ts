@@ -1,6 +1,8 @@
 import { getMainWindow } from '../../common/mainwin';
 import { setHalfScreen, setFullScreen } from '../../common/winctrl';
+import { handleExitIntent } from '../../common/exitFlow';
 import { registerHandler } from '../core/ipcHandler';
+import * as log from '../../../modules/logger';
 
 /**
  * 窗口控制插件
@@ -33,9 +35,15 @@ function handleMaximize(): void {
 }
 
 // 窗口关闭处理
+// [lc-1071] X 按钮不再走 win.close() → 'close' 事件 preventDefault 取消的路径：
+// transparent 无边框窗口在 Windows 上取消系统关闭会整窗闪一帧(用户报障「画面闪一下」)。
+// 直接按 exitMode 分流(询问弹窗 / 隐藏托盘 / 退出)，只有真正退出时才 quit。
 function handleClose(): void {
     const mainWindow = getMainWindow();
-    if (mainWindow) mainWindow.close();
+    if (!mainWindow) return;
+    handleExitIntent(mainWindow).catch((error: Error) => {
+        log.error('窗口关闭意图处理失败:', error);
+    });
 }
 
 // 注册窗口控制处理器

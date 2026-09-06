@@ -1,5 +1,5 @@
 import { registerHook, HookType } from '../core/hooks';
-import { getWatchReportData, getSessionTs } from './watchHistory';
+import { getWatchReportData, getSessionTs, getWatchDayLedger, MIN_VALID_TS } from './watchHistory';
 
 // watchReport.ts — [lc-1062] 年度观影报告（Spotify Wrapped 式翻页报告 + 导出长图）
 // ─────────────────────────────────────────────────────────────────────────────
@@ -29,6 +29,8 @@ interface YearReport {
     nightRatio: number;     // 0-1，00:00-05:00 开始的会话占比
     top: ReportItem[];
     items: ReportItem[];
+    ignored: number;        // [lc-1075] 被修正机制剔除的脏时间戳会话数（< 2000-01-01，如 1970）
+    synthetic?: boolean;    // [lc-1077] 条目级数据为零时由观影台账估算（每日记录 × 30 分钟）
 }
 
 /** 纯函数：按年聚合（独立导出便于验证） */
@@ -38,6 +40,7 @@ export function computeReport(items: { sessions?: [string, string][]; lastPlayed
     const daySet = new Map<string, number>(); // yyyy-mm → ms
     let totalMs = 0;
     let nightMs = 0;
+    let ignored = 0;
     const top: ReportItem[] = [];
 
     for (const it of items) {
@@ -45,8 +48,10 @@ export function computeReport(items: { sessions?: [string, string][]; lastPlayed
         if (Array.isArray(it.sessions) && it.sessions.length) {
             for (const ses of it.sessions) {
                 const s = tsOf(ses[0]);
+                // [lc-1075] 修正机制：早于 2000 年的时间戳是 NAS 端脏数据（epoch 占位 → "1970 年
+                //   观看"），不参与聚合也不进年份清单，计数后在报告封面明示。
+                if (!s || s < MIN_VALID_TS) { ignored++; continue; }
                 const e = tsOf(ses[1]) || s;
-                if (!s || s < 0) continue;
                 const d = new Date(s);
                 if (d.getFullYear() !== year) continue;
                 const dur = Math.max(0, (e > s ? e : s + 30 * 60000) - s);
@@ -58,7 +63,7 @@ export function computeReport(items: { sessions?: [string, string][]; lastPlayed
                 const dk = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
                 daySet.set(dk, (daySet.get(dk) || 0) + clamp);
             }
-        } else if (it.lastPlayedAt && new Date(it.lastPlayedAt).getFullYear() === year) {
+        } else if (it.lastPlayedAt && it.lastPlayedAt >= MIN_VALID_TS && new Date(it.lastPlayedAt).getFullYear() === year) {
             const fb = Math.min(it.totalRuntimeMs || 0, 12 * 3600000);
             if (fb > 0) {
                 itemMs += fb;
@@ -106,6 +111,7 @@ export function computeReport(items: { sessions?: [string, string][]; lastPlayed
         nightRatio,
         top: top.slice(0, 5),
         items: top,
+        ignored,
     };
 }
 
@@ -124,24 +130,28 @@ function fmtHours(ms: number): string {
 let _cur: YearReport | null = null;
 
 // ── 入口按钮注入 ──
+// [lc-1073] 入口迁到右上角按钮列 #fntv-wh-topbtns 最左侧（用户要求：旧位置在面板标题旁
+//   尺寸突兀且遮挡内容）。几何对齐列内 pill（22px 圆角 / 9×16 padding），去掉大发光阴影。
+//   data-self-handled 让 watchHistory.handleTopBtnAction 放行事件，由本按钮自带 click 监听处理。
 function ensureButton(): void {
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
     if (document.getElementById(BTN_ID)) return;
-    const bar = panel.querySelector('.wh-topbar .wh-tb-left') as HTMLElement | null;
+    const bar = document.getElementById('fntv-wh-topbtns');
     if (!bar) return;
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.textContent = '✨ 年度报告';
     btn.title = '生成本年度观影报告';
-    btn.style.cssText = 'margin-left:14px;padding:8px 16px;border:none;border-radius:10px;cursor:pointer;'
-        + 'font-size:13px;font-weight:700;color:#fff;letter-spacing:.5px;'
-        + 'background:' + ACCENT_GRAD + ';box-shadow:0 6px 18px rgba(109,127,242,.4);'
-        + 'transition:transform .15s ease, box-shadow .15s ease;';
-    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-2px)'; });
-    btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
+    btn.setAttribute('data-self-handled', '1');
+    btn.style.cssText = 'padding:9px 16px;border:none;border-radius:22px;cursor:pointer;'
+        + 'font-size:14px;font-weight:600;color:#fff;letter-spacing:.5px;'
+        + 'background:' + ACCENT_GRAD + ';'
+        + 'transition:transform .15s ease, filter .15s ease;';
+    btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-2px)'; btn.style.filter = 'brightness(1.08)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.transform = ''; btn.style.filter = ''; });
     btn.addEventListener('click', (e) => { e.stopPropagation(); openReport(); });
-    bar.appendChild(btn);
+    bar.prepend(btn);
 }
 
 // ── 报告计算入口 ──
@@ -155,21 +165,71 @@ function buildForYear(year: number): YearReport {
         myRating: it.myRating,
         type: it.type,
     }));
-    return computeReport(items, year, getSessionTs);
+    const r = computeReport(items, year, getSessionTs);
+    // [lc-1077] 台账回退：热力图与报告的数据源对齐。热力图统计的是「每日观看台账」
+    //   （本地播放追踪/历史累积都写入），而条目级会话在飞牛侧 last_played 脏数据被
+    //   修正为「未记录」后为空 → 报告全 0 但热力图有记录（用户报障）。条目级统计为零时，
+    //   按台账估算：每日记录数 × 30 分钟（与会话缺省时长口径一致），封面明示。
+    if (r.totalMs <= 0) return synthesizeFromLedger(year, r);
+    return r;
+}
+
+/** [lc-1077] 台账估算：把某年的每日观看台账折算为报告（count × 30 分钟/次） */
+function synthesizeFromLedger(year: number, base: YearReport): YearReport {
+    const THIRTY_MIN = 1800000;
+    const monthMs = new Array(12).fill(0);
+    const days = new Set<string>();
+    let totalMs = 0;
+    for (const b of getWatchDayLedger()) {
+        if (b.y !== year) continue;
+        const ms = b.count * THIRTY_MIN;
+        totalMs += ms;
+        monthMs[b.m0] += ms;
+        days.add(`${b.y}-${b.m0}-${b.d}`);
+    }
+    if (totalMs <= 0) return base;
+    // 最长连续天数（按有记录的日历日，复用条目级同款算法）
+    const sorted = Array.from(days).sort();
+    let maxStreak = 0, run = 0, prev = '';
+    for (const dk of sorted) {
+        if (prev) {
+            const [py, pm, pd] = prev.split('-').map(Number);
+            const [cy, cm, cd] = dk.split('-').map(Number);
+            const gap = Math.round((new Date(cy, cm, cd).getTime() - new Date(py, pm, pd).getTime()) / 86400000);
+            run = gap === 1 ? run + 1 : 1;
+        } else run = 1;
+        if (run > maxStreak) maxStreak = run;
+        prev = dk;
+    }
+    return {
+        ...base,
+        totalMs,
+        monthMs,
+        activeDays: days.size,
+        maxStreak,
+        top: [],
+        items: [],
+        synthetic: true,
+    };
 }
 
 function openReport(): void {
     if (document.getElementById(OV_ID)) return;
     const all = getWatchReportData();
     // 可选年份 = 数据里出现过的年份(降序)，默认当前年
+    //   [lc-1075] 过修正基准的年份才入选，脏数据(1970 等)不再出现在年份下拉里
+    //   [lc-1077] 并入观影台账的年份（与热力图同源，台账-only 的年份也能选）
     const years = new Set<number>([new Date().getFullYear()]);
     for (const it of all) {
         const t = lastPlayedOf(it);
-        if (t) years.add(new Date(t).getFullYear());
+        if (t && t >= MIN_VALID_TS) years.add(new Date(t).getFullYear());
         for (const ses of it.sessions || []) {
             const ts = getSessionTs(ses[0]);
-            if (ts) years.add(new Date(ts).getFullYear());
+            if (ts && ts >= MIN_VALID_TS) years.add(new Date(ts).getFullYear());
         }
+    }
+    for (const b of getWatchDayLedger()) {
+        if (b.y >= 2000 && b.y <= new Date().getFullYear()) years.add(b.y);
     }
     const yearList = Array.from(years).sort((a, b) => b - a);
     // 默认选「有数据的最近一年」——当前年没看东西时不该展示全 0 封面
@@ -179,8 +239,15 @@ function openReport(): void {
     const ov = document.createElement('div');
     ov.id = OV_ID;
     ov.setAttribute('data-fnos-ui', '1');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483602;background:rgba(12,14,22,.86);'
-        + 'backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);'
+    // [lc-1073] z-index 提到 #fntv-wh-topbtns(2147483641) 之上：报告打开时右上角按钮列
+    //   不应浮在报告控制行上方。仍低于 dialogUI(2147483647)。
+    //   刻意不挂 backdrop-filter：透明窗口 + --disable-features=VizDisplayCompositor（可选
+    //   软件渲染）下，全屏 blur 层是合成器卡死的高发源（用户报障「点击后页面卡死」）；
+    //   底色 .86 不透明，blur 贡献本就不可感知。
+    //   [lc-1075] background 必须 !important —— 云母增强(glassUI ①b)的
+    //   body>div {background:transparent!important} 会把行内遮罩压成全透明：底部控制行
+    //   直接浮在页面上，半透明白底按钮的文字没法分辨（用户报障）。控制行按钮同样加固。
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483642;background:rgba(12,14,22,.86)!important;'
         + 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;'
         + 'font-family:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,sans-serif;';
 
@@ -190,14 +257,14 @@ function openReport(): void {
         + 'background:' + CARD_BG + ';color:' + INK + ';box-shadow:0 24px 80px rgba(20,26,60,.5), inset 0 0 0 1px rgba(255,255,255,.6);';
     ov.appendChild(stage);
 
-    // 翻页控制行
+    // 翻页控制行（[lc-1075] 各按钮底色 !important 加固：不依赖遮罩层存活性，任何样式表规则都剥不掉）
     const ctrl = document.createElement('div');
     ctrl.style.cssText = 'display:flex;align-items:center;gap:14px;';
     const mkNav = (label: string, dir: number) => {
         const b = document.createElement('button');
         b.textContent = label;
         b.style.cssText = 'width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.3);cursor:pointer;'
-            + 'background:rgba(255,255,255,.12);color:#fff;font-size:16px;font-weight:700;';
+            + 'background:rgba(48,52,74,.92)!important;color:#fff;font-size:16px;font-weight:700;';
         b.addEventListener('click', () => turn(dir));
         return b;
     };
@@ -206,7 +273,8 @@ function openReport(): void {
     dots.style.cssText = 'display:flex;gap:8px;align-items:center;';
     // 年份切换
     const yearSel = document.createElement('select');
-    yearSel.style.cssText = 'margin-right:6px;padding:6px 10px;border-radius:9px;border:none;background:rgba(255,255,255,.14);color:#fff;font-size:13px;font-weight:700;outline:none;cursor:pointer;';
+    yearSel.style.cssText = 'margin-right:6px;padding:6px 10px;border-radius:9px;border:none;'
+        + 'background:rgba(48,52,74,.92)!important;color:#fff;font-size:13px;font-weight:700;outline:none;cursor:pointer;';
     for (const y of yearList) {
         const op = document.createElement('option');
         op.value = String(y);
@@ -227,7 +295,7 @@ function openReport(): void {
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '✕ 关闭';
     closeBtn.style.cssText = 'padding:8px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.3);cursor:pointer;'
-        + 'background:rgba(255,255,255,.12);color:#fff;font-size:13px;font-weight:600;';
+        + 'background:rgba(48,52,74,.92)!important;color:#fff;font-size:13px;font-weight:600;';
     closeBtn.addEventListener('click', () => { ov.remove(); document.removeEventListener('keydown', onKey, true); });
     ctrl.appendChild(closeBtn);
     ov.appendChild(ctrl);
@@ -302,6 +370,8 @@ function pageHtml(r: YearReport, page: number): string {
                 <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB};">天有观影</div></div>
                 <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB};">部看完</div></div>
             </div>
+            ${r.ignored > 0 ? `<div style="font-size:11px;color:#b06a3a;background:rgba(176,106,58,.10);border:1px solid rgba(176,106,58,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">🛠 已自动修正 ${r.ignored} 条异常时间记录（播放时间早于 2000 年的脏数据，不计入统计）</div>` : ''}
+            ${r.synthetic ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 飞牛侧播放时间缺失，本报告按观影台账估算（每日记录 × 30 分钟）</div>` : ''}
             <div style="position:absolute;bottom:20px;font-size:10.5px;color:#8a93ad;">← → 翻页 · Esc 关闭 · 可导出长图</div>
         </div>`;
     }
@@ -359,7 +429,7 @@ function pageHtml(r: YearReport, page: number): string {
         return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head('PAGE 4 · 年度片单')}
             <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 18px;">你的年度 TOP5</div>
-            ${rows || '<div style="color:#5a6480;">今年暂无观看时长数据</div>'}
+            ${rows || (r.synthetic ? '<div style="color:#5a6480;line-height:1.8;">台账估算模式：飞牛侧未记录单部作品的播放时长，<br>无法生成年度片单。修好时间数据后即可展示。</div>' : '<div style="color:#5a6480;">今年暂无观看时长数据</div>')}
         </div>`;
     }
     const doneRate = r.titles ? Math.round((r.finished / r.titles) * 100) : 0;
