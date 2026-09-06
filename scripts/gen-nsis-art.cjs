@@ -18,47 +18,106 @@ const Zlib = require('zlib');
 const ROOT = Path.resolve(__dirname, '..');
 const LOGO_URI = 'data:image/png;base64,' + Fs.readFileSync(Path.join(ROOT, 'build/iconfntv.png')).toString('base64');
 
-// ── 画稿(项目风格 token: 粉紫亚克力渐变 + 玻璃光斑 + 宫灯橙粉渐变点睛) ──
+// ── 画稿(lc-1073 液体玻璃 token: 深靛底+流动光斑+磨砂噪点+高光折射边+内发光) ──
 const sharedCss = `
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; overflow:hidden; }
+  body { font-family:"Microsoft YaHei","PingFang SC","SF Pro Display",sans-serif; overflow:hidden; }
   .stage { position:relative; overflow:hidden;
-    background:linear-gradient(165deg,#f7f9fd 0%,#eef1fa 52%,#e3e9f6 100%); }
-  .blob { position:absolute; border-radius:50%; filter:blur(2px); }
-  .b1 { background:radial-gradient(circle at 35% 35%, rgba(150,120,200,.42), rgba(150,120,200,0) 70%); }
-  .b2 { background:radial-gradient(circle at 60% 40%, rgba(148,196,236,.36), rgba(148,196,236,0) 70%); }
-  .b3 { background:radial-gradient(circle at 50% 45%, rgba(186,222,206,.30), rgba(186,222,206,0) 70%); }
-  .glass { position:absolute; border-radius:14px;
-    background:linear-gradient(165deg, rgba(255,255,255,.62), rgba(255,255,255,.28));
-    border:1px solid rgba(255,255,255,.65);
-    box-shadow:0 10px 28px rgba(91,60,160,.16), inset 0 1px 0 rgba(255,255,255,.9); }
-  .logo { object-fit:contain; }
-  .name { font-weight:800; color:#2f3550; letter-spacing:.4px; }
-  .sub  { font-weight:600; color:#5a6480; }
-  .orb  { border-radius:50%; background:linear-gradient(135deg,#6d7ff2,#8a63e8);
-          box-shadow:0 6px 18px rgba(109,127,242,.38), inset 0 1px 0 rgba(255,255,255,.5); }
+    background:
+      linear-gradient(160deg,
+        #0a0e27 0%,
+        #141842 18%,
+        #1a1545 35%,
+        #251b4a 52%,
+        #1e2856 72%,
+        #162240 88%,
+        #0d152e 100%
+      ); }
+  /* 流动光斑 — 大面积、高饱和、强模糊，模拟液体折射 */
+  .blob { position:absolute; border-radius:50%; filter:blur(3px); }
+  .b1 { background:radial-gradient(circle at 30% 30%,
+      rgba(99,102,241,.55) 0%, rgba(139,92,246,.40) 35%, rgba(168,85,247,0) 72%);
+      width:180px; height:180px; }
+  .b2 { background:radial-gradient(circle at 65% 38%,
+      rgba(56,189,248,.45) 0%, rgba(34,211,238,.28) 40%, rgba(6,182,212,0) 75%);
+      width:160px; height:160px; }
+  .b3 { background:radial-gradient(circle at 45% 65%,
+      rgba(167,139,250,.38) 0%, rgba(192,132,252,.22) 40%, rgba(216,180,254,0) 72%);
+      width:170px; height:170px; }
+  .b4 { background:radial-gradient(circle at 75% 75%,
+      rgba(99,102,241,.32) 0%, rgba(129,140,248,.16) 45%, rgba(165,180,252,0) 75%);
+      width:130px; height:130px; }
+  /* 噪点纹理层 — 模拟磨砂玻璃颗粒感 */
+  .noise { position:absolute; inset:0; opacity:.055; pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    background-size:128px 128px; mix-blend-mode:overlay; }
+  /* 液体玻璃卡片 */
+  .glass { position:absolute; border-radius:16px;
+    background:
+      linear-gradient(165deg,
+        rgba(255,255,255,.22) 0%,
+        rgba(255,255,255,.13) 35%,
+        rgba(255,255,255,.07) 70%,
+        rgba(255,255,255,.04) 100%
+      );
+    border:1px solid rgba(255,255,255,.20);
+    border-top-color:rgba(255,255,255,.42);
+    border-left-color:rgba(255,255,255,.30);
+    box-shadow:
+      0 8px 32px rgba(0,0,0,.28),
+      0 2px 8px rgba(0,0,0,.18),
+      inset 0 1px 0 rgba(255,255,255,.28),
+      inset 0 -1px 0 rgba(0,0,0,.06);
+    backdrop-filter:saturate(180%) blur(1px); }
+  /* 高光折射条纹 */
+  .glass::before { content:''; position:absolute; top:0; left:12%; right:12%; height:1px;
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+    border-radius:1px; }
+  .glass::after { content:''; position:absolute; top:2px; left:22%; right:22%; height:.5px;
+    background:linear-gradient(90deg, transparent 20%, rgba(255,255,255,.25) 50%, transparent 80%); }
+  .logo { object-fit:contain; filter:brightness(1.02) drop-shadow(0 2px 8px rgba(99,102,241,.25)); }
+  .name { font-weight:800; color:#e8ecf7; letter-spacing:.5px;
+           text-shadow:0 1px 3px rgba(0,0,0,.35), 0 0 20px rgba(139,92,246,.18); }
+  .sub  { font-weight:500; color:rgba(200,208,230,.78);
+          text-shadow:0 1px 2px rgba(0,0,0,.25); line-height:1.55; }
+  /* 发光 orb — 液态核心 */
+  .orb  { border-radius:50%;
+    background:linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+    box-shadow:
+      0 4px 16px rgba(99,102,241,.50),
+      0 0 28px rgba(139,92,246,.30),
+      inset 0 1px 0 rgba(255,255,255,.35),
+      inset 0 -2px 6px rgba(0,0,0,.15); }
+  .badge { font-weight:800; letter-spacing:2.8px;
+           text-transform:uppercase;
+           text-shadow:0 0 12px currentColor, 0 1px 3px rgba(0,0,0,.4); }
+  .tag  { letter-spacing:1.4px; text-transform:uppercase;
+          text-shadow:0 1px 2px rgba(0,0,0,.35); }
 `;
 
 const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf-8"><style>
   ${sharedCss}
   .stage { width:164px; height:314px; }
-  .b1 { width:150px; height:150px; left:-42px; top:-36px; }
-  .b2 { width:130px; height:130px; right:-40px; top:64px; }
-  .b3 { width:150px; height:150px; left:-30px; bottom:44px; }
-  .glass { left:12px; right:12px; top:96px; height:118px; padding:14px 10px;
+  .b1 { left:-50px; top:-50px; }
+  .b2 { right:-48px; top:56px; }
+  .b3 { left:-38px; bottom:36px; }
+  .b4 { right:-28px; bottom:-20px; }
+  .glass { left:10px; right:10px; top:88px; height:126px; padding:14px 10px;
            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; }
-  .logo { width:118px; }
-  .name { font-size:14px; }
-  .sub { font-size:8.5px; text-align:center; line-height:1.5; }
-  .orb { width:30px; height:30px; position:absolute; right:16px; bottom:22px; }
-  .tag { position:absolute; left:0; right:0; bottom:12px; text-align:center;
-         font-size:8.5px; color:#8a93ad; letter-spacing:1.2px; }
-  .badge { position:absolute; top:34px; left:14px; right:14px; text-align:center;
-           font-size:10.5px; font-weight:800; color:${uninstall ? '#b3564d' : '#4a5fd0'}; letter-spacing:2.5px; }
+  .logo { width:110px; }
+  .name { font-size:13.5px; }
+  .sub { font-size:8px; text-align:center; }
+  .orb { width:28px; height:28px; position:absolute; right:14px; bottom:20px; }
+  .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
+         font-size:7.5px; color:rgba(160,170,200,.55); }
+  .badge { position:absolute; top:30px; left:12px; right:12px; text-align:center;
+           font-size:9.5px; color:${uninstall ? '#f87171' : '#818cf8'}; }
 </style></head><body>
   <div class="stage">
-    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
-    <div class="badge">${uninstall ? 'UNINSTALL' : 'SETUP WIZARD'}</div>
+    <div class="noise"></div>
+    <div class="blob b1"></div><div class="blob b2"></div>
+    <div class="blob b3"></div><div class="blob b4"></div>
+    <div class="badge">${uninstall ? 'UNINSTALL' : 'SETUP'}</div>
     <div class="glass">
       <img class="logo" src="${LOGO_URI}">
       <div class="name">Fntv-Plus</div>
@@ -71,14 +130,16 @@ const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="ut
 
 const headerHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   ${sharedCss}
-  .stage { width:150px; height:57px; display:flex; align-items:center; gap:7px; padding:0 8px; }
-  .b1 { width:90px; height:90px; left:52px; top:-30px; }
-  .b3 { width:90px; height:90px; left:-34px; top:6px; }
+  .stage { width:150px; height:57px; display:flex; align-items:center; gap:7px; padding:0 8px;
+    border-radius:0; }
+  .b1 { width:90px; height:90px; left:48px; top:-32px; filter:blur(2.5px); }
+  .b3 { width:80px; height:80px; left:-30px; top:4px; filter:blur(2.5px); }
   .logo { height:20px; }
   .name { font-size:10px; }
-  .sub { font-size:7px; }
+  .sub { font-size:6.5px; }
 </style></head><body>
   <div class="stage">
+    <div class="noise"></div>
     <div class="blob b1"></div><div class="blob b3"></div>
     <img class="logo" src="${LOGO_URI}">
     <div><div class="name">Fntv-Plus</div><div class="sub">飞牛影视增强</div></div>
@@ -89,25 +150,29 @@ const headerHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
 const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf-8"><style>
   ${sharedCss}
   .stage { width:480px; height:300px; }
-  .b1 { width:420px; height:420px; left:-120px; top:-110px; }
-  .b2 { width:360px; height:360px; right:-100px; top:40px; }
-  .b3 { width:400px; height:400px; right:60px; bottom:-160px; }
-  .glass { left:60px; right:60px; top:56px; height:188px; padding:22px 20px;
-           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:13px; }
-  .logo { width:210px; }
-  .name { font-size:21px; }
-  .sub { font-size:11.5px; text-align:center; line-height:1.6; }
-  .badge { position:absolute; top:26px; left:0; right:0; text-align:center;
-           font-size:12px; font-weight:800; color:${uninstall ? '#b3564d' : '#4a5fd0'}; letter-spacing:4px; }
-  .orb { width:44px; height:44px; position:absolute; left:50%; transform:translateX(-50%); bottom:34px; }
-  .orb::after { content:''; position:absolute; inset:-9px; border-radius:50%;
-                border:1.5px solid rgba(109,127,242,.35); border-radius:50%; }
-  .tag { position:absolute; left:0; right:0; bottom:12px; text-align:center;
-         font-size:9px; color:#8a93ad; letter-spacing:3px; }
+  .b1 { left:-130px; top:-120px; }
+  .b2 { right:-110px; top:36px; }
+  .b3 { right:50px; bottom:-170px; }
+  .b4 { left:60px; bottom:-90px; }
+  .glass { left:56px; right:56px; top:52px; height:192px; padding:24px 22px;
+           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+           border-radius:20px; }
+  .logo { width:200px; }
+  .name { font-size:23px; }
+  .sub { font-size:11.5px; text-align:center; line-height:1.65; }
+  .badge { position:absolute; top:24px; left:0; right:0; text-align:center;
+           font-size:12px; color:${uninstall ? '#f87171' : '#818cf8'}; letter-spacing:5px; }
+  .orb { width:46px; height:46px; position:absolute; left:50%; transform:translateX(-50%); bottom:32px; }
+  .orb::after { content:''; position:absolute; inset:-10px; border-radius:50%;
+                border:1.5px solid rgba(139,92,246,.30); }
+  .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
+         font-size:9px; color:rgba(160,170,200,.50); letter-spacing:3.5px; }
 </style></head><body>
   <div class="stage">
-    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
-    <div class="badge">${uninstall ? 'UNINSTALL WIZARD' : 'SETUP WIZARD'}</div>
+    <div class="noise"></div>
+    <div class="blob b1"></div><div class="blob b2"></div>
+    <div class="blob b3"></div><div class="blob b4"></div>
+    <div class="badge">${uninstall ? 'UNINSTALL' : 'SETUP'}</div>
     <div class="glass">
       <img class="logo" src="${LOGO_URI}">
       <div class="name">Fntv-Plus</div>
@@ -115,6 +180,22 @@ const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf
     </div>
     <div class="orb"></div>
     <div class="tag">FNTV-PLUS</div>
+  </div>
+</body></html>`;
+
+// [lc-1073] 安装页整页液体玻璃背景：490×327 满铺霜化底, 与侧栏/头图同主题(无文字, 控件浮于其上)
+const bgHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
+  ${sharedCss}
+  .stage { width:490px; height:327px; }
+  .b1 { left:-170px; top:-160px; }
+  .b2 { right:-160px; top:-70px; }
+  .b3 { left:-130px; bottom:-160px; }
+  .b4 { right:-110px; bottom:-130px; }
+</style></head><body>
+  <div class="stage">
+    <div class="noise"></div>
+    <div class="blob b1"></div><div class="blob b2"></div>
+    <div class="blob b3"></div><div class="blob b4"></div>
   </div>
 </body></html>`;
 
@@ -202,6 +283,7 @@ async function renderBmp(page, html, width, height, outFile) {
   await renderBmp(page, sidebarHtml(false), 164, 314, Path.join(outDir, 'installerSidebar.bmp'));
   await renderBmp(page, sidebarHtml(true), 164, 314, Path.join(outDir, 'uninstallerSidebar.bmp'));
   await renderBmp(page, headerHtml, 150, 57, Path.join(outDir, 'installerHeader.bmp'));
+  await renderBmp(page, bgHtml, 490, 327, Path.join(outDir, 'installerBackground.bmp'));
   await renderBmp(page, splashHtml(false), 480, 300, Path.join(outDir, 'installerSplash.bmp'));
   await renderBmp(page, splashHtml(true), 480, 300, Path.join(outDir, 'uninstallerSplash.bmp'));
   await browser.close();
