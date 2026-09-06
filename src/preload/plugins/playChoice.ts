@@ -75,7 +75,11 @@ export function createPlayModal(
         left: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
+        /* [lc-1077] 透明窗口(transparent:true)下, 半透明全屏遮罩在 add 的瞬间合成器会把
+           窗口默认白色画布透出(重绘帧里半透明层尚未画好, 底下是白 canvas 而非深色 fnOS 页)
+           → 整屏先闪白再"扣出"弹窗。改为不透明深靛渐变底, 彻底杜绝白透; 弹窗卡片仍保留玻璃质感。
+           不透明遮罩同时盖住"fnOS 跳到白底新视图"的可能白闪, 一举两得。 */
+        background: linear-gradient(160deg, #0e1330 0%, #080b1c 100%);
         z-index: 2147483600;
         display: flex;
         justify-content: center;
