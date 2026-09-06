@@ -89,7 +89,8 @@
             "!**/portable_config/mpv.log",
             "!**/portable_config/watch_later/**",
             "!**/portable_config/danmaku-history.json",
-            "!**/portable_config/mpv.conf.bak*"
+            "!**/portable_config/mpv.conf.bak*",
+            "!**/*.bak*"
           ]
         },
         {
@@ -144,7 +145,8 @@
             "!**/mpv.log",
             "!**/watch_later/**",
             "!**/danmaku-history.json",
-            "!**/mpv.conf.bak*"
+            "!**/mpv.conf.bak*",
+            "!**/*.bak*"
           ]
         },
         {
@@ -214,7 +216,8 @@
             "!**/mpv.log",
             "!**/watch_later/**",
             "!**/danmaku-history.json",
-            "!**/mpv.conf.bak*"
+            "!**/mpv.conf.bak*",
+            "!**/*.bak*"
           ]
         },
         {
@@ -252,5 +255,5 @@
       "resource/logos/**/*"
     ]
   },
-  "appDisplayVersion": "3.5.0"
+  "appDisplayVersion": "3.6.0"
 }
