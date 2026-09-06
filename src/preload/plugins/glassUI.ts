@@ -65,7 +65,10 @@ const DEF = {
 
 // [lc-1012] 视觉参数 schema：v2 材质重做后, 旧版保存的视觉参数(平涂白/彩虹流体/无噪点)
 // 会让新材质失效 → 首次升到 v2 时清空视觉键重derive新默认, 仅保留「启用」开关状态。
-const SCHEMA = 2;
+// [lc-1081] schema 升到 v3：3.6.0 出厂默认云母增强为开。存量用户即便之前关过
+// （localStorage 残留 fntvGlass.enabled="0"），更新后也强制回落到 DEF.enabled=true，
+// 规避「代码默认开却被旧 localStorage 值覆盖」的坑。一次性迁移，用户之后手动关会正常持久化。
+const SCHEMA = 3;
 const K_SCHEMA = 'fntvGlass.schema';
 function migrateSchema(): void {
   try {
