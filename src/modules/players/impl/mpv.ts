@@ -93,7 +93,10 @@ export class MpvPlayer extends BasePlayer {
             try {
                 const playerPath = this.config.playerPath;
                 if (playerPath && playerPath.length > 0) {
-                    const mpvConfigMod = require('../../handlers/plugins/mpvConfig');
+                    // [lc-1085] 路径必须是 ../../../main/: tsc 平铺编译(src→dest 同构),
+                    //   本文件产物在 dest/modules/players/impl/, 旧的 '../../handlers/...' 解析到
+                    //   dest/modules/handlers/(不存在) → 静默 catch, thumbfast.conf 从未写成功过。
+                    const mpvConfigMod = require('../../../main/handlers/plugins/mpvConfig');
                     mpvConfigMod.writeThumbfastConf(playerPath);
                     mpvConfigMod.ensureStatsKeyBinding();
                 }
@@ -296,7 +299,10 @@ export class MpvPlayer extends BasePlayer {
     private scrobbleLastAt = 0;
     private scrobbleLastPct = -1;
     private scrobbleLazy(): { scrobble: (a: 'start' | 'pause' | 'stop', g: string, p: number) => Promise<{ ok: boolean }> } | null {
-        try { return require('../../handlers/plugins/traktSync'); } catch { return null; }
+        // [lc-1085] 同 thumbfast: 旧路径 '../../handlers/...' 在产物里指向不存在的 dest/modules/handlers/,
+        //   catch 又直接返回 null → Trakt scrobble 静默失效。改对路径 + 失败留日志。
+        try { return require('../../../main/handlers/plugins/traktSync'); }
+        catch (e: any) { log.warn('加载 traktSync 失败:', e && e.message); return null; }
     }
     private setupEventListeners(): void {
         if (!this.mpvInstance) return;
