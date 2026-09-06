@@ -54,6 +54,11 @@
 </div>
 
 <div align="center">
+  <img src="resource/docs/Actor.png" width="100%" alt="">
+  <p><em>图：支持一键查询参演作品（是否入库检测）</em></p>
+</div>
+
+<div align="center">
   <img src="resource/docs/Watchhistory.png" width="100%" alt="">
   <p><em>图：本地化记录观影历史</em></p>
 </div>
@@ -366,3 +371,15 @@ npm run build:linux   # Linux
 
 - **原项目版权**：Copyright (c) 原作者 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron)
 - **本仓库修改署名**：YDMY007（Fork 修改版，含冷调渐变玻璃 / 云母增强界面 / 沉浸式剧集详情页 / 3D 首页轮播 / 侧栏设置面板 / 豆瓣 · Bangumi · Trakt 同步 / B 站弹幕 / 手柄控制 / 观影记录 / 年度观影报告等增强）
+
+---
+
+## 🌟 Star 趋势
+
+> 下图由 [Star History](https://www.star-history.com/) 动态生成，每次打开 README 都会拉取仓库最新 star 数据实时渲染，无需手动更新：
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date&theme=dark" />
+  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
+</picture>
