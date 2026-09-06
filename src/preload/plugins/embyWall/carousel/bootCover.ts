@@ -11,7 +11,7 @@
 //   离开首页路径(SPA 导航) / 12s 硬兜底(绝不长遮)。
 // ─────────────────────────────────────────────────────────────────────────────
 import { S } from '../state';
-import { log } from '../log';
+import { clog } from '../log';
 
 const STYLE_ID = 'fntv-boot-style';
 const HIDE_ID = 'fntv-boot-hide';
@@ -79,7 +79,7 @@ function lift(reason: string): void {
     c.style.opacity = '0';
     window.setTimeout(() => { if (c.parentNode) c.parentNode.removeChild(c); }, FADE_MS + 80);
   }
-  log('[lc-1084] boot cover lifted:', reason);
+  clog('[lc-1084] boot cover lifted:', reason);
 }
 
 /** 入口 init 调用(仅首页路径生效)：铺骨架+隐藏原生 #root，直到轮播就绪/离开首页/硬兜底。 */
@@ -99,5 +99,5 @@ export function armBootCover(): void {
     if (S.carouselLoadedButNone) { lift('loaded-but-none'); return; }
     if (Date.now() - t0 > HARD_LIFT_MS) { lift('hard-timeout'); return; }
   }, POLL_MS);
-  log('[lc-1084] boot cover armed (hide #root + skeleton overlay)');
+  clog('[lc-1084] boot cover armed (hide #root + skeleton overlay)');
 }

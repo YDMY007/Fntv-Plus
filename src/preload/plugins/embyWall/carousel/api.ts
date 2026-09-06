@@ -6,7 +6,7 @@
 //   接线由入口（组合根）完成：setOnShowsReady(injectCarousel)。
 
 import { S, CAROUSEL_SCRAPE_CAP, CAROUSEL_TARGET } from '../state';
-import { log } from '../log';
+import { log, clog } from '../log';
 import { ensureLibraryIndex } from '../../hotUpdates';
 import { updateCarouselProgress, completeCarouselProgress } from './progress';
 import { scrapeLandscapeBackdrops, fetchItemDetail, resolveShowBackdrop } from './images';
@@ -236,13 +236,13 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
     //   且排序就是「最近更新在前」, 一次请求到手 → 不再依赖隐藏 iframe 滚 DOM(未识别项占前排时旧路径必抓空)。
     // 兜底1 = 旧的 /v/list/all 首屏 DOM 抓取(老版 fnOS 无此接口/签名失败时)。
     // 兜底2 = 当前首页已渲染 DOM 真实卡片（非硬编码）。绝对不用硬编码数据。
-    log('[lc-1083] fetching recognized shows via item/list API (primary source)...');
+    clog('[lc-1083] fetching recognized shows via item/list API (primary source)...');
     let newShows: any[] = await fetchRecognizedShows(base, CAROUSEL_SCRAPE_CAP);
     S.diagLastShows = newShows; // [DIAG] 供看门狗/异常日志定位
     if (newShows.length > 0) updateCarouselProgress(newShows.length);
 
     if (newShows.length === 0) {
-      log('[lc-1083] item/list 返回 0, 兜底1: scraping /v/list/all first screen...');
+      clog('[lc-1083] item/list 返回 0, 兜底1: scraping /v/list/all first screen...');
       newShows = await scrapeAllPageFirstScreen(18000, (n) => updateCarouselProgress(n));
       S.diagLastShows = newShows;
       log('[lc-561] all-page scrape returned', newShows.length, 'cards');
@@ -256,7 +256,7 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
       if (newShows.length > 0) updateCarouselProgress(newShows.length);
     }
 
-    log('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
+    clog('[lc-561] selected', newShows.length, 'carousel items, order:', newShows.map((s: any) => s.title?.substring(0, 8)).join(' → '));
 
     if (newShows.length > 0) {
       S.apiShows.length = 0;
@@ -316,28 +316,28 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         const landscapeCount = newShows.filter(isLandscapeBackdrop).length;
         if (landscapeCount === 0 && revealAttempts < 3) {
           revealAttempts++;
-          log('[lc-624] 无横版 backdrop 就绪(', landscapeCount, '/', newShows.length, '), 延迟 reveal (attempt', revealAttempts, ')');
+          clog('[lc-624] 无横版 backdrop 就绪(', landscapeCount, '/', newShows.length, '), 延迟 reveal (attempt', revealAttempts, ')');
           window.setTimeout(revealOnce, 1500);
           return;
         }
         if (landscapeCount === 0) {
-          log('[lc-624] 始终无横版 backdrop, 强制 reveal(将显示占位背景而非竖版海报)');
+          clog('[lc-624] 始终无横版 backdrop, 强制 reveal(将显示占位背景而非竖版海报)');
           // [DIAG] 列出缺横版 backdrop 的项（重点看是否都是 STRM/网盘导致海报出不来）
           const miss = newShows.filter((s: any) => !isLandscapeBackdrop(s)).map((s: any) => `${(s.title || '').substring(0, 12)}${s.strmTag ? '(STRM:' + s.strmTag + ')' : ''}`);
-          log('[DIAG] 无横版backdrop的项:', miss.length ? miss.join(', ') : '(无)');
+          clog('[DIAG] 无横版backdrop的项:', miss.length ? miss.join(', ') : '(无)');
         }
         S.carouselRevealed = true;
         S.carouselInited = false;
         if (onShowsReady) onShowsReady();
       };
       const revealTimer = setTimeout(() => {
-        log('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
+        clog('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
         completeCarouselProgress(revealOnce, 'revealTimer-8s-timeout');
       }, 8000);
       detailsPromise.then(async () => {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
-        log('[lc-569] item details enriched:', withData, '/', newShows.length);
+        clog('[lc-569] item details enriched:', withData, '/', newShows.length);
         // [lc-768] 兜底：STR/网盘海报加载不到 → 跳过并尝试后续候选，凑齐 CAROUSEL_TARGET 个横版；全失败则主页提示
         const pool = newShows.slice();
         const settled = await Promise.all(pool.map(async (s: any) => ({ s, blob: await resolveShowBackdrop(s, base) })));
@@ -348,9 +348,9 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
           else log('[lc-768] 跳过无法加载海报的项(疑似 STR/网盘):', (x.s.title || '').substring(0, 16), x.s.strmTag || '');
         }
         if (picked.length === 0) {
-          log('[lc-768] 全部候选项海报均无法加载(疑似均为 STR/网盘)，主页显示「暂未支持STRM海报」');
+          clog('[lc-768] 全部候选项海报均无法加载(疑似均为 STR/网盘)，主页显示「暂未支持STRM海报」');
         } else {
-          log('[lc-768] 轮播候选取齐', picked.length, '/', CAROUSEL_TARGET, '个可加载海报');
+          clog('[lc-768] 轮播候选取齐', picked.length, '/', CAROUSEL_TARGET, '个可加载海报');
         }
         S.carouselLoadedButNone = picked.length === 0;
         // [lc-768] 用.splice 原地替换(不重新赋值 const 数组)：清除旧候选，写入「可加载海报」的子集
@@ -366,10 +366,10 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
       });
     } else {
       // [lc-1083] 三源皆空: 必须收尾进度条(假进度封顶 99%, 不调用 complete 就永久卡 99%), 并写明原因
-      log('[lc-561] all sources returned 0 — leaving native media library visible');
+      clog('[lc-561] all sources returned 0 — leaving native media library visible');
       finishEmpty('媒体库暂无已识别的影视，或加载失败，请刷新重试', 'no-shows');
     }
-  } catch (e: any) { log('[lc-561] fetch error:', e); finishEmpty('加载失败，请刷新重试', 'fetch-error'); }
+  } catch (e: any) { clog('[lc-561] fetch error:', e); finishEmpty('加载失败，请刷新重试', 'fetch-error'); }
   S.apiLoading = false;
   return S.apiShows;
 }

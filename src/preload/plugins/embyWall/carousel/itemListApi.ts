@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
 import { CAROUSEL_SCRAPE_CAP } from '../state';
-import { log } from '../log';
+import { clog } from '../log';
 
 const ITEM_LIST_PATH = '/v/api/v1/item/list';
 
@@ -50,7 +50,7 @@ async function postItemList(base: string, body: Record<string, any>, timeoutMs: 
     });
     const json = await resp.json().catch(() => null);
     if (!json || json.code !== 0 || !json.data || !Array.isArray(json.data.list)) {
-      log('[lc-1083] item/list 无有效响应 code=', json && json.code, (json && (json.message || json.msg)) || '');
+      clog('[lc-1083] item/list 无有效响应 code=', json && json.code, (json && (json.message || json.msg)) || '');
       return null;
     }
     return json;
@@ -76,7 +76,7 @@ function mediaTypeOf(it: any): string {
 export async function fetchRecognizedShows(base: string, cap = CAROUSEL_SCRAPE_CAP, timeoutMs = 6000): Promise<any[]> {
   try {
     const json = await postItemList(base, itemListBody(1, cap * 2), timeoutMs);
-    if (!json) { log('[lc-1083] item/list 无有效响应 → 降级 DOM 抓取'); return []; }
+    if (!json) { clog('[lc-1083] item/list 无有效响应 → 降级 DOM 抓取'); return []; }
     const raw: any[] = json.data.list;
     const ordered = raw.filter((it) => it && it.poster).concat(raw.filter((it) => it && !it.poster));
     const shows = ordered.slice(0, cap).map((it: any) => {
@@ -99,10 +99,10 @@ export async function fetchRecognizedShows(base: string, cap = CAROUSEL_SCRAPE_C
         genres: [] as string[],
       };
     }).filter((s: any) => s.id && s.title);
-    log('[lc-1083] item/list 已识别作品', shows.length, '/', raw.length, '(total=', json.data.total, ') 顺序:', shows.map((s: any) => s.title.substring(0, 8)).join(' → '));
+    clog('[lc-1083] item/list 已识别作品', shows.length, '/', raw.length, '(total=', json.data.total, ') 顺序:', shows.map((s: any) => s.title.substring(0, 8)).join(' → '));
     return shows;
   } catch (e: any) {
-    log('[lc-1083] item/list 异常 → 降级 DOM 抓取:', String((e && e.message) || e).substring(0, 120));
+    clog('[lc-1083] item/list 异常 → 降级 DOM 抓取:', String((e && e.message) || e).substring(0, 120));
     return [];
   }
 }
@@ -138,10 +138,10 @@ export async function fetchLibraryItems(base: string, timeoutMs = 8000): Promise
       }
       if (list.length < LIB_PAGE_SIZE) break;   // 末页
     }
-    log('[lc-1087] item/list 库索引', out.length, '项 (pages=' + pages + ')');
+    clog('[lc-1087] item/list 库索引', out.length, '项 (pages=' + pages + ')');
     return out;
   } catch (e: any) {
-    log('[lc-1087] item/list 库索引异常(已收 ' + out.length + ' 项):', String((e && e.message) || e).substring(0, 120));
+    clog('[lc-1087] item/list 库索引异常(已收 ' + out.length + ' 项):', String((e && e.message) || e).substring(0, 120));
     return out;
   }
 }

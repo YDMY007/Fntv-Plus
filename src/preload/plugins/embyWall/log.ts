@@ -62,3 +62,25 @@ export function dlog(...a: any[]): void {
   if (!isSeasonLayoutDebugOn()) return;
   emitLog(LOG_TAG + '[LAYOUT] ' + a.join(' '));
 }
+
+/**
+ * [lc-1089] 轮播/库索引诊断日志开关（默认开启，localStorage `fntvCarouselDebug` 设 '0' 即静默）。
+ * 为什么必须绕过调试总开关（实测钉死，不是推测）：
+ *   ① release 包里 [EmbyWall] 渲染日志能进 app.log 的**唯一**通道是 main.ts 的 webContents
+ *      'console-message' 捕获（无条件 log.info 落盘，报告者 v3.6.0 日志里 25 条 [LAYOUT] 就是这么进去的）；
+ *   ② emitLog 的另一半 ipcRenderer.invoke('log-message') 对 [EmbyWall] 前缀消息**从不落盘**——
+ *      handleLogMessage 把字符串 'info' 原样传给 logC(level)，emit() 里 `level >= this.logLevel`
+ *      变成 'info' >= 1 → NaN 比较恒 false（dev 实测：console 格式 141 行 / IPC 格式 0 行）；
+ *   ③ 而 log() 在总开关关闭时连 console.log 都不发 → 装到用户机器上的包，轮播一条诊断都看不到，
+ *      「卡 99 / 白屏 / 无数据」这类只能靠用户复现的问题就永远缺证据。
+ * 所以关键诊断行走本函数：不受总开关影响，量控制在每次启动十几行，需要静音时设 '0' 即可。
+ */
+export function isCarouselDebugOn(): boolean {
+  try { return localStorage.getItem('fntvCarouselDebug') !== '0'; } catch (e) { return true; }
+}
+
+/** 轮播诊断日志：只看 fntvCarouselDebug，不看调试总开关。 */
+export function clog(...a: any[]): void {
+  if (!isCarouselDebugOn()) return;
+  emitLog(LOG_TAG + '[CAROUSEL] ' + a.join(' '));
+}

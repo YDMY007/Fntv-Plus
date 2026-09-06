@@ -2,7 +2,7 @@ import { S } from '../state';
 import { ensureStyle4Css } from './styles';
 import { getEffectiveDark } from '../theme';
 import { ipcRenderer } from 'electron';
-import { log } from '../log';
+import { log, clog } from '../log';
 
 // embyWall/carousel/progress.ts — 轮播骨架屏与加载进度：占位构建、进度条推进、完成收尾、STRM 不支持提示
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
@@ -338,7 +338,7 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
         S.diagStuckLogged = true;
         const landCnt = (S.apiShows || []).filter((s: any) => s && s.backdrop && !/poster-|poster\/|\/poster/i.test(s.backdrop)).length;
         const strmCnt = (S.apiShows || []).filter((s: any) => s && s.strmTag).length;
-        log('[DIAG][WATCHDOG] 轮播进度卡在 99% 已超 15s，completeCarouselProgress 未触发 → 轮播不会显示。' +
+        clog('[DIAG][WATCHDOG] 轮播进度卡在 99% 已超 15s，completeCarouselProgress 未触发 → 轮播不会显示。' +
             ` apiShows=${S.apiShows.length} 有横版backdrop=${landCnt} 疑似STRM项数=${strmCnt}` +
             ` diagLastShows=${S.diagLastShows.length}`);
       }
@@ -390,7 +390,7 @@ export function buildStrmUnsupportedTip(target: HTMLElement): void {
   container.appendChild(col);
   wrapper.appendChild(container);
   target.appendChild(wrapper);
-  log('[lc-768] 已渲染「暂未支持 STRm 海报」主页提示');
+  clog('[lc-768] 已渲染「暂未支持 STRm 海报」主页提示');
 }
 
 /** [lc-627] 数据加载完成: 进度条从当前值快速补到 100%(ease-out 缓动, 约 600ms),
@@ -399,7 +399,7 @@ export function buildStrmUnsupportedTip(target: HTMLElement): void {
  *  然后回调 onDone(注入轮播, 骨架淡出→轮播淡入) */
 export function completeCarouselProgress(onDone?: () => void, reason?: string): void {
   // [DIAG] 记录触发来源，便于排查「卡在 99%」到底哪条路径没到（revealTimer-8s-timeout / details-ready / details-error）
-  log('[DIAG] completeCarouselProgress 触发, reason=', reason || 'unknown', 'startPct=', Math.round(S.carouselProgressPct), 'apiShows=', S.apiShows.length);
+  clog('[DIAG] completeCarouselProgress 触发, reason=', reason || 'unknown', 'startPct=', Math.round(S.carouselProgressPct), 'apiShows=', S.apiShows.length);
   S.diagStuckTicks = 0; S.diagStuckLogged = false; // [DIAG] 看门狗复位：进度已推进到完成阶段
   if (S.carouselProgressTimer) { clearInterval(S.carouselProgressTimer); S.carouselProgressTimer = null; }
   const start = S.carouselProgressPct;
