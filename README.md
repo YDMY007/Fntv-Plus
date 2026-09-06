@@ -376,7 +376,7 @@ npm run build:linux   # Linux
 
 ## 🌟 Star 趋势
 
-> 下图由 [Star History](https://www.star-history.com/) 动态生成，每次打开 README 都会拉取仓库最新 star 数据实时渲染，无需手动更新：
+> 如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下，也感谢每一位点过 Star 的朋友！🙏：
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date&theme=dark" />
