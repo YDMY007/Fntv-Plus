@@ -547,16 +547,35 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
         }
     } 
     else if (type === 'Video' && parentGuid) {
-        // [lc-609] 个人视频(未刮削, 侧边栏「分类-其他」文件夹里的视频) → 单播, 不拉文件夹合集!
-        // 根因: 旧实现 getItemList(parent_guid) 拉取整个文件夹所有视频塞进播放列表,
-        // 但 getItemList 返回的 guid 与 getPlayInfo(id) 的 itemGuid 不一致 →
-        // currentIndex 匹配失败(-1) → 静默从列表第 1 个(上次播放的那个)开始 →
-        // 用户"点新的个人视频却播放的是上次的视频"。
-        // 个人视频彼此独立(非剧集), 点击哪个就播哪个: 直接单播, 与电影分支一致。
-        log.info('当前为其他视频(个人视频)，单播:', itemGuid);
-        const mediaItem = processSingleMedia(config, response.data);
-        playList.push(mediaItem);
-        log.info('添加个人视频到播放列表:', mediaItem);
+        // [lc-1095] 个人视频(未刮削, 侧边栏「分类-其他」文件夹里的视频) → 播放列表 = 同文件夹全部视频,
+        // 用户可在 MPV / PotPlayer 自己的播放列表面板里直接切集。
+        // lc-609 曾因「getItemList 返回的 guid 与 getPlayInfo 的 itemGuid 不一致 → currentIndex=-1 →
+        // 静默从列表第 1 个(上次播放的那个)开始」而回退成单播; 现网实测该前提不成立
+        // (NAS 上 Mix/Others 两个库的个人视频文件夹, exclude_folder=1 的列表 guid 与 getPlayInfo 逐一相符、
+        // findIndex 命中), 故恢复文件夹列表。防护保留在下面: 匹配不到就退回单播, 绝不静默播索引 0。
+        const folderResp = await fnapi.getItemList({
+            parent_guid: parentGuid,
+            exclude_folder: 1,          // 服务端已滤掉子文件夹(实测 44 项的文件夹返回 0 项)
+            sort_column: 'sort_title',
+            sort_type: 'ASC',
+        }).catch((e: any) => { log.warn('[个人视频] 拉取同文件夹列表异常，退回单播:', e?.message || e); return null; });
+        const folderItems: fn.PlayListItem[] = (folderResp && folderResp.success && folderResp.data && folderResp.data.list) || [];
+        // 只收可直接播的单文件叶子; Season/TV/Directory 是容器, 拿去铸直链必然失败
+        const siblings = folderItems.filter(it => it && it.guid && !CONTAINER_ITEM_TYPES.has(String(it.type || '')));
+
+        if (siblings.some(it => it.guid === itemGuid)) {
+            for (const sibling of siblings) {
+                const mediaItem = processEpisodeMedia(config, sibling);
+                playList.push(mediaItem);
+                log.info('添加同文件夹视频到播放列表:', mediaItem);
+            }
+            log.info(`[个人视频] 播放列表 = 同文件夹 ${playList.length} 个视频 (parent=${parentGuid}, 文件夹原始 ${folderItems.length} 项)`);
+        } else {
+            log.error(`[个人视频] 同文件夹 ${siblings.length} 项里没有 guid=${itemGuid}，退回单播以免播错内容`);
+            const mediaItem = processSingleMedia(config, response.data);
+            playList.push(mediaItem);
+            log.info('添加个人视频到播放列表:', mediaItem);
+        }
     }
     else {
         const mediaItem = processSingleMedia(config, response.data);
@@ -590,7 +609,7 @@ async function handlePlayMovie(event: IpcMainEvent, { id, token: reqToken, sourc
     }
 
     // 检查是否选择了特定的播放源索引
-    if (sourceIndex > 0) {
+    if (sourceIndex > 0 && currentIndex >= 0) {
         log.info(`使用指定的播放源索引: ${sourceIndex}`);
         // 修改播放列表中的源索引
         playList[currentIndex].playLink = getProxyUrl(config, playList[currentIndex].itemGuid, sourceIndex);
@@ -846,6 +865,14 @@ function prewarmPlayLink(playLink: string | undefined): void {
         log.debug(`[预热] 异常(不影响播放): ${e?.message || e}`);
     }
 }
+
+/**
+ * [lc-1095] item/list 里不能直接拿去铸播放直链的「容器类」条目类型。
+ * 实测这三种都会出现在 item/list 的返回里：Directory(exclude_folder=0 时某文件夹 44 项全是它)，
+ * Season / TV(Mix 库根目录同时混着刮削过的 TV/Movie 与个人视频文件夹)。
+ * 容器 guid 交给 Go 代理 playvideo 必然失败，故构造播放列表时排除。
+ */
+const CONTAINER_ITEM_TYPES = new Set(['Directory', 'Season', 'TV']);
 
 // 处理当前播放的媒体信息
 function processEpisodeMedia(cfg: fnConfig.Config, info: fn.PlayListItem): ply.PlayItem {
