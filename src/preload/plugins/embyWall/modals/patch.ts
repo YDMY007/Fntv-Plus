@@ -250,7 +250,14 @@ try {
       // 镜像必须立刻写: embyWall handle() 在本异步回填前就同步预读它(lc-1014)
       try { localStorage.setItem('fntv-perf-mode', s.perfModeEnabled ? '1' : '0'); } catch (_) {}
       const perf = s.perfModeEnabled;
-      whenRootReady(() => { document.documentElement.classList.toggle('fnos-perf', perf); });
+      whenRootReady(() => {
+        // [lc-1099] 仅类真变化时派发: glassUI 云母增强 / pageAnim 入场动画运行期同步接管
+        const had = document.documentElement.classList.contains('fnos-perf');
+        if (had !== perf) {
+          document.documentElement.classList.toggle('fnos-perf', perf);
+          try { window.dispatchEvent(new CustomEvent('fntv:perf-change', { detail: { on: perf } })); } catch (_) {}
+        }
+      });
     }
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) whenRootReady(() => applyLoginBgVar(s.loginBg));

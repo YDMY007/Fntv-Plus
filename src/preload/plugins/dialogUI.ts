@@ -70,7 +70,10 @@ function ensureDialogStyle(): void {
         //   面板只开在首页无此问题，弹窗必须有主题底色兜底。内联只钉 background-image(不占
         //   background-color)，让本规则以 !important 接管底色。
         + '#fnos-dialog-overlay [data-fnos-dialog-card="1"]{background-color:rgba(255,255,255,.32)!important}'
-        + 'html.dark #fnos-dialog-overlay [data-fnos-dialog-card="1"]{background-color:rgba(24,27,40,.45)!important}';
+        + 'html.dark #fnos-dialog-overlay [data-fnos-dialog-card="1"]{background-color:rgba(24,27,40,.45)!important}'
+        // [lc-1099] 性能模式实心底色: 关磨砂后半透 tint 会露清晰背景, 明暗双套实底接管
+        + 'html.fnos-perf #fnos-dialog-overlay [data-fnos-dialog-card="1"]{background-color:#fafbfe!important}'
+        + 'html.fnos-perf.dark #fnos-dialog-overlay [data-fnos-dialog-card="1"]{background-color:#1e2130!important}';
     (document.head || document.documentElement).appendChild(style);
 }
 

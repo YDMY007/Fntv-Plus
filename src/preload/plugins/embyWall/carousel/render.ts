@@ -284,6 +284,7 @@ export function injectCarousel(): void {
 
   // Slide track (纵向: 上→下切换)
   const track = document.createElement('div');
+  track.className = 'fntv-s1-track'; // [lc-1099] perf 总闸过渡例外选择器锚点(inline transition 非 important, 可被样式表压)
   track.style.cssText = 'display:flex;flex-direction:column;position:absolute;top:0;left:0;width:100%;height:100%;transition:transform .8s ease-in-out';
   track.style.transform = 'translateX(0)';
   container.appendChild(track);

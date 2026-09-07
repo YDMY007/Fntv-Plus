@@ -147,7 +147,11 @@ function modalIn(el: any): void {
  *  的场景下会漏抓→卡片永久卡在 CSS 预隐藏的 opacity:0(空白)。改为：任意 childList 变更都触发一次
  *  文档级 collect()(下一帧去抖)，无论网格与卡片同帧还是分批插入都能可靠捕获；看门狗去掉 fntvIn 闸门，
  *  只要 computed opacity 仍为 0 就强制显示，彻底杜绝空白。 */
+let observersInstalled = false;
+
 function setupObservers(): void {
+  // [lc-1099] 幂等: 运行期关 perf 会重入 initPageAnim, 防叠加多个 MutationObserver
+  if (observersInstalled) return;
   const a = getAnime();
   if (!a) {
     logger.warn('[pageAnim] window.anime 未就绪，跳过全局动画（降级为原生）');
@@ -235,6 +239,7 @@ function setupObservers(): void {
       }
     });
     obs.observe(document.body, { childList: true, subtree: true });
+    observersInstalled = true;
 
     // 首屏已存在的卡片：CSS 已预隐藏，首帧不会闪；首帧后立即收集(不必等 600ms)，避免首屏空白。
     requestAnimationFrame(collect);   // 首帧后立即补入场
@@ -256,11 +261,44 @@ function setupObservers(): void {
   }
 }
 
+let waapiGated = false;
+
+/** [lc-1099] 全局 WAAPI 闸: perf 下 Element.animate 立即跳终态(anime.js v4 底层即 WAAPI, CSS 闸管不到)。
+ *  每次调用动态查类, 关 perf 即恢复原生行为零残留; 返回真 Animation, 调用方 .finished/.cancel 语义完整。 */
+function installWaapiGate(): void {
+  if (waapiGated) return;
+  waapiGated = true;
+  const proto = Element.prototype as any;
+  const native: (...args: any[]) => Animation = proto.animate;
+  if (typeof native !== 'function') return;
+  proto.animate = function (this: Element, ...args: any[]): Animation {
+    const anim = native.apply(this, args as any);
+    if (!perfMode()) return anim;
+    try {
+      anim.finish(); // 有限动画: 跳终态并触发 finish/onfinish
+    } catch {
+      // iterations:Infinity 时 finish() 抛 InvalidStateError → 冻结帧0(装饰性循环首帧均为可见态)
+      try { anim.pause(); try { anim.currentTime = 0; } catch { /* ignore */ } } catch { /* ignore */ }
+    }
+    return anim;
+  };
+}
+
+let perfChangeHooked = false;
+
 function initPageAnim(): void {
+  installWaapiGate();
+  if (!perfChangeHooked) {
+    perfChangeHooked = true;
+    // [lc-1099] 运行期关 perf 不刷新也恢复入场动画(setupObservers 幂等守卫防叠加观察者)
+    window.addEventListener('fntv:perf-change', (e: any) => {
+      if (e.detail && e.detail.on === false) initPageAnim();
+    });
+  }
   // 仅在飞牛影视 TV 页注入全局动画；系统页/登录页跳过
   if (!isFntvTvPage()) return;
   // [lc-1014] 性能模式：不注入预隐藏 CSS（卡片首帧即见, 无 FOUC 风险）也不装观察者。
-  // 若用户随后关闭性能模式, 刷新页面后动画恢复（提示文案已注明）。
+  // [lc-1099] 运行期关闭性能模式时经 fntv:perf-change 重入本函数恢复, 不必等刷新。
   if (perfMode()) { logger.info('[pageAnim] 性能模式开启, 跳过动画安装'); return; }
   // 注入 CSS 预隐藏规则：首帧前把网格卡片置 0，根治「点开详情页闪一下」(FOUC)。作用域限定 .fnos-tv-page。
   injectHideCSS();

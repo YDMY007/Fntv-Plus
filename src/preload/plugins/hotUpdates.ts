@@ -801,6 +801,8 @@ function markInLibrary(root: ParentNode): void {
 // [lc-462] 卡片入场动画：用 anime.js 错落(stagger)浮现（opacity + 上移 + 轻微放大）。
 // window.anime 由 animeLib 注入；若未注入成功则静默降级（卡片照常显示）。
 function animateCardsIn(root: ParentNode): void {
+  // [lc-1099] 性能模式: 跳过入场动画(卡片无 opacity:0 初始态, 跳过即天然可见)
+  if (document.documentElement.classList.contains('fnos-perf')) return;
   const a = (window as any).anime;
   if (!a) return;
   try {
@@ -886,22 +888,25 @@ function buildPanel(): void {
   document.body.appendChild(panel);
 
   // [lc-462] 宫灯按钮入场动画：优先用 anime.js（带回弹），未注入则降级为原 CSS keyframe
-  const aTab = (window as any).anime;
-  if (aTab) {
-    aTab.animate(tab, {
-      opacity: [0, 1],
-      translateY: [-12, 0],
-      scale: [0.85, 1],
-      duration: 540,
-      ease: 'outBack',
-    });
-  } else {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        tab.classList.add('entering');
-        setTimeout(() => tab.classList.remove('entering'), 520);
+  // [lc-1099] 性能模式: 两分支都跳过(按钮无隐藏初始态, 跳过即天然可见)
+  if (!document.documentElement.classList.contains('fnos-perf')) {
+    const aTab = (window as any).anime;
+    if (aTab) {
+      aTab.animate(tab, {
+        opacity: [0, 1],
+        translateY: [-12, 0],
+        scale: [0.85, 1],
+        duration: 540,
+        ease: 'outBack',
       });
-    });
+    } else {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          tab.classList.add('entering');
+          setTimeout(() => tab.classList.remove('entering'), 520);
+        });
+      });
+    }
   }
 
   let loadedBg = false, loadedTm = false;

@@ -72,6 +72,9 @@ export function injectUiThemeStyle(): void {
   --fnos-ui-sec:#4a6fd4;
   --fnos-ui-muted:#565f7e;
   --fnos-ui-muted2:#737d99;
+  /* [lc-1103] 此前从未定义: embyWall.ts 有 39 处状态/说明行写 color:var(--fnos-ui-sub),
+     悬空变量 → IACVT → 整条 color 作废, 次级文字继承正文全亮色。别名到 muted, 深色档随之换值。 */
+  --fnos-ui-sub:var(--fnos-ui-muted);
   --fnos-ui-btn-text:#3d4a6e;
   --fnos-ui-btn-text2:#5a6480;
   --fnos-ui-border:rgba(90,120,200,.14);
@@ -136,6 +139,10 @@ export function injectUiThemeStyle(): void {
   --fnos-skel-bg:rgba(255,255,255,.45);
   --fnos-skel-shine:rgba(255,255,255,.8);
   --fnos-sidebar-btn-bg:rgba(52,64,100,.24);
+  /* [lc-1099] 抽屉面板/遮罩的 backdrop-filter 值走变量: applySidebarGlass 写的是 inline !important,
+     样式表闸压不住, 性能模式靠 html.fnos-perf 把变量解析成 none 在计算期关掉 */
+  --fnos-sb-bf:blur(56px) saturate(135%) brightness(1.02);
+  --fnos-drawer-bf:blur(8px) saturate(120%);
   --fnos-qr-bg:#fff;
   --fnos-modal-overlay:rgba(30,34,58,.42);
   --fnos-modal-inner-shadow:inset 0 1px 0 rgba(255,255,255,.6);
@@ -223,14 +230,40 @@ html.dark{
   --fnos-titlebar-hover-close-bg:rgba(232,17,35,.18);
   --fnos-titlebar-hover-close-icon:#ff4d5a;
 }
-/* [lc-1098] 性能模式(lc-1014 总闸关磨砂)下半透底会露出**清晰**壁纸 → 面板改不透明底。
-   置于 html.dark 之后: 二者特异度相同靠顺序取胜, 深色+性能模式也落到不透明这套。 */
+/* [lc-1098→lc-1099] 性能模式实底套: 半透底在关磨砂后会露清晰壁纸/糊底, 用户要求 perf 直接实心底色。
+   色相照抄 :root/html.dark 现值、alpha→1; 置于 html.dark 之后靠顺序取胜。
+   [lc-1099] --fnos-ui-panel-surface 是**唯一**经 background-image 消费的变量(embyWall.ts:1273
+   作为 sheen 光泽下的第二层), 纯色在 background-image 里非法(IACVT)会整条声明作废→面板全透,
+   故它必须保持**不透明渐变**; 其余变量走 background 简写, 纯色合法, 平为纯色无妨。 */
 html.fnos-perf{
-  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(250,251,254,.96),rgba(240,243,250,.97));
+  --fnos-ui-panel-surface:linear-gradient(165deg,#fafbfe,#f0f3fa);
+  --fnos-ui-panel-bg:#fafbfe;
+  --fnos-ui-input-bg:#ffffff;
+  --fnos-hero-container:#f4f6fc;
+  --fnos-hero-panel:#f7f9fd;
+  --fnos-hero-dots:#f8fafd;
+  --fnos-ui-veil:#f4f6fc;
+  --fnos-sidebar-bg:#f8fafd;
+  --fnos-sidebar-btn-bg:#c3c9d8;
+  --fnos-skel-bg:#eceff5;
+  --fnos-sb-bf:none;
+  --fnos-drawer-bf:none;
 }
 html.fnos-perf.dark{
-  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(30,33,48,.96),rgba(24,27,40,.97));
-}`;
+  --fnos-ui-panel-surface:linear-gradient(165deg,#1e2130,#181b28);
+  --fnos-ui-panel-bg:#1e2130;
+  --fnos-ui-input-bg:#343a54;
+  --fnos-hero-container:#24283a;
+  --fnos-hero-panel:#24283a;
+  --fnos-hero-dots:#3e445e;
+  --fnos-ui-veil:#1c202e;
+  --fnos-sidebar-bg:#24283a;
+  --fnos-sidebar-btn-bg:#2e3348;
+  --fnos-skel-bg:#3a3f52;
+}
+/* [lc-1103] 面板作用域必须再声明一次: 自定义属性值里的 var() 在**声明该属性的元素**上解析,
+   :root 那条拿到的是 html 的 muted, 吃不到 lc-1098 按半透/不透明两档在面板上重定义的 muted。 */
+#fnos-settings-panel{--fnos-ui-sub:var(--fnos-ui-muted)}`;
   (document.head || document.documentElement).appendChild(s);
 }
 

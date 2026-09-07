@@ -92,6 +92,13 @@ function getBool(k: string, d: boolean): boolean {
 }
 function setStr(k: string, v: string): void { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
 
+// [lc-1099] 性能模式总闸: perf 开启期间云母增强强制关闭(不写 K.enabled, 关 perf 即按原值恢复)。
+//   localStorage 镜像兜底启动竞态: embyWall handle() 同步预读挂类在前, 但本模块 OnReady 顺序不保证。
+function perfOn(): boolean {
+  if (document.documentElement.classList.contains('fnos-perf')) return true;
+  try { return localStorage.getItem('fntv-perf-mode') === '1'; } catch { return false; }
+}
+
 // ── 读取全部设置 ──
 interface GlassSettings {
   enabled: boolean; mode: string; tint: string; blur: number; frost: number; sat: number;
@@ -571,6 +578,8 @@ function debugTopAncestry(): void {
 function applyGlass(): void {
   try {
     const s = readSettings();
+    // [lc-1099] perf 开启期间强制关闭(摘属性即 GATE_CSS 全失配, 不与其高特异性 !important 对抗)
+    const effEnabled = s.enabled && !perfOn();
     const root = document.documentElement;
 
     // 写 CSS 变量
@@ -599,7 +608,7 @@ function applyGlass(): void {
     const isLight = detectLightMode();
     root.setAttribute('data-fntv-glass-is-light', isLight ? '1' : '0');
 
-    if (s.enabled) {
+    if (effEnabled) {
       root.setAttribute('data-fntv-glass', '');
       root.setAttribute('data-fntv-glass-mode', s.mode);
       // [lc-1023] 底座开关随背景源：fluid=html 铺不透明环境底(①c)，none=保留透桌面
@@ -610,7 +619,7 @@ function applyGlass(): void {
       if (s.particles) startParticles(); else stopParticles();
       // [lc-1026] 诊断锚点：真机再出「全透」时，控制台按此行确认 applyGlass 是否跑过、
       // 以及 html[data-fntv-glass-bg] 属性在不在——区分「状态没应用」与「合成层没画」。
-      console.info(LOG, 'applied: mode=' + s.mode + ' bg=' + s.bg + ' root[' + s.enabled + ']');
+      console.info(LOG, 'applied: mode=' + s.mode + ' bg=' + s.bg + ' root[' + effEnabled + ']');
       // JS 兜底：强制清空顶栏祖先样式（行内 > CSS !important，覆盖 mainwin.ts insertCSS）
       neutralizeTopBar();
       setTimeout(neutralizeTopBar, 800);
@@ -635,6 +644,14 @@ function applyGlass(): void {
 //  设置面板控件注入（非侵入：挂在 #fnos-appearance-ctrl 之后）
 // ════════════════════════════════════════════════════════════════
 let settingsInjected = false;
+
+// [lc-1099] 云母块提示文案: perf 开启期间云母被总闸强制关闭, 文案需解释开关为何「看似开着却没效果」
+let glassHintEl: HTMLElement | null = null;
+const GLASS_HINT_NORMAL = '提示：切换开启后，请回到首页点击左上角的「刷新」按钮刷新一遍，效果才能正确应用。';
+const GLASS_HINT_PERF = '性能模式已开启：云母增强暂时强制关闭（你的开关设置已保留），关闭性能模式后自动恢复。';
+function updatePerfHint(): void {
+  if (glassHintEl) glassHintEl.textContent = perfOn() ? GLASS_HINT_PERF : GLASS_HINT_NORMAL;
+}
 
 function mkToggle(): { wrap: HTMLElement; input: HTMLInputElement; track: HTMLElement; knob: HTMLElement } {
   const wrap = document.createElement('label');
@@ -780,13 +797,13 @@ function buildGlassControls(): HTMLElement {
   });
   block.appendChild(row('启用云母增强', tog.wrap));
 
-  // 启用提示标记（[用户要求] 开启后需回首页点左上角刷新按钮刷新一次才能正确应用）
-  const hint = document.createElement('div');
-  hint.style.cssText = 'margin:2px 0 6px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.55;'
+  // 启用提示标记（[用户要求] 开启后需回首页点左上角刷新按钮刷新一次才能正确应用；[lc-1099] perf 期间换强制关闭文案）
+  glassHintEl = document.createElement('div');
+  glassHintEl.style.cssText = 'margin:2px 0 6px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.55;'
     + 'color:var(--fnos-ui-warning,#b07a00);background:color-mix(in srgb, var(--fnos-ui-warning,#b07a00) 12%, transparent);'
     + 'border:1px solid color-mix(in srgb, var(--fnos-ui-warning,#b07a00) 30%, transparent);';
-  hint.textContent = '提示：切换开启后，请回到首页点击左上角的「刷新」按钮刷新一遍，效果才能正确应用。';
-  block.appendChild(hint);
+  updatePerfHint();
+  block.appendChild(glassHintEl);
 
   // [lc-818] 云母增强的具体组件设置默认折叠：点击折叠头展开/收起，默认收起
   const foldHead = document.createElement('div');
@@ -931,6 +948,9 @@ function handle(): void {
     } else {
       startKeepAlive();
     }
+
+    // [lc-1099] 运行期切换性能模式: 同步摘/挂云母属性+停/复粒子, 并刷新设置块提示文案
+    window.addEventListener('fntv:perf-change', () => { applyGlass(); updatePerfHint(); });
   } catch (err) {
     console.error(LOG, 'handle failed', err);
   }

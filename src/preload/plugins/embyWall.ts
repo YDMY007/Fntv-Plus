@@ -29,7 +29,7 @@ import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
 import { isFntvTvPage } from '../core/pageMode';
-import { getLang, setLang } from '../core/i18n'; // [lc-1065] 设置面板语言切换
+import { getLang, setLang, t } from '../core/i18n'; // [lc-1065] 设置面板语言切换
 // [lc-563] 轮播数据源 = 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex（稳定构建 97 项），取 Map 前 10 项 = 首屏 DOM 顺序 = 最近更新在前。
 // 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。绝不在隐藏 iframe 内强制要求 poster（fnOS 懒加载图永远没真实 URL → 跳过 → 0 个）。
 import { ensureLibraryIndex } from './hotUpdates';
@@ -77,7 +77,8 @@ function handle(): void {
     perfSt.id = 'fntv-perf-style';
     perfSt.textContent = [
       '/* [lc-1014] 性能模式总闸：低配机关掉一切合成器负担——动画/过渡压到近零, 磨砂全关 */',
-      'html.fnos-perf *{',
+      /* [lc-1099] 选择器必须带伪元素: * 不匹配 ::before/::after, 面板/弹窗光泽扫过与骨架 shimmer 全在伪元素上 */
+      'html.fnos-perf *,html.fnos-perf *::before,html.fnos-perf *::after{',
       '  animation-duration:.01ms!important;',
       '  animation-iteration-count:1!important;',
       '  animation-delay:0ms!important;',
@@ -86,12 +87,18 @@ function handle(): void {
       '  scroll-behavior:auto!important;',
       '}',
       /* body 亚克力(mainwin .fnos-tv-page body, 特异性 0,1,1)必须被稳定压过, 故单列高特异性规则 */
-      'html.fnos-perf *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+      'html.fnos-perf *,html.fnos-perf *::before,html.fnos-perf *::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
       'html.fnos-perf .fnos-tv-page body{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
       /* 详情页全屏底图: 保留低透画面但去掉 52px 大模糊(常驻合成器大头) */
       'html.fnos-perf .fnos-detail-backdrop__img{filter:none!important}',
       /* [lc-1017] 性能模式同时掐掉底图交叉淡换/整层淡出过渡, 保持零合成开销 */
       'html.fnos-perf .fnos-detail-backdrop__img,html.fnos-perf .fnos-detail-backdrop{transition:none!important}',
+      /* [lc-1099] 首页轮播保留基本切换动画: 四种样式的切换层开 .4s 过渡例外(特异度 0,2,1 压过总闸 0,1,1);
+         Ken Burns 底图缩放/信息区 stagger/进度回缩弹跳仍被总闸压掉(animationend 照触发, 状态机不卡死) */
+      'html.fnos-perf .fntv-s1-track,html.fnos-perf .fnos-slide-item,html.fnos-perf .fntv-s3-card,html.fnos-perf .fntv-s4-card{',
+      '  transition-duration:.4s!important;',
+      '  transition-delay:0ms!important;',
+      '}',
       /* [lc-1079] 性能模式关掉磨砂(backdrop-filter)后, 页面赖以可读的磨砂没了, 若底色本身透明就整页全透:
          玻璃「背景层:无」(data-fntv-glass-bg=none)时 body 被 glassUI 清成 transparent(透桌面语义),
          非玻璃低透明度(--fnos-alpha 拖到 0)时 body 也近乎透明 —— 二者在磨砂被关后都=全透。
@@ -507,10 +514,9 @@ function handle(): void {
       const panel = child;
       // Mica Acrylic: 粉紫暖调半透 + 高模糊 (透桌面真亚克力)
       panel.style.setProperty('background', 'var(--fnos-sidebar-bg)', 'important');
-      panel.style.setProperty('backdrop-filter',
-        'blur(56px) saturate(135%) brightness(1.02)', 'important');
-      panel.style.setProperty('-webkit-backdrop-filter',
-        'blur(56px) saturate(135%) brightness(1.02)', 'important');
+      // [lc-1099] blur 值走变量: inline !important 压过一切样式表, 性能模式只能靠 --fnos-sb-bf:none 在计算期关掉
+      panel.style.setProperty('backdrop-filter', 'var(--fnos-sb-bf)', 'important');
+      panel.style.setProperty('-webkit-backdrop-filter', 'var(--fnos-sb-bf)', 'important');
       panel.style.setProperty('border-right', 'var(--fnos-sidebar-border)', 'important');
       panel.style.setProperty('box-shadow', 'var(--fnos-sidebar-shadow)', 'important');
       // [v352] 关键: 面板内层嵌套容器常带白底(bg-white/bg-gray), 会盖住浅蓝 → 把它们全部透明化
@@ -534,8 +540,8 @@ function handle(): void {
     }
     // 遮罩层: 极淡暖灰雾感, 与 Mica 亚克力风格统一
     drawer.style.setProperty('background', 'rgba(200,195,210,.12)', 'important');
-    drawer.style.setProperty('backdrop-filter', 'blur(8px) saturate(120%)', 'important');
-      drawer.style.setProperty('-webkit-backdrop-filter', 'blur(8px) saturate(120%)', 'important');
+    drawer.style.setProperty('backdrop-filter', 'var(--fnos-drawer-bf)', 'important');
+      drawer.style.setProperty('-webkit-backdrop-filter', 'var(--fnos-drawer-bf)', 'important');
   }
 
   /** [lc-360] 构造"亚克力透明度/模糊"调节滑块组(纯 DOM, 可复用于设置面板"外观"标签页)
@@ -584,7 +590,7 @@ function handle(): void {
       +     '<span id="fnos-perf-knob" style="position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>'
       +   '</label>'
       + '</div>'
-      + '<div style="font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-top:4px;">大幅减少动画、关闭磨砂模糊与全屏底图，优先保证流畅。即时生效。</div>'
+      + '<div style="font-size:11px;color:var(--fnos-ui-sub,#888);line-height:1.5;margin-top:4px;">实心底色、关闭全部动画/磨砂/光泽（含云母增强），仅保留轮播基本切换。即时生效。</div>'
       /* [lc-1014] 硬件加速：Electron 启动级开关，改动写 config 重启后生效 */
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">'
       +   '<span style="font-weight:600;letter-spacing:.5px;">硬件加速（优美动画）</span>'
@@ -647,11 +653,20 @@ function handle(): void {
     perfInput.checked = document.documentElement.classList.contains('fnos-perf');
     paintPerf();
     perfInput.addEventListener('change', () => {
-      document.documentElement.classList.toggle('fnos-perf', perfInput.checked);
+      const on = perfInput.checked;
+      const had = document.documentElement.classList.contains('fnos-perf');
+      document.documentElement.classList.toggle('fnos-perf', on);
       paintPerf();
-      try { localStorage.setItem('fntv-perf-mode', perfInput.checked ? '1' : '0'); } catch (_) {}
-      S.perfModeEnabled = perfInput.checked;
-      ipcRenderer.invoke('settings:set-perf-mode', perfInput.checked).catch(() => {});
+      try { localStorage.setItem('fntv-perf-mode', on ? '1' : '0'); } catch (_) {}
+      S.perfModeEnabled = on;
+      ipcRenderer.invoke('settings:set-perf-mode', on)
+        // [lc-1099] 每次切换都强制刷新: 运行期只改 html 类会遗留跨态不一致(用户实测关 perf 后整页
+        //   偏暗需手动强刷)。reload 让所有插件从 localStorage 镜像(上一行已同步写入)干净重建。
+        //   等 config 落盘后再刷; .catch 也刷(镜像已在, 落盘失败不影响本次态, 下次启动 patch.ts 会补写)。
+        .then(() => { try { location.reload(); } catch (_) {} })
+        .catch(() => { try { location.reload(); } catch (_) {} });
+      // [lc-1099] 运行期同步接管(reload 前的即时反馈): glassUI 云母增强摘属性/回挂、pageAnim 重挂入场动画
+      if (had !== on) { try { window.dispatchEvent(new CustomEvent('fntv:perf-change', { detail: { on } })); } catch (_) {} }
     });
 
     /* ── [lc-1014] 硬件加速开关：写 config，重启后生效（主进程启动期才挂 GPU 开关）。
@@ -691,7 +706,7 @@ function handle(): void {
     csWrap.style.cssText = 'margin-top:20px;';
     const csTitle = document.createElement('div');
     csTitle.style.cssText = 'font-weight:600;letter-spacing:.5px;margin-bottom:8px;';
-    csTitle.textContent = '首页轮播图样式';
+    csTitle.textContent = t('首页轮播图样式');
     csWrap.appendChild(csTitle);
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
@@ -701,7 +716,7 @@ function handle(): void {
       const b = document.createElement('button');
       b.type = 'button';
       b.dataset.style = String(idx + 1);
-      b.textContent = lab;
+      b.textContent = t(lab);
       const active = (idx + 1) === getCs();
       b.style.cssText = 'flex:1 1 0;padding:8px 6px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;'
         + 'box-sizing:border-box;border:1px solid ' + (active ? 'var(--fnos-ui-accent)' : 'var(--fnos-ui-border)') + ';'
@@ -1144,7 +1159,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const mkBtn = (text: string, small = false): HTMLButtonElement => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = text;
+      b.textContent = t(text);
       if (small) {
         // [lc-1043] 去描边：玻璃卡面上的按钮靠填充明度分层（用户审美：无边框）
         b.style.cssText = 'padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;'
@@ -1175,11 +1190,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
       // 可选分组标题
       if (titleText) {
-        const t = document.createElement('div');
-        t.textContent = titleText;
-        t.style.cssText = 'font-size:11.5px;font-weight:600;letter-spacing:.4px;'
+        const ttl = document.createElement('div');
+        ttl.textContent = t(titleText);
+        ttl.style.cssText = 'font-size:11.5px;font-weight:600;letter-spacing:.4px;'
           + 'color:var(--fnos-ui-sec);padding:12px 14px 0;flex:none;';
-        d.appendChild(t);
+        d.appendChild(ttl);
       }
 
       // 内容容器
@@ -1189,6 +1204,39 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       // [lc-1065] 搜索索引标记: 行走查按此识别内容容器(分组标题不参与匹配)
       body.dataset.secBody = '1';
       return { el: d, body };
+    };
+
+    // [lc-1102] 卡内折叠区（外观沿用调试卡「组件日志」折叠范式：▸ caret + display:none + hover 底色）。
+    //   data-fold / data-fold-body 是给设置搜索走查用的标记：折叠态下的行也要能搜到、
+    //   点搜索结果直达时靠 wrapper 上的 setOpen 先展开再滚动（见 runSearch）。
+    const mkFold = (labelText: string): { fold: HTMLDivElement; body: HTMLDivElement; setOpen: (v: boolean) => void } => {
+      const fold = document.createElement('div');
+      fold.style.cssText = 'display:flex;flex-direction:column;';
+      fold.dataset.fold = '1';
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--fnos-ui-muted);'
+        + 'font-size:11.5px;padding:5px 6px;border-radius:6px;user-select:none;transition:background .12s;';
+      header.onmouseenter = () => { header.style.background = 'var(--fnos-ui-row-hover)'; };
+      header.onmouseleave = () => { header.style.background = 'transparent'; };
+      const caret = document.createElement('span');
+      caret.textContent = '▸';
+      caret.style.cssText = 'display:inline-block;transition:transform .12s;font-size:10px;flex:none;';
+      const hlabel = document.createElement('span');
+      hlabel.textContent = t(labelText);
+      header.appendChild(caret); header.appendChild(hlabel);
+
+      const body = document.createElement('div');
+      body.style.cssText = 'display:none;padding:0 0 2px 13px;';
+      body.dataset.foldBody = '1';
+
+      const setOpen = (v: boolean): void => {
+        body.style.display = v ? 'block' : 'none';
+        caret.style.transform = v ? 'rotate(90deg)' : 'rotate(0deg)';
+      };
+      header.addEventListener('click', () => setOpen(body.style.display === 'none'));
+      fold.appendChild(header); fold.appendChild(body);
+      (fold as any).__setOpen = setOpen;
+      return { fold, body, setOpen };
     };
 
     // ===== 主面板 =====
@@ -1292,7 +1340,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:15px 16px 12px;flex-shrink:0;';
     const title = document.createElement('span');
-    title.textContent = '⚙ 设置';
+    title.textContent = t('⚙ 设置');
     title.style.cssText = 'font-size:15px;font-weight:700;color:var(--fnos-ui-text);letter-spacing:.3px;';
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -1355,7 +1403,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
       row.onmouseleave = () => { row.style.background = 'transparent'; };
       const span = document.createElement('span');
-      span.textContent = label;
+      span.textContent = t(label);
       span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
       const sw = document.createElement('input');
       sw.type = 'checkbox';
@@ -1384,7 +1432,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const themeRow = document.createElement('div');
     themeRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
     const themeLabel = document.createElement('span');
-    themeLabel.textContent = '主题模式';
+    themeLabel.textContent = t('主题模式');
     themeLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;white-space:nowrap;';
     const seg = document.createElement('div');
     seg.style.cssText = 'display:inline-flex;background:var(--fnos-ui-input-bg);border-radius:9px;padding:3px;gap:2px;flex-shrink:0;';
@@ -1393,7 +1441,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     themeModes.forEach(([mode, text]) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.textContent = text;
+      b.textContent = t(text);
       b.dataset.mode = mode;
       b.style.cssText = 'border:none;cursor:pointer;font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:7px;'
         + 'background:transparent;color:var(--fnos-ui-btn-text);transition:all .15s;white-space:nowrap;';
@@ -1452,7 +1500,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     updFooter.appendChild(devGrid);
 
     const testHint = document.createElement('div');
-    testHint.textContent = '🔧 测试更新 / 版号切换：开发者测试通道，需解锁码（普通用户无需操作）';
+    testHint.textContent = t('🔧 测试更新 / 版号切换：开发者测试通道，需解锁码（普通用户无需操作）');
     testHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);opacity:.75;text-align:center;margin-top:9px;line-height:1.5;';
     updFooter.appendChild(testHint);
 
@@ -1558,7 +1606,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
                 const input = document.createElement('input');
                 input.type = 'password';
-                input.placeholder = '解锁码';
+                input.placeholder = t('解锁码');
                 input.id = 'fntv-unlock-input';
                 input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
                     + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
@@ -1568,12 +1616,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                 row.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
                 const cancelBtn = document.createElement('button');
                 cancelBtn.type = 'button';
-                cancelBtn.textContent = '取消';
+                cancelBtn.textContent = t('取消');
                 cancelBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
                     + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-btn-text);';
                 const okBtn = document.createElement('button');
                 okBtn.type = 'button';
-                okBtn.textContent = '确定';
+                okBtn.textContent = t('确定');
                 // [lc-640] 主按钮实色紫底白字(与其他弹窗一致)
                 okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;'
                     + 'background:linear-gradient(135deg,#8a6dd6,#6b4ec8)!important;color:#fff!important;'
@@ -1590,7 +1638,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                     if (!code) {
                         // [lc-646] 空码: 弹窗内红字提示(不用 toast, 顶部 toast 用户容易忽略以为"没反应")
                         errEl.style.display = 'block';
-                        errEl.textContent = '请输入解锁码';
+                        errEl.textContent = t('请输入解锁码');
                         return;
                     }
                     if (opts && opts.onVerify) {
@@ -1600,11 +1648,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                                 doClose(code);
                             } else {
                                 errEl.style.display = 'block';
-                                errEl.textContent = '解锁代码错误，请重新输入';
+                                errEl.textContent = t('解锁代码错误，请重新输入');
                             }
                         }).catch(() => {
                             errEl.style.display = 'block';
-                            errEl.textContent = '解锁码验证失败，请重试';
+                            errEl.textContent = t('解锁码验证失败，请重试');
                         });
                     } else {
                         doClose(code);
@@ -1659,7 +1707,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
             const input = document.createElement('input');
             input.type = 'text';
-            input.placeholder = '例如 9.9.9';
+            input.placeholder = t('例如 9.9.9');
             input.id = 'fntv-version-switch-input';
             input.style.cssText = 'width:100%;box-sizing:border-box;padding:9px 12px;border-radius:9px;font-size:13px;'
                 + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border);outline:none;';
@@ -1669,12 +1717,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             row.style.cssText = 'display:flex;gap:8px;margin-top:16px;';
             const cancelBtn = document.createElement('button');
             cancelBtn.type = 'button';
-            cancelBtn.textContent = '取消';
+            cancelBtn.textContent = t('取消');
             cancelBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;'
                 + 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-btn-text);';
             const okBtn = document.createElement('button');
             okBtn.type = 'button';
-            okBtn.textContent = '确定';
+            okBtn.textContent = t('确定');
             okBtn.style.cssText = 'flex:1;padding:9px 0;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;'
                 + 'background:linear-gradient(135deg,#8a6dd6,#6b4ec8)!important;color:#fff!important;'
                 + 'border:1px solid rgba(255,255,255,.28)!important;box-shadow:0 4px 14px rgba(107,78,200,.38);';
@@ -1688,7 +1736,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             const doSubmit = () => {
                 const v = (input.value || '').trim();
                 okBtn.disabled = true;
-                okBtn.textContent = '提交中…';
+                okBtn.textContent = t('提交中…');
                 ipcRenderer.invoke('settings:set-custom-version', code, v).then((r: any) => {
                     doClose();
                     if (r && r.ok) {
@@ -1700,7 +1748,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
                     }
                 }).catch(() => {
                     okBtn.disabled = false;
-                    okBtn.textContent = '确定';
+                    okBtn.textContent = t('确定');
                     showPatchToast('版号切换失败：主进程无响应');
                 });
             };
@@ -2000,7 +2048,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secBody2.appendChild(playerCols);
 
     const mpvLabel = document.createElement('div');
-    mpvLabel.textContent = 'MPV 路径（留空则使用应用内置）';
+    mpvLabel.textContent = t('MPV 路径（留空则使用应用内置）');
     mpvLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:0 0 5px;';
     colMpv.appendChild(mpvLabel);
 
@@ -2009,7 +2057,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     mpvPath.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
       + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
-    mpvPath.textContent = '应用内置（已随安装包分发，无需本机安装）'; // 初始占位, 不依赖 _refresh 回填
+    mpvPath.textContent = t('应用内置（已随安装包分发，无需本机安装）'); // 初始占位, 不依赖 _refresh 回填
     colMpv.appendChild(mpvPath);
 
     const mpvBtns = document.createElement('div');
@@ -2029,12 +2077,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     clearBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       await ipcRenderer.invoke('settings:clear-mpv-path');
-      mpvPath.textContent = '应用内置（已随安装包分发，无需本机安装）';
+      mpvPath.textContent = t('应用内置（已随安装包分发，无需本机安装）');
     });
 
     // ===== 默认 MPV 着色器（由应用面板管理 MPV 启动默认，MPV 内 Ctrl+1~9 仍可临时切换）=====
     const shaderLabel = document.createElement('div');
-    shaderLabel.textContent = '默认 MPV 着色器';
+    shaderLabel.textContent = t('默认 MPV 着色器');
     shaderLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:12px 0 5px;';
     colMpv.appendChild(shaderLabel);
 
@@ -2080,7 +2128,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // ===== PotPlayer 路径 =====
     const potLabel = document.createElement('div');
-    potLabel.textContent = 'PotPlayer 路径（留空则使用应用内置）';
+    potLabel.textContent = t('PotPlayer 路径（留空则使用应用内置）');
     potLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:0 0 5px;';
     colPot.appendChild(potLabel);
 
@@ -2089,7 +2137,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     potPathEl.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);word-break:break-all;margin-bottom:7px;min-height:28px;'
       + 'max-height:72px;overflow-y:auto;padding:6px 9px;background:var(--fnos-ui-input-bg);border-radius:7px;'
       + 'border:1px solid var(--fnos-ui-border);line-height:1.5;';
-    potPathEl.textContent = '应用内置（已随安装包分发，无需本机安装）'; // 初始占位, 不依赖 _refresh 回填
+    potPathEl.textContent = t('应用内置（已随安装包分发，无需本机安装）'); // 初始占位, 不依赖 _refresh 回填
     colPot.appendChild(potPathEl);
 
     const potBtns = document.createElement('div');
@@ -2106,12 +2154,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     clearPotBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
       await ipcRenderer.invoke('settings:clear-pot-path');
-      potPathEl.textContent = '应用内置（已随安装包分发，无需本机安装）';
+      potPathEl.textContent = t('应用内置（已随安装包分发，无需本机安装）');
     });
 
     // ===== 默认播放器（直接播放时使用）=====
     const defLabel = document.createElement('div');
-    defLabel.textContent = '默认播放器（直接播放时使用）';
+    defLabel.textContent = t('默认播放器（直接播放时使用）');
     defLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
     colPot.appendChild(defLabel);
 
@@ -2154,29 +2202,47 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const langRow = document.createElement('div');
     langRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 6px;gap:10px;';
     const langLabel = document.createElement('span');
-    langLabel.textContent = '界面语言 / Interface language';
+    langLabel.textContent = t('界面语言 / Interface language');
     langLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;white-space:nowrap;';
-    const langSel = document.createElement('select');
-    langSel.id = 'fnos-ui-lang';
-    langSel.setAttribute('aria-label', '界面语言 / Interface language');
-    langSel.style.cssText = 'font-size:12px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
-      + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:5px 8px;cursor:pointer;flex-shrink:0;';
-    [['zh', '简体中文'], ['en', 'English']].forEach(([v, label]) => {
-      const o = document.createElement('option');
-      o.value = v; o.textContent = label;
-      langSel.appendChild(o);
+    // [lc-1100] 语言切换改双按钮分段控件(与主题模式同款), 替代原生 <select>:
+    //   原生下拉两选项收起不可见、玻璃面板里观感突兀; 分段控件一眼可见当前语言。
+    const langSeg = document.createElement('div');
+    langSeg.id = 'fnos-ui-lang';
+    langSeg.setAttribute('role', 'radiogroup');
+    langSeg.setAttribute('aria-label', t('界面语言 / Interface language'));
+    langSeg.style.cssText = 'display:inline-flex;background:var(--fnos-ui-input-bg);border-radius:9px;padding:3px;gap:2px;flex-shrink:0;';
+    const langOpts: Array<['zh' | 'en', string]> = [['zh', '简体中文'], ['en', 'English']];
+    const langBtns: HTMLButtonElement[] = [];
+    langOpts.forEach(([v, label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label; // 语言名自指, 不翻译
+      b.dataset.lang = v;
+      b.style.cssText = 'border:none;cursor:pointer;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:7px;'
+        + 'background:transparent;color:var(--fnos-ui-btn-text);transition:all .15s;white-space:nowrap;';
+      b.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        if (v !== getLang()) {
+          setLang(v);
+          location.reload(); // 已渲染文案随刷新统一换语言（不做运行时 DOM 回写）
+        }
+      });
+      langSeg.appendChild(b);
+      langBtns.push(b);
     });
-    langSel.value = getLang();
-    langSel.addEventListener('change', () => {
-      if (langSel.value !== getLang()) {
-        setLang(langSel.value as 'zh' | 'en');
-        location.reload(); // 已渲染文案随刷新统一换语言（不做运行时 DOM 回写）
-      }
-    });
+    const refreshLangSeg = (): void => {
+      const cur = getLang();
+      langBtns.forEach((b) => {
+        const on = b.dataset.lang === cur;
+        b.style.background = on ? 'var(--fnos-ui-accent)' : 'transparent';
+        b.style.color = on ? '#fff' : 'var(--fnos-ui-btn-text)';
+      });
+    };
+    refreshLangSeg();
     const langHint = document.createElement('div');
-    langHint.textContent = '切换后自动刷新页面生效（仅影响 Fntv-Plus 注入的界面文案）';
+    langHint.textContent = t('切换后自动刷新页面生效（仅影响 Fntv-Plus 注入的界面文案）');
     langHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2);line-height:1.5;padding:0 6px 6px;';
-    langRow.appendChild(langLabel); langRow.appendChild(langSel);
+    langRow.appendChild(langLabel); langRow.appendChild(langSeg);
     secLang.body.appendChild(langRow);
     secLang.body.appendChild(langHint);
 
@@ -2202,7 +2268,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const loginBgWrap = document.createElement('div');
     loginBgWrap.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid var(--fnos-ui-border2);';
     const loginBgLabel = document.createElement('div');
-    loginBgLabel.textContent = '登录页背景图';
+    loginBgLabel.textContent = t('登录页背景图');
     loginBgLabel.style.cssText = 'font-size:10.5px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:8px;';
     loginBgWrap.appendChild(loginBgLabel);
 
@@ -2229,13 +2295,18 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secBody3.appendChild(loginBgWrap);
     /* 布局统一在末尾 layout 区追加 */
 
-    // ===== 分组: B站弹幕登录 =====
-    const secBili = section('B站弹幕登录');
+    // ===== 分组: B站弹幕（内置降级源）=====
+    const secBili = section('B站弹幕');
     const secBodyBili = secBili.body;
 
     const biliStatus = document.createElement('div');
     biliStatus.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);margin-bottom:8px;';
     secBodyBili.appendChild(biliStatus);
+
+    // [lc-1102] 首屏只留「登录状态 + 弹幕搜索开关」，登录按钮 / 手动 Cookie / 聚合阈值收进卡内折叠区
+    //   折叠区先建后挂：其中的行要按创建顺序 append 进 fold.body，而卡片里它排在开关行之后。
+    const biliFold = mkFold('登录与 Cookie、聚合阈值');
+    const biliFoldBody = biliFold.body;
 
     // 按钮行：扫码登录 / 退出登录 / 保存 Cookie（与豆瓣左半部分按钮行同款样式）
     const biliBtns = document.createElement('div');
@@ -2244,22 +2315,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const logoutBiliBtn = mkBtn('退出登录', true);
     const saveBiliCookieBtn = mkBtn('保存 Cookie', true);
     biliBtns.appendChild(scanBtn); biliBtns.appendChild(logoutBiliBtn); biliBtns.appendChild(saveBiliCookieBtn);
-    secBodyBili.appendChild(biliBtns);
+    biliFoldBody.appendChild(biliBtns);
 
     // 手动粘贴 Cookie（兜底：B站风控/扫码失效时用），与豆瓣左半部分 manualWrap 同款
     const biliManualWrap = document.createElement('div');
     biliManualWrap.style.cssText = 'margin-top:8px;';
     const biliManualLabel = document.createElement('div');
-    biliManualLabel.textContent = '手动粘贴 Cookie（B站风控/扫码失效时用）';
+    biliManualLabel.textContent = t('手动粘贴 Cookie（B站风控/扫码失效时用）');
     biliManualLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-bottom:4px;';
     biliManualWrap.appendChild(biliManualLabel);
     const biliManualTa = document.createElement('input');
     biliManualTa.type = 'text';
-    biliManualTa.placeholder = '粘贴浏览器里 B站的 Cookie 字符串（含 SESSDATA 等）';
+    biliManualTa.placeholder = t('粘贴浏览器里 B站的 Cookie 字符串（含 SESSDATA 等）');
     biliManualTa.style.cssText = 'width:100%;height:32px;font-size:10.5px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
       + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
     biliManualWrap.appendChild(biliManualTa);
-    secBodyBili.appendChild(biliManualWrap);
+    biliFoldBody.appendChild(biliManualWrap);
 
     // MPV B站弹幕搜索开关（联动 MPV uosc_danmaku 的 script-opts/uosc_danmaku.conf）
     const biliSearchRow = document.createElement('div');
@@ -2268,13 +2339,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     biliSearchRow.onmouseenter = () => { biliSearchRow.style.background = 'var(--fnos-ui-row-hover)'; };
     biliSearchRow.onmouseleave = () => { biliSearchRow.style.background = 'transparent'; };
     const biliSearchLabel = document.createElement('span');
-    biliSearchLabel.textContent = '启用 MPV B站弹幕搜索';
+    biliSearchLabel.textContent = t('启用 MPV B站弹幕搜索');
     biliSearchLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const swMpvBiliSearch = document.createElement('input');
     swMpvBiliSearch.type = 'checkbox';
     swMpvBiliSearch.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
     biliSearchRow.appendChild(biliSearchLabel); biliSearchRow.appendChild(swMpvBiliSearch);
     secBodyBili.appendChild(biliSearchRow);
+    secBodyBili.appendChild(biliFold.fold);
     swMpvBiliSearch.addEventListener('change', () => {
       ipcRenderer.invoke('settings:set-mpv-bili-search-enabled', swMpvBiliSearch.checked).catch((err) => log('set-mpv-bili-search-enabled failed', err));
     });
@@ -2283,7 +2355,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const aggRow = document.createElement('div');
     aggRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;gap:10px;';
     const aggLabel = document.createElement('span');
-    aggLabel.textContent = '弹幕聚合阈值（单视频弹幕少于此数则合并多个源）';
+    aggLabel.textContent = t('弹幕聚合阈值（单视频弹幕少于此数则合并多个源）');
     aggLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:12.5px;flex:1;line-height:1.4;';
     const aggInput = document.createElement('input');
     aggInput.type = 'number';
@@ -2293,7 +2365,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     aggInput.style.cssText = 'width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--fnos-ui-border);'
       + 'background:var(--fnos-input-bg);color:var(--fnos-ui-text);font-size:13px;text-align:center;';
     aggRow.appendChild(aggLabel); aggRow.appendChild(aggInput);
-    secBodyBili.appendChild(aggRow);
+    biliFoldBody.appendChild(aggRow);
     aggInput.addEventListener('change', () => {
       const v = parseInt(aggInput.value, 10);
       ipcRenderer.invoke('settings:set-mpv-bili-aggregate-threshold', isNaN(v) ? 0 : v).catch((err) => log('set-mpv-bili-aggregate-threshold failed', err));
@@ -2312,13 +2384,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const bangumiHintTop = document.createElement('div');
     bangumiHintTop.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin-bottom:8px;line-height:1.5;';
-    bangumiHintTop.textContent = '填入你的 Bangumi Access Token 以启用 Bangumi 关联功能。';
+    bangumiHintTop.textContent = t('填入你的 Bangumi Access Token 以启用 Bangumi 关联功能。');
     secBodyBangumi.appendChild(bangumiHintTop);
 
     // 单行 token 输入框
     const bangumiInput = document.createElement('input');
     bangumiInput.type = 'text';
-    bangumiInput.placeholder = '粘贴 Bangumi Access Token';
+    bangumiInput.placeholder = t('粘贴 Bangumi Access Token');
     bangumiInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
       + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
       + 'padding:6px 8px;box-sizing:border-box;';
@@ -2354,7 +2426,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     bangumiSyncRow.onmouseenter = () => { bangumiSyncRow.style.background = 'var(--fnos-ui-row-hover)'; };
     bangumiSyncRow.onmouseleave = () => { bangumiSyncRow.style.background = 'transparent'; };
     const bangumiSyncLabel = document.createElement('span');
-    bangumiSyncLabel.textContent = '启用 Bangumi 集数同步';
+    bangumiSyncLabel.textContent = t('启用 Bangumi 集数同步');
     bangumiSyncLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const swBangumiSync = document.createElement('input');
     swBangumiSync.type = 'checkbox';
@@ -2370,7 +2442,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     bangumiThrRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
       + 'border-radius:6px;transition:background .12s;';
     const bangumiThrLabel = document.createElement('span');
-    bangumiThrLabel.textContent = '同步阈值（播放进度 %）';
+    bangumiThrLabel.textContent = t('同步阈值（播放进度 %）');
     bangumiThrLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:11.5px;';
     const bangumiThresholdInput = document.createElement('input');
     bangumiThresholdInput.type = 'number';
@@ -2421,20 +2493,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           if (token) {
             bangumiInput.value = maskBangumi(token);
             bangumiInput.readOnly = true;
-            bangumiStatus.textContent = '已保存 Token';
+            bangumiStatus.textContent = t('已保存 Token');
             bangumiStatus.style.color = 'var(--fnos-ui-ok)';
           } else {
             bangumiInput.value = '';
             bangumiInput.readOnly = false;
-            bangumiStatus.textContent = '已清除 Token';
+            bangumiStatus.textContent = t('已清除 Token');
             bangumiStatus.style.color = 'var(--fnos-ui-warn)';
           }
         } else {
-          bangumiStatus.textContent = '保存失败';
+          bangumiStatus.textContent = t('保存失败');
           bangumiStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        bangumiStatus.textContent = '保存失败';
+        bangumiStatus.textContent = t('保存失败');
         bangumiStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -2445,10 +2517,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       bangumiReal = '';
       try {
         await ipcRenderer.invoke('settings:set-bangumi-token', '');
-        bangumiStatus.textContent = '已清除 Token';
+        bangumiStatus.textContent = t('已清除 Token');
         bangumiStatus.style.color = 'var(--fnos-ui-warn)';
       } catch {
-        bangumiStatus.textContent = '清除失败';
+        bangumiStatus.textContent = t('清除失败');
         bangumiStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -2463,13 +2535,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const tmdbHintTop = document.createElement('div');
     tmdbHintTop.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin-bottom:8px;line-height:1.5;';
-    tmdbHintTop.textContent = '填入你的 TMDB API Key（或 v4 Read Access Token）以启用「热门剧更新」中的 TMDB 电影/剧集数据源。';
+    tmdbHintTop.textContent = t('填入你的 TMDB API Key（或 v4 Read Access Token）以启用「热门剧更新」中的 TMDB 电影/剧集数据源。');
     secBodyTmdb.appendChild(tmdbHintTop);
 
     // 单行 key 输入框
     const tmdbInput = document.createElement('input');
     tmdbInput.type = 'text';
-    tmdbInput.placeholder = '粘贴 TMDB API Key / Read Access Token';
+    tmdbInput.placeholder = t('粘贴 TMDB API Key / Read Access Token');
     tmdbInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
       + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
       + 'padding:6px 8px;box-sizing:border-box;';
@@ -2531,20 +2603,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           if (key) {
             tmdbInput.value = maskTmdb(key);
             tmdbInput.readOnly = true;
-            tmdbStatus.textContent = '已保存 TMDB Key';
+            tmdbStatus.textContent = t('已保存 TMDB Key');
             tmdbStatus.style.color = 'var(--fnos-ui-ok)';
           } else {
             tmdbInput.value = '';
             tmdbInput.readOnly = false;
-            tmdbStatus.textContent = '已清除 TMDB Key';
+            tmdbStatus.textContent = t('已清除 TMDB Key');
             tmdbStatus.style.color = 'var(--fnos-ui-warn)';
           }
         } else {
-          tmdbStatus.textContent = '保存失败';
+          tmdbStatus.textContent = t('保存失败');
           tmdbStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        tmdbStatus.textContent = '保存失败';
+        tmdbStatus.textContent = t('保存失败');
         tmdbStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -2555,10 +2627,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       tmdbReal = '';
       try {
         await ipcRenderer.invoke('settings:set-tmdb-key', '');
-        tmdbStatus.textContent = '已清除 TMDB Key';
+        tmdbStatus.textContent = t('已清除 TMDB Key');
         tmdbStatus.style.color = 'var(--fnos-ui-warn)';
       } catch {
-        tmdbStatus.textContent = '清除失败';
+        tmdbStatus.textContent = t('清除失败');
         tmdbStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -2570,7 +2642,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const dcDesc = document.createElement('div');
     dcDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    dcDesc.textContent = '开启后用固定 IP 覆盖 DNS 解析，绕过污染直连 TMDB（无需梯子）。IP 来自 CheckTMDB 项目，CDN 边缘节点可能变动，可点「更新 IP」拉取最新，或手动填写。';
+    dcDesc.textContent = t('开启后用固定 IP 覆盖 DNS 解析，绕过污染直连 TMDB（无需梯子）。IP 来自 CheckTMDB 项目，CDN 边缘节点可能变动，可点「更新 IP」拉取最新，或手动填写。');
     dcWrap.appendChild(dcDesc);
 
     const dcRow = document.createElement('label');
@@ -2581,7 +2653,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // （38×22 轨道 + ::after 滑块），18px 滑块从 16px 轨道溢出压住「启」字（用户截图报障）。
     // 交由 #fnos-settings-panel input[type=checkbox] 统一渲染，与其余 9 处开关同款。
     const dcToggleLabel = document.createElement('span');
-    dcToggleLabel.textContent = '启用免梯子直连';
+    dcToggleLabel.textContent = t('启用免梯子直连');
     dcRow.appendChild(dcToggle);
     dcRow.appendChild(dcToggleLabel);
     dcWrap.appendChild(dcRow);
@@ -2590,11 +2662,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     dcIpGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;';
     const dcApiInput = document.createElement('input');
     dcApiInput.type = 'text';
-    dcApiInput.placeholder = 'api IP（如 65.8.20.79）';
+    dcApiInput.placeholder = t('api IP（如 65.8.20.79）');
     dcApiInput.style.cssText = 'width:100%;height:30px;font-size:11px;color:var(--fnos-ui-text);';
     const dcImgInput = document.createElement('input');
     dcImgInput.type = 'text';
-    dcImgInput.placeholder = 'img IP（如 65.8.20.8）';
+    dcImgInput.placeholder = t('img IP（如 65.8.20.8）');
     dcImgInput.style.cssText = 'width:100%;height:30px;font-size:11px;color:var(--fnos-ui-text);';
     dcIpGrid.appendChild(dcApiInput);
     dcIpGrid.appendChild(dcImgInput);
@@ -2625,17 +2697,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           dcStatus.textContent = dcToggle.checked ? '已启用免梯子直连' : '已关闭免梯子直连';
           dcStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
-          dcStatus.textContent = '保存失败';
+          dcStatus.textContent = t('保存失败');
           dcStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        dcStatus.textContent = '保存失败';
+        dcStatus.textContent = t('保存失败');
         dcStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
     dcUpdateBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
-      dcStatus.textContent = '正在从 CheckTMDB 拉取最新 IP…';
+      dcStatus.textContent = t('正在从 CheckTMDB 拉取最新 IP…');
       dcStatus.style.color = 'var(--fnos-ui-sub)';
       try {
         const r: any = await ipcRenderer.invoke('tmdb:update-ip');
@@ -2649,7 +2721,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           dcStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        dcStatus.textContent = '更新失败';
+        dcStatus.textContent = t('更新失败');
         dcStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -2664,7 +2736,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const dsHint = document.createElement('div');
     dsHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    dsHint.textContent = '选择「热门剧更新」浮层的数据源。豆瓣国内直连、免 Key、零配置；TMDB 数据更全但需 Key 且可能被墙（需免梯子直连/代理）。';
+    dsHint.textContent = t('选择「热门剧更新」浮层的数据源。豆瓣国内直连、免 Key、零配置；TMDB 数据更全但需 Key 且可能被墙（需免梯子直连/代理）。');
 
     const dsSeg = document.createElement('div');
     dsSeg.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
@@ -2683,7 +2755,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const doubanHint = document.createElement('div');
     doubanHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-ok);line-height:1.5;margin-bottom:8px;';
-    doubanHint.textContent = '✓ 已选豆瓣：国内直连、免 Key、零配置，无需任何额外设置。「热门剧更新」浮层将展示豆瓣热门影视。';
+    doubanHint.textContent = t('✓ 已选豆瓣：国内直连、免 Key、零配置，无需任何额外设置。「热门剧更新」浮层将展示豆瓣热门影视。');
 
     // 仅刷新 UI 显示（不写盘）：用于构建/打开时按「磁盘真值」回填，避免用默认/内存旧值覆盖已保存选择
     const reflectDs = (val: 'tmdb' | 'douban'): void => {
@@ -2753,7 +2825,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
       row.onmouseleave = () => { row.style.background = 'transparent'; };
       const span = document.createElement('span');
-      span.textContent = label;
+      span.textContent = t(label);
       span.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
       const sw = document.createElement('input');
       sw.type = 'checkbox';
@@ -2778,13 +2850,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     scanDoubanBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
-      doubanStatus.textContent = '请在弹出的窗口中用豆瓣 App 扫码…';
+      doubanStatus.textContent = t('请在弹出的窗口中用豆瓣 App 扫码…');
       doubanStatus.style.color = 'var(--fnos-ui-sec)';
       try {
         const r: any = await ipcRenderer.invoke('douban:open-login');
         if (!r || !r.ok) doubanStatus.textContent = '打开登录窗口失败：' + ((r && r.msg) || '未知');
       } catch {
-        doubanStatus.textContent = '打开登录窗口失败';
+        doubanStatus.textContent = t('打开登录窗口失败');
       }
     });
     logoutDoubanBtn.addEventListener('click', async (e: Event) => {
@@ -2797,12 +2869,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const manualWrap = document.createElement('div');
     manualWrap.style.cssText = 'margin-top:8px;';
     const manualLabel = document.createElement('div');
-    manualLabel.textContent = '手动粘贴 Cookie（豆瓣风控/扫码失效时用）';
+    manualLabel.textContent = t('手动粘贴 Cookie（豆瓣风控/扫码失效时用）');
     manualLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);margin-bottom:4px;';
     manualWrap.appendChild(manualLabel);
     const manualTa = document.createElement('input');
     manualTa.type = 'text';
-    manualTa.placeholder = '粘贴浏览器里豆瓣的 Cookie 字符串（含 dbcl2 等）';
+    manualTa.placeholder = t('粘贴浏览器里豆瓣的 Cookie 字符串（含 dbcl2 等）');
     manualTa.style.cssText = 'width:100%;height:32px;font-size:10.5px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);'
       + 'border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
     manualWrap.appendChild(manualTa);
@@ -2818,20 +2890,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const watchedWrap = document.createElement('div');
     watchedWrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
     const watchedTitle = document.createElement('div');
-    watchedTitle.textContent = '已观看列表 → 豆瓣「看过」';
+    watchedTitle.textContent = t('已观看列表 → 豆瓣「看过」');
     watchedTitle.style.cssText = 'font-size:11px;font-weight:600;color:var(--fnos-ui-text);margin-bottom:6px;';
     watchedWrap.appendChild(watchedTitle);
 
     const watchedStatus = document.createElement('div');
     watchedStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;';
-    watchedStatus.textContent = '读取飞牛「已观看」列表，批量标记到豆瓣（已标记的会跳过，不重复打）。';
+    watchedStatus.textContent = t('读取飞牛「已观看」列表，批量标记到豆瓣（已标记的会跳过，不重复打）。');
     watchedWrap.appendChild(watchedStatus);
 
     const syncBtn = mkBtn('立即同步已观看列表', true);
     syncBtn.addEventListener('click', async (e: Event) => {
         e.stopPropagation();
         syncBtn.setAttribute('disabled', 'true');
-        watchedStatus.textContent = '正在扫描飞牛「已观看」列表…（需加载列表页，约 10 秒）';
+        watchedStatus.textContent = t('正在扫描飞牛「已观看」列表…（需加载列表页，约 10 秒）');
         watchedStatus.style.color = 'var(--fnos-ui-sec)';
         const r: any = await (window as any).fnosScanWatched();
         syncBtn.removeAttribute('disabled');
@@ -2850,7 +2922,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const autoRow = document.createElement('div');
     autoRow.style.cssText = 'display:flex;align-items:center;gap:6px;';
     const autoLabel = document.createElement('span');
-    autoLabel.textContent = '自动同步间隔(分钟, 0=关闭):';
+    autoLabel.textContent = t('自动同步间隔(分钟, 0=关闭):');
     autoLabel.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-text);';
     const autoInput = document.createElement('input');
     autoInput.type = 'number';
@@ -2932,7 +3004,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const traBody = secTrakt.body;
     const traHint = document.createElement('div');
     traHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    traHint.textContent = '把观影记录（看完的电影 / 已看的剧集集数）同步到 trakt.tv 历史。需要在 Trakt 应用管理页(trakt.tv/oauth/applications)注册应用，把 Client ID 与 Secret 填到这里，再点「连接 Trakt」完成设备授权。';
+    traHint.textContent = t('把观影记录（看完的电影 / 已看的剧集集数）同步到 trakt.tv 历史。需要在 Trakt 应用管理页(trakt.tv/oauth/applications)注册应用，把 Client ID 与 Secret 填到这里，再点「连接 Trakt」完成设备授权。');
     traBody.appendChild(traHint);
 
     // 凭证（掩码输入，交互同 Bangumi token / 弹弹play 凭证）
@@ -2977,10 +3049,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         traStatus.textContent = '已连接 Trakt' + exp;
         traStatus.style.color = 'var(--fnos-ui-ok)';
       } else if (st && st.configured) {
-        traStatus.textContent = '凭证已保存，尚未连接。';
+        traStatus.textContent = t('凭证已保存，尚未连接。');
         traStatus.style.color = 'var(--fnos-ui-sub)';
       } else {
-        traStatus.textContent = '未配置。';
+        traStatus.textContent = t('未配置。');
         traStatus.style.color = 'var(--fnos-ui-sub)';
       }
     };
@@ -2990,7 +3062,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const id = traIdInput.value.trim();
       const sec = traSecretInput.value.trim();
       if (!id || !sec) {
-        traStatus.textContent = 'Client ID 与 Secret 均必填（清除请用「清除凭证」）。';
+        traStatus.textContent = t('Client ID 与 Secret 均必填（清除请用「清除凭证」）。');
         traStatus.style.color = 'var(--fnos-ui-warn)';
         return;
       }
@@ -3039,10 +3111,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     traScrobLabelWrap.style.cssText = 'min-width:0;';
     const traScrobLabel = document.createElement('div');
     traScrobLabel.style.cssText = 'font-size:12.5px;font-weight:600;color:var(--fnos-ui-text);';
-    traScrobLabel.textContent = '实时同步播放（scrobble）';
+    traScrobLabel.textContent = t('实时同步播放（scrobble）');
     const traScrobSub = document.createElement('div');
     traScrobSub.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted2,#5a6480);line-height:1.5;margin-top:2px;';
-    traScrobSub.textContent = '播放时实时打点到 Trakt（开始/暂停/看完≥80% 自动记录），需先连接 Trakt。';
+    traScrobSub.textContent = t('播放时实时打点到 Trakt（开始/暂停/看完≥80% 自动记录），需先连接 Trakt。');
     traScrobLabelWrap.appendChild(traScrobLabel); traScrobLabelWrap.appendChild(traScrobSub);
     const traScrobBtn = mkBtn('…', true);
     traScrobRow.appendChild(traScrobLabelWrap); traScrobRow.appendChild(traScrobBtn);
@@ -3064,7 +3136,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     traConnectBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
-      traStatus.textContent = '正在获取设备码…';
+      traStatus.textContent = t('正在获取设备码…');
       traStatus.style.color = 'var(--fnos-ui-sub)';
       ipcRenderer.invoke('trakt:device-start').then((r: any) => {
         if (r && r.error) {
@@ -3077,13 +3149,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         traCodeBox.style.display = 'block';
         traCodeBox.innerHTML = '';
         const l1 = document.createElement('div');
-        l1.textContent = '1. 打开授权页：';
+        l1.textContent = t('1. 打开授权页：');
         const link = document.createElement('a');
         link.href = url; link.textContent = url; link.style.color = 'var(--fnos-ui-accent)';
         link.addEventListener('click', (ev: Event) => { ev.preventDefault(); try { require('electron').shell.openExternal(url); } catch { /* ignore */ } });
         l1.appendChild(link);
         const l2 = document.createElement('div');
-        l2.textContent = '2. 输入授权码：';
+        l2.textContent = t('2. 输入授权码：');
         const codeEl = document.createElement('span');
         codeEl.textContent = code;
         codeEl.style.cssText = 'font-size:15px;font-weight:700;letter-spacing:2px;color:var(--fnos-ui-text);user-select:all;cursor:pointer;margin-left:4px;';
@@ -3093,14 +3165,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         });
         l2.appendChild(codeEl);
         const l3 = document.createElement('div');
-        l3.textContent = '3. 授权后本窗口自动完成连接（等待中…）';
+        l3.textContent = t('3. 授权后本窗口自动完成连接（等待中…）');
         traCodeBox.appendChild(l1); traCodeBox.appendChild(l2); traCodeBox.appendChild(l3);
-        traStatus.textContent = '等待授权中…';
+        traStatus.textContent = t('等待授权中…');
       }).catch((err) => { traStatus.textContent = '失败: ' + (err && err.message ? err.message : err); traStatus.style.color = 'var(--fnos-ui-warn)'; });
     });
     ipcRenderer.on('trakt:connected', () => {
       traCodeBox.style.display = 'none';
-      traStatus.textContent = '已连接 Trakt ✓';
+      traStatus.textContent = t('已连接 Trakt ✓');
       traStatus.style.color = 'var(--fnos-ui-ok)';
       void traRefreshStatus();
     });
@@ -3116,7 +3188,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
     traSyncBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
-      traSyncResult.textContent = '同步中…（扫描媒体库并写入 Trakt，可能需要一点时间）';
+      traSyncResult.textContent = t('同步中…（扫描媒体库并写入 Trakt，可能需要一点时间）');
       ipcRenderer.invoke('trakt:sync-watched').then((r: any) => {
         if (r && r.error) {
           traSyncResult.textContent = '同步失败: ' + (r.error === 'busy' ? '上一次同步仍在进行' : r.error);
@@ -3138,14 +3210,27 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       void traRefreshStatus();
     }).catch(() => {});
 
-    // ===== 弹幕设置（写入 danmaku_block_types.json + 屏蔽词文件 + 弹幕文件夹管理）=====
+    // ===== 弹幕屏蔽（写入 danmaku_block_types.json + 屏蔽词文件 + 弹幕文件夹管理）=====
     // [lc-215] 移除「弹幕样式」控制项（透明度/字号/描边/阴影/显示区域/同屏上限/粗体）——
     // 这些已由 MPV 底部控制栏的弹幕样式按钮管理；此处仅保留/新增「弹幕屏蔽」相关。
     // [lc-301] 标题由「B站弹幕屏蔽」改为「弹幕设置」，并新增「打开弹幕文件夹」入口。
-    const secDanmaku = section('弹幕设置');
+    // [lc-1102] 弹弹play 凭证、自建弹幕接口各自独立成卡后，本卡收窄为「屏蔽与样式」，
+    //   首屏只留一行提示，6 个屏蔽类型 + 屏蔽词 + 文件夹入口收进折叠区。
+    const secDanmaku = section('弹幕屏蔽与样式');
     secDanmaku.el.id = 'sec-danmaku'; // [lc-199] 供控制栏按钮唤起时滚动定位
     const danBody = secDanmaku.body;
     let _danTimer: any = null;
+
+    const danHint = document.createElement('div');
+    danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:2px 6px 4px;line-height:1.5;';
+    danHint.textContent = t('「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本卡管理 B站 弹幕的屏蔽。');
+    danBody.appendChild(danHint);
+
+    const danFold = mkFold('屏蔽类型、屏蔽词、弹幕文件夹');
+    danBody.appendChild(danFold.fold);
+    const danFoldBody = danFold.body;
+    // [lc-199] 控制栏「弹幕样式」按钮进来的语义就是「去改屏蔽/样式」→ 该入口展开本卡折叠区
+    (overlay as any)._expandDanmakuFold = (): void => danFold.setOpen(true);
 
     // 屏蔽类型定义（key 必须与 bili_danmaku.py 的 danmaku_block_types.json 一致）
     const BLOCK_TYPES: { key: string; label: string }[] = [
@@ -3174,31 +3259,38 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const t = addToggle(bt.label);
       t.checked = false;
       t.addEventListener('change', pushDan);
-      danBody.appendChild(t.parentElement as HTMLElement);
+      danFoldBody.appendChild(t.parentElement as HTMLElement);
       blockToggles.push({ key: bt.key, input: t });
     }
 
     danBlacklist = addTextarea('屏蔽词（每行一条，支持正则）', '', '例如：\n广告\n关注.*', pushDan);
-    danBody.appendChild(danBlacklist.row);
+    danFoldBody.appendChild(danBlacklist.row);
 
-    const danHint = document.createElement('div');
-    danHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
-    danHint.textContent = '「弹幕样式」（透明度/字号/描边等）请在播放时通过 MPV 底部控制栏调整；本处仅管理 B站 弹幕的屏蔽。屏蔽类型于下一次 B站 弹幕加载时生效。';
-    danBody.appendChild(danHint);
+    const danFoldNote = document.createElement('div');
+    danFoldNote.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:4px 6px 0;line-height:1.5;';
+    danFoldNote.textContent = t('屏蔽类型与屏蔽词于下一次 B站 弹幕加载时生效。');
+    danFoldBody.appendChild(danFoldNote);
 
     // ===== [lc-1018] 弹弹play 自定义凭证（开放 API AppId + Secret）=====
     // 背景：脚本内置共享凭证已被弹弹play官方接口整体 403（2026-09-05 实测，搜索/弹幕恒"无数据"）。
     // 用户在弹弹play开放平台注册应用后把专属 AppId+Secret 填到这里 → 写入 script-opts/uosc_danmaku.conf
     // → dandanplay.lua 优先用自定义凭证签名；两项留空=回落内置共享凭证。mpv 每次播放新起进程 → 下次播放生效。
-    const ddCredLabel = document.createElement('div');
-    ddCredLabel.textContent = '弹弹play 凭证（开放 API AppId / Secret）';
-    ddCredLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:12px 0 5px;';
-    danBody.appendChild(ddCredLabel);
+    // [lc-1102] 从「弹幕屏蔽与样式」卡独立成卡：首屏只留凭证状态一行，输入与按钮收进折叠区。
+    const secDandan = section('弹弹play');
+    const ddBody = secDandan.body;
+
+    const ddStateLine = document.createElement('div');
+    ddStateLine.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);line-height:1.5;';
+    ddBody.appendChild(ddStateLine);
+
+    const ddFold = mkFold('开放 API 凭证（AppId / Secret）');
+    ddBody.appendChild(ddFold.fold);
+    const ddFoldBody = ddFold.body;
 
     const ddHint = document.createElement('div');
     ddHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    ddHint.textContent = '内置共享凭证已被弹弹play官方接口封禁（弹幕恒「无数据」）。在弹弹play开放平台注册应用后，填入专属 AppId 与 Secret 即可恢复；两项都填才生效，清除后回落内置凭证。下次 MPV 播放时生效。';
-    danBody.appendChild(ddHint);
+    ddHint.textContent = t('内置共享凭证已被弹弹play官方接口封禁（弹幕恒「无数据」）。在弹弹play开放平台注册应用后，填入专属 AppId 与 Secret 即可恢复；两项都填才生效，清除后回落内置凭证。下次 MPV 播放时生效。');
+    ddFoldBody.appendChild(ddHint);
 
     // 掩码输入（交互同 Bangumi token：已保存显示星号，聚焦自动清空进入编辑）
     const maskDd = (t: string): string => '*'.repeat(Math.max(0, t.length));
@@ -3221,26 +3313,34 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     };
     ddIdInput.addEventListener('blur', () => ddBlurMask(ddIdInput, ddRealId));
     ddSecretInput.addEventListener('blur', () => ddBlurMask(ddSecretInput, ddRealSecret));
-    danBody.appendChild(ddIdInput);
-    danBody.appendChild(ddSecretInput);
+    ddFoldBody.appendChild(ddIdInput);
+    ddFoldBody.appendChild(ddSecretInput);
 
     const ddBtns = document.createElement('div');
     ddBtns.style.cssText = 'display:flex;gap:6px;';
     const ddSaveBtn = mkBtn('保存凭证', true);
     const ddClearBtn = mkBtn('清除凭证', true);
     ddBtns.appendChild(ddSaveBtn); ddBtns.appendChild(ddClearBtn);
-    danBody.appendChild(ddBtns);
+    ddFoldBody.appendChild(ddBtns);
 
     const ddStatus = document.createElement('div');
     ddStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
-    danBody.appendChild(ddStatus);
+    ddFoldBody.appendChild(ddStatus);
+
+    // 首屏状态行 = 本卡唯一的常显信息：保存/清除/回填时都要同步，否则会停在旧状态误导用户
+    const ddSetState = (configured: boolean): void => {
+      ddStateLine.textContent = configured
+        ? t('已配置自定义凭证')
+        : t('未配置（内置共享凭证已被弹弹play 封禁，弹幕恒「无数据」）');
+      ddStateLine.style.color = configured ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
+    };
 
     ddSaveBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       const id = ddIdInput.value.trim();
       const secret = ddSecretInput.value.trim();
       if (!id || !secret) {
-        ddStatus.textContent = 'AppId 与 Secret 两项都必填（清除请用「清除凭证」）。';
+        ddStatus.textContent = t('AppId 与 Secret 两项都必填（清除请用「清除凭证」）。');
         ddStatus.style.color = 'var(--fnos-ui-warn)';
         return;
       }
@@ -3249,8 +3349,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           ddRealId = id; ddRealSecret = secret;
           ddIdInput.value = maskDd(id); ddIdInput.readOnly = true;
           ddSecretInput.value = maskDd(secret); ddSecretInput.readOnly = true;
-          ddStatus.textContent = '已保存，下次 MPV 播放时生效。';
+          ddStatus.textContent = t('已保存，下次 MPV 播放时生效。');
           ddStatus.style.color = 'var(--fnos-ui-sub)';
+          ddSetState(true);
         })
         .catch((err) => { ddStatus.textContent = '保存失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
     });
@@ -3261,15 +3362,104 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           ddRealId = ''; ddRealSecret = '';
           ddIdInput.value = ''; ddIdInput.readOnly = false;
           ddSecretInput.value = ''; ddSecretInput.readOnly = false;
-          ddStatus.textContent = '已清除，回落脚本内置共享凭证，下次 MPV 播放时生效。';
+          ddStatus.textContent = t('已清除，回落脚本内置共享凭证，下次 MPV 播放时生效。');
+          ddSetState(false);
         })
         .catch((err) => { ddStatus.textContent = '清除失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+
+    // ===== [lc-1101] 自建弹幕接口（danmu_api，多平台聚合，弹幕优选源）=====
+    // 用户在 NAS/Docker 自建 danmu_api（聚合哔哩/爱奇艺/优酷/腾讯/咪咕等），同集弹幕密度高于本应用
+    // 「直连 B站 单源 + 阈值聚合」。开启后主进程 biliRunner 优先向它取弹幕，未命中/未启用自动降级回
+    // 内置 B站 链路。地址存 config.json（真实请求在主进程发起），同时写 uosc_danmaku.conf 的
+    // danmu_api_enabled —— 那只是 Lua 侧闸门：否则用户关掉「B站弹幕搜索」时 Lua 根本不会请求本地 shim。
+    // [lc-1102] 独立成卡：首屏只留启用开关，地址与连通测试收进折叠区（开关变更时自动展开以显示回显）。
+    const secDmApi = section('自建弹幕接口（danmu_api）');
+    const dmApiBody = secDmApi.body;
+
+    const dmApiRow = document.createElement('div');
+    dmApiRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    dmApiRow.onmouseenter = () => { dmApiRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    dmApiRow.onmouseleave = () => { dmApiRow.style.background = 'transparent'; };
+    const dmApiTextLabel = document.createElement('span');
+    dmApiTextLabel.textContent = t('启用自建弹幕接口（优先于 B站弹幕）');
+    dmApiTextLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swDanmuApi = document.createElement('input');
+    swDanmuApi.type = 'checkbox';
+    swDanmuApi.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    dmApiRow.appendChild(dmApiTextLabel); dmApiRow.appendChild(swDanmuApi);
+    dmApiBody.appendChild(dmApiRow);
+    dmApiRow.addEventListener('click', (e: Event) => { if (e.target !== swDanmuApi) swDanmuApi.click(); });
+
+    // 状态行常显：开关就在卡片首屏，回显（含「已开启但未填地址」）不能再藏进折叠区
+    const dmApiStatus = document.createElement('div');
+    dmApiStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;';
+    dmApiBody.appendChild(dmApiStatus);
+
+    const dmApiFold = mkFold('服务地址与连通测试');
+    dmApiBody.appendChild(dmApiFold.fold);
+    const dmApiFoldBody = dmApiFold.body;
+
+    const dmApiHint = document.createElement('div');
+    dmApiHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
+    dmApiHint.textContent = t('填入 NAS 上部署的 danmu_api 服务地址（聚合哔哩/爱奇艺/优酷/腾讯等多平台弹幕，密度通常高于单源 B站）。开启后作为弹幕优选源，未命中或未启用时自动降级到内置 B站 弹幕获取。下次 MPV 播放时生效。');
+    dmApiFoldBody.appendChild(dmApiHint);
+
+    const dmApiInput = document.createElement('input');
+    dmApiInput.type = 'text';
+    dmApiInput.placeholder = 'http://192.168.1.10:9321';
+    dmApiInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;margin:2px 0 6px;';
+    dmApiFoldBody.appendChild(dmApiInput);
+
+    const dmApiBtns = document.createElement('div');
+    dmApiBtns.style.cssText = 'display:flex;gap:6px;';
+    const dmApiSaveBtn = mkBtn('保存', true);
+    const dmApiTestBtn = mkBtn('测试连接', true);
+    dmApiBtns.appendChild(dmApiSaveBtn); dmApiBtns.appendChild(dmApiTestBtn);
+    dmApiFoldBody.appendChild(dmApiBtns);
+
+    const dmApiSave = (): void => {
+      const base = dmApiInput.value.trim().replace(/\/+$/, '');
+      ipcRenderer.invoke('settings:set-danmu-api', { enabled: swDanmuApi.checked, base })
+        .then((r: any) => {
+          if (r && r.ok === false) {
+            dmApiStatus.textContent = String(r.error || t('保存失败'));
+            dmApiStatus.style.color = 'var(--fnos-ui-warn)';
+            return;
+          }
+          dmApiStatus.textContent = swDanmuApi.checked
+            ? t('已保存并启用，下次 MPV 播放时生效。')
+            : t('已保存并关闭，回落内置 B站 弹幕获取。');
+          dmApiStatus.style.color = 'var(--fnos-ui-sub)';
+        })
+        .catch((err) => { dmApiStatus.textContent = t('保存失败') + ': ' + (err && err.message ? err.message : err); dmApiStatus.style.color = 'var(--fnos-ui-warn)'; });
+    };
+    // 开关与「保存」走同一条路径：只拨开关不点保存会造成「看着开了其实没生效」的静默陷阱
+    swDanmuApi.addEventListener('change', () => {
+      // 开了但地址还空着 → 直接把要填的地方摊开，省一次「找输入框在哪」
+      if (swDanmuApi.checked && !dmApiInput.value.trim()) dmApiFold.setOpen(true);
+      dmApiSave();
+    });
+    dmApiSaveBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); dmApiSave(); });
+    dmApiTestBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      dmApiStatus.textContent = t('正在测试连接…');
+      dmApiStatus.style.color = 'var(--fnos-ui-sub)';
+      ipcRenderer.invoke('settings:test-danmu-api', dmApiInput.value.trim())
+        .then((r: any) => {
+          dmApiStatus.textContent = String((r && r.message) || (r && r.ok ? t('连接正常') : t('连接失败')));
+          dmApiStatus.style.color = (r && r.ok) ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
+        })
+        .catch((err) => { dmApiStatus.textContent = t('连接失败') + ': ' + (err && err.message ? err.message : err); dmApiStatus.style.color = 'var(--fnos-ui-warn)'; });
     });
 
     // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘、Node 端弹幕缓存一致：%PUBLIC%\fnos-danmaku）
     const biliFolderBtn = mkBtn('打开弹幕文件夹', true);
     biliFolderBtn.style.marginTop = '10px';
-    danBody.appendChild(biliFolderBtn);
+    danFoldBody.appendChild(biliFolderBtn);
     biliFolderBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
       ipcRenderer.invoke('bili:open-danmaku-folder').catch((err) => log('bili:open-danmaku-folder failed', err));
@@ -3285,7 +3475,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     interpBody.appendChild(interpEnabledToggle.parentElement as HTMLElement);
 
     const engineLabel = document.createElement('div');
-    engineLabel.textContent = '插帧引擎';
+    engineLabel.textContent = t('插帧引擎');
     engineLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
     interpBody.appendChild(engineLabel);
 
@@ -3307,7 +3497,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     interpBody.appendChild(engineSel);
 
     const pathLabel = document.createElement('div');
-    pathLabel.textContent = '引擎路径（SVP 目录 / RIFE 可执行文件，留空=自动探测）';
+    pathLabel.textContent = t('引擎路径（SVP 目录 / RIFE 可执行文件，留空=自动探测）');
     pathLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:10px 0 5px;';
     interpBody.appendChild(pathLabel);
 
@@ -3320,7 +3510,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const interpHint = document.createElement('div');
     interpHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:8px 0 0;line-height:1.5;';
-    interpHint.textContent = '播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好，未安装时自动回退 MPV 内置平滑运动；选 N 卡需 RTX50+ 并在 NVIDIA App 开启「Smooth Motion（视频）」。';
+    interpHint.textContent = t('播放时可在 MPV 底部控制栏点「插帧」按钮实时开关。选 SVP/RIFE 需本机已安装对应引擎并配好，未安装时自动回退 MPV 内置平滑运动；选 N 卡需 RTX50+ 并在 NVIDIA App 开启「Smooth Motion（视频）」。');
     interpBody.appendChild(interpHint);
 
     // ===== [lc-1069] 渲染画质（MPV 渲染预设三档）=====
@@ -3329,7 +3519,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const renderBody = secRender.body;
 
     const renderLabel = document.createElement('div');
-    renderLabel.textContent = '渲染预设';
+    renderLabel.textContent = t('渲染预设');
     renderLabel.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:4px 0 6px;';
     renderBody.appendChild(renderLabel);
 
@@ -3365,7 +3555,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const renderHint = document.createElement('div');
     renderHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:6px 0 0;line-height:1.5;';
-    renderHint.textContent = '渲染管线(vo)变更需重启应用后生效；画质档位亦可被「着色器/ICC」设置叠加。';
+    renderHint.textContent = t('渲染管线(vo)变更需重启应用后生效；画质档位亦可被「着色器/ICC」设置叠加。');
     renderBody.appendChild(renderHint);
 
     const DESCS: Record<string, string> = {};
@@ -3418,7 +3608,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const diagPre = document.createElement('pre');
     diagPre.style.cssText = 'margin:0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px;font-size:10.5px;'
       + 'line-height:1.55;color:var(--fnos-ui-text);white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;';
-    diagPre.textContent = '点击「刷新」加载诊断信息…';
+    diagPre.textContent = t('点击「刷新」加载诊断信息…');
     const diagBtns = document.createElement('div');
     diagBtns.style.cssText = 'display:flex;gap:6px;padding:8px 0 0;';
     const diagRefresh = mkBtn('刷新', true);
@@ -3482,7 +3672,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const dbgLabel = document.createElement('div');
     dbgLabel.style.cssText = 'color:var(--fnos-ui-sec);font-size:10px;margin:0 0 8px;'
       + 'font-weight:700;text-transform:uppercase;letter-spacing:1.2px;';
-    dbgLabel.textContent = '调试日志';
+    dbgLabel.textContent = t('调试日志');
     secDebugBody.appendChild(dbgLabel);
 
     // 调试开关动态挂载目标：主开关直接进卡片，组件开关进折叠区
@@ -3513,31 +3703,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
 
     // ===== 组件日志（默认折叠，置于主开关下方）=====
-    const dbgFold = document.createElement('div');
-    dbgFold.style.cssText = 'margin-top:4px;';
-    const dbgFoldHeader = document.createElement('div');
-    dbgFoldHeader.style.cssText = 'display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--fnos-ui-muted);'
-      + 'font-size:11.5px;padding:4px 6px;border-radius:6px;user-select:none;transition:background .12s;';
-    dbgFoldHeader.onmouseenter = () => { dbgFoldHeader.style.background = 'var(--fnos-ui-row-hover)'; };
-    dbgFoldHeader.onmouseleave = () => { dbgFoldHeader.style.background = 'transparent'; };
-    const dbgCaret = document.createElement('span');
-    dbgCaret.textContent = '▸';
-    dbgCaret.style.cssText = 'display:inline-block;transition:transform .12s;font-size:10px;';
-    const dbgFoldTitle = document.createElement('span');
-    dbgFoldTitle.textContent = '组件日志（按组件单独控制）';
-    dbgFoldHeader.appendChild(dbgCaret); dbgFoldHeader.appendChild(dbgFoldTitle);
-
-    const dbgFoldBody = document.createElement('div');
-    dbgFoldBody.style.cssText = 'display:none;'; // 默认折叠
-    dbgFoldHeader.addEventListener('click', () => {
-      const collapsed = dbgFoldBody.style.display === 'none';
-      dbgFoldBody.style.display = collapsed ? 'block' : 'none';
-      dbgCaret.style.transform = collapsed ? 'rotate(90deg)' : 'rotate(0deg)';
-    });
+    // [lc-1102] 改用统一的 mkFold：折叠区带 data-fold / data-fold-body 标记 → 设置搜索能穿进来，
+    //   点搜索结果直达时自动展开（此前手搓的折叠区没有标记，这一整块永远搜不到）。
+    const dbgFold = mkFold('组件日志（按组件单独控制）');
+    secDebugBody.appendChild(dbgFold.fold);
+    const dbgFoldBody = dbgFold.body;
 
     const debugHint = document.createElement('div');
     debugHint.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin:6px 0 8px;line-height:1.5;';
-    debugHint.textContent = '关闭时控制台仅显示 警告/错误；开启后可单独控制各组件是否输出详细日志(INFO/DEBUG)。';
+    debugHint.textContent = t('关闭时控制台仅显示 警告/错误；开启后可单独控制各组件是否输出详细日志(INFO/DEBUG)。');
     dbgFoldBody.appendChild(debugHint);
 
     // 组件开关进折叠区
@@ -3560,9 +3734,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         ipcRenderer.invoke('settings:set-debug-components', cur).catch((err) => log('set-debug-components failed', err));
       });
     });
-    dbgFold.appendChild(dbgFoldHeader);
-    dbgFold.appendChild(dbgFoldBody);
-    secDebugBody.appendChild(dbgFold);
 
     // 日志状态文字放在 body 内，避免占用 footer 高度导致左右 footer 不齐
     const logStatus = document.createElement('div');
@@ -3636,7 +3807,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secSkip.el.id = 'sec-skip';
     const skipBody = secSkip.body;
     const skipDesc = document.createElement('div');
-    skipDesc.textContent = '自动加载飞牛/影片库跳过数据；可在播放时显示「跳过片头/片尾」按钮，或开启后自动跳过。';
+    skipDesc.textContent = t('自动加载飞牛/影片库跳过数据；可在播放时显示「跳过片头/片尾」按钮，或开启后自动跳过。');
     skipDesc.style.cssText = 'color:#9aa0a6;font-size:12px;line-height:1.5;margin-bottom:6px;';
     skipBody.appendChild(skipDesc);
     const skipRow = document.createElement('div');
@@ -3645,7 +3816,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     skipRow.onmouseenter = () => { skipRow.style.background = 'var(--fnos-ui-row-hover)'; };
     skipRow.onmouseleave = () => { skipRow.style.background = 'transparent'; };
     const skipLabel = document.createElement('span');
-    skipLabel.textContent = '自动跳过片头片尾';
+    skipLabel.textContent = t('自动跳过片头片尾');
     skipLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const swSkip = document.createElement('input');
     swSkip.type = 'checkbox';
@@ -3665,7 +3836,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const gpDesc = document.createElement('div');
     gpDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    gpDesc.textContent = '支持使用手柄（Xbox/PS/通用）遥控：播放中控制播放器（播放暂停/快退快进/倍速/下一集），未播放时在影视界面导航（方向键/确认/返回）。可自定义各功能对应的按键。';
+    gpDesc.textContent = t('支持使用手柄（Xbox/PS/通用）遥控：播放中控制播放器（播放暂停/快退快进/倍速/下一集），未播放时在影视界面导航（方向键/确认/返回）。可自定义各功能对应的按键。');
     secBodyGamepad.appendChild(gpDesc);
 
     // [lc-680] 手柄连接状态：检测按钮 + 实时状态
@@ -3676,7 +3847,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     gpConnDot.style.cssText = 'width:9px;height:9px;border-radius:50%;background:var(--fnos-ui-warn);flex-shrink:0;';
     const gpConnText = document.createElement('span');
     gpConnText.style.cssText = 'font-size:11px;color:var(--fnos-ui-text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    gpConnText.textContent = '未检测到手柄（先按一下手柄任意键激活）';
+    gpConnText.textContent = t('未检测到手柄（先按一下手柄任意键激活）');
     const gpDetectBtn = mkBtn('检测', true);
     gpDetectBtn.style.cssText = (gpDetectBtn.style.cssText || '') + ';flex-shrink:0;';
     gpConnRow.appendChild(gpConnDot); gpConnRow.appendChild(gpConnText); gpConnRow.appendChild(gpDetectBtn);
@@ -3691,7 +3862,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           gpConnText.textContent = '已连接：' + String(r.id || '手柄').slice(0, 60);
         } else {
           gpConnDot.style.background = 'var(--fnos-ui-warn)';
-          gpConnText.textContent = '未检测到手柄（先按一下手柄任意键激活）';
+          gpConnText.textContent = t('未检测到手柄（先按一下手柄任意键激活）');
         }
       } catch { /* ignore */ }
     };
@@ -3702,7 +3873,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const gpToggleRow = document.createElement('label');
     gpToggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;';
     const gpToggleSpan = document.createElement('span');
-    gpToggleSpan.textContent = '启用手柄控制';
+    gpToggleSpan.textContent = t('启用手柄控制');
     gpToggleSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const gpToggle = document.createElement('input');
     gpToggle.type = 'checkbox';
@@ -3740,7 +3911,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:7px 6px;border-radius:6px;';
         const span = document.createElement('span');
         // [lc-680] 显示默认值提示
-        span.textContent = defaultBtn ? label + `（默认 ${defaultBtn}）` : label;
+        const zhRowLabel = defaultBtn ? label + `（默认 ${defaultBtn}）` : label;
+        span.textContent = t(zhRowLabel);
         span.style.cssText = 'color:var(--fnos-ui-text);font-size:12.5px;';
         select.style.cssText = 'width:150px;height:28px;font-size:11.5px;color:var(--fnos-ui-text);'
             + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:2px 6px;box-sizing:border-box;';
@@ -3752,14 +3924,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 播放控制组
     const gpPlayTitle = document.createElement('div');
     gpPlayTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;';
-    gpPlayTitle.textContent = '播放控制（播放中生效）';
+    gpPlayTitle.textContent = t('播放控制（播放中生效）');
     secBodyGamepad.appendChild(gpPlayTitle);
 
     const gpSelect = (): HTMLSelectElement => {
         const s = document.createElement('select');
         for (const o of gpBtnOptions) {
             const op = document.createElement('option');
-            op.value = o.value; op.textContent = o.label;
+            op.value = o.value; op.textContent = t(o.label);
             s.appendChild(op);
         }
         return s;
@@ -3776,7 +3948,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 界面导航组
     const gpNavTitle = document.createElement('div');
     gpNavTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;';
-    gpNavTitle.textContent = '界面导航（未播放时生效）';
+    gpNavTitle.textContent = t('界面导航（未播放时生效）');
     secBodyGamepad.appendChild(gpNavTitle);
 
     const gpBackSel = gpSelect(); gpBuildRow('返回 / 关闭', 'navBack', gpBackSel, 'B');
@@ -3791,13 +3963,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     ];
     const gpAdvTitle = document.createElement('div');
     gpAdvTitle.style.cssText = 'font-size:11px;font-weight:700;color:var(--fnos-ui-accent);margin:10px 0 4px;cursor:pointer;user-select:none;';
-    gpAdvTitle.textContent = '▶ 高级设置（灵敏度 / 连跳）';
+    gpAdvTitle.textContent = t('▶ 高级设置（灵敏度 / 连跳）');
     const gpAdvBody = document.createElement('div');
     gpAdvBody.style.cssText = 'display:none;';
     gpAdvTitle.addEventListener('click', () => {
         const show = gpAdvBody.style.display !== 'block';
         gpAdvBody.style.display = show ? 'block' : 'none';
-        gpAdvTitle.textContent = (show ? '▼' : '▶') + ' 高级设置（灵敏度 / 连跳）';
+        gpAdvTitle.textContent = (show ? '▼ ' : '▶ ') + t('高级设置（灵敏度 / 连跳）');
     });
     secBodyGamepad.appendChild(gpAdvTitle);
     secBodyGamepad.appendChild(gpAdvBody);
@@ -3807,7 +3979,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 6px;';
         const span = document.createElement('span');
-        span.textContent = it.label;
+        span.textContent = t(it.label);
         span.style.cssText = 'color:var(--fnos-ui-text);font-size:11.5px;flex:1;min-width:0;';
         const val = document.createElement('span');
         val.style.cssText = 'color:var(--fnos-ui-sec);font-size:11px;min-width:36px;text-align:right;';
@@ -3822,7 +3994,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     }
     const gpAdvHint = document.createElement('div');
     gpAdvHint.style.cssText = 'font-size:10px;color:var(--fnos-ui-sub);margin:2px 6px 0;line-height:1.5;';
-    gpAdvHint.textContent = '死区越大摇杆需推越大力才响应；方向阈值同理。长按延迟/连跳间隔控制白框连续移动节奏（仅焦点导航时）。保存后立即生效。';
+    gpAdvHint.textContent = t('死区越大摇杆需推越大力才响应；方向阈值同理。长按延迟/连跳间隔控制白框连续移动节奏（仅焦点导航时）。保存后立即生效。');
     gpAdvBody.appendChild(gpAdvHint);
 
     // 按钮行
@@ -3892,11 +4064,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
             const next = { enabled: gpToggle.checked, bindings, ...adv };
             if (gpApi && gpApi.saveConfig) {
                 gpApi.saveConfig(next);
-                gpStatus.textContent = '已保存 ✓ 立即生效';
+                gpStatus.textContent = t('已保存 ✓ 立即生效');
                 gpStatus.style.color = 'var(--fnos-ui-ok)';
                 gpUpdateConn();
             } else {
-                gpStatus.textContent = '保存失败：手柄插件未就绪';
+                gpStatus.textContent = t('保存失败：手柄插件未就绪');
                 gpStatus.style.color = 'var(--fnos-ui-warn)';
             }
         } catch (err) {
@@ -3910,7 +4082,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         try {
             if (gpApi && gpApi.resetConfig) gpApi.resetConfig();
             if (gpApi && gpApi.getConfig) gpApplyConfig(gpApi.getConfig());
-            gpStatus.textContent = '已恢复默认 ✓';
+            gpStatus.textContent = t('已恢复默认 ✓');
             gpStatus.style.color = 'var(--fnos-ui-ok)';
         } catch (err) {
             gpStatus.textContent = '重置失败：' + String((err as Error)?.message || err);
@@ -3925,7 +4097,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutTitle = document.createElement('div');
     aboutTitle.style.cssText = 'font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);';
-    aboutTitle.textContent = '🎬 飞牛影视';
+    aboutTitle.textContent = t('🎬 飞牛影视');
     secBodyAbout.appendChild(aboutTitle);
 
     const aboutAuthor = document.createElement('div');
@@ -3935,13 +4107,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutDesc = document.createElement('div');
     aboutDesc.style.cssText = 'font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;';
-    aboutDesc.textContent = '基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。支持 MPV 播放器、B站弹幕、自定义透明度与模糊效果。';
+    aboutDesc.textContent = t('基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。支持 MPV 播放器、B站弹幕、自定义透明度与模糊效果。');
     secBodyAbout.appendChild(aboutDesc);
 
     const aboutVer = document.createElement('div');
     aboutVer.id = 'fnos-about-version';
     aboutVer.style.cssText = 'font-size:12.5px;color:var(--fnos-ui-muted);margin-top:2px;';
-    aboutVer.textContent = '版本：获取中…';
+    aboutVer.textContent = t('版本：获取中…');
     secBodyAbout.appendChild(aboutVer);
     // 动态版本号：复用主进程 get-version / version-info（与旧侧栏关于按钮同源）
     try {
@@ -3953,7 +4125,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutLink = document.createElement('a');
     aboutLink.href = ABOUT_LINK_URL;
-    aboutLink.textContent = '🔗 GitHub 项目地址';
+    aboutLink.textContent = t('🔗 GitHub 项目地址');
     aboutLink.style.cssText = 'display:inline-block;font-size:13px;font-weight:700;color:var(--fnos-ui-pill-text);text-decoration:none;'
       + 'padding:8px 20px;border-radius:10px;background:var(--fnos-ui-pill-bg)!important;border:1px solid var(--fnos-ui-pill-border);'
       + 'transition:background .15s,transform .1s;margin-top:6px;cursor:pointer;';
@@ -4013,11 +4185,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           sysStatus.textContent = val ? ('已保存：' + val) : '已设为自动（当前影视连接根路径）';
           sysStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
-          sysStatus.textContent = '保存失败';
+          sysStatus.textContent = t('保存失败');
           sysStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        sysStatus.textContent = '保存失败';
+        sysStatus.textContent = t('保存失败');
         sysStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -4027,11 +4199,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       try {
         const r: any = await ipcRenderer.invoke('settings:set-system-page-url', '');
         if (!r || r.ok !== false) {
-          sysStatus.textContent = '已重置为自动（当前影视连接根路径）';
+          sysStatus.textContent = t('已重置为自动（当前影视连接根路径）');
           sysStatus.style.color = 'var(--fnos-ui-ok)';
         }
       } catch {
-        sysStatus.textContent = '重置失败';
+        sysStatus.textContent = t('重置失败');
         sysStatus.style.color = 'var(--fnos-ui-warn)';
       }
     });
@@ -4051,14 +4223,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const cpDesc = document.createElement('div');
     cpDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    cpDesc.textContent = '为 Bangumi 每日放送、TMDB（影视发现/海报）等数据源指定代理入口。支持 HTTP / HTTPS / SOCKS5，可填账号密码鉴权。优先级低于环境变量 HTTPS_PROXY（已设环境变量则它先生效）。开启开关并填写地址后才生效。';
+    cpDesc.textContent = t('为 Bangumi 每日放送、TMDB（影视发现/海报）等数据源指定代理入口。支持 HTTP / HTTPS / SOCKS5，可填账号密码鉴权。优先级低于环境变量 HTTPS_PROXY（已设环境变量则它先生效）。开启开关并填写地址后才生效。');
     secBodyCustomProxy.appendChild(cpDesc);
 
     // 开关行（整行可点）
     const cpToggleRow = document.createElement('label');
     cpToggleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;';
     const cpToggleSpan = document.createElement('span');
-    cpToggleSpan.textContent = '启用自定义代理';
+    cpToggleSpan.textContent = t('启用自定义代理');
     cpToggleSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const cpToggle = document.createElement('input');
     cpToggle.type = 'checkbox';
@@ -4079,7 +4251,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
     const cpAddr = document.createElement('input');
     cpAddr.type = 'text';
-    cpAddr.placeholder = '主机:端口，如 127.0.0.1:7890';
+    cpAddr.placeholder = t('主机:端口，如 127.0.0.1:7890');
     cpAddr.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
     cpRow1.appendChild(cpType);
     cpRow1.appendChild(cpAddr);
@@ -4090,11 +4262,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     cpRow2.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
     const cpUser = document.createElement('input');
     cpUser.type = 'text';
-    cpUser.placeholder = '账号（可选）';
+    cpUser.placeholder = t('账号（可选）');
     cpUser.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
     const cpPass = document.createElement('input');
     cpPass.type = 'password';
-    cpPass.placeholder = '密码（可选）';
+    cpPass.placeholder = t('密码（可选）');
     cpPass.style.cssText = 'flex:1 1 auto;min-width:0;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
     cpRow2.appendChild(cpUser);
     cpRow2.appendChild(cpPass);
@@ -4213,7 +4385,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const carouselLogoDesc = document.createElement('div');
     carouselLogoDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    carouselLogoDesc.textContent = '开启后，首页轮播图右侧的文字标题会被替换为 TMDB 的透明 Logo 图（仅当该剧集在 TMDB 有透明 Logo 时）。关闭则保留原始文字标题。';
+    carouselLogoDesc.textContent = t('开启后，首页轮播图右侧的文字标题会被替换为 TMDB 的透明 Logo 图（仅当该剧集在 TMDB 有透明 Logo 时）。关闭则保留原始文字标题。');
     secBodyCarousel.appendChild(carouselLogoDesc);
 
     // 开关行（整行可点）：开启=用 logo 图替换右侧文字标题；关闭=保留文字标题
@@ -4223,7 +4395,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const swLogoRow = document.createElement('label');
     swLogoRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;';
     const swLogoSpan = document.createElement('span');
-    swLogoSpan.textContent = '轮播图标题替换为 Logo';
+    swLogoSpan.textContent = t('轮播图标题替换为 Logo');
     swLogoSpan.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     swLogoRow.appendChild(swLogoSpan); swLogoRow.appendChild(swLogo);
     secBodyCarousel.appendChild(swLogoRow);
@@ -4248,7 +4420,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'general', label: '通用', els: [sec3.el, secLang.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
       { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secRender.el, secUX.el] },
-      { id: 'danmaku', label: '弹幕', els: [secBili.el, secDanmaku.el] },
+      // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
+      { id: 'danmaku', label: '弹幕', els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
@@ -4312,7 +4485,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     cats.forEach((cat) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = cat.label;
+      btn.textContent = t(cat.label);
       btn.style.cssText = 'text-align:left;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:13px;'
         + 'border:1px solid transparent;background:transparent;color:var(--fnos-ui-text);'
         + 'transition:background .16s ease,color .16s ease;'
@@ -4342,7 +4515,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const searchInput = document.createElement('input');
     searchInput.id = 'fnos-settings-search-input';
     searchInput.type = 'text';
-    searchInput.placeholder = '搜索设置…（Ctrl+F）';
+    searchInput.placeholder = t('搜索设置…（Ctrl+F）');
     searchInput.spellcheck = false;
     searchInput.style.cssText = 'flex:1;min-width:0;border:none;outline:none;background:transparent;'
       + 'color:var(--fnos-ui-text);font-size:12.5px;';
@@ -4389,19 +4562,37 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       rightContent.scrollTop = 0;
     };
 
+    // [lc-1102] 折叠区走查：卡体直接子级里若有折叠区(data-fold)，下钻一层收集其中的行，
+    //   折叠标题行自身也参与匹配（命中后点直达会展开对应区域）。display 不被继承，
+    //   所以折叠态（body display:none）不影响其中的行被收集。
+    const rowsOf = (bodyEl: HTMLElement): HTMLElement[] => {
+      const out: HTMLElement[] = [];
+      for (const child of Array.from(bodyEl.children) as HTMLElement[]) {
+        if (child.dataset.fold === '1') {
+          for (const fc of Array.from(child.children) as HTMLElement[]) {
+            if (fc.dataset.foldBody === '1') out.push(...(Array.from(fc.children) as HTMLElement[]));
+            else out.push(fc);
+          }
+          continue;
+        }
+        out.push(child);
+      }
+      return out;
+    };
+
     const runSearch = (): void => {
       const raw = searchInput.value;
       const q = norm(raw);
       searchClear.style.display = q ? 'block' : 'none';
       if (!q) { setSearchMode(false); return; }
-      // 实时走查: 分类→卡片(data-sec-body)→直接子级行; 自身 display:none 的行(条件隐藏)不入结果
+      // 实时走查: 分类→卡片(data-sec-body)→行(含折叠区); 自身 display:none 的行(条件隐藏)不入结果
       const hits: { cat: Cat; row: HTMLElement; label: string }[] = [];
       for (const cat of cats) {
         for (const card of cat.els) {
           const bodyEl = Array.from(card.children)
             .find((ch) => (ch as HTMLElement).dataset && (ch as HTMLElement).dataset.secBody === '1') as HTMLElement | undefined;
           if (!bodyEl) continue;
-          for (const row of Array.from(bodyEl.children) as HTMLElement[]) {
+          for (const row of rowsOf(bodyEl)) {
             if (getComputedStyle(row).display === 'none') continue;
             const label = (row.textContent || '').replace(/\s+/g, ' ').trim();
             if (label.length < 2) continue;
@@ -4425,7 +4616,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         item.onmouseenter = () => { item.style.background = 'var(--fnos-ui-row-hover)!important'; };
         item.onmouseleave = () => { item.style.background = 'var(--fnos-ui-input-bg)!important'; };
         const badge = document.createElement('span');
-        badge.textContent = cat.label;
+        badge.textContent = t(cat.label);
         badge.style.cssText = 'flex-shrink:0;font-size:10px;font-weight:700;color:#fff;padding:3px 8px;'
           + 'border-radius:6px;background:var(--fnos-ui-accent)!important;letter-spacing:.3px;';
         const txt = document.createElement('span');
@@ -4437,11 +4628,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         arrow.style.cssText = 'flex-shrink:0;color:var(--fnos-ui-sub);font-size:11px;';
         item.appendChild(badge); item.appendChild(txt); item.appendChild(arrow);
         item.addEventListener('click', () => {
-          // 直达: 清搜索→退搜索态→切分类→滚动居中→高亮脉冲
+          // 直达: 清搜索→退搜索态→切分类→展开折叠区→滚动居中→高亮脉冲
           searchInput.value = '';
           searchClear.style.display = 'none';
           setSearchMode(false);
           selectCat(cat.id);
+          // [lc-1102] 命中行在折叠区内(或命中的就是折叠标题) → 先展开，否则滚到一个隐藏元素，表现为「点了没反应」
+          const foldHost = row.closest('[data-fold]') as HTMLElement | null;
+          if (foldHost && typeof (foldHost as any).__setOpen === 'function') (foldHost as any).__setOpen(true);
           requestAnimationFrame(() => {
             row.scrollIntoView({ behavior: 'smooth', block: 'center' });
             row.classList.remove('fnos-search-hit');
@@ -4501,15 +4695,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       try {
         const st: any = await ipcRenderer.invoke('douban:login-status');
         if (st && st.loggedIn) {
-          doubanStatus.textContent = '已登录豆瓣 ✓';
+          doubanStatus.textContent = t('已登录豆瓣 ✓');
           doubanStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
-          doubanStatus.textContent = '未登录豆瓣（点"扫码登录"）';
+          doubanStatus.textContent = t('未登录豆瓣（点"扫码登录"）');
           doubanStatus.style.color = 'var(--fnos-ui-warn)';
         }
         swDouban.checked = !!(st && st.enabled);
       } catch {
-        doubanStatus.textContent = '状态获取失败';
+        doubanStatus.textContent = t('状态获取失败');
         doubanStatus.style.color = 'var(--fnos-ui-warn)';
       }
     };
@@ -4521,14 +4715,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       try {
         const st: any = await ipcRenderer.invoke('bili:cookie-status');
         if (st && st.exists) {
-          biliStatus.textContent = '已登录 ✓';
+          biliStatus.textContent = t('已登录 ✓');
           biliStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
-          biliStatus.textContent = '未登录';
+          biliStatus.textContent = t('未登录');
           biliStatus.style.color = 'var(--fnos-ui-warn)';
         }
       } catch {
-        biliStatus.textContent = '状态获取失败';
+        biliStatus.textContent = t('状态获取失败');
         biliStatus.style.color = 'var(--fnos-ui-warn)';
       }
     };
@@ -4572,7 +4766,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           + '<div class="fnos-bili-tip" style="font-size:12px;color:var(--fnos-ui-muted);min-height:18px;margin-bottom:14px;">准备中…</div>';
         const closeB = document.createElement('button');
         closeB.type = 'button';
-        closeB.textContent = '取消';
+        closeB.textContent = t('取消');
         closeB.style.cssText = 'width:100%;padding:9px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;'
           + 'background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text2);border:1px solid var(--fnos-ui-border-strong);';
         box.appendChild(closeB);
@@ -4592,7 +4786,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       clearInterval(_biliQrTimer);
 
       const okLib = await ensureBiliQrLib();
-      if (!okLib) { if (qrWrap) qrWrap.textContent = '二维码库加载失败'; return; }
+      if (!okLib) { if (qrWrap) qrWrap.textContent = t('二维码库加载失败'); return; }
       const gen: any = await ipcRenderer.invoke('bili:qr-generate');
       if (!gen || !gen.ok) { if (qrWrap) qrWrap.textContent = '获取失败: ' + ((gen && gen.error) || '未知'); return; }
       try {
@@ -4603,17 +4797,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       } catch (e: any) {
         if (qrWrap) qrWrap.textContent = '渲染失败: ' + (e?.message || e);
       }
-      if (tip) tip.textContent = '请用 B站 APP 扫码';
+      if (tip) tip.textContent = t('请用 B站 APP 扫码');
       _biliQrTimer = window.setInterval(async () => {
         const r: any = await ipcRenderer.invoke('bili:qr-poll', gen.key);
         if (r.code === 0) {
           clearInterval(_biliQrTimer);
-          if (tip) tip.textContent = '登录成功！';
+          if (tip) tip.textContent = t('登录成功！');
           refreshBili();
           window.setTimeout(() => { m.style.display = 'none'; }, 900);
         } else if (r.expired) {
           clearInterval(_biliQrTimer);
-          if (tip) tip.textContent = '二维码已过期，请重新点击扫码登录';
+          if (tip) tip.textContent = t('二维码已过期，请重新点击扫码登录');
           if (qrWrap) qrWrap.innerHTML = '二维码已失效';
         } else {
           if (tip) tip.textContent = r.status || '等待扫码…';
@@ -4628,7 +4822,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const r: any = await ipcRenderer.invoke('bili:clear');
         biliStatus.textContent = (r && r.ok) ? '已清除登录信息' : '清除失败';
         biliStatus.style.color = 'var(--fnos-ui-warn)';
-      } catch { biliStatus.textContent = '清除失败'; }
+      } catch { biliStatus.textContent = t('清除失败'); }
     });
     saveBiliCookieBtn.addEventListener('click', async (e: Event) => {
       e.stopPropagation();
@@ -4722,7 +4916,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           bangumiReal = bt;
           bangumiInput.value = maskBangumi(bt);
           bangumiInput.readOnly = true;
-          bangumiStatus.textContent = '已保存 Token';
+          bangumiStatus.textContent = t('已保存 Token');
           bangumiStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
           bangumiReal = '';
@@ -4741,7 +4935,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           tmdbReal = kt;
           tmdbInput.value = maskTmdb(kt);
           tmdbInput.readOnly = true;
-          tmdbStatus.textContent = '已保存 TMDB Key';
+          tmdbStatus.textContent = t('已保存 TMDB Key');
           tmdbStatus.style.color = 'var(--fnos-ui-ok)';
         } else {
           tmdbReal = '';
@@ -4773,7 +4967,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         ddIdInput.readOnly = !!ddRealId;
         ddSecretInput.value = ddRealSecret ? maskDd(ddRealSecret) : '';
         ddSecretInput.readOnly = !!ddRealSecret;
-        if (ddRealId) ddStatus.textContent = '已保存自定义凭证，下次 MPV 播放时生效。';
+        if (ddRealId) ddStatus.textContent = t('已保存自定义凭证，下次 MPV 播放时生效。');
+        ddSetState(!!ddRealId);
+        // [lc-1101] 自建弹幕接口回填（地址非敏感，明文显示；程序化赋值不触发 change，不会误保存）
+        swDanmuApi.checked = s.danmuApiEnabled === true;
+        dmApiInput.value = s.danmuApiBase || '';
+        if (swDanmuApi.checked) {
+          dmApiStatus.textContent = dmApiInput.value
+            ? t('已启用自建弹幕接口作为优选源，未命中时自动降级到 B站。')
+            : t('已开启但未填服务地址 —— 展开「服务地址与连通测试」填写后点保存。');
+          dmApiStatus.style.color = dmApiInput.value ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
+        }
       });
       // 诊断日志：面板每次打开都记录关键回填值，便于核对「配置文件 vs 面板显示」是否一致
       log('SETTINGS refresh done: bangumiSyncEnabled=' + String(s.bangumiSyncEnabled)
@@ -4840,6 +5044,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const sel = (overlay as any)._selectCat;
       if (catMap[sectionId] && typeof sel === 'function') {
         sel(catMap[sectionId]);
+        // [lc-1102] 「弹幕样式」入口的语义是去改屏蔽/屏蔽词，而屏蔽卡默认折叠 → 该入口额外展开
+        if (sectionId === 'danmaku') {
+          const ex = (overlay as any)._expandDanmakuFold;
+          if (typeof ex === 'function') ex();
+        }
       } else {
         const target = document.getElementById('sec-' + sectionId);
         if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
