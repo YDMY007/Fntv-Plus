@@ -1115,8 +1115,9 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
     if platform == "windows" then
         res = mp.command_native({
             name = "subprocess",
+            -- [lc-1092] 必须钉 UTF8, 否则 PowerShell 按控制台代码页(中文机=GBK)重写 stdout。
             args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                     "try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
             capture_stdout = true, capture_stderr = true,
         })
     else

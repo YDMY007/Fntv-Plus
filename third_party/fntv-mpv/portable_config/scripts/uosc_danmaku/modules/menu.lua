@@ -543,7 +543,11 @@ function open_bili_candidates_menu(title, ep, season)
         res = mp.command_native({
             name = "subprocess",
             args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
-                     "try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+                     -- [lc-1092] PowerShell 用「控制台输出编码」写 stdout: 中文机器上那是 GBK,
+                     -- shim 返回的 UTF-8 JSON 会被整段重编码(实测 摇 e69187 → GBK d2a1),
+                     -- mpv/Lua 再按 UTF-8 读 → 候选标题全是乱码; 西语机器(CP437)更直接变一串 ?。
+                     -- 显式钉成 UTF8 后与本机代码页无关(三种代码页实测均产出正确 UTF-8 字节)。
+                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
             capture_stdout = true, capture_stderr = true,
         })
     else
