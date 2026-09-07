@@ -295,6 +295,21 @@ export class ApiService {
     }
 
     /**
+     * 字幕标题是否「只含语言标签/空/序号」，即不带任何片名信息。
+     * fnOS 外挂字幕的标题常直接取字幕流内部的语言元数据（实测如 "Chinese Simplified"、""、" 1"），
+     * 这类标题既无法参与片名匹配，也不可能是「别的剧的字幕」，因此不该被标题匹配一票否决。
+     */
+    private isLanguageLabelOnly(title: string): boolean {
+        const t = (title || '').trim().toLowerCase();
+        if (!t || /^[\d\s._\-()#]+$/.test(t)) return true;
+        const LANG = '(chinese|english|japanese|korean|french|german|spanish|portuguese|russian|italian'
+            + '|arabic|thai|vietnamese|indonesian|malay|simplified|traditional|mandarin|cantonese'
+            + '|zh|chi|zho|chs|cht|sc|tc|eng|jpn|kor|ja|en'
+            + '|简体|繁体|简中|繁中|中文|中字|国语|粤语|日语|英语|韩语|双语)';
+        return new RegExp(`^${LANG}([\\s._\\-/|+]*${LANG})*[\\s._\\-()#\\d]*$`).test(t);
+    }
+
+    /**
      * 获取字幕文件列表（中文优先 + 标题匹配）
      * @param itemGuid - 视频项目的唯一标识符
      * @param videoTitle - 可选，影片中文标题，用于挑选同剧同集的正确字幕
@@ -308,21 +323,37 @@ export class ApiService {
             if (response.success && response.data) {
                 const streams: types.SubtitleStreamExtended[] =
                     (response.data.subtitle_streams as types.SubtitleStreamExtended[]) || [];
-                const external = streams.filter(stream => stream.is_external);
+                // fnOS 用 extra_file 标记「与视频同目录的独立字幕文件」；is_external 在当前版本恒为 0
+                // (实测 14/14 个 item 全为 0)，只按它过滤会让外挂字幕一条都挂不上。保留 is_external 兼容旧版。
+                const isExternalFile = (s: types.SubtitleStreamExtended) =>
+                    Number(s.extra_file) === 1 || Number(s.is_external) === 1;
+                const external = streams.filter(isExternalFile);
+                // 内封字幕轨由播放器从容器里自行读取(并按 slang 自动选中)，不需要也不应由我们外挂
+                const embedded = streams.filter(s => !isExternalFile(s));
 
                 if (external.length === 0) {
-                    log.info('没有找到外挂字幕文件');
+                    log.info(`没有找到外挂字幕文件(内封字幕轨 ${embedded.length} 条由播放器自行读取)`);
                     return [];
                 }
 
                 // 优先中文外挂字幕；若服务端未提供任何中文，则回退到全部外挂（避免无字幕可用）
                 const chinese = external.filter(s => this.isChineseSubtitle(s));
+                // 无中文外挂、但容器已内封中文字幕时不回退挂非中文外挂：
+                // 挂载会 select 新轨，把播放器已自动选中的内封中文字幕顶掉。
+                if (chinese.length === 0 && embedded.some(s => this.isChineseSubtitle(s))) {
+                    log.info(`外挂字幕无中文(共 ${external.length} 条)且已有内封中文字幕轨，跳过挂载以免顶掉中文`);
+                    return [];
+                }
                 const pool = chinese.length > 0 ? chinese : external;
 
                 // 计算每条字幕标题与影片标题的匹配度，用于剔除错配
                 // （飞牛偶发把别的剧字幕元数据挂到本集，如本集返回「佐罗」字幕）
                 pool.forEach(s => { (s as any).__score = this.scoreSubtitleTitle(s, videoTitle); });
-                const matched = pool.filter(s => (s as any).__score > 0);
+                // 标题只是语言标签/空/序号的外挂字幕不含片名信息，标题匹配对它必然判 0；
+                // 其归属已由服务端 media_guid 精确绑定到本集媒体文件(实测全部 BOUND-OK)，不存在跨剧错配。
+                // 故只让带实义片名的标题参与「一票否决」，语言标签类字幕保留（lc-010『佐罗』防护不受影响）。
+                const matched = pool.filter(s =>
+                    this.isLanguageLabelOnly(s.title) || (s as any).__score > 0);
 
                 // 是否为分集内容（电视剧/综艺）：视频标题含 SxxExx 即视为剧集
                 const isEpisode = /s\d+e\d+/i.test(videoTitle || '');
