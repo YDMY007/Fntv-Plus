@@ -104,11 +104,10 @@ function buildDialog(payload: FnosDialogPayload): HTMLElement {
     const card = document.createElement('div');
     card.setAttribute('data-fnos-ui', '1');
     card.setAttribute('data-fnos-dialog-card', '1');
-    // [lc-1071] 材质 = #fnos-settings-panel 的计算材质：面板原生写法是
-    //   background:var(--fnos-ui-panel-bg) 后紧跟 background-image:光泽渐变，后者覆盖前者，
-    //   故面板实际表面 = 165deg 光泽渐变（近透明）+ blur(30px) saturate(150%) 磨砂。
-    //   此处直接落同一条渐变；主题 tint 底色由 ensureDialogStyle 的样式表接管
-    //   （内联只钉 background-image，不占 background-color 长手位）。
+    // [lc-1071] 材质对齐 #fnos-settings-panel：lc-1097 后面板 = 一条 background-image 里
+    //   「165deg 光泽渐变, var(--fnos-ui-panel-bg)」两层(光泽在上、tint 在下)。弹窗卡片等价分层：
+    //   内联只钉光泽渐变(不占 background-color 长手位)，tint 底由 ensureDialogStyle 的
+    //   样式表以 !important 接管 —— 弹窗可能浮在任意页面(含播放页)上，必须有主题底色兜底。
     card.style.cssText = [
         'position:relative', 'overflow:hidden',
         'min-width:420px', 'max-width:600px', 'width:90%',

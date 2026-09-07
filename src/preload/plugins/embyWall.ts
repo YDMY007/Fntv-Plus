@@ -1247,9 +1247,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       //   height:auto 会导致面板随内容伸缩)。固定高度 + bodyRow flex:1 + 右内容区
       //   overflow-y:auto 实现"面板恒定、内容内部滚动"。
       + 'height:min(820px,calc(100vh - 100px));max-height:calc(100vh - 100px);overflow:hidden;color:var(--fnos-ui-text);font-size:12.5px;line-height:1.45;'
-      + 'background:var(--fnos-ui-panel-bg)!important;'
-      // [lc-1043] 165deg 顶缘受光光泽渐变 —— 与 glassUI ② 卡片材质同配方，风格统一
-      + 'background-image:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.015) 45%,rgba(255,255,255,.005) 100%)!important;'
+      // [lc-1097] 光泽渐变与 tint 底必须同处一条 background-image(逗号分层: 光泽在上、tint 在下)。
+      //   原写法 background:var(--fnos-ui-panel-bg) 会被紧随的 background-image 整条覆盖,
+      //   面板实际表面≈全透(峰值 .06), 文字直接压在模糊壁纸上 —— 「设置面板字看不清」的真因。
+      + 'background-image:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.015) 45%,rgba(255,255,255,.005) 100%),var(--fnos-ui-panel-bg)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       // [lc-1043] 去 1px 描边改 inset 玻璃厚度环（glassUI ② 同款三层阴影语言；用户审美：无边框）
       + 'box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.5),0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
