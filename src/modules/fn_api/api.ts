@@ -393,10 +393,12 @@ export class ApiService {
 
                 // 只选用「最佳匹配」的一条，避免一次性挂载多条字幕
                 const best = usePool[0];
+                // fnOS 外挂字幕的 title 常是空串(实测)，不兜底挂载出的轨道名/文件名会是 '@guid.ass'
+                const bestLang = String(best.language || '').trim();
                 const subtitle: types.Subtitle = {
                     id: best.guid,
                     format: best.format,
-                    name: best.title
+                    name: String(best.title || '').trim() || bestLang || ('字幕-' + String(best.guid).slice(0, 8)),
                 };
                 if (forcedFallback) {
                     log.warn(`字幕标题未与影片(${videoTitle})匹配，已退化挂载最佳一条(可能不准确):`,

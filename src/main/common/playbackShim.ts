@@ -89,6 +89,16 @@ class PlaybackShim {
             this.handleDanmakuByBvid(req, res);
             return;
         }
+        // [lc-1096] NAS 外挂字幕列表：MPV「加载字幕」菜单经此取当前集的 fnOS 外挂字幕（与原生网页字幕菜单同源）
+        if (pathname === '/nas-subtitles') {
+            this.handleNasSubtitles(req, res);
+            return;
+        }
+        // [lc-1096] 用户选定某条字幕后，主进程下载/复用本地临时文件并回传路径，供 mpv sub-add 挂载
+        if (pathname === '/nas-subtitle-file') {
+            this.handleNasSubtitleFile(req, res);
+            return;
+        }
         const m = pathname.match(/^\/p\/([^/]+)\//);
         if (!m) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -742,6 +752,90 @@ class PlaybackShim {
             }
         }).catch((e) => {
             log.warn(`[playbackShim][danmaku-by-bvid] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
+    // ===================== NAS 字幕端点（/nas-subtitles、/nas-subtitle-file）=====================
+
+    /** [lc-1096] 解析 lua 从播放 URL 透传来的 fnOS 连接参数；缺参直接回 400 并返回 null。 */
+    private nasFnParams(res: http.ServerResponse, q: Record<string, string | undefined>): { api: ApiService; itemGuid: string } | null {
+        const itemGuid = (q.itemGuid || '').toString();
+        const token = (q.token || '').toString();
+        const domain = (q.domain || '').toString();
+        if (!itemGuid || !token || !domain) {
+            this.json(res, 400, { ok: false, error: '缺少 itemGuid / token / domain 参数' });
+            return null;
+        }
+        return { api: new ApiService(domain, token), itemGuid };
+    }
+
+    /**
+     * [lc-1096] 处理 /nas-subtitles：返回当前集的外挂字幕清单（guid/title/format/language/is_default）。
+     * 只列 extra_file=1（或旧版 is_external=1）的独立字幕文件——内封轨播放器自己会读，不该在这里重复挂。
+     */
+    private handleNasSubtitles(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const p = this.nasFnParams(res, q);
+        if (!p) return;
+        p.api.getStreamList(p.itemGuid).then((r) => {
+            const streams: any[] = (r.success && r.data && (r.data as any).subtitle_streams) || [];
+            const items = streams
+                .filter((s) => Number(s.extra_file) === 1 || Number(s.is_external) === 1)
+                .map((s, i) => {
+                    const lang = String(s.language || '').trim();
+                    // fnOS 外挂字幕的 title 常是空串/纯语言标签(lc-1093 实测)，不兜底菜单里全是 guid
+                    const title = String(s.title || '').trim() || [lang && lang !== 'und' ? lang : '', `字幕#${i + 1}`].filter(Boolean).join(' ');
+                    return {
+                        guid: String(s.guid || ''),
+                        title,
+                        format: String(s.format || 'srt'),
+                        language: lang,
+                        is_default: Number(s.is_default) || 0,
+                    };
+                });
+            log.info(`[playbackShim][nas-subtitles] itemGuid=${p.itemGuid} 外挂字幕 ${items.length} 条(流共 ${streams.length} 条)`);
+            this.json(res, 200, { ok: true, items });
+        }).catch((e) => {
+            log.warn(`[playbackShim][nas-subtitles] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
+    /**
+     * [lc-1096] 处理 /nas-subtitle-file：下载（或复用已缓存的）指定 guid 字幕到本地临时目录，回传绝对路径。
+     * 标题/格式不回传自 lua（含中文，拼 URL 易错），而是用 getStreamListCached 反查；downloadSubtitle
+     * 自身带「已存在即跳过」缓存，菜单里反复选同一条不会重复下载。
+     */
+    private handleNasSubtitleFile(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const p = this.nasFnParams(res, q);
+        if (!p) return;
+        const guid = (q.guid || '').toString();
+        if (!guid) {
+            this.json(res, 400, { ok: false, error: '缺少 guid 参数' });
+            return;
+        }
+        p.api.getStreamListCached(p.itemGuid).then((r) => {
+            const streams: any[] = (r.success && r.data && (r.data as any).subtitle_streams) || [];
+            const idx = streams.findIndex((s) => String(s.guid) === guid);
+            const hit = idx >= 0 ? streams[idx] : undefined;
+            const lang = String(hit?.language || '').trim();
+            const name = String(hit?.title || '').trim() || [lang && lang !== 'und' ? lang : '', `字幕#${idx + 1}`].filter(Boolean).join(' ');
+            const sub = { id: guid, name: name || guid, format: hit?.format || 'srt' };
+            return p.api.downloadSubtitle([sub]).then((paths) => {
+                if (!paths || paths.length === 0) {
+                    log.warn(`[playbackShim][nas-subtitle-file] 下载失败 guid=${guid}`);
+                    this.json(res, 200, { ok: false, error: '字幕下载失败(NAS 上不存在或无权限)' });
+                    return;
+                }
+                log.info(`[playbackShim][nas-subtitle-file] 就绪 guid=${guid} -> ${paths[0]}`);
+                this.json(res, 200, { ok: true, path: paths[0], title: sub.name });
+            });
+        }).catch((e) => {
+            log.warn(`[playbackShim][nas-subtitle-file] 异常: ${e?.message || e}`);
             this.json(res, 500, { ok: false, error: String(e?.message || e) });
         });
     }

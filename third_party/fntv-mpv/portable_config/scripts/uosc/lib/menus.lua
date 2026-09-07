@@ -858,6 +858,13 @@ function create_track_loader_menu_opener(opts)
 		---@type Menu
 		local menu
 		local path = state.path
+		-- [fntv lc-1096] 播本工程代理流(NAS 视频)时本地磁盘浏览器没有意义（媒体不在本机），
+		-- 委托 fntv_nas_sub 脚本开 fnOS NAS 外挂字幕菜单（与原生网页字幕菜单同源）；
+		-- 本地文件/外链播放仍走下面的 uosc 原浏览器。
+		if path and is_protocol(path) and path:match('^https?://127%.0%.0%.1:2234[67]/') then
+			mp.commandv('script-message', 'fntv-nas-sub-open')
+			return
+		end
 		if path then
 			if is_protocol(path) then
 				path = false
