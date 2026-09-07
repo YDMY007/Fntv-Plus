@@ -888,7 +888,7 @@ mp.register_event("file-loaded", function()
     -- 该番不在库 / 文件名乱码），DANMAKU.anime 为空，B站 就彻底不自动搜索，
     -- 表现「弹弹play 没匹配到、B站 也只能手点」。现把 B站 触发提到 dir 守卫之前，
     -- 网络流统一用 media-title 解析番名+集数直接触发；本地文件行为不变。
-    if options.auto_load_extra then
+    if options.auto_load_extra or options.danmu_api_enabled then
         ENABLED = true
         bili_auto_triggered = false
         -- 对于网络流媒体，filename 是 URL 路径（可能含 IP 地址等无意义字符），
@@ -951,7 +951,7 @@ mp.register_event("file-loaded", function()
         end
     end
 
-    if options.auto_load_extra then
+    if options.auto_load_extra or options.danmu_api_enabled then
         -- 本地文件：B站 已由上方触发，弹弹play 作为兜底源叠加（匹配成功会再用更准的番名补一次 B站）
         auto_load_danmaku(path, dir, filename)
         addon_danmaku(dir, false)
@@ -1139,5 +1139,8 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
     end
     BILI_INFO = parsed
     add_danmaku_source_local(out_xml, false)
-    show_message(("已使用选定视频弹幕：%s（BV:%s，%d 条）"):format(title, bvid, parsed.danmaku_count or 0), 4)
+    -- 自建弹幕接口(danmu_api)的候选用 dmapi:<episodeId> 伪 bvid 回流，不能当 BV 号显示
+    local bvs = tostring(bvid or "")
+    local id_label = (bvs:sub(1, 6) == "dmapi:") and ("自建源 ID:%s"):format(bvs:sub(7)) or ("BV:%s"):format(bvs)
+    show_message(("已使用选定视频弹幕：%s（%s，%d 条）"):format(title, id_label, parsed.danmaku_count or 0), 4)
 end)

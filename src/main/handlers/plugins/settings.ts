@@ -10,7 +10,8 @@ import { fnosDialog } from '../../common/fnosDialog';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { clearAllPatches } from '../../../modules/patcher/patchApplier';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials, applyRenderPreset, ensureStatsKeyBinding } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials, writeDanmuApiConf, applyRenderPreset, ensureStatsKeyBinding } from './mpvConfig';
+import * as danmuApi from '../../common/danmuApi';
 import * as log from '../../../modules/logger';
 
 /**
@@ -50,6 +51,10 @@ async function handleGetSettings(): Promise<any> {
         // [lc-1018] 弹弹play 开放 API 自定义凭证（渲染端只显示掩码，不回显明文）
         dandanplayAppId: fnConfig.getDandanplayAppId(),
         dandanplayAppSecret: fnConfig.getDandanplayAppSecret(),
+        // [lc-1101] 自建弹幕接口（danmu_api）：开关 + 服务地址。地址可能把 TOKEN 作为路径段携带，
+        //   但必须明文回填供用户编辑（本机 IPC，不出网）；[lc-1104] 它不得进 conf / 日志 / 打包产物。
+        danmuApiEnabled: fnConfig.getDanmuApiEnabled(),
+        danmuApiBase: fnConfig.getDanmuApiBase(),
         detailBoxless: fnConfig.getDetailBoxless(),
         // [lc-1014] 硬件加速（重启生效）与性能模式（即时生效）
         hwAccelEnabled: fnConfig.getHwAccelEnabled(),
@@ -370,6 +375,29 @@ async function handleSetDandanplayCredentials(_event: any, payload: { appId?: st
     fnConfig.setDandanplayCredentials(appId, appSecret);
     writeDandanplayCredentials(appId, appSecret);
     log.info('弹弹play 自定义凭证 →', appId ? (appId.slice(0, 2) + '***(已保存)') : '(已清除,回落内置共享凭证)');
+}
+
+// [lc-1101] 设置「自建弹幕接口（danmu_api）」开关与地址：写 config + 同步 script-opts/uosc_danmaku.conf。
+// 开启即成为弹幕优选源（biliRunner 三个入口先问它）；未命中自动降级内置 B站 弹幕链路。
+// 地址非法时照样保存（用户可能正在配），但把校验结论回给面板，避免「开了却没反应」的哑失败。
+async function handleSetDanmuApi(_event: any, payload: { enabled?: boolean; base?: string }): Promise<any> {
+    const enabled = !!(payload && payload.enabled);
+    const base = String((payload && payload.base) || '').trim().replace(/\/+$/, '');
+    fnConfig.setDanmuApi(enabled, base);
+    writeDanmuApiConf(enabled, base);
+    // [lc-1104] 不打 base 值：danmu_api 的 TOKEN 是地址的路径段，而 app.log 是用户会整段转贴的东西
+    log.info('自建弹幕接口 →', `enabled=${enabled} 地址已配置=${!!base}`);
+    if (enabled && !danmuApi.isValidBase(base)) {
+        return { ok: false, error: '地址格式应为 http://IP:端口（如 http://192.168.1.10:9321）' };
+    }
+    return { ok: true };
+}
+
+// [lc-1101] 测试自建弹幕接口连通性（用面板当前输入的地址；留空则用已保存的地址）
+async function handleTestDanmuApi(_event: any, base?: string): Promise<{ ok: boolean; message: string }> {
+    const r = await danmuApi.testConnection(typeof base === 'string' ? base.trim() : '');
+    log.info('自建弹幕接口测试 →', `${r.ok ? '成功' : '失败'}: ${r.message}`);
+    return r;
 }
 
 // 用系统默认浏览器打开外部链接（设置面板内的可点击链接用）
@@ -755,6 +783,14 @@ function init(): void {
         writeDandanplayCredentials(ddId, fnConfig.getDandanplayAppSecret());
         if (ddId) log.info('启动同步弹弹play凭证:', ddId.slice(0, 2) + '***');
     } catch (e) { log.warn('启动同步弹弹play凭证失败', e); }
+    // [lc-1101] 启动时把「自建弹幕接口」开关同步到 script-opts/uosc_danmaku.conf。
+    //   随包分发的 conf 里没有 danmu_api_enabled，不补这一次的话，全新安装/升级后
+    //   Lua 侧闸门要等用户打开设置面板点保存才会出现（表现为「配置了却不生效」）。
+    //   [lc-1104] 地址不写进 conf：它可能带 TOKEN，而 conf 既被 git 跟踪又随安装包分发；
+    //   地址只存 config.json，由主进程 danmuApi.ts 发请求，Lua 侧只需要这个布尔闸门。
+    try {
+        writeDanmuApiConf(fnConfig.getDanmuApiEnabled(), fnConfig.getDanmuApiBase());
+    } catch (e) { log.warn('启动同步自建弹幕接口配置失败', e); }
     // 启动时把已保存的「默认 MPV 着色器 / ICC 校色」重新写回活动配置目录。
     // 关键修复：旧实现只在面板改着色器时写 portable_config 单一目录，而 MPV 在 Windows 标准模式下
     // 读的是用户配置目录(AppData/Roaming/mpv)；加上 writeMpvUserConfig 现双写到两个目录，
@@ -797,6 +833,9 @@ function init(): void {
     registerHandler('settings:set-mpv-bili-search-enabled', handleSetMpvBiliSearchEnabled, { useHandle: true });
     registerHandler('settings:set-mpv-bili-aggregate-threshold', handleSetMpvBiliAggregateThreshold, { useHandle: true });
     registerHandler('settings:set-dandanplay-credentials', handleSetDandanplayCredentials, { useHandle: true });
+    // [lc-1101] 自建弹幕接口（danmu_api）：保存开关+地址 / 测试连通性
+    registerHandler('settings:set-danmu-api', handleSetDanmuApi, { useHandle: true });
+    registerHandler('settings:test-danmu-api', handleTestDanmuApi, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
     registerHandler('settings:set-carousel-logo', handleSetCarouselLogoEnabled, { useHandle: true });

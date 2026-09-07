@@ -602,6 +602,49 @@ function writeDandanplayCredentials(appId: string, appSecret: string): void {
     }
 }
 
+// [lc-1101] 写入「自建弹幕接口（danmu_api）」开关到 script-opts/uosc_danmaku.conf。
+// 这个键只是 Lua 侧的【闸门】：danmu_api_enabled 让自动补源在「B站弹幕搜索」关闭时也能触发
+// （main.lua:891/954、apis/dandanplay.lua:53 的 `auto_load_extra or danmu_api_enabled`），
+// 真正的服务地址由主进程从 config.json 读（danmuApi.ts），Lua 不参与 HTTP。
+// ⚠️ 双写 portable_config 与用户配置目录（AppData/Roaming/mpv），同 writeDandanplayCredentials 的 lc-094 教训。
+// 未启用或地址为空 → 从 conf 删键（options.lua 默认 danmu_api_enabled=false，即完全走内置 B站 链路）。
+// ⚠️ [lc-1104] 绝不把 base 写进 conf：它 Lua 侧零读取，而 portable_config 是 git 跟踪且随安装包
+//   分发的目录 —— 实测已把用户内网地址连同 TOKEN 路径写进仓库工作区和 win-unpacked。地址只存 config.json。
+//   下面的 filter 仍会清掉历史版本残留的 danmu_api_base 行，升级后用户机器上的明文 TOKEN 自动消失。
+function writeDanmuApiConf(enabled: boolean, base: string): void {
+    try {
+        const on = !!enabled;
+        const hasBase = !!String(base || '').trim();
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) {
+                    fs.mkdirSync(scriptOptsDir, { recursive: true });
+                }
+                const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                lines = lines.filter(l => !/^\s*(danmu_api_enabled|danmu_api_base)\s*=/.test(l)
+                    && !/^#\s*自建弹幕接口/.test(l));
+                while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+                if (on && hasBase) {
+                    lines.push('# 自建弹幕接口（danmu_api）：由应用设置面板控制，作为弹幕优选源；未命中自动降级内置B站弹幕');
+                    lines.push('danmu_api_enabled=yes');
+                }
+                fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                logger.info(`MPV 自建弹幕接口已写入: ${target} (enabled=${on}, 地址已配置=${hasBase})`);
+            } catch (e) {
+                logger.error(`写入 uosc_danmaku.conf (自建弹幕接口) 失败: ${dir}`, e);
+            }
+        }
+    } catch (error) {
+        logger.error('写入自建弹幕接口配置失败:', error);
+    }
+}
+
 // 写入 B站弹幕「样式与过滤」到 script-opts/uosc_danmaku.conf（覆盖 fontsize/opacity/outline/shadow/bold/displayarea/max_screen_danmaku/blacklist_path）
 // 同时把屏蔽词写入 <portable_config>/danmaku_blacklist.txt（用 ~~ 相对路径引用，MPV 自动解析到当前配置目录），
 // 把弹幕屏蔽类型写入 <portable_config>/scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.js 启动时读取并过滤）。
@@ -717,5 +760,6 @@ export {
     writeThumbfastConf,
     writeBiliAggregateThreshold,
     writeBiliDanmakuStyle,
-    writeDandanplayCredentials
+    writeDandanplayCredentials,
+    writeDanmuApiConf
 };

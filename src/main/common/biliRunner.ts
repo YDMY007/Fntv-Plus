@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
+import * as danmuApi from './danmuApi';
 const log = logger.component('biliRunner');
 
 /**
@@ -11,9 +12,13 @@ const log = logger.component('biliRunner');
  * 而 Node 运行时本就包含在 electron.exe 内，因此可直接在【主进程内 require 并运行】，
  * 无需捆绑 ~20MB 的 Python 安装包，也不依赖用户本机装有 node/python。
  *
- * 两个消费者都会走这里：
- *   - MPV / Lua（extra.lua）：经本地 shim(127.0.0.1:22347) 的 /danmaku 端点触发；
- *   - PotPlayer（biliDanmaku.ts）：直接在本模块内调用 runBiliDanmaku()。
+ * 消费者都走这里（也因此这里是弹幕源优选的唯一挂载点，见下）：
+ *   - MPV / Lua（extra.lua / menu.lua / main.lua）：经本地 shim(127.0.0.1:22347) 的三个 danmaku 端点触发；
+ *   - 原生网页播放器的弹幕 overlay（danmakuWeb.ts → biliDanmaku.ts:436 getDanmakuItems）：直接调 runBiliDanmaku()；
+ *   - PotPlayer 链路（biliDanmaku.ts:54 fetchBiliDanmakuXml → ASS）：同入口，当前已无调用方（弹幕触发在 potplayer.ts 移除）。
+ *
+ * [lc-1101] 三个入口在跑内置 bili_danmaku.js 之前先问一次自建弹幕接口（danmuApi）：
+ * 用户配置了 danmu_api 就作为优选源，命中即用；未启用/未命中一律降级回下面的内置 B站 链路。
  */
 
 export interface BiliDanmakuResult {
@@ -125,6 +130,10 @@ export async function runBiliDanmaku(
     season?: number | string,
     timeoutMs = 60000,
 ): Promise<BiliDanmakuResult> {
+    // [lc-1101] 自建弹幕接口（danmu_api）优选：命中即返回，未命中(null)原样降级到下面的内置 B站 链路。
+    //   放在 loadModule() 之前，命中时连 bili_danmaku.js 都不必加载。
+    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0);
+    if (pre) return pre;
     let mod: any;
     try {
         mod = loadModule();
@@ -163,6 +172,10 @@ export async function runBiliDanmakuCandidates(
     season?: number | string,
     timeoutMs = 60000,
 ): Promise<BiliCandidatesResult> {
+    // [lc-1101] 自建弹幕接口优选：命中则候选列表全部来自自建源（bvid 位为 `dmapi:<episodeId>`），
+    //   未命中(null)降级到下面的 B站 候选搜索。
+    const pre = await danmuApi.candidates(String(title || ''), Number(ep) || 0, Number(season) || 0);
+    if (pre) return { ok: true, candidates: pre };
     let mod: any;
     try {
         mod = loadModule();
@@ -195,6 +208,10 @@ export async function runBiliDanmakuByBvid(
     threshold?: number | string,
     timeoutMs = 60000,
 ): Promise<BiliDanmakuResult> {
+    // [lc-1101] 用户从候选列表选定的是自建源条目（伪 bvid = `dmapi:<episodeId>`）→ 按 id 直取。
+    //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
+    const dmapiId = danmuApi.parsePrefixedId(bvid);
+    if (dmapiId) return danmuApi.fetchById(dmapiId, String(title || ''), out);
     let mod: any;
     try {
         mod = loadModule();

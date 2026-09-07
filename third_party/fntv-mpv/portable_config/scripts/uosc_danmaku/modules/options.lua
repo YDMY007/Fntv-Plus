@@ -27,6 +27,12 @@ options = {
     auto_load_extra = true,
     -- B站弹幕搜索总开关（由应用设置面板写入 conf；手动搜索门控，与 auto_load_extra 同开同关）
     bili_search_enabled = true,
+    -- [lc-1101] 自建弹幕接口（danmu_api，多平台聚合）开关，由应用设置面板
+    -- 「弹幕设置→自建弹幕接口」写入 script-opts/uosc_danmaku.conf。
+    -- 这里只当【Lua 侧闸门】用：置 true 时即使 B站搜索（auto_load_extra）被关掉，
+    -- 自动补源仍会去请求本地 shim，让主进程里的「优选源」有机会命中；
+    -- 真正的服务地址由主进程从 config.json 读取，Lua 不直接发这个请求。
+    danmu_api_enabled = false,
     -- B站弹幕聚合阈值（由应用设置面板写入 conf）。单个视频弹幕数 < 此值时，
     -- 自动合并多个同类候选（时间轴对齐的单集源）的弹幕，提升弹幕密度。
     -- 设为 0 或负数可禁用聚合（只取最佳单源）。默认 1500（单个视频弹幕>=1500 直接用单源，否则合并）。

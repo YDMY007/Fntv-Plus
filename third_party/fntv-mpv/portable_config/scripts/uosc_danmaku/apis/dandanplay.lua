@@ -50,7 +50,7 @@ function set_episode_id(input, from_menu)
     --   a) file-loaded 阶段未按文件名触发过 B站（bili_auto_triggered=false）
     --   b) 文件名触发过但失败/无关联（BILI_INFO 为空或 ok=false）——典型场景是文件名乱码，
     --      拿乱码去搜 B站 必然失败；此时必须用弹弹play的干净标题重试一次。
-    if options.auto_load_extra and DANMAKU.anime then
+    if (options.auto_load_extra or options.danmu_api_enabled) and DANMAKU.anime then
         local bili_failed = (BILI_INFO == nil) or (type(BILI_INFO) == "table" and not BILI_INFO.ok)
         if not bili_auto_triggered or bili_failed then
             local ep_num = tonumber((DANMAKU.episode or ""):match("%d+"))

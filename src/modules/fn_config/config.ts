@@ -118,6 +118,11 @@ export interface Config {
     // 留空=脚本内置共享凭证——该共享凭证已被官方接口 403，仅作向后兼容保留）
     dandanplayAppId?: string;
     dandanplayAppSecret?: string;
+    // [lc-1101] 自建弹幕接口（danmu_api: github.com/huangxd-/danmu_api，用户自部署于 NAS Docker）：
+    // 开启且地址合法时作为弹幕【优选源】（聚合哔哩/爱优腾芒咪咕360人人等，密度高于内置 B站 单源）；
+    // 未启用、或该源未命中（搜不到 / 相关性不足 / 0 条弹幕）时自动降级到内置 B站 弹幕链路。
+    danmuApiEnabled?: boolean;
+    danmuApiBase?: string;
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
     // [lc-1014] 硬件加速开关（默认开启=true）：关闭时 app.disableHardwareAcceleration() 走软件合成，
@@ -947,6 +952,26 @@ export function setDandanplayCredentials(appId: string, appSecret: string): void
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
+// [lc-1101] 自建弹幕接口（danmu_api）开关：默认关闭=完全走内置 B站 弹幕链路（与接入前行为一致）
+export function getDanmuApiEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.danmuApiEnabled === true;
+}
+
+// [lc-1101] 自建弹幕接口地址（形如 http://192.168.1.10:9321）；空串=未配置
+export function getDanmuApiBase(): string {
+    const config: Config = readConfig() || {};
+    return typeof config.danmuApiBase === 'string' ? config.danmuApiBase : '';
+}
+
+// [lc-1101] 设置自建弹幕接口开关与地址（地址去尾斜杠，避免拼出 `//api/v2/...` 双斜杠）
+export function setDanmuApi(enabled: boolean, base: string): void {
+    const config: Config = readConfig() || {};
+    config.danmuApiEnabled = !!enabled;
+    config.danmuApiBase = String(base || '').trim().replace(/\/+$/, '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 // 获取「智能跳过片头片尾」总开关（默认关闭=false：仅显示按钮不自动跳）
 export function getSmartSkipEnabled(): boolean {
     const config: Config = readConfig() || {};
@@ -1135,6 +1160,8 @@ Object.assign(module.exports, {
     setMpvBiliAggregateThreshold,
     // [lc-1018] 弹弹play 开放 API 自定义凭证
     getDandanplayAppId, getDandanplayAppSecret, setDandanplayCredentials,
+    // [lc-1101] 自建弹幕接口（danmu_api）优选源
+    getDanmuApiEnabled, getDanmuApiBase, setDanmuApi,
     // 智能跳过片头片尾
     getSmartSkipEnabled,
     setSmartSkipEnabled,

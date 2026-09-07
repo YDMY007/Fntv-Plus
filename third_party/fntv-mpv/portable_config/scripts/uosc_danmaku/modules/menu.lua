@@ -296,9 +296,11 @@ function open_bili_config_menu()
 
     -- ====== B站关联状态区（用户最关心的信息）======
     if BILI_INFO and type(BILI_INFO) == "table" then
+        -- [lc-1101] 来源可能是自建弹幕接口(danmu_api)，标题不能一律写「B站弹幕」
+        local src_name = (tostring(BILI_INFO.source or ""):match("danmu_api")) and "自建弹幕接口" or "B站弹幕"
         if BILI_INFO.ok then
             -- ✅ 关联成功
-            table.insert(items, { title = "✅ B站弹幕：已关联成功", bold = true, keep_open = true, selectable = false, })
+            table.insert(items, { title = ("✅ %s：已关联成功"):format(src_name), bold = true, keep_open = true, selectable = false, })
             if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
                 table.insert(items, { title = "  📺 视频：" .. (BILI_INFO.title or "未知") .. " [" .. BILI_INFO.bvid .. "]", keep_open = true, selectable = false })
             elseif BILI_INFO.title then
@@ -322,7 +324,7 @@ function open_bili_config_menu()
             table.insert(items, { title = "  🎯 匹配来源：" .. src_label .. src_extra, keep_open = true, selectable = false })
         else
             -- ❌ 搜索失败
-            table.insert(items, { title = "❌ B站弹幕：关联失败", bold = true, keep_open = true, selectable = false })
+            table.insert(items, { title = ("❌ %s：关联失败"):format(src_name), bold = true, keep_open = true, selectable = false })
             table.insert(items, { title = "  原因：" .. (BILI_INFO.error or "未知错误"), keep_open = true, selectable = false })
         end
     else
@@ -579,19 +581,24 @@ function open_bili_candidates_menu(title, ep, season)
     -- 展示候选列表
     local new_items = {}
     table.insert(new_items, { title = ("✅ 共 %d 个候选，选择一个视频使用其弹幕："):format(#cands), bold = true, italic = true, keep_open = true, selectable = false })
+    local has_self_hosted = false
     for _, c in ipairs(cands) do
         local src_label = ({ bangumi = "番剧区", video = "视频区" })[c.source] or c.source
         local tag = c.is_compilation and " ⚠️合集/解说" or ""
+        -- [lc-1101] 自建弹幕接口(danmu_api)的候选用 dmapi:<episodeId> 伪 bvid，不能当 BV 号显示
+        local cb = tostring(c.bvid or "")
+        local is_self = cb:sub(1, 6) == "dmapi:"
+        if is_self then has_self_hosted = true end
         table.insert(new_items, {
             title = ("%s [%s] %s%s"):format(c.title, c.bvid or "?", src_label, tag),
-            hint = ("BV: %s"):format(c.bvid or "未知"),
+            hint = is_self and ("自建源 ID: %s"):format(cb:sub(7)) or ("BV: %s"):format(c.bvid or "未知"),
             value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", c.bvid or "", title, tostring(ep or 0) },
             keep_open = false, selectable = true,
         })
     end
     local props = {
         type = "menu_bili_candidates",
-        title = ("B站候选：「%s」%s"):format(title, (ep and ep > 0) and ("第" .. ep .. "集") or ""),
+        title = ("%s：「%s」%s"):format(has_self_hosted and "弹幕候选" or "B站候选", title, (ep and ep > 0) and ("第" .. ep .. "集") or ""),
         search_style = "disabled",
         items = new_items,
     }
