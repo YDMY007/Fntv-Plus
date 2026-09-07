@@ -65,6 +65,9 @@ export function injectUiThemeStyle(): void {
   s.textContent = `
 :root{
   --fnos-ui-panel-bg:linear-gradient(165deg,rgba(250,251,254,.94),rgba(240,243,250,.96));
+  /* [lc-1098] 设置面板表面底(与 --fnos-ui-panel-bg 分离): 默认半透——保留磨砂玻璃观感,
+     alpha 取 .78 是「糊壁纸透出 hue 但亮度被钉住」的下限(最坏深色底上次级文字仍 ≥4.6:1)。 */
+  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(250,251,254,.78),rgba(240,243,250,.80));
   --fnos-ui-text:#2f3550;
   --fnos-ui-sec:#4a6fd4;
   --fnos-ui-muted:#565f7e;
@@ -143,6 +146,7 @@ export function injectUiThemeStyle(): void {
 }
 html.dark{
   --fnos-ui-panel-bg:linear-gradient(165deg,rgba(30,33,48,.94),rgba(24,27,40,.96));
+  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(30,33,48,.78),rgba(24,27,40,.80));
   --fnos-ui-text:#e5e9f7;
   --fnos-ui-sec:#8fa8f0;
   --fnos-ui-muted:#a9b2d0;
@@ -218,6 +222,14 @@ html.dark{
   --fnos-titlebar-hover-minmax:rgba(255,255,255,.08);
   --fnos-titlebar-hover-close-bg:rgba(232,17,35,.18);
   --fnos-titlebar-hover-close-icon:#ff4d5a;
+}
+/* [lc-1098] 性能模式(lc-1014 总闸关磨砂)下半透底会露出**清晰**壁纸 → 面板改不透明底。
+   置于 html.dark 之后: 二者特异度相同靠顺序取胜, 深色+性能模式也落到不透明这套。 */
+html.fnos-perf{
+  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(250,251,254,.96),rgba(240,243,250,.97));
+}
+html.fnos-perf.dark{
+  --fnos-ui-panel-surface:linear-gradient(165deg,rgba(30,33,48,.96),rgba(24,27,40,.97));
 }`;
   (document.head || document.documentElement).appendChild(s);
 }

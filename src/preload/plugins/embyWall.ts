@@ -1230,13 +1230,21 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         //   根因: lc-1043 流光玻璃的白色光泽渐变(顶缘 .06 + 流光峰 .13)整体提亮面板表面,
         //   浅色主题下 --fnos-ui-sec(#4a6fd4≈3.7:1)/--fnos-ui-accent(#6d7ff2≈2.4:1) 本就贴着
         //   或跌破 AA 线(4.5:1), 玻璃上更糊 —— 分组标题/提示语/链接/状态值/手柄键位标题全命中。
-        //   修=仅在 #fnos-settings-panel 作用域重定义三枚文字色变量为深紫罗兰(全部 ≥4.7:1),
-        //   CSS 变量按计算值实时解析, 已打开的面板与后注入的卡片(手柄/插件卡)同样生效;
-        //   深色主题(sec 7.3:1/accent 8.5:1)本就达标不动, 面板外全部自建 UI 零影响。
-        + 'html:not(.dark) #fnos-settings-panel{'
-        + '--fnos-ui-sec:#3f5ec8;'      // 4.7→5.7:1; 豆瓣/TMDB 数据源选中底(白字)同步 4.7→5.7:1
-        + '--fnos-ui-accent:#4c63e0;'  // 3.1→5.0:1; 导航选中底+白字/开关选中轨/重启按钮同受益
-        + '--fnos-ui-muted2:#5f6a8c;}'; // 插帧开关未选中态 4.0→5.3:1
+        //   修=仅在 #fnos-settings-panel 作用域重定义文字色变量, CSS 变量按计算值实时解析,
+        //   已打开的面板与后注入的卡片(手柄/插件卡)同样生效; 面板外全部自建 UI 零影响。
+        // [lc-1098] 拆两档(底见 --fnos-ui-panel-surface): 性能模式不透明底沿用 lc-1044 原值;
+        //   默认半透底的最坏情况是背后糊壁纸偏暗(浅)/偏亮(深), 次级文字再各压/提一档:
+        //   浅 sec #2f4aa8 4.7:1、muted 系 #454e69 4.6:1; 深 sec #b0c0fa 4.8:1、muted 系 #b6bfd9 4.7:1。
+        + 'html.fnos-perf:not(.dark) #fnos-settings-panel{'
+        + '--fnos-ui-sec:#3f5ec8;'      // 豆瓣/TMDB 数据源选中底(白字)同步 5.7:1
+        + '--fnos-ui-accent:#4c63e0;'   // 导航选中底+白字/开关选中轨/重启按钮: 白字 5.0:1
+        + '--fnos-ui-muted2:#5f6a8c;}'  // 插帧开关未选中态 5.3:1
+        + 'html:not(.fnos-perf):not(.dark) #fnos-settings-panel{'
+        + '--fnos-ui-sec:#2f4aa8;--fnos-ui-accent:#4c63e0;'
+        + '--fnos-ui-muted:#454e69;--fnos-ui-muted2:#454e69;--fnos-ui-btn-text2:#454e69;}'
+        + 'html:not(.fnos-perf).dark #fnos-settings-panel{'
+        + '--fnos-ui-sec:#b0c0fa;--fnos-ui-accent:#4c63e0;'
+        + '--fnos-ui-muted:#b6bfd9;--fnos-ui-muted2:#b6bfd9;--fnos-ui-btn-text2:#b6bfd9;}';
       (document.head || document.documentElement).appendChild(animSt);
     }
     const overlay = document.createElement('div');
@@ -1250,7 +1258,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       // [lc-1097] 光泽渐变与 tint 底必须同处一条 background-image(逗号分层: 光泽在上、tint 在下)。
       //   原写法 background:var(--fnos-ui-panel-bg) 会被紧随的 background-image 整条覆盖,
       //   面板实际表面≈全透(峰值 .06), 文字直接压在模糊壁纸上 —— 「设置面板字看不清」的真因。
-      + 'background-image:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.015) 45%,rgba(255,255,255,.005) 100%),var(--fnos-ui-panel-bg)!important;'
+      // [lc-1098] 底改用 --fnos-ui-panel-surface: 默认半透(.78, 保留磨砂观感但钉住亮度),
+      //   性能模式(html.fnos-perf, 磨砂被关)自动切不透明(.96) —— 变量作用域见 theme.ts。
+      + 'background-image:linear-gradient(165deg,rgba(255,255,255,.06) 0%,rgba(255,255,255,.015) 45%,rgba(255,255,255,.005) 100%),var(--fnos-ui-panel-surface)!important;'
       + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);'
       // [lc-1043] 去 1px 描边改 inset 玻璃厚度环（glassUI ② 同款三层阴影语言；用户审美：无边框）
       + 'box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.5),0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
