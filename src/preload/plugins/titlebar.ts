@@ -55,12 +55,30 @@ function injectTitleBar(): void {
     document.body.appendChild(dragRegion);
 
     /* ── [lc-556] 原生页去掉窗口圆角：ACRYLIC_CSS 给 html 加了全局 border-radius:16px+clip-path,
-       在登录页等原生页会裁出难看的圆角(内容被裁掉)。用更高优先级覆盖回直角。 ── */
+       在登录页等原生页会裁出难看的圆角(内容被裁掉)。用更高优先级覆盖回直角。
+       [lc-1094] 全部限定 html:not(.fnos-tv-page)：飞牛「登录页/系统页 → /v」是 SPA 不重载文档,
+       裸 html{} 会一路残留到 TV 页(圆角/clip-path 被钉死成直角)。作用域交给 embyWall 的
+       syncTvPageClass(400ms 轮询 pathname 增删该类)自动收放, 不需要 JS 再清一遍。 ── */
     const noCornerStyle = document.createElement('style');
     noCornerStyle.id = 'fntv-native-nocorner';
     noCornerStyle.textContent = `
-      html{border-radius:0!important;clip-path:none!important;-webkit-clip-path:none!important;}
-      body{border-radius:0!important;}
+      html:not(.fnos-tv-page){border-radius:0!important;clip-path:none!important;-webkit-clip-path:none!important;}
+      html:not(.fnos-tv-page) body{border-radius:0!important;}
+      /* [lc-377/lc-379] 原生页消除 body 白色亚克力背景露白(顶部/底部白边同一根因):
+         主进程 ACRYLIC_CSS 给 body 设了 background:rgba(250,244,250,.68)+backdrop-filter 做 TV 页亚克力,
+         但原生 fnOS 桌面自带不透明背景; body 白底会在内容没撑满视口时于顶/底间隙露出白边。
+         原生页将 body 背景/模糊全部透明化, 让 fnOS 桌面自身背景透出 → 上下白边一并消除。
+         [lc-1094] 改用样式表而非 body 行内 !important: 行内优先级高于一切作者样式表, 而 TV 页的
+         环境光底座(glassUI ①c)正是画在 body 背景上的 !important 规则 —— 旧写法在 SPA 进 /v 后
+         无人清除, 直接把底座抹成透明 → 整窗透出桌面(用户报障「开机底色全透, 手动强刷才好」)。
+         文档内样式表足以压过主进程 insertCSS 注入的 ACRYLIC(实测作者样式表 > injected 样式表)。 */
+      html:not(.fnos-tv-page) body{
+        padding-top:0!important;
+        background:transparent!important;
+        background-color:transparent!important;
+        backdrop-filter:none!important;
+        -webkit-backdrop-filter:none!important;
+      }
     `;
     document.head.appendChild(noCornerStyle);
 
@@ -87,16 +105,8 @@ function injectTitleBar(): void {
 
     document.body.appendChild(floatBar);
 
-    // [lc-377/lc-379] 原生页消除 body 白色亚克力背景露白(顶部/底部白边同一根因):
-    //   主进程 ACRYLIC_CSS 给 body 设了 background:rgba(250,244,250,.68)+backdrop-filter 做 TV 页亚克力,
-    //   但原生 fnOS 桌面自带不透明背景; body 白底会在内容没撑满视口时于顶/底间隙露出白边。
-    //   原生页将 body 背景/模糊全部透明化, 让 fnOS 桌面自身背景透出 → 上下白边一并消除。
-    //   均用 !important 压过主进程 insertCSS 注入的 !important 规则。
-    document.body.style.setProperty('padding-top', '0', 'important');
-    document.body.style.setProperty('background', 'transparent', 'important');
-    document.body.style.setProperty('background-color', 'transparent', 'important');
-    document.body.style.setProperty('backdrop-filter', 'none', 'important');
-    document.body.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    // [lc-377/lc-379→lc-1094] body 透明化已上移到 #fntv-native-nocorner 样式表(见上),
+    //   不再写 body 行内 !important —— 行内样式在 SPA 进 /v 后无人能清除。
 
     // 点击事件
     document.getElementById('min-btn')?.addEventListener('click', function () { ipcRenderer.send('window-minimize'); });

@@ -514,9 +514,14 @@ function neutralizeTopBar(): void {
     bar.style.setProperty('border', 'none', 'important');
     bar.style.setProperty('box-shadow', 'none', 'important');
     // 向上追溯所有祖先，强制归零（覆盖 mainwin.ts insertCSS + 玻璃规则）
+    // [lc-1094] 走到 body/html 前即停：①c 起 **body 背景本身就是环境光底座**、html 是
+    //   rgba(255,255,255,.003) 传播阻断层，二者的底色都由本样式表用 !important 画。
+    //   行内 !important 优先级高于任何作者样式表 → 一旦把 body 行内涂成 transparent，
+    //   底座整块消失，transparent 窗口下就是"桌面直接透出"(用户报障: 开机全透、强刷才好)。
+    //   真机链路实测: 顶栏容器在 #root 内第 4 级 → body=第5、html=第6，旧 depth<10 预算必然走到。
     let el: Element | null = bar.parentElement;
     let depth = 0;
-    while (el && depth < 10) {
+    while (el && depth < 10 && el !== document.body && el !== document.documentElement) {
       const h = el as HTMLElement;
       h.style.setProperty('background', 'transparent', 'important');
       h.style.setProperty('background-color', 'transparent', 'important');
