@@ -54,7 +54,9 @@ if (!src) {
 // 注意：必须跳过 PotPlayerMini64.ini —— 它是 PotPlayer 的配置文件。
 // 若把本机 ini 带进包，内置版就会沿用本机配置，违背「与本机隔离」的设计。
 // 内置版改为在 userData 隔离副本里用空 ini 触发便携模式，自动生成独立配置。
-const SKIP = new Set(['capture', 'thumbnails', 'playlist', 'log', 'logs', 'pplive', 'skin-user', 'history', 'potplayermini64.ini']);
+// uninstall.exe 也跳过：全仓无任何引用、便携版永不调用自己的卸载器；而它是杀软即时扫描的
+// 重点对象，build:win 的 nsis 7z 压缩阶段实测因它被瞬时占用（共享冲突）整包失败。
+const SKIP = new Set(['capture', 'thumbnails', 'playlist', 'log', 'logs', 'pplive', 'skin-user', 'history', 'potplayermini64.ini', 'uninstall.exe']);
 
 console.log(`[copy-potplayer] 复制 PotPlayer: ${src} -> ${DEST}`);
 fs.cpSync(src, DEST, {
