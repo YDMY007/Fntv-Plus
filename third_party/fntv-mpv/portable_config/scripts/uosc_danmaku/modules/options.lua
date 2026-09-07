@@ -81,6 +81,10 @@ options = {
     --指定弹幕屏蔽词文件路径(black.txt)，支持绝对路径和相对路径。文件内容以换行分隔
     --支持 lua 的正则表达式写法
     blacklist_path = "",
+    --指定弹幕屏蔽类型文件路径(danmaku_block_types.json)，内容为字符串数组，如 ["top","color"]
+    --可选值: scroll/bottom/top/reverse/advanced/color
+    --由 Fntv-Plus 设置面板写入，属常量路径，一般无需手改
+    block_types_path = "~~/scripts/uosc_danmaku/danmaku_block_types.json",
     --指定脚本相关消息显示的消息的对齐方式
     message_anlignment = 7,
     --指定脚本相关消息显示的消息的x轴坐标

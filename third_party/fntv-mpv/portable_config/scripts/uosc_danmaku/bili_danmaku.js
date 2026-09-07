@@ -947,7 +947,9 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
         if (merged.length >= agg_threshold) break;
     }
 
-    merged.sort((a, b) => a.time - b.time);
+    // merged 存的是元组 [pr, mode, col, con]，此前写 a.time - b.time 恒为 NaN ——
+    // V8 把 NaN 比较器当 +0，等于完全没排序，写进 XML 的顺序一直是乱的。
+    merged.sort((a, b) => a[0] - b[0]);
 
     log(`[聚合] 首选 ${chosen[1]}(${chosen[3].length}条) 不足阈值${agg_threshold}, 从 ${pool.length} 个季匹配候选中合并 ${src_count - 1} 个额外源 → ${merged.length} 条(去重窗口±${AGG_DUP_SEC}s)`);
     return [merged, chosen[0], chosen[1], chosen[2], chosen[2] && chosen[2].source, src_count > 1 ? src_count : null, src_titles.join(' + ')];

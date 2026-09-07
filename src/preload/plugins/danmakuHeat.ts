@@ -1,20 +1,29 @@
-import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
 
 // danmakuHeat.ts — [lc-1070] 弹幕高能进度条（对标 B站）
 // 在 xgplayer 进度条上方叠加弹幕密度热力条：
-//   · 数据：拦截 ipcRenderer.invoke('danmaku:prepare') 响应拿 items[].time（danmakuWeb 拉取后经此透传）
+//   · 数据：danmakuWeb 拉到弹幕后派发 'fntv:danmaku-items'（detail.times），本插件监听取用。
+//     旧版是包一层 ipcRenderer.invoke 抓 'danmaku:prepare' 的响应，有两个死穴：
+//       ① lc-1015 之后 prepare 由 play/info **预取**触发，那一刻 video 还没有 metadata，
+//          duration 恒为 0 → density 永远算不出来；
+//       ② 会话 LRU 命中时根本不走 IPC → 首集/切回来的那一集恒不显示。
+//     改成事件后：times 先存下，duration 就绪了再算（2s 轮询里补算），两条加载路径都覆盖。
 //   · 聚合：按视频时长等分桶统计密度
 //   · 渲染：canvas 热力条（透明→靛蓝渐变），pointer-events:none
 //   · 可见性：单函 updateHeat() 统一管定位+可见性+绘制（弹幕开关关/无数据→隐藏）
-// 独立于 danmakuWeb.ts（不 import 它），只读它的 localStorage 开关与 IPC 通道。
+// 独立于 danmakuWeb.ts（不 import 它），只读它的 localStorage 开关与自定义事件。
 
 const HEAT_ID = 'fntv-danmaku-heat';
-const LS_KEY = 'fntv-danmaku';
+// ⚠️ 必须与 danmakuWeb.ts 的 LS_KEY 逐字一致。旧版写成 'fntv-danmaku'，与真实键
+// 'fntv_danmaku_enabled' 不符 → 读到的永远是 null，热力条完全无视弹幕开关。
+const LS_KEY = 'fntv_danmaku_enabled';
+const ITEMS_EVENT = 'fntv:danmaku-items';
 
 let heatCanvas: HTMLCanvasElement | null = null;
 let heatCtx: CanvasRenderingContext2D | null = null;
 let density: number[] = [];
+// 拿到 times 但 video 还没有 duration 时先存着，等轮询补算
+let pendingTimes: number[] | null = null;
 
 // ── 密度聚合 ──
 function aggregate(times: number[], duration: number): number[] {
@@ -25,6 +34,12 @@ function aggregate(times: number[], duration: number): number[] {
         arr[idx]++;
     }
     return arr;
+}
+
+function videoDuration(): number {
+    const v = document.querySelector('video') as HTMLVideoElement | null;
+    const d = v ? v.duration : 0;
+    return (d && isFinite(d) && d > 0) ? d : 0;
 }
 
 // ── 热力条绘制 ──
@@ -45,30 +60,9 @@ function drawHeat(): void {
     }
 }
 
-// ── 弹幕数据拦截（invoke 透传后抓 items[].time 聚合）──
-let hookInstalled = false;
-function hookInvoke(): void {
-    if (hookInstalled) return;
-    hookInstalled = true;
-    const real = ipcRenderer.invoke.bind(ipcRenderer);
-    ipcRenderer.invoke = async function (cmd: string, ...args: any[]) {
-        const result = await real(cmd, ...args);
-        if (cmd === 'danmaku:prepare' && result && Array.isArray(result.items) && result.items.length) {
-            try {
-                const v = document.querySelector('video') as HTMLVideoElement | null;
-                const realDur = (v && v.duration && isFinite(v.duration) && v.duration > 0) ? v.duration : 0;
-                if (realDur > 0) {
-                    density = aggregate(result.items.map((it: any) => it.time || 0), realDur);
-                }
-            } catch { /* ignore */ }
-        }
-        return result;
-    };
-}
-
 // ── 热力条 DOM ──
 function ensureHeatCanvas(): void {
-    if (heatCanvas) return;
+    if (heatCanvas || !document.body) return;
     const c = document.createElement('canvas');
     c.id = HEAT_ID;
     c.style.cssText = 'position:fixed;z-index:6;pointer-events:none;display:none;';
@@ -92,12 +86,22 @@ function positionHeatBar(): void {
     heatCanvas.height = 8;
 }
 
-// ── 单一 update：定位+可见性+绘制 ──
+// ── 单一 update：补算 + 定位 + 可见性 + 绘制 ──
 function updateHeat(): void {
+    ensureHeatCanvas();
     if (!heatCanvas) return;
     let danmakuOn = true;
     try { danmakuOn = localStorage.getItem(LS_KEY) !== '0'; } catch { /* ignore */ }
-    if (!danmakuOn || !density.length) {
+    if (!danmakuOn) {
+        heatCanvas.style.display = 'none';
+        return;
+    }
+    // duration 迟到：预取时 video 还没 metadata，这里补算
+    if (pendingTimes) {
+        const dur = videoDuration();
+        if (dur > 0) { density = aggregate(pendingTimes, dur); pendingTimes = null; }
+    }
+    if (!density.length) {
         heatCanvas.style.display = 'none';
         return;
     }
@@ -105,16 +109,30 @@ function updateHeat(): void {
     drawHeat();
 }
 
+function ingest(times: unknown): void {
+    if (!Array.isArray(times) || !times.length) return;
+    const dur = videoDuration();
+    if (dur > 0) {
+        density = aggregate(times as number[], dur);
+        pendingTimes = null;
+    } else {
+        pendingTimes = times as number[];
+    }
+    try { updateHeat(); } catch { /* ignore */ }
+}
+
+// 监听器必须在本模块**加载时**就装好：danmakuHeat 按字母序先于 danmakuWeb 加载，而
+// danmakuWeb 的 play/info 预取在其模块加载阶段就可能触发 —— 放到 OnReady 里会漏掉首集。
+window.addEventListener(ITEMS_EVENT, (e) => {
+    try { ingest((e as CustomEvent).detail?.times); } catch { /* ignore */ }
+});
+
 // ── 注册 ──
 registerHook(HookType.OnReady, () => {
-    hookInvoke();
     ensureHeatCanvas();
 
     window.setInterval(() => {
-        try {
-            ensureHeatCanvas();
-            updateHeat();
-        } catch { /* ignore */ }
+        try { updateHeat(); } catch { /* ignore */ }
     }, 2000);
 
     registerHook(HookType.OnDomChange, () => {

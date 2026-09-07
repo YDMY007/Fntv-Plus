@@ -21,6 +21,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
 import logger from '../core/logger';
+import { t } from '../core/i18n';
 
 const log = logger;
 
@@ -183,15 +184,19 @@ interface DanmakuStyle {
     outline: number;        // 描边强度 0~3（MPV outline，默认 1.0）
     shadow: number;         // 阴影强度 0~3（MPV shadow，默认 0）
     scrollDuration: number; // 滚动横跨秒数（MPV scrolltime，默认 8）
-    opacity: number;        // 全局不透明度 0.3~1（MPV opacity，默认 0.7）
+    opacity: number;        // 全局不透明度 0.3~1（MPV opacity，本端默认 0.9）
     displayArea: number;    // 弹幕显示范围（占画布高比例，MPV displayarea 默认 0.85）
 }
 
 interface ActiveState {
-    appear: number;          // 出现时的 video.currentTime
+    appear: number;             // 出现时的 video.currentTime
     lane: number;
-    w: number;               // 文本像素宽（激活时测量一次）
-    fix: boolean;            // 是否固定弹幕（顶/底）
+    w: number;                  // 文本布局宽（不含内边距）—— 轨道碰撞判定与居中都用它
+    fix: boolean;               // 是否固定弹幕（顶/底）
+    cvs: HTMLCanvasElement;     // 离屏预渲染位图，生命周期与本条弹幕绑定（出 active 即随之回收）
+    bw: number;                 // 位图 CSS 宽（含 pad）
+    bh: number;                 // 位图 CSS 高（含 pad）
+    pad: number;                // 位图四周为描边/阴影预留的内边距，回贴时要减掉
 }
 
 // ─── 运行态 ───
@@ -215,12 +220,14 @@ let currentGuid: string | null = null;
 // [lc-1015] currentGuid 是否来自 play/info 预取（此刻 URL 可能还停留在详情页/上一集）。
 // URL 触发的 prepareAndLoad 看到不一致的 guid 时以预取为准，避免旧 URL 把 currentGuid 拉回去。
 let currentGuidFromPrefetch = false;
-// [lc-1015] guid → 弹幕结果 的内存 LRU（上限 6 个）：详情页预取后进播放页、播放页切集再切回、
+// [lc-1015] guid → 弹幕结果 的内存 LRU：详情页预取后进播放页、播放页切集再切回、
 // 同一次会话重进同一集都直接命中，不再走 IPC（IPC 虽有磁盘缓存也有 ~百毫秒开销）。
-const guidCache = new Map<string, { items: DanmakuItem[]; meta: DanmakuMeta | null }>();
-const GUID_CACHE_MAX = 6;
+// 上限 3：自建源(danmu_api) 单集可达十几万条（实测 ~59B/条 → 一份 11MB JSON），
+// 结构化克隆后每个条目都常驻渲染进程，6 份能把内存顶到几百 MB。
+const guidCache = new Map<string, { items: DanmakuItem[]; meta: DanmakuMeta | null; maxScreen: number }>();
+const GUID_CACHE_MAX = 3;
 
-function guidCachePut(guid: string, payload: { items: DanmakuItem[]; meta: DanmakuMeta | null }): void {
+function guidCachePut(guid: string, payload: { items: DanmakuItem[]; meta: DanmakuMeta | null; maxScreen: number }): void {
     guidCache.delete(guid);
     guidCache.set(guid, payload);
     while (guidCache.size > GUID_CACHE_MAX) {
@@ -243,17 +250,40 @@ const LANE_GRACE_SEC = 2.0;
 // 单源内部的「前方高能」刷屏仍会成堆出现）。
 const DUP_TEXT_SEC = 1.0;
 const recentTexts = new Map<string, number>();
+// 去重表整集只增不减（十几万条弹幕 = 十几万个常驻 Map 条目）。超阈值整体清空：
+// 只丢 1 秒去重窗口，观感几乎不可察，比维护时间分桶简单得多。
+const RECENT_TEXTS_MAX = 2048;
 // [lc-1015] 暂停时画面静止：仅在脏（进度/尺寸/样式变化）时重绘，省掉暂停期间的无谓逐帧 clear+draw。
 let renderDirty = true;
 let lastPausedDraw = false;
-let laneBusyScroll: number[] = [];   // 各轨道"滚动弹幕"占用到（video 时间）
-let laneBusyTop: number[] = [];      // [lc-1015] 顶部固定弹幕独立轨道（旧版顶/底共用一池会隐形互撞）
-let laneBusyBottom: number[] = [];   // [lc-1015] 底部固定弹幕独立轨道
+
+// 每条轨道存「占用它的那条弹幕」的时间与宽度，而不是单个 busyUntil 数字 ——
+// 碰撞判定（见 slotCollides）两者都要。
+interface LaneSlot { time: number; width: number }
+let laneScroll: Array<LaneSlot | null> = [];
+let laneTop: Array<LaneSlot | null> = [];      // [lc-1015] 顶部固定弹幕独立轨道（旧版顶/底共用一池会隐形互撞）
+let laneBottom: Array<LaneSlot | null> = [];   // [lc-1015] 底部固定弹幕独立轨道
 let laneCount = 0;
 
 // 渲染参数（参照 B站网页弹幕引擎）
 const LANE_RATIO = 0.034;    // 单轨道高 / 画布高（轨道高度基准，不暴露给用户）
-const MAX_ACTIVE = 80;       // 同屏活跃弹幕硬顶（防极端高峰）
+// 同屏上限：来自主进程的 biliDanmakuMaxScreen（与 MPV 的 max_screen_danmaku 同一份设置），0=不限。
+let maxScreen = 0;
+// 0=不限时仍必须有防崩硬顶：自建源单集可达十几万条（≈80 条/秒），不限就会同帧激活上千条位图。
+const MAX_ACTIVE_HARD_CAP = 200;
+
+// 样式热切换：签名变了就把在屏弹幕整体重建（见 relocateCursor）。
+// 不含 opacity —— 它只在绘制时读，重建反而会让拖滑块时每帧清屏。
+let appliedSignature: string | null = null;
+let styleSettling = false;
+let styleSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 画布矩形改为事件驱动 + 低频兜底（旧版每帧 getBoundingClientRect = 每帧强制 layout）
+let needRectSync = true;
+let rectTicks = 0;
+const RECT_SYNC_EVERY = 30;
+let rectRO: ResizeObserver | null = null;
+let rectROTarget: HTMLVideoElement | null = null;
 
 // 弹幕样式（默认对齐 MPV 观感；用户可在播放器内「样式」面板调节，各端独立持久化）
 const DEFAULT_STYLE: DanmakuStyle = {
@@ -291,9 +321,24 @@ function loadStyle(): DanmakuStyle {
     return { ...DEFAULT_STYLE };
 }
 
+// 样式签名：任一项变化都让在屏弹幕的位图/行高/轨道数/滚动时长作废。
+// 刻意不含 opacity —— 它只在绘制时读，纳入签名会让拖透明度滑块时每帧清屏。
+function styleSignature(): string {
+    return `${style.bold}|${style.fontScale}|${style.outline}|${style.shadow}|${style.scrollDuration}|${style.displayArea}|${maxScreen}`;
+}
+
 function saveStyle(): void {
-    try { localStorage.setItem(LS_STYLE_KEY, JSON.stringify(style)); } catch { /* ignore */ }
     renderDirty = true; // [lc-1015] 样式变化后即使暂停也立即重绘生效
+    // 拖滑块 = input 事件每帧一发。写盘与重建都 debounce 到停手之后，
+    // 否则一次拖动就是几百次 localStorage 写 + 几百次整屏清空（观感=弹幕疯狂闪烁）。
+    styleSettling = true;
+    if (styleSettleTimer) clearTimeout(styleSettleTimer);
+    styleSettleTimer = setTimeout(() => {
+        styleSettleTimer = null;
+        styleSettling = false;
+        try { localStorage.setItem(LS_STYLE_KEY, JSON.stringify(style)); } catch { /* ignore */ }
+        renderDirty = true;
+    }, 180);
 }
 
 let style: DanmakuStyle = loadStyle();
@@ -422,19 +467,19 @@ function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivE
 
 function createControls(): void {
     if (toggleWrap) return;
-    const t = makeControlButton('弹幕', () => toggleDanmaku());
-    toggleWrap = t.wrap;
-    toggleSpan = t.span;
-    const d = makeControlButton('详情', () => openDetails());
+    const dmBtn = makeControlButton(t('弹幕'), () => toggleDanmaku());
+    toggleWrap = dmBtn.wrap;
+    toggleSpan = dmBtn.span;
+    const d = makeControlButton(t('详情'), () => openDetails());
     detailsWrap = d.wrap;
-    const s = makeControlButton('样式', () => openStylePanel());
+    const s = makeControlButton(t('样式'), () => openStylePanel());
     styleWrap = s.wrap;
     syncToggleUI();
 }
 
 function syncToggleUI(): void {
     if (!toggleSpan) return;
-    toggleSpan.textContent = loading ? '弹幕…' : '弹幕';
+    toggleSpan.textContent = loading ? t('弹幕…') : t('弹幕');
     toggleSpan.style.color = enabled
         ? 'var(--fn-bg-brand, #3374DB)'
         : 'var(--semi-color-text-1)';
@@ -451,6 +496,19 @@ function toggleDanmaku(): void {
 }
 
 // ─── 数据拉取 ───
+
+/** 高能进度条（danmakuHeat.ts）刻意不 import 本模块，靠这个事件拿弹幕时间轴。
+ * 会话 LRU 命中时不走 IPC，所以两条加载路径都要发 —— 否则首集/切回来的那一集
+ * 热力条恒不显示（旧版靠包 ipcRenderer.invoke 抓响应，正是漏在这两点上）。 */
+const DANMAKU_ITEMS_EVENT = 'fntv:danmaku-items';
+function announceItems(): void {
+    if (!items.length) return;
+    try {
+        window.dispatchEvent(new CustomEvent(DANMAKU_ITEMS_EVENT, {
+            detail: { times: items.map((d) => d.time) },
+        }));
+    } catch { /* ignore */ }
+}
 
 /**
  * [lc-1015] 拉取指定 guid 的弹幕并进入渲染。
@@ -494,8 +552,10 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
     if (cached && cached.items.length) {
         items = cached.items;
         meta = cached.meta;
+        maxScreen = cached.maxScreen;
         loadedGuids.add(guid);
         renderDirty = true;
+        announceItems();
         log.info('[danmakuWeb] 会话缓存命中 ' + items.length + ' 条 guid=' + guid);
         if (enabled) startRender();
         return;
@@ -517,15 +577,17 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
             return;
         }
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
-            items = res.items as DanmakuItem[];
+            items = ensureAscending(res.items as DanmakuItem[]);
             meta = res.meta as DanmakuMeta || {
                 searchTitle: res.title || '', matchedTitle: res.title || '',
                 source: res.source || '', ep: res.ep || 0, season: res.season || 0, isMovie: !!res.isMovie,
                 count: res.count || items.length,
             };
+            maxScreen = Number(res.maxScreen) > 0 ? Math.round(Number(res.maxScreen)) : 0;
             loadedGuids.add(guid);
-            guidCachePut(guid, { items, meta });
+            guidCachePut(guid, { items, meta, maxScreen });
             renderDirty = true;
+            announceItems();
             log.info(`[danmakuWeb] 获取弹幕 ${items.length} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
             if (enabled) startRender();
         } else {
@@ -583,11 +645,14 @@ function installPlayInfoObserver(): void {
         // skipInject 在「外部播放器(MPV)」流程会把 play/info 伪造成 {success:true,data:null}
         // 阻止原生播放器启动——识别出这种响应就不预取（MPV 自己会拉弹幕）。
         // 真实 play/info 的 data 恒为对象；命中伪造特征时跳过预取。
+        // ⚠️ 不能 await 这个克隆解析：那会把 play/info 响应扣在解析完成之后才还给 fnOS，
+        // 等于把我们的嗅探塞进起播关键路径。预取本身是锦上添花，晚一点无所谓。
         try {
             const ct = resp.headers?.get?.('content-type') || '';
             if (ct.includes('json')) {
-                const j = await resp.clone().json();
-                if (!(j && j.success === true && j.data == null)) onPlayInfo(guid);
+                resp.clone().json()
+                    .then((j) => { if (!(j && j.success === true && j.data == null)) onPlayInfo(guid); })
+                    .catch(() => onPlayInfo(guid));
             } else {
                 onPlayInfo(guid);
             }
@@ -615,12 +680,53 @@ function installPlayInfoObserver(): void {
     } as typeof XMLHttpRequest.prototype.send;
 }
 
-// ─── Canvas 渲染引擎（B站网页弹幕同款：逐帧重绘）───
+// ─── Canvas 渲染引擎 ───
+// 渲染核心照抄 npm `Danmaku` v2（dd-danmaku 内含的那份）验证过的四个机制：
+//   · internal/allocate.js 的 willCollide —— 轨道按「会不会撞」释放，而非「整条播完才释放」
+//   · internal/seek.js —— clear + 重置轨道 + 二分定位，seek 与样式热切换共用同一条路
+//   · engine/canvas.js —— 每条弹幕离屏预渲染一次，逐帧只 drawImage
+//   · utils.js:binsearch —— O(log n) 定位游标
+// 运动模型不抄：它的 duration=stageW/speed 配合位移 (stageW+cmtW)*elapsed/duration，与本端
+// 固定 scrollDuration 的 x = cw - p*(cw+w) 本质同构，改了没收益还会破坏「滚动时长」滑块语义。
 
-function syncCanvasRect(): void {
-    if (!canvas || !videoEl) return;
+/** items 必须按 time 升序：激活游标只前进、seek 用二分，两者都以升序为前提。
+ * 主进程已排好（biliDanmaku.ts），这里只做 O(n) 校验，真乱序才排 —— preload 是按 basename
+ * 热更新的，与主进程产物版本错开时这是最后一道保险。 */
+function ensureAscending(arr: DanmakuItem[]): DanmakuItem[] {
+    for (let i = 1; i < arr.length; i++) {
+        if (arr[i].time < arr[i - 1].time) {
+            log.info('[danmakuWeb] items 非升序（主进程产物可能偏旧）→ 渲染侧补排');
+            arr.sort((a, b) => a.time - b.time);
+            break;
+        }
+    }
+    return arr;
+}
+
+/** 抄 utils.js:binsearch（含其 off-by-one 处理）：返回首条 time > key 的下标。 */
+function binsearchTimes(arr: DanmakuItem[], key: number): number {
+    let left = 0;
+    let right = arr.length;
+    while (left < right - 1) {
+        const mid = (left + right) >> 1;
+        if (key >= arr[mid].time) left = mid; else right = mid;
+    }
+    if (arr[left] && key < arr[left].time) return left;
+    return right;
+}
+
+let ctxFont = '';
+function applyFont(font: string): void {
+    if (!ctx || ctxFont === font) return;
+    ctx.font = font;
+    ctxFont = font;
+}
+
+/** @returns 视频矩形是否可用（false = video 还没尺寸或选错了元素） */
+function syncCanvasRect(): boolean {
+    if (!canvas || !videoEl) return false;
     const r = videoEl.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return;
+    if (r.width < 2 || r.height < 2) return false;
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(r.width * dpr);
     const h = Math.round(r.height * dpr);
@@ -628,36 +734,98 @@ function syncCanvasRect(): void {
         canvas.width = w;
         canvas.height = h;
         renderDirty = true; // [lc-1015] 画布重置后内容被清空，需立即重绘（暂停时也要）
+        ctxFont = '';       // 改画布尺寸会清空 ctx 状态
+        // 尺寸/dpr 变了 → 字号、行高、轨道数、以及所有已预渲染的位图全部作废
+        appliedSignature = null;
     }
     canvas.style.left = r.left + 'px';
     canvas.style.top = r.top + 'px';
     canvas.style.width = r.width + 'px';
     canvas.style.height = r.height + 'px';
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 之后一律用 CSS 像素绘制
+    return true;
 }
 
-function allocLane(busy: number[], t: number, dur: number): number {
-    for (let i = 0; i < busy.length; i++) {
-        if (t >= busy[i]) { busy[i] = t + dur; return i; }
+// 矩形同步改为事件驱动 + RECT_SYNC_EVERY 帧兜底：旧版每帧 getBoundingClientRect()
+// 就是每帧一次强制 layout，通常比文字栅格化还贵；兜底是给页面滚动/布局位移这类
+// 不触发 resize 的变化用的。
+function ensureRectObserver(): void {
+    if (!videoEl || typeof ResizeObserver === 'undefined') return;
+    if (!rectRO) {
+        rectRO = new ResizeObserver(() => { needRectSync = true; renderDirty = true; });
+        const bump = (): void => { needRectSync = true; renderDirty = true; };
+        window.addEventListener('resize', bump, { passive: true });
+        document.addEventListener('fullscreenchange', bump);
+    }
+    if (rectROTarget !== videoEl) {
+        rectRO.disconnect();
+        rectRO.observe(videoEl);
+        rectROTarget = videoEl;
+        needRectSync = true;
+    }
+}
+
+/** 抄 internal/allocate.js:willCollide。
+ * 旧版 allocLane 的条件是 t >= busy[i]，而 busy[i] = t0 + 整条滚动时长 —— 等于要求前一条
+ * **完全播完 8 秒**才释放轨道：1080p 下 ~21 轨 ⇒ 吞吐仅 ≈2.6 条/秒，而自建源动辄 7~80 条/秒，
+ * 多出来的全被 2s 宽限丢掉（排序修好后仍会丢约六成）。改成按「会不会撞」判定后，
+ * 同样的轨道数吞吐高一个量级。 */
+function slotCollides(s: LaneSlot, now: number, cw: number, newW: number, dur: number, fix: boolean): boolean {
+    if (fix) return now - s.time < dur;                       // 固定弹幕：占满显示时长才算占着
+    const slotTotal = cw + s.width;
+    if (s.width > slotTotal * (now - s.time) / dur) return true;  // ① 前一条车尾还没完全进屏
+    const slotLeftTime = dur + s.time - now;                  // 前一条车尾离开左边界还需多久
+    const newArrivalTime = dur * cw / (cw + newW);              // 新条从右边界走到左边界需多久
+    return slotLeftTime > newArrivalTime;                       // ② 新条更快 → 追尾
+}
+
+function allocLane(pool: Array<LaneSlot | null>, now: number, cw: number, w: number,
+                   dur: number, fix: boolean): number {
+    for (let i = 0; i < pool.length; i++) {
+        const s = pool[i];
+        if (!s || !slotCollides(s, now, cw, w, dur, fix)) {
+            pool[i] = { time: now, width: w };
+            return i;
+        }
     }
     return -1;
 }
 
-function ensureLanes(n: number): void {
-    if (laneCount === n) return;
+function resetLanes(): void {
+    laneScroll = new Array(laneCount).fill(null);
+    laneTop = new Array(laneCount).fill(null);
+    laneBottom = new Array(laneCount).fill(null);
+}
+
+/** @returns 轨道数是否发生了变化（变了就必须连同在屏弹幕一起重建） */
+function ensureLanes(n: number): boolean {
+    if (laneCount === n) return false;
     laneCount = n;
-    laneBusyScroll = new Array(n).fill(-Infinity);
-    laneBusyTop = new Array(n).fill(-Infinity);
-    laneBusyBottom = new Array(n).fill(-Infinity);
+    resetLanes();
+    return true;
+}
+
+/** 照抄 internal/seek.js：clear() + resetSpace() + 二分定位到当前时间。
+ * seek 与样式热切换共用这一条路 —— 两者都让在屏弹幕的位图/轨道/滚动时长全部作废。
+ * ⚠️ 不能改用 resetRenderState()：它把 cursor 归零，下一帧会从视频头把所有历史弹幕一次性
+ * 激活，瞬间涌入一大屏（这正是「样式一改就叠字/瞬移」的成因之一）。 */
+function relocateCursor(t: number): void {
+    active.clear();   // 位图挂在 ActiveState 上，随之一起回收（生命周期绑定，无需另设缓存）
+    resetLanes();
+    recentTexts.clear();
+    cursor = binsearchTimes(items, t);
+    // 二分只给位置；去重窗口要补回 t 前 DUP_TEXT_SEC 内的样本（升序 → 紧邻 cursor 之前的若干条）
+    for (let i = cursor - 1; i >= 0 && t - items[i].time <= DUP_TEXT_SEC; i--) {
+        recentTexts.set(items[i].text, items[i].time);
+    }
+    renderDirty = true;
 }
 
 function resetRenderState(): void {
     active.clear();
     cursor = 0;
     recentTexts.clear();
-    laneBusyScroll = new Array(laneCount).fill(-Infinity);
-    laneBusyTop = new Array(laneCount).fill(-Infinity);
-    laneBusyBottom = new Array(laneCount).fill(-Infinity);
+    resetLanes();
     lastTime = -1;
     renderDirty = true;
     lastPausedDraw = false;
@@ -678,18 +846,65 @@ function stopRender(): void {
     resetRenderState();
 }
 
+function currentFont(fontSize: number): string {
+    return `${style.bold ? 'bold ' : ''}${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+}
+
+/** 抄 engine/canvas.js:createCommentCanvas —— strokeText/fillText/shadowBlur 每条只付一次，
+ * 逐帧退化成一次 drawImage。旧版每条活跃弹幕每帧都 strokeText+fillText，且 shadowBlur 对文字
+ * 极贵：≤80 条 × 2 次栅格化 × 60fps。
+ * 库自己在 remove()/clear() 里把 cmt.canvas 置 null，注释明写「avoid caching canvas to reduce
+ * memory usage」—— 本端把位图挂在 ActiveState 上，出 active 即随之回收，效果等价，还不用处理
+ * 「同文本不同颜色/描边」的缓存键歧义。 */
+function createCommentBitmap(text: string, color: string, fontSize: number, textW: number,
+                             out: { bw: number; bh: number; pad: number }): HTMLCanvasElement {
+    const sw = style.outline > 0 ? Math.max(1, fontSize * 0.04 * style.outline) : 0;
+    const blur = style.shadow > 0 ? fontSize * 0.06 * style.shadow : 0;
+    // 四周内边距：容下描边与阴影，再留一点字形上下溢出（textBaseline='top' 下 CJK 会略微越界）
+    const pad = Math.ceil(sw + blur + fontSize * 0.28);
+    const bw = textW + pad * 2;
+    const bh = Math.ceil(fontSize * 1.3) + pad * 2;
+    const dpr = window.devicePixelRatio || 1;
+    const cvs = document.createElement('canvas');
+    // 位图按设备像素建、内部再 scale(dpr) —— 与舞台 ctx 同口径，回贴时传 CSS 像素即可
+    cvs.width = Math.max(1, Math.round(bw * dpr));
+    cvs.height = Math.max(1, Math.round(bh * dpr));
+    const c = cvs.getContext('2d');
+    if (c) {
+        c.scale(dpr, dpr);
+        c.font = currentFont(fontSize);
+        c.textBaseline = 'top';
+        if (blur > 0) { c.shadowColor = 'rgba(0,0,0,0.9)'; c.shadowBlur = blur; }
+        if (sw > 0) {
+            c.lineJoin = 'round';
+            c.lineWidth = sw;
+            c.strokeStyle = 'rgba(0,0,0,0.95)';
+            c.strokeText(text, pad, pad);
+        }
+        c.fillStyle = color;
+        c.fillText(text, pad, pad);
+    }
+    out.bw = bw; out.bh = bh; out.pad = pad;
+    return cvs;
+}
+
 function render(): void {
     if (!ctx || !canvas || !enabled) return;
 
-    // 视频元素失效则重新选取（规避选错/丢 video 导致的时灵时不灵）
-    if (!videoEl || videoEl.getBoundingClientRect().width < 2) {
-        videoEl = pickVideo();
-    }
+    // 视频元素失效则重新选取（isConnected 不触发 layout；旧版每帧 getBoundingClientRect）
+    if (!videoEl || !videoEl.isConnected) videoEl = pickVideo();
     if (!videoEl) return;
-    syncCanvasRect();
+    ensureRectObserver();
+    if (needRectSync || ++rectTicks >= RECT_SYNC_EVERY) {
+        rectTicks = 0;
+        needRectSync = false;
+        // 矩形不可用（video 尚无尺寸/选错了元素）→ 重挑一次，等下一轮兜底再试
+        if (!syncCanvasRect()) { videoEl = pickVideo(); return; }
+    }
 
-    const cw = canvas.width / (window.devicePixelRatio || 1);
-    const ch = canvas.height / (window.devicePixelRatio || 1);
+    const dprNow = window.devicePixelRatio || 1;
+    const cw = canvas.width / dprNow;
+    const ch = canvas.height / dprNow;
     const t = videoEl.currentTime;
     const fixDuration = Math.max(3, style.scrollDuration * 0.6);
 
@@ -700,44 +915,38 @@ function render(): void {
     lastPausedDraw = paused;
     renderDirty = false;
 
-    // 倒退（seek 回拖）→ 清空已生成集合，允许重播
-    if (lastTime >= 0 && t < lastTime - 0.5) {
-        active.clear();
-        cursor = 0;
-        recentTexts.clear();
-        laneBusyScroll = new Array(laneCount).fill(-Infinity);
-        laneBusyTop = new Array(laneCount).fill(-Infinity);
-        laneBusyBottom = new Array(laneCount).fill(-Infinity);
-    } else if (lastTime >= 0 && t > lastTime + 1.5) {
-        // [lc-1015] 前向 seek：跳过区间内的弹幕（真实播放器行为，不倒灌、不堆积）
-        while (cursor < items.length && items[cursor].time <= t) {
-            recentTexts.set(items[cursor].text, items[cursor].time);
-            cursor++;
-        }
-    }
-    lastTime = t;
-
     // [lc-1015] 行高跟随实际字号（旧版固定 ch*0.034，调大字号后相邻行会互相压字）
     const fontSize = Math.max(14, Math.min(48, ch * style.fontScale));
     const laneH = Math.max(20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
-    ensureLanes(n);
+
+    // ── 何时整体重建（seek / 样式变化 / 轨道数变化）──
+    let needRelocate = false;
+    if (lastTime >= 0 && (t < lastTime - 0.5 || t > lastTime + 1.5)) {
+        // 任意方向 seek。旧版前向分支是**无上限**的线性 while，一次拖到片尾要在单帧里推进
+        // 十几万次游标 + Set 写入，主线程硬冻结；二分后 O(log n)。
+        needRelocate = true;
+    } else if (!styleSettling) {
+        const sig = styleSignature();
+        if (appliedSignature === null) appliedSignature = sig;
+        else if (sig !== appliedSignature) { appliedSignature = sig; needRelocate = true; }
+    }
+    // 轨道数变了必须连同在屏弹幕一起清：旧版只把 busy 数组重置成「全空闲」，active 里仍占着
+    // 轨道的弹幕一条没清 → 新弹幕被分到同一条「以为空闲」的轨道，直接叠字。
+    // 拖动滑块期间冻结轨道数：否则 n 每跨一个阈值就整体重建一次，debounce 白做（观感=一路闪）；
+    // 停手后由上面的签名变化触发**一次**重建。
+    if (!styleSettling && ensureLanes(n)) needRelocate = true;
+
+    if (needRelocate) relocateCursor(t);
+    lastTime = t;
+
     ctx.clearRect(0, 0, cw, ch);
-    ctx.font = `${style.bold ? 'bold ' : ''}${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
-    ctx.textBaseline = 'top';
-    if (style.shadow > 0) {
-        ctx.shadowColor = 'rgba(0,0,0,0.9)';
-        ctx.shadowBlur = fontSize * 0.06 * style.shadow;
-    } else {
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-    }
-    if (style.outline > 0) {
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = Math.max(1, fontSize * 0.04 * style.outline);
-        ctx.strokeStyle = 'rgba(0,0,0,0.95)';
-    }
+
+    const cap = maxScreen > 0 ? Math.min(maxScreen, MAX_ACTIVE_HARD_CAP) : MAX_ACTIVE_HARD_CAP;
+    if (recentTexts.size > RECENT_TEXTS_MAX) recentTexts.clear();
+    const font = currentFont(fontSize);
+    applyFont(font);
 
     // ① 激活到点的弹幕：游标只前进（items 按时间升序），轨道满则在宽限期内等待，
     //    超宽限或同文本短窗重复即丢弃，不再像旧版每帧从头全量扫描。
@@ -749,14 +958,19 @@ function render(): void {
             cursor++;
             continue;
         }
-        if (active.size >= MAX_ACTIVE) break;
+        if (active.size >= cap) break;
         const isBottom = d.type === 4;
         const isFix = isBottom || d.type === 5;
         const dur = isFix ? fixDuration : style.scrollDuration;
-        const lane = allocLane(isBottom ? laneBusyBottom : (isFix ? laneBusyTop : laneBusyScroll), t, dur);
+        // 先量宽再分配轨道：碰撞判定要宽度，而旧版是先分配后 measureText，量出来的宽度
+        // 对本帧的分配毫无用处。位图留到确认拿到轨道之后再建，避免高峰期白做栅格化。
+        const w = Math.max(1, Math.ceil(ctx.measureText(d.text).width));
+        const lane = allocLane(isBottom ? laneBottom : (isFix ? laneTop : laneScroll), t, cw, w, dur, isFix);
         if (lane >= 0) {
-            const w = ctx.measureText(d.text).width;
-            active.set(i, { appear: t, lane, w, fix: isFix });
+            const dim = { bw: 0, bh: 0, pad: 0 };
+            const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
+            const cvs = createCommentBitmap(d.text, color, fontSize, w, dim);
+            active.set(i, { appear: t, lane, w, fix: isFix, cvs, bw: dim.bw, bh: dim.bh, pad: dim.pad });
             recentTexts.set(d.text, d.time);
             cursor++;
         } else if (t - d.time > LANE_GRACE_SEC) {
@@ -766,24 +980,20 @@ function render(): void {
         }
     }
 
-    // ② 绘制活跃弹幕（滚动行从顶部数起；顶部固定行从顶数、底部固定行锚底）
+    // ② 绘制活跃弹幕：只剩 drawImage（滚动行从顶部数起；顶部固定行从顶数、底部固定行锚底）
     for (const [i, st] of active) {
         const d = items[i];
-        const isFix = st.fix;
-        const dur = isFix ? fixDuration : style.scrollDuration;
+        const dur = st.fix ? fixDuration : style.scrollDuration;
         const elapsed = t - st.appear;
         if (elapsed >= dur || elapsed < 0) {
-            // 播完（按激活后的实际滚动时长算满程）→ 释放
-            active.delete(i);
+            active.delete(i);   // 播完 → 释放（位图随 ActiveState 一起回收）
             continue;
         }
-        const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
         let x: number;
         let y: number;
         let alpha = style.opacity;
-        if (isFix) {
-            // [lc-1015] 修复：底部弹幕(type=4)旧版被画在顶部 —— 现在锚定画面底部；
-            // 同时去掉旧版 y 多加一整个 fontSize 的偏移 bug。
+        if (st.fix) {
+            // [lc-1015] 底部弹幕(type=4)锚定画面底部（旧版被画在顶部）；顶部(type=5)从顶数
             y = (d.type === 5)
                 ? 6 + st.lane * laneH
                 : ch - 6 - (st.lane + 1) * laneH;
@@ -791,14 +1001,13 @@ function render(): void {
             if (elapsed < 0.2) alpha = (elapsed / 0.2) * style.opacity;
             else if (elapsed > dur - 0.3) alpha = Math.max(0, (dur - elapsed) / 0.3) * style.opacity;
         } else {
-            const p = elapsed / dur; // 0→1
-            x = cw - p * (cw + st.w);
+            x = cw - (elapsed / dur) * (cw + st.w);
             y = 6 + st.lane * laneH;
         }
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-        ctx.fillStyle = color;
-        if (style.outline > 0) ctx.strokeText(d.text, x, y);
-        ctx.fillText(d.text, x, y);
+        // 舞台 ctx 已 setTransform(dpr,...)，这里必须传 CSS 像素的宽高。库里写的是
+        // drawImage(cvs, x*dpr, y*dpr) —— 它的舞台不做 dpr 变换；照抄会得到 2 倍大或糊掉的弹幕。
+        ctx.drawImage(st.cvs, x - st.pad, y - st.pad, st.bw, st.bh);
     }
     ctx.globalAlpha = 1;
 }
@@ -1044,30 +1253,31 @@ function buildStyleControls(): HTMLElement {
     const wrap = document.createElement('div');
     Object.assign(wrap.style, { display: 'flex', flexDirection: 'column', gap: '14px' } as CSSStyleDeclaration);
 
-    wrap.appendChild(makeToggle('粗体', style.bold, (v) => { style.bold = v; saveStyle(); }));
+    wrap.appendChild(makeToggle(t('粗体'), style.bold, (v) => { style.bold = v; saveStyle(); }));
 
-    // 字号：以默认 fontScale(0.036) 为 100% 的相对倍数（50%~180%）
-    wrap.appendChild(makeSlider('字号', 50, 180, 1, Math.round(style.fontScale / 0.036 * 100),
-        (v) => v + '%', (v) => { style.fontScale = 0.036 * (v / 100); saveStyle(); }));
+    // 字号：以默认 fontScale 为 100% 的相对倍数（50%~180%）
+    const baseScale = DEFAULT_STYLE.fontScale;
+    wrap.appendChild(makeSlider(t('字号'), 50, 180, 1, Math.round(style.fontScale / baseScale * 100),
+        (v) => v + '%', (v) => { style.fontScale = baseScale * (v / 100); saveStyle(); }));
 
-    wrap.appendChild(makeSlider('描边', 0, 3, 0.1, style.outline,
+    wrap.appendChild(makeSlider(t('描边'), 0, 3, 0.1, style.outline,
         (v) => v.toFixed(1), (v) => { style.outline = v; saveStyle(); }));
 
-    wrap.appendChild(makeSlider('阴影', 0, 3, 0.1, style.shadow,
+    wrap.appendChild(makeSlider(t('阴影'), 0, 3, 0.1, style.shadow,
         (v) => v.toFixed(1), (v) => { style.shadow = v; saveStyle(); }));
 
     // 滚动时长（秒）：值越大弹幕越慢，对应 MPV scrolltime
-    wrap.appendChild(makeSlider('滚动时长', 4, 16, 0.5, style.scrollDuration,
-        (v) => v.toFixed(1) + 's（越大越慢）', (v) => { style.scrollDuration = v; saveStyle(); }));
+    wrap.appendChild(makeSlider(t('滚动时长（越大越慢）'), 4, 16, 0.5, style.scrollDuration,
+        (v) => v.toFixed(1) + 's', (v) => { style.scrollDuration = v; saveStyle(); }));
 
-    wrap.appendChild(makeSlider('透明度', 0.3, 1, 0.05, style.opacity,
+    wrap.appendChild(makeSlider(t('透明度'), 0.3, 1, 0.05, style.opacity,
         (v) => Math.round(v * 100) + '%', (v) => { style.opacity = v; saveStyle(); }));
 
-    wrap.appendChild(makeSlider('显示范围', 0.3, 1, 0.05, style.displayArea,
+    wrap.appendChild(makeSlider(t('显示范围'), 0.3, 1, 0.05, style.displayArea,
         (v) => Math.round(v * 100) + '%', (v) => { style.displayArea = v; saveStyle(); }));
 
     const reset = document.createElement('button');
-    reset.textContent = '恢复默认';
+    reset.textContent = t('恢复默认');
     Object.assign(reset.style, {
         marginTop: '4px', padding: '9px 12px', background: 'rgba(41,151,255,.22)',
         color: '#6cb8ff', border: '1px solid rgba(41,151,255,.35)', borderRadius: '10px',
@@ -1116,7 +1326,7 @@ function ensureStylePanel(): HTMLDivElement {
         borderBottom: '1px solid rgba(255,255,255,.06)',
     } as CSSStyleDeclaration);
     const titleEl = document.createElement('span');
-    titleEl.textContent = '弹幕样式';
+    titleEl.textContent = t('弹幕样式');
     const closeEl = document.createElement('span');
     closeEl.textContent = '✕';
     closeEl.style.cursor = 'pointer';

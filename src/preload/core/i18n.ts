@@ -81,6 +81,19 @@ const EN: Record<string, string> = {
     '自定义代理': 'Custom proxy',
     '轮播图 Logo': 'Carousel logo',
 
+    // ── 播放器内弹幕面板（danmakuWeb.ts 控制栏 + 样式面板）──
+    '弹幕…': 'Danmaku…',
+    '详情': 'Details',
+    '样式': 'Style',
+    '弹幕样式': 'Danmaku style',
+    '粗体': 'Bold',
+    '字号': 'Font size',
+    '描边': 'Outline',
+    '阴影': 'Shadow',
+    '滚动时长（越大越慢）': 'Scroll duration (larger = slower)',
+    '透明度': 'Opacity',
+    '显示范围': 'Display area',
+
     // ── 设置面板：开关 ──
     '下载代理': 'Download proxy',
     '隐藏原始播放按钮': 'Hide original play button',

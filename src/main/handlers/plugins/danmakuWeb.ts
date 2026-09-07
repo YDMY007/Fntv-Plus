@@ -33,6 +33,8 @@ interface PrepareResult {
     source?: string;
     error?: string;
     meta?: DanmakuMeta;
+    /** 同屏弹幕上限（0=不限），与 MPV 的 max_screen_danmaku 同一份设置 */
+    maxScreen?: number;
 }
 
 async function handlePrepare(
@@ -90,7 +92,7 @@ async function handlePrepare(
         }
         const { items, meta } = res;
         log.info(`[danmakuWeb] ✅ 弹幕就绪: title="${title}" ep=${ep} movie=${isMovie} count=${items.length} source=${meta.source} matched="${meta.matchedTitle}"`);
-        return { ok: true, title, ep, isMovie, count: items.length, items, source: 'bilibili', meta };
+        return { ok: true, title, ep, isMovie, count: items.length, items, source: 'bilibili', meta, maxScreen: fnConfig.getBiliDanmakuMaxScreen() };
     } catch (e: any) {
         return { ok: false, title, ep, isMovie, error: '弹幕获取异常: ' + (e?.message || e) };
     }

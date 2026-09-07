@@ -31,6 +31,16 @@ const log = logger.component('danmuApi');
 
 /** 回给 Lua/渲染层的来源标识（menu.lua 直接把它当 src_label 显示） */
 const SOURCE_LABEL = '自建源(danmu_api)';
+
+/**
+ * 某个 `meta.source` 是否出自本模块。
+ * 供 biliDanmaku 校验磁盘缓存的来源，避免把 SOURCE_LABEL 字面量复制到第二个文件里
+ * （复制必然导致日后改标签时两处不同步）。老缓存的 source 可能是 undefined/空串，一律判非自建源。
+ */
+export function isSelfHostedSource(source: unknown): boolean {
+    return source === SOURCE_LABEL;
+}
+
 /** 候选列表里回填给 Lua 的伪 bvid 前缀：用户选定后据此把请求路由回本模块 */
 export const ID_PREFIX = 'dmapi:';
 /** 标题相关性下限：低于此分判未命中（防挂错弹幕） */

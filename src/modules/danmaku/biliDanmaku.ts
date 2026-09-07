@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
 import { runBiliDanmaku } from '../../main/common/biliRunner';
+import * as danmuApi from '../../main/common/danmuApi';
 const log = logger.component('danmaku');
 
 /**
@@ -261,6 +262,11 @@ export function parseDanmakuXml(xmlPath: string): DanmakuItem[] | null {
         log.info('[danmaku] XML 中无弹幕条目');
         return null;
     }
+    // B站 protobuf 分片的 elements 不是时间序（实测相邻逆序率 44~49%），而网页渲染器的激活游标
+    // 只能单调前进、超 2s 宽限即丢弃 —— 乱序会让游标死等在一条「时间戳在未来」的条目上，
+    // 后面早已到点的弹幕永远轮不到检查（实测 16979 条只显示出 112 条）。MPV 端有 parse.lua 的
+    // table.sort 兜住，TS 这条链一直没有排序。二分 seek 也依赖升序。
+    items.sort((a, b) => a.time - b.time);
     return items;
 }
 
@@ -385,6 +391,99 @@ function cacheBaseName(title: string, ep: number, season = 0): string {
     return season > 0 ? `bili_${h}_s${season}_${ep}` : `bili_${h}_${ep}`;
 }
 
+/** 白色（B站 默认色）。非此值的彩色弹幕归入 color 屏蔽类型，与 bili_danmaku.js:_filter_danmaku 一致。 */
+const DANMAKU_WHITE = 16777215;
+
+/**
+ * 屏蔽类型 → mode 映射，严格照抄 bili_danmaku.js:861-876 的 `_filter_danmaku`
+ * （mode 2/3 这类老式滚动不打标签，因此不会被任何类型命中，保持原样放行）。
+ */
+function blockTagOfMode(mode: number): string | null {
+    switch (mode) {
+        case 1: return 'scroll';
+        case 4: return 'bottom';
+        case 5: return 'top';
+        case 6: return 'reverse';
+        case 7: case 8: return 'advanced';
+        default: return null;
+    }
+}
+
+/**
+ * 屏蔽词编译缓存：key = 原始多行文本。
+ * 一次编译跨集复用 —— 绝不能每条弹幕重编译（几千条 × N 行）。
+ */
+const blacklistCache = new Map<string, Array<{ re: RegExp | null; raw: string }>>();
+
+function compileBlacklist(text: string): Array<{ re: RegExp | null; raw: string }> {
+    const hit = blacklistCache.get(text);
+    if (hit) return hit;
+    const out: Array<{ re: RegExp | null; raw: string }> = [];
+    for (const line of String(text || '').split(/\r?\n/)) {
+        const raw = line.trim();
+        if (!raw) continue;
+        // parse.lua:54-70 用 `str:match(pattern)`，即 Lua pattern，JS 没有等价物。
+        // 用户实际写的是「广告」「关注.*」「^xx$」「[0-9]+」这类，JS 正则都吃得下；
+        // 吃了不下（Lua 专属的 %a+ 之类）就退化成子串匹配，对齐 Lua 那边 pcall 的容错意图。
+        let re: RegExp | null = null;
+        try { re = new RegExp(raw); } catch (_) { re = null; }
+        out.push({ re, raw });
+    }
+    blacklistCache.set(text, out);
+    return out;
+}
+
+function isBlacklisted(text: string, patterns: Array<{ re: RegExp | null; raw: string }>): boolean {
+    for (const p of patterns) {
+        if (p.re) {
+            try { if (p.re.test(text)) return true; } catch (_) { /* 规则本身有问题 → 跳过，同 Lua pcall */ }
+        } else if (text.includes(p.raw)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 在 TS 侧应用「弹幕屏蔽类型 + 屏蔽词」。
+ *
+ * 为什么要在这里再做一遍：这两项配置原本只有 MPV 吃得到 ——
+ *   · 屏蔽类型写进 `danmaku_block_types.json`，唯一读者是 `bili_danmaku.js:_load_block_types()`；
+ *     而自建 danmu_api 命中时 `biliRunner.ts` 会在调用 `run()` 之前就早退，Lua 侧又完全不读这个 json
+ *     → 该源命中时屏蔽类型对 MPV 和网页端双双失效。
+ *   · 屏蔽词写进 `danmaku_blacklist.txt`，唯一读者是 `parse.lua:is_blacklisted()`
+ *     → 网页播放器根本不过 Lua，从来没遵守过屏蔽词。
+ *
+ * 调用时机必须在**磁盘缓存读取之后**：缓存里存的是未过滤条目，
+ * 这样用户改屏蔽设置下一集立即生效，既不必重抓、也不必让缓存失效。
+ */
+export function filterDanmakuItems(
+    items: DanmakuItem[],
+    blockTypes: string[],
+    blacklistText: string,
+): DanmakuItem[] {
+    const types = new Set((Array.isArray(blockTypes) ? blockTypes : []).map((x) => String(x)));
+    const patterns = compileBlacklist(blacklistText);
+    if (!types.size && !patterns.length) return items;
+
+    const out: DanmakuItem[] = [];
+    let byType = 0;
+    let byWord = 0;
+    for (const d of items) {
+        if (types.size) {
+            const tag = blockTagOfMode(d.type);
+            if ((tag && types.has(tag)) || (d.color !== DANMAKU_WHITE && types.has('color'))) { byType++; continue; }
+        }
+        if (patterns.length && isBlacklisted(d.text, patterns)) { byWord++; continue; }
+        out.push(d);
+    }
+    if (byType || byWord) {
+        log.info(`[danmaku] 屏蔽生效: 类型移除 ${byType} 条${types.size ? '(' + [...types].sort().join(',') + ')' : ''}`
+            + `, 屏蔽词移除 ${byWord} 条(${patterns.length} 条规则), 剩余 ${out.length}/${items.length} 条`);
+    }
+    return out;
+}
+
 /**
  * 获取某集的 B站弹幕【原始条目数组 + 来源信息】（供原生网页弹幕 overlay 使用）。
  * 与 getDanmakuAss 同源：标题+集数搜 B站、抓弹幕 XML。区别是这里直接返回
@@ -395,6 +494,13 @@ function cacheBaseName(title: string, ep: number, season = 0): string {
  * 用于「详情」弹窗展示"弹幕是从哪来的"。
  *
  * 带磁盘缓存（.json 内含 {items, meta}），避免重复请求 B站。
+ *
+ * 契约（调用方可以依赖的三件事）：
+ *   1. 返回的 items **保证按 time 升序** —— 渲染器的单调激活游标与二分 seek 都依赖这一点；
+ *   2. 返回前已应用「屏蔽类型 + 屏蔽词」（见 filterDanmakuItems），但**缓存里存的是未过滤的原始条目**，
+ *      所以改屏蔽设置下一集立即生效，不必重抓；
+ *   3. 缓存命中时会校验 `meta.source` 与当前弹幕源设置是否一致，不一致（例如刚开/刚关自建 danmu_api）
+ *      则忽略缓存重抓，避免旧源的缓存永久压制新源。
  * @param title   干净番名
  * @param ep      集数（0=仅标题）
  * @param isMovie 是否电影（仅影响 meta 标注）
@@ -413,20 +519,38 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
     } catch (_) { /* ignore */ }
 
     const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.json`);
+    // 屏蔽类型/屏蔽词一律在缓存读取之后才应用：缓存里存的是未过滤的原始条目，
+    // 这样用户改屏蔽设置下一集立即生效，既不必重抓、也不必让缓存失效。
+    const applyFilter = (arr: DanmakuItem[]): DanmakuItem[] =>
+        filterDanmakuItems(arr, fnConfig.getBiliDanmakuBlockTypes(), fnConfig.getBiliDanmakuBlacklist() || '');
+
     if (fs.existsSync(cacheFile) && fs.statSync(cacheFile).size > 0) {
         try {
             const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf-8')) as any;
             const items = (parsed && Array.isArray(parsed.items)) ? parsed.items : (Array.isArray(parsed) ? parsed : null);
             const meta = (parsed && parsed.meta) ? parsed.meta : null;
             if (items && items.length > 0) {
-                log.info(`[danmaku] ✅ 命中缓存(条目): ${cacheFile} (${items.length} 条)`);
-                return {
-                    items,
-                    meta: (meta && typeof meta === 'object') ? meta : {
+                // 缓存键 cacheBaseName 只有 title/season/ep、没有源维度，而命中即 return 会让
+                // runBiliDanmaku（内含 danmu_api 优选，见 biliRunner.ts:135）永不执行 ——
+                // lc-1101 之前存下的 B站 单源缓存（几百条）会永久压制自建源（几千条），关掉开关后反之亦然。
+                // 抓取前无法预知 danmu_api 会不会命中，所以不能把源写进 key；改成读缓存时双向校验。
+                // 无 meta 的老缓存 source 为 ''/undefined，isSelfHostedSource 判 false，自然归入内置 B站 侧。
+                const cachedCustom = danmuApi.isSelfHostedSource(meta && meta.source);
+                const wantCustom = danmuApi.isActive();
+                if (cachedCustom === wantCustom) {
+                    // 这条路径不经过 parseDanmakuXml，缓存里可能是排序修复之前落盘的乱序条目
+                    // （实测 29/29 个真实缓存全部乱序），必须再排一次，否则渲染器的单调游标照样卡死。
+                    items.sort((a: DanmakuItem, b: DanmakuItem) => a.time - b.time);
+                    const m: DanmakuMeta = (meta && typeof meta === 'object') ? meta : {
                         searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
                         ep, isMovie, season, count: items.length,
-                    },
-                };
+                    };
+                    const kept = applyFilter(items);
+                    m.count = kept.length;
+                    log.info(`[danmaku] ✅ 命中缓存(条目): ${cacheFile} (${items.length} 条 → 过滤后 ${kept.length} 条)`);
+                    return { items: kept, meta: m };
+                }
+                log.info(`[danmaku] ⚠️ 缓存来源(${cachedCustom ? '自建源' : '内置B站'})与当前设置(${wantCustom ? '自建源' : '内置B站'})不符 → 忽略缓存重抓: ${cacheFile}`);
             }
         } catch (_) { /* ignore */ }
     }
@@ -457,10 +581,14 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
         cookieStatus: r.cookie_status || undefined,
     };
     try {
+        // 缓存存**未过滤**的原始条目（与上面命中路径一致）：过滤结果一旦落盘，
+        // 用户改屏蔽设置后不重抓就永远生效不了，正是这里要避免的病。
         fs.writeFileSync(cacheFile, JSON.stringify({ items, meta }), 'utf-8');
-        log.info(`[danmaku] ✅ 弹幕条目就绪: ${cacheFile} (${items.length} 条)`);
     } catch (_) { /* ignore */ }
-    return { items, meta };
+    const kept = applyFilter(items);
+    meta.count = kept.length;
+    log.info(`[danmaku] ✅ 弹幕条目就绪: ${cacheFile} (${items.length} 条 → 过滤后 ${kept.length} 条)`);
+    return { items: kept, meta };
 }
 
 /**

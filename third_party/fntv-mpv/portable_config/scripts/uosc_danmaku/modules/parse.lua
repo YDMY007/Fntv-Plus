@@ -70,6 +70,60 @@ function is_blacklisted(str, patterns)
     return false
 end
 
+-- 弹幕屏蔽类型：mode → 标签，映射与 bili_danmaku.js:_filter_danmaku 逐条对齐
+local MODE_BLOCK_TAG = {
+    [1] = "scroll",
+    [4] = "bottom",
+    [5] = "top",
+    [6] = "reverse",
+    [7] = "advanced",
+    [8] = "advanced",
+}
+
+local function load_block_types(filepath)
+    local tags = {}
+    if not file_exists(filepath) then
+        return tags
+    end
+    local content = read_file(filepath)
+    if not content then
+        msg.warn("无法读取屏蔽类型文件: " .. filepath)
+        return tags
+    end
+    local arr = utils.parse_json(content)
+    if type(arr) ~= "table" then
+        msg.warn("屏蔽类型文件不是 JSON 数组: " .. filepath)
+        return tags
+    end
+    for _, v in ipairs(arr) do
+        if type(v) == "string" then
+            tags[v] = true
+        end
+    end
+    if next(tags) ~= nil then
+        local names = {}
+        for k in pairs(tags) do names[#names + 1] = k end
+        table.sort(names)
+        msg.info("弹幕屏蔽类型已加载: " .. table.concat(names, ","))
+    end
+    return tags
+end
+
+local block_types = load_block_types(mp.command_native({ "expand-path", options.block_types_path }))
+
+-- 判定必须用归一化后的 d.type/d.color：parse_xml_danmaku 的 params 序是 {time,type,size,color}，
+-- 而 parse_json_danmaku 是 {time,color,type,size} —— 两者相反，碰原始 params 必错。
+local function is_type_blocked(d)
+    if next(block_types) == nil then
+        return false
+    end
+    local tag = MODE_BLOCK_TAG[d.type or 1]
+    if tag and block_types[tag] then
+        return true
+    end
+    return block_types["color"] == true and (d.color or 0xFFFFFF) ~= 0xFFFFFF
+end
+
 -- 简繁转换
 local function convert(text, dict)
     return text:gsub("[%z\1-\127\194-\244][\128-\191]*", function(c)
@@ -302,12 +356,14 @@ function parse_danmaku_files(danmaku_input, delays)
                 end
 
                 for _, d in ipairs(parsed) do
-                    local matched, pattern = is_blacklisted(d.text, black_patterns)
-                    if not matched then
-                        d.text = ch_convert_cached(d.text)
-                        table.insert(all_danmaku, d)
-                    else
-                        -- msg.debug("命中黑名单: " .. pattern)
+                    if not is_type_blocked(d) then
+                        local matched, pattern = is_blacklisted(d.text, black_patterns)
+                        if not matched then
+                            d.text = ch_convert_cached(d.text)
+                            table.insert(all_danmaku, d)
+                        else
+                            -- msg.debug("命中黑名单: " .. pattern)
+                        end
                     end
                 end
             else
