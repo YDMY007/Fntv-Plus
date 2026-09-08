@@ -450,8 +450,12 @@ function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivE
     const flex = document.createElement('div');
     flex.className = 'flex h-full items-center justify-center';
     flex.setAttribute('tabindex', '0');
+    // [lc-1106] xgplayer 控制栏恒为暗底(渐变遮罩), 不跟随页面明暗主题 →
+    // 不能用 --semi-color-text-1(浅色主题下解析为深色 → 暗底上不可见/反色),
+    // 固定用白色系, 与 xgplayer 原生控件(倍速/选集/全屏)一致。
     const span = document.createElement('span');
-    span.className = 'cursor-pointer text-lg leading-lg text-[var(--semi-color-text-1)] hover:text-[var(--semi-color-text-0)]';
+    span.className = 'cursor-pointer text-lg leading-lg';
+    span.style.color = 'rgba(255,255,255,.85)';
     span.textContent = label;
     span.style.userSelect = 'none';
     flex.appendChild(span);
@@ -480,10 +484,11 @@ function createControls(): void {
 function syncToggleUI(): void {
     if (!toggleSpan) return;
     toggleSpan.textContent = loading ? t('弹幕…') : t('弹幕');
+    // [lc-1106] 控制栏恒暗底: 开启=品牌蓝, 关闭=半透白(不用 --semi-color-text-1, 浅色主题下会反色)
     toggleSpan.style.color = enabled
         ? 'var(--fn-bg-brand, #3374DB)'
-        : 'var(--semi-color-text-1)';
-    toggleSpan.style.opacity = enabled ? '1' : '0.55';
+        : 'rgba(255,255,255,.45)';
+    toggleSpan.style.opacity = enabled ? '1' : '1';
 }
 
 function toggleDanmaku(): void {

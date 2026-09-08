@@ -5184,6 +5184,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   let _tlLastApply = 0;
   let _tlLum: number | null = null;
   let _tlLumTs = 0;
+  let _tlLastLoggedState = ''; // [lc-1106] 只在状态变化时打日志，防视频播放页 DOM 高频变动刷屏
   const _tlImgCache = new Map<string, number | null>();
 
   /** 采集左上角需要反色的元素: 详情页原生「返回」+ 汉堡键 ☰ + 刷新按钮 + 同排导航文字(「首页」等) */
@@ -5352,7 +5353,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
       }
     }
-    log(`[lc-925] 左上角图标反色: lum=${Math.round(lum)} → ${dark ? '浅色(暗底)' : '深色(亮底)'}, ${icons.length} 个元素`);
+    // [lc-1106] 只在状态变化时打日志: 视频播放页 xgplayer 控制栏/弹幕频繁触发 DOM 变动 →
+    // burgerObserver → ensureBurgerVisible → scheduleTopLeftIconContrast → 每 ~3s 重刷一次,
+    // 但结果始终相同(lum=0 暗底 / 1 个元素) → 旧代码每次都 log → CMD 刷屏。
+    const stateKey = `${dark}:${icons.length}`;
+    if (stateKey !== _tlLastLoggedState) {
+      log(`[lc-925] 左上角图标反色: lum=${Math.round(lum)} → ${dark ? '浅色(暗底)' : '深色(亮底)'}, ${icons.length} 个元素`);
+      _tlLastLoggedState = stateKey;
+    }
   }
 
   async function applyTopLeftIconContrast(): Promise<void> {
