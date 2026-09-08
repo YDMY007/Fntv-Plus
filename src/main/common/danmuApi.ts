@@ -129,6 +129,12 @@ interface HttpProbe {
     ctype: string;
     /** 非 2xx 时从 JSON 里抽出的 errorMessage（不含原始 body） */
     errMsg: string;
+    /**
+     * [lc-1116] 一行请求明细（URL 已脱敏）：分段耗时 + 实际连到的地址 + 连接是否复用 + 关键响应头 + 错误原文。
+     * 精简的 detail 给人看，这条给排查用 —— 「公网连不上」和「时好时坏」的区别全藏在这些细节里
+     * （连到的是不是 DNS 给的那个 IP、走没走隧道网口、连接是新建还是复用、有没有反代 via）。
+     */
+    dbg: string;
 }
 
 /**
@@ -140,10 +146,47 @@ function httpGetEx(u: string, timeoutMs: number, agent?: any): Promise<HttpProbe
     return new Promise((resolve) => {
         const t0 = Date.now();
         let done = false;
+        // [lc-1116] 分段耗时：把「慢」拆成 dns / tcp / tls / 等首字节 四段，才知道慢在哪一段
+        const mark = { lookup: 0, connect: 0, secure: 0, head: 0 };
+        let sockDesc = '';
+        let httpVer = '';
+        let via = '';
+        let dateH = '';
+        let loc = '';
+        let errRaw = '';
+        const segOf = (): string => {
+            const n = (v: number): string => (v ? `${v}ms` : '-');
+            return `dns=${n(mark.lookup)}`
+                + ` tcp=${n(mark.connect ? mark.connect - (mark.lookup || 0) : 0)}`
+                + ` tls=${n(mark.secure ? mark.secure - mark.connect : 0)}`
+                + ` 首字节=${n(mark.head)} 总=${n(Date.now() - t0)}`;
+        };
+        const describeSocket = (s: any): string => {
+            if (!s) return 'socket=未建连';
+            const parts = [`远端 ${s.remoteAddress || '?'}:${s.remotePort || '?'}`, `本地网口 ${s.localAddress || '?'}:${s.localPort || '?'}`];
+            if (s.reused) parts.push('连接复用');
+            if (s.authorizationError) parts.push(`证书错误=${s.authorizationError}`);
+            try {
+                const proto = typeof s.getProtocol === 'function' ? s.getProtocol() : '';
+                if (proto) parts.push(proto);
+                const c = typeof s.getCipher === 'function' ? s.getCipher() : null;
+                if (c?.name) parts.push(`cipher=${c.name}`);
+            } catch (_) { /* 非 TLS socket */ }
+            return parts.join(' ');
+        };
         const finish = (p: Partial<HttpProbe>) => {
             if (done) return;
             done = true;
-            resolve({ body: null, status: 0, ms: Date.now() - t0, bytes: 0, err: '', server: '', ctype: '', errMsg: '', ...p } as HttpProbe);
+            const dbg = `GET ${safeUrl(u)} → ${p.status || '--'} ${p.bytes || 0}B`
+                + ` ｜ ${segOf()} ｜ ${sockDesc || 'socket=未建连'}`
+                + (httpVer ? ` ｜ HTTP/${httpVer}` : '')
+                + (p.server ? ` server=${p.server}` : '')
+                + (via ? ` via=${via}` : '')
+                + (dateH ? ` date=${dateH}` : '')
+                + (loc ? ` location=${safeUrl(loc)}` : '')
+                + (agent ? ` ｜ agent=${agent.constructor?.name || 'custom'}` : '')
+                + (p.err ? ` ｜ err=${p.err}${errRaw ? ' (' + errRaw + ')' : ''}` : '');
+            resolve({ body: null, status: 0, ms: Date.now() - t0, bytes: 0, err: '', server: '', ctype: '', errMsg: '', dbg, ...p } as HttpProbe);
         };
         let req: http.ClientRequest;
         const opt: http.RequestOptions = {};
@@ -151,12 +194,16 @@ function httpGetEx(u: string, timeoutMs: number, agent?: any): Promise<HttpProbe
         try {
             const mod = u.startsWith('https:') ? https : http;
             req = mod.get(u, opt, (res) => {
+                mark.head = Date.now() - t0;
                 const status = res.statusCode || 0;
                 const head = (k: string) => {
                     const v = res.headers[k];
                     return Array.isArray(v) ? v.join(',') : String(v || '');
                 };
                 const server = head('server'); const ctype = head('content-type');
+                httpVer = String(res.httpVersion || '');
+                via = head('via'); dateH = head('date'); loc = head('location');
+                sockDesc = describeSocket((req as any).socket);
                 if (status < 200 || status >= 300) {
                     // [lc-1115] 非 2xx 也要带回服务自报的原因：danmu_api 令牌错就是 401 + {"errorMessage":"Unauthorized"}，
                     // 光一个状态码分不出「令牌写错」和「端口上是别的服务」。只抽 errorMessage，不回显原始 body。
@@ -191,21 +238,32 @@ function httpGetEx(u: string, timeoutMs: number, agent?: any): Promise<HttpProbe
                     finish({ body, status, bytes: size, server, ctype });
                 });
                 res.on('error', (e: any) => {
+                    errRaw = String(e?.message || e).slice(0, 120);
                     log.warn(`[danmuApi] 响应错误: ${e?.message || e}`);
                     finish({ status, err: String(e?.code || e?.message || 'STREAM_ERROR'), server, ctype });
                 });
             });
         } catch (e: any) {
+            errRaw = String(e?.message || e).slice(0, 120);
             log.warn(`[danmuApi] 请求构造失败: ${e?.message || e}`);
             finish({ err: String(e?.code || 'CONSTRUCT_FAILED') });
             return;
         }
+        req.on('lookup', (e: any, address: string) => {
+            mark.lookup = Date.now() - t0;
+            if (e) errRaw = String(e.message || e).slice(0, 120);
+            else sockDesc = `DNS 给出 ${address} ` + sockDesc;
+        });
+        req.on('connect', () => { mark.connect = Date.now() - t0; sockDesc = describeSocket((req as any).socket); });
+        req.on('secureConnect', () => { mark.secure = Date.now() - t0; sockDesc = describeSocket((req as any).socket); });
         req.setTimeout(timeoutMs, () => {
+            errRaw = `socket 空闲超 ${timeoutMs}ms 被销毁`;
             log.warn(`[danmuApi] 请求超时(${timeoutMs}ms) | ${safeUrl(u)}`);
             try { req.destroy(); } catch (_) { /* ignore */ }
             finish({ err: 'ETIMEDOUT' });
         });
         req.on('error', (e: any) => {
+            errRaw = String(e?.message || e).slice(0, 120);
             log.warn(`[danmuApi] 请求失败: ${e?.message || e} | ${safeUrl(u)}`);
             finish({ err: String(e?.code || e?.message || 'REQ_ERROR') });
         });
@@ -574,6 +632,9 @@ export interface DiagStep {
     detail: string;
     /** 面向用户的下一步动作；只有 warn/fail 才给 */
     hint?: string;
+    /** [lc-1116] 该层的一行明细（分段耗时/实际连到的地址/连接复用/关键响应头/错误原文，已脱敏）。
+     *  app.log 始终落这条；面板按「明细日志」勾选决定是否显示。 */
+    dbg?: string;
 }
 
 export interface DiagConfig {
@@ -806,6 +867,8 @@ export async function diagnose(
         steps.push(s);
         try { if (onStep) onStep(s); } catch (_) { /* ignore */ }
         log.info(`[danmuApi诊断] ${s.state.toUpperCase().padEnd(4)} ${s.label} (${s.ms}ms) | ${s.detail}${s.hint ? ' | 建议: ' + s.hint : ''}`);
+        // 明细走 info 而非 debug：生产默认级别是 INFO，log.debug 根本不会落进 app.log，而这条正是排查要看的。
+        if (s.dbg) log.info(`[danmuApi诊断·明细] ${s.label} | ${s.dbg}`);
         return s;
     };
     const raw = String(baseOverride || fnConfig.getDanmuApiBase() || '').trim().replace(/\/+$/, '');
@@ -866,6 +929,9 @@ export async function diagnose(
             id: 'dns', label: '域名解析', state: d.err ? 'fail' : only6 ? 'warn' : 'ok', ms: d.ms,
             detail: d.err ? `解析失败 ${d.err}（本机 DNS: ${d.servers}）`
                 : `IPv4: ${d.v4.join(', ') || '无'} ｜ IPv6: ${d.v6.join(', ') || '无'} ｜ 本机 DNS: ${d.servers}`,
+            dbg: `dns.promises.lookup(${url.hostname}, verbatim) → `
+                + (d.err ? `err=${d.err}` : `v4=[${d.v4.join(',') || '-'}] v6=[${d.v6.join(',') || '-'}]`)
+                + ` ｜ ${d.ms}ms ｜ 系统 DNS: ${d.servers}`,
             hint: d.err ? errHintOf(d.err)
                 : only6 ? '只解析到 IPv6：若本机或出口链路 IPv6 不通，连接就会间歇性失败 —— 建议给域名补 A 记录，或强制走 IPv4' : undefined,
         });
@@ -891,6 +957,9 @@ export async function diagnose(
         id: 'tcp', label: 'TCP 建连', state: tcp.ok ? 'ok' : 'fail', ms: tcp.ms,
         detail: (tcp.ok ? `可建连 → ${tcp.remote}（本机出口 ${tcp.via}）` : `失败 ${tcp.err}`) + perIp,
         hint: tcp.ok ? undefined : (errHintOf(tcp.err) || '') + (routeNote ? routeNote : ''),
+        dbg: `net.connect(${url.hostname}:${port}${hc.v6 ? ' IPv6' : ''}) → ${tcp.ok ? 'connected' : 'FAILED'}`
+          + ` ｜ 远端 ${tcp.remote || '-'} ｜ 本机出口 ${tcp.via || '-'} ｜ ${tcp.ms}ms`
+          + `${tcp.err ? ' ｜ err=' + tcp.err : ''}${perIp}`,
     });
     if (!tcp.ok) return { steps, summary: `TCP 不通：${tcp.err}`, maskedBase: maskBase(raw) };
 
@@ -898,7 +967,11 @@ export async function diagnose(
     if (url.protocol === 'https:') {
         const strict = await tlsProbe(url.hostname, port, Math.min(timeoutMs, 8000), true);
         if (strict.ok) {
-            push({ id: 'tls', label: 'TLS 证书', state: 'ok', ms: strict.ms, detail: `握手成功 ${strict.proto}｜证书 CN=${strict.cn || '(无)'} 到期 ${strict.to || '(未知)'}` });
+            push({
+                id: 'tls', label: 'TLS 证书', state: 'ok', ms: strict.ms,
+                detail: `握手成功 ${strict.proto}｜证书 CN=${strict.cn || '(无)'} 到期 ${strict.to || '(未知)'}`,
+                dbg: `严格校验 通过 ｜ ${strict.proto} ｜ CN=${strict.cn || '(无)'} ｜ 到期=${strict.to || '(未知)'} ｜ ${strict.ms}ms`,
+            });
         } else {
             const loose = await tlsProbe(url.hostname, port, Math.min(timeoutMs, 8000), false);
             push({
@@ -907,6 +980,9 @@ export async function diagnose(
                 hint: loose.ok
                     ? `${errHintOf(strict.err)} 服务端证书不受本机信任：本应用按标准校验证书，所以会一直连不上（浏览器可能因为你手动信任过而能打开）。要么换成 http，要么给服务配一份受信任证书。`
                     : `${errHintOf(strict.err)} 且关闭校验也握不上，多半是端口上不是 TLS 服务。`,
+                dbg: `严格校验 失败 err=${strict.err}（${strict.ms}ms）`
+                  + ` ｜ 免校验=${loose.ok ? '通' : '失败 err=' + (loose.err || '未知')}（${loose.ms}ms）`
+                  + `${loose.ok ? ` ｜ ${loose.proto} CN=${loose.cn || '(无)'} 到期=${loose.to || '(未知)'}` : ''}`,
             });
             return { steps, summary: `TLS 未通过：${strict.err}`, maskedBase: maskBase(raw) };
         }
@@ -922,6 +998,7 @@ export async function diagnose(
             : `HTTP ${root.status || '(无响应)'} ${(root.bytes / 1024).toFixed(1)}KB${root.server ? ' ｜ Server: ' + root.server : ''}${root.ctype ? ' ｜ ' + root.ctype : ''}`,
         hint: root.err ? errHintOf(root.err)
             : root.status >= 400 ? `根路径返回 ${root.status}：如果配了反向代理，可能是代理没转发到容器；直连端口则多半正常（本服务根路径不一定提供页面）` : undefined,
+        dbg: root.dbg,
     });
 
     // ── ⑦ 三跳业务链路 ──
@@ -958,7 +1035,7 @@ export async function diagnose(
             sHint = n ? undefined : '连通但 0 条：服务端没有这部片子，或它查上游时超时了。这类情况弹幕会自动降级到内置 B站 链路（不是连不上）';
         }
     }
-    push({ id: 'search', label: '搜索接口 /api/v2/search/anime', state: searchState, ms: s1.ms, detail: sDetail, hint: sHint });
+    push({ id: 'search', label: '搜索接口 /api/v2/search/anime', state: searchState, ms: s1.ms, detail: sDetail, hint: sHint, dbg: s1.dbg });
 
     let episodeId = 0;
     if (conf.deep) {
@@ -977,6 +1054,7 @@ export async function diagnose(
                     : eps.length ? `条目存在，分集 ${eps.length} 个（首集 episodeId=${episodeId}）`
                         : `条目里 0 个分集（HTTP ${b.status || '-'}）`,
                 hint: eps.length ? undefined : '搜索有结果但条目拿不到分集：服务端该条数据不完整，实际播放时会降级内置 B站',
+                dbg: b.dbg,
             });
             if (!episodeId) {
                 push({ id: 'comment', label: '弹幕接口 /api/v2/comment', state: 'skip', ms: 0, detail: '上一跳没拿到 episodeId' });
@@ -987,6 +1065,7 @@ export async function diagnose(
                     id: 'comment', label: '弹幕接口 /api/v2/comment', state: n ? 'ok' : 'warn', ms: c.ms,
                     detail: c.err && !c.status ? `请求失败 ${c.err}` : `XML ${(c.bytes / 1024).toFixed(1)}KB，解析出 ${n} 条弹幕`,
                     hint: n ? undefined : '接口通但这一集没有弹幕（或返回 0 条）：属服务端数据问题，播放时会降级内置 B站',
+                    dbg: c.dbg + ` ｜ 响应预览: ${JSON.stringify(String(c.body || '').slice(0, 60))}`,
                 });
             }
         }
@@ -1004,6 +1083,7 @@ export async function diagnose(
         push({
             id: `repeat${i + 1}`, label: `重复探测 ${i + 1}/${repeats}`, state: ok ? 'ok' : 'fail', ms: p.ms,
             detail: ok ? `HTTP ${p.status} ${(p.bytes / 1024).toFixed(1)}KB` : (p.err || `HTTP ${p.status}`),
+            dbg: p.dbg,
         });
     }
     const okRuns = runs.filter((r) => r.ok);
@@ -1014,6 +1094,7 @@ export async function diagnose(
     push({
         id: 'jitter', label: '耗时与稳定性', state: flaky ? 'fail' : slowest > timeoutMs * 0.6 ? 'warn' : 'ok', ms: med,
         detail: `${okRuns.length}/${runs.length} 次成功 ｜ 最快 ${sorted[0] || 0}ms ｜ 中位 ${med}ms ｜ 最慢 ${slowest}ms ｜ 当前超时 ${timeoutMs}ms`,
+        dbg: `逐次 ${runs.map((r) => `${r.ms}ms${r.ok ? '' : '(失败)'}`).join(' ')} ｜ 成功 ${okRuns.length}/${runs.length} ｜ 极差 ${slowest - (sorted[0] || 0)}ms`,
         hint: flaky
             ? `同一地址同一接口 ${flaky} 次失败 —— 「时好时坏」被复现。服务端首次搜某个词要回源多个平台（实测可达 3s 以上），之后命中缓存只要十几毫秒；如果失败的全是超时，把超时调大即可`
             : slowest > timeoutMs * 0.6 ? `最慢一次已到 ${slowest}ms，超过当前超时上限的六成 —— 公网/高延迟网络下建议把超时调到 ${Math.max(timeoutMs, Math.round(slowest * 2.5 / 500) * 500)}ms 以上，否则会随机判为连不上` : undefined,
@@ -1031,6 +1112,7 @@ export async function diagnose(
             push({
                 id: 'proxy', label: '代理旁路', state: ok ? 'ok' : 'fail', ms: p.ms,
                 detail: ok ? `走代理 HTTP ${p.status} ${(p.bytes / 1024).toFixed(1)}KB` : `走代理仍失败：${p.err || 'HTTP ' + p.status}`,
+                dbg: p.dbg,
                 hint: '注意：弹幕请求本身不经过这个代理（本模块只直连）。这里只是验证「挂上代理能不能通」——如果走代理通、直连不通，说明问题在你到 NAS 的那条网络路径上。',
             });
         }

@@ -44,6 +44,57 @@ setOnShowsReady(injectCarousel);
 
 const LOG = '[EmbyWall]';
 
+/**
+ * [lc-1116] 面板跑在 http://<NAS> 上，那是**非安全上下文** —— 浏览器压根不挂 navigator.clipboard，
+ * 只认它的复制会静默什么都不发生（实测点击后 writeText/execCommand 调用数都是 0）。
+ * 三级兜底，并告诉调用方最终走到了哪一级。
+ */
+async function copyTextRobust(text: string, srcEl?: HTMLElement): Promise<'clipboard' | 'exec' | 'select' | 'none'> {
+  if (text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return 'clipboard';
+      }
+    } catch (_) { /* 落到下一级 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.readOnly = true;
+      ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0;white-space:pre;';
+      document.body.appendChild(ta);
+      ta.select();
+      const done = document.execCommand('copy');
+      ta.remove();
+      if (done) return 'exec';
+    } catch (_) { /* 落到下一级 */ }
+  }
+  try {
+    if (srcEl) {
+      const range = document.createRange();
+      range.selectNodeContents(srcEl);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+      return 'select';
+    }
+  } catch (_) { /* 下面按失败处理 */ }
+  return 'none';
+}
+
+const copyFlashTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
+/** 复制某个元素的全部文本，并把结果直接写在按钮上（1.8s 后复原），不给用户留「点了没反应」的空间。 */
+async function copyFromEl(btn: HTMLElement, srcEl: HTMLElement, idleLabel?: string): Promise<void> {
+  const how = await copyTextRobust(srcEl.textContent || '', srcEl);
+  const idle = idleLabel || btn.textContent || '';
+  const label = how === 'none' ? t('复制失败') : how === 'select' ? t('已选中，请按 Ctrl+C') : t('已复制');
+  btn.textContent = label;
+  const prev = copyFlashTimers.get(btn);
+  if (prev) clearTimeout(prev);
+  copyFlashTimers.set(btn, setTimeout(() => { btn.textContent = idle; }, 1800));
+}
+
 // [lc-516] 「应用补丁」向导弹窗监听：模块顶层注册，直接唤起自包含的补丁应用弹窗。
 // ===== 已迁移到 ./embyWall/modals/patch.ts（[lc-516] 模块级、自包含的补丁应用弹窗） =====
 // ===== 已迁移到 ./embyWall/login.ts =====
@@ -3488,10 +3539,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         + 'padding:0 6px;box-sizing:border-box;';
       return i;
     };
+    /* 不写内联尺寸：轨道 38×22 与 knob 位移都由 #fnos-settings-panel input[type=checkbox] 统一给，
+       内联 16px 会把轨道压成正方形而 knob 仍按 38 位移，就溢出成框外一个白点。 */
     const cfgChk = (checked: boolean): HTMLInputElement => {
       const c = document.createElement('input');
-      c.type = 'checkbox'; c.checked = checked;
-      c.style.cssText = 'width:16px;height:16px;accent-color:var(--semi-color-primary);cursor:pointer;margin:0;';
+      c.type = 'checkbox';
+      c.checked = checked;
       return c;
     };
     const dmApiTimeoutInp = cfgInp('8000', 76);
@@ -3501,11 +3554,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     dmApiKwInp.placeholder = t('片名或关键词');
     const dmApiDeepChk = cfgChk(true);
     const dmApiProxyChk = cfgChk(false);
+    const dmApiVerboseChk = cfgChk(false);
     dmApiFoldBody.appendChild(cfgRow(t('超时(ms)'), dmApiTimeoutInp));
     dmApiFoldBody.appendChild(cfgRow(t('重复次数'), dmApiRepeatInp));
     dmApiFoldBody.appendChild(cfgRow(t('测试关键词'), dmApiKwInp));
     dmApiFoldBody.appendChild(cfgRow(t('端到端三跳（条目→分集→弹幕）'), dmApiDeepChk));
     dmApiFoldBody.appendChild(cfgRow(t('试代理旁路'), dmApiProxyChk));
+    dmApiFoldBody.appendChild(cfgRow(t('明细日志（逐层附请求原始信息）'), dmApiVerboseChk));
     /* 末行去掉发丝线，免得和下面的按钮区之间出现两条并排的线 */
     const dmApiLastCfg = dmApiFoldBody.lastElementChild as HTMLElement;
     if (dmApiLastCfg) dmApiLastCfg.style.borderBottom = 'none';
@@ -3534,7 +3589,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       const d = new Date();
       const mark = String(s.state || '').toUpperCase();
       const txt = `[${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}] [${mark}] ${s.label} ${s.ms}ms\n`
-        + `       ${s.detail}${s.hint ? '\n　　↳ ' + s.hint : ''}\n`;
+        + `       ${s.detail}${s.hint ? '\n　　↳ ' + s.hint : ''}`
+        + (dmApiVerboseChk.checked && s.dbg ? `\n　　· ${s.dbg}` : '')
+        + '\n';
       dmApiDiagLog.textContent = (dmApiDiagLog.textContent || '') + txt;
       dmApiDiagLog.scrollTop = dmApiDiagLog.scrollHeight;
     };
@@ -3604,8 +3661,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
     dmApiCopyBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
-      const text = dmApiDiagLog.textContent || '';
-      if (text && navigator.clipboard) navigator.clipboard.writeText(text).catch(() => { });
+      void copyFromEl(dmApiCopyBtn, dmApiDiagLog, t('复制'));
     });
 
     // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘、Node 端弹幕缓存一致：%PUBLIC%\fnos-danmaku）
@@ -3812,8 +3868,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     diagRefresh.addEventListener('click', (e: Event) => { e.stopPropagation(); loadDiag(); });
     diagCopy.addEventListener('click', (e: Event) => {
       e.stopPropagation();
-      const text = diagPre.textContent || '';
-      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+      void copyFromEl(diagCopy, diagPre, t('复制'));
     });
     diagBody.appendChild(diagPre);
     diagBody.appendChild(diagBtns);
