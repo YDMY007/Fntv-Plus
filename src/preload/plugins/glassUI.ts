@@ -506,6 +506,53 @@ function stopParticles(): void {
   particles = [];
 }
 
+// ── [lc-1108] 播放页撤出全屏覆盖层 ──
+// 用户报障：飞牛原生网页播放时云母增强的粒子还浮在画面上。粒子(z:2)/噪点(z:2147482900)/
+// 暗角(body::before, z:5) 都是全屏 fixed 覆盖层, 而 <video> 是非定位元素 → 三层全压在视频之上。
+// 判据复用 embyWall 每秒同步到 <html> 的 fnos-video-active(mainwin ACRYLIC_CSS 同一约定),
+// 再并一条自查 <video>, 兜住进播放页后最长 1s 的空窗。
+// 只撤覆盖层: 玻璃材质与用户的开关设置原样保留(与 lc-1099 perf 总闸同一思路)。
+function isVideoPage(): boolean {
+  return document.documentElement.classList.contains('fnos-video-active')
+    || !!document.querySelector('video');
+}
+
+let overlaysOnVideoPage = false;
+
+function applyOverlays(s: GlassSettings, onVideo: boolean): void {
+  const root = document.documentElement;
+  root.setAttribute('data-fntv-glass-noise', s.noise && !onVideo ? '1' : '0');
+  root.setAttribute('data-fntv-glass-vignette', s.vignette && !onVideo ? '1' : '0');
+  if (s.particles && !onVideo) startParticles(); else stopParticles();
+  overlaysOnVideoPage = onVideo;
+}
+
+// 播放页状态翻转 → 只重落覆盖层, 不重跑整个 applyGlass(那会重放 neutralizeTopBar 的三次定时
+// 与 debugTopAncestry 的整批 [GLASS-DEBUG] 祖先扫描输出, 进出播放页各刷一次屏)
+function syncVideoOverlays(): void {
+  const onVideo = isVideoPage();
+  if (onVideo === overlaysOnVideoPage) return;
+  overlaysOnVideoPage = onVideo;
+  if (!document.documentElement.hasAttribute('data-fntv-glass')) return; // 云母未开, 无覆盖层可撤
+  applyOverlays(readSettings(), onVideo);
+  console.info(LOG, onVideo ? 'video page: overlays withdrawn' : 'left video page: overlays restored');
+}
+
+// OnDomChange 是 index.ts 里 body 子树的裸 MutationObserver(框架层不防抖), 播放页 xgplayer 起播期
+// 会打到每帧多发 → 用尾随节流而非防抖: 排队中的那一发不会被后续 churn 冲掉(lc-1107 饿死教训)
+let videoCheckQueued = false;
+let lastVideoCheck = 0;
+function scheduleVideoCheck(): void {
+  if (videoCheckQueued) return;
+  videoCheckQueued = true;
+  const wait = Math.max(0, 300 - (Date.now() - lastVideoCheck));
+  setTimeout(() => {
+    videoCheckQueued = false;
+    lastVideoCheck = Date.now();
+    try { syncVideoOverlays(); } catch { /* ignore */ }
+  }, wait);
+}
+
 // ── JS 兜底：直接置空顶栏祖先行内样式（优先级高于所有 CSS !important）──
 //    同时给 data-fnos-clear 容器的所有后代打 data-fntv-glass-exclude 标记，
 //    防止规则 ② 命中内部子元素（如导航栏行"飞牛影视"区域），避免该行单独浮出。
@@ -613,10 +660,9 @@ function applyGlass(): void {
       root.setAttribute('data-fntv-glass-mode', s.mode);
       // [lc-1023] 底座开关随背景源：fluid=html 铺不透明环境底(①c)，none=保留透桌面
       root.setAttribute('data-fntv-glass-bg', s.bg === 'none' ? 'none' : 'fluid');
-      root.setAttribute('data-fntv-glass-noise', s.noise ? '1' : '0');
-      root.setAttribute('data-fntv-glass-vignette', s.vignette ? '1' : '0');
       ensureNoiseLayer();
-      if (s.particles) startParticles(); else stopParticles();
+      // [lc-1108] 粒子/噪点/暗角三层全屏覆盖统一在此落地: 播放页(有 <video>)一律撤出
+      applyOverlays(s, isVideoPage());
       // [lc-1026] 诊断锚点：真机再出「全透」时，控制台按此行确认 applyGlass 是否跑过、
       // 以及 html[data-fntv-glass-bg] 属性在不在——区分「状态没应用」与「合成层没画」。
       console.info(LOG, 'applied: mode=' + s.mode + ' bg=' + s.bg + ' root[' + effEnabled + ']');
@@ -951,6 +997,11 @@ function handle(): void {
 
     // [lc-1099] 运行期切换性能模式: 同步摘/挂云母属性+停/复粒子, 并刷新设置块提示文案
     window.addEventListener('fntv:perf-change', () => { applyGlass(); updatePerfHint(); });
+
+    // [lc-1108] 播放页进出: embyWall 每秒把 fnos-video-active 同步到 <html>, 这里盯它的 class 变化
+    // (另一路 OnDomChange 自查 <video> 见文件底部注册, 两路都汇到同一个节流入口)
+    new MutationObserver(scheduleVideoCheck)
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   } catch (err) {
     console.error(LOG, 'handle failed', err);
   }
@@ -958,5 +1009,7 @@ function handle(): void {
 
 // 注册必须在任何可能抛错的模块级代码之前（本文件无模块级 IIFE，此处即顶层注册）
 registerHook(HookType.OnReady, handle);
+// [lc-1108] DOM 变化即自查播放页状态(节流, 见 scheduleVideoCheck)
+registerHook(HookType.OnDomChange, scheduleVideoCheck);
 
 export {};
