@@ -541,12 +541,27 @@ function injectDmPanelStyle(): void {
 .fntv-dm-fold.open>div{visibility:visible}
 /* 分区线 = .semi-dropdown-divider: 通铺 1px, 上下 4px */
 .fntv-dm-sep{height:1px;margin:4px 0;background:rgba(255,255,255,.15);pointer-events:none}
-/* [lc-1118] 手动搜索段: 搜索行 + 候选列表(极简排版, 无框体堆砌) */
-.fntv-dm-search-row{display:flex;gap:6px;align-items:center;padding:8px 16px 4px}
-.fntv-dm-search-in{flex:1;min-width:0;height:26px;padding:0 8px;border:1px solid rgba(255,255,255,.15);border-radius:4px;background:rgba(255,255,255,.06);color:#fff;font-size:12px;outline:none;box-sizing:border-box}
-.fntv-dm-search-in:focus{border-color:var(--semi-color-primary,#3374DB)}
-.fntv-dm-search-btn{flex:none;height:26px;padding:0 10px;border:none;border-radius:4px;background:var(--semi-color-primary,#3374DB);color:#fff;font-size:12px;cursor:pointer}
-.fntv-dm-search-btn:disabled{opacity:.5;cursor:default}
+/* [lc-1118] 手动搜索段: 搜索行 + 候选列表(极简排版, 无框体堆砌)。
+   选择器带 .fntv-dm-list 前缀抬特异度，并显式压掉飞牛页面全局给 input/button 的
+   浅色 inset 描边与灰白底(box-shadow/background)，否则控件在暗底弹窗里发灰 */
+.fntv-dm-list .fntv-dm-search-row{display:flex;gap:6px;align-items:center;padding:8px 16px 4px}
+.fntv-dm-list .fntv-dm-search-in{
+  flex:1;min-width:0;height:28px;padding:0 9px;box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.14);border-radius:6px;
+  background:rgba(255,255,255,.07);color:#fff;font-size:12px;
+  outline:none;box-shadow:none;appearance:none;
+}
+.fntv-dm-list .fntv-dm-search-in::placeholder{color:rgba(255,255,255,.35)}
+.fntv-dm-list .fntv-dm-search-in:focus{border-color:var(--semi-color-primary,#3374DB);background:rgba(255,255,255,.09)}
+.fntv-dm-list .fntv-dm-search-btn{
+  flex:none;height:28px;padding:0 12px;box-sizing:border-box;
+  border:none;border-radius:6px;
+  background-color:var(--semi-color-primary,#3374DB);
+  color:#fff;font-size:12px;font-weight:500;cursor:pointer;
+  outline:none;box-shadow:none;appearance:none;
+}
+.fntv-dm-list .fntv-dm-search-btn:hover{background-color:var(--semi-color-primary-hover,#2e63c9)}
+.fntv-dm-list .fntv-dm-search-btn:disabled{opacity:.45;cursor:default}
 .fntv-dm-cand{padding:7px 16px;cursor:pointer}
 .fntv-dm-cand:hover{background:rgba(255,255,255,.06)}
 .fntv-dm-cand.on{background:rgba(51,116,219,.18)}
@@ -1527,8 +1542,12 @@ function renderSearchBody(): void {
 
     const row = document.createElement('div');
     row.className = 'fntv-dm-search-row';
+    // class 含 "search" 会被 glassUI 组件级磨砂([class*="search"]) !important 命中，
+    // 走它自带的 :not([data-fntv-glass-exclude]) 豁免通道排除，别事后 !important 对抗
+    const glassExempt = (el: HTMLElement): void => { el.setAttribute('data-fntv-glass-exclude', '1'); };
     const inp = document.createElement('input');
     inp.className = 'fntv-dm-search-in';
+    glassExempt(inp);
     inp.value = dmSearchKw;
     inp.placeholder = t('番名或关键词');
     inp.addEventListener('input', () => { dmSearchKw = inp.value; });
@@ -1539,9 +1558,11 @@ function renderSearchBody(): void {
     });
     const btn = document.createElement('button');
     btn.className = 'fntv-dm-search-btn';
+    glassExempt(btn);
     btn.textContent = t('搜索');
     btn.disabled = dmSearchBusy;
     btn.addEventListener('click', (e) => { e.stopPropagation(); void runSearch(dmSearchKw); });
+    glassExempt(row);
     row.appendChild(inp);
     row.appendChild(btn);
     body.appendChild(row);
