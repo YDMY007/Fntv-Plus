@@ -3403,8 +3403,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const dmApiHint = document.createElement('div');
     dmApiHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    dmApiHint.textContent = t('填入 NAS 上部署的 danmu_api 服务地址（聚合哔哩/爱奇艺/优酷/腾讯等多平台弹幕，密度通常高于单源 B站）。开启后作为弹幕优选源，未命中或未启用时自动降级到内置 B站 弹幕获取。下次 MPV 播放时生效。');
+    dmApiHint.textContent = t('填入 NAS 上部署的 danmu_api 服务地址（聚合多平台弹幕，密度高于单源 B站）。开启后作为优选源，未命中自动降级内置 B站；下次 MPV 播放时生效。');
     dmApiFoldBody.appendChild(dmApiHint);
+
+    const dmApiHint2 = document.createElement('div');
+    dmApiHint2.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
+    dmApiHint2.textContent = t('连不上时点「运行分层诊断」，它逐层给出根因。关键词建议填正在看的片名：服务端搜新词要回源多平台，远慢于搜已缓存词 —— 这就是「时好时坏」的来源。');
+    dmApiFoldBody.appendChild(dmApiHint2);
 
     const dmApiInput = document.createElement('input');
     dmApiInput.type = 'text';
@@ -3454,6 +3459,153 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           dmApiStatus.style.color = (r && r.ok) ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
         })
         .catch((err) => { dmApiStatus.textContent = t('连接失败') + ': ' + (err && err.message ? err.message : err); dmApiStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+
+    // ===== [lc-1115] 测试配置 + 分层诊断 =====
+    // 「测试连接」只回一句成/败，可用户报的是「公网连不上、内网时好时坏」—— 一句话查不出根因。
+    // 这里把探测拆成 地址形态→本机路由→DNS→TCP→TLS→服务应答→三跳→耗时抖动→代理旁路 逐层推给面板。
+    const dmApiCfgTitle = document.createElement('div');
+    dmApiCfgTitle.textContent = t('测试配置');
+    dmApiCfgTitle.style.cssText = 'color:var(--fnos-ui-muted);font-size:11.5px;margin:12px 0 2px;';
+    dmApiFoldBody.appendChild(dmApiCfgTitle);
+
+    /* 标签左 · 值右，只用发丝线分隔，不再套框 */
+    const cfgRow = (labelText: string, ctl: HTMLElement): HTMLElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;'
+        + 'padding:7px 6px;border-bottom:1px solid var(--fnos-ui-border);';
+      const lab = document.createElement('span');
+      lab.textContent = labelText;
+      lab.style.cssText = 'color:var(--fnos-ui-text);font-size:11.5px;';
+      row.appendChild(lab); row.appendChild(ctl);
+      return row;
+    };
+    const cfgInp = (val: string, width: number): HTMLInputElement => {
+      const i = document.createElement('input');
+      i.type = 'text'; i.value = val;
+      i.style.cssText = `width:${width}px;height:26px;font-size:11px;color:var(--fnos-ui-text);text-align:right;`
+        + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;'
+        + 'padding:0 6px;box-sizing:border-box;';
+      return i;
+    };
+    const cfgChk = (checked: boolean): HTMLInputElement => {
+      const c = document.createElement('input');
+      c.type = 'checkbox'; c.checked = checked;
+      c.style.cssText = 'width:16px;height:16px;accent-color:var(--semi-color-primary);cursor:pointer;margin:0;';
+      return c;
+    };
+    const dmApiTimeoutInp = cfgInp('8000', 76);
+    const dmApiRepeatInp = cfgInp('3', 52);
+    const dmApiKwInp = cfgInp('测试', 120);
+    dmApiKwInp.style.textAlign = 'left';
+    dmApiKwInp.placeholder = t('片名或关键词');
+    const dmApiDeepChk = cfgChk(true);
+    const dmApiProxyChk = cfgChk(false);
+    dmApiFoldBody.appendChild(cfgRow(t('超时(ms)'), dmApiTimeoutInp));
+    dmApiFoldBody.appendChild(cfgRow(t('重复次数'), dmApiRepeatInp));
+    dmApiFoldBody.appendChild(cfgRow(t('测试关键词'), dmApiKwInp));
+    dmApiFoldBody.appendChild(cfgRow(t('端到端三跳（条目→分集→弹幕）'), dmApiDeepChk));
+    dmApiFoldBody.appendChild(cfgRow(t('试代理旁路'), dmApiProxyChk));
+    /* 末行去掉发丝线，免得和下面的按钮区之间出现两条并排的线 */
+    const dmApiLastCfg = dmApiFoldBody.lastElementChild as HTMLElement;
+    if (dmApiLastCfg) dmApiLastCfg.style.borderBottom = 'none';
+
+    const dmApiDiagLog = document.createElement('pre');
+    dmApiDiagLog.style.cssText = 'margin:8px 0 0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px;'
+      + 'font-size:10.5px;line-height:1.55;color:var(--fnos-ui-text);white-space:pre-wrap;word-break:break-all;'
+      + 'max-height:240px;overflow:auto;';
+    const dmApiDiagBtns = document.createElement('div');
+    dmApiDiagBtns.style.cssText = 'display:flex;gap:6px;margin-top:10px;';
+    const dmApiDiagBtn = mkBtn('运行分层诊断', true);
+    const dmApiStopBtn = mkBtn('停止', true);
+    const dmApiCopyBtn = mkBtn('复制', true);
+    dmApiStopBtn.style.display = 'none';
+    dmApiCopyBtn.style.display = 'none';
+    dmApiDiagBtns.appendChild(dmApiDiagBtn); dmApiDiagBtns.appendChild(dmApiStopBtn); dmApiDiagBtns.appendChild(dmApiCopyBtn);
+    dmApiFoldBody.appendChild(dmApiDiagBtns);
+    dmApiFoldBody.appendChild(dmApiDiagLog);
+    dmApiDiagLog.style.display = 'none';
+
+    /* runId 由面板生成、主进程原样回带：按「停止」后旧一轮迟到的事件会被下面的比对丢弃，不和新一次混框 */
+    let dmApiRunId = '';
+    const pad2 = (n: number): string => (n < 10 ? '0' + n : String(n));
+    const dmApiAppendStep = (s: any): void => {
+      if (!s || s.runId !== dmApiRunId) return;
+      const d = new Date();
+      const mark = String(s.state || '').toUpperCase();
+      const txt = `[${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}] [${mark}] ${s.label} ${s.ms}ms\n`
+        + `       ${s.detail}${s.hint ? '\n　　↳ ' + s.hint : ''}\n`;
+      dmApiDiagLog.textContent = (dmApiDiagLog.textContent || '') + txt;
+      dmApiDiagLog.scrollTop = dmApiDiagLog.scrollHeight;
+    };
+    const dmApiOnStep = (_e: any, s: any): void => { dmApiAppendStep(s); };
+    const dmApiFinish = (): void => {
+      dmApiRunId = '';
+      ipcRenderer.removeListener('settings:diag-danmu-api-step', dmApiOnStep);
+      dmApiDiagBtn.disabled = false;
+      dmApiDiagBtn.style.opacity = '';
+      dmApiStopBtn.style.display = 'none';
+      dmApiCopyBtn.style.display = dmApiDiagLog.textContent ? '' : 'none';
+    };
+    dmApiDiagBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      dmApiRunId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      dmApiDiagLog.textContent = '';
+      dmApiDiagLog.style.display = '';
+      dmApiCopyBtn.style.display = 'none';
+      dmApiStopBtn.style.display = '';
+      dmApiDiagBtn.disabled = true;
+      dmApiDiagBtn.style.opacity = '.5';
+      dmApiStatus.textContent = t('正在诊断…');
+      dmApiStatus.style.color = 'var(--fnos-ui-sub)';
+      ipcRenderer.on('settings:diag-danmu-api-step', dmApiOnStep);
+      const payload = {
+        runId: dmApiRunId,
+        base: dmApiInput.value.trim(),
+        timeoutMs: Number(dmApiTimeoutInp.value),
+        repeats: Number(dmApiRepeatInp.value),
+        keyword: dmApiKwInp.value,
+        deep: dmApiDeepChk.checked,
+        tryProxy: dmApiProxyChk.checked,
+      };
+      ipcRenderer.invoke('settings:diag-danmu-api', payload)
+        .then((r: any) => {
+          const rep = r && r.report;
+          if (rep) {
+            if (dmApiRunId === payload.runId) {
+              /* 首行补脱敏地址（maskedBase 已隐藏路径段，TOKEN 不会跟着外发）：整段复制走才有上下文 */
+              dmApiDiagLog.textContent = `${rep.maskedBase} ｜ ${rep.summary}\n${dmApiDiagLog.textContent || ''}`;
+              dmApiStatus.textContent = t('诊断完成') + ': ' + rep.summary;
+              const bad = (rep.steps || []).filter((x: any) => x.state === 'fail').length;
+              dmApiStatus.style.color = bad ? 'var(--fnos-ui-warn)' : 'var(--fnos-ui-sub)';
+            }
+          }
+          dmApiFinish();
+        })
+        .catch((err) => {
+          const msg = t('诊断失败') + ': ' + (err && err.message ? err.message : err);
+          if (dmApiRunId === payload.runId) {
+            dmApiDiagLog.textContent = (dmApiDiagLog.textContent || '') + msg + '\n';
+            dmApiStatus.textContent = msg;
+            dmApiStatus.style.color = 'var(--fnos-ui-warn)';
+          }
+          dmApiFinish();
+        });
+    });
+    dmApiStopBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      /* 探测在主进程，渲染侧无法真中断；这里停的是显示，并把话说清楚，别让用户以为已经掐了请求 */
+      if (dmApiRunId) {
+        dmApiDiagLog.textContent = (dmApiDiagLog.textContent || '') + '\n' + t('（已停止显示：本轮探测仍在后台跑完并写入日志）') + '\n';
+      }
+      dmApiFinish();
+      dmApiStatus.textContent = t('已停止');
+      dmApiStatus.style.color = 'var(--fnos-ui-sub)';
+    });
+    dmApiCopyBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const text = dmApiDiagLog.textContent || '';
+      if (text && navigator.clipboard) navigator.clipboard.writeText(text).catch(() => { });
     });
 
     // 打开已下载弹幕文件夹（方便用户管理/删除；目录与 MPV 弹幕落盘、Node 端弹幕缓存一致：%PUBLIC%\fnos-danmaku）

@@ -400,6 +400,33 @@ async function handleTestDanmuApi(_event: any, base?: string): Promise<{ ok: boo
     return r;
 }
 
+// [lc-1115] 分层诊断：把一句「连不上」拆成 地址形态 / 本机路由 / DNS / TCP / TLS / 服务应答 / 三跳 / 抖动 / 代理 逐层归因。
+// 每出一条既推给面板实时显示、也落 app.log（diagnose 内部已记），用户报「公网连不上、内网时好时坏」时这份结论才是可查的东西。
+// 数值字段只在有效时才挂进 cfg —— 展开时 undefined 会盖掉 diagnose 里的默认值。
+// runId 由面板生成并原样回带：用户按「停止」后，旧一轮迟到的事件会被面板丢弃，不会和新一次的结果混在同一个日志框。
+async function handleDiagDanmuApi(_event: any, payload: any): Promise<any> {
+    const p: any = (payload && typeof payload === 'object') ? payload : {};
+    const cfg: danmuApi.DiagConfig = {};
+    const tmo = Math.round(Number(p.timeoutMs));
+    if (Number.isFinite(tmo) && tmo > 0) cfg.timeoutMs = tmo;
+    const rep = Math.round(Number(p.repeats));
+    if (Number.isFinite(rep) && rep > 0) cfg.repeats = rep;
+    if (typeof p.keyword === 'string' && p.keyword.trim()) cfg.keyword = p.keyword.trim();
+    cfg.deep = p.deep !== false;
+    cfg.tryProxy = !!p.tryProxy;
+    const runId = String(p.runId || '');
+    const win = getMainWindow();
+    const onStep = (s: danmuApi.DiagStep): void => {
+        try {
+            if (win && !win.isDestroyed()) win.webContents.send('settings:diag-danmu-api-step', Object.assign({ runId }, s));
+        } catch (_) { /* 窗口已关：诊断照常跑完并落 app.log，只是没处回传 */ }
+    };
+    const r = await danmuApi.diagnose(typeof p.base === 'string' ? p.base.trim() : '', cfg, onStep);
+    // 结论里不含地址路径段（TOKEN 在那），可以整行落日志
+    log.info('自建弹幕接口诊断 →', `${r.summary}（${r.steps.length} 层）`);
+    return { ok: true, report: r };
+}
+
 // 用系统默认浏览器打开外部链接（设置面板内的可点击链接用）
 async function handleOpenExternal(_event: any, url: string): Promise<void> {
     if (url && /^https?:\/\//i.test(url)) {
@@ -836,6 +863,7 @@ function init(): void {
     // [lc-1101] 自建弹幕接口（danmu_api）：保存开关+地址 / 测试连通性
     registerHandler('settings:set-danmu-api', handleSetDanmuApi, { useHandle: true });
     registerHandler('settings:test-danmu-api', handleTestDanmuApi, { useHandle: true });
+    registerHandler('settings:diag-danmu-api', handleDiagDanmuApi, { useHandle: true });
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
     registerHandler('settings:set-carousel-logo', handleSetCarouselLogoEnabled, { useHandle: true });

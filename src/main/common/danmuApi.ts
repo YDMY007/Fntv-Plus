@@ -1,9 +1,14 @@
 import * as http from 'http';
 import * as https from 'https';
+import * as net from 'net';
+import * as tls from 'tls';
+import * as dns from 'dns';
+import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
+import { resolveProxyAgent } from '../../modules/proxyAgent';
 import type { BiliDanmakuResult, BiliCandidate } from './biliRunner';
 
 const log = logger.component('danmuApi');
@@ -93,12 +98,14 @@ function currentBase(): string {
 // ===================== HTTP =====================
 
 /** [lc-1104] 日志脱敏：自建 danmu_api 的 TOKEN 是 base 的**路径**段（http://host:port/<TOKEN>），
- *  把完整 url 打进 app.log 等于将凭据摊在用户会转贴的日志里。只留 host + /api/… 尾段 + query。 */
+ *  把完整 url 打进 app.log 等于将凭据摊在用户会转贴的日志里。只留 host + /api/… 尾段 + query。
+ *  [lc-1115] 补漏：路径里没有 /api/ 时（诊断的「根路径应答」就是这种）原先会整段回显 = 直接印出 TOKEN，
+ *  现在一律隐藏；工装 G 组专门盯这条。 */
 function safeUrl(u: string): string {
     try {
         const p = new URL(u);
         const i = p.pathname.indexOf('/api/');
-        return p.host + (i >= 0 ? p.pathname.slice(i) : p.pathname) + p.search;
+        return p.host + (i >= 0 ? p.pathname.slice(i) : '/<路径前缀·已隐藏>') + p.search;
     } catch (_) {
         return '(非法地址)';
     }
@@ -106,18 +113,65 @@ function safeUrl(u: string): string {
 
 /** GET 文本（内置超时 + 体积上限）；任何失败返回 null，绝不抛给调用方。 */
 function httpGet(u: string, timeoutMs: number): Promise<string | null> {
+    return httpGetEx(u, timeoutMs).then((p) => p.body);
+}
+
+interface HttpProbe {
+    body: string | null;
+    /** 0 = 没拿到响应（连接/解析阶段就挂了） */
+    status: number;
+    ms: number;
+    bytes: number;
+    /** Node 错误码或 'ETIMEDOUT'(自建超时)，'' = 无错误 */
+    err: string;
+    /** 只留诊断要用的几个头（server/content-type 能分清「直连容器」还是「走了反代」） */
+    server: string;
+    ctype: string;
+    /** 非 2xx 时从 JSON 里抽出的 errorMessage（不含原始 body） */
+    errMsg: string;
+}
+
+/**
+ * [lc-1115] 带归因的 GET：诊断套件要把「连不上」拆成 DNS / TCP / TLS / HTTP / 业务 五层，
+ * 而旧 httpGet 把所有失败压成一个 null，用户侧只剩一句「连不上（地址/端口/防火墙/Docker 未运行？）」。
+ * 失败不抛、不吞，一律结构化返回。
+ */
+function httpGetEx(u: string, timeoutMs: number, agent?: any): Promise<HttpProbe> {
     return new Promise((resolve) => {
+        const t0 = Date.now();
         let done = false;
-        const finish = (v: string | null) => { if (!done) { done = true; resolve(v); } };
+        const finish = (p: Partial<HttpProbe>) => {
+            if (done) return;
+            done = true;
+            resolve({ body: null, status: 0, ms: Date.now() - t0, bytes: 0, err: '', server: '', ctype: '', errMsg: '', ...p } as HttpProbe);
+        };
         let req: http.ClientRequest;
+        const opt: http.RequestOptions = {};
+        if (agent) opt.agent = agent;
         try {
             const mod = u.startsWith('https:') ? https : http;
-            req = mod.get(u, (res) => {
+            req = mod.get(u, opt, (res) => {
                 const status = res.statusCode || 0;
+                const head = (k: string) => {
+                    const v = res.headers[k];
+                    return Array.isArray(v) ? v.join(',') : String(v || '');
+                };
+                const server = head('server'); const ctype = head('content-type');
                 if (status < 200 || status >= 300) {
-                    res.resume();
-                    log.warn(`[danmuApi] HTTP ${status} | ${safeUrl(u)}`);
-                    finish(null);
+                    // [lc-1115] 非 2xx 也要带回服务自报的原因：danmu_api 令牌错就是 401 + {"errorMessage":"Unauthorized"}，
+                    // 光一个状态码分不出「令牌写错」和「端口上是别的服务」。只抽 errorMessage，不回显原始 body。
+                    let raw = '';
+                    res.on('data', (c: Buffer) => { if (raw.length < 4096) raw += c.toString('utf8'); });
+                    res.on('end', () => {
+                        let msg = '';
+                        try {
+                            const j = JSON.parse(raw);
+                            msg = String(j.errorMessage || j.error || j.message || '').slice(0, 60);
+                        } catch (_) { /* 非 JSON（HTML 错误页等）不抽 */ }
+                        log.warn(`[danmuApi] HTTP ${status}${msg ? ' ' + msg : ''} | ${safeUrl(u)}`);
+                        finish({ status, err: '', server, ctype, errMsg: msg });
+                    });
+                    res.on('error', () => finish({ status, err: '', server, ctype }));
                     return;
                 }
                 const chunks: Buffer[] = [];
@@ -127,25 +181,34 @@ function httpGet(u: string, timeoutMs: number): Promise<string | null> {
                     if (size > MAX_BODY) {
                         log.warn(`[danmuApi] 响应超过 ${MAX_BODY} 字节上限，中断 | ${safeUrl(u)}`);
                         try { res.destroy(); } catch (_) { /* ignore */ }
-                        finish(null);
+                        finish({ status, err: 'ETOOLARGE', server, ctype });
                         return;
                     }
                     chunks.push(c);
                 });
-                res.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
-                res.on('error', (e) => { log.warn(`[danmuApi] 响应错误: ${e?.message || e}`); finish(null); });
+                res.on('end', () => {
+                    const body = Buffer.concat(chunks).toString('utf8');
+                    finish({ body, status, bytes: size, server, ctype });
+                });
+                res.on('error', (e: any) => {
+                    log.warn(`[danmuApi] 响应错误: ${e?.message || e}`);
+                    finish({ status, err: String(e?.code || e?.message || 'STREAM_ERROR'), server, ctype });
+                });
             });
         } catch (e: any) {
             log.warn(`[danmuApi] 请求构造失败: ${e?.message || e}`);
-            finish(null);
+            finish({ err: String(e?.code || 'CONSTRUCT_FAILED') });
             return;
         }
         req.setTimeout(timeoutMs, () => {
             log.warn(`[danmuApi] 请求超时(${timeoutMs}ms) | ${safeUrl(u)}`);
             try { req.destroy(); } catch (_) { /* ignore */ }
-            finish(null);
+            finish({ err: 'ETIMEDOUT' });
         });
-        req.on('error', (e: any) => { log.warn(`[danmuApi] 请求失败: ${e?.message || e} | ${safeUrl(u)}`); finish(null); });
+        req.on('error', (e: any) => {
+            log.warn(`[danmuApi] 请求失败: ${e?.message || e} | ${safeUrl(u)}`);
+            finish({ err: String(e?.code || e?.message || 'REQ_ERROR') });
+        });
     });
 }
 
@@ -488,6 +551,500 @@ export async function testConnection(baseOverride?: string): Promise<{ ok: boole
     if (j.success === false) return { ok: false, message: '服务有响应但报错：' + String(j.errorMessage || '未知') };
     const n = Array.isArray(j.animes) ? j.animes.length : 0;
     return { ok: true, message: `连通正常（试搜「测试」返回 ${n} 条结果）` };
+}
+
+// ===================== [lc-1115] 分层连通诊断 =====================
+//
+// 用户反馈两种症状：① 公网环境连不上；② 内网有时连得上、有时连不上。旧「测试连接」只有一发
+// search 请求，任何失败都被压成同一句「连不上（地址/端口/防火墙/Docker 未运行？）」。要分清真凶，
+// 只能把链路拆开逐层量：地址形态 → 本机有没有能直达它的路由 → DNS → TCP → TLS → 服务应答 →
+// 三跳业务链路 → 重复探测的耗时分布 → 代理旁路。
+//
+// 实测背景（内网活服务）：search 冷关键词回源多平台要 1~3s，命中服务端缓存只 15ms —— 相差约 200 倍，
+// 所以「固定探测一个已被缓存的关键词」会让连通性结论随缓存冷热摆动，抖动必须靠耗时分布来判。
+
+export type DiagState = 'ok' | 'warn' | 'fail' | 'skip';
+
+export interface DiagStep {
+    id: string;
+    label: string;
+    state: DiagState;
+    ms: number;
+    /** 已脱敏：绝不含 base 的路径段（TOKEN 就在那） */
+    detail: string;
+    /** 面向用户的下一步动作；只有 warn/fail 才给 */
+    hint?: string;
+}
+
+export interface DiagConfig {
+    timeoutMs?: number;
+    repeats?: number;
+    keyword?: string;
+    deep?: boolean;
+    tryProxy?: boolean;
+}
+
+export interface DiagReport {
+    steps: DiagStep[];
+    summary: string;
+    /** 可以安全外发/贴进反馈的地址写法 */
+    maskedBase: string;
+}
+
+const DIAG_DEF = { timeoutMs: 8000, repeats: 3, keyword: '测试', deep: true, tryProxy: true };
+
+/** 网络层错误码 → 人话。这张表就是「连不上」的归因字典。 */
+const NET_ERR_HINT: Record<string, string> = {
+    ECONNREFUSED: '对端明确拒绝：该端口上没有在监听的服务（容器没起 / 端口没映射 / 防火墙 REJECT）。',
+    ECONNRESET: '连上就被掐断：端口上跑的可能是别的服务，或反代不认这个 Host/IP。',
+    ETIMEDOUT: '包被静默丢弃（没人应答）：公网端口未开放 / 云安全组 / 防火墙 DROP / 路由不可达。',
+    EHOSTUNREACH: '本机没有到该地址的路由：多半是不在同一网段且没有可达网关。',
+    ENETUNREACH: '本机对应网络接口未启用：断网 / VPN 或 Tailscale 未连接。',
+    ENOENT: '本机网络栈拒绝该地址（常见于目标为保留地址）。',
+    EACCES: '地址被系统拒绝：试图连接本机保留端口。',
+    ENOTFOUND: '域名解析不到：域名写错 / 未托管 / DDNS 记录没更新。',
+    EAI_AGAIN: 'DNS 临时失败：本机 DNS 服务器无响应或抖动 —— 这类失败天然是间歇性的。',
+    EAI_FAIL: 'DNS 查询被服务器拒绝。',
+    ERR_TLS_INVALID_CONTEXT: 'TLS 上下文非法：IP 字面量做 SNI 不被允许。',
+};
+
+/** TLS 层错误码 → 人话（自签/域名不符是公网 https 的头号死因，必须单独归因）。 */
+const TLS_ERR_HINT: Record<string, string> = {
+    DEPTH_ZERO_SELF_SIGNED_CERT: '自签证书（证书不是任何 CA 签发的）。',
+    SELF_SIGNED_CERT_IN_CHAIN: '证书链里含自签证书（常见于 NAS/反代用 openssl 自签）。',
+    UNABLE_TO_VERIFY_LEAF_SIGNATURE: '证书链不完整，无法验证到根 CA。',
+    UNKNOWN_CA: '签发 CA 不被本机信任。',
+    UNABLE_TO_GET_ISSUER_CERT: '拿不到签发者证书：服务端没把中间证书一起发出来。',
+    CERT_HAS_EXPIRED: '证书已过期。',
+    HOSTNAME_VERIFY_ERROR: '证书里的名字与所连地址不符。',
+    ERR_TLS_CERT_ALTNAME_INVALID: '证书的 SAN 不覆盖所连的域名/IP。',
+    CIRCLE_DEBUG: '证书链成环（服务端配置错误）。',
+};
+
+const errHintOf = (code: string): string => {
+    return NET_ERR_HINT[code] || TLS_ERR_HINT[code] || '';
+};
+
+/**
+ * [lc-1104 同源约束] 诊断结果会被用户整段截图转贴，所以这里把 base 压成「协议 + host:port + 有没有路径前缀」。
+ * danmu_api 的 TOKEN 就是 base 的路径段，任何原样回显等于把凭据公开。
+ */
+function maskBase(base: string): string {
+    try {
+        const p = new URL(base);
+        const prefix = String(p.pathname || '').replace(/\/+$/, '');
+        return `${p.protocol}//${p.host}${prefix ? '/<路径前缀·已隐藏>' : ''}`;
+    } catch (_) {
+        return '(无法解析的地址)';
+    }
+}
+
+function ipFamilyOf(h: string): 0 | 4 | 6 {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return 4;
+    if (h.includes(':')) return 6;
+    return 0;
+}
+
+function ipv4ToLong(s: string): number {
+    const p = s.split('.').map((n) => parseInt(n, 10));
+    if (p.length !== 4 || p.some((n) => !(n >= 0 && n <= 255))) return -1;
+    return ((p[0] * 256 + p[1]) * 256 + p[2]) * 256 + p[3];
+}
+
+/** 地址属于哪一类 —— 直接决定「公网连不上」是不是「填了个只在局域网有效的地址」。 */
+function classifyHost(h: string): { kind: string; ip: string; v6: boolean } {
+    const fam = ipFamilyOf(h);
+    let host = h;
+    if (fam === 6) {
+        const br = host.indexOf(']');
+        if (br > 0) host = host.slice(1, br);
+        const lo = host === '::1' || /^f[cd]/i.test(host);
+        return { kind: lo ? '回环(IPv6)' : 'IPv6 地址', ip: host, v6: true };
+    }
+    if (fam !== 4) return { kind: '域名', ip: '', v6: false };
+    const a = parseInt(host.split('.')[0], 10);
+    const b = parseInt(host.split('.')[1], 10);
+    if (a === 127) return { kind: '回环(仅本机)', ip: host, v6: false };
+    if (a === 169 && b === 254) return { kind: '链路本地(169.254/16)', ip: host, v6: false };
+    if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+        return { kind: '私网(局域网)', ip: host, v6: false };
+    }
+    if (a === 100 && b >= 64 && b <= 127) return { kind: 'CGNAT/隧道段(100.64/10)', ip: host, v6: false };
+    if (a === 0) return { kind: '保留地址', ip: host, v6: false };
+    return { kind: '公网 IP', ip: host, v6: false };
+}
+
+/** 本机是否有网口与目标在同一子段（Tailscale/CGNAT 段同理）—— 没有就说明此刻这个地址根本不可达。 */
+function localRouteCovers(ip: string): { covered: boolean; same: string; nets: string[] } {
+    const target = ipv4ToLong(ip);
+    const nets: string[] = [];
+    if (target < 0) return { covered: false, same: '', nets };
+    let covered = false; let same = '';
+    const ifaces = os.networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+        for (const a of ifaces[name] || []) {
+            if (a.family !== 'IPv4') continue;
+            const net4 = a.netmask ? ipv4ToLong(a.netmask) : -1;
+            if (net4 <= 0) continue;
+            const self = ipv4ToLong(a.address);
+            const network = self & net4;
+            const bits = (() => { let n = 0; let m = net4 >>> 0; while (m) { m = (m << 1) >>> 0; n++; } return n; })();
+            nets.push(`${name} ${a.address}/${bits}`);
+            if (((target & net4) >>> 0) === (network >>> 0)) { covered = true; same = `${name} ${a.address}/${bits}`; }
+        }
+    }
+    return { covered, same, nets };
+}
+
+function tcpProbe(host: string, port: number, timeoutMs: number, family?: 4 | 6):
+    Promise<{ ok: boolean; ms: number; err: string; remote: string; via: string }> {
+    return new Promise((resolve) => {
+        const t0 = Date.now();
+        let done = false;
+        let sock: net.Socket;
+        const finish = (ok: boolean, err?: string, remote?: string, via?: string) => {
+            if (done) return;
+            done = true;
+            try { sock?.destroy(); } catch (_) { /* ignore */ }
+            resolve({ ok, ms: Date.now() - t0, err: err || '', remote: remote || '', via: via || '' });
+        };
+        const opt: net.TcpSocketConnectOpts = { host, port };
+        if (family) opt.family = family;
+        try {
+            sock = net.connect(opt);
+        } catch (e: any) {
+            finish(false, String(e?.code || e?.message || 'CONNECT_THROW'));
+            return;
+        }
+        sock.setTimeout(timeoutMs);
+        sock.on('connect', () => finish(true, '', `${sock.remoteAddress}:${sock.remotePort}`, String(sock.localAddress)));
+        sock.on('timeout', () => finish(false, 'ETIMEDOUT'));
+        sock.on('error', (e: any) => finish(false, String(e?.code || e?.message || 'SOCK_ERROR')));
+    });
+}
+
+function tlsProbe(host: string, port: number, timeoutMs: number, reject: boolean):
+    Promise<{ ok: boolean; ms: number; err: string; proto: string; to: string; cn: string }> {
+    return new Promise((resolve) => {
+        const t0 = Date.now();
+        let done = false;
+        let sock: tls.TLSSocket;
+        const finish = (ok: boolean, extra?: { proto?: string; to?: string; cn?: string }, err?: string) => {
+            if (done) return;
+            done = true;
+            try { sock?.destroy(); } catch (_) { /* ignore */ }
+            resolve({
+                ok, ms: Date.now() - t0, err: err || '',
+                proto: (extra && extra.proto) || '', to: (extra && extra.to) || '', cn: (extra && extra.cn) || '',
+            });
+        };
+        const isIp = ipFamilyOf(host) !== 0;
+        const opt: tls.ConnectionOptions = {
+            host, port, rejectUnauthorized: reject, timeout: timeoutMs,
+            // IP 字面量不能做 SNI（Node 会直接拒），域名才带 servername
+            ...(isIp ? {} : { servername: host }),
+        };
+        try {
+            sock = tls.connect(opt);
+        } catch (e: any) {
+            finish(false, undefined, String(e?.code || e?.message || 'TLS_THROW'));
+            return;
+        }
+        sock.setTimeout(timeoutMs);
+        sock.on('secureConnect', () => {
+            let to = ''; let cn = '';
+            try {
+                const c = sock.getPeerCertificate();
+                to = String((c && (c as any).valid_to) || '');
+                cn = String((c && c.subject && (c.subject as any).CN) || '');
+            } catch (_) { /* ignore */ }
+            finish(true, { proto: `${sock.getProtocol() || ''}`, to, cn });
+        });
+        sock.on('timeout', () => finish(false, undefined, 'ETIMEDOUT'));
+        sock.on('error', (e: any) => finish(false, undefined, String(e?.code || e?.message || 'TLS_ERROR')));
+    });
+}
+
+async function dnsProbe(host: string, timeoutMs: number):
+    Promise<{ err: string; v4: string[]; v6: string[]; servers: string; ms: number }> {
+    const t0 = Date.now();
+    const servers = (() => { try { return dns.getServers().join(' '); } catch (_) { return '(未知)'; } })();
+    try {
+        const rows = await Promise.race([
+            dns.promises.lookup(host, { all: true, verbatim: true }),
+            new Promise<never>((_res, rej) => setTimeout(() => rej(Object.assign(new Error('DNS_TIMEOUT'), { code: 'ETIMEDOUT' })), timeoutMs)),
+        ]);
+        const list = Array.isArray(rows) ? rows : [rows as any];
+        return {
+            err: '',
+            v4: list.filter((r: any) => r.family === 4).map((r: any) => r.address),
+            v6: list.filter((r: any) => r.family === 6).map((r: any) => r.address),
+            servers, ms: Date.now() - t0,
+        };
+    } catch (e: any) {
+        return { err: String(e?.code || e?.message || 'DNS_ERROR'), v4: [], v6: [], servers, ms: Date.now() - t0 };
+    }
+}
+
+const countXml = (s: string): number => (String(s || '').match(/<d\s+p=/g) || []).length;
+
+/**
+ * 跑一套分层诊断。onStep 每完成一项回调一次（公网下一套可能要几十秒，必须让用户看着它长出来）。
+ * 本函数不抛异常：任何一项出错都落成一条 fail/warn 记录。
+ */
+export async function diagnose(
+    baseOverride?: string,
+    cfg: DiagConfig = {},
+    onStep?: (s: DiagStep) => void,
+): Promise<DiagReport> {
+    const conf = { ...DIAG_DEF, ...cfg };
+    const timeoutMs = Math.min(60000, Math.max(1000, Number(conf.timeoutMs) || DIAG_DEF.timeoutMs));
+    const repeats = Math.min(20, Math.max(1, Math.round(Number(conf.repeats) || DIAG_DEF.repeats)));
+    const keyword = (String(conf.keyword || '').trim() || DIAG_DEF.keyword).slice(0, 40);
+    const steps: DiagStep[] = [];
+    const push = (s: DiagStep): DiagStep => {
+        steps.push(s);
+        try { if (onStep) onStep(s); } catch (_) { /* ignore */ }
+        log.info(`[danmuApi诊断] ${s.state.toUpperCase().padEnd(4)} ${s.label} (${s.ms}ms) | ${s.detail}${s.hint ? ' | 建议: ' + s.hint : ''}`);
+        return s;
+    };
+    const raw = String(baseOverride || fnConfig.getDanmuApiBase() || '').trim().replace(/\/+$/, '');
+
+    // ── ① 地址形态 ──
+    if (!raw) {
+        push({ id: 'base', label: '地址形态', state: 'fail', ms: 0, detail: '地址为空（面板没填，也没保存过）', hint: '填入 http://IP:端口 后再诊断' });
+        return { steps, summary: '地址为空，无法诊断', maskedBase: '(空)' };
+    }
+    let url: URL | null = null;
+    try { url = new URL(raw); } catch (_) { /* 下面按非法处理 */ }
+    if (!url || !/^https?:$/.test(url.protocol) || !url.hostname) {
+        push({ id: 'base', label: '地址形态', state: 'fail', ms: 0, detail: `无法解析：${raw.slice(0, 40)}`, hint: '要带协议头，如 http://192.168.1.10:9321' });
+        return { steps, summary: '地址格式非法', maskedBase: '(无法解析)' };
+    }
+    const port = Number(url.port) || (url.protocol === 'https:' ? 443 : 80);
+    const hc = classifyHost(url.hostname);
+    const prefixLen = String(url.pathname || '').replace(/\/+$/, '').length;
+    const baseOk = isValidBase(raw);
+    push({
+        id: 'base', label: '地址形态', state: baseOk ? 'ok' : 'fail', ms: 0,
+        detail: `${maskBase(raw)} ｜ ${url.protocol.replace(':', '').toUpperCase()} 端口 ${port} ｜ 主机类型: ${hc.kind}`
+          + `${prefixLen ? ' ｜ 带路径前缀(长度 ' + prefixLen + '，内容已隐藏)' : ' ｜ 无路径前缀'}`,
+        hint: baseOk ? undefined
+          : '当前只接受 http(s)://主机[:端口][/前缀]（主机名不含下划线、不支持 IPv6 字面量方括号写法）',
+    });
+    if (!baseOk) return { steps, summary: '地址格式非法，后续项未测', maskedBase: maskBase(raw) };
+
+    // ── ② 本机路由：这个地址在我此刻的网络里到底存不存在 ──
+    let routeNote = '';
+    if (hc.v6) {
+        push({ id: 'route', label: '本机路由', state: 'skip', ms: 0, detail: '目标是 IPv6 地址，跳过子网比对' });
+    } else if (hc.kind === '域名') {
+        push({ id: 'route', label: '本机路由', state: 'skip', ms: 0, detail: '目标是域名，先看下面「域名解析」拿到的 IP' });
+    } else {
+        const r = localRouteCovers(hc.ip);
+        const lanish = hc.kind === '私网(局域网)' || hc.kind === 'CGNAT/隧道段(100.64/10)' || hc.kind === '链路本地(169.254/16)';
+        if (r.covered) {
+            push({ id: 'route', label: '本机路由', state: 'ok', ms: 0, detail: `目标与本机网口同网段：${r.same}` });
+        } else {
+            // 覆盖不到**不判失败**：实测 Tailscale/VPN 这类 /32 策略路由与目标不同网段也照样能通
+            // （本机无 100.64/10 网口，100.66.1.2 却 6ms 建连成功）。可达性只由下面的 TCP 实测下结论。
+            routeNote = lanish ? '；且本机没有能直达它的网口 —— 你多半已不在这个网络里（公网/换网/VPN 未连）' : '';
+            push({
+                id: 'route', label: '本机路由', state: 'skip', ms: 0,
+                detail: `本机网口里没有与 ${hc.ip} 同网段的（现有：${r.nets.join('、') || '(无 IPv4 网口)'}）；/32 策略路由与隧道也能通，以 TCP 实测为准`,
+            });
+        }
+    }
+
+    // ── ③ DNS（域名才测） ──
+    let addrs: string[] = [];
+    if (hc.kind === '域名') {
+        const d = await dnsProbe(url.hostname, Math.min(timeoutMs, 8000));
+        addrs = [...d.v4, ...d.v6];
+        const only6 = d.v4.length === 0 && d.v6.length > 0;
+        push({
+            id: 'dns', label: '域名解析', state: d.err ? 'fail' : only6 ? 'warn' : 'ok', ms: d.ms,
+            detail: d.err ? `解析失败 ${d.err}（本机 DNS: ${d.servers}）`
+                : `IPv4: ${d.v4.join(', ') || '无'} ｜ IPv6: ${d.v6.join(', ') || '无'} ｜ 本机 DNS: ${d.servers}`,
+            hint: d.err ? errHintOf(d.err)
+                : only6 ? '只解析到 IPv6：若本机或出口链路 IPv6 不通，连接就会间歇性失败 —— 建议给域名补 A 记录，或强制走 IPv4' : undefined,
+        });
+        if (d.err) return { steps, summary: `DNS 未通过：${d.err}`, maskedBase: maskBase(raw) };
+    } else {
+        push({ id: 'dns', label: '域名解析', state: 'skip', ms: 0, detail: `目标是 ${hc.kind}，无需解析` });
+        addrs = [hc.ip];
+    }
+
+    // ── ④ TCP 建连 ──
+    const tcp = await tcpProbe(url.hostname, port, Math.min(timeoutMs, 6000), hc.v6 ? 6 : undefined);
+    let perIp = '';
+    if (!tcp.ok && addrs.length > 1) {
+        // 域名解析到多个地址（DDNS 改过但旧 A 记录没删就会这样）：逐个探，才能看出是哪个地址是死的
+        const parts: string[] = [];
+        for (const a of addrs) {
+            const one = await tcpProbe(a, port, 3000, ipFamilyOf(a) === 6 ? 6 : 4);
+            parts.push(`${a} ${one.ok ? '通' : '不通(' + one.err + ')'}`);
+        }
+        perIp = ` ｜ 逐地址: ${parts.join('、')}`;
+    }
+    push({
+        id: 'tcp', label: 'TCP 建连', state: tcp.ok ? 'ok' : 'fail', ms: tcp.ms,
+        detail: (tcp.ok ? `可建连 → ${tcp.remote}（本机出口 ${tcp.via}）` : `失败 ${tcp.err}`) + perIp,
+        hint: tcp.ok ? undefined : (errHintOf(tcp.err) || '') + (routeNote ? routeNote : ''),
+    });
+    if (!tcp.ok) return { steps, summary: `TCP 不通：${tcp.err}`, maskedBase: maskBase(raw) };
+
+    // ── ⑤ TLS 握手（仅 https） ──
+    if (url.protocol === 'https:') {
+        const strict = await tlsProbe(url.hostname, port, Math.min(timeoutMs, 8000), true);
+        if (strict.ok) {
+            push({ id: 'tls', label: 'TLS 证书', state: 'ok', ms: strict.ms, detail: `握手成功 ${strict.proto}｜证书 CN=${strict.cn || '(无)'} 到期 ${strict.to || '(未知)'}` });
+        } else {
+            const loose = await tlsProbe(url.hostname, port, Math.min(timeoutMs, 8000), false);
+            push({
+                id: 'tls', label: 'TLS 证书', state: 'fail', ms: strict.ms,
+                detail: `证书校验被拒 ${strict.err}` + (loose.ok ? `；关掉校验后握手能成功（${loose.proto || 'TLS'}，到期 ${loose.to || '未知'}）` : ''),
+                hint: loose.ok
+                    ? `${errHintOf(strict.err)} 服务端证书不受本机信任：本应用按标准校验证书，所以会一直连不上（浏览器可能因为你手动信任过而能打开）。要么换成 http，要么给服务配一份受信任证书。`
+                    : `${errHintOf(strict.err)} 且关闭校验也握不上，多半是端口上不是 TLS 服务。`,
+            });
+            return { steps, summary: `TLS 未通过：${strict.err}`, maskedBase: maskBase(raw) };
+        }
+    } else {
+        push({ id: 'tls', label: 'TLS 证书', state: 'skip', ms: 0, detail: '地址是 http，无 TLS 环节（公网传输请自行评估泄露风险）' });
+    }
+
+    // ── ⑥ 服务应答：GET 配置的根 ──
+    const root = await httpGetEx(`${url.protocol}//${url.host}${String(url.pathname || '/').replace(/\/+$/, '')}/`, Math.min(timeoutMs, 8000));
+    push({
+        id: 'root', label: '服务应答', state: root.err && !root.status ? 'fail' : root.status ? 'ok' : 'warn', ms: root.ms,
+        detail: root.err && !root.status ? `请求失败 ${root.err}`
+            : `HTTP ${root.status || '(无响应)'} ${(root.bytes / 1024).toFixed(1)}KB${root.server ? ' ｜ Server: ' + root.server : ''}${root.ctype ? ' ｜ ' + root.ctype : ''}`,
+        hint: root.err ? errHintOf(root.err)
+            : root.status >= 400 ? `根路径返回 ${root.status}：如果配了反向代理，可能是代理没转发到容器；直连端口则多半正常（本服务根路径不一定提供页面）` : undefined,
+    });
+
+    // ── ⑦ 三跳业务链路 ──
+    const searchUrl = `${raw}/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`;
+    const s1 = await httpGetEx(searchUrl, timeoutMs);
+    let sj: any = null;
+    let searchState: DiagState = 'fail';
+    let sDetail = '';
+    let sHint: string | undefined;
+    let animeId = 0;
+    if (s1.err && !s1.status) {
+        sDetail = `请求失败 ${s1.err}（超时上限 ${timeoutMs}ms）`;
+        sHint = errHintOf(s1.err) || (s1.err === 'ETIMEDOUT' ? `本跳耗时已超 ${timeoutMs}ms：把上面的「超时」调大再试（服务端首次搜某个词要回源多平台，实测可到 3s 以上）` : undefined);
+    } else if (s1.status < 200 || s1.status >= 300) {
+        sDetail = `HTTP ${s1.status}${s1.errMsg ? `（服务自报：${s1.errMsg}）` : ''}${s1.server ? '，Server: ' + s1.server : ''}`;
+        sHint = s1.status === 404 ? '接口路径 404：地址里的路径前缀或反代改写规则不对（danmu_api 的接口固定在 /api/v2/…）'
+            : s1.status === 401 || s1.status === 403
+                ? `HTTP ${s1.status}：地址末段的访问令牌前缀被服务端拒绝。实测同一服务「去掉末段令牌、直接用 http://IP:端口」就能正常查询 —— 请先删掉末段再测；确实开了令牌校验的话则改成正确的令牌`
+                : '端口上可能是别的服务（不是 danmu_api），或被反代/防火墙拦在应用之外';
+    } else {
+        try { sj = JSON.parse(s1.body || ''); } catch (_) { /* 非 JSON */ }
+        if (!sj) {
+            sDetail = `响应不是 JSON（${(s1.bytes / 1024).toFixed(1)}KB，${s1.ctype || '无 content-type'}）`;
+            sHint = '多半是反代/登录页/验证码HTML，不是 danmu_api 的接口';
+        } else if (sj.success === false) {
+            sDetail = `服务自报失败：${String(sj.errorMessage || '未知').slice(0, 80)}`;
+            sHint = '服务活着但这次查询失败，多为上游平台或数据库侧问题';
+        } else {
+            const n = Array.isArray(sj.animes) ? sj.animes.length : 0;
+            searchState = n ? 'ok' : 'warn';
+            const first = n ? sj.animes.find((a: any) => Number(a && a.animeId) > 0) : null;
+            animeId = first ? Number(first.animeId) : 0;
+            sDetail = `试搜「${keyword}」返回 ${n} 条` + (first ? `（首条 animeId=${animeId}，标题已省略）` : '');
+            sHint = n ? undefined : '连通但 0 条：服务端没有这部片子，或它查上游时超时了。这类情况弹幕会自动降级到内置 B站 链路（不是连不上）';
+        }
+    }
+    push({ id: 'search', label: '搜索接口 /api/v2/search/anime', state: searchState, ms: s1.ms, detail: sDetail, hint: sHint });
+
+    let episodeId = 0;
+    if (conf.deep) {
+        if (!animeId) {
+            push({ id: 'bangumi', label: '分集接口 /api/v2/bangumi', state: 'skip', ms: 0, detail: '上一跳没拿到 animeId' });
+            push({ id: 'comment', label: '弹幕接口 /api/v2/comment', state: 'skip', ms: 0, detail: '上一跳没拿到 episodeId' });
+        } else {
+            const b = await httpGetEx(`${raw}/api/v2/bangumi/${animeId}`, Math.min(Math.max(timeoutMs, 12000), 30000));
+            const bj = b.body ? (() => { try { return JSON.parse(b.body); } catch (_) { return null; } })() : null;
+            const eps = bj && bj.bangumi && Array.isArray(bj.bangumi.episodes) ? bj.bangumi.episodes : [];
+            episodeId = eps.length ? Number(eps[0].episodeId) || 0 : 0;
+            push({
+                id: 'bangumi', label: '分集接口 /api/v2/bangumi',
+                state: eps.length ? 'ok' : 'fail', ms: b.ms,
+                detail: b.err && !b.status ? `请求失败 ${b.err}`
+                    : eps.length ? `条目存在，分集 ${eps.length} 个（首集 episodeId=${episodeId}）`
+                        : `条目里 0 个分集（HTTP ${b.status || '-'}）`,
+                hint: eps.length ? undefined : '搜索有结果但条目拿不到分集：服务端该条数据不完整，实际播放时会降级内置 B站',
+            });
+            if (!episodeId) {
+                push({ id: 'comment', label: '弹幕接口 /api/v2/comment', state: 'skip', ms: 0, detail: '上一跳没拿到 episodeId' });
+            } else {
+                const c = await httpGetEx(`${raw}/api/v2/comment/${episodeId}?format=xml`, Math.min(Math.max(timeoutMs, 30000), 45000));
+                const n = countXml(c.body || '');
+                push({
+                    id: 'comment', label: '弹幕接口 /api/v2/comment', state: n ? 'ok' : 'warn', ms: c.ms,
+                    detail: c.err && !c.status ? `请求失败 ${c.err}` : `XML ${(c.bytes / 1024).toFixed(1)}KB，解析出 ${n} 条弹幕`,
+                    hint: n ? undefined : '接口通但这一集没有弹幕（或返回 0 条）：属服务端数据问题，播放时会降级内置 B站',
+                });
+            }
+        }
+    } else {
+        push({ id: 'bangumi', label: '分集接口 /api/v2/bangumi', state: 'skip', ms: 0, detail: '未勾选端到端三跳' });
+        push({ id: 'comment', label: '弹幕接口 /api/v2/comment', state: 'skip', ms: 0, detail: '未勾选端到端三跳' });
+    }
+
+    // ── ⑧ 重复探测：把「有时连得上有时连不上」量出来 ──
+    const runs: { ok: boolean; ms: number }[] = [];
+    for (let i = 0; i < repeats; i++) {
+        const p = await httpGetEx(searchUrl, timeoutMs);
+        const ok = !!p.status && p.status >= 200 && p.status < 300 && !p.err;
+        runs.push({ ok, ms: p.ms });
+        push({
+            id: `repeat${i + 1}`, label: `重复探测 ${i + 1}/${repeats}`, state: ok ? 'ok' : 'fail', ms: p.ms,
+            detail: ok ? `HTTP ${p.status} ${(p.bytes / 1024).toFixed(1)}KB` : (p.err || `HTTP ${p.status}`),
+        });
+    }
+    const okRuns = runs.filter((r) => r.ok);
+    const sorted = okRuns.map((r) => r.ms).sort((a, b) => a - b);
+    const med = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+    const slowest = sorted.length ? sorted[sorted.length - 1] : 0;
+    const flaky = runs.length - okRuns.length;
+    push({
+        id: 'jitter', label: '耗时与稳定性', state: flaky ? 'fail' : slowest > timeoutMs * 0.6 ? 'warn' : 'ok', ms: med,
+        detail: `${okRuns.length}/${runs.length} 次成功 ｜ 最快 ${sorted[0] || 0}ms ｜ 中位 ${med}ms ｜ 最慢 ${slowest}ms ｜ 当前超时 ${timeoutMs}ms`,
+        hint: flaky
+            ? `同一地址同一接口 ${flaky} 次失败 —— 「时好时坏」被复现。服务端首次搜某个词要回源多个平台（实测可达 3s 以上），之后命中缓存只要十几毫秒；如果失败的全是超时，把超时调大即可`
+            : slowest > timeoutMs * 0.6 ? `最慢一次已到 ${slowest}ms，超过当前超时上限的六成 —— 公网/高延迟网络下建议把超时调到 ${Math.max(timeoutMs, Math.round(slowest * 2.5 / 500) * 500)}ms 以上，否则会随机判为连不上` : undefined,
+    });
+
+    // ── ⑨ 代理旁路：本应用的弹幕请求只走直连，这条用来验「换代理是不是就通」 ──
+    if (conf.tryProxy) {
+        let agent: any = null;
+        try { agent = resolveProxyAgent(); } catch (_) { agent = null; }
+        if (!agent) {
+            push({ id: 'proxy', label: '代理旁路', state: 'skip', ms: 0, detail: '未启用代理（环境变量 HTTPS_PROXY 与设置面板「自定义代理」都为空）' });
+        } else {
+            const p = await httpGetEx(searchUrl, timeoutMs, agent);
+            const ok = !!p.status && p.status >= 200 && p.status < 300 && !p.err;
+            push({
+                id: 'proxy', label: '代理旁路', state: ok ? 'ok' : 'fail', ms: p.ms,
+                detail: ok ? `走代理 HTTP ${p.status} ${(p.bytes / 1024).toFixed(1)}KB` : `走代理仍失败：${p.err || 'HTTP ' + p.status}`,
+                hint: '注意：弹幕请求本身不经过这个代理（本模块只直连）。这里只是验证「挂上代理能不能通」——如果走代理通、直连不通，说明问题在你到 NAS 的那条网络路径上。',
+            });
+        }
+    } else {
+        push({ id: 'proxy', label: '代理旁路', state: 'skip', ms: 0, detail: '未勾选代理旁路' });
+    }
+
+    // ── 结论 ──
+    const firstFail = steps.find((s) => s.state === 'fail');
+    const warns = steps.filter((s) => s.state === 'warn');
+    const summary = firstFail
+        ? `卡在「${firstFail.label}」：${firstFail.detail}`
+        : warns.length ? `链路可用，${warns.length} 项需注意：${warns.map((w) => w.label).join('、')}` : '全链路正常';
+    return { steps, summary, maskedBase: maskBase(raw) };
 }
 
 /** 从 Lua 回流的可疑伪 bvid 里取出自建源 episodeId；不是自建源 id 返回 null。 */
