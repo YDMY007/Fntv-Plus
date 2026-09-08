@@ -203,12 +203,15 @@ interface ActiveState {
 let videoEl: HTMLVideoElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
-let toggleWrap: HTMLDivElement | null = null;
-let toggleSpan: HTMLSpanElement | null = null;
-let detailsWrap: HTMLDivElement | null = null;
-let modal: HTMLDivElement | null = null;
-let styleWrap: HTMLDivElement | null = null;
-let stylePanel: HTMLDivElement | null = null;
+// [lc-1107] 控制栏只留一个「弹幕」入口(仿原生单按钮), 点开是原生 .xg-options-list 形态的
+// 紧凑弹窗; 弹窗里的「样式设置」「来源详情」再唤起原生 .right-side 形态的右侧抽屉。
+let dmBtnWrap: HTMLDivElement | null = null;   // plugin-placeholder 外壳(挂进 xg-right-grid)
+let dmBtnSpan: HTMLSpanElement | null = null;  // 按钮文字「弹幕」
+let dmList: HTMLUListElement | null = null;    // 紧凑弹窗(锚在按钮正上方)
+let dmDrawer: HTMLDivElement | null = null;    // 右侧抽屉(挂进 .xgplayer 播放器根)
+let dmDrawerTitle: HTMLSpanElement | null = null;
+let dmDrawerBody: HTMLDivElement | null = null;
+let dmDrawerMode: 'style' | 'details' = 'style';
 let controlsPlaced = false;
 let mountedForGuid: string | null = null;
 let loading = false;
@@ -399,6 +402,125 @@ function findControlsBar(): HTMLElement | null {
     return null;
 }
 
+/**
+ * [lc-1107] 找播放器根节点（`.xgplayer`）。
+ * 原生右侧抽屉 `.xg-options-list.right-side` 是 appendChild 到 player.root 的
+ * （取证: VideoPlayer chunk `root:r.listType===Hr.RIGHT_SIDE?a.root:this.root`），
+ * 靠 `height:100%; right:…; bottom:0` 相对播放器盒子定位。我们必须挂到同一个根，
+ * 否则挂 body 上会被页面级布局拉伸/错位。
+ */
+function findPlayerRoot(): HTMLElement | null {
+    const bar = findControlsBar();
+    const fromBar = bar?.closest('.xgplayer') as HTMLElement | null;
+    if (fromBar) return fromBar;
+    const v = pickVideo();
+    const fromVideo = v?.closest('.xgplayer') as HTMLElement | null;
+    if (fromVideo) return fromVideo;
+    return document.querySelector('.xgplayer') as HTMLElement | null;
+}
+
+// ═══ [lc-1107] 原生形态面板样式 ═══
+// 取证来源: fnOS /assets/VideoPlayer-C6NSHpD8.css 里 xgplayer 原生选项面板两套形态 ——
+//   紧凑弹窗 .xg-options-list{position:absolute;z-index:5;width:78px;right:50%;bottom:100%;
+//     background:#0000008a;border-radius:1px;transform:translate(50%);cursor:pointer;
+//     overflow:hidden;height:0;opacity:.85;font-size:14px;color:#fffc;display:none}
+//     .active{display:block;height:auto}
+//     li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center}
+//     li:nth-child(1){margin-top:12px} li:last-child{margin-bottom:12px}
+//     li:hover,li.selected{color:var(--xgplayer-color)!important}
+//   右侧抽屉 .xg-options-list.right-side{width:20%;height:100%;right:-10.5%;bottom:0;
+//     background:#000000e6;display:flex;flex-direction:column;box-sizing:border-box}
+//     .active{animation:xg_options_active .3s ease-out forwards}  // translate(0)→translate(-50%)
+//     .hide{animation:xg_options_hide .3s ease-in forwards}
+//   fnOS 自有覆盖: .xgplayer{--xgplayer-color:var(--semi-color-primary)}
+// ⚠ 不直接复用 xg-options-list 类名: 原生 `li{height:20px}` 与 `.right-side li span{
+//   pointer-events:none}` 会压坏滑块(拖不动)与多行内容 → 原样复刻 token 到自有类，
+//   视觉与原生一致但控件可用，也避开与库样式的特异度对撞。
+const DM_PANEL_STYLE_ID = 'fntv-dm-panel-style';
+// 原生 .xgplayer{--xgplayer-color:var(--semi-color-primary)} → 抽屉里的滑块/复选框同色系，
+// 不用旧模态那套 iOS 蓝 #2997ff（在飞牛播放器里是异色）。
+const BRAND_ACCENT = 'var(--semi-color-primary, #3374DB)';
+let _dmPanelStyleInjected = false;
+
+function injectDmPanelStyle(): void {
+    if (_dmPanelStyleInjected) return;
+    const css = `
+/* ── 紧凑弹窗: 复刻原生 .xg-options-list ── */
+/* z-index 30: 原生 .xg-options-list 写的是 5 / .right-side 6, 但我们的弹幕 canvas 挂在
+   body 上 z-index=5、高能条 z-index=6 → 同一层叠上下文里后插入者胜, 面板会被 canvas 盖住。 */
+.fntv-dm-list{
+  position:absolute; right:50%; bottom:100%; transform:translate(50%);
+  z-index:30; width:104px; margin:0 0 4px; padding:0; list-style:none;
+  background:#0000008a; border-radius:1px; cursor:pointer; overflow:hidden;
+  height:0; opacity:.85; font-size:14px; color:#fffc; display:none;
+}
+.fntv-dm-list:hover{opacity:1}
+.fntv-dm-list.active{display:block;height:auto}
+.fntv-dm-list li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center}
+.fntv-dm-list li:nth-child(1){margin-top:12px}
+.fntv-dm-list li:last-child{margin-bottom:12px}
+.fntv-dm-list li:hover,.fntv-dm-list li.selected{
+  color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))!important;
+}
+/* 特异度必须压过 .fntv-dm-list li(0,1,1) → 用 li.fntv-dm-sep(0,2,1) */
+.fntv-dm-list li.fntv-dm-sep{
+  height:1px; line-height:0; margin:8px 12px; padding:0;
+  background:#ffffff26; pointer-events:none; cursor:default;
+}
+/* ── 右侧抽屉: 复刻原生 .xg-options-list.right-side ── */
+/* z-index 9 而不是原生的 6: 要压过 body 上的弹幕 canvas(5)/高能条(6);
+   但又必须**低于** .xgplayer-controls(z-index:10) —— 抽屉是满高的, 盖住控制栏就等于
+   盖住「弹幕」按钮自己, 打开后再也点不到入口(playwright 实测 pointer 被抽屉 body 拦截)。
+   底部内容则靠 JS 按控制栏实高留内边距避开(见 syncDrawerBottomInset)。 */
+.fntv-dm-drawer{
+  position:absolute; right:0; bottom:0; height:100%; width:min(320px,22%);
+  z-index:9; box-sizing:border-box; display:flex; flex-direction:column;
+  background:#000000e6; color:#fffc; font-size:14px; overflow:hidden;
+  transform:translateX(105%); pointer-events:none;
+  /* 滑块/复选框走 accent-color, 未填充轨道默认按浅色表单控件渲染(截图实测一条近白粗轨),
+     在 #000000e6 的暗面板上很扎眼 → 强制暗色方案 */
+  color-scheme:dark;
+}
+.fntv-dm-drawer.active{
+  pointer-events:auto; animation:fntv_dm_drawer_in .3s ease-out forwards;
+}
+.fntv-dm-drawer.hide{animation:fntv_dm_drawer_out .3s ease-in forwards}
+@keyframes fntv_dm_drawer_in{from{transform:translateX(105%)}to{transform:translateX(0)}}
+@keyframes fntv_dm_drawer_out{from{transform:translateX(0)}to{transform:translateX(105%)}}
+.fntv-dm-drawer-head{
+  flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+  padding:16px 16px 12px; font-size:14px; font-weight:600; color:#fffc;
+  border-bottom:1px solid #ffffff14;
+}
+.fntv-dm-drawer-close{cursor:pointer; opacity:.6; font-size:13px; line-height:1; padding:2px 3px}
+.fntv-dm-drawer-close:hover{opacity:1}
+.fntv-dm-drawer-body{flex:1 1 auto; overflow:auto; padding:14px 16px 18px}
+/* 滑块自绘: accent-color 的未填充轨道在暗面板上是一条近白粗轨(color-scheme:dark 也压不住),
+   已填充比例由 makeSlider 的 paint() 用 linear-gradient 画在 background 上 */
+.fntv-dm-drawer input[type=range]{
+  -webkit-appearance:none; appearance:none; width:100%; height:4px; margin:6px 0;
+  border-radius:2px; background:rgba(255,255,255,.18); cursor:pointer; outline:none;
+}
+.fntv-dm-drawer input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
+  background:var(--semi-color-primary, #3374DB); border:none;
+}
+.fntv-dm-drawer ::-webkit-scrollbar{width:6px}
+.fntv-dm-drawer ::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:3px}
+/* 「恢复默认」做成发丝线分隔的纯文本行(不用带边框圆角的按钮, 与原生面板观感一致) */
+.fntv-dm-reset{
+  margin-top:16px; padding-top:12px; border-top:1px solid #ffffff14;
+  color:#fffc; cursor:pointer; font-size:13px; text-align:center;
+}
+.fntv-dm-reset:hover{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))}
+`;
+    const el = document.createElement('style');
+    el.id = DM_PANEL_STYLE_ID;
+    el.textContent = css;
+    (document.head || document.documentElement).appendChild(el);
+    _dmPanelStyleInjected = true;
+}
+
 // ─── 挂载 canvas + 控制栏按钮 ───
 
 function ensureCanvas(): void {
@@ -422,77 +544,126 @@ function ensureMounted(): void {
     if (!isPlayerPage()) return;
     ensureCanvas();
 
-    // 控制栏按钮：弹幕开关 + 详情
+    // SPA 换集/返回再进：旧播放器 DOM 连同按钮一起被销毁，入位标记必须作废
+    if (dmBtnWrap && !dmBtnWrap.isConnected) controlsPlaced = false;
+
     const bar = findControlsBar();
-    if (bar) {
-        if (!toggleWrap) createControls();
-        if (toggleWrap && toggleWrap.parentElement !== bar) bar.appendChild(toggleWrap);
-        if (detailsWrap && detailsWrap.parentElement !== bar) bar.appendChild(detailsWrap);
-        if (styleWrap && styleWrap.parentElement !== bar) bar.appendChild(styleWrap);
-        if (!controlsPlaced) {
-            log.info('[danmakuWeb] 弹幕开关已注入控制栏(' + String(bar.className).slice(0, 40) + ')');
-            controlsPlaced = true;
-        }
-    } else {
-        // 控制栏尚未就绪：把按钮挂到 body 末尾也能点（极少见，飞牛几乎必有 xg-right-grid）
-        if (!toggleWrap) createControls();
-        if (toggleWrap && !toggleWrap.parentElement) document.body.appendChild(toggleWrap);
-        if (detailsWrap && !detailsWrap.parentElement) document.body.appendChild(detailsWrap);
-        if (styleWrap && !styleWrap.parentElement) document.body.appendChild(styleWrap);
+    // [lc-1107] 控制栏还没渲染出来时**不再**把按钮丢到 body 上兜底：旧代码那样做会让按钮
+    // 落在页面左上角被 xgplayer 层盖住（用户看到的就是"要播十来秒才出现"），改成留在游离态，
+    // 由 startMountPoll() 每 400ms 重试，控制栏一出现立刻入位。
+    if (!bar) return;
+
+    if (!dmBtnWrap) createControls();
+    if (dmBtnWrap && dmBtnWrap.parentElement !== bar) bar.appendChild(dmBtnWrap);
+    if (!controlsPlaced) {
+        log.info('[danmakuWeb] 弹幕入口已注入控制栏(' + String(bar.className).slice(0, 40) + ')');
+        controlsPlaced = true;
+        stopMountPoll();
     }
 }
 
-function makeControlButton(label: string, onClick: () => void): { wrap: HTMLDivElement; span: HTMLSpanElement } {
+/**
+ * [lc-1107] 控制栏只放一个「弹幕」入口，DOM 层级照抄原生文字按钮（原画/选集/倍速）：
+ * `div.plugin-placeholder > div.h-full > div.flex.h-full.items-center.justify-center[tabindex=0] > span`。
+ * 紧凑弹窗作为 wrap 的子节点，靠 `bottom:100%; right:50%; translate(50%)` 锚在按钮正上方，
+ * 所以 wrap 必须是定位上下文。
+ */
+function createControls(): void {
+    if (dmBtnWrap) return;
+    injectDmPanelStyle();
+
     const wrap = document.createElement('div');
     wrap.className = 'plugin-placeholder';
+    wrap.dataset.fnosUi = '1';      // 约定标记：豁免各注入层的刷白/焦点/动画接管
+    wrap.style.position = 'relative';
+
     const hfull = document.createElement('div');
     hfull.className = 'h-full';
     const flex = document.createElement('div');
     flex.className = 'flex h-full items-center justify-center';
     flex.setAttribute('tabindex', '0');
+
     // [lc-1106] xgplayer 控制栏恒为暗底(渐变遮罩), 不跟随页面明暗主题 →
     // 不能用 --semi-color-text-1(浅色主题下解析为深色 → 暗底上不可见/反色),
     // 固定用白色系, 与 xgplayer 原生控件(倍速/选集/全屏)一致。
     const span = document.createElement('span');
     span.className = 'cursor-pointer text-lg leading-lg';
-    span.style.color = 'rgba(255,255,255,.85)';
-    span.textContent = label;
     span.style.userSelect = 'none';
+    span.textContent = t('弹幕');
     flex.appendChild(span);
     hfull.appendChild(flex);
     wrap.appendChild(hfull);
+
+    const list = document.createElement('ul');
+    list.className = 'fntv-dm-list';
+    list.dataset.fnosUi = '1';
+    wrap.appendChild(list);
+
     flex.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        onClick();
+        toggleList();
     });
-    return { wrap, span };
-}
+    list.addEventListener('click', (e) => e.stopPropagation());
 
-function createControls(): void {
-    if (toggleWrap) return;
-    const dmBtn = makeControlButton(t('弹幕'), () => toggleDanmaku());
-    toggleWrap = dmBtn.wrap;
-    toggleSpan = dmBtn.span;
-    const d = makeControlButton(t('详情'), () => openDetails());
-    detailsWrap = d.wrap;
-    const s = makeControlButton(t('样式'), () => openStylePanel());
-    styleWrap = s.wrap;
+    dmBtnWrap = wrap;
+    dmBtnSpan = span;
+    dmList = list;
     syncToggleUI();
 }
 
-function syncToggleUI(): void {
-    if (!toggleSpan) return;
-    toggleSpan.textContent = loading ? t('弹幕…') : t('弹幕');
-    // [lc-1106] 控制栏恒暗底: 开启=品牌蓝, 关闭=半透白(不用 --semi-color-text-1, 浅色主题下会反色)
-    toggleSpan.style.color = enabled
-        ? 'var(--fn-bg-brand, #3374DB)'
-        : 'rgba(255,255,255,.45)';
-    toggleSpan.style.opacity = enabled ? '1' : '1';
+function renderListItems(): void {
+    const list = dmList;
+    if (!list) return;
+    list.innerHTML = '';
+    const mk = (text: string, selected: boolean, onClick: () => void): HTMLLIElement => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        if (selected) li.className = 'selected';
+        li.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onClick();
+        });
+        return li;
+    };
+    list.appendChild(mk(t('开'), enabled, () => { setDanmakuEnabled(true); closeList(); }));
+    list.appendChild(mk(t('关'), !enabled, () => { setDanmakuEnabled(false); closeList(); }));
+    const sep = document.createElement('li');
+    sep.className = 'fntv-dm-sep';
+    list.appendChild(sep);
+    list.appendChild(mk(t('样式设置'), false, () => { closeList(); openDrawer('style'); }));
+    list.appendChild(mk(t('来源详情'), false, () => { closeList(); openDrawer('details'); }));
 }
 
-function toggleDanmaku(): void {
-    enabled = !enabled;
+function toggleList(): void {
+    if (!dmList) return;
+    if (dmList.classList.contains('active')) { closeList(); return; }
+    renderListItems();
+    dmList.classList.add('active');
+    refreshDismissBinding();
+}
+
+function closeList(): void {
+    dmList?.classList.remove('active');
+    refreshDismissBinding();
+}
+
+function syncToggleUI(): void {
+    if (!dmBtnSpan) return;
+    dmBtnSpan.textContent = loading ? t('弹幕…') : t('弹幕');
+    // [lc-1106] 控制栏恒暗底: 开启=品牌蓝, 关闭=半透白(不用 --semi-color-text-1, 浅色主题下会反色)
+    // [lc-1107] --fn-bg-brand 是幻影 token(fnOS index.css 里没有, 项目内也仅此一处引用) →
+    // 旧写法实际恒为硬编码 #3374DB, 与弹窗选中行的 --semi-color-primary(暗色主题实测
+    // rgb(0,102,255)) 不是一个蓝。统一走同一条 token 链。
+    dmBtnSpan.style.color = enabled
+        ? 'var(--semi-color-primary, #3374DB)'
+        : 'rgba(255,255,255,.45)';
+    if (dmList?.classList.contains('active')) renderListItems();
+}
+
+function setDanmakuEnabled(v: boolean): void {
+    if (enabled === v) return;
+    enabled = v;
     try { localStorage.setItem(LS_KEY, enabled ? '1' : '0'); } catch { /* ignore */ }
     if (canvas) canvas.style.display = enabled ? 'block' : 'none';
     syncToggleUI();
@@ -539,7 +710,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
         items = [];
         meta = null;
         resetRenderState();
-        closeDetails();
+        closeDrawer();
         inflight = false;
     } else if (items.length && enabled) {
         startRender();
@@ -1041,91 +1212,136 @@ function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: str
     return { text: '—', warn: false, detail: '' };
 }
 
-// [lc-1015] 弹窗玻璃材质（与 lc-1012/1013 云母/观影记录同配方）：
-// tint 半透底 + 165deg 光泽渐变 + 真实 backdrop blur（透出后方视频画面），无实心、无硬边框线。
-const GLASS_PANEL_STYLE: { [k: string]: string } = {
-    background: 'linear-gradient(165deg, rgba(255,255,255,.05), rgba(255,255,255,.012))',
-    backgroundColor: 'rgba(15,15,20,.78)',
-    backdropFilter: 'blur(42px) saturate(150%) brightness(.82)',
-    '-webkit-backdrop-filter': 'blur(42px) saturate(150%) brightness(.82)',
-    borderRadius: '18px',
-    boxShadow: '0 18px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.07), inset 0 1px 0 rgba(255,255,255,.10)',
-    fontFamily: '-apple-system, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif',
-};
+// ─── [lc-1107] 右侧抽屉（复刻原生 .xg-options-list.right-side 形态）───
+// 旧实现是两个居中模态 + 全屏 backdrop-filter 遮罩：一来形态和飞牛原生播放器完全不一致，
+// 二来本项目透明窗口带 --disable-features=VizDisplayCompositor（见 dialogUI.ts 的说明），
+// 整屏 backdrop-filter 层有整窗闪烁风险。现在统一成一个挂在播放器根上的右侧抽屉，
+// 由 dmDrawerMode 决定装「样式设置」还是「来源详情」。
 
-function ensureModal(): HTMLDivElement {
-    if (modal) return modal;
-    const m = document.createElement('div');
-    m.id = 'fntv-dm-modal';
-    Object.assign(m.style, {
-        position: 'fixed',
-        inset: '0',
-        zIndex: '2147483647',
-        display: 'none',
-        alignItems: 'center',
-        justifyContent: 'center',
-    } as CSSStyleDeclaration);
+function ensureDrawer(): HTMLDivElement | null {
+    const host = findPlayerRoot();
+    // 播放器根还没就绪 → 这次先不开，下次点击再试（挂到 body 上会被页面级布局拉错位）
+    if (!host) return null;
+    injectDmPanelStyle();
 
-    const backdrop = document.createElement('div');
-    Object.assign(backdrop.style, {
-        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.42)',
-        backdropFilter: 'blur(18px) saturate(120%)',
-    } as CSSStyleDeclaration);
-    backdrop.style.setProperty('-webkit-backdrop-filter', 'blur(18px) saturate(120%)');
-    backdrop.addEventListener('click', () => closeDetails());
+    if (dmDrawer) {
+        // SPA 换集后旧播放器根被销毁，抽屉成了游离节点 → 重新挂到新的根上
+        if (!dmDrawer.isConnected) host.appendChild(dmDrawer);
+        return dmDrawer;
+    }
 
-    const panel = document.createElement('div');
-    Object.assign(panel.style, {
-        position: 'relative',
-        width: 'min(560px, 92vw)',
-        maxHeight: '82vh',
-        color: '#f5f5f7',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        fontSize: '14px',
-    } as CSSStyleDeclaration, GLASS_PANEL_STYLE);
+    const d = document.createElement('div');
+    d.className = 'fntv-dm-drawer';
+    d.dataset.fnosUi = '1';
+    // fnOS 顶栏是窗口拖拽区，注入面板必须显式排除，否则抽屉里的滑块拖不动
+    d.style.setProperty('-webkit-app-region', 'no-drag');
+    d.addEventListener('click', (e) => e.stopPropagation());
 
     const head = document.createElement('div');
-    Object.assign(head.style, {
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '14px 18px 12px', fontWeight: '600', fontSize: '15px',
-        borderBottom: '1px solid rgba(255,255,255,.06)',
-    } as CSSStyleDeclaration);
-    const titleEl = document.createElement('span');
-    titleEl.textContent = '弹幕来源信息';
+    head.className = 'fntv-dm-drawer-head';
+    const title = document.createElement('span');
     const closeEl = document.createElement('span');
+    closeEl.className = 'fntv-dm-drawer-close';
     closeEl.textContent = '✕';
-    closeEl.style.cursor = 'pointer';
-    closeEl.style.padding = '0 4px';
-    closeEl.style.opacity = '0.7';
-    closeEl.addEventListener('click', () => closeDetails());
-    head.appendChild(titleEl);
+    closeEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeDrawer();
+    });
+    head.appendChild(title);
     head.appendChild(closeEl);
 
     const body = document.createElement('div');
-    body.id = 'fntv-dm-modal-body';
-    Object.assign(body.style, {
-        overflow: 'auto', padding: '14px 18px', flex: '1',
-    } as CSSStyleDeclaration);
+    body.className = 'fntv-dm-drawer-body';
 
-    panel.appendChild(head);
-    panel.appendChild(body);
-    m.appendChild(backdrop);
-    m.appendChild(panel);
-    document.body.appendChild(m);
-    modal = m;
-    return m;
+    d.appendChild(head);
+    d.appendChild(body);
+    host.appendChild(d);
+    dmDrawer = d;
+    dmDrawerTitle = title;
+    dmDrawerBody = body;
+    return d;
 }
 
-function renderModalBody(): void {
-    const m = ensureModal();
-    const body = m.querySelector('#fntv-dm-modal-body') as HTMLElement | null;
+/**
+ * 抽屉压在控制栏之下（z-index 9 < 10）后，底部那条会被控制栏盖住 → 落在里面的滑块点不到。
+ * 按控制栏**实高**留内边距：fnOS 有 mini-controls / flex-controls 等形态，写死 48px 不可靠。
+ */
+function syncDrawerBottomInset(): void {
+    if (!dmDrawer || !dmDrawerBody) return;
+    const bar = dmDrawer.parentElement?.querySelector('.xgplayer-controls') as HTMLElement | null;
+    const h = bar?.offsetHeight || 0;
+    dmDrawerBody.style.paddingBottom = (h > 0 ? h + 12 : 18) + 'px';
+}
+
+function openDrawer(mode: 'style' | 'details'): void {
+    const d = ensureDrawer();
+    if (!d) return;
+    dmDrawerMode = mode;
+    if (dmDrawerTitle) dmDrawerTitle.textContent = mode === 'style' ? t('弹幕样式') : t('弹幕来源信息');
+    renderDrawerBody();
+    syncDrawerBottomInset();
+    d.classList.remove('hide');
+    d.classList.add('active');
+    refreshDismissBinding();
+}
+
+function closeDrawer(): void {
+    const d = dmDrawer;
+    if (!d || !d.classList.contains('active')) { refreshDismissBinding(); return; }
+    d.classList.remove('active');
+    d.classList.add('hide');
+    refreshDismissBinding();
+    // 出场动画结束后清掉 hide 类，免得和下次入场的 active 动画互相覆盖
+    window.setTimeout(() => { d.classList.remove('hide'); }, 320);
+}
+
+function renderDrawerBody(): void {
+    const body = dmDrawerBody;
     if (!body) return;
     body.innerHTML = '';
+    if (dmDrawerMode === 'style') body.appendChild(buildStyleControls());
+    else renderDetailsInto(body);
+}
 
+// ─── 关闭策略：ESC / 点击面板外 ───
+// 没有遮罩层，所以靠捕获阶段的 document 监听判定「点在外面」——xgplayer 会在冒泡阶段
+// stopPropagation 吞掉视频区点击，只有捕获阶段拦得到。仅在有面板打开时才挂监听。
+let _dismissBound = false;
+
+function anyPanelOpen(): boolean {
+    return !!dmList?.classList.contains('active') || !!dmDrawer?.classList.contains('active');
+}
+
+function onDismissClick(e: MouseEvent): void {
+    const tgt = e.target as Node | null;
+    if (tgt && dmBtnWrap?.contains(tgt)) return;   // 按钮自己负责开合
+    if (tgt && dmDrawer?.contains(tgt)) return;
+    closeList();
+    closeDrawer();
+}
+
+function onDismissKeydown(e: KeyboardEvent): void {
+    if (e.key !== 'Escape') return;
+    closeList();
+    closeDrawer();
+}
+
+function refreshDismissBinding(): void {
+    const need = anyPanelOpen();
+    if (need === _dismissBound) return;
+    _dismissBound = need;
+    if (need) {
+        document.addEventListener('click', onDismissClick, true);
+        document.addEventListener('keydown', onDismissKeydown, true);
+    } else {
+        document.removeEventListener('click', onDismissClick, true);
+        document.removeEventListener('keydown', onDismissKeydown, true);
+    }
+}
+
+function renderDetailsInto(body: HTMLElement): void {
     if (!meta) {
-        body.textContent = '弹幕加载中…';
+        body.textContent = t('弹幕加载中…');
         return;
     }
 
@@ -1160,7 +1376,7 @@ function renderModalBody(): void {
     const grid = document.createElement('div');
     Object.assign(grid.style, {
         display: 'grid',
-        gridTemplateColumns: '96px 1fr',
+        gridTemplateColumns: '78px 1fr',   // 抽屉仅 ~320px 宽，标签列比旧模态(96px)再收一档
         rowGap: '10px',
         columnGap: '12px',
         alignItems: 'start',
@@ -1193,17 +1409,8 @@ function renderModalBody(): void {
     body.appendChild(tip);
 }
 
-function openDetails(): void {
-    const m = ensureModal();
-    renderModalBody();
-    m.style.display = 'flex';
-}
-
-function closeDetails(): void {
-    if (modal) modal.style.display = 'none';
-}
-
-// ─── 弹幕样式调节面板（对齐 MPV 弹幕样式 7 项旋钮：粗体/字号/描边/阴影/滚动时长/透明度/显示范围）───
+// ─── 弹幕样式旋钮（对齐 MPV 弹幕样式 7 项：粗体/字号/描边/阴影/滚动时长/透明度/显示范围）───
+// [lc-1107] 渲染进右侧抽屉，不再是独立的居中模态。
 
 function makeSlider(label: string, min: number, max: number, step: number, value: number,
                     fmt: (v: number) => string, onInput: (v: number) => void): HTMLElement {
@@ -1226,10 +1433,17 @@ function makeSlider(label: string, min: number, max: number, step: number, value
     input.step = String(step);
     input.value = String(value);
     Object.assign(input.style, { width: '100%' } as CSSStyleDeclaration);
-    input.style.setProperty('accent-color', '#2997ff');
+    // 轨道已填充比例画在 background 上（见 .fntv-dm-drawer input[type=range] 的注释）
+    const paint = () => {
+        const pct = Math.max(0, Math.min(100, ((parseFloat(input.value) - min) / (max - min)) * 100));
+        input.style.background =
+            `linear-gradient(to right, ${BRAND_ACCENT} 0 ${pct}%, rgba(255,255,255,.18) ${pct}% 100%)`;
+    };
+    paint();
     input.addEventListener('input', () => {
         const v = parseFloat(input.value);
         val.textContent = fmt(v);
+        paint();
         onInput(v);
     });
     row.appendChild(top);
@@ -1247,7 +1461,7 @@ function makeToggle(label: string, value: boolean, onChange: (v: boolean) => voi
     input.type = 'checkbox';
     input.checked = value;
     Object.assign(input.style, { width: '18px', height: '18px' } as CSSStyleDeclaration);
-    input.style.setProperty('accent-color', '#2997ff');
+    input.style.setProperty('accent-color', BRAND_ACCENT);
     input.addEventListener('change', () => onChange(input.checked));
     row.appendChild(lab);
     row.appendChild(input);
@@ -1281,87 +1495,16 @@ function buildStyleControls(): HTMLElement {
     wrap.appendChild(makeSlider(t('显示范围'), 0.3, 1, 0.05, style.displayArea,
         (v) => Math.round(v * 100) + '%', (v) => { style.displayArea = v; saveStyle(); }));
 
-    const reset = document.createElement('button');
+    const reset = document.createElement('div');
+    reset.className = 'fntv-dm-reset';
     reset.textContent = t('恢复默认');
-    Object.assign(reset.style, {
-        marginTop: '4px', padding: '9px 12px', background: 'rgba(41,151,255,.22)',
-        color: '#6cb8ff', border: '1px solid rgba(41,151,255,.35)', borderRadius: '10px',
-        cursor: 'pointer', fontSize: '13px',
-    } as CSSStyleDeclaration);
-    reset.addEventListener('mouseenter', () => { reset.style.background = 'rgba(41,151,255,.32)'; });
-    reset.addEventListener('mouseleave', () => { reset.style.background = 'rgba(41,151,255,.22)'; });
     reset.addEventListener('click', () => {
         style = { ...DEFAULT_STYLE };
         saveStyle();
-        const body = stylePanel?.querySelector('#fntv-dm-style-body') as HTMLElement | null;
-        if (body) { body.innerHTML = ''; body.appendChild(buildStyleControls()); }
+        renderDrawerBody();
     });
     wrap.appendChild(reset);
     return wrap;
-}
-
-function ensureStylePanel(): HTMLDivElement {
-    if (stylePanel) return stylePanel;
-    const m = document.createElement('div');
-    m.id = 'fntv-dm-style';
-    Object.assign(m.style, {
-        position: 'fixed', inset: '0', zIndex: '2147483647', display: 'none',
-        alignItems: 'center', justifyContent: 'center',
-    } as CSSStyleDeclaration);
-
-    const backdrop = document.createElement('div');
-    Object.assign(backdrop.style, {
-        position: 'absolute', inset: '0', background: 'rgba(0,0,0,0.42)',
-        backdropFilter: 'blur(18px) saturate(120%)',
-    } as CSSStyleDeclaration);
-    backdrop.style.setProperty('-webkit-backdrop-filter', 'blur(18px) saturate(120%)');
-    backdrop.addEventListener('click', () => closeStylePanel());
-
-    const panel = document.createElement('div');
-    Object.assign(panel.style, {
-        position: 'relative', width: 'min(420px, 92vw)', maxHeight: '82vh',
-        color: '#f5f5f7', display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', fontSize: '14px',
-    } as CSSStyleDeclaration, GLASS_PANEL_STYLE);
-
-    const head = document.createElement('div');
-    Object.assign(head.style, {
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '14px 18px 12px', fontWeight: '600', fontSize: '15px',
-        borderBottom: '1px solid rgba(255,255,255,.06)',
-    } as CSSStyleDeclaration);
-    const titleEl = document.createElement('span');
-    titleEl.textContent = t('弹幕样式');
-    const closeEl = document.createElement('span');
-    closeEl.textContent = '✕';
-    closeEl.style.cursor = 'pointer';
-    closeEl.style.padding = '0 4px';
-    closeEl.style.opacity = '0.7';
-    closeEl.addEventListener('click', () => closeStylePanel());
-    head.appendChild(titleEl);
-    head.appendChild(closeEl);
-
-    const body = document.createElement('div');
-    body.id = 'fntv-dm-style-body';
-    Object.assign(body.style, { overflow: 'auto', padding: '14px 18px', flex: '1' } as CSSStyleDeclaration);
-    body.appendChild(buildStyleControls());
-
-    panel.appendChild(head);
-    panel.appendChild(body);
-    m.appendChild(backdrop);
-    m.appendChild(panel);
-    document.body.appendChild(m);
-    stylePanel = m;
-    return m;
-}
-
-function openStylePanel(): void {
-    const m = ensureStylePanel();
-    m.style.display = 'flex';
-}
-
-function closeStylePanel(): void {
-    if (stylePanel) stylePanel.style.display = 'none';
 }
 
 // ─── 初始化 ───
@@ -1369,6 +1512,36 @@ function closeStylePanel(): void {
 // [lc-1015] 模块加载即安装 play/info 只读观察器（必须在 fnOS 页面脚本开始发请求前就位；
 // 本插件按字母序先于 skipInject 加载，包装链上它能看到原生播放流程的 play/info）。
 installPlayInfoObserver();
+
+// [lc-1107] 有界轮询兜底。旧实现只有 OnReady+1.5s（每次文档加载仅一次）+ OnDomChange 的
+// 800ms **无上限尾随防抖**：xgplayer 起播阶段持续改 DOM → 计时器被不停重置 → maybeSetup
+// 迟迟不跑，等它终于跑起来已是播放十来秒后，用户看到的就是"弹幕按钮要过一会儿才出现"。
+const MOUNT_POLL_MS = 400;
+const MOUNT_POLL_MAX = 60;          // 400ms × 60 = 24s 硬上限
+const MOUNT_POLL_PAGE_GRACE = 15;   // 前 6s 允许 isPlayerPage() 为假（等 <video> 元素出现）
+let mountPollTimer: ReturnType<typeof setInterval> | null = null;
+let mountPollTries = 0;
+
+function stopMountPoll(): void {
+    if (mountPollTimer) { clearInterval(mountPollTimer); mountPollTimer = null; }
+    mountPollTries = 0;
+}
+
+function startMountPoll(): void {
+    if (mountPollTimer || controlsPlaced) return;
+    mountPollTries = 0;
+    mountPollTimer = setInterval(() => {
+        mountPollTries++;
+        if (controlsPlaced || mountPollTries > MOUNT_POLL_MAX ||
+            (mountPollTries > MOUNT_POLL_PAGE_GRACE && !isPlayerPage())) {
+            stopMountPoll();
+            return;
+        }
+        // 只补「入位」这一件事，不调 maybeSetup()：后者会顺带跑 prepareAndLoad()，
+        // 每 400ms 打一条"已有弹幕请求在途"日志 → CMD 刷屏（lc-1106 刚治过）。
+        ensureMounted();
+    }, MOUNT_POLL_MS);
+}
 
 function maybeSetup(): void {
     // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
@@ -1389,7 +1562,9 @@ function maybeSetup(): void {
     const guid = getGuid();
     if (!guid) return;
 
-    if (guid === mountedForGuid && controlsPlaced) {
+    // isConnected 必须一起判：SPA 重建播放器会把按钮连同旧控制栏一起销毁，
+    // 只看 controlsPlaced 会永远短路，按钮再也回不来。
+    if (guid === mountedForGuid && controlsPlaced && !!dmBtnWrap?.isConnected) {
         if (canvas) canvas.style.display = enabled ? 'block' : 'none';
         syncToggleUI();
         return;
@@ -1399,15 +1574,19 @@ function maybeSetup(): void {
     mountedForGuid = guid;
     syncToggleUI();
     prepareAndLoad();
+    if (!controlsPlaced) startMountPoll();
 }
 
 registerHook(HookType.OnReady, () => {
+    startMountPoll();
     setTimeout(maybeSetup, 1500);
 });
 
 registerHook(HookType.OnDomChange, () => {
     if ((maybeSetup as any)._t) clearTimeout((maybeSetup as any)._t);
     (maybeSetup as any)._t = setTimeout(maybeSetup, 800);
+    // 防抖被起播期的高频 DOM 变动饿死时，靠轮询保证按钮能入位
+    if (!controlsPlaced) startMountPoll();
 });
 
 export {};
