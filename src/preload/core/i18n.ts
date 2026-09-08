@@ -81,14 +81,12 @@ const EN: Record<string, string> = {
     '自定义代理': 'Custom proxy',
     '轮播图 Logo': 'Carousel logo',
 
-    // ── 播放器内弹幕面板（danmakuWeb.ts 控制栏「弹幕」入口 + 原生形态弹窗/右侧抽屉）──
+    // ── 播放器内弹幕面板（danmakuWeb.ts 控制栏「弹幕」入口的 hover 弹窗）──
     '弹幕…': 'Danmaku…',
     '开': 'On',
     '关': 'Off',
-    '样式设置': 'Style settings',
     '来源详情': 'Source details',
-    '弹幕样式': 'Danmaku style',
-    '弹幕来源信息': 'Danmaku source info',
+    '返回': 'Back',
     '弹幕加载中…': 'Loading danmaku…',
     '粗体': 'Bold',
     '字号': 'Font size',

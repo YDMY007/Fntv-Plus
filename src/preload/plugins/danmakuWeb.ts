@@ -3,12 +3,12 @@
 // [原生网页播放器弹幕] 飞牛「原声播放器」(fnOS 网页自身 <video>) 的 B站弹幕支持。
 //
 // 设计要点（用户明确要求）：
-//   1) 控制栏里有三个按钮：
-//        - 「弹幕」：弹幕开关（默认开，localStorage 记忆，颜色区分开/关）。
-//        - 「详情」：弹出窗口，展示弹幕【来源信息】（从哪个区/哪个 B站标题匹配、相似度、
-//                    bvid/cid、条数）—— 与 MPV 的弹幕来源提示一致，而非罗列全部弹幕。
-//        - 「样式」：弹出面板，调节弹幕样式（粗体/字号/描边/阴影/滚动时长/透明度/显示范围），
-//                    对齐 MPV 弹幕样式旋钮，配置 localStorage 独立持久化。
+//   1) 控制栏只有一个「弹幕」按钮，交互与飞牛原生按钮一致：**鼠标移上去就弹出弹窗**
+//      （[lc-1110] 之前是点击弹紧凑列表、列表里两项再唤起右侧抽屉；用户明确不要侧边栏形态）。
+//      弹窗里直接装：开关（默认开，localStorage 记忆，颜色区分开/关）、弹幕样式旋钮
+//      （粗体/字号/描边/阴影/滚动时长/透明度/显示范围，对齐 MPV，localStorage 独立持久化）、
+//      以及就地切换的「来源详情」视图（从哪个区/哪个标题匹配、相似度、bvid/cid、条数）
+//      —— 与 MPV 的弹幕来源提示一致，而非罗列全部弹幕。
 //   2) 弹幕渲染采用 B站网页播放器同款方案：<canvas> 逐帧重绘引擎（非 DOM 元素），
 //      挂在 body 上 position:fixed，每帧按 video.getBoundingClientRect() 对齐播放画面，
 //      彻底规避「overlay 没盖对位置 / video 元素选错」导致的时灵时不灵。
@@ -203,15 +203,16 @@ interface ActiveState {
 let videoEl: HTMLVideoElement | null = null;
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
-// [lc-1107] 控制栏只留一个「弹幕」入口(仿原生单按钮), 点开是原生 .xg-options-list 形态的
-// 紧凑弹窗; 弹窗里的「样式设置」「来源详情」再唤起原生 .right-side 形态的右侧抽屉。
+// [lc-1110] 控制栏只留一个「弹幕」入口(仿原生单按钮), 鼠标移上去弹出原生 .xg-options-list
+// 形态的弹窗; 开关/样式旋钮/来源详情全在这一个弹窗里(不再有右侧抽屉)。
 let dmBtnWrap: HTMLDivElement | null = null;   // plugin-placeholder 外壳(挂进 xg-right-grid)
 let dmBtnSpan: HTMLSpanElement | null = null;  // 按钮文字「弹幕」
-let dmList: HTMLUListElement | null = null;    // 紧凑弹窗(锚在按钮正上方)
-let dmDrawer: HTMLDivElement | null = null;    // 右侧抽屉(挂进 .xgplayer 播放器根)
-let dmDrawerTitle: HTMLSpanElement | null = null;
-let dmDrawerBody: HTMLDivElement | null = null;
-let dmDrawerMode: 'style' | 'details' = 'style';
+let dmList: HTMLDivElement | null = null;      // hover 弹窗(锚在按钮正上方)
+let dmPanelView: 'main' | 'details' = 'main';  // 弹窗当前视图(来源详情就地切换, 不另开面板)
+let dmLiOn: HTMLLIElement | null = null;       // 「开」行引用: 状态变了就地改选中态, 不重绘整块面板
+let dmLiOff: HTMLLIElement | null = null;
+let dmCloseTimer: number | null = null;        // 移出后延时关闭: 留时间让鼠标从按钮移进弹窗
+let dmDragging = false;                        // 正拖着滑块/焦点在弹窗内时不自动关闭
 let controlsPlaced = false;
 let mountedForGuid: string | null = null;
 let loading = false;
@@ -402,42 +403,22 @@ function findControlsBar(): HTMLElement | null {
     return null;
 }
 
-/**
- * [lc-1107] 找播放器根节点（`.xgplayer`）。
- * 原生右侧抽屉 `.xg-options-list.right-side` 是 appendChild 到 player.root 的
- * （取证: VideoPlayer chunk `root:r.listType===Hr.RIGHT_SIDE?a.root:this.root`），
- * 靠 `height:100%; right:…; bottom:0` 相对播放器盒子定位。我们必须挂到同一个根，
- * 否则挂 body 上会被页面级布局拉伸/错位。
- */
-function findPlayerRoot(): HTMLElement | null {
-    const bar = findControlsBar();
-    const fromBar = bar?.closest('.xgplayer') as HTMLElement | null;
-    if (fromBar) return fromBar;
-    const v = pickVideo();
-    const fromVideo = v?.closest('.xgplayer') as HTMLElement | null;
-    if (fromVideo) return fromVideo;
-    return document.querySelector('.xgplayer') as HTMLElement | null;
-}
-
-// ═══ [lc-1107] 原生形态面板样式 ═══
-// 取证来源: fnOS /assets/VideoPlayer-C6NSHpD8.css 里 xgplayer 原生选项面板两套形态 ——
-//   紧凑弹窗 .xg-options-list{position:absolute;z-index:5;width:78px;right:50%;bottom:100%;
+// ═══ [lc-1110] 原生形态面板样式 ═══
+// 取证来源: fnOS /assets/VideoPlayer-C6NSHpD8.css 里 xgplayer 原生选项弹窗 ——
+//   .xg-options-list{position:absolute;z-index:5;width:78px;right:50%;bottom:100%;
 //     background:#0000008a;border-radius:1px;transform:translate(50%);cursor:pointer;
 //     overflow:hidden;height:0;opacity:.85;font-size:14px;color:#fffc;display:none}
 //     .active{display:block;height:auto}
 //     li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center}
 //     li:nth-child(1){margin-top:12px} li:last-child{margin-bottom:12px}
 //     li:hover,li.selected{color:var(--xgplayer-color)!important}
-//   右侧抽屉 .xg-options-list.right-side{width:20%;height:100%;right:-10.5%;bottom:0;
-//     background:#000000e6;display:flex;flex-direction:column;box-sizing:border-box}
-//     .active{animation:xg_options_active .3s ease-out forwards}  // translate(0)→translate(-50%)
-//     .hide{animation:xg_options_hide .3s ease-in forwards}
 //   fnOS 自有覆盖: .xgplayer{--xgplayer-color:var(--semi-color-primary)}
-// ⚠ 不直接复用 xg-options-list 类名: 原生 `li{height:20px}` 与 `.right-side li span{
-//   pointer-events:none}` 会压坏滑块(拖不动)与多行内容 → 原样复刻 token 到自有类，
-//   视觉与原生一致但控件可用，也避开与库样式的特异度对撞。
+//   原生还有第二套形态 .right-side(右侧抽屉), lc-1110 起不再使用 —— 用户要求设置就在 hover 弹窗里。
+// ⚠ 不直接复用 xg-options-list 类名: 原生 `li{height:20px}` 会压坏滑块与多行内容 →
+//   复刻配色/圆角/字色/hover 品牌色到自有类, 宽度按内容放宽, 视觉与原生一致但控件可用,
+//   也避开与库样式的特异度对撞。
 const DM_PANEL_STYLE_ID = 'fntv-dm-panel-style';
-// 原生 .xgplayer{--xgplayer-color:var(--semi-color-primary)} → 抽屉里的滑块/复选框同色系，
+// 原生 .xgplayer{--xgplayer-color:var(--semi-color-primary)} → 弹窗里的滑块/复选框同色系，
 // 不用旧模态那套 iOS 蓝 #2997ff（在飞牛播放器里是异色）。
 const BRAND_ACCENT = 'var(--semi-color-primary, #3374DB)';
 let _dmPanelStyleInjected = false;
@@ -445,74 +426,75 @@ let _dmPanelStyleInjected = false;
 function injectDmPanelStyle(): void {
     if (_dmPanelStyleInjected) return;
     const css = `
-/* ── 紧凑弹窗: 复刻原生 .xg-options-list ── */
-/* z-index 30: 原生 .xg-options-list 写的是 5 / .right-side 6, 但我们的弹幕 canvas 挂在
-   body 上 z-index=5、高能条 z-index=6 → 同一层叠上下文里后插入者胜, 面板会被 canvas 盖住。 */
+/* ── hover 弹窗: 复刻原生 .xg-options-list 观感, 宽度按旋钮内容放宽 ── */
+/* z-index 30: 原生 .xg-options-list 写的是 5, 但我们的弹幕 canvas 挂在 body 上 z-index=5、
+   高能条 z-index=6 → 同一层叠上下文里后插入者胜, 面板会被 canvas 盖住。 */
+/* 右对齐按钮而非原生的居中(right:50%+translate(50%)): 弹窗 252px 宽, 而弹幕按钮在控制栏
+   最右侧一组里, 居中会溢出播放器右边界。 */
 .fntv-dm-list{
-  position:absolute; right:50%; bottom:100%; transform:translate(50%);
-  z-index:30; width:104px; margin:0 0 4px; padding:0; list-style:none;
-  background:#0000008a; border-radius:1px; cursor:pointer; overflow:hidden;
-  height:0; opacity:.85; font-size:14px; color:#fffc; display:none;
+  position:absolute; right:-6px; bottom:calc(100% + 6px);
+  z-index:30; width:252px; box-sizing:border-box; margin:0; padding:0 14px;
+  background:#0000008a; border-radius:1px; cursor:pointer;
+  overflow:hidden auto; height:0; opacity:.85;
+  font-size:14px; color:#fffc; display:none;
+  /* 小窗/半屏播放时 6 个旋钮会高于播放器 → 限高滚动 */
+  max-height:min(440px, 62vh);
+  /* 否则复选框/滑块按浅色表单控件渲染, 暗面板上是一条近白粗轨 */
+  color-scheme:dark;
+  /* fnOS 顶栏是窗口拖拽区, 注入面板必须显式排除, 否则滑块拖不动 */
+  -webkit-app-region:no-drag;
 }
+/* 透明桥接: 弹窗与按钮之间留 6px 视觉间隙, 但鼠标穿过时不能算「移出」——
+   hover 触发的弹窗若在半路关掉, 就永远移不进去拖滑块。伪元素属于弹窗本身。 */
+.fntv-dm-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:8px}
 .fntv-dm-list:hover{opacity:1}
 .fntv-dm-list.active{display:block;height:auto}
-.fntv-dm-list li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center}
-.fntv-dm-list li:nth-child(1){margin-top:12px}
-.fntv-dm-list li:last-child{margin-bottom:12px}
+/* 开关两行沿用原生 li 观感(20px 行高 + 居中 + hover 品牌色) */
+.fntv-dm-list li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center;list-style:none}
+.fntv-dm-list li:first-child{margin-top:12px}
 .fntv-dm-list li:hover,.fntv-dm-list li.selected{
   color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))!important;
 }
-/* 特异度必须压过 .fntv-dm-list li(0,1,1) → 用 li.fntv-dm-sep(0,2,1) */
-.fntv-dm-list li.fntv-dm-sep{
-  height:1px; line-height:0; margin:8px 12px; padding:0;
-  background:#ffffff26; pointer-events:none; cursor:default;
-}
-/* ── 右侧抽屉: 复刻原生 .xg-options-list.right-side ── */
-/* z-index 9 而不是原生的 6: 要压过 body 上的弹幕 canvas(5)/高能条(6);
-   但又必须**低于** .xgplayer-controls(z-index:10) —— 抽屉是满高的, 盖住控制栏就等于
-   盖住「弹幕」按钮自己, 打开后再也点不到入口(playwright 实测 pointer 被抽屉 body 拦截)。
-   底部内容则靠 JS 按控制栏实高留内边距避开(见 syncDrawerBottomInset)。 */
-.fntv-dm-drawer{
-  position:absolute; right:0; bottom:0; height:100%; width:min(320px,22%);
-  z-index:9; box-sizing:border-box; display:flex; flex-direction:column;
-  background:#000000e6; color:#fffc; font-size:14px; overflow:hidden;
-  transform:translateX(105%); pointer-events:none;
-  /* 滑块/复选框走 accent-color, 未填充轨道默认按浅色表单控件渲染(截图实测一条近白粗轨),
-     在 #000000e6 的暗面板上很扎眼 → 强制暗色方案 */
-  color-scheme:dark;
-}
-.fntv-dm-drawer.active{
-  pointer-events:auto; animation:fntv_dm_drawer_in .3s ease-out forwards;
-}
-.fntv-dm-drawer.hide{animation:fntv_dm_drawer_out .3s ease-in forwards}
-@keyframes fntv_dm_drawer_in{from{transform:translateX(105%)}to{transform:translateX(0)}}
-@keyframes fntv_dm_drawer_out{from{transform:translateX(0)}to{transform:translateX(105%)}}
-.fntv-dm-drawer-head{
-  flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
-  padding:16px 16px 12px; font-size:14px; font-weight:600; color:#fffc;
-  border-bottom:1px solid #ffffff14;
-}
-.fntv-dm-drawer-close{cursor:pointer; opacity:.6; font-size:13px; line-height:1; padding:2px 3px}
-.fntv-dm-drawer-close:hover{opacity:1}
-.fntv-dm-drawer-body{flex:1 1 auto; overflow:auto; padding:14px 16px 18px}
-/* 滑块自绘: accent-color 的未填充轨道在暗面板上是一条近白粗轨(color-scheme:dark 也压不住),
-   已填充比例由 makeSlider 的 paint() 用 linear-gradient 画在 background 上 */
-.fntv-dm-drawer input[type=range]{
-  -webkit-appearance:none; appearance:none; width:100%; height:4px; margin:6px 0;
-  border-radius:2px; background:rgba(255,255,255,.18); cursor:pointer; outline:none;
-}
-.fntv-dm-drawer input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
-  background:var(--semi-color-primary, #3374DB); border:none;
-}
-.fntv-dm-drawer ::-webkit-scrollbar{width:6px}
-.fntv-dm-drawer ::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:3px}
-/* 「恢复默认」做成发丝线分隔的纯文本行(不用带边框圆角的按钮, 与原生面板观感一致) */
+/* 发丝线分区: 现在是独立 div(分区两侧夹着旋钮区, 不再是列表项) */
+.fntv-dm-sep{height:1px;margin:10px 0;background:#ffffff26;pointer-events:none}
+/* 旋钮区: 每行「标签 + 当前值」在上、滑块在下, 与 MPV 弹幕样式面板同构 */
+.fntv-dm-knobs{display:flex;flex-direction:column;gap:12px;padding:2px 0 0}
+/* 「恢复默认」「来源详情」都做成发丝线分隔的纯文本行(不用带边框圆角的按钮, 与原生观感一致) */
 .fntv-dm-reset{
-  margin-top:16px; padding-top:12px; border-top:1px solid #ffffff14;
+  margin-top:12px; padding-top:10px; border-top:1px solid #ffffff14;
   color:#fffc; cursor:pointer; font-size:13px; text-align:center;
 }
 .fntv-dm-reset:hover{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))}
+.fntv-dm-nav{
+  display:flex; justify-content:space-between; align-items:center;
+  margin-top:10px; padding:10px 0 12px; border-top:1px solid #ffffff14;
+  color:#fffc; cursor:pointer; font-size:13px;
+}
+.fntv-dm-nav:hover{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))}
+/* 详情视图: 252px 宽里「标签一行 + 值一行」比左右两列耐读(值可能是很长的服务端标题) */
+.fntv-dm-back{
+  display:flex; align-items:center; gap:6px; padding:12px 0 6px;
+  cursor:pointer; font-size:13px; color:#fffc;
+}
+.fntv-dm-back:hover{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))}
+.fntv-dm-rows{margin:0;padding:0 0 12px}
+.fntv-dm-row{padding:7px 0;border-bottom:1px solid #ffffff0f}
+.fntv-dm-row:last-child{border-bottom:none}
+.fntv-dm-row dt{font-size:12px;color:rgba(245,245,247,.5);margin-bottom:2px}
+.fntv-dm-row dd{margin:0;font-size:13px;line-height:1.45;color:rgba(245,245,247,.92);word-break:break-all}
+/* 滑块自绘: accent-color 的未填充轨道在暗面板上是一条近白粗轨(color-scheme:dark 也压不住),
+   已填充比例由 makeSlider 的 paint() 用 linear-gradient 画在 background 上 */
+.fntv-dm-list input[type=range]{
+  -webkit-appearance:none; appearance:none; width:100%; height:4px; margin:6px 0 0;
+  border-radius:2px; background:rgba(255,255,255,.18); cursor:pointer; outline:none;
+}
+.fntv-dm-list input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
+  background:var(--semi-color-primary, #3374DB); border:none;
+}
+/* 弹窗自身就是滚动容器: ::-webkit-scrollbar 必须同时写自身与后代, 只写后代(带空格)会漏掉它 */
+.fntv-dm-list::-webkit-scrollbar,.fntv-dm-list *::-webkit-scrollbar{width:6px}
+.fntv-dm-list::-webkit-scrollbar-thumb,.fntv-dm-list *::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:3px}
 `;
     const el = document.createElement('style');
     el.id = DM_PANEL_STYLE_ID;
@@ -594,17 +576,29 @@ function createControls(): void {
     hfull.appendChild(flex);
     wrap.appendChild(hfull);
 
-    const list = document.createElement('ul');
+    const list = document.createElement('div');
     list.className = 'fntv-dm-list';
     list.dataset.fnosUi = '1';
     wrap.appendChild(list);
 
+    // [lc-1110] 与飞牛原生按钮同交互：鼠标移上去就弹出、移出延时关闭。
+    // 延时不可省 —— 弹窗锚在按钮上方(中间 6px 间隙靠 ::after 桥接)，用户还要把鼠标
+    // 移进弹窗拖滑块；立即关闭等于弹窗永远碰不到。
+    wrap.addEventListener('mouseenter', () => { cancelClosePanel(); openPanel(); });
+    wrap.addEventListener('mouseleave', () => scheduleClosePanel());
+    // 点击也保留(触控板/键盘用户)：已展开就保持展开，不做 toggle 关掉
     flex.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        toggleList();
+        cancelClosePanel();
+        openPanel();
     });
     list.addEventListener('click', (e) => e.stopPropagation());
+    // 拖滑块时鼠标可能滑出弹窗边界 → 拖动期间不自动关闭（once 注册, 避免重建按钮时累积监听）
+    list.addEventListener('pointerdown', () => {
+        dmDragging = true;
+        window.addEventListener('pointerup', () => { dmDragging = false; }, { once: true });
+    });
 
     dmBtnWrap = wrap;
     dmBtnSpan = span;
@@ -612,10 +606,16 @@ function createControls(): void {
     syncToggleUI();
 }
 
-function renderListItems(): void {
-    const list = dmList;
-    if (!list) return;
-    list.innerHTML = '';
+/** 弹窗内容：开关两行(原生 li 观感) + 弹幕样式旋钮 + 来源详情入口。 */
+function renderPanel(): void {
+    const p = dmList;
+    if (!p) return;
+    const keepScroll = p.scrollTop;   // 重绘(点开关/恢复默认)后别把用户弹回顶部
+    p.innerHTML = '';
+    dmLiOn = null;
+    dmLiOff = null;
+    if (dmPanelView === 'details') { renderDetailsInto(p); p.scrollTop = keepScroll; return; }
+
     const mk = (text: string, selected: boolean, onClick: () => void): HTMLLIElement => {
         const li = document.createElement('li');
         li.textContent = text;
@@ -626,26 +626,71 @@ function renderListItems(): void {
         });
         return li;
     };
-    list.appendChild(mk(t('开'), enabled, () => { setDanmakuEnabled(true); closeList(); }));
-    list.appendChild(mk(t('关'), !enabled, () => { setDanmakuEnabled(false); closeList(); }));
-    const sep = document.createElement('li');
-    sep.className = 'fntv-dm-sep';
-    list.appendChild(sep);
-    list.appendChild(mk(t('样式设置'), false, () => { closeList(); openDrawer('style'); }));
-    list.appendChild(mk(t('来源详情'), false, () => { closeList(); openDrawer('details'); }));
+    // 开关不关弹窗：用户往往接着调样式（旧版点一下就收面板）
+    dmLiOn = mk(t('开'), enabled, () => setDanmakuEnabled(true));
+    dmLiOff = mk(t('关'), !enabled, () => setDanmakuEnabled(false));
+    p.appendChild(dmLiOn);
+    p.appendChild(dmLiOff);
+
+    const sep1 = document.createElement('div');
+    sep1.className = 'fntv-dm-sep';
+    p.appendChild(sep1);
+
+    const knobs = document.createElement('div');
+    knobs.className = 'fntv-dm-knobs';
+    knobs.appendChild(buildStyleControls());
+    p.appendChild(knobs);
+
+    const nav = document.createElement('div');
+    nav.className = 'fntv-dm-nav';
+    const navText = document.createElement('span');
+    navText.textContent = t('来源详情');
+    const navArrow = document.createElement('span');
+    navArrow.textContent = '›';
+    navArrow.style.opacity = '.5';
+    nav.appendChild(navText);
+    nav.appendChild(navArrow);
+    nav.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dmPanelView = 'details';
+        renderPanel();
+        p.scrollTop = 0;
+    });
+    p.appendChild(nav);
 }
 
-function toggleList(): void {
+function openPanel(): void {
     if (!dmList) return;
-    if (dmList.classList.contains('active')) { closeList(); return; }
-    renderListItems();
+    // 已展开就不重绘：mouseenter 会在鼠标于按钮与弹窗之间往返时反复触发，
+    // 每次重绘都把光标下的元素换成新节点 → 浏览器重发边界事件 → leave/enter 自激循环。
+    if (!dmList.classList.contains('active')) renderPanel();
     dmList.classList.add('active');
     refreshDismissBinding();
 }
 
-function closeList(): void {
+function closePanel(): void {
+    cancelClosePanel();
+    dmPanelView = 'main';       // 下次 hover 从主视图开始，不停在上一次的详情里
     dmList?.classList.remove('active');
+    if (dmList) dmList.scrollTop = 0;
     refreshDismissBinding();
+}
+
+/** 移出后延时关闭；期间回到按钮/弹窗、或正拖着滑块 → 不关。
+ * ⚠ 不看 document.activeElement：拖滑块/点复选框都会让控件拿到焦点，鼠标在弹窗**外**松手后
+ * 焦点仍在弹窗里，加上这条规则弹窗就永久卡开（再移进移出也关不掉，只能 ESC/点外面）。
+ * 原生 .xg-options-list 就是移出即收；键盘用户 Tab 进来不会触发 mouseleave，不受影响。 */
+function scheduleClosePanel(): void {
+    cancelClosePanel();
+    dmCloseTimer = window.setTimeout(() => {
+        dmCloseTimer = null;
+        if (dmDragging) { scheduleClosePanel(); return; }
+        closePanel();
+    }, 260);
+}
+
+function cancelClosePanel(): void {
+    if (dmCloseTimer !== null) { window.clearTimeout(dmCloseTimer); dmCloseTimer = null; }
 }
 
 function syncToggleUI(): void {
@@ -658,7 +703,13 @@ function syncToggleUI(): void {
     dmBtnSpan.style.color = enabled
         ? 'var(--semi-color-primary, #3374DB)'
         : 'rgba(255,255,255,.45)';
-    if (dmList?.classList.contains('active')) renderListItems();
+    // ⚠ 不能在这里重绘整块弹窗：xgplayer 播放期持续改 DOM(进度条/时间文本) →
+    // OnDomChange(800ms 尾随防抖) → maybeSetup → 这里，重绘会把用户**正在拖的滑块**与
+    // 滚动位置一起销毁(取证表现为「点返回行反复 element was detached」)。只就地改选中态。
+    if (dmLiOn && dmLiOff) {
+        dmLiOn.className = enabled ? 'selected' : '';
+        dmLiOff.className = enabled ? '' : 'selected';
+    }
 }
 
 function setDanmakuEnabled(v: boolean): void {
@@ -710,7 +761,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
         items = [];
         meta = null;
         resetRenderState();
-        closeDrawer();
+        closePanel();
         inflight = false;
     } else if (items.length && enabled) {
         startRender();
@@ -1212,118 +1263,24 @@ function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: str
     return { text: '—', warn: false, detail: '' };
 }
 
-// ─── [lc-1107] 右侧抽屉（复刻原生 .xg-options-list.right-side 形态）───
-// 旧实现是两个居中模态 + 全屏 backdrop-filter 遮罩：一来形态和飞牛原生播放器完全不一致，
-// 二来本项目透明窗口带 --disable-features=VizDisplayCompositor（见 dialogUI.ts 的说明），
-// 整屏 backdrop-filter 层有整窗闪烁风险。现在统一成一个挂在播放器根上的右侧抽屉，
-// 由 dmDrawerMode 决定装「样式设置」还是「来源详情」。
-
-function ensureDrawer(): HTMLDivElement | null {
-    const host = findPlayerRoot();
-    // 播放器根还没就绪 → 这次先不开，下次点击再试（挂到 body 上会被页面级布局拉错位）
-    if (!host) return null;
-    injectDmPanelStyle();
-
-    if (dmDrawer) {
-        // SPA 换集后旧播放器根被销毁，抽屉成了游离节点 → 重新挂到新的根上
-        if (!dmDrawer.isConnected) host.appendChild(dmDrawer);
-        return dmDrawer;
-    }
-
-    const d = document.createElement('div');
-    d.className = 'fntv-dm-drawer';
-    d.dataset.fnosUi = '1';
-    // fnOS 顶栏是窗口拖拽区，注入面板必须显式排除，否则抽屉里的滑块拖不动
-    d.style.setProperty('-webkit-app-region', 'no-drag');
-    d.addEventListener('click', (e) => e.stopPropagation());
-
-    const head = document.createElement('div');
-    head.className = 'fntv-dm-drawer-head';
-    const title = document.createElement('span');
-    const closeEl = document.createElement('span');
-    closeEl.className = 'fntv-dm-drawer-close';
-    closeEl.textContent = '✕';
-    closeEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        closeDrawer();
-    });
-    head.appendChild(title);
-    head.appendChild(closeEl);
-
-    const body = document.createElement('div');
-    body.className = 'fntv-dm-drawer-body';
-
-    d.appendChild(head);
-    d.appendChild(body);
-    host.appendChild(d);
-    dmDrawer = d;
-    dmDrawerTitle = title;
-    dmDrawerBody = body;
-    return d;
-}
-
-/**
- * 抽屉压在控制栏之下（z-index 9 < 10）后，底部那条会被控制栏盖住 → 落在里面的滑块点不到。
- * 按控制栏**实高**留内边距：fnOS 有 mini-controls / flex-controls 等形态，写死 48px 不可靠。
- */
-function syncDrawerBottomInset(): void {
-    if (!dmDrawer || !dmDrawerBody) return;
-    const bar = dmDrawer.parentElement?.querySelector('.xgplayer-controls') as HTMLElement | null;
-    const h = bar?.offsetHeight || 0;
-    dmDrawerBody.style.paddingBottom = (h > 0 ? h + 12 : 18) + 'px';
-}
-
-function openDrawer(mode: 'style' | 'details'): void {
-    const d = ensureDrawer();
-    if (!d) return;
-    dmDrawerMode = mode;
-    if (dmDrawerTitle) dmDrawerTitle.textContent = mode === 'style' ? t('弹幕样式') : t('弹幕来源信息');
-    renderDrawerBody();
-    syncDrawerBottomInset();
-    d.classList.remove('hide');
-    d.classList.add('active');
-    refreshDismissBinding();
-}
-
-function closeDrawer(): void {
-    const d = dmDrawer;
-    if (!d || !d.classList.contains('active')) { refreshDismissBinding(); return; }
-    d.classList.remove('active');
-    d.classList.add('hide');
-    refreshDismissBinding();
-    // 出场动画结束后清掉 hide 类，免得和下次入场的 active 动画互相覆盖
-    window.setTimeout(() => { d.classList.remove('hide'); }, 320);
-}
-
-function renderDrawerBody(): void {
-    const body = dmDrawerBody;
-    if (!body) return;
-    body.innerHTML = '';
-    if (dmDrawerMode === 'style') body.appendChild(buildStyleControls());
-    else renderDetailsInto(body);
-}
-
 // ─── 关闭策略：ESC / 点击面板外 ───
 // 没有遮罩层，所以靠捕获阶段的 document 监听判定「点在外面」——xgplayer 会在冒泡阶段
 // stopPropagation 吞掉视频区点击，只有捕获阶段拦得到。仅在有面板打开时才挂监听。
 let _dismissBound = false;
 
 function anyPanelOpen(): boolean {
-    return !!dmList?.classList.contains('active') || !!dmDrawer?.classList.contains('active');
+    return !!dmList?.classList.contains('active');
 }
 
 function onDismissClick(e: MouseEvent): void {
     const tgt = e.target as Node | null;
-    if (tgt && dmBtnWrap?.contains(tgt)) return;   // 按钮自己负责开合
-    if (tgt && dmDrawer?.contains(tgt)) return;
-    closeList();
-    closeDrawer();
+    if (tgt && dmBtnWrap?.contains(tgt)) return;   // 按钮与弹窗都在 wrap 里，各自负责开合
+    closePanel();
 }
 
 function onDismissKeydown(e: KeyboardEvent): void {
     if (e.key !== 'Escape') return;
-    closeList();
-    closeDrawer();
+    closePanel();
 }
 
 function refreshDismissBinding(): void {
@@ -1340,8 +1297,31 @@ function refreshDismissBinding(): void {
 }
 
 function renderDetailsInto(body: HTMLElement): void {
+    // 返回行恒在：弹幕还没拉到（无 meta）时也必须能退回主视图调样式
+    const back = document.createElement('div');
+    back.className = 'fntv-dm-back';
+    const backArrow = document.createElement('span');
+    backArrow.textContent = '‹';
+    backArrow.style.opacity = '.5';
+    const backText = document.createElement('span');
+    backText.textContent = t('返回');
+    back.appendChild(backArrow);
+    back.appendChild(backText);
+    back.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dmPanelView = 'main';
+        renderPanel();
+        if (dmList) dmList.scrollTop = 0;
+    });
+    body.appendChild(back);
+
     if (!meta) {
-        body.textContent = t('弹幕加载中…');
+        const wait = document.createElement('div');
+        wait.textContent = t('弹幕加载中…');
+        Object.assign(wait.style, {
+            padding: '4px 0 14px', fontSize: '13px', color: 'rgba(245,245,247,.5)',
+        } as CSSStyleDeclaration);
+        body.appendChild(wait);
         return;
     }
 
@@ -1366,39 +1346,31 @@ function renderDetailsInto(body: HTMLElement): void {
         const banner = document.createElement('div');
         banner.textContent = '⚠️ ' + cookie.detail;
         Object.assign(banner.style, {
-            marginBottom: '14px', padding: '9px 11px', borderRadius: '8px',
+            margin: '2px 0 10px', padding: '8px 10px', borderRadius: '6px',
             background: 'rgba(255,76,76,0.12)', border: '1px solid rgba(255,76,76,0.45)',
-            color: '#ff8a8a', fontSize: '13px', lineHeight: '1.5',
+            color: '#ff8a8a', fontSize: '12px', lineHeight: '1.5',
         } as CSSStyleDeclaration);
         body.appendChild(banner);
     }
 
-    const grid = document.createElement('div');
-    Object.assign(grid.style, {
-        display: 'grid',
-        gridTemplateColumns: '78px 1fr',   // 抽屉仅 ~320px 宽，标签列比旧模态(96px)再收一档
-        rowGap: '10px',
-        columnGap: '12px',
-        alignItems: 'start',
-    } as CSSStyleDeclaration);
+    const dl = document.createElement('dl');
+    dl.className = 'fntv-dm-rows';
     for (const [k, v] of rows) {
-        const kEl = document.createElement('div');
+        const row = document.createElement('div');
+        row.className = 'fntv-dm-row';
+        const kEl = document.createElement('dt');
         kEl.textContent = k;
-        kEl.style.color = 'rgba(245,245,247,.52)';
-        kEl.style.flexShrink = '0';
-        const vEl = document.createElement('div');
+        const vEl = document.createElement('dd');
         vEl.textContent = v;
-        vEl.style.wordBreak = 'break-all';
         if (k === '登录状态') {
             vEl.style.color = cookie.warn ? '#ff6b6b' : '#5ad17a';
             vEl.style.fontWeight = '600';
-        } else {
-            vEl.style.color = 'rgba(245,245,247,.92)';
         }
-        grid.appendChild(kEl);
-        grid.appendChild(vEl);
+        row.appendChild(kEl);
+        row.appendChild(vEl);
+        dl.appendChild(row);
     }
-    body.appendChild(grid);
+    body.appendChild(dl);
 
     const tip = document.createElement('div');
     // 底部说明必须跟着实际来源走：自建源命中时写「数据来源：B站」是错信息（用户正是看着这句报的匹配 bug）。
@@ -1407,19 +1379,19 @@ function renderDetailsInto(body: HTMLElement): void {
         ? '数据来源：自建弹幕接口 danmu_api（只认精确匹配，未命中自动降级 B站）'
         : '数据来源：B站（与 MPV 弹幕同源）';
     Object.assign(tip.style, {
-        marginTop: '14px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
-        color: 'rgba(245,245,247,.4)', fontSize: '12px',
+        paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
+        color: 'rgba(245,245,247,.4)', fontSize: '12px', lineHeight: '1.5',
     } as CSSStyleDeclaration);
     body.appendChild(tip);
 }
 
 // ─── 弹幕样式旋钮（对齐 MPV 弹幕样式 7 项：粗体/字号/描边/阴影/滚动时长/透明度/显示范围）───
-// [lc-1107] 渲染进右侧抽屉，不再是独立的居中模态。
+// [lc-1110] 渲染进控制栏「弹幕」按钮的 hover 弹窗，与开关两行同处一个面板。
 
 function makeSlider(label: string, min: number, max: number, step: number, value: number,
                     fmt: (v: number) => string, onInput: (v: number) => void): HTMLElement {
     const row = document.createElement('div');
-    Object.assign(row.style, { display: 'flex', flexDirection: 'column', gap: '6px' } as CSSStyleDeclaration);
+    Object.assign(row.style, { display: 'flex', flexDirection: 'column' } as CSSStyleDeclaration);
     const top = document.createElement('div');
     Object.assign(top.style, { display: 'flex', justifyContent: 'space-between', fontSize: '13px' } as CSSStyleDeclaration);
     const lab = document.createElement('span');
@@ -1437,7 +1409,7 @@ function makeSlider(label: string, min: number, max: number, step: number, value
     input.step = String(step);
     input.value = String(value);
     Object.assign(input.style, { width: '100%' } as CSSStyleDeclaration);
-    // 轨道已填充比例画在 background 上（见 .fntv-dm-drawer input[type=range] 的注释）
+    // 轨道已填充比例画在 background 上（见 .fntv-dm-list input[type=range] 的注释）
     const paint = () => {
         const pct = Math.max(0, Math.min(100, ((parseFloat(input.value) - min) / (max - min)) * 100));
         input.style.background =
@@ -1502,10 +1474,11 @@ function buildStyleControls(): HTMLElement {
     const reset = document.createElement('div');
     reset.className = 'fntv-dm-reset';
     reset.textContent = t('恢复默认');
-    reset.addEventListener('click', () => {
+    reset.addEventListener('click', (e) => {
+        e.stopPropagation();
         style = { ...DEFAULT_STYLE };
         saveStyle();
-        renderDrawerBody();
+        renderPanel();
     });
     wrap.appendChild(reset);
     return wrap;
