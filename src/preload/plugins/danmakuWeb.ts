@@ -506,7 +506,11 @@ function injectDmPanelStyle(): void {
 // ─── 挂载 canvas + 控制栏按钮 ───
 
 function ensureCanvas(): void {
-    if (canvas) return;
+    if (canvas) {
+        // 复播时必须复位：leavePlayer 收起的是 display，这里不早退恢复就永远看不见弹幕
+        canvas.style.display = enabled ? 'block' : 'none';
+        return;
+    }
     const c = document.createElement('canvas');
     c.id = 'fntv-danmaku-canvas';
     Object.assign(c.style, {
@@ -1520,10 +1524,37 @@ function startMountPoll(): void {
     }, MOUNT_POLL_MS);
 }
 
+/**
+ * [lc-1111] 离开播放页时收起整个弹幕层。
+ * ⚠ canvas 挂在 body 上且 position:fixed，播放器 DOM 被 SPA 销毁时**不会**带走它；
+ * 渲染循环取不到 video 就提前 return，于是最后一帧弹幕永远浮在首页/详情页上（用户实机截图）。
+ * items/meta/currentGuid 故意不清：回到同一集时靠它们直接续播，不必再打一次 B站。
+ */
+function leavePlayer(): void {
+    stopRender();                       // 内部已 clearRect，画布内容一并抹掉
+    if (canvas) canvas.style.display = 'none';
+    if (rectRO) { rectRO.disconnect(); rectRO = null; rectROTarget = null; }
+    cancelClosePanel();
+    dmBtnWrap?.remove();
+    dmBtnWrap = null;
+    dmBtnSpan = null;
+    dmList = null;
+    dmLiOn = null;
+    dmLiOff = null;
+    dmPanelView = 'main';
+    controlsPlaced = false;
+    mountedForGuid = null;
+    refreshDismissBinding();
+}
+
 function maybeSetup(): void {
     // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
     applyVideoFullscreenClass();
-    if (!isPlayerPage()) return;
+    if (!isPlayerPage()) {
+        // 只在确实挂过东西时才收 —— 否则每次 DOM 变动都要跑一遍清理
+        if (canvas || dmBtnWrap) leavePlayer();
+        return;
+    }
 
     // [lc-544] 播放页顶部标题栏美化（毛玻璃 + 自动隐藏）
     injectPlayerHeaderStyle();
