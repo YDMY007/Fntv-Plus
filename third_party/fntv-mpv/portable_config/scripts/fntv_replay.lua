@@ -33,6 +33,14 @@ mp.observe_property('path', 'string', function(_, v)
     if v and v ~= '' then last_path = v end
 end)
 
+-- [lc-1106] 主进程加载 M3U8 播放列表后会通过 script-message 把文件路径发过来。
+-- EOF 后重新播放时优先用这个路径（loadfile 一个 M3U8 = 恢复完整列表），
+-- 否则只能 loadfile 单集代理 URL → 播放列表全丢。
+local last_playlist = nil
+mp.register_script_message('fntv-playlist-path', function(p)
+    if p and p ~= '' then last_playlist = p end
+end)
+
 -- 核心：重新播放（从头开始）
 local function do_replay()
     local cur = mp.get_property('path')
@@ -40,11 +48,14 @@ local function do_replay()
     pcall(function() mp.commandv('show-text', '↻ 重新播放', 1500) end)
 
     if not cur or cur == '' then
-        if not last_path then
+        -- [lc-1106] 优先用 M3U8 播放列表路径（恢复完整列表），单文件场景退回 last_path
+        local reload_url = last_playlist or last_path
+        if not reload_url then
             msg.warn('重新播放：无当前文件（也无可重载的地址）')
             return
         end
-        msg.info('重新播放：EOF 空闲态 → 重新加载 ' .. tostring(last_path))
+        msg.info('重新播放：EOF 空闲态 → 重新加载 ' .. tostring(reload_url)
+            .. (last_playlist and ' (播放列表)' or ''))
         -- watch_later 会把续播位置带回来(save-position-on-quit=yes, 实测 reload 后
         -- "Resuming playback" → playback restart @1.1 而非 0), 所以显式 start=+0 压掉它,
         -- 并在 file-loaded 后再归零一次兜底。
@@ -57,7 +68,7 @@ local function do_replay()
         mp.add_timeout(20, function() pcall(function() mp.unregister_event(zero_once) end) end)
         -- loadfile 的位置参数是 url/flags/index/options(第 4 位是整数 index, 直接塞 options 会报
         -- "The loadfile option must be an integer") → 必须用命名参数形式传 options。
-        mp.command_native({ name = 'loadfile', url = last_path, flags = 'replace', options = 'start=+0' })
+        mp.command_native({ name = 'loadfile', url = reload_url, flags = 'replace', options = 'start=+0' })
         return
     end
 

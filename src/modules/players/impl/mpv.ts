@@ -207,6 +207,12 @@ export class MpvPlayer extends BasePlayer {
             // 加载播放列表文件
             await this.mpvInstance.loadPlaylist(this.playlistFilePath, 'replace');
 
+            // [lc-1106] 把 M3U8 路径告诉 fntv_replay.lua：EOF 后重新播放才能恢复完整列表，
+            // 否则 do_replay 只能 loadfile 单集代理 URL → 播放列表全丢
+            if (infos.length > 1) {
+                this.mpvInstance.command('script-message', ['fntv-playlist-path', this.playlistFilePath]);
+            }
+
             // 跳转到指定位置
             if (pos > 0) {
                 // 更新全局状态
