@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
-import { runBiliDanmaku } from '../../main/common/biliRunner';
+import { runBiliDanmaku, runBiliDanmakuByBvid } from '../../main/common/biliRunner';
 import * as danmuApi from '../../main/common/danmuApi';
 const log = logger.component('danmaku');
 
@@ -622,6 +622,67 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
     const kept = applyFilter(items);
     meta.count = kept.length;
     log.info(`[danmaku] ✅ 弹幕条目就绪: ${cacheFile} (${items.length} 条 → 过滤后 ${kept.length} 条)`);
+    return { items: kept, meta };
+}
+
+/**
+ * [lc-1118] 手动搜索：用户从候选列表选定了具体条目（bvid 或 `dmapi:<episodeId>`），直接拉该条目的弹幕。
+ * 与 getDanmakuItems 同一套磁盘缓存（缓存键只有 title/season/ep），选定结果落缓存后
+ * 下次自动加载直接命中 —— 手动选择被记住，与 MPV 侧「XML 同路径覆盖」语义一致。
+ * @returns {items, meta}；失败返回 items=[] 且 meta.error 带根因（供弹窗展示）
+ */
+export async function getDanmakuItemsByBvid(
+    title: string, ep: number, isMovie = false, season = 0, bvid: string,
+): Promise<GetDanmakuResult | null> {
+    const cleanTitle = normalizeDanmakuTitle(title) || title;
+    log.info(`[danmaku] ========== getDanmakuItemsByBvid 入口 ==========`);
+    log.info(`[danmaku] title="${cleanTitle}", ep=${ep}, bvid=${bvid.startsWith('dmapi:') ? 'dmapi:<id>' : bvid}`);
+    try {
+        if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+    } catch (_) { /* ignore */ }
+
+    const xmlFile = path.join(CACHE_DIR, `manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.xml`);
+    const r = await runBiliDanmakuByBvid(cleanTitle, bvid, xmlFile, fnConfig.getMpvBiliAggregateThreshold());
+    if (!r.ok) {
+        try { if (fs.existsSync(xmlFile)) fs.unlinkSync(xmlFile); } catch (_) { /* ignore */ }
+        log.warn('[danmaku] ❌ 手动选定拉取失败: ' + (r.error || '未知'));
+        return {
+            items: [],
+            meta: {
+                searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
+                ep, isMovie, season, count: 0, error: r.error || '未知',
+            },
+        };
+    }
+    const items = parseDanmakuXml(xmlFile);
+    try { if (fs.existsSync(xmlFile)) fs.unlinkSync(xmlFile); } catch (_) { /* ignore */ }
+    if (!items || items.length === 0) {
+        return {
+            items: [],
+            meta: {
+                searchTitle: cleanTitle, matchedTitle: r.matched_title || cleanTitle,
+                source: r.source || '', ep, isMovie, season, count: 0, error: '该条目没有弹幕',
+            },
+        };
+    }
+    const meta: DanmakuMeta = {
+        searchTitle: cleanTitle,
+        matchedTitle: r.matched_title || cleanTitle,
+        source: r.source || '',
+        bvid: r.bvid || bvid,
+        cid: r.cid,
+        sim: null,
+        ep, isMovie, season,
+        count: items.length,
+        cookieStatus: r.cookie_status || undefined,
+    };
+    try {
+        const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.json`);
+        fs.writeFileSync(cacheFile, JSON.stringify({ items, meta }), 'utf-8');
+        log.info(`[danmaku] ✅ 手动选定结果已落缓存: ${cacheFile} (${items.length} 条)`);
+    } catch (_) { /* ignore */ }
+    const kept = filterDanmakuItems(items, fnConfig.getBiliDanmakuBlockTypes(), fnConfig.getBiliDanmakuBlacklist() || '');
+    meta.count = kept.length;
     return { items: kept, meta };
 }
 

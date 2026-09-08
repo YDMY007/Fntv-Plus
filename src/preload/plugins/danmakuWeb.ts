@@ -232,12 +232,22 @@ let dmList: HTMLDivElement | null = null;      // hover 弹窗(锚在按钮正�
 // 重绘整块会销毁用户正在拖的滑块（见 syncToggleUI 的注释）。
 let dmSecStyle = false;                        // 「弹幕样式」段是否展开(跨 hover 保持)
 let dmSecDetail = false;                       // 「来源详情」段是否展开
+let dmSecSearch = false;                       // 「手动搜索」段是否展开
 let dmHeadStyle: HTMLLIElement | null = null;
 let dmHeadDetail: HTMLLIElement | null = null;
+let dmHeadSearch: HTMLLIElement | null = null;
 let dmFoldStyle: HTMLDivElement | null = null;    // 折叠体引用: 互斥展开时就地切另一段的 class
 let dmFoldDetail: HTMLDivElement | null = null;
+let dmFoldSearch: HTMLDivElement | null = null;
 let dmDetailBody: HTMLDivElement | null = null;   // 详情段的内层容器(meta 到位后就地重填)
 let dmDetailShown: typeof meta | undefined;       // 上次渲染详情时的 meta 引用, 变了才重填
+// [lc-1118] 手动搜索段: 搜索框 + 最多 5 条候选, 点选定条目直接拉弹幕(主进程落缓存记住选择)
+let dmSearchBody: HTMLDivElement | null = null;
+let dmSearchResults: any[] | null = null;         // null=本集还没搜过(展开时自动搜一次)
+let dmSearchErr = '';
+let dmSearchBusy = false;                         // 搜索/选定拉取进行中(按钮与列表进入忙态)
+let dmSearchKw = '';                              // 搜索框当前关键词(重绘后恢复输入)
+let dmPickedBvid = '';                            // 已选定的候选(bvid/dmapi:<id>), 换集清空
 let dmSwitch: HTMLInputElement | null = null;     // 开关行引用: 状态变了就地改 checked, 不重绘整块面板
 let dmCloseTimer: number | null = null;        // 移出后延时关闭: 留时间让鼠标从按钮移进弹窗
 let dmDragging = false;                        // 正拖着滑块/焦点在弹窗内时不自动关闭
@@ -531,6 +541,21 @@ function injectDmPanelStyle(): void {
 .fntv-dm-fold.open>div{visibility:visible}
 /* 分区线 = .semi-dropdown-divider: 通铺 1px, 上下 4px */
 .fntv-dm-sep{height:1px;margin:4px 0;background:rgba(255,255,255,.15);pointer-events:none}
+/* [lc-1118] 手动搜索段: 搜索行 + 候选列表(极简排版, 无框体堆砌) */
+.fntv-dm-search-row{display:flex;gap:6px;align-items:center;padding:8px 16px 4px}
+.fntv-dm-search-in{flex:1;min-width:0;height:26px;padding:0 8px;border:1px solid rgba(255,255,255,.15);border-radius:4px;background:rgba(255,255,255,.06);color:#fff;font-size:12px;outline:none;box-sizing:border-box}
+.fntv-dm-search-in:focus{border-color:var(--semi-color-primary,#3374DB)}
+.fntv-dm-search-btn{flex:none;height:26px;padding:0 10px;border:none;border-radius:4px;background:var(--semi-color-primary,#3374DB);color:#fff;font-size:12px;cursor:pointer}
+.fntv-dm-search-btn:disabled{opacity:.5;cursor:default}
+.fntv-dm-cand{padding:7px 16px;cursor:pointer}
+.fntv-dm-cand:hover{background:rgba(255,255,255,.06)}
+.fntv-dm-cand.on{background:rgba(51,116,219,.18)}
+.fntv-dm-cand.on:hover{background:rgba(51,116,219,.26)}
+.fntv-dm-cand-t{font-size:12px;color:#fff;line-height:1.45;word-break:break-all}
+.fntv-dm-cand.on .fntv-dm-cand-t{color:var(--semi-color-primary,#3374DB)}
+.fntv-dm-cand-s{font-size:11px;color:rgba(255,255,255,.45);margin-top:2px}
+.fntv-dm-search-msg{font-size:12px;color:rgba(255,255,255,.5);padding:8px 16px;line-height:1.55}
+.fntv-dm-search-err{color:#ff8a8a}
 /* 旋钮区: 每行「标签 + 当前值」在上、滑块在下, 与 MPV 弹幕样式面板同构 */
 .fntv-dm-knobs{display:flex;flex-direction:column;gap:14px}
 /* 「恢复默认」通铺成一行菜单项: 负 margin 抵消内层留白, 发丝线才跟分区线一样齐边 */
@@ -703,9 +728,12 @@ function renderPanel(): void {
     dmSwitch = null;
     dmHeadStyle = null;
     dmHeadDetail = null;
+    dmHeadSearch = null;
     dmFoldStyle = null;
     dmFoldDetail = null;
+    dmFoldSearch = null;
     dmDetailBody = null;
+    dmSearchBody = null;
     dmDetailShown = undefined;
 
     // 开关做成 Switch 而不是两行「开/关」纯文字: 状态一眼可见, 也跟飞牛其余设置项同构。
@@ -776,15 +804,25 @@ function renderPanel(): void {
     dmDetailBody = document.createElement('div');
     dmHeadDetail = mkFold(p, t('来源详情'), dmDetailBody, 'detail');
     renderDetailRows();
+
+    // [lc-1118] 第三段「手动搜索」：展开时自动按当前番名搜一次，也可改关键词重搜，点候选直接换弹幕
+    dmSearchBody = document.createElement('div');
+    dmHeadSearch = mkFold(p, t('手动搜索'), dmSearchBody, 'search', (open) => {
+        if (open && dmSearchResults === null && !dmSearchBusy) {
+            void runSearch(dmSearchKw || (meta ? meta.searchTitle : ''));
+        }
+    });
+    renderSearchBody();
     p.scrollTop = keepScroll;
 }
 
 /** 折叠段 = 一行菜单项标题(左) + caret(右) + 一个 0fr↔1fr 的 grid 体。
  * 点击只切 class：内容节点全程不换，展开着的滑块不会被销毁。
- * 两段互斥 —— 同时展开会把面板顶到比播放器还高，就得滚了。 */
+ * 三段互斥 —— 同时展开会把面板顶到比播放器还高，就得滚了。
+ * onToggle: 段切换后回调(open=true 展开)，手动搜索段用它触发首次自动搜索。 */
 function mkFold(parent: HTMLElement, label: string, body: HTMLElement,
-                which: 'style' | 'detail'): HTMLLIElement {
-    const on = () => (which === 'style' ? dmSecStyle : dmSecDetail);
+                which: 'style' | 'detail' | 'search', onToggle?: (open: boolean) => void): HTMLLIElement {
+    const on = () => (which === 'style' ? dmSecStyle : which === 'detail' ? dmSecDetail : dmSecSearch);
 
     const head = document.createElement('li');
     head.className = 'fntv-dm-h';
@@ -796,7 +834,7 @@ function mkFold(parent: HTMLElement, label: string, body: HTMLElement,
     const fold = document.createElement('div');
     fold.className = 'fntv-dm-fold';
     fold.appendChild(body);
-    if (which === 'style') dmFoldStyle = fold; else dmFoldDetail = fold;
+    if (which === 'style') dmFoldStyle = fold; else if (which === 'detail') dmFoldDetail = fold; else dmFoldSearch = fold;
 
     const apply = (): void => {
         head.classList.toggle('open', on());
@@ -809,8 +847,11 @@ function mkFold(parent: HTMLElement, label: string, body: HTMLElement,
         const next = !on();
         dmSecStyle = which === 'style' ? next : false;
         dmSecDetail = which === 'detail' ? next : false;
+        dmSecSearch = which === 'search' ? next : false;
         if (dmFoldStyle) { dmFoldStyle.classList.toggle('open', dmSecStyle); dmHeadStyle?.classList.toggle('open', dmSecStyle); }
         if (dmFoldDetail) { dmFoldDetail.classList.toggle('open', dmSecDetail); dmHeadDetail?.classList.toggle('open', dmSecDetail); }
+        if (dmFoldSearch) { dmFoldSearch.classList.toggle('open', dmSecSearch); dmHeadSearch?.classList.toggle('open', dmSecSearch); }
+        onToggle?.(next);
     });
     parent.appendChild(head);
     parent.appendChild(fold);
@@ -931,6 +972,10 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
         currentGuidFromPrefetch = !!targetGuid && guid !== urlGuid;
         items = [];
         meta = null;
+        // [lc-1118] 换集后手动搜索状态跟着清：候选/错误/已选标记都不属于新的一集
+        dmSearchResults = null;
+        dmSearchErr = '';
+        dmPickedBvid = '';
         resetRenderState();
         closePanel();
         inflight = false;
@@ -1464,6 +1509,126 @@ function refreshDismissBinding(): void {
     } else {
         document.removeEventListener('click', onDismissClick, true);
         document.removeEventListener('keydown', onDismissKeydown, true);
+    }
+}
+
+// ─── [lc-1118] 手动搜索段 ───
+
+function renderSearchBody(): void {
+    const body = dmSearchBody;
+    if (!body) return;
+    body.innerHTML = '';
+    const msg = (text: string, err = false): void => {
+        const m = document.createElement('div');
+        m.className = 'fntv-dm-search-msg' + (err ? ' fntv-dm-search-err' : '');
+        m.textContent = text;
+        body.appendChild(m);
+    };
+
+    const row = document.createElement('div');
+    row.className = 'fntv-dm-search-row';
+    const inp = document.createElement('input');
+    inp.className = 'fntv-dm-search-in';
+    inp.value = dmSearchKw;
+    inp.placeholder = t('番名或关键词');
+    inp.addEventListener('input', () => { dmSearchKw = inp.value; });
+    inp.addEventListener('click', (e) => e.stopPropagation());
+    inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') void runSearch(dmSearchKw);
+    });
+    const btn = document.createElement('button');
+    btn.className = 'fntv-dm-search-btn';
+    btn.textContent = t('搜索');
+    btn.disabled = dmSearchBusy;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); void runSearch(dmSearchKw); });
+    row.appendChild(inp);
+    row.appendChild(btn);
+    body.appendChild(row);
+
+    if (dmSearchBusy) { msg(t('正在搜索…')); return; }
+    if (dmSearchErr) { msg(dmSearchErr, true); return; }
+    if (dmSearchResults === null) { msg(t('展开后自动按当前番名搜索，也可改关键词重搜')); return; }
+    if (!dmSearchResults.length) { msg(t('没有可用的搜索结果')); return; }
+    for (const c of dmSearchResults) {
+        const item = document.createElement('div');
+        item.className = 'fntv-dm-cand' + (c.bvid === dmPickedBvid ? ' on' : '');
+        const tEl = document.createElement('div');
+        tEl.className = 'fntv-dm-cand-t';
+        tEl.textContent = (c.bvid === dmPickedBvid ? '✓ ' : '') + c.title;
+        const sEl = document.createElement('div');
+        sEl.className = 'fntv-dm-cand-s';
+        sEl.textContent = sourceLabel(c.source) + (c.isCompilation ? ' ⚠️合集' : '') + (c.bvid === dmPickedBvid ? t('（使用中）') : '');
+        item.appendChild(tEl);
+        item.appendChild(sEl);
+        item.addEventListener('click', (e) => { e.stopPropagation(); void pickCandidate(c); });
+        body.appendChild(item);
+    }
+}
+
+/** 搜候选：danmu_api 优选 → 未命中降级内置 B站；主进程只回可直接拉取的（bvid 非空）前 5 条。 */
+async function runSearch(kw: string): Promise<void> {
+    kw = String(kw || '').trim();
+    if (!kw) { dmSearchErr = t('请输入搜索关键词'); renderSearchBody(); return; }
+    if (dmSearchBusy) return;
+    dmSearchBusy = true;
+    dmSearchKw = kw;
+    dmSearchErr = '';
+    renderSearchBody();
+    try {
+        const res = await ipcRenderer.invoke('danmaku:candidates', {
+            title: kw, ep: meta ? meta.ep : 0, season: meta ? meta.season : 0,
+        }) as any;
+        if (res && res.ok && Array.isArray(res.candidates)) {
+            dmSearchResults = res.candidates;
+        } else {
+            dmSearchResults = [];
+            dmSearchErr = (res && res.error) || t('没有可用的搜索结果');
+        }
+    } catch (e: any) {
+        dmSearchResults = [];
+        dmSearchErr = t('搜索异常') + ': ' + (e?.message || e);
+    } finally {
+        dmSearchBusy = false;
+        renderSearchBody();
+    }
+}
+
+/** 选定候选：直接拉该条目弹幕并就地换上（主进程落磁盘缓存，下次自动加载命中记住的选择）。 */
+async function pickCandidate(c: any): Promise<void> {
+    if (dmSearchBusy || !c?.bvid) return;
+    dmSearchBusy = true;
+    dmSearchErr = '';
+    renderSearchBody();
+    try {
+        const res = await ipcRenderer.invoke('danmaku:pick', {
+            title: dmSearchKw || (meta ? meta.searchTitle : ''), ep: meta ? meta.ep : 0,
+            season: meta ? meta.season : 0, isMovie: meta ? meta.isMovie : false, bvid: c.bvid,
+        }) as any;
+        if (res && res.ok && Array.isArray(res.items) && res.items.length && currentGuid) {
+            items = ensureAscending(res.items as DanmakuItem[]);
+            meta = (res.meta as DanmakuMeta) || meta;
+            if (Number(res.maxScreen) > 0) maxScreen = Math.round(Number(res.maxScreen));
+            dmPickedBvid = String(c.bvid);
+            loadedGuids.add(currentGuid);
+            guidCachePut(currentGuid, { items, meta, maxScreen });
+            renderDirty = true;
+            dmDetailShown = undefined;
+            renderDetailRows();   // 无条件重填：详情段收起时也要就地换成新值，展开才能看到
+            announceItems();
+            if (enabled) startRender();
+            log.info('[danmakuWeb] 手动选定弹幕: ' + items.length + ' 条 bvid=' + c.bvid);
+        } else {
+            const err = (res && res.error) || t('选定失败');
+            if (meta) meta.error = err;   // 让「来源详情→备注」同步显示失败原因
+            dmSearchErr = err;
+        }
+    } catch (e: any) {
+        dmSearchErr = t('选定失败') + ': ' + (e?.message || e);
+    } finally {
+        dmSearchBusy = false;
+        renderSearchBody();
+        syncToggleUI();
     }
 }
 

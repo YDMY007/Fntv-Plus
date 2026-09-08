@@ -3,7 +3,8 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import { registerHandler } from '../core/ipcHandler';
 import log from '../../../modules/logger';
 import * as fn from '../../../modules/fn_api/api';
-import { getDanmakuItems, DanmakuItem, DanmakuMeta } from '../../../modules/danmaku/biliDanmaku';
+import { getDanmakuItems, getDanmakuItemsByBvid, DanmakuItem, DanmakuMeta } from '../../../modules/danmaku/biliDanmaku';
+import { runBiliDanmakuCandidates } from '../../../main/common/biliRunner';
 
 /**
  * 原生网页播放器弹幕插件（danmakuWeb）
@@ -103,7 +104,54 @@ async function handlePrepare(
 
 function init(): void {
     registerHandler('danmaku:prepare', handlePrepare, { useHandle: true });
-    log.info('[danmakuWeb] 已注册 IPC: danmaku:prepare');
+    registerHandler('danmaku:candidates', handleCandidates, { useHandle: true });
+    registerHandler('danmaku:pick', handlePick, { useHandle: true });
+    log.info('[danmakuWeb] 已注册 IPC: danmaku:prepare / danmaku:candidates / danmaku:pick');
+}
+
+// [lc-1118] 手动搜索：按关键词搜候选（danmu_api 优选 → 未命中降级 B站），只回可直接拉取的（bvid 非空）前 5 条
+async function handleCandidates(_event: IpcMainInvokeEvent, params: { title?: string; ep?: number; season?: number }): Promise<any> {
+    const title = String(params?.title || '').trim();
+    if (!title) return { ok: false, error: '缺少搜索关键词' };
+    try {
+        const r = await runBiliDanmakuCandidates(title, Number(params?.ep) || 0, params?.season ? Number(params.season) : 0);
+        if (!r.ok || !Array.isArray(r.candidates)) {
+            return { ok: false, error: r.error || '候选搜索失败' };
+        }
+        const usable = r.candidates.filter((c: any) => c && c.bvid);
+        if (usable.length === 0) {
+            return { ok: false, error: `搜到 ${r.candidates.length} 个条目但没有可选定的（番剧区条目暂不支持网页端手动选定）` };
+        }
+        return {
+            ok: true,
+            candidates: usable.slice(0, 5).map((c: any) => ({
+                bvid: String(c.bvid),
+                title: String(c.title || ''),
+                source: String(c.source || ''),
+                isCompilation: !!c.is_compilation,
+                sim: (typeof c.sim === 'number') ? c.sim : null,
+            })),
+        };
+    } catch (e: any) {
+        return { ok: false, error: '候选搜索异常: ' + (e?.message || e) };
+    }
+}
+
+// [lc-1118] 手动选定：按 bvid（或 dmapi:<episodeId>）直接拉弹幕并落缓存，下次自动加载直接命中
+async function handlePick(_event: IpcMainInvokeEvent, params: { title?: string; ep?: number; season?: number; isMovie?: boolean; bvid?: string }): Promise<any> {
+    const title = String(params?.title || '').trim();
+    const bvid = String(params?.bvid || '').trim();
+    if (!title || !bvid) return { ok: false, error: '缺少 title/bvid' };
+    try {
+        const res = await getDanmakuItemsByBvid(title, Number(params?.ep) || 0, !!params?.isMovie, params?.season ? Number(params.season) : 0, bvid);
+        if (!res || !res.items || res.items.length === 0) {
+            return { ok: false, title, error: (res && res.meta && res.meta.error) || '该条目没有弹幕' };
+        }
+        log.info(`[danmakuWeb] ✅ 手动选定弹幕就绪: title="${title}" count=${res.items.length} source=${res.meta.source}`);
+        return { ok: true, title, ep: res.meta.ep, isMovie: !!params?.isMovie, count: res.items.length, items: res.items, source: 'bilibili', meta: res.meta, maxScreen: fnConfig.getBiliDanmakuMaxScreen() };
+    } catch (e: any) {
+        return { ok: false, title, error: '弹幕获取异常: ' + (e?.message || e) };
+    }
 }
 
 export { init };
