@@ -21,6 +21,8 @@ import { getDanmakuItems, DanmakuItem, DanmakuMeta } from '../../../modules/danm
 
 interface PrepareParams {
     guid: string;
+    /** [lc-1117] 网页弹幕设置「B站弹幕搜索」开关；缺省=true（不传该参的旧调用方行为不变） */
+    biliSearch?: boolean;
 }
 
 interface PrepareResult {
@@ -85,10 +87,11 @@ async function handlePrepare(
     }
 
     // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化；season>0 时优先精确匹配该季）──
+    // [lc-1117] biliSearch=false：网页弹幕设置关掉了「B站弹幕搜索」兜底（自建 danmu_api 优选不受影响）
     try {
-        const res = await getDanmakuItems(title, ep, isMovie, season);
+        const res = await getDanmakuItems(title, ep, isMovie, season, params?.biliSearch !== false);
         if (!res || !res.items || res.items.length === 0) {
-            return { ok: false, title, ep, isMovie, count: 0, error: '未找到匹配的B站弹幕' };
+            return { ok: false, title, ep, isMovie, count: 0, error: (res && res.meta && res.meta.error) || '未找到匹配的B站弹幕' };
         }
         const { items, meta } = res;
         log.info(`[danmakuWeb] ✅ 弹幕就绪: title="${title}" ep=${ep} movie=${isMovie} count=${items.length} source=${meta.source} matched="${meta.matchedTitle}"`);

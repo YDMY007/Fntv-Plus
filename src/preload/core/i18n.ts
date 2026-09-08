@@ -142,6 +142,7 @@ const EN: Record<string, string> = {
     '试代理旁路': 'Try proxy fallback',
     '运行分层诊断': 'Run layered diagnostics',
     '明细日志（逐层附请求原始信息）': 'Verbose log (per-layer request detail)',
+    'B站弹幕搜索': 'Bilibili search',
     '正在诊断…': 'Diagnosing…',
     '诊断完成': 'Diagnostics done',
     '诊断失败': 'Diagnostics failed',

@@ -129,11 +129,18 @@ export async function runBiliDanmaku(
     threshold?: number | string,
     season?: number | string,
     timeoutMs = 60000,
+    allowBiliFallback = true,
 ): Promise<BiliDanmakuResult> {
     // [lc-1101] 自建弹幕接口（danmu_api）优选：命中即返回，未命中(null)原样降级到下面的内置 B站 链路。
     //   放在 loadModule() 之前，命中时连 bili_danmaku.js 都不必加载。
     const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0);
     if (pre) return pre;
+    // [lc-1117] 网页弹幕设置可单独关掉「B站弹幕搜索」兜底（只影响网页链路；MPV 侧由 Lua 的
+    //   bili_search_enabled 门控且不传此参）。手动候选搜索 runBiliDanmakuCandidates 不受限。
+    if (!allowBiliFallback) {
+        log.info('[biliRunner] B站弹幕搜索未启用（网页弹幕设置），跳过内置 B站降级');
+        return { ok: false, error: 'B站弹幕搜索未启用' };
+    }
     let mod: any;
     try {
         mod = loadModule();

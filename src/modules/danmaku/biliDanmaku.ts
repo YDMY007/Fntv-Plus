@@ -525,9 +525,11 @@ export function filterDanmakuItems(
  * @param title   干净番名
  * @param ep      集数（0=仅标题）
  * @param isMovie 是否电影（仅影响 meta 标注）
- * @returns {items, meta}；失败返回 null
+ * @param biliSearch [lc-1117] 网页弹幕设置的「B站弹幕搜索」开关：false 时无视 B站侧缓存且不再
+ *                   降级内置 B站（自建 danmu_api 优选不受影响）；默认 true 保持原行为
+ * @returns {items, meta}；无弹幕返回 items=[] 且 meta.error 带根因（供弹窗「备注」行展示）
  */
-export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0): Promise<GetDanmakuResult | null> {
+export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0, biliSearch = true): Promise<GetDanmakuResult | null> {
     const cleanTitle = normalizeDanmakuTitle(title);
     log.info(`[danmaku] ========== getDanmakuItems 入口 ==========`);
     log.info(`[danmaku] title="${cleanTitle}", ep=${ep}`);
@@ -559,7 +561,9 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
                 // 无 meta 的老缓存 source 为 ''/undefined，isSelfHostedSource 判 false，自然归入内置 B站 侧。
                 const cachedCustom = danmuApi.isSelfHostedSource(meta && meta.source);
                 const wantCustom = danmuApi.isActive();
-                if (cachedCustom === wantCustom) {
+                // [lc-1117] biliSearch=false 时 B站侧缓存同样无视（否则关了开关旧缓存照样命中，开关成假的）；
+                //   自建侧缓存与该开关无关，照常命中。
+                if (cachedCustom === wantCustom && (cachedCustom || biliSearch)) {
                     // 这条路径不经过 parseDanmakuXml，缓存里可能是排序修复之前落盘的乱序条目
                     // （实测 29/29 个真实缓存全部乱序），必须再排一次，否则渲染器的单调游标照样卡死。
                     items.sort((a: DanmakuItem, b: DanmakuItem) => a.time - b.time);
@@ -579,10 +583,18 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
 
     const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.xml`);
     const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
-    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season);
+    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season, 60000, biliSearch);
     if (!r.ok) {
         log.warn('[danmaku] ❌ 弹幕获取失败: ' + (r.error || '未知'));
-        return null;
+        // [lc-1117] 带根因返回（items=[] + meta.error），供网页弹窗「来源详情→备注」展示，
+        //   否则 handler 只能报笼统的「未找到匹配的B站弹幕」。
+        return {
+            items: [],
+            meta: {
+                searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
+                ep, isMovie, season, count: 0, error: r.error || '未知',
+            },
+        };
     }
     const items = parseDanmakuXml(xmlFile);
     try { if (fs.existsSync(xmlFile)) fs.unlinkSync(xmlFile); } catch (_) { /* ignore */ }

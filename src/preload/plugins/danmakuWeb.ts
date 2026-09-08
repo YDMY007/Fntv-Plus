@@ -35,6 +35,7 @@ const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32}
 
 const LS_KEY = 'fntv_danmaku_enabled';
 const LS_STYLE_KEY = 'fntv_danmaku_style';
+const LS_BILI_KEY = 'fntv_danmaku_bili_search';
 
 // ═══ [lc-544] 播放页顶部标题栏美化 ═══
 // 飞牛原生播放页顶部的页面级 header（返回箭头+标题+窗口控件）在视频上方很突兀。
@@ -76,6 +77,24 @@ html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="con
     opacity: 0 !important;
     pointer-events: none !important;
     transform: translateY(-8px) !important;
+}
+/* ── 隐藏播放器起播/缓冲时的加载圈（用户要求删掉的白圈）──
+   ① xgplayer 自带缓冲转圈；容器状态类 xgplayer-isloading 不动（它还联动 start 按钮显隐），
+      原生 .xgplayer-isloading .xgplayer-loading{display:block} 特异度更高，必须 !important 压过；
+   ② 飞牛播放器流加载时的 Semi「加载中…」蒙层（spinner+文字），限定在播放器根内，
+      不影响其它页面正常使用的 Semi Spin；蒙层容器整体藏，圈和文字一起消失。 */
+.xgplayer-loading {
+    display: none !important;
+}
+/* ③ xgplayer 起播遮罩 spinner（白色辐条圈 #ffffffb3，实测就是用户指的白圈本体），遮罩只有它，整个藏 */
+.xgplayer-enter {
+    display: none !important;
+}
+.trim-mc__video-player--root .semi-spin {
+    display: none !important;
+}
+.trim-mc__video-player--root div:has(> .semi-spin) {
+    display: none !important;
 }
 `;
     const el = document.createElement('style');
@@ -227,6 +246,9 @@ let mountedForGuid: string | null = null;
 let loading = false;
 let inflight = false;       // 同一 guid 只允许一个在途请求（单飞，避免并发重复拉取触发 B站限流）
 let enabled = true;
+// [lc-1117] 网页独立的「B站弹幕搜索」兜底开关（只管网页链路，MPV 侧 conf 开关不受影响）。
+// false 时 prepare 请求带 biliSearch:false，主进程跳过内置 B站降级（自建 danmu_api 优选照常）。
+let biliSearch = true;
 let items: DanmakuItem[] = [];
 let meta: DanmakuMeta | null = null;
 let currentGuid: string | null = null;
@@ -715,6 +737,33 @@ function renderPanel(): void {
     dmSwitch = input;
     p.appendChild(swRow);
 
+    // [lc-1117] 第二行：「B站弹幕搜索」兜底开关（网页独立，只管本页面的降级链路）
+    const biliRow = document.createElement('li');
+    biliRow.className = 'fntv-dm-sw-row';
+    const biliLab = document.createElement('span');
+    biliLab.textContent = t('B站弹幕搜索');
+    const biliSw = document.createElement('label');
+    biliSw.className = 'fntv-dm-sw';
+    const biliInput = document.createElement('input');
+    biliInput.type = 'checkbox';
+    biliInput.className = 'fntv-dm-sw-in';
+    biliInput.checked = biliSearch;
+    biliInput.setAttribute('aria-label', t('B站弹幕搜索'));
+    biliInput.addEventListener('change', () => setBiliSearch(biliInput.checked));
+    const biliKnob = document.createElement('span');
+    biliKnob.className = 'fntv-dm-sw-knob';
+    biliSw.appendChild(biliInput);
+    biliSw.appendChild(biliKnob);
+    biliRow.appendChild(biliLab);
+    biliRow.appendChild(biliSw);
+    biliRow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if ((e.target as HTMLElement).closest('.fntv-dm-sw')) return;
+        biliInput.checked = !biliInput.checked;
+        setBiliSearch(biliInput.checked);
+    });
+    p.appendChild(biliRow);
+
     const sep1 = document.createElement('div');
     sep1.className = 'fntv-dm-sep';
     p.appendChild(sep1);
@@ -831,6 +880,19 @@ function setDanmakuEnabled(v: boolean): void {
     else stopRender();
 }
 
+/** [lc-1117] 拨「B站弹幕搜索」开关：持久化 + 当前集当场重试（失败标记会拦住重拉，先清掉）。
+ * 只对 items 为空的集重试 —— 自建命中的集拨开关不该把已有弹幕拆掉。 */
+function setBiliSearch(v: boolean): void {
+    if (biliSearch === v) return;
+    biliSearch = v;
+    try { localStorage.setItem(LS_BILI_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+    log.info('[danmakuWeb] B站弹幕搜索开关 → ' + v);
+    if (currentGuid && !inflight && items.length === 0) {
+        loadedGuids.delete(currentGuid);
+        void prepareAndLoad(currentGuid);
+    }
+}
+
 // ─── 数据拉取 ───
 
 /** 高能进度条（danmakuHeat.ts）刻意不 import 本模块，靠这个事件拿弹幕时间轴。
@@ -905,7 +967,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
     loading = true;
     syncToggleUI();
     try {
-        const res = await ipcRenderer.invoke('danmaku:prepare', { guid }) as any;
+        const res = await ipcRenderer.invoke('danmaku:prepare', { guid, biliSearch }) as any;
         // [lc-1015] 请求期间用户可能已切到别的集（currentGuid 变了）：旧响应直接丢弃，
         // 旧版会把上一集的弹幕回写进当前集。
         if (guid !== currentGuid) {
@@ -1669,6 +1731,9 @@ function maybeSetup(): void {
     try {
         const saved = localStorage.getItem(LS_KEY);
         enabled = saved !== '0';
+    } catch { /* ignore */ }
+    try {
+        biliSearch = localStorage.getItem(LS_BILI_KEY) !== '0';
     } catch { /* ignore */ }
 
     const guid = getGuid();
