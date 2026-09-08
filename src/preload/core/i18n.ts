@@ -86,7 +86,7 @@ const EN: Record<string, string> = {
     '开': 'On',
     '关': 'Off',
     '来源详情': 'Source details',
-    '返回': 'Back',
+    '弹幕样式': 'Danmaku style',
     '弹幕加载中…': 'Loading danmaku…',
     '粗体': 'Bold',
     '字号': 'Font size',
