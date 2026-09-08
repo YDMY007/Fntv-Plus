@@ -1551,8 +1551,10 @@ function maybeSetup(): void {
     // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
     applyVideoFullscreenClass();
     if (!isPlayerPage()) {
-        // 只在确实挂过东西时才收 —— 否则每次 DOM 变动都要跑一遍清理
-        if (canvas || dmBtnWrap) leavePlayer();
+        // 收的条件是「URL 已离开带 GUID 的播放/详情路由」，而不是「此刻查不到 <video>」：
+        // xgplayer 播放期会瞬时重建 video 元素，按后者判断会把入口和画布一起拆了再重建（弹幕闪一下没了）。
+        // 且只在确实挂过东西时才收 —— 否则每次 DOM 变动都要跑一遍清理。
+        if ((canvas || dmBtnWrap) && !GUID_RE.test(window.location.href)) leavePlayer();
         return;
     }
 
