@@ -83,8 +83,6 @@ const EN: Record<string, string> = {
 
     // ── 播放器内弹幕面板（danmakuWeb.ts 控制栏「弹幕」入口的 hover 弹窗）──
     '弹幕…': 'Danmaku…',
-    '开': 'On',
-    '关': 'Off',
     '来源详情': 'Source details',
     '弹幕样式': 'Danmaku style',
     '弹幕加载中…': 'Loading danmaku…',

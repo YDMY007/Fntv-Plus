@@ -208,16 +208,18 @@ let ctx: CanvasRenderingContext2D | null = null;
 let dmBtnWrap: HTMLDivElement | null = null;   // plugin-placeholder 外壳(挂进 xg-right-grid)
 let dmBtnSpan: HTMLSpanElement | null = null;  // 按钮文字「弹幕」
 let dmList: HTMLDivElement | null = null;      // hover 弹窗(锚在按钮正上方)
-// [lc-1112] 弹窗是「开关两行 + 两段折叠菜单」，不再切视图：展开收起只切 class，
-// 绝不重绘整块面板（重绘会销毁用户正在拖的滑块，见 syncToggleUI 的注释）。
+// [lc-1113] 弹窗 = 飞牛 Semi 弹层容器(14px 圆角 + 双层阴影 + 进出场动画)，内容是
+// 「弹幕开关(Switch 控件) + 两段互斥折叠菜单」。展开/收起只切 class：
+// 重绘整块会销毁用户正在拖的滑块（见 syncToggleUI 的注释）。
 let dmSecStyle = false;                        // 「弹幕样式」段是否展开(跨 hover 保持)
 let dmSecDetail = false;                       // 「来源详情」段是否展开
 let dmHeadStyle: HTMLLIElement | null = null;
 let dmHeadDetail: HTMLLIElement | null = null;
+let dmFoldStyle: HTMLDivElement | null = null;    // 折叠体引用: 互斥展开时就地切另一段的 class
+let dmFoldDetail: HTMLDivElement | null = null;
 let dmDetailBody: HTMLDivElement | null = null;   // 详情段的内层容器(meta 到位后就地重填)
 let dmDetailShown: typeof meta | undefined;       // 上次渲染详情时的 meta 引用, 变了才重填
-let dmLiOn: HTMLLIElement | null = null;       // 「开」行引用: 状态变了就地改选中态, 不重绘整块面板
-let dmLiOff: HTMLLIElement | null = null;
+let dmSwitch: HTMLInputElement | null = null;     // 开关行引用: 状态变了就地改 checked, 不重绘整块面板
 let dmCloseTimer: number | null = null;        // 移出后延时关闭: 留时间让鼠标从按钮移进弹窗
 let dmDragging = false;                        // 正拖着滑块/焦点在弹窗内时不自动关闭
 let controlsPlaced = false;
@@ -410,20 +412,20 @@ function findControlsBar(): HTMLElement | null {
     return null;
 }
 
-// ═══ [lc-1110] 原生形态面板样式 ═══
-// 取证来源: fnOS /assets/VideoPlayer-C6NSHpD8.css 里 xgplayer 原生选项弹窗 ——
-//   .xg-options-list{position:absolute;z-index:5;width:78px;right:50%;bottom:100%;
-//     background:#0000008a;border-radius:1px;transform:translate(50%);cursor:pointer;
-//     overflow:hidden;height:0;opacity:.85;font-size:14px;color:#fffc;display:none}
-//     .active{display:block;height:auto}
-//     li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center}
-//     li:nth-child(1){margin-top:12px} li:last-child{margin-bottom:12px}
-//     li:hover,li.selected{color:var(--xgplayer-color)!important}
-//   fnOS 自有覆盖: .xgplayer{--xgplayer-color:var(--semi-color-primary)}
-//   原生还有第二套形态 .right-side(右侧抽屉), lc-1110 起不再使用 —— 用户要求设置就在 hover 弹窗里。
-// ⚠ 不直接复用 xg-options-list 类名: 原生 `li{height:20px}` 会压坏滑块与多行内容 →
-//   复刻配色/圆角/字色/hover 品牌色到自有类, 宽度按内容放宽, 视觉与原生一致但控件可用,
-//   也避开与库样式的特异度对撞。
+// ═══ [lc-1110→lc-1113] 弹幕 hover 弹窗样式 ═══
+// 取证来源从 xgplayer 自带的 .xg-options-list 换到飞牛 Semi 组件库 —— 用户要「跟飞牛一样」，
+// 而飞牛自己的弹层就是 Semi 渲染的。下列值逐字取自 fnOS /assets/index.css：
+//   .semi-dropdown-wrapper{border-radius:14px;background:var(--semi-color-bg-dropdown);
+//     box-shadow:0 10px 20px #00000014,0 10px 40px #0000001f;z-index:1050}
+//   .semi-dropdown-menu{padding:4px 0;margin:0;list-style:none}
+//   .semi-dropdown-item{padding:8px 16px;color:var(--semi-color-text-0)}
+//     hover→--semi-color-fill-1 / active→--semi-color-fill-2（换底色，不是换字色）
+//   .semi-switch{width:40px;height:24px;border-radius:12px;background:var(--semi-color-fill-2)}
+//     -checked{background:var(--semi-color-primary)}；-knob{18×18;top:2px;radius 9px;#fff;
+//     box-shadow:0 4px 6px #0000001a,0 0 1px #0000004d}；-checked .-knob{transform:translate(18px)}
+//   暗色 tokens: bg-dropdown=rgba(46,47,48,1) fill-1=rgba(255,255,255,.06) fill-2=…,.12
+// ⚠ 不复用 Semi 类名、只复刻规格到自有类：面板挂在 xgplayer 控制栏里，与库样式的特异度对撞要可控。
+// ⚠ 动画时长必须自己写：fnOS 把 --semi-transition_duration-* 全覆成 0ms，原生弹层其实没有过渡。
 const DM_PANEL_STYLE_ID = 'fntv-dm-panel-style';
 // 原生 .xgplayer{--xgplayer-color:var(--semi-color-primary)} → 弹窗里的滑块/复选框同色系，
 // 不用旧模态那套 iOS 蓝 #2997ff（在飞牛播放器里是异色）。
@@ -433,79 +435,114 @@ let _dmPanelStyleInjected = false;
 function injectDmPanelStyle(): void {
     if (_dmPanelStyleInjected) return;
     const css = `
-/* ── hover 弹窗: 复刻原生 .xg-options-list 观感, 宽度按旋钮内容放宽 ── */
+/* ── hover 弹窗: 逐字照抄飞牛 Semi 弹层 .semi-dropdown-wrapper / -menu / -item ── */
 /* z-index 30: 原生 .xg-options-list 写的是 5, 但我们的弹幕 canvas 挂在 body 上 z-index=5、
    高能条 z-index=6 → 同一层叠上下文里后插入者胜, 面板会被 canvas 盖住。 */
-/* 右对齐按钮而非原生的居中(right:50%+translate(50%)): 弹窗 300px 宽, 而弹幕按钮在控制栏
+/* 右对齐按钮而非原生的居中(right:50%+translate(50%)): 弹窗 320px 宽, 弹幕按钮在控制栏
    最右侧一组里, 居中会溢出播放器右边界。 */
 .fntv-dm-list{
-  position:absolute; right:-6px; bottom:calc(100% + 6px);
-  z-index:30; width:300px; box-sizing:border-box; margin:0; padding:0 16px;
-  background:#0000008a; border-radius:1px; cursor:pointer;
-  overflow:hidden auto; height:0; opacity:.85;
-  font-size:14px; color:#fffc; display:none;
-  /* 小窗/半屏播放时两段全展开会高于播放器 → 限高滚动 */
-  max-height:min(460px, 62vh);
+  position:absolute; right:-6px; bottom:calc(100% + 10px);
+  z-index:30; width:320px; box-sizing:border-box; margin:0; padding:4px 0;
+  background:rgba(46,47,48,.97);                 /* 暗色 --semi-color-bg-dropdown = grey-2(46,47,48) */
+  border:1px solid rgba(255,255,255,.07);        /* 纯黑画面上把容器边界分出来 */
+  border-radius:14px;                            /* .semi-dropdown-wrapper */
+  box-shadow:0 10px 20px #00000014, 0 10px 40px #0000001f;
+  cursor:default; overflow:auto; color:#fff; font-size:14px; line-height:20px;
+  /* 高度随内容长(折叠段自己过渡); 只在极端小窗兜底 —— 正常形态下一览无余、不出滚动条 */
+  max-height:min(86vh, 920px);
   /* 否则复选框/滑块按浅色表单控件渲染, 暗面板上是一条近白粗轨 */
   color-scheme:dark;
   /* fnOS 顶栏是窗口拖拽区, 注入面板必须显式排除, 否则滑块拖不动 */
   -webkit-app-region:no-drag;
+  /* 进出场动画: 不能再靠 display:none 硬切(那会跳过整段过渡)。visibility 延到淡出走完
+     才翻隐藏 → 关闭态既不占视觉也不拦点击。 */
+  transform-origin:100% 100%;
+  opacity:0; visibility:hidden; pointer-events:none; transform:translateY(8px) scale(.96);
+  transition:opacity .18s cubic-bezier(.22,1,.36,1), transform .18s cubic-bezier(.22,1,.36,1), visibility 0s linear .18s;
 }
-/* 透明桥接: 弹窗与按钮之间留 6px 视觉间隙, 但鼠标穿过时不能算「移出」——
+.fntv-dm-list.active{opacity:1; visibility:visible; pointer-events:auto; transform:none; transition-delay:0s}
+/* 透明桥接: 弹窗与按钮之间留 10px 视觉间隙, 但鼠标穿过时不能算「移出」——
    hover 触发的弹窗若在半路关掉, 就永远移不进去拖滑块。伪元素属于弹窗本身。 */
-.fntv-dm-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:8px}
-.fntv-dm-list:hover{opacity:1}
-.fntv-dm-list.active{display:block;height:auto}
-/* 列表行逐字照抄原生 .xg-options-list li: 20px 行高 + 居中 + 首尾 12px 呼吸 */
-.fntv-dm-list li{height:20px;line-height:20px;position:relative;padding:4px 0;text-align:center;list-style:none}
-.fntv-dm-list li:first-child{margin-top:12px}
-.fntv-dm-list li:last-child{margin-bottom:12px}
-.fntv-dm-list li:hover,.fntv-dm-list li.selected{
-  color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))!important;
+.fntv-dm-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:12px}
+/* 行 = .semi-dropdown-item: 左对齐 + 8px 16px + hover 换底色(原生就是换底色, 不是换字色) */
+.fntv-dm-list li{
+  display:flex; align-items:center; gap:8px; margin:0; padding:8px 16px;
+  list-style:none; cursor:pointer; color:#fff; transition:background-color .16s ease;
 }
-/* 折叠头 = 原生列表行 + 右缘一个 V 形 caret(纯 CSS 画, 不依赖字形) */
-.fntv-dm-h.open{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))!important}
+.fntv-dm-list li:hover{background:rgba(255,255,255,.06)}    /* --semi-color-fill-1 */
+.fntv-dm-list li:active{background:rgba(255,255,255,.12)}   /* --semi-color-fill-2 */
+/* 开关行: 标签在左、Switch 推到右缘 */
+.fntv-dm-sw-row{justify-content:space-between}
+/* Semi Switch 逐字规格: 40×24 轨道 / 18×18 白色旋钮 / 选中位移 18px */
+.fntv-dm-sw{
+  position:relative; flex:none; box-sizing:border-box; width:40px; height:24px;
+  border-radius:12px; border:1px solid transparent; background:rgba(255,255,255,.12);
+  transition:background-color .2s cubic-bezier(0,0,.2,1);
+}
+.fntv-dm-sw:hover{background:rgba(255,255,255,.06)}
+.fntv-dm-sw-knob{
+  position:absolute; left:0; top:2px; width:18px; height:18px; border-radius:9px;
+  background:#fff; box-shadow:0 4px 6px #0000001a, 0 0 1px #0000004d;
+  transition:transform .2s ease-in-out;
+}
+.fntv-dm-sw:has(input:checked){background:var(--semi-color-primary, #3374DB)}
+.fntv-dm-sw:has(input:checked):hover{background:var(--semi-color-primary-hover, #2e63c9)}
+.fntv-dm-sw:has(input:checked) .fntv-dm-sw-knob{transform:translate(18px)}
+/* 原生 checkbox 管状态与键盘, 视觉全交给上面的轨道 */
+.fntv-dm-sw input{position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer}
+/* 折叠头: 标题在左、caret 在右(纯 CSS 画 V 形, 不依赖字形); 展开态标题转品牌色 */
+.fntv-dm-h{justify-content:space-between}
+.fntv-dm-h.open{color:var(--semi-color-primary, #3374DB)}
 .fntv-dm-caret{
-  position:absolute; right:0; top:50%; width:6px; height:6px; margin-top:-4px;
+  flex:none; width:6px; height:6px;
   border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor;
-  transform:rotate(45deg); opacity:.45; transition:transform .22s ease,opacity .22s ease;
+  transform:rotate(45deg); opacity:.45; transition:transform .22s ease, opacity .22s ease;
 }
-.fntv-dm-h.open .fntv-dm-caret{transform:rotate(-135deg);opacity:.85}
+.fntv-dm-h.open .fntv-dm-caret{transform:rotate(-135deg); opacity:.85}
 /* 折叠: grid-template-rows 0fr↔1fr 过渡; visibility 的过渡是阶跃的(展开立即变可见、收起等动画走完)正好合用。 */
 .fntv-dm-fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}
 .fntv-dm-fold.open{grid-template-rows:1fr}
-.fntv-dm-fold>div{overflow:hidden;min-height:0;box-sizing:border-box;visibility:hidden;transition:visibility .22s ease}
-/* 折叠段自身的 padding 会漏出 0fr 轨道(item 高度被轨道钉成 0, padding 却加在外侧, 实测泄 2px)
-   → box-sizing:border-box 把它算进 0 里, 呼吸一律放裁剪框内部的 ::after。 */
+/* 左右留白由内层统一承担(容器只留上下 4px)。纵向 padding 会漏出 0fr 轨道(实测泄 2px) → 一律不给,
+   呼吸放裁剪框内部的 ::after。 */
+.fntv-dm-fold>div{overflow:hidden;min-height:0;box-sizing:border-box;padding:0 16px;visibility:hidden;transition:visibility .22s ease}
 .fntv-dm-fold>div::after{content:'';display:block;height:12px}
 .fntv-dm-fold.open>div{visibility:visible}
-/* 发丝线分区: 开关区与两段折叠菜单之间 */
-.fntv-dm-sep{height:1px;margin:10px 0;background:#ffffff26;pointer-events:none}
+/* 分区线 = .semi-dropdown-divider: 通铺 1px, 上下 4px */
+.fntv-dm-sep{height:1px;margin:4px 0;background:rgba(255,255,255,.15);pointer-events:none}
 /* 旋钮区: 每行「标签 + 当前值」在上、滑块在下, 与 MPV 弹幕样式面板同构 */
 .fntv-dm-knobs{display:flex;flex-direction:column;gap:14px}
-/* 「恢复默认」是发丝线下的纯文本行(不带边框圆角按钮, 与原生观感一致) */
+/* 「恢复默认」通铺成一行菜单项: 负 margin 抵消内层留白, 发丝线才跟分区线一样齐边 */
 .fntv-dm-reset{
-  margin-top:14px; padding-top:12px; border-top:1px solid #ffffff14;
-  color:#fffc; cursor:pointer; font-size:13px; text-align:center;
+  margin:14px -16px -12px; padding:12px 16px 10px; border-top:1px solid rgba(255,255,255,.08);
+  color:#fff; cursor:pointer; font-size:14px; text-align:center; transition:background-color .16s ease;
 }
-.fntv-dm-reset:hover{color:var(--xgplayer-color, var(--semi-color-primary, #3374DB))}
-/* 详情: 300px 宽里仍是「标签一行 + 值一行」比左右两列耐读(值可能是很长的服务端标题) */
+.fntv-dm-reset:hover{background:rgba(255,255,255,.06)}
+/* 详情: 单行「标签左 / 值右」(iOS 设置单元格式)。原先标签/值各一行太占高 ——
+   11 行把框顶到 86vh 上限仍需滚 93px，而用户明确要「展开详情就一览无余、不要滚动」。
+   值可能是很长的服务端标题 → 允许折行右对齐，overflow-wrap:anywhere 兜住连号 BVID。 */
 .fntv-dm-rows{margin:0;padding:0}
-.fntv-dm-row{padding:7px 0;border-bottom:1px solid #ffffff0f}
+.fntv-dm-row{
+  display:flex; align-items:baseline; justify-content:space-between; gap:14px;
+  padding:7px 0; border-bottom:1px solid rgba(255,255,255,.05);
+}
 .fntv-dm-row:last-child{border-bottom:none}
-.fntv-dm-row dt{font-size:12px;color:rgba(245,245,247,.5);margin-bottom:2px}
-.fntv-dm-row dd{margin:0;font-size:13px;line-height:1.45;color:rgba(245,245,247,.92);word-break:break-all}
-.fntv-dm-wait{padding:2px 0 0;font-size:13px;color:rgba(245,245,247,.5)}
-/* 复选框自绘: 原生 checkbox 在暗面板上是一坨实心灰块, 与飞牛 Semi 的描边方框观感不符 */
-.fntv-dm-list input[type=checkbox]{
+.fntv-dm-row dt{flex:none;font-size:12px;color:rgba(255,255,255,.45)}
+.fntv-dm-row dd{
+  margin:0; flex:1; min-width:0; text-align:right; font-size:13px; line-height:1.4;
+  color:rgba(255,255,255,.92); overflow-wrap:anywhere;
+}
+.fntv-dm-wait{padding:2px 0 0;font-size:13px;color:rgba(255,255,255,.45)}
+/* 复选框自绘: 原生 checkbox 在暗面板上是一坨实心灰块, 与飞牛 Semi 的描边方框观感不符。
+   ⚠ 必须排除开关里那个透明的原生 checkbox, 否则它会被画成方框。 */
+.fntv-dm-list input[type=checkbox]:not(.fntv-dm-sw-in){
   -webkit-appearance:none; appearance:none; box-sizing:border-box; width:16px; height:16px; margin:0;
   background-color:#ffffff14; border:1px solid #ffffff33; border-radius:3px; cursor:pointer;
   background-repeat:no-repeat; background-position:center; background-size:11px 11px;
   transition:border-color .15s ease, background-color .15s ease;
 }
-.fntv-dm-list input[type=checkbox]:hover{border-color:#ffffff5c}
-.fntv-dm-list input[type=checkbox]:checked{
-  background-color:var(--xgplayer-color, var(--semi-color-primary,#3374DB)); border-color:transparent;
+.fntv-dm-list input[type=checkbox]:not(.fntv-dm-sw-in):hover{border-color:#ffffff5c}
+.fntv-dm-list input[type=checkbox]:not(.fntv-dm-sw-in):checked{
+  background-color:var(--semi-color-primary, #3374DB); border-color:transparent;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.3 4.9 8.6 9.4 3.7' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 /* 滑块自绘: accent-color 的未填充轨道在暗面板上是一条近白粗轨(color-scheme:dark 也压不住),
@@ -518,10 +555,9 @@ function injectDmPanelStyle(): void {
   -webkit-appearance:none; appearance:none; width:12px; height:12px; border-radius:50%;
   background:var(--semi-color-primary, #3374DB); border:none;
 }
-/* 弹窗自身就是滚动容器: ::-webkit-scrollbar 必须同时写自身与后代, 只写后代(带空格)会漏掉它 */
+/* 极端小窗兜底: 弹窗自身就是滚动容器, ::-webkit-scrollbar 必须同时写自身与后代 */
 .fntv-dm-list::-webkit-scrollbar,.fntv-dm-list *::-webkit-scrollbar{width:6px}
-.fntv-dm-list::-webkit-scrollbar-thumb,.fntv-dm-list *::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:3px}
-`;
+.fntv-dm-list::-webkit-scrollbar-thumb,.fntv-dm-list *::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:3px}`;
     const el = document.createElement('style');
     el.id = DM_PANEL_STYLE_ID;
     el.textContent = css;
@@ -636,34 +672,48 @@ function createControls(): void {
     syncToggleUI();
 }
 
-/** 弹窗内容：开关两行(原生 li 观感) + 「弹幕样式」「来源详情」两段折叠菜单。 */
+/** 弹窗内容：「弹幕」开关行(Semi Switch) + 「弹幕样式」「来源详情」两段互斥折叠菜单。 */
 function renderPanel(): void {
     const p = dmList;
     if (!p) return;
     const keepScroll = p.scrollTop;   // 重绘(点开关/恢复默认)后别把用户弹回顶部
     p.innerHTML = '';
-    dmLiOn = null;
-    dmLiOff = null;
+    dmSwitch = null;
     dmHeadStyle = null;
     dmHeadDetail = null;
+    dmFoldStyle = null;
+    dmFoldDetail = null;
     dmDetailBody = null;
     dmDetailShown = undefined;
 
-    const mk = (text: string, selected: boolean, onClick: () => void): HTMLLIElement => {
-        const li = document.createElement('li');
-        li.textContent = text;
-        if (selected) li.className = 'selected';
-        li.addEventListener('click', (e) => {
-            e.stopPropagation();
-            onClick();
-        });
-        return li;
-    };
-    // 开关不关弹窗：用户往往接着调样式（旧版点一下就收面板）
-    dmLiOn = mk(t('开'), enabled, () => setDanmakuEnabled(true));
-    dmLiOff = mk(t('关'), !enabled, () => setDanmakuEnabled(false));
-    p.appendChild(dmLiOn);
-    p.appendChild(dmLiOff);
+    // 开关做成 Switch 而不是两行「开/关」纯文字: 状态一眼可见, 也跟飞牛其余设置项同构。
+    const swRow = document.createElement('li');
+    swRow.className = 'fntv-dm-sw-row';
+    const swLab = document.createElement('span');
+    swLab.textContent = t('弹幕');
+    const sw = document.createElement('label');
+    sw.className = 'fntv-dm-sw';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'fntv-dm-sw-in';
+    input.checked = enabled;
+    input.setAttribute('aria-label', t('弹幕'));
+    input.addEventListener('change', () => setDanmakuEnabled(input.checked));
+    const knob = document.createElement('span');
+    knob.className = 'fntv-dm-sw-knob';
+    sw.appendChild(input);
+    sw.appendChild(knob);
+    swRow.appendChild(swLab);
+    swRow.appendChild(sw);
+    // 点行任意位置都能拨开关(命中控件本身时交给原生 change, 别重复翻一次)
+    swRow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if ((e.target as HTMLElement).closest('.fntv-dm-sw')) return;
+        input.checked = !input.checked;
+        setDanmakuEnabled(input.checked);
+    });
+    dmSwitch = input;
+    p.appendChild(swRow);
 
     const sep1 = document.createElement('div');
     sep1.className = 'fntv-dm-sep';
@@ -680,10 +730,13 @@ function renderPanel(): void {
     p.scrollTop = keepScroll;
 }
 
-/** 折叠段 = 原生列表行样式的头(居中文字 + 右缘 caret) + 一个 0fr↔1fr 的 grid 体。
- * 点击只切 class：内容节点全程不换，展开着的滑块不会被销毁。 */
+/** 折叠段 = 一行菜单项标题(左) + caret(右) + 一个 0fr↔1fr 的 grid 体。
+ * 点击只切 class：内容节点全程不换，展开着的滑块不会被销毁。
+ * 两段互斥 —— 同时展开会把面板顶到比播放器还高，就得滚了。 */
 function mkFold(parent: HTMLElement, label: string, body: HTMLElement,
                 which: 'style' | 'detail'): HTMLLIElement {
+    const on = () => (which === 'style' ? dmSecStyle : dmSecDetail);
+
     const head = document.createElement('li');
     head.className = 'fntv-dm-h';
     head.textContent = label;
@@ -694,17 +747,21 @@ function mkFold(parent: HTMLElement, label: string, body: HTMLElement,
     const fold = document.createElement('div');
     fold.className = 'fntv-dm-fold';
     fold.appendChild(body);
+    if (which === 'style') dmFoldStyle = fold; else dmFoldDetail = fold;
 
-    if (which === 'style' ? dmSecStyle : dmSecDetail) {
-        head.classList.add('open');
-        fold.classList.add('open');
-    }
+    const apply = (): void => {
+        head.classList.toggle('open', on());
+        fold.classList.toggle('open', on());
+    };
+    apply();
+
     head.addEventListener('click', (e) => {
         e.stopPropagation();
-        const next = !(which === 'style' ? dmSecStyle : dmSecDetail);
-        if (which === 'style') dmSecStyle = next; else dmSecDetail = next;
-        head.classList.toggle('open', next);
-        fold.classList.toggle('open', next);
+        const next = !on();
+        dmSecStyle = which === 'style' ? next : false;
+        dmSecDetail = which === 'detail' ? next : false;
+        if (dmFoldStyle) { dmFoldStyle.classList.toggle('open', dmSecStyle); dmHeadStyle?.classList.toggle('open', dmSecStyle); }
+        if (dmFoldDetail) { dmFoldDetail.classList.toggle('open', dmSecDetail); dmHeadDetail?.classList.toggle('open', dmSecDetail); }
     });
     parent.appendChild(head);
     parent.appendChild(fold);
@@ -758,10 +815,7 @@ function syncToggleUI(): void {
     // ⚠ 不能在这里重绘整块弹窗：xgplayer 播放期持续改 DOM(进度条/时间文本) →
     // OnDomChange(800ms 尾随防抖) → maybeSetup → 这里，重绘会把用户**正在拖的滑块**与
     // 滚动位置一起销毁(取证表现为「点返回行反复 element was detached」)。只就地改选中态。
-    if (dmLiOn && dmLiOff) {
-        dmLiOn.className = enabled ? 'selected' : '';
-        dmLiOff.className = enabled ? '' : 'selected';
-    }
+    if (dmSwitch && dmSwitch.checked !== enabled) dmSwitch.checked = enabled;
     // 详情段展开着时，弹幕异步拉完(meta 到位)要自己刷新，不必用户关了再开。
     // 拿引用做门槛：否则每次 DOM 变动都会重排一遍详情行。
     if (dmSecDetail && dmDetailBody && dmDetailShown !== meta) renderDetailRows();
@@ -1574,10 +1628,11 @@ function leavePlayer(): void {
     dmBtnWrap = null;
     dmBtnSpan = null;
     dmList = null;
-    dmLiOn = null;
-    dmLiOff = null;
+    dmSwitch = null;
     dmHeadStyle = null;
     dmHeadDetail = null;
+    dmFoldStyle = null;
+    dmFoldDetail = null;
     dmDetailBody = null;
     dmDetailShown = undefined;
     controlsPlaced = false;
