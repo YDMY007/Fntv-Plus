@@ -1640,14 +1640,23 @@ function leavePlayer(): void {
     refreshDismissBinding();
 }
 
+/** [lc-1114] 「该收了」抽成可同步调用的轻检查：只看 URL 是否已离开带 GUID 的路由。
+ *  不必再查 `!isPlayerPage()` —— GUID 缺席时它必为假，两条判据等价，而省掉 querySelector 才敢
+ *  挂在每次 DOM 变动 / 路由事件上。门槛用 mountedForGuid/dmBtnWrap 而不是 canvas：
+ *  canvas 一旦建过就常驻，拿它当门槛每次路由事件都会重跑一遍清理。 */
+function checkLeave(): void {
+    if (mountedForGuid === null && !dmBtnWrap) return;
+    if (GUID_RE.test(window.location.href)) return;
+    leavePlayer();
+}
+
 function maybeSetup(): void {
     // [lc-550] 全屏去圆角: 即便当前非播放页也调用一次, 清理可能残留的 fntv-video-fullscreen 标记
     applyVideoFullscreenClass();
     if (!isPlayerPage()) {
         // 收的条件是「URL 已离开带 GUID 的播放/详情路由」，而不是「此刻查不到 <video>」：
         // xgplayer 播放期会瞬时重建 video 元素，按后者判断会把入口和画布一起拆了再重建（弹幕闪一下没了）。
-        // 且只在确实挂过东西时才收 —— 否则每次 DOM 变动都要跑一遍清理。
-        if ((canvas || dmBtnWrap) && !GUID_RE.test(window.location.href)) leavePlayer();
+        checkLeave();
         return;
     }
 
@@ -1686,10 +1695,37 @@ registerHook(HookType.OnReady, () => {
 });
 
 registerHook(HookType.OnDomChange, () => {
+    // [lc-1114] 「收」不等防抖。下面这条 800ms 是给「重建/入位」设的尾随防抖，
+    // 而 SPA 拆播放器 + 渲染新页会连吐 DOM 变动、把计时器一路重置（实测 3.2s 才收，
+    // 用户看到的就是弹幕冻在首页两三秒）。checkLeave 只读一次 URL，够便宜挂在这里。
+    checkLeave();
     if ((maybeSetup as any)._t) clearTimeout((maybeSetup as any)._t);
     (maybeSetup as any)._t = setTimeout(maybeSetup, 800);
     // 防抖被起播期的高频 DOM 变动饿死时，靠轮询保证按钮能入位
     if (!controlsPlaced) startMountPoll();
 });
+
+// [lc-1114] 路由事件即时收：DOM 变动只是「事后」信号，URL 离开播放路由才是事实本身。
+// fnOS 是 history 模式 SPA（embyWall 里已在用 pushState + 手动 dispatch popstate 导航），
+// 所以三条都挂：包 pushState/replaceState、听 popstate、听 hashchange。
+let _routeHooked = false;
+function hookRouteChanges(): void {
+    if (_routeHooked) return;
+    _routeHooked = true;
+    window.addEventListener('popstate', checkLeave);
+    window.addEventListener('hashchange', checkLeave);
+    try {
+        const h = window.history as any;
+        for (const m of ['pushState', 'replaceState'] as const) {
+            const orig = h[m];
+            if (typeof orig !== 'function') continue;
+            h[m] = function (this: History, ...a: any[]): void {
+                orig.apply(this, a);      // 抛错（如跨域 url）就让它照常抛，不做判断
+                checkLeave();             // 此刻 location 已更新
+            };
+        }
+    } catch { /* ignore */ }
+}
+hookRouteChanges();
 
 export {};
