@@ -26,7 +26,8 @@ const log = logger.component('danmuApi');
  * 三条链路：搜索条目 → 取分集定位 episodeId → 拉弹幕 XML。
  * 不用官方更省事的一发命中接口 `/api/v2/fongmi/danmaku?name=&episode=`：实测它做宽松模糊匹配，
  * 搜「流浪地球2」会返回「悠久之翼2」这类完全不相干的条目（挂错弹幕比没弹幕更糟），
- * 且 episode=0 恒返回空数组。所以这里自己搜 + 自己做标题相关性打分，低分一律判未命中。
+ * 且 episode=0 恒返回空数组。所以这里自己搜，并且**只认精确匹配**（主名归一化后完全相等、
+ * 季号一致），不匹配一律判未命中 —— 模糊匹配留给内置 B站 链路，那条链路只查 B站、条目少（lc-1109）。
  */
 
 /** 回给 Lua/渲染层的来源标识（menu.lua 直接把它当 src_label 显示） */
@@ -43,8 +44,6 @@ export function isSelfHostedSource(source: unknown): boolean {
 
 /** 候选列表里回填给 Lua 的伪 bvid 前缀：用户选定后据此把请求路由回本模块 */
 export const ID_PREFIX = 'dmapi:';
-/** 标题相关性下限：低于此分判未命中（防挂错弹幕） */
-const MIN_SCORE = 0.34;
 /** 最多尝试几个搜索条目（每个条目要再打一次分集接口，服务端默认限流 3 次/分钟） */
 const MAX_TRIES = 3;
 /** 搜索/分集结果缓存 TTL：连播同番时不必每集重搜 */
@@ -56,7 +55,8 @@ interface AnimeHit {
     animeTitle: string;
     episodeCount: number;
     source: string;
-    score: number;
+    /** 季号匹配档位（SEASON_TIER_*，越小越优先）：主名已精确相等，这里只决定同作品多条目谁先试 */
+    seasonTier: number;
 }
 
 interface EpisodeHit {
@@ -175,69 +175,68 @@ export function normalizeTitle(s: string): string {
         .toLowerCase();
 }
 
-function bigrams(s: string): Set<string> {
-    const out = new Set<string>();
-    for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2));
-    if (s.length === 1) out.add(s);
-    return out;
+/** 中文季号 → 数字（服务端实测只出现 一~十，多留两位防「十一」这类写法）。 */
+const CN_NUM: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+
+function seasonToInt(s: string): number {
+    const t = String(s || '').trim();
+    if (/^\d+$/.test(t)) return parseInt(t, 10);
+    if (t.length === 1) return CN_NUM[t] || 0;
+    if (t[0] === '十') return 10 + (CN_NUM[t[1]] || 0);
+    if (t.endsWith('十')) return (CN_NUM[t[0]] || 0) * 10;
+    return 0;
 }
 
 /**
- * 相关性：完全相同=1；候选以查询开头（分季/副标题，如「老友记」→「老友记 第一季」）=0.95；
- * 查询以候选开头=0.9；其它「包含」（中缀/后缀）按长度比重罚分；否则字符二元组 Jaccard。
+ * 季号标记。实测服务端写法有「第一季」「第1季」「第3季」，另兼容 Season N / S0N。
+ * 「最终季」这类非数字写法**不当季号**：留在主名里让精确匹配自然落空，比猜一个季号安全
+ * （猜错就是挂错季的弹幕）。
+ */
+const SEASON_MARK_RE = /第\s*(0*\d{1,2}|[一二三四五六七八九十]{1,3})\s*[季部]|season\s*0*(\d{1,2})|\bs\s*0*(\d{1,2})\b/gi;
+
+/** 拆「作品主名 + 季号」：季号写法多样，先剥季号再归一化，两边才在同一口径下可比。 */
+function splitSeason(raw: string): { name: string; season: number } {
+    let season = 0;
+    const body = String(raw || '').replace(SEASON_MARK_RE, (_m, cn, en, sn) => {
+        if (!season) season = seasonToInt(cn || en || sn);
+        return ' ';
+    });
+    return { name: normalizeTitle(body), season };
+}
+
+/**
+ * 季号匹配档位（主名精确相等之后才轮到它，越小越优先）：
+ * 0=候选季号与播放侧一致；1=播放侧没给季号而候选标了第一季；2=候选未标季号（服务端把整部合成一条）。
+ * 播放侧明确指向第 N 季(N>1) 而候选未标季号 → 判不匹配：这类合集条目的 episodeNumber 常是全剧
+ * 连续编号，按 ep 定位会挂到别的季上（挂错比没弹幕更糟）。
+ */
+const SEASON_TIER_EXACT = 0;
+const SEASON_TIER_IMPLIED_FIRST = 1;
+const SEASON_TIER_UNMARKED = 2;
+
+/**
+ * 自建源准入 = 精确匹配：主名归一化后**完全相等**，且季号一致。命中返回档位，不匹配返回 null。
  *
- * ⚠️ 中缀必须重罚（lc-1101 实测）：danmu_api 的搜索结果里混着「名字恰好带查询串的另一部作品」，
- * 查询《老友记》会返回《古宅老友记 第一季》《曼谷老友记》《速通老友记》。旧口径一律给 0.95，
- * 会把它们抬到真正的《老友记》前面 —— 挂错弹幕比没弹幕更糟。前缀匹配则安全：
- * 《流浪地球2》→《流浪地球2：再次冒险》(纪录片) 拿 0.95，而《流浪地球2(2023)》精确匹配拿 1.0，排序自然选对。
+ * ⚠️ 自建源不做模糊匹配（lc-1109 实机挂错）：它聚合多平台、条目极密，同名/近名作品扎堆 ——
+ * 查《悬案》返回 37 条，混着《探案新窍门 第一季》(aliases 含「悬案神探」)、《李小龙悬案》
+ * 《酱园弄·悬案》《悬案委托行》《悬案密码N》。旧的相关性打分（前缀 0.95 / 包含按长度罚分 /
+ * 别名封顶 0.6 / 二元组 Jaccard，下限 0.34）只要有任一条错挂条目被 MAX_TRIES 首试且有弹幕，
+ * 就把别片的弹幕当本片交出去；季数优先排序键还曾把 0.6 的别名命中抬到 1.0 的精确命中之前。
+ * 精确口径下这 37 条只剩《悬案(2026)》youku/360 两条真命中。
+ * 模糊匹配保留给内置 B站 链路（bili_danmaku.js）：那边只查 B站、条目少，且是原有行为，不动。
+ * 附带好处：`解说版`/`手语版`/`字幕助听版`/`独家专访` 等衍生条目主名不等，自动落空。
  */
-export function similarity(query: string, cand: string): number {
-    const a = normalizeTitle(query);
-    const b = normalizeTitle(cand);
-    if (!a || !b) return 0;
-    if (a === b) return 1;
-    if (b.startsWith(a)) return 0.95;
-    if (a.startsWith(b)) return 0.9;
-    if (a.includes(b) || b.includes(a)) {
-        return 0.5 * (Math.min(a.length, b.length) / Math.max(a.length, b.length));
+function exactMatchTier(query: string, querySeason: number, candTitle: string): number | null {
+    const q = splitSeason(query);
+    const c = splitSeason(candTitle);
+    if (!q.name || q.name !== c.name) return null;
+    const want = querySeason > 0 ? querySeason : q.season;
+    if (c.season > 0) {
+        if (c.season === want) return SEASON_TIER_EXACT;
+        if (want === 0 && c.season === 1) return SEASON_TIER_IMPLIED_FIRST;
+        return null;
     }
-    const A = bigrams(a);
-    const B = bigrams(b);
-    let inter = 0;
-    A.forEach((g) => { if (B.has(g)) inter++; });
-    const union = A.size + B.size - inter;
-    return union > 0 ? inter / union : 0;
-}
-
-const CN_NUM = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-
-/** 条目标题里是否标明第 N 季/期（阿拉伯或中文数字），用于多季时优先选中正确的那一季。 */
-function hasSeason(title: string, season: number): boolean {
-    if (!(season > 0)) return false;
-    const cn = CN_NUM[season] || String(season);
-    const re = new RegExp(`(第\\s*(0*${season}|${cn})\\s*[季期部]|season\\s*0*${season}|\\bs0*${season}\\b)`, 'i');
-    return re.test(String(title || ''));
-}
-
-// 别名封顶分：高于 MIN_SCORE（能救回「只有别名对得上」的作品），但低于任何真实标题匹配（0.9+）
-const ALIAS_CAP = 0.6;
-
-/**
- * 条目相关性 = 标题分优先，别名只在标题没匹配上时兜底且封顶。
- * ⚠️ 别名不可与标题同权（lc-1101 实测）：《古宅老友记 第一季》的 aliases 含「老友记」，
- * 若让别名精确匹配拿 1.0，查询《老友记》就会挂上《古宅老友记》的弹幕。
- */
-function bestScore(query: string, a: any): number {
-    const titleScore = similarity(query, String((a && a.animeTitle) || ''));
-    if (titleScore >= MIN_SCORE) return titleScore;
-    let best = titleScore;
-    const aliases = Array.isArray(a && a.aliases) ? a.aliases : [];
-    for (const n of aliases) {
-        if (!n) continue;
-        const s = Math.min(similarity(query, String(n)), ALIAS_CAP);
-        if (s > best) best = s;
-    }
-    return best;
+    return want <= 1 ? SEASON_TIER_UNMARKED : null;
 }
 
 // ===================== 搜索 / 分集 =====================
@@ -246,9 +245,9 @@ function bestScore(query: string, a: any): number {
  * 搜索关键词候选：原始 title 优先，失败时回退到砍掉集标题后缀的首段。
  * ⚠️ 必须回退（lc-1101 实机实测）：播放侧传来的 title 是「番名 + 集标题」粘成的整串
  * （如「悬案 - : 矢量」），danmu_api 服务端的模糊搜索对这种整串**直接返回 0 条**，
- * 而砍成番名「悬案」能返回 38 条且首条即目标 —— 不回退就等于优选源恒未命中、白白降级。
- * 只作回退不作首选：番名本身含「 - 」的作品（如「XX - 副标题」）砍首段仍能靠
- * 相关性打分 + 季数优先排序选对条目，但整串能命中时精度更高。
+ * 而砍成番名「悬案」能返回 37 条并含目标 —— 不回退就等于优选源恒未命中、白白降级。
+ * 精确匹配下两轮都省不掉：整串那轮负责「番名自带副标题」的作品（「命运石之门 - 负荷领域的既视感」
+ * 归一化剥掉「 - 」后正好等于服务端条目标题，砍成首段反而不匹配）；首段那轮负责集标题粘连的情况。
  */
 function keywordCandidates(title: string): string[] {
     const raw = String(title || '').trim();
@@ -258,14 +257,14 @@ function keywordCandidates(title: string): string[] {
     return head && head !== raw ? [raw, head] : [raw];
 }
 
-/** 搜索条目并按相关性排序（同分时优先 bilibili 源、优先季数匹配的条目）。 */
+/** 搜索条目并只留精确匹配的（同作品多平台条目按季号档位排序，同档位优先 bilibili 源）。 */
 async function searchAnimes(title: string, season: number): Promise<AnimeHit[]> {
     const cands = keywordCandidates(title);
     for (let i = 0; i < cands.length; i++) {
-        const hits = await searchWithKeyword(cands[i], title, season);
+        const hits = await searchWithKeyword(cands[i], season);
         if (hits.length) {
             if (i > 0) {
-                log.info(`[danmuApi] 整串关键词无相关条目，回退番名首段命中 | ${JSON.stringify(title)} → ${JSON.stringify(cands[i])} | ${hits.length} 条`);
+                log.info(`[danmuApi] 整串关键词无精确匹配，回退番名首段命中 | ${JSON.stringify(title)} → ${JSON.stringify(cands[i])} | ${hits.length} 条`);
             }
             return hits;
         }
@@ -273,7 +272,7 @@ async function searchAnimes(title: string, season: number): Promise<AnimeHit[]> 
     return [];
 }
 
-async function searchWithKeyword(keyword: string, title: string, season: number): Promise<AnimeHit[]> {
+async function searchWithKeyword(keyword: string, season: number): Promise<AnimeHit[]> {
     const base = currentBase();
     const key = normalizeTitle(keyword);
     let animes: any[] | null = null;
@@ -294,21 +293,21 @@ async function searchWithKeyword(keyword: string, title: string, season: number)
     for (const a of animes || []) {
         const id = Number(a && a.animeId);
         if (!id) continue;
-        const score = bestScore(title, a);
-        if (score < MIN_SCORE) continue;
+        const animeTitle = String((a && a.animeTitle) || '');
+        // 比对对象是**搜索关键词**而不是整串 title：整串常粘着集标题（「悬案 - : 矢量」），
+        // 归一化后主名不可能相等，拿它比会把所有条目判空。
+        const tier = exactMatchTier(keyword, season, animeTitle);
+        if (tier === null) continue;
         hits.push({
             animeId: id,
-            animeTitle: String((a && a.animeTitle) || ''),
+            animeTitle,
             episodeCount: Number((a && a.episodeCount) || 0),
             source: String((a && a.source) || ''),
-            score,
+            seasonTier: tier,
         });
     }
     hits.sort((x, y) => {
-        const sx = hasSeason(x.animeTitle, season) ? 1 : 0;
-        const sy = hasSeason(y.animeTitle, season) ? 1 : 0;
-        if (sx !== sy) return sy - sx;
-        if (y.score !== x.score) return y.score - x.score;
+        if (x.seasonTier !== y.seasonTier) return x.seasonTier - y.seasonTier;
         const bx = x.source === 'bilibili' ? 1 : 0;
         const by = y.source === 'bilibili' ? 1 : 0;
         return by - bx;
@@ -383,13 +382,16 @@ async function fetchXml(episodeId: number, out: string): Promise<number> {
     return count;
 }
 
-function okResult(count: number, title: string, matchedTitle: string): BiliDanmakuResult {
+/** sim 恒为 1：自建源只收精确匹配，网页「来源详情」显示的匹配相似度因此总是 100%；
+ *  用户手选条目那条路径没有相似度概念，传 null（面板显示「—」）。 */
+function okResult(count: number, title: string, matchedTitle: string, sim: number | null): BiliDanmakuResult {
     return {
         ok: true,
         danmaku_count: count,
         source: SOURCE_LABEL,
         title: matchedTitle || title,
         matched_title: matchedTitle || undefined,
+        sim,
         bvid: null,
         cid: null,
         season_id: null,
@@ -406,7 +408,7 @@ export async function autoFetch(title: string, ep: number, out: string, season =
     try {
         const hits = await searchAnimes(title, season);
         if (!hits.length) {
-            log.info(`[danmuApi] 未命中（搜索无相关条目）→ 降级内置B站 | title=${title} ep=${ep}`);
+            log.info(`[danmuApi] 未命中（无精确匹配条目）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep} season=${season}`);
             return null;
         }
         for (const hit of hits.slice(0, MAX_TRIES)) {
@@ -417,11 +419,11 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             }
             const count = await fetchXml(e.episodeId, out);
             if (count > 0) {
-                log.info(`[danmuApi] ✅ 命中 | ${hit.animeTitle} · ${e.episodeTitle || ('第' + ep + '集')} | ${count} 条 (score=${hit.score.toFixed(2)} src=${hit.source})`);
-                return okResult(count, title, hit.animeTitle);
+                log.info(`[danmuApi] ✅ 精确命中 | ${hit.animeTitle} · ${e.episodeTitle || ('第' + ep + '集')} | ${count} 条 (seasonTier=${hit.seasonTier} src=${hit.source})`);
+                return okResult(count, title, hit.animeTitle, 1);
             }
         }
-        log.info(`[danmuApi] 未命中（${Math.min(hits.length, MAX_TRIES)} 个条目均无有效弹幕）→ 降级内置B站 | title=${title} ep=${ep}`);
+        log.info(`[danmuApi] 未命中（${Math.min(hits.length, MAX_TRIES)} 个精确匹配条目均无有效弹幕）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep}`);
         return null;
     } catch (e: any) {
         log.warn(`[danmuApi] autoFetch 异常 → 降级内置B站: ${e?.message || e}`);
@@ -449,11 +451,11 @@ export async function candidates(title: string, ep: number, season = 0): Promise
                 source: '自建源',
                 season: season || 0,
                 is_compilation: false,
-                sim: hit.score,
+                sim: 1,
             });
         }
         if (!out.length) {
-            log.info(`[danmuApi] 候选未命中 → 降级内置B站候选 | title=${title} ep=${ep}`);
+            log.info(`[danmuApi] 候选未命中（无精确匹配条目）→ 降级内置B站候选 | title=${title} ep=${ep}`);
             return null;
         }
         log.info(`[danmuApi] ✅ 自建源候选 ${out.length} 个 | title=${title} ep=${ep}`);
@@ -472,7 +474,7 @@ export async function fetchById(prefixedId: string, title: string, out: string):
     const count = await fetchXml(id, out);
     if (count <= 0) return { ok: false, error: '自建弹幕接口未返回弹幕' };
     log.info(`[danmuApi] ✅ 按选定 id 拉取成功 | episodeId=${id} | ${count} 条`);
-    return okResult(count, title, title);
+    return okResult(count, title, title, null);
 }
 
 /** 设置面板「测试连接」：探一次搜索接口，回可读结论。 */

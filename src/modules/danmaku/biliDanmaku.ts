@@ -384,11 +384,32 @@ function safeName(s: string): string {
  * 中文常被按 ANSI 解析/截断，PotPlayer 实际拿到的字幕路径是坏的，
  * 导致「加载了字幕参数却打不开文件」→ 无弹幕。改用 ASCII hash 文件名彻底规避。
  */
+// [lc-1109] 缓存代际：lc-1101~lc-1108 的自建源排序有「季数优先压过相似度」的 bug，
+// 落盘缓存的 matched 可能是错作品（实测《悬案》挂《探案新窍门 第一季》191 条），
+// 而读缓存时的 source 双向校验会让它**永久命中**（缓存源=自建源=当前设置）。
+// ∴ 改匹配口径必须换代际；旧代际文件是可再生的网络缓存，首次访问缓存目录时清掉。
+// 同一批改动把自建源准入从「相关性打分 ≥0.34」收紧成「只认精确匹配」，
+// 模糊匹配只留给内置 B站 链路（见 danmuApi.ts 的 exactMatchTier）。
+const CACHE_GEN = 'v2';
 function cacheBaseName(title: string, ep: number, season = 0): string {
     // 季数纳入缓存键：同一番名+集数不同季的弹幕不同（如《无职转生》二/三季），
     // 必须分目录缓存，否则旧缓存会让"错误季"的弹幕长期命中。
     const h = createHash('md5').update(`${title}::${season}::${ep}`, 'utf-8').digest('hex').slice(0, 16);
-    return season > 0 ? `bili_${h}_s${season}_${ep}` : `bili_${h}_${ep}`;
+    return season > 0 ? `bili_${h}_${CACHE_GEN}_s${season}_${ep}` : `bili_${h}_${CACHE_GEN}_${ep}`;
+}
+
+/** 清掉上一代际的缓存文件（文件名不含 CACHE_GEN 的 bili_<16hex>_… 三件套）。 */
+let genSwept = false;
+function sweepOldGenCache(dir: string): void {
+    if (genSwept) return;
+    genSwept = true;
+    try {
+        for (const f of fs.readdirSync(dir)) {
+            if (/^bili_[0-9a-f]{16}_(s\d+_)?\d+\.(json|xml|ass)$/.test(f)) {
+                try { fs.unlinkSync(path.join(dir, f)); } catch (_) { /* ignore */ }
+            }
+        }
+    } catch (_) { /* ignore */ }
 }
 
 /** 白色（B站 默认色）。非此值的彩色弹幕归入 color 屏蔽类型，与 bili_danmaku.js:_filter_danmaku 一致。 */
@@ -516,6 +537,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
     }
     try {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+        sweepOldGenCache(CACHE_DIR);
     } catch (_) { /* ignore */ }
 
     const cacheFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.json`);
@@ -607,6 +629,7 @@ export async function getDanmakuAss(title: string, ep: number): Promise<string |
     }
     try {
         if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+        sweepOldGenCache(CACHE_DIR);
     } catch (_) { /* ignore */ }
     log.info(`[danmaku] 缓存目录: ${CACHE_DIR} (存在:${fs.existsSync(CACHE_DIR)})`);
 
