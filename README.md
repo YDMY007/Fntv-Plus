@@ -1,19 +1,9 @@
 # Fntv-Plus 飞牛影视桌面客户端 · 增强版
 
-## 🌟 Star 趋势
-
-> 如果这个项目对你有帮助，欢迎点个 ⭐ Star 支持一下，也感谢每一位点过 Star 的朋友！🙏：
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date&theme=dark" />
-  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
-  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=YDMY007/Fntv-Plus&type=Date" />
-</picture>
-
 > ### ⚠️ 重要警告与声明
 >
 > **🧪 这是作者个人的练习 / 学习作品，不代表任何官方立场，与飞牛影视官方无任何关联或合作关系。**
->
+> **本仓库于9月9日正式已脱离上游 fork 网络，【成为独立仓库】 · 与 QiaoKes/fntv-electron 无上游关系**
 > 使用前请务必知悉以下风险：
 > - **非官方第三方客户端**：在飞牛影视 Web 端之上做注入式修改，可能因飞牛端更新而失效、闪退或行为异常，**不保证长期稳定可用**。
 > - **账号与隐私风险**：需登录你的飞牛账号，并可能涉及豆瓣 / Bangumi / Trakt / B 站等第三方账号授权（Cookie / Token 仅本地加密存储）；请仅在可信环境使用，后果自负。
