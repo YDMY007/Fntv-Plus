@@ -199,18 +199,22 @@ body.fnos-beautify div.relative.z-20.flex.items-center.justify-between.px-11.py-
      会把清晰度角标/播放按钮等小图也强制拉成 16:9 满宽。
    ⚠ 坑3: 本文件 CSS 整体是反引号模板字符串，注释里绝不能出现反引号，否则模板提前闭合(tsc TS1109)。 */
 /* 选集区(nth-child 2)及其直接 .relative 包裹层：原生为定高横滑带，可能带 overflow/max-h
-   会裁掉竖排后变高的列表 → 强制 auto 高度 + visible，让列表自然展开、页面正常滚动。 */
+   会裁掉竖排后变高的列表 → 强制 auto 高度 + visible，让列表自然展开、页面正常滚动。
+   [lc-1124] 收窄：ms-container 两条规则必须「内含 details 卡」才命中（:has 判据）——
+   演职人员横滑容器类名几乎相同（pl-[44px] 版），lc-1124 COL 双判据后误命中：
+   white-space:normal 把横滑圆形头像行打成交换行堆叠，右栏暴涨 700px+（用户报「排版乱」）。
+   序号视图(纯数字)的 ms-container 不含 details 卡 → 同样排除，保持原生横滑。 */
 body.fnos-beautify ${COL} > :nth-child(2),
 body.fnos-beautify ${COL} > :nth-child(2) > .relative{
   height:auto !important; max-height:none !important; overflow:visible !important;
 }
-body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"]{
+body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]){
   overflow:visible !important;
   white-space:normal !important;
   max-height:none !important; height:auto !important;
   padding:0 44px !important;   /* 与「选集」标题 px-11(44px) 左右对齐 */
 }
-body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"] > [class*="w-max"]{
+body.fnos-beautify ${COL} > :nth-child(2) .ms-container[class*="overflow-x-scroll"]:has([data-id="details"]) > [class*="w-max"]{
   display:flex !important; flex-direction:column !important;
   width:100% !important; height:auto !important; gap:0 !important;
 }
