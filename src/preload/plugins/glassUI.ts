@@ -162,8 +162,6 @@ const GATE_CSS = `
     --fntv-glass-sheen-1: .10;
     --fntv-glass-sheen-2: .028;
     --fntv-amb-base: #eef0f7;
-    /* [lc-1120] 液态玻璃 hover 镜面高光强度：浅底白玻璃上要略强才可感知 */
-    --fntv-lg-hi: .08;
     /* [lc-1026] 拆 rgb/alpha 分量：底座挪到 body 背景后不能再挂 filter（见 ①c），
        「背景亮度」滑杆改为直接缩放色域 alpha（对深底=等效压暗/提亮）。 */
     --fntv-amb-1-rgb: 178 158 232; --fntv-amb-1-a: .40;
@@ -177,8 +175,6 @@ const GATE_CSS = `
     --fntv-glass-sheen-1: .05;
     --fntv-glass-sheen-2: .012;
     --fntv-amb-base: #0d0d15;
-    /* [lc-1120] 深底上高光收敛，防「亮斑过曝」 */
-    --fntv-lg-hi: .05;
     --fntv-amb-1-rgb: 118 84 218; --fntv-amb-1-a: .50;
     --fntv-amb-2-rgb: 26 106 188; --fntv-amb-2-a: .46;
     --fntv-amb-3-rgb: 18 126 112; --fntv-amb-3-a: .36;
@@ -278,19 +274,11 @@ const GATE_CSS = `
       0 16px 40px -8px rgba(0, 0, 0, var(--fntv-glass-shadow, 0.22)) !important;
   }
 
-  /* ②-lg [lc-1120] 液态玻璃镜面高光（hover 才出现，平时零绘制开销）：
-     高光斑跟随鼠标(--fntv-lg-mx/my 由 pointermove rAF 节流写 html 变量，见 applyGlass)，
-     与原 sheen 渐变叠加；alpha 克制(深 .05/浅 .08)，参照参考实现 specular 的低强度档。
-     热补丁面板内(②c 文字密集纪律)在下方单独压回 none。 */
-  ${FROST_TARGETS}:hover {
-    background-image:
-      linear-gradient(165deg,
-        rgba(255, 255, 255, var(--fntv-glass-sheen-1, .05)) 0%,
-        rgba(255, 255, 255, calc(var(--fntv-glass-sheen-1, .05) * .3)) 42%,
-        rgba(255, 255, 255, var(--fntv-glass-sheen-2, .012)) 100%),
-      radial-gradient(360px circle at var(--fntv-lg-mx, 50%) var(--fntv-lg-my, 30%),
-        rgba(255, 255, 255, var(--fntv-lg-hi, .06)), transparent 70%) !important;
-  }
+  /* ②-lg [lc-1129] 鼠标跟随镜面高光已整体移除（lc-1120 引入）。
+     实测真机: 高光斑圆心 = 写在 <html> 上的 --fntv-lg-mx/my, 每次指针移动都改根自定义属性
+     → 66 个 [class*=card] 磨砂命中元素全部样式失效重算, hover 期间 renderer 主线程被打到
+     80~88%(用户报「所有动画慢吞吞一段一段」的根因), 并连带 themeMo 4Hz 强制重算(detectHotLightMode 占 12%)。
+     修=连规则带 bindLgPointer 一起删, 静态玻璃观感(① 环境光 + ② sheen 渐变 + 折射线)不变。 */
 
   /* ②b [lc-1042] 首页海报行底部留空位（用户报障：云母下剧集卡片底部阴影「粘连」）。
      实测：海报行 .ms-container 为 overflow-y:hidden 且容器高=卡片高(294=294)、卡片外边距 0，
@@ -346,11 +334,6 @@ const GATE_CSS = `
     background-color: rgba(0, 0, 0, .05) !important;
     border-color: rgba(255, 107, 53, .30) !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, .12) !important;
-  }
-  /* ②c-lg [lc-1120] 热补丁面板卡片同样压回 ②-lg 的 hover 镜面高光（文字密集浮层纪律）。
-     本条必须位于 ②-lg 之后：同特异度比源顺序，且 .fntv-hot-card:hover 命中词表 [class*="card"]。 */
-  html[data-fntv-glass].fnos-tv-page #fntv-hot-panel .fntv-hot-card:hover {
-    background-image: none !important;
   }
 
   /* [lc-1012] 旧「浅色模式白磨砂特例」已删：tint/环境光/sheen 全部跟随 html.dark 双套自适应,
@@ -451,23 +434,6 @@ const GATE_CSS = `
 let styleEl: HTMLStyleElement | null = null;
 let noiseEl: HTMLElement | null = null;
 let particleCanvas: HTMLCanvasElement | null = null;
-// [lc-1120] 液态玻璃 hover 镜面高光的鼠标跟随：全局只绑一次，rAF 节流写两个 CSS 变量。
-// 未 hover 任何磨砂组件时变量更新无渲染代价（radial 只在 ②-lg hover 规则里被引用）。
-let lgPointerBound = false;
-let lgPointerRaf = 0;
-function bindLgPointer(): void {
-  if (lgPointerBound) return;
-  lgPointerBound = true;
-  window.addEventListener('pointermove', (e) => {
-    if (lgPointerRaf) return;
-    lgPointerRaf = requestAnimationFrame(() => {
-      lgPointerRaf = 0;
-      const st = document.documentElement.style;
-      st.setProperty('--fntv-lg-mx', e.clientX + 'px');
-      st.setProperty('--fntv-lg-my', e.clientY + 'px');
-    });
-  }, { passive: true });
-}
 let particleRAF = 0;
 
 // ── hex 色调 → rgb ──
@@ -710,8 +676,6 @@ function applyGlass(): void {
       // [lc-1023] 底座开关随背景源：fluid=html 铺不透明环境底(①c)，none=保留透桌面
       root.setAttribute('data-fntv-glass-bg', s.bg === 'none' ? 'none' : 'fluid');
       ensureNoiseLayer();
-      // [lc-1120] 镜面高光鼠标跟随（仅玻璃模式生效期挂载；perf 期间 effEnabled=false 不挂）
-      bindLgPointer();
       // [lc-1108] 粒子/噪点/暗角三层全屏覆盖统一在此落地: 播放页(有 <video>)一律撤出
       applyOverlays(s, isVideoPage());
       // [lc-1026] 诊断锚点：真机再出「全透」时，控制台按此行确认 applyGlass 是否跑过、
