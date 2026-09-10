@@ -900,7 +900,7 @@ function handle(): void {
         + 'flex-shrink:0;transition:background-color .16s ease;';
       const chev = document.createElement('span');
       chev.style.cssText = 'width:8px;height:8px;border-right:1.5px solid rgba(255,255,255,.55);'
-        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(-135deg);'
+        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(45deg);'
         + 'transition:transform .22s ease, border-color .16s ease;display:block;';
       head.appendChild(chev);
       head.addEventListener('mouseenter', () => { head.style.backgroundColor = 'rgba(255,255,255,.06)'; chev.style.borderColor = 'rgba(255,255,255,.9)'; });
@@ -913,7 +913,8 @@ function handle(): void {
         // [lc-1121] 0fr 轨道只约束行高，inner 自身 padding 会在折叠态撑出 ≈16px 残留
         // （lc-1112 同款 padding 泄漏）——折叠时同步收掉
         inner!.style.padding = c ? '0' : '2px 14px 14px';
-        chev.style.transform = c ? 'rotate(45deg)' : 'rotate(-135deg)';
+        // [lc-1123] 方向按用户反馈对调：展开态 ∨(45deg 朝下)、折叠态 ∧(-135deg 朝上)
+        chev.style.transform = c ? 'rotate(-135deg)' : 'rotate(45deg)';
       };
       head.addEventListener('click', (e: Event) => {
         e.stopPropagation();
