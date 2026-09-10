@@ -905,8 +905,9 @@ function handle(): void {
       head.style.cssText = 'padding:7px 0 5px;display:flex;justify-content:center;cursor:pointer;'
         + 'flex-shrink:0;transition:background-color .16s ease;';
       const chevUp = document.createElement('span');
+      // [lc-1127] 方向遵循 lc-1123 用户拍板: 展开态显示 ∨(45deg 朝下)
       chevUp.style.cssText = 'width:8px;height:8px;border-right:1.5px solid rgba(255,255,255,.55);'
-        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(-135deg);'
+        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(45deg);'
         + 'transition:transform .22s ease, border-color .16s ease;display:block;';
       head.appendChild(chevUp);
       head.addEventListener('mouseenter', () => { head!.style.backgroundColor = 'rgba(255,255,255,.06)'; chevUp.style.borderColor = 'rgba(255,255,255,.9)'; });
@@ -953,7 +954,8 @@ function handle(): void {
       expandBtn.style.cssText = 'box-sizing:border-box;width:38px;height:36px;border-radius:10px;cursor:pointer;'
         + 'background:transparent;color:rgba(255,255,255,.6);font-size:13px;border:1px dashed rgba(255,255,255,.3);'
         + 'display:flex;align-items:center;justify-content:center;transition:background-color .16s ease, color .16s ease;';
-      expandBtn.textContent = '∨';
+      // [lc-1127] 收起态显示 ∧(朝上)——lc-1123 约定
+      expandBtn.textContent = '∧';
       expandBtn.addEventListener('mouseenter', () => { expandBtn.style.backgroundColor = 'rgba(255,255,255,.1)'; expandBtn.style.color = '#fff'; });
       expandBtn.addEventListener('mouseleave', () => { expandBtn.style.backgroundColor = 'transparent'; expandBtn.style.color = 'rgba(255,255,255,.6)'; });
       expandBtn.addEventListener('click', (e: Event) => {
