@@ -15,7 +15,10 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
     st.textContent = `
 @keyframes fnos-ph-shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 .fnos-ph-skel{position:relative;overflow:hidden;background:var(--fnos-skel-bg)}
-.fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite}
+/* [lc-1128] shimmer 限 20 轮(30s): 任何 infinite 动画都让合成器 60fps 永动——首页常驻的
+   骨架占位(详情未到就卡住的 prev/next 侧卡)把 gpu-process 钉在 ~1 核持续光栅, 整机发卡。
+   30s 后骨架静止(占位底色仍在, 进度文字不受影响), 合成器随页面静止熄火。 */
+.fnos-ph-skel::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--fnos-skel-shine),transparent);transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s 20}
 /* [lc-621] 实时进度模拟器样式(用户参考) — 渐变进度条 + 大百分比 + 状态文字, 无 emoji */
 .fnos-ph-track{width:280px;height:8px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden;position:relative}
 .fnos-ph-fill{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#8f6fe8,#c9a7f0);transition:width .25s ease}
@@ -61,7 +64,7 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
 /* [lc-841] 样式4 骨架深浅适配: 占位条 / 指示点 / 进度条随主题切换 —— 由 container[data-fntv-skel] 控制 */
 .fntv-s4-skelbg{position:relative;width:100%;height:100%;overflow:hidden}
 .fntv-s4-skel{position:relative;overflow:hidden}
-.fntv-s4-skel::after{content:'';position:absolute;inset:0;transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s infinite;pointer-events:none}
+.fntv-s4-skel::after{content:'';position:absolute;inset:0;transform:translateX(-120%);animation:fnos-ph-shimmer 1.5s 20;pointer-events:none} /* [lc-1128] 限 20 轮, 见上 */
 [data-fntv-skel="dark"] .fntv-s4-skel{background:rgba(255,255,255,.20)}
 [data-fntv-skel="dark"] .fntv-s4-skel::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent)}
 [data-fntv-skel="light"] .fntv-s4-skel{background:rgba(60,50,40,.15)}

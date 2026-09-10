@@ -106,7 +106,9 @@ function injectStyle(): void {
   font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .5px;
   background: linear-gradient(135deg, #ff6b35, #f7418f, #c94bcb);
   background-size: 200% 200%;
-  animation: fntv-gongdeng-grad 4s ease infinite, fntv-gongdeng-pulse 2.5s ease-in-out infinite;
+  /* [lc-1128] 限 6 轮: infinite 动画让合成器 60fps 永动(首页空闲 gpu-process ~1 核的元凶之一)。
+     24s 后按钮静止为静态渐变+外发光(视觉仍在, 只是停止呼吸), 合成器随页面静止熄火。 */
+  animation: fntv-gongdeng-grad 4s ease 6, fntv-gongdeng-pulse 2.5s ease-in-out 6;
   border: 1.5px solid rgba(255,255,255,.55);
   box-shadow:
     0 0 20px rgba(255,107,53,.45),
