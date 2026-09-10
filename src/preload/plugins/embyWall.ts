@@ -950,7 +950,7 @@ function handle(): void {
         // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉
         (window as any).fntvCloseSidebar?.();
       });
-      ctrl.appendChild(swBtn);  // [lc-633] 占位(设置按钮块稍后 prepend 到最前)
+      inner.appendChild(swBtn);  // [lc-1121] 占位进折叠体内层(设置按钮块稍后 prepend 到最前)
     }
 
     if (ctrl.querySelector('#fnos-settings-btn')) return; // 幂等
@@ -991,7 +991,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉（反馈弹窗挂在 body，不受影响）
         (window as any).fntvCloseSidebar?.();
       });
-      ctrl.appendChild(fbChoiceBtn);
+      inner.appendChild(fbChoiceBtn);
     }
 
     // [lc-365] 侧栏设置框底部常规显示版本号（像大厂软件：小灰字 + 上分隔线，居中）
@@ -1001,7 +1001,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       verLine.style.cssText = 'margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);'
         + 'text-align:center;font-size:11.5px;letter-spacing:.3px;color:rgba(255,255,255,.5);user-select:none;';
       verLine.textContent = 'v…';
-      ctrl.appendChild(verLine);
+      inner.appendChild(verLine);
       // 动态版本号：复用主进程 get-version / version-info（与"关于"标签页同源）
       try {
         ipcRenderer.send('get-version');
