@@ -864,12 +864,66 @@ function handle(): void {
     if (!ctrl) {
       ctrl = document.createElement('div');
       ctrl.id = 'fnos-sidebar-actions';
+      // [lc-1121] padding 移交折叠体 inner（面板本体只保留底部圆角呼吸），便于折叠头通栏
       ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
-        + 'padding:14px 14px 16px;border-radius:14px;display:flex;flex-direction:column;gap:6px;'
+        + 'border-radius:14px;display:flex;flex-direction:column;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
-        + 'color:#fff;font-size:12px;user-select:none;';
+        + 'color:#fff;font-size:12px;user-select:none;overflow:hidden;';
       panel.appendChild(ctrl);
+    } else {
+      // [lc-1121] 升级场景：旧 DOM 的 ctrl 带旧 padding，统一重设（幂等）
+      ctrl.style.padding = '0';
+      ctrl.style.overflow = 'hidden';
+    }
+
+    // [lc-1121] 面板顶部折叠头 + 可折叠主体：默认展开；折叠后只剩细条，避免遮挡
+    // 侧栏分类文字（用户反馈：面板悬浮在类目列表上时常盖住「演唱会」等条目）。
+    // 折叠态持久化 localStorage（fntvSidebarActions.collapsed），抽屉重开保持用户选择。
+    let foldBody = ctrl.querySelector('#fnos-sidebar-actions-body') as HTMLElement | null;
+    let inner = ctrl.querySelector('#fnos-sidebar-actions-inner') as HTMLElement | null;
+    if (!foldBody || !inner) {
+      foldBody = document.createElement('div');
+      foldBody.id = 'fnos-sidebar-actions-body';
+      foldBody.style.cssText = 'display:grid;grid-template-rows:1fr;transition:grid-template-rows .22s ease;';
+      inner = document.createElement('div');
+      inner.id = 'fnos-sidebar-actions-inner';
+      inner.style.cssText = 'overflow:hidden;min-height:0;box-sizing:border-box;'
+        + 'padding:2px 14px 14px;display:flex;flex-direction:column;gap:6px;';
+      // 收编升级场景下已存在的按钮/版本号（幂等：全新 DOM 时此处为空）
+      while (ctrl.firstChild) inner.appendChild(ctrl.firstChild);
+      foldBody.appendChild(inner);
+      const head = document.createElement('div');
+      head.id = 'fnos-sidebar-collapse-head';
+      head.title = '收起 / 展开快捷操作';
+      head.style.cssText = 'padding:7px 0 5px;display:flex;justify-content:center;cursor:pointer;'
+        + 'flex-shrink:0;transition:background-color .16s ease;';
+      const chev = document.createElement('span');
+      chev.style.cssText = 'width:8px;height:8px;border-right:1.5px solid rgba(255,255,255,.55);'
+        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(-135deg);'
+        + 'transition:transform .22s ease, border-color .16s ease;display:block;';
+      head.appendChild(chev);
+      head.addEventListener('mouseenter', () => { head.style.backgroundColor = 'rgba(255,255,255,.06)'; chev.style.borderColor = 'rgba(255,255,255,.9)'; });
+      head.addEventListener('mouseleave', () => { head.style.backgroundColor = 'transparent'; chev.style.borderColor = 'rgba(255,255,255,.55)'; });
+      const applyFold = (): void => {
+        let c = false;
+        try { c = localStorage.getItem('fntvSidebarActions.collapsed') === '1'; } catch (_) { /* ignore */ }
+        head.classList.toggle('folded', c);
+        foldBody!.style.gridTemplateRows = c ? '0fr' : '1fr';
+        // [lc-1121] 0fr 轨道只约束行高，inner 自身 padding 会在折叠态撑出 ≈16px 残留
+        // （lc-1112 同款 padding 泄漏）——折叠时同步收掉
+        inner!.style.padding = c ? '0' : '2px 14px 14px';
+        chev.style.transform = c ? 'rotate(45deg)' : 'rotate(-135deg)';
+      };
+      head.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        const c = head.classList.contains('folded');
+        try { localStorage.setItem('fntvSidebarActions.collapsed', c ? '0' : '1'); } catch (_) { /* ignore */ }
+        applyFold();
+      });
+      ctrl.insertBefore(head, ctrl.firstChild);
+      ctrl.appendChild(foldBody);
+      applyFold();
     }
     // [lc-371] "切换系统页面"按钮: 置于 #fnos-sidebar-actions 容器内部(设置按钮旁),
     //   点击后整窗导航到飞牛原生 NAS 系统页(根路径 `/`); 原生页由 injectNativeReturnButton 提供返回。
@@ -917,7 +971,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       // [lc-705] 复刻飞牛原生类目按钮：点击后自动收起侧边栏抽屉（设置面板挂在 body，不受影响）
       (window as any).fntvCloseSidebar?.();
     });
-    ctrl.prepend(btn); // [lc-633] 设置按钮置顶 → 最终顺序: 设置 → 切换系统页面 → 软件反馈建议
+    // [lc-1121] 设置按钮置顶 → 插入折叠体内层最前（不能 ctrl.prepend，会跑到折叠头上面）
+    //   最终顺序: 折叠头 → 设置 → 切换系统页面 → 软件反馈建议 → 版本号
+    (ctrl.querySelector('#fnos-sidebar-actions-inner') || ctrl).prepend(btn);
 
     // [lc-361] 合并"问卷反馈"与"Q群反馈"为单个"软件反馈建议"按钮(点击弹出选择弹窗)
     if (!ctrl.querySelector('#fnos-feedback-choice-btn')) {

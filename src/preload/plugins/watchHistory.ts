@@ -196,8 +196,11 @@ function injectEntry(): boolean {
     });
 
     // ④ 插入：有设置按钮就插在它后面，否则 prepend 到容器顶部
-    if (settingsBtn && settingsBtn.parentElement === ctrl) {
-        ctrl.insertBefore(btn, settingsBtn.nextSibling);
+    // [lc-1121] 设置按钮的实际父级可能是折叠体内层 #fnos-sidebar-actions-inner
+    //   （面板顶部加了折叠头，主体收进 grid 折叠容器）——跟随它的真实父级插，
+    //   不能再按 parentElement === ctrl 判断（否则回落 ctrl.prepend 会插到折叠头上面）
+    if (settingsBtn && settingsBtn.parentElement) {
+        settingsBtn.parentElement.insertBefore(btn, settingsBtn.nextSibling);
     } else {
         ctrl.prepend(btn);
     }
