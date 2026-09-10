@@ -58,8 +58,14 @@ const HERO = ':is('
  *  （hero + 选集 + 演职人员 + IMDB 外链块，A 段的 nth-child(4) 规则就是按后者写的）。
  *  用子节点数量一刀切掉 wrapper，比去论证 wrapper 内会不会出现 [data-id="details"] 更硬。
  *  代价：「只有 2 个子节点的 Season 页」会降级成单列 —— 那种页面右栏本来就是空的，
- *  两栏只会白留 40% 宽的空白列，单列反而更好，是可接受的降级而非回归。 */
-const COL = `:has(> ${HERO}):has([data-id="details"]):has(> :nth-child(3))`;
+ *  两栏只会白留 40% 宽的空白列，单列反而更好，是可接受的降级而非回归。
+ *
+ *  [lc-1124] 飞牛选集有第二种展示形态：**序号视图**（纯数字块，工具行「切换为序号视图」
+ *  切换，账号级记忆）——数字网格 div.grid-cols-[repeat(auto-fill,52px)]，其条目**没有
+ *  [data-id="details"]** → 旧 COL 判据失配 → 序号视图下美化整段退出（用户报「UI 欠缺」）。
+ *  COL 改为 :is() 双判据：列表视图（details 卡）或序号视图（52px 数字网格）任一命中即启用；
+ *  I 段竖排规则按 [data-id=details] 定位、序号视图自然 no-op，互不干扰。 */
+const COL = `:has(> ${HERO}):is(:has([data-id="details"]), :has([class*="grid-cols-[repeat(auto-fill,52"])):has(> :nth-child(3))`;
 
 /** [lc-1010] Series 一级页内容面板。**必须与 tmdbCard.ts 的 SERIES_PANEL_SEL 逐字一致**
  *  （两处各存一份是刻意的，同 HERO/DETAIL_HERO_SEL 的约定：这边参与 CSS 字符串拼接、
@@ -266,6 +272,42 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="detail
 }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child picture img{ transform:scale(1.035) !important; }
+
+/* ── [lc-1124] 序号视图（纯数字选集）与演职人员 精修 ──
+   原生「切换为序号视图」(工具行 title="切换为序号视图") 在美化作用域下功能完好
+   （竖排规则 [data-id=details] 不命中此视图的数字块，实测 beautifyGridHit=false），
+   本段只做视觉语言统一：
+   · 数字块（.grid[grid-cols-[repeat(auto-fill,52px)]] 内的 semi-button）加发丝线 +
+     统一 10px 圆角 + hover 微浮；当前集(.semi-button-primary)保留原生品牌底，只补描边光环；
+   · 演职人员卡 hover 头像微放大（与选集缩略图 hover 同语言）。
+   演职人员与选集共用 .ms-container[overflow-x-scroll] 横滑（I 段已给 44px 对齐）。 */
+
+/* 数字块（非当前集）：发丝线 + 圆角 + hover 微浮，底色交回原生 tertiary 自适应明暗 */
+body.fnos-beautify ${COL} > :nth-child(2) [class*="grid-cols-[repeat(auto-fill,52"] button:not(.semi-button-primary){
+  border-radius:10px !important;
+  border:1px solid var(--fnos-hairline-soft) !important;
+  transition:background .16s ease, border-color .16s ease, transform .16s ease !important;
+}
+body.fnos-beautify ${COL} > :nth-child(2) [class*="grid-cols-[repeat(auto-fill,52"] button:not(.semi-button-primary):hover{
+  background:var(--fnos-row-hover) !important;
+  border-color:rgba(140,150,180,.45) !important;
+  transform:translateY(-1px) !important;
+}
+/* 当前集：品牌描边光环（原生 primary 底保留） */
+body.fnos-beautify ${COL} > :nth-child(2) [class*="grid-cols-[repeat(auto-fill,52"] button.semi-button-primary{
+  border-radius:10px !important;
+  box-shadow:0 0 0 1px var(--semi-color-primary, #6d7ff2), 0 2px 12px -2px rgba(109, 127, 242, .4) !important;
+}
+
+/* 演员卡 hover：头像微放大（克制，与选集缩略图 scale 同档）。
+   [lc-1124] 实测演员头像 img 与 a.no-underline 不同路径组合（文档首个 no-underline a 在
+   剧照区）——作用域放宽为 COL 内全部 no-underline 链接 img，hover 统一微放大（无害）。 */
+body.fnos-beautify ${COL} a.no-underline img{
+  transition:transform .3s cubic-bezier(.25, .1, .25, 1) !important;
+}
+body.fnos-beautify ${COL} a.no-underline:hover img{
+  transform:scale(1.05) !important;
+}
 
 /* [lc-1049] 隐藏原生横滑翻页箭头（Semi ScrollList 的 [class*="semi-color-bg-arrow-mask"] 掩膜层）。
    用户报障：选集列表(集数据)与剧集信息卡之间有个「页面切换标签」hover 时短暂闪现 —— 那是原生
