@@ -137,17 +137,10 @@ if (process.platform === 'win32') {
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
-    // 仍未能获取锁: 可能是同名新版本进程残留(关窗不退进程)。给出明确提示而非静默秒退。
-    log.warn('[启动] 未能获取单实例锁, 另一个实例可能仍在运行');
-    app.whenReady().then(() => {
-        appDialog({
-            type: 'info',
-            title: '程序已在运行',
-            message: '检测到本程序另一个实例正在运行（或旧版本进程未完全退出）。\n\n请先通过托盘图标退出，或在任务管理器结束 Fntv-Plus / FNMedia 进程后重新启动。',
-            buttons: ['知道了'],
-            defaultId: 0,
-        }).then(() => app.quit());
-    });
+    // [lc-1132] 锁被占(另一实例或旧进程残留)→ 静默退出, 不再弹「程序已在运行」对话框(用户要求删除)。
+    // 正在运行的实例会收到 second-instance 事件自动还原/聚焦到前台, 用户感知就是「窗口被带到面前」。
+    log.warn('[启动] 未能获取单实例锁, 另一个实例可能仍在运行, 静默退出');
+    app.quit();
 } else {
     // 当尝试启动第二个实例时，聚焦到现有窗口
     app.on('second-instance', (event, commandLine, workingDirectory) => {
