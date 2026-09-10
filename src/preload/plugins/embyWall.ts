@@ -865,7 +865,9 @@ function handle(): void {
       ctrl = document.createElement('div');
       ctrl.id = 'fnos-sidebar-actions';
       // [lc-1121] padding 移交折叠体 inner（面板本体只保留底部圆角呼吸），便于折叠头通栏
-      ctrl.style.cssText = 'position:sticky;bottom:10px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
+      // [lc-1126] sticky top 下限 42px: 首页等短列表页面板自然位置会顶到窗口最上方,
+      //   被全宽 32px 自绘标题栏(drag 区)盖住 → 折叠细条不可点、图标行上缘被遮
+      ctrl.style.cssText = 'position:sticky;bottom:10px;top:42px;flex-shrink:0;box-sizing:border-box;margin:14px 12px 0;width:calc(100% - 24px);'
         + 'border-radius:14px;display:flex;flex-direction:column;'
         + 'background:var(--fnos-sidebar-btn-bg)!important;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
         + 'border:1px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.18);'
@@ -875,14 +877,17 @@ function handle(): void {
       // [lc-1121] 升级场景：旧 DOM 的 ctrl 带旧 padding，统一重设（幂等）
       ctrl.style.padding = '0';
       ctrl.style.overflow = 'hidden';
+      ctrl.style.top = '42px';
     }
 
-    // [lc-1121] 面板顶部折叠头 + 可折叠主体：默认展开；折叠后只剩细条，避免遮挡
-    // 侧栏分类文字（用户反馈：面板悬浮在类目列表上时常盖住「演唱会」等条目）。
-    // 折叠态持久化 localStorage（fntvSidebarActions.collapsed），抽屉重开保持用户选择。
+    // [lc-1121][lc-1126] 面板折叠：**默认收起**为一排可直点的图标（⚙ 设置 / 🕐 观影记录 /
+    //   🖥 切换系统 / 💬 反馈 + ∨ 展开钮），避免遮挡侧栏分类文字；展开态为文字按钮列。
+    // 状态持久化 localStorage（fntvSidebarActions.collapsed）：'0'=展开，缺省/其它=收起。
     let foldBody = ctrl.querySelector('#fnos-sidebar-actions-body') as HTMLElement | null;
     let inner = ctrl.querySelector('#fnos-sidebar-actions-inner') as HTMLElement | null;
-    if (!foldBody || !inner) {
+    let iconRow = ctrl.querySelector('#fnos-sidebar-actions-icons') as HTMLElement | null;
+    let head = ctrl.querySelector('#fnos-sidebar-collapse-head') as HTMLElement | null;
+    if (!foldBody || !inner || !iconRow || !head) {
       foldBody = document.createElement('div');
       foldBody.id = 'fnos-sidebar-actions-body';
       foldBody.style.cssText = 'display:grid;grid-template-rows:1fr;transition:grid-template-rows .22s ease;';
@@ -893,39 +898,90 @@ function handle(): void {
       // 收编升级场景下已存在的按钮/版本号（幂等：全新 DOM 时此处为空）
       while (ctrl.firstChild) inner.appendChild(ctrl.firstChild);
       foldBody.appendChild(inner);
-      const head = document.createElement('div');
+      // 展开态顶部细条（点击收起）
+      head = document.createElement('div');
       head.id = 'fnos-sidebar-collapse-head';
-      head.title = '收起 / 展开快捷操作';
+      head.title = '收起快捷操作';
       head.style.cssText = 'padding:7px 0 5px;display:flex;justify-content:center;cursor:pointer;'
         + 'flex-shrink:0;transition:background-color .16s ease;';
-      const chev = document.createElement('span');
-      chev.style.cssText = 'width:8px;height:8px;border-right:1.5px solid rgba(255,255,255,.55);'
-        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(45deg);'
+      const chevUp = document.createElement('span');
+      chevUp.style.cssText = 'width:8px;height:8px;border-right:1.5px solid rgba(255,255,255,.55);'
+        + 'border-bottom:1.5px solid rgba(255,255,255,.55);transform:rotate(-135deg);'
         + 'transition:transform .22s ease, border-color .16s ease;display:block;';
-      head.appendChild(chev);
-      head.addEventListener('mouseenter', () => { head.style.backgroundColor = 'rgba(255,255,255,.06)'; chev.style.borderColor = 'rgba(255,255,255,.9)'; });
-      head.addEventListener('mouseleave', () => { head.style.backgroundColor = 'transparent'; chev.style.borderColor = 'rgba(255,255,255,.55)'; });
-      const applyFold = (): void => {
-        let c = false;
-        try { c = localStorage.getItem('fntvSidebarActions.collapsed') === '1'; } catch (_) { /* ignore */ }
-        head.classList.toggle('folded', c);
-        foldBody!.style.gridTemplateRows = c ? '0fr' : '1fr';
-        // [lc-1121] 0fr 轨道只约束行高，inner 自身 padding 会在折叠态撑出 ≈16px 残留
-        // （lc-1112 同款 padding 泄漏）——折叠时同步收掉
-        inner!.style.padding = c ? '0' : '2px 14px 14px';
-        // [lc-1123] 方向按用户反馈对调：展开态 ∨(45deg 朝下)、折叠态 ∧(-135deg 朝上)
-        chev.style.transform = c ? 'rotate(-135deg)' : 'rotate(45deg)';
-      };
+      head.appendChild(chevUp);
+      head.addEventListener('mouseenter', () => { head!.style.backgroundColor = 'rgba(255,255,255,.06)'; chevUp.style.borderColor = 'rgba(255,255,255,.9)'; });
+      head.addEventListener('mouseleave', () => { head!.style.backgroundColor = 'transparent'; chevUp.style.borderColor = 'rgba(255,255,255,.55)'; });
       head.addEventListener('click', (e: Event) => {
         e.stopPropagation();
-        const c = head.classList.contains('folded');
-        try { localStorage.setItem('fntvSidebarActions.collapsed', c ? '0' : '1'); } catch (_) { /* ignore */ }
+        try { localStorage.setItem('fntvSidebarActions.collapsed', '1'); } catch (_) { /* ignore */ }
         applyFold();
       });
+      // 收起态图标行：每个图标 = 直连对应功能（运行时转发点击给折叠体内的文字按钮，零逻辑重复）
+      iconRow = document.createElement('div');
+      iconRow.id = 'fnos-sidebar-actions-icons';
+      iconRow.style.cssText = 'display:none;padding:8px 10px;justify-content:center;align-items:center;'
+        + 'gap:4px;flex-wrap:wrap;';
+      const iconDefs: { icon: string; target: string; title: string }[] = [
+        { icon: '⚙', target: '#fnos-settings-btn', title: '设置' },
+        { icon: '🕐', target: '#fntv-wh-entry', title: '观影记录' },
+        { icon: '🖥', target: '#fnos-switch-system-btn', title: '切换系统页面' },
+        { icon: '💬', target: '#fnos-feedback-choice-btn', title: '软件反馈建议' },
+      ];
+      for (const def of iconDefs) {
+        const ib = document.createElement('button');
+        ib.type = 'button';
+        ib.title = def.title;
+        ib.textContent = def.icon;
+        ib.style.cssText = 'box-sizing:border-box;width:38px;height:36px;border-radius:10px;cursor:pointer;'
+          + 'background:var(--fnos-sidebar-btn-bg)!important;color:#fff;font-size:15px;'
+          + 'border:1px solid rgba(255,255,255,.28);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+          + 'box-shadow:0 4px 16px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;'
+          + 'transition:background-color .16s ease, transform .16s ease;';
+        ib.addEventListener('mouseenter', () => { ib.style.backgroundColor = 'rgba(255,255,255,.14)'; ib.style.transform = 'translateY(-1px)'; });
+        ib.addEventListener('mouseleave', () => { ib.style.backgroundColor = ''; ib.style.transform = ''; });
+        ib.addEventListener('click', (e: Event) => {
+          e.stopPropagation();
+          const target = ctrl!.querySelector(def.target) as HTMLElement | null;
+          if (target) target.click(); // 文字按钮 handler 自带功能跳转 + 抽屉收起
+        });
+        iconRow.appendChild(ib);
+      }
+      // 展开钮（收起态末尾）
+      const expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.title = '展开快捷操作';
+      expandBtn.style.cssText = 'box-sizing:border-box;width:38px;height:36px;border-radius:10px;cursor:pointer;'
+        + 'background:transparent;color:rgba(255,255,255,.6);font-size:13px;border:1px dashed rgba(255,255,255,.3);'
+        + 'display:flex;align-items:center;justify-content:center;transition:background-color .16s ease, color .16s ease;';
+      expandBtn.textContent = '∨';
+      expandBtn.addEventListener('mouseenter', () => { expandBtn.style.backgroundColor = 'rgba(255,255,255,.1)'; expandBtn.style.color = '#fff'; });
+      expandBtn.addEventListener('mouseleave', () => { expandBtn.style.backgroundColor = 'transparent'; expandBtn.style.color = 'rgba(255,255,255,.6)'; });
+      expandBtn.addEventListener('click', (e: Event) => {
+        e.stopPropagation();
+        try { localStorage.setItem('fntvSidebarActions.collapsed', '0'); } catch (_) { /* ignore */ }
+        applyFold();
+      });
+      iconRow.appendChild(expandBtn);
       ctrl.insertBefore(head, ctrl.firstChild);
+      ctrl.insertBefore(iconRow, ctrl.firstChild);
       ctrl.appendChild(foldBody);
-      applyFold();
     }
+    // 状态应用（独立于构建：升级/重注入场景幂等重跑）
+    const applyFold = (): void => {
+      let c = true; // [lc-1126] 默认收起
+      try { c = localStorage.getItem('fntvSidebarActions.collapsed') !== '0'; } catch (_) { /* ignore */ }
+      const iconRowEl = ctrl!.querySelector('#fnos-sidebar-actions-icons') as HTMLElement | null;
+      const headEl = ctrl!.querySelector('#fnos-sidebar-collapse-head') as HTMLElement | null;
+      const bodyEl = ctrl!.querySelector('#fnos-sidebar-actions-body') as HTMLElement | null;
+      const innerEl = ctrl!.querySelector('#fnos-sidebar-actions-inner') as HTMLElement | null;
+      if (iconRowEl) iconRowEl.style.display = c ? 'flex' : 'none';
+      if (headEl) headEl.style.display = c ? 'none' : 'flex';
+      if (bodyEl) bodyEl.style.display = c ? 'none' : 'grid';
+      if (bodyEl) bodyEl.style.gridTemplateRows = c ? '0fr' : '1fr';
+      // [lc-1121] 0fr 轨道只约束行高，inner 自身 padding 会在折叠态撑出残留——同步收掉
+      if (innerEl) innerEl.style.padding = c ? '0' : '2px 14px 14px';
+    };
+    applyFold();
     // [lc-371] "切换系统页面"按钮: 置于 #fnos-sidebar-actions 容器内部(设置按钮旁),
     //   点击后整窗导航到飞牛原生 NAS 系统页(根路径 `/`); 原生页由 injectNativeReturnButton 提供返回。
     // [lc-373-fix] 必须放进 ctrl 容器内部, 不能 insertBefore 到容器外——
