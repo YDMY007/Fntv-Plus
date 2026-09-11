@@ -25,8 +25,27 @@ export function destroyCarousel(): void {
     S.carouselContainer = null;
     S.carouselWrapper = null;
     S.carouselPosterStrip = null;
+    S.placeholderInited = false; // [lc-1136] 占位被 fnOS 重渲染冲掉时允许重建(否则合成块永久空壳)
     // carouselInfos/Shows/Base 为数据字段(非 DOM 引用), injectCarousel 重建时会重新赋值, 无需置空
   }
+}
+
+/** [lc-1136] 轮播位预留: fnOS 首页内容列已渲染但「媒体库」区块尚未可匹配的窗口里(实测 ~1.4s),
+ *  原生行会裸奔而轮播位空空。此处把轮播/占位(建在合成块 [data-fntv-slot] 里, 内容列首个子元素)迁入
+ *  真正的媒体库 section——迁入语义与首次注入一致(清空该 section 原生内容), 保持「轮播替换媒体库行」;
+ *  空掉的合成块移除。返回是否发生了迁移。 */
+export function migrateSlotToRealSection(): boolean {
+  const w = S.carouselWrapper;
+  if (!w || !w.isConnected) return false;
+  const from = w.parentElement;
+  if (!from || !from.hasAttribute('data-fntv-slot')) return false;
+  const sec = findMediaLibrarySection();
+  if (!sec || sec === from) return false;
+  sec.innerHTML = '';
+  sec.appendChild(w);
+  if (!from.firstChild) from.remove();
+  log('reserved slot migrated into media-library section');
+  return true;
 }
 
 /** [lc-946] 轮播仍健康(挂载+已初始化)时返回首页: 不销毁重建 DOM, 仅重启被 _stopCarouselOffHome 停掉的自动轮播,
@@ -114,12 +133,43 @@ export function injectCarousel(): void {
   let target: HTMLElement | null = null;
   let rebuild = false;
   if (S.carouselWrapper && document.body.contains(S.carouselWrapper)) {
+    migrateSlotToRealSection(); // [lc-1136] 预留合成块里的轮播/占位迁入真 section(可匹配时)
     target = S.carouselWrapper.parentElement; // section
     rebuild = true;
     log('rebuild: reusing section(parent of existing wrapper)');
   } else {
     target = findMediaLibrarySection();
     if (target) log('media-library section found via robust search');
+  }
+  if (!target) {
+    // [lc-1136] 轮播位预留: 「媒体库」区块尚未可匹配时, 若首页内容列已渲染, 插入合成 section 占住轮播位
+    // (占位骨架或已就绪的真实轮播都建在这里), 其余原生行(继续观看等)不受影响直接展示。
+    // [lc-1136 修订] 旧选择器 .ms-container > div[...] 在真机 fnOS 首页从不匹配(app.log 整个加载期零条
+    //   "reserved slot" 日志) → 预留槽整段失效, 媒体库 section 就绪前(~1.4s)原生行裸奔。
+    //   内容列与 findMediaLibrarySection 分支1 同源(.relative.flex.flex-col.gap-6): 优先取含
+    //   「继续观看/媒体库」的那一列; 其次 ms-container 内同名; 终极兜底从「继续观看」标题上爬找 gap-6 列。
+    const cols = Array.from(document.querySelectorAll('.relative.flex.flex-col.gap-6')) as HTMLElement[];
+    let col = cols.find(c => /继续观看|媒体库/.test(c.textContent || '')) || cols[0] || null;
+    if (!col) col = (document.querySelector('.ms-container div[class*="flex-col"][class*="gap-6"]') as HTMLElement | null) || col;
+    if (!col) {
+      for (const h of Array.from(document.querySelectorAll('strong,h2,h3')) as HTMLElement[]) {
+        if (!/继续观看/.test(h.textContent || '')) continue;
+        let el: HTMLElement | null = h;
+        for (let i = 0; i < 6 && el; i++) { el = el.parentElement; if (el && /gap-6/.test(el.className || '')) break; }
+        if (el) { col = el; break; }
+      }
+    }
+    let syn = col ? (col.querySelector(':scope > [data-fntv-slot]') as HTMLElement | null) : null;
+    if (col && !syn) {
+      syn = document.createElement('div');
+      syn.className = 'relative';
+      syn.setAttribute('data-fntv-slot', '1');
+      col.insertBefore(syn, col.firstChild);
+    }
+    if (syn) {
+      target = syn;
+      log('media-library section pending, using reserved slot section');
+    }
   }
   if (!target) { log('no target'); return; }
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
@@ -187,7 +237,12 @@ export function injectCarousel(): void {
 
   // 预加载占位: 真实片库「仍在加载中」时, 显示优雅占位(骨架 + 加载进度数字), 不让用户干等
   // 注意: 此处不设 S.carouselInited=true, 让数据到位后 injectCarousel() 能重新进入并重建真实轮播
-  if (S.apiShows.length === 0) {
+  // [lc-1136] apiLoaded && !carouselRevealed(数据已到、详情/横版图补完中)也走占位: 该窗口旧逻辑
+  //   整段不注入(观察者守卫同步放行此处 return)→ 原生媒体库行裸奔上屏后真轮播突跳替换。
+  //   建骨架后 completeCarouselProgress(详情就绪触发)会把进度推满 → revealOnce→injectCarousel 原位替换。
+  //   sessionStorage 缓存恢复(apiShows 非空但尚未 reveal)的场景由此补上骨架, 与 v3.6.0 慢抓取时代
+  //   "apiShows 空窗期建骨架"观感对齐。
+  if (S.apiShows.length === 0 || (S.apiLoaded && !S.carouselRevealed)) {
     // [lc-768] 拉取已完成但可用海报为 0(全是 STR/网盘且加载不到) → 主页提示而非骨架死等
     if (S.carouselLoadedButNone) {
       if (!S.placeholderInited) {
@@ -201,7 +256,7 @@ export function injectCarousel(): void {
     // 避免 MutationObserver 反复触发 injectCarousel → 反复清空重建占位 → 死循环(见 lc-100)。
     // 数据到位后 injectCarousel 会清空 section 并重建为真实轮播(占位自然被替换)。
     if (!S.placeholderInited) {
-      log('api not ready, building loading skeleton with progress count');
+      log('api not ready(or details enriching), building loading skeleton with progress count');
       buildLoadingPlaceholder(target);
       S.placeholderInited = true;
     }

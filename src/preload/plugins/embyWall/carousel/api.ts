@@ -15,9 +15,13 @@ import { scrapeLandscapeBackdrops, fetchItemDetail, resolveShowBackdrop } from '
 import { fetchRecognizedShows } from './itemListApi';
 
 // ── 数据就绪 → 渲染 钩子（依赖倒置，避免 api ↔ render 循环依赖）──────────────
+import { setRevealHook } from './progress';
 let onShowsReady: (() => void) | null = null;
 /** 由入口注册：fetchShowsViaIPC 内部详情补完、需要揭示轮播时回调（= injectCarousel）。 */
-export function setOnShowsReady(fn: () => void): void { onShowsReady = fn; }
+export function setOnShowsReady(fn: () => void): void {
+  onShowsReady = fn;
+  setRevealHook(fn); // [lc-1136] progress.ts watchdog 卡死自愈走同一揭示钩子
+}
 
 // [lc-950] 轮播数据缓存: 把 S.apiShows(含 base64 data URL 横版海报 + 简介等)序列化到 sessionStorage,
 //   跨整页重载/模块重启持久化。返回首页重建时若 S.apiShows 已空(整页刷新), 可零网络即时恢复海报/简介,

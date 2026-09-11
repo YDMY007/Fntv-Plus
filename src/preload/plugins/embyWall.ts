@@ -2,7 +2,7 @@ import { ABOUT_LINK_URL, openFeedbackChoiceModal } from './embyWall/modals/feedb
 import { UiThemeMode, applyUiTheme, getEffectiveDark, getUiTheme, injectUiThemeStyle, removeThemeModeSetting, setUiTheme } from './embyWall/theme';
 import { applyCarouselLogoNow, backfillDetailLogo } from './embyWall/carousel/logo';
 import { applyLoginBgVar } from './embyWall/login';
-import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, resumeCarousel } from './embyWall/carousel/render';
+import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, migrateSlotToRealSection, resumeCarousel } from './embyWall/carousel/render';
 import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
@@ -12,7 +12,6 @@ import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
 import { fetchShowsViaIPC, setOnShowsReady } from './embyWall/carousel/api';
-import { armBootCover } from './embyWall/carousel/bootCover';
 
 // preload/plugins/embyWall.ts
 //
@@ -6157,22 +6156,17 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
 
-  // [lc-1084] 首页强刷时原生 #root(~2.5s) 先于轮播 revealOnce(~4s) 渲染 → 原生页裸奔闪现。
-  //   启动期隐藏 #root + 铺全屏骨架遮罩, 轮播注入/STRM 提示/离开首页/12s 兜底任一命中即揭示。
-  armBootCover();
-
   // 1) 首屏: 立即注入(数据未到显示骨架占位)
   injectCarousel();
 
   // 2) 异步: 用已知剧集GUID反查库GUID→item/list→动态数据
   // [lc-625] 不再无条件重建: fetchShowsViaIPC 内部(lc-624)详情就绪→revealOnce 统一渲染。
-  //   ⚠️ 此 .then 在 fetchShowsViaIPC 同步返回后立即执行(不等详情), 若用 !S.carouselInited 判断
-  //   必为 true(此时 revealOnce 还没跑) → 会用未补详情的竖版数据直接渲染 → 进度条 20% 就出图!
-  //   修复: 仅当 S.carouselRevealed(内部已渲染完成) 才允许兜底重建; 未完成则交给内部 revealOnce。
+  //   ⚠️ 渲染守卫已收进 injectCarousel 内部([lc-1136]): 此处直接调用, apiShows 空或详情补完中
+  //   只会建/保留骨架占位, 不会用未补详情的竖版数据渲染(先竖版后横版闪屏根因不变)。
   fetchShowsViaIPC(base).then(() => {
     if (S.apiShows.length === 0) { log('API empty'); return; }
     log('got', S.apiShows.length, 'shows from API (carousel revealed by fetchShowsViaIPC)');
-    if (!S.carouselInited && S.carouselRevealed) { S.carouselInited = false; injectCarousel(); }
+    if (!S.carouselInited && S.carouselRevealed) injectCarousel();
   }).catch((e: any) => log('fetch error:', e));
 
   // 3) 定时自动刷新轮播内容(无需退出重开):
@@ -6194,7 +6188,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       log('carousel refresh: got', S.apiShows.length, 'shows');
       // [lc-625] 兜底: 内部 revealOnce 已渲染则跳过(自动刷新时 S.carouselRevealed 已重置为 false,
       //   内部会重新渲染; 此处仅防内部异常未渲染时的兜底)
-      if (!S.carouselInited && S.carouselRevealed) { S.carouselInited = false; injectCarousel(); }
+      if (!S.carouselInited && S.carouselRevealed) injectCarousel();
     }).catch((e: any) => log('carousel refresh error:', e));
   }
   const CAROUSEL_REFRESH_MS = 10 * 60 * 1000;
@@ -6231,10 +6225,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       S.carouselContainer = null;
       S.carouselInited = false;
     }
-    // [lc-623] 数据已到达但未 reveal(详情补完流程进行中)时不抢先渲染——
+    // [lc-623] 数据已到达但未 reveal(详情补完流程进行中)时不渲染真实轮播——
     // 否则 MutationObserver 会用竖版 backdrop 渲染一次, 之后 revealOnce 再渲染横版
-    // → '先竖版后横版'闪屏。只有骨架阶段(S.apiShows 空)或已 reveal 后才允许注入。
-    if (!S.carouselInited && !(S.apiLoaded && !S.carouselRevealed)) injectCarousel();
+    // → '先竖版后横版'闪屏。渲染守卫已收进 injectCarousel 内部(apiShows 空或详情补完中一律
+    // 建骨架占位, [lc-1136]): 骨架先行占位, revealOnce(details-ready→completeCarouselProgress
+    // 推满进度条)后再原位替换真实轮播, 媒体库区块就绪前后都不裸奔。
+    migrateSlotToRealSection(); // [lc-1136] 轮播建在预留合成块时, 真 section 可匹配即迁入(此时 injectCarousel 被 inited 守卫挡住)
+    if (!S.carouselInited) injectCarousel();
   }).observe(document.body, { childList: true, subtree: true });
 
   setInterval(() => {
