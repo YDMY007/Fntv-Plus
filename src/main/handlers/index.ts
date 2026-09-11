@@ -29,10 +29,28 @@ function loadPlugins(): void {
     // patchesDir/main 与 app.asar/dest/main 互为镜像，被补文件相对 main 的路径一致，便于映射回 asar 原始位置
     const patchMainRoot = mainPatchDir ? path.dirname(path.dirname(mainPatchDir)) : ''; // .../patches/main
     const asarMainRoot = path.dirname(path.dirname(bundledDir)); // .../dest/main
+    // [lc-1137] 覆盖层优先解析: 补丁里的 main/common/* modules/* 也随包分发(全量快照),
+    //   被 require 到时必须解析到覆盖层新版, 而非 asar 内旧版(否则共享模块的热修复永不生效)。
+    //   规则: 请求方来自覆盖层 且 相对依赖能映射到覆盖层同路径文件存在 → 直接用覆盖层路径;
+    //   否则维持原行为(映射回 asar 原位置解析)。
+    function resolveFromOverlay(request: string, parentFilename: string): string | null {
+        if (!patchMainRoot || !parentFilename.startsWith(patchMainRoot)) return null;
+        if (typeof request !== 'string' || !request.startsWith('.')) return null;
+        const baseDir = path.dirname(parentFilename);
+        const joined = path.resolve(baseDir, request);
+        if (!joined.startsWith(patchMainRoot)) return null;
+        for (const cand of [joined, joined + '.js', path.join(joined, 'index.js')]) {
+            try { if (fs.existsSync(cand) && fs.statSync(cand).isFile()) return cand; } catch { /* ignore */ }
+        }
+        return null;
+    }
     function requireMainPatch(file: string): Plugin {
         Module._resolveFilename = function (request: string, parent: any, ...rest: any[]): string {
             if (mainPatchDir && patchMainRoot && parent && typeof parent.filename === 'string'
                 && parent.filename.startsWith(mainPatchDir)) {
+                // [lc-1137] 覆盖层内同路径文件存在 → 优先解析到覆盖层(共享模块新版生效)
+                const overlayHit = resolveFromOverlay(request, parent.filename);
+                if (overlayHit) return overlayHit;
                 // 还原该补丁文件在 asar 中的原始路径，作为 require 解析起点（文件不必真实存在，仅取其目录用于解析）
                 const relPath = parent.filename.slice(patchMainRoot.length).replace(/^[\\/]/, '');
                 const asarOriginal = path.join(asarMainRoot, relPath);

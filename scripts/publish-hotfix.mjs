@@ -50,7 +50,10 @@ const collectJs = (absDir, relPrefix) => {
         }
     }
 };
-for (const sub of ['main/handlers/plugins', 'preload/plugins', 'modules']) {
+// [lc-1137] 收集范围扩展: + main/common(danmuApi/playbackShim/biliRunner 等被插件 require 的共享模块)
+//   + preload/core(i18n/hooks/logger 等被插件 require 的共享模块)。缺了它们, 补丁文件 require 时
+//   回退解析到 asar 内旧版(3.6.0 无 i18n/danmuApi → 直接 require 失败, 补丁整体加载被跳过)。
+for (const sub of ['main/handlers/plugins', 'main/common', 'preload/plugins', 'preload/core', 'modules']) {
     const dir = path.join(root, 'dest', sub);
     if (!fs.existsSync(dir)) continue;
     collectJs(dir, sub);

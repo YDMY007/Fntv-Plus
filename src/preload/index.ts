@@ -22,33 +22,51 @@ const patchesDir = process.env.FNTV_PATCHES_DIR || '';
 
 // [lc-474] 让热补丁文件(位于 asar 外 patches 目录)的同级 require 回退到 asar 内原插件目录，
 //   如此只需覆盖被修文件，其依赖(如 './core/hooks')仍从原处解析，无需把整个插件树打进补丁。
+// [lc-1137] 语义反转: 补丁包是 dest 全量快照(preload/plugins + preload/core 都在内),
+//   覆盖层内同路径文件存在 → 必须优先解析到覆盖层(新版), 而非 asar 旧版。
+//   旧「asar 优先、失败才回退」导致共享模块(core/i18n 等)与插件子模块(carousel/*)的热修复永不生效。
 const Module = require('module');
 const _origResolve = Module._resolveFilename;
 function requirePatch(patchFile: string): void {
     Module._resolveFilename = function (request: string, parent: any, ...rest: any[]): string {
-        try {
-            return _origResolve.call(this, request, parent, ...rest);
-        } catch (e) {
-            if (patchesDir && parent && typeof parent.filename === 'string'
-                && parent.filename.startsWith(patchesDir)
-                && typeof request === 'string' && request.startsWith('.')) {
-                // [fix] 把相对依赖重新相对到 bundled 插件目录解析；
-                //   用 stub-parent 走 _origResolve 可自动补 .js/.json 扩展名，
-                //   旧写法 path.resolve 不带扩展名、fs.existsSync 必为 false 导致回退失效，
-                //   补丁文件(如 embyWall.js)因 require('../core/hooks') 失败而被整体跳过，热补丁永不生效。
-                const stubParent = {
-                    filename: path.join(bundledPluginsDir, '_patch_stub_.js'),
-                    id: path.join(bundledPluginsDir, '_patch_stub_.js'),
-                    paths: [],
-                };
-                try {
-                    return _origResolve.call(this, request, stubParent as any, ...rest);
-                } catch {
-                    // bundled 中也缺失该依赖，保留原错误
+        if (patchesDir && parent && typeof parent.filename === 'string'
+            && parent.filename.startsWith(patchesDir)
+            && typeof request === 'string' && request.startsWith('.')) {
+            // [lc-1137] 覆盖层优先: 相对依赖映射到覆盖层同路径, 文件存在即用(带扩展名/index 探测)
+            const baseDir = path.dirname(parent.filename);
+            const joined = path.resolve(baseDir, request);
+            if (joined.startsWith(patchesDir)) {
+                for (const cand of [joined, joined + '.js', path.join(joined, 'index.js')]) {
+                    try {
+                        if (fs.existsSync(cand) && fs.statSync(cand).isFile()) return cand;
+                    } catch { /* ignore */ }
                 }
             }
-            throw e;
+            // 覆盖层没有 → 映射回 asar 原位置解析(stub-parent 自动补 .js/.json 扩展名)。
+            //   旧写法 path.resolve 不带扩展名、fs.existsSync 必为 false 导致回退失效，
+            //   补丁文件(如 embyWall.js)因 require('../core/hooks') 失败而被整体跳过，热补丁永不生效。
+            const relToPreload = path.relative(path.join(patchesDir, 'preload'), joined);
+            const stubPath = path.join(bundledPluginsDir, '_patch_stub_.js');
+            const stubParent = {
+                filename: stubPath,
+                id: stubPath,
+                paths: [],
+            };
+            try {
+                const asarTarget = path.join(bundledPluginsDir, relToPreload);
+                if (relToPreload && !relToPreload.startsWith('..')) {
+                    try {
+                        if (fs.existsSync(asarTarget) || fs.existsSync(asarTarget + '.js') || fs.existsSync(path.join(asarTarget, 'index.js'))) {
+                            return _origResolve.call(this, asarTarget, stubParent as any, ...rest);
+                        }
+                    } catch { /* ignore */ }
+                }
+                return _origResolve.call(this, request, stubParent as any, ...rest);
+            } catch {
+                // bundled 中也缺失该依赖，落到默认解析（保留原错误路径）
+            }
         }
+        return _origResolve.call(this, request, parent, ...rest);
     };
     try {
         require(patchFile);
