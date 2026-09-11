@@ -209,9 +209,10 @@ export class MpvPlayer extends BasePlayer {
 
             // [lc-1106] 把 M3U8 路径告诉 fntv_replay.lua：EOF 后重新播放才能恢复完整列表，
             // 否则 do_replay 只能 loadfile 单集代理 URL → 播放列表全丢
-            if (infos.length > 1) {
-                this.mpvInstance.command('script-message', ['fntv-playlist-path', this.playlistFilePath]);
-            }
+            // [lc-1139] 单集(列表 length===1)也发: do_replay 优先 last_playlist(M3U8)再退 last_path,
+            //   单集场景二者等价但 M3U8 路径更可靠(last_path 在部分 EOF 时序下可能拿不到),
+            //   「其他」分类单视频文件夹播完重播不再有边缘差异。
+            this.mpvInstance.command('script-message', ['fntv-playlist-path', this.playlistFilePath]);
 
             // 跳转到指定位置
             if (pos > 0) {
