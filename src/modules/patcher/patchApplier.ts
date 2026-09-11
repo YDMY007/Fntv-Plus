@@ -450,37 +450,23 @@ function compareVersions(a: string, b: string): number {
     return 0;
 }
 
-// 解析版本号类型/序号为可比较的 rank：无后缀=0；-test=1xx；-full=3xx；-hotfix=2xx（xx=序号, 如 -hotfix2=202）
-// [lc-661] 反转 full/hotfix：full(3) > hotfix(2) > test(1) > 无后缀(0)。
-//   典型场景：应用内显示 3.4.1-full 的全量包用户同版本不再收 3.4.1-hotfix 热补丁；
-//   无后缀(3.4.1)用户则会正常收到 3.4.1-hotfix 热补丁。
-function parseVersion(v: string): { base: string; rank: number } {
-    const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
-    if (m) {
-        const suffix = m[0].toLowerCase();
-        // full=3 > hotfix=2 > test=1：同 base 下全量包高于热补丁
-        const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 3 : 2);
-        const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
-        return { base: m[1], rank: typeRank * 100 + idx };
-    }
-    return { base: v || '0', rank: 0 };
+// [lc-1138] 剥除版本号历史类型后缀（-hotfix/-full/-test 及序号），取纯数字 base。
+// 更新判定改为纯版本号语义：同版本号(剥后缀相等)有热补丁=不更新；仅 base 严格大于基线才拉取。
+function stripVersionSuffix(v: string): string {
+    return String(v || '0').replace(/^v/i, '').replace(/-(?:hotfix|full|test)\d*$/i, '');
 }
 
-// 版本比较：base 优先，base 相同比 rank（类型/序号）。[lc-661] full(3) > hotfix(2) > test(1) > 无后缀(0)。
-// -full 用户同版本不再收 -hotfix；-hotfix 用户链式递进；无后缀(基线=安装版本)会收同版本 -hotfix。
+// [lc-1138] 版本比较（纯数字）：剥后缀后 base 比较，base 相同=不大于（同版本号有热补丁不更新）。
+// 旧 rank 后缀轨道(full/hotfix/test 权重)整体废除——更新类型由版本号增量决定(patch+1=hotfix, minor/major+=full)，
+// 该判定职责已归 updateChecker.typeFromVersion；此处只负责「要不要拉取」这一个布尔判定。
 function versionGreater(latest: string, baseline: string): boolean {
-    const a = parseVersion(latest);
-    const b = parseVersion(baseline);
-    const c = compareVersions(a.base, b.base);
-    if (c !== 0) return c > 0;
-    return a.rank > b.rank;
+    return compareVersions(stripVersionSuffix(latest), stripVersionSuffix(baseline)) > 0;
 }
 
-// 从发行说明(更新日志)取「版本号最高」的 ## vX.Y.Z(-hotfix|-full)? (date) heading；找不到回退 null
-// 注意：仅匹配 hotfix|full，天然排除 -test，使默认检测/应用补丁永不落到测试版。
-// (?=[\s（(]|$) 锚定：版本号后须为空白/半角或全角左括号/行尾，避免 `## v3.3.7-test` 被部分匹配成
-// 基版本 `3.3.7`（那样会把测试版误判为普通版）；同时兼容更新日志里 `（2026-...）` 全角括号的写法。
-// 取「最高版本」而非「首条」：兼容更新日志乱序/多次追加 hotfix 的情况（如 v3.3.7-hotfix 与 v3.3.8-hotfix）。
+// 从发行说明(更新日志)取「版本号最高」的 ## vX.Y.Z (date) heading；找不到回退 null
+// [lc-1138] 新格式 = 纯数字版本；兼容历史 -hotfix/-full 后缀（versionGreater 已剥后缀比较）。
+// 仅匹配数字/历史 hotfix|full 后缀，天然排除 -test，使默认检测/应用补丁永不落到测试版。
+// (?=[\s（(]|$) 锚定：版本号后须为空白/半角或全角左括号/行尾；兼容更新日志里 `（2026-...）` 全角括号写法。
 function parseLatestChangelogVersion(body: string): string | null {
     const lines = (body || '').split(/\r?\n/);
     let best: string | null = null;
@@ -495,7 +481,7 @@ function parseLatestChangelogVersion(body: string): string | null {
 
 // [lc-482] 从 Gitee 发布列表中选出「版本号最高的非 test 发布」作为"最新"。
 // Gitee /releases 默认升序(最旧在前)，直接取 [0] 会拿到 v3.0.0 之类的旧版，故需自行择优。
-// test 发布(更新日志含 -test heading 或 tag 带 -test)一律排除——普通检测/应用补丁只认 hotfix|full。
+// test 发布(更新日志含 -test heading 或 tag 带 -test)一律排除——普通检测/应用补丁不落测试版。
 function pickLatestRelease(releases: any[]): any {
     let best: any = null;
     let bestVer = '0';
@@ -542,12 +528,12 @@ async function finalizeAfterApply(result: ApplyResult): Promise<ApplyResult> {
 /**
  * [lc-483] 仅检查是否有可用热补丁（不下载、不应用），供渲染端弹窗先展示版本号与确认按钮。
  * 逻辑与 applyLatestPatch 的「是否更新」判断保持一致：以更新日志最新 heading 为准，
- * 与已应用补丁版本比较；天然排除 -test（parseLatestChangelogVersion 只认 hotfix|full）。
+ * 与基线纯数字比较（[lc-1138] 同版本号有热补丁=不更新）；天然排除 -test。
  */
 export async function checkLatestPatchInfo(): Promise<PatchCheckInfo> {
     const applied = getAppliedPatchVersion();
-    // [lc-661] 基线优先级: 已应用补丁版本 > 应用内显示版本(appDisplayVersion) > 安装包版本(app.getVersion())。
-    //   与 updateChecker 保持一致：选 -full 轨道的用户同版本不再提示热补丁。
+    // [lc-1138] 基线优先级: 已应用补丁版本 > 应用内显示版本(appDisplayVersion) > 安装包版本(app.getVersion())。
+    //   versionGreater 已剥后缀：已应用 3.6.1-hotfix2 的用户看到 3.6.1 → 剥后缀相等 → 不再提示。
     const baseline = applied || getAppDisplayVersion() || app.getVersion();
     const currentVersion = baseline;
     try {
@@ -631,7 +617,7 @@ export async function listTestPatches(): Promise<TestPatchListResult> {
                 hasAsset: !!exact,
             });
         }
-        // 降序（最新在前）：先比 base 版本，再比 rank（类型/序号）
+        // 降序（最新在前）：[lc-1138] 纯数字比较（剥后缀），同版本号视为相等
         patches.sort((a, b) => {
             if (versionGreater(a.version, b.version)) return -1;
             if (versionGreater(b.version, a.version)) return 1;
@@ -825,7 +811,7 @@ async function applyManifestFiles(manifest: PatchManifest, version: string, onPr
 export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyResult> {
     const onProgress = opts && opts.onProgress;
     const applied = getAppliedPatchVersion();
-    // [lc-661] 与 checkLatestPatchInfo 一致：基线 = 已应用版本 > 应用内显示版本 > 安装版本
+    // [lc-1138] 与 checkLatestPatchInfo 一致：基线 = 已应用版本 > 应用内显示版本 > 安装版本（纯数字比较，同版本号不更新）
     const baseline = applied || getAppDisplayVersion() || app.getVersion();
     log.info(`[patch] 当前已应用补丁版本: ${applied || '(无)'}, 基线版本: ${baseline}`);
 
@@ -858,7 +844,7 @@ export async function applyLatestPatch(opts?: PatchApplyOptions): Promise<ApplyR
 
     // [回退] 旧 Gitee releases API / GitHub / 镜像（Gitee 需 token，仅供有 token 场景；GitHub 公开可读作为兜底）
     const release = await fetchReleaseJson();
-    // [lc-477] 版本号以更新日志最新 heading 为准(## vX.Y.Z(-hotfix)? (date))，Git tag 仅兜底
+    // [lc-477] 版本号以更新日志最新 heading 为准(## vX.Y.Z (date)，兼容历史后缀)，Git tag 仅兜底
     const body = release.body || release.note || '';
     const latestVersion: string = parseLatestChangelogVersion(body)
         || String(release.tag_name || '').replace(/^v/i, '')

@@ -83,41 +83,14 @@ export class UpdateChecker {
     }
 
     /**
-     * 解析更新类型标识。
-     * 主信号 = 更新日志里最新 `## vX.Y.Z(-hotfix|-full|-test) (date)` heading 的版本后缀：
-     *  - `-hotfix` / `-hotfixN` → 热补丁(hotfix)，应用内拉取 Gitee 补丁包；
-     *  - `-full` / `-fullN`     → 全量包(full)，去 GitHub 下载覆盖安装；
-     *  - `-test` / `-testN`     → 开发者自用测试版(test)，绝不向用户推送（仅供「应用补丁」按钮手动拉取测试）；
-     *  - 无后缀的普通版本(如 `v3.3.6`) → 视为全量包(full)。
-     * Git Release tag 本身保持干净(如 `v3.3.6`)，不带后缀。
-     * 兼容旧发布：发行说明显式标识 `<!-- fntv:type:hotfix|full|test -->` 仍生效；
-     * 再退按资产推断：含 `patch-<ver>.json` 视为 hotfix。
-     */
-    private parseUpdateType(body: string, assets: any[], latestVersion: string): 'hotfix' | 'full' | 'test' {
-        if (/-hotfix\d*$/i.test(latestVersion || '')) return 'hotfix';
-        if (/-full\d*$/i.test(latestVersion || '')) return 'full';
-        // [lc-480] -test / -testN = 开发者自用测试版，绝不向用户推送更新
-        if (/-test\d*$/i.test(latestVersion || '')) return 'test';
-        const m = /fntv:type:\s*(hotfix|full|test)/i.exec(body || '');
-        if (m) {
-            const t = m[1].toLowerCase();
-            return t === 'hotfix' ? 'hotfix' : (t === 'test' ? 'test' : 'full');
-        }
-        const hasPatch = Array.isArray(assets)
-            && assets.some((a: any) => a && a.name === `patch-${latestVersion}.json`);
-        return hasPatch ? 'hotfix' : 'full';
-    }
-
-    /**
-     * 从发行说明(更新日志)里取「最新一条」`## vX.Y.Z(-hotfix|-full)? (date)` heading 的版本号。
-     * 更新日志 newest-first，取第一个 `## ` heading 即为当前发布版本。
+     * 从发行说明(更新日志)里取「最高」`## vX.Y.Z (date)` heading 的版本号（[lc-1138] 兼容历史 -hotfix/-full 后缀）。
      * 找不到则返回 null（调用方回退到 Git tag_name）。
      */
     private parseLatestChangelogVersion(body: string): string | null {
         const lines = (body || '').split(/\r?\n/);
         let best: string | null = null;
         for (const line of lines) {
-            // 仅匹配 hotfix|full（排除 -test），使 test 更新日志永不触发用户更新；取最高版本非首条。
+            // [lc-1138] 新格式 = 纯数字 `## v3.6.1 (date)`；兼容历史 -hotfix/-full 后缀；排除 -test。
             // (?=[\s（(]|$) 兼容全角括号 `（2026-...）` 写法，并防止 `v3.3.7-test` 被部分匹配成 `3.3.7`。
             const m = /^##\s+v?(\d+\.\d+\.\d+(?:-(?:hotfix|full)\d*)?)(?=[\s（(]|$)/i.exec(line.trim());
             if (!m) continue;
@@ -142,9 +115,7 @@ export class UpdateChecker {
             if (this.versionGreater(v, bestVer)) { bestVer = v; best = rel; }
         }
         return best;
-    }
-
-    /**
+    }    /**
      * 通过国内 Gitee 检测最新版本（唯一检测源）。
      *  - 版本号/类型以「更新日志最新 heading」为准：`## vX.Y.Z(-hotfix|-full) (date)`（newest-first 取第一条）；
      *    Git Release tag 保持干净(如 v3.3.6)，仅作兜底；
@@ -194,14 +165,18 @@ export class UpdateChecker {
         log.info(`Gitee 检测版本: ${ver}, 类型: ${updateType}${isTest ? ' (test 开发版, 不推送用户)' : ''}`);
 
         const applied = getAppliedPatchVersion();
-        // [lc-511] 仅当「已应用版本」与「待检测更新」同为热补丁时，才以已应用版本为基线（热补丁链式递进、避免重复提示）；
-        // 若已应用的是 -test 开发者版、或待检测为全量包，一律以安装包版本(currentVersion)为基线，
-        // 确保：① 开发者测试版版本号再高也不会挡住官方更新；② 用户已应用热补丁后，正式版(全量包)更新总能直接盖过。
-        const baseline = (updateType === 'hotfix' && applied && /-hotfix\d*$/i.test(applied)) ? applied : this.currentVersion;
+        // [lc-1138] 基线规则简化：热补丁链式递进仅保留「同 minor/major 轨道」语义——
+        // 待检测为热补丁(patch 位增加)且已应用热补丁时，以已应用版本剥后缀后与当前安装版本取较高者为基线，
+        // 避免已应用 3.6.1-hotfix 的用户被 3.6.0 安装版本基线拉低而重复提示；
+        // 全量更新(minor/major 增加)一律以安装包版本为基线（正式版总能盖过热补丁与测试版）。
+        const appliedBase = this.stripSuffix(applied);
+        const curBase = this.stripSuffix(this.currentVersion);
+        const verBase = this.stripSuffix(ver);
+        const patchTrack = (updateType === 'hotfix') && (verBase.split('.')[0] === curBase.split('.')[0]) && (verBase.split('.')[1] === curBase.split('.')[1]);
+        const baseline = (patchTrack && appliedBase && this.versionGreater(appliedBase, curBase)) ? appliedBase : curBase;
 
-        // 注意: semver 把 -hotfix/-full 当预发布, gt('1.2.3-hotfix','1.2.3') 会返回 false，
-        // 故统一走自定义 versionGreater：无后缀最低(0)，hotfix(2) > 无后缀，full(3) > hotfix，test(1) 最低。
-        const hasUpdate = !isTest && this.versionGreater(ver, baseline);
+        // [lc-1138] hasUpdate = 版本号纯数字大于基线（semver 优先，失败回落逐位比较）。后缀已剥除，无 rank 概念。
+        const hasUpdate = !isTest && this.cmpBase(verBase, baseline) > 0;
         log.info(`[update-debug] checkGitee: ver=${ver} type=${updateType} applied=${applied} baseline=${baseline} hasUpdate=${hasUpdate}`);
 
         return {
@@ -216,12 +191,28 @@ export class UpdateChecker {
         };
     }
 
-    /** 从版本号后缀解析更新类型（与 parseUpdateType 后缀规则一致）：-hotfix=补丁 / -full=全量包 / -test=开发者版 / 无后缀=full。 */
+    /**
+     * [lc-1138] 解析更新类型：纯版本号数字判定，不再用 -full/-hotfix 后缀分轨。
+     * 规则（与基线当前版本逐位比较）：
+     *  - patch 位(第三位)增加（如 3.6.0 → 3.6.1） → hotfix（热补丁，应用内拉取）；
+     *  - minor 位(第二位)或 major 位(第一位)增加（如 3.6.0 → 3.7.0 / 4.0.0） → full（必须下载全量包）。
+     * 兼容旧发布：版本号仍允许带 -hotfix/-full/-test 后缀，后缀剥除后按数字判定；
+     * `-test` 一律视为 test 开发版（绝不推送用户）。
+     */
     private typeFromVersion(v: string): 'hotfix' | 'full' | 'test' {
-        if (/-hotfix\d*$/i.test(v)) return 'hotfix';
-        if (/-full\d*$/i.test(v)) return 'full';
-        if (/-test\d*$/i.test(v)) return 'test';
-        return 'full';
+        if (/-test\d*$/i.test(v || '')) return 'test';
+        const base = this.stripSuffix(v);
+        const cur = this.stripSuffix(this.currentVersion);
+        const a = base.split('.').map(Number);
+        const b = cur.split('.').map(Number);
+        const major = (a[0] || 0) > (b[0] || 0);
+        const minor = (a[0] || 0) === (b[0] || 0) && (a[1] || 0) > (b[1] || 0);
+        return (major || minor) ? 'full' : 'hotfix';
+    }
+
+    /** [lc-1138] 剥除版本号的历史类型后缀（-hotfix/-full/-test 及序号），取纯数字 base。 */
+    private stripSuffix(v: string): string {
+        return String(v || '0').replace(/^v/i, '').replace(/-(?:hotfix|full|test)\d*$/i, '');
     }
 
     /**
@@ -247,28 +238,7 @@ export class UpdateChecker {
         return 0;
     }
 
-    /**
-     * 解析版本号中的类型后缀为可比较的 rank。
-     * 无后缀=0；`-test`/`-testN`=1xx；`-hotfix`/`-hotfixN`=2xx；`-full`/`-fullN`=3xx（xx=序号）。
-     * [lc-661] 反转 full/hotfix：full(3) > hotfix(2) > test(1) > 无后缀(0)。
-     *   典型场景：安装「全量包」的用户应用内显示 3.4.1-full，不应再收到同版本 3.4.1-hotfix 热补丁提示；
-     *   选择「无后缀」的用户基线为 3.4.1，会正常收到 3.4.1-hotfix 热补丁。
-     *   跨版本升级仍由 base 比较决定（base 高者优先），不受 rank 影响。
-     *   `-test` 权重最低，开发者测试版绝不向普通用户推送。
-     */
-    private parseVersion(v: string): { base: string; rank: number } {
-        const m = /^(.*?)-(?:hotfix|full|test)(\d*)$/i.exec(v || '');
-        if (m) {
-            const suffix = m[0].toLowerCase();
-            // full=3 > hotfix=2 > test=1：同 base 下全量包高于热补丁
-            const typeRank = suffix.includes('test') ? 1 : (suffix.includes('full') ? 3 : 2);
-            const idx = m[2] === '' ? 1 : parseInt(m[2], 10);
-            return { base: m[1], rank: typeRank * 100 + idx };
-        }
-        return { base: v || '0', rank: 0 };
-    }
-
-    /** 仅比较 base 部分（semver 优先，失败回落到数字比较）。 */
+    /** 仅比较 base 部分（semver 优先，失败回落到数字比较）。入参应为已剥后缀的纯数字版本。 */
     private cmpBase(a: string, b: string): number {
         if (semver) {
             try {
@@ -281,17 +251,11 @@ export class UpdateChecker {
     }
 
     /**
-     * 版本比较：base 优先，base 相同则比 rank（类型/序号）。
-     * [lc-661] rank: full(3) > hotfix(2) > test(1) > 无后缀(0)。
-     *   故「无后缀」用户会收到同版本 -hotfix 热补丁；而 -full 用户同版本不再收 -hotfix（全量轨道优先）。
-     * 例：versionGreater('1.2.3-hotfix','1.2.3') === true；versionGreater('1.2.3-hotfix','1.2.3-full') === false。
+     * [lc-1138] 版本比较（纯数字）：剥后缀后 base 优先，base 相同=不大于。
+     * 「同版本号有热补丁不更新」：3.6.1 基线看到 3.6.1-hotfix2 → 剥后缀相等 → false，不再提示。
      */
     private versionGreater(latest: string, baseline: string): boolean {
-        const a = this.parseVersion(latest);
-        const b = this.parseVersion(baseline);
-        const c = this.cmpBase(a.base, b.base);
-        if (c !== 0) return c > 0;
-        return a.rank > b.rank;
+        return this.cmpBase(this.stripSuffix(latest), this.stripSuffix(baseline)) > 0;
     }
 
     /**

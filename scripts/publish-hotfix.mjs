@@ -7,7 +7,12 @@
  *
  * 需要环境变量 GITEE_TOKEN（主仓库写入权限）。
  * 用法: GITEE_TOKEN=xxx node scripts/publish-hotfix.mjs <version> <minAppVersion>
- *   例: GITEE_TOKEN=xxx node scripts/publish-hotfix.mjs 3.4.1-hotfix 3.4.0
+ *   例: GITEE_TOKEN=xxx node scripts/publish-hotfix.mjs 3.6.2 3.6.0
+ *
+ * [lc-1138] 版本号规则 = 纯数字（如 3.6.2），不再使用 -hotfix/-full 后缀。
+ *   用户端更新类型由版本号增量决定：patch 位增加=热补丁(应用内拉取)，minor/major 位增加=全量包(下载安装)。
+ *   同版本号（剥后缀相等）已有热补丁的用户不再重复提示。
+ *   注意：<version> 的 patch 位必须大于当前线上版本，否则用户端判定「已是最新」不拉取。
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -15,10 +20,15 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv;
-const version = argv[2];
 let minAppVersion = argv[3] || '3.4.0';
-if (!version) {
+if (!argv[2]) {
     console.error('用法: node scripts/publish-hotfix.mjs <version> <minAppVersion>');
+    process.exit(1);
+}
+// [lc-1138] 版本号规整：剥 v 前缀与历史后缀，只保留纯数字版本再发布
+const version = String(argv[2]).replace(/^v/i, '').replace(/-(?:hotfix|full|test)\d*$/i, '');
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    console.error(`版本号须为纯数字 semver(如 3.6.2)，收到: ${version}`);
     process.exit(1);
 }
 
