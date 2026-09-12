@@ -6806,7 +6806,9 @@ html.fnos-perf.dark{
         return "sys/img" + (s.startsWith("/") ? s : "/" + s);
       };
       const rel = pickImg2(d.backdrops, true);
-      const backdrop = rel ? rel.startsWith("http") ? rel : base + "/v/api/v1/" + rel : "";
+      const relStill = !rel ? pickImg2(d.still_path || d.stillPath, true) : "";
+      const effRel = rel || relStill;
+      const backdrop = effRel ? effRel.startsWith("http") ? effRel : base + "/v/api/v1/" + effRel : "";
       const relPoster = pickImg2(d.posters, true);
       const poster = relPoster ? relPoster.startsWith("http") ? relPoster : base + "/v/api/v1/" + relPoster : "";
       const relLogo = pickImg2(d.logos);
@@ -13422,7 +13424,7 @@ html.fnos-perf.dark{
     return out;
   }
   async function runCustomScraper(btn) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e;
     const guid = seasonPageGuid();
     if (!guid || _running2) return;
     const enabled3 = S.customScraperEnabled;
@@ -13445,13 +13447,16 @@ html.fnos-perf.dark{
       const data = await fnosGetEditDetail(origin, guid);
       if (!data) throw new Error("\u8BFB\u53D6\u5B63\u4FE1\u606F\u5931\u8D25\uFF08getEditDetail\uFF09");
       const tmdbId = (() => {
-        var _a2, _b2;
-        const t2 = (_b2 = (_a2 = data.tmdb_id) != null ? _a2 : data.tmdbId) != null ? _b2 : data.trim_id;
+        var _a2;
+        const t2 = (_a2 = data.tmdb_id) != null ? _a2 : data.tmdbId;
         const s = String(t2 != null ? t2 : "").trim();
         return /^\d+$/.test(s) ? s : "";
       })();
+      const trimId = String((_a = data.trim_id) != null ? _a : "").trim();
+      const imdbId = String((_b = data.imdb_id) != null ? _b : "").trim();
+      const doubanId = String((_c = data.douban_id) != null ? _c : "").trim();
       const title = String(data.title || data.name || "").trim();
-      const seasonNumber = numOrNull((_b = (_a = data.index_number) != null ? _a : data.index) != null ? _b : data.season_number);
+      const seasonNumber = numOrNull((_e = (_d = data.index_number) != null ? _d : data.index) != null ? _e : data.season_number);
       if (!title && !tmdbId) throw new Error("\u65E0\u6807\u9898\u4E14\u65E0 TMDB id\uFF0C\u65E0\u6CD5\u522E\u524A");
       let episodes = await fnosEpisodeList(origin, guid).catch(() => []);
       if (!episodes.length) episodes = episodeGuidsFromDom();
@@ -13462,6 +13467,10 @@ html.fnos-perf.dark{
         title,
         season: seasonNumber != null ? seasonNumber : 0,
         tmdbId,
+        trimId,
+        imdbId,
+        doubanId,
+        guid,
         episodes
       });
       if (!scrap.size) {
@@ -13474,7 +13483,7 @@ html.fnos-perf.dark{
       }
       let idx = 0;
       const worker = async () => {
-        var _a2, _b2, _c, _d, _e, _f;
+        var _a2, _b2, _c2, _d2, _e2, _f;
         while (idx < episodes.length) {
           const ep = episodes[idx++];
           try {
@@ -13493,8 +13502,8 @@ html.fnos-perf.dark{
             }
             const titleKey = "title" in ed ? "title" : "name" in ed ? "name" : "title";
             const ovKey = "overview" in ed ? "overview" : "description" in ed ? "description" : "overview";
-            const curTitle = String((_c = ed[titleKey]) != null ? _c : "");
-            const curOv = String((_d = ed[ovKey]) != null ? _d : "");
+            const curTitle = String((_c2 = ed[titleKey]) != null ? _c2 : "");
+            const curOv = String((_d2 = ed[ovKey]) != null ? _d2 : "");
             const newTitle = decideField(curTitle, t2.title, null, isPlaceholderTitle);
             const newOv = decideField(curOv, t2.overview, null);
             if (newTitle === null && newOv === null) {
@@ -13522,7 +13531,7 @@ html.fnos-perf.dark{
               continue;
             }
             const vf = await fnosGetEditDetail(origin, ep.guid);
-            const vTitle = String(vf ? (_e = vf[titleKey]) != null ? _e : "" : "");
+            const vTitle = String(vf ? (_e2 = vf[titleKey]) != null ? _e2 : "" : "");
             const vOv = String(vf ? (_f = vf[ovKey]) != null ? _f : "" : "");
             if (titleChanged && vTitle.trim() !== newTitle.trim() || ovChanged && vOv.trim() !== newOv.trim()) {
               stats.failed++;

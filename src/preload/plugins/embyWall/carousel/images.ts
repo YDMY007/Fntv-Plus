@@ -242,7 +242,11 @@ export async function fetchItemDetail(base: string, id: string): Promise<any | n
       return 'sys/img' + (s.startsWith('/') ? s : '/' + s); // "/a9/06/x.webp" → "sys/img/a9/06/x.webp"
     };
     const rel = pickImg(d.backdrops, true); // [lc-599] 优先选 width*height 最大的横版
-    const backdrop = rel ? (rel.startsWith('http') ? rel : base + '/v/api/v1/' + rel) : '';
+    // [v1.7.0] Episode 级无 backdrops(数据存储报告 §5: 单集剧照是 still_path 专有) → 回退 still_path,
+    //   保证未来轮播/预览扩展到 Episode 条目时横版图仍精准可得(报告 §3 同一 sys/img 拼装)。
+    const relStill = !rel ? pickImg(d.still_path || d.stillPath, true) : '';
+    const effRel = rel || relStill;
+    const backdrop = effRel ? (effRel.startsWith('http') ? effRel : base + '/v/api/v1/' + effRel) : '';
     // [lc-606] 竖版海报: 右侧海报条(posterStrip)用的 show.poster 一直没被 API 补过。
     //   scrapeAllPageFirstScreen 只从 libIndex(iframe 懒加载图常空) + 当前页 DOM 抓,
     //   磁盘缓存(lc-586)化后 item.poster 也常空 → 右侧海报全变占位「暂无海报」。

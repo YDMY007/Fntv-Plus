@@ -33,7 +33,11 @@ function seasonPageGuid(): string | null { return seasonGuid(); }
 /** 调自定义刮削服务：POST {title, season, tmdbId, episodes} → 规范化响应。
  *  容错：episodes 数组元素允许 {index, episode, number} 任一作集号；title/name；overview/description。 */
 async function fetchFromCustomScraper(
-  url: string, payload: { title: string; season: number; tmdbId: string; episodes: { index: number | null; guid: string }[] },
+  url: string, payload: {
+    title: string; season: number; tmdbId: string;
+    trimId?: string; imdbId?: string; doubanId?: string; guid?: string;
+    episodes: { index: number | null; guid: string }[];
+  },
 ): Promise<Map<number, { title: string | null; overview: string | null }>> {
   const out = new Map<number, { title: string | null; overview: string | null }>();
   let j: any = null;
@@ -82,11 +86,15 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
     // 1) 季信息：标题/季号/TMDB id（给自定义服务尽可能多的匹配线索）
     const data = await fnosGetEditDetail(origin, guid);
     if (!data) throw new Error('读取季信息失败（getEditDetail）');
+    // [v1.7.0] 锚点全链(精准匹配优先级, 数据存储报告 §7.2): tmdb_id > trim_id(tt…) > imdb_id > douban_id
     const tmdbId = ((): string => {
-      const t = data.tmdb_id ?? data.tmdbId ?? data.trim_id;
+      const t = data.tmdb_id ?? data.tmdbId;
       const s = String(t ?? '').trim();
       return /^\d+$/.test(s) ? s : '';
     })();
+    const trimId = String(data.trim_id ?? '').trim();        // 形如 tt1399
+    const imdbId = String(data.imdb_id ?? '').trim();
+    const doubanId = String(data.douban_id ?? '').trim();
     const title = String(data.title || data.name || '').trim();
     const seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number);
     if (!title && !tmdbId) throw new Error('无标题且无 TMDB id，无法刮削');
@@ -100,7 +108,9 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
     // 3) 请求自定义刮削服务
     setBtn(btn, '⏳ 请求刮削服务…');
     const scrap = await fetchFromCustomScraper(url, {
-      title, season: seasonNumber ?? 0, tmdbId, episodes,
+      title, season: seasonNumber ?? 0, tmdbId,
+      trimId, imdbId, doubanId, guid,
+      episodes,
     });
     if (!scrap.size) {
       setBtn(btn, '⚠ 服务无分集数据', '自定义服务响应的 episodes 为空。');
