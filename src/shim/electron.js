@@ -693,8 +693,15 @@ const ipcRenderer = {
     return () => {};
   },
   once(channel, cb) {
-    // 兼容 embyWall 的 get-version → version-info 握手
-    if (channel === 'version-info') { try { cb({}, { version: '0.0.0-web' }); } catch {} }
+    // 兼容 embyWall 的 get-version → version-info 握手：网页端从后端 /api/status 拿真实版本
+    // （= manifest version，打包器自动维护）。旧版写死 '0.0.0-web' 侧栏永远显示 0.0.0（用户报障）。
+    if (channel === 'version-info') {
+      apiGet('/app/fntvplus/api/status').then((st) => {
+        const v = (st && st.version) || '';
+        if (!v) return; // 拿不到就保持侧栏 'v…' 占位, 不显示误导值
+        try { cb({}, { version: v }); } catch { /* ignore */ }
+      }).catch(() => { /* 同上, 保持占位 */ });
+    }
     return () => {};
   },
   removeListener() {},

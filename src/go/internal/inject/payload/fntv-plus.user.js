@@ -983,10 +983,15 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         },
         once(channel, cb) {
           if (channel === "version-info") {
-            try {
-              cb({}, { version: "0.0.0-web" });
-            } catch {
-            }
+            apiGet("/app/fntvplus/api/status").then((st) => {
+              const v = st && st.version || "";
+              if (!v) return;
+              try {
+                cb({}, { version: v });
+              } catch {
+              }
+            }).catch(() => {
+            });
           }
           return () => {
           };
@@ -15542,6 +15547,17 @@ html.fntv-boot-hide #root{visibility:hidden}
           dmApiStatus.style.color = "var(--fnos-ui-warn)";
         });
       });
+      const secScraperSvc = section("\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1");
+      const ssvBody = secScraperSvc.body;
+      ssvBody.style.cssText = "padding:14px 16px;display:flex;flex-direction:column;gap:8px;";
+      const ssvDesc = document.createElement("div");
+      ssvDesc.style.cssText = "font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.6;";
+      ssvDesc.textContent = t("\u63A5\u5165\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u7528\u4F60\u81EA\u5DF1\u7684\u6570\u636E\u6E90\u5237\u65B0\u5267\u96C6\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u6D77\u62A5\u7B49\u5143\u6570\u636E\uFF08\u652F\u6301 Bangumi/TMDB/\u8C46\u74E3\u7B49\u591A\u6E90\u805A\u5408\uFF09\u3002");
+      ssvBody.appendChild(ssvDesc);
+      const ssvBadge = document.createElement("div");
+      ssvBadge.style.cssText = "display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(255,180,60,.12);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.35);";
+      ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t("\u529F\u80FD\u5F00\u53D1\u4E2D\uFF0C\u656C\u8BF7\u671F\u5F85");
+      ssvBody.appendChild(ssvBadge);
       const secDiag = section("\u8BCA\u65AD\u4FE1\u606F");
       const diagBody = secDiag.body;
       const diagPre = document.createElement("pre");
@@ -16268,7 +16284,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         { id: "appearance", label: "\u901A\u7528", els: [secAppearance.el, secDaily.el, secUX.el, secSkip.el] },
         // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
         { id: "danmaku", label: "\u5F39\u5E55", els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
-        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secCustomProxy.el, secTmdbDirect.el] },
+        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secCustomProxy.el, secTmdbDirect.el] },
         { id: "diag", label: "\u8BCA\u65AD\u4E0E\u65E5\u5FD7", els: [secDiag.el, secDebug.el] },
         { id: "about", label: "\u5173\u4E8E", els: [secAbout.el] }
       ];
