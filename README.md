@@ -1,14 +1,41 @@
 # Fntv-Plus · 飞牛影视网页端增强（fpk · Web 版）
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.version&label=version&prefix=v)](https://github.com/YDMY007/Fntv-Plus-fpk)
+[![Test Build](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.version&label=test%20build&prefix=Fntv-Plus-v&suffix=%20%E2%80%A2%20%E5%BC%80%E5%8F%91%E6%B5%8B%E8%AF%95)](https://github.com/YDMY007/Fntv-Plus-fpk/releases)
+[![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.release_version&label=release&prefix=v)](https://github.com/YDMY007/Fntv-Plus-fpk/releases)
+[![Commits](https://img.shields.io/github/commit-activity/t/YDMY007/Fntv-Plus-fpk?label=commits)](https://github.com/YDMY007/Fntv-Plus-fpk/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/YDMY007/Fntv-Plus-fpk/main?label=last%20commit&display_date=committed)](https://github.com/YDMY007/Fntv-Plus-fpk/commits/main)
+[![Repo Size](https://img.shields.io/github/repo-size/YDMY007/Fntv-Plus-fpk?label=repo%20size)](https://github.com/YDMY007/Fntv-Plus-fpk)
+[![Code Size](https://img.shields.io/github/languages/code-size/YDMY007/Fntv-Plus-fpk?label=code)](https://github.com/YDMY007/Fntv-Plus-fpk)
+[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Node](https://img.shields.io/badge/Node.js-%E2%89%A518-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Platform](https://img.shields.io/badge/fnOS-x86__64-3d7fe0)](https://www.fnnas.com)
+[![Desktop Client](https://img.shields.io/badge/%E6%A1%8C%E9%9D%A2%E7%89%88-Fntv--Plus-8a6fd6)](https://github.com/YDMY007/Fntv-Plus)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 为飞牛影视（fnOS 影视应用）网页端打造的**界面增强应用**——以一个 fpk 包装进 fnOS，通过反向代理把增强能力注入到影视网页，**浏览器打开即是增强版**，电视 / 平板 / 手机 / 电脑全设备生效，无需在每台设备上装任何东西。
 
 > **本项目为个人练手作品，与飞牛 / fnOS 及官方影视应用无任何隶属关系。**
-> 需要完整桌面体验（MPV 硬解 / 原盘播放）？前往桌面客户端：**https://github.com/YDMY007/Fntv-Plus**
+> 需要完整桌面体验（MPV 硬解 / 原盘播放）？
+
+> 前往桌面客户端：**https://github.com/YDMY007/Fntv-Plus**
 
 ---
+
+<div align="center">
+  <img src="resource/docs/home.png" width="100%" alt="">
+  <p><em>图：web端实机展示</em></p>
+</div>
+
+<div align="center">
+  <img src="resource/docs/detail.png" width="100%" alt="">
+  <p><em>图：详情页增强</em></p>
+</div>
+
+<div align="center">
+  <img src="resource/docs/actor.png" width="100%" alt="">
+  <p><em>图：演员入库检测</em></p>
+</div>
 
 ## 实现方式
 
