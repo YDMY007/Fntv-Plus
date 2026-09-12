@@ -22,14 +22,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"fntvplus/internal/config"
 	"fntvplus/internal/inject"
 	"fntvplus/internal/proxy"
 )
-
-// appVersion 与根目录 manifest 的 version 保持一致（改动版本时两处同步）。
-const appVersion = "1.2.2"
 
 func main() {
 	port := flag.String("port", envOr("TRIM_SERVICE_PORT", "22350"), "监听端口")
@@ -38,6 +37,12 @@ func main() {
 	destDir := flag.String("dest", envOr("TRIM_APPDEST", "."), "应用安装目录（payload 来源）")
 	upstreamFlag := flag.String("upstream", "", "回环上游地址覆盖（如 http://127.0.0.1:5666）")
 	flag.Parse()
+
+	// [v1.8.0] 版本号直接读 manifest（打包器每次打包自动维护），废除两处同步的常量
+	appVersion := readManifestVersion(*destDir)
+	if appVersion == "" {
+		appVersion = "dev"
+	}
 
 	cfgPath := filepath.Join(*etcDir, "config.json")
 	cfg, err := config.Load(cfgPath)
@@ -105,6 +110,19 @@ func resolveUpstream(flagVal string) (*url.URL, error) {
 		}
 	}
 	return nil, fmt.Errorf("no valid upstream address")
+}
+
+// readManifestVersion 从 TRIM_APPDEST/manifest 读 version= 值（打包器自动维护）。
+func readManifestVersion(destDir string) string {
+	data, err := os.ReadFile(filepath.Join(destDir, "manifest"))
+	if err != nil {
+		return ""
+	}
+	m := regexp.MustCompile(`(?m)^\s*version\s*=\s*(\S+)`).FindStringSubmatch(string(data))
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
 }
 
 func envOr(key, def string) string {
