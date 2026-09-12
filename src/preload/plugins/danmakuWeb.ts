@@ -1260,8 +1260,42 @@ function applyFont(font: string): void {
 }
 
 /** @returns 视频矩形是否可用（false = video 还没尺寸或选错了元素） */
+// [v1.9.0] 全屏宿主迁移状态: canvas 常驻 body(fixed)。全屏时原生 fullscreen 元素进入
+// top layer、xgplayer 伪全屏容器 z-index 极高——body 下的 canvas 无论 z-index 都会被视频
+// 盖住(用户报障：全屏弹幕不显示)。解法=把 canvas 物理搬进全屏容器内(absolute 定位)。
+let canvasHost: HTMLElement | null = null;   // null=在 body(fixed 模式)
+
+/** 找弹幕 canvas 应该待的全屏容器: 原生 fullscreenElement 或 xgplayer 伪全屏根。 */
+function fullscreenHost(): HTMLElement | null {
+    const native = document.fullscreenElement as HTMLElement | null;
+    if (native) return native;
+    const pseudo = document.querySelector<HTMLElement>('.xgplayer.xgplayer-fullscreen');
+    return pseudo;
+}
+
+/** 每次矩形同步前调用: 依全屏状态把 canvas 迁入/迁出全屏容器(状态变化才动 DOM)。 */
+function ensureCanvasHost(): void {
+    if (!canvas) return;
+    const fs = fullscreenHost();
+    if (fs) {
+        // 容器被 SPA 重建(canvas 被甩出文档)时也要重新收养
+        if (canvasHost !== fs || !fs.contains(canvas)) {
+            if (!fs.contains(canvas)) fs.appendChild(canvas);
+            canvas.style.position = 'absolute';
+            canvas.style.zIndex = '20';   // 容器内: 高于视频, 低于控制栏
+            canvasHost = fs;
+        }
+    } else {
+        if (canvas.parentElement !== document.body) document.body.appendChild(canvas);
+        canvas.style.position = 'fixed';
+        canvas.style.zIndex = '5';
+        canvasHost = null;
+    }
+}
+
 function syncCanvasRect(): boolean {
     if (!canvas || !videoEl) return false;
+    ensureCanvasHost();
     const r = videoEl.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
     const dpr = window.devicePixelRatio || 1;
@@ -1980,7 +2014,15 @@ function startMountPoll(): void {
  */
 function leavePlayer(): void {
     stopRender();                       // 内部已 clearRect，画布内容一并抹掉
-    if (canvas) canvas.style.display = 'none';
+    if (canvas) {
+        if (canvasHost !== null && canvas.parentElement !== document.body) {
+            document.body.appendChild(canvas);   // 全屏容器随 SPA 销毁, 先把 canvas 抢回 body
+            canvas.style.position = 'fixed';
+            canvas.style.zIndex = '5';
+        }
+        canvasHost = null;
+        canvas.style.display = 'none';
+    }
     if (rectRO) { rectRO.disconnect(); rectRO = null; rectROTarget = null; }
     cancelClosePanel();
     dmBtnWrap?.remove();

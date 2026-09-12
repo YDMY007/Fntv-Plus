@@ -5267,8 +5267,33 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     ctx.font = font;
     ctxFont = font;
   }
+  var canvasHost = null;
+  function fullscreenHost() {
+    const native = document.fullscreenElement;
+    if (native) return native;
+    const pseudo = document.querySelector(".xgplayer.xgplayer-fullscreen");
+    return pseudo;
+  }
+  function ensureCanvasHost() {
+    if (!canvas) return;
+    const fs = fullscreenHost();
+    if (fs) {
+      if (canvasHost !== fs || !fs.contains(canvas)) {
+        if (!fs.contains(canvas)) fs.appendChild(canvas);
+        canvas.style.position = "absolute";
+        canvas.style.zIndex = "20";
+        canvasHost = fs;
+      }
+    } else {
+      if (canvas.parentElement !== document.body) document.body.appendChild(canvas);
+      canvas.style.position = "fixed";
+      canvas.style.zIndex = "5";
+      canvasHost = null;
+    }
+  }
   function syncCanvasRect() {
     if (!canvas || !videoEl) return false;
+    ensureCanvasHost();
     const r = videoEl.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return false;
     const dpr = window.devicePixelRatio || 1;
@@ -5961,7 +5986,15 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   }
   function leavePlayer() {
     stopRender();
-    if (canvas) canvas.style.display = "none";
+    if (canvas) {
+      if (canvasHost !== null && canvas.parentElement !== document.body) {
+        document.body.appendChild(canvas);
+        canvas.style.position = "fixed";
+        canvas.style.zIndex = "5";
+      }
+      canvasHost = null;
+      canvas.style.display = "none";
+    }
     if (rectRO) {
       rectRO.disconnect();
       rectRO = null;
