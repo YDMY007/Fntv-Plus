@@ -4,7 +4,8 @@ import { ipcRenderer } from 'electron';
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
 
 /* ========== [恢复v381] 反馈弹窗 ========== */
-export const ABOUT_LINK_URL = 'https://github.com/YDMY007/Fntv-Plus';
+// [v1.8.0] Web 版(fpk)仓库——关于页/反馈弹窗的 GitHub 入口（桌面版仓库在关于页描述中另附）
+export const ABOUT_LINK_URL = 'https://github.com/YDMY007/Fntv-Plus-fpk';
 
 const FEEDBACK_LINK_URL = 'https://wj.qq.com/s2/27390788/787a/';
 const QQ_GROUP_URL = 'https://qm.qq.com/q/dUnIQVvoIw'; // [lc-361] QQ 交流群(原侧栏"Q群反馈"按钮迁入反馈选择弹窗)

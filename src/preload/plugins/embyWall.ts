@@ -2465,7 +2465,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutTitle = document.createElement('div');
     aboutTitle.style.cssText = 'font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);';
-    aboutTitle.textContent = t('🎬 飞牛影视');
+    aboutTitle.textContent = t('🎬 Fntv-Plus · Web 版');
     secBodyAbout.appendChild(aboutTitle);
 
     const aboutAuthor = document.createElement('div');
@@ -2475,7 +2475,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutDesc = document.createElement('div');
     aboutDesc.style.cssText = 'font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;';
-    aboutDesc.textContent = t('基于飞牛影视（fnOS TV）打造的增强桌面客户端，采用 Electron + 亚克力玻璃 UI。支持 B站弹幕、自定义透明度与模糊效果。');
+    aboutDesc.textContent = t('飞牛影视网页端增强应用（fpk 反向代理注入）：海报墙/轮播美化、网页弹幕、多源同步（豆瓣/Bangumi/Trakt）、自定义刮削源回填，手机/平板/电脑浏览器全设备生效。不修改系统与影视应用文件，个人练手作品。桌面全量版：github.com/YDMY007/Fntv-Plus');
     secBodyAbout.appendChild(aboutDesc);
 
     const aboutVer = document.createElement('div');

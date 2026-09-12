@@ -6052,7 +6052,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
 
   // src/preload/plugins/embyWall/modals/feedback.ts
   init_electron();
-  var ABOUT_LINK_URL = "https://github.com/YDMY007/Fntv-Plus";
+  var ABOUT_LINK_URL = "https://github.com/YDMY007/Fntv-Plus-fpk";
   var FEEDBACK_LINK_URL = "https://wj.qq.com/s2/27390788/787a/";
   var QQ_GROUP_URL = "https://qm.qq.com/q/dUnIQVvoIw";
   var openFeedbackModal = async () => {
@@ -15751,7 +15751,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyAbout.style.cssText = "padding:18px 16px;flex:1 1 auto;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;";
       const aboutTitle = document.createElement("div");
       aboutTitle.style.cssText = "font-size:22px;font-weight:800;color:var(--fnos-ui-pill-text);";
-      aboutTitle.textContent = t("\u{1F3AC} \u98DE\u725B\u5F71\u89C6");
+      aboutTitle.textContent = t("\u{1F3AC} Fntv-Plus \xB7 Web \u7248");
       secBodyAbout.appendChild(aboutTitle);
       const aboutAuthor = document.createElement("div");
       aboutAuthor.style.cssText = "font-size:13px;font-weight:600;color:var(--fnos-ui-sec);margin-bottom:4px;";
@@ -15759,7 +15759,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyAbout.appendChild(aboutAuthor);
       const aboutDesc = document.createElement("div");
       aboutDesc.style.cssText = "font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;";
-      aboutDesc.textContent = t("\u57FA\u4E8E\u98DE\u725B\u5F71\u89C6\uFF08fnOS TV\uFF09\u6253\u9020\u7684\u589E\u5F3A\u684C\u9762\u5BA2\u6237\u7AEF\uFF0C\u91C7\u7528 Electron + \u4E9A\u514B\u529B\u73BB\u7483 UI\u3002\u652F\u6301 B\u7AD9\u5F39\u5E55\u3001\u81EA\u5B9A\u4E49\u900F\u660E\u5EA6\u4E0E\u6A21\u7CCA\u6548\u679C\u3002");
+      aboutDesc.textContent = t("\u98DE\u725B\u5F71\u89C6\u7F51\u9875\u7AEF\u589E\u5F3A\u5E94\u7528\uFF08fpk \u53CD\u5411\u4EE3\u7406\u6CE8\u5165\uFF09\uFF1A\u6D77\u62A5\u5899/\u8F6E\u64AD\u7F8E\u5316\u3001\u7F51\u9875\u5F39\u5E55\u3001\u591A\u6E90\u540C\u6B65\uFF08\u8C46\u74E3/Bangumi/Trakt\uFF09\u3001\u81EA\u5B9A\u4E49\u522E\u524A\u6E90\u56DE\u586B\uFF0C\u624B\u673A/\u5E73\u677F/\u7535\u8111\u6D4F\u89C8\u5668\u5168\u8BBE\u5907\u751F\u6548\u3002\u4E0D\u4FEE\u6539\u7CFB\u7EDF\u4E0E\u5F71\u89C6\u5E94\u7528\u6587\u4EF6\uFF0C\u4E2A\u4EBA\u7EC3\u624B\u4F5C\u54C1\u3002\u684C\u9762\u5168\u91CF\u7248\uFF1Agithub.com/YDMY007/Fntv-Plus");
       secBodyAbout.appendChild(aboutDesc);
       const aboutVer = document.createElement("div");
       aboutVer.id = "fnos-about-version";
