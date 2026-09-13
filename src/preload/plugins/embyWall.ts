@@ -2251,19 +2251,19 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [v0.78.0] 「打开弹幕文件夹」按钮已删：那是外部播放器（MPV）的弹幕落盘目录，网页端不存在。
 
 
-    // ═══ [v1.8.0] 自定义刮削服务（占位，开发中）═══
+    // ═══ [v1.8.0] 自定义刮削服务（占位，开放中未正式生效）═══
     const secScraperSvc = section('自定义刮削服务');
     const ssvBody = secScraperSvc.body;
     ssvBody.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:8px;';
     const ssvDesc = document.createElement('div');
     ssvDesc.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.6;';
-    ssvDesc.textContent = t('接入自定义刮削服务，用你自己的数据源刷新剧集标题、简介与海报等元数据（支持 Bangumi/TMDB/豆瓣等多源聚合）。');
+    ssvDesc.textContent = t('接入自定义刮削服务，用你自己的数据源刷新剧集标题、简介与海报等元数据。功能开放中，未正式生效，敬请期待。');
     ssvBody.appendChild(ssvDesc);
     const ssvBadge = document.createElement('div');
     ssvBadge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;align-self:flex-start;'
       + 'padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;'
       + 'background:rgba(255,180,60,.12);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.35);';
-    ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t('功能开发中，敬请期待');
+    ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t('未正式生效');
     ssvBody.appendChild(ssvBadge);
 
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
@@ -3415,16 +3415,19 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ===== [v1.11.0] 页面背景卡结束 =====
 
     type Cat = { id: string; label: string; els: HTMLElement[] };
-    // [飞牛影视特化 v0.15.0] 全部项重新分类排版（精简后余项按功能域收敛，v0.61.0 起 5 类）：
+    // [飞牛影视特化 v0.15.0] 全部项重新分类排版（精简后余项按功能域收敛；v1.10.2 起 6 类）：
     //   通用=主题模式+每日放送+界面交互+跳过片头片尾（原「外观」「播放」合并更名）
     //   弹幕=4卡 · 账号与网络=四家同步+自定义代理+TMDB直连(第三方服务/代理同域)
+    //   自定义刮削=自定义刮削服务(开放中置顶)/源+Fanart.tv/TVMaze/OMDb/MAL/Jav（原挂「账号与网络」，v1.10.2 独立成类）
     //   诊断与日志=调试开关+组件日志+实时日志 · 关于
     const cats: Cat[] = [
       // [v0.61.0] 「播放」分类删除：跳过片头片尾并入「通用」（原「外观」更名）；分类由 6 → 5
       { id: 'appearance', label: '通用', els: [secAppearance.el, secPageBg.el, secDaily.el, secUX.el, secSkip.el] },
       // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
       { id: 'danmaku', label: '弹幕', els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
-      { id: 'account', label: '账号与网络', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el, secCustomProxy.el, secTmdbDirect.el] },
+      { id: 'account', label: '账号与网络', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secCustomProxy.el, secTmdbDirect.el] },
+      // [v1.10.2] 自定义刮削源→Jav 刮削七卡从「账号与网络」拆出独立成类；开发中的「自定义刮削服务」置顶占位
+      { id: 'scraper', label: '自定义刮削', els: [secScraperSvc.el, secScraper.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];

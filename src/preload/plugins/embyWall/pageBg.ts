@@ -76,6 +76,15 @@ export function applyPageBg(): void {
     + ROOT + ' [class*="bg-[var(--semi-color-bg-0)"]{background-color:transparent!important}'
     + ROOT + ' #root,' + ROOT + ' #app,' + ROOT + ' body > div,'
     + ROOT + ' body > nav,' + ROOT + ' body > header,' + ROOT + ' body > section{background:transparent!important}';
+  // [v1.10.2] 浮层保护：宫灯/每日放送面板也挂 body 顶层，会被上面 body>div 清透规则连带清成
+  // 全透（用户报障；glassUI lc-1052 同款误伤）——它们的底色在 hotUpdates 自己的 <style> 表里
+  // 无 !important，打不过清透规则的 !important。按「模态浮层保持不透明可读」纪律用 ID 特异性
+  // 恢复，取值与 glassUI ②c 完全一致（玻璃+背景两增强模式同开时无跳变）。
+  const PROTECT = ROOT + ' body > #fntv-hot-tab{background-image:linear-gradient(135deg,#ff6b35,#f7418f,#c94bcb)!important;'
+    + 'background-color:#f7418f!important;background-size:200% 200%!important;background-position:0% 50%!important}'
+    + ROOT + ' body > #fntv-hot-tab:hover{background-image:linear-gradient(135deg,#ff8c5a,#f76aa3,#d96bd6)!important}'
+    + ROOT + ' body > #fntv-hot-panel{background-color:rgba(24,26,34,.96)!important;background-image:none!important}'
+    + ROOT + ' body > #fntv-hot-panel.fntv-hot-light{background-color:rgba(255,255,255,.96)!important}';
 
   let bodyCss = '';
   if (mode === 'solid') {
@@ -88,7 +97,7 @@ export function applyPageBg(): void {
   } else if (mode === 'image') {
     bodyCss = 'background:transparent!important;background-color:transparent!important;';
   }
-  st.textContent = ROOT + ' body{' + bodyCss + '}' + CLEAR;
+  st.textContent = ROOT + ' body{' + bodyCss + '}' + CLEAR + PROTECT;
 
   // 重挂到 head 末尾：与 glassUI 等特异性规则同现时「后到胜」
   (document.head || document.documentElement).appendChild(st);

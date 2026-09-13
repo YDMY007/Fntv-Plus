@@ -4,6 +4,7 @@ import { applyPageBg } from '../pageBg';
 import { ipcRenderer } from 'electron';
 import { wheelToScroll } from '../nav/scroll';
 import { applyDetailBeautify } from '../detail/immersive';
+import { reconcileLogoChoice, migrateLocalLogoToServer } from '../../customLogo';
 
 // embyWall/modals/patch.ts — 补丁应用向导弹窗（lc-516）：自包含的进度展示与用户确认流程
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
@@ -279,6 +280,18 @@ try {
     if (s && typeof s.pageBgDim === 'number') S.pageBgDim = s.pageBgDim;
     if (s && typeof s.pageBgBlur === 'number') S.pageBgBlur = s.pageBgBlur;
     whenRootReady(() => { try { applyPageBg(); } catch (e) { console.error('[fntv-web] applyPageBg failed', e); } });
+    // [v1.10.x] 首页 Logo 选择跨设备同步：localStorage 只存本机，换设备登录后 logo 不跟随
+    // （用户报障）。服务端已有选择 → 收编本机并重挂 #tb-logo；服务端从未同步过（老用户）
+    // → 把本机选择推一次上去。custom 图两头都缺时 resolveLogoSrc 兜底默认图。
+    try {
+      const lc = s && s.logoChoice;
+      if (lc && typeof lc === 'object'
+        && (lc.type === 'default' || lc.type === 'preset' || lc.type === 'custom')) {
+        reconcileLogoChoice(lc, typeof s.logoCustomData === 'string' ? s.logoCustomData : undefined);
+      } else {
+        migrateLocalLogoToServer();
+      }
+    } catch { /* ignore */ }
   });
 } catch (e) {}
 

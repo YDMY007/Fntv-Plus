@@ -51,15 +51,17 @@ function makeBtn(): HTMLButtonElement {
   btn.type = 'button';
   btn.id = JAV_BTN_ID;
   btn.textContent = '⟳ jav 刮削';
-  btn.setAttribute('title', '从文件名番号在 javbus 查询并回填标题（封面就地替换，仅本地视觉）。设置→账号与网络→Jav 刮削 开关。');
+  btn.setAttribute('title', '从文件名番号在 javbus 查询并回填标题（封面就地替换，仅本地视觉）。设置→自定义刮削→Jav 刮削 开关。');
   btn.style.cssText = 'position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;'
     + 'padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;'
-    + 'background:rgba(28,24,40,.82);color:#e7e2f5;border:1px solid rgba(255,255,255,.16);'
+    + 'background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);'
     + 'box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);'
     + 'transition:background .15s,transform .15s;user-select:none;';
   btn.setAttribute('data-fnos-ui', '1'); // 白底清除器保护
-  btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(52,44,76,.9)'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(28,24,40,.82)'; });
+  // 行内 !important（行内压过样式表 !important）：页面背景自定义/玻璃的 body>div 清透规则
+  // 都会把无 important 的行内底色清成全透，浮层按钮必须保住自身底色
+  btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(52,44,76,.9)!important'; });
+  btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(28,24,40,.82)!important'; });
   btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); void runJav(btn); });
   document.body.appendChild(btn);
   return btn;

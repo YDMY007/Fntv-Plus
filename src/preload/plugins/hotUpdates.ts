@@ -14,6 +14,7 @@ import logger from '../core/logger';
 // [lc-1087] 库索引主源: item/list API 客户端(叶子模块)。不能 import ./embyWall/carousel/api ——
 //   api.ts 已 import 本文件的 ensureLibraryIndex 当轮播兜底1, 反向 import 会成环。
 import { fetchLibraryItems } from './embyWall/carousel/itemListApi';
+import { getEffectiveDark } from './embyWall/theme';
 
 const PANEL_ID = 'fntv-hot-updates';
 const STYLE_ID = 'fntv-hot-updates-style';
@@ -521,36 +522,15 @@ function escapeHtml(s: string): string {
   ));
 }
 
-// ═══ [lc-543] 跟随 fnOS 系统深浅模式 ═══
-// fnOS 并未暴露独立的 dark/light 标志，沿用 Glass UI 的成熟判定：取 .fnos-tv-page
-// 计算背景相对亮度（ITU-R BT.709），>50% 视为浅色主题。用户切系统浅/深时背景会随之变化，
-// 故靠 MutationObserver 监听根节点/页面容器 class·style 变化来实时重算。
-// [lc-543-fix] 回退链：.fnos-tv-page → body → html；云母增强会把 .fnos-tv-page 设透明，
-// 此时必须回退到 body/html 才能读到真实系统底色，否则永远误判为"深色"。
+// ═══ [lc-543] 跟随深浅模式 ═══
+// [v1.10.x] 原实现取 .fnos-tv-page(=html)/body 的计算背景亮度猜明暗。但页面主题的真实落点
+// 是插件自己的三态偏好（theme.ts：html.dark + body[theme-mode] + MutationObserver 持续纠正，
+// fnOS 原生主题开关已被插件隐藏/锁定）——插件切深色后 html 层的计算底色未必跟着翻
+// （fnOS 的 token 覆盖挂 body 作用域下，够不到 html）→ 用户报障「切深色每日放送卡片不变深」。
+// 改为直接读同一事实源 getEffectiveDark()，与全部自建 UI（--fnos-ui-* 变量挂 html.dark）同源
+// 同变；下方 MutationObserver 照旧在 class/style 变化时驱动重算，面板打开/挂载也各重算一次。
 function detectHotLightMode(): boolean {
-  const candidates = [
-    document.querySelector('.fnos-tv-page'),
-    document.body,
-    document.documentElement,
-  ];
-  for (const el of candidates) {
-    if (!el) continue;
-    try {
-      const cs = getComputedStyle(el);
-      const bg = cs.backgroundColor;
-      const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-      if (!m) continue;
-      const alpha = m[4] !== undefined ? parseFloat(m[4]) : 1;
-      // 透明度 < 5% 视为不可见（如云母设的 transparent），跳过找下一个候选
-      if (alpha < 0.05) continue;
-      const r = parseInt(m[1], 10) / 255;
-      const g = parseInt(m[2], 10) / 255;
-      const b = parseInt(m[3], 10) / 255;
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      return lum > 0.5;
-    } catch (_) { /* continue */ }
-  }
-  return false; // 全部失败默认深色
+  return !getEffectiveDark();
 }
 
 /** 让每日放送面板跟随系统深浅模式：浅色→加 .fntv-hot-light 应用浅色配色，深色→移除 */

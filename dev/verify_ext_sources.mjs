@@ -1,6 +1,7 @@
 // dev/verify_ext_sources.mjs — [v1.10.0] 扩展数据源四张独立设置卡 + shim 设置链路验证。
 // route 拦截喂 host.html + payload（无端口依赖，域名 fntv.test 不落网）→ 打开设置 →
-// 切「账号与网络」→ 断言 Fanart.tv / TVMaze / OMDb / MyAnimeList 四张卡各自挂载、控件齐全 →
+// 切「自定义刮削」（v1.10.2 起四卡+Jav 从「账号与网络」拆出独立成类）→
+// 断言 Fanart.tv / TVMaze / OMDb / MyAnimeList 四张卡各自挂载、控件齐全 →
 // ① Fanart 开关 change（即时持久化）②填 api_key 点保存 → 断言键已落模拟后端 + 输入框掩码只读。
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -44,13 +45,13 @@ const panelThere = await page.evaluate(() => {
   return p ? 'panel:' + p.style.display : 'no-panel';
 });
 
-// 2) 切到「账号与网络」分类
+// 2) 切到「自定义刮削」分类（v1.10.2 起四卡+Jav 挂在此分类下）
 const switched = await page.evaluate(() => {
   const panel = document.querySelector('#fnos-settings-panel');
   if (!panel) return false;
   const navBtns = Array.from(panel.querySelectorAll('button'));
-  let el = navBtns.find((b) => (b.textContent || '').trim() === '账号与网络');
-  if (!el) el = Array.from(panel.querySelectorAll('*')).find((e) => (e.textContent || '').trim() === '账号与网络');
+  let el = navBtns.find((b) => (b.textContent || '').trim() === '自定义刮削');
+  if (!el) el = Array.from(panel.querySelectorAll('*')).find((e) => (e.textContent || '').trim() === '自定义刮削');
   if (!el) return false;
   el.click();
   return true;

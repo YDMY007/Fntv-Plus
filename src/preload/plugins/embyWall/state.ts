@@ -41,7 +41,7 @@ export const S: {
   carouselLogoEnabled: boolean;
 
   // ── [v1.5.0] 自定义刮削源（纯前端回填，零系统改动）─────────────────────────
-  /** 是否启用自定义刮削源（侧栏设置 → 账号与网络 → 自定义刮削源） */
+  /** 是否启用自定义刮削源（侧栏设置 → 自定义刮削 → 自定义刮削源） */
   customScraperEnabled: boolean;
   /** 自定义刮削服务地址（POST JSON，详见 detail/customScraper.ts 头注的协议约定） */
   customScraperUrl: string;

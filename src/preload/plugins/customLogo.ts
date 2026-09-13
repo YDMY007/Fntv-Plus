@@ -22,8 +22,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // [网页版适配] 预设图不经 fs——后端 /bridge/logos/<file>（Go embed，7 天缓存）同源直用；
 // 默认图=原版「飞牛影视」图标（iconfntv.png 同样 embed）。其余 UI/交互与桌面版逐字一致。
+// [v1.10.x] 跨设备同步：localStorage 只存本机——换设备登录后 logo 选择丢失，要重设一遍才回来
+// （用户报障）。现选择写入时同步 NAS config（settings:set-logo-choice / logo-custom-data，与
+// pageBg 同链路），启动 seed（patch.ts settings:get）以服务端为准 reconcile；自定义上传 dataURL
+// ≤700KB 才随传（settings POST 1MB 上限），过大只存本机、其他设备 resolveLogoSrc 兜底默认图。
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
+import { ipcRenderer } from 'electron';
 import logger from '../core/logger';
 
 const LOGO_API_BASE = '/app/fntvplus/api/bridge/logos/';
@@ -91,6 +96,17 @@ export function getChoice(): LogoChoice {
 
 function setChoice(c: LogoChoice): void {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); } catch (e) { log.warn('[customLogo] 持久化失败', String(e).substring(0, 80)); }
+  // [v1.10.x] 同步服务端（fire-and-forget：桌面端无该通道/离线时静默失败，本地照常生效）
+  try { ipcRenderer.invoke('settings:set-logo-choice', c).catch(() => {}); } catch { /* ignore */ }
+}
+
+/** 自定义图随传上限：settings POST body 1MB（Go LimitReader），dataURL ≤700KB 留足 JSON 余量。 */
+const SYNC_DATA_MAX = 700 * 1024;
+
+/** 推送本机自定义图到服务端（≤SYNC_DATA_MAX 才传；过大只存本机）。 */
+function syncCustomData(dataUrl: string): void {
+  if (!dataUrl || dataUrl.length > SYNC_DATA_MAX) return;
+  try { ipcRenderer.invoke('settings:set-logo-custom-data', dataUrl).catch(() => {}); } catch { /* ignore */ }
 }
 
 /** 按选项解析 logo dataURI；default → 登记的默认图，preset → 预设文件，custom → localStorage dataURL。 */
@@ -101,7 +117,8 @@ export function resolveLogoSrc(choice?: LogoChoice): string {
     return p ? presetDataUri(p) : '';
   }
   if (c.type === 'custom') {
-    try { return localStorage.getItem(CUSTOM_DATA_KEY) || ''; } catch { return ''; }
+    // 本机无数据（换设备且上传图超限未同步/手动清了存储）→ 兜底默认图，绝不留空 src 挂裂图
+    try { return localStorage.getItem(CUSTOM_DATA_KEY) || LOGO_API_BASE + 'fntv_default.png'; } catch { return LOGO_API_BASE + 'fntv_default.png'; }
   }
   return LOGO_API_BASE + 'fntv_default.png';
 }
@@ -335,6 +352,7 @@ export function applyCustomDataUrl(dataUrl: string): string | null {
   if (dataUrl.length > MAX_UPLOAD_BYTES * 1.4) return '文件超过 1.5MB';
   try { localStorage.setItem(CUSTOM_DATA_KEY, dataUrl); } catch (e) { return '图片过大，存储失败'; }
   setChoice({ type: 'custom' });
+  syncCustomData(dataUrl);
   applyLogoToDom();
   refreshCard();
   return null;
@@ -345,6 +363,36 @@ export function resetToDefault(): void {
   setChoice({ type: 'default' });
   applyLogoToDom();
   refreshCard();
+}
+
+// ── [v1.10.x] 跨设备同步 reconcile（boot 时由 patch.ts settings:get seed 调）─────────
+// 以服务端 config 为准收编本机：localStorage 只存本机，换设备登录后 logo 不跟随（用户报障）。
+// 直接写 localStorage 不走 setChoice —— 避免收编动作又回推服务器成环。
+
+/** 服务端选择 → 本机（缺数据时先补 custom 图；两头都缺由 resolveLogoSrc 兜底默认图）。 */
+export function reconcileLogoChoice(choice: LogoChoice, customData?: string): void {
+  if (!choice || (choice.type !== 'default' && choice.type !== 'preset' && choice.type !== 'custom')) return;
+  if (choice.type === 'custom' && customData && /^data:image\//.test(customData)) {
+    try {
+      if (localStorage.getItem(CUSTOM_DATA_KEY) !== customData) localStorage.setItem(CUSTOM_DATA_KEY, customData);
+    } catch { /* ignore */ }
+  }
+  try {
+    if (JSON.stringify(getChoice()) === JSON.stringify(choice)) return; // 与本机一致 → 无需动
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(choice));
+  } catch { /* ignore */ }
+  applyLogoToDom(choice);
+  refreshCard();
+}
+
+/** 老用户迁移：服务端从未同步过 logoChoice 而本机已有选择 → 推一次上去，其他设备才能跟上。 */
+export function migrateLocalLogoToServer(): void {
+  try { if (!localStorage.getItem(STORAGE_KEY)) return; } catch { return; }
+  const c = getChoice();
+  try { ipcRenderer.invoke('settings:set-logo-choice', c).catch(() => {}); } catch { /* ignore */ }
+  if (c.type === 'custom') {
+    try { syncCustomData(localStorage.getItem(CUSTOM_DATA_KEY) || ''); } catch { /* ignore */ }
+  }
 }
 
 // ── 预设选择弹窗（[lc-1046b] 一步到位：点选预设=立即持久化+上真 logo+自动关面板，

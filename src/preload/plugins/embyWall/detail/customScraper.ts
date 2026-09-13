@@ -71,7 +71,7 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
   const enabled = S.customScraperEnabled;
   const url = String(S.customScraperUrl || '').trim();
   if (!enabled || !url) {
-    setBtn(btn, '⚠ 未配置', '请到 侧栏设置 → 账号与网络 → 自定义刮削源 开启并填写地址。');
+    setBtn(btn, '⚠ 未配置', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 开启并填写地址。');
     window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ 自定义刮削'); }, 5000);
     return;
   }
@@ -202,7 +202,7 @@ function makeCsBtn(): HTMLButtonElement {
   btn.type = 'button';
   btn.id = CS_BTN_ID;
   btn.textContent = '⟳ 自定义刮削';
-  btn.setAttribute('title', '用自定义刮削服务的数据回填本季每集的标题/简介（在侧栏设置 → 账号与网络 中配置）');
+  btn.setAttribute('title', '用自定义刮削服务的数据回填本季每集的标题/简介（在侧栏设置 → 自定义刮削 中配置）');
   btn.style.cssText = 'display:inline-flex;align-items:center;margin-left:7px;padding:3px 10px;border-radius:999px;'
     + 'font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;'
     + 'background:var(--fnos-ui-btn-bg,rgba(90,160,120,.12));color:#3f9d63;'
