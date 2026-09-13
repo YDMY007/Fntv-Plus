@@ -84,7 +84,8 @@ Var fnosFontBold    ; 粗体: 同上 700(页眉标题用)
   Var fnosModeCardsCtl  ; 选择卡双态贴片控件
   Var fnosDirText       ; 安装选项页路径只读显示(Static, 取代可编辑输入框)
   Var fnosDirChosen     ; 浏览选定的安装路径(空 = 沿用所选模式的默认路径)
-  Var fnosFontSmall     ; 路径/说明小字(9pt 常规)
+  Var fnosFontSmall     ; 路径只读文本(9pt)
+  Var fnosFontHint      ; 模式说明文字(10pt)
   Var fnosInstDone      ; 进度页安装已完成标志
   Var fnosInstTitleCtl  ; 进度页标题条贴片控件(空图透明, 完成时换片)
   Var fnosInstBarCtl    ; 进度页按钮区条带贴片控件(取消→下一步换片)
@@ -167,8 +168,8 @@ Var fnosFontBold    ; 粗体: 同上 700(页眉标题用)
 ; ── 字体清晰化: 见文件头【字体】说明 ──
 !define MUI_CUSTOMFUNCTION_GUIINIT fnosOnInitGUI
 Function fnosOnInitGUI
-  !insertmacro fnosMakeFont 8 400 $fnosFont
-  !insertmacro fnosMakeFont 8 700 $fnosFontBold
+  !insertmacro fnosMakeFont 9 400 $fnosFont
+  !insertmacro fnosMakeFont 9 700 $fnosFontBold
   ; ID 1 起步: 覆盖按钮(1=下一步/安装, 2=取消, 3=上一步) + MUI2 chrome(1000-1499)
   ; (不存在的 ID GetDlgItem 返回 0, SendMessage 安全跳过)
   StrCpy $R9 1
@@ -188,8 +189,9 @@ Function fnosOnInitGUI
   ; 自绘整页几何: 780×520 逻辑(画稿比例) → 本机像素(仅安装器遍, 变量条件声明)
   !ifndef BUILD_UNINSTALLER
     StrCpy $fnosSized 0
-    !insertmacro fnosMakeFont 10 400 $fnosFontPage        ; 原生页(多用户/进度)控件字体
-    !insertmacro fnosMakeFont 9 400 $fnosFontSmall        ; 路径只读文本 / 模式说明小字
+    !insertmacro fnosMakeFont 11 400 $fnosFontPage        ; 原生页(多用户/进度)控件字体
+    !insertmacro fnosMakeFont 9 400 $fnosFontSmall        ; 路径只读文本(9pt: 槽宽 286 逻辑, 再大装不下完整路径)
+    !insertmacro fnosMakeFont 10 400 $fnosFontHint        ; 模式说明文字(可两行, 大一档)
     System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i.r0'
     ${If} $0 < 96
       StrCpy $0 96
@@ -468,12 +470,13 @@ FunctionEnd
     ShowWindow $MultiUser.InstallModePage.AllUsers ${SW_HIDE}
     ShowWindow $MultiUser.InstallModePage.CurrentUser ${SW_HIDE}
     ; 动态说明标签坐进右上卡信息底 infoplate(40,312,620x82)@2x → 页面逻辑(430,301,310x41);
-    ; 内边距 12 → (442,307,286,29)。9pt 小字, 不透明底(f3f7fe = infoplate 同色)保证
-    ; 切换模式换字时旧字被擦净(transparent 会叠影); 文本里的安装路径由 fnosModeTrimHint 去掉。
-    !insertmacro fnosArtRect 442 307 286 29
+    ; 内边距收到 4 → (442,303,286,37): 说明已升到 10pt, 两行需 ≈27 逻辑高, 原来 29 只够一行半
+    ; 会把「即将重新安装/升级.」那行裁掉。不透明底(f3f7fe = infoplate 同色)保证换字擦净不叠影;
+    ; 文本里的安装路径由 fnosModeTrimHint 去掉。
+    !insertmacro fnosArtRect 442 303 286 37
     System::Call 'user32::SetWindowPos(p $RadioButtonLabel1, p 0, i $3, i $4, i $5, i $6, i 0x14)'
     SetCtlColors $RadioButtonLabel1 ${FNOS_SUB} f3f7fe
-    SendMessage $RadioButtonLabel1 0x0030 $fnosFontSmall 1
+    SendMessage $RadioButtonLabel1 0x0030 $fnosFontHint 1
     ; 选择卡双态贴片(初态跟随 EB Pre 的默认点选)
     !insertmacro fnosArtRect 40 140 362 215
     System::Call 'kernel32::GetModuleHandle(p 0) p.r7'
@@ -606,44 +609,50 @@ FunctionEnd
     ${NSD_SetText} $fnosDirText "$fnosDirChosen"
   FunctionEnd
 
-  ; 剥掉 EB 说明文字里的 "(安装路径)" 段: EB 的 InstModeChange 把整条路径拼进提示句
-  ; ("$(perUserInstallExists)($perUserInstallationFolder)$\r$\n$(reinstallUpgrade)"),
-  ; 路径已由只读路径槽单独显示, 提示句里再带一遍既重复、又溢出控件宽度(286 逻辑)
-  ; 被硬裁且压住底板。逐字符扫描: 遇到括号后第 2 个字符是 ":" 的段(盘符路径)整体丢弃,
-  ; 其余括号(如 "(需要管理员资格)")原样保留。不用 StrFunc.nsh —— 该头文件的宏会按
-  ; 使用点插入函数体, 与 EB 的"警告即错误"策略冲突, 自实现零依赖更稳。
+  ; 剥掉 EB 说明文字里的 "(安装路径)" 段 ...
+  ; ⚠ 用「定位 + 截取拼接」而不是逐字符重建: 逐字符 StrCpy 复制时行内的 $\r$\n 会丢,
+  ;   表现为只剩第一行(「即将重新安装/升级.」整行消失)。只找括号位置、再按位置截两段拼回,
+  ;   换行符原样留在原串里, 不会丢。
   Function fnosModeTrimHint
     ${NSD_GetText} $RadioButtonLabel1 $0
-    StrCpy $1 ""                    ; 输出缓冲
     StrLen $2 $0
-    StrCpy $3 0                     ; 扫描下标
-    StrCpy $4 0                     ; 0=正常 1=普通括号内 2=路径括号内(丢弃)
+    ; ① 找第一个「括号内第 2 字符是冒号」的 '(' (即盘符路径段的起点)
+    StrCpy $6 ""
+    StrCpy $3 0
     ${While} $3 < $2
-      StrCpy $5 $0 1 $3             ; 当前字符
+      StrCpy $5 $0 1 $3
       ${If} $5 == "("
-        IntOp $6 $3 + 2             ; 括号内第 2 个字符
-        StrCpy $7 $0 1 $6
-        ${If} $7 == ":"             ; "C:" / "D:" → 盘符路径段
-          StrCpy $4 2
-        ${Else}
-          StrCpy $4 1
-          StrCpy $1 "$1$5"
-        ${EndIf}
-      ${ElseIf} $5 == ")"
-        ${If} $4 == 2
-          StrCpy $4 0               ; 路径段收尾: ")" 一并丢弃
-        ${Else}
-          StrCpy $4 0
-          StrCpy $1 "$1$5"          ; 普通括号: 保留
-        ${EndIf}
-      ${Else}
-        ${If} $4 != 2
-          StrCpy $1 "$1$5"
+        IntOp $8 $3 + 2
+        StrCpy $9 $0 1 $8
+        ${If} $9 == ":"
+          StrCpy $6 $3
+          StrCpy $3 $2                    ; 找到即跳出
         ${EndIf}
       ${EndIf}
       IntOp $3 $3 + 1
     ${EndWhile}
-    ${NSD_SetText} $RadioButtonLabel1 "$1"
+    ${If} $6 == ""
+      Return                              ; 没有路径段, 原样保留
+    ${EndIf}
+    ; ② 从该 '(' 起找配对的 ')'
+    StrCpy $7 ""
+    StrCpy $3 $6
+    ${While} $3 < $2
+      StrCpy $5 $0 1 $3
+      ${If} $5 == ")"
+        StrCpy $7 $3
+        StrCpy $3 $2
+      ${EndIf}
+      IntOp $3 $3 + 1
+    ${EndWhile}
+    ${If} $7 == ""
+      Return
+    ${EndIf}
+    ; ③ 前缀 + ')' 之后的后缀拼回(换行符随后缀原样保留)
+    StrCpy $1 $0 $6                       ; 前 $6 个字符 = '(' 之前
+    IntOp $8 $7 + 1
+    StrCpy $9 $0 "" $8                    ; 从 ')' 之后到结尾
+    ${NSD_SetText} $RadioButtonLabel1 "$1$9"
   FunctionEnd
 
   Function fnosDirBrowse

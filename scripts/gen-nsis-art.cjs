@@ -100,27 +100,27 @@ const welcomeHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   .b4 { width:380px; height:380px; right:120px; bottom:-200px; background:rgba(205,180,255,.35); }
   .brand { position:absolute; left:64px; top:52px; display:flex; align-items:center; gap:20px; }
   .brand img { width:96px; }
-  .brand .name { font-size:34px; }
-  .badge { position:absolute; right:64px; top:64px; font-size:16px; }
+  .brand .name { font-size:38px; }
+  .badge { position:absolute; right:64px; top:64px; font-size:18px; }
   .hero { position:absolute; left:92px; top:270px; max-width:900px; }
-  .hero .t { font-size:58px; font-weight:800; color:#16233f; letter-spacing:1px;
+  .hero .t { font-size:64px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:18px; font-size:20px; line-height:1.7; color:#42506e; }
+  .hero .s { margin-top:18px; font-size:23px; line-height:1.7; color:#42506e; }
   .feats { position:absolute; left:92px; top:620px; display:flex; gap:26px; }
-  .feat { width:320px; padding:24px 26px; border-radius:18px;
+  .feat { width:356px; padding:24px 26px; border-radius:18px;
           background:linear-gradient(165deg, rgba(255,255,255,.78) 0%, rgba(255,255,255,.52) 100%);
           border:1px solid rgba(255,255,255,.92); border-top-color:rgba(255,255,255,1);
           box-shadow:0 10px 30px rgba(96,130,190,.15), inset 0 1px 0 rgba(255,255,255,.95); }
-  .feat .fi { font-size:26px; }
+  .feat .fi { font-size:30px; }
   /* [v6] 描述原 12.5px(@2x) → 1x 下仅 6.25 逻辑 px, 偏费眼; 提到 14px, 行距 1.55→1.62,
      标题与描述的纵向间距同步加大, 卡片内边距 22/24 → 24/26 补呼吸。 */
-  .feat .ft { margin-top:12px; font-size:18px; font-weight:700; color:#1b2540; }
-  .feat .fd { margin-top:8px; font-size:14px; line-height:1.62; color:#4d5a7a; }
+  .feat .ft { margin-top:12px; font-size:22px; font-weight:700; color:#1b2540; }
+  .feat .fd { margin-top:8px; font-size:18px; line-height:1.62; color:#4d5a7a; }
   .pill.primary { left:1000px; top:844px; width:440px; height:96px; }
-  .hint { position:absolute; right:96px; top:962px; font-size:14px;
+  .hint { position:absolute; right:96px; top:962px; font-size:16px;
           color:#5d6f99; letter-spacing:.5px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#8896b6; letter-spacing:4px; }
+         font-size:14px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
          color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
@@ -163,20 +163,20 @@ const finishHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
           background:linear-gradient(165deg, rgba(255,255,255,.92) 0%, rgba(255,255,255,.62) 100%);
           border:2px solid rgba(140,170,240,.55);
           box-shadow:0 12px 40px rgba(96,130,190,.22), inset 0 1px 0 rgba(255,255,255,1); }
-  .ring span { font-size:74px; color:#3d6df5; }
+  .ring span { font-size:80px; color:#3d6df5; }
   .done { position:absolute; left:0; right:0; top:340px; text-align:center;
-          font-size:46px; font-weight:800; color:#16233f; letter-spacing:2px;
+          font-size:52px; font-weight:800; color:#16233f; letter-spacing:2px;
           text-shadow:0 1px 3px rgba(255,255,255,.9); }
   .sub  { position:absolute; left:0; right:0; top:430px; text-align:center;
-          font-size:19px; color:#42506e; line-height:1.7; }
+          font-size:22px; color:#42506e; line-height:1.7; }
   .brand { position:absolute; left:64px; top:52px; display:flex; align-items:center; gap:20px; }
   .brand img { width:96px; }
-  .brand .name { font-size:34px; }
-  .badge { position:absolute; right:64px; top:64px; font-size:16px; color:#2f9e6e; }
-  .pill.primary { left:420px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
-  .pill.secondary { left:800px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
+  .brand .name { font-size:38px; }
+  .badge { position:absolute; right:64px; top:64px; font-size:18px; color:#2f9e6e; }
+  .pill.primary { left:420px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px; }
+  .pill.secondary { left:800px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#8896b6; letter-spacing:4px; }
+         font-size:14px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
          color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
@@ -213,12 +213,12 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
   .b4 { width:380px; height:380px; right:120px; bottom:-200px; background:rgba(205,180,255,.35); }
   .brand { position:absolute; left:64px; top:52px; display:flex; align-items:center; gap:20px; }
   .brand img { width:96px; }
-  .brand .name { font-size:34px; }
-  .badge { position:absolute; right:64px; top:64px; font-size:16px; }
+  .brand .name { font-size:38px; }
+  .badge { position:absolute; right:64px; top:64px; font-size:18px; }
   .hero { position:absolute; left:92px; top:120px; }
-  .hero .t { font-size:52px; font-weight:800; color:#16233f; letter-spacing:1px;
+  .hero .t { font-size:58px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:18px; font-size:20px; color:#42506e; }
+  .hero .s { margin-top:18px; font-size:23px; color:#42506e; }
   /* 2×2 玻璃卡: 左列模式选择 / 右列安装位置(高卡); 统一磨砂+高光顶边+悬浮投影 */
   .card { position:absolute; width:700px; border-radius:28px;
           background:linear-gradient(165deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.58) 100%);
@@ -236,30 +236,30 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
                box-shadow:0 0 0 6px rgba(61,109,245,.12), 0 4px 10px rgba(61,109,245,.28); }
   .radio.on::after { content:''; position:absolute; left:9px; top:9px; width:24px; height:24px;
            border-radius:50%; background:linear-gradient(135deg, #3d6df5, #6a5cf0); }
-  .card .ct { position:absolute; left:160px; top:52px; font-size:30px; font-weight:800;
+  .card .ct { position:absolute; left:160px; top:48px; font-size:34px; font-weight:800;
               color:#1b2540; letter-spacing:.5px; }
-  .card .cd { position:absolute; left:160px; top:112px; font-size:18px; color:#4d5a7a; }
+  .card .cd { position:absolute; left:160px; top:116px; font-size:21px; color:#4d5a7a; }
   .card .ci { position:absolute; right:40px; top:50%; transform:translateY(-50%);
-              font-size:44px; opacity:.9; filter:drop-shadow(0 4px 10px rgba(96,130,190,.25)); }
+              font-size:48px; opacity:.9; filter:drop-shadow(0 4px 10px rgba(96,130,190,.25)); }
   /* 右上卡「安装位置」: 标题 + 路径只读显示槽(NSIS 侧不透明底 Label 坐入) + 浏览药丸 + 模式说明底 */
-  .r1t { position:absolute; left:60px; top:44px; font-size:30px; font-weight:800; color:#1b2540; }
+  .r1t { position:absolute; left:60px; top:44px; font-size:34px; font-weight:800; color:#1b2540; }
   /* 路径只读显示槽(单一显示位): 路径以只读文本呈现, 修改入口只有「浏览…」 */
   .pathplate { position:absolute; left:40px; top:96px; width:620px; height:110px; border-radius:12px;
                background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.35);
                box-sizing:border-box; }
-  .pathplate .plabel { position:absolute; left:24px; top:12px; font-size:14px; font-weight:700;
+  .pathplate .plabel { position:absolute; left:24px; top:12px; font-size:16px; font-weight:700;
                letter-spacing:2px; color:#7f8ba6; }
   .pill.pill.browse { left:40px !important; top:232px !important; width:180px !important; height:60px !important;
                       font-size:22px; letter-spacing:2px; text-indent:2px; }
-  .dhint { position:absolute; left:236px; top:248px; font-size:15px; color:#7f8ba6; width:420px; }
+  .dhint { position:absolute; left:236px; top:248px; font-size:17px; color:#7f8ba6; width:420px; }
   /* 安装模式说明底(EB 动态说明文字坐入; 与 NSIS 侧不透明底同色 → 切换模式换字无叠影、不压边框) */
   .infoplate { position:absolute; left:40px; top:312px; width:620px; height:82px; border-radius:12px;
                background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.30);
                box-sizing:border-box; }
-  .pill.primary { left:800px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
-  .pill.secondary { left:420px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
+  .pill.primary { left:800px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px; }
+  .pill.secondary { left:420px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#8896b6; letter-spacing:4px; }
+         font-size:14px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
          color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
@@ -305,22 +305,22 @@ const instPageHtml = (done, pill) => `<!doctype html><html><head><meta charset="
   .b4 { width:360px; height:360px; right:-160px; bottom:-160px; background:rgba(205,180,255,.35); }
   .brand { position:absolute; left:64px; top:52px; display:flex; align-items:center; gap:20px; }
   .brand img { width:96px; }
-  .brand .name { font-size:34px; }
-  .badge { position:absolute; right:64px; top:64px; font-size:16px; ${done ? 'color:#2f9e6e;' : ''} }
+  .brand .name { font-size:38px; }
+  .badge { position:absolute; right:64px; top:64px; font-size:18px; ${done ? 'color:#2f9e6e;' : ''} }
   .hero { position:absolute; left:92px; top:120px; }
-  .hero .t { font-size:52px; font-weight:800; color:#16233f; letter-spacing:1px;
+  .hero .t { font-size:58px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:18px; font-size:20px; color:#42506e; }
+  .hero .s { margin-top:18px; font-size:23px; color:#42506e; }
   .panel { position:absolute; left:92px; top:252px; width:1376px; height:508px; border-radius:22px;
            background:#ffffff; border:1.5px solid rgba(151,176,222,.55);
            box-shadow:0 14px 40px rgba(96,130,190,.16), inset 0 1px 0 rgba(255,255,255,1); }
   /* 进度页双药丸槽位: 本体按钮(自绘隐形)坐进去, 点击/禁用态/Enter 全原生 */
-  .pill.secondary { left:460px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
+  .pill.secondary { left:460px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px; }
   /* 「下一步」药丸: 去掉外部投影(用户要求, 只留内高光) —— 该页药丸下方不要那团蓝色光晕 */
-  .pill.primary { left:840px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px;
+  .pill.primary { left:840px; top:824px; width:340px; height:96px; font-size:30px; letter-spacing:3px; text-indent:3px;
                   box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#8896b6; letter-spacing:4px; }
+         font-size:14px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
          color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
@@ -357,15 +357,15 @@ const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf
            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
            border-radius:20px; }
   .logo { width:200px; }
-  .name { font-size:23px; }
-  .sub { font-size:12px; text-align:center; }
+  .name { font-size:25px; }
+  .sub { font-size:14px; text-align:center; }
   .badge { position:absolute; top:24px; left:0; right:0; text-align:center;
            font-size:12px; letter-spacing:5px; color:${uninstall ? '#e05252' : '#3d6df5'}; }
   .orb { width:46px; height:46px; position:absolute; left:50%; transform:translateX(-50%); bottom:32px; }
   .orb::after { content:''; position:absolute; inset:-10px; border-radius:50%;
                 border:1.5px solid rgba(120,150,240,.35); }
   .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
-         font-size:9px; color:#8896b6; letter-spacing:3.5px; }
+         font-size:10px; color:#8896b6; letter-spacing:3.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -393,11 +393,11 @@ const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="ut
   .glass { left:10px; right:10px; top:88px; height:126px; padding:14px 10px;
            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; }
   .logo { width:110px; }
-  .name { font-size:14px; }
-  .sub { font-size:8px; text-align:center; }
+  .name { font-size:15px; }
+  .sub { font-size:9px; text-align:center; }
   .orb { width:28px; height:28px; position:absolute; right:14px; bottom:20px; }
   .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
-         font-size:8px; color:#8896b6; }
+         font-size:9px; color:#8896b6; }
   .badge { position:absolute; top:30px; left:12px; right:12px; text-align:center;
            font-size:10px; color:${uninstall ? '#e05252' : '#3d6df5'}; }
 </style></head><body>
