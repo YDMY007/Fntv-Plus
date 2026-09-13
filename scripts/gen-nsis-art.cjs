@@ -316,7 +316,9 @@ const instPageHtml = (done, pill) => `<!doctype html><html><head><meta charset="
            box-shadow:0 14px 40px rgba(96,130,190,.16), inset 0 1px 0 rgba(255,255,255,1); }
   /* 进度页双药丸槽位: 本体按钮(自绘隐形)坐进去, 点击/禁用态/Enter 全原生 */
   .pill.secondary { left:460px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
-  .pill.primary { left:840px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
+  /* 「下一步」药丸: 去掉外部投影(用户要求, 只留内高光) —— 该页药丸下方不要那团蓝色光晕 */
+  .pill.primary { left:840px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px;
+                  box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
          font-size:12px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
