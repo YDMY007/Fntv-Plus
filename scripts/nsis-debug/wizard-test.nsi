@@ -91,6 +91,7 @@ LangString perMachineInstall ${LANGID_ZHCN} "存在一个安装到所有用户�
 ; multiUser.nsh 必须全路径: 裸名会大小写不敏感撞上官方 Include\MultiUser.nsh
 !include "D:\GitHub\Fntv-Plus\node_modules\app-builder-lib\templates\nsis\multiUser.nsh"
 !include "assistedInstaller.nsh"
+; MUI_ICON 已由 EB 模板(common.nsh)定义, 这里不要再定义(会 "already defined" 报错)
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
 Function .onInit

@@ -43,6 +43,18 @@
 !include LogicLib.nsh
 !include WinMessages.nsh
 !include nsDialogs.nsh
+
+; ── 安装器图标(窗口左上角 / 任务栏 / MUI 页面的安装程序图标) ──
+; ⚠ 必须在这里定义: MUI2.nsh 内部对 MUI_ICON 有 `!ifndef` 兜底(NSIS 自带的老式图标)
+;   并据此自动发 Icon 指令, 定义晚了会被默认值抢先 —— 表现就是「图标怎么改都是 NSIS 老图标」。
+;   本文件在 EB 生成的脚本里先于 common.nsh / MUI2.nsh 被 include, 因此这里定义有效;
+;   若 electron-builder 已按 package.json 的 icon 传参则不覆盖(反正都是 build/icon.ico)。
+!ifndef MUI_ICON
+  !define MUI_ICON "${BUILD_RESOURCES_DIR}\icon.ico"
+!endif
+!ifndef MUI_UNICON
+  !define MUI_UNICON "${BUILD_RESOURCES_DIR}\icon.ico"
+!endif
 ; 仅安装器遍(安装位置页用); 卸载器遍引入会成为孤儿函数/变量, EB 视警告为错误
 !ifndef BUILD_UNINSTALLER
   !include StrContains.nsh
