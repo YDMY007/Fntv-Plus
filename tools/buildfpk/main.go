@@ -197,11 +197,41 @@ func pack() (string, error) {
 		if len(segs) == 4 {
 			named := filepath.Join(root, "Fntv-Plus-v"+segs[3]+".fpk")
 			if err := os.Rename(out, named); err == nil {
+				// [v1.11.x] 自动清理上一个开发包（用户要求）：只删同名前缀(小写 v)旧产物，
+				// 刚打出的保留；发布包是大写 V 前缀，大小写敏感比较天然不误删。
+				cleanOldDevPackages(named)
 				return named, nil
 			}
 		}
 	}
 	return out, nil
+}
+
+// cleanOldDevPackages 删除根目录下除 keep 外的全部开发包（Fntv-Plus-v*.fpk，小写 v）。
+// 手工遍历而非 Glob：Windows 下 Glob 大小写不敏感，会把发布包 Fntv-Plus-V*.fpk 一并匹配进来。
+func cleanOldDevPackages(keep string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	removed := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "Fntv-Plus-v") || !strings.HasSuffix(name, ".fpk") {
+			continue
+		}
+		p := filepath.Join(root, name)
+		if p == keep {
+			continue
+		}
+		if err := os.Remove(p); err == nil {
+			fmt.Printf("       已清理旧包: %s\n", name)
+			removed++
+		}
+	}
+	if removed == 0 {
+		fmt.Println("       无旧开发包需要清理")
+	}
 }
 
 // findFnpack 依次查找 tools/fnpack.exe、用户 Downloads 下的 fnpack*。
@@ -222,28 +252,30 @@ func findFnpack() (string, error) {
 		filepath.Join("fntvplus", "tools", "fnpack.exe"))
 }
 
-// devCommitVersion 开发测试版号 = <发布版基号>.<git 提交数> 四段式。
+// devCommitVersion 开发测试版号 = <发布版基号>.<序号> 四段式，**严格递增**。
 // 用户诉求两全：测试包要能覆盖已装的正式版（>正式版号），又不能挡住下一个正式版（<下一正式版号）。
-// 纯三段无解 → 四段式：正式版基号(release_version, 默认 1.0.0) + 第四段 commit 数，
+// 纯三段无解 → 四段式：正式版基号(release_version, 默认 1.0.0) + 第四段序号，
 // 如 1.0.0.193：> 1.0.0(可覆盖正式版)；下一正式版 1.0.1 > 1.0.0.193(semver 逐段比较)→可覆盖测试版。
+// 序号取法（[v1.11.x] 改严格递增，用户反馈"打包不会自己加版号"）：
+//   ① git 提交数 > 当前包号 → 用提交数（正常节奏：先提交后打包，版号=提交数）；
+//   ② 否则（无新提交重复打包 / git 不可用）→ 当前包号 +1 —— 重复打包版号也必须前进，
+//     否则飞牛安装器视为同版本拒绝覆盖安装。
 // ⚠ 依赖飞牛安装器支持四段版本号比较——fnpack 无 version 格式校验(实勘仅 CheckAppName/CheckWizard)，
 //   安装侧行为需 NAS 实测；若安装器拒绝四段，回退方案=测试前卸载正式版。
-// git 不可用时回退：读当前第四段 +1。
 func devCommitVersion() string {
 	base := manifestGetString("release_version", "1.0.0")
-	out, err := exec.Command("git", "rev-list", "--count", "HEAD").Output()
-	if err == nil {
-		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > 0 {
-			return base + "." + fmt.Sprintf("%d", n)
-		}
-	}
-	ver := manifestVersion()
-	if strings.HasPrefix(ver, base+".") {
+	cur := 0
+	if ver := manifestVersion(); strings.HasPrefix(ver, base+".") {
 		if n, err := strconv.Atoi(strings.TrimPrefix(ver, base+".")); err == nil {
-			return base + "." + fmt.Sprintf("%d", n+1)
+			cur = n
 		}
 	}
-	return base + ".0"
+	if out, err := exec.Command("git", "rev-list", "--count", "HEAD").Output(); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > cur {
+			return base + "." + strconv.Itoa(n)
+		}
+	}
+	return base + "." + strconv.Itoa(cur+1)
 }
 
 // writeVersion 把 version 写回 manifest（开发版流程用；发布版号存 release_version 独立键）。
