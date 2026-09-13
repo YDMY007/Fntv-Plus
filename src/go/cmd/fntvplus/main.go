@@ -36,13 +36,14 @@ func main() {
 	varDir := flag.String("var", envOr("TRIM_PKGVAR", "."), "运行时数据目录")
 	destDir := flag.String("dest", envOr("TRIM_APPDEST", "."), "应用安装目录（payload 来源）")
 	upstreamFlag := flag.String("upstream", "", "回环上游地址覆盖（如 http://127.0.0.1:5666）")
+	versionFlag := flag.String("version", "", "应用版本号（缺省时按 TRIM_APPVER → manifest → 编译期注入 依次兜底）")
 	flag.Parse()
 
-	// [v1.8.0] 版本号直接读 manifest（打包器每次打包自动维护），废除两处同步的常量
-	appVersion := readManifestVersion(*destDir)
-	if appVersion == "" {
-		appVersion = "dev"
-	}
+	// [v1.8.0] 版本号不再写常量，运行时解析（打包器自动维护 manifest）。
+	// [lc-167] 旧实现只读 <TRIM_APPDEST>/manifest —— FPK 安装后 manifest 落在「应用根目录」，
+	//   解到 TRIM_APPDEST 的只有包内 app.tgz 的内容，故恒读不到 → 一律 fallback "dev"，
+	//   侧栏左下角与设置面板「关于」显示 "vdev"（用户报障）。改为多路兜底，见 resolveAppVersion。
+	appVersion := resolveAppVersion(*versionFlag, *destDir)
 
 	cfgPath := filepath.Join(*etcDir, "config.json")
 	cfg, err := config.Load(cfgPath)
@@ -112,7 +113,44 @@ func resolveUpstream(flagVal string) (*url.URL, error) {
 	return nil, fmt.Errorf("no valid upstream address")
 }
 
-// readManifestVersion 从 TRIM_APPDEST/manifest 读 version= 值（打包器自动维护）。
+// buildVersion 由打包器编译时注入（-ldflags "-X main.buildVersion=<manifest version>"），
+// 是最后一层兜底：正常安装环境优先取 fnOS 注入的 TRIM_APPVER 或磁盘上的 manifest。
+var buildVersion = ""
+
+// resolveAppVersion 解析应用版本号（侧栏 / 设置面板「关于」 / 管理页展示用）。
+//
+// 取值优先级（逐级兜底，任一命中即返回）：
+//  1. --version 参数（cmd/main 由 fnOS 注入的 TRIM_APPVER 透传而来）
+//  2. TRIM_APPVER 环境变量（fnOS 生命周期的信息变量，取自 manifest 的 version=）
+//  3. manifest 文件：先 <dest>/manifest，再向上最多 3 级目录找
+//     （FPK 安装后布局为 /var/apps/<app>/manifest + target/→TRIM_APPDEST，故需上溯）
+//  4. 编译期注入的 buildVersion（打包时写进二进制）
+//  5. "dev"（本地源码直跑等无法取版号的场景）
+func resolveAppVersion(flagVal, destDir string) string {
+	if v := strings.TrimSpace(flagVal); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("TRIM_APPVER")); v != "" {
+		return v
+	}
+	dir := destDir
+	for i := 0; i < 4 && dir != ""; i++ {
+		if v := readManifestVersion(dir); v != "" {
+			return v
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // 已到根
+			break
+		}
+		dir = parent
+	}
+	if strings.TrimSpace(buildVersion) != "" {
+		return strings.TrimSpace(buildVersion)
+	}
+	return "dev"
+}
+
+// readManifestVersion 从 <dir>/manifest 读 version= 值（打包器自动维护）。
 func readManifestVersion(destDir string) string {
 	data, err := os.ReadFile(filepath.Join(destDir, "manifest"))
 	if err != nil {

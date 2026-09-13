@@ -16,6 +16,9 @@ start() {
   log "==== start requested ===="
   log "BIN=$BIN"
   log "TRIM_SERVICE_PORT=$TRIM_SERVICE_PORT TRIM_PKGETC=$TRIM_PKGETC TRIM_PKGVAR=$TRIM_PKGVAR TRIM_APPDEST=$TRIM_APPDEST"
+  # [lc-167] 版本号来源：fnOS 注入的 TRIM_APPVER（取自 manifest version）优先透传给后端；
+  #   未注入时后端自行按 manifest 文件多路兜底（旧实现只读 $TRIM_APPDEST/manifest 恒失败→界面显示 vdev）。
+  log "version probe: TRIM_APPVER=${TRIM_APPVER:-<empty>}"
 
   [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && { log "already running (pid $(cat "$PIDFILE"))"; exit 0; }
 
@@ -51,6 +54,7 @@ start() {
 
   nohup "$BIN" \
     --port "$SVC_PORT" \
+    --version "${TRIM_APPVER:-}" \
     $UPSTREAM_ARG \
     --etc "$TRIM_PKGETC" \
     --var "$TRIM_PKGVAR" \

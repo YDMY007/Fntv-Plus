@@ -706,11 +706,15 @@ const ipcRenderer = {
   once(channel, cb) {
     // 兼容 embyWall 的 get-version → version-info 握手：网页端从后端 /api/status 拿真实版本
     // （= manifest version，打包器自动维护）。旧版写死 '0.0.0-web' 侧栏永远显示 0.0.0（用户报障）。
+    // [lc-167] 展示值统一追加 '-web' 后缀标识「网页版」（与桌面版区分，用户要求显示 1.0.1-web）；
+    //   仅对纯数字版号（x.y / x.y.z / x.y.z.w）追加——dev、取不到版号等非版号值原样透传，
+    //   避免出现 "dev-web" 这类误导值。
     if (channel === 'version-info') {
       apiGet('/app/fntvplus/api/status').then((st) => {
         const v = (st && st.version) || '';
         if (!v) return; // 拿不到就保持侧栏 'v…' 占位, 不显示误导值
-        try { cb({}, { version: v }); } catch { /* ignore */ }
+        const disp = /^\d+\.\d+(\.\d+)*$/.test(v) ? v + '-web' : v;
+        try { cb({}, { version: disp }); } catch { /* ignore */ }
       }).catch(() => { /* 同上, 保持占位 */ });
     }
     return () => {};

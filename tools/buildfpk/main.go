@@ -144,7 +144,14 @@ func buildBackend(bin string) error {
 	}
 	// 先编译到 src/go 目录内（个别环境下 -o 指向目录外会静默失败），再移动到 app/server/
 	tmp := filepath.Join(root, "src", "go", "fntvplus_linux_amd64")
-	cmd := exec.Command(goBin, "build", "-o", "fntvplus_linux_amd64", "./cmd/fntvplus")
+	// [lc-167] 编译期注入版号兜底：-X main.buildVersion=<manifest version>
+	//   （运行时优先 TRIM_APPVER / 磁盘 manifest；注入值保证取不到文件时界面仍显示正确版号）
+	args := []string{"build"}
+	if v := manifestVersion(); v != "" && v != "?" {
+		args = append(args, "-ldflags", "-X main.buildVersion="+v)
+	}
+	args = append(args, "-o", "fntvplus_linux_amd64", "./cmd/fntvplus")
+	cmd := exec.Command(goBin, args...)
 	cmd.Dir = filepath.Join(root, "src", "go")
 	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

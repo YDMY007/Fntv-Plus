@@ -993,8 +993,9 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
             apiGet("/app/fntvplus/api/status").then((st) => {
               const v = st && st.version || "";
               if (!v) return;
+              const disp = /^\d+\.\d+(\.\d+)*$/.test(v) ? v + "-web" : v;
               try {
-                cb({}, { version: v });
+                cb({}, { version: disp });
               } catch {
               }
             }).catch(() => {
@@ -2311,6 +2312,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   });
 
   // src/preload/plugins/customLogo.ts
+  init_electron();
   var LOGO_API_BASE = "/app/fntvplus/api/bridge/logos/";
   var log5 = logger_default;
   var STORAGE_KEY = "fntvLogo.custom";
@@ -2365,6 +2367,20 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     } catch (e) {
       log5.warn("[customLogo] \u6301\u4E45\u5316\u5931\u8D25", String(e).substring(0, 80));
     }
+    try {
+      ipcRenderer.invoke("settings:set-logo-choice", c).catch(() => {
+      });
+    } catch {
+    }
+  }
+  var SYNC_DATA_MAX = 700 * 1024;
+  function syncCustomData(dataUrl) {
+    if (!dataUrl || dataUrl.length > SYNC_DATA_MAX) return;
+    try {
+      ipcRenderer.invoke("settings:set-logo-custom-data", dataUrl).catch(() => {
+      });
+    } catch {
+    }
   }
   function resolveLogoSrc(choice) {
     const c = choice || getChoice();
@@ -2374,9 +2390,9 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
     if (c.type === "custom") {
       try {
-        return localStorage.getItem(CUSTOM_DATA_KEY) || "";
+        return localStorage.getItem(CUSTOM_DATA_KEY) || LOGO_API_BASE + "fntv_default.png";
       } catch {
-        return "";
+        return LOGO_API_BASE + "fntv_default.png";
       }
     }
     return LOGO_API_BASE + "fntv_default.png";
@@ -2603,6 +2619,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
       return "\u56FE\u7247\u8FC7\u5927\uFF0C\u5B58\u50A8\u5931\u8D25";
     }
     setChoice({ type: "custom" });
+    syncCustomData(dataUrl);
     applyLogoToDom();
     refreshCard();
     return null;
@@ -2615,6 +2632,41 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     setChoice({ type: "default" });
     applyLogoToDom();
     refreshCard();
+  }
+  function reconcileLogoChoice(choice, customData) {
+    if (!choice || choice.type !== "default" && choice.type !== "preset" && choice.type !== "custom") return;
+    if (choice.type === "custom" && customData && /^data:image\//.test(customData)) {
+      try {
+        if (localStorage.getItem(CUSTOM_DATA_KEY) !== customData) localStorage.setItem(CUSTOM_DATA_KEY, customData);
+      } catch {
+      }
+    }
+    try {
+      if (JSON.stringify(getChoice()) === JSON.stringify(choice)) return;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(choice));
+    } catch {
+    }
+    applyLogoToDom(choice);
+    refreshCard();
+  }
+  function migrateLocalLogoToServer() {
+    try {
+      if (!localStorage.getItem(STORAGE_KEY)) return;
+    } catch {
+      return;
+    }
+    const c = getChoice();
+    try {
+      ipcRenderer.invoke("settings:set-logo-choice", c).catch(() => {
+      });
+    } catch {
+    }
+    if (c.type === "custom") {
+      try {
+        syncCustomData(localStorage.getItem(CUSTOM_DATA_KEY) || "");
+      } catch {
+      }
+    }
   }
   var _panelOpen = false;
   var _closeTimer = 0;
@@ -7555,29 +7607,7 @@ html.fnos-perf.dark{
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
   function detectHotLightMode() {
-    const candidates = [
-      document.querySelector(".fnos-tv-page"),
-      document.body,
-      document.documentElement
-    ];
-    for (const el of candidates) {
-      if (!el) continue;
-      try {
-        const cs = getComputedStyle(el);
-        const bg = cs.backgroundColor;
-        const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-        if (!m) continue;
-        const alpha = m[4] !== void 0 ? parseFloat(m[4]) : 1;
-        if (alpha < 0.05) continue;
-        const r = parseInt(m[1], 10) / 255;
-        const g = parseInt(m[2], 10) / 255;
-        const b = parseInt(m[3], 10) / 255;
-        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        return lum > 0.5;
-      } catch (_) {
-      }
-    }
-    return false;
+    return !getEffectiveDark();
   }
   function applyHotTheme() {
     const panel = document.getElementById("fntv-hot-panel");
@@ -11138,6 +11168,7 @@ html.fnos-perf.dark{
     html.setAttribute("data-fntv-bg", "1");
     const ROOT = 'html[data-fntv-bg-active][data-fntv-bg-mode="' + mode + '"][data-fntv-bg].fnos-tv-page';
     const CLEAR = ROOT + ' [class*="bg-[var(--semi-color-bg-1)"],' + ROOT + ' [class*="bg-[var(--semi-color-bg-0)"]{background-color:transparent!important}' + ROOT + " #root," + ROOT + " #app," + ROOT + " body > div," + ROOT + " body > nav," + ROOT + " body > header," + ROOT + " body > section{background:transparent!important}";
+    const PROTECT = ROOT + " body > #fntv-hot-tab{background-image:linear-gradient(135deg,#ff6b35,#f7418f,#c94bcb)!important;background-color:#f7418f!important;background-size:200% 200%!important;background-position:0% 50%!important}" + ROOT + " body > #fntv-hot-tab:hover{background-image:linear-gradient(135deg,#ff8c5a,#f76aa3,#d96bd6)!important}" + ROOT + " body > #fntv-hot-panel{background-color:rgba(24,26,34,.96)!important;background-image:none!important}" + ROOT + " body > #fntv-hot-panel.fntv-hot-light{background-color:rgba(255,255,255,.96)!important}";
     let bodyCss = "";
     if (mode === "solid") {
       bodyCss = "background:" + S.pageBgColor + "!important;background-color:" + S.pageBgColor + "!important;background-image:none!important;";
@@ -11147,7 +11178,7 @@ html.fnos-perf.dark{
     } else if (mode === "image") {
       bodyCss = "background:transparent!important;background-color:transparent!important;";
     }
-    st.textContent = ROOT + " body{" + bodyCss + "}" + CLEAR;
+    st.textContent = ROOT + " body{" + bodyCss + "}" + CLEAR + PROTECT;
     (document.head || document.documentElement).appendChild(st);
     if (mode === "image") {
       ensureImageLayer(S.pageBgImage, S.pageBgDim, S.pageBgBlur);
@@ -12659,7 +12690,7 @@ html.fnos-perf.dark{
     if (_veil && document.body.contains(_veil)) return _veil;
     const v = document.createElement("div");
     v.id = VEIL_ID;
-    v.style.cssText = `position:fixed;top:32px;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;opacity:0;background:var(--fnos-ui-veil);transition:opacity ${FADE_MS}ms ease;border-radius:0 0 16px 16px;overflow:hidden;`;
+    v.style.cssText = `position:fixed;top:32px;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;opacity:0;background:var(--fnos-ui-veil)!important;transition:opacity ${FADE_MS}ms ease;border-radius:0 0 16px 16px;overflow:hidden;`;
     document.body.appendChild(v);
     _veil = v;
     return v;
@@ -13058,6 +13089,15 @@ html.fnos-perf.dark{
           console.error("[fntv-web] applyPageBg failed", e);
         }
       });
+      try {
+        const lc = s && s.logoChoice;
+        if (lc && typeof lc === "object" && (lc.type === "default" || lc.type === "preset" || lc.type === "custom")) {
+          reconcileLogoChoice(lc, typeof s.logoCustomData === "string" ? s.logoCustomData : void 0);
+        } else {
+          migrateLocalLogoToServer();
+        }
+      } catch {
+      }
     });
   } catch (e) {
   }
@@ -13650,7 +13690,7 @@ html.fnos-perf.dark{
     const enabled3 = S.customScraperEnabled;
     const url = String(S.customScraperUrl || "").trim();
     if (!enabled3 || !url) {
-      setBtn(btn, "\u26A0 \u672A\u914D\u7F6E", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u8D26\u53F7\u4E0E\u7F51\u7EDC \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u5F00\u542F\u5E76\u586B\u5199\u5730\u5740\u3002");
+      setBtn(btn, "\u26A0 \u672A\u914D\u7F6E", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u5F00\u542F\u5E76\u586B\u5199\u5730\u5740\u3002");
       window.setTimeout(() => {
         if (btn.isConnected) setBtn(btn, "\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A");
       }, 5e3);
@@ -13806,7 +13846,7 @@ html.fnos-perf.dark{
     btn.type = "button";
     btn.id = CS_BTN_ID;
     btn.textContent = "\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A";
-    btn.setAttribute("title", "\u7528\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u7684\u6570\u636E\u56DE\u586B\u672C\u5B63\u6BCF\u96C6\u7684\u6807\u9898/\u7B80\u4ECB\uFF08\u5728\u4FA7\u680F\u8BBE\u7F6E \u2192 \u8D26\u53F7\u4E0E\u7F51\u7EDC \u4E2D\u914D\u7F6E\uFF09");
+    btn.setAttribute("title", "\u7528\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u7684\u6570\u636E\u56DE\u586B\u672C\u5B63\u6BCF\u96C6\u7684\u6807\u9898/\u7B80\u4ECB\uFF08\u5728\u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u4E2D\u914D\u7F6E\uFF09");
     btn.style.cssText = "display:inline-flex;align-items:center;margin-left:7px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;background:var(--fnos-ui-btn-bg,rgba(90,160,120,.12));color:#3f9d63;border:none;transition:background .15s,color .15s;flex-shrink:0;";
     btn.addEventListener("mouseenter", () => {
       btn.style.background = "var(--fnos-ui-btn-hover,rgba(63,157,99,.28))";
@@ -13891,14 +13931,14 @@ html.fnos-perf.dark{
     btn.type = "button";
     btn.id = JAV_BTN_ID;
     btn.textContent = "\u27F3 jav \u522E\u524A";
-    btn.setAttribute("title", "\u4ECE\u6587\u4EF6\u540D\u756A\u53F7\u5728 javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF0C\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u8BBE\u7F6E\u2192\u8D26\u53F7\u4E0E\u7F51\u7EDC\u2192Jav \u522E\u524A \u5F00\u5173\u3002");
-    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82);color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
+    btn.setAttribute("title", "\u4ECE\u6587\u4EF6\u540D\u756A\u53F7\u5728 javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF0C\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u8BBE\u7F6E\u2192\u81EA\u5B9A\u4E49\u522E\u524A\u2192Jav \u522E\u524A \u5F00\u5173\u3002");
+    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
     btn.setAttribute("data-fnos-ui", "1");
     btn.addEventListener("mouseenter", () => {
-      btn.style.background = "rgba(52,44,76,.9)";
+      btn.style.background = "rgba(52,44,76,.9)!important";
     });
     btn.addEventListener("mouseleave", () => {
-      btn.style.background = "rgba(28,24,40,.82)";
+      btn.style.background = "rgba(28,24,40,.82)!important";
     });
     btn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -15906,11 +15946,11 @@ html.fntv-boot-hide #root{visibility:hidden}
       ssvBody.style.cssText = "padding:14px 16px;display:flex;flex-direction:column;gap:8px;";
       const ssvDesc = document.createElement("div");
       ssvDesc.style.cssText = "font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.6;";
-      ssvDesc.textContent = t("\u63A5\u5165\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u7528\u4F60\u81EA\u5DF1\u7684\u6570\u636E\u6E90\u5237\u65B0\u5267\u96C6\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u6D77\u62A5\u7B49\u5143\u6570\u636E\uFF08\u652F\u6301 Bangumi/TMDB/\u8C46\u74E3\u7B49\u591A\u6E90\u805A\u5408\uFF09\u3002");
+      ssvDesc.textContent = t("\u63A5\u5165\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u7528\u4F60\u81EA\u5DF1\u7684\u6570\u636E\u6E90\u5237\u65B0\u5267\u96C6\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u6D77\u62A5\u7B49\u5143\u6570\u636E\u3002\u529F\u80FD\u5F00\u653E\u4E2D\uFF0C\u672A\u6B63\u5F0F\u751F\u6548\uFF0C\u656C\u8BF7\u671F\u5F85\u3002");
       ssvBody.appendChild(ssvDesc);
       const ssvBadge = document.createElement("div");
       ssvBadge.style.cssText = "display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(255,180,60,.12);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.35);";
-      ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t("\u529F\u80FD\u5F00\u53D1\u4E2D\uFF0C\u656C\u8BF7\u671F\u5F85");
+      ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t("\u672A\u6B63\u5F0F\u751F\u6548");
       ssvBody.appendChild(ssvBadge);
       const secDiag = section("\u8BCA\u65AD\u4FE1\u606F");
       const diagBody = secDiag.body;
@@ -17093,7 +17133,9 @@ html.fntv-boot-hide #root{visibility:hidden}
         { id: "appearance", label: "\u901A\u7528", els: [secAppearance.el, secPageBg.el, secDaily.el, secUX.el, secSkip.el] },
         // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
         { id: "danmaku", label: "\u5F39\u5E55", els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
-        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el, secCustomProxy.el, secTmdbDirect.el] },
+        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secCustomProxy.el, secTmdbDirect.el] },
+        // [v1.10.2] 自定义刮削源→Jav 刮削七卡从「账号与网络」拆出独立成类；开发中的「自定义刮削服务」置顶占位
+        { id: "scraper", label: "\u81EA\u5B9A\u4E49\u522E\u524A", els: [secScraperSvc.el, secScraper.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el] },
         { id: "diag", label: "\u8BCA\u65AD\u4E0E\u65E5\u5FD7", els: [secDiag.el, secDebug.el] },
         { id: "about", label: "\u5173\u4E8E", els: [secAbout.el] }
       ];
