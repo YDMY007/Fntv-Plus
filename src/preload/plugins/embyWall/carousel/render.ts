@@ -340,8 +340,13 @@ export function injectCarousel(): void {
     };
     if (blob) {
       imgEl.onerror = () => { log('[DIAG] 轮播主图(blob缓存)加载失败:', (show.title || '').substring(0, 16)); };
+      // [v1.10.1] 竞速修复：blob 路径此前漏挂 onload，只靠赋 src 后同步读 imgEl.complete——
+      // 大底图(4K dataURL 数 MB)解码是异步任务，那一刻 complete 常为 false → applyLandscapeCheck
+      // 永远没人跑 → img 停在初始 display:none（症状：横屏海报时有时无、Ctrl+F5 强刷后时间线
+      // 变了又能显示）。必须先挂 onload 再赋 src，同步 complete 命中仅作加速路径。
+      imgEl.onload = applyLandscapeCheck;
       imgEl.src = blob;
-      try { if (imgEl.complete) applyLandscapeCheck(); } catch (e) { /* ignore */ }
+      try { if (imgEl.complete && imgEl.naturalWidth > 0) applyLandscapeCheck(); } catch (e) { /* ignore */ }
     } else if (!(show as any)._backdropIsPortrait) {
       // [lc-924] 返回首页校验发现 backdrop 是竖版 → 不拉图, 保留默认隐藏(img 已是 display:none)
       fetchImageAuth(pic, { label: 'slide#' + i + ':' + (show.title || '').substring(0, 10), isStrm: isSlideStrm }).then((b) => {

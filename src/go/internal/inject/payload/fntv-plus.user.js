@@ -10709,9 +10709,10 @@ html.fnos-perf.dark{
         imgEl.onerror = () => {
           log7("[DIAG] \u8F6E\u64AD\u4E3B\u56FE(blob\u7F13\u5B58)\u52A0\u8F7D\u5931\u8D25:", (show.title || "").substring(0, 16));
         };
+        imgEl.onload = applyLandscapeCheck;
         imgEl.src = blob;
         try {
-          if (imgEl.complete) applyLandscapeCheck();
+          if (imgEl.complete && imgEl.naturalWidth > 0) applyLandscapeCheck();
         } catch (e) {
         }
       } else if (!show._backdropIsPortrait) {
