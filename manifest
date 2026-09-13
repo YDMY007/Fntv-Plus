@@ -7,6 +7,7 @@ source=thirdparty
 platform=x86
 maintainer=YDMY007
 maintainer_url=https://github.com/YDMY007/Fntv-Plus
+distributor=彩奈
 
 
 desktop_uidir=ui
