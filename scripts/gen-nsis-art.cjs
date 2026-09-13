@@ -70,9 +70,11 @@ const sharedCss = `
   .logo { object-fit:contain; filter:drop-shadow(0 2px 8px rgba(80,120,220,.18)); }
   .name { font-weight:800; color:#1b2540; letter-spacing:.5px;
            text-shadow:0 1px 2px rgba(255,255,255,.85); }
-  .sub  { font-weight:500; color:#4a5878; line-height:1.6; }
+  /* [v6] 字色整体加深一档 + 行距统一 1.7: 1x 原生渲染后次要文字不再被缩放糊掉,
+     原来的浅灰在 1:1 下显得发虚, 加深后对比度更稳(WCAG 更安全)。 */
+  .sub  { font-weight:500; color:#42506e; line-height:1.7; }
   .badge { font-weight:800; letter-spacing:2.8px; text-transform:uppercase; color:#3d6df5; }
-  .tag  { letter-spacing:1.4px; text-transform:uppercase; color:#93a1bf; }
+  .tag  { letter-spacing:1.4px; text-transform:uppercase; color:#8896b6; }
   /* 玻璃药丸按钮(烘焙进画稿; NSIS 侧用热区/本体隐形按钮精确叠放) */
   .pill { position:absolute; display:flex; align-items:center; justify-content:center;
           border-radius:48px; font-weight:700; letter-spacing:6px; text-indent:6px;
@@ -103,22 +105,24 @@ const welcomeHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   .hero { position:absolute; left:92px; top:270px; max-width:900px; }
   .hero .t { font-size:58px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:22px; font-size:20px; line-height:1.7; color:#4a5878; }
+  .hero .s { margin-top:18px; font-size:20px; line-height:1.7; color:#42506e; }
   .feats { position:absolute; left:92px; top:620px; display:flex; gap:26px; }
-  .feat { width:300px; padding:22px 24px; border-radius:18px;
+  .feat { width:320px; padding:24px 26px; border-radius:18px;
           background:linear-gradient(165deg, rgba(255,255,255,.78) 0%, rgba(255,255,255,.52) 100%);
           border:1px solid rgba(255,255,255,.92); border-top-color:rgba(255,255,255,1);
           box-shadow:0 10px 30px rgba(96,130,190,.15), inset 0 1px 0 rgba(255,255,255,.95); }
   .feat .fi { font-size:26px; }
-  .feat .ft { margin-top:10px; font-size:17px; font-weight:700; color:#1b2540; }
-  .feat .fd { margin-top:6px; font-size:12.5px; line-height:1.55; color:#5a6885; }
+  /* [v6] 描述原 12.5px(@2x) → 1x 下仅 6.25 逻辑 px, 偏费眼; 提到 14px, 行距 1.55→1.62,
+     标题与描述的纵向间距同步加大, 卡片内边距 22/24 → 24/26 补呼吸。 */
+  .feat .ft { margin-top:12px; font-size:18px; font-weight:700; color:#1b2540; }
+  .feat .fd { margin-top:8px; font-size:14px; line-height:1.62; color:#4d5a7a; }
   .pill.primary { left:1000px; top:844px; width:440px; height:96px; }
   .hint { position:absolute; right:96px; top:962px; font-size:14px;
-          color:#6b7ea3; letter-spacing:.5px; }
+          color:#5d6f99; letter-spacing:.5px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#9aa8c4; letter-spacing:4px; }
+         font-size:12px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
-         color:#9aa8c4; letter-spacing:.5px; }
+         color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -164,7 +168,7 @@ const finishHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
           font-size:46px; font-weight:800; color:#16233f; letter-spacing:2px;
           text-shadow:0 1px 3px rgba(255,255,255,.9); }
   .sub  { position:absolute; left:0; right:0; top:430px; text-align:center;
-          font-size:19px; color:#4a5878; line-height:1.7; }
+          font-size:19px; color:#42506e; line-height:1.7; }
   .brand { position:absolute; left:64px; top:52px; display:flex; align-items:center; gap:20px; }
   .brand img { width:96px; }
   .brand .name { font-size:34px; }
@@ -172,9 +176,9 @@ const finishHtml = `<!doctype html><html><head><meta charset="utf-8"><style>
   .pill.primary { left:420px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .pill.secondary { left:800px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#9aa8c4; letter-spacing:4px; }
+         font-size:12px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
-         color:#9aa8c4; letter-spacing:.5px; }
+         color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -214,7 +218,7 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
   .hero { position:absolute; left:92px; top:120px; }
   .hero .t { font-size:52px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:14px; font-size:20px; color:#4a5878; }
+  .hero .s { margin-top:18px; font-size:20px; color:#42506e; }
   /* 2×2 玻璃卡: 左列模式选择 / 右列安装位置(高卡); 统一磨砂+高光顶边+悬浮投影 */
   .card { position:absolute; width:700px; border-radius:28px;
           background:linear-gradient(165deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.58) 100%);
@@ -232,9 +236,9 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
                box-shadow:0 0 0 6px rgba(61,109,245,.12), 0 4px 10px rgba(61,109,245,.28); }
   .radio.on::after { content:''; position:absolute; left:9px; top:9px; width:24px; height:24px;
            border-radius:50%; background:linear-gradient(135deg, #3d6df5, #6a5cf0); }
-  .card .ct { position:absolute; left:160px; top:44px; font-size:30px; font-weight:800;
+  .card .ct { position:absolute; left:160px; top:52px; font-size:30px; font-weight:800;
               color:#1b2540; letter-spacing:.5px; }
-  .card .cd { position:absolute; left:160px; top:104px; font-size:17px; color:#5a6885; }
+  .card .cd { position:absolute; left:160px; top:112px; font-size:18px; color:#4d5a7a; }
   .card .ci { position:absolute; right:40px; top:50%; transform:translateY(-50%);
               font-size:44px; opacity:.9; filter:drop-shadow(0 4px 10px rgba(96,130,190,.25)); }
   /* 右上卡「安装位置」: 标题 + 路径只读显示槽(NSIS 侧不透明底 Label 坐入) + 浏览药丸 + 模式说明底 */
@@ -244,10 +248,10 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
                background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.35);
                box-sizing:border-box; }
   .pathplate .plabel { position:absolute; left:24px; top:12px; font-size:14px; font-weight:700;
-               letter-spacing:2px; color:#8b96ad; }
+               letter-spacing:2px; color:#7f8ba6; }
   .pill.pill.browse { left:40px !important; top:232px !important; width:180px !important; height:60px !important;
                       font-size:22px; letter-spacing:2px; text-indent:2px; }
-  .dhint { position:absolute; left:236px; top:248px; font-size:15px; color:#8b96ad; width:420px; }
+  .dhint { position:absolute; left:236px; top:248px; font-size:15px; color:#7f8ba6; width:420px; }
   /* 安装模式说明底(EB 动态说明文字坐入; 与 NSIS 侧不透明底同色 → 切换模式换字无叠影、不压边框) */
   .infoplate { position:absolute; left:40px; top:312px; width:620px; height:82px; border-radius:12px;
                background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.30);
@@ -255,9 +259,9 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
   .pill.primary { left:800px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .pill.secondary { left:420px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#9aa8c4; letter-spacing:4px; }
+         font-size:12px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
-         color:#9aa8c4; letter-spacing:.5px; }
+         color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -306,7 +310,7 @@ const instPageHtml = (done, pill) => `<!doctype html><html><head><meta charset="
   .hero { position:absolute; left:92px; top:120px; }
   .hero .t { font-size:52px; font-weight:800; color:#16233f; letter-spacing:1px;
              text-shadow:0 1px 3px rgba(255,255,255,.9); }
-  .hero .s { margin-top:16px; font-size:20px; color:#4a5878; }
+  .hero .s { margin-top:18px; font-size:20px; color:#42506e; }
   .panel { position:absolute; left:92px; top:252px; width:1376px; height:508px; border-radius:22px;
            background:#ffffff; border:1.5px solid rgba(151,176,222,.55);
            box-shadow:0 14px 40px rgba(96,130,190,.16), inset 0 1px 0 rgba(255,255,255,1); }
@@ -314,9 +318,9 @@ const instPageHtml = (done, pill) => `<!doctype html><html><head><meta charset="
   .pill.secondary { left:460px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .pill.primary { left:840px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
-         font-size:12px; color:#9aa8c4; letter-spacing:4px; }
+         font-size:12px; color:#8896b6; letter-spacing:4px; }
   .ver { position:absolute; left:66px; bottom:20px; font-size:12px;
-         color:#9aa8c4; letter-spacing:.5px; }
+         color:#8896b6; letter-spacing:.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -352,14 +356,14 @@ const splashHtml = (uninstall) => `<!doctype html><html><head><meta charset="utf
            border-radius:20px; }
   .logo { width:200px; }
   .name { font-size:23px; }
-  .sub { font-size:11.5px; text-align:center; }
+  .sub { font-size:12px; text-align:center; }
   .badge { position:absolute; top:24px; left:0; right:0; text-align:center;
            font-size:12px; letter-spacing:5px; color:${uninstall ? '#e05252' : '#3d6df5'}; }
   .orb { width:46px; height:46px; position:absolute; left:50%; transform:translateX(-50%); bottom:32px; }
   .orb::after { content:''; position:absolute; inset:-10px; border-radius:50%;
                 border:1.5px solid rgba(120,150,240,.35); }
   .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
-         font-size:9px; color:#9aa8c4; letter-spacing:3.5px; }
+         font-size:9px; color:#8896b6; letter-spacing:3.5px; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -387,13 +391,13 @@ const sidebarHtml = (uninstall) => `<!doctype html><html><head><meta charset="ut
   .glass { left:10px; right:10px; top:88px; height:126px; padding:14px 10px;
            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; }
   .logo { width:110px; }
-  .name { font-size:13.5px; }
+  .name { font-size:14px; }
   .sub { font-size:8px; text-align:center; }
   .orb { width:28px; height:28px; position:absolute; right:14px; bottom:20px; }
   .tag { position:absolute; left:0; right:0; bottom:10px; text-align:center;
-         font-size:7.5px; color:#9aa8c4; }
+         font-size:8px; color:#8896b6; }
   .badge { position:absolute; top:30px; left:12px; right:12px; text-align:center;
-           font-size:9.5px; color:${uninstall ? '#e05252' : '#3d6df5'}; }
+           font-size:10px; color:${uninstall ? '#e05252' : '#3d6df5'}; }
 </style></head><body>
   <div class="stage">
     <div class="noise"></div>
@@ -533,59 +537,90 @@ async function renderBmp(page, html, width, height, outFile) {
   console.log('[gen-nsis-art]', Path.basename(outFile), width + 'x' + height, Math.round(bmp.length / 1024) + 'KB');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// [v6] 1x 原生渲染
+// 背景: 画稿原本只有 1560×1040(@2x) 一套, NSIS 侧 SS_BITMAP 拉伸到客户区
+//   (96dpi/100% 缩放时是 1560→780 的**缩小**)。Windows 的 STATIC 位图拉伸默认走
+//   COLORONCOLOR = 直接采样丢像素 → 笔画断裂、字体发虚(用户报「字体不够清晰」的真正根因)。
+// 做法: viewport 直接给目标尺寸(780×520), 再用 CSS `zoom` 让浏览器**按目标尺寸重新布局
+//   并重新光栅化**(zoom 会触发 relayout, 与 transform:scale 那种先渲染再缩放不同),
+//   于是文字/描边是原生像素渲染, NSIS 侧 1:1 贴图完全无缩放损失。
+//   ⚠ 不能用「deviceScaleFactor:0.5 渲染 2x」替代 —— 那仍是大尺寸光栅化后降采样。
+// 输出命名: 2x 保持原名(兼容既有 File 列表), 1x 追加 `1x` 后缀。
+// ─────────────────────────────────────────────────────────────────────────────
+const nextFrame = (page) =>
+  page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+// 整页 1x: 逻辑尺寸 W×H(=2x 尺寸) → 实际输出 W/2 × H/2
+async function renderBmp1x(page, html, W, H, outFile) {
+  const w = Math.round(W / 2);
+  const h = Math.round(H / 2);
+  await page.setViewportSize({ width: w, height: h });
+  await page.setContent(html);
+  await page.evaluate(() => { document.documentElement.style.zoom = '0.5'; });
+  await nextFrame(page);
+  const png = await page.screenshot({ clip: { x: 0, y: 0, width: w, height: h } });
+  const bmp = pngToBmp24(png);
+  assertBmpHealthy(bmp, w, h, Path.basename(outFile));
+  Fs.writeFileSync(outFile, bmp);
+  console.log('[gen-nsis-art]', Path.basename(outFile), w + 'x' + h, Math.round(bmp.length / 1024) + 'KB');
+}
+
+// 裁片 1x: 入参用 2x 坐标(与 2x clip 同源), 内部折半
+async function clipBmp1x(page, html, x2, y2, w2, h2, outFile) {
+  const x = x2 / 2, y = y2 / 2, w = w2 / 2, h = h2 / 2;
+  await page.setViewportSize({ width: 780, height: 520 });
+  await page.setContent(html);
+  await page.evaluate(() => { document.documentElement.style.zoom = '0.5'; });
+  await nextFrame(page);
+  const png = await page.screenshot({ clip: { x, y, width: w, height: h } });
+  const bmp = pngToBmp24(png);
+  assertBmpHealthy(bmp, w, h, Path.basename(outFile));
+  Fs.writeFileSync(outFile, bmp);
+  console.log('[gen-nsis-art]', Path.basename(outFile), w + 'x' + h, Math.round(bmp.length / 1024) + 'KB');
+}
+
 (async () => {
   const browser = await chromium.launch();
   const page = await (await browser.newContext({ deviceScaleFactor: 1 })).newPage();
   const outDir = Path.join(ROOT, 'build');
 
-  // 整页画稿(2x: 1560×1040, NSIS 侧拉伸到客户区, 100%/125%/150% DPI 均清晰)
-  await renderBmp(page, welcomeHtml, 1560, 1040, Path.join(outDir, 'installerWelcome.bmp'));
-  await renderBmp(page, finishHtml, 1560, 1040, Path.join(outDir, 'installerFinish.bmp'));
+  // 2x 裁片工具(与整页同源同坐标 → 与背景逐像素一致, 运行时换贴片无缝)
+  const clip2x = async (html, x, y, w, h, name) => {
+    await page.setViewportSize({ width: 1560, height: 1040 });
+    await page.setContent(html);
+    Fs.writeFileSync(Path.join(outDir, name + '.bmp'),
+      pngToBmp24(await page.screenshot({ clip: { x, y, width: w, height: h } })));
+    console.log('[gen-nsis-art]', name + '.bmp', w + 'x' + h);
+  };
 
-  // CTA 按钮裁片: 与整页同像素坐标 clip → 与背景逐像素一致, 热区叠放无缝
-  await page.setViewportSize({ width: 1560, height: 1040 });
-  await page.setContent(welcomeHtml);
-  const pngCta = await page.screenshot({ clip: { x: 1000, y: 844, width: 440, height: 96 } });
-  Fs.writeFileSync(Path.join(outDir, 'installerWelcomeCta.bmp'), pngToBmp24(pngCta));
-  console.log('[gen-nsis-art] installerWelcomeCta.bmp 440x96');
+  // ── [v6] 每个画稿出两套: 2x(原名, 高 DPI 用) + 1x(`1x` 后缀, 96dpi/100% 用) ──
+  //    NSIS 侧按 DPI 选目录, 两套都是「尽量不缩放」的那一套; 裁片必须与整页同源同缩放,
+  //    否则换贴片时与背景对不上。
+  const both = async (html, name) => {
+    await renderBmp(page, html, 1560, 1040, Path.join(outDir, name + '.bmp'));
+    await renderBmp1x(page, html, 1560, 1040, Path.join(outDir, name + '1x.bmp'));
+  };
+  const bothClip = async (html, x, y, w, h, name) => {
+    await clip2x(html, x, y, w, h, name);
+    await clipBmp1x(page, html, x, y, w, h, Path.join(outDir, name + '1x.bmp'));
+  };
 
-  await page.setContent(finishHtml);
-  const pngP1 = await page.screenshot({ clip: { x: 420, y: 824, width: 340, height: 96 } });
-  const pngP2 = await page.screenshot({ clip: { x: 800, y: 824, width: 340, height: 96 } });
-  Fs.writeFileSync(Path.join(outDir, 'installerFinishPrimary.bmp'), pngToBmp24(pngP1));
-  Fs.writeFileSync(Path.join(outDir, 'installerFinishSecondary.bmp'), pngToBmp24(pngP2));
-  console.log('[gen-nsis-art] installerFinishPrimary/Secondary.bmp 340x96');
+  await both(welcomeHtml, 'installerWelcome');
+  await both(finishHtml, 'installerFinish');
+  await both(modePageHtml(false), 'installerMode');
+  await bothClip(modePageHtml(true), 80, 280, 724, 430, 'installerModeCardsA');
+  await bothClip(modePageHtml(false), 80, 280, 724, 430, 'installerModeCardsB');
+  await both(instPageHtml(false, 'cancel'), 'installerInst');
+  await bothClip(instPageHtml(true, 'next'), 0, 100, 1560, 200, 'installerInstDoneTitle');
+  await bothClip(instPageHtml(false, 'cancel'), 400, 810, 780, 130, 'installerInstBar');
+  await bothClip(instPageHtml(true, 'next'), 400, 810, 780, 130, 'installerInstBarDone');
 
-  // ── [v5] 第二步安装选项(整页 + 选择卡双态裁片, 裁片=运行时换态贴片) ──
-  await renderBmp(page, modePageHtml(false), 1560, 1040, Path.join(outDir, 'installerMode.bmp'));
-  await page.setViewportSize({ width: 1560, height: 1040 });
-  await page.setContent(modePageHtml(true));
-  Fs.writeFileSync(Path.join(outDir, 'installerModeCardsA.bmp'),
-    pngToBmp24(await page.screenshot({ clip: { x: 80, y: 280, width: 724, height: 430 } })));
-  await page.setContent(modePageHtml(false));
-  Fs.writeFileSync(Path.join(outDir, 'installerModeCardsB.bmp'),
-    pngToBmp24(await page.screenshot({ clip: { x: 80, y: 280, width: 724, height: 430 } })));
-  console.log('[gen-nsis-art] installerModeCardsA/B.bmp 724x430');
-
-  // ── [v5] 第三步安装进度(整页 + 完成态标题条 + 按钮区条带双态) ──
-  await renderBmp(page, instPageHtml(false, 'cancel'), 1560, 1040, Path.join(outDir, 'installerInst.bmp'));
-  await page.setViewportSize({ width: 1560, height: 1040 });
-  await page.setContent(instPageHtml(true, 'next'));
-  Fs.writeFileSync(Path.join(outDir, 'installerInstDoneTitle.bmp'),
-    pngToBmp24(await page.screenshot({ clip: { x: 0, y: 100, width: 1560, height: 200 } })));
-  await page.setContent(instPageHtml(false, 'cancel'));
-  Fs.writeFileSync(Path.join(outDir, 'installerInstBar.bmp'),
-    pngToBmp24(await page.screenshot({ clip: { x: 400, y: 810, width: 780, height: 130 } })));
-  await page.setContent(instPageHtml(true, 'next'));
-  Fs.writeFileSync(Path.join(outDir, 'installerInstBarDone.bmp'),
-    pngToBmp24(await page.screenshot({ clip: { x: 400, y: 810, width: 780, height: 130 } })));
-  console.log('[gen-nsis-art] installerInst + DoneTitle 1560x200 + InstBar 780x130 x2');
-
-  // 保留产物: 开场闪屏(安装/卸载) + 卸载器侧栏; 页眉品牌卡(淡蓝玻璃)
+  // 闪屏/侧栏/页眉: 本身就是按显示尺寸 1:1 布局的小图, 保持单套
   await renderBmp(page, splashHtml(false), 480, 300, Path.join(outDir, 'installerSplash.bmp'));
   await renderBmp(page, splashHtml(true), 480, 300, Path.join(outDir, 'uninstallerSplash.bmp'));
   await renderBmp(page, sidebarHtml(true), 164, 314, Path.join(outDir, 'uninstallerSidebar.bmp'));
   await renderBmp(page, headerHtml, 350, 148, Path.join(outDir, 'installerHeader.bmp'));
   await browser.close();
-  console.log('[gen-nsis-art] done (v5 四页整页化 · 苹果风淡蓝液态玻璃向导)');
+  console.log('[gen-nsis-art] done (v6 双分辨率画稿 · 1x 原生渲染 + 2x)');
 })().catch((e) => { console.error(e); process.exit(1); });

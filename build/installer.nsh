@@ -76,6 +76,7 @@ Var fnosFontBold    ; 粗体: 同上 700(页眉标题用)
   Var fnosInstDone      ; 进度页安装已完成标志
   Var fnosInstTitleCtl  ; 进度页标题条贴片控件(空图透明, 完成时换片)
   Var fnosInstBarCtl    ; 进度页按钮区条带贴片控件(取消→下一步换片)
+  Var fnosArtDir        ; 画稿分辨率目录: "1x"(96dpi 原生 1:1) / "2x"(高 DPI); 见 fnosOnInitGUI
 !endif
 
 ; ── [v3] 淡蓝液态玻璃主题 token(与画稿同源; SetCtlColors 用 RRGGBB 无前缀格式) ──
@@ -112,22 +113,30 @@ Var fnosFontBold    ; 粗体: 同上 700(页眉标题用)
   System::Free $9
 !macroend
 
+; ── [v6] 画稿成对解压: 同一画稿的 1x(原生渲染)/2x 都进 $PLUGINSDIR,
+; 运行时按 DPI 选目录($fnosArtDir)。源文件名规则: 2x 无后缀, 1x 加 `1x`(见 gen-nsis-art.cjs)。
+!macro fnosArtPair NAME
+  File /oname=$PLUGINSDIR\1x\${NAME}.bmp "${BUILD_RESOURCES_DIR}\${NAME}1x.bmp"
+  File /oname=$PLUGINSDIR\2x\${NAME}.bmp "${BUILD_RESOURCES_DIR}\${NAME}.bmp"
+!macroend
+
 ; ── 自定义 Init: 画稿预载 + 闪屏 ──
 !macro customInit
   InitPluginsDir
-  File /oname=$PLUGINSDIR\fntv-splash.bmp      "${BUILD_RESOURCES_DIR}\installerSplash.bmp"
-  File /oname=$PLUGINSDIR\fnos-welcome.bmp     "${BUILD_RESOURCES_DIR}\installerWelcome.bmp"
-  File /oname=$PLUGINSDIR\fnos-welcome-cta.bmp "${BUILD_RESOURCES_DIR}\installerWelcomeCta.bmp"
-  File /oname=$PLUGINSDIR\fnos-finish.bmp      "${BUILD_RESOURCES_DIR}\installerFinish.bmp"
-  File /oname=$PLUGINSDIR\fnos-finish-p1.bmp   "${BUILD_RESOURCES_DIR}\installerFinishPrimary.bmp"
-  File /oname=$PLUGINSDIR\fnos-finish-p2.bmp   "${BUILD_RESOURCES_DIR}\installerFinishSecondary.bmp"
-  File /oname=$PLUGINSDIR\fnos-mode.bmp        "${BUILD_RESOURCES_DIR}\installerMode.bmp"
-  File /oname=$PLUGINSDIR\fnos-mode-a.bmp      "${BUILD_RESOURCES_DIR}\installerModeCardsA.bmp"
-  File /oname=$PLUGINSDIR\fnos-mode-b.bmp      "${BUILD_RESOURCES_DIR}\installerModeCardsB.bmp"
-  File /oname=$PLUGINSDIR\fnos-inst.bmp        "${BUILD_RESOURCES_DIR}\installerInst.bmp"
-  File /oname=$PLUGINSDIR\fnos-inst-done.bmp   "${BUILD_RESOURCES_DIR}\installerInstDoneTitle.bmp"
-  File /oname=$PLUGINSDIR\fnos-inst-bar.bmp      "${BUILD_RESOURCES_DIR}\installerInstBar.bmp"
-  File /oname=$PLUGINSDIR\fnos-inst-bar-done.bmp "${BUILD_RESOURCES_DIR}\installerInstBarDone.bmp"
+  CreateDirectory $PLUGINSDIR\1x
+  CreateDirectory $PLUGINSDIR\2x
+  ; 9 张会在向导里显示的画稿/贴片, 每张两套分辨率(1x 供 96dpi 原生 1:1, 2x 供高 DPI)
+  !insertmacro fnosArtPair installerWelcome
+  !insertmacro fnosArtPair installerFinish
+  !insertmacro fnosArtPair installerMode
+  !insertmacro fnosArtPair installerModeCardsA
+  !insertmacro fnosArtPair installerModeCardsB
+  !insertmacro fnosArtPair installerInst
+  !insertmacro fnosArtPair installerInstDoneTitle
+  !insertmacro fnosArtPair installerInstBar
+  !insertmacro fnosArtPair installerInstBarDone
+  ; 闪屏按显示尺寸 480×300 1:1 布局, 单套即可
+  File /oname=$PLUGINSDIR\fntv-splash.bmp "${BUILD_RESOURCES_DIR}\installerSplash.bmp"
   ${IfNot} ${Silent}
     AdvSplash::show 1000 350 350 0x00FF00 "$PLUGINSDIR\fntv-splash.bmp"
     Pop $0
@@ -172,6 +181,13 @@ Function fnosOnInitGUI
     System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i.r0'
     ${If} $0 < 96
       StrCpy $0 96
+    ${EndIf}
+    ; 画稿按 DPI 选套: 1x 是 780×520 原生渲染版, 客户区 ≈780px(96dpi/100%) 时 1:1 零缩放;
+    ; 客户区随 DPI 变大后 1x 只能被放大(放大比缩小更糊), 故 >120dpi 换 2x(缩小比<1)。
+    ${If} $0 <= 120
+      StrCpy $fnosArtDir "1x"
+    ${Else}
+      StrCpy $fnosArtDir "2x"
     ${EndIf}
     IntOp $1 $0 * 780
     IntOp $1 $1 + 48
@@ -367,7 +383,7 @@ FunctionEnd
     !insertmacro fnosFitWindow $0
     ${NSD_CreateBitmap} 0 0 $fnosPW $fnosPH ""
     Pop $fnosWelcomeBmpCtl
-    ${NSD_SetStretchedImage} $fnosWelcomeBmpCtl "$PLUGINSDIR\fnos-welcome.bmp" $fnosWelcomeBmp
+    ${NSD_SetStretchedImage} $fnosWelcomeBmpCtl "$PLUGINSDIR\$fnosArtDir\installerWelcome.bmp" $fnosWelcomeBmp
     ${NSD_OnClick} $fnosWelcomeBmpCtl fnosWelcomeArtClick   ; 位图带 SS_NOTIFY, 真实点击必达; 处理器按药丸区域分发
     Call muiPageLoadFullWindow
     ; 药丸即主按钮, 隐藏原生向导按钮(✕/Esc 仍可退出)
@@ -433,7 +449,7 @@ FunctionEnd
   ; 原链路照常更新说明文字/UAC 盾牌), 选中态用画稿双态贴片呈现; 向导按钮铺成
   ; 玻璃药丸隐形皮肤。仅安装器遍会到达此页(卸载器遍未挂 SHOW 钩子)。 ──
   Function fnosInstModeShow
-    StrCpy $R8 "$PLUGINSDIR\fnos-mode.bmp"
+    StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerMode.bmp"
     Call fnosNativeArtShow                              ; $R5 = 页面 dialog
     ; 原生控件退场: 说明文字与单选钮隐藏(单选钮仅作选中状态载体, 热区代点)
     ShowWindow $MultiUser.InstallModePage.Text ${SW_HIDE}
@@ -520,9 +536,9 @@ FunctionEnd
   ; 选择卡贴片: $fnosModeSel(1=所有用户卡选中) → 对应画稿裁片
   Function fnosModeSwapCards
     ${If} $fnosModeSel == 1
-      StrCpy $R8 "$PLUGINSDIR\fnos-mode-a.bmp"
+      StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerModeCardsA.bmp"
     ${Else}
-      StrCpy $R8 "$PLUGINSDIR\fnos-mode-b.bmp"
+      StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerModeCardsB.bmp"
     ${EndIf}
     StrCpy $R7 $fnosModeCardsCtl
     Call fnosSwapBmp
@@ -638,7 +654,7 @@ FunctionEnd
     !insertmacro fnosFitWindow $0
     ${NSD_CreateBitmap} 0 0 $fnosPW $fnosPH ""
     Pop $fnosFinishBmpCtl
-    ${NSD_SetStretchedImage} $fnosFinishBmpCtl "$PLUGINSDIR\fnos-finish.bmp" $fnosFinishBmp
+    ${NSD_SetStretchedImage} $fnosFinishBmpCtl "$PLUGINSDIR\$fnosArtDir\installerFinish.bmp" $fnosFinishBmp
     ${NSD_OnClick} $fnosFinishBmpCtl fnosFinishArtClick      ; 两个药丸区域在处理器内分发
     Call muiPageLoadFullWindow
     GetDlgItem $1 $HWNDPARENT 1
@@ -700,7 +716,7 @@ FunctionEnd
   Function fnosInstFilesShow
     StrCpy $fnosInstDone 0
     StrCpy $fnosInstTitleCtl 0
-    StrCpy $R8 "$PLUGINSDIR\fnos-inst.bmp"
+    StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerInst.bmp"
     Call fnosNativeArtShow                              ; $R5 = 页面 dialog
     ; 完成态标题条控件(空图透明, customInstall 时换「安装完成」贴片)
     !insertmacro fnosArtRect 0 50 780 100
@@ -753,7 +769,7 @@ FunctionEnd
     StrCpy $fnosInstBarCtl $1
     SetCtlColors $1 "" transparent
     StrCpy $R7 $1
-    StrCpy $R8 "$PLUGINSDIR\fnos-inst-bar.bmp"
+    StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerInstBar.bmp"
     Call fnosSwapBmp
   FunctionEnd
 !macroend
@@ -767,12 +783,12 @@ FunctionEnd
   StrCpy $fnosInstDone 1
   ${If} $fnosInstTitleCtl P<> 0
     StrCpy $R7 $fnosInstTitleCtl
-    StrCpy $R8 "$PLUGINSDIR\fnos-inst-done.bmp"
+    StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerInstDoneTitle.bmp"
     Call fnosSwapBmp
   ${EndIf}
   ${If} $fnosInstBarCtl P<> 0
     StrCpy $R7 $fnosInstBarCtl
-    StrCpy $R8 "$PLUGINSDIR\fnos-inst-bar-done.bmp"
+    StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerInstBarDone.bmp"
     Call fnosSwapBmp
   ${EndIf}
 !macroend
