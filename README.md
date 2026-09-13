@@ -106,7 +106,8 @@
 |---|---|
 | 通用 | 主题模式 / 界面交互 / 跳过片头 |
 | 弹幕 | B站登录 / 弹弹play / 自建源 / 屏蔽与样式 |
-| 账号与网络 | Bangumi Token / TMDB Key / 豆瓣 Cookie / **自定义刮削服务（开发中）** / 自定义代理 / TMDB 免梯子直连 |
+| 账号与网络 | Bangumi Token / TMDB Key / 豆瓣 Cookie / 自定义代理 / TMDB 免梯子直连 |
+| 自定义刮削 | 自定义刮削服务（未正式生效，置顶）/ 自定义刮削源 / Fanart.tv / TVMaze / OMDb / MyAnimeList / Jav 刮削 |
 | 诊断与日志 | 诊断信息 / 调试日志 |
 | 关于 | 项目信息 |
 
