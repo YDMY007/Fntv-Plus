@@ -1,7 +1,8 @@
 // Package bridge —— skip.go：跳过片头/片尾外部数据链（网页端 skip:fetch-and-fill 的外网部分）。
 // 移植桌面版 smartSkip.ts + skipMalMap.ts：
 //   Step A  AniSkip（动漫社区库，区间绝对秒；需 MAL id → 标题映射链：
-//           Bangumi v0 中文搜索取日文名 → Jikan / AniList 双路互备；映射缓存 30 天；
+//           Bangumi v0 中文搜索取日文名 → MAL 官方 v2（配了 Client ID 时首选，扩展数据源 ④）→
+//           Jikan / AniList 双路互备；映射缓存 30 天；
 //           episodeLength 敏感，±1/±2 阶梯重试；含 recap 前情回顾透传）
 //   Step B  theintrodb v3 兜底（非动画剧集；tmdb_id/imdb_id 查询 + duration_ms 匹配）
 // fnOS 语义换算：skipStart = OP 结束秒 / intro.end 秒；skipEnd = 总时长 − ED 开始秒 / credits.start 秒
@@ -105,6 +106,33 @@ func jikanMalID(name string) int64 {
 	return 0
 }
 
+// malOfficialID MAL 官方 API v2（扩展数据源 ④：api.myanimelist.net/v2，注册应用得 Client ID，
+// 请求带 X-MAL-CLIENT-ID 头读公开数据——官方文档 myanimelist.net/apiconfig/references/api/v2）。
+// 非官方 Jikan 的替代首选：配置了 malClientId 才参与映射链，未配置/失败不影响 Jikan/AniList 兜底。
+// malAPIBase var 而非 const：单测用 httptest 覆盖指向本地假服务器。
+var malAPIBase = "https://api.myanimelist.net"
+
+func (b *Bridge) malOfficialID(name string) int64 {
+	clientID := strings.TrimSpace(getSetting(b.cfg, "malClientId"))
+	if clientID == "" {
+		return 0
+	}
+	out, err := extGetJSON(http.MethodGet,
+		malAPIBase+"/v2/anime?q="+url.QueryEscape(name)+"&limit=1&fields=id",
+		nil, map[string]string{"X-MAL-CLIENT-ID": clientID})
+	if err != nil || out == nil {
+		return 0
+	}
+	if data, _ := out["data"].([]any); len(data) > 0 {
+		if m, _ := data[0].(map[string]any); m != nil {
+			if node, _ := m["node"].(map[string]any); node != nil {
+				return int64(jsNum(node["id"]))
+			}
+		}
+	}
+	return 0
+}
+
 func anilistMalID(name string) int64 {
 	out, err := extGetJSON(http.MethodPost, "https://graphql.anilist.co",
 		map[string]any{"query": "query($s:String){Media(search:$s,type:ANIME){id idMal}}", "variables": map[string]string{"s": name}},
@@ -137,6 +165,11 @@ func (b *Bridge) skipResolveMalID(tmdbKey, title string) int64 {
 	}
 	candidates = append(candidates, title)
 	for _, name := range candidates {
+		// MAL 官方 v2 首选（配了 Client ID 才生效），Jikan/AniList 非官方双路互备兜底
+		if id := b.malOfficialID(name); id > 0 {
+			malCacheSet(key, id)
+			return id
+		}
 		if id := jikanMalID(name); id > 0 {
 			malCacheSet(key, id)
 			return id

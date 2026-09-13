@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
+import { S } from '../state';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
@@ -176,7 +177,7 @@ function makeBtn(): HTMLButtonElement {
   btn.type = 'button';
   btn.id = BTN_ID;
   btn.textContent = '⟳ 补全集信息';
-  btn.setAttribute('title', '从 TMDB 拉取本季每集的标题/简介，回填到飞牛（中文 > 英文 > 无数据）');
+  btn.setAttribute('title', '从 TMDB 拉取本季每集的标题/简介，回填到飞牛（中文 > 英文 > 无数据）；TMDB 缺英文时可用 TVMaze 兜底（设置→扩展数据源开启）');
   btn.style.cssText = 'display:inline-flex;align-items:center;margin-left:9px;padding:3px 10px;border-radius:999px;'
     + 'font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;'
     + 'background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-accent,#6d7ff2);'
@@ -300,6 +301,32 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
     const tmdbByNum = new Map<number, any>();
     for (const e of r.data.episodes) tmdbByNum.set(e.episodeNumber, e);
 
+    // 2.5) [v1.10.0] TVMaze 英文兜底（扩展数据源 ②，设置卡开关）：TMDB 缺英文（或整集缺失）时，
+    //    用 TVMaze 官方 API（免 Key，CC BY-SA）的英文标题/简介顶上。一次整季拉取 + 后端 24h 缓存；
+    //    查无此剧/未开启/网络失败都静默降级为纯 TMDB，绝不拖住主流程。
+    const tvmazeByNum = new Map<number, { name: string; summary: string }>();
+    if (S.tvmazeEnabled) {
+      setBtn(btn, '⏳ 获取 TVMaze…');
+      try {
+        const tr: any = await ipcRenderer.invoke('tvmaze:show', {
+          title: title || undefined, tmdbId: tmdbId || undefined, seasonNumber,
+        });
+        if (tr && tr.ok && Array.isArray(tr.episodes)) {
+          for (const e of tr.episodes) {
+            const n = numOrNull(e.number);
+            // TVMaze 未播出集常用占位名「TBD」，与「第 N 集」同性质按无数据处理
+            const nm = (e.name && !/^tbd$/i.test(String(e.name).trim())) ? String(e.name) : '';
+            if (n !== null && numOrNull(e.season) === seasonNumber && (nm || e.summary)) {
+              tvmazeByNum.set(n, { name: nm, summary: String(e.summary || '') });
+            }
+          }
+        }
+        log('[epBackfill] TVMaze 兜底就绪: ' + tvmazeByNum.size + ' 集');
+      } catch (e: any) {
+        dlog('[epBackfill] TVMaze 兜底失败(忽略): ' + String(e && e.message || e).substring(0, 80));
+      }
+    }
+
     // 3) 飞牛枚举本季集（item/list 为主，DOM 回落）
     let episodes = await fnosEpisodeList(origin, guid).catch(() => [] as { guid: string; index: number | null }[]);
     if (!episodes.length) episodes = episodeGuidsFromDom();
@@ -316,13 +343,20 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
           if (!ed) { stats.failed++; tick(); continue; }
           const num = numOrNull(ed.index_number ?? ed.index) ?? ep.index;
           const t = (num !== null) ? tmdbByNum.get(num) : undefined;
-          if (!t) { stats.unmatched++; tick(); continue; }
+          // [v1.10.0] TVMaze 兜底：TMDB 整集缺失 → 用 TVMaze 该集英文（走"仅英文兜底"路径）；
+          // TMDB 有集但缺英文 → 英文字段用 TVMaze 补齐后再裁决。
+          const tvEp = (num !== null) ? tvmazeByNum.get(num) : undefined;
+          if (!t && !tvEp) { stats.unmatched++; tick(); continue; }
+          const nameZh = t ? t.nameZh : '';
+          const ovZh = t ? t.overviewZh : '';
+          const nameEn = (t && t.nameEn) || (tvEp ? tvEp.name : '');
+          const ovEn = (t && t.overviewEn) || (tvEp ? tvEp.summary : '');
           const titleKey = ('title' in ed) ? 'title' : ('name' in ed ? 'name' : 'title');
           const ovKey = ('overview' in ed) ? 'overview' : ('description' in ed ? 'description' : 'overview');
           const curTitle = String(ed[titleKey] ?? '');
           const curOv = String(ed[ovKey] ?? '');
-          const newTitle = decideField(curTitle, t.nameZh, t.nameEn, isPlaceholderTitle);
-          const newOv = decideField(curOv, t.overviewZh, t.overviewEn);
+          const newTitle = decideField(curTitle, nameZh, nameEn, isPlaceholderTitle);
+          const newOv = decideField(curOv, ovZh, ovEn);
           if (newTitle === null && newOv === null) { stats.unchanged++; tick(); continue; }
           const body: any = { ...ed, nonce: fnNonce() };
           // 防御：getEditDetail 返回体可能不带 guid 字段（logo 回填实测全量回写即可定位条目，

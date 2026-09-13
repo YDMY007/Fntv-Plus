@@ -6,6 +6,9 @@ import { log } from '../log';
 import { extractTmdbId } from './api';
 
 // embyWall/carousel/logo.ts — 轮播/详情页 LOGO：TMDB 透明 logo 拉取、标题替换为 logo、回写飞牛媒体库
+// [v1.10.0] 新增 Fanart.tv 官方高清透明 Logo 兜底（扩展数据源 ①）：TMDB 全部候选不可用时，
+//   经 fanart:logos 桥（后端 webservice.fanart.tv v3，电影按 TMDB id、剧自动换算 TVDB id）
+//   拿 CDN 直链列表逐个下载（复用 tmdb:image 通用图片代理，bridge.go 已放行 assets.fanart.tv）。
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
 
 export async function resolveShowLogo(show: any, base: string): Promise<string | null> {
@@ -36,6 +39,9 @@ export async function resolveShowLogo(show: any, base: string): Promise<string |
         } catch (e) { /* 试下一个候选 */ }
       }
       if (whiteFallback) return whiteFallback;
+      // [v1.10.0] Fanart.tv 官方兜底：TMDB 无可用（无候选/全纯白）时补高清透明 Logo
+      const fa = await fetchFanartLogoDataUrl(show.mediaType === 'movie' ? 'movie' : 'tv', show.tmdbId);
+      if (fa) { log('fanart logo applied:', show.title); return fa; }
     }
     return null;
   } catch (e) { log('resolveShowLogo err:', (show && show.title) || '', e); return null; }
@@ -95,6 +101,14 @@ export function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[])
             show.tmdbLogo = whiteFallback;
             swapTitleToLogo(info, whiteFallback);
             log('tmdb logo applied(纯白兜底):', show.title);
+            return;
+          }
+          // [v1.10.0] Fanart.tv 官方兜底：TMDB 候选全不可用时补高清透明 Logo
+          const fa = await fetchFanartLogoDataUrl(show.mediaType === 'movie' ? 'movie' : 'tv', show.tmdbId);
+          if (fa) {
+            show.tmdbLogo = fa;
+            swapTitleToLogo(info, fa);
+            log('fanart logo applied:', show.title);
             return;
           }
           log('tmdb logo 全部候选不可用:', show.title);
@@ -246,6 +260,21 @@ export function backfillDetailLogo(): void {
           log('[回填] 保存失败', p);
         } catch (e) { log('[回填] 候选失败', p, String(e).substring(0, 80)); }
       }
+      // [v1.10.0] Fanart.tv 官方兜底回填：TMDB 无可用 logo 时试高清透明 Logo（同管线：下载→上传→写回）
+      if (tmdbId) {
+        const fa = await fetchFanartLogoDataUrl(mediaType, tmdbId);
+        if (fa) {
+          const hashPath = await uploadLogoToFnos(origin, fa);
+          if (hashPath) {
+            const saved = await saveEditDetail(origin, data, hashPath);
+            if (saved) {
+              log('[回填] ✅ 已写回 logo(Fanart.tv) → guid=' + guid + ' path=' + hashPath);
+              return;
+            }
+            log('[回填] 保存失败(Fanart.tv 候选)');
+          }
+        }
+      }
       log('[回填] 无可用 logo', guid);
     } catch (e) { log('[回填] err', String(e).substring(0, 120)); }
   }, 800);
@@ -260,9 +289,31 @@ export function swapTitleToLogo(info: HTMLElement, src: string): void {
   logoEl.style.display = 'block';
 }
 
+/** [v1.10.0] Fanart.tv 官方高清透明 Logo 兜底（扩展数据源 ①，设置卡开关 S.fanartEnabled）。
+ *  经 fanart:logos 桥拿官方 CDN 直链列表（HD 优先、likes 降序），逐个经 tmdb:image 图片代理
+ *  下载 + 纯白过滤，返回首个可用 dataUrl；未开启/未配 key/无命中一律返回 null（静默降级）。
+ *  只接受 tmdbId —— 剧集的 TVDB 换算在后端做（TMDB external_ids），电影直接用 TMDB id。 */
+export async function fetchFanartLogoDataUrl(mediaType: 'tv' | 'movie', tmdbId?: string | number): Promise<string | null> {
+  if (!S.fanartEnabled) return null;
+  if (tmdbId === undefined || tmdbId === null || String(tmdbId).trim() === '') return null;
+  try {
+    const r: any = await ipcRenderer.invoke('fanart:logos', { mediaType, tmdbId });
+    if (!r || !r.ok) return null;
+    const logos: any[] = Array.isArray(r.logos) ? r.logos : [];
+    for (const l of logos) {
+      if (!l || !l.url) continue;
+      try {
+        const img = await ipcRenderer.invoke('tmdb:image', l.url);
+        if (img && img.ok && img.dataUrl && !(await isPureWhitePng(img.dataUrl))) return img.dataUrl;
+      } catch { /* 单个候选失败继续 */ }
+    }
+  } catch { /* 未配置 key / 网络失败静默 */ }
+  return null;
+}
+
 /** [lc-413] 判断 base64/blob PNG 是否为「纯白 logo」：可见(非透明)像素几乎全部接近纯白 → 视为纯白，
  *  在浅色面板上不可见，应跳过；完全透明(无可见内容)同样视为不可用。渲染端 canvas 像素分析。 */
-function isPureWhitePng(dataUrl: string): Promise<boolean> {
+export function isPureWhitePng(dataUrl: string): Promise<boolean> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {

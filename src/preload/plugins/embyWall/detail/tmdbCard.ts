@@ -512,10 +512,14 @@ export function buildCardHtml(d: any, opts?: { fromStillsOnly?: boolean }): stri
     const r = Number(d.rating);
     const votes = d.votes
       ? `<span class="fnos-showinfo__votes">${esc(Number(d.votes).toLocaleString('zh-CN'))} 人评分</span>` : '';
+    // [v1.10.0] OMDb（扩展数据源 ③）：后端 tmdb:show 在开启 OMDb 时随详情补的 IMDb 评分，
+    // 与 TMDB 星级并排展示（IMDb 无官方公开 API，OMDb 官方 key 走后端缓存，随 TMDB 卡缓存落盘）。
+    const imdb = Number(d.imdbRating) > 0
+      ? `<span class="fnos-showinfo__votes">IMDb ${Number(d.imdbRating).toFixed(1)}</span>` : '';
     blocks.push(
       '<div class="fnos-showinfo__block fnos-showinfo__score">'
       + `<div class="fnos-showinfo__rating"><span class="fnos-showinfo__num">${r.toFixed(1)}</span><span class="fnos-showinfo__outof">⁄10</span></div>`
-      + `<div class="fnos-showinfo__rsub">${starsHtml(r)}${votes}</div>`
+      + `<div class="fnos-showinfo__rsub">${starsHtml(r)}${votes}${imdb}</div>`
       + '</div>'
     );
   }

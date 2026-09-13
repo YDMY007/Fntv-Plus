@@ -322,6 +322,18 @@ func (b *Bridge) doubanEnrich(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// [v1.10.0] OMDb（扩展数据源 ③）：开关开启时经 TMDB external_ids 拿 IMDb id → 补 IMDb 评分/票数。
+	// 观影记录详情浮层据此渲染第三格「IMDb」评分（watchHistory.ts renderRatings）。尽力而为，失败静默。
+	if b.omdbOn() {
+		if _, ext, err := b.tmdbGet("/"+mt+"/"+fmt.Sprintf("%d", toInt64(first["id"]))+"/external_ids", nil); err == nil && ext != nil {
+			if imdb := strings.TrimSpace(jsFirstStr(ext["imdb_id"], ext["imdbId"])); imdb != "" {
+				if rating, votes := b.omdbEnrich(imdb); rating > 0 {
+					out["imdb_rating"] = rating
+					out["imdb_votes"] = votes
+				}
+			}
+		}
+	}
 	if id := strings.TrimSpace(it.DoubanID); isAllDigits(id) {
 		if rating, votes := b.fetchDoubanRating(id); rating > 0 {
 			out["douban_rating"] = rating

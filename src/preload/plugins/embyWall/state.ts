@@ -46,6 +46,28 @@ export const S: {
   /** 自定义刮削服务地址（POST JSON，详见 detail/customScraper.ts 头注的协议约定） */
   customScraperUrl: string;
 
+  // ── [v1.10.0] 扩展数据源（官方开放 API）───────────────────────────────────
+  /** Fanart.tv 高清透明 Logo 兜底：TMDB 无可用 logo 时经官方 API v3 补（设置卡开关）。
+   *  写：embyWall.ts 设置卡 + modals/patch.ts 启动 seed；读：carousel/logo.ts */
+  fanartEnabled: boolean;
+  /** TVMaze 英文分集兜底：「补全集信息」在 TMDB 缺英文（或整集缺失）时用官方 API 补英文标题/简介。
+   *  写：embyWall.ts 设置卡 + modals/patch.ts 启动 seed；读：detail/epBackfill.ts */
+  tvmazeEnabled: boolean;
+  /** JAV 番号刮削（个人库整理，默认关）：电影详情页「⟳ jav 刮削」按钮开关。
+   *  写：embyWall.ts 设置卡 + modals/patch.ts 启动 seed；读：detail/jav.ts */
+  javEnabled: boolean;
+
+  // ── [v1.11.0] 页面背景自定义（不再锁死深浅模式的实心白/黑）─────────────────
+  /** 背景模式：native=跟随原生（默认）| solid=纯色 | gradient=渐变 | image=自定义图片。
+   *  写：embyWall.ts 设置卡 + modals/patch.ts 启动 seed；读：pageBg.ts */
+  pageBgMode: 'native' | 'solid' | 'gradient' | 'image';
+  pageBgColor: string;      // solid 主色 / gradient 起始色（#rrggbb）
+  pageBgColor2: string;     // gradient 结束色
+  pageBgAngle: number;      // gradient 角度（deg）
+  pageBgImage: string;      // image 模式：URL 或 dataURL（上传）
+  pageBgDim: number;        // image 暗化 0~85（%）
+  pageBgBlur: number;       // image 模糊 0~40（px）
+
   // ── 片库数据（轮播数据源）───────────────────────────────────────────────────
   /** 经 IPC 拉取到的条目池。写：carousel/api.ts；读：carousel/index.ts、carousel/styles.ts */
   apiShows: any[];
@@ -122,6 +144,18 @@ export const S: {
   carouselLogoEnabled: true,
   customScraperEnabled: false,
   customScraperUrl: '',
+
+  fanartEnabled: false,
+  tvmazeEnabled: false,
+  javEnabled: false,
+
+  pageBgMode: 'native',
+  pageBgColor: '#12141c',
+  pageBgColor2: '#2a3a5e',
+  pageBgAngle: 160,
+  pageBgImage: '',
+  pageBgDim: 35,
+  pageBgBlur: 0,
 
   apiShows: [],
   apiLoaded: false,

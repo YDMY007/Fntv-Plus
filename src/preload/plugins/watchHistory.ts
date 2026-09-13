@@ -36,7 +36,7 @@ interface FnMeta {
     year: number;
     genres: string[];
     cast: string[];
-    ratings: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number }; // 多平台评分：TMDB(飞牛缓存) / 豆瓣(现取)
+    ratings: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number; imdb?: number; imdbVotes?: number }; // 多平台评分：TMDB(飞牛缓存) / 豆瓣(现取) / IMDb(OMDb 扩展数据源，按需 enrich)
     overview: string;
 }
 interface ShowItem {
@@ -762,7 +762,7 @@ function buildSubtitleHTML(total: number, done: number, partial: number, activeD
 /** 多平台评分条：TMDB（飞牛刮削缓存）+ 豆瓣（主进程现取），各自一格。
  *  TMDB 卡=飞牛影视已刮削缓存的 vote_average（直接可用，源自 TMDB）；
  *  豆瓣卡=飞牛不提供，主进程现取豆瓣评分。两卡始终同时展示，无值显示「暂无」。 */
-function renderRatings(r: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number }): string {
+function renderRatings(r: { tmdb: number; tmdbVotes: number; douban: number; doubanVotes: number; imdb?: number; imdbVotes?: number }): string {
     const cell = (label: string, score: number, sub?: string) =>
         `<div class="wh-rating"><div class="rl">${label}</div>` +
         `<div class="rs">${score > 0 ? score.toFixed(1) : '暂无'}</div>` +
@@ -772,6 +772,11 @@ function renderRatings(r: { tmdb: number; tmdbVotes: number; douban: number; dou
     const dv = fmtVotes(r.doubanVotes);
     let h = cell('TMDB', r.tmdb, r.tmdb > 0 ? (tv ? `${tv} 人评` : '飞牛缓存') : '');
     h += cell('豆瓣', r.douban, r.douban > 0 ? (dv ? `${dv} 人评` : '实时') : '');
+    // [v1.10.0] IMDb 评分（OMDb 扩展数据源 ③）：enrich 拿到才渲染，未开启/无 IMDb id 的条目保持两格
+    if (typeof r.imdb === 'number' && r.imdb > 0) {
+        const iv = fmtVotes(r.imdbVotes || 0);
+        h += cell('IMDb', r.imdb, iv ? `${iv} 人评` : 'OMDb');
+    }
     return h;
 }
 
@@ -1674,6 +1679,9 @@ function enrichDetailOnDemand(idx: number): void {
         if (typeof e.tmdb_votes === 'number') m.fn.ratings.tmdbVotes = e.tmdb_votes;
         if (typeof e.douban_rating === 'number') m.fn.ratings.douban = e.douban_rating;
         if (typeof e.douban_votes === 'number') m.fn.ratings.doubanVotes = e.douban_votes;
+        // [v1.10.0] OMDb 扩展数据源：后端 enrich 开启时随响应补 IMDb 评分/票数
+        if (typeof e.imdb_rating === 'number' && e.imdb_rating > 0) m.fn.ratings.imdb = e.imdb_rating;
+        if (typeof e.imdb_votes === 'number' && e.imdb_votes > 0) m.fn.ratings.imdbVotes = e.imdb_votes;
         applyAirOverride(m); // 用户人工覆盖优先于 TMDB 自动值
         saveCurData();       // 持久化补全结果，下次秒开
         // 仅当详情浮层仍展示同一部作品时才重绘类型/评分（防止快速切换串台）

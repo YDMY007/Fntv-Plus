@@ -43,6 +43,10 @@ var proxyAllowSuffix = []string{
 	"bgm.tv", "api.bgm.tv",
 	"themoviedb.org", "api.themoviedb.org", "image.tmdb.org",
 	"douban.com", "movie.douban.com", "frodo.douban.com",
+	// [v1.10.0] 扩展数据源（官方开放 API）：Fanart.tv 图库（webservice=API/assets=图片CDN）、
+	// TVMaze（分集英文兜底）、OMDb（IMDb 评分）、MyAnimeList 官方 v2（动漫映射链）
+	"webservice.fanart.tv", "assets.fanart.tv",
+	"api.tvmaze.com", "www.omdbapi.com", "api.myanimelist.net",
 	"wj.qq.com", "qm.qq.com", "github.com",
 }
 
@@ -107,6 +111,13 @@ func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/candidates", b.danmakuCandidates)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/pick", b.danmakuPick)
 	mux.HandleFunc("/app/fntvplus/api/bridge/proxy/test", b.proxyTest)
+	// [v1.10.0] 扩展数据源（官方开放 API）：Fanart.tv 高清 Logo / TVMaze 分集兜底 / OMDb IMDb 评分
+	mux.HandleFunc("/app/fntvplus/api/bridge/fanart/logos", b.fanartLogosHandler)
+	mux.HandleFunc("/app/fntvplus/api/bridge/tvmaze/show", b.tvmazeShowHandler)
+	mux.HandleFunc("/app/fntvplus/api/bridge/omdb/rating", b.omdbRatingHandler)
+	// [v1.10.x] Jav 番号刮削（个人库整理，默认关）：javbus 抓取 + 封面代理
+	mux.HandleFunc("/app/fntvplus/api/bridge/jav/lookup", b.javLookupHandler)
+	mux.HandleFunc("/app/fntvplus/api/bridge/jav/image", b.javImageHandler)
 }
 
 /* ========== 通用工具 ========== */
@@ -302,10 +313,11 @@ func (b *Bridge) handleTMDBImage(w http.ResponseWriter, r *http.Request) {
 	}
 	// [v0.64.0] 放行为通用图片代理：image.tmdb.org（/t/p/ 路径）+ bgm.tv 系（每日放送
 	// Bangumi 源海报 lainpic.bgm.tv 也经此通道，此前被域名白名单 400 拒 → Bangumi 无图）。
+	// [v1.10.0] + assets.fanart.tv（Fanart.tv 官方 API 返回的高清 Logo/背景图 CDN 直链）。
 	host := u.Hostname()
-	allowed := host == "image.tmdb.org" || strings.HasSuffix(host, "bgm.tv")
+	allowed := host == "image.tmdb.org" || strings.HasSuffix(host, "bgm.tv") || host == "assets.fanart.tv"
 	if !allowed || (host == "image.tmdb.org" && !strings.HasPrefix(u.Path, "/t/p/")) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "仅支持 image.tmdb.org/t/p/ 与 bgm.tv 图片"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "仅支持 image.tmdb.org/t/p/、bgm.tv 与 assets.fanart.tv 图片"})
 		return
 	}
 	// [v0.63.0] 多路尝试：自定义代理 → 免梯子直连 IP → 系统直连，任一成功即返回。

@@ -896,6 +896,18 @@ func (b *Bridge) tmdbShow(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "data": normalizeShow(d, mt, id, season),
 		"fetchedAt": time.Now().UnixMilli(),
 	}
+	// [v1.10.0] OMDb（扩展数据源 ③）：开关开启且有 IMDb id 时补 IMDb 评分/票数，
+	// 剧集信息卡评分块渲染「IMDb ★x.x」（tmdbCard.ts）。随 TMDB 磁盘缓存落盘（刷新按钮可更新）。
+	if data, ok := out["data"].(map[string]any); ok && b.omdbOn() {
+		if ext, ok2 := data["externalIds"].(map[string]any); ok2 {
+			if imdb := strings.TrimSpace(jStr(ext, "imdb")); imdb != "" {
+				if rating, votes := b.omdbEnrich(imdb); rating > 0 {
+					data["imdbRating"] = rating
+					data["imdbVotes"] = votes
+				}
+			}
+		}
+	}
 	tmdbCacheWrite(cachePath, out) // [v0.62.0] 成功结果落盘
 	writeJSON(w, http.StatusOK, out)
 }

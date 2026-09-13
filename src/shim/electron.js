@@ -345,6 +345,17 @@ const ipcRenderer = {
     if (channel === 'tmdb:season-episodes') {
       return apiPost('/app/fntvplus/api/bridge/tmdb/season-episodes', args[0] || {});
     }
+    // [v1.10.0] 扩展数据源（官方开放 API）：Fanart.tv 高清 Logo / TVMaze 分集兜底 / OMDb IMDb 评分
+    if (channel === 'fanart:logos') return apiPost('/app/fntvplus/api/bridge/fanart/logos', args[0] || {});
+    if (channel === 'tvmaze:show') return apiPost('/app/fntvplus/api/bridge/tvmaze/show', args[0] || {});
+    if (channel === 'omdb:rating') return apiPost('/app/fntvplus/api/bridge/omdb/rating', args[0] || {});
+    // [v1.10.x] Jav 番号刮削（javbus 抓取，默认关）：lookup 元数据 / image 封面代理
+    if (channel === 'jav:lookup') return apiPost('/app/fntvplus/api/bridge/jav/lookup', args[0] || {});
+    if (channel === 'jav:image') {
+      return fetch('/app/fntvplus/api/bridge/jav/image?url=' + encodeURIComponent(String((args[0] && args[0].url) || '')))
+        .then((r) => r.json())
+        .catch(() => ({ ok: false }));
+    }
     if (channel === 'tmdb:discover') {
       // 每日放送 TMDB 源：后端 /discover/movie + /discover/tv 合并（复用 Key 鉴权 + 免梯子直连）
       return apiPost('/app/fntvplus/api/bridge/tmdb/discover', { force: !!args[0] });

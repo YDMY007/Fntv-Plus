@@ -1,6 +1,6 @@
 appname=fntvplus
 release_version=1.0.0
-version=1.0.0.202
+version=1.0.0.209
 display_name=Fntv-Plus
 desc=为飞牛影视网页端提供界面增强（海报墙 / 轮播 / 沉浸式美化 / Logo 自定义），通过官方桌面入口注入到网页版飞牛影视，零系统文件改动
 source=thirdparty

@@ -657,6 +657,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
           if (channel === "tmdb:season-episodes") {
             return apiPost("/app/fntvplus/api/bridge/tmdb/season-episodes", args[0] || {});
           }
+          if (channel === "fanart:logos") return apiPost("/app/fntvplus/api/bridge/fanart/logos", args[0] || {});
+          if (channel === "tvmaze:show") return apiPost("/app/fntvplus/api/bridge/tvmaze/show", args[0] || {});
+          if (channel === "omdb:rating") return apiPost("/app/fntvplus/api/bridge/omdb/rating", args[0] || {});
+          if (channel === "jav:lookup") return apiPost("/app/fntvplus/api/bridge/jav/lookup", args[0] || {});
+          if (channel === "jav:image") {
+            return fetch("/app/fntvplus/api/bridge/jav/image?url=" + encodeURIComponent(String(args[0] && args[0].url || ""))).then((r) => r.json()).catch(() => ({ ok: false }));
+          }
           if (channel === "tmdb:discover") {
             return apiPost("/app/fntvplus/api/bridge/tmdb/discover", { force: !!args[0] });
           }
@@ -6249,6 +6256,16 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     carouselLogoEnabled: true,
     customScraperEnabled: false,
     customScraperUrl: "",
+    fanartEnabled: false,
+    tvmazeEnabled: false,
+    javEnabled: false,
+    pageBgMode: "native",
+    pageBgColor: "#12141c",
+    pageBgColor2: "#2a3a5e",
+    pageBgAngle: 160,
+    pageBgImage: "",
+    pageBgDim: 35,
+    pageBgBlur: 0,
     apiShows: [],
     apiLoaded: false,
     apiLoading: false,
@@ -6916,6 +6933,9 @@ html.fnos-perf.dark{
     }
     return map;
   }
+
+  // src/preload/plugins/embyWall/carousel/logo.ts
+  init_electron();
 
   // src/preload/plugins/embyWall/detail/glass.ts
   var DETAIL_HERO_SEL = ':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)';
@@ -10082,6 +10102,11 @@ html.fnos-perf.dark{
           }
         }
         if (whiteFallback) return whiteFallback;
+        const fa = await fetchFanartLogoDataUrl(show.mediaType === "movie" ? "movie" : "tv", show.tmdbId);
+        if (fa) {
+          log7("fanart logo applied:", show.title);
+          return fa;
+        }
       }
       return null;
     } catch (e) {
@@ -10143,6 +10168,13 @@ html.fnos-perf.dark{
               show.tmdbLogo = whiteFallback;
               swapTitleToLogo(info, whiteFallback);
               log7("tmdb logo applied(\u7EAF\u767D\u515C\u5E95):", show.title);
+              return;
+            }
+            const fa = await fetchFanartLogoDataUrl(show.mediaType === "movie" ? "movie" : "tv", show.tmdbId);
+            if (fa) {
+              show.tmdbLogo = fa;
+              swapTitleToLogo(info, fa);
+              log7("fanart logo applied:", show.title);
               return;
             }
             log7("tmdb logo \u5168\u90E8\u5019\u9009\u4E0D\u53EF\u7528:", show.title);
@@ -10319,6 +10351,20 @@ html.fnos-perf.dark{
             log7("[\u56DE\u586B] \u5019\u9009\u5931\u8D25", p, String(e).substring(0, 80));
           }
         }
+        if (tmdbId) {
+          const fa = await fetchFanartLogoDataUrl(mediaType, tmdbId);
+          if (fa) {
+            const hashPath = await uploadLogoToFnos(origin, fa);
+            if (hashPath) {
+              const saved = await saveEditDetail(origin, data, hashPath);
+              if (saved) {
+                log7("[\u56DE\u586B] \u2705 \u5DF2\u5199\u56DE logo(Fanart.tv) \u2192 guid=" + guid + " path=" + hashPath);
+                return;
+              }
+              log7("[\u56DE\u586B] \u4FDD\u5B58\u5931\u8D25(Fanart.tv \u5019\u9009)");
+            }
+          }
+        }
         log7("[\u56DE\u586B] \u65E0\u53EF\u7528 logo", guid);
       } catch (e) {
         log7("[\u56DE\u586B] err", String(e).substring(0, 120));
@@ -10331,6 +10377,25 @@ html.fnos-perf.dark{
     if (!logoEl) return;
     logoEl.src = src;
     logoEl.style.display = "block";
+  }
+  async function fetchFanartLogoDataUrl(mediaType, tmdbId) {
+    if (!S.fanartEnabled) return null;
+    if (tmdbId === void 0 || tmdbId === null || String(tmdbId).trim() === "") return null;
+    try {
+      const r = await ipcRenderer.invoke("fanart:logos", { mediaType, tmdbId });
+      if (!r || !r.ok) return null;
+      const logos = Array.isArray(r.logos) ? r.logos : [];
+      for (const l of logos) {
+        if (!l || !l.url) continue;
+        try {
+          const img = await ipcRenderer.invoke("tmdb:image", l.url);
+          if (img && img.ok && img.dataUrl && !await isPureWhitePng(img.dataUrl)) return img.dataUrl;
+        } catch {
+        }
+      }
+    } catch {
+    }
+    return null;
   }
   function isPureWhitePng(dataUrl) {
     return new Promise((resolve2) => {
@@ -11020,6 +11085,74 @@ html.fnos-perf.dark{
       document.documentElement.style.setProperty("--fnos-login-bg", 'url("' + toFileUrl(p) + '")');
     } else {
       document.documentElement.style.setProperty("--fnos-login-bg", "");
+    }
+  }
+
+  // src/preload/plugins/embyWall/pageBg.ts
+  var STYLE_ID4 = "fntv-page-bg-style";
+  var LAYER_ID = "fntv-page-bg-layer";
+  function cssUrl(raw) {
+    return 'url("' + String(raw).replace(/"/g, "%22") + '")';
+  }
+  function ensureImageLayer(src, dim, blur) {
+    let layer = document.getElementById(LAYER_ID);
+    if (!src) {
+      if (layer && layer.parentNode) layer.parentNode.removeChild(layer);
+      return;
+    }
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = LAYER_ID;
+      layer.setAttribute("data-fnos-ui", "1");
+      layer.style.cssText = "position:fixed;inset:0;z-index:-1;pointer-events:none;";
+      (document.body || document.documentElement).appendChild(layer);
+    }
+    const d = Math.min(85, Math.max(0, dim)) / 100;
+    layer.style.background = "linear-gradient(rgba(0,0,0," + d + "),rgba(0,0,0," + d + "))," + cssUrl(src) + " center/cover no-repeat";
+    layer.style.filter = blur > 0 ? "blur(" + blur + "px)" : "";
+    layer.style.transform = blur > 0 ? "scale(1.07)" : "";
+  }
+  function applyPageBg() {
+    const html = document.documentElement;
+    const mode = S.pageBgMode;
+    const st = (() => {
+      let el = document.getElementById(STYLE_ID4);
+      if (!el) {
+        el = document.createElement("style");
+        el.id = STYLE_ID4;
+      }
+      return el;
+    })();
+    if (mode === "native") {
+      html.removeAttribute("data-fntv-bg-active");
+      html.removeAttribute("data-fntv-bg-mode");
+      html.removeAttribute("data-fntv-bg");
+      if (st.parentNode) st.parentNode.removeChild(st);
+      const old = document.getElementById(LAYER_ID);
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      return;
+    }
+    html.setAttribute("data-fntv-bg-active", "1");
+    html.setAttribute("data-fntv-bg-mode", mode);
+    html.setAttribute("data-fntv-bg", "1");
+    const ROOT = 'html[data-fntv-bg-active][data-fntv-bg-mode="' + mode + '"][data-fntv-bg].fnos-tv-page';
+    const CLEAR = ROOT + ' [class*="bg-[var(--semi-color-bg-1)"],' + ROOT + ' [class*="bg-[var(--semi-color-bg-0)"]{background-color:transparent!important}' + ROOT + " #root," + ROOT + " #app," + ROOT + " body > div," + ROOT + " body > nav," + ROOT + " body > header," + ROOT + " body > section{background:transparent!important}";
+    let bodyCss = "";
+    if (mode === "solid") {
+      bodyCss = "background:" + S.pageBgColor + "!important;background-color:" + S.pageBgColor + "!important;background-image:none!important;";
+    } else if (mode === "gradient") {
+      const a = Math.min(360, Math.max(0, Number(S.pageBgAngle) || 160));
+      bodyCss = "background:linear-gradient(" + a + "deg," + S.pageBgColor + "," + S.pageBgColor2 + ") fixed!important;background-color:" + S.pageBgColor + "!important;";
+    } else if (mode === "image") {
+      bodyCss = "background:transparent!important;background-color:transparent!important;";
+    }
+    st.textContent = ROOT + " body{" + bodyCss + "}" + CLEAR;
+    (document.head || document.documentElement).appendChild(st);
+    if (mode === "image") {
+      ensureImageLayer(S.pageBgImage, S.pageBgDim, S.pageBgBlur);
+    } else {
+      const old = document.getElementById(LAYER_ID);
+      if (old && old.parentNode) old.parentNode.removeChild(old);
     }
   }
 
@@ -11837,8 +11970,9 @@ html.fnos-perf.dark{
     if (full && d.rating) {
       const r = Number(d.rating);
       const votes = d.votes ? `<span class="fnos-showinfo__votes">${esc(Number(d.votes).toLocaleString("zh-CN"))} \u4EBA\u8BC4\u5206</span>` : "";
+      const imdb2 = Number(d.imdbRating) > 0 ? `<span class="fnos-showinfo__votes">IMDb ${Number(d.imdbRating).toFixed(1)}</span>` : "";
       blocks.push(
-        `<div class="fnos-showinfo__block fnos-showinfo__score"><div class="fnos-showinfo__rating"><span class="fnos-showinfo__num">${r.toFixed(1)}</span><span class="fnos-showinfo__outof">\u204410</span></div><div class="fnos-showinfo__rsub">${starsHtml(r)}${votes}</div></div>`
+        `<div class="fnos-showinfo__block fnos-showinfo__score"><div class="fnos-showinfo__rating"><span class="fnos-showinfo__num">${r.toFixed(1)}</span><span class="fnos-showinfo__outof">\u204410</span></div><div class="fnos-showinfo__rsub">${starsHtml(r)}${votes}${imdb2}</div></div>`
       );
     }
     if (full && d.tagline && String(d.tagline).trim() && d.tagline !== d.overview) {
@@ -12904,6 +13038,25 @@ html.fnos-perf.dark{
         });
       }
       if (s && s.loginBg) whenRootReady(() => applyLoginBgVar(s.loginBg));
+      if (s && typeof s.fanartEnabled === "boolean") S.fanartEnabled = s.fanartEnabled;
+      if (s && typeof s.tvmazeEnabled === "boolean") S.tvmazeEnabled = s.tvmazeEnabled;
+      if (s && typeof s.javEnabled === "boolean") S.javEnabled = s.javEnabled;
+      if (s && typeof s.pageBgMode === "string" && ["native", "solid", "gradient", "image"].includes(s.pageBgMode)) {
+        S.pageBgMode = s.pageBgMode;
+      }
+      if (s && typeof s.pageBgColor === "string" && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor)) S.pageBgColor = s.pageBgColor;
+      if (s && typeof s.pageBgColor2 === "string" && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor2)) S.pageBgColor2 = s.pageBgColor2;
+      if (s && typeof s.pageBgAngle === "number") S.pageBgAngle = s.pageBgAngle;
+      if (s && typeof s.pageBgImage === "string") S.pageBgImage = s.pageBgImage;
+      if (s && typeof s.pageBgDim === "number") S.pageBgDim = s.pageBgDim;
+      if (s && typeof s.pageBgBlur === "number") S.pageBgBlur = s.pageBgBlur;
+      whenRootReady(() => {
+        try {
+          applyPageBg();
+        } catch (e) {
+          console.error("[fntv-web] applyPageBg failed", e);
+        }
+      });
     });
   } catch (e) {
   }
@@ -13189,7 +13342,7 @@ html.fnos-perf.dark{
     btn.type = "button";
     btn.id = BTN_ID;
     btn.textContent = "\u27F3 \u8865\u5168\u96C6\u4FE1\u606F";
-    btn.setAttribute("title", "\u4ECE TMDB \u62C9\u53D6\u672C\u5B63\u6BCF\u96C6\u7684\u6807\u9898/\u7B80\u4ECB\uFF0C\u56DE\u586B\u5230\u98DE\u725B\uFF08\u4E2D\u6587 > \u82F1\u6587 > \u65E0\u6570\u636E\uFF09");
+    btn.setAttribute("title", "\u4ECE TMDB \u62C9\u53D6\u672C\u5B63\u6BCF\u96C6\u7684\u6807\u9898/\u7B80\u4ECB\uFF0C\u56DE\u586B\u5230\u98DE\u725B\uFF08\u4E2D\u6587 > \u82F1\u6587 > \u65E0\u6570\u636E\uFF09\uFF1BTMDB \u7F3A\u82F1\u6587\u65F6\u53EF\u7528 TVMaze \u515C\u5E95\uFF08\u8BBE\u7F6E\u2192\u6269\u5C55\u6570\u636E\u6E90\u5F00\u542F\uFF09");
     btn.style.cssText = "display:inline-flex;align-items:center;margin-left:9px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-accent,#6d7ff2);border:none;transition:background .15s,color .15s;flex-shrink:0;";
     btn.addEventListener("mouseenter", () => {
       btn.style.background = "var(--fnos-ui-btn-hover,rgba(109,127,242,.32))";
@@ -13303,6 +13456,29 @@ html.fnos-perf.dark{
       }
       const tmdbByNum = /* @__PURE__ */ new Map();
       for (const e of r.data.episodes) tmdbByNum.set(e.episodeNumber, e);
+      const tvmazeByNum = /* @__PURE__ */ new Map();
+      if (S.tvmazeEnabled) {
+        setBtn(btn, "\u23F3 \u83B7\u53D6 TVMaze\u2026");
+        try {
+          const tr = await ipcRenderer.invoke("tvmaze:show", {
+            title: title || void 0,
+            tmdbId: tmdbId || void 0,
+            seasonNumber
+          });
+          if (tr && tr.ok && Array.isArray(tr.episodes)) {
+            for (const e of tr.episodes) {
+              const n = numOrNull(e.number);
+              const nm = e.name && !/^tbd$/i.test(String(e.name).trim()) ? String(e.name) : "";
+              if (n !== null && numOrNull(e.season) === seasonNumber && (nm || e.summary)) {
+                tvmazeByNum.set(n, { name: nm, summary: String(e.summary || "") });
+              }
+            }
+          }
+          log7("[epBackfill] TVMaze \u515C\u5E95\u5C31\u7EEA: " + tvmazeByNum.size + " \u96C6");
+        } catch (e) {
+          dlog("[epBackfill] TVMaze \u515C\u5E95\u5931\u8D25(\u5FFD\u7565): " + String(e && e.message || e).substring(0, 80));
+        }
+      }
       let episodes = await fnosEpisodeList(origin, guid).catch(() => []);
       if (!episodes.length) episodes = episodeGuidsFromDom();
       if (!episodes.length) throw new Error("\u672A\u679A\u4E3E\u5230\u672C\u5B63\u4EFB\u4F55\u96C6\uFF08item/list \u4E0E DOM \u90FD\u4E3A\u7A7A\uFF09");
@@ -13321,17 +13497,22 @@ html.fnos-perf.dark{
             }
             const num2 = (_b2 = numOrNull((_a2 = ed.index_number) != null ? _a2 : ed.index)) != null ? _b2 : ep.index;
             const t2 = num2 !== null ? tmdbByNum.get(num2) : void 0;
-            if (!t2) {
+            const tvEp = num2 !== null ? tvmazeByNum.get(num2) : void 0;
+            if (!t2 && !tvEp) {
               stats.unmatched++;
               tick2();
               continue;
             }
+            const nameZh = t2 ? t2.nameZh : "";
+            const ovZh = t2 ? t2.overviewZh : "";
+            const nameEn = t2 && t2.nameEn || (tvEp ? tvEp.name : "");
+            const ovEn = t2 && t2.overviewEn || (tvEp ? tvEp.summary : "");
             const titleKey = "title" in ed ? "title" : "name" in ed ? "name" : "title";
             const ovKey = "overview" in ed ? "overview" : "description" in ed ? "description" : "overview";
             const curTitle = String((_c2 = ed[titleKey]) != null ? _c2 : "");
             const curOv = String((_d = ed[ovKey]) != null ? _d : "");
-            const newTitle = decideField(curTitle, t2.nameZh, t2.nameEn, isPlaceholderTitle);
-            const newOv = decideField(curOv, t2.overviewZh, t2.overviewEn);
+            const newTitle = decideField(curTitle, nameZh, nameEn, isPlaceholderTitle);
+            const newOv = decideField(curOv, ovZh, ovEn);
             if (newTitle === null && newOv === null) {
               stats.unchanged++;
               tick2();
@@ -13682,8 +13863,147 @@ html.fnos-perf.dark{
     }, d));
   }
 
+  // src/preload/plugins/embyWall/detail/jav.ts
+  init_electron();
+  var JAV_BTN_ID = "fnos-jav-btn";
+  var _running3 = false;
+  function movieGuid() {
+    const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
+    return m ? m[1] : null;
+  }
+  function fnNonce4() {
+    return String(Math.floor(Math.random() * 9e5) + 1e5);
+  }
+  function setBtn2(btn, text, title) {
+    btn.textContent = text;
+    if (title !== void 0) btn.setAttribute("title", title);
+  }
+  function heroPosterImg() {
+    const view = findActiveDetailView();
+    if (!view) return null;
+    const hero = findDetailHero(view);
+    if (!hero) return null;
+    return Array.from(hero.querySelectorAll("img")).filter((im) => (im.currentSrc || im.src) && im.offsetHeight >= 200 && im.offsetHeight <= 400 && im.offsetWidth < 300)[0] || null;
+  }
+  function makeBtn2() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = JAV_BTN_ID;
+    btn.textContent = "\u27F3 jav \u522E\u524A";
+    btn.setAttribute("title", "\u4ECE\u6587\u4EF6\u540D\u756A\u53F7\u5728 javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF0C\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u8BBE\u7F6E\u2192\u8D26\u53F7\u4E0E\u7F51\u7EDC\u2192Jav \u522E\u524A \u5F00\u5173\u3002");
+    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82);color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
+    btn.setAttribute("data-fnos-ui", "1");
+    btn.addEventListener("mouseenter", () => {
+      btn.style.background = "rgba(52,44,76,.9)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.background = "rgba(28,24,40,.82)";
+    });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void runJav(btn);
+    });
+    document.body.appendChild(btn);
+    return btn;
+  }
+  function ensureJavButton() {
+    if (!S.javEnabled || !movieGuid()) {
+      removeJavButton();
+      return;
+    }
+    const existing = document.getElementById(JAV_BTN_ID);
+    if (existing && existing.isConnected) return;
+    makeBtn2();
+    dlog("[jav] \u6309\u94AE\u5DF2\u6302\u8F7D " + location.pathname);
+  }
+  function removeJavButton() {
+    const b = document.getElementById(JAV_BTN_ID);
+    if (b && b.parentNode) b.parentNode.removeChild(b);
+  }
+  function scheduleJavButton() {
+    ensureJavButton();
+  }
+  async function runJav(btn) {
+    var _a;
+    const guid = movieGuid();
+    if (!guid || _running3) return;
+    _running3 = true;
+    const origin = location.origin;
+    try {
+      const data = await fnosGetEditDetail(origin, guid);
+      if (!data) throw new Error("\u8BFB\u53D6\u6761\u76EE\u5931\u8D25\uFF08getEditDetail\uFF09");
+      const curTitle = String(data.title || data.name || "").trim();
+      setBtn2(btn, "\u23F3 jav \u67E5\u8BE2\u4E2D\u2026");
+      const r = await ipcRenderer.invoke("jav:lookup", { title: curTitle, guid });
+      if (!r || !r.ok) {
+        const err = String(r && r.error || "\u67E5\u8BE2\u5931\u8D25");
+        const noCode = err.indexOf("\u756A\u53F7") >= 0;
+        setBtn2(btn, noCode ? "\u26A0 \u672A\u8BC6\u522B\u756A\u53F7" : "\u26A0 javbus \u5931\u8D25", err);
+        window.setTimeout(() => {
+          if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
+        }, 5e3);
+        return;
+      }
+      const meta2 = r.meta || {};
+      log7("[jav] \u547D\u4E2D " + meta2.code + "\uFF1A" + (meta2.title || "") + (Array.isArray(meta2.actresses) && meta2.actresses.length ? " / " + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB") : "") + (meta2.date ? " / " + meta2.date : ""));
+      const newTitle = String(meta2.title || "").trim();
+      if (!newTitle) throw new Error("\u8FD4\u56DE\u6807\u9898\u4E3A\u7A7A");
+      let saved = false;
+      if (newTitle !== curTitle) {
+        const titleKey = "title" in data ? "title" : "name" in data ? "name" : "title";
+        const body = { ...data, nonce: fnNonce4() };
+        if (!body.guid && !body.item_guid) body.guid = guid;
+        body[titleKey] = newTitle;
+        body.title_locked = true;
+        saved = await fnosSaveEditDetail(origin, body);
+        if (saved) {
+          const vf = await fnosGetEditDetail(origin, guid);
+          saved = !!vf && String((_a = vf[titleKey]) != null ? _a : "").trim() === newTitle;
+        }
+        if (!saved) dlog("[jav] \u6807\u9898\u5199\u56DE\u672A\u786E\u8BA4\uFF08\u53EF\u80FD\u5B57\u6BB5\u540D/\u6743\u9650\u4E0D\u7B26\uFF09\uFF0C\u5C01\u9762\u4ECD\u66FF\u6362");
+      } else {
+        saved = true;
+      }
+      let coverOk = false;
+      if (meta2.cover) {
+        try {
+          const img = await ipcRenderer.invoke("jav:image", { url: meta2.cover });
+          if (img && img.ok && img.dataUrl) {
+            const poster = heroPosterImg();
+            if (poster) {
+              poster.src = img.dataUrl;
+              coverOk = true;
+            }
+          }
+        } catch (e) {
+          dlog("[jav] \u5C01\u9762\u83B7\u53D6\u5931\u8D25: " + String(e).substring(0, 80));
+        }
+      }
+      const who = Array.isArray(meta2.actresses) && meta2.actresses.length ? " \xB7 " + meta2.actresses.map((a) => a && a.name).filter(Boolean).slice(0, 3).join("\u30FB") : "";
+      if (saved) {
+        setBtn2(btn, "\u2713 \u5DF2\u56DE\u586B" + (coverOk ? " + \u5C01\u9762" : ""), meta2.code + " " + (meta2.date || "") + who + (coverOk ? "" : "\uFF08\u5C01\u9762\u672A\u66FF\u6362\uFF1Ahero \u5185\u672A\u627E\u5230\u6D77\u62A5\u4F4D\uFF09"));
+      } else {
+        setBtn2(btn, "\u26A0 \u56DE\u586B\u5931\u8D25", "\u6807\u9898\u5199\u56DE\u672A\u786E\u8BA4\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u5C01\u9762/\u67E5\u8BE2\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\u3002");
+      }
+      window.setTimeout(() => {
+        if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
+      }, 6e3);
+    } catch (e) {
+      log7("[jav] \u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
+      setBtn2(btn, "\u26A0 " + String(e && e.message || e).substring(0, 24), String(e && e.message || e));
+      window.setTimeout(() => {
+        if (btn.isConnected) {
+          setBtn2(btn, "\u27F3 jav \u522E\u524A");
+        }
+      }, 5e3);
+    } finally {
+      _running3 = false;
+    }
+  }
+
   // src/preload/plugins/embyWall/carousel/bootCover.ts
-  var STYLE_ID4 = "fntv-boot-style";
+  var STYLE_ID5 = "fntv-boot-style";
   var BAR_ID = "fntv-boot-bar";
   var POLL_MS = 120;
   var HARD_LIFT_MS = 2500;
@@ -13694,9 +14014,9 @@ html.fnos-perf.dark{
     return p === "/v" || p === "/v/";
   };
   function ensure() {
-    if (document.getElementById(STYLE_ID4)) return;
+    if (document.getElementById(STYLE_ID5)) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID4;
+    st.id = STYLE_ID5;
     st.textContent = `
 #${BAR_ID}{position:fixed;top:0;left:0;right:0;height:3px;z-index:99999;pointer-events:none;background:rgba(148,156,178,.15)}
 #${BAR_ID}::after{content:'';position:absolute;left:0;top:0;height:100%;width:38%;border-radius:3px;background:var(--fnos-ui-accent,#4a8df0);animation:fntv-boot-slide 1s ease-in-out infinite}
@@ -13710,7 +14030,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     try {
       document.documentElement.classList.remove("fntv-boot-hide");
       (_a = document.getElementById(BAR_ID)) == null ? void 0 : _a.remove();
-      (_b = document.getElementById(STYLE_ID4)) == null ? void 0 : _b.remove();
+      (_b = document.getElementById(STYLE_ID5)) == null ? void 0 : _b.remove();
     } catch {
     }
     if (_poll) {
@@ -16120,6 +16440,217 @@ html.fntv-boot-hide #root{visibility:hidden}
         csToggle.checked = S.customScraperEnabled;
         csUrlInput.value = S.customScraperUrl || "";
       };
+      const secFanart = section("Fanart.tv \u9AD8\u6E05 Logo");
+      const secTvmaze = section("TVMaze \u5206\u96C6\u515C\u5E95");
+      const secOmdb = section("OMDb IMDb \u8BC4\u5206");
+      const secMal = section("MyAnimeList \u5B98\u65B9");
+      const maskExt = (v) => "*".repeat(Math.max(0, v.length));
+      const extInputCss = "width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;";
+      const mkExtDesc = (body, text) => {
+        const d = document.createElement("div");
+        d.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;";
+        d.textContent = t(text);
+        body.appendChild(d);
+      };
+      const mkExtToggle = (body, label) => {
+        const row2 = document.createElement("label");
+        row2.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:6px 4px;cursor:pointer;border-radius:6px;margin-bottom:6px;";
+        const sp = document.createElement("span");
+        sp.textContent = t(label);
+        sp.style.cssText = "color:var(--fnos-ui-text);font-weight:500;";
+        const sw = document.createElement("input");
+        sw.type = "checkbox";
+        sw.style.cssText = "width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);";
+        row2.appendChild(sp);
+        row2.appendChild(sw);
+        body.appendChild(row2);
+        return sw;
+      };
+      const mkMaskedKey = (body, placeholder, holder) => {
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.placeholder = t(placeholder);
+        inp.style.cssText = extInputCss + "margin-bottom:6px;";
+        body.appendChild(inp);
+        inp.addEventListener("focus", () => {
+          if (inp.readOnly) {
+            inp.readOnly = false;
+            inp.value = "";
+          }
+        });
+        inp.addEventListener("blur", () => {
+          if (inp.value.trim() === "" && holder.v) {
+            inp.value = maskExt(holder.v);
+            inp.readOnly = true;
+          }
+        });
+        return inp;
+      };
+      const mkExtLink = (body, label, url) => {
+        const a = document.createElement("a");
+        a.textContent = t(label);
+        a.href = url;
+        a.style.cssText = "color:var(--fnos-ui-sec);text-decoration:underline;cursor:pointer;font-size:10.5px;";
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ipcRenderer.invoke("settings:open-external", url).catch(() => {
+          });
+        });
+        body.appendChild(a);
+      };
+      const mkExtBtnRow = (body) => {
+        const row2 = document.createElement("div");
+        row2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
+        const save = mkBtn("\u4FDD\u5B58", true);
+        const clear = mkBtn("\u6E05\u9664", true);
+        row2.appendChild(save);
+        row2.appendChild(clear);
+        body.appendChild(row2);
+        const status = document.createElement("div");
+        status.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;";
+        body.appendChild(status);
+        return { save, clear, status };
+      };
+      const wireExtKeyCard = (fields, btns, savedText) => {
+        btns.save.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            const resolved = [];
+            for (const f of fields) {
+              const key = f.input.readOnly ? f.holder.v : f.input.value.trim() || f.holder.v;
+              resolved.push(key);
+              await ipcRenderer.invoke("settings:set-" + f.settingsKey, key);
+            }
+            fields.forEach((f, i) => {
+              f.holder.v = resolved[i];
+              if (resolved[i]) {
+                f.input.value = maskExt(resolved[i]);
+                f.input.readOnly = true;
+              } else {
+                f.input.value = "";
+                f.input.readOnly = false;
+              }
+            });
+            btns.status.textContent = t(savedText);
+            btns.status.style.color = "var(--fnos-ui-ok)";
+          } catch {
+            btns.status.textContent = t("\u4FDD\u5B58\u5931\u8D25");
+            btns.status.style.color = "var(--fnos-ui-warn)";
+          }
+          window.setTimeout(() => {
+            btns.status.textContent = "";
+          }, 4e3);
+        });
+        btns.clear.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            for (const f of fields) {
+              f.input.value = "";
+              f.input.readOnly = false;
+              f.holder.v = "";
+              await ipcRenderer.invoke("settings:set-" + f.settingsKey, "");
+            }
+            btns.status.textContent = t("\u5DF2\u6E05\u9664");
+            btns.status.style.color = "var(--fnos-ui-warn)";
+          } catch {
+            btns.status.textContent = t("\u6E05\u9664\u5931\u8D25");
+            btns.status.style.color = "var(--fnos-ui-warn)";
+          }
+          window.setTimeout(() => {
+            btns.status.textContent = "";
+          }, 4e3);
+        });
+      };
+      const faBody = secFanart.body;
+      mkExtDesc(faBody, "TMDB \u65E0\u53EF\u7528\u900F\u660E Logo \u65F6\uFF08\u65E0\u5019\u9009/\u5168\u7EAF\u767D\uFF09\u81EA\u52A8\u515C\u5E95 Fanart.tv \u5B98\u65B9\u9AD8\u6E05 Logo\uFF0C\u7528\u4E8E\u8F6E\u64AD\u6807\u9898\u66FF\u6362\u4E0E\u8BE6\u60C5\u9875 Logo \u56DE\u586B\uFF1B\u7535\u5F71\u6309 TMDB id\u3001\u5267\u96C6\u81EA\u52A8\u6362\u7B97 TVDB id\u3002");
+      const faToggle = mkExtToggle(faBody, "\u542F\u7528 Fanart.tv \u9AD8\u6E05 Logo \u515C\u5E95");
+      faToggle.addEventListener("change", () => {
+        S.fanartEnabled = faToggle.checked;
+        ipcRenderer.invoke("settings:set-fanart-enabled", faToggle.checked).catch(() => {
+        });
+      });
+      const faReal = { v: "" };
+      const faClientReal = { v: "" };
+      const faKey = mkMaskedKey(faBody, "Fanart.tv api_key\uFF08\u9879\u76EE key\uFF0C\u5FC5\u586B\uFF09", faReal);
+      const faClientKey = mkMaskedKey(faBody, "Fanart.tv client_key\uFF08\u4E2A\u4EBA key\uFF0C\u53EF\u9009\uFF0C\u65B0\u56FE\u5EF6\u8FDF\u66F4\u77ED\uFF09", faClientReal);
+      const faBtns = mkExtBtnRow(faBody);
+      wireExtKeyCard([
+        { input: faKey, holder: faReal, settingsKey: "fanart-api-key" },
+        { input: faClientKey, holder: faClientReal, settingsKey: "fanart-client-key" }
+      ], faBtns, "\u5DF2\u4FDD\u5B58 Fanart.tv Key");
+      mkExtLink(faBody, "fanart.tv \u514D\u8D39\u9886\u53D6 api_key \u2192", "https://fanart.tv/get-an-api-key/");
+      const tvBody = secTvmaze.body;
+      mkExtDesc(tvBody, "\u300C\u8865\u5168\u96C6\u4FE1\u606F\u300D\u5728 TMDB \u7F3A\u82F1\u6587\u6807\u9898/\u7B80\u4ECB\uFF08\u6216\u6574\u96C6\u7F3A\u5931\uFF09\u65F6\uFF0C\u7528 TVMaze \u5B98\u65B9 API \u8865\u82F1\u6587\u515C\u5E95\u3002\u5B8C\u5168\u514D\u8D39\u3001\u65E0\u9700\u4EFB\u4F55 Key\u3001\u56FD\u5185\u53EF\u76F4\u8FDE\uFF1B\u67E5\u8BE2\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u7EAF TMDB\u3002");
+      const tvToggle = mkExtToggle(tvBody, "\u542F\u7528 TVMaze \u82F1\u6587\u5206\u96C6\u515C\u5E95");
+      tvToggle.addEventListener("change", () => {
+        S.tvmazeEnabled = tvToggle.checked;
+        ipcRenderer.invoke("settings:set-tvmaze-enabled", tvToggle.checked).catch(() => {
+        });
+      });
+      const omBody = secOmdb.body;
+      mkExtDesc(omBody, "\u5267\u96C6\u8BE6\u60C5\u5361\u4E0E\u89C2\u5F71\u8BB0\u5F55\u8865\u300CIMDb\u300D\u8BC4\u5206\uFF08IMDb \u65E0\u5B98\u65B9\u516C\u5F00 API\uFF0COMDb \u4E3A\u5176\u6388\u6743\u6E20\u9053\uFF1B\u514D\u8D39\u6863 1000 \u6B21/\u5929\u3001\u975E\u5546\u4E1A\uFF09\u3002\u540E\u7AEF\u7F13\u5B58 7 \u5929\u7701\u989D\u5EA6\u3002");
+      const omToggle = mkExtToggle(omBody, "\u542F\u7528 OMDb IMDb \u8BC4\u5206");
+      omToggle.addEventListener("change", () => {
+        ipcRenderer.invoke("settings:set-omdb-enabled", omToggle.checked).catch(() => {
+        });
+      });
+      const omReal = { v: "" };
+      const omKey = mkMaskedKey(omBody, "OMDb API Key\uFF08\u90AE\u7BB1\u514D\u8D39\u9886\u53D6\uFF0C1000 \u6B21/\u5929\uFF09", omReal);
+      const omBtns = mkExtBtnRow(omBody);
+      wireExtKeyCard([{ input: omKey, holder: omReal, settingsKey: "omdb-api-key" }], omBtns, "\u5DF2\u4FDD\u5B58 OMDb API Key");
+      mkExtLink(omBody, "omdbapi.com \u514D\u8D39\u9886\u53D6 API Key \u2192", "https://www.omdbapi.com/apikey.aspx");
+      const malBody = secMal.body;
+      mkExtDesc(malBody, "\u52A8\u6F2B\u300C\u8DF3\u8FC7\u7247\u5934\u7247\u5C3E\u300D\u7684\u6807\u9898\u6620\u5C04\u94FE\u9996\u9009 MAL \u5B98\u65B9 v2 API\uFF1B\u672A\u914D\u7F6E\u65F6\u81EA\u52A8\u56DE\u9000\u975E\u5B98\u65B9 Jikan/AniList\u3002\u5728 myanimelist.net/apiconfig \u6CE8\u518C\u5E94\u7528\u5373\u5F97 Client ID\uFF0C\u65E0\u9700\u767B\u5F55\u6388\u6743\u3002");
+      const malReal = { v: "" };
+      const malKey = mkMaskedKey(malBody, "MAL Client ID\uFF08\u53EF\u9009\uFF0C\u6CE8\u518C\u5373\u7528\uFF09", malReal);
+      const malBtns = mkExtBtnRow(malBody);
+      wireExtKeyCard([{ input: malKey, holder: malReal, settingsKey: "mal-client-id" }], malBtns, "\u5DF2\u4FDD\u5B58 MAL Client ID");
+      mkExtLink(malBody, "myanimelist.net \u6CE8\u518C Client ID \u2192", "https://myanimelist.net/apiconfig");
+      const secJav = section("Jav \u522E\u524A");
+      const javBody = secJav.body;
+      mkExtDesc(javBody, "\u7535\u5F71\u6587\u4EF6\u540D\u542B\u756A\u53F7\uFF08\u5982 ABC-123 / FC2-PPV-1234567\uFF09\u65F6\uFF0C\u7535\u5F71\u8BE6\u60C5\u9875\u51FA\u73B0\u300C\u27F3 jav \u522E\u524A\u300D\u6309\u94AE\uFF1A\u6309\u756A\u53F7\u4ECE javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u9501\u5B9A\u9632\u8986\u76D6\uFF09\uFF0C\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF08\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u975E\u5B98\u65B9\u6293\u53D6\uFF08\u65E0\u5B98\u65B9 API\uFF09\uFF0C\u56FD\u5185\u76F4\u8FDE\u4E0D\u901A\u2014\u2014\u9700\u914D\u5408\u300C\u81EA\u5B9A\u4E49\u4EE3\u7406\u300D\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u8FBE\u7684\u955C\u50CF\u57DF\u540D\u3002\u4EC5\u5EFA\u8BAE\u7528\u4E8E\u6574\u7406\u81EA\u6709\u5A92\u4F53\u5E93\u3002");
+      const javToggle = mkExtToggle(javBody, "\u542F\u7528 Jav \u522E\u524A");
+      javToggle.addEventListener("change", () => {
+        S.javEnabled = javToggle.checked;
+        ipcRenderer.invoke("settings:set-jav-enabled", javToggle.checked).catch(() => {
+        });
+      });
+      const javDomainInput = document.createElement("input");
+      javDomainInput.type = "text";
+      javDomainInput.placeholder = t("javbus \u57DF\u540D\uFF08\u9ED8\u8BA4 www.javbus.com\uFF0C\u53EF\u586B\u955C\u50CF\uFF09");
+      javDomainInput.style.cssText = extInputCss;
+      javBody.appendChild(javDomainInput);
+      const javBtns = mkExtBtnRow(javBody);
+      javBtns.save.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await ipcRenderer.invoke("settings:set-jav-bus-domain", javDomainInput.value.trim());
+          javBtns.status.textContent = t("\u5DF2\u4FDD\u5B58\u57DF\u540D");
+          javBtns.status.style.color = "var(--fnos-ui-ok)";
+        } catch {
+          javBtns.status.textContent = t("\u4FDD\u5B58\u5931\u8D25");
+          javBtns.status.style.color = "var(--fnos-ui-warn)";
+        }
+        window.setTimeout(() => {
+          javBtns.status.textContent = "";
+        }, 4e3);
+      });
+      javBtns.clear.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        javDomainInput.value = "";
+        try {
+          await ipcRenderer.invoke("settings:set-jav-bus-domain", "");
+          javBtns.status.textContent = t("\u5DF2\u6062\u590D\u9ED8\u8BA4\u57DF\u540D");
+          javBtns.status.style.color = "var(--fnos-ui-warn)";
+        } catch {
+          javBtns.status.textContent = t("\u6E05\u9664\u5931\u8D25");
+          javBtns.status.style.color = "var(--fnos-ui-warn)";
+        }
+        window.setTimeout(() => {
+          javBtns.status.textContent = "";
+        }, 4e3);
+      });
       const secCustomProxy = section("\u81EA\u5B9A\u4E49\u4EE3\u7406");
       const secBodyCustomProxy = secCustomProxy.body;
       secBodyCustomProxy.style.cssText = "padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;";
@@ -16312,12 +16843,256 @@ html.fntv-boot-hide #root{visibility:hidden}
         } catch {
         }
       })();
+      const secPageBg = section("\u9875\u9762\u80CC\u666F");
+      const secBodyPageBg = secPageBg.body;
+      secBodyPageBg.style.cssText = "padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;";
+      const pbDesc = document.createElement("div");
+      pbDesc.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;";
+      pbDesc.textContent = t("\u66FF\u6362\u9875\u9762\u5E95\u8272\uFF1A\u6DF1\u6D45\u6A21\u5F0F\u90FD\u4E0D\u518D\u662F\u9501\u6B7B\u7684\u5B9E\u5FC3\u767D/\u9ED1\u3002\u539F\u751F=\u6062\u590D\u9ED8\u8BA4\uFF1B\u7EAF\u8272/\u6E10\u53D8=\u81EA\u9009\u989C\u8272\uFF1B\u56FE\u7247=\u81EA\u5B9A\u4E49\u80CC\u666F\u56FE\uFF08\u652F\u6301\u4E0A\u4F20\u6216 URL\uFF0C\u53EF\u8C03\u6697\u5316\u4E0E\u6A21\u7CCA\uFF09\u3002\u81EA\u5B9A\u4E49\u80CC\u666F\u5BF9\u6DF1\u8272/\u6D45\u8272\u4E3B\u9898\u540C\u65F6\u751F\u6548\u3002");
+      secBodyPageBg.appendChild(pbDesc);
+      const pbSeg = document.createElement("div");
+      pbSeg.style.cssText = "display:flex;gap:6px;margin-bottom:10px;";
+      const PB_MODES = [["native", "\u539F\u751F"], ["solid", "\u7EAF\u8272"], ["gradient", "\u6E10\u53D8"], ["image", "\u56FE\u7247"]];
+      const pbSegBtns = {};
+      PB_MODES.forEach(([val, label]) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = t(label);
+        b.style.cssText = "flex:1;height:30px;font-size:12px;border-radius:7px;cursor:pointer;border:1px solid var(--fnos-ui-border);background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);transition:.15s;";
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setPageBgMode(val);
+        });
+        pbSegBtns[val] = b;
+        pbSeg.appendChild(b);
+      });
+      secBodyPageBg.appendChild(pbSeg);
+      const pbRow = (marginTop = "6px") => {
+        const d = document.createElement("div");
+        d.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:" + marginTop + ";";
+        secBodyPageBg.appendChild(d);
+        return d;
+      };
+      const pbColor = (label) => {
+        const row2 = pbRow();
+        const sp = document.createElement("span");
+        sp.textContent = t(label);
+        sp.style.cssText = "font-size:11.5px;color:var(--fnos-ui-text);flex:none;";
+        const inp = document.createElement("input");
+        inp.type = "color";
+        inp.style.cssText = "width:44px;height:28px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;flex:none;";
+        const hex = document.createElement("span");
+        hex.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);";
+        row2.appendChild(sp);
+        row2.appendChild(inp);
+        row2.appendChild(hex);
+        return [row2, inp, hex];
+      };
+      const paintSeg = () => {
+        PB_MODES.forEach(([val]) => {
+          const active2 = S.pageBgMode === val;
+          pbSegBtns[val].style.background = active2 ? "var(--fnos-ui-sec)" : "var(--fnos-ui-input-bg)";
+          pbSegBtns[val].style.color = active2 ? "#fff" : "var(--fnos-ui-text)";
+          pbSegBtns[val].style.borderColor = active2 ? "var(--fnos-ui-sec)" : "var(--fnos-ui-border)";
+        });
+        pbSolidRow.style.display = S.pageBgMode === "solid" ? "" : "none";
+        pbGradRow.style.display = S.pageBgMode === "gradient" ? "" : "none";
+        pbGradRow2.style.display = S.pageBgMode === "gradient" ? "" : "none";
+        pbImageRows.style.display = S.pageBgMode === "image" ? "" : "none";
+      };
+      const persistPageBg = (key, value) => {
+        ipcRenderer.invoke("settings:set-" + key, value).catch((e) => log7("set page-bg failed", key, e));
+      };
+      const setPageBgMode = (val) => {
+        S.pageBgMode = val;
+        persistPageBg("page-bg-mode", val);
+        paintSeg();
+        applyPageBg();
+      };
+      const pbSolidRow = pbRow("2px");
+      const pbSolidInp = document.createElement("input");
+      pbSolidInp.type = "color";
+      pbSolidInp.style.cssText = "width:52px;height:30px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;";
+      const pbSolidHex = document.createElement("span");
+      pbSolidHex.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);";
+      const pbSolidLabel = document.createElement("span");
+      pbSolidLabel.textContent = t("\u80CC\u666F\u989C\u8272");
+      pbSolidLabel.style.cssText = "font-size:11.5px;color:var(--fnos-ui-text);";
+      pbSolidRow.appendChild(pbSolidLabel);
+      pbSolidRow.appendChild(pbSolidInp);
+      pbSolidRow.appendChild(pbSolidHex);
+      const syncSolidHex = () => {
+        pbSolidHex.textContent = S.pageBgColor.toUpperCase();
+      };
+      pbSolidInp.addEventListener("input", () => {
+        S.pageBgColor = pbSolidInp.value;
+        persistPageBg("page-bg-color", S.pageBgColor);
+        syncSolidHex();
+        applyPageBg();
+      });
+      const pbGradRow = pbRow("2px");
+      const pbGradLabel = document.createElement("span");
+      pbGradLabel.textContent = t("\u6E10\u53D8\u8D77\u6B62");
+      pbGradLabel.style.cssText = "font-size:11.5px;color:var(--fnos-ui-text);flex:none;";
+      pbGradRow.appendChild(pbGradLabel);
+      const pbGradInp1 = document.createElement("input");
+      pbGradInp1.type = "color";
+      pbGradInp1.style.cssText = "width:44px;height:28px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;";
+      const pbGradInp2 = pbGradInp1.cloneNode(true);
+      const pbGradHex = document.createElement("span");
+      pbGradHex.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);";
+      pbGradRow.appendChild(pbGradInp1);
+      pbGradRow.appendChild(pbGradInp2);
+      pbGradRow.appendChild(pbGradHex);
+      const pbGradRow2 = pbRow("2px");
+      const pbGradAngleLabel = document.createElement("span");
+      pbGradAngleLabel.textContent = t("\u89D2\u5EA6");
+      pbGradAngleLabel.style.cssText = "font-size:11.5px;color:var(--fnos-ui-text);flex:none;";
+      const pbGradAngle = document.createElement("input");
+      pbGradAngle.type = "number";
+      pbGradAngle.min = "0";
+      pbGradAngle.max = "360";
+      pbGradAngle.style.cssText = "width:70px;height:28px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;box-sizing:border-box;";
+      const pbGradAngleDeg = document.createElement("span");
+      pbGradAngleDeg.textContent = "\xB0\uFF080=\u2191\u2192 \u4E0B\u884C 160 \u9ED8\u8BA4\uFF09";
+      pbGradAngleDeg.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);";
+      pbGradRow2.appendChild(pbGradAngleLabel);
+      pbGradRow2.appendChild(pbGradAngle);
+      pbGradRow2.appendChild(pbGradAngleDeg);
+      const syncGrad = () => {
+        pbGradInp1.value = S.pageBgColor;
+        pbGradInp2.value = S.pageBgColor2;
+        pbGradHex.textContent = S.pageBgColor.toUpperCase() + " \u2192 " + S.pageBgColor2.toUpperCase();
+        pbGradAngle.value = String(S.pageBgAngle);
+      };
+      pbGradInp1.addEventListener("input", () => {
+        S.pageBgColor = pbGradInp1.value;
+        persistPageBg("page-bg-color", S.pageBgColor);
+        syncGrad();
+        applyPageBg();
+      });
+      pbGradInp2.addEventListener("input", () => {
+        S.pageBgColor2 = pbGradInp2.value;
+        persistPageBg("page-bg-color2", S.pageBgColor2);
+        syncGrad();
+        applyPageBg();
+      });
+      pbGradAngle.addEventListener("change", () => {
+        S.pageBgAngle = Math.min(360, Math.max(0, parseInt(pbGradAngle.value, 10) || 160));
+        persistPageBg("page-bg-angle", S.pageBgAngle);
+        syncGrad();
+        applyPageBg();
+      });
+      const pbImageRows = document.createElement("div");
+      pbImageRows.style.cssText = "display:flex;flex-direction:column;";
+      secBodyPageBg.appendChild(pbImageRows);
+      const pbImgRow1 = document.createElement("div");
+      pbImgRow1.style.cssText = "display:flex;gap:6px;margin-top:2px;";
+      const pbImgUrl = document.createElement("input");
+      pbImgUrl.type = "text";
+      pbImgUrl.placeholder = t("\u56FE\u7247 URL \u6216\u4E0A\u4F20\uFF08http(s):// \u6216 data:\uFF09");
+      pbImgUrl.style.cssText = "flex:1 1 auto;min-width:0;height:30px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;";
+      const pbImgUpload = document.createElement("button");
+      pbImgUpload.type = "button";
+      pbImgUpload.textContent = t("\u4E0A\u4F20");
+      pbImgUpload.style.cssText = "flex:none;padding:6px 12px;border-radius:7px;cursor:pointer;font-size:11.5px;font-weight:600;background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text);border:none;";
+      const pbImgFile = document.createElement("input");
+      pbImgFile.type = "file";
+      pbImgFile.accept = "image/*";
+      pbImgFile.style.display = "none";
+      pbImgRow1.appendChild(pbImgUrl);
+      pbImgRow1.appendChild(pbImgUpload);
+      pbImgRow1.appendChild(pbImgFile);
+      pbImageRows.appendChild(pbImgRow1);
+      const pbImgApply = () => {
+        S.pageBgImage = pbImgUrl.value.trim();
+        persistPageBg("page-bg-image", S.pageBgImage);
+        applyPageBg();
+      };
+      pbImgUrl.addEventListener("change", pbImgApply);
+      pbImgUpload.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pbImgFile.click();
+      });
+      pbImgFile.addEventListener("change", () => {
+        const f = pbImgFile.files && pbImgFile.files[0];
+        if (!f) return;
+        if (f.size > 3 * 1024 * 1024) {
+          pbImgUrl.value = "";
+          pbImgUrl.placeholder = t("\u56FE\u7247\u8FC7\u5927\uFF08>3MB\uFF09\uFF0C\u8BF7\u538B\u7F29\u540E\u518D\u8BD5");
+          return;
+        }
+        const rd = new FileReader();
+        rd.onload = () => {
+          pbImgUrl.value = String(rd.result || "");
+          pbImgApply();
+          pbPageBgStatus.textContent = t("\u5DF2\u5E94\u7528\u4E0A\u4F20\u56FE\u7247") + "\uFF08\u8DE8\u6D4F\u89C8\u5668\u4F7F\u7528\u8BF7\u6539\u586B URL\uFF0CdataURL \u4F53\u79EF\u8F83\u5927\uFF09";
+          pbPageBgStatus.style.color = "var(--fnos-ui-ok)";
+          window.setTimeout(() => {
+            pbPageBgStatus.textContent = "";
+          }, 5e3);
+        };
+        rd.readAsDataURL(f);
+      });
+      const pbSlider = (label, min, max, get, set) => {
+        const row2 = document.createElement("div");
+        row2.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;";
+        const sp = document.createElement("span");
+        sp.textContent = t(label);
+        sp.style.cssText = "font-size:11.5px;color:var(--fnos-ui-text);flex:none;";
+        const val = document.createElement("span");
+        val.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);width:38px;text-align:right;flex:none;";
+        const rng = document.createElement("input");
+        rng.type = "range";
+        rng.min = String(min);
+        rng.max = String(max);
+        rng.step = "1";
+        rng.style.cssText = "flex:1 1 auto;min-width:0;accent-color:var(--fnos-ui-accent);";
+        const sync = () => {
+          rng.value = String(get());
+          val.textContent = String(get());
+        };
+        rng.addEventListener("input", () => {
+          set(parseInt(rng.value, 10) || 0);
+          persistPageBg("page-bg-dim", S.pageBgDim);
+          persistPageBg("page-bg-blur", S.pageBgBlur);
+          val.textContent = String(get());
+          applyPageBg();
+        });
+        row2.appendChild(sp);
+        row2.appendChild(rng);
+        row2.appendChild(val);
+        pbImageRows.appendChild(row2);
+        row2.__sync = sync;
+      };
+      pbSlider("\u6697\u5316", 0, 85, () => S.pageBgDim, (v) => {
+        S.pageBgDim = v;
+      });
+      pbSlider("\u6A21\u7CCA", 0, 40, () => S.pageBgBlur, (v) => {
+        S.pageBgBlur = v;
+      });
+      const pbPageBgStatus = document.createElement("div");
+      pbPageBgStatus.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;";
+      secBodyPageBg.appendChild(pbPageBgStatus);
+      overlay._refreshPageBgCard = () => {
+        paintSeg();
+        syncSolidHex();
+        syncGrad();
+        pbImgUrl.value = S.pageBgImage;
+        const rows = Array.from(pbImageRows.children);
+        rows.forEach((r) => {
+          if (r.__sync) r.__sync();
+        });
+      };
+      paintSeg();
+      syncSolidHex();
+      syncGrad();
       const cats = [
         // [v0.61.0] 「播放」分类删除：跳过片头片尾并入「通用」（原「外观」更名）；分类由 6 → 5
-        { id: "appearance", label: "\u901A\u7528", els: [secAppearance.el, secDaily.el, secUX.el, secSkip.el] },
+        { id: "appearance", label: "\u901A\u7528", els: [secAppearance.el, secPageBg.el, secDaily.el, secUX.el, secSkip.el] },
         // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
         { id: "danmaku", label: "\u5F39\u5E55", els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
-        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secCustomProxy.el, secTmdbDirect.el] },
+        { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el, secCustomProxy.el, secTmdbDirect.el] },
         { id: "diag", label: "\u8BCA\u65AD\u4E0E\u65E5\u5FD7", els: [secDiag.el, secDebug.el] },
         { id: "about", label: "\u5173\u4E8E", els: [secAbout.el] }
       ];
@@ -16775,6 +17550,48 @@ html.fntv-boot-hide #root{visibility:hidden}
           } catch {
           }
         });
+        seg2("ext-sources", () => {
+          S.fanartEnabled = s.fanartEnabled === true;
+          S.tvmazeEnabled = s.tvmazeEnabled === true;
+          faToggle.checked = S.fanartEnabled;
+          tvToggle.checked = S.tvmazeEnabled;
+          omToggle.checked = s.omdbEnabled === true;
+          const fillKey = (inp, holder, raw) => {
+            const v = String(raw || "");
+            holder.v = v;
+            if (v) {
+              inp.value = maskExt(v);
+              inp.readOnly = true;
+            } else {
+              inp.value = "";
+              inp.readOnly = false;
+            }
+          };
+          fillKey(faKey, faReal, s.fanartApiKey);
+          fillKey(faClientKey, faClientReal, s.fanartClientKey);
+          fillKey(omKey, omReal, s.omdbApiKey);
+          fillKey(malKey, malReal, s.malClientId);
+          S.javEnabled = s.javEnabled === true;
+          javToggle.checked = S.javEnabled;
+          javDomainInput.value = String(s.javBusDomain || "");
+        });
+        seg2("page-bg", () => {
+          var _a;
+          if (s && typeof s.pageBgMode === "string" && ["native", "solid", "gradient", "image"].includes(s.pageBgMode)) {
+            S.pageBgMode = s.pageBgMode;
+          }
+          if (typeof (s && s.pageBgColor) === "string" && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor)) S.pageBgColor = s.pageBgColor;
+          if (typeof (s && s.pageBgColor2) === "string" && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor2)) S.pageBgColor2 = s.pageBgColor2;
+          if (typeof (s && s.pageBgAngle) === "number") S.pageBgAngle = Math.min(360, Math.max(0, s.pageBgAngle));
+          if (typeof (s && s.pageBgImage) === "string") S.pageBgImage = s.pageBgImage;
+          if (typeof (s && s.pageBgDim) === "number") S.pageBgDim = Math.min(85, Math.max(0, s.pageBgDim));
+          if (typeof (s && s.pageBgBlur) === "number") S.pageBgBlur = Math.min(40, Math.max(0, s.pageBgBlur));
+          try {
+            (_a = overlay._refreshPageBgCard) == null ? void 0 : _a.call(overlay);
+          } catch {
+          }
+          applyPageBg();
+        });
         seg2("debug", () => {
           swDebug.checked = !!s.debugEnabled;
           const dc = s.debugComponents || {};
@@ -16939,6 +17756,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       if (!burger) return;
       let el = burger.parentElement;
       for (let i = 0; i < 4 && el; i++) {
+        if (el === document.body || el === document.documentElement) break;
         const bg = getComputedStyle(el).backgroundColor;
         const m = bg.match(/rgba?\(([^)]+)\)/);
         if (m) {
@@ -17544,6 +18362,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         applyDetailBeautify();
         scheduleEpBackfill();
         scheduleCustomScraperButton();
+        scheduleJavButton();
       };
       history.replaceState = function(...a) {
         const prevPath = location.pathname;
@@ -17563,6 +18382,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         applyDetailBeautify();
         scheduleEpBackfill();
         scheduleCustomScraperButton();
+        scheduleJavButton();
       };
       window.addEventListener("popstate", () => {
         logNav("popstate");
@@ -17575,6 +18395,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         applyDetailBeautify();
         scheduleEpBackfill();
         scheduleCustomScraperButton();
+        scheduleJavButton();
       });
       window.addEventListener("hashchange", () => logNav("hashchange"));
       setTimeout(hideStaleViews, 1500);
@@ -17586,10 +18407,12 @@ html.fntv-boot-hide #root{visibility:hidden}
       applyDetailBeautify();
       scheduleEpBackfill();
       scheduleCustomScraperButton();
+      scheduleJavButton();
       [600, 1500, 3e3].forEach((ms) => setTimeout(() => {
         backfillDetailLogo();
         scheduleEpBackfill();
         scheduleCustomScraperButton();
+        scheduleJavButton();
       }, ms));
     }
     let _detailGlassTimer = 0;
@@ -19124,7 +19947,7 @@ html.fntv-boot-hide #root{visibility:hidden}
 
   // src/preload/plugins/personWorks.ts
   init_electron();
-  var STYLE_ID5 = "fnos-person-works-style";
+  var STYLE_ID6 = "fnos-person-works-style";
   var PANEL_ID2 = "fnos-person-works";
   var POSTER_BASE = "https://image.tmdb.org/t/p/w342";
   var esc2 = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -19192,7 +20015,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   function ensureStyle() {
     if (_styleInjected) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID5;
+    st.id = STYLE_ID6;
     st.textContent = PANEL_CSS;
     (document.head || document.documentElement).appendChild(st);
     _styleInjected = true;
@@ -20481,6 +21304,10 @@ html.fntv-boot-hide #root{visibility:hidden}
     const dv = fmtVotes(r.doubanVotes);
     let h = cell("TMDB", r.tmdb, r.tmdb > 0 ? tv ? `${tv} \u4EBA\u8BC4` : "\u98DE\u725B\u7F13\u5B58" : "");
     h += cell("\u8C46\u74E3", r.douban, r.douban > 0 ? dv ? `${dv} \u4EBA\u8BC4` : "\u5B9E\u65F6" : "");
+    if (typeof r.imdb === "number" && r.imdb > 0) {
+      const iv = fmtVotes(r.imdbVotes || 0);
+      h += cell("IMDb", r.imdb, iv ? `${iv} \u4EBA\u8BC4` : "OMDb");
+    }
     return h;
   }
   function filteredData() {
@@ -21313,6 +22140,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       if (typeof e.tmdb_votes === "number") m.fn.ratings.tmdbVotes = e.tmdb_votes;
       if (typeof e.douban_rating === "number") m.fn.ratings.douban = e.douban_rating;
       if (typeof e.douban_votes === "number") m.fn.ratings.doubanVotes = e.douban_votes;
+      if (typeof e.imdb_rating === "number" && e.imdb_rating > 0) m.fn.ratings.imdb = e.imdb_rating;
+      if (typeof e.imdb_votes === "number" && e.imdb_votes > 0) m.fn.ratings.imdbVotes = e.imdb_votes;
       applyAirOverride(m);
       saveCurData();
       if (curIdx === idx && $("wh-detail") && $("wh-detail").classList.contains("show")) {

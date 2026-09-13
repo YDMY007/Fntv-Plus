@@ -10,6 +10,8 @@ import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
 import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackfill';
 import { scheduleCustomScraperButton } from './embyWall/detail/customScraper';
+import { scheduleJavButton } from './embyWall/detail/jav';
+import { applyPageBg } from './embyWall/pageBg';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
@@ -2807,6 +2809,217 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       csUrlInput.value = S.customScraperUrl || '';
     };
 
+    // ===== [v1.10.0] 扩展数据源（官方开放 API）——每渠道一张独立卡（与 Bangumi/TMDB/Trakt 卡同规格）=====
+    // 四个渠道均为官方开放 API（查验报告见 docs/刮削渠道查验报告.md），全部经 Go bridge 后端调用：
+    //   fanart:logos（fanart.go，电影按 TMDB id、剧经 external_ids 换算 TVDB id）
+    //   tvmaze:show（tvmaze.go，免 Key）/ omdb:rating（omdb.go）+ skip 映射链 MAL 官方优先。
+    const secFanart = section('Fanart.tv 高清 Logo');
+    const secTvmaze = section('TVMaze 分集兜底');
+    const secOmdb = section('OMDb IMDb 评分');
+    const secMal = section('MyAnimeList 官方');
+
+    const maskExt = (v: string): string => '*'.repeat(Math.max(0, v.length));
+    const extInputCss = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;';
+    const mkExtDesc = (body: HTMLElement, text: string): void => {
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+      d.textContent = t(text);
+      body.appendChild(d);
+    };
+    const mkExtToggle = (body: HTMLElement, label: string): HTMLInputElement => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 4px;cursor:pointer;border-radius:6px;margin-bottom:6px;';
+      const sp = document.createElement('span');
+      sp.textContent = t(label);
+      sp.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+      const sw = document.createElement('input');
+      sw.type = 'checkbox';
+      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+      row.appendChild(sp); row.appendChild(sw);
+      body.appendChild(row);
+      return sw;
+    };
+    // 掩码 key 输入（TMDB/Bangumi 卡同款语义）：已存值掩码只读，聚焦清空进入编辑，
+    // 失焦空值恢复掩码 —— 防误清空真实 key。
+    const mkMaskedKey = (body: HTMLElement, placeholder: string, holder: { v: string }): HTMLInputElement => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = t(placeholder);
+      inp.style.cssText = extInputCss + 'margin-bottom:6px;';
+      body.appendChild(inp);
+      inp.addEventListener('focus', () => {
+        if (inp.readOnly) { inp.readOnly = false; inp.value = ''; }
+      });
+      inp.addEventListener('blur', () => {
+        if (inp.value.trim() === '' && holder.v) {
+          inp.value = maskExt(holder.v);
+          inp.readOnly = true;
+        }
+      });
+      return inp;
+    };
+    const mkExtLink = (body: HTMLElement, label: string, url: string): void => {
+      const a = document.createElement('a');
+      a.textContent = t(label);
+      a.href = url;
+      a.style.cssText = 'color:var(--fnos-ui-sec);text-decoration:underline;cursor:pointer;font-size:10.5px;';
+      a.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); ipcRenderer.invoke('settings:open-external', url).catch(() => {}); });
+      body.appendChild(a);
+    };
+    const mkExtBtnRow = (body: HTMLElement): { save: HTMLButtonElement; clear: HTMLButtonElement; status: HTMLDivElement } => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+      const save = mkBtn('保存', true);
+      const clear = mkBtn('清除', true);
+      row.appendChild(save); row.appendChild(clear);
+      body.appendChild(row);
+      const status = document.createElement('div');
+      status.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+      body.appendChild(status);
+      return { save, clear, status };
+    };
+    // key 卡保存/清除（支持 1~2 字段，掩码语义：掩码态保存已存真实值；编辑态空值=保留已存，防误清空）
+    const wireExtKeyCard = (
+      fields: { input: HTMLInputElement; holder: { v: string }; settingsKey: string }[],
+      btns: { save: HTMLButtonElement; clear: HTMLButtonElement; status: HTMLDivElement },
+      savedText: string,
+    ): void => {
+      btns.save.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        try {
+          const resolved: string[] = [];
+          for (const f of fields) {
+            const key = f.input.readOnly ? f.holder.v : (f.input.value.trim() || f.holder.v);
+            resolved.push(key);
+            await ipcRenderer.invoke('settings:set-' + f.settingsKey, key);
+          }
+          fields.forEach((f, i) => {
+            f.holder.v = resolved[i];
+            if (resolved[i]) { f.input.value = maskExt(resolved[i]); f.input.readOnly = true; }
+            else { f.input.value = ''; f.input.readOnly = false; }
+          });
+          btns.status.textContent = t(savedText);
+          btns.status.style.color = 'var(--fnos-ui-ok)';
+        } catch {
+          btns.status.textContent = t('保存失败');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        }
+        window.setTimeout(() => { btns.status.textContent = ''; }, 4000);
+      });
+      btns.clear.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        try {
+          for (const f of fields) {
+            f.input.value = '';
+            f.input.readOnly = false;
+            f.holder.v = '';
+            await ipcRenderer.invoke('settings:set-' + f.settingsKey, '');
+          }
+          btns.status.textContent = t('已清除');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        } catch {
+          btns.status.textContent = t('清除失败');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        }
+        window.setTimeout(() => { btns.status.textContent = ''; }, 4000);
+      });
+    };
+
+    // ① Fanart.tv —— 高清透明 Logo 兜底（电影按 TMDB id；剧自动换算 TVDB id；个人 client_key 可选）
+    const faBody = secFanart.body;
+    mkExtDesc(faBody, 'TMDB 无可用透明 Logo 时（无候选/全纯白）自动兜底 Fanart.tv 官方高清 Logo，用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id。');
+    const faToggle = mkExtToggle(faBody, '启用 Fanart.tv 高清 Logo 兜底');
+    faToggle.addEventListener('change', () => {
+      S.fanartEnabled = faToggle.checked;
+      ipcRenderer.invoke('settings:set-fanart-enabled', faToggle.checked).catch(() => {});
+    });
+    const faReal = { v: '' };
+    const faClientReal = { v: '' };
+    const faKey = mkMaskedKey(faBody, 'Fanart.tv api_key（项目 key，必填）', faReal);
+    const faClientKey = mkMaskedKey(faBody, 'Fanart.tv client_key（个人 key，可选，新图延迟更短）', faClientReal);
+    const faBtns = mkExtBtnRow(faBody);
+    wireExtKeyCard([
+      { input: faKey, holder: faReal, settingsKey: 'fanart-api-key' },
+      { input: faClientKey, holder: faClientReal, settingsKey: 'fanart-client-key' },
+    ], faBtns, '已保存 Fanart.tv Key');
+    mkExtLink(faBody, 'fanart.tv 免费领取 api_key →', 'https://fanart.tv/get-an-api-key/');
+
+    // ② TVMaze —— 分集英文兜底（免 Key；「补全集信息」用）
+    const tvBody = secTvmaze.body;
+    mkExtDesc(tvBody, '「补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。完全免费、无需任何 Key、国内可直连；查询失败自动回退纯 TMDB。');
+    const tvToggle = mkExtToggle(tvBody, '启用 TVMaze 英文分集兜底');
+    tvToggle.addEventListener('change', () => {
+      S.tvmazeEnabled = tvToggle.checked;
+      ipcRenderer.invoke('settings:set-tvmaze-enabled', tvToggle.checked).catch(() => {});
+    });
+
+    // ③ OMDb —— IMDb 评分（详情卡 + 观影记录第三格）
+    const omBody = secOmdb.body;
+    mkExtDesc(omBody, '剧集详情卡与观影记录补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。');
+    const omToggle = mkExtToggle(omBody, '启用 OMDb IMDb 评分');
+    omToggle.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-omdb-enabled', omToggle.checked).catch(() => {});
+    });
+    const omReal = { v: '' };
+    const omKey = mkMaskedKey(omBody, 'OMDb API Key（邮箱免费领取，1000 次/天）', omReal);
+    const omBtns = mkExtBtnRow(omBody);
+    wireExtKeyCard([{ input: omKey, holder: omReal, settingsKey: 'omdb-api-key' }], omBtns, '已保存 OMDb API Key');
+    mkExtLink(omBody, 'omdbapi.com 免费领取 API Key →', 'https://www.omdbapi.com/apikey.aspx');
+
+    // ④ MyAnimeList 官方 —— 动漫跳片头映射链首选（无需登录，注册应用得 Client ID）
+    const malBody = secMal.body;
+    mkExtDesc(malBody, '动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API；未配置时自动回退非官方 Jikan/AniList。在 myanimelist.net/apiconfig 注册应用即得 Client ID，无需登录授权。');
+    const malReal = { v: '' };
+    const malKey = mkMaskedKey(malBody, 'MAL Client ID（可选，注册即用）', malReal);
+    const malBtns = mkExtBtnRow(malBody);
+    wireExtKeyCard([{ input: malKey, holder: malReal, settingsKey: 'mal-client-id' }], malBtns, '已保存 MAL Client ID');
+    mkExtLink(malBody, 'myanimelist.net 注册 Client ID →', 'https://myanimelist.net/apiconfig');
+
+    // ⑤ Jav 刮削 —— 番号匹配个人库整理（非官方抓取 javbus，默认关；可换镜像域名）
+    const secJav = section('Jav 刮削');
+    const javBody = secJav.body;
+    mkExtDesc(javBody, '电影文件名含番号（如 ABC-123 / FC2-PPV-1234567）时，电影详情页出现「⟳ jav 刮削」按钮：按番号从 javbus 查询并回填标题（锁定防覆盖），封面就地替换（仅本地视觉）。非官方抓取（无官方 API），国内直连不通——需配合「自定义代理」或在下方填写可达的镜像域名。仅建议用于整理自有媒体库。');
+    const javToggle = mkExtToggle(javBody, '启用 Jav 刮削');
+    javToggle.addEventListener('change', () => {
+      S.javEnabled = javToggle.checked;
+      ipcRenderer.invoke('settings:set-jav-enabled', javToggle.checked).catch(() => {});
+    });
+    const javDomainInput = document.createElement('input');
+    javDomainInput.type = 'text';
+    javDomainInput.placeholder = t('javbus 域名（默认 www.javbus.com，可填镜像）');
+    javDomainInput.style.cssText = extInputCss;
+    javBody.appendChild(javDomainInput);
+    const javBtns = mkExtBtnRow(javBody);
+    javBtns.save.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      try {
+        await ipcRenderer.invoke('settings:set-jav-bus-domain', javDomainInput.value.trim());
+        javBtns.status.textContent = t('已保存域名');
+        javBtns.status.style.color = 'var(--fnos-ui-ok)';
+      } catch {
+        javBtns.status.textContent = t('保存失败');
+        javBtns.status.style.color = 'var(--fnos-ui-warn)';
+      }
+      window.setTimeout(() => { javBtns.status.textContent = ''; }, 4000);
+    });
+    javBtns.clear.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      javDomainInput.value = '';
+      try {
+        await ipcRenderer.invoke('settings:set-jav-bus-domain', '');
+        javBtns.status.textContent = t('已恢复默认域名');
+        javBtns.status.style.color = 'var(--fnos-ui-warn)';
+      } catch {
+        javBtns.status.textContent = t('清除失败');
+        javBtns.status.style.color = 'var(--fnos-ui-warn)';
+      }
+      window.setTimeout(() => { javBtns.status.textContent = ''; }, 4000);
+    });
+    // ===== [v1.10.0] 扩展数据源四卡结束 =====
+
+
     const secCustomProxy = section('自定义代理');
     const secBodyCustomProxy = secCustomProxy.body;
     secBodyCustomProxy.style.cssText = 'padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;';
@@ -2995,6 +3208,212 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
       } catch { /* ignore */ }
     })();
+
+    // ===== [v1.11.0] 页面背景卡（不再锁死深浅模式的实心白/黑）=====
+    // 三种自定义模式（纯色/渐变/图片）在深浅两种主题下同样生效；实现见 embyWall/pageBg.ts。
+    const secPageBg = section('页面背景');
+    const secBodyPageBg = secPageBg.body;
+    secBodyPageBg.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;';
+
+    const pbDesc = document.createElement('div');
+    pbDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+    pbDesc.textContent = t('替换页面底色：深浅模式都不再是锁死的实心白/黑。原生=恢复默认；纯色/渐变=自选颜色；图片=自定义背景图（支持上传或 URL，可调暗化与模糊）。自定义背景对深色/浅色主题同时生效。');
+    secBodyPageBg.appendChild(pbDesc);
+
+    // 模式分段（原生/纯色/渐变/图片）
+    const pbSeg = document.createElement('div');
+    pbSeg.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+    const PB_MODES: [string, string][] = [['native', '原生'], ['solid', '纯色'], ['gradient', '渐变'], ['image', '图片']];
+    const pbSegBtns: Record<string, HTMLButtonElement> = {};
+    PB_MODES.forEach(([val, label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = t(label);
+      b.style.cssText = 'flex:1;height:30px;font-size:12px;border-radius:7px;cursor:pointer;border:1px solid var(--fnos-ui-border);background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);transition:.15s;';
+      b.addEventListener('click', (e: Event) => { e.stopPropagation(); setPageBgMode(val as any); });
+      pbSegBtns[val] = b;
+      pbSeg.appendChild(b);
+    });
+    secBodyPageBg.appendChild(pbSeg);
+
+    const pbRow = (marginTop = '6px'): HTMLDivElement => {
+      const d = document.createElement('div');
+      d.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:' + marginTop + ';';
+      secBodyPageBg.appendChild(d);
+      return d;
+    };
+    const pbColor = (label: string): [HTMLDivElement, HTMLInputElement] => {
+      const row = pbRow();
+      const sp = document.createElement('span');
+      sp.textContent = t(label);
+      sp.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);flex:none;';
+      const inp = document.createElement('input');
+      inp.type = 'color';
+      inp.style.cssText = 'width:44px;height:28px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;flex:none;';
+      const hex = document.createElement('span');
+      hex.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);';
+      row.appendChild(sp); row.appendChild(inp); row.appendChild(hex);
+      return [row, inp, hex] as any;
+    };
+    const paintSeg = (): void => {
+      PB_MODES.forEach(([val]) => {
+        const active = S.pageBgMode === val;
+        pbSegBtns[val].style.background = active ? 'var(--fnos-ui-sec)' : 'var(--fnos-ui-input-bg)';
+        pbSegBtns[val].style.color = active ? '#fff' : 'var(--fnos-ui-text)';
+        pbSegBtns[val].style.borderColor = active ? 'var(--fnos-ui-sec)' : 'var(--fnos-ui-border)';
+      });
+      pbSolidRow.style.display = S.pageBgMode === 'solid' ? '' : 'none';
+      pbGradRow.style.display = S.pageBgMode === 'gradient' ? '' : 'none';
+      pbGradRow2.style.display = S.pageBgMode === 'gradient' ? '' : 'none';
+      pbImageRows.style.display = S.pageBgMode === 'image' ? '' : 'none';
+    };
+    const persistPageBg = (key: string, value: any): void => {
+      ipcRenderer.invoke('settings:set-' + key, value).catch((e) => log('set page-bg failed', key, e));
+    };
+    const setPageBgMode = (val: 'native' | 'solid' | 'gradient' | 'image'): void => {
+      S.pageBgMode = val;
+      persistPageBg('page-bg-mode', val);
+      paintSeg();
+      applyPageBg();
+    };
+
+    // 纯色行
+    const pbSolidRow = pbRow('2px');
+    const pbSolidInp = document.createElement('input');
+    pbSolidInp.type = 'color';
+    pbSolidInp.style.cssText = 'width:52px;height:30px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;';
+    const pbSolidHex = document.createElement('span');
+    pbSolidHex.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);';
+    const pbSolidLabel = document.createElement('span');
+    pbSolidLabel.textContent = t('背景颜色');
+    pbSolidLabel.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);';
+    pbSolidRow.appendChild(pbSolidLabel); pbSolidRow.appendChild(pbSolidInp); pbSolidRow.appendChild(pbSolidHex);
+    const syncSolidHex = (): void => { pbSolidHex.textContent = S.pageBgColor.toUpperCase(); };
+    pbSolidInp.addEventListener('input', () => {
+      S.pageBgColor = pbSolidInp.value;
+      persistPageBg('page-bg-color', S.pageBgColor);
+      syncSolidHex();
+      applyPageBg();
+    });
+
+    // 渐变行 ×2 + 角度
+    const pbGradRow = pbRow('2px');
+    const pbGradLabel = document.createElement('span');
+    pbGradLabel.textContent = t('渐变起止');
+    pbGradLabel.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);flex:none;';
+    pbGradRow.appendChild(pbGradLabel);
+    const pbGradInp1 = document.createElement('input');
+    pbGradInp1.type = 'color';
+    pbGradInp1.style.cssText = 'width:44px;height:28px;padding:0;border:1px solid var(--fnos-ui-border);border-radius:6px;background:var(--fnos-ui-input-bg);cursor:pointer;';
+    const pbGradInp2 = pbGradInp1.cloneNode(true) as HTMLInputElement;
+    const pbGradHex = document.createElement('span');
+    pbGradHex.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);';
+    pbGradRow.appendChild(pbGradInp1); pbGradRow.appendChild(pbGradInp2); pbGradRow.appendChild(pbGradHex);
+    const pbGradRow2 = pbRow('2px');
+    const pbGradAngleLabel = document.createElement('span');
+    pbGradAngleLabel.textContent = t('角度');
+    pbGradAngleLabel.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);flex:none;';
+    const pbGradAngle = document.createElement('input');
+    pbGradAngle.type = 'number';
+    pbGradAngle.min = '0'; pbGradAngle.max = '360';
+    pbGradAngle.style.cssText = 'width:70px;height:28px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;box-sizing:border-box;';
+    const pbGradAngleDeg = document.createElement('span');
+    pbGradAngleDeg.textContent = '°（0=↑→ 下行 160 默认）';
+    pbGradAngleDeg.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);';
+    pbGradRow2.appendChild(pbGradAngleLabel); pbGradRow2.appendChild(pbGradAngle); pbGradRow2.appendChild(pbGradAngleDeg);
+    const syncGrad = (): void => {
+      pbGradInp1.value = S.pageBgColor; pbGradInp2.value = S.pageBgColor2;
+      pbGradHex.textContent = S.pageBgColor.toUpperCase() + ' → ' + S.pageBgColor2.toUpperCase();
+      pbGradAngle.value = String(S.pageBgAngle);
+    };
+    pbGradInp1.addEventListener('input', () => { S.pageBgColor = pbGradInp1.value; persistPageBg('page-bg-color', S.pageBgColor); syncGrad(); applyPageBg(); });
+    pbGradInp2.addEventListener('input', () => { S.pageBgColor2 = pbGradInp2.value; persistPageBg('page-bg-color2', S.pageBgColor2); syncGrad(); applyPageBg(); });
+    pbGradAngle.addEventListener('change', () => { S.pageBgAngle = Math.min(360, Math.max(0, parseInt(pbGradAngle.value, 10) || 160)); persistPageBg('page-bg-angle', S.pageBgAngle); syncGrad(); applyPageBg(); });
+
+    // 图片行：URL/上传 + 暗化/模糊
+    const pbImageRows = document.createElement('div');
+    pbImageRows.style.cssText = 'display:flex;flex-direction:column;';
+    secBodyPageBg.appendChild(pbImageRows);
+    const pbImgRow1 = document.createElement('div');
+    pbImgRow1.style.cssText = 'display:flex;gap:6px;margin-top:2px;';
+    const pbImgUrl = document.createElement('input');
+    pbImgUrl.type = 'text';
+    pbImgUrl.placeholder = t('图片 URL 或上传（http(s):// 或 data:）');
+    pbImgUrl.style.cssText = 'flex:1 1 auto;min-width:0;height:30px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;';
+    const pbImgUpload = document.createElement('button');
+    pbImgUpload.type = 'button';
+    pbImgUpload.textContent = t('上传');
+    pbImgUpload.style.cssText = 'flex:none;padding:6px 12px;border-radius:7px;cursor:pointer;font-size:11.5px;font-weight:600;background:var(--fnos-ui-btn-bg)!important;color:var(--fnos-ui-btn-text);border:none;';
+    const pbImgFile = document.createElement('input');
+    pbImgFile.type = 'file';
+    pbImgFile.accept = 'image/*';
+    pbImgFile.style.display = 'none';
+    pbImgRow1.appendChild(pbImgUrl); pbImgRow1.appendChild(pbImgUpload); pbImgRow1.appendChild(pbImgFile);
+    pbImageRows.appendChild(pbImgRow1);
+    const pbImgApply = (): void => {
+      S.pageBgImage = pbImgUrl.value.trim();
+      persistPageBg('page-bg-image', S.pageBgImage);
+      applyPageBg();
+    };
+    pbImgUrl.addEventListener('change', pbImgApply);
+    pbImgUpload.addEventListener('click', (e: Event) => { e.stopPropagation(); pbImgFile.click(); });
+    pbImgFile.addEventListener('change', () => {
+      const f = pbImgFile.files && pbImgFile.files[0];
+      if (!f) return;
+      if (f.size > 3 * 1024 * 1024) {
+        pbImgUrl.value = '';
+        pbImgUrl.placeholder = t('图片过大（>3MB），请压缩后再试');
+        return;
+      }
+      const rd = new FileReader();
+      rd.onload = () => {
+        pbImgUrl.value = String(rd.result || '');
+        pbImgApply();
+        pbPageBgStatus.textContent = t('已应用上传图片') + '（跨浏览器使用请改填 URL，dataURL 体积较大）';
+        pbPageBgStatus.style.color = 'var(--fnos-ui-ok)';
+        window.setTimeout(() => { pbPageBgStatus.textContent = ''; }, 5000);
+      };
+      rd.readAsDataURL(f);
+    });
+    const pbSlider = (label: string, min: number, max: number, get: () => number, set: (v: number) => void): void => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;';
+      const sp = document.createElement('span');
+      sp.textContent = t(label);
+      sp.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);flex:none;';
+      const val = document.createElement('span');
+      val.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);width:38px;text-align:right;flex:none;';
+      const rng = document.createElement('input');
+      rng.type = 'range';
+      rng.min = String(min); rng.max = String(max); rng.step = '1';
+      rng.style.cssText = 'flex:1 1 auto;min-width:0;accent-color:var(--fnos-ui-accent);';
+      const sync = (): void => { rng.value = String(get()); val.textContent = String(get()); };
+      rng.addEventListener('input', () => { set(parseInt(rng.value, 10) || 0); persistPageBg('page-bg-dim', S.pageBgDim); persistPageBg('page-bg-blur', S.pageBgBlur); val.textContent = String(get()); applyPageBg(); });
+      row.appendChild(sp); row.appendChild(rng); row.appendChild(val);
+      pbImageRows.appendChild(row);
+      (row as any).__sync = sync;
+    };
+    pbSlider('暗化', 0, 85, () => S.pageBgDim, (v) => { S.pageBgDim = v; });
+    pbSlider('模糊', 0, 40, () => S.pageBgBlur, (v) => { S.pageBgBlur = v; });
+
+    const pbPageBgStatus = document.createElement('div');
+    pbPageBgStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyPageBg.appendChild(pbPageBgStatus);
+
+    // 回填（面板打开时由 seg('page-bg') 调 _refreshPageBgCard）
+    (overlay as any)._refreshPageBgCard = (): void => {
+      paintSeg();
+      syncSolidHex();
+      syncGrad();
+      pbImgUrl.value = S.pageBgImage;
+      const rows = Array.from(pbImageRows.children) as any[];
+      rows.forEach((r) => { if (r.__sync) r.__sync(); });
+    };
+    paintSeg();
+    syncSolidHex();
+    syncGrad();
+    // ===== [v1.11.0] 页面背景卡结束 =====
+
     type Cat = { id: string; label: string; els: HTMLElement[] };
     // [飞牛影视特化 v0.15.0] 全部项重新分类排版（精简后余项按功能域收敛，v0.61.0 起 5 类）：
     //   通用=主题模式+每日放送+界面交互+跳过片头片尾（原「外观」「播放」合并更名）
@@ -3002,10 +3421,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   诊断与日志=调试开关+组件日志+实时日志 · 关于
     const cats: Cat[] = [
       // [v0.61.0] 「播放」分类删除：跳过片头片尾并入「通用」（原「外观」更名）；分类由 6 → 5
-      { id: 'appearance', label: '通用', els: [secAppearance.el, secDaily.el, secUX.el, secSkip.el] },
+      { id: 'appearance', label: '通用', els: [secAppearance.el, secPageBg.el, secDaily.el, secUX.el, secSkip.el] },
       // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
       { id: 'danmaku', label: '弹幕', els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
-      { id: 'account', label: '账号与网络', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secCustomProxy.el, secTmdbDirect.el] },
+      { id: 'account', label: '账号与网络', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secScraper.el, secScraperSvc.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
@@ -3472,6 +3891,43 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         S.customScraperUrl = String(s.customScraperUrl || '');
         try { (overlay as any)._refreshCustomScraperCard?.(); } catch { /* ignore */ }
       });
+      // [v1.10.0] 扩展数据源四卡（Fanart.tv / TVMaze / OMDb / MAL 官方）：布尔开关 + 掩码 key 回填。
+      // 直接用已取回的 s（settings:get 磁盘真值）回填，不再单独请求。
+      seg('ext-sources', () => {
+        S.fanartEnabled = s.fanartEnabled === true;
+        S.tvmazeEnabled = s.tvmazeEnabled === true;
+        faToggle.checked = S.fanartEnabled;
+        tvToggle.checked = S.tvmazeEnabled;
+        omToggle.checked = s.omdbEnabled === true;
+        const fillKey = (inp: HTMLInputElement, holder: { v: string }, raw: any): void => {
+          const v = String(raw || '');
+          holder.v = v;
+          if (v) { inp.value = maskExt(v); inp.readOnly = true; }
+          else { inp.value = ''; inp.readOnly = false; }
+        };
+        fillKey(faKey, faReal, s.fanartApiKey);
+        fillKey(faClientKey, faClientReal, s.fanartClientKey);
+        fillKey(omKey, omReal, s.omdbApiKey);
+        fillKey(malKey, malReal, s.malClientId);
+        // ⑤ Jav 刮削卡（开关 + 域名，均非机密明文）
+        S.javEnabled = s.javEnabled === true;
+        javToggle.checked = S.javEnabled;
+        javDomainInput.value = String(s.javBusDomain || '');
+      });
+      // [v1.11.0] 页面背景（模式/颜色/图片/暗化/模糊）: 状态同步 + 卡片回填 + 即时应用
+      seg('page-bg', () => {
+        if (s && typeof s.pageBgMode === 'string' && ['native', 'solid', 'gradient', 'image'].includes(s.pageBgMode)) {
+          S.pageBgMode = s.pageBgMode;
+        }
+        if (typeof (s && s.pageBgColor) === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor)) S.pageBgColor = s.pageBgColor;
+        if (typeof (s && s.pageBgColor2) === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor2)) S.pageBgColor2 = s.pageBgColor2;
+        if (typeof (s && s.pageBgAngle) === 'number') S.pageBgAngle = Math.min(360, Math.max(0, s.pageBgAngle));
+        if (typeof (s && s.pageBgImage) === 'string') S.pageBgImage = s.pageBgImage;
+        if (typeof (s && s.pageBgDim) === 'number') S.pageBgDim = Math.min(85, Math.max(0, s.pageBgDim));
+        if (typeof (s && s.pageBgBlur) === 'number') S.pageBgBlur = Math.min(40, Math.max(0, s.pageBgBlur));
+        try { (overlay as any)._refreshPageBgCard?.(); } catch { /* ignore */ }
+        applyPageBg();
+      });
       seg('debug', () => {
         swDebug.checked = !!s.debugEnabled;
         const dc: Record<string, boolean> = s.debugComponents || {};
@@ -3683,6 +4139,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     if (!burger) return;
     let el: HTMLElement | null = burger.parentElement;
     for (let i = 0; i < 4 && el; i++) {
+      // [v1.11.0] 只清顶栏容器，绝不清 body/html：demo/浅层 DOM 下祖先链 4 级内可直达 body，
+      //   把 body 内联涂成 transparent !important 会压过一切样式表背景（页面背景自定义失效），
+      //   且"透桌面"是玻璃模式的显式职责，本函数不应越权。
+      if (el === document.body || el === document.documentElement) break;
       const bg = getComputedStyle(el).backgroundColor;
       const m = bg.match(/rgba?\(([^)]+)\)/);
       if (m) {
@@ -4388,7 +4848,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       runPageTransition(isDetailPage()); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
-      scheduleEpBackfill(); scheduleCustomScraperButton(); // [v1.5.0] 自定义刮削按钮：非季页自撤
+      scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 自定义刮削按钮：非季页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -4402,7 +4862,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       runPageTransition(isDetailPage()); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 同 pushState
-      scheduleEpBackfill(); scheduleCustomScraperButton(); // [v1.5.0] 同 pushState
+      scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -4413,7 +4873,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       _scheduleTopLeftAfterNav(); // [lc-925] 背景换了 → 重采样左上角图标亮度
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
       applyDetailBeautify(); // [lc-980] 前进/后退到详情页也套美化；退回首页则 teardown
-      scheduleEpBackfill(); scheduleCustomScraperButton(); // [v1.5.0] 同 popstate
+      scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
@@ -4425,9 +4885,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   if (isDetailPage()) {
     backfillDetailLogo();
     applyDetailBeautify();
-    scheduleEpBackfill(); scheduleCustomScraperButton(); // [v1.5.0] 初始/深链同挂自定义刮削按钮
+    scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 初始/深链同挂自定义刮削按钮
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleCustomScraperButton(); }, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); }, ms));
   }
   // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
   let _detailGlassTimer = 0;

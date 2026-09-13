@@ -1,5 +1,6 @@
 import { S } from '../state';
 import { applyLoginBgVar } from '../login';
+import { applyPageBg } from '../pageBg';
 import { ipcRenderer } from 'electron';
 import { wheelToScroll } from '../nav/scroll';
 import { applyDetailBeautify } from '../detail/immersive';
@@ -261,6 +262,23 @@ try {
     }
     // [lc-120] 自定义登录页背景图：启动时即应用（含登录页），无需打开设置面板
     if (s && s.loginBg) whenRootReady(() => applyLoginBgVar(s.loginBg));
+    // [v1.10.0] 扩展数据源开关启动 seed：Fanart.tv 高清 Logo 兜底 / TVMaze 英文分集兜底。
+    // 未开设置面板也要生效（logo 链/补全集按钮直接读 S），缺失=关闭；布尔存法与面板一致（true/false）。
+    if (s && typeof s.fanartEnabled === 'boolean') S.fanartEnabled = s.fanartEnabled;
+    if (s && typeof s.tvmazeEnabled === 'boolean') S.tvmazeEnabled = s.tvmazeEnabled;
+    // [v1.10.x] JAV 番号刮削开关 seed（电影详情页按钮直接读 S）
+    if (s && typeof s.javEnabled === 'boolean') S.javEnabled = s.javEnabled;
+    // [v1.11.0] 页面背景 seed：模式/颜色/图片等 → S → 立即应用（不锁死深浅模式实心白/黑）
+    if (s && typeof s.pageBgMode === 'string' && ['native', 'solid', 'gradient', 'image'].includes(s.pageBgMode)) {
+      S.pageBgMode = s.pageBgMode as any;
+    }
+    if (s && typeof s.pageBgColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor)) S.pageBgColor = s.pageBgColor;
+    if (s && typeof s.pageBgColor2 === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.pageBgColor2)) S.pageBgColor2 = s.pageBgColor2;
+    if (s && typeof s.pageBgAngle === 'number') S.pageBgAngle = s.pageBgAngle;
+    if (s && typeof s.pageBgImage === 'string') S.pageBgImage = s.pageBgImage;
+    if (s && typeof s.pageBgDim === 'number') S.pageBgDim = s.pageBgDim;
+    if (s && typeof s.pageBgBlur === 'number') S.pageBgBlur = s.pageBgBlur;
+    whenRootReady(() => { try { applyPageBg(); } catch (e) { console.error('[fntv-web] applyPageBg failed', e); } });
   });
 } catch (e) {}
 
