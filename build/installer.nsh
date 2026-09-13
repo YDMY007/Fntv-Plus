@@ -26,6 +26,13 @@
 ;   ③ 安装选项页按钮: 本体隐藏, 玻璃药丸 = 画稿 + nsDialogs 热区转发 BM_CLICK
 ;      (实测结论: 原生按钮改样式/挪位会被 NSIS 复位; 外来控件发 WM_COMMAND 两条
 ;      挂法 NSIS 均不认; 唯 nsDialogs 自建控件的 OnClick 链路可靠, 勿回退);
+;   ③' 安装位置卡(只读路径 + 浏览): 路径以只读 Static 呈现(不可手输, 避免路径写错),
+;      唯一修改入口 = 「浏览…」热区; 默认路径随模式卡联动, 点「下一步」时选定路径
+;      覆盖模式默认 INSTDIR 并按 EB 规则补应用目录名。EB 会对模式说明句调用
+;      WM_SETTEXT 塞入 "(完整安装路径)", 既与只读路径重复又会溢出控件宽度压住底板
+;      → 每次重设后由 fnosModeTrimHint 剥掉括号段(路径全页只保留只读槽一处)。
+;      (实测: 该处原为 EDIT 本体, 无边框 + SetCtlColors 后文本实测完全不渲染,
+;       整块区域空白 —— 改只读 Static 后同区域文本正常显示。)
 ;   ④ 进度页(非 nsDialogs, 无可靠脚本点击通道): 取消/下一步用本体按钮自绘隐形,
 ;      挪进画稿药丸槽位(本体挪位实测不复位); 明细列表置入烘焙玻璃面板(去 sunken
 ;      边框); customInstall(EB 段尾钩子)时标题条/按钮区换「安装完成」贴片。
@@ -63,7 +70,9 @@ Var fnosFontBold    ; 粗体: 同上 700(页眉标题用)
                       ; 它由 installSection.nsh 在本宏之后才 Var 声明(单遍编译)
   Var fnosModeSel       ; 安装选项页当前选中(1=所有用户, 0=仅为我)
   Var fnosModeCardsCtl  ; 选择卡双态贴片控件
-  Var fnosDirEdit       ; 安装选项页「安装到」路径输入框
+  Var fnosDirText       ; 安装选项页路径只读显示(Static, 取代可编辑输入框)
+  Var fnosDirChosen     ; 浏览选定的安装路径(空 = 沿用所选模式的默认路径)
+  Var fnosFontSmall     ; 路径/说明小字(9pt 常规)
   Var fnosInstDone      ; 进度页安装已完成标志
   Var fnosInstTitleCtl  ; 进度页标题条贴片控件(空图透明, 完成时换片)
   Var fnosInstBarCtl    ; 进度页按钮区条带贴片控件(取消→下一步换片)
@@ -159,6 +168,7 @@ Function fnosOnInitGUI
   !ifndef BUILD_UNINSTALLER
     StrCpy $fnosSized 0
     !insertmacro fnosMakeFont 10 400 $fnosFontPage        ; 原生页(多用户/进度)控件字体
+    !insertmacro fnosMakeFont 9 400 $fnosFontSmall        ; 路径只读文本 / 模式说明小字
     System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i.r0'
     ${If} $0 < 96
       StrCpy $0 96
@@ -264,16 +274,24 @@ FunctionEnd
 !macroend
 
 ; ── 本体按钮药丸化: BS_OWNERDRAW 无人应答 = 隐形(画稿药丸透出), 挪到画稿槽位。
-; 仅用于非 nsDialogs 原生页(进度页/安装位置页) —— 本体按钮 WM_COMMAND NSIS 必认;
-; nsDialogs 页(安装选项/欢迎)一律用 fnosHot 热区链路。挪位在进度/位置页实测不复位。
-; 入参 HWND L T W H; 覆写 $1-$6; 可见性由调用方 SW_SHOW 控制(隐藏控件不参与命中)。──
+; 仅用于非 nsDialogs 原生页(进度页) —— 本体按钮 WM_COMMAND NSIS 必认;
+; nsDialogs 页(安装选项/欢迎)一律用 fnosHot 热区链路。
+; ⚠ 调用方句柄请放 $R2 之类「宏内绝不触碰」的寄存器: 本宏内部要用 $3-$6(换算槽位),
+;   句柄若放 $1-$6 会被当场改写(踩坑 lc-1140: 句柄被样式整数顶掉, SetWindowLongW/
+;   SetWindowPos 全打在无效句柄上 → 整个宏静默失效, 按钮保持原生外观且原地不动。
+;   而 BM_CLICK 绕过命中测试, "程序点击"看着一切正常, 极易误判成已生效 ——
+;   必须用真实鼠标点击或命中测试验, 别只看 style 值/挪位)。
+; ⚠ 调用顺序: 先 skin 再 SW_SHOW —— 先显示会按原生外观画一遍, 留下"原生按钮"残影。 ──
 !macro fnosSkinButton HWND L T W H
-  System::Call 'user32::GetWindowLongW(p ${HWND}, i -16) i.r1'
-  IntOp $1 $1 & 0xFFFFFFF0                                              ; 清 BS_TYPEMASK
-  IntOp $1 $1 | 0x0000000B                                              ; BS_OWNERDRAW
-  System::Call 'user32::SetWindowLongW(p ${HWND}, i -16, i r1)'
-  !insertmacro fnosArtRect ${L} ${T} ${W} ${H}
-  System::Call 'user32::SetWindowPos(p ${HWND}, p 0, i $3, i $4, i $5, i $6, i 0x14)'
+  System::Call 'user32::GetWindowLongW(p ${HWND}, i -16) i.r3'          ; $3 = 原样式(用后即弃)
+  IntOp $3 $3 & 0xFFFFFFF0                                              ; 清 BS_TYPEMASK
+  IntOp $3 $3 | 0x0000000B                                              ; BS_OWNERDRAW
+  System::Call 'user32::SetWindowLongW(p ${HWND}, i -16, i r3)'         ; 此时句柄仍完好
+  !insertmacro fnosArtRect ${L} ${T} ${W} ${H}                          ; 覆写 $3-$6(此后 $3 不再用)
+  ; SWP_FRAMECHANGED(0x20) 必须带: 改样式位后系统要靠它重算窗口/失效旧绘制缓存,
+  ; 否则按钮表面会残留改样式之前绘制的原生外观 —— 肉眼即「原生按钮跑出来了」。
+  System::Call 'user32::SetWindowPos(p ${HWND}, p 0, i $3, i $4, i $5, i $6, i 0x34)'
+  System::Call 'user32::InvalidateRect(p ${HWND}, p 0, i 1)'            ; 强制擦掉残留绘制
 !macroend
 
 ; ── 拉伸换片: 往 $R7(STATIC)载入 $R8 位图并替换(旧句柄 DeleteObject)。覆写 $0-$3。
@@ -421,11 +439,13 @@ FunctionEnd
     ShowWindow $MultiUser.InstallModePage.Text ${SW_HIDE}
     ShowWindow $MultiUser.InstallModePage.AllUsers ${SW_HIDE}
     ShowWindow $MultiUser.InstallModePage.CurrentUser ${SW_HIDE}
-    ; 动态说明标签坐进右上卡信息底 infoplate(60,312,580,66)@2x; 卡原点(410,145)
-    !insertmacro fnosArtRect 440 302 290 33
+    ; 动态说明标签坐进右上卡信息底 infoplate(40,312,620x82)@2x → 页面逻辑(430,301,310x41);
+    ; 内边距 12 → (442,307,286,29)。9pt 小字, 不透明底(f3f7fe = infoplate 同色)保证
+    ; 切换模式换字时旧字被擦净(transparent 会叠影); 文本里的安装路径由 fnosModeTrimHint 去掉。
+    !insertmacro fnosArtRect 442 307 286 29
     System::Call 'user32::SetWindowPos(p $RadioButtonLabel1, p 0, i $3, i $4, i $5, i $6, i 0x14)'
-    SetCtlColors $RadioButtonLabel1 ${FNOS_SUB} ${FNOS_BG2}
-    SendMessage $RadioButtonLabel1 0x0030 $fnosFontPage 1
+    SetCtlColors $RadioButtonLabel1 ${FNOS_SUB} f3f7fe
+    SendMessage $RadioButtonLabel1 0x0030 $fnosFontSmall 1
     ; 选择卡双态贴片(初态跟随 EB Pre 的默认点选)
     !insertmacro fnosArtRect 40 140 362 215
     System::Call 'kernel32::GetModuleHandle(p 0) p.r7'
@@ -440,25 +460,26 @@ FunctionEnd
     ; 卡片点击热区(SS_NOTIFY, 置顶): 整张卡 = 单选钮的代理点击面
     !insertmacro fnosHot 46 145 350 95 fnosModePickAll
     !insertmacro fnosHot 46 255 350 95 fnosModePickCurrent
-    ; 安装位置区(右上卡): 路径容器框 pathplate — 画稿像素(881,401,580x270) →
-    ; 逻辑(440,200,290x135)。路径显示 = EDIT 本体坐入框内标签以下整行:
-    ; 框内(24,52,532,72)@2x → 页面逻辑(452,226,266,36)
-    !insertmacro fnosArtRect 452 226 266 36
-    ${NSD_CreateText} $3 $4 $5 $6 "$INSTDIR"
-    Pop $fnosDirEdit
-    ; EDIT 融框: 清 WS_EX_CLIENTEDGE 边框 → FRAMECHANGED 重算非客户区
-    ; → SetCtlColors(深藏青字 / 底=容器框同色 f3f7fe; EDIT 不支持透明)
-    System::Call 'user32::GetWindowLongW(p $fnosDirEdit, i -20) i.r1'
-    IntOp $1 $1 & 0xFFFFFDFF
-    System::Call 'user32::SetWindowLongW(p $fnosDirEdit, i -20, i r1)'
-    System::Call 'user32::SetWindowPos(p $fnosDirEdit, p 0, i 0, i 0, i 0, i 0, i 0x37)'
-    SetCtlColors $fnosDirEdit ${FNOS_SUB} f3f7fe
-    SendMessage $fnosDirEdit 0x0030 $fnosFontPage 1
-    System::Call 'user32::InvalidateRect(p $fnosDirEdit, p 0, i 1)'
+    ; ── 安装位置(右上卡): 路径只读显示槽 pathplate ──
+    ;   画稿(40,96,620x110)@2x → 页面逻辑(430,193,310x55); 槽内边距 14 →
+    ;   路径文本 (444,212,282,26)。路径以只读 Static 呈现(不可手输, 避免路径写错),
+    ;   唯一修改入口 = 「浏览…」; 不透明底(f3f7fe = pathplate 同色)保证换路径擦净无叠影。
+    !insertmacro fnosArtRect 444 212 282 26
+    ${NSD_CreateLabel} $3 $4 $5 $6 ""
+    Pop $fnosDirText
+    SetCtlColors $fnosDirText ${FNOS_TEXT} f3f7fe
+    SendMessage $fnosDirText 0x0030 $fnosFontSmall 1
+    ; 本页是「满铺画稿位图 + 多层自绘控件」叠出来的: 新建 Static 在该布局下会被系统
+    ; 判定为首帧被遮挡而跳过绘制, 之后即使遮挡消失也不会自动补画 —— 实测表现为该
+    ; 控件区域长期空白(旧版 EDIT 同样症状, 误判成 SetCtlColors 失效)。显式置顶 + 
+    ; 强制重绘解决; 同类新建文本控件(说明标签/卡片贴片)在更早时机创建, 不受影响。
+    System::Call 'user32::SetWindowPos(p $fnosDirText, p 0, i 0, i 0, i 0, i 0, i 0x13)'  ; HWND_TOP
+    System::Call 'user32::InvalidateRect(p $fnosDirText, p 0, i 1)'
     Call fnosModeDefaultPath
-    ${NSD_SetText} $fnosDirEdit $0
-    ; browse(60,314,180,64)@2x → 页面(440,302,90,32)
-    !insertmacro fnosHot 440 302 90 32 fnosDirBrowse
+    StrCpy $fnosDirChosen "$0"
+    Call fnosDirShowPath
+    ; browse 药丸(40,232,180x60)@2x → 页面(430,261,90,30)
+    !insertmacro fnosHot 430 261 90 30 fnosDirBrowse
     ; 向导按钮本体退场(隐藏稳定; Enter/Esc 仍路由到本体), 药丸 = 画稿 + nsDialogs
     ; 热区转发 BM_CLICK(与欢迎页 CTA 同款已验证链路; 原生按钮/外来控件发
     ; WM_COMMAND 的路子 NSIS 不认, 实测两轮均死, 勿回退)
@@ -470,6 +491,9 @@ FunctionEnd
     ShowWindow $1 ${SW_HIDE}
     !insertmacro fnosHot 210 412 170 48 fnosPillBackClick
     !insertmacro fnosHot 400 412 170 48 fnosPillInstallClick
+    ; 说明文字去路径: EB 会把整条安装路径拼进提示句子(「已经存在…安装.(C:\...)\r\n即将…」),
+    ; 既与只读路径重复, 又会溢出控件宽度压住底板 —— 统一剥掉括号里的路径段(fnosModeTrimHint)。
+    Call fnosModeTrimHint
   FunctionEnd
 
   ; 药丸热区: 转发点击到隐藏的本体按钮(上一步=3 / 开始安装=1)
@@ -483,15 +507,13 @@ FunctionEnd
     Pop $0
     GetDlgItem $1 $HWNDPARENT 1
     SendMessage $1 0x00F5 0 0              ; BM_CLICK → EB InstModeLeave 定模式/提权/置默认 INSTDIR
-    ; 用户自定义安装位置优先于模式默认值(留空 = 沿用默认), 并按 EB 规则补应用目录名
-    ${NSD_GetText} $fnosDirEdit $0
-    ${If} $0 != ""
-      StrCpy $INSTDIR $0
+    ; 经「浏览…」选定的安装位置优先于模式默认值(未选 = 沿用模式默认), 按 EB 规则补应用目录名
+    ${If} $fnosDirChosen != ""
+      StrCpy $INSTDIR $fnosDirChosen
       ${StrContains} $1 "${APP_FILENAME}" $INSTDIR
       ${If} $1 == ""
         StrCpy $INSTDIR "$INSTDIR\${APP_FILENAME}"
       ${EndIf}
-      ${NSD_SetText} $fnosDirEdit $INSTDIR
     ${EndIf}
   FunctionEnd
 
@@ -513,7 +535,9 @@ FunctionEnd
     Call fnosModeSwapCards
     SendMessage $MultiUser.InstallModePage.AllUsers 0x00F5 0 0    ; BM_CLICK
     Call fnosModeDefaultPath
-    ${NSD_SetText} $fnosDirEdit $0                                ; 输入框随模式带出默认路径
+    StrCpy $fnosDirChosen "$0"                                    ; 切换模式即回到该模式的默认路径
+    Call fnosDirShowPath
+    Call fnosModeTrimHint                                         ; 说明句随模式重设后再去路径
   FunctionEnd
 
   Function fnosModePickCurrent
@@ -522,13 +546,15 @@ FunctionEnd
     Call fnosModeSwapCards
     SendMessage $MultiUser.InstallModePage.CurrentUser 0x00F5 0 0 ; BM_CLICK
     Call fnosModeDefaultPath
-    ${NSD_SetText} $fnosDirEdit $0                                ; 输入框随模式带出默认路径
+    StrCpy $fnosDirChosen "$0"
+    Call fnosDirShowPath
+    Call fnosModeTrimHint
   FunctionEnd
 
-  ; ── [v5] 安装位置区(集成在安装选项页右侧面板, 替代独立目录页):
-  ; 路径输入框(本体 Text)坐进画稿输入槽, 浏览热区弹系统文件夹对话框;
+  ; ── [v5] 安装位置区(集成在安装选项页右侧卡: 路径只读文本 + 浏览按钮):
+  ; 路径以只读 Static 呈现(不可手输, 从根上避免手改写错), 唯一修改入口 = 「浏览…」;
   ; 默认路径随选中模式联动(注册表已有安装则带出, 否则按模式给推荐位置),
-  ; 点「下一步」时自定义路径覆盖模式默认 INSTDIR 并按 EB 规则补应用目录名。 ──
+  ; 点「下一步」时选定路径覆盖模式默认 INSTDIR 并按 EB 规则补应用目录名。 ──
   Function fnosModeDefaultPath
     ; 入参 $fnosModeSel(1=所有用户) → 出参 $0 = 该模式默认路径
     ${If} $fnosModeSel == 1
@@ -546,15 +572,61 @@ FunctionEnd
     ${EndIf}
   FunctionEnd
 
+  ; 路径只读显示: 先清空再写入 —— 不透明底(f3f7fe)下必然擦净旧字, 不会叠影
+  Function fnosDirShowPath
+    ${NSD_SetText} $fnosDirText ""
+    ${NSD_SetText} $fnosDirText "$fnosDirChosen"
+  FunctionEnd
+
+  ; 剥掉 EB 说明文字里的 "(安装路径)" 段: EB 的 InstModeChange 把整条路径拼进提示句
+  ; ("$(perUserInstallExists)($perUserInstallationFolder)$\r$\n$(reinstallUpgrade)"),
+  ; 路径已由只读路径槽单独显示, 提示句里再带一遍既重复、又溢出控件宽度(286 逻辑)
+  ; 被硬裁且压住底板。逐字符扫描: 遇到括号后第 2 个字符是 ":" 的段(盘符路径)整体丢弃,
+  ; 其余括号(如 "(需要管理员资格)")原样保留。不用 StrFunc.nsh —— 该头文件的宏会按
+  ; 使用点插入函数体, 与 EB 的"警告即错误"策略冲突, 自实现零依赖更稳。
+  Function fnosModeTrimHint
+    ${NSD_GetText} $RadioButtonLabel1 $0
+    StrCpy $1 ""                    ; 输出缓冲
+    StrLen $2 $0
+    StrCpy $3 0                     ; 扫描下标
+    StrCpy $4 0                     ; 0=正常 1=普通括号内 2=路径括号内(丢弃)
+    ${While} $3 < $2
+      StrCpy $5 $0 1 $3             ; 当前字符
+      ${If} $5 == "("
+        IntOp $6 $3 + 2             ; 括号内第 2 个字符
+        StrCpy $7 $0 1 $6
+        ${If} $7 == ":"             ; "C:" / "D:" → 盘符路径段
+          StrCpy $4 2
+        ${Else}
+          StrCpy $4 1
+          StrCpy $1 "$1$5"
+        ${EndIf}
+      ${ElseIf} $5 == ")"
+        ${If} $4 == 2
+          StrCpy $4 0               ; 路径段收尾: ")" 一并丢弃
+        ${Else}
+          StrCpy $4 0
+          StrCpy $1 "$1$5"          ; 普通括号: 保留
+        ${EndIf}
+      ${Else}
+        ${If} $4 != 2
+          StrCpy $1 "$1$5"
+        ${EndIf}
+      ${EndIf}
+      IntOp $3 $3 + 1
+    ${EndWhile}
+    ${NSD_SetText} $RadioButtonLabel1 "$1"
+  FunctionEnd
+
   Function fnosDirBrowse
     Pop $0
-    ${NSD_GetText} $fnosDirEdit $1
-    nsDialogs::SelectFolderDialog "选择安装文件夹" "$1"
+    nsDialogs::SelectFolderDialog "选择安装文件夹" "$fnosDirChosen"
     Pop $0
     ${If} $0 != "cancel"
     ${AndIf} $0 != "error"
     ${AndIf} $0 != ""
-      ${NSD_SetText} $fnosDirEdit $0
+      StrCpy $fnosDirChosen "$0"
+      Call fnosDirShowPath
     ${EndIf}
   FunctionEnd
 
@@ -656,15 +728,24 @@ FunctionEnd
     ; 取消/下一步 = 本体按钮改自绘(无人应答 = 隐形, 画稿药丸透出) + 挪进药丸槽位;
     ; 本体按钮的 WM_COMMAND NSIS 必认, 点击/禁用态/UAC/Enter/Esc 全原生;
     ; 进度页挪位已实测不复位(取消按钮挪后停留原位)。
-    ; 本体按钮自第二步起一直处于隐藏态, 必须显式 SW_SHOW —— 隐藏控件不参与鼠标命中。
-    GetDlgItem $1 $HWNDPARENT 2
-    ShowWindow $1 ${SW_SHOW}
-    !insertmacro fnosSkinButton $1 230 412 170 48
-    GetDlgItem $1 $HWNDPARENT 1
-    ShowWindow $1 ${SW_SHOW}
-    !insertmacro fnosSkinButton $1 420 412 170 48
-    GetDlgItem $1 $HWNDPARENT 3
-    ShowWindow $1 ${SW_HIDE}
+    ; 本体按钮自第二步起一直处于隐藏态, 必须显式 SW_SHOW —— 隐藏控件不参与鼠标命中;
+    ; 顺序必须是「先 skin 再 SW_SHOW」: 反过来的话显示瞬间会按原生外观绘制一遍并留在
+    ; 按钮表面(改样式不触发重绘), 肉眼即「原生按钮跑出来了」(实测踩过)。
+    ; ⚠ 还要把按钮提到主窗口子窗口的 z 序顶端: 本体按钮的父窗口是主对话框, 而满铺画稿
+    ; 所在的页面 dialog 也是主对话框的子窗口且创建更晚 → 默认压在按钮之上, 鼠标点击被
+    ; dialog 整个吃掉, 表现为「下一步点下去没反应」。置顶后按钮仍是 BS_OWNERDRAW 不绘制,
+    ; 视觉零副作用; 按钮槽位与明细列表/品牌条不重叠, 不会挡到别处。
+    ; 句柄一律走 $R2: fnosSkinButton 内部会覆写 $1-$6(它自己要用), 用 $1 传句柄会被打坏。
+    GetDlgItem $R2 $HWNDPARENT 2
+    !insertmacro fnosSkinButton $R2 230 412 170 48
+    ShowWindow $R2 ${SW_SHOW}
+    System::Call 'user32::SetWindowPos(p r2, p 0, i 0, i 0, i 0, i 0, i 0x13)'   ; HWND_TOP
+    GetDlgItem $R2 $HWNDPARENT 1
+    !insertmacro fnosSkinButton $R2 420 412 170 48
+    ShowWindow $R2 ${SW_SHOW}
+    System::Call 'user32::SetWindowPos(p r2, p 0, i 0, i 0, i 0, i 0, i 0x13)'   ; HWND_TOP
+    GetDlgItem $R2 $HWNDPARENT 3
+    ShowWindow $R2 ${SW_HIDE}
     ; 按钮区条带控件(初始: 取消药丸; .onInstSuccess 换成下一步药丸, 隐藏已消失的取消)
     !insertmacro fnosArtRect 200 405 390 65
     System::Call 'kernel32::GetModuleHandle(p 0) p.r7'

@@ -237,18 +237,21 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
   .card .cd { position:absolute; left:160px; top:104px; font-size:17px; color:#5a6885; }
   .card .ci { position:absolute; right:40px; top:50%; transform:translateY(-50%);
               font-size:44px; opacity:.9; filter:drop-shadow(0 4px 10px rgba(96,130,190,.25)); }
-  /* 右上卡「安装位置」: 图标 + 标题 + 输入槽(本体 Text 坐入) + 浏览药丸 + 动态提示底 */
+  /* 右上卡「安装位置」: 标题 + 路径只读显示槽(NSIS 侧不透明底 Label 坐入) + 浏览药丸 + 模式说明底 */
   .r1t { position:absolute; left:60px; top:44px; font-size:30px; font-weight:800; color:#1b2540; }
-  /* 路径容器框(单一显示位): 输入框本体(透明无边框)直接坐入框内, 浏览/自定义同步更新 */
-  .pathplate { position:absolute; left:60px; top:110px; width:580px; height:270px; border-radius:14px;
+  /* 路径只读显示槽(单一显示位): 路径以只读文本呈现, 修改入口只有「浏览…」 */
+  .pathplate { position:absolute; left:40px; top:96px; width:620px; height:110px; border-radius:12px;
                background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.35);
                box-sizing:border-box; }
-  .pathplate .plabel { position:absolute; left:24px; top:14px; font-size:14px; font-weight:700;
+  .pathplate .plabel { position:absolute; left:24px; top:12px; font-size:14px; font-weight:700;
                letter-spacing:2px; color:#8b96ad; }
-  /* 浏览药丸与提示文字都坐在容器框内(框: 卡 60,110..640,380) */
-  .pill.pill.browse { left:84px !important; top:306px !important; width:180px !important; height:64px !important;
+  .pill.pill.browse { left:40px !important; top:232px !important; width:180px !important; height:60px !important;
                       font-size:22px; letter-spacing:2px; text-indent:2px; }
-  .dhint { position:absolute; left:296px; top:322px; font-size:15px; color:#8b96ad; width:330px; }
+  .dhint { position:absolute; left:236px; top:248px; font-size:15px; color:#8b96ad; width:420px; }
+  /* 安装模式说明底(EB 动态说明文字坐入; 与 NSIS 侧不透明底同色 → 切换模式换字无叠影、不压边框) */
+  .infoplate { position:absolute; left:40px; top:312px; width:620px; height:82px; border-radius:12px;
+               background:rgba(243,247,254,.92); border:1px solid rgba(151,176,222,.30);
+               box-sizing:border-box; }
   .pill.primary { left:800px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .pill.secondary { left:420px; top:824px; width:340px; height:96px; font-size:27px; letter-spacing:3px; text-indent:3px; }
   .tag { position:absolute; left:0; right:0; bottom:22px; text-align:center;
@@ -277,9 +280,10 @@ const modePageHtml = (allUsersChecked) => `<!doctype html><html><head><meta char
       <div class="cd">仅为当前 Windows 用户安装 · 无需管理员权限</div></div>
     <div class="card r1">
       <div class="r1t">安装位置</div>
+      <div class="infoplate"></div>
       <div class="pathplate"><div class="plabel">当前安装路径</div></div>
       <div class="pill secondary browse">浏览…</div>
-      <div class="dhint">点「浏览…」或直接修改上方路径，安装信息随选择更新</div></div>
+      <div class="dhint">点「浏览…」选择安装文件夹</div></div>
     <div class="pill secondary">上一步</div>
     <div class="pill primary">下一步</div>
     <div class="tag">FNTV-PLUS</div>
