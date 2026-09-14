@@ -655,16 +655,47 @@ FunctionEnd
     ${NSD_SetText} $RadioButtonLabel1 "$1$9"
   FunctionEnd
 
+  ; ── 非 ASCII 路径检测(与启动期 checkNonAsciiPathBlocking 同源, 提前到"选路径"这一步) ──
+  ;   入参 $0 = 待检路径; 出参 $1 = 1(含中文/非 ASCII) / 0(纯 ASCII)。
+  ;   判定法: 把 Unicode 串按 UTF-8 编码, **字节数 > 字符数即为含非 ASCII**
+  ;   (纯 ASCII 时二者相等; 每个中文/全角字符在 UTF-8 里占 3 字节)。比逐字符取码位省事得多,
+  ;   也不用引 StrFunc.nsh(其宏按使用点插函数体, 与 EB「警告即错误」冲突)。
+  ;   为什么要在向导里拦: 原生子进程(proxy.exe / mpv / potctl)按 ANSI/GBK 解析中文路径会失败 →
+  ;   装到中文目录表现为「程序打不开 / 闪退 / 无弹幕」, 而那时用户已经装完, 排错成本高。
+  Function fnosPathNonAscii
+    StrCpy $1 0
+    StrLen $2 $0
+    ${If} $2 == 0
+      Return
+    ${EndIf}
+    System::Call 'kernel32::WideCharToMultiByte(i 65001, i 0, w "$0", i -1, p 0, i 0, p 0, p 0) i.r3'
+    IntOp $3 $3 - 1                               ; 减掉结尾 NUL
+    ${If} $3 > $2
+      StrCpy $1 1
+    ${EndIf}
+  FunctionEnd
+
   Function fnosDirBrowse
     Pop $0
     nsDialogs::SelectFolderDialog "选择安装文件夹" "$fnosDirChosen"
     Pop $0
-    ${If} $0 != "cancel"
-    ${AndIf} $0 != "error"
-    ${AndIf} $0 != ""
-      StrCpy $fnosDirChosen "$0"
-      Call fnosDirShowPath
+    ${If} $0 == "cancel"
+      Return
     ${EndIf}
+    ${If} $0 == "error"
+      Return
+    ${EndIf}
+    ${If} $0 == ""
+      Return
+    ${EndIf}
+    StrCpy $5 "$0"                                ; 先存(下面 Call 会覆写 $0)
+    Call fnosPathNonAscii
+    StrCmp $1 "1" 0 fnosDirBrowseApply
+      MessageBox MB_ICONEXCLAMATION|MB_YESNO "检测到安装路径包含中文或非英文字符：$\r$\n$\r$\n$5$\r$\n$\r$\n这会导致内置代理服务或外部播放器（MPV / PotPlayer）无法启动，表现为「程序打不开」「闪退」或「无弹幕」。$\r$\n建议改选纯英文路径，例如 D:\Fntv-Plus。$\r$\n$\r$\n是否仍要使用这个路径？" IDYES fnosDirBrowseApply
+      Return                                      ; 选「否」→ 不采用, 保持原路径
+    fnosDirBrowseApply:
+    StrCpy $fnosDirChosen "$5"
+    Call fnosDirShowPath
   FunctionEnd
 
   Function fnosFinishPre
