@@ -40,6 +40,20 @@ export const S: {
    *  写：settings/*；读：carousel/logo.ts */
   carouselLogoEnabled: boolean;
 
+  // ── [自定义刮削]（fpk 交接报告 §2.2）───────────────────────────────────────
+  /** 自定义刮削源开关。写：settings 面板「自定义刮削」卡、detail/customScraper.ts 启动自举；读：detail/customScraper.ts */
+  customScraperEnabled: boolean;
+  /** 自定义刮削服务完整地址(http/https)。写：同上；读：detail/customScraper.ts */
+  customScraperUrl: string;
+  /** Jav 番号刮削开关(默认关)。写：settings 面板「Jav 刮削」卡；读：detail/jav.ts */
+  javEnabled: boolean;
+  /** Fanart.tv 高清 Logo 兜底开关。写：settings 面板 Fanart 卡；读：carousel/logo.ts(fetchFanartLogoDataUrl) */
+  fanartEnabled: boolean;
+  /** TVMaze 英文分集兜底开关。写：settings 面板 TVMaze 卡；读：detail/epBackfill.ts */
+  tvmazeEnabled: boolean;
+  /** OMDb IMDb 评分开关。写：settings 面板 OMDb 卡；读：暂无(评分消费点后续接) */
+  omdbEnabled: boolean;
+
   // ── 片库数据（轮播数据源）───────────────────────────────────────────────────
   /** 经 IPC 拉取到的条目池。写：carousel/api.ts；读：carousel/index.ts、carousel/styles.ts */
   apiShows: any[];
@@ -57,6 +71,17 @@ export const S: {
   /** [lc-615] 轮播是否已揭示(进度条走完)。详情补完的二次重建只有在已揭示后才执行,
    *  否则会绕过进度条提前出图(用户看到"进度条 20% 就闪出轮播")。 */
   carouselRevealed: boolean;
+  /** [多源刮削-修复轮播海报错位] 在途 fetch 的共享 Promise(单飞): 并发触发(返回首页/定时刷新/
+   *  隐藏 iframe 抖动)时后来者复用同一请求, 杜绝多轮重建互相踩踏后「DOM=旧序, apiShows=新序」错位。
+   *  写/读: carousel/api.ts(fetchShowsViaIPC) */
+  carouselInFlight: Promise<any[]> | null;
+  /** [多源刮削-修复轮播海报错位] 最近一次实际渲染轮播的内容签名(guid 顺序 join)。
+   *  写: carousel/render.ts(injectCarousel 构建完成后); 读: carousel/api.ts(picked 后比对,
+   *  仅当 guid 顺序真的变化才重置 carouselRevealed 强制重渲染, 未变化不闪不重建)。 */
+  carouselRenderedSig: string;
+  /** [多源刮削-修复轮播海报错位] 最近一次成功拉取的时间戳。写/读: carousel/api.ts ——
+   *  60s 内的重复触发(返回首页抖动/多观察器)直接复用现有数据, 遏制重建风暴。 */
+  lastCarouselFetchAt: number;
   /** [lc-937] 是否「离开过首页」。离开首页时置 true，返回首页后强制干净重建轮播，重建完成后复位。
    *  用于避免 in-home 的 replaceState 反复重建，同时保证「轮播按钮打开的详情返回首页」必定重建。 */
   leftHome: boolean;
@@ -115,6 +140,13 @@ export const S: {
   hotSource: 'douban',
   carouselLogoEnabled: true,
 
+  customScraperEnabled: false,
+  customScraperUrl: '',
+  javEnabled: false,
+  fanartEnabled: false,
+  tvmazeEnabled: false,
+  omdbEnabled: false,
+
   apiShows: [],
   apiLoaded: false,
   apiLoading: false,
@@ -125,6 +157,9 @@ export const S: {
 
   carouselInited: false,
   carouselRevealed: false,
+  carouselInFlight: null,
+  carouselRenderedSig: '',
+  lastCarouselFetchAt: 0,
   leftHome: false,
   carouselContainer: null,
   carouselUpdatedAt: 0,

@@ -8,6 +8,28 @@ import { extractTmdbId } from './api';
 // embyWall/carousel/logo.ts — 轮播/详情页 LOGO：TMDB 透明 logo 拉取、标题替换为 logo、回写飞牛媒体库
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
 
+/** [自定义刮削·v1.10.0] Fanart.tv 官方高清透明 Logo 兜底（扩展数据源 ①，设置卡开关 S.fanartEnabled）。
+ *  经 fanart:logos 桥拿官方 CDN 直链列表（HD 优先、likes 降序），逐个经 tmdb:image 图片代理
+ *  下载 + 纯白过滤，返回首个可用 dataUrl；未开启/未配 key/无命中一律返回 null（静默降级）。
+ *  只接受 tmdbId —— 剧集的 TVDB 换算在后端做（TMDB external_ids），电影直接用 TMDB id。 */
+export async function fetchFanartLogoDataUrl(mediaType: 'tv' | 'movie', tmdbId?: string | number): Promise<string | null> {
+  if (!S.fanartEnabled) return null;
+  if (tmdbId === undefined || tmdbId === null || String(tmdbId).trim() === '') return null;
+  try {
+    const r: any = await ipcRenderer.invoke('fanart:logos', { mediaType, tmdbId });
+    if (!r || !r.ok) return null;
+    const logos: any[] = Array.isArray(r.logos) ? r.logos : [];
+    for (const l of logos) {
+      if (!l || !l.url) continue;
+      try {
+        const img = await ipcRenderer.invoke('tmdb:image', l.url);
+        if (img && img.ok && img.dataUrl && !(await isPureWhitePng(img.dataUrl))) return img.dataUrl;
+      } catch { /* 单个候选失败继续 */ }
+    }
+  } catch { /* 未配置 key / 网络失败静默 */ }
+  return null;
+}
+
 export async function resolveShowLogo(show: any, base: string): Promise<string | null> {
   try {
     if (show.logo) {
@@ -36,6 +58,9 @@ export async function resolveShowLogo(show: any, base: string): Promise<string |
         } catch (e) { /* 试下一个候选 */ }
       }
       if (whiteFallback) return whiteFallback;
+      // [自定义刮削] TMDB 无可用透明 Logo 时 Fanart.tv 官方兜底（设置卡开关）
+      const fa = await fetchFanartLogoDataUrl(show.mediaType === 'movie' ? 'movie' : 'tv', show.tmdbId);
+      if (fa) { log('fanart logo applied:', show.title); return fa; }
     }
     return null;
   } catch (e) { log('resolveShowLogo err:', (show && show.title) || '', e); return null; }
@@ -95,6 +120,14 @@ export function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[])
             show.tmdbLogo = whiteFallback;
             swapTitleToLogo(info, whiteFallback);
             log('tmdb logo applied(纯白兜底):', show.title);
+            return;
+          }
+          // [自定义刮削] TMDB 无可用透明 Logo 时 Fanart.tv 官方兜底（设置卡开关）
+          const fa = await fetchFanartLogoDataUrl(show.mediaType === 'movie' ? 'movie' : 'tv', show.tmdbId);
+          if (fa) {
+            show.tmdbLogo = fa;
+            swapTitleToLogo(info, fa);
+            log('fanart logo applied:', show.title);
             return;
           }
           log('tmdb logo 全部候选不可用:', show.title);

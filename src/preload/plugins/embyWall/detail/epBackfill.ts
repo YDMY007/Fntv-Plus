@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
+import { S } from '../state';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
@@ -35,7 +36,7 @@ const CONCURRENCY = 4;
 
 // ── 路由/文本纯函数 ──
 
-function seasonGuid(): string | null {
+export function seasonGuid(): string | null {
   const m = location.pathname.match(/\/v\/tv\/season\/([a-f0-9]{32})/);
   return m ? m[1] : null;
 }
@@ -53,25 +54,39 @@ export function isPlaceholderTitle(s: string): boolean {
 
 /** 单字段回填裁决（纯函数，验证脚本直测）。返回 null=不动；否则=应写入的新值。
  *  best 取值：zh 有 CJK → zh；否则 en；否则 zh 原文（zh 回落英文原文时与 en 等价，仍可用）。
- *  · 当前为空 & best 非空 → 回填；· 当前无 CJK & best 有 CJK → 中文覆盖；· 其余不动。 */
+ *  · 当前为空 & best 非空 → 回填；
+ *  · 当前是占位标题(「第 N 集」等, placeholder 判定) & best 非空 → 回填（英文也算升级）；
+ *  · 当前无 CJK & best 有 CJK → 中文覆盖；
+ *  · 其余不动。 */
 export function decideField(
-  cur: string, zh: string, en: string,
-  placeholder?: (s: string) => boolean,
+    cur: string, zh: string, en: string,
+    placeholder?: (s: string) => boolean,
 ): string | null {
-  const zhOk = !!(zh && zh.trim() && !(placeholder && placeholder(zh)));
-  const enOk = !!(en && en.trim() && !(placeholder && placeholder(en)));
-  const best = (zhOk && hasCJK(zh)) ? zh : (enOk ? en : (zhOk ? zh : ''));
-  const curT = (cur || '').trim();
-  if (!best.trim()) return null;
-  if (!curT) return best;
-  if (!hasCJK(curT) && hasCJK(best)) return best;
-  return null;
+    const zhOk = !!(zh && zh.trim() && !(placeholder && placeholder(zh)));
+    const enOk = !!(en && en.trim() && !(placeholder && placeholder(en)));
+    const best = (zhOk && hasCJK(zh)) ? zh : (enOk ? en : (zhOk ? zh : ''));
+    const curT = (cur || '').trim();
+    if (!best.trim()) return null;
+    // [多源刮削] 占位标题是垃圾数据，任何真实数据(含英文)都是升级 —— 用户要求英文标题也兜底补齐
+    if (placeholder && placeholder(curT)) return best;
+    if (!curT) return best;
+    if (!hasCJK(curT) && hasCJK(best)) return best;
+    return null;
 }
 
-function numOrNull(v: any): number | null {
-  if (typeof v === 'number' && !isNaN(v)) return v;
-  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
-  return null;
+export function numOrNull(v: any): number | null {
+    if (typeof v === 'number' && !isNaN(v)) return v;
+    if (typeof v === 'string' && /^\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
+    return null;
+}
+
+/** [多源刮削] 从集标题提取集号: fnOS 0.9.8 的 getEditDetail/item/list 实测都不带 index_number,
+ *  未刮削分集的标题形如「第 11 集」「第 3 话」「Episode 4」「12」—— 可直接解析出集号。 */
+export function epNumFromTitle(t: string): number | null {
+    const s = (t || '').trim();
+    const m = s.match(/^第\s*(\d{1,4})\s*[集话話]/) || s.match(/^(?:Episode|EP\.?)\s*(\d{1,4})\b/i)
+        || s.match(/^(?:第\s*)?(\d{1,4})$/);
+    return m ? parseInt(m[1], 10) : null;
 }
 
 /** DOM 兜底解析季号（getEditDetail 没有 index_number 时用；只认数字/中文数字两种形态）。 */
@@ -127,7 +142,7 @@ async function fnosPost(origin: string, path: string, body: any): Promise<any | 
 }
 
 /** 枚举本季全部集（guid + type）。item/list 失败时由调用方回落 DOM href 收集。 */
-async function fnosEpisodeList(origin: string, seasonGuid: string): Promise<{ guid: string; index: number | null }[]> {
+export async function fnosEpisodeList(origin: string, seasonGuid: string): Promise<{ guid: string; index: number | null }[]> {
   const data = await fnosPost(origin, '/v/api/v1/item/list', {
     parent_guid: seasonGuid, exclude_folder: 1,
     sort_column: 'sort_title', sort_type: 'ASC', nonce: fnNonce(),
@@ -143,7 +158,7 @@ async function fnosEpisodeList(origin: string, seasonGuid: string): Promise<{ gu
 }
 
 /** DOM 回落：活跃视图选集卡的 a[href="/v/tv/episode/<guid>"]。 */
-function episodeGuidsFromDom(): { guid: string; index: number | null }[] {
+export function episodeGuidsFromDom(): { guid: string; index: number | null }[] {
   const view = findActiveDetailView();
   if (!view) return [];
   const out: { guid: string; index: number | null }[] = [];
@@ -159,14 +174,23 @@ function episodeGuidsFromDom(): { guid: string; index: number | null }[] {
 }
 
 /** 全量回写（仅调用方改好的字段 + nonce；字段锁定由调用方放进了 body）。 */
-async function fnosSaveEditDetail(origin: string, body: any): Promise<boolean> {
-  const data = await fnosPost(origin, '/v/api/v1/item/saveEditDetail', body);
-  return data !== null;
+export async function fnosSaveEditDetail(origin: string, body: any): Promise<boolean> {
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/saveEditDetail', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/item/saveEditDetail', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) { dlog('[epBackfill] saveEditDetail HTTP ' + resp.status); return false; }
+    const j = await resp.json().catch(() => null);
+    // [多源刮削] 成功判定必须按 code===0 —— 实测成功响应是 {code:0, data:null},
+    //  旧写法「data !== null」把所有成功写回误判成失败(failed 虚高、复核从未执行)。
+    return !!j && j.code === 0;
 }
 
 // ── 按钮挂载/状态 ──
 
-function setBtn(btn: HTMLElement, text: string, title?: string): void {
+export function setBtn(btn: HTMLElement, text: string, title?: string): void {
   btn.textContent = text;
   if (title !== undefined) btn.setAttribute('title', title);
 }
@@ -188,7 +212,7 @@ function makeBtn(): HTMLButtonElement {
 }
 
 /** 「选集」标题元素：活跃视图内文本恰为「选集」的可见叶子（防选集计数等变体：再试 ≤8 字前缀）。 */
-function findSelectHeading(): HTMLElement | null {
+export function findSelectHeading(): HTMLElement | null {
   const view = findActiveDetailView();
   if (!view) return null;
   const nodes = view.querySelectorAll('strong,b,h1,h2,h3,h4,p,span,div,em');
@@ -230,7 +254,8 @@ export function removeEpFixButton(): void {
 // ── DOM 即时补丁 ──
 
 /** 标题 p：卡内「含 <p> 的 <a>」首个 <p>（epResolution 实机验证的定位）；简介 p：其余 p 的最后一个。 */
-function patchEpisodeCard(epGuid: string, title: string | null, overview: string | null): void {
+// [多源刮削] 导出供 bangumiBackfill 复用（同一选集卡结构，写回成功后的即时补丁手法一致）
+export function patchEpisodeCard(epGuid: string, title: string | null, overview: string | null): void {
   const view = findActiveDetailView();
   if (!view) return;
   const link = view.querySelector<HTMLAnchorElement>('a[href="/v/tv/episode/' + epGuid + '"]');
@@ -267,16 +292,16 @@ function patchEpisodeCard(epGuid: string, title: string | null, overview: string
 let _running = false;
 let _retryTimers: number[] = [];
 
-interface Stats { filled: number; upgraded: number; unchanged: number; failed: number; unmatched: number; total: number; }
+interface Stats { filled: number; upgraded: number; unchanged: number; failed: number; unmatched: number; unverified: number; total: number; }
 
 async function runBackfill(btn: HTMLButtonElement): Promise<void> {
   const guid = seasonGuid();
   if (!guid || _running) return;
   _running = true;
   const origin = location.origin;
-  const stats: Stats = { filled: 0, upgraded: 0, unchanged: 0, failed: 0, unmatched: 0, total: 0 };
+  const stats: Stats = { filled: 0, upgraded: 0, unchanged: 0, failed: 0, unmatched: 0, unverified: 0, total: 0 };
   const tick = (): void => {
-    const done = stats.filled + stats.upgraded + stats.unchanged + stats.failed + stats.unmatched;
+    const done = stats.filled + stats.upgraded + stats.unchanged + stats.failed + stats.unmatched + stats.unverified;
     if (btn.isConnected) setBtn(btn, '⏳ 补全中 ' + done + '/' + stats.total);
   };
   try {
@@ -298,7 +323,39 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
       throw new Error((r && r.error) || 'TMDB 获取失败');
     }
     const tmdbByNum = new Map<number, any>();
-    for (const e of r.data.episodes) tmdbByNum.set(e.episodeNumber, e);
+    // [多源刮削] 播出日期索引: 集号解析全失败时的兜底匹配(仅当该日期在 TMDB 唯一才采用)
+    const tmdbByDate = new Map<string, any[]>();
+    for (const e of r.data.episodes) {
+        tmdbByNum.set(e.episodeNumber, e);
+        const ad = String(e.airDate || '');
+        if (ad) { const arr = tmdbByDate.get(ad) || []; arr.push(e); tmdbByDate.set(ad, arr); }
+    }
+
+    // 2.5) [自定义刮削·v1.10.0] TVMaze 英文兜底（扩展数据源 ②，设置卡开关）：TMDB 缺英文（或整集
+    //    缺失）时，用 TVMaze 官方 API（免 Key，CC BY-SA）的英文标题/简介顶上。一次整季拉取 + 后端
+    //    24h 缓存；查无此剧/未开启/网络失败都静默降级为纯 TMDB，绝不拖住主流程。
+    const tvmazeByNum = new Map<number, { name: string; summary: string }>();
+    if (S.tvmazeEnabled) {
+      setBtn(btn, '⏳ 获取 TVMaze…');
+      try {
+        const tr: any = await ipcRenderer.invoke('tvmaze:show', {
+          title: title || undefined, tmdbId: tmdbId || undefined, seasonNumber,
+        });
+        if (tr && tr.ok && Array.isArray(tr.episodes)) {
+          for (const e of tr.episodes) {
+            const n = numOrNull(e.number);
+            // TVMaze 未播出集常用占位名「TBD」，与「第 N 集」同性质按无数据处理
+            const nm = (e.name && !/^tbd$/i.test(String(e.name).trim())) ? String(e.name) : '';
+            if (n !== null && numOrNull(e.season) === seasonNumber && (nm || e.summary)) {
+              tvmazeByNum.set(n, { name: nm, summary: String(e.summary || '') });
+            }
+          }
+        }
+        log('[epBackfill] TVMaze 兜底就绪: ' + tvmazeByNum.size + ' 集');
+      } catch (e: any) {
+        dlog('[epBackfill] TVMaze 兜底失败(忽略): ' + String(e && e.message || e).substring(0, 80));
+      }
+    }
 
     // 3) 飞牛枚举本季集（item/list 为主，DOM 回落）
     let episodes = await fnosEpisodeList(origin, guid).catch(() => [] as { guid: string; index: number | null }[]);
@@ -312,34 +369,65 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
       while (idx < episodes.length) {
         const ep = episodes[idx++];
         try {
-          const ed = await fnosGetEditDetail(origin, ep.guid);
-          if (!ed) { stats.failed++; tick(); continue; }
-          const num = numOrNull(ed.index_number ?? ed.index) ?? ep.index;
-          const t = (num !== null) ? tmdbByNum.get(num) : undefined;
-          if (!t) { stats.unmatched++; tick(); continue; }
+                    const ed = await fnosGetEditDetail(origin, ep.guid);
+                    if (!ed) { stats.failed++; tick(); continue; }
+                    // [多源刮削] 集号解析链: fnOS 0.9.8 实测 getEditDetail/item/list 都不带 index_number
+                    //  (旧实现此处全 unmatched) → 补「标题『第 N 集』解析」与「播出日期唯一匹配」两级兜底
+                    const num = numOrNull(ed.index_number ?? ed.index ?? ed.episode_number)
+                        ?? epNumFromTitle(String(ed.title ?? ed.name ?? ''))
+                        ?? ep.index;
+                    let t = (num !== null) ? tmdbByNum.get(num) : undefined;
+                    if (!t && ed.air_date) {
+                        const byDate = tmdbByDate.get(String(ed.air_date));
+                        if (byDate && byDate.length === 1) t = byDate[0]; // 该日期唯一才采用, 防错配
+                    }
+                    // [自定义刮削] TVMaze 兜底：TMDB 整集缺失 → 用 TVMaze 该集英文（走"仅英文兜底"路径）；
+                    // TMDB 有集但缺英文 → 英文字段用 TVMaze 补齐后再裁决。
+                    const tvEp = (num !== null) ? tvmazeByNum.get(num) : undefined;
+                    if (!t && !tvEp) {
+                        dlog('[epBackfill] 集号无法确定: guid=' + ep.guid + ' title=' + String(ed.title ?? ed.name ?? '')
+                            + ' air_date=' + String(ed.air_date || ''));
+                        stats.unmatched++; tick(); continue;
+                    }
           const titleKey = ('title' in ed) ? 'title' : ('name' in ed ? 'name' : 'title');
           const ovKey = ('overview' in ed) ? 'overview' : ('description' in ed ? 'description' : 'overview');
           const curTitle = String(ed[titleKey] ?? '');
           const curOv = String(ed[ovKey] ?? '');
-          const newTitle = decideField(curTitle, t.nameZh, t.nameEn, isPlaceholderTitle);
-          const newOv = decideField(curOv, t.overviewZh, t.overviewEn);
+          const nameZh = t ? t.nameZh : '';
+          const ovZh = t ? t.overviewZh : '';
+          const nameEn = (t && t.nameEn) || (tvEp ? tvEp.name : '');
+          const ovEn = (t && t.overviewEn) || (tvEp ? tvEp.summary : '');
+          const newTitle = decideField(curTitle, nameZh, nameEn, isPlaceholderTitle);
+          const newOv = decideField(curOv, ovZh, ovEn);
           if (newTitle === null && newOv === null) { stats.unchanged++; tick(); continue; }
           const body: any = { ...ed, nonce: fnNonce() };
           // 防御：getEditDetail 返回体可能不带 guid 字段（logo 回填实测全量回写即可定位条目，
           // 服务端从 data 内取 guid）——缺了就显式补，保证 saveEditDetail 永远可定位本集
           if (!body.guid && !body.item_guid) body.guid = ep.guid;
-          let titleChanged = false, ovChanged = false;
-          if (newTitle !== null) { body[titleKey] = newTitle; body.title_locked = true; titleChanged = true; }
-          if (newOv !== null) { body[ovKey] = newOv; body.overview_locked = true; ovChanged = true; }
-          const saved = await fnosSaveEditDetail(origin, body);
-          if (!saved) { stats.failed++; tick(); continue; }
-          // 复核：服务端字段名/落盘不确定（*_locked 为仿 logos_locked 的尽力约定），读不回就如实计失败
-          const vf = await fnosGetEditDetail(origin, ep.guid);
-          const vTitle = String(vf ? (vf[titleKey] ?? '') : '');
-          const vOv = String(vf ? (vf[ovKey] ?? '') : '');
-          const titleOk = !titleChanged || vTitle.trim() === (newTitle as string).trim();
-          const ovOk = !ovChanged || vOv.trim() === (newOv as string).trim();
-          if (!titleOk || !ovOk) { stats.failed++; tick(); continue; }
+                    let titleChanged = false, ovChanged = false;
+                    // [多源刮削] 仅中文结果加 *_locked（防 fnOS 自动刮削覆盖）；英文兜底不锁 ——
+                    //  让后续官方中文翻译/自动刮削可以自然覆盖英文占位（用户主诉求是中文数据）。
+                    if (newTitle !== null) { body[titleKey] = newTitle; if (hasCJK(newTitle)) body.title_locked = true; titleChanged = true; }
+                    if (newOv !== null) { body[ovKey] = newOv; if (hasCJK(newOv)) body.overview_locked = true; ovChanged = true; }
+                    const saved = await fnosSaveEditDetail(origin, body);
+                    if (!saved) { stats.failed++; tick(); continue; }
+                    // 复核：写后立即读回可能撞上服务端旧值（实测 code:0 但回读仍是旧内容）→
+                    //  隔 700ms 重读一次；仍不一致计「未确认」（提交成败需刷新页面核实），不算硬失败
+                    let verified = false;
+                    for (let v = 0; v < 2 && !verified; v++) {
+                        if (v > 0) await new Promise((r) => setTimeout(r, 700));
+                        const vf = await fnosGetEditDetail(origin, ep.guid);
+                        const vTitle = String(vf ? (vf[titleKey] ?? '') : '');
+                        const vOv = String(vf ? (vf[ovKey] ?? '') : '');
+                        verified = (!titleChanged || vTitle.trim() === (newTitle as string).trim())
+                            && (!ovChanged || vOv.trim() === (newOv as string).trim());
+                    }
+                    if (!verified) {
+                        stats.unverified++;
+                        dlog('[epBackfill] 已提交但复核未确认(疑似服务端写后读延迟): guid=' + ep.guid);
+                        tick();
+                        continue;
+                    }
           if (titleChanged && hasCJK(newTitle as string)) stats.filled++;       // 中文（回填或覆盖都算"补全"）
           else if (titleChanged) stats.upgraded++;                              // 仅英文兜底
           if (ovChanged && hasCJK(newOv as string)) stats.filled++;
@@ -358,10 +446,15 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
 
     // 5) 结果反馈
     const done = stats.filled + stats.upgraded;
+    const uv = stats.unverified;
     if (stats.failed) {
       setBtn(btn, '⚠ 补全 ' + done + ' · 失败 ' + stats.failed, '部分集写入失败，详见日志；可再点一次重试。');
     } else if (done) {
-      setBtn(btn, '✓ 已补全 ' + stats.filled + ' · 兜底 ' + stats.upgraded, '标题/简介已写回飞牛元数据。');
+      setBtn(btn, '✓ 中文回填 ' + stats.filled + ' · 英文兜底 ' + stats.upgraded + (uv ? ' · 未确认 ' + uv : ''),
+        uv ? '已提交但部分复核未确认，刷新页面核实；详见日志。'
+           : (stats.upgraded ? '部分集数据源暂无中文，已用英文补齐（未加锁，后续中文可覆盖）。' : '标题/简介已写回飞牛元数据。'));
+    } else if (uv) {
+      setBtn(btn, '⚠ 已提交 ' + uv + ' · 未确认', '写回已提交但复核未确认，请刷新页面核实；详见日志。');
     } else if (stats.unmatched) {
       setBtn(btn, '⚠ ' + stats.unmatched + ' 集未匹配', 'TMDB 上也缺这些集的数据或集号对不上。');
     } else {
@@ -369,7 +462,8 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
     }
     log('[epBackfill] 完成 S' + seasonNumber + ' total=' + stats.total + ' filled=' + stats.filled
       + ' fallback=' + stats.upgraded + ' unchanged=' + stats.unchanged
-      + ' unmatched=' + stats.unmatched + ' failed=' + stats.failed);
+      + ' unmatched=' + stats.unmatched + ' failed=' + stats.failed
+      + ' unverified=' + stats.unverified);
   } catch (e: any) {
     const msg = String(e && e.message || e).substring(0, 80);
     log('[epBackfill] 失败: ' + msg);
