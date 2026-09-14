@@ -207,6 +207,33 @@ export async function scrapeAllPageFirstScreen(timeoutMs = 18000, onProgress?: (
 }
 
 export async function fetchShowsViaIPC(base: string): Promise<any[]> {
+  if (location.protocol === 'file:') return S.apiShows;
+  // [多源刮削-修复轮播海报错位] 隐藏 iframe(ensureLibraryIndex 的 /v/list/all 抓取帧)里 preload 同样会
+  //  启动轮播 → 与主页面双份并发构建互相踩踏(日志实证: 「fetching recognized shows」成对出现、
+  //  apiShows 被不同顺序轮替覆盖)。轮播只在真实顶层页面运行; 抓库索引的 iframe 不是展示面。
+  if (window.self !== window.top) return S.apiShows;
+  // [多源刮削-修复轮播海报错位] 单飞: 在途请求直接复用同一 Promise, 杜绝并发重建。
+  if (S.carouselInFlight) return S.carouselInFlight;
+  if (S.apiLoaded) return S.apiShows;
+  if (S.apiLoading) return S.apiShows;
+  // [多源刮削-修复轮播海报错位] 节流: 刚成功拉取过(60s 内)直接复用现有数据,
+  //  抑制「返回首页/多观察器/定时器」短时间内反复重拉造成的重建风暴。
+  if (S.apiShows.length && Date.now() - S.lastCarouselFetchAt < 60_000) {
+    log('[多源刮削] 距上次成功拉取不足 60s, 复用现有轮播数据(防重建风暴)');
+    S.apiLoaded = true;
+    if (S.apiShows.length) S.carouselRevealed = true; // 数据在屏上, 恢复揭示标记防下游误建骨架
+    return S.apiShows;
+  }
+  const job = fetchShowsViaIPCInner(base);
+  S.carouselInFlight = job;
+  try {
+    return await job;
+  } finally {
+    if (S.carouselInFlight === job) S.carouselInFlight = null;
+  }
+}
+
+async function fetchShowsViaIPCInner(base: string): Promise<any[]> {
   // [lc-211] 本地登录页(file://)不需要也不应跑轮播取海报
   if (location.protocol === 'file:') return S.apiShows;
   if (S.apiLoaded) return S.apiShows;
@@ -266,6 +293,7 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
       S.apiShows.length = 0;
       Array.prototype.push.apply(S.apiShows, newShows);
       S.apiLoaded = true;
+      S.lastCarouselFetchAt = Date.now(); // [多源刮削] 记录成功拉取时刻, 供 60s 节流
       S.carouselInited = false;
       S.carouselLoadedButNone = false; // [lc-768] 新一轮拉取，重置「全 STR 失败」标记
       // [lc-620] 不再先渲染再补详情(会闪两次): 先并行补 item API 详情, 全部就绪后
@@ -361,6 +389,18 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         S.apiShows.length = 0;
         Array.prototype.push.apply(S.apiShows, picked);
         persistShows(); // [lc-950] 落盘完整快照(含 _backdropBlob + desc), 供整页重载后零网络恢复
+        // [多源刮削-修复轮播海报错位] 内容签名变更检测: 仅当 guid 顺序真的变化才重置 carouselRevealed
+        //  强制重渲染; 未变化则维持已揭示状态(revealOnce 跳过重建, DOM 与数据保持一致),
+        //  消除「DOM=旧序 vs apiShows=新序」的错位窗口(该窗口内一切按索引配对的更新都会海报对不上)。
+        const nextSig = picked.map((s: any) => s.id).join(',');
+        if (nextSig === S.carouselRenderedSig) {
+          S.carouselRevealed = true;
+          log('[多源刮削] 轮播内容签名未变化, 保留现有渲染(不重建不闪屏)');
+        } else {
+          // 内容真的变了(含 8s 超时先渲染过未补全列表的场景) → 强制重渲染,
+          // 绝不让「DOM=旧序 vs apiShows=新序」跨构建共存(此即海报对不上根因)。
+          S.carouselRevealed = false;
+        }
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
         completeCarouselProgress(revealOnce, 'details-ready');
       }).catch((e: any) => {

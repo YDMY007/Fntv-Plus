@@ -112,6 +112,8 @@ function fmtCarouselUpdated(ts: number): string {
 // ===== resolveSeasonHref 已迁移到 ./href.ts（打断 render ↔ styles 循环依赖） =====
 
 export function injectCarousel(): void {
+  // [多源刮削-修复轮播海报错位] 隐藏 iframe(库索引抓取帧)里绝不注入轮播(与 api.ts 单飞/节流同因)
+  if (window.self !== window.top) return;
   log('injectCarousel called, S.carouselInited=', S.carouselInited, 'S.apiShows.length=', S.apiShows.length);
   if (S.carouselInited) return;
 
@@ -364,6 +366,9 @@ export function injectCarousel(): void {
     const slide = document.createElement('div');
     slide.style.cssText = 'width:100%;height:100%;position:relative;flex-shrink:0;display:flex;background:transparent;overflow:hidden;border-radius:inherit';
     slide.className = 'fnos-slide';
+    // [多源刮削-修复轮播海报错位] 每个轮播片绑定条目 guid: 后续任何异步更新可按 guid 定位,
+    //  不再依赖「数组下标 ↔ DOM 下标」的脆弱配对(重建竞态下正是错位根因)。
+    slide.dataset.showGuid = String(show.id || '');
 
     // 左: 图片面板(占 ~80%, 撑满无白边)
     const leftEl = document.createElement('div');
@@ -702,6 +707,9 @@ export function injectCarousel(): void {
   // [lc-409] 记录当前轮播引用，供设置开关即时生效
   S.carouselInfos = infos;
   S.carouselShows = shows;
+  // [多源刮削-修复轮播海报错位] 记录本次实际渲染的内容签名(guid 顺序): api.ts picked 后据此
+  //  判断「数据真的变了才重建」, 避免无变化重建闪屏, 也杜绝「DOM=旧序 vs 数据=新序」错位窗口。
+  S.carouselRenderedSig = shows.map((s: any) => String(s.id || '')).join(',');
   S.carouselBase = base;
   applyTitleLogo(base, shows, infos);
 
