@@ -22,6 +22,7 @@ import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
 import logger from '../core/logger';
 import { t } from '../core/i18n';
+import { fullscreenHost } from '../core/fullscreen';
 
 const log = logger;
 
@@ -133,12 +134,24 @@ function bindHeaderAutoHide(): void {
     改为直接监听 xgplayer 自身的 xgplayer-fullscreen class(MutationObserver),
     这是最可靠的全屏信号——xgplayer 进入/退出伪全屏时立即添加/移除该 class。 */
 let _fsFixBound = false;
+let _lastFsState = false;      // [lc-1164] 供「全屏状态变化」事件判重
 function applyVideoFullscreenClass(): void {
     // ① 浏览器原生全屏（最高优先级）
     const nativeFs = !!document.fullscreenElement;
     // ② 飞牛 xgplayer 伪全屏：直接检查 xgplayer-fullscreen class（xgplayer 自身管理）
     const pseudoFs = !!document.querySelector('.xgplayer.xgplayer-fullscreen');
     document.documentElement.classList.toggle('fntv-video-fullscreen', nativeFs || pseudoFs);
+    // [lc-1164] 画布搬家：全屏时挪进全屏层内部，否则被全屏层整体盖住(伪全屏)或干脆不在渲染树里(原生全屏)
+    syncCanvasHost();
+    // [lc-1164] 全屏状态变化广播给其他插件(danmakuHeat 的高能条同样要搬家)。
+    // 与它读 LS_KEY / 收 'fntv:danmaku-items' 一样走事件 —— 两个插件刻意不互相 import。
+    const fsNow = nativeFs || pseudoFs;
+    if (fsNow !== _lastFsState) {
+        _lastFsState = fsNow;
+        try {
+            window.dispatchEvent(new CustomEvent('fntv:fullscreen-change', { detail: { fullscreen: fsNow } }));
+        } catch { /* ignore */ }
+    }
 }
 function bindVideoFullscreenFix(): void {
     if (!isPlayerPage()) return;
@@ -329,6 +342,9 @@ let rectTicks = 0;
 const RECT_SYNC_EVERY = 30;
 let rectRO: ResizeObserver | null = null;
 let rectROTarget: HTMLVideoElement | null = null;
+
+// [lc-1164] 画布「全屏宿主」状态：全屏时 canvas 必须搬进全屏层内部（见 syncCanvasHost）
+let canvasInFsHost = false;
 
 // 弹幕样式（默认对齐 MPV 观感；用户可在播放器内「样式」面板调节，各端独立持久化）
 const DEFAULT_STYLE: DanmakuStyle = {
@@ -629,10 +645,50 @@ function injectDmPanelStyle(): void {
 
 // ─── 挂载 canvas + 控制栏按钮 ───
 
+/**
+ * [lc-1164] 把弹幕画布在「body ↔ 全屏层」之间搬家。
+ *
+ * 症状（用户报障）：飞牛原生网页播放时点右下角全屏，弹幕整层消失。
+ * 两个成因都指向同一个事实 —— 画布被挂在 body 下，脱离了整个全屏层：
+ *   ① xgplayer 伪全屏（飞牛多数情况）：.xgplayer 被提到 position:fixed + z-index:9999，
+ *      而 canvas 在 body 下只有 z-index:5 → 被全屏层整块盖住（画布内容照常绘制，就是看不见）。
+ *   ② 浏览器原生全屏：浏览器只渲染「全屏元素」子树，body 下与它平级的 canvas 根本不在渲染树里。
+ * 所以修复不是加 z-index（那会连控制栏一起盖掉），而是**把画布搬进全屏层当子节点**：
+ * 同处一个层叠上下文后，z-index:5 的关系与「非全屏时相对 body」完全一致 —— 高于 video、
+ * 低于弹幕面板(30)，视觉层级不变，只是不再被整体吞掉。全屏层怎么找见 core/fullscreen.ts。
+ *
+ * 坐标不用动：画布是 position:fixed，全屏层铺满视口且不含 transform/filter 时，fixed 的
+ * 包含块仍是视口 —— syncCanvasRect() 那套「video 的视口 rect 直接赋值」搬家后原样成立。
+ * 调用点：全屏状态变化(applyVideoFullscreenClass)、画布创建、以及渲染循环里的低频兜底
+ * （xgplayer 重建全屏层会把画布连同旧节点一起丢掉，必须能自愈）。
+ */
+function syncCanvasHost(): void {
+    if (!canvas) return;
+    const host: HTMLElement = fullscreenHost(videoEl) || document.body;
+    const inFs = host !== document.body;
+    let changed = false;
+    if (canvas.parentElement !== host) { host.appendChild(canvas); changed = true; }
+    if (inFs !== canvasInFsHost) {
+        canvasInFsHost = inFs;
+        changed = true;
+        log.info('[danmakuWeb] 全屏层' + (inFs ? '介入: 弹幕画布已搬入 ' +
+            (host.className ? String(host.className).slice(0, 40) : host.tagName) : '退出: 弹幕画布已搬回 body'));
+    }
+    if (changed) { needRectSync = true; renderDirty = true; }
+}
+
 function ensureCanvas(): void {
     if (canvas) {
         // 复播时必须复位：leavePlayer 收起的是 display，这里不早退恢复就永远看不见弹幕
         canvas.style.display = enabled ? 'block' : 'none';
+        // [lc-1164] 画布曾被搬进全屏层，而全屏层被 xgplayer 重建/销毁时会连带旧节点一起丢掉
+        // （canvas 引用还在、但已脱离文档）→ 这里补一道重挂，避免它成为游离节点后再不出现。
+        if (!canvas.isConnected && document.body) {
+            document.body.appendChild(canvas);
+            canvasInFsHost = false;
+            needRectSync = true;
+        }
+        syncCanvasHost();
         return;
     }
     const c = document.createElement('canvas');
@@ -648,6 +704,8 @@ function ensureCanvas(): void {
     document.body.appendChild(c);
     canvas = c;
     ctx = c.getContext('2d');
+    // [lc-1164] 若此刻已经处于全屏（先全屏再起播/画布被销毁重建）→ 直接挂进全屏层
+    syncCanvasHost();
 }
 
 function ensureMounted(): void {
@@ -1356,6 +1414,9 @@ function render(): void {
     if (needRectSync || ++rectTicks >= RECT_SYNC_EVERY) {
         rectTicks = 0;
         needRectSync = false;
+        // [lc-1164] 低频兜底：全屏层的进出由 applyVideoFullscreenClass 即时同步，这里只为
+        // 「xgplayer 重建全屏层 / 画布被顺带移出文档」这类无人通知的情形自愈（约 0.5s 一次）。
+        syncCanvasHost();
         // 矩形不可用（video 尚无尺寸/选错了元素）→ 重挑一次，等下一轮兜底再试
         if (!syncCanvasRect()) { videoEl = pickVideo(); return; }
     }
@@ -1869,6 +1930,12 @@ function startMountPoll(): void {
  */
 function leavePlayer(): void {
     stopRender();                       // 内部已 clearRect，画布内容一并抹掉
+    // [lc-1164] 画布可能正挂在全屏层内部(lc-1164 全屏修复)：SPA 切页会把全屏层连根销毁，
+    // 先搬回 body，别让画布跟着成为游离节点（渲染循环里虽有自愈，但那是下次进播放页的事）。
+    if (canvas && document.body && canvas.parentElement !== document.body) {
+        document.body.appendChild(canvas);
+        canvasInFsHost = false;
+    }
     if (canvas) canvas.style.display = 'none';
     if (rectRO) { rectRO.disconnect(); rectRO = null; rectROTarget = null; }
     cancelClosePanel();

@@ -1,4 +1,5 @@
 import { registerHook, HookType } from '../core/hooks';
+import { fullscreenHost } from '../core/fullscreen';
 
 // danmakuHeat.ts — [lc-1070] 弹幕高能进度条（对标 B站）
 // 在 xgplayer 进度条上方叠加弹幕密度热力条：
@@ -71,9 +72,28 @@ function ensureHeatCanvas(): void {
     heatCtx = c.getContext('2d');
 }
 
+// [lc-1164] 全屏时高能条必须跟着搬家：它和弹幕画布一样是挂在 body 下的固定定位画布(z-index:6)，
+// 不搬就会被 xgplayer 的全屏层整块盖住 —— 正是「点右下角全屏后弹幕/高能条全不见」的同一个坑。
+// 全屏层判定与坐标系说明见 core/fullscreen.ts（两插件共用，互不 import）。
+// ⚠ 带 250ms 节流：updateHeat 挂在 OnDomChange 上(起播期 DOM 变动风暴会高频进来)，而全屏层
+//   判定要沿 video 祖先链跑 getComputedStyle —— 不节流就是每次 DOM 变动都白算一遍。
+//   force=true 绕过节流，专供全屏事件(进/出全屏必须立即生效)。
+let _lastHostCheck = 0;
+function syncHeatHost(force = false): void {
+    if (!heatCanvas || !document.body) return;
+    const now = performance.now();
+    if (!force && now - _lastHostCheck < 250) return;
+    _lastHostCheck = now;
+    // 画布若挂在已销毁的旧全屏层里，parentElement 还指向游离节点 → 判定必然不等 → 重挂自愈
+    const host = fullscreenHost(document.querySelector('video') as HTMLVideoElement | null)
+        || document.body;
+    if (heatCanvas.parentElement !== host) host.appendChild(heatCanvas);
+}
+
 // ── 定位：贴在 xgplayer 进度条上方 ──
 function positionHeatBar(): void {
     if (!heatCanvas) return;
+    syncHeatHost();
     const bar = document.querySelector('[class*="xgplayer-progress"], [class*="xg-progress"]') as HTMLElement | null;
     if (!bar || !bar.offsetHeight || !bar.offsetWidth) { heatCanvas.style.display = 'none'; return; }
     const r = bar.getBoundingClientRect();
@@ -125,6 +145,14 @@ function ingest(times: unknown): void {
 // danmakuWeb 的 play/info 预取在其模块加载阶段就可能触发 —— 放到 OnReady 里会漏掉首集。
 window.addEventListener(ITEMS_EVENT, (e) => {
     try { ingest((e as CustomEvent).detail?.times); } catch { /* ignore */ }
+});
+
+// [lc-1164] 全屏进出即时搬家：danmakuWeb 检测到全屏状态变化(原生 fullscreenchange /
+// xgplayer class 翻转)会广播该事件；不走它的话只能等 2s 轮询或节流窗口过期，观感是
+// 「进全屏后高能条空白一小段才出现」。force=true 绕过 syncHeatHost 的节流。同样必须
+// 挂模块加载期 —— OnReady 里注册会错过 danmakuWeb 首次广播。
+window.addEventListener('fntv:fullscreen-change', () => {
+    try { syncHeatHost(true); updateHeat(); } catch { /* ignore */ }
 });
 
 // ── 注册 ──
