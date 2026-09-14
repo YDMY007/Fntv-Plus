@@ -166,7 +166,31 @@ function estimateHeight(opts: AppDialogOptions): number {
  *  [lc-1158] 逃生口（按钮失灵时不许把用户锁死）：标题栏关闭钮(weak closable=true) +
  *  Esc(页面内) + Alt+F4/系统关闭 全部按 cancelId ?? defaultId 兜底 resolve；
  *  超时保险 120s 自动按 cancelId 关闭——弹窗永远不能成为永久锁。 */
-export function appDialog(opts: AppDialogOptions): Promise<number> {
+export async function appDialog(opts: AppDialogOptions): Promise<number> {
+    // ── [lc-1165] 启动期（还没有任何可见窗口）改用系统原生对话框 ──
+    // 这是正解，不是退让。原因：Windows 对「没有父窗口的顶层窗口」抢前台有硬限制 ——
+    //   SetForegroundWindow 只允许「当前前台进程」或「刚启动的进程」调用成功。本弹窗恰恰出现在
+    //   主窗口尚未创建时，是个「孤儿窗」：它可见、WindowFromPoint 命中的也是它，却拿不到前台焦点
+    //   （实测 isForegroundNow=False、页面收到 0 个鼠标事件）→ 三个按钮连 ✕ 全部点不动；
+    //   Electron 的 win.focus() / app.focus({steal:true}) 在这种状态下会被系统直接忽略。
+    //   原生对话框由系统创建，不受这条限制，永远可点。
+    // 有可见窗口时仍走下面的自绘玻璃窗（那时它是有主的窗口，抢前台没有问题，视觉保持一致）。
+    const hasVisibleWindow = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible());
+    if (!hasVisibleWindow) {
+        const { dialog } = require('electron');
+        const r = await dialog.showMessageBox({
+            type: (opts.type === 'warn' ? 'warning' : (opts.type || 'info')) as any,
+            title: opts.title,
+            message: opts.message || opts.title,
+            detail: opts.detail,
+            buttons: opts.buttons,
+            defaultId: opts.defaultId ?? 0,
+            cancelId: opts.cancelId ?? opts.defaultId ?? 0,
+            noLink: true,
+        });
+        return r.response;
+    }
+
     return new Promise<number>((resolve) => {
         ensureIpc();
         const id = `dlg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -242,18 +266,21 @@ export function appDialog(opts: AppDialogOptions): Promise<number> {
         fitWindows.set(id, win);
         void win.loadFile(file);
         win.once('ready-to-show', () => {
-            // [lc-1161] 必须把层级提到 'screen-saver'！默认 alwaysOnTop 只是 normal 级,
-            // 盖不住"独占全屏应用 / 其他置顶窗"。那种情况下弹窗**看着在最上面**, 但鼠标点击
-            // 会被上层窗口整层吃掉 —— 实测证据: WindowFromPoint 命中的不是本窗口、
-            // 页面收到 0 个鼠标事件、SetForegroundWindow 也无效(isForegroundNow=False)。
-            // 表现就是「三个按钮怎么点都没反应、✕ 也点不动、只能 Alt+F4」。
-            if (win && !win.isDestroyed()) {
-                win.setAlwaysOnTop(true, 'screen-saver');
-                win.show();
-                win.focus();
-            }
+            if (!win || win.isDestroyed()) return;
+            // 层级提到 screen-saver：默认 alwaysOnTop 只是 normal 级，盖不住独占全屏应用。
+            win.setAlwaysOnTop(true, 'screen-saver');
+            win.show();
+            win.focus();
+            // [lc-1165] 主进程侧键盘兜底：不依赖页面脚本（页面脚本万一没跑起来，Esc 也会失效）。
+            // 只要窗口能收到键盘事件，Esc 就能关掉。
+            win.webContents.on('before-input-event', (e: any, input: any) => {
+                if (input.type === 'keyDown' && input.key === 'Escape' && pending.has(id)) {
+                    e.preventDefault();
+                    done(opts.cancelId ?? opts.defaultId ?? 0);
+                }
+            });
         });
-        // [lc-1158] 超时保险: 120s 无选择自动按 cancelId 关闭(按钮失灵/渲染层挂死也不锁死用户)
+        // 超时保险 120s：兜住"渲染层彻底挂死"这种极端情况，不作为常规出路。
         timeoutTimer = setTimeout(() => {
             if (pending.has(id)) {
                 try { if (win && !win.isDestroyed()) { win.hide(); win.destroy(); } } catch { /* ignore */ }
