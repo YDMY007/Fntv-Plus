@@ -89,7 +89,8 @@ export function buildAppDialogHtml(opts: AppDialogOptions, id: string): string {
         : '';
     return `<!doctype html><html><head><meta charset="utf-8"><style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        html { background:transparent; }
+        /* [lc-1161] 窗口不再透明 → 铺卡片同色系底, 卡片外那圈不留白底也不显脏 */
+        html { background:#eef1f7; }
         /* [lc-1158] 窗口被屏幕高度封顶后内容可内部滚动(按钮必须始终可达) */
         body { background:transparent; overflow-y:auto; overflow-x:hidden;
             font-family:"Segoe UI Variable","Segoe UI",system-ui,-apple-system,sans-serif; }
@@ -97,7 +98,9 @@ export function buildAppDialogHtml(opts: AppDialogOptions, id: string): string {
         .card { position:relative; width:calc(100vw - 28px);
             background:linear-gradient(165deg,rgba(250,251,254,.98),rgba(240,243,250,.99));
             border-radius:16px; padding:22px 22px 18px; color:#2f3550;
-            box-shadow:0 18px 50px rgba(40,52,110,.30), inset 0 0 0 1px rgba(255,255,255,.6), inset 0 1px 0 rgba(255,255,255,.85);
+            /* [lc-1161] 去掉卡片外部投影(用户要求): 只留内外描边高光。透明窗口下外阴影
+               会糊在桌面内容上显脏, 且本弹窗是 alwaysOnTop 的独立小窗, 不需要靠投影拉开层次。 */
+            box-shadow:inset 0 0 0 1px rgba(255,255,255,.6), inset 0 1px 0 rgba(255,255,255,.85);
             animation:fntv-ad-in .18s cubic-bezier(.22,.61,.36,1) both; }
         @keyframes fntv-ad-in { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }
         .head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
@@ -123,9 +126,10 @@ export function buildAppDialogHtml(opts: AppDialogOptions, id: string): string {
             <div class="foot">${btns}</div>
         </div>
         <script>
-            const { ipcRenderer } = require('electron');
+            // [lc-1161] 走 preload 暴露的 window.fntvDialog(不再是 require('electron'))
+            const api = window.fntvDialog;
             const buttons = document.querySelectorAll('button[data-index]');
-            const send = (i) => { try { ipcRenderer.send('fntv-app-dialog:result', '${id}', i); } catch (e) {} };
+            const send = (i) => { try { api.result('${id}', i); } catch (e) {} };
             buttons.forEach((b) => b.addEventListener('click', () => send(Number(b.dataset.index))));
             // [lc-1159] 本窗口 frame:false 没有系统关闭钮, 且 alwaysOnTop+skipTaskbar 让任务栏
             // 也找不到它 → 补一个显式「✕」入口, 语义等同 Esc / cancelId。
@@ -140,7 +144,7 @@ export function buildAppDialogHtml(opts: AppDialogOptions, id: string): string {
             new ResizeObserver(() => {
                 try {
                     const h = Math.ceil(document.querySelector('.card').getBoundingClientRect().height) + 28;
-                    ipcRenderer.send('fntv-app-dialog:fit', '${id}', h);
+                    api.fit('${id}', h);
                 } catch (e) {}
             }).observe(document.querySelector('.card'));
         </script>
@@ -193,7 +197,11 @@ export function appDialog(opts: AppDialogOptions): Promise<number> {
             height: estimateHeight(opts),
             useContentSize: true,
             frame: false,
-            transparent: true,
+            // [lc-1161] transparent 关掉! Windows 上 transparent+frameless 的窗口存在输入异常:
+            //   实测「点击命中测试通过(WindowFromPoint 返回本窗口渲染层)但页面收到 0 个鼠标事件」,
+            //   三个按钮/✕ 全部点不动。改为不透明窗口 + 页面铺同色系底(见下方 html background),
+            //   视觉上仍是一张卡片(卡片外那圈只是同色留白, 正好也满足"去掉弹窗阴影"的要求)。
+            transparent: false,
             resizable: false,
             minimizable: false,
             maximizable: false,
@@ -202,16 +210,21 @@ export function appDialog(opts: AppDialogOptions): Promise<number> {
             skipTaskbar: true,
             show: false,
             center: true,
-            backgroundColor: '#00000000',
+            backgroundColor: '#eef1f7',
             // [lc-1158] closable=true: Win11 任务栏悬停/Alt+F4 走原生关闭路径 → 'close' 事件
             // (frameless 下系统关不掉无框窗? 实测 closable 仍允许任务管理器之外的常规关闭消息到达)
             closable: true,
-            // [lc-1159] sandbox 必须显式关掉！Electron 20+ 渲染进程默认 sandbox=true,
-            // 而沙箱下 nodeIntegration 会被**静默忽略** → 页内脚本的 require('electron')
-            // 直接抛错(被 catch 吞掉), 表现为「两个按钮点了都没反应 + Esc 无效 + 关不掉」。
-            // 本弹窗没有 preload(HTML 即时生成写临时文件), 只能靠 nodeIntegration 回传结果,
-            // 所以这里必须 sandbox:false。(主窗口有 preload, 走的是 preload 通道, 不受影响)
-            webPreferences: { nodeIntegration: true, contextIsolation: false, sandbox: false },
+            // [lc-1161] 改走 preload + contextBridge(官方姿势): sandbox 保持默认开启、
+            // contextIsolation 打开, 页面只能通过白名单 API 回传。
+            // ⚠ 别再退回 nodeIntegration 那条路: Electron 38 上即使 sandbox:false, 页内
+            // require('electron') 拿到的 ipcRenderer 也是空壳 —— 真实点击能正常打到按钮上
+            // (mousedown/mouseup/click 事件都收到了) 却毫无反应, 正是「按钮点不动」的真因。
+            webPreferences: {
+                preload: path.join(__dirname, 'appDialogPreload.js'),
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true,
+            },
         });
         // [lc-1158] 原生 close 拦截 → 按 cancel 兜底 resolve(等效于页面 Esc)。
         // 之前只在 'closed'(窗口已销毁) 兜底, 而 closable=false 时系统根本发不出关闭,
@@ -228,7 +241,18 @@ export function appDialog(opts: AppDialogOptions): Promise<number> {
         });
         fitWindows.set(id, win);
         void win.loadFile(file);
-        win.once('ready-to-show', () => { win.show(); win.focus(); });
+        win.once('ready-to-show', () => {
+            // [lc-1161] 必须把层级提到 'screen-saver'！默认 alwaysOnTop 只是 normal 级,
+            // 盖不住"独占全屏应用 / 其他置顶窗"。那种情况下弹窗**看着在最上面**, 但鼠标点击
+            // 会被上层窗口整层吃掉 —— 实测证据: WindowFromPoint 命中的不是本窗口、
+            // 页面收到 0 个鼠标事件、SetForegroundWindow 也无效(isForegroundNow=False)。
+            // 表现就是「三个按钮怎么点都没反应、✕ 也点不动、只能 Alt+F4」。
+            if (win && !win.isDestroyed()) {
+                win.setAlwaysOnTop(true, 'screen-saver');
+                win.show();
+                win.focus();
+            }
+        });
         // [lc-1158] 超时保险: 120s 无选择自动按 cancelId 关闭(按钮失灵/渲染层挂死也不锁死用户)
         timeoutTimer = setTimeout(() => {
             if (pending.has(id)) {
