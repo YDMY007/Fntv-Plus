@@ -8,6 +8,11 @@ import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewE
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
 import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackfill';
+import { scheduleBangumiBackfill, ensureBangumiFixButton } from './embyWall/detail/bangumiBackfill';
+import { scheduleSeasonsNav, ensureSeasonsNav } from './embyWall/detail/seasonsNav';
+import { scheduleEpListMerge, ensureEpListMerge } from './embyWall/detail/epListMerge';
+import { scheduleCustomScraperButton, ensureCustomScraperButton } from './embyWall/detail/customScraper';
+import { scheduleJavButton, ensureJavButton } from './embyWall/detail/jav';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
@@ -4411,7 +4416,337 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         }
     });
 
-    // ===== 分组: 关于（独立标签页；原侧栏"关于"按钮迁入设置面板）=====
+    // ===== 分组: 自定义刮削 =====
+    // [自定义刮削] 移植自 Web 版 fpk（交接报告 §2.3）：自定义刮削源回填 + Jav 番号刮削各一张卡
+    // （用户要求分卡），扩展数据源四卡随后。渲染端 detail/customScraper.ts + detail/jav.ts；
+    // 后端通道 main/handlers/plugins/extScraper.ts。
+    const secMetaScrape = section('自定义刮削源');
+    const secBodyMeta = secMetaScrape.body;
+    secBodyMeta.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;gap:2px;';
+
+    // 🚧 功能开发中横幅（用户要求置顶）：以下各卡已按 fpk v1.10.2 七卡口径接入，但整体仍处
+    // 验证期——自定义刮削服务协议已定但官方多源聚合未就绪，先明示「未正式生效」防误判为成品。
+    const metaWip = document.createElement('div');
+    metaWip.style.cssText = 'display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:9px 12px;border-radius:10px;'
+      + 'background:rgba(255,180,60,.10);border:1px solid rgba(255,180,60,.35);';
+    const metaWipIcon = document.createElement('span');
+    metaWipIcon.textContent = '🚧';
+    metaWipIcon.style.cssText = 'font-size:14px;flex-shrink:0;';
+    const metaWipText = document.createElement('div');
+    metaWipText.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fnos-ui-text);flex:1 1 auto;';
+    metaWipText.innerHTML = t('<b>功能开发中，未正式生效</b> —— 以下选项为预览，可能随版本调整：'
+      + '各卡当前可正常配置并使用（季页「⟳ 自定义刮削」/「⟳ 补全集信息」/电影页「⟳ jav 刮削」），'
+      + '多源聚合与批量刮削任务开发中，敬请期待。');
+    const metaWipBadge = document.createElement('span');
+    metaWipBadge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;align-self:flex-start;flex-shrink:0;'
+      + 'padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;'
+      + 'background:rgba(255,180,60,.14);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.4);';
+    metaWipBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t('未正式生效');
+    metaWip.appendChild(metaWipIcon);
+    metaWip.appendChild(metaWipText);
+    metaWip.appendChild(metaWipBadge);
+    secBodyMeta.appendChild(metaWip);
+
+    // ── 自定义刮削源卡 ──
+    const csHint = document.createElement('div');
+    csHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
+    csHint.innerHTML = t('把季标题/季号/TMDB 等锚点发给<b>你自建的刮削服务</b>，用返回的分集标题/简介回填飞牛'
+      + '（只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文；写回带字段锁）。'
+      + '<br/>请求由桌面端代理发出，服务无需配置 CORS。');
+    secBodyMeta.appendChild(csHint);
+
+    const csEnableRow = document.createElement('div');
+    csEnableRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    csEnableRow.onmouseenter = () => { csEnableRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    csEnableRow.onmouseleave = () => { csEnableRow.style.background = 'transparent'; };
+    const csEnableLabel = document.createElement('span');
+    csEnableLabel.textContent = t('启用自定义刮削源');
+    csEnableLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swCustomScraper = document.createElement('input');
+    swCustomScraper.type = 'checkbox';
+    swCustomScraper.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    csEnableRow.appendChild(csEnableLabel); csEnableRow.appendChild(swCustomScraper);
+    secBodyMeta.appendChild(csEnableRow);
+    swCustomScraper.addEventListener('change', () => {
+      S.customScraperEnabled = swCustomScraper.checked;
+      ipcRenderer.invoke('settings:set-custom-scraper-enabled', swCustomScraper.checked)
+        .then(() => scheduleCustomScraperButton())
+        .catch((err) => log('set-custom-scraper-enabled failed', err));
+    });
+
+    const csUrlInput = document.createElement('input');
+    csUrlInput.type = 'text';
+    csUrlInput.placeholder = t('https://your-scraper.example.com/api/episodes');
+    csUrlInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;margin-top:6px;';
+    secBodyMeta.appendChild(csUrlInput);
+
+    const csBtnRow = document.createElement('div');
+    csBtnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const csSaveBtn = mkBtn('保存', true);
+    const csClearBtn = mkBtn('清除', true);
+    csBtnRow.appendChild(csSaveBtn); csBtnRow.appendChild(csClearBtn);
+    secBodyMeta.appendChild(csBtnRow);
+
+    const csStatus = document.createElement('div');
+    csStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    secBodyMeta.appendChild(csStatus);
+
+    const saveCsUrl = (url: string): void => {
+      const v = url.trim();
+      if (v && !/^https?:\/\//i.test(v)) {
+        csStatus.textContent = '地址必须以 http:// 或 https:// 开头';
+        csStatus.style.color = 'var(--fnos-ui-warn,#b06a3a)';
+        return;
+      }
+      ipcRenderer.invoke('settings:set-custom-scraper-url', v).then(() => {
+        S.customScraperUrl = v;
+        csUrlInput.value = v;
+        csStatus.textContent = v ? '已保存地址' : '已清除地址';
+        csStatus.style.color = 'var(--fnos-ui-ok)';
+      }).catch((err) => log('set-custom-scraper-url failed', err));
+    };
+    csSaveBtn.addEventListener('click', () => saveCsUrl(csUrlInput.value));
+    csClearBtn.addEventListener('click', () => { csUrlInput.value = ''; saveCsUrl(''); });
+
+    const csFoot = document.createElement('div');
+    csFoot.style.cssText = 'font-size:10.5px;line-height:1.6;color:var(--fnos-ui-muted);margin-top:8px;padding:0 6px;';
+    csFoot.textContent = t('协议：POST {title, season, tmdbId, trimId, imdbId, doubanId, guid, episodes:[{index,guid}]}, '
+      + '响应 {episodes:[{index, title?, overview?}]}（title/overview 缺省=不动该字段）。');
+    secBodyMeta.appendChild(csFoot);
+
+    // ── Jav 番号刮削卡（独立卡；默认关；仅电影详情页出现浮动按钮）──
+    const secJav = section('Jav 刮削');
+    const javBody = secJav.body;
+    javBody.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;gap:2px;';
+    const javHint = document.createElement('div');
+    javHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
+    javHint.innerHTML = t('<b>Jav 番号刮削</b>（个人库整理，默认关）：从文件名番号在 javbus 查询并回填标题（带字段锁），'
+      + '封面就地替换 hero 海报（仅本地视觉，不写服务端）。网络走「自定义代理 > 系统直连」，国内直连不通时请先配代理或填镜像域名。');
+    javBody.appendChild(javHint);
+
+    const javEnableRow = document.createElement('div');
+    javEnableRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    javEnableRow.onmouseenter = () => { javEnableRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    javEnableRow.onmouseleave = () => { javEnableRow.style.background = 'transparent'; };
+    const javEnableLabel = document.createElement('span');
+    javEnableLabel.textContent = t('启用 Jav 刮削');
+    javEnableLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swJav = document.createElement('input');
+    swJav.type = 'checkbox';
+    swJav.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    javEnableRow.appendChild(javEnableLabel); javEnableRow.appendChild(swJav);
+    javBody.appendChild(javEnableRow);
+    swJav.addEventListener('change', () => {
+      S.javEnabled = swJav.checked;
+      ipcRenderer.invoke('settings:set-jav-enabled', swJav.checked)
+        .then(() => scheduleJavButton())
+        .catch((err) => log('set-jav-enabled failed', err));
+    });
+
+    const javDomainInput = document.createElement('input');
+    javDomainInput.type = 'text';
+    javDomainInput.placeholder = t('www.javbus.com（可填镜像域名，留空用默认）');
+    javDomainInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;margin-top:6px;';
+    javBody.appendChild(javDomainInput);
+
+    const javBtnRow = document.createElement('div');
+    javBtnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+    const javSaveBtn = mkBtn('保存', true);
+    const javClearBtn = mkBtn('清除', true);
+    javBtnRow.appendChild(javSaveBtn); javBtnRow.appendChild(javClearBtn);
+    javBody.appendChild(javBtnRow);
+
+    const javStatus = document.createElement('div');
+    javStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+    javBody.appendChild(javStatus);
+
+    const saveJavDomain = (domain: string): void => {
+      const v = domain.trim();
+      ipcRenderer.invoke('settings:set-jav-bus-domain', v).then(() => {
+        javDomainInput.value = v;
+        javStatus.textContent = v ? '已保存域名' : '已清除域名（回退默认 www.javbus.com）';
+        javStatus.style.color = 'var(--fnos-ui-ok)';
+      }).catch((err) => log('set-jav-bus-domain failed', err));
+    };
+    javSaveBtn.addEventListener('click', () => saveJavDomain(javDomainInput.value));
+    javClearBtn.addEventListener('click', () => { javDomainInput.value = ''; saveJavDomain(''); });
+
+    // ── 扩展数据源四卡（fpk v1.10.0 同款：Fanart.tv / TVMaze / OMDb / MAL，与官方/授权 API 通信）──
+    // 每渠道一张独立卡（桌面版 Bangumi/TMDB 卡同规格）；key 输入用掩码语义（防误清空真实 key）。
+    const maskExt = (v: string): string => '*'.repeat(Math.max(0, v.length));
+    const extInputCss = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
+      + 'padding:6px 8px;box-sizing:border-box;';
+    const mkExtDesc = (body: HTMLElement, text: string): void => {
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
+      d.textContent = t(text);
+      body.appendChild(d);
+    };
+    const mkExtToggle = (body: HTMLElement, label: string): HTMLInputElement => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 4px;cursor:pointer;border-radius:6px;margin-bottom:6px;';
+      const sp = document.createElement('span');
+      sp.textContent = t(label);
+      sp.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+      const sw = document.createElement('input');
+      sw.type = 'checkbox';
+      sw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+      row.appendChild(sp); row.appendChild(sw);
+      body.appendChild(row);
+      return sw;
+    };
+    // 掩码 key 输入（TMDB/Bangumi 卡同款语义）：已存值掩码只读，聚焦清空进入编辑，
+    // 失焦空值恢复掩码 —— 防误清空真实 key。
+    const mkMaskedKey = (body: HTMLElement, placeholder: string, holder: { v: string }): HTMLInputElement => {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = t(placeholder);
+      inp.style.cssText = extInputCss + 'margin-bottom:6px;';
+      body.appendChild(inp);
+      inp.addEventListener('focus', () => {
+        if (inp.readOnly) { inp.readOnly = false; inp.value = ''; }
+      });
+      inp.addEventListener('blur', () => {
+        if (inp.value.trim() === '' && holder.v) {
+          inp.value = maskExt(holder.v);
+          inp.readOnly = true;
+        }
+      });
+      return inp;
+    };
+    const mkExtLink = (body: HTMLElement, label: string, url: string): void => {
+      const a = document.createElement('a');
+      a.textContent = t(label);
+      a.href = url;
+      a.style.cssText = 'color:var(--fnos-ui-sec);text-decoration:underline;cursor:pointer;font-size:10.5px;';
+      a.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); ipcRenderer.invoke('settings:open-external', url).catch(() => {}); });
+      body.appendChild(a);
+    };
+    const mkExtBtnRow = (body: HTMLElement): { save: HTMLButtonElement; clear: HTMLButtonElement; status: HTMLDivElement } => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+      const save = mkBtn('保存', true);
+      const clear = mkBtn('清除', true);
+      row.appendChild(save); row.appendChild(clear);
+      body.appendChild(row);
+      const status = document.createElement('div');
+      status.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
+      body.appendChild(status);
+      return { save, clear, status };
+    };
+    // key 卡保存/清除（掩码语义：掩码态保存已存真实值；编辑态空值=保留已存，防误清空）
+    const wireExtKeyCard = (
+      fields: { input: HTMLInputElement; holder: { v: string }; settingsKey: string }[],
+      btns: { save: HTMLButtonElement; clear: HTMLButtonElement; status: HTMLDivElement },
+      savedText: string,
+    ): void => {
+      btns.save.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        try {
+          const resolved: string[] = [];
+          for (const f of fields) {
+            const key = f.input.readOnly ? f.holder.v : (f.input.value.trim() || f.holder.v);
+            resolved.push(key);
+            await ipcRenderer.invoke('settings:set-' + f.settingsKey, key);
+          }
+          fields.forEach((f, i) => {
+            f.holder.v = resolved[i];
+            if (resolved[i]) { f.input.value = maskExt(resolved[i]); f.input.readOnly = true; }
+            else { f.input.value = ''; f.input.readOnly = false; }
+          });
+          btns.status.textContent = t(savedText);
+          btns.status.style.color = 'var(--fnos-ui-ok)';
+        } catch {
+          btns.status.textContent = t('保存失败');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        }
+        window.setTimeout(() => { btns.status.textContent = ''; }, 4000);
+      });
+      btns.clear.addEventListener('click', async (e: Event) => {
+        e.stopPropagation();
+        try {
+          for (const f of fields) {
+            f.input.value = '';
+            f.input.readOnly = false;
+            f.holder.v = '';
+            await ipcRenderer.invoke('settings:set-' + f.settingsKey, '');
+          }
+          btns.status.textContent = t('已清除');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        } catch {
+          btns.status.textContent = t('清除失败');
+          btns.status.style.color = 'var(--fnos-ui-warn)';
+        }
+        window.setTimeout(() => { btns.status.textContent = ''; }, 4000);
+      });
+    };
+
+    // ① Fanart.tv —— 高清透明 Logo 兜底（电影按 TMDB id；剧自动换算 TVDB id；个人 client_key 可选）
+    const secFanart = section('Fanart.tv 高清 Logo');
+    const faBody = secFanart.body;
+    mkExtDesc(faBody, 'TMDB 无可用透明 Logo 时（无候选/全纯白）自动兜底 Fanart.tv 官方高清 Logo，用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id。');
+    const faToggle = mkExtToggle(faBody, '启用 Fanart.tv 高清 Logo 兜底');
+    faToggle.addEventListener('change', () => {
+      S.fanartEnabled = faToggle.checked;
+      ipcRenderer.invoke('settings:set-fanart-enabled', faToggle.checked).catch(() => {});
+    });
+    const faReal = { v: '' };
+    const faClientReal = { v: '' };
+    const faKey = mkMaskedKey(faBody, 'Fanart.tv api_key（项目 key，必填）', faReal);
+    const faClientKey = mkMaskedKey(faBody, 'Fanart.tv client_key（个人 key，可选，新图延迟更短）', faClientReal);
+    const faBtns = mkExtBtnRow(faBody);
+    wireExtKeyCard([
+      { input: faKey, holder: faReal, settingsKey: 'fanart-api-key' },
+      { input: faClientKey, holder: faClientReal, settingsKey: 'fanart-client-key' },
+    ], faBtns, '已保存 Fanart.tv Key');
+    mkExtLink(faBody, 'fanart.tv 免费领取 api_key →', 'https://fanart.tv/get-an-api-key/');
+
+    // ② TVMaze —— 分集英文兜底（免 Key；「补全集信息」用）
+    const secTvmaze = section('TVMaze 分集兜底');
+    const tvBody = secTvmaze.body;
+    mkExtDesc(tvBody, '「补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。完全免费、无需任何 Key、国内可直连；查询失败自动回退纯 TMDB。');
+    const tvToggle = mkExtToggle(tvBody, '启用 TVMaze 英文分集兜底');
+    tvToggle.addEventListener('change', () => {
+      S.tvmazeEnabled = tvToggle.checked;
+      ipcRenderer.invoke('settings:set-tvmaze-enabled', tvToggle.checked).catch(() => {});
+    });
+
+    // ③ OMDb —— IMDb 评分（详情卡）
+    const secOmdb = section('OMDb IMDb 评分');
+    const omBody = secOmdb.body;
+    mkExtDesc(omBody, '剧集详情卡补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。');
+    const omToggle = mkExtToggle(omBody, '启用 OMDb IMDb 评分');
+    omToggle.addEventListener('change', () => {
+      S.omdbEnabled = omToggle.checked;
+      ipcRenderer.invoke('settings:set-omdb-enabled', omToggle.checked).catch(() => {});
+    });
+    const omReal = { v: '' };
+    const omKey = mkMaskedKey(omBody, 'OMDb API Key（邮箱免费领取，1000 次/天）', omReal);
+    const omBtns = mkExtBtnRow(omBody);
+    wireExtKeyCard([{ input: omKey, holder: omReal, settingsKey: 'omdb-api-key' }], omBtns, '已保存 OMDb API Key');
+    mkExtLink(omBody, 'omdbapi.com 免费领取 API Key →', 'https://www.omdbapi.com/apikey.aspx');
+
+    // ④ MyAnimeList 官方 —— 动漫跳片头映射链首选（无需登录，注册应用得 Client ID）
+    const secMal = section('MyAnimeList 官方');
+    const malBody = secMal.body;
+    mkExtDesc(malBody, '动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API；未配置时自动回退非官方 Jikan/AniList。在 myanimelist.net/apiconfig 注册应用即得 Client ID，无需登录授权。');
+    const malReal = { v: '' };
+    const malKey = mkMaskedKey(malBody, 'MAL Client ID（可选，注册即用）', malReal);
+    const malBtns = mkExtBtnRow(malBody);
+    wireExtKeyCard([{ input: malKey, holder: malReal, settingsKey: 'mal-client-id' }], malBtns, '已保存 MAL Client ID');
+    mkExtLink(malBody, 'myanimelist.net 注册 Client ID →', 'https://myanimelist.net/apiconfig');
+
+    const metaFoot = document.createElement('div');
+    metaFoot.style.cssText = 'font-size:11px;line-height:1.6;color:var(--fnos-ui-muted);margin-top:4px;padding:0 6px;';
+    metaFoot.textContent = t('数据获取仅使用本应用已登录的飞牛影视网页会话, 不要求任何高权限; 回填走飞牛官方编辑接口, 电视端/其他设备同步可见。');
+    secBodyMeta.appendChild(metaFoot);    // ===== 分组: 关于（独立标签页；原侧栏"关于"按钮迁入设置面板）=====
     const secAbout = section();
     const secBodyAbout = secAbout.body;
     secBodyAbout.style.cssText = 'padding:18px 16px;flex:1 1 auto;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;';
@@ -4744,6 +5079,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
       { id: 'danmaku', label: '弹幕', els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
+      { id: 'metascrape', label: '自定义刮削', els: [secMetaScrape.el, secJav.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el] }, // [自定义刮削] 源卡+Jav 卡+扩展四源卡
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
       { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
@@ -5248,6 +5584,42 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         // Bangumi 同步开关 + 阈值回填
         swBangumiSync.checked = !!s.bangumiSyncEnabled;
         bangumiThresholdInput.value = String(s.bangumiSyncThreshold || 80);
+      });
+      seg('custom-scraper', () => {
+        // [自定义刮削] 开关/地址回填 + 运行时 S 同步（按钮挂载读 S）
+        S.customScraperEnabled = !!s.customScraperEnabled;
+        S.customScraperUrl = String(s.customScraperUrl || '');
+        swCustomScraper.checked = S.customScraperEnabled;
+        csUrlInput.value = S.customScraperUrl;
+        csStatus.textContent = S.customScraperEnabled
+          ? (S.customScraperUrl ? '已启用，地址已保存' : '已启用（未填地址）')
+          : '未启用';
+        csStatus.style.color = 'var(--fnos-ui-sub)';
+      });
+      seg('jav', () => {
+        // [自定义刮削] Jav 卡回填 + S 同步
+        S.javEnabled = !!s.javEnabled;
+        swJav.checked = S.javEnabled;
+        javDomainInput.value = String(s.javBusDomain || '');
+      });
+      seg('ext-sources', () => {
+        // [自定义刮削] 扩展数据源四卡（Fanart.tv / TVMaze / OMDb / MAL）：开关 + 掩码 key 回填
+        S.fanartEnabled = s.fanartEnabled === true;
+        S.tvmazeEnabled = s.tvmazeEnabled === true;
+        S.omdbEnabled = s.omdbEnabled === true;
+        faToggle.checked = S.fanartEnabled;
+        tvToggle.checked = S.tvmazeEnabled;
+        omToggle.checked = S.omdbEnabled;
+        const fillKey = (inp: HTMLInputElement, holder: { v: string }, raw: any): void => {
+          const v = String(raw || '');
+          holder.v = v;
+          if (v) { inp.value = maskExt(v); inp.readOnly = true; }
+          else { inp.value = ''; inp.readOnly = false; }
+        };
+        fillKey(faKey, faReal, s.fanartApiKey);
+        fillKey(faClientKey, faClientReal, s.fanartClientKey);
+        fillKey(omKey, omReal, s.omdbApiKey);
+        fillKey(malKey, malReal, s.malClientId);
       });
       seg('tmdb', () => {
         // TMDB Key 回填（已保存则显示星号掩码，不显示明文）
@@ -6106,6 +6478,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       runPageTransition(isDetailPage()); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
       scheduleEpBackfill(); // [lc-1045] 季页「选集」TMDB 回填按钮：非季页自撤
+      scheduleEpListMerge(); // [lc-1147] 季页选集全量显示(分页+虚拟窗口根治)：非季页自撤
+      scheduleBangumiBackfill(); // [多源刮削] 季页「Bangumi 补全」按钮：非季页自撤
+      scheduleSeasonsNav(); // [多源刮削] 剧集一级页季行翻页箭头：非一级页自撤
+      scheduleCustomScraperButton(); // [自定义刮削] 季页「⟳ 自定义刮削」按钮：非季页自撤
+      scheduleJavButton(); // [自定义刮削] 电影页「⟳ jav 刮削」浮动按钮：非电影页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -6120,6 +6497,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       runPageTransition(isDetailPage()); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 同 pushState
       scheduleEpBackfill(); // [lc-1045] 同 pushState
+      scheduleEpListMerge(); // [lc-1147] 同 pushState
+      scheduleBangumiBackfill(); // [多源刮削] 同 pushState
+      scheduleSeasonsNav(); // [多源刮削] 同 pushState
+      scheduleCustomScraperButton(); // [自定义刮削] 同 pushState
+      scheduleJavButton(); // [自定义刮削] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -6131,6 +6513,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
       applyDetailBeautify(); // [lc-980] 前进/后退到详情页也套美化；退回首页则 teardown
       scheduleEpBackfill(); // [lc-1045] 同 popstate
+      scheduleEpListMerge(); // [lc-1147] 同 popstate
+      scheduleBangumiBackfill(); // [多源刮削] 同 popstate
+      scheduleSeasonsNav(); // [多源刮削] 同 popstate
+      scheduleCustomScraperButton(); // [自定义刮削] 同 popstate
+      scheduleJavButton(); // [自定义刮削] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
@@ -6143,15 +6530,20 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     backfillDetailLogo();
     applyDetailBeautify();
     scheduleEpBackfill(); // [lc-1045] 初始/深链直达季页也挂「选集」回填按钮
+    scheduleEpListMerge(); // [lc-1147] 初始/深链直达季页也合并选集全量列表
+    scheduleBangumiBackfill(); // [多源刮削] 初始/深链直达季页也挂「Bangumi 补全」按钮
+    scheduleSeasonsNav(); // [多源刮削] 剧集一级页季行箭头亦同
+    scheduleCustomScraperButton(); // [自定义刮削] 初始/深链直达季页亦同
+    scheduleJavButton(); // [自定义刮削] 初始/深链直达电影页亦同
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); }, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleEpListMerge(); scheduleCustomScraperButton(); scheduleJavButton(); scheduleBangumiBackfill(); scheduleSeasonsNav(); }, ms));
   }
   // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); }
+      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureEpListMerge(false); ensureCustomScraperButton(); ensureJavButton(); ensureBangumiFixButton(); ensureSeasonsNav(); }
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });

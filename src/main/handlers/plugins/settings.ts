@@ -74,7 +74,20 @@ async function handleGetSettings(): Promise<any> {
         biliDanmakuBlacklist: fnConfig.getBiliDanmakuBlacklist(),
         biliDanmakuBlockTypes: fnConfig.getBiliDanmakuBlockTypes(),
         // 防御性兜底：若某次构建 dest 与 src 不同步导致该函数缺失，绝不能让登录页 preload 抛错白屏
-        loginBg: (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : ''
+        loginBg: (typeof (fnConfig as any).getLoginBgPath === 'function') ? ((fnConfig as any).getLoginBgPath() || '') : '',
+        // ===== [自定义刮削] 与 Web 版 config 键名对齐（fpk 交接报告 §4/§5）=====
+        customScraperEnabled: fnConfig.getCustomScraperEnabled(),
+        customScraperUrl: fnConfig.getCustomScraperUrl(),
+        javEnabled: fnConfig.getJavEnabled(),
+        javBusDomain: fnConfig.getJavBusDomain(),
+        // 扩展数据源四键（Fanart.tv / TVMaze / OMDb / MAL）
+        fanartEnabled: fnConfig.getFanartEnabled(),
+        fanartApiKey: fnConfig.getFanartApiKey(),
+        fanartClientKey: fnConfig.getFanartClientKey(),
+        tvmazeEnabled: fnConfig.getTvmazeEnabled(),
+        omdbEnabled: fnConfig.getOmdbEnabled(),
+        omdbApiKey: fnConfig.getOmdbApiKey(),
+        malClientId: fnConfig.getMalClientId()
     };
 }
 
@@ -126,6 +139,66 @@ async function handleSetWheelHScroll(_event: any, enabled: boolean): Promise<voi
 async function handleSetCarouselLogoEnabled(_event: any, enabled: boolean): Promise<void> {
     fnConfig.setCarouselLogoEnabled(!!enabled);
     log.info('轮播图标题替换为 Logo 开关 →', !!enabled);
+}
+
+// ===== [自定义刮削] 自定义刮削源回填 + Jav 番号刮削（与 Web 版 IPC 通道名逐字一致，
+//   customScraper.ts/jav.ts 直连这些通道；键名走 config.json 平铺，与 fpk 对齐）=====
+
+async function handleSetCustomScraperEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setCustomScraperEnabled(!!enabled);
+    log.info('[自定义刮削] enabled=' + (!!enabled));
+}
+
+async function handleSetCustomScraperUrl(_event: any, url: string): Promise<void> {
+    fnConfig.setCustomScraperUrl(String(url || ''));
+    log.info('[自定义刮削] url 已更新');
+}
+
+async function handleSetJavEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setJavEnabled(!!enabled);
+    log.info('[Jav 刮削] enabled=' + (!!enabled));
+}
+
+async function handleSetJavBusDomain(_event: any, domain: string): Promise<void> {
+    fnConfig.setJavBusDomain(String(domain || ''));
+    log.info('[Jav 刮削] javbus 域名已更新');
+}
+
+// ===== [自定义刮削] 扩展数据源四键写入通道 =====
+
+async function handleSetFanartEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setFanartEnabled(!!enabled);
+    log.info('[Fanart.tv] enabled=' + (!!enabled));
+}
+
+async function handleSetFanartApiKey(_event: any, key: string): Promise<void> {
+    fnConfig.setFanartApiKey(String(key || ''));
+    log.info('[Fanart.tv] api_key 已更新');
+}
+
+async function handleSetFanartClientKey(_event: any, key: string): Promise<void> {
+    fnConfig.setFanartClientKey(String(key || ''));
+    log.info('[Fanart.tv] client_key 已更新');
+}
+
+async function handleSetTvmazeEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setTvmazeEnabled(!!enabled);
+    log.info('[TVMaze] enabled=' + (!!enabled));
+}
+
+async function handleSetOmdbEnabled(_event: any, enabled: boolean): Promise<void> {
+    fnConfig.setOmdbEnabled(!!enabled);
+    log.info('[OMDb] enabled=' + (!!enabled));
+}
+
+async function handleSetOmdbApiKey(_event: any, key: string): Promise<void> {
+    fnConfig.setOmdbApiKey(String(key || ''));
+    log.info('[OMDb] api_key 已更新');
+}
+
+async function handleSetMalClientId(_event: any, key: string): Promise<void> {
+    fnConfig.setMalClientId(String(key || ''));
+    log.info('[MAL] client_id 已更新');
 }
 
 // 弹出系统文件选择框，选中后写回配置并刷新 media 模块缓存
@@ -867,6 +940,17 @@ function init(): void {
     registerHandler('settings:set-detail-boxless', handleSetDetailBoxless, { useHandle: true });
     registerHandler('settings:set-wheel-hscroll', handleSetWheelHScroll, { useHandle: true });
     registerHandler('settings:set-carousel-logo', handleSetCarouselLogoEnabled, { useHandle: true });
+    registerHandler('settings:set-custom-scraper-enabled', handleSetCustomScraperEnabled, { useHandle: true });
+    registerHandler('settings:set-custom-scraper-url', handleSetCustomScraperUrl, { useHandle: true });
+    registerHandler('settings:set-jav-enabled', handleSetJavEnabled, { useHandle: true });
+    registerHandler('settings:set-jav-bus-domain', handleSetJavBusDomain, { useHandle: true });
+    registerHandler('settings:set-fanart-enabled', handleSetFanartEnabled, { useHandle: true });
+    registerHandler('settings:set-fanart-api-key', handleSetFanartApiKey, { useHandle: true });
+    registerHandler('settings:set-fanart-client-key', handleSetFanartClientKey, { useHandle: true });
+    registerHandler('settings:set-tvmaze-enabled', handleSetTvmazeEnabled, { useHandle: true });
+    registerHandler('settings:set-omdb-enabled', handleSetOmdbEnabled, { useHandle: true });
+    registerHandler('settings:set-omdb-api-key', handleSetOmdbApiKey, { useHandle: true });
+    registerHandler('settings:set-mal-client-id', handleSetMalClientId, { useHandle: true });
     registerHandler('settings:open-external', handleOpenExternal, { useHandle: true });
     // 渲染进程(EmbyWall 墙)主动索取当前调试过滤 → 回传，使其渲染侧日志开关即时生效
     registerHandler('debug-filter-request', (event: any) => {
