@@ -84,9 +84,8 @@ function syncHeatHost(force = false): void {
     const now = performance.now();
     if (!force && now - _lastHostCheck < 250) return;
     _lastHostCheck = now;
-    // 画布若挂在已销毁的旧全屏层里，parentElement 还指向游离节点 → 判定必然不等 → 重挂自愈
-    const host = fullscreenHost(document.querySelector('video') as HTMLVideoElement | null)
-        || document.body;
+    // 画布若挂在已销毁的旧全屏容器里，parentElement 还指向游离节点 → 判定必然不等 → 重挂自愈
+    const host = fullscreenHost() || document.body;
     if (heatCanvas.parentElement !== host) host.appendChild(heatCanvas);
 }
 
