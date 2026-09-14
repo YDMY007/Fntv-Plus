@@ -435,6 +435,136 @@ export async function fetchEpisodeDescs(tvTitle: string, totalEps: number): Prom
     }
 }
 
+// ---- 条目级元数据（[多源刮削] 季页「自定义刮削」按钮的数据源，三段式拉取） ----
+// 拆成 搜索/条目信息/分集 三步的原因：渲染端按钮要「实时显示刮削状态」——单条 IPC 一把梭时,
+// Bangumi 慢响应会让按钮干等十几秒(用户日志实证 12s 超时, 且期间毫无反馈被误以为刮削串台)。
+// 每步独立 IPC + 独立内存缓存；单次请求 15s 超时、自动重试 1 次；两步齐了合并持久化到盘上。
+export interface BgEpFull { ep: number; nameCn: string; name: string; desc: string; airdate: string; }
+export interface BgSubjectDetail {
+    subjectId: number;
+    nameCn: string;
+    name: string;
+    summary: string;
+    rating: number;
+}
+let _metaCacheFile = '';
+const _metaCache: Record<string, any> = {}; // 合并持久化快照(subjectId → 全量)，供「先本地后网络」
+const _metaDetailCache = new Map<number, BgSubjectDetail>();
+const _metaEpsCache = new Map<number, BgEpFull[]>();
+let _metaSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function loadMetaCache(): void {
+    try { _metaCacheFile = path.join(app.getPath('userData'), 'bangumi_subject_meta.json'); } catch (e) { return; }
+    try {
+        if (fs.existsSync(_metaCacheFile)) {
+            const obj = JSON.parse(fs.readFileSync(_metaCacheFile, 'utf-8')) || {};
+            Object.assign(_metaCache, obj);
+            for (const [k, v] of Object.entries(obj)) {
+                const sid = Number(k);
+                const m = v as any;
+                if (!sid || !m || !Array.isArray(m.eps)) continue;
+                _metaDetailCache.set(sid, {
+                    subjectId: sid, nameCn: m.nameCn || '', name: m.name || '',
+                    summary: m.summary || '', rating: m.rating || 0,
+                });
+                _metaEpsCache.set(sid, m.eps);
+            }
+        }
+    } catch (e) { /* 首次运行或文件损坏 */ }
+}
+
+function scheduleMetaSave(): void {
+    if (_metaSaveTimer || !_metaCacheFile) return;
+    _metaSaveTimer = setTimeout(() => {
+        _metaSaveTimer = null;
+        try {
+            const obj: Record<string, any> = {};
+            for (const [sid, d] of _metaDetailCache) {
+                const eps = _metaEpsCache.get(sid);
+                if (eps) obj[String(sid)] = { ...d, eps };
+            }
+            fs.writeFileSync(_metaCacheFile, JSON.stringify(obj));
+        } catch (e) {}
+    }, 2000);
+}
+
+/** 错误归类（给渲染端转成中性按钮文案用；原始细节进日志） */
+function metaErr(e: any): string {
+    return String((e && e.message) || e);
+}
+function metaErrKind(e: any): string {
+    return /timeout/i.test(String((e && e.message) || e)) ? 'timeout' : 'error';
+}
+
+/** GET with 自动重试（单次 15s 超时，失败隔 800ms 重试 1 次——Bangumi 偶发慢响应实测常见） */
+async function bgmGetRetry(path: string, params?: any): Promise<any> {
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            return await http().get(path, { params, timeout: 15000 });
+        } catch (e: any) {
+            lastErr = e;
+            if (attempt === 0) await new Promise((r) => setTimeout(r, 800));
+        }
+    }
+    throw lastErr;
+}
+
+/** ① 按标题匹配条目（复用 searchSubject 的盘上缓存；命中返回 subjectId） */
+export async function searchSubjectId(tvTitle: string, totalEps: number): Promise<{ subjectId: number } | null> {
+    const subjectId = await searchSubject(tvTitle, totalEps);
+    return subjectId ? { subjectId } : null;
+}
+
+/** ② 条目信息（中文名/原名/简介/评分），内存缓存 */
+export async function fetchSubjectDetail(subjectId: number): Promise<BgSubjectDetail> {
+    const hit = _metaDetailCache.get(subjectId);
+    if (hit) return hit;
+    const resp = await bgmGetRetry('/v0/subjects/' + subjectId);
+    const s = resp.data || {};
+    const d: BgSubjectDetail = {
+        subjectId,
+        nameCn: s.name_cn || '',
+        name: s.name || '',
+        summary: s.summary || '',
+        rating: (s.rating && s.rating.score) || 0,
+    };
+    _metaDetailCache.set(subjectId, d);
+    persistMetaIfComplete(subjectId);
+    return d;
+}
+
+/** ③ 分集数据（集号/中文标题/原文标题/简介/播出日期），内存缓存 */
+export async function fetchSubjectEpisodes(subjectId: number): Promise<BgEpFull[]> {
+    const hit = _metaEpsCache.get(subjectId);
+    if (hit) return hit;
+    const resp = await bgmGetRetry('/v0/episodes', { subject_id: subjectId, type: 0, limit: 500 });
+    const rawEps: any[] = (resp.data && resp.data.data) || [];
+    const eps: BgEpFull[] = rawEps
+        .filter((e: any) => Number(e.type) === 0)
+        .map((e: any) => ({
+            ep: Number(e.ep) || Number(e.sort) || 0,
+            nameCn: e.name_cn || '',
+            name: e.name || '',
+            desc: e.desc || '',
+            airdate: e.airdate || '',
+        }))
+        .filter((e: BgEpFull) => e.nameCn || e.name || e.desc)
+        .sort((a, b) => a.ep - b.ep);
+    _metaEpsCache.set(subjectId, eps);
+    persistMetaIfComplete(subjectId);
+    return eps;
+}
+
+/** 条目信息 + 分集都到手后，合并持久化（下次「先本地后网络」） */
+function persistMetaIfComplete(subjectId: number): void {
+    const d = _metaDetailCache.get(subjectId);
+    const eps = _metaEpsCache.get(subjectId);
+    if (!d || !eps || !_metaCacheFile) return;
+    _metaCache[String(subjectId)] = { ...d, eps };
+    scheduleMetaSave();
+}
+
 /**
  * 拉取 Bangumi 每日放送（正在播），供「热门剧更新」浮层使用。
  * - 接口为公开端点，无需鉴权（无 token 也能用）。
@@ -502,9 +632,38 @@ function sumNumeric(obj: any): number {
 export function init(): void {
     loadCache();
     loadDescCache();       // 加载每集简介缓存
+    loadMetaCache();       // [多源刮削] 加载条目级元数据缓存
     // 注册 IPC：供 preload 选集页调用获取 Bangumi 每集简介
     registerHandler('bangumi:episode-descs', async (_e: any, tvTitle: string, totalEps: number) => {
         return fetchEpisodeDescs(tvTitle, totalEps);
+    }, { useHandle: true });
+    // [多源刮削] 三段式 IPC: 匹配(快) → 条目信息 → 分集数据 —— 渲染端逐步刷新按钮状态,
+    //  每步独立超时重试; 错误带 kind(timeout/nomatch/error) 供按钮转成中性提示文案。
+    registerHandler('bangumi:meta-search', async (_e: any, tvTitle: string, totalEps: number) => {
+        try {
+            const r = await searchSubjectId(tvTitle, totalEps);
+            return r ? { ok: true, data: r } : { ok: false, error: '未匹配到条目', kind: 'nomatch' };
+        } catch (e: any) {
+            return { ok: false, error: metaErr(e), kind: metaErrKind(e) };
+        }
+    }, { useHandle: true });
+    registerHandler('bangumi:meta-detail', async (_e: any, subjectId: number) => {
+        try {
+            return { ok: true, data: await fetchSubjectDetail(Number(subjectId)) };
+        } catch (e: any) {
+            log.warn('[多源刮削] 条目信息获取失败 subject ' + subjectId + ':', metaErr(e));
+            return { ok: false, error: metaErr(e), kind: metaErrKind(e) };
+        }
+    }, { useHandle: true });
+    registerHandler('bangumi:meta-episodes', async (_e: any, subjectId: number) => {
+        try {
+            const eps = await fetchSubjectEpisodes(Number(subjectId));
+            if (!eps.length) return { ok: false, error: '该条目无可回填分集数据', kind: 'nomatch' };
+            return { ok: true, data: { eps } };
+        } catch (e: any) {
+            log.warn('[多源刮削] 分集数据获取失败 subject ' + subjectId + ':', metaErr(e));
+            return { ok: false, error: metaErr(e), kind: metaErrKind(e) };
+        }
     }, { useHandle: true });
     // 注册 IPC：供「热门剧更新」浮层拉取 Bangumi 每日放送
     // 每日缓存：24h 内只真正抓一次，其余返回本地磁盘缓存，避免被 Bangumi 限流/封禁
