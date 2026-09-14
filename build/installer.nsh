@@ -812,5 +812,32 @@ FunctionEnd
     StrCpy $R8 "$PLUGINSDIR\$fnosArtDir\installerInstBarDone.bmp"
     Call fnosSwapBmp
   ${EndIf}
+  ; [lc-1157] 段尾明细收尾行(输出已在 customFiles_* 恢复, 见下)
+  DetailPrint "写入注册表与快捷方式完成"
+  DetailPrint "安装完成。"
+!macroend
+
+; ── [lc-1157] 进度页明细列表输出恢复 ──
+; 白框真因: 进度页的玻璃面板里坐的是 NSIS 明细列表 Log 控件(fnosInstFilesShow 已 SW_SHOW +
+; 模拟点「显示细节」翻开输出开关), 但 EB 的 installSection 一开头就
+; `SetDetailsPrint none`(common.nsh 另有 ShowInstDetails nevershow 隐藏原生按钮)——
+; 该指令把之后所有 File/DetailPrint 的明细输出全部静默, Log 恒空 → 面板一片白。
+; 我们在 SHOW 钩子里无法对抗它: SHOW 先于 Section 执行, Section 开头的 none 会把
+; 任何提前恢复压回去; 而 EB 提供的 Section 内注入点只有 customFiles_<arch>
+; (解压 app 包时, 晚于 SetDetailsPrint none)与 customInstall(段尾)。
+; ∴ customFiles_<arch> 里恢复 SetDetailsPrint lastused 并打印阶段行; 为覆盖三种
+; 架构遍, 三分支都声明(EB 按目标架构只编译其一, !ifmacrodef 选择性展开)。
+; 输出语言与画稿一致走中文; 明细字体/配色已由 fnosInstFilesShow 设好。
+!macro customFiles_arm64
+  SetDetailsPrint lastused
+  DetailPrint "应用文件解压完成，正在安装…"
+!macroend
+!macro customFiles_x64
+  SetDetailsPrint lastused
+  DetailPrint "应用文件解压完成，正在安装…"
+!macroend
+!macro customFiles_ia32
+  SetDetailsPrint lastused
+  DetailPrint "应用文件解压完成，正在安装…"
 !macroend
 !endif
