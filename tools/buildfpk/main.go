@@ -63,10 +63,10 @@ func run() error {
 	fmt.Println("==============================================")
 	fmt.Printf("项目根: %s\n\n", root)
 
-	// ---- Step 0: 开发版号 = git commit 数（用户要求：开发包小 v + commit 数）----
+	// ---- Step 0: 开发版号 = max(git commit 数, 历史痕迹最大包号+1)（开发包小 v + 序号，严格递增）----
 	devVer := devCommitVersion()
 	writeVersion(devVer)
-	fmt.Printf("开发版号: %s (git commit 数)\n", devVer)
+	fmt.Printf("开发版号: %s\n", devVer)
 
 	// ---- Step 1: 重建 payload（可选）----
 	syncPayload()
@@ -263,10 +263,14 @@ func findFnpack() (string, error) {
 // 用户诉求两全：测试包要能覆盖已装的正式版（>正式版号），又不能挡住下一个正式版（<下一正式版号）。
 // 纯三段无解 → 四段式：正式版基号(release_version, 默认 1.0.0) + 第四段序号，
 // 如 1.0.0.193：> 1.0.0(可覆盖正式版)；下一正式版 1.0.1 > 1.0.0.193(semver 逐段比较)→可覆盖测试版。
-// 序号取法（[v1.11.x] 改严格递增，用户反馈"打包不会自己加版号"）：
-//   ① git 提交数 > 当前包号 → 用提交数（正常节奏：先提交后打包，版号=提交数）；
-//   ② 否则（无新提交重复打包 / git 不可用）→ 当前包号 +1 —— 重复打包版号也必须前进，
-//     否则飞牛安装器视为同版本拒绝覆盖安装。
+// 序号取法（[v1.11.x] 改严格递增，用户反馈"打包不会自己加版号"）——取三者最大：
+//   ① git 提交数（正常节奏：先提交后打包，版号=提交数）；
+//   ② 历史痕迹里的最大包号 +1：根目录残留的 Fntv-Plus-vN.fpk 包名（*.fpk 不入库，
+//     cleanOldDevPackages 又会删旧包，manifest 版号可能被手工拨回——残留包名是
+//     "已装到 NAS 的最高版"唯一的本地证据，缺了它本地号追不上应用商店已装版
+//     → 覆盖安装被拒，用户报"版号对不上"）；
+//   ③ git 不可用时退化为当前包号 +1。
+//   即 seq = max(提交数, 痕迹最大包号+1)；再与 manifest 第四段比取大，仍严格递增。
 // ⚠ 依赖飞牛安装器支持四段版本号比较——fnpack 无 version 格式校验(实勘仅 CheckAppName/CheckWizard)，
 //   安装侧行为需 NAS 实测；若安装器拒绝四段，回退方案=测试前卸载正式版。
 func devCommitVersion() string {
@@ -277,12 +281,41 @@ func devCommitVersion() string {
 			cur = n
 		}
 	}
+	seq := cur
+	// 痕迹：根目录残留开发包名 Fntv-Plus-v<NNN>.fpk（*.fpk 不入库、旧包会被自动清理，
+	// manifest 版号也可能被手工拨回——残留包名是"本地打包历史最高版"唯一可靠的证据；
+	// 缺了它本地号追不上应用商店已装版 → 覆盖安装被拒，用户报"版号对不上"）。
+	if n, ok := maxHistorySeq(); ok && n > seq {
+		seq = n
+	}
+	seq++ // 无新提交重复打包版号也必须前进（否则安装器视为同版本拒装）
 	if out, err := exec.Command("git", "rev-list", "--count", "HEAD").Output(); err == nil {
-		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > cur {
-			return base + "." + strconv.Itoa(n)
+		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > seq {
+			return base + "." + strconv.Itoa(n) // 提交数更高（正常节奏）→ 版号=提交数
 		}
 	}
-	return base + "." + strconv.Itoa(cur+1)
+	return base + "." + strconv.Itoa(seq)
+}
+
+// maxHistorySeq 扫根目录 Fntv-Plus-v<数字>.fpk（小写 v 开发包），返回最大 N。
+func maxHistorySeq() (int, bool) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return 0, false
+	}
+	re := regexp.MustCompile(`^Fntv-Plus-v(\d+)\.fpk$`)
+	max, ok := 0, false
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if m := re.FindStringSubmatch(e.Name()); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > max {
+				max, ok = n, true
+			}
+		}
+	}
+	return max, ok
 }
 
 // writeVersion 把 version 写回 manifest（开发版流程用；发布版号存 release_version 独立键）。
