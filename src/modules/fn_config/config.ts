@@ -108,6 +108,22 @@ export interface Config {
     // Bangumi 同步阈值百分比（0-100，默认 80）：播放进度达此比例才标记该集看过
     bangumiSyncThreshold?: number;
     mpvBiliSearchEnabled?: boolean;
+    // [自定义刮削] 自定义刮削源回填：开关 + 用户自建刮削服务完整地址(http/https)。
+    // 协议见 fpk 交接报告 §3.1：POST {title,season,tmdbId,...,episodes:[{index,guid}]} →
+    // {episodes:[{index,title?,overview?}]}（与 Web 版字段名对齐）
+    customScraperEnabled?: boolean;
+    customScraperUrl?: string;
+    // [自定义刮削] Jav 番号刮削（默认关）：开关 + javbus 域名（可填镜像；归一化剥 scheme/尾斜杠）
+    javEnabled?: boolean;
+    javBusDomain?: string;
+    // [自定义刮削] 扩展数据源四键（与 Web 版键名对齐；fpk 交接报告 §2.3 七卡）：
+    fanartEnabled?: boolean;      // Fanart.tv 高清 Logo 兜底（轮播标题/详情页 Logo）
+    fanartApiKey?: string;        // 项目 key（必填，fanart.tv 免费领取）
+    fanartClientKey?: string;     // 个人 key（可选，新图延迟更短）
+    tvmazeEnabled?: boolean;      // TVMaze 英文分集兜底（免 Key，「补全集信息」用）
+    omdbEnabled?: boolean;        // OMDb IMDb 评分（详情卡）
+    omdbApiKey?: string;          // OMDb API Key（邮箱免费领取）
+    malClientId?: string;         // MAL Client ID（跳片头映射链首选，可选）
     // 智能跳过片头片尾总开关（默认关闭：仅显示「跳过」按钮，不自动跳；开启后自动跳过）
     smartSkipEnabled?: boolean;
     traktScrobbleEnabled?: boolean;
@@ -1078,6 +1094,131 @@ export function setFullUpdateDismissedAt(ts: number): void {
 }
 
 // 获取 fnOS 系统桌面地址（留空=自动，用当前 TV 连接的 origin 根路径）
+// ===== [自定义刮削] 扩展数据源四键（Fanart.tv / TVMaze / OMDb / MAL，与 Web 版键名对齐）=====
+
+export function getFanartEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.fanartEnabled === true;
+}
+
+export function setFanartEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.fanartEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getFanartApiKey(): string {
+    const config: Config = readConfig() || {};
+    return String(config.fanartApiKey || '');
+}
+
+export function setFanartApiKey(key: string): void {
+    const config: Config = readConfig() || {};
+    config.fanartApiKey = String(key || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getFanartClientKey(): string {
+    const config: Config = readConfig() || {};
+    return String(config.fanartClientKey || '');
+}
+
+export function setFanartClientKey(key: string): void {
+    const config: Config = readConfig() || {};
+    config.fanartClientKey = String(key || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getTvmazeEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.tvmazeEnabled === true;
+}
+
+export function setTvmazeEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.tvmazeEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getOmdbEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.omdbEnabled === true;
+}
+
+export function setOmdbEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.omdbEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getOmdbApiKey(): string {
+    const config: Config = readConfig() || {};
+    return String(config.omdbApiKey || '');
+}
+
+export function setOmdbApiKey(key: string): void {
+    const config: Config = readConfig() || {};
+    config.omdbApiKey = String(key || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getMalClientId(): string {
+    const config: Config = readConfig() || {};
+    return String(config.malClientId || '');
+}
+
+export function setMalClientId(key: string): void {
+    const config: Config = readConfig() || {};
+    config.malClientId = String(key || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// ===== [自定义刮削] 自定义刮削源回填 + Jav 番号刮削（默认关，与 Web 版 config 键名对齐）=====
+
+export function getCustomScraperEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.customScraperEnabled === true;
+}
+
+export function setCustomScraperEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.customScraperEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getCustomScraperUrl(): string {
+    const config: Config = readConfig() || {};
+    return String(config.customScraperUrl || '');
+}
+
+export function setCustomScraperUrl(url: string): void {
+    const config: Config = readConfig() || {};
+    config.customScraperUrl = String(url || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getJavEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.javEnabled === true;
+}
+
+export function setJavEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.javEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+export function getJavBusDomain(): string {
+    const config: Config = readConfig() || {};
+    return String(config.javBusDomain || '');
+}
+
+export function setJavBusDomain(domain: string): void {
+    const config: Config = readConfig() || {};
+    config.javBusDomain = String(domain || '');
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
 export function getSystemPageUrl(): string {
     const config: Config = readConfig() || {};
     return (typeof config.systemPageUrl === 'string' && config.systemPageUrl.trim()) ? config.systemPageUrl.trim() : '';
