@@ -16,8 +16,9 @@
     "watch": "tsc --watch",
     "clean": "rimraf dest",
     "build:potplayer:win": "node scripts/copy-potplayer.js",
-    "build:win": "npm-run-all -s build:proxy:win build:potctl:win build:potplayer:win compile && electron-builder --win",
-    "build:win:fast": "npm-run-all -s build:potplayer:win compile && electron-builder --win",
+    "build:nsis-art": "node scripts/gen-nsis-art.cjs",
+    "build:win": "npm-run-all -s build:proxy:win build:potctl:win build:potplayer:win compile && npm run build:nsis-art && electron-builder --win",
+    "build:win:fast": "npm-run-all -s build:potplayer:win compile && npm run build:nsis-art && electron-builder --win",
     "build:mac": "npm-run-all -s build:proxy:mac:x64 build:proxy:mac:arm64 build:proxy:mac:universal compile clean:proxy:mac && electron-builder --mac",
     "build:linux": "npm-run-all -s build:proxy:linux compile && electron-builder --linux"
   },
@@ -237,13 +238,11 @@
       ]
     },
     "nsis": {
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "oneClick": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerSidebar": "build/installerSidebar.bmp",
       "uninstallerSidebar": "build/uninstallerSidebar.bmp",
-      "installerHeader": "build/installerHeader.bmp",
       "installerLanguages": [
         "zh_CN"
       ],

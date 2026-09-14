@@ -1,9 +1,25 @@
 # Fntv-Plus 飞牛影视桌面客户端 · 增强版
 
+<div align="center">
+
+[![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2FYDMY007%2FFntv-Plus%2Freleases%2Flatest&query=%24.tag_name&label=release&prefix=v&color=blue)](https://github.com/YDMY007/Fntv-Plus/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)]()
+[![飞牛影视](https://img.shields.io/badge/%E9%A3%9E%E7%89%9B%E5%BD%B1%E8%A7%86-fnOS-056de2)](https://www.fnnas.com/)
+[![Electron](https://img.shields.io/badge/electron-38-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/YDMY007/Fntv-Plus?style=flat&logo=github&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/stargazers)
+[![Forks](https://img.shields.io/github/forks/YDMY007/Fntv-Plus?style=flat&logo=github&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/forks)
+[![Issues](https://img.shields.io/github/issues/YDMY007/Fntv-Plus?logo=github)](https://github.com/YDMY007/Fntv-Plus/issues)
+[![Commits](https://img.shields.io/badge/commits-1067-2ea44f?logo=git&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/commits)
+[![Last Commit](https://img.shields.io/github/last-commit/YDMY007/Fntv-Plus/release?logo=git&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/commits)
+[![Gitee](https://img.shields.io/badge/Gitee-mirror-F47040?logo=gitee&logoColor=white)](https://gitee.com/YDMY007/fntv-plus)
+
+</div>
+
 > ### ⚠️ 重要警告与声明
 >
 > **🧪 这是作者个人的练习 / 学习作品，不代表任何官方立场，与飞牛影视官方无任何关联或合作关系。**
-> - **本仓库于9月9日正式已脱离上游 fork 网络，【成为独立仓库】 · 与 QiaoKes/fntv-electron 无上游关系**
+> - **本仓库于 2026 年 9 月 9 日脱离上游 fork 网络，正式成为独立仓库独立发展 · 项目受 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) 启发，并沿用 GPL-3.0 许可证保留其版权与致谢**
 > 
 > 使用前请务必知悉以下风险：
 > - **非官方第三方客户端**：在飞牛影视 Web 端之上做注入式修改，可能因飞牛端更新而失效、闪退或行为异常，**不保证长期稳定可用**。
@@ -66,14 +82,14 @@
 
 ---
 
-## 🍴 Fork 声明
+## 🍴 项目缘起与独立声明
 
-> **本项目是 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) 的 Fork 修改版。**
+> **本项目受 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) 启发创建，现已作为独立仓库独立发展。**
 >
-> - **上游项目**：基于飞牛影视（fnOS TV）Web 端封装的 Electron 桌面客户端。
-> - **原项目版权**：归原作者 [QiaoKes](https://github.com/QiaoKes) 所有，遵循 [GPL-3.0](LICENSE) 许可证。
-> - **本仓库（[YDMY007/fntv-plus](https://gitee.com/YDMY007/fntv-plus)）**：在上游基础上叠加了**冷调渐变玻璃 / 云母增强界面、原生窗口交互、侧栏设置面板、沉浸式剧集详情页、3D 首页轮播、豆瓣 · Bangumi · Trakt 同步、B 站弹幕、手柄控制、观影记录、年度观影报告等大量 UI / 体验增强**，**已改动上游核心代码，此后作为独立分支独立发展，不再跟随上游更新。**（preload 注入与 main 主进程均有修改）。
-> - **许可证继承**：本仓库沿用原项目的 GPL-3.0 许可证，完整条款见 [LICENSE](LICENSE) 文件。
+> - **启发来源**：[QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) 是基于飞牛影视（fnOS TV）Web 端封装的 Electron 桌面客户端，其项目思路与部分基础模块为本项目提供了起点与参考。
+> - **原项目版权**：归原作者 [QiaoKes](https://github.com/QiaoKes) 所有，遵循 [GPL-3.0](LICENSE) 许可证，本项目沿用 GPL-3.0 并保留其版权与致谢。
+> - **独立发展**：本仓库于 2026 年 9 月 9 日脱离上游 fork 网络，此后与上游各自演进、互不同步。当前仓库 **80% 以上代码为本项目自研**——冷调渐变玻璃 / 云母增强界面、原生窗口交互、侧栏设置面板、沉浸式剧集详情页、3D 首页轮播、豆瓣 · Bangumi · Trakt 同步、B 站弹幕、手柄控制、观影记录、年度观影报告等功能均为本项目独立实现；飞牛 API 封装、日志、播放器抽象、Go 本地代理等基础模块在早期版本基础上经大量重构与增强（preload 注入与 main 主进程均有深入修改）。
+> - **许可证**：本仓库沿用 GPL-3.0 许可证，完整条款见 [LICENSE](LICENSE) 文件。
 
 > **⚠️ 免责声明**：本项目为第三方客户端，与飞牛影视官方无关。本项目仅为作者本人**个人练手 / 学习用途**的开源项目，不代表任何官方立场，亦与飞牛影视官方不存在任何关联或合作关系。使用前请确保遵守相关服务条款与版权规定，因使用本项目产生的任何后果由使用者自行承担。
 
@@ -219,7 +235,7 @@
   - **热补丁免重启**：热补丁包下载后重载即生效，无需重新安装全量包。
   - 💡 新版本发布后客户端会自动弹窗提醒；小修复走热补丁，重载一下就生效，不用下载整个安装包。需要时可到设置里手动「检查更新」。
 
-### 继承自上游的基础能力
+### 源自上游的基础能力
 
 - **原生桌面体验** — 基于飞牛影视 Web 端构建的桌面应用，提供类原生体验。
   - 💡 直接当独立桌面程序用，比开浏览器标签页更顺手，窗口、托盘、快捷键都是桌面级的。
@@ -334,8 +350,8 @@ npm run build:linux   # Linux
 
 本项目的上游与依赖参考以下开源项目：
 
-**上游 / Fork 来源**
-- [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) - 上游项目（本仓库 Fork 来源）
+**项目启发来源**
+- [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron) - 受其启发创建本项目，现已完全独立发展
 - [QiaoKes/fntv-mpv-config](https://github.com/QiaoKes/fntv-mpv-config) - MPV 配置与预设着色器方案来源（本项目的 `portable_config` 基于此管理）
 - [fnos-tv](https://github.com/thshu/fnos-tv) - 支持弹幕的飞牛影视
 - [fnToPotplayer](https://github.com/gudqs7/fnToPotplayer) - 飞牛影视调用 PotPlayer 的集成逻辑
@@ -371,5 +387,5 @@ npm run build:linux   # Linux
 本项目采用 [GPL-3.0 许可证](LICENSE)。
 
 - **原项目版权**：Copyright (c) 原作者 [QiaoKes/fntv-electron](https://github.com/QiaoKes/fntv-electron)
-- **本仓库修改署名**：YDMY007（Fork 修改版，含冷调渐变玻璃 / 云母增强界面 / 沉浸式剧集详情页 / 3D 首页轮播 / 侧栏设置面板 / 豆瓣 · Bangumi · Trakt 同步 / B 站弹幕 / 手柄控制 / 观影记录 / 年度观影报告等增强）
+- **本仓库修改署名**：YDMY007（受上游启发的独立增强版，含冷调渐变玻璃 / 云母增强界面 / 沉浸式剧集详情页 / 3D 首页轮播 / 侧栏设置面板 / 豆瓣 · Bangumi · Trakt 同步 / B 站弹幕 / 手柄控制 / 观影记录 / 年度观影报告等增强）
 

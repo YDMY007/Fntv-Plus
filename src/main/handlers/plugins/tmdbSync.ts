@@ -1163,6 +1163,8 @@ function init(): void {
                                 overviewZh: typeof e.overview === 'string' ? e.overview : '',
                                 nameEn: en && typeof en.name === 'string' ? en.name : '',
                                 overviewEn: en && typeof en.overview === 'string' ? en.overview : '',
+                                // [多源刮削] 播出日期: 集号解析全失败时按「日期唯一匹配」兜底对位(epBackfill 用)
+                                airDate: typeof e.air_date === 'string' ? e.air_date : '',
                             };
                         }),
                 };
