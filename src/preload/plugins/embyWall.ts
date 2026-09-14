@@ -9,6 +9,7 @@ import { injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
 import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackfill';
+import { ensureVirtualBandFix } from './embyWall/detail/virtualBand';
 import { scheduleCustomScraperButton } from './embyWall/detail/customScraper';
 import { scheduleJavButton } from './embyWall/detail/jav';
 import { applyPageBg } from './embyWall/pageBg';
@@ -4890,14 +4891,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     applyDetailBeautify();
     scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 初始/深链同挂自定义刮削按钮
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); }, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); ensureVirtualBandFix(); }, ms));
   }
   // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); }
+      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureVirtualBandFix(); } // [v1.10.2] 虚拟窗口补丁随详情页重建补挂
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });

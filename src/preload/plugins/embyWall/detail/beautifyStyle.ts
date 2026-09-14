@@ -289,6 +289,27 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="detail
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child picture img{ transform:scale(1.035) !important; }
 
+/* ── [v1.10.2] 虚拟窗口配套（详见 virtualBand.ts）：原生 RH 横滑带带 virtualList，
+   窗口只渲染首屏 ~11 张、其余靠 scrollLeft 滑动补渲染；竖排后 scrollLeft 恒 0 窗口冻结
+   → 用户报障「选集最多显示 11 集」。① 垫条：原生两条 h-px 行内宽度≈全量列表宽（万级
+   px），竖排列里是隐形横线且会横向撑爆文档 → 隐藏（live 预热期临时放开供横向滚动）。
+   ② live 类：virtualBand 预热——**真改宽度**（width:-δ；padding 对 width:auto 块不改
+   clientWidth，首版踩坑）+ 临时可横向滚 + 隐滚动条，配合成 resize/scrollLeft 喂 RH 重测。 */
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"] > [class*="w-max"] > .h-px{
+  display:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live{
+  width:calc(100% - var(--fntv-vband-pad,300px)) !important;
+  overflow-x:scroll !important;
+  scrollbar-width:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live::-webkit-scrollbar{
+  width:0 !important; height:0 !important; display:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live > [class*="w-max"] > .h-px{
+  display:block !important;
+}
+
 /* ── [lc-1124] 序号视图（纯数字选集）与演职人员 精修 ──
    原生「切换为序号视图」(工具行 title="切换为序号视图") 在美化作用域下功能完好
    （竖排规则 [data-id=details] 不命中此视图的数字块，实测 beautifyGridHit=false），
@@ -1156,6 +1177,35 @@ body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="detai
    原生标题 p 若带 truncate 会把胶囊裁没 → 同 J 段的解禁规则，此处按面板作用域重写 */
 body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p:has(> .fnos-ep-res){
   white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
+}
+/* N7b. 季行左右切换圆钮（seasonNav.ts）：>4 季时行溢出横滑但滚动条隐藏（N7 定稿 4 卡一屏），
+   用户无从得知右侧还有季 → 观感「季数超过 4 个就不显示」。两翼各一枚柔光玻璃圆钮
+   （样式同 N4 收藏/已看圆钮：半透白、blur、无边框无线条），点击按一张卡宽步进横滑，
+   到端 data-end=1 淡化禁用。top/left/width 由 JS 实测海报竖版中线钉 inline（面板是
+   N5 absolute 定位容器，offsetParent 即面板，几何稳定）；水平探出 7px 半压海报边，
+   玻璃后透出海报同 Apple TV 翻页钮观感。 */
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav{
+  position:absolute !important; height:0 !important;
+  pointer-events:none !important; z-index:3 !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button{
+  pointer-events:auto !important;
+  position:absolute !important; top:0 !important; transform:translateY(-50%) !important;
+  width:32px !important; height:32px !important; border-radius:50% !important;
+  border:none !important; padding:0 !important; margin:0 !important; cursor:pointer !important;
+  background:rgba(255,255,255,.10) !important;
+  backdrop-filter:blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
+  color:rgba(255,255,255,.92) !important;
+  display:flex !important; align-items:center !important; justify-content:center !important;
+  box-shadow:0 4px 14px rgba(0,0,0,.30) !important;
+  transition:background .15s ease, opacity .2s ease !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:first-child{ left:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:last-child{ right:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:hover{ background:rgba(255,255,255,.20) !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button[data-end="1"]{
+  opacity:.28 !important; pointer-events:none !important;
 }
 /* N8. 原生外链行（链接：IMDB链接）隐藏 —— 与季页 A 段同一决策（lc-988 用户明确要求去掉），
    卡内 N8b 外链区已覆盖；双条件同 A 段（有外链 且 无人物链接）。 */

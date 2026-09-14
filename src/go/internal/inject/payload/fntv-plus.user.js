@@ -3144,6 +3144,27 @@ body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"] + [data-id="detail
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover{ background:var(--fnos-row-hover) !important; }
 body.fnos-beautify ${COL} > :nth-child(2) [data-id="details"]:hover > :first-child picture img{ transform:scale(1.035) !important; }
 
+/* \u2500\u2500 [v1.10.2] \u865A\u62DF\u7A97\u53E3\u914D\u5957\uFF08\u8BE6\u89C1 virtualBand.ts\uFF09\uFF1A\u539F\u751F RH \u6A2A\u6ED1\u5E26\u5E26 virtualList\uFF0C
+   \u7A97\u53E3\u53EA\u6E32\u67D3\u9996\u5C4F ~11 \u5F20\u3001\u5176\u4F59\u9760 scrollLeft \u6ED1\u52A8\u8865\u6E32\u67D3\uFF1B\u7AD6\u6392\u540E scrollLeft \u6052 0 \u7A97\u53E3\u51BB\u7ED3
+   \u2192 \u7528\u6237\u62A5\u969C\u300C\u9009\u96C6\u6700\u591A\u663E\u793A 11 \u96C6\u300D\u3002\u2460 \u57AB\u6761\uFF1A\u539F\u751F\u4E24\u6761 h-px \u884C\u5185\u5BBD\u5EA6\u2248\u5168\u91CF\u5217\u8868\u5BBD\uFF08\u4E07\u7EA7
+   px\uFF09\uFF0C\u7AD6\u6392\u5217\u91CC\u662F\u9690\u5F62\u6A2A\u7EBF\u4E14\u4F1A\u6A2A\u5411\u6491\u7206\u6587\u6863 \u2192 \u9690\u85CF\uFF08live \u9884\u70ED\u671F\u4E34\u65F6\u653E\u5F00\u4F9B\u6A2A\u5411\u6EDA\u52A8\uFF09\u3002
+   \u2461 live \u7C7B\uFF1AvirtualBand \u9884\u70ED\u2014\u2014**\u771F\u6539\u5BBD\u5EA6**\uFF08width:-\u03B4\uFF1Bpadding \u5BF9 width:auto \u5757\u4E0D\u6539
+   clientWidth\uFF0C\u9996\u7248\u8E29\u5751\uFF09+ \u4E34\u65F6\u53EF\u6A2A\u5411\u6EDA + \u9690\u6EDA\u52A8\u6761\uFF0C\u914D\u5408\u6210 resize/scrollLeft \u5582 RH \u91CD\u6D4B\u3002 */
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"] > [class*="w-max"] > .h-px{
+  display:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live{
+  width:calc(100% - var(--fntv-vband-pad,300px)) !important;
+  overflow-x:scroll !important;
+  scrollbar-width:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live::-webkit-scrollbar{
+  width:0 !important; height:0 !important; display:none !important;
+}
+body.fnos-beautify ${COL} .ms-container[class*="overflow-x-scroll"].fnos-vband-live > [class*="w-max"] > .h-px{
+  display:block !important;
+}
+
 /* \u2500\u2500 [lc-1124] \u5E8F\u53F7\u89C6\u56FE\uFF08\u7EAF\u6570\u5B57\u9009\u96C6\uFF09\u4E0E\u6F14\u804C\u4EBA\u5458 \u7CBE\u4FEE \u2500\u2500
    \u539F\u751F\u300C\u5207\u6362\u4E3A\u5E8F\u53F7\u89C6\u56FE\u300D(\u5DE5\u5177\u884C title="\u5207\u6362\u4E3A\u5E8F\u53F7\u89C6\u56FE") \u5728\u7F8E\u5316\u4F5C\u7528\u57DF\u4E0B\u529F\u80FD\u5B8C\u597D
    \uFF08\u7AD6\u6392\u89C4\u5219 [data-id=details] \u4E0D\u547D\u4E2D\u6B64\u89C6\u56FE\u7684\u6570\u5B57\u5757\uFF0C\u5B9E\u6D4B beautifyGridHit=false\uFF09\uFF0C
@@ -4011,6 +4032,35 @@ body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="detai
    \u539F\u751F\u6807\u9898 p \u82E5\u5E26 truncate \u4F1A\u628A\u80F6\u56CA\u88C1\u6CA1 \u2192 \u540C J \u6BB5\u7684\u89E3\u7981\u89C4\u5219\uFF0C\u6B64\u5904\u6309\u9762\u677F\u4F5C\u7528\u57DF\u91CD\u5199 */
 body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p:has(> .fnos-ep-res){
   white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
+}
+/* N7b. \u5B63\u884C\u5DE6\u53F3\u5207\u6362\u5706\u94AE\uFF08seasonNav.ts\uFF09\uFF1A>4 \u5B63\u65F6\u884C\u6EA2\u51FA\u6A2A\u6ED1\u4F46\u6EDA\u52A8\u6761\u9690\u85CF\uFF08N7 \u5B9A\u7A3F 4 \u5361\u4E00\u5C4F\uFF09\uFF0C
+   \u7528\u6237\u65E0\u4ECE\u5F97\u77E5\u53F3\u4FA7\u8FD8\u6709\u5B63 \u2192 \u89C2\u611F\u300C\u5B63\u6570\u8D85\u8FC7 4 \u4E2A\u5C31\u4E0D\u663E\u793A\u300D\u3002\u4E24\u7FFC\u5404\u4E00\u679A\u67D4\u5149\u73BB\u7483\u5706\u94AE
+   \uFF08\u6837\u5F0F\u540C N4 \u6536\u85CF/\u5DF2\u770B\u5706\u94AE\uFF1A\u534A\u900F\u767D\u3001blur\u3001\u65E0\u8FB9\u6846\u65E0\u7EBF\u6761\uFF09\uFF0C\u70B9\u51FB\u6309\u4E00\u5F20\u5361\u5BBD\u6B65\u8FDB\u6A2A\u6ED1\uFF0C
+   \u5230\u7AEF data-end=1 \u6DE1\u5316\u7981\u7528\u3002top/left/width \u7531 JS \u5B9E\u6D4B\u6D77\u62A5\u7AD6\u7248\u4E2D\u7EBF\u9489 inline\uFF08\u9762\u677F\u662F
+   N5 absolute \u5B9A\u4F4D\u5BB9\u5668\uFF0CoffsetParent \u5373\u9762\u677F\uFF0C\u51E0\u4F55\u7A33\u5B9A\uFF09\uFF1B\u6C34\u5E73\u63A2\u51FA 7px \u534A\u538B\u6D77\u62A5\u8FB9\uFF0C
+   \u73BB\u7483\u540E\u900F\u51FA\u6D77\u62A5\u540C Apple TV \u7FFB\u9875\u94AE\u89C2\u611F\u3002 */
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav{
+  position:absolute !important; height:0 !important;
+  pointer-events:none !important; z-index:3 !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button{
+  pointer-events:auto !important;
+  position:absolute !important; top:0 !important; transform:translateY(-50%) !important;
+  width:32px !important; height:32px !important; border-radius:50% !important;
+  border:none !important; padding:0 !important; margin:0 !important; cursor:pointer !important;
+  background:rgba(255,255,255,.10) !important;
+  backdrop-filter:blur(20px) saturate(150%) !important;
+  -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
+  color:rgba(255,255,255,.92) !important;
+  display:flex !important; align-items:center !important; justify-content:center !important;
+  box-shadow:0 4px 14px rgba(0,0,0,.30) !important;
+  transition:background .15s ease, opacity .2s ease !important;
+}
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:first-child{ left:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:last-child{ right:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:hover{ background:rgba(255,255,255,.20) !important; }
+body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button[data-end="1"]{
+  opacity:.28 !important; pointer-events:none !important;
 }
 /* N8. \u539F\u751F\u5916\u94FE\u884C\uFF08\u94FE\u63A5\uFF1AIMDB\u94FE\u63A5\uFF09\u9690\u85CF \u2014\u2014 \u4E0E\u5B63\u9875 A \u6BB5\u540C\u4E00\u51B3\u7B56\uFF08lc-988 \u7528\u6237\u660E\u786E\u8981\u6C42\u53BB\u6389\uFF09\uFF0C
    \u5361\u5185 N8b \u5916\u94FE\u533A\u5DF2\u8986\u76D6\uFF1B\u53CC\u6761\u4EF6\u540C A \u6BB5\uFF08\u6709\u5916\u94FE \u4E14 \u65E0\u4EBA\u7269\u94FE\u63A5\uFF09\u3002 */
@@ -12547,6 +12597,404 @@ html.fnos-perf.dark{
     };
   }
 
+  // src/preload/plugins/embyWall/detail/virtualBand.ts
+  var MARK = "__fntvFullSlice";
+  var LIVE_CLS = "fnos-vband-live";
+  var PAD_VAR = "--fntv-vband-pad";
+  var RETRY_DELAYS2 = [0, 400, 1e3, 2e3, 3500];
+  var RECHECK_DELAY = 350;
+  var WARM_PADS = [300, 150, 450];
+  var WARM_MEASURE_MS = 320;
+  var WARM_VERIFY_MS = 380;
+  var _timers2 = [];
+  var _obs = null;
+  var _obsTargets = /* @__PURE__ */ new WeakSet();
+  var _rafId = 0;
+  var _scheduledFor3 = null;
+  var _patchedArrays = [];
+  var _patchedProps = [];
+  function _clearTimers2() {
+    for (let i = 0; i < _timers2.length; i++) clearTimeout(_timers2[i]);
+    _timers2 = [];
+  }
+  function _findVirtualList(el) {
+    const fk = Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
+    if (!fk) return null;
+    let fiber = el[fk];
+    for (let depth = 0; fiber && depth < 60; depth++) {
+      const vl = fiber.memoizedProps && fiber.memoizedProps.virtualList;
+      if (vl && Array.isArray(vl.items) && vl.items.length) return { vl, items: vl.items };
+      fiber = fiber.return;
+    }
+    return null;
+  }
+  function _patchVl(ref) {
+    const { vl, items: items2 } = ref;
+    const anyArr = items2;
+    let changed = false;
+    if (!anyArr[MARK]) {
+      try {
+        Object.defineProperty(anyArr, "slice", {
+          value: function() {
+            return Array.prototype.slice.call(this, 0, this.length);
+          },
+          writable: true,
+          configurable: true
+        });
+        anyArr[MARK] = true;
+        _patchedArrays.push(items2);
+        changed = true;
+      } catch (e) {
+        dlog("vband: slice \u8986\u76D6\u5931\u8D25(frozen?) " + String(e).substring(0, 60));
+      }
+    }
+    if (vl.itemWidth !== 1) {
+      try {
+        vl.itemWidth = 1;
+        _patchedProps.push(vl);
+        changed = true;
+      } catch {
+      }
+    }
+    return changed;
+  }
+  function _domCount(band) {
+    const cards = band.querySelectorAll('[data-id="details"]');
+    if (cards.length) return cards.length;
+    const persons = band.querySelectorAll('a[href*="/v/person/"]');
+    if (persons.length) return persons.length;
+    return band.querySelectorAll("button").length;
+  }
+  function _warmUp(sc, items2) {
+    const target = items2.length;
+    let round = 0;
+    const fire = () => {
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {
+      }
+    };
+    const step = () => {
+      if (round >= WARM_PADS.length) {
+        dlog("vband: \u9884\u70ED " + WARM_PADS.length + " \u8F6E\u540E\u4ECD dom=" + _domCount(sc) + "/" + target + "\uFF08items \u5DF2\u8986\u76D6\uFF0C\u5F85\u4E0B\u6B21\u7A97\u53E3\u91CD\u7B97\uFF09");
+        return;
+      }
+      const pad = WARM_PADS[round];
+      round++;
+      sc.classList.add(LIVE_CLS);
+      sc.style.setProperty(PAD_VAR, pad + "px");
+      fire();
+      try {
+        sc.scrollLeft = 280 * 8 * round;
+      } catch {
+      }
+      _timers2.push(window.setTimeout(() => {
+        try {
+          sc.scrollLeft = 0;
+        } catch {
+        }
+        sc.classList.remove(LIVE_CLS);
+        fire();
+        _timers2.push(window.setTimeout(() => {
+          const dom = _domCount(sc);
+          if (dom >= target) {
+            dlog("vband: \u9884\u70ED\u7B2C" + round + "\u8F6E\u5168\u91CF\u8FBE\u6210 dom=" + dom + "/" + target);
+            return;
+          }
+          dlog("vband: \u9884\u70ED\u7B2C" + round + "\u8F6E\u540E dom=" + dom + "/" + target + "\uFF0C\u6362\u57AB\u91CD\u8BD5");
+          step();
+        }, WARM_VERIFY_MS));
+      }, WARM_MEASURE_MS));
+    };
+    step();
+  }
+  function _runOnce() {
+    try {
+      if (!document.body || !document.body.classList.contains("fnos-beautify")) return 0;
+      const view = findActiveDetailView();
+      if (!view) return 0;
+      let n = 0;
+      const scrollers = view.querySelectorAll(
+        '.ms-container, [class*="grid-cols-[repeat(auto-fill,52px"]'
+      );
+      for (let i = 0; i < scrollers.length; i++) {
+        try {
+          const sc = scrollers[i];
+          const ref = _findVirtualList(sc);
+          if (!ref) continue;
+          if (_patchVl(ref)) {
+            n++;
+            dlog("vband: \u8865\u8986\u76D6 band#" + i + " items=" + ref.items.length);
+            _warmUp(sc, ref.items);
+          } else {
+            const dom = _domCount(sc);
+            if (dom > 0 && dom < ref.items.length) {
+              dlog("vband: \u7A97\u53E3\u77ED\u7F3A dom=" + dom + "/" + ref.items.length + " \u2192 \u518D\u9884\u70ED");
+              _warmUp(sc, ref.items);
+            }
+          }
+          _watch(sc);
+        } catch (e) {
+          dlog("vband: \u5355\u5E26\u5904\u7406\u5F02\u5E38 " + String(e).substring(0, 60));
+        }
+      }
+      return n;
+    } catch (e) {
+      dlog("vband: runOnce \u5F02\u5E38 " + String(e).substring(0, 80));
+      return 0;
+    }
+  }
+  function _watch(sc) {
+    if (_obsTargets.has(sc)) return;
+    _obsTargets.add(sc);
+    if (!_obs) {
+      _obs = new MutationObserver(() => {
+        if (_rafId) return;
+        _rafId = window.setTimeout(() => {
+          _rafId = 0;
+          _runOnce();
+        }, RECHECK_DELAY);
+      });
+    }
+    _obs.observe(sc, { childList: true, subtree: true });
+  }
+  function ensureVirtualBandFix() {
+    _runOnce();
+  }
+  function scheduleVirtualBandFix() {
+    const href = location.href;
+    if (_scheduledFor3 === href) return;
+    _scheduledFor3 = href;
+    _clearTimers2();
+    for (let i = 0; i < RETRY_DELAYS2.length; i++) {
+      _timers2.push(window.setTimeout(() => {
+        if (_scheduledFor3 !== location.href) return;
+        _runOnce();
+      }, RETRY_DELAYS2[i]));
+    }
+  }
+  function removeVirtualBandFix() {
+    _scheduledFor3 = null;
+    _clearTimers2();
+    if (_rafId) {
+      clearTimeout(_rafId);
+      _rafId = 0;
+    }
+    if (_obs) {
+      _obs.disconnect();
+      _obs = null;
+    }
+    _obsTargets = /* @__PURE__ */ new WeakSet();
+    for (const arr of _patchedArrays) {
+      try {
+        delete arr.slice;
+        delete arr[MARK];
+      } catch {
+      }
+    }
+    _patchedArrays.length = 0;
+    for (const vl of _patchedProps) {
+      try {
+        delete vl.itemWidth;
+      } catch {
+      }
+    }
+    _patchedProps.length = 0;
+    const lives = document.querySelectorAll("." + LIVE_CLS);
+    for (let i = 0; i < lives.length; i++) {
+      lives[i].classList.remove(LIVE_CLS);
+      lives[i].style.removeProperty(PAD_VAR);
+    }
+  }
+
+  // src/preload/plugins/embyWall/detail/seasonNav.ts
+  var PANEL_SEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+  var NAV_ID = "fnos-season-nav";
+  var RETRY_DELAYS3 = [0, 350, 900, 1800, 3e3, 4200];
+  var RESYNC_DEBOUNCE = 200;
+  var EDGE_EPS = 2;
+  var _timers3 = [];
+  var _scheduledFor4 = null;
+  var _panelObs = null;
+  var _obsPanel = null;
+  var _obsTimer = 0;
+  var _resizeTimer = 0;
+  var _resizeBound = false;
+  var _boundRow = null;
+  var _navRow = null;
+  function _clearTimers3() {
+    for (let i = 0; i < _timers3.length; i++) clearTimeout(_timers3[i]);
+    _timers3 = [];
+  }
+  function _unbindScroll() {
+    if (_boundRow) {
+      _boundRow.removeEventListener("scroll", _onRowScroll);
+      _boundRow = null;
+    }
+  }
+  function _onRowScroll() {
+    const nav = document.getElementById(NAV_ID);
+    if (nav && _boundRow) _setEndState(nav, _boundRow);
+  }
+  function _onResize() {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = window.setTimeout(() => {
+      _resizeTimer = 0;
+      _ensure();
+    }, RESYNC_DEBOUNCE);
+  }
+  function _setEndState(nav, row2) {
+    const btns = nav.querySelectorAll("button");
+    const max = row2.scrollWidth - row2.clientWidth;
+    if (btns[0]) btns[0].setAttribute("data-end", row2.scrollLeft <= EDGE_EPS ? "1" : "0");
+    if (btns[1]) btns[1].setAttribute("data-end", row2.scrollLeft >= max - EDGE_EPS ? "1" : "0");
+  }
+  function _step(row2) {
+    const cards = row2.querySelectorAll(':scope > [data-id="details"]');
+    if (cards.length >= 2) {
+      const d = cards[1].offsetLeft - cards[0].offsetLeft;
+      if (d > 0) return d;
+    }
+    return Math.max(80, Math.round(row2.clientWidth / 2));
+  }
+  function _layout(nav, row2) {
+    const rowRect = row2.getBoundingClientRect();
+    let centerY = rowRect.height / 2;
+    const poster = row2.querySelector('[data-id="details"] .poster-box');
+    if (poster) {
+      const pr = poster.getBoundingClientRect();
+      if (pr.height > 0) centerY = pr.top - rowRect.top + pr.height / 2;
+    }
+    nav.style.top = Math.round(row2.offsetTop + centerY) + "px";
+    nav.style.left = Math.round(row2.offsetLeft) + "px";
+    nav.style.width = Math.round(row2.offsetWidth) + "px";
+    _setEndState(nav, row2);
+  }
+  var CHEV_L = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M8.8 3.2 5 7l3.8 3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var CHEV_R = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5.2 3.2 9 7l-3.8 3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  function _mkBtn(dir, row2) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", dir === "left" ? "\u5F80\u524D\u7FFB\u5B63" : "\u5F80\u540E\u7FFB\u5B63");
+    b.title = dir === "left" ? "\u5F80\u524D\u7FFB\u5B63" : "\u5F80\u540E\u7FFB\u5B63";
+    b.innerHTML = dir === "left" ? CHEV_L : CHEV_R;
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      row2.scrollBy({ left: dir === "left" ? -_step(row2) : _step(row2), behavior: "smooth" });
+    });
+    return b;
+  }
+  function _ensure() {
+    try {
+      if (!document.body || !document.body.classList.contains("fnos-series-panel")) {
+        _removeNav();
+        return;
+      }
+      const view = findActiveDetailView();
+      const panel = view ? view.querySelector(PANEL_SEL) : null;
+      const row2 = panel ? panel.querySelector(':scope > div[class*="flex-wrap"]') : null;
+      if (!panel || !row2) {
+        _removeNav();
+        _observePanel(null);
+        return;
+      }
+      let nav = document.getElementById(NAV_ID);
+      const overflow = row2.scrollWidth > row2.clientWidth + EDGE_EPS;
+      if (!overflow) {
+        if (nav) nav.remove();
+        _unbindScroll();
+        _navRow = null;
+        return;
+      }
+      const staleRow = !_navRow || _navRow.deref() !== row2;
+      if (!nav || !nav.isConnected || nav.parentElement !== panel || staleRow) {
+        if (nav) nav.remove();
+        nav = document.createElement("div");
+        nav.id = NAV_ID;
+        nav.className = "fnos-season-nav";
+        nav.appendChild(_mkBtn("left", row2));
+        nav.appendChild(_mkBtn("right", row2));
+        row2.after(nav);
+        _navRow = new WeakRef(row2);
+        dlog("seasonNav: \u5B63\u884C\u6EA2\u51FA \u2192 \u6302\u5DE6\u53F3\u5207\u6362\u94AE");
+      }
+      _unbindScroll();
+      _boundRow = row2;
+      row2.addEventListener("scroll", _onRowScroll, { passive: true });
+      _layout(nav, row2);
+      _observePanel(panel);
+      _bindResize();
+    } catch (e) {
+      dlog("seasonNav: ensure \u5F02\u5E38 " + String(e).substring(0, 80));
+    }
+  }
+  function _removeNav() {
+    _unbindScroll();
+    _navRow = null;
+    const nav = document.getElementById(NAV_ID);
+    if (nav) nav.remove();
+  }
+  function _observePanel(panel) {
+    if (!panel) {
+      if (_panelObs) {
+        _panelObs.disconnect();
+        _panelObs = null;
+      }
+      _obsPanel = null;
+      return;
+    }
+    if (_obsPanel === panel && _panelObs) return;
+    if (!_panelObs) {
+      _panelObs = new MutationObserver(() => {
+        if (_obsTimer) return;
+        _obsTimer = window.setTimeout(() => {
+          _obsTimer = 0;
+          _ensure();
+        }, RESYNC_DEBOUNCE);
+      });
+    }
+    _panelObs.disconnect();
+    _obsPanel = panel;
+    _panelObs.observe(panel, { childList: true, subtree: true });
+  }
+  function _bindResize() {
+    if (_resizeBound) return;
+    window.addEventListener("resize", _onResize, { passive: true });
+    _resizeBound = true;
+  }
+  function _unbindResize() {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = 0;
+    if (_resizeBound) {
+      window.removeEventListener("resize", _onResize);
+      _resizeBound = false;
+    }
+  }
+  function scheduleSeasonNav() {
+    const href = location.href;
+    if (_scheduledFor4 === href) return;
+    _scheduledFor4 = href;
+    _clearTimers3();
+    for (let i = 0; i < RETRY_DELAYS3.length; i++) {
+      _timers3.push(window.setTimeout(() => {
+        if (_scheduledFor4 !== location.href) return;
+        _ensure();
+      }, RETRY_DELAYS3[i]));
+    }
+  }
+  function removeSeasonNav() {
+    _scheduledFor4 = null;
+    _clearTimers3();
+    if (_obsTimer) {
+      clearTimeout(_obsTimer);
+      _obsTimer = 0;
+    }
+    _observePanel(null);
+    _unbindResize();
+    _removeNav();
+  }
+
   // src/preload/plugins/embyWall/detail/heroTint.ts
   var TINT_VAR = "--fnos-hero-tint";
   var BRIGHT_ATTR = "data-fntv-hero-bright";
@@ -12726,20 +13174,20 @@ html.fnos-perf.dark{
   // src/preload/plugins/embyWall/detail/immersive.ts
   var OBS_MAX_LIFE = 4e3;
   var BACKDROP_REFRESH_DELAY = 700;
-  var _obs = null;
-  var _rafId = 0;
+  var _obs2 = null;
+  var _rafId2 = 0;
   var _obsBornAt = 0;
   var _settledHref = null;
   var _backdropRefreshTimer = 0;
   var _deferredApply = false;
   function _disconnectObs() {
-    if (_obs) {
-      _obs.disconnect();
-      _obs = null;
+    if (_obs2) {
+      _obs2.disconnect();
+      _obs2 = null;
     }
-    if (_rafId) {
-      cancelAnimationFrame(_rafId);
-      _rafId = 0;
+    if (_rafId2) {
+      cancelAnimationFrame(_rafId2);
+      _rafId2 = 0;
     }
   }
   function _apply(view, hero) {
@@ -12752,6 +13200,8 @@ html.fnos-perf.dark{
     cacheHeroImages(location.href, hero);
     scheduleTmdbCard(view);
     scheduleEpResolution();
+    scheduleVirtualBandFix();
+    scheduleSeasonNav();
     _settledHref = location.href;
     S.detailGlassInited = true;
     _disconnectObs();
@@ -12784,23 +13234,25 @@ html.fnos-perf.dark{
     clearHeroTint();
     removeTmdbCard();
     removeEpResolution();
+    removeVirtualBandFix();
+    removeSeasonNav();
   }
   function _armObserver() {
-    if (_obs) return;
+    if (_obs2) return;
     _obsBornAt = Date.now();
     const check = () => {
-      _rafId = 0;
+      _rafId2 = 0;
       if (_trySettle()) return;
       if (Date.now() - _obsBornAt > OBS_MAX_LIFE) {
         dlog("beautify: observer \u8D85 " + OBS_MAX_LIFE + "ms \u672A\u89C1 hero, \u81EA\u65AD(\u4E0B\u6B21\u5BFC\u822A\u91CD\u8BD5)");
         _disconnectObs();
       }
     };
-    _obs = new MutationObserver(() => {
-      if (_rafId) return;
-      _rafId = requestAnimationFrame(check);
+    _obs2 = new MutationObserver(() => {
+      if (_rafId2) return;
+      _rafId2 = requestAnimationFrame(check);
     });
-    _obs.observe(document.body, { childList: true, subtree: true });
+    _obs2.observe(document.body, { childList: true, subtree: true });
   }
   function applyDetailBeautify() {
     if (!document.body) {
@@ -12838,6 +13290,8 @@ html.fnos-perf.dark{
     clearHeroTint();
     removeTmdbCard();
     removeEpResolution();
+    removeVirtualBandFix();
+    removeSeasonNav();
     clearInstantLayer();
     releaseNavVeil();
   }
@@ -13259,7 +13713,7 @@ html.fnos-perf.dark{
   init_electron();
   var BTN_ID = "fnos-epfix-btn";
   var ANCHOR_MARK = "data-fnos-epfix-anchor";
-  var RETRY_DELAYS2 = [0, 400, 1e3, 2e3, 3400, 5e3];
+  var RETRY_DELAYS4 = [0, 400, 1e3, 2e3, 3400, 5e3];
   var CONCURRENCY = 4;
   function seasonGuid() {
     const m = location.pathname.match(/\/v\/tv\/season\/([a-f0-9]{32})/);
@@ -13641,11 +14095,11 @@ html.fnos-perf.dark{
       removeEpFixButton();
       return;
     }
-    for (let i = 0; i < RETRY_DELAYS2.length; i++) {
+    for (let i = 0; i < RETRY_DELAYS4.length; i++) {
       _retryTimers.push(window.setTimeout(() => {
         if (!seasonGuid()) return;
         ensureEpFixButton();
-      }, RETRY_DELAYS2[i]));
+      }, RETRY_DELAYS4[i]));
     }
   }
 
@@ -18456,6 +18910,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleEpBackfill();
         scheduleCustomScraperButton();
         scheduleJavButton();
+        ensureVirtualBandFix();
       }, ms));
     }
     let _detailGlassTimer = 0;
@@ -18465,6 +18920,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         if (isDetailPage()) {
           backfillDetailLogo();
           ensureEpFixButton();
+          ensureVirtualBandFix();
         }
       }, 200);
     });

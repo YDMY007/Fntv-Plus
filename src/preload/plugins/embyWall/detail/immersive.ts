@@ -22,6 +22,8 @@ import { injectBeautifyStyle } from './beautifyStyle';
 import { injectBackdrop, removeBackdrop, hideInstantLayer, clearInstantLayer, showInstantLayer, cacheHeroImages } from './backdrop';
 import { scheduleTmdbCard, removeTmdbCard } from './tmdbCard';
 import { scheduleEpResolution, removeEpResolution } from './epResolution';
+import { scheduleVirtualBandFix, removeVirtualBandFix } from './virtualBand';
+import { scheduleSeasonNav, removeSeasonNav } from './seasonNav';
 import { applyHeroTint, clearHeroTint } from './heroTint';
 import { releaseNavVeil } from './veil';
 
@@ -54,6 +56,9 @@ function _apply(view: HTMLElement, hero: HTMLElement): void {
   cacheHeroImages(location.href, hero);  // 存海报/剧照供下次进同页秒出
   scheduleTmdbCard(view);                // 延后异步注入信息卡（非阻塞，失败静默）
   scheduleEpResolution();                // 清晰度角标 → 标题后胶囊（内部有上限重试链，等选集卡到达）
+  scheduleVirtualBandFix();              // [v1.10.2] 虚拟窗口全量渲染（原生横滑带 virtualList 只渲染首窗 ~11 张，
+                                         //   竖排后 scrollLeft 恒 0 窗口冻结 → 选集/演员被截断，用户报障）
+  scheduleSeasonNav();                   // [v1.10.3] 一级页季选行 >4 季溢出不可见 → 左右切换圆钮（内部有界重试链）
   _settledHref = location.href;
   S.detailGlassInited = true;
   _disconnectObs();                      // 一次性：命中即断开
@@ -95,6 +100,8 @@ function _softReset(): void {
   clearHeroTint();
   removeTmdbCard();
   removeEpResolution();
+  removeVirtualBandFix();
+  removeSeasonNav();
 }
 
 /** arm 一次性限域 observer：只等 hero 出现，命中即套用+disconnect；硬上限 OBS_MAX_LIFE 后自断。 */
@@ -161,6 +168,8 @@ export function teardownDetailBeautify(): void {
   clearHeroTint();
   removeTmdbCard();
   removeEpResolution();
+  removeVirtualBandFix();
+  removeSeasonNav();
   clearInstantLayer();
   releaseNavVeil(); // [lc-1017] 无论从哪条路进来(含退回首页/关闭开关)，持罩都必须被释放
 }
