@@ -1094,6 +1094,19 @@ async function search_candidates(title, ep_num, season_num) {
     list.sort((a, b) =>
         ((a.is_compilation ? 1 : 0) - (b.is_compilation ? 1 : 0)) ||
         ((b.sim || 0) - (a.sim || 0)));
+    // [lc-1171] 给每个 B站候选补官方弹幕数（view API stat.danmaku）：0 弹幕的搬运候选
+    // 盲选必然「无弹幕数据」，把弹幕数亮在候选列表里让用户一步选对。限并发 3、仅 bvid 候选
+    // （dmapi 伪 bvid 跳过）；单候选失败不影响整体（字段缺省 = 未知）。
+    const withBvid = list.filter((c) => c.bvid && !String(c.bvid).startsWith('dmapi:'));
+    await mapLimit(withBvid, 3, async (c) => {
+        try {
+            const d = await jget(`https://api.bilibili.com/x/web-interface/view?bvid=${c.bvid}`);
+            if (d && d.code === 0 && d.data) {
+                c.danmaku_count = (d.data.stat && d.data.stat.danmaku) || 0;
+                if (!c.title) c.title = d.data.title || '';
+            }
+        } catch (e) { /* 单个失败不影响整体 */ }
+    });
     log(`[候选搜索] 返回 ${list.length} 个候选`);
     return { ok: true, candidates: list };
 }
@@ -1110,7 +1123,19 @@ async function run_candidates(title, bvid, out, threshold) {
     if (!cid) return { ok: false, error: `无法解析 bvid=${bvid} 的 cid` };
     // [lc-1019] 用户手动选定的视频：值得多等一轮复核
     const [ok, all_d] = await try_fetch_danmaku(cid, true);
-    if (!ok || !all_d.length) return { ok: false, error: `bvid=${bvid} 无弹幕数据` };
+    if (!ok || !all_d.length) {
+        // [lc-1171] 区分「视频本身无人发弹幕」与「接口被风控/权限不足」——
+        // 实测案例：搬运候选在 B站官方统计里弹幕数就是 0，拉到空是正确结果，错误信息必须说明这点。
+        let official = null;
+        try {
+            const d = await jget(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`);
+            if (d && d.code === 0 && d.data && d.data.stat) official = d.data.stat.danmaku || 0;
+        } catch (e) { /* 忽略，回退通用错误 */ }
+        if (official === 0) {
+            return { ok: false, error: '该视频在B站的弹幕数为0（视频本身无人发弹幕，常见于搬运/新番无弹幕候选），建议换其他候选或使用自建弹幕源' };
+        }
+        return { ok: false, error: `bvid=${bvid} 无弹幕数据${official !== null ? `（B站统计弹幕数=${official}，可能被风控或需要更高权限），请稍后重试` : ''}` };
+    }
     const block_types = _load_block_types();
     let final = all_d;
     if (block_types.size) final = _filter_danmaku(final, block_types);

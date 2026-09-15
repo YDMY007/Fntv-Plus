@@ -597,9 +597,20 @@ function open_bili_candidates_menu(title, ep, season)
         local cb = tostring(c.bvid or "")
         local is_self = cb:sub(1, 6) == "dmapi:"
         if is_self then has_self_hosted = true end
+        -- [lc-1171] 候选带 B站官方弹幕数：💬N=弹幕条数；0 弹幕的候选在 hint 里直接警告（盲选必失败）
+        local dmTag = ""
+        local dmWarn = ""
+        if c.danmaku_count ~= nil then
+            if (c.danmaku_count or 0) > 0 then
+                dmTag = (" 💬%d"):format(c.danmaku_count)
+            else
+                dmTag = " 💬0"
+                dmWarn = " ⚠️该视频无人发弹幕"
+            end
+        end
         table.insert(new_items, {
-            title = ("%s [%s] %s%s"):format(c.title, c.bvid or "?", src_label, tag),
-            hint = is_self and ("自建源 ID: %s"):format(cb:sub(7)) or ("BV: %s"):format(c.bvid or "未知"),
+            title = ("%s [%s] %s%s%s"):format(c.title, c.bvid or "?", src_label, tag, dmTag),
+            hint = is_self and ("自建源 ID: %s"):format(cb:sub(7)) or ("BV: %s%s"):format(c.bvid or "未知", dmWarn),
             value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", c.bvid or "", title, tostring(ep or 0) },
             keep_open = false, selectable = true,
         })
