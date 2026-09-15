@@ -360,6 +360,14 @@ function open_bili_config_menu()
         value = { "script-message-to", mp.get_script_name(), "bili_show_alias" },
         keep_open = false, selectable = true,
     })
+    -- [lc-1170] 弹幕源延迟设置收编进本菜单（原底栏独立按钮已删）：
+    -- 延迟是「每个弹幕源」的属性（弹弹play/B站/自建源各自可调），与本面板同属弹幕来源域。
+    -- 处理器在 main.lua 的 register_script_message("open_source_delay_menu") —— 与总菜单同款消息路由。
+    table.insert(items, {
+        title = "▶ 弹幕源延迟设置",
+        value = { "script-message-to", mp.get_script_name(), "open_source_delay_menu" },
+        keep_open = false, selectable = true,
+    })
 
     local menu_props = {
         type = "menu_bili_config",
@@ -942,17 +950,9 @@ mp.commandv(
     })
 )
 
-mp.commandv(
-    "script-message-to",
-    "uosc",
-    "set-button",
-    "danmaku_delay",
-    utils.format_json({
-        icon = "more_time",
-        tooltip = "弹幕源延迟设置",
-        command = "script-message open_source_delay_menu",
-    })
-)
+-- [lc-1170] 「弹幕源延迟设置」不再占底栏独立按钮：入口收进「B站弹幕配置」菜单
+-- （open_bili_config_menu 的操作项）与「弹幕设置」总菜单（open_add_total_menu_uosc），
+-- 底栏控件声明同步从 uosc.conf controls 中移除 button:danmaku_delay。
 
 mp.commandv(
     "script-message-to",
