@@ -1108,8 +1108,9 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
         return (str:gsub("([^%w%-%.%_%~])", function(c) return string.format("%%%02X", string.byte(c)) end))
     end
     local api = string.format(
-        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s",
-        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500))
+        -- [lc-1172] ep 透传给 shim：合集/多P 候选按集数取对应分P 的 cid（否则永远只拿首P 弹幕）
+        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s&ep=%s",
+        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500), tostring(ep))
     local platform = mp.get_property("platform") or ""
     local res
     if platform == "windows" then

@@ -732,6 +732,8 @@ class PlaybackShim {
         const bvid = (q.bvid || '').toString();
         const out = (q.out || '').toString();
         const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
+        // [lc-1172] 集数透传：合集/多P 候选按分P 标题匹配取对应集的 cid（缺省 0=首P）
+        const epNum = q.ep ? (parseInt(q.ep.toString(), 10) || 0) : 0;
         if (!title || !bvid || !out) {
             this.json(res, 400, { ok: false, error: '缺少 title / bvid / out 参数' });
             return;
@@ -741,8 +743,8 @@ class PlaybackShim {
             this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
             return;
         }
-        log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'}`);
-        runBiliDanmakuByBvid(title, bvid, out, threshold).then((r) => {
+        log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'} ep=${epNum}`);
+        runBiliDanmakuByBvid(title, bvid, out, threshold, epNum).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku-by-bvid] ✅ 弹幕就绪 | count=${r.danmaku_count} bvid=${r.bvid}`);
                 this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, bvid: r.bvid, cid: r.cid });

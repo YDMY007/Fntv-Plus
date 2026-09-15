@@ -876,17 +876,18 @@ function _filter_danmaku(dm, block_types) {
 }
 
 function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
-    // ── 单源优选：季匹配优先；同季内排除「合集/解说」源，取弹幕最多者 ──
-    // [lc-469] 合集源(isCompilation)不参与首选/聚合优选，避免电视剧兜底时误选
-    // 「一口气看完全集」之类解说合集（弹幕多但非正片）。仅在确实无任何非合集候选时才兜底选用。
+    // ── 单源优选：季匹配优先；同季内取弹幕最多者 ──
+    // [lc-1172] 修订 [lc-469]：合集源(isCompilation)不再一刀切排除。旧逻辑把 389 条弹幕的
+    // 「12集合集(已按集匹配到第1话分P)」输给 17 条弹幕的先行版，用户被迫手动搜索。
+    // 合集的风险场景（解说/一口气看完整集，弹幕时间轴=全剧时长）已由 agg_time_limit
+    // 过滤兜底（解说合集 max_t 远超单集时长）；能通过时长过滤且按集取到分P 的合集，
+    // 其弹幕就是当前集的正片弹幕 —— 与非合集同池比较，取弹幕最多者。
     function pick(pool) {
         if (!pool.length) return null;
         const valid = pool.filter((f) => f[4] <= agg_time_limit);
         const use = valid.length ? valid : pool;
-        const nonComp = use.filter((f) => !(f[2] && f[2].isCompilation));
-        const base = nonComp.length ? nonComp : use; // 全为合集才退而求其次
-        let best = base[0];
-        for (const f of base) if (f[3].length > best[3].length) best = f;
+        let best = use[0];
+        for (const f of use) if (f[3].length > best[3].length) best = f;
         return best;
     }
     const hit = fetched.filter((f) => f[2] && f[2].season_match);
@@ -902,7 +903,9 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
     // 策略：只从「季匹配」候选中聚合（不混入错季弹幕）；
     // 去重用时间窗口 ±AGG_DUP_SEC（同一窗口内相同文本视为重复，保留先出现的）。
     const AGG_DUP_SEC = 2; // 去重时间窗口（秒）
-    const pool = hit.filter((f) => f !== chosen && !(f[2] && f[2].isCompilation)); // 仅季命中且非合集候选参与聚合
+    // [lc-1172] 聚合池放开合集（原排除见 pick 处注释）：合集已按集取分P，弹幕时间轴
+    // 与单集一致，可参与合并；时间轴超限的解说合集仍会被下方 agg_time_limit 跳过。
+    const pool = hit.filter((f) => f !== chosen);
 
     if (pool.length === 0) {
         log(`[聚合] 首选 ${chosen[1]}(${chosen[3].length}条) 不足阈值${agg_threshold}, 无其他季匹配候选可聚合`);
@@ -1112,14 +1115,18 @@ async function search_candidates(title, ep_num, season_num) {
 }
 
 // 由用户选定的 bvid 直接拉取该视频弹幕（手动搜索模式：用户已明确选定视频）。
-async function run_candidates(title, bvid, out, threshold) {
+// [lc-1172] ep_num：手动搜索时 menu 已知的集数 —— 合集/多P 候选按分P 标题匹配取对应集的
+// cid（cid_from_bvid 已支持），否则只能拿首P（第1集）弹幕、选合集候选时其他集全错。
+async function run_candidates(title, bvid, out, threshold, ep_num) {
     if (!title || !bvid || !out) return { ok: false, error: '缺少 title/bvid/out 参数' };
     if (typeof threshold === 'string') threshold = parseInt(threshold, 10);
     if (isNaN(threshold) || !threshold) threshold = 1500;
+    if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
+    if (isNaN(ep_num)) ep_num = 0;
     _refresh_cookie();
     await verify_cookie();
-    log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out}`);
-    const cid = await cid_from_bvid(bvid, 0, title);
+    log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out} ep_num=${ep_num || 0}`);
+    const cid = await cid_from_bvid(bvid, ep_num || 0, title);
     if (!cid) return { ok: false, error: `无法解析 bvid=${bvid} 的 cid` };
     // [lc-1019] 用户手动选定的视频：值得多等一轮复核
     const [ok, all_d] = await try_fetch_danmaku(cid, true);

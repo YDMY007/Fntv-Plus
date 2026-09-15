@@ -214,6 +214,7 @@ export async function runBiliDanmakuByBvid(
     out: string,
     threshold?: number | string,
     timeoutMs = 60000,
+    epNum = 0,
 ): Promise<BiliDanmakuResult> {
     // [lc-1101] 用户从候选列表选定的是自建源条目（伪 bvid = `dmapi:<episodeId>`）→ 按 id 直取。
     //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
@@ -227,7 +228,8 @@ export async function runBiliDanmakuByBvid(
         return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
     }
     try {
-        const runP = Promise.resolve(mod.run_candidates(title, bvid, out, threshold));
+        // [lc-1172] epNum 透传：合集/多P 候选按分P 标题匹配取对应集的 cid
+        const runP = Promise.resolve(mod.run_candidates(title, bvid, out, threshold, epNum));
         let timeoutHandle: NodeJS.Timeout | null = null;
         const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
             timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
