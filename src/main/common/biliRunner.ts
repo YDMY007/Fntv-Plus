@@ -213,8 +213,8 @@ export async function runBiliDanmakuByBvid(
     bvid: string,
     out: string,
     threshold?: number | string,
-    timeoutMs = 60000,
     epNum = 0,
+    timeoutMs = 60000,
 ): Promise<BiliDanmakuResult> {
     // [lc-1101] 用户从候选列表选定的是自建源条目（伪 bvid = `dmapi:<episodeId>`）→ 按 id 直取。
     //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
