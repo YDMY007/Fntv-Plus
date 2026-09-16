@@ -616,10 +616,14 @@ async function search_video(title, ep_num, season_num) {
             });
             for (const [sim, kind, t, bvid, vr, season, cid] of resolved) {
                 if (!cid) continue;
-                // [lc-469] 合集/解说类(kind=2 或命中 BAD_TITLE)标记 isCompilation：
-                // 不参与「首选/聚合优选」，避免电视剧兜底时误选「一口气看完全集」之类。
-                const isCompilation = (kind === 2) || BAD_TITLE.some((k) => t.toLowerCase().indexOf(k) >= 0);
-                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num), isCompilation };
+                // [lc-469] 合集/解说类(kind=2 或命中 BAD_TITLE)标记 isCompilation。
+                // [lc-1172] 选优不再排除合集；[lc-1175] 把两类拆开供 UI 区分展示：
+                //   bad_title=true  → 命中 BAD_TITLE 强信号词（reaction/解说/盘点…，真该避开）
+                //   comp_kind===2   → 仅「全N集/合集」标题（搬运正片多P合集，按集取分P 可放心用）
+                const low = t.toLowerCase();
+                const badTitle = BAD_TITLE.some((k) => low.indexOf(k) >= 0);
+                const isCompilation = (kind === 2) || badTitle;
+                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num), isCompilation, comp_kind: kind, bad_title: badTitle };
                 const tag = tagmap[kind] || '?';
                 const mark = sim >= SIM_LOW ? '' : ' [兜底]';
                 log(`[视频区]${label ? ' (' + label + ')' : ''} sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
@@ -1091,6 +1095,9 @@ async function search_candidates(title, ep_num, season_num) {
         source: (info && info.source) || 'unknown',
         season: (info && info.season_match) ? season_num : 0,
         is_compilation: !!(info && info.isCompilation),
+        // [lc-1175] 供 UI 区分「⚠️解说/二创」与「📁多P合集」（见 search_video info 构造）
+        bad_title: !!(info && info.bad_title),
+        comp_kind: (info && info.comp_kind) !== undefined ? info.comp_kind : null,
         sim: (info && typeof info.sim === 'number') ? info.sim : null,
     }));
     // 按「非合集优先、相似度降序」排序，让正片候选排在前面（合集/解说沉底）

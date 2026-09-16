@@ -592,7 +592,12 @@ function open_bili_candidates_menu(title, ep, season)
     local has_self_hosted = false
     for _, c in ipairs(cands) do
         local src_label = ({ bangumi = "番剧区", video = "视频区" })[c.source] or c.source
-        local tag = c.is_compilation and " ⚠️合集/解说" or ""
+        -- [lc-1175] 标签拆分：BAD_TITLE 命中(解说/reaction/二创…)才是真该避开的「⚠️解说/二创」；
+        -- 仅「全N集」式多P 正片合集标「📁合集」（lc-1172 起选优不排除，已可按集取分P 放心选）。
+        local tag = ""
+        if c.is_compilation then
+            tag = c.bad_title and " ⚠️解说/二创" or " 📁合集"
+        end
         -- [lc-1101] 自建弹幕接口(danmu_api)的候选用 dmapi:<episodeId> 伪 bvid，不能当 BV 号显示
         local cb = tostring(c.bvid or "")
         local is_self = cb:sub(1, 6) == "dmapi:"
