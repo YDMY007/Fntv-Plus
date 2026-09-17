@@ -847,9 +847,58 @@ function openStillLightbox(startIdx: number): void {
  *    绝对定位到面板右列，宿主只提供挂载点。settle 那一刻面板可能未渲染 → 返回 null，
  *    由 _renderCard() 在 fetch resolve 后重试(与季页竞态同一自愈路径)。 */
 const FALLBACK_HOST_MARK = 'data-fnos-card-host';
+/** [lc-1186] 浮动宿主 id：无原生右栏时承载卡片，挂在 body 下（脱离飞牛 React 子树）。 */
+const FLOAT_HOST_ID = 'fnos-beautify-card-float-host';
 /** [lc-1185] 补挂节流：同一 pathname 的补挂次数（防与 React 互相删除时死循环空转）。 */
 let _remountKey = '';
 let _remountCount = 0;
+
+/** [lc-1186] 浮动宿主定位：贴着「右栏」应有的位置（内容列右侧 40%，hero 下方）。
+ *  用 fixed + 视口坐标并监听滚动/尺寸变化重算 —— 这样即使页面滚动发生在内层容器里，
+ *  位置也始终与 hero 对齐（capture 捕获所有滚动来源）。 */
+function _positionFloatHost(): void {
+  const host = document.getElementById(FLOAT_HOST_ID);
+  if (!host) return;
+  const hero = _activeHero();
+  const col = hero ? hero.parentElement : null;
+  if (!hero || !col) return;
+  const cr = col.getBoundingClientRect();
+  const hr = hero.getBoundingClientRect();
+  const gap = 32;   // 与 beautifyStyle I 段 column-gap 一致
+  const w = Math.max(260, (cr.width - gap) * 0.4);
+  const left = cr.left + (cr.width - gap) * 0.6 + gap;
+  const top = hr.bottom + 20;   // 与 I 段 row-gap 一致
+  host.style.left = Math.round(left) + 'px';
+  host.style.top = Math.round(top) + 'px';
+  host.style.width = Math.round(w) + 'px';
+}
+
+let _floatRaf = 0;
+function _onViewportChange(): void {
+  if (_floatRaf) return;
+  _floatRaf = window.requestAnimationFrame(() => { _floatRaf = 0; _positionFloatHost(); });
+}
+
+let _floatListenersArmed = false;
+function _ensureFloatHost(): HTMLElement {
+  let host = document.getElementById(FLOAT_HOST_ID);
+  if (!host) {
+    host = document.createElement('div');
+    host.id = FLOAT_HOST_ID;
+    host.setAttribute(FALLBACK_HOST_MARK, '1');
+    // body 级 fixed 容器：飞牛的 React 只重建它自己管的那棵子树，绝不碰 body 上的外来节点 ——
+    // 这是「自建节点必被 React 清掉」的结构性问题的根治办法（lc-1180/1183/1185 三轮补挂均失败）。
+    host.style.cssText = 'position:fixed;z-index:6;pointer-events:auto;';
+    document.body.appendChild(host);
+  }
+  if (!_floatListenersArmed) {
+    _floatListenersArmed = true;
+    window.addEventListener('scroll', _onViewportChange, true);
+    window.addEventListener('resize', _onViewportChange);
+  }
+  _positionFloatHost();
+  return host;
+}
 
 function _cardHost(): HTMLElement | null {
   const hero = _activeHero();
@@ -858,33 +907,25 @@ function _cardHost(): HTMLElement | null {
   const col = hero.parentElement;
   const third = (col.children[2] as HTMLElement) || null;
   const made0 = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
-  // [lc-1183] ⚠ third **不一定能用**：没有演职人员区的条目（Bangumi 源番常见，季 getEditDetail
-  //  credits:[]），第 3 个子节点正好是原生「IMDB 链接块」，而 beautifyStyle I 段把它
-  //  `display:none` 掉了（含 imdb/tmdb 外链且无 /v/person/ 链接即隐藏）。卡挂进隐藏节点 =
-  //  在 DOM 里但完全不可见 —— 用户观感「右边直接为空」。这里必须按**可见性**判定宿主。
-  const thirdUsable = !!third && getComputedStyle(third).display !== 'none';
-  if (thirdUsable) {
-    // 原生第三栏后来才渲染出来（异步）→ 把此前挂在自建宿主里的卡搬回原生栏（insertBefore 自带移动语义）
-    if (made0 && third !== made0 && made0.parentNode === col) {
+  // 原生第三栏**可见**且不是我们自建的 → 用它（有演职人员区的剧走这条老路，行为一字不变）
+  if (third && third !== made0 && !third.hasAttribute(FALLBACK_HOST_MARK)
+    && getComputedStyle(third).display !== 'none') {
+    if (made0 && made0.parentNode === col) {
       const c = document.getElementById(CARD_ID);
       if (c && made0.contains(c)) third.insertBefore(c, third.firstChild || null);
       if (!made0.firstChild && made0.parentNode) made0.parentNode.removeChild(made0);
     }
     return third;
   }
-  // [lc-1180] 原生第三栏缺失/不可见 → 自建一个空容器作为 :nth-child(3)。
-  //  ⚠ 不能只建卡不建栏：beautifyStyle 的 COL 选择器带 `:has(> :nth-child(3))`，
-  //  没有第 3 个子节点时整段两栏 Grid 布局（grid-area:2/2 右列）压根不匹配。
-  if (made0 && made0.parentNode === col) return made0;
-  const host = document.createElement('div');
-  host.setAttribute(FALLBACK_HOST_MARK, '1');
-  // 插到 third 之前：自建容器成为 :nth-child(3)，被隐藏的原节点顺延（仍被隐藏规则命中，
-  // display:none 不参与 grid 布局，不会多出空行）
-  if (third && third.parentNode === col) col.insertBefore(host, third);
-  else col.appendChild(host);
-  dlog('[lc-1183] 季页第三栏不可用'
-    + (third ? '(被 CSS 隐藏, 疑似原生 IMDB 块)' : '(不存在)') + ', 自建右栏宿主承载 TMDB 卡');
-  return host;
+  // [lc-1186] 无可用的原生第三栏（不存在 / 是被 CSS 隐藏的原生块）→ **body 级浮动宿主**。
+  //  历史教训：lc-1180/1183 试过在 col 里自建同级容器，lc-1185 试过零尺寸补挂 —— 全部失败，
+  //  因为 React 渲染第 3 个子节点时会重建 col 的子节点列表，把它不认识的自建节点连同卡一起
+  //  清掉（实机诊断 children=3 里始终没有自建宿主，卡最终落在被 display:none 的原生块里，0×0）。
+  //  浮动宿主挂在 body 上，React 绝不触碰；位置用 fixed 贴合右栏应有的区域（滚动/缩放重算）。
+  const orphan = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
+  if (orphan && orphan.parentNode === col) orphan.parentNode.removeChild(orphan);
+  dlog('[lc-1186] 季页无可用原生右栏, 启用 body 级浮动宿主承载 TMDB 卡');
+  return _ensureFloatHost();
 }
 
 function _ensureCardEl(): HTMLElement | null {
