@@ -932,7 +932,8 @@ function _ensureFloatHost(): HTMLElement {
     host.setAttribute(FALLBACK_HOST_MARK, '1');
     // body 级容器：飞牛的 React 只重建它自己管的那棵子树，绝不碰 body 上的外来节点 ——
     // 这是「自建节点必被 React 清掉」的结构性问题的根治办法（lc-1180/1183/1185 三轮补挂均失败）。
-    host.style.cssText = 'z-index:6;pointer-events:auto;';
+    // position 初值给 absolute：避免在首次定位前作为流内元素把页面布局挤一下。
+    host.style.cssText = 'position:absolute;left:0;top:0;z-index:6;pointer-events:auto;';
     document.body.appendChild(host);
   }
   if (!_floatListenersArmed) {
@@ -944,8 +945,18 @@ function _ensureFloatHost(): HTMLElement {
   return host;
 }
 
+/** [lc-1189] 原生「IMDB/豆瓣链接块」的特征类（与 beautifyStyle I 段的隐藏规则同源判据）。
+ *  ⚠ 它**绝不能当卡片宿主**：只是外链行，不是信息栏。此前按"可见性"判定时，若该块因
+ *  没有 imdb/tmdb 外链而未被 CSS 隐藏（display:block），就会被误判成可用右栏，卡被挂进去后
+ *  恒为 0×0（实机：children[2]=DIV[box-border w-full px-[46px]]{block}，重建 5 次全失败）。 */
+const LINK_BLOCK_RE = /px-\[46px\]/;
+
+/** 已知不适合承载卡片的宿主（运行时探测）：一旦某个原生宿主让卡量到零尺寸就拉黑，
+ *  后续一律改用浮动宿主 —— 结构变化时的自动降级，避免"选了坏宿主 → 重建 → 还是坏宿主"的死循环。 */
+const _badHosts = new WeakSet<Element>();
+
 /** [lc-1188] 季页「首选原生宿主」判定（**无副作用**，不建浮动宿主）：
- *  第 3 个子节点存在、可见、且不是我们自建的 → 就是它；否则 null（表示该走浮动宿主）。
+ *  第 3 个子节点存在、不是链接块、不是自建宿主、可见、且没被拉黑 → 就是它；否则 null（走浮动宿主）。
  *  单独抽出来的理由：`ensureTmdbCard` 要判断"卡是否待在正确宿主里"，不能顺手把浮动宿主建出来。 */
 function _preferredNativeHost(): HTMLElement | null {
   if (_isOneLevel()) return null;
@@ -954,6 +965,8 @@ function _preferredNativeHost(): HTMLElement | null {
   if (!col) return null;
   const third = (col.children[2] as HTMLElement) || null;
   if (!third || third.hasAttribute(FALLBACK_HOST_MARK)) return null;
+  if (_badHosts.has(third)) return null;
+  if (LINK_BLOCK_RE.test(String(third.className || ''))) return null;
   return getComputedStyle(third).display !== 'none' ? third : null;
 }
 
@@ -1091,7 +1104,16 @@ function _renderCard(): void {
   window.setTimeout(() => {
     const c = document.getElementById(CARD_ID) as HTMLElement | null;
     logMountDiag('已挂载', c);
-    if (c && c.offsetHeight === 0 && c.offsetWidth === 0) ensureTmdbCard();
+    if (c && c.offsetHeight === 0 && c.offsetWidth === 0) {
+      // [lc-1189] 零尺寸 → 先把当前宿主拉黑（仅限原生宿主；浮动宿主零尺寸是位置/样式问题，
+      //  拉黑它会导致无宿主可用）。下次选宿主时就会自动降级到浮动宿主，不再死循环重建同一个坏宿主。
+      const p = c.parentNode as HTMLElement | null;
+      if (p && p.id !== FLOAT_HOST_ID) {
+        _badHosts.add(p);
+        dlog('[lc-1189] 宿主 ' + p.tagName + '[' + String(p.className || '').substring(0, 24) + '] 致卡零尺寸 → 拉黑, 改用浮动宿主');
+      }
+      ensureTmdbCard();
+    }
   }, 400);
   _disarmMountRetry(); // 已挂上，重试链收队
   let body = '';
