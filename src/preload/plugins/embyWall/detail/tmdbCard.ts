@@ -944,28 +944,44 @@ function _ensureFloatHost(): HTMLElement {
   return host;
 }
 
+/** [lc-1188] 季页「首选原生宿主」判定（**无副作用**，不建浮动宿主）：
+ *  第 3 个子节点存在、可见、且不是我们自建的 → 就是它；否则 null（表示该走浮动宿主）。
+ *  单独抽出来的理由：`ensureTmdbCard` 要判断"卡是否待在正确宿主里"，不能顺手把浮动宿主建出来。 */
+function _preferredNativeHost(): HTMLElement | null {
+  if (_isOneLevel()) return null;
+  const hero = _activeHero();
+  const col = hero ? hero.parentElement : null;
+  if (!col) return null;
+  const third = (col.children[2] as HTMLElement) || null;
+  if (!third || third.hasAttribute(FALLBACK_HOST_MARK)) return null;
+  return getComputedStyle(third).display !== 'none' ? third : null;
+}
+
 function _cardHost(): HTMLElement | null {
   const hero = _activeHero();
   if (!hero || !hero.parentElement) return null;
   if (_isOneLevel()) return _pagePanel(); // [lc-1028] Series/Movie：卡挂进各自面板，O8b/N8b 绝对定位右列
   const col = hero.parentElement;
-  const third = (col.children[2] as HTMLElement) || null;
+  const native = _preferredNativeHost();
   const made0 = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
-  // 原生第三栏**可见**且不是我们自建的 → 用它（有演职人员区的剧走这条老路，行为一字不变）
-  if (third && third !== made0 && !third.hasAttribute(FALLBACK_HOST_MARK)
-    && getComputedStyle(third).display !== 'none') {
+  // 原生第三栏可用 → 用它（有演职人员区的剧走这条老路，行为一字不变）
+  if (native) {
     if (made0 && made0.parentNode === col) {
       const c = document.getElementById(CARD_ID);
-      if (c && made0.contains(c)) third.insertBefore(c, third.firstChild || null);
+      if (c && made0.contains(c)) native.insertBefore(c, native.firstChild || null);
       if (!made0.firstChild && made0.parentNode) made0.parentNode.removeChild(made0);
     }
-    return third;
+    // [lc-1188] 卡已搬回原生栏 → 浮动宿主（若空）一并撤掉，避免残留干扰后续判定
+    const fh = document.getElementById(FLOAT_HOST_ID);
+    if (fh && !fh.firstChild && fh.parentNode) fh.parentNode.removeChild(fh);
+    return native;
   }
-  // [lc-1186] 无可用的原生第三栏（不存在 / 是被 CSS 隐藏的原生块）→ **body 级浮动宿主**。
-  //  历史教训：lc-1180/1183 试过在 col 里自建同级容器，lc-1185 试过零尺寸补挂 —— 全部失败，
-  //  因为 React 渲染第 3 个子节点时会重建 col 的子节点列表，把它不认识的自建节点连同卡一起
-  //  清掉（实机诊断 children=3 里始终没有自建宿主，卡最终落在被 display:none 的原生块里，0×0）。
-  //  浮动宿主挂在 body 上，React 绝不触碰；位置用 fixed 贴合右栏应有的区域（滚动/缩放重算）。
+  // [lc-1186] 无可用的原生第三栏（不存在 / 是被 CSS 隐藏的原生块 / 演职人员区尚未渲染）→
+  //  **body 级浮动宿主**。历史教训：lc-1180/1183 试过在 col 里自建同级容器，lc-1185 试过零尺寸
+  //  补挂 —— 全部失败，因为 React 渲染第 3 个子节点时会重建 col 的子节点列表，把它不认识的
+  //  自建节点连同卡一起清掉（实机诊断 children=3 里始终没有自建宿主，卡最终落在 display:none
+  //  的原生块里，0×0）。浮动宿主挂在 body 上，React 绝不触碰；位置贴合右栏应有的区域。
+  //  ⚠ 这是**兜底**不是默认：原生栏稍后渲染出来时，由 _ensureCardEl/ensureTmdbCard 把卡搬回去。
   const orphan = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
   if (orphan && orphan.parentNode === col) orphan.parentNode.removeChild(orphan);
   dlog('[lc-1186] 季页无可用原生右栏, 启用 body 级浮动宿主承载 TMDB 卡');
@@ -973,10 +989,19 @@ function _cardHost(): HTMLElement | null {
 }
 
 function _ensureCardEl(): HTMLElement | null {
-  let card = document.getElementById(CARD_ID) as HTMLElement | null;
-  if (card) return card;
   const host = _cardHost();
   if (!host) return null;
+  let card = document.getElementById(CARD_ID) as HTMLElement | null;
+  if (card) {
+    // [lc-1188] 卡已在别处（首次渲染时原生栏还没出现，先挂了浮动宿主）→ **搬到当前首选宿主**。
+    //  旧写法在此处直接 `return card`，导致原生右栏事后渲染出来也永远搬不回去 ——
+    //  实机现象：所有季页（含带演职人员的正常剧）全部留在「悬浮」形态。
+    if (card.parentNode !== host) {
+      dlog('[lc-1188] 卡片宿主变更 → 搬迁到首选宿主');
+      host.insertBefore(card, host.firstChild || null);
+    }
+    return card;
+  }
   card = document.createElement('div');
   card.id = CARD_ID;
   card.className = 'fnos-beautify-card';
@@ -1226,12 +1251,25 @@ export function ensureTmdbCard(): void {
   if (!_isSeasonRoute() && !_isOneLevel()) return;                    // 非卡片路由
   if (!_tmdbInfoData && !_tmdbInfoLoading && !_tmdbInfoError) return; // 从未拉取过（交给正常 schedule 流程）
   const card = document.getElementById(CARD_ID) as HTMLElement | null;
-  if (card && card.offsetHeight > 0 && card.offsetWidth > 0) return;  // 健康（可见且已布局）
+  const healthy = !!card && card.offsetHeight > 0 && card.offsetWidth > 0;
+  // [lc-1188] 「健康」还不够，**宿主也要对**：季页首选原生栏（无则浮动宿主）；一级页是聚簇面板。
+  //  否则会出现「卡一切正常，只是待错地方」—— 典型就是首次渲染时原生右栏还没出现、先挂了浮动宿主，
+  //  此后演职人员区渲染出来也没人把它搬回去（旧判定直接 return），实机现象「所有季页全变悬浮」。
+  const native = _preferredNativeHost();
+  const floatHost = document.getElementById(FLOAT_HOST_ID);
+  const want: HTMLElement | null = _isOneLevel() ? _pagePanel() : (native || floatHost);
+  if (healthy && card && want && card.parentNode === want) return;     // 一切正常
   // 同页补挂次数上限：避免极端情况下与 React 互相删除形成死循环（空转 CPU）
   const k = location.pathname;
   if (_remountKey !== k) { _remountKey = k; _remountCount = 0; }
   if (_remountCount >= 5) return;
   _remountCount++;
+  if (healthy && card) {
+    // 内容完好、只是待错宿主 → 搬迁（保持已渲染内容，零重建、零网络）
+    dlog('[lc-1188] 卡片宿主不对 → 搬迁到首选宿主(' + _remountCount + '/5)');
+    _ensureCardEl();
+    return;
+  }
   if (card) {
     dlog('[lc-1185] 卡存在但零尺寸(宿主脱离布局) → 重建挂点(' + _remountCount + '/5)');
     if (card.parentNode) card.parentNode.removeChild(card);
