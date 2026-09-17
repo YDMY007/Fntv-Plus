@@ -691,6 +691,11 @@ const CREW_JOBS = {
         'Set Decoration', 'Costume Design', 'VFX Supervisor', '3D Director', 'CGI Director'],
 } as const;
 
+/** [lc-1181] 剧名 → TMDB id 的进程内缓存（跨路由复用；主进程常驻，随应用重启失效）。
+ *  只缓存「标题搜索解析出的 id」，有显式 tmdbId 时根本不走搜索，无需缓存。 */
+const _titleIdCache = new Map<string, { id: number; at: number }>();
+const TITLE_ID_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 function titleSlug(title: string): string {
     return crypto.createHash('md5').update(String(title || '')).digest('hex').slice(0, 12);
 }
@@ -799,8 +804,22 @@ async function resolveShowId(
     // [lc-945] 去掉标题尾部「第N季 / Season N / S01」等季号，避免污染 TMDB 搜索(季号由 seasonNumber 单独传)
     title = title.replace(/\s*(第\s*[0-9一二三四五六七八九十百]+\s*季|season\s*\d{1,3}|s\s*\d{1,3})\s*$/i, '').trim();
     if (!title) return null;
+    // [lc-1181] 跨路由复用「剧名 → TMDB id」：详情缓存 key 带季号后缀(show_v2_tv_<slug>_s1 / _sx)，
+    //   同一部剧在**一级页与季页各搜一次**。译名与飞牛/Bangumi 刮削名有出入时（实机：飞牛「…打垮祖国～」
+    //   对 TMDB「…碾碎祖国～」，一字之差）季页会搜不到，而一级页刚解析成功过 —— 用户观感
+    //   「一级详情页有数据，二级页刷新却说不存在」。这里把已解析的 id 按剧名缓存起来，
+    //   后续同名词条（不论哪个页面/季号）直接复用，不再各自重搜。
+    //   force 刷新同样复用：它只省掉一次搜索，详情/分集数据仍按 force 重新拉取。
+    const idCacheKey = mt + '_' + titleSlug(title);
+    const hit = _titleIdCache.get(idCacheKey);
+    if (hit && (Date.now() - hit.at) < TITLE_ID_TTL_MS) {
+        log.info('[TMDB][lc-1181] 复用已解析 id ' + hit.id + ' ← "' + title + '"');
+        return hit.id;
+    }
     const best = await tmdbSearchBest(client, baseParams, mt, title, arg.year);
-    return best ? best.id : null;
+    const id = best ? best.id : null;
+    if (id != null) _titleIdCache.set(idCacheKey, { id, at: Date.now() });
+    return id;
 }
 
 /** 归一化 TMDB 详情 + append_to_response 的多个子响应为「剧集信息」渲染所需的扁平结构 */
