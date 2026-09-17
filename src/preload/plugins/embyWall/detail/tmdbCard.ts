@@ -908,6 +908,41 @@ function _ensureCardEl(): HTMLElement | null {
   return card;
 }
 
+/** [lc-1184] 卡片挂载诊断：一次性输出宿主结构/可见性/卡内容量，便于定位「右侧为空」的真因。
+ *  同一 pathname + 同一 tag 只打一次，避免渲染循环刷屏。 */
+let _mountDiagKey = '';
+function logMountDiag(tag: string, card?: HTMLElement | null): void {
+  const k = location.pathname + '|' + tag;
+  if (_mountDiagKey === k) return;
+  _mountDiagKey = k;
+  try {
+    const hero = _activeHero();
+    const col = hero ? hero.parentElement : null;
+    if (!col) { log('[lc-1184][卡诊断] ' + tag + ' | hero 未找到'); return; }
+    const kids: string[] = [];
+    for (let i = 0; i < col.children.length; i++) {
+      const el = col.children[i] as HTMLElement;
+      kids.push(i + ':' + el.tagName + '[' + String(el.className || '').replace(/\s+/g, ' ').substring(0, 26)
+        + ']{' + getComputedStyle(el).display + '}');
+    }
+    const cs = getComputedStyle(col);
+    const stills = (_tmdbInfoData && Array.isArray((_tmdbInfoData as any).backdrops))
+      ? ((_tmdbInfoData as any).backdrops as any[]).filter(Boolean).length : -1;
+    log('[lc-1184][卡诊断] ' + tag
+      + ' | children=' + col.children.length
+      + ' | details=' + !!col.querySelector('[data-id="details"]')
+      + ' | beautify=' + document.body.classList.contains('fnos-beautify')
+      + ' | col{' + cs.display + '/' + cs.gridTemplateColumns + '}'
+      + ' | stills=' + stills
+      + (card ? (' | card{h=' + card.offsetHeight + ',w=' + card.offsetWidth
+          + ',display=' + getComputedStyle(card).display
+          + ',html=' + card.innerHTML.length + '}') : ' | card=(未挂载)')
+      + ' | ' + kids.join(' ~ '));
+  } catch (e) {
+    log('[lc-1184][卡诊断] err ' + String(e).substring(0, 80));
+  }
+}
+
 function _renderCard(): void {
   // [lc-1010] 系列页：TMDB 失败 → 卡已被 _fetch 撤除，这里不再重建错误框
   // （面板 :has(> .fnos-beautify-card) 失配自动收窄回 600px 单列）；季页维持错误框不变。
@@ -915,14 +950,25 @@ function _renderCard(): void {
   const card = _ensureCardEl();
   if (!card) {
     // [lc-1020] 宿主（季页演职人员区 / 系列页面板）还没渲染 → 有界重试，不再永久放弃
+    logMountDiag('宿主缺失');
     _armMountRetry();
     return;
   }
+  // [lc-1184] 挂载后延迟 400ms 量一次卡的真实尺寸/内容量（此时内容与图片已填充）——
+  //  「卡在 DOM 但不可见」与「卡可见但空白」是两种完全不同的故障，靠这条一眼区分。
+  window.setTimeout(() => logMountDiag('已挂载', document.getElementById(CARD_ID)), 400);
   _disarmMountRetry(); // 已挂上，重试链收队
   let body = '';
   // [lc-1022] 二级(季)页只渲染「剧照」以后的分节 —— 评分/标语/meta/事实/主创/本季与一级页右栏的
   // 同一张卡逐字重复；一级页维持全量。
-  if (_tmdbInfoData) body = buildCardHtml(_tmdbInfoData, { fromStillsOnly: _isSeasonRoute() });
+  // [lc-1184] ⚠ 裁剪版式**以「剧照」为首节**：TMDB 没有剧照时（Bangumi 源新番常见）裁剪后
+  //  整卡只剩页脚，用户观感就是「右边直接为空」。故无剧照时回退全量内容 —— 宁可信息冗余也不留白。
+  if (_tmdbInfoData) {
+    const stillsN = Array.isArray(_tmdbInfoData.backdrops) ? _tmdbInfoData.backdrops.filter(Boolean).length : 0;
+    const trim = _isSeasonRoute() && stillsN > 0;
+    if (_isSeasonRoute() && !trim) dlog('[lc-1184] 本季 TMDB 无剧照, 季页卡回退全量内容(避免空白卡)');
+    body = buildCardHtml(_tmdbInfoData, { fromStillsOnly: trim });
+  }
   // [lc-1039] 季页 loading 换骨架占位（用户要求「骨架图占位」）：按最终版式铺脉冲灰块而非一行文字，
   //   数据到齐整块替换，避免右栏从「什么都没有→一行字→整卡内容」两次跳变。
   //   磁盘缓存命中时 fetch 毫秒级返回，骨架只闪现一瞬甚至不出现。一级页维持原文字（卡在聚簇面板内，另有入场动画）。
