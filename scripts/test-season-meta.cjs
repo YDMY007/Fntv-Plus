@@ -11,7 +11,7 @@ Module._load = function (req) {
   }
   return _load.apply(this, arguments);
 };
-const { stripSeasonSuffix } = require('../dest/preload/plugins/embyWall/detail/epBackfill.js');
+const { stripSeasonSuffix, parseCardNum } = require('../dest/preload/plugins/embyWall/detail/epBackfill.js');
 const { extractTmdbId, extractBangumiId } = require('../dest/preload/plugins/embyWall/carousel/api.js');
 
 let n = 0;
@@ -42,4 +42,13 @@ const tmSeason = { trim_id: 'tm250008', title: '转学后班上的清纯可爱�
 eq(extractTmdbId(tmSeason), '250008', 'TMDB 源仍解析正确');
 eq(extractBangumiId(tmSeason), undefined, 'TMDB 源不误判为 Bangumi');
 
-console.log('✅ lc-1176 断言全通过 (' + n + ' 项)');
+// ── [lc-1178] parseCardNum：选集卡文本 → 集号（空壳集的唯一集号来源）──
+eq(parseCardNum('8 夏日的回忆碎片'), 8, '真机截图形态: 数字前缀+标题');
+eq(parseCardNum('12 两人的约定 本季大结局 0% 评个分吧!'), 12, '带胶囊文本的整串 textContent');
+eq(parseCardNum('第 11 集'), 11, '占位标题形态');
+eq(parseCardNum('Episode 4'), 4, '英文占位');
+eq(parseCardNum('夏日的回忆碎片'), null, '无集号前缀 → null(不瞎猜)');
+eq(parseCardNum('3月的狮子'), null, '数字后无空白不入集号(防标题误判)');
+eq(parseCardNum(''), null, '空串');
+
+console.log('✅ lc-1176/1178 断言全通过 (' + n + ' 项)');

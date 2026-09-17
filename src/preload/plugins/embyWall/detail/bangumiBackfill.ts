@@ -17,7 +17,7 @@
 import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
 import { fnosGetEditDetail } from '../carousel/logo';
-import { decideField, hasCJK, isPlaceholderTitle, patchEpisodeCard, epNumFromTitle } from './epBackfill';
+import { decideField, hasCJK, isPlaceholderTitle, patchEpisodeCard, epNumFromTitle, epNumFromCard } from './epBackfill';
 import { S } from '../state';
 // [lc-1177] 自建刮削服务通道（第二数据源）：Bangumi 未匹配时回落。
 //   该模块不再自己挂按钮，故其设置自举依赖本模块对它的 import 触发。
@@ -306,10 +306,12 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
                     const ed = await fnosGetEditDetail(origin, ep.guid);
                     if (!ed) { stats.failed++; tick(); continue; }
                     // [多源刮削] 集号解析链(同 epBackfill): fnOS 0.9.8 无 index_number →
-                    //  标题「第 N 集」解析 → item/list 序号 → 播出日期唯一匹配
+                    //  标题「第 N 集」解析 → item/list 序号 → [lc-1178] 选集卡文本集号 → 播出日期唯一匹配
+                    //  (Bangumi 源常出现 title/air_date 全空的空壳集, 但 UI 卡片始终渲染集号)
                     const num = numOrNull(ed.index_number ?? ed.index ?? ed.episode_number)
                         ?? epNumFromTitle(String(ed.title ?? ed.name ?? ''))
-                        ?? ep.index;
+                        ?? ep.index
+                        ?? epNumFromCard(ep.guid);
                     let t = (num !== null) ? bgByNum.get(num) : undefined;
                     if (!t && ed.air_date) {
                         const byDate = bgByDate.get(String(ed.air_date));

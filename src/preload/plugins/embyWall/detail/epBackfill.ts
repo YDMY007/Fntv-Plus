@@ -89,6 +89,29 @@ export function epNumFromTitle(t: string): number | null {
     return m ? parseInt(m[1], 10) : null;
 }
 
+/** [lc-1178] 选集卡文本 → 集号（纯函数，验证脚本直测）。
+ *  fnOS 对元数据全空的集仍会在选集卡标题行渲染集号（真机截图实锤「8 夏日的回忆碎片」，
+ *  首文本节点就是「8」），所以卡内 <p> 的整串文本可解析出集号。 */
+export function parseCardNum(text: string): number | null {
+    const s = (text || '').trim();
+    const m = s.match(/^第\s*(\d{1,4})\s*[集话話]/) || s.match(/^(?:Episode|EP\.?)\s*(\d{1,4})\b/i)
+        || s.match(/^(\d{1,4})(?:\s|$)/);
+    return m ? parseInt(m[1], 10) : null;
+}
+
+/** [lc-1178] DOM 选集卡兜底集号：仅当 getEditDetail 无 index/title 且 item/list 无序号时调用
+ *  （每集一次 querySelector，不在渲染循环内）。找不到卡片（虚拟窗口未渲染）返回 null。 */
+export function epNumFromCard(epGuid: string): number | null {
+    const view = findActiveDetailView();
+    if (!view) return null;
+    const link = view.querySelector<HTMLAnchorElement>('a[href="/v/tv/episode/' + epGuid + '"]');
+    if (!link) return null;
+    const card = link.closest('[data-id="details"]') as HTMLElement | null;
+    const p = (link.querySelector('p') as HTMLElement | null)
+        || (card ? (card.querySelector('p') as HTMLElement | null) : null);
+    return parseCardNum((p && p.textContent) || '');
+}
+
 /** DOM 兜底解析季号（getEditDetail 没有 index_number 时用；只认数字/中文数字两种形态）。 */
 function cnNumToInt(s: string): number {
   const map: Record<string, number> = { 零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
@@ -501,6 +524,15 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
     // 3) 飞牛枚举本季集（item/list 为主，DOM 回落）
     let episodes = await fnosEpisodeList(origin, guid).catch(() => [] as { guid: string; index: number | null }[]);
     if (!episodes.length) episodes = episodeGuidsFromDom();
+    // [lc-1178] item/list 可能漏集（实测「本季大结局」未播集不返回：接口 11 集、页面 12 张卡）
+    //  → DOM 卡片比接口多时，把多出的 guid 并进来回填；集号由解析链的 epNumFromCard 兜底。
+    const domEps = episodeGuidsFromDom();
+    if (domEps.length > episodes.length) {
+        const have = new Set(episodes.map((e) => e.guid));
+        let merged = 0;
+        for (const d of domEps) if (!have.has(d.guid)) { episodes.push(d); merged++; }
+        if (merged) log('[epBackfill] item/list 比页面卡片少 ' + merged + ' 集, 已从 DOM 并入');
+    }
     if (!episodes.length) throw new Error('未枚举到本季任何集（item/list 与 DOM 都为空）');
     stats.total = episodes.length;
 
@@ -513,10 +545,13 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
                     const ed = await fnosGetEditDetail(origin, ep.guid);
                     if (!ed) { stats.failed++; tick(); continue; }
                     // [多源刮削] 集号解析链: fnOS 0.9.8 实测 getEditDetail/item/list 都不带 index_number
-                    //  (旧实现此处全 unmatched) → 补「标题『第 N 集』解析」与「播出日期唯一匹配」两级兜底
+                    //  (旧实现此处全 unmatched) → 补「标题『第 N 集』解析」「播出日期唯一匹配」与
+                    //  [lc-1178]「选集卡文本集号」三级兜底 —— Bangumi 源常出现 title/air_date 全空的空壳集
+                    //  (2026-09-17 实测 11 集中 6 集全空 → unmatched=6)，但 UI 卡片上始终渲染着集号。
                     const num = numOrNull(ed.index_number ?? ed.index ?? ed.episode_number)
                         ?? epNumFromTitle(String(ed.title ?? ed.name ?? ''))
-                        ?? ep.index;
+                        ?? ep.index
+                        ?? epNumFromCard(ep.guid);
                     let t = (num !== null) ? tmdbByNum.get(num) : undefined;
                     if (!t && ed.air_date) {
                         const byDate = tmdbByDate.get(String(ed.air_date));
