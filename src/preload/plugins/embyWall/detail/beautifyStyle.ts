@@ -136,6 +136,17 @@ body.fnos-beautify ${COL} > ${HERO}{ grid-area:1 / 1 / 2 / 3 !important; }
 body.fnos-beautify ${COL} > :nth-child(2){ grid-area:2 / 1 / 3 / 2 !important; min-width:0 !important; }
 /* 演职人员 + 注入的剧集信息卡：右列 row2（占 4 成，顶部对齐） */
 body.fnos-beautify ${COL} > :nth-child(3){ grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important; }
+/* [lc-1192] 无演职人员区条目的自建右栏宿主：**尾插到 col 末尾**（绝不与 React 争子节点顺序，
+   那会形成 insertBefore 乒乓 → 微任务风暴 → 主线程卡死），位置改用属性选择器 + 显式
+   grid-area 指定 —— 与 React 的子节点排序彻底解耦，插在哪个位置都落在右列。 */
+body.fnos-beautify ${COL} > [data-fnos-card-host]{
+  grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important;
+}
+/* 该宿主存在（= 该条目没有演职人员区）时，原生「链接块」让位：它没有显式 grid-area，
+   auto-placement 会掉到第三行挤出版面，且会与卡片争右列格子。 */
+body.fnos-beautify ${COL}:has(> [data-fnos-card-host]) > div[class*="px-[46px]"]{
+  display:none !important;
+}
 /* 右列清框：原生容器若带 border/底色/阴影，会与卡内分隔线拼出「半闭合框」→ 一律抹掉。
    唯一豁免 .fnos-beautify-card（我们注入的 TMDB 信息卡）：用户要求右栏「只要一个大的容器包起来」，
    那个容器就是它。若不豁免，这条规则的特异性(COL 的 :has 链 + body.fnos-beautify = 0,5,1)会压过

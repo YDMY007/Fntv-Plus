@@ -859,9 +859,9 @@ let _remountCount = 0;
  *  React 的摘除与我们的重插都发生在同一次渲染之前，视觉上完全无感；节点自身有引用，内容不丢。
  *  （浮动定位虽然稳，但卡片不占文档流、右列空着、滚动表现也不同 —— 用户明确要"和正常的那样"。） */
 let _colHost: HTMLElement | null = null;       // 自建的 col 内宿主
-let _colHostRef: Node | null = null;           // 原定插入位置的下一个兄弟（原生 IMDB 块）
 let _colHostCol: HTMLElement | null = null;
 let _colHostObs: MutationObserver | null = null;
+let _colHostLastPut = 0;                       // [lc-1192] 补插节流（防与 React 互删时微任务风暴卡死主线程）
 
 function _armColHostGuard(col: HTMLElement): void {
   if (_colHostCol === col && _colHostObs) return;
@@ -875,33 +875,33 @@ function _armColHostGuard(col: HTMLElement): void {
       _colHost = null;
       return;
     }
-    // [lc-1191] 位置也要校验：React 重排时可能把宿主挤到第 4 位 —— 而 beautifyStyle 的
-    // 「隐藏第 4 个子节点」规则(nth-child(4):has(imdb/tmdb 外链))会命中**自带 IMDb/TMDB
-    // 外链行的卡片**，把宿主连带卡一起 display:none（实机：card{h=0,w=0} 而宿主在 col 里）。
-    // CSS 侧已加 :not([data-fnos-card-host]) 豁免，这里再把位置纠正回 :nth-child(3) 双保险。
-    if (h.parentNode === col && col.children[2] === h) return;   // 已在第 3 位 → 收工
-    const ref = (_colHostRef && _colHostRef.parentNode === col) ? _colHostRef : null;
-    col.insertBefore(h, ref);                      // 微任务内放回，渲染前完成，无闪烁
+    if (h.parentNode === col) return;              // 还在 col 里 → 收工
+    // [lc-1192] ⚠ 只做 **appendChild 追加**，绝不用 insertBefore 抢位置：
+    //  lc-1191 的「强制纠正到 :nth-child(3)」与 React 的子节点排序互相冲突 —— 双方都是同步
+    //  DOM 操作 + 各自触发新的 Mutation → 微任务风暴 → 主线程卡死（用户实测打开季页即死）。
+    //  位置交由 CSS 显式 grid-area 指定（beautifyStyle 新增 [data-fnos-card-host] 规则），
+    //  顺序谁先谁后都无所谓，双方不再争抢同一资源。
+    const now = Date.now();
+    if (now - _colHostLastPut < 100) return;       // 100ms 节流
+    _colHostLastPut = now;
+    col.appendChild(h);
   });
   _colHostObs.observe(col, { childList: true });
 }
 
-/** 取/建 col 内的自建右栏宿主：插到原生 IMDB 块之前，使其成为 :nth-child(3) 从而拿到 grid 右列。 */
+/** 取/建 col 内的自建右栏宿主：**appendChild 追加到 col 末尾**（绝不插队），
+ *  grid 右列位置由 beautifyStyle 的 [data-fnos-card-host] 显式规则指定。 */
 function _ensureColHost(col: HTMLElement): HTMLElement {
   _armColHostGuard(col);
   if (_colHost) {
-    if (_colHost.parentNode !== col) {
-      const ref = (_colHostRef && _colHostRef.parentNode === col) ? _colHostRef : null;
-      col.insertBefore(_colHost, ref);
-    }
+    if (_colHost.parentNode !== col) col.appendChild(_colHost);
     return _colHost;
   }
   const h = document.createElement('div');
   h.setAttribute(FALLBACK_HOST_MARK, '1');
-  _colHostRef = (col.children[2] as Node) || null;
   _colHost = h;
-  col.insertBefore(h, _colHostRef);
-  dlog('[lc-1190] 季页无原生右栏(演职人员区未渲染), 自建 col 内右栏宿主 + 同步保活');
+  col.appendChild(h);
+  dlog('[lc-1192] 季页无原生右栏(演职人员区未渲染), 自建 col 内右栏宿主(尾插+CSS 定位)');
   return h;
 }
 
@@ -1217,7 +1217,6 @@ export function removeTmdbCard(): void {
   }
   // [lc-1190] 自建宿主引用与同步守卫一并复位（换页后 col 会换成新节点）
   _colHost = null;
-  _colHostRef = null;
   _colHostCol = null;
   if (_colHostObs) { _colHostObs.disconnect(); _colHostObs = null; }
   _remountKey = '';
