@@ -356,8 +356,10 @@ async function fnosGet(origin: string, path: string): Promise<any | null> {
 
 const GUID32 = /^[a-f0-9]{32}$/;
 
-/** 季 guid → 父级「剧集」guid：季详情 parent 系字段 → GET /v/api/v1/item/{guid} 再探。 */
-async function resolveSeriesGuid(origin: string, sg: string, seasonData: any): Promise<string | null> {
+/** 季 guid → 父级「剧集」guid：季详情 parent 系字段 → GET /v/api/v1/item/{guid} 再探。
+ *  [lc-1182] 导出供 tmdbCard.loadShowMeta 复用 —— 季层 title/tmdbId 双空时向上找剧集层
+ *  （与一级详情页同一条数据源，剧名一致 → 可命中主进程的「剧名→id」复用缓存）。 */
+export async function resolveSeriesGuid(origin: string, sg: string, seasonData: any): Promise<string | null> {
   const pick = (d: any): string | null => {
     if (!d) return null;
     const c = d.parent_guid || d.parent_id || d.parent_item_guid || d.series_guid || d.show_guid

@@ -12,6 +12,7 @@ import { dlog, log } from '../log';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
+import { resolveSeriesGuid } from './epBackfill';
 
 const CARD_ID = 'fnos-beautify-tmdb-card';
 
@@ -318,8 +319,10 @@ async function loadShowMeta(): Promise<{ guid: string; title: string; year: stri
   if (!page) return null;
   if (_tmdbMetaCache && _tmdbMetaCache.guid === page.guid) return _tmdbMetaCache;
   let title = '', year = '', tmdbId = '';
+  let seasonData: any = null;
   try {
     const data = await fnosGetEditDetail(location.origin, page.guid);
+    seasonData = data;
     if (data) {
       title = String(data.title || data.name || '').trim();
       if (_isSysTitle(title)) title = '';
@@ -334,6 +337,33 @@ async function loadShowMeta(): Promise<{ guid: string; title: string; year: stri
     }
   } catch (e) {
     dlog('[lc-980] getEditDetail 失败, 退回页面解析: ' + String(e).substring(0, 60));
+  }
+  // [lc-1182] 父级剧集兜底（先于 DOM）：Bangumi 源条目的季层 title 恒空、无 TMDB id（lc-1176 同源问题，
+  //  实机复现「(无标题)」→ TMDB 直接放弃），而 DOM 兜底依赖渲染时机时灵时不灵。父级剧集层与
+  //  **一级详情页是同一条数据**，剧名必然一致 —— 拿到它既能让搜索命中，还能命中主进程
+  //  lc-1181 的「剧名→id」复用缓存（一级页解析过就直接复用 id，正是用户要的"一级页有就复用"）。
+  if ((!title || !tmdbId) && !_isOneLevel()) {
+    try {
+      const seriesGuid = await resolveSeriesGuid(location.origin, page.guid, seasonData);
+      if (seriesGuid) {
+        const sd = await fnosGetEditDetail(location.origin, seriesGuid);
+        if (sd) {
+          if (!tmdbId) tmdbId = extractTmdbId(sd) || '';
+          if (!title) {
+            const st = String(sd.title || sd.name || '').trim();
+            if (!_isSysTitle(st)) title = st;
+          }
+          if (!year) {
+            const yRaw = sd.year || sd.production_year || sd.first_aired || sd.premiere_date || '';
+            const ym = String(yRaw).match(/(\d{4})/);
+            if (ym) year = ym[1];
+          }
+          dlog('[lc-1182] 季 meta 父级剧集兜底: guid=' + seriesGuid + ' title=' + JSON.stringify(title) + ' tmdb=' + (tmdbId || '-'));
+        }
+      }
+    } catch (e2) {
+      dlog('[lc-1182] 父级剧集兜底失败(忽略): ' + String(e2).substring(0, 60));
+    }
   }
   if (!title) title = findSeasonShowTitle();
   if (!year) year = findSeasonYearText().replace(/\D/g, '').slice(0, 4);
