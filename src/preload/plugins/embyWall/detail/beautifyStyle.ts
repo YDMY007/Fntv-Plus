@@ -154,8 +154,8 @@ body.fnos-beautify ${COL} > :nth-child(3) > *:not(.fnos-beautify-card){
    ⚠ 用 display:none 而不是删节点：节点归 React 所有，删了会在下次重渲染时炸；
      且 collectNativeImdb() 靠 querySelectorAll('a') 取 IMDb 做回退，display:none 不影响它。
    ⚠ grid-template-rows 必须同步收成两行(auto auto)：留第三行的话，隐藏后会多出一条 20px row-gap。 */
-body.fnos-beautify ${COL} > :nth-child(4):has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])),
-body.fnos-beautify ${COL} > div[class*="px-[46px]"]:has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
+body.fnos-beautify ${COL} > :nth-child(4):not([data-fnos-card-host]):has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])),
+body.fnos-beautify ${COL} > div[class*="px-[46px]"]:not([data-fnos-card-host]):has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
   display:none !important;
 }
 

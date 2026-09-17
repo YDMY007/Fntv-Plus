@@ -875,7 +875,11 @@ function _armColHostGuard(col: HTMLElement): void {
       _colHost = null;
       return;
     }
-    if (h.parentNode === col) return;              // 已在原位 → 收工（也避免自触发死循环）
+    // [lc-1191] 位置也要校验：React 重排时可能把宿主挤到第 4 位 —— 而 beautifyStyle 的
+    // 「隐藏第 4 个子节点」规则(nth-child(4):has(imdb/tmdb 外链))会命中**自带 IMDb/TMDB
+    // 外链行的卡片**，把宿主连带卡一起 display:none（实机：card{h=0,w=0} 而宿主在 col 里）。
+    // CSS 侧已加 :not([data-fnos-card-host]) 豁免，这里再把位置纠正回 :nth-child(3) 双保险。
+    if (h.parentNode === col && col.children[2] === h) return;   // 已在第 3 位 → 收工
     const ref = (_colHostRef && _colHostRef.parentNode === col) ? _colHostRef : null;
     col.insertBefore(h, ref);                      // 微任务内放回，渲染前完成，无闪烁
   });
