@@ -18,6 +18,10 @@ import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { decideField, hasCJK, isPlaceholderTitle, patchEpisodeCard, epNumFromTitle } from './epBackfill';
+import { S } from '../state';
+// [lc-1177] 自建刮削服务通道（第二数据源）：Bangumi 未匹配时回落。
+//   该模块不再自己挂按钮，故其设置自举依赖本模块对它的 import 触发。
+import { runCustomScraperFlow } from './customScraper';
 
 const BTN_ID = 'fnos-bgfix-btn';
 const RETRY_DELAYS = [0, 400, 1000, 2000, 3400, 5000];
@@ -158,9 +162,13 @@ function makeBtn(): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.id = BTN_ID;
+    // [lc-1177] 季页只保留两个按钮：①「⟳ 补全集信息」= TMDB；②本按钮 = 统一「自定义刮削」入口，
+    //   内部先走 Bangumi，Bangumi 未匹配/失败时回落自建刮削服务（customScraper.runCustomScraperFlow）。
+    //   旧的第三个按钮（customScraper 自己的 fnos-cs-scraper-btn）已撤 —— 它和本按钮同名，无法分辨。
     btn.textContent = '⟳ 自定义刮削';
-    btn.setAttribute('title', '自定义刮削: 匹配条目并回填本季每集的中文标题/剧情简介到飞牛'
-        + '（中文优先；已有中文不被覆盖）。命中条目时也会尝试回填剧名与剧集简介。');
+    btn.setAttribute('title', '自定义刮削: 先用 Bangumi(番组计划) 匹配本季并回填每集中文标题/剧情简介；'
+        + 'Bangumi 未匹配时自动回落到你在「侧栏设置 → 自定义刮削」里配置的自建服务。'
+        + '（中文优先；已有中文不被覆盖）');
     btn.style.cssText = 'display:inline-flex;align-items:center;margin-left:9px;padding:3px 10px;border-radius:999px;'
         + 'font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;'
         + 'background:var(--fnos-ui-btn-bg,rgba(90,120,200,.12));color:var(--fnos-ui-accent,#6d7ff2);'
@@ -244,32 +252,47 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
 
         // 3) [多源刮削] 三段式拉取(匹配→条目信息→分集): 每步刷新按钮状态, 数据先落主进程缓存。
         //    按钮文案一律中性(不出现数据源名); 源细节只进日志便排查。
-        setBtn(btn, '⏳ 匹配条目…');
-        const sr: any = await ipcRenderer.invoke('bangumi:meta-search', searchTitle, episodes.length);
-        if (!sr || !sr.ok) {
-            log('[bgBackfill] 条目匹配失败:', (sr && sr.error) || '');
-            throw new Error(sr && sr.kind === 'timeout' ? '数据源超时,请重试' : '未匹配到条目');
-        }
-        const subjectId = Number(sr.data.subjectId);
-        setBtn(btn, '⏳ 获取条目信息…');
-        const dr: any = await ipcRenderer.invoke('bangumi:meta-detail', subjectId);
-        if (!dr || !dr.ok) {
-            log('[bgBackfill] 条目信息失败:', (dr && dr.error) || '');
-            throw new Error(dr && dr.kind === 'timeout' ? '数据源超时,请重试' : '刮削失败,请重试');
-        }
-        const detail = dr.data;
-        setBtn(btn, '⏳ 获取分集数据…');
-        const er: any = await ipcRenderer.invoke('bangumi:meta-episodes', subjectId);
-        if (!er || !er.ok) {
-            log('[bgBackfill] 分集数据失败:', (er && er.error) || '');
-            throw new Error(er && er.kind === 'timeout' ? '数据源超时,请重试' : '刮削失败,请重试');
-        }
+        //    [lc-1177] Bangumi 未匹配/失败 → 回落自建刮削服务（本按钮是「自定义刮削」统一入口，
+        //    服务若接手则由它负责按钮状态；服务没接手才把 Bangumi 的错原样抛出）。
+        let detail: any = null;
         const bgByNum = new Map<number, any>();
-        // [多源刮削] 播出日期索引: 集号解析全失败时的兜底匹配(仅当该日期在数据源唯一才采用)
         const bgByDate = new Map<string, any[]>();
-        for (const e of er.data.eps || []) {
-            bgByNum.set(e.ep, e);
-            if (e.airdate) { const arr = bgByDate.get(e.airdate) || []; arr.push(e); bgByDate.set(e.airdate, arr); }
+        try {
+            setBtn(btn, '⏳ 匹配条目…');
+            const sr: any = await ipcRenderer.invoke('bangumi:meta-search', searchTitle, episodes.length);
+            if (!sr || !sr.ok) {
+                log('[bgBackfill] 条目匹配失败:', (sr && sr.error) || '');
+                throw new Error(sr && sr.kind === 'timeout' ? '数据源超时,请重试' : '未匹配到条目');
+            }
+            const subjectId = Number(sr.data.subjectId);
+            setBtn(btn, '⏳ 获取条目信息…');
+            const dr: any = await ipcRenderer.invoke('bangumi:meta-detail', subjectId);
+            if (!dr || !dr.ok) {
+                log('[bgBackfill] 条目信息失败:', (dr && dr.error) || '');
+                throw new Error(dr && dr.kind === 'timeout' ? '数据源超时,请重试' : '刮削失败,请重试');
+            }
+            detail = dr.data;
+            setBtn(btn, '⏳ 获取分集数据…');
+            const er: any = await ipcRenderer.invoke('bangumi:meta-episodes', subjectId);
+            if (!er || !er.ok) {
+                log('[bgBackfill] 分集数据失败:', (er && er.error) || '');
+                throw new Error(er && er.kind === 'timeout' ? '数据源超时,请重试' : '刮削失败,请重试');
+            }
+            // [多源刮削] 播出日期索引: 集号解析全失败时的兜底匹配(仅当该日期在数据源唯一才采用)
+            for (const e of er.data.eps || []) {
+                bgByNum.set(e.ep, e);
+                if (e.airdate) { const arr = bgByDate.get(e.airdate) || []; arr.push(e); bgByDate.set(e.airdate, arr); }
+            }
+        } catch (e: any) {
+            const msg = String(e && e.message || e).substring(0, 80);
+            log('[bgBackfill] Bangumi 通道失败: ' + msg);
+            // 只在**确实配了**自建服务时才回落；没配就把 Bangumi 的真实错误抛出去
+            // （否则用户没想用自建服务，却看到「未配置」，反而掩盖了 Bangumi 未匹配的真相）
+            if (S.customScraperEnabled && String(S.customScraperUrl || '').trim()) {
+                log('[bgBackfill] 回落自定义刮削服务…');
+                if (await runCustomScraperFlow(btn)) { _running = false; return; }
+            }
+            throw e;
         }
 
         // 4) 逐集：读全量 → 裁决 → 写回 → 复核 → DOM 补丁（按钮实时显示当前进度）

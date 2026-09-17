@@ -2,7 +2,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // 用户方案：不改 trim.media 官方刮削（不动 --item/系统文件），由本应用在前端层做
 // 「标题 → 自定义刮削服务 → 元数据回填飞牛」：
-//   1) 季页点「⟳ 自定义刮削」按钮（与「补全集信息」并列）；
+//   1) [lc-1177] 季页第二个按钮「⟳ 自定义刮削」（由 bangumiBackfill 挂载）内部：
+//      先走 Bangumi，Bangumi 未匹配/失败 → 回落本模块的自建服务通道（runCustomScraperFlow）；
+//      本模块**不再单独挂按钮**（旧的 fnos-cs-scraper-btn 已撤，避免一排三个按钮两个同名）。
 //   2) 读季信息（getEditDetail）拿标题/季号/TMDB id，枚举本季集（item/list，DOM 兜底）；
 //   3) POST {title, season, tmdbId, episodes:[{index,guid}]} 到用户配置的自定义刮削地址；
 //      期望响应 JSON：{ "episodes": [ { "index": 1, "title": "...", "overview": "..." }, ... ] }
@@ -17,15 +19,13 @@
 import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
 import { S } from '../state';
-import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
 import { fnosGetEditDetail } from '../carousel/logo';
 import {
   decideField, numOrNull, seasonGuid, resolveSeasonMeta,
   fnosEpisodeList, episodeGuidsFromDom, fnosSaveEditDetail,
-  patchEpisodeCard, isPlaceholderTitle, setBtn, findSelectHeading,
+  patchEpisodeCard, isPlaceholderTitle, setBtn,
 } from './epBackfill';
 
-const CS_BTN_ID = 'fnos-cs-scraper-btn';
 const CONCURRENCY = 4;
 let _running = false;
 
@@ -73,16 +73,22 @@ async function fetchFromCustomScraper(
   return out;
 }
 
-/** 自定义刮削回填主流程（与 epBackfill.runBackfill 同构，数据源换成自定义地址）。 */
-async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
+/**
+ * [lc-1177] 自定义刮削回填主流程（与 epBackfill.runBackfill 同构，数据源换成自定义地址）。
+ * ⚠ 本模块**不再单独挂按钮**（旧 `fnos-cs-scraper-btn` 已撤）——季页只保留两个按钮：
+ *   ①「⟳ 补全集信息」= TMDB（epBackfill）；②「⟳ 自定义刮削」= 统一入口（bangumiBackfill），
+ *   先走 Bangumi，Bangumi 未匹配时由本函数接手回落。故导出给 bangumiBackfill 调用。
+ * 返回 true = 已接手并完成（含"数据已最新"），false = 未配置/无数据/失败（调用方继续报错）。
+ */
+export async function runCustomScraperFlow(btn: HTMLElement): Promise<boolean> {
   const guid = seasonPageGuid();
-  if (!guid || _running) return;
+  if (!guid || _running) return false;
   const enabled = S.customScraperEnabled;
   const url = String(S.customScraperUrl || '').trim();
   if (!enabled || !url) {
-    setBtn(btn, '⚠ 未配置', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 开启并填写地址。');
+    setBtn(btn, '⚠ 未配置', 'Bangumi 未匹配；请到 侧栏设置 → 自定义刮削 → 自定义刮削源 开启并填写地址。');
     window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ 自定义刮削'); }, 5000);
-    return;
+    return false;
   }
   _running = true;
   const origin = location.origin;
@@ -127,7 +133,7 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
       setBtn(btn, '⚠ 服务无分集数据', '自定义服务响应的 episodes 为空。');
       window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ 自定义刮削'); }, 5000);
       _running = false;
-      return;
+      return false;
     }
 
     // 4) 逐集读全量 → 裁决合并 → 回写 → 复核 → DOM 补丁（管线与 epBackfill 完全一致）
@@ -189,6 +195,8 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
     }
     log('[customScraper] 完成 ' + (title || tmdbId) + ' total=' + stats.total + ' filled=' + stats.filled
       + ' unchanged=' + stats.unchanged + ' unmatched=' + stats.unmatched + ' failed=' + stats.failed);
+    // 有集写回、或全部已是最新 = 本通道已接手（"服务未返回这些集"也视为已尝试过，不再回落报错）
+    return true;
   } catch (e: any) {
     const msg = String(e && e.message || e).substring(0, 80);
     log('[customScraper] 失败: ' + msg);
@@ -197,6 +205,7 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
       btn.style.color = 'var(--fnos-ui-warn,#b06a3a)';
       window.setTimeout(() => { if (btn.isConnected) { btn.style.color = ''; setBtn(btn, '⟳ 自定义刮削'); } }, 6000);
     }
+    return false;
   } finally {
     _running = false;
   }
@@ -206,66 +215,15 @@ function fnNonce(): string {
   return String(Math.floor(Math.random() * 900000) + 100000);
 }
 
-// ── 按钮挂载（与 epBackfill 同锚点并列：选集标题行）──
-
-function makeCsBtn(): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.id = CS_BTN_ID;
-  btn.textContent = '⟳ 自定义刮削';
-  btn.setAttribute('title', '用自定义刮削服务的数据回填本季每集的标题/简介（在侧栏设置 → 自定义刮削 中配置）');
-  btn.style.cssText = 'display:inline-flex;align-items:center;margin-left:7px;padding:3px 10px;border-radius:999px;'
-    + 'font-size:11.5px;font-weight:600;cursor:pointer;vertical-align:middle;letter-spacing:.3px;'
-    + 'background:var(--fnos-ui-btn-bg,rgba(90,160,120,.12));color:#3f9d63;'
-    + 'border:none;transition:background .15s,color .15s;flex-shrink:0;';
-  btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--fnos-ui-btn-hover,rgba(63,157,99,.28))'; });
-  btn.addEventListener('mouseleave', () => { btn.style.background = 'var(--fnos-ui-btn-bg,rgba(90,160,120,.12))'; });
-  btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); void runCustomScraper(btn); });
-  return btn;
-}
-
-/** 幂等挂载：跟随 epBackfill 的「选集」标题锚点；该锚点已被 epfix 按钮占用（其 findSelectHeading
- *  会跳过含子节点的元素）时，退而挂在 #fnos-epfix-btn 旁或其宿主上，保证两按钮并列。 */
-export function ensureCustomScraperButton(): void {
-  if (!seasonPageGuid()) { removeCustomScraperButton(); return; }
-  const existing = document.getElementById(CS_BTN_ID);
-  if (existing && existing.isConnected) return;
-  let anchor = findSelectHeading();
-  if (!anchor) {
-    const epfix = document.getElementById('fnos-epfix-btn');
-    if (epfix && epfix.parentNode) anchor = epfix.parentNode as HTMLElement;
-  }
-  if (!anchor) return;
-  anchor.appendChild(makeCsBtn());
-  dlog('[customScraper] 按钮已挂载 ' + location.pathname);
-}
-
-export function removeCustomScraperButton(): void {
-  const b = document.getElementById(CS_BTN_ID);
-  if (b && b.parentNode) b.parentNode.removeChild(b);
-}
-
-/** [v1.5.0] 自举：模块加载即拉一次设置同步 S（不依赖用户打开设置面板），完成后重挂按钮。 */
+/** [v1.5.0] 自举：模块加载即拉一次设置同步 S（不依赖用户打开设置面板）。
+ *  [lc-1177] 按钮并入「⟳ 自定义刮削」统一入口后，这里只负责同步开关/地址，不再自行挂按钮。 */
 function bootstrapFromSettings(): void {
   try {
     ipcRenderer.invoke('settings:get').then((s: any) => {
       if (!s || typeof s !== 'object') return;
       S.customScraperEnabled = s.customScraperEnabled === true;
       S.customScraperUrl = String(s.customScraperUrl || '');
-      if (S.customScraperEnabled && seasonPageGuid()) scheduleCustomScraperButton();
     }).catch(() => { /* ignore */ });
   } catch { /* ignore */ }
 }
 bootstrapFromSettings();
-
-/** 导航钩子入口：季页挂按钮，其余页面摘除。由 embyWall 的导航钩子/观察器调用。 */
-export function scheduleCustomScraperButton(): void {
-  if (!S.customScraperEnabled) { removeCustomScraperButton(); return; }
-  // 延迟等选集标题渲染（与 epBackfill 的有界重试节奏一致）
-  [0, 400, 1000, 2000, 3400].forEach((d) => setTimeout(() => {
-    if (seasonPageGuid()) ensureCustomScraperButton();
-  }, d));
-}
-
-// DETAIL_HERO_SEL/findActiveDetailView 保留给后续 DOM 兜底扩展
-void DETAIL_HERO_SEL; void findActiveDetailView;

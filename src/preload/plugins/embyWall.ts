@@ -11,7 +11,6 @@ import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackf
 import { scheduleBangumiBackfill, ensureBangumiFixButton } from './embyWall/detail/bangumiBackfill';
 import { scheduleSeasonsNav, ensureSeasonsNav } from './embyWall/detail/seasonsNav';
 import { scheduleEpListMerge, ensureEpListMerge } from './embyWall/detail/epListMerge';
-import { scheduleCustomScraperButton, ensureCustomScraperButton } from './embyWall/detail/customScraper';
 import { scheduleJavButton, ensureJavButton } from './embyWall/detail/jav';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
@@ -4471,7 +4470,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     swCustomScraper.addEventListener('change', () => {
       S.customScraperEnabled = swCustomScraper.checked;
       ipcRenderer.invoke('settings:set-custom-scraper-enabled', swCustomScraper.checked)
-        .then(() => scheduleCustomScraperButton())
         .catch((err) => log('set-custom-scraper-enabled failed', err));
     });
 
@@ -6481,7 +6479,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleEpListMerge(); // [lc-1147] 季页选集全量显示(分页+虚拟窗口根治)：非季页自撤
       scheduleBangumiBackfill(); // [多源刮削] 季页「Bangumi 补全」按钮：非季页自撤
       scheduleSeasonsNav(); // [多源刮削] 剧集一级页季行翻页箭头：非一级页自撤
-      scheduleCustomScraperButton(); // [自定义刮削] 季页「⟳ 自定义刮削」按钮：非季页自撤
       scheduleJavButton(); // [自定义刮削] 电影页「⟳ jav 刮削」浮动按钮：非电影页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
@@ -6500,7 +6497,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleEpListMerge(); // [lc-1147] 同 pushState
       scheduleBangumiBackfill(); // [多源刮削] 同 pushState
       scheduleSeasonsNav(); // [多源刮削] 同 pushState
-      scheduleCustomScraperButton(); // [自定义刮削] 同 pushState
       scheduleJavButton(); // [自定义刮削] 同 pushState
     };
     window.addEventListener('popstate', () => {
@@ -6516,7 +6512,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleEpListMerge(); // [lc-1147] 同 popstate
       scheduleBangumiBackfill(); // [多源刮削] 同 popstate
       scheduleSeasonsNav(); // [多源刮削] 同 popstate
-      scheduleCustomScraperButton(); // [自定义刮削] 同 popstate
       scheduleJavButton(); // [自定义刮削] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
@@ -6533,17 +6528,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     scheduleEpListMerge(); // [lc-1147] 初始/深链直达季页也合并选集全量列表
     scheduleBangumiBackfill(); // [多源刮削] 初始/深链直达季页也挂「Bangumi 补全」按钮
     scheduleSeasonsNav(); // [多源刮削] 剧集一级页季行箭头亦同
-    scheduleCustomScraperButton(); // [自定义刮削] 初始/深链直达季页亦同
     scheduleJavButton(); // [自定义刮削] 初始/深链直达电影页亦同
     // 延迟重试: SPA渲染可能分批加载DOM
-    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleEpListMerge(); scheduleCustomScraperButton(); scheduleJavButton(); scheduleBangumiBackfill(); scheduleSeasonsNav(); }, ms));
+    [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleEpListMerge(); scheduleJavButton(); scheduleBangumiBackfill(); scheduleSeasonsNav(); }, ms));
   }
   // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureEpListMerge(false); ensureCustomScraperButton(); ensureJavButton(); ensureBangumiFixButton(); ensureSeasonsNav(); }
+      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureEpListMerge(false); ensureJavButton(); ensureBangumiFixButton(); ensureSeasonsNav(); }
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });
