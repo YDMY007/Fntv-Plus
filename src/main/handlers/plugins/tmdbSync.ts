@@ -732,8 +732,10 @@ async function tmdbSearchBest(
             { '，': ',', '、': ',', '；': ';', '：': ':', '！': '!', '？': '?', '—': '-', '…': '...', '・': '·', '･': '·' } as Record<string, string>
         )[c] || c)
         .replace(/　/g, ' ');
-    const doSearch = async (q: string, y?: string): Promise<any[]> => {
+    const doSearch = async (q: string, y?: string, noLang?: boolean): Promise<any[]> => {
         const p: any = { ...baseParams, query: q, page: 1 };
+        // [lc-1176] noLang：删掉 language 让 TMDB 按原始语言检索（见下方多语言兜底说明）
+        if (noLang) delete p.language;
         if (y) { if (mt === 'movie') p.year = y; else p.first_air_date_year = y; }
         const r = await getWithRetry(client, `/search/${mt}`, { params: p });
         return (r?.data?.results || []) as any[];
@@ -754,6 +756,20 @@ async function tmdbSearchBest(
     for (const q of queries) {
         const r = await tryQuery(q);
         if (r.length) { all = r; log.info('[TMDB][lc-947] 搜索命中 q=' + JSON.stringify(q) + ' results=' + r.length); break; }
+    }
+    // [lc-1176] 多语言兜底：TMDB 的 language 参数会让检索偏向该语言译名，新番/冷门条目常只有
+    //   日文原名或英文译名 → 拿中文剧名去搜 zh-CN 会 0 结果（用户观感：「TMDB 明明有这部却说匹配不上」）。
+    //   仅当上面全部策略都无果时，去掉 language 再试一轮（TMDB 此时按原始语言返回，能命中原文条目）。
+    //   只在原本就会失败的路径上多发请求，成功路径零额外开销。
+    if (!all.length) {
+        for (const q of queries.slice(0, 2)) {
+            const r = await doSearch(q, undefined, true).catch(() => [] as any[]);
+            if (r.length) {
+                all = r;
+                log.info('[TMDB][lc-1176] 无语言搜索命中 q=' + JSON.stringify(q) + ' results=' + r.length);
+                break;
+            }
+        }
     }
     if (!all.length) { log.warn('[TMDB][lc-947] 搜索无果 title=' + JSON.stringify(title)); return null; }
     const y = parseInt(String(year || '').slice(0, 4), 10);

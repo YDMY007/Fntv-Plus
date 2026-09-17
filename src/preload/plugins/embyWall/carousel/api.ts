@@ -84,6 +84,27 @@ export function extractTmdbId(data: any): string | undefined {
   return undefined;
 }
 
+/**
+ * [lc-1176] 从 fnOS item 数据中提取 Bangumi(番组计划) subject id。
+ * 背景：飞牛对中国动画/新番常走 Bangumi 源刮削，trim_id 形如 `bg456080`（is_official:true、
+ *   海报文件名 bgm_0_*.webp 也是同源佐证）。这类条目**没有 TMDB id**，且「季」级条目的 title
+ *   恒为空（剧名只挂在父级「剧集」条目上）——旧代码据此直接判定「无法匹配」而全季失败。
+ * 返回纯数字 subject id 字符串；非 Bangumi 源返回 undefined。
+ */
+export function extractBangumiId(data: any): string | undefined {
+  if (!data) return undefined;
+  const direct = [data.bangumiId, data.bangumi_id, data.bgm_id, data.subjectId, data.subject_id];
+  for (const c of direct) {
+    if (c != null && /^\d+$/.test(String(c).trim())) return String(c).trim();
+  }
+  const trimId = data.trimId || data.trim_id;
+  if (typeof trimId === 'string') {
+    const m = trimId.match(/^bg(\d+)$/i);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
 /** [lc-554] 直接读当前页面可见的媒体库卡片（同步、零网络、零 iframe，绝不卡白屏）。
     飞牛首页"最近更新"等板块的卡片自带真实封面与 /v/tv|movie/{guid} 链接，直接抓即可。
     这是彻底绕开会卡死的 ensureLibraryIndex 后台 iframe+滚动轮询机制的最终方案。 */

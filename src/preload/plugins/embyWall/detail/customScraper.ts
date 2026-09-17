@@ -20,7 +20,7 @@ import { S } from '../state';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
 import { fnosGetEditDetail } from '../carousel/logo';
 import {
-  decideField, numOrNull, seasonGuid,
+  decideField, numOrNull, seasonGuid, resolveSeasonMeta,
   fnosEpisodeList, episodeGuidsFromDom, fnosSaveEditDetail,
   patchEpisodeCard, isPlaceholderTitle, setBtn, findSelectHeading,
 } from './epBackfill';
@@ -93,19 +93,21 @@ async function runCustomScraper(btn: HTMLButtonElement): Promise<void> {
   };
   try {
     // 1) 季信息：标题/季号/TMDB id（给自定义服务尽可能多的匹配线索）
+    //    [lc-1176] 季自身字段 → 父级剧集 → DOM → document.title 四级兜底（Bangumi 源季标题恒空）
     const data = await fnosGetEditDetail(origin, guid);
     if (!data) throw new Error('读取季信息失败（getEditDetail）');
+    const meta = await resolveSeasonMeta(origin, guid);
     // [v1.7.0] 锚点全链(精准匹配优先级): tmdb_id > trim_id(tt…) > imdb_id > douban_id
     const tmdbId = ((): string => {
       const t = data.tmdb_id ?? data.tmdbId;
       const s = String(t ?? '').trim();
-      return /^\d+$/.test(s) ? s : '';
+      return /^\d+$/.test(s) ? s : (meta.tmdbId || '');
     })();
-    const trimId = String(data.trim_id ?? '').trim();        // 形如 tt1399
+    const trimId = String(data.trim_id ?? '').trim();        // 形如 tt1399 / bg456080
     const imdbId = String(data.imdb_id ?? '').trim();
     const doubanId = String(data.douban_id ?? '').trim();
-    const title = String(data.title || data.name || '').trim();
-    const seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number);
+    const title = meta.title;
+    const seasonNumber = meta.seasonNumber;
     if (!title && !tmdbId) throw new Error('无标题且无 TMDB id，无法刮削');
 
     // 2) 枚举本季集
