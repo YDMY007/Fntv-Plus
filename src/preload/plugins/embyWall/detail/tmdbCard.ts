@@ -853,9 +853,27 @@ const FLOAT_HOST_ID = 'fnos-beautify-card-float-host';
 let _remountKey = '';
 let _remountCount = 0;
 
+/** [lc-1187] 找内容列真正的滚动祖先（null = window/文档滚动）。 */
+function _scrollParentOf(el: HTMLElement): HTMLElement | null {
+  let p: HTMLElement | null = el.parentElement;
+  while (p && p !== document.body && p !== document.documentElement) {
+    const cs = getComputedStyle(p);
+    if (/(auto|scroll|overlay)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 4) return p;
+    p = p.parentElement;
+  }
+  return null;
+}
+
+/** 浮动宿主的定位基准（fixed 模式下用「基准 + 滚动量」纯写不读，滚动帧内零强制 layout）。 */
+let _floatScrollEl: HTMLElement | Window = window;
+let _floatBase = { left: 0, top: 0, width: 0, scrollTop: 0, scrollLeft: 0 };
+
 /** [lc-1186] 浮动宿主定位：贴着「右栏」应有的位置（内容列右侧 40%，hero 下方）。
- *  用 fixed + 视口坐标并监听滚动/尺寸变化重算 —— 这样即使页面滚动发生在内层容器里，
- *  位置也始终与 hero 对齐（capture 捕获所有滚动来源）。 */
+ *  [lc-1187] ⚠ 默认走 **absolute + 文档坐标**：滚动在文档上时，浏览器在合成器线程里带着它一起滚，
+ *  完全同步、零滞后。此前用 fixed + scroll 监听（哪怕 rAF 节流）总慢一帧 —— 实机观感
+ *  「一滑动就跟不上」（惯性滚动时尤其明显），因为 JS scroll 事件在主线程，永远追不上合成器滚动。
+ *  仅当内容列处于**内层滚动容器**里（文档不滚）时，absolute 会与内容脱节，才退回 fixed +
+ *  「基准 + 滚动量」的纯写更新（不做 getBoundingClientRect，避免滚动帧内强制 layout）。 */
 function _positionFloatHost(): void {
   const host = document.getElementById(FLOAT_HOST_ID);
   if (!host) return;
@@ -866,17 +884,43 @@ function _positionFloatHost(): void {
   const hr = hero.getBoundingClientRect();
   const gap = 32;   // 与 beautifyStyle I 段 column-gap 一致
   const w = Math.max(260, (cr.width - gap) * 0.4);
-  const left = cr.left + (cr.width - gap) * 0.6 + gap;
-  const top = hr.bottom + 20;   // 与 I 段 row-gap 一致
-  host.style.left = Math.round(left) + 'px';
-  host.style.top = Math.round(top) + 'px';
-  host.style.width = Math.round(w) + 'px';
+  const leftVp = cr.left + (cr.width - gap) * 0.6 + gap;
+  const topVp = hr.bottom + 20;   // 与 I 段 row-gap 一致
+  const sp = _scrollParentOf(col);
+  if (!sp) {
+    host.style.position = 'absolute';
+    host.style.left = Math.round(leftVp + window.scrollX) + 'px';
+    host.style.top = Math.round(topVp + window.scrollY) + 'px';
+    host.style.width = Math.round(w) + 'px';
+    _floatScrollEl = window;
+  } else {
+    _floatBase = { left: leftVp, top: topVp, width: w, scrollTop: sp.scrollTop, scrollLeft: sp.scrollLeft };
+    host.style.position = 'fixed';
+    host.style.width = Math.round(w) + 'px';
+    _floatScrollEl = sp;
+    _applyFloatFixed(host, sp);
+  }
+}
+
+/** fixed 模式下的位置写入：纯数学平移，不读任何布局属性。 */
+function _applyFloatFixed(host: HTMLElement, sp: HTMLElement): void {
+  host.style.left = Math.round(_floatBase.left - (sp.scrollLeft - _floatBase.scrollLeft)) + 'px';
+  host.style.top = Math.round(_floatBase.top - (sp.scrollTop - _floatBase.scrollTop)) + 'px';
 }
 
 let _floatRaf = 0;
 function _onViewportChange(): void {
   if (_floatRaf) return;
   _floatRaf = window.requestAnimationFrame(() => { _floatRaf = 0; _positionFloatHost(); });
+}
+
+/** 内层滚动容器滚动时才需要动（absolute 模式由浏览器自己处理，直接短路）。 */
+function _onAnyScroll(e: Event): void {
+  if (_floatScrollEl === window) return;
+  const host = document.getElementById(FLOAT_HOST_ID);
+  if (!host) return;
+  const t = e.target as HTMLElement | null;
+  if (t === (_floatScrollEl as HTMLElement)) _applyFloatFixed(host, _floatScrollEl as HTMLElement);
 }
 
 let _floatListenersArmed = false;
@@ -886,14 +930,14 @@ function _ensureFloatHost(): HTMLElement {
     host = document.createElement('div');
     host.id = FLOAT_HOST_ID;
     host.setAttribute(FALLBACK_HOST_MARK, '1');
-    // body 级 fixed 容器：飞牛的 React 只重建它自己管的那棵子树，绝不碰 body 上的外来节点 ——
+    // body 级容器：飞牛的 React 只重建它自己管的那棵子树，绝不碰 body 上的外来节点 ——
     // 这是「自建节点必被 React 清掉」的结构性问题的根治办法（lc-1180/1183/1185 三轮补挂均失败）。
-    host.style.cssText = 'position:fixed;z-index:6;pointer-events:auto;';
+    host.style.cssText = 'z-index:6;pointer-events:auto;';
     document.body.appendChild(host);
   }
   if (!_floatListenersArmed) {
     _floatListenersArmed = true;
-    window.addEventListener('scroll', _onViewportChange, true);
+    window.addEventListener('scroll', _onAnyScroll, true);
     window.addEventListener('resize', _onViewportChange);
   }
   _positionFloatHost();
