@@ -142,9 +142,12 @@ body.fnos-beautify ${COL} > :nth-child(3){ grid-area:2 / 2 / 3 / 3 !important; m
 body.fnos-beautify ${COL} > [data-fnos-card-host]{
   grid-area:2 / 2 / 3 / 3 !important; min-width:0 !important;
 }
-/* 该宿主存在（= 该条目没有演职人员区）时，原生「链接块」让位：它没有显式 grid-area，
-   auto-placement 会掉到第三行挤出版面，且会与卡片争右列格子。 */
-body.fnos-beautify ${COL}:has(> [data-fnos-card-host]) > div[class*="px-[46px]"]{
+/* 该宿主存在（= 该条目没有演职人员区）时，原生「文件信息+IMDB」块让位：它没有显式 grid-area，
+   auto-placement 会掉到第三行挤出版面，且会与卡片争右列格子。
+   ⚠ [lc-1193] 必须带 :has(a) 判据 —— 季页 col 里带 px-[46px] 的块有**两个**（见上方结构注释）：
+   「简介」(纯文本, 无链接) 与「文件信息+IMDB」(含外链)。无差别隐藏会把飞牛原生的简介/信息栏
+   一起藏掉（用户实测「顶部信息栏没了」）；带链接判据后只藏真链接块，简介块保留。 */
+body.fnos-beautify ${COL}:has(> [data-fnos-card-host]) > div[class*="px-[46px]"]:has(a){
   display:none !important;
 }
 /* 右列清框：原生容器若带 border/底色/阴影，会与卡内分隔线拼出「半闭合框」→ 一律抹掉。
