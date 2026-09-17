@@ -847,6 +847,9 @@ function openStillLightbox(startIdx: number): void {
  *    绝对定位到面板右列，宿主只提供挂载点。settle 那一刻面板可能未渲染 → 返回 null，
  *    由 _renderCard() 在 fetch resolve 后重试(与季页竞态同一自愈路径)。 */
 const FALLBACK_HOST_MARK = 'data-fnos-card-host';
+/** [lc-1185] 补挂节流：同一 pathname 的补挂次数（防与 React 互相删除时死循环空转）。 */
+let _remountKey = '';
+let _remountCount = 0;
 
 function _cardHost(): HTMLElement | null {
   const hero = _activeHero();
@@ -908,17 +911,22 @@ function _ensureCardEl(): HTMLElement | null {
   return card;
 }
 
-/** [lc-1184] 卡片挂载诊断：一次性输出宿主结构/可见性/卡内容量，便于定位「右侧为空」的真因。
- *  同一 pathname + 同一 tag 只打一次，避免渲染循环刷屏。 */
-let _mountDiagKey = '';
+/** [lc-1184] 卡片挂载诊断：输出宿主结构/可见性/卡内容量，便于定位「右侧为空」的真因。
+ *  [lc-1185] 改为「状态指纹变化才打」+ 总条数上限（10 条）——这样能完整看到
+ *  「挂上 → 被 React 冲掉 → 补挂」的整个时序，而不是只有第一帧快照。 */
+let _mountDiagCount = 0;
+let _mountDiagLast = '';
 function logMountDiag(tag: string, card?: HTMLElement | null): void {
-  const k = location.pathname + '|' + tag;
-  if (_mountDiagKey === k) return;
-  _mountDiagKey = k;
+  if (_mountDiagCount >= 10) return;
   try {
     const hero = _activeHero();
     const col = hero ? hero.parentElement : null;
-    if (!col) { log('[lc-1184][卡诊断] ' + tag + ' | hero 未找到'); return; }
+    if (!col) {
+      if (_mountDiagLast === tag + '|nohero') return;
+      _mountDiagLast = tag + '|nohero'; _mountDiagCount++;
+      log('[lc-1185][卡诊断] ' + tag + ' | hero 未找到');
+      return;
+    }
     const kids: string[] = [];
     for (let i = 0; i < col.children.length; i++) {
       const el = col.children[i] as HTMLElement;
@@ -928,18 +936,30 @@ function logMountDiag(tag: string, card?: HTMLElement | null): void {
     const cs = getComputedStyle(col);
     const stills = (_tmdbInfoData && Array.isArray((_tmdbInfoData as any).backdrops))
       ? ((_tmdbInfoData as any).backdrops as any[]).filter(Boolean).length : -1;
-    log('[lc-1184][卡诊断] ' + tag
+    const parentStr = card
+      ? (card.parentNode
+        ? ((card.parentNode as HTMLElement).tagName + '['
+          + String((card.parentNode as HTMLElement).className || '').substring(0, 18) + ']{'
+          + getComputedStyle(card.parentNode as HTMLElement).display + '}')
+        : 'null')
+      : '-';
+    const msg = '[lc-1185][卡诊断] ' + tag
       + ' | children=' + col.children.length
       + ' | details=' + !!col.querySelector('[data-id="details"]')
       + ' | beautify=' + document.body.classList.contains('fnos-beautify')
       + ' | col{' + cs.display + '/' + cs.gridTemplateColumns + '}'
       + ' | stills=' + stills
       + (card ? (' | card{h=' + card.offsetHeight + ',w=' + card.offsetWidth
-          + ',display=' + getComputedStyle(card).display
-          + ',html=' + card.innerHTML.length + '}') : ' | card=(未挂载)')
-      + ' | ' + kids.join(' ~ '));
+        + ',html=' + card.innerHTML.length
+        + ',inDoc=' + document.contains(card)
+        + ',parent=' + parentStr + '}') : ' | card=(未挂载)')
+      + ' | ' + kids.join(' ~ ');
+    const fp = tag + '|' + col.children.length + '|' + (card ? (card.offsetHeight + 'x' + card.offsetWidth) : 'n') + '|' + parentStr;
+    if (fp === _mountDiagLast) return;
+    _mountDiagLast = fp; _mountDiagCount++;
+    log(msg);
   } catch (e) {
-    log('[lc-1184][卡诊断] err ' + String(e).substring(0, 80));
+    log('[lc-1185][卡诊断] err ' + String(e).substring(0, 80));
   }
 }
 
@@ -956,7 +976,13 @@ function _renderCard(): void {
   }
   // [lc-1184] 挂载后延迟 400ms 量一次卡的真实尺寸/内容量（此时内容与图片已填充）——
   //  「卡在 DOM 但不可见」与「卡可见但空白」是两种完全不同的故障，靠这条一眼区分。
-  window.setTimeout(() => logMountDiag('已挂载', document.getElementById(CARD_ID)), 400);
+  //  [lc-1185] 顺便自愈：挂上却零尺寸 = 宿主已脱离布局（React 重建 col 时挤走自建宿主），
+  //  这里主动重建挂点 —— 不能只等 MutationObserver，因为 DOM 稳定后不会再有变化事件。
+  window.setTimeout(() => {
+    const c = document.getElementById(CARD_ID) as HTMLElement | null;
+    logMountDiag('已挂载', c);
+    if (c && c.offsetHeight === 0 && c.offsetWidth === 0) ensureTmdbCard();
+  }, 400);
   _disarmMountRetry(); // 已挂上，重试链收队
   let body = '';
   // [lc-1022] 二级(季)页只渲染「剧照」以后的分节 —— 评分/标语/meta/事实/主创/本季与一级页右栏的
@@ -1105,14 +1131,33 @@ export function removeTmdbCard(): void {
 /**
  * [lc-1179] 卡片保活补挂：React 重渲染会连带重建右栏（hero 重排/回填写回后的数据刷新都会触发），
  * 把我们 append 进飞牛自有子树的卡片一起冲掉 —— 选集按钮有 ensureEpFixButton 同款补挂，
- * 这张卡此前没有，用户实机表现为「TMDB 卡连刷新按钮一起消失」（2026-09-17 14:27 实锤：
- * 卡就绪+剧照拉取日志齐全，1 秒后第二次 beautify 重渲染，卡没了）。
- * 由 embyWall 常驻 _detailObs 去抖回调调用：卡不在 DOM 且数据仍有效 → 原样重挂（缓存数据零请求）。
+ * 这张卡此前没有，用户实机表现为「TMDB 卡连刷新按钮一起消失」。
+ * [lc-1185] ⚠ 判定必须按**可见性**而不是"在不在 DOM"：React 把自建宿主从 col 挤走时，
+ *  卡节点往往仍在文档里（只是脱离布局/尺寸归零），`getElementById` 照样命中 → 旧的
+ *  「不在 DOM 才补挂」会直接 return，于是卡永远停在 0×0（实机诊断：card{h=0,w=0,html=159032}
+ *  而 col.children 里已没有自建宿主）。现在改为：卡零尺寸也强制重建挂点。
  */
 export function ensureTmdbCard(): void {
-  if (document.getElementById(CARD_ID)) return;                       // 还在，无需补
   if (!_isSeasonRoute() && !_isOneLevel()) return;                    // 非卡片路由
   if (!_tmdbInfoData && !_tmdbInfoLoading && !_tmdbInfoError) return; // 从未拉取过（交给正常 schedule 流程）
-  dlog('[lc-1179] TMDB 卡被页面重渲染冲掉, 补挂');
-  _renderCard(); // 内部 _ensureCardEl 找不到宿主时自带有界重试链
+  const card = document.getElementById(CARD_ID) as HTMLElement | null;
+  if (card && card.offsetHeight > 0 && card.offsetWidth > 0) return;  // 健康（可见且已布局）
+  // 同页补挂次数上限：避免极端情况下与 React 互相删除形成死循环（空转 CPU）
+  const k = location.pathname;
+  if (_remountKey !== k) { _remountKey = k; _remountCount = 0; }
+  if (_remountCount >= 5) return;
+  _remountCount++;
+  if (card) {
+    dlog('[lc-1185] 卡存在但零尺寸(宿主脱离布局) → 重建挂点(' + _remountCount + '/5)');
+    if (card.parentNode) card.parentNode.removeChild(card);
+  } else {
+    dlog('[lc-1179] TMDB 卡被页面重渲染冲掉, 补挂(' + _remountCount + '/5)');
+  }
+  // 清掉遗留的空宿主（React 只删了卡、或自建宿主被挤到 col 外成为孤儿时）
+  const orphans = document.querySelectorAll('[' + FALLBACK_HOST_MARK + ']');
+  for (let i = 0; i < orphans.length; i++) {
+    const el = orphans[i];
+    if (!el.firstChild && el.parentNode) el.parentNode.removeChild(el);
+  }
+  _renderCard(); // _ensureCardEl 内部会重新选/建宿主；宿主缺失时自带有界重试链
 }
