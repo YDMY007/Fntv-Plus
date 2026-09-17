@@ -7,6 +7,7 @@ import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
 import { injectExternalPlayButton, injectNativeReturnButton, injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
+import { ensureTmdbCard } from './embyWall/detail/tmdbCard';
 import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackfill';
 import { scheduleBangumiBackfill, ensureBangumiFixButton } from './embyWall/detail/bangumiBackfill';
 import { scheduleSeasonsNav, ensureSeasonsNav } from './embyWall/detail/seasonsNav';
@@ -6533,11 +6534,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleEpListMerge(); scheduleJavButton(); scheduleBangumiBackfill(); scheduleSeasonsNav(); }, ms));
   }
   // MutationObserver 覆盖详情页DOM变化 → 回填 Logo + [lc-1045] React 重渲染冲掉按钮时补挂
+  //   [lc-1179] TMDB 信息卡同款保活：右栏被 React 重建时卡片会被连带冲掉 → ensureTmdbCard 补挂
   let _detailGlassTimer = 0;
   const _detailObs = new MutationObserver(() => {
     clearTimeout(_detailGlassTimer);
     _detailGlassTimer = window.setTimeout(() => {
-      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureEpListMerge(false); ensureJavButton(); ensureBangumiFixButton(); ensureSeasonsNav(); }
+      if (isDetailPage()) { backfillDetailLogo(); ensureEpFixButton(); ensureEpListMerge(false); ensureJavButton(); ensureBangumiFixButton(); ensureSeasonsNav(); ensureTmdbCard(); }
     }, 200);
   });
   _detailObs.observe(document.body, { childList: true, subtree: true });

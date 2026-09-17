@@ -989,3 +989,18 @@ export function removeTmdbCard(): void {
   _disarmSeriesPanel();
   _resetState();
 }
+
+/**
+ * [lc-1179] 卡片保活补挂：React 重渲染会连带重建右栏（hero 重排/回填写回后的数据刷新都会触发），
+ * 把我们 append 进飞牛自有子树的卡片一起冲掉 —— 选集按钮有 ensureEpFixButton 同款补挂，
+ * 这张卡此前没有，用户实机表现为「TMDB 卡连刷新按钮一起消失」（2026-09-17 14:27 实锤：
+ * 卡就绪+剧照拉取日志齐全，1 秒后第二次 beautify 重渲染，卡没了）。
+ * 由 embyWall 常驻 _detailObs 去抖回调调用：卡不在 DOM 且数据仍有效 → 原样重挂（缓存数据零请求）。
+ */
+export function ensureTmdbCard(): void {
+  if (document.getElementById(CARD_ID)) return;                       // 还在，无需补
+  if (!_isSeasonRoute() && !_isOneLevel()) return;                    // 非卡片路由
+  if (!_tmdbInfoData && !_tmdbInfoLoading && !_tmdbInfoError) return; // 从未拉取过（交给正常 schedule 流程）
+  dlog('[lc-1179] TMDB 卡被页面重渲染冲掉, 补挂');
+  _renderCard(); // 内部 _ensureCardEl 找不到宿主时自带有界重试链
+}
