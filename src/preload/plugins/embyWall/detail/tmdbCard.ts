@@ -847,102 +847,58 @@ function openStillLightbox(startIdx: number): void {
  *    绝对定位到面板右列，宿主只提供挂载点。settle 那一刻面板可能未渲染 → 返回 null，
  *    由 _renderCard() 在 fetch resolve 后重试(与季页竞态同一自愈路径)。 */
 const FALLBACK_HOST_MARK = 'data-fnos-card-host';
-/** [lc-1186] 浮动宿主 id：无原生右栏时承载卡片，挂在 body 下（脱离飞牛 React 子树）。 */
-const FLOAT_HOST_ID = 'fnos-beautify-card-float-host';
 /** [lc-1185] 补挂节流：同一 pathname 的补挂次数（防与 React 互相删除时死循环空转）。 */
 let _remountKey = '';
 let _remountCount = 0;
 
-/** [lc-1187] 找内容列真正的滚动祖先（null = window/文档滚动）。 */
-function _scrollParentOf(el: HTMLElement): HTMLElement | null {
-  let p: HTMLElement | null = el.parentElement;
-  while (p && p !== document.body && p !== document.documentElement) {
-    const cs = getComputedStyle(p);
-    if (/(auto|scroll|overlay)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 4) return p;
-    p = p.parentElement;
+/** [lc-1190] col 内自建宿主 + **同步保活**（取代 lc-1186/1187 的浮动定位方案）。
+ *  背景（血泪史 lc-1180~1189）：季页右栏 = col 的第 3 个子节点，由 beautifyStyle 的 grid
+ *  定位到右侧 40% 栏。无演职人员区的条目（Bangumi 源常见）没有这个节点，而**自建的兄弟节点会被
+ *  React 重建 col 子节点时摘掉**（实机诊断：children 里始终没有自建宿主），此前用「延迟 200ms
+ *  补挂」只能闪烁式挣扎。★ 正解：在 MutationObserver 的**微任务**里把**同一个节点**放回原位 ——
+ *  React 的摘除与我们的重插都发生在同一次渲染之前，视觉上完全无感；节点自身有引用，内容不丢。
+ *  （浮动定位虽然稳，但卡片不占文档流、右列空着、滚动表现也不同 —— 用户明确要"和正常的那样"。） */
+let _colHost: HTMLElement | null = null;       // 自建的 col 内宿主
+let _colHostRef: Node | null = null;           // 原定插入位置的下一个兄弟（原生 IMDB 块）
+let _colHostCol: HTMLElement | null = null;
+let _colHostObs: MutationObserver | null = null;
+
+function _armColHostGuard(col: HTMLElement): void {
+  if (_colHostCol === col && _colHostObs) return;
+  if (_colHostObs) _colHostObs.disconnect();
+  _colHostCol = col;
+  _colHostObs = new MutationObserver(() => {
+    const h = _colHost;
+    if (!h || !col.isConnected) return;
+    if (!h.firstChild) {                           // 卡已被搬走/移除 → 宿主没用了，就地回收
+      if (h.parentNode) h.parentNode.removeChild(h);
+      _colHost = null;
+      return;
+    }
+    if (h.parentNode === col) return;              // 已在原位 → 收工（也避免自触发死循环）
+    const ref = (_colHostRef && _colHostRef.parentNode === col) ? _colHostRef : null;
+    col.insertBefore(h, ref);                      // 微任务内放回，渲染前完成，无闪烁
+  });
+  _colHostObs.observe(col, { childList: true });
+}
+
+/** 取/建 col 内的自建右栏宿主：插到原生 IMDB 块之前，使其成为 :nth-child(3) 从而拿到 grid 右列。 */
+function _ensureColHost(col: HTMLElement): HTMLElement {
+  _armColHostGuard(col);
+  if (_colHost) {
+    if (_colHost.parentNode !== col) {
+      const ref = (_colHostRef && _colHostRef.parentNode === col) ? _colHostRef : null;
+      col.insertBefore(_colHost, ref);
+    }
+    return _colHost;
   }
-  return null;
-}
-
-/** 浮动宿主的定位基准（fixed 模式下用「基准 + 滚动量」纯写不读，滚动帧内零强制 layout）。 */
-let _floatScrollEl: HTMLElement | Window = window;
-let _floatBase = { left: 0, top: 0, width: 0, scrollTop: 0, scrollLeft: 0 };
-
-/** [lc-1186] 浮动宿主定位：贴着「右栏」应有的位置（内容列右侧 40%，hero 下方）。
- *  [lc-1187] ⚠ 默认走 **absolute + 文档坐标**：滚动在文档上时，浏览器在合成器线程里带着它一起滚，
- *  完全同步、零滞后。此前用 fixed + scroll 监听（哪怕 rAF 节流）总慢一帧 —— 实机观感
- *  「一滑动就跟不上」（惯性滚动时尤其明显），因为 JS scroll 事件在主线程，永远追不上合成器滚动。
- *  仅当内容列处于**内层滚动容器**里（文档不滚）时，absolute 会与内容脱节，才退回 fixed +
- *  「基准 + 滚动量」的纯写更新（不做 getBoundingClientRect，避免滚动帧内强制 layout）。 */
-function _positionFloatHost(): void {
-  const host = document.getElementById(FLOAT_HOST_ID);
-  if (!host) return;
-  const hero = _activeHero();
-  const col = hero ? hero.parentElement : null;
-  if (!hero || !col) return;
-  const cr = col.getBoundingClientRect();
-  const hr = hero.getBoundingClientRect();
-  const gap = 32;   // 与 beautifyStyle I 段 column-gap 一致
-  const w = Math.max(260, (cr.width - gap) * 0.4);
-  const leftVp = cr.left + (cr.width - gap) * 0.6 + gap;
-  const topVp = hr.bottom + 20;   // 与 I 段 row-gap 一致
-  const sp = _scrollParentOf(col);
-  if (!sp) {
-    host.style.position = 'absolute';
-    host.style.left = Math.round(leftVp + window.scrollX) + 'px';
-    host.style.top = Math.round(topVp + window.scrollY) + 'px';
-    host.style.width = Math.round(w) + 'px';
-    _floatScrollEl = window;
-  } else {
-    _floatBase = { left: leftVp, top: topVp, width: w, scrollTop: sp.scrollTop, scrollLeft: sp.scrollLeft };
-    host.style.position = 'fixed';
-    host.style.width = Math.round(w) + 'px';
-    _floatScrollEl = sp;
-    _applyFloatFixed(host, sp);
-  }
-}
-
-/** fixed 模式下的位置写入：纯数学平移，不读任何布局属性。 */
-function _applyFloatFixed(host: HTMLElement, sp: HTMLElement): void {
-  host.style.left = Math.round(_floatBase.left - (sp.scrollLeft - _floatBase.scrollLeft)) + 'px';
-  host.style.top = Math.round(_floatBase.top - (sp.scrollTop - _floatBase.scrollTop)) + 'px';
-}
-
-let _floatRaf = 0;
-function _onViewportChange(): void {
-  if (_floatRaf) return;
-  _floatRaf = window.requestAnimationFrame(() => { _floatRaf = 0; _positionFloatHost(); });
-}
-
-/** 内层滚动容器滚动时才需要动（absolute 模式由浏览器自己处理，直接短路）。 */
-function _onAnyScroll(e: Event): void {
-  if (_floatScrollEl === window) return;
-  const host = document.getElementById(FLOAT_HOST_ID);
-  if (!host) return;
-  const t = e.target as HTMLElement | null;
-  if (t === (_floatScrollEl as HTMLElement)) _applyFloatFixed(host, _floatScrollEl as HTMLElement);
-}
-
-let _floatListenersArmed = false;
-function _ensureFloatHost(): HTMLElement {
-  let host = document.getElementById(FLOAT_HOST_ID);
-  if (!host) {
-    host = document.createElement('div');
-    host.id = FLOAT_HOST_ID;
-    host.setAttribute(FALLBACK_HOST_MARK, '1');
-    // body 级容器：飞牛的 React 只重建它自己管的那棵子树，绝不碰 body 上的外来节点 ——
-    // 这是「自建节点必被 React 清掉」的结构性问题的根治办法（lc-1180/1183/1185 三轮补挂均失败）。
-    // position 初值给 absolute：避免在首次定位前作为流内元素把页面布局挤一下。
-    host.style.cssText = 'position:absolute;left:0;top:0;z-index:6;pointer-events:auto;';
-    document.body.appendChild(host);
-  }
-  if (!_floatListenersArmed) {
-    _floatListenersArmed = true;
-    window.addEventListener('scroll', _onAnyScroll, true);
-    window.addEventListener('resize', _onViewportChange);
-  }
-  _positionFloatHost();
-  return host;
+  const h = document.createElement('div');
+  h.setAttribute(FALLBACK_HOST_MARK, '1');
+  _colHostRef = (col.children[2] as Node) || null;
+  _colHost = h;
+  col.insertBefore(h, _colHostRef);
+  dlog('[lc-1190] 季页无原生右栏(演职人员区未渲染), 自建 col 内右栏宿主 + 同步保活');
+  return h;
 }
 
 /** [lc-1189] 原生「IMDB/豆瓣链接块」的特征类（与 beautifyStyle I 段的隐藏规则同源判据）。
@@ -951,13 +907,13 @@ function _ensureFloatHost(): HTMLElement {
  *  恒为 0×0（实机：children[2]=DIV[box-border w-full px-[46px]]{block}，重建 5 次全失败）。 */
 const LINK_BLOCK_RE = /px-\[46px\]/;
 
-/** 已知不适合承载卡片的宿主（运行时探测）：一旦某个原生宿主让卡量到零尺寸就拉黑，
- *  后续一律改用浮动宿主 —— 结构变化时的自动降级，避免"选了坏宿主 → 重建 → 还是坏宿主"的死循环。 */
+/** 已知不适合承载卡片的**原生**宿主（运行时探测）：某个原生宿主让卡量到零尺寸就拉黑，
+ *  后续一律改走 col 内自建宿主 —— 结构变化时的自动降级，避免"选了坏宿主 → 重建 → 还是坏宿主"的死循环。 */
 const _badHosts = new WeakSet<Element>();
 
-/** [lc-1188] 季页「首选原生宿主」判定（**无副作用**，不建浮动宿主）：
- *  第 3 个子节点存在、不是链接块、不是自建宿主、可见、且没被拉黑 → 就是它；否则 null（走浮动宿主）。
- *  单独抽出来的理由：`ensureTmdbCard` 要判断"卡是否待在正确宿主里"，不能顺手把浮动宿主建出来。 */
+/** [lc-1188] 季页「首选原生宿主」判定（**无副作用**，不建自建宿主）：
+ *  第 3 个子节点存在、不是什么链接块、不是自建宿主、可见、且没被拉黑 → 就是它；否则 null。
+ *  单独抽出来的理由：`ensureTmdbCard` 要判断"卡是否待在正确宿主里"，不能顺手把宿主建出来。 */
 function _preferredNativeHost(): HTMLElement | null {
   if (_isOneLevel()) return null;
   const hero = _activeHero();
@@ -979,26 +935,26 @@ function _cardHost(): HTMLElement | null {
   const made0 = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
   // 原生第三栏可用 → 用它（有演职人员区的剧走这条老路，行为一字不变）
   if (native) {
-    if (made0 && made0.parentNode === col) {
+    if (made0 && made0.parentNode === col && made0 !== _colHost) {
       const c = document.getElementById(CARD_ID);
       if (c && made0.contains(c)) native.insertBefore(c, native.firstChild || null);
       if (!made0.firstChild && made0.parentNode) made0.parentNode.removeChild(made0);
     }
-    // [lc-1188] 卡已搬回原生栏 → 浮动宿主（若空）一并撤掉，避免残留干扰后续判定
-    const fh = document.getElementById(FLOAT_HOST_ID);
-    if (fh && !fh.firstChild && fh.parentNode) fh.parentNode.removeChild(fh);
+    // [lc-1188] 原生右栏出现了 → 把卡从自建宿主搬回原生栏（内容零重建），自建宿主撤掉
+    if (_colHost) {
+      const c = document.getElementById(CARD_ID);
+      if (c && _colHost.contains(c)) native.insertBefore(c, native.firstChild || null);
+      if (!_colHost.firstChild) {
+        if (_colHost.parentNode) _colHost.parentNode.removeChild(_colHost);
+        _colHost = null;
+      }
+    }
     return native;
   }
-  // [lc-1186] 无可用的原生第三栏（不存在 / 是被 CSS 隐藏的原生块 / 演职人员区尚未渲染）→
-  //  **body 级浮动宿主**。历史教训：lc-1180/1183 试过在 col 里自建同级容器，lc-1185 试过零尺寸
-  //  补挂 —— 全部失败，因为 React 渲染第 3 个子节点时会重建 col 的子节点列表，把它不认识的
-  //  自建节点连同卡一起清掉（实机诊断 children=3 里始终没有自建宿主，卡最终落在 display:none
-  //  的原生块里，0×0）。浮动宿主挂在 body 上，React 绝不触碰；位置贴合右栏应有的区域。
-  //  ⚠ 这是**兜底**不是默认：原生栏稍后渲染出来时，由 _ensureCardEl/ensureTmdbCard 把卡搬回去。
-  const orphan = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
-  if (orphan && orphan.parentNode === col) orphan.parentNode.removeChild(orphan);
-  dlog('[lc-1186] 季页无可用原生右栏, 启用 body 级浮动宿主承载 TMDB 卡');
-  return _ensureFloatHost();
+  // [lc-1190] 无可用原生右栏（不存在 / 是链接块 / 被隐藏 / 演职人员区尚未渲染）→ **col 内自建宿主**
+  //  + 同步保活：卡片照旧待在文档流的第 3 个位置，由 beautifyStyle 的 grid 排进右侧 40% 栏 ——
+  //  与有演职人员的剧**完全同一套机制、同样的显示方式**（用户明确不要浮动方案）。
+  return _ensureColHost(col);
 }
 
 function _ensureCardEl(): HTMLElement | null {
@@ -1108,7 +1064,7 @@ function _renderCard(): void {
       // [lc-1189] 零尺寸 → 先把当前宿主拉黑（仅限原生宿主；浮动宿主零尺寸是位置/样式问题，
       //  拉黑它会导致无宿主可用）。下次选宿主时就会自动降级到浮动宿主，不再死循环重建同一个坏宿主。
       const p = c.parentNode as HTMLElement | null;
-      if (p && p.id !== FLOAT_HOST_ID) {
+      if (p && !p.hasAttribute(FALLBACK_HOST_MARK)) {
         _badHosts.add(p);
         dlog('[lc-1189] 宿主 ' + p.tagName + '[' + String(p.className || '').substring(0, 24) + '] 致卡零尺寸 → 拉黑, 改用浮动宿主');
       }
@@ -1255,6 +1211,13 @@ export function removeTmdbCard(): void {
     const el = made[i];
     if (el.parentNode) el.parentNode.removeChild(el);
   }
+  // [lc-1190] 自建宿主引用与同步守卫一并复位（换页后 col 会换成新节点）
+  _colHost = null;
+  _colHostRef = null;
+  _colHostCol = null;
+  if (_colHostObs) { _colHostObs.disconnect(); _colHostObs = null; }
+  _remountKey = '';
+  _remountCount = 0;
   _scheduledFor = null;
   _disarmSeriesPanel();
   _resetState();
@@ -1278,8 +1241,7 @@ export function ensureTmdbCard(): void {
   //  否则会出现「卡一切正常，只是待错地方」—— 典型就是首次渲染时原生右栏还没出现、先挂了浮动宿主，
   //  此后演职人员区渲染出来也没人把它搬回去（旧判定直接 return），实机现象「所有季页全变悬浮」。
   const native = _preferredNativeHost();
-  const floatHost = document.getElementById(FLOAT_HOST_ID);
-  const want: HTMLElement | null = _isOneLevel() ? _pagePanel() : (native || floatHost);
+  const want: HTMLElement | null = _isOneLevel() ? _pagePanel() : (native || _colHost);
   if (healthy && card && want && card.parentNode === want) return;     // 一切正常
   // 同页补挂次数上限：避免极端情况下与 React 互相删除形成死循环（空转 CPU）
   const k = location.pathname;
