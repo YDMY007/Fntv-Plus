@@ -854,23 +854,33 @@ function _cardHost(): HTMLElement | null {
   if (_isOneLevel()) return _pagePanel(); // [lc-1028] Series/Movie：卡挂进各自面板，O8b/N8b 绝对定位右列
   const col = hero.parentElement;
   const third = (col.children[2] as HTMLElement) || null;
-  // 原生第三栏后来才渲染出来（异步）→ 把此前挂在自建宿主里的卡搬回原生栏（insertBefore 自带移动语义）
   const made0 = col.querySelector<HTMLElement>('[' + FALLBACK_HOST_MARK + ']');
-  if (third && made0 && third !== made0 && made0.parentNode === col) {
-    const c = document.getElementById(CARD_ID);
-    if (c && made0.contains(c)) third.insertBefore(c, third.firstChild || null);
+  // [lc-1183] ⚠ third **不一定能用**：没有演职人员区的条目（Bangumi 源番常见，季 getEditDetail
+  //  credits:[]），第 3 个子节点正好是原生「IMDB 链接块」，而 beautifyStyle I 段把它
+  //  `display:none` 掉了（含 imdb/tmdb 外链且无 /v/person/ 链接即隐藏）。卡挂进隐藏节点 =
+  //  在 DOM 里但完全不可见 —— 用户观感「右边直接为空」。这里必须按**可见性**判定宿主。
+  const thirdUsable = !!third && getComputedStyle(third).display !== 'none';
+  if (thirdUsable) {
+    // 原生第三栏后来才渲染出来（异步）→ 把此前挂在自建宿主里的卡搬回原生栏（insertBefore 自带移动语义）
+    if (made0 && third !== made0 && made0.parentNode === col) {
+      const c = document.getElementById(CARD_ID);
+      if (c && made0.contains(c)) third.insertBefore(c, third.firstChild || null);
+      if (!made0.firstChild && made0.parentNode) made0.parentNode.removeChild(made0);
+    }
+    return third;
   }
-  if (third) return third;
-  // [lc-1180] 原生第三栏缺失：飞牛对**没有演职人员/没有该分区**的条目根本不渲染这个节点
-  // （Bangumi 源番常见 —— 季 getEditDetail 实测 credits:[]；用户观感「别的剧集都正常，就这部右侧空」）。
-  // ⚠ 这里不能只建卡不建栏：beautifyStyle 的 COL 选择器带 `:has(> :nth-child(3))`，
-  //  没有第 3 个子节点时整段右栏布局（grid-area:2/2）压根不匹配，卡会掉进页面流里没有右列位置。
-  //  故自建一个空容器占位，使其成为 :nth-child(3)，布局规则自然套上。
+  // [lc-1180] 原生第三栏缺失/不可见 → 自建一个空容器作为 :nth-child(3)。
+  //  ⚠ 不能只建卡不建栏：beautifyStyle 的 COL 选择器带 `:has(> :nth-child(3))`，
+  //  没有第 3 个子节点时整段两栏 Grid 布局（grid-area:2/2 右列）压根不匹配。
   if (made0 && made0.parentNode === col) return made0;
   const host = document.createElement('div');
   host.setAttribute(FALLBACK_HOST_MARK, '1');
-  col.appendChild(host);
-  dlog('[lc-1180] 季页无原生第三栏(演职人员区未渲染), 自建右栏宿主承载 TMDB 卡');
+  // 插到 third 之前：自建容器成为 :nth-child(3)，被隐藏的原节点顺延（仍被隐藏规则命中，
+  // display:none 不参与 grid 布局，不会多出空行）
+  if (third && third.parentNode === col) col.insertBefore(host, third);
+  else col.appendChild(host);
+  dlog('[lc-1183] 季页第三栏不可用'
+    + (third ? '(被 CSS 隐藏, 疑似原生 IMDB 块)' : '(不存在)') + ', 自建右栏宿主承载 TMDB 卡');
   return host;
 }
 
