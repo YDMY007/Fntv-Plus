@@ -3,156 +3,522 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fntv-Plus · 飞牛影视桌面增强客户端</title>
-<meta name="description" content="Fntv-Plus 是基于飞牛影视 Web 端的第三方桌面客户端：玻璃拟态界面、沉浸式剧集详情、豆瓣/Bangumi/Trakt 同步、B站弹幕、外链播放器与手柄控制，支持 Windows / macOS / Linux。">
+<title>Fntv-Plus · 把飞牛影视变成你桌面上的私人影院</title>
+<meta name="description" content="Fntv-Plus 是基于飞牛影视（fnOS TV）Web 端的第三方桌面客户端：玻璃拟态界面、沉浸式剧集详情、豆瓣 / Bangumi / Trakt 同步、B 站弹幕、外链播放器与手柄控制，支持 Windows / macOS / Linux。">
+<meta name="theme-color" content="#050505">
+<meta property="og:title" content="Fntv-Plus · 桌面私人影院">
+<meta property="og:description" content="把飞牛影视，变成你桌面上的私人流媒体影院。支持 Windows / macOS / Linux。">
+<meta property="og:image" content="assets/home.webp">
 <style>
+  /* ============ 设计系统 ============ */
   :root{
-    --bg:#0b1020; --bg2:#111834; --card:rgba(255,255,255,.055);
-    --line:rgba(255,255,255,.12); --text:#eaf0ff; --muted:#9fb0d6;
-    --accent:#6ea8ff; --accent2:#a78bfa;
+    --bg:#050505;
+    --fg:#FAFAFA;
+    --muted:#9CA3AF;
+    --muted2:#6B7280;
+    --accent:#3B82F6;
+    --accent2:#2563EB;
+    --line:rgba(255,255,255,.1);
+    --line2:rgba(255,255,255,.2);
+    --stroke:rgba(255,255,255,.692);
+    --ease:cubic-bezier(.76,0,.24,1);
+    --serif:"Playfair Display","Noto Serif SC","Source Han Serif SC","Songti SC",Georgia,serif;
+    --sans:Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:
-      radial-gradient(1200px 600px at 12% -8%, rgba(110,168,255,.20), transparent 60%),
-      radial-gradient(900px 500px at 88% 4%, rgba(167,139,250,.18), transparent 60%),
-      linear-gradient(180deg,var(--bg),var(--bg2));
-    color:var(--text);font:16px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg)}
+  body{font-family:var(--sans);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
-  header{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(11,16,32,.72);border-bottom:1px solid var(--line)}
-  .nav{display:flex;align-items:center;justify-content:space-between;height:60px}
-  .logo{font-weight:800;letter-spacing:.5px;font-size:18px;
-    background:linear-gradient(92deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .nav a.btn{padding:8px 16px;border-radius:10px;font-size:14px;font-weight:600;
-    background:linear-gradient(92deg,var(--accent),var(--accent2));color:#0b1020}
-  .hero{padding:76px 0 44px;text-align:center}
-  h1{font-size:clamp(30px,5.4vw,52px);line-height:1.15;margin:0 0 14px;font-weight:800;letter-spacing:-.5px}
-  .slogan{color:var(--muted);font-size:clamp(15px,2.2vw,19px);max-width:760px;margin:0 auto 26px}
-  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
-  .btn{padding:13px 26px;border-radius:12px;font-weight:700;font-size:15px;transition:transform .12s,filter .12s;display:inline-block}
-  .btn:hover{transform:translateY(-2px);filter:brightness(1.08)}
-  .btn.primary{background:linear-gradient(92deg,var(--accent),var(--accent2));color:#0b1020}
-  .btn.ghost{border:1px solid var(--line);background:var(--card);color:var(--text)}
-  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;color:var(--muted);font-size:13px}
-  .badge{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 13px}
-  h2{font-size:26px;margin:60px 0 8px;letter-spacing:-.3px}
-  .sec-note{color:var(--muted);margin:0 0 26px;font-size:15px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
-  .card{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:20px;
-    background-image:linear-gradient(165deg,rgba(255,255,255,.06),rgba(255,255,255,.012) 60%)}
-  .card h3{margin:0 0 8px;font-size:17px}
-  .card p{margin:0;color:var(--muted);font-size:14.5px}
-  .card .ico{font-size:22px;margin-bottom:10px;display:block}
-  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
-  .shots img{width:100%;border-radius:14px;border:1px solid var(--line);display:block;cursor:zoom-in;background:#0d1430}
-  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:6px}
-  .dl a{display:block;border:1px solid var(--line);background:var(--card);border-radius:14px;padding:18px;text-align:center;transition:background .15s}
-  .dl a:hover{background:rgba(255,255,255,.1)}
-  .dl .os{font-weight:700;font-size:16px}
-  .dl .hint{color:var(--muted);font-size:13px;margin-top:4px}
-  .notice{margin-top:46px;border:1px solid rgba(255,190,120,.32);background:rgba(255,180,100,.08);
-    border-radius:16px;padding:18px 20px;color:#f3e2c7;font-size:14px}
-  .notice b{color:#ffd9a0}
-  footer{margin-top:60px;border-top:1px solid var(--line);padding:26px 0 40px;color:var(--muted);font-size:14px}
-  footer .links{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px}
+  img,video{display:block;max-width:100%}
+  ::selection{background:var(--accent);color:#fff}
+
+  .shell{max-width:100rem;margin:0 auto;padding:0 1.5rem}
+  @media(min-width:768px){.shell{padding:0 3rem}}
+  section{position:relative}
+  .sec-pad{padding-top:7rem;padding-bottom:7rem}
+  @media(min-width:768px){.sec-pad{padding-top:12rem;padding-bottom:12rem}}
+
+  .tag{font-size:.8125rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:500}
+  .sec-head{font-family:var(--serif);font-size:clamp(2.4rem,5.2vw,4.5rem);line-height:1.06;letter-spacing:-.02em;margin:.6rem 0 0;font-weight:500}
+  .lede{color:var(--muted);font-size:1.0625rem;max-width:44rem;margin-top:1.1rem}
+
+  /* ============ 自定义光标 ============ */
+  .cur,.cur-dot{position:fixed;top:0;left:0;z-index:9999;pointer-events:none;border-radius:50%;mix-blend-mode:difference}
+  .cur{width:36px;height:36px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.06);transition:width .3s var(--ease),height .3s var(--ease),background .3s}
+  .cur-dot{width:6px;height:6px;background:#fff}
+  .cur.grow{width:76px;height:76px;background:rgba(255,255,255,.14)}
+  @media(hover:none),(pointer:coarse){.cur,.cur-dot{display:none}}
+
+  /* ============ 导航 ============ */
+  nav{position:fixed;inset:0 0 auto 0;z-index:60;border-bottom:1px solid transparent;
+      transition:transform .5s var(--ease),background .4s,border-color .4s,backdrop-filter .4s}
+  nav.solid{background:rgba(5,5,5,.55);backdrop-filter:blur(14px) saturate(160%);border-bottom-color:var(--line)}
+  nav.hide{transform:translateY(-100%)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:76px}
+  .brand{display:flex;align-items:center;gap:.55rem;font-family:var(--serif);font-size:1.35rem}
+  .brand i{width:9px;height:9px;border-radius:50%;background:var(--accent);display:block;box-shadow:0 0 18px var(--accent)}
+  .nav-links{display:none;gap:2.25rem;align-items:center}
+  @media(min-width:1024px){.nav-links{display:flex}}
+  .nav-links a{font-size:.9375rem;color:var(--muted);position:relative;padding:.25rem 0;transition:color .3s}
+  .nav-links a:hover{color:var(--fg)}
+  .nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:1px;width:0;background:var(--accent);transition:width .45s var(--ease)}
+  .nav-links a:hover::after{width:100%}
+  .nav-cta{padding:.7rem 1.35rem;border:1px solid var(--line2);border-radius:999px;font-size:.9375rem;font-weight:500;
+           background:rgba(255,255,255,.04);transition:background .3s,border-color .3s,color .3s}
+  .nav-cta:hover{background:var(--fg);color:#050505;border-color:var(--fg)}
+  .burger{display:grid;gap:5px;padding:.6rem;border:1px solid var(--line);border-radius:999px;cursor:pointer}
+  @media(min-width:1024px){.burger{display:none}}
+  .burger s{display:block;width:18px;height:1.5px;background:var(--fg);text-decoration:none}
+  #mnav{position:fixed;inset:0;z-index:55;background:rgba(5,5,5,.97);backdrop-filter:blur(10px);
+        display:flex;flex-direction:column;justify-content:center;gap:1.25rem;padding:0 2rem;
+        opacity:0;visibility:hidden;transition:opacity .45s var(--ease),visibility .45s}
+  #mnav.on{opacity:1;visibility:visible}
+  #mnav a{font-family:var(--serif);font-size:2.1rem;border-bottom:1px solid var(--line);padding-bottom:.7rem}
+
+  /* ============ Hero ============ */
+  .hero-wrap{height:100vh;position:relative}
+  .hero{position:fixed;inset:0;height:100vh;width:100%;overflow:hidden;z-index:1;
+        will-change:transform,border-radius;transform-origin:50% 35%;border-radius:0}
+  .hero-bg{position:absolute;inset:-2%;width:104%;height:104%;object-fit:cover;filter:brightness(.42) saturate(1.1);
+           animation:kb 26s ease-in-out infinite alternate}
+  @keyframes kb{from{transform:scale(1.02)}to{transform:scale(1.12)}}
+  .hero-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,5,5,.68) 0%,rgba(5,5,5,.34) 42%,rgba(5,5,5,.94) 100%)}
+  .hero-in{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 1.5rem}
+  .hero-title{font-family:var(--serif);font-weight:500;letter-spacing:-.03em;line-height:.98;
+              font-size:clamp(2.6rem,10.5vw,12rem);margin:0}
+  .hero-title .out{color:transparent;-webkit-text-stroke:1px var(--stroke)}
+  .hero-sub{color:var(--muted);max-width:46rem;margin:1.6rem auto 0;font-size:clamp(.95rem,1.6vw,1.15rem)}
+  .hero-meta{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;margin-top:2rem}
+  .chip{font-size:.8125rem;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:.4rem .9rem;background:rgba(255,255,255,.03)}
+  .scroll-hint{position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);display:grid;justify-items:center;gap:.5rem;color:var(--muted2);font-size:.72rem;letter-spacing:.2em}
+  .scroll-hint s{display:block;width:1px;height:42px;background:linear-gradient(var(--line2),transparent);animation:fall 2.2s var(--ease) infinite}
+  @keyframes fall{0%{opacity:0;transform:translateY(-12px)}40%{opacity:1}100%{opacity:0;transform:translateY(14px)}}
+
+  /* ============ Showcase 横滑手风琴 ============ */
+  .acc{display:flex;gap:.6rem;height:62vh;margin-top:2.6rem}
+  @media(min-width:1024px){.acc{height:78vh}}
+  .panel{position:relative;overflow:hidden;border-radius:1.25rem;cursor:pointer;flex:1 1 0;background:#0b0b0c;
+         transition:flex-grow .8s var(--ease),flex-basis .8s var(--ease)}
+  .panel img{width:100%;height:100%;object-fit:cover;opacity:.5;transition:opacity .8s var(--ease),transform 1s var(--ease)}
+  .panel::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,rgba(5,5,5,.9),rgba(5,5,5,.1));opacity:.7;transition:opacity .6s}
+  .panel.on{flex-grow:8}
+  .panel.on img{opacity:.85;transform:scale(1.02)}
+  .panel.on::after{opacity:.85}
+  .panel .rot{position:absolute;left:50%;bottom:1.5rem;transform:translateX(-50%) rotate(-90deg);transform-origin:center;
+              white-space:nowrap;font-family:var(--serif);font-size:1.05rem;letter-spacing:.06em;transition:opacity .35s var(--ease)}
+  .panel.on .rot{opacity:0}
+  .panel .info{position:absolute;left:1.75rem;right:1.75rem;bottom:1.6rem;opacity:0;transform:translateY(14px);
+               transition:opacity .6s var(--ease) .12s,transform .6s var(--ease) .12s;z-index:2}
+  .panel.on .info{opacity:1;transform:none}
+  .panel .info h3{font-family:var(--serif);font-size:clamp(1.4rem,2.4vw,2.2rem);margin:0 0 .35rem;font-weight:500}
+  .panel .info p{margin:0;color:var(--muted);font-size:.95rem;max-width:34rem}
+  @media(max-width:1023px){
+    .acc{flex-direction:column;height:auto}
+    .panel{height:14vh;transition:height .7s var(--ease)}
+    .panel.on{height:54vh}
+    .panel .rot{transform:translateX(-50%);bottom:auto;top:50%;margin-top:-.8rem}
+  }
+
+  /* ============ Bento ============ */
+  .bento{display:grid;gap:1rem;grid-template-columns:1fr;margin-top:2.6rem}
+  @media(min-width:768px){.bento{grid-template-columns:repeat(3,1fr);grid-auto-rows:19rem}}
+  .cell{position:relative;overflow:hidden;border-radius:1.5rem;background:#0c0c0e;border:1px solid rgba(255,255,255,.05);
+        padding:1.75rem;display:flex;flex-direction:column;justify-content:flex-end;min-height:15rem}
+  .cell .bg{position:absolute;inset:0;object-fit:cover;width:100%;height:100%;opacity:.2;mix-blend-mode:luminosity;
+            transition:opacity .8s var(--ease),transform 1s var(--ease)}
+  .cell:hover .bg{opacity:.42;transform:scale(1.05)}
+  .cell>*{position:relative;z-index:2}
+  .cell .num{font-family:var(--serif);font-size:.95rem;color:var(--accent);margin-bottom:auto}
+  .cell h3{font-family:var(--serif);font-weight:500;font-size:clamp(1.3rem,2.1vw,1.85rem);margin:0 0 .5rem}
+  .cell p{margin:0;color:var(--muted);font-size:.95rem}
+  .cell .go{position:absolute;top:1.5rem;right:1.5rem;width:2.6rem;height:2.6rem;border-radius:50%;display:grid;place-items:center;
+            background:rgba(255,255,255,.1);backdrop-filter:blur(8px);border:1px solid var(--line2);
+            opacity:0;transform:translateX(-12px);transition:opacity .5s var(--ease),transform .5s var(--ease);z-index:3}
+  .cell:hover .go{opacity:1;transform:none}
+  @media(min-width:768px){
+    .cell.wide{grid-column:span 2}
+    .cell.tall{grid-row:span 2}
+  }
+
+  /* ============ About ============ */
+  .about{display:grid;gap:3rem;grid-template-columns:1fr;align-items:start}
+  @media(min-width:1024px){.about{grid-template-columns:7fr 5fr;gap:4.5rem}}
+  .reveal-text{font-family:var(--serif);font-size:clamp(1.3rem,2.5vw,2.2rem);line-height:1.55;margin:1rem 0 0;font-weight:400}
+  .reveal-text span{opacity:.15;transition:opacity .35s linear}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1.8rem}
+  .stats b{display:block;font-family:var(--serif);font-size:clamp(1.7rem,3.4vw,2.6rem);font-weight:500;line-height:1.1}
+  .stats span{font-size:.8125rem;color:var(--muted2);letter-spacing:.08em}
+  .about-media{position:relative;border-radius:2.5rem;overflow:hidden;aspect-ratio:4/5;border:1px solid var(--line)}
+  .about-media img{width:100%;height:100%;object-fit:cover;filter:brightness(.85)}
+
+  /* ============ FAQ ============ */
+  .faq{display:grid;gap:2.5rem;grid-template-columns:1fr;margin-top:0}
+  @media(min-width:1024px){.faq{grid-template-columns:5fr 7fr;gap:5rem}}
+  .q{border-bottom:1px solid var(--line)}
+  .q>button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:1.5rem;background:none;border:0;
+            color:var(--fg);text-align:left;padding:1.5rem 0;cursor:pointer;font:inherit;font-size:1.1rem}
+  .q .ic{position:relative;width:1.1rem;height:1.1rem;flex:none}
+  .q .ic::before,.q .ic::after{content:"";position:absolute;background:var(--fg);transition:transform .45s var(--ease),opacity .45s}
+  .q .ic::before{left:0;top:50%;width:100%;height:1.5px;margin-top:-.75px}
+  .q .ic::after{top:0;left:50%;height:100%;width:1.5px;margin-left:-.75px}
+  .q.on .ic::after{transform:scaleY(0);opacity:0}
+  .q .a{max-height:0;overflow:hidden;transition:max-height .55s var(--ease),opacity .45s;opacity:0}
+  .q.on .a{opacity:1}
+  .q .a p{margin:0 0 1.5rem;color:var(--muted);max-width:44rem}
+
+  /* ============ Contact ============ */
+  .contact{position:relative;min-height:100vh;display:grid;place-items:center;overflow:hidden}
+  .contact-bg{position:absolute;inset:0;object-fit:cover;width:100%;height:100%;filter:brightness(.4)}
+  .contact::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,.45) 0%,rgba(0,0,0,.96) 78%)}
+  .contact-in{position:relative;z-index:2;text-align:center;padding:6rem 1.5rem}
+  .contact-title{font-family:var(--serif);font-size:clamp(2.6rem,10vw,9rem);line-height:1;margin:0;font-weight:500;letter-spacing:-.03em}
+  .pill{position:relative;display:inline-flex;align-items:center;gap:.7rem;margin-top:2.4rem;padding:1.05rem 2.3rem;border-radius:999px;
+        background:var(--fg);color:#050505;font-weight:600;font-size:1rem;overflow:hidden;isolation:isolate;transition:color .4s}
+  .pill s{position:absolute;inset:0;background:var(--accent2);transform:translateY(100%);transition:transform .55s var(--ease);z-index:-1;text-decoration:none}
+  .pill:hover s{transform:translateY(0)}
+  .pill:hover{color:#fff}
+  .pill span{position:relative;z-index:1}
+
+  footer{border-top:1px solid var(--line);padding:3rem 0 3.5rem;color:var(--muted);font-size:.9375rem;position:relative;z-index:2;background:var(--bg)}
+  footer .fl{display:flex;gap:1.75rem;flex-wrap:wrap;margin-bottom:1.1rem}
   footer a:hover{color:var(--accent)}
-  dialog{max-width:96vw;max-height:92vh;background:transparent;border:none}
-  dialog img{width:100%;border-radius:14px}
-  .ver{color:var(--accent);font-weight:700}
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .9s var(--ease),transform .9s var(--ease)}
+  .reveal.in{opacity:1;transform:none}
+  @media(prefers-reduced-motion:reduce){
+    *{animation:none!important}
+    .reveal{opacity:1;transform:none}
+    .reveal-text span{opacity:1}
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap nav">
-    <div class="logo">🎬 Fntv-Plus</div>
-    <a class="btn" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载</a>
-  </div>
-</header>
 
-<main class="wrap">
-  <section class="hero">
-    <h1>把飞牛影视，变成你桌面上的私人流媒体影院</h1>
-    <p class="slogan">基于飞牛影视（fnOS TV）Web 端的第三方桌面客户端。冷调渐变玻璃与云母界面、Netflix 风格沉浸式剧集详情、3D 首页轮播——先重塑观影视觉；再打通豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库与年度观影报告——织成你的专属观影档案；最后叠加手柄控制、智能跳过、外链播放器等硬核播放增强。</p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载最新版 <span class="ver" id="ver"></span></a>
-      <a class="btn ghost" href="https://github.com/YDMY007/Fntv-Plus" target="_blank" rel="noopener">GitHub 项目</a>
+<div class="cur" id="cur"></div>
+<div class="cur-dot" id="curdot"></div>
+
+<nav id="nav">
+  <div class="shell nav-in">
+    <a class="brand" href="#top"><i></i>Fntv-Plus</a>
+    <div class="nav-links">
+      <a href="#work">界面</a>
+      <a href="#services">能力</a>
+      <a href="#about">关于</a>
+      <a href="#faq">常见问题</a>
+      <a class="nav-cta" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载</a>
     </div>
-    <div class="badges">
-      <span class="badge">Windows</span><span class="badge">macOS</span><span class="badge">Linux</span>
-      <span class="badge">Electron 38</span><span class="badge">GPL-3.0</span>
-      <span class="badge" id="rel">版本获取中…</span>
+    <div class="burger" id="burger"><s></s><s></s><s></s></div>
+  </div>
+</nav>
+
+<div id="mnav">
+  <a href="#work">界面</a>
+  <a href="#services">能力</a>
+  <a href="#about">关于</a>
+  <a href="#faq">常见问题</a>
+  <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载 →</a>
+</div>
+
+<div class="hero-wrap" id="top">
+  <header class="hero" id="hero">
+    <img class="hero-bg" src="assets/home.webp" alt="Fntv-Plus 首页海报轮播墙">
+    <div class="hero-veil"></div>
+    <div class="hero-in">
+      <p class="tag" style="margin:0 0 1.4rem">飞牛影视 · 第三方桌面客户端</p>
+      <h1 class="hero-title">把飞牛影视<br><span class="out">变成私人影院</span></h1>
+      <p class="hero-sub">冷调玻璃与云母界面、Netflix 风格沉浸式剧集详情、3D 首页轮播；豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库与年度观影报告；再叠加手柄控制、智能跳过与外链播放器。</p>
+      <div class="hero-meta">
+        <span class="chip">Windows</span>
+        <span class="chip">macOS</span>
+        <span class="chip">Linux</span>
+        <span class="chip">Electron 38</span>
+        <span class="chip">GPL-3.0</span>
+        <span class="chip" id="relchip">版本获取中…</span>
+      </div>
+      <div class="scroll-hint"><span>SCROLL</span><s></s></div>
+    </div>
+  </header>
+  <div style="height:100vh"></div>
+</div>
+
+<main style="position:relative;z-index:2;background:var(--bg)">
+
+  <section id="work" class="sec-pad">
+    <div class="shell">
+      <p class="tag reveal">01 — 界面</p>
+      <h2 class="sec-head reveal">不是套个网页外壳<br>是整套视觉重做</h2>
+      <p class="lede reveal">把鼠标移到任意一栏看细节：轮播墙、沉浸式详情、B 站弹幕，都是实际运行界面。</p>
+      <div class="acc" id="acc">
+        <div class="panel on" data-idx="0">
+          <img src="assets/home.webp" alt="3D 首页轮播墙">
+          <div class="rot">3D 首页轮播墙</div>
+          <div class="info">
+            <h3>3D 首页轮播墙</h3>
+            <p>四种轮播样式可切换（竖向 / 横向 / 堆叠 / 立体堆叠），标题用 TMDB 透明 Logo 替换，背景按当前海报自动取色。</p>
+          </div>
+        </div>
+        <div class="panel" data-idx="1">
+          <img src="assets/detail.webp" alt="沉浸式剧集详情">
+          <div class="rot">沉浸式剧集详情</div>
+          <div class="info">
+            <h3>沉浸式剧集详情</h3>
+            <p>Netflix 风格首屏：大背板 + 玻璃信息层 + 展开收起；选集、演职人员、剧集卡片都能一键回填 TMDB / Bangumi 元数据。</p>
+          </div>
+        </div>
+        <div class="panel" data-idx="2">
+          <img src="assets/danmaku.webp" alt="B 站弹幕与播放增强">
+          <div class="rot">B 站弹幕与播放增强</div>
+          <div class="info">
+            <h3>B 站弹幕与播放增强</h3>
+            <p>内置降级源 + 弹弹 play + 自建弹幕接口三段式，支持合集按集取分 P、手动锁定弹幕源；再叠加插帧与智能跳过片头片尾。</p>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <h2>它做了什么</h2>
-  <p class="sec-note">不只是把网页装进桌面外壳，而是从视觉、档案到播放链路的整套重做。</p>
-  <div class="grid">
-    <div class="card"><span class="ico">🪟</span><h3>视觉重塑</h3><p>亚克力玻璃与云母质感、可调透明度与模糊、Netflix 风格沉浸式剧集详情页、3D 首页轮播墙，也支持回退原生 NAS 界面。</p></div>
-    <div class="card"><span class="ico">📚</span><h3>观影档案</h3><p>豆瓣 / Bangumi / Trakt 多站同步观看记录，TMDB 元数据回填，演员作品库，年度观影报告。</p></div>
-    <div class="card"><span class="ico">▶️</span><h3>播放增强</h3><p>内置 MPV 与 PotPlayer 外链播放，B 站弹幕与弹弹 play / 自建弹幕源，插帧、智能跳过片头片尾。</p></div>
-    <div class="card"><span class="ico">🎮</span><h3>操控与细节</h3><p>手柄全键盘导航、鼠标横向滚轮、自定义刮削与扩展数据源、播放记忆与自动连播、诊断与日志导出。</p></div>
-  </div>
+  <section id="services" class="sec-pad" style="padding-top:0">
+    <div class="shell">
+      <p class="tag reveal">02 — 能力</p>
+      <h2 class="sec-head reveal">从视觉到播放链路<br>一整套重做</h2>
+      <div class="bento">
+        <div class="cell wide reveal">
+          <img class="bg" src="assets/settings.webp" alt="">
+          <div class="go" aria-hidden="true">↗</div>
+          <div class="num">01</div>
+          <h3>视觉重塑</h3>
+          <p>亚克力玻璃与云母质感、透明度与模糊可调、页面过渡与卡片入场动画；低配机可开「性能模式」一键压掉全部特效，也能回退原生 NAS 界面。</p>
+        </div>
+        <div class="cell tall reveal">
+          <img class="bg" src="assets/actor.webp" alt="">
+          <div class="go" aria-hidden="true">↗</div>
+          <div class="num">02</div>
+          <h3>观影档案</h3>
+          <p>豆瓣 / Bangumi / Trakt 多站观看记录同步，TMDB、Fanart、TVMaze、OMDb、MAL 多源元数据回填，演员作品库与年度观影报告，把散落的记录织成一份档案。</p>
+        </div>
+        <div class="cell reveal">
+          <img class="bg" src="assets/player.webp" alt="">
+          <div class="go" aria-hidden="true">↗</div>
+          <div class="num">03</div>
+          <h3>播放增强</h3>
+          <p>内置 MPV 与 PotPlayer 外链播放，本地 Go 代理中转流媒体，插帧与渲染预设可选。</p>
+        </div>
+        <div class="cell reveal">
+          <img class="bg" src="assets/nas.webp" alt="">
+          <div class="go" aria-hidden="true">↗</div>
+          <div class="num">04</div>
+          <h3>操控与细节</h3>
+          <p>手柄全键盘导航、鼠标横向滚轮、播放记忆与自动连播、诊断面板与一键导出日志反馈。</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <h2>界面一览</h2>
-  <p class="sec-note">点图片可放大查看。</p>
-  <div class="shots">
-    <img src="assets/home.webp" alt="首页海报轮播墙" loading="lazy">
-    <img src="assets/detail.webp" alt="沉浸式剧集详情页" loading="lazy">
-    <img src="assets/danmaku.webp" alt="B站弹幕播放" loading="lazy">
-    <img src="assets/player.webp" alt="外链播放器" loading="lazy">
-    <img src="assets/actor.webp" alt="演员作品库" loading="lazy">
-    <img src="assets/nas.webp" alt="原生 NAS 界面" loading="lazy">
-    <img src="assets/settings.webp" alt="设置面板" loading="lazy">
-  </div>
+  <section id="about" class="sec-pad" style="padding-top:0">
+    <div class="shell about">
+      <div>
+        <p class="tag reveal">03 — 关于</p>
+        <p class="reveal-text" id="revealText">Fntv-Plus 是一个基于飞牛影视 Web 端的第三方桌面客户端。它不做另起炉灶的播放器，而是在你熟悉的界面之上，把视觉、元数据、同步与播放链路一层层补完 —— 让 NAS 里的片子，看起来、用起来都像一间属于自己的影院。项目在 2026 年 9 月脱离上游 fork 网络独立发展，沿用 GPL-3.0 许可证，代码、更新与补丁全部公开在 GitHub。</p>
+        <div class="stats reveal">
+          <div><b>3</b><span>Windows / macOS / Linux</span></div>
+          <div><b>7</b><span>元数据源接入</span></div>
+          <div><b>GPL</b><span>开源 · 3.0 许可证</span></div>
+        </div>
+      </div>
+      <div class="about-media reveal">
+        <img src="assets/detail.webp" alt="Fntv-Plus 剧集详情界面">
+      </div>
+    </div>
+  </section>
 
-  <h2>下载</h2>
-  <p class="sec-note">安装包与更新均从 GitHub Releases 官方渠道获取，请勿安装来源不明的补丁包。</p>
-  <div class="dl">
-    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">Windows</div><div class="hint">x64 安装包（NSIS）</div></a>
-    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">macOS</div><div class="hint">DMG · x64 / arm64</div></a>
-    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">Linux</div><div class="hint">AppImage · x64 / arm64</div></a>
-  </div>
+  <section id="faq" class="sec-pad" style="padding-top:0">
+    <div class="shell faq">
+      <div>
+        <p class="tag reveal">04 — 常见问题</p>
+        <h2 class="sec-head reveal">你可能想问</h2>
+      </div>
+      <div class="reveal">
+        <div class="q">
+          <button type="button">它和飞牛影视官方客户端是什么关系？<i class="ic"></i></button>
+          <div class="a"><p>没有关系。这是作者个人的学习 / 练习作品，与飞牛影视官方无任何关联或合作。它通过在官方 Web 端之上做注入式修改实现增强，可能因官方更新而失效，不保证长期稳定可用。</p></div>
+        </div>
+        <div class="q">
+          <button type="button">登录我的飞牛账号安全吗？<i class="ic"></i></button>
+          <div class="a"><p>登录走官方页面，Cookie 与第三方授权（豆瓣 / Bangumi / Trakt / B 站）都只加密保存在本机。项目自带匿名统计用于了解使用人数，只上报「随机匿名 ID + 版本号 + 系统类型」，不采集账号、IP、媒体库或文件路径，也可在设置里一键关闭并重置匿名 ID。</p></div>
+        </div>
+        <div class="q">
+          <button type="button">支持哪些系统？怎么更新？<i class="ic"></i></button>
+          <div class="a"><p>Windows（NSIS 安装包）、macOS（DMG，x64 / arm64）、Linux（AppImage，x64 / arm64）。应用内可检查更新，也支持热补丁 —— 小修小补不用重装。更新只从本项目 GitHub / Gitee 官方渠道获取。</p></div>
+        </div>
+        <div class="q">
+          <button type="button">遇到 bug 怎么反馈？<i class="ic"></i></button>
+          <div class="a"><p>设置面板「诊断与日志」里可以直接写描述提交，也能一键附带脱敏后的日志（账号、令牌、密钥一律打码）；不方便联网时还可导出日志文件手动发我。</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <div class="notice">
-    <b>⚠️ 使用前请知悉</b><br>
-    这是作者个人的学习 / 练习作品，<b>非飞牛影视官方客户端</b>，与官方无任何关联或合作关系。它通过在飞牛影视 Web 端之上做注入式修改实现功能，可能因官方更新而失效、闪退或行为异常，不保证长期稳定可用。使用需登录你的飞牛账号，并可能涉及豆瓣 / Bangumi / Trakt / B 站等第三方账号授权（Cookie / Token 仅本地加密存储），请仅在可信环境使用。外链播放与本地代理请确保所播内容符合所在地法律法规与版权规定。项目基于 GPL-3.0 开源，按「原样」提供、不提供任何担保。
-  </div>
+  <section id="contact" class="contact">
+    <img class="contact-bg" src="assets/home.webp" alt="">
+    <div class="contact-in">
+      <p class="tag reveal" style="color:var(--muted)">05 — 下载</p>
+      <h2 class="contact-title reveal">开始观影</h2>
+      <p class="lede reveal" style="margin:1.2rem auto 0;text-align:center">安装包与更新仅从官方仓库发布，请勿使用来源不明的补丁包。</p>
+      <a class="pill reveal" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">
+        <s></s><span>下载最新版 <b id="ver">→</b></span>
+      </a>
+    </div>
+  </section>
 </main>
 
 <footer>
-  <div class="wrap">
-    <div class="links">
+  <div class="shell">
+    <div class="fl">
       <a href="https://github.com/YDMY007/Fntv-Plus" target="_blank" rel="noopener">GitHub</a>
       <a href="https://gitee.com/YDMY007/fntv-plus" target="_blank" rel="noopener">Gitee 镜像</a>
       <a href="https://github.com/YDMY007/Fntv-Plus/issues" target="_blank" rel="noopener">问题反馈</a>
-      <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">更新日志</a>
+      <a href="https://github.com/YDMY007/Fntv-Plus/releases" target="_blank" rel="noopener">更新日志</a>
     </div>
-    <div>Fntv-Plus · by YDMY007 · GPL-3.0 · 基于 QiaoKes/fntv-electron 启发并保留其版权与致谢</div>
+    <div style="font-size:.875rem;color:var(--muted2)">
+      非官方第三方客户端 · 基于 QiaoKes/fntv-electron 启发并保留其版权与致谢 · 按「原样」提供、不提供任何担保 · by YDMY007
+    </div>
   </div>
 </footer>
 
-<dialog id="lb"><img id="lbimg" alt=""></dialog>
-
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.20/dist/lenis.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script>
-  // 拉 GitHub 最新 release 信息（失败则静默降级，不影响页面）
-  fetch('https://api.github.com/repos/YDMY007/Fntv-Plus/releases/latest')
-    .then(r => r.ok ? r.json() : Promise.reject())
-    .then(j => {
-      const tag = j.tag_name || '';
-      const d = j.published_at ? new Date(j.published_at).toISOString().slice(0, 10) : '';
-      const el = document.getElementById('rel');
-      const v = document.getElementById('ver');
-      if (el) el.textContent = '最新 ' + tag + (d ? '（' + d + '）' : '');
-      if (v) v.textContent = tag;
-    })
-    .catch(() => { const el = document.getElementById('rel'); if (el) el.textContent = '前往 GitHub 查看版本'; });
+(function () {
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var fine = matchMedia('(hover:hover) and (pointer:fine)').matches;
 
-  // 图片点击放大
-  const lb = document.getElementById('lb'), lbimg = document.getElementById('lbimg');
-  document.querySelectorAll('.shots img').forEach(img => {
-    img.addEventListener('click', () => { lbimg.src = img.src; lb.showModal(); });
+  /* Lenis 平滑滚动 */
+  var lenis = null;
+  if (window.Lenis && !reduce) {
+    lenis = new Lenis({ lerp: 0.09, smoothWheel: true });
+    (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })(performance.now());
+  }
+
+  /* 自定义光标：实心点即时跟随 + 外圈弹簧拖尾 */
+  if (fine && !reduce) {
+    var cur = document.getElementById('cur'), dot = document.getElementById('curdot');
+    var tx = innerWidth / 2, ty = innerHeight / 2, cx = tx, cy = ty;
+    addEventListener('mousemove', function (e) {
+      tx = e.clientX; ty = e.clientY;
+      dot.style.transform = 'translate(' + (tx - 3) + 'px,' + (ty - 3) + 'px)';
+    }, { passive: true });
+    (function loop() {
+      cx += (tx - cx) * 0.16; cy += (ty - cy) * 0.16;
+      cur.style.transform = 'translate(' + (cx - cur.offsetWidth / 2) + 'px,' + (cy - cur.offsetHeight / 2) + 'px)';
+      requestAnimationFrame(loop);
+    })();
+    document.querySelectorAll('a,button,.panel,.cell').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { cur.classList.add('grow'); });
+      el.addEventListener('mouseleave', function () { cur.classList.remove('grow'); });
+    });
+  }
+
+  /* 导航：滚过 50px 加玻璃背景；下滚隐藏、上滚显示 */
+  var nav = document.getElementById('nav'), last = 0;
+  function onScroll(y) {
+    nav.classList.toggle('solid', y > 50);
+    if (y > last && y > 220) nav.classList.add('hide'); else nav.classList.remove('hide');
+    last = y;
+  }
+  addEventListener('scroll', function () { onScroll(scrollY); }, { passive: true });
+  if (lenis) lenis.on('scroll', function (e) { onScroll(e.scroll); });
+
+  /* 移动端菜单 */
+  var mnav = document.getElementById('mnav');
+  document.getElementById('burger').addEventListener('click', function () { mnav.classList.toggle('on'); });
+
+  /* 锚点：交给 Lenis 平滑滚动 */
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var t = document.querySelector(a.getAttribute('href'));
+      if (!t) return;
+      e.preventDefault();
+      mnav.classList.remove('on');
+      lenis ? lenis.scrollTo(t, { offset: -60 }) : t.scrollIntoView({ behavior: 'smooth' });
+    });
   });
-  lb.addEventListener('click', () => lb.close());
+
+  /* Hero：滚动时整屏缩放 + 起圆角（GSAP ScrollTrigger 接管） */
+  if (window.gsap && window.ScrollTrigger && !reduce) {
+    gsap.registerPlugin(ScrollTrigger);
+    gsap.to('#hero', {
+      scale: 0.82, borderRadius: '2rem', ease: 'none',
+      scrollTrigger: { trigger: '.hero-wrap', start: 'top top', end: 'bottom top', scrub: true }
+    });
+    gsap.to('.hero-in', {
+      opacity: 0, y: -40, ease: 'none',
+      scrollTrigger: { trigger: '.hero-wrap', start: '15% top', end: '60% top', scrub: true }
+    });
+  }
+
+  /* 区块进场 */
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.14 });
+  document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+
+  /* 横滑手风琴：悬停/点击切换，激活栏 80% 宽 */
+  var acc = document.getElementById('acc');
+  if (acc) {
+    acc.querySelectorAll('.panel').forEach(function (p) {
+      var on = function () {
+        acc.querySelectorAll('.panel').forEach(function (x) { x.classList.remove('on'); });
+        p.classList.add('on');
+      };
+      p.addEventListener('mouseenter', function () { if (fine) on(); });
+      p.addEventListener('click', on);
+    });
+  }
+
+  /* FAQ 手风琴 */
+  document.querySelectorAll('.q').forEach(function (q) {
+    var btn = q.querySelector('button'), a = q.querySelector('.a');
+    btn.addEventListener('click', function () {
+      var open = q.classList.contains('on');
+      document.querySelectorAll('.q.on').forEach(function (o) {
+        o.classList.remove('on'); o.querySelector('.a').style.maxHeight = '';
+      });
+      if (!open) { q.classList.add('on'); a.style.maxHeight = a.scrollHeight + 'px'; }
+    });
+  });
+
+  /* About：逐词点亮（滚动进度驱动 opacity 0.15 → 1） */
+  var rt = document.getElementById('revealText');
+  if (rt) {
+    var parts = rt.textContent.trim().split(/(\s+)/);
+    rt.innerHTML = parts.map(function (w) { return /\s+/.test(w) ? w : '<span>' + w + '</span>'; }).join('');
+    var spans = rt.querySelectorAll('span');
+    function paint() {
+      var r = rt.getBoundingClientRect(), vh = innerHeight;
+      var p = (vh * 0.82 - r.top) / (r.height + vh * 0.28);
+      p = Math.max(0, Math.min(1, p));
+      var n = Math.floor(p * spans.length * 1.15);
+      for (var i = 0; i < spans.length; i++) spans[i].style.opacity = i < n ? 1 : 0.15;
+    }
+    paint();
+    addEventListener('scroll', paint, { passive: true });
+    if (lenis) lenis.on('scroll', paint);
+  }
+
+  /* 版本号：拉 GitHub Release（失败静默降级） */
+  fetch('https://api.github.com/repos/YDMY007/Fntv-Plus/releases/latest')
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function (j) {
+      var chip = document.getElementById('relchip'), v = document.getElementById('ver');
+      var d = j.published_at ? new Date(j.published_at).toISOString().slice(0, 10) : '';
+      if (chip) chip.textContent = '最新 ' + j.tag_name + (d ? ' · ' + d : '');
+      if (v) v.textContent = j.tag_name;
+    })
+    .catch(function () {
+      var chip = document.getElementById('relchip');
+      if (chip) chip.textContent = '前往 GitHub 查看版本';
+    });
+})();
 </script>
 </body>
 </html>
