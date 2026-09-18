@@ -53,6 +53,11 @@ export default {
     if (url.pathname === '/stats' && request.method === 'GET') return handleStats(url, env);
     if (url.pathname === '/stats/log' && request.method === 'GET') return handleStatsLog(url, env);
 
+    // 根路径健康检查：便于探活/自检（不返回任何用户数据）
+    if (url.pathname === '/' || url.pathname === '') {
+      return json({ ok: true, service: 'fntv-stats', d1: !!env.DB, r2: !!env.LOGS, time: new Date().toISOString() });
+    }
+
     return json({ error: 'not found' }, 404);
   },
 };
