@@ -1,0 +1,9 @@
+{
+  "name": "fntv-stats-scf",
+  "version": "1.0.0",
+  "main": "index.js",
+  "description": "Fntv-Plus 匿名统计 / 反馈（腾讯云函数 SCF + COS）",
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^2.14.6"
+  }
+}
