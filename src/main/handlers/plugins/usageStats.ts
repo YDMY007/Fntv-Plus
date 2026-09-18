@@ -26,7 +26,8 @@ import * as log from '../../../modules/logger';
 // 统计服务端地址：部署完 stats-server/ 后把 Worker 域名填到这里，
 // 或用环境变量 FNTV_STATS_ENDPOINT 覆盖（便于本地调试）。
 // 留空 = 功能静默关闭，一个字节都不会往外发。
-const DEFAULT_ENDPOINT = '';
+// 已部署的服务端（Cloudflare Workers）。多个地址用逗号分隔，主地址不通时自动回退。
+const DEFAULT_ENDPOINT = 'https://fntv-stats.122983191.workers.dev';
 
 const PING_PATH = '/ping';
 const TIMEOUT_MS = 6000;
