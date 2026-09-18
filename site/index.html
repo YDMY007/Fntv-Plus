@@ -158,22 +158,33 @@
   .panel.on .info{opacity:1;transform:none}
   .panel .info h3{font-family:var(--serif);font-size:clamp(1.4rem,2.4vw,2.1rem);margin:0 0 .35rem;font-weight:500;color:var(--ink)}
   .panel .info p{margin:0;color:var(--ink2);font-size:.95rem;max-width:34rem}
-  /* 移动端：手风琴不成立 —— 改成竖排卡片（图在上、玻璃文字层在下，信息常显不依赖 hover） */
+  /* 移动端：横滑改纵向手风琴 —— 收起态=缩略图+标题（有内容、可点），点按展开成大幅图+描述 */
   @media(max-width:1023px){
-    .acc{flex-direction:column;height:auto;gap:1rem}
-    .panel{height:auto;flex:0 0 auto;display:flex;flex-direction:column;border-radius:1.35rem}
-    .panel.on{flex-grow:0}
-    .panel img{position:static;height:auto;aspect-ratio:16/10;object-fit:cover;opacity:1;transform:none}
-    .panel::before{display:none}
-    .panel .rot{display:none}
-    .panel .info{position:static;opacity:1;transform:none;left:auto;right:auto;bottom:auto;
-                 padding:1.15rem 1.25rem 1.3rem;
-                 background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.4));
-                 backdrop-filter:blur(14px) saturate(170%)}
-    .panel .info h3{font-size:1.35rem}
-    .panel .info p{font-size:.94rem;max-width:none}
-    /* 移动端不再需要自定义光标相关的 hover 语义，卡片本身也不该被点击 */
-    .panel{cursor:default}
+    .acc{flex-direction:column;height:auto;gap:.8rem}
+    .panel{flex:0 0 auto;height:92px;display:block;border-radius:1.35rem;cursor:pointer;
+           transition:height .72s var(--ease),box-shadow .6s,transform .25s var(--ease)}
+    .panel.on{height:58vh;box-shadow:0 24px 54px rgba(31,80,160,.22),var(--hl)}
+    .panel:active{transform:scale(.985)}
+    .panel img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.55;transform:none}
+    .panel.on img{opacity:1}
+    .panel::before{background:linear-gradient(0deg,rgba(233,241,255,.94) 0%,rgba(233,241,255,.5) 45%,rgba(233,241,255,.15) 100%)}
+    .panel.on::before{opacity:.72}
+    /* 收起态：横排标题（不再竖排）+ 右侧可点提示 */
+    .panel .rot{left:1.15rem;right:3.2rem;bottom:1.15rem;transform:none;font-size:1.08rem;
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:1}
+    .panel.on .rot{opacity:0}
+    .panel .chev{position:absolute;right:1.15rem;bottom:1.15rem;width:1.9rem;height:1.9rem;border-radius:50%;
+                 display:grid;place-items:center;z-index:2;color:var(--accent-d);font-size:.9rem;
+                 background:rgba(255,255,255,.75);border:1px solid var(--glass-line);box-shadow:var(--shadow-s);
+                 transition:transform .5s var(--ease),opacity .4s}
+    .panel.on .chev{transform:rotate(90deg);opacity:0}
+    .panel .info{left:1.3rem;right:1.3rem;bottom:1.15rem}
+    .panel .info h3{font-size:1.4rem}
+    .panel .info p{font-size:.95rem;max-width:none}
+    /* 触屏上的即时反馈（替代 hover 的存在感） */
+    .cell:active{transform:scale(.985)}
+    .pill:active{transform:scale(.97)}
+    .chip:active{transform:scale(.96)}
   }
 
   /* ============ Bento 能力卡 ============ */
@@ -319,6 +330,7 @@
       <div class="panel on">
         <img src="assets/home.webp" alt="3D 首页轮播墙">
         <div class="rot">3D 首页轮播墙</div>
+        <div class="chev" aria-hidden="true">›</div>
         <div class="info">
           <h3>3D 首页轮播墙</h3>
           <p>四种轮播样式可切换（竖向 / 横向 / 堆叠 / 立体堆叠），标题用 TMDB 透明 Logo 替换，背景按当前海报自动取色。</p>
@@ -327,6 +339,7 @@
       <div class="panel">
         <img src="assets/detail.webp" alt="沉浸式剧集详情">
         <div class="rot">沉浸式剧集详情</div>
+        <div class="chev" aria-hidden="true">›</div>
         <div class="info">
           <h3>沉浸式剧集详情</h3>
           <p>Netflix 风格首屏：大背板 + 玻璃信息层 + 展开收起；选集、演职人员、剧集卡片都能一键回填 TMDB / Bangumi 元数据。</p>
@@ -335,6 +348,7 @@
       <div class="panel">
         <img src="assets/danmaku.webp" alt="B 站弹幕与播放增强">
         <div class="rot">B 站弹幕与播放增强</div>
+        <div class="chev" aria-hidden="true">›</div>
         <div class="info">
           <h3>B 站弹幕与播放增强</h3>
           <p>内置降级源 + 弹弹 play + 自建弹幕接口三段式，支持合集按集取分 P、手动锁定弹幕源；再叠加插帧与智能跳过片头片尾。</p>
@@ -524,15 +538,26 @@
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 
   /* 横滑手风琴 */
+  /* 手风琴：桌面悬停/点击切换；触屏点按展开（收起态显示缩略图+标题，展开态才有描述） */
   var acc = document.getElementById('acc');
-  if (acc && fine) { // 移动端是竖排卡片，不参与手风琴交互
+  if (acc) {
     acc.querySelectorAll('.panel').forEach(function (p) {
-      var on = function () {
+      var activate = function (fromTouch) {
         acc.querySelectorAll('.panel').forEach(function (x) { x.classList.remove('on'); });
         p.classList.add('on');
+        if (fromTouch) {
+          // 展开后把这一条滚进视野（纵向手风琴在手机上会撑高，不滚容易看不到描述）
+          setTimeout(function () {
+            try { p.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+          }, 180);
+        }
       };
-      p.addEventListener('mouseenter', on);
-      p.addEventListener('click', on);
+      if (fine) p.addEventListener('mouseenter', function () { activate(false); });
+      p.addEventListener('click', function () { activate(!fine); });
+      p.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(!fine); }
+      });
+      p.setAttribute('tabindex', '0');
     });
   }
 
