@@ -7,6 +7,14 @@
 
 免费额度完全够用：Workers 10 万请求/天、D1 500 万行读/天、R2 10GB。
 
+## 常见问题：需要个人网站 / 域名吗？
+
+**不需要。**
+
+- Cloudflare 账号只要邮箱注册，不需要你有网站、不需要买域名、不需要服务器、不需要备案。
+- 创建 Worker 时会自动分配一个 `https://fntv-stats.你的子域.workers.dev` 的地址，直接能用。
+- 只有「想换成自己的域名」时才需要买域名（也只是做一条 DNS 解析，依然不需要搭网站）；见文末《国内访问与自定义域名》。
+
 ---
 
 ## 一、采集了什么 / 没采集什么
@@ -31,53 +39,74 @@
 
 ---
 
-## 二、部署（约 5 分钟）
+## 二、部署方式 A：网页操作（零命令行，推荐）
+
+全程在浏览器点，不需要装 Node、不需要敲命令。
+
+1. **注册/登录**：打开 <https://dash.cloudflare.com>，用邮箱注册（不用域名、不用绑卡）。
+2. **建 Worker**：左侧 **Compute (Workers)** → **Workers & Pages** → **Create** → 选 **Create Worker** → 名字填 `fntv-stats` → **Deploy**。
+   - 第一次用会让你起一个账户子域（随便填，比如你的 ID），之后地址就是 `https://fntv-stats.你的子域.workers.dev`。
+3. **贴代码**：进这个 Worker → 右上角 **Edit Code**（在线编辑器）→ 把 `worker.js` 里的内容**全选删掉原模板、整段粘贴**进去 → 右上角 **Deploy**。
+4. **建 D1 数据库**：左侧 **Storage & Databases** → **D1 SQL Database** → **Create** → 名字 `fntv-stats` → 建好后点进去 → **Console** 标签 → 把 `schema.sql` 内容粘进去 → **Execute**（建两张表）。
+5. **建 R2 桶**：左侧 **R2** → **Create bucket** → 名字 `fntv-stats-logs`（部分地区首次开通会要求验证一下账户，免费额度不用付费）。
+6. **绑定（关键，变量名必须一字不差）**：回到 Worker → **Settings** → **Bindings** → **+ Add**：
+   - **D1 database**：Variable name 填 `DB`，数据库选 `fntv-stats`
+   - **R2 bucket**：Variable name 填 `LOGS`，桶选 `fntv-stats-logs`
+   - 再点 **+ Add** → **Secret**（或 Environment variable）：名字 `STATS_TOKEN`，值随便设一个长一点的口令（这是你看数据的钥匙，自己记好）
+   - 每次加绑定后记得 **Deploy** 生效。
+7. **拿到地址**：Worker 详情页 **Domains & Routes** 里那条 `*.workers.dev` 就是你的服务端地址，复制下来。
+
+> 变量名必须是 `DB`、`LOGS`、`STATS_TOKEN` —— worker.js 里就是按这三个名字读的，写错会报 `db error`。
+
+## 二、部署方式 B：命令行（wrangler）
+
+熟悉命令行的话更快：
 
 ```bash
 cd stats-server
 
-# 1. 登录 Cloudflare（浏览器授权）
-npx wrangler login
-
-# 2. 建 D1 数据库，把输出的 database_id 填进 wrangler.toml
-npx wrangler d1 create fntv-stats
-
-# 3. 建表
-npx wrangler d1 execute fntv-stats --remote --file=schema.sql
-
-# 4. 建 R2 桶（存反馈日志）
-npx wrangler r2 bucket create fntv-stats-logs
-
-# 5. 设置查看统计用的口令（自己随便想一个，记下来）
-npx wrangler secret put STATS_TOKEN
-
-# 6. 部署
-npx wrangler deploy
+npx wrangler login                                   # 1. 浏览器授权
+npx wrangler d1 create fntv-stats                    # 2. 建库，把输出的 database_id 填进 wrangler.toml
+npx wrangler d1 execute fntv-stats --remote --file=schema.sql   # 3. 建表
+npx wrangler r2 bucket create fntv-stats-logs        # 4. 建桶
+npx wrangler secret put STATS_TOKEN                  # 5. 设看数据的口令
+npx wrangler deploy                                  # 6. 部署，输出地址
 ```
-
-部署完会给你一个地址，形如 `https://fntv-stats.<你的子域>.workers.dev`。
 
 ---
 
-## 三、客户端接入
+## 三、客户端接入（两步）
 
-把上一步的地址填进 `src/main/handlers/plugins/usageStats.ts` 顶部的 `DEFAULT_ENDPOINT`，
-或者本地调试时用环境变量（不入库）：
+1. 打开 `src/main/handlers/plugins/usageStats.ts`，把顶部 `DEFAULT_ENDPOINT` 改成你的地址：
+
+   ```ts
+   const DEFAULT_ENDPOINT = 'https://fntv-stats.你的子域.workers.dev';
+   ```
+
+   （本地调试也可以不入库：`set FNTV_STATS_ENDPOINT=https://...` 再启动。）
+
+2. `npx tsc` 重新编译，或照常 `dev.cmd` 启动。留空 = 功能静默关闭，一个字节都不会往外发。
+
+> 开发模式（`dev.cmd`）**自动上报是关的**，避免作者自测把数据灌水；但你在「关于」页手动点
+> 「立即上报一次」不受此限制，可以直接验证链路是否打通（想让自动上报也在 dev 下跑，设 `FNTV_STATS_FORCE=1`）。
+
+### 接入自检
+
+先直接 curl 一下服务端（把地址换成你的）：
 
 ```bash
-set FNTV_STATS_ENDPOINT=https://fntv-stats.xxx.workers.dev
+curl -X POST https://fntv-stats.你的子域.workers.dev/ping ^
+  -H "content-type: application/json" ^
+  -d "{\"aid\":\"test-test-test-test\",\"v\":\"3.7.0\",\"os\":\"Windows\",\"arch\":\"x64\",\"d\":\"2026-09-18\"}"
 ```
 
-留空 = 功能静默关闭，一个字节都不会往外发。
-
-> 开发模式（`dev.cmd`）默认不上报，避免作者自测把数据灌水；
-> 需要实测时设 `FNTV_STATS_FORCE=1`。
+返回 `{"ok":true}` 就是通了（注意日期要填今天）。然后在软件里 **设置 → 关于 → 匿名使用统计 → 立即上报一次**，看状态行是不是「上报成功 ✅」；再打开 `/stats?token=你的口令` 就能看到人数 +1。
 
 ---
 
 ## 四、看数据
 
-浏览器直接打开（把 token 换成第 5 步设的口令）：
+浏览器直接打开（把 token 换成第 6 步设的口令）：
 
 ```
 https://fntv-stats.<你的子域>.workers.dev/stats?token=你的口令
@@ -122,3 +151,32 @@ npx wrangler d1 execute fntv-stats --remote --command "SELECT COUNT(DISTINCT aid
   DELETE FROM feedback WHERE aid = '那个ID';
   ```
 - R2 里的日志随反馈一起删：`npx wrangler r2 object delete fntv-stats-logs/logs/<id>.log`
+
+---
+
+## 六、本地自测（不部署也能验证逻辑）
+
+Node 22+ 即可，用内存 SQLite 模拟 D1：
+
+```bash
+cd stats-server
+node --experimental-sqlite _smoke.mjs
+```
+
+覆盖：同 ID 同日去重、非法 payload 拒绝、stats token 鉴权、反馈入库、日志进 R2 并可取回。
+
+---
+
+## 七、国内访问与自定义域名（重要）
+
+`*.workers.dev` 这个免费域名在国内网络下**可能时好时坏**（Cloudflare 的 IP 与 SNI 偶发被干扰），表现是：客户端上报失败 → 但代码是静默失败，用户完全无感，只是你看到的数字偏低。
+
+判断方法：用手机流量 + 不同宽带各 curl 一次上面的 `/ping`，看是不是都返回 `{"ok":true}`。
+
+三条路：
+
+1. **都能通**：直接这么用，不用管。
+2. **时通时不通**：把统计当「趋势参考」看（比例、版本分布、日活走势依然可信），不要当精确值。
+3. **基本不通**：绑一个自己的域名 —— 买个便宜域名（.top/.xyz 一年十几块）托管到 Cloudflare（改 NS 即可，不需要建站），然后在 Worker → **Settings → Domains & Routes → Custom domains → Add** 填上你的二级域名（如 `stats.你的域名.com`），把客户端地址换成它。仍然免费，且国内连通性通常好于 `workers.dev`。
+
+> 如果连自定义域都不理想，可以迁到腾讯云函数 / 阿里云函数计算（国内直连稳定）。代码结构不用动，只要把 worker 的 `fetch(request, env)` 入口换成云函数的事件入口 —— 需要时说一声，我加一版适配。

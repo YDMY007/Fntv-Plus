@@ -74,7 +74,8 @@ export async function sendPing(force: boolean = false): Promise<{ ok: boolean; s
     const endpoint = getEndpoint();
     if (!endpoint) return { ok: false, skipped: '未配置统计服务端地址' };
     if (!fnConfig.getStatsEnabled()) return { ok: false, skipped: '匿名统计已关闭' };
-    if (!app.isPackaged && process.env.FNTV_STATS_FORCE !== '1') {
+    // force（用户在「关于」页点了「立即上报一次」）视为显式授权，dev 下也允许发一次，方便验证链路
+    if (!force && !app.isPackaged && process.env.FNTV_STATS_FORCE !== '1') {
         return { ok: false, skipped: '开发模式默认不上报（设 FNTV_STATS_FORCE=1 可强制）' };
     }
     const today = todayStr();
