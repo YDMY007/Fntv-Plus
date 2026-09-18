@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fntv-Plus · 飞牛影视桌面增强客户端</title>
+<meta name="description" content="Fntv-Plus 是基于飞牛影视 Web 端的第三方桌面客户端：玻璃拟态界面、沉浸式剧集详情、豆瓣/Bangumi/Trakt 同步、B站弹幕、外链播放器与手柄控制，支持 Windows / macOS / Linux。">
+<style>
+  :root{
+    --bg:#0b1020; --bg2:#111834; --card:rgba(255,255,255,.055);
+    --line:rgba(255,255,255,.12); --text:#eaf0ff; --muted:#9fb0d6;
+    --accent:#6ea8ff; --accent2:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 12% -8%, rgba(110,168,255,.20), transparent 60%),
+      radial-gradient(900px 500px at 88% 4%, rgba(167,139,250,.18), transparent 60%),
+      linear-gradient(180deg,var(--bg),var(--bg2));
+    color:var(--text);font:16px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  header{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(11,16,32,.72);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{font-weight:800;letter-spacing:.5px;font-size:18px;
+    background:linear-gradient(92deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .nav a.btn{padding:8px 16px;border-radius:10px;font-size:14px;font-weight:600;
+    background:linear-gradient(92deg,var(--accent),var(--accent2));color:#0b1020}
+  .hero{padding:76px 0 44px;text-align:center}
+  h1{font-size:clamp(30px,5.4vw,52px);line-height:1.15;margin:0 0 14px;font-weight:800;letter-spacing:-.5px}
+  .slogan{color:var(--muted);font-size:clamp(15px,2.2vw,19px);max-width:760px;margin:0 auto 26px}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
+  .btn{padding:13px 26px;border-radius:12px;font-weight:700;font-size:15px;transition:transform .12s,filter .12s;display:inline-block}
+  .btn:hover{transform:translateY(-2px);filter:brightness(1.08)}
+  .btn.primary{background:linear-gradient(92deg,var(--accent),var(--accent2));color:#0b1020}
+  .btn.ghost{border:1px solid var(--line);background:var(--card);color:var(--text)}
+  .badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;color:var(--muted);font-size:13px}
+  .badge{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 13px}
+  h2{font-size:26px;margin:60px 0 8px;letter-spacing:-.3px}
+  .sec-note{color:var(--muted);margin:0 0 26px;font-size:15px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .card{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:20px;
+    background-image:linear-gradient(165deg,rgba(255,255,255,.06),rgba(255,255,255,.012) 60%)}
+  .card h3{margin:0 0 8px;font-size:17px}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .card .ico{font-size:22px;margin-bottom:10px;display:block}
+  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+  .shots img{width:100%;border-radius:14px;border:1px solid var(--line);display:block;cursor:zoom-in;background:#0d1430}
+  .dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:6px}
+  .dl a{display:block;border:1px solid var(--line);background:var(--card);border-radius:14px;padding:18px;text-align:center;transition:background .15s}
+  .dl a:hover{background:rgba(255,255,255,.1)}
+  .dl .os{font-weight:700;font-size:16px}
+  .dl .hint{color:var(--muted);font-size:13px;margin-top:4px}
+  .notice{margin-top:46px;border:1px solid rgba(255,190,120,.32);background:rgba(255,180,100,.08);
+    border-radius:16px;padding:18px 20px;color:#f3e2c7;font-size:14px}
+  .notice b{color:#ffd9a0}
+  footer{margin-top:60px;border-top:1px solid var(--line);padding:26px 0 40px;color:var(--muted);font-size:14px}
+  footer .links{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px}
+  footer a:hover{color:var(--accent)}
+  dialog{max-width:96vw;max-height:92vh;background:transparent;border:none}
+  dialog img{width:100%;border-radius:14px}
+  .ver{color:var(--accent);font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <div class="logo">🎬 Fntv-Plus</div>
+    <a class="btn" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>把飞牛影视，变成你桌面上的私人流媒体影院</h1>
+    <p class="slogan">基于飞牛影视（fnOS TV）Web 端的第三方桌面客户端。冷调渐变玻璃与云母界面、Netflix 风格沉浸式剧集详情、3D 首页轮播——先重塑观影视觉；再打通豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库与年度观影报告——织成你的专属观影档案；最后叠加手柄控制、智能跳过、外链播放器等硬核播放增强。</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载最新版 <span class="ver" id="ver"></span></a>
+      <a class="btn ghost" href="https://github.com/YDMY007/Fntv-Plus" target="_blank" rel="noopener">GitHub 项目</a>
+    </div>
+    <div class="badges">
+      <span class="badge">Windows</span><span class="badge">macOS</span><span class="badge">Linux</span>
+      <span class="badge">Electron 38</span><span class="badge">GPL-3.0</span>
+      <span class="badge" id="rel">版本获取中…</span>
+    </div>
+  </section>
+
+  <h2>它做了什么</h2>
+  <p class="sec-note">不只是把网页装进桌面外壳，而是从视觉、档案到播放链路的整套重做。</p>
+  <div class="grid">
+    <div class="card"><span class="ico">🪟</span><h3>视觉重塑</h3><p>亚克力玻璃与云母质感、可调透明度与模糊、Netflix 风格沉浸式剧集详情页、3D 首页轮播墙，也支持回退原生 NAS 界面。</p></div>
+    <div class="card"><span class="ico">📚</span><h3>观影档案</h3><p>豆瓣 / Bangumi / Trakt 多站同步观看记录，TMDB 元数据回填，演员作品库，年度观影报告。</p></div>
+    <div class="card"><span class="ico">▶️</span><h3>播放增强</h3><p>内置 MPV 与 PotPlayer 外链播放，B 站弹幕与弹弹 play / 自建弹幕源，插帧、智能跳过片头片尾。</p></div>
+    <div class="card"><span class="ico">🎮</span><h3>操控与细节</h3><p>手柄全键盘导航、鼠标横向滚轮、自定义刮削与扩展数据源、播放记忆与自动连播、诊断与日志导出。</p></div>
+  </div>
+
+  <h2>界面一览</h2>
+  <p class="sec-note">点图片可放大查看。</p>
+  <div class="shots">
+    <img src="assets/home.webp" alt="首页海报轮播墙" loading="lazy">
+    <img src="assets/detail.webp" alt="沉浸式剧集详情页" loading="lazy">
+    <img src="assets/danmaku.webp" alt="B站弹幕播放" loading="lazy">
+    <img src="assets/player.webp" alt="外链播放器" loading="lazy">
+    <img src="assets/actor.webp" alt="演员作品库" loading="lazy">
+    <img src="assets/nas.webp" alt="原生 NAS 界面" loading="lazy">
+    <img src="assets/settings.webp" alt="设置面板" loading="lazy">
+  </div>
+
+  <h2>下载</h2>
+  <p class="sec-note">安装包与更新均从 GitHub Releases 官方渠道获取，请勿安装来源不明的补丁包。</p>
+  <div class="dl">
+    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">Windows</div><div class="hint">x64 安装包（NSIS）</div></a>
+    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">macOS</div><div class="hint">DMG · x64 / arm64</div></a>
+    <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><div class="os">Linux</div><div class="hint">AppImage · x64 / arm64</div></a>
+  </div>
+
+  <div class="notice">
+    <b>⚠️ 使用前请知悉</b><br>
+    这是作者个人的学习 / 练习作品，<b>非飞牛影视官方客户端</b>，与官方无任何关联或合作关系。它通过在飞牛影视 Web 端之上做注入式修改实现功能，可能因官方更新而失效、闪退或行为异常，不保证长期稳定可用。使用需登录你的飞牛账号，并可能涉及豆瓣 / Bangumi / Trakt / B 站等第三方账号授权（Cookie / Token 仅本地加密存储），请仅在可信环境使用。外链播放与本地代理请确保所播内容符合所在地法律法规与版权规定。项目基于 GPL-3.0 开源，按「原样」提供、不提供任何担保。
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/YDMY007/Fntv-Plus" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://gitee.com/YDMY007/fntv-plus" target="_blank" rel="noopener">Gitee 镜像</a>
+      <a href="https://github.com/YDMY007/Fntv-Plus/issues" target="_blank" rel="noopener">问题反馈</a>
+      <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">更新日志</a>
+    </div>
+    <div>Fntv-Plus · by YDMY007 · GPL-3.0 · 基于 QiaoKes/fntv-electron 启发并保留其版权与致谢</div>
+  </div>
+</footer>
+
+<dialog id="lb"><img id="lbimg" alt=""></dialog>
+
+<script>
+  // 拉 GitHub 最新 release 信息（失败则静默降级，不影响页面）
+  fetch('https://api.github.com/repos/YDMY007/Fntv-Plus/releases/latest')
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(j => {
+      const tag = j.tag_name || '';
+      const d = j.published_at ? new Date(j.published_at).toISOString().slice(0, 10) : '';
+      const el = document.getElementById('rel');
+      const v = document.getElementById('ver');
+      if (el) el.textContent = '最新 ' + tag + (d ? '（' + d + '）' : '');
+      if (v) v.textContent = tag;
+    })
+    .catch(() => { const el = document.getElementById('rel'); if (el) el.textContent = '前往 GitHub 查看版本'; });
+
+  // 图片点击放大
+  const lb = document.getElementById('lb'), lbimg = document.getElementById('lbimg');
+  document.querySelectorAll('.shots img').forEach(img => {
+    img.addEventListener('click', () => { lbimg.src = img.src; lb.showModal(); });
+  });
+  lb.addEventListener('click', () => lb.close());
+</script>
+</body>
+</html>
