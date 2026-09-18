@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
-import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid } from './biliRunner';
+import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
 
@@ -82,6 +82,11 @@ class PlaybackShim {
         // 候选搜索：仅返回候选视频列表（标题/bvid/来源/是否合集），供 MPV 手动搜索 UI 展示
         if (pathname === '/danmaku-candidates') {
             this.handleDanmakuCandidates(req, res);
+            return;
+        }
+        // [lc-1195] 分P 列表：合集候选点击后展开分P 明细，供用户手动选定具体分P
+        if (pathname === '/danmaku-pages') {
+            this.handleDanmakuPages(req, res);
             return;
         }
         // 用户选定 bvid 后，直接拉取该视频弹幕
@@ -720,6 +725,35 @@ class PlaybackShim {
         });
     }
 
+    // ===================== 分P 列表端点（/danmaku-pages）[lc-1195] =====================
+
+    /**
+     * 处理 /danmaku-pages 请求：列出某合集(bvid)的全部分P（page/cid/part），供 MPV
+     * 手动搜索 UI 在点击合集候选后展开分P 明细，由用户手动选定具体分P。
+     */
+    private handleDanmakuPages(req: http.IncomingMessage, res: http.ServerResponse): void {
+        const u = url.parse(req.url || '', true);
+        const q = (u.query || {}) as Record<string, string | undefined>;
+        const bvid = (q.bvid || '').toString();
+        if (!bvid) {
+            this.json(res, 400, { ok: false, error: '缺少 bvid 参数' });
+            return;
+        }
+        log.info(`[playbackShim][danmaku-pages] ▶ 请求分P列表 | bvid=${bvid}`);
+        listBiliDanmakuPages(bvid).then((r) => {
+            if (r.ok) {
+                log.info(`[playbackShim][danmaku-pages] ✅ 分P ${r.pages ? r.pages.length : 0} 个 | bvid=${bvid}`);
+                this.json(res, 200, r);
+            } else {
+                log.warn(`[playbackShim][danmaku-pages] ❌ 分P列表失败: ${r.error}`);
+                this.json(res, 200, { ok: false, error: r.error });
+            }
+        }).catch((e) => {
+            log.warn(`[playbackShim][danmaku-pages] 异常: ${e?.message || e}`);
+            this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
     // ===================== 指定 bvid 拉取端点（/danmaku-by-bvid）=====================
 
     /**
@@ -734,6 +768,8 @@ class PlaybackShim {
         const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
         // [lc-1172] 集数透传：合集/多P 候选按分P 标题匹配取对应集的 cid（缺省 0=首P）
         const epNum = q.ep ? (parseInt(q.ep.toString(), 10) || 0) : 0;
+        // [lc-1195] 用户从「分P 列表」手动选定的分P cid：直接用该 cid 拉弹幕（跳过 ep_num 自动匹配）
+        const forceCid = q.cid ? (parseInt(q.cid.toString(), 10) || 0) : 0;
         if (!title || !bvid || !out) {
             this.json(res, 400, { ok: false, error: '缺少 title / bvid / out 参数' });
             return;
@@ -743,8 +779,8 @@ class PlaybackShim {
             this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
             return;
         }
-        log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'} ep=${epNum}`);
-        runBiliDanmakuByBvid(title, bvid, out, threshold, epNum).then((r) => {
+        log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'} ep=${epNum}${forceCid ? ' cid=' + forceCid + '(手动指定分P)' : ''}`);
+        runBiliDanmakuByBvid(title, bvid, out, threshold, epNum, 60000, forceCid).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku-by-bvid] ✅ 弹幕就绪 | count=${r.danmaku_count} bvid=${r.bvid}`);
                 this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, bvid: r.bvid, cid: r.cid });

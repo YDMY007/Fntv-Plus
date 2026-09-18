@@ -1219,7 +1219,7 @@ async function search_candidates(title, ep_num, season_num) {
 // 由用户选定的 bvid 直接拉取该视频弹幕（手动搜索模式：用户已明确选定视频）。
 // [lc-1172] ep_num：手动搜索时 menu 已知的集数 —— 合集/多P 候选按分P 标题匹配取对应集的
 // cid（cid_from_bvid 已支持），否则只能拿首P（第1集）弹幕、选合集候选时其他集全错。
-async function run_candidates(title, bvid, out, threshold, ep_num) {
+async function run_candidates(title, bvid, out, threshold, ep_num, force_cid) {
     if (!title || !bvid || !out) return { ok: false, error: '缺少 title/bvid/out 参数' };
     if (typeof threshold === 'string') threshold = parseInt(threshold, 10);
     if (isNaN(threshold) || !threshold) threshold = 1500;
@@ -1227,8 +1227,10 @@ async function run_candidates(title, bvid, out, threshold, ep_num) {
     if (isNaN(ep_num)) ep_num = 0;
     _refresh_cookie();
     await verify_cookie();
-    log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out} ep_num=${ep_num || 0}`);
-    const cid = await cid_from_bvid(bvid, ep_num || 0, title);
+    // [lc-1195] force_cid：用户在分P 明细菜单里手动选定的 cid，直接使用（跳过 ep_num 自动匹配）
+    force_cid = parseInt(force_cid, 10) || 0;
+    log(`[候选拉取] 由 bvid=${bvid} 直接拉取弹幕 title=${title} out=${out} ep_num=${ep_num || 0}${force_cid ? ' force_cid=' + force_cid + '(手动指定分P)' : ''}`);
+    const cid = force_cid || await cid_from_bvid(bvid, ep_num || 0, title);
     if (!cid) return { ok: false, error: `无法解析 bvid=${bvid} 的 cid` };
     // [lc-1019] 用户手动选定的视频：值得多等一轮复核
     const [ok, all_d] = await try_fetch_danmaku(cid, true);
@@ -1289,7 +1291,31 @@ async function main() {
     }
 }
 
-module.exports = { run: run, search_candidates: search_candidates, run_candidates: run_candidates, setLogSink: setLogSink, _load_cookie: _load_cookie, search_guochuang_wbi: search_guochuang_wbi, search_bangumi_wbi: search_bangumi_wbi };
+// [lc-1195] 列出某合集(bvid)的全部分P（page/cid/part），供手动搜索 UI 点击合集候选后
+// 展开分P 明细菜单，由用户手动选定具体分P（view API 一次请求）。
+async function list_pages(bvid) {
+    if (!bvid) return { ok: false, error: '缺少 bvid' };
+    return jget(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`).then((d) => {
+        if (!d || d.code !== 0 || !d.data) {
+            log(`[list_pages] view请求失败 bvid=${bvid} code=${d && d.code}`);
+            return { ok: false, error: '视频信息获取失败(bvid=' + bvid + ')' };
+        }
+        const data = d.data;
+        const pages = (data.pages || []).map((p, i) => ({
+            page: (typeof p.page === 'number' && p.page > 0) ? p.page : (i + 1),
+            cid: p.cid,
+            part: String(p.part || ('P' + ((typeof p.page === 'number' && p.page > 0) ? p.page : (i + 1)))),
+            duration: (typeof p.duration === 'number') ? p.duration : 0,
+        }));
+        log(`[list_pages] bvid=${bvid} title=${JSON.stringify(data.title || '')} 分P=${pages.length}`);
+        return { ok: true, bvid: bvid, title: String(data.title || ''), pages: pages };
+    }).catch((e) => {
+        log('[list_pages] view请求异常: ' + (e.message || e));
+        return { ok: false, error: String(e.message || e) };
+    });
+}
+
+module.exports = { run: run, search_candidates: search_candidates, run_candidates: run_candidates, list_pages: list_pages, setLogSink: setLogSink, _load_cookie: _load_cookie, search_guochuang_wbi: search_guochuang_wbi, search_bangumi_wbi: search_bangumi_wbi };
 
 if (require.main === module) {
     main();

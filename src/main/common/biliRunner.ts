@@ -215,6 +215,7 @@ export async function runBiliDanmakuByBvid(
     threshold?: number | string,
     epNum = 0,
     timeoutMs = 60000,
+    forceCid?: number | string,   // [lc-1195] 用户从分P 列表手动选定的 cid（直接用，跳过 ep_num 匹配）
 ): Promise<BiliDanmakuResult> {
     // [lc-1101] 用户从候选列表选定的是自建源条目（伪 bvid = `dmapi:<episodeId>`）→ 按 id 直取。
     //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
@@ -229,7 +230,8 @@ export async function runBiliDanmakuByBvid(
     }
     try {
         // [lc-1172] epNum 透传：合集/多P 候选按分P 标题匹配取对应集的 cid
-        const runP = Promise.resolve(mod.run_candidates(title, bvid, out, threshold, epNum));
+        // [lc-1195] forceCid 透传：用户在分P 明细菜单里手动选定的 cid，直接使用
+        const runP = Promise.resolve(mod.run_candidates(title, bvid, out, threshold, epNum, forceCid ? Number(forceCid) : 0));
         let timeoutHandle: NodeJS.Timeout | null = null;
         const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
             timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
@@ -239,6 +241,36 @@ export async function runBiliDanmakuByBvid(
         return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run_candidates 无返回）' };
     } catch (e: any) {
         log.warn('[biliRunner] run_candidates 异常: ' + (e?.message || e));
+        return { ok: false, error: String(e?.message || e) };
+    }
+}
+
+/**
+ * [lc-1195] 列出某合集(bvid)的全部分P（page/cid/part），供 MPV 手动搜索 UI 在点击合集候选后
+ * 展开分P 明细菜单，由用户手动选定具体分P（对应脚本内 list_pages，view API 一次请求）。
+ */
+export async function listBiliDanmakuPages(
+    bvid: string,
+    timeoutMs = 30000,
+): Promise<{ ok: boolean; bvid?: string; title?: string; pages?: { page: number; cid: number; part: string }[]; error?: string }> {
+    let mod: any;
+    try {
+        mod = loadModule();
+    } catch (e: any) {
+        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
+        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+    }
+    try {
+        const runP = Promise.resolve(mod.list_pages(bvid));
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutP = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `分P 列表超时(${timeoutMs}ms)` }), timeoutMs);
+        });
+        const r = await Promise.race([runP, timeoutP]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（list_pages 无返回）' };
+    } catch (e: any) {
+        log.warn('[biliRunner] list_pages 异常: ' + (e?.message || e));
         return { ok: false, error: String(e?.message || e) };
     }
 }

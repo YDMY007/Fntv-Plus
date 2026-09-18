@@ -1085,10 +1085,22 @@ mp.register_script_message("bili_manual_search_event", function(query)
     open_bili_candidates_menu(title, ep or 0, season or 0)
 end)
 
--- 用户从候选列表中选定某个视频（按 bvid）
-mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
+-- [lc-1195] 合集候选 → 展开该合集的分P 明细菜单（用户可手动选定具体分P）
+mp.register_script_message("bili_open_pages", function(bvid, title, ep_str, cand_title)
     bvid = (bvid or ""):gsub("^%s*(.-)%s*$", "%1")
     title = (title or ""):gsub("^%s*(.-)%s*$", "%1")
+    cand_title = (cand_title or ""):gsub("^%s*(.-)%s*$", "%1")
+    if bvid == "" then return end
+    local ep = tonumber((ep_str or ""):match("%d+")) or 0
+    open_bili_pages_menu(bvid, title, ep, cand_title)
+end)
+
+-- 用户从候选列表中选定某个视频（按 bvid）
+mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str, cid_str)
+    bvid = (bvid or ""):gsub("^%s*(.-)%s*$", "%1")
+    title = (title or ""):gsub("^%s*(.-)%s*$", "%1")
+    -- [lc-1195] 用户从分P 明细菜单选定的 cid（可空 = 按集数自动匹配分P）
+    local manual_cid = tonumber((cid_str or ""):match("%d+")) or 0
     if not bvid or bvid == "" or not title or title == "" then
         show_message("候选缺少 bvid 或 番名，无法拉取", 4)
         return
@@ -1109,8 +1121,9 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str)
     end
     local api = string.format(
         -- [lc-1172] ep 透传给 shim：合集/多P 候选按集数取对应分P 的 cid（否则永远只拿首P 弹幕）
-        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s&ep=%s",
-        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500), tostring(ep))
+        -- [lc-1195] cid 透传：用户在分P 明细菜单手动选定的分P，直接用该 cid 拉弹幕
+        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s&ep=%s&cid=%s",
+        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500), tostring(ep), tostring(manual_cid))
     local platform = mp.get_property("platform") or ""
     local res
     if platform == "windows" then

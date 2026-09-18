@@ -613,16 +613,110 @@ function open_bili_candidates_menu(title, ep, season)
                 dmWarn = " ⚠️该视频无人发弹幕"
             end
         end
-        table.insert(new_items, {
-            title = ("%s [%s] %s%s%s"):format(c.title, c.bvid or "?", src_label, tag, dmTag),
-            hint = is_self and ("自建源 ID: %s"):format(cb:sub(7)) or ("BV: %s%s"):format(c.bvid or "未知", dmWarn),
-            value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", c.bvid or "", title, tostring(ep or 0) },
-            keep_open = false, selectable = true,
-        })
+        -- [lc-1195] 合集候选（📁合集 且非自建源）→ 点击展开分P 明细菜单，由用户手动选定具体分P；
+        -- 非合集/自建源保持原直选行为。
+        if c.is_compilation and not is_self and cb ~= "" then
+            table.insert(new_items, {
+                title = ("%s [%s] %s%s%s"):format(c.title, c.bvid or "?", src_label, tag, dmTag),
+                hint = ("📁合集 → 点击展开分P 明细列表"):format() .. dmWarn,
+                value = { "script-message-to", mp.get_script_name(), "bili_open_pages", c.bvid or "", title, tostring(ep or 0), c.title or "" },
+                keep_open = false, selectable = true,
+            })
+        else
+            table.insert(new_items, {
+                title = ("%s [%s] %s%s%s"):format(c.title, c.bvid or "?", src_label, tag, dmTag),
+                hint = is_self and ("自建源 ID: %s"):format(cb:sub(7)) or ("BV: %s%s"):format(c.bvid or "未知", dmWarn),
+                value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", c.bvid or "", title, tostring(ep or 0) },
+                keep_open = false, selectable = true,
+            })
+        end
     end
     local props = {
         type = "menu_bili_candidates",
         title = ("%s：「%s」%s"):format(has_self_hosted and "弹幕候选" or "B站候选", title, (ep and ep > 0) and ("第" .. ep .. "集") or ""),
+        search_style = "disabled",
+        items = new_items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
+end
+
+-- [lc-1195] 合集候选 → 分P 明细菜单：逐分P 列出（Pn 标题），选择后以该分P 的 cid 精确拉取弹幕；
+-- 顶部保留「按集数自动匹配」入口（不手动选分P 时走 ep_num 自动匹配）。
+function open_bili_pages_menu(bvid, title, ep, cand_title)
+    if not uosc_available then
+        show_message("需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local items = {
+        { title = "🔍 正在获取分P 列表…", keep_open = true, selectable = false, italic = true },
+    }
+    local menu_props = {
+        type = "menu_bili_pages",
+        title = ("分P 明细：%s"):format(cand_title or bvid),
+        search_style = "disabled",
+        items = items,
+    }
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+
+    local function url_encode(str)
+        if not str then return "" end
+        return (str:gsub("([^%w%-%.%_%~])", function(c) return string.format("%%%02X", string.byte(c)) end))
+    end
+    local api = "http://127.0.0.1:22347/danmaku-pages?bvid=" .. url_encode(bvid)
+    local platform = mp.get_property("platform") or ""
+    local res
+    if platform == "windows" then
+        res = mp.command_native({
+            name = "subprocess",
+            args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 30).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+            capture_stdout = true, capture_stderr = true,
+        })
+    else
+        res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "30", api }, capture_stdout = true, capture_stderr = true })
+    end
+    if not res then
+        open_bili_candidates_error("请求失败（shim 未启动？）")
+        return
+    end
+    local body = (res.stdout or ""):gsub("\\r?\\n$", "")
+    if body:sub(1, 4) == "ERR:" then
+        open_bili_candidates_error(body:sub(5))
+        return
+    end
+    local ok_parse, parsed = pcall(utils.parse_json, body)
+    if not ok_parse or type(parsed) ~= "table" then
+        open_bili_candidates_error("响应解析失败")
+        return
+    end
+    if not parsed.ok then
+        open_bili_candidates_error(parsed.error or "未知错误")
+        return
+    end
+    local pages = parsed.pages or {}
+    if #pages == 0 then
+        open_bili_candidates_error("该视频没有分P 列表")
+        return
+    end
+
+    local new_items = {}
+    table.insert(new_items, { title = ("✅ 「%s」共 %d 个分P，选择具体分P 使用其弹幕："):format(cand_title or bvid, #pages), bold = true, italic = true, keep_open = true, selectable = false })
+    if ep and ep > 0 then
+        table.insert(new_items, { title = ("⚡ 自动匹配第 %d 集(按分P 标题)"):format(ep), hint = "不手动指定分P，按集数自动匹配（推荐）",
+            value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", bvid, title, tostring(ep) },
+            keep_open = false, selectable = true })
+    end
+    for _, p in ipairs(pages) do
+        table.insert(new_items, {
+            title = ("P%d  %s"):format(p.page or 0, p.part or ""),
+            hint = ("cid: %s"):format(p.cid or "?"),
+            value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", bvid, title, tostring(ep or 0), tostring(p.cid or "") },
+            keep_open = false, selectable = true,
+        })
+    end
+    local props = {
+        type = "menu_bili_pages",
+        title = ("分P 明细：%s"):format(cand_title or bvid),
         search_style = "disabled",
         items = new_items,
     }
