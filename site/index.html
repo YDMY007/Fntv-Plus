@@ -158,11 +158,22 @@
   .panel.on .info{opacity:1;transform:none}
   .panel .info h3{font-family:var(--serif);font-size:clamp(1.4rem,2.4vw,2.1rem);margin:0 0 .35rem;font-weight:500;color:var(--ink)}
   .panel .info p{margin:0;color:var(--ink2);font-size:.95rem;max-width:34rem}
+  /* 移动端：手风琴不成立 —— 改成竖排卡片（图在上、玻璃文字层在下，信息常显不依赖 hover） */
   @media(max-width:1023px){
-    .acc{flex-direction:column;height:auto}
-    .panel{height:13vh;transition:height .7s var(--ease)}
-    .panel.on{height:50vh}
-    .panel .rot{transform:translateX(-50%);bottom:auto;top:50%;margin-top:-.8rem}
+    .acc{flex-direction:column;height:auto;gap:1rem}
+    .panel{height:auto;flex:0 0 auto;display:flex;flex-direction:column;border-radius:1.35rem}
+    .panel.on{flex-grow:0}
+    .panel img{position:static;height:auto;aspect-ratio:16/10;object-fit:cover;opacity:1;transform:none}
+    .panel::before{display:none}
+    .panel .rot{display:none}
+    .panel .info{position:static;opacity:1;transform:none;left:auto;right:auto;bottom:auto;
+                 padding:1.15rem 1.25rem 1.3rem;
+                 background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.4));
+                 backdrop-filter:blur(14px) saturate(170%)}
+    .panel .info h3{font-size:1.35rem}
+    .panel .info p{font-size:.94rem;max-width:none}
+    /* 移动端不再需要自定义光标相关的 hover 语义，卡片本身也不该被点击 */
+    .panel{cursor:default}
   }
 
   /* ============ Bento 能力卡 ============ */
@@ -194,6 +205,11 @@
   .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:3rem;padding-top:1.8rem;border-top:1px solid var(--edge)}
   .stats b{display:block;font-family:var(--serif);font-size:clamp(1.7rem,3.4vw,2.6rem);font-weight:500;line-height:1.1;color:var(--ink)}
   .stats span{font-size:.8125rem;color:var(--ink3);letter-spacing:.06em}
+  @media(max-width:767px){
+    .stats{grid-template-columns:1fr 1fr;gap:1.3rem 1rem}
+    .stats b{font-size:1.7rem}
+    .stats span{font-size:.75rem;display:block;margin-top:.35rem;line-height:1.5}
+  }
   .about-media{border-radius:2.25rem;overflow:hidden;aspect-ratio:4/5;position:relative;padding:.7rem;
     background:linear-gradient(150deg,rgba(255,255,255,.75),rgba(255,255,255,.4));border:1px solid var(--glass-line);
     box-shadow:0 26px 60px rgba(31,80,160,.2),var(--hl);backdrop-filter:blur(16px)}
@@ -509,13 +525,13 @@
 
   /* 横滑手风琴 */
   var acc = document.getElementById('acc');
-  if (acc) {
+  if (acc && fine) { // 移动端是竖排卡片，不参与手风琴交互
     acc.querySelectorAll('.panel').forEach(function (p) {
       var on = function () {
         acc.querySelectorAll('.panel').forEach(function (x) { x.classList.remove('on'); });
         p.classList.add('on');
       };
-      p.addEventListener('mouseenter', function () { if (fine) on(); });
+      p.addEventListener('mouseenter', on);
       p.addEventListener('click', on);
     });
   }
