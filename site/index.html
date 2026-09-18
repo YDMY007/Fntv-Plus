@@ -5,194 +5,243 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fntv-Plus · 把飞牛影视变成你桌面上的私人影院</title>
 <meta name="description" content="Fntv-Plus 是基于飞牛影视（fnOS TV）Web 端的第三方桌面客户端：玻璃拟态界面、沉浸式剧集详情、豆瓣 / Bangumi / Trakt 同步、B 站弹幕、外链播放器与手柄控制，支持 Windows / macOS / Linux。">
-<meta name="theme-color" content="#050505">
+<meta name="theme-color" content="#eaf2ff">
 <meta property="og:title" content="Fntv-Plus · 桌面私人影院">
 <meta property="og:description" content="把飞牛影视，变成你桌面上的私人流媒体影院。支持 Windows / macOS / Linux。">
 <meta property="og:image" content="assets/home.webp">
 <style>
-  /* ============ 设计系统 ============ */
+  /* ============ 浅蓝液态玻璃 设计系统 ============ */
   :root{
-    --bg:#050505;
-    --fg:#FAFAFA;
-    --muted:#9CA3AF;
-    --muted2:#6B7280;
-    --accent:#3B82F6;
-    --accent2:#2563EB;
-    --line:rgba(255,255,255,.1);
-    --line2:rgba(255,255,255,.2);
-    --stroke:rgba(255,255,255,.692);
+    --bg:#e9f1ff;
+    --bg2:#f4f8ff;
+    --ink:#0a1f44;          /* 主文字：深蓝 */
+    --ink2:#4e6a8f;         /* 次要 */
+    --ink3:#7a93b4;         /* 弱 */
+    --accent:#2e7bf6;
+    --accent-d:#1d6ae5;
+    --accent-l:#6fb0ff;
+    --cyan:#38bdf8;
+    --glass:rgba(255,255,255,.62);
+    --glass-2:rgba(255,255,255,.42);
+    --glass-line:rgba(255,255,255,.85);
+    --edge:rgba(13,52,102,.10);
+    --shadow:0 10px 34px rgba(31,80,160,.13);
+    --shadow-s:0 4px 16px rgba(31,80,160,.10);
+    --hl:inset 0 1px 0 rgba(255,255,255,.95);
     --ease:cubic-bezier(.76,0,.24,1);
     --serif:"Playfair Display","Noto Serif SC","Source Han Serif SC","Songti SC",Georgia,serif;
     --sans:Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg)}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}
   body{font-family:var(--sans);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
-  img,video{display:block;max-width:100%}
+  img{display:block;max-width:100%}
   ::selection{background:var(--accent);color:#fff}
+
+  /* 背景：多层浅蓝光斑（液态流动） */
+  .glow{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+  .glow i{position:absolute;border-radius:50%;filter:blur(70px);opacity:.55;display:block}
+  .glow i:nth-child(1){width:46vw;height:46vw;left:-8vw;top:-10vw;background:radial-gradient(circle at 30% 30%,#9ec8ff,#cfe3ff 70%);animation:drift1 22s ease-in-out infinite alternate}
+  .glow i:nth-child(2){width:38vw;height:38vw;right:-6vw;top:4vw;background:radial-gradient(circle at 60% 40%,#b9d8ff,#e3f0ff 70%);animation:drift2 26s ease-in-out infinite alternate}
+  .glow i:nth-child(3){width:34vw;height:34vw;left:18vw;bottom:-12vw;background:radial-gradient(circle at 50% 50%,#a8d4ff,#dcecff 72%);animation:drift3 30s ease-in-out infinite alternate}
+  .glow i:nth-child(4){width:20vw;height:20vw;right:22vw;bottom:6vw;background:radial-gradient(circle at 50% 50%,#c9e4ff,#eaf4ff 70%);animation:drift2 34s ease-in-out infinite alternate}
+  @keyframes drift1{to{transform:translate3d(6vw,4vw,0) scale(1.12)}}
+  @keyframes drift2{to{transform:translate3d(-5vw,6vw,0) scale(1.08)}}
+  @keyframes drift3{to{transform:translate3d(4vw,-5vw,0) scale(1.14)}}
+  body>.shell-layer{position:relative;z-index:2}
 
   .shell{max-width:100rem;margin:0 auto;padding:0 1.5rem}
   @media(min-width:768px){.shell{padding:0 3rem}}
-  section{position:relative}
   .sec-pad{padding-top:7rem;padding-bottom:7rem}
-  @media(min-width:768px){.sec-pad{padding-top:12rem;padding-bottom:12rem}}
+  @media(min-width:768px){.sec-pad{padding-top:11rem;padding-bottom:11rem}}
 
-  .tag{font-size:.8125rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:500}
-  .sec-head{font-family:var(--serif);font-size:clamp(2.4rem,5.2vw,4.5rem);line-height:1.06;letter-spacing:-.02em;margin:.6rem 0 0;font-weight:500}
-  .lede{color:var(--muted);font-size:1.0625rem;max-width:44rem;margin-top:1.1rem}
+  /* 通用玻璃面板 */
+  .glass{background:linear-gradient(140deg,var(--glass),var(--glass-2));backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+         border:1px solid var(--glass-line);box-shadow:var(--shadow),var(--hl);border-radius:1.75rem;position:relative;overflow:hidden}
+  .glass::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.55) 47%,transparent 62%);
+    transform:translateX(-120%);transition:transform 1.1s var(--ease)}
+  .glass:hover::after{transform:translateX(120%)}
 
-  /* ============ 自定义光标 ============ */
-  .cur,.cur-dot{position:fixed;top:0;left:0;z-index:9999;pointer-events:none;border-radius:50%;mix-blend-mode:difference}
-  .cur{width:36px;height:36px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.06);transition:width .3s var(--ease),height .3s var(--ease),background .3s}
-  .cur-dot{width:6px;height:6px;background:#fff}
-  .cur.grow{width:76px;height:76px;background:rgba(255,255,255,.14)}
+  .tag{font-size:.8125rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  .sec-head{font-family:var(--serif);font-size:clamp(2.3rem,5vw,4.3rem);line-height:1.08;letter-spacing:-.02em;margin:.7rem 0 0;font-weight:500;color:var(--ink)}
+  .lede{color:var(--ink2);font-size:1.0625rem;max-width:44rem;margin-top:1.1rem}
+
+  /* ============ 光标（浅色底：深蓝描边+实心点） ============ */
+  .cur,.cur-dot{position:fixed;top:0;left:0;z-index:9999;pointer-events:none;border-radius:50%}
+  .cur{width:34px;height:34px;border:1.5px solid rgba(10,31,68,.45);background:rgba(255,255,255,.35);backdrop-filter:blur(3px);
+       transition:width .3s var(--ease),height .3s var(--ease),background .3s,border-color .3s}
+  .cur-dot{width:6px;height:6px;background:var(--accent)}
+  .cur.grow{width:72px;height:72px;background:rgba(46,123,246,.16);border-color:rgba(46,123,246,.5)}
   @media(hover:none),(pointer:coarse){.cur,.cur-dot{display:none}}
 
-  /* ============ 导航 ============ */
-  nav{position:fixed;inset:0 0 auto 0;z-index:60;border-bottom:1px solid transparent;
-      transition:transform .5s var(--ease),background .4s,border-color .4s,backdrop-filter .4s}
-  nav.solid{background:rgba(5,5,5,.55);backdrop-filter:blur(14px) saturate(160%);border-bottom-color:var(--line)}
+  /* ============ 导航（玻璃条） ============ */
+  nav{position:fixed;inset:0 0 auto 0;z-index:60;border-bottom:1px solid transparent;transition:transform .5s var(--ease),background .4s,border-color .4s,box-shadow .4s}
+  nav.solid{background:rgba(255,255,255,.6);backdrop-filter:blur(18px) saturate(180%);border-bottom-color:var(--glass-line);box-shadow:0 4px 24px rgba(31,80,160,.08)}
   nav.hide{transform:translateY(-100%)}
   .nav-in{display:flex;align-items:center;justify-content:space-between;height:76px}
-  .brand{display:flex;align-items:center;gap:.55rem;font-family:var(--serif);font-size:1.35rem}
-  .brand i{width:9px;height:9px;border-radius:50%;background:var(--accent);display:block;box-shadow:0 0 18px var(--accent)}
+  .brand{display:flex;align-items:center;gap:.55rem;font-family:var(--serif);font-size:1.35rem;color:var(--ink)}
+  .brand i{width:9px;height:9px;border-radius:50%;background:linear-gradient(140deg,var(--accent-l),var(--accent-d));display:block;box-shadow:0 0 14px rgba(46,123,246,.6)}
   .nav-links{display:none;gap:2.25rem;align-items:center}
   @media(min-width:1024px){.nav-links{display:flex}}
-  .nav-links a{font-size:.9375rem;color:var(--muted);position:relative;padding:.25rem 0;transition:color .3s}
-  .nav-links a:hover{color:var(--fg)}
+  .nav-links a{font-size:.9375rem;color:var(--ink2);position:relative;padding:.25rem 0;transition:color .3s}
+  .nav-links a:hover{color:var(--ink)}
   .nav-links a::after{content:"";position:absolute;left:0;bottom:0;height:1px;width:0;background:var(--accent);transition:width .45s var(--ease)}
   .nav-links a:hover::after{width:100%}
-  .nav-cta{padding:.7rem 1.35rem;border:1px solid var(--line2);border-radius:999px;font-size:.9375rem;font-weight:500;
-           background:rgba(255,255,255,.04);transition:background .3s,border-color .3s,color .3s}
-  .nav-cta:hover{background:var(--fg);color:#050505;border-color:var(--fg)}
-  .burger{display:grid;gap:5px;padding:.6rem;border:1px solid var(--line);border-radius:999px;cursor:pointer}
+  .nav-cta{padding:.7rem 1.35rem;border-radius:999px;font-size:.9375rem;font-weight:600;color:#fff;
+           background:linear-gradient(140deg,var(--accent-l),var(--accent-d));
+           box-shadow:0 6px 18px rgba(46,123,246,.35),inset 0 1px 0 rgba(255,255,255,.5);transition:transform .3s var(--ease),box-shadow .3s}
+  .nav-cta:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(46,123,246,.42),inset 0 1px 0 rgba(255,255,255,.5)}
+  .burger{display:grid;gap:5px;padding:.6rem;border-radius:999px;cursor:pointer;background:var(--glass);border:1px solid var(--glass-line);backdrop-filter:blur(10px)}
   @media(min-width:1024px){.burger{display:none}}
-  .burger s{display:block;width:18px;height:1.5px;background:var(--fg);text-decoration:none}
-  #mnav{position:fixed;inset:0;z-index:55;background:rgba(5,5,5,.97);backdrop-filter:blur(10px);
-        display:flex;flex-direction:column;justify-content:center;gap:1.25rem;padding:0 2rem;
+  .burger s{display:block;width:18px;height:1.5px;background:var(--ink);text-decoration:none}
+  #mnav{position:fixed;inset:0;z-index:55;background:rgba(244,248,255,.92);backdrop-filter:blur(18px);
+        display:flex;flex-direction:column;justify-content:center;gap:1.1rem;padding:0 2rem;
         opacity:0;visibility:hidden;transition:opacity .45s var(--ease),visibility .45s}
   #mnav.on{opacity:1;visibility:visible}
-  #mnav a{font-family:var(--serif);font-size:2.1rem;border-bottom:1px solid var(--line);padding-bottom:.7rem}
+  #mnav a{font-family:var(--serif);font-size:2rem;color:var(--ink);border-bottom:1px solid var(--edge);padding-bottom:.6rem}
 
   /* ============ Hero ============ */
-  .hero-wrap{height:100vh;position:relative}
-  .hero{position:fixed;inset:0;height:100vh;width:100%;overflow:hidden;z-index:1;
-        will-change:transform,border-radius;transform-origin:50% 35%;border-radius:0}
-  .hero-bg{position:absolute;inset:-2%;width:104%;height:104%;object-fit:cover;filter:brightness(.42) saturate(1.1);
-           animation:kb 26s ease-in-out infinite alternate}
-  @keyframes kb{from{transform:scale(1.02)}to{transform:scale(1.12)}}
-  .hero-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(5,5,5,.68) 0%,rgba(5,5,5,.34) 42%,rgba(5,5,5,.94) 100%)}
-  .hero-in{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 1.5rem}
-  .hero-title{font-family:var(--serif);font-weight:500;letter-spacing:-.03em;line-height:.98;
-              font-size:clamp(2.6rem,10.5vw,12rem);margin:0}
-  .hero-title .out{color:transparent;-webkit-text-stroke:1px var(--stroke)}
-  .hero-sub{color:var(--muted);max-width:46rem;margin:1.6rem auto 0;font-size:clamp(.95rem,1.6vw,1.15rem)}
-  .hero-meta{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;margin-top:2rem}
-  .chip{font-size:.8125rem;letter-spacing:.06em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:.4rem .9rem;background:rgba(255,255,255,.03)}
-  .scroll-hint{position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);display:grid;justify-items:center;gap:.5rem;color:var(--muted2);font-size:.72rem;letter-spacing:.2em}
-  .scroll-hint s{display:block;width:1px;height:42px;background:linear-gradient(var(--line2),transparent);animation:fall 2.2s var(--ease) infinite}
-  @keyframes fall{0%{opacity:0;transform:translateY(-12px)}40%{opacity:1}100%{opacity:0;transform:translateY(14px)}}
+  .hero{padding:120px 0 0;position:relative}
+  .hero-in{text-align:center;max-width:64rem;margin:0 auto}
+  .hero-title{font-family:var(--serif);font-weight:500;letter-spacing:-.03em;line-height:1.0;
+              font-size:clamp(2.4rem,9vw,9rem);margin:0;color:var(--ink)}
+  .hero-title .out{color:transparent;-webkit-text-stroke:1.2px rgba(10,31,68,.42)}
+  .hero-sub{color:var(--ink2);max-width:46rem;margin:1.5rem auto 0;font-size:clamp(.95rem,1.6vw,1.12rem)}
+  .hero-meta{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;margin-top:1.9rem}
+  .chip{font-size:.8125rem;letter-spacing:.04em;color:var(--ink2);padding:.42rem .95rem;border-radius:999px;
+        background:rgba(255,255,255,.55);border:1px solid var(--glass-line);backdrop-filter:blur(8px);box-shadow:var(--shadow-s),var(--hl)}
+  .hero-cta{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap;margin-top:2.1rem}
+  .pill{position:relative;display:inline-flex;align-items:center;gap:.6rem;padding:1rem 2.1rem;border-radius:999px;
+        font-weight:600;font-size:1rem;overflow:hidden;isolation:isolate;transition:transform .3s var(--ease),box-shadow .3s}
+  .pill.solid{color:#fff;background:linear-gradient(140deg,var(--accent-l),var(--accent-d));
+              box-shadow:0 10px 28px rgba(46,123,246,.36),inset 0 1px 0 rgba(255,255,255,.5)}
+  .pill.solid:hover{transform:translateY(-3px);box-shadow:0 16px 34px rgba(46,123,246,.42),inset 0 1px 0 rgba(255,255,255,.5)}
+  .pill.ghost{color:var(--ink);background:linear-gradient(140deg,rgba(255,255,255,.8),rgba(255,255,255,.45));
+              border:1px solid var(--glass-line);box-shadow:var(--shadow),var(--hl)}
+  .pill.ghost s{position:absolute;inset:0;z-index:-1;background:linear-gradient(140deg,var(--accent-l),var(--accent-d));
+                transform:translateY(100%);transition:transform .55s var(--ease);text-decoration:none}
+  .pill.ghost:hover{color:#fff}
+  .pill.ghost:hover s{transform:translateY(0)}
+  .pill span{position:relative;z-index:1}
+
+  /* Hero 预览卡（玻璃外壳 + 液态高光） */
+  .hero-stage{margin-top:4rem}
+  .stage-card{border-radius:2rem;padding:.85rem;
+    background:linear-gradient(140deg,rgba(255,255,255,.75),rgba(255,255,255,.38));
+    border:1px solid var(--glass-line);box-shadow:0 30px 70px rgba(31,80,160,.20),inset 0 1px 0 rgba(255,255,255,1);
+    backdrop-filter:blur(22px) saturate(180%)}
+  .stage-in{border-radius:1.5rem;overflow:hidden;position:relative;border:1px solid rgba(255,255,255,.6)}
+  .stage-in img{width:100%;aspect-ratio:16/9;object-fit:cover}
+  .stage-in::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.16),transparent 40%)}
+  .scroll-hint{display:flex;justify-content:center;align-items:center;gap:.6rem;margin-top:2.2rem;color:var(--ink3);font-size:.72rem;letter-spacing:.22em}
+  .scroll-hint s{display:block;width:1px;height:34px;background:linear-gradient(rgba(10,31,68,.35),transparent);animation:fall 2.2s var(--ease) infinite;text-decoration:none}
+  @keyframes fall{0%{opacity:0;transform:translateY(-10px)}40%{opacity:1}100%{opacity:0;transform:translateY(12px)}}
 
   /* ============ Showcase 横滑手风琴 ============ */
-  .acc{display:flex;gap:.6rem;height:62vh;margin-top:2.6rem}
-  @media(min-width:1024px){.acc{height:78vh}}
-  .panel{position:relative;overflow:hidden;border-radius:1.25rem;cursor:pointer;flex:1 1 0;background:#0b0b0c;
-         transition:flex-grow .8s var(--ease),flex-basis .8s var(--ease)}
-  .panel img{width:100%;height:100%;object-fit:cover;opacity:.5;transition:opacity .8s var(--ease),transform 1s var(--ease)}
-  .panel::after{content:"";position:absolute;inset:0;background:linear-gradient(0deg,rgba(5,5,5,.9),rgba(5,5,5,.1));opacity:.7;transition:opacity .6s}
-  .panel.on{flex-grow:8}
-  .panel.on img{opacity:.85;transform:scale(1.02)}
-  .panel.on::after{opacity:.85}
-  .panel .rot{position:absolute;left:50%;bottom:1.5rem;transform:translateX(-50%) rotate(-90deg);transform-origin:center;
-              white-space:nowrap;font-family:var(--serif);font-size:1.05rem;letter-spacing:.06em;transition:opacity .35s var(--ease)}
+  .acc{display:flex;gap:.75rem;height:58vh;margin-top:2.6rem}
+  @media(min-width:1024px){.acc{height:74vh}}
+  .panel{position:relative;overflow:hidden;border-radius:1.5rem;cursor:pointer;flex:1 1 0;background:#dbe8ff;
+         border:1px solid var(--glass-line);box-shadow:var(--shadow-s);
+         transition:flex-grow .8s var(--ease),flex-basis .8s var(--ease),box-shadow .6s}
+  .panel img{width:100%;height:100%;object-fit:cover;opacity:.62;transition:opacity .8s var(--ease),transform 1s var(--ease)}
+  .panel::before{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(0deg,rgba(233,241,255,.92),rgba(233,241,255,.05) 55%);transition:opacity .6s}
+  .panel.on{flex-grow:8;box-shadow:0 24px 54px rgba(31,80,160,.22),var(--hl)}
+  .panel.on img{opacity:1;transform:scale(1.02)}
+  .panel.on::before{opacity:.65}
+  .panel .rot{position:absolute;left:50%;bottom:1.6rem;z-index:2;transform:translateX(-50%) rotate(-90deg);transform-origin:center;
+              white-space:nowrap;font-family:var(--serif);font-size:1.05rem;color:var(--ink);letter-spacing:.06em;transition:opacity .35s var(--ease)}
   .panel.on .rot{opacity:0}
-  .panel .info{position:absolute;left:1.75rem;right:1.75rem;bottom:1.6rem;opacity:0;transform:translateY(14px);
-               transition:opacity .6s var(--ease) .12s,transform .6s var(--ease) .12s;z-index:2}
+  .panel .info{position:absolute;left:1.75rem;right:1.75rem;bottom:1.6rem;z-index:2;opacity:0;transform:translateY(14px);
+               transition:opacity .6s var(--ease) .12s,transform .6s var(--ease) .12s}
   .panel.on .info{opacity:1;transform:none}
-  .panel .info h3{font-family:var(--serif);font-size:clamp(1.4rem,2.4vw,2.2rem);margin:0 0 .35rem;font-weight:500}
-  .panel .info p{margin:0;color:var(--muted);font-size:.95rem;max-width:34rem}
+  .panel .info h3{font-family:var(--serif);font-size:clamp(1.4rem,2.4vw,2.1rem);margin:0 0 .35rem;font-weight:500;color:var(--ink)}
+  .panel .info p{margin:0;color:var(--ink2);font-size:.95rem;max-width:34rem}
   @media(max-width:1023px){
     .acc{flex-direction:column;height:auto}
-    .panel{height:14vh;transition:height .7s var(--ease)}
-    .panel.on{height:54vh}
+    .panel{height:13vh;transition:height .7s var(--ease)}
+    .panel.on{height:50vh}
     .panel .rot{transform:translateX(-50%);bottom:auto;top:50%;margin-top:-.8rem}
   }
 
-  /* ============ Bento ============ */
+  /* ============ Bento 能力卡 ============ */
   .bento{display:grid;gap:1rem;grid-template-columns:1fr;margin-top:2.6rem}
-  @media(min-width:768px){.bento{grid-template-columns:repeat(3,1fr);grid-auto-rows:19rem}}
-  .cell{position:relative;overflow:hidden;border-radius:1.5rem;background:#0c0c0e;border:1px solid rgba(255,255,255,.05);
-        padding:1.75rem;display:flex;flex-direction:column;justify-content:flex-end;min-height:15rem}
-  .cell .bg{position:absolute;inset:0;object-fit:cover;width:100%;height:100%;opacity:.2;mix-blend-mode:luminosity;
+  @media(min-width:768px){.bento{grid-template-columns:repeat(3,1fr);grid-auto-rows:18.5rem}}
+  .cell{position:relative;overflow:hidden;border-radius:1.75rem;padding:1.75rem;display:flex;flex-direction:column;justify-content:flex-end;min-height:14rem;
+        background:linear-gradient(150deg,rgba(255,255,255,.78),rgba(255,255,255,.42));
+        border:1px solid var(--glass-line);box-shadow:var(--shadow),var(--hl);backdrop-filter:blur(18px) saturate(170%);
+        transition:transform .5s var(--ease),box-shadow .5s}
+  .cell:hover{transform:translateY(-6px);box-shadow:0 22px 48px rgba(31,80,160,.2),var(--hl)}
+  .cell .bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.16;mix-blend-mode:multiply;
             transition:opacity .8s var(--ease),transform 1s var(--ease)}
-  .cell:hover .bg{opacity:.42;transform:scale(1.05)}
+  .cell:hover .bg{opacity:.3;transform:scale(1.05)}
   .cell>*{position:relative;z-index:2}
-  .cell .num{font-family:var(--serif);font-size:.95rem;color:var(--accent);margin-bottom:auto}
-  .cell h3{font-family:var(--serif);font-weight:500;font-size:clamp(1.3rem,2.1vw,1.85rem);margin:0 0 .5rem}
-  .cell p{margin:0;color:var(--muted);font-size:.95rem}
-  .cell .go{position:absolute;top:1.5rem;right:1.5rem;width:2.6rem;height:2.6rem;border-radius:50%;display:grid;place-items:center;
-            background:rgba(255,255,255,.1);backdrop-filter:blur(8px);border:1px solid var(--line2);
-            opacity:0;transform:translateX(-12px);transition:opacity .5s var(--ease),transform .5s var(--ease);z-index:3}
+  .cell .num{font-family:var(--serif);font-size:.95rem;color:var(--accent);margin-bottom:auto;font-weight:600}
+  .cell h3{font-family:var(--serif);font-weight:500;font-size:clamp(1.3rem,2.1vw,1.8rem);margin:0 0 .5rem;color:var(--ink)}
+  .cell p{margin:0;color:var(--ink2);font-size:.95rem}
+  .cell .go{position:absolute;top:1.5rem;right:1.5rem;width:2.6rem;height:2.6rem;border-radius:50%;display:grid;place-items:center;z-index:3;
+            color:var(--accent-d);background:rgba(255,255,255,.7);border:1px solid var(--glass-line);backdrop-filter:blur(8px);
+            box-shadow:var(--shadow-s),var(--hl);opacity:0;transform:translateX(-12px);transition:opacity .5s var(--ease),transform .5s var(--ease)}
   .cell:hover .go{opacity:1;transform:none}
-  @media(min-width:768px){
-    .cell.wide{grid-column:span 2}
-    .cell.tall{grid-row:span 2}
-  }
+  @media(min-width:768px){.cell.wide{grid-column:span 2}.cell.tall{grid-row:span 2}}
 
   /* ============ About ============ */
   .about{display:grid;gap:3rem;grid-template-columns:1fr;align-items:start}
   @media(min-width:1024px){.about{grid-template-columns:7fr 5fr;gap:4.5rem}}
-  .reveal-text{font-family:var(--serif);font-size:clamp(1.3rem,2.5vw,2.2rem);line-height:1.55;margin:1rem 0 0;font-weight:400}
-  .reveal-text span{opacity:.15;transition:opacity .35s linear}
-  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1.8rem}
-  .stats b{display:block;font-family:var(--serif);font-size:clamp(1.7rem,3.4vw,2.6rem);font-weight:500;line-height:1.1}
-  .stats span{font-size:.8125rem;color:var(--muted2);letter-spacing:.08em}
-  .about-media{position:relative;border-radius:2.5rem;overflow:hidden;aspect-ratio:4/5;border:1px solid var(--line)}
-  .about-media img{width:100%;height:100%;object-fit:cover;filter:brightness(.85)}
+  .reveal-text{font-family:var(--serif);font-size:clamp(1.3rem,2.5vw,2.2rem);line-height:1.55;margin:1rem 0 0;font-weight:400;color:var(--ink)}
+  .reveal-text span{opacity:.16;transition:opacity .35s linear}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:3rem;padding-top:1.8rem;border-top:1px solid var(--edge)}
+  .stats b{display:block;font-family:var(--serif);font-size:clamp(1.7rem,3.4vw,2.6rem);font-weight:500;line-height:1.1;color:var(--ink)}
+  .stats span{font-size:.8125rem;color:var(--ink3);letter-spacing:.06em}
+  .about-media{border-radius:2.25rem;overflow:hidden;aspect-ratio:4/5;position:relative;padding:.7rem;
+    background:linear-gradient(150deg,rgba(255,255,255,.75),rgba(255,255,255,.4));border:1px solid var(--glass-line);
+    box-shadow:0 26px 60px rgba(31,80,160,.2),var(--hl);backdrop-filter:blur(16px)}
+  .about-media img{width:100%;height:100%;object-fit:cover;border-radius:1.6rem}
 
   /* ============ FAQ ============ */
-  .faq{display:grid;gap:2.5rem;grid-template-columns:1fr;margin-top:0}
+  .faq{display:grid;gap:2.5rem;grid-template-columns:1fr}
   @media(min-width:1024px){.faq{grid-template-columns:5fr 7fr;gap:5rem}}
-  .q{border-bottom:1px solid var(--line)}
+  .q{border-bottom:1px solid var(--edge)}
   .q>button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:1.5rem;background:none;border:0;
-            color:var(--fg);text-align:left;padding:1.5rem 0;cursor:pointer;font:inherit;font-size:1.1rem}
+            color:var(--ink);text-align:left;padding:1.5rem 0;cursor:pointer;font:inherit;font-size:1.08rem;font-weight:500}
   .q .ic{position:relative;width:1.1rem;height:1.1rem;flex:none}
-  .q .ic::before,.q .ic::after{content:"";position:absolute;background:var(--fg);transition:transform .45s var(--ease),opacity .45s}
+  .q .ic::before,.q .ic::after{content:"";position:absolute;background:var(--accent);transition:transform .45s var(--ease),opacity .45s}
   .q .ic::before{left:0;top:50%;width:100%;height:1.5px;margin-top:-.75px}
   .q .ic::after{top:0;left:50%;height:100%;width:1.5px;margin-left:-.75px}
   .q.on .ic::after{transform:scaleY(0);opacity:0}
   .q .a{max-height:0;overflow:hidden;transition:max-height .55s var(--ease),opacity .45s;opacity:0}
   .q.on .a{opacity:1}
-  .q .a p{margin:0 0 1.5rem;color:var(--muted);max-width:44rem}
+  .q .a p{margin:0 0 1.5rem;color:var(--ink2);max-width:44rem}
 
   /* ============ Contact ============ */
-  .contact{position:relative;min-height:100vh;display:grid;place-items:center;overflow:hidden}
-  .contact-bg{position:absolute;inset:0;object-fit:cover;width:100%;height:100%;filter:brightness(.4)}
-  .contact::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,.45) 0%,rgba(0,0,0,.96) 78%)}
-  .contact-in{position:relative;z-index:2;text-align:center;padding:6rem 1.5rem}
-  .contact-title{font-family:var(--serif);font-size:clamp(2.6rem,10vw,9rem);line-height:1;margin:0;font-weight:500;letter-spacing:-.03em}
-  .pill{position:relative;display:inline-flex;align-items:center;gap:.7rem;margin-top:2.4rem;padding:1.05rem 2.3rem;border-radius:999px;
-        background:var(--fg);color:#050505;font-weight:600;font-size:1rem;overflow:hidden;isolation:isolate;transition:color .4s}
-  .pill s{position:absolute;inset:0;background:var(--accent2);transform:translateY(100%);transition:transform .55s var(--ease);z-index:-1;text-decoration:none}
-  .pill:hover s{transform:translateY(0)}
-  .pill:hover{color:#fff}
-  .pill span{position:relative;z-index:1}
+  .contact{margin-top:6rem}
+  .contact-card{border-radius:2.5rem;padding:clamp(3rem,7vw,6rem) 1.5rem;text-align:center;position:relative;overflow:hidden;
+    background:linear-gradient(150deg,rgba(255,255,255,.72),rgba(226,238,255,.5));
+    border:1px solid var(--glass-line);box-shadow:0 30px 70px rgba(31,80,160,.18),var(--hl);backdrop-filter:blur(22px) saturate(180%)}
+  .contact-card::before{content:"";position:absolute;width:120%;height:70%;left:-10%;top:-40%;pointer-events:none;
+    background:radial-gradient(ellipse at center,rgba(255,255,255,.9),transparent 62%)}
+  .contact-title{position:relative;font-family:var(--serif);font-size:clamp(2.4rem,8.5vw,7.5rem);line-height:1;margin:0;font-weight:500;letter-spacing:-.03em;color:var(--ink)}
+  .contact-card .pill{margin-top:2.4rem}
 
-  footer{border-top:1px solid var(--line);padding:3rem 0 3.5rem;color:var(--muted);font-size:.9375rem;position:relative;z-index:2;background:var(--bg)}
-  footer .fl{display:flex;gap:1.75rem;flex-wrap:wrap;margin-bottom:1.1rem}
-  footer a:hover{color:var(--accent)}
+  footer{margin-top:6rem;padding:2.6rem 0 3.2rem;color:var(--ink2);font-size:.9375rem;border-top:1px solid var(--edge)}
+  footer .fl{display:flex;gap:1.75rem;flex-wrap:wrap;margin-bottom:1rem}
+  footer a:hover{color:var(--accent-d)}
   .reveal{opacity:0;transform:translateY(26px);transition:opacity .9s var(--ease),transform .9s var(--ease)}
   .reveal.in{opacity:1;transform:none}
   @media(prefers-reduced-motion:reduce){
     *{animation:none!important}
     .reveal{opacity:1;transform:none}
     .reveal-text span{opacity:1}
+    .glow i{animation:none}
   }
 </style>
 </head>
 <body>
 
+<div class="glow" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+<div class="shell-layer">
 <div class="cur" id="cur"></div>
 <div class="cur-dot" id="curdot"></div>
 
@@ -218,103 +267,103 @@
   <a href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">下载 →</a>
 </div>
 
-<div class="hero-wrap" id="top">
-  <header class="hero" id="hero">
-    <img class="hero-bg" src="assets/home.webp" alt="Fntv-Plus 首页海报轮播墙">
-    <div class="hero-veil"></div>
-    <div class="hero-in">
-      <p class="tag" style="margin:0 0 1.4rem">飞牛影视 · 第三方桌面客户端</p>
-      <h1 class="hero-title">把飞牛影视<br><span class="out">变成私人影院</span></h1>
-      <p class="hero-sub">冷调玻璃与云母界面、Netflix 风格沉浸式剧集详情、3D 首页轮播；豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库与年度观影报告；再叠加手柄控制、智能跳过与外链播放器。</p>
-      <div class="hero-meta">
-        <span class="chip">Windows</span>
-        <span class="chip">macOS</span>
-        <span class="chip">Linux</span>
-        <span class="chip">Electron 38</span>
-        <span class="chip">GPL-3.0</span>
-        <span class="chip" id="relchip">版本获取中…</span>
-      </div>
-      <div class="scroll-hint"><span>SCROLL</span><s></s></div>
+<header class="hero shell" id="top">
+  <div class="hero-in">
+    <p class="tag" style="margin:0 0 1.2rem">飞牛影视 · 第三方桌面客户端</p>
+    <h1 class="hero-title">把飞牛影视<br><span class="out">变成私人影院</span></h1>
+    <p class="hero-sub">冷调玻璃与云母界面、沉浸式剧集详情、3D 首页轮播；豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库与年度观影报告；再叠加手柄控制、智能跳过与外链播放器。</p>
+    <div class="hero-meta">
+      <span class="chip">Windows</span>
+      <span class="chip">macOS</span>
+      <span class="chip">Linux</span>
+      <span class="chip">Electron 38</span>
+      <span class="chip">GPL-3.0</span>
+      <span class="chip" id="relchip">版本获取中…</span>
     </div>
-  </header>
-  <div style="height:100vh"></div>
-</div>
+    <div class="hero-cta">
+      <a class="pill solid" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><span>下载最新版 <b id="ver">→</b></span></a>
+      <a class="pill ghost" href="#work"><s></s><span>先看看界面</span></a>
+    </div>
+  </div>
 
-<main style="position:relative;z-index:2;background:var(--bg)">
+  <div class="hero-stage">
+    <div class="stage-card glass" id="stageCard">
+      <div class="stage-in"><img src="assets/home.webp" alt="Fntv-Plus 首页海报轮播墙"></div>
+    </div>
+    <div class="scroll-hint"><span>SCROLL</span><s></s></div>
+  </div>
+</header>
 
-  <section id="work" class="sec-pad">
-    <div class="shell">
-      <p class="tag reveal">01 — 界面</p>
-      <h2 class="sec-head reveal">不是套个网页外壳<br>是整套视觉重做</h2>
-      <p class="lede reveal">把鼠标移到任意一栏看细节：轮播墙、沉浸式详情、B 站弹幕，都是实际运行界面。</p>
-      <div class="acc" id="acc">
-        <div class="panel on" data-idx="0">
-          <img src="assets/home.webp" alt="3D 首页轮播墙">
-          <div class="rot">3D 首页轮播墙</div>
-          <div class="info">
-            <h3>3D 首页轮播墙</h3>
-            <p>四种轮播样式可切换（竖向 / 横向 / 堆叠 / 立体堆叠），标题用 TMDB 透明 Logo 替换，背景按当前海报自动取色。</p>
-          </div>
-        </div>
-        <div class="panel" data-idx="1">
-          <img src="assets/detail.webp" alt="沉浸式剧集详情">
-          <div class="rot">沉浸式剧集详情</div>
-          <div class="info">
-            <h3>沉浸式剧集详情</h3>
-            <p>Netflix 风格首屏：大背板 + 玻璃信息层 + 展开收起；选集、演职人员、剧集卡片都能一键回填 TMDB / Bangumi 元数据。</p>
-          </div>
-        </div>
-        <div class="panel" data-idx="2">
-          <img src="assets/danmaku.webp" alt="B 站弹幕与播放增强">
-          <div class="rot">B 站弹幕与播放增强</div>
-          <div class="info">
-            <h3>B 站弹幕与播放增强</h3>
-            <p>内置降级源 + 弹弹 play + 自建弹幕接口三段式，支持合集按集取分 P、手动锁定弹幕源；再叠加插帧与智能跳过片头片尾。</p>
-          </div>
+<main>
+  <section id="work" class="sec-pad shell">
+    <p class="tag reveal">01 — 界面</p>
+    <h2 class="sec-head reveal">不是套个网页外壳<br>是整套视觉重做</h2>
+    <p class="lede reveal">把鼠标移到任意一栏看细节：轮播墙、沉浸式详情、B 站弹幕，都是实际运行界面。</p>
+    <div class="acc" id="acc">
+      <div class="panel on">
+        <img src="assets/home.webp" alt="3D 首页轮播墙">
+        <div class="rot">3D 首页轮播墙</div>
+        <div class="info">
+          <h3>3D 首页轮播墙</h3>
+          <p>四种轮播样式可切换（竖向 / 横向 / 堆叠 / 立体堆叠），标题用 TMDB 透明 Logo 替换，背景按当前海报自动取色。</p>
         </div>
       </div>
-    </div>
-  </section>
-
-  <section id="services" class="sec-pad" style="padding-top:0">
-    <div class="shell">
-      <p class="tag reveal">02 — 能力</p>
-      <h2 class="sec-head reveal">从视觉到播放链路<br>一整套重做</h2>
-      <div class="bento">
-        <div class="cell wide reveal">
-          <img class="bg" src="assets/settings.webp" alt="">
-          <div class="go" aria-hidden="true">↗</div>
-          <div class="num">01</div>
-          <h3>视觉重塑</h3>
-          <p>亚克力玻璃与云母质感、透明度与模糊可调、页面过渡与卡片入场动画；低配机可开「性能模式」一键压掉全部特效，也能回退原生 NAS 界面。</p>
+      <div class="panel">
+        <img src="assets/detail.webp" alt="沉浸式剧集详情">
+        <div class="rot">沉浸式剧集详情</div>
+        <div class="info">
+          <h3>沉浸式剧集详情</h3>
+          <p>Netflix 风格首屏：大背板 + 玻璃信息层 + 展开收起；选集、演职人员、剧集卡片都能一键回填 TMDB / Bangumi 元数据。</p>
         </div>
-        <div class="cell tall reveal">
-          <img class="bg" src="assets/actor.webp" alt="">
-          <div class="go" aria-hidden="true">↗</div>
-          <div class="num">02</div>
-          <h3>观影档案</h3>
-          <p>豆瓣 / Bangumi / Trakt 多站观看记录同步，TMDB、Fanart、TVMaze、OMDb、MAL 多源元数据回填，演员作品库与年度观影报告，把散落的记录织成一份档案。</p>
-        </div>
-        <div class="cell reveal">
-          <img class="bg" src="assets/player.webp" alt="">
-          <div class="go" aria-hidden="true">↗</div>
-          <div class="num">03</div>
-          <h3>播放增强</h3>
-          <p>内置 MPV 与 PotPlayer 外链播放，本地 Go 代理中转流媒体，插帧与渲染预设可选。</p>
-        </div>
-        <div class="cell reveal">
-          <img class="bg" src="assets/nas.webp" alt="">
-          <div class="go" aria-hidden="true">↗</div>
-          <div class="num">04</div>
-          <h3>操控与细节</h3>
-          <p>手柄全键盘导航、鼠标横向滚轮、播放记忆与自动连播、诊断面板与一键导出日志反馈。</p>
+      </div>
+      <div class="panel">
+        <img src="assets/danmaku.webp" alt="B 站弹幕与播放增强">
+        <div class="rot">B 站弹幕与播放增强</div>
+        <div class="info">
+          <h3>B 站弹幕与播放增强</h3>
+          <p>内置降级源 + 弹弹 play + 自建弹幕接口三段式，支持合集按集取分 P、手动锁定弹幕源；再叠加插帧与智能跳过片头片尾。</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="about" class="sec-pad" style="padding-top:0">
-    <div class="shell about">
+  <section id="services" class="sec-pad shell" style="padding-top:0">
+    <p class="tag reveal">02 — 能力</p>
+    <h2 class="sec-head reveal">从视觉到播放链路<br>一整套重做</h2>
+    <div class="bento">
+      <div class="cell wide reveal">
+        <img class="bg" src="assets/settings.webp" alt="">
+        <div class="go" aria-hidden="true">↗</div>
+        <div class="num">01</div>
+        <h3>视觉重塑</h3>
+        <p>亚克力玻璃与云母质感、透明度与模糊可调、页面过渡与卡片入场动画；低配机可开「性能模式」一键压掉全部特效，也能回退原生 NAS 界面。</p>
+      </div>
+      <div class="cell tall reveal">
+        <img class="bg" src="assets/actor.webp" alt="">
+        <div class="go" aria-hidden="true">↗</div>
+        <div class="num">02</div>
+        <h3>观影档案</h3>
+        <p>豆瓣 / Bangumi / Trakt 多站观看记录同步，TMDB、Fanart、TVMaze、OMDb、MAL 多源元数据回填，演员作品库与年度观影报告，把散落的记录织成一份档案。</p>
+      </div>
+      <div class="cell reveal">
+        <img class="bg" src="assets/player.webp" alt="">
+        <div class="go" aria-hidden="true">↗</div>
+        <div class="num">03</div>
+        <h3>播放增强</h3>
+        <p>内置 MPV 与 PotPlayer 外链播放，本地 Go 代理中转流媒体，插帧与渲染预设可选。</p>
+      </div>
+      <div class="cell reveal">
+        <img class="bg" src="assets/nas.webp" alt="">
+        <div class="go" aria-hidden="true">↗</div>
+        <div class="num">04</div>
+        <h3>操控与细节</h3>
+        <p>手柄全键盘导航、鼠标横向滚轮、播放记忆与自动连播、诊断面板与一键导出日志反馈。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="about" class="sec-pad shell" style="padding-top:0">
+    <div class="about">
       <div>
         <p class="tag reveal">03 — 关于</p>
         <p class="reveal-text" id="revealText">Fntv-Plus 是一个基于飞牛影视 Web 端的第三方桌面客户端。它不做另起炉灶的播放器，而是在你熟悉的界面之上，把视觉、元数据、同步与播放链路一层层补完 —— 让 NAS 里的片子，看起来、用起来都像一间属于自己的影院。项目在 2026 年 9 月脱离上游 fork 网络独立发展，沿用 GPL-3.0 许可证，代码、更新与补丁全部公开在 GitHub。</p>
@@ -330,8 +379,8 @@
     </div>
   </section>
 
-  <section id="faq" class="sec-pad" style="padding-top:0">
-    <div class="shell faq">
+  <section id="faq" class="sec-pad shell" style="padding-top:0">
+    <div class="faq">
       <div>
         <p class="tag reveal">04 — 常见问题</p>
         <h2 class="sec-head reveal">你可能想问</h2>
@@ -357,15 +406,12 @@
     </div>
   </section>
 
-  <section id="contact" class="contact">
-    <img class="contact-bg" src="assets/home.webp" alt="">
-    <div class="contact-in">
-      <p class="tag reveal" style="color:var(--muted)">05 — 下载</p>
+  <section id="contact" class="shell">
+    <div class="contact-card">
+      <p class="tag reveal" style="position:relative">05 — 下载</p>
       <h2 class="contact-title reveal">开始观影</h2>
-      <p class="lede reveal" style="margin:1.2rem auto 0;text-align:center">安装包与更新仅从官方仓库发布，请勿使用来源不明的补丁包。</p>
-      <a class="pill reveal" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener">
-        <s></s><span>下载最新版 <b id="ver">→</b></span>
-      </a>
+      <p class="lede reveal" style="position:relative;margin:1.1rem auto 0;text-align:center">安装包与更新仅从官方仓库发布，请勿使用来源不明的补丁包。</p>
+      <a class="pill solid reveal" href="https://github.com/YDMY007/Fntv-Plus/releases/latest" target="_blank" rel="noopener"><span>下载最新版 <b id="ver2">→</b></span></a>
     </div>
   </section>
 </main>
@@ -378,11 +424,12 @@
       <a href="https://github.com/YDMY007/Fntv-Plus/issues" target="_blank" rel="noopener">问题反馈</a>
       <a href="https://github.com/YDMY007/Fntv-Plus/releases" target="_blank" rel="noopener">更新日志</a>
     </div>
-    <div style="font-size:.875rem;color:var(--muted2)">
+    <div style="font-size:.875rem;color:var(--ink3)">
       非官方第三方客户端 · 基于 QiaoKes/fntv-electron 启发并保留其版权与致谢 · 按「原样」提供、不提供任何担保 · by YDMY007
     </div>
   </div>
 </footer>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.20/dist/lenis.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
@@ -399,7 +446,7 @@
     (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })(performance.now());
   }
 
-  /* 自定义光标：实心点即时跟随 + 外圈弹簧拖尾 */
+  /* 光标：实心点即时 + 外圈弹簧拖尾 */
   if (fine && !reduce) {
     var cur = document.getElementById('cur'), dot = document.getElementById('curdot');
     var tx = innerWidth / 2, ty = innerHeight / 2, cx = tx, cy = ty;
@@ -418,7 +465,7 @@
     });
   }
 
-  /* 导航：滚过 50px 加玻璃背景；下滚隐藏、上滚显示 */
+  /* 导航：滚过 50px 变玻璃条，下滚收起上滚展开 */
   var nav = document.getElementById('nav'), last = 0;
   function onScroll(y) {
     nav.classList.toggle('solid', y > 50);
@@ -428,11 +475,9 @@
   addEventListener('scroll', function () { onScroll(scrollY); }, { passive: true });
   if (lenis) lenis.on('scroll', function (e) { onScroll(e.scroll); });
 
-  /* 移动端菜单 */
+  /* 移动菜单 + 锚点平滑 */
   var mnav = document.getElementById('mnav');
   document.getElementById('burger').addEventListener('click', function () { mnav.classList.toggle('on'); });
-
-  /* 锚点：交给 Lenis 平滑滚动 */
   document.querySelectorAll('a[href^="#"]').forEach(function (a) {
     a.addEventListener('click', function (e) {
       var t = document.querySelector(a.getAttribute('href'));
@@ -443,26 +488,26 @@
     });
   });
 
-  /* Hero：滚动时整屏缩放 + 起圆角（GSAP ScrollTrigger 接管） */
+  /* Hero 预览卡：滚动时轻微上浮缩放（浅色下用视差代替整屏缩放） */
   if (window.gsap && window.ScrollTrigger && !reduce) {
     gsap.registerPlugin(ScrollTrigger);
-    gsap.to('#hero', {
-      scale: 0.82, borderRadius: '2rem', ease: 'none',
-      scrollTrigger: { trigger: '.hero-wrap', start: 'top top', end: 'bottom top', scrub: true }
+    gsap.fromTo('#stageCard', { y: 0, scale: 1 }, {
+      y: -60, scale: 1.03, ease: 'none',
+      scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true }
     });
     gsap.to('.hero-in', {
       opacity: 0, y: -40, ease: 'none',
-      scrollTrigger: { trigger: '.hero-wrap', start: '15% top', end: '60% top', scrub: true }
+      scrollTrigger: { trigger: '.hero', start: '12% top', end: '55% top', scrub: true }
     });
   }
 
-  /* 区块进场 */
+  /* 进场 reveal */
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
   }, { threshold: 0.14 });
   document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
 
-  /* 横滑手风琴：悬停/点击切换，激活栏 80% 宽 */
+  /* 横滑手风琴 */
   var acc = document.getElementById('acc');
   if (acc) {
     acc.querySelectorAll('.panel').forEach(function (p) {
@@ -487,7 +532,7 @@
     });
   });
 
-  /* About：逐词点亮（滚动进度驱动 opacity 0.15 → 1） */
+  /* About 逐词点亮 */
   var rt = document.getElementById('revealText');
   if (rt) {
     var parts = rt.textContent.trim().split(/(\s+)/);
@@ -498,21 +543,22 @@
       var p = (vh * 0.82 - r.top) / (r.height + vh * 0.28);
       p = Math.max(0, Math.min(1, p));
       var n = Math.floor(p * spans.length * 1.15);
-      for (var i = 0; i < spans.length; i++) spans[i].style.opacity = i < n ? 1 : 0.15;
+      for (var i = 0; i < spans.length; i++) spans[i].style.opacity = i < n ? 1 : 0.16;
     }
     paint();
     addEventListener('scroll', paint, { passive: true });
     if (lenis) lenis.on('scroll', paint);
   }
 
-  /* 版本号：拉 GitHub Release（失败静默降级） */
+  /* 版本号 */
   fetch('https://api.github.com/repos/YDMY007/Fntv-Plus/releases/latest')
     .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
     .then(function (j) {
-      var chip = document.getElementById('relchip'), v = document.getElementById('ver');
+      var chip = document.getElementById('relchip'), v = document.getElementById('ver'), v2 = document.getElementById('ver2');
       var d = j.published_at ? new Date(j.published_at).toISOString().slice(0, 10) : '';
       if (chip) chip.textContent = '最新 ' + j.tag_name + (d ? ' · ' + d : '');
       if (v) v.textContent = j.tag_name;
+      if (v2) v2.textContent = j.tag_name;
     })
     .catch(function () {
       var chip = document.getElementById('relchip');
