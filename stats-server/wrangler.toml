@@ -11,12 +11,10 @@ database_name = "fntv-stats"
 database_id = "39b66bd5-a309-4a86-963b-955f34ea5930"
 
 # R2：存反馈附带的日志正文（免费额度 10GB，够用很久）
-# ⚠ 新账号需先在 Cloudflare Dashboard 里启用 R2（控制台 → R2 → 启用，会走一次开通流程），
-#    否则 wrangler 报 code 10042。启用后把下面三行的 # 去掉，重新 `npx wrangler deploy` 即可，
-#    统计功能完全不受影响 —— 未启用期间只是反馈日志存不下来（反馈描述仍能收到）。
-# [[r2_buckets]]
-# binding = "LOGS"
-# bucket_name = "fntv-stats-logs"
+# 未启用 R2 时也没关系：日志会自动退回存进 D1 的 feedback.log 列（见 worker.js 说明）。
+[[r2_buckets]]
+binding = "LOGS"
+bucket_name = "fntv-stats-logs"
 
 # STATS_TOKEN 不要写在这里，用 secret：
 #   npx wrangler secret put STATS_TOKEN
