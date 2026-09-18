@@ -27,6 +27,7 @@ const MAX_LOG = 3 * 1024 * 1024;
 
 let app = null;
 let db = null;
+let collReady = false;
 function getDb() {
   if (!db) {
     // SYMBOL_CURRENT_ENV = 云函数所在环境；本地/特殊场景可用 ENV_ID 覆盖
@@ -34,6 +35,16 @@ function getDb() {
     db = app.database();
   }
   return db;
+}
+
+/** 首次使用时确保集合存在（控制台忘了建也不至于一直报错；失败忽略，让业务自己报错） */
+async function ensureCollections() {
+  if (collReady) return;
+  collReady = true;
+  const database = getDb();
+  for (const name of ['ping', 'feedback']) {
+    try { await database.createCollection(name); } catch (_) { /* 已存在或无权限，忽略 */ }
+  }
 }
 
 // 实例级内存缓冲（云函数实例复用期间有效）
@@ -105,6 +116,7 @@ async function handlePing(body) {
   const aid = clamp(body.aid, 64);
   const day = clamp(body.d, 10);
   if (!RE_AID.test(aid) || !dayPlausible(day)) return err(400, 'bad payload');
+  await ensureCollections();
 
   const key = aid + '_' + day;
   if (seen.has(key)) return ok({ ok: true, dedup: 'memory' }); // 同实例内重复：0 成本直接返回
