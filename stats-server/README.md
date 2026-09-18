@@ -260,3 +260,33 @@ node --experimental-sqlite _smoke.mjs
 
 **反馈功能**（用户主动提交）不受"静默"影响：所有端点都失败时会在面板明确提示失败，
 用户可以改用「导出日志文件」把日志存下来手动发给你 —— 这条退路一直保留。
+
+---
+
+## 十、接入自有域名（已上线）
+
+生产环境用自有域名比 `*.workers.dev` 稳（后者是泛域名，国内更易被误伤）。当前部署：
+
+| 入口 | 域名 | 指向 |
+| --- | --- | --- |
+| 统计 / 反馈 | **https://stats.690075.xyz** | 本 Worker（`wrangler.toml` 的 `routes`，`custom_domain = true`） |
+| 官网 | https://690075.xyz / www.690075.xyz | Cloudflare Pages 项目 `fntv-plus` |
+| 备份端点 | https://fntv-stats.122983191.workers.dev | 同一个 Worker（`workers_dev = true`） |
+
+**两个必踩的坑**（都已被 wrangler 配置固化）：
+
+1. `routes` 必须是 **`wrangler.toml` 的顶层键**。如果它出现在任何 `[[table]]`（如 `[[r2_buckets]]`）之后，
+   TOML 会把它归进那张表，wrangler 报 `Unexpected fields found in r2_buckets[0] field: "routes"`，
+   自定义域名**静默建不出来**。
+2. 一旦配置了 `routes`，wrangler 默认会把 **`workers_dev` 关掉**（备份端点失效）。
+   要保留就显式写 `workers_dev = true`。
+
+自检工具（查 zone 状态、两个自定义域、以及各入口 HTTP 连通性）：
+
+```bash
+node stats-server/check-domain.mjs
+```
+
+> ⚠ 如果本机开了代理（Clash 等 fake-ip 模式），`nslookup` 会返回 `198.18.x.x` 之类的假地址，
+> 判断域名是否生效请改用 DoH 查询：
+> `curl -s "https://dns.google/resolve?name=stats.690075.xyz&type=A"`
