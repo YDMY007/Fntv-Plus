@@ -4,7 +4,7 @@ import * as path from 'path';
 import axios from 'axios';
 import * as fnConfig from '../../../modules/fn_config/config';
 import { registerHandler } from '../core/ipcHandler';
-import { getEndpoint, isEndpointConfigured } from './usageStats';
+import { getEndpoints, isEndpointConfigured } from './usageStats';
 import { maskStringByPatterns } from '../../../modules/logger/masking';
 import * as log from '../../../modules/logger';
 
@@ -101,8 +101,8 @@ function trimLog(text: string): string {
 
 /** 上传一段日志文本（内部统一入口） */
 async function uploadLogText(logText: string, message: string, contact: string): Promise<any> {
-    const endpoint = getEndpoint();
-    if (!endpoint) return { ok: false, error: '未配置反馈服务端地址（FNTV_STATS_ENDPOINT）' };
+    const endpoints = getEndpoints();
+    if (endpoints.length === 0) return { ok: false, error: '未配置反馈服务端地址（FNTV_STATS_ENDPOINT）' };
     const body = {
         aid: fnConfig.getStatsAnonId(),
         v: appVersion(),
@@ -112,21 +112,26 @@ async function uploadLogText(logText: string, message: string, contact: string):
         contact: (contact || '').slice(0, MAX_CONTACT),
         log: logText || '',
     };
-    try {
-        const res = await axios.post(endpoint + FEEDBACK_PATH, body, {
-            timeout: UPLOAD_TIMEOUT_MS,
-            headers: { 'content-type': 'application/json' },
-            maxBodyLength: MAX_LOG_BYTES + 1024 * 1024,
-            maxContentLength: 8 * 1024 * 1024,
-        });
-        const data: any = res && res.data;
-        log.info('[feedback] 反馈提交成功 id=' + (data && data.id ? data.id : '?'));
-        return { ok: true, id: (data && data.id) || '' };
-    } catch (e: any) {
-        const msg = String(e?.response?.data?.error || e?.message || e);
-        log.warn(`[feedback] 反馈提交失败: ${msg}`);
-        return { ok: false, error: msg };
+    // 主地址不通时依次尝试备用地址（例如 Cloudflare 被墙 → 走国内 SCF）
+    let lastErr = '';
+    for (const base of endpoints) {
+        try {
+            const res = await axios.post(base + FEEDBACK_PATH, body, {
+                timeout: UPLOAD_TIMEOUT_MS,
+                headers: { 'content-type': 'application/json' },
+                maxBodyLength: MAX_LOG_BYTES + 1024 * 1024,
+                maxContentLength: 8 * 1024 * 1024,
+            });
+            const data: any = res && res.data;
+            log.info('[feedback] 反馈提交成功 id=' + (data && data.id ? data.id : '?'));
+            return { ok: true, id: (data && data.id) || '' };
+        } catch (e: any) {
+            lastErr = String(e?.response?.data?.error || e?.message || e);
+            log.warn(`[feedback] 端点 ${base} 提交失败，尝试下一个: ${lastErr}`);
+        }
     }
+    log.warn(`[feedback] 反馈提交失败（所有端点均不可达）: ${lastErr}`);
+    return { ok: false, error: lastErr };
 }
 
 /** 提交反馈（可附带最近应用日志） */

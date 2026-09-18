@@ -161,6 +161,7 @@ export interface Config {
     statsAnonId?: string;          // 本地随机 UUID，与用户身份无关；可在「关于」页重置
     statsLastPingDay?: string;     // 上次上报日期 YYYY-MM-DD（同一天不重复上报）
     statsLastPingOk?: boolean;     // 上次上报是否成功（仅用于面板展示）
+    statsPendingDays?: string[];   // 上报失败攒下的欠报日期（网络恢复后补报，最多 7 天）
     // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
     biliDanmakuOpacity?: number;     // 透明度 0-1（默认 0.7）
     biliDanmakuFontSize?: number;    // 字号（默认 50）
@@ -1132,6 +1133,24 @@ export function setStatsLastPing(day: string, ok: boolean): void {
     const config: Config = readConfig() || {};
     config.statsLastPingDay = day;
     config.statsLastPingOk = !!ok;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+/**
+ * 上报失败时攒下的「欠报日期」（YYYY-MM-DD 数组，最多 7 天）。
+ * 网络恢复后客户端会把这些天连同当天一起补发，避免偶发断网导致活跃人数被低估。
+ */
+export function getStatsPendingDays(): string[] {
+    const config: Config = readConfig() || {};
+    const arr = config.statsPendingDays;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)).slice(0, 7);
+}
+
+/** 覆盖写入欠报日期（上报成功时传空数组即清空） */
+export function setStatsPendingDays(days: string[]): void {
+    const config: Config = readConfig() || {};
+    config.statsPendingDays = (days || []).filter((d) => typeof d === 'string').slice(0, 7);
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

@@ -10,6 +10,7 @@ const r2 = new Map();
 const env = {
   STATS_TOKEN: 'test-token',
   DB: {
+    async batch(list) { for (const s of list) { await s.run(); } },
     prepare(sql) {
       const api = {
         bind(...args) {
@@ -63,6 +64,16 @@ assert('今日活跃=2', s.users.today === 2, JSON.stringify(s.users));
 assert('系统分布 2 类', s.systems.length === 2, JSON.stringify(s.systems));
 r = await get('/stats?token=wrong');
 assert('stats 错误 token 拒绝', r.status === 403, 'status=' + r.status);
+
+// 5b. 补报：一次带多天（断网几天后网络恢复，客户端把欠报的日期一起发来）
+const y1 = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+const y2 = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+const back = await post('/ping', { aid: 'dddddddd-1111-2222-3333-444444444444', v: '3.7.0', os: 'Windows', d: today, days: [today, y1, y2] });
+assert('补报 days 数组被接受', back.status === 200, 'status=' + back.status);
+const rows = db.prepare("SELECT day FROM ping WHERE aid='dddddddd-1111-2222-3333-444444444444'").all();
+assert('补报写入 3 天记录', rows.length === 3, JSON.stringify(rows.map((r) => r.day)));
+const tooOld = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+assert('补报超过 7 天被拒', (await post('/ping', { aid: 'eeeeeeee-1111-2222-3333-444444444444', d: tooOld, days: [tooOld] })).status === 400);
 
 // 6. 反馈 + 日志
 r = await post('/feedback', { aid: 'aaaaaaaa-1111-2222-3333-444444444444', v: '3.7.0', os: 'Windows', message: '播放闪退', contact: 'me@qq.com', log: 'line1\nline2' });

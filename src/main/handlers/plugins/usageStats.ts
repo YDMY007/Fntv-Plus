@@ -33,10 +33,21 @@ const TIMEOUT_MS = 6000;
 const BOOT_DELAY_MS = 20000;           // 启动 20s 后再报，避开启动高峰
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 之后每 6 小时检查一次（跨天才补报）
 
-/** 取统计服务端根地址（已去掉结尾斜杠）；空串表示未部署 */
-export function getEndpoint(): string {
+/**
+ * 取统计服务端根地址列表（已去掉结尾斜杠）；空数组表示未部署。
+ * 支持**多个地址**（逗号分隔）：主地址不通时自动依次尝试备用地址，
+ * 例如把 Cloudflare 与腾讯云 SCF 同时配上，国内网络下也能到达。
+ */
+export function getEndpoints(): string[] {
     const raw = (process.env.FNTV_STATS_ENDPOINT || DEFAULT_ENDPOINT || '').trim();
-    return raw.replace(/\/+$/, '');
+    if (!raw) return [];
+    return raw.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+}
+
+/** 兼容旧调用：返回主地址（第一个），未配置时为空串 */
+export function getEndpoint(): string {
+    const list = getEndpoints();
+    return list.length ? list[0] : '';
 }
 
 /** 本地日期 YYYY-MM-DD（按用户所在时区算「一天」，比 UTC 更贴近真实活跃） */
@@ -71,8 +82,8 @@ export function isEndpointConfigured(): boolean {
  * force=true 时忽略「今日已报」限速（用于面板手动测试）。
  */
 export async function sendPing(force: boolean = false): Promise<{ ok: boolean; skipped?: string; error?: string }> {
-    const endpoint = getEndpoint();
-    if (!endpoint) return { ok: false, skipped: '未配置统计服务端地址' };
+    const endpoints = getEndpoints();
+    if (endpoints.length === 0) return { ok: false, skipped: '未配置统计服务端地址' };
     if (!fnConfig.getStatsEnabled()) return { ok: false, skipped: '匿名统计已关闭' };
     // force（用户在「关于」页点了「立即上报一次」）视为显式授权，dev 下也允许发一次，方便验证链路
     if (!force && !app.isPackaged && process.env.FNTV_STATS_FORCE !== '1') {
@@ -83,28 +94,42 @@ export async function sendPing(force: boolean = false): Promise<{ ok: boolean; s
         return { ok: false, skipped: '今日已上报' };
     }
 
+    // 待报日期 = 今天 + 之前网络不通时攒下的欠报日期（补报让活跃人数不被偶发断网低估）
+    const pending = fnConfig.getStatsPendingDays().filter((d) => d !== today);
+    const days = [today, ...pending].slice(0, 8);
+
     // ⚠ 这里是全部会被送出本机的内容，新增字段前请先想清楚是否必要
     const payload = {
         aid: fnConfig.getStatsAnonId(),
         v: appVersion(),
         os: osName(),
         arch: process.arch,
-        d: today,
+        d: today,     // 兼容只认单日字段的老服务端
+        days,         // 新服务端按数组逐条去重入库
     };
 
-    try {
-        await axios.post(endpoint + PING_PATH, payload, {
-            timeout: TIMEOUT_MS,
-            headers: { 'content-type': 'application/json' },
-        });
-        fnConfig.setStatsLastPing(today, true);
-        log.debug('[stats] 匿名心跳上报成功');
-        return { ok: true };
-    } catch (e: any) {
-        fnConfig.setStatsLastPing(today, false);
-        log.debug(`[stats] 匿名心跳上报失败（静默忽略）: ${e?.message || e}`);
-        return { ok: false, error: String(e?.message || e) };
+    let lastErr = '';
+    for (const base of endpoints) {
+        try {
+            await axios.post(base + PING_PATH, payload, {
+                timeout: TIMEOUT_MS,
+                headers: { 'content-type': 'application/json' },
+            });
+            fnConfig.setStatsLastPing(today, true);
+            fnConfig.setStatsPendingDays([]); // 补报成功，清空欠报
+            log.debug(`[stats] 匿名心跳上报成功（${base}，含补报 ${days.length - 1} 天）`);
+            return { ok: true };
+        } catch (e: any) {
+            lastErr = String(e?.message || e);
+            log.debug(`[stats] 端点 ${base} 上报失败，尝试下一个: ${lastErr}`);
+        }
     }
+
+    // 所有端点都不通：记下欠报日期，等网络恢复后补发（对用户完全静默，不弹窗、不重试风暴）
+    fnConfig.setStatsPendingDays(days.slice(0, 7));
+    fnConfig.setStatsLastPing(today, false);
+    log.debug(`[stats] 匿名心跳上报失败（静默忽略，已记 ${days.length} 天待补报）`);
+    return { ok: false, error: lastErr };
 }
 
 /** 面板读取当前统计状态（匿名 ID 只回传前 8 位，够用户核对又不至于被复制滥用） */

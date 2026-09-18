@@ -31,11 +31,15 @@ function clamp(str, max) {
   return typeof str === 'string' ? str.slice(0, max) : '';
 }
 
-/** 只接受今天 ±2 天的日期，避免有人灌历史数据 / 未来数据 */
+/**
+ * 只接受今天 ±7 天的日期。
+ * 放宽到 7 天是为了支持「补报」：用户网络连不上服务端时客户端会把当天记下来，
+ * 等网络恢复后连同前几天一起补发，这样统计到的活跃人数不会因为偶发断网而偏低。
+ */
 function dayPlausible(day) {
   if (!RE_DAY.test(day)) return false;
   const diff = Math.abs(Date.now() - Date.parse(day + 'T00:00:00Z')) / 86400000;
-  return diff <= 2;
+  return diff <= 7;
 }
 
 export default {
@@ -62,8 +66,12 @@ async function handlePing(request, env) {
     return json({ error: 'bad json' }, 400);
   }
   const aid = clamp(body.aid, 64);
-  const day = clamp(body.d, 10);
-  if (!RE_AID.test(aid) || !dayPlausible(day)) return json({ error: 'bad payload' }, 400);
+  // days 支持数组（补报多天）；d 为兼容旧客户端的单日字段
+  const days = Array.isArray(body.days)
+    ? body.days.slice(0, 8).map((d) => clamp(String(d), 10)).filter((d) => RE_DAY.test(d))
+    : [clamp(body.d, 10)];
+  const valid = days.filter((d) => dayPlausible(d));
+  if (!RE_AID.test(aid) || valid.length === 0) return json({ error: 'bad payload' }, 400);
 
   const ver = clamp(body.v, 32);
   const os = clamp(body.os, 16);
@@ -71,13 +79,13 @@ async function handlePing(request, env) {
 
   try {
     // 同一天重复上报直接忽略 —— 这是「人数」而非「次数」的关键
-    await env.DB.prepare(
+    await env.DB.batch(valid.map((day) => env.DB.prepare(
       'INSERT OR IGNORE INTO ping (aid, day, ver, os, arch) VALUES (?, ?, ?, ?, ?)'
-    ).bind(aid, day, ver, os, arch).run();
+    ).bind(aid, day, ver, os, arch)));
   } catch (e) {
     return json({ error: 'db error' }, 500);
   }
-  return json({ ok: true });
+  return json({ ok: true, days: valid.length });
 }
 
 /** Bug 反馈（含可选日志正文） */
