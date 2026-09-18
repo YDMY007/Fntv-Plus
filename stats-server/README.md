@@ -43,7 +43,22 @@
 
 ---
 
-## 二、部署方式 A：网页操作（零命令行，推荐）
+## 二、部署方式 A：一键脚本（最省事）
+
+在**普通终端**（cmd / PowerShell / Windows Terminal，别在 AI 工具的嵌入式终端里跑）执行：
+
+```
+cd stats-server
+部署.cmd
+```
+
+它会依次完成：浏览器授权登录 → 建 D1 并自动把 `database_id` 写回 `wrangler.toml` → 建表 → 建 R2 桶 → 让你输入 `STATS_TOKEN` 口令 → `wrangler deploy`，最后打印出你的服务端地址。
+
+跑完把那个 `https://xxx.workers.dev` 地址填进 `src/main/handlers/plugins/usageStats.ts` 顶部的 `DEFAULT_ENDPOINT`，`npx tsc` 即可。
+
+> Linux/macOS 直接 `node deploy.mjs`。
+
+## 二、部署方式 B：网页操作（零命令行）
 
 全程在浏览器点，不需要装 Node、不需要敲命令。
 
