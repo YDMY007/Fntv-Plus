@@ -18,3 +18,8 @@ bucket_name = "fntv-stats-logs"
 
 # STATS_TOKEN 不要写在这里，用 secret：
 #   npx wrangler secret put STATS_TOKEN
+
+# 自定义域名：NS 生效（zone active）后由 wrangler 自动创建并签发证书
+routes = [
+  { pattern = "stats.690075.xyz", custom_domain = true }
+]
