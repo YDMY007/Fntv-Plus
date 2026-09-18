@@ -1,5 +1,9 @@
 # Fntv-Plus 匿名统计 / 反馈服务端
 
+> 两套后端任选其一，接口完全一致，客户端只换 endpoint：
+> **A. Cloudflare Workers + D1 + R2**（本文件，¥0，国内连通性需自测）
+> **B. 腾讯云开发 CloudBase**（[cloudbase/README.md](./cloudbase/README.md)，国内直连，¥0 起步）
+
 一个 Cloudflare Worker 单文件，负责两件事：
 
 1. **`/ping`** —— 客户端每天上报一次「今天我在用」，用来统计**有多少人在用**（总人数 / 日活 / 周活 / 月活 / 版本分布）。

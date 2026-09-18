@@ -1,0 +1,9 @@
+{
+  "name": "fntv-stats",
+  "version": "1.0.0",
+  "main": "index.js",
+  "description": "Fntv-Plus 匿名统计 / 反馈（腾讯云开发云函数）",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^2.7.0"
+  }
+}
