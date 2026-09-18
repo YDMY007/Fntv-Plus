@@ -1,9 +1,0 @@
-[probe] 环境: {"require":"function","ipcRenderer":"object","buttonCount":3,"xBtn":true}
-[probe] patch: ok
-[main] 收到 result 通道: id=dlg_1789361978905_wpn8wd index=0
-[main] 收到 result 通道: id=dlg_1789361978905_wpn8wd index=1
-[main] 收到 result 通道: id=dlg_1789361978905_wpn8wd index=0
-[probe] 点击结果: clicked
-[probe] send 调用记录: [["fntv-app-dialog:result","dlg_1789361978905_wpn8wd","0"],["fntv-app-dialog:result","dlg_1789361978905_wpn8wd","1"],["fntv-app-dialog:result","dlg_1789361978905_wpn8wd","0"]]
-[main] 收到 result 通道: id=dlg_1789361978905_wpn8wd index=1
-[main] 收到 result 通道: id=dlg_1789361978905_wpn8wd index=0

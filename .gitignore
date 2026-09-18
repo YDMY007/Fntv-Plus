@@ -101,3 +101,7 @@ scripts/sync_packages_to_gitee.py
 # ⚠️ WorkBuddy 工作区数据（AI 会话日志/项目记忆），纯本机不入库 —— 用户 2026-09-15 明确要求
 # 此前 .workbuddy/memory/*.md 曾被跟踪并推送过，已从索引移除 + GitHub 远端删除
 .workbuddy/
+
+# 临时调试脚本/产物（AI 会话遗留，不入库）
+scripts/_*
+scripts/nsis-debug/_*

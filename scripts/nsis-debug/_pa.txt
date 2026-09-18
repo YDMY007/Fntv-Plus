@@ -1,5 +1,0 @@
-case | len | utf8 | nonascii | expect
-pure-ascii   | 12 | 12 | 0 | 0
-chinese-dir  | 17 | 25 | 1 | 1
-with-space   | 26 | 26 | 0 | 0
-fullwidth-tag| 16 | 24 | 1 | 1

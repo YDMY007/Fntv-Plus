@@ -1,2 +1,0 @@
-[probe] RESULT = 1  (耗时 1682ms)
-[probe] 判定: FAIL 真实鼠标点击没落到按钮上(返回的是 cancelId/超时)
