@@ -106,15 +106,20 @@ async function handleFeedback(request, env) {
   const ts = new Date().toISOString();
   const hasLog = logText ? 1 : 0;
 
+  // 日志优先存 R2（不占数据库）；**没有 R2 时退回存 D1** —— 新账号启用 R2 可能要绑支付方式，
+  // 为一个日志桶不值当，D1 免费 5GB 也完全够（几十条日志才几十 MB）。
+  const useR2 = hasLog && !!env.LOGS;
+  const d1Log = !useR2 && hasLog ? logText.slice(0, 800 * 1024) : '';
+
   try {
-    if (hasLog && env.LOGS) {
+    if (useR2) {
       await env.LOGS.put(`logs/${id}.log`, logText, {
         httpMetadata: { contentType: 'text/plain; charset=utf-8' },
       });
     }
     await env.DB.prepare(
-      'INSERT INTO feedback (id, ts, aid, ver, os, arch, contact, has_log, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(id, ts, aid, clamp(body.v, 32), clamp(body.os, 16), clamp(body.arch, 16), contact, hasLog, message).run();
+      'INSERT INTO feedback (id, ts, aid, ver, os, arch, contact, has_log, log, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, ts, aid, clamp(body.v, 32), clamp(body.os, 16), clamp(body.arch, 16), contact, hasLog, d1Log, message).run();
   } catch (e) {
     return json({ error: 'db error' }, 500);
   }
@@ -161,11 +166,27 @@ async function handleStatsLog(url, env) {
   if (!env.STATS_TOKEN || url.searchParams.get('token') !== env.STATS_TOKEN) {
     return json({ error: 'forbidden' }, 403);
   }
-  const id = url.searchParams.get('id') || '';
-  if (!/^[0-9a-fA-F-]{8,64}$/.test(id) || !env.LOGS) return json({ error: 'bad id' }, 400);
-  const obj = await env.LOGS.get(`logs/${id}.log`);
-  if (!obj) return json({ error: 'not found' }, 404);
-  return new Response(await obj.text(), {
-    headers: { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8' },
-  });
+  const id = String(url.searchParams.get('id') || '');
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return json({ error: 'bad id' }, 400);
+
+  // 1) D1 里的日志（无 R2 时的存放处）
+  try {
+    const row = await env.DB.prepare('SELECT log FROM feedback WHERE id = ?').bind(id).first();
+    if (row && row.log) {
+      return new Response(row.log, {
+        headers: { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
+  } catch (_) { /* 老表没有 log 列，忽略 */ }
+
+  // 2) R2 里的日志（启用了 R2 时的存放处）
+  if (env.LOGS) {
+    const obj = await env.LOGS.get(`logs/${id}.log`);
+    if (obj) {
+      return new Response(await obj.text(), {
+        headers: { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
+  }
+  return json({ error: 'not found' }, 404);
 }

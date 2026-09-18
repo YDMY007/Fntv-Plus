@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   arch    TEXT,
   contact TEXT,              -- 用户自愿填写的联系方式（可空）
   has_log INTEGER DEFAULT 0, -- 是否附带日志
+  log     TEXT,              -- 日志正文兜底存放处（未启用 R2 时用它；启用 R2 后此列留空，日志在 R2）
   message TEXT               -- 问题描述
 );
 CREATE INDEX IF NOT EXISTS idx_fb_ts ON feedback(ts);

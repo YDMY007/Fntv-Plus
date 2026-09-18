@@ -77,6 +77,10 @@ cd stats-server
 
 > 变量名必须是 `DB`、`LOGS`、`STATS_TOKEN` —— worker.js 里就是按这三个名字读的，写错会报 `db error`。
 
+> **R2 是可选的。** 新账号创建 R2 桶常报 `code 10042`（需先在控制台启用 R2，部分地区还要求绑支付方式）。
+> 没启用也不影响：日志会自动退回存进 D1 的 `feedback.log` 列（D1 免费 5GB，几十条日志才几十 MB），
+> 反馈照收、日志照取，只是占用一点数据库空间。启用 R2 后无需改代码，会自动优先用 R2。
+
 ## 二、部署方式 B：命令行（wrangler）
 
 熟悉命令行的话更快：
@@ -87,7 +91,7 @@ cd stats-server
 npx wrangler login                                   # 1. 浏览器授权
 npx wrangler d1 create fntv-stats                    # 2. 建库，把输出的 database_id 填进 wrangler.toml
 npx wrangler d1 execute fntv-stats --remote --file=schema.sql   # 3. 建表
-npx wrangler r2 bucket create fntv-stats-logs        # 4. 建桶
+npx wrangler r2 bucket create fntv-stats-logs        # 4. 建桶（**可选**，见下方说明）
 npx wrangler secret put STATS_TOKEN                  # 5. 设看数据的口令
 npx wrangler deploy                                  # 6. 部署，输出地址
 ```
