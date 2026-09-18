@@ -270,8 +270,9 @@ node --experimental-sqlite _smoke.mjs
 | 入口 | 域名 | 指向 |
 | --- | --- | --- |
 | 统计 / 反馈 | **https://stats.690075.xyz** | 本 Worker（`wrangler.toml` 的 `routes`，`custom_domain = true`） |
-| 官网 | https://690075.xyz / www.690075.xyz | Cloudflare Pages 项目 `fntv-plus` |
+| 官网 | https://690075.xyz / www.690075.xyz | **Workers Static Assets**（`site/wrangler.toml`，见 `site/README.md`） |
 | 备份端点 | https://fntv-stats.122983191.workers.dev | 同一个 Worker（`workers_dev = true`） |
+| 官网备份 | https://fntv-plus.pages.dev | Cloudflare Pages 项目 `fntv-plus` |
 
 **两个必踩的坑**（都已被 wrangler 配置固化）：
 

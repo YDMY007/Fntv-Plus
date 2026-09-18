@@ -1,13 +1,13 @@
 /**
  * 把 resource/docs 里的截图压缩成 webp，输出到 site/assets（供官网使用）
- * 用法：在项目根目录执行  node site/_gen-assets.mjs
+ * 用法：在项目根目录执行  node scripts/gen-site-assets.mjs
  */
 import sharp from 'sharp';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const SRC = 'resource/docs';
-const OUT = 'site/assets';
+const OUT = 'site/assets'; // 相对项目根目录执行
 fs.mkdirSync(OUT, { recursive: true });
 
 // 只挑能体现项目特色的几张，避免页面过重
