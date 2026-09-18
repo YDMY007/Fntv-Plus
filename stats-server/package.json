@@ -1,0 +1,6 @@
+{
+  "name": "fntv-stats-server",
+  "private": true,
+  "type": "module",
+  "description": "Fntv-Plus 匿名统计 / 反馈服务端（Cloudflare Worker）"
+}

@@ -153,6 +153,14 @@ export interface Config {
     // 轮播图标题替换为 TMDB 透明 Logo 开关（默认开启=true：用 logo 图替换右侧文字标题；
     // false=保留文字标题）
     carouselLogoEnabled?: boolean;
+    // ===== [lc-1196] 匿名使用统计（默认开启=true）=====
+    // 只上报三样东西：本机随机生成的匿名 ID + 应用版本号 + 操作系统/架构，每天最多一次。
+    // 不含账号、IP（服务端不存）、媒体库、文件路径、设备名等任何可识别信息。
+    // 服务端未部署（endpoint 为空）时不发任何请求。
+    statsEnabled?: boolean;        // 用户开关（「关于」页可关）
+    statsAnonId?: string;          // 本地随机 UUID，与用户身份无关；可在「关于」页重置
+    statsLastPingDay?: string;     // 上次上报日期 YYYY-MM-DD（同一天不重复上报）
+    statsLastPingOk?: boolean;     // 上次上报是否成功（仅用于面板展示）
     // ===== B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf）=====
     biliDanmakuOpacity?: number;     // 透明度 0-1（默认 0.7）
     biliDanmakuFontSize?: number;    // 字号（默认 50）
@@ -1064,6 +1072,66 @@ export function getCarouselLogoEnabled(): boolean {
 export function setCarouselLogoEnabled(enabled: boolean): void {
     const config: Config = readConfig() || {};
     config.carouselLogoEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// ===== [lc-1196] 匿名使用统计 =====
+// 设计原则（隐私最小化）：
+//  1) 匿名 ID 在本机随机生成，不与账号/设备/机器码做任何绑定，重置即失联；
+//  2) 上报字段只有 匿名ID / 版本号 / 系统 / 架构 四个，服务端不存 IP；
+//  3) 每天最多一次，且服务端按 (匿名ID, 日期) 去重 —— 只能算出"人数"，算不出"谁"。
+
+/** 统计开关（默认开启=true；用户在「关于」页可一键关闭，关闭后不再发出任何请求） */
+export function getStatsEnabled(): boolean {
+    const config: Config = readConfig() || {};
+    return config.statsEnabled !== false;
+}
+
+export function setStatsEnabled(enabled: boolean): void {
+    const config: Config = readConfig() || {};
+    config.statsEnabled = !!enabled;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+/** 取本机匿名 ID（没有就随机生成一个并落盘）。UUID v4，无任何个人信息成分。 */
+export function getStatsAnonId(): string {
+    const config: Config = readConfig() || {};
+    const cur = typeof config.statsAnonId === 'string' ? config.statsAnonId : '';
+    if (/^[0-9a-fA-F-]{8,64}$/.test(cur)) return cur;
+    const fresh = crypto.randomUUID();
+    config.statsAnonId = fresh;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+    return fresh;
+}
+
+/** 丢弃旧匿名 ID 并生成新的（用户可在「关于」页主动切断与历史数据的关联） */
+export function resetStatsAnonId(): string {
+    const config: Config = readConfig() || {};
+    const fresh = crypto.randomUUID();
+    config.statsAnonId = fresh;
+    config.statsLastPingDay = '';
+    config.statsLastPingOk = false;
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+    return fresh;
+}
+
+/** 上次上报日期 YYYY-MM-DD（空串=从未上报） */
+export function getStatsLastPingDay(): string {
+    const config: Config = readConfig() || {};
+    return typeof config.statsLastPingDay === 'string' ? config.statsLastPingDay : '';
+}
+
+/** 上次上报是否成功 */
+export function getStatsLastPingOk(): boolean {
+    const config: Config = readConfig() || {};
+    return config.statsLastPingOk === true;
+}
+
+/** 记录一次上报结果（day 为 YYYY-MM-DD） */
+export function setStatsLastPing(day: string, ok: boolean): void {
+    const config: Config = readConfig() || {};
+    config.statsLastPingDay = day;
+    config.statsLastPingOk = !!ok;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 

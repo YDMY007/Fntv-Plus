@@ -1,4 +1,5 @@
 import { ABOUT_LINK_URL, openFeedbackChoiceModal } from './embyWall/modals/feedback';
+import { buildFeedbackBody, buildStatsCard } from './embyWall/modals/telemetry'; // [lc-1196/1197] 匿名统计 + Bug 反馈卡
 import { UiThemeMode, applyUiTheme, getEffectiveDark, getUiTheme, injectUiThemeStyle, removeThemeModeSetting, setUiTheme } from './embyWall/theme';
 import { applyCarouselLogoNow, backfillDetailLogo } from './embyWall/carousel/logo';
 import { applyLoginBgVar } from './embyWall/login';
@@ -1550,6 +1551,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 调试日志(独立卡片; 从「退出行为」卡片迁出, 见下方 debug 块)
     const secDebug = section('调试日志');
     const secDebugBody = secDebug.body;
+
+    // [lc-1197] Bug 反馈 + 日志上传卡（用户手动触发；日志上传前在主进程脱敏）
+    const secFeedback = section('Bug 反馈与日志上传');
+    secFeedback.body.appendChild(buildFeedbackBody());
 
     // ===== [lc-1041] 分组重组：原「功能开关」大杂烩卡按域拆成三张卡，主题模式行并入「外观」=====
     //   网络与代理: 下载代理 + NAS 本地网盘代理（与「自定义代理」「TMDB 免梯子直连」同归网络分类）
@@ -4792,6 +4797,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     aboutLink.onmouseenter = () => { aboutLink.style.transform = 'scale(1.03)'; aboutLink.style.background = 'var(--fnos-ui-pill-hover)!important'; aboutLink.style.color = '#fff'; };
     aboutLink.onmouseleave = () => { aboutLink.style.transform = ''; aboutLink.style.background = 'var(--fnos-ui-pill-bg)!important'; aboutLink.style.color = 'var(--fnos-ui-pill-text)'; };
     secBodyAbout.appendChild(aboutLink);
+    // [lc-1196] 匿名使用统计卡（开关 + 上次上报状态 + 重置匿名 ID），挂在「关于」页底部
+    try { secBodyAbout.appendChild(buildStatsCard()); } catch (_) {}
 
     // ===== 分组: 外观（独立标签页；原侧栏"亚克力透明度/背景模糊"滑块迁入设置面板）=====
     const secAppearance = section('主题与外观');
@@ -5081,7 +5088,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'metascrape', label: '自定义刮削', els: [secMetaScrape.el, secJav.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el] }, // [自定义刮削] 源卡+Jav 卡+扩展四源卡
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },
       { id: 'gamepad', label: '手柄', els: [secGamepad.el] },
-      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
+      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secFeedback.el, secDebug.el] }, // [lc-1197] 反馈卡
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
