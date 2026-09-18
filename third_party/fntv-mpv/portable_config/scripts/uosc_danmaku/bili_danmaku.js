@@ -375,9 +375,23 @@ async function search_bangumi(title, ep_num, season_num) {
     return results;
 }
 
+// [lc-1194] 简体中文数字 → 阿拉伯数字（支持 一~九十九；「两」按 2）
+function _cn_num(s) {
+    if (/^[0-9]+$/.test(s)) return parseInt(s, 10);
+    const M = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    const ten = s.indexOf('十');
+    if (ten < 0) return M[s] || 0;
+    const head = s.substring(0, ten);
+    const tail = s.substring(ten + 1);
+    return (head ? (M[head] || 0) : 1) * 10 + (tail ? (M[tail] || 0) : 0);
+}
+
 function _ep_in_title(t, ep_num) {
     if (!ep_num) return false;
     const s = String(t);
+    // [lc-1194] 中文数字集号（「第一话」「第十二集」… 搬运合集常见命名）
+    const cn = s.match(/第\s*([一二三四五六七八九十]{1,3})\s*[话集回話]/);
+    if (cn) return _cn_num(cn[1]) === ep_num;
     if (new RegExp(`第\\s*0*${ep_num}\\s*[话集回話]`).test(s)) return true;
     if (new RegExp('\\d\\s*[~\\-–至]\\s*\\d').test(s)) return false;
     if (new RegExp(`(?:^|[^A-Za-z\\d])(?:e\\.?p\\.?\\s*|episode\\s*|#\\s*)\\s*0*${ep_num}(?!\\d)`, 'i').test(s)) return true;
@@ -440,17 +454,37 @@ function cid_from_bvid(bvid, ep_num, title_hint) {
         }
         if (ep_num) {
             let best = null;
+            // [lc-1194] 非正片分P（PV/OP/ED/预告/特典/菜单…）不参与集号匹配与顺序对位
+            const parts = [];
             for (let i = 0; i < pages.length; i++) {
                 const part = pages[i].part || '';
-                if (_ep_in_title(part, ep_num)) {
+                if (/PV|预告|預告|OP|ED|特典|菜单|菜單|_menu|_menu/i.test(part)) continue;
+                parts.push(pages[i]);
+            }
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i].part || '';
+                let hit = _ep_in_title(part, ep_num);
+                // [lc-1194] 兜底一：复用 parse_ep_from_title 的宽解析（括号「(1)」「- 1 -」「1话」等）
+                if (!hit) { const pe = parse_ep_from_title(part); hit = pe > 0 && pe === ep_num; }
+                if (hit) {
                     if (part.indexOf('先行') >= 0 || part.indexOf('预览') >= 0) {
-                        if (best === null) best = pages[i].cid;
+                        if (best === null) best = parts[i].cid;
                         log(`[cid_from_bvid] 分P[${i}]=${JSON.stringify(part)} 命中但为先行/预览, 暂存兜底`);
                         continue;
                     }
-                    log(`[cid_from_bvid] 分P[${i}]=${JSON.stringify(part)} 集数匹配 -> cid=${pages[i].cid}`);
-                    return pages[i].cid;
+                    log(`[cid_from_bvid] 分P[${i}]=${JSON.stringify(part)} 集数匹配 -> cid=${parts[i].cid}`);
+                    return parts[i].cid;
                 }
+            }
+            // [lc-1194] 兜底二（顺序对位）：所有正片分P **都解析不出集号**（标题为空/「正片」等）时，
+            // 按正片顺序取第 ep_num 个 —— 已完结搬运合集常见形态。只要任一分P 可解析出集号就说明
+            // 命名是「有标记但没对上」的混乱态，顺序不可信，宁可放弃也不冒险错位。
+            let anyEp = false;
+            for (const p of parts) { if (parse_ep_from_title(p.part || '') > 0) { anyEp = true; break; } }
+            if (!anyEp && ep_num >= 1 && ep_num <= parts.length) {
+                const c = parts[ep_num - 1].cid;
+                log(`[cid_from_bvid] 分P均无集号标记(${parts.length}个正片P), 顺序对位第${ep_num}话 -> cid=${c}`);
+                return c;
             }
             log(`[cid_from_bvid] 多P未精确匹配第${ep_num}话, 兜底 cid=${best}`);
             return best;
@@ -862,6 +896,34 @@ function _load_block_types() {
     return new Set();
 }
 
+// [lc-1194] 弹幕源锁定缓存：剧名 → 上次命中的合集 bvid。
+// 已完结番剧在B站搜到的几乎全是搬运合集，手动选定（或上次自动命中）后锁定，
+// 整季每集自动按 ep_num 精确取分P —— 保证前后一致，且省去逐集全量搜索。
+const SOURCE_CACHE_PATH = path.join(SCRIPT_DIR, 'danmaku_source_cache.json');
+function _load_source_cache() {
+    try {
+        const d = JSON.parse(fs.readFileSync(SOURCE_CACHE_PATH, 'utf8'));
+        return (d && d.v1) || {};
+    } catch (e) { return {}; }
+}
+function _save_source_cache(map) {
+    try { fs.writeFileSync(SOURCE_CACHE_PATH, JSON.stringify({ v1: map }), 'utf8'); }
+    catch (e) { log('[源缓存] 写入失败: ' + (e.message || e)); }
+}
+function _cache_key(title) { return String(title || '').trim(); }
+function _lock_source(title, bvid) {
+    if (!title || !bvid) return;
+    const map = _load_source_cache();
+    map[_cache_key(title)] = { bvid: String(bvid), title: String(title), at: Date.now() };
+    _save_source_cache(map);
+    log(`[源缓存] 已锁定弹幕源: "${title}" -> bvid=${bvid} (整季每集将自动按集取此合集的分P)`);
+}
+function _get_locked_source(title) {
+    const map = _load_source_cache();
+    const v = map[_cache_key(title)];
+    return (v && v.bvid) ? v : null;
+}
+
 function _filter_danmaku(dm, block_types) {
     if (!block_types || !block_types.size) return dm;
     const out = [];
@@ -984,6 +1046,37 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
     }
     log(`番名=${title} 集数=${ep_num} 季数=${season_num || 0} 聚合阈值=${agg_threshold}${loginTag}`);
 
+    // [lc-1194] 源锁定缓存：手动选定过（或上次自动命中）的合集直接复用，每集按 ep_num 精确取分P。
+    // 已完结番剧搜到的几乎全是搬运合集 —— 锁定后整季前后一致，且省去逐集全量搜索（快 2~4s）。
+    if (ep_num) {
+        const locked = _get_locked_source(title);
+        if (locked && locked.bvid) {
+            log(`[源缓存] 命中锁定源 bvid=${locked.bvid} (${locked.title || ''}) → 直接按集取分P`);
+            const lcid = await cid_from_bvid(locked.bvid, ep_num, locked.title || title);
+            if (lcid) {
+                const [ok, all_d] = await try_fetch_danmaku(lcid, false);
+                if (ok && all_d.length) {
+                    const block_types = _load_block_types();
+                    let final = all_d;
+                    if (block_types.size) final = _filter_danmaku(final, block_types);
+                    _write_xml(out, final);
+                    log(`[源缓存] ✅ 第${ep_num}话弹幕 ${final.length} 条 (bvid=${locked.bvid}) -> ${out}`);
+                    return {
+                        ok: true, bvid: locked.bvid, title: title, matched_title: locked.title || title,
+                        sim: null, danmaku_count: final.length, source: 'video', cid: lcid,
+                        from_source_cache: true, cookie_status: (cv && cv.ok) ? 'valid' : ((cv && cv.reason === 'expired_or_invalid') ? 'expired' : 'missing'),
+                    };
+                }
+                log(`[源缓存] 锁定源第${ep_num}话无弹幕数据 → 清缓存走全量搜索`);
+            } else {
+                log(`[源缓存] 锁定源未匹配到第${ep_num}话分P → 清缓存走全量搜索`);
+            }
+            const cm = _load_source_cache();
+            delete cm[_cache_key(title)];
+            _save_source_cache(cm);
+        }
+    }
+
     const candidates = await search_cid(title, ep_num, season_num);
     if (!candidates.length) {
         log('未找到B站对应集（可能番名不匹配或网络受限）');
@@ -1059,6 +1152,8 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
     } else {
         log(`✅ 最终输出: ${best_atitle} -> ${final.length} 条弹幕 (source=${source}) -> ${out}`);
     }
+    // [lc-1194] 自动命中且拿到 bvid → 锁定为本剧弹幕源（整季后续每集直接按集取此合集的分P）
+    if (best_info && best_info.bvid && source === 'video') _lock_source(title, best_info.bvid);
     return result;
 }
 
@@ -1165,6 +1260,9 @@ async function run_candidates(title, bvid, out, threshold, ep_num) {
         cid: cid,
     };
     log(`✅ [候选拉取] ${title} -> ${final.length} 条弹幕 (bvid=${bvid}) -> ${out}`);
+    // [lc-1194] 手动选定 → 锁定为本剧弹幕源：此后该番每集的自动模式直接用此合集按集取分P
+    // （已完结番剧搜到的几乎全是合集，逐集手动选既繁琐又容易前后不一致）。
+    _lock_source(title, bvid);
     return result;
 }
 
