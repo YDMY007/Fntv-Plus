@@ -26,3 +26,10 @@ CREATE TABLE IF NOT EXISTS feedback (
   message TEXT               -- 问题描述
 );
 CREATE INDEX IF NOT EXISTS idx_fb_ts ON feedback(ts);
+
+-- 官网访问计数（按天聚合；只记数字 —— 不存 IP、不存任何 ID 或身份信息）
+CREATE TABLE IF NOT EXISTS visit (
+  day TEXT PRIMARY KEY,               -- YYYY-MM-DD（UTC+8，访客主要在国内）
+  pv  INTEGER NOT NULL DEFAULT 0,     -- 页面浏览次数（每次加载 +1）
+  uv  INTEGER NOT NULL DEFAULT 0      -- 首次到访的浏览器数（客户端本地首访标记，可被清存储虚增，接受）
+);

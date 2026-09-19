@@ -87,6 +87,16 @@ assert('feedback 拒绝空描述', r.status === 400, 'status=' + r.status);
 r = await get('/stats?token=test-token');
 assert('统计里反馈计数=1', (await r.json()).feedbackCount === 1);
 
-// 7. 404
+// 8. 官网访问计数
+let v = await (await post('/visit', {})).json();
+assert('visit 首次上报 pv=1', v.ok === true && v.pv === 1 && v.today === 1, JSON.stringify(v));
+v = await (await post('/visit', { nv: 1 })).json();
+assert('visit 二次 pv=2 uv=1', v.pv === 2 && v.uv === 1 && v.uvToday === 1, JSON.stringify(v));
+const vt = await (await get('/visit/total')).json();
+assert('visit/total 一致', vt.ok === true && vt.pv === 2 && vt.uv === 1, JSON.stringify(vt));
+r = await get('/stats?token=test-token');
+assert('stats 带官网访问', (await r.json()).visits.pv === 2);
+
+// 9. 404
 r = await get('/nope');
 assert('未知路径 404', r.status === 404, 'status=' + r.status);

@@ -50,7 +50,10 @@ export default {
 
     if (url.pathname === '/ping' && request.method === 'POST') return handlePing(request, env);
     if (url.pathname === '/feedback' && request.method === 'POST') return handleFeedback(request, env);
+    if (url.pathname === '/visit' && request.method === 'POST') return handleVisit(request, env);
+    if (url.pathname === '/visit/total' && request.method === 'GET') return handleVisitTotal(url, env);
     if (url.pathname === '/stats' && request.method === 'GET') return handleStats(url, env);
+    if (url.pathname === '/stats/feedback' && request.method === 'GET') return handleStatsFeedback(url, env);
     if (url.pathname === '/stats/log' && request.method === 'GET') return handleStatsLog(url, env);
 
     // 根路径健康检查：便于探活/自检（不返回任何用户数据）
@@ -61,6 +64,53 @@ export default {
     return json({ error: 'not found' }, 404);
   },
 };
+
+/** 官网访问计数：每次页面加载 +1 PV；body.nv=1 表示该浏览器首次到访，再 +1 UV。
+ *  只聚合成 visit 表里的天级数字 —— 不存 IP、不存任何 ID，与 /ping 同一套隐私底线。 */
+function cnDay() {
+  return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);   // UTC+8
+}
+
+async function visitNums(env) {
+  const day = cnDay();
+  try {
+    const [all, td] = await Promise.all([
+      env.DB.prepare('SELECT COALESCE(SUM(pv),0) AS pv, COALESCE(SUM(uv),0) AS uv FROM visit').first(),
+      env.DB.prepare('SELECT pv, uv FROM visit WHERE day = ?').bind(day).first(),
+    ]);
+    return { pv: all.pv, uv: all.uv, today: td ? td.pv : 0, uvToday: td ? td.uv : 0 };
+  } catch (e) {
+    return { pv: 0, uv: 0, today: 0, uvToday: 0 };
+  }
+}
+
+async function handleVisit(request, env) {
+  let nv = 0;
+  try {
+    const body = await request.json();
+    nv = body && body.nv === 1 ? 1 : 0;
+  } catch { /* 无 body 也算一次 PV */ }
+  const day = cnDay();
+  const upsert = 'INSERT INTO visit (day, pv, uv) VALUES (?, 1, ?) ' +
+    'ON CONFLICT(day) DO UPDATE SET pv = pv + 1, uv = uv + excluded.uv';
+  try {
+    await env.DB.prepare(upsert).bind(day, nv).run();
+  } catch (e) {
+    try {
+      // 老库还没建 visit 表：建表后重试一次
+      await env.DB.exec('CREATE TABLE IF NOT EXISTS visit (day TEXT PRIMARY KEY, pv INTEGER NOT NULL DEFAULT 0, uv INTEGER NOT NULL DEFAULT 0)');
+      await env.DB.prepare(upsert).bind(day, nv).run();
+    } catch (e2) {
+      return json({ error: 'db error' }, 500);
+    }
+  }
+  return json({ ok: true, ...(await visitNums(env)) });
+}
+
+/** 官网访问数（公开 —— 只有聚合数字，无需 token）：GET /visit/total */
+async function handleVisitTotal(url, env) {
+  return json({ ok: true, ...(await visitNums(env)) });
+}
 
 /** 客户端每天一次的匿名心跳 */
 async function handlePing(request, env) {
@@ -151,10 +201,11 @@ async function handleStats(url, env) {
     env.DB.prepare('SELECT os, COUNT(DISTINCT aid) AS c FROM ping GROUP BY os ORDER BY c DESC').all(),
     env.DB.prepare('SELECT COUNT(*) AS c FROM feedback').first(),
     env.DB.prepare(
-      'SELECT id, ts, ver, os, has_log, substr(message, 1, 160) AS msg FROM feedback ORDER BY ts DESC LIMIT 20'
+      'SELECT id, ts, ver, os, has_log, substr(message, 1, 160) AS msg FROM feedback ORDER BY ts DESC LIMIT 50'
     ).all(),
   ]);
 
+  const visits = await visitNums(env);
   return json({
     ok: true,
     users: { total: total.c, today: d1.c, last7: d7.c, last30: d30.c },
@@ -163,7 +214,27 @@ async function handleStats(url, env) {
     systems: systems.results,
     feedbackCount: fb.c,
     recentFeedback: recent.results,
+    visits: visits,
   });
+}
+
+/** 作者查看单条反馈的完整内容：/stats/feedback?id=xxx&token=yyy
+ *  （官网后台管理面板用；/stats 列表里只有 160 字摘要） */
+async function handleStatsFeedback(url, env) {
+  if (!env.STATS_TOKEN || url.searchParams.get('token') !== env.STATS_TOKEN) {
+    return json({ error: 'forbidden' }, 403);
+  }
+  const id = String(url.searchParams.get('id') || '');
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(id)) return json({ error: 'bad id' }, 400);
+  try {
+    const row = await env.DB.prepare(
+      'SELECT id, ts, aid, ver, os, arch, contact, has_log, message FROM feedback WHERE id = ?'
+    ).bind(id).first();
+    if (!row) return json({ error: 'not found' }, 404);
+    return json({ ok: true, feedback: row });
+  } catch (e) {
+    return json({ error: 'db error' }, 500);
+  }
 }
 
 /** 作者下载某条反馈附带的日志：/stats/log?id=xxx&token=yyy */
