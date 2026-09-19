@@ -10,6 +10,7 @@ import * as proxyModule from '../../../modules/proxyAgent';
 import * as logger from '../../../modules/logger';
 import { registerHandler } from '../core/ipcHandler';
 import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
+import { pickFallbackSeason } from '../../common/tmdbSeasonResolve';
 
 const log = logger.component('tmdb');
 
@@ -1049,7 +1050,24 @@ async function fetchShowDetails(arg: {
                 const sResp = await getWithRetry(client, `/tv/${id}/season/${arg.seasonNumber}`, { params: baseParams });
                 season = normalizeSeason(sResp?.data || null, arg.seasonNumber);
             } catch (e: any) {
-                log.warn('[TMDB] 季详情获取失败（season=' + arg.seasonNumber + '）：' + String(e?.message || e));
+                // [lc-1225] 飞牛季号与 TMDB 分季不一致（如「爱书的下克上」飞牛第4季 = TMDB S2）时
+                //   /tv/{id}/season/{n} 404。用主请求已带回来的 seasons 列表自动对位实际季，零额外搜索。
+                if ((e && e.response && e.response.status) === 404) {
+                    const fb = pickFallbackSeason(dResp?.data?.seasons, arg.seasonNumber);
+                    if (fb !== null) {
+                        try {
+                            const sResp = await getWithRetry(client, `/tv/${id}/season/${fb}`, { params: baseParams });
+                            season = normalizeSeason(sResp?.data || null, fb);
+                            log.info('[TMDB][lc-1225] 第 ' + arg.seasonNumber + ' 季在 TMDB 不存在(404)，'
+                                + '剧集信息卡已对位第 ' + fb + ' 季');
+                        } catch (e2: any) {
+                            log.warn('[TMDB] 对位季（season=' + fb + '）获取失败：' + dumpErr(e2));
+                        }
+                    }
+                }
+                if (!season) {
+                    log.warn('[TMDB] 季详情获取失败（season=' + arg.seasonNumber + '）：' + String(e?.message || e));
+                }
             }
         }
         log.info('[TMDB] 详情获取成功：' + mt + '/' + id + ' ' + (arg.title || '') + (season ? (' 含第' + arg.seasonNumber + '季') : ''));
@@ -1159,7 +1177,7 @@ function init(): void {
     //   缓存 7 天（getDailyCached 内置 SWR：过期先秒回旧值后台静默刷新）；重拉由 force 驱动。
     registerHandler('tmdb:season-episodes', async (_e: any, arg: {
         tmdbId?: string | number; title?: string; year?: string;
-        seasonNumber?: number | null; force?: boolean;
+        seasonNumber?: number | null; episodeCount?: number; force?: boolean;
     }) => {
         const sn = typeof arg?.seasonNumber === 'number' && arg.seasonNumber >= 0 ? arg.seasonNumber : null;
         if (sn === null) return { ok: false, error: '缺少季号，无法定位 TMDB 分季。' };
@@ -1173,37 +1191,60 @@ function init(): void {
                 tmdbId: arg?.tmdbId, title: arg?.title, year: arg?.year,
             });
             if (!id) return { ok: false, error: 'TMDB 未找到匹配条目：' + (arg?.title || arg?.tmdbId || '(无标题)') };
-            const cacheKey = 'season_eps_v1_' + id + '_s' + sn;
+            const cacheKey = 'season_eps_v2_' + id + '_s' + sn;
             const r = await getDailyCached(cacheKey, async () => {
-                const pull = async (lang: string): Promise<any[]> => {
-                    const resp = await getWithRetry(client, `/tv/${id}/season/${sn}`, { params: { ...baseParams, language: lang } });
+                const pull = async (lang: string, season: number): Promise<any[]> => {
+                    const resp = await getWithRetry(client, `/tv/${id}/season/${season}`, { params: { ...baseParams, language: lang } });
                     return Array.isArray(resp?.data?.episodes) ? resp.data.episodes : [];
                 };
-                // 双语两次请求并行；zh 缺翻译时 TMDB 回落英文原文 → 渲染端按 CJK 检测降级使用
-                const [zhEps, enEps] = await Promise.all([pull('zh-CN'), pull('en-US')]);
+                // [lc-1225] 飞牛季号常来自番剧/Bangumi 计数，与 TMDB 分季不一致（实锤：爱书的下克上
+                //   飞牛「第 4 季」= TMDB S2「领主的养女」），直取 /season/{n} 必 404。此处自动对位：
+                //   episodeCount（渲染端传的本季实际集数）唯一命中优先，否则取最近播出的季。
+                //   缓存按「请求季」为键，命中后不再反复探测；对位结果随 payload 下发。
+                let effSn = sn;
+                try {
+                    const [zhEps, enEps] = await Promise.all([pull('zh-CN', sn), pull('en-US', sn)]);
+                    return { effSn, zhEps, enEps };
+                } catch (e: any) {
+                    if ((e && e.response && e.response.status) !== 404) throw e;
+                    const tvResp = await getWithRetry(client, `/tv/${id}`, { params: baseParams });
+                    const fb = pickFallbackSeason(tvResp?.data?.seasons, sn, arg?.episodeCount);
+                    if (fb === null) throw e;   // 无候选可对位 → 维持原 404 语义
+                    log.info('[TMDB][lc-1225] 第 ' + sn + ' 季在 TMDB 不存在(404)，自动对位第 ' + fb + ' 季'
+                        + (arg?.episodeCount ? ('（本地 ' + arg.episodeCount + ' 集）') : ''));
+                    const [zhEps, enEps] = await Promise.all([pull('zh-CN', fb), pull('en-US', fb)]);
+                    effSn = fb;
+                    return { effSn, zhEps, enEps };
+                }
+            }, TMDB_SEASON_EPS_TTL_MS, !!arg?.force).then((rr: any) => {
+                // getDailyCached 缓存的是 fetcher 返回值本身 —— 这里把 {effSn,zhEps,enEps} 归一成对外 payload
                 const enByNum = new Map<number, any>();
-                for (const e of enEps) {
+                for (const e of (rr.enEps || [])) {
                     if (e && typeof e.episode_number === 'number') enByNum.set(e.episode_number, e);
                 }
                 return {
-                    showTmdbId: id,
-                    seasonNumber: sn,
-                    episodes: zhEps
-                        .filter((e: any) => e && typeof e.episode_number === 'number')
-                        .map((e: any) => {
-                            const en = enByNum.get(e.episode_number) || null;
-                            return {
-                                episodeNumber: e.episode_number,
-                                nameZh: typeof e.name === 'string' ? e.name : '',
-                                overviewZh: typeof e.overview === 'string' ? e.overview : '',
-                                nameEn: en && typeof en.name === 'string' ? en.name : '',
-                                overviewEn: en && typeof en.overview === 'string' ? en.overview : '',
-                                // [多源刮削] 播出日期: 集号解析全失败时按「日期唯一匹配」兜底对位(epBackfill 用)
-                                airDate: typeof e.air_date === 'string' ? e.air_date : '',
-                            };
-                        }),
+                    ...rr,
+                    data: {
+                        showTmdbId: id,
+                        seasonNumber: rr.effSn,
+                        requestedSeasonNumber: sn,
+                        episodes: (rr.zhEps || [])
+                            .filter((e: any) => e && typeof e.episode_number === 'number')
+                            .map((e: any) => {
+                                const en = enByNum.get(e.episode_number) || null;
+                                return {
+                                    episodeNumber: e.episode_number,
+                                    nameZh: typeof e.name === 'string' ? e.name : '',
+                                    overviewZh: typeof e.overview === 'string' ? e.overview : '',
+                                    nameEn: en && typeof en.name === 'string' ? en.name : '',
+                                    overviewEn: en && typeof en.overview === 'string' ? en.overview : '',
+                                    // [多源刮削] 播出日期: 集号解析全失败时按「日期唯一匹配」兜底对位(epBackfill 用)
+                                    airDate: typeof e.air_date === 'string' ? e.air_date : '',
+                                };
+                            }),
+                    },
                 };
-            }, TMDB_SEASON_EPS_TTL_MS, !!arg?.force);
+            });
             log.info('[TMDB] 季分集' + (r.fromCache ? '来自磁盘缓存(未请求TMDB)' : '已向TMDB刷新') + ' key=' + cacheKey
                 + ' eps=' + ((r.data && r.data.episodes && r.data.episodes.length) || 0));
             return { ok: true, data: r.data, fetchedAt: r.fetchedAt, fromCache: r.fromCache };

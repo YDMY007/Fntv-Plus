@@ -478,52 +478,9 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
         : '无 TMDB id 且无标题，无法匹配');
     }
 
-    // 2) TMDB 双语分集（7 天磁盘缓存 + SWR；失败 throw 不落盘）
-    setBtn(btn, '⏳ 获取 TMDB…');
-    const r: any = await ipcRenderer.invoke('tmdb:season-episodes', {
-      tmdbId: tmdbId || undefined, title: title || undefined, seasonNumber,
-      year: meta.year || undefined,   // [lc-1176] 年份消歧：同名条目取首播年最接近者
-    });
-    if (!r || !r.ok || !r.data || !Array.isArray(r.data.episodes)) {
-      throw new Error(((r && r.error) || 'TMDB 获取失败')
-        + (meta.bangumiId ? ('（本季 Bangumi subject ' + meta.bangumiId + '，可试「Bangumi 补全」）') : ''));
-    }
-    const tmdbByNum = new Map<number, any>();
-    // [多源刮削] 播出日期索引: 集号解析全失败时的兜底匹配(仅当该日期在 TMDB 唯一才采用)
-    const tmdbByDate = new Map<string, any[]>();
-    for (const e of r.data.episodes) {
-        tmdbByNum.set(e.episodeNumber, e);
-        const ad = String(e.airDate || '');
-        if (ad) { const arr = tmdbByDate.get(ad) || []; arr.push(e); tmdbByDate.set(ad, arr); }
-    }
-
-    // 2.5) [自定义刮削·v1.10.0] TVMaze 英文兜底（扩展数据源 ②，设置卡开关）：TMDB 缺英文（或整集
-    //    缺失）时，用 TVMaze 官方 API（免 Key，CC BY-SA）的英文标题/简介顶上。一次整季拉取 + 后端
-    //    24h 缓存；查无此剧/未开启/网络失败都静默降级为纯 TMDB，绝不拖住主流程。
-    const tvmazeByNum = new Map<number, { name: string; summary: string }>();
-    if (S.tvmazeEnabled) {
-      setBtn(btn, '⏳ 获取 TVMaze…');
-      try {
-        const tr: any = await ipcRenderer.invoke('tvmaze:show', {
-          title: title || undefined, tmdbId: tmdbId || undefined, seasonNumber,
-        });
-        if (tr && tr.ok && Array.isArray(tr.episodes)) {
-          for (const e of tr.episodes) {
-            const n = numOrNull(e.number);
-            // TVMaze 未播出集常用占位名「TBD」，与「第 N 集」同性质按无数据处理
-            const nm = (e.name && !/^tbd$/i.test(String(e.name).trim())) ? String(e.name) : '';
-            if (n !== null && numOrNull(e.season) === seasonNumber && (nm || e.summary)) {
-              tvmazeByNum.set(n, { name: nm, summary: String(e.summary || '') });
-            }
-          }
-        }
-        log('[epBackfill] TVMaze 兜底就绪: ' + tvmazeByNum.size + ' 集');
-      } catch (e: any) {
-        dlog('[epBackfill] TVMaze 兜底失败(忽略): ' + String(e && e.message || e).substring(0, 80));
-      }
-    }
-
-    // 3) 飞牛枚举本季集（item/list 为主，DOM 回落）
+    // 2) [lc-1225] 先枚举本季集（item/list 为主，DOM 回落）—— 集数要作为 TMDB 季号对位的匹配线索
+    //   （飞牛季号来自番剧/Bangumi 计数而与 TMDB 分季不一致时，主进程在 404 后按集数/最近播出
+    //   自动对位实际季，见 tmdbSeasonResolve.ts；此前枚举在 TMDB 拉取之后，线索拿不到）
     let episodes = await fnosEpisodeList(origin, guid).catch(() => [] as { guid: string; index: number | null }[]);
     if (!episodes.length) episodes = episodeGuidsFromDom();
     // [lc-1178] item/list 可能漏集（实测「本季大结局」未播集不返回：接口 11 集、页面 12 张卡）
@@ -537,6 +494,57 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
     }
     if (!episodes.length) throw new Error('未枚举到本季任何集（item/list 与 DOM 都为空）');
     stats.total = episodes.length;
+
+    // 3) TMDB 双语分集（7 天磁盘缓存 + SWR；失败 throw 不落盘）
+    setBtn(btn, '⏳ 获取 TMDB…');
+    const r: any = await ipcRenderer.invoke('tmdb:season-episodes', {
+      tmdbId: tmdbId || undefined, title: title || undefined, seasonNumber,
+      year: meta.year || undefined,   // [lc-1176] 年份消歧：同名条目取首播年最接近者
+      episodeCount: episodes.length,  // [lc-1225] 季号对位线索：整季集数唯一命中最可信
+    });
+    if (!r || !r.ok || !r.data || !Array.isArray(r.data.episodes)) {
+      throw new Error(((r && r.error) || 'TMDB 获取失败')
+        + (meta.bangumiId ? ('（本季 Bangumi subject ' + meta.bangumiId + '，可试「Bangumi 补全」）') : ''));
+    }
+    // [lc-1225] 主进程对位结果：飞牛第 N 季 → TMDB 实际季（无对位时两者相等）
+    const tmdbSeason = numOrNull(r.data.seasonNumber) ?? seasonNumber;
+    if (tmdbSeason !== seasonNumber) {
+      log('[epBackfill] 飞牛第 ' + seasonNumber + ' 季在 TMDB 不存在，已自动对位 TMDB 第 ' + tmdbSeason + ' 季');
+    }
+    const tmdbByNum = new Map<number, any>();
+    // [多源刮削] 播出日期索引: 集号解析全失败时的兜底匹配(仅当该日期在 TMDB 唯一才采用)
+    const tmdbByDate = new Map<string, any[]>();
+    for (const e of r.data.episodes) {
+        tmdbByNum.set(e.episodeNumber, e);
+        const ad = String(e.airDate || '');
+        if (ad) { const arr = tmdbByDate.get(ad) || []; arr.push(e); tmdbByDate.set(ad, arr); }
+    }
+
+    // 3.5) [自定义刮削·v1.10.0] TVMaze 英文兜底（扩展数据源 ②，设置卡开关）：TMDB 缺英文（或整集
+    //    缺失）时，用 TVMaze 官方 API（免 Key，CC BY-SA）的英文标题/简介顶上。一次整季拉取 + 后端
+    //    24h 缓存；查无此剧/未开启/网络失败都静默降级为纯 TMDB，绝不拖住主流程。
+    const tvmazeByNum = new Map<number, { name: string; summary: string }>();
+    if (S.tvmazeEnabled) {
+      setBtn(btn, '⏳ 获取 TVMaze…');
+      try {
+        const tr: any = await ipcRenderer.invoke('tvmaze:show', {
+          title: title || undefined, tmdbId: tmdbId || undefined, seasonNumber: tmdbSeason,
+        });
+        if (tr && tr.ok && Array.isArray(tr.episodes)) {
+          for (const e of tr.episodes) {
+            const n = numOrNull(e.number);
+            // TVMaze 未播出集常用占位名「TBD」，与「第 N 集」同性质按无数据处理
+            const nm = (e.name && !/^tbd$/i.test(String(e.name).trim())) ? String(e.name) : '';
+            if (n !== null && numOrNull(e.season) === tmdbSeason && (nm || e.summary)) {
+              tvmazeByNum.set(n, { name: nm, summary: String(e.summary || '') });
+            }
+          }
+        }
+        log('[epBackfill] TVMaze 兜底就绪: ' + tvmazeByNum.size + ' 集');
+      } catch (e: any) {
+        dlog('[epBackfill] TVMaze 兜底失败(忽略): ' + String(e && e.message || e).substring(0, 80));
+      }
+    }
 
     // 4) 逐集：读全量 → 裁决 → 写回 → 复核 → DOM 补丁
     let idx = 0;
