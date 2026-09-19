@@ -5,7 +5,8 @@
 // 按番号取 标题/封面/日期/类别/演员，本模块在详情页提供「⟳ jav 刮削」按钮：
 //   1) getEditDetail 读条目 → 标题里提取番号（后端同款正则，前端只透传标题）；
 //   2) 查询成功 → saveEditDetail 全量读改写回填 标题/简介/发行日期/演员 + 对应 *_locked
-//     （防飞牛再刮削覆盖，仿 epBackfill）；
+//     （防飞牛再刮削覆盖，仿 epBackfill）。演员须先 /person/search 查重 → /person/create
+//     拿真实 guid（实测：person_guid 空串被静默丢弃、temp-person__ 前缀被硬拒 -6）；
 //   3) 封面经 jav:image 代理取回 dataURL → uploadImageToFnos('poster') 临时图床 →
 //     hash_path 写 posters 字段落库（2026-09-19 实测：posters 为单 hash_path 字符串、
 //     image_type='poster' code=0；folder 自定义封面需 poster_type=1 Single）；
@@ -121,13 +122,55 @@ function buildOverview(meta: any): string {
   return parts.join('\n');
 }
 
-/** 演员 → credits（结构为原生包 zod schema 逆向：job/name/order/person_guid/profile_path；头像落库留待后续）。 */
-function buildCredits(meta: any): any[] {
+/** person/search {keyword} → 候选列表（按名字精确匹配取 guid）。 */
+async function fnosPersonSearch(origin: string, keyword: string): Promise<any[]> {
+  try {
+    const body = { keyword, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/person/search', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/person/search', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) return [];
+    const j = await resp.json().catch(() => null);
+    return (j && j.code === 0 && j.data && Array.isArray(j.data.list)) ? j.data.list : [];
+  } catch { return []; }
+}
+
+/** person/create {name} → 真实 person guid（原生「新建演员」同款端点）。 */
+async function fnosPersonCreate(origin: string, name: string): Promise<string> {
+  try {
+    const body = { name, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/person/create', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/person/create', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) return '';
+    const j = await resp.json().catch(() => null);
+    return (j && j.code === 0 && j.data && j.data.guid) ? String(j.data.guid) : '';
+  } catch { return ''; }
+}
+
+/** 演员 → credits。person_guid 必须为真实 guid：空串被服务端静默丢弃（code 0 但不入库）、
+ *  原生前端的 temp-person__ 前缀被硬拒（-6）——必须先 /person/search 查重、没有再 /person/create。
+ *  单个演员失败只跳过该演员，不毁掉整次回填。 */
+async function buildCredits(origin: string, meta: any): Promise<any[]> {
   const out: any[] = [];
-  (Array.isArray(meta.actresses) ? meta.actresses : []).forEach((a: any, i: number) => {
-    const name = String((a && a.name) || '').trim();
-    if (name) out.push({ job: 'Actor', name, order: i, person_guid: '', profile_path: '' });
-  });
+  const names = (Array.isArray(meta.actresses) ? meta.actresses : [])
+    .map((a: any) => String((a && a.name) || '').trim()).filter(Boolean);
+  for (let i = 0; i < names.length; i++) {
+    let guid = '';
+    try {
+      const hits = await fnosPersonSearch(origin, names[i]);
+      const hit = hits.find((p: any) => String((p && p.name) || '').trim() === names[i] && p.guid);
+      guid = hit ? String(hit.guid) : await fnosPersonCreate(origin, names[i]);
+    } catch { /* guid 留空 → 跳过 */ }
+    if (!guid) continue;
+    out.push({ job: 'Actor', name: names[i], order: i, person_guid: guid, profile_path: '', role: '' });
+  }
   return out;
 }
 
@@ -186,7 +229,7 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
       body.air_date_locked = true;
       done.push('日期');
     }
-    const credits = buildCredits(meta);
+    const credits = await buildCredits(origin, meta);
     if (credits.length && !creditsEqual(credits, data.credits)) {
       body.credits = credits;
       body.credits_locked = true;
