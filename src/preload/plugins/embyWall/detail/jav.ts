@@ -2,29 +2,44 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // 背景：JAV 文件飞牛原生刮削基本瞎匹配（标题=文件名、海报错乱）。文件名里的番号
 //（ABC-123 / FC2-PPV-1234567）是天然匹配键 → 后端 jav/lookup（javbus 抓取，jav.go）
-// 按番号取 标题/封面/日期/类别/演员，本模块在电影详情页提供「⟳ jav 刮削」按钮：
+// 按番号取 标题/封面/日期/类别/演员，本模块在详情页提供「⟳ jav 刮削」按钮：
 //   1) getEditDetail 读条目 → 标题里提取番号（后端同款正则，前端只透传标题）；
-//   2) 查询成功 → saveEditDetail 回写 title（title_locked 防飞牛再刮削覆盖，仿 epBackfill）；
-//   3) 封面经 jav:image 代理取回 dataURL，就地替换 hero 海报（纯前端视觉，不写服务端——
-//      fnOS posters 字段为数组结构，写回格式未抓包验证，宁缺勿错）；
+//   2) 查询成功 → saveEditDetail 全量读改写回填 标题/简介/发行日期/演员 + 对应 *_locked
+//     （防飞牛再刮削覆盖，仿 epBackfill）；
+//   3) 封面经 jav:image 代理取回 dataURL → uploadImageToFnos('poster') 临时图床 →
+//     hash_path 写 posters 字段落库（2026-09-19 实测：posters 为单 hash_path 字符串、
+//     image_type='poster' code=0；folder 自定义封面需 poster_type=1 Single）；
 //   4) 按钮状态机反馈（未识别番号 / 查询失败 / 已回填），详情进日志。
-// 挂载：body 级浮动胶囊按钮（仅 /v/movie/<guid> 路由 + S.javEnabled 开启时出现），
+// 挂载：body 级浮动胶囊按钮。路由支持 电影 /v/movie/<32hex>（guid 裸 hex）与
+//   文件夹 /v/folder/fv_<32hex>（条目 guid 必须带 fv_ 前缀，裸 hex 返回 code -6——
+//   JAV 普遍是文件夹条目，识别靠标题番号、不靠目录名）+ S.javEnabled 开关，
 // 与 epBackfill/customScraper 同一批导航钩子调度（embyWall.ts scheduleJavButton）。
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
 import { dlog, log } from '../log';
 import { S } from '../state';
 import { findActiveDetailView, findDetailHero } from './glass';
-import { fnosGetEditDetail } from '../carousel/logo';
+import { fnosGetEditDetail, uploadImageToFnos } from '../carousel/logo';
 import { fnosSaveEditDetail } from './epBackfill';
 
 const JAV_BTN_ID = 'fnos-jav-btn';
 let _running = false;
 
-/** 电影详情路由 guid（/v/movie/<32hex>）。 */
+/** 电影详情路由 guid（/v/movie/<32hex>，裸 hex）。 */
 export function movieGuid(): string | null {
   const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
   return m ? m[1] : null;
+}
+
+/** 文件夹详情路由 guid（/v/folder/fv_<32hex> → 条目 guid 带 fv_ 前缀，飞牛编辑接口仅认此形态）。 */
+export function folderGuid(): string | null {
+  const m = location.pathname.match(/\/v\/folder\/fv_([a-f0-9]{32})/);
+  return m ? 'fv_' + m[1] : null;
+}
+
+/** 当前详情条目 guid（电影/folder 两种路由，jav 刮削共用一条回填管线）。 */
+function detailGuid(): string | null {
+  return folderGuid() || movieGuid();
 }
 
 function fnNonce(): string {
@@ -51,7 +66,7 @@ function makeBtn(): HTMLButtonElement {
   btn.type = 'button';
   btn.id = JAV_BTN_ID;
   btn.textContent = '⟳ jav 刮削';
-  btn.setAttribute('title', '从文件名番号在 javbus 查询并回填标题（封面就地替换，仅本地视觉）。设置→自定义刮削→Jav 刮削 开关。');
+  btn.setAttribute('title', '从标题番号在 javbus 查询并回填 标题/简介/日期/演员/封面（封面经临时图床落库）。设置→自定义刮削→Jav 刮削 开关。');
   btn.style.cssText = 'position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;'
     + 'padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;'
     + 'background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);'
@@ -67,9 +82,9 @@ function makeBtn(): HTMLButtonElement {
   return btn;
 }
 
-/** 幂等挂载：电影路由 + 开启 → 确保按钮在；否则撤按钮。 */
+/** 幂等挂载：电影/folder 路由 + 开启 → 确保按钮在；否则撤按钮。 */
 export function ensureJavButton(): void {
-  if (!S.javEnabled || !movieGuid()) { removeJavButton(); return; }
+  if (!S.javEnabled || !detailGuid()) { removeJavButton(); return; }
   const existing = document.getElementById(JAV_BTN_ID);
   if (existing && existing.isConnected) return;
   makeBtn();
@@ -91,13 +106,39 @@ try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
     if (!s || typeof s !== 'object') return;
     S.javEnabled = s.javEnabled === true;
-    if (S.javEnabled && movieGuid()) ensureJavButton();
+    if (S.javEnabled && detailGuid()) ensureJavButton();
   }).catch(() => { /* ignore */ });
 } catch { /* ignore */ }
 
-/** 主流程：读条目 → javbus 查询 → 回填标题（locked）→ 封面替换 hero 海报。 */
+/** 简介：演员/发行日期/类别拼摘要（javbus 元数据都是短标签，行式排版）。 */
+function buildOverview(meta: any): string {
+  const parts: string[] = [];
+  if (Array.isArray(meta.actresses) && meta.actresses.length) {
+    parts.push('【演员】' + meta.actresses.map((a: any) => a && a.name).filter(Boolean).join('・'));
+  }
+  if (meta.date) parts.push('【发行】' + meta.date);
+  if (Array.isArray(meta.genres) && meta.genres.length) parts.push('【类别】' + meta.genres.join('・'));
+  return parts.join('\n');
+}
+
+/** 演员 → credits（结构为原生包 zod schema 逆向：job/name/order/person_guid/profile_path；头像落库留待后续）。 */
+function buildCredits(meta: any): any[] {
+  const out: any[] = [];
+  (Array.isArray(meta.actresses) ? meta.actresses : []).forEach((a: any, i: number) => {
+    const name = String((a && a.name) || '').trim();
+    if (name) out.push({ job: 'Actor', name, order: i, person_guid: '', profile_path: '' });
+  });
+  return out;
+}
+
+function creditsEqual(a: any[], b: any): boolean {
+  if (!Array.isArray(b) || b.length !== a.length) return false;
+  return a.every((c, i) => String(c.name) === String(b[i] && b[i].name) && String(c.job) === String(b[i] && b[i].job));
+}
+
+/** 主流程：读条目 → javbus 查询 → 全量读改写回填（标题/简介/日期/演员/封面，locked）→ 复核。 */
 async function runJav(btn: HTMLButtonElement): Promise<void> {
-  const guid = movieGuid();
+  const guid = detailGuid();
   if (!guid || _running) return;
   _running = true;
   const origin = location.origin;
@@ -123,47 +164,95 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
         ? ' / ' + meta.actresses.map((a: any) => a && a.name).filter(Boolean).join('・') : '')
       + (meta.date ? ' / ' + meta.date : ''));
 
-    // 3) 回填标题（全量读改写 + title_locked，仿 epBackfill 防再刮削覆盖）
+    // 3) 组装回填：全量读改写，仅改本流程负责的字段 + locked（防字段缺失被清空）
+    const titleKey = ('title' in data) ? 'title' : (('name' in data) ? 'name' : 'title');
+    const body: any = { ...data, nonce: fnNonce() };
+    if (!body.guid && !body.item_guid) body.guid = guid;
+    const done: string[] = [];
     const newTitle = String(meta.title || '').trim();
-    if (!newTitle) throw new Error('返回标题为空');
-    let saved = false;
-    if (newTitle !== curTitle) {
-      const titleKey = ('title' in data) ? 'title' : (('name' in data) ? 'name' : 'title');
-      const body: any = { ...data, nonce: fnNonce() };
-      if (!body.guid && !body.item_guid) body.guid = guid;
+    if (newTitle && newTitle !== curTitle) {
       body[titleKey] = newTitle;
       body.title_locked = true;
-      saved = await fnosSaveEditDetail(origin, body);
-      if (saved) {
-        // 复核：读不回新标题 → 如实按失败计（数据可能未落盘）
-        const vf = await fnosGetEditDetail(origin, guid);
-        saved = !!vf && String(vf[titleKey] ?? '').trim() === newTitle;
-      }
-      if (!saved) dlog('[jav] 标题写回未确认（可能字段名/权限不符），封面仍替换');
-    } else {
-      saved = true; // 标题已一致，无需写
+      done.push('标题');
+    }
+    const ov = buildOverview(meta);
+    if (ov && ov !== String(data.overview || '').trim()) {
+      body.overview = ov;
+      body.overview_locked = true;
+      done.push('简介');
+    }
+    if (meta.date && meta.date !== String(data.air_date || '').trim()) {
+      body.air_date = meta.date;
+      body.air_date_locked = true;
+      done.push('日期');
+    }
+    const credits = buildCredits(meta);
+    if (credits.length && !creditsEqual(credits, data.credits)) {
+      body.credits = credits;
+      body.credits_locked = true;
+      done.push('演员');
     }
 
-    // 4) 封面就地替换 hero 海报（仅本地视觉；服务端 posters 写回格式未验证，不写）
-    let coverOk = false;
+    // 4) 封面落库：jav:image 代理 → 临时图床('poster') → hash_path 写 posters。
+    //    folder 自定义封面需 poster_type=1(Single) 才会替换自动截图（实测枚举 Multiple=0/Single=1）。
+    let coverDataUrl = '';
+    let coverHash = '';
     if (meta.cover) {
+      setBtn(btn, '⏳ 封面上传中…');
       try {
         const img: any = await ipcRenderer.invoke('jav:image', { url: meta.cover });
         if (img && img.ok && img.dataUrl) {
-          const poster = heroPosterImg();
-          if (poster) { poster.src = img.dataUrl; coverOk = true; }
+          coverDataUrl = img.dataUrl;
+          const hashPath = await uploadImageToFnos(origin, coverDataUrl, 'poster');
+          if (hashPath && hashPath !== String(data.posters || '').trim()) {
+            coverHash = hashPath;
+            body.posters = coverHash;
+            body.posters_locked = true;
+            if (Number(data.poster_type) !== 1) body.poster_type = 1;
+            done.push('封面');
+          }
         }
-      } catch (e) { dlog('[jav] 封面获取失败: ' + String(e).substring(0, 80)); }
+      } catch (e) { dlog('[jav] 封面上传失败: ' + String(e).substring(0, 80)); }
     }
 
-    // 5) 按钮反馈
+    if (!done.length) {
+      setBtn(btn, '✓ 已是最新', meta.code + '（标题/简介/日期/演员/封面均已一致）');
+      window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ jav 刮削'); }, 6000);
+      return;
+    }
+
+    // 5) 保存 + 复核（读回比对关键字段，写不回如实按失败计——数据可能未落盘）
+    setBtn(btn, '⏳ 回填中…');
+    let saved = await fnosSaveEditDetail(origin, body);
+    let verified = false;
+    if (saved) {
+      const vf = await fnosGetEditDetail(origin, guid);
+      verified = !!vf;
+      if (verified && body.title_locked) verified = String(vf[titleKey] ?? '').trim() === newTitle;
+      if (verified && body.overview_locked) verified = String(vf.overview ?? '').trim() === ov;
+      if (verified && body.air_date_locked) verified = String(vf.air_date ?? '').trim() === String(body.air_date);
+      if (verified && body.posters_locked) verified = String(vf.posters ?? '').trim() === coverHash;
+      if (verified && body.credits_locked) verified = creditsEqual(credits, vf.credits);
+    }
+    if (saved && !verified) dlog('[jav] 部分字段写回未确认（可能字段名/权限不符）');
+
+    // 6) 封面就地替换 hero 海报（即时视觉；服务端已落库，重进页面同样生效）
+    let coverOk = false;
+    if (coverDataUrl) {
+      const poster = heroPosterImg();
+      if (poster) { poster.src = coverDataUrl; coverOk = true; }
+    }
+
+    // 7) 按钮反馈
     const who = Array.isArray(meta.actresses) && meta.actresses.length
       ? ' · ' + meta.actresses.map((a: any) => a && a.name).filter(Boolean).slice(0, 3).join('・') : '';
-    if (saved) {
-      setBtn(btn, '✓ 已回填' + (coverOk ? ' + 封面' : ''), meta.code + ' ' + (meta.date || '') + who
-        + (coverOk ? '' : '（封面未替换：hero 内未找到海报位）'));
+    if (saved && verified) {
+      setBtn(btn, '✓ 已回填（' + done.join('/') + '）', meta.code + ' ' + (meta.date || '') + who
+        + (coverOk ? '' : '（hero 海报位未找到，封面已落库，重进页面生效）'));
+    } else if (saved) {
+      setBtn(btn, '⚠ 回填未确认', '写入已提交但复核未通过，详见日志。');
     } else {
-      setBtn(btn, '⚠ 回填失败', '标题写回未确认，详见日志；封面/查询数据不受影响。');
+      setBtn(btn, '⚠ 回填失败', 'saveEditDetail 写入失败，详见日志；查询数据不受影响。');
     }
     window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ jav 刮削'); }, 6000);
   } catch (e: any) {

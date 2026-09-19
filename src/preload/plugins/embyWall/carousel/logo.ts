@@ -191,28 +191,34 @@ export async function fnosGetEditDetail(origin: string, guid: string): Promise<a
   } catch (e) { log('[回填] getEditDetail 异常', String(e).substring(0, 120)); return null; }
 }
 
-/** 上传 logo 到飞牛临时图床，返回 hash_path（如 /f5/04/upload_logo_xxx.webp）或 null。
- *  签名 data 取非文件表单字段 {image_type, nonce}（与 fnOS 前端 multipart 约定一致）。 */
+/** 通用图片上传到飞牛临时图床（jav 刮削封面落库与 logo 回填共用）。
+ *  image_type 实测枚举：poster/backdrop/logo/thumb（原生包 Rc 枚举逆向,2026-09-19 poster 已实测 code=0）。
+ *  返回 hash_path（如 /84/18/upload_poster_xxx.webp,服务端统一转 webp）或 null。 */
+export async function uploadImageToFnos(origin: string, dataUrl: string, imageType: 'poster' | 'backdrop' | 'logo' | 'thumb'): Promise<string | null> {
+    try {
+        const { ipcRenderer } = require('electron');
+        const blob = dataUrlToBlob(dataUrl);
+        const fd = new FormData();
+        fd.append('file', blob, imageType + '.png');
+        fd.append('image_type', imageType);
+        const signData = { image_type: imageType, nonce: fnNonce() };
+        const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/image/temp/upload', signData).catch(() => '');
+        const resp = await fetch(`${origin}/v/api/v1/image/temp/upload`, {
+            method: 'POST', credentials: 'include',
+            headers: { ...(authx ? { Authx: authx } : {}) }, body: fd,
+        });
+        if (!resp.ok) { log('[回填] upload HTTP', resp.status); return null; }
+        const j = await resp.json().catch(() => null);
+        if (!j || j.code !== 0 || !j.data?.hash_path) {
+            log('[回填] upload 业务失败', JSON.stringify(j).substring(0, 200)); return null;
+        }
+        return j.data.hash_path as string;
+    } catch (e) { log('[回填] upload 异常', String(e).substring(0, 120)); return null; }
+}
+
+/** 上传 logo 到飞牛临时图床，返回 hash_path（如 /f5/04/upload_logo_xxx.webp）或 null。 */
 async function uploadLogoToFnos(origin: string, dataUrl: string): Promise<string | null> {
-  try {
-    const { ipcRenderer } = require('electron');
-    const blob = dataUrlToBlob(dataUrl);
-    const fd = new FormData();
-    fd.append('file', blob, 'logo.png');
-    fd.append('image_type', 'logo');
-    const signData = { image_type: 'logo', nonce: fnNonce() };
-    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/image/temp/upload', signData).catch(() => '');
-    const resp = await fetch(`${origin}/v/api/v1/image/temp/upload`, {
-      method: 'POST', credentials: 'include',
-      headers: { ...(authx ? { Authx: authx } : {}) }, body: fd,
-    });
-    if (!resp.ok) { log('[回填] upload HTTP', resp.status); return null; }
-    const j = await resp.json().catch(() => null);
-    if (!j || j.code !== 0 || !j.data?.hash_path) {
-      log('[回填] upload 业务失败', JSON.stringify(j).substring(0, 200)); return null;
-    }
-    return j.data.hash_path as string;
-  } catch (e) { log('[回填] upload 异常', String(e).substring(0, 120)); return null; }
+    return uploadImageToFnos(origin, dataUrl, 'logo');
 }
 
 /** 把完整详情对象回写飞牛（仅改 logos + logos_locked，带 nonce 签名），成功返回 true */
