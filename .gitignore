@@ -105,3 +105,6 @@ scripts/sync_packages_to_gitee.py
 # 临时调试脚本/产物（AI 会话遗留，不入库）
 scripts/_*
 scripts/nsis-debug/_*
+
+# 弹幕搜索源运行时缓存（uosc_danmaku 插件自动写入）
+third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/danmaku_source_cache.json
