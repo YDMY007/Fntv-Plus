@@ -43,20 +43,20 @@ jobs:
           CURRENT: ${{ steps.sum.outputs.current }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          api="repos/${GITHUB_REPOSITORY}/contents/downloads.json"
           json=$(printf '{"total":%s,"githubCurrent":%s,"legacy":1967,"updatedAt":"%s"}' \
             "$TOTAL" "$CURRENT" "$(date -u +%FT%TZ)")
-          content=$(printf '%s' "$json" | base64 -w0)
           msg="downloads: $TOTAL (current=$CURRENT + legacy=1967) @ $(date -u +%FT%TZ)"
-          # 已存在则拿到其 sha 以便更新，不存在则新建
-          sha=$(gh api "$api?ref=badge-data" --jq '.sha' 2>/dev/null || true)
-          # 用 --field 传参避免手拼 JSON 的引号/转义问题
-          if [ -n "$sha" ]; then
-            gh api -X PUT "$api" -f message="$msg" -f content="$content" -f branch=badge-data -f sha="$sha" > /dev/null \
-              && echo "badge-data/downloads.json 已更新 (total=$TOTAL)"
-          else
-            gh api -X PUT "$api" -f message="$msg" -f content="$content" -f branch=badge-data > /dev/null \
-              && echo "badge-data/downloads.json 已新建 (total=$TOTAL)"
-          fi
+          # 孤儿分支只放一个 downloads.json，每次整个覆盖推送（无需处理文件 sha / 分支不存在）
+          workdir=$(mktemp -d)
+          cd "$workdir"
+          git init -q .
+          git checkout -q --orphan badge-data
+          printf '%s' "$json" > downloads.json
+          git add downloads.json
+          git commit -q -m "$msg"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -q -f origin badge-data
+          echo "badge-data/downloads.json 已推送 (total=$TOTAL): $json"
