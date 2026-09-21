@@ -3,7 +3,6 @@
 <div align="center">
 
 [![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2FYDMY007%2FFntv-Plus%2Freleases%2Flatest&query=%24.tag_name&label=release&prefix=v&color=blue)](https://github.com/YDMY007/Fntv-Plus/releases/latest)
-[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus%2Fbadge-data%2Fdownloads.json&query=%24.total&label=%E4%B8%8B%E8%BD%BD&suffix=%E6%AC%A1&color=2ea44f&logo=github&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)]()
 [![飞牛影视](https://img.shields.io/badge/%E9%A3%9E%E7%89%9B%E5%BD%B1%E8%A7%86-fnOS-056de2)](https://www.fnnas.com/)
 [![Electron](https://img.shields.io/badge/electron-38-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
@@ -14,6 +13,8 @@
 [![Commits](https://img.shields.io/badge/commits-1067-2ea44f?logo=git&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/commits)
 [![Last Commit](https://img.shields.io/github/last-commit/YDMY007/Fntv-Plus/release?logo=git&logoColor=white)](https://github.com/YDMY007/Fntv-Plus/commits)
 [![Gitee](https://img.shields.io/badge/Gitee-mirror-F47040?logo=gitee&logoColor=white)](https://gitee.com/YDMY007/fntv-plus)
+
+<img src="https://count.getloli.com/get/@Fntv-Plus?theme=rule34" alt="访问计数" width="320">
 
 </div>
 
