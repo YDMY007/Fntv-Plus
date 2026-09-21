@@ -1,0 +1,62 @@
+name: Download Badge
+
+on:
+  # 每日汇总一次下载量（含已删旧仓库的冻结历史值）写入 badge-data 分支，供 README 徽章读取。
+  # 发布新 Release 后也会立即跑一次，让徽章当天就更新。
+  schedule:
+    - cron: '17 3 * * *'   # 每天 UTC 3:17（北京 11:17）
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# 已删旧仓库（Fntv-Plus-old / 上游时期）无法再从 API 统计的下载量，取删除当天从
+# releases.json 备份固化的冻结值；如后续又有需要并入的固定量，直接改这个常量。
+env:
+  LEGACY_DOWNLOADS: '1967'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 推送 badge-data 分支
+    steps:
+      - name: 汇总下载量
+        id: sum
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate \
+            --jq '[.[].assets[].download_count] | add // 0')
+          TOTAL=$((CURRENT + LEGACY_DOWNLOADS))
+          echo "current=$CURRENT legacy=$LEGACY_DOWNLOADS total=$TOTAL"
+          {
+            echo "current=$CURRENT"
+            echo "total=$TOTAL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 写入 badge-data 分支
+        env:
+          TOTAL: ${{ steps.sum.outputs.total }}
+          CURRENT: ${{ steps.sum.outputs.current }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          json=$(printf '{"total":%s,"githubCurrent":%s,"legacy":1967,"updatedAt":"%s"}' \
+            "$TOTAL" "$CURRENT" "$(date -u +%FT%TZ)")
+          msg="downloads: $TOTAL (current=$CURRENT + legacy=1967) @ $(date -u +%FT%TZ)"
+          # 孤儿分支只放一个 downloads.json，每次整个覆盖推送（无需处理文件 sha / 分支不存在）
+          workdir=$(mktemp -d)
+          cd "$workdir"
+          git init -q .
+          git checkout -q --orphan badge-data
+          printf '%s' "$json" > downloads.json
+          git add downloads.json
+          git commit -q -m "$msg"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -q -f origin badge-data
+          echo "badge-data/downloads.json 已推送 (total=$TOTAL): $json"
