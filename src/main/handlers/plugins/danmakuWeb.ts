@@ -58,6 +58,7 @@ async function handlePrepare(
     let title = '';
     let ep = 0;
     let season = 0;
+    let epTitle = '';
     let isMovie = false;
     try {
         const fnapi = new fn.ApiService(config.domain, config.token);
@@ -68,6 +69,14 @@ async function handlePrepare(
         const item = resp.data.item;
         title = (item?.tv_title || item?.title || '').trim();
         const type = (resp.data.type || item?.type || '').toLowerCase();
+        // [lc-1220] 本集标题：剧集时 tv_title=番名、title=本集标题，供自建源核验未标季条目。
+        //   title===tv_title（电影或番名回退）时没有独立的集标题，置空；
+        //   「The Demon Hunter.S02E27」这类纯集号刮削名剥掉 .SxxExx 尾缀（danmuApi 侧
+        //   extractEpisodeTitle 也会再兜一道，这里先剥省得垃圾串往下游传）。
+        const t = (item?.title || '').trim();
+        epTitle = (type !== 'movie' && t && t !== title)
+            ? t.replace(/[.\s]*[Ss]\d{1,2}[Ee]\d{1,4}[.\s]*$/g, '').trim()
+            : '';
         if (type === 'movie') {
             isMovie = true;
             ep = 0; // 电影：仅按番名搜，取最优/首集
@@ -90,7 +99,7 @@ async function handlePrepare(
     // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化；season>0 时优先精确匹配该季）──
     // [lc-1117] biliSearch=false：网页弹幕设置关掉了「B站弹幕搜索」兜底（自建 danmu_api 优选不受影响）
     try {
-        const res = await getDanmakuItems(title, ep, isMovie, season, params?.biliSearch !== false);
+        const res = await getDanmakuItems(title, ep, isMovie, season, params?.biliSearch !== false, epTitle);
         if (!res || !res.items || res.items.length === 0) {
             return { ok: false, title, ep, isMovie, count: 0, error: (res && res.meta && res.meta.error) || '未找到匹配的B站弹幕' };
         }

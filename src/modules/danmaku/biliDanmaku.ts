@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
 import { runBiliDanmaku, runBiliDanmakuByBvid } from '../../main/common/biliRunner';
+import type { DanmakuSourceTrace } from '../../main/common/biliRunner';
 import * as danmuApi from '../../main/common/danmuApi';
 const log = logger.component('danmaku');
 
@@ -88,6 +89,8 @@ export interface DanmakuMeta {
     aggregatedFrom?: any;
     cookieStatus?: string;   // 'valid' | 'expired' | 'missing'
     error?: string;
+    /** [lc-1226] 各弹幕源的尝试结果（自建源 / 内置 B站），供「来源详情」逐条说明。 */
+    sources?: DanmakuSourceTrace[];
 }
 
 export interface GetDanmakuResult {
@@ -527,9 +530,10 @@ export function filterDanmakuItems(
  * @param isMovie 是否电影（仅影响 meta 标注）
  * @param biliSearch [lc-1117] 网页弹幕设置的「B站弹幕搜索」开关：false 时无视 B站侧缓存且不再
  *                   降级内置 B站（自建 danmu_api 优选不受影响）；默认 true 保持原行为
+ * @param epTitle [lc-1220] 播放侧本集标题（供自建 danmu_api 核验未标季条目的分集归属；空串=无）
  * @returns {items, meta}；无弹幕返回 items=[] 且 meta.error 带根因（供弹窗「备注」行展示）
  */
-export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0, biliSearch = true): Promise<GetDanmakuResult | null> {
+export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0, biliSearch = true, epTitle = ''): Promise<GetDanmakuResult | null> {
     const cleanTitle = normalizeDanmakuTitle(title);
     log.info(`[danmaku] ========== getDanmakuItems 入口 ==========`);
     log.info(`[danmaku] title="${cleanTitle}", ep=${ep}`);
@@ -583,7 +587,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
 
     const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.xml`);
     const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
-    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season, 60000, biliSearch);
+    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season, 60000, biliSearch, epTitle);
     if (!r.ok) {
         log.warn('[danmaku] ❌ 弹幕获取失败: ' + (r.error || '未知'));
         // [lc-1117] 带根因返回（items=[] + meta.error），供网页弹窗「来源详情→备注」展示，
@@ -593,6 +597,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
             meta: {
                 searchTitle: cleanTitle, matchedTitle: cleanTitle, source: '',
                 ep, isMovie, season, count: 0, error: r.error || '未知',
+                sources: r.sources,
             },
         };
     }
@@ -613,6 +618,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
         count: items.length,
         aggregatedFrom: r.aggregated_from,
         cookieStatus: r.cookie_status || undefined,
+        sources: r.sources,
     };
     try {
         // 缓存存**未过滤**的原始条目（与上面命中路径一致）：过滤结果一旦落盘，

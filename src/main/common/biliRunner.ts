@@ -21,6 +21,29 @@ const log = logger.component('biliRunner');
  * 用户配置了 danmu_api 就作为优选源，命中即用；未启用/未命中一律降级回下面的内置 B站 链路。
  */
 
+/**
+ * [lc-1226] 单个弹幕源在本集的实际结果，供「弹幕详情」把三个来源各自的情况都写清楚。
+ * 三来源的优先级链：弹弹play（MPV：匹配剧集并取弹幕）→ 自建 danmu_api（优选）→ 内置 B站（兜底）。
+ * 网页播放器链路没有弹弹play（弹弹play 是 MPV 的 Lua 脚本在用），那条链路只有后两个来源，
+ * 详情面板据此把弹弹play 标为「不适用」而不是伪造一条「未命中」。
+ */
+export interface DanmakuSourceTrace {
+    /** 'dandanplay' | 'danmu_api' | 'bilibili' */
+    id: 'dandanplay' | 'danmu_api' | 'bilibili';
+    /** 该源是否参与了本次取弹幕 */
+    attempted: boolean;
+    /** 未参与的原因（如未启用/未配置），attempted=false 时有意义 */
+    skippedReason?: string;
+    /** 是否由该源提供了最终弹幕 */
+    used: boolean;
+    /** 命中/失败的一句话结论，直接给用户看 */
+    detail?: string;
+    /** 该源取到的弹幕条数（used=true 时为实际使用条数） */
+    count?: number;
+    /** 失败根因（attempted 且 !used 时展示） */
+    error?: string;
+}
+
 export interface BiliDanmakuResult {
     ok: boolean;
     bvid?: string | null;
@@ -36,6 +59,8 @@ export interface BiliDanmakuResult {
     // [lc-607] 番剧区(正版)无 bvid, 透传 season_id/epid 供 MPV 配置面板显示 ep_id
     season_id?: string | number | null;
     epid?: string | number | null;
+    /** [lc-1226] 三来源各自的尝试结果（详情面板用） */
+    sources?: DanmakuSourceTrace[];
 }
 
 export interface BiliCandidate {
@@ -120,6 +145,7 @@ function loadModule(): any {
  * @param threshold 聚合阈值（可选，默认 1500）
  * @param season  季数（可选，0/undefined=不启用季过滤；>0 时优先精确匹配该季，根治跨季错配）
  * @param timeoutMs 超时保护（默认 60000ms），超时返回 {ok:false}
+ * @param epTitle [lc-1220] 播放侧本集标题（供自建源核验未标季条目的分集归属；空串=无核验材料）
  * @returns 结果对象（ok=true 表示成功并写出 XML）
  */
 export async function runBiliDanmaku(
@@ -130,23 +156,60 @@ export async function runBiliDanmaku(
     season?: number | string,
     timeoutMs = 60000,
     allowBiliFallback = true,
+    epTitle = '',
 ): Promise<BiliDanmakuResult> {
+    // [lc-1226] 逐源记录本次尝试结果，随结果回传给两处「弹幕详情」面板，
+    // 让用户看到三个来源各自是被跳过、试过没中、还是提供了最终弹幕。
+    const traces: DanmakuSourceTrace[] = [];
+
     // [lc-1101] 自建弹幕接口（danmu_api）优选：命中即返回，未命中(null)原样降级到下面的内置 B站 链路。
     //   放在 loadModule() 之前，命中时连 bili_danmaku.js 都不必加载。
-    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0);
-    if (pre) return pre;
+    const danmuApiId = danmuApi.selfHostedSourceLabel();
+    const apiActive = danmuApi.isActive();
+    if (!apiActive) {
+        traces.push({
+            id: 'danmu_api', attempted: false, used: false,
+            skippedReason: danmuApi.isEnabledButInvalid()
+                ? '已开启但服务地址为空/非法（到「弹幕设置 → 自建弹幕接口」填写地址）'
+                : '未启用（到「弹幕设置 → 自建弹幕接口」开启，或从内置 B站 获取）',
+        });
+    }
+    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle);
+    if (pre) {
+        traces.push({
+            id: 'danmu_api', attempted: true, used: true,
+            detail: pre.matched_title ? `命中《${pre.matched_title}》（精确匹配）` : '精确匹配命中',
+            count: pre.danmaku_count,
+        });
+        // 自建源命中 → 内置 B站 本轮未参与，如实标注（不是失败，是没轮到）
+        traces.push({
+            id: 'bilibili', attempted: false, used: false,
+            skippedReason: '自建源已命中，无需兜底',
+        });
+        return { ...pre, sources: traces };
+    }
+    traces.push({
+        id: 'danmu_api', attempted: true, used: false,
+        error: '未命中（只认精确匹配；未命中即自动降级内置 B站 模糊匹配）',
+    });
+
     // [lc-1117] 网页弹幕设置可单独关掉「B站弹幕搜索」兜底（只影响网页链路；MPV 侧由 Lua 的
     //   bili_search_enabled 门控且不传此参）。手动候选搜索 runBiliDanmakuCandidates 不受限。
     if (!allowBiliFallback) {
         log.info('[biliRunner] B站弹幕搜索未启用（网页弹幕设置），跳过内置 B站降级');
-        return { ok: false, error: 'B站弹幕搜索未启用' };
+        traces.push({
+            id: 'bilibili', attempted: false, used: false,
+            skippedReason: '「B站弹幕搜索」已关闭（网页弹幕设置里可重新开启）',
+        });
+        return { ok: false, error: 'B站弹幕搜索未启用', sources: traces };
     }
     let mod: any;
     try {
         mod = loadModule();
     } catch (e: any) {
         log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
-        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+        traces.push({ id: 'bilibili', attempted: true, used: false, error: '弹幕脚本加载失败: ' + (e?.message || e) });
+        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e), sources: traces };
     }
     try {
         const runP = Promise.resolve(mod.run(title, ep, out, threshold, season));
@@ -156,10 +219,19 @@ export async function runBiliDanmaku(
         });
         const r = await Promise.race([runP, timeoutP]);
         if (timeoutHandle) clearTimeout(timeoutHandle);
-        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run 无返回）' };
+        const res = (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run 无返回）' };
+        traces.push(res.ok
+            ? {
+                id: 'bilibili', attempted: true, used: true,
+                detail: res.matched_title ? `命中《${res.matched_title}》` : '匹配成功',
+                count: res.danmaku_count,
+            }
+            : { id: 'bilibili', attempted: true, used: false, error: res.error || '未知错误' });
+        return { ...res, sources: traces };
     } catch (e: any) {
         log.warn('[biliRunner] run 异常: ' + (e?.message || e));
-        return { ok: false, error: String(e?.message || e) };
+        traces.push({ id: 'bilibili', attempted: true, used: false, error: String(e?.message || e) });
+        return { ok: false, error: String(e?.message || e), sources: traces };
     }
 }
 

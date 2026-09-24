@@ -9,6 +9,15 @@ bili_auto_triggered = false
 -- 供 menu.lua 的 open_bili_config_menu() 面板显示关联状态
 BILI_INFO = nil
 
+-- [lc-1228] 换片时清掉弹弹play 挂起的 /comment 回退，避免上一集的挂起任务落到新一集头上
+-- （dd_clear_pending_comment 由 apis/dandanplay.lua 定义；此处用 pcall 防加载顺序问题）
+local function reset_pending_dd_comment()
+    if type(dd_clear_pending_comment) == "function" then
+        pcall(dd_clear_pending_comment)
+    end
+end
+mp.register_event("end-file", reset_pending_dd_comment)
+
 local Source = {
     ["b 站"] = "bilibili1",
     ["腾讯"] = "qq",
@@ -625,8 +634,13 @@ function auto_search_extra(title, episode_num, season)
     end
     if not ok then
         msg.warn("自动补源：B站弹幕下载失败（确认本地代理 127.0.0.1:22347 已随应用启动，详见 mpv.log）")
+        -- [lc-1228] B站 没拿到 → 通知弹弹play 可以回退用内置凭证取弹幕库了。
+        -- （若已有其他源弹幕，dd_flush_pending_comment 内部会自行跳过，不会重复拉。）
+        if dd_flush_pending_comment then dd_flush_pending_comment("自建源/内置 B站 均未命中") end
         return
     end
     msg.warn(("自动补源：叠加 B站弹幕（%s 第%s集）"):format(title, episode_num))
     add_danmaku_source_local(out_xml, false)
+    -- [lc-1228] B站/自建源 已提供弹幕 → 取消挂起的内置凭证 /comment（这就是降级省下的请求）
+    if dd_clear_pending_comment then dd_clear_pending_comment() end
 end

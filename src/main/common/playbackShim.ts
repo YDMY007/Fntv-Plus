@@ -652,10 +652,14 @@ class PlaybackShim {
                     matched_title: r.matched_title || null,
                     season_id: r.season_id || null,
                     epid: r.epid || null,
+                    // [lc-1226] 三来源各自的尝试结果 → MPV「弹幕来源详情」逐条展示
+                    sources: r.sources || null,
                 });
             } else {
                 log.warn(`[playbackShim][danmaku] ❌ 弹幕获取失败: ${r.error}`);
-                this.json(res, 200, { ok: false, error: r.error });
+                // 失败也把逐源结论带回去：用户看到的「失败」往往只发生在最后一跳，
+                // 前两跳（自建源为何未命中）才是排查关键。
+                this.json(res, 200, { ok: false, error: r.error, sources: r.sources || null });
             }
         }).catch((e) => {
             log.warn(`[playbackShim][danmaku] 异常: ${e?.message || e}`);

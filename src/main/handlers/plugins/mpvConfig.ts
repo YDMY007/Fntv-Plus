@@ -2,6 +2,7 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import * as logger from '../../../modules/logger';
 import * as fnConfig from '../../../modules/fn_config/config';
 
@@ -560,11 +561,29 @@ function writeBiliAggregateThreshold(threshold: number): void {
     }
 }
 
-// [lc-1018] 写入弹弹play 开放 API 自定义凭证到 script-opts/uosc_danmaku.conf（由应用设置面板控制）。
-// 背景：脚本内置的共享 AppId 已被弹弹play官方接口整体 403（2026-09-05 实测，弹幕恒"无数据"），
-// 用户在弹弹play开放平台注册应用后，把专属 AppId+Secret 填进设置面板即可恢复。
+// [lc-1226] 把明文凭证加密成 dandanplay.lua 能解开的 AES-256-ECB 密文（base64）。
+// 契约：密钥 = main.lua 的 KEY（table_to_zero_indexed({0x00..0x1f})，实际是 32 个 0x1f）；
+//       零填充到 16 字节整数倍、不启用 PKCS7（与 Lua 侧 chunks() 的行为一一对应）。
+// 为什么写密文而不是明文：uosc_danmaku.conf 既被 git 跟踪、又随安装包分发，明文等于把
+// 用户的专属密钥公开传播出去——这正是内置凭证要密文内嵌的同一个理由。
+function ddEncryptForLua(plain: string): string {
+    const KEY = Buffer.alloc(32, 0x1f);
+    let buf = Buffer.from(String(plain || ''), 'utf8');
+    const rem = buf.length % 16;
+    if (rem !== 0) buf = Buffer.concat([buf, Buffer.alloc(16 - rem)]);
+    const cipher = crypto.createCipheriv('aes-256-ecb', KEY, null);
+    cipher.setAutoPadding(false);
+    return Buffer.concat([cipher.update(buf), cipher.final()]).toString('base64');
+}
+
+// [lc-1226] 写入弹弹play 开放 API 自定义凭证到 script-opts/uosc_danmaku.conf（由应用设置面板控制）。
+// 背景：脚本内置了一套兜底凭证（AppId + Secret，AES 密文内嵌于 apis/dandanplay.lua，
+// 固定用 1 号密钥、不做自动轮换以免被视为绕过官方处置）。
+// [lc-1228] 内置凭证是【兜底】：未配自定义凭证时，弹幕库（/comment）先让自建源与内置 B站 去取，
+// 两者都拿不到才回退内置凭证——按官方「按需使用」约定减少共享配额消耗。
+// 这里写的是【用户自定义凭证】：填了则弹弹play 立即参与并优先取弹幕库（消耗用户自己的配额）。
 // ⚠️ 双写 portable_config 与用户配置目录（AppData/Roaming/mpv），同 writeBiliSearchEnabled 的 lc-094 教训。
-// 两项任一为空 → 从 conf 删除对应键（dandanplay.lua 端回落到内置共享凭证）。
+// 两项任一为空 → 从 conf 删除对应键（dandanplay.lua 端回到兜底状态）。
 // mpv 在每次启动(每次播放拉起的新进程)读取 script-opts → 下次播放生效，无需重启应用。
 function writeDandanplayCredentials(appId: string, appSecret: string): void {
     try {
@@ -582,14 +601,16 @@ function writeDandanplayCredentials(appId: string, appSecret: string): void {
                 if (fs.existsSync(target)) {
                     lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
                 }
-                // 移除已存在的凭证键及旧注释，避免重复堆叠
-                lines = lines.filter(l => !/^\s*(dandanplay_app_id|dandanplay_app_secret)\s*=/.test(l)
-                    && !/^#\s*弹弹play\s*(开放\s*API\s*)?凭证/.test(l));
+                // 移除已存在的凭证键及旧注释，避免重复堆叠。
+                // 明文键（dandanplay_app_id/secret，历史版本写法）一并清掉：升级后首次同步即自动清除
+                // 用户机器上残留的明文密钥（同 lc-1104 对 danmu_api 地址的处理）。
+                lines = lines.filter(l => !/^\s*dandanplay_app_(id|secret)(_enc)?\s*=/.test(l)
+                    && !/^#.*弹弹play.*凭证/.test(l));
                 while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
                 if (id && secret) {
-                    lines.push('# 弹弹play 开放 API 自定义凭证（由应用设置面板控制；留空/清除即回落脚本内置共享凭证）');
-                    lines.push('dandanplay_app_id=' + id);
-                    lines.push('dandanplay_app_secret=' + secret);
+                    lines.push('# 弹弹play 开放 API 专属凭证（由应用设置面板控制，AES 加密存储；留空/清除即回落脚本内置凭证）');
+                    lines.push('dandanplay_app_id_enc=' + ddEncryptForLua(id));
+                    lines.push('dandanplay_app_secret_enc=' + ddEncryptForLua(secret));
                 }
                 fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
                 logger.info(`MPV 弹弹play凭证已写入: ${target} (appId=${id ? id.slice(0, 2) + '***' : '(空,回落内置)'})`);

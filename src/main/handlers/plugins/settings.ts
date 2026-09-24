@@ -48,7 +48,7 @@ async function handleGetSettings(): Promise<any> {
         bangumiSyncThreshold: fnConfig.getBangumiSyncThreshold(),
         mpvBiliSearchEnabled: fnConfig.getMpvBiliSearchEnabled(),
         mpvBiliAggregateThreshold: fnConfig.getMpvBiliAggregateThreshold(),
-        // [lc-1018] 弹弹play 开放 API 自定义凭证（渲染端只显示掩码，不回显明文）
+        // [lc-1226] 弹弹play 开放 API 自定义凭证（渲染端只显示掩码，不回显明文；空=用脚本内置凭证）
         dandanplayAppId: fnConfig.getDandanplayAppId(),
         dandanplayAppSecret: fnConfig.getDandanplayAppSecret(),
         // [lc-1101] 自建弹幕接口（danmu_api）：开关 + 服务地址。地址可能把 TOKEN 作为路径段携带，
@@ -439,15 +439,15 @@ async function handleSetMpvBiliAggregateThreshold(_event: any, threshold: number
     log.info('B站弹幕聚合阈值 →', t);
 }
 
-// [lc-1018] 设置弹弹play 开放 API 自定义凭证（写 config + 同步到 script-opts/uosc_danmaku.conf；
+// [lc-1226] 设置弹弹play 开放 API 自定义凭证（写 config + 同步到 script-opts/uosc_danmaku.conf；
 // mpv 每次播放新起进程读 script-opts → 下次播放生效，无需重启应用）。
-// 两项任一为空=清除，dandanplay.lua 端回落脚本内置共享凭证。
+// 两项任一为空=清除，dandanplay.lua 端回落脚本内置凭证（开箱即用的默认凭证）。
 async function handleSetDandanplayCredentials(_event: any, payload: { appId?: string; appSecret?: string }): Promise<void> {
     const appId = String((payload && payload.appId) || '').trim();
     const appSecret = String((payload && payload.appSecret) || '').trim();
     fnConfig.setDandanplayCredentials(appId, appSecret);
     writeDandanplayCredentials(appId, appSecret);
-    log.info('弹弹play 自定义凭证 →', appId ? (appId.slice(0, 2) + '***(已保存)') : '(已清除,回落内置共享凭证)');
+    log.info('弹弹play 自定义凭证 →', appId ? (appId.slice(0, 2) + '***(已保存)') : '(已清除,回落内置凭证)');
 }
 
 // [lc-1101] 设置「自建弹幕接口（danmu_api）」开关与地址：写 config + 同步 script-opts/uosc_danmaku.conf。
@@ -877,7 +877,7 @@ function init(): void {
     try { writeBiliSearchEnabled(fnConfig.getMpvBiliSearchEnabled()); } catch (e) { log.warn('启动同步 bili_search_enabled 失败', e); }
     // 启动时把 B站弹幕聚合阈值同步到 script-opts/uosc_danmaku.conf
     try { writeBiliAggregateThreshold(fnConfig.getMpvBiliAggregateThreshold()); } catch (e) { log.warn('启动同步 aggregate_threshold 失败', e); }
-    // [lc-1018] 启动时把弹弹play 自定义凭证同步到 script-opts/uosc_danmaku.conf（空=清键回落内置凭证）
+    // [lc-1226] 启动时把弹弹play 自定义凭证同步到 script-opts/uosc_danmaku.conf（空=清键回落内置凭证）
     try {
         const ddId = fnConfig.getDandanplayAppId();
         writeDandanplayCredentials(ddId, fnConfig.getDandanplayAppSecret());

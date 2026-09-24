@@ -30,19 +30,19 @@ function get_animes(query)
         return
     end
 
-    local res = mp.command_native({ name = 'subprocess', capture_stdout = true, capture_stderr = true, args = args })
+    local body, _, res = dd_request_sync(args)
 
-    if not res.status or res.status ~= 0 then
+    if not res or not res.status or res.status ~= 0 then
         local message = "获取数据失败"
         if uosc_available then
             update_menu_uosc(menu_type, menu_title, message, footnote, menu_cmd, query)
         else
             show_message(message, 3)
         end
-        msg.error("HTTP 请求失败：" .. res.stderr)
+        msg.error("HTTP 请求失败：" .. tostring(res and res.stderr))
     end
 
-    local response = utils.parse_json(res.stdout)
+    local response = utils.parse_json(body)
 
     if not response or not response.animes then
         local message = "无结果"
@@ -99,19 +99,19 @@ function get_episodes(animeTitle, bangumiId)
         return
     end
 
-    local res = mp.command_native({ name = 'subprocess', capture_stdout = true, capture_stderr = true, args = args })
+    local body, _, res = dd_request_sync(args)
 
-    if not res.status or res.status ~= 0 then
+    if not res or not res.status or res.status ~= 0 then
         local message = "获取数据失败"
         if uosc_available then
             update_menu_uosc(menu_type, menu_title, message, footnote)
         else
             show_message(message, 3)
         end
-        msg.error("HTTP 请求失败：" .. res.stderr)
+        msg.error("HTTP 请求失败：" .. tostring(res and res.stderr))
     end
 
-    local response = utils.parse_json(res.stdout)
+    local response = utils.parse_json(body)
 
     if not response or not response.bangumi or not response.bangumi.episodes then
         local message = "无结果"
@@ -294,7 +294,85 @@ function open_bili_config_menu()
     -- 分隔线
     table.insert(items, { title = "", keep_open = true, selectable = false })
 
-    -- ====== B站关联状态区（用户最关心的信息）======
+    -- ====== [lc-1226] 弹幕来源详情：三个来源各自的结果 ======
+    -- [lc-1228] 取弹幕顺序 = ① 自建源 → ② 内置 B站 → ③ 弹弹play(兜底)：
+    --   弹弹play 的【取弹幕库】在内置凭证下降级为兜底（官方约定要求按需使用共享配额）；
+    --   但它的【识别剧集】仍最先跑——另外两个源正靠它给出的规范番名去搜索，故单独列在最前。
+    -- BILI_INFO.sources 由主进程逐源记录后透传（biliRunner.ts / playbackShim.ts）；
+    -- 老版本缓存或旧 shim 没这个字段时回落到单源展示，不显示成"失败"。
+    table.insert(items, { title = "── 弹幕来源详情 ──", keep_open = true, selectable = false })
+    do
+        -- 弹弹play 的剧集识别状态（在先；不消耗弹幕库配额）
+        local dd_ok = (DANMAKU.anime and DANMAKU.anime ~= "")
+        local dd_txt
+        if dd_ok then
+            dd_txt = ("✅ 已识别：《%s》%s"):format(
+                tostring(DANMAKU.anime),
+                (DANMAKU.episode and DANMAKU.episode ~= "") and (" · " .. tostring(DANMAKU.episode)) or "")
+        else
+            dd_txt = "➖ 未识别到条目（按文件名解析番名与集数）"
+        end
+        table.insert(items, { title = "弹弹play 剧集识别", bold = true, keep_open = true, selectable = false })
+        table.insert(items, { title = "   " .. dd_txt, keep_open = true, selectable = false })
+
+        -- ①② 自建源 / 内置 B站：主进程逐源记录的实测结论
+        local srcs = (type(BILI_INFO) == "table") and BILI_INFO.sources or nil
+        local function push_source(label, id, fallback_note)
+            table.insert(items, { title = label, bold = true, keep_open = true, selectable = false })
+            local note, is_used = fallback_note, false
+            if type(srcs) == "table" then
+                for _, s in ipairs(srcs) do
+                    if type(s) == "table" and s.id == id then
+                        if s.used then
+                            is_used = true
+                            local cnt = (s.count ~= nil) and (" · " .. tostring(s.count) .. " 条") or ""
+                            note = "✅ " .. tostring(s.detail or "提供了本次弹幕") .. cnt
+                        elseif s.attempted then
+                            note = "❌ " .. tostring(s.error or "尝试过但未命中")
+                        else
+                            note = "➖ " .. tostring(s.skippedReason or "本轮未参与")
+                        end
+                        break
+                    end
+                end
+            end
+            table.insert(items, { title = "   " .. note, keep_open = true, selectable = false })
+            return is_used
+        end
+        if type(BILI_INFO) == "table" then
+            local used_api = push_source("① 自建弹幕接口（danmu_api）", "danmu_api",
+                (type(srcs) == "table") and "➖ 未启用（弹幕设置 → 自建弹幕接口）"
+                    or "（无逐源记录，见下方实际匹配结果）")
+            local used_bili = push_source("② 内置 B站", "bilibili",
+                (type(srcs) == "table") and "➖ 未启用或本轮未参与" or "（无逐源记录，见下方实际匹配结果）")
+            -- ③ 弹弹play 弹幕库（兜底）：只有前两者都没拿到时才会去取
+            table.insert(items, { title = "③ 弹弹play 弹幕库（兜底）", bold = true, keep_open = true, selectable = false })
+            if used_api or used_bili then
+                table.insert(items, { title = "   ➖ 未启用（前两者已提供弹幕，无需兜底）", keep_open = true, selectable = false })
+            elseif BILI_INFO.ok then
+                table.insert(items, { title = "   ✅ 已从弹弹play 取到弹幕（前两者均未命中）", keep_open = true, selectable = false })
+            else
+                table.insert(items, { title = "   ℹ️ 前两者均未命中；弹弹play 若配置了自定义凭证会立即取弹幕库", keep_open = true, selectable = false })
+            end
+            if not used_api and not used_bili and BILI_INFO.ok == false then
+                -- 全链路失败时，把最后一条根因也摆出来（上面的逐源行已各自写明原因）
+                table.insert(items, { title = "   ↳ 最终失败：" .. tostring(BILI_INFO.error or "未知"), keep_open = true, selectable = false })
+            end
+        else
+            table.insert(items, { title = "① 自建弹幕接口（danmu_api）", bold = true, keep_open = true, selectable = false })
+            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
+            table.insert(items, { title = "② 内置 B站", bold = true, keep_open = true, selectable = false })
+            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
+            table.insert(items, { title = "③ 弹弹play 弹幕库（兜底）", bold = true, keep_open = true, selectable = false })
+            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
+        end
+    end
+
+    -- 分隔线
+    table.insert(items, { title = "", keep_open = true, selectable = false })
+
+    -- ====== 实际匹配结果（哪个源、哪条视频）======
+    table.insert(items, { title = "── 实际匹配结果 ──", keep_open = true, selectable = false })
     if BILI_INFO and type(BILI_INFO) == "table" then
         -- [lc-1101] 来源可能是自建弹幕接口(danmu_api)，标题不能一律写「B站弹幕」
         local src_name = (tostring(BILI_INFO.source or ""):match("danmu_api")) and "自建弹幕接口" or "B站弹幕"

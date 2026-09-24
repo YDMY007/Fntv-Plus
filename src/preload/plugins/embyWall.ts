@@ -2470,6 +2470,41 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secBody3.appendChild(loginBgWrap);
     /* 布局统一在末尾 layout 区追加 */
 
+    // ===== [lc-1226] 弹幕来源总览（说明三来源的角色与优先级，置于弹幕页首）=====
+    // 三个来源不是「三选一」，而是一条按顺序尝试、命中即停的链。
+    // [lc-1228] 顺序与角色已调整：弹弹play 的【取弹幕库】降级为兜底（它消耗的是内置共享凭证的
+    // 配额，官方约定要求「按需使用」）——先让自建源与内置 B站 去取，两者都不行才回退弹弹play。
+    // 注意弹弹play 的【识别剧集】仍在最前：另外两个源正靠它给出的规范番名去搜索。
+    // ⚠️ 弹弹play 只作用于 MPV（它是 MPV 的 Lua 脚本，网页播放器不经过它）。
+    const secDmSources = section('弹幕来源与优先级');
+    const dmSourcesBody = secDmSources.body;
+    {
+      const rowsData: [string, string][] = [
+        ['① 自建弹幕接口（danmu_api）', '首选源。开启并填好地址后最先取弹幕，只认精确匹配（番名与季号完全一致），命中即用。'],
+        ['② 内置 B站', '次选源。自建源未命中时用它：按番名+集数匹配 B站 番剧区/视频区，是本应用一直以来的默认链路。'],
+        ['③ 弹弹play', '兜底源（仅 MPV）。先用来识别剧集拿到规范番名；其弹幕库只在前两者都拿不到弹幕时才取，避免过度消耗内置共享配额。填了自己的专属凭证则立即参与。'],
+      ];
+      const tip = document.createElement('div');
+      tip.textContent = t('取弹幕按 ① → ② → ③ 依次尝试，命中即停，全部未命中才判定为无弹幕。弹弹play 的剧集识别在最前（它提供规范番名）。播放时可在 MPV「B站弹幕配置」或网页播放器弹幕弹窗的「来源详情」里逐条查看各源的结果。');
+      tip.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.55;margin-bottom:10px;';
+      dmSourcesBody.appendChild(tip);
+      for (const [k, v] of rowsData) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:7px 0;border-bottom:1px solid var(--fnos-ui-border);';
+        const kEl = document.createElement('div');
+        kEl.textContent = t(k);
+        kEl.style.cssText = 'font-size:12.5px;color:var(--fnos-ui-text);font-weight:600;margin-bottom:3px;';
+        const vEl = document.createElement('div');
+        vEl.textContent = t(v);
+        vEl.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.55;';
+        row.appendChild(kEl);
+        row.appendChild(vEl);
+        dmSourcesBody.appendChild(row);
+      }
+      const last = dmSourcesBody.lastElementChild as HTMLElement | null;
+      if (last) last.style.borderBottom = 'none';
+    }
+
     // ===== 分组: B站弹幕（内置降级源）=====
     const secBili = section('B站弹幕');
     const secBodyBili = secBili.body;
@@ -3446,25 +3481,29 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     danFoldNote.textContent = t('屏蔽类型与屏蔽词于下一次 B站 弹幕加载时生效。');
     danFoldBody.appendChild(danFoldNote);
 
-    // ===== [lc-1018] 弹弹play 自定义凭证（开放 API AppId + Secret）=====
-    // 背景：脚本内置共享凭证已被弹弹play官方接口整体 403（2026-09-05 实测，搜索/弹幕恒"无数据"）。
-    // 用户在弹弹play开放平台注册应用后把专属 AppId+Secret 填到这里 → 写入 script-opts/uosc_danmaku.conf
-    // → dandanplay.lua 优先用自定义凭证签名；两项留空=回落内置共享凭证。mpv 每次播放新起进程 → 下次播放生效。
+    // ===== [lc-1226] 弹弹play 自定义凭证（开放 API AppId + Secret）=====
+    // 背景：弹幕脚本内置了一套兜底凭证（AppId + Secret 以 AES 密文内嵌在 apis/dandanplay.lua，
+    // 固定用 1 号密钥、不做自动轮换以免被视为绕过官方处置）。
+    // [lc-1228] 改为【兜底】而非默认：未配自定义凭证时，弹幕库（/comment，流量大头）
+    // 会先让「自建 danmu_api」和「内置 B站」去取，两者都拿不到才回退用内置凭证。
+    // 本卡是【可选覆盖】：填了自己的 AppId+Secret 后，弹弹play 立即正常参与（消耗自己的配额）。
+    // 写入 script-opts/uosc_danmaku.conf 的是 AES 密文（该 conf 既被 git 跟踪又随包分发）。
+    // mpv 每次播放新起进程 → 下次播放生效。
     // [lc-1102] 从「弹幕屏蔽与样式」卡独立成卡：首屏只留凭证状态一行，输入与按钮收进折叠区。
     const secDandan = section('弹弹play');
     const ddBody = secDandan.body;
 
     const ddStateLine = document.createElement('div');
-    ddStateLine.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);line-height:1.5;';
+    ddStateLine.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;';
     ddBody.appendChild(ddStateLine);
 
-    const ddFold = mkFold('开放 API 凭证（AppId / Secret）');
+    const ddFold = mkFold('开放 API 凭证（AppId / Secret，可选）');
     ddBody.appendChild(ddFold.fold);
     const ddFoldBody = ddFold.body;
 
     const ddHint = document.createElement('div');
     ddHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    ddHint.textContent = t('内置共享凭证已被弹弹play官方接口封禁（弹幕恒「无数据」）。在弹弹play开放平台注册应用后，填入专属 AppId 与 Secret 即可恢复；两项都填才生效，清除后回落内置凭证。下次 MPV 播放时生效。');
+    ddHint.textContent = t('弹幕默认由「自建弹幕接口」与「内置 B站」提供，通常无需填写。这里填的是可选的弹弹play 专属凭证：未填时弹弹play 仅作兜底（前两者都拿不到弹幕才用它）；填了则弹弹play 立即参与并优先取弹幕库（消耗你自己在弹弹play开放平台的配额）。两项都填才生效，清除后回到兜底状态。下次 MPV 播放时生效。');
     ddFoldBody.appendChild(ddHint);
 
     // 掩码输入（交互同 Bangumi token：已保存显示星号，聚焦自动清空进入编辑）
@@ -3481,7 +3520,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       inp.addEventListener('focus', () => { if (inp.readOnly) { inp.readOnly = false; inp.value = ''; } });
       return inp;
     };
-    const ddIdInput = mkDdInput('弹弹play AppId（如 gz2wnihj9d 形式的专属 id）');
+    const ddIdInput = mkDdInput('弹弹play AppId（开放平台创建应用后获得，形如 10 位小写字母数字）');
     const ddSecretInput = mkDdInput('弹弹play Secret（注册应用后获得，勿外传）');
     const ddBlurMask = (inp: HTMLInputElement, real: string): void => {
       if (inp.value.trim() === '' && real) { inp.value = maskDd(real); inp.readOnly = true; }
@@ -3505,9 +3544,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 首屏状态行 = 本卡唯一的常显信息：保存/清除/回填时都要同步，否则会停在旧状态误导用户
     const ddSetState = (configured: boolean): void => {
       ddStateLine.textContent = configured
-        ? t('已配置自定义凭证')
-        : t('未配置（内置共享凭证已被弹弹play 封禁，弹幕恒「无数据」）');
-      ddStateLine.style.color = configured ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
+        ? t('已配置专属凭证（弹弹play 立即参与并优先取弹幕库）')
+        : t('未配置 —— 弹弹play 仅作兜底（自建源与内置 B站 都拿不到弹幕时才启用）');
+      ddStateLine.style.color = 'var(--fnos-ui-sub)';
     };
 
     ddSaveBtn.addEventListener('click', (e: Event) => {
@@ -3537,7 +3576,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           ddRealId = ''; ddRealSecret = '';
           ddIdInput.value = ''; ddIdInput.readOnly = false;
           ddSecretInput.value = ''; ddSecretInput.readOnly = false;
-          ddStatus.textContent = t('已清除，回落脚本内置共享凭证，下次 MPV 播放时生效。');
+          ddStatus.textContent = t('已清除，回落脚本内置凭证，下次 MPV 播放时生效。');
           ddSetState(false);
         })
         .catch((err) => { ddStatus.textContent = '清除失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
@@ -5082,8 +5121,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'general', label: '通用', els: [sec3.el, secLang.el, secSystem.el, secUpd.el] },
       { id: 'appearance', label: '外观', els: [secAppearance.el, secCarousel.el] },
       { id: 'player', label: '播放', els: [sec2.el, secSkip.el, secInterp.el, secRender.el, secUX.el] },
-      // [lc-1102] 三张「弹幕源」卡并列（内置降级源 → 弹弹play → 自建优选源），最后才是屏蔽/样式
-      { id: 'danmaku', label: '弹幕', els: [secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
+      // [lc-1226] 首张「弹幕来源与优先级」总览卡（三来源的角色与尝试顺序），
+      //   随后三张源卡：内置降级源 → 弹弹play → 自建优选源，最后才是屏蔽/样式
+      { id: 'danmaku', label: '弹幕', els: [secDmSources.el, secBili.el, secDandan.el, secDmApi.el, secDanmaku.el] },
       { id: 'account', label: '账号同步', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el] },
       { id: 'metascrape', label: '自定义刮削', els: [secMetaScrape.el, secJav.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el] }, // [自定义刮削] 源卡+Jav 卡+扩展四源卡
       { id: 'network', label: '网络', els: [secNet.el, secCustomProxy.el, secTmdbDirect.el] },

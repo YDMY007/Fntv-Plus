@@ -130,8 +130,8 @@ export interface Config {
     mpvRenderPreset?: string;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
     mpvBiliAggregateThreshold?: number;
-    // [lc-1018] 弹弹play 开放 API 自定义凭证（两项都非空才启用；写入 script-opts/uosc_danmaku.conf。
-    // 留空=脚本内置共享凭证——该共享凭证已被官方接口 403，仅作向后兼容保留）
+    // [lc-1226] 弹弹play 开放 API 自定义凭证（两项都非空才启用；写入 script-opts/uosc_danmaku.conf。
+    // 留空=回落脚本内置凭证——脚本已内嵌一套可用凭证，开箱即用无需配置）
     dandanplayAppId?: string;
     dandanplayAppSecret?: string;
     // [lc-1101] 自建弹幕接口（danmu_api: github.com/huangxd-/danmu_api，用户自部署于 NAS Docker）：
@@ -959,7 +959,7 @@ export function setMpvBiliAggregateThreshold(threshold: number): void {
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }
 
-// [lc-1018] 获取弹弹play 开放 API 自定义凭证（默认空串=用脚本内置共享凭证）
+// [lc-1226] 获取弹弹play 开放 API 自定义凭证（默认空串=用脚本内置凭证，开箱即用）
 export function getDandanplayAppId(): string {
     const config: Config = readConfig() || {};
     return typeof config.dandanplayAppId === 'string' ? config.dandanplayAppId : '';
@@ -969,7 +969,7 @@ export function getDandanplayAppSecret(): string {
     return typeof config.dandanplayAppSecret === 'string' ? config.dandanplayAppSecret : '';
 }
 
-// [lc-1018] 设置弹弹play 自定义凭证（两项都 trim；任一为空视为清除，Lua 端回落内置共享凭证）
+// [lc-1226] 设置弹弹play 自定义凭证（两项都 trim；任一为空视为清除，Lua 端回落内置凭证）
 export function setDandanplayCredentials(appId: string, appSecret: string): void {
     const config: Config = readConfig() || {};
     config.dandanplayAppId = String(appId || '').trim();

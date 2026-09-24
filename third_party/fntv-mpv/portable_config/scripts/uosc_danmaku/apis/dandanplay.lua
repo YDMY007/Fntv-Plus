@@ -6,17 +6,373 @@ local function extract_url(url)
     return path
 end
 
-local function generateXSignature(url, time, appid, app_accept)
-    local url_path = extract_url(url)
-    if not url_path then
+-- ===== [lc-1226] 弹弹play 开放 API 内置凭证 =====
+-- 官方文档：https://doc.dandanplay.com/open/
+--   签名 = base64(sha256(AppId + Timestamp + Path + AppSecret))；Path 取域名后、不含查询串的路径。
+--   请求头 X-AppId / X-Timestamp / X-Signature。凭证模式（X-AppSecret）只推荐服务端用。
+-- AppId 与 Secret 都以 AES-256-ECB 密文内嵌在此（密钥即 main.lua 的 KEY），运行时解密使用。
+-- 不落明文的原因：本文件既被 git 跟踪、又随安装包分发到每台用户机器，明文等于公开传播。
+-- ⚠️ 内置凭证是【兜底】：仅当用户没配自定义凭证时才用（见 dd_credentials）。
+-- ⚠️ [lc-1228] 固定只用 1 号密钥，不做自动轮换（自动切换会被视为绕过官方处置）；
+--    需要换密钥时由维护者手动替换下面的密文，用户无感知。
+local BUILTIN_APPID_B64 = "ywOH0hrmLAPXgUVlwumuzg=="
+local BUILTIN_SECRETS_B64 = {
+    "bwlyxWbVRl9YSc3WIV08SkFUTR+wNtttVe66x4kfTBE=",
+    "lsEbThojhb40A7Qe8V+a3InMY4ndPY1QB2h4FUL8KiY=",
+}
+local builtin_appid, builtin_secrets = nil, nil
+local active_secret_idx = 1
+
+local function trim_ws(s)
+    return tostring(s or ""):match("^%s*(.-)%s*$")
+end
+
+-- 解开设置面板写入的 AES-256-ECB 密文（base64）。密钥同 main.lua 的 KEY。
+-- 解不开时返回 nil，由调用方回落内置凭证，绝不因一条坏配置让整条弹幕链路崩掉。
+-- base64 解码本身也要进 pcall：它对非法字符会直接抛错，放在 pcall 外面就等于没防住。
+local function dd_decrypt_conf(blob)
+    local b = trim_ws(blob)
+    if b == "" then
         return nil
     end
+    local ok, decoded = pcall(Base64.decode, b)
+    if not ok or type(decoded) ~= 'string' or #decoded == 0 then
+        msg.warn("弹弹play 自定义凭证密文非法（base64 解码失败），回落内置凭证")
+        return nil
+    end
+    local ok2, plain = pcall(AES.ECB.decrypt, KEY, decoded)
+    if not ok2 or type(plain) ~= 'string' then
+        msg.warn("弹弹play 自定义凭证解密失败，回落内置凭证")
+        return nil
+    end
+    plain = trim_ws(plain)
+    -- 合理性校验：解错密钥时通常得到一串乱码/控制字符。用它当凭证签出来的名必然被官方拒，
+    -- 又不能轮换（自定义凭证不参与内置轮换），会把原本可用的内置凭证顶掉 —— 那就等于配置一坏
+    -- 弹幕全废。故要求「长度像样且全为可打印 ASCII」，否则视为不可信、回落内置。
+    -- 用「可打印」而不是具体字符白名单：官方 AppId/Secret 是纯字母数字，但白名单太窄会误伤
+    -- 用户手上可能存在的其它合法形态凭证，而控制字符这一条已足以识别解错密钥的乱码。
+    if #plain < 4 or #plain > 128 or plain:find("[^%g%s]") then
+        msg.warn("弹弹play 自定义凭证解密结果不可信，回落内置凭证")
+        return nil
+    end
+    return plain
+end
 
-    local dataToHash = string.format("%s%d%s%s", AES.ECB.decrypt(KEY, Base64.decode(appid)),
-    time, url_path, AES.ECB.decrypt(KEY, Base64.decode(app_accept)))
-    local hash = Sha256(dataToHash)
-    local base64Hash = Base64.encode(hex_to_bin(hash))
-    return base64Hash
+-- 解密内置凭证（幂等：成功解出后缓存，后续调用零开销）
+local function load_builtin_credentials()
+    if builtin_appid and builtin_secrets and #builtin_secrets > 0 then
+        return true
+    end
+    local ok, appid = pcall(AES.ECB.decrypt, KEY, Base64.decode(BUILTIN_APPID_B64))
+    if not ok or type(appid) ~= 'string' or trim_ws(appid) == '' then
+        msg.error("弹弹play 内置凭证：AppId 解密失败")
+        return false
+    end
+    local secrets = {}
+    for _, blob in ipairs(BUILTIN_SECRETS_B64) do
+        local ok2, s = pcall(AES.ECB.decrypt, KEY, Base64.decode(blob))
+        if ok2 and type(s) == 'string' and trim_ws(s) ~= '' then
+            secrets[#secrets + 1] = trim_ws(s)
+        end
+    end
+    if #secrets == 0 then
+        msg.error("弹弹play 内置凭证：Secret 解密失败")
+        return false
+    end
+    builtin_appid, builtin_secrets = trim_ws(appid), secrets
+    return true
+end
+
+-- 用户在设置面板填的专属凭证（存的是 AES 密文，见 options.lua 的 *_enc 键）。
+-- 兼容旧的明文键：老版本 conf 里可能还留着 dandanplay_app_id/secret，读得到就照用
+-- （下一次应用启动同步会把它清掉换成密文键）。
+-- 不缓存：每次调用重新解一次密（AES 解 32 字节的开销可忽略），换取「配置改动立即可见」，
+-- 避免缓存把同一次 mpv 会话里后来的配置变更挡成静默失效。
+local function dd_custom_credentials()
+    local id = dd_decrypt_conf(options.dandanplay_app_id_enc)
+    local secret = dd_decrypt_conf(options.dandanplay_app_secret_enc)
+    if not id or not secret then
+        id = trim_ws(options.dandanplay_app_id)
+        secret = trim_ws(options.dandanplay_app_secret)
+        if id == "" or secret == "" then
+            id, secret = nil, nil
+        end
+    end
+    return id, secret
+end
+
+local function dd_using_custom()
+    local id, secret = dd_custom_credentials()
+    return id ~= nil and secret ~= nil
+end
+
+-- 当前生效的凭证 → appId, secret, is_custom
+local function dd_credentials()
+    local cid, csecret = dd_custom_credentials()
+    if cid and csecret then
+        return cid, csecret, true
+    end
+    if load_builtin_credentials() then
+        local s = builtin_secrets[active_secret_idx] or builtin_secrets[1]
+        return builtin_appid, s, false
+    end
+    return nil, nil, false
+end
+
+-- [lc-1228] 内置 Secret 被官方拒绝（403）时的处理：只报警、不自动切换。
+-- 曾经实现为「403 就自动切到另一枚」——已移除：官方发两枚 Secret 是给开发者【主动轮换】用的，
+-- 若密钥被封是出于滥用判定，自动切换等于绕过官方处置，与「禁止滥用 API」的精神相悖；
+-- 且自动来回切会掩盖真实状态（用户/维护者看不出凭证已被拒）。
+-- 现在固定只用 1 号密钥，直至维护者手动更换内嵌密文（见 BUILTIN_SECRETS_B64）。
+
+-- 403 报警（只报一次，避免每个请求刷屏）。这是密钥失效的唯一提示渠道：
+-- Lua 侧日志会经 mpv.log 转发进 app.log，维护者据此决定是否手动轮换。
+local dd_403_warned = false
+local function dd_warn_403()
+    if dd_403_warned then return end
+    dd_403_warned = true
+    local which = dd_using_custom() and "自定义凭证" or ("内置密钥 " .. tostring(active_secret_idx))
+    msg.error(("弹弹play 返回 403（%s 被官方拒绝）：弹幕将不可用，请到开放平台检查应用状态；" ..
+        "内置凭证需轮换时改 BUILTIN_SECRETS_B64 密文（不再自动切换）"):format(which))
+end
+
+-- 按官方算法签名，生成鉴权请求头（-H key / value 交替的三对）。
+-- 无可用凭证时返回空表：请求照发，官方回 403，由上层决定是否重试。
+local function dd_auth_headers(url)
+    local url_path = extract_url(url)
+    if not url_path then
+        return {}
+    end
+    local appid, secret = dd_credentials()
+    if not appid or not secret then
+        msg.warn("弹弹play 凭证不可用（内置解密失败且未配置自定义凭证），本次请求无签名，官方将返回 403")
+        return {}
+    end
+    local time = os.time()
+    local hash = Sha256(appid .. time .. url_path .. secret)
+    return {
+        '-H', string.format('X-AppId: %s', appid),
+        '-H', string.format('X-Signature: %s', Base64.encode(hex_to_bin(hash))),
+        '-H', string.format('X-Timestamp: %s', time),
+    }
+end
+
+-- 往已构造好的 curl 参数尾部追加鉴权头（调用方随后再插入 url，故顺序正确）
+local function append_dandanplay_auth(args, url)
+    for _, v in ipairs(dd_auth_headers(url)) do
+        args[#args + 1] = v
+    end
+end
+
+-- 给 args 追加 `-w` 状态码标记（插在 url 之前），以便从 stdout 尾部取回 HTTP 状态。
+-- 只有在判断 403 时才需要状态码：curl 无 --fail 时 403 也返回退出码 0，光看退出码分不出
+-- 「密钥失效」和「正常拿到了空弹幕」。
+local DD_HTTP_MARK = "__DDHTTP__"
+local function dd_args_with_status(args)
+    local out = {}
+    for i = 1, #args - 1 do
+        out[i] = args[i]
+    end
+    out[#args] = '-w'
+    out[#args + 1] = "\n" .. DD_HTTP_MARK .. "%{http_code}"
+    out[#args + 2] = args[#args]
+    return out
+end
+
+-- 从带状态码标记的输出里拆出 (body, status)。无标记时按原样当 body 返回。
+local function dd_split_status(out)
+    if type(out) ~= 'string' then
+        return out, nil
+    end
+    local body, code = out:match("^(.-)\n" .. DD_HTTP_MARK .. "(%d+)%s*$")
+    if body then
+        return body, tonumber(code)
+    end
+    return out, nil
+end
+
+-- 异步请求（等价 call_cmd_async(args, callback) 的 drop-in 替换），带 403 检测与报警。
+-- [lc-1228] 不再自动重试/换密钥：403 只报警一次，请求结果照常交给上层
+-- （上层把空弹幕当「未命中」，走既有的降级链）。
+local function dd_fetch(args, callback)
+    call_cmd_async(dd_args_with_status(args), function(error, out)
+        if error then
+            callback(error, {})
+            return
+        end
+        local body, status = dd_split_status(out)
+        if status == 403 then
+            dd_warn_403()
+        end
+        callback(nil, body)
+    end)
+end
+
+-- 同步请求（供 menu.lua 这类用 mp.command_native 的调用点）。
+-- (body, status, res)：res 为原始 subprocess 结果（调用方判断退出码/stderr）。
+local function dd_request_sync(args)
+    local res = mp.command_native({
+        name = 'subprocess', capture_stdout = true, capture_stderr = true,
+        args = dd_args_with_status(args),
+    })
+    if type(res) ~= 'table' or res.status ~= 0 then
+        return nil, nil, res
+    end
+    local body, status = dd_split_status(res.stdout or '')
+    if status == 403 then
+        dd_warn_403()
+    end
+    return body, status, res
+end
+
+-- ===== [lc-1228] 内置凭证降级 + 本地弹幕文件复用 =====
+-- 合规背景（https://doc.dandanplay.com/open/ 使用约定）：
+--   「请缓存 API 返回的数据，以减少对服务器的请求次数」「请结合用户的实际操作调用 API，并按需使用」。
+-- 两条措施：
+--   ① 内置凭证降级——/comment（弹幕库，单次几百 KB，是流量大头）推迟到「自建源 + 内置 B站」
+--      都拿不到弹幕时才发；/match（识别剧集，几 KB）照常，因为另外两个源正靠它给出的规范番名搜索。
+--      用户填了自定义凭证时完全不干预（那是他自己的配额，且他要的就是弹弹play 弹幕库）。
+--   ② 本地缓存复用——弹幕库按 episodeId 落盘，重播同一集直接读盘，一次 /comment 只发一次。
+-- 缓存文件用固定命名且【不注册进 DANMAKU.sources】，这样 render.lua 换片时的清理循环
+-- （只删 sources 里登记的文件）不会把它删掉，重播才能命中。
+
+-- 弹幕库 URL。集中构造：DANMAKU.sources 以这个 URL 为键，缓存命中路径与请求路径
+-- 必须给出完全一致的字符串，否则会被当成两个不同的源而重复加载。
+local function dd_comment_url(episodeId)
+    return options.api_server .. "/api/v2/comment/" .. tostring(episodeId) .. "?withRelated=false&chConvert=0"
+end
+
+-- 缓存文件路径：按 episodeId 稳定命名（与 PID/DANMAKU.count 无关，故可跨进程复用）
+local function dd_cache_path(episodeId)
+    return utils.join_path(DANMAKU_PATH, "dandanplay_" .. tostring(episodeId) .. ".json")
+end
+
+-- 二进制拷贝（缓存 → 工作文件）。用 rb/wb 避免 Windows 下 CRLF 被改写。
+local function dd_copy_file(src, dst)
+    local i = io.open(normalize(src), "rb")
+    if not i then return false end
+    local data = i:read("*a")
+    i:close()
+    if not data or #data == 0 then return false end
+    local o = io.open(normalize(dst), "wb")
+    if not o then return false end
+    o:write(data)
+    o:close()
+    return true
+end
+
+-- 缓存条数上限（超出按修改时间删最旧）。单集缓存约几百 KB，上限 300 ≈ 数十 MB 量级。
+local DD_CACHE_MAX = 300
+
+-- 清理过量的缓存文件（保留最近 DD_CACHE_MAX 个），避免弹幕目录无限膨胀。
+local function dd_prune_cache()
+    local ok, items = pcall(utils.readdir, DANMAKU_PATH, "files")
+    if not ok or type(items) ~= "table" then return end
+    local files = {}
+    for _, name in ipairs(items) do
+        if type(name) == "string" and name:match("^dandanplay_%d+%.json$") then
+            local p = utils.join_path(DANMAKU_PATH, name)
+            local info = utils.file_info(p)
+            files[#files + 1] = { path = p, mtime = (info and info.mtime) or 0 }
+        end
+    end
+    if #files <= DD_CACHE_MAX then return end
+    table.sort(files, function(a, b) return a.mtime < b.mtime end)
+    for i = 1, #files - DD_CACHE_MAX do
+        os.remove(files[i].path)
+    end
+    msg.info(("弹弹play 缓存清理：%d → %d 个"):format(#files, DD_CACHE_MAX))
+end
+
+-- 把已落盘的工作文件复制一份成稳定命名的缓存（供下次重播复用）。
+local function dd_write_cache(episodeId, url)
+    local src = DANMAKU.sources[url] and DANMAKU.sources[url].fname
+    if not src or not file_exists(src) then return end
+    if dd_copy_file(src, dd_cache_path(episodeId)) then
+        msg.info("弹弹play 弹幕已缓存（重播同集不再请求 /comment）: " .. dd_cache_path(episodeId))
+        dd_prune_cache()
+    end
+end
+
+-- 命中本地缓存 → 复制成工作文件并注册为弹幕源；返回 true 表示调用方无需再发 /comment。
+local function dd_try_use_cache(episodeId, url, from_menu)
+    local cache = dd_cache_path(episodeId)
+    if not file_exists(cache) then return false end
+    local danmaku_file = utils.join_path(DANMAKU_PATH, "danmaku-" .. PID .. DANMAKU.count .. ".json")
+    DANMAKU.count = DANMAKU.count + 1
+    if not dd_copy_file(cache, danmaku_file) then
+        msg.warn("弹弹play 缓存读取失败，改为重新请求: " .. cache)
+        return false
+    end
+    if DANMAKU.sources[url] ~= nil then
+        if DANMAKU.sources[url].fname and file_exists(DANMAKU.sources[url].fname) then
+            os.remove(DANMAKU.sources[url].fname)
+        end
+        DANMAKU.sources[url]["fname"] = danmaku_file
+    else
+        DANMAKU.sources[url] = {from = "api_server", fname = danmaku_file}
+    end
+    msg.info("弹弹play 命中本地缓存，跳过 /comment 请求: " .. cache)
+    show_message("弹弹play 弹幕来自本地缓存", 3)
+    load_danmaku(from_menu)
+    return true
+end
+
+-- 待回退的 /comment（内置凭证降级时挂起，等自建源/B站 结果）
+local pending_dd_comment = nil
+local pending_dd_timer = nil
+
+-- 是否该把 /comment 推迟到其他源之后：仅「用内置凭证」且「有其他源可等」时为真。
+local function dd_should_defer_comment()
+    if dd_using_custom() then return false end
+    if not (options.auto_load_extra or options.danmu_api_enabled) then return false end
+    return true
+end
+
+-- 其他源是否已交付过弹幕（判断「都不行」用；不把弹弹play 自己的源算进去）。
+local function dd_has_other_source()
+    for url, s in pairs(DANMAKU.sources) do
+        if type(url) == "string" and not url:find("api%.dandanplay%.") then
+            if s and s.fname and file_exists(s.fname) then return true end
+        end
+    end
+    return false
+end
+
+-- 挂起 /comment，等自建源/B站 结果；带超时安全网（其他源因解析失败根本没发起时兜底）。
+function dd_set_pending_comment(episodeId, from_menu)
+    pending_dd_comment = { episodeId = episodeId, from_menu = from_menu }
+    if pending_dd_timer then pending_dd_timer:kill() end
+    pending_dd_timer = mp.add_timeout(25, function()
+        pending_dd_timer = nil
+        dd_flush_pending_comment("等待其他源超时")
+    end)
+    msg.info(("弹弹play：内置凭证降级——暂缓 /comment（ep=%s），等自建源/内置 B站 结果")
+        :format(tostring(episodeId)))
+end
+
+-- 其他源已提供弹幕 → 取消挂起的 /comment（这就是「降级」省下的请求）。
+function dd_clear_pending_comment()
+    if pending_dd_timer then pending_dd_timer:kill() pending_dd_timer = nil end
+    if pending_dd_comment then
+        msg.info("弹弹play：其他源已提供弹幕，取消内置凭证 /comment（省一次请求）")
+    end
+    pending_dd_comment = nil
+end
+
+-- 其他源都没拿到 → 回退用内置凭证发 /comment；若已有其他源弹幕则不重复拉。
+function dd_flush_pending_comment(reason)
+    if pending_dd_timer then pending_dd_timer:kill() pending_dd_timer = nil end
+    local p = pending_dd_comment
+    pending_dd_comment = nil
+    if not p then return end
+    if dd_has_other_source() then
+        msg.info("弹弹play：已有其他源弹幕，无需回退 /comment")
+        return
+    end
+    msg.warn(("弹弹play：其他源均未提供弹幕（%s），回退内置凭证取弹幕库（ep=%s）")
+        :format(reason, tostring(p.episodeId)))
+    fetch_danmaku(p.episodeId, p.from_menu)
 end
 
 -- 写入history.json
@@ -40,8 +396,20 @@ function set_episode_id(input, from_menu)
     local episodeId = tonumber(input)
     write_history(episodeId)
     set_danmaku_button()
-    if options.load_more_danmaku then
+
+    local dd_url = dd_comment_url(episodeId)
+    -- [lc-1228] ① 本地缓存复用：本集弹幕以前拉过就直接用，完全不再碰官方接口，
+    --   也无需进入下面的降级等待。
+    --   ⚠️ 不可在此 return：下方的「自动补源（B站 叠加）」仍须执行 —— 缓存只替代弹弹play
+    --   的弹幕库请求，不代表本集已有 B站 弹幕；提前 return 会让命中缓存的那一集只剩弹弹play 弹幕。
+    if not options.load_more_danmaku and dd_try_use_cache(episodeId, dd_url, from_menu) then
+        -- 已从缓存取到弹弹play 弹幕，跳过请求/挂起，但继续走下面的 B站 补源
+    elseif options.load_more_danmaku then
         fetch_danmaku_all(episodeId, from_menu)
+    elseif dd_should_defer_comment() then
+        -- [lc-1228] ② 内置凭证降级：暂缓 /comment，优先让自建源/内置 B站 去取
+        --   （它们在 file-loaded 阶段已经发起）。等它们落地后再决定要不要回退。
+        dd_set_pending_comment(episodeId, from_menu)
     else
         fetch_danmaku(episodeId, from_menu)
     end
@@ -134,32 +502,9 @@ function make_danmaku_request_args(method, url, headers, body)
     end
 
     if url:find("api%.dandanplay%.") then
-        local time = os.time()
-        -- [lc-1018] 优先使用用户自定义凭证（设置面板「弹幕设置→弹弹play 凭证」写入
-        -- script-opts/uosc_danmaku.conf 的 dandanplay_app_id / dandanplay_app_secret）。
-        -- 明文配置直接签名，无需内置共享凭证那套 AES 解混淆。
-        -- 内置共享凭证已被官方接口整体 403（2026-09-05 实测），仅作留空时的向后兼容保留。
-        local custom_id = tostring(options.dandanplay_app_id or ""):match("^%s*(.-)%s*$")
-        local custom_secret = tostring(options.dandanplay_app_secret or ""):match("^%s*(.-)%s*$")
-        local url_path = extract_url(url)
-        if custom_id ~= "" and custom_secret ~= "" and url_path then
-            local hash = Sha256(custom_id .. time .. url_path .. custom_secret)
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-AppId: %s', custom_id))
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-Signature: %s', Base64.encode(hex_to_bin(hash))))
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-Timestamp: %s', time))
-        else
-            local appid = "UgjRIH45lE1BBLNmir1WKw=="
-            local app_accept = "SzuWlFZAPRMqeWf9qmfp8dcvYr3hvxuSrIRZuAeEfko="
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-AppId: %s', AES.ECB.decrypt(KEY, Base64.decode(appid))))
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-Signature: %s', generateXSignature(url, time, appid, app_accept)))
-            table.insert(args, '-H')
-            table.insert(args, string.format('X-Timestamp: %s', time))
-        end
+        -- [lc-1226] 自定义凭证优先，否则用内置凭证（密文内嵌，运行时解密）。两者都带
+        -- 密钥轮换能力：自定义不可轮换，内置默认 1 号、被拒自动切 2 号。
+        append_dandanplay_auth(args, url)
     end
 
     table.insert(args, url)
@@ -176,7 +521,7 @@ local function match_episode(animeTitle, bangumiId, episode_num)
         return
     end
 
-    call_cmd_async(args, function(error, json)
+    dd_fetch(args, function(error, json)
         async_running = false
         if error then
             show_message("HTTP 请求失败，打开控制台查看详情", 5)
@@ -225,7 +570,7 @@ local function match_anime()
 
     if not args then return end
 
-    call_cmd_async(args, function(error, json)
+    dd_fetch(args, function(error, json)
         async_running = false
         if error then
             show_message("HTTP 请求失败，打开控制台查看详情", 5)
@@ -355,7 +700,7 @@ local function match_file(file_path, file_name, callback)
             return
         end
 
-        call_cmd_async(args, function(error, json)
+        dd_fetch(args, function(error, json)
             async_running = false
             if error then
                 show_message("HTTP 请求失败，打开控制台查看详情", 5)
@@ -404,7 +749,7 @@ end
 
 -- 异步获取弹幕数据
 function fetch_danmaku_data(args, callback)
-    call_cmd_async(args, function(error, json)
+    dd_fetch(args, function(error, json)
         async_running = false
         if error then
             show_message("获取数据失败", 3)
@@ -588,8 +933,10 @@ end
 
 -- 匹配弹幕库 comment, 仅匹配dandan本身弹幕库
 -- 通过danmaku api（url）+id获取弹幕
+-- [lc-1228] 拿到数据后落一份 episodeId 命名的缓存（含 get_danmaku_fallback 重试路径），
+-- 下次重播同集直接读盘（见 dd_try_use_cache），不再请求官方 /comment。
 function fetch_danmaku(episodeId, from_menu)
-    local url = options.api_server .. "/api/v2/comment/" .. episodeId .. "?withRelated=false&chConvert=0"
+    local url = dd_comment_url(episodeId)
     show_message("弹幕加载中...", 30)
     msg.verbose("尝试获取弹幕：" .. url)
     local args = make_danmaku_request_args("GET", url)
@@ -600,6 +947,7 @@ function fetch_danmaku(episodeId, from_menu)
 
     fetch_danmaku_data(args, function(data)
         handle_fetched_danmaku(data, url, from_menu)
+        dd_write_cache(episodeId, url)
     end)
 end
 

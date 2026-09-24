@@ -33,6 +33,10 @@ const log = logger.component('danmuApi');
  * 搜「流浪地球2」会返回「悠久之翼2」这类完全不相干的条目（挂错弹幕比没弹幕更糟），
  * 且 episode=0 恒返回空数组。所以这里自己搜，并且**只认精确匹配**（主名归一化后完全相等、
  * 季号一致），不匹配一律判未命中 —— 模糊匹配留给内置 B站 链路，那条链路只查 B站、条目少（lc-1109）。
+ * [lc-1220] 唯一例外：聚合源把第 N 季挂进「沧元图(2023)【国漫】from youku」这类不带季号的
+ * 主条目是常态，一律拒收导致第二季起自建源恒未命中（S1 全中、S2+ 全降级，且 S2 的 B站
+ * 候选常为 0 弹幕）。这类条目降级为「待核验」，由 pickVerifiedEpisode 用播放侧集标题
+ * 核对服务端分集标题后才放行 —— 分集标题对不上仍拒收，防错配的初衷不变。
  */
 
 /** 回给 Lua/渲染层的来源标识（menu.lua 直接把它当 src_label 显示） */
@@ -84,6 +88,20 @@ export function isActive(): boolean {
     } catch (_) {
         return false;
     }
+}
+
+/** [lc-1226] 开了开关但地址没填/非法 —— 详情面板据此给出「去补地址」而不是笼统的「未启用」。 */
+export function isEnabledButInvalid(): boolean {
+    try {
+        return fnConfig.getDanmuApiEnabled() && !isValidBase(fnConfig.getDanmuApiBase());
+    } catch (_) {
+        return false;
+    }
+}
+
+/** [lc-1226] 本模块回给上层的结果来源标识（详情面板据此判断「这条是不是自建源给的」）。 */
+export function selfHostedSourceLabel(): string {
+    return SOURCE_LABEL;
 }
 
 /** 地址白名单式校验：只收 http(s)://主机[:端口][/前缀]，挡掉换行等非法字符（防拼出畸形请求）。 */
@@ -327,13 +345,22 @@ function splitSeason(raw: string): { name: string; season: number } {
 
 /**
  * 季号匹配档位（主名精确相等之后才轮到它，越小越优先）：
- * 0=候选季号与播放侧一致；1=播放侧没给季号而候选标了第一季；2=候选未标季号（服务端把整部合成一条）。
- * 播放侧明确指向第 N 季(N>1) 而候选未标季号 → 判不匹配：这类合集条目的 episodeNumber 常是全剧
- * 连续编号，按 ep 定位会挂到别的季上（挂错比没弹幕更糟）。
+ * 0=候选季号与播放侧一致；1=播放侧没给季号而候选标了第一季；2=候选未标季号（服务端把整部合成一条，
+ * 播放侧 S1/无季号时直接可用）；3=候选未标季号但播放侧明确要第 N 季(N>1)——需 pickVerifiedEpisode
+ * 核对分集标题后才放行（这类合集条目 episodeNumber 常是全剧连续编号，直接按 ep 定位会挂到别的季）。
  */
 const SEASON_TIER_EXACT = 0;
 const SEASON_TIER_IMPLIED_FIRST = 1;
 const SEASON_TIER_UNMARKED = 2;
+/**
+ * [lc-1220] 未标季条目 + 播放侧明确第 N 季(N>1)：不在 exactMatchTier 里直接判死，
+ * 降级为「待核验」档——由 pickVerifiedEpisode 用播放侧集标题核对服务端分集标题后再放行
+ * （分集标题对不上仍拒收）。放宽原因：聚合源（youku 等）把第 N 季挂进
+ * 「沧元图(2023)【国漫】from youku」这类不带季号的主条目是常态，一刀切拒收导致
+ * 第二季起自建源恒未命中（用户实机：S1 全中、S2+ 全降级内置 B站，S2 的 B站
+ * 候选又全是 0 弹幕 → 观感"第二季彻底没弹幕"）。
+ */
+const SEASON_TIER_UNMARKED_VERIFY = 3;
 
 /**
  * 自建源准入 = 精确匹配：主名归一化后**完全相等**，且季号一致。命中返回档位，不匹配返回 null。
@@ -346,8 +373,13 @@ const SEASON_TIER_UNMARKED = 2;
  * 精确口径下这 37 条只剩《悬案(2026)》youku/360 两条真命中。
  * 模糊匹配保留给内置 B站 链路（bili_danmaku.js）：那边只查 B站、条目少，且是原有行为，不动。
  * 附带好处：`解说版`/`手语版`/`字幕助听版`/`独家专访` 等衍生条目主名不等，自动落空。
+ *
+ * [lc-1220] 季号口径更新：want>1 且候选未标季号的条目不再一律拒收（返回
+ * SEASON_TIER_UNMARKED_VERIFY），改由 pickVerifiedEpisode 核对分集标题后放行——
+ * 前提是有集标题可核（epTitle 非空）；没有集标题时维持旧的拒收行为
+ * （returnUnverified=false，搜到也是白搜，不如省掉一次分集请求）。
  */
-function exactMatchTier(query: string, querySeason: number, candTitle: string): number | null {
+function exactMatchTier(query: string, querySeason: number, candTitle: string, returnUnverified = false): number | null {
     const q = splitSeason(query);
     const c = splitSeason(candTitle);
     if (!q.name || q.name !== c.name) return null;
@@ -357,7 +389,9 @@ function exactMatchTier(query: string, querySeason: number, candTitle: string): 
         if (want === 0 && c.season === 1) return SEASON_TIER_IMPLIED_FIRST;
         return null;
     }
-    return want <= 1 ? SEASON_TIER_UNMARKED : null;
+    if (want <= 1) return SEASON_TIER_UNMARKED;
+    // want>1 且候选未标季：仅在有集标题可核验时放行为「待核验」候选
+    return returnUnverified ? SEASON_TIER_UNMARKED_VERIFY : null;
 }
 
 // ===================== 搜索 / 分集 =====================
@@ -378,11 +412,50 @@ function keywordCandidates(title: string): string[] {
     return head && head !== raw ? [raw, head] : [raw];
 }
 
+/**
+ * [lc-1220] 从播放侧标题里提取「本集标题」（核验未标季条目用）。
+ *
+ * 三种输入形态：
+ *   MPV 整串   「番名 - : 集标题」/「番名 - S2E27: 集标题」（clean_bili_title 只剥 noTitle
+ *              后缀，有真实副标题时保留）→ 取尾段；
+ *   MPV 裸番名 「沧元图」（fnOS 未刮削副标题）→ 无集标题，返回 ''（拿番名去核验必全不匹配）；
+ *   网页直传   「The Demon Hunter.S02E27」（fnOS 刮削的集名常自带 .SxxExx 尾缀）→ 剥掉尾缀。
+ * 提取不出真实集标题一律返回 ''（宁可不核验，不拿垃圾串当比对材料）。
+ */
+export function extractEpisodeTitle(title: string): string {
+    const raw = String(title || '').trim();
+    if (!raw) return '';
+    // 「番名 - [SxxExx][:] 集标题」/「番名: 集标题」：取最后一个分隔符之后的尾段。
+    // 先剥「.SxxExx」集号尾缀（网页路径的刮削名形态），再按分隔符切。
+    let s = raw.replace(/[.\s]*[Ss]\d{1,2}[Ee]\d{1,4}[.\s]*$/g, '').trim();
+    let head = '';
+    const dash = s.match(/^(.+?)\s*[-–—]\s*(?:[Ss]\d{1,2}[Ee]\d{1,4}\s*)?[:：]?\s*(.+)$/);
+    const colon = dash ? null : s.match(/^(.+?)\s*[:：]\s*(.+)$/);
+    if (dash || colon) {
+        head = ((dash || colon) as RegExpMatchArray)[1].trim();
+        s = ((dash || colon) as RegExpMatchArray)[2].trim();
+    }
+    if (!s || /^noTitle$/i.test(s)) return '';
+    // 尾段与首段/番名本身相同（裸番名形态）→ 无集标题
+    if (normalizeEpTitle(s) === normalizeEpTitle(head || raw)) return '';
+    return s;
+}
+
+/** 归一化集标题：剥包裹符号/空白/常见前后缀装饰后比对，口径与 normalizeTitle 一致但保留集号语义。 */
+function normalizeEpTitle(s: string): string {
+    return String(s || '')
+        .replace(/【[^】]*】/g, '')
+        .replace(/[『』「」〔〕《》〈〉""''（）()]/g, '')
+        .replace(/第\s*(\d{1,4})\s*[话集期]/g, ' ')
+        .replace(/[\s·:：!！?？,，.。、\-_—~～]+/g, '')
+        .toLowerCase();
+}
+
 /** 搜索条目并只留精确匹配的（同作品多平台条目按季号档位排序，同档位优先 bilibili 源）。 */
-async function searchAnimes(title: string, season: number): Promise<AnimeHit[]> {
+async function searchAnimes(title: string, season: number, epTitle = ''): Promise<AnimeHit[]> {
     const cands = keywordCandidates(title);
     for (let i = 0; i < cands.length; i++) {
-        const hits = await searchWithKeyword(cands[i], season);
+        const hits = await searchWithKeyword(cands[i], season, epTitle);
         if (hits.length) {
             if (i > 0) {
                 log.info(`[danmuApi] 整串关键词无精确匹配，回退番名首段命中 | ${JSON.stringify(title)} → ${JSON.stringify(cands[i])} | ${hits.length} 条`);
@@ -393,7 +466,7 @@ async function searchAnimes(title: string, season: number): Promise<AnimeHit[]> 
     return [];
 }
 
-async function searchWithKeyword(keyword: string, season: number): Promise<AnimeHit[]> {
+async function searchWithKeyword(keyword: string, season: number, epTitle = ''): Promise<AnimeHit[]> {
     const base = currentBase();
     const key = normalizeTitle(keyword);
     let animes: any[] | null = null;
@@ -417,7 +490,8 @@ async function searchWithKeyword(keyword: string, season: number): Promise<Anime
         const animeTitle = String((a && a.animeTitle) || '');
         // 比对对象是**搜索关键词**而不是整串 title：整串常粘着集标题（「悬案 - : 矢量」），
         // 归一化后主名不可能相等，拿它比会把所有条目判空。
-        const tier = exactMatchTier(keyword, season, animeTitle);
+        // [lc-1220] 有集标题时允许「未标季条目」进候选（待核验档），由 pickVerifiedEpisode 兜底把关。
+        const tier = exactMatchTier(keyword, season, animeTitle, !!epTitle);
         if (tier === null) continue;
         hits.push({
             animeId: id,
@@ -480,6 +554,60 @@ async function pickEpisode(hit: AnimeHit, ep: number): Promise<EpisodeHit | null
     return null;
 }
 
+/**
+ * [lc-1220] 未标季条目（SEASON_TIER_UNMARKED_VERIFY）的分集定位：episodeNumber 在这类
+ * 合集条目里常是全剧连续编号（S1E1..S1E26, S2E1..S2E27 会被编成 1..53），按 ep 直接取
+ * 会挂到别的季 —— 所以必须拿播放侧集标题与服务端分集标题比对定位。
+ *
+ * 匹配口径（防错挂优先于命中率）：
+ *   1. 归一化后完全相等 → 命中；若有**多个**分集完全相等（同标题不同清晰度/分P），
+ *      且其中一个的集号 === ep 则取它，否则歧义判未命中；
+ *   2. 否则做包含匹配（播放侧集标题完整出现在分集标题里，如「东宁府的夏天：叁」⊂
+ *      「【youku】 第69集 前传：东宁府的夏天 叁」）→ 唯一命中才算数，多个歧义判未命中；
+ *   3. 都不行 → 判未命中。集号兜底已移除：合集条目集号跨季连续、语义不可信，
+ *      标题核不上时用集号纯属猜（挂错比没弹幕更糟，lc-1109 同一原则）。
+ */
+async function pickVerifiedEpisode(hit: AnimeHit, ep: number, epTitle: string): Promise<EpisodeHit | null> {
+    const want = normalizeEpTitle(epTitle);
+    if (!want) return null;
+    const eps = await episodesOf(hit.animeId);
+    const exact: EpisodeHit[] = [];
+    const contains: EpisodeHit[] = [];
+    for (const e of eps) {
+        const id = Number(e && e.episodeId);
+        if (!id) continue;
+        const raw = String((e && e.episodeTitle) || '');
+        const norm = normalizeEpTitle(raw);
+        if (!norm) continue;
+        const item = { episodeId: id, episodeTitle: raw };
+        if (norm === want) {
+            exact.push(item);
+        } else if (norm.includes(want) && want.length >= 2) {
+            contains.push(item);
+        }
+    }
+    const decide = (list: EpisodeHit[], how: string): EpisodeHit | null => {
+        if (!list.length) return null;
+        if (list.length > 1) {
+            // 平票：集号恰好等于 ep 的那个优先（同标题重发/分P 场景），仍不止一个则歧义拒收
+            const byNum = list.filter((x) => x.episodeTitle && epFromTitle(x.episodeTitle) === ep);
+            const picked = byNum.length === 1 ? byNum[0] : null;
+            if (!picked) {
+                log.info(`[danmuApi] [核验] ${how}命中 ${list.length} 个分集，歧义拒收 ep=${ep} | ${hit.animeTitle}`);
+                return null;
+            }
+            return picked;
+        }
+        return list[0];
+    };
+    const byExact = decide(exact, '完全相等');
+    if (byExact) return byExact;
+    const byContains = decide(contains, '包含');
+    if (byContains) return byContains;
+    log.info(`[danmuApi] [核验] 未标季条目分集标题均不匹配（ep=${ep} epTitle=${JSON.stringify(epTitle)}）| ${hit.animeTitle}`);
+    return null;
+}
+
 // ===================== 弹幕 XML =====================
 
 /** 拉弹幕 XML 并落盘（out 由调用方给定，路径安全校验在调用方）；0 条判未命中。 */
@@ -522,18 +650,32 @@ function okResult(count: number, title: string, matchedTitle: string, sim: numbe
 
 /**
  * 自动路径：番名 + 集数 → 搜索 → 定位集 → 拉 XML 落盘。
+ * [lc-1220] epTitle：播放侧本集标题（网页路径=item.title；MPV 路径从整串 title 尾段提取），
+ * 用于核验未标季条目的分集归属；空串=无核验材料，未标季条目照旧拒收。
  * 命中返回与内置 B站 链路同契约的结果；未命中/异常返回 null（调用方降级）。
  */
-export async function autoFetch(title: string, ep: number, out: string, season = 0): Promise<BiliDanmakuResult | null> {
+export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = ''): Promise<BiliDanmakuResult | null> {
     if (!isActive()) return null;
     try {
-        const hits = await searchAnimes(title, season);
+        // [lc-1220] MPV 链路只传整串 title（「番名 - S2E27: 集标题」，Lua 侧 clean_bili_title
+        // 保留真实副标题），调用方没给 epTitle 时从尾段提取；网页链路已显式传 item.title。
+        // 提取结果与搜索首段（番名本身）相同时视为无集标题（title 就是裸番名的形态），
+        // 拿番名当集标题去核验必然全不匹配，还白耗一次分集请求。
+        let verifyTitle = epTitle;
+        if (!verifyTitle) {
+            const ex = extractEpisodeTitle(title);
+            const head = keywordCandidates(title).slice(-1)[0] || '';
+            verifyTitle = (ex && normalizeEpTitle(ex) !== normalizeEpTitle(head)) ? ex : '';
+        }
+        const hits = await searchAnimes(title, season, verifyTitle);
         if (!hits.length) {
             log.info(`[danmuApi] 未命中（无精确匹配条目）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep} season=${season}`);
             return null;
         }
         for (const hit of hits.slice(0, MAX_TRIES)) {
-            const e = await pickEpisode(hit, ep);
+            const e = hit.seasonTier === SEASON_TIER_UNMARKED_VERIFY
+                ? await pickVerifiedEpisode(hit, ep, verifyTitle)
+                : await pickEpisode(hit, ep);
             if (!e) {
                 log.info(`[danmuApi] 条目无第 ${ep} 集，换下一个 | ${hit.animeTitle}`);
                 continue;
@@ -554,15 +696,24 @@ export async function autoFetch(title: string, ep: number, out: string, season =
 
 /**
  * 手动搜索路径：返回 Lua 期望形状的候选列表（bvid 位填 `dmapi:<episodeId>`）。
+ * [lc-1220] 未标季条目也放行进候选（exactMatchTier 返回待核验档即可入列）：候选菜单里
+ * 用户能看到「条目名 · 分集标题」，选不选、对不对由人眼把关——与 B站 候选同权。
  * 无候选返回 null（调用方降级到 B站 候选）。
  */
 export async function candidates(title: string, ep: number, season = 0): Promise<BiliCandidate[] | null> {
     if (!isActive()) return null;
     try {
-        const hits = await searchAnimes(title, season);
+        const hits = await searchAnimes(title, season, extractEpisodeTitle(title));
         const out: BiliCandidate[] = [];
         for (const hit of hits.slice(0, MAX_TRIES + 2)) {
-            const e = await pickEpisode(hit, ep);
+            // [lc-1220] 待核验条目标题核不上时不直接丢弃：回落 pickEpisode 按集号列出，
+            // 候选菜单里有「条目名 · 分集标题」可看，选不选由用户把关（与 B站 候选同权）。
+            let e = hit.seasonTier === SEASON_TIER_UNMARKED_VERIFY
+                ? await pickVerifiedEpisode(hit, ep, extractEpisodeTitle(title))
+                : await pickEpisode(hit, ep);
+            if (!e && hit.seasonTier === SEASON_TIER_UNMARKED_VERIFY) {
+                e = await pickEpisode(hit, ep);
+            }
             if (!e) continue;
             out.push({
                 index: out.length,

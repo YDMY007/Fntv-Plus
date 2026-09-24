@@ -607,6 +607,20 @@ function injectDmPanelStyle(): void {
   color:rgba(255,255,255,.92); overflow-wrap:anywhere;
 }
 .fntv-dm-wait{padding:2px 0 0;font-size:13px;color:rgba(255,255,255,.45)}
+/* [lc-1226] 三来源逐条说明：每条 = 状态点 + 源名 + 结论。用竖线把三条串起来，
+   让「按顺序依次尝试、命中即停」这件事一眼可见，而不是三行孤立文字。 */
+.fntv-dm-srcs{margin:0 0 10px;padding:0}
+.fntv-dm-src{display:flex;gap:8px;padding:6px 0;align-items:flex-start}
+.fntv-dm-src-dot{
+  flex:none;width:14px;height:14px;border-radius:50%;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;
+  color:#0b0d12;line-height:1;
+}
+.fntv-dm-src-txt{flex:1;min-width:0}
+.fntv-dm-src-name{font-size:13px;color:rgba(255,255,255,.92);font-weight:600}
+.fntv-dm-src-note{font-size:11.5px;line-height:1.45;color:rgba(255,255,255,.5);margin-top:2px;overflow-wrap:anywhere}
+.fntv-dm-src-note.fntv-dm-src-err{color:#ff8a8a}
+.fntv-dm-srcs-cap{font-size:11.5px;color:rgba(255,255,255,.45);margin:0 0 6px;line-height:1.5}
 /* 复选框自绘: 原生 checkbox 在暗面板上是一坨实心灰块, 与飞牛 Semi 的描边方框观感不符。
    ⚠ 必须排除开关里那个透明的原生 checkbox, 否则它会被画成方框。 */
 .fntv-dm-list input[type=checkbox]:not(.fntv-dm-sw-in){
@@ -1526,6 +1540,33 @@ function sourceLabel(s: string): string {
     return s || '未知';
 }
 
+// [lc-1226] 三来源的静态元信息（顺序 = 实际尝试顺序）。
+// 弹弹play 只在 MPV 链路参与（它是 MPV 的 Lua 脚本）——网页播放器这条链路上没有它，
+// 故这里标「不适用」而不是伪造一条「未命中」。
+// [lc-1228] 顺序改为「自建源 → 内置 B站 → 弹弹play(兜底)」：弹弹play 的弹幕库在内置凭证下
+// 只作兜底（官方约定要求按需使用），其剧集识别仍在 MPV 最前（网页链路不适用）。
+// name/role 存中文原文，渲染时才过 t()（与设置面板文案同一套词条）。
+const DM_SOURCES: { id: string; name: string; role: string; mpvOnly?: boolean }[] = [
+    { id: 'danmu_api', name: '自建弹幕接口（danmu_api）', role: '首选源：只认精确匹配，命中即用' },
+    { id: 'bilibili', name: '内置 B站', role: '次选源：模糊匹配，与 MPV 弹幕同源' },
+    { id: 'dandanplay', name: '弹弹play', role: '兜底源（仅 MPV）：前两者都拿不到弹幕时才启用', mpvOnly: true },
+];
+
+/** 单个来源该显示什么结论：优先用主进程回传的实测结果，没有则按配置状态如实说明。 */
+function sourceNote(trace: any, metaAny: any, fallback: string): { note: string; err: boolean; state: 'used' | 'tried' | 'skip' } {
+    if (!trace) return { note: fallback, err: false, state: 'skip' };
+    if (trace.used) {
+        const extra = trace.detail ? trace.detail : '';
+        const cnt = (trace.count != null) ? t('{n} 条', { n: trace.count }) : '';
+        // 用「 · 」连接结论与条数：中英文都自然，且不必把标点塞进词条里
+        return { note: [extra, cnt].filter(Boolean).join(' · ') || t('提供了本次弹幕'), err: false, state: 'used' };
+    }
+    if (trace.attempted) {
+        return { note: trace.error || t('尝试过但未命中'), err: true, state: 'tried' };
+    }
+    return { note: trace.skippedReason || fallback, err: false, state: 'skip' };
+}
+
 // Cookie 登录态 → 详情弹窗展示文案（非有效时 warn=true，弹窗会标红横幅）
 function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: string } {
     if (s === 'valid') return { text: '已登录（Cookie 有效）', warn: false, detail: '' };
@@ -1717,6 +1758,55 @@ function renderDetailRows(): void {
     }
 
     const cookie = cookieStatusInfo(meta.cookieStatus || '');
+
+    // ── [lc-1226] 三个来源的详情：谁在用、谁试过没中、谁没轮到，逐条写清 ──
+    const srcCap = document.createElement('div');
+    srcCap.className = 'fntv-dm-srcs-cap';
+    srcCap.textContent = t('弹幕按以下顺序依次尝试，命中即停：');
+    body.appendChild(srcCap);
+
+    const traces: any[] = Array.isArray((meta as any).sources) ? (meta as any).sources : [];
+    const srcBox = document.createElement('div');
+    srcBox.className = 'fntv-dm-srcs';
+    // 网页链路实际只有「自建源 → 内置 B站」两跳，弹弹play 是 MPV 的 Lua 脚本（不在这条链路上）。
+    const isSelfHosted = /^自建源/.test(String(meta.source || ''));
+    for (const def of DM_SOURCES) {
+        const trace = traces.find((x) => x && x.id === def.id);
+        let fb = t(def.role);
+        if (def.id === 'dandanplay') {
+            fb = t('不适用于网页播放器（弹弹play 由 MPV 侧使用）');
+        } else if (def.id === 'bilibili') {
+            fb = isSelfHosted ? t('自建源已命中，无需兜底') : t(def.role);
+        } else if (def.id === 'danmu_api' && isSelfHosted) {
+            fb = t('本次弹幕即由此源提供');
+        }
+        const st = sourceNote(trace, meta, fb);
+        // 状态点：绿=提供了弹幕，红=试过没中，灰=没轮到/不适用
+        const color = st.state === 'used' ? '#5ad17a' : (st.state === 'tried' ? '#ff6b6b' : 'rgba(255,255,255,.28)');
+        const glyph = st.state === 'used' ? '✓' : (st.state === 'tried' ? '✕' : '–');
+
+        const row = document.createElement('div');
+        row.className = 'fntv-dm-src';
+        const dot = document.createElement('div');
+        dot.className = 'fntv-dm-src-dot';
+        dot.style.background = color;
+        dot.textContent = glyph;
+        const txt = document.createElement('div');
+        txt.className = 'fntv-dm-src-txt';
+        const nm = document.createElement('div');
+        nm.className = 'fntv-dm-src-name';
+        nm.textContent = def.mpvOnly ? t('弹弹play（仅 MPV）') : t(def.name);
+        const nt = document.createElement('div');
+        nt.className = 'fntv-dm-src-note' + (st.err ? ' fntv-dm-src-err' : '');
+        nt.textContent = st.note;
+        txt.appendChild(nm);
+        txt.appendChild(nt);
+        row.appendChild(dot);
+        row.appendChild(txt);
+        srcBox.appendChild(row);
+    }
+    body.appendChild(srcBox);
+
     const rows: [string, string][] = [
         ['搜索番名', meta.searchTitle || '—'],
         ['来源区域', sourceLabel(meta.source)],

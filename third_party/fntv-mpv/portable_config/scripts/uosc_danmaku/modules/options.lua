@@ -37,10 +37,17 @@ options = {
     -- 自动合并多个同类候选（时间轴对齐的单集源）的弹幕，提升弹幕密度。
     -- 设为 0 或负数可禁用聚合（只取最佳单源）。默认 1500（单个视频弹幕>=1500 直接用单源，否则合并）。
     aggregate_threshold = 1500,
-    -- [lc-1018] 弹弹play 开放 API 自定义凭证（在弹弹play 开放平台注册应用后获得 AppId + Secret）。
-    -- 两项都非空才启用自定义签名；留空=使用脚本内置的共享凭证——该共享凭证已被官方接口
-    -- 整体 403 拒绝（2026-09-05 实测，表现为搜索/弹幕恒返回"无数据"），留空仅作向后兼容保留。
+    -- [lc-1226] 弹弹play 开放 API 自定义凭证（在弹弹play 开放平台注册应用后获得 AppId + Secret）。
+    -- 两项都非空才启用，此时【自定义优先、内置降级不生效】（自定义消耗用户自己的配额，
+    -- 弹弹play 会立即参与并优先取弹幕库）。
+    -- 留空则用脚本内置兜底凭证（AppId + Secret 以 AES 密文内嵌于 apis/dandanplay.lua，
+    -- 固定用 1 号密钥、不做自动轮换）；此时其弹幕库只在自建源与内置 B站 都拿不到时才取。
     -- 由应用设置面板「弹幕设置→弹弹play 凭证」写入 script-opts/uosc_danmaku.conf。
+    -- ⚠️ 存的是 AES-256-ECB 密文（base64），不是明文：该 conf 既被 git 跟踪又随安装包分发。
+    dandanplay_app_id_enc = "",
+    dandanplay_app_secret_enc = "",
+    -- 以下两个明文键为历史版本遗留，仅为兼容旧 conf 保留读取能力，新版本不再写入
+    -- （应用启动同步会主动清除它们，见 mpvConfig.ts writeDandanplayCredentials）。
     dandanplay_app_id = "",
     dandanplay_app_secret = "",
     save_danmaku = false,
