@@ -36,6 +36,9 @@ interface YearReport {
     ignored: number;        // [lc-1075] 被修正机制剔除的脏时间戳会话数（< 2000-01-01，如 1970）
     synthetic?: boolean;    // [lc-1077] 条目级数据为零时由观影台账估算（每日记录 × 平均单次时长）
     source?: 'events' | 'items' | 'ledger'; // [lc-1230] 本次报告实际用了哪一级数据源
+    /** [lc-1230b] 片单口径：'year'=本年（有真实日期，可信）；'all'=全库累计（飞牛无观看日期，
+     *  作品级事实只能给全量，页面须明示，否则「年度 TOP5」会名不副实）。 */
+    itemsScope?: 'year' | 'all';
 }
 
 /** 真实观看事件（watchHistory 台账导出的形状） */
@@ -129,6 +132,7 @@ export function computeReportFromEvents(
         items: top,
         ignored,
         source: 'events',
+        itemsScope: 'year', // 事件带真实墙钟时间 → 片单确实是本年的
         synthetic: estimated > 0 ? true : undefined,
     };
 }
@@ -215,6 +219,7 @@ export function computeReport(
         items: top,
         ignored,
         source: 'items',
+        itemsScope: 'year', // 有「最近播放」日期才计入 → 片单是本年的
         synthetic: estimated > 0 ? true : undefined,
     };
 }
@@ -276,18 +281,52 @@ function buildForYear(year: number): YearReport {
     // ② 次选条目级：真实进度 × 作品总时长（时长真实，日期只能按最近播放归年）
     const r = computeReport(items, year, getSessionTs);
     if (r.totalMs > 0) return r;
-    // ③ 兜底：每日台账 × 真实平均单次时长（封面明示为估算）
-    return synthesizeFromLedger(getWatchDayLedger(), getWatchEvents(), year, r);
+    // ③ 兜底：每日台账 × 真实平均单次时长（封面明示为估算）。
+    //    [lc-1230b] 同时用不依赖日期的作品级事实回填片单/看完率——飞牛没有观看日期，
+    //    不代表「没看过哪几部」；否则 TOP5 与看完率会整片空白（用户报障）。
+    return synthesizeFromLedger(getWatchDayLedger(), getWatchEvents(), year, r, computeItemFacts(items));
+}
+
+/**
+ * [lc-1230b] 作品级事实（不依赖日期）：飞牛的「看过哪些、看完没、看了多少」是真实可得的
+ *   （item/list 钻取出的 progress + total_runtime_ms），与「什么时候看的」无关。
+ *   旧实现在拿不到日期、退到每日台账时把 top/items 整个清空，于是片单、看完率、打分数
+ *   一起变 0（用户报障：观影天数/连续天数正常，但 TOP5 与看完率空）。
+ *   这里按「观看进度 × 作品总时长」折算每部的观看量并排序，供无日期年份回填作品级事实。
+ */
+export function computeItemFacts(
+    items: { name: string; prog: number; myRating: number; totalRuntimeMs?: number; type?: string }[],
+): { top: ReportItem[]; items: ReportItem[]; titles: number; finished: number; rated: number } {
+    const list: ReportItem[] = [];
+    for (const it of items) {
+        const runtime = it.totalRuntimeMs || 0;
+        const watched = Math.min(1, Math.max(0, it.prog || 0));
+        // 未看完按真实进度折算；看完按全片；仅痕迹(prog=0)按 5% 估
+        const ms = runtime > 0 ? Math.round(runtime * (watched > 0 ? watched : 0.05)) : 0;
+        list.push({ name: it.name, ms, prog: it.prog, rating: it.myRating, type: it.type || '' });
+    }
+    // 有真实时长的排前面；缺时长的靠 prog/评分兜底，保证「看过的」不因缺时长被整体丢弃
+    list.sort((a, b) => (b.ms - a.ms) || (b.prog - a.prog) || (b.rating - a.rating));
+    return {
+        top: list.slice(0, 5),
+        items: list,
+        titles: list.length,
+        finished: list.filter((t) => t.prog >= 1).length,
+        rated: list.filter((t) => t.rating > 0).length,
+    };
 }
 
 /** [lc-1077] 台账估算：把某年的每日观看台账折算为报告（纯函数，数据由调用方注入便于验证）。
  *  [lc-1230] 单次时长改用**真实历史均值**（取自观看事件台账），不再硬编码 30 分钟；
- *  只有从未有过带时长的事件时才退回 30 分钟，且结果始终带 synthetic/source 标记供封面明示。 */
+ *  只有从未有过带时长的事件时才退回 30 分钟，且结果始终带 synthetic/source 标记供封面明示。
+ *  [lc-1230b] 作品级事实（片单/看完率/打分数）不再被清空——飞牛给不出观看日期不代表「没看过哪几部」，
+ *  按 facts（progress × 时长）回填，并用 itemsScope='all' 明示口径为「全库累计」而非本年。 */
 export function synthesizeFromLedger(
     ledger: Array<{ y: number; m0: number; d: number; count: number }>,
     events: WatchEventLite[],
     year: number,
     base: YearReport,
+    facts?: { top: ReportItem[]; items: ReportItem[]; titles: number; finished: number; rated: number },
 ): YearReport {
     const perSession = avgSessionMs(events);
     const monthMs = new Array(12).fill(0);
@@ -307,8 +346,13 @@ export function synthesizeFromLedger(
         monthMs,
         activeDays: days.size,
         maxStreak: maxStreakOf(Array.from(days)),
-        top: [],
-        items: [],
+        // 作品级事实：进度与时长都是真实值，只是无法归到具体年份 → 标注口径为全库累计
+        top: facts ? facts.top : [],
+        items: facts ? facts.items : [],
+        titles: facts ? facts.titles : 0,
+        finished: facts ? facts.finished : 0,
+        rated: facts ? facts.rated : 0,
+        itemsScope: facts && facts.items.length ? 'all' : undefined,
         source: 'ledger',
         synthetic: true,
     };
@@ -456,9 +500,14 @@ function lastPlayedOf(it: { lastPlayedAt?: number; sessions?: [string, string][]
 }
 
 // ── 页面 HTML ──
-function pageHtml(r: YearReport, page: number): string {
+/** 单页 HTML（导出便于验证「用户实际看到什么」，如无数据时不得编造结论）。 */
+export function pageHtml(r: YearReport, page: number): string {
     const hours = r.totalMs / 3600000;
     const esc = (x: string): string => x.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    // [lc-1230b] 作品级数据口径：飞牛给不出观看日期时只能给全库累计，
+    //   凡是用到「片单/看完率/打分数」的地方都要标出来，避免把全库当成「本年」误读。
+    const allScope = r.itemsScope === 'all';
+    const scopeTag = allScope ? '<span style="font-size:10px;color:#8a93ad;font-weight:600;">（全库累计）</span>' : '';
     const head = (kicker: string) => `<div style="position:absolute;top:26px;left:0;right:0;text-align:center;
         font-size:11px;font-weight:800;letter-spacing:4px;color:#8a93ad;">${kicker}</div>`;
     if (page === 0) {
@@ -471,12 +520,12 @@ function pageHtml(r: YearReport, page: number): string {
                 <span style="font-size:20px;font-weight:800;color:${INK};">小时</span>
             </div>
             <div style="display:flex;gap:26px;margin-top:6px;">
-                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.titles}</div><div style="font-size:11px;color:${SUB};">部作品</div></div>
+                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.titles}</div><div style="font-size:11px;color:${SUB};">部作品${scopeTag}</div></div>
                 <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB};">天有观影</div></div>
-                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB};">部看完</div></div>
+                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB};">部看完${scopeTag}</div></div>
             </div>
             ${r.ignored > 0 ? `<div style="font-size:11px;color:#b06a3a;background:rgba(176,106,58,.10);border:1px solid rgba(176,106,58,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">🛠 已自动修正 ${r.ignored} 条异常时间记录（播放时间早于 2000 年的脏数据，不计入统计）</div>` : ''}
-            ${r.source === 'ledger' ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 本报告按观影台账估算（每日记录 × 你的平均单次时长）；播放一段后重开即为精确值</div>` : ''}
+            ${r.source === 'ledger' ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;max-width:600px;line-height:1.6;">📊 播放时段按观影台账估算（每日记录 × 你的平均单次时长）；飞牛未提供观看日期，「部作品 / 部看完 / 片单」为全库累计值。播一段后重开即逐步精确。</div>` : ''}
             ${r.source === 'items' ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 时长按飞牛观看进度折算（真实），日期按最近播放归入本年</div>` : ''}
             <div style="position:absolute;bottom:20px;font-size:10.5px;color:#8a93ad;">← → 翻页 · Esc 关闭 · 可导出长图</div>
         </div>`;
@@ -492,9 +541,14 @@ function pageHtml(r: YearReport, page: number): string {
                 <div style="font-size:10px;color:${SUB};">${i + 1}月</div>
             </div>`;
         }).join('');
+        // [lc-1230b] 月份全零时不得声称「最猛的是 1 月」——那是数组下标 0 的假结论
+        const peakIdx = r.monthMs.indexOf(Math.max(...r.monthMs));
+        const head2 = r.totalMs > 0
+            ? `你观影最猛的一个月是 <span style="background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${peakIdx + 1} 月</span>`
+            : '月度节奏';
         return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head('PAGE 2 · 月度节奏')}
-            <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 6px;">你观影最猛的一个月是 <span style="background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${r.monthMs.indexOf(Math.max(...r.monthMs)) + 1} 月</span></div>
+            <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 6px;">${head2}</div>
             <div style="display:flex;align-items:flex-end;gap:8px;height:220px;margin-top:26px;">${bars}</div>
         </div>`;
     }
@@ -507,6 +561,18 @@ function pageHtml(r: YearReport, page: number): string {
                 ${h % 3 === 0 ? `<div style="font-size:8.5px;color:${SUB};">${hh}</div>` : '<div style="font-size:8.5px;">&nbsp;</div>'}
             </div>`;
         }).join('');
+        // [lc-1230b] 时刻数据缺失时必须说清，不能默认成「养生作息」——每日台账只记「当天看了几部」，
+        //   没有小时维度，硬算只会给出「深夜占比 0.0% + 养生作息」这种看着像结论的编造值。
+        const hourTotal = r.hourMs.reduce((a, b) => a + b, 0);
+        if (hourTotal <= 0) {
+            return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
+                ${head('PAGE 3 · 观影时刻')}
+                <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 6px;">观影时刻</div>
+                <div style="color:#5a6480;line-height:1.9;margin-top:10px;">暂无可用的观看时刻数据。<br>
+                飞牛未提供观看时间，每日台账也只记录「当天看了几部」而没有具体小时。<br>
+                <span style="color:#4a5fd0;">用本应用播放一段后重开本报告，即可看到真实的 24 小时分布与夜猫指数。</span></div>
+            </div>`;
+        }
         const owl = r.nightRatio > 0.25 ? '重度夜猫 🦉' : (r.nightRatio > 0.1 ? '轻度夜猫 🌙' : '养生作息 ☀️');
         return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head('PAGE 3 · 观影时刻')}
@@ -534,8 +600,8 @@ function pageHtml(r: YearReport, page: number): string {
         }).join('');
         return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head('PAGE 4 · 年度片单')}
-            <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 18px;">你的年度 TOP5</div>
-            ${rows || (r.source === 'ledger' ? '<div style="color:#5a6480;line-height:1.8;">台账估算模式：暂无单部作品的观看时长记录，<br>多播放几部后即可生成年度片单。</div>' : '<div style="color:#5a6480;">今年暂无观看时长数据</div>')}
+            <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 18px;">你的年度 TOP5${scopeTag}</div>
+            ${rows || (r.source === 'ledger' ? '<div style="color:#5a6480;line-height:1.8;">暂无可排序的作品数据，<br>多播放几部后即可生成年度片单。</div>' : '<div style="color:#5a6480;">今年暂无观看时长数据</div>')}
         </div>`;
     }
     const doneRate = r.titles ? Math.round((r.finished / r.titles) * 100) : 0;
@@ -544,8 +610,8 @@ function pageHtml(r: YearReport, page: number): string {
         ${head('PAGE 5 · 总结')}
         <div style="font-size:26px;font-weight:900;color:${INK};">${r.year} 年，最大连续观影 <span style="background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${r.maxStreak} 天</span></div>
         <div style="display:flex;gap:34px;">
-            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${doneRate}%</div><div style="font-size:11px;color:${SUB};">看完率</div></div>
-            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.rated}</div><div style="font-size:11px;color:${SUB};">打过分</div></div>
+            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${doneRate}%</div><div style="font-size:11px;color:${SUB};">看完率${scopeTag}</div></div>
+            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.rated}</div><div style="font-size:11px;color:${SUB};">打过分${scopeTag}</div></div>
             <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB};">观影天数</div></div>
         </div>
         <div style="font-size:12.5px;color:${SUB};margin-top:8px;">期待 ${r.year + 1} 年继续与你相伴 🎬</div>
@@ -590,6 +656,8 @@ function exportLongImage(): void {
     const maxMonth = Math.max(...r.monthMs, 1);
     const maxHour = Math.max(...r.hourMs, 1);
     const maxTop = r.top.length ? r.top[0].ms : 1;
+    // [lc-1230b] 导出图与页面同口径：作品级数据是全库累计时必须标出
+    const SCOPE_SUFFIX = r.itemsScope === 'all' ? '（全库累计）' : '';
 
     // 封面段
     text('FNTV-PLUS · ' + r.year + ' 年度观影报告', W / 2, 70, 13, '800', '#8a93ad', 'center');
@@ -597,7 +665,7 @@ function exportLongImage(): void {
     accent(W / 2 - 92, 138, 184, 62);
     text(String(fmtHours(r.totalMs)), W / 2, 182, 52, '900', '#ffffff', 'center');
     text('小时', W / 2 + 104, 182, 18, '800', ink, 'center');
-    const c3 = [['部作品', String(r.titles)], ['天有观影', String(r.activeDays)], ['部看完', String(r.finished)]];
+    const c3 = [['部作品' + SCOPE_SUFFIX, String(r.titles)], ['天有观影', String(r.activeDays)], ['部看完' + SCOPE_SUFFIX, String(r.finished)]];
     c3.forEach(([l, v], i) => {
         const x = W / 2 + (i - 1) * 150;
         text(v, x, 246, 26, '900', ink, 'center');
@@ -608,7 +676,7 @@ function exportLongImage(): void {
     let y0 = 360;
     text('月度节奏', 46, y0, 20, '900', ink);
     const peak = r.monthMs.indexOf(Math.max(...r.monthMs));
-    text('最猛的一个月：' + (peak + 1) + ' 月', W - 46, y0, 13, '700', '#4a5fd0', 'right');
+    if (r.totalMs > 0) text('最猛的一个月：' + (peak + 1) + ' 月', W - 46, y0, 13, '700', '#4a5fd0', 'right');
     const bw = 34, gap = (W - 92 - bw * 12) / 11;
     for (let i = 0; i < 12; i++) {
         const h = Math.max(4, Math.round((r.monthMs[i] / maxMonth) * 130));
@@ -620,8 +688,15 @@ function exportLongImage(): void {
 
     // 时刻
     y0 += 240;
+    // [lc-1230b] 与页面同口径：无小时数据时如实写「暂无」，不编造「养生作息」结论
+    const hourTotalExport = r.hourMs.reduce((a, b) => a + b, 0);
     const owl = r.nightRatio > 0.25 ? '重度夜猫 🦉' : (r.nightRatio > 0.1 ? '轻度夜猫 🌙' : '养生作息 ☀️');
-    text('观影时刻 · ' + owl + '（深夜占比 ' + (r.nightRatio * 100).toFixed(1) + '%）', 46, y0, 20, '900', ink);
+    if (hourTotalExport > 0) {
+        text('观影时刻 · ' + owl + '（深夜占比 ' + (r.nightRatio * 100).toFixed(1) + '%）', 46, y0, 20, '900', ink);
+    } else {
+        text('观影时刻 · 暂无可用的观看时刻数据', 46, y0, 20, '900', ink);
+        text('飞牛未提供观看时间，用本应用播放一段后重开即有 24 小时分布', 46, y0 + 22, 11, '600', sub);
+    }
     const hw = (W - 92) / 24 - 4;
     for (let h = 0; h < 24; h++) {
         const hh = Math.max(3, Math.round((r.hourMs[h] / maxHour) * 90));
@@ -633,7 +708,7 @@ function exportLongImage(): void {
 
     // TOP5
     y0 += 200;
-    text('年度 TOP5', 46, y0, 20, '900', ink);
+    text('年度 TOP5' + SCOPE_SUFFIX, 46, y0, 20, '900', ink);
     const medals = ['🥇', '🥈', '🥉', '④', '⑤'];
     r.top.forEach((t, i) => {
         const yy = y0 + 34 + i * 52;
@@ -650,15 +725,18 @@ function exportLongImage(): void {
     const doneRate = r.titles ? Math.round((r.finished / r.titles) * 100) : 0;
     accent(W / 2 - 150, y0, 300, 2);
     text(r.year + ' 年，最大连续观影 ' + r.maxStreak + ' 天', W / 2, y0 + 52, 24, '900', ink, 'center');
-    const c5 = [['看完率', doneRate + '%'], ['打过分', String(r.rated)], ['观影天数', String(r.activeDays)]];
+    const c5 = [['看完率' + SCOPE_SUFFIX, doneRate + '%'], ['打过分' + SCOPE_SUFFIX, String(r.rated)], ['观影天数', String(r.activeDays)]];
     c5.forEach(([l, v], i) => {
         const x = W / 2 + (i - 1) * 150;
         text(v, x, y0 + 108, 26, '900', ink, 'center');
         text(l, x, y0 + 130, 11, '600', sub, 'center');
     });
     text('期待 ' + (r.year + 1) + ' 年继续与你相伴 🎬  ·  Fntv-Plus 生成', W / 2, H - 40, 10.5, '600', '#8a93ad', 'center');
-    // [lc-1230] 导出图同样注明数据口径（估算/折算时不能让人当成精确值）
-    const note = r.source === 'ledger' ? '数据口径：按观影台账估算（每日记录 × 平均单次时长）'
+    // [lc-1230/1230b] 导出图同样注明数据口径（估算/折算/全库累计时不能让人当成精确值）
+    const note = r.source === 'ledger'
+        ? (r.itemsScope === 'all'
+            ? '数据口径：时段按观影台账估算；飞牛未提供观看日期，「部作品/部看完/看完率/片单」为全库累计'
+            : '数据口径：按观影台账估算（每日记录 × 平均单次时长）')
         : (r.source === 'items' ? '数据口径：时长按飞牛观看进度折算，日期按最近播放归年' : '');
     if (note) text(note, W / 2, H - 22, 10, '600', '#8a93ad', 'center');
 

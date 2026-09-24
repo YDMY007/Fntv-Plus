@@ -233,11 +233,91 @@ eq(FL.activeDays, 2, 'F4 活跃天数 2');
 eq(FL.maxStreak, 2, 'F5 3/10-3/11 连刷 2 天');
 eq(FL.source, 'ledger', 'F6 标记数据源=ledger');
 eq(FL.synthetic, true, 'F7 标记估算（封面/导出图如实告知）');
-eq(FL.top.length, 0, 'F8 台账模式不编造片单');
+eq(FL.top.length, 0, 'F8 不传 facts 时不编造片单');
 // 无任何历史时长 → 退回 30 分钟
 const F0 = wr.synthesizeFromLedger(ledger, [], 2025, baseEmpty);
 eq(F0.totalMs, 3 * 1800000, 'F9 从未有带时长事件 → 退回 30 分钟口径');
 // 该年台账为空 → 原样返回基准（不伪造数据）
 eq(wr.synthesizeFromLedger([], histEvents, 2030, baseEmpty).totalMs, 0, 'F10 无台账年份不伪造数据');
 
-console.log('\n[lc-1230] 年度报告数据修复验证通过: ' + n + '/' + n + ' 断言');
+// ── G. [lc-1230b] 复现用户报障：飞牛无观看日期，但天数/连续天数正常，片单与看完率却空 ──
+// 真实数据形状：24 部（看完 9 / 部分看 15），全部 last_played=0（日期不可用），
+// 每日台账却有记录（所以天数/连续天数有值）。旧实现把 top/items 清空 → TOP5 与看完率一起 0。
+const realItems = [
+    { name: '剧A', prog: 1, myRating: 5, totalRuntimeMs: 24 * 3600000, lastPlayedAt: 0, type: '剧集' },
+    { name: '剧B', prog: 0.5, myRating: 4, totalRuntimeMs: 20 * 3600000, lastPlayedAt: 0, type: '动漫' },
+    { name: '电影C', prog: 1, myRating: 0, totalRuntimeMs: 2 * 3600000, lastPlayedAt: 0, type: '电影' },
+    { name: '仅痕迹剧D', prog: 0, myRating: 0, totalRuntimeMs: 10 * 3600000, lastPlayedAt: 0, type: '剧集' },
+];
+// 无日期年份：条目级 computeReport 得 0 → 走第③级台账
+const noDate = wr.computeReport(realItems, 2026, tsOf);
+eq(noDate.totalMs, 0, 'G1 无观看日期时条目级无时长（复现报障前提）');
+const facts = wr.computeItemFacts(realItems);
+eq(facts.titles, 4, 'G2 作品级事实：4 部（不依赖日期）');
+eq(facts.finished, 2, 'G3 看完 2 部（旧实现此处为 0 → 看完率 0%）');
+eq(facts.rated, 2, 'G4 打过分 2 部（旧实现此处为 0）');
+eq(facts.top[0].name, '剧A', 'G5 TOP1 = 剧A（24h 看完）');
+eq(facts.top[1].name, '剧B', 'G6 TOP2 = 剧B（20h × 50% = 10h）');
+eq(facts.top[2].name, '电影C', 'G7 TOP3 = 电影C（2h 看完）');
+const G = wr.synthesizeFromLedger(ledger, histEvents, 2025, noDate, facts);
+eq(G.top.length, 4, 'G8 台账模式回填真实片单（旧实现被清空 → TOP5 页空白）');
+eq(G.finished, 2, 'G9 看完数不再为 0');
+eq(G.titles, 4, 'G10 部数不再为 0');
+eq(G.itemsScope, 'all', 'G11 明示口径=全库累计（飞牛无日期，不能冒充本年）');
+ok(G.top[0].ms > 0, 'G12 片单时长按真实进度折算（非编造）');
+// 看完率恢复（旧实现在此得 0%）
+eq(Math.round((G.finished / G.titles) * 100), 50, 'G13 看完率 50% 而非 0%');
+// 口径标记的契约：computeReport 只统计本年日期，故恒为 'year'（无数据时其结果会被层级选择丢弃）；
+// 只有台账兜底那条路才会标 'all'。两者都不能含糊。
+const noDate2 = wr.computeReport(realItems, 2026, tsOf);
+eq(noDate2.totalMs, 0, 'G14a 无日期年份条目级无时长（该结果会被层级选择丢弃）');
+eq(noDate2.itemsScope, 'year', 'G14b computeReport 恒为 year 口径（它只统计本年日期）');
+ok(G.itemsScope === 'all' && noDate2.itemsScope === 'year', 'G14c all/year 两种口径严格区分，不互相冒充');
+const withDate = wr.computeReport([{ name: 'X', prog: 1, myRating: 0, totalRuntimeMs: 3600000, lastPlayedAt: new Date(2026, 4, 1).getTime() }], 2026, tsOf);
+eq(withDate.itemsScope, 'year', 'G15 有本年日期 → 口径标 year');
+eq(wr.computeReportFromEvents([{ ts: new Date(2026, 4, 1).getTime(), key: 'k', name: 'Y', ms: 3600000 }], 2026, []).itemsScope, 'year', 'G16 事件级口径标 year');
+
+// ── H. [lc-1230b] 「观影时刻」无小时数据：不得编造结论 ──
+// 每日台账只有「当天看了几部」，没有小时维度 → hourMs 必然全零。
+// 旧实现据此算出 nightRatio=0 → 页面显示「养生作息 ☀️ / 深夜占比 0.0%」并配一张空图（用户报障之一）。
+const noHour = wr.synthesizeFromLedger(ledger, histEvents, 2025, noDate, facts);
+eq(noHour.hourMs.reduce((a, b) => a + b, 0), 0, 'H1 台账模式无小时维度（hourMs 全零）');
+eq(noHour.nightRatio, 0, 'H2 夜猫占比无数据时为 0');
+// 关键：页面必须靠 hourMs 全零来识别「无数据」，而不是把 nightRatio=0 当结论
+ok(noHour.hourMs.every((v) => v === 0), 'H3 页面据 hourMs 全零判定「暂无数据」而非输出养生作息');
+// 对照：有真实事件时小时分布非空，页面才会给出夜猫结论
+const withHour = wr.computeReportFromEvents([{ ts: new Date(2025, 4, 1, 1, 30).getTime(), key: 'k', name: 'Z', ms: 3600000 }], 2025, []);
+ok(withHour.hourMs.reduce((a, b) => a + b, 0) > 0, 'H4 有真实事件时小时分布非空');
+eq(withHour.nightRatio, 1, 'H5 深夜起播时夜猫占比 1（结论有据）');
+
+// ── I. 用户实际看到的页面文案（pageHtml 是渲染入口，直接断言渲染结果）──
+const noHourPage = wr.pageHtml(noHour, 2);
+ok(/暂无可用的观看时刻数据/.test(noHourPage), 'I1 无小时数据 → 页面明说暂无，而不是给结论');
+ok(!/养生作息/.test(noHourPage), 'I2 不得出现编造的「养生作息」');
+ok(!/深夜时段\(00-05点\)观看占比/.test(noHourPage), 'I3 不得显示「深夜占比 0.0%」这种假指标');
+
+// 月份全零时不得声称「最猛的是 1 月」（indexOf 返回 0 的假结论）
+const emptyBase = wr.computeReport([], 2025, tsOf);
+const noMonth = wr.synthesizeFromLedger([], histEvents, 2025, emptyBase, facts);
+ok(noHour.monthMs.some((v) => v > 0), 'I4 该场景月份有值（下一条断言针对真的全零）');
+const allZero = { ...emptyBase, totalMs: 0, monthMs: new Array(12).fill(0) };
+const p2 = wr.pageHtml({ ...allZero, source: 'ledger', itemsScope: 'all' }, 1);
+ok(!/最猛的一个月是/.test(p2), 'I5 月份全零 → 不声称「最猛的一个月是 1 月」');
+const p2ok = wr.pageHtml(noHour, 1);
+ok(/最猛的一个月是/.test(p2ok), 'I6 有月份数据时正常给出峰值月');
+
+// 片单/看完率页：有 facts 时必须渲染真实条目与数值
+const p4 = wr.pageHtml(noHour, 3);
+ok(/剧A/.test(p4), 'I7 TOP5 页渲染出真实作品名（旧实现为空白提示）');
+ok(/全库累计/.test(p4), 'I8 TOP5 页标注「全库累计」口径');
+const p5 = wr.pageHtml(noHour, 4);
+ok(!/>0%</.test(p5), 'I9 总结页看完率不再是 0%（旧实现 0%）');
+ok(/50%/.test(p5), 'I10 总结页看完率为真实的 50%（2/4 部看完）');
+const p1 = wr.pageHtml(noHour, 0);
+ok(/部作品/.test(p1) && /全库累计/.test(p1), 'I11 封面标注部作品为全库累计');
+ok(/飞牛未提供观看日期/.test(p1), 'I12 封面如实说明日期缺失原因');
+// 有真实日期的年份不得出现「全库累计」字样
+const yearPage = wr.pageHtml(wr.computeReportFromEvents([{ ts: new Date(2026, 4, 1).getTime(), key: 'k', name: 'Y', ms: 3600000 }], 2026, []), 0);
+ok(!/全库累计/.test(yearPage), 'I13 有真实日期时不误标全库累计');
+
+console.log('\n[lc-1230/1230b] 年度报告数据修复验证通过: ' + n + '/' + n + ' 断言');
