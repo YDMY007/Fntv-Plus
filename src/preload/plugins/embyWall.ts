@@ -5,6 +5,7 @@ import { buildCard as buildCustomLogoCard, refreshCard as refreshCustomLogoCard 
 import { applyLoginBgVar } from './embyWall/login';
 import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, resumeCarousel } from './embyWall/carousel/render';
 import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
+import { buildStatsCard } from './embyWall/modals/telemetry'; // [v1.12.0] 匿名使用统计卡（关于页）
 import { injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
@@ -2003,16 +2004,34 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     danFoldNote.textContent = t('屏蔽类型与屏蔽词于下一次 B站 弹幕加载时生效。');
     danFoldBody.appendChild(danFoldNote);
 
-    // ===== [lc-1018] 弹弹play 自定义凭证（开放 API AppId + Secret）=====
-    // 背景：脚本内置共享凭证已被弹弹play官方接口整体 403（2026-09-05 实测，搜索/弹幕恒"无数据"）。
-    // 用户在弹弹play开放平台注册应用后把专属 AppId+Secret 填到这里 → 写入 script-opts/uosc_danmaku.conf
-    // → dandanplay.lua 优先用自定义凭证签名；两项留空=回落内置共享凭证。mpv 每次播放新起进程 → 下次播放生效。
-    // [lc-1102] 从「弹幕屏蔽与样式」卡独立成卡：首屏只留凭证状态一行，输入与按钮收进折叠区。
+    // ===== [lc-1018→v1.11.0] 弹弹play 弹幕源（内置凭证开箱即用 + 可选自定义凭证）=====
+    // 历史：脚本内置共享凭证曾被弹弹play官方接口整体 403（2026-09-05 实测），当时只能靠用户自填凭证救活。
+    // [v1.11.0] 已申请到正式开放平台应用，凭证加密内置进二进制（见 internal/secret）→ 默认即可用，
+    // 本条链路直接在后端出弹幕（不再依赖 MPV 的 dandanplay.lua）。自定义凭证仍保留：面板填入后优先于内置，
+    // 两项都填才生效；清除后回落内置。密文落盘（config.json 里看不到明文）。
+    // [lc-1102] 从「弹幕屏蔽与样式」卡独立成卡：首屏只留状态行，输入与按钮收进折叠区。
     const secDandan = section('弹弹play');
     const ddBody = secDandan.body;
 
+    // 首屏：启用开关（默认开）+ 状态行
+    const ddRow = document.createElement('div');
+    ddRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;'
+      + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+    ddRow.onmouseenter = () => { ddRow.style.background = 'var(--fnos-ui-row-hover)'; };
+    ddRow.onmouseleave = () => { ddRow.style.background = 'transparent'; };
+    const ddRowLabel = document.createElement('span');
+    ddRowLabel.textContent = t('启用弹弹play 弹幕源（兜底）');
+    ddRowLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+    const swDandan = document.createElement('input');
+    swDandan.type = 'checkbox';
+    swDandan.checked = true;
+    swDandan.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    ddRow.appendChild(ddRowLabel); ddRow.appendChild(swDandan);
+    ddBody.appendChild(ddRow);
+    ddRow.addEventListener('click', (e: Event) => { if (e.target !== swDandan) swDandan.click(); });
+
     const ddStateLine = document.createElement('div');
-    ddStateLine.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-warn);line-height:1.5;';
+    ddStateLine.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;padding:0 6px 4px;';
     ddBody.appendChild(ddStateLine);
 
     const ddFold = mkFold('开放 API 凭证（AppId / Secret）');
@@ -2021,13 +2040,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const ddHint = document.createElement('div');
     ddHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    ddHint.textContent = t('内置共享凭证已被弹弹play官方接口封禁（弹幕恒「无数据」）。在弹弹play开放平台注册应用后，填入专属 AppId 与 Secret 即可恢复；两项都填才生效，清除后回落内置凭证。下次播放时生效。');
+    ddHint.textContent = t('弹弹play 为兜底源：仅当自建源与 B站 都没拿到足量弹幕时才请求，以节省开放 API 额度。本应用已内置一套正式凭证，默认即可使用（无需填写）；若你有自己的弹弹play 应用，可填入专属 AppId 与 Secret 覆盖内置凭证，两项都填才生效，清除后回落内置。凭证加密保存在 NAS 配置目录，不会明文暴露。保存后立即生效。');
     ddFoldBody.appendChild(ddHint);
 
     // 掩码输入（交互同 Bangumi token：已保存显示星号，聚焦自动清空进入编辑）
     const maskDd = (t: string): string => '*'.repeat(Math.max(0, t.length));
     let ddRealId = '';
-    let ddRealSecret = '';
+    let ddHasCustomSecret = false;
     const mkDdInput = (placeholder: string): HTMLInputElement => {
       const inp = document.createElement('input');
       inp.type = 'text';
@@ -2040,11 +2059,6 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     };
     const ddIdInput = mkDdInput('弹弹play AppId（如 gz2wnihj9d 形式的专属 id）');
     const ddSecretInput = mkDdInput('弹弹play Secret（注册应用后获得，勿外传）');
-    const ddBlurMask = (inp: HTMLInputElement, real: string): void => {
-      if (inp.value.trim() === '' && real) { inp.value = maskDd(real); inp.readOnly = true; }
-    };
-    ddIdInput.addEventListener('blur', () => ddBlurMask(ddIdInput, ddRealId));
-    ddSecretInput.addEventListener('blur', () => ddBlurMask(ddSecretInput, ddRealSecret));
     ddFoldBody.appendChild(ddIdInput);
     ddFoldBody.appendChild(ddSecretInput);
 
@@ -2052,20 +2066,61 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     ddBtns.style.cssText = 'display:flex;gap:6px;';
     const ddSaveBtn = mkBtn('保存凭证', true);
     const ddClearBtn = mkBtn('清除凭证', true);
-    ddBtns.appendChild(ddSaveBtn); ddBtns.appendChild(ddClearBtn);
+    const ddTestBtn = mkBtn('测试连接', true);
+    ddBtns.appendChild(ddSaveBtn); ddBtns.appendChild(ddClearBtn); ddBtns.appendChild(ddTestBtn);
     ddFoldBody.appendChild(ddBtns);
 
     const ddStatus = document.createElement('div');
     ddStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
     ddFoldBody.appendChild(ddStatus);
 
-    // 首屏状态行 = 本卡唯一的常显信息：保存/清除/回填时都要同步，否则会停在旧状态误导用户
-    const ddSetState = (configured: boolean): void => {
-      ddStateLine.textContent = configured
-        ? t('已配置自定义凭证')
-        : t('未配置（内置共享凭证已被弹弹play 封禁，弹幕恒「无数据」）');
-      ddStateLine.style.color = configured ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';
+    // 首屏状态行 = 本卡唯一的常显信息：保存/清除/开关/回填时都要同步，否则会停在旧状态误导用户。
+    // [v1.11.1] 弹弹play 已降为兜底源（开放 API 有配额），状态行需讲清「什么时候才会用到它」。
+    const ddSetState = (credential: string): void => {
+      if (!swDandan.checked) {
+        ddStateLine.textContent = t('已关闭，弹弹play 不参与兜底（B站/自建源照常）。');
+        ddStateLine.style.color = 'var(--fnos-ui-warn)';
+        return;
+      }
+      const how = t('仅当自建源与 B站 都没拿到足量弹幕时才使用，节省额度');
+      if (credential === 'custom') {
+        ddStateLine.textContent = t('已启用（兜底）· 使用你填写的自定义凭证 · ') + how;
+        ddStateLine.style.color = 'var(--fnos-ui-sub)';
+      } else if (credential === 'builtin') {
+        ddStateLine.textContent = t('已启用（兜底）· 使用应用内置凭证 · ') + how;
+        ddStateLine.style.color = 'var(--fnos-ui-ok)';
+      } else {
+        ddStateLine.textContent = t('未启用 —— 无可用凭证，请填写自定义凭证后保存。');
+        ddStateLine.style.color = 'var(--fnos-ui-warn)';
+      }
     };
+
+    // 后端为准的状态回查：凭证来源与是否配置都以 bridge 结论为准，不靠前端猜测
+    const ddRefreshStatus = (): void => {
+      ipcRenderer.invoke('dandanplay:status').then((r: any) => {
+        if (!r) return;
+        swDandan.checked = r.enabled !== false;
+        // AppId 后端会下发（非密钥材料）；Secret 只回布尔，绝不回明文
+        ddRealId = r.appId || '';
+        ddHasCustomSecret = r.credential === 'custom' && !!r.configured;
+        if (ddRealId) { ddIdInput.value = maskDd(ddRealId); ddIdInput.readOnly = true; }
+        if (ddHasCustomSecret) {
+          ddSecretInput.value = maskDd('00000000'); // 仅示意「已保存」，不回显真实长度
+          ddSecretInput.readOnly = true;
+        }
+        ddSetState(String(r.credential || 'none'));
+      }).catch(() => { /* 状态查询失败不阻断面板 */ });
+    };
+    ddRefreshStatus();
+
+    swDandan.addEventListener('change', () => {
+      ipcRenderer.invoke('settings:set-dandanplay-enabled', swDandan.checked)
+        .then(() => ddRefreshStatus())
+        .catch((err) => {
+          ddStatus.textContent = t('保存失败') + ': ' + (err && err.message ? err.message : err);
+          ddStatus.style.color = 'var(--fnos-ui-warn)';
+        });
+    });
 
     ddSaveBtn.addEventListener('click', (e: Event) => {
       e.stopPropagation();
@@ -2078,12 +2133,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       ipcRenderer.invoke('settings:set-dandanplay-credentials', { appId: id, appSecret: secret })
         .then(() => {
-          ddRealId = id; ddRealSecret = secret;
+          ddRealId = id;
           ddIdInput.value = maskDd(id); ddIdInput.readOnly = true;
           ddSecretInput.value = maskDd(secret); ddSecretInput.readOnly = true;
-          ddStatus.textContent = t('已保存，下次播放时生效。');
+          ddStatus.textContent = t('已保存（密文落盘），立即生效。');
           ddStatus.style.color = 'var(--fnos-ui-sub)';
-          ddSetState(true);
+          ddRefreshStatus();
         })
         .catch((err) => { ddStatus.textContent = '保存失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
     });
@@ -2091,13 +2146,32 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       e.stopPropagation();
       ipcRenderer.invoke('settings:set-dandanplay-credentials', { appId: '', appSecret: '' })
         .then(() => {
-          ddRealId = ''; ddRealSecret = '';
+          ddRealId = ''; ddHasCustomSecret = false;
           ddIdInput.value = ''; ddIdInput.readOnly = false;
           ddSecretInput.value = ''; ddSecretInput.readOnly = false;
-          ddStatus.textContent = t('已清除，回落脚本内置共享凭证，下次播放时生效。');
-          ddSetState(false);
+          ddStatus.textContent = t('已清除，回落应用内置凭证。');
+          ddRefreshStatus();
         })
         .catch((err) => { ddStatus.textContent = '清除失败: ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
+    });
+    ddTestBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      ddStatus.textContent = t('正在测试…');
+      ddStatus.style.color = 'var(--fnos-ui-sub)';
+      ipcRenderer.invoke('dandanplay:test', { keyword: '' })
+        .then((r: any) => {
+          if (r && r.ok) {
+            const sample = Array.isArray(r.sample) && r.sample.length ? '（如 ' + r.sample.slice(0, 2).join('、') + '）' : '';
+            ddStatus.textContent = t('连接正常 · {src} · {ms}ms · 命中 {n} 条 {sample}')
+              .replace('{src}', String(r.credential || '')).replace('{ms}', String(r.costMs || 0))
+              .replace('{n}', String(r.hits || 0)).replace('{sample}', sample);
+            ddStatus.style.color = 'var(--fnos-ui-ok)';
+          } else {
+            ddStatus.textContent = t('连接失败：') + String((r && r.error) || t('未知错误'));
+            ddStatus.style.color = 'var(--fnos-ui-warn)';
+          }
+        })
+        .catch((err) => { ddStatus.textContent = t('测试失败') + ': ' + (err && err.message ? err.message : err); ddStatus.style.color = 'var(--fnos-ui-warn)'; });
     });
 
     // ===== [lc-1101] 自建弹幕接口（danmu_api，多平台聚合，弹幕优选源）=====
@@ -2129,18 +2203,19 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     dmApiStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;';
     dmApiBody.appendChild(dmApiStatus);
 
-    // [v1.2.7] 自建源弹幕下限：命中条数（过滤后）低于该值时自动请求 B站补源（B 站更多才换，否则保留自建源）
+    // [v1.11.1] 弹幕下限（原「自建源弹幕下限」）：源链改为 自建源→B站→弹弹play 后，
+    // 这个阈值统一决定「多少条算够用、不必再往下探更全的源」，不再只作用于自建源。
     const dmMinRow = document.createElement('div');
     dmMinRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;gap:10px;';
     const dmMinLabel = document.createElement('span');
-    dmMinLabel.textContent = t('自建源弹幕少于该条数时自动改用 B 站（0=不启用）');
+    dmMinLabel.textContent = t('弹幕少于该条数时继续找下一个源（0=不启用）');
     dmMinLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;font-size:12.5px;flex:1;line-height:1.4;';
     const dmMinInput = document.createElement('input');
     dmMinInput.type = 'number';
     dmMinInput.min = '0';
     dmMinInput.max = '9999';
     dmMinInput.step = '1';
-    dmMinInput.placeholder = '20';
+    dmMinInput.placeholder = '100';
     dmMinInput.style.cssText = 'width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--fnos-ui-border);'
       + 'background:var(--fnos-input-bg);color:var(--fnos-ui-text);font-size:13px;text-align:center;flex:none;';
     dmMinRow.appendChild(dmMinLabel); dmMinRow.appendChild(dmMinInput);
@@ -2508,6 +2583,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     aboutLink.onmouseenter = () => { aboutLink.style.transform = 'scale(1.03)'; aboutLink.style.background = 'var(--fnos-ui-pill-hover)!important'; aboutLink.style.color = '#fff'; };
     aboutLink.onmouseleave = () => { aboutLink.style.transform = ''; aboutLink.style.background = 'var(--fnos-ui-pill-bg)!important'; aboutLink.style.color = 'var(--fnos-ui-pill-text)'; };
     secBodyAbout.appendChild(aboutLink);
+
+    // [v1.12.0] 匿名使用统计卡（开关 / 立即上报 / 重置匿名 ID）——与桌面版「关于」页同款。
+    secBodyAbout.appendChild(buildStatsCard());
 
     // ===== 分组: 外观（独立标签页；原侧栏"亚克力透明度/背景模糊"滑块迁入设置面板）=====
     // [飞牛影视特化 v0.12.0] 卡内只留主题模式三选一（亚克力透明度/背景模糊两滑块已按需移除，CSS 变量走启动默认值）
@@ -3988,20 +4066,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const bt: string[] = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
         for (const b of blockToggles) b.input.checked = bt.includes(b.key);
         if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || '';
-        // [lc-1018] 弹弹play 凭证回填（已保存则星号掩码只读显示，不回显明文）
-        ddRealId = s.dandanplayAppId || '';
-        ddRealSecret = s.dandanplayAppSecret || '';
-        ddIdInput.value = ddRealId ? maskDd(ddRealId) : '';
-        ddIdInput.readOnly = !!ddRealId;
-        ddSecretInput.value = ddRealSecret ? maskDd(ddRealSecret) : '';
-        ddSecretInput.readOnly = !!ddRealSecret;
-        if (ddRealId) ddStatus.textContent = t('已保存自定义凭证，下次播放时生效。');
-        ddSetState(!!ddRealId);
+        // [v1.11.0] 弹弹play 卡片状态改由后端 bridge 回查（凭证来源/是否配置/开关）：
+        // Secret 永不下发前端，故不能再靠 settings 里的明文回填掩码。
+        ddRefreshStatus();
         // [lc-1101] 自建弹幕接口回填（地址非敏感，明文显示；程序化赋值不触发 change，不会误保存）
         swDanmuApi.checked = s.danmuApiEnabled === true;
         dmApiInput.value = s.danmuApiBase || '';
-        // [v1.2.7] 自建源弹幕下限回填（后端默认 20；0=不启用）
-        dmMinInput.value = String(s.danmuMinCount == null ? 20 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
+        // [v1.11.1] 弹幕下限回填（后端默认 100；0=不启用）
+        dmMinInput.value = String(s.danmuMinCount == null ? 100 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
         if (swDanmuApi.checked) {
           dmApiStatus.textContent = dmApiInput.value
             ? t('已启用自建弹幕接口作为优选源，未命中时自动降级到 B站。')

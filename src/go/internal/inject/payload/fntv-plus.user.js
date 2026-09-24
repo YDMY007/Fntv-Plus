@@ -43,6 +43,17 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     authxMap.push({ path, authx });
     push("[diag] captured Authx for " + path);
   }
+  function getCapturedAuthx(path) {
+    const p = normalizePath(path);
+    if (!p) return "";
+    for (let i = authxMap.length - 1; i >= 0; i--) {
+      if (authxMap[i].path === p) return authxMap[i].authx;
+    }
+    for (let i = authxMap.length - 1; i >= 0; i--) {
+      if (p.startsWith(authxMap[i].path) || authxMap[i].path.startsWith(p)) return authxMap[i].authx;
+    }
+    return "";
+  }
   function installCapture() {
     try {
       const xo = XMLHttpRequest.prototype.open;
@@ -329,6 +340,9 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     shell: () => shell
   });
   function genAuthx(url, data) {
+    if (!AUTHX_KEY || !AUTHX_SECRET) {
+      return getCapturedAuthx(String(url)) || "";
+    }
     const nonce = String(Math.floor(Math.random() * (1e6 - 1e5) + 1e5));
     const timestamp = Date.now().toString();
     const dataJson = data ? JSON.stringify(data) : "";
@@ -474,8 +488,8 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     "src/shim/electron.js"() {
       init_diag();
       init_md5();
-      AUTHX_KEY = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
-      AUTHX_SECRET = "16CCEB3D-AB42-077D-36A1-F355324E4237";
+      AUTHX_KEY = "";
+      AUTHX_SECRET = "";
       LS_KEY = "fntv:electron-settings";
       shimExports = { ipcRenderer: null, shell: null };
       try {
@@ -506,6 +520,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         "system-page-url": "systemPageUrl",
         "smart-skip-enabled": "smartSkipEnabled",
         "dandanplay-credentials": "dandanplayCredentials",
+        "dandanplay-enabled": "dandanplayEnabled",
         "exit-mode": "exitMode",
         "custom-version": "customVersion",
         "debug-enabled": "debugEnabled",
@@ -547,9 +562,10 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
               });
             }
             if (channel === "settings:set-dandanplay-credentials") {
+              const a = args[0] || {};
               return apiPost("/app/fntvplus/api/settings", {
-                dandanplayAppId: String(args[0] || ""),
-                dandanplayAppSecret: String(args[1] || "")
+                dandanplayAppId: String(a.appId || "").trim(),
+                dandanplayAppSecret: String(a.appSecret || "").trim()
               });
             }
             const p = apiPost("/app/fntvplus/api/settings", { [key]: args[0] });
@@ -749,6 +765,12 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
             }
           }
           if (channel === "log-message") return Promise.resolve(void 0);
+          if (channel === "stats:get-info") return apiGet("/app/fntvplus/api/stats");
+          if (channel === "stats:set-enabled") {
+            return apiPost("/app/fntvplus/api/stats/enabled", { enabled: !!args[0] });
+          }
+          if (channel === "stats:ping-now") return apiPost("/app/fntvplus/api/stats/ping", {});
+          if (channel === "stats:reset-id") return apiPost("/app/fntvplus/api/stats/reset", {});
           if (channel === "settings:verify-unlock-code") return Promise.resolve({ ok: false, message: "\u7F51\u9875\u7AEF\u672A\u9002\u914D\u89E3\u9501\u7801" });
           if (channel === "settings:check-patch" || channel === "settings:apply-patch" || channel === "settings:apply-test-patch" || channel === "settings:rollback-patch") {
             return Promise.resolve({ ok: false, message: "\u7F51\u9875\u7AEF\u4E0D\u652F\u6301\u8865\u4E01\u673A\u5236" });
@@ -930,6 +952,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
           }
           if (channel === "danmaku:pick") {
             return apiPost("/app/fntvplus/api/bridge/danmaku/pick", args[0] || {});
+          }
+          if (channel === "dandanplay:status") {
+            return apiGet("/app/fntvplus/api/bridge/dandanplay/status");
+          }
+          if (channel === "dandanplay:test") {
+            const a = args[0] || {};
+            return apiPost("/app/fntvplus/api/bridge/dandanplay/test", { keyword: a.keyword || "" });
           }
           if (channel === "person:tmdb-brief" || channel === "person:tmdb-credits") {
             const ep = channel === "person:tmdb-brief" ? "brief" : "credits";
@@ -1320,6 +1349,30 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     "\u624B\u67C4": "Gamepad",
     "\u8BCA\u65AD\u4E0E\u65E5\u5FD7": "Diagnostics & logs",
     "\u5173\u4E8E": "About",
+    // ── [v1.12.0] 设置面板「关于」页：匿名使用统计卡（modals/telemetry.ts）──
+    "\u{1F4CA} \u533F\u540D\u4F7F\u7528\u7EDF\u8BA1": "\u{1F4CA} Anonymous usage stats",
+    "\u53C2\u4E0E\u533F\u540D\u7EDF\u8BA1": "Join anonymous stats",
+    "\u6BCF\u5929\u6700\u591A\u4E0A\u62A5\u4E00\u6B21\uFF0C\u5185\u5BB9\u53EA\u6709\uFF1A\u968F\u673A\u533F\u540D ID + \u7248\u672C\u53F7 + \u7CFB\u7EDF\u7C7B\u578B\u3002\u4E0D\u91C7\u96C6\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u4E0E\u6587\u4EF6\u8DEF\u5F84\uFF0C\u670D\u52A1\u7AEF\u4E5F\u4E0D\u5B58 IP\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002": "At most one report per day, containing only: a random anonymous ID + version + system type. No account, IP, library or file paths are collected; the server does not store IPs either. Counted only when someone actually opens the enhanced page.",
+    "\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21": "Report once now",
+    "\u91CD\u7F6E\u533F\u540D ID": "Reset anonymous ID",
+    "\u8BFB\u53D6\u4E2D\u2026": "Loading\u2026",
+    "\u4E0A\u62A5\u4E2D\u2026": "Reporting\u2026",
+    "\u4E0A\u62A5\u6210\u529F \u2705": "Reported \u2705",
+    "\u672A\u4E0A\u62A5\uFF1A": "Not reported: ",
+    "\u4E0A\u62A5\u5931\u8D25\uFF1A": "Report failed: ",
+    "\u672A\u77E5\u539F\u56E0": "unknown reason",
+    "\u5DF2\u5F00\u542F\uFF0C\u660E\u5929\u8D77\u6BCF\u5929\u4E0A\u62A5\u4E00\u6B21\u3002": "Enabled \u2014 one report per day from tomorrow.",
+    "\u5DF2\u5173\u95ED\uFF0C\u4E0D\u4F1A\u518D\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002": "Disabled \u2014 no data will be sent.",
+    "\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF0C\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\u3002": "New anonymous ID generated; no longer linked to past data.",
+    "\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF1A": "New anonymous ID: ",
+    "\u2026\uFF08\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\uFF09": "\u2026 (no longer linked to past data)",
+    "\u670D\u52A1\u7AEF\u672A\u914D\u7F6E\uFF0C\u5F53\u524D\u4E0D\u4F1A\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002": "No server configured \u2014 nothing is being sent.",
+    "\u5F00\u53D1\u7248\u9ED8\u8BA4\u4E0D\u4E0A\u62A5\uFF08\u53EF\u7528\u300C\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21\u300D\u6D4B\u8BD5\uFF09\u3002": "Dev builds do not report automatically (use \u201CReport once now\u201D to test).",
+    "\u4E0A\u6B21\u4E0A\u62A5\uFF1A": "Last report: ",
+    "\uFF08\u6210\u529F\uFF09": " (ok)",
+    "\uFF08\u5931\u8D25\uFF0C\u7A0D\u540E\u81EA\u52A8\u91CD\u8BD5\uFF09": " (failed, will retry later)",
+    "\u4ECA\u5929\u5DF2\u8BB0\u5F55\u4F7F\u7528\uFF0C\u5C06\u5728\u6570\u5C0F\u65F6\u5185\u4E0A\u62A5\u3002": "Usage recorded today; it will be reported within hours.",
+    "\u5C1A\u672A\u4E0A\u62A5\u8FC7\uFF08\u6253\u5F00\u4E00\u6B21\u589E\u5F3A\u9875\u9762\u540E\u5F00\u59CB\u8BA1\u6570\uFF09\u3002": "Not reported yet (counting starts once you open the enhanced page).",
     // ── 设置面板：分组标题 ──
     "\u8C03\u8BD5\u65E5\u5FD7": "Debug log",
     "\u7F51\u7EDC\u4E0E\u4EE3\u7406": "Network & proxy",
@@ -1336,7 +1389,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     "Trakt \u540C\u6B65": "Trakt sync",
     "\u5F39\u5F39play": "dandanplay",
     "\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\uFF08danmu_api\uFF09": "Self-hosted danmaku API (danmu_api)",
-    "\u81EA\u5EFA\u6E90\u5F39\u5E55\u5C11\u4E8E\u8BE5\u6761\u6570\u65F6\u81EA\u52A8\u6539\u7528 B \u7AD9\uFF080=\u4E0D\u542F\u7528\uFF09": "Auto-switch to Bilibili when self-hosted danmaku is below this count (0=off)",
+    "\u5F39\u5E55\u5C11\u4E8E\u8BE5\u6761\u6570\u65F6\u7EE7\u7EED\u627E\u4E0B\u4E00\u4E2A\u6E90\uFF080=\u4E0D\u542F\u7528\uFF09": "Keep looking at the next source when danmaku is below this count (0=off)",
     "\u641C\u7D22\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u6216\u5237\u65B0\u9875\u9762": "Search request timed out \u2014 try again shortly or reload the page",
     "\u5F39\u5E55\u5C4F\u853D\u4E0E\u6837\u5F0F": "Danmaku blocking & style",
     "\u63D2\u5E27\uFF08AI \u8865\u5E27\uFF09": "Frame interpolation (AI)",
@@ -1545,13 +1598,23 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     "\u670D\u52A1\u5730\u5740\u4E0E\u8FDE\u901A\u6D4B\u8BD5": "Service address & connection test",
     "\u5C4F\u853D\u7C7B\u578B\u3001\u5C4F\u853D\u8BCD\u3001\u5F39\u5E55\u6587\u4EF6\u5939": "Block types, keywords & danmaku folder",
     "\u5C4F\u853D\u7C7B\u578B\u4E0E\u5C4F\u853D\u8BCD\u4E8E\u4E0B\u4E00\u6B21 B\u7AD9 \u5F39\u5E55\u52A0\u8F7D\u65F6\u751F\u6548\u3002": "Block types and keywords take effect on the next Bilibili danmaku load.",
-    "\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\u5DF2\u88AB\u5F39\u5F39play\u5B98\u65B9\u63A5\u53E3\u5C01\u7981\uFF08\u5F39\u5E55\u6052\u300C\u65E0\u6570\u636E\u300D\uFF09\u3002\u5728\u5F39\u5F39play\u5F00\u653E\u5E73\u53F0\u6CE8\u518C\u5E94\u7528\u540E\uFF0C\u586B\u5165\u4E13\u5C5E AppId \u4E0E Secret \u5373\u53EF\u6062\u590D\uFF1B\u4E24\u9879\u90FD\u586B\u624D\u751F\u6548\uFF0C\u6E05\u9664\u540E\u56DE\u843D\u5185\u7F6E\u51ED\u8BC1\u3002\u4E0B\u6B21 MPV \u64AD\u653E\u65F6\u751F\u6548\u3002": "The built-in shared credential is banned by dandanplay (danmaku always empty). Register an app on the dandanplay open platform and fill your AppId & Secret to restore; both required. Takes effect on next MPV play.",
+    // [v1.11.0] 弹弹play 卡片（内置凭证开箱即用 + 可选自定义凭证覆盖）
+    // [v1.11.1] 弹弹play 降为兜底源（开放 API 有配额）
+    "\u542F\u7528\u5F39\u5F39play \u5F39\u5E55\u6E90\uFF08\u515C\u5E95\uFF09": "Use dandanplay as a fallback source",
+    "\u4EC5\u5F53\u81EA\u5EFA\u6E90\u4E0E B\u7AD9 \u90FD\u6CA1\u62FF\u5230\u8DB3\u91CF\u5F39\u5E55\u65F6\u624D\u4F7F\u7528\uFF0C\u8282\u7701\u989D\u5EA6": "Used only when the self-hosted source and Bilibili both fall short \u2014 saves API quota",
+    "\u5F39\u5F39play \u4E3A\u515C\u5E95\u6E90\uFF1A\u4EC5\u5F53\u81EA\u5EFA\u6E90\u4E0E B\u7AD9 \u90FD\u6CA1\u62FF\u5230\u8DB3\u91CF\u5F39\u5E55\u65F6\u624D\u8BF7\u6C42\uFF0C\u4EE5\u8282\u7701\u5F00\u653E API \u989D\u5EA6\u3002\u672C\u5E94\u7528\u5DF2\u5185\u7F6E\u4E00\u5957\u6B63\u5F0F\u51ED\u8BC1\uFF0C\u9ED8\u8BA4\u5373\u53EF\u4F7F\u7528\uFF08\u65E0\u9700\u586B\u5199\uFF09\uFF1B\u82E5\u4F60\u6709\u81EA\u5DF1\u7684\u5F39\u5F39play \u5E94\u7528\uFF0C\u53EF\u586B\u5165\u4E13\u5C5E AppId \u4E0E Secret \u8986\u76D6\u5185\u7F6E\u51ED\u8BC1\uFF0C\u4E24\u9879\u90FD\u586B\u624D\u751F\u6548\uFF0C\u6E05\u9664\u540E\u56DE\u843D\u5185\u7F6E\u3002\u51ED\u8BC1\u52A0\u5BC6\u4FDD\u5B58\u5728 NAS \u914D\u7F6E\u76EE\u5F55\uFF0C\u4E0D\u4F1A\u660E\u6587\u66B4\u9732\u3002\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002": "dandanplay is a fallback source: it is queried only when the self-hosted source and Bilibili both fail to return enough danmaku, which saves open-API quota. A licensed credential is built in and works out of the box (nothing to fill in). If you have your own dandanplay app, enter its AppId & Secret to override it; both are required, and clearing them falls back to the built-in credential. Credentials are stored encrypted in the NAS config directory \u2014 never in plaintext. Takes effect immediately.",
+    "\u5DF2\u5173\u95ED\uFF0C\u5F39\u5F39play \u4E0D\u53C2\u4E0E\u515C\u5E95\uFF08B\u7AD9/\u81EA\u5EFA\u6E90\u7167\u5E38\uFF09\u3002": "Disabled \u2014 dandanplay will not act as a fallback (Bilibili / self-hosted sources unaffected).",
+    "\u5DF2\u542F\u7528\uFF08\u515C\u5E95\uFF09\xB7 \u4F7F\u7528\u4F60\u586B\u5199\u7684\u81EA\u5B9A\u4E49\u51ED\u8BC1 \xB7 ": "Fallback enabled \xB7 using your custom credentials \xB7 ",
+    "\u5DF2\u542F\u7528\uFF08\u515C\u5E95\uFF09\xB7 \u4F7F\u7528\u5E94\u7528\u5185\u7F6E\u51ED\u8BC1 \xB7 ": "Fallback enabled \xB7 using the built-in credential \xB7 ",
+    "\u672A\u542F\u7528 \u2014\u2014 \u65E0\u53EF\u7528\u51ED\u8BC1\uFF0C\u8BF7\u586B\u5199\u81EA\u5B9A\u4E49\u51ED\u8BC1\u540E\u4FDD\u5B58\u3002": "Not available \u2014 no usable credential. Please fill in your own AppId & Secret and save.",
     "AppId \u4E0E Secret \u4E24\u9879\u90FD\u5FC5\u586B\uFF08\u6E05\u9664\u8BF7\u7528\u300C\u6E05\u9664\u51ED\u8BC1\u300D\uFF09\u3002": 'Both AppId and Secret are required (use "Clear credentials" to remove).',
-    "\u5DF2\u4FDD\u5B58\uFF0C\u4E0B\u6B21 MPV \u64AD\u653E\u65F6\u751F\u6548\u3002": "Saved; takes effect on next MPV play.",
-    "\u5DF2\u6E05\u9664\uFF0C\u56DE\u843D\u811A\u672C\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\uFF0C\u4E0B\u6B21 MPV \u64AD\u653E\u65F6\u751F\u6548\u3002": "Cleared; falls back to the built-in credential on next MPV play.",
-    "\u5DF2\u4FDD\u5B58\u81EA\u5B9A\u4E49\u51ED\u8BC1\uFF0C\u4E0B\u6B21 MPV \u64AD\u653E\u65F6\u751F\u6548\u3002": "Custom credential saved; takes effect on next MPV play.",
-    "\u5DF2\u914D\u7F6E\u81EA\u5B9A\u4E49\u51ED\u8BC1": "Custom credential configured",
-    "\u672A\u914D\u7F6E\uFF08\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\u5DF2\u88AB\u5F39\u5F39play \u5C01\u7981\uFF0C\u5F39\u5E55\u6052\u300C\u65E0\u6570\u636E\u300D\uFF09": 'Not configured (the built-in shared credential is banned by dandanplay \u2014 danmaku stays "no data")',
+    "\u5DF2\u4FDD\u5B58\uFF08\u5BC6\u6587\u843D\u76D8\uFF09\uFF0C\u7ACB\u5373\u751F\u6548\u3002": "Saved (encrypted at rest); takes effect immediately.",
+    "\u5DF2\u6E05\u9664\uFF0C\u56DE\u843D\u5E94\u7528\u5185\u7F6E\u51ED\u8BC1\u3002": "Cleared; falling back to the built-in credential.",
+    "\u6B63\u5728\u6D4B\u8BD5\u2026": "Testing\u2026",
+    "\u8FDE\u63A5\u6B63\u5E38 \xB7 {src} \xB7 {ms}ms \xB7 \u547D\u4E2D {n} \u6761 {sample}": "Connection OK \xB7 {src} \xB7 {ms}ms \xB7 {n} hits {sample}",
+    "\u8FDE\u63A5\u5931\u8D25\uFF1A": "Connection failed: ",
+    "\u672A\u77E5\u9519\u8BEF": "Unknown error",
+    "\u6D4B\u8BD5\u5931\u8D25": "Test failed",
     "\u5DF2\u5F00\u542F\u4F46\u672A\u586B\u670D\u52A1\u5730\u5740 \u2014\u2014 \u5C55\u5F00\u300C\u670D\u52A1\u5730\u5740\u4E0E\u8FDE\u901A\u6D4B\u8BD5\u300D\u586B\u5199\u540E\u70B9\u4FDD\u5B58\u3002": 'Enabled but no service address \u2014 open "Service address & connection test", fill it in and save.',
     "\u586B\u5165 NAS \u4E0A\u90E8\u7F72\u7684 danmu_api \u670D\u52A1\u5730\u5740\uFF08\u805A\u5408\u591A\u5E73\u53F0\u5F39\u5E55\uFF0C\u5BC6\u5EA6\u9AD8\u4E8E\u5355\u6E90 B\u7AD9\uFF09\u3002\u5F00\u542F\u540E\u4F5C\u4E3A\u4F18\u9009\u6E90\uFF0C\u672A\u547D\u4E2D\u81EA\u52A8\u964D\u7EA7\u5185\u7F6E B\u7AD9\uFF1B\u4E0B\u6B21 MPV \u64AD\u653E\u65F6\u751F\u6548\u3002": "Enter the danmu_api service address deployed on your NAS (aggregates multiple platforms, denser than Bilibili alone). When on it becomes the preferred danmaku source and falls back to the built-in Bilibili fetch on a miss. Takes effect on next MPV play.",
     "\u542F\u7528\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\uFF08\u4F18\u5148\u4E8E B\u7AD9\u5F39\u5E55\uFF09": "Use the self-hosted danmaku API (preferred over Bilibili)",
@@ -5646,6 +5709,12 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   function sourceLabel(s) {
     if (s === "bangumi") return "\u756A\u5267\u533A\uFF08B\u7AD9\u6B63\u7248\uFF09";
     if (s === "video") return "\u89C6\u9891\u533A\uFF08UP\u4E3B\u642C\u8FD0\uFF09";
+    if (s === "bilibili") return "B\u7AD9\u5F39\u5E55";
+    if (s === "dandanplay") return "\u5F39\u5F39play";
+    if (s === "danmu_api") return "\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\uFF08danmu_api\uFF09";
+    if (s === "\u5F39\u5F39play") return "\u5F39\u5F39play\uFF08\u591A\u5E73\u53F0\u6574\u5408\uFF09";
+    if (s === "\u81EA\u5EFA\u6E90(danmu_api)") return "\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\uFF08danmu_api\uFF09";
+    if (s === "B\u7AD9") return "B\u7AD9\u5F39\u5E55";
     return s || "\u672A\u77E5";
   }
   function cookieStatusInfo(s) {
@@ -5868,22 +5937,19 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       body.appendChild(wait);
       return;
     }
+    const srcName = String(meta.source || "");
+    const isPreferred = /^自建源/.test(srcName) || srcName === "\u5F39\u5F39play";
     const cookie = cookieStatusInfo(meta.cookieStatus || "");
     const rows = [
       ["\u641C\u7D22\u756A\u540D", meta.searchTitle || "\u2014"],
-      ["\u6765\u6E90\u533A\u57DF", sourceLabel(meta.source)],
+      ["\u6700\u7EC8\u6765\u6E90", sourceLabel(meta.source)],
       ["\u5B9E\u9645\u5339\u914D", meta.matchedTitle || "\u2014"],
       ["\u96C6\u6570", meta.isMovie ? "\u7535\u5F71\uFF08\u6309\u756A\u540D\u641C\u6700\u4F18\u96C6\uFF09" : `\u7B2C ${meta.ep} \u96C6`],
       ["\u76EE\u6807\u5B63\u6570", meta.season > 0 ? `\u7B2C ${meta.season} \u5B63\uFF08\u4F18\u5148\u7CBE\u786E\u5339\u914D\uFF09` : "\u672A\u6307\u5B9A\uFF08\u4EC5\u6309\u756A\u540D+\u96C6\u6570\uFF09"],
-      ["\u5339\u914D\u76F8\u4F3C\u5EA6", meta.sim != null ? (meta.sim * 100).toFixed(0) + "%" : "\u2014"],
-      ["BVID", meta.bvid || "\u2014"],
-      ["CID", meta.cid != null ? String(meta.cid) : "\u2014"],
-      ["\u5F39\u5E55\u6761\u6570", String(meta.count)],
-      ["\u805A\u5408", meta.aggregatedFrom ? `${meta.aggregatedFrom} \u4E2A\u5019\u9009\u805A\u5408` : "\u5355\u6E90"],
-      ["\u767B\u5F55\u72B6\u6001", cookie.text]
+      ["\u5F39\u5E55\u6761\u6570", String(meta.count)]
     ];
     if (meta.error) rows.push(["\u5907\u6CE8", meta.error]);
-    if (cookie.warn) {
+    if (!isPreferred && cookie.warn) {
       const banner = document.createElement("div");
       banner.textContent = "\u26A0\uFE0F " + cookie.detail;
       Object.assign(banner.style, {
@@ -5898,26 +5964,107 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       });
       body.appendChild(banner);
     }
-    const dl = document.createElement("dl");
-    dl.className = "fntv-dm-rows";
-    for (const [k, v] of rows) {
-      const row2 = document.createElement("div");
-      row2.className = "fntv-dm-row";
-      const kEl = document.createElement("dt");
-      kEl.textContent = k;
-      const vEl = document.createElement("dd");
-      vEl.textContent = v;
-      if (k === "\u767B\u5F55\u72B6\u6001") {
-        vEl.style.color = cookie.warn ? "#ff6b6b" : "#5ad17a";
-        vEl.style.fontWeight = "600";
+    const appendRows = (parent, list, keyCol) => {
+      const dl = document.createElement("dl");
+      dl.className = "fntv-dm-rows";
+      for (const [k, v] of list) {
+        const row2 = document.createElement("div");
+        row2.className = "fntv-dm-row";
+        const kEl = document.createElement("dt");
+        kEl.textContent = k;
+        const vEl = document.createElement("dd");
+        vEl.textContent = v;
+        if (k === "\u767B\u5F55\u72B6\u6001") {
+          vEl.style.color = cookie.warn ? "#ff6b6b" : "#5ad17a";
+          vEl.style.fontWeight = "600";
+        }
+        if (keyCol && k === "\u72B6\u6001") {
+          vEl.style.fontWeight = "600";
+        }
+        row2.appendChild(kEl);
+        row2.appendChild(vEl);
+        dl.appendChild(row2);
       }
-      row2.appendChild(kEl);
-      row2.appendChild(vEl);
-      dl.appendChild(row2);
+      parent.appendChild(dl);
+    };
+    appendRows(body, rows, false);
+    const sources = Array.isArray(meta.sources) ? meta.sources : [];
+    if (sources.length) {
+      const title = document.createElement("div");
+      title.textContent = "\u5F39\u5E55\u6E90\u8BE6\u60C5";
+      Object.assign(title.style, {
+        marginTop: "14px",
+        paddingTop: "10px",
+        borderTop: "1px solid rgba(255,255,255,.06)",
+        fontSize: "12px",
+        fontWeight: "600",
+        color: "rgba(245,245,247,.75)"
+      });
+      body.appendChild(title);
+      sources.forEach((s, idx) => {
+        const card = document.createElement("div");
+        Object.assign(card.style, {
+          margin: "8px 0 0",
+          padding: "8px 10px",
+          borderRadius: "8px",
+          background: s.used ? "rgba(90,209,122,.10)" : "rgba(255,255,255,.035)",
+          border: "1px solid " + (s.used ? "rgba(90,209,122,.42)" : "rgba(255,255,255,.08)")
+        });
+        const head = document.createElement("div");
+        Object.assign(head.style, {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          fontSize: "12.5px",
+          fontWeight: "600",
+          marginBottom: "6px",
+          color: s.used ? "#5ad17a" : "rgba(245,245,247,.8)"
+        });
+        const headName = document.createElement("span");
+        headName.textContent = `${idx + 1}. ${sourceLabel(s.label || s.key)}`;
+        head.appendChild(headName);
+        const badge = document.createElement("span");
+        badge.textContent = s.used ? "\u4F7F\u7528\u4E2D" : !s.enabled ? "\u672A\u53C2\u4E0E" : s.note ? "\u672A\u91C7\u7528" : "\u672A\u53C2\u4E0E";
+        Object.assign(badge.style, {
+          marginLeft: "auto",
+          padding: "1px 7px",
+          borderRadius: "9px",
+          fontSize: "10.5px",
+          fontWeight: "500",
+          background: s.used ? "rgba(90,209,122,.18)" : "rgba(255,255,255,.07)",
+          color: s.used ? "#5ad17a" : "rgba(245,245,247,.55)"
+        });
+        head.appendChild(badge);
+        card.appendChild(head);
+        const sRows = [];
+        if (s.matchedTitle) sRows.push(["\u547D\u4E2D\u6761\u76EE", s.matchedTitle]);
+        if (s.episodeTitle) sRows.push(["\u547D\u4E2D\u5206\u96C6", s.episodeTitle]);
+        if (s.episodeId) sRows.push(["\u96C6 ID", String(s.episodeId)]);
+        if (s.bvid) sRows.push(["BVID", String(s.bvid)]);
+        if (s.cid) sRows.push(["CID", String(s.cid)]);
+        if (s.sim != null) sRows.push(["\u5339\u914D\u76F8\u4F3C\u5EA6", (Number(s.sim) * 100).toFixed(0) + "%"]);
+        if (s.credential) sRows.push([s.key === "bilibili" ? "\u767B\u5F55\u72B6\u6001" : "\u4F7F\u7528\u51ED\u8BC1", s.credential]);
+        if (s.base) sRows.push(["\u670D\u52A1\u5730\u5740", s.base]);
+        if (s.enabled && s.rawCount > 0) {
+          sRows.push(["\u5F39\u5E55\u6761\u6570", `${s.count}${s.blocked > 0 ? `\uFF08\u62C9\u53D6 ${s.rawCount}\uFF0C\u5C4F\u853D ${s.blocked}\uFF09` : ""}`]);
+        }
+        if (!s.enabled) {
+          if (s.note) sRows.push(["\u72B6\u6001", s.note]);
+        } else if (!s.used && s.note) {
+          sRows.push(["\u672A\u91C7\u7528\u539F\u56E0", s.note]);
+        }
+        if (sRows.length) appendRows(card, sRows, false);
+        body.appendChild(card);
+      });
     }
-    body.appendChild(dl);
     const tip = document.createElement("div");
-    tip.textContent = /^自建源/.test(String(meta.source || "")) ? "\u6570\u636E\u6765\u6E90\uFF1A\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3 danmu_api\uFF08\u53EA\u8BA4\u7CBE\u786E\u5339\u914D\uFF1B\u5F39\u5E55\u4F4E\u4E8E\u4E0B\u9650\u65F6\u81EA\u52A8\u8BF7\u6C42 B\u7AD9\u8865\u6E90\uFF0CB\u7AD9\u66F4\u591A\u624D\u6362\uFF1B\u624B\u52A8\u641C\u7D22\u540C\u65F6\u7ED9\u51FA\u81EA\u5EFA\u6E90\u4E0E B\u7AD9\u5019\u9009\uFF09" : "\u6570\u636E\u6765\u6E90\uFF1AB\u7AD9\uFF08\u4E0E MPV \u5F39\u5E55\u540C\u6E90\uFF09";
+    if (/^自建源/.test(srcName)) {
+      tip.textContent = "\u6570\u636E\u6765\u6E90\uFF1A\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3 danmu_api\uFF08\u53EA\u8BA4\u7CBE\u786E\u5339\u914D\uFF1B\u5F39\u5E55\u4F4E\u4E8E\u4E0B\u9650\u65F6\u7EE7\u7EED\u627E B\u7AD9/\u5F39\u5F39play \u8865\u6E90\uFF09";
+    } else if (srcName === "\u5F39\u5F39play") {
+      tip.textContent = "\u6570\u636E\u6765\u6E90\uFF1A\u5F39\u5F39play \u5B98\u65B9\u5F00\u653E API\uFF08\u515C\u5E95\u6E90\uFF1A\u81EA\u5EFA\u6E90\u4E0E B\u7AD9 \u90FD\u6CA1\u62FF\u5230\u8DB3\u91CF\u5F39\u5E55\u65F6\u624D\u8BF7\u6C42\uFF0C\u4EE5\u8282\u7701\u989D\u5EA6\uFF1B\u542B\u591A\u5E73\u53F0\u6574\u5408\u5F39\u5E55\uFF09";
+    } else {
+      tip.textContent = "\u6570\u636E\u6765\u6E90\uFF1AB\u7AD9\u5F39\u5E55\uFF08\u4E0E\u81EA\u5EFA\u6E90\u540C\u4E3A\u514D\u8D39\u94FE\u8DEF\uFF0C\u4F18\u5148\u4E8E\u5F39\u5F39play \u515C\u5E95\u6E90\uFF09";
+    }
     Object.assign(tip.style, {
       paddingTop: "10px",
       borderTop: "1px solid rgba(255,255,255,.06)",
@@ -13556,6 +13703,136 @@ html.fnos-perf.dark{
   } catch (e) {
   }
 
+  // src/preload/plugins/embyWall/modals/telemetry.ts
+  init_electron();
+  var SUB = "var(--fnos-ui-sub,#888)";
+  var MUTED = "var(--fnos-ui-muted,#999)";
+  function mkToggle(on, onChange) {
+    const label = document.createElement("label");
+    label.style.cssText = "position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;flex:none;";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = on;
+    input.style.cssText = "position:absolute;opacity:0;width:0;height:0;";
+    const track = document.createElement("span");
+    track.style.cssText = "position:absolute;inset:0;border-radius:23px;background:rgba(140,140,160,.45);transition:.2s;";
+    const knob = document.createElement("span");
+    knob.style.cssText = "position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.3);";
+    label.appendChild(input);
+    label.appendChild(track);
+    label.appendChild(knob);
+    const paint = () => {
+      track.style.background = input.checked ? "var(--fnos-ui-accent)" : "rgba(140,140,160,.45)";
+      knob.style.left = input.checked ? "21.5px" : "2.5px";
+    };
+    paint();
+    input.addEventListener("change", () => {
+      paint();
+      onChange(input.checked);
+    });
+    return { el: label, set: (v) => {
+      input.checked = v;
+      paint();
+    } };
+  }
+  function mkRow(title, right) {
+    const row2 = document.createElement("div");
+    row2.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;";
+    const span = document.createElement("span");
+    span.style.cssText = "font-weight:600;letter-spacing:.5px;";
+    span.textContent = t(title);
+    row2.appendChild(span);
+    if (right) row2.appendChild(right);
+    return row2;
+  }
+  function mkNote(text) {
+    const d = document.createElement("div");
+    d.style.cssText = "font-size:11px;color:" + MUTED + ";line-height:1.6;margin-top:6px;";
+    d.textContent = t(text);
+    return d;
+  }
+  function mkBtn(text, primary) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = t(text);
+    b.style.cssText = "padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;border:none;" + (primary ? "background:var(--fnos-ui-btn-bg2)!important;" : "background:var(--fnos-ui-btn-bg)!important;") + "color:var(--fnos-ui-btn-text);transition:background .15s;";
+    b.onmouseenter = () => {
+      b.style.background = (primary ? "var(--fnos-ui-btn-hover2)" : "var(--fnos-ui-btn-hover)") + "!important";
+    };
+    b.onmouseleave = () => {
+      b.style.background = (primary ? "var(--fnos-ui-btn-bg2)" : "var(--fnos-ui-btn-bg)") + "!important";
+    };
+    return b;
+  }
+  function buildStatsCard() {
+    const card = document.createElement("div");
+    card.style.cssText = "width:100%;max-width:440px;text-align:left;margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);";
+    const wrap = document.createElement("div");
+    const status = document.createElement("div");
+    status.style.cssText = "font-size:11px;color:" + SUB + ";margin-top:8px;min-height:14px;";
+    status.textContent = t("\u8BFB\u53D6\u4E2D\u2026");
+    const toggle = mkToggle(true, (v) => {
+      ipcRenderer.invoke("stats:set-enabled", v).catch(() => {
+      });
+      status.textContent = v ? t("\u5DF2\u5F00\u542F\uFF0C\u660E\u5929\u8D77\u6BCF\u5929\u4E0A\u62A5\u4E00\u6B21\u3002") : t("\u5DF2\u5173\u95ED\uFF0C\u4E0D\u4F1A\u518D\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002");
+    });
+    const title = document.createElement("div");
+    title.style.cssText = "font-size:12.5px;font-weight:700;color:var(--fnos-ui-pill-text);";
+    title.textContent = t("\u{1F4CA} \u533F\u540D\u4F7F\u7528\u7EDF\u8BA1");
+    wrap.appendChild(title);
+    wrap.appendChild(mkRow("\u53C2\u4E0E\u533F\u540D\u7EDF\u8BA1", toggle.el));
+    wrap.appendChild(mkNote("\u6BCF\u5929\u6700\u591A\u4E0A\u62A5\u4E00\u6B21\uFF0C\u5185\u5BB9\u53EA\u6709\uFF1A\u968F\u673A\u533F\u540D ID + \u7248\u672C\u53F7 + \u7CFB\u7EDF\u7C7B\u578B\u3002\u4E0D\u91C7\u96C6\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u4E0E\u6587\u4EF6\u8DEF\u5F84\uFF0C\u670D\u52A1\u7AEF\u4E5F\u4E0D\u5B58 IP\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002"));
+    wrap.appendChild(status);
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;";
+    const pingBtn = mkBtn("\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21", true);
+    const resetBtn = mkBtn("\u91CD\u7F6E\u533F\u540D ID", false);
+    btnRow.appendChild(pingBtn);
+    btnRow.appendChild(resetBtn);
+    wrap.appendChild(btnRow);
+    pingBtn.addEventListener("click", () => {
+      pingBtn.disabled = true;
+      status.textContent = t("\u4E0A\u62A5\u4E2D\u2026");
+      ipcRenderer.invoke("stats:ping-now").then((r) => {
+        if (r && r.ok) status.textContent = t("\u4E0A\u62A5\u6210\u529F \u2705");
+        else status.textContent = t("\u672A\u4E0A\u62A5\uFF1A") + (r && (r.skipped || r.error) || t("\u672A\u77E5\u539F\u56E0"));
+      }).catch((e) => {
+        status.textContent = t("\u4E0A\u62A5\u5931\u8D25\uFF1A") + String(e && e.message || e);
+      }).finally(() => {
+        pingBtn.disabled = false;
+      });
+    });
+    resetBtn.addEventListener("click", () => {
+      ipcRenderer.invoke("stats:reset-id").then((r) => {
+        const short = r && r.anonIdShort ? String(r.anonIdShort) : "";
+        status.textContent = short ? t("\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF1A") + short + t("\u2026\uFF08\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\uFF09") : t("\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF0C\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\u3002");
+      }).catch(() => {
+      });
+    });
+    ipcRenderer.invoke("stats:get-info").then((s) => {
+      if (!s) return;
+      toggle.set(s.enabled !== false);
+      if (!s.configured) {
+        status.textContent = t("\u670D\u52A1\u7AEF\u672A\u914D\u7F6E\uFF0C\u5F53\u524D\u4E0D\u4F1A\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002");
+        pingBtn.disabled = true;
+        return;
+      }
+      if (s.devMode) {
+        status.textContent = t("\u5F00\u53D1\u7248\u9ED8\u8BA4\u4E0D\u4E0A\u62A5\uFF08\u53EF\u7528\u300C\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21\u300D\u6D4B\u8BD5\uFF09\u3002");
+      } else if (s.lastDay) {
+        status.textContent = t("\u4E0A\u6B21\u4E0A\u62A5\uFF1A") + s.lastDay + (s.lastOk ? t("\uFF08\u6210\u529F\uFF09") : t("\uFF08\u5931\u8D25\uFF0C\u7A0D\u540E\u81EA\u52A8\u91CD\u8BD5\uFF09"));
+      } else if (s.usedToday) {
+        status.textContent = t("\u4ECA\u5929\u5DF2\u8BB0\u5F55\u4F7F\u7528\uFF0C\u5C06\u5728\u6570\u5C0F\u65F6\u5185\u4E0A\u62A5\u3002");
+      } else {
+        status.textContent = t("\u5C1A\u672A\u4E0A\u62A5\u8FC7\uFF08\u6253\u5F00\u4E00\u6B21\u589E\u5F3A\u9875\u9762\u540E\u5F00\u59CB\u8BA1\u6570\uFF09\u3002");
+      }
+    }).catch(() => {
+      status.textContent = "";
+    });
+    card.appendChild(wrap);
+    return card;
+  }
+
   // src/preload/plugins/embyWall/nav/inject.ts
   init_electron();
   function injectVideoPreviewExternalPlay() {
@@ -13638,7 +13915,7 @@ html.fnos-perf.dark{
       const card = document.createElement("div");
       card.style.cssText = "min-width:300px;max-width:90vw;padding:20px 22px;border-radius:14px;background:var(--semi-color-bg-1,#fff);box-shadow:0 8px 30px rgba(0,0,0,0.25);color:var(--semi-color-text-0);";
       card.innerHTML = '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">\u9009\u62E9\u64AD\u653E\u65B9\u5F0F</div><div style="opacity:0.7;font-size:12px;margin-bottom:14px;">\u8981\u5982\u4F55\u64AD\u653E\u6B64\u89C6\u9891\uFF1F</div>';
-      const mkBtn = (label, primary, onClick) => {
+      const mkBtn2 = (label, primary, onClick) => {
         const b = document.createElement("button");
         b.textContent = label;
         b.style.cssText = "display:block;width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;" + (primary ? "background:var(--semi-color-primary,#3370ff);color:#fff;" : "background:var(--semi-color-fill-0,#f0f0f0);color:var(--semi-color-text-0);");
@@ -13657,11 +13934,11 @@ html.fnos-perf.dark{
       const playNative = () => {
         unfreezeVideo(video);
       };
-      card.appendChild(mkBtn("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
+      card.appendChild(mkBtn2("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
         closeDialog();
         launchExternal(modal);
       }));
-      card.appendChild(mkBtn("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
+      card.appendChild(mkBtn2("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
         closeDialog();
         playNative();
       }));
@@ -15036,7 +15313,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     }
     function buildSettingsPanel() {
       if (document.getElementById("fnos-settings-panel")) return;
-      const mkBtn = (text, small = false) => {
+      const mkBtn2 = (text, small = false) => {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = t(text);
@@ -15270,9 +15547,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const biliFoldBody = biliFold.body;
       const biliBtns = document.createElement("div");
       biliBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
-      const logoutBiliBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
-      const saveBiliCookieBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
+      const scanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
+      const logoutBiliBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
+      const saveBiliCookieBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
       biliBtns.appendChild(scanBtn);
       biliBtns.appendChild(logoutBiliBtn);
       biliBtns.appendChild(saveBiliCookieBtn);
@@ -15335,8 +15612,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const bangumiBtns = document.createElement("div");
       bangumiBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveBangumiBtn = mkBtn("\u4FDD\u5B58", true);
-      const clearBangumiBtn = mkBtn("\u6E05\u9664", true);
+      const saveBangumiBtn = mkBtn2("\u4FDD\u5B58", true);
+      const clearBangumiBtn = mkBtn2("\u6E05\u9664", true);
       bangumiBtns.appendChild(saveBangumiBtn);
       bangumiBtns.appendChild(clearBangumiBtn);
       secBodyBangumi.appendChild(bangumiBtns);
@@ -15470,8 +15747,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const tmdbBtns = document.createElement("div");
       tmdbBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveTmdbBtn = mkBtn("\u4FDD\u5B58", true);
-      const clearTmdbBtn = mkBtn("\u6E05\u9664", true);
+      const saveTmdbBtn = mkBtn2("\u4FDD\u5B58", true);
+      const clearTmdbBtn = mkBtn2("\u6E05\u9664", true);
       tmdbBtns.appendChild(saveTmdbBtn);
       tmdbBtns.appendChild(clearTmdbBtn);
       secBodyTmdb.appendChild(tmdbBtns);
@@ -15571,8 +15848,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dcWrap.appendChild(dcIpGrid);
       const dcBtns = document.createElement("div");
       dcBtns.style.cssText = "display:flex;gap:6px;";
-      const dcSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const dcUpdateBtn = mkBtn("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
+      const dcSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const dcUpdateBtn = mkBtn2("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
       dcBtns.appendChild(dcSaveBtn);
       dcBtns.appendChild(dcUpdateBtn);
       dcWrap.appendChild(dcBtns);
@@ -15726,9 +16003,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const doubanBtns = document.createElement("div");
       doubanBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanDoubanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
-      const logoutDoubanBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
-      const manualBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
+      const scanDoubanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
+      const logoutDoubanBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
+      const manualBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
       doubanBtns.appendChild(scanDoubanBtn);
       doubanBtns.appendChild(logoutDoubanBtn);
       doubanBtns.appendChild(manualBtn);
@@ -15784,7 +16061,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       watchedStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;";
       watchedStatus.textContent = t("\u8BFB\u53D6\u98DE\u725B\u300C\u5DF2\u89C2\u770B\u300D\u5217\u8868\uFF0C\u6279\u91CF\u6807\u8BB0\u5230\u8C46\u74E3\uFF08\u5DF2\u6807\u8BB0\u7684\u4F1A\u8DF3\u8FC7\uFF0C\u4E0D\u91CD\u590D\u6253\uFF09\u3002");
       watchedWrap.appendChild(watchedStatus);
-      const syncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
+      const syncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
       syncBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         syncBtn.setAttribute("disabled", "true");
@@ -15812,7 +16089,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       autoInput.min = "0";
       autoInput.step = "5";
       autoInput.style.cssText = "width:64px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;";
-      const autoSave = mkBtn("\u4FDD\u5B58", true);
+      const autoSave = mkBtn2("\u4FDD\u5B58", true);
       autoSave.style.fontSize = "11px";
       autoRow.appendChild(autoLabel);
       autoRow.appendChild(autoInput);
@@ -15914,8 +16191,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       traBody.appendChild(traSecretInput);
       const traBtnRow1 = document.createElement("div");
       traBtnRow1.style.cssText = "display:flex;gap:6px;";
-      const traSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const traClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
+      const traSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const traClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
       traBtnRow1.appendChild(traSaveBtn);
       traBtnRow1.appendChild(traClearBtn);
       traBody.appendChild(traBtnRow1);
@@ -15974,9 +16251,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const traBtnRow2 = document.createElement("div");
       traBtnRow2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const traConnectBtn = mkBtn("\u8FDE\u63A5 Trakt", true);
-      const traSyncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
-      const traDiscBtn = mkBtn("\u65AD\u5F00\u8FDE\u63A5", true);
+      const traConnectBtn = mkBtn2("\u8FDE\u63A5 Trakt", true);
+      const traSyncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
+      const traDiscBtn = mkBtn2("\u65AD\u5F00\u8FDE\u63A5", true);
       traBtnRow2.appendChild(traConnectBtn);
       traBtnRow2.appendChild(traSyncBtn);
       traBtnRow2.appendChild(traDiscBtn);
@@ -15999,7 +16276,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       traScrobSub.textContent = t("\u64AD\u653E\u65F6\u5B9E\u65F6\u6253\u70B9\u5230 Trakt\uFF08\u5F00\u59CB/\u6682\u505C/\u770B\u5B8C\u226580% \u81EA\u52A8\u8BB0\u5F55\uFF09\uFF0C\u9700\u5148\u8FDE\u63A5 Trakt\u3002");
       traScrobLabelWrap.appendChild(traScrobLabel);
       traScrobLabelWrap.appendChild(traScrobSub);
-      const traScrobBtn = mkBtn("\u2026", true);
+      const traScrobBtn = mkBtn2("\u2026", true);
       traScrobRow.appendChild(traScrobLabelWrap);
       traScrobRow.appendChild(traScrobBtn);
       traBody.appendChild(traScrobRow);
@@ -16166,19 +16443,40 @@ html.fntv-boot-hide #root{visibility:hidden}
       danFoldBody.appendChild(danFoldNote);
       const secDandan = section("\u5F39\u5F39play");
       const ddBody = secDandan.body;
+      const ddRow = document.createElement("div");
+      ddRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;transition:background .12s;";
+      ddRow.onmouseenter = () => {
+        ddRow.style.background = "var(--fnos-ui-row-hover)";
+      };
+      ddRow.onmouseleave = () => {
+        ddRow.style.background = "transparent";
+      };
+      const ddRowLabel = document.createElement("span");
+      ddRowLabel.textContent = t("\u542F\u7528\u5F39\u5F39play \u5F39\u5E55\u6E90\uFF08\u515C\u5E95\uFF09");
+      ddRowLabel.style.cssText = "color:var(--fnos-ui-text);font-weight:500;";
+      const swDandan = document.createElement("input");
+      swDandan.type = "checkbox";
+      swDandan.checked = true;
+      swDandan.style.cssText = "width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);";
+      ddRow.appendChild(ddRowLabel);
+      ddRow.appendChild(swDandan);
+      ddBody.appendChild(ddRow);
+      ddRow.addEventListener("click", (e) => {
+        if (e.target !== swDandan) swDandan.click();
+      });
       const ddStateLine = document.createElement("div");
-      ddStateLine.style.cssText = "font-size:11.5px;color:var(--fnos-ui-warn);line-height:1.5;";
+      ddStateLine.style.cssText = "font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.5;padding:0 6px 4px;";
       ddBody.appendChild(ddStateLine);
       const ddFold = mkFold2("\u5F00\u653E API \u51ED\u8BC1\uFF08AppId / Secret\uFF09");
       ddBody.appendChild(ddFold.fold);
       const ddFoldBody = ddFold.body;
       const ddHint = document.createElement("div");
       ddHint.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;";
-      ddHint.textContent = t("\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\u5DF2\u88AB\u5F39\u5F39play\u5B98\u65B9\u63A5\u53E3\u5C01\u7981\uFF08\u5F39\u5E55\u6052\u300C\u65E0\u6570\u636E\u300D\uFF09\u3002\u5728\u5F39\u5F39play\u5F00\u653E\u5E73\u53F0\u6CE8\u518C\u5E94\u7528\u540E\uFF0C\u586B\u5165\u4E13\u5C5E AppId \u4E0E Secret \u5373\u53EF\u6062\u590D\uFF1B\u4E24\u9879\u90FD\u586B\u624D\u751F\u6548\uFF0C\u6E05\u9664\u540E\u56DE\u843D\u5185\u7F6E\u51ED\u8BC1\u3002\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
+      ddHint.textContent = t("\u5F39\u5F39play \u4E3A\u515C\u5E95\u6E90\uFF1A\u4EC5\u5F53\u81EA\u5EFA\u6E90\u4E0E B\u7AD9 \u90FD\u6CA1\u62FF\u5230\u8DB3\u91CF\u5F39\u5E55\u65F6\u624D\u8BF7\u6C42\uFF0C\u4EE5\u8282\u7701\u5F00\u653E API \u989D\u5EA6\u3002\u672C\u5E94\u7528\u5DF2\u5185\u7F6E\u4E00\u5957\u6B63\u5F0F\u51ED\u8BC1\uFF0C\u9ED8\u8BA4\u5373\u53EF\u4F7F\u7528\uFF08\u65E0\u9700\u586B\u5199\uFF09\uFF1B\u82E5\u4F60\u6709\u81EA\u5DF1\u7684\u5F39\u5F39play \u5E94\u7528\uFF0C\u53EF\u586B\u5165\u4E13\u5C5E AppId \u4E0E Secret \u8986\u76D6\u5185\u7F6E\u51ED\u8BC1\uFF0C\u4E24\u9879\u90FD\u586B\u624D\u751F\u6548\uFF0C\u6E05\u9664\u540E\u56DE\u843D\u5185\u7F6E\u3002\u51ED\u8BC1\u52A0\u5BC6\u4FDD\u5B58\u5728 NAS \u914D\u7F6E\u76EE\u5F55\uFF0C\u4E0D\u4F1A\u660E\u6587\u66B4\u9732\u3002\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002");
       ddFoldBody.appendChild(ddHint);
       const maskDd = (t2) => "*".repeat(Math.max(0, t2.length));
       let ddRealId = "";
-      let ddRealSecret = "";
+      let ddHasCustomSecret = false;
       const mkDdInput = (placeholder) => {
         const inp = document.createElement("input");
         inp.type = "text";
@@ -16194,30 +16492,63 @@ html.fntv-boot-hide #root{visibility:hidden}
       };
       const ddIdInput = mkDdInput("\u5F39\u5F39play AppId\uFF08\u5982 gz2wnihj9d \u5F62\u5F0F\u7684\u4E13\u5C5E id\uFF09");
       const ddSecretInput = mkDdInput("\u5F39\u5F39play Secret\uFF08\u6CE8\u518C\u5E94\u7528\u540E\u83B7\u5F97\uFF0C\u52FF\u5916\u4F20\uFF09");
-      const ddBlurMask = (inp, real) => {
-        if (inp.value.trim() === "" && real) {
-          inp.value = maskDd(real);
-          inp.readOnly = true;
-        }
-      };
-      ddIdInput.addEventListener("blur", () => ddBlurMask(ddIdInput, ddRealId));
-      ddSecretInput.addEventListener("blur", () => ddBlurMask(ddSecretInput, ddRealSecret));
       ddFoldBody.appendChild(ddIdInput);
       ddFoldBody.appendChild(ddSecretInput);
       const ddBtns = document.createElement("div");
       ddBtns.style.cssText = "display:flex;gap:6px;";
-      const ddSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const ddClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
+      const ddSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const ddClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
+      const ddTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
       ddBtns.appendChild(ddSaveBtn);
       ddBtns.appendChild(ddClearBtn);
+      ddBtns.appendChild(ddTestBtn);
       ddFoldBody.appendChild(ddBtns);
       const ddStatus = document.createElement("div");
       ddStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;";
       ddFoldBody.appendChild(ddStatus);
-      const ddSetState = (configured) => {
-        ddStateLine.textContent = configured ? t("\u5DF2\u914D\u7F6E\u81EA\u5B9A\u4E49\u51ED\u8BC1") : t("\u672A\u914D\u7F6E\uFF08\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\u5DF2\u88AB\u5F39\u5F39play \u5C01\u7981\uFF0C\u5F39\u5E55\u6052\u300C\u65E0\u6570\u636E\u300D\uFF09");
-        ddStateLine.style.color = configured ? "var(--fnos-ui-sub)" : "var(--fnos-ui-warn)";
+      const ddSetState = (credential) => {
+        if (!swDandan.checked) {
+          ddStateLine.textContent = t("\u5DF2\u5173\u95ED\uFF0C\u5F39\u5F39play \u4E0D\u53C2\u4E0E\u515C\u5E95\uFF08B\u7AD9/\u81EA\u5EFA\u6E90\u7167\u5E38\uFF09\u3002");
+          ddStateLine.style.color = "var(--fnos-ui-warn)";
+          return;
+        }
+        const how = t("\u4EC5\u5F53\u81EA\u5EFA\u6E90\u4E0E B\u7AD9 \u90FD\u6CA1\u62FF\u5230\u8DB3\u91CF\u5F39\u5E55\u65F6\u624D\u4F7F\u7528\uFF0C\u8282\u7701\u989D\u5EA6");
+        if (credential === "custom") {
+          ddStateLine.textContent = t("\u5DF2\u542F\u7528\uFF08\u515C\u5E95\uFF09\xB7 \u4F7F\u7528\u4F60\u586B\u5199\u7684\u81EA\u5B9A\u4E49\u51ED\u8BC1 \xB7 ") + how;
+          ddStateLine.style.color = "var(--fnos-ui-sub)";
+        } else if (credential === "builtin") {
+          ddStateLine.textContent = t("\u5DF2\u542F\u7528\uFF08\u515C\u5E95\uFF09\xB7 \u4F7F\u7528\u5E94\u7528\u5185\u7F6E\u51ED\u8BC1 \xB7 ") + how;
+          ddStateLine.style.color = "var(--fnos-ui-ok)";
+        } else {
+          ddStateLine.textContent = t("\u672A\u542F\u7528 \u2014\u2014 \u65E0\u53EF\u7528\u51ED\u8BC1\uFF0C\u8BF7\u586B\u5199\u81EA\u5B9A\u4E49\u51ED\u8BC1\u540E\u4FDD\u5B58\u3002");
+          ddStateLine.style.color = "var(--fnos-ui-warn)";
+        }
       };
+      const ddRefreshStatus = () => {
+        ipcRenderer.invoke("dandanplay:status").then((r) => {
+          if (!r) return;
+          swDandan.checked = r.enabled !== false;
+          ddRealId = r.appId || "";
+          ddHasCustomSecret = r.credential === "custom" && !!r.configured;
+          if (ddRealId) {
+            ddIdInput.value = maskDd(ddRealId);
+            ddIdInput.readOnly = true;
+          }
+          if (ddHasCustomSecret) {
+            ddSecretInput.value = maskDd("00000000");
+            ddSecretInput.readOnly = true;
+          }
+          ddSetState(String(r.credential || "none"));
+        }).catch(() => {
+        });
+      };
+      ddRefreshStatus();
+      swDandan.addEventListener("change", () => {
+        ipcRenderer.invoke("settings:set-dandanplay-enabled", swDandan.checked).then(() => ddRefreshStatus()).catch((err) => {
+          ddStatus.textContent = t("\u4FDD\u5B58\u5931\u8D25") + ": " + (err && err.message ? err.message : err);
+          ddStatus.style.color = "var(--fnos-ui-warn)";
+        });
+      });
       ddSaveBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const id = ddIdInput.value.trim();
@@ -16229,14 +16560,13 @@ html.fntv-boot-hide #root{visibility:hidden}
         }
         ipcRenderer.invoke("settings:set-dandanplay-credentials", { appId: id, appSecret: secret }).then(() => {
           ddRealId = id;
-          ddRealSecret = secret;
           ddIdInput.value = maskDd(id);
           ddIdInput.readOnly = true;
           ddSecretInput.value = maskDd(secret);
           ddSecretInput.readOnly = true;
-          ddStatus.textContent = t("\u5DF2\u4FDD\u5B58\uFF0C\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
+          ddStatus.textContent = t("\u5DF2\u4FDD\u5B58\uFF08\u5BC6\u6587\u843D\u76D8\uFF09\uFF0C\u7ACB\u5373\u751F\u6548\u3002");
           ddStatus.style.color = "var(--fnos-ui-sub)";
-          ddSetState(true);
+          ddRefreshStatus();
         }).catch((err) => {
           ddStatus.textContent = "\u4FDD\u5B58\u5931\u8D25: " + (err && err.message ? err.message : err);
           ddStatus.style.color = "var(--fnos-ui-warn)";
@@ -16246,15 +16576,33 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         ipcRenderer.invoke("settings:set-dandanplay-credentials", { appId: "", appSecret: "" }).then(() => {
           ddRealId = "";
-          ddRealSecret = "";
+          ddHasCustomSecret = false;
           ddIdInput.value = "";
           ddIdInput.readOnly = false;
           ddSecretInput.value = "";
           ddSecretInput.readOnly = false;
-          ddStatus.textContent = t("\u5DF2\u6E05\u9664\uFF0C\u56DE\u843D\u811A\u672C\u5185\u7F6E\u5171\u4EAB\u51ED\u8BC1\uFF0C\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
-          ddSetState(false);
+          ddStatus.textContent = t("\u5DF2\u6E05\u9664\uFF0C\u56DE\u843D\u5E94\u7528\u5185\u7F6E\u51ED\u8BC1\u3002");
+          ddRefreshStatus();
         }).catch((err) => {
           ddStatus.textContent = "\u6E05\u9664\u5931\u8D25: " + (err && err.message ? err.message : err);
+          ddStatus.style.color = "var(--fnos-ui-warn)";
+        });
+      });
+      ddTestBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        ddStatus.textContent = t("\u6B63\u5728\u6D4B\u8BD5\u2026");
+        ddStatus.style.color = "var(--fnos-ui-sub)";
+        ipcRenderer.invoke("dandanplay:test", { keyword: "" }).then((r) => {
+          if (r && r.ok) {
+            const sample = Array.isArray(r.sample) && r.sample.length ? "\uFF08\u5982 " + r.sample.slice(0, 2).join("\u3001") + "\uFF09" : "";
+            ddStatus.textContent = t("\u8FDE\u63A5\u6B63\u5E38 \xB7 {src} \xB7 {ms}ms \xB7 \u547D\u4E2D {n} \u6761 {sample}").replace("{src}", String(r.credential || "")).replace("{ms}", String(r.costMs || 0)).replace("{n}", String(r.hits || 0)).replace("{sample}", sample);
+            ddStatus.style.color = "var(--fnos-ui-ok)";
+          } else {
+            ddStatus.textContent = t("\u8FDE\u63A5\u5931\u8D25\uFF1A") + String(r && r.error || t("\u672A\u77E5\u9519\u8BEF"));
+            ddStatus.style.color = "var(--fnos-ui-warn)";
+          }
+        }).catch((err) => {
+          ddStatus.textContent = t("\u6D4B\u8BD5\u5931\u8D25") + ": " + (err && err.message ? err.message : err);
           ddStatus.style.color = "var(--fnos-ui-warn)";
         });
       });
@@ -16286,14 +16634,14 @@ html.fntv-boot-hide #root{visibility:hidden}
       const dmMinRow = document.createElement("div");
       dmMinRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;gap:10px;";
       const dmMinLabel = document.createElement("span");
-      dmMinLabel.textContent = t("\u81EA\u5EFA\u6E90\u5F39\u5E55\u5C11\u4E8E\u8BE5\u6761\u6570\u65F6\u81EA\u52A8\u6539\u7528 B \u7AD9\uFF080=\u4E0D\u542F\u7528\uFF09");
+      dmMinLabel.textContent = t("\u5F39\u5E55\u5C11\u4E8E\u8BE5\u6761\u6570\u65F6\u7EE7\u7EED\u627E\u4E0B\u4E00\u4E2A\u6E90\uFF080=\u4E0D\u542F\u7528\uFF09");
       dmMinLabel.style.cssText = "color:var(--fnos-ui-text);font-weight:500;font-size:12.5px;flex:1;line-height:1.4;";
       const dmMinInput = document.createElement("input");
       dmMinInput.type = "number";
       dmMinInput.min = "0";
       dmMinInput.max = "9999";
       dmMinInput.step = "1";
-      dmMinInput.placeholder = "20";
+      dmMinInput.placeholder = "100";
       dmMinInput.style.cssText = "width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--fnos-ui-border);background:var(--fnos-input-bg);color:var(--fnos-ui-text);font-size:13px;text-align:center;flex:none;";
       dmMinRow.appendChild(dmMinLabel);
       dmMinRow.appendChild(dmMinInput);
@@ -16317,8 +16665,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmApiFoldBody.appendChild(dmApiInput);
       const dmApiBtns = document.createElement("div");
       dmApiBtns.style.cssText = "display:flex;gap:6px;";
-      const dmApiSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const dmApiTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const dmApiSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const dmApiTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
       dmApiBtns.appendChild(dmApiSaveBtn);
       dmApiBtns.appendChild(dmApiTestBtn);
       dmApiFoldBody.appendChild(dmApiBtns);
@@ -16345,7 +16693,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         dmApiSave();
       });
-      const dmApiDiagBtn = mkBtn("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
+      const dmApiDiagBtn = mkBtn2("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
       dmApiBtns.appendChild(dmApiDiagBtn);
       let dmApiDiagPre = null;
       dmApiDiagBtn.addEventListener("click", async (e) => {
@@ -16413,8 +16761,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       diagPre.textContent = t("\u70B9\u51FB\u300C\u5237\u65B0\u300D\u52A0\u8F7D\u8BCA\u65AD\u4FE1\u606F\u2026");
       const diagBtns = document.createElement("div");
       diagBtns.style.cssText = "display:flex;gap:6px;padding:8px 0 0;";
-      const diagRefresh = mkBtn("\u5237\u65B0", true);
-      const diagCopy = mkBtn("\u590D\u5236", true);
+      const diagRefresh = mkBtn2("\u5237\u65B0", true);
+      const diagCopy = mkBtn2("\u590D\u5236", true);
       diagBtns.appendChild(diagRefresh);
       diagBtns.appendChild(diagCopy);
       const loadDiag = async () => {
@@ -16533,7 +16881,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       logFooter.appendChild(logDivider);
       const logRow = document.createElement("div");
       logRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;";
-      const liveBtn = mkBtn("\u5237\u65B0", true);
+      const liveBtn = mkBtn2("\u5237\u65B0", true);
       logRow.appendChild(liveBtn);
       logFooter.appendChild(logRow);
       const livePre = document.createElement("pre");
@@ -16644,6 +16992,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         aboutLink.style.color = "var(--fnos-ui-pill-text)";
       };
       secBodyAbout.appendChild(aboutLink);
+      secBodyAbout.appendChild(buildStatsCard());
       const secAppearance = section("\u5916\u89C2");
       const secBodyAppearance = secAppearance.body;
       secBodyAppearance.style.cssText = "padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;";
@@ -16860,7 +17209,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       hotIntervalRow.appendChild(hotIntervalLabel);
       hotIntervalRow.appendChild(hotIntervalSel);
       secBodyDaily.appendChild(hotIntervalRow);
-      const hotRefreshBtn = mkBtn("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
+      const hotRefreshBtn = mkBtn2("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
       hotRefreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         try {
@@ -16997,8 +17346,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       const mkExtBtnRow = (body) => {
         const row2 = document.createElement("div");
         row2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-        const save = mkBtn("\u4FDD\u5B58", true);
-        const clear = mkBtn("\u6E05\u9664", true);
+        const save = mkBtn2("\u4FDD\u5B58", true);
+        const clear = mkBtn2("\u6E05\u9664", true);
         row2.appendChild(save);
         row2.appendChild(clear);
         body.appendChild(row2);
@@ -17219,9 +17568,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
       const cpBtns = document.createElement("div");
       cpBtns.style.cssText = "display:flex;gap:6px;";
-      const cpSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const cpTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
-      const cpResetBtn = mkBtn("\u5173\u95ED\u4EE3\u7406", true);
+      const cpSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const cpTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const cpResetBtn = mkBtn2("\u5173\u95ED\u4EE3\u7406", true);
       cpBtns.appendChild(cpSaveBtn);
       cpBtns.appendChild(cpTestBtn);
       cpBtns.appendChild(cpResetBtn);
@@ -18139,17 +18488,10 @@ html.fntv-boot-hide #root{visibility:hidden}
           const bt = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
           for (const b of blockToggles) b.input.checked = bt.includes(b.key);
           if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || "";
-          ddRealId = s.dandanplayAppId || "";
-          ddRealSecret = s.dandanplayAppSecret || "";
-          ddIdInput.value = ddRealId ? maskDd(ddRealId) : "";
-          ddIdInput.readOnly = !!ddRealId;
-          ddSecretInput.value = ddRealSecret ? maskDd(ddRealSecret) : "";
-          ddSecretInput.readOnly = !!ddRealSecret;
-          if (ddRealId) ddStatus.textContent = t("\u5DF2\u4FDD\u5B58\u81EA\u5B9A\u4E49\u51ED\u8BC1\uFF0C\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
-          ddSetState(!!ddRealId);
+          ddRefreshStatus();
           swDanmuApi.checked = s.danmuApiEnabled === true;
           dmApiInput.value = s.danmuApiBase || "";
-          dmMinInput.value = String(s.danmuMinCount == null ? 20 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
+          dmMinInput.value = String(s.danmuMinCount == null ? 100 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
           if (swDanmuApi.checked) {
             dmApiStatus.textContent = dmApiInput.value ? t("\u5DF2\u542F\u7528\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\u4F5C\u4E3A\u4F18\u9009\u6E90\uFF0C\u672A\u547D\u4E2D\u65F6\u81EA\u52A8\u964D\u7EA7\u5230 B\u7AD9\u3002") : t("\u5DF2\u5F00\u542F\u4F46\u672A\u586B\u670D\u52A1\u5730\u5740 \u2014\u2014 \u5C55\u5F00\u300C\u670D\u52A1\u5730\u5740\u4E0E\u8FDE\u901A\u6D4B\u8BD5\u300D\u586B\u5199\u540E\u70B9\u4FDD\u5B58\u3002");
             dmApiStatus.style.color = dmApiInput.value ? "var(--fnos-ui-sub)" : "var(--fnos-ui-warn)";
@@ -19715,7 +20057,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   function updatePerfHint() {
     if (glassHintEl) glassHintEl.textContent = perfOn() ? GLASS_HINT_PERF : GLASS_HINT_NORMAL;
   }
-  function mkToggle() {
+  function mkToggle2() {
     const wrap = document.createElement("label");
     wrap.style.cssText = "position:relative;display:inline-block;width:42px;height:23px;cursor:pointer;flex-shrink:0;";
     const input = document.createElement("input");
@@ -19827,7 +20169,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     sub.textContent = "\u7EC4\u4EF6\u78E8\u7802\u73BB\u7483 + \u73AF\u5883\u5149\u80CC\u666F\uFF08\u4F4E\u9971\u548C\u6C1B\u56F4\u8272\u57DF\uFF0CWin11 Mica / Linear \u5F0F\u6750\u8D28\uFF09\u3002\u9ED8\u8BA4\u5F00\u542F\u3002";
     block.appendChild(title);
     block.appendChild(sub);
-    const tog = mkToggle();
+    const tog = mkToggle2();
     paintToggle(tog, s.enabled);
     tog.input.checked = s.enabled;
     tog.input.addEventListener("change", () => {
@@ -19895,7 +20237,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       setStr(K.bright, String(v));
       applyGlass();
     }));
-    const borderTog = mkToggle();
+    const borderTog = mkToggle2();
     paintToggle(borderTog, s.border);
     borderTog.input.checked = s.border;
     borderTog.input.addEventListener("change", () => {
@@ -19912,7 +20254,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       setStr(K.shadow, String(v / 100));
       applyGlass();
     }));
-    const noiseTog = mkToggle();
+    const noiseTog = mkToggle2();
     paintToggle(noiseTog, s.noise);
     noiseTog.input.checked = s.noise;
     noiseTog.input.addEventListener("change", () => {
@@ -19921,7 +20263,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       applyGlass();
     });
     foldBody.appendChild(row("\u78E8\u7802\u566A\u70B9", noiseTog.wrap));
-    const vigTog = mkToggle();
+    const vigTog = mkToggle2();
     paintToggle(vigTog, s.vignette);
     vigTog.input.checked = s.vignette;
     vigTog.input.addEventListener("change", () => {
@@ -19930,7 +20272,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       applyGlass();
     });
     foldBody.appendChild(row("\u80CC\u666F\u6697\u89D2", vigTog.wrap));
-    const particleTog = mkToggle();
+    const particleTog = mkToggle2();
     paintToggle(particleTog, s.particles);
     particleTog.input.checked = s.particles;
     particleTog.input.addEventListener("change", () => {
@@ -23173,7 +23515,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   var ACCENT_GRAD = "linear-gradient(135deg,#6d7ff2,#8a63e8)";
   var CARD_BG = "linear-gradient(165deg,rgba(250,251,254,.97),rgba(240,243,250,.99))";
   var INK = "#262c44";
-  var SUB = "#5a6480";
+  var SUB2 = "#5a6480";
   function fmtHours(ms) {
     const h = Math.round(ms / 36e5);
     return h >= 1e4 ? (ms / 36e5 / 1e4).toFixed(1) + " \u4E07" : String(h);
@@ -23376,15 +23718,15 @@ html.fntv-boot-hide #root{visibility:hidden}
       return `<div style="position:absolute;inset:0;background:linear-gradient(165deg,rgba(109,127,242,.10),rgba(138,99,232,.06));
             display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;">
             ${head("FNTV-PLUS \xB7 " + r.year + " \u5E74\u5EA6\u89C2\u5F71\u62A5\u544A")}
-            <div style="font-size:15px;font-weight:700;color:${SUB};">\u8FD9\u4E00\u5E74\uFF0C\u4F60\u5728 Fntv-Plus \u770B\u4E86</div>
+            <div style="font-size:15px;font-weight:700;color:${SUB2};">\u8FD9\u4E00\u5E74\uFF0C\u4F60\u5728 Fntv-Plus \u770B\u4E86</div>
             <div style="display:flex;align-items:baseline;gap:8px;">
                 <span style="font-size:74px;font-weight:900;background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${fmtHours(r.totalMs)}</span>
                 <span style="font-size:20px;font-weight:800;color:${INK};">\u5C0F\u65F6</span>
             </div>
             <div style="display:flex;gap:26px;margin-top:6px;">
-                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.titles}</div><div style="font-size:11px;color:${SUB};">\u90E8\u4F5C\u54C1</div></div>
-                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB};">\u5929\u6709\u89C2\u5F71</div></div>
-                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB};">\u90E8\u770B\u5B8C</div></div>
+                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.titles}</div><div style="font-size:11px;color:${SUB2};">\u90E8\u4F5C\u54C1</div></div>
+                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB2};">\u5929\u6709\u89C2\u5F71</div></div>
+                <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB2};">\u90E8\u770B\u5B8C</div></div>
             </div>
             ${r.ignored > 0 ? `<div style="font-size:11px;color:#b06a3a;background:rgba(176,106,58,.10);border:1px solid rgba(176,106,58,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">\u{1F6E0} \u5DF2\u81EA\u52A8\u4FEE\u6B63 ${r.ignored} \u6761\u5F02\u5E38\u65F6\u95F4\u8BB0\u5F55\uFF08\u64AD\u653E\u65F6\u95F4\u65E9\u4E8E 2000 \u5E74\u7684\u810F\u6570\u636E\uFF0C\u4E0D\u8BA1\u5165\u7EDF\u8BA1\uFF09</div>` : ""}
             ${r.synthetic ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">\u{1F4CA} \u98DE\u725B\u4FA7\u64AD\u653E\u65F6\u95F4\u7F3A\u5931\uFF0C\u672C\u62A5\u544A\u6309\u89C2\u5F71\u53F0\u8D26\u4F30\u7B97\uFF08\u6BCF\u65E5\u8BB0\u5F55 \xD7 30 \u5206\u949F\uFF09</div>` : ""}
@@ -23399,7 +23741,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;">
                 <div style="font-size:9px;color:${hot ? "#4a5fd0" : "transparent"};font-weight:700;">\u5CF0\u503C</div>
                 <div style="width:60%;height:${h}px;border-radius:7px;background:${hot ? ACCENT_GRAD : "linear-gradient(180deg,rgba(109,127,242,.55),rgba(109,127,242,.25))"};"></div>
-                <div style="font-size:10px;color:${SUB};">${i + 1}\u6708</div>
+                <div style="font-size:10px;color:${SUB2};">${i + 1}\u6708</div>
             </div>`;
       }).join("");
       return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
@@ -23414,14 +23756,14 @@ html.fntv-boot-hide #root{visibility:hidden}
         const hh = h > 9 ? String(h) : "0" + h;
         return `<div title="${hh}:00" style="display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;">
                 <div style="width:70%;height:${Math.max(3, Math.round(ms / max * 110))}px;border-radius:4px 4px 0 0;background:${h >= 0 && h < 5 ? ACCENT_GRAD : "rgba(109,127,242,.35)"};"></div>
-                ${h % 3 === 0 ? `<div style="font-size:8.5px;color:${SUB};">${hh}</div>` : '<div style="font-size:8.5px;">&nbsp;</div>'}
+                ${h % 3 === 0 ? `<div style="font-size:8.5px;color:${SUB2};">${hh}</div>` : '<div style="font-size:8.5px;">&nbsp;</div>'}
             </div>`;
       }).join("");
       const owl = r.nightRatio > 0.25 ? "\u91CD\u5EA6\u591C\u732B \u{1F989}" : r.nightRatio > 0.1 ? "\u8F7B\u5EA6\u591C\u732B \u{1F319}" : "\u517B\u751F\u4F5C\u606F \u2600\uFE0F";
       return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head("PAGE 3 \xB7 \u89C2\u5F71\u65F6\u523B")}
             <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 4px;">\u4F60\u662F <span style="background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${owl}</span></div>
-            <div style="font-size:12px;color:${SUB};margin-bottom:18px;">\u6DF1\u591C\u65F6\u6BB5(00-05\u70B9)\u89C2\u770B\u5360\u6BD4 ${(r.nightRatio * 100).toFixed(1)}%</div>
+            <div style="font-size:12px;color:${SUB2};margin-bottom:18px;">\u6DF1\u591C\u65F6\u6BB5(00-05\u70B9)\u89C2\u770B\u5360\u6BD4 ${(r.nightRatio * 100).toFixed(1)}%</div>
             <div style="display:flex;align-items:flex-end;height:140px;">${bars}</div>
         </div>`;
     }
@@ -23434,7 +23776,7 @@ html.fntv-boot-hide #root{visibility:hidden}
                 <div style="flex:1;min-width:0;">
                     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
                         <span style="font-size:14px;font-weight:700;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc4(t2.name)}</span>
-                        <span style="font-size:11px;color:${SUB};flex-shrink:0;">${fmtHours(t2.ms)} \u5C0F\u65F6${t2.prog >= 1 ? " \xB7 \u5DF2\u770B\u5B8C" : ""}</span>
+                        <span style="font-size:11px;color:${SUB2};flex-shrink:0;">${fmtHours(t2.ms)} \u5C0F\u65F6${t2.prog >= 1 ? " \xB7 \u5DF2\u770B\u5B8C" : ""}</span>
                     </div>
                     <div style="margin-top:5px;height:7px;border-radius:99px;background:rgba(109,127,242,.14);">
                         <div style="height:100%;width:${Math.max(4, Math.round(t2.ms / max * 100))}%;border-radius:99px;background:${ACCENT_GRAD};"></div>
@@ -23454,11 +23796,11 @@ html.fntv-boot-hide #root{visibility:hidden}
         ${head("PAGE 5 \xB7 \u603B\u7ED3")}
         <div style="font-size:26px;font-weight:900;color:${INK};">${r.year} \u5E74\uFF0C\u6700\u5927\u8FDE\u7EED\u89C2\u5F71 <span style="background:${ACCENT_GRAD};-webkit-background-clip:text;background-clip:text;color:transparent;">${r.maxStreak} \u5929</span></div>
         <div style="display:flex;gap:34px;">
-            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${doneRate}%</div><div style="font-size:11px;color:${SUB};">\u770B\u5B8C\u7387</div></div>
-            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.rated}</div><div style="font-size:11px;color:${SUB};">\u6253\u8FC7\u5206</div></div>
-            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB};">\u89C2\u5F71\u5929\u6570</div></div>
+            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${doneRate}%</div><div style="font-size:11px;color:${SUB2};">\u770B\u5B8C\u7387</div></div>
+            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.rated}</div><div style="font-size:11px;color:${SUB2};">\u6253\u8FC7\u5206</div></div>
+            <div style="text-align:center;"><div style="font-size:30px;font-weight:900;color:${INK};">${r.activeDays}</div><div style="font-size:11px;color:${SUB2};">\u89C2\u5F71\u5929\u6570</div></div>
         </div>
-        <div style="font-size:12.5px;color:${SUB};margin-top:8px;">\u671F\u5F85 ${r.year + 1} \u5E74\u7EE7\u7EED\u4E0E\u4F60\u76F8\u4F34 \u{1F3AC}</div>
+        <div style="font-size:12.5px;color:${SUB2};margin-top:8px;">\u671F\u5F85 ${r.year + 1} \u5E74\u7EE7\u7EED\u4E0E\u4F60\u76F8\u4F34 \u{1F3AC}</div>
         <div style="font-size:10.5px;color:#8a93ad;">\u70B9\u51FB\u5E95\u90E8\u300C\u5BFC\u51FA\u957F\u56FE\u300D\u4FDD\u5B58\u5206\u4EAB</div>
     </div>`;
   }

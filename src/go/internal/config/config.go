@@ -7,10 +7,14 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
+
+	"fntvplus/internal/secret"
 )
 
 // Config 是后端的全部可持久化配置。
@@ -39,6 +43,44 @@ var knownKeys = map[string]bool{
 	"enhancement_enabled": true,
 	"upstream":            true,
 	"inject_css":          true,
+}
+
+// secretAtRest 落盘前必须加密的配置键。
+//
+// 写入：Update 收到明文即加密，Extra 里始终只存密文（config.json 被拷走也读不出凭证）。
+// 读取：GetSetting 透明解密（业务代码拿明文，无感知）；Get()/GetMap 见下面的脱敏规则。
+var secretAtRest = map[string]bool{
+	"dandanplayAppId":     true,
+	"dandanplayAppSecret": true,
+}
+
+// redactedKeys 经设置 API 下发时必须遮蔽的键。
+//
+// 两类：
+//  1. 纯密钥项——AppId 是标识符（每个请求头都带、面板要按长度渲染掩码），下发明文不增加
+//     暴露面；Secret 一旦下发就等于把凭证明文放进浏览器内存。
+//  2. 匿名统计 ID——面板只展示前 8 位供核对（经 /api/stats 的 anonIdShort），完整 ID 没有任何
+//     下发理由：它是本机随机生成的假名，完整值被复制走就能对上服务端里的记录。
+//
+// 遮蔽后另发 <键名>Set 布尔标记，面板据此显示「已配置」而不需要拿到明文。
+var redactedKeys = map[string]bool{
+	"dandanplayAppSecret": true,
+	"statsAnonId":         true,
+}
+
+// decryptSetting 密文则解密；明文（历史遗留值）原样返回。
+func decryptSetting(v any) any {
+	s, ok := v.(string)
+	if !ok || !secret.IsEncrypted(s) {
+		return v
+	}
+	plain, err := secret.DecryptStored(s)
+	if err != nil {
+		// 解密失败（换机拷贝 / 盐文件丢失）：记日志并按空值处理，不阻断启动。
+		logSecretIssue(err)
+		return ""
+	}
+	return plain
 }
 
 // MarshalJSON 平铺输出：已知字段 + Extra。（指针接收者：避免按值拷贝内嵌 sync.RWMutex，go vet 报锁拷贝）
@@ -106,6 +148,9 @@ func Default() *Config {
 func Load(path string) (*Config, error) {
 	c := Default()
 	c.path = path
+	// 绑定每安装盐文件（同目录）：自定义凭证的落盘密钥由此派生。
+	// 必须在任何 GetSetting/Update 之前完成，否则密文将按内置域密钥解不开。
+	secret.BindStoreDir(filepath.Dir(path))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -120,6 +165,14 @@ func Load(path string) (*Config, error) {
 	}
 	c.path = path
 	return c, nil
+}
+
+// logSecretIssue 记录敏感值处理异常。不引 log 包也避免 import 环：直接写标准错误，
+// 由上层（fntvplus 进程 log 重定向）统一收进 fntvplus.log。
+func logSecretIssue(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[fntvplus-config] 敏感配置解密/加密异常: %v\n", err)
+	}
 }
 
 // Save 将当前配置写回磁盘（原子写：临时文件 + rename）。外部调用，内部加写锁。
@@ -159,13 +212,13 @@ func (c *Config) Dir() string {
 	return filepath.Dir(c.path)
 }
 
-// Get 返回配置快照（线程安全）。
+// Get 返回配置快照（线程安全）。敏感键同样按脱敏规则处理（见 redactedKeys）。
 func (c *Config) Get() Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	extra := map[string]any{}
 	for kk, vv := range c.Extra {
-		extra[kk] = vv
+		extra[kk] = redactValue(kk, vv)
 	}
 	return Config{
 		EnhancementEnabled: c.EnhancementEnabled,
@@ -176,6 +229,7 @@ func (c *Config) Get() Config {
 }
 
 // GetMap 返回平铺配置快照（供 settings API / bridge 使用）。
+// 敏感键在此脱敏：只回布尔标记，明文永不出后端。
 func (c *Config) GetMap() map[string]any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -185,14 +239,35 @@ func (c *Config) GetMap() map[string]any {
 		"inject_css":          c.InjectCSS,
 	}
 	for kk, vv := range c.Extra {
-		if !knownKeys[kk] {
-			m[kk] = vv
+		if knownKeys[kk] {
+			continue
 		}
+		if redactedKeys[kk] {
+			m[kk] = ""
+			m[kk+"Set"] = hasSecretValue(vv)
+			continue
+		}
+		m[kk] = redactValue(kk, vv)
 	}
 	return m
 }
 
+// redactValue 单值脱敏（非敏感键解密后原样返回；敏感键→空）。
+func redactValue(key string, v any) any {
+	if redactedKeys[key] {
+		return ""
+	}
+	return decryptSetting(v)
+}
+
+// hasSecretValue 判断某敏感键是否已配置（密文非空、或历史明文非空）。
+func hasSecretValue(v any) bool {
+	s, ok := v.(string)
+	return ok && strings.TrimSpace(s) != ""
+}
+
 // GetSetting 取单个设置值（不存在返回 "", false）。
+// 落盘为密文的键在此透明解密：调用方拿到的始终是明文，无需关心存储形态。
 func (c *Config) GetSetting(key string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -203,6 +278,7 @@ func (c *Config) GetSetting(key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	v = decryptSetting(v)
 	switch tv := v.(type) {
 	case string:
 		return tv, true
@@ -255,6 +331,26 @@ func (c *Config) Update(patch map[string]any) error {
 		}
 		if c.Extra == nil {
 			c.Extra = map[string]any{}
+		}
+		// 敏感键落盘前加密（明文只存在于内存与本次请求体）。已是密文则原样存，
+		// 避免「读→写」往返把密文二次加密。
+		if secretAtRest[kk] {
+			if s, ok := vv.(string); ok {
+				if s = strings.TrimSpace(s); s == "" {
+					delete(c.Extra, kk)
+					continue
+				}
+				if !secret.IsEncrypted(s) {
+					enc, err := secret.EncryptStored(s)
+					if err == nil {
+						c.Extra[kk] = enc
+						continue
+					}
+					logSecretIssue(err)
+				}
+				c.Extra[kk] = s
+				continue
+			}
 		}
 		c.Extra[kk] = vv
 	}

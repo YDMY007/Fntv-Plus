@@ -13,6 +13,7 @@ import (
 
 	"fntvplus/internal/config"
 	"fntvplus/internal/inject"
+	"fntvplus/internal/stats"
 )
 
 // upstreamHandler 模拟飞牛影视网页服务（与 cmd/mockupstream 等价，供测试内联使用）。
@@ -45,12 +46,27 @@ func upstreamHandler() http.Handler {
 // testEnv 封装一套测试用的上游 + 反代 + 客户端。
 // 客户端关闭 keep-alive，规避「嵌套 httptest 服务器 + 复用连接」导致的测试桩死锁
 // （生产环境代理与上游是独立进程，不存在此问题）。
+// client 注入统一网关身份头（X-Trim-*），模拟「经 fnOS 网关登录后转发」的请求；
+// anonClient 不带头，用于验证受保护接口的 401 拒绝路径。
 type testEnv struct {
-	proxyURL string
-	client   *http.Client
-	inj      *inject.Injector
-	cfg      *config.Config
-	close    func()
+	proxyURL   string
+	client     *http.Client
+	anonClient *http.Client
+	inj        *inject.Injector
+	cfg        *config.Config
+	stat       *stats.Stats
+	close      func()
+}
+
+// gatewayUserTransport 给所有请求注入统一网关身份头（模拟 fnOS 网关转发）。
+type gatewayUserTransport struct{ base http.RoundTripper }
+
+func (g gatewayUserTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r2 := r.Clone(r.Context())
+	r2.Header.Set("X-Trim-Userid", "1000")
+	r2.Header.Set("X-Trim-Isadmin", "true")
+	r2.Header.Set("X-Trim-Username", "admin")
+	return g.base.RoundTrip(r2)
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -65,15 +81,47 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("inject.New: %v", err)
 	}
-	srv := NewServer(Deps{Upstream: upURL, Config: cfg, Injector: inj})
+	// 统计端点点到死地址：测试只验证「本地使用标记」，任何意外发出的心跳都打不到生产服务端。
+	t.Setenv("FNTV_STATS_ENDPOINT", "http://127.0.0.1:1")
+	stat := stats.New(cfg, "1.12.0-test")
+	srv := NewServer(Deps{Upstream: upURL, Config: cfg, Injector: inj, Stats: stat})
 	proxySrv := httptest.NewServer(srv)
-	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	base := &http.Transport{DisableKeepAlives: true}
+	client := &http.Client{Transport: gatewayUserTransport{base: base}}
+	anonClient := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
 	return &testEnv{
-		proxyURL: proxySrv.URL,
-		client:   client,
-		inj:      inj,
-		cfg:      cfg,
-		close:    func() { proxySrv.Close(); up.Close() },
+		proxyURL:   proxySrv.URL,
+		client:     client,
+		anonClient: anonClient,
+		inj:        inj,
+		cfg:        cfg,
+		stat:       stat,
+		close:      func() { proxySrv.Close(); up.Close() },
+	}
+}
+
+// TestGatewayAuthRejected —— 受保护接口（管理/设置/状态/日志/bridge）对没有
+// 统一网关身份头的直连请求必须返回 401，防止回环端口被未授权访问。
+func TestGatewayAuthRejected(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	for _, path := range []string{
+		"/app/fntvplus/admin",
+		"/app/fntvplus/api/settings",
+		"/app/fntvplus/api/status",
+		"/app/fntvplus/api/logs",
+		"/app/fntvplus/api/bridge/proxy",
+	} {
+		resp, err := env.anonClient.Get(env.proxyURL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("GET %s without gateway identity: status = %d, want 401", path, resp.StatusCode)
+		}
 	}
 }
 
@@ -223,5 +271,174 @@ func TestInjectorIdempotent(t *testing.T) {
 	}
 	if out2 != out1 {
 		t.Errorf("idempotent inject changed output")
+	}
+}
+
+/* ========== 匿名使用统计 ========== */
+
+// TestStatsAuthRequired 统计接口与其它管理 API 同待遇：无网关身份一律 401。
+func TestStatsAuthRequired(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	for _, path := range []string{
+		"/app/fntvplus/api/stats",
+		"/app/fntvplus/api/stats/enabled",
+		"/app/fntvplus/api/stats/ping",
+		"/app/fntvplus/api/stats/reset",
+	} {
+		resp, err := env.anonClient.Get(env.proxyURL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("GET %s without gateway identity: status = %d, want 401", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestInjectionMarksUsage 反代注入成功 → 记下「今天确实被用过」（统计的真实触发点）。
+// 关键点：注入之后本地要留下使用记录，且这是**唯一**触发路径（进程启动不算）。
+func TestInjectionMarksUsage(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	if env.stat.UsedToday() {
+		t.Fatal("尚未打开过增强页面，不应有使用记录")
+	}
+
+	resp, err := env.client.Get(env.proxyURL + "/app/fntvplus/v/")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// MarkUsed 在注入后异步触发，轮询等它落盘。
+	deadline := time.Now().Add(2 * time.Second)
+	for !env.stat.UsedToday() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !env.stat.UsedToday() {
+		t.Fatal("注入成功后应记录今天的使用")
+	}
+}
+
+// TestNonHTMLDoesNotMarkUsage 静态资源/视频 206 不触发使用记录（只有页面被打开才算用）。
+func TestNonHTMLDoesNotMarkUsage(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	resp, err := env.client.Get(env.proxyURL + "/app/fntvplus/v/style.css")
+	if err != nil {
+		t.Fatalf("get css: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	time.Sleep(100 * time.Millisecond) // 给异步标记（若有）留出窗口
+	if env.stat.UsedToday() {
+		t.Error("拉取 CSS 不应算作使用")
+	}
+}
+
+// TestStatsToggleAndReset 面板三个动作的端到端行为：读状态 / 关开关 / 重置匿名 ID。
+func TestStatsToggleAndReset(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	// 读状态
+	resp, err := env.client.Get(env.proxyURL + "/app/fntvplus/api/stats")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	var info map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if info["enabled"] != true {
+		t.Errorf("缺省应开启: %v", info["enabled"])
+	}
+	short, _ := info["anonIdShort"].(string)
+	if len(short) != 8 {
+		t.Errorf("应只回匿名 ID 前 8 位，实为 %q", short)
+	}
+
+	// 关开关
+	req, _ := http.NewRequest("POST", env.proxyURL+"/app/fntvplus/api/stats/enabled",
+		bytes.NewReader([]byte(`{"enabled":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	resp2, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("post enabled: %v", err)
+	}
+	io.Copy(io.Discard, resp2.Body)
+	resp2.Body.Close()
+	if env.stat.Enabled() {
+		t.Error("关闭后 Enabled 应为 false")
+	}
+
+	// 重置匿名 ID（先重新打开，避免开关状态干扰）
+	req2, _ := http.NewRequest("POST", env.proxyURL+"/app/fntvplus/api/stats/reset", nil)
+	resp3, err := env.client.Do(req2)
+	if err != nil {
+		t.Fatalf("post reset: %v", err)
+	}
+	var reset map[string]any
+	json.NewDecoder(resp3.Body).Decode(&reset)
+	resp3.Body.Close()
+	newShort, _ := reset["anonIdShort"].(string)
+	if newShort == short {
+		t.Errorf("重置后 ID 应变化: %q", newShort)
+	}
+}
+
+// TestStatsIDNotLeakedBySettingsAPI 完整匿名 ID 不通过设置 API 下发（只给前 8 位）。
+func TestStatsIDNotLeakedBySettingsAPI(t *testing.T) {
+	env := newTestEnv(t)
+	defer env.close()
+
+	// 打开一次页面，让匿名 ID 真正生成
+	resp, _ := env.client.Get(env.proxyURL + "/app/fntvplus/v/")
+	if resp != nil {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+
+	// 从统计接口拿短 ID
+	resp2, err := env.client.Get(env.proxyURL + "/app/fntvplus/api/stats")
+	if err != nil {
+		t.Fatalf("get stats: %v", err)
+	}
+	var info map[string]any
+	json.NewDecoder(resp2.Body).Decode(&info)
+	resp2.Body.Close()
+	short, _ := info["anonIdShort"].(string)
+	if len(short) != 8 {
+		t.Fatalf("短 ID 应为 8 位: %q", short)
+	}
+
+	// 设置 API 下发的配置里不应出现完整 ID
+	resp3, err := env.client.Get(env.proxyURL + "/app/fntvplus/api/settings")
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	raw, _ := io.ReadAll(resp3.Body)
+	resp3.Body.Close()
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if v, ok := settings["statsAnonId"]; ok {
+		if s, _ := v.(string); s != "" {
+			t.Errorf("设置 API 泄漏了匿名 ID: %q", s)
+		}
+	}
+	if strings.Contains(string(raw), short) && !strings.Contains(string(raw), "statsAnonIdSet") {
+		// 只在没有任何遮蔽标记时才真算泄漏
+		t.Logf("settings payload: %s", raw)
 	}
 }

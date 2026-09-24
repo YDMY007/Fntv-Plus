@@ -1,6 +1,8 @@
 // Command fntvplus —— Fntv-Plus 影视网页端增强后端（FPK 常驻服务）。
 //
-// 监听 127.0.0.1:<port>，经官方网关接收 /app/fntvplus/* 请求，回环反代影视网页并注入增强脚本。
+// 主入口：监听应用目录下的 Unix socket，经飞牛统一网关接收 /app/fntvplus/* 请求
+//（网关校验 NAS 登录态后转发，并注入 X-Trim-Userid 等身份头），回环反代影视网页并注入增强脚本。
+// 辅助入口：监听 127.0.0.1:<port>，仅本机健康检查/调试用，不对局域网开放。
 //
 // 启动（本地调试）：
 //
@@ -8,7 +10,7 @@
 //
 // 在 fnOS 上由 cmd/main 经环境变量拉起：
 //
-//	fntvplus --port $TRIM_SERVICE_PORT --etc $TRIM_PKGETC --var $TRIM_PKGVAR --dest $TRIM_APPDEST
+//	fntvplus --port $TRIM_SERVICE_PORT --socket fntvplus.sock --etc $TRIM_PKGETC --var $TRIM_PKGVAR --dest $TRIM_APPDEST
 //
 // 上游地址优先级：--upstream > 环境变量 FNTV_UPSTREAM > 环境变量 TRIM_SYS_WEB_PORT
 // （拼成 http://127.0.0.1:<port>）> 默认 http://127.0.0.1:5666。
@@ -18,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,10 +31,12 @@ import (
 	"fntvplus/internal/config"
 	"fntvplus/internal/inject"
 	"fntvplus/internal/proxy"
+	"fntvplus/internal/stats"
 )
 
 func main() {
 	port := flag.String("port", envOr("TRIM_SERVICE_PORT", "22350"), "监听端口")
+	sock := flag.String("socket", envOr("TRIM_GATEWAY_SOCKET", ""), "统一网关 Unix socket 文件名（置于 destDir 下；空则不监听 socket）")
 	etcDir := flag.String("etc", envOr("TRIM_PKGETC", "."), "配置目录（config.json 所在）")
 	varDir := flag.String("var", envOr("TRIM_PKGVAR", "."), "运行时数据目录")
 	destDir := flag.String("dest", envOr("TRIM_APPDEST", "."), "应用安装目录（payload 来源）")
@@ -74,20 +79,55 @@ func main() {
 		log.Printf("[fntvplus] using config upstream override: %s", cfg.Get().Upstream)
 	}
 
+	// [v1.12.0] 匿名使用统计：以「今天确实有人打开了增强页面」（反代注入成功）为触发，
+	// 每天最多一次心跳；未配置服务端地址 / 用户关闭开关 / 开发版号（dev）都不会往外发。
+	// 细节见 internal/stats 包注释与 docs/匿名统计说明.md。
+	stat := stats.New(cfg, appVersion)
+	stat.Start()
+
 	srv := proxy.NewServer(proxy.Deps{
 		Upstream: upstream,
 		Config:   cfg,
 		Injector: inj,
+		Stats:    stat,
 		VarDir:   *varDir,
 		Version:  appVersion,
 	})
 
-	// 端口服务模式：桌面入口直连 http://<NAS>:port，必须绑 0.0.0.0（绑 127.0.0.1 浏览器连不上）。
-	addr := "0.0.0.0:" + *port
+	// 统一网关（主入口）：监听 TRIM_APPDEST 下的 Unix socket，请求经官方网关
+	// /app/fntvplus/* 转发进来，网关已校验 NAS 登录态——本服务不再监听公网 TCP。
+	if *sock != "" {
+		sockPath := filepath.Join(*destDir, *sock)
+		if err := serveSocket(sockPath, srv); err != nil {
+			log.Fatalf("gateway socket %s: %v", sockPath, err)
+		}
+		log.Printf("[fntvplus] gateway socket ready: %s", sockPath)
+	}
+
+	// 回环 TCP（辅助入口：本机健康检查/调试；仅 127.0.0.1，不对局域网开放）。
+	addr := "127.0.0.1:" + *port
 	log.Printf("[fntvplus] v%s listening on %s (etc=%s var=%s dest=%s)", appVersion, addr, *etcDir, *varDir, *destDir)
 	if err := http.ListenAndServe(addr, srv); err != nil {
 		log.Fatalf("listen %s: %v", addr, err)
 	}
+}
+
+// serveSocket 在 sockPath 创建并监听 Unix socket，随后在后台 goroutine 常驻服务。
+// fnOS 统一网关按 gatewaySocket 约定把 /app/<appname>/* 请求转发到该 socket。
+func serveSocket(sockPath string, h http.Handler) error {
+	if err := os.Remove(sockPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale socket: %w", err)
+	}
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if err := http.Serve(ln, h); err != nil && err != http.ErrServerClosed {
+			log.Printf("[fntvplus] gateway socket server exited: %v", err)
+		}
+	}()
+	return nil
 }
 
 // resolveUpstream 按优先级推导回环上游地址。

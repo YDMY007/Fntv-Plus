@@ -14,10 +14,17 @@ import { md5 } from './md5';
 
 // fnOS 影视 API 鉴权签名（算法与桌面版主进程 fnosAuth.js 完全一致）：
 // sign = md5([API_KEY, url, nonce, timestamp, md5(JSON.stringify(data)||''), API_SECRET].join('_'))
-const AUTHX_KEY = 'NDzZTVxnRKP8Z0jXg1VAMonaG8akvh';
-const AUTHX_SECRET = '16CCEB3D-AB42-077D-36A1-F355324E4237';
+// 签名材料不硬编码进本仓库/产物（官方密钥随包分发属审核红线）：网页端注入脚本运行在
+// 已登录影视页面内，签名一律回放 diag.ts 捕获到的页面自身合法签名（genAuthx 空材料时
+// 直接返回捕获值，未捕获到返回空串 → 上层跳过该头，靠 cookie 直取同源接口）。
+const AUTHX_KEY = '';
+const AUTHX_SECRET = '';
 
 function genAuthx(url, data) {
+  // 空材料（网页端常态）：直接回放页面自身捕获的合法签名；仍无则空串（上层跳过头）。
+  if (!AUTHX_KEY || !AUTHX_SECRET) {
+    return getCapturedAuthx(String(url)) || '';
+  }
   const nonce = String(Math.floor(Math.random() * (1000000 - 100000) + 100000));
   const timestamp = Date.now().toString();
   const dataJson = data ? JSON.stringify(data) : '';
@@ -164,6 +171,7 @@ const SETTINGS_KEY_MAP = {
   'system-page-url': 'systemPageUrl',
   'smart-skip-enabled': 'smartSkipEnabled',
   'dandanplay-credentials': 'dandanplayCredentials',
+  'dandanplay-enabled': 'dandanplayEnabled',
   'exit-mode': 'exitMode',
   'custom-version': 'customVersion',
   'debug-enabled': 'debugEnabled',
@@ -236,9 +244,12 @@ const ipcRenderer = {
       });
     }
       if (channel === 'settings:set-dandanplay-credentials') {
+        // 面板传来的是对象 { appId, appSecret }（桌面版 handler 同形）；此前按 args[0]/args[1]
+        // 两个字符串读取 → 存进配置的是 "[object Object]"、Secret 为空 → 自定义凭证静默失效。
+        const a = args[0] || {};
         return apiPost('/app/fntvplus/api/settings', {
-          dandanplayAppId: String(args[0] || ''),
-          dandanplayAppSecret: String(args[1] || ''),
+          dandanplayAppId: String(a.appId || '').trim(),
+          dandanplayAppSecret: String(a.appSecret || '').trim(),
         });
       }
       const p = apiPost('/app/fntvplus/api/settings', { [key]: args[0] });
@@ -459,6 +470,16 @@ const ipcRenderer = {
     }
     if (channel === 'log-message') return Promise.resolve(undefined); // emitLog 已并行 console.log，diag 会捕获
 
+    /* ── [v1.12.0] 匿名使用统计（网页端上报由 NAS 后端 Go 发出，这里只转发面板动作）──
+     * 桌面版由主进程直接发心跳；网页端没有主进程，改由后端 internal/stats 以
+     * 「反代注入成功」为触发每天报一次 —— 浏览器拿不到也无需拿到匿名 ID。 */
+    if (channel === 'stats:get-info') return apiGet('/app/fntvplus/api/stats');
+    if (channel === 'stats:set-enabled') {
+      return apiPost('/app/fntvplus/api/stats/enabled', { enabled: !!args[0] });
+    }
+    if (channel === 'stats:ping-now') return apiPost('/app/fntvplus/api/stats/ping', {});
+    if (channel === 'stats:reset-id') return apiPost('/app/fntvplus/api/stats/reset', {});
+
     /* ── 补丁/解锁（桌面版更新机制；网页端更新走应用中心）── */
     if (channel === 'settings:verify-unlock-code') return Promise.resolve({ ok: false, message: '网页端未适配解锁码' });
     if (channel === 'settings:check-patch' || channel === 'settings:apply-patch' || channel === 'settings:apply-test-patch' || channel === 'settings:rollback-patch') {
@@ -640,6 +661,15 @@ const ipcRenderer = {
     }
     if (channel === 'danmaku:pick') {
       return apiPost('/app/fntvplus/api/bridge/danmaku/pick', args[0] || {});
+    }
+    /* ── [v1.11.0] 弹弹play 开放 API（内置凭证 + 可选自定义凭证）── */
+    if (channel === 'dandanplay:status') {
+      return apiGet('/app/fntvplus/api/bridge/dandanplay/status');
+    }
+    if (channel === 'dandanplay:test') {
+      // 连通自检：真发一次搜索请求，把凭证/网络两类失败分别归因
+      const a = args[0] || {};
+      return apiPost('/app/fntvplus/api/bridge/dandanplay/test', { keyword: a.keyword || '' });
     }
 
     /* ── 人物页 TMDB 增强（fnOS person API → TMDB 链路待接）── */
