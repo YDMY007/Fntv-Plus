@@ -517,9 +517,10 @@ function writeSmartSkipEnabled(enabled: boolean): void {
                 if (fs.existsSync(target)) {
                     lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
                 }
-                // 移除已存在的 enabled 行及旧注释，避免重复堆叠
+                // 移除已存在的 enabled 行及相关注释，避免重复堆叠
                 lines = lines.filter(l => !/^\s*enabled\s*=/.test(l)
-                    && !/^#\s*智能跳过片头片尾开关/.test(l));
+                    && !/^#\s*智能跳过片头片尾开关/.test(l)
+                    && !/^#\s*开启后：/.test(l));
                 while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
                 lines.push('# 智能跳过片头片尾开关（由应用「插件」面板控制）');
                 lines.push('enabled=' + val);

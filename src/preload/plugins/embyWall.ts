@@ -4177,7 +4177,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     secSkip.el.id = 'sec-skip';
     const skipBody = secSkip.body;
     const skipDesc = document.createElement('div');
-    skipDesc.textContent = t('自动加载飞牛/影片库跳过数据；可在播放时显示「跳过片头/片尾」按钮，或开启后自动跳过。');
+    skipDesc.textContent = t('开启后：播放获取到跳过数据时，进入片头/片尾区间会在播放器右下角显示「跳过片头/片尾」按钮，由你点击才跳过（不自动跳过，避免误切正剧）。');
     skipDesc.style.cssText = 'color:#9aa0a6;font-size:12px;line-height:1.5;margin-bottom:6px;';
     skipBody.appendChild(skipDesc);
     const skipRow = document.createElement('div');
@@ -4186,7 +4186,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     skipRow.onmouseenter = () => { skipRow.style.background = 'var(--fnos-ui-row-hover)'; };
     skipRow.onmouseleave = () => { skipRow.style.background = 'transparent'; };
     const skipLabel = document.createElement('span');
-    skipLabel.textContent = t('自动跳过片头片尾');
+    skipLabel.textContent = t('显示跳过按钮（点击才跳过）');
     skipLabel.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
     const swSkip = document.createElement('input');
     swSkip.type = 'checkbox';

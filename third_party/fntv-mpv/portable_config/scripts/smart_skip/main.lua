@@ -45,7 +45,7 @@ local aniskip_intro_applied = false
 local aniskip_outro_applied = false
 local pending_aniskip = false
 
--- 跳过按钮状态（enabled=no 时显示）
+-- 跳过按钮状态：进入片头/片尾区间显示，由用户点击才跳过
 local skip_btn = {
     active = false,
     hover = false,
@@ -53,6 +53,17 @@ local skip_btn = {
     target = 0,    -- 点击后跳转到的秒数
     rect = { x = 0, y = 0, w = 0, h = 0 },
 }
+
+-- time-pos 观察器只注册一次（file-loaded 每集都会触发，重复注册会叠加多个观察器）
+local timepos_observed = false
+-- 已点击跳过的段落标记（每集重置，避免点击后按钮在落点上再次闪现）
+local skip_state = { intro_done = false, outro_done = false }
+-- 点击跳过后落点恰在区间右端点上，留一小段缓冲避免按钮在落点上闪现
+local BUTTON_EPSILON = 0.3
+
+-- MBTN_LEFT 强制绑定当前是否已注册
+local click_bound = false
+local CLICK_BIND = "fntv_smart_skip_click"
 
 -- theintrodb 兜底：根据当前播放 guid 查 tmdb 元数据获取片头/片尾
 local function try_theintrodb_fallback()
@@ -166,32 +177,124 @@ mp.register_script_message('skip-metadata', function(payload)
     end
 end)
 
--- 绘制右下角跳过按钮（enabled=no 时）
+-- [lc-1227] 跳过按钮距底部的基线（像素，按 osd 高度缩放）。
+-- 原值 80 是硬编码：在那个尺寸下按钮底边正好压进 uosc 底部控制栏（实测 720p 控制栏高 81px），
+-- 表现为「跳过片头」被进度条/按钮行遮住。现在改为读取 uosc 实际公布的控制栏高度后再上抬。
+local SKIP_BTN_BASE_LIFT = 80
+-- [lc-1229] 水平内缩（像素，按高度缩放）：按钮左边缘距屏幕左侧的距离。
+-- 与右侧留白用同一个基准，换边后视觉位置对称。
+local SKIP_BTN_MARGIN_X = 40
+
+-- uosc 在每次渲染后把「未被占用的边缘」发布到 user-data/osc/margins（比例值 0~1，b=底部）。
+-- 这是唯一能跟着用户 uosc 配置/DPI 缩放/窗口尺寸自动变化的高度来源，比猜一个常量可靠。
+-- ⚠️ 该属性在 uosc 完成首次渲染前为 nil（脚本加载早于首帧），必须回退到经验值。
+local function controls_bottom_px(h)
+    local margins = mp.get_property_native("user-data/osc/margins")
+    if type(margins) == "table" then
+        local b = tonumber(margins.b)
+        if b and b > 0 and b < 1 then
+            return math.floor(b * h)
+        end
+    end
+    return 0
+end
+
+-- 绘制跳过按钮（[lc-1229] 左下角）
+-- 用纯文字大描边实现按钮底色：set_osd_ass 单 Dialogue 事件内矢量矩形(\p1)会使后续
+-- 文字定位失效（实测 \pos 被忽略、错位），描边文字方案经截图验证清晰可靠。
+-- hover 用描边变色（深灰→蓝）代替底色变化。
 local function draw_skip_button()
-    local w = mp.get_property_number("osd-width") or 1280
-    local h = mp.get_property_number("osd-height") or 720
+    -- osd-width/height 可能在 file-loaded 早期返回 0（非 nil），直接用会导致按钮画到
+    -- 屏幕外（实测 pos(-40,-80)）；为 0/nil 时回退 1280x720，并监听尺寸变化重绘。
+    local w = mp.get_property_number("osd-width") or 0
+    local h = mp.get_property_number("osd-height") or 0
+    if w <= 0 or h <= 0 then
+        w, h = 1280, 720
+    end
     if not skip_btn.active then
         mp.set_osd_ass(w, h, "")
         return
     end
-    local bw, bh = 200, 54
-    local bx = w - bw - 40
-    local by = h - bh - 90
-    skip_btn.rect = { x = bx, y = by, w = bw, h = bh }
-    local bg_hex = skip_btn.hover and "4C8DFF" or "2A2F3A"
+    local fs = 28
+    -- 预估文字尺寸以计算命中区（中文 4 字 + border8：宽约 fs*4，高约 fs+bord*2）
+    local bw = fs * 4 + 40
+    local bh = fs + 30
+    -- [lc-1227] 垂直定位：\pos 的 y 锚在文字【上边】，所以要让「文字底边」落在
+    -- 控制栏上沿之上，须满足 pos_y + bh <= h - bar - gap，即 lift >= bar + gap + bh。
+    -- （原实现直接用 lift=80：文字底边落在 h-22，而 720p 控制栏从 h-81 起 —— 必然被遮挡。）
+    local scale = h / 720
+    local gap = math.floor(24 * scale)                      -- 控制栏与按钮之间的留白
+    local bar = controls_bottom_px(h)
+    if bar <= 0 then bar = math.floor(SKIP_BTN_BASE_LIFT * scale) end  -- uosc 首帧前回退
+    local lift = bar + gap + bh
+    -- 上限保护：极端矮窗口下别把按钮顶进标题区域
+    lift = math.min(lift, math.floor(h * 0.5))
+    -- [lc-1229] 左对齐：\an7 锚在文字【左上】，x 即按钮左边缘，故直接用左边距。
+    -- 注意 \an7 与 \an9 的 x 语义不同（前者=左边缘，后者=右边缘），换边时必须同时改 \an。
+    local margin_x = math.floor(SKIP_BTN_MARGIN_X * scale)
+    -- 命中区与文字同位：rect 左上角 = 文字左上角，二者不再错位
+    skip_btn.rect = { x = margin_x, y = h - lift, w = bw, h = bh }
+    local border_hex = skip_btn.hover and "4C8DFF" or "2A2F3A"
     local ass = string.format(
-        "{\\an1\\p1\\c&H%s&\\3c&HE0E0E0&\\3a&H60&}m %d %d l %d %d l %d %d l %d %d{\\p0}{\\an5\\pos(%d,%d)\\c&HFFFFFF&\\b1\\fs26}%s",
-        bg_hex, bx, by, bx + bw, by, bx + bw, by + bh, bx, by + bh,
-        bx + bw / 2, by + bh / 2, skip_btn.kind)
+        "{\\an7\\pos(%d,%d)\\c&HFFFFFF&\\b1\\fs%d\\bord8\\3c&H%s&\\shad1\\4c&H000000&}%s",
+        margin_x, h - lift, fs, border_hex, skip_btn.kind)
     mp.set_osd_ass(w, h, ass)
 end
 
+-- 鼠标悬停高亮 + 动态接管左键点击
+-- 捆绑的 mpv v0.41 已移除 mouse-btn-down 事件；uosc 接管全局 MBTN_LEFT。
+-- 探测结论：add_forced_key_binding 的绑定优先级(priority≈23)高于 input.conf(17)
+-- 与 uosc(-1)，因此仅在鼠标悬停按钮时注册强制 MBTN_LEFT 绑定，点击按钮本身，
+-- 离开/隐藏按钮时立即注销，其余区域点击不受影响（仍走 uosc/暂停切换）。
+local function hide_click_binding()
+    if click_bound then
+        click_bound = false
+        mp.remove_key_binding(CLICK_BIND)
+    end
+end
+
+local function do_skip_jump()
+    mp.set_property_number("time-pos", skip_btn.target)
+    mutils.show_message(string.format("⏭️ 已%s", skip_btn.kind), 2)
+    msg.info(string.format("用户点击跳过按钮: %s → %.1f 秒", skip_btn.kind, skip_btn.target))
+    -- 本集该段落已跳过：此后即使重新进入区间（如回看）也不再显示按钮
+    if skip_btn.kind == "跳过片头" then
+        skip_state.intro_done = true
+    elseif skip_btn.kind == "跳过片尾" then
+        skip_state.outro_done = true
+    end
+    skip_btn.active = false
+    skip_btn.kind = nil
+    skip_btn.hover = false
+    hide_click_binding()
+    draw_skip_button()
+end
+
+local function show_click_binding()
+    if click_bound then return end
+    click_bound = true
+    mp.add_forced_key_binding("MBTN_LEFT", CLICK_BIND, function()
+        if skip_btn.active and skip_btn.hover then
+            do_skip_jump()
+        else
+            -- 悬停态过期（按钮已隐藏但绑定尚未注销）：交还控制权
+            hide_click_binding()
+            mp.commandv("keypress", "MBTN_LEFT")
+        end
+    end)
+end
+
 -- 根据当前播放位置更新按钮显示/隐藏
+-- [用户点击跳过] 检测到片头/片尾数据后，播放进入区间即显示按钮，由用户决定是否跳过
+--（适配"先正剧后片头曲"的剧：正剧部分不跳，出现片头/片尾时用户自己点）；
+-- 已点击跳过的段落不再重复显示按钮。
 local function update_skip_button(curr_pos, result)
     local show, label, target = false, "", 0
-    if result and result.intro and curr_pos >= result.intro[1] and curr_pos <= result.intro[2] then
+    if result and result.intro and not skip_state.intro_done
+        and curr_pos >= result.intro[1] and curr_pos <= result.intro[2] - BUTTON_EPSILON then
         show, label, target = true, "跳过片头", result.intro[2]
-    elseif result and result.outro and curr_pos >= result.outro[1] and curr_pos <= result.outro[2] then
+    elseif result and result.outro and not skip_state.outro_done
+        and curr_pos >= result.outro[1] and curr_pos <= result.outro[2] - BUTTON_EPSILON then
         show, label, target = true, "跳过片尾", result.outro[2]
     end
     if show then
@@ -204,30 +307,40 @@ local function update_skip_button(curr_pos, result)
     elseif skip_btn.active then
         skip_btn.active = false
         skip_btn.kind = nil
+        skip_btn.hover = false
+        hide_click_binding()
         draw_skip_button()
     end
 end
 
--- 鼠标悬停高亮
 mp.observe_property("mouse-pos", "native", function(_, pos)
     if not skip_btn.active or not pos then return end
     local r = skip_btn.rect
     local inside = pos.x >= r.x and pos.x <= r.x + r.w and pos.y >= r.y and pos.y <= r.y + r.h
     if inside ~= skip_btn.hover then
         skip_btn.hover = inside
+        if inside then
+            show_click_binding()
+        else
+            hide_click_binding()
+        end
         draw_skip_button()
     end
 end)
 
--- 鼠标点击命中按钮区域 → 跳转跳过
-mp.register_event("mouse-btn-down", function()
-    if skip_btn.active and skip_btn.hover then
-        mp.set_property_number("time-pos", skip_btn.target)
-        mutils.show_message(string.format("⏭️ 已%s", skip_btn.kind), 2)
-        skip_btn.active = false
-        skip_btn.kind = nil
-        draw_skip_button()
-    end
+-- OSD 分辨率变化（窗口缩放/全屏切换）时重绘按钮，避免位置停留在旧坐标系
+mp.observe_property("osd-width", "number", function()
+    if skip_btn.active then draw_skip_button() end
+end)
+mp.observe_property("osd-height", "number", function()
+    if skip_btn.active then draw_skip_button() end
+end)
+
+-- [lc-1227] uosc 首次渲染后才发布 margins（此前为 nil，draw 走的是回退值）。
+-- 不监听的话，首帧前画的按钮会一直停在回退位置上（仍是遮挡状态的近似值），
+-- 必须等 margins 到位后重绘一次，才能落到「控制栏上方」的正确位置。
+mp.observe_property("user-data/osc/margins", "native", function()
+    if skip_btn.active then draw_skip_button() end
 end)
 
 --  通过章节检测片头片尾
@@ -345,47 +458,43 @@ local function manual_skip_forward()
     mutils.show_message(string.format('⏩ 快速跳过 %d 秒', duration), 2)
 end
 
--- 智能跳过片头片尾
+-- 智能跳过片头片尾：获取到跳过数据后，播放进入片头/片尾区间显示按钮，
+-- 由用户点击才执行跳过（不自动 seek：很多剧先正剧后片头曲，自动跳过会误切正剧）
 local function smart_skip()
     load_server_config()
 
-    local has_skip_intro = false
-    local has_skip_outro = false
+    -- 每集重置：点击跳过标记 + 清掉上一集残留的按钮和点击绑定
+    skip_state.intro_done = false
+    skip_state.outro_done = false
+    skip_btn.active = false
+    skip_btn.kind = nil
+    skip_btn.hover = false
+    hide_click_binding()
+    draw_skip_button()
 
-    -- 监听播放位置以执行跳过 / 显示按钮
+    if timepos_observed then return end
+    timepos_observed = true
+
+    -- 监听播放位置以显示/隐藏按钮
     mp.observe_property("time-pos", "number", function(_, curr_pos)
         if not curr_pos then
             return
         end
 
-        local result = detect_by_mode()
-
-        -- 未开启自动跳过：仅在片头/片尾窗口内显示可点击按钮
+        -- 总开关关闭：不显示跳过按钮
         if not opts.enabled then
-            update_skip_button(curr_pos, result)
+            if skip_btn.active then
+                skip_btn.active = false
+                skip_btn.kind = nil
+                skip_btn.hover = false
+                hide_click_binding()
+                draw_skip_button()
+            end
             return
         end
 
-        -- 已开启自动跳过：隐藏按钮并执行自动跳过
-        if skip_btn.active then
-            skip_btn.active = false
-            skip_btn.kind = nil
-            draw_skip_button()
-        end
-
-        if not has_skip_intro and result and result.intro then
-            has_skip_intro = mutils.skip_if_in(curr_pos, result.intro[1], result.intro[2], "⏭️ 正在跳过片头...")
-            if has_skip_intro then
-                msg.info("检测到片头, mode=" .. opts.detect_mode .. " args:" .. utils.to_string(result.intro))
-            end
-        end
-
-        if not has_skip_outro and result and result.outro then
-            has_skip_outro = mutils.skip_if_in(curr_pos, result.outro[1], result.outro[2], "⏭️ 正在跳过片尾...")
-            if has_skip_outro then
-                msg.info("检测到片尾, mode=" .. opts.detect_mode .. " args:" .. utils.to_string(result.outro))
-            end
-        end
+        local result = detect_by_mode()
+        update_skip_button(curr_pos, result)
     end)
 end
 
@@ -402,3 +511,4 @@ end
 
 -- 启动初始化
 init()
+

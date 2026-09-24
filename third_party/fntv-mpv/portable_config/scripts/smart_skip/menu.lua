@@ -194,6 +194,14 @@ local function build_items()
         selectable = false,
     })
 
+    -- 行为说明行
+    table.insert(items, {
+        title      = '开启后：进入片头/片尾区间显示按钮，点击才跳过',
+        italic     = true,
+        keep_open  = true,
+        selectable = false,
+    })
+
     -- 开关按钮
     table.insert(items, {
         title      = opts.enabled and '关闭' or '开启',
@@ -203,8 +211,8 @@ local function build_items()
         selectable = true,
     })
 
-    -- 模式选择
-    table.insert(items, { title = '— 模式选择 —', keep_open = true, selectable = false })
+    -- 模式选择（决定跳过数据来源：检测到数据才有按钮可显示）
+    table.insert(items, { title = '— 数据来源（检测到才有按钮） —', keep_open = true, selectable = false })
     local dm = Controls.detect_mode
     for _, opt in ipairs(dm.options) do
         table.insert(items, {
@@ -248,7 +256,7 @@ local function build_items()
     })
 
     -- 手动时间
-    table.insert(items, { title = '— 手动设置片头片尾时间 —', keep_open = true, selectable = false })
+    table.insert(items, { title = '— 手动标记片头片尾（可选，服务器共享） —', keep_open = true, selectable = false })
 
     table.insert(items, {
         title      = string.format('设置片头: %d s', Controls.intro.get()),
