@@ -21,6 +21,7 @@ import { getMainWindow } from '../../common/mainwin';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as fn from '../../../modules/fn_api/api';
 import * as logger from '../../../modules/logger';
+import { MIN_VALID_TS_SEC } from '../../common/watchTime';
 const log = logger.component('trakt');
 
 const API = 'https://api.trakt.tv';
@@ -166,10 +167,13 @@ interface MovieWatch { title: string; year: number; watchedAt?: string; tmdbId?:
 interface EpWatch { season: number; episode: number; watchedAt?: string }
 interface ShowWatch { title: string; year: number; eps: EpWatch[] }
 
+// [lc-1230] watched_ts 语义修正：它是**播放进度(秒)**不是观看时间戳（见 main/common/watchTime.ts）。
+//   旧代码 new Date(watched_ts*1000) 会把进度 528 秒写成 1970-01-01 推给 Trakt。
+//   非墙钟值一律 undefined → 交由 Trakt 按当前时间记录，绝不编造 1970。
 function iso(tsSec: any): string | undefined {
     const n = Number(tsSec);
-    if (!n || !isFinite(n)) return undefined;
-    try { return new Date(n * 1000).toISOString().slice(0, 10); } catch { return undefined; }
+    if (!n || !isFinite(n) || n < MIN_VALID_TS_SEC) return undefined;
+    try { return new Date((n < 1e12 ? n * 1000 : n)).toISOString().slice(0, 10); } catch { return undefined; }
 }
 function yearOf(it: any): number {
     const m = String(it.air_date || it.release_date || '').match(/(\d{4})/);

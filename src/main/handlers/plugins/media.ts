@@ -18,6 +18,7 @@ import { getSessionCookieHeader } from '../../../modules/fn_api/request';
 import { getMainWindow } from '../../common/mainwin';
 import * as doubanSync from './doubanSync';
 import * as bangumiSync from './bangumiSync';
+import { WatchSessionTracker, EndedSession } from '../../common/watchSession';
 
 /**
 * 媒体播放插件
@@ -386,6 +387,9 @@ function eventHandler(fnapi: fn.ApiService) {
 
                 const info = resp.data;
 
+                // [lc-1230] 累计真实观看时长（年度报告总时长/月度节奏的数据源）
+                tickWatchSession(progressData.itemGuid, (info.item && (info.item.title || (info.item as any).name)) || '');
+
                 const record: fn.PlayStatusData = {
                     item_guid: progressData.itemGuid,
                     media_guid: info.media_guid,
@@ -468,6 +472,8 @@ function eventHandler(fnapi: fn.ApiService) {
                 //   会自动重注入播放按钮/轮播; 用户仅需「下次启动」时首页才会重新拉取「继续观看」进度
                 //   (符合用户需求: 刷新只在启动时发生一次, 而非每次关闭视频都刷)。
                 await new Promise(resolve => setTimeout(resolve, 50));
+                // [lc-1230] 播放器退出 → 结算本段真实观看时长给渲染进程（年度报告用）
+                sendEndedSession(watchTracker.flush());
                 break;
 
             default:
@@ -495,6 +501,26 @@ function recordWatchEvent(event: IpcMainEvent, p: WatchRecordPayload): void {
             ts: Date.now(),
         });
     } catch (e: any) { log.warn('[play-movie] 回传观看记录失败:', e?.message || e); }
+}
+
+// ── [lc-1230] 真实观看时长累计 ──
+// 年度报告原先按「每日条数 × 30 分钟」估算时长，因为飞牛的 watched_ts 是播放进度(秒)而非时间戳，
+//   条目级根本没有可用的观看时间/时长（见 main/common/watchTime.ts）。这里按播放器进度事件
+//   累计每次起播的**真实挂钟观看时长**，播放结束/切集时回传渲染进程，
+//   让报告的总时长、月度节奏都建立在真实数据上。计入口径见 common/watchSession.ts。
+const watchTracker = new WatchSessionTracker();
+
+/** 把结算出的真实观看时长回传渲染进程（观影记录台账 → 年度报告）。 */
+function sendEndedSession(s: EndedSession | null): void {
+    if (!s) return;
+    try {
+        const w = getMainWindow();
+        if (w && !w.isDestroyed()) w.webContents.send('fntv:watch-session-ended', s);
+    } catch { /* 渲染端可能已关闭，忽略 */ }
+}
+/** 收到进度事件：累计本段观看时长（切集会顺带结算上一段）。 */
+function tickWatchSession(guid: string, title: string): void {
+    sendEndedSession(watchTracker.tick(guid, title));
 }
 
 // 处理播放事件
@@ -930,6 +956,8 @@ function processSingleMedia(cfg: fnConfig.Config, info: fn.PlayInfo): ply.PlayIt
 
 // 应用退出前清理播放器
 function handleBeforeQuit(): void {
+    // [lc-1230] 退出前结算未结束的观看会话（否则本次观看时长丢失）
+    sendEndedSession(watchTracker.flush());
     if (currentPlayer) {
         log.info('应用退出前关闭播放器');
         currentPlayer.stop();

@@ -1,11 +1,15 @@
 import { registerHook, HookType } from '../core/hooks';
-import { getWatchReportData, getSessionTs, getWatchDayLedger, MIN_VALID_TS } from './watchHistory';
+import { getWatchReportData, getSessionTs, getWatchDayLedger, getWatchEvents, MIN_VALID_TS } from './watchHistory';
 
 // watchReport.ts — [lc-1062] 年度观影报告（Spotify Wrapped 式翻页报告 + 导出长图）
 // ─────────────────────────────────────────────────────────────────────────────
-// 数据：watchHistory.ts 的 curData（ShowItem[]，经 getWatchReportData 浅拷贝读取），
-//   时间轴用 sessions（[start,end] 会话对）按年过滤——sessions 是"真实观看发生时间"，
-//   比作品 totalRuntimeMs(作品全长) 更能反映"今年看了多久"；sessions 缺失时回退 totalRuntimeMs。
+// [lc-1230] 数据源修正：飞牛的 watched_ts 是**播放进度(秒)**不是观看时间戳（见 main/common/watchTime.ts），
+//   修掉之后条目级 lastPlayedAt 基本为空，「条目会话」不再可信。报告改为三级取数，每级都是真实量：
+//     ① 观看事件台账（本地每次起播落一条墙钟时间 + 播放结束回填真实时长）→ 时间轴/时长/时刻全真实；
+//     ② 条目级真实时长（prog × 作品总时长，飞牛确有该字段）→ 能算时长但不确知日期，按最近播放归年；
+//     ③ 每日观看台账 × 真实平均单次时长（取①的历史均值，从未看过才退回 30 分钟）→ 明示为估算。
+//   旧实现在 ① 缺失时一律「每条记录 30 分钟」，且会话无结束时间时同样按 30 分钟补齐，
+//   时长数字是编出来的；现在只有第 ③ 级才会出现估算值，且用真实均值而非硬编码。
 // 页面：①封面(年份/总时长/部数) ②月度节奏(12 月条形) ③观影时刻(24 小时分布+夜猫指数)
 //       ④年度 TOP5(按观看时长) ⑤总结(连续天数/看完率/评分/结语)。←/→ 键与按钮翻页。
 // 导出：canvas 程序化绘制长图（纯文字/图形，无外链图片 → canvas 不被污染，toDataURL 可用）。
@@ -30,74 +34,172 @@ interface YearReport {
     top: ReportItem[];
     items: ReportItem[];
     ignored: number;        // [lc-1075] 被修正机制剔除的脏时间戳会话数（< 2000-01-01，如 1970）
-    synthetic?: boolean;    // [lc-1077] 条目级数据为零时由观影台账估算（每日记录 × 30 分钟）
+    synthetic?: boolean;    // [lc-1077] 条目级数据为零时由观影台账估算（每日记录 × 平均单次时长）
+    source?: 'events' | 'items' | 'ledger'; // [lc-1230] 本次报告实际用了哪一级数据源
 }
 
-/** 纯函数：按年聚合（独立导出便于验证） */
-export function computeReport(items: { sessions?: [string, string][]; lastPlayedAt?: number; totalRuntimeMs?: number; name: string; prog: number; myRating: number; type?: string; }[], year: number, tsOf: (s: string) => number): YearReport {
+/** 真实观看事件（watchHistory 台账导出的形状） */
+interface WatchEventLite { ts: number; key: string; name: string; type?: string; player?: string; ms?: number }
+
+/** 事件日期 → 本地日历日 key（用于连续天数/活跃天数，避免 UTC 偏移串日） */
+function dayKey(ts: number): string {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+/** 一组日历日 key 的最长连续天数 */
+function maxStreakOf(dayKeys: string[]): number {
+    const days = Array.from(new Set(dayKeys)).sort();
+    let maxStreak = 0, run = 0, prev = '';
+    for (const dk of days) {
+        if (prev) {
+            const [py, pm, pd] = prev.split('-').map(Number);
+            const [cy, cm, cd] = dk.split('-').map(Number);
+            const gap = Math.round((new Date(cy, cm, cd).getTime() - new Date(py, pm, pd).getTime()) / 86400000);
+            run = gap === 1 ? run + 1 : 1;
+        } else run = 1;
+        if (run > maxStreak) maxStreak = run;
+        prev = dk;
+    }
+    return maxStreak;
+}
+/** 无时长记录的会话兜底：优先用历史真实均值，完全没有历史才退回 30 分钟 */
+const FALLBACK_SESSION_MS = 30 * 60000;
+function avgSessionMs(events: WatchEventLite[]): number {
+    let sum = 0, n = 0;
+    for (const e of events) if (e.ms && e.ms > 0) { sum += e.ms; n++; }
+    return n > 0 ? sum / n : FALLBACK_SESSION_MS;
+}
+
+export type { YearReport, WatchEventLite, ReportItem };
+
+/**
+ * ① 事件级聚合（首选，全部为真实墙钟时间）：
+ *   每次起播一条事件，时长取播放结束回填的真实值；未回填的少数（如播放器崩溃）用历史均值补齐，
+ *   并把补齐的条数记为 estimated 供封面如实标注。
+ */
+export function computeReportFromEvents(
+    events: WatchEventLite[],
+    year: number,
+    items: { name: string; prog: number; myRating: number; type?: string }[] = [],
+): YearReport {
     const monthMs = new Array(12).fill(0);
     const hourMs = new Array(24).fill(0);
-    const daySet = new Map<string, number>(); // yyyy-mm → ms
-    let totalMs = 0;
-    let nightMs = 0;
-    let ignored = 0;
+    const dayKeys: string[] = [];
+    let totalMs = 0, nightMs = 0, estimated = 0, ignored = 0;
+    const byKey = new Map<string, { name: string; ms: number }>();
+    const fallback = avgSessionMs(events);
+
+    for (const e of events) {
+        if (!e.ts || e.ts < MIN_VALID_TS) { ignored++; continue; }
+        const d = new Date(e.ts);
+        if (d.getFullYear() !== year) continue;
+        let ms = (typeof e.ms === 'number' && e.ms > 0) ? e.ms : 0;
+        if (!ms) { ms = fallback; estimated++; }
+        totalMs += ms;
+        monthMs[d.getMonth()] += ms;
+        hourMs[d.getHours()] += ms;
+        if (d.getHours() < 5) nightMs += ms;
+        dayKeys.push(dayKey(e.ts));
+        const gk = e.key || e.name || 'unknown';
+        const cur = byKey.get(gk);
+        if (cur) cur.ms += ms;
+        else byKey.set(gk, { name: e.name || '未知作品', ms });
+    }
+
+    // 用条目元数据补齐片单的进度/评分/类型（事件本身只带标题）
+    const meta = new Map(items.map((it) => [it.name, it]));
+    const top: ReportItem[] = [];
+    byKey.forEach((v) => {
+        const m = meta.get(v.name);
+        top.push({ name: v.name, ms: v.ms, prog: m ? m.prog : 0, rating: m ? m.myRating : 0, type: (m && m.type) || '' });
+    });
+    top.sort((a, b) => b.ms - a.ms);
+    return {
+        year,
+        totalMs,
+        titles: top.length,
+        finished: top.filter((t) => t.prog >= 1).length,
+        rated: top.filter((t) => t.rating > 0).length,
+        monthMs,
+        hourMs,
+        activeDays: new Set(dayKeys).size,
+        maxStreak: maxStreakOf(dayKeys),
+        nightRatio: totalMs > 0 ? nightMs / totalMs : 0,
+        top: top.slice(0, 5),
+        items: top,
+        ignored,
+        source: 'events',
+        synthetic: estimated > 0 ? true : undefined,
+    };
+}
+
+/**
+ * ② 条目级聚合（次选）：飞牛不提供观看日期时，用**真实**的观看进度折算时长
+ *   （prog × 作品总时长；看完的按全片算），日期只能取「最近一次播放」归年 —— 时长真实、日期粗。
+ *   [lc-1230] 顺带修掉旧实现两个缺陷：
+ *     · totalRuntimeMs 在无会话时被整段当成本年观看（一部去年看完的剧全算进今年）；
+ *     · 会话串大多没有结束时间（本模块自己产出的就是空 end），旧实现一律按 30 分钟补齐 ——
+ *       而「进度 × 时长」是真实量、严格更优，故现在**优先**用它；30 分钟只在拿不到任何
+ *       真实时长（runtime=0）时才作为最后手段，并标记 synthetic 供封面明示。
+ */
+export function computeReport(
+    items: { sessions?: [string, string][]; lastPlayedAt?: number; totalRuntimeMs?: number; name: string; prog: number; myRating: number; type?: string }[],
+    year: number,
+    tsOf: (s: string) => number,
+): YearReport {
+    const monthMs = new Array(12).fill(0);
+    const hourMs = new Array(24).fill(0);
+    const dayKeys: string[] = [];
+    let totalMs = 0, nightMs = 0, ignored = 0, estimated = 0;
     const top: ReportItem[] = [];
 
     for (const it of items) {
         let itemMs = 0;
+        let at = 0; // 该条目的归年/归月时间点（ms）
+        const runtime = it.totalRuntimeMs || 0;
+        let sawSessionNoEnd = false;
         if (Array.isArray(it.sessions) && it.sessions.length) {
             for (const ses of it.sessions) {
                 const s = tsOf(ses[0]);
                 // [lc-1075] 修正机制：早于 2000 年的时间戳是 NAS 端脏数据（epoch 占位 → "1970 年
                 //   观看"），不参与聚合也不进年份清单，计数后在报告封面明示。
                 if (!s || s < MIN_VALID_TS) { ignored++; continue; }
-                const e = tsOf(ses[1]) || s;
                 const d = new Date(s);
                 if (d.getFullYear() !== year) continue;
-                const dur = Math.max(0, (e > s ? e : s + 30 * 60000) - s);
-                const clamp = Math.min(dur, 12 * 3600000); // 单会话钳 12h（挂机保护）
+                const e = tsOf(ses[1]);
+                // 无结束时间 → 时长未知（起播日期仍然有效，先记下时间点），交给下面按进度折算
+                if (!(e > s)) { sawSessionNoEnd = true; if (s > at) at = s; continue; }
+                const clamp = Math.min(e - s, 12 * 3600000);       // 单会话钳 12h（挂机保护）
                 itemMs += clamp;
-                monthMs[d.getMonth()] += clamp;
-                hourMs[d.getHours()] += clamp;
-                if (d.getHours() < 5) nightMs += clamp;
-                const dk = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                daySet.set(dk, (daySet.get(dk) || 0) + clamp);
-            }
-        } else if (it.lastPlayedAt && it.lastPlayedAt >= MIN_VALID_TS && new Date(it.lastPlayedAt).getFullYear() === year) {
-            const fb = Math.min(it.totalRuntimeMs || 0, 12 * 3600000);
-            if (fb > 0) {
-                itemMs += fb;
-                const d = new Date(it.lastPlayedAt);
-                monthMs[d.getMonth()] += fb;
-                hourMs[d.getHours()] += fb;
-                const dk = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                daySet.set(dk, (daySet.get(dk) || 0) + fb);
+                if (s > at) at = s;
             }
         }
-        if (itemMs > 0) {
-            top.push({ name: it.name, ms: itemMs, prog: it.prog, rating: it.myRating, type: it.type || '' });
+        // 真实时长优先：观看进度 × 作品总时长（仅痕迹 prog=0 时按 5% 记），日期取最近播放
+        if (itemMs <= 0 && runtime > 0) {
+            const lp = it.lastPlayedAt || 0;
+            if (lp >= MIN_VALID_TS && new Date(lp).getFullYear() === year) {
+                const watched = Math.min(1, Math.max(0, it.prog || 0));
+                const fb = Math.round(runtime * (watched > 0 ? watched : 0.05));
+                if (fb > 0) { itemMs += Math.min(fb, 12 * 3600000); at = lp; }
+            }
         }
+        // 兜底：既无结束时间也无作品时长（极罕见）→ 沿用旧口径的 30 分钟占位，并标记为估算
+        if (itemMs <= 0 && sawSessionNoEnd && at > 0) {
+            itemMs += FALLBACK_SESSION_MS;
+            estimated++;
+        }
+        if (itemMs > 0 && at) {
+            const d = new Date(at);
+            monthMs[d.getMonth()] += itemMs;
+            hourMs[d.getHours()] += itemMs;
+            if (d.getHours() < 5) nightMs += itemMs;
+            dayKeys.push(dayKey(at));
+        }
+        if (itemMs > 0) top.push({ name: it.name, ms: itemMs, prog: it.prog, rating: it.myRating, type: it.type || '' });
         totalMs += itemMs;
     }
 
-    // 最长连续观看天数（按"当日有会话"的日历日）
-    const days = Array.from(daySet.keys()).sort();
-    let maxStreak = 0, run = 0, prev = '';
-    for (const dk of days) {
-        if (prev) {
-            const [py, pm, pd] = prev.split('-').map(Number);
-            const dPrev = new Date(py, pm, pd);
-            const [cy, cm, cd] = dk.split('-').map(Number);
-            const dCur = new Date(cy, cm, cd);
-            const gap = Math.round((dCur.getTime() - dPrev.getTime()) / 86400000);
-            run = gap === 1 ? run + 1 : 1;
-        } else run = 1;
-        if (run > maxStreak) maxStreak = run;
-        prev = dk;
-    }
-
     top.sort((a, b) => b.ms - a.ms);
-    const nightRatio = totalMs > 0 ? nightMs / totalMs : 0;
     return {
         year,
         totalMs,
@@ -106,12 +208,14 @@ export function computeReport(items: { sessions?: [string, string][]; lastPlayed
         rated: items.filter((it) => it.myRating > 0 && top.some((t) => t.name === it.name)).length,
         monthMs,
         hourMs,
-        activeDays: daySet.size,
-        maxStreak,
-        nightRatio,
+        activeDays: new Set(dayKeys).size,
+        maxStreak: maxStreakOf(dayKeys),
+        nightRatio: totalMs > 0 ? nightMs / totalMs : 0,
         top: top.slice(0, 5),
         items: top,
         ignored,
+        source: 'items',
+        synthetic: estimated > 0 ? true : undefined,
     };
 }
 
@@ -156,7 +260,8 @@ function ensureButton(): void {
 
 // ── 报告计算入口 ──
 function buildForYear(year: number): YearReport {
-    const items = getWatchReportData().map((it) => ({
+    const all = getWatchReportData();
+    const items = all.map((it) => ({
         name: it.name,
         sessions: it.sessions,
         lastPlayedAt: it.lastPlayedAt,
@@ -165,50 +270,46 @@ function buildForYear(year: number): YearReport {
         myRating: it.myRating,
         type: it.type,
     }));
+    // [lc-1230] ① 首选真实观看事件台账（每次起播的墙钟时间 + 播放结束回填的真实时长）
+    const ev = computeReportFromEvents(getWatchEvents(), year, items);
+    if (ev.totalMs > 0) return ev;
+    // ② 次选条目级：真实进度 × 作品总时长（时长真实，日期只能按最近播放归年）
     const r = computeReport(items, year, getSessionTs);
-    // [lc-1077] 台账回退：热力图与报告的数据源对齐。热力图统计的是「每日观看台账」
-    //   （本地播放追踪/历史累积都写入），而条目级会话在飞牛侧 last_played 脏数据被
-    //   修正为「未记录」后为空 → 报告全 0 但热力图有记录（用户报障）。条目级统计为零时，
-    //   按台账估算：每日记录数 × 30 分钟（与会话缺省时长口径一致），封面明示。
-    if (r.totalMs <= 0) return synthesizeFromLedger(year, r);
-    return r;
+    if (r.totalMs > 0) return r;
+    // ③ 兜底：每日台账 × 真实平均单次时长（封面明示为估算）
+    return synthesizeFromLedger(getWatchDayLedger(), getWatchEvents(), year, r);
 }
 
-/** [lc-1077] 台账估算：把某年的每日观看台账折算为报告（count × 30 分钟/次） */
-function synthesizeFromLedger(year: number, base: YearReport): YearReport {
-    const THIRTY_MIN = 1800000;
+/** [lc-1077] 台账估算：把某年的每日观看台账折算为报告（纯函数，数据由调用方注入便于验证）。
+ *  [lc-1230] 单次时长改用**真实历史均值**（取自观看事件台账），不再硬编码 30 分钟；
+ *  只有从未有过带时长的事件时才退回 30 分钟，且结果始终带 synthetic/source 标记供封面明示。 */
+export function synthesizeFromLedger(
+    ledger: Array<{ y: number; m0: number; d: number; count: number }>,
+    events: WatchEventLite[],
+    year: number,
+    base: YearReport,
+): YearReport {
+    const perSession = avgSessionMs(events);
     const monthMs = new Array(12).fill(0);
     const days = new Set<string>();
     let totalMs = 0;
-    for (const b of getWatchDayLedger()) {
+    for (const b of ledger) {
         if (b.y !== year) continue;
-        const ms = b.count * THIRTY_MIN;
+        const ms = Math.round(b.count * perSession);
         totalMs += ms;
         monthMs[b.m0] += ms;
         days.add(`${b.y}-${b.m0}-${b.d}`);
     }
     if (totalMs <= 0) return base;
-    // 最长连续天数（按有记录的日历日，复用条目级同款算法）
-    const sorted = Array.from(days).sort();
-    let maxStreak = 0, run = 0, prev = '';
-    for (const dk of sorted) {
-        if (prev) {
-            const [py, pm, pd] = prev.split('-').map(Number);
-            const [cy, cm, cd] = dk.split('-').map(Number);
-            const gap = Math.round((new Date(cy, cm, cd).getTime() - new Date(py, pm, pd).getTime()) / 86400000);
-            run = gap === 1 ? run + 1 : 1;
-        } else run = 1;
-        if (run > maxStreak) maxStreak = run;
-        prev = dk;
-    }
     return {
         ...base,
         totalMs,
         monthMs,
         activeDays: days.size,
-        maxStreak,
+        maxStreak: maxStreakOf(Array.from(days)),
         top: [],
         items: [],
+        source: 'ledger',
         synthetic: true,
     };
 }
@@ -230,6 +331,10 @@ function openReport(): void {
     }
     for (const b of getWatchDayLedger()) {
         if (b.y >= 2000 && b.y <= new Date().getFullYear()) years.add(b.y);
+    }
+    // [lc-1230] 真实观看事件台账的年份（报告最可信的数据源，年份下拉必须覆盖到）
+    for (const e of getWatchEvents()) {
+        if (e.ts >= MIN_VALID_TS) years.add(new Date(e.ts).getFullYear());
     }
     const yearList = Array.from(years).sort((a, b) => b - a);
     // 默认选「有数据的最近一年」——当前年没看东西时不该展示全 0 封面
@@ -371,7 +476,8 @@ function pageHtml(r: YearReport, page: number): string {
                 <div style="text-align:center;"><div style="font-size:24px;font-weight:900;color:${INK};">${r.finished}</div><div style="font-size:11px;color:${SUB};">部看完</div></div>
             </div>
             ${r.ignored > 0 ? `<div style="font-size:11px;color:#b06a3a;background:rgba(176,106,58,.10);border:1px solid rgba(176,106,58,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">🛠 已自动修正 ${r.ignored} 条异常时间记录（播放时间早于 2000 年的脏数据，不计入统计）</div>` : ''}
-            ${r.synthetic ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 飞牛侧播放时间缺失，本报告按观影台账估算（每日记录 × 30 分钟）</div>` : ''}
+            ${r.source === 'ledger' ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 本报告按观影台账估算（每日记录 × 你的平均单次时长）；播放一段后重开即为精确值</div>` : ''}
+            ${r.source === 'items' ? `<div style="font-size:11px;color:#4a5fd0;background:rgba(109,127,242,.10);border:1px solid rgba(109,127,242,.28);border-radius:8px;padding:5px 12px;margin-top:10px;">📊 时长按飞牛观看进度折算（真实），日期按最近播放归入本年</div>` : ''}
             <div style="position:absolute;bottom:20px;font-size:10.5px;color:#8a93ad;">← → 翻页 · Esc 关闭 · 可导出长图</div>
         </div>`;
     }
@@ -429,7 +535,7 @@ function pageHtml(r: YearReport, page: number): string {
         return `<div style="position:absolute;inset:0;padding:56px 46px 30px;">
             ${head('PAGE 4 · 年度片单')}
             <div style="font-size:24px;font-weight:900;color:${INK};margin:14px 0 18px;">你的年度 TOP5</div>
-            ${rows || (r.synthetic ? '<div style="color:#5a6480;line-height:1.8;">台账估算模式：飞牛侧未记录单部作品的播放时长，<br>无法生成年度片单。修好时间数据后即可展示。</div>' : '<div style="color:#5a6480;">今年暂无观看时长数据</div>')}
+            ${rows || (r.source === 'ledger' ? '<div style="color:#5a6480;line-height:1.8;">台账估算模式：暂无单部作品的观看时长记录，<br>多播放几部后即可生成年度片单。</div>' : '<div style="color:#5a6480;">今年暂无观看时长数据</div>')}
         </div>`;
     }
     const doneRate = r.titles ? Math.round((r.finished / r.titles) * 100) : 0;
@@ -550,7 +656,11 @@ function exportLongImage(): void {
         text(v, x, y0 + 108, 26, '900', ink, 'center');
         text(l, x, y0 + 130, 11, '600', sub, 'center');
     });
-    text('期待 ' + (r.year + 1) + ' 年继续与你相伴 🎬  ·  Fntv-Plus 生成', W / 2, H - 24, 10.5, '600', '#8a93ad', 'center');
+    text('期待 ' + (r.year + 1) + ' 年继续与你相伴 🎬  ·  Fntv-Plus 生成', W / 2, H - 40, 10.5, '600', '#8a93ad', 'center');
+    // [lc-1230] 导出图同样注明数据口径（估算/折算时不能让人当成精确值）
+    const note = r.source === 'ledger' ? '数据口径：按观影台账估算（每日记录 × 平均单次时长）'
+        : (r.source === 'items' ? '数据口径：时长按飞牛观看进度折算，日期按最近播放归年' : '');
+    if (note) text(note, W / 2, H - 22, 10, '600', '#8a93ad', 'center');
 
     // 下载
     const a = document.createElement('a');

@@ -11,6 +11,7 @@ import * as logger from '../../../modules/logger';
 import * as types from '../../../modules/fn_api/types';
 import { tmdbGenresFor } from './tmdbSync';
 import { getDailyCached, DEFAULT_TTL_MS } from '../../common/dailyCache';
+import { watchedTsToMs, hasWatchTrace } from '../../common/watchTime';
 const log = logger.component('douban');
 
 /**
@@ -565,14 +566,21 @@ interface AnalyzeResult {
     progress: number;        // 0..1：电视剧=已看集数/总集数；电影=1(看完)或0(仅痕迹)
     anyWatch: boolean;       // 是否纳入清单（看完 / 部分看 / 已开始）
     started: boolean;        // 有观看痕迹但未看完（前端显示"在观看"）
-    last_played: number;     // ms（取自 watched_ts，无则 0）
+    last_played: number;     // ms（仅当 watched_ts 确为墙钟时间；否则 0=未记录时间）
 }
+
+// [lc-1230] watched_ts 语义修正见 src/main/common/watchTime.ts（进度秒 ≠ 观看时间戳，
+//   本仓库 log/ 下 672 条真实样本实测：与 ts 相等者 530 条、从未大于 duration）。
+//   旧代码 `watched_ts * 1000` 把进度 528 秒当 epoch → 1970-01-01，是「1970 年观看」的源头。
+
 async function analyzeItem(fnapi: any, it: any, force = false): Promise<AnalyzeResult> {
     const empty: AnalyzeResult = { total_runtime_ms: 0, progress: 0, anyWatch: false, started: false, last_played: 0 };
     const type = (it && it.type || '').toLowerCase();
     const itemListFn = force ? fnapi.getItemList.bind(fnapi) : fnapi.getItemListCached.bind(fnapi);
     const epListFn = force ? fnapi.getEpisodeList.bind(fnapi) : fnapi.getEpisodeListCached.bind(fnapi);
-    const lpMs = it.watched_ts ? Number(it.watched_ts) * 1000 : 0;
+    // 「有没有播过」用原始字段（非零进度即播过）；「什么时候播的」只在字段确为墙钟时间时才有值
+    const hasTrace = hasWatchTrace(it.watched_ts);
+    const lpMs = watchedTsToMs(it.watched_ts);
 
     // 电影：单文件，自身字段即总时长
     if (type === 'movie') {
@@ -582,7 +590,7 @@ async function analyzeItem(fnapi: any, it: any, force = false): Promise<AnalyzeR
         if (it.watched === 1) {
             return { total_runtime_ms: Math.round(totalSec * 1000), progress: 1, anyWatch: true, started: false, last_played: lpMs };
         }
-        if (it.watched_ts > 0) {
+        if (hasTrace) {
             // 有播放痕迹但没标看完 → 记为"在观看"（飞牛电影部分看无精确百分比）
             return { total_runtime_ms: Math.round(totalSec * 1000), progress: 0, anyWatch: true, started: true, last_played: lpMs };
         }
@@ -813,7 +821,7 @@ const WATCH_CACHE_FILE = (() => {
     try { return path.join(app.getPath('userData'), 'watch_history_cache.json'); } catch { return ''; }
 })();
 const WATCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分钟
-const WATCH_CACHE_SCHEMA = 4; // 缓存结构版本：观影记录字段变更(如新增 air_status)时 +1，使旧缓存失效强制重拉。lc-765 升 4：配合 tmdbGenresFor v3(按年份选最佳匹配+连载中收窄)，强制重拉拿到修正后的完结状态
+const WATCH_CACHE_SCHEMA = 5; // 缓存结构版本：观影记录字段变更(如新增 air_status)时 +1，使旧缓存失效强制重拉。lc-765 升 4：配合 tmdbGenresFor v3(按年份选最佳匹配+连载中收窄)，强制重拉拿到修正后的完结状态。lc-1230 升 5：watched_ts 语义修正(进度秒→不再当 epoch)，清掉旧缓存里被当成 1970 的 last_played
 
 /** 读取磁盘缓存（未过期）：返回 { items, libraryTotal } 或 null。 */
 function readWatchCache(staleOk = false): { items: any[]; libraryTotal: number } | null {

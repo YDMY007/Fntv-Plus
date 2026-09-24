@@ -1451,6 +1451,101 @@ function saveDayCount(map: Map<string, number>): void {
     } catch { /* 配额/隐私模式失败时忽略 */ }
 }
 
+/** 观看事件台账（真实起播时刻），年度报告时间轴的数据源。
+ *  [lc-1230] 年度报告此前只能靠「条目级 lastPlayedAt + 会话字符串」拼时间轴，而飞牛 watched_ts
+ *  是播放进度(秒)不是时间戳（被误当 epoch → 见 main/common/watchTime.ts），修正后条目级时间基本为空，
+ *  报告就退化成「每日条数 × 30 分钟」估算。这里在每次「开始播放」落一条真实墙钟事件（标题/类型/播放器），
+ *  让月度节奏、观影时刻、夜猫指数、连续天数回归真实数据；容量滚动上限，最旧的先丢。 */
+interface WatchEvent { ts: number; key: string; name: string; type: string; player: string; ms?: number; }
+const _watchEvents: WatchEvent[] = [];
+const _EVENTS_LS_KEY = 'fntv_wh_events_v1';
+const _EVENTS_MAX = 3000;
+const _EVENTS_DEDUPE_MS = 3 * 60 * 1000; // 同一条目 3 分钟内重复上报（切换/重试）只记一次
+let _eventsLoaded = false;
+function loadWatchEvents(): void {
+    if (_eventsLoaded) return;
+    try {
+        const raw = localStorage.getItem(_EVENTS_LS_KEY);
+        if (!raw) { _eventsLoaded = true; return; }
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) { _eventsLoaded = true; return; }
+        for (const e of arr) {
+            if (!e || typeof e.ts !== 'number' || e.ts < MIN_VALID_TS || typeof e.key !== 'string' || !e.key) continue;
+            _watchEvents.push({ ts: e.ts, key: e.key, name: e.name || '', type: e.type || '', player: e.player || '', ms: (typeof e.ms === 'number' && e.ms > 0) ? e.ms : undefined });
+        }
+        _watchEvents.sort((a, b) => a.ts - b.ts);
+        _eventsLoaded = true; // 仅解析成功才置位；失败允许下次重试
+    } catch { /* 解析失败：保持内存原状，下次再试 */ }
+}
+function saveWatchEvents(): void {
+    try { localStorage.setItem(_EVENTS_LS_KEY, JSON.stringify(_watchEvents)); } catch { /* 配额失败忽略 */ }
+}
+/** 记一笔真实观看事件（同条目短时间内去重后落盘）。 */
+function recordWatchEvent(ts: number, key: string, name: string, type: string, player: string): void {
+    if (!key || !ts || ts < MIN_VALID_TS) return;
+    loadWatchEvents();
+    const last = _watchEvents.length ? _watchEvents[_watchEvents.length - 1] : null;
+    if (last && last.key === key && Math.abs(ts - last.ts) < _EVENTS_DEDUPE_MS) return;
+    _watchEvents.push({ ts, key, name: name || '', type: type || '', player: player || '' });
+    if (_watchEvents.length > _EVENTS_MAX) _watchEvents.splice(0, _watchEvents.length - _EVENTS_MAX);
+    saveWatchEvents();
+}
+/** [lc-1230] 播放结束时回填真实时长（主进程按播放器进度算，见 media.ts tickWatchSession）。
+ *  按 startedAt 精确对位那次起播的事件（同一部剧多次观看时才不会回填错会话）；
+ *  startedAt 缺失/对不上时退化为「该条目最近一条未填时长的事件」。 */
+function attachWatchDuration(key: string, name: string, ms: number, startedAt?: number): void {
+    if (!key || !ms || ms <= 0) return;
+    loadWatchEvents();
+    let target: WatchEvent | null = null;
+    if (startedAt) {
+        // 主进程 startedAt 与渲染端起播事件时间相近（同一次播放），容忍数秒偏差
+        let bestDiff = Infinity;
+        for (const e of _watchEvents) {
+            if (e.key !== key || e.ms) continue;
+            const diff = Math.abs(e.ts - startedAt);
+            if (diff < bestDiff && diff <= 60000) { bestDiff = diff; target = e; }
+        }
+    }
+    if (!target) {
+        for (let i = _watchEvents.length - 1; i >= 0; i--) {
+            const e = _watchEvents[i];
+            if (e.key !== key) continue;
+            if (e.ms) break;        // 最近一条已有真实时长 → 不覆盖（避免下一条会话串上）
+            target = e;
+            break;
+        }
+    }
+    if (!target) return;
+    target.ms = ms;
+    if (!target.name && name) target.name = name;
+    saveWatchEvents();
+}
+/** 取某条目的真实观看事件（旧→新）。
+ *  有 guid 就只按 guid 匹配——同名不同作品（翻拍/重名剧集）不得互相串记录；
+ *  无 guid（本地文件/直链）才退化为按标题匹配。 */
+function eventsForItem(guid: string | undefined, name: string): WatchEvent[] {
+    loadWatchEvents();
+    if (guid) return _watchEvents.filter((e) => e.key === guid);
+    if (!name) return [];
+    return _watchEvents.filter((e) => e.name === name);
+}
+/** 条目的「分段记录」：优先用真实观看事件（带年份的完整时间戳），无事件才回退最后一次播放时间。
+ *  [lc-1230] 顺带修掉两处缺陷：①时间戳带年份（旧 formatDate 丢年份 → 回读被补成当前年，
+ *  去年的观看被算进今年）；②真实数据下不再永远只有一行「最近一次」。 */
+function sessionsForItem(guid: string | undefined, name: string, fallbackTs: number): [string, string][] {
+    const evs = eventsForItem(guid, name);
+    if (evs.length) {
+        return evs.slice(-12).reverse().map((e): [string, string] => [formatDate(e.ts), '']);
+    }
+    return fallbackTs >= MIN_VALID_TS ? [[formatDate(fallbackTs), '']] : [];
+}
+/** 条目最近一次观看时刻（ms）：条目字段优先，否则取真实事件里最新的一条。0=无记录。 */
+function latestWatchTs(guid: string | undefined, name: string, explicit: number): number {
+    if (explicit && explicit >= MIN_VALID_TS) return explicit;
+    const evs = eventsForItem(guid, name);
+    return evs.length ? evs[evs.length - 1].ts : 0;
+}
+
 // ── 本地播放记录（观影记录面板补充数据源）──
 // 客户端本地发起的播放（含 MPV / PotPlayer 外链、本地文件 / 直链），只要经 Fntv-Plus 启动播放就记一笔，
 // 判断标题是否像 GUID/UUID 乱码（个人视频/本地文件通常拿不到有意义标题，回退成 guid 字符串）
@@ -1596,7 +1691,7 @@ function restoreCurData(): boolean {
                 fn: it.fn || { year: new Date().getFullYear(), genres: ['未分类'], cast: [], ratings: { tmdb: 0, tmdbVotes: 0, douban: 0, doubanVotes: 0 }, overview: '暂无简介（来自飞牛影视）' },
                 myRating: it.myRating || 0,
                 myReview: it.myReview || '',
-                sessions: it.lastPlayedAt ? [[formatDate(it.lastPlayedAt), '']] : [],
+                sessions: sessionsForItem(it.guid, it.name || '', it.lastPlayedAt || 0),
                 airStatus: it.airStatus,
             };
         });
@@ -1616,6 +1711,8 @@ ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: 
         // 写入本地播放记录（按 guid 去重飞牛条目；本地文件/直链按标题/链接去重）
         // 个人视频/本地文件拿不到有意义标题时 name 会回退成 guid 乱码，直接跳过不入面板
         const lk = (d && d.guid) ? d.guid : ((d && d.title) || '');
+        const evName = (d && d.title) || '';
+        const evType = (d && d.type) ? mapType(d.type) : '';
         if (lk && !(isGuidLike(lk) && !(d && d.guid))) {
             const prev = _localWatchItems.get(lk);
             _localWatchItems.set(lk, {
@@ -1628,6 +1725,9 @@ ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: 
             });
             saveLocalWatch();
         }
+        // [lc-1230] 记一笔真实观看事件：年度报告的时间轴（月度节奏/观影时刻/夜猫指数/连续天数）
+        //   靠它才有真实墙钟时间——飞牛 watched_ts 是播放进度不是时间戳，条目级时间已不可信。
+        recordWatchEvent(ts, lk, evName, evType, (d && d.player) || '');
         // 同步更新对应作品的 lastPlayedAt，使首次实时渲染与后续真实同步都更准确
         if (d && d.guid) {
             const it = curData.find((i) => i.guid === d.guid);
@@ -1638,6 +1738,17 @@ ipcRenderer.on('fntv:watch-recorded', (_e: unknown, d: { guid?: string; title?: 
         if ($('wh-chart-wrap')) renderChart();
         } catch (e: any) { log.warn('[watchHistory] 记录本地观看失败:', e?.message || e); }
     });
+
+// [lc-1230] 播放结束：主进程回传本段真实观看时长（累计进度推进时间），回填到对应观看事件。
+//   年度报告的「总时长 / 月度节奏」用它取代此前「每日条数 × 30 分钟」的估算。
+ipcRenderer.on('fntv:watch-session-ended', (_e: unknown, d: { guid?: string; title?: string; ms?: number; startedAt?: number }) => {
+    try {
+        if (!d || !d.ms) return;
+        const key = d.guid || d.title || '';
+        if (!key) return;
+        attachWatchDuration(d.guid || key, d.title || d.guid || '', d.ms, d.startedAt);
+    } catch (e: any) { log.warn('[watchHistory] 回填观看时长失败:', e?.message || e); }
+});
 
 // 主进程后台静默补全观影记录（TMDB 分类/类型 + 豆瓣评分）完成后推送，增量合并进 curData 并就地刷新，
 // 避免补全搜索阻塞首屏（否则豆瓣 429 退避会让面板一直卡骨架屏）。详见 doubanSync.ts getWatchedItems。
@@ -1795,14 +1906,16 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
                 //   年份 → 视为未记录（条目仍保留，仅时间缺失）。
                 if (lpMs < MIN_VALID_TS) lpMs = 0;
             }
+            // [lc-1230] 飞牛侧时间不可信/为空时，用本地真实观看事件补「最近一次观看」
+            const lastTs = latestWatchTs(it.guid, it.title || '', lpMs);
             return {
             guid: it.guid || '',
             name: it.title || '未知作品',
             // 分类标签：主进程已按 fnOS 类型给出 电影/剧集（TV 基分类），TMDB 命中时可升级为 动漫；
             // 缺字段时回退到 mapType（仍可能落到"其他"，仅极罕见未知类型）。
             type: (typeof it.category === 'string' && it.category) ? it.category : mapType(it.type),
-            last: lpMs ? formatAgo(lpMs) : '未记录时间',
-            lastPlayedAt: lpMs,
+            last: lastTs ? formatAgo(lastTs) : '未记录时间',
+            lastPlayedAt: lastTs,
             totalRuntimeMs: (typeof it.total_runtime_ms === 'number' && it.total_runtime_ms > 0) ? it.total_runtime_ms : 0,
             prog: typeof it.progress === 'number' ? Math.min(1, Math.max(0, it.progress)) : (it.watched ? 1 : 0),
             started: it.started ? true : false,
@@ -1824,7 +1937,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             },
             myRating: 0,
             myReview: '',
-            sessions: lpMs ? [[formatDate(lpMs), '']] : [],
+            sessions: sessionsForItem(it.guid, it.title || '', lastTs),
             airStatus: typeof it.air_status === 'string' ? it.air_status : undefined,
             douban_id: (it.douban_id || 0) as (string | number),
             };
@@ -1864,7 +1977,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             if (lt !== '剧集' && lt !== '电影' && lt !== '动漫') continue;
             // 防御：无 guid 且标题像 GUID 乱码（兜底，正常已被上面 type 过滤拦掉）
             if (!lw.guid && isGuidLike(lw.name)) continue;
-            const lpMs = lw.lastPlayedAt;
+            const lpMs = latestWatchTs(lw.guid, lw.name || '', lw.lastPlayedAt) || lw.lastPlayedAt;
             mapped.push({
                 guid: lw.guid || '',
                 name: lw.name || '未知作品',
@@ -1877,7 +1990,7 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
                 poster: '',
                 fn: { year: new Date().getFullYear(), genres: ['未分类'], cast: [], ratings: { tmdb: 0, tmdbVotes: 0, douban: 0, doubanVotes: 0 }, overview: `通过 ${playerLabel(lw.player)} 本地播放` },
                 myRating: 0, myReview: '',
-                sessions: lpMs ? [[formatDate(lpMs), '']] : [],
+                sessions: sessionsForItem(lw.guid, lw.name || '', lpMs),
                 viaPlayer: lw.player,
             });
         }
@@ -1910,23 +2023,37 @@ function formatAgo(ts: string | number): string {
 function formatDate(ts: string | number): string {
     try {
         const d = new Date(ts);
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         const hh = String(d.getHours()).padStart(2, '0');
         const mi = String(d.getMinutes()).padStart(2, '0');
-        return `${mm}-${dd} ${hh}:${mi}`;
+        // [lc-1230] 带上年份：旧格式 "MM-DD HH:MM" 丢年份，回读时只能补当前年，
+        //   导致去年（甚至更早）的观看被算进今年，年度报告整体串年。
+        return `${d.getFullYear()}-${mo}-${dd} ${hh}:${mi}`;
     } catch { return ''; }
 }
 
 /** 解析播放会话日期字符串为时间戳（ms）。
- *  支持：ISO 字符串（飞牛/真实，含完整年份）与 SAMPLE 的 "MM-DD HH:MM"（缺年份→用当前年）。 */
+ *  支持：ISO 字符串（飞牛/真实，含完整年份）、本模块 formatDate 的
+ *  "YYYY-MM-DD HH:MM"（lc-1230 起）与旧版 "MM-DD HH:MM"（缺年份→用当前年）。 */
 // [lc-1075] 数据修正基准：早于此的时间戳(2000-01-01T00:00:00Z)视为 NAS 端脏数据
 //   （epoch 0/秒级占位值、"1970-01-01" 字符串），展示与聚合时一律视为「未记录时间」。
+//   [lc-1230] 脏数据的真正源头（watched_ts 被当成 epoch）已在主进程 common/watchTime.ts 堵住。
 export const MIN_VALID_TS = 946684800000;
 
 function parseSessionDate(s: string): number {
     if (!s) return 0;
-    // ① 优先解析本项目 formatDate 产出的 "MM-DD HH:MM"（无年份 → 补当前年）。
+    // ① 带年份的完整日期（本模块 formatDate lc-1230 产物）：显式按本地时区构造，
+    //    不依赖 Date.parse 对 "YYYY-MM-DD HH:MM" 的实现差异，年月日时分逐一校准。
+    const my = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
+    if (my) {
+        const y = parseInt(my[1], 10), mo = parseInt(my[2], 10), da = parseInt(my[3], 10);
+        if (y >= 2000 && mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+            return new Date(y, mo - 1, da, parseInt(my[4], 10), parseInt(my[5], 10), 0, 0).getTime();
+        }
+        return 0;
+    }
+    // ② 无年份的 "MM-DD HH:MM"（旧版 formatDate / SAMPLE 格式）。
     //    [lc-1075] 必须先于 Date.parse：Chromium 对 "08-21 22:14" 会宽容解析成 2001 年
     //    （>2000 被直采），导致真实会话全部错记到 2001 年。^ 锚定 + 月/日范围校验：
     //    旧写法无锚点，"1970-01-01 08:00" 会命中 "70-01-01"（m1=70）→ setMonth(69) 溢出。
@@ -1941,7 +2068,7 @@ function parseSessionDate(s: string): number {
         }
         return 0;
     }
-    // ② 完整日期（含年份）直解
+    // ③ 其它完整日期（含年份）直解
     const direct = Date.parse(s);
     if (!Number.isNaN(direct)) {
         const d = new Date(direct);
@@ -2183,4 +2310,13 @@ export function getWatchDayLedger(): Array<{ y: number; m0: number; d: number; c
         out.push({ y, m0, d, count: v });
     }
     return out;
+}
+/**
+ * [lc-1230] 导出真实观看事件台账（每次「开始播放」落一条墙钟时间），供年度报告构建时间轴。
+ * 这是修正 watched_ts 语义后报告唯一的真实时间来源：条目级 last_played 已不可信，
+ * 只有这里的事件带真实日期/时刻/条目，才能算准月度节奏、观影时刻与连续天数。
+ */
+export function getWatchEvents(): Array<{ ts: number; key: string; name: string; type: string; player: string }> {
+    loadWatchEvents();
+    return _watchEvents.map((e) => ({ ...e }));
 }
