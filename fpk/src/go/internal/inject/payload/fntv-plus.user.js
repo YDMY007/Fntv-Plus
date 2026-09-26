@@ -1,4 +1,5 @@
 try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){window.require=function(id){if(id==='electron'||id==='electron/main')return (window.__fntvShim||{});throw new Error('网页端不支持 Node 模块: '+id)};}if(typeof window.__dirname==='undefined')window.__dirname='/fntv-web';}}catch(e){}
+"use strict";
 (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -186,6 +187,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   var API, buf, timer, authxMap;
   var init_diag = __esm({
     "src/preload/web/diag.ts"() {
+      "use strict";
       API = "/app/fntvplus/api/client-log";
       buf = [];
       timer = null;
@@ -330,6 +332,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   var init_md5 = __esm({
     "src/shim/md5.ts"() {
+      "use strict";
     }
   });
 
@@ -486,6 +489,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   var AUTHX_KEY, AUTHX_SECRET, LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
   var init_electron = __esm({
     "src/shim/electron.js"() {
+      "use strict";
       init_diag();
       init_md5();
       AUTHX_KEY = "";
@@ -11067,7 +11071,7 @@ html.fnos-perf.dark{
       }
     });
     if (S.carouselPosterStrip && shows.length > 0) {
-      let centerPoster = function(idx) {
+      let centerPoster2 = function(idx) {
         const strip = S.carouselPosterStrip;
         if (!strip) return;
         const target2 = pInner.children[idx];
@@ -11078,6 +11082,7 @@ html.fnos-perf.dark{
         const clamped = Math.min(Math.max(desired, 0), maxScroll);
         pInner.style.transform = `translateY(-${clamped}px)`;
       };
+      var centerPoster = centerPoster2;
       S.carouselPosterStrip.innerHTML = "";
       const pInner = document.createElement("div");
       pInner.className = "fnos-ps-inner";
@@ -11139,7 +11144,7 @@ html.fnos-perf.dark{
             el.style.zIndex = "1";
           }
         }
-        centerPoster(idx);
+        centerPoster2(idx);
       };
     }
     if (infos.length > 0) {
