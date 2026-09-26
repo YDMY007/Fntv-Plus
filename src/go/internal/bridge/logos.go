@@ -5,10 +5,10 @@
 package bridge
 
 import (
+	"embed"
 	"net/http"
 	"regexp"
 	"strings"
-	"embed"
 )
 
 //go:embed logos

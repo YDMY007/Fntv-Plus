@@ -1,6 +1,8 @@
 // Package bridge —— danmu_diag.go：自建弹幕接口分层诊断。
 // [lc-1115/1116] 复刻桌面版 danmuApi.ts 的 diagnose：把「连不上」逐层归因——
-//   地址形态 → DNS → TCP → TLS（证书错误归因）→ 服务应答（httptrace 分段耗时 dns/tcp/tls/首字节）。
+//
+//	地址形态 → DNS → TCP → TLS（证书错误归因）→ 服务应答（httptrace 分段耗时 dns/tcp/tls/首字节）。
+//
 // 诊断从 NAS 后端发出，与实际弹幕拉取同网络位置，结论真实。
 // 诊断结果会被用户整段截图转贴：base 一律脱敏成「协议+host:port+有无路径前缀」（TOKEN 在路径段）。
 package bridge

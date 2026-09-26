@@ -114,10 +114,10 @@ func TestTvmazeStripHTMLTag(t *testing.T) {
 
 func TestTvmazeSeasonSuffixStrip(t *testing.T) {
 	cases := map[string]string{
-		"三体 第二季":  "三体",
+		"三体 第二季":        "三体",
 		"Dark Season 2": "Dark",
 		"Friends S3":    "Friends",
-		"普通标题":      "普通标题",
+		"普通标题":          "普通标题",
 	}
 	for in, want := range cases {
 		if got := reTVSeasonSuffix.ReplaceAllString(in, ""); got != want {

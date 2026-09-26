@@ -244,16 +244,16 @@ func hotNormalizeDouban(raw map[string]any, mediaType string) map[string]any {
 		pop = jsNum(m["count"]) // Rexxar 无 popularity，用评价人数近似热度
 	}
 	return map[string]any{
-		"id":        raw["id"],
-		"mediaType": mediaType,
-		"name":      title,
-		"name_cn":   title,
-		"images":    map[string]any{"common": cover},
-		"rating":    rating,
-		"year":      jsStr(raw["year"]),
+		"id":         raw["id"],
+		"mediaType":  mediaType,
+		"name":       title,
+		"name_cn":    title,
+		"images":     map[string]any{"common": cover},
+		"rating":     rating,
+		"year":       jsStr(raw["year"]),
 		"popularity": pop,
-		"overview":  "",
-		"url":       fmt.Sprintf("https://movie.douban.com/subject/%v", raw["id"]),
+		"overview":   "",
+		"url":        fmt.Sprintf("https://movie.douban.com/subject/%v", raw["id"]),
 	}
 }
 

@@ -8,6 +8,7 @@
 BIN="$TRIM_APPDEST/server/fntvplus"
 PIDFILE="$TRIM_PKGVAR/fntvplus.pid"
 LOG="$TRIM_PKGVAR/fntvplus.log"
+SOCK="$TRIM_APPDEST/fntvplus.sock"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [main] $*" >> "$LOG"; }
 
@@ -54,12 +55,15 @@ start() {
 
   nohup "$BIN" \
     --port "$SVC_PORT" \
+    --socket "fntvplus.sock" \
     --version "${TRIM_APPVER:-}" \
     $UPSTREAM_ARG \
     --etc "$TRIM_PKGETC" \
     --var "$TRIM_PKGVAR" \
     --dest "$TRIM_APPDEST" \
     >> "$LOG" 2>&1 &
+  # Authx 签名材料经环境变量注入后端（不硬编码进二进制/仓库）；未设置则后端不发 Authx 头。
+  # 在应用「设置 → 环境变量」中配置 FNTV_AUTHX_KEY / FNTV_AUTHX_SECRET 即启用签名桥。
   echo $! > "$PIDFILE"
   sleep 1
   if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
@@ -76,6 +80,7 @@ stop() {
     kill "$(cat "$PIDFILE")" 2>/dev/null && log "killed pid $(cat "$PIDFILE")"
     rm -f "$PIDFILE"
   fi
+  rm -f "$SOCK" 2>/dev/null
   exit 0
 }
 

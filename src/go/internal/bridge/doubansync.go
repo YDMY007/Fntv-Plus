@@ -6,6 +6,7 @@
 //     标题包含+年份+类型打分取最优），系列级缓存（剧名|类型|年代 → id）防风控限流
 //   - 进度同步语义：首次有效进度（媒体有真实时长）标"在看"；飞牛侧已观看则直接标"看过"
 //     且绝不降级；"标记为已观看"动作 → 标"看过"
+//
 // cookie 来自设置面板手动粘贴的 doubanCookie（网页端无内嵌浏览器登录途径）。
 // 触发器：preload/web/playSync.ts 拦截页面自身 /v/api/v1/play/record 与 /v/api/v1/item/watched。
 package bridge
@@ -25,13 +26,13 @@ import (
 /* ── 会话状态（进程内存；重启即清，豆瓣端重复标记幂等无害）── */
 
 var (
-	doubanStateMu  sync.RWMutex
-	doubanStateMap = map[string]string{}   // itemGuid → "doing" | "collect"
-	doubanSeriesMu sync.RWMutex
+	doubanStateMu       sync.RWMutex
+	doubanStateMap      = map[string]string{} // itemGuid → "doing" | "collect"
+	doubanSeriesMu      sync.RWMutex
 	doubanSeriesMuCache = map[string]string{} // "剧名|类型|年代" → douban_id（系列级，防每集搜索触发风控）
-	doubanCkMu      sync.Mutex
-	doubanCkCached  string                  // 会话内 ck 缓存
-	doubanGateCh    = make(chan struct{}, 2) // 豆瓣请求并发闸门（防风控限流）
+	doubanCkMu          sync.Mutex
+	doubanCkCached      string                   // 会话内 ck 缓存
+	doubanGateCh        = make(chan struct{}, 2) // 豆瓣请求并发闸门（防风控限流）
 )
 
 func doubanStateGet(guid string) string {
