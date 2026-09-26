@@ -301,11 +301,32 @@ Fntv-Plus/
 ├── scripts/                      # 构建辅助脚本（图标生成 / potplayer 复制 / 发布等）
 ├── build/                        # 打包资源（icon / entitlements.mac.plist，供 electron-builder）
 ├── .github/workflows/            # 自动构建（release.yml：macOS / Linux 自动，Windows 手传）
+├── fpk/                          # ★ Web 版（fnOS 应用，原 Fntv-Plus-fpk 仓库已并入）
+│   ├── manifest                  # fpk 包清单（版本 / 描述 / changelog）
+│   ├── src/go/                   # fpk 后端：Go 反向代理 + HTML 注入 + TMDB/弹幕等桥接 API
+│   ├── src/preload/              # 网页端 preload 副本（自桌面版移植，含 web/ 独有模块）
+│   ├── src/shim/ + web-entry.ts  # 浏览器垫片（electron/fs/path）与网页端打包入口
+│   ├── cmd/ config/ wizard/      # fpk 安装 / 卸载 / 升级钩子与包配置
+│   ├── tools/buildfpk/           # 一键打包工具源码（编译出 build-fpk.exe，配合 fnpack 出 .fpk）
+│   └── scripts/ docs/            # fpk 构建脚本与文档（详见 fpk/README.md）
 ├── package.json                  # 依赖与打包配置（artifactName = Fntv-Plus_*）
 ├── tsconfig.json                 # TypeScript 配置
 ├── dev.cmd                       # 开发调试（taskkill → tsc → electron）
 └── README.md                     # 本文件
 ```
+
+---
+
+## 🌐 Web 版（fpk · NAS 应用）
+
+本仓库同时包含 **Fntv-Plus Web 版**（原 [Fntv-Plus-fpk](https://github.com/YDMY007/Fntv-Plus-fpk) 仓库，已并入 `fpk/` 目录）：一个装进 fnOS 的 fpk 应用，通过旁路反向代理把增强能力注入飞牛影视网页端——**NAS 装一次，电视 / 平板 / 手机 / 电脑浏览器打开即是增强版**，无需每台设备安装。功能与桌面版同源（美化 / 弹幕 / 同步 / 观影记录），但无外链播放器与 MPV 硬解；详见 [fpk/README.md](fpk/README.md)。
+
+**开发流程：桌面版先行** —— 前端增强改动先在本仓库 `src/preload` 开发并验证，确认无误后再移植到 `fpk/src/preload` 这份网页端副本，两份代码间的差异用 `diff -rq src/preload fpk/src/preload` 排查。fpk 的 Go 后端改动直接在 `fpk/src/go` 进行。
+
+**打包发布**：fpk 与桌面安装包（exe）均为手动构建、手动上传 Release——
+- fpk 开发包：进入 `fpk/` 目录执行 `一键打包.bat`（需先在 `fpk/` 下 `go build -o build-fpk.exe ./tools/buildfpk`）；
+- fpk 正式版：`fpk/发布打包.bat`（网页 GUI 填显示名与正式版号）；
+- 产物 `Fntv-Plus-vXXX.fpk` 在飞牛 fnOS 应用中心手动安装，或与桌面安装包一起挂到 GitHub Release。
 
 ---
 

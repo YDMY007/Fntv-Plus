@@ -55,7 +55,7 @@ func run() error {
 	}
 	root = filepath.Dir(exe)
 	if _, err := os.Stat(filepath.Join(root, "manifest")); err != nil {
-		return fmt.Errorf("在 %s 找不到 manifest，请把 build-fpk.exe 放在 fntvplus 仓库根目录", root)
+		return fmt.Errorf("在 %s 找不到 manifest，请把 build-fpk.exe 放在 fpk/ 目录（Fntv-Plus 仓库内 Web 版子目录）", root)
 	}
 
 	fmt.Println("==============================================")
@@ -256,7 +256,7 @@ func findFnpack() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("找不到 fnpack：请把 fnpack-<ver>-windows-amd64 复制为 %s（或放到 Downloads 下）",
-		filepath.Join("fntvplus", "tools", "fnpack.exe"))
+		filepath.Join("fpk", "tools", "fnpack.exe"))
 }
 
 // devCommitVersion 开发测试版号 = <发布版基号>.<序号> 四段式，**严格递增**。
@@ -289,7 +289,11 @@ func devCommitVersion() string {
 		seq = n
 	}
 	seq++ // 无新提交重复打包版号也必须前进（否则安装器视为同版本拒装）
-	if out, err := exec.Command("git", "rev-list", "--count", "HEAD").Output(); err == nil {
+	// 本仓库已合并桌面版（fpk/ 是 Web 版子目录）：全仓库提交数混入桌面版提交，
+	// 且序号线必须与商店已装的 22x 连续 —— 只数 fpk/ 目录下的提交。
+	gitCount := exec.Command("git", "rev-list", "--count", "HEAD", "--", ".")
+	gitCount.Dir = root
+	if out, err := gitCount.Output(); err == nil {
 		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > seq {
 			return base + "." + strconv.Itoa(n) // 提交数更高（正常节奏）→ 版号=提交数
 		}

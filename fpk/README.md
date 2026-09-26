@@ -1,12 +1,8 @@
 # Fntv-Plus · 飞牛影视网页端增强（fpk · Web 版）
 
-[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.version&label=version&prefix=v)](https://github.com/YDMY007/Fntv-Plus-fpk)
-[![Test Build](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.version&label=test%20build&prefix=Fntv-Plus-v&suffix=%20%E2%80%A2%20%E5%BC%80%E5%8F%91%E6%B5%8B%E8%AF%95)](https://github.com/YDMY007/Fntv-Plus-fpk/releases)
-[![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus-fpk%2Fmain%2Fmanifest&query=%24.release_version&label=release&prefix=v)](https://github.com/YDMY007/Fntv-Plus-fpk/releases)
-[![Commits](https://img.shields.io/github/commit-activity/t/YDMY007/Fntv-Plus-fpk?label=commits)](https://github.com/YDMY007/Fntv-Plus-fpk/commits/main)
-[![Last Commit](https://img.shields.io/github/last-commit/YDMY007/Fntv-Plus-fpk/main?label=last%20commit&display_date=committed)](https://github.com/YDMY007/Fntv-Plus-fpk/commits/main)
-[![Repo Size](https://img.shields.io/github/repo-size/YDMY007/Fntv-Plus-fpk?label=repo%20size)](https://github.com/YDMY007/Fntv-Plus-fpk)
-[![Code Size](https://img.shields.io/github/languages/code-size/YDMY007/Fntv-Plus-fpk?label=code)](https://github.com/YDMY007/Fntv-Plus-fpk)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus%2Frelease%2Ffpk%2Fmanifest&query=%24.version&label=version&prefix=v)](https://github.com/YDMY007/Fntv-Plus/tree/release/fpk)
+[![Test Build](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus%2Frelease%2Ffpk%2Fmanifest&query=%24.version&label=test%20build&prefix=Fntv-Plus-v&suffix=%20%E2%80%A2%20%E5%BC%80%E5%8F%91%E6%B5%8B%E8%AF%95)](https://github.com/YDMY007/Fntv-Plus/releases)
+[![Release](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FYDMY007%2FFntv-Plus%2Frelease%2Ffpk%2Fmanifest&query=%24.release_version&label=release&prefix=v)](https://github.com/YDMY007/Fntv-Plus/releases)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A518-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/fnOS-x86__64-3d7fe0)](https://www.fnnas.com)
@@ -19,6 +15,9 @@
 > 需要完整桌面体验（MPV 硬解 / 原盘播放）？
 
 > 前往桌面客户端：**https://github.com/YDMY007/Fntv-Plus**
+
+> **📌 本目录（`fpk/`）已并入 [Fntv-Plus 主仓库](https://github.com/YDMY007/Fntv-Plus)**（原 Fntv-Plus-fpk 仓库停止更新，历史完整保留在 git 中）。
+> 开发流程：**桌面版先行** —— 前端增强改动先在主仓库 `src/preload` 开发验证，确认无误后再移植到 `fpk/src/preload` 这份网页端副本，然后用 `fpk/一键打包.bat` 出包。安装包（fpk / exe）均为手动构建、手动上传到 [Releases](https://github.com/YDMY007/Fntv-Plus/releases)。
 
 ---
 

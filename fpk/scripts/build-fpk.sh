@@ -10,7 +10,7 @@
 #       app/server/fntvplus（对应运行时 $TRIM_APPDEST/server/fntvplus，
 #       与 cmd/main 的 BIN 路径一致）。根目录 server/ 不会进包！
 #
-# 用法（在 fntvplus/ 仓库根执行）：
+# 用法（在 Fntv-Plus 仓库的 fpk/ 目录执行；脚本按自身位置定位，路径无关）：
 #   bash scripts/build-fpk.sh            # 仅 amd64
 #   WITH_ARM64=1 bash scripts/build-fpk.sh  # amd64 + arm64
 #
