@@ -13,6 +13,7 @@ import { scheduleEpBackfill, ensureEpFixButton } from './embyWall/detail/epBackf
 import { ensureVirtualBandFix } from './embyWall/detail/virtualBand';
 import { scheduleCustomScraperButton } from './embyWall/detail/customScraper';
 import { scheduleJavButton } from './embyWall/detail/jav';
+import { scheduleFolderScraperButton } from './embyWall/detail/folderScraper';
 import { applyPageBg } from './embyWall/pageBg';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
@@ -2828,7 +2829,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const csDesc = document.createElement('div');
     csDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    csDesc.textContent = t('把视频标题/季号发给你的自定义刮削服务，返回的分集标题与简介经飞牛官方接口回填元数据（不修改任何系统文件）。服务协议：POST JSON {title, season, tmdbId, episodes}，响应 {episodes:[{index,title,overview}]}。开启后在季页「选集」标题旁出现「⟳ 自定义刮削」按钮。');
+    csDesc.textContent = t('把视频标题/季号发给你的自定义刮削服务，返回的分集标题与简介经飞牛官方接口回填元数据（不修改任何系统文件）。服务协议：季页 POST {title, season, tmdbId, episodes}，响应 {episodes:[{index,title,overview}]}；文件夹 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}（name=文件名，服务按 name/index 匹配），响应 {items|episodes:[{index|name,title,overview}]}。开启后在季页「选集」标题旁出现「⟳ 自定义刮削」按钮，个人视频文件夹页（/v/folder/…）出现「⟳ 文件夹刮削」浮动按钮。');
     secBodyScraper.appendChild(csDesc);
 
     const csToggleRow = document.createElement('label');
@@ -4925,6 +4926,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       runPageTransition(isDetailPage()); setTimeout(ensureBurgerVisible, 300); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 详情页美化：进详情铺加载层+一次性 observer 等 hero；非详情/关闭则 teardown
       scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 自定义刮削按钮：非季页自撤
+      scheduleFolderScraperButton(); // [自定义刮削] 个人视频文件夹页「⟳ 文件夹刮削」浮动按钮：非文件夹页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -4939,6 +4941,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       runPageTransition(isDetailPage()); setTimeout(closeDrawer, 300); setTimeout(hideStaleViews, 400); setTimeout(ensureHomepageEnhanced, 350); _stopCarouselOffHome(newHref); _scheduleTopLeftAfterNav();
       applyDetailBeautify(); // [lc-980] 同 pushState
       scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 同 pushState
+      scheduleFolderScraperButton(); // [自定义刮削] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -4950,9 +4953,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       setTimeout(ensureHomepageEnhanced, 350); // [lc-889] 返回首页强制重注入轮播
       applyDetailBeautify(); // [lc-980] 前进/后退到详情页也套美化；退回首页则 teardown
       scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 同 popstate
+      scheduleFolderScraperButton(); // [自定义刮削] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
+  // [自定义刮削] 文件夹页不满足 isDetailPage()（上方初始块不会跑），初始/深链直达文件夹页
+  // 也要无条件调度一次——函数内部自判路由与开关，非文件夹页自摘。
+  scheduleFolderScraperButton();
+  [600, 1500, 3000].forEach(ms => setTimeout(() => scheduleFolderScraperButton(), ms));
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
 
 
@@ -4962,6 +4970,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     backfillDetailLogo();
     applyDetailBeautify();
     scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); // [v1.5.0] 初始/深链同挂自定义刮削按钮
+    scheduleFolderScraperButton(); // [自定义刮削] 文件夹页非 isDetailPage 亦无条件调度（内部自判路由）
     // 延迟重试: SPA渲染可能分批加载DOM
     [600, 1500, 3000].forEach(ms => setTimeout(() => { backfillDetailLogo(); scheduleEpBackfill(); scheduleCustomScraperButton(); scheduleJavButton(); ensureVirtualBandFix(); }, ms));
   }

@@ -14,6 +14,7 @@ import { scheduleBangumiBackfill, ensureBangumiFixButton } from './embyWall/deta
 import { scheduleSeasonsNav, ensureSeasonsNav } from './embyWall/detail/seasonsNav';
 import { scheduleEpListMerge, ensureEpListMerge } from './embyWall/detail/epListMerge';
 import { scheduleJavButton, ensureJavButton } from './embyWall/detail/jav';
+import { scheduleFolderScraperButton } from './embyWall/detail/folderScraper';
 import { runPageTransition } from './embyWall/detail/veil';
 import { epResolutionDiag } from './embyWall/detail/epResolution';
 import { wheelToScroll } from './embyWall/nav/scroll';
@@ -4479,7 +4480,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const metaWipText = document.createElement('div');
     metaWipText.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fnos-ui-text);flex:1 1 auto;';
     metaWipText.innerHTML = t('<b>功能开发中，未正式生效</b> —— 以下选项为预览，可能随版本调整：'
-      + '各卡当前可正常配置并使用（季页「⟳ 自定义刮削」/「⟳ 补全集信息」/电影页「⟳ jav 刮削」），'
+      + '各卡当前可正常配置并使用（季页「⟳ 自定义刮削」/「⟳ 补全集信息」/电影页「⟳ jav 刮削」'
+      + '/个人视频文件夹页「⟳ 文件夹刮削」），'
       + '多源聚合与批量刮削任务开发中，敬请期待。');
     const metaWipBadge = document.createElement('span');
     metaWipBadge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;align-self:flex-start;flex-shrink:0;'
@@ -4496,6 +4498,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     csHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
     csHint.innerHTML = t('把季标题/季号/TMDB 等锚点发给<b>你自建的刮削服务</b>，用返回的分集标题/简介回填飞牛'
       + '（只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文；写回带字段锁）。'
+      + '<br/>个人视频文件夹页另有「⟳ 文件夹刮削」浮动按钮：按文件名发给服务，回填每个文件条目的标题/简介。'
       + '<br/>请求由桌面端代理发出，服务无需配置 CORS。');
     secBodyMeta.appendChild(csHint);
 
@@ -4556,8 +4559,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const csFoot = document.createElement('div');
     csFoot.style.cssText = 'font-size:10.5px;line-height:1.6;color:var(--fnos-ui-muted);margin-top:8px;padding:0 6px;';
-    csFoot.textContent = t('协议：POST {title, season, tmdbId, trimId, imdbId, doubanId, guid, episodes:[{index,guid}]}, '
-      + '响应 {episodes:[{index, title?, overview?}]}（title/overview 缺省=不动该字段）。');
+    csFoot.textContent = t('协议：季页 POST {title, season, tmdbId, trimId, imdbId, doubanId, guid, episodes:[{index,guid}]}, '
+      + '响应 {episodes:[{index, title?, overview?}]}；'
+      + '文件夹 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}（name=文件名），'
+      + '响应 {items|episodes:[{index|name, title?, overview?}]}（title/overview 缺省=不动该字段）。');
     secBodyMeta.appendChild(csFoot);
 
     // ── Jav 番号刮削卡（独立卡；默认关；仅电影详情页出现浮动按钮）──
@@ -6528,6 +6533,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleBangumiBackfill(); // [多源刮削] 季页「Bangumi 补全」按钮：非季页自撤
       scheduleSeasonsNav(); // [多源刮削] 剧集一级页季行翻页箭头：非一级页自撤
       scheduleJavButton(); // [自定义刮削] 电影页「⟳ jav 刮削」浮动按钮：非电影页自撤
+      scheduleFolderScraperButton(); // [自定义刮削] 个人视频文件夹页「⟳ 文件夹刮削」浮动按钮：非文件夹页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
       const prevPath = location.pathname;
@@ -6546,6 +6552,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleBangumiBackfill(); // [多源刮削] 同 pushState
       scheduleSeasonsNav(); // [多源刮削] 同 pushState
       scheduleJavButton(); // [自定义刮削] 同 pushState
+      scheduleFolderScraperButton(); // [自定义刮削] 同 pushState
     };
     window.addEventListener('popstate', () => {
       logNav('popstate');
@@ -6561,9 +6568,14 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleBangumiBackfill(); // [多源刮削] 同 popstate
       scheduleSeasonsNav(); // [多源刮削] 同 popstate
       scheduleJavButton(); // [自定义刮削] 同 popstate
+      scheduleFolderScraperButton(); // [自定义刮削] 同 popstate
     });
     window.addEventListener('hashchange', () => logNav('hashchange'));
     setTimeout(hideStaleViews, 1500); // 初始/深链到详情页时也清理一次
+    // [自定义刮削] 文件夹页不满足 isDetailPage()（上方初始块不会跑），初始/深链直达文件夹页
+    // 也要无条件调度一次——函数内部自判路由与开关，非文件夹页自摘。
+    scheduleFolderScraperButton();
+    [600, 1500, 3000].forEach(ms => setTimeout(() => scheduleFolderScraperButton(), ms));
   } catch (e) { log('NAV hook err', String(e).substring(0, 60)); }
 
 

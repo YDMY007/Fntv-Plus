@@ -7734,7 +7734,7 @@ html.fnos-perf.dark{
   function hydratePosters(root) {
     const imgs = Array.from(root.querySelectorAll("img.fntv-hot-poster[data-poster]"));
     if (!imgs.length) return;
-    const CONCURRENCY3 = 5;
+    const CONCURRENCY4 = 5;
     let cursor2 = 0;
     const worker = () => {
       while (cursor2 < imgs.length) {
@@ -7763,7 +7763,7 @@ html.fnos-perf.dark{
         return;
       }
     };
-    for (let i = 0; i < Math.min(CONCURRENCY3, imgs.length); i++) worker();
+    for (let i = 0; i < Math.min(CONCURRENCY4, imgs.length); i++) worker();
   }
   function todayBangumiWeekday() {
     return ((/* @__PURE__ */ new Date()).getDay() + 6) % 7 + 1;
@@ -14779,6 +14779,339 @@ html.fnos-perf.dark{
     }
   }
 
+  // src/preload/plugins/embyWall/detail/folderScraper.ts
+  init_electron();
+  var FOLDER_BTN_ID = "fnos-folder-scraper-btn";
+  var CONCURRENCY3 = 4;
+  var MAX_PAGES = 10;
+  var PAGE_SIZE = 1e3;
+  var _running4 = false;
+  function folderGuid() {
+    const m = location.pathname.match(/\/v\/folder\/([A-Za-z0-9_]+)/);
+    return m ? m[1] : null;
+  }
+  function fnNonce5() {
+    return String(Math.floor(Math.random() * 9e5) + 1e5);
+  }
+  async function fnosPost2(origin, path, body) {
+    const authx = await ipcRenderer.invoke("fnos-gen-authx", path, body).catch(() => "");
+    const resp = await fetch(origin + path, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      dlog("[folderScraper] POST " + path + " HTTP " + resp.status);
+      return null;
+    }
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0) {
+      dlog("[folderScraper] POST " + path + " \u4E1A\u52A1\u5931\u8D25 " + JSON.stringify(j).substring(0, 160));
+      return null;
+    }
+    return j.data || null;
+  }
+  async function fnosFolderItems(origin, fGuid) {
+    var _a, _b, _c;
+    const out = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const data = await fnosPost2(origin, "/v/api/v1/item/list", {
+        parent_guid: fGuid,
+        exclude_folder: 1,
+        sort_column: "sort_title",
+        sort_type: "ASC",
+        page,
+        page_size: PAGE_SIZE,
+        nonce: fnNonce5()
+      });
+      const list = data && Array.isArray(data.list) ? data.list : [];
+      for (const it of list) {
+        if (!it || !it.guid) continue;
+        if (String(it.type || "").toLowerCase() === "folder") continue;
+        const name = String((_b = (_a = it.title) != null ? _a : it.name) != null ? _b : "").trim();
+        if (!name) continue;
+        out.push({ guid: String(it.guid), name, index: numOrNull((_c = it.index_number) != null ? _c : it.index) });
+      }
+      if (list.length < PAGE_SIZE) break;
+    }
+    return out;
+  }
+  function normName(s) {
+    return String(s || "").toLowerCase().replace(/\.[a-z0-9]{1,5}$/i, "").replace(/[\s._\-–—]+/g, "");
+  }
+  async function fetchFolderScrape(url, payload) {
+    let j = null;
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      j = await resp.json();
+    } catch (e) {
+      throw new Error("\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u8BF7\u6C42\u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
+    }
+    const arr = j && (Array.isArray(j.items) ? j.items : Array.isArray(j.episodes) ? j.episodes : Array.isArray(j.data) ? j.data : null);
+    if (!arr) throw new Error("\u54CD\u5E94\u7F3A\u5C11 items/episodes \u6570\u7EC4");
+    const out = [];
+    arr.forEach((e, i) => {
+      var _a, _b, _c, _d, _e, _f, _g, _h;
+      if (!e || typeof e !== "object") return;
+      const index = numOrNull((_b = (_a = e.index) != null ? _a : e.episode) != null ? _b : e.number);
+      const name = (_d = (_c = e.filename) != null ? _c : e.file) != null ? _d : e.title == null ? e.name : null;
+      out.push({
+        index: index != null ? index : i + 1,
+        name: name != null ? String(name).trim() : null,
+        title: ((_e = e.title) != null ? _e : e.name) != null ? String((_f = e.title) != null ? _f : e.name).trim() : null,
+        overview: ((_g = e.overview) != null ? _g : e.description) != null ? String((_h = e.overview) != null ? _h : e.description).trim() : null
+      });
+    });
+    return out;
+  }
+  function matchFor(item, byName, byIndex) {
+    const nk = normName(item.name);
+    if (nk && byName.has(nk)) return byName.get(nk);
+    if (item.index !== null && byIndex.has(item.index)) return byIndex.get(item.index);
+    return void 0;
+  }
+  function patchFolderCard(guid, title, overview) {
+    const views = document.querySelectorAll(ACTIVE_VIEW_SEL);
+    for (let i = views.length - 1; i >= 0; i--) {
+      const v = views[i];
+      if (v.offsetParent === null) continue;
+      const link = v.querySelector('a[href*="' + guid + '"]');
+      if (!link) continue;
+      const card = link.closest('[data-id="details"]') || link.parentElement;
+      if (!card) return;
+      const titleP = link.querySelector("p") || card.querySelector("p");
+      if (titleP && title !== null) {
+        const tn = titleP.firstChild;
+        if (tn && tn.nodeType === Node.TEXT_NODE) {
+          if (tn.nodeValue !== title) tn.nodeValue = title;
+        } else {
+          titleP.insertBefore(document.createTextNode(title), titleP.firstChild);
+        }
+      }
+      if (overview !== null) {
+        const ps = Array.from(card.querySelectorAll("p")).filter((p) => p !== titleP);
+        const ovP = ps.length ? ps[ps.length - 1] : null;
+        if (ovP && ovP.children.length === 0) {
+          const tn = ovP.firstChild;
+          if (tn && tn.nodeType === Node.TEXT_NODE) {
+            if (tn.nodeValue !== overview) tn.nodeValue = overview;
+          } else if (!ovP.firstChild) {
+            ovP.appendChild(document.createTextNode(overview));
+          }
+        }
+      }
+      return;
+    }
+  }
+  async function runFolderScraper(btn) {
+    const guid = folderGuid();
+    if (!guid || _running4) return;
+    const url = String(S.customScraperUrl || "").trim();
+    if (!S.customScraperEnabled || !url) {
+      setBtn(btn, "\u26A0 \u672A\u914D\u7F6E", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u5F00\u542F\u5E76\u586B\u5199\u5730\u5740\u3002");
+      window.setTimeout(() => {
+        if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
+      }, 5e3);
+      return;
+    }
+    _running4 = true;
+    const origin = location.origin;
+    const stats = { filled: 0, unchanged: 0, failed: 0, unmatched: 0, total: 0 };
+    const tick2 = () => {
+      const done = stats.filled + stats.unchanged + stats.failed + stats.unmatched;
+      if (btn.isConnected) setBtn(btn, "\u23F3 \u56DE\u586B\u4E2D " + done + "/" + stats.total);
+    };
+    try {
+      let folderTitle = "";
+      const fd = await fnosGetEditDetail(origin, guid).catch(() => null);
+      if (fd) folderTitle = String(fd.title || fd.name || "").trim();
+      const items2 = await fnosFolderItems(origin, guid);
+      if (!items2.length) {
+        setBtn(btn, "\u26A0 \u672A\u679A\u4E3E\u5230\u6587\u4EF6", "item/list \u672A\u8FD4\u56DE\u672C\u6587\u4EF6\u5939\u7684\u6587\u4EF6\u6761\u76EE\uFF08fv_ guid \u53EF\u80FD\u4E0D\u88AB\u63A5\u53E3\u63A5\u53D7\uFF09\uFF0C\u8BE6\u89C1\u65E5\u5FD7\u3002");
+        window.setTimeout(() => {
+          if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
+        }, 6e3);
+        _running4 = false;
+        return;
+      }
+      stats.total = items2.length;
+      setBtn(btn, "\u23F3 \u8BF7\u6C42\u522E\u524A\u670D\u52A1\u2026");
+      const hits = await fetchFolderScrape(url, {
+        mode: "folder",
+        title: folderTitle,
+        folderGuid: guid,
+        guid,
+        items: items2,
+        episodes: items2
+      });
+      const byName = /* @__PURE__ */ new Map();
+      const byIndex = /* @__PURE__ */ new Map();
+      for (const h of hits) {
+        const nk = h.name ? normName(h.name) : "";
+        if (nk && !byName.has(nk)) byName.set(nk, h);
+        if (h.index !== null && !byIndex.has(h.index)) byIndex.set(h.index, h);
+      }
+      if (!byName.size && !byIndex.size) {
+        setBtn(btn, "\u26A0 \u670D\u52A1\u65E0\u5339\u914D\u6570\u636E", "\u81EA\u5B9A\u4E49\u670D\u52A1\u54CD\u5E94\u672A\u643A\u5E26\u53EF\u5339\u914D\u7684 name/index\u3002");
+        window.setTimeout(() => {
+          if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
+        }, 5e3);
+        _running4 = false;
+        return;
+      }
+      let idx = 0;
+      const worker = async () => {
+        var _a, _b, _c, _d, _e, _f;
+        while (idx < items2.length) {
+          const item = items2[idx++];
+          try {
+            const ed = await fnosGetEditDetail(origin, item.guid);
+            if (!ed) {
+              stats.failed++;
+              tick2();
+              continue;
+            }
+            const m = matchFor(item, byName, byIndex);
+            if (!m) {
+              stats.unmatched++;
+              tick2();
+              continue;
+            }
+            const titleKey = "title" in ed ? "title" : "name" in ed ? "name" : "title";
+            const ovKey = "overview" in ed ? "overview" : "description" in ed ? "description" : "overview";
+            const curTitle = String((_a = ed[titleKey]) != null ? _a : "");
+            const curOv = String((_b = ed[ovKey]) != null ? _b : "");
+            const newTitle = decideField(curTitle, (_c = m.title) != null ? _c : "", "", isPlaceholderTitle);
+            const newOv = decideField(curOv, (_d = m.overview) != null ? _d : "", "");
+            if (newTitle === null && newOv === null) {
+              stats.unchanged++;
+              tick2();
+              continue;
+            }
+            const body = { ...ed, nonce: fnNonce5() };
+            if (!body.guid && !body.item_guid) body.guid = item.guid;
+            let titleChanged = false, ovChanged = false;
+            if (newTitle !== null) {
+              body[titleKey] = newTitle;
+              body.title_locked = true;
+              titleChanged = true;
+            }
+            if (newOv !== null) {
+              body[ovKey] = newOv;
+              body.overview_locked = true;
+              ovChanged = true;
+            }
+            const saved = await fnosSaveEditDetail(origin, body);
+            if (!saved) {
+              stats.failed++;
+              tick2();
+              continue;
+            }
+            const vf = await fnosGetEditDetail(origin, item.guid);
+            const vTitle = String(vf ? (_e = vf[titleKey]) != null ? _e : "" : "");
+            const vOv = String(vf ? (_f = vf[ovKey]) != null ? _f : "" : "");
+            if (titleChanged && vTitle.trim() !== newTitle.trim() || ovChanged && vOv.trim() !== newOv.trim()) {
+              stats.failed++;
+              tick2();
+              continue;
+            }
+            if (titleChanged) stats.filled++;
+            if (ovChanged) stats.filled++;
+            patchFolderCard(item.guid, titleChanged ? newTitle : null, ovChanged ? newOv : null);
+            tick2();
+          } catch (e) {
+            stats.failed++;
+            dlog("[folderScraper] \u5355\u9879\u5F02\u5E38 " + item.guid + " " + String(e && e.message || e).substring(0, 100));
+            tick2();
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY3, items2.length) }, worker));
+      if (stats.failed) {
+        setBtn(btn, "\u26A0 \u56DE\u586B " + stats.filled + " \xB7 \u5931\u8D25 " + stats.failed, "\u90E8\u5206\u6761\u76EE\u5199\u5165\u5931\u8D25\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u53EF\u518D\u70B9\u4E00\u6B21\u91CD\u8BD5\u3002");
+      } else if (stats.filled) {
+        setBtn(btn, "\u2713 \u5DF2\u56DE\u586B " + stats.filled + " \u9879", "\u81EA\u5B9A\u4E49\u522E\u524A\u6570\u636E\u5DF2\u5199\u56DE\u98DE\u725B\u5143\u6570\u636E\u3002");
+      } else if (stats.unmatched) {
+        setBtn(btn, "\u26A0 " + stats.unmatched + " \u9879\u672A\u5339\u914D", "\u81EA\u5B9A\u4E49\u670D\u52A1\u672A\u8FD4\u56DE\u8FD9\u4E9B\u6587\u4EF6\u7684 \u6570\u636E\uFF08\u68C0\u67E5 name/index \u5339\u914D\u952E\uFF09\u3002");
+      } else {
+        setBtn(btn, "\u2713 \u6570\u636E\u5DF2\u6700\u65B0", "\u4E0E\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u4E00\u81F4\uFF0C\u65E0\u9700\u56DE\u586B\u3002");
+      }
+      log7("[folderScraper] \u5B8C\u6210 " + (folderTitle || guid) + " total=" + stats.total + " filled=" + stats.filled + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
+    } catch (e) {
+      const msg = String(e && e.message || e).substring(0, 80);
+      log7("[folderScraper] \u5931\u8D25: " + msg);
+      if (btn.isConnected) {
+        setBtn(btn, "\u26A0 " + msg, msg);
+        btn.style.color = "var(--fnos-ui-warn,#b06a3a)";
+        window.setTimeout(() => {
+          if (btn.isConnected) {
+            btn.style.color = "";
+            setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
+          }
+        }, 6e3);
+      }
+    } finally {
+      _running4 = false;
+    }
+  }
+  function makeBtn3() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = FOLDER_BTN_ID;
+    btn.textContent = "\u27F3 \u6587\u4EF6\u5939\u522E\u524A";
+    btn.setAttribute("title", "\u628A\u672C\u6587\u4EF6\u5939\u5185\u6587\u4EF6\u7684\u6587\u4EF6\u540D\u53D1\u7ED9\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u6309\u8FD4\u56DE\u6570\u636E\u56DE\u586B\u5404\u6587\u4EF6\u7684\u6807\u9898/\u7B80\u4ECB\uFF08\u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u4E2D\u914D\u7F6E\uFF1B\u5B50\u6587\u4EF6\u5939\u8BF7\u8FDB\u5165\u540E\u9010\u5C42\u522E\u524A\uFF09");
+    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
+    btn.setAttribute("data-fnos-ui", "1");
+    btn.addEventListener("mouseenter", () => {
+      btn.style.transform = "translateY(-1px)";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.transform = "";
+    });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void runFolderScraper(btn);
+    });
+    return btn;
+  }
+  function ensureFolderScraperButton() {
+    if (!folderGuid() || !S.customScraperEnabled) {
+      removeFolderScraperButton();
+      return;
+    }
+    const existing = document.getElementById(FOLDER_BTN_ID);
+    if (existing && existing.isConnected) return;
+    document.body.appendChild(makeBtn3());
+    dlog("[folderScraper] \u6309\u94AE\u5DF2\u6302\u8F7D " + location.pathname);
+  }
+  function removeFolderScraperButton() {
+    const b = document.getElementById(FOLDER_BTN_ID);
+    if (b && b.parentNode) b.parentNode.removeChild(b);
+  }
+  function scheduleFolderScraperButton() {
+    ensureFolderScraperButton();
+  }
+  function bootstrapFromSettings2() {
+    try {
+      ipcRenderer.invoke("settings:get").then((s) => {
+        if (!s || typeof s !== "object") return;
+        S.customScraperEnabled = s.customScraperEnabled === true;
+        S.customScraperUrl = String(s.customScraperUrl || "");
+        scheduleFolderScraperButton();
+      }).catch(() => {
+      });
+    } catch {
+    }
+  }
+  bootstrapFromSettings2();
+
   // src/preload/plugins/embyWall/carousel/bootCover.ts
   var STYLE_ID5 = "fntv-boot-style";
   var BAR_ID = "fntv-boot-bar";
@@ -17236,7 +17569,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyScraper.style.cssText = "padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;";
       const csDesc = document.createElement("div");
       csDesc.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;";
-      csDesc.textContent = t("\u628A\u89C6\u9891\u6807\u9898/\u5B63\u53F7\u53D1\u7ED9\u4F60\u7684\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u8FD4\u56DE\u7684\u5206\u96C6\u6807\u9898\u4E0E\u7B80\u4ECB\u7ECF\u98DE\u725B\u5B98\u65B9\u63A5\u53E3\u56DE\u586B\u5143\u6570\u636E\uFF08\u4E0D\u4FEE\u6539\u4EFB\u4F55\u7CFB\u7EDF\u6587\u4EF6\uFF09\u3002\u670D\u52A1\u534F\u8BAE\uFF1APOST JSON {title, season, tmdbId, episodes}\uFF0C\u54CD\u5E94 {episodes:[{index,title,overview}]}\u3002\u5F00\u542F\u540E\u5728\u5B63\u9875\u300C\u9009\u96C6\u300D\u6807\u9898\u65C1\u51FA\u73B0\u300C\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A\u300D\u6309\u94AE\u3002");
+      csDesc.textContent = t('\u628A\u89C6\u9891\u6807\u9898/\u5B63\u53F7\u53D1\u7ED9\u4F60\u7684\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u8FD4\u56DE\u7684\u5206\u96C6\u6807\u9898\u4E0E\u7B80\u4ECB\u7ECF\u98DE\u725B\u5B98\u65B9\u63A5\u53E3\u56DE\u586B\u5143\u6570\u636E\uFF08\u4E0D\u4FEE\u6539\u4EFB\u4F55\u7CFB\u7EDF\u6587\u4EF6\uFF09\u3002\u670D\u52A1\u534F\u8BAE\uFF1A\u5B63\u9875 POST {title, season, tmdbId, episodes}\uFF0C\u54CD\u5E94 {episodes:[{index,title,overview}]}\uFF1B\u6587\u4EF6\u5939 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}\uFF08name=\u6587\u4EF6\u540D\uFF0C\u670D\u52A1\u6309 name/index \u5339\u914D\uFF09\uFF0C\u54CD\u5E94 {items|episodes:[{index|name,title,overview}]}\u3002\u5F00\u542F\u540E\u5728\u5B63\u9875\u300C\u9009\u96C6\u300D\u6807\u9898\u65C1\u51FA\u73B0\u300C\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A\u300D\u6309\u94AE\uFF0C\u4E2A\u4EBA\u89C6\u9891\u6587\u4EF6\u5939\u9875\uFF08/v/folder/\u2026\uFF09\u51FA\u73B0\u300C\u27F3 \u6587\u4EF6\u5939\u522E\u524A\u300D\u6D6E\u52A8\u6309\u94AE\u3002');
       secBodyScraper.appendChild(csDesc);
       const csToggleRow = document.createElement("label");
       csToggleRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;";
@@ -19207,6 +19540,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleEpBackfill();
         scheduleCustomScraperButton();
         scheduleJavButton();
+        scheduleFolderScraperButton();
       };
       history.replaceState = function(...a) {
         const prevPath = location.pathname;
@@ -19227,6 +19561,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleEpBackfill();
         scheduleCustomScraperButton();
         scheduleJavButton();
+        scheduleFolderScraperButton();
       };
       window.addEventListener("popstate", () => {
         logNav("popstate");
@@ -19240,9 +19575,12 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleEpBackfill();
         scheduleCustomScraperButton();
         scheduleJavButton();
+        scheduleFolderScraperButton();
       });
       window.addEventListener("hashchange", () => logNav("hashchange"));
       setTimeout(hideStaleViews, 1500);
+      scheduleFolderScraperButton();
+      [600, 1500, 3e3].forEach((ms) => setTimeout(() => scheduleFolderScraperButton(), ms));
     } catch (e) {
       log7("NAV hook err", String(e).substring(0, 60));
     }
@@ -19252,6 +19590,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       scheduleEpBackfill();
       scheduleCustomScraperButton();
       scheduleJavButton();
+      scheduleFolderScraperButton();
       [600, 1500, 3e3].forEach((ms) => setTimeout(() => {
         backfillDetailLogo();
         scheduleEpBackfill();
