@@ -312,9 +312,10 @@ function makeBtn(): HTMLButtonElement {
   return btn;
 }
 
-/** 幂等挂载：非文件夹页 / 未启用自开服务 → 摘除。 */
+/** 幂等挂载：非文件夹页 → 摘除。按钮在文件夹页**常显**（可发现性优先）：
+ *  未启用/未配置自建服务时点击给出「⚠ 未配置」指引（runFolderScraper 内），不会误写任何数据。 */
 export function ensureFolderScraperButton(): void {
-  if (!folderGuid() || !S.customScraperEnabled) { removeFolderScraperButton(); return; }
+  if (!folderGuid()) { removeFolderScraperButton(); return; }
   const existing = document.getElementById(FOLDER_BTN_ID);
   if (existing && existing.isConnected) return;
   document.body.appendChild(makeBtn());
