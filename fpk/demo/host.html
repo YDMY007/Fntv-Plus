@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="TJYncUD5Cazxc16eQB7ro9">
+<head data-page-node-id="NdaHO1qFGHIgWWlYJtLWtL">
+  <meta charset="UTF-8" data-page-node-id="UNOPJRtIHEFSfAcvjEcODd" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="gvGw7BdE01jRdjHUIdVI6C" />
+  <title>Fntv-Plus 网页端 · 注入宿主测试页</title>
+  <style>
+    body { margin: 0; background: #0b0d12; color: #f3f5f8; font: 14px/1.6 system-ui, sans-serif; }
+    .bar { position: sticky; top: 0; padding: 10px 16px; background: rgba(0,0,0,.6); backdrop-filter: blur(10px); display: flex; gap: 12px; align-items: center; z-index: 10; }
+    .bar h1 { font-size: 15px; margin: 0; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #2a2f3a; }
+    .badge.ok { background: #1f6f43; } .badge.err { background: #8a2b2b; }
+    #log { font: 12px/1.5 ui-monospace, monospace; padding: 10px 16px; white-space: pre-wrap; color: #aab2c0; max-height: 40vh; overflow: auto; }
+    /* 极简「影视首页」骨架：仅用于让被复用的 embyWall 有可挂接的容器，便于本地验证注入是否加载。 */
+    #homePage { padding: 16px; }
+    .home-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 12px; }
+    .card { aspect-ratio: 2/3; border-radius: 10px; background: linear-gradient(135deg,#243, #426); }
+  </style>
+</head>
+<body data-page-node-id="pe2bEyBM92CxMsbn4UAGCA">
+  <div class="bar" data-page-node-id="nBkzCLt7DBJSibBCNwtdcN">
+    <h1 data-page-node-id="sI7U8ltxyk8NLWVd4V2VEV">Fntv-Plus 网页端增强</h1>
+    <span id="status" class="badge" data-page-node-id="XBEQd3UgNBo1QjnsBzvpAG">加载中…</span>
+    <span class="badge" id="boot" data-page-node-id="iNHeXgdpUtzn4kpE2YRxAn">boot: ?</span>
+  </div>
+  <div id="log" data-page-node-id="58m8arZOusXt6pg3O2QHle">（控制台输出将显示在这里）</div>
+
+  <!-- 仿飞牛侧边栏：汉堡键 + 抽屉（fixed.inset-0.lg:!hidden），用于回归「侧栏设置按钮 → 设置面板」链路 -->
+  <button class="lg:!hidden p-2" id="fake-burger" data-page-node-id="fakeburger0001">☰</button>
+  <div class="fixed inset-0 lg:!hidden" id="fake-drawer" data-page-node-id="fakedrawer0001" style="display:none">
+    <div class="fake-sidebar-panel" data-page-node-id="fakesidebar001" style="width:240px;height:100%;background:#ffffff">
+      <nav data-page-node-id="fakenav0000001"><a href="/v/">首页</a></nav>
+    </div>
+    <div class="absolute inset-0" data-page-node-id="fakemask00001" style="background:rgba(0,0,0,.35)"></div>
+  </div>
+
+  <!-- 仿影视首页骨架（测试用，非真实 UI） -->
+  <main id="homePage" data-page-node-id="nzr2X9iRVF1NrQuZJqfljo"><div class="home-container" data-page-node-id="sm0QwL9P9Zl7HmF2Lq9fUg">
+    <div class="card" data-page-node-id="PZ2tJeGtekhNTXPzUBjMFz"></div><div class="card" data-page-node-id="ZCFR5xHMBfFpuWUJeIxBFp"></div><div class="card" data-page-node-id="Lbia3DmCDnMUGDoDXWexgo"></div><div class="card" data-page-node-id="6dz5C9QhYEWeBMQOScP4HB"></div>
+    <div class="card" data-page-node-id="o6hQw7Eo8CcASYkN7jYyE4"></div><div class="card" data-page-node-id="Lh1KtEGsYCfE1ILtnUkBTH"></div><div class="card" data-page-node-id="bgcDEOv2sMuFbV9RERKlqt"></div><div class="card" data-page-node-id="Yu3irG5cdSzgGNOU1gNEnQ"></div>
+  </div></main>
+
+  <script>
+    const status = document.getElementById('status');
+    const boot = document.getElementById('boot');
+    const logEl = document.getElementById('log');
+    // [自激防护] 早期实现是 log() 直接 += 到 #log.textContent —— 而 payload 内部也有
+    //   MutationObserver：日志写 DOM → 触发 observer → observer 回调又打日志 → 无限自激，
+    //   主线程被微任务饿死（DOMContentLoaded 都派发不了，页面完全无响应）。
+    //   这里改成「缓冲 + rAF 批量 flush」：log() 本身不再触碰 DOM，打破自激链条。
+    let logBuf = [];
+    let logFlushScheduled = false;
+    function flushLog() {
+      logFlushScheduled = false;
+      if (!logBuf.length) return;
+      const chunk = logBuf.join('');
+      logBuf = [];
+      if (logEl.textContent.length > 20000) logEl.textContent = logEl.textContent.slice(-8000);
+      logEl.appendChild(document.createTextNode(chunk));
+    }
+    function log(...a) {
+      logBuf.push(a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ') + '\n');
+      if (!logFlushScheduled) { logFlushScheduled = true; requestAnimationFrame(flushLog); }
+    }
+    window.addEventListener('error', e => { status.textContent = '脚本错误'; status.className = 'badge err'; log('❌', e.message); });
+    window.addEventListener('unhandledrejection', e => { log('❌ promise', e.reason); });
+    const orig = console.error.bind(console); console.error = (...a) => { log('[err]', ...a); orig(...a); };
+    const oLog = console.log.bind(console); console.log = (...a) => { log(...a); oLog(...a); };
+  </script>
+  <!-- 注入打包后的 payload（复用自 Fntv-Plus 的 embyWall） -->
+  <script src="/dist/fntv-plus.user.js"></script>
+  <script>
+    setTimeout(() => {
+      boot.textContent = 'boot: ' + (typeof window.__FNTV_BOOT__ === 'function' ? 'ready ✅' : 'missing');
+      if (typeof window.__FNTV_BOOT__ === 'function') { status.textContent = 'payload 已加载'; status.className = 'badge ok'; }
+      else { status.textContent = 'payload 未暴露 boot'; status.className = 'badge err'; }
+    }, 1500);
+  </script>
+</body>
+</html>

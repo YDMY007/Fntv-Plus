@@ -1,0 +1,3 @@
+#!/bin/bash
+# 升级后置钩子：新二进制就位后由 appcenter 自动重启服务；config.json 向后兼容，无需迁移。
+exit 0

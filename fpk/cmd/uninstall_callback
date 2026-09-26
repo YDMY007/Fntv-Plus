@@ -1,0 +1,21 @@
+#!/bin/bash
+# 卸载后回调：按卸载向导的用户选择处理数据。
+#   向导（wizard/uninstall）字段 wizard_delete_data：
+#     "no"  = 保留数据（默认）：不删任何数据，重装同名应用后设置/缓存原样恢复
+#     "yes" = 删除数据：清空本应用数据目录（$TRIM_PKGVAR = /vol[x]/@appdata/fntvplus）
+# 防误删：仅当 TRIM_PKGVAR 以 @appdata/fntvplus 结尾时才执行删除。
+# 动作与路径会输出到 fnOS 安装日志（应用中心安装/卸载详情可见），便于核对。
+echo "[fntvplus] 卸载数据处理: wizard_delete_data=${wizard_delete_data:-未设置(按保留处理)}"
+echo "[fntvplus] 数据目录: ${TRIM_PKGVAR:-未知}"
+if [ "$wizard_delete_data" = "yes" ]; then
+    if [ -n "$TRIM_PKGVAR" ] && case "$TRIM_PKGVAR" in *@appdata/fntvplus) true;; *) false;; esac; then
+        echo "[fntvplus] 用户选择删除数据 -> 清空 $TRIM_PKGVAR"
+        rm -rf "$TRIM_PKGVAR"
+        echo "[fntvplus] 数据已删除"
+    else
+        echo "[fntvplus] 数据目录异常（$TRIM_PKGVAR），跳过删除以策安全"
+    fi
+else
+    echo "[fntvplus] 用户选择保留数据 -> 未做任何删除（重装 Fntv-Plus 后设置与缓存自动恢复）"
+fi
+exit 0

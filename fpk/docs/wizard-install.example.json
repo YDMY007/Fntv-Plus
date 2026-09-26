@@ -1,0 +1,12 @@
+{
+  "_note": "飞牛安装向导配置（install wizard）。字段语义以官方文档为准，打包前需按实际 fnOS 版本校核。这里仅声明一个增强总开关，默认开启；真实配置由后端 config.json 控制，向导值可作为初始默认值。",
+  "title": "影视 Plus 安装",
+  "items": [
+    {
+      "key": "enhancement_enabled",
+      "type": "switch",
+      "label": "启用网页端增强（海报墙 / 轮播 / 沉浸式美化）",
+      "default": true
+    }
+  ]
+}

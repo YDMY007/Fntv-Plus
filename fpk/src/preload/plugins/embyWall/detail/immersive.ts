@@ -1,0 +1,175 @@
+// embyWall/detail/immersive.ts — 详情页美化编排层（lc-980 重写）
+// ─────────────────────────────────────────────────────────────────────────────
+// 职责：精准三闸触发 + 一次性限域 observer，把「套美化」收敛成 O(1) per 导航的一次成型动作。
+//
+// 与旧版(lc-979 前)的本质区别——旧版为何卡顿/错乱/两次点击：
+//   ✗ 旧：_detailObs 每 200ms 全文档 querySelectorAll + getComputedStyle 扫描 + dumpSeasonDOMToFile 写文件
+//        + setInterval(600ms) 演员重排 + layoutSeasonTwoPane 搬运 React 节点 + 运行时亮度采样 → 与 SPA 重渲染对打 → 无限重排环路。
+//   ✓ 新：三闸(URL && 活跃视图 && 视图内 hero)一次判定；命中即 injectBeautifyStyle + body.class + injectBackdrop
+//        → 布局/玻璃/悬停全交给 CSS(零节点搬运)；observer rAF 去抖、命中即 disconnect、硬上限 4s 自断；
+//        无写文件、无 setInterval、无 getComputedStyle 风暴、无 DOM 搬运。
+//
+// 判定锚点(实测见 memory/fnos-detail-dom.md)：
+//   活跃视图 .trim-ui__cache-outlet--exclude(末尾可见)；hero 由 glass.ts 的 DETAIL_HERO_SEL 定义
+//   —— [lc-993] 该选择器已扩容到三种详情页 hero(Season 二级页 / Movie 一级页 / Series 一级页)，
+//   本编排层**代码零改动**即自动覆盖一级页：三闸、observer、teardown 全是围绕这个常量写的。
+//   扩容前 Series 一级页(/v/tv|movie/<32hex>)结构性永不匹配 → 美化从 lc-980 起一次都没套用过。
+// ─────────────────────────────────────────────────────────────────────────────
+import { S } from '../state';
+import { dlog } from '../log';
+import { isDetailPage, findActiveDetailView, findDetailHero } from './glass';
+import { injectBeautifyStyle } from './beautifyStyle';
+import { injectBackdrop, removeBackdrop, hideInstantLayer, clearInstantLayer, showInstantLayer, cacheHeroImages } from './backdrop';
+import { scheduleTmdbCard, removeTmdbCard } from './tmdbCard';
+import { scheduleEpResolution, removeEpResolution } from './epResolution';
+import { scheduleVirtualBandFix, removeVirtualBandFix } from './virtualBand';
+import { scheduleSeasonNav, removeSeasonNav } from './seasonNav';
+import { applyHeroTint, clearHeroTint } from './heroTint';
+import { releaseNavVeil } from './veil';
+
+/** observer 硬上限生命周期(ms)：超时强制断开，绝不变永久轮询(旧版病根)。 */
+const OBS_MAX_LIFE = 4000;
+/** hero 图可能懒加载：settle 后一次性(非轮询)延迟刷新底图，捕获迟到的剧照。 */
+const BACKDROP_REFRESH_DELAY = 700;
+
+let _obs: MutationObserver | null = null;
+let _rafId = 0;
+let _obsBornAt = 0;
+let _settledHref: string | null = null;
+let _backdropRefreshTimer = 0;
+/** [lc-1086] body 未解析时把本次 apply 推迟到 DOMContentLoaded 重跑，防重复挂监听。 */
+let _deferredApply = false;
+
+function _disconnectObs(): void {
+  if (_obs) { _obs.disconnect(); _obs = null; }
+  if (_rafId) { cancelAnimationFrame(_rafId); _rafId = 0; }
+}
+
+/** 套用美化（三闸已过、hero 已就绪）：一次成型，之后全靠 CSS，无任何 per-tick 工作。 */
+function _apply(view: HTMLElement, hero: HTMLElement): void {
+  injectBeautifyStyle();                 // 幂等，全程只一份 <style>
+  document.body.classList.add('fnos-beautify');
+  injectBackdrop(hero);                  // 复用 hero 已加载剧照，无新网络请求
+  applyHeroTint(hero);                   // 从同一张剧照取主色 → 顶栏玻璃条 + hero 遮罩的同色系底色
+  hideInstantLayer();                    // 内容就绪 → 淡出瞬间加载层
+  releaseNavVeil();                      // [lc-1017] 美化已就绪 → 释放持罩轻纱，统一淡出揭示(消除"一帧换装"闪动)
+  cacheHeroImages(location.href, hero);  // 存海报/剧照供下次进同页秒出
+  scheduleTmdbCard(view);                // 延后异步注入信息卡（非阻塞，失败静默）
+  scheduleEpResolution();                // 清晰度角标 → 标题后胶囊（内部有上限重试链，等选集卡到达）
+  scheduleVirtualBandFix();              // [v1.10.2] 虚拟窗口全量渲染（原生横滑带 virtualList 只渲染首窗 ~11 张，
+                                         //   竖排后 scrollLeft 恒 0 窗口冻结 → 选集/演员被截断，用户报障）
+  scheduleSeasonNav();                   // [v1.10.3] 一级页季选行 >4 季溢出不可见 → 左右切换圆钮（内部有界重试链）
+  _settledHref = location.href;
+  S.detailGlassInited = true;
+  _disconnectObs();                      // 一次性：命中即断开
+
+  // hero 剧照可能晚于 settle 才解码/懒加载 → 一次性延迟刷新底图与 tint(非轮询)
+  clearTimeout(_backdropRefreshTimer);
+  _backdropRefreshTimer = window.setTimeout(() => {
+    if (_settledHref !== location.href) return;
+    const v = findActiveDetailView();
+    const h = v && findDetailHero(v);
+    if (h) { injectBackdrop(h); applyHeroTint(h); }
+  }, BACKDROP_REFRESH_DELAY);
+
+  dlog('beautify: 套用完成 href=' + location.pathname);
+}
+
+/** 三闸判定：①URL 详情 ②活跃视图存在 ③视图内 hero 就绪。全过→套用并返回 true。 */
+function _trySettle(): boolean {
+  if (!isDetailPage()) return false;
+  const view = findActiveDetailView();
+  if (!view) return false;
+  const hero = findDetailHero(view);
+  if (!hero) return false;
+  _apply(view, hero);
+  return true;
+}
+
+/** 换 href 时的轻量复位：保留 body.class + <style>(避免原生闪回)，只清卡/observer，等新页重套。
+ *  [lc-1017] **不再移除底图层**：详情↔详情(一级页→二级页)时保留旧剧照，等新 hero 就绪后
+ *  由 backdrop 的双层交叉淡入接管——旧版在这里瞬间 removeBackdrop，新底图要等 hero 渲染才回来，
+ *  中间的真空期整页透出桌面底 = 用户报的「打开二级详情页突然闪一下」。
+ *  [lc-1017] 顺带 clearInstantLayer()：快速连续切集时清掉上一页还挂着的加载层，
+ *  避免新页 showInstantLayer 早退后残留上一页的旧海报。 */
+function _softReset(): void {
+  _disconnectObs();
+  clearTimeout(_backdropRefreshTimer);
+  _settledHref = null;
+  clearInstantLayer();
+  clearHeroTint();
+  removeTmdbCard();
+  removeEpResolution();
+  removeVirtualBandFix();
+  removeSeasonNav();
+}
+
+/** arm 一次性限域 observer：只等 hero 出现，命中即套用+disconnect；硬上限 OBS_MAX_LIFE 后自断。 */
+function _armObserver(): void {
+  if (_obs) return; // 已 arm，不重复
+  _obsBornAt = Date.now();
+  const check = (): void => {
+    _rafId = 0;
+    if (_trySettle()) return;                       // 命中 → _apply 内已 disconnect
+    if (Date.now() - _obsBornAt > OBS_MAX_LIFE) {   // 硬上限：停止，绝不变永久轮询
+      dlog('beautify: observer 超 ' + OBS_MAX_LIFE + 'ms 未见 hero, 自断(下次导航重试)');
+      _disconnectObs();
+    }
+  };
+  _obs = new MutationObserver(() => {
+    if (_rafId) return;                             // rAF 去抖：一帧内多次突变只查一次
+    _rafId = requestAnimationFrame(check);
+  });
+  // 此刻活跃详情视图可能尚未渲染, 无法定位子树 → 观察 body, 但命中即断、有硬上限, 与旧版永久全文档轮询本质不同
+  // (body 一定存在: 唯一调用方 applyDetailBeautify 已在入口挡住 body 未解析的时机)
+  _obs.observe(document.body, { childList: true, subtree: true });
+}
+
+/** 统一入口（导航 hook / 设置开关 ON 调用）：
+ *  非详情页或关闭开关 → teardown；已在当前 href 套好 → 幂等早退；
+ *  hero 已渲染 → 秒套(不铺加载层, 无闪)；hero 未就绪 → 铺瞬间加载层盖白屏 + arm 一次性 observer 等它。 */
+export function applyDetailBeautify(): void {
+  // [lc-1086] preload 可能早于 <body> 解析执行(入口 embyWall.ts 的初始 apply、modals/patch.ts 的 .then 补调
+  //   都可能落在这个窗口)。此时整条链路无处下手: 本文件的 document.body.classList、heroTint 的
+  //   document.body.style 会直接抛 TypeError, 而且抛在 promise 里无人接(用户 v3.6.0 实测日志:
+  //   Uncaught (in promise) TypeError: Cannot read properties of null (reading 'classList') @ immersive.js:152),
+  //   后续清理被整体跳过。body 都还没有 → 我们注入的任何层都不可能存在, 推迟到 DOMContentLoaded 后重跑一次即可。
+  if (!document.body) {
+    if (_deferredApply) return;
+    _deferredApply = true;
+    const rerun = (): void => { _deferredApply = false; applyDetailBeautify(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rerun, { once: true });
+    else window.setTimeout(rerun, 0);
+    return;
+  }
+  if (S.detailBoxless || !isDetailPage()) { teardownDetailBeautify(); return; }
+  if (_settledHref === location.href && document.body.classList.contains('fnos-beautify')) {
+    releaseNavVeil(); // [lc-1017] 同 href 重复导航：美化已在位，直接放行持罩(否则干等 900ms 兜底)
+    return; // 幂等
+  }
+  if (_settledHref !== location.href) _softReset();
+  if (_trySettle()) return;               // hero 已在 → 立即套用(内部已释放 veil)，无需加载层
+  showInstantLayer(location.href);        // hero 未就绪 → 铺加载层盖住 fnOS 原生白屏
+  _armObserver();                         // 等 hero，命中即套用 + 淡出加载层
+}
+
+/** 彻底清理（离开详情页 / 关闭开关 / 切到非详情）：O(1)，恢复 fnOS 原生外观。 */
+export function teardownDetailBeautify(): void {
+  _disconnectObs();
+  clearTimeout(_backdropRefreshTimer);
+  _settledHref = null;
+  S.detailGlassInited = false;
+  // [lc-1086] body 尚未解析 → 底图/tint/信息卡/持罩一个都不存在, 没有 DOM 可清, 复位完自身状态即可返回。
+  //   旧版下一行就抛 TypeError, 连带 removeBackdrop/clearHeroTint/removeTmdbCard/clearInstantLayer/
+  //   releaseNavVeil 全部跳过(lc-1017 的持罩会残留在页面上)。
+  if (!document.body) return;
+  document.body.classList.remove('fnos-beautify');
+  removeBackdrop();
+  clearHeroTint();
+  removeTmdbCard();
+  removeEpResolution();
+  removeVirtualBandFix();
+  removeSeasonNav();
+  clearInstantLayer();
+  releaseNavVeil(); // [lc-1017] 无论从哪条路进来(含退回首页/关闭开关)，持罩都必须被释放
+}

@@ -1,0 +1,45 @@
+#!/bin/bash
+# 安装后回调：幂等初始化运行时目录。
+# payload 已编译进 Go 单二进制（//go:embed），无需额外拷入；
+# 此处仅确保 var/etc 目录存在，真正的 config.json 由后端首次运行自动生成。
+
+mkdir -p "$TRIM_PKGVAR" "$TRIM_PKGETC"
+touch "$TRIM_PKGVAR/.installed"
+
+# Windows fnpack 打包的权限位全 0666，必须补可执行位，否则 cmd/main 的 nohup 会 Permission denied。
+chmod +x "$TRIM_APPDEST/server/fntvplus" 2>/dev/null || true
+
+# 若发布包附带可覆盖用的 payload，则放到 var 目录（后端目前以内置嵌入为准，此处为扩展预留）。
+# 注：app/ 目录内容解包后直接落在 TRIM_APPDEST 根，故 app/server/payload/... → $TRIM_APPDEST/server/payload/...
+if [ -f "$TRIM_APPDEST/server/payload/fntv-plus.user.js" ]; then
+  mkdir -p "$TRIM_PKGVAR/payload"
+  cp "$TRIM_APPDEST/server/payload/fntv-plus.user.js" "$TRIM_PKGVAR/payload/fntv-plus.user.js"
+fi
+
+# ── 安装向导（wizard/install）端口配置落盘 ──
+# fnOS 把向导字段以环境变量注入本脚本：wizard_service_port / wizard_upstream_port。
+# 生命周期脚本每次都是新 shell，环境变量不跨调用保留 → 落盘到 $TRIM_PKGETC/wizard.env，
+# 由 cmd/main 每次 start 时 source。仅首次写入（升级/重装不覆盖用户已改的配置；
+# 升级向导若重新收集，fnOS 会再次注入并触发本脚本，字段名相同即自然更新）。
+log="$(dirname "$TRIM_PKGVAR")/wizard_install.log"
+[ -d "$TRIM_PKGVAR" ] && log="$TRIM_PKGVAR/wizard_install.log"
+{
+  echo "==== install_callback wizard vars ===="
+  echo "wizard_service_port=${wizard_service_port:-<unset>}"
+  echo "wizard_upstream_port=${wizard_upstream_port:-<unset>}"
+} >> "$log" 2>&1
+
+if [ -n "$wizard_service_port" ] || [ -n "$wizard_upstream_port" ]; then
+  {
+    echo "# Fntv-Plus 安装向导端口配置（由 wizard/install 生成，供 cmd/main 启动读取）"
+    echo "# 手动改动本文件后重启应用即可生效。"
+    if [ -n "$wizard_service_port" ]; then
+      echo "FNTV_SERVICE_PORT=$wizard_service_port"
+    fi
+    if [ -n "$wizard_upstream_port" ]; then
+      echo "FNTV_UPSTREAM_PORT=$wizard_upstream_port"
+    fi
+  } > "$TRIM_PKGETC/wizard.env"
+fi
+
+exit 0

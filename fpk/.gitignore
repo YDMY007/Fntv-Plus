@@ -1,0 +1,34 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Go 后端构建产物（由 scripts/build-fpk.sh 生成，不入库；源码在 src/go/）
+server/
+src/server/
+app/server/
+
+# 一键打包工具产物（打包器源码在 tools/buildfpk/ 随库管理；fnpack.exe 为官方工具本地副本）
+build-fpk.exe
+tools/*
+!tools/buildfpk/
+tools/buildfpk/*.exe
+*.fpk
+
+# 本地测试残留
+src/go/*.exe
+zzz_var/
+src/zzz_*/
+
+# 本地环境文件（含用户名/内网细节，不入公开仓库）
+scripts/bisect-plugins.mjs
+scripts/heartbeat-probe.mjs
+scripts/mo-dump.mjs
+scripts/pair-test.mjs
+scripts/smoke.mjs
+scripts/stack-probe.mjs
+scripts/test-panel.mjs
+本地commit/
+docs/初稿v1-已由完整实施方案取代.md
+docs/完整实施方案.md
+.workbuddy/

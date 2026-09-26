@@ -1,0 +1,30 @@
+
+import { installDiag } from './preload/web/diag';
+import { runHooks, HookType } from './preload/core/hooks';
+installDiag();
+import './preload/plugins/a11y';
+import './preload/plugins/animeLib';
+import './preload/plugins/autoplayNext';
+import './preload/plugins/customLogo';
+import './preload/plugins/danmakuHeat';
+import './preload/plugins/danmakuWeb';
+import './preload/plugins/embyWall';
+import './preload/plugins/gamepad';
+import './preload/plugins/gamepadFocus';
+import './preload/plugins/glassUI';
+import './preload/plugins/hotUpdates';
+import './preload/plugins/listLayout';
+import './preload/plugins/pageAnim';
+import './preload/plugins/personWorks';
+import './preload/plugins/playButton';
+import './preload/plugins/playChoice';
+import './preload/plugins/playMaskButton';
+import './preload/plugins/playMemory';
+import './preload/plugins/previewThumb';
+import './preload/plugins/skipInject';
+import './preload/plugins/watchedSync';
+import './preload/plugins/watchHistory';
+function boot() { try { runHooks(HookType.OnReady); } catch (e) { console.error('boot failed', e); } }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
+window.__FNTV_BOOT_DONE = true;

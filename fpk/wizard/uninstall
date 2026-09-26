@@ -1,0 +1,29 @@
+[
+    {
+        "stepTitle": "卸载 Fntv-Plus",
+        "items": [
+            {
+                "type": "radio",
+                "field": "wizard_delete_data",
+                "label": "如何处理本应用的数据？数据包含：界面设置、首页 Logo 选择、B站登录态、弹幕缓存（自建源 + B站）、TMDB 缓存。卸载后影视页面将不再有界面增强。",
+                "initValue": "no",
+                "options": [
+                    {
+                        "label": "保留数据 —— 重装 Fntv-Plus 时自动恢复全部设置与缓存",
+                        "value": "no"
+                    },
+                    {
+                        "label": "删除数据 —— 彻底清空以上全部内容，不可恢复",
+                        "value": "yes"
+                    }
+                ],
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请选择如何处理应用数据"
+                    }
+                ]
+            }
+        ]
+    }
+]

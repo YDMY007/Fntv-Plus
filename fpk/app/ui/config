@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "fntvplus.Application": {
+      "title": "Fntv-Plus",
+      "icon": "images/fntv_v2_{0}.png",
+      "type": "url",
+      "protocol": "http",
+      "port": "22350",
+      "url": "/v/",
+      "allUsers": true,
+      "control": { "accessPerm": "editable" }
+    }
+  }
+}
