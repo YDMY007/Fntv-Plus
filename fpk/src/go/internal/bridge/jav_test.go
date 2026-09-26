@@ -16,19 +16,19 @@ import (
 
 func TestJavExtractCode(t *testing.T) {
 	cases := map[string]string{
-		"ABC-123":                     "ABC-123",
-		"ABC123":                      "ABC-123",
-		"abc-123":                     "ABC-123", // 大小写归一
+		"ABC-123":                      "ABC-123",
+		"ABC123":                       "ABC-123",
+		"abc-123":                      "ABC-123", // 大小写归一
 		"[JAV] SSIS-406 4K uncensored": "SSIS-406",
-		"FC2-PPV-1234567":             "FC2-PPV-1234567",
-		"FC2 1234567":                 "FC2-1234567",
-		"MIDV-002.1080p":              "MIDV-002",
-		"庆余年 2019":                    "",       // 普通中文影视无番号
-		"Movie HDR10 2160p":           "",       // 技术词不算番号
-		"Video H265.mkv":              "",       // 单字母 H 不满足 2-6 位
-		"20230815":                    "",       // 纯数字
-		"CD1 [1985]":                  "",       // CD 黑名单
-		"SSIS-406-2":                  "SSIS-406", // 多分段只取主体（-2 非独立番号形态则不误吞）
+		"FC2-PPV-1234567":              "FC2-PPV-1234567",
+		"FC2 1234567":                  "FC2-1234567",
+		"MIDV-002.1080p":               "MIDV-002",
+		"庆余年 2019":                     "",         // 普通中文影视无番号
+		"Movie HDR10 2160p":            "",         // 技术词不算番号
+		"Video H265.mkv":               "",         // 单字母 H 不满足 2-6 位
+		"20230815":                     "",         // 纯数字
+		"CD1 [1985]":                   "",         // CD 黑名单
+		"SSIS-406-2":                   "SSIS-406", // 多分段只取主体（-2 非独立番号形态则不误吞）
 	}
 	for in, want := range cases {
 		if got := javExtractCode(in); got != want {

@@ -1,12 +1,14 @@
 // Package bridge —— fanart.go：Fanart.tv 官方 API v3 客户端（扩展数据源 ①）。
 // 官方文档（webservice.fanart.tv，2026-09 核实）：
-//   GET https://webservice.fanart.tv/v3/movies/{tmdb_id 或 imdb_id}?api_key={项目key}[&client_key={个人key}]
-//   GET https://webservice.fanart.tv/v3/tv/{tvdb_id}?...
-//   - 电影分类接受 TMDB 数字 ID / IMDb tt ID；**剧集分类只认 TVDB ID**（无 TMDB 直查）→
-//     前端只有 tmdbId 时由本端经 TMDB /tv/{id}/external_ids 换算 tvdb_id（tmdbshow 同链）。
-//   - 响应按艺术类型分键，条目 {id,url,lang,likes}（v3.1 起加 added，v3.2 加宽高）：
-//     电影 logo = hdmovielogo + movielogo；剧集 logo = hdtvlogo + clearlogo。
-//   - 项目 key 免费（fanart.tv 注册应用），个人 client_key 可选（新图延迟 7 天→2 天）。
+//
+//	GET https://webservice.fanart.tv/v3/movies/{tmdb_id 或 imdb_id}?api_key={项目key}[&client_key={个人key}]
+//	GET https://webservice.fanart.tv/v3/tv/{tvdb_id}?...
+//	- 电影分类接受 TMDB 数字 ID / IMDb tt ID；**剧集分类只认 TVDB ID**（无 TMDB 直查）→
+//	  前端只有 tmdbId 时由本端经 TMDB /tv/{id}/external_ids 换算 tvdb_id（tmdbshow 同链）。
+//	- 响应按艺术类型分键，条目 {id,url,lang,likes}（v3.1 起加 added，v3.2 加宽高）：
+//	  电影 logo = hdmovielogo + movielogo；剧集 logo = hdtvlogo + clearlogo。
+//	- 项目 key 免费（fanart.tv 注册应用），个人 client_key 可选（新图延迟 7 天→2 天）。
+//
 // 图片本体在 assets.fanart.tv CDN，前端经 /bridge/tmdb/img 通用图片代理下载（bridge.go 放行该域）。
 package bridge
 
@@ -30,8 +32,10 @@ func (b *Bridge) fanartOn() bool {
 	return getSetting(b.cfg, "fanartEnabled") == "1"
 }
 
-func (b *Bridge) fanartAPIKey() string    { return strings.TrimSpace(getSetting(b.cfg, "fanartApiKey")) }
-func (b *Bridge) fanartClientKey() string { return strings.TrimSpace(getSetting(b.cfg, "fanartClientKey")) }
+func (b *Bridge) fanartAPIKey() string { return strings.TrimSpace(getSetting(b.cfg, "fanartApiKey")) }
+func (b *Bridge) fanartClientKey() string {
+	return strings.TrimSpace(getSetting(b.cfg, "fanartClientKey"))
+}
 
 // fanartLogo 条目归一化（url 直出 CDN 全链，lang 可空）。
 type fanartLogo struct {

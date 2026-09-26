@@ -219,10 +219,30 @@ interface DanmakuItem {
     text: string;
 }
 
+/** [v1.11.0] 单个弹幕源本次尝试的溯源明细（后端 meta.sources，按 自建源→弹弹play→B站 排序）。 */
+interface DanmakuSourceDetail {
+    key: string;             // danmu_api | dandanplay | bilibili
+    label: string;           // 展示名
+    enabled: boolean;        // 本次是否参与（开关关掉/未配置为 false）
+    used: boolean;           // 最终采用的是不是这个源
+    rawCount: number;        // 拉取原始条数
+    count: number;           // 屏蔽过滤后条数
+    blocked: number;         // 被屏蔽规则挡掉的条数
+    note?: string;           // 未采用/失败原因（人话）
+    matchedTitle?: string;   // 命中的条目名
+    episodeTitle?: string;   // 命中的分集名
+    episodeId?: number;      // 优选源集 id
+    bvid?: string;           // B站 视频 id
+    cid?: number;            // B站 弹幕库 id
+    sim?: number;            // 匹配相似度
+    credential?: string;     // 凭证/登录态
+    base?: string;           // 自建源服务地址（脱敏）
+}
+
 interface DanmakuMeta {
     searchTitle: string;
     matchedTitle: string;
-    source: string;          // 'bangumi' | 'video'
+    source: string;          // 'bangumi' | 'video' | '弹弹play' | '自建源(danmu_api)'
     bvid?: string | null;
     cid?: any;
     sim?: number | null;
@@ -233,6 +253,7 @@ interface DanmakuMeta {
     aggregatedFrom?: any;
     cookieStatus?: string;
     error?: string;
+    sources?: DanmakuSourceDetail[];
 }
 
 interface DanmakuStyle {
@@ -1592,6 +1613,14 @@ function render(): void {
 function sourceLabel(s: string): string {
     if (s === 'bangumi') return '番剧区（B站正版）';
     if (s === 'video') return '视频区（UP主搬运）';
+    // [v1.11.0] 三源明细的 key 形态（meta.sources[].key）
+    if (s === 'bilibili') return 'B站弹幕';
+    if (s === 'dandanplay') return '弹弹play';
+    if (s === 'danmu_api') return '自建弹幕接口（danmu_api）';
+    // 兼容后端下发的展示名（meta.source / sources[].label）
+    if (s === '弹弹play') return '弹弹play（多平台整合）';
+    if (s === '自建源(danmu_api)') return '自建弹幕接口（danmu_api）';
+    if (s === 'B站') return 'B站弹幕';
     return s || '未知';
 }
 
@@ -1813,24 +1842,27 @@ function renderDetailRows(): void {
         return;
     }
 
+    // [v1.11.0] 详情分两块：① 本次播放（搜的什么、最终用哪个源、共多少条）
+    //                      ② 三个弹幕源各自的匹配详情（自建源 → 弹弹play → B站，含未参与的原因）
+    // 字段按来源分流：BVID/CID/匹配相似度/登录状态都是 B站 链路专属，
+    // 优选源（自建 danmu_api / 弹弹play）命中时这些字段恒为空 → 只在对应源块里展示。
+    const srcName = String(meta.source || '');
+    const isPreferred = /^自建源/.test(srcName) || srcName === '弹弹play';
     const cookie = cookieStatusInfo(meta.cookieStatus || '');
+
+    // ① 本次播放概览
     const rows: [string, string][] = [
         ['搜索番名', meta.searchTitle || '—'],
-        ['来源区域', sourceLabel(meta.source)],
+        ['最终来源', sourceLabel(meta.source)],
         ['实际匹配', meta.matchedTitle || '—'],
         ['集数', meta.isMovie ? '电影（按番名搜最优集）' : `第 ${meta.ep} 集`],
         ['目标季数', meta.season > 0 ? `第 ${meta.season} 季（优先精确匹配）` : '未指定（仅按番名+集数）'],
-        ['匹配相似度', meta.sim != null ? (meta.sim * 100).toFixed(0) + '%' : '—'],
-        ['BVID', meta.bvid || '—'],
-        ['CID', meta.cid != null ? String(meta.cid) : '—'],
         ['弹幕条数', String(meta.count)],
-        ['聚合', meta.aggregatedFrom ? `${meta.aggregatedFrom} 个候选聚合` : '单源'],
-        ['登录状态', cookie.text],
     ];
     if (meta.error) rows.push(['备注', meta.error]);
 
-    // 非有效登录态：醒目红色横幅提示（一眼可见，对应 lc-336 的 Cookie 过期检查）
-    if (cookie.warn) {
+    // 非有效登录态且最终用的是 B站：醒目红色横幅提示（优选源与 Cookie 无关，不误报）
+    if (!isPreferred && cookie.warn) {
         const banner = document.createElement('div');
         banner.textContent = '⚠️ ' + cookie.detail;
         Object.assign(banner.style, {
@@ -1841,31 +1873,110 @@ function renderDetailRows(): void {
         body.appendChild(banner);
     }
 
-    const dl = document.createElement('dl');
-    dl.className = 'fntv-dm-rows';
-    for (const [k, v] of rows) {
-        const row = document.createElement('div');
-        row.className = 'fntv-dm-row';
-        const kEl = document.createElement('dt');
-        kEl.textContent = k;
-        const vEl = document.createElement('dd');
-        vEl.textContent = v;
-        if (k === '登录状态') {
-            vEl.style.color = cookie.warn ? '#ff6b6b' : '#5ad17a';
-            vEl.style.fontWeight = '600';
+    // 概览行渲染（sources 区块共用同一套 dl 样式）
+    const appendRows = (parent: HTMLElement, list: [string, string][], keyCol: boolean): void => {
+        const dl = document.createElement('dl');
+        dl.className = 'fntv-dm-rows';
+        for (const [k, v] of list) {
+            const row = document.createElement('div');
+            row.className = 'fntv-dm-row';
+            const kEl = document.createElement('dt');
+            kEl.textContent = k;
+            const vEl = document.createElement('dd');
+            vEl.textContent = v;
+            if (k === '登录状态') {
+                vEl.style.color = cookie.warn ? '#ff6b6b' : '#5ad17a';
+                vEl.style.fontWeight = '600';
+            }
+            if (keyCol && k === '状态') {
+                vEl.style.fontWeight = '600';
+            }
+            row.appendChild(kEl);
+            row.appendChild(vEl);
+            dl.appendChild(row);
         }
-        row.appendChild(kEl);
-        row.appendChild(vEl);
-        dl.appendChild(row);
+        parent.appendChild(dl);
+    };
+
+    appendRows(body, rows, false);
+
+    // ② 三源明细：每个源一张小卡（标题行 = 序号+名字+状态徽标，下面是该源的匹配字段）
+    const sources = Array.isArray(meta.sources) ? meta.sources : [];
+    if (sources.length) {
+        const title = document.createElement('div');
+        title.textContent = '弹幕源详情';
+        Object.assign(title.style, {
+            marginTop: '14px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
+            fontSize: '12px', fontWeight: '600', color: 'rgba(245,245,247,.75)',
+        } as CSSStyleDeclaration);
+        body.appendChild(title);
+
+        sources.forEach((s, idx) => {
+            const card = document.createElement('div');
+            Object.assign(card.style, {
+                margin: '8px 0 0', padding: '8px 10px', borderRadius: '8px',
+                background: s.used ? 'rgba(90,209,122,.10)' : 'rgba(255,255,255,.035)',
+                border: '1px solid ' + (s.used ? 'rgba(90,209,122,.42)' : 'rgba(255,255,255,.08)'),
+            } as CSSStyleDeclaration);
+
+            // 标题行：① 自建源(danmu_api)   [使用中 / 未启用 / 已关闭]
+            const head = document.createElement('div');
+            Object.assign(head.style, {
+                display: 'flex', alignItems: 'center', gap: '6px',
+                fontSize: '12.5px', fontWeight: '600', marginBottom: '6px',
+                color: s.used ? '#5ad17a' : 'rgba(245,245,247,.8)',
+            } as CSSStyleDeclaration);
+            const headName = document.createElement('span');
+            headName.textContent = `${idx + 1}. ${sourceLabel(s.label || s.key)}`;
+            head.appendChild(headName);
+            const badge = document.createElement('span');
+            // 徽标只给「短状态词」，具体原因交给下面的字段行/未采用原因行 ——
+            // 否则「未启用」会在徽标和行里各出现一次（实测重复）。
+            badge.textContent = s.used ? '使用中' : !s.enabled ? '未参与' : s.note ? '未采用' : '未参与';
+            Object.assign(badge.style, {
+                marginLeft: 'auto', padding: '1px 7px', borderRadius: '9px', fontSize: '10.5px', fontWeight: '500',
+                background: s.used ? 'rgba(90,209,122,.18)' : 'rgba(255,255,255,.07)',
+                color: s.used ? '#5ad17a' : 'rgba(245,245,247,.55)',
+            } as CSSStyleDeclaration);
+            head.appendChild(badge);
+            card.appendChild(head);
+
+            // 字段行：按源类型给该源专属字段（不适用的一律不列，避免一排「—」）
+            const sRows: [string, string][] = [];
+            if (s.matchedTitle) sRows.push(['命中条目', s.matchedTitle]);
+            if (s.episodeTitle) sRows.push(['命中分集', s.episodeTitle]);
+            if (s.episodeId) sRows.push(['集 ID', String(s.episodeId)]);
+            if (s.bvid) sRows.push(['BVID', String(s.bvid)]);
+            if (s.cid) sRows.push(['CID', String(s.cid)]);
+            if (s.sim != null) sRows.push(['匹配相似度', (Number(s.sim) * 100).toFixed(0) + '%']);
+            if (s.credential) sRows.push([s.key === 'bilibili' ? '登录状态' : '使用凭证', s.credential]);
+            if (s.base) sRows.push(['服务地址', s.base]);
+            // 条数只在源真的跑过时给（未参与的源显示「0 条」是误导）
+            if (s.enabled && s.rawCount > 0) {
+                sRows.push(['弹幕条数', `${s.count}${s.blocked > 0 ? `（拉取 ${s.rawCount}，屏蔽 ${s.blocked}）` : ''}`]);
+            }
+            // 未参与（开关关/未配置）：原因直接作为状态行；跑过但没采用：单列原因
+            if (!s.enabled) {
+                if (s.note) sRows.push(['状态', s.note]);
+            } else if (!s.used && s.note) {
+                sRows.push(['未采用原因', s.note]);
+            }
+            if (sRows.length) appendRows(card, sRows, false);
+            body.appendChild(card);
+        });
     }
-    body.appendChild(dl);
 
     const tip = document.createElement('div');
-    // 底部说明必须跟着实际来源走：自建源命中时写「数据来源：B站」是错信息（用户正是看着这句报的匹配 bug）。
-    // preload 插件独立加载、import 不到主进程 danmuApi.isSelfHostedSource，只能按来源标签前缀判断。
-    tip.textContent = /^自建源/.test(String(meta.source || ''))
-        ? '数据来源：自建弹幕接口 danmu_api（只认精确匹配；弹幕低于下限时自动请求 B站补源，B站更多才换；手动搜索同时给出自建源与 B站候选）'
-        : '数据来源：B站（与 MPV 弹幕同源）';
+    // 底部说明必须跟着实际来源走：优选源命中时写「数据来源：B站」是错信息（用户正是看着这句报的匹配 bug）。
+    // srcName 在本函数开头已按来源解析（见字段分流处）。
+    // [v1.11.1] 源链改为 自建源 → B站 → 弹弹play（兜底），说明需讲清各自的条件。
+    if (/^自建源/.test(srcName)) {
+        tip.textContent = '数据来源：自建弹幕接口 danmu_api（只认精确匹配；弹幕低于下限时继续找 B站/弹弹play 补源）';
+    } else if (srcName === '弹弹play') {
+        tip.textContent = '数据来源：弹弹play 官方开放 API（兜底源：自建源与 B站 都没拿到足量弹幕时才请求，以节省额度；含多平台整合弹幕）';
+    } else {
+        tip.textContent = '数据来源：B站弹幕（与自建源同为免费链路，优先于弹弹play 兜底源）';
+    }
     Object.assign(tip.style, {
         paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
         color: 'rgba(245,245,247,.4)', fontSize: '12px', lineHeight: '1.5',

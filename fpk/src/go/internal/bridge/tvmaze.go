@@ -1,9 +1,11 @@
 // Package bridge —— tvmaze.go：TVMaze 官方 REST API 客户端（扩展数据源 ②）。
 // 官方文档（api.tvmaze.com，2026-09 核实）：完全免费、无需 key、CC BY-SA（需署名），
 // 限速 20 次/10 秒/IP，官方建议客户端缓存（本端进程内 24h）。
-//   GET https://api.tvmaze.com/lookup/shows?imdb={ttID} | ?thetvdb={tvdbID} → show 对象直出
-//   GET https://api.tvmaze.com/search/shows?q={title}       → [{score, show}]（模糊搜索兜底）
-//   GET https://api.tvmaze.com/shows/{id}/episodes?specials=1 → 分集数组
+//
+//	GET https://api.tvmaze.com/lookup/shows?imdb={ttID} | ?thetvdb={tvdbID} → show 对象直出
+//	GET https://api.tvmaze.com/search/shows?q={title}       → [{score, show}]（模糊搜索兜底）
+//	GET https://api.tvmaze.com/shows/{id}/episodes?specials=1 → 分集数组
+//
 // 分集字段：{name, season, number, airdate, runtime, summary(HTML)} —— summary 剥 HTML 后透出。
 // 用途：「补全集信息」在 TMDB 缺英文（或整集缺失）时的英文标题/简介兜底（epBackfill）。
 package bridge
@@ -30,24 +32,24 @@ func (b *Bridge) tvmazeOn() bool { return getSetting(b.cfg, "tvmazeEnabled") == 
 
 // tvmazeShow 归一化剧集（仅取用到的字段）。
 type tvmazeShow struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Tvdb  string `json:"tvdb"`
-	Imdb  string `json:"imdb"`
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Tvdb string `json:"tvdb"`
+	Imdb string `json:"imdb"`
 }
 
 // tvmazeEp 归一化分集（summary 已剥 HTML）。
 type tvmazeEp struct {
-	Season   int64   `json:"season"`
-	Number   int64   `json:"number"`
-	Name     string  `json:"name"`
-	Airdate  string  `json:"airdate"`
-	Runtime  int64   `json:"runtime"`
-	Summary  string  `json:"summary"`
+	Season  int64  `json:"season"`
+	Number  int64  `json:"number"`
+	Name    string `json:"name"`
+	Airdate string `json:"airdate"`
+	Runtime int64  `json:"runtime"`
+	Summary string `json:"summary"`
 }
 
 var (
-	tvmazeMu     sync.Mutex
+	tvmazeMu      sync.Mutex
 	tvmazeEpCache = map[string]tvmazeCacheEntry{} // key: showID → 24h
 )
 
@@ -115,8 +117,8 @@ func (b *Bridge) tvmazeLookupShow(imdbID, tvdbID, title string) (*tvmazeShow, er
 	}
 	q = reTVSeasonSuffix.ReplaceAllString(q, "")
 	var hits []struct {
-		Score float64     `json:"score"`
-		Show  tvmazeShow  `json:"show"`
+		Score float64    `json:"score"`
+		Show  tvmazeShow `json:"show"`
 	}
 	if err := b.tvmazeGetJSON("/search/shows?q="+url.QueryEscape(q), &hits); err != nil {
 		return nil, err

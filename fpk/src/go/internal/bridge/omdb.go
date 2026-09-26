@@ -1,7 +1,9 @@
 // Package bridge —— omdb.go：OMDb API 客户端（扩展数据源 ③）。
 // 官方文档（www.omdbapi.com，2026-09 核实）：GET https://www.omdbapi.com/?apikey={key}&i={imdbID}
-//   免费档 1000 次/天（邮箱领 key），$1/月 Patreon 解除；非商业许可（CC BY-NC 4.0）。
-//   响应 {"Response":"True","imdbRating":"7.6","imdbVotes":"12,345",...}（imdbVotes 带千分位逗号）。
+//
+//	免费档 1000 次/天（邮箱领 key），$1/月 Patreon 解除；非商业许可（CC BY-NC 4.0）。
+//	响应 {"Response":"True","imdbRating":"7.6","imdbVotes":"12,345",...}（imdbVotes 带千分位逗号）。
+//
 // 用途：TMDB 详情卡（tmdb:show）与观影记录 enrich 补 IMDb 评分列——IMDb 自身无官方公开 API，
 // OMDb 是事实上的间接官方渠道。评分变化慢 → 进程内缓存 7 天，省免费额度。
 package bridge
@@ -20,12 +22,12 @@ import (
 // omdbBase var 而非 const：单测用 httptest 覆盖指向本地假服务器。
 var omdbBase = "https://www.omdbapi.com"
 
-func (b *Bridge) omdbOn() bool        { return getSetting(b.cfg, "omdbEnabled") == "1" }
-func (b *Bridge) omdbAPIKey() string  { return strings.TrimSpace(getSetting(b.cfg, "omdbApiKey")) }
+func (b *Bridge) omdbOn() bool       { return getSetting(b.cfg, "omdbEnabled") == "1" }
+func (b *Bridge) omdbAPIKey() string { return strings.TrimSpace(getSetting(b.cfg, "omdbApiKey")) }
 
 var (
-	omdbMu       sync.Mutex
-	omdbCache    = map[string]omdbCacheEntry{} // imdbID → 7d
+	omdbMu    sync.Mutex
+	omdbCache = map[string]omdbCacheEntry{} // imdbID → 7d
 )
 
 type omdbCacheEntry struct {

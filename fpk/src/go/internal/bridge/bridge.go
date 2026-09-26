@@ -32,10 +32,23 @@ import (
 	"time"
 
 	"fntvplus/internal/config"
+	"fntvplus/internal/gateway"
 )
 
-const authxKey = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh"
-const authxSecret = "16CCEB3D-AB42-077D-36A1-F355324E4237"
+// Authx 签名材料不再硬编码进二进制（审核红线：第三方应用内嵌官方签名密钥观感差、
+// 也防泄漏扩散）。fnOS 上由 cmd/main 经环境变量注入（值与官方影视应用一致），
+// 本地调试可用 FNTV_AUTHX_KEY / FNTV_AUTHX_SECRET 环境变量提供。
+var (
+	authxKey    = envOr("FNTV_AUTHX_KEY", "")
+	authxSecret = envOr("FNTV_AUTHX_SECRET", "")
+)
+
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
 
 // 白名单后缀：proxy 只放行这些外部域（含子域）。
 var proxyAllowSuffix = []string{
@@ -105,6 +118,9 @@ func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/bili/qr-lib", b.biliQrLib)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmu/test", b.danmuTest)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmu/diag", b.danmuDiag)
+	// [v1.11.0] 弹弹play 开放 API（内置凭证 + 可选自定义凭证）：状态回显 / 连通自检
+	mux.HandleFunc("/app/fntvplus/api/bridge/dandanplay/status", b.ddpStatusHandler())
+	mux.HandleFunc("/app/fntvplus/api/bridge/dandanplay/test", b.ddpTestHandler())
 	mux.HandleFunc("/app/fntvplus/api/bridge/logos/", b.handleLogoFile)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/prepare", b.danmakuPrepare)
 	mux.HandleFunc("/app/fntvplus/api/bridge/skip/external", b.skipExternal)
@@ -120,6 +136,21 @@ func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/jav/image", b.javImageHandler)
 }
 
+// muxHandler 返回内部路由表（挂好全部 bridge 子路由的 http.Handler），
+// 供 proxy 层统一包鉴权中间件后注册到 /app/fntvplus/api/bridge/ 前缀。
+func (b *Bridge) MuxHandler() http.Handler {
+	mux := http.NewServeMux()
+	b.Mount(mux)
+	return mux
+}
+
+// Authed 给 handler 套上统一网关身份校验：fnOS 网关转发请求时注入 X-Trim-Userid/
+// X-Trim-Username 头（网关已先校验 NAS 登录态）。缺身份头的请求一律 401——
+// 防止回环端口的直连访问绕过登录调用 bridge（伪造头需先攻破网关所在的本机）。
+func (b *Bridge) Authed(next http.Handler) http.Handler {
+	return gateway.RequireGatewayUser(next)
+}
+
 /* ========== 通用工具 ========== */
 
 func md5hex(s string) string {
@@ -128,6 +159,9 @@ func md5hex(s string) string {
 }
 
 func genAuthx(path, dataJSON string) string {
+	if authxKey == "" || authxSecret == "" {
+		return "" // 未注入签名材料：不加 Authx 头，由上游按未签名请求处理
+	}
 	nonce := fmt.Sprintf("%d", 100000+rand.Intn(900000))
 	ts := time.Now().UnixMilli()
 	sign := md5hex(strings.Join([]string{authxKey, path, nonce, fmt.Sprintf("%d", ts), md5hex(dataJSON), authxSecret}, "_"))
@@ -209,7 +243,9 @@ func (b *Bridge) handleFnOS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request: "+err.Error())
 		return
 	}
-	req2.Header.Set("Authx", genAuthx(req.Path, dataJSON))
+	if authx := genAuthx(req.Path, dataJSON); authx != "" {
+		req2.Header.Set("Authx", authx)
+	}
 	req2.Header.Set("Content-Type", "application/json")
 	if req.Cookie != "" {
 		req2.Header.Set("Cookie", req.Cookie)
@@ -640,7 +676,9 @@ func (b *Bridge) traktScrobble(w http.ResponseWriter, r *http.Request) {
 	// fnOS play/info（签名 + cookie 转发）
 	body, _ := json.Marshal(map[string]any{"item_guid": req.GUID})
 	req2, _ := http.NewRequest(http.MethodPost, b.effectiveUpstream()+"/v/api/v1/play/info", strings.NewReader(string(body)))
-	req2.Header.Set("Authx", genAuthx("/v/api/v1/play/info", string(body)))
+	if authx := genAuthx("/v/api/v1/play/info", string(body)); authx != "" {
+		req2.Header.Set("Authx", authx)
+	}
 	req2.Header.Set("Content-Type", "application/json")
 	if req.Cookie != "" {
 		req2.Header.Set("Cookie", req.Cookie)
@@ -785,7 +823,7 @@ func (b *Bridge) tmdbDirectIPs() (apiIP, imgIP string) {
 
 // effectiveUpstream 当前生效的 fnOS 上游：config 覆盖值优先（管理页可热改），回退启动推导值。
 // [v0.73.0] 修复：bridge 此前固定用启动推导值（如 127.0.0.1:5666），而用户配置的上游覆盖
-//（如 18888）只作用于反代主链路 → fnOS 桥（演员作品/跳过片头/播放同步等）连错端口被拒。
+// （如 18888）只作用于反代主链路 → fnOS 桥（演员作品/跳过片头/播放同步等）连错端口被拒。
 func (b *Bridge) effectiveUpstream() string {
 	if s := strings.TrimSpace(b.cfg.Get().Upstream); s != "" {
 		return strings.TrimRight(s, "/")

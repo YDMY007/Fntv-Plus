@@ -1,1 +1,1 @@
-{"defaults":{"run-as":"root"}}
+{"defaults":{"run-as":"package"}}

@@ -4,9 +4,11 @@
       "title": "Fntv-Plus",
       "icon": "images/fntv_v2_{0}.png",
       "type": "url",
-      "protocol": "http",
-      "port": "22350",
-      "url": "/v/",
+      "protocol": "",
+      "port": "",
+      "gatewayPrefix": "/app/fntvplus",
+      "gatewaySocket": "fntvplus.sock",
+      "url": "/app/fntvplus/v/",
       "allUsers": true,
       "control": { "accessPerm": "editable" }
     }

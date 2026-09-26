@@ -1,10 +1,12 @@
 // Package bridge —— person.go：演员页「TMDB 完整作品 + 简报」。
 // 忠实移植桌面版 personTmdb.ts（lc-1033~1039）：
-//   ① fnOS /v/api/v1/person/{guid}（签名请求，cookie 由前端转发）→ imdbId / name
-//   ② fnOS /v/api/v1/person/item/list（job×5，page_size 200）→ 库内作品 owned 匹配键
-//      （规范化中/英标题 + tmdb_id；imdb→tmdb 兜底换算）
-//   ③ TMDB /find/{imdb} → person id → /person/{id}/combined_credits → 全量 cast
-//   ④ owned 标记 + 库内 guid 回填 → {ok, name, items, ownedCount, total}
+//
+//	① fnOS /v/api/v1/person/{guid}（签名请求，cookie 由前端转发）→ imdbId / name
+//	② fnOS /v/api/v1/person/item/list（job×5，page_size 200）→ 库内作品 owned 匹配键
+//	   （规范化中/英标题 + tmdb_id；imdb→tmdb 兜底换算）
+//	③ TMDB /find/{imdb} → person id → /person/{id}/combined_credits → 全量 cast
+//	④ owned 标记 + 库内 guid 回填 → {ok, name, items, ownedCount, total}
+//
 // TMDB 请求复用 tmdbGet（v3/v4 鉴权 + 代理/免梯子直连）。缓存为进程内存 TTL（桌面版是
 // userData 磁盘缓存 7d/30d + SWR；NAS 后端常驻，内存 6h 等效防 TMDB 限流）。
 package bridge

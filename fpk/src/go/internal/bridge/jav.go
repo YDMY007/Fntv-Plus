@@ -1,7 +1,9 @@
 // Package bridge —— jav.go：JAV 番号刮削（个人媒体库整理用，扩展数据源 ⑤）。
 // 数据源为 javbus 网页端（无官方 API，与豆瓣链路同性质的非官方抓取）：
-//   GET https://{javBusDomain}/{番号}                详情页直取（URL 即番号）
-//   GET https://{javBusDomain}/search/{番号}&type=1  搜索兜底（变体番号）
+//
+//	GET https://{javBusDomain}/{番号}                详情页直取（URL 即番号）
+//	GET https://{javBusDomain}/search/{番号}&type=1  搜索兜底（变体番号）
+//
 // 解析字段：标题、大图封面（bigImage/cover img）、发行日期、类别（/genre/ 链接）、
 // 演员列表（avatar-box：头像 + 名字）。全部宽容正则 + html 反转义，字段间独立容错。
 // 防误识别：番号正则的字母段过黑名单（HDR10/VP9/CD1 等技术词/分段词不算番号）。

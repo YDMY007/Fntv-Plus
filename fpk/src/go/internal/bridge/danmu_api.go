@@ -1,10 +1,11 @@
 // Package bridge —— danmu_api.go：自建弹幕接口（danmu_api）客户端。
 // [lc-1118] 完整复刻桌面版 common/danmuApi.ts：
-//   三端点：/api/v2/search/anime?keyword=（条目搜索，只收「主名精确相等 + 季号一致」）
-//          /api/v2/bangumi/{animeId}（分集列表）
-//          /api/v2/comment/{episodeId}?format=xml（弹幕 XML，与 list.so 同构共用解析器）
-//   候选 bvid 位为伪 id `dmapi:<episodeId>`；用户手选后按 id 直拉。自建源不做模糊匹配
-//   （多平台条目极密，模糊必挂错，桌面 lc-1109 实机教训）。
+//
+//	三端点：/api/v2/search/anime?keyword=（条目搜索，只收「主名精确相等 + 季号一致」）
+//	       /api/v2/bangumi/{animeId}（分集列表）
+//	       /api/v2/comment/{episodeId}?format=xml（弹幕 XML，与 list.so 同构共用解析器）
+//	候选 bvid 位为伪 id `dmapi:<episodeId>`；用户手选后按 id 直拉。自建源不做模糊匹配
+//	（多平台条目极密，模糊必挂错，桌面 lc-1109 实机教训）。
 package bridge
 
 import (
@@ -23,8 +24,8 @@ import (
 const danmuSourceLabel = "自建源(danmu_api)"
 const danmuIDPrefix = "dmapi:"
 
-func (b *Bridge) danmuBase() string      { return strings.TrimSpace(getSetting(b.cfg, "danmuApiBase")) }
-func (b *Bridge) danmuIsActive() bool    { return b.danmuBase() != "" }
+func (b *Bridge) danmuBase() string   { return strings.TrimSpace(getSetting(b.cfg, "danmuApiBase")) }
+func (b *Bridge) danmuIsActive() bool { return b.danmuBase() != "" }
 
 var (
 	reDanmuBracket  = regexp.MustCompile(`【[^】]*】`)
@@ -257,13 +258,19 @@ func (b *Bridge) danmuFetchItems(episodeID int64) []map[string]any {
 
 // danmuAutoFetch 自建源自动路径：番名+集数 → 搜索 → 定位集 → 拉弹幕。
 // [v0.81.0] 返回带原因（供面板排障）：未启用 / 搜索无精确匹配条目 / 候选均无弹幕 / 命中。
-func (b *Bridge) danmuAutoFetch(title string, ep int64, season int64) ([]map[string]any, string) {
+// [v1.11.0] 一并回溯源明细（命中的条目名 / 集标题 / episodeId），供网页端「来源详情」按源分列。
+func (b *Bridge) danmuAutoFetch(title string, ep int64, season int64) ([]map[string]any, string, danmuSourceDetail) {
+	d := danmuSourceDetail{Key: "danmu_api", Label: danmuSourceLabel}
 	if !b.danmuIsActive() {
-		return nil, "自建源未启用"
+		d.Note = "未启用"
+		return nil, "自建源未启用", d
 	}
+	d.Enabled = true
+	d.Base = danmuMaskBase(b.danmuBase()) // 服务地址脱敏（路径段可能含 TOKEN）
 	hits := b.danmuSearchAnimes(title, season)
 	if len(hits) == 0 {
-		return nil, "自建源搜索无精确匹配条目"
+		d.Note = "搜索无精确匹配条目"
+		return nil, "自建源搜索无精确匹配条目", d
 	}
 	tries := 3
 	for _, hit := range hits {
@@ -280,10 +287,15 @@ func (b *Bridge) danmuAutoFetch(title string, ep int64, season int64) ([]map[str
 			continue
 		}
 		if items := b.danmuFetchItems(int64(id)); len(items) > 0 {
-			return items, "命中"
+			d.MatchedTitle = jsStr(hit["animeTitle"])
+			d.EpisodeTitle = jsStr(e["episodeTitle"])
+			d.EpisodeID = int64(id)
+			d.RawCount = len(items)
+			return items, "命中", d
 		}
 	}
-	return nil, "自建源候选均无弹幕"
+	d.Note = "候选均无弹幕"
+	return nil, "自建源候选均无弹幕", d
 }
 
 // danmuCandidates 自建源候选（bvid 位为 dmapi:<episodeId> 伪 id）。未启用/未命中返回 nil → 降级 B站。

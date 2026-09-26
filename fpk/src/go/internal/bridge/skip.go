@@ -1,10 +1,12 @@
 // Package bridge —— skip.go：跳过片头/片尾外部数据链（网页端 skip:fetch-and-fill 的外网部分）。
 // 移植桌面版 smartSkip.ts + skipMalMap.ts：
-//   Step A  AniSkip（动漫社区库，区间绝对秒；需 MAL id → 标题映射链：
-//           Bangumi v0 中文搜索取日文名 → MAL 官方 v2（配了 Client ID 时首选，扩展数据源 ④）→
-//           Jikan / AniList 双路互备；映射缓存 30 天；
-//           episodeLength 敏感，±1/±2 阶梯重试；含 recap 前情回顾透传）
-//   Step B  theintrodb v3 兜底（非动画剧集；tmdb_id/imdb_id 查询 + duration_ms 匹配）
+//
+//	Step A  AniSkip（动漫社区库，区间绝对秒；需 MAL id → 标题映射链：
+//	        Bangumi v0 中文搜索取日文名 → MAL 官方 v2（配了 Client ID 时首选，扩展数据源 ④）→
+//	        Jikan / AniList 双路互备；映射缓存 30 天；
+//	        episodeLength 敏感，±1/±2 阶梯重试；含 recap 前情回顾透传）
+//	Step B  theintrodb v3 兜底（非动画剧集；tmdb_id/imdb_id 查询 + duration_ms 匹配）
+//
 // fnOS 语义换算：skipStart = OP 结束秒 / intro.end 秒；skipEnd = 总时长 − ED 开始秒 / credits.start 秒
 // （outro ≥ 总时长一半视为异常仅填片头）。fnOS skipinfo 的读/写由前端直连完成（httpOnly 断链绕开）。
 package bridge
@@ -277,8 +279,8 @@ func skipTheIntroDb(trimID string, season, episode int64, durationSec float64) (
 			continue
 		}
 		var out struct {
-			Error   string `json:"error"`
-			Intro   []struct {
+			Error string `json:"error"`
+			Intro []struct {
 				EndMs float64 `json:"end_ms"`
 			} `json:"intro"`
 			Credits []struct {
@@ -314,11 +316,11 @@ func skipTheIntroDb(trimID string, season, episode int64, durationSec float64) (
 // {ok, skipStart, skipEnd, source:'aniskip'|'theintrodb'|'none', recapStart, recapEnd}
 func (b *Bridge) skipExternal(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TrimID    string  `json:"trimId"`
-		Season    int64   `json:"season"`
-		Episode   int64   `json:"episode"`
-		Duration  float64 `json:"duration"`
-		Title     string  `json:"title"`
+		TrimID   string  `json:"trimId"`
+		Season   int64   `json:"season"`
+		Episode  int64   `json:"episode"`
+		Duration float64 `json:"duration"`
+		Title    string  `json:"title"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&req)
 	empty := map[string]any{"ok": false, "skipStart": 0, "skipEnd": 0, "source": "none", "recapStart": 0, "recapEnd": 0}

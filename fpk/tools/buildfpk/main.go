@@ -197,12 +197,11 @@ func pack() (string, error) {
 	if st, err := os.Stat(out); err != nil || st.Size() < 1024 {
 		return "", fmt.Errorf("fnpack 未产出有效的 fntvplus.fpk（请检查上方报错）")
 	}
-	// 开发包命名: 小 v + commit 数（Fntv-Plus-v194 形态区分发布版大写 V）
-	// 四段测试版号 1.0.0.<commit> → 取第四段
-	if ver := manifestVersion(); strings.Contains(ver, ".") {
-		segs := strings.Split(ver, ".")
-		if len(segs) == 4 {
-			named := filepath.Join(root, "Fntv-Plus-v"+segs[3]+".fpk")
+	// 开发包命名: 小 v + 序号（Fntv-Plus-v194 形态区分发布版大写 V）
+	// 版号 x.y.z-<seq>（飞牛商店规则：3 段式 + 数字预发布后缀；4 段式无效）→ 取 "-" 后的数字
+	if ver := manifestVersion(); strings.Contains(ver, "-") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(ver, strings.SplitN(ver, "-", 2)[0]+"-")); err == nil {
+			named := filepath.Join(root, "Fntv-Plus-v"+strconv.Itoa(n)+".fpk")
 			if err := os.Rename(out, named); err == nil {
 				// [v1.11.x] 自动清理上一个开发包（用户要求）：只删同名前缀(小写 v)旧产物，
 				// 刚打出的保留；发布包是大写 V 前缀，大小写敏感比较天然不误删。
@@ -259,25 +258,25 @@ func findFnpack() (string, error) {
 		filepath.Join("fpk", "tools", "fnpack.exe"))
 }
 
-// devCommitVersion 开发测试版号 = <发布版基号>.<序号> 四段式，**严格递增**。
-// 用户诉求两全：测试包要能覆盖已装的正式版（>正式版号），又不能挡住下一个正式版（<下一正式版号）。
-// 纯三段无解 → 四段式：正式版基号(release_version, 默认 1.0.0) + 第四段序号，
-// 如 1.0.0.193：> 1.0.0(可覆盖正式版)；下一正式版 1.0.1 > 1.0.0.193(semver 逐段比较)→可覆盖测试版。
-// 序号取法（[v1.11.x] 改严格递增，用户反馈"打包不会自己加版号"）——取三者最大：
+// devCommitVersion 开发测试版号 = <发布版基号>-<序号>，**严格递增**。
+// 飞牛商店审核规则：版本号固定 3 段式 x.y.z；可带后缀 -m（仅数字才有版本对比逻辑）。
+// 旧实现的 4 段式（1.0.0.193）属审核违规 → 改为数字预发布后缀 1.0.0-193（语义化版本
+// 预发布号 < 正式版：1.0.0-193 < 1.0.0 ≤ 下一正式版 1.0.1，覆盖关系不变）。
+// 序号取法（沿用 [v1.11.x] 严格递增）——取三者最大：
 //   ① git 提交数（正常节奏：先提交后打包，版号=提交数）；
 //   ② 历史痕迹里的最大包号 +1：根目录残留的 Fntv-Plus-vN.fpk 包名（*.fpk 不入库，
 //     cleanOldDevPackages 又会删旧包，manifest 版号可能被手工拨回——残留包名是
 //     "已装到 NAS 的最高版"唯一的本地证据，缺了它本地号追不上应用商店已装版
 //     → 覆盖安装被拒，用户报"版号对不上"）；
 //   ③ git 不可用时退化为当前包号 +1。
-//   即 seq = max(提交数, 痕迹最大包号+1)；再与 manifest 第四段比取大，仍严格递增。
-// ⚠ 依赖飞牛安装器支持四段版本号比较——fnpack 无 version 格式校验(实勘仅 CheckAppName/CheckWizard)，
-//   安装侧行为需 NAS 实测；若安装器拒绝四段，回退方案=测试前卸载正式版。
+//   即 seq = max(提交数, 痕迹最大包号+1)；再与 manifest 后缀比取大，仍严格递增。
+// ⚠ 若安装器对预发布号与正式版的覆盖方向与预期不符（如拒装 -n 覆盖 1.0.0），
+//   回退方案=测试前卸载正式版。
 func devCommitVersion() string {
 	base := manifestGetString("release_version", "1.0.0")
 	cur := 0
-	if ver := manifestVersion(); strings.HasPrefix(ver, base+".") {
-		if n, err := strconv.Atoi(strings.TrimPrefix(ver, base+".")); err == nil {
+	if ver := manifestVersion(); strings.HasPrefix(ver, base+"-") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(ver, base+"-")); err == nil {
 			cur = n
 		}
 	}
@@ -295,10 +294,10 @@ func devCommitVersion() string {
 	gitCount.Dir = root
 	if out, err := gitCount.Output(); err == nil {
 		if n, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && n > seq {
-			return base + "." + strconv.Itoa(n) // 提交数更高（正常节奏）→ 版号=提交数
+			return base + "-" + strconv.Itoa(n) // 提交数更高（正常节奏）→ 版号=提交数
 		}
 	}
-	return base + "." + strconv.Itoa(seq)
+	return base + "-" + strconv.Itoa(seq)
 }
 
 // maxHistorySeq 扫根目录 Fntv-Plus-v<数字>.fpk（小写 v 开发包），返回最大 N。

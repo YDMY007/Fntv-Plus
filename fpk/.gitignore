@@ -32,3 +32,6 @@ scripts/test-panel.mjs
 docs/初稿v1-已由完整实施方案取代.md
 docs/完整实施方案.md
 .workbuddy/
+
+# 本机构建产物目录（fpk 包输出，不入库）
+release/
