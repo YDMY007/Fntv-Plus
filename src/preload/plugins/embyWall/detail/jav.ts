@@ -340,90 +340,121 @@ async function listLibraryRoot(origin: string): Promise<{ dirs: string[]; videos
   return { dirs, videos };
 }
 
-/** [lc-1250] 混合番号文件夹批量刮削：夹名识别不到番号时，逐子视频按各自文件名番号
- *  查询 + 回填（顺序执行——javbus 忌并发，限流/封禁风险）。返回按钮结果摘要。 */
-async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid: string): Promise<string> {
-  setBtn(btn, '⏳ 枚举子视频…');
-  const children = await folderChildVideos(origin, fGuid);
-  if (!children.length) return '⚠ 无子视频';
-  let ok = 0, fail = 0, nocode = 0;
-  for (let i = 0; i < children.length; i++) {
-    setBtn(btn, '⏳ 批量刮削 ' + (i + 1) + '/' + children.length);
+/** [lc-1250] 枚举文件夹直属子项（不带 exclude_folder）：Video → videos，Directory → dirs。
+ *  实测子文件夹 type=Directory、guid 带 fv_ 前缀。 */
+async function folderChildren(origin: string, fGuid: string): Promise<{ videos: string[]; dirs: string[] }> {
+  const videos: string[] = [];
+  const dirs: string[] = [];
+  try {
+    const body = { parent_guid: fGuid, sort_column: 'sort_title', sort_type: 'ASC', nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/list', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/item/list', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) return { videos, dirs };
+    const j = await resp.json().catch(() => null);
+    const list = (j && j.code === 0 && j.data && Array.isArray(j.data.list)) ? j.data.list : [];
+    for (const it of list) {
+      if (!it || !it.guid) continue;
+      const g = String(it.guid);
+      const t = String(it.type || '').toLowerCase();
+      if (t === 'video' && /^[a-f0-9]{32}$/.test(g)) videos.push(g);
+      else if (t === 'directory') dirs.push(g);
+    }
+  } catch { /* 返回已收集部分 */ }
+  return { videos, dirs };
+}
+
+/** [lc-1250] 文件夹树递归刮削（用户诉求「在外面就刮」的完整版）：
+ *  夹名番号命中 → 本体+直属子视频整体回填（单番号分段夹，同 lc-1222 语义）；
+ *  未命中 → 直属子视频按各自文件名番号刮；**子文件夹递归下钻（深度上限 3）**——
+ *  修复「混合夹里的套夹（如 测试/SNOS-332-UC/489155.com@SNOS-332-UC.mp4）必须
+ *  点进具体视频才能刮」的问题。stats/tick 由调用方注入，顺序执行防 javbus 限流。 */
+async function javScrapeFolderTree(
+  origin: string, fGuid: string, depth: number,
+  stats: { ok: number; fail: number; nocode: number },
+  tick: (label: string) => void,
+): Promise<void> {
+  if (depth > 3) return;
+  const { videos, dirs } = await folderChildren(origin, fGuid);
+  const ed = await fnosGetEditDetail(origin, fGuid).catch(() => null);
+  const dTitle = String((ed && (ed.title || ed.name)) || '').trim();
+  const p = await javPrepByTitle(origin, fGuid, dTitle);
+  if (p.prep) {
+    // 单番号夹：本体 + 直属子视频共用同一份元数据
+    tick('⏳ 回填 ' + (dTitle || fGuid).slice(0, 16) + '…');
     try {
-      const ed = await fnosGetEditDetail(origin, children[i]);
-      const childTitle = String((ed && (ed.title || ed.name)) || '').trim();
-      const st = await javScrapeByTitle(origin, children[i], childTitle);
-      if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
-    } catch (e: any) {
-      fail++;
-      dlog('[jav] 批量单条异常: ' + String(e && e.message || e).substring(0, 100));
+      const r1 = await backfillOne(origin, fGuid, p.prep);
+      if (r1.saved) stats.ok++; else stats.fail++;
+    } catch (e: any) { stats.fail++; }
+    for (const c of videos) {
+      try {
+        const r = await backfillOne(origin, c, p.prep);
+        if (r.saved) stats.ok++; else stats.fail++;
+      } catch (e: any) { stats.fail++; }
+    }
+  } else {
+    if (p.nocode) stats.nocode++; else stats.fail++;
+    for (const c of videos) {
+      const ced = await fnosGetEditDetail(origin, c).catch(() => null);
+      const cTitle = String((ced && (ced.title || ced.name)) || '').trim();
+      tick('⏳ 刮削 ' + (cTitle || c).slice(0, 16) + '…');
+      try {
+        const st = await javScrapeByTitle(origin, c, cTitle);
+        if (st === 'ok') stats.ok++; else if (st === 'nocode') stats.nocode++; else stats.fail++;
+      } catch (e: any) { stats.fail++; }
     }
   }
-  log('[jav] 文件夹批量完成: ok=' + ok + ' fail=' + fail + ' nocode=' + nocode);
-  if (ok) return '✓ 已回填 ' + ok + (nocode ? ' · 未识别 ' + nocode : '') + (fail ? ' · 失败 ' + fail : '');
-  if (nocode) return '⚠ ' + nocode + ' 个未识别番号';
+  for (const d of dirs) {
+    await javScrapeFolderTree(origin, d, depth + 1, stats, tick);
+  }
+}
+
+/** [lc-1250] 混合番号文件夹批量刮削入口（文件夹页按钮）：递归整棵文件夹树。
+ *  返回按钮结果摘要。 */
+async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid: string): Promise<string> {
+  const stats = { ok: 0, fail: 0, nocode: 0 };
+  const tick = (label: string): void => {
+    const done = stats.ok + stats.fail + stats.nocode;
+    setBtn(btn, label + ' (' + done + ')');
+  };
+  await javScrapeFolderTree(origin, fGuid, 0, stats, tick);
+  log('[jav] 文件夹批量完成: ok=' + stats.ok + ' fail=' + stats.fail + ' nocode=' + stats.nocode);
+  if (stats.ok) return '✓ 已回填 ' + stats.ok + (stats.nocode ? ' · 未识别 ' + stats.nocode : '') + (stats.fail ? ' · 失败 ' + stats.fail : '');
+  if (stats.nocode) return '⚠ ' + stats.nocode + ' 个未识别番号';
   return '⚠ 回填失败';
 }
 
-/** [lc-1250] 其他视频库列表页（/v/list/other）一键全库刮削：根级 Directory(Others) 按
- *  文件夹页同款语义处理（夹名番号命中 → 本体+子视频整体回填=单番号夹；未命中 →
- *  逐子视频按各自文件名刮=混合夹），根级未识别 Video 按自身标题刮；
- *  Movie/TV 等已识别作品一律跳过。顺序执行，按钮实时进度。 */
+/** [lc-1250] 其他视频库列表页（/v/list/other）一键全库刮削：根级 Directory(Others) 递归
+ *  整棵文件夹树（语义同上），根级未识别 Video 按自身标题刮；Movie/TV 已识别作品跳过。
+ *  顺序执行，按钮实时进度。 */
 async function runJavLibrary(btn: HTMLButtonElement, origin: string): Promise<string> {
   setBtn(btn, '⏳ 枚举库内容…');
   const { dirs, videos } = await listLibraryRoot(origin);
   if (!dirs.length && !videos.length) return '⚠ 未枚举到可刮内容';
-  const childrenOf = new Map<string, string[]>();
-  let total = videos.length;
+  const stats = { ok: 0, fail: 0, nocode: 0 };
+  let done = 0;
+  const tick = (label: string): void => {
+    done = stats.ok + stats.fail + stats.nocode;
+    setBtn(btn, label + ' (' + done + ')');
+  };
   for (const d of dirs) {
-    const ch = await folderChildVideos(origin, d);
-    childrenOf.set(d, ch);
-    total += ch.length;
-  }
-  let ok = 0, fail = 0, nocode = 0, done = 0;
-  const tick = (): void => { setBtn(btn, '⏳ 全库刮削 ' + done + '/' + total); };
-  for (const d of dirs) {
-    const ch = childrenOf.get(d) || [];
-    const ed = await fnosGetEditDetail(origin, d).catch(() => null);
-    const dTitle = String((ed && (ed.title || ed.name)) || '').trim();
-    const p = await javPrepByTitle(origin, d, dTitle);
-    if (p.prep) {
-      // 单番号夹：本体 + 全部子视频共用同一份元数据（与文件夹页整体回填同语义）
-      const r1 = await backfillOne(origin, d, p.prep);
-      if (r1.saved) ok++; else fail++;
-      done++; tick();
-      for (const c of ch) {
-        try {
-          const r2 = await backfillOne(origin, c, p.prep);
-          if (r2.saved) ok++; else fail++;
-        } catch (e: any) { fail++; }
-        done++; tick();
-      }
-    } else {
-      if (p.nocode) nocode++; // 夹名无番号不单计失败，子视频各自刮
-      for (const c of ch) {
-        try {
-          const ced = await fnosGetEditDetail(origin, c).catch(() => null);
-          const cTitle = String((ced && (ced.title || ced.name)) || '').trim();
-          const st = await javScrapeByTitle(origin, c, cTitle);
-          if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
-        } catch (e: any) { fail++; }
-        done++; tick();
-      }
-    }
+    await javScrapeFolderTree(origin, d, 0, stats, tick);
   }
   for (const v of videos) {
     try {
       const ed = await fnosGetEditDetail(origin, v).catch(() => null);
       const vTitle = String((ed && (ed.title || ed.name)) || '').trim();
       const st = await javScrapeByTitle(origin, v, vTitle);
-      if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
-    } catch (e: any) { fail++; }
-    done++; tick();
+      if (st === 'ok') stats.ok++; else if (st === 'nocode') stats.nocode++; else stats.fail++;
+    } catch (e: any) { stats.fail++; }
+    tick('⏳ 全库刮削');
   }
-  log('[jav] 全库批量完成: ok=' + ok + ' fail=' + fail + ' nocode=' + nocode);
-  if (ok) return '✓ 已回填 ' + ok + (nocode ? ' · 未识别 ' + nocode : '') + (fail ? ' · 失败 ' + fail : '');
-  if (nocode) return '⚠ ' + nocode + ' 个未识别番号';
+  log('[jav] 全库批量完成: ok=' + stats.ok + ' fail=' + stats.fail + ' nocode=' + stats.nocode);
+  if (stats.ok) return '✓ 已回填 ' + stats.ok + (stats.nocode ? ' · 未识别 ' + stats.nocode : '') + (stats.fail ? ' · 失败 ' + stats.fail : '');
+  if (stats.nocode) return '⚠ ' + stats.nocode + ' 个未识别番号';
   return '⚠ 回填失败';
 }
 
