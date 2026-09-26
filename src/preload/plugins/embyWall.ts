@@ -4494,9 +4494,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ── 自定义刮削源卡 ──
     const csHint = document.createElement('div');
     csHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
-    csHint.innerHTML = t('把季标题/季号/TMDB 等锚点发给<b>你自建的刮削服务</b>，用返回的分集标题/简介回填飞牛元数据'
-      + '（只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文；写回带字段锁，不碰你手动改过的内容）。'
-      + '<br/>个人视频文件夹页「⟳ 文件夹刮削」：按文件名逐项匹配，批量回填每个文件条目的标题/简介，子文件夹自动递归。'
+    csHint.innerHTML = t('<b>自定义刮削源</b>（需自建服务）：把刮削锚点发给<b>你自己的刮削服务</b>（一个能收发 JSON 的 HTTP 接口），'
+      + '用返回的数据回填飞牛元数据——只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文，写回带字段锁。'
+      + '<br/>① 搭服务：任何语言均可，能按下方协议收发 JSON 即可（也可改造社区现成项目）；'
+      + '<br/>② 开开关：打开下方「启用自定义刮削源」；'
+      + '<br/>③ 填地址：http(s):// 开头的服务地址 → 点「保存」；'
+      + '<br/>④ 使用：季页「⟳ 自定义刮削」（按季锚点返回分集标题/简介）；个人视频文件夹页「⟳ 文件夹刮削」（按文件名逐项匹配批量回填，子文件夹自动递归）。'
       + '<br/>请求由桌面端代理发出，服务无需配置 CORS。');
     secBodyMeta.appendChild(csHint);
 
@@ -4569,8 +4572,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     javBody.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;gap:2px;';
     const javHint = document.createElement('div');
     javHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
-    javHint.innerHTML = t('<b>Jav 番号刮削</b>（个人库整理，默认关）：从文件名番号在 javbus 查询并回填标题（带字段锁），'
-      + '封面就地替换 hero 海报（仅本地视觉，不写服务端）。网络走「自定义代理 > 系统直连」，国内直连不通时请先配代理或填镜像域名。');
+    javHint.innerHTML = t('<b>Jav 番号刮削</b>（个人视频库整理，默认关，<b>无需自建服务</b>）：'
+      + '<br/>① 开关：打开下方「启用 Jav 番号刮削」；'
+      + '<br/>② 按钮：电影/未识别视频详情页「⟳ jav 刮削」单条精修；文件夹页「⟳ jav 刮削」整夹批量——夹名有番号则整套落库，无番号则自动递归子夹、按文件名逐个刮；库列表页「⟳ 全库刮削」全库批量（已识别的 Movie/TV 自动跳过）；'
+      + '<br/>③ 回填内容：javbus 按番号查询 → 标题/简介/发行日期/演员（演员先查重再创建，带字段锁）+ 封面（上传图床真实落库，重进页面也在）；'
+      + '<br/>④ 网络：走「自定义代理 > 系统直连」，国内直连 javbus 不通时先到「账号与网络」配代理或镜像域名；'
+      + '<br/>⑤ 容错：未识别番号的文件自动跳过并计数，不中断批量。');
     javBody.appendChild(javHint);
 
     const javEnableRow = document.createElement('div');
@@ -4631,8 +4638,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       + 'padding:6px 8px;box-sizing:border-box;';
     const mkExtDesc = (body: HTMLElement, text: string): void => {
       const d = document.createElement('div');
-      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-      d.textContent = t(text);
+      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.55;margin-bottom:8px;white-space:pre-line;';
+      d.innerHTML = t(text); // 文本均为代码内静态常量（lc-1250 详细使用指南，支持换行/加粗）
       body.appendChild(d);
     };
     const mkExtToggle = (body: HTMLElement, label: string): HTMLInputElement => {
@@ -4737,7 +4744,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ① Fanart.tv —— 高清透明 Logo 兜底（电影按 TMDB id；剧自动换算 TVDB id；个人 client_key 可选）
     const secFanart = section('Fanart.tv 高清 Logo');
     const faBody = secFanart.body;
-    mkExtDesc(faBody, 'TMDB 无可用透明 Logo 时（无候选/全纯白）自动兜底 Fanart.tv 官方高清 Logo，用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id。');
+    mkExtDesc(faBody, '<b>用途</b>：TMDB 拿不到透明 Logo 时，自动兜底 Fanart.tv 官方高清图（用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id）。\n'
+      + '<b>怎么配</b>：① 点下方链接到 fanart.tv 免费注册，在 Personal API Keys 页领取 api_key；② 把 api_key 填入下方「必填」框 → 保存；client_key（个人 key）可选，新图延迟更短；③ 打开开关。\n'
+      + '未填 Key 或开关关闭时自动跳过，不影响其它功能。');
     const faToggle = mkExtToggle(faBody, '启用 Fanart.tv 高清 Logo 兜底');
     faToggle.addEventListener('change', () => {
       S.fanartEnabled = faToggle.checked;
@@ -4757,7 +4766,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ② TVMaze —— 分集英文兜底（免 Key；「补全集信息」用）
     const secTvmaze = section('TVMaze 分集兜底');
     const tvBody = secTvmaze.body;
-    mkExtDesc(tvBody, '「补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。完全免费、无需任何 Key、国内可直连；查询失败自动回退纯 TMDB。');
+    mkExtDesc(tvBody, '<b>用途</b>：「⟳ 补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。\n'
+      + '<b>怎么配</b>：零配置——完全免费、无需任何 Key、国内可直连，打开开关即用；查询失败自动回退纯 TMDB，不会因此报错。');
     const tvToggle = mkExtToggle(tvBody, '启用 TVMaze 英文分集兜底');
     tvToggle.addEventListener('change', () => {
       S.tvmazeEnabled = tvToggle.checked;
@@ -4767,7 +4777,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ③ OMDb —— IMDb 评分（详情卡）
     const secOmdb = section('OMDb IMDb 评分');
     const omBody = secOmdb.body;
-    mkExtDesc(omBody, '剧集详情卡补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。');
+    mkExtDesc(omBody, '<b>用途</b>：剧集详情卡补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。\n'
+      + '<b>怎么配</b>：① 点下方链接用邮箱免费申请 Key；② 到邮箱点激活链接（不激活无效）；③ 把收到的 Key 填入下方 → 保存 → 打开开关。');
     const omToggle = mkExtToggle(omBody, '启用 OMDb IMDb 评分');
     omToggle.addEventListener('change', () => {
       S.omdbEnabled = omToggle.checked;
@@ -4782,7 +4793,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ④ MyAnimeList 官方 —— 动漫跳片头映射链首选（无需登录，注册应用得 Client ID）
     const secMal = section('MyAnimeList 官方');
     const malBody = secMal.body;
-    mkExtDesc(malBody, '动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API；未配置时自动回退非官方 Jikan/AniList。在 myanimelist.net/apiconfig 注册应用即得 Client ID，无需登录授权。');
+    mkExtDesc(malBody, '<b>用途</b>：动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API（未配置自动回退非官方 Jikan/AniList）；仅需 Client ID，无需登录授权。\n'
+      + '<b>怎么配</b>：① 点下方链接登录 myanimelist.net → API 页 → Create；② App Name 随意（如 Fntv-Plus）、类型选 web、Commercial 选 non-commercial、Purpose 选 hobbyist、Redirect/Homepage 填任意可达网址（如你的 GitHub 仓库）；③ 提交后复制 Client ID 填入下方 → 保存 → 打开开关。');
     const malReal = { v: '' };
     const malKey = mkMaskedKey(malBody, 'MAL Client ID（可选，注册即用）', malReal);
     const malBtns = mkExtBtnRow(malBody);
