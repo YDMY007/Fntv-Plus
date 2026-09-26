@@ -6014,6 +6014,109 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
   }
 
+  /** [lc-1250] CSS 颜色字面量 → rgba（支持 rgb/rgba() 与 #hex3/4/6/8）。 */
+  function _cssColorToRgba(s: string): { r: number; g: number; b: number; a: number } | null {
+    const m = s.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+      const p = m[1].split(',').map(x => parseFloat(x.trim()));
+      if (p.length >= 3 && !isNaN(p[0]) && !isNaN(p[1]) && !isNaN(p[2])) {
+        return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 ? p[3] : 1 };
+      }
+      return null;
+    }
+    const h = s.match(/^#([0-9a-f]{3,8})$/i);
+    if (h) {
+      const v = h[1];
+      if (v.length === 3 || v.length === 4) {
+        return {
+          r: parseInt(v[0] + v[0], 16), g: parseInt(v[1] + v[1], 16), b: parseInt(v[2] + v[2], 16),
+          a: v.length === 4 ? parseInt(v[3] + v[3], 16) / 255 : 1,
+        };
+      }
+      if (v.length === 6 || v.length === 8) {
+        return {
+          r: parseInt(v.slice(0, 2), 16), g: parseInt(v.slice(2, 4), 16), b: parseInt(v.slice(4, 6), 16),
+          a: v.length === 8 ? parseInt(v.slice(6, 8), 16) / 255 : 1,
+        };
+      }
+    }
+    return null;
+  }
+
+  /** [lc-1250] 估算纯色 linear-gradient 遮罩（无 url）在图标中心处的局部 rgba。
+   *  背景: lc-925 采样器原先把 hero 的黑色渐变遮罩整层跳过（backgroundImage 无 url()
+   *  即 continue），刮削后的亮封面（左上角白底文字区）被采成"亮底" → 图标画成深色
+   *  压在暗 hero 上反色。此处按图标位置解析渐变在该点的 alpha/颜色——仅支持水平/
+   *  垂直方向（fnOS 实际 scrim 就是 to bottom 黑渐变 + 90deg .gradient-for-full 两种，
+   *  lc-989 实测），斜向/复杂渐变返回 null 维持旧行为。 */
+  function gradientOverlayAt(el: HTMLElement, bgImage: string, px: number, py: number): { l: number; a: number } | null {
+    if (!bgImage || bgImage.indexOf('linear-gradient') < 0 || bgImage.indexOf('url(') >= 0) return null;
+    const open = bgImage.indexOf('(', bgImage.indexOf('linear-gradient'));
+    let depth = 0, close = -1;
+    for (let i = open; i >= 0 && i < bgImage.length; i++) {
+      if (bgImage[i] === '(') depth++;
+      else if (bgImage[i] === ')') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (open < 0 || close < 0) return null;
+    const inner = bgImage.slice(open + 1, close);
+    // 顶层逗号切分（rgba() 内的逗号按括号深度跳过）
+    const parts: string[] = [];
+    let buf = '', d2 = 0;
+    for (const ch of inner) {
+      if (ch === '(') d2++; else if (ch === ')') d2--;
+      if (ch === ',' && d2 === 0) { parts.push(buf.trim()); buf = ''; } else buf += ch;
+    }
+    if (buf.trim()) parts.push(buf.trim());
+    if (parts.length < 2) return null;
+    // 方向段（首段非颜色时）: 仅水平/垂直
+    let horiz = false, reverse = false, startIdx = 0;
+    const first = parts[0].toLowerCase();
+    if (!/^(rgba?\(|hsla?\(|#)/.test(first)) {
+      startIdx = 1;
+      if (first.indexOf('to right') >= 0 || first.indexOf('90deg') >= 0) horiz = true;
+      else if (first.indexOf('to left') >= 0 || first.indexOf('270deg') >= 0) { horiz = true; reverse = true; }
+      else if (first.indexOf('to bottom') >= 0 || first.indexOf('180deg') >= 0) horiz = false;
+      else if (first.indexOf('to top') >= 0 || first.indexOf('0deg') >= 0) { horiz = false; reverse = true; }
+      else return null;
+    }
+    // 颜色停靠点（无 % 位置时按序均分——CSS 缺省语义的近似）
+    const segs = parts.slice(startIdx);
+    const stops: { pos: number; r: number; g: number; b: number; a: number }[] = [];
+    for (let i = 0; i < segs.length; i++) {
+      const cm = segs[i].match(/(rgba?\([^)]*\)|#[0-9a-f]{3,8})/i);
+      if (!cm) continue;
+      const col = _cssColorToRgba(cm[1]);
+      if (!col) continue;
+      const pm = segs[i].match(/([\d.]+)\s*%/);
+      const pos = pm ? Math.max(0, Math.min(1, parseFloat(pm[1]) / 100))
+        : (segs.length > 1 ? i / (segs.length - 1) : 0);
+      stops.push({ pos, r: col.r, g: col.g, b: col.b, a: col.a });
+    }
+    if (stops.length < 2) return null;
+    stops.sort((a, b) => a.pos - b.pos);
+    // 图标中心投影到渐变轴 t ∈ [0,1]
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    let t = horiz ? (px - r.left) / r.width : (py - r.top) / r.height;
+    if (reverse) t = 1 - t;
+    t = Math.max(0, Math.min(1, t));
+    // 相邻停靠点线性插值
+    let c = stops[stops.length - 1];
+    if (t <= stops[0].pos) c = stops[0];
+    else {
+      for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i], b = stops[i + 1];
+        if (t >= a.pos && t <= b.pos) {
+          const f = b.pos > a.pos ? (t - a.pos) / (b.pos - a.pos) : 0;
+          c = { pos: t, r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f, a: a.a + (b.a - a.a) * f };
+          break;
+        }
+      }
+    }
+    if (c.a < 0.05) return null; // 该位置几乎透明 → 无遮盖，继续往下找底层
+    return { l: _lumOf(c.r, c.g, c.b), a: c.a };
+  }
+
   /** 采样某个图标"背后那一层"的亮度。返回 null 表示拿不到(交上层兜底)。 */
   async function detectBehindLuminance(icon: HTMLElement): Promise<number | null> {
     const r = icon.getBoundingClientRect();
@@ -6048,9 +6151,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           if (a >= 0.05) overlays.push({ l: _lumOf(p[0], p[1], p[2]), a });
         }
       }
-      // ② 背景图(纯渐变无 url() 会自动跳过, 继续往下找)
+      // ② 背景图/渐变: 纯渐变遮罩（无 url）按图标位置估算局部 rgba 计入合成
+      //   [lc-1250] 以前整层跳过 → hero 黑渐变不计入，亮封面左上被采成"亮底"误判反色
       const bi = cs.backgroundImage || '';
       if (bi && bi !== 'none') {
+        const g = gradientOverlayAt(el, bi, x, y);
+        if (g) {
+          if (g.a >= 0.5) return blend(g.l);
+          overlays.push(g);
+        }
         const u = bi.match(/url\(["']?([^"')]+)["']?\)/);
         if (u && u[1]) {
           const l = await imageTopLeftLuminance(u[1]);
@@ -6059,6 +6168,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       // ③ <img> 元素
       if (el.tagName === 'IMG') {
+        // [lc-1250] 详情页 hero 背景图跳过: fnOS 恒在 hero 图上叠暗色渐变（lc-989 实测
+        // 顶栏三层恒暗、图片贡献 ≤4%），原图左上角亮度不代表视觉背景——刮削后的亮封面
+        // 会把图标误判成"亮底"。跳过后继续往下命中遮罩层 / hero 实底 rgb(25,25,26)。
+        if (isDetailPage() && el.closest('.semi-always-dark')) continue;
         const src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || '';
         if (src) {
           const l = await imageTopLeftLuminance(src);
