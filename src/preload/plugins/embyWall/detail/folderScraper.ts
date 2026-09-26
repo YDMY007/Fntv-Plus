@@ -298,11 +298,26 @@ async function runFolderScraper(btn: HTMLButtonElement): Promise<void> {
 
 // ── 按钮挂载（jav.ts 同款 body 级浮动胶囊：文件夹页无「选集」标题锚点可内联）──
 
-const FOLDER_BTN_CSS = 'position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;'
-  + 'padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;'
-  + 'background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);'
-  + 'box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);'
-  + 'transition:background .15s,transform .15s;user-select:none;';
+const FOLDER_BTN_STYLE_ID = 'fnos-folder-scraper-style';
+
+/** [lc-1250] 按钮样式走注入样式表而非内联 style：用户实测内联样式被运行时某环节反复
+ *  清写（app.log 有「内联样式被外部改动/巡检重打」循环，元凶未定位），清掉后按钮变
+ *  白底黑字默认态、且重打会把 bottom 复位 26px 造成两按钮叠跳。样式表方案下元素
+ *  内联被清多少次都不影响渲染；避让位置用类切换（.fnos-over-jav）。 */
+function ensureBtnStylesheet(): void {
+  const existing = document.getElementById(FOLDER_BTN_STYLE_ID) as HTMLStyleElement | null;
+  if (existing && existing.isConnected) return;
+  const st = document.createElement('style');
+  st.id = FOLDER_BTN_STYLE_ID;
+  st.textContent = '#fnos-folder-scraper-btn{position:fixed;right:18px;bottom:26px;z-index:2147483500;'
+    + 'display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;'
+    + 'font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;'
+    + 'color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);'
+    + 'backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;'
+    + 'user-select:none;}'
+    + '#fnos-folder-scraper-btn.fnos-over-jav{bottom:70px;}';
+  (document.head || document.documentElement).appendChild(st);
+}
 
 function makeBtn(): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -311,35 +326,11 @@ function makeBtn(): HTMLButtonElement {
   btn.textContent = '⟳ 文件夹刮削';
   btn.setAttribute('title', '把本文件夹内文件的文件名发给自定义刮削服务，按返回数据回填各文件的标题/简介'
     + '（侧栏设置 → 自定义刮削 中配置；子文件夹请进入后逐层刮削）');
-  btn.style.cssText = FOLDER_BTN_CSS;
   btn.setAttribute('data-fnos-ui', '1'); // 白底清除器保护
   btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-1px)'; });
   btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
   btn.addEventListener('click', (e: Event) => { e.preventDefault(); e.stopPropagation(); void runFolderScraper(btn); });
   return btn;
-}
-
-/** [lc-1250] 样式自愈 + 元凶诊断：用户实测按钮曾变成白底黑字（=内联样式被运行时某环
- *  节清掉后的浏览器默认态；静态排查全部清理器/主题规则均未命中，data-fnos-ui 保护与
- *  jav 按钮完全一致但 jav 正常）。对策：
- *  ① ensure/4s 巡检发现 style 丢失暗底(28,24,40)即重打完整样式并留痕日志；
- *  ② 挂载后 60s 内监听 style 属性变更，旧值→新值写进 app.log——下次复现可直接定位元凶。 */
-function ensureBtnStyleFresh(btn: HTMLButtonElement): void {
-  if ((btn.getAttribute('style') || '').indexOf('28,24,40') < 0) {
-    btn.style.cssText = FOLDER_BTN_CSS;
-    log('[folderScraper] 按钮内联样式被外部改动, 已重打');
-  }
-  if (!(btn as any)._styleWatch) {
-    (btn as any)._styleWatch = '1';
-    const mo = new MutationObserver((muts) => {
-      for (const m of muts) {
-        log('[folderScraper] style 被改 旧=[' + String(m.oldValue || '').slice(0, 90)
-          + '] 新=[' + String(btn.getAttribute('style') || '').slice(0, 90) + ']');
-      }
-    });
-    mo.observe(btn, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
-    window.setTimeout(() => mo.disconnect(), 60000);
-  }
 }
 
 /** [lc-1250] 位置自愈: jav 按钮挂载/摘除时由 jav.ts 反向调用, 立即重算避让位置。
@@ -348,11 +339,12 @@ function ensureBtnStyleFresh(btn: HTMLButtonElement): void {
 export function repositionFolderScraperButton(): void {
   const b = document.getElementById(FOLDER_BTN_ID);
   if (!b || !b.isConnected) return;
+  ensureBtnStylesheet();
   const javVisible = !!document.getElementById('fnos-jav-btn')?.isConnected;
-  const want = javVisible ? '70px' : '26px';
-  if (b.style.bottom !== want) {
-    b.style.bottom = want;
-    dlog('[folderScraper] 避让位置重算 → ' + want);
+  const want = javVisible ? 'fnos-over-jav' : '';
+  if (b.classList.contains('fnos-over-jav') !== javVisible) {
+    if (want) b.classList.add('fnos-over-jav'); else b.classList.remove('fnos-over-jav');
+    dlog('[folderScraper] 避让位置重算 → ' + (javVisible ? '70px' : '26px'));
   }
 }
 
@@ -363,22 +355,19 @@ export function repositionFolderScraperButton(): void {
  *  repositionFolderScraperButton 即时重算，4s 巡检兜底。 */
 export function ensureFolderScraperButton(): void {
   if (!folderGuid()) { removeFolderScraperButton(); return; }
+  ensureBtnStylesheet();
   const existing = document.getElementById(FOLDER_BTN_ID);
   const btn = (existing && existing.isConnected) ? existing as HTMLButtonElement : makeBtn();
-  ensureBtnStyleFresh(btn);
   repositionFolderScraperButton();
   if (existing && existing.isConnected) return;
   document.body.appendChild(btn);
   dlog('[folderScraper] 按钮已挂载 ' + location.pathname);
-  // 4s 巡检兜底（样式被中途清掉/位置错乱时不必等下次导航）：按钮不在了自动停表
+  // 4s 巡检兜底（样式表被移除时不必等下次导航）：按钮不在了自动停表
   if (!(window as any).__fnosFolderBtnGuard) {
     (window as any).__fnosFolderBtnGuard = window.setInterval(() => {
       const b = document.getElementById(FOLDER_BTN_ID);
       if (!b || !b.isConnected) { window.clearInterval((window as any).__fnosFolderBtnGuard); return; }
-      if ((b.getAttribute('style') || '').indexOf('28,24,40') < 0) {
-        b.style.cssText = FOLDER_BTN_CSS;
-        log('[folderScraper] 巡检重打样式');
-      }
+      ensureBtnStylesheet();
       repositionFolderScraperButton();
     }, 4000);
   }
