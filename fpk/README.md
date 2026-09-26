@@ -17,7 +17,7 @@
 > 前往桌面客户端：**https://github.com/YDMY007/Fntv-Plus**
 
 > **📌 本目录（`fpk/`）已并入 [Fntv-Plus 主仓库](https://github.com/YDMY007/Fntv-Plus)**（原 Fntv-Plus-fpk 仓库停止更新，历史完整保留在 git 中）。
-> 开发流程：**桌面版先行** —— 前端增强改动先在主仓库 `src/preload` 开发验证，确认无误后再移植到 `fpk/src/preload` 这份网页端副本，然后用 `fpk/一键打包.bat` 出包。安装包（fpk / exe）均为手动构建、手动上传到 [Releases](https://github.com/YDMY007/Fntv-Plus/releases)。
+> 开发流程：**桌面版先行** —— 前端增强改动先在主仓库 `src/preload` 开发验证，确认无误后再移植到 `fpk/src/preload` 这份网页端副本，然后用 `fpk/打包.bat`（WinForms GUI）出包，产物输出到 `<仓库根>/release/`。安装包（fpk / exe）均为手动构建、手动上传到 [Releases](https://github.com/YDMY007/Fntv-Plus/releases)。
 
 ---
 
@@ -117,14 +117,16 @@
 | 账号与网络 | Bangumi Token / TMDB Key / 豆瓣 Cookie / 自定义代理 / TMDB 免梯子直连 |
 | 自定义刮削 | 自定义刮削服务（未正式生效，置顶）/ 自定义刮削源 / Fanart.tv / TVMaze / OMDb / MyAnimeList / Jav 刮削 |
 | 诊断与日志 | 诊断信息 / 调试日志 |
-| 关于 | 项目信息 / 匿名使用统计（开关 / 立即上报 / 重置匿名 ID） |
+| 关于 | 项目信息 / 匿名使用统计（开关；匿名 ID 为机器级固定哈希，重装不变） |
 
 ## 打包（从源码构建）
 
 | 通道 | 命令 | 版号规则 | 产物 |
 |---|---|---|---|
-| **开发测试版** | 双击 `一键打包.bat`（或 `build-fpk.exe build`） | 3 段式 `x.y.z`（打包器自动维护 manifest） | `Fntv-Plus-v<号>.fpk` |
-| **正式发布版** | 双击 `发布打包.bat` → 网页 GUI（`127.0.0.1:8199`） | 网页上填写的正式版号（大写 V） | `Fntv-Plus-V<版号去点>.fpk` |
+| **开发测试版** | 双击 `打包.bat` → GUI 选「开发测试版」（或 `build-fpk.exe build`） | 3 段式 `x.y.z`（打包器自动维护 manifest） | `Fntv-Plus-v<号>.fpk` |
+| **正式发布版** | 双击 `打包.bat` → GUI 选「正式发布版」，填显示名与版号（或 `build-fpk.exe release --name … --version …`） | GUI 填写的正式版号（大写 V） | `Fntv-Plus-V<版号去点>.fpk` |
+
+> 两种通道的产物都自动输出到 `<仓库根>/release/`；引擎缺失时 GUI 会自动用 go 编译。
 
 > 飞牛商店要求版本号固定 3 段式 `x.y.z`（可带数字预发布后缀 `x.y.z-n`）；4 段式无效。
 

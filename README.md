@@ -324,9 +324,8 @@ Fntv-Plus/
 **开发流程：桌面版先行** —— 前端增强改动先在本仓库 `src/preload` 开发并验证，确认无误后再移植到 `fpk/src/preload` 这份网页端副本，两份代码间的差异用 `diff -rq src/preload fpk/src/preload` 排查。fpk 的 Go 后端改动直接在 `fpk/src/go` 进行。
 
 **打包发布**：fpk 与桌面安装包（exe）均为手动构建、手动上传 Release——
-- fpk 开发包：进入 `fpk/` 目录执行 `一键打包.bat`（需先在 `fpk/` 下 `go build -o build-fpk.exe ./tools/buildfpk`）；
-- fpk 正式版：`fpk/发布打包.bat`（网页 GUI 填显示名与正式版号）；
-- 产物 `Fntv-Plus-vXXX.fpk` 在飞牛 fnOS 应用中心手动安装，或与桌面安装包一起挂到 GitHub Release。
+- 双击 `fpk/打包.bat`（WinForms GUI，引擎缺失时自动编译）：选「开发测试版」或「正式发布版」（填显示名与版号）；
+- 产物自动输出到 `<仓库根>/release/`，在飞牛 fnOS 应用中心手动安装，或与桌面安装包一起挂到 GitHub Release。
 
 ---
 
