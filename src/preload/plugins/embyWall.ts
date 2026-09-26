@@ -4469,25 +4469,23 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const secBodyMeta = secMetaScrape.body;
     secBodyMeta.style.cssText = 'padding:8px 12px 12px;flex:1 1 auto;display:flex;flex-direction:column;gap:2px;';
 
-    // 🚧 功能开发中横幅（用户要求置顶）：以下各卡已按 fpk v1.10.2 七卡口径接入，但整体仍处
-    // 验证期——自定义刮削服务协议已定但官方多源聚合未就绪，先明示「未正式生效」防误判为成品。
+    // ✅ 已上线横幅（lc-1250：自定义刮削服务正式发布, 替换原「功能开发中」警示）
     const metaWip = document.createElement('div');
     metaWip.style.cssText = 'display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:9px 12px;border-radius:10px;'
-      + 'background:rgba(255,180,60,.10);border:1px solid rgba(255,180,60,.35);';
+      + 'background:rgba(80,180,110,.10);border:1px solid rgba(80,180,110,.35);';
     const metaWipIcon = document.createElement('span');
-    metaWipIcon.textContent = '🚧';
+    metaWipIcon.textContent = '✅';
     metaWipIcon.style.cssText = 'font-size:14px;flex-shrink:0;';
     const metaWipText = document.createElement('div');
     metaWipText.style.cssText = 'font-size:12px;line-height:1.6;color:var(--fnos-ui-text);flex:1 1 auto;';
-    metaWipText.innerHTML = t('<b>功能开发中，未正式生效</b> —— 以下选项为预览，可能随版本调整：'
-      + '各卡当前可正常配置并使用（季页「⟳ 自定义刮削」/「⟳ 补全集信息」/电影页「⟳ jav 刮削」'
-      + '/个人视频文件夹页「⟳ 文件夹刮削」），'
-      + '多源聚合与批量刮削任务开发中，敬请期待。');
+    metaWipText.innerHTML = t('<b>自定义刮削已上线</b> —— 配置下方服务地址即用：'
+      + '季页「⟳ 自定义刮削」（分集标题/简介回填）、个人视频文件夹页「⟳ 文件夹刮削」（按文件名批量回填）。'
+      + '「⟳ 补全集信息」走 TMDB、电影页与文件夹页「⟳ jav 刮削」走 javbus，无需自建服务。');
     const metaWipBadge = document.createElement('span');
     metaWipBadge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;align-self:flex-start;flex-shrink:0;'
       + 'padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;'
-      + 'background:rgba(255,180,60,.14);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.4);';
-    metaWipBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t('未正式生效');
+      + 'background:rgba(80,180,110,.14);color:var(--fnos-ui-ok,#3f9d63);border:1px solid rgba(80,180,110,.4);';
+    metaWipBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-ok,#3f9d63);display:inline-block;"></span>' + t('已上线');
     metaWip.appendChild(metaWipIcon);
     metaWip.appendChild(metaWipText);
     metaWip.appendChild(metaWipBadge);
@@ -4496,9 +4494,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ── 自定义刮削源卡 ──
     const csHint = document.createElement('div');
     csHint.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);margin:4px 0 8px;line-height:1.6;';
-    csHint.innerHTML = t('把季标题/季号/TMDB 等锚点发给<b>你自建的刮削服务</b>，用返回的分集标题/简介回填飞牛'
-      + '（只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文；写回带字段锁）。'
-      + '<br/>个人视频文件夹页另有「⟳ 文件夹刮削」浮动按钮：按文件名发给服务，回填每个文件条目的标题/简介。'
+    csHint.innerHTML = t('把季标题/季号/TMDB 等锚点发给<b>你自建的刮削服务</b>，用返回的分集标题/简介回填飞牛元数据'
+      + '（只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文；写回带字段锁，不碰你手动改过的内容）。'
+      + '<br/>个人视频文件夹页「⟳ 文件夹刮削」：按文件名逐项匹配，批量回填每个文件条目的标题/简介，子文件夹自动递归。'
       + '<br/>请求由桌面端代理发出，服务无需配置 CORS。');
     secBodyMeta.appendChild(csHint);
 
