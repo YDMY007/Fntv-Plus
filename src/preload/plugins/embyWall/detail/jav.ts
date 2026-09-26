@@ -95,10 +95,17 @@ function makeBtn(): HTMLButtonElement {
 
 /** 幂等挂载：电影/folder 路由 + 开启 → 确保按钮在；否则撤按钮。 */
 export function ensureJavButton(): void {
-  if (!S.javEnabled || !detailGuid()) { removeJavButton(); return; }
+  const onList = listOtherPage();
+  if (!S.javEnabled || (!detailGuid() && !onList)) { removeJavButton(); return; }
   const existing = document.getElementById(JAV_BTN_ID);
-  if (existing && existing.isConnected) return;
+  if (existing && existing.isConnected) {
+    // 路由间共用一枚按钮：按当前页型刷新文案（运行中不打断进度显示）
+    if (!_running) setBtn(existing, onList ? '⟳ 全库刮削' : '⟳ jav 刮削');
+    return;
+  }
   makeBtn();
+  const b = document.getElementById(JAV_BTN_ID);
+  if (b && onList) setBtn(b, '⟳ 全库刮削');
   dlog('[jav] 按钮已挂载 ' + location.pathname);
 }
 
@@ -117,7 +124,7 @@ try {
   ipcRenderer.invoke('settings:get').then((s: any) => {
     if (!s || typeof s !== 'object') return;
     S.javEnabled = s.javEnabled === true;
-    if (S.javEnabled && detailGuid()) ensureJavButton();
+    if (S.javEnabled && (detailGuid() || listOtherPage())) ensureJavButton();
   }).catch(() => { /* ignore */ });
 } catch { /* ignore */ }
 
@@ -263,9 +270,74 @@ async function backfillOne(origin: string, guid: string, prep: { meta: any; ov: 
   return { saved, verified, done };
 }
 
+/** [lc-1250] 其他视频库列表页路由（/v/list/other，query 不参与判定）。 */
+export function listOtherPage(): boolean {
+  return /^\/v\/list\/other\/?$/.test(location.pathname);
+}
+
+/** [lc-1250] 单条准备：按标题查 javbus → 简介/演员/封面一次性备齐。
+ *  返回 { nocode:true }（标题识别不到番号）/ { err }（javbus 失败等）/ { prep }（成功）。 */
+async function javPrepByTitle(origin: string, guid: string, title: string): Promise<{ nocode?: boolean; err?: string; prep?: { meta: any; ov: string; credits: any[]; coverHash: string } }> {
+  const r: any = title ? await ipcRenderer.invoke('jav:lookup', { title, guid }) : null;
+  if (!r || !r.ok) {
+    const err = String((r && r.error) || '查询失败');
+    return err.indexOf('番号') >= 0 ? { nocode: true } : { err };
+  }
+  const meta = r.meta || {};
+  const ov = buildOverview(meta);
+  const credits = await buildCredits(origin, meta).catch(() => [] as any[]);
+  let coverHash = '';
+  if (meta.cover) {
+    try {
+      const img: any = await ipcRenderer.invoke('jav:image', { url: meta.cover });
+      if (img && img.ok && img.dataUrl) {
+        coverHash = (await uploadImageToFnos(origin, img.dataUrl, 'poster')) || '';
+      }
+    } catch (e: any) { dlog('[jav] 封面准备失败: ' + String(e).substring(0, 80)); }
+  }
+  return { prep: { meta, ov, credits, coverHash } };
+}
+
+/** [lc-1250] 单条「按自身标题番号查询+完整落库」。返回 'ok' | 'nocode' | 'fail'。 */
+async function javScrapeByTitle(origin: string, guid: string, title: string): Promise<'ok' | 'nocode' | 'fail'> {
+  const p = await javPrepByTitle(origin, guid, title);
+  if (p.nocode) return 'nocode';
+  if (!p.prep) return 'fail';
+  const res = await backfillOne(origin, guid, p.prep);
+  return res.saved ? 'ok' : 'fail';
+}
+
+/** [lc-1250] 全库根级枚举：不带 parent_guid 的 item/list 即全库视图（实测返回
+ *  Directory/Movie/TV 等）。只收 Directory（须 ancestor_category=Others，防止把
+ *  电视剧库目录拖进来）与未识别 Video；Movie/TV 已识别作品跳过。分页取完。 */
+async function listLibraryRoot(origin: string): Promise<{ dirs: string[]; videos: string[] }> {
+  const dirs: string[] = [];
+  const videos: string[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const body = { sort_column: 'sort_title', sort_type: 'ASC', page, page_size: 200, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/list', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/item/list', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) break;
+    const j = await resp.json().catch(() => null);
+    const list = (j && j.code === 0 && j.data && Array.isArray(j.data.list)) ? j.data.list : [];
+    for (const it of list) {
+      if (!it || !it.guid) continue;
+      const g = String(it.guid);
+      const t = String(it.type || '').toLowerCase();
+      if (t === 'directory' && String(it.ancestor_category || '') === 'Others') dirs.push(g);
+      else if (t === 'video') videos.push(g);
+    }
+    if (list.length < 200) break;
+  }
+  return { dirs, videos };
+}
+
 /** [lc-1250] 混合番号文件夹批量刮削：夹名识别不到番号时，逐子视频按各自文件名番号
- *  查询 + 回填（顺序执行——javbus 忌并发，限流/封禁风险；每条完整走
- *  查询 → 简介/演员/封面 → backfillOne）。返回按钮结果摘要。 */
+ *  查询 + 回填（顺序执行——javbus 忌并发，限流/封禁风险）。返回按钮结果摘要。 */
 async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid: string): Promise<string> {
   setBtn(btn, '⏳ 枚举子视频…');
   const children = await folderChildVideos(origin, fGuid);
@@ -276,27 +348,8 @@ async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid
     try {
       const ed = await fnosGetEditDetail(origin, children[i]);
       const childTitle = String((ed && (ed.title || ed.name)) || '').trim();
-      const r: any = childTitle ? await ipcRenderer.invoke('jav:lookup', { title: childTitle, guid: children[i] }) : null;
-      if (!r || !r.ok) {
-        const err = String((r && r.error) || '');
-        if (err.indexOf('番号') >= 0) nocode++; else fail++;
-        continue;
-      }
-      const meta = r.meta || {};
-      const ov = buildOverview(meta);
-      setBtn(btn, '⏳ ' + (i + 1) + '/' + children.length + ' 演员/封面…');
-      const credits = await buildCredits(origin, meta).catch(() => [] as any[]);
-      let coverHash = '';
-      if (meta.cover) {
-        try {
-          const img: any = await ipcRenderer.invoke('jav:image', { url: meta.cover });
-          if (img && img.ok && img.dataUrl) {
-            coverHash = (await uploadImageToFnos(origin, img.dataUrl, 'poster')) || '';
-          }
-        } catch (e: any) { dlog('[jav] 批量封面失败: ' + String(e).substring(0, 80)); }
-      }
-      const res = await backfillOne(origin, children[i], { meta, ov, credits, coverHash });
-      if (res.saved) ok++; else fail++;
+      const st = await javScrapeByTitle(origin, children[i], childTitle);
+      if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
     } catch (e: any) {
       fail++;
       dlog('[jav] 批量单条异常: ' + String(e && e.message || e).substring(0, 100));
@@ -308,13 +361,89 @@ async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid
   return '⚠ 回填失败';
 }
 
+/** [lc-1250] 其他视频库列表页（/v/list/other）一键全库刮削：根级 Directory(Others) 按
+ *  文件夹页同款语义处理（夹名番号命中 → 本体+子视频整体回填=单番号夹；未命中 →
+ *  逐子视频按各自文件名刮=混合夹），根级未识别 Video 按自身标题刮；
+ *  Movie/TV 等已识别作品一律跳过。顺序执行，按钮实时进度。 */
+async function runJavLibrary(btn: HTMLButtonElement, origin: string): Promise<string> {
+  setBtn(btn, '⏳ 枚举库内容…');
+  const { dirs, videos } = await listLibraryRoot(origin);
+  if (!dirs.length && !videos.length) return '⚠ 未枚举到可刮内容';
+  const childrenOf = new Map<string, string[]>();
+  let total = videos.length;
+  for (const d of dirs) {
+    const ch = await folderChildVideos(origin, d);
+    childrenOf.set(d, ch);
+    total += ch.length;
+  }
+  let ok = 0, fail = 0, nocode = 0, done = 0;
+  const tick = (): void => { setBtn(btn, '⏳ 全库刮削 ' + done + '/' + total); };
+  for (const d of dirs) {
+    const ch = childrenOf.get(d) || [];
+    const ed = await fnosGetEditDetail(origin, d).catch(() => null);
+    const dTitle = String((ed && (ed.title || ed.name)) || '').trim();
+    const p = await javPrepByTitle(origin, d, dTitle);
+    if (p.prep) {
+      // 单番号夹：本体 + 全部子视频共用同一份元数据（与文件夹页整体回填同语义）
+      const r1 = await backfillOne(origin, d, p.prep);
+      if (r1.saved) ok++; else fail++;
+      done++; tick();
+      for (const c of ch) {
+        try {
+          const r2 = await backfillOne(origin, c, p.prep);
+          if (r2.saved) ok++; else fail++;
+        } catch (e: any) { fail++; }
+        done++; tick();
+      }
+    } else {
+      if (p.nocode) nocode++; // 夹名无番号不单计失败，子视频各自刮
+      for (const c of ch) {
+        try {
+          const ced = await fnosGetEditDetail(origin, c).catch(() => null);
+          const cTitle = String((ced && (ced.title || ced.name)) || '').trim();
+          const st = await javScrapeByTitle(origin, c, cTitle);
+          if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
+        } catch (e: any) { fail++; }
+        done++; tick();
+      }
+    }
+  }
+  for (const v of videos) {
+    try {
+      const ed = await fnosGetEditDetail(origin, v).catch(() => null);
+      const vTitle = String((ed && (ed.title || ed.name)) || '').trim();
+      const st = await javScrapeByTitle(origin, v, vTitle);
+      if (st === 'ok') ok++; else if (st === 'nocode') nocode++; else fail++;
+    } catch (e: any) { fail++; }
+    done++; tick();
+  }
+  log('[jav] 全库批量完成: ok=' + ok + ' fail=' + fail + ' nocode=' + nocode);
+  if (ok) return '✓ 已回填 ' + ok + (nocode ? ' · 未识别 ' + nocode : '') + (fail ? ' · 失败 ' + fail : '');
+  if (nocode) return '⚠ ' + nocode + ' 个未识别番号';
+  return '⚠ 回填失败';
+}
+
 /** 主流程：读条目 → javbus 查询 → 一次性准备（演员/封面跨条目复用）→ 双层回填 → hero 就地刷新。 */
 async function runJav(btn: HTMLButtonElement): Promise<void> {
+  if (_running) return;
+  const origin = location.origin;
+  // [lc-1250] 其他视频库列表页：一键全库刮削（无单条目上下文，独立分支）
+  if (listOtherPage()) {
+    _running = true;
+    try {
+      const summary = await runJavLibrary(btn, origin);
+      setBtn(btn, summary, summary.indexOf('⚠') === 0 ? summary : 'jav 全库刮削完成，可重进页面查看。');
+      btn.style.color = summary.indexOf('⚠') === 0 ? 'var(--fnos-ui-warn,#b06a3a)' : '';
+      window.setTimeout(() => {
+        if (btn.isConnected) { btn.style.color = ''; setBtn(btn, '⟳ 全库刮削'); }
+      }, 8000);
+    } finally { _running = false; }
+    return;
+  }
   const folderG = folderGuid();
   const guid = folderG || otherGuid() || movieGuid();
-  if (!guid || _running) return;
+  if (!guid) return;
   _running = true;
-  const origin = location.origin;
   try {
     // 1) 读条目（取当前标题供番号提取）
     const data = await fnosGetEditDetail(origin, guid);
