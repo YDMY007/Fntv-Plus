@@ -175,7 +175,12 @@ async function runFolderScraper(btn: HTMLButtonElement): Promise<void> {
   if (!guid || _running) return;
   const url = String(S.customScraperUrl || '').trim();
   if (!S.customScraperEnabled || !url) {
-    setBtn(btn, '⚠ 未配置', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 开启并填写地址。');
+    // 区分两种未就绪：开关未开 vs 开关已开但没填地址（用户反馈「打开了开关仍提示未配置」的混淆点）
+    if (!S.customScraperEnabled) {
+      setBtn(btn, '⚠ 未启用', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 打开开关。');
+    } else {
+      setBtn(btn, '⚠ 未填服务地址', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 填写并保存刮削服务地址。');
+    }
     window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ 文件夹刮削'); }, 5000);
     return;
   }
@@ -313,12 +318,17 @@ function makeBtn(): HTMLButtonElement {
 }
 
 /** 幂等挂载：非文件夹页 → 摘除。按钮在文件夹页**常显**（可发现性优先）：
- *  未启用/未配置自建服务时点击给出「⚠ 未配置」指引（runFolderScraper 内），不会误写任何数据。 */
+ *  未启用/未填地址时点击给出对应指引（runFolderScraper 内），不会误写任何数据。
+ *  位置避让：jav 刮削按钮（lc-1222 起同样挂 /v/folder/ 页，同坐标 bottom:26）在位时，
+ *  本按钮上移到其上方，避免两枚胶囊层叠（jav 在下、本按钮在上）。 */
 export function ensureFolderScraperButton(): void {
   if (!folderGuid()) { removeFolderScraperButton(); return; }
   const existing = document.getElementById(FOLDER_BTN_ID);
+  const btn = (existing && existing.isConnected) ? existing as HTMLButtonElement : makeBtn();
+  const javVisible = !!document.getElementById('fnos-jav-btn')?.isConnected;
+  btn.style.bottom = javVisible ? '70px' : '26px';
   if (existing && existing.isConnected) return;
-  document.body.appendChild(makeBtn());
+  document.body.appendChild(btn);
   dlog('[folderScraper] 按钮已挂载 ' + location.pathname);
 }
 
