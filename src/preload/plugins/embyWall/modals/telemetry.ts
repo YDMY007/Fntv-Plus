@@ -87,8 +87,8 @@ export function buildStatsCard(): HTMLElement {
   title.textContent = t('📊 匿名使用统计');
   wrap.appendChild(title);
   wrap.appendChild(mkRow('参与匿名统计', toggle.el));
-  wrap.appendChild(mkNote('开启后每天最多上报一次心跳，内容仅：随机匿名 ID + 应用版本 + 系统类型。'
-    + '不含账号、IP、媒体库与文件路径，服务端也不存 IP，可随时在此关闭。'));
+  wrap.appendChild(mkNote('开启后收集必须的应用版本 + 系统类型，用于日志反馈收集需要的系统信息，方便排查故障 Bug。'
+    + '不涉及账号、IP、媒体库及文件路径等隐私数据，服务端亦不做 IP 存储，可随时在这里关闭。'));
   wrap.appendChild(status);
 
   // 初值回填
