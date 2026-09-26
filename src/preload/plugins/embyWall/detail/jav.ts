@@ -17,6 +17,7 @@
 //   同一批导航钩子调度（embyWall.ts scheduleJavButton）。
 //   识别靠标题番号、不靠目录名（每用户目录结构/命名都不同）。folder 路由回填双层：
 //   文件夹本体 + 其下全部子视频（POST item/list {parent_guid,exclude_folder:1} type=Video，
+//   [lc-1250] 夹名识别不到番号（混合番号夹）→ 降级逐子视频按各自文件名番号批量刮，
 //   实测子项 guid 为裸 hex），一层影片一文件夹的整理习惯下即「整套落库」。
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
@@ -262,6 +263,51 @@ async function backfillOne(origin: string, guid: string, prep: { meta: any; ov: 
   return { saved, verified, done };
 }
 
+/** [lc-1250] 混合番号文件夹批量刮削：夹名识别不到番号时，逐子视频按各自文件名番号
+ *  查询 + 回填（顺序执行——javbus 忌并发，限流/封禁风险；每条完整走
+ *  查询 → 简介/演员/封面 → backfillOne）。返回按钮结果摘要。 */
+async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid: string): Promise<string> {
+  setBtn(btn, '⏳ 枚举子视频…');
+  const children = await folderChildVideos(origin, fGuid);
+  if (!children.length) return '⚠ 无子视频';
+  let ok = 0, fail = 0, nocode = 0;
+  for (let i = 0; i < children.length; i++) {
+    setBtn(btn, '⏳ 批量刮削 ' + (i + 1) + '/' + children.length);
+    try {
+      const ed = await fnosGetEditDetail(origin, children[i]);
+      const childTitle = String((ed && (ed.title || ed.name)) || '').trim();
+      const r: any = childTitle ? await ipcRenderer.invoke('jav:lookup', { title: childTitle, guid: children[i] }) : null;
+      if (!r || !r.ok) {
+        const err = String((r && r.error) || '');
+        if (err.indexOf('番号') >= 0) nocode++; else fail++;
+        continue;
+      }
+      const meta = r.meta || {};
+      const ov = buildOverview(meta);
+      setBtn(btn, '⏳ ' + (i + 1) + '/' + children.length + ' 演员/封面…');
+      const credits = await buildCredits(origin, meta).catch(() => [] as any[]);
+      let coverHash = '';
+      if (meta.cover) {
+        try {
+          const img: any = await ipcRenderer.invoke('jav:image', { url: meta.cover });
+          if (img && img.ok && img.dataUrl) {
+            coverHash = (await uploadImageToFnos(origin, img.dataUrl, 'poster')) || '';
+          }
+        } catch (e: any) { dlog('[jav] 批量封面失败: ' + String(e).substring(0, 80)); }
+      }
+      const res = await backfillOne(origin, children[i], { meta, ov, credits, coverHash });
+      if (res.saved) ok++; else fail++;
+    } catch (e: any) {
+      fail++;
+      dlog('[jav] 批量单条异常: ' + String(e && e.message || e).substring(0, 100));
+    }
+  }
+  log('[jav] 文件夹批量完成: ok=' + ok + ' fail=' + fail + ' nocode=' + nocode);
+  if (ok) return '✓ 已回填 ' + ok + (nocode ? ' · 未识别 ' + nocode : '') + (fail ? ' · 失败 ' + fail : '');
+  if (nocode) return '⚠ ' + nocode + ' 个未识别番号';
+  return '⚠ 回填失败';
+}
+
 /** 主流程：读条目 → javbus 查询 → 一次性准备（演员/封面跨条目复用）→ 双层回填 → hero 就地刷新。 */
 async function runJav(btn: HTMLButtonElement): Promise<void> {
   const folderG = folderGuid();
@@ -279,6 +325,17 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
     setBtn(btn, '⏳ jav 查询中…');
     const r: any = await ipcRenderer.invoke('jav:lookup', { title: curTitle, guid });
     if (!r || !r.ok) {
+      // [lc-1250] 文件夹名识别不到番号 → 混合番号文件夹场景：降级为逐子视频按各自
+      // 文件名番号批量刮削（用户诉求「在外面就刮削」；单番号分段夹仍走下方整体回填）
+      if (folderG) {
+        const summary = await runJavBatchChildren(btn, origin, folderG);
+        setBtn(btn, summary, summary.indexOf('⚠') === 0 ? summary : 'jav 文件夹批量刮削完成，可重进页面查看。');
+        btn.style.color = summary.indexOf('⚠') === 0 ? 'var(--fnos-ui-warn,#b06a3a)' : '';
+        window.setTimeout(() => {
+          if (btn.isConnected) { btn.style.color = ''; setBtn(btn, '⟳ jav 刮削'); }
+        }, 8000);
+        return;
+      }
       const err = String((r && r.error) || '查询失败');
       const noCode = err.indexOf('番号') >= 0;
       setBtn(btn, noCode ? '⚠ 未识别番号' : '⚠ javbus 失败', err);
