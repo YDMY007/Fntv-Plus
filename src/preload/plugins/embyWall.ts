@@ -5868,18 +5868,21 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [v351] 侧栏毛玻璃: 只要抽屉DOM存在就注入(无论开/关状态, openDrawer也会再调)
     const _dr = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
     if (_dr) applySidebarGlass(_dr);
-    // ② 汉堡键点击: 完全接管抽屉开合 (capture 阶段拦截飞牛原生 onClick, 避免双重控制)
-    //   [v325/v326 关键修正] 之前用冒泡且不拦截飞牛 → 飞牛原生 toggle 与我们的 inline 切换
-    //   双重控制, 宽屏下飞牛 onClick 有时激活、有时 no-op, 导致抽屉"能开不能收/卡死"。
-    //   改为: capture 阶段 stopImmediatePropagation 拦截飞牛, 由我们唯一用 inline style 控制显隐。
-    //   因从不修改 !hidden 类(飞牛 state 永远不变/与 DOM 一致), 不会触发 state 同步死锁
-    //   (与 v322 的 !hidden 类编辑死锁本质不同)。
-    //   [v329 动画] 开合不再瞬切 display, 改为 display:flex + 双rAF切 .drawer-open 类驱动 CSS 过渡
-    //     (overlay opacity 淡入 + 面板 translateX 滑入); 关闭时移除类、过渡结束(340ms)后再移除 display。
-    if (!(burger as any).dataset.burgerHooked) {
-      (burger as any).dataset.burgerHooked = '1';
-      burger.addEventListener('click', (e: Event) => {
-        if ((e.target as HTMLElement).closest('a')) return; // 🏠 首页链接放行(不拦截, 交给飞牛导航)
+    // ② 汉堡键点击: 完全接管抽屉开合 —— [lc-1250] 改为**文档级 capture 委托**。
+    //   旧方案把 click 钩子装在汉堡节点上(dataset.burgerHooked 幂等)，但 React 重渲染会
+    //   整节点替换顶栏（文件夹页实测：进页后 header 重挂 → 新节点无钩子 → 点击无反应，
+    //   日志可见 16:32:24 装钩后 16:32:47 前无任何 BURGER 点击记录），要等下次导航重跑
+    //   ensureBurgerVisible 才恢复。委托到 document 后无论节点怎么换都命中当前节点，
+    //   capture+stopImmediate 依旧抢在 React 之前拦截，避免双重控制。
+    //   [v329 动画] 开合走 display + .drawer-open 类驱动 CSS 过渡（不变）。
+    if (!(window as any).__fnosBurgerDelegated) {
+      (window as any).__fnosBurgerDelegated = '1';
+      document.addEventListener('click', (e: Event) => {
+        const t = e.target as HTMLElement;
+        if (!t || !t.closest) return;
+        if (t.closest('a')) return; // 🏠 首页链接放行(不拦截, 交给飞牛导航)
+        const burger = t.closest('[class*="lg:!hidden"]:not([class*="inset-0"])');
+        if (!burger) return;
         e.preventDefault();
         e.stopImmediatePropagation(); // 拦截飞牛原生 onClick, 避免双重控制
         const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
@@ -5888,7 +5891,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         if (drawer.classList.contains('drawer-open')) { animateCloseDrawer(drawer); log('BURGER -> CLOSE (anim)'); }
         else { openDrawer(drawer); log('BURGER -> OPEN (anim)'); }
       }, true); // capture 阶段, 抢在 React 之前拦截
-      log('BURGER click-hook installed (capture+stop)');
+      log('BURGER click-hook installed (document delegation)');
     }
     // ③ 遮罩/背板点击关闭: 点抽屉背板(非侧栏面板)即关闭
     //    [v326 修正] 之前用 `e.target === drawer` 太严格 —— 实际暗色背板是 drawer 的子元素(.absolute.inset-0),
