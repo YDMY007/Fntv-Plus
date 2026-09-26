@@ -96,6 +96,7 @@ function makeBtn(): HTMLButtonElement {
 
 /** 幂等挂载：电影/folder 路由 + 开启 → 确保按钮在；否则撤按钮。 */
 export function ensureJavButton(): void {
+  schedulePendingLayoutSwitch(); // [lc-1250] 有待切横幅时, 每次导航先补切
   const onList = listOtherPage();
   if (!S.javEnabled || (!detailGuid() && !onList)) { removeJavButton(); return; }
   const existing = document.getElementById(JAV_BTN_ID);
@@ -370,17 +371,17 @@ async function folderChildren(origin: string, fGuid: string): Promise<{ videos: 
 /** [lc-1250] jav 刮削成功后把「布局」自动切到「横幅海报」：刮入的封面是 1920×1080
  *  横版图，竖幅海报布局会上下裁切难看。实现走原生 UI 自动化（点开工具栏「布局」
  *  下拉 → 点「横幅海报」项），与用户手点完全同路径，不碰任何内部状态/私有 API。
- *  页面没有布局工具栏（详情页等）时静默跳过。 */
-async function switchLayoutToLandscape(): Promise<void> {
+ *  页面没有布局工具栏（详情页等）时返回 false（交给待切记账在下次导航补切）。 */
+async function switchLayoutToLandscape(): Promise<boolean> {
   try {
     // ① 工具栏「布局」触发器：叶子 span 文本精确匹配 + 可点祖先
     const spans = Array.from(document.querySelectorAll('span')) as HTMLElement[];
     const trigger = spans.find((s) => (s.textContent || '').trim() === '布局'
       && s.children.length === 0 && s.offsetParent !== null
       && s.closest('[class*="cursor-pointer"]'));
-    if (!trigger) { dlog('[jav] 未找到布局菜单（本页无布局工具栏），跳过横幅切换'); return; }
+    if (!trigger) { dlog('[jav] 未找到布局菜单（本页无布局工具栏），跳过横幅切换'); return false; }
     const host = (trigger.closest('[class*="cursor-pointer"]') as HTMLElement) || (trigger.parentElement as HTMLElement);
-    if (!host) return;
+    if (!host) return false;
     host.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     host.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     host.click();
@@ -388,13 +389,37 @@ async function switchLayoutToLandscape(): Promise<void> {
     // ② Semi 下拉 portal（body 级浮层）里找「横幅海报」项
     const items = Array.from(document.querySelectorAll('.semi-dropdown-item, .semi-popover li, [class*="dropdown-item"]')) as HTMLElement[];
     const target = items.find((it) => (it.textContent || '').trim() === '横幅海报' && it.offsetParent !== null);
-    if (!target) { dlog('[jav] 布局菜单未弹出或无横幅海报项，跳过'); return; }
+    if (!target) { dlog('[jav] 布局菜单未弹出或无横幅海报项，跳过'); return false; }
     target.click();
     await new Promise((r) => setTimeout(r, 300));
     log('[jav] 布局已自动切换为横幅海报');
+    return true;
   } catch (e: any) {
     dlog('[jav] 布局切换失败: ' + String(e && e.message || e).substring(0, 80));
+    return false;
   }
+}
+
+let _pendingLayoutSwitch = false;
+let _switchChainGen = 0;
+
+/** [lc-1250] 待切横幅记账：单视频详情页没有布局工具栏，刮成功后先记一笔，
+ *  导航回文件夹/列表页（工具栏渲染出来）时自动补切。 */
+function markPendingLayoutSwitch(): void {
+  _pendingLayoutSwitch = true;
+}
+
+/** [lc-1250] 补切链：每次导航重置一代表（防旧链叠加），300/900/2000/4000ms 各试一次，
+ *  成功（找到工具栏并切换）即清账；一直没工具栏（比如去了首页）则账保留到下次。 */
+function schedulePendingLayoutSwitch(): void {
+  if (!_pendingLayoutSwitch || _running) return;
+  const gen = ++_switchChainGen;
+  [300, 900, 2000, 4000].forEach((ms) => {
+    window.setTimeout(() => {
+      if (gen !== _switchChainGen || !_pendingLayoutSwitch || _running) return;
+      void switchLayoutToLandscape().then((ok) => { if (ok) _pendingLayoutSwitch = false; });
+    }, ms);
+  });
 }
 
 /** [lc-1250] 文件夹树递归刮削（用户诉求「在外面就刮」的完整版）：
@@ -452,7 +477,10 @@ async function runJavBatchChildren(btn: HTMLButtonElement, origin: string, fGuid
   };
   await javScrapeFolderTree(origin, fGuid, 0, stats, tick);
   log('[jav] 文件夹批量完成: ok=' + stats.ok + ' fail=' + stats.fail + ' nocode=' + stats.nocode);
-  if (stats.ok > 0) await switchLayoutToLandscape(); // [lc-1250] 横版封面配横幅海报布局
+  if (stats.ok > 0) { // [lc-1250] 横版封面配横幅海报布局（当场切, 失败留给补切链）
+    markPendingLayoutSwitch();
+    if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
+  }
   if (stats.ok) return '✓ 已回填 ' + stats.ok + (stats.nocode ? ' · 未识别 ' + stats.nocode : '') + (stats.fail ? ' · 失败 ' + stats.fail : '');
   if (stats.nocode) return '⚠ ' + stats.nocode + ' 个未识别番号';
   return '⚠ 回填失败';
@@ -484,7 +512,10 @@ async function runJavLibrary(btn: HTMLButtonElement, origin: string): Promise<st
     tick('⏳ 全库刮削');
   }
   log('[jav] 全库批量完成: ok=' + stats.ok + ' fail=' + stats.fail + ' nocode=' + stats.nocode);
-  if (stats.ok > 0) await switchLayoutToLandscape(); // [lc-1250] 横版封面配横幅海报布局
+  if (stats.ok > 0) { // [lc-1250] 横版封面配横幅海报布局（当场切, 失败留给补切链）
+    markPendingLayoutSwitch();
+    if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
+  }
   if (stats.ok) return '✓ 已回填 ' + stats.ok + (stats.nocode ? ' · 未识别 ' + stats.nocode : '') + (stats.fail ? ' · 失败 ' + stats.fail : '');
   if (stats.nocode) return '⚠ ' + stats.nocode + ' 个未识别番号';
   return '⚠ 回填失败';
@@ -589,6 +620,7 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
       ? ' · ' + meta.actresses.map((a: any) => a && a.name).filter(Boolean).slice(0, 3).join('・') : '';
     const scope = targets.length > 1 ? ' ×' + targets.length : '';
     if (savedAll && verifiedAll) {
+      if (done.length) markPendingLayoutSwitch(); // [lc-1250] 详情页无布局工具栏, 导航回列表页后自动补切横幅
       setBtn(btn, done.length ? ('✓ 已回填（' + done.join('/') + scope + '）') : '✓ 已是最新',
         meta.code + ' ' + (meta.date || '') + who
         + (done.length && coverHash && !coverOk ? '（hero 海报位未找到，封面已落库，重进页面生效）' : ''));
