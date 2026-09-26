@@ -1,5 +1,6 @@
-import { app, dialog, BrowserWindow } from 'electron';
+import { app, dialog, BrowserWindow, screen } from 'electron';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import axios from 'axios';
 import * as fnConfig from '../../../modules/fn_config/config';
@@ -99,10 +100,45 @@ function trimLog(text: string): string {
     return buf.subarray(buf.length - MAX_LOG_BYTES).toString('utf8');
 }
 
-/** 上传一段日志文本（内部统一入口） */
-async function uploadLogText(logText: string, message: string, contact: string): Promise<any> {
+/**
+ * [lc-1250] 设备环境信息块（自动附加到日志头部）：便于远程排查的版本/时间/屏幕等参数。
+ * 全部为无害设备信息（不含账号/凭据），设置面板文案里已向用户说明。
+ * 直接前置进 log 字段 —— 无需改 stats-server 表结构与 worker。
+ */
+function buildContextHeader(page?: string): string {
+    const lines: string[] = [];
+    const push = (k: string, v: string): void => { if (v) lines.push(k + ': ' + v); };
+    try {
+        push('应用版本', appVersion());
+        let sysVer = '';
+        try { sysVer = (process as any).getSystemVersion ? (process as any).getSystemVersion() : ''; } catch { sysVer = ''; }
+        if (!sysVer) sysVer = os.release();
+        push('系统', osName() + ' ' + (sysVer || '(未知)') + ' (' + process.arch + ')');
+        const ver = process.versions || ({} as NodeJS.ProcessVersions);
+        push('运行时', 'Electron ' + (ver.electron || '?') + ' / Chrome ' + (ver.chrome || '?') + ' / Node ' + (ver.node || '?'));
+        try { push('语言', app.getLocale()); } catch { /* ignore */ }
+        try { push('时区', Intl.DateTimeFormat().resolvedOptions().timeZone || ''); } catch { /* ignore */ }
+        const now = new Date();
+        push('系统时间', now.toString() + ' / UTC ' + now.toISOString());
+        try { push('应用运行时长', Math.round(process.uptime()) + 's'); } catch { /* ignore */ }
+        try {
+            const d = screen.getPrimaryDisplay();
+            push('屏幕', d.size.width + 'x' + d.size.height + ' @' + d.scaleFactor
+                + 'x（工作区 ' + d.workAreaSize.width + 'x' + d.workAreaSize.height + '）');
+        } catch { /* ignore */ }
+        if (page) push('当前页面', page);
+    } catch { /* 环境信息收集失败不影响上传 */ }
+    if (!lines.length) return '';
+    return '===== 设备环境（Fntv-Plus 自动附加，便于排查）=====\n'
+        + lines.join('\n') + '\n'
+        + '==============================================\n';
+}
+
+/** 上传一段日志文本（内部统一入口；头部自动附加设备环境块） */
+async function uploadLogText(logText: string, message: string, contact: string, page?: string): Promise<any> {
     const endpoints = getEndpoints();
     if (endpoints.length === 0) return { ok: false, error: '未配置反馈服务端地址（FNTV_STATS_ENDPOINT）' };
+    const ctx = buildContextHeader(page);
     const body = {
         aid: fnConfig.getStatsAnonId(),
         v: appVersion(),
@@ -110,7 +146,7 @@ async function uploadLogText(logText: string, message: string, contact: string):
         arch: process.arch,
         message: (message || '').slice(0, MAX_MESSAGE),
         contact: (contact || '').slice(0, MAX_CONTACT),
-        log: logText || '',
+        log: (ctx ? ctx + '\n' : '') + (logText || ''),
     };
     // 主地址不通时依次尝试备用地址（例如 Cloudflare 被墙 → 走国内 SCF）
     let lastErr = '';
@@ -134,8 +170,8 @@ async function uploadLogText(logText: string, message: string, contact: string):
     return { ok: false, error: lastErr };
 }
 
-/** 提交反馈（可附带最近应用日志） */
-async function handleSubmitFeedback(_event: any, p?: { message?: string; contact?: string; includeLog?: boolean }): Promise<any> {
+/** 提交反馈（可附带最近应用日志；page=触发反馈时的页面 URL，随环境块上传） */
+async function handleSubmitFeedback(_event: any, p?: { message?: string; contact?: string; includeLog?: boolean; page?: string }): Promise<any> {
     const message = String(p?.message || '').trim();
     if (!message) return { ok: false, error: '请先填写问题描述' };
     let logText = '';
@@ -145,11 +181,12 @@ async function handleSubmitFeedback(_event: any, p?: { message?: string; contact
         logText = trimLog(sanitizeLog(raw));
         if (!logText) logText = '（日志为空或读取失败）';
     }
-    return await uploadLogText(logText, message, String(p?.contact || '').trim());
+    return await uploadLogText(logText, message, String(p?.contact || '').trim(),
+        typeof p?.page === 'string' ? p.page : '');
 }
 
 /** 手动选择日志文件并上传（用户主动点选，支持 .log/.txt） */
-async function handlePickAndUploadLog(): Promise<any> {
+async function handlePickAndUploadLog(_event: any, p?: { page?: string }): Promise<any> {
     let win: BrowserWindow | null = null;
     try { win = BrowserWindow.getFocusedWindow(); } catch { win = null; }
     const opts = {
@@ -170,7 +207,8 @@ async function handlePickAndUploadLog(): Promise<any> {
     }
     const raw = readTail(file, MAX_LOG_BYTES);
     const safe = trimLog(sanitizeLog(raw));
-    return await uploadLogText(safe, '手动上传日志文件：' + path.basename(file), '');
+    return await uploadLogText(safe, '手动上传日志文件：' + path.basename(file), '',
+        typeof p?.page === 'string' ? p.page : '');
 }
 
 /** 面板展示用：当前应用日志路径与大小 */

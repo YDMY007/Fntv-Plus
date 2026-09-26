@@ -143,7 +143,8 @@ export function buildFeedbackBody(): HTMLElement {
   wrap.style.cssText = 'display:flex;flex-direction:column;';
 
   const tip = mkNote('遇到问题？在这里直接提交。日志在上传前会脱敏（账号、令牌、密钥、手机号、邮箱一律打码），'
-    + '但会保留 NAS 地址与域名以便排查网络问题。');
+    + '但会保留 NAS 地址与域名以便排查网络问题。上传时还会自动附加设备环境信息'
+    + '（应用版本 / 系统版本 / Electron 版本 / 语言时区 / 系统时间 / 运行时长 / 屏幕分辨率 / 当前页面），便于定位问题。');
   wrap.appendChild(tip);
 
   const area = document.createElement('textarea');
@@ -193,7 +194,7 @@ export function buildFeedbackBody(): HTMLElement {
     const msg = area.value.trim();
     if (!msg) { status.textContent = t('请先填写问题描述。'); area.focus(); return; }
     setBusy(true, submitBtn, t('提交中…'));
-    ipcRenderer.invoke('feedback:submit', { message: msg, contact: contact.value.trim(), includeLog })
+    ipcRenderer.invoke('feedback:submit', { message: msg, contact: contact.value.trim(), includeLog, page: location.href })
       .then((r: any) => {
         if (r && r.ok) {
           status.textContent = t('提交成功，感谢反馈！编号：') + (r.id ? String(r.id).slice(0, 8) : '—');
@@ -208,7 +209,7 @@ export function buildFeedbackBody(): HTMLElement {
 
   uploadBtn.addEventListener('click', () => {
     setBusy(true, uploadBtn, t('选择文件…'));
-    ipcRenderer.invoke('feedback:upload-log')
+    ipcRenderer.invoke('feedback:upload-log', { page: location.href })
       .then((r: any) => {
         if (r && r.canceled) status.textContent = '';
         else if (r && r.ok) status.textContent = t('日志上传成功，编号：') + (r.id ? String(r.id).slice(0, 8) : '—');
