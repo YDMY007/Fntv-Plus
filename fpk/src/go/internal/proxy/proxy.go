@@ -85,6 +85,8 @@ func NewServer(d Deps) *Server {
 	// 2b) 匿名使用统计（设置面板「关于」页）：读状态 / 开关 / 立即上报 / 重置匿名 ID。
 	//     与其它管理 API 同待遇——要求网关身份，无身份直连一律 401。
 	if d.Stats != nil {
+		// [lc-1250] Bug 反馈/日志一键上传（反馈弹窗）：用户显式触发，转发统计服务端。
+		s.mux.Handle("/app/fntvplus/api/feedback", gateway.RequireGatewayUser(d.Stats.FeedbackHandler(info.VarDir, info.StartTime)))
 		s.mux.Handle("/app/fntvplus/api/stats", gateway.RequireGatewayUser(d.Stats.InfoHandler()))
 		s.mux.Handle("/app/fntvplus/api/stats/enabled", gateway.RequireGatewayUser(d.Stats.EnabledHandler()))
 		s.mux.Handle("/app/fntvplus/api/stats/ping", gateway.RequireGatewayUser(d.Stats.PingHandler()))

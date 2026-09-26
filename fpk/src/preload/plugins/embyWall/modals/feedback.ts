@@ -129,7 +129,22 @@ export const openFeedbackChoiceModal = (): void => {
       openQQGroupModal();
     });
 
-    // [lc-1250] 选项三：复制设备环境信息 —— 问卷/QQ 反馈时粘贴，便于远程排查
+    // [lc-1250] 选项首：一键上传日志反馈（描述 + 自动附前后端日志与环境信息 → NAS 后端转发统计服务端）
+    const optUpload = document.createElement('button');
+    optUpload.type = 'button';
+    optUpload.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:14px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:center;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
+      + 'transition:background .15s,border-color .15s;';
+    optUpload.innerHTML = '<div style="font-size:14px;font-weight:700;">📮 一键上传日志反馈</div>'
+      + '<div style="font-size:11.5px;opacity:.7;">写一句问题描述即可，自动附带前后端日志（已脱敏）与环境信息</div>';
+    optUpload.addEventListener('click', () => {
+      if (modal) modal.style.display = 'none';
+      openFeedbackUploadModal();
+    });
+    card.insertBefore(optUpload, optSurvey);
+
+    // [lc-1250] 复制设备环境信息 —— 问卷/QQ 反馈时粘贴，便于远程排查
     const optEnv = document.createElement('button');
     optEnv.type = 'button';
     optEnv.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;'
@@ -177,7 +192,7 @@ export const openFeedbackChoiceModal = (): void => {
     card.insertBefore(optEnv, optSurvey);
 
     // 悬停高亮
-    [optSurvey, optQQ, optEnv].forEach((b) => {
+    [optUpload, optSurvey, optQQ, optEnv].forEach((b) => {
       b.addEventListener('mouseenter', () => { b.style.background = 'var(--fnos-ui-pill-hover)!important'; b.style.borderColor = 'var(--fnos-ui-pill-border)'; });
       b.addEventListener('mouseleave', () => { b.style.background = 'var(--fnos-ui-input-bg)!important'; b.style.borderColor = 'var(--fnos-ui-border3)'; });
     });
@@ -237,6 +252,92 @@ const openQQGroupModal = (): void => {
     const qjoin = document.getElementById('fnos-qq-join') as HTMLElement;
     qjoin.onmouseenter = () => { qjoin.style.transform = 'scale(1.03)'; qjoin.style.background = 'var(--fnos-ui-pill-hover)!important'; qjoin.style.color = '#fff'; };
     qjoin.onmouseleave = () => { qjoin.style.transform = ''; qjoin.style.background = 'var(--fnos-ui-pill-bg)!important'; qjoin.style.color = 'var(--fnos-ui-pill-text)'; };
+  }
+  modal.style.display = 'flex';
+};
+
+
+/* ========== [lc-1250] 一键上传日志反馈表单（NAS 后端转发统计服务端） ========== */
+const openFeedbackUploadModal = (): void => {
+  let modal = document.getElementById('fnos-feedback-upload-modal') as HTMLElement | null;
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'fnos-feedback-upload-modal';
+    modal.setAttribute('data-fnos-ui', '1');
+    modal.style.cssText = 'position:fixed;z-index:2147483702;inset:0;display:none;align-items:center;justify-content:center;'
+      + 'background:rgba(0,0,0,.5);';
+    modal.addEventListener('click', (e: Event) => { if (e.target === modal) modal!.style.display = 'none'; });
+
+    const card = document.createElement('div');
+    card.style.cssText = 'width:420px;max-width:92vw;border-radius:18px;padding:22px;color:var(--fnos-ui-text);'
+      + 'background:var(--fnos-ui-panel-bg)!important;border:1px solid var(--fnos-ui-border-outer);'
+      + 'box-shadow:0 18px 50px rgba(80,60,120,.28),0 4px 16px rgba(80,60,120,.14);'
+      + 'backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);';
+
+    card.innerHTML = ''
+      + '<div style="font-size:19px;font-weight:800;color:var(--fnos-ui-pill-text);margin-bottom:4px;">📮 一键上传日志反馈</div>'
+      + '<div style="font-size:11.5px;line-height:1.6;color:var(--fnos-ui-text);opacity:.75;margin-bottom:12px;">'
+      + '提交后会自动附带：设备环境（应用版本 / fnOS 版本 / 时间 / 页面）+ 前后端日志（最近片段，凭据类信息已打码；保留 NAS 地址便于排查网络问题）。仅在你点击「上传」时才发送。</div>';
+
+    const area = document.createElement('textarea');
+    area.placeholder = '描述你遇到的问题 / 复现步骤（必填）…';
+    area.style.cssText = 'width:100%;box-sizing:border-box;min-height:88px;padding:10px 12px;border-radius:10px;'
+      + 'font-size:12.5px;line-height:1.6;font-family:inherit;resize:vertical;'
+      + 'background:var(--fnos-ui-input-bg)!important;color:var(--fnos-ui-text);'
+      + 'border:1px solid var(--fnos-ui-border3);outline:none;';
+    card.appendChild(area);
+
+    const contact = document.createElement('input');
+    contact.type = 'text';
+    contact.placeholder = '联系方式（选填，方便回复你：QQ / 邮箱）';
+    contact.style.cssText = 'width:100%;box-sizing:border-box;margin-top:8px;padding:9px 12px;border-radius:10px;'
+      + 'font-size:12.5px;font-family:inherit;background:var(--fnos-ui-input-bg)!important;'
+      + 'color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);outline:none;';
+    card.appendChild(contact);
+
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-text);opacity:.75;margin-top:8px;min-height:16px;';
+    card.appendChild(status);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:10px;';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = '取消';
+    cancelBtn.style.cssText = 'padding:8px 18px;border-radius:10px;cursor:pointer;font-size:12.5px;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);';
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.textContent = '上传';
+    submitBtn.style.cssText = 'padding:8px 22px;border-radius:10px;cursor:pointer;font-size:12.5px;font-weight:700;'
+      + 'background:var(--fnos-ui-accent)!important;border:none;color:#fff;';
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(submitBtn);
+    card.appendChild(btnRow);
+
+    cancelBtn.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+
+    submitBtn.addEventListener('click', () => {
+      const msg = area.value.trim();
+      if (!msg) { status.textContent = '请先填写问题描述。'; area.focus(); return; }
+      submitBtn.disabled = true;
+      status.textContent = '上传中…（正在打包前后端日志与环境信息）';
+      ipcRenderer.invoke('feedback:submit', { message: msg, contact: contact.value.trim(), page: location.href })
+        .then((r: any) => {
+          if (r && r.ok) {
+            status.textContent = '✓ 上传成功，感谢反馈！（环境与日志已附带）';
+            area.value = '';
+            window.setTimeout(() => { if (modal) modal.style.display = 'none'; }, 1600);
+          } else {
+            status.textContent = '上传失败：' + ((r && r.error) || '未知错误');
+          }
+        })
+        .catch((e: any) => { status.textContent = '上传失败：' + String((e && e.message) || e); })
+        .finally(() => { submitBtn.disabled = false; });
+    });
+
+    modal.appendChild(card);
+    document.body.appendChild(modal);
   }
   modal.style.display = 'flex';
 };

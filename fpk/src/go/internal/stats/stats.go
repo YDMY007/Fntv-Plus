@@ -34,6 +34,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -405,6 +406,126 @@ func (s *Stats) Info() map[string]any {
 		"version":     s.version,
 		"devMode":     s.DevMode(),
 	}
+}
+
+/* ========== [lc-1250] Bug 反馈/日志一键上传（反馈弹窗「一键上传日志反馈」） ========== */
+
+const (
+	feedbackMaxLogBytes = 512 * 1024 // 附带日志总量上限（后端/前端各取一半）
+)
+
+// maskSensitive 日志脱敏：凭据类键值 / Bearer / 邮箱 / 手机号打码。
+// 保留 NAS 地址与域名（排查网络问题必需，不含凭据）——与桌面版口径一致。
+func maskSensitive(text string) string {
+	if text == "" {
+		return ""
+	}
+	out := regexp.MustCompile(`(?i)(token|cookie|password|passwd|pwd|secret|api[_-]?key|authorization)(["']?\s*[:=]\s*["']?)([^\s"',&}]{6,})`).
+		ReplaceAllString(text, "${1}${2}<MASKED>")
+	out = regexp.MustCompile(`Bearer\s+[A-Za-z0-9._\-]+`).ReplaceAllString(out, "Bearer <MASKED>")
+	out = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`).ReplaceAllString(out, "<EMAIL>")
+	out = regexp.MustCompile(`1[3-9]\d{9}`).ReplaceAllString(out, "<PHONE>")
+	return out
+}
+
+// tailFileBytes 读文件尾部 maxBytes 字节（日志通常几 MB，直接读入后截尾）。
+func tailFileBytes(path string, maxBytes int) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(b) > maxBytes {
+		b = b[len(b)-maxBytes:]
+	}
+	return string(b)
+}
+
+// FeedbackHandler 一键上传日志反馈：用户写描述 → 自动附加设备环境块与前后端日志
+// （脱敏）→ 转发到统计服务端 /feedback（与心跳同一 FNTV_STATS_ENDPOINT 体系）。
+// 用户显式触发才会上传，没有任何自动路径；要求网关身份（proxy 挂载时统一包了）。
+func (s *Stats) FeedbackHandler(varDir string, startTime time.Time) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var p struct {
+			Message string `json:"message"`
+			Contact string `json:"contact"`
+			Page    string `json:"page"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&p); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+		msg := strings.TrimSpace(p.Message)
+		if msg == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "请先填写问题描述"})
+			return
+		}
+		if len(msg) > 2000 {
+			msg = msg[:2000]
+		}
+		contact := strings.TrimSpace(p.Contact)
+		if len(contact) > 120 {
+			contact = contact[:120]
+		}
+		// 设备环境块（远程排查需要的版本/时间/机器参数）
+		now := time.Now()
+		kernel := ""
+		if b, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
+			kernel = strings.TrimSpace(string(b))
+		}
+		ctxLines := []string{
+			"应用版本: " + s.version,
+			"系统: fnOS (Linux " + kernel + " " + runtime.GOARCH + ")",
+			"匿名ID前8位: " + shortID(s.anonID()),
+			"系统时间: " + now.Format("2006-01-02 15:04:05 MST") + " / UTC " + now.UTC().Format(time.RFC3339),
+			"应用运行时长: " + now.Sub(startTime).Round(time.Second).String(),
+		}
+		if p.Page != "" {
+			ctxLines = append(ctxLines, "当前页面: "+p.Page)
+		}
+		ctx := "===== 设备环境（Fntv-Plus Web 版自动附加，便于排查）=====\n" +
+			strings.Join(ctxLines, "\n") + "\n==============================================\n"
+		// 前后端日志（后端只取本次启动之后的行，与诊断页口径一致）
+		var sb strings.Builder
+		sb.WriteString(ctx + "\n")
+		sb.WriteString("===== 后端日志（本次启动）=====\n")
+		sb.WriteString(tailFileBytes(filepath.Join(varDir, "fntvplus.log"), feedbackMaxLogBytes/2))
+		sb.WriteString("\n===== 前端日志（payload console 回传）=====\n")
+		sb.WriteString(tailFileBytes(filepath.Join(varDir, "client.log"), feedbackMaxLogBytes/2))
+		logBody := maskSensitive(sb.String())
+		payload := map[string]any{
+			"aid":     s.anonID(),
+			"v":       s.version,
+			"os":      "fnOS",
+			"arch":    runtime.GOARCH,
+			"message": msg,
+			"contact": contact,
+			"log":     logBody,
+		}
+		var lastErr string
+		for _, base := range s.Endpoints() {
+			if err := s.post(base+"/feedback", payload); err != nil {
+				lastErr = err.Error()
+				log.Printf("[stats] 反馈端点 %s 提交失败，尝试下一个: %s", base, lastErr)
+				continue
+			}
+			log.Printf("[stats] 反馈提交成功（用户手动触发）")
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "反馈服务端不可达: " + lastErr})
+	}
+}
+
+// shortID 取匿名 ID 前 8 位（环境块里只露前缀，够核对不泄漏完整 ID）。
+func shortID(id string) string {
+	if len(id) >= 8 {
+		return id[:8]
+	}
+	return id
 }
 
 /* ========== 面板接口（由 proxy 挂到 /app/fntvplus/api/stats*，统一过网关鉴权） ========== */

@@ -479,6 +479,7 @@ const ipcRenderer = {
     }
     if (channel === 'stats:ping-now') return apiPost('/app/fntvplus/api/stats/ping', {});
     if (channel === 'stats:reset-id') return apiPost('/app/fntvplus/api/stats/reset', {});
+    if (channel === 'feedback:submit') return apiPost('/app/fntvplus/api/feedback', args[0] || {});
 
     /* ── 补丁/解锁（桌面版更新机制；网页端更新走应用中心）── */
     if (channel === 'settings:verify-unlock-code') return Promise.resolve({ ok: false, message: '网页端未适配解锁码' });
