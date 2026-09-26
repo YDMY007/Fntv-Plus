@@ -26,6 +26,7 @@ import { S } from '../state';
 import { findActiveDetailView, findDetailHero } from './glass';
 import { fnosGetEditDetail, uploadImageToFnos } from '../carousel/logo';
 import { fnosSaveEditDetail } from './epBackfill';
+import { repositionFolderScraperButton } from './folderScraper';
 
 const JAV_BTN_ID = 'fnos-jav-btn';
 let _running = false;
@@ -101,17 +102,20 @@ export function ensureJavButton(): void {
   if (existing && existing.isConnected) {
     // 路由间共用一枚按钮：按当前页型刷新文案（运行中不打断进度显示）
     if (!_running) setBtn(existing, onList ? '⟳ 全库刮削' : '⟳ jav 刮削');
+    repositionFolderScraperButton(); // [lc-1250] jav 在位 → 文件夹刮削按钮让位上移
     return;
   }
   makeBtn();
   const b = document.getElementById(JAV_BTN_ID);
   if (b && onList) setBtn(b, '⟳ 全库刮削');
+  repositionFolderScraperButton(); // [lc-1250] 异步挂载完成后立即让文件夹刮削按钮避让
   dlog('[jav] 按钮已挂载 ' + location.pathname);
 }
 
 export function removeJavButton(): void {
   const b = document.getElementById(JAV_BTN_ID);
   if (b && b.parentNode) b.parentNode.removeChild(b);
+  repositionFolderScraperButton(); // [lc-1250] jav 摘除 → 文件夹刮削按钮落回底部
 }
 
 /** 导航钩子调用：离开页面立即撤按钮，进电影页时挂。 */

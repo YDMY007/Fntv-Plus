@@ -342,21 +342,35 @@ function ensureBtnStyleFresh(btn: HTMLButtonElement): void {
   }
 }
 
+/** [lc-1250] 位置自愈: jav 按钮挂载/摘除时由 jav.ts 反向调用, 立即重算避让位置。
+ *  原先位置只在导航钩子/初始化重试时算一次——jav 的设置自举是异步的, 晚于本按钮
+ *  挂上来时会与本按钮同坐标(26px)相叠, 下次导航又跳到 70px, 视觉上"按钮跳来跳去"。 */
+export function repositionFolderScraperButton(): void {
+  const b = document.getElementById(FOLDER_BTN_ID);
+  if (!b || !b.isConnected) return;
+  const javVisible = !!document.getElementById('fnos-jav-btn')?.isConnected;
+  const want = javVisible ? '70px' : '26px';
+  if (b.style.bottom !== want) {
+    b.style.bottom = want;
+    dlog('[folderScraper] 避让位置重算 → ' + want);
+  }
+}
+
 /** 幂等挂载：非文件夹页 → 摘除。按钮在文件夹页**常显**（可发现性优先）：
  *  未启用/未填地址时点击给出对应指引（runFolderScraper 内），不会误写任何数据。
  *  位置避让：jav 刮削按钮（lc-1222 起同样挂 /v/folder/ 页，同坐标 bottom:26）在位时，
- *  本按钮上移到其上方，避免两枚胶囊层叠（jav 在下、本按钮在上）。 */
+ *  本按钮上移到其上方（jav 在下、本按钮在上）；jav 挂载/摘除会反向调用
+ *  repositionFolderScraperButton 即时重算，4s 巡检兜底。 */
 export function ensureFolderScraperButton(): void {
   if (!folderGuid()) { removeFolderScraperButton(); return; }
   const existing = document.getElementById(FOLDER_BTN_ID);
   const btn = (existing && existing.isConnected) ? existing as HTMLButtonElement : makeBtn();
   ensureBtnStyleFresh(btn);
-  const javVisible = !!document.getElementById('fnos-jav-btn')?.isConnected;
-  btn.style.bottom = javVisible ? '70px' : '26px';
+  repositionFolderScraperButton();
   if (existing && existing.isConnected) return;
   document.body.appendChild(btn);
   dlog('[folderScraper] 按钮已挂载 ' + location.pathname);
-  // 4s 巡检兜底（样式被中途清掉时不必等下次导航）：按钮不在了自动停表
+  // 4s 巡检兜底（样式被中途清掉/位置错乱时不必等下次导航）：按钮不在了自动停表
   if (!(window as any).__fnosFolderBtnGuard) {
     (window as any).__fnosFolderBtnGuard = window.setInterval(() => {
       const b = document.getElementById(FOLDER_BTN_ID);
@@ -365,6 +379,7 @@ export function ensureFolderScraperButton(): void {
         b.style.cssText = FOLDER_BTN_CSS;
         log('[folderScraper] 巡检重打样式');
       }
+      repositionFolderScraperButton();
     }, 4000);
   }
 }
