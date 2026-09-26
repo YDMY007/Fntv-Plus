@@ -87,34 +87,9 @@ export function buildStatsCard(): HTMLElement {
   title.textContent = t('📊 匿名使用统计');
   wrap.appendChild(title);
   wrap.appendChild(mkRow('参与匿名统计', toggle.el));
-  wrap.appendChild(mkNote('每天最多上报一次，内容只有：随机匿名 ID + 版本号 + 系统类型。'
-    + '不采集账号、IP、媒体库与文件路径，服务端也不存 IP。'));
+  wrap.appendChild(mkNote('开启后每天最多上报一次心跳，内容仅：随机匿名 ID + 应用版本 + 系统类型。'
+    + '不含账号、IP、媒体库与文件路径，服务端也不存 IP，可随时在此关闭。'));
   wrap.appendChild(status);
-
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;';
-  const pingBtn = mkBtn('立即上报一次', true);
-  const resetBtn = mkBtn('重置匿名 ID', false);
-  btnRow.appendChild(pingBtn);
-  btnRow.appendChild(resetBtn);
-  wrap.appendChild(btnRow);
-
-  pingBtn.addEventListener('click', () => {
-    pingBtn.disabled = true;
-    status.textContent = t('上报中…');
-    ipcRenderer.invoke('stats:ping-now').then((r: any) => {
-      if (r && r.ok) status.textContent = t('上报成功 ✅');
-      else status.textContent = t('未上报：') + ((r && (r.skipped || r.error)) || t('未知原因'));
-    }).catch((e: any) => {
-      status.textContent = t('上报失败：') + String((e && e.message) || e);
-    }).finally(() => { pingBtn.disabled = false; });
-  });
-
-  resetBtn.addEventListener('click', () => {
-    ipcRenderer.invoke('stats:reset-id').then(() => {
-      status.textContent = t('已生成新的匿名 ID，与历史数据不再关联。');
-    }).catch(() => {});
-  });
 
   // 初值回填
   ipcRenderer.invoke('stats:get-info').then((s: any) => {
@@ -122,10 +97,9 @@ export function buildStatsCard(): HTMLElement {
     toggle.set(s.enabled !== false);
     if (!s.configured) {
       status.textContent = t('服务端未配置，当前不会发送任何数据。');
-      pingBtn.disabled = true;
       return;
     }
-    if (s.devMode) status.textContent = t('开发模式默认不上报（可用「立即上报一次」测试）。');
+    if (s.devMode) status.textContent = t('开发模式，默认不上报。');
     else if (s.lastDay) status.textContent = t('上次上报：') + s.lastDay + (s.lastOk ? t('（成功）') : t('（失败，稍后自动重试）'));
     else status.textContent = t('尚未上报过。');
   }).catch(() => { status.textContent = ''; });
