@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'node:path';
 import * as crypto from 'crypto';
+import * as childProcess from 'child_process';
 import { app } from 'electron';
 import { USER_DATA_PATH } from '../../public/constants';
 
@@ -158,7 +159,7 @@ export interface Config {
     // 不含账号、IP（服务端不存）、媒体库、文件路径、设备名等任何可识别信息。
     // 服务端未部署（endpoint 为空）时不发任何请求。
     statsEnabled?: boolean;        // 用户开关（「关于」页可关）
-    statsAnonId?: string;          // 本地随机 UUID，与用户身份无关；可在「关于」页重置
+    statsAnonId?: string;          // [lc-1250] 机器级固定匿名 ID（系统机器标识 SHA-256 哈希，重装不变；旧随机 UUID 会自动迁移）
     statsLastPingDay?: string;     // 上次上报日期 YYYY-MM-DD（同一天不重复上报）
     statsLastPingOk?: boolean;     // 上次上报是否成功（仅用于面板展示）
     statsPendingDays?: string[];   // 上报失败攒下的欠报日期（网络恢复后补报，最多 7 天）
@@ -1098,11 +1099,55 @@ export function setStatsEnabled(enabled: boolean): void {
 export function getStatsAnonId(): string {
     const config: Config = readConfig() || {};
     const cur = typeof config.statsAnonId === 'string' ? config.statsAnonId : '';
+    // [lc-1250] 机器级固定 ID 优先：已是机器派生 ID → 直接用（重装/清配置后重新派生仍相同）
+    if (/^M[0-9a-f]{31}$/.test(cur)) return cur;
+    // 尝试从操作系统机器标识派生（拿到即覆盖旧的随机 ID，保证「每台机固定唯一不变」）
+    const mid = machineStableId();
+    if (mid) {
+        if (mid !== cur) {
+            config.statsAnonId = mid;
+            try { fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2)); } catch { /* 只读配置不影响返回 */ }
+        }
+        return mid;
+    }
+    // 回退：拿不到系统机器标识的极少数环境 → 随机 UUID（保底可用）
     if (/^[0-9a-fA-F-]{8,64}$/.test(cur)) return cur;
     const fresh = crypto.randomUUID();
     config.statsAnonId = fresh;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
     return fresh;
+}
+
+/**
+ * [lc-1250] 机器级稳定标识：取操作系统自身的机器 ID（Windows MachineGuid /
+ * macOS IOPlatformUUID / Linux /etc/machine-id）做 SHA-256 哈希后截取。
+ * - 重装应用、清空配置、重命名设备都不会变（随操作系统安装存在）；
+ * - 哈希不可逆：上报的是哈希值，不含任何明文硬件标识；
+ * - 拿不到（异常环境）返回空串，由调用方回退随机 UUID。
+ */
+function machineStableId(): string {
+    try {
+        let raw = '';
+        if (process.platform === 'win32') {
+            const out = childProcess.execSync(
+                'reg query HKLM\\SOFTWARE\\Microsoft\\Cryptography /v MachineGuid',
+                { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+            const m = out.match(/MachineGuid\s+REG_SZ\s+(\S+)/i);
+            if (m) raw = m[1].trim();
+        } else if (process.platform === 'darwin') {
+            const out = childProcess.execSync('ioreg -rd1 -c IOPlatformExpertDevice', { timeout: 3000 }).toString();
+            const m = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+            if (m) raw = m[1].trim();
+        } else {
+            for (const p of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
+                try { const v = fs.readFileSync(p, 'utf8').trim(); if (v) { raw = v; break; } } catch { /* next */ }
+            }
+        }
+        if (!raw) return '';
+        return 'M' + crypto.createHash('sha256').update(raw).digest('hex').slice(0, 31);
+    } catch {
+        return '';
+    }
 }
 
 /** 丢弃旧匿名 ID 并生成新的（用户可在「关于」页主动切断与历史数据的关联） */
