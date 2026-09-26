@@ -6437,7 +6437,52 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
         if (modal) modal.style.display = "none";
         openQQGroupModal();
       });
-      [optSurvey, optQQ].forEach((b) => {
+      const optEnv = document.createElement("button");
+      optEnv.type = "button";
+      optEnv.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;padding:12px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:center;background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);transition:background .15s,border-color .15s;";
+      optEnv.innerHTML = '<div style="font-size:14px;font-weight:700;">\u{1F4CB} \u590D\u5236\u8BBE\u5907\u73AF\u5883\u4FE1\u606F</div><div style="font-size:11.5px;opacity:.7;">\u5E94\u7528\u7248\u672C / \u9875\u9762 / \u65F6\u95F4 / \u6D4F\u89C8\u5668\uFF0C\u7C98\u8D34\u5230\u95EE\u5377\u6216\u7FA4\u91CC\u4FBF\u4E8E\u6392\u67E5</div>';
+      optEnv.addEventListener("click", async () => {
+        let ver = "";
+        try {
+          const info = await ipcRenderer.invoke("stats:get-info");
+          if (info && info.version) ver = String(info.version);
+        } catch {
+        }
+        const lines = [
+          "===== Fntv-Plus Web \u7248\u8BBE\u5907\u73AF\u5883 =====",
+          "\u5E94\u7528\u7248\u672C: " + (ver || "\u672A\u77E5"),
+          "\u9875\u9762: " + location.href,
+          "\u65F6\u95F4: " + (/* @__PURE__ */ new Date()).toString(),
+          "\u5C4F\u5E55: " + window.screen.width + "x" + window.screen.height + " @" + (window.devicePixelRatio || 1) + "x",
+          "\u6D4F\u89C8\u5668: " + navigator.userAgent
+        ];
+        const text = lines.join("\n");
+        let ok = false;
+        try {
+          await navigator.clipboard.writeText(text);
+          ok = true;
+        } catch {
+        }
+        if (!ok) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.cssText = "position:fixed;left:-9999px;top:0;";
+            document.body.appendChild(ta);
+            ta.select();
+            ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+          } catch {
+            ok = false;
+          }
+        }
+        optEnv.innerHTML = ok ? '<div style="font-size:14px;font-weight:700;">\u2713 \u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F</div><div style="font-size:11.5px;opacity:.7;">\u7C98\u8D34\u5230\u95EE\u5377\u6216 QQ \u7FA4\u5373\u53EF</div>' : '<div style="font-size:14px;font-weight:700;">\u26A0 \u590D\u5236\u5931\u8D25</div><div style="font-size:11.5px;opacity:.7;">\u8BF7\u624B\u52A8\u622A\u56FE\u672C\u9875\u7248\u672C\u4FE1\u606F</div>';
+        window.setTimeout(() => {
+          optEnv.innerHTML = '<div style="font-size:14px;font-weight:700;">\u{1F4CB} \u590D\u5236\u8BBE\u5907\u73AF\u5883\u4FE1\u606F</div><div style="font-size:11.5px;opacity:.7;">\u5E94\u7528\u7248\u672C / \u9875\u9762 / \u65F6\u95F4 / \u6D4F\u89C8\u5668\uFF0C\u7C98\u8D34\u5230\u95EE\u5377\u6216\u7FA4\u91CC\u4FBF\u4E8E\u6392\u67E5</div>';
+        }, 4e3);
+      });
+      card.insertBefore(optEnv, optSurvey);
+      [optSurvey, optQQ, optEnv].forEach((b) => {
         b.addEventListener("mouseenter", () => {
           b.style.background = "var(--fnos-ui-pill-hover)!important";
           b.style.borderColor = "var(--fnos-ui-pill-border)";
@@ -10441,6 +10486,37 @@ html.fnos-perf.dark{
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     return new Blob([arr], { type: mime });
   }
+  async function uploadImageToFnos(origin, dataUrl, imageType) {
+    var _a;
+    try {
+      const { ipcRenderer: ipcRenderer2 } = (init_electron(), __toCommonJS(electron_exports));
+      const blob = dataUrlToBlob(dataUrl);
+      const fd = new FormData();
+      fd.append("file", blob, imageType + ".png");
+      fd.append("image_type", imageType);
+      const signData = { image_type: imageType, nonce: fnNonce() };
+      const authx = await ipcRenderer2.invoke("fnos-gen-authx", "/v/api/v1/image/temp/upload", signData).catch(() => "");
+      const resp = await fetch(`${origin}/v/api/v1/image/temp/upload`, {
+        method: "POST",
+        credentials: "include",
+        headers: { ...authx ? { Authx: authx } : {} },
+        body: fd
+      });
+      if (!resp.ok) {
+        log7("[\u56DE\u586B] upload HTTP", resp.status);
+        return null;
+      }
+      const j = await resp.json().catch(() => null);
+      if (!j || j.code !== 0 || !((_a = j.data) == null ? void 0 : _a.hash_path)) {
+        log7("[\u56DE\u586B] upload \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
+        return null;
+      }
+      return j.data.hash_path;
+    } catch (e) {
+      log7("[\u56DE\u586B] upload \u5F02\u5E38", String(e).substring(0, 120));
+      return null;
+    }
+  }
   async function fnosGetEditDetail(origin, guid) {
     try {
       const { ipcRenderer: ipcRenderer2 } = (init_electron(), __toCommonJS(electron_exports));
@@ -13756,19 +13832,6 @@ html.fnos-perf.dark{
     d.textContent = t(text);
     return d;
   }
-  function mkBtn(text, primary) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.textContent = t(text);
-    b.style.cssText = "padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;border:none;" + (primary ? "background:var(--fnos-ui-btn-bg2)!important;" : "background:var(--fnos-ui-btn-bg)!important;") + "color:var(--fnos-ui-btn-text);transition:background .15s;";
-    b.onmouseenter = () => {
-      b.style.background = (primary ? "var(--fnos-ui-btn-hover2)" : "var(--fnos-ui-btn-hover)") + "!important";
-    };
-    b.onmouseleave = () => {
-      b.style.background = (primary ? "var(--fnos-ui-btn-bg2)" : "var(--fnos-ui-btn-bg)") + "!important";
-    };
-    return b;
-  }
   function buildStatsCard() {
     const card = document.createElement("div");
     card.style.cssText = "width:100%;max-width:440px;text-align:left;margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);";
@@ -13786,44 +13849,17 @@ html.fnos-perf.dark{
     title.textContent = t("\u{1F4CA} \u533F\u540D\u4F7F\u7528\u7EDF\u8BA1");
     wrap.appendChild(title);
     wrap.appendChild(mkRow("\u53C2\u4E0E\u533F\u540D\u7EDF\u8BA1", toggle.el));
-    wrap.appendChild(mkNote("\u6BCF\u5929\u6700\u591A\u4E0A\u62A5\u4E00\u6B21\uFF0C\u5185\u5BB9\u53EA\u6709\uFF1A\u968F\u673A\u533F\u540D ID + \u7248\u672C\u53F7 + \u7CFB\u7EDF\u7C7B\u578B\u3002\u4E0D\u91C7\u96C6\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u4E0E\u6587\u4EF6\u8DEF\u5F84\uFF0C\u670D\u52A1\u7AEF\u4E5F\u4E0D\u5B58 IP\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002"));
+    wrap.appendChild(mkNote("\u5F00\u542F\u540E\u6536\u96C6\u5FC5\u987B\u7684\u5E94\u7528\u7248\u672C + \u7CFB\u7EDF\u7C7B\u578B\uFF0C\u7528\u4E8E\u65E5\u5FD7\u53CD\u9988\u6536\u96C6\u9700\u8981\u7684\u7CFB\u7EDF\u4FE1\u606F\uFF0C\u65B9\u4FBF\u6392\u67E5\u6545\u969C Bug\u3002\u4E0D\u6D89\u53CA\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u53CA\u6587\u4EF6\u8DEF\u5F84\u7B49\u9690\u79C1\u6570\u636E\uFF0C\u670D\u52A1\u7AEF\u4EA6\u4E0D\u505A IP \u5B58\u50A8\uFF0C\u53EF\u968F\u65F6\u5728\u8FD9\u91CC\u5173\u95ED\u3002\u533F\u540D ID \u53D6\u81EA NAS \u673A\u5668\u6807\u8BC6\u7684\u54C8\u5E0C\uFF0C\u6BCF\u53F0\u8BBE\u5907\u56FA\u5B9A\u552F\u4E00\u4E0D\u53D8\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002"));
     wrap.appendChild(status);
-    const btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;";
-    const pingBtn = mkBtn("\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21", true);
-    const resetBtn = mkBtn("\u91CD\u7F6E\u533F\u540D ID", false);
-    btnRow.appendChild(pingBtn);
-    btnRow.appendChild(resetBtn);
-    wrap.appendChild(btnRow);
-    pingBtn.addEventListener("click", () => {
-      pingBtn.disabled = true;
-      status.textContent = t("\u4E0A\u62A5\u4E2D\u2026");
-      ipcRenderer.invoke("stats:ping-now").then((r) => {
-        if (r && r.ok) status.textContent = t("\u4E0A\u62A5\u6210\u529F \u2705");
-        else status.textContent = t("\u672A\u4E0A\u62A5\uFF1A") + (r && (r.skipped || r.error) || t("\u672A\u77E5\u539F\u56E0"));
-      }).catch((e) => {
-        status.textContent = t("\u4E0A\u62A5\u5931\u8D25\uFF1A") + String(e && e.message || e);
-      }).finally(() => {
-        pingBtn.disabled = false;
-      });
-    });
-    resetBtn.addEventListener("click", () => {
-      ipcRenderer.invoke("stats:reset-id").then((r) => {
-        const short = r && r.anonIdShort ? String(r.anonIdShort) : "";
-        status.textContent = short ? t("\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF1A") + short + t("\u2026\uFF08\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\uFF09") : t("\u5DF2\u751F\u6210\u65B0\u7684\u533F\u540D ID\uFF0C\u4E0E\u5386\u53F2\u6570\u636E\u4E0D\u518D\u5173\u8054\u3002");
-      }).catch(() => {
-      });
-    });
     ipcRenderer.invoke("stats:get-info").then((s) => {
       if (!s) return;
       toggle.set(s.enabled !== false);
       if (!s.configured) {
         status.textContent = t("\u670D\u52A1\u7AEF\u672A\u914D\u7F6E\uFF0C\u5F53\u524D\u4E0D\u4F1A\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002");
-        pingBtn.disabled = true;
         return;
       }
       if (s.devMode) {
-        status.textContent = t("\u5F00\u53D1\u7248\u9ED8\u8BA4\u4E0D\u4E0A\u62A5\uFF08\u53EF\u7528\u300C\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21\u300D\u6D4B\u8BD5\uFF09\u3002");
+        status.textContent = t("\u5F00\u53D1\u7248\u9ED8\u8BA4\u4E0D\u4E0A\u62A5\u3002");
       } else if (s.lastDay) {
         status.textContent = t("\u4E0A\u6B21\u4E0A\u62A5\uFF1A") + s.lastDay + (s.lastOk ? t("\uFF08\u6210\u529F\uFF09") : t("\uFF08\u5931\u8D25\uFF0C\u7A0D\u540E\u81EA\u52A8\u91CD\u8BD5\uFF09"));
       } else if (s.usedToday) {
@@ -13920,7 +13956,7 @@ html.fnos-perf.dark{
       const card = document.createElement("div");
       card.style.cssText = "min-width:300px;max-width:90vw;padding:20px 22px;border-radius:14px;background:var(--semi-color-bg-1,#fff);box-shadow:0 8px 30px rgba(0,0,0,0.25);color:var(--semi-color-text-0);";
       card.innerHTML = '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">\u9009\u62E9\u64AD\u653E\u65B9\u5F0F</div><div style="opacity:0.7;font-size:12px;margin-bottom:14px;">\u8981\u5982\u4F55\u64AD\u653E\u6B64\u89C6\u9891\uFF1F</div>';
-      const mkBtn2 = (label, primary, onClick) => {
+      const mkBtn = (label, primary, onClick) => {
         const b = document.createElement("button");
         b.textContent = label;
         b.style.cssText = "display:block;width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;" + (primary ? "background:var(--semi-color-primary,#3370ff);color:#fff;" : "background:var(--semi-color-fill-0,#f0f0f0);color:var(--semi-color-text-0);");
@@ -13939,11 +13975,11 @@ html.fnos-perf.dark{
       const playNative = () => {
         unfreezeVideo(video);
       };
-      card.appendChild(mkBtn2("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
+      card.appendChild(mkBtn("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
         closeDialog();
         launchExternal(modal);
       }));
-      card.appendChild(mkBtn2("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
+      card.appendChild(mkBtn("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
         closeDialog();
         playNative();
       }));
@@ -14642,142 +14678,6 @@ html.fnos-perf.dark{
 
   // src/preload/plugins/embyWall/detail/jav.ts
   init_electron();
-  var JAV_BTN_ID = "fnos-jav-btn";
-  var _running3 = false;
-  function movieGuid() {
-    const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
-    return m ? m[1] : null;
-  }
-  function fnNonce4() {
-    return String(Math.floor(Math.random() * 9e5) + 1e5);
-  }
-  function setBtn2(btn, text, title) {
-    btn.textContent = text;
-    if (title !== void 0) btn.setAttribute("title", title);
-  }
-  function heroPosterImg() {
-    const view = findActiveDetailView();
-    if (!view) return null;
-    const hero = findDetailHero(view);
-    if (!hero) return null;
-    return Array.from(hero.querySelectorAll("img")).filter((im) => (im.currentSrc || im.src) && im.offsetHeight >= 200 && im.offsetHeight <= 400 && im.offsetWidth < 300)[0] || null;
-  }
-  function makeBtn2() {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = JAV_BTN_ID;
-    btn.textContent = "\u27F3 jav \u522E\u524A";
-    btn.setAttribute("title", "\u4ECE\u6587\u4EF6\u540D\u756A\u53F7\u5728 javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF0C\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u8BBE\u7F6E\u2192\u81EA\u5B9A\u4E49\u522E\u524A\u2192Jav \u522E\u524A \u5F00\u5173\u3002");
-    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
-    btn.setAttribute("data-fnos-ui", "1");
-    btn.addEventListener("mouseenter", () => {
-      btn.style.background = "rgba(52,44,76,.9)!important";
-    });
-    btn.addEventListener("mouseleave", () => {
-      btn.style.background = "rgba(28,24,40,.82)!important";
-    });
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      void runJav(btn);
-    });
-    document.body.appendChild(btn);
-    return btn;
-  }
-  function ensureJavButton() {
-    if (!S.javEnabled || !movieGuid()) {
-      removeJavButton();
-      return;
-    }
-    const existing = document.getElementById(JAV_BTN_ID);
-    if (existing && existing.isConnected) return;
-    makeBtn2();
-    dlog("[jav] \u6309\u94AE\u5DF2\u6302\u8F7D " + location.pathname);
-  }
-  function removeJavButton() {
-    const b = document.getElementById(JAV_BTN_ID);
-    if (b && b.parentNode) b.parentNode.removeChild(b);
-  }
-  function scheduleJavButton() {
-    ensureJavButton();
-  }
-  async function runJav(btn) {
-    var _a;
-    const guid = movieGuid();
-    if (!guid || _running3) return;
-    _running3 = true;
-    const origin = location.origin;
-    try {
-      const data = await fnosGetEditDetail(origin, guid);
-      if (!data) throw new Error("\u8BFB\u53D6\u6761\u76EE\u5931\u8D25\uFF08getEditDetail\uFF09");
-      const curTitle = String(data.title || data.name || "").trim();
-      setBtn2(btn, "\u23F3 jav \u67E5\u8BE2\u4E2D\u2026");
-      const r = await ipcRenderer.invoke("jav:lookup", { title: curTitle, guid });
-      if (!r || !r.ok) {
-        const err = String(r && r.error || "\u67E5\u8BE2\u5931\u8D25");
-        const noCode = err.indexOf("\u756A\u53F7") >= 0;
-        setBtn2(btn, noCode ? "\u26A0 \u672A\u8BC6\u522B\u756A\u53F7" : "\u26A0 javbus \u5931\u8D25", err);
-        window.setTimeout(() => {
-          if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
-        }, 5e3);
-        return;
-      }
-      const meta2 = r.meta || {};
-      log7("[jav] \u547D\u4E2D " + meta2.code + "\uFF1A" + (meta2.title || "") + (Array.isArray(meta2.actresses) && meta2.actresses.length ? " / " + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB") : "") + (meta2.date ? " / " + meta2.date : ""));
-      const newTitle = String(meta2.title || "").trim();
-      if (!newTitle) throw new Error("\u8FD4\u56DE\u6807\u9898\u4E3A\u7A7A");
-      let saved = false;
-      if (newTitle !== curTitle) {
-        const titleKey = "title" in data ? "title" : "name" in data ? "name" : "title";
-        const body = { ...data, nonce: fnNonce4() };
-        if (!body.guid && !body.item_guid) body.guid = guid;
-        body[titleKey] = newTitle;
-        body.title_locked = true;
-        saved = await fnosSaveEditDetail(origin, body);
-        if (saved) {
-          const vf = await fnosGetEditDetail(origin, guid);
-          saved = !!vf && String((_a = vf[titleKey]) != null ? _a : "").trim() === newTitle;
-        }
-        if (!saved) dlog("[jav] \u6807\u9898\u5199\u56DE\u672A\u786E\u8BA4\uFF08\u53EF\u80FD\u5B57\u6BB5\u540D/\u6743\u9650\u4E0D\u7B26\uFF09\uFF0C\u5C01\u9762\u4ECD\u66FF\u6362");
-      } else {
-        saved = true;
-      }
-      let coverOk = false;
-      if (meta2.cover) {
-        try {
-          const img = await ipcRenderer.invoke("jav:image", { url: meta2.cover });
-          if (img && img.ok && img.dataUrl) {
-            const poster = heroPosterImg();
-            if (poster) {
-              poster.src = img.dataUrl;
-              coverOk = true;
-            }
-          }
-        } catch (e) {
-          dlog("[jav] \u5C01\u9762\u83B7\u53D6\u5931\u8D25: " + String(e).substring(0, 80));
-        }
-      }
-      const who = Array.isArray(meta2.actresses) && meta2.actresses.length ? " \xB7 " + meta2.actresses.map((a) => a && a.name).filter(Boolean).slice(0, 3).join("\u30FB") : "";
-      if (saved) {
-        setBtn2(btn, "\u2713 \u5DF2\u56DE\u586B" + (coverOk ? " + \u5C01\u9762" : ""), meta2.code + " " + (meta2.date || "") + who + (coverOk ? "" : "\uFF08\u5C01\u9762\u672A\u66FF\u6362\uFF1Ahero \u5185\u672A\u627E\u5230\u6D77\u62A5\u4F4D\uFF09"));
-      } else {
-        setBtn2(btn, "\u26A0 \u56DE\u586B\u5931\u8D25", "\u6807\u9898\u5199\u56DE\u672A\u786E\u8BA4\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u5C01\u9762/\u67E5\u8BE2\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\u3002");
-      }
-      window.setTimeout(() => {
-        if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
-      }, 6e3);
-    } catch (e) {
-      log7("[jav] \u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
-      setBtn2(btn, "\u26A0 " + String(e && e.message || e).substring(0, 24), String(e && e.message || e));
-      window.setTimeout(() => {
-        if (btn.isConnected) {
-          setBtn2(btn, "\u27F3 jav \u522E\u524A");
-        }
-      }, 5e3);
-    } finally {
-      _running3 = false;
-    }
-  }
 
   // src/preload/plugins/embyWall/detail/folderScraper.ts
   init_electron();
@@ -14785,12 +14685,12 @@ html.fnos-perf.dark{
   var CONCURRENCY3 = 4;
   var MAX_PAGES = 10;
   var PAGE_SIZE = 1e3;
-  var _running4 = false;
+  var _running3 = false;
   function folderGuid() {
     const m = location.pathname.match(/\/v\/folder\/([A-Za-z0-9_]+)/);
     return m ? m[1] : null;
   }
-  function fnNonce5() {
+  function fnNonce4() {
     return String(Math.floor(Math.random() * 9e5) + 1e5);
   }
   async function fnosPost2(origin, path, body) {
@@ -14823,7 +14723,7 @@ html.fnos-perf.dark{
         sort_type: "ASC",
         page,
         page_size: PAGE_SIZE,
-        nonce: fnNonce5()
+        nonce: fnNonce4()
       });
       const list = data && Array.isArray(data.list) ? data.list : [];
       for (const it of list) {
@@ -14911,16 +14811,20 @@ html.fnos-perf.dark{
   }
   async function runFolderScraper(btn) {
     const guid = folderGuid();
-    if (!guid || _running4) return;
+    if (!guid || _running3) return;
     const url = String(S.customScraperUrl || "").trim();
     if (!S.customScraperEnabled || !url) {
-      setBtn(btn, "\u26A0 \u672A\u914D\u7F6E", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u5F00\u542F\u5E76\u586B\u5199\u5730\u5740\u3002");
+      if (!S.customScraperEnabled) {
+        setBtn(btn, "\u26A0 \u672A\u542F\u7528", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u6253\u5F00\u5F00\u5173\u3002");
+      } else {
+        setBtn(btn, "\u26A0 \u672A\u586B\u670D\u52A1\u5730\u5740", "\u8BF7\u5230 \u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u2192 \u81EA\u5B9A\u4E49\u522E\u524A\u6E90 \u586B\u5199\u5E76\u4FDD\u5B58\u522E\u524A\u670D\u52A1\u5730\u5740\u3002");
+      }
       window.setTimeout(() => {
         if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
       }, 5e3);
       return;
     }
-    _running4 = true;
+    _running3 = true;
     const origin = location.origin;
     const stats = { filled: 0, unchanged: 0, failed: 0, unmatched: 0, total: 0 };
     const tick2 = () => {
@@ -14937,7 +14841,7 @@ html.fnos-perf.dark{
         window.setTimeout(() => {
           if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
         }, 6e3);
-        _running4 = false;
+        _running3 = false;
         return;
       }
       stats.total = items2.length;
@@ -14962,7 +14866,7 @@ html.fnos-perf.dark{
         window.setTimeout(() => {
           if (btn.isConnected) setBtn(btn, "\u27F3 \u6587\u4EF6\u5939\u522E\u524A");
         }, 5e3);
-        _running4 = false;
+        _running3 = false;
         return;
       }
       let idx = 0;
@@ -14994,7 +14898,7 @@ html.fnos-perf.dark{
               tick2();
               continue;
             }
-            const body = { ...ed, nonce: fnNonce5() };
+            const body = { ...ed, nonce: fnNonce4() };
             if (!body.guid && !body.item_guid) body.guid = item.guid;
             let titleChanged = false, ovChanged = false;
             if (newTitle !== null) {
@@ -15057,16 +14961,24 @@ html.fnos-perf.dark{
         }, 6e3);
       }
     } finally {
-      _running4 = false;
+      _running3 = false;
     }
   }
-  function makeBtn3() {
+  var FOLDER_BTN_STYLE_ID = "fnos-folder-scraper-style";
+  function ensureBtnStylesheet() {
+    const existing = document.getElementById(FOLDER_BTN_STYLE_ID);
+    if (existing && existing.isConnected) return;
+    const st = document.createElement("style");
+    st.id = FOLDER_BTN_STYLE_ID;
+    st.textContent = "#fnos-folder-scraper-btn{position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;}#fnos-folder-scraper-btn.fnos-over-jav{bottom:70px;}";
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function makeBtn2() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.id = FOLDER_BTN_ID;
     btn.textContent = "\u27F3 \u6587\u4EF6\u5939\u522E\u524A";
     btn.setAttribute("title", "\u628A\u672C\u6587\u4EF6\u5939\u5185\u6587\u4EF6\u7684\u6587\u4EF6\u540D\u53D1\u7ED9\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u6309\u8FD4\u56DE\u6570\u636E\u56DE\u586B\u5404\u6587\u4EF6\u7684\u6807\u9898/\u7B80\u4ECB\uFF08\u4FA7\u680F\u8BBE\u7F6E \u2192 \u81EA\u5B9A\u4E49\u522E\u524A \u4E2D\u914D\u7F6E\uFF1B\u5B50\u6587\u4EF6\u5939\u8BF7\u8FDB\u5165\u540E\u9010\u5C42\u522E\u524A\uFF09");
-    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
     btn.setAttribute("data-fnos-ui", "1");
     btn.addEventListener("mouseenter", () => {
       btn.style.transform = "translateY(-1px)";
@@ -15081,15 +14993,42 @@ html.fnos-perf.dark{
     });
     return btn;
   }
+  function repositionFolderScraperButton() {
+    var _a;
+    const b = document.getElementById(FOLDER_BTN_ID);
+    if (!b || !b.isConnected) return;
+    ensureBtnStylesheet();
+    const javVisible = !!((_a = document.getElementById("fnos-jav-btn")) == null ? void 0 : _a.isConnected);
+    const want = javVisible ? "fnos-over-jav" : "";
+    if (b.classList.contains("fnos-over-jav") !== javVisible) {
+      if (want) b.classList.add("fnos-over-jav");
+      else b.classList.remove("fnos-over-jav");
+      dlog("[folderScraper] \u907F\u8BA9\u4F4D\u7F6E\u91CD\u7B97 \u2192 " + (javVisible ? "70px" : "26px"));
+    }
+  }
   function ensureFolderScraperButton() {
-    if (!folderGuid() || !S.customScraperEnabled) {
+    if (!folderGuid()) {
       removeFolderScraperButton();
       return;
     }
+    ensureBtnStylesheet();
     const existing = document.getElementById(FOLDER_BTN_ID);
+    const btn = existing && existing.isConnected ? existing : makeBtn2();
+    repositionFolderScraperButton();
     if (existing && existing.isConnected) return;
-    document.body.appendChild(makeBtn3());
+    document.body.appendChild(btn);
     dlog("[folderScraper] \u6309\u94AE\u5DF2\u6302\u8F7D " + location.pathname);
+    if (!window.__fnosFolderBtnGuard) {
+      window.__fnosFolderBtnGuard = window.setInterval(() => {
+        const b = document.getElementById(FOLDER_BTN_ID);
+        if (!b || !b.isConnected) {
+          window.clearInterval(window.__fnosFolderBtnGuard);
+          return;
+        }
+        ensureBtnStylesheet();
+        repositionFolderScraperButton();
+      }, 4e3);
+    }
   }
   function removeFolderScraperButton() {
     const b = document.getElementById(FOLDER_BTN_ID);
@@ -15111,6 +15050,573 @@ html.fnos-perf.dark{
     }
   }
   bootstrapFromSettings2();
+
+  // src/preload/plugins/embyWall/detail/jav.ts
+  var JAV_BTN_ID = "fnos-jav-btn";
+  var _running4 = false;
+  function movieGuid() {
+    const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
+    return m ? m[1] : null;
+  }
+  function folderGuid2() {
+    const m = location.pathname.match(/\/v\/folder\/fv_([a-f0-9]{32})/);
+    return m ? "fv_" + m[1] : null;
+  }
+  function otherGuid() {
+    const m = location.pathname.match(/\/v\/other\/([a-f0-9]{32})/);
+    return m ? m[1] : null;
+  }
+  function detailGuid() {
+    return folderGuid2() || otherGuid() || movieGuid();
+  }
+  function fnNonce5() {
+    return String(Math.floor(Math.random() * 9e5) + 1e5);
+  }
+  function setBtn2(btn, text, title) {
+    btn.textContent = text;
+    if (title !== void 0) btn.setAttribute("title", title);
+  }
+  function heroPosterImg() {
+    const view = findActiveDetailView();
+    if (!view) return null;
+    const hero = findDetailHero(view);
+    if (!hero) return null;
+    return Array.from(hero.querySelectorAll("img")).filter((im) => (im.currentSrc || im.src) && im.offsetHeight >= 200 && im.offsetHeight <= 400 && im.offsetWidth < 300)[0] || null;
+  }
+  function makeBtn3() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = JAV_BTN_ID;
+    btn.textContent = "\u27F3 jav \u522E\u524A";
+    btn.setAttribute("title", "\u4ECE\u6807\u9898\u756A\u53F7\u5728 javbus \u67E5\u8BE2\u5E76\u56DE\u586B \u6807\u9898/\u7B80\u4ECB/\u65E5\u671F/\u6F14\u5458/\u5C01\u9762\uFF08\u5C01\u9762\u7ECF\u4E34\u65F6\u56FE\u5E8A\u843D\u5E93\uFF09\u3002\u8BBE\u7F6E\u2192\u81EA\u5B9A\u4E49\u522E\u524A\u2192Jav \u522E\u524A \u5F00\u5173\u3002");
+    btn.style.cssText = "position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;user-select:none;";
+    btn.setAttribute("data-fnos-ui", "1");
+    btn.addEventListener("mouseenter", () => {
+      btn.style.background = "rgba(52,44,76,.9)!important";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.background = "rgba(28,24,40,.82)!important";
+    });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void runJav(btn);
+    });
+    document.body.appendChild(btn);
+    return btn;
+  }
+  function ensureJavButton() {
+    schedulePendingLayoutSwitch();
+    const onList = listOtherPage();
+    if (!S.javEnabled || !detailGuid() && !onList) {
+      removeJavButton();
+      return;
+    }
+    const existing = document.getElementById(JAV_BTN_ID);
+    if (existing && existing.isConnected) {
+      if (!_running4) setBtn2(existing, onList ? "\u27F3 \u5168\u5E93\u522E\u524A" : "\u27F3 jav \u522E\u524A");
+      repositionFolderScraperButton();
+      return;
+    }
+    makeBtn3();
+    const b = document.getElementById(JAV_BTN_ID);
+    if (b && onList) setBtn2(b, "\u27F3 \u5168\u5E93\u522E\u524A");
+    repositionFolderScraperButton();
+    dlog("[jav] \u6309\u94AE\u5DF2\u6302\u8F7D " + location.pathname);
+  }
+  function removeJavButton() {
+    const b = document.getElementById(JAV_BTN_ID);
+    if (b && b.parentNode) b.parentNode.removeChild(b);
+    repositionFolderScraperButton();
+  }
+  function scheduleJavButton() {
+    ensureJavButton();
+  }
+  try {
+    ipcRenderer.invoke("settings:get").then((s) => {
+      if (!s || typeof s !== "object") return;
+      S.javEnabled = s.javEnabled === true;
+      if (S.javEnabled && (detailGuid() || listOtherPage())) ensureJavButton();
+    }).catch(() => {
+    });
+  } catch {
+  }
+  function buildOverview(meta2) {
+    const parts = [];
+    if (Array.isArray(meta2.actresses) && meta2.actresses.length) {
+      parts.push("\u3010\u6F14\u5458\u3011" + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB"));
+    }
+    if (meta2.date) parts.push("\u3010\u53D1\u884C\u3011" + meta2.date);
+    if (Array.isArray(meta2.genres) && meta2.genres.length) parts.push("\u3010\u7C7B\u522B\u3011" + meta2.genres.join("\u30FB"));
+    return parts.join("\n");
+  }
+  async function fnosPersonSearch(origin, keyword) {
+    try {
+      const body = { keyword, nonce: fnNonce5() };
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/person/search", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/person/search", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) return [];
+      const j = await resp.json().catch(() => null);
+      return j && j.code === 0 && j.data && Array.isArray(j.data.list) ? j.data.list : [];
+    } catch {
+      return [];
+    }
+  }
+  async function fnosPersonCreate(origin, name) {
+    try {
+      const body = { name, nonce: fnNonce5() };
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/person/create", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/person/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) return "";
+      const j = await resp.json().catch(() => null);
+      return j && j.code === 0 && j.data && j.data.guid ? String(j.data.guid) : "";
+    } catch {
+      return "";
+    }
+  }
+  async function buildCredits(origin, meta2) {
+    const out = [];
+    const names = (Array.isArray(meta2.actresses) ? meta2.actresses : []).map((a) => String(a && a.name || "").trim()).filter(Boolean);
+    for (let i = 0; i < names.length; i++) {
+      let guid = "";
+      try {
+        const hits = await fnosPersonSearch(origin, names[i]);
+        const hit = hits.find((p) => String(p && p.name || "").trim() === names[i] && p.guid);
+        guid = hit ? String(hit.guid) : await fnosPersonCreate(origin, names[i]);
+      } catch {
+      }
+      if (!guid) continue;
+      out.push({ job: "Actor", name: names[i], order: i, person_guid: guid, profile_path: "", role: "" });
+    }
+    return out;
+  }
+  function creditsEqual(a, b) {
+    if (!Array.isArray(b) || b.length !== a.length) return false;
+    return a.every((c, i) => String(c.name) === String(b[i] && b[i].name) && String(c.job) === String(b[i] && b[i].job));
+  }
+  async function folderChildVideos(origin, fGuid) {
+    try {
+      const body = { parent_guid: fGuid, exclude_folder: 1, sort_column: "sort_title", sort_type: "ASC", nonce: fnNonce5() };
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/item/list", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/item/list", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) return [];
+      const j = await resp.json().catch(() => null);
+      const list = j && j.code === 0 && j.data && Array.isArray(j.data.list) ? j.data.list : [];
+      return list.filter((it) => it && it.guid && String(it.type || "").toLowerCase() === "video").map((it) => String(it.guid)).filter((g) => /^[a-f0-9]{32}$/.test(g));
+    } catch {
+      return [];
+    }
+  }
+  async function backfillOne(origin, guid, prep) {
+    var _a, _b, _c, _d;
+    const data = await fnosGetEditDetail(origin, guid);
+    if (!data) return { saved: false, verified: false, done: [] };
+    const meta2 = prep.meta;
+    const titleKey = "title" in data ? "title" : "name" in data ? "name" : "title";
+    const curTitle = String(data[titleKey] || "").trim();
+    const body = { ...data, nonce: fnNonce5() };
+    if (!body.guid && !body.item_guid) body.guid = guid;
+    const done = [];
+    const newTitle = String(meta2.title || "").trim();
+    if (newTitle && newTitle !== curTitle) {
+      body[titleKey] = newTitle;
+      body.title_locked = true;
+      done.push("\u6807\u9898");
+    }
+    if (prep.ov && prep.ov !== String(data.overview || "").trim()) {
+      body.overview = prep.ov;
+      body.overview_locked = true;
+      done.push("\u7B80\u4ECB");
+    }
+    if (meta2.date && meta2.date !== String(data.air_date || "").trim()) {
+      body.air_date = meta2.date;
+      body.air_date_locked = true;
+      done.push("\u65E5\u671F");
+    }
+    if (prep.credits.length && !creditsEqual(prep.credits, data.credits)) {
+      body.credits = prep.credits;
+      body.credits_locked = true;
+      done.push("\u6F14\u5458");
+    }
+    if (prep.coverHash && prep.coverHash !== String(data.posters || "").trim()) {
+      body.posters = prep.coverHash;
+      body.posters_locked = true;
+      if (Number(data.poster_type) !== 1) body.poster_type = 1;
+      done.push("\u5C01\u9762");
+    }
+    if (!done.length) return { saved: true, verified: true, done: [] };
+    const saved = await fnosSaveEditDetail(origin, body);
+    let verified = false;
+    if (saved) {
+      const vf = await fnosGetEditDetail(origin, guid);
+      verified = !!vf;
+      if (verified && body.title_locked) verified = String((_a = vf[titleKey]) != null ? _a : "").trim() === newTitle;
+      if (verified && body.overview_locked) verified = String((_b = vf.overview) != null ? _b : "").trim() === prep.ov;
+      if (verified && body.air_date_locked) verified = String((_c = vf.air_date) != null ? _c : "").trim() === String(body.air_date);
+      if (verified && body.posters_locked) verified = String((_d = vf.posters) != null ? _d : "").trim() === prep.coverHash;
+      if (verified && body.credits_locked) verified = creditsEqual(prep.credits, vf.credits);
+    }
+    return { saved, verified, done };
+  }
+  function listOtherPage() {
+    return /^\/v\/list\/other\/?$/.test(location.pathname);
+  }
+  async function javPrepByTitle(origin, guid, title) {
+    const r = title ? await ipcRenderer.invoke("jav:lookup", { title, guid }) : null;
+    if (!r || !r.ok) {
+      const err = String(r && r.error || "\u67E5\u8BE2\u5931\u8D25");
+      return err.indexOf("\u756A\u53F7") >= 0 ? { nocode: true } : { err };
+    }
+    const meta2 = r.meta || {};
+    const ov = buildOverview(meta2);
+    const credits = await buildCredits(origin, meta2).catch(() => []);
+    let coverHash = "";
+    if (meta2.cover) {
+      try {
+        const img = await ipcRenderer.invoke("jav:image", { url: meta2.cover });
+        if (img && img.ok && img.dataUrl) {
+          coverHash = await uploadImageToFnos(origin, img.dataUrl, "poster") || "";
+        }
+      } catch (e) {
+        dlog("[jav] \u5C01\u9762\u51C6\u5907\u5931\u8D25: " + String(e).substring(0, 80));
+      }
+    }
+    return { prep: { meta: meta2, ov, credits, coverHash } };
+  }
+  async function javScrapeByTitle(origin, guid, title) {
+    const p = await javPrepByTitle(origin, guid, title);
+    if (p.nocode) return "nocode";
+    if (!p.prep) return "fail";
+    const res = await backfillOne(origin, guid, p.prep);
+    return res.saved ? "ok" : "fail";
+  }
+  async function listLibraryRoot(origin) {
+    const dirs = [];
+    const videos = [];
+    for (let page = 1; page <= 50; page++) {
+      const body = { sort_column: "sort_title", sort_type: "ASC", page, page_size: 200, nonce: fnNonce5() };
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/item/list", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/item/list", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) break;
+      const j = await resp.json().catch(() => null);
+      const list = j && j.code === 0 && j.data && Array.isArray(j.data.list) ? j.data.list : [];
+      for (const it of list) {
+        if (!it || !it.guid) continue;
+        const g = String(it.guid);
+        const t2 = String(it.type || "").toLowerCase();
+        if (t2 === "directory" && String(it.ancestor_category || "") === "Others") dirs.push(g);
+        else if (t2 === "video") videos.push(g);
+      }
+      if (list.length < 200) break;
+    }
+    return { dirs, videos };
+  }
+  async function folderChildren(origin, fGuid) {
+    const videos = [];
+    const dirs = [];
+    try {
+      const body = { parent_guid: fGuid, sort_column: "sort_title", sort_type: "ASC", nonce: fnNonce5() };
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/item/list", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/item/list", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) return { videos, dirs };
+      const j = await resp.json().catch(() => null);
+      const list = j && j.code === 0 && j.data && Array.isArray(j.data.list) ? j.data.list : [];
+      for (const it of list) {
+        if (!it || !it.guid) continue;
+        const g = String(it.guid);
+        const t2 = String(it.type || "").toLowerCase();
+        if (t2 === "video" && /^[a-f0-9]{32}$/.test(g)) videos.push(g);
+        else if (t2 === "directory") dirs.push(g);
+      }
+    } catch {
+    }
+    return { videos, dirs };
+  }
+  async function switchLayoutToLandscape() {
+    try {
+      const spans = Array.from(document.querySelectorAll("span"));
+      const trigger = spans.find((s) => (s.textContent || "").trim() === "\u5E03\u5C40" && s.children.length === 0 && s.offsetParent !== null && s.closest('[class*="cursor-pointer"]'));
+      if (!trigger) {
+        dlog("[jav] \u672A\u627E\u5230\u5E03\u5C40\u83DC\u5355\uFF08\u672C\u9875\u65E0\u5E03\u5C40\u5DE5\u5177\u680F\uFF09\uFF0C\u8DF3\u8FC7\u6A2A\u5E45\u5207\u6362");
+        return false;
+      }
+      const host = trigger.closest('[class*="cursor-pointer"]') || trigger.parentElement;
+      if (!host) return false;
+      host.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      host.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      host.click();
+      await new Promise((r) => setTimeout(r, 500));
+      const items2 = Array.from(document.querySelectorAll('.semi-dropdown-item, .semi-popover li, [class*="dropdown-item"]'));
+      const target = items2.find((it) => (it.textContent || "").trim() === "\u6A2A\u5E45\u6D77\u62A5" && it.offsetParent !== null);
+      if (!target) {
+        dlog("[jav] \u5E03\u5C40\u83DC\u5355\u672A\u5F39\u51FA\u6216\u65E0\u6A2A\u5E45\u6D77\u62A5\u9879\uFF0C\u8DF3\u8FC7");
+        return false;
+      }
+      target.click();
+      await new Promise((r) => setTimeout(r, 300));
+      log7("[jav] \u5E03\u5C40\u5DF2\u81EA\u52A8\u5207\u6362\u4E3A\u6A2A\u5E45\u6D77\u62A5");
+      return true;
+    } catch (e) {
+      dlog("[jav] \u5E03\u5C40\u5207\u6362\u5931\u8D25: " + String(e && e.message || e).substring(0, 80));
+      return false;
+    }
+  }
+  var _pendingLayoutSwitch = false;
+  var _switchChainGen = 0;
+  function markPendingLayoutSwitch() {
+    _pendingLayoutSwitch = true;
+  }
+  function schedulePendingLayoutSwitch() {
+    if (!_pendingLayoutSwitch || _running4) return;
+    const gen = ++_switchChainGen;
+    [300, 900, 2e3, 4e3].forEach((ms) => {
+      window.setTimeout(() => {
+        if (gen !== _switchChainGen || !_pendingLayoutSwitch || _running4) return;
+        void switchLayoutToLandscape().then((ok) => {
+          if (ok) _pendingLayoutSwitch = false;
+        });
+      }, ms);
+    });
+  }
+  async function javScrapeFolderTree(origin, fGuid, depth, stats, tick2) {
+    if (depth > 3) return;
+    const { videos, dirs } = await folderChildren(origin, fGuid);
+    const ed = await fnosGetEditDetail(origin, fGuid).catch(() => null);
+    const dTitle = String(ed && (ed.title || ed.name) || "").trim();
+    const p = await javPrepByTitle(origin, fGuid, dTitle);
+    if (p.prep) {
+      tick2("\u23F3 \u56DE\u586B " + (dTitle || fGuid).slice(0, 16) + "\u2026");
+      try {
+        const r1 = await backfillOne(origin, fGuid, p.prep);
+        if (r1.saved) stats.ok++;
+        else stats.fail++;
+      } catch (e) {
+        stats.fail++;
+      }
+      for (const c of videos) {
+        try {
+          const r = await backfillOne(origin, c, p.prep);
+          if (r.saved) stats.ok++;
+          else stats.fail++;
+        } catch (e) {
+          stats.fail++;
+        }
+      }
+    } else {
+      if (p.nocode) stats.nocode++;
+      else stats.fail++;
+      for (const c of videos) {
+        const ced = await fnosGetEditDetail(origin, c).catch(() => null);
+        const cTitle = String(ced && (ced.title || ced.name) || "").trim();
+        tick2("\u23F3 \u522E\u524A " + (cTitle || c).slice(0, 16) + "\u2026");
+        try {
+          const st = await javScrapeByTitle(origin, c, cTitle);
+          if (st === "ok") stats.ok++;
+          else if (st === "nocode") stats.nocode++;
+          else stats.fail++;
+        } catch (e) {
+          stats.fail++;
+        }
+      }
+    }
+    for (const d of dirs) {
+      await javScrapeFolderTree(origin, d, depth + 1, stats, tick2);
+    }
+  }
+  async function runJavBatchChildren(btn, origin, fGuid) {
+    const stats = { ok: 0, fail: 0, nocode: 0 };
+    const tick2 = (label) => {
+      const done = stats.ok + stats.fail + stats.nocode;
+      setBtn2(btn, label + " (" + done + ")");
+    };
+    await javScrapeFolderTree(origin, fGuid, 0, stats, tick2);
+    log7("[jav] \u6587\u4EF6\u5939\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
+    if (stats.ok > 0) {
+      markPendingLayoutSwitch();
+      if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
+    }
+    if (stats.ok) return "\u2713 \u5DF2\u56DE\u586B " + stats.ok + (stats.nocode ? " \xB7 \u672A\u8BC6\u522B " + stats.nocode : "") + (stats.fail ? " \xB7 \u5931\u8D25 " + stats.fail : "");
+    if (stats.nocode) return "\u26A0 " + stats.nocode + " \u4E2A\u672A\u8BC6\u522B\u756A\u53F7";
+    return "\u26A0 \u56DE\u586B\u5931\u8D25";
+  }
+  async function runJavLibrary(btn, origin) {
+    setBtn2(btn, "\u23F3 \u679A\u4E3E\u5E93\u5185\u5BB9\u2026");
+    const { dirs, videos } = await listLibraryRoot(origin);
+    if (!dirs.length && !videos.length) return "\u26A0 \u672A\u679A\u4E3E\u5230\u53EF\u522E\u5185\u5BB9";
+    const stats = { ok: 0, fail: 0, nocode: 0 };
+    let done = 0;
+    const tick2 = (label) => {
+      done = stats.ok + stats.fail + stats.nocode;
+      setBtn2(btn, label + " (" + done + ")");
+    };
+    for (const d of dirs) {
+      await javScrapeFolderTree(origin, d, 0, stats, tick2);
+    }
+    for (const v of videos) {
+      try {
+        const ed = await fnosGetEditDetail(origin, v).catch(() => null);
+        const vTitle = String(ed && (ed.title || ed.name) || "").trim();
+        const st = await javScrapeByTitle(origin, v, vTitle);
+        if (st === "ok") stats.ok++;
+        else if (st === "nocode") stats.nocode++;
+        else stats.fail++;
+      } catch (e) {
+        stats.fail++;
+      }
+      tick2("\u23F3 \u5168\u5E93\u522E\u524A");
+    }
+    log7("[jav] \u5168\u5E93\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
+    if (stats.ok > 0) {
+      markPendingLayoutSwitch();
+      if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
+    }
+    if (stats.ok) return "\u2713 \u5DF2\u56DE\u586B " + stats.ok + (stats.nocode ? " \xB7 \u672A\u8BC6\u522B " + stats.nocode : "") + (stats.fail ? " \xB7 \u5931\u8D25 " + stats.fail : "");
+    if (stats.nocode) return "\u26A0 " + stats.nocode + " \u4E2A\u672A\u8BC6\u522B\u756A\u53F7";
+    return "\u26A0 \u56DE\u586B\u5931\u8D25";
+  }
+  async function runJav(btn) {
+    if (_running4) return;
+    const origin = location.origin;
+    if (listOtherPage()) {
+      _running4 = true;
+      try {
+        const summary = await runJavLibrary(btn, origin);
+        setBtn2(btn, summary, summary.indexOf("\u26A0") === 0 ? summary : "jav \u5168\u5E93\u522E\u524A\u5B8C\u6210\uFF0C\u53EF\u91CD\u8FDB\u9875\u9762\u67E5\u770B\u3002");
+        btn.style.color = summary.indexOf("\u26A0") === 0 ? "var(--fnos-ui-warn,#b06a3a)" : "";
+        window.setTimeout(() => {
+          if (btn.isConnected) {
+            btn.style.color = "";
+            setBtn2(btn, "\u27F3 \u5168\u5E93\u522E\u524A");
+          }
+        }, 8e3);
+      } finally {
+        _running4 = false;
+      }
+      return;
+    }
+    const folderG = folderGuid2();
+    const guid = folderG || otherGuid() || movieGuid();
+    if (!guid) return;
+    _running4 = true;
+    try {
+      const data = await fnosGetEditDetail(origin, guid);
+      if (!data) throw new Error("\u8BFB\u53D6\u6761\u76EE\u5931\u8D25\uFF08getEditDetail\uFF09");
+      const curTitle = String(data.title || data.name || "").trim();
+      setBtn2(btn, "\u23F3 jav \u67E5\u8BE2\u4E2D\u2026");
+      const r = await ipcRenderer.invoke("jav:lookup", { title: curTitle, guid });
+      if (!r || !r.ok) {
+        if (folderG) {
+          const summary = await runJavBatchChildren(btn, origin, folderG);
+          setBtn2(btn, summary, summary.indexOf("\u26A0") === 0 ? summary : "jav \u6587\u4EF6\u5939\u6279\u91CF\u522E\u524A\u5B8C\u6210\uFF0C\u53EF\u91CD\u8FDB\u9875\u9762\u67E5\u770B\u3002");
+          btn.style.color = summary.indexOf("\u26A0") === 0 ? "var(--fnos-ui-warn,#b06a3a)" : "";
+          window.setTimeout(() => {
+            if (btn.isConnected) {
+              btn.style.color = "";
+              setBtn2(btn, "\u27F3 jav \u522E\u524A");
+            }
+          }, 8e3);
+          return;
+        }
+        const err = String(r && r.error || "\u67E5\u8BE2\u5931\u8D25");
+        const noCode = err.indexOf("\u756A\u53F7") >= 0;
+        setBtn2(btn, noCode ? "\u26A0 \u672A\u8BC6\u522B\u756A\u53F7" : "\u26A0 javbus \u5931\u8D25", err);
+        window.setTimeout(() => {
+          if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
+        }, 5e3);
+        return;
+      }
+      const meta2 = r.meta || {};
+      log7("[jav] \u547D\u4E2D " + meta2.code + "\uFF1A" + (meta2.title || "") + (Array.isArray(meta2.actresses) && meta2.actresses.length ? " / " + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB") : "") + (meta2.date ? " / " + meta2.date : ""));
+      const ov = buildOverview(meta2);
+      setBtn2(btn, "\u23F3 \u5339\u914D\u6F14\u5458\u2026");
+      const credits = await buildCredits(origin, meta2);
+      let coverDataUrl = "";
+      let coverHash = "";
+      if (meta2.cover) {
+        setBtn2(btn, "\u23F3 \u5C01\u9762\u4E0A\u4F20\u4E2D\u2026");
+        try {
+          const img = await ipcRenderer.invoke("jav:image", { url: meta2.cover });
+          if (img && img.ok && img.dataUrl) {
+            coverDataUrl = img.dataUrl;
+            coverHash = await uploadImageToFnos(origin, coverDataUrl, "poster") || "";
+          }
+        } catch (e) {
+          dlog("[jav] \u5C01\u9762\u4E0A\u4F20\u5931\u8D25: " + String(e).substring(0, 80));
+        }
+      }
+      const targets = folderG ? [folderG, ...await folderChildVideos(origin, folderG)] : [guid];
+      const done = [];
+      let savedAll = true;
+      let verifiedAll = true;
+      for (let i = 0; i < targets.length; i++) {
+        setBtn2(btn, "\u23F3 \u56DE\u586B\u4E2D\u2026(" + (i + 1) + "/" + targets.length + ")");
+        const res = await backfillOne(origin, targets[i], { meta: meta2, ov, credits, coverHash });
+        savedAll = savedAll && res.saved;
+        verifiedAll = verifiedAll && res.verified;
+        for (const d of res.done) if (!done.includes(d)) done.push(d);
+      }
+      let coverOk = false;
+      if (coverDataUrl) {
+        const poster = heroPosterImg();
+        if (poster) {
+          poster.src = coverDataUrl;
+          coverOk = true;
+        }
+      }
+      const who = Array.isArray(meta2.actresses) && meta2.actresses.length ? " \xB7 " + meta2.actresses.map((a) => a && a.name).filter(Boolean).slice(0, 3).join("\u30FB") : "";
+      const scope = targets.length > 1 ? " \xD7" + targets.length : "";
+      if (savedAll && verifiedAll) {
+        if (done.length) markPendingLayoutSwitch();
+        setBtn2(
+          btn,
+          done.length ? "\u2713 \u5DF2\u56DE\u586B\uFF08" + done.join("/") + scope + "\uFF09" : "\u2713 \u5DF2\u662F\u6700\u65B0",
+          meta2.code + " " + (meta2.date || "") + who + (done.length && coverHash && !coverOk ? "\uFF08hero \u6D77\u62A5\u4F4D\u672A\u627E\u5230\uFF0C\u5C01\u9762\u5DF2\u843D\u5E93\uFF0C\u91CD\u8FDB\u9875\u9762\u751F\u6548\uFF09" : "")
+        );
+      } else if (savedAll) {
+        setBtn2(btn, "\u26A0 \u56DE\u586B\u672A\u786E\u8BA4", "\u5199\u5165\u5DF2\u63D0\u4EA4\u4F46\u590D\u6838\u672A\u901A\u8FC7\uFF0C\u8BE6\u89C1\u65E5\u5FD7\u3002");
+      } else {
+        setBtn2(btn, "\u26A0 \u56DE\u586B\u5931\u8D25", "saveEditDetail \u5199\u5165\u5931\u8D25\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u67E5\u8BE2\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\u3002");
+      }
+      window.setTimeout(() => {
+        if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
+      }, 6e3);
+    } catch (e) {
+      log7("[jav] \u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
+      setBtn2(btn, "\u26A0 " + String(e && e.message || e).substring(0, 24), String(e && e.message || e));
+      window.setTimeout(() => {
+        if (btn.isConnected) {
+          setBtn2(btn, "\u27F3 jav \u522E\u524A");
+        }
+      }, 5e3);
+    } finally {
+      _running4 = false;
+    }
+  }
 
   // src/preload/plugins/embyWall/carousel/bootCover.ts
   var STYLE_ID5 = "fntv-boot-style";
@@ -15651,7 +16157,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     }
     function buildSettingsPanel() {
       if (document.getElementById("fnos-settings-panel")) return;
-      const mkBtn2 = (text, small = false) => {
+      const mkBtn = (text, small = false) => {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = t(text);
@@ -15885,9 +16391,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const biliFoldBody = biliFold.body;
       const biliBtns = document.createElement("div");
       biliBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
-      const logoutBiliBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
-      const saveBiliCookieBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
+      const scanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
+      const logoutBiliBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
+      const saveBiliCookieBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
       biliBtns.appendChild(scanBtn);
       biliBtns.appendChild(logoutBiliBtn);
       biliBtns.appendChild(saveBiliCookieBtn);
@@ -15950,8 +16456,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const bangumiBtns = document.createElement("div");
       bangumiBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveBangumiBtn = mkBtn2("\u4FDD\u5B58", true);
-      const clearBangumiBtn = mkBtn2("\u6E05\u9664", true);
+      const saveBangumiBtn = mkBtn("\u4FDD\u5B58", true);
+      const clearBangumiBtn = mkBtn("\u6E05\u9664", true);
       bangumiBtns.appendChild(saveBangumiBtn);
       bangumiBtns.appendChild(clearBangumiBtn);
       secBodyBangumi.appendChild(bangumiBtns);
@@ -16085,8 +16591,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const tmdbBtns = document.createElement("div");
       tmdbBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveTmdbBtn = mkBtn2("\u4FDD\u5B58", true);
-      const clearTmdbBtn = mkBtn2("\u6E05\u9664", true);
+      const saveTmdbBtn = mkBtn("\u4FDD\u5B58", true);
+      const clearTmdbBtn = mkBtn("\u6E05\u9664", true);
       tmdbBtns.appendChild(saveTmdbBtn);
       tmdbBtns.appendChild(clearTmdbBtn);
       secBodyTmdb.appendChild(tmdbBtns);
@@ -16186,8 +16692,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dcWrap.appendChild(dcIpGrid);
       const dcBtns = document.createElement("div");
       dcBtns.style.cssText = "display:flex;gap:6px;";
-      const dcSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const dcUpdateBtn = mkBtn2("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
+      const dcSaveBtn = mkBtn("\u4FDD\u5B58", true);
+      const dcUpdateBtn = mkBtn("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
       dcBtns.appendChild(dcSaveBtn);
       dcBtns.appendChild(dcUpdateBtn);
       dcWrap.appendChild(dcBtns);
@@ -16341,9 +16847,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const doubanBtns = document.createElement("div");
       doubanBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanDoubanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
-      const logoutDoubanBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
-      const manualBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
+      const scanDoubanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
+      const logoutDoubanBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
+      const manualBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
       doubanBtns.appendChild(scanDoubanBtn);
       doubanBtns.appendChild(logoutDoubanBtn);
       doubanBtns.appendChild(manualBtn);
@@ -16399,7 +16905,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       watchedStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;";
       watchedStatus.textContent = t("\u8BFB\u53D6\u98DE\u725B\u300C\u5DF2\u89C2\u770B\u300D\u5217\u8868\uFF0C\u6279\u91CF\u6807\u8BB0\u5230\u8C46\u74E3\uFF08\u5DF2\u6807\u8BB0\u7684\u4F1A\u8DF3\u8FC7\uFF0C\u4E0D\u91CD\u590D\u6253\uFF09\u3002");
       watchedWrap.appendChild(watchedStatus);
-      const syncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
+      const syncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
       syncBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         syncBtn.setAttribute("disabled", "true");
@@ -16427,7 +16933,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       autoInput.min = "0";
       autoInput.step = "5";
       autoInput.style.cssText = "width:64px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;";
-      const autoSave = mkBtn2("\u4FDD\u5B58", true);
+      const autoSave = mkBtn("\u4FDD\u5B58", true);
       autoSave.style.fontSize = "11px";
       autoRow.appendChild(autoLabel);
       autoRow.appendChild(autoInput);
@@ -16529,8 +17035,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       traBody.appendChild(traSecretInput);
       const traBtnRow1 = document.createElement("div");
       traBtnRow1.style.cssText = "display:flex;gap:6px;";
-      const traSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const traClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
+      const traSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const traClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
       traBtnRow1.appendChild(traSaveBtn);
       traBtnRow1.appendChild(traClearBtn);
       traBody.appendChild(traBtnRow1);
@@ -16589,9 +17095,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const traBtnRow2 = document.createElement("div");
       traBtnRow2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const traConnectBtn = mkBtn2("\u8FDE\u63A5 Trakt", true);
-      const traSyncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
-      const traDiscBtn = mkBtn2("\u65AD\u5F00\u8FDE\u63A5", true);
+      const traConnectBtn = mkBtn("\u8FDE\u63A5 Trakt", true);
+      const traSyncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
+      const traDiscBtn = mkBtn("\u65AD\u5F00\u8FDE\u63A5", true);
       traBtnRow2.appendChild(traConnectBtn);
       traBtnRow2.appendChild(traSyncBtn);
       traBtnRow2.appendChild(traDiscBtn);
@@ -16614,7 +17120,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       traScrobSub.textContent = t("\u64AD\u653E\u65F6\u5B9E\u65F6\u6253\u70B9\u5230 Trakt\uFF08\u5F00\u59CB/\u6682\u505C/\u770B\u5B8C\u226580% \u81EA\u52A8\u8BB0\u5F55\uFF09\uFF0C\u9700\u5148\u8FDE\u63A5 Trakt\u3002");
       traScrobLabelWrap.appendChild(traScrobLabel);
       traScrobLabelWrap.appendChild(traScrobSub);
-      const traScrobBtn = mkBtn2("\u2026", true);
+      const traScrobBtn = mkBtn("\u2026", true);
       traScrobRow.appendChild(traScrobLabelWrap);
       traScrobRow.appendChild(traScrobBtn);
       traBody.appendChild(traScrobRow);
@@ -16834,9 +17340,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       ddFoldBody.appendChild(ddSecretInput);
       const ddBtns = document.createElement("div");
       ddBtns.style.cssText = "display:flex;gap:6px;";
-      const ddSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const ddClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
-      const ddTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const ddSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const ddClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
+      const ddTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
       ddBtns.appendChild(ddSaveBtn);
       ddBtns.appendChild(ddClearBtn);
       ddBtns.appendChild(ddTestBtn);
@@ -17003,8 +17509,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmApiFoldBody.appendChild(dmApiInput);
       const dmApiBtns = document.createElement("div");
       dmApiBtns.style.cssText = "display:flex;gap:6px;";
-      const dmApiSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const dmApiTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const dmApiSaveBtn = mkBtn("\u4FDD\u5B58", true);
+      const dmApiTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
       dmApiBtns.appendChild(dmApiSaveBtn);
       dmApiBtns.appendChild(dmApiTestBtn);
       dmApiFoldBody.appendChild(dmApiBtns);
@@ -17031,7 +17537,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         dmApiSave();
       });
-      const dmApiDiagBtn = mkBtn2("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
+      const dmApiDiagBtn = mkBtn("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
       dmApiBtns.appendChild(dmApiDiagBtn);
       let dmApiDiagPre = null;
       dmApiDiagBtn.addEventListener("click", async (e) => {
@@ -17099,8 +17605,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       diagPre.textContent = t("\u70B9\u51FB\u300C\u5237\u65B0\u300D\u52A0\u8F7D\u8BCA\u65AD\u4FE1\u606F\u2026");
       const diagBtns = document.createElement("div");
       diagBtns.style.cssText = "display:flex;gap:6px;padding:8px 0 0;";
-      const diagRefresh = mkBtn2("\u5237\u65B0", true);
-      const diagCopy = mkBtn2("\u590D\u5236", true);
+      const diagRefresh = mkBtn("\u5237\u65B0", true);
+      const diagCopy = mkBtn("\u590D\u5236", true);
       diagBtns.appendChild(diagRefresh);
       diagBtns.appendChild(diagCopy);
       const loadDiag = async () => {
@@ -17219,7 +17725,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       logFooter.appendChild(logDivider);
       const logRow = document.createElement("div");
       logRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;";
-      const liveBtn = mkBtn2("\u5237\u65B0", true);
+      const liveBtn = mkBtn("\u5237\u65B0", true);
       logRow.appendChild(liveBtn);
       logFooter.appendChild(logRow);
       const livePre = document.createElement("pre");
@@ -17547,7 +18053,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       hotIntervalRow.appendChild(hotIntervalLabel);
       hotIntervalRow.appendChild(hotIntervalSel);
       secBodyDaily.appendChild(hotIntervalRow);
-      const hotRefreshBtn = mkBtn2("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
+      const hotRefreshBtn = mkBtn("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
       hotRefreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         try {
@@ -17569,7 +18075,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyScraper.style.cssText = "padding:14px 16px;flex:1 1 auto;display:flex;flex-direction:column;";
       const csDesc = document.createElement("div");
       csDesc.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;";
-      csDesc.textContent = t('\u628A\u89C6\u9891\u6807\u9898/\u5B63\u53F7\u53D1\u7ED9\u4F60\u7684\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u8FD4\u56DE\u7684\u5206\u96C6\u6807\u9898\u4E0E\u7B80\u4ECB\u7ECF\u98DE\u725B\u5B98\u65B9\u63A5\u53E3\u56DE\u586B\u5143\u6570\u636E\uFF08\u4E0D\u4FEE\u6539\u4EFB\u4F55\u7CFB\u7EDF\u6587\u4EF6\uFF09\u3002\u670D\u52A1\u534F\u8BAE\uFF1A\u5B63\u9875 POST {title, season, tmdbId, episodes}\uFF0C\u54CD\u5E94 {episodes:[{index,title,overview}]}\uFF1B\u6587\u4EF6\u5939 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}\uFF08name=\u6587\u4EF6\u540D\uFF0C\u670D\u52A1\u6309 name/index \u5339\u914D\uFF09\uFF0C\u54CD\u5E94 {items|episodes:[{index|name,title,overview}]}\u3002\u5F00\u542F\u540E\u5728\u5B63\u9875\u300C\u9009\u96C6\u300D\u6807\u9898\u65C1\u51FA\u73B0\u300C\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A\u300D\u6309\u94AE\uFF0C\u4E2A\u4EBA\u89C6\u9891\u6587\u4EF6\u5939\u9875\uFF08/v/folder/\u2026\uFF09\u51FA\u73B0\u300C\u27F3 \u6587\u4EF6\u5939\u522E\u524A\u300D\u6D6E\u52A8\u6309\u94AE\u3002');
+      csDesc.innerHTML = t('<b>\u2705 \u5DF2\u4E0A\u7EBF</b> \u2014\u2014 \u628A\u522E\u524A\u951A\u70B9\u53D1\u7ED9<b>\u4F60\u81EA\u5EFA\u7684\u522E\u524A\u670D\u52A1</b>\uFF08\u80FD\u6536\u53D1 JSON \u7684 HTTP \u63A5\u53E3\uFF09\uFF0C\u8FD4\u56DE\u6570\u636E\u7ECF\u98DE\u725B\u5B98\u65B9\u7F16\u8F91\u63A5\u53E3\u56DE\u586B\uFF08\u4E0D\u4FEE\u6539\u4EFB\u4F55\u7CFB\u7EDF\u6587\u4EF6\uFF1B\u53EA\u586B\u7A7A/\u8986\u76D6\u5360\u4F4D/\u4E2D\u6587\u8986\u76D6\u82F1\u6587\uFF0C\u7EDD\u4E0D\u5012\u6253\u5DF2\u6709\u4E2D\u6587\uFF0C\u5199\u56DE\u5E26\u5B57\u6BB5\u9501\uFF09\u3002\u6B65\u9AA4\uFF1A\u2460 \u642D\u670D\u52A1\uFF08\u4EFB\u4F55\u8BED\u8A00\uFF0C\u534F\u8BAE\u89C1\u4E0B\uFF09\u2461 \u6253\u5F00\u4E0B\u65B9\u5F00\u5173 \u2462 \u586B\u670D\u52A1\u5730\u5740 \u2192 \u4FDD\u5B58\u3002\u534F\u8BAE\uFF1A\u5B63\u9875 POST {title, season, tmdbId, episodes}\uFF0C\u54CD\u5E94 {episodes:[{index,title,overview}]}\uFF1B\u6587\u4EF6\u5939 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}\uFF08name=\u6587\u4EF6\u540D\uFF0C\u670D\u52A1\u6309 name/index \u5339\u914D\uFF09\uFF0C\u54CD\u5E94 {items|episodes:[{index|name,title,overview}]}\u3002\u6309\u94AE\u4F4D\u7F6E\uFF1A\u5B63\u9875\u300C\u9009\u96C6\u300D\u65C1\u300C\u27F3 \u81EA\u5B9A\u4E49\u522E\u524A\u300D\uFF08\u5206\u96C6\u56DE\u586B\uFF09\uFF1B\u4E2A\u4EBA\u89C6\u9891\u6587\u4EF6\u5939\u9875\u300C\u27F3 \u6587\u4EF6\u5939\u522E\u524A\u300D\uFF08\u6309\u6587\u4EF6\u540D\u6279\u91CF\uFF0C\u5B50\u6587\u4EF6\u5939\u81EA\u52A8\u9012\u5F52\uFF09\u3002');
       secBodyScraper.appendChild(csDesc);
       const csToggleRow = document.createElement("label");
       csToggleRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;cursor:pointer;border-radius:6px;margin-bottom:8px;";
@@ -17630,8 +18136,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       const extInputCss = "width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;";
       const mkExtDesc = (body, text) => {
         const d = document.createElement("div");
-        d.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;";
-        d.textContent = t(text);
+        d.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);line-height:1.55;margin-bottom:8px;white-space:pre-line;";
+        d.innerHTML = t(text);
         body.appendChild(d);
       };
       const mkExtToggle = (body, label) => {
@@ -17684,8 +18190,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       const mkExtBtnRow = (body) => {
         const row2 = document.createElement("div");
         row2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-        const save = mkBtn2("\u4FDD\u5B58", true);
-        const clear = mkBtn2("\u6E05\u9664", true);
+        const save = mkBtn("\u4FDD\u5B58", true);
+        const clear = mkBtn("\u6E05\u9664", true);
         row2.appendChild(save);
         row2.appendChild(clear);
         body.appendChild(row2);
@@ -17745,7 +18251,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         });
       };
       const faBody = secFanart.body;
-      mkExtDesc(faBody, "TMDB \u65E0\u53EF\u7528\u900F\u660E Logo \u65F6\uFF08\u65E0\u5019\u9009/\u5168\u7EAF\u767D\uFF09\u81EA\u52A8\u515C\u5E95 Fanart.tv \u5B98\u65B9\u9AD8\u6E05 Logo\uFF0C\u7528\u4E8E\u8F6E\u64AD\u6807\u9898\u66FF\u6362\u4E0E\u8BE6\u60C5\u9875 Logo \u56DE\u586B\uFF1B\u7535\u5F71\u6309 TMDB id\u3001\u5267\u96C6\u81EA\u52A8\u6362\u7B97 TVDB id\u3002");
+      mkExtDesc(faBody, "<b>\u7528\u9014</b>\uFF1ATMDB \u62FF\u4E0D\u5230\u900F\u660E Logo \u65F6\uFF0C\u81EA\u52A8\u515C\u5E95 Fanart.tv \u5B98\u65B9\u9AD8\u6E05\u56FE\uFF08\u7528\u4E8E\u8F6E\u64AD\u6807\u9898\u66FF\u6362\u4E0E\u8BE6\u60C5\u9875 Logo \u56DE\u586B\uFF1B\u7535\u5F71\u6309 TMDB id\u3001\u5267\u96C6\u81EA\u52A8\u6362\u7B97 TVDB id\uFF09\u3002\n<b>\u600E\u4E48\u914D</b>\uFF1A\u2460 \u70B9\u4E0B\u65B9\u94FE\u63A5\u5230 fanart.tv \u514D\u8D39\u6CE8\u518C\uFF0C\u5728 Personal API Keys \u9875\u9886\u53D6 api_key\uFF1B\u2461 \u628A api_key \u586B\u5165\u4E0B\u65B9\u300C\u5FC5\u586B\u300D\u6846 \u2192 \u4FDD\u5B58\uFF1Bclient_key\uFF08\u4E2A\u4EBA key\uFF09\u53EF\u9009\uFF0C\u65B0\u56FE\u5EF6\u8FDF\u66F4\u77ED\uFF1B\u2462 \u6253\u5F00\u5F00\u5173\u3002\n\u672A\u586B Key \u6216\u5F00\u5173\u5173\u95ED\u65F6\u81EA\u52A8\u8DF3\u8FC7\uFF0C\u4E0D\u5F71\u54CD\u5176\u5B83\u529F\u80FD\u3002");
       const faToggle = mkExtToggle(faBody, "\u542F\u7528 Fanart.tv \u9AD8\u6E05 Logo \u515C\u5E95");
       faToggle.addEventListener("change", () => {
         S.fanartEnabled = faToggle.checked;
@@ -17763,7 +18269,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       ], faBtns, "\u5DF2\u4FDD\u5B58 Fanart.tv Key");
       mkExtLink(faBody, "fanart.tv \u514D\u8D39\u9886\u53D6 api_key \u2192", "https://fanart.tv/get-an-api-key/");
       const tvBody = secTvmaze.body;
-      mkExtDesc(tvBody, "\u300C\u8865\u5168\u96C6\u4FE1\u606F\u300D\u5728 TMDB \u7F3A\u82F1\u6587\u6807\u9898/\u7B80\u4ECB\uFF08\u6216\u6574\u96C6\u7F3A\u5931\uFF09\u65F6\uFF0C\u7528 TVMaze \u5B98\u65B9 API \u8865\u82F1\u6587\u515C\u5E95\u3002\u5B8C\u5168\u514D\u8D39\u3001\u65E0\u9700\u4EFB\u4F55 Key\u3001\u56FD\u5185\u53EF\u76F4\u8FDE\uFF1B\u67E5\u8BE2\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u7EAF TMDB\u3002");
+      mkExtDesc(tvBody, "<b>\u7528\u9014</b>\uFF1A\u300C\u27F3 \u8865\u5168\u96C6\u4FE1\u606F\u300D\u5728 TMDB \u7F3A\u82F1\u6587\u6807\u9898/\u7B80\u4ECB\uFF08\u6216\u6574\u96C6\u7F3A\u5931\uFF09\u65F6\uFF0C\u7528 TVMaze \u5B98\u65B9 API \u8865\u82F1\u6587\u515C\u5E95\u3002\n<b>\u600E\u4E48\u914D</b>\uFF1A\u96F6\u914D\u7F6E\u2014\u2014\u5B8C\u5168\u514D\u8D39\u3001\u65E0\u9700\u4EFB\u4F55 Key\u3001\u56FD\u5185\u53EF\u76F4\u8FDE\uFF0C\u6253\u5F00\u5F00\u5173\u5373\u7528\uFF1B\u67E5\u8BE2\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u7EAF TMDB\uFF0C\u4E0D\u4F1A\u56E0\u6B64\u62A5\u9519\u3002");
       const tvToggle = mkExtToggle(tvBody, "\u542F\u7528 TVMaze \u82F1\u6587\u5206\u96C6\u515C\u5E95");
       tvToggle.addEventListener("change", () => {
         S.tvmazeEnabled = tvToggle.checked;
@@ -17771,7 +18277,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         });
       });
       const omBody = secOmdb.body;
-      mkExtDesc(omBody, "\u5267\u96C6\u8BE6\u60C5\u5361\u4E0E\u89C2\u5F71\u8BB0\u5F55\u8865\u300CIMDb\u300D\u8BC4\u5206\uFF08IMDb \u65E0\u5B98\u65B9\u516C\u5F00 API\uFF0COMDb \u4E3A\u5176\u6388\u6743\u6E20\u9053\uFF1B\u514D\u8D39\u6863 1000 \u6B21/\u5929\u3001\u975E\u5546\u4E1A\uFF09\u3002\u540E\u7AEF\u7F13\u5B58 7 \u5929\u7701\u989D\u5EA6\u3002");
+      mkExtDesc(omBody, "<b>\u7528\u9014</b>\uFF1A\u5267\u96C6\u8BE6\u60C5\u5361\u4E0E\u89C2\u5F71\u8BB0\u5F55\u8865\u300CIMDb\u300D\u8BC4\u5206\uFF08IMDb \u65E0\u5B98\u65B9\u516C\u5F00 API\uFF0COMDb \u4E3A\u5176\u6388\u6743\u6E20\u9053\uFF1B\u514D\u8D39\u6863 1000 \u6B21/\u5929\u3001\u975E\u5546\u4E1A\uFF09\u3002\u540E\u7AEF\u7F13\u5B58 7 \u5929\u7701\u989D\u5EA6\u3002\n<b>\u600E\u4E48\u914D</b>\uFF1A\u2460 \u70B9\u4E0B\u65B9\u94FE\u63A5\u7528\u90AE\u7BB1\u514D\u8D39\u7533\u8BF7 Key\uFF1B\u2461 \u5230\u90AE\u7BB1\u70B9\u6FC0\u6D3B\u94FE\u63A5\uFF08\u4E0D\u6FC0\u6D3B\u65E0\u6548\uFF09\uFF1B\u2462 \u628A\u6536\u5230\u7684 Key \u586B\u5165\u4E0B\u65B9 \u2192 \u4FDD\u5B58 \u2192 \u6253\u5F00\u5F00\u5173\u3002");
       const omToggle = mkExtToggle(omBody, "\u542F\u7528 OMDb IMDb \u8BC4\u5206");
       omToggle.addEventListener("change", () => {
         ipcRenderer.invoke("settings:set-omdb-enabled", omToggle.checked).catch(() => {
@@ -17783,7 +18289,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       wireExtKeyCard([{ input: omKey, holder: omReal, settingsKey: "omdb-api-key" }], omBtns, "\u5DF2\u4FDD\u5B58 OMDb API Key");
       mkExtLink(omBody, "omdbapi.com \u514D\u8D39\u9886\u53D6 API Key \u2192", "https://www.omdbapi.com/apikey.aspx");
       const malBody = secMal.body;
-      mkExtDesc(malBody, "\u52A8\u6F2B\u300C\u8DF3\u8FC7\u7247\u5934\u7247\u5C3E\u300D\u7684\u6807\u9898\u6620\u5C04\u94FE\u9996\u9009 MAL \u5B98\u65B9 v2 API\uFF1B\u672A\u914D\u7F6E\u65F6\u81EA\u52A8\u56DE\u9000\u975E\u5B98\u65B9 Jikan/AniList\u3002\u5728 myanimelist.net/apiconfig \u6CE8\u518C\u5E94\u7528\u5373\u5F97 Client ID\uFF0C\u65E0\u9700\u767B\u5F55\u6388\u6743\u3002");
+      mkExtDesc(malBody, "<b>\u7528\u9014</b>\uFF1A\u52A8\u6F2B\u300C\u8DF3\u8FC7\u7247\u5934\u7247\u5C3E\u300D\u7684\u6807\u9898\u6620\u5C04\u94FE\u9996\u9009 MAL \u5B98\u65B9 v2 API\uFF08\u672A\u914D\u7F6E\u81EA\u52A8\u56DE\u9000\u975E\u5B98\u65B9 Jikan/AniList\uFF09\uFF1B\u4EC5\u9700 Client ID\uFF0C\u65E0\u9700\u767B\u5F55\u6388\u6743\u3002\n<b>\u600E\u4E48\u914D</b>\uFF1A\u2460 \u70B9\u4E0B\u65B9\u94FE\u63A5\u767B\u5F55 myanimelist.net \u2192 API \u9875 \u2192 Create\uFF1B\u2461 App Name \u968F\u610F\uFF08\u5982 Fntv-Plus\uFF09\u3001\u7C7B\u578B\u9009 web\u3001Commercial \u9009 non-commercial\u3001Purpose \u9009 hobbyist\u3001Redirect/Homepage \u586B\u4EFB\u610F\u53EF\u8FBE\u7F51\u5740\uFF08\u5982\u4F60\u7684 GitHub \u4ED3\u5E93\uFF09\uFF1B\u2462 \u63D0\u4EA4\u540E\u590D\u5236 Client ID \u586B\u5165\u4E0B\u65B9 \u2192 \u4FDD\u5B58 \u2192 \u6253\u5F00\u5F00\u5173\u3002");
       const malReal = { v: "" };
       const malKey = mkMaskedKey(malBody, "MAL Client ID\uFF08\u53EF\u9009\uFF0C\u6CE8\u518C\u5373\u7528\uFF09", malReal);
       const malBtns = mkExtBtnRow(malBody);
@@ -17791,7 +18297,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       mkExtLink(malBody, "myanimelist.net \u6CE8\u518C Client ID \u2192", "https://myanimelist.net/apiconfig");
       const secJav = section("Jav \u522E\u524A");
       const javBody = secJav.body;
-      mkExtDesc(javBody, "\u7535\u5F71\u6587\u4EF6\u540D\u542B\u756A\u53F7\uFF08\u5982 ABC-123 / FC2-PPV-1234567\uFF09\u65F6\uFF0C\u7535\u5F71\u8BE6\u60C5\u9875\u51FA\u73B0\u300C\u27F3 jav \u522E\u524A\u300D\u6309\u94AE\uFF1A\u6309\u756A\u53F7\u4ECE javbus \u67E5\u8BE2\u5E76\u56DE\u586B\u6807\u9898\uFF08\u9501\u5B9A\u9632\u8986\u76D6\uFF09\uFF0C\u5C01\u9762\u5C31\u5730\u66FF\u6362\uFF08\u4EC5\u672C\u5730\u89C6\u89C9\uFF09\u3002\u975E\u5B98\u65B9\u6293\u53D6\uFF08\u65E0\u5B98\u65B9 API\uFF09\uFF0C\u56FD\u5185\u76F4\u8FDE\u4E0D\u901A\u2014\u2014\u9700\u914D\u5408\u300C\u81EA\u5B9A\u4E49\u4EE3\u7406\u300D\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u8FBE\u7684\u955C\u50CF\u57DF\u540D\u3002\u4EC5\u5EFA\u8BAE\u7528\u4E8E\u6574\u7406\u81EA\u6709\u5A92\u4F53\u5E93\u3002");
+      mkExtDesc(javBody, "<b>\u7528\u9014</b>\uFF1A\u4E2A\u4EBA\u89C6\u9891\u5E93\u6309\u756A\u53F7\u6574\u7406\uFF08\u9ED8\u8BA4\u5173\uFF0C<b>\u65E0\u9700\u81EA\u5EFA\u670D\u52A1</b>\uFF0C\u6570\u636E\u6E90 javbus\uFF09\u3002\n<b>\u6309\u94AE</b>\uFF1A\u7535\u5F71/\u672A\u8BC6\u522B\u89C6\u9891\u8BE6\u60C5\u9875\u300C\u27F3 jav \u522E\u524A\u300D\u5355\u6761\u7CBE\u4FEE\uFF1B\u6587\u4EF6\u5939\u9875\u300C\u27F3 jav \u522E\u524A\u300D\u6574\u5939\u6279\u91CF\uFF08\u5939\u540D\u6709\u756A\u53F7\u2192\u6574\u5957\u843D\u5E93\uFF0C\u65E0\u756A\u53F7\u2192\u9012\u5F52\u5B50\u5939\u6309\u6587\u4EF6\u540D\u9010\u4E2A\u522E\uFF09\uFF1B\u5E93\u5217\u8868\u9875\u300C\u27F3 \u5168\u5E93\u522E\u524A\u300D\u5168\u5E93\u6279\u91CF\uFF08\u5DF2\u8BC6\u522B Movie/TV \u81EA\u52A8\u8DF3\u8FC7\uFF09\u3002\n<b>\u56DE\u586B</b>\uFF1A\u6807\u9898/\u7B80\u4ECB/\u53D1\u884C\u65E5\u671F/\u6F14\u5458\uFF08\u5E26\u5B57\u6BB5\u9501\uFF09+ \u5C01\u9762\uFF08\u771F\u5B9E\u843D\u5E93\uFF09\u3002\u672A\u8BC6\u522B\u756A\u53F7\u81EA\u52A8\u8DF3\u8FC7\u4E0D\u4E2D\u65AD\u3002\n<b>\u7F51\u7EDC</b>\uFF1A\u975E\u5B98\u65B9\u6293\u53D6\uFF0C\u56FD\u5185\u76F4\u8FDE\u4E0D\u901A\u2014\u2014\u9700\u914D\u5408\u300C\u81EA\u5B9A\u4E49\u4EE3\u7406\u300D\u6216\u5728\u4E0B\u65B9\u586B\u5199\u53EF\u8FBE\u7684\u955C\u50CF\u57DF\u540D\u3002\u4EC5\u5EFA\u8BAE\u7528\u4E8E\u6574\u7406\u81EA\u6709\u5A92\u4F53\u5E93\u3002");
       const javToggle = mkExtToggle(javBody, "\u542F\u7528 Jav \u522E\u524A");
       javToggle.addEventListener("change", () => {
         S.javEnabled = javToggle.checked;
@@ -17906,9 +18412,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
       const cpBtns = document.createElement("div");
       cpBtns.style.cssText = "display:flex;gap:6px;";
-      const cpSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const cpTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
-      const cpResetBtn = mkBtn2("\u5173\u95ED\u4EE3\u7406", true);
+      const cpSaveBtn = mkBtn("\u4FDD\u5B58", true);
+      const cpTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const cpResetBtn = mkBtn("\u5173\u95ED\u4EE3\u7406", true);
       cpBtns.appendChild(cpSaveBtn);
       cpBtns.appendChild(cpTestBtn);
       cpBtns.appendChild(cpResetBtn);
@@ -18972,10 +19478,14 @@ html.fntv-boot-hide #root{visibility:hidden}
         ].join("\n");
         (document.head || document.documentElement).appendChild(animStyle);
       }
-      if (!burger.dataset.burgerHooked) {
-        burger.dataset.burgerHooked = "1";
-        burger.addEventListener("click", (e) => {
-          if (e.target.closest("a")) return;
+      if (!window.__fnosBurgerDelegated) {
+        window.__fnosBurgerDelegated = "1";
+        document.addEventListener("click", (e) => {
+          const t2 = e.target;
+          if (!t2 || !t2.closest) return;
+          if (t2.closest("a")) return;
+          const burgerHit = t2.closest('[class*="lg:!hidden"]:not([class*="inset-0"])');
+          if (!burgerHit) return;
           e.preventDefault();
           e.stopImmediatePropagation();
           const drawer2 = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
@@ -18988,7 +19498,7 @@ html.fntv-boot-hide #root{visibility:hidden}
             log7("BURGER -> OPEN (anim)");
           }
         }, true);
-        log7("BURGER click-hook installed (capture+stop)");
+        log7("BURGER click-hook installed (document delegation)");
       }
       const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
       if (drawer && !drawer.dataset.maskHooked) {
@@ -19101,6 +19611,112 @@ html.fntv-boot-hide #root{visibility:hidden}
         im.src = url;
       });
     }
+    function _cssColorToRgba(s) {
+      const m = s.match(/rgba?\(([^)]+)\)/i);
+      if (m) {
+        const p = m[1].split(",").map((x) => parseFloat(x.trim()));
+        if (p.length >= 3 && !isNaN(p[0]) && !isNaN(p[1]) && !isNaN(p[2])) {
+          return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 ? p[3] : 1 };
+        }
+        return null;
+      }
+      const h = s.match(/^#([0-9a-f]{3,8})$/i);
+      if (h) {
+        const v = h[1];
+        if (v.length === 3 || v.length === 4) {
+          return {
+            r: parseInt(v[0] + v[0], 16),
+            g: parseInt(v[1] + v[1], 16),
+            b: parseInt(v[2] + v[2], 16),
+            a: v.length === 4 ? parseInt(v[3] + v[3], 16) / 255 : 1
+          };
+        }
+        if (v.length === 6 || v.length === 8) {
+          return {
+            r: parseInt(v.slice(0, 2), 16),
+            g: parseInt(v.slice(2, 4), 16),
+            b: parseInt(v.slice(4, 6), 16),
+            a: v.length === 8 ? parseInt(v.slice(6, 8), 16) / 255 : 1
+          };
+        }
+      }
+      return null;
+    }
+    function gradientOverlayAt(el, bgImage, px, py) {
+      if (!bgImage || bgImage.indexOf("linear-gradient") < 0 || bgImage.indexOf("url(") >= 0) return null;
+      const open = bgImage.indexOf("(", bgImage.indexOf("linear-gradient"));
+      let depth = 0, close = -1;
+      for (let i = open; i >= 0 && i < bgImage.length; i++) {
+        if (bgImage[i] === "(") depth++;
+        else if (bgImage[i] === ")") {
+          depth--;
+          if (depth === 0) {
+            close = i;
+            break;
+          }
+        }
+      }
+      if (open < 0 || close < 0) return null;
+      const inner = bgImage.slice(open + 1, close);
+      const parts = [];
+      let buf2 = "", d2 = 0;
+      for (const ch of inner) {
+        if (ch === "(") d2++;
+        else if (ch === ")") d2--;
+        if (ch === "," && d2 === 0) {
+          parts.push(buf2.trim());
+          buf2 = "";
+        } else buf2 += ch;
+      }
+      if (buf2.trim()) parts.push(buf2.trim());
+      if (parts.length < 2) return null;
+      let horiz = false, reverse = false, startIdx = 0;
+      const first = parts[0].toLowerCase();
+      if (!/^(rgba?\(|hsla?\(|#)/.test(first)) {
+        startIdx = 1;
+        if (first.indexOf("to right") >= 0 || first.indexOf("90deg") >= 0) horiz = true;
+        else if (first.indexOf("to left") >= 0 || first.indexOf("270deg") >= 0) {
+          horiz = true;
+          reverse = true;
+        } else if (first.indexOf("to bottom") >= 0 || first.indexOf("180deg") >= 0) horiz = false;
+        else if (first.indexOf("to top") >= 0 || first.indexOf("0deg") >= 0) {
+          horiz = false;
+          reverse = true;
+        } else return null;
+      }
+      const segs = parts.slice(startIdx);
+      const stops = [];
+      for (let i = 0; i < segs.length; i++) {
+        const cm = segs[i].match(/(rgba?\([^)]*\)|#[0-9a-f]{3,8})/i);
+        if (!cm) continue;
+        const col = _cssColorToRgba(cm[1]);
+        if (!col) continue;
+        const pm = segs[i].match(/([\d.]+)\s*%/);
+        const pos = pm ? Math.max(0, Math.min(1, parseFloat(pm[1]) / 100)) : segs.length > 1 ? i / (segs.length - 1) : 0;
+        stops.push({ pos, r: col.r, g: col.g, b: col.b, a: col.a });
+      }
+      if (stops.length < 2) return null;
+      stops.sort((a, b) => a.pos - b.pos);
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return null;
+      let t2 = horiz ? (px - r.left) / r.width : (py - r.top) / r.height;
+      if (reverse) t2 = 1 - t2;
+      t2 = Math.max(0, Math.min(1, t2));
+      let c = stops[stops.length - 1];
+      if (t2 <= stops[0].pos) c = stops[0];
+      else {
+        for (let i = 0; i < stops.length - 1; i++) {
+          const a = stops[i], b = stops[i + 1];
+          if (t2 >= a.pos && t2 <= b.pos) {
+            const f = b.pos > a.pos ? (t2 - a.pos) / (b.pos - a.pos) : 0;
+            c = { pos: t2, r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f, a: a.a + (b.a - a.a) * f };
+            break;
+          }
+        }
+      }
+      if (c.a < 0.05) return null;
+      return { l: _lumOf(c.r, c.g, c.b), a: c.a };
+    }
     async function detectBehindLuminance(icon) {
       const r = icon.getBoundingClientRect();
       const x = Math.min(Math.max(r.left + r.width / 2, 2), window.innerWidth - 2);
@@ -19138,6 +19754,11 @@ html.fntv-boot-hide #root{visibility:hidden}
         }
         const bi = cs.backgroundImage || "";
         if (bi && bi !== "none") {
+          const g = gradientOverlayAt(el, bi, x, y);
+          if (g) {
+            if (g.a >= 0.5) return blend(g.l);
+            overlays.push(g);
+          }
           const u = bi.match(/url\(["']?([^"')]+)["']?\)/);
           if (u && u[1]) {
             const l = await imageTopLeftLuminance(u[1]);
@@ -19145,6 +19766,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           }
         }
         if (el.tagName === "IMG") {
+          if (isDetailPage() && el.closest(".semi-always-dark")) continue;
           const src = el.currentSrc || el.src || "";
           if (src) {
             const l = await imageTopLeftLuminance(src);

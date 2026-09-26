@@ -129,8 +129,55 @@ export const openFeedbackChoiceModal = (): void => {
       openQQGroupModal();
     });
 
+    // [lc-1250] 选项三：复制设备环境信息 —— 问卷/QQ 反馈时粘贴，便于远程排查
+    const optEnv = document.createElement('button');
+    optEnv.type = 'button';
+    optEnv.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;width:100%;box-sizing:border-box;'
+      + 'padding:12px 16px;margin-bottom:12px;border-radius:14px;cursor:pointer;text-align:center;'
+      + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);color:var(--fnos-ui-text);'
+      + 'transition:background .15s,border-color .15s;';
+    optEnv.innerHTML = '<div style="font-size:14px;font-weight:700;">📋 复制设备环境信息</div>'
+      + '<div style="font-size:11.5px;opacity:.7;">应用版本 / 页面 / 时间 / 浏览器，粘贴到问卷或群里便于排查</div>';
+    optEnv.addEventListener('click', async () => {
+      let ver = '';
+      try {
+        const info: any = await ipcRenderer.invoke('stats:get-info');
+        if (info && info.version) ver = String(info.version);
+      } catch { /* ignore */ }
+      const lines = [
+        '===== Fntv-Plus Web 版设备环境 =====',
+        '应用版本: ' + (ver || '未知'),
+        '页面: ' + location.href,
+        '时间: ' + new Date().toString(),
+        '屏幕: ' + window.screen.width + 'x' + window.screen.height + ' @' + (window.devicePixelRatio || 1) + 'x',
+        '浏览器: ' + navigator.userAgent,
+      ];
+      const text = lines.join('\n');
+      let ok = false;
+      try { await navigator.clipboard.writeText(text); ok = true; } catch { /* 非 https 降级 execCommand */ }
+      if (!ok) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch { ok = false; }
+      }
+      optEnv.innerHTML = ok
+        ? '<div style="font-size:14px;font-weight:700;">✓ 已复制到剪贴板</div><div style="font-size:11.5px;opacity:.7;">粘贴到问卷或 QQ 群即可</div>'
+        : '<div style="font-size:14px;font-weight:700;">⚠ 复制失败</div><div style="font-size:11.5px;opacity:.7;">请手动截图本页版本信息</div>';
+      window.setTimeout(() => {
+        optEnv.innerHTML = '<div style="font-size:14px;font-weight:700;">📋 复制设备环境信息</div>'
+          + '<div style="font-size:11.5px;opacity:.7;">应用版本 / 页面 / 时间 / 浏览器，粘贴到问卷或群里便于排查</div>';
+      }, 4000);
+    });
+    card.insertBefore(optEnv, optSurvey);
+
     // 悬停高亮
-    [optSurvey, optQQ].forEach((b) => {
+    [optSurvey, optQQ, optEnv].forEach((b) => {
       b.addEventListener('mouseenter', () => { b.style.background = 'var(--fnos-ui-pill-hover)!important'; b.style.borderColor = 'var(--fnos-ui-pill-border)'; });
       b.addEventListener('mouseleave', () => { b.style.background = 'var(--fnos-ui-input-bg)!important'; b.style.borderColor = 'var(--fnos-ui-border3)'; });
     });

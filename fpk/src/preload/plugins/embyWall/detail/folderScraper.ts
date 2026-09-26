@@ -175,7 +175,12 @@ async function runFolderScraper(btn: HTMLButtonElement): Promise<void> {
   if (!guid || _running) return;
   const url = String(S.customScraperUrl || '').trim();
   if (!S.customScraperEnabled || !url) {
-    setBtn(btn, '⚠ 未配置', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 开启并填写地址。');
+    // 区分两种未就绪：开关未开 vs 开关已开但没填地址（用户反馈「打开了开关仍提示未配置」的混淆点）
+    if (!S.customScraperEnabled) {
+      setBtn(btn, '⚠ 未启用', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 打开开关。');
+    } else {
+      setBtn(btn, '⚠ 未填服务地址', '请到 侧栏设置 → 自定义刮削 → 自定义刮削源 填写并保存刮削服务地址。');
+    }
     window.setTimeout(() => { if (btn.isConnected) setBtn(btn, '⟳ 文件夹刮削'); }, 5000);
     return;
   }
@@ -293,6 +298,27 @@ async function runFolderScraper(btn: HTMLButtonElement): Promise<void> {
 
 // ── 按钮挂载（jav.ts 同款 body 级浮动胶囊：文件夹页无「选集」标题锚点可内联）──
 
+const FOLDER_BTN_STYLE_ID = 'fnos-folder-scraper-style';
+
+/** [lc-1250] 按钮样式走注入样式表而非内联 style：用户实测内联样式被运行时某环节反复
+ *  清写（app.log 有「内联样式被外部改动/巡检重打」循环，元凶未定位），清掉后按钮变
+ *  白底黑字默认态、且重打会把 bottom 复位 26px 造成两按钮叠跳。样式表方案下元素
+ *  内联被清多少次都不影响渲染；避让位置用类切换（.fnos-over-jav）。 */
+function ensureBtnStylesheet(): void {
+  const existing = document.getElementById(FOLDER_BTN_STYLE_ID) as HTMLStyleElement | null;
+  if (existing && existing.isConnected) return;
+  const st = document.createElement('style');
+  st.id = FOLDER_BTN_STYLE_ID;
+  st.textContent = '#fnos-folder-scraper-btn{position:fixed;right:18px;bottom:26px;z-index:2147483500;'
+    + 'display:inline-flex;align-items:center;padding:7px 14px;border-radius:999px;font-size:11.5px;'
+    + 'font-weight:600;cursor:pointer;letter-spacing:.3px;background:rgba(28,24,40,.82)!important;'
+    + 'color:#e7e2f5;border:1px solid rgba(255,255,255,.16);box-shadow:0 6px 18px rgba(10,8,20,.35);'
+    + 'backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:background .15s,transform .15s;'
+    + 'user-select:none;}'
+    + '#fnos-folder-scraper-btn.fnos-over-jav{bottom:70px;}';
+  (document.head || document.documentElement).appendChild(st);
+}
+
 function makeBtn(): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -300,11 +326,6 @@ function makeBtn(): HTMLButtonElement {
   btn.textContent = '⟳ 文件夹刮削';
   btn.setAttribute('title', '把本文件夹内文件的文件名发给自定义刮削服务，按返回数据回填各文件的标题/简介'
     + '（侧栏设置 → 自定义刮削 中配置；子文件夹请进入后逐层刮削）');
-  btn.style.cssText = 'position:fixed;right:18px;bottom:26px;z-index:2147483500;display:inline-flex;align-items:center;'
-    + 'padding:7px 14px;border-radius:999px;font-size:11.5px;font-weight:600;cursor:pointer;letter-spacing:.3px;'
-    + 'background:rgba(28,24,40,.82)!important;color:#e7e2f5;border:1px solid rgba(255,255,255,.16);'
-    + 'box-shadow:0 6px 18px rgba(10,8,20,.35);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);'
-    + 'transition:background .15s,transform .15s;user-select:none;';
   btn.setAttribute('data-fnos-ui', '1'); // 白底清除器保护
   btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateY(-1px)'; });
   btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
@@ -312,13 +333,44 @@ function makeBtn(): HTMLButtonElement {
   return btn;
 }
 
-/** 幂等挂载：非文件夹页 / 未启用自开服务 → 摘除。 */
+/** [lc-1250] 位置自愈: jav 按钮挂载/摘除时由 jav.ts 反向调用, 立即重算避让位置。
+ *  原先位置只在导航钩子/初始化重试时算一次——jav 的设置自举是异步的, 晚于本按钮
+ *  挂上来时会与本按钮同坐标(26px)相叠, 下次导航又跳到 70px, 视觉上"按钮跳来跳去"。 */
+export function repositionFolderScraperButton(): void {
+  const b = document.getElementById(FOLDER_BTN_ID);
+  if (!b || !b.isConnected) return;
+  ensureBtnStylesheet();
+  const javVisible = !!document.getElementById('fnos-jav-btn')?.isConnected;
+  const want = javVisible ? 'fnos-over-jav' : '';
+  if (b.classList.contains('fnos-over-jav') !== javVisible) {
+    if (want) b.classList.add('fnos-over-jav'); else b.classList.remove('fnos-over-jav');
+    dlog('[folderScraper] 避让位置重算 → ' + (javVisible ? '70px' : '26px'));
+  }
+}
+
+/** 幂等挂载：非文件夹页 → 摘除。按钮在文件夹页**常显**（可发现性优先）：
+ *  未启用/未填地址时点击给出对应指引（runFolderScraper 内），不会误写任何数据。
+ *  位置避让：jav 刮削按钮（lc-1222 起同样挂 /v/folder/ 页，同坐标 bottom:26）在位时，
+ *  本按钮上移到其上方（jav 在下、本按钮在上）；jav 挂载/摘除会反向调用
+ *  repositionFolderScraperButton 即时重算，4s 巡检兜底。 */
 export function ensureFolderScraperButton(): void {
-  if (!folderGuid() || !S.customScraperEnabled) { removeFolderScraperButton(); return; }
+  if (!folderGuid()) { removeFolderScraperButton(); return; }
+  ensureBtnStylesheet();
   const existing = document.getElementById(FOLDER_BTN_ID);
+  const btn = (existing && existing.isConnected) ? existing as HTMLButtonElement : makeBtn();
+  repositionFolderScraperButton();
   if (existing && existing.isConnected) return;
-  document.body.appendChild(makeBtn());
+  document.body.appendChild(btn);
   dlog('[folderScraper] 按钮已挂载 ' + location.pathname);
+  // 4s 巡检兜底（样式表被移除时不必等下次导航）：按钮不在了自动停表
+  if (!(window as any).__fnosFolderBtnGuard) {
+    (window as any).__fnosFolderBtnGuard = window.setInterval(() => {
+      const b = document.getElementById(FOLDER_BTN_ID);
+      if (!b || !b.isConnected) { window.clearInterval((window as any).__fnosFolderBtnGuard); return; }
+      ensureBtnStylesheet();
+      repositionFolderScraperButton();
+    }, 4000);
+  }
 }
 
 export function removeFolderScraperButton(): void {

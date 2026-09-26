@@ -154,6 +154,30 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime });
 }
 
+/** [lc-1250] 上传图片到飞牛临时图床，返回 hash_path（如 /e9/06/poster-xxx.webp）或 null。
+ *  供 jav 刮削封面落库使用（与桌面版同实现；fd 直发 FormData，字段名 image_type）。 */
+export async function uploadImageToFnos(origin: string, dataUrl: string, imageType: 'poster' | 'backdrop' | 'logo' | 'thumb'): Promise<string | null> {
+  try {
+    const { ipcRenderer } = require('electron');
+    const blob = dataUrlToBlob(dataUrl);
+    const fd = new FormData();
+    fd.append('file', blob, imageType + '.png');
+    fd.append('image_type', imageType);
+    const signData = { image_type: imageType, nonce: fnNonce() };
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/image/temp/upload', signData).catch(() => '');
+    const resp = await fetch(`${origin}/v/api/v1/image/temp/upload`, {
+      method: 'POST', credentials: 'include',
+      headers: { ...(authx ? { Authx: authx } : {}) }, body: fd,
+    });
+    if (!resp.ok) { log('[回填] upload HTTP', resp.status); return null; }
+    const j: any = await resp.json().catch(() => null);
+    if (!j || j.code !== 0 || !j.data?.hash_path) {
+      log('[回填] upload 业务失败', JSON.stringify(j).substring(0, 200)); return null;
+    }
+    return j.data.hash_path as string;
+  } catch (e) { log('[回填] upload 异常', String(e).substring(0, 120)); return null; }
+}
+
 /** 读取 item 当前完整可编辑元数据（POST 带 nonce，按 fnOS 约定签名） */
 export async function fnosGetEditDetail(origin: string, guid: string): Promise<any | null> {
   try {

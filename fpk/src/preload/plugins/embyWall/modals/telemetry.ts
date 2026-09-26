@@ -94,37 +94,12 @@ export function buildStatsCard(): HTMLElement {
   title.textContent = t('📊 匿名使用统计');
   wrap.appendChild(title);
   wrap.appendChild(mkRow('参与匿名统计', toggle.el));
-  wrap.appendChild(mkNote('每天最多上报一次，内容只有：随机匿名 ID + 版本号 + 系统类型。'
-    + '不采集账号、IP、媒体库与文件路径，服务端也不存 IP。仅在有人打开增强页面时计数。'));
+  wrap.appendChild(mkNote('开启后收集必须的应用版本 + 系统类型，用于日志反馈收集需要的系统信息，方便排查故障 Bug。'
+    + '不涉及账号、IP、媒体库及文件路径等隐私数据，服务端亦不做 IP 存储，可随时在这里关闭。'
+    + '匿名 ID 取自 NAS 机器标识的哈希，每台设备固定唯一不变。仅在有人打开增强页面时计数。'));
   wrap.appendChild(status);
 
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;';
-  const pingBtn = mkBtn('立即上报一次', true);
-  const resetBtn = mkBtn('重置匿名 ID', false);
-  btnRow.appendChild(pingBtn);
-  btnRow.appendChild(resetBtn);
-  wrap.appendChild(btnRow);
-
-  pingBtn.addEventListener('click', () => {
-    pingBtn.disabled = true;
-    status.textContent = t('上报中…');
-    ipcRenderer.invoke('stats:ping-now').then((r: any) => {
-      if (r && r.ok) status.textContent = t('上报成功 ✅');
-      else status.textContent = t('未上报：') + ((r && (r.skipped || r.error)) || t('未知原因'));
-    }).catch((e: any) => {
-      status.textContent = t('上报失败：') + String((e && e.message) || e);
-    }).finally(() => { pingBtn.disabled = false; });
-  });
-
-  resetBtn.addEventListener('click', () => {
-    ipcRenderer.invoke('stats:reset-id').then((r: any) => {
-      const short = (r && r.anonIdShort) ? String(r.anonIdShort) : '';
-      status.textContent = short
-        ? t('已生成新的匿名 ID：') + short + t('…（与历史数据不再关联）')
-        : t('已生成新的匿名 ID，与历史数据不再关联。');
-    }).catch(() => {});
-  });
+  // [lc-1250] 精简：移除「立即上报一次」「重置匿名 ID」按钮（匿名 ID 已是机器级固定, 重置无意义）
 
   // 初值回填（状态全在后端：网页端没有主进程配置可读）
   ipcRenderer.invoke('stats:get-info').then((s: any) => {
@@ -132,11 +107,10 @@ export function buildStatsCard(): HTMLElement {
     toggle.set(s.enabled !== false);
     if (!s.configured) {
       status.textContent = t('服务端未配置，当前不会发送任何数据。');
-      pingBtn.disabled = true;
       return;
     }
     if (s.devMode) {
-      status.textContent = t('开发版默认不上报（可用「立即上报一次」测试）。');
+      status.textContent = t('开发版默认不上报。');
     } else if (s.lastDay) {
       status.textContent = t('上次上报：') + s.lastDay + (s.lastOk ? t('（成功）') : t('（失败，稍后自动重试）'));
     } else if (s.usedToday) {

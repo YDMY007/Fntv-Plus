@@ -277,47 +277,66 @@ func TestForceWithoutUsageStillReports(t *testing.T) {
 }
 
 // TestResetIDDisconnectsHistory 重置匿名 ID 后，与历史数据的关联断开（欠报队列一并清空）。
-func TestResetIDDisconnectsHistory(t *testing.T) {
+// TestResetIDKeepsMachineID [lc-1250] 机器级 ID 语义：重置清空上报状态，但 anonID
+// 会重新派生出同一机器 ID（每台机固定唯一不变；面板的重置按钮已移除）。
+func TestResetIDKeepsMachineID(t *testing.T) {
+	restore := stubMachineID(t)
+	defer restore()
 	fake := newFakeServer(t)
 	s := newTestStats(t, "1.12.0", fake.srv.URL)
 	s.MarkUsed()
 	before := s.anonID()
 
-	newID := s.ResetID()
-	if newID == before {
-		t.Fatal("重置后 ID 应改变")
-	}
-	if s.anonID() != newID {
-		t.Error("重置后 anonID 应返回新值")
+	_ = s.ResetID()
+	if s.anonID() != before {
+		t.Error("重置后 anonID 应重新派生出同一机器 ID")
 	}
 	if len(s.pendingDays()) != 0 {
-		t.Error("重置应清空欠报队列（新身份从零开始）")
+		t.Error("重置应清空欠报队列")
 	}
 	if s.UsedToday() {
 		t.Error("重置后不应再认为今天已使用")
 	}
 }
 
-// TestAnonIDStableAndRandom 匿名 ID 稳定（同配置读回一致）且是 UUID v4 形态。
-func TestAnonIDStableAndRandom(t *testing.T) {
+// stubMachineID 注入确定性的机器标识原文（跨平台/跨环境测试一致）。
+func stubMachineID(t *testing.T) func() {
+	old := machineIDRaw
+	machineIDRaw = func() string { return "test-machine-id-stable" }
+	return func() { machineIDRaw = old }
+}
+
+// TestAnonIDMachineStable [lc-1250] 匿名 ID 机器级语义：同一台机稳定不变（M+31hex），
+// 同机两个独立安装也相同（口径=设备数）；换机器标识则 ID 不同。
+func TestAnonIDMachineStable(t *testing.T) {
+	restore := stubMachineID(t)
+	defer restore()
 	s := newTestStats(t, "1.12.0", "http://127.0.0.1:1")
 	a := s.anonID()
 	b := s.anonID()
 	if a != b {
-		t.Fatalf("同一次安装的匿名 ID 应稳定: %q vs %q", a, b)
+		t.Fatalf("同一台机的匿名 ID 应稳定: %q vs %q", a, b)
 	}
-	if len(a) != 36 || a[14] != '4' {
-		t.Errorf("应为 UUID v4 形态，实为 %q", a)
+	if !machineAnonIDRe.MatchString(a) {
+		t.Errorf("应为机器派生形态 M+31hex，实为 %q", a)
 	}
-	// 两个独立安装（不同目录）应得到不同 ID
+	// 同机两个独立安装（不同配置目录）→ 相同 ID
 	s2 := newTestStats(t, "1.12.0", "http://127.0.0.1:1")
-	if s2.anonID() == a {
-		t.Error("不同安装的匿名 ID 不应相同")
+	if s2.anonID() != a {
+		t.Error("同一台机的不同安装应得到相同匿名 ID（按设备计数）")
+	}
+	// 换机器标识 → 新实例派生出不同 ID
+	machineIDRaw = func() string { return "another-machine" }
+	s3 := newTestStats(t, "1.12.0", "http://127.0.0.1:1")
+	if s3.anonID() == a {
+		t.Error("不同机器的匿名 ID 不应相同")
 	}
 }
 
 // TestInfoDoesNotLeakFullID 面板状态接口只给 ID 前 8 位。
 func TestInfoDoesNotLeakFullID(t *testing.T) {
+	restore := stubMachineID(t)
+	defer restore()
 	s := newTestStats(t, "1.12.0", "http://127.0.0.1:1")
 	info := s.Info()
 	short, _ := info["anonIdShort"].(string)

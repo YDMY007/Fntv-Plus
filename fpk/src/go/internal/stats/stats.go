@@ -3,8 +3,11 @@
 // 目标：知道「有多少台 NAS 在用 Web 版」，同时尽可能少地知道「是谁」。
 // 与桌面客户端（Fntv-Plus 的 usageStats.ts）同源的四条隐私硬约束：
 //
-//  1. 匿名 ID 在本机用 crypto/rand 随机生成，与账号 / 设备 / 机器码 / 安装路径全部无关联；
-//     用户可在设置面板「关于」页一键重置，重置后新旧数据即断开。
+//  1. [lc-1250] 匿名 ID 改为机器级固定唯一：取操作系统机器标识（fnOS 为
+//     /etc/machine-id）做 SHA-256 哈希（不可逆，上报值不含明文硬件标识）——
+//     重装应用/清空配置都不会变，「每台设备」的统计口径因此稳定。
+//     （设计变更：初版用 crypto/rand 随机生成，重装即换号导致台数虚高；
+//     面板的「重置匿名 ID」按钮已随之移除，/api/stats/reset 端点保留做兼容。）
 //  2. 上报字段只有五个：匿名 ID、应用版本号、操作系统、CPU 架构、日期。
 //     不含 IP（服务端代码里连对端地址都不读）、不含 NAS 账号、不含媒体库 /
 //     文件路径 / 设备名 / 观看了什么等任何其它信息。
@@ -21,6 +24,7 @@ package stats
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -29,6 +33,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
@@ -130,6 +135,17 @@ func (s *Stats) anonID() string {
 // anonIDLocked 取/生成匿名 ID（调用者须已持有锁）。配置始终是权威来源，不做内存缓存。
 func (s *Stats) anonIDLocked() string {
 	if v, ok := s.cfg.GetSetting(keyAnonID); ok {
+		if id := strings.TrimSpace(v); machineAnonIDRe.MatchString(id) {
+			return id // [lc-1250] 已是机器派生 ID → 直接用
+		}
+	}
+	// [lc-1250] 尝试机器派生（旧随机 ID 自动迁移覆盖，保证每台机固定唯一不变）
+	if mid := machineAnonID(); mid != "" {
+		_ = s.cfg.SetSetting(keyAnonID, mid)
+		return mid
+	}
+	// 回退：拿不到机器标识的异常环境 → 沿用已存的随机 ID；没有才生成
+	if v, ok := s.cfg.GetSetting(keyAnonID); ok {
 		if id := strings.TrimSpace(v); id != "" {
 			return id
 		}
@@ -137,6 +153,49 @@ func (s *Stats) anonIDLocked() string {
 	id := newAnonID()
 	_ = s.cfg.SetSetting(keyAnonID, id)
 	return id
+}
+
+// machineAnonIDRe 机器派生 ID 形态：M + 31 位小写 hex（sha256 截取）。
+var machineAnonIDRe = regexp.MustCompile(`^M[0-9a-f]{31}$`)
+
+// machineIDRaw 取操作系统机器标识原文（可被测试替换以获得确定性）。
+var machineIDRaw = func() string {
+	if b, err := os.ReadFile("/etc/machine-id"); err == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v
+		}
+	}
+	if b, err := os.ReadFile("/var/lib/dbus/machine-id"); err == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("reg", "query", `HKLM\SOFTWARE\Microsoft\Cryptography`, "/v", "MachineGuid").Output(); err == nil {
+			if m := regexp.MustCompile(`MachineGuid\s+REG_SZ\s+(\S+)`).FindSubmatch(out); m != nil {
+				return string(m[1])
+			}
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		if out, err := exec.Command("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output(); err == nil {
+			if m := regexp.MustCompile(`"IOPlatformUUID"\s*=\s*"([^"]+)"`).FindSubmatch(out); m != nil {
+				return string(m[1])
+			}
+		}
+	}
+	return ""
+}
+
+// machineAnonID 机器标识原文 → SHA-256 → "M"+31 位 hex（不可逆）。
+// 原文拿不到（异常环境）返回空串，由调用方回退 crypto/rand 随机 ID。
+func machineAnonID() string {
+	raw := strings.TrimSpace(machineIDRaw())
+	if raw == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return "M" + hex.EncodeToString(sum[:])[:31]
 }
 
 // ResetID 换一个新匿名 ID（面板「重置匿名 ID」），与历史数据彻底断开：

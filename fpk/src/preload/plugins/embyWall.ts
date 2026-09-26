@@ -2829,7 +2829,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const csDesc = document.createElement('div');
     csDesc.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-    csDesc.textContent = t('把视频标题/季号发给你的自定义刮削服务，返回的分集标题与简介经飞牛官方接口回填元数据（不修改任何系统文件）。服务协议：季页 POST {title, season, tmdbId, episodes}，响应 {episodes:[{index,title,overview}]}；文件夹 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}（name=文件名，服务按 name/index 匹配），响应 {items|episodes:[{index|name,title,overview}]}。开启后在季页「选集」标题旁出现「⟳ 自定义刮削」按钮，个人视频文件夹页（/v/folder/…）出现「⟳ 文件夹刮削」浮动按钮。');
+    csDesc.innerHTML = t('<b>✅ 已上线</b> —— 把刮削锚点发给<b>你自建的刮削服务</b>（能收发 JSON 的 HTTP 接口），返回数据经飞牛官方编辑接口回填（不修改任何系统文件；只填空/覆盖占位/中文覆盖英文，绝不倒打已有中文，写回带字段锁）。'
+      + '步骤：① 搭服务（任何语言，协议见下）② 打开下方开关 ③ 填服务地址 → 保存。'
+      + '协议：季页 POST {title, season, tmdbId, episodes}，响应 {episodes:[{index,title,overview}]}；'
+      + '文件夹 POST {mode:"folder", title, folderGuid, items/episodes:[{index,guid,name}]}（name=文件名，服务按 name/index 匹配），响应 {items|episodes:[{index|name,title,overview}]}。'
+      + '按钮位置：季页「选集」旁「⟳ 自定义刮削」（分集回填）；个人视频文件夹页「⟳ 文件夹刮削」（按文件名批量，子文件夹自动递归）。');
     secBodyScraper.appendChild(csDesc);
 
     const csToggleRow = document.createElement('label');
@@ -2904,8 +2908,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       + 'padding:6px 8px;box-sizing:border-box;';
     const mkExtDesc = (body: HTMLElement, text: string): void => {
       const d = document.createElement('div');
-      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.5;margin-bottom:8px;';
-      d.textContent = t(text);
+      d.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);line-height:1.55;margin-bottom:8px;white-space:pre-line;';
+      d.innerHTML = t(text); // 文本均为代码内静态常量（lc-1250 详细使用指南，支持换行/加粗）
       body.appendChild(d);
     };
     const mkExtToggle = (body: HTMLElement, label: string): HTMLInputElement => {
@@ -3009,7 +3013,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // ① Fanart.tv —— 高清透明 Logo 兜底（电影按 TMDB id；剧自动换算 TVDB id；个人 client_key 可选）
     const faBody = secFanart.body;
-    mkExtDesc(faBody, 'TMDB 无可用透明 Logo 时（无候选/全纯白）自动兜底 Fanart.tv 官方高清 Logo，用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id。');
+    mkExtDesc(faBody, '<b>用途</b>：TMDB 拿不到透明 Logo 时，自动兜底 Fanart.tv 官方高清图（用于轮播标题替换与详情页 Logo 回填；电影按 TMDB id、剧集自动换算 TVDB id）。\n'
+      + '<b>怎么配</b>：① 点下方链接到 fanart.tv 免费注册，在 Personal API Keys 页领取 api_key；② 把 api_key 填入下方「必填」框 → 保存；client_key（个人 key）可选，新图延迟更短；③ 打开开关。\n'
+      + '未填 Key 或开关关闭时自动跳过，不影响其它功能。');
     const faToggle = mkExtToggle(faBody, '启用 Fanart.tv 高清 Logo 兜底');
     faToggle.addEventListener('change', () => {
       S.fanartEnabled = faToggle.checked;
@@ -3028,7 +3034,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // ② TVMaze —— 分集英文兜底（免 Key；「补全集信息」用）
     const tvBody = secTvmaze.body;
-    mkExtDesc(tvBody, '「补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。完全免费、无需任何 Key、国内可直连；查询失败自动回退纯 TMDB。');
+    mkExtDesc(tvBody, '<b>用途</b>：「⟳ 补全集信息」在 TMDB 缺英文标题/简介（或整集缺失）时，用 TVMaze 官方 API 补英文兜底。\n'
+      + '<b>怎么配</b>：零配置——完全免费、无需任何 Key、国内可直连，打开开关即用；查询失败自动回退纯 TMDB，不会因此报错。');
     const tvToggle = mkExtToggle(tvBody, '启用 TVMaze 英文分集兜底');
     tvToggle.addEventListener('change', () => {
       S.tvmazeEnabled = tvToggle.checked;
@@ -3037,7 +3044,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // ③ OMDb —— IMDb 评分（详情卡 + 观影记录第三格）
     const omBody = secOmdb.body;
-    mkExtDesc(omBody, '剧集详情卡与观影记录补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。');
+    mkExtDesc(omBody, '<b>用途</b>：剧集详情卡与观影记录补「IMDb」评分（IMDb 无官方公开 API，OMDb 为其授权渠道；免费档 1000 次/天、非商业）。后端缓存 7 天省额度。\n'
+      + '<b>怎么配</b>：① 点下方链接用邮箱免费申请 Key；② 到邮箱点激活链接（不激活无效）；③ 把收到的 Key 填入下方 → 保存 → 打开开关。');
     const omToggle = mkExtToggle(omBody, '启用 OMDb IMDb 评分');
     omToggle.addEventListener('change', () => {
       ipcRenderer.invoke('settings:set-omdb-enabled', omToggle.checked).catch(() => {});
@@ -3050,7 +3058,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // ④ MyAnimeList 官方 —— 动漫跳片头映射链首选（无需登录，注册应用得 Client ID）
     const malBody = secMal.body;
-    mkExtDesc(malBody, '动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API；未配置时自动回退非官方 Jikan/AniList。在 myanimelist.net/apiconfig 注册应用即得 Client ID，无需登录授权。');
+    mkExtDesc(malBody, '<b>用途</b>：动漫「跳过片头片尾」的标题映射链首选 MAL 官方 v2 API（未配置自动回退非官方 Jikan/AniList）；仅需 Client ID，无需登录授权。\n'
+      + '<b>怎么配</b>：① 点下方链接登录 myanimelist.net → API 页 → Create；② App Name 随意（如 Fntv-Plus）、类型选 web、Commercial 选 non-commercial、Purpose 选 hobbyist、Redirect/Homepage 填任意可达网址（如你的 GitHub 仓库）；③ 提交后复制 Client ID 填入下方 → 保存 → 打开开关。');
     const malReal = { v: '' };
     const malKey = mkMaskedKey(malBody, 'MAL Client ID（可选，注册即用）', malReal);
     const malBtns = mkExtBtnRow(malBody);
@@ -3060,7 +3069,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // ⑤ Jav 刮削 —— 番号匹配个人库整理（非官方抓取 javbus，默认关；可换镜像域名）
     const secJav = section('Jav 刮削');
     const javBody = secJav.body;
-    mkExtDesc(javBody, '电影文件名含番号（如 ABC-123 / FC2-PPV-1234567）时，电影详情页出现「⟳ jav 刮削」按钮：按番号从 javbus 查询并回填标题（锁定防覆盖），封面就地替换（仅本地视觉）。非官方抓取（无官方 API），国内直连不通——需配合「自定义代理」或在下方填写可达的镜像域名。仅建议用于整理自有媒体库。');
+    mkExtDesc(javBody, '<b>用途</b>：个人视频库按番号整理（默认关，<b>无需自建服务</b>，数据源 javbus）。\n'
+      + '<b>按钮</b>：电影/未识别视频详情页「⟳ jav 刮削」单条精修；文件夹页「⟳ jav 刮削」整夹批量（夹名有番号→整套落库，无番号→递归子夹按文件名逐个刮）；库列表页「⟳ 全库刮削」全库批量（已识别 Movie/TV 自动跳过）。\n'
+      + '<b>回填</b>：标题/简介/发行日期/演员（带字段锁）+ 封面（真实落库）。未识别番号自动跳过不中断。\n'
+      + '<b>网络</b>：非官方抓取，国内直连不通——需配合「自定义代理」或在下方填写可达的镜像域名。仅建议用于整理自有媒体库。');
     const javToggle = mkExtToggle(javBody, '启用 Jav 刮削');
     javToggle.addEventListener('change', () => {
       S.javEnabled = javToggle.checked;
@@ -4271,19 +4283,25 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       ].join('\n');
       (document.head || document.documentElement).appendChild(animStyle);
     }
-    if (!(burger as any).dataset.burgerHooked) {
-      (burger as any).dataset.burgerHooked = '1';
-      burger.addEventListener('click', (e: Event) => {
-        if ((e.target as HTMLElement).closest('a')) return; // 🏠 首页链接放行(不拦截, 交给飞牛导航)
+    // [lc-1250] 汉堡键点击: 文档级 capture 委托 —— React 重渲染会整节点替换顶栏汉堡
+    //   （文件夹页实测进页后 header 重挂 → 元素级钩子随旧节点失效 → 点击无反应），
+    //   委托到 document 后无论节点怎么换都命中当前节点，capture+stopImmediate 仍抢在 React 之前。
+    if (!(window as any).__fnosBurgerDelegated) {
+      (window as any).__fnosBurgerDelegated = '1';
+      document.addEventListener('click', (e: Event) => {
+        const t = e.target as HTMLElement;
+        if (!t || !t.closest) return;
+        if (t.closest('a')) return; // 🏠 首页链接放行(不拦截, 交给飞牛导航)
+        const burgerHit = t.closest('[class*="lg:!hidden"]:not([class*="inset-0"])');
+        if (!burgerHit) return;
         e.preventDefault();
         e.stopImmediatePropagation(); // 拦截飞牛原生 onClick, 避免双重控制
         const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]') as HTMLElement | null;
         if (!drawer) return;
-        // 接管抽屉开合(动画版): 不动 !hidden 类, 用 display + .drawer-open 类驱动 CSS 过渡
         if (drawer.classList.contains('drawer-open')) { animateCloseDrawer(drawer); log('BURGER -> CLOSE (anim)'); }
         else { openDrawer(drawer); log('BURGER -> OPEN (anim)'); }
       }, true); // capture 阶段, 抢在 React 之前拦截
-      log('BURGER click-hook installed (capture+stop)');
+      log('BURGER click-hook installed (document delegation)');
     }
     // ③ 遮罩/背板点击关闭: 点抽屉背板(非侧栏面板)即关闭
     //    [v326 修正] 之前用 `e.target === drawer` 太严格 —— 实际暗色背板是 drawer 的子元素(.absolute.inset-0),
@@ -4405,6 +4423,98 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     });
   }
 
+  /** [lc-1250] CSS 颜色字面量 → rgba（支持 rgb/rgba() 与 #hex3/4/6/8）。 */
+  function _cssColorToRgba(s: string): { r: number; g: number; b: number; a: number } | null {
+    const m = s.match(/rgba?\(([^)]+)\)/i);
+    if (m) {
+      const p = m[1].split(',').map(x => parseFloat(x.trim()));
+      if (p.length >= 3 && !isNaN(p[0]) && !isNaN(p[1]) && !isNaN(p[2])) {
+        return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 ? p[3] : 1 };
+      }
+      return null;
+    }
+    const h = s.match(/^#([0-9a-f]{3,8})$/i);
+    if (h) {
+      const v = h[1];
+      if (v.length === 3 || v.length === 4) {
+        return { r: parseInt(v[0] + v[0], 16), g: parseInt(v[1] + v[1], 16), b: parseInt(v[2] + v[2], 16),
+          a: v.length === 4 ? parseInt(v[3] + v[3], 16) / 255 : 1 };
+      }
+      if (v.length === 6 || v.length === 8) {
+        return { r: parseInt(v.slice(0, 2), 16), g: parseInt(v.slice(2, 4), 16), b: parseInt(v.slice(4, 6), 16),
+          a: v.length === 8 ? parseInt(v.slice(6, 8), 16) / 255 : 1 };
+      }
+    }
+    return null;
+  }
+
+  /** [lc-1250] 估算纯色 linear-gradient 遮罩（无 url）在图标中心处的局部 rgba。
+   *  修复：lc-925 采样器原先把 hero 的黑色渐变遮罩整层跳过（backgroundImage 无 url()
+   *  即 continue），刮削后的亮封面左上角被采成"亮底" → 图标反色错误。仅支持水平/垂直
+   *  方向（fnOS 实际 scrim 即 to bottom 黑渐变 + 90deg .gradient-for-full），其余返回 null。 */
+  function gradientOverlayAt(el: HTMLElement, bgImage: string, px: number, py: number): { l: number; a: number } | null {
+    if (!bgImage || bgImage.indexOf('linear-gradient') < 0 || bgImage.indexOf('url(') >= 0) return null;
+    const open = bgImage.indexOf('(', bgImage.indexOf('linear-gradient'));
+    let depth = 0, close = -1;
+    for (let i = open; i >= 0 && i < bgImage.length; i++) {
+      if (bgImage[i] === '(') depth++;
+      else if (bgImage[i] === ')') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (open < 0 || close < 0) return null;
+    const inner = bgImage.slice(open + 1, close);
+    const parts: string[] = [];
+    let buf = '', d2 = 0;
+    for (const ch of inner) {
+      if (ch === '(') d2++; else if (ch === ')') d2--;
+      if (ch === ',' && d2 === 0) { parts.push(buf.trim()); buf = ''; } else buf += ch;
+    }
+    if (buf.trim()) parts.push(buf.trim());
+    if (parts.length < 2) return null;
+    let horiz = false, reverse = false, startIdx = 0;
+    const first = parts[0].toLowerCase();
+    if (!/^(rgba?\(|hsla?\(|#)/.test(first)) {
+      startIdx = 1;
+      if (first.indexOf('to right') >= 0 || first.indexOf('90deg') >= 0) horiz = true;
+      else if (first.indexOf('to left') >= 0 || first.indexOf('270deg') >= 0) { horiz = true; reverse = true; }
+      else if (first.indexOf('to bottom') >= 0 || first.indexOf('180deg') >= 0) horiz = false;
+      else if (first.indexOf('to top') >= 0 || first.indexOf('0deg') >= 0) { horiz = false; reverse = true; }
+      else return null;
+    }
+    const segs = parts.slice(startIdx);
+    const stops: { pos: number; r: number; g: number; b: number; a: number }[] = [];
+    for (let i = 0; i < segs.length; i++) {
+      const cm = segs[i].match(/(rgba?\([^)]*\)|#[0-9a-f]{3,8})/i);
+      if (!cm) continue;
+      const col = _cssColorToRgba(cm[1]);
+      if (!col) continue;
+      const pm = segs[i].match(/([\d.]+)\s*%/);
+      const pos = pm ? Math.max(0, Math.min(1, parseFloat(pm[1]) / 100))
+        : (segs.length > 1 ? i / (segs.length - 1) : 0);
+      stops.push({ pos, r: col.r, g: col.g, b: col.b, a: col.a });
+    }
+    if (stops.length < 2) return null;
+    stops.sort((a, b) => a.pos - b.pos);
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    let t = horiz ? (px - r.left) / r.width : (py - r.top) / r.height;
+    if (reverse) t = 1 - t;
+    t = Math.max(0, Math.min(1, t));
+    let c = stops[stops.length - 1];
+    if (t <= stops[0].pos) c = stops[0];
+    else {
+      for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i], b = stops[i + 1];
+        if (t >= a.pos && t <= b.pos) {
+          const f = b.pos > a.pos ? (t - a.pos) / (b.pos - a.pos) : 0;
+          c = { pos: t, r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f, a: a.a + (b.a - a.a) * f };
+          break;
+        }
+      }
+    }
+    if (c.a < 0.05) return null;
+    return { l: _lumOf(c.r, c.g, c.b), a: c.a };
+  }
+
   /** 采样某个图标"背后那一层"的亮度。返回 null 表示拿不到(交上层兜底)。 */
   async function detectBehindLuminance(icon: HTMLElement): Promise<number | null> {
     const r = icon.getBoundingClientRect();
@@ -4439,9 +4549,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
           if (a >= 0.05) overlays.push({ l: _lumOf(p[0], p[1], p[2]), a });
         }
       }
-      // ② 背景图(纯渐变无 url() 会自动跳过, 继续往下找)
+      // ② 背景图/渐变: 纯渐变遮罩（无 url）按图标位置估算局部 rgba 计入合成
+      //   [lc-1250] 以前整层跳过 → hero 黑渐变不计入, 亮封面左上被采成"亮底"误判反色
       const bi = cs.backgroundImage || '';
       if (bi && bi !== 'none') {
+        const g = gradientOverlayAt(el, bi, x, y);
+        if (g) {
+          if (g.a >= 0.5) return blend(g.l);
+          overlays.push(g);
+        }
         const u = bi.match(/url\(["']?([^"')]+)["']?\)/);
         if (u && u[1]) {
           const l = await imageTopLeftLuminance(u[1]);
@@ -4450,6 +4566,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       }
       // ③ <img> 元素
       if (el.tagName === 'IMG') {
+        // [lc-1250] 详情页 hero 背景图跳过: fnOS 恒在 hero 图上叠暗色渐变（lc-989 实测
+        // 顶栏三层恒暗、图片贡献 ≤4%），原图左上角亮度不代表视觉背景。
+        if (isDetailPage() && el.closest('.semi-always-dark')) continue;
         const src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || '';
         if (src) {
           const l = await imageTopLeftLuminance(src);
