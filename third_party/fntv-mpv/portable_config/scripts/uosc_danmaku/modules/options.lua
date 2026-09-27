@@ -85,6 +85,10 @@ options = {
     outline = 1.0,
     -- 限制屏幕中同时显示的最大弹幕数量，0 表示不限制
     max_screen_danmaku = 0,
+    -- [lc-1253] 相同弹幕聚合：merge_window 秒窗口内（以组首为锚）同文本同类型合并为一条，
+    -- 渲染时追加 ×N 并按重叠次数放大字号（log2 增长，1.8 倍封顶）。merge_same_text=no 关闭
+    merge_same_text = true,
+    merge_window = 10,
     --指定弹幕屏蔽词文件路径(black.txt)，支持绝对路径和相对路径。文件内容以换行分隔
     --支持 lua 的正则表达式写法
     blacklist_path = "",

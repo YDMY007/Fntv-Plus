@@ -37,6 +37,9 @@ const GUID_RE = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32}
 const LS_KEY = 'fntv_danmaku_enabled';
 const LS_STYLE_KEY = 'fntv_danmaku_style';
 const LS_BILI_KEY = 'fntv_danmaku_bili_search';
+// [lc-1253] 相同弹幕聚合
+const LS_MERGE_KEY = 'fntv_danmaku_merge';
+const LS_MERGE_WINDOW_KEY = 'fntv_danmaku_merge_window';
 
 // ═══ [lc-544] 播放页顶部标题栏美化 ═══
 // 飞牛原生播放页顶部的页面级 header（返回箭头+标题+窗口控件）在视频上方很突兀。
@@ -192,6 +195,7 @@ interface DanmakuItem {
     type: number;   // 1/2/3=滚动 4=底部 5=顶部
     color: number;  // 十进制 RGB
     text: string;
+    count?: number; // [lc-1253] 聚合重叠次数（>1 渲染 ×N 并放大字号；1/缺省=未聚合）
 }
 
 interface DanmakuMeta {
@@ -273,6 +277,45 @@ let enabled = true;
 // false 时 prepare 请求带 biliSearch:false，主进程跳过内置 B站降级（自建 danmu_api 优选照常）。
 let biliSearch = true;
 let items: DanmakuItem[] = [];
+// [lc-1253] 聚合相同弹幕：rawItems 恒存原始列表，items 由它派生（开关/窗口变更时重算）。
+// 锚点窗口语义：以组首时间为锚，窗口内（≤windowSec）同文本+同类型合并为一条，count 记重叠次数。
+let rawItems: DanmakuItem[] = [];
+let mergeSame = true;
+let mergeWindow = 10;
+try {
+    mergeSame = localStorage.getItem(LS_MERGE_KEY) !== '0';
+    mergeWindow = clampNum(localStorage.getItem(LS_MERGE_WINDOW_KEY), 3, 30, 10);
+} catch { /* ignore */ }
+
+/** 聚合：相邻且同文本同类型、与组首时间差 ≤ windowSec 的弹幕合并为一条（count 累加）。列表须升序。 */
+function aggregateDanmaku(list: DanmakuItem[], windowSec: number): DanmakuItem[] {
+    if (windowSec <= 0 || list.length === 0) return list;
+    const out: DanmakuItem[] = [];
+    let group: DanmakuItem | null = null;
+    for (const d of list) {
+        if (group && d.type === group.type && d.text === group.text && d.time - group.time <= windowSec) {
+            group.count = (group.count || 1) + 1;
+        } else {
+            if (group) out.push(group);
+            group = { ...d, count: 1 };
+        }
+    }
+    if (group) out.push(group);
+    return out;
+}
+
+/** 载入弹幕统一入口：rawItems 存原始列表，items 恒为显示列表（按聚合设置派生）。 */
+function setItems(list: DanmakuItem[]): void {
+    rawItems = ensureAscending(list);
+    items = mergeSame ? aggregateDanmaku(rawItems, mergeWindow) : rawItems;
+}
+
+/** 聚合开关/窗口变更 → 重派生 items，并让在屏弹幕按新列表重建（复用 seek 的重建路径）。 */
+function rebuildItems(): void {
+    items = mergeSame ? aggregateDanmaku(rawItems, mergeWindow) : rawItems;
+    if (videoEl) relocateCursor(videoEl.currentTime);
+    else renderDirty = true;
+}
 let meta: DanmakuMeta | null = null;
 let currentGuid: string | null = null;
 // [lc-1015] currentGuid 是否来自 play/info 预取（此刻 URL 可能还停留在详情页/上一集）。
@@ -1046,7 +1089,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
         }
         currentGuid = guid;
         currentGuidFromPrefetch = !!targetGuid && guid !== urlGuid;
-        items = [];
+        setItems([]);
         meta = null;
         // [lc-1118] 换集后手动搜索状态跟着清：候选/错误/已选标记都不属于新的一集
         dmSearchResults = null;
@@ -1069,7 +1112,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
     // [lc-1015] 会话内 LRU 命中：详情页预取过 / 切集切回来 → 直接用，不进 IPC
     const cached = guidCache.get(guid);
     if (cached && cached.items.length) {
-        items = cached.items;
+        setItems(cached.items);
         meta = cached.meta;
         maxScreen = cached.maxScreen;
         loadedGuids.add(guid);
@@ -1096,7 +1139,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
             return;
         }
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
-            items = ensureAscending(res.items as DanmakuItem[]);
+            setItems(res.items as DanmakuItem[]);
             meta = res.meta as DanmakuMeta || {
                 searchTitle: res.title || '', matchedTitle: res.title || '',
                 source: res.source || '', ep: res.ep || 0, season: res.season || 0, isMovie: !!res.isMovie,
@@ -1104,7 +1147,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
             };
             maxScreen = Number(res.maxScreen) > 0 ? Math.round(Number(res.maxScreen)) : 0;
             loadedGuids.add(guid);
-            guidCachePut(guid, { items, meta, maxScreen });
+            guidCachePut(guid, { items: rawItems, meta, maxScreen });
             renderDirty = true;
             announceItems();
             log.info(`[danmakuWeb] 获取弹幕 ${items.length} 条 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
@@ -1482,14 +1525,21 @@ function render(): void {
         const isBottom = d.type === 4;
         const isFix = isBottom || d.type === 5;
         const dur = isFix ? fixDuration : style.scrollDuration;
+        // [lc-1253] 聚合弹幕：count>1 时追加 ×N，字号按重叠次数放大（log2 增长，1.8 倍封顶）。
+        // 放大弹幕允许溢出所在车道（视觉即「更大的弹幕」，对齐 B站 特殊弹幕观感）。
+        const cnt = d.count && d.count > 1 ? d.count : 1;
+        const scaleMult = cnt > 1 ? Math.min(1 + 0.2 * Math.log2(cnt), 1.8) : 1;
+        const fSize = fontSize * scaleMult;
+        const dispText = cnt > 1 ? d.text + ' ×' + cnt : d.text;
+        applyFont(currentFont(fSize));
         // 先量宽再分配轨道：碰撞判定要宽度，而旧版是先分配后 measureText，量出来的宽度
         // 对本帧的分配毫无用处。位图留到确认拿到轨道之后再建，避免高峰期白做栅格化。
-        const w = Math.max(1, Math.ceil(ctx.measureText(d.text).width));
+        const w = Math.max(1, Math.ceil(ctx.measureText(dispText).width));
         const lane = allocLane(isBottom ? laneBottom : (isFix ? laneTop : laneScroll), t, cw, w, dur, isFix);
         if (lane >= 0) {
             const dim = { bw: 0, bh: 0, pad: 0 };
             const color = '#' + (d.color & 0xffffff).toString(16).padStart(6, '0');
-            const cvs = createCommentBitmap(d.text, color, fontSize, w, dim);
+            const cvs = createCommentBitmap(dispText, color, fSize, w, dim);
             active.set(i, { appear: t, lane, w, fix: isFix, cvs, bw: dim.bw, bh: dim.bh, pad: dim.pad });
             recentTexts.set(d.text, d.time);
             cursor++;
@@ -1716,12 +1766,12 @@ async function pickCandidate(c: any): Promise<void> {
             season: meta ? meta.season : 0, isMovie: meta ? meta.isMovie : false, bvid: c.bvid,
         }) as any;
         if (res && res.ok && Array.isArray(res.items) && res.items.length && currentGuid) {
-            items = ensureAscending(res.items as DanmakuItem[]);
+            setItems(res.items as DanmakuItem[]);
             meta = (res.meta as DanmakuMeta) || meta;
             if (Number(res.maxScreen) > 0) maxScreen = Math.round(Number(res.maxScreen));
             dmPickedBvid = String(c.bvid);
             loadedGuids.add(currentGuid);
-            guidCachePut(currentGuid, { items, meta, maxScreen });
+            guidCachePut(currentGuid, { items: rawItems, meta, maxScreen });
             renderDirty = true;
             dmDetailShown = undefined;
             renderDetailRows();   // 无条件重填：详情段收起时也要就地换成新值，展开才能看到
@@ -1926,6 +1976,19 @@ function makeToggle(label: string, value: boolean, onChange: (v: boolean) => voi
 function buildStyleControls(): HTMLElement {
     const wrap = document.createElement('div');
     Object.assign(wrap.style, { display: 'flex', flexDirection: 'column', gap: '14px' } as CSSStyleDeclaration);
+
+    // [lc-1253] 聚合相同弹幕：开关 + 窗口（秒）。变更即持久化并重派生 items。
+    wrap.appendChild(makeToggle(t('聚合相同弹幕'), mergeSame, (v) => {
+        mergeSame = v;
+        try { localStorage.setItem(LS_MERGE_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+        rebuildItems();
+    }));
+    wrap.appendChild(makeSlider(t('聚合窗口（秒）'), 3, 30, 1, mergeWindow,
+        (v) => v.toFixed(0) + 's', (v) => {
+            mergeWindow = v;
+            try { localStorage.setItem(LS_MERGE_WINDOW_KEY, String(v)); } catch { /* ignore */ }
+            rebuildItems();
+        }));
 
     wrap.appendChild(makeToggle(t('粗体'), style.bold, (v) => { style.bold = v; saveStyle(); }));
 

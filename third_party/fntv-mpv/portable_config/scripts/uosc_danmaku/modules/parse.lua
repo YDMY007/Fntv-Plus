@@ -573,6 +573,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         end
     end
 
+    -- [lc-1253] 相同弹幕聚合：先于 max_screen 限制执行（合并后数量减少，限额不误伤组内重叠）。
+    -- 以组首事件为锚，merge_window 秒内同文本同类型合并为一条，count 记录重叠次数。
+    if options.merge_same_text then
+        local merged_events = {}
+        local cur = nil
+        for _, ev in ipairs(pre_events) do
+            local d = ev.danmaku
+            if cur and d.type == cur.danmaku.type and d.text == cur.danmaku.text
+                and (ev.start_time - cur.start_time) <= (options.merge_window or 10) then
+                cur.count = (cur.count or 1) + 1
+            else
+                if cur then table.insert(merged_events, cur) end
+                cur = { start_time = ev.start_time, end_time = ev.end_time, danmaku = d, count = 1 }
+            end
+        end
+        if cur then table.insert(merged_events, cur) end
+        pre_events = merged_events
+    end
+
     if options.max_screen_danmaku > 0 then
         pre_events = limit_danmaku(pre_events, options.max_screen_danmaku)
     end
@@ -584,6 +603,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         local danmaku_type = d.type
         local text = ass_escape(decode_html_entities(d.text))
                     :gsub("x(%d+)$", "{\\b1\\i1}x%1")
+
+        -- [lc-1253] 聚合弹幕：追加 ×N 后缀，字号按重叠次数放大（内联 \fs 覆写，log2 增长 1.8 倍封顶）；
+        -- 滚动布局宽度同步使用放大后的字号，避免入屏时刻偏移。× 用乘号字符，不与来源自带的 xN gsub 冲突
+        local count = tonumber(ev.count) or 1
+        local ev_fs = fontsize
+        if options.merge_same_text and count > 1 then
+            local mult = 1 + 0.2 * (math.log(count) / math.log(2))
+            if mult > 1.8 then mult = 1.8 end
+            ev_fs = math.floor(fontsize * mult + 0.5)
+            text = string.format("{\\fs%d}", ev_fs) .. text
+            text = text .. string.format("{\\b1\\i1} ×%d", count)
+        end
 
         -- 颜色从十进制转为 BGR Hex
         local color = math.max(0, math.min(d.color or 0xFFFFFF, 0xFFFFFF))
@@ -601,7 +632,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             layer = 0
             end_time_str = seconds_to_time(ev.end_time)
             style = "R2L"
-            local text_length = get_str_width(text, fontsize)
+            local text_length = get_str_width(text, ev_fs)
             local x1 = res_x + text_length / 2
             local x2 = -text_length / 2
             local y = get_position_y(fontsize, appear_time, text_length, res_x, scrolltime, roll_array)
