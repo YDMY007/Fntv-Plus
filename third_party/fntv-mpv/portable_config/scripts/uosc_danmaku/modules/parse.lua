@@ -604,13 +604,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         local text = ass_escape(decode_html_entities(d.text))
                     :gsub("x(%d+)$", "{\\b1\\i1}x%1")
 
-        -- [lc-1253] 聚合弹幕：追加 ×N 后缀，字号按重叠次数放大（内联 \fs 覆写，log2 增长 1.8 倍封顶）；
+        -- [lc-1253] 聚合弹幕：追加 ×N 后缀，字号按重叠次数放大（内联 \fs 覆写，log2 增长）；
+        -- [lc-1256] 曲线收紧（与网页端一致）：×2 仅 +8%，×16 及以上封顶 +30%——
+        -- 旧曲线 ×2 +20% / 封顶 +80% 被反馈放大过猛，观感接近翻倍。
         -- 滚动布局宽度同步使用放大后的字号，避免入屏时刻偏移。× 用乘号字符，不与来源自带的 xN gsub 冲突
         local count = tonumber(ev.count) or 1
         local ev_fs = fontsize
         if options.merge_same_text and count > 1 then
-            local mult = 1 + 0.2 * (math.log(count) / math.log(2))
-            if mult > 1.8 then mult = 1.8 end
+            local mult = 1 + 0.08 * (math.log(count) / math.log(2))
+            if mult > 1.3 then mult = 1.3 end
             ev_fs = math.floor(fontsize * mult + 0.5)
             text = string.format("{\\fs%d}", ev_fs) .. text
             text = text .. string.format("{\\b1\\i1} ×%d", count)

@@ -1527,8 +1527,10 @@ function render(): void {
         const dur = isFix ? fixDuration : style.scrollDuration;
         // [lc-1253] 聚合弹幕：count>1 时追加 ×N，字号按重叠次数放大（log2 增长，1.8 倍封顶）。
         // 放大弹幕允许溢出所在车道（视觉即「更大的弹幕」，对齐 B站 特殊弹幕观感）。
+        // [lc-1256] 曲线收紧（用户反馈 ×N 一下大太多）：×2 仅 +8%，×16 及以上封顶 +30%——
+        // 数量仍决定字号，但幅度克制；旧曲线 ×2 +20% / 封顶 +80% 观感接近翻倍，已废弃。
         const cnt = d.count && d.count > 1 ? d.count : 1;
-        const scaleMult = cnt > 1 ? Math.min(1 + 0.2 * Math.log2(cnt), 1.8) : 1;
+        const scaleMult = cnt > 1 ? Math.min(1 + 0.08 * Math.log2(cnt), 1.3) : 1;
         const fSize = fontSize * scaleMult;
         const dispText = cnt > 1 ? d.text + ' ×' + cnt : d.text;
         applyFont(currentFont(fSize));
