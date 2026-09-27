@@ -210,7 +210,11 @@ end
 
 -- 同步请求（供 menu.lua 这类用 mp.command_native 的调用点）。
 -- (body, status, res)：res 为原始 subprocess 结果（调用方判断退出码/stderr）。
-local function dd_request_sync(args)
+-- [lc-1258] 必须为全局：menu.lua 与本文件不共享作用域，lc-1226/1228 加入调用点后
+--   本函数仍是 local → menu.lua 取到 nil → 「输入番剧名搜索」直接 Lua error 崩溃
+--   （表现为搜索菜单卡在「加载数据中...」）。同文件其它被 menu.lua 消费的函数（match_*/fetch_*）
+--   都是全局风格，此处统一。
+function dd_request_sync(args)
     local res = mp.command_native({
         name = 'subprocess', capture_stdout = true, capture_stderr = true,
         args = dd_args_with_status(args),
