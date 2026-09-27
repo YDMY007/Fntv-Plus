@@ -611,10 +611,18 @@ function auto_search_extra(title, episode_num, season)
     local ep_label = episode_num == 0 and "仅标题/单集(极速兜底)" or ("第" .. episode_num .. "集")
     msg.warn(("自动补源：经本地代理直连B站搜索 %s（%s）"):format(title, ep_label))
     local season_arg = (season and season > 0) and ("&season=" .. tostring(season)) or ""
+    -- [lc-1255] 播放地址里的 item guid（/playvideo/<guid>…，与 smart_skip 同一解析口径）：
+    -- 传给 shim 用于解析季 guid → 自建源「系列级匹配记忆」的键，各集标题元数据不一致时
+    -- 复用已命中条目，避免逐集重搜失败降级（lc-1254 的 MPV 侧接线）。
+    -- 注：本函数是「自动补源」路径（唯一走 /danmaku 的自动链路）；手动候选搜索/按 bvid 拉取
+    -- 走 danmaku-candidates / danmaku-by-bvid，是用户显式选择，按设计不参与系列记忆。
+    local play_path = mp.get_property("path") or ""
+    local item_guid = play_path:match("/playvideo/([^%?]+)") or ""
+    local guid_arg = item_guid ~= "" and ("&guid=" .. url_encode(item_guid)) or ""
     local api = string.format(
-        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s%s",
-        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500), season_arg)
-    msg.info(("[自动补源-DEBUG] 请求 %s (season=%s)"):format(api, tostring(season or 0)))
+        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s%s%s",
+        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500), season_arg, guid_arg)
+    msg.info(("[自动补源-DEBUG] 请求 %s (season=%s guid=%s)"):format(api, tostring(season or 0), item_guid ~= "" and "有" or "无"))
 
     local body = http_get(api)
     local ok = false
