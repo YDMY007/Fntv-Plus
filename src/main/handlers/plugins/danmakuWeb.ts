@@ -60,6 +60,7 @@ async function handlePrepare(
     let season = 0;
     let epTitle = '';
     let isMovie = false;
+    let seriesKey = '';
     try {
         const fnapi = new fn.ApiService(config.domain, config.token);
         const resp = await fnapi.getPlayInfo(guid);
@@ -67,6 +68,9 @@ async function handlePrepare(
             return { ok: false, error: '获取播放信息失败: ' + (resp?.message || '未知错误') };
         }
         const item = resp.data.item;
+        // [lc-1254] 系列键：剧集取季 guid（跨集稳定），电影/无父级退化为条目自身 guid——
+        // 供自建源「系列级匹配记忆」跨集复用命中条目（各集标题元数据不一致时不再逐集重搜）。
+        seriesKey = String((resp.data as any).parent_guid || item?.parent_guid || guid);
         title = (item?.tv_title || item?.title || '').trim();
         const type = (resp.data.type || item?.type || '').toLowerCase();
         // [lc-1220] 本集标题：剧集时 tv_title=番名、title=本集标题，供自建源核验未标季条目。
@@ -99,7 +103,7 @@ async function handlePrepare(
     // ── 抓取 B站弹幕（带磁盘缓存；ep=0 自动退化；season>0 时优先精确匹配该季）──
     // [lc-1117] biliSearch=false：网页弹幕设置关掉了「B站弹幕搜索」兜底（自建 danmu_api 优选不受影响）
     try {
-        const res = await getDanmakuItems(title, ep, isMovie, season, params?.biliSearch !== false, epTitle);
+        const res = await getDanmakuItems(title, ep, isMovie, season, params?.biliSearch !== false, epTitle, seriesKey);
         if (!res || !res.items || res.items.length === 0) {
             return { ok: false, title, ep, isMovie, count: 0, error: (res && res.meta && res.meta.error) || '未找到匹配的B站弹幕' };
         }

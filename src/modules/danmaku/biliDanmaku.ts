@@ -533,7 +533,7 @@ export function filterDanmakuItems(
  * @param epTitle [lc-1220] 播放侧本集标题（供自建 danmu_api 核验未标季条目的分集归属；空串=无）
  * @returns {items, meta}；无弹幕返回 items=[] 且 meta.error 带根因（供弹窗「备注」行展示）
  */
-export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0, biliSearch = true, epTitle = ''): Promise<GetDanmakuResult | null> {
+export async function getDanmakuItems(title: string, ep: number, isMovie = false, season = 0, biliSearch = true, epTitle = '', seriesKey = ''): Promise<GetDanmakuResult | null> {
     const cleanTitle = normalizeDanmakuTitle(title);
     log.info(`[danmaku] ========== getDanmakuItems 入口 ==========`);
     log.info(`[danmaku] title="${cleanTitle}", ep=${ep}`);
@@ -587,7 +587,7 @@ export async function getDanmakuItems(title: string, ep: number, isMovie = false
 
     const xmlFile = path.join(CACHE_DIR, `${cacheBaseName(cleanTitle, ep, season)}.xml`);
     const aggThreshold = fnConfig.getMpvBiliAggregateThreshold();
-    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season, 60000, biliSearch, epTitle);
+    const r = await runBiliDanmaku(cleanTitle, ep, xmlFile, aggThreshold, season, 60000, biliSearch, epTitle, seriesKey);
     if (!r.ok) {
         log.warn('[danmaku] ❌ 弹幕获取失败: ' + (r.error || '未知'));
         // [lc-1117] 带根因返回（items=[] + meta.error），供网页弹窗「来源详情→备注」展示，

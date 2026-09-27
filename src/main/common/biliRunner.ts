@@ -157,6 +157,7 @@ export async function runBiliDanmaku(
     timeoutMs = 60000,
     allowBiliFallback = true,
     epTitle = '',
+    seriesKey = '',
 ): Promise<BiliDanmakuResult> {
     // [lc-1226] 逐源记录本次尝试结果，随结果回传给两处「弹幕详情」面板，
     // 让用户看到三个来源各自是被跳过、试过没中、还是提供了最终弹幕。
@@ -174,7 +175,7 @@ export async function runBiliDanmaku(
                 : '未启用（到「弹幕设置 → 自建弹幕接口」开启，或从内置 B站 获取）',
         });
     }
-    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle);
+    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle, seriesKey);
     if (pre) {
         traces.push({
             id: 'danmu_api', attempted: true, used: true,

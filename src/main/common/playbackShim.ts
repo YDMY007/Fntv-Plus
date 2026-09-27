@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
+import * as fnConfig from '../../modules/fn_config/config';
 import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
@@ -618,7 +619,7 @@ class PlaybackShim {
      * 仅接受 out 落在安全缓存目录（PUBLIC/ProgramData/tmp 下的 fnos-danmaku）内的请求，
      * 防止通过 out 参数做路径穿越写任意文件。
      */
-    private handleDanmaku(req: http.IncomingMessage, res: http.ServerResponse): void {
+    private async handleDanmaku(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         const u = url.parse(req.url || '', true);
         const q = (u.query || {}) as Record<string, string | undefined>;
         const title = (q.title || '').toString();
@@ -626,6 +627,8 @@ class PlaybackShim {
         const out = (q.out || '').toString();
         const threshold = q.threshold ? parseInt(q.threshold.toString(), 10) : undefined;
         const season = q.season ? parseInt(q.season.toString(), 10) : 0;
+        // [lc-1254] 集 guid（可选）：传了则解析季 guid，作为自建源「系列级匹配记忆」的键
+        const episodeGuid = (q.guid || '').toString();
 
         if (!title || !out) {
             this.json(res, 400, { ok: false, error: '缺少 title 或 out 参数' });
@@ -637,7 +640,8 @@ class PlaybackShim {
             return;
         }
         log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} season=${season || 0} out=${out} threshold=${threshold ?? '(默认)'}`);
-        runBiliDanmaku(title, ep, out, threshold, season).then((r) => {
+        this.resolveSeriesKey(episodeGuid).then((seriesKey) =>
+            runBiliDanmaku(title, ep, out, threshold, season, 60000, true, '', seriesKey)).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku] ✅ 弹幕就绪 | count=${r.danmaku_count} source=${r.source} cid=${r.cid}`);
                 // [lc-607] 透传 bvid/matched_title: MPV 配置面板「匹配来源」需显示 BV(视频区)/标题,
@@ -665,6 +669,31 @@ class PlaybackShim {
             log.warn(`[playbackShim][danmaku] 异常: ${e?.message || e}`);
             this.json(res, 500, { ok: false, error: String(e?.message || e) });
         });
+    }
+
+    /** [lc-1254] 集 guid → 季 guid（10 分钟缓存）：自建源系列匹配记忆的键。
+     *  Lua 目前不传 guid → 返回空串（记忆不启用，行为同旧版）；传了解析失败也返回空串兜底。 */
+    private seriesKeyCache = new Map<string, { key: string; at: number }>();
+
+    private async resolveSeriesKey(episodeGuid: string): Promise<string> {
+        if (!episodeGuid) return '';
+        const hit = this.seriesKeyCache.get(episodeGuid);
+        if (hit && Date.now() - hit.at < 600000) return hit.key;
+        try {
+            const config = fnConfig.readConfig() || {};
+            const domain = config.domain || '';
+            const token = config.token || '';
+            if (!domain || !token) return '';
+            const api = new ApiService(domain, token);
+            const resp = await api.getPlayInfo(episodeGuid);
+            if (!resp.success || !resp.data) return '';
+            const info = resp.data as any;
+            const key = String(info.parent_guid || info.item?.parent_guid || episodeGuid);
+            this.seriesKeyCache.set(episodeGuid, { key, at: Date.now() });
+            return key;
+        } catch {
+            return '';
+        }
     }
 
     /** 校验 out 是否落在允许的弹幕缓存目录内（防路径穿越）。 */

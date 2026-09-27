@@ -6,6 +6,7 @@ import * as dns from 'dns';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import { app } from 'electron';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
 import { resolveProxyAgent } from '../../modules/proxyAgent';
@@ -654,7 +655,77 @@ function okResult(count: number, title: string, matchedTitle: string, sim: numbe
  * 用于核验未标季条目的分集归属；空串=无核验材料，未标季条目照旧拒收。
  * 命中返回与内置 B站 链路同契约的结果；未命中/异常返回 null（调用方降级）。
  */
-export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = ''): Promise<BiliDanmakuResult | null> {
+// ─── [lc-1254] 系列级匹配记忆 ───
+// 为什么需要：自建源按站点点名收录（多为中文译名），而播放侧每集 title 来自 fnOS 条目标题/
+// 文件名——同一部剧各集命名常不一致（实测：第1集「迷途之子!!!!! - : 羽丘的不可思议女孩」靠
+// 首段回退精确命中 28287 条；第2集整串变成日文官方名「BanG Dream! It`s MyGO!!!!!」，两轮
+// 关键词全落空 → 白白降级 B站 只剩 589 条）。以剧集 guid 为键记住命中条目，后续集直接复用
+// 分集表定位，不再依赖每集标题都能搜中。记忆持久化到 userData/danmu-api-mem.json，跨重启生效。
+interface SeriesMemEntry {
+    animeId: number;
+    animeTitle: string;
+    episodeCount: number;
+    source: string;
+    seasonTier: number;
+    ts: number;
+}
+
+const MEM_VERSION = 1;
+const MEM_MAX = 300;
+let memLoaded = false;
+const seriesMem = new Map<string, SeriesMemEntry>();
+
+function memFile(): string {
+    return path.join(app.getPath('userData'), 'danmu-api-mem.json');
+}
+
+function loadMem(): void {
+    if (memLoaded) return;
+    memLoaded = true;
+    try {
+        const raw = fs.readFileSync(memFile(), 'utf-8');
+        const data = JSON.parse(raw) as { version?: number; series?: Record<string, SeriesMemEntry> };
+        if (data && data.version === MEM_VERSION && data.series && typeof data.series === 'object') {
+            for (const [k, v] of Object.entries(data.series)) {
+                if (v && Number(v.animeId)) seriesMem.set(k, v);
+            }
+        }
+    } catch { /* 不存在/损坏 → 空表（version 变更自然失效） */ }
+}
+
+function saveMem(): void {
+    try {
+        const entries = [...seriesMem.entries()].sort((a, b) => b[1].ts - a[1].ts).slice(0, MEM_MAX);
+        seriesMem.clear();
+        for (const [k, v] of entries) seriesMem.set(k, v);
+        fs.mkdirSync(path.dirname(memFile()), { recursive: true });
+        fs.writeFileSync(memFile(), JSON.stringify({ version: MEM_VERSION, series: Object.fromEntries(seriesMem) }, null, 2));
+    } catch (e) {
+        log.warn('[danmuApi] 写匹配记忆失败:', (e as Error).message);
+    }
+}
+
+function recallSeries(key: string): SeriesMemEntry | null {
+    if (!key) return null;
+    loadMem();
+    return seriesMem.get(key) || null;
+}
+
+function rememberSeries(key: string, hit: AnimeHit): void {
+    if (!key || !Number(hit.animeId)) return;
+    loadMem();
+    seriesMem.set(key, {
+        animeId: Number(hit.animeId),
+        animeTitle: hit.animeTitle,
+        episodeCount: Number(hit.episodeCount) || 0,
+        source: hit.source,
+        seasonTier: hit.seasonTier,
+        ts: Date.now(),
+    });
+    saveMem();
+}
+
+export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = '', seriesKey = ''): Promise<BiliDanmakuResult | null> {
     if (!isActive()) return null;
     try {
         // [lc-1220] MPV 链路只传整串 title（「番名 - S2E27: 集标题」，Lua 侧 clean_bili_title
@@ -666,6 +737,26 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             const ex = extractEpisodeTitle(title);
             const head = keywordCandidates(title).slice(-1)[0] || '';
             verifyTitle = (ex && normalizeEpTitle(ex) !== normalizeEpTitle(head)) ? ex : '';
+        }
+        // [lc-1254] 系列记忆命中：同剧上一集已精确命中过 → 直接复用条目定位分集，跳过标题搜索。
+        // 记忆失效（条目被删/集号定位不到/弹幕为空）→ 落回正常搜索，成功后重新记忆。
+        const mem = recallSeries(seriesKey);
+        if (mem) {
+            const memHit: AnimeHit = {
+                animeId: mem.animeId, animeTitle: mem.animeTitle,
+                episodeCount: mem.episodeCount, source: mem.source, seasonTier: mem.seasonTier,
+            };
+            const e = mem.seasonTier === SEASON_TIER_UNMARKED_VERIFY
+                ? await pickVerifiedEpisode(memHit, ep, verifyTitle)
+                : await pickEpisode(memHit, ep);
+            if (e) {
+                const count = await fetchXml(e.episodeId, out);
+                if (count > 0) {
+                    log.info(`[danmuApi] ✅ 记忆命中 | ${mem.animeTitle} · ${e.episodeTitle || ('第' + ep + '集')} | ${count} 条 (series=${seriesKey.slice(0, 8)}…)`);
+                    return okResult(count, title, mem.animeTitle, 1);
+                }
+            }
+            log.info(`[danmuApi] 记忆条目未取到第 ${ep} 集有效弹幕 → 走正常搜索 | ${mem.animeTitle}`);
         }
         const hits = await searchAnimes(title, season, verifyTitle);
         if (!hits.length) {
@@ -682,6 +773,7 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             }
             const count = await fetchXml(e.episodeId, out);
             if (count > 0) {
+                if (seriesKey) rememberSeries(seriesKey, hit);
                 log.info(`[danmuApi] ✅ 精确命中 | ${hit.animeTitle} · ${e.episodeTitle || ('第' + ep + '集')} | ${count} 条 (seasonTier=${hit.seasonTier} src=${hit.source})`);
                 return okResult(count, title, hit.animeTitle, 1);
             }
