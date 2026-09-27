@@ -730,6 +730,50 @@ function writeBiliDanmakuStyle(): void {
     }
 }
 
+/** [lc-1252] 仅写屏蔽相关（blockTypes json + 屏蔽词文件 + conf 的 blacklist_path 键）。
+ *  样式键（fontsize/opacity/outline/shadow/bold/displayarea/scrolltime）自 lc-1252 起由
+ *  MPV 弹幕样式菜单直接持久化到 conf——屏蔽词保存若整写样式键，会把用户在播放器里
+ *  调好的值冲回 fnConfig 冻结值（lc-215 起设置面板已无样式行，fnConfig 样式字段无人更新）。 */
+function writeBiliDanmakuBlockOnly(): void {
+    try {
+        const blacklist = fnConfig.getBiliDanmakuBlacklist() || '';
+        const blockTypes = fnConfig.getBiliDanmakuBlockTypes();
+        const dirs = [getPortableConfigDir(), getMpvConfigDir()];
+        for (const dir of dirs) {
+            try {
+                const scriptOptsDir = path.join(dir, 'script-opts');
+                if (!fs.existsSync(scriptOptsDir)) fs.mkdirSync(scriptOptsDir, { recursive: true });
+                const target = path.join(scriptOptsDir, 'uosc_danmaku.conf');
+                // 屏蔽词：按行写入（支持 lua 正则）；空则清空文件引用
+                const blacklistFile = path.join(dir, 'danmaku_blacklist.txt');
+                const words = blacklist.split(/\r?\n/).map(w => w.trim()).filter(Boolean);
+                fs.writeFileSync(blacklistFile, words.join('\n') + (words.length ? '\n' : ''), 'utf-8');
+                // conf：仅确保 blacklist_path 键存在，不触碰任何样式键
+                let lines: string[] = [];
+                if (fs.existsSync(target)) {
+                    lines = fs.readFileSync(target, 'utf-8').split(/\r?\n/);
+                }
+                const hasBlacklistPath = lines.some(l => /^\s*blacklist_path\s*=/.test(l));
+                if (!hasBlacklistPath) {
+                    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+                    lines.push('# B站弹幕屏蔽词');
+                    lines.push('blacklist_path=~~/danmaku_blacklist.txt');
+                    fs.writeFileSync(target, lines.join('\n') + '\n', 'utf-8');
+                }
+                // 弹幕屏蔽类型：写入 scripts/uosc_danmaku/danmaku_block_types.json（bili_danmaku.js 启动时读取并过滤）
+                const uoscDir = path.join(dir, 'scripts', 'uosc_danmaku');
+                if (!fs.existsSync(uoscDir)) fs.mkdirSync(uoscDir, { recursive: true });
+                fs.writeFileSync(path.join(uoscDir, 'danmaku_block_types.json'), JSON.stringify(blockTypes), 'utf-8');
+            } catch (e) {
+                logger.error(`写入弹幕屏蔽配置失败: ${dir}`, e);
+            }
+        }
+        logger.info('B站弹幕屏蔽配置已更新（样式键未触碰）');
+    } catch (error) {
+        logger.error('写入 B站弹幕屏蔽配置失败:', error);
+    }
+}
+
 // 插件初始化函数
 function init(): void {
     logger.info('Initializing MPV Config Plugin...');
@@ -782,6 +826,7 @@ export {
     writeThumbfastConf,
     writeBiliAggregateThreshold,
     writeBiliDanmakuStyle,
+    writeBiliDanmakuBlockOnly,
     writeDandanplayCredentials,
     writeDanmuApiConf
 };

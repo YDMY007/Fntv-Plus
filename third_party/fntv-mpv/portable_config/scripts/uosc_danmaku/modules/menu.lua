@@ -927,7 +927,64 @@ local menu_items_config = {
 -- 创建一个包含键顺序的表，这是样式菜单的排布顺序
 local ordered_keys = {"bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea"}
 
--- 设置弹幕样式菜单（仅本次播放生效；持久化样式请到 Electron 设置面板调整屏蔽类型）
+-- [lc-1252] 样式改动持久化：把当前样式键合并回 script-opts/uosc_danmaku.conf。
+-- 只替换自身管理的样式键所在行，其余行（含密文凭证/开关等）逐字节保留；键不存在时追加到尾部。
+-- mpv 每次启动重新读 conf，菜单改动因此跨会话生效。bold 写 yes/no 与主进程写法一致。
+local STYLE_PERSIST_KEYS = { "bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea" }
+
+function persist_style_opts()
+    local conf_path = mp.command_native({ "expand-path", "~~/script-opts/uosc_danmaku.conf" })
+    if type(conf_path) ~= "string" or conf_path == "" then
+        mp.msg.warn("样式持久化失败：无法解析 uosc_danmaku.conf 路径")
+        return
+    end
+    local vals = {}
+    for _, key in ipairs(STYLE_PERSIST_KEYS) do
+        local v = options[key]
+        if key == "bold" then
+            vals[key] = v and "yes" or "no"
+        elseif v ~= nil then
+            vals[key] = tostring(v)
+        end
+    end
+    local lines = {}
+    local fin = io.open(conf_path, "r")
+    if fin then
+        for line in fin:lines() do
+            table.insert(lines, line)
+        end
+        fin:close()
+    end
+    local seen = {}
+    for i, line in ipairs(lines) do
+        local key = line:match("^%s*([%w_]+)%s*=")
+        if key then
+            for _, sk in ipairs(STYLE_PERSIST_KEYS) do
+                if key == sk and vals[sk] ~= nil then
+                    seen[sk] = true
+                    lines[i] = sk .. "=" .. vals[sk]
+                    break
+                end
+            end
+        end
+    end
+    for _, sk in ipairs(STYLE_PERSIST_KEYS) do
+        if not seen[sk] and vals[sk] ~= nil then
+            table.insert(lines, sk .. "=" .. vals[sk])
+        end
+    end
+    local fout = io.open(conf_path, "w")
+    if fout then
+        fout:write(table.concat(lines, "\n"))
+        if #lines > 0 then fout:write("\n") end
+        fout:close()
+        mp.msg.info("弹幕样式已持久化: " .. conf_path)
+    else
+        mp.msg.warn("样式持久化失败：无法写入 " .. conf_path)
+    end
+end
+
+-- 设置弹幕样式菜单（样式改动自动持久化到 script-opts/uosc_danmaku.conf；屏蔽类型由 Electron 设置面板管理）
 function add_danmaku_setup(actived, status)
     if not uosc_available then
         show_message("无uosc UI框架，不支持使用该功能", 2)
@@ -955,7 +1012,7 @@ function add_danmaku_setup(actived, status)
         type = "menu_style",
         title = "弹幕样式",
         search_style = "disabled",
-        footnote = "样式更改仅在本次播放生效",
+        footnote = "样式更改将自动保存，下次播放自动生效",
         item_actions_place = "outside",
         items = items,
         callback = { mp.get_script_name(), 'setup-danmaku-style'},
@@ -1291,7 +1348,8 @@ mp.register_script_message("open_content_danmaku_menu", function()
 end)
 
 -- [lc-217] 恢复播放器内弹幕样式菜单回调。lc-200/lc-215 将样式控件从设置面板也移除了,
--- 导致「弹幕样式」按钮变成空壳。现恢复内置菜单(仅本次播放生效), 屏蔽类型仍由 Electron 设置面板管理。
+-- 导致「弹幕样式」按钮变成空壳。现恢复内置菜单(样式改动经 persist_style_opts 自动持久化),
+-- 屏蔽类型仍由 Electron 设置面板管理。
 mp.register_script_message("setup-danmaku-style", function(query, text)
     local event = utils.parse_json(query)
     if event ~= nil then
@@ -1301,6 +1359,7 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
                 if ordered_keys[event.index] == "bold" then
                     options.bold = not options.bold
                     menu_items_config.bold.hint = options.bold and "true" or "false"
+                    persist_style_opts()
                 end
                 -- "updata" 模式会保留输入框文字
                 add_danmaku_setup(ordered_keys[event.index], "updata")
@@ -1308,6 +1367,7 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
             else
                 options[event.action] = menu_items_config[event.action]["original"]
                 menu_items_config[event.action]["hint"] = options[event.action]
+                persist_style_opts()
                 add_danmaku_setup(event.action, "updata")
                 if event.action == "fontsize" or event.action == "scrolltime" then
                     load_danmaku(true)
@@ -1330,6 +1390,7 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
                 end
                 options[query] = tostring(num)
                 menu_items_config[query]["hint"] = options[query]
+                persist_style_opts()
                 add_danmaku_setup(query, "refresh")
                 if query == "fontsize" or query == "scrolltime" then
                     load_danmaku(true, true)

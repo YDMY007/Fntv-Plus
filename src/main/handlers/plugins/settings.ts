@@ -10,7 +10,7 @@ import { fnosDialog } from '../../common/fnosDialog';
 import { getInstance as getUpdateChecker } from '../../../modules/updater/updateChecker';
 import { clearAllPatches } from '../../../modules/patcher/patchApplier';
 import { setMpvPlayerPath, setPotPlayerPath } from './media';
-import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials, writeDanmuApiConf, applyRenderPreset, ensureStatsKeyBinding } from './mpvConfig';
+import { writeMpvUserConfig, writeBiliSearchEnabled, writeBiliAggregateThreshold, writeBiliDanmakuStyle, writeBiliDanmakuBlockOnly, writeInterpConfig, getPortableConfigDir, writeDandanplayCredentials, writeDanmuApiConf, applyRenderPreset, ensureStatsKeyBinding } from './mpvConfig';
 import * as danmuApi from '../../common/danmuApi';
 import * as log from '../../../modules/logger';
 
@@ -546,6 +546,11 @@ async function handleSetMpvShaderConfig(_event: any, payload: { shader?: string;
 // 设置 B站弹幕样式与过滤（写入 script-opts/uosc_danmaku.conf + 屏蔽词文件）
 async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<void> {
     const p = payload || {};
+    // [lc-1252] 载荷含样式字段才整写样式键；弹幕设置卡自 lc-215 起只发 blockTypes/blacklist，
+    // 走整写会把播放器菜单里持久化的样式值冲回 fnConfig 冻结值（样式行已从面板移除，fnConfig 样式字段无人更新）。
+    const hasStyleField = typeof p.opacity === 'number' || typeof p.fontSize === 'number' || typeof p.outline === 'number'
+        || typeof p.shadow === 'number' || typeof p.bold === 'boolean' || typeof p.displayArea === 'number'
+        || typeof p.maxScreen === 'number';
     if (typeof p.opacity === 'number') fnConfig.setBiliDanmakuOpacity(p.opacity);
     if (typeof p.fontSize === 'number') fnConfig.setBiliDanmakuFontSize(p.fontSize);
     if (typeof p.outline === 'number') fnConfig.setBiliDanmakuOutline(p.outline);
@@ -555,8 +560,12 @@ async function handleSetBiliDanmakuStyle(_event: any, payload: any): Promise<voi
     if (typeof p.maxScreen === 'number') fnConfig.setBiliDanmakuMaxScreen(p.maxScreen);
     if (typeof p.blacklist === 'string') fnConfig.setBiliDanmakuBlacklist(p.blacklist);
     if (Array.isArray(p.blockTypes)) fnConfig.setBiliDanmakuBlockTypes(p.blockTypes);
-    writeBiliDanmakuStyle();
-    log.info('B站弹幕样式与过滤已更新');
+    if (hasStyleField) {
+        writeBiliDanmakuStyle();
+        log.info('B站弹幕样式与过滤已更新');
+    } else {
+        writeBiliDanmakuBlockOnly();
+    }
 }
 
 // [lc-486] 设置 MPV 插帧（AI 补帧）：写 config + 同步到 script-opts/fntv_interp.conf（供 fntv_interp.lua 读取）
