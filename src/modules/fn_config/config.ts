@@ -127,6 +127,12 @@ export interface Config {
     malClientId?: string;         // MAL Client ID（跳片头映射链首选，可选）
     // 智能跳过片头片尾总开关（默认关闭：仅显示「跳过」按钮，不自动跳；开启后自动跳过）
     smartSkipEnabled?: boolean;
+    // [skip-manual] 片头片尾手动标记（标记面板 + 写回服务端 + 兜底按钮）
+    skipManualEnabled?: boolean;                       // 总开关（默认开）
+    skipManualWriteBack?: boolean;                     // 手动标记写回飞牛服务端（默认开，用户已确认）
+    skipManualDefaultScope?: 'episode' | 'season';     // 面板默认作用范围（默认仅本集）
+    skipManualLeadSeconds?: number;                    // 触发提前量秒数（0~60，默认 5）
+    skipManualIntroSoftLimit?: number;                 // 片头合理上限软提示秒数（默认 300）
     traktScrobbleEnabled?: boolean;
     mpvRenderPreset?: string;
     // B站弹幕聚合阈值（默认 1500）：单个视频弹幕数 >= 此值时直接用单源(弹幕最多者)，否则合并多个单集有效候选
@@ -1009,6 +1015,42 @@ export function setSmartSkipEnabled(enabled: boolean): void {
     const config: Config = readConfig() || {};
     config.smartSkipEnabled = !!enabled;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// ─── [skip-manual] 片头片尾手动标记配置 ───
+
+export interface SkipManualConfig {
+    enabled: boolean;              // 总开关（默认开）
+    writeBack: boolean;            // 手动标记写回飞牛服务端（默认开，用户已确认写回）
+    defaultScope: 'episode' | 'season';
+    leadSeconds: number;           // 触发提前量（0~60s，默认 5）
+    introSoftLimit: number;        // 片头合理上限软提示秒数（默认 300）
+}
+
+// 读取手动标记配置（字段缺省/非法时给默认值）
+export function getSkipManualConfig(): SkipManualConfig {
+    const config: Config = readConfig() || {};
+    return {
+        enabled: config.skipManualEnabled !== false,
+        writeBack: config.skipManualWriteBack !== false,
+        defaultScope: config.skipManualDefaultScope === 'season' ? 'season' : 'episode',
+        leadSeconds: typeof config.skipManualLeadSeconds === 'number' && config.skipManualLeadSeconds >= 0
+            ? Math.min(60, Math.round(config.skipManualLeadSeconds)) : 5,
+        introSoftLimit: typeof config.skipManualIntroSoftLimit === 'number' && config.skipManualIntroSoftLimit > 0
+            ? Math.round(config.skipManualIntroSoftLimit) : 300,
+    };
+}
+
+// 写入手动标记配置（patch 增量更新；越界值收敛到合法区间）
+export function setSkipManualConfig(patch: Partial<SkipManualConfig>): SkipManualConfig {
+    const config: Config = readConfig() || {};
+    if (patch.enabled !== undefined) config.skipManualEnabled = !!patch.enabled;
+    if (patch.writeBack !== undefined) config.skipManualWriteBack = !!patch.writeBack;
+    if (patch.defaultScope !== undefined) config.skipManualDefaultScope = patch.defaultScope === 'season' ? 'season' : 'episode';
+    if (patch.leadSeconds !== undefined) config.skipManualLeadSeconds = Math.max(0, Math.min(60, Math.round(patch.leadSeconds)));
+    if (patch.introSoftLimit !== undefined) config.skipManualIntroSoftLimit = Math.max(60, Math.round(patch.introSoftLimit));
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+    return getSkipManualConfig();
 }
 // 获取「Trakt 实时 scrobble」开关（[lc-1064] 未设置时默认开启）
 export function getTraktScrobbleEnabled(): boolean {

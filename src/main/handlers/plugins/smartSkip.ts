@@ -7,6 +7,7 @@ import log from '../../../modules/logger';
 import { getSessionCookieHeader } from '../../../modules/fn_api/request';
 import * as fn from '../../../modules/fn_api/api';
 import { resolveMalId } from '../../common/skipMalMap';
+import { resolveManualSkip } from './skipManual';
 
 /**
  * 智能跳过片头片尾插件（smart_skip）— [lc-1058] 多源聚合重写
@@ -40,13 +41,14 @@ interface FetchAndFillParams {
     trimId?: string;       // TMDB id（用于 AniSkip 映射与 theintrodb）
     season?: number;
     episode?: number;
+    force?: boolean;       // [skip-manual] 「恢复自动」后强制重跑（绕过 filledGuids 去重）
 }
 
 interface FetchAndFillResult {
     filled: boolean;
     skipStart: number;
     skipEnd: number;
-    source: 'fnos' | 'aniskip' | 'theintrodb' | 'none';
+    source: 'fnos' | 'aniskip' | 'theintrodb' | 'manual' | 'none';
     message?: string;
     /** [lc-1060] AniSkip recap（前情回顾）绝对区间（秒）；0 = 无。不写回飞牛，供网页播放器「跳过前情」按钮 */
     recapStart: number;
@@ -119,8 +121,20 @@ async function handleFetchAndFill(
         return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '缺少 guid', recapStart: 0, recapEnd: 0 };
     }
 
-    // 去重：同一 guid 进程内只填一次
-    if (filledGuids.has(guid)) {
+    // [skip-manual] Step 0: 手动标记优先于一切自动源（人工真值最高，用户已确认写回语义）。
+    // 命中即短路：不查 PlayInfo/AniSkip/theintrodb、不写回（保存时已写）；recap 无手动语义，返回 0。
+    try {
+        const manual = await resolveManualSkip(guid);
+        if (manual) {
+            log.info(`[skip:fetch-and-fill] 手动标记命中 guid=${guid} start=${manual.skipStart} end=${manual.skipEnd}`);
+            return { filled: true, skipStart: manual.skipStart, skipEnd: manual.skipEnd, source: 'manual', recapStart: 0, recapEnd: 0 };
+        }
+    } catch (e) {
+        log.warn('[skip:fetch-and-fill] 手动标记查询失败（按无标记继续）:', (e as Error).message);
+    }
+
+    // 去重：同一 guid 进程内只填一次（force 绕过——「恢复自动」清标后强制重跑链路）
+    if (filledGuids.has(guid) && !params.force) {
         return { filled: false, skipStart: 0, skipEnd: 0, source: 'none', message: '已填充过', recapStart: 0, recapEnd: 0 };
     }
 
@@ -163,7 +177,7 @@ async function handleFetchAndFill(
         let skipEnd = 0;
         let recapStart = 0; // [lc-1060] 前情回顾绝对区间（秒），不写回飞牛
         let recapEnd = 0;
-        let source: 'fnos' | 'aniskip' | 'theintrodb' | 'none' = 'none';
+        let source: 'fnos' | 'aniskip' | 'theintrodb' | 'manual' | 'none' = 'none';
 
         try {
             let cookie = '';

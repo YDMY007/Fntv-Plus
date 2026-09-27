@@ -4200,6 +4200,66 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // 读取初始值（默认关闭）
     ipcRenderer.invoke('settings:get-smart-skip-enabled').then((v: boolean) => { swSkip.checked = !!v; }).catch(() => { swSkip.checked = false; });
 
+    // ===== [skip-manual] 片头片尾手动标记配置（写回 / 默认范围 / 提前量）=====
+    const mkManualRow = (label: string): HTMLDivElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;'
+        + 'cursor:pointer;border-radius:6px;transition:background .12s;';
+      row.onmouseenter = () => { row.style.background = 'var(--fnos-ui-row-hover)'; };
+      row.onmouseleave = () => { row.style.background = 'transparent'; };
+      const labelEl = document.createElement('span');
+      labelEl.textContent = t(label);
+      labelEl.style.cssText = 'color:var(--fnos-ui-text);font-weight:500;';
+      row.appendChild(labelEl);
+      skipBody.appendChild(row);
+      return row;
+    };
+    // 手动标记写回服务端开关（默认开，用户已确认写回语义）
+    const wbRow = mkManualRow('手动标记写回飞牛服务端（关闭后仅本机生效）');
+    const wbSw = document.createElement('input');
+    wbSw.type = 'checkbox';
+    wbSw.style.cssText = 'width:38px;height:21px;cursor:pointer;accent-color:var(--fnos-ui-accent);';
+    wbRow.appendChild(wbSw);
+    // 标记默认作用范围
+    const scopeRow = mkManualRow('标记默认作用范围');
+    const scopeSel = document.createElement('select');
+    scopeSel.style.cssText = 'background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);'
+      + 'border-radius:6px;padding:3px 6px;font-size:12px;cursor:pointer;';
+    const optEp = document.createElement('option');
+    optEp.value = 'episode';
+    optEp.textContent = t('仅本集');
+    const optSeason = document.createElement('option');
+    optSeason.value = 'season';
+    optSeason.textContent = t('应用到整季');
+    scopeSel.appendChild(optEp);
+    scopeSel.appendChild(optSeason);
+    scopeRow.appendChild(scopeSel);
+    // 兜底按钮触发提前量
+    const leadRow = mkManualRow('跳过按钮提前量（秒）');
+    const leadInput = document.createElement('input');
+    leadInput.type = 'number';
+    leadInput.min = '0';
+    leadInput.max = '60';
+    leadInput.style.cssText = 'width:64px;background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);'
+      + 'border-radius:6px;padding:3px 6px;font-size:12px;';
+    leadRow.appendChild(leadInput);
+    // 读写配置（改动即保存）
+    const pushSkipManualCfg = (): void => {
+      ipcRenderer.invoke('skip-manual:set-config', { patch: {
+        writeBack: wbSw.checked,
+        defaultScope: scopeSel.value === 'season' ? 'season' : 'episode',
+        leadSeconds: Math.max(0, Math.min(60, Math.round(Number(leadInput.value) || 0))),
+      } }).catch((err) => log('skip-manual:set-config failed', err));
+    };
+    wbSw.addEventListener('change', pushSkipManualCfg);
+    scopeSel.addEventListener('change', pushSkipManualCfg);
+    leadInput.addEventListener('change', pushSkipManualCfg);
+    ipcRenderer.invoke('skip-manual:get-config').then((c: { writeBack?: boolean; defaultScope?: string; leadSeconds?: number }) => {
+      wbSw.checked = !c || c.writeBack !== false;
+      scopeSel.value = c && c.defaultScope === 'season' ? 'season' : 'episode';
+      leadInput.value = String(c && typeof c.leadSeconds === 'number' ? c.leadSeconds : 5);
+    }).catch(() => { /* 读取失败用默认值 */ });
+
     // ===== 分组: 手柄设置（独立标签页；自定义手柄按键映射）=====
     const secGamepad = section('手柄设置');
     const secBodyGamepad = secGamepad.body;
