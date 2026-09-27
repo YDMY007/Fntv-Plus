@@ -5,6 +5,42 @@ input_loaded, input = pcall(require, "mp.input")
 uosc_available = false
 
 -- 打开番剧数据匹配菜单
+-- [lc-1263] 自建源优先：同一个搜索词并行查自建源（danmu_api），命中则结果置顶展示、
+--   选中直接拉自建源弹幕；自建源未命中/未启用时，下方照旧列弹弹play 番剧库结果。
+--   用户诉求：「搜索时先搜自建源，自建源没有才匹配弹弹play」（自建源弹幕密度远高于弹弹play）。
+local function fetch_self_hosted_candidates(query, ep)
+    -- 经本地 shim 的 /danmaku-candidates（主进程里自建源优选 + B站 兜底，返回统一候选结构）
+    local params = "title=" .. url_encode(query) .. "&ep=" .. tostring(ep or 0)
+    local api = "http://127.0.0.1:22347/danmaku-candidates?" .. params
+    local platform = mp.get_property("platform") or ""
+    local res
+    if platform == "windows" then
+        res = mp.command_native({
+            name = "subprocess",
+            -- PowerShell 必须钉 UTF8（中文机默认 GBK 会把 UTF-8 JSON 整个重编码）
+            args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 30).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+            capture_stdout = true, capture_stderr = true,
+        })
+    else
+        res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "30", api }, capture_stdout = true, capture_stderr = true })
+    end
+    if not res then return {} end
+    local body = (res.stdout or ""):gsub("\\r?\\n$", "")
+    if body == "" or body:sub(1, 4) == "ERR:" then return {} end
+    local ok, parsed = pcall(utils.parse_json, body)
+    if not ok or type(parsed) ~= "table" or not parsed.ok then return {} end
+    local out = {}
+    for _, c in ipairs(parsed.candidates or {}) do
+        -- 只收自建源候选（伪 bvid = dmapi:…）；B站 候选留给下面的弹弹play/B站 链路
+        local cb = tostring(c.bvid or "")
+        if cb:sub(1, 6) == "dmapi:" then
+            out[#out + 1] = c
+        end
+    end
+    return out
+end
+
 function get_animes(query)
     local encoded_query = url_encode(query)
     local url = options.api_server .. "/api/v2/search/anime"
@@ -24,9 +60,38 @@ function get_animes(query)
     end
     msg.verbose("尝试获取番剧数据：" .. full_url)
 
+    -- [lc-1263] 自建源优先：先并行查自建源候选（弹幕密度远高于弹弹play），命中即置顶
+    -- 当前集数：自建源候选是「条目 + 具体集」的形式（bvid = dmapi:<animeId>:<episodeId>），
+    --   搜索时必须带上本集号，否则候选会定位到条目的首集 → 拿到的弹幕不是正在看的那集。
+    local cur_ep = tonumber(tostring(DANMAKU.episode or ""):match("%d+")) or 0
+    local self_cands = fetch_self_hosted_candidates(query, cur_ep)
+    if #self_cands > 0 then
+        table.insert(items, {
+            title = ("⭐ 自建源命中 %d 个（推荐，弹幕更全）:"):format(#self_cands),
+            bold = true, italic = true, keep_open = true, selectable = false,
+        })
+        for _, c in ipairs(self_cands) do
+            table.insert(items, {
+                title = "  " .. tostring(c.title or ""),
+                hint = ("自建源 · 点击直接使用该条目弹幕（第%s集）"):format(cur_ep > 0 and tostring(cur_ep) or "?"),
+                value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", tostring(c.bvid or ""), query, tostring(cur_ep) },
+            })
+        end
+        table.insert(items, {
+            title = "—— 弹弹play 番剧库（下方为备用源）——",
+            italic = true, keep_open = true, selectable = false,
+        })
+        if uosc_available then update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query) end
+        msg.info(("[lc-1263] 自建源候选 %d 个已置顶（搜索词=%s ep=%d）"):format(#self_cands, query, cur_ep))
+    end
+
     local args = make_danmaku_request_args("GET", full_url)
 
     if args == nil then
+        -- [lc-1263] 弹弹play 不可用但有自建源结果时，不要把已置顶的自建源列表清掉
+        if #items > 0 and uosc_available then
+            update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query)
+        end
         return
     end
 
@@ -35,7 +100,13 @@ function get_animes(query)
     if not res or not res.status or res.status ~= 0 then
         local message = "获取数据失败"
         if uosc_available then
-            update_menu_uosc(menu_type, menu_title, message, footnote, menu_cmd, query)
+            if #items > 0 then
+                -- 有自建源结果 → 保留展示，不让弹弹play 的失败把可选项清空
+                table.insert(items, { title = "（弹弹play 番剧库查询失败，可继续选上方自建源）", italic = true, selectable = false, keep_open = true })
+                update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query)
+            else
+                update_menu_uosc(menu_type, menu_title, message, footnote, menu_cmd, query)
+            end
         else
             show_message(message, 3)
         end
@@ -45,6 +116,15 @@ function get_animes(query)
     local response = utils.parse_json(body)
 
     if not response or not response.animes then
+        if #items > 0 then
+            -- 自建源有结果 → 保留列表（弹弹play 无结果不影响自建源可用）
+            if uosc_available then
+                table.insert(items, { title = "（弹弹play 番剧库无结果，可继续选上方自建源）", italic = true, selectable = false, keep_open = true })
+                update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query)
+            end
+            msg.info("弹弹play 无结果（已保留自建源候选）")
+            return
+        end
         local message = "无结果"
         if uosc_available then
             update_menu_uosc(menu_type, menu_title, message, footnote, menu_cmd, query)
