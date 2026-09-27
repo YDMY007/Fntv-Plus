@@ -725,7 +725,7 @@ function rememberSeries(key: string, hit: AnimeHit): void {
     saveMem();
 }
 
-export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = '', seriesKey = ''): Promise<BiliDanmakuResult | null> {
+export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = '', seriesKey = '', altTitle = ''): Promise<BiliDanmakuResult | null> {
     if (!isActive()) return null;
     try {
         // [lc-1220] MPV 链路只传整串 title（「番名 - S2E27: 集标题」，Lua 侧 clean_bili_title
@@ -759,8 +759,19 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             log.info(`[danmuApi] 记忆条目未取到第 ${ep} 集有效弹幕 → 走正常搜索 | ${mem.animeTitle}`);
         }
         const hits = await searchAnimes(title, season, verifyTitle);
+        if (!hits.length && altTitle) {
+            // [lc-1262] 备用搜索词：弹弹play 解析出的标题常是日文原名（「BanG Dream! It`s MyGO!!!!!」），
+            // 而自建源多按中文名收录（「迷途之子!!!!!」）→ 主标题精确匹配必然落空。
+            // fnOS 通过 force-media-title 注入的中文原名就在 altTitle 里，用它再试一轮。
+            log.info(`[danmuApi] 主标题未命中，改用 fnOS 原标题重试 | alt=${altTitle}`);
+            const altHits = await searchAnimes(altTitle, season, '');
+            if (altHits.length) {
+                log.info(`[danmuApi] ✅ fnOS 原标题命中 ${altHits.length} 个条目 | alt=${altTitle}`);
+                hits.push(...altHits);
+            }
+        }
         if (!hits.length) {
-            log.info(`[danmuApi] 未命中（无精确匹配条目）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep} season=${season}`);
+            log.info(`[danmuApi] 未命中（无精确匹配条目）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep} season=${season}${altTitle ? ' alt=' + altTitle : ''}`);
             return null;
         }
         for (const hit of hits.slice(0, MAX_TRIES)) {

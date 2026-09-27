@@ -78,6 +78,12 @@ export interface BiliCandidatesResult {
     ok: boolean;
     candidates?: BiliCandidate[];
     error?: string;
+    /** [lc-1261] 自建源候选的参与情况：供 MPV 候选菜单说明「自建源为何没出现」 */
+    selfHosted?: {
+        active: boolean;    // 自建源是否已启用（未启用时 UI 提示去设置里开）
+        matched: boolean;   // 本次搜索自建源是否命中
+        count: number;      // 自建源候选个数
+    };
 }
 
 let cachedModule: any = null;
@@ -158,6 +164,7 @@ export async function runBiliDanmaku(
     allowBiliFallback = true,
     epTitle = '',
     seriesKey = '',
+    altTitle = '',   // [lc-1262] fnOS 原标题（备用搜索词：弹弹play 给日文名、自建源只有中文名时用）
 ): Promise<BiliDanmakuResult> {
     // [lc-1226] 逐源记录本次尝试结果，随结果回传给两处「弹幕详情」面板，
     // 让用户看到三个来源各自是被跳过、试过没中、还是提供了最终弹幕。
@@ -175,7 +182,7 @@ export async function runBiliDanmaku(
                 : '未启用（到「弹幕设置 → 自建弹幕接口」开启，或从内置 B站 获取）',
         });
     }
-    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle, seriesKey);
+    const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle, seriesKey, altTitle);
     if (pre) {
         traces.push({
             id: 'danmu_api', attempted: true, used: true,
@@ -245,6 +252,9 @@ export function resetBiliModule(): void {
 /**
  * 仅搜索 B站 候选视频列表（标题/bvid/来源/是否合集），不拉取/聚合弹幕。
  * 供 MPV 侧「手动搜索」展示候选列表，由用户选定具体视频。
+ * [lc-1261] 双源合并：自建源与 B站 候选同时展示（自建源优先排前）。旧版是二选一
+ *   （自建源命中则只出它、未命中才出 B站）——用户手动搜索时看不到全貌：命中时不知道
+ *   B站 还有哪些可选，未命中时误以为自建源不支持手动搜索。另附 selfHosted 状态供 UI 说明。
  */
 export async function runBiliDanmakuCandidates(
     title: string,
@@ -252,30 +262,53 @@ export async function runBiliDanmakuCandidates(
     season?: number | string,
     timeoutMs = 60000,
 ): Promise<BiliCandidatesResult> {
-    // [lc-1101] 自建弹幕接口优选：命中则候选列表全部来自自建源（bvid 位为 `dmapi:<episodeId>`），
-    //   未命中(null)降级到下面的 B站 候选搜索。
-    const pre = await danmuApi.candidates(String(title || ''), Number(ep) || 0, Number(season) || 0);
-    if (pre) return { ok: true, candidates: pre };
-    let mod: any;
-    try {
-        mod = loadModule();
-    } catch (e: any) {
-        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
-        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+    const selfP: Promise<BiliCandidate[] | null> = danmuApi
+        .candidates(String(title || ''), Number(ep) || 0, Number(season) || 0)
+        .catch(() => null);
+
+    const biliP = (async (): Promise<BiliCandidatesResult> => {
+        let mod: any;
+        try {
+            mod = loadModule();
+        } catch (e: any) {
+            log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
+            return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+        }
+        try {
+            const runP = Promise.resolve(mod.search_candidates(title, ep, season));
+            let timeoutHandle: NodeJS.Timeout | null = null;
+            const timeoutP = new Promise<BiliCandidatesResult>((resolve) => {
+                timeoutHandle = setTimeout(() => resolve({ ok: false, error: `候选搜索超时(${timeoutMs}ms)` }), timeoutMs);
+            });
+            const r = await Promise.race([runP, timeoutP]);
+            if (timeoutHandle) clearTimeout(timeoutHandle);
+            return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（search_candidates 无返回）' };
+        } catch (e: any) {
+            log.warn('[biliRunner] search_candidates 异常: ' + (e?.message || e));
+            return { ok: false, error: String(e?.message || e) };
+        }
+    })();
+
+    const [selfCands, biliRes] = await Promise.all([selfP, biliP]);
+    const selfList: BiliCandidate[] = Array.isArray(selfCands) ? selfCands : [];
+    const biliList: BiliCandidate[] = (biliRes && biliRes.ok && Array.isArray(biliRes.candidates))
+        ? biliRes.candidates : [];
+
+    const merged: BiliCandidate[] = [];
+    selfList.forEach((c, i) => { c.index = i; merged.push(c); });
+    biliList.forEach((c, i) => { c.index = selfList.length + i; merged.push(c); });
+
+    const selfStatus = {
+        active: danmuApi.isActive(),
+        matched: selfList.length > 0,
+        count: selfList.length,
+    };
+    log.info(`[biliRunner] 候选合并：自建源 ${selfList.length} 个（${selfStatus.active ? '已启用' : '未启用'}） + B站 ${biliList.length} 个`);
+
+    if (!merged.length) {
+        return { ok: false, error: (biliRes && biliRes.error) || '未找到候选', selfHosted: selfStatus };
     }
-    try {
-        const runP = Promise.resolve(mod.search_candidates(title, ep, season));
-        let timeoutHandle: NodeJS.Timeout | null = null;
-        const timeoutP = new Promise<BiliCandidatesResult>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `候选搜索超时(${timeoutMs}ms)` }), timeoutMs);
-        });
-        const r = await Promise.race([runP, timeoutP]);
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（search_candidates 无返回）' };
-    } catch (e: any) {
-        log.warn('[biliRunner] search_candidates 异常: ' + (e?.message || e));
-        return { ok: false, error: String(e?.message || e) };
-    }
+    return { ok: true, candidates: merged, selfHosted: selfStatus };
 }
 
 /**

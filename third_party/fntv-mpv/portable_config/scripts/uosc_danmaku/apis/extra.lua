@@ -619,10 +619,23 @@ function auto_search_extra(title, episode_num, season)
     local play_path = mp.get_property("path") or ""
     local item_guid = play_path:match("/playvideo/([^%?]+)") or ""
     local guid_arg = item_guid ~= "" and ("&guid=" .. url_encode(item_guid)) or ""
+    -- [lc-1262] fnOS 原标题兜底：弹弹play 解析后 DANMAKU.anime 常是日文原名（如
+    --   「BanG Dream! It`s MyGO!!!!!」），而 fnOS 库里与自建源收录的可能是中文名
+    --   （「迷途之子!!!!!」）→ 自建源按日文名精确匹配必然落空（实测返回空数组）。
+    --   fnOS 通过 force-media-title 注入的中文标题就在 media-title 里，带上它作备用搜索词。
+    local fnos_title = mp.get_property("media-title") or ""
+    -- 剥掉「番名 - S1E2: 副标题」的季集后缀，只留番名（与 clean_bili_title 同口径）
+    fnos_title = fnos_title:gsub("%s*%-%s*S%d+E%d+.*$", "")
+    fnos_title = fnos_title:gsub("%s*%-%s*[:：]?%s*$", "")
+    fnos_title = fnos_title:gsub("^%s+", ""):gsub("%s+$", "")
+    local alt_arg = ""
+    if fnos_title ~= "" and fnos_title ~= title then
+        alt_arg = "&alt=" .. url_encode(fnos_title)
+    end
     local api = string.format(
-        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s%s%s",
-        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500), season_arg, guid_arg)
-    msg.info(("[自动补源-DEBUG] 请求 %s (season=%s guid=%s)"):format(api, tostring(season or 0), item_guid ~= "" and "有" or "无"))
+        "http://127.0.0.1:22347/danmaku?title=%s&ep=%d&out=%s&threshold=%s%s%s%s",
+        url_encode(title), episode_num, url_encode(out_xml), tostring(options.aggregate_threshold or 1500), season_arg, guid_arg, alt_arg)
+    msg.info(("[自动补源-DEBUG] 请求 %s (season=%s guid=%s alt=%s)"):format(api, tostring(season or 0), item_guid ~= "" and "有" or "无", alt_arg ~= "" and fnos_title or "无"))
 
     local body = http_get(api)
     local ok = false

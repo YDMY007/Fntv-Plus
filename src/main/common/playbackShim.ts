@@ -635,6 +635,9 @@ class PlaybackShim {
         const season = q.season ? parseInt(q.season.toString(), 10) : 0;
         // [lc-1254] 集 guid（可选）：传了则解析季 guid，作为自建源「系列级匹配记忆」的键
         const episodeGuid = (q.guid || '').toString();
+        // [lc-1262] fnOS 原标题（可选）：弹弹play 解析出的 DANMAKU.anime 常是日文原名，
+        // 而自建源可能只收录中文名 → 自建源搜索时把它作为备用搜索词（见 danmuApi 的 alt 逻辑）
+        const altTitle = (q.alt || '').toString();
 
         if (!title || !out) {
             this.json(res, 400, { ok: false, error: '缺少 title 或 out 参数' });
@@ -645,9 +648,9 @@ class PlaybackShim {
             this.json(res, 403, { ok: false, error: 'out 路径不在允许的弹幕缓存目录内' });
             return;
         }
-        log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} season=${season || 0} out=${out} threshold=${threshold ?? '(默认)'}`);
+        log.info(`[playbackShim][danmaku] ▶ 请求弹幕 | title=${JSON.stringify(title)} ep=${ep} season=${season || 0} out=${out} threshold=${threshold ?? '(默认)'} alt=${altTitle ? JSON.stringify(altTitle) : '(无)'}`);
         this.resolveSeriesKey(episodeGuid).then((seriesKey) =>
-            runBiliDanmaku(title, ep, out, threshold, season, 60000, true, '', seriesKey)).then((r) => {
+            runBiliDanmaku(title, ep, out, threshold, season, 60000, true, '', seriesKey, altTitle)).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku] ✅ 弹幕就绪 | count=${r.danmaku_count} source=${r.source} cid=${r.cid}`);
                 // [lc-607] 透传 bvid/matched_title: MPV 配置面板「匹配来源」需显示 BV(视频区)/标题,
