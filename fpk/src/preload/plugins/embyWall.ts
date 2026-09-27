@@ -2551,7 +2551,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutDesc = document.createElement('div');
     aboutDesc.style.cssText = 'font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;';
-    aboutDesc.textContent = t('NAS 装一次，电视、平板、手机、电脑浏览器打开飞牛影视即是增强版：沉浸式美化（海报墙、四型轮播、详情页柔光玻璃、Logo 自定义）、弹幕（B站 / 自建源 / 弹弹play 兜底）、豆瓣 / Bangumi / Trakt 同步、跳过片头与跨设备播放记忆、TMDB 信息卡与每日放送、观影记录与年度报告、自定义刮削源回填。经飞牛统一网关注入，不改动系统与影视应用任何文件，卸载即还原，个人练手作品。');
+    aboutDesc.textContent = t('NAS 装一次，电视、平板、手机、电脑浏览器打开飞牛影视即是增强版：沉浸式美化（海报墙、四型轮播、详情页柔光玻璃、Logo 自定义）、弹幕（B站 / 自建源 / 弹弹play 兜底）、豆瓣 / Bangumi / Trakt 同步、跳过片头与跨设备播放记忆、TMDB 信息卡与每日放送、观影记录与年度报告、自定义刮削源回填。经飞牛统一网关注入，不改动系统与影视应用任何文件，卸载即还原。');
     secBodyAbout.appendChild(aboutDesc);
 
     const aboutVer = document.createElement('div');
