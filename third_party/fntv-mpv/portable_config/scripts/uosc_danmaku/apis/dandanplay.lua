@@ -288,20 +288,55 @@ local function dd_prune_cache()
     msg.info(("弹弹play 缓存清理：%d → %d 个"):format(#files, DD_CACHE_MAX))
 end
 
+-- [lc-1260] 缓存条数：弹弹play 缓存是 JSON 数组，每条形如 {"c":"...","m":"..."}。
+-- 数顶层对象个数（"\"c\":" 每条恰好一次，且只出现在条目内）即弹幕条数，比完整解析便宜得多。
+local function dd_cache_count(path)
+    local f = io.open(normalize(path), "rb")
+    if not f then return -1 end
+    local data = f:read("*a")
+    f:close()
+    if not data or data == "" then return -1 end
+    local n = 0
+    for _ in data:gmatch('"c":') do n = n + 1 end
+    return n
+end
+
+-- [lc-1260] 缓存复用的条数闸门：缓存弹幕少于该值时视为「上次没取到足够弹幕」（多为源侧瞬时
+-- 失败或被限流后落下的残缺结果），每次重新拉取；达到该值才复用旧弹幕、跳过 /comment。
+-- 语义与 aggregate_threshold 同量级（用户熟悉的「弹幕够不够多」口径）。
+function dd_min_cache_count()
+    local v = tonumber(options.dd_cache_min_count)
+    if v == nil then return 1500 end
+    return v
+end
+
 -- 把已落盘的工作文件复制一份成稳定命名的缓存（供下次重播复用）。
+-- [lc-1260] 写入端不设闸门：缓存始终落盘（哪怕本次条数偏少）——是否复用由读取端
+-- dd_try_use_cache 按条数闸门决定（少于 dd_cache_min_count 则重拉，够多则直接复用）。
+-- 这样「重拉了但这次仍不多」时下次仍能复用已有缓存，不会因不写盘而每次都白跑请求。
 local function dd_write_cache(episodeId, url)
     local src = DANMAKU.sources[url] and DANMAKU.sources[url].fname
     if not src or not file_exists(src) then return end
     if dd_copy_file(src, dd_cache_path(episodeId)) then
-        msg.info("弹弹play 弹幕已缓存（重播同集不再请求 /comment）: " .. dd_cache_path(episodeId))
+        msg.info(("弹弹play 弹幕已缓存 %d 条（重播同集不再请求 /comment）: %s")
+            :format(dd_cache_count(src), dd_cache_path(episodeId)))
         dd_prune_cache()
     end
 end
 
 -- 命中本地缓存 → 复制成工作文件并注册为弹幕源；返回 true 表示调用方无需再发 /comment。
-local function dd_try_use_cache(episodeId, url, from_menu)
+-- [lc-1260] 复用前先过条数闸门：不足 dd_cache_min_count 条则不用旧缓存，改为重新拉取。
+-- force=true 时跳过闸门（同会话去重路径专用：本集本次已拉过，宁可复用少弹幕也不再耗 API 配额）。
+local function dd_try_use_cache(episodeId, url, from_menu, force)
     local cache = dd_cache_path(episodeId)
     if not file_exists(cache) then return false end
+    local n = dd_cache_count(cache)
+    local minCount = dd_min_cache_count()
+    if not force and minCount > 0 and (n < 0 or n < minCount) then
+        msg.info(("弹弹play 缓存仅 %d 条（阈值 %d）→ 不复用，重新拉取: %s")
+            :format(n, minCount, cache))
+        return false
+    end
     local danmaku_file = utils.join_path(DANMAKU_PATH, "danmaku-" .. PID .. DANMAKU.count .. ".json")
     DANMAKU.count = DANMAKU.count + 1
     if not dd_copy_file(cache, danmaku_file) then
@@ -316,8 +351,9 @@ local function dd_try_use_cache(episodeId, url, from_menu)
     else
         DANMAKU.sources[url] = {from = "api_server", fname = danmaku_file}
     end
-    msg.info("弹弹play 命中本地缓存，跳过 /comment 请求: " .. cache)
-    show_message("弹弹play 弹幕来自本地缓存", 3)
+    msg.info(("弹弹play 命中本地缓存（%d 条 ≥ %d），跳过 /comment 请求: %s")
+        :format(n, minCount, cache))
+    show_message(("弹弹play 弹幕来自本地缓存（%d 条）"):format(n), 3)
     load_danmaku(from_menu)
     return true
 end
@@ -939,15 +975,40 @@ end
 -- 通过danmaku api（url）+id获取弹幕
 -- [lc-1228] 拿到数据后落一份 episodeId 命名的缓存（含 get_danmaku_fallback 重试路径），
 -- 下次重播同集直接读盘（见 dd_try_use_cache），不再请求官方 /comment。
-function fetch_danmaku(episodeId, from_menu)
-    local url = dd_comment_url(episodeId)
-    show_message("弹幕加载中...", 30)
-    msg.verbose("尝试获取弹幕：" .. url)
-    local args = make_danmaku_request_args("GET", url)
+-- [lc-1260] 同集会话内去重（仅针对弹弹play：其开放 API 有次数配额，同一集不该拉第二次）。
+--   跨会话：缓存 < dd_cache_min_count 条 → 重拉；≥ 阈值 → 复用旧盘（省配额）
+--   同会话：本集已拉过一次 → 沿用现有弹幕/缓存，绝不再打接口
+-- ⚠️ 去重命中时不能简单 return：set_episode_id 开头已把上一份 api_server 工作文件删掉，
+--   直接返回会让本集弹幕消失。故命中时若仍有可用缓存/工作文件则重新挂载。
+--   仅当「工作文件与缓存都不可用」时才放行重拉——否则本集将无弹幕可用。
+local dd_fetched_episodes = {}
 
+function fetch_danmaku(episodeId, from_menu)
+    local key = tostring(episodeId)
+    local url = dd_comment_url(episodeId)
+    if dd_fetched_episodes[key] then
+        local cur = DANMAKU.sources[url]
+        local has_work = cur and cur.fname and file_exists(cur.fname)
+        if has_work then
+            msg.info(("弹弹play：本集（ep=%s）本次会话已拉取过，沿用现有弹幕不再请求") :format(key))
+            show_message("弹弹play 弹幕已加载（本次会话已拉取过）", 3)
+            load_danmaku(from_menu)
+            return
+        end
+        -- 跳过条数闸门（force）：本集已拉过，宁可复用偏少缓存也不再耗配额
+        if dd_try_use_cache(episodeId, url, from_menu, true) then return end
+        -- 工作文件与缓存都不可用 → 只能重拉，否则本集弹幕为空（此路径无法省配额）
+        msg.warn(("弹弹play：本集（ep=%s）本次会话已拉过但工作文件与缓存均不可用 → 重新拉取")
+            :format(key))
+    end
+    local args = make_danmaku_request_args("GET", url)
     if args == nil then
+        -- 请求都构造不出来（未配置/无凭证）→ 不标记已拉取，下次仍可重试
         return
     end
+    dd_fetched_episodes[key] = true
+    show_message("弹幕加载中...", 30)
+    msg.verbose("尝试获取弹幕：" .. url)
 
     fetch_danmaku_data(args, function(data)
         handle_fetched_danmaku(data, url, from_menu)
