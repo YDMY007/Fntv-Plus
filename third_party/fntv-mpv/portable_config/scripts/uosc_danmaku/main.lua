@@ -1119,11 +1119,16 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str, cid
         if not str then return "" end
         return (str:gsub("([^%w%-%.%_%~])", function(c) return string.format("%%%02X", string.byte(c)) end))
     end
+    -- [lc-1259] 播放地址里的 item guid（/playvideo/<guid>，与 smart_skip/extra.lua 同口径）：
+    -- 手动选定自建源条目时透传给 shim，用于播种系列记忆（后续集免搜索直接命中）。
+    local play_path = mp.get_property("path") or ""
+    local item_guid = play_path:match("/playvideo/([^%?]+)") or ""
     local api = string.format(
         -- [lc-1172] ep 透传给 shim：合集/多P 候选按集数取对应分P 的 cid（否则永远只拿首P 弹幕）
         -- [lc-1195] cid 透传：用户在分P 明细菜单手动选定的分P，直接用该 cid 拉弹幕
-        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s&ep=%s&cid=%s",
-        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500), tostring(ep), tostring(manual_cid))
+        -- [lc-1259] guid 透传：手动选定自建源条目时，主进程据此播种系列记忆（后续集免搜索直接命中）
+        "http://127.0.0.1:22347/danmaku-by-bvid?title=%s&bvid=%s&out=%s&threshold=%s&ep=%s&cid=%s&guid=%s",
+        url_encode(title), url_encode(bvid), url_encode(out_xml), tostring(options.aggregate_threshold or 1500), tostring(ep), tostring(manual_cid), url_encode(item_guid))
     local platform = mp.get_property("platform") or ""
     local res
     if platform == "windows" then

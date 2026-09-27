@@ -810,7 +810,9 @@ export async function candidates(title: string, ep: number, season = 0): Promise
             out.push({
                 index: out.length,
                 cid: null,
-                bvid: ID_PREFIX + e.episodeId,
+                // [lc-1259] bvid 编码 animeId:episodeId（旧格式仅 episodeId）——用户选定后主进程
+                //   直接拿到 animeId 播种系列记忆，无需反查（danmu_api 无按 episodeId 反查条目的端点）
+                bvid: ID_PREFIX + hit.animeId + ':' + e.episodeId,
                 title: e.episodeTitle ? `${hit.animeTitle} · ${e.episodeTitle}` : hit.animeTitle,
                 source: '自建源',
                 season: season || 0,
@@ -830,13 +832,49 @@ export async function candidates(title: string, ep: number, season = 0): Promise
     }
 }
 
-/** 用户在候选列表里选了自建源条目（伪 bvid = `dmapi:<episodeId>`）后按 id 拉弹幕。 */
-export async function fetchById(prefixedId: string, title: string, out: string): Promise<BiliDanmakuResult> {
-    const id = parseInt(String(prefixedId || '').replace(/^dmapi:/, ''), 10);
+/** [lc-1259] 由 animeId 拉条目详情构造 AnimeHit（手动选定播种记忆用）。 */
+async function hitFromAnimeId(animeId: number): Promise<AnimeHit | null> {
+    try {
+        const j = await getJson(`${currentBase()}/api/v2/bangumi/${animeId}`, 12000);
+        const b = j && j.bangumi;
+        if (!b || !b.animeId) return null;
+        return {
+            animeId: Number(b.animeId),
+            animeTitle: String(b.animeTitle || ''),
+            episodeCount: Array.isArray(b.episodes) ? b.episodes.length : 0,
+            source: String(b.source || ''),
+            seasonTier: 0,   // 用户手动选定 = 最高可信度，占最优档
+        };
+    } catch {
+        return null;
+    }
+}
+
+/** 用户在候选列表里选了自建源条目（伪 bvid = `dmapi:[<animeId>:]<episodeId>`）后按 id 拉弹幕。
+ *  [lc-1259] 候选 id 携带 animeId（candidates 生成时已知），选定后直接用它播种系列记忆——
+ *  这是最可靠的播种路径：用户手动选定即明确指认「就是这部」，后续集不必再依赖各集标题都能搜中。
+ *  兼容旧格式（仅 episodeId，无 animeId）时不播种，行为同旧版。 */
+export async function fetchById(prefixedId: string, title: string, out: string, seriesKey = ''): Promise<BiliDanmakuResult> {
+    const raw = String(prefixedId || '').replace(/^dmapi:/, '');
+    const parts = raw.split(':');
+    // 新格式 `animeId:episodeId`；旧格式 `episodeId`
+    const animeId = parts.length >= 2 ? parseInt(parts[0], 10) : 0;
+    const id = parts.length >= 2 ? parseInt(parts[1], 10) : parseInt(parts[0], 10);
     if (!id) return { ok: false, error: '自建源候选 id 无效' };
     if (!isActive()) return { ok: false, error: '自建弹幕接口未启用' };
     const count = await fetchXml(id, out);
     if (count <= 0) return { ok: false, error: '自建弹幕接口未返回弹幕' };
+    if (seriesKey && animeId) {
+        try {
+            const hit = await hitFromAnimeId(animeId);
+            if (hit) {
+                rememberSeries(seriesKey, hit);
+                log.info(`[danmuApi] ✅ 手动选定已播种系列记忆 | ${hit.animeTitle} (animeId=${animeId} series=${seriesKey.slice(0, 8)}…)`);
+            }
+        } catch (e) {
+            log.warn('[danmuApi] 播种系列记忆失败（不影响本次弹幕）:', (e as Error).message);
+        }
+    }
     log.info(`[danmuApi] ✅ 按选定 id 拉取成功 | episodeId=${id} | ${count} 条`);
     return okResult(count, title, title, null);
 }

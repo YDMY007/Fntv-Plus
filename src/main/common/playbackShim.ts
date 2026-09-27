@@ -845,7 +845,10 @@ class PlaybackShim {
             return;
         }
         log.info(`[playbackShim][danmaku-by-bvid] ▶ 请求弹幕 | title=${JSON.stringify(title)} bvid=${bvid} out=${out} threshold=${threshold ?? '(默认)'} ep=${epNum}${forceCid ? ' cid=' + forceCid + '(手动指定分P)' : ''}`);
-        runBiliDanmakuByBvid(title, bvid, out, threshold, epNum, 60000, forceCid).then((r) => {
+        // [lc-1259] 用户手动选定自建源条目 → 播种系列记忆（guid → 季 guid）：可选参数，缺省不影响旧行为
+        const episodeGuid = (q.guid || '').toString();
+        this.resolveSeriesKey(episodeGuid).then((seriesKey) =>
+            runBiliDanmakuByBvid(title, bvid, out, threshold, epNum, 60000, forceCid, seriesKey)).then((r) => {
             if (r.ok) {
                 log.info(`[playbackShim][danmaku-by-bvid] ✅ 弹幕就绪 | count=${r.danmaku_count} bvid=${r.bvid}`);
                 this.json(res, 200, { ok: true, danmaku_count: r.danmaku_count, source: r.source, bvid: r.bvid, cid: r.cid });

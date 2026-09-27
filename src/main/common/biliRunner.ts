@@ -289,11 +289,12 @@ export async function runBiliDanmakuByBvid(
     epNum = 0,
     timeoutMs = 60000,
     forceCid?: number | string,   // [lc-1195] 用户从分P 列表手动选定的 cid（直接用，跳过 ep_num 匹配）
+    seriesKey = '',               // [lc-1259] 系列记忆键（季 guid）：手动选定自建源条目时播种记忆
 ): Promise<BiliDanmakuResult> {
     // [lc-1101] 用户从候选列表选定的是自建源条目（伪 bvid = `dmapi:<episodeId>`）→ 按 id 直取。
     //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
     const dmapiId = danmuApi.parsePrefixedId(bvid);
-    if (dmapiId) return danmuApi.fetchById(dmapiId, String(title || ''), out);
+    if (dmapiId) return danmuApi.fetchById(dmapiId, String(title || ''), out, seriesKey);
     let mod: any;
     try {
         mod = loadModule();
