@@ -196,6 +196,73 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
   });
 
+  // src/preload/web/signMaterials.ts
+  function extractFromChunk(txt) {
+    try {
+      const joinRe = /\[`([A-Za-z0-9_]{16,64})`,\w+,\w+,\w+,\w+,\w+\]\.join\(`_`\)/;
+      const mj = joinRe.exec(txt);
+      if (!mj) return null;
+      const key = mj[1];
+      const tailStart = mj.index + mj[0].length;
+      const tail = txt.slice(Math.max(0, tailStart - 400), tailStart + 900);
+      const mv = /\{apiKey:(\w+)/.exec(tail) || /\{apiKey:(\w+)/.exec(txt);
+      if (!mv) return null;
+      const varName = mv[1];
+      const defRe = new RegExp(varName.replace(/\$/g, "\\$&") + "=\\(\\(\\)=>\\{[\\s\\S]{0,1200}?\\}\\)\\(\\)");
+      const md = defRe.exec(txt);
+      if (!md) return null;
+      const iife = md[0].slice(varName.length + 1);
+      const secret = window.eval("(" + iife + ")");
+      if (typeof secret !== "string" || secret.length < 8 || secret.length > 128) return null;
+      return { key, secret };
+    } catch (e) {
+      return null;
+    }
+  }
+  async function extract() {
+    const urls = /* @__PURE__ */ new Set();
+    try {
+      for (const s of Array.from(document.querySelectorAll("script[src]"))) {
+        const u = s.src || "";
+        if (u.includes("/v/assets/") && u.endsWith(".js")) urls.add(u);
+      }
+      for (const r of performance.getEntriesByType("resource")) {
+        const n = r.name;
+        if (n.includes("/v/assets/") && n.endsWith(".js") && n.startsWith(location.origin)) urls.add(n);
+      }
+    } catch (e) {
+    }
+    for (const u of urls) {
+      try {
+        const resp = await fetch(u, { credentials: "omit" });
+        if (!resp.ok) continue;
+        const txt = await resp.text();
+        const found = extractFromChunk(txt);
+        if (found) return found;
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+  function ensureSignMaterials() {
+    if (cached) return Promise.resolve(cached);
+    if (!pending) {
+      pending = extract().then((m) => {
+        cached = m;
+        return m;
+      }).catch(() => null);
+    }
+    return pending;
+  }
+  var cached, pending;
+  var init_signMaterials = __esm({
+    "src/preload/web/signMaterials.ts"() {
+      "use strict";
+      cached = null;
+      pending = null;
+    }
+  });
+
   // src/shim/md5.ts
   function safeAdd(x, y) {
     const lsw = (x & 65535) + (y & 65535);
@@ -342,18 +409,23 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     ipcRenderer: () => ipcRenderer,
     shell: () => shell
   });
-  function genAuthx(url, data) {
-    if (!AUTHX_KEY || !AUTHX_SECRET) {
-      return getCapturedAuthx(String(url)) || "";
-    }
+  function signWith(key, secret, url, data) {
     const nonce = String(Math.floor(Math.random() * (1e6 - 1e5) + 1e5));
     const timestamp = Date.now().toString();
     const dataJson = data ? JSON.stringify(data) : "";
-    const signStr = [AUTHX_KEY, String(url), nonce, timestamp, md5(dataJson), AUTHX_SECRET].join("_");
+    const signStr = [key, String(url), nonce, timestamp, md5(dataJson), secret].join("_");
     return "nonce=" + nonce + "&timestamp=" + timestamp + "&sign=" + md5(signStr);
   }
-  function fnosApi(method, path, body) {
-    const headers = { "Authx": genAuthx(path, body) };
+  async function genAuthxAsync(url, data) {
+    try {
+      const m = await ensureSignMaterials();
+      if (m && m.key && m.secret) return signWith(m.key, m.secret, url, data);
+    } catch (e) {
+    }
+    return getCapturedAuthx(String(url)) || "";
+  }
+  async function fnosApi(method, path, body) {
+    const headers = { "Authx": await genAuthxAsync(path, body) };
     if (body) headers["Content-Type"] = "application/json";
     return fetch(location.origin + path, {
       method,
@@ -486,14 +558,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     } catch {
     }
   }
-  var AUTHX_KEY, AUTHX_SECRET, LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
+  var LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
   var init_electron = __esm({
     "src/shim/electron.js"() {
       "use strict";
       init_diag();
+      init_signMaterials();
       init_md5();
-      AUTHX_KEY = "";
-      AUTHX_SECRET = "";
       LS_KEY = "fntv:electron-settings";
       shimExports = { ipcRenderer: null, shell: null };
       try {
@@ -806,7 +877,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
             if (!guid) return Promise.resolve(Object.assign({}, empty, { message: "\u7F3A\u5C11 guid" }));
             const signedFetch = async (method, path, payload) => {
               const headers = { "Content-Type": "application/json" };
-              headers.Authx = await genAuthx(path, payload || void 0);
+              headers.Authx = await genAuthxAsync(path, payload || void 0);
               const resp = await fetch(location.origin + path, {
                 method,
                 credentials: "include",
@@ -881,7 +952,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
               try {
                 const path = "/v/api/v1/item/list";
                 const payload = { parent_guid: parentGuid, exclude_folder: 1, sort_column: "sort_title", sort_type: "ASC", page: 1, page_size: 200 };
-                const headers = { "Content-Type": "application/json", Authx: await genAuthx(path, payload) };
+                const headers = { "Content-Type": "application/json", Authx: await genAuthxAsync(path, payload) };
                 const resp = await fetch(location.origin + path, {
                   method: "POST",
                   credentials: "include",
@@ -922,7 +993,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
               try {
                 const infoPath = "/v/api/v1/play/info";
                 const payload = { item_guid: guid };
-                const authx = await genAuthx(infoPath, payload);
+                const authx = await genAuthxAsync(infoPath, payload);
                 const resp = await fetch(location.origin + infoPath, {
                   method: "POST",
                   credentials: "include",
@@ -980,7 +1051,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
             return apiPost("/app/fntvplus/api/bridge/trakt/disconnect", {});
           }
           if (channel === "fnos-gen-authx") {
-            return Promise.resolve(genAuthx(String(args[0] || ""), args[1]));
+            return genAuthxAsync(String(args[0] || ""), args[1]);
           }
           if (channel === "app:open-external") {
             try {
@@ -1142,8 +1213,8 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   var _lastDoubanFire = 0;
   var inflightInfo = /* @__PURE__ */ new Map();
   function fetchPlayInfo(guid) {
-    const cached = inflightInfo.get(guid);
-    if (cached) return cached;
+    const cached2 = inflightInfo.get(guid);
+    if (cached2) return cached2;
     const p = (async () => {
       try {
         const path = "/v/api/v1/play/info";
@@ -1312,9 +1383,36 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
 
   // src/preload/core/pageMode.ts
+  var GW_PREFIX = "/app/fntvplus";
+  function pagePath() {
+    return pagePathOf(location.pathname || "");
+  }
+  function pagePathOf(p) {
+    if (p === GW_PREFIX) return "/";
+    return p.startsWith(GW_PREFIX + "/") ? p.slice(GW_PREFIX.length) : p;
+  }
+  function isGatewayPath() {
+    return (location.pathname || "").startsWith(GW_PREFIX + "/v");
+  }
   function isFntvTvPage() {
-    const p = location.pathname || "";
+    const p = pagePath();
     return p === "/v" || p.startsWith("/v/");
+  }
+  function navToTvPage(path) {
+    location.href = isGatewayPath() ? GW_PREFIX + path : path;
+  }
+  function tvHref(url) {
+    if (isGatewayPath()) {
+      try {
+        const u = new URL(url, location.href);
+        const p = u.pathname;
+        if (u.origin === location.origin && (p === "/v" || p.startsWith("/v/"))) {
+          return GW_PREFIX + p + u.search + u.hash;
+        }
+      } catch {
+      }
+    }
+    return url;
   }
 
   // src/preload/core/i18n.ts
@@ -1357,7 +1455,6 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     // ── [v1.12.0] 设置面板「关于」页：匿名使用统计卡（modals/telemetry.ts）──
     "\u{1F4CA} \u533F\u540D\u4F7F\u7528\u7EDF\u8BA1": "\u{1F4CA} Anonymous usage stats",
     "\u53C2\u4E0E\u533F\u540D\u7EDF\u8BA1": "Join anonymous stats",
-    "\u6BCF\u5929\u6700\u591A\u4E0A\u62A5\u4E00\u6B21\uFF0C\u5185\u5BB9\u53EA\u6709\uFF1A\u968F\u673A\u533F\u540D ID + \u7248\u672C\u53F7 + \u7CFB\u7EDF\u7C7B\u578B\u3002\u4E0D\u91C7\u96C6\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u4E0E\u6587\u4EF6\u8DEF\u5F84\uFF0C\u670D\u52A1\u7AEF\u4E5F\u4E0D\u5B58 IP\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002": "At most one report per day, containing only: a random anonymous ID + version + system type. No account, IP, library or file paths are collected; the server does not store IPs either. Counted only when someone actually opens the enhanced page.",
     "\u7ACB\u5373\u4E0A\u62A5\u4E00\u6B21": "Report once now",
     "\u91CD\u7F6E\u533F\u540D ID": "Reset anonymous ID",
     "\u8BFB\u53D6\u4E2D\u2026": "Loading\u2026",
@@ -2306,7 +2403,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     if (!nextInfo || !nextInfo.guid || !armedGuid) return;
     if (firedFor === armedGuid) return;
     firedFor = armedGuid;
-    const target = location.pathname.replace(armedGuid, nextInfo.guid);
+    const target = pagePath().replace(armedGuid, nextInfo.guid);
     removeCard();
     logger_default.info("\u81EA\u52A8\u8FDE\u64AD \u2192 " + target);
     history.pushState({}, "", target);
@@ -2467,7 +2564,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   function applyLogoToDom(choice) {
     let img = document.getElementById("tb-logo");
-    const onHome = /\/v\/?$/.test(location.pathname || "");
+    const onHome = /\/v\/?$/.test(pagePath());
     if (!img) {
       if (!onHome) return;
       img = document.createElement("img");
@@ -2480,7 +2577,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         window.__fntvLogoGuard = window.setInterval(() => {
           try {
             const el = document.getElementById("tb-logo");
-            const oh = /\/v\/?$/.test(location.pathname || "");
+            const oh = /\/v\/?$/.test(pagePath());
             if (!el) {
               applyLogoToDom();
               return;
@@ -5289,11 +5386,11 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       log6.info("[danmakuWeb] \u5DF2\u6709\u5F39\u5E55\u8BF7\u6C42\u5728\u9014\uFF0C\u8DF3\u8FC7\u91CD\u590D\u62C9\u53D6");
       return;
     }
-    const cached = guidCache.get(guid);
-    if (cached && cached.items.length) {
-      items = cached.items;
-      meta = cached.meta;
-      maxScreen = cached.maxScreen;
+    const cached2 = guidCache.get(guid);
+    if (cached2 && cached2.items.length) {
+      items = cached2.items;
+      meta = cached2.meta;
+      maxScreen = cached2.maxScreen;
       loadedGuids.add(guid);
       renderDirty = true;
       announceItems();
@@ -6346,7 +6443,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
 
   // src/preload/plugins/embyWall/modals/feedback.ts
   init_electron();
-  var ABOUT_LINK_URL = "https://github.com/YDMY007/Fntv-Plus-fpk";
+  var ABOUT_LINK_URL = "https://github.com/YDMY007/Fntv-Plus";
   var FEEDBACK_LINK_URL = "https://wj.qq.com/s2/27390788/787a/";
   var QQ_GROUP_URL = "https://qm.qq.com/q/dUnIQVvoIw";
   var openFeedbackModal = async () => {
@@ -6693,7 +6790,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       if (v === "light" || v === "dark" || v === "system") return v;
     } catch (e) {
     }
-    return "light";
+    return "system";
   }
   function systemPrefersDark() {
     try {
@@ -6701,6 +6798,18 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     } catch (e) {
       return false;
     }
+  }
+  function isSurfaceDark() {
+    try {
+      const html = document.documentElement;
+      if (html.classList.contains("dark")) return true;
+      if (html.classList.contains("light")) return false;
+      const bm = document.body ? document.body.getAttribute("theme-mode") : null;
+      if (bm === "dark") return true;
+      if (bm === "light") return false;
+    } catch (e) {
+    }
+    return systemPrefersDark();
   }
   function getEffectiveDark() {
     const m = getUiTheme();
@@ -7195,6 +7304,15 @@ html.fnos-perf.dark{
   }
   async function fetchItemDetail(base, id) {
     try {
+      try {
+        const cap = window.__fntvApiCap;
+        const e = cap && cap.itemDetail && cap.itemDetail[id];
+        if (e && e.resp) {
+          const j = JSON.parse(e.resp);
+          if (j && j.code === 0 && j.data) return mapItemDetail(j, id, base);
+        }
+      } catch (_) {
+      }
       const { ipcRenderer: ipcRenderer2 } = (init_electron(), __toCommonJS(electron_exports));
       const path = `/v/api/v1/item/${id}`;
       const authx = await ipcRenderer2.invoke("fnos-gen-authx", path);
@@ -7208,87 +7326,91 @@ html.fnos-perf.dark{
       }
       if (!resp.ok) return null;
       const json = await resp.json();
-      const d = json && json.data || {};
-      const strmTag = detectStrmOrCloud(d);
-      if (strmTag) log7("[DIAG] item", id, "\u7591\u4F3C\u6765\u6E90:", strmTag, "| \u5019\u9009\u8DEF\u5F84=", String(d.path || d.file_path || "").substring(0, 90));
-      const pickImg2 = (v, preferLargest = false) => {
-        let s = "";
-        const extract = (it) => {
-          if (typeof it === "string") return it;
-          if (!it || typeof it !== "object") return "";
-          return it.file_path || it.url || it.path || it.image || it.src || "";
-        };
-        if (typeof v === "string") s = v;
-        else if (Array.isArray(v) && v.length) {
-          let best = v[0];
-          if (preferLargest) {
-            let bestSize = 0;
-            for (const it of v) {
-              const w = it && (it.width || it.w) || 0;
-              const h = it && (it.height || it.h) || 0;
-              const sz = w * h;
-              if (sz > bestSize) {
-                bestSize = sz;
-                best = it;
-              }
-            }
-          }
-          s = extract(best);
-        }
-        if (!s) return "";
-        if (s.startsWith("http") || s.includes("sys/img")) return s;
-        return "sys/img" + (s.startsWith("/") ? s : "/" + s);
-      };
-      const rel = pickImg2(d.backdrops, true);
-      const relStill = !rel ? pickImg2(d.still_path || d.stillPath, true) : "";
-      const effRel = rel || relStill;
-      const backdrop = effRel ? effRel.startsWith("http") ? effRel : base + "/v/api/v1/" + effRel : "";
-      const relPoster = pickImg2(d.posters, true);
-      const poster = relPoster ? relPoster.startsWith("http") ? relPoster : base + "/v/api/v1/" + relPoster : "";
-      const relLogo = pickImg2(d.logos);
-      const logo = relLogo ? relLogo.startsWith("http") ? relLogo : base + "/v/api/v1/" + relLogo : "";
-      const totalEps = Number(d.number_of_episodes) || 0;
-      const localEps = Number(d.local_number_of_episodes) || 0;
-      const totalSeasons = Number(d.number_of_seasons) || 0;
-      const localSeasons = Number(d.local_number_of_seasons) || 0;
-      const rawYear = Number(d.production_year) || Number(String(d.premiere_date || d.air_date || "").slice(0, 4)) || 0;
-      const rawRating = parseFloat(String(d.vote_average || "").trim());
-      const rating = isNaN(rawRating) ? 0 : rawRating;
-      const statusRaw = (d.status || "").trim();
-      let statusText = "";
-      if (statusRaw) {
-        const s = statusRaw.toLowerCase();
-        if (s.includes("continu") || s.includes("\u66F4\u65B0") || s.includes("\u8FDE\u8F7D")) statusText = "\u8FDE\u8F7D\u4E2D";
-        else if (s.includes("end") || s.includes("\u5B8C\u7ED3")) statusText = "\u5DF2\u5B8C\u7ED3";
-        else if (s.includes("releas") || s.includes("\u4E0A\u6620") || s.includes("\u53D1\u884C")) statusText = "\u5DF2\u4E0A\u6620";
-        else statusText = statusRaw;
-      }
-      let genres = [];
-      const g = d.genres || d.genre || d.types || d.categories || d.tags;
-      if (Array.isArray(g)) genres = g.map((x) => typeof x === "string" ? x : (x == null ? void 0 : x.name) || (x == null ? void 0 : x.Name) || (x == null ? void 0 : x.title) || "").filter(Boolean);
-      else if (typeof g === "string" && g.trim()) genres = g.split(/[,，/、|]/).map((s) => s.trim()).filter(Boolean);
-      log7("[lc-572] item genres:", JSON.stringify(genres), "(raw=", JSON.stringify(g).substring(0, 100), ")");
-      return {
-        backdrop,
-        poster,
-        logo,
-        // [lc-606] poster = 竖版(item API data.posters, 右侧海报条用)
-        totalEps,
-        localEps,
-        totalSeasons,
-        localSeasons,
-        year: rawYear,
-        rating,
-        statusText,
-        genres,
-        desc: (d.overview || "").trim(),
-        title: (d.title || d.name || "").trim(),
-        strmTag
-        // [DIAG] 携带来源标签，供轮播渲染/看门狗诊断
-      };
+      return mapItemDetail(json, id, base);
     } catch (e) {
+      log7("[lc-569] item detail fetch error:", String(e && e.message || e).substring(0, 120));
       return null;
     }
+  }
+  function mapItemDetail(json, id, base) {
+    const d = json && json.data || {};
+    const strmTag = detectStrmOrCloud(d);
+    if (strmTag) log7("[DIAG] item", id, "\u7591\u4F3C\u6765\u6E90:", strmTag, "| \u5019\u9009\u8DEF\u5F84=", String(d.path || d.file_path || "").substring(0, 90));
+    const pickImg2 = (v, preferLargest = false) => {
+      let s = "";
+      const extract2 = (it) => {
+        if (typeof it === "string") return it;
+        if (!it || typeof it !== "object") return "";
+        return it.file_path || it.url || it.path || it.image || it.src || "";
+      };
+      if (typeof v === "string") s = v;
+      else if (Array.isArray(v) && v.length) {
+        let best = v[0];
+        if (preferLargest) {
+          let bestSize = 0;
+          for (const it of v) {
+            const w = it && (it.width || it.w) || 0;
+            const h = it && (it.height || it.h) || 0;
+            const sz = w * h;
+            if (sz > bestSize) {
+              bestSize = sz;
+              best = it;
+            }
+          }
+        }
+        s = extract2(best);
+      }
+      if (!s) return "";
+      if (s.startsWith("http") || s.includes("sys/img")) return s;
+      return "sys/img" + (s.startsWith("/") ? s : "/" + s);
+    };
+    const rel = pickImg2(d.backdrops, true);
+    const relStill = !rel ? pickImg2(d.still_path || d.stillPath, true) : "";
+    const effRel = rel || relStill;
+    const backdrop = effRel ? effRel.startsWith("http") ? effRel : base + "/v/api/v1/" + effRel : "";
+    const relPoster = pickImg2(d.posters, true);
+    const poster = relPoster ? relPoster.startsWith("http") ? relPoster : base + "/v/api/v1/" + relPoster : "";
+    const relLogo = pickImg2(d.logos);
+    const logo = relLogo ? relLogo.startsWith("http") ? relLogo : base + "/v/api/v1/" + relLogo : "";
+    const totalEps = Number(d.number_of_episodes) || 0;
+    const localEps = Number(d.local_number_of_episodes) || 0;
+    const totalSeasons = Number(d.number_of_seasons) || 0;
+    const localSeasons = Number(d.local_number_of_seasons) || 0;
+    const rawYear = Number(d.production_year) || Number(String(d.premiere_date || d.air_date || "").slice(0, 4)) || 0;
+    const rawRating = parseFloat(String(d.vote_average || "").trim());
+    const rating = isNaN(rawRating) ? 0 : rawRating;
+    const statusRaw = (d.status || "").trim();
+    let statusText = "";
+    if (statusRaw) {
+      const s = statusRaw.toLowerCase();
+      if (s.includes("continu") || s.includes("\u66F4\u65B0") || s.includes("\u8FDE\u8F7D")) statusText = "\u8FDE\u8F7D\u4E2D";
+      else if (s.includes("end") || s.includes("\u5B8C\u7ED3")) statusText = "\u5DF2\u5B8C\u7ED3";
+      else if (s.includes("releas") || s.includes("\u4E0A\u6620") || s.includes("\u53D1\u884C")) statusText = "\u5DF2\u4E0A\u6620";
+      else statusText = statusRaw;
+    }
+    let genres = [];
+    const g = d.genres || d.genre || d.types || d.categories || d.tags;
+    if (Array.isArray(g)) genres = g.map((x) => typeof x === "string" ? x : (x == null ? void 0 : x.name) || (x == null ? void 0 : x.Name) || (x == null ? void 0 : x.title) || "").filter(Boolean);
+    else if (typeof g === "string" && g.trim()) genres = g.split(/[,，/、|]/).map((s) => s.trim()).filter(Boolean);
+    log7("[lc-572] item genres:", JSON.stringify(genres), "(raw=", String(JSON.stringify(g) || "undefined").substring(0, 100), ")");
+    return {
+      backdrop,
+      poster,
+      logo,
+      // [lc-606] poster = 竖版(item API data.posters, 右侧海报条用)
+      totalEps,
+      localEps,
+      totalSeasons,
+      localSeasons,
+      year: rawYear,
+      rating,
+      statusText,
+      genres,
+      desc: (d.overview || "").trim(),
+      title: (d.title || d.name || "").trim(),
+      strmTag
+      // [DIAG] 携带来源标签，供轮播渲染/看门狗诊断
+    };
   }
   function scrapeLandscapeBackdrops() {
     const map = /* @__PURE__ */ new Map();
@@ -7392,39 +7514,72 @@ html.fnos-perf.dark{
   function mediaTypeOf(it) {
     return String(it && it.type || "").toLowerCase() === "movie" ? "movie" : "tv";
   }
+  function capturedItemListJson() {
+    try {
+      const cap = window.__fntvApiCap;
+      const arr = cap && cap.itemLists || [];
+      for (const e of arr) {
+        if (!e || !e.resp || !e.body) continue;
+        let body = null;
+        try {
+          body = JSON.parse(e.body);
+        } catch (err) {
+          continue;
+        }
+        if (!body || typeof body !== "object") continue;
+        if (body.ancestor_guid || body.parent_guid || body.library_guid) continue;
+        const types = body.tags && body.tags.type || [];
+        if (!(types.includes("Movie") && types.includes("TV"))) continue;
+        if (String(body.sort_column || "") !== "create_time") continue;
+        if (body.exclude_grouped_video !== 1) continue;
+        const j = JSON.parse(e.resp);
+        if (j && j.code === 0 && j.data && Array.isArray(j.data.list)) return j;
+      }
+    } catch (e) {
+    }
+    return null;
+  }
+  function showsFromItemListJson(json, cap) {
+    const raw = json.data.list;
+    const ordered = raw.filter((it) => it && it.poster).concat(raw.filter((it) => it && !it.poster));
+    const shows = ordered.slice(0, cap).map((it) => {
+      const rawRating = parseFloat(String(it.vote_average || "").trim());
+      return {
+        id: String(it.guid || ""),
+        title: String(it.title || "").trim(),
+        poster: posterUrl("", it.poster),
+        backdrop: "",
+        // 横版大图仍由 fetchItemDetail(data.backdrops) 补
+        desc: String(it.overview || "").trim(),
+        mediaType: mediaTypeOf(it),
+        tmdbId: 0,
+        totalEps: Number(it.number_of_episodes) || 0,
+        localEps: Number(it.local_number_of_episodes) || 0,
+        totalSeasons: Number(it.number_of_seasons) || 0,
+        localSeasons: Number(it.local_number_of_seasons) || 0,
+        year: Number(String(it.release_date || it.air_date || "").slice(0, 4)) || 0,
+        rating: isNaN(rawRating) ? 0 : rawRating,
+        statusText: "",
+        // 由 fetchItemDetail 归一化(连载中/已完结)
+        genres: []
+      };
+    }).filter((s) => s.id && s.title);
+    clog("[lc-1083] item/list \u5DF2\u8BC6\u522B\u4F5C\u54C1", shows.length, "/", raw.length, "(total=", json.data.total, ") \u987A\u5E8F:", shows.map((s) => s.title.substring(0, 8)).join(" \u2192 "));
+    return shows;
+  }
   async function fetchRecognizedShows(base, cap = CAROUSEL_SCRAPE_CAP, timeoutMs = 6e3) {
     try {
+      const captured = capturedItemListJson();
+      if (captured) {
+        clog("[lc-1083] \u4F7F\u7528\u9875\u9762\u6355\u83B7\u7684 item/list \u54CD\u5E94\uFF08\u7F51\u9875\u7AEF\u65E0\u7B7E\u540D\u6750\u6599\uFF0C\u7ED5\u5F00 invalid sign\uFF09");
+        return showsFromItemListJson(captured, cap);
+      }
       const json = await postItemList(base, itemListBody(1, cap * 2), timeoutMs);
       if (!json) {
         clog("[lc-1083] item/list \u65E0\u6709\u6548\u54CD\u5E94 \u2192 \u964D\u7EA7 DOM \u6293\u53D6");
         return [];
       }
-      const raw = json.data.list;
-      const ordered = raw.filter((it) => it && it.poster).concat(raw.filter((it) => it && !it.poster));
-      const shows = ordered.slice(0, cap).map((it) => {
-        const rawRating = parseFloat(String(it.vote_average || "").trim());
-        return {
-          id: String(it.guid || ""),
-          title: String(it.title || "").trim(),
-          poster: posterUrl(base, it.poster),
-          backdrop: "",
-          // 横版大图仍由 fetchItemDetail(data.backdrops) 补
-          desc: String(it.overview || "").trim(),
-          mediaType: mediaTypeOf(it),
-          tmdbId: 0,
-          totalEps: Number(it.number_of_episodes) || 0,
-          localEps: Number(it.local_number_of_episodes) || 0,
-          totalSeasons: Number(it.number_of_seasons) || 0,
-          localSeasons: Number(it.local_number_of_seasons) || 0,
-          year: Number(String(it.release_date || it.air_date || "").slice(0, 4)) || 0,
-          rating: isNaN(rawRating) ? 0 : rawRating,
-          statusText: "",
-          // 由 fetchItemDetail 归一化(连载中/已完结)
-          genres: []
-        };
-      }).filter((s) => s.id && s.title);
-      clog("[lc-1083] item/list \u5DF2\u8BC6\u522B\u4F5C\u54C1", shows.length, "/", raw.length, "(total=", json.data.total, ") \u987A\u5E8F:", shows.map((s) => s.title.substring(0, 8)).join(" \u2192 "));
-      return shows;
+      return showsFromItemListJson(json, cap);
     } catch (e) {
       clog("[lc-1083] item/list \u5F02\u5E38 \u2192 \u964D\u7EA7 DOM \u6293\u53D6:", String(e && e.message || e).substring(0, 120));
       return [];
@@ -7435,6 +7590,20 @@ html.fnos-perf.dark{
     const seen = /* @__PURE__ */ new Set();
     let pages = 0;
     try {
+      const captured = capturedItemListJson();
+      if (captured) {
+        pages = 1;
+        for (const it of captured.data.list) {
+          const guid = String(it && it.guid || "");
+          const title = String(it && it.title || "").trim();
+          if (!guid || !title || seen.has(guid)) continue;
+          seen.add(guid);
+          const mediaType = mediaTypeOf(it);
+          out.push({ title, href: base + "/v/" + mediaType + "/" + guid, mediaType, poster: posterUrl(base, it.poster) });
+        }
+        clog("[lc-1087] \u4F7F\u7528\u9875\u9762\u6355\u83B7\u7684 item/list \u54CD\u5E94: \u5E93\u7D22\u5F15", out.length, "\u9879");
+        return out;
+      }
       for (let page = 1; page <= LIB_MAX_PAGES; page++) {
         const json = await postItemList(base, itemListBody(page, LIB_PAGE_SIZE), timeoutMs);
         if (!json) break;
@@ -7509,7 +7678,7 @@ html.fnos-perf.dark{
   var _lastHotHome = null;
   function isHomePage() {
     const href = location.href.toLowerCase();
-    const path = (location.pathname || "/").toLowerCase();
+    const path = pagePath().toLowerCase();
     if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false;
     if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;
     if (/\/search/.test(href)) return false;
@@ -7868,9 +8037,9 @@ html.fnos-perf.dark{
         const url = el.getAttribute("data-poster");
         if (!url) continue;
         el.removeAttribute("data-poster");
-        const cached = _posterCache.get(url);
-        if (cached) {
-          el.src = cached;
+        const cached2 = _posterCache.get(url);
+        if (cached2) {
+          el.src = cached2;
           continue;
         }
         const isDouban = /doubanio\.com/i.test(url);
@@ -7972,13 +8141,13 @@ html.fnos-perf.dark{
       _diskInit = true;
       _libLoading = true;
       return new Promise((resolve2) => {
-        readIndexFromDisk().then((cached) => {
-          if (cached && cached.length) {
-            _libIndex = cached;
+        readIndexFromDisk().then((cached2) => {
+          if (cached2 && cached2.length) {
+            _libIndex = cached2;
             _libLoading = false;
             _libWaiters.forEach((r) => r(_libIndex));
             _libWaiters = [];
-            logger_default.info("[hotUpdates] \u7D22\u5F15\u4ECE\u78C1\u76D8\u7F13\u5B58\u52A0\u8F7D", cached.length, "\u9879, \u540E\u53F0\u5F02\u6B65\u91CD\u5EFA\u66F4\u65B0\u4E2D\u2026");
+            logger_default.info("[hotUpdates] \u7D22\u5F15\u4ECE\u78C1\u76D8\u7F13\u5B58\u52A0\u8F7D", cached2.length, "\u9879, \u540E\u53F0\u5F02\u6B65\u91CD\u5EFA\u66F4\u65B0\u4E2D\u2026");
             try {
               markInLibrary(document);
             } catch {
@@ -8217,11 +8386,11 @@ html.fnos-perf.dark{
       setTimeout(() => {
         const backBtn = !!document.querySelector('button[aria-label="\u8FD4\u56DE"]');
         const seasonRendered = !!document.querySelector('[data-id="details"]') || !!document.querySelector(".fnos-season-2col") || !!document.querySelector('a[href*="/v/person/"]');
-        if (!backBtn && !seasonRendered) location.href = href;
+        if (!backBtn && !seasonRendered) location.href = tvHref(href);
       }, 600);
     } catch (e) {
       try {
-        location.href = href;
+        location.href = tvHref(href);
       } catch {
       }
     }
@@ -8473,11 +8642,11 @@ html.fnos-perf.dark{
     });
     async function loadBg(force) {
       if (!force) {
-        const cached = hotCacheGet("bangumi");
-        if (cached) {
+        const cached2 = hotCacheGet("bangumi");
+        if (cached2) {
           allBg.length = 0;
-          for (const it of cached.items) allBg.push(it);
-          updateFoot({ cachedAt: cached.ts, fromCache: true });
+          for (const it of cached2.items) allBg.push(it);
+          updateFoot({ cachedAt: cached2.ts, fromCache: true });
           render2();
           return;
         }
@@ -8501,11 +8670,11 @@ html.fnos-perf.dark{
     async function loadTm(force) {
       const source2 = await ipcRenderer.invoke("settings:get-hot-source").catch(() => "douban");
       if (!force) {
-        const cached = hotCacheGet(source2);
-        if (cached) {
+        const cached2 = hotCacheGet(source2);
+        if (cached2) {
           allTm.length = 0;
-          for (const it of cached.items) allTm.push(it);
-          updateFoot({ cachedAt: cached.ts, fromCache: true });
+          for (const it of cached2.items) allTm.push(it);
+          updateFoot({ cachedAt: cached2.ts, fromCache: true });
           render2();
           return;
         }
@@ -8600,8 +8769,8 @@ html.fnos-perf.dark{
     const fallback = "/v/" + kind + "/" + show.id;
     const id = String(show.id || "");
     if (!id) return fallback;
-    const cached = _seasonHrefCache.get(id);
-    if (cached) return cached;
+    const cached2 = _seasonHrefCache.get(id);
+    if (cached2) return cached2;
     try {
       const { ipcRenderer: ipcRenderer2 } = (init_electron(), __toCommonJS(electron_exports));
       const r = await ipcRenderer2.invoke("media:season-guid", id);
@@ -9672,7 +9841,7 @@ html.fnos-perf.dark{
       const v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
       return v >= 1 && v <= 4 ? v : 4;
     })();
-    const _isDark = getEffectiveDark();
+    const _isDark = isSurfaceDark();
     const container = document.createElement("div");
     container.setAttribute("data-fntv-carousel-style", String(_cs));
     const _blur = "backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%)";
@@ -10270,7 +10439,7 @@ html.fnos-perf.dark{
     if (location.protocol === "file:") return S.apiShows;
     if (S.apiLoaded) return S.apiShows;
     if (S.apiLoading) return S.apiShows;
-    const p = location.pathname;
+    const p = pagePath();
     if (p !== "/v" && p !== "/v/" && p !== "/") {
       watchHomeThenFetch(base);
       return S.apiShows;
@@ -10413,14 +10582,14 @@ html.fnos-perf.dark{
     if (_carouselWatchArmed) return;
     _carouselWatchArmed = true;
     const trigger = () => {
-      const hp = location.pathname;
+      const hp = pagePath();
       if ((hp === "/v" || hp === "/v/" || hp === "/") && !S.apiLoaded && !S.apiLoading) {
         fetchShowsViaIPC(base);
       }
     };
     window.addEventListener("popstate", trigger);
     const iv = setInterval(() => {
-      const hp = location.pathname;
+      const hp = pagePath();
       if (hp === "/v" || hp === "/v/" || hp === "/") {
         clearInterval(iv);
         trigger();
@@ -10900,7 +11069,7 @@ html.fnos-perf.dark{
     log7("injectCarousel called, S.carouselInited=", S.carouselInited, "S.apiShows.length=", S.apiShows.length);
     if (S.carouselInited) return;
     destroyCarousel();
-    const p = location.pathname;
+    const p = pagePath();
     if (p !== "/v" && p !== "/v/") {
       return;
     }
@@ -11376,13 +11545,13 @@ html.fnos-perf.dark{
         if (isFntvTvPage()) return;
         const p = location.pathname || "/";
         if (p !== "/") return;
-        const target = location.origin + "/v";
+        const target = location.origin + (isGatewayPath() ? GW_PREFIX : "") + "/v";
         if (location.href === target) return;
         ipcRenderer.send(
           "renderer-desktop-fix",
           "\u767B\u5F55\u540E\u81EA\u52A8\u8DF3\u5F71\u89C6: \u5F53\u524D\u5728\u98DE\u725B\u539F\u751F\u684C\u9762(/), \u8DF3\u8F6C\u5230 /v"
         );
-        location.href = target;
+        navToTvPage("/v");
       } catch (e) {
       }
     };
@@ -11393,7 +11562,7 @@ html.fnos-perf.dark{
     }
   })();
   (function autoFillVLogin() {
-    if (location.pathname !== "/v/login") return;
+    if (pagePath() !== "/v/login") return;
     const { ipcRenderer: ipcRenderer2 } = (init_electron(), __toCommonJS(electron_exports));
     function triggerInput(input, value) {
       const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
@@ -13913,46 +14082,86 @@ html.fnos-perf.dark{
     d.textContent = t(text);
     return d;
   }
+  function mkBtn(text, primary) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = t(text);
+    b.style.cssText = "padding:7px 12px;border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:600;border:none;" + (primary ? "background:var(--fnos-ui-btn-bg2)!important;" : "background:var(--fnos-ui-btn-bg)!important;") + "color:var(--fnos-ui-btn-text);transition:background .15s;";
+    b.onmouseenter = () => {
+      b.style.background = (primary ? "var(--fnos-ui-btn-hover2)" : "var(--fnos-ui-btn-hover)") + "!important";
+    };
+    b.onmouseleave = () => {
+      b.style.background = (primary ? "var(--fnos-ui-btn-bg2)" : "var(--fnos-ui-btn-bg)") + "!important";
+    };
+    return b;
+  }
   function buildStatsCard() {
     const card = document.createElement("div");
     card.style.cssText = "width:100%;max-width:440px;text-align:left;margin-top:14px;padding:12px 14px;border-radius:12px;background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);";
     const wrap = document.createElement("div");
-    const status = document.createElement("div");
-    status.style.cssText = "font-size:11px;color:" + SUB + ";margin-top:8px;min-height:14px;";
-    status.textContent = t("\u8BFB\u53D6\u4E2D\u2026");
     const toggle = mkToggle(true, (v) => {
       ipcRenderer.invoke("stats:set-enabled", v).catch(() => {
       });
-      status.textContent = v ? t("\u5DF2\u5F00\u542F\uFF0C\u660E\u5929\u8D77\u6BCF\u5929\u4E0A\u62A5\u4E00\u6B21\u3002") : t("\u5DF2\u5173\u95ED\uFF0C\u4E0D\u4F1A\u518D\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002");
     });
     const title = document.createElement("div");
     title.style.cssText = "font-size:12.5px;font-weight:700;color:var(--fnos-ui-pill-text);";
     title.textContent = t("\u{1F4CA} \u533F\u540D\u4F7F\u7528\u7EDF\u8BA1");
     wrap.appendChild(title);
     wrap.appendChild(mkRow("\u53C2\u4E0E\u533F\u540D\u7EDF\u8BA1", toggle.el));
-    wrap.appendChild(mkNote("\u5F00\u542F\u540E\u6536\u96C6\u5FC5\u987B\u7684\u5E94\u7528\u7248\u672C + \u7CFB\u7EDF\u7C7B\u578B\uFF0C\u7528\u4E8E\u65E5\u5FD7\u53CD\u9988\u6536\u96C6\u9700\u8981\u7684\u7CFB\u7EDF\u4FE1\u606F\uFF0C\u65B9\u4FBF\u6392\u67E5\u6545\u969C Bug\u3002\u4E0D\u6D89\u53CA\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u53CA\u6587\u4EF6\u8DEF\u5F84\u7B49\u9690\u79C1\u6570\u636E\uFF0C\u670D\u52A1\u7AEF\u4EA6\u4E0D\u505A IP \u5B58\u50A8\uFF0C\u53EF\u968F\u65F6\u5728\u8FD9\u91CC\u5173\u95ED\u3002\u533F\u540D ID \u53D6\u81EA NAS \u673A\u5668\u6807\u8BC6\u7684\u54C8\u5E0C\uFF0C\u6BCF\u53F0\u8BBE\u5907\u56FA\u5B9A\u552F\u4E00\u4E0D\u53D8\u3002\u4EC5\u5728\u6709\u4EBA\u6253\u5F00\u589E\u5F3A\u9875\u9762\u65F6\u8BA1\u6570\u3002"));
-    wrap.appendChild(status);
+    wrap.appendChild(mkNote("\u5F00\u542F\u540E\u6536\u96C6\u5FC5\u987B\u7684\u5E94\u7528\u7248\u672C + \u7CFB\u7EDF\u7C7B\u578B\uFF0C\u7528\u4E8E\u65E5\u5FD7\u53CD\u9988\u6536\u96C6\u9700\u8981\u7684\u7CFB\u7EDF\u4FE1\u606F\uFF0C\u65B9\u4FBF\u6392\u67E5\u6545\u969C Bug\u3002\u4E0D\u6D89\u53CA\u8D26\u53F7\u3001IP\u3001\u5A92\u4F53\u5E93\u53CA\u6587\u4EF6\u8DEF\u5F84\u7B49\u9690\u79C1\u6570\u636E\uFF0C\u670D\u52A1\u7AEF\u4EA6\u4E0D\u505A IP \u5B58\u50A8\uFF0C\u53EF\u968F\u65F6\u5728\u8FD9\u91CC\u5173\u95ED\u3002"));
     ipcRenderer.invoke("stats:get-info").then((s) => {
       if (!s) return;
       toggle.set(s.enabled !== false);
-      if (!s.configured) {
-        status.textContent = t("\u670D\u52A1\u7AEF\u672A\u914D\u7F6E\uFF0C\u5F53\u524D\u4E0D\u4F1A\u53D1\u9001\u4EFB\u4F55\u6570\u636E\u3002");
-        return;
-      }
-      if (s.devMode) {
-        status.textContent = t("\u5F00\u53D1\u7248\u9ED8\u8BA4\u4E0D\u4E0A\u62A5\u3002");
-      } else if (s.lastDay) {
-        status.textContent = t("\u4E0A\u6B21\u4E0A\u62A5\uFF1A") + s.lastDay + (s.lastOk ? t("\uFF08\u6210\u529F\uFF09") : t("\uFF08\u5931\u8D25\uFF0C\u7A0D\u540E\u81EA\u52A8\u91CD\u8BD5\uFF09"));
-      } else if (s.usedToday) {
-        status.textContent = t("\u4ECA\u5929\u5DF2\u8BB0\u5F55\u4F7F\u7528\uFF0C\u5C06\u5728\u6570\u5C0F\u65F6\u5185\u4E0A\u62A5\u3002");
-      } else {
-        status.textContent = t("\u5C1A\u672A\u4E0A\u62A5\u8FC7\uFF08\u6253\u5F00\u4E00\u6B21\u589E\u5F3A\u9875\u9762\u540E\u5F00\u59CB\u8BA1\u6570\uFF09\u3002");
-      }
     }).catch(() => {
-      status.textContent = "";
     });
     card.appendChild(wrap);
     return card;
+  }
+  function buildFeedbackBody() {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;flex-direction:column;";
+    const tip = mkNote("\u9047\u5230\u95EE\u9898\uFF1F\u5728\u8FD9\u91CC\u76F4\u63A5\u63D0\u4EA4\u3002\u63D0\u4EA4\u4F1A\u81EA\u52A8\u9644\u5E26\u6700\u8FD1\u7684\u524D\u540E\u7AEF\u65E5\u5FD7\uFF08\u8D26\u53F7\u3001\u4EE4\u724C\u3001\u5BC6\u94A5\u3001\u624B\u673A\u53F7\u3001\u90AE\u7BB1\u4E00\u5F8B\u6253\u7801\uFF1B\u4FDD\u7559 NAS \u5730\u5740\u4E0E\u57DF\u540D\u4FBF\u4E8E\u6392\u67E5\u7F51\u7EDC\u95EE\u9898\uFF09\u4E0E\u8BBE\u5907\u73AF\u5883\u4FE1\u606F\uFF08\u5E94\u7528\u7248\u672C / fnOS \u7248\u672C / \u65F6\u95F4 / \u5F53\u524D\u9875\u9762\uFF09\u3002");
+    wrap.appendChild(tip);
+    const area = document.createElement("textarea");
+    area.placeholder = t("\u63CF\u8FF0\u4F60\u9047\u5230\u7684\u95EE\u9898 / \u590D\u73B0\u6B65\u9AA4\uFF08\u5FC5\u586B\uFF09\u2026");
+    area.style.cssText = "width:100%;box-sizing:border-box;min-height:88px;margin-top:8px;padding:10px 12px;border-radius:10px;font-size:12.5px;line-height:1.6;font-family:inherit;resize:vertical;background:var(--fnos-ui-input-bg)!important;color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);outline:none;";
+    wrap.appendChild(area);
+    const contact = document.createElement("input");
+    contact.type = "text";
+    contact.placeholder = t("\u8054\u7CFB\u65B9\u5F0F\uFF08\u9009\u586B\uFF0C\u65B9\u4FBF\u56DE\u590D\u4F60\uFF1AQQ / \u90AE\u7BB1\uFF09");
+    contact.style.cssText = "width:100%;box-sizing:border-box;margin-top:8px;padding:9px 12px;border-radius:10px;font-size:12.5px;font-family:inherit;background:var(--fnos-ui-input-bg)!important;color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);outline:none;";
+    wrap.appendChild(contact);
+    const status = document.createElement("div");
+    status.style.cssText = "font-size:11px;color:" + SUB + ";margin-top:8px;min-height:14px;";
+    wrap.appendChild(status);
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;";
+    const submitBtn = mkBtn("\u63D0\u4EA4\u53CD\u9988", true);
+    btnRow.appendChild(submitBtn);
+    wrap.appendChild(btnRow);
+    submitBtn.addEventListener("click", () => {
+      const msg = area.value.trim();
+      if (!msg) {
+        status.textContent = t("\u8BF7\u5148\u586B\u5199\u95EE\u9898\u63CF\u8FF0\u3002");
+        area.focus();
+        return;
+      }
+      submitBtn.disabled = true;
+      status.textContent = t("\u63D0\u4EA4\u4E2D\u2026");
+      ipcRenderer.invoke("feedback:submit", { message: msg, contact: contact.value.trim(), page: location.href }).then((r) => {
+        if (r && r.ok) {
+          status.textContent = t("\u63D0\u4EA4\u6210\u529F\uFF0C\u611F\u8C22\u53CD\u9988\uFF01\u7F16\u53F7\uFF1A") + (r.id ? String(r.id).slice(0, 8) : "\u2014");
+          area.value = "";
+        } else {
+          status.textContent = t("\u63D0\u4EA4\u5931\u8D25\uFF1A") + (r && r.error || t("\u672A\u77E5\u9519\u8BEF"));
+        }
+      }).catch((e) => {
+        status.textContent = t("\u63D0\u4EA4\u5931\u8D25\uFF1A") + String(e && e.message || e);
+      }).finally(() => {
+        submitBtn.disabled = false;
+      });
+    });
+    return wrap;
   }
 
   // src/preload/plugins/embyWall/nav/inject.ts
@@ -14037,7 +14246,7 @@ html.fnos-perf.dark{
       const card = document.createElement("div");
       card.style.cssText = "min-width:300px;max-width:90vw;padding:20px 22px;border-radius:14px;background:var(--semi-color-bg-1,#fff);box-shadow:0 8px 30px rgba(0,0,0,0.25);color:var(--semi-color-text-0);";
       card.innerHTML = '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">\u9009\u62E9\u64AD\u653E\u65B9\u5F0F</div><div style="opacity:0.7;font-size:12px;margin-bottom:14px;">\u8981\u5982\u4F55\u64AD\u653E\u6B64\u89C6\u9891\uFF1F</div>';
-      const mkBtn = (label, primary, onClick) => {
+      const mkBtn2 = (label, primary, onClick) => {
         const b = document.createElement("button");
         b.textContent = label;
         b.style.cssText = "display:block;width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;" + (primary ? "background:var(--semi-color-primary,#3370ff);color:#fff;" : "background:var(--semi-color-fill-0,#f0f0f0);color:var(--semi-color-text-0);");
@@ -14056,11 +14265,11 @@ html.fnos-perf.dark{
       const playNative = () => {
         unfreezeVideo(video);
       };
-      card.appendChild(mkBtn("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
+      card.appendChild(mkBtn2("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
         closeDialog();
         launchExternal(modal);
       }));
-      card.appendChild(mkBtn("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
+      card.appendChild(mkBtn2("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
         closeDialog();
         playNative();
       }));
@@ -14168,6 +14377,29 @@ html.fnos-perf.dark{
       }
     }
     return null;
+  }
+  async function fnosGet(origin, path) {
+    try {
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", path).catch(() => "");
+      const resp = await fetch(origin + path, {
+        method: "GET",
+        credentials: "include",
+        headers: authx ? { Authx: authx } : {}
+      });
+      if (!resp.ok) return null;
+      const j = await resp.json().catch(() => null);
+      if (!j || j.code !== 0) return null;
+      return j.data || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function seasonNumberFromTitle(t2) {
+    const s = String(t2 || "").trim();
+    const m = s.match(/第\s*([0-9一二三四五六七八九十]+)\s*季/) || s.match(/Season\s*(\d{1,3})/i);
+    if (!m) return null;
+    const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : cnNumToInt2(m[1]);
+    return isNaN(n) ? null : n;
   }
   function fnNonce2() {
     return String(Math.floor(Math.random() * 9e5) + 1e5);
@@ -14321,7 +14553,7 @@ html.fnos-perf.dark{
   var _running = false;
   var _retryTimers = [];
   async function runBackfill(btn) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const guid = seasonGuid();
     if (!guid || _running) return;
     _running = true;
@@ -14336,7 +14568,12 @@ html.fnos-perf.dark{
       if (!data) throw new Error("\u8BFB\u53D6\u5B63\u4FE1\u606F\u5931\u8D25\uFF08getEditDetail\uFF09");
       const tmdbId = extractTmdbId(data) || "";
       const title = String(data.title || data.name || "").trim();
-      const seasonNumber = (_c = numOrNull((_b = (_a = data.index_number) != null ? _a : data.index) != null ? _b : data.season_number)) != null ? _c : findSeasonNumberDom();
+      let seasonNumber = (_c = numOrNull((_b = (_a = data.index_number) != null ? _a : data.index) != null ? _b : data.season_number)) != null ? _c : seasonNumberFromTitle(String(data.title || data.name || ""));
+      if (seasonNumber === null) {
+        const info = await fnosGet(origin, "/v/api/v1/item/" + guid).catch(() => null);
+        if (info) seasonNumber = numOrNull((_e = (_d = info.season_number) != null ? _d : info.index_number) != null ? _e : info.index);
+      }
+      if (seasonNumber === null) seasonNumber = findSeasonNumberDom();
       if (seasonNumber === null) throw new Error("\u65E0\u6CD5\u786E\u5B9A\u5B63\u53F7\uFF08\u9875\u9762\u4E0E\u5143\u6570\u636E\u90FD\u6CA1\u6709\uFF09");
       if (!tmdbId && !title) throw new Error("\u65E0 TMDB id \u4E14\u65E0\u6807\u9898\uFF0C\u65E0\u6CD5\u5339\u914D");
       setBtn(btn, "\u23F3 \u83B7\u53D6 TMDB\u2026");
@@ -14379,7 +14616,7 @@ html.fnos-perf.dark{
       stats.total = episodes.length;
       let idx = 0;
       const worker = async () => {
-        var _a2, _b2, _c2, _d, _e, _f;
+        var _a2, _b2, _c2, _d2, _e2, _f;
         while (idx < episodes.length) {
           const ep = episodes[idx++];
           try {
@@ -14404,7 +14641,7 @@ html.fnos-perf.dark{
             const titleKey = "title" in ed ? "title" : "name" in ed ? "name" : "title";
             const ovKey = "overview" in ed ? "overview" : "description" in ed ? "description" : "overview";
             const curTitle = String((_c2 = ed[titleKey]) != null ? _c2 : "");
-            const curOv = String((_d = ed[ovKey]) != null ? _d : "");
+            const curOv = String((_d2 = ed[ovKey]) != null ? _d2 : "");
             const newTitle = decideField(curTitle, nameZh, nameEn, isPlaceholderTitle);
             const newOv = decideField(curOv, ovZh, ovEn);
             if (newTitle === null && newOv === null) {
@@ -14432,7 +14669,7 @@ html.fnos-perf.dark{
               continue;
             }
             const vf = await fnosGetEditDetail(origin, ep.guid);
-            const vTitle = String(vf ? (_e = vf[titleKey]) != null ? _e : "" : "");
+            const vTitle = String(vf ? (_e2 = vf[titleKey]) != null ? _e2 : "" : "");
             const vOv = String(vf ? (_f = vf[ovKey]) != null ? _f : "" : "");
             const titleOk = !titleChanged || vTitle.trim() === newTitle.trim();
             const ovOk = !ovChanged || vOv.trim() === newOv.trim();
@@ -15818,10 +16055,10 @@ html.fntv-boot-hide #root{visibility:hidden}
       document.documentElement.classList.toggle("fnos-tv-page", isFntvTvPage());
     };
     syncTvPageClass();
-    let _lastPath = location.pathname;
+    let _lastPath = pagePath();
     const _tvClassTimer = window.setInterval(() => {
-      if (location.pathname !== _lastPath) {
-        _lastPath = location.pathname;
+      if (pagePath() !== _lastPath) {
+        _lastPath = pagePath();
         syncTvPageClass();
         log7("[TV\u7C7B\u540C\u6B65]", location.pathname, "isTv=", isFntvTvPage());
       }
@@ -16238,7 +16475,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     }
     function buildSettingsPanel() {
       if (document.getElementById("fnos-settings-panel")) return;
-      const mkBtn = (text, small = false) => {
+      const mkBtn2 = (text, small = false) => {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = t(text);
@@ -16472,9 +16709,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const biliFoldBody = biliFold.body;
       const biliBtns = document.createElement("div");
       biliBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
-      const logoutBiliBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
-      const saveBiliCookieBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
+      const scanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
+      const logoutBiliBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
+      const saveBiliCookieBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
       biliBtns.appendChild(scanBtn);
       biliBtns.appendChild(logoutBiliBtn);
       biliBtns.appendChild(saveBiliCookieBtn);
@@ -16537,8 +16774,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const bangumiBtns = document.createElement("div");
       bangumiBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveBangumiBtn = mkBtn("\u4FDD\u5B58", true);
-      const clearBangumiBtn = mkBtn("\u6E05\u9664", true);
+      const saveBangumiBtn = mkBtn2("\u4FDD\u5B58", true);
+      const clearBangumiBtn = mkBtn2("\u6E05\u9664", true);
       bangumiBtns.appendChild(saveBangumiBtn);
       bangumiBtns.appendChild(clearBangumiBtn);
       secBodyBangumi.appendChild(bangumiBtns);
@@ -16672,8 +16909,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const tmdbBtns = document.createElement("div");
       tmdbBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveTmdbBtn = mkBtn("\u4FDD\u5B58", true);
-      const clearTmdbBtn = mkBtn("\u6E05\u9664", true);
+      const saveTmdbBtn = mkBtn2("\u4FDD\u5B58", true);
+      const clearTmdbBtn = mkBtn2("\u6E05\u9664", true);
       tmdbBtns.appendChild(saveTmdbBtn);
       tmdbBtns.appendChild(clearTmdbBtn);
       secBodyTmdb.appendChild(tmdbBtns);
@@ -16773,8 +17010,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dcWrap.appendChild(dcIpGrid);
       const dcBtns = document.createElement("div");
       dcBtns.style.cssText = "display:flex;gap:6px;";
-      const dcSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const dcUpdateBtn = mkBtn("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
+      const dcSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const dcUpdateBtn = mkBtn2("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
       dcBtns.appendChild(dcSaveBtn);
       dcBtns.appendChild(dcUpdateBtn);
       dcWrap.appendChild(dcBtns);
@@ -16928,9 +17165,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const doubanBtns = document.createElement("div");
       doubanBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanDoubanBtn = mkBtn("\u626B\u7801\u767B\u5F55", true);
-      const logoutDoubanBtn = mkBtn("\u9000\u51FA\u767B\u5F55", true);
-      const manualBtn = mkBtn("\u4FDD\u5B58 Cookie", true);
+      const scanDoubanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
+      const logoutDoubanBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
+      const manualBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
       doubanBtns.appendChild(scanDoubanBtn);
       doubanBtns.appendChild(logoutDoubanBtn);
       doubanBtns.appendChild(manualBtn);
@@ -16986,7 +17223,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       watchedStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;";
       watchedStatus.textContent = t("\u8BFB\u53D6\u98DE\u725B\u300C\u5DF2\u89C2\u770B\u300D\u5217\u8868\uFF0C\u6279\u91CF\u6807\u8BB0\u5230\u8C46\u74E3\uFF08\u5DF2\u6807\u8BB0\u7684\u4F1A\u8DF3\u8FC7\uFF0C\u4E0D\u91CD\u590D\u6253\uFF09\u3002");
       watchedWrap.appendChild(watchedStatus);
-      const syncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
+      const syncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
       syncBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         syncBtn.setAttribute("disabled", "true");
@@ -17014,7 +17251,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       autoInput.min = "0";
       autoInput.step = "5";
       autoInput.style.cssText = "width:64px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;";
-      const autoSave = mkBtn("\u4FDD\u5B58", true);
+      const autoSave = mkBtn2("\u4FDD\u5B58", true);
       autoSave.style.fontSize = "11px";
       autoRow.appendChild(autoLabel);
       autoRow.appendChild(autoInput);
@@ -17116,8 +17353,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       traBody.appendChild(traSecretInput);
       const traBtnRow1 = document.createElement("div");
       traBtnRow1.style.cssText = "display:flex;gap:6px;";
-      const traSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const traClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
+      const traSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const traClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
       traBtnRow1.appendChild(traSaveBtn);
       traBtnRow1.appendChild(traClearBtn);
       traBody.appendChild(traBtnRow1);
@@ -17176,9 +17413,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const traBtnRow2 = document.createElement("div");
       traBtnRow2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const traConnectBtn = mkBtn("\u8FDE\u63A5 Trakt", true);
-      const traSyncBtn = mkBtn("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
-      const traDiscBtn = mkBtn("\u65AD\u5F00\u8FDE\u63A5", true);
+      const traConnectBtn = mkBtn2("\u8FDE\u63A5 Trakt", true);
+      const traSyncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
+      const traDiscBtn = mkBtn2("\u65AD\u5F00\u8FDE\u63A5", true);
       traBtnRow2.appendChild(traConnectBtn);
       traBtnRow2.appendChild(traSyncBtn);
       traBtnRow2.appendChild(traDiscBtn);
@@ -17201,7 +17438,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       traScrobSub.textContent = t("\u64AD\u653E\u65F6\u5B9E\u65F6\u6253\u70B9\u5230 Trakt\uFF08\u5F00\u59CB/\u6682\u505C/\u770B\u5B8C\u226580% \u81EA\u52A8\u8BB0\u5F55\uFF09\uFF0C\u9700\u5148\u8FDE\u63A5 Trakt\u3002");
       traScrobLabelWrap.appendChild(traScrobLabel);
       traScrobLabelWrap.appendChild(traScrobSub);
-      const traScrobBtn = mkBtn("\u2026", true);
+      const traScrobBtn = mkBtn2("\u2026", true);
       traScrobRow.appendChild(traScrobLabelWrap);
       traScrobRow.appendChild(traScrobBtn);
       traBody.appendChild(traScrobRow);
@@ -17421,9 +17658,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       ddFoldBody.appendChild(ddSecretInput);
       const ddBtns = document.createElement("div");
       ddBtns.style.cssText = "display:flex;gap:6px;";
-      const ddSaveBtn = mkBtn("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const ddClearBtn = mkBtn("\u6E05\u9664\u51ED\u8BC1", true);
-      const ddTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const ddSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const ddClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
+      const ddTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
       ddBtns.appendChild(ddSaveBtn);
       ddBtns.appendChild(ddClearBtn);
       ddBtns.appendChild(ddTestBtn);
@@ -17590,8 +17827,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmApiFoldBody.appendChild(dmApiInput);
       const dmApiBtns = document.createElement("div");
       dmApiBtns.style.cssText = "display:flex;gap:6px;";
-      const dmApiSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const dmApiTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const dmApiSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const dmApiTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
       dmApiBtns.appendChild(dmApiSaveBtn);
       dmApiBtns.appendChild(dmApiTestBtn);
       dmApiFoldBody.appendChild(dmApiBtns);
@@ -17618,7 +17855,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         dmApiSave();
       });
-      const dmApiDiagBtn = mkBtn("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
+      const dmApiDiagBtn = mkBtn2("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
       dmApiBtns.appendChild(dmApiDiagBtn);
       let dmApiDiagPre = null;
       dmApiDiagBtn.addEventListener("click", async (e) => {
@@ -17673,21 +17910,19 @@ html.fntv-boot-hide #root{visibility:hidden}
       ssvBody.style.cssText = "padding:14px 16px;display:flex;flex-direction:column;gap:8px;";
       const ssvDesc = document.createElement("div");
       ssvDesc.style.cssText = "font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.6;";
-      ssvDesc.textContent = t("\u63A5\u5165\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u7528\u4F60\u81EA\u5DF1\u7684\u6570\u636E\u6E90\u5237\u65B0\u5267\u96C6\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u6D77\u62A5\u7B49\u5143\u6570\u636E\u3002\u529F\u80FD\u5F00\u653E\u4E2D\uFF0C\u672A\u6B63\u5F0F\u751F\u6548\uFF0C\u656C\u8BF7\u671F\u5F85\u3002");
+      ssvDesc.textContent = t("\u63A5\u5165\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\uFF0C\u7528\u4F60\u81EA\u5DF1\u7684\u6570\u636E\u6E90\u5237\u65B0\u5267\u96C6\u6807\u9898\u3001\u7B80\u4ECB\u4E0E\u6D77\u62A5\u7B49\u5143\u6570\u636E\u3002");
       ssvBody.appendChild(ssvDesc);
-      const ssvBadge = document.createElement("div");
-      ssvBadge.style.cssText = "display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;background:rgba(255,180,60,.12);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.35);";
-      ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t("\u672A\u6B63\u5F0F\u751F\u6548");
-      ssvBody.appendChild(ssvBadge);
       const secDiag = section("\u8BCA\u65AD\u4FE1\u606F");
       const diagBody = secDiag.body;
+      const secFeedback = section("Bug \u53CD\u9988\u4E0E\u65E5\u5FD7\u4E0A\u4F20");
+      secFeedback.body.appendChild(buildFeedbackBody());
       const diagPre = document.createElement("pre");
       diagPre.style.cssText = "margin:0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px;font-size:10.5px;line-height:1.55;color:var(--fnos-ui-text);white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;";
       diagPre.textContent = t("\u70B9\u51FB\u300C\u5237\u65B0\u300D\u52A0\u8F7D\u8BCA\u65AD\u4FE1\u606F\u2026");
       const diagBtns = document.createElement("div");
       diagBtns.style.cssText = "display:flex;gap:6px;padding:8px 0 0;";
-      const diagRefresh = mkBtn("\u5237\u65B0", true);
-      const diagCopy = mkBtn("\u590D\u5236", true);
+      const diagRefresh = mkBtn2("\u5237\u65B0", true);
+      const diagCopy = mkBtn2("\u590D\u5236", true);
       diagBtns.appendChild(diagRefresh);
       diagBtns.appendChild(diagCopy);
       const loadDiag = async () => {
@@ -17806,7 +18041,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       logFooter.appendChild(logDivider);
       const logRow = document.createElement("div");
       logRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;";
-      const liveBtn = mkBtn("\u5237\u65B0", true);
+      const liveBtn = mkBtn2("\u5237\u65B0", true);
       logRow.appendChild(liveBtn);
       logFooter.appendChild(logRow);
       const livePre = document.createElement("pre");
@@ -17880,7 +18115,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyAbout.appendChild(aboutAuthor);
       const aboutDesc = document.createElement("div");
       aboutDesc.style.cssText = "font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;";
-      aboutDesc.textContent = t("\u98DE\u725B\u5F71\u89C6\u7F51\u9875\u7AEF\u589E\u5F3A\u5E94\u7528\uFF08fpk \u53CD\u5411\u4EE3\u7406\u6CE8\u5165\uFF09\uFF1A\u6D77\u62A5\u5899/\u8F6E\u64AD\u7F8E\u5316\u3001\u7F51\u9875\u5F39\u5E55\u3001\u591A\u6E90\u540C\u6B65\uFF08\u8C46\u74E3/Bangumi/Trakt\uFF09\u3001\u81EA\u5B9A\u4E49\u522E\u524A\u6E90\u56DE\u586B\uFF0C\u624B\u673A/\u5E73\u677F/\u7535\u8111\u6D4F\u89C8\u5668\u5168\u8BBE\u5907\u751F\u6548\u3002\u4E0D\u4FEE\u6539\u7CFB\u7EDF\u4E0E\u5F71\u89C6\u5E94\u7528\u6587\u4EF6\uFF0C\u4E2A\u4EBA\u7EC3\u624B\u4F5C\u54C1\u3002\u684C\u9762\u5168\u91CF\u7248\uFF1Agithub.com/YDMY007/Fntv-Plus");
+      aboutDesc.textContent = t("NAS \u88C5\u4E00\u6B21\uFF0C\u7535\u89C6\u3001\u5E73\u677F\u3001\u624B\u673A\u3001\u7535\u8111\u6D4F\u89C8\u5668\u6253\u5F00\u98DE\u725B\u5F71\u89C6\u5373\u662F\u589E\u5F3A\u7248\uFF1A\u6C89\u6D78\u5F0F\u7F8E\u5316\uFF08\u6D77\u62A5\u5899\u3001\u56DB\u578B\u8F6E\u64AD\u3001\u8BE6\u60C5\u9875\u67D4\u5149\u73BB\u7483\u3001Logo \u81EA\u5B9A\u4E49\uFF09\u3001\u5F39\u5E55\uFF08B\u7AD9 / \u81EA\u5EFA\u6E90 / \u5F39\u5F39play \u515C\u5E95\uFF09\u3001\u8C46\u74E3 / Bangumi / Trakt \u540C\u6B65\u3001\u8DF3\u8FC7\u7247\u5934\u4E0E\u8DE8\u8BBE\u5907\u64AD\u653E\u8BB0\u5FC6\u3001TMDB \u4FE1\u606F\u5361\u4E0E\u6BCF\u65E5\u653E\u9001\u3001\u89C2\u5F71\u8BB0\u5F55\u4E0E\u5E74\u5EA6\u62A5\u544A\u3001\u81EA\u5B9A\u4E49\u522E\u524A\u6E90\u56DE\u586B\u3002\u7ECF\u98DE\u725B\u7EDF\u4E00\u7F51\u5173\u6CE8\u5165\uFF0C\u4E0D\u6539\u52A8\u7CFB\u7EDF\u4E0E\u5F71\u89C6\u5E94\u7528\u4EFB\u4F55\u6587\u4EF6\uFF0C\u5378\u8F7D\u5373\u8FD8\u539F\uFF0C\u4E2A\u4EBA\u7EC3\u624B\u4F5C\u54C1\u3002");
       secBodyAbout.appendChild(aboutDesc);
       const aboutVer = document.createElement("div");
       aboutVer.id = "fnos-about-version";
@@ -17967,7 +18202,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           localStorage.setItem("fnos-carousel-style", String(s));
           paintCs();
           try {
-            window.location.href = (window.location.origin || "") + "/v";
+            navToTvPage("/v");
           } catch (_) {
             try {
               window.location.reload();
@@ -18134,7 +18369,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       hotIntervalRow.appendChild(hotIntervalLabel);
       hotIntervalRow.appendChild(hotIntervalSel);
       secBodyDaily.appendChild(hotIntervalRow);
-      const hotRefreshBtn = mkBtn("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
+      const hotRefreshBtn = mkBtn2("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
       hotRefreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         try {
@@ -18271,8 +18506,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       const mkExtBtnRow = (body) => {
         const row2 = document.createElement("div");
         row2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-        const save = mkBtn("\u4FDD\u5B58", true);
-        const clear = mkBtn("\u6E05\u9664", true);
+        const save = mkBtn2("\u4FDD\u5B58", true);
+        const clear = mkBtn2("\u6E05\u9664", true);
         row2.appendChild(save);
         row2.appendChild(clear);
         body.appendChild(row2);
@@ -18493,9 +18728,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
       const cpBtns = document.createElement("div");
       cpBtns.style.cssText = "display:flex;gap:6px;";
-      const cpSaveBtn = mkBtn("\u4FDD\u5B58", true);
-      const cpTestBtn = mkBtn("\u6D4B\u8BD5\u8FDE\u63A5", true);
-      const cpResetBtn = mkBtn("\u5173\u95ED\u4EE3\u7406", true);
+      const cpSaveBtn = mkBtn2("\u4FDD\u5B58", true);
+      const cpTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const cpResetBtn = mkBtn2("\u5173\u95ED\u4EE3\u7406", true);
       cpBtns.appendChild(cpSaveBtn);
       cpBtns.appendChild(cpTestBtn);
       cpBtns.appendChild(cpResetBtn);
@@ -18864,7 +19099,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         { id: "account", label: "\u8D26\u53F7\u4E0E\u7F51\u7EDC", els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secCustomProxy.el, secTmdbDirect.el] },
         // [v1.10.2] 自定义刮削源→Jav 刮削七卡从「账号与网络」拆出独立成类；开发中的「自定义刮削服务」置顶占位
         { id: "scraper", label: "\u81EA\u5B9A\u4E49\u522E\u524A", els: [secScraperSvc.el, secScraper.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el] },
-        { id: "diag", label: "\u8BCA\u65AD\u4E0E\u65E5\u5FD7", els: [secDiag.el, secDebug.el] },
+        { id: "diag", label: "\u8BCA\u65AD\u4E0E\u65E5\u5FD7", els: [secDiag.el, secFeedback.el, secDebug.el] },
         { id: "about", label: "\u5173\u4E8E", els: [secAbout.el] }
       ];
       const panes = {};
@@ -19642,8 +19877,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
     function imageTopLeftLuminance(url) {
-      const cached = _tlImgCache.get(url);
-      if (cached !== void 0) return Promise.resolve(cached);
+      const cached2 = _tlImgCache.get(url);
+      if (cached2 !== void 0) return Promise.resolve(cached2);
       return new Promise((resolve2) => {
         let done = false;
         const finish = (v) => {
@@ -20213,9 +20448,9 @@ html.fntv-boot-hide #root{visibility:hidden}
         const h = newHref || location.href;
         let p = "";
         try {
-          p = new URL(h, location.origin).pathname;
+          p = pagePathOf(new URL(h, location.origin).pathname);
         } catch (_) {
-          p = location.pathname;
+          p = pagePath();
         }
         if (p === "/v" || p === "/v/") return;
         try {
@@ -20224,7 +20459,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         }
       };
       history.pushState = function(...a) {
-        const prevPath = location.pathname;
+        const prevPath = pagePath();
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _ps.apply(this, a);
         logNav("pushState");
@@ -20246,7 +20481,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleFolderScraperButton();
       };
       history.replaceState = function(...a) {
-        const prevPath = location.pathname;
+        const prevPath = pagePath();
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _rs.apply(this, a);
         logNav("replaceState");
@@ -20360,7 +20595,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     wheelToScroll();
     [2e3, 4e3, 8e3].forEach((ms) => setTimeout(wheelToScroll, ms));
     const _isHomePath = () => {
-      const p = location.pathname;
+      const p = pagePath();
       return p === "/v" || p === "/v/";
     };
     let _wtsTimer = 0;
@@ -21432,7 +21667,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   var lastPad = -1;
   var confirmCount = 0;
   function makeKey(parent) {
-    return location.pathname + "|" + parent.clientWidth;
+    return pagePath() + "|" + parent.clientWidth;
   }
   function applyFix() {
     if (isDetailRoute()) {
@@ -21535,12 +21770,12 @@ html.fntv-boot-hide #root{visibility:hidden}
     }, 400);
   }
   var navObserver = null;
-  var lastPath = location.pathname;
+  var lastPath = pagePath();
   function watchChanges() {
     if (navObserver || !document.body) return;
     navObserver = new MutationObserver(() => {
-      if (location.pathname !== lastPath) {
-        lastPath = location.pathname;
+      if (pagePath() !== lastPath) {
+        lastPath = pagePath();
         startPolling();
       } else if (!lockedKey) {
         startPolling();
@@ -21557,6 +21792,242 @@ html.fntv-boot-hide #root{visibility:hidden}
     watchChanges();
   });
   registerHook("onDomChange" /* OnDomChange */, startPolling);
+
+  // src/preload/plugins/mobileStyle.ts
+  var STYLE_ID6 = "fnos-mobile-css";
+  var MQ_NARROW = "(min-width: 640.5px)";
+  var MQ_COMPACT = "(min-width: 820.5px)";
+  var _mqNarrow = null;
+  var _mqCompact = null;
+  function applyViewportFlags() {
+    const html = document.documentElement;
+    const narrow = !_mqNarrow || !_mqNarrow.matches;
+    const compact = !_mqCompact || !_mqCompact.matches;
+    const narrowBefore = html.classList.contains("fnos-narrow");
+    const compactBefore = html.classList.contains("fnos-compact");
+    html.classList.toggle("fnos-narrow", narrow);
+    html.classList.toggle("fnos-compact", compact);
+    const root = document.getElementById("root");
+    if (root) {
+      if (compact) root.style.setProperty("min-width", "0", "important");
+      else if (root.style.minWidth === "0px" || root.style.getPropertyValue("min-width") === "0") root.style.removeProperty("min-width");
+    }
+    if (narrow !== narrowBefore || compact !== compactBefore) {
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {
+      }
+    }
+  }
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID6)) return;
+    const st = document.createElement("style");
+    st.id = STYLE_ID6;
+    st.textContent = MOBILE_CSS;
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function ensure2() {
+    ensureStyle();
+    applyViewportFlags();
+  }
+  function installMobileStyle() {
+    if (typeof window.matchMedia === "function") {
+      try {
+        if (!_mqNarrow) {
+          _mqNarrow = window.matchMedia(MQ_NARROW);
+          const h = () => applyViewportFlags();
+          if (_mqNarrow.addEventListener) _mqNarrow.addEventListener("change", h);
+          else _mqNarrow.addListener(h);
+        }
+        if (!_mqCompact) {
+          _mqCompact = window.matchMedia(MQ_COMPACT);
+          const h = () => applyViewportFlags();
+          if (_mqCompact.addEventListener) _mqCompact.addEventListener("change", h);
+          else _mqCompact.addListener(h);
+        }
+      } catch {
+      }
+    }
+    ensure2();
+  }
+  var SERIES_PANEL2 = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+  var MOVIE_PANEL2 = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
+  var SERIES_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var MOVIE_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var MOBILE_CSS = `
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 A. fnos-compact\uFF08\u2264820px\uFF09\u7ED3\u6784\u6027\u515C\u5E95 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+
+/* A1. \u89E3\u9664\u7AD9\u70B9 #root 820px \u6700\u5C0F\u5BBD\uFF08\u771F\u51F6\u6765\u6E90\u679A\u4E3E\u4E0D\u5230\uFF0C\u6837\u5F0F\u8868 + \u884C\u5185\u53CC\u4FDD\u9669\uFF09 */
+html.fnos-compact #root{ min-width:0 !important; width:auto !important; }
+html.fnos-compact body{ overflow-x:hidden !important; }
+
+/* A2. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5185\u8054 width min(680px,100vw-80px) \u5728\u7A84\u5C4F\u4E0B\u53EA\u5269 310px \u4E14\u9AD8\u5EA6\u5403\u6EE1\uFF0C
+   \u6539\u4E3A\u8FD1\u6EE1\u5C4F\uFF08!important \u538B\u884C\u5185\u6837\u5F0F\uFF09\uFF1Bdvh \u5728\u652F\u6301\u7684\u6D4F\u89C8\u5668\u4E0A\u63A5\u7BA1\u5730\u5740\u680F\u6536\u7F29 */
+html.fnos-compact #fnos-settings-panel{
+  width:calc(100vw - 16px) !important;
+  height:calc(100vh - 56px) !important;
+  height:calc(100dvh - 56px) !important;
+  max-height:calc(100vh - 56px) !important;
+  max-height:calc(100dvh - 56px) !important;
+}
+
+/* A3. \u6BCF\u65E5\u653E\u9001\u6D6E\u5C42\u5BBD\u5EA6\u94B3\u5236\uFF08340px \u5B9A\u5BBD\u5728 \u2264360px \u624B\u673A\u4E0A\u6EA2\u51FA\uFF09 */
+html.fnos-compact #fntv-hot-panel{ width:min(340px,calc(100vw - 20px)) !important; }
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 B. fnos-narrow\uFF08\u2264640px\uFF09\u624B\u673A\u6574\u7248 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+
+/* B1. \u9996\u9875\u60AC\u6D6E logo \u7F29\u5C0F\uFF1A390px \u4E0B\u4E0E\u539F\u751F\u9876\u680F\u641C\u7D22/\u5934\u50CF\u56FE\u6807\u8FC7\u8FD1 */
+html.fnos-narrow #tb-logo{ height:20px !important; }
+
+/* B2. \u5B63\u9875/\u7AD6\u7248\u7535\u5F71\u9875 hero\uFF1A\u6A2A\u5411\u300C\u6D77\u62A5+\u4FE1\u606F\u300D\u884C\u6539\u7EB5\u5411\u5806\u53E0\u3002
+   \u6839\u56E0\uFF1A\u4FE1\u606F\u5217\u539F\u751F w-[calc(100%-246px)]\uFF0C390px \u4E0B\u53EA\u5269 52px \u2014\u2014 \u6807\u9898\u4E00\u5B57\u4E00\u884C\u3001
+   \u64AD\u653E\u6309\u94AE(150px)\u6EA2\u51FA\u5C4F\u5E55\u53F3\u7F18\u3002\u7AD6\u7248\u7535\u5F71\u4E00\u7EA7\u9875\u8D70 O \u6BB5\u6EE1\u5C4F\u805A\u7C07\uFF0C\u6392\u9664\u3002 */
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"]{
+  height:auto !important; min-height:0 !important;
+  padding-left:16px !important; padding-right:16px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] > [class*="pt-[116px]"]{
+  flex-direction:column !important; align-items:flex-start !important;
+  gap:14px !important; padding-top:72px !important; padding-bottom:20px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="h-[320px]"][class*="w-[214px]"]{
+  width:126px !important; height:189px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="w-[calc(100%-246px)]"]{
+  width:100% !important;
+}
+
+/* B3. \u7CFB\u5217/\u7535\u5F71\u4E00\u7EA7\u9875\u73BB\u7483\u805A\u7C07\uFF1A\u7A84\u5C4F\u4E0B\u7B80\u4ECB\u4E0D\u518D\u8BA9\u4F4D 57% \u53F3\u680F\uFF0CTMDB \u5361\u4ECE\u7EDD\u5BF9\u5B9A\u4F4D\u53F3\u5217
+   \u56DE\u6D41\u4E3A\u5757\u7EA7\uFF08DOM \u672B\u4F4D\uFF0C\u81EA\u7136\u6392\u5728\u7B80\u4ECB/\u5B63\u9009\u4E4B\u540E\uFF09\uFF0C\u805A\u7C07\u6574\u4F53\u53D8\u9AD8\u3001\u5185\u90E8\u53EF\u6EDA\u3002 */
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2},
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2}{
+  left:12px !important; right:12px !important; width:auto !important;
+  bottom:12px !important;
+  padding:14px 14px 12px !important;
+  max-height:min(58vh,520px) !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="text-justify"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > div[class*="text-justify"]{
+  width:100% !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > div[class*="flex-wrap"]{
+  width:100% !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] > [data-id="details"]{
+  width:calc(33.33% - 10px) !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card,
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card{
+  position:static !important;
+  top:auto !important; bottom:auto !important; left:auto !important; right:auto !important;
+  width:auto !important; margin:12px 0 0 !important; padding:0 !important;
+  max-height:none !important; overflow:visible !important;
+}
+
+/* B4. \u60AC\u6D6E\u6309\u94AE\u884C\uFF1A\u7A84\u5C4F\u6362\u884C\uFF08\u64AD\u653E\u952E + \u6536\u85CF/\u5DF2\u770B/\u66F4\u591A\u5706\u94AE\u4E00\u6392\u653E\u4E0D\u4E0B\uFF09 */
+html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW2},
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW2}{
+  left:12px !important; right:12px !important; width:auto !important;
+  bottom:calc(var(--fnos-cluster-h, 360px) + 20px) !important;
+  flex-wrap:wrap !important; row-gap:10px !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW2} div[class*="size-[54px]"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="size-[54px]"]{
+  width:44px !important; height:44px !important;
+}
+
+/* B5. \u8F6E\u64AD\uFF1A\u6807\u9898 3.3rem/\u7B80\u4ECB 600px \u5747\u4E3A\u684C\u9762\u5C3A\u5EA6\uFF0C390px \u4E0B\u6EA2\u51FA\u88C1\u5207\u3002
+   \u4E09\u5957\u76AE\u80A4\u5171\u7528 .fnos-slide-* \u7C7B\u540D\uFF0C\u4E00\u4EFD\u89C4\u5219\u5168\u8986\u76D6\uFF1B\u7B80\u4ECB\u94B3 3 \u884C\u3002 */
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-content{
+  padding:14px 16px 34px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-meta{
+  font-size:.66rem !important; margin-bottom:.3rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title{
+  font-size:1.6rem !important; line-height:1.2 !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title-logo-img{
+  max-height:64px !important; max-width:74% !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-desc{
+  font-size:.8rem !important; line-height:1.55 !important; max-width:100% !important;
+  margin-bottom:.7rem !important;
+  display:-webkit-box !important; -webkit-line-clamp:3 !important;
+  -webkit-box-orient:vertical !important; overflow:hidden !important;
+}
+
+/* B5b. \u8F6E\u64AD\u6837\u5F0F 4\uFF08s4 3D \u5361\u7247\uFF09\uFF1A\u5BB9\u5668\u5185\u8054 aspect-ratio 16/9 \u2192 390px \u4E0B\u4EC5 210px \u9AD8\uFF0C
+   \u800C\u4FE1\u606F\u5C42(logo 64 + \u6807\u9898 + \u7B80\u4ECB + \u6309\u94AE\u5217)\u6309\u684C\u9762\u5C3A\u5EA6\u6392 \u2248 260px+ \u2192 \u6587\u5B57\u5411\u4E0A\u6EA2\u51FA\u88AB\u88C1\u3002
+   \u7A84\u5C4F\uFF1A\u5BB9\u5668\u52A0\u9AD8\u5230 240px + \u4FE1\u606F\u5C42\u5168\u9762\u6536\u7D27\uFF08logo 40/\u6807\u9898 1.2rem/\u7B80\u4ECB\u94B3 2 \u884C/\u6309\u94AE\u6A2A\u6392\u7F29\u5C0F\uFF09\uFF0C
+   \u5706\u70B9\u6307\u793A\u5668\u4E0B\u79FB\u907F\u5F00\u6309\u94AE\u884C\u3002 */
+html.fnos-narrow [data-fntv-carousel-style="4"]{
+  aspect-ratio:auto !important; height:240px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-bg{ padding:12px 14px 44px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info{
+  padding:10px 14px 38px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .meta{
+  font-size:.6rem !important; margin-bottom:.2rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-title-logo-img{
+  max-height:40px !important; max-width:70% !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info h3{
+  font-size:1.2rem !important; margin-bottom:.2rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .desc{
+  font-size:.72rem !important; line-height:1.5 !important; max-width:100% !important; margin-bottom:.5rem !important;
+  display:-webkit-box !important; -webkit-line-clamp:2 !important;
+  -webkit-box-orient:vertical !important; overflow:hidden !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-actions{
+  flex-direction:row !important; align-items:center !important; gap:.5rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-play,
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-detail{
+  padding:.5rem 1.1rem !important; font-size:.72rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{ bottom:12px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{
+  width:32px !important; height:56px !important; font-size:1.7rem !important;
+}
+
+/* B6. \u89C2\u5F71\u8BB0\u5F55\u9762\u677F\uFF08\u5168\u5C4F\u6D6E\u5C42\uFF09\uFF1A\u684C\u9762\u4FA7 padding 40px/\u53CC\u5217\u56FE\u8868\u5728\u624B\u673A\u4E0A\u6324\u7206 */
+html.fnos-narrow #fntv-wh .wh-topbar{ padding:16px 16px 10px !important; gap:14px !important; }
+html.fnos-narrow #fntv-wh .wh-title{ font-size:26px !important; }
+html.fnos-narrow #fntv-wh .wh-section{ padding:0 16px !important; }
+html.fnos-narrow #fntv-wh .wh-chart-split{ grid-template-columns:1fr !important; }
+html.fnos-narrow #fntv-wh .wh-stat-row{ grid-template-columns:repeat(2,1fr) !important; }
+html.fnos-narrow #fntv-wh-topbtns{
+  top:10px !important; right:10px !important; max-width:calc(100vw - 20px) !important;
+  height:auto !important; min-height:44px !important; flex-wrap:wrap !important;
+}
+
+/* B7. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5DE6\u5206\u7C7B\u5BFC\u822A\u6539\u9876\u90E8\u6A2A\u6ED1\u884C\uFF08\u7AD6\u6392 130px \u5BFC\u822A + 180px \u5185\u5BB9\u5728\u624B\u673A\u4E0A\u6CA1\u6CD5\u770B\uFF09\u3002
+   overlay \u5B50\u8282\u70B9 = [0]\u5934\u90E8 [1]\u641C\u7D22\u6846(lc-1065) [2]bodyRow(\u5BFC\u822A+\u5185\u5BB9) [3]\u5E95\u90E8\u5F39\u7C27 */
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3){ flex-direction:column !important; }
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child{
+  flex:0 0 auto !important; max-width:none !important; min-width:0 !important;
+  flex-direction:row !important; align-items:center !important;
+  overflow-x:auto !important; overflow-y:hidden !important;
+  padding:6px 8px !important; gap:6px !important;
+  scrollbar-width:none !important;
+}
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child::-webkit-scrollbar{ display:none !important; }
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child > button{
+  flex:0 0 auto !important; width:auto !important; text-align:center !important;
+}
+
+/* B8. \u6C89\u6D78\u5C42\u9876\u90E8\u7559\u767D\u968F\u9876\u680F\u6536\u7D27\uFF08\u6F14\u804C\u4EBA\u5458\u4F5C\u54C1\u9762\u677F .fpw-card 162px \u5B9A\u5BBD\u53EF\u81EA\u9002\u5E94\u6362\u884C\uFF0C\u65E0\u9700\u5904\u7406\uFF09 */
+html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
+`;
+  registerHook("onReady" /* OnReady */, installMobileStyle);
+  registerHook("onDomChange" /* OnDomChange */, ensure2);
 
   // src/preload/plugins/pageAnim.ts
   var GRID_SEL = '[class*="flex-wrap"][class*="gap-x"]';
@@ -21835,7 +22306,7 @@ html.fntv-boot-hide #root{visibility:hidden}
 
   // src/preload/plugins/personWorks.ts
   init_electron();
-  var STYLE_ID6 = "fnos-person-works-style";
+  var STYLE_ID7 = "fnos-person-works-style";
   var PANEL_ID2 = "fnos-person-works";
   var POSTER_BASE = "https://image.tmdb.org/t/p/w342";
   var esc2 = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -21900,10 +22371,10 @@ html.fntv-boot-hide #root{visibility:hidden}
   var _cache = /* @__PURE__ */ new Map();
   var _inflight = /* @__PURE__ */ new Set();
   var _currentGuid = "";
-  function ensureStyle() {
+  function ensureStyle2() {
     if (_styleInjected) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID6;
+    st.id = STYLE_ID7;
     st.textContent = PANEL_CSS;
     (document.head || document.documentElement).appendChild(st);
     _styleInjected = true;
@@ -21930,7 +22401,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       box.innerHTML = "";
       box.dataset.guid = _currentGuid;
     }
-    ensureStyle();
+    ensureStyle2();
     const items2 = data.items || [];
     const ownedCount = Number(data.ownedCount || 0);
     const list = _onlyMissing ? items2.filter((m) => !m.owned) : items2;
@@ -21968,7 +22439,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     });
   }
   function renderMsg(container, msg) {
-    ensureStyle();
+    ensureStyle2();
     let box = container.querySelector("#" + PANEL_ID2);
     if (!box) {
       box = document.createElement("div");
@@ -21979,7 +22450,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     box.innerHTML = `<div class="fpw-head"><span class="fpw-h-title">TMDB \u5B8C\u6574\u4F5C\u54C1</span></div><div class="fpw-msg">${esc2(msg)}</div>`;
   }
   function renderCollapsed(container) {
-    ensureStyle();
+    ensureStyle2();
     let box = container.querySelector("#" + PANEL_ID2);
     if (!box) {
       box = document.createElement("div");
@@ -21997,9 +22468,9 @@ html.fntv-boot-hide #root{visibility:hidden}
     const guid = _currentGuid;
     const container = activeCol();
     if (!guid || !container || _inflight.has(guid)) return;
-    const cached = _cache.get(guid);
-    if (cached) {
-      renderPanel2(container, cached);
+    const cached2 = _cache.get(guid);
+    if (cached2) {
+      renderPanel2(container, cached2);
       return;
     }
     _inflight.add(guid);
@@ -22129,8 +22600,8 @@ html.fntv-boot-hide #root{visibility:hidden}
     }, 900);
   }
   function checkRoute() {
-    if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(location.pathname)) enrichCast();
-    const m = location.pathname.match(/\/v\/person\/([0-9a-f]{32})/i);
+    if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(pagePath())) enrichCast();
+    const m = pagePath().match(/\/v\/person\/([0-9a-f]{32})/i);
     if (!m) {
       if (_currentGuid) {
         _currentGuid = "";
@@ -23740,9 +24211,8 @@ html.fntv-boot-hide #root{visibility:hidden}
   function viewItemInFnos(item) {
     if (!item.guid) return;
     const prefix = fnosRoutePrefix(item.type);
-    const url = `${location.origin}/v/${prefix}/${item.guid}`;
     try {
-      location.href = url;
+      navToTvPage(`/v/${prefix}/${item.guid}`);
     } catch {
     }
   }
@@ -24062,7 +24532,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   }, true);
   function pickImg(v, preferLargest = false) {
     let s = "";
-    const extract = (it) => {
+    const extract2 = (it) => {
       if (typeof it === "string") return it;
       if (!it || typeof it !== "object") return "";
       return it.file_path || it.url || it.path || it.image || it.src || "";
@@ -24082,7 +24552,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           }
         }
       }
-      s = extract(best);
+      s = extract2(best);
     }
     if (!s) return "";
     if (s.startsWith("http") || s.includes("sys/img")) return s;
@@ -24187,10 +24657,10 @@ html.fntv-boot-hide #root{visibility:hidden}
         const slice = mapped.slice(i, i + CHUNK);
         await Promise.all(slice.map(async (m) => {
           if (!m.guid) return;
-          const cached = _posterCache2.get(m.guid);
-          if (cached) {
-            m.poster = cached.poster;
-            if (cached.overview && !m.fn.overview) m.fn.overview = cached.overview;
+          const cached2 = _posterCache2.get(m.guid);
+          if (cached2) {
+            m.poster = cached2.poster;
+            if (cached2.overview && !m.fn.overview) m.fn.overview = cached2.overview;
           } else {
             const res = await fetchItemPoster(m.guid);
             m.poster = res.poster;
@@ -24430,10 +24900,10 @@ html.fntv-boot-hide #root{visibility:hidden}
     root.classList.remove("wh-detail-open");
     root.querySelectorAll(".wh-card.focused").forEach((c) => c.classList.remove("focused"));
     if (goHome && isFntvTvPage()) {
-      const p = (location.pathname || "").replace(/\/+$/, "");
+      const p = pagePath().replace(/\/+$/, "");
       if (p !== "/v") {
         try {
-          location.href = location.origin + "/v";
+          navToTvPage("/v");
         } catch {
         }
       }

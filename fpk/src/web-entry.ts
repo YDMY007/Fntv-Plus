@@ -20,6 +20,8 @@ import './preload/plugins/embyWall';
 import './preload/plugins/glassUI';
 import './preload/plugins/hotUpdates';
 import './preload/plugins/listLayout';
+// 手机/窄视口适配层（≤820 解除站点 #root 820px 裁切；≤640 手机整版排布）
+import './preload/plugins/mobileStyle';
 import './preload/plugins/pageAnim';
 import './preload/plugins/personWorks';
 import './preload/plugins/playMemory';
