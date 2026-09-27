@@ -391,14 +391,19 @@ export function upsertFromMpv(params: {
     introEnd: number;
     outroLen: number;
     totalDuration?: number;
+    /** [lc-1264] MPV 面板升级后的精确区间（可缺省=旧版 2 值载荷） */
+    introStart?: number;
+    outroStart?: number;
+    outroEnd?: number;
 }): { saved: boolean; message?: string } {
     const guid = String(params.guid || '').trim();
     if (!/^[a-f0-9]{32}$/i.test(guid)) return { saved: false, message: 'guid 非法' };
+    const introStart = Math.max(0, Math.round(Number(params.introStart) || 0));
     const introEnd = Math.max(0, Math.round(Number(params.introEnd) || 0));
-    const outroLen = Math.max(0, Math.round(Number(params.outroLen) || 0));
     const totalDuration = Math.max(0, Math.round(Number(params.totalDuration) || 0));
-    if (introEnd === 0 && outroLen === 0) {
-        // 双零 = MPV 面板的「清空」动作 → 删除本集本地标记（服务端清零由 MPV 侧自行完成）
+    if (introEnd === 0 && Number(params.outroLen || 0) === 0
+        && Number(params.outroStart || 0) === 0 && Number(params.outroEnd || 0) === 0) {
+        // 全零 = MPV 面板的「清除」动作 → 删除本集本地标记（服务端清零由 MPV 侧自行完成）
         const store = readStore();
         if (store.entries[guid]) {
             delete store.entries[guid];
@@ -407,22 +412,30 @@ export function upsertFromMpv(params: {
         }
         return { saved: true };
     }
-    const outroStart = totalDuration > 0 ? Math.max(0, totalDuration - outroLen) : 0;
+    // 精确区间（lc-1264 新载荷优先；缺省回落旧版 2 值换算）
+    const hasPreciseOutro = Number(params.outroStart) > 0 || Number(params.outroEnd) > 0;
+    const outroLen = Math.max(0, Math.round(Number(params.outroLen) || 0));
+    const outroStart = hasPreciseOutro
+        ? Math.max(0, Math.round(Number(params.outroStart) || 0))
+        : (totalDuration > 0 ? Math.max(0, totalDuration - outroLen) : 0);
+    const outroEnd = hasPreciseOutro
+        ? Math.max(outroStart, Math.round(Number(params.outroEnd) || 0))
+        : totalDuration;
     const store = readStore();
     store.entries[guid] = {
         guid,
         scope: 'episode',
-        introStart: 0,          // MPV 面板语义：片头起点恒为 0
+        introStart,
         introEnd,
         outroStart,
-        outroEnd: totalDuration,
+        outroEnd,
         fnSkipStart: introEnd,
-        fnSkipEnd: outroLen,
+        fnSkipEnd: outroEnd > outroStart ? Math.round(outroEnd - outroStart) : outroLen,
         totalDuration,
         updatedAt: Date.now(),
     };
     writeStore(store);
-    log.info(`[skip-manual] MPV 打点同步 guid=${guid} introEnd=${introEnd} outroLen=${outroLen}`);
+    log.info(`[skip-manual] MPV 打点同步 guid=${guid} intro=${introStart}~${introEnd} outro=${outroStart}~${outroEnd}`);
     return { saved: true };
 }
 

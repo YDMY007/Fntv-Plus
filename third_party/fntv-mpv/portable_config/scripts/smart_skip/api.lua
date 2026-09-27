@@ -33,9 +33,10 @@ local opt = require('mp.options')
 local api = {}
 
 -- [lc-1257] MPV 面板打点同步到 Electron 本地 4 值存储（fire-and-forget，失败不影响主流程）。
--- 2 值语义：introEnd=片头结束秒（起点恒 0）、outroLen=片尾时长秒、totalDuration=视频总时长（换算 outroStart 用）。
--- 服务端写回由 set_skip_time 完成，这里只补本地（供网页端「标记不准」状态与精确兜底按钮跨端一致）。
-function api.sync_manual_local(play_url, intro_end, outro_len, total_duration)
+-- [lc-1264] 升级为精确 4 值载荷（introStart/outroStart/outroEnd 可缺省=旧版 2 值语义，
+--   由 Electron 侧回落换算）；服务端写回由 set_skip_time 完成，这里只补本地
+--   （供网页端「标记不准」状态与精确兜底按钮跨端一致）。
+function api.sync_manual_local(play_url, intro_end, outro_len, total_duration, intro_start, outro_start, outro_end)
     local id, _ = mutils.extract_id_and_query(play_url)
     if not id then return end
     http_async.request({
@@ -46,10 +47,26 @@ function api.sync_manual_local(play_url, intro_end, outro_len, total_duration)
             introEnd = intro_end or 0,
             outroLen = outro_len or 0,
             totalDuration = total_duration or 0,
+            introStart = intro_start or 0,
+            outroStart = outro_start or 0,
+            outroEnd = outro_end or 0,
         },
         json = true,
     }, function(_resp, err)
         if err then msg.verbose("本地标记同步失败: " .. tostring(err)) end
+    end)
+end
+
+-- [lc-1264] MPV 面板改提前量 → 同步 Electron 侧 skip-manual 配置（兜底按钮提前量同一套值）。
+-- 复用 /skip-manual 端点的 config 载荷形态；失败静默（Electron 侧重启后以自己面板的值为准）。
+function api.sync_manual_lead(seconds)
+    http_async.request({
+        url = "http://127.0.0.1:22347/skip-manual-config",
+        method = "POST",
+        data = { leadSeconds = seconds or 5 },
+        json = true,
+    }, function(_resp, err)
+        if err then msg.verbose("提前量同步失败: " .. tostring(err)) end
     end)
 end
 

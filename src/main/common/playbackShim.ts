@@ -111,6 +111,11 @@ class PlaybackShim {
             this.handleSkipManualSync(req, res);
             return;
         }
+        // [lc-1264] MPV 面板改提前量 → 同步 Electron 侧 skip-manual 配置
+        if (pathname === '/skip-manual-config' && req.method === 'POST') {
+            this.handleSkipManualConfig(req, res);
+            return;
+        }
         const m = pathname.match(/^\/p\/([^/]+)\//);
         if (!m) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -691,15 +696,41 @@ class PlaybackShim {
         });
         req.on('end', () => {
             try {
-                const p = JSON.parse(raw || '{}') as { guid?: string; introEnd?: number; outroLen?: number; totalDuration?: number };
+                const p = JSON.parse(raw || '{}') as {
+                    guid?: string; introEnd?: number; outroLen?: number; totalDuration?: number;
+                    introStart?: number; outroStart?: number; outroEnd?: number;  // [lc-1264] 精确区间
+                };
                 const r = upsertFromMpv({
                     guid: String(p.guid || ''),
                     introEnd: Number(p.introEnd) || 0,
                     outroLen: Number(p.outroLen) || 0,
                     totalDuration: Number(p.totalDuration) || 0,
+                    introStart: Number(p.introStart) || 0,
+                    outroStart: Number(p.outroStart) || 0,
+                    outroEnd: Number(p.outroEnd) || 0,
                 });
                 if (r.saved) this.json(res, 200, { ok: true });
                 else this.json(res, 400, { ok: false, error: r.message || '保存失败' });
+            } catch (e) {
+                this.json(res, 400, { ok: false, error: String((e as Error).message || e) });
+            }
+        });
+    }
+
+    /** [lc-1264] MPV 面板改跳过按钮提前量 → 写 Electron 侧 skip-manual 配置（双端同一套值）。 */
+    private handleSkipManualConfig(req: http.IncomingMessage, res: http.ServerResponse): void {
+        let raw = '';
+        req.on('data', (c: Buffer) => {
+            raw += c.toString('utf-8');
+            if (raw.length > 4096) { req.destroy(); }
+        });
+        req.on('end', () => {
+            try {
+                const p = JSON.parse(raw || '{}') as { leadSeconds?: number };
+                const lead = Math.max(0, Math.min(60, Math.round(Number(p.leadSeconds) || 0)));
+                fnConfig.setSkipManualConfig({ leadSeconds: lead });
+                logger.info(`[playbackShim][skip-manual-config] 提前量已同步: ${lead}s（来自 MPV 面板）`);
+                this.json(res, 200, { ok: true });
             } catch (e) {
                 this.json(res, 400, { ok: false, error: String((e as Error).message || e) });
             }
