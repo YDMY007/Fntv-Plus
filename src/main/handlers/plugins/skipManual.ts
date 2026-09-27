@@ -293,7 +293,6 @@ async function handleSet(_event: IpcMainInvokeEvent, params: SetManualParams): P
     };
     writeStore(store);
     log.info(`[skip-manual] 已保存标记 guid=${storeGuid} scope=${entryScope} intro=${introStart}~${introEnd} outro=${outroStart}~${outroEnd}`);
-
     // 保存即写回（用户已确认写回语义）
     let writtenBack = false;
     let written = 0;
@@ -381,6 +380,51 @@ async function handleSetConfig(_event: IpcMainInvokeEvent, params: { patch?: Par
 }
 
 // ─── 注册（handlers/index.ts 目录自动加载 + init() 调用）───
+
+/** [lc-1257] MPV smart_skip 面板打点 → 本地 4 值存储同步（经 playbackShim POST /skip-manual 调用）。
+ *  入参是 MPV 面板的 2 值语义（introEnd=片头结束秒、outroLen=片尾时长秒，outroEnd=视频总时长可选），
+ *  换算：outroStart = totalDuration - outroLen。只写本地 store，不触发服务端写回——
+ *  MPV 面板自己已 POST /api/v1/skipinfo（api.set_skip_time），双写会重复。
+ *  本地有 4 值的目的是让网页端「标记不准」入口状态与兜底按钮（精确区间）跨端一致。 */
+export function upsertFromMpv(params: {
+    guid: string;
+    introEnd: number;
+    outroLen: number;
+    totalDuration?: number;
+}): { saved: boolean; message?: string } {
+    const guid = String(params.guid || '').trim();
+    if (!/^[a-f0-9]{32}$/i.test(guid)) return { saved: false, message: 'guid 非法' };
+    const introEnd = Math.max(0, Math.round(Number(params.introEnd) || 0));
+    const outroLen = Math.max(0, Math.round(Number(params.outroLen) || 0));
+    const totalDuration = Math.max(0, Math.round(Number(params.totalDuration) || 0));
+    if (introEnd === 0 && outroLen === 0) {
+        // 双零 = MPV 面板的「清空」动作 → 删除本集本地标记（服务端清零由 MPV 侧自行完成）
+        const store = readStore();
+        if (store.entries[guid]) {
+            delete store.entries[guid];
+            writeStore(store);
+            log.info(`[skip-manual] MPV 清空本地标记 guid=${guid}`);
+        }
+        return { saved: true };
+    }
+    const outroStart = totalDuration > 0 ? Math.max(0, totalDuration - outroLen) : 0;
+    const store = readStore();
+    store.entries[guid] = {
+        guid,
+        scope: 'episode',
+        introStart: 0,          // MPV 面板语义：片头起点恒为 0
+        introEnd,
+        outroStart,
+        outroEnd: totalDuration,
+        fnSkipStart: introEnd,
+        fnSkipEnd: outroLen,
+        totalDuration,
+        updatedAt: Date.now(),
+    };
+    writeStore(store);
+    log.info(`[skip-manual] MPV 打点同步 guid=${guid} introEnd=${introEnd} outroLen=${outroLen}`);
+    return { saved: true };
+}
 
 export function init(): void {
     registerHandler('skip-manual:get', handleGet, { useHandle: true });

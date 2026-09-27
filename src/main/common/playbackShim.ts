@@ -6,6 +6,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
+import { upsertFromMpv } from '../handlers/plugins/skipManual';
 import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
@@ -103,6 +104,11 @@ class PlaybackShim {
         // [lc-1096] 用户选定某条字幕后，主进程下载/复用本地临时文件并回传路径，供 mpv sub-add 挂载
         if (pathname === '/nas-subtitle-file') {
             this.handleNasSubtitleFile(req, res);
+            return;
+        }
+        // [lc-1257] MPV smart_skip 面板打点 → 本地 4 值存储同步（POST JSON）
+        if (pathname === '/skip-manual' && req.method === 'POST') {
+            this.handleSkipManualSync(req, res);
             return;
         }
         const m = pathname.match(/^\/p\/([^/]+)\//);
@@ -668,6 +674,32 @@ class PlaybackShim {
         }).catch((e) => {
             log.warn(`[playbackShim][danmaku] 异常: ${e?.message || e}`);
             this.json(res, 500, { ok: false, error: String(e?.message || e) });
+        });
+    }
+
+    /** [lc-1257] MPV smart_skip 面板打点同步到本地 4 值存储。
+     *  载荷: { guid, introEnd, outroLen, totalDuration? } —— 与 MPV 面板的 2 值语义一致，
+     *  4 值换算在 upsertFromMpv 内做。只落本地，服务端写回由 MPV 面板自行完成（不双写）。 */
+    private handleSkipManualSync(req: http.IncomingMessage, res: http.ServerResponse): void {
+        let raw = '';
+        req.on('data', (c: Buffer) => {
+            raw += c.toString('utf-8');
+            if (raw.length > 8192) { req.destroy(); }   // 防御：载荷极小，超限即断
+        });
+        req.on('end', () => {
+            try {
+                const p = JSON.parse(raw || '{}') as { guid?: string; introEnd?: number; outroLen?: number; totalDuration?: number };
+                const r = upsertFromMpv({
+                    guid: String(p.guid || ''),
+                    introEnd: Number(p.introEnd) || 0,
+                    outroLen: Number(p.outroLen) || 0,
+                    totalDuration: Number(p.totalDuration) || 0,
+                });
+                if (r.saved) this.json(res, 200, { ok: true });
+                else this.json(res, 400, { ok: false, error: r.message || '保存失败' });
+            } catch (e) {
+                this.json(res, 400, { ok: false, error: String((e as Error).message || e) });
+            }
         });
     }
 

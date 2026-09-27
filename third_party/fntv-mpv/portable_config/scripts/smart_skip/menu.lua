@@ -131,6 +131,8 @@ local Controls = {
             opts.manual_intro_end = n
             local play_url = mp.get_property('path')
             api.set_skip_time(play_url, opts.manual_intro_end, current_outro_len())
+            -- [lc-1257] 同步本地 4 值存储（网页端「标记不准」状态/兜底按钮跨端一致）
+            api.sync_manual_local(play_url, opts.manual_intro_end, current_outro_len(), mutils.dur())
             mutils.save_options()
         end,
         after    = function(n)
@@ -154,6 +156,8 @@ local Controls = {
             opts.manual_outro_start = (opts.manual_outro_end or 0) - n
             local play_url = mp.get_property('path')
             api.set_skip_time(play_url, opts.manual_intro_end or 0, n)
+            -- [lc-1257] 同步本地 4 值存储（n=片尾时长秒；outroStart 换算在主进程侧做）
+            api.sync_manual_local(play_url, opts.manual_intro_end or 0, n, mutils.dur())
             mutils.save_options()
         end,
         after    = function(n)
@@ -333,6 +337,8 @@ mp.register_script_message('menu:action', function(op, id, value)
     if op == 'clean_skip_time' then
         local play_url = mp.get_property('path')
         api.set_skip_time(play_url, 0, 0)
+        -- [lc-1257] 清空动作同步删本地标记（双零载荷 = 删除语义）
+        api.sync_manual_local(play_url, 0, 0, 0)
         opts.manual_intro_start = 0
         opts.manual_outro_start = 0
         opts.manual_intro_end = 0

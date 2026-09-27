@@ -32,6 +32,27 @@ local opt = require('mp.options')
 
 local api = {}
 
+-- [lc-1257] MPV 面板打点同步到 Electron 本地 4 值存储（fire-and-forget，失败不影响主流程）。
+-- 2 值语义：introEnd=片头结束秒（起点恒 0）、outroLen=片尾时长秒、totalDuration=视频总时长（换算 outroStart 用）。
+-- 服务端写回由 set_skip_time 完成，这里只补本地（供网页端「标记不准」状态与精确兜底按钮跨端一致）。
+function api.sync_manual_local(play_url, intro_end, outro_len, total_duration)
+    local id, _ = mutils.extract_id_and_query(play_url)
+    if not id then return end
+    http_async.request({
+        url = "http://127.0.0.1:22347/skip-manual",
+        method = "POST",
+        data = {
+            guid = id,
+            introEnd = intro_end or 0,
+            outroLen = outro_len or 0,
+            totalDuration = total_duration or 0,
+        },
+        json = true,
+    }, function(_resp, err)
+        if err then msg.verbose("本地标记同步失败: " .. tostring(err)) end
+    end)
+end
+
 -- 设置跳过时间点
 function api.set_skip_time(play_url, start_time, end_time, callback)
     if not play_url or play_url == "" then
