@@ -250,7 +250,8 @@ export async function fetchItemDetail(base: string, id: string): Promise<any | n
     const g: any = d.genres || d.genre || d.types || d.categories || d.tags;
     if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || x?.title || ''))).filter(Boolean);
     else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、|]/).map((s: string) => s.trim()).filter(Boolean);
-    log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', JSON.stringify(g).substring(0, 100), ')');
+    // [lc-1250-web] g 为 undefined 时 JSON.stringify 返回 undefined → .substring 抛错（曾致详情补全静默失败）
+    log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', String(JSON.stringify(g) || 'undefined').substring(0, 100), ')');
     return {
       backdrop, poster, logo, // [lc-606] poster = 竖版(item API data.posters, 右侧海报条用)
       totalEps, localEps, totalSeasons, localSeasons,

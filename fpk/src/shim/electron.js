@@ -10,6 +10,7 @@
 // （images.ts/itemListApi 对空值会跳过或由 diag 剥离坏头，靠 cookie 直取同源图片）。
 
 import { getCapturedAuthx } from '../preload/web/diag';
+import { ensureSignMaterials } from '../preload/web/signMaterials';
 import { md5 } from './md5';
 
 // fnOS 影视 API 鉴权签名（算法与桌面版主进程 fnosAuth.js 完全一致）：
@@ -17,19 +18,23 @@ import { md5 } from './md5';
 // 签名材料不硬编码进本仓库/产物（官方密钥随包分发属审核红线）：网页端注入脚本运行在
 // 已登录影视页面内，签名一律回放 diag.ts 捕获到的页面自身合法签名（genAuthx 空材料时
 // 直接返回捕获值，未捕获到返回空串 → 上层跳过该头，靠 cookie 直取同源接口）。
-const AUTHX_KEY = '';
-const AUTHX_SECRET = '';
-
-function genAuthx(url, data) {
-  // 空材料（网页端常态）：直接回放页面自身捕获的合法签名；仍无则空串（上层跳过头）。
-  if (!AUTHX_KEY || !AUTHX_SECRET) {
-    return getCapturedAuthx(String(url)) || '';
-  }
+function signWith(key, secret, url, data) {
   const nonce = String(Math.floor(Math.random() * (1000000 - 100000) + 100000));
   const timestamp = Date.now().toString();
   const dataJson = data ? JSON.stringify(data) : '';
-  const signStr = [AUTHX_KEY, String(url), nonce, timestamp, md5(dataJson), AUTHX_SECRET].join('_');
+  const signStr = [key, String(url), nonce, timestamp, md5(dataJson), secret].join('_');
   return 'nonce=' + nonce + '&timestamp=' + timestamp + '&sign=' + md5(signStr);
+}
+
+async function genAuthxAsync(url, data) {
+  // [lc-1250-web] 运行时提取材料优先：影视 SPA 的 chunk 内嵌 KEY + 自解码 SECRET IIFE，
+  // 从用户自己 NAS 的前端资源提取（只驻页面内存，不随包分发、不落盘），本地真签名。
+  try {
+    const m = await ensureSignMaterials();
+    if (m && m.key && m.secret) return signWith(m.key, m.secret, url, data);
+  } catch (e) { /* 提取失败走回放 */ }
+  // 回放：diag.ts 捕获的页面自身合法签名（body 哈希不一致时服务端会拒绝，仅作兜底）
+  return getCapturedAuthx(String(url)) || '';
 }
 
 const LS_KEY = 'fntv:electron-settings';
@@ -39,8 +44,8 @@ const LS_KEY = 'fntv:electron-settings';
  * fnOS 会话凭证（Trim-MC-token）为 httpOnly 时拿不到 → 后端请求未登录 → 空列表。
  * 改为前端直连：credentials:'include' 自动带全部会话 cookie（含 httpOnly）+ 本地 genAuthx
  * 签名，与海报 fetchItemPoster 同款已验证鉴权路径。 */
-function fnosApi(method, path, body) {
-  const headers = { 'Authx': genAuthx(path, body) };
+async function fnosApi(method, path, body) {
+  const headers = { 'Authx': await genAuthxAsync(path, body) };
   if (body) headers['Content-Type'] = 'application/json';
   return fetch(location.origin + path, {
     method,
@@ -520,7 +525,7 @@ const ipcRenderer = {
       if (!guid) return Promise.resolve(Object.assign({}, empty, { message: '缺少 guid' }));
       const signedFetch = async (method, path, payload) => {
         const headers = { 'Content-Type': 'application/json' };
-        headers.Authx = await genAuthx(path, payload || undefined);
+        headers.Authx = await genAuthxAsync(path, payload || undefined);
         const resp = await fetch(location.origin + path, {
           method, credentials: 'include', headers,
           body: payload ? JSON.stringify(payload) : undefined,
@@ -585,7 +590,7 @@ const ipcRenderer = {
         try {
           const path = '/v/api/v1/item/list';
           const payload = { parent_guid: parentGuid, exclude_folder: 1, sort_column: 'sort_title', sort_type: 'ASC', page: 1, page_size: 200 };
-          const headers = { 'Content-Type': 'application/json', Authx: await genAuthx(path, payload) };
+          const headers = { 'Content-Type': 'application/json', Authx: await genAuthxAsync(path, payload) };
           const resp = await fetch(location.origin + path, {
             method: 'POST', credentials: 'include', headers, body: JSON.stringify(payload),
           });
@@ -630,7 +635,7 @@ const ipcRenderer = {
         try {
           const infoPath = '/v/api/v1/play/info';
           const payload = { item_guid: guid };
-          const authx = await genAuthx(infoPath, payload);
+          const authx = await genAuthxAsync(infoPath, payload);
           const resp = await fetch(location.origin + infoPath, {
             method: 'POST',
             credentials: 'include',
@@ -689,8 +694,8 @@ const ipcRenderer = {
     }
 
     if (channel === 'fnos-gen-authx') {
-      // 本地真签名（与桌面版主进程同算法），不再依赖页面捕获回放；getCapturedAuthx 仅留作诊断对照
-      return Promise.resolve(genAuthx(String(args[0] || ''), args[1]));
+      // [lc-1250-web] 运行时提取材料 → 本地真签名（与桌面版主进程同算法）；提取失败回退捕获回放
+      return genAuthxAsync(String(args[0] || ''), args[1]);
     }
     if (channel === 'app:open-external') {
       // 网页端：新标签页打开外链（桌面端由主进程 shell.openExternal）

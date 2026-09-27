@@ -198,7 +198,7 @@ func makeProxy(d Deps, strip string) http.HandlerFunc {
 			io.Copy(w, strings.NewReader(html))
 			return
 		}
-		newHTML, ok := d.Injector.Inject(html)
+		newHTML, ok := d.Injector.Inject(html, strip != "")
 		if !ok {
 			copyHeader(w.Header(), resp.Header)
 			w.WriteHeader(resp.StatusCode)

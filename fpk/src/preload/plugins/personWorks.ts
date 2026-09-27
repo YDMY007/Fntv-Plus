@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer, shell } from 'electron';
 import { registerHook } from '../core/hooks';
+import { pagePath } from '../core/pageMode';
 import { HookType } from '../core/hooks';
 
 
@@ -301,8 +302,8 @@ function enrichCast(): void {
 
 function checkRoute(): void {
     // [lc-1036] 二级详情页（季页）→ 演职人员行富化
-    if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(location.pathname)) enrichCast();
-    const m = location.pathname.match(/\/v\/person\/([0-9a-f]{32})/i);
+    if (/\/v\/(?:tv|movie)\/season\/[0-9a-f]{32}/i.test(pagePath())) enrichCast();
+    const m = pagePath().match(/\/v\/person\/([0-9a-f]{32})/i);
     if (!m) {
         if (_currentGuid) {
             _currentGuid = '';

@@ -11,14 +11,29 @@ export function getUiTheme(): UiThemeMode {
     const v = localStorage.getItem(UI_THEME_KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v as UiThemeMode;
   } catch (e) { /* ignore */ }
-  return 'light'; // 默认浅色
+  return 'system'; // [lc-1250-web] 默认跟随系统深浅（用户预期：系统深浅自动切换）
 }
 
 /** 系统是否偏好深色(跟随系统时用) */
-function systemPrefersDark(): boolean {
+export function systemPrefersDark(): boolean {
   try {
     return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   } catch (e) { return false; }
+}
+
+/** [lc-1250-web] 页面当前实际明暗（供骨架屏等"贴页面表面"的组件使用）：
+ *  html/body 上的主题标记优先（payload 面板偏好或 fnOS 原生主题都写在这里），
+ *  都没有时回退系统偏好。避免出现"面板存了深色、页面实际浅色、骨架却按面板偏好画成深色"的错位。 */
+export function isSurfaceDark(): boolean {
+  try {
+    const html = document.documentElement;
+    if (html.classList.contains('dark')) return true;
+    if (html.classList.contains('light')) return false;
+    const bm = document.body ? document.body.getAttribute('theme-mode') : null;
+    if (bm === 'dark') return true;
+    if (bm === 'light') return false;
+  } catch (e) { /* ignore */ }
+  return systemPrefersDark();
 }
 
 /** 解析为实际明暗(跟随系统 → 读系统偏好) */

@@ -199,6 +199,16 @@ function detectStrmOrCloud(d: any): string {
  *  带 Authx 签名 + AbortController 4s 超时; 失败返回 null(由调用方保留 DOM 兜底)。 */
 export async function fetchItemDetail(base: string, id: string): Promise<any | null> {
   try {
+    // [网关路径兼容] 优先用注入 shim 捕获的页面自身 item/{guid} 响应（用户访问过详情页后即有,
+    // 回访首页重建轮播时可为该条补上横版 backdrop）；无捕获再走网络(网页端无签名材料, 多半失败)。
+    try {
+      const cap = (window as any).__fntvApiCap;
+      const e = cap && cap.itemDetail && cap.itemDetail[id];
+      if (e && e.resp) {
+        const j = JSON.parse(e.resp);
+        if (j && j.code === 0 && j.data) return mapItemDetail(j, id, base);
+      }
+    } catch (_) { /* 捕获不可用则走网络 */ }
     const { ipcRenderer } = require('electron');
     const path = `/v/api/v1/item/${id}`;
     const authx = await ipcRenderer.invoke('fnos-gen-authx', path);
@@ -210,7 +220,16 @@ export async function fetchItemDetail(base: string, id: string): Promise<any | n
     } finally { clearTimeout(timer); }
     if (!resp.ok) return null;
     const json: any = await resp.json();
-    const d = (json && json.data) || {};
+    return mapItemDetail(json, id, base);
+  } catch (e: any) {
+    log('[lc-569] item detail fetch error:', String((e && e.message) || e).substring(0, 120));
+    return null;
+  }
+}
+
+/** item/{guid} JSON → 轮播详情字段映射（自 fetchItemDetail 抽出, 供捕获响应与网络响应共用）。 */
+function mapItemDetail(json: any, id: string, base: string): any {
+  const d = (json && json.data) || {};
     // [DIAG] STRM/网盘来源识别 + 关键字段记录（不改行为）：定位海报加载失败是否由网盘 STR 媒体引起
     const strmTag = detectStrmOrCloud(d);
     if (strmTag) log('[DIAG] item', id, '疑似来源:', strmTag, '| 候选路径=', String(d.path || d.file_path || '').substring(0, 90));
@@ -279,7 +298,8 @@ export async function fetchItemDetail(base: string, id: string): Promise<any | n
     const g: any = d.genres || d.genre || d.types || d.categories || d.tags;
     if (Array.isArray(g)) genres = g.map((x: any) => (typeof x === 'string' ? x : (x?.name || x?.Name || x?.title || ''))).filter(Boolean);
     else if (typeof g === 'string' && g.trim()) genres = g.split(/[,，/、|]/).map((s: string) => s.trim()).filter(Boolean);
-    log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', JSON.stringify(g).substring(0, 100), ')');
+    // [lc-1250-web] g 为 undefined 时 JSON.stringify 返回 undefined → .substring 抛错（曾致全部详情补全失败）
+    log('[lc-572] item genres:', JSON.stringify(genres), '(raw=', String(JSON.stringify(g) || 'undefined').substring(0, 100), ')');
     return {
       backdrop, poster, logo, // [lc-606] poster = 竖版(item API data.posters, 右侧海报条用)
       totalEps, localEps, totalSeasons, localSeasons,
@@ -288,7 +308,6 @@ export async function fetchItemDetail(base: string, id: string): Promise<any | n
       title: (d.title || d.name || '').trim(),
       strmTag, // [DIAG] 携带来源标签，供轮播渲染/看门狗诊断
     };
-  } catch (e) { return null; }
 }
 
 /** [lc-567] 从当前页已渲染 DOM 抓**已加载的横版图**(naturalWidth>naturalHeight, 如"继续观看"等横版卡片)按 id 建表。

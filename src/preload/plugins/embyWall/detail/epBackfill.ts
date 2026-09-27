@@ -418,15 +418,34 @@ function pickYear(d: any): string {
   return m ? m[1] : '';
 }
 
+/** 从季条目标题取季号（「第 1 季」/「第一季」/「Season 1」）——零成本兜底。 */
+export function seasonNumberFromTitle(t: string): number | null {
+  const s = String(t || '').trim();
+  const m = s.match(/第\s*([0-9一二三四五六七八九十]+)\s*季/) || s.match(/Season\s*(\d{1,3})/i);
+  if (!m) return null;
+  const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : cnNumToInt(m[1]);
+  return isNaN(n) ? null : n;
+}
+
 /** 季页完整 meta 解析（四级兜底）。抛错仅在 getEditDetail 彻底失败时。 */
 export async function resolveSeasonMeta(origin: string, sg: string): Promise<SeasonMeta> {
   const data = await fnosGetEditDetail(origin, sg);
   if (!data) throw new Error('读取季信息失败（getEditDetail）');
   let tmdbId = extractTmdbId(data) || '';
-  let title = stripSeasonSuffix(String(data.title || data.name || '').trim());
+  const rawTitle = String(data.title || data.name || '').trim();
+  let title = stripSeasonSuffix(rawTitle);
   let year = pickYear(data);
   const bangumiId = extractBangumiId(data) || '';
-  const seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number) ?? findSeasonNumberDom();
+  // [lc-1250-e] fnOS 的 getEditDetail 实测不返回季号字段（用户报障：Snull → 无法确定季号）。
+  //   季号判定链：编辑态字段 → 季标题后缀（「第 1 季」等）→ 签名 GET item/{sg} 的
+  //   season_number（实测权威来源，季详情接口自带）→ DOM 探测。
+  let seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number)
+    ?? seasonNumberFromTitle(rawTitle);
+  if (seasonNumber === null) {
+    const info = await fnosGet(origin, '/v/api/v1/item/' + sg).catch(() => null);
+    if (info) seasonNumber = numOrNull(info.season_number ?? info.index_number ?? info.index);
+  }
+  if (seasonNumber === null) seasonNumber = findSeasonNumberDom();
 
   // ② 父级剧集：Bangumi 源把剧名/TMDB id 只放在剧集层
   if (!title || !tmdbId || !year) {

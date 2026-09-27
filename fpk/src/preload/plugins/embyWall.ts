@@ -5,7 +5,7 @@ import { buildCard as buildCustomLogoCard, refreshCard as refreshCustomLogoCard 
 import { applyLoginBgVar } from './embyWall/login';
 import { destroyCarousel, findMediaLibrarySection, injectCarousel, isModalOpen, resumeCarousel } from './embyWall/carousel/render';
 import { fntvOpenPatchApplyPopup } from './embyWall/modals/patch';
-import { buildStatsCard } from './embyWall/modals/telemetry'; // [v1.12.0] 匿名使用统计卡（关于页）
+import { buildStatsCard, buildFeedbackBody } from './embyWall/modals/telemetry'; // [v1.12.0] 匿名使用统计卡（关于页）
 import { injectVideoPreviewExternalPlay } from './embyWall/nav/inject';
 import { isDetailPage } from './embyWall/detail/glass';
 import { applyDetailBeautify, teardownDetailBeautify } from './embyWall/detail/immersive';
@@ -35,7 +35,7 @@ import { armBootCover } from './embyWall/carousel/bootCover'; // [lc-066] 极简
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
-import { isFntvTvPage } from '../core/pageMode';
+import { isFntvTvPage, pagePath, pagePathOf, navToTvPage } from '../core/pageMode';
 import { getLang, setLang, t } from '../core/i18n'; // [lc-1065] 设置面板语言切换
 // [lc-563] 轮播数据源 = 复用 hotUpdates.ts 已验证可行的 ensureLibraryIndex（稳定构建 97 项），取 Map 前 10 项 = 首屏 DOM 顺序 = 最近更新在前。
 // 兜底 = 当前首页已渲染 DOM 真实卡片。绝不用硬编码数据。绝不在隐藏 iframe 内强制要求 poster（fnOS 懒加载图永远没真实 URL → 跳过 → 0 个）。
@@ -143,10 +143,10 @@ function handle(): void {
     document.documentElement.classList.toggle('fnos-tv-page', isFntvTvPage());
   };
   syncTvPageClass();
-  let _lastPath = location.pathname;
+  let _lastPath = pagePath();
   const _tvClassTimer = window.setInterval(() => {
-    if (location.pathname !== _lastPath) {
-      _lastPath = location.pathname;
+    if (pagePath() !== _lastPath) {
+      _lastPath = pagePath();
       syncTvPageClass();
       log('[TV类同步]', location.pathname, 'isTv=', isFntvTvPage());
     }
@@ -2328,24 +2328,21 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [v0.78.0] 「打开弹幕文件夹」按钮已删：那是外部播放器（MPV）的弹幕落盘目录，网页端不存在。
 
 
-    // ═══ [v1.8.0] 自定义刮削服务（占位，开放中未正式生效）═══
+    // ═══ [v1.8.0] 自定义刮削服务（[lc-1250-web] 「未正式生效」占位文案与角标已按要求移除）═══
     const secScraperSvc = section('自定义刮削服务');
     const ssvBody = secScraperSvc.body;
     ssvBody.style.cssText = 'padding:14px 16px;display:flex;flex-direction:column;gap:8px;';
     const ssvDesc = document.createElement('div');
     ssvDesc.style.cssText = 'font-size:11.5px;color:var(--fnos-ui-sub);line-height:1.6;';
-    ssvDesc.textContent = t('接入自定义刮削服务，用你自己的数据源刷新剧集标题、简介与海报等元数据。功能开放中，未正式生效，敬请期待。');
+    ssvDesc.textContent = t('接入自定义刮削服务，用你自己的数据源刷新剧集标题、简介与海报等元数据。');
     ssvBody.appendChild(ssvDesc);
-    const ssvBadge = document.createElement('div');
-    ssvBadge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;align-self:flex-start;'
-      + 'padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;'
-      + 'background:rgba(255,180,60,.12);color:var(--fnos-ui-warn,#b0813a);border:1px solid rgba(255,180,60,.35);';
-    ssvBadge.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--fnos-ui-warn,#d09030);display:inline-block;"></span>' + t('未正式生效');
-    ssvBody.appendChild(ssvBadge);
 
     // ===== 诊断信息（汇总运行态，减少"查日志"往返）=====
     const secDiag = section('诊断信息');
     const diagBody = secDiag.body;
+    // [lc-1197→web] Bug 反馈 + 日志上传卡（与桌面端诊断与日志分类同款；日志由后端自动打包脱敏）
+    const secFeedback = section('Bug 反馈与日志上传');
+    secFeedback.body.appendChild(buildFeedbackBody());
     const diagPre = document.createElement('pre');
     diagPre.style.cssText = 'margin:0;padding:10px;background:rgba(0,0,0,.18);border-radius:8px;font-size:10.5px;'
       + 'line-height:1.55;color:var(--fnos-ui-text);white-space:pre-wrap;word-break:break-all;max-height:260px;overflow:auto;';
@@ -2554,7 +2551,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const aboutDesc = document.createElement('div');
     aboutDesc.style.cssText = 'font-size:13px;line-height:1.9;color:var(--fnos-ui-text);opacity:.82;max-width:440px;';
-    aboutDesc.textContent = t('飞牛影视网页端增强应用（fpk 反向代理注入）：海报墙/轮播美化、网页弹幕、多源同步（豆瓣/Bangumi/Trakt）、自定义刮削源回填，手机/平板/电脑浏览器全设备生效。不修改系统与影视应用文件，个人练手作品。桌面全量版：github.com/YDMY007/Fntv-Plus');
+    aboutDesc.textContent = t('NAS 装一次，电视、平板、手机、电脑浏览器打开飞牛影视即是增强版：沉浸式美化（海报墙、四型轮播、详情页柔光玻璃、Logo 自定义）、弹幕（B站 / 自建源 / 弹弹play 兜底）、豆瓣 / Bangumi / Trakt 同步、跳过片头与跨设备播放记忆、TMDB 信息卡与每日放送、观影记录与年度报告、自定义刮削源回填。经飞牛统一网关注入，不改动系统与影视应用任何文件，卸载即还原，个人练手作品。');
     secBodyAbout.appendChild(aboutDesc);
 
     const aboutVer = document.createElement('div');
@@ -2649,7 +2646,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         paintCs();
         // [网页端] 入口就是裸 /v 路由（后端反代剥离 /app/fntvplus 前缀），跳同源 /v 即回首页重载；
         //   新样式在重载后由 render.ts 从 localStorage 读取，干净生效（避免 live-rebuild 跨样式残留）。
-        try { window.location.href = (window.location.origin || '') + '/v'; }
+        try { navToTvPage('/v'); }
         catch (_) { try { window.location.reload(); } catch (__) { /* ignore */ } }
       });
     });
@@ -3520,7 +3517,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       { id: 'account', label: '账号与网络', els: [secBangumi.el, secTmdb.el, secDouban.el, secTrakt.el, secCustomProxy.el, secTmdbDirect.el] },
       // [v1.10.2] 自定义刮削源→Jav 刮削七卡从「账号与网络」拆出独立成类；开发中的「自定义刮削服务」置顶占位
       { id: 'scraper', label: '自定义刮削', els: [secScraperSvc.el, secScraper.el, secFanart.el, secTvmaze.el, secOmdb.el, secMal.el, secJav.el] },
-      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secDebug.el] },
+      { id: 'diag', label: '诊断与日志', els: [secDiag.el, secFeedback.el, secDebug.el] },
       { id: 'about', label: '关于', els: [secAbout.el] },
     ];
     // 每个分类一个 pane(竖向卡片列); 清掉卡片在旧 grid 里设的 gridColumn(现已不在 grid 内)
@@ -5026,12 +5023,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const _stopCarouselOffHome = (newHref: string | undefined): void => {
       const h = newHref || location.href;
       let p = '';
-      try { p = new URL(h, location.origin).pathname; } catch (_) { p = location.pathname; }
+      try { p = pagePathOf(new URL(h, location.origin).pathname); } catch (_) { p = pagePath(); }
       if (p === '/v' || p === '/v/') return;
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
     (history as any).pushState = function (...a: any[]) {
-      const prevPath = location.pathname;
+      const prevPath = pagePath();
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _ps.apply(this, a as any);
       logNav('pushState');
@@ -5048,7 +5045,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleFolderScraperButton(); // [自定义刮削] 个人视频文件夹页「⟳ 文件夹刮削」浮动按钮：非文件夹页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
-      const prevPath = location.pathname;
+      const prevPath = pagePath();
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
       logNav('replaceState');
@@ -5164,7 +5161,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   反复调用 injectCarousel(每次都会先 destroyCarousel 再被路径守卫挡回), 与详情页自身的重活叠加,
   //   是从"首页轮播图打开二级详情页"这条路径才卡死、从剧集列表进入却正常的关键差异。
   //   非首页一律跳过轮播重建(回到首页时 pushState/popstate 钩子会重新注入)。
-  const _isHomePath = (): boolean => { const p = location.pathname; return p === '/v' || p === '/v/'; };
+  const _isHomePath = (): boolean => { const p = pagePath(); return p === '/v' || p === '/v/'; };
 
   let _wtsTimer = 0;
   // [网页端] 触发风暴熔断：1 秒内回调超过 40 次即视为自激（回调自身在改 DOM → 再触发自己），

@@ -261,11 +261,11 @@ func TestInjectorIdempotent(t *testing.T) {
 		t.Fatalf("inject.New: %v", err)
 	}
 	html := "<html><body>hi</body></html>"
-	out1, ok1 := inj.Inject(html)
+	out1, ok1 := inj.Inject(html, false)
 	if !ok1 || !strings.Contains(out1, "<!-- FNTV_PLUS_INJECT_BEGIN -->") {
 		t.Fatalf("first inject failed: ok=%v", ok1)
 	}
-	out2, ok2 := inj.Inject(out1)
+	out2, ok2 := inj.Inject(out1, false)
 	if ok2 {
 		t.Errorf("second inject should be no-op (idempotent), got ok=%v", ok2)
 	}

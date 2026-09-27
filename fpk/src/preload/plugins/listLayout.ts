@@ -26,6 +26,7 @@
  */
 
 import { registerHook, HookType } from '../core/hooks';
+import { pagePath } from '../core/pageMode';
 
 const MIN_PAD = 20; // 每侧最小留白
 
@@ -106,7 +107,7 @@ let lastPad = -1;        // 上一次测量得到的 pad
 let confirmCount = 0;    // 连续确认次数（≥2 才锁定）
 
 function makeKey(parent: HTMLElement): string {
-    return location.pathname + '|' + parent.clientWidth;
+    return pagePath() + '|' + parent.clientWidth;
 }
 
 /**
@@ -253,13 +254,13 @@ function startPolling(): void {
  * 锁定 key 含「路由 + 容器宽」，任一变化 applyFix 自会失锁重算。
  */
 let navObserver: MutationObserver | null = null;
-let lastPath = location.pathname;
+let lastPath = pagePath();
 function watchChanges(): void {
     if (navObserver || !document.body) return;
     navObserver = new MutationObserver(() => {
         // 仅在路由真的变化时重启轮询；虚拟滚动的 DOM 变化直接忽略
-        if (location.pathname !== lastPath) {
-            lastPath = location.pathname;
+        if (pagePath() !== lastPath) {
+            lastPath = pagePath();
             startPolling();
         } else if (!lockedKey) {
             // 未锁定期间（首屏渐进渲染）也允许推进

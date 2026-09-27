@@ -6,6 +6,7 @@
 //   接线由入口（组合根）完成：setOnShowsReady(injectCarousel)。
 
 import { S, CAROUSEL_SCRAPE_CAP, CAROUSEL_TARGET } from '../state';
+import { pagePath } from '../../../core/pageMode';
 import { log, clog } from '../log';
 import { ensureLibraryIndex } from '../../hotUpdates';
 import { updateCarouselProgress, completeCarouselProgress } from './progress';
@@ -209,7 +210,7 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
   if (S.apiLoading) return S.apiShows;
   // [lc-558] 不在首页(如 /v/login)时不预热: 未登录时 /v/list/all 抓空且会被 ensureLibraryIndex 缓存,
   // 导致后续永不重拉(白屏死锁)。改为注册 watcher, 等路由到达首页(/v)再真正拉取。
-  const p = location.pathname;
+  const p = pagePath();
   if (p !== '/v' && p !== '/v/' && p !== '/') {
     watchHomeThenFetch(base);
     return S.apiShows;
@@ -380,7 +381,7 @@ function watchHomeThenFetch(base: string): void {
   if (_carouselWatchArmed) return;
   _carouselWatchArmed = true;
   const trigger = (): void => {
-    const hp = location.pathname;
+    const hp = pagePath();
     if ((hp === '/v' || hp === '/v/' || hp === '/') && !S.apiLoaded && !S.apiLoading) {
       fetchShowsViaIPC(base);
     }
@@ -388,7 +389,7 @@ function watchHomeThenFetch(base: string): void {
   window.addEventListener('popstate', trigger);
   // 轮询兜底: 飞牛登录跳转常不触发 history hook, 用轻量轮询探测到达首页
   const iv = setInterval(() => {
-    const hp = location.pathname;
+    const hp = pagePath();
     if (hp === '/v' || hp === '/v/' || hp === '/') { clearInterval(iv); trigger(); }
   }, 1500);
 }

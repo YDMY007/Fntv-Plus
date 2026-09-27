@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron';
 import { registerHook, HookType } from '../core/hooks';
+import { pagePath } from '../core/pageMode';
 import { extractCurrentGuid } from './skipInject';
 import { t } from '../core/i18n';
 import logger from '../core/logger';
@@ -116,7 +117,7 @@ function goNext(): void {
     if (!nextInfo || !nextInfo.guid || !armedGuid) return;
     if (firedFor === armedGuid) return;
     firedFor = armedGuid;
-    const target = location.pathname.replace(armedGuid, nextInfo.guid);
+    const target = pagePath().replace(armedGuid, nextInfo.guid);
     removeCard();
     logger.info('自动连播 → ' + target);
     history.pushState({}, '', target);

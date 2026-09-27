@@ -22,7 +22,7 @@
 import { registerHook, HookType } from '../core/hooks';
 import { ipcRenderer } from 'electron';
 import log from '../core/logger';
-import { isFntvTvPage } from '../core/pageMode';
+import { isFntvTvPage, pagePath, navToTvPage } from '../core/pageMode';
 
 const LOG = '[WatchHistory]';
 const ENTRY_ID = 'fntv-wh-entry';
@@ -1370,8 +1370,7 @@ function fnosRoutePrefix(type: string): string {
 function viewItemInFnos(item: ShowItem): void {
     if (!item.guid) return;
     const prefix = fnosRoutePrefix(item.type);
-    const url = `${location.origin}/v/${prefix}/${item.guid}`;
-    try { location.href = url; } catch { /* ignore */ }
+    try { navToTvPage(`/v/${prefix}/${item.guid}`); } catch { /* ignore */ }
 }
 
 /** 预设渐变色盘（按名称 hash 稳定取色，避免每次随机） */
@@ -2141,10 +2140,10 @@ function closePanel(goHome = false): void {
     // 回影视首页仅发生在 goHome=true（点 ✕）且当前处于影视 App 子页时；
     // 空白/Esc 关闭一律原地收起（用户要求：只有点 ✕ 才返回首页）
     if (goHome && isFntvTvPage()) {
-        const p = (location.pathname || '').replace(/\/+$/, '');
+        const p = pagePath().replace(/\/+$/, '');
         if (p !== '/v') {
             // 影视子页（/v/movie|tv|...）：回影视首页
-            try { location.href = location.origin + '/v'; } catch { /* ignore */ }
+            try { navToTvPage('/v'); } catch { /* ignore */ }
         }
         // 已在影视首页：直接关闭面板即可，不再整页刷新（避免关闭观影记录时首页闪烁重排）
     }

@@ -1,6 +1,6 @@
 import { S } from '../state';
 import { ensureStyle4Css } from './styles';
-import { getEffectiveDark } from '../theme';
+import { isSurfaceDark } from '../theme';
 import { ipcRenderer } from 'electron';
 import { log, clog } from '../log';
 
@@ -86,7 +86,7 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
   const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10); return (v >= 1 && v <= 4) ? v : 4; })();
-  const _isDark = getEffectiveDark(); // [lc-815] 跟随 fnOS 明暗主题
+  const _isDark = isSurfaceDark(); // [lc-1250-web] 跟随页面实际明暗（系统/原生主题标记），不再按面板存储偏好错画深色
 
   const container = document.createElement('div');
   container.setAttribute('data-fntv-carousel-style', String(_cs));

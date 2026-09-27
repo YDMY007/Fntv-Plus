@@ -80,13 +80,9 @@ export function buildStatsCard(): HTMLElement {
     + 'background:var(--fnos-ui-input-bg)!important;border:1px solid var(--fnos-ui-border3);';
 
   const wrap = document.createElement('div');
-  const status = document.createElement('div');
-  status.style.cssText = 'font-size:11px;color:' + SUB + ';margin-top:8px;min-height:14px;';
-  status.textContent = t('读取中…');
 
   const toggle = mkToggle(true, (v) => {
     ipcRenderer.invoke('stats:set-enabled', v).catch(() => {});
-    status.textContent = v ? t('已开启，明天起每天上报一次。') : t('已关闭，不会再发送任何数据。');
   });
 
   const title = document.createElement('div');
@@ -95,31 +91,74 @@ export function buildStatsCard(): HTMLElement {
   wrap.appendChild(title);
   wrap.appendChild(mkRow('参与匿名统计', toggle.el));
   wrap.appendChild(mkNote('开启后收集必须的应用版本 + 系统类型，用于日志反馈收集需要的系统信息，方便排查故障 Bug。'
-    + '不涉及账号、IP、媒体库及文件路径等隐私数据，服务端亦不做 IP 存储，可随时在这里关闭。'
-    + '匿名 ID 取自 NAS 机器标识的哈希，每台设备固定唯一不变。仅在有人打开增强页面时计数。'));
-  wrap.appendChild(status);
+    + '不涉及账号、IP、媒体库及文件路径等隐私数据，服务端亦不做 IP 存储，可随时在这里关闭。'));
 
   // [lc-1250] 精简：移除「立即上报一次」「重置匿名 ID」按钮（匿名 ID 已是机器级固定, 重置无意义）
-
-  // 初值回填（状态全在后端：网页端没有主进程配置可读）
+  // [lc-1250-web] 状态行整行不显示（读取中/上报结果/计划提示等一律不展示），仅保留开关同步
   ipcRenderer.invoke('stats:get-info').then((s: any) => {
     if (!s) return;
     toggle.set(s.enabled !== false);
-    if (!s.configured) {
-      status.textContent = t('服务端未配置，当前不会发送任何数据。');
-      return;
-    }
-    if (s.devMode) {
-      status.textContent = t('开发版默认不上报。');
-    } else if (s.lastDay) {
-      status.textContent = t('上次上报：') + s.lastDay + (s.lastOk ? t('（成功）') : t('（失败，稍后自动重试）'));
-    } else if (s.usedToday) {
-      status.textContent = t('今天已记录使用，将在数小时内上报。');
-    } else {
-      status.textContent = t('尚未上报过（打开一次增强页面后开始计数）。');
-    }
-  }).catch(() => { status.textContent = ''; });
+  }).catch(() => {});
 
   card.appendChild(wrap);
   return card;
+}
+
+/**
+ * [lc-1197→web] Bug 反馈 + 日志上传卡（「诊断与日志」分类）。
+ * 网页端适配：日志全部在 NAS 后端（fntvplus.log + client.log，提交时自动打包脱敏），
+ * 无需桌面版的「选择日志文件上传 / 打开日志目录」——填描述点提交即完成一键反馈。
+ */
+export function buildFeedbackBody(): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-direction:column;';
+
+  const tip = mkNote('遇到问题？在这里直接提交。提交会自动附带最近的前后端日志（账号、令牌、密钥、手机号、邮箱一律打码；保留 NAS 地址与域名便于排查网络问题）与设备环境信息（应用版本 / fnOS 版本 / 时间 / 当前页面）。');
+  wrap.appendChild(tip);
+
+  const area = document.createElement('textarea');
+  area.placeholder = t('描述你遇到的问题 / 复现步骤（必填）…');
+  area.style.cssText = 'width:100%;box-sizing:border-box;min-height:88px;margin-top:8px;padding:10px 12px;'
+    + 'border-radius:10px;font-size:12.5px;line-height:1.6;font-family:inherit;resize:vertical;'
+    + 'background:var(--fnos-ui-input-bg)!important;color:var(--fnos-ui-text);'
+    + 'border:1px solid var(--fnos-ui-border3);outline:none;';
+  wrap.appendChild(area);
+
+  const contact = document.createElement('input');
+  contact.type = 'text';
+  contact.placeholder = t('联系方式（选填，方便回复你：QQ / 邮箱）');
+  contact.style.cssText = 'width:100%;box-sizing:border-box;margin-top:8px;padding:9px 12px;border-radius:10px;'
+    + 'font-size:12.5px;font-family:inherit;background:var(--fnos-ui-input-bg)!important;'
+    + 'color:var(--fnos-ui-text);border:1px solid var(--fnos-ui-border3);outline:none;';
+  wrap.appendChild(contact);
+
+  const status = document.createElement('div');
+  status.style.cssText = 'font-size:11px;color:' + SUB + ';margin-top:8px;min-height:14px;';
+  wrap.appendChild(status);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;';
+  const submitBtn = mkBtn('提交反馈', true);
+  btnRow.appendChild(submitBtn);
+  wrap.appendChild(btnRow);
+
+  submitBtn.addEventListener('click', () => {
+    const msg = area.value.trim();
+    if (!msg) { status.textContent = t('请先填写问题描述。'); area.focus(); return; }
+    submitBtn.disabled = true;
+    status.textContent = t('提交中…');
+    ipcRenderer.invoke('feedback:submit', { message: msg, contact: contact.value.trim(), page: location.href })
+      .then((r: any) => {
+        if (r && r.ok) {
+          status.textContent = t('提交成功，感谢反馈！编号：') + (r.id ? String(r.id).slice(0, 8) : '—');
+          area.value = '';
+        } else {
+          status.textContent = t('提交失败：') + ((r && r.error) || t('未知错误'));
+        }
+      })
+      .catch((e: any) => { status.textContent = t('提交失败：') + String((e && e.message) || e); })
+      .finally(() => { submitBtn.disabled = false; });
+  });
+
+  return wrap;
 }

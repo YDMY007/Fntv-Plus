@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
-import { isFntvTvPage } from '../core/pageMode';
+import { isFntvTvPage, pagePath } from '../core/pageMode';
 import logger from '../core/logger';
 // [lc-1046] 顶部 logo 自定义：预设(流媒体平台)/上传/恢复默认。本模块只单向依赖它的解析器，
 //   把默认 logo dataURI 登记过去；设置卡片在 customLogo.ts 内自行注入(#fnos-appearance-ctrl 锚点)。
@@ -208,7 +208,7 @@ function injectTitleBar(): void {
     // [v375] 仅首页显示 logo: 非首页(详情/播放/列表/搜索/个人中心等)隐藏, 避免遮挡观看
     const isHomePage = function (): boolean {
       const href = location.href.toLowerCase();
-      const pt = (location.pathname || '/').toLowerCase();
+      const pt = pagePath().toLowerCase();
       // 明确非首页的子路由/页面
       if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false;
       if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;

@@ -57,10 +57,6 @@ const EN: Record<string, string> = {
     // ── [v1.12.0] 设置面板「关于」页：匿名使用统计卡（modals/telemetry.ts）──
     '📊 匿名使用统计': '📊 Anonymous usage stats',
     '参与匿名统计': 'Join anonymous stats',
-    '每天最多上报一次，内容只有：随机匿名 ID + 版本号 + 系统类型。不采集账号、IP、媒体库与文件路径，服务端也不存 IP。仅在有人打开增强页面时计数。':
-        'At most one report per day, containing only: a random anonymous ID + version + system type. '
-        + 'No account, IP, library or file paths are collected; the server does not store IPs either. '
-        + 'Counted only when someone actually opens the enhanced page.',
     '立即上报一次': 'Report once now',
     '重置匿名 ID': 'Reset anonymous ID',
     '读取中…': 'Loading…',

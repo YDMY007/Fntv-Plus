@@ -1,4 +1,5 @@
 import { resolveSeasonHref } from './href';
+import { pagePath } from '../../../core/pageMode';
 
 import { S } from '../state';
 import { applyTitleLogo, swapTitleToLogo } from './logo';
@@ -105,7 +106,7 @@ export function injectCarousel(): void {
   destroyCarousel();
 
   // [lc-182] 路径守卫: 轮播仅注入首页(/v 或 /v/)。
-  const p = location.pathname;
+  const p = pagePath();
   if (p !== '/v' && p !== '/v/') {
     return; // 静默跳过, 不打日志(避免非首页页面刷屏)
   }

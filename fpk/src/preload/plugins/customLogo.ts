@@ -27,6 +27,7 @@
 // pageBg 同链路），启动 seed（patch.ts settings:get）以服务端为准 reconcile；自定义上传 dataURL
 // ≤700KB 才随传（settings POST 1MB 上限），过大只存本机、其他设备 resolveLogoSrc 兜底默认图。
 import { registerHook } from '../core/hooks';
+import { pagePath } from '../core/pageMode';
 import { HookType } from '../core/hooks';
 import { ipcRenderer } from 'electron';
 import logger from '../core/logger';
@@ -128,7 +129,7 @@ export function resolveLogoSrc(choice?: LogoChoice): string {
  *  （body 顶层 fixed top:72px 水平居中 height:30px，仅首页可见，4s 守护重建 + 路由显隐）。 */
 export function applyLogoToDom(choice?: LogoChoice): void {
   let img = document.getElementById('tb-logo') as HTMLImageElement | null;
-  const onHome = /\/v\/?$/.test(location.pathname || '');
+  const onHome = /\/v\/?$/.test(pagePath());
   if (!img) {
     if (!onHome) return;
     img = document.createElement('img');
@@ -142,7 +143,7 @@ export function applyLogoToDom(choice?: LogoChoice): void {
       (window as any).__fntvLogoGuard = window.setInterval(() => {
         try {
           const el = document.getElementById('tb-logo') as HTMLImageElement | null;
-          const oh = /\/v\/?$/.test(location.pathname || '');
+          const oh = /\/v\/?$/.test(pagePath());
           if (!el) { applyLogoToDom(); return; }
           el.style.visibility = oh ? 'visible' : 'hidden';
         } catch { /* ignore */ }

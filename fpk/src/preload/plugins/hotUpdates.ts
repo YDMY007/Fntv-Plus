@@ -9,7 +9,7 @@
 import { ipcRenderer } from 'electron';
 import { registerHook } from '../core/hooks';
 import { HookType } from '../core/hooks';
-import { isFntvTvPage } from '../core/pageMode';
+import { isFntvTvPage, pagePath, tvHref } from '../core/pageMode';
 import logger from '../core/logger';
 // [lc-1087] 库索引主源: item/list API 客户端(叶子模块)。不能 import ./embyWall/carousel/api ——
 //   api.ts 已 import 本文件的 ensureLibraryIndex 当轮播兜底1, 反向 import 会成环。
@@ -70,7 +70,7 @@ function shouldInject(): boolean {
 let _lastHotHome: boolean | null = null;
 function isHomePage(): boolean {
   const href = location.href.toLowerCase();
-  const path = (location.pathname || '/').toLowerCase();
+  const path = pagePath().toLowerCase();
   if (/\/v\/(tv|movie|anime|cartoon|documentary|variety|show)/.test(href)) return false; // 详情/播放
   if (/\/play($|\/|#)/.test(href) || /\/watch($|\/|#)/.test(href)) return false;          // 播放页
   if (/\/search/.test(href)) return false;                                                  // 搜索
@@ -845,9 +845,9 @@ function navigateToDetail(href: string): void {
       const seasonRendered = !!document.querySelector('[data-id="details"]')
         || !!document.querySelector('.fnos-season-2col')
         || !!document.querySelector('a[href*="/v/person/"]');
-      if (!backBtn && !seasonRendered) location.href = href;
+      if (!backBtn && !seasonRendered) location.href = tvHref(href);
     }, 600);
-  } catch (e) { try { location.href = href; } catch { /* ignore */ } }
+  } catch (e) { try { location.href = tvHref(href); } catch { /* ignore */ } }
 }
 
 /** 把时间戳格式化为底部小字：当天显示 HH:MM，跨天显示 M/D HH:MM（缓存可能是昨天的快照） */

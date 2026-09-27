@@ -109,6 +109,30 @@ function findSeasonNumberDom(): number | null {
 
 // ── 飞牛 API（nonce + Authx 约定同 logo.ts lc-425）──
 
+/** [lc-1250-e] GET 飞牛 item 详情（季号权威来源：季详情接口自带 season_number，getEditDetail 不带）。 */
+async function fnosGet(origin: string, path: string): Promise<any | null> {
+  try {
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', path).catch(() => '');
+    const resp = await fetch(origin + path, {
+      method: 'GET', credentials: 'include',
+      headers: authx ? { Authx: authx } : {},
+    });
+    if (!resp.ok) return null;
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0) return null;
+    return j.data || null;
+  } catch (e) { return null; }
+}
+
+/** [lc-1250-e] 从季条目标题取季号（「第 1 季」/「第一季」/「Season 1」）——零成本兜底。 */
+function seasonNumberFromTitle(t: string): number | null {
+  const s = String(t || '').trim();
+  const m = s.match(/第\s*([0-9一二三四五六七八九十]+)\s*季/) || s.match(/Season\s*(\d{1,3})/i);
+  if (!m) return null;
+  const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : cnNumToInt(m[1]);
+  return isNaN(n) ? null : n;
+}
+
 function fnNonce(): string {
   return String(Math.floor(Math.random() * 900000) + 100000);
 }
@@ -286,7 +310,15 @@ async function runBackfill(btn: HTMLButtonElement): Promise<void> {
     if (!data) throw new Error('读取季信息失败（getEditDetail）');
     const tmdbId = extractTmdbId(data) || '';
     const title = String(data.title || data.name || '').trim();
-    const seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number) ?? findSeasonNumberDom();
+    // [lc-1250-e] fnOS 的 getEditDetail 实测不返回季号字段：编辑态字段 → 季标题后缀 →
+    //   签名 GET item/{guid} 的 season_number（权威）→ DOM 探测。
+    let seasonNumber = numOrNull(data.index_number ?? data.index ?? data.season_number)
+      ?? seasonNumberFromTitle(String(data.title || data.name || ''));
+    if (seasonNumber === null) {
+      const info = await fnosGet(origin, '/v/api/v1/item/' + guid).catch(() => null);
+      if (info) seasonNumber = numOrNull(info.season_number ?? info.index_number ?? info.index);
+    }
+    if (seasonNumber === null) seasonNumber = findSeasonNumberDom();
     if (seasonNumber === null) throw new Error('无法确定季号（页面与元数据都没有）');
     if (!tmdbId && !title) throw new Error('无 TMDB id 且无标题，无法匹配');
 

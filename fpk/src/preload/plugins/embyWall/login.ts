@@ -1,5 +1,5 @@
 import { ipcRenderer } from 'electron';
-import { isFntvTvPage } from '../../core/pageMode';
+import { isFntvTvPage, pagePath, isGatewayPath, GW_PREFIX, navToTvPage } from '../../core/pageMode';
 import { log } from './log';
 
 // embyWall/login.ts — 登录页增强：登录后自动跳影视、/v/login 账号自动填充、登录页自定义背景
@@ -24,11 +24,11 @@ import { log } from './log';
       const p = location.pathname || '/';
       // 仅当落在飞牛原生桌面(根路径 '/')时跳影视; 其他非 /v 路径(异常)不主动跳, 交给主进程守卫
       if (p !== '/') return;
-      const target = location.origin + '/v';
+      const target = location.origin + (isGatewayPath() ? GW_PREFIX : '') + '/v';
       if (location.href === target) return;
       ipcRenderer.send('renderer-desktop-fix',
         '登录后自动跳影视: 当前在飞牛原生桌面(/), 跳转到 /v');
-      location.href = target;
+      navToTvPage('/v');
     } catch (e) { /* ignore */ }
   };
   // 页面可能 SPA 延迟渲染, 延迟 1.5s 执行一次; 一次性(无 setInterval)→ 任何循环都不可能发生
@@ -45,7 +45,7 @@ import { log } from './log';
 //   凭据来源: auth.ts 的 get-config IPC 返回 config(account/domain) + history(含密码若勾选"记住密码").
 (function autoFillVLogin(): void {
   // 仅在飞牛影视登录页(/v/login)介入; fnOS 系统 /signin 不归这里管
-  if (location.pathname !== '/v/login') return;
+  if (pagePath() !== '/v/login') return;
 
   const { ipcRenderer } = require('electron');
 
