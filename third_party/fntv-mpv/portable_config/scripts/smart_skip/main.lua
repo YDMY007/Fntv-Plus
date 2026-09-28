@@ -50,16 +50,44 @@ local skip_btn = {
     active = false,
     hover = false,
     kind = nil,    -- "跳过片头" / "跳过片尾"
-    target = 0,    -- 点击后跳转到的秒数
+    target = 0,    -- 标记区间终点（日志用）
+    seg_len = 0,   -- [lc-1265] 打点得出的区间时长（秒）；点击跳过=从当前位置相对跳过这么久
     rect = { x = 0, y = 0, w = 0, h = 0 },
 }
 
 -- time-pos 观察器只注册一次（file-loaded 每集都会触发，重复注册会叠加多个观察器）
 local timepos_observed = false
--- 已点击跳过的段落标记（每集重置，避免点击后按钮在落点上再次闪现）
-local skip_state = { intro_done = false, outro_done = false }
 -- 点击跳过后落点恰在区间右端点上，留一小段缓冲避免按钮在落点上闪现
 local BUTTON_EPSILON = 0.3
+
+-- [lc-1265] 跨文件共享状态（本文件与 menu.lua 同属一个 Lua state，经 _G 传递）：
+--   gen                    每换集/每次手动改标记 +1，使在途的异步结果作废（防串集/防旧响应覆盖新打点）
+--   source                 'local'=精确 4 值人工标记 | 'server'=飞牛 2 值/兜底换算 | nil
+--   have_intro/have_outro  该区间是否已被人工标记覆盖（已覆盖则自动来源不再写 opts）
+--   intro_done/outro_done  本集该段落是否已点击跳过（每集重置）
+local skip_shared = _G.fntv_skip_state
+if not skip_shared then
+    skip_shared = { gen = 0, source = nil, have_intro = false, have_outro = false,
+                    intro_done = false, outro_done = false }
+    _G.fntv_skip_state = skip_shared
+end
+local skip_state = skip_shared
+
+-- [lc-1265] 异步回调有效性：换集或用户重新打点后，在途的旧结果必须丢弃
+local function gen_alive(gen)
+    if gen ~= nil and gen ~= skip_shared.gen then
+        msg.verbose("跳过数据响应已过期（换集或重新标记），丢弃")
+        return false
+    end
+    return true
+end
+
+-- [lc-1265] 该区间是否已有精确人工标记（=最高优先级，自动/兜底来源不得覆盖）
+local function has_local_marks(section)
+    if section == 'intro' then return skip_shared.have_intro end
+    if section == 'outro' then return skip_shared.have_outro end
+    return skip_shared.have_intro or skip_shared.have_outro
+end
 
 -- MBTN_LEFT 强制绑定当前是否已注册
 local click_bound = false
@@ -92,7 +120,8 @@ local function try_theintrodb_fallback()
 
         local intro = resp.intro and resp.intro[1]
         local credits = resp.credits and resp.credits[1]
-        if intro and not aniskip_intro_applied then
+        -- [lc-1265] 人工标记区间优先：已有精确标记时不覆盖
+        if intro and not aniskip_intro_applied and not has_local_marks('intro') then
             local s = (intro.start_ms and intro.start_ms / 1000) or 0
             local e = (intro.end_ms and intro.end_ms / 1000) or 0
             if e > s then
@@ -101,7 +130,7 @@ local function try_theintrodb_fallback()
                 msg.info(string.format("theintrodb 片头: %.0f - %.0f 秒", s, e))
             end
         end
-        if credits and not aniskip_outro_applied then
+        if credits and not aniskip_outro_applied and not has_local_marks('outro') then
             local s = (credits.start_ms and credits.start_ms / 1000) or 0
             local e = (credits.end_ms and credits.end_ms / 1000) or total_dur
             if e > s then
@@ -253,10 +282,24 @@ local function hide_click_binding()
     end
 end
 
+-- [lc-1265] 点击跳过 = 按打点得出的区间时长做「相对跳过」（动态跳过片头片尾）：
+--   打点后算出片头/片尾各是多长（e - s），点击时从当前位置直接跳过对应的秒数，
+--   不再 seek 到某个固定时间点——固定端点经飞牛 2 值换算（片尾终点恒为文件尾）
+--   或整季标记跨集复用后会漂移，时长是稳定的。
 local function do_skip_jump()
-    mp.set_property_number("time-pos", skip_btn.target)
-    mutils.show_message(string.format("⏭️ 已%s", skip_btn.kind), 2)
-    msg.info(string.format("用户点击跳过按钮: %s → %.1f 秒", skip_btn.kind, skip_btn.target))
+    local seg_len = tonumber(skip_btn.seg_len) or 0
+    if seg_len <= 0 then
+        msg.warn("跳过按钮缺少时长信息，忽略本次点击")
+        return
+    end
+    local pos = mutils.timepos() or 0
+    local dur = mutils.dur() or 0
+    local target = pos + seg_len
+    if dur > 0 and target > dur then target = dur end   -- 不越过文件末尾
+    mp.commandv('seek', tostring(target), 'absolute+exact')
+    mutils.show_message(string.format("⏭️ 已%s（跳过 %d 秒）", skip_btn.kind, math.floor(seg_len + 0.5)), 2)
+    msg.info(string.format("用户点击跳过按钮: %s 相对跳过 %.1f 秒（%.1f → %.1f）",
+        skip_btn.kind, seg_len, pos, target))
     -- 本集该段落已跳过：此后即使重新进入区间（如回看）也不再显示按钮
     if skip_btn.kind == "跳过片头" then
         skip_state.intro_done = true
@@ -265,6 +308,7 @@ local function do_skip_jump()
     end
     skip_btn.active = false
     skip_btn.kind = nil
+    skip_btn.seg_len = 0
     skip_btn.hover = false
     hide_click_binding()
     draw_skip_button()
@@ -285,28 +329,40 @@ local function show_click_binding()
 end
 
 -- 根据当前播放位置更新按钮显示/隐藏
--- [用户点击跳过] 检测到片头/片尾数据后，播放进入区间即显示按钮，由用户决定是否跳过
+-- [用户点击跳过] 检测到片头/片尾数据后，播放进入窗口即显示按钮，由用户决定是否跳过
 --（适配"先正剧后片头曲"的剧：正剧部分不跳，出现片头/片尾时用户自己点）；
 -- 已点击跳过的段落不再重复显示按钮。
+-- [lc-1265] ① 显示窗口 = [区间起点 - 提前量, 区间终点 - ε]（提前量应用于片头/片尾两处）；
+--   ② 点击跳过不再跳「固定时间点」而是按打点得出的区间时长相对跳过（见 do_skip_jump），
+--   因此按钮激活时把时长（e - s）记到 skip_btn.seg_len，供点击时使用；
+--   ③ 落点/时长每次刷新（而非仅 kind 变化时）——改完标记后按钮必须立即跟随，否则带旧值去跳。
 local function update_skip_button(curr_pos, result)
-    local show, label, target = false, "", 0
-    if result and result.intro and not skip_state.intro_done
-        and curr_pos >= result.intro[1] and curr_pos <= result.intro[2] - BUTTON_EPSILON then
-        show, label, target = true, "跳过片头", result.intro[2]
-    elseif result and result.outro and not skip_state.outro_done
-        and curr_pos >= result.outro[1] and curr_pos <= result.outro[2] - BUTTON_EPSILON then
-        show, label, target = true, "跳过片尾", result.outro[2]
+    local show, label, target, seg_len = false, "", 0, 0
+    if result and result.intro and not skip_state.intro_done then
+        local s, e = result.intro[1], result.intro[2]
+        if curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON then
+            show, label, target, seg_len = true, "跳过片头", e, e - s
+        end
+    end
+    if not show and result and result.outro and not skip_state.outro_done then
+        local s, e = result.outro[1], result.outro[2]
+        if curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON then
+            show, label, target, seg_len = true, "跳过片尾", e, e - s
+        end
     end
     if show then
-        if not skip_btn.active or skip_btn.kind ~= label then
+        if not skip_btn.active or skip_btn.kind ~= label
+            or skip_btn.target ~= target or skip_btn.seg_len ~= seg_len then
             skip_btn.active = true
             skip_btn.kind = label
             skip_btn.target = target
+            skip_btn.seg_len = seg_len
             draw_skip_button()
         end
     elseif skip_btn.active then
         skip_btn.active = false
         skip_btn.kind = nil
+        skip_btn.seg_len = 0
         skip_btn.hover = false
         hide_click_binding()
         draw_skip_button()
@@ -393,21 +449,70 @@ local function detect_by_mode()
     elseif opts.detect_mode == DETECT_MODE.MANUAL then
         return detect_by_manual()
     elseif opts.detect_mode == DETECT_MODE.AUTO then
+        -- [lc-1265] 人工精确标记优先（用户既定优先级：人工 > 获取）：
+        --   已打点的区间固定用人工值，章节检测只补未打点的区间——
+        --   否则有章节的文件里，章节推出来的片尾（往往顶到文件尾）会顶掉用户标的区间。
         local result = detect_by_chapters()
+        local manual = detect_by_manual()
+        if has_local_marks('intro') and manual and manual.intro then
+            result = result or {}
+            result.intro = manual.intro
+        end
+        if has_local_marks('outro') and manual and manual.outro then
+            result = result or {}
+            result.outro = manual.outro
+        end
         if result then return result end
-        result = detect_by_manual()
-        if result then return result end
-        return nil
+        return manual
     else
         msg.error("未知的检测模式")
         return nil
     end
 end
 
+-- [lc-1265] 读取 Electron 本地精确 4 值标记（人工打点，优先级最高）：
+--   飞牛服务端只有 2 值（skipStart/skipEnd=从结尾倒数秒数），还原出的片尾终点恒等于「文件末尾」，
+--   用户把片尾终点标在 ED 结束处（其后还有正片）时会丢失 → 点击跳过直接跳到文件尾触发 EOF 切下一集。
+--   本地存储（skip-manual.json）保留了精确区间，此处优先采用；命中后 have_* 置位，
+--   服务端 2 值/兜底链不得再覆盖对应区间。
+local function load_local_marks(gen)
+    local play_url = mp.get_property("path")
+    local id = mutils.extract_id_and_query(play_url)
+    if not id then return end
+    api.get_manual_local(id, function(resp, err)
+        if not gen_alive(gen) then return end
+        if err or not resp or resp.empty then
+            msg.verbose("本地无精确标记，回落服务端/兜底数据")
+            return
+        end
+        local hit = false
+        if (tonumber(resp.introEnd) or 0) > (tonumber(resp.introStart) or 0) then
+            opts.manual_intro_start = tonumber(resp.introStart) or 0
+            opts.manual_intro_end = tonumber(resp.introEnd)
+            skip_shared.have_intro = true
+            hit = true
+        end
+        if (tonumber(resp.outroEnd) or 0) > (tonumber(resp.outroStart) or 0) then
+            opts.manual_outro_start = tonumber(resp.outroStart)
+            opts.manual_outro_end = tonumber(resp.outroEnd)
+            skip_shared.have_outro = true
+            hit = true
+        end
+        if hit then
+            skip_shared.source = 'local'
+            msg.info(string.format("本地精确标记(%s): 片头 %.0f - %.0f 秒, 片尾 %.0f - %.0f 秒",
+                tostring(resp.scope or 'episode'),
+                opts.manual_intro_start, opts.manual_intro_end,
+                opts.manual_outro_start, opts.manual_outro_end))
+        end
+    end)
+end
+
 -- 读取服务器配置
-local function load_server_config()
+local function load_server_config(gen)
     local play_url = mp.get_property("path")
     api.get_skip_time(play_url, function(resp, err)
+        if not gen_alive(gen) then return end
         if err or not resp or resp.code ~= 0 then
             msg.error("获取服务器跳过时间点失败: " .. tostring(err))
             fnos_empty = true
@@ -420,20 +525,25 @@ local function load_server_config()
             local total_dur = mutils.dur()
             if not total_dur or total_dur <= 0 then return end
 
-            opts.manual_intro_start = 0
-            opts.manual_intro_end = data.skipStart
+            -- [lc-1265] 已有本地精确标记的区间不再被服务端 2 值换算覆盖
+            if not has_local_marks('intro') then
+                opts.manual_intro_start = 0
+                opts.manual_intro_end = data.skipStart
+            end
 
             local outro_start = total_dur - data.skipEnd
             -- 合理性检查：片尾开始时间不应早于视频的一半
             if outro_start < total_dur / 2 then
                 msg.warn("服务器返回的片尾时间异常，已忽略。片尾时长: "..data.skipEnd)
-                opts.manual_outro_start = 0
-                opts.manual_outro_end = 0
-            else
+                if not has_local_marks('outro') then
+                    opts.manual_outro_start = 0
+                    opts.manual_outro_end = 0
+                end
+            elseif not has_local_marks('outro') then
                 opts.manual_outro_start = outro_start
                 opts.manual_outro_end = total_dur
             end
-            
+
             msg.info(string.format("服务器跳过时间点: 片头 %d - %d 秒, 片尾 %d - %d 秒",
                 opts.manual_intro_start, opts.manual_intro_end,
                 opts.manual_outro_start, opts.manual_outro_end))
@@ -461,16 +571,38 @@ end
 -- 智能跳过片头片尾：获取到跳过数据后，播放进入片头/片尾区间显示按钮，
 -- 由用户点击才执行跳过（不自动 seek：很多剧先正剧后片头曲，自动跳过会误切正剧）
 local function smart_skip()
-    load_server_config()
-
-    -- 每集重置：点击跳过标记 + 清掉上一集残留的按钮和点击绑定
+    -- [lc-1265] 换集：gen+1 作废上一集在途的异步响应；重置本集的人工标记覆盖位与点击态
+    skip_shared.gen = skip_shared.gen + 1
+    local gen = skip_shared.gen
+    skip_shared.source = nil
+    skip_shared.have_intro = false
+    skip_shared.have_outro = false
     skip_state.intro_done = false
     skip_state.outro_done = false
+    -- 立即清空上一集的区间值：等待新数据期间不得用旧区间显示按钮（防跨集误跳）
+    opts.manual_intro_start = 0
+    opts.manual_intro_end = 0
+    opts.manual_outro_start = 0
+    opts.manual_outro_end = 0
     skip_btn.active = false
     skip_btn.kind = nil
+    skip_btn.target = 0
+    skip_btn.seg_len = 0
     skip_btn.hover = false
     hide_click_binding()
     draw_skip_button()
+
+    -- 优先级：本地精确 4 值（人工打点）> 飞牛服务端 2 值 > AniSkip/theintrodb 兜底。
+    -- 两者并行发出，先到先写；本地命中后服务端/兜底不再覆盖对应区间（has_local_marks 守门）。
+    load_local_marks(gen)
+    load_server_config(gen)
+
+    -- [lc-1265] 供 menu.lua 打点后立即刷新按钮（暂停时 time-pos 不变化，观察器不会触发）。
+    -- 必须注册在 timepos_observed 提前返回之前：否则第 2 集起不会再注册，
+    -- 打点后按钮不刷新（会带着旧落点去跳）。读的是当前 opts，无跨集风险。
+    skip_shared.refresh = function()
+        update_skip_button(mutils.timepos() or 0, detect_by_mode())
+    end
 
     if timepos_observed then return end
     timepos_observed = true

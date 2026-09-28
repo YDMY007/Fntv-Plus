@@ -56,6 +56,19 @@ local function fmt_ts(t)
     return string.format('%d:%02d', math.floor(t / 60), math.floor(t % 60))
 end
 
+-- [lc-1265] 飞牛 skipinfo 的 2 值语义：skipStart=片头跳过秒数、skipEnd=片尾从结尾倒数秒数。
+--   ⚠️ 不能把「片尾区间长度」当 skipEnd 写（读回按 total-skipEnd 还原起点，会逐次漂移）；
+--   必须写 总时长 − 片尾起点。片尾终点（ED 后仍有正片的情形）2 值表达不了，
+--   靠本地 4 值存储 + MPV 侧 load_local_marks 精确保留。
+local function fnos_skip_end()
+    local total = mutils.dur() or 0
+    local outro_start = opts.manual_outro_start or 0
+    if outro_start > 0 and total > 0 and total > outro_start then
+        return math.floor(total - outro_start)
+    end
+    return 0
+end
+
 -- 试跳到指定秒数（校准打点用；记录原位置供「回到原位」）
 local pre_seek_pos = -1
 
@@ -66,14 +79,28 @@ local function seek_to(t)
     mp.commandv('seek', t, 'absolute+exact')
 end
 
+-- [lc-1265] 人工标记改动后同步共享状态：作废在途异步结果（gen+1）、
+--   声明来源为本地精确标记并按当前 opts 置位区间覆盖位（自动/兜底来源不得再覆盖）。
+local function sync_shared_marks()
+    local shared = _G.fntv_skip_state
+    if not shared then return end
+    shared.gen = (shared.gen or 0) + 1
+    shared.source = 'local'
+    shared.have_intro = (opts.manual_intro_end or 0) > (opts.manual_intro_start or 0)
+    shared.have_outro = (opts.manual_outro_end or 0) > (opts.manual_outro_start or 0)
+    if shared.refresh then shared.refresh() end
+end
+
 -- [lc-1257] 打点动作统一出口：写 opts + 飞牛服务端 + 本地 4 值存储（三者同源不脱节）
 -- [lc-1264] 升级：本地同步带精确 4 值（introStart/outroStart/outroEnd），网页端兜底按钮同区间
+-- [lc-1265] 写服务端改用正确 skipEnd 语义（总时长−片尾起点）；打点后立即刷新按钮落点
 local function apply_manual_marks()
     local play_url = mp.get_property('path')
-    api.set_skip_time(play_url, opts.manual_intro_end or 0, current_outro_len())
-    api.sync_manual_local(play_url, opts.manual_intro_end or 0, current_outro_len(), mutils.dur(),
+    api.set_skip_time(play_url, opts.manual_intro_end or 0, fnos_skip_end())
+    api.sync_manual_local(play_url, opts.manual_intro_end or 0, fnos_skip_end(), mutils.dur(),
         opts.manual_intro_start or 0, opts.manual_outro_start or 0, opts.manual_outro_end or 0)
     mutils.save_options()
+    sync_shared_marks()
 end
 
 -- ========= uosc 菜单渲染 =========
@@ -156,9 +183,10 @@ local Controls = {
         set      = function(n)
             opts.manual_intro_end = n
             local play_url = mp.get_property('path')
-            api.set_skip_time(play_url, opts.manual_intro_end, current_outro_len())
+            api.set_skip_time(play_url, opts.manual_intro_end, fnos_skip_end())
             -- [lc-1257] 同步本地 4 值存储（网页端「标记不准」状态/兜底按钮跨端一致）
-            api.sync_manual_local(play_url, opts.manual_intro_end, current_outro_len(), mutils.dur())
+            api.sync_manual_local(play_url, opts.manual_intro_end, fnos_skip_end(), mutils.dur(),
+                opts.manual_intro_start or 0, opts.manual_outro_start or 0, opts.manual_outro_end or 0)
             mutils.save_options()
         end,
         after    = function(n)
@@ -181,9 +209,10 @@ local Controls = {
         set      = function(n)
             opts.manual_outro_start = (opts.manual_outro_end or 0) - n
             local play_url = mp.get_property('path')
-            api.set_skip_time(play_url, opts.manual_intro_end or 0, n)
-            -- [lc-1257] 同步本地 4 值存储（n=片尾时长秒；outroStart 换算在主进程侧做）
-            api.sync_manual_local(play_url, opts.manual_intro_end or 0, n, mutils.dur())
+            api.set_skip_time(play_url, opts.manual_intro_end or 0, fnos_skip_end())
+            -- [lc-1257] 同步本地 4 值存储（改片尾时长 = 移动片尾起点，终点保持不变）
+            api.sync_manual_local(play_url, opts.manual_intro_end or 0, fnos_skip_end(), mutils.dur(),
+                opts.manual_intro_start or 0, opts.manual_outro_start or 0, opts.manual_outro_end or 0)
             mutils.save_options()
         end,
         after    = function(n)
@@ -286,51 +315,80 @@ local function build_items()
     })
 
     -- 手动时间
-    -- [lc-1264] 全面升级：当前值回显（分:秒）+ 精确区间编辑 + 试跳校准 + 起点打点，
-    --   与 Electron 网页端标记面板（lc-1251）对齐。所有写入经 apply_manual_marks 三方同步。
+    -- [lc-1264] 当前值回显（分:秒）+ 精确区间编辑 + 试跳校准 + 起点打点。
+    -- [lc-1265] 打点完成后（该段起点/终点均已标）收起该段的两个打点按钮，
+    --   直接显示「片头/片尾时长」；点「清除标记」后恢复打点按钮重新标记。
+    local intro_marked = (opts.manual_intro_end or 0) > 0
+        and (opts.manual_intro_end or 0) > (opts.manual_intro_start or 0)
+    local outro_marked = (opts.manual_outro_start or 0) > 0
+        and (opts.manual_outro_end or 0) > (opts.manual_outro_start or 0)
+
     table.insert(items, { title = '— 手动标记片头片尾（写服务端 + 本地，全端生效） —', keep_open = true, selectable = false })
 
-    table.insert(items, {
-        title      = string.format('▶ 片头区间: %s ~ %s', fmt_ts(opts.manual_intro_start), fmt_ts(opts.manual_intro_end)),
-        hint       = '下方四项可编辑精确秒数，或播放到对应位置点「打点」',
-        keep_open  = true,
-        selectable = false,
-    })
-    table.insert(items, {
-        title      = string.format('▶ 片尾区间: %s ~ %s', fmt_ts(opts.manual_outro_start), fmt_ts(opts.manual_outro_end)),
-        keep_open  = true,
-        selectable = false,
-    })
+    if intro_marked then
+        local ilen = math.floor((opts.manual_intro_end or 0) - (opts.manual_intro_start or 0))
+        table.insert(items, {
+            title      = string.format('▶ 片头时长: %s（%d 秒）', fmt_ts(ilen), ilen),
+            hint       = string.format('区间 %s ~ %s；点「清除标记」可重新打点',
+                fmt_ts(opts.manual_intro_start), fmt_ts(opts.manual_intro_end)),
+            keep_open  = true,
+            selectable = false,
+        })
+    else
+        table.insert(items, {
+            title      = '▶ 片头: 未标记',
+            hint       = '播放到对应位置点下方「打点」，或用「编辑片头起点/终点」直填秒数',
+            keep_open  = true,
+            selectable = false,
+        })
+        -- 打点（当前播放位置）
+        table.insert(items, {
+            title      = string.format('◈ 打点片头起点（当前 %s）', fmt_ts(mutils.timepos())),
+            hint       = '把当前播放位置记为片头开始（OP 前有前情回顾时用）',
+            value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'intro_start' },
+            keep_open  = true,
+            selectable = true,
+        })
+        table.insert(items, {
+            title      = string.format('◈ 打点片头终点（当前 %s）', fmt_ts(mutils.timepos())),
+            hint       = '把当前播放位置记为片头结束（跳过落点）',
+            value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'intro_end' },
+            keep_open  = true,
+            selectable = true,
+        })
+    end
 
-    -- 打点（当前播放位置）
-    table.insert(items, {
-        title      = string.format('◈ 打点片头起点（当前 %s）', fmt_ts(mutils.timepos())),
-        hint       = '把当前播放位置记为片头开始（OP 前有前情回顾时用）',
-        value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'intro_start' },
-        keep_open  = true,
-        selectable = true,
-    })
-    table.insert(items, {
-        title      = string.format('◈ 打点片头终点（当前 %s）', fmt_ts(mutils.timepos())),
-        hint       = '把当前播放位置记为片头结束（跳过落点）',
-        value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'intro_end' },
-        keep_open  = true,
-        selectable = true,
-    })
-    table.insert(items, {
-        title      = string.format('◈ 打点片尾起点（当前 %s）', fmt_ts(mutils.timepos())),
-        hint       = '把当前播放位置记为片尾开始（跳过起点）',
-        value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'outro_start' },
-        keep_open  = true,
-        selectable = true,
-    })
-    table.insert(items, {
-        title      = string.format('◈ 打点片尾终点（当前 %s）', fmt_ts(mutils.timepos())),
-        hint       = '把当前播放位置记为片尾结束（ED 完的位置，一般=片长）',
-        value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'outro_end' },
-        keep_open  = true,
-        selectable = true,
-    })
+    if outro_marked then
+        local olen = math.floor((opts.manual_outro_end or 0) - (opts.manual_outro_start or 0))
+        table.insert(items, {
+            title      = string.format('▶ 片尾时长: %s（%d 秒）', fmt_ts(olen), olen),
+            hint       = string.format('区间 %s ~ %s；点「清除标记」可重新打点',
+                fmt_ts(opts.manual_outro_start), fmt_ts(opts.manual_outro_end)),
+            keep_open  = true,
+            selectable = false,
+        })
+    else
+        table.insert(items, {
+            title      = '▶ 片尾: 未标记',
+            hint       = '播放到对应位置点下方「打点」，或用「编辑片尾起点/终点」直填秒数',
+            keep_open  = true,
+            selectable = false,
+        })
+        table.insert(items, {
+            title      = string.format('◈ 打点片尾起点（当前 %s）', fmt_ts(mutils.timepos())),
+            hint       = '把当前播放位置记为片尾开始（跳过起点）',
+            value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'outro_start' },
+            keep_open  = true,
+            selectable = true,
+        })
+        table.insert(items, {
+            title      = string.format('◈ 打点片尾终点（当前 %s）', fmt_ts(mutils.timepos())),
+            hint       = '把当前播放位置记为片尾结束（ED 完的位置）',
+            value      = { 'script-message-to', SCRIPT, 'menu:action', 'mark_at', 'outro_end' },
+            keep_open  = true,
+            selectable = true,
+        })
+    end
 
     -- 精确区间编辑（直接输秒数，对齐网页端「直填秒数」）
     table.insert(items, {
@@ -380,19 +438,12 @@ local function build_items()
         selectable = true,
     })
 
-    -- 跳过按钮行为（提前量：按钮比区间早多少秒出现）
+    -- 跳过按钮行为（提前量：片头/片尾按钮提前多少秒出现）
     table.insert(items, { title = '— 跳过按钮 —', keep_open = true, selectable = false })
     table.insert(items, {
-        title      = string.format('提前量: %d 秒', opts.manual_skip_lead or 5),
-        hint       = '按钮比标记区间早出现的秒数（0~60）',
+        title      = string.format('提前量: %d 秒', Controls.skip_lead.get()),
+        hint       = '按钮比片头/片尾起点早出现的秒数（0~60，片头片尾共用）',
         value      = { 'script-message-to', SCRIPT, 'menu:action', 'open_input', 'skip_lead' },
-        keep_open  = true,
-        selectable = true,
-    })
-    table.insert(items, {
-        title      = string.format('跳过时长: %d 秒', Controls.skipdur.get()),
-        hint       = Controls.skipdur.hint .. '（快捷键 Backspace）',
-        value      = { 'script-message-to', SCRIPT, 'menu:action', 'open_input', 'skipdur' },
         keep_open  = true,
         selectable = true,
     })
@@ -455,6 +506,15 @@ mp.register_script_message('menu:action', function(op, id, value)
         opts.manual_intro_end = 0
         opts.manual_outro_end = 0
         mutils.save_options()
+        -- [lc-1265] 清空后：作废在途异步结果 + 复位人工覆盖位 → 面板恢复 4 个打点按钮
+        local shared = _G.fntv_skip_state
+        if shared then
+            shared.gen = (shared.gen or 0) + 1
+            shared.source = nil
+            shared.have_intro = false
+            shared.have_outro = false
+            if shared.refresh then shared.refresh() end
+        end
         return open_main_menu()
     end
 
@@ -470,12 +530,9 @@ mp.register_script_message('menu:action', function(op, id, value)
         elseif id == 'intro_end' then
             opts.manual_intro_end = n
         elseif id == 'outro_start' then
+            -- [lc-1265] 不再自动把终点默认成片长：终点未标 = 片尾未标完，
+            --  面板保持打点按钮可继续标终点（旧行为会把跳过落点悄悄顶到文件尾）。
             opts.manual_outro_start = n
-            -- 片尾终点未标时默认=片长（多数 ED 之后无正片）
-            if (opts.manual_outro_end or 0) <= n then
-                local dur = mutils.dur()
-                opts.manual_outro_end = (dur and dur > 0) and math.floor(dur) or 0
-            end
         elseif id == 'outro_end' then
             opts.manual_outro_end = n
         end
@@ -569,7 +626,7 @@ end)
 Controls.skip_lead = {
     type     = 'number',
     title    = '跳过按钮提前量（秒）',
-    hint     = '按钮比标记区间早出现的秒数（0~60）',
+    hint     = '按钮比片头/片尾起点早出现的秒数（0~60）',
     parse    = mutils.parse_integer,
     get      = function() return opts.manual_skip_lead or 5 end,
     validate = function(n) if n < 0 or n > 60 then return false, '应在 0~60' end return true end,

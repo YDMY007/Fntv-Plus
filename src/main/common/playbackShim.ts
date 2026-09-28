@@ -6,7 +6,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
-import { upsertFromMpv } from '../handlers/plugins/skipManual';
+import { upsertFromMpv, resolveManualSkip } from '../handlers/plugins/skipManual';
 import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
@@ -109,6 +109,13 @@ class PlaybackShim {
         // [lc-1257] MPV smart_skip 面板打点 → 本地 4 值存储同步（POST JSON）
         if (pathname === '/skip-manual' && req.method === 'POST') {
             this.handleSkipManualSync(req, res);
+            return;
+        }
+        // [lc-1265] MPV smart_skip 读取本集生效的精确 4 值人工标记（集级优先，季级回落）。
+        //   飞牛 skipinfo 只有 2 值（片尾终点恒为文件尾），MPV 按钮的动态跳过时长
+        //   必须取本地精确区间。无标记时返回 { empty: true }。
+        if (pathname === '/skip-manual' && req.method === 'GET') {
+            this.handleSkipManualGet(req, res);
             return;
         }
         // [lc-1264] MPV 面板改提前量 → 同步 Electron 侧 skip-manual 配置
@@ -735,6 +742,38 @@ class PlaybackShim {
                 this.json(res, 400, { ok: false, error: String((e as Error).message || e) });
             }
         });
+    }
+
+    /** [lc-1265] MPV smart_skip 读取本集生效的精确 4 值人工标记（GET /skip-manual?guid=...）。
+     *  集 guid 优先取本集标记，无则回落季级标记（resolveManualSkip 内做季解析，10 分钟缓存）。
+     *  飞牛 skipinfo 只有 2 值（片尾终点恒为文件尾），MPV 按钮的「动态跳过时长」
+     *  必须取本地精确区间才能正确落在 ED 结束处（ED 后仍有正片的剧集）。 */
+    private async handleSkipManualGet(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+        try {
+            const u = url.parse(req.url || '', true);
+            const guid = String(u.query.guid || '').trim();
+            if (!/^[a-f0-9]{32}$/i.test(guid)) {
+                this.json(res, 200, { empty: true });
+                return;
+            }
+            const m = await resolveManualSkip(guid);
+            if (!m) {
+                this.json(res, 200, { empty: true });
+                return;
+            }
+            logger.info(`[playbackShim][skip-manual] MPV 读取精确标记 guid=${guid} scope=${m.scope} `
+                + `intro=${m.introStart}~${m.introEnd} outro=${m.outroStart}~${m.outroEnd}`);
+            this.json(res, 200, {
+                scope: m.scope,
+                introStart: m.introStart,
+                introEnd: m.introEnd,
+                outroStart: m.outroStart,
+                outroEnd: m.outroEnd,
+            });
+        } catch (e) {
+            logger.warn('[playbackShim][skip-manual] 读取本地标记失败:', (e as Error).message);
+            this.json(res, 200, { empty: true });
+        }
     }
 
     /** [lc-1254] 集 guid → 季 guid（10 分钟缓存）：自建源系列匹配记忆的键。

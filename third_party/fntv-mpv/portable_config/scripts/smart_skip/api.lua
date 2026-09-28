@@ -70,7 +70,33 @@ function api.sync_manual_lead(seconds)
     end)
 end
 
--- 设置跳过时间点
+-- [lc-1265] 读取 Electron 本地精确 4 值标记（人工打点，最高优先级）。
+--   飞牛服务端只有 2 值（skipStart=片头跳过秒数 / skipEnd=片尾从结尾倒数秒数），
+--   还原出的片尾终点恒为「文件末尾」，无法表达「ED 结束但后面还有正片」。
+--   本地 skip-manual.json 保留精确区间，MPV 侧经此拉取后优先采用。
+--   返回：{ introStart, introEnd, outroStart, outroEnd, scope } 或 { empty = true }
+function api.get_manual_local(guid, callback)
+    if not guid or guid == "" then
+        if callback then callback(nil, "get_manual_local: 缺少 guid") end
+        return false
+    end
+    http_async.request({
+        url = "http://127.0.0.1:22347/skip-manual?guid=" .. guid,
+        method = "GET",
+        headers = nil,
+        json = true
+    }, function(resp, err)
+        if callback then callback(resp, err) end
+    end)
+    return true
+end
+
+-- 设置跳过时间点。
+-- ⚠️ [lc-1265] 飞牛语义是「时长」而非「区间端点」：
+--   skipStart = 片头从 0 跳过的秒数（= 片头终点）
+--   skipEnd   = 片尾从结尾倒数的秒数（= 总时长 − 片尾起点），读回时按 total_dur - skipEnd 还原起点。
+--   传「片尾区间长度」当 skipEnd 会被读成「片尾起点更靠后」，每次读回都漂移，
+--   故调用方（menu.lua apply_manual_marks）必须传 总时长 − 片尾起点。
 function api.set_skip_time(play_url, start_time, end_time, callback)
     if not play_url or play_url == "" then
         msg.error("播放地址不能为空")

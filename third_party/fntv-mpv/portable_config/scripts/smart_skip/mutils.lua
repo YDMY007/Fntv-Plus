@@ -186,4 +186,12 @@ function mutils.parse_integer(v)
     return n
 end
 
+-- [lc-1265] 跳过按钮「提前量」：按钮比标记区间起点早出现的秒数（片头/片尾共用），0~60。
+function mutils.lead_for(options)
+    local v = options and tonumber(options.manual_skip_lead)
+    if not v or v < 0 then v = 5 end
+    if v > 60 then v = 60 end
+    return v
+end
+
 return mutils

@@ -67,6 +67,9 @@ _G.opts           = {
 
     -- 手动/静音检测触发跳过时长
     manual_skip_duration = 90,
+
+    -- [lc-1265] 跳过按钮提前量（秒）：按钮比片头/片尾起点早出现的秒数（片头片尾共用）。
+    manual_skip_lead = 5,
 }
 
 return {
