@@ -2,6 +2,9 @@
 local msg = require('mp.msg')
 local utils = require("mp.utils")
 
+-- [lc-1272] 渲染步进：vf_fps=yes 时 0.01s(100Hz)。120Hz 显示器与 100Hz 更新无法整除对齐，
+--   有的显示帧重复旧位置、有的帧跳新位置 → 全屏下肉眼可见「左右抖动」。
+--   display-fps 观察器会把步进改为「显示器刷新率 ÷2」(60Hz@120屏) 实现整帧对齐。
 local INTERVAL = options.vf_fps and 0.01 or 0.001
 local osd_width, osd_height, pause = 0, 0, true
 
@@ -37,12 +40,14 @@ local function parse_comment(event, pos, height, delay)
     local current_y = tonumber(y1 + (y2 - y1) * progress)
 
     -- 移除 \move 标签并应用当前坐标
+    -- [lc-1272] 坐标精度 0.1px→0.01px：全屏后物理分辨率翻倍（overlay 纹理实测 4096 宽），
+    --   0.1 逻辑像素的量化误差在物理像素间来回取整 → 弹幕左右抖动；0.01 足够平滑。
     local clean_text = event.text:gsub("\\move%(.-%)", "")
     if current_y > displayarea then return end
     if event.style ~= "SP" and event.style ~= "MSG" then
-        return string.format("{\\pos(%.1f,%.1f)\\an8}%s", current_x, current_y, clean_text)
+        return string.format("{\\pos(%.2f,%.2f)\\an8}%s", current_x, current_y, clean_text)
     else
-        return string.format("{\\pos(%.1f,%.1f)\\an7}%s", current_x, current_y, clean_text)
+        return string.format("{\\pos(%.2f,%.2f)\\an7}%s", current_x, current_y, clean_text)
     end
 end
 
@@ -255,9 +260,11 @@ end
 
 mp.observe_property('osd-width', 'number', function(_, value) osd_width = value or osd_width end)
 mp.observe_property('osd-height', 'number', function(_, value) osd_height = value or osd_height end)
+-- [lc-1272] 步进=两显示帧(2/fps)：更新频率是刷新率的整约数，逐帧位置严格对齐，
+--   消除「100Hz 更新 × 120Hz 显示」错频造成的抖动；比 1/fps 省一半重排开销。
 mp.observe_property('display-fps', 'number', function(_, value)
     if value ~= nil then
-        local interval = 1 / value / 10
+        local interval = 2 / value
         if interval > INTERVAL then
             timer:kill()
             timer = mp.add_periodic_timer(interval, render, true)
