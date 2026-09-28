@@ -1007,7 +1007,7 @@ function fetch_danmaku(episodeId, from_menu)
         return
     end
     dd_fetched_episodes[key] = true
-    show_message("弹幕加载中...", 30)
+    show_message("弹幕加载中...", nil, true)
     msg.verbose("尝试获取弹幕：" .. url)
 
     fetch_danmaku_data(args, function(data)
@@ -1019,7 +1019,7 @@ end
 -- 主函数：获取所有相关弹幕
 function fetch_danmaku_all(episodeId, from_menu)
     local url = options.api_server .. "/api/v2/related/" .. episodeId
-    show_message("弹幕加载中...", 30)
+    show_message("弹幕加载中...", nil, true)
     msg.verbose("尝试获取弹幕：" .. url)
     local args = make_danmaku_request_args("GET", url)
 
@@ -1130,7 +1130,7 @@ end
 function add_danmaku_source_online(query, from_menu)
     set_danmaku_button()
     local url = options.api_server .. "/api/v2/extcomment?url=" .. url_encode(query)
-    show_message("弹幕加载中...", 30)
+    show_message("弹幕加载中...", nil, true)
     msg.verbose("尝试获取弹幕：" .. url)
     local args = make_danmaku_request_args("GET", url)
 

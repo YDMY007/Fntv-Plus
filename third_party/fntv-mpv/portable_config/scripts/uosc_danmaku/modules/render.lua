@@ -198,11 +198,12 @@ function hide_danmaku_func()
     end
 end
 
--- [lc-1267] 消息堆叠：每条消息各带到期时间，按行堆在同一处渲染（\N 换行），
---   新消息不再把旧消息瞬间顶掉（「一下就没了」），相同文本重复弹出只刷新到期时间。
+-- [lc-1267/1268] 消息堆叠 + 占位：每条消息各带到期时间，按行堆在同一处渲染（\N 换行）。
+--   sticky（占位）消息不过期、一直显示（如「弹幕加载中...」），任意下一条消息出现时被顶替；
+--   普通消息按各自时长堆叠展示，相同文本重复弹出只保留一条。
 --   堆叠上限 4 条，超出丢最旧的；全部到期后移除 overlay 并停表。
 local message_overlay = mp.create_osd_overlay('ass-events')
-local active_messages = {}   -- { { text = ..., expire = ... } }
+local active_messages = {}   -- { { text = ..., expire = ..., sticky = ... } }
 
 local function render_message_block()
     local lines = {}
@@ -236,17 +237,15 @@ local message_timer = mp.add_periodic_timer(0.25, function()
 end)
 message_timer:kill()   -- 空闲时不空转，首条消息弹出时再启动
 
-function show_message(text, time)
-    local expire = mp.get_time() + (time or 3) + 0.05
-    for _, m in ipairs(active_messages) do
-        if m.text == text then
-            m.expire = expire
-            if not message_timer:is_enabled() then message_timer:resume() end
-            return
-        end
+function show_message(text, time, sticky)
+    local expire = sticky and math.huge or (mp.get_time() + (time or 3) + 0.05)
+    -- 新消息出现时：顶掉所有占位条 + 同文本旧条
+    for i = #active_messages, 1, -1 do
+        local m = active_messages[i]
+        if m.sticky or m.text == text then table.remove(active_messages, i) end
     end
-    if #active_messages >= 4 then table.remove(active_messages, 1) end
-    active_messages[#active_messages + 1] = { text = text, expire = expire }
+    if not sticky and #active_messages >= 4 then table.remove(active_messages, 1) end
+    active_messages[#active_messages + 1] = { text = text, expire = expire, sticky = sticky }
     render_message_block()
     if not message_timer:is_enabled() then message_timer:resume() end
 end

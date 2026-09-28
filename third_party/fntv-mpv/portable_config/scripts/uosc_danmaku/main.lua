@@ -116,12 +116,12 @@ function show_loaded(init)
     local shown = has_bili and BILI_INFO.danmaku_count or #COMMENTS
     local label = has_bili and "B站弹幕加载成功，共计" or "弹幕加载成功，共计"
     if DANMAKU.anime and DANMAKU.episode then
-        show_message("匹配内容：" .. DANMAKU.anime .. "-" .. DANMAKU.episode .. "\\N" .. label .. shown .. "条弹幕", 3)
+        show_message("匹配内容：" .. DANMAKU.anime .. "-" .. DANMAKU.episode .. "\\N" .. label .. shown .. "条弹幕", 5)
         if init then
             msg.info(DANMAKU.anime .. "-" .. DANMAKU.episode .. " " .. label .. shown .. "条弹幕")
         end
     else
-        show_message(label .. shown .. "条弹幕", 3)
+        show_message(label .. shown .. "条弹幕", 5)
     end
 end
 
