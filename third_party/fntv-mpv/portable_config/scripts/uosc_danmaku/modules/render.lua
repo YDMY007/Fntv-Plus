@@ -221,7 +221,10 @@ local function render_message_block()
     message_overlay:update()
 end
 
-local message_timer = mp.add_periodic_timer(0.25, function()
+-- ⚠️ message_timer 必须前置声明：回调里要用到它自己，而 `local x = f(function() x end)`
+-- 的 x 在初始化表达式中尚未进入作用域（会被解析成全局 nil → 回调一执行就崩掉整个脚本）。
+local message_timer
+message_timer = mp.add_periodic_timer(0.25, function()
     local now = mp.get_time()
     local keep, pruned = {}, false
     for _, m in ipairs(active_messages) do
