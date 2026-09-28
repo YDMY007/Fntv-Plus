@@ -847,7 +847,7 @@ function handle_danmaku_data(query, data, from_menu)
 
     -- 如果没有数据，进行重试
     if count == 0 then
-        show_message("服务器无缓存数据，再次尝试请求", 30)
+        show_message("服务器无缓存数据，再次尝试请求…", nil, true)
         msg.verbose("服务器无缓存数据，再次尝试请求")
         -- 等待 2 秒后重试
         local start = os.time()
@@ -879,7 +879,7 @@ end
 -- 处理第三方弹幕数据
 function handle_related_danmaku(index, relateds, related, shift, callback)
     local url = options.api_server .. "/api/v2/extcomment?url=" .. url_encode(related["url"])
-    show_message(string.format("正在从第三方库装填弹幕 [%d/%d]", index, #relateds), 30)
+    show_message(string.format("正在从第三方库装填弹幕 [%d/%d]…", index, #relateds), nil, true)
     msg.verbose("正在从第三方库装填弹幕：" .. url)
 
     local args = make_danmaku_request_args("GET", url)
@@ -921,7 +921,7 @@ end
 
 -- 处理dandan库的弹幕数据
 function handle_main_danmaku(url, from_menu)
-    show_message("正在从弹弹Play库装填弹幕", 30)
+    show_message("正在从弹弹Play库装填弹幕…", nil, true)
     msg.verbose("尝试获取弹幕：" .. url)
     local args = make_danmaku_request_args("GET", url)
 

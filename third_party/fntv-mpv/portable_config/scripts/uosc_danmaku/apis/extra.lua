@@ -123,7 +123,7 @@ function get_details(class, id, site, title, year, number, episodenum)
     if uosc_available and not episodenum then
         update_menu_uosc(menu_type, menu_title, message, footnote)
     else
-        show_message(message, 3)
+        show_message(message, nil, true)
     end
 
     local cat = 0
@@ -306,7 +306,7 @@ function query_extra(name, class)
     if uosc_available then
         update_menu_uosc(menu.type, menu.title, message, menu.footnote, menu.cmd, name)
     else
-        show_message(message, 30)
+        show_message(message, nil, true)
     end
 
     if is_chinese(name) then
