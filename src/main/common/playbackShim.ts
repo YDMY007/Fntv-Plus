@@ -6,7 +6,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
-import { upsertFromMpv, resolveManualSkip } from '../handlers/plugins/skipManual';
+import { upsertFromMpv, resolveManualSkip, upsertSeasonFallbackFromMpv } from '../handlers/plugins/skipManual';
 import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
@@ -716,8 +716,19 @@ class PlaybackShim {
                     outroStart: Number(p.outroStart) || 0,
                     outroEnd: Number(p.outroEnd) || 0,
                 });
-                if (r.saved) this.json(res, 200, { ok: true });
-                else this.json(res, 400, { ok: false, error: r.message || '保存失败' });
+                if (r.saved) {
+                    this.json(res, 200, { ok: true });
+                    // [lc-1266] fire-and-forget：同步季级时长兜底（同季未打点的集也弹按钮）
+                    void upsertSeasonFallbackFromMpv(String(p.guid || ''), {
+                        introStart: Number(p.introStart) || 0,
+                        introEnd: Number(p.introEnd) || 0,
+                        outroStart: Number(p.outroStart) || 0,
+                        outroEnd: Number(p.outroEnd) || 0,
+                        totalDuration: Number(p.totalDuration) || 0,
+                    }).catch(() => { /* best-effort */ });
+                } else {
+                    this.json(res, 400, { ok: false, error: r.message || '保存失败' });
+                }
             } catch (e) {
                 this.json(res, 400, { ok: false, error: String((e as Error).message || e) });
             }

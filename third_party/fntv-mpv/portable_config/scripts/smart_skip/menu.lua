@@ -447,6 +447,21 @@ local function build_items()
         keep_open  = true,
         selectable = true,
     })
+    -- [lc-1266] 显示窗口：片头=播放开始后多少秒内；片尾=距结束剩多少秒内
+    table.insert(items, {
+        title      = string.format('片头显示窗口: %d 秒', Controls.intro_window.get()),
+        hint       = '播放开始后多少秒内显示「跳过片头」按钮（0=仅按标记区间显示）',
+        value      = { 'script-message-to', SCRIPT, 'menu:action', 'open_input', 'intro_window' },
+        keep_open  = true,
+        selectable = true,
+    })
+    table.insert(items, {
+        title      = string.format('片尾显示窗口: %d 秒', Controls.outro_window.get()),
+        hint       = '距视频结束还剩多少秒内显示「跳过片尾」按钮（0=仅按标记区间显示）',
+        value      = { 'script-message-to', SCRIPT, 'menu:action', 'open_input', 'outro_window' },
+        keep_open  = true,
+        selectable = true,
+    })
 
     return items
 end
@@ -637,6 +652,35 @@ Controls.skip_lead = {
         api.sync_manual_lead(n)
     end,
     after    = function(n) msg.info('提前量 => ' .. n .. ' 秒') end,
+}
+
+-- [lc-1266] 显示窗口输入：片头=播放开始后 N 秒内显示按钮；片尾=距结束剩 N 秒内显示按钮
+Controls.intro_window = {
+    type     = 'number',
+    title    = '片头按钮显示窗口（秒）',
+    hint     = '播放开始后多少秒内显示「跳过片头」按钮（0=仅按标记区间显示）',
+    parse    = mutils.parse_integer,
+    get      = function() return opts.manual_intro_window or 0 end,
+    validate = function(n) if n < 0 or n > 7200 then return false, '应在 0~7200' end return true end,
+    set      = function(n)
+        opts.manual_intro_window = n
+        mutils.save_options()
+    end,
+    after    = function(n) msg.info('片头显示窗口 => ' .. n .. ' 秒') end,
+}
+
+Controls.outro_window = {
+    type     = 'number',
+    title    = '片尾按钮显示窗口（秒）',
+    hint     = '距视频结束还剩多少秒内显示「跳过片尾」按钮（0=仅按标记区间显示）',
+    parse    = mutils.parse_integer,
+    get      = function() return opts.manual_outro_window or 0 end,
+    validate = function(n) if n < 0 or n > 7200 then return false, '应在 0~7200' end return true end,
+    set      = function(n)
+        opts.manual_outro_window = n
+        mutils.save_options()
+    end,
+    after    = function(n) msg.info('片尾显示窗口 => ' .. n .. ' 秒') end,
 }
 
 mp.register_script_message('menu:input', function(id, value)

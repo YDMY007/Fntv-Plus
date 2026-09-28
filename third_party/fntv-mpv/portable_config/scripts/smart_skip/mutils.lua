@@ -194,4 +194,16 @@ function mutils.lead_for(options)
     return v
 end
 
+-- [lc-1266] 跳过按钮「显示窗口」（秒）：片头=播放开始后 N 秒内；片尾=距结束剩 N 秒内。
+-- 0 = 不按时间窗口显示（仅按标记区间 ± 提前量）。
+function mutils.window_for(options, kind)
+    local v
+    if options then
+        v = (kind == 'intro') and tonumber(options.manual_intro_window) or tonumber(options.manual_outro_window)
+    end
+    if not v or v < 0 then v = 0 end
+    if v > 7200 then v = 7200 end
+    return v
+end
+
 return mutils

@@ -448,3 +448,39 @@ export function init(): void {
     registerHandler('skip-manual:set-config', handleSetConfig, { useHandle: true });
     log.info('[skip-manual] 片头片尾手动标记插件已注册');
 }
+
+/** [lc-1266] MPV 打点同步的「季级时长兜底」：MPV 的跳过按钮按打点得出的【时长】相对跳过，
+ *  时长整季通用（同一季的 OP/ED 时长一致），因此打点任意一集后，同季未打点的集
+ *  经 resolveManualSkip 的季级回落取到同一份区间，跳过按钮照样出现。
+ *  以最近一次打点为准（整季覆盖写）；全零载荷 = 清除动作 → 同步删季级兜底。 */
+export async function upsertSeasonFallbackFromMpv(guid: string, p: {
+    introStart: number; introEnd: number; outroStart: number; outroEnd: number; totalDuration: number;
+}): Promise<void> {
+    const seasonGuid = await resolveSeasonGuid(guid);
+    if (!seasonGuid) return;   // 电影/单视频/解析失败 → 无季概念，跳过
+    const store = readStore();
+    if (p.introEnd <= 0 && p.introStart <= 0 && p.outroEnd <= 0 && p.outroStart <= 0) {
+        if (store.entries[seasonGuid]) {
+            delete store.entries[seasonGuid];
+            writeStore(store);
+            log.info(`[skip-manual] 季级时长兜底已清除 guid=${seasonGuid}`);
+        }
+        return;
+    }
+    store.entries[seasonGuid] = {
+        guid: seasonGuid,
+        scope: 'season',
+        introStart: p.introStart,
+        introEnd: p.introEnd,
+        outroStart: p.outroStart,
+        outroEnd: p.outroEnd,
+        fnSkipStart: p.introEnd > 0 ? Math.round(p.introEnd) : 0,
+        fnSkipEnd: p.outroStart > 0 && p.totalDuration > 0
+            ? Math.max(0, Math.round(p.totalDuration - p.outroStart)) : 0,
+        totalDuration: p.totalDuration,
+        updatedAt: Date.now(),
+    };
+    writeStore(store);
+    log.info(`[skip-manual] 季级时长兜底已更新 guid=${seasonGuid} `
+        + `intro=${p.introStart}~${p.introEnd} outro=${p.outroStart}~${p.outroEnd}`);
+}

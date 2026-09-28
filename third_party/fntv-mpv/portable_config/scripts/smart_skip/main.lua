@@ -329,24 +329,34 @@ local function show_click_binding()
 end
 
 -- 根据当前播放位置更新按钮显示/隐藏
--- [用户点击跳过] 检测到片头/片尾数据后，播放进入窗口即显示按钮，由用户决定是否跳过
---（适配"先正剧后片头曲"的剧：正剧部分不跳，出现片头/片尾时用户自己点）；
+-- [用户点击跳过] 检测到片头/片尾数据后，按显示窗口/标记区间显示按钮，由用户决定是否跳过；
 -- 已点击跳过的段落不再重复显示按钮。
 -- [lc-1265] ① 显示窗口 = [区间起点 - 提前量, 区间终点 - ε]（提前量应用于片头/片尾两处）；
 --   ② 点击跳过不再跳「固定时间点」而是按打点得出的区间时长相对跳过（见 do_skip_jump），
 --   因此按钮激活时把时长（e - s）记到 skip_btn.seg_len，供点击时使用；
 --   ③ 落点/时长每次刷新（而非仅 kind 变化时）——改完标记后按钮必须立即跟随，否则带旧值去跳。
+-- [lc-1266] 显示判定改为「时间窗口 ∪ 标记区间」：
+--   片头：播放开始后 N 秒内（窗口）∪ 标记区间起点前提前量 ~ 区间终点；
+--   片尾：距视频结束剩 N 秒内（窗口）∪ 同上；
+--   两个窗口与标记无关，即使标记没命中（如整季标记落到别集/时长不同的集）按钮也会按时出现；
+--   但都必须有可用区间（有时长才跳得了）。
 local function update_skip_button(curr_pos, result)
     local show, label, target, seg_len = false, "", 0, 0
+    local dur = mutils.dur() or 0
     if result and result.intro and not skip_state.intro_done then
         local s, e = result.intro[1], result.intro[2]
-        if curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON then
+        local in_time_window = curr_pos <= mutils.window_for(opts, 'intro')
+        local in_marks = curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON
+        if (in_time_window or in_marks) and e > s then
             show, label, target, seg_len = true, "跳过片头", e, e - s
         end
     end
     if not show and result and result.outro and not skip_state.outro_done then
         local s, e = result.outro[1], result.outro[2]
-        if curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON then
+        local remain = (dur > 0) and (dur - curr_pos) or math.huge
+        local in_time_window = remain <= mutils.window_for(opts, 'outro')
+        local in_marks = curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON
+        if (in_time_window or in_marks) and e > s then
             show, label, target, seg_len = true, "跳过片尾", e, e - s
         end
     end
