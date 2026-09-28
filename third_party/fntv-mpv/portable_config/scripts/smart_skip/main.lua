@@ -347,7 +347,9 @@ local function update_skip_button(curr_pos, result)
         local s, e = result.intro[1], result.intro[2]
         local in_time_window = curr_pos <= mutils.window_for(opts, 'intro')
         local in_marks = curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON
-        if (in_time_window or in_marks) and e > s then
+        -- [lc-1270] 整体必须满足「还没播过片头终点」：续播落在片头之后（如上次跳过片头后
+        --  看到中段退出）时，时间窗口(位置≤N)不得再让按钮复活——片头在身后，按钮无意义。
+        if (in_time_window or in_marks) and curr_pos <= e - BUTTON_EPSILON and e > s then
             show, label, target, seg_len = true, "跳过片头", e, e - s
         end
     end
