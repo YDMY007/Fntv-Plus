@@ -521,7 +521,9 @@ export class MpvPlayer extends BasePlayer {
                     }
 
                     try {
-                        await this.mpvInstance.goToPosition(position);
+                        // [lc-1267] 续播跳转用属性写入而非 seek 命令：seek 会触发 mpv 内置 OSD
+                        //  （左上角位置文字），和弹幕脚本的加载提示叠在同一处；属性写入不画 OSD。
+                        await this.mpvInstance.setProperty('time-pos', position);
                         if (this.config.debug) {
                             log.info(`跳转成功: 位置 ${position}s ${retryCount > 0 ? `(重试 ${retryCount} 次后成功)` : ''}`);
                         }

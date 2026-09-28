@@ -198,17 +198,17 @@ function hide_danmaku_func()
     end
 end
 
+-- [lc-1267] 消息堆叠：每条消息各带到期时间，按行堆在同一处渲染（\N 换行），
+--   新消息不再把旧消息瞬间顶掉（「一下就没了」），相同文本重复弹出只刷新到期时间。
+--   堆叠上限 4 条，超出丢最旧的；全部到期后移除 overlay 并停表。
 local message_overlay = mp.create_osd_overlay('ass-events')
-local message_timer = mp.add_timeout(3, function()
-    message_overlay:remove()
-end, true)
+local active_messages = {}   -- { { text = ..., expire = ... } }
 
-function show_message(text, time)
-    message_timer.timeout = time or 3
-    message_timer:kill()
-    message_overlay:remove()
+local function render_message_block()
+    local lines = {}
+    for _, m in ipairs(active_messages) do lines[#lines + 1] = m.text end
     local message = string.format("{\\an%d\\pos(%d,%d)}%s", options.message_anlignment,
-       options.message_x, options.message_y, text)
+       options.message_x, options.message_y, table.concat(lines, "\\N"))
     local width, height = 1920, 1080
     local ratio = osd_width / osd_height
     if width / height < ratio then
@@ -218,7 +218,37 @@ function show_message(text, time)
     message_overlay.res_y = height
     message_overlay.data = message
     message_overlay:update()
-    message_timer:resume()
+end
+
+local message_timer = mp.add_periodic_timer(0.25, function()
+    local now = mp.get_time()
+    local keep, pruned = {}, false
+    for _, m in ipairs(active_messages) do
+        if m.expire > now then keep[#keep + 1] = m else pruned = true end
+    end
+    if #keep ~= #active_messages then active_messages = keep end
+    if #active_messages == 0 then
+        message_timer:kill()
+        message_overlay:remove()
+        return
+    end
+    if pruned then render_message_block() end
+end)
+message_timer:kill()   -- 空闲时不空转，首条消息弹出时再启动
+
+function show_message(text, time)
+    local expire = mp.get_time() + (time or 3) + 0.05
+    for _, m in ipairs(active_messages) do
+        if m.text == text then
+            m.expire = expire
+            if not message_timer:is_enabled() then message_timer:resume() end
+            return
+        end
+    end
+    if #active_messages >= 4 then table.remove(active_messages, 1) end
+    active_messages[#active_messages + 1] = { text = text, expire = expire }
+    render_message_block()
+    if not message_timer:is_enabled() then message_timer:resume() end
 end
 
 mp.observe_property('osd-width', 'number', function(_, value) osd_width = value or osd_width end)

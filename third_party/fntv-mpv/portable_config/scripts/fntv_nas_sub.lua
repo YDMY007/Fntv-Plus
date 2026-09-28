@@ -93,16 +93,18 @@ end
 local function load_subtitle(guid)
     local ctx = current_fn_ctx()
     if not ctx or not guid or guid == '' then return end
-    mp.osd_message('字幕下载中…', 3)
+    -- [lc-1267] 消息统一放左下角（{\an1}）：左上角是弹幕脚本的状态区，
+    --  内置 OSD 默认对齐也是左上，不加定位会叠成两行字
+    mp.osd_message('{\\an1}字幕下载中…', 3)
     local api = ('http://127.0.0.1:22347/nas-subtitle-file?itemGuid=%s&token=%s&domain=%s&guid=%s'):format(ctx.itemGuid, ctx.token, ctx.domain, guid)
     local data, err = fetch_json(api)
     if not data then
-        mp.osd_message('字幕下载失败: ' .. (err or '未知错误'), 4)
+        mp.osd_message('{\\an1}字幕下载失败: ' .. (err or '未知错误'), 4)
         return
     end
     -- sub-add 签名是 <url> [flags] [title] [lang]：flags 位传 select 让新轨立即生效，标题放第三位
     mp.commandv('sub-add', data.path, 'select', data.title or '')
-    mp.osd_message('已加载字幕: ' .. (data.title or ''), 3)
+    mp.osd_message('{\\an1}已加载字幕: ' .. (data.title or ''), 3)
 end
 
 mp.register_script_message('fntv-nas-sub-open', open_menu)
