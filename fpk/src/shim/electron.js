@@ -26,14 +26,13 @@ function signWith(key, secret, url, data) {
   return 'nonce=' + nonce + '&timestamp=' + timestamp + '&sign=' + md5(signStr);
 }
 
-// [lc-1286] ⚠ 签名必须 oracle 优先（回退 lc-1281 的「本地优先」优化——那是错的）。
-//   lc-1281 为省一次局域网往返，把本地 chunk 提取提到最前，并假设「本地材料与服务端 env
-//   注入的是同一套、等价」。该假设不成立：本地提取是**正则抓取**页面 chunk 里的 KEY/SECRET，
-//   可能抓到不完整/过期的材料 —— 一旦「抓到但签不对」，返回值看似有效，oracle 兜底就永远
-//   轮不到，于是所有 fnOS 请求全部 invalid sign（用户日志实证：item/list code=5000
-//   invalid sign + 18 条 item 详情 Authx 全空 + 海报全数加载失败）。
-//   服务端 oracle 用的是 fnOS 运行时注入的权威材料（与官方影视应用同源），签名必然有效，
-//   因此必须放在最前；本地提取仅作 oracle 不可用（旧版后端/网络异常）时的兜底。
+// [lc-1287] 签名策略：oracle 优先、本地提取为主力兜底。
+//   实测（NAS 真机）：本项目的 oracle 端点返回 503「服务端未注入 Authx 签名材料」——
+//   即后端默认**没有**签名材料（需在应用设置里配 FNTV_AUTHX_KEY/SECRET），所以本地提取
+//   才是常态可用路径，oracle 仅供已配置该环境变量的部署使用。两者顺序无性能影响
+//   （oracle 失败是一次本地 HTTP 503 往返，毫秒级）。
+//   ⚠ 真正的回归不在顺序，而在 signMaterials 的「失败记忆」：见该文件 lc-1287 注释——
+//   早期一次提取失败会永久记忆，导致后续全部 invalid sign（本轮海报全灭的根因）。
 let _signMaterialsPromise = null;
 function localSignMaterials() {
   if (!_signMaterialsPromise) {

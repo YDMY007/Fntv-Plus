@@ -246,25 +246,30 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   function ensureSignMaterials() {
     if (cached) return Promise.resolve(cached);
-    if (triedFailed) return Promise.resolve(null);
+    if (lastFailAt && Date.now() - lastFailAt < RETRY_COOLDOWN_MS) return Promise.resolve(null);
     if (!pending) {
       pending = extract().then((m) => {
         cached = m;
-        if (!m) triedFailed = true;
+        if (!m) lastFailAt = Date.now();
+        else lastFailAt = 0;
+        pending = null;
         return m;
       }).catch(() => {
-        triedFailed = true;
+        lastFailAt = Date.now();
+        pending = null;
         return null;
       });
     }
     return pending;
   }
-  var cached, pending;
+  var cached, pending, RETRY_COOLDOWN_MS, lastFailAt;
   var init_signMaterials = __esm({
     "src/preload/web/signMaterials.ts"() {
       "use strict";
       cached = null;
       pending = null;
+      RETRY_COOLDOWN_MS = 1500;
+      lastFailAt = 0;
     }
   });
 

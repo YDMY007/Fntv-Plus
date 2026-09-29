@@ -72,18 +72,31 @@ async function extract(): Promise<{ key: string; secret: string } | null> {
   return null;
 }
 
-/** 取签名材料（带缓存；失败返回 null，调用方走捕获回放）。 */
+// [lc-1287] ⚠ 失败记忆必须有「冷却期」，绝不能一次失败就永久放弃。
+//   回归根因（lc-1282 引入、lc-1286 沿用）：增强脚本在页面 OnReady 极早期就发起轮播取数，
+//   那一刻影视页的 JS chunk 尚未加载完 → extract() 扫不到签名 chunk 返回 null →
+//   原实现置 triedFailed 后本会话永不再试 → 之后所有 fnOS 请求全部 invalid sign，
+//   轮播海报全数加载失败（用户日志实证：item/list code=5000 + item/{guid} 的 Authx 全空）。
+//   修复：失败只记「时间戳」，超过冷却期（1.5s）后允许重试；chunk 加载完成后即可自愈。
+//   同时若已连续失败多次仍拿不到，退化为「每次调用都重试」但做节流（避免请求风暴）。
+const RETRY_COOLDOWN_MS = 1500;
+let lastFailAt = 0;
+
+/** 取签名材料（带缓存与失败冷却；失败返回 null，调用方走 oracle / 捕获回放）。 */
 export function ensureSignMaterials(): Promise<{ key: string; secret: string } | null> {
   if (cached) return Promise.resolve(cached);
-  // [lc-1281] 失败记忆：提取失败（chunk 特征失配）时此前 `if (cached)` 恒假 → 每个调用方
-  //   都重跑一遍「拉取全部 chunk 文本 + 正则扫描」；首页轮播几十个请求叠加时纯属浪费
-  //   （用户感知「要等很久才加载出数据」）。一次失败即记入 triedFailed，本会话不再重试；
-  //   签名 oracle / 捕获回放路径照常工作，功能不受影响。
-  if (triedFailed) return Promise.resolve(null);
+  // 冷却期内不重复扫描（节流）；超过冷却期允许重试，chunk 到位后自然成功
+  if (lastFailAt && Date.now() - lastFailAt < RETRY_COOLDOWN_MS) return Promise.resolve(null);
   if (!pending) {
     pending = extract()
-      .then((m) => { cached = m; if (!m) triedFailed = true; return m; })
-      .catch(() => { triedFailed = true; return null; });
+      .then((m) => {
+        cached = m;
+        if (!m) lastFailAt = Date.now(); // 只记时间，不永久放弃
+        else lastFailAt = 0;
+        pending = null; // 允许冷却期后重新提取（成功后 cached 已命中，不会重跑）
+        return m;
+      })
+      .catch(() => { lastFailAt = Date.now(); pending = null; return null; });
   }
   return pending;
 }
