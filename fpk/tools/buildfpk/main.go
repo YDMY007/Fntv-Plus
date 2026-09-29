@@ -135,7 +135,7 @@ func runDev() (string, error) {
 }
 
 // runRelease 正式发布版：显示名与版号完全由调用方控制（飞牛商店真实展示）。
-// 版号须 x.y.z 三段数字；产物 Fntv-Plus-V<版号去点>.fpk（大写 V 区分开发版小 v）。
+// 版号须 x.y.z 三段数字；产物 Fntv-Plus-<版号>.fpk（不带 v/V 前缀，用户指定统一命名）。
 func runRelease(relName, relVer string) (string, error) {
 	if strings.TrimSpace(relName) == "" {
 		return "", fmt.Errorf("正式发布需要 --name <显示名>")
@@ -158,8 +158,8 @@ func runRelease(relName, relVer string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	compact := strings.ReplaceAll(relVer, ".", "")
-	named := filepath.Join(root, "Fntv-Plus-V"+compact+".fpk") // 发布版大写 V
+	// [命名统一] 不再用大小写 v/V 区分开发/发布包：发布包 = Fntv-Plus-<版号>.fpk
+	named := filepath.Join(root, "Fntv-Plus-"+relVer+".fpk")
 	if err := os.Rename(final, named); err != nil {
 		return final, nil // 重命名失败不致命，返回原名
 	}
@@ -177,14 +177,11 @@ func buildPackage(kind string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 开发包命名: 小 v + 序号（区分发布版大写 V）；版号 x.y.z-<seq> → 取 "-" 后数字
+	// [命名统一] 带序号包命名: Fntv-Plus-<序号>.fpk（不再用大小写 v/V 区分开发/发布）。
+	// 版号 x.y.z-<seq> → 取 "-" 后数字。
 	if ver := manifestVersion(); strings.Contains(ver, "-") {
 		if n, err := strconv.Atoi(strings.TrimPrefix(ver, strings.SplitN(ver, "-", 2)[0]+"-")); err == nil {
-			suffix := "v"
-			if kind == "rel" {
-				suffix = "V"
-			}
-			named := filepath.Join(root, "Fntv-Plus-"+suffix+strconv.Itoa(n)+".fpk")
+			named := filepath.Join(root, "Fntv-Plus-"+strconv.Itoa(n)+".fpk")
 			if err := os.Rename(fpk, named); err == nil {
 				cleanOldDevPackages(named)
 				return named, nil
@@ -292,7 +289,8 @@ func pack() (string, error) {
 	}
 	if ver := manifestVersion(); strings.Contains(ver, "-") {
 		if n, err := strconv.Atoi(strings.TrimPrefix(ver, strings.SplitN(ver, "-", 2)[0]+"-")); err == nil {
-			named := filepath.Join(root, "Fntv-Plus-v"+strconv.Itoa(n)+".fpk")
+			// [命名统一] 测试包 = Fntv-Plus-<序号>.fpk（仅序号，无 v 前缀）
+			named := filepath.Join(root, "Fntv-Plus-"+strconv.Itoa(n)+".fpk")
 			if err := os.Rename(out, named); err == nil {
 				cleanOldDevPackages(named)
 				return named, nil
@@ -302,10 +300,13 @@ func pack() (string, error) {
 	return out, nil
 }
 
-// cleanOldDevPackages 清理 root 与输出目录里的旧开发包（Fntv-Plus-v*.fpk，小写 v；
-// 大写 V 发布包按大小写区分天然不误删）。outDir 可为空（不扫）。
+// cleanOldDevPackages 清理 root 与输出目录里的旧测试包（新命名 Fntv-Plus-<序号>.fpk、
+// 历史 Fntv-Plus-v<序号>.fpk）；发布包 Fntv-Plus-x.y.z.fpk 带点，正则天然不匹配、不会误删。
+// outDir 可为空（不扫）。
 func cleanOldDevPackages(keep string) {
-	re := regexp.MustCompile(`^Fntv-Plus-v\d+\.fpk$`)
+	// 兼容历史命名（Fntv-Plus-v123.fpk）与新命名（Fntv-Plus-123.fpk）；
+	// 纯数字形态不会与发布包冲突（发布包是 x.y.z 带点）。
+	re := regexp.MustCompile(`^Fntv-Plus-(?:v)?\d+\.fpk$`)
 	removed, checked := 0, 0
 	for _, dir := range []string{root, filepath.Dir(keep)} {
 		entries, err := os.ReadDir(dir)
@@ -314,7 +315,7 @@ func cleanOldDevPackages(keep string) {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasPrefix(name, "Fntv-Plus-v") || !strings.HasSuffix(name, ".fpk") {
+			if e.IsDir() || !strings.HasPrefix(name, "Fntv-Plus-") || !strings.HasSuffix(name, ".fpk") {
 				continue
 			}
 			if !re.MatchString(name) {
@@ -379,10 +380,11 @@ func devCommitVersion() string {
 	return base + "-" + strconv.Itoa(seq)
 }
 
-// maxHistorySeq 扫根目录与输出目录里的 Fntv-Plus-v<数字>.fpk（小写 v 开发包），
+// maxHistorySeq 扫根目录与输出目录里的 Fntv-Plus-<数字>.fpk（含历史 v 前缀形态），
 // 返回最大 N（包挪进 release/ 后痕迹依然可追）。
 func maxHistorySeq() (int, bool) {
-	re := regexp.MustCompile(`^Fntv-Plus-v(\d+)\.fpk$`)
+	// 兼容历史 Fntv-Plus-v123.fpk 与新 Fntv-Plus-123.fpk（发布包带点，不匹配）
+	re := regexp.MustCompile(`^Fntv-Plus-(?:v)?(\d+)\.fpk$`)
 	max, ok := 0, false
 	for _, dir := range []string{root, defaultOutDir()} {
 		entries, err := os.ReadDir(dir)

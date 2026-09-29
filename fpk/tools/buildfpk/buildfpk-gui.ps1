@@ -33,13 +33,13 @@ $gbMode.Location    = New-Object System.Drawing.Point(16, 12)
 $gbMode.Size        = New-Object System.Drawing.Size(710, 128)
 
 $rbDev             = New-Object System.Windows.Forms.RadioButton
-$rbDev.Text        = '开发测试版（版号自动 = fpk 提交数，包名 Fntv-Plus-vNNN.fpk）'
+$rbDev.Text        = '测试包（版号不动，仅追加 -N 序号；包名 Fntv-Plus-NNN.fpk）'
 $rbDev.Location    = New-Object System.Drawing.Point(14, 24)
 $rbDev.Size        = New-Object System.Drawing.Size(680, 20)
 $rbDev.Checked     = $true
 
 $rbRel             = New-Object System.Windows.Forms.RadioButton
-$rbRel.Text        = '正式发布版（飞牛商店口径，包名 Fntv-Plus-VXYZ.fpk）'
+$rbRel.Text        = '正式发布包（需指定版号，包名 Fntv-Plus-X.Y.Z.fpk）'
 $rbRel.Location    = New-Object System.Drawing.Point(14, 52)
 $rbRel.Size        = New-Object System.Drawing.Size(680, 20)
 
