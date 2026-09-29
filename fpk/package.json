@@ -2,6 +2,7 @@
   "name": "fntvplus",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0",
   "type": "module",
   "description": "Fntv-Plus 影视网页端增强（FPK）：复用 Fntv-Plus 客户端 preload 代码，经反代注入飞牛影视网页。",
   "scripts": {

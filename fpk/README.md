@@ -7,7 +7,7 @@
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A518-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/fnOS-x86__64-3d7fe0)](https://www.fnnas.com)
 [![Desktop Client](https://img.shields.io/badge/%E6%A1%8C%E9%9D%A2%E7%89%88-Fntv--Plus-8a6fd6)](https://github.com/YDMY007/Fntv-Plus)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 为飞牛影视（fnOS 影视应用）网页端打造的**界面增强应用**——以一个 fpk 包装进 fnOS，通过反向代理把增强能力注入到影视网页，**浏览器打开即是增强版**，电视 / 平板 / 手机 / 电脑全设备生效，无需在每台设备上装任何东西。
 
@@ -157,4 +157,10 @@
 
 ## License
 
-MIT
+本项目沿用 **GNU General Public License v3.0（GPL-3.0）**，与同仓库桌面客户端
+[Fntv-Plus](https://github.com/YDMY007/Fntv-Plus) 保持一致 —— fpk 版的网页端注入、
+界面增强与后端桥接代码大量复用/改造自该 GPL-3.0 项目，故必须沿用同一许可证并保留
+原作者版权与致谢（Copyright (C) 2025 QiaoKes）。
+
+- 完整许可与项目声明见 [LICENSE](LICENSE)
+- GPL-3.0 官方全文：https://www.gnu.org/licenses/gpl-3.0.html
