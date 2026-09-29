@@ -143,10 +143,10 @@ function handle(): void {
     document.documentElement.classList.toggle('fnos-tv-page', isFntvTvPage());
   };
   syncTvPageClass();
-  let _lastPath = location.pathname;
+  let _lastPath = pagePath();
   const _tvClassTimer = window.setInterval(() => {
-    if (location.pathname !== _lastPath) {
-      _lastPath = location.pathname;
+    if (pagePath() !== _lastPath) {
+      _lastPath = pagePath();
       syncTvPageClass();
       log('[TV类同步]', location.pathname, 'isTv=', isFntvTvPage());
     }
@@ -5023,12 +5023,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const _stopCarouselOffHome = (newHref: string | undefined): void => {
       const h = newHref || location.href;
       let p = '';
-      try { p = pagePathOf(new URL(h, location.origin).pathname); } catch (_) { p = location.pathname; }
+      try { p = pagePathOf(new URL(h, location.origin).pathname); } catch (_) { p = pagePath(); }
       if (p === '/v' || p === '/v/') return;
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
     (history as any).pushState = function (...a: any[]) {
-      const prevPath = location.pathname;
+      const prevPath = pagePath();
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _ps.apply(this, a as any);
       logNav('pushState');
@@ -5045,7 +5045,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleFolderScraperButton(); // [自定义刮削] 个人视频文件夹页「⟳ 文件夹刮削」浮动按钮：非文件夹页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
-      const prevPath = location.pathname;
+      const prevPath = pagePath();
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
       logNav('replaceState');
@@ -5161,7 +5161,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   反复调用 injectCarousel(每次都会先 destroyCarousel 再被路径守卫挡回), 与详情页自身的重活叠加,
   //   是从"首页轮播图打开二级详情页"这条路径才卡死、从剧集列表进入却正常的关键差异。
   //   非首页一律跳过轮播重建(回到首页时 pushState/popstate 钩子会重新注入)。
-  const _isHomePath = (): boolean => { const p = location.pathname; return p === '/v' || p === '/v/'; };
+  const _isHomePath = (): boolean => { const p = pagePath(); return p === '/v' || p === '/v/'; };
 
   let _wtsTimer = 0;
   // [网页端] 触发风暴熔断：1 秒内回调超过 40 次即视为自激（回调自身在改 DOM → 再触发自己），

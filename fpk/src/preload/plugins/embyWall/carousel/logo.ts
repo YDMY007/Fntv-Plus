@@ -245,7 +245,7 @@ async function saveEditDetail(origin: string, data: any, logoHashPath: string): 
 export function backfillDetailLogo(): void {
   if (!S.carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
   if (!isDetailPage()) return;
-  const m = location.pathname.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+  const m = location.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
   if (!m) return;
   const guid = m[2];
   const mediaType = m[1] === 'tv' ? 'tv' : 'movie';

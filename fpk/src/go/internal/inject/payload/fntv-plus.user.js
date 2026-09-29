@@ -10901,7 +10901,7 @@ html.fnos-perf.dark{
   function backfillDetailLogo() {
     if (!S.carouselLogoEnabled) return;
     if (!isDetailPage()) return;
-    const m = location.pathname.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+    const m = location.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
     if (!m) return;
     const guid = m[2];
     const mediaType = m[1] === "tv" ? "tv" : "movie";
@@ -16214,10 +16214,10 @@ html.fntv-boot-hide #root{visibility:hidden}
       document.documentElement.classList.toggle("fnos-tv-page", isFntvTvPage());
     };
     syncTvPageClass();
-    let _lastPath = location.pathname;
+    let _lastPath = pagePath();
     const _tvClassTimer = window.setInterval(() => {
-      if (location.pathname !== _lastPath) {
-        _lastPath = location.pathname;
+      if (pagePath() !== _lastPath) {
+        _lastPath = pagePath();
         syncTvPageClass();
         log7("[TV\u7C7B\u540C\u6B65]", location.pathname, "isTv=", isFntvTvPage());
       }
@@ -20609,7 +20609,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         try {
           p = pagePathOf(new URL(h, location.origin).pathname);
         } catch (_) {
-          p = location.pathname;
+          p = pagePath();
         }
         if (p === "/v" || p === "/v/") return;
         try {
@@ -20618,7 +20618,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         }
       };
       history.pushState = function(...a) {
-        const prevPath = location.pathname;
+        const prevPath = pagePath();
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _ps.apply(this, a);
         logNav("pushState");
@@ -20640,7 +20640,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleFolderScraperButton();
       };
       history.replaceState = function(...a) {
-        const prevPath = location.pathname;
+        const prevPath = pagePath();
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _rs.apply(this, a);
         logNav("replaceState");
@@ -20754,7 +20754,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     wheelToScroll();
     [2e3, 4e3, 8e3].forEach((ms) => setTimeout(wheelToScroll, ms));
     const _isHomePath = () => {
-      const p = location.pathname;
+      const p = pagePath();
       return p === "/v" || p === "/v/";
     };
     let _wtsTimer = 0;
