@@ -23,41 +23,26 @@ export function setOnShowsReady(fn: () => void): void { onShowsReady = fn; }
 // [lc-950] 轮播数据缓存: 把 S.apiShows(含 base64 data URL 横版海报 + 简介等)序列化到 sessionStorage,
 //   跨整页重载/模块重启持久化。返回首页重建时若 S.apiShows 已空(整页刷新), 可零网络即时恢复海报/简介,
 //   根治「返回首页重载 + 海报图/剧集简介丢失」。仅在数据完整(已带 _backdropBlob)时落盘。
-const SHOWS_CACHE_KEY = 'fntv-carousel-shows-v1';
-// [lc-1274] 用 function 声明（非 const 箭头）：logo.ts 已 import 本模块（extractTmdbId，
-// 经 styles.ts 形成既有环），function 提升使其在任意模块求值顺序下都可用，免疫 TDZ。
+// [lc-1280] key 带版本号：旧版快照(v1，可能已被 tmdbLogo 挤爆配额而降级丢了 _backdropBlob)
+//   一律不再读取 —— 否则用户升级后仍会从坏快照恢复出「有文字无海报」的轮播。
+const SHOWS_CACHE_KEY = 'fntv-carousel-shows-v2';
+// [lc-1280] 快照字段优先级：_backdropBlob(海报, 主体) > desc/poster > tmdbLogo(装饰, 可省)。
+//   ⚠ 教训：lc-1274 曾把 tmdbLogo 一并落盘，其 base64 体积(每条数十 KB × 10 条)挤爆
+//   sessionStorage 5MB 配额 → 整个 setItem 抛异常 → 降级链又先丢 _backdropBlob(海报大图),
+//   结果「返回首页/重载后海报不显示」(用户报告)。装饰项绝不能挤掉主体项。
+//   tmdbLogo 本就有桥端 24h 缓存 + render 时即时复用，不落盘零损失。
 export function persistShows(): void {
+  const slim = (dropBlob: boolean): string => JSON.stringify(S.apiShows.map((s: any) => {
+    const { tmdbLogo, _backdropBlob, ...rest } = s; // tmdbLogo 一律不落盘（体积大且可再生）
+    return dropBlob ? rest : { ...rest, _backdropBlob };
+  }));
   try {
     if (!S.apiShows.length) return;
-    const snap = S.apiShows.map((s: any) => ({
-      id: s.id, title: s.title, desc: s.desc, backdrop: s.backdrop,
-      _backdropBlob: s._backdropBlob, poster: s.poster, logo: s.logo,
-      genres: s.genres, rating: s.rating, year: s.year,
-      totalEps: s.totalEps, localEps: s.localEps, totalSeasons: s.totalSeasons,
-      localSeasons: s.localSeasons, statusText: s.statusText, mediaType: s.mediaType,
-      strmTag: s.strmTag, _backdropIsPortrait: s._backdropIsPortrait,
-      tmdbId: s.tmdbId, // [lc-1274] 缓存快照携带, 整页重载恢复后 logo 仍可走 id 精确匹配
-      tmdbLogo: s.tmdbLogo, // [lc-1274] 已解析的 TMDB logo dataUrl 一并落盘, 强刷后渲染时零网络秒复用
-    }));
-    sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(snap));
+    sessionStorage.setItem(SHOWS_CACHE_KEY, slim(false));
   } catch (_) {
-    // [lc-1274] 配额溢出：先只丢 logo dataUrl 再试；仍溢出才退回「无横版 blob」的精简快照，
-    // 尽量保住 lc-950 的海报/简介主收益
-    try {
-      const noLogo = S.apiShows.map((s: any) => {
-        const { tmdbLogo, ...rest } = s;
-        return rest;
-      });
-      sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(noLogo));
-    } catch (_) {
-      try {
-        const slim = S.apiShows.map((s: any) => {
-          const { tmdbLogo, _backdropBlob, ...rest } = s;
-          return rest;
-        });
-        sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(slim));
-      } catch (_) { /* 放弃快照, 不影响主流程 */ }
-    }
+    // [lc-1280] 配额溢出：只降级「不带海报 blob」这一档（保 id/标题/简介/logo，让下次进入
+    //   走 fetchImageAuth 网络补图），绝不再出现「先保 logo 丢海报」的倒挂。
+    try { sessionStorage.setItem(SHOWS_CACHE_KEY, slim(true)); } catch (_) { /* 放弃快照 */ }
   }
 }
 const restoreShows = (): void => {
@@ -67,9 +52,19 @@ const restoreShows = (): void => {
     if (!raw) return;
     const arr = JSON.parse(raw);
     if (Array.isArray(arr) && arr.length) {
+      // [lc-1280] 兜底自检：恢复的数据必须带横版海报 blob(_backdropBlob)。若普遍缺失
+      //   （配额降级后落盘的精简快照、或历史坏数据），恢复出来只会得到「有文字无海报」的
+      //   轮播，且 apiLoaded 未被置位时也不会自动重拉 → 永久无图。此时丢弃快照、清空数据，
+      //   让正常拉取流程完整跑一遍（含 resolveShowBackdrop 重新下载海报）。
+      const withBlob = arr.filter((s: any) => s && s._backdropBlob).length;
+      if (withBlob === 0) {
+        log('[lc-1280] 快照无可用海报 blob，丢弃并重新拉取:', arr.length, '项');
+        try { sessionStorage.removeItem(SHOWS_CACHE_KEY); } catch (_) { /* ignore */ }
+        return;
+      }
       S.apiShows.length = 0;
       Array.prototype.push.apply(S.apiShows, arr);
-      S.carouselLoadedButNone = arr.length === 0;
+      S.carouselLoadedButNone = false;
       log('[lc-950] 从 sessionStorage 恢复轮播缓存', arr.length, '项(含横版海报 data URL + 简介)');
     }
   } catch (_) { /* 解析异常: 忽略 */ }

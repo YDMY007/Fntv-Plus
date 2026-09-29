@@ -7256,7 +7256,6 @@ html.fnos-perf.dark{
       target.style.backgroundImage = `url("${dataUrl}")`;
       return;
     }
-    if (show && show._backdropIsPortrait) return;
     startFetchFallback(show, target, base, title);
   }
   function startFetchFallback(show, target, base, title) {
@@ -10261,51 +10260,19 @@ html.fnos-perf.dark{
   function setOnShowsReady(fn) {
     onShowsReady = fn;
   }
-  var SHOWS_CACHE_KEY = "fntv-carousel-shows-v1";
+  var SHOWS_CACHE_KEY = "fntv-carousel-shows-v2";
   function persistShows() {
+    const slim = (dropBlob) => JSON.stringify(S.apiShows.map((s) => {
+      const { tmdbLogo, _backdropBlob, ...rest } = s;
+      return dropBlob ? rest : { ...rest, _backdropBlob };
+    }));
     try {
       if (!S.apiShows.length) return;
-      const snap = S.apiShows.map((s) => ({
-        id: s.id,
-        title: s.title,
-        desc: s.desc,
-        backdrop: s.backdrop,
-        _backdropBlob: s._backdropBlob,
-        poster: s.poster,
-        logo: s.logo,
-        genres: s.genres,
-        rating: s.rating,
-        year: s.year,
-        totalEps: s.totalEps,
-        localEps: s.localEps,
-        totalSeasons: s.totalSeasons,
-        localSeasons: s.localSeasons,
-        statusText: s.statusText,
-        mediaType: s.mediaType,
-        strmTag: s.strmTag,
-        _backdropIsPortrait: s._backdropIsPortrait,
-        tmdbId: s.tmdbId,
-        // [lc-1274] 缓存快照携带, 整页重载恢复后 logo 仍可走 id 精确匹配
-        tmdbLogo: s.tmdbLogo
-        // [lc-1274] 已解析的 TMDB logo dataUrl 一并落盘, 强刷后渲染时零网络秒复用
-      }));
-      sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(snap));
+      sessionStorage.setItem(SHOWS_CACHE_KEY, slim(false));
     } catch (_) {
       try {
-        const noLogo = S.apiShows.map((s) => {
-          const { tmdbLogo, ...rest } = s;
-          return rest;
-        });
-        sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(noLogo));
+        sessionStorage.setItem(SHOWS_CACHE_KEY, slim(true));
       } catch (_2) {
-        try {
-          const slim = S.apiShows.map((s) => {
-            const { tmdbLogo, _backdropBlob, ...rest } = s;
-            return rest;
-          });
-          sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(slim));
-        } catch (_3) {
-        }
       }
     }
   }
@@ -10316,9 +10283,18 @@ html.fnos-perf.dark{
       if (!raw) return;
       const arr = JSON.parse(raw);
       if (Array.isArray(arr) && arr.length) {
+        const withBlob = arr.filter((s) => s && s._backdropBlob).length;
+        if (withBlob === 0) {
+          log7("[lc-1280] \u5FEB\u7167\u65E0\u53EF\u7528\u6D77\u62A5 blob\uFF0C\u4E22\u5F03\u5E76\u91CD\u65B0\u62C9\u53D6:", arr.length, "\u9879");
+          try {
+            sessionStorage.removeItem(SHOWS_CACHE_KEY);
+          } catch (_) {
+          }
+          return;
+        }
         S.apiShows.length = 0;
         Array.prototype.push.apply(S.apiShows, arr);
-        S.carouselLoadedButNone = arr.length === 0;
+        S.carouselLoadedButNone = false;
         log7("[lc-950] \u4ECE sessionStorage \u6062\u590D\u8F6E\u64AD\u7F13\u5B58", arr.length, "\u9879(\u542B\u6A2A\u7248\u6D77\u62A5 data URL + \u7B80\u4ECB)");
       }
     } catch (_) {

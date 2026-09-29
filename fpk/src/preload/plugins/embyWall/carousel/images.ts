@@ -139,7 +139,10 @@ export function applyCarouselBackdrop(show: any, target: HTMLElement, base: stri
     target.style.backgroundImage = `url("${dataUrl}")`;
     return;
   }
-  if (show && (show as any)._backdropIsPortrait) return; // 已知竖版 → 不拉(保留渐变兜底)
+  // [lc-1280] 无 blob 时不早退：_backdropIsPortrait 是历史遗留标记（当前代码从不赋值），
+  //   若曾为 true 会永久阻断补图 → 轮播「有文字无海报」。改为仅在有 backdrop 可拉时跳过，
+  //   且竖版判定交给 startFetchFallback 内部的横版校验（拉回后 w<h 即丢弃），
+  //   这样即便标记为竖版也能靠 item API 的横版地址补上。
   startFetchFallback(show, target, base, title);
 }
 
