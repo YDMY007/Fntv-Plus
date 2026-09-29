@@ -298,7 +298,8 @@ local function set_danmaku_delay(dly, time)
     DELAYS = merge_delay_segments(DELAYS)
 
     if ENABLED and COMMENTS ~= nil then
-        render()
+        -- [lc-1273] 延迟变了 = 事件时间轴变了：滤镜路径须重建渲染 ASS 并重挂滤镜
+        rebuild_render()
     end
 
     show_message('设置弹幕延迟: ' .. string.format("%.1f", DELAY + 1e-10) .. ' s')

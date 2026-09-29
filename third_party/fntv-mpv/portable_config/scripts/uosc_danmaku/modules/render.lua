@@ -5,6 +5,13 @@ local utils = require("mp.utils")
 -- [lc-1272] 渲染步进：vf_fps=yes 时 0.01s(100Hz)。120Hz 显示器与 100Hz 更新无法整除对齐，
 --   有的显示帧重复旧位置、有的帧跳新位置 → 全屏下肉眼可见「左右抖动」。
 --   display-fps 观察器会把步进改为「显示器刷新率 ÷2」(60Hz@120屏) 实现整帧对齐。
+-- [lc-1273] 上述步进只对 OSD 回退路径生效。默认路径改为 lavfi=[ass=...] 视频滤镜渲染：
+--   mpv 的 OSD overlay 恒以 ass_render_frame(t=0) 渲染（osd_libass.c append_ass 硬编码 0），
+--   \move 在 OSD 内完全静止，只能靠 Lua 定时器逐 tick 重算 \pos；而 add_periodic_timer
+--   相位与垂直同步无锁，更新落帧间隔抖动 → 全屏（高分辨率下事件循环更忙、定时器更不稳）
+--   弹幕左右微抖，窗口模式负载低被掩盖。滤镜路径把弹幕交给视频滤镜链里的 libass，
+--   由其按每帧 pts 精确插值 \move（实测 150 帧拟合斜率 -1.3331px/帧 vs 理论 -1.3333，
+--   零定时器参与），定时器相位/坐标量化问题整体消失。滤镜不可用时自动回退本 OSD 路径。
 local INTERVAL = options.vf_fps and 0.01 or 0.001
 local osd_width, osd_height, pause = 0, 0, true
 
@@ -92,7 +99,179 @@ end
 
 local overlay = mp.create_osd_overlay('ass-events')
 
+-- ============================================================
+-- [lc-1273] 滤镜渲染路径（默认）与 OSD 定时器路径（回退）
+-- ============================================================
+local FILTER_LABEL = "fntv-danmaku"
+-- nil=未探测, true=可用, false=探测失败（本场回退 OSD 路径）
+local filter_available
+local filter_active = false   -- 弹幕滤镜当前是否挂在 vf 链上
+local render_ass_path_cache
+
+local function get_render_ass_path()
+    -- DANMAKU_PATH/PID 在 main.lua 尾部才赋值（本模块先于其加载），必须惰性取
+    if not render_ass_path_cache then
+        render_ass_path_cache = utils.join_path(DANMAKU_PATH, "danmaku-render-" .. PID .. ".ass")
+    end
+    return render_ass_path_cache
+end
+
+-- lavfi 滤镜图内的路径转义：Windows 盘符冒号在滤镜图里是选项分隔符，须 \: 转义，
+-- 整体单引号包裹防空格（实测：不转义冒号 → AVFilterGraph "No option name" 解析失败）
+local function escape_filter_path(p)
+    p = p:gsub("\\", "/")
+    p = p:gsub(":", "\\:")
+    return "'" .. p .. "'"
+end
+
+local function danmaku_filter_arg()
+    return "@" .. FILTER_LABEL .. ":lavfi=[ass=filename=" .. escape_filter_path(get_render_ass_path()) .. "]"
+end
+
+-- 虚拟画布(PlayRes)与字号：与 OSD 路径 render() 完全同一套超宽屏修正，
+-- 区别仅在画布按视频原生尺寸取比例（滤镜渲染发生在视频帧上，而非 OSD 矩形）
+local function canvas_geometry()
+    local width, height = 1920, 1080
+    local vw = mp.get_property_number('width') or 0
+    local vh = mp.get_property_number('height') or 0
+    local ratio = (vw > 0 and vh > 0) and vw / vh
+        or (osd_height > 0 and osd_width / osd_height or 16 / 9)
+    local fontsize = options.fontsize
+    if width / height < ratio then
+        height = width / ratio
+        fontsize = options.fontsize - ratio * 2
+    end
+    return width, height, math.floor(fontsize)
+end
+
+-- 从 COMMENTS 重建渲染用 ASS 文件（滤镜 init 时才读文件，任何内容变更都必须重挂滤镜）：
+--   ①每条滚动弹幕的 \move 补上事件内时长 (0→dur_ms)：转换器写入的 \move 无时间参数，
+--     libass 默认只在前 10s 内插值——这正是旧实现必须逐 tick 重算 \pos 的根因
+--   ②显示延迟按段偏移事件时间；③displayarea 屏蔽（滚动弹幕 y 恒定，取 y1 即可）
+--   ④合并弹幕 {\fs} ×1.5 与 &#NNN; 实体清理，与 OSD 路径 parse_comment 后处理语义一致
+--   ⑤\an 锚点沿用 OSD 路径约定（SP/MSG 用 7，其余 8；转换器的 move/pos 坐标按中心锚计算）
+local function write_render_file()
+    local _, height, fontsize = canvas_geometry()
+    local displayarea = height * tonumber(options.displayarea)
+    local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
+    local bold = options.bold and "1" or "0"
+    local outline = tonumber(options.outline) or 1.0
+    local shadow = tonumber(options.shadow) or 0.0
+    local fontname = options.fontname
+
+    local style_align = { R2L = 7, TOP = 8, BTM = 2, SP = 7, MSG = 7, Default = 7 }
+    local style_lines = {}
+    for _, name in ipairs({ "R2L", "TOP", "BTM", "SP", "MSG", "Default" }) do
+        style_lines[#style_lines + 1] = string.format(
+            "Style: %s,%s,%d,&H%sFFFFFF,&H00FFFFFF,&H00000000,&H%s000000,%s,0,0,0,100,100,0,0,1,%.2f,%.2f,%d,0,0,0,1",
+            name, fontname, fontsize, alpha, alpha, bold, outline, shadow, style_align[name])
+    end
+
+    local header = table.concat({
+        "[Script Info]",
+        "Title: Fntv-Plus danmaku render",
+        "ScriptType: v4.00+",
+        "Collisions: Normal",
+        "PlayResX: 1920",
+        string.format("PlayResY: %d", height),
+        "Timer: 100.0000",
+        "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        table.concat(style_lines, "\n"),
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        "",
+    }, "\n")
+
+    local lines, count = {}, 0
+    for _, event in ipairs(COMMENTS or {}) do
+        local delay = get_delay_for_time(DELAYS, event.start_time)
+        local start_t = event.start_time + delay
+        local end_t = event.end_time + delay
+        if end_t > 0 then
+            if start_t < 0 then start_t = 0 end
+            local text = (event.text or ""):gsub("&#%d+;", "")
+            local an = (event.style ~= "SP" and event.style ~= "MSG") and 8 or 7
+            local line
+            local x1, y1, x2, y2 = parse_move_tag(text)
+            if x1 then
+                if y1 <= displayarea then
+                    local clean = text:gsub("\\move%(.-%)", "")
+                    clean = clean:gsub("\\fs(%d+)", function(size)
+                        return string.format("\\fs%d", size * 1.5)
+                    end)
+                    local dur_ms = math.max(1, math.floor((end_t - start_t) * 1000 + 0.5))
+                    line = string.format("Dialogue: 0,%s,%s,%s,,0,0,0,,{\\an%d\\move(%s,%s,%s,%s,0,%d)}%s",
+                        seconds_to_time(start_t), seconds_to_time(end_t), event.style or "Default",
+                        an, x1, y1, x2, y2, dur_ms, clean)
+                end
+            else
+                local _, cy = text:match("\\pos%((%-?[%d%.]+),%s*(%-?[%d%.]+).*%)")
+                if cy and tonumber(cy) <= displayarea then
+                    text = text:gsub("\\fs(%d+)", function(size)
+                        return string.format("\\fs%d", size * 1.5)
+                    end)
+                    line = string.format("Dialogue: 0,%s,%s,%s,,0,0,0,,{\\an%d}%s",
+                        seconds_to_time(start_t), seconds_to_time(end_t), event.style or "Default",
+                        an, text)
+                end
+            end
+            if line then
+                count = count + 1
+                lines[#lines + 1] = line
+            end
+        end
+    end
+
+    local f = io.open(get_render_ass_path(), "w")
+    if not f then
+        msg.warn("[lc-1273] 渲染 ASS 写入失败: " .. get_render_ass_path())
+        return nil
+    end
+    f:write(header .. table.concat(lines, "\n"))
+    f:close()
+    msg.info(string.format("[lc-1273] 渲染 ASS 重建: %d/%d 条弹幕 → %s",
+        count, COMMENTS and #COMMENTS or 0, get_render_ass_path()))
+    return true
+end
+
+local function remove_danmaku_filter()
+    if filter_active then
+        mp.commandv("vf", "remove", "@" .. FILTER_LABEL)
+        filter_active = false
+    end
+end
+
+-- 尝试滤镜路径：成功返回 true；首次尝试即真实挂载（单独探针挂/撤会多两次滤镜链
+-- 重配，首显时可感知卡顿）。任何一步失败都置 filter_available=false 永久回退。
+local function try_filter_path()
+    if filter_available == false then return false end
+    if write_render_file() then
+        remove_danmaku_filter()
+        if mp.commandv("vf", "add", danmaku_filter_arg()) then
+            filter_active = true
+            if filter_available ~= true then
+                msg.info("[lc-1273] 弹幕走 lavfi ass 滤镜渲染（libass 按帧 pts 插值，全屏抖动根治）")
+            end
+            filter_available = true
+            return true
+        end
+    end
+    if filter_available ~= false then
+        msg.warn("[lc-1273] lavfi ass 滤镜不可用，弹幕回退 OSD 定时器渲染")
+    end
+    filter_available = false
+    return false
+end
+
 function render()
+    -- [lc-1273] 滤镜路径下无需逐 tick 重画：seek/暂停/续播的弹幕位置由 libass
+    -- 按帧 pts 自行对齐。此函数保留给 OSD 回退路径（定时器/换文件/seek 调用）
+    if filter_available then return end
     if COMMENTS == nil then return end
 
     local pos, err = mp.get_property_number('time-pos')
@@ -177,24 +356,42 @@ local function filter_state(label, name)
 end
 
 function show_danmaku_func()
-    render()
     mp.set_property_bool(HAS_DANMAKU, true)
-    if not pause then
-        timer:resume()
-    end
+    -- [lc-1273] fps 滤镜须先于 ass 滤镜入链：重复帧携带新 pts，libass 才能对每个重复帧
+    -- 插值一次，弹幕才能随 fps 滤镜获得 60fps 平滑（顺序颠倒会退化为视频原始帧率）
     if options.vf_fps then
         local display_fps = mp.get_property_number('display-fps')
         local video_fps = mp.get_property_number('estimated-vf-fps')
-        if (display_fps and display_fps < 58) or (video_fps and video_fps > 58) then
-            return
+        if not ((display_fps and display_fps < 58) or (video_fps and video_fps > 58)) then
+            if not filter_state("danmaku", "fps") then
+                mp.commandv("vf", "append", string.format("@danmaku:fps=fps=%s", options.fps))
+            end
         end
-        if not filter_state("danmaku", "fps") then
-            mp.commandv("vf", "append", string.format("@danmaku:fps=fps=%s", options.fps))
-        end
+    end
+    if try_filter_path() then
+        return
+    end
+    -- ===== OSD 回退路径（lc-1272 逻辑原样保留）=====
+    render()
+    if not pause then
+        timer:resume()
     end
 end
 
+-- [lc-1273] 弹幕延迟等「事件时间轴」变更后的刷新入口：滤镜路径重建文件并重挂
+-- （滤镜 init 时才会重新读文件）；OSD 路径直接重画。main.lua 延迟处理调用此函数。
+function rebuild_render()
+    if filter_available then
+        if filter_active then
+            try_filter_path()
+        end
+        return
+    end
+    render()
+end
+
 function hide_danmaku_func()
+    remove_danmaku_filter()
     timer:kill()
     mp.set_property_bool(HAS_DANMAKU, false)
     overlay:remove()
@@ -262,7 +459,9 @@ mp.observe_property('osd-width', 'number', function(_, value) osd_width = value 
 mp.observe_property('osd-height', 'number', function(_, value) osd_height = value or osd_height end)
 -- [lc-1272] 步进=两显示帧(2/fps)：更新频率是刷新率的整约数，逐帧位置严格对齐，
 --   消除「100Hz 更新 × 120Hz 显示」错频造成的抖动；比 1/fps 省一半重排开销。
+--   [lc-1273] 滤镜路径下无定时器可调，跳过。
 mp.observe_property('display-fps', 'number', function(_, value)
+    if filter_available then return end
     if value ~= nil then
         local interval = 2 / value
         if interval > INTERVAL then
@@ -284,7 +483,8 @@ mp.observe_property('pause', 'bool', function(_, value)
     if value ~= nil then
         pause = value
     end
-    if ENABLED then
+    -- [lc-1273] 滤镜路径下弹幕随 pts 冻结（暂停即静止，行为正确），无需停/启定时器
+    if ENABLED and not filter_available then
         if pause then
             timer:kill()
         elseif COMMENTS ~= nil then
@@ -306,6 +506,11 @@ mp.add_hook("on_unload", 50, function()
     COMMENTS, DELAY = nil, 0
     timer:kill()
     overlay:remove()
+    -- [lc-1273] 撤滤镜 + 清理渲染 ASS（与 danmaku-PID.ass 同生命周期）
+    remove_danmaku_filter()
+    if file_exists(get_render_ass_path()) then
+        os.remove(get_render_ass_path())
+    end
     mp.set_property_native(DELAY_PROPERTY, 0)
     if filter_state("danmaku") then
         mp.commandv("vf", "remove", "@danmaku")
