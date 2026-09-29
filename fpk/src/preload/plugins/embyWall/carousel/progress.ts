@@ -104,6 +104,10 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
   S.carouselContainer = container;
+  // [lc-1284] 骨架专属标记：揭示逻辑据此**唯一**识别骨架节点。
+  //   此前靠 S.carouselContainer 猜（该引用在真实轮播渲染时也会被覆写），
+  //   自动刷新/二次注入场景下会把刚渲染好的真实轮播误当骨架摘除 → 「轮播没了」。
+  container.dataset.fntvSkeleton = '1';
 
   let fillEl: HTMLElement, percentEl: HTMLElement, statusEl: HTMLElement;
 

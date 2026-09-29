@@ -9871,6 +9871,7 @@ html.fnos-perf.dark{
       container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
     }
     S.carouselContainer = container;
+    container.dataset.fntvSkeleton = "1";
     let fillEl, percentEl, statusEl;
     if (!_isDark && _cs !== 4) {
       const overlay = document.createElement("div");
@@ -11144,7 +11145,7 @@ html.fnos-perf.dark{
       log7("no target");
       return;
     }
-    const skeletonEl = S.placeholderInited && S.carouselContainer && document.contains(S.carouselContainer) ? S.carouselContainer : null;
+    const skeletonEl = S.carouselWrapper && S.carouselWrapper.querySelector("[data-fntv-skeleton]") || document.querySelector("[data-fntv-skeleton]");
     log7("target found on", location.href, rebuild ? "(rebuild)" : "(first)");
     if (!document.getElementById("fnos-hero-action-style")) {
       const actSt = document.createElement("style");

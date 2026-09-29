@@ -139,12 +139,18 @@ export function injectCarousel(): void {
   // [lc-1278] 捕获当前骨架节点（buildLoadingPlaceholder 把自己的容器存在 S.carouselContainer）。
   // 有骨架时揭示改为「交叉淡出」：骨架原地淡出、真实轮播淡入，消除白底骨架骤删后
   // 露出容器深色底的黑屏帧（白骨架→纯黑→出图）。
-  // ⚠ 数据到达后的再次注入会因 wrapper 已存在走 rebuild 分支——但那个 wrapper 其实是
-  // 骨架的 wrapper（骨架路径不置 carouselInited），所以这里只看 placeholderInited，不排除 rebuild。
-  // [lc-1283] 追加 document.contains 校验：S.carouselContainer 可能指向已移除的旧节点
-  //   （上一次揭示后骨架被摘除，但 S 引用未清），此时若误当骨架处理，会把新轮播一起淡出/摘掉。
-  const skeletonEl = (S.placeholderInited && S.carouselContainer && document.contains(S.carouselContainer))
-    ? S.carouselContainer : null;
+  // [lc-1284] ⚠ 只认骨架专属标记，绝不用 S.carouselContainer 推断！
+  //   该引用在真实轮播渲染时同样会被写入（render.ts 底部 S.carouselContainer = container），
+  //   而自动刷新/二次注入会在轮播已渲染后再次进入本函数 —— 此时按 S 引用取会把
+  //   **刚建好的真实轮播**当成骨架，520ms 后 remove() 掉（用户两次报告「轮播图没了」的根因）。
+  //   改为从 DOM 取带 data-fntv-skeleton 标记的节点，语义明确、无歧义。
+  // 查找范围：优先骨架 wrapper（S.carouselWrapper 此时可能仍指向骨架 wrapper），
+  //   兜底全文档查（wrapper 引用被 FNOS 重渲染打断时仍能找到骨架）。
+  // ⚠ 唯一判据就是这个标记本身，不再叠加 S.placeholderInited 等状态位——
+  //   那些状态位在「数据到达 / 自动刷新 / 二次注入」各路径的置位时机不同，叠加判断
+  //   反而会在某些时序下放行「把真实轮播当骨架」的错误分支。有标记才可能是骨架。
+  const skeletonEl = ((S.carouselWrapper && S.carouselWrapper.querySelector('[data-fntv-skeleton]'))
+    || document.querySelector('[data-fntv-skeleton]')) as HTMLElement | null;
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
   // [lc-773] 轮播行动按钮样式（Apple 风格）只注入一次。
