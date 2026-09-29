@@ -127,13 +127,24 @@ export function injectCarousel(): void {
     target = findMediaLibrarySection();
     if (target) log('media-library section found via robust search');
   }
+  // [lc-1283] 复用的 section 也必须仍在文档中：wrapper 可能挂在已被 fnOS 移除的旧 section 下，
+  //   此时应回退到 DOM 搜索（否则新轮播注入到游离节点 → 页面看不到轮播）。
+  if (rebuild && (!target || !document.contains(target))) {
+    log('rebuild section detached, fallback to DOM search');
+    target = findMediaLibrarySection();
+    rebuild = false;
+    if (target) log('media-library section found via robust search (fallback)');
+  }
   if (!target) { log('no target'); return; }
   // [lc-1278] 捕获当前骨架节点（buildLoadingPlaceholder 把自己的容器存在 S.carouselContainer）。
   // 有骨架时揭示改为「交叉淡出」：骨架原地淡出、真实轮播淡入，消除白底骨架骤删后
   // 露出容器深色底的黑屏帧（白骨架→纯黑→出图）。
   // ⚠ 数据到达后的再次注入会因 wrapper 已存在走 rebuild 分支——但那个 wrapper 其实是
   // 骨架的 wrapper（骨架路径不置 carouselInited），所以这里只看 placeholderInited，不排除 rebuild。
-  const skeletonEl = (S.placeholderInited && S.carouselContainer) ? S.carouselContainer : null;
+  // [lc-1283] 追加 document.contains 校验：S.carouselContainer 可能指向已移除的旧节点
+  //   （上一次揭示后骨架被摘除，但 S 引用未清），此时若误当骨架处理，会把新轮播一起淡出/摘掉。
+  const skeletonEl = (S.placeholderInited && S.carouselContainer && document.contains(S.carouselContainer))
+    ? S.carouselContainer : null;
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
   // [lc-773] 轮播行动按钮样式（Apple 风格）只注入一次。
@@ -238,7 +249,9 @@ export function injectCarousel(): void {
 
   // 统一容器: 重建时复用已有wrapper(保留padding:0 44px), 避免嵌套叠加导致宽度变宽
   let wrapper: HTMLElement;
-  if (rebuild && S.carouselWrapper) {
+  // [lc-1283] 追加 document.contains 校验：S.carouselWrapper 可能指向已随骨架一起被摘除的
+  //   游离节点（骨架 wrapper 在揭示后被清理），复用它会让新轮播挂在文档外 → 轮播不可见。
+  if (rebuild && S.carouselWrapper && document.contains(S.carouselWrapper)) {
     wrapper = S.carouselWrapper;
     // [lc-1278] 首次揭示(rebuild 但 wrapper 里其实只有骨架)时保留骨架做交叉淡出
     if (skeletonEl && skeletonEl.parentElement === wrapper) {
@@ -307,9 +320,17 @@ export function injectCarousel(): void {
       container.style.opacity = '1';
       if (skeletonEl) {
         skeletonEl.style.opacity = '0';
-        // 连骨架 wrapper 一起摘除(其内仅剩此节点, wrapper 无高度无样式残留)
+        // [lc-1283] ⚠ 只移除骨架节点自身，绝不能删它的父级！
+        //   rebuild 分支下 wrapper = S.carouselWrapper（骨架与真实轮播共用的同一个 wrapper），
+        //   原写法 (skeletonEl.parentElement || skeletonEl).remove() 会把**装着新轮播的 wrapper**
+        //   整个摘掉 → 淡入后 520ms 轮播整体消失（用户报告「海报轮播图直接没了」）。
         window.setTimeout(() => {
-          try { (skeletonEl.parentElement || skeletonEl).remove(); } catch (e) { /* 已被移除 */ }
+          try {
+            const p = skeletonEl.parentElement as HTMLElement | null;
+            skeletonEl.remove();
+            // 骨架用过的空 wrapper 才清理（仅当它已不含任何内容，避免误删真实轮播宿主）
+            if (p && p.childElementCount === 0) p.remove();
+          } catch (e) { /* 已被移除 */ }
         }, 520);
       }
     });

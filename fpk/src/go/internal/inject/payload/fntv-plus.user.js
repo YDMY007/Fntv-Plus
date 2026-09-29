@@ -11134,11 +11134,17 @@ html.fnos-perf.dark{
       target = findMediaLibrarySection();
       if (target) log7("media-library section found via robust search");
     }
+    if (rebuild && (!target || !document.contains(target))) {
+      log7("rebuild section detached, fallback to DOM search");
+      target = findMediaLibrarySection();
+      rebuild = false;
+      if (target) log7("media-library section found via robust search (fallback)");
+    }
     if (!target) {
       log7("no target");
       return;
     }
-    const skeletonEl = S.placeholderInited && S.carouselContainer ? S.carouselContainer : null;
+    const skeletonEl = S.placeholderInited && S.carouselContainer && document.contains(S.carouselContainer) ? S.carouselContainer : null;
     log7("target found on", location.href, rebuild ? "(rebuild)" : "(first)");
     if (!document.getElementById("fnos-hero-action-style")) {
       const actSt = document.createElement("style");
@@ -11224,7 +11230,7 @@ html.fnos-perf.dark{
     let currentIdx = 0;
     const infos = [];
     let wrapper;
-    if (rebuild && S.carouselWrapper) {
+    if (rebuild && S.carouselWrapper && document.contains(S.carouselWrapper)) {
       wrapper = S.carouselWrapper;
       if (skeletonEl && skeletonEl.parentElement === wrapper) {
         for (const child of Array.from(wrapper.childNodes)) {
@@ -11283,7 +11289,9 @@ html.fnos-perf.dark{
           skeletonEl.style.opacity = "0";
           window.setTimeout(() => {
             try {
-              (skeletonEl.parentElement || skeletonEl).remove();
+              const p2 = skeletonEl.parentElement;
+              skeletonEl.remove();
+              if (p2 && p2.childElementCount === 0) p2.remove();
             } catch (e) {
             }
           }, 520);
