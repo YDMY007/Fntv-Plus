@@ -26,13 +26,32 @@ function signWith(key, secret, url, data) {
   return 'nonce=' + nonce + '&timestamp=' + timestamp + '&sign=' + md5(signStr);
 }
 
+// [lc-1281] 签名材料单次求解：本地 chunk 提取（零网络，命中后永久缓存）。
+//   ⚠ 性能要点：此前（lc-1275）把 oracle 放在最前，导致**每个** fnOS 接口请求都先做一次
+//   局域网往返 —— 首页轮播要发几十个请求（item/list + 10 条 item 详情 + 每张图 + logo 查询）
+//   全部叠加，用户感知「等很久才加载出数据」。本地提取材料与服务端 env 注入的是同一套
+//   （都来自官方影视应用），签名算法也完全一致，故本地优先、oracle 仅作兜底。
+let _signMaterialsPromise = null;
+function localSignMaterials() {
+  if (!_signMaterialsPromise) {
+    _signMaterialsPromise = Promise.resolve()
+      .then(() => ensureSignMaterials())
+      .catch(() => null);
+  }
+  return _signMaterialsPromise;
+}
+
 async function genAuthxAsync(url, data) {
   const path = String(url || '');
-  // [lc-1275] 签名 oracle 优先：请服务端按「原样 dataJson 字符串」计算 Authx。服务端材料由
-  // fnOS 运行时 env 注入（与官方影视应用一致），不依赖前端 chunk 特征、永不过期——根治
-  // 「SPA 更新后本地提取失配 → 带 nonce 的 fnOS POST 全部 invalid sign」（jav 回填失败等）。
-  // dataJson 与后续 fetch body 是同一对象的同一 stringify 形态，字节严格一致。
-  // 代价是每次签名一次局域网往返（毫秒级），换签名确定性。
+  // ① 本地材料优先（零网络，命中后从内存缓存直取）
+  try {
+    const m = await localSignMaterials();
+    if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
+  } catch (e) { /* 提取失败 → oracle 兜底 */ }
+  // ② 签名 oracle 兜底：本地提取失败（SPA 更新致 chunk 特征失配）时，请服务端按
+  //   「原样 dataJson 字符串」计算 Authx。服务端材料由 fnOS 运行时 env 注入、永不过期，
+  //   根治「jav 回填等带 nonce 的 fnOS POST 全部 invalid sign」（lc-1275）。
+  //   仅在本地不可用时才付这次往返，正常路径零额外延迟。
   try {
     const dataJson = data === undefined || data === null ? '' : JSON.stringify(data);
     const r = await fetch('/app/fntvplus/api/bridge/fnos/authx', {
@@ -42,14 +61,8 @@ async function genAuthxAsync(url, data) {
       body: JSON.stringify({ path, dataJson }),
     }).then((x) => x.json());
     if (r && r.ok && r.authx) return r.authx;
-  } catch (e) { /* oracle 不可用（旧版后端/网络失败）→ 本地提取兜底 */ }
-  // [lc-1250-web] 本地提取兜底：影视 SPA 的 chunk 内嵌 KEY + 自解码 SECRET IIFE，
-  // 从用户自己 NAS 的前端资源提取（只驻页面内存，不随包分发、不落盘），本地真签名。
-  try {
-    const m = await ensureSignMaterials();
-    if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
-  } catch (e) { /* 提取失败走回放 */ }
-  // 回放：diag.ts 捕获的页面自身合法签名（body 哈希不一致时服务端会拒绝，仅作兜底）
+  } catch (e) { /* oracle 不可用（旧版后端/网络失败）→ 回放兜底 */ }
+  // ③ 回放：diag.ts 捕获的页面自身合法签名（body 哈希不一致时服务端会拒绝，仅作最后兜底）
   return getCapturedAuthx(path) || '';
 }
 

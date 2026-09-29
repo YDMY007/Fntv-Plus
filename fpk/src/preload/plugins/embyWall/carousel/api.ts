@@ -294,31 +294,41 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
       log('[lc-569] fetching item details for', newShows.length, 'items (live-DOM landscape + API)...');
       const domLand = scrapeLandscapeBackdrops(); // 当前页已加载横版图(如"继续观看"横版卡片)
       log('[lc-569] live landscape backdrops by id:', domLand.size, 'available');
+      // [lc-1282] 详情与海报并行：原实现是「先 await 全部详情 → 再下载全部海报」两段串行，
+      //   总耗时 ≈ 详情最慢一条 + 海报最慢一张；首屏因此「要等很久才加载出数据」。
+      //   改为每条详情一就绪就立刻发起它自己的海报下载（同一个 map 内 await），两段重叠后
+      //   总耗时 ≈ max(详情, 海报)。⚠ 渲染时机不变（仍是全部就绪才 reveal，保 lc-620 防闪
+      //   与 lc-624 横版门控），只压缩等待，不改策略。
       const detailsPromise = Promise.all(newShows.map(async (s: any) => {
         const fromDom = domLand.get(s.id);
         if (fromDom) s.backdrop = fromDom; // ① DOM 横版图(最快最稳)
         const detail = await fetchItemDetail(base, s.id); // ② item API 全字段
-        if (!detail) return !!(fromDom);
-        // 仅填充 API 有值的字段(0/空保留 DOM 兜底值)
-        if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
-        // [lc-606] 竖版海报补全: DOM 抓图(scrapeAllPageFirstScreen)可能为空(磁盘缓存化后
-        //   item.poster 常空), item API 的 data.posters 是权威竖版源 → 右侧海报条稳定显示
-        if (detail.poster && !s.poster) s.poster = detail.poster;
-        if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
-        // [lc-1274] 携带 TMDB id(trim_id 剥前缀): logo 查询优先 id 精确匹配, 标题搜索只作兜底
-        if (detail.tmdbId) s.tmdbId = detail.tmdbId;
-        if (detail.strmTag) s.strmTag = detail.strmTag; // [DIAG] 携带来源标签
-        if (detail.totalEps) s.totalEps = detail.totalEps;
-        if (detail.localEps) s.localEps = detail.localEps;
-        if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
-        if (detail.localSeasons) s.localSeasons = detail.localSeasons;
-        if (detail.year) s.year = detail.year;
-        if (detail.rating) s.rating = detail.rating;
-        if (detail.statusText) s.statusText = detail.statusText;
-        if (detail.genres && detail.genres.length) s.genres = detail.genres;
-        if (detail.desc) s.desc = detail.desc;
-        if (detail.title) s.title = detail.title;
-        return true;
+        if (detail) {
+          // 仅填充 API 有值的字段(0/空保留 DOM 兜底值)
+          if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
+          // [lc-606] 竖版海报补全: DOM 抓图(scrapeAllPageFirstScreen)可能为空(磁盘缓存化后
+          //   item.poster 常空), item API 的 data.posters 是权威竖版源 → 右侧海报条稳定显示
+          if (detail.poster && !s.poster) s.poster = detail.poster;
+          if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
+          // [lc-1274] 携带 TMDB id(trim_id 剥前缀): logo 查询优先 id 精确匹配, 标题搜索只作兜底
+          if (detail.tmdbId) s.tmdbId = detail.tmdbId;
+          if (detail.strmTag) s.strmTag = detail.strmTag; // [DIAG] 携带来源标签
+          if (detail.totalEps) s.totalEps = detail.totalEps;
+          if (detail.localEps) s.localEps = detail.localEps;
+          if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
+          if (detail.localSeasons) s.localSeasons = detail.localSeasons;
+          if (detail.year) s.year = detail.year;
+          if (detail.rating) s.rating = detail.rating;
+          if (detail.statusText) s.statusText = detail.statusText;
+          if (detail.genres && detail.genres.length) s.genres = detail.genres;
+          if (detail.desc) s.desc = detail.desc;
+          if (detail.title) s.title = detail.title;
+        }
+        // ③ [lc-1282] 紧接详情下海报（原为第二阶段串行执行，现提前与其余条目详情重叠）
+        const blob = await resolveShowBackdrop(s, base);
+        if (blob) { s._backdropBlob = blob; return true; }
+        log('[lc-768] 跳过无法加载海报的项(疑似 STR/网盘):', (s.title || '').substring(0, 16), s.strmTag || '');
+        return !!fromDom;
       }));
       // [lc-624] 渲染时机: 只有横版 backdrop 就绪才 reveal——用户明确不要"竖屏先渲染"
       // 再变横屏。revealOnce 前检查: 若 backdrop 仍是竖版(poster)或空, 说明详情未补全,
@@ -358,14 +368,12 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         clearTimeout(revealTimer);
         const withData = newShows.filter((s: any) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
         clog('[lc-569] item details enriched:', withData, '/', newShows.length);
-        // [lc-768] 兜底：STR/网盘海报加载不到 → 跳过并尝试后续候选，凑齐 CAROUSEL_TARGET 个横版；全失败则主页提示
-        const pool = newShows.slice();
-        const settled = await Promise.all(pool.map(async (s: any) => ({ s, blob: await resolveShowBackdrop(s, base) })));
+        // [lc-768] 海报已在上面 map 内随详情并行下载完毕（lc-1282 合并两段串行），
+        //   此处只做「按顺序取前 CAROUSEL_TARGET 个有海报的」整理，不再重复下载。
         const picked: any[] = [];
-        for (const x of settled) {
+        for (const s of newShows) {
           if (picked.length >= CAROUSEL_TARGET) break;
-          if (x.blob) { x.s._backdropBlob = x.blob; picked.push(x.s); }
-          else log('[lc-768] 跳过无法加载海报的项(疑似 STR/网盘):', (x.s.title || '').substring(0, 16), x.s.strmTag || '');
+          if (s._backdropBlob) picked.push(s);
         }
         if (picked.length === 0) {
           clog('[lc-768] 全部候选项海报均无法加载(疑似均为 STR/网盘)，主页显示「暂未支持STRM海报」');

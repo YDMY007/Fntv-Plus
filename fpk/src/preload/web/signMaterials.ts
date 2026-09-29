@@ -75,10 +75,15 @@ async function extract(): Promise<{ key: string; secret: string } | null> {
 /** 取签名材料（带缓存；失败返回 null，调用方走捕获回放）。 */
 export function ensureSignMaterials(): Promise<{ key: string; secret: string } | null> {
   if (cached) return Promise.resolve(cached);
+  // [lc-1281] 失败记忆：提取失败（chunk 特征失配）时此前 `if (cached)` 恒假 → 每个调用方
+  //   都重跑一遍「拉取全部 chunk 文本 + 正则扫描」；首页轮播几十个请求叠加时纯属浪费
+  //   （用户感知「要等很久才加载出数据」）。一次失败即记入 triedFailed，本会话不再重试；
+  //   签名 oracle / 捕获回放路径照常工作，功能不受影响。
+  if (triedFailed) return Promise.resolve(null);
   if (!pending) {
     pending = extract()
-      .then((m) => { cached = m; return m; })
-      .catch(() => null);
+      .then((m) => { cached = m; if (!m) triedFailed = true; return m; })
+      .catch(() => { triedFailed = true; return null; });
   }
   return pending;
 }

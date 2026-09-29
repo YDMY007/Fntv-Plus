@@ -246,11 +246,16 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   function ensureSignMaterials() {
     if (cached) return Promise.resolve(cached);
+    if (triedFailed) return Promise.resolve(null);
     if (!pending) {
       pending = extract().then((m) => {
         cached = m;
+        if (!m) triedFailed = true;
         return m;
-      }).catch(() => null);
+      }).catch(() => {
+        triedFailed = true;
+        return null;
+      });
     }
     return pending;
   }
@@ -416,8 +421,19 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     const signStr = [key, String(url), nonce, timestamp, md5(dataJson), secret].join("_");
     return "nonce=" + nonce + "&timestamp=" + timestamp + "&sign=" + md5(signStr);
   }
+  function localSignMaterials() {
+    if (!_signMaterialsPromise) {
+      _signMaterialsPromise = Promise.resolve().then(() => ensureSignMaterials()).catch(() => null);
+    }
+    return _signMaterialsPromise;
+  }
   async function genAuthxAsync(url, data) {
     const path = String(url || "");
+    try {
+      const m = await localSignMaterials();
+      if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
+    } catch (e) {
+    }
     try {
       const dataJson = data === void 0 || data === null ? "" : JSON.stringify(data);
       const r = await fetch("/app/fntvplus/api/bridge/fnos/authx", {
@@ -427,11 +443,6 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         body: JSON.stringify({ path, dataJson })
       }).then((x) => x.json());
       if (r && r.ok && r.authx) return r.authx;
-    } catch (e) {
-    }
-    try {
-      const m = await ensureSignMaterials();
-      if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
     } catch (e) {
     }
     return getCapturedAuthx(path) || "";
@@ -570,13 +581,14 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     } catch {
     }
   }
-  var LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
+  var _signMaterialsPromise, LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
   var init_electron = __esm({
     "src/shim/electron.js"() {
       "use strict";
       init_diag();
       init_signMaterials();
       init_md5();
+      _signMaterialsPromise = null;
       LS_KEY = "fntv:electron-settings";
       shimExports = { ipcRenderer: null, shell: null };
       try {
@@ -10491,23 +10503,30 @@ html.fnos-perf.dark{
           const fromDom = domLand.get(s.id);
           if (fromDom) s.backdrop = fromDom;
           const detail = await fetchItemDetail(base, s.id);
-          if (!detail) return !!fromDom;
-          if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
-          if (detail.poster && !s.poster) s.poster = detail.poster;
-          if (detail.logo) s.logo = detail.logo;
-          if (detail.tmdbId) s.tmdbId = detail.tmdbId;
-          if (detail.strmTag) s.strmTag = detail.strmTag;
-          if (detail.totalEps) s.totalEps = detail.totalEps;
-          if (detail.localEps) s.localEps = detail.localEps;
-          if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
-          if (detail.localSeasons) s.localSeasons = detail.localSeasons;
-          if (detail.year) s.year = detail.year;
-          if (detail.rating) s.rating = detail.rating;
-          if (detail.statusText) s.statusText = detail.statusText;
-          if (detail.genres && detail.genres.length) s.genres = detail.genres;
-          if (detail.desc) s.desc = detail.desc;
-          if (detail.title) s.title = detail.title;
-          return true;
+          if (detail) {
+            if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
+            if (detail.poster && !s.poster) s.poster = detail.poster;
+            if (detail.logo) s.logo = detail.logo;
+            if (detail.tmdbId) s.tmdbId = detail.tmdbId;
+            if (detail.strmTag) s.strmTag = detail.strmTag;
+            if (detail.totalEps) s.totalEps = detail.totalEps;
+            if (detail.localEps) s.localEps = detail.localEps;
+            if (detail.totalSeasons) s.totalSeasons = detail.totalSeasons;
+            if (detail.localSeasons) s.localSeasons = detail.localSeasons;
+            if (detail.year) s.year = detail.year;
+            if (detail.rating) s.rating = detail.rating;
+            if (detail.statusText) s.statusText = detail.statusText;
+            if (detail.genres && detail.genres.length) s.genres = detail.genres;
+            if (detail.desc) s.desc = detail.desc;
+            if (detail.title) s.title = detail.title;
+          }
+          const blob = await resolveShowBackdrop(s, base);
+          if (blob) {
+            s._backdropBlob = blob;
+            return true;
+          }
+          log7("[lc-768] \u8DF3\u8FC7\u65E0\u6CD5\u52A0\u8F7D\u6D77\u62A5\u7684\u9879(\u7591\u4F3C STR/\u7F51\u76D8):", (s.title || "").substring(0, 16), s.strmTag || "");
+          return !!fromDom;
         }));
         const isLandscapeBackdrop = (s) => {
           const b = s && s.backdrop || "";
@@ -10543,15 +10562,10 @@ html.fnos-perf.dark{
           clearTimeout(revealTimer);
           const withData = newShows.filter((s) => s.totalEps || s.localEps || s.backdrop || s.poster || s.logo).length;
           clog("[lc-569] item details enriched:", withData, "/", newShows.length);
-          const pool = newShows.slice();
-          const settled = await Promise.all(pool.map(async (s) => ({ s, blob: await resolveShowBackdrop(s, base) })));
           const picked = [];
-          for (const x of settled) {
+          for (const s of newShows) {
             if (picked.length >= CAROUSEL_TARGET) break;
-            if (x.blob) {
-              x.s._backdropBlob = x.blob;
-              picked.push(x.s);
-            } else log7("[lc-768] \u8DF3\u8FC7\u65E0\u6CD5\u52A0\u8F7D\u6D77\u62A5\u7684\u9879(\u7591\u4F3C STR/\u7F51\u76D8):", (x.s.title || "").substring(0, 16), x.s.strmTag || "");
+            if (s._backdropBlob) picked.push(s);
           }
           if (picked.length === 0) {
             clog("[lc-768] \u5168\u90E8\u5019\u9009\u9879\u6D77\u62A5\u5747\u65E0\u6CD5\u52A0\u8F7D(\u7591\u4F3C\u5747\u4E3A STR/\u7F51\u76D8)\uFF0C\u4E3B\u9875\u663E\u793A\u300C\u6682\u672A\u652F\u6301STRM\u6D77\u62A5\u300D");
