@@ -10530,6 +10530,7 @@ html.fnos-perf.dark{
           return !!fromDom;
         }));
         const isLandscapeBackdrop = (s) => {
+          if (s && s._backdropBlob) return true;
           const b = s && s.backdrop || "";
           return !!b && !/poster-|poster\/|\/poster/i.test(b);
         };
@@ -10555,9 +10556,25 @@ html.fnos-perf.dark{
           S.carouselInited = false;
           if (onShowsReady) onShowsReady();
         };
+        const revealGuard = () => {
+          const skel = document.querySelector("[data-fntv-skeleton]");
+          if (!skel) return;
+          clog("[lc-1285] \u515C\u5E95\uFF1A\u9AA8\u67B6\u4ECD\u5728\uFF08\u53EF\u80FD\u63ED\u793A\u88AB\u5B88\u536B\u62E6\u622A\uFF09\uFF0C\u5F3A\u5236\u6CE8\u5165\u8F6E\u64AD");
+          S.carouselRevealed = false;
+          S.carouselInited = false;
+          if (onShowsReady) onShowsReady();
+          window.setTimeout(() => {
+            if (document.querySelector("[data-fntv-skeleton]")) {
+              clog("[lc-1285] \u8B66\u544A\uFF1A\u515C\u5E95\u540E\u9AA8\u67B6\u4ECD\u5728\uFF0C\u9700\u67E5 Console \u524D\u5E8F\u65E5\u5FD7\u5B9A\u4F4D\u63ED\u793A\u4E2D\u65AD\u539F\u56E0");
+            }
+          }, 1200);
+        };
         const revealTimer = setTimeout(() => {
           clog("[lc-624] detail fetch timeout(8s), revealing carousel with fallback");
-          completeCarouselProgress(revealOnce, "revealTimer-8s-timeout");
+          completeCarouselProgress(() => {
+            revealOnce();
+            revealGuard();
+          }, "revealTimer-8s-timeout");
         }, 8e3);
         detailsPromise.then(async () => {
           clearTimeout(revealTimer);
@@ -10577,11 +10594,17 @@ html.fnos-perf.dark{
           S.apiShows.length = 0;
           Array.prototype.push.apply(S.apiShows, picked);
           persistShows();
-          completeCarouselProgress(revealOnce, "details-ready");
+          completeCarouselProgress(() => {
+            revealOnce();
+            revealGuard();
+          }, "details-ready");
         }).catch((e) => {
           clearTimeout(revealTimer);
           log7("[lc-569] item detail fetch error:", e);
-          completeCarouselProgress(revealOnce, "details-error");
+          completeCarouselProgress(() => {
+            revealOnce();
+            revealGuard();
+          }, "details-error");
         });
       } else {
         clog("[lc-561] all sources returned 0 \u2014 leaving native media library visible");

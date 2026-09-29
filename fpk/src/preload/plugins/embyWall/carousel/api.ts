@@ -333,9 +333,14 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
       // [lc-624] 渲染时机: 只有横版 backdrop 就绪才 reveal——用户明确不要"竖屏先渲染"
       // 再变横屏。revealOnce 前检查: 若 backdrop 仍是竖版(poster)或空, 说明详情未补全,
       // 继续保留骨架(进度条), 等详情补完(或总超时 8s 兜底)再 reveal。
-      // 注: 无法预知图片宽高比(URL 无信息), 用"是否有 poster 前缀之外的 backdrop"粗判:
-      //   竖版 poster URL 形如 poster-{32hex}.webp; 横版 backdrop URL 通常无 poster- 前缀。
+      // [lc-1285] 横版就绪判定以**实际下载结果**为准，不再只看 URL 字符串。
+      //   原实现用正则看 backdrop URL 是否含 poster 字样来粗判横竖 —— 但海报此前已由
+      //   resolveShowBackdrop 下载并**按真实宽高（w >= h）校验过**，_backdropBlob 存在
+      //   即证明它是可用横版图。URL 粗判会把「路径里恰好含 poster 的横版图」误判为竖版
+      //   → revealOnce 进入 1.5s×3 重试循环，期间骨架停在 100% 不动（用户所见黑屏）。
+      //   判定顺序：① 已下载并校验的 blob（权威）→ ② 无 blob 时退回 URL 粗判（兼容未下载路径）。
       const isLandscapeBackdrop = (s: any): boolean => {
+        if (s && s._backdropBlob) return true; // 已下载且通过 w>=h 校验，权威结论
         const b = (s && s.backdrop) || '';
         return !!b && !/poster-|poster\/|\/poster/i.test(b);
       };
@@ -360,9 +365,26 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         S.carouselInited = false;
         if (onShowsReady) onShowsReady();
       };
+      // [lc-1285] 防卡死兜底：进度到 100% 后若骨架仍在文档中，说明揭示序列因故未完成
+      //   （revealOnce 被 carouselRevealed 守卫拦截 / onShowsReady 异常 / 横版重试未收敛等），
+      //   直接强制注入一次，绝不让用户停在「100% 黑屏不动」。幂等：injectCarousel 自身有守卫。
+      const revealGuard = (): void => {
+        const skel = document.querySelector('[data-fntv-skeleton]');
+        if (!skel) return; // 骨架已移除 → 揭示正常完成
+        clog('[lc-1285] 兜底：骨架仍在（可能揭示被守卫拦截），强制注入轮播');
+        S.carouselRevealed = false; // 解除可能存在的「已揭示」误标，让 onShowsReady 真正执行
+        S.carouselInited = false;
+        if (onShowsReady) onShowsReady();
+        // 再探一次：仍未移除则记日志（便于定位），不无限重试
+        window.setTimeout(() => {
+          if (document.querySelector('[data-fntv-skeleton]')) {
+            clog('[lc-1285] 警告：兜底后骨架仍在，需查 Console 前序日志定位揭示中断原因');
+          }
+        }, 1200);
+      };
       const revealTimer = setTimeout(() => {
         clog('[lc-624] detail fetch timeout(8s), revealing carousel with fallback');
-        completeCarouselProgress(revealOnce, 'revealTimer-8s-timeout');
+        completeCarouselProgress(() => { revealOnce(); revealGuard(); }, 'revealTimer-8s-timeout');
       }, 8000);
       detailsPromise.then(async () => {
         clearTimeout(revealTimer);
@@ -386,11 +408,11 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         Array.prototype.push.apply(S.apiShows, picked);
         persistShows(); // [lc-950] 落盘完整快照(含 _backdropBlob + desc), 供整页重载后零网络恢复
         // [lc-620] 详情补完后只渲染一次(不闪): 首次渲染已含全部详情, 不再二次重建
-        completeCarouselProgress(revealOnce, 'details-ready');
+        completeCarouselProgress(() => { revealOnce(); revealGuard(); }, 'details-ready');
       }).catch((e: any) => {
         clearTimeout(revealTimer);
         log('[lc-569] item detail fetch error:', e);
-        completeCarouselProgress(revealOnce, 'details-error');
+        completeCarouselProgress(() => { revealOnce(); revealGuard(); }, 'details-error');
       });
     } else {
       // [lc-1083] 三源皆空: 必须收尾进度条(假进度封顶 99%, 不调用 complete 就永久卡 99%), 并写明原因
