@@ -196,9 +196,13 @@ async function buildCredits(origin: string, meta: any): Promise<any[]> {
   return out;
 }
 
-function creditsEqual(a: any[], b: any): boolean {
-  if (!Array.isArray(b) || b.length !== a.length) return false;
-  return a.every((c, i) => String(c.name) === String(b[i] && b[i].name) && String(c.job) === String(b[i] && b[i].job));
+/** [lc-1276] 演员写入判定（写前跳过 + 写后复核共用）：「写入的每个演员名都在读回集合中」。
+ *  不比对顺序/job/长度——fnOS 读回 credits 会重排并补人员 guid，逐项全等会把写成功误判
+ *  为需重写/复核未过；集合包含语义也更稳：条目已有用户手动加的演员时不覆盖。 */
+function creditsWrittenPresent(want: any[], got: any): boolean {
+  if (!Array.isArray(got)) return false;
+  const gotNames = new Set(got.map((c: any) => String((c && c.name) || '').trim()).filter(Boolean));
+  return want.every((c) => gotNames.has(String((c && c.name) || '').trim()));
 }
 
 /** folder 子项里的视频文件（单层，不递归子文件夹）：item/list {parent_guid, exclude_folder:1}
@@ -249,7 +253,7 @@ async function backfillOne(origin: string, guid: string, prep: { meta: any; ov: 
     body.air_date_locked = true;
     done.push('日期');
   }
-  if (prep.credits.length && !creditsEqual(prep.credits, data.credits)) {
+  if (prep.credits.length && !creditsWrittenPresent(prep.credits, data.credits)) {
     body.credits = prep.credits;
     body.credits_locked = true;
     done.push('演员');
@@ -266,11 +270,20 @@ async function backfillOne(origin: string, guid: string, prep: { meta: any; ov: 
   if (saved) {
     const vf = await fnosGetEditDetail(origin, guid);
     verified = !!vf;
+    // [lc-1276] 容错复核：fnOS 读回时会对字段做归一化（日期补时间/posters 变形态/credits
+    // 重排或补人员 guid），逐字节全等会把「写成功」误判成「复核未通过」。改语义级比对：
+    // 日期比日期部分、posters 按文件名包含、credits 按「写入的演员都在读回集合中」（忽略
+    // 顺序/job 形态）；标题/简介 fnOS 原样回读，保持 trim 全等。
     if (verified && body.title_locked) verified = String(vf[titleKey] ?? '').trim() === newTitle;
     if (verified && body.overview_locked) verified = String(vf.overview ?? '').trim() === prep.ov;
-    if (verified && body.air_date_locked) verified = String(vf.air_date ?? '').trim() === String(body.air_date);
-    if (verified && body.posters_locked) verified = String(vf.posters ?? '').trim() === prep.coverHash;
-    if (verified && body.credits_locked) verified = creditsEqual(prep.credits, vf.credits);
+    if (verified && body.air_date_locked) verified = String(vf.air_date ?? '').trim().slice(0, 10) === String(body.air_date).trim().slice(0, 10);
+    if (verified && body.posters_locked) {
+      const got = String(vf.posters ?? '').trim();
+      const want = String(prep.coverHash || '').trim();
+      const base = want.split('/').pop() || want;
+      verified = got === want || (base !== '' && got.indexOf(base) >= 0);
+    }
+    if (verified && body.credits_locked) verified = creditsWrittenPresent(prep.credits, vf.credits);
   }
   return { saved, verified, done };
 }
@@ -597,14 +610,21 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
     const targets = folderG ? [folderG, ...(await folderChildVideos(origin, folderG))] : [guid];
 
     // 5) 逐条目全量读改写 + 复核
+    // [lc-1276] 按目标计数而非 all 布尔：folder 批量时单个子项失败会把整批拉成「回填失败」，
+    // 用户看到的是多数条目数据已写入 —— 报「部分回填 N/M」才符合实况。
     const done: string[] = [];
-    let savedAll = true;
-    let verifiedAll = true;
+    let savedCount = 0;
+    let failCount = 0;
+    let unverifiedCount = 0;
     for (let i = 0; i < targets.length; i++) {
       setBtn(btn, '⏳ 回填中…(' + (i + 1) + '/' + targets.length + ')');
       const res = await backfillOne(origin, targets[i], { meta, ov, credits, coverHash });
-      savedAll = savedAll && res.saved;
-      verifiedAll = verifiedAll && res.verified;
+      if (res.saved) {
+        savedCount++;
+        if (!res.verified) unverifiedCount++;
+      } else {
+        failCount++;
+      }
       for (const d of res.done) if (!done.includes(d)) done.push(d);
     }
 
@@ -619,13 +639,16 @@ async function runJav(btn: HTMLButtonElement): Promise<void> {
     const who = Array.isArray(meta.actresses) && meta.actresses.length
       ? ' · ' + meta.actresses.map((a: any) => a && a.name).filter(Boolean).slice(0, 3).join('・') : '';
     const scope = targets.length > 1 ? ' ×' + targets.length : '';
-    if (savedAll && verifiedAll) {
+    if (failCount === 0 && unverifiedCount === 0) {
       if (done.length) markPendingLayoutSwitch(); // [lc-1250] 详情页无布局工具栏, 导航回列表页后自动补切横幅
       setBtn(btn, done.length ? ('✓ 已回填（' + done.join('/') + scope + '）') : '✓ 已是最新',
         meta.code + ' ' + (meta.date || '') + who
         + (done.length && coverHash && !coverOk ? '（hero 海报位未找到，封面已落库，重进页面生效）' : ''));
-    } else if (savedAll) {
-      setBtn(btn, '⚠ 回填未确认', '写入已提交但复核未通过，详见日志。');
+    } else if (failCount > 0 && savedCount > 0) {
+      setBtn(btn, '⚠ 部分回填 ' + savedCount + '/' + targets.length,
+        '部分条目写入/读取失败，其余已生效，详见日志；可重试补齐。');
+    } else if (failCount === 0) {
+      setBtn(btn, '⚠ 回填未确认', '写入已提交但复核未通过，详见日志；若条目数据无误可忽略。');
     } else {
       setBtn(btn, '⚠ 回填失败', 'saveEditDetail 写入失败，详见日志；查询数据不受影响。');
     }

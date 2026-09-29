@@ -14513,8 +14513,28 @@ html.fnos-perf.dark{
     return out;
   }
   async function fnosSaveEditDetail(origin, body) {
-    const data = await fnosPost(origin, "/v/api/v1/item/saveEditDetail", body);
-    return data !== null;
+    try {
+      const authx = await ipcRenderer.invoke("fnos-gen-authx", "/v/api/v1/item/saveEditDetail", body).catch(() => "");
+      const resp = await fetch(origin + "/v/api/v1/item/saveEditDetail", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...authx ? { Authx: authx } : {} },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) {
+        dlog("[epBackfill] saveEditDetail HTTP " + resp.status);
+        return false;
+      }
+      const j = await resp.json().catch(() => null);
+      if (!j || j.code !== 0) {
+        dlog("[epBackfill] saveEditDetail \u4E1A\u52A1\u5931\u8D25 " + JSON.stringify(j).substring(0, 160));
+        return false;
+      }
+      return true;
+    } catch (e) {
+      dlog("[epBackfill] saveEditDetail \u5F02\u5E38 " + String(e && e.message || e).substring(0, 120));
+      return false;
+    }
   }
   function setBtn(btn, text, title) {
     btn.textContent = text;
@@ -15575,9 +15595,10 @@ html.fnos-perf.dark{
     }
     return out;
   }
-  function creditsEqual(a, b) {
-    if (!Array.isArray(b) || b.length !== a.length) return false;
-    return a.every((c, i) => String(c.name) === String(b[i] && b[i].name) && String(c.job) === String(b[i] && b[i].job));
+  function creditsWrittenPresent(want, got) {
+    if (!Array.isArray(got)) return false;
+    const gotNames = new Set(got.map((c) => String(c && c.name || "").trim()).filter(Boolean));
+    return want.every((c) => gotNames.has(String(c && c.name || "").trim()));
   }
   async function folderChildVideos(origin, fGuid) {
     try {
@@ -15623,7 +15644,7 @@ html.fnos-perf.dark{
       body.air_date_locked = true;
       done.push("\u65E5\u671F");
     }
-    if (prep.credits.length && !creditsEqual(prep.credits, data.credits)) {
+    if (prep.credits.length && !creditsWrittenPresent(prep.credits, data.credits)) {
       body.credits = prep.credits;
       body.credits_locked = true;
       done.push("\u6F14\u5458");
@@ -15642,9 +15663,14 @@ html.fnos-perf.dark{
       verified = !!vf;
       if (verified && body.title_locked) verified = String((_a = vf[titleKey]) != null ? _a : "").trim() === newTitle;
       if (verified && body.overview_locked) verified = String((_b = vf.overview) != null ? _b : "").trim() === prep.ov;
-      if (verified && body.air_date_locked) verified = String((_c = vf.air_date) != null ? _c : "").trim() === String(body.air_date);
-      if (verified && body.posters_locked) verified = String((_d = vf.posters) != null ? _d : "").trim() === prep.coverHash;
-      if (verified && body.credits_locked) verified = creditsEqual(prep.credits, vf.credits);
+      if (verified && body.air_date_locked) verified = String((_c = vf.air_date) != null ? _c : "").trim().slice(0, 10) === String(body.air_date).trim().slice(0, 10);
+      if (verified && body.posters_locked) {
+        const got = String((_d = vf.posters) != null ? _d : "").trim();
+        const want = String(prep.coverHash || "").trim();
+        const base = want.split("/").pop() || want;
+        verified = got === want || base !== "" && got.indexOf(base) >= 0;
+      }
+      if (verified && body.credits_locked) verified = creditsWrittenPresent(prep.credits, vf.credits);
     }
     return { saved, verified, done };
   }
@@ -15946,13 +15972,18 @@ html.fnos-perf.dark{
       }
       const targets = folderG ? [folderG, ...await folderChildVideos(origin, folderG)] : [guid];
       const done = [];
-      let savedAll = true;
-      let verifiedAll = true;
+      let savedCount = 0;
+      let failCount = 0;
+      let unverifiedCount = 0;
       for (let i = 0; i < targets.length; i++) {
         setBtn2(btn, "\u23F3 \u56DE\u586B\u4E2D\u2026(" + (i + 1) + "/" + targets.length + ")");
         const res = await backfillOne(origin, targets[i], { meta: meta2, ov, credits, coverHash });
-        savedAll = savedAll && res.saved;
-        verifiedAll = verifiedAll && res.verified;
+        if (res.saved) {
+          savedCount++;
+          if (!res.verified) unverifiedCount++;
+        } else {
+          failCount++;
+        }
         for (const d of res.done) if (!done.includes(d)) done.push(d);
       }
       let coverOk = false;
@@ -15965,15 +15996,21 @@ html.fnos-perf.dark{
       }
       const who = Array.isArray(meta2.actresses) && meta2.actresses.length ? " \xB7 " + meta2.actresses.map((a) => a && a.name).filter(Boolean).slice(0, 3).join("\u30FB") : "";
       const scope = targets.length > 1 ? " \xD7" + targets.length : "";
-      if (savedAll && verifiedAll) {
+      if (failCount === 0 && unverifiedCount === 0) {
         if (done.length) markPendingLayoutSwitch();
         setBtn2(
           btn,
           done.length ? "\u2713 \u5DF2\u56DE\u586B\uFF08" + done.join("/") + scope + "\uFF09" : "\u2713 \u5DF2\u662F\u6700\u65B0",
           meta2.code + " " + (meta2.date || "") + who + (done.length && coverHash && !coverOk ? "\uFF08hero \u6D77\u62A5\u4F4D\u672A\u627E\u5230\uFF0C\u5C01\u9762\u5DF2\u843D\u5E93\uFF0C\u91CD\u8FDB\u9875\u9762\u751F\u6548\uFF09" : "")
         );
-      } else if (savedAll) {
-        setBtn2(btn, "\u26A0 \u56DE\u586B\u672A\u786E\u8BA4", "\u5199\u5165\u5DF2\u63D0\u4EA4\u4F46\u590D\u6838\u672A\u901A\u8FC7\uFF0C\u8BE6\u89C1\u65E5\u5FD7\u3002");
+      } else if (failCount > 0 && savedCount > 0) {
+        setBtn2(
+          btn,
+          "\u26A0 \u90E8\u5206\u56DE\u586B " + savedCount + "/" + targets.length,
+          "\u90E8\u5206\u6761\u76EE\u5199\u5165/\u8BFB\u53D6\u5931\u8D25\uFF0C\u5176\u4F59\u5DF2\u751F\u6548\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u53EF\u91CD\u8BD5\u8865\u9F50\u3002"
+        );
+      } else if (failCount === 0) {
+        setBtn2(btn, "\u26A0 \u56DE\u586B\u672A\u786E\u8BA4", "\u5199\u5165\u5DF2\u63D0\u4EA4\u4F46\u590D\u6838\u672A\u901A\u8FC7\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u82E5\u6761\u76EE\u6570\u636E\u65E0\u8BEF\u53EF\u5FFD\u7565\u3002");
       } else {
         setBtn2(btn, "\u26A0 \u56DE\u586B\u5931\u8D25", "saveEditDetail \u5199\u5165\u5931\u8D25\uFF0C\u8BE6\u89C1\u65E5\u5FD7\uFF1B\u67E5\u8BE2\u6570\u636E\u4E0D\u53D7\u5F71\u54CD\u3002");
       }

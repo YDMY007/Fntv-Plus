@@ -183,10 +183,27 @@ export function episodeGuidsFromDom(): { guid: string; index: number | null }[] 
   return out;
 }
 
-/** 全量回写（仅调用方改好的字段 + nonce；字段锁定由调用方放进了 body）。 */
+/** 全量回写（仅调用方改好的字段 + nonce；字段锁定由调用方放进了 body）。
+ *  [lc-1276] 成功判定只看业务 code，不依赖 data：fnOS 对写接口的成功响应常不带 data
+ *  （或 data:null），经 fnosPost 的 `j.data || null` 会把「写成功」误判成失败——
+ *  用户症状：jav 回填显示失败但数据实际已写入。与 carousel/logo.ts 的 saveEditDetail
+ *  （只看 code）对齐。 */
 export async function fnosSaveEditDetail(origin: string, body: any): Promise<boolean> {
-  const data = await fnosPost(origin, '/v/api/v1/item/saveEditDetail', body);
-  return data !== null;
+  try {
+    const authx = await ipcRenderer.invoke('fnos-gen-authx', '/v/api/v1/item/saveEditDetail', body).catch(() => '');
+    const resp = await fetch(origin + '/v/api/v1/item/saveEditDetail', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(authx ? { Authx: authx } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) { dlog('[epBackfill] saveEditDetail HTTP ' + resp.status); return false; }
+    const j = await resp.json().catch(() => null);
+    if (!j || j.code !== 0) { dlog('[epBackfill] saveEditDetail 业务失败 ' + JSON.stringify(j).substring(0, 160)); return false; }
+    return true;
+  } catch (e: any) {
+    dlog('[epBackfill] saveEditDetail 异常 ' + String((e && e.message) || e).substring(0, 120));
+    return false;
+  }
 }
 
 // ── 按钮挂载/状态 ──
