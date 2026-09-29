@@ -1142,7 +1142,8 @@ export function getStatsAnonId(): string {
     const config: Config = readConfig() || {};
     const cur = typeof config.statsAnonId === 'string' ? config.statsAnonId : '';
     // [lc-1250] 机器级固定 ID 优先：已是机器派生 ID → 直接用（重装/清配置后重新派生仍相同）
-    if (/^M[0-9a-f]{31}$/.test(cur)) return cur;
+    // [lc-1277] 形态改为纯 31 位 hex（去 M 前缀）；旧 M 形态存值不匹配 → 自动重派生覆盖，身份连续
+    if (/^[0-9a-f]{31}$/.test(cur)) return cur;
     // 尝试从操作系统机器标识派生（拿到即覆盖旧的随机 ID，保证「每台机固定唯一不变」）
     const mid = machineStableId();
     if (mid) {
@@ -1186,7 +1187,8 @@ function machineStableId(): string {
             }
         }
         if (!raw) return '';
-        return 'M' + crypto.createHash('sha256').update(raw).digest('hex').slice(0, 31);
+        // [lc-1277] 不再加 "M" 前缀：服务端 RE_AID 只认 hex/横杠，带前缀恒被 400 拒绝
+        return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 31);
     } catch {
         return '';
     }

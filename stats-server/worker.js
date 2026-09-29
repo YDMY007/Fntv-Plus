@@ -24,7 +24,9 @@ function json(data, status = 200, extra = {}) {
   });
 }
 
-const RE_AID = /^[0-9a-fA-F-]{8,64}$/;
+// [lc-1277] 放行大写字母：机器派生 ID 形如 M+31hex（桌面/FPK 端 sha256 截取），
+// 旧式纯 hex/横杠白名单会把 M 前缀恒判 400（所有端心跳从未成功过）。
+const RE_AID = /^[0-9a-zA-Z-]{8,64}$/;
 const RE_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function clamp(str, max) {

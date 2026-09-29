@@ -306,8 +306,9 @@ func stubMachineID(t *testing.T) func() {
 	return func() { machineIDRaw = old }
 }
 
-// TestAnonIDMachineStable [lc-1250] 匿名 ID 机器级语义：同一台机稳定不变（M+31hex），
-// 同机两个独立安装也相同（口径=设备数）；换机器标识则 ID 不同。
+// TestAnonIDMachineStable [lc-1250] 匿名 ID 机器级语义：同一台机稳定不变（31 位 hex，
+// [lc-1277] 去掉 M 前缀——服务端 RE_AID 只认 hex/横杠），同机两个独立安装也相同
+// （口径=设备数）；换机器标识则 ID 不同。
 func TestAnonIDMachineStable(t *testing.T) {
 	restore := stubMachineID(t)
 	defer restore()
@@ -318,7 +319,10 @@ func TestAnonIDMachineStable(t *testing.T) {
 		t.Fatalf("同一台机的匿名 ID 应稳定: %q vs %q", a, b)
 	}
 	if !machineAnonIDRe.MatchString(a) {
-		t.Errorf("应为机器派生形态 M+31hex，实为 %q", a)
+		t.Errorf("应为机器派生形态 31 位 hex，实为 %q", a)
+	}
+	if !anonIDServerRe.MatchString(a) {
+		t.Errorf("匿名 ID 必须能过服务端 RE_AID 校验，实为 %q", a)
 	}
 	// 同机两个独立安装（不同配置目录）→ 相同 ID
 	s2 := newTestStats(t, "1.12.0", "http://127.0.0.1:1")

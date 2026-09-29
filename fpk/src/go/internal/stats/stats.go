@@ -137,7 +137,7 @@ func (s *Stats) anonID() string {
 func (s *Stats) anonIDLocked() string {
 	if v, ok := s.cfg.GetSetting(keyAnonID); ok {
 		if id := strings.TrimSpace(v); machineAnonIDRe.MatchString(id) {
-			return id // [lc-1250] 已是机器派生 ID → 直接用
+			return id // 已是机器派生 ID → 直接用
 		}
 	}
 	// [lc-1250] 尝试机器派生（旧随机 ID 自动迁移覆盖，保证每台机固定唯一不变）
@@ -145,9 +145,9 @@ func (s *Stats) anonIDLocked() string {
 		_ = s.cfg.SetSetting(keyAnonID, mid)
 		return mid
 	}
-	// 回退：拿不到机器标识的异常环境 → 沿用已存的随机 ID；没有才生成
+	// 回退：拿不到机器标识的异常环境 → 沿用已存 ID（须为服务端可接受形态），没有才生成
 	if v, ok := s.cfg.GetSetting(keyAnonID); ok {
-		if id := strings.TrimSpace(v); id != "" {
+		if id := strings.TrimSpace(v); anonIDServerRe.MatchString(id) {
 			return id
 		}
 	}
@@ -156,8 +156,13 @@ func (s *Stats) anonIDLocked() string {
 	return id
 }
 
-// machineAnonIDRe 机器派生 ID 形态：M + 31 位小写 hex（sha256 截取）。
-var machineAnonIDRe = regexp.MustCompile(`^M[0-9a-f]{31}$`)
+// [lc-1277] 机器派生 ID 形态：31 位小写 hex（sha256 截取）。去掉旧版 "M" 前缀——服务端
+// RE_AID 只认 hex/横杠，M 前缀恒被 400 拒绝（所有端心跳从未成功过，补报积压滚雪球）。
+// 旧 M 形态存值与新正则不匹配 → 下次派生自动迁移覆盖；哈希部分与旧值相同，身份连续。
+var machineAnonIDRe = regexp.MustCompile(`^[0-9a-f]{31}$`)
+
+// anonIDServerRe 与服务端 RE_AID 对齐的形态（随机 UUID 回退值也要过这道关）。
+var anonIDServerRe = regexp.MustCompile(`^[0-9a-fA-F-]{8,64}$`)
 
 // machineIDRaw 取操作系统机器标识原文（可被测试替换以获得确定性）。
 var machineIDRaw = func() string {
@@ -188,15 +193,16 @@ var machineIDRaw = func() string {
 	return ""
 }
 
-// machineAnonID 机器标识原文 → SHA-256 → "M"+31 位 hex（不可逆）。
-// 原文拿不到（异常环境）返回空串，由调用方回退 crypto/rand 随机 ID。
+// machineAnonID 机器标识原文 → SHA-256 → 31 位 hex（不可逆）。[lc-1277] 不再加 "M" 前缀
+// （服务端 RE_AID 只认 hex/横杠，带前缀恒 400）。原文拿不到（异常环境）返回空串，
+// 由调用方回退 crypto/rand 随机 ID。
 func machineAnonID() string {
 	raw := strings.TrimSpace(machineIDRaw())
 	if raw == "" {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(raw))
-	return "M" + hex.EncodeToString(sum[:])[:31]
+	return hex.EncodeToString(sum[:])[:31]
 }
 
 // ResetID 换一个新匿名 ID（面板「重置匿名 ID」），与历史数据彻底断开：
