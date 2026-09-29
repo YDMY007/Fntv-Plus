@@ -26,7 +26,7 @@
  */
 
 import { registerHook, HookType } from '../core/hooks';
-import { pagePath } from '../core/pageMode';
+import { pagePath, pagePathOf } from '../core/pageMode';
 
 const MIN_PAD = 20; // 每侧最小留白
 
@@ -49,17 +49,20 @@ const MIN_PAD = 20; // 每侧最小留白
  *    故仅靠 hasSidebarLibraryNav() 不够，必须按路由显式排除详情页（见 isDetailRoute）。
  */
 
-/** 判断一个链接是否为「媒体库/分类」导航（按路由，不按显示名）。兼容有无结尾斜杠、绝对/相对 href。 */
+/** 判断一个链接是否为「媒体库/分类」导航（按路由，不按显示名）。兼容有无结尾斜杠、绝对/相对 href。
+ *  [lc-1279] 必须剥离网关前缀：fpk 网关模式下侧边栏链接形如 /app/fntvplus/v/library/xxx，
+ *  直判 /v/... 恒为 false（曾使 hasSidebarLibraryNav() 在 fpk 下恒假 → 居中完全不生效）。 */
 function isLibraryNavHref(href: string | null): boolean {
     if (!href) return false;
     try {
         const url = new URL(href, location.href);
-        const p = url.pathname.toLowerCase();
+        const p = pagePathOf(url.pathname).toLowerCase();
         return p === '/v/library' || p.startsWith('/v/library/')
             || p === '/v/list'    || p.startsWith('/v/list/');
     } catch {
-        // 解析失败（极少数非法 href）兜底：直接按路径前缀判断
-        return /\/v\/library\/?/i.test(href) || /\/v\/list\/?/i.test(href);
+        // 解析失败（极少数非法 href）兜底：直接按路径前缀判断（同样剥前缀）
+        const p = pagePathOf(href).toLowerCase();
+        return /\/v\/library(\/|$|\?)/.test(p) || /\/v\/list(\/|$|\?)/.test(p);
     }
 }
 
@@ -78,9 +81,15 @@ function hasSidebarLibraryNav(): boolean {
 
 /** 详情页判定：/v/tv/ 剧集、/v/movie/ 电影、/v/person/ 人物。
  * 这些页面 fnOS 会复用左侧「媒体库/分类」侧边栏（hasSidebarLibraryNav 误判为 true），
- * 但其主内容并非浏览器卡片网格，套上对称 padding 会把内容挤到中间，故显式排除。 */
+ * 但其主内容并非浏览器卡片网格，套上对称 padding 会把内容挤到中间，故显式排除。
+ *
+ * ⚠️ [lc-1279] 必须用 pagePath()（剥网关前缀）而非 location.pathname：
+ *   fpk 网关模式下地址栏是 /app/fntvplus/v/tv/{guid}，本正则的 ^ 锚点永不匹配
+ *   → 详情页排除整体失效，居中 padding 被误套到详情页（用户报告：居中有时候
+ *   错误应用到剧集二详情页）。且注入 shim 在 SPA 启动前后会在「带前缀/不带前缀」
+ *   之间切换地址，直读 pathname 的结果随时机抖动 —— 正是「有时候」的由来。 */
 function isDetailRoute(): boolean {
-    return /^\/v\/(tv|movie|person)(\/|$)/i.test(location.pathname);
+    return /^\/v\/(tv|movie|person)(\/|$)/i.test(pagePath());
 }
 
 /** 找到真正的卡片网格：flex-wrap + gap-x、子元素>=2 且首个子元素是海报卡（够高） */
@@ -95,9 +104,30 @@ function findCardGrid(): HTMLElement | null {
         const r = first.getBoundingClientRect();
         // 海报卡约 162x294；筛选条/标签等小元素高度远小于 150 → 排除
         if (r.width < 80 || r.width > 400 || r.height < 150) continue;
+        // [lc-1279] 第二道防线：详情页内的「相关推荐/演职人员作品」网格也满足上述特征，
+        //   路由判断一旦失效就会把对称 padding 套到详情页（用户报的居中误用）。
+        //   此处按 DOM 归属排除：网格顶部仍在 hero 之下且位于详情视图内 → 非浏览页网格。
+        if (isInsideDetailView(el)) continue;
         if (!best || el.children.length > best.children.length) best = el;
     }
     return best;
+}
+
+/** [lc-1279] 该元素是否位于「详情页视图」内（剧集/电影/季详情页）。
+ *  与 embyWall/detail/glass.ts 同源判定：活跃视图 = 末尾可见的 cache-outlet，
+ *  hero = :is(.semi-always-dark[class*=h-[470px]|min-h-[390px]], .trim-mc__details--key-version)。
+ *  这里遍历全部 cache-outlet（含隐藏的 --cache 残页，它们同样可能挂着详情 hero），
+ *  只要求「视图内出现 hero」——列表页/首页视图内没有 hero，不会误判。 */
+function isInsideDetailView(el: HTMLElement): boolean {
+    try {
+        const views = document.querySelectorAll<HTMLElement>('.trim-ui__cache-outlet--exclude, .trim-ui__cache-outlet--cache');
+        for (let i = 0; i < views.length; i++) {
+            const v = views[i];
+            if (!v.querySelector(':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)')) continue;
+            if (v.contains(el)) return true;
+        }
+    } catch (_) { /* 选择器异常不误杀 */ }
+    return false;
 }
 
 // ===== 锁定状态 =====

@@ -26,6 +26,7 @@ import { S } from '../state';
 import { ACTIVE_VIEW_SEL } from './glass';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { decideField, numOrNull, setBtn, isPlaceholderTitle, fnosSaveEditDetail } from './epBackfill';
+import { pagePath } from '../../../core/pageMode';
 
 const FOLDER_BTN_ID = 'fnos-folder-scraper-btn';
 const CONCURRENCY = 4;
@@ -35,7 +36,7 @@ let _running = false;
 
 /** 文件夹页路由 id（/v/folder/<id>，实测形如 fv_<32hex>；放宽为字母数字下划线容忍后续前缀）。 */
 export function folderGuid(): string | null {
-  const m = location.pathname.match(/\/v\/folder\/([A-Za-z0-9_]+)/);
+  const m = pagePath().match(/\/v\/folder\/([A-Za-z0-9_]+)/); // [lc-1279] 剥网关前缀
   return m ? m[1] : null;
 }
 

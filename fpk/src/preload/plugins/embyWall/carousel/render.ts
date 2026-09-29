@@ -128,6 +128,12 @@ export function injectCarousel(): void {
     if (target) log('media-library section found via robust search');
   }
   if (!target) { log('no target'); return; }
+  // [lc-1278] 捕获当前骨架节点（buildLoadingPlaceholder 把自己的容器存在 S.carouselContainer）。
+  // 有骨架时揭示改为「交叉淡出」：骨架原地淡出、真实轮播淡入，消除白底骨架骤删后
+  // 露出容器深色底的黑屏帧（白骨架→纯黑→出图）。
+  // ⚠ 数据到达后的再次注入会因 wrapper 已存在走 rebuild 分支——但那个 wrapper 其实是
+  // 骨架的 wrapper（骨架路径不置 carouselInited），所以这里只看 placeholderInited，不排除 rebuild。
+  const skeletonEl = (S.placeholderInited && S.carouselContainer) ? S.carouselContainer : null;
   log('target found on', location.href, rebuild ? '(rebuild)' : '(first)');
 
   // [lc-773] 轮播行动按钮样式（Apple 风格）只注入一次。
@@ -234,9 +240,21 @@ export function injectCarousel(): void {
   let wrapper: HTMLElement;
   if (rebuild && S.carouselWrapper) {
     wrapper = S.carouselWrapper;
-    wrapper.innerHTML = ''; // 清空旧container(我们自己的节点, 不影响飞牛DOM), 内部重建
+    // [lc-1278] 首次揭示(rebuild 但 wrapper 里其实只有骨架)时保留骨架做交叉淡出
+    if (skeletonEl && skeletonEl.parentElement === wrapper) {
+      for (const child of Array.from(wrapper.childNodes)) {
+        if (child !== skeletonEl) (child as HTMLElement).remove?.();
+      }
+    } else {
+      wrapper.innerHTML = ''; // 清空旧container(我们自己的节点, 不影响飞牛DOM), 内部重建
+    }
   } else {
-    target.innerHTML = ''; // 首屏清空section原内容(媒体库标题+卡片)
+    // [lc-1278] 保留骨架 wrapper(交叉淡出用), 其余内容(飞牛原生标题/卡片或旧节点)照旧清掉。
+    // 原 target.innerHTML='' 会把骨架一起删掉, 揭示序列就退化回「骨架骤删→黑屏帧→出图」。
+    const keep = skeletonEl ? skeletonEl.parentElement : null;
+    for (const child of Array.from(target.childNodes)) {
+      if (child !== keep) (child as HTMLElement).remove?.();
+    }
     // [lc-444] 清掉飞牛section自身顶部边框/阴影/上边距, 避免与顶部导航栏之间出现细黑线
     target.style.borderTop = 'none';
     target.style.boxShadow = 'none';
@@ -258,7 +276,64 @@ export function injectCarousel(): void {
   container.style.transition = 'opacity .45s ease';
   wrapper.appendChild(container);
   S.carouselContainer = container;
-  requestAnimationFrame(() => { container.style.opacity = '1'; });
+  // [lc-1278] 揭示序列：骨架原地淡出 ↔ 轮播淡入，且淡入等首图解码完成。
+  //   原实现先清骨架、容器立即开始 opacity 淡入 —— 淡入前段只有容器自身的深色底
+  //   （暗色主题 --fnos-hero-container）而首图尚未解码，即「白骨架→纯黑→才出图」。
+  //   ①骨架不删：绝对定位叠在 section 顶部（与轮播同宽同 16:9 比例，几何一致），
+  //     容器淡入时骨架同步淡出，视觉无缝；
+  //   ②淡入门控：用第一张横版图（优先预载 blob）decode() 完成后再启动淡入，
+  //     淡入首帧图已就绪；1.2s 兜底超时防网络图卡住揭示。
+  if (skeletonEl && skeletonEl.parentElement) {
+    try {
+      const skelWrap = skeletonEl.parentElement;
+      // 与真实 wrapper 同享移动端边距 CSS(16px !important), 保证各视口下骨架与轮播对位一致
+      skelWrap.dataset.fntvCarouselWrapper = '1';
+      const cs = getComputedStyle(skelWrap);
+      skelWrap.style.position = 'relative';
+      // 骨架绝对定位: 内边距取 wrapper 的 computed padding(绝对定位以 padding box 为基准)
+      skeletonEl.style.position = 'absolute';
+      skeletonEl.style.top = cs.paddingTop;
+      skeletonEl.style.left = cs.paddingLeft;
+      skeletonEl.style.right = cs.paddingRight;
+      skeletonEl.style.width = 'auto';
+      skeletonEl.style.margin = '0';
+      skeletonEl.style.transition = 'opacity .45s ease';
+      skeletonEl.style.pointerEvents = 'none';
+      skeletonEl.style.zIndex = '1';
+    } catch (e) { /* 骨架定位失败 → 退化为直接淡入(与旧行为一致) */ }
+  }
+  const revealCarousel = (): void => {
+    requestAnimationFrame(() => {
+      container.style.opacity = '1';
+      if (skeletonEl) {
+        skeletonEl.style.opacity = '0';
+        // 连骨架 wrapper 一起摘除(其内仅剩此节点, wrapper 无高度无样式残留)
+        window.setTimeout(() => {
+          try { (skeletonEl.parentElement || skeletonEl).remove(); } catch (e) { /* 已被移除 */ }
+        }, 520);
+      }
+    });
+  };
+  const f0: any = shows[0] || {};
+  const raw0 = (f0._backdropBlob as string) || ((): string => {
+    const b = String(f0.backdrop || '');
+    if (!b) return '';
+    return (b.startsWith('http') || b.startsWith('/v/api/')) ? b : base + '/v/api/v1/' + b;
+  })();
+  if (raw0) {
+    const probe = new Image();
+    let done = false;
+    const finish = (): void => { if (!done) { done = true; window.clearTimeout(timer); revealCarousel(); } };
+    const timer = window.setTimeout(finish, 1200); // 解码过慢/异常兜底：最迟 1.2s 揭示
+    probe.onload = finish;
+    probe.onerror = finish;
+    probe.src = raw0; // ⚠ 先设 src 再 decode()：空 src 的 decode() 会立即 resolve 使门控失效
+    if (typeof probe.decode === 'function') {
+      probe.decode().then(finish, finish);
+    }
+  } else {
+    revealCarousel();
+  }
 
   // [lc-781] 样式 2（滑动切换 + 进度条）：早期分支，复用已建好的 container/wrapper，
   //   跳过下方样式 1 的 track / posterStrip / 竖向轮播逻辑，改走 buildCarouselStyle2。

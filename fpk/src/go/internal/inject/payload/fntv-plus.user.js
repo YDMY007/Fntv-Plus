@@ -10910,7 +10910,7 @@ html.fnos-perf.dark{
   function backfillDetailLogo() {
     if (!S.carouselLogoEnabled) return;
     if (!isDetailPage()) return;
-    const m = location.href.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
     if (!m) return;
     const guid = m[2];
     const mediaType = m[1] === "tv" ? "tv" : "movie";
@@ -11123,6 +11123,7 @@ html.fnos-perf.dark{
     );
   }
   function injectCarousel() {
+    var _a, _b;
     log7("injectCarousel called, S.carouselInited=", S.carouselInited, "S.apiShows.length=", S.apiShows.length);
     if (S.carouselInited) return;
     destroyCarousel();
@@ -11147,6 +11148,7 @@ html.fnos-perf.dark{
       log7("no target");
       return;
     }
+    const skeletonEl = S.placeholderInited && S.carouselContainer ? S.carouselContainer : null;
     log7("target found on", location.href, rebuild ? "(rebuild)" : "(first)");
     if (!document.getElementById("fnos-hero-action-style")) {
       const actSt = document.createElement("style");
@@ -11234,9 +11236,18 @@ html.fnos-perf.dark{
     let wrapper;
     if (rebuild && S.carouselWrapper) {
       wrapper = S.carouselWrapper;
-      wrapper.innerHTML = "";
+      if (skeletonEl && skeletonEl.parentElement === wrapper) {
+        for (const child of Array.from(wrapper.childNodes)) {
+          if (child !== skeletonEl) (_a = child.remove) == null ? void 0 : _a.call(child);
+        }
+      } else {
+        wrapper.innerHTML = "";
+      }
     } else {
-      target.innerHTML = "";
+      const keep = skeletonEl ? skeletonEl.parentElement : null;
+      for (const child of Array.from(target.childNodes)) {
+        if (child !== keep) (_b = child.remove) == null ? void 0 : _b.call(child);
+      }
       target.style.borderTop = "none";
       target.style.boxShadow = "none";
       target.style.marginTop = "0";
@@ -11257,9 +11268,64 @@ html.fnos-perf.dark{
     container.style.transition = "opacity .45s ease";
     wrapper.appendChild(container);
     S.carouselContainer = container;
-    requestAnimationFrame(() => {
-      container.style.opacity = "1";
-    });
+    if (skeletonEl && skeletonEl.parentElement) {
+      try {
+        const skelWrap = skeletonEl.parentElement;
+        skelWrap.dataset.fntvCarouselWrapper = "1";
+        const cs = getComputedStyle(skelWrap);
+        skelWrap.style.position = "relative";
+        skeletonEl.style.position = "absolute";
+        skeletonEl.style.top = cs.paddingTop;
+        skeletonEl.style.left = cs.paddingLeft;
+        skeletonEl.style.right = cs.paddingRight;
+        skeletonEl.style.width = "auto";
+        skeletonEl.style.margin = "0";
+        skeletonEl.style.transition = "opacity .45s ease";
+        skeletonEl.style.pointerEvents = "none";
+        skeletonEl.style.zIndex = "1";
+      } catch (e) {
+      }
+    }
+    const revealCarousel = () => {
+      requestAnimationFrame(() => {
+        container.style.opacity = "1";
+        if (skeletonEl) {
+          skeletonEl.style.opacity = "0";
+          window.setTimeout(() => {
+            try {
+              (skeletonEl.parentElement || skeletonEl).remove();
+            } catch (e) {
+            }
+          }, 520);
+        }
+      });
+    };
+    const f0 = shows[0] || {};
+    const raw0 = f0._backdropBlob || (() => {
+      const b = String(f0.backdrop || "");
+      if (!b) return "";
+      return b.startsWith("http") || b.startsWith("/v/api/") ? b : base + "/v/api/v1/" + b;
+    })();
+    if (raw0) {
+      const probe = new Image();
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          window.clearTimeout(timer3);
+          revealCarousel();
+        }
+      };
+      const timer3 = window.setTimeout(finish, 1200);
+      probe.onload = finish;
+      probe.onerror = finish;
+      probe.src = raw0;
+      if (typeof probe.decode === "function") {
+        probe.decode().then(finish, finish);
+      }
+    } else {
+      revealCarousel();
+    }
     if (_cs === 2) {
       buildCarouselStyle2(container, wrapper, shows, base, rebuild);
       if (!rebuild) target.appendChild(wrapper);
@@ -12075,10 +12141,10 @@ html.fnos-perf.dark{
   var _seriesResizeBound = false;
   var _seriesResizeTimer = 0;
   function _isSeriesRoute() {
-    return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(location.pathname);
+    return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(pagePath());
   }
   function _isMovieRoute() {
-    return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(location.pathname);
+    return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(pagePath());
   }
   function _isOneLevel() {
     return _isSeriesRoute() || _isMovieRoute();
@@ -12219,7 +12285,7 @@ html.fnos-perf.dark{
     return _activeHero() || document.querySelector("header");
   }
   function getSeasonPageGuid() {
-    const m = location.pathname.match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
     if (!m) return null;
     return { guid: m[2], mediaType: m[1] === "movie" ? "movie" : "tv" };
   }
@@ -12989,7 +13055,7 @@ html.fnos-perf.dark{
     })();
   }
   function _isSeasonRoute() {
-    return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(location.pathname);
+    return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(pagePath());
   }
   function scheduleTmdbCard(_view) {
     const href = location.href;
@@ -14381,7 +14447,7 @@ html.fnos-perf.dark{
   var RETRY_DELAYS4 = [0, 400, 1e3, 2e3, 3400, 5e3];
   var CONCURRENCY = 4;
   function seasonGuid() {
-    const m = location.pathname.match(/\/v\/tv\/season\/([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/tv\/season\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   var CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
@@ -15082,7 +15148,7 @@ html.fnos-perf.dark{
   var PAGE_SIZE = 1e3;
   var _running3 = false;
   function folderGuid() {
-    const m = location.pathname.match(/\/v\/folder\/([A-Za-z0-9_]+)/);
+    const m = pagePath().match(/\/v\/folder\/([A-Za-z0-9_]+)/);
     return m ? m[1] : null;
   }
   function fnNonce4() {
@@ -15450,15 +15516,15 @@ html.fnos-perf.dark{
   var JAV_BTN_ID = "fnos-jav-btn";
   var _running4 = false;
   function movieGuid() {
-    const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/movie\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   function folderGuid2() {
-    const m = location.pathname.match(/\/v\/folder\/fv_([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/folder\/fv_([a-f0-9]{32})/);
     return m ? "fv_" + m[1] : null;
   }
   function otherGuid() {
-    const m = location.pathname.match(/\/v\/other\/([a-f0-9]{32})/);
+    const m = pagePath().match(/\/v\/other\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   function detailGuid() {
@@ -15675,7 +15741,7 @@ html.fnos-perf.dark{
     return { saved, verified, done };
   }
   function listOtherPage() {
-    return /^\/v\/list\/other\/?$/.test(location.pathname);
+    return /^\/v\/list\/other\/?$/.test(pagePath());
   }
   async function javPrepByTitle(origin, guid, title) {
     const r = title ? await ipcRenderer.invoke("jav:lookup", { title, guid }) : null;
@@ -16038,7 +16104,7 @@ html.fnos-perf.dark{
   var _armed = false;
   var _poll = 0;
   var isHome = () => {
-    const p = location.pathname;
+    const p = pagePath();
     return p === "/v" || p === "/v/";
   };
   function ensure() {
@@ -20457,7 +20523,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
     };
     const ensureHomepageEnhanced = () => {
-      if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return;
+      if (!/^\/v\/?($|\?|#)/.test(pagePath())) return;
       const healthy = !!(S.carouselContainer && document.body.contains(S.carouselContainer) && S.carouselInited);
       if (healthy) {
         S.leftHome = false;
@@ -20747,8 +20813,9 @@ html.fntv-boot-hide #root{visibility:hidden}
         return S.leftHome;
       },
       get onHome() {
-        return /^\/v\/?($|\?|#)/.test(location.pathname);
+        return /^\/v\/?($|\?|#)/.test(pagePath());
       },
+      // [lc-1279]
       get carouselWrapper() {
         return S.carouselWrapper;
       },
@@ -20768,7 +20835,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       // [lc-940] 一键快照: 返回首页后轮播为什么没显示, 看这一份即可定位
       rebuildSnapshot: () => ({
         pathname: location.pathname,
-        onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
+        onHome: /^\/v\/?($|\?|#)/.test(pagePath()),
+        // [lc-1279]
         leftHome: S.leftHome,
         apiShowsLen: (S.apiShows || []).length,
         apiShowsWithBlob: (S.apiShows || []).filter((s) => !!s._backdropBlob).length,
@@ -21722,10 +21790,11 @@ html.fntv-boot-hide #root{visibility:hidden}
     if (!href) return false;
     try {
       const url = new URL(href, location.href);
-      const p = url.pathname.toLowerCase();
+      const p = pagePathOf(url.pathname).toLowerCase();
       return p === "/v/library" || p.startsWith("/v/library/") || p === "/v/list" || p.startsWith("/v/list/");
     } catch {
-      return /\/v\/library\/?/i.test(href) || /\/v\/list\/?/i.test(href);
+      const p = pagePathOf(href).toLowerCase();
+      return /\/v\/library(\/|$|\?)/.test(p) || /\/v\/list(\/|$|\?)/.test(p);
     }
   }
   function hasSidebarLibraryNav() {
@@ -21740,7 +21809,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     return false;
   }
   function isDetailRoute() {
-    return /^\/v\/(tv|movie|person)(\/|$)/i.test(location.pathname);
+    return /^\/v\/(tv|movie|person)(\/|$)/i.test(pagePath());
   }
   function findCardGrid() {
     const candidates = Array.from(
@@ -21752,9 +21821,22 @@ html.fntv-boot-hide #root{visibility:hidden}
       const first = el.children[0];
       const r = first.getBoundingClientRect();
       if (r.width < 80 || r.width > 400 || r.height < 150) continue;
+      if (isInsideDetailView(el)) continue;
       if (!best || el.children.length > best.children.length) best = el;
     }
     return best;
+  }
+  function isInsideDetailView(el) {
+    try {
+      const views = document.querySelectorAll(".trim-ui__cache-outlet--exclude, .trim-ui__cache-outlet--cache");
+      for (let i = 0; i < views.length; i++) {
+        const v = views[i];
+        if (!v.querySelector(':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)')) continue;
+        if (v.contains(el)) return true;
+      }
+    } catch (_) {
+    }
+    return false;
   }
   var lockedKey = "";
   var lockedEl = null;

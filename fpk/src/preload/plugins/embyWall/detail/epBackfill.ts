@@ -26,6 +26,7 @@ import { S } from '../state';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
+import { pagePath } from '../../../core/pageMode';
 
 const BTN_ID = 'fnos-epfix-btn';
 const ANCHOR_MARK = 'data-fnos-epfix-anchor';
@@ -37,7 +38,7 @@ const CONCURRENCY = 4;
 // ── 路由/文本纯函数 ──
 
 export function seasonGuid(): string | null {
-  const m = location.pathname.match(/\/v\/tv\/season\/([a-f0-9]{32})/);
+  const m = pagePath().match(/\/v\/tv\/season\/([a-f0-9]{32})/); // [lc-1279] 剥网关前缀
   return m ? m[1] : null;
 }
 

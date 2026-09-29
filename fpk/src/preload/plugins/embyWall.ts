@@ -4934,7 +4934,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   ④ 若 S.apiShows 为空(整页重载), 重置 S.apiLoaded 重新拉取。
   //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
-    if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
+    if (!/^\/v\/?($|\?|#)/.test(pagePath())) return; // 仅首页(/v) —— [lc-1279] 剥网关前缀
     // [lc-946] 轮播仍健康(已挂载+已初始化)→ 直接复用, 绝不销毁重建(根治"返回首页轮播重载/海报丢失")。
     //   仅重启被 _stopCarouselOffHome 停掉的自动轮播(钩子由各样式注册到 S.carouselResume), DOM/海报原样保留。
     //   此前的 S.leftHome 强制重建是 lc-941 整页刷新根因的临时补丁, lc-941 已修复根因, 不再需要, 反而会引回"重载"。
@@ -5211,7 +5211,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     get carouselRevealed() { return S.carouselRevealed; },
     get carouselContainer() { return S.carouselContainer; },
     get leftHome() { return S.leftHome; },
-    get onHome() { return /^\/v\/?($|\?|#)/.test(location.pathname); },
+    get onHome() { return /^\/v\/?($|\?|#)/.test(pagePath()); }, // [lc-1279]
     get carouselWrapper() { return S.carouselWrapper; },
     get mediaLibrarySectionFound() { return !!findMediaLibrarySection(); },
     // [lc-940] 手动强制重建轮播: 若复现「路径B返回首页不显示」后调用它仍修不好 → 是重建逻辑/数据问题;
@@ -5220,7 +5220,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [lc-940] 一键快照: 返回首页后轮播为什么没显示, 看这一份即可定位
     rebuildSnapshot: () => ({
       pathname: location.pathname,
-      onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
+      onHome: /^\/v\/?($|\?|#)/.test(pagePath()), // [lc-1279]
       leftHome: S.leftHome,
       apiShowsLen: (S.apiShows || []).length,
       apiShowsWithBlob: (S.apiShows || []).filter((s: any) => !!s._backdropBlob).length,
