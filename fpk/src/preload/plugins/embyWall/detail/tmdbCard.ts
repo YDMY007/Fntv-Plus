@@ -12,7 +12,6 @@ import { dlog, log } from '../log';
 import { fnosGetEditDetail } from '../carousel/logo';
 import { extractTmdbId } from '../carousel/api';
 import { DETAIL_HERO_SEL, findActiveDetailView } from './glass';
-import { pagePath } from '../../../core/pageMode';
 
 const CARD_ID = 'fnos-beautify-tmdb-card';
 
@@ -34,7 +33,7 @@ let _seriesResizeTimer = 0;
 
 function _isSeriesRoute(): boolean {
   // 仅 tv 一级页：电影一级页(组件 Q/Zse isVideo 分支)结构未采样验证，本轮不放开。
-  return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(pagePath()); // [lc-1279] 剥网关前缀
+  return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(location.pathname);
 }
 
 /** [lc-1028] Movie 一级页。活体结构（2026-09-05 /v/movie/36b7d8e5… 实采）：与 Series 同族——
@@ -42,7 +41,7 @@ function _isSeriesRoute(): boolean {
  *  (trim-mc__details--key-version + .gradient h-45% + logo 锚点)、同 mt-4 按钮行；
  *  差异仅在 col.children[1..3] = 简介(px-[46px])/演职人员(mb-10)/文件信息+IMDB(px-[46px] gap-4)。 */
 function _isMovieRoute(): boolean {
-  return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(pagePath()); // [lc-1279] 剥网关前缀
+  return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(location.pathname);
 }
 
 /** 一级页（Series/Movie 共用行为：聚簇武装、卡片失败即撤、全量卡片内容）。 */
@@ -226,7 +225,7 @@ function detailHeaderScope(): HTMLElement | null {
 }
 
 function getSeasonPageGuid(): { guid: string; mediaType: 'tv' | 'movie' } | null {
-  const m = pagePath().match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/); // [lc-1279]
+  const m = location.pathname.match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
   if (!m) return null;
   return { guid: m[2], mediaType: m[1] === 'movie' ? 'movie' : 'tv' };
 }
@@ -1008,7 +1007,7 @@ function _fetch(force = false): void {
  *  ③ 版式：N8b 把卡放进 43% 右列并内部滚动，正是当年设计的 40fr 窄栏场景。
  *     电影一级页(组件 Q / Zse isVideo 分支)结构不同且未采样验证，本轮**不放开**（按路由排除）。 */
 function _isSeasonRoute(): boolean {
-  return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(pagePath()); // [lc-1279]
+  return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(location.pathname);
 }
 
 /** settle 后调度：同一 href 只排一次；追加卡片占位并异步拉取。非阻塞。

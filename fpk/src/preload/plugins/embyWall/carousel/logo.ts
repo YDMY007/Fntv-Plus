@@ -5,7 +5,6 @@ import { ipcRenderer } from 'electron';
 import { isDetailPage } from '../detail/glass';
 import { log } from '../log';
 import { extractTmdbId } from './api';
-import { pagePath } from '../../../core/pageMode';
 
 // embyWall/carousel/logo.ts — 轮播/详情页 LOGO：TMDB 透明 logo 拉取、标题替换为 logo、回写飞牛媒体库
 // [v1.10.0] 新增 Fanart.tv 官方高清透明 Logo 兜底（扩展数据源 ①）：TMDB 全部候选不可用时，
@@ -246,7 +245,7 @@ async function saveEditDetail(origin: string, data: any, logoHashPath: string): 
 export function backfillDetailLogo(): void {
   if (!S.carouselLogoEnabled) return;            // 复用「轮播 Logo」开关
   if (!isDetailPage()) return;
-  const m = pagePath().match(/\/v\/(tv|movie)\/([a-f0-9]{32})/); // [lc-1279] 剥网关前缀(统一口径)
+  const m = location.pathname.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
   if (!m) return;
   const guid = m[2];
   const mediaType = m[1] === 'tv' ? 'tv' : 'movie';

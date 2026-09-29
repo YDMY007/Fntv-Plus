@@ -10901,7 +10901,7 @@ html.fnos-perf.dark{
   function backfillDetailLogo() {
     if (!S.carouselLogoEnabled) return;
     if (!isDetailPage()) return;
-    const m = pagePath().match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/(tv|movie)\/([a-f0-9]{32})/);
     if (!m) return;
     const guid = m[2];
     const mediaType = m[1] === "tv" ? "tv" : "movie";
@@ -12140,10 +12140,10 @@ html.fnos-perf.dark{
   var _seriesResizeBound = false;
   var _seriesResizeTimer = 0;
   function _isSeriesRoute() {
-    return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(pagePath());
+    return /\/v\/tv\/[a-f0-9]{32}\/?$/.test(location.pathname);
   }
   function _isMovieRoute() {
-    return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(pagePath());
+    return /\/v\/movie\/[a-f0-9]{32}\/?$/.test(location.pathname);
   }
   function _isOneLevel() {
     return _isSeriesRoute() || _isMovieRoute();
@@ -12284,7 +12284,7 @@ html.fnos-perf.dark{
     return _activeHero() || document.querySelector("header");
   }
   function getSeasonPageGuid() {
-    const m = pagePath().match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/(tv|movie)\/(?:season\/)?([a-f0-9]{32})/);
     if (!m) return null;
     return { guid: m[2], mediaType: m[1] === "movie" ? "movie" : "tv" };
   }
@@ -13054,7 +13054,7 @@ html.fnos-perf.dark{
     })();
   }
   function _isSeasonRoute() {
-    return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(pagePath());
+    return /\/v\/(?:tv|movie)\/season\/[a-f0-9]{32}/.test(location.pathname);
   }
   function scheduleTmdbCard(_view) {
     const href = location.href;
@@ -14446,7 +14446,7 @@ html.fnos-perf.dark{
   var RETRY_DELAYS4 = [0, 400, 1e3, 2e3, 3400, 5e3];
   var CONCURRENCY = 4;
   function seasonGuid() {
-    const m = pagePath().match(/\/v\/tv\/season\/([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/tv\/season\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   var CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
@@ -15147,7 +15147,7 @@ html.fnos-perf.dark{
   var PAGE_SIZE = 1e3;
   var _running3 = false;
   function folderGuid() {
-    const m = pagePath().match(/\/v\/folder\/([A-Za-z0-9_]+)/);
+    const m = location.pathname.match(/\/v\/folder\/([A-Za-z0-9_]+)/);
     return m ? m[1] : null;
   }
   function fnNonce4() {
@@ -15515,15 +15515,15 @@ html.fnos-perf.dark{
   var JAV_BTN_ID = "fnos-jav-btn";
   var _running4 = false;
   function movieGuid() {
-    const m = pagePath().match(/\/v\/movie\/([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   function folderGuid2() {
-    const m = pagePath().match(/\/v\/folder\/fv_([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/folder\/fv_([a-f0-9]{32})/);
     return m ? "fv_" + m[1] : null;
   }
   function otherGuid() {
-    const m = pagePath().match(/\/v\/other\/([a-f0-9]{32})/);
+    const m = location.pathname.match(/\/v\/other\/([a-f0-9]{32})/);
     return m ? m[1] : null;
   }
   function detailGuid() {
@@ -15740,7 +15740,7 @@ html.fnos-perf.dark{
     return { saved, verified, done };
   }
   function listOtherPage() {
-    return /^\/v\/list\/other\/?$/.test(pagePath());
+    return /^\/v\/list\/other\/?$/.test(location.pathname);
   }
   async function javPrepByTitle(origin, guid, title) {
     const r = title ? await ipcRenderer.invoke("jav:lookup", { title, guid }) : null;
@@ -16103,7 +16103,7 @@ html.fnos-perf.dark{
   var _armed = false;
   var _poll = 0;
   var isHome = () => {
-    const p = pagePath();
+    const p = location.pathname;
     return p === "/v" || p === "/v/";
   };
   function ensure() {
@@ -16214,10 +16214,10 @@ html.fntv-boot-hide #root{visibility:hidden}
       document.documentElement.classList.toggle("fnos-tv-page", isFntvTvPage());
     };
     syncTvPageClass();
-    let _lastPath = pagePath();
+    let _lastPath = location.pathname;
     const _tvClassTimer = window.setInterval(() => {
-      if (pagePath() !== _lastPath) {
-        _lastPath = pagePath();
+      if (location.pathname !== _lastPath) {
+        _lastPath = location.pathname;
         syncTvPageClass();
         log7("[TV\u7C7B\u540C\u6B65]", location.pathname, "isTv=", isFntvTvPage());
       }
@@ -20522,7 +20522,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
     };
     const ensureHomepageEnhanced = () => {
-      if (!/^\/v\/?($|\?|#)/.test(pagePath())) return;
+      if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return;
       const healthy = !!(S.carouselContainer && document.body.contains(S.carouselContainer) && S.carouselInited);
       if (healthy) {
         S.leftHome = false;
@@ -20609,7 +20609,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         try {
           p = pagePathOf(new URL(h, location.origin).pathname);
         } catch (_) {
-          p = pagePath();
+          p = location.pathname;
         }
         if (p === "/v" || p === "/v/") return;
         try {
@@ -20618,7 +20618,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         }
       };
       history.pushState = function(...a) {
-        const prevPath = pagePath();
+        const prevPath = location.pathname;
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _ps.apply(this, a);
         logNav("pushState");
@@ -20640,7 +20640,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         scheduleFolderScraperButton();
       };
       history.replaceState = function(...a) {
-        const prevPath = pagePath();
+        const prevPath = location.pathname;
         const newHref = a && a.length >= 3 && typeof a[2] === "string" ? a[2] : location.href;
         _rs.apply(this, a);
         logNav("replaceState");
@@ -20754,7 +20754,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     wheelToScroll();
     [2e3, 4e3, 8e3].forEach((ms) => setTimeout(wheelToScroll, ms));
     const _isHomePath = () => {
-      const p = pagePath();
+      const p = location.pathname;
       return p === "/v" || p === "/v/";
     };
     let _wtsTimer = 0;
@@ -20812,9 +20812,8 @@ html.fntv-boot-hide #root{visibility:hidden}
         return S.leftHome;
       },
       get onHome() {
-        return /^\/v\/?($|\?|#)/.test(pagePath());
+        return /^\/v\/?($|\?|#)/.test(location.pathname);
       },
-      // [lc-1279]
       get carouselWrapper() {
         return S.carouselWrapper;
       },
@@ -20834,8 +20833,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       // [lc-940] 一键快照: 返回首页后轮播为什么没显示, 看这一份即可定位
       rebuildSnapshot: () => ({
         pathname: location.pathname,
-        onHome: /^\/v\/?($|\?|#)/.test(pagePath()),
-        // [lc-1279]
+        onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
         leftHome: S.leftHome,
         apiShowsLen: (S.apiShows || []).length,
         apiShowsWithBlob: (S.apiShows || []).filter((s) => !!s._backdropBlob).length,

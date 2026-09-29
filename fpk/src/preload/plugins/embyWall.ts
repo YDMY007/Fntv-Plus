@@ -143,10 +143,10 @@ function handle(): void {
     document.documentElement.classList.toggle('fnos-tv-page', isFntvTvPage());
   };
   syncTvPageClass();
-  let _lastPath = pagePath();
+  let _lastPath = location.pathname;
   const _tvClassTimer = window.setInterval(() => {
-    if (pagePath() !== _lastPath) {
-      _lastPath = pagePath();
+    if (location.pathname !== _lastPath) {
+      _lastPath = location.pathname;
       syncTvPageClass();
       log('[TV类同步]', location.pathname, 'isTv=', isFntvTvPage());
     }
@@ -4934,7 +4934,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   ④ 若 S.apiShows 为空(整页重载), 重置 S.apiLoaded 重新拉取。
   //   [lc-924→lc-932] 返回首页仅用缓存重建轮播(无网络重拉), 数据新鲜度由每 10 分钟整页重载保证。
   const ensureHomepageEnhanced = (): void => {
-    if (!/^\/v\/?($|\?|#)/.test(pagePath())) return; // 仅首页(/v) —— [lc-1279] 剥网关前缀
+    if (!/^\/v\/?($|\?|#)/.test(location.pathname)) return; // 仅首页(/v)
     // [lc-946] 轮播仍健康(已挂载+已初始化)→ 直接复用, 绝不销毁重建(根治"返回首页轮播重载/海报丢失")。
     //   仅重启被 _stopCarouselOffHome 停掉的自动轮播(钩子由各样式注册到 S.carouselResume), DOM/海报原样保留。
     //   此前的 S.leftHome 强制重建是 lc-941 整页刷新根因的临时补丁, lc-941 已修复根因, 不再需要, 反而会引回"重载"。
@@ -5023,12 +5023,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const _stopCarouselOffHome = (newHref: string | undefined): void => {
       const h = newHref || location.href;
       let p = '';
-      try { p = pagePathOf(new URL(h, location.origin).pathname); } catch (_) { p = pagePath(); }
+      try { p = pagePathOf(new URL(h, location.origin).pathname); } catch (_) { p = location.pathname; }
       if (p === '/v' || p === '/v/') return;
       try { destroyCarousel(); } catch (_) { /* ignore */ }
     };
     (history as any).pushState = function (...a: any[]) {
-      const prevPath = pagePath();
+      const prevPath = location.pathname;
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _ps.apply(this, a as any);
       logNav('pushState');
@@ -5045,7 +5045,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       scheduleFolderScraperButton(); // [自定义刮削] 个人视频文件夹页「⟳ 文件夹刮削」浮动按钮：非文件夹页自撤
     };
     (history as any).replaceState = function (...a: any[]) {
-      const prevPath = pagePath();
+      const prevPath = location.pathname;
       const newHref = (a && a.length >= 3 && typeof a[2] === 'string') ? a[2] : location.href;
       _rs.apply(this, a as any);
       logNav('replaceState');
@@ -5161,7 +5161,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
   //   反复调用 injectCarousel(每次都会先 destroyCarousel 再被路径守卫挡回), 与详情页自身的重活叠加,
   //   是从"首页轮播图打开二级详情页"这条路径才卡死、从剧集列表进入却正常的关键差异。
   //   非首页一律跳过轮播重建(回到首页时 pushState/popstate 钩子会重新注入)。
-  const _isHomePath = (): boolean => { const p = pagePath(); return p === '/v' || p === '/v/'; };
+  const _isHomePath = (): boolean => { const p = location.pathname; return p === '/v' || p === '/v/'; };
 
   let _wtsTimer = 0;
   // [网页端] 触发风暴熔断：1 秒内回调超过 40 次即视为自激（回调自身在改 DOM → 再触发自己），
@@ -5211,7 +5211,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     get carouselRevealed() { return S.carouselRevealed; },
     get carouselContainer() { return S.carouselContainer; },
     get leftHome() { return S.leftHome; },
-    get onHome() { return /^\/v\/?($|\?|#)/.test(pagePath()); }, // [lc-1279]
+    get onHome() { return /^\/v\/?($|\?|#)/.test(location.pathname); },
     get carouselWrapper() { return S.carouselWrapper; },
     get mediaLibrarySectionFound() { return !!findMediaLibrarySection(); },
     // [lc-940] 手动强制重建轮播: 若复现「路径B返回首页不显示」后调用它仍修不好 → 是重建逻辑/数据问题;
@@ -5220,7 +5220,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [lc-940] 一键快照: 返回首页后轮播为什么没显示, 看这一份即可定位
     rebuildSnapshot: () => ({
       pathname: location.pathname,
-      onHome: /^\/v\/?($|\?|#)/.test(pagePath()), // [lc-1279]
+      onHome: /^\/v\/?($|\?|#)/.test(location.pathname),
       leftHome: S.leftHome,
       apiShowsLen: (S.apiShows || []).length,
       apiShowsWithBlob: (S.apiShows || []).filter((s: any) => !!s._backdropBlob).length,

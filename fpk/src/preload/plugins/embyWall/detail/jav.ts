@@ -27,26 +27,25 @@ import { findActiveDetailView, findDetailHero } from './glass';
 import { fnosGetEditDetail, uploadImageToFnos } from '../carousel/logo';
 import { fnosSaveEditDetail } from './epBackfill';
 import { repositionFolderScraperButton } from './folderScraper';
-import { pagePath } from '../../../core/pageMode';
 
 const JAV_BTN_ID = 'fnos-jav-btn';
 let _running = false;
 
 /** 电影详情路由 guid（/v/movie/<32hex>，裸 hex）。 */
 export function movieGuid(): string | null {
-  const m = pagePath().match(/\/v\/movie\/([a-f0-9]{32})/); // [lc-1279] 剥网关前缀
+  const m = location.pathname.match(/\/v\/movie\/([a-f0-9]{32})/);
   return m ? m[1] : null;
 }
 
 /** 文件夹详情路由 guid（/v/folder/fv_<32hex> → 条目 guid 带 fv_ 前缀，飞牛编辑接口仅认此形态）。 */
 export function folderGuid(): string | null {
-  const m = pagePath().match(/\/v\/folder\/fv_([a-f0-9]{32})/); // [lc-1279]
+  const m = location.pathname.match(/\/v\/folder\/fv_([a-f0-9]{32})/);
   return m ? 'fv_' + m[1] : null;
 }
 
 /** 文件条目路由 guid（/v/other/<32hex>，裸 hex——与 folder 的 fv_ 前缀不同，实测确认）。 */
 export function otherGuid(): string | null {
-  const m = pagePath().match(/\/v\/other\/([a-f0-9]{32})/); // [lc-1279]
+  const m = location.pathname.match(/\/v\/other\/([a-f0-9]{32})/);
   return m ? m[1] : null;
 }
 
@@ -291,7 +290,7 @@ async function backfillOne(origin: string, guid: string, prep: { meta: any; ov: 
 
 /** [lc-1250] 其他视频库列表页路由（/v/list/other，query 不参与判定）。 */
 export function listOtherPage(): boolean {
-  return /^\/v\/list\/other\/?$/.test(pagePath()); // [lc-1279]
+  return /^\/v\/list\/other\/?$/.test(location.pathname);
 }
 
 /** [lc-1250] 单条准备：按标题查 javbus → 简介/演员/封面一次性备齐。

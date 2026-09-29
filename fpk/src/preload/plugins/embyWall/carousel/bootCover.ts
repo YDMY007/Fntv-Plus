@@ -10,7 +10,6 @@
 //   离开首页路径 / 2.5s 硬兜底（绝不长遮）。
 // ─────────────────────────────────────────────────────────────────────────────
 import { S } from '../state';
-import { pagePath } from '../../../core/pageMode';
 
 const STYLE_ID = 'fntv-boot-style';
 const BAR_ID = 'fntv-boot-bar';
@@ -20,10 +19,7 @@ const HARD_LIFT_MS = 2500;
 let _armed = false;
 let _poll = 0;
 
-// [lc-1279] 用 pagePath()（剥网关前缀）判定首页：fpk 网关模式下地址栏是 /app/fntvplus/v，
-//   直读 location.pathname 永不命中 → armBootCover 直接 return，启动进度条根本不挂；
-//   且注入 shim 会在带/不带前缀间切换地址，直读判定随时机抖动。
-const isHome = (): boolean => { const p = pagePath(); return p === '/v' || p === '/v/'; };
+const isHome = (): boolean => { const p = location.pathname; return p === '/v' || p === '/v/'; };
 
 function ensure(): void {
   if (document.getElementById(STYLE_ID)) return;
