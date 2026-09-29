@@ -84,6 +84,7 @@ func New(cfg *config.Config, upstream string) *Bridge {
 // Mount 注册全部 bridge 路由。
 func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/fnos", b.handleFnOS)
+	mux.HandleFunc("/app/fntvplus/api/bridge/fnos/authx", b.handleFnOSAuthx)
 	mux.HandleFunc("/app/fntvplus/api/bridge/proxy", b.handleProxy)
 	mux.HandleFunc("/app/fntvplus/api/bridge/tmdb/img", b.handleTMDBImage)
 	mux.HandleFunc("/app/fntvplus/api/bridge/tmdb/logo", b.tmdbLogo)
@@ -262,6 +263,38 @@ func (b *Bridge) handleFnOS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(data)
+}
+
+// handleFnOSAuthx [lc-1275] 签名 oracle：网页端 Authx 材料靠「运行时从影视 SPA chunk 提取」，
+// fnOS 前端更新导致特征失配后本地签名不可用，旧兜底「捕获回放」的 body 哈希与本次请求
+// 不一致——所有带 nonce 的 fnOS POST（getEditDetail/saveEditDetail/image/temp/upload/person
+// 等）一律 invalid sign 被拒（用户症状：jav 查询正常但回填失败）。
+// 本端点用服务端 env 注入的材料（与官方影视应用一致，永不过期）按请求方送来的
+// dataJson 原文计算 Authx 后返回；密钥不出服务端，浏览器仍以同源 fetch 自发请求
+// （credentials 保住 httpOnly 会话）。path 白名单与 handleFnOS 同规。
+func (b *Bridge) handleFnOSAuthx(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path     string `json:"path"`
+		DataJSON string `json:"dataJson"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 512*1024)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json: "+err.Error())
+		return
+	}
+	if !strings.HasPrefix(req.Path, "/v/api/") {
+		writeErr(w, http.StatusForbidden, "path 必须以 /v/api/ 开头")
+		return
+	}
+	authx := genAuthx(req.Path, req.DataJSON)
+	if authx == "" {
+		writeErr(w, http.StatusServiceUnavailable, "服务端未注入 Authx 签名材料")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "authx": authx})
 }
 
 /* ========== 白名单外部代理 ========== */

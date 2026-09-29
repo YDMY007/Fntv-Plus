@@ -417,12 +417,24 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return "nonce=" + nonce + "&timestamp=" + timestamp + "&sign=" + md5(signStr);
   }
   async function genAuthxAsync(url, data) {
+    const path = String(url || "");
     try {
-      const m = await ensureSignMaterials();
-      if (m && m.key && m.secret) return signWith(m.key, m.secret, url, data);
+      const dataJson = data === void 0 || data === null ? "" : JSON.stringify(data);
+      const r = await fetch("/app/fntvplus/api/bridge/fnos/authx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ path, dataJson })
+      }).then((x) => x.json());
+      if (r && r.ok && r.authx) return r.authx;
     } catch (e) {
     }
-    return getCapturedAuthx(String(url)) || "";
+    try {
+      const m = await ensureSignMaterials();
+      if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
+    } catch (e) {
+    }
+    return getCapturedAuthx(path) || "";
   }
   async function fnosApi(method, path, body) {
     const headers = { "Authx": await genAuthxAsync(path, body) };
