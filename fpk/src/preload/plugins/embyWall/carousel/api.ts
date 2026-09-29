@@ -24,7 +24,9 @@ export function setOnShowsReady(fn: () => void): void { onShowsReady = fn; }
 //   跨整页重载/模块重启持久化。返回首页重建时若 S.apiShows 已空(整页刷新), 可零网络即时恢复海报/简介,
 //   根治「返回首页重载 + 海报图/剧集简介丢失」。仅在数据完整(已带 _backdropBlob)时落盘。
 const SHOWS_CACHE_KEY = 'fntv-carousel-shows-v1';
-const persistShows = (): void => {
+// [lc-1274] 用 function 声明（非 const 箭头）：logo.ts 已 import 本模块（extractTmdbId，
+// 经 styles.ts 形成既有环），function 提升使其在任意模块求值顺序下都可用，免疫 TDZ。
+export function persistShows(): void {
   try {
     if (!S.apiShows.length) return;
     const snap = S.apiShows.map((s: any) => ({
@@ -34,10 +36,30 @@ const persistShows = (): void => {
       totalEps: s.totalEps, localEps: s.localEps, totalSeasons: s.totalSeasons,
       localSeasons: s.localSeasons, statusText: s.statusText, mediaType: s.mediaType,
       strmTag: s.strmTag, _backdropIsPortrait: s._backdropIsPortrait,
+      tmdbId: s.tmdbId, // [lc-1274] 缓存快照携带, 整页重载恢复后 logo 仍可走 id 精确匹配
+      tmdbLogo: s.tmdbLogo, // [lc-1274] 已解析的 TMDB logo dataUrl 一并落盘, 强刷后渲染时零网络秒复用
     }));
     sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(snap));
-  } catch (_) { /* 配额/序列化异常: 忽略, 不影响主流程 */ }
-};
+  } catch (_) {
+    // [lc-1274] 配额溢出：先只丢 logo dataUrl 再试；仍溢出才退回「无横版 blob」的精简快照，
+    // 尽量保住 lc-950 的海报/简介主收益
+    try {
+      const noLogo = S.apiShows.map((s: any) => {
+        const { tmdbLogo, ...rest } = s;
+        return rest;
+      });
+      sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(noLogo));
+    } catch (_) {
+      try {
+        const slim = S.apiShows.map((s: any) => {
+          const { tmdbLogo, _backdropBlob, ...rest } = s;
+          return rest;
+        });
+        sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(slim));
+      } catch (_) { /* 放弃快照, 不影响主流程 */ }
+    }
+  }
+}
 const restoreShows = (): void => {
   if (S.apiShows.length > 0) return; // 已有数据不覆盖
   try {
@@ -288,6 +310,8 @@ export async function fetchShowsViaIPC(base: string): Promise<any[]> {
         //   item.poster 常空), item API 的 data.posters 是权威竖版源 → 右侧海报条稳定显示
         if (detail.poster && !s.poster) s.poster = detail.poster;
         if (detail.logo) s.logo = detail.logo; // [lc-570] 飞牛自带 logo(与详情页一致)
+        // [lc-1274] 携带 TMDB id(trim_id 剥前缀): logo 查询优先 id 精确匹配, 标题搜索只作兜底
+        if (detail.tmdbId) s.tmdbId = detail.tmdbId;
         if (detail.strmTag) s.strmTag = detail.strmTag; // [DIAG] 携带来源标签
         if (detail.totalEps) s.totalEps = detail.totalEps;
         if (detail.localEps) s.localEps = detail.localEps;

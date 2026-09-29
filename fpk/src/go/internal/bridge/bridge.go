@@ -28,7 +28,9 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"fntvplus/internal/config"
@@ -340,6 +342,41 @@ func (b *Bridge) handleProxy(w http.ResponseWriter, r *http.Request) {
 /* ========== TMDB 图片 ========== */
 
 // handleTMDBImage GET ?url=https://image.tmdb.org/... → {ok, dataUrl}（对齐桌面版 tmdb:image 契约）。
+// [lc-1274] TMDB 图片代理内存缓存：网页端强刷后轮播 logo/海报逐张重下（走多路网络，
+// 慢路 12-20s 超时叠加时以十秒计），用户感知「标题停留很久才出 logo」。
+// 命中直接回包不再发起下载。24h TTL + 总量上限（超限放弃缓存新条目，旧条目到期自然腾位）。
+var tmdbImgCache sync.Map // string(raw url) → tmdbImgCacheEntry
+
+type tmdbImgCacheEntry struct {
+	contentType string
+	data        []byte
+	at          time.Time
+}
+
+const (
+	tmdbImgCacheTTL    = 24 * time.Hour
+	tmdbImgCacheMaxLen = 64 << 20 // 总字节上限 64MB（w500 logo ≈50KB、海报 ≈100KB，数百张余量）
+)
+
+func tmdbImgCachePut(key string, ct string, data []byte) {
+	now := time.Now()
+	total := int64(0)
+	tmdbImgCache.Range(func(k, v any) bool {
+		if e, ok := v.(tmdbImgCacheEntry); ok {
+			if now.Sub(e.at) > tmdbImgCacheTTL {
+				tmdbImgCache.Delete(k)
+			} else {
+				total += int64(len(e.data))
+			}
+		}
+		return true
+	})
+	if total+int64(len(data)) > tmdbImgCacheMaxLen {
+		return
+	}
+	tmdbImgCache.Store(key, tmdbImgCacheEntry{contentType: ct, data: data, at: now})
+}
+
 func (b *Bridge) handleTMDBImage(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	u, err := url.Parse(raw)
@@ -358,6 +395,17 @@ func (b *Bridge) handleTMDBImage(w http.ResponseWriter, r *http.Request) {
 	}
 	// [v0.63.0] 多路尝试：自定义代理 → 免梯子直连 IP → 系统直连，任一成功即返回。
 	// 每日放送 TMDB 源海报此前单路失败即整批挂（代理对 image.tmdb.org 慢/失败时无兜底）。
+	// [lc-1274] 缓存命中先回包（强刷后 logo 秒出，不再逐张重下）。
+	if e, ok := tmdbImgCache.Load(raw); ok {
+		if ce, ok2 := e.(tmdbImgCacheEntry); ok2 && time.Since(ce.at) < tmdbImgCacheTTL {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":      true,
+				"dataUrl": "data:" + ce.contentType + ";base64," + b64encode(ce.data),
+				"cached":  true,
+			})
+			return
+		}
+	}
 	type imgAttempt struct {
 		c   *http.Client
 		via string
@@ -396,6 +444,7 @@ func (b *Bridge) handleTMDBImage(w http.ResponseWriter, r *http.Request) {
 		if ct == "" {
 			ct = "image/jpeg"
 		}
+		tmdbImgCachePut(raw, ct, data) // [lc-1274] 仅缓存 200 响应
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"dataUrl": "data:" + ct + ";base64," + b64encode(data),
@@ -960,11 +1009,19 @@ func authForKey(key string) (bearer string, queryKey string) {
 }
 
 func (b *Bridge) tmdbGet(path string, params map[string]string) (int, map[string]any, error) {
+	return b.tmdbGetOpts(path, params, false)
+}
+
+// tmdbGetOpts：tmdbGet 的多语言变体。[lc-1274] noLang=true 时不带 language 参数——TMDB 会按
+// 原始语言检索，长中文描述性标题在 zh-CN 偏向下常 0 结果（对齐桌面版 lc-1176 无语言兜底）。
+func (b *Bridge) tmdbGetOpts(path string, params map[string]string, noLang bool) (int, map[string]any, error) {
 	key := b.tmdbAPIKey()
 	bearer, queryKey := authForKey(key)
 	u, _ := url.Parse("https://api.themoviedb.org/3" + path)
 	q := u.Query()
-	q.Set("language", "zh-CN")
+	if !noLang {
+		q.Set("language", "zh-CN")
+	}
 	for k, v := range params {
 		q.Set(k, v)
 	}
@@ -1026,7 +1083,29 @@ func (b *Bridge) tmdbGet(path string, params map[string]string) (int, map[string
 	return 0, nil, lastNetErr
 }
 
-// tmdbLogo {mediaType, id|title} → {ok, logoPaths:[...]}（/images logos，zh/en/null 语言）。
+// [lc-1274] tmdb logo 查询结果内存缓存（24h TTL，对齐桌面版 getDailyCached 默认时长）。
+// 轮播每次重建/翻页都会为每个条目请求一次 logo，无缓存时反复打 TMDB（慢 + 429 风险）。
+// 仅缓存「有结果」的查询（与桌面版语义一致：失败/无结果不缓存，允许后续重试）。
+var tmdbLogoCache sync.Map // string → tmdbLogoCacheEntry
+
+type tmdbLogoCacheEntry struct {
+	paths []string
+	at    time.Time
+}
+
+const tmdbLogoCacheTTL = 24 * time.Hour
+
+// tmdbLogo {mediaType, id|title} → {ok, logoPaths:[...]}（/images logos）。
+// [lc-1274] 修复「fpk 版首页轮播图获取不到 logo」：用户动漫库在 TMDB 上的 logo 大多只有
+// 日语版，而本桥此前 include_image_language 只请求 zh,en,null → 大面积落空。对齐桌面版
+// getTmdbLogo（lc-413/lc-947/lc-1176）四点：
+//  ①语言集补上 ja（zh,ja,en,null）——动漫 logo 缺失的主根因；
+//  ②横屏筛选（width>height，缺失宽高时 aspect_ratio>1，皆缺保守保留）+ 语言优先级排序
+//    zh>ja>en>其他、同语言按 vote_average 降序（旧版原样返回未排序数组，首候选可能是
+//    竖版/小语种 logo，配合前端「取首个非纯白」逻辑会选错）；
+//  ③标题搜索多策略：全角标点归一 → 原文 → 递进截断（首段/两段/16/12/8 字）→
+//    无 language 兜底（长中文描述性标题单策略全落空）；
+//  ④查询结果内存缓存 24h。
 func (b *Bridge) tmdbLogo(w http.ResponseWriter, r *http.Request) {
 	if b.tmdbAPIKey() == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "未配置 TMDB API Key"})
@@ -1042,30 +1121,31 @@ func (b *Bridge) tmdbLogo(w http.ResponseWriter, r *http.Request) {
 	if mt != "movie" && mt != "tv" {
 		mt = "tv"
 	}
+	cacheKey := fmt.Sprintf("logo_%s_%d_%s", mt, req.ID, req.Title)
+	if e, ok := tmdbLogoCache.Load(cacheKey); ok {
+		if ce, ok2 := e.(tmdbLogoCacheEntry); ok2 && time.Since(ce.at) < tmdbLogoCacheTTL {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": len(ce.paths) > 0, "logoPaths": ce.paths, "cached": true})
+			return
+		}
+	}
 	id := req.ID
 	if id <= 0 && req.Title != "" {
-		st, out, err := b.tmdbGet("/search/"+mt, map[string]string{"query": req.Title})
+		found, err := b.tmdbSearchID(mt, req.Title)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		if st != http.StatusOK {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": fmt.Sprintf("search %d", st)})
-			return
-		}
-		results, _ := out["results"].([]any)
-		if len(results) == 0 {
+		if found <= 0 {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "搜索无结果"})
 			return
 		}
-		first, _ := results[0].(map[string]any)
-		id = toInt64(first["id"])
+		id = found
 	}
 	if id <= 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "缺少 id/title"})
 		return
 	}
-	st, out, err := b.tmdbGet("/"+mt+"/"+fmt.Sprintf("%d", id)+"/images", map[string]string{"include_image_language": "zh,en,null"})
+	st, out, err := b.tmdbGet("/"+mt+"/"+fmt.Sprintf("%d", id)+"/images", map[string]string{"include_image_language": "zh,ja,en,null"})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"ok": false, "error": err.Error()})
 		return
@@ -1075,14 +1155,197 @@ func (b *Bridge) tmdbLogo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logos, _ := out["logos"].([]any)
-	paths := []string{}
-	for _, raw := range logos {
-		l, _ := raw.(map[string]any)
-		if fp, ok := l["file_path"].(string); ok && fp != "" {
-			paths = append(paths, fp)
-		}
+	paths := tmdbRankLogoPaths(logos)
+	if len(paths) > 0 {
+		tmdbLogoCache.Store(cacheKey, tmdbLogoCacheEntry{paths: paths, at: time.Now()})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": len(paths) > 0, "logoPaths": paths})
+}
+
+// [lc-1274 对齐桌面 lc-413] logo 候选处理：横屏筛选 + 语言优先级排序（zh>ja>en>其他，同语言
+// 按票数降序），返回 file_path 列表。独立成纯函数便于单测。
+func tmdbRankLogoPaths(logos []any) []string {
+	type tmLogoCand struct {
+		path string
+		lang string
+		vote float64
+		w, h int
+		ar   float64
+	}
+	// json 解码数字恒为 float64；测试/其他调用方可能传 int，这里都宽容收下
+	toF := func(v any) (float64, bool) {
+		switch n := v.(type) {
+		case float64:
+			return n, true
+		case int:
+			return float64(n), true
+		}
+		return 0, false
+	}
+	cands := []tmLogoCand{}
+	for _, raw := range logos {
+		l, _ := raw.(map[string]any)
+		fp, _ := l["file_path"].(string)
+		if fp == "" {
+			continue
+		}
+		c := tmLogoCand{path: fp}
+		c.lang, _ = l["iso_639_1"].(string)
+		if v, ok := toF(l["vote_average"]); ok {
+			c.vote = v
+		}
+		if v, ok := toF(l["width"]); ok {
+			c.w = int(v)
+		}
+		if v, ok := toF(l["height"]); ok {
+			c.h = int(v)
+		}
+		if v, ok := toF(l["aspect_ratio"]); ok {
+			c.ar = v
+		}
+		cands = append(cands, c)
+	}
+	// 横屏筛选：width>height；缺失宽高退用 aspect_ratio>1；二者皆缺保守保留（交渲染端像素复核）
+	landscape := make([]tmLogoCand, 0, len(cands))
+	for _, c := range cands {
+		ls := true
+		if c.w > 0 && c.h > 0 {
+			ls = c.w > c.h
+		} else if c.ar > 0 {
+			ls = c.ar > 1
+		}
+		if ls {
+			landscape = append(landscape, c)
+		}
+	}
+	rank := func(lang string) int {
+		if strings.HasPrefix(lang, "zh") {
+			return 3
+		}
+		if lang == "ja" {
+			return 2
+		}
+		if lang == "en" {
+			return 1
+		}
+		return 0
+	}
+	sort.SliceStable(landscape, func(i, j int) bool {
+		ri, rj := rank(landscape[i].lang), rank(landscape[j].lang)
+		if ri != rj {
+			return ri > rj
+		}
+		return landscape[i].vote > landscape[j].vote
+	})
+	paths := make([]string, 0, len(landscape))
+	for _, c := range landscape {
+		paths = append(paths, c.path)
+	}
+	return paths
+}
+
+// [lc-1274] 多策略标题搜索（对齐桌面版 tmdbSearchBest lc-947/lc-1176），返回首个命中的 tmdb id。
+// 返回 (0, nil) = 全部策略无结果；返回 (0, err) = 网络层失败（上游转 502）。
+func (b *Bridge) tmdbSearchID(mt, title string) (int64, error) {
+	queries := []string{}
+	norm := tmdbNormPunct(title)
+	if norm != title {
+		queries = append(queries, norm)
+	}
+	queries = append(queries, title)
+	for _, q := range tmdbRelaxedTitles(title) {
+		dup := false
+		for _, have := range queries {
+			if have == q {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			queries = append(queries, q)
+		}
+	}
+	searchOnce := func(q string, noLang bool) (int64, error) {
+		st, out, err := b.tmdbGetOpts("/search/"+mt, map[string]string{"query": q, "page": "1"}, noLang)
+		if err != nil {
+			return 0, err
+		}
+		if st != http.StatusOK {
+			return 0, nil // 服务器有响应（401/429 等）：视为无结果，不中断多策略
+		}
+		results, _ := out["results"].([]any)
+		if len(results) == 0 {
+			return 0, nil
+		}
+		first, _ := results[0].(map[string]any)
+		return toInt64(first["id"]), nil
+	}
+	var lastErr error
+	for _, q := range queries {
+		id, err := searchOnce(q, false)
+		if id > 0 {
+			return id, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	// [lc-1176 对齐] 全部策略无果时，去 language 再试前两个查询（TMDB 按原始语言检索）
+	retryN := len(queries)
+	if retryN > 2 {
+		retryN = 2
+	}
+	for _, q := range queries[:retryN] {
+		id, err := searchOnce(q, true)
+		if id > 0 {
+			return id, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return 0, lastErr
+	}
+	return 0, nil
+}
+
+// [lc-947 对齐] 全角标点归一（修「X，Y」vs TMDB「X,Y」标点形态不同整句匹配失败）
+func tmdbNormPunct(s string) string {
+	return strings.NewReplacer(
+		"，", ",", "、", ",", "；", ";", "：", ":",
+		"！", "!", "？", "?", "—", "-", "…", "...",
+		"・", "·", "･", "·", "　", " ",
+	).Replace(s)
+}
+
+// [lc-947 对齐] 递进放宽标题：首段 / 首两段 / 16/12/8 字截断（去描述性后缀兜底）
+func tmdbRelaxedTitles(title string) []string {
+	out := []string{}
+	re := regexp.MustCompile(`[，,、；;：:！!？?。\s…—\-]`)
+	segs := []string{}
+	for _, s := range re.Split(title, -1) {
+		if s = strings.TrimSpace(s); s != "" {
+			segs = append(segs, s)
+		}
+	}
+	rcLen := func(s string) int { return len([]rune(s)) }
+	if len(segs) > 1 {
+		out = append(out, segs[0])
+		if len(segs) >= 2 && rcLen(segs[0])+rcLen(segs[1]) <= 20 {
+			out = append(out, segs[0]+segs[1])
+		}
+	}
+	runes := []rune(title)
+	for _, n := range []int{16, 12, 8} {
+		if rcLen(title) > n {
+			t := strings.TrimSpace(string(runes[:n]))
+			if t != "" {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
 }
 
 /* ========== Bangumi / 豆瓣 ========== */

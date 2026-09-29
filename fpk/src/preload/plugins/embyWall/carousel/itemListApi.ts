@@ -9,11 +9,13 @@
 //   hotUpdates 反向 import api.ts 就成环。抽成叶子后依赖图单向：
 //     api.ts → hotUpdates → itemListApi → log/state
 //
-// 依赖方向：只准依赖 electron + ../log + ../state；禁止 import api.ts / hotUpdates.ts。
+// 依赖方向：只准依赖 electron + ../log + ../state + ./images 的 tmdbIdFromItemData
+//（[lc-1274] item/list 行带 trim_id 时可同步提取 tmdbId；images.ts 也是叶子模块，无环）。
 // ─────────────────────────────────────────────────────────────────────────────
 import { ipcRenderer } from 'electron';
 import { CAROUSEL_SCRAPE_CAP } from '../state';
 import { clog } from '../log';
+import { tmdbIdFromItemData } from './images';
 
 const ITEM_LIST_PATH = '/v/api/v1/item/list';
 
@@ -113,7 +115,7 @@ function showsFromItemListJson(json: any, cap: number): any[] {
       backdrop: '',                                  // 横版大图仍由 fetchItemDetail(data.backdrops) 补
       desc: String(it.overview || '').trim(),
       mediaType: mediaTypeOf(it),
-      tmdbId: 0,
+      tmdbId: tmdbIdFromItemData(it), // [lc-1274] trim_id 剥前缀，logo 查询走 id 精确匹配
       totalEps: Number(it.number_of_episodes) || 0,
       localEps: Number(it.local_number_of_episodes) || 0,
       totalSeasons: Number(it.number_of_seasons) || 0,

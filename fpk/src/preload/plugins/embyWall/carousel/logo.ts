@@ -1,5 +1,6 @@
 import { S } from '../state';
 import { fetchImageAuth } from './images';
+import { persistShows } from './api';
 import { ipcRenderer } from 'electron';
 import { isDetailPage } from '../detail/glass';
 import { log } from '../log';
@@ -92,6 +93,7 @@ export function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[])
               }
               show.tmdbLogo = img.dataUrl;
               swapTitleToLogo(info, img.dataUrl);
+              persistShows(); // [lc-1274] logo 落 sessionStorage 快照, 强刷后渲染时零网络秒复用
               log('tmdb logo applied:', show.title);
               return;
             } catch (e) { log('tmdb logo candidate err:', show.title, e); }
@@ -100,6 +102,7 @@ export function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[])
           if (whiteFallback) {
             show.tmdbLogo = whiteFallback;
             swapTitleToLogo(info, whiteFallback);
+            persistShows(); // [lc-1274] 同上
             log('tmdb logo applied(纯白兜底):', show.title);
             return;
           }
@@ -108,6 +111,7 @@ export function applyTitleLogo(base: string, shows: any[], infos: HTMLElement[])
           if (fa) {
             show.tmdbLogo = fa;
             swapTitleToLogo(info, fa);
+            persistShows(); // [lc-1274] 同上
             log('fanart logo applied:', show.title);
             return;
           }

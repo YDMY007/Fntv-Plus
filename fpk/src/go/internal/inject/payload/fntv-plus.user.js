@@ -22,7 +22,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // src/preload/web/diag.ts
+  // fpk/src/preload/web/diag.ts
   function normalizePath(url) {
     let p = String(url || "");
     const m = p.match(/^https?:\/\/[^/]+(\/.*)$/);
@@ -186,7 +186,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   var API, buf, timer, authxMap;
   var init_diag = __esm({
-    "src/preload/web/diag.ts"() {
+    "fpk/src/preload/web/diag.ts"() {
       "use strict";
       API = "/app/fntvplus/api/client-log";
       buf = [];
@@ -196,7 +196,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
   });
 
-  // src/preload/web/signMaterials.ts
+  // fpk/src/preload/web/signMaterials.ts
   function extractFromChunk(txt) {
     try {
       const joinRe = /\[`([A-Za-z0-9_]{16,64})`,\w+,\w+,\w+,\w+,\w+\]\.join\(`_`\)/;
@@ -256,14 +256,14 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   var cached, pending;
   var init_signMaterials = __esm({
-    "src/preload/web/signMaterials.ts"() {
+    "fpk/src/preload/web/signMaterials.ts"() {
       "use strict";
       cached = null;
       pending = null;
     }
   });
 
-  // src/shim/md5.ts
+  // fpk/src/shim/md5.ts
   function safeAdd(x, y) {
     const lsw = (x & 65535) + (y & 65535);
     const msw = (x >> 16) + (y >> 16) + (lsw >> 16);
@@ -398,12 +398,12 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return bytesToHex(out);
   }
   var init_md5 = __esm({
-    "src/shim/md5.ts"() {
+    "fpk/src/shim/md5.ts"() {
       "use strict";
     }
   });
 
-  // src/shim/electron.js
+  // fpk/src/shim/electron.js
   var electron_exports = {};
   __export(electron_exports, {
     ipcRenderer: () => ipcRenderer,
@@ -560,7 +560,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   var LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
   var init_electron = __esm({
-    "src/shim/electron.js"() {
+    "fpk/src/shim/electron.js"() {
       "use strict";
       init_diag();
       init_signMaterials();
@@ -1138,10 +1138,10 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
   });
 
-  // src/preload/web/playSync.ts
+  // fpk/src/preload/web/playSync.ts
   init_electron();
 
-  // src/preload/core/logger.ts
+  // fpk/src/preload/core/logger.ts
   init_electron();
   var preloadLogger = {
     debug: (...args) => {
@@ -1201,7 +1201,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   };
   var logger_default = preloadLogger;
 
-  // src/preload/web/playSync.ts
+  // fpk/src/preload/web/playSync.ts
   var log2 = {
     info: (...a) => logger_default.info("[play-sync]", ...a),
     error: (...a) => logger_default.error("[play-sync]", ...a)
@@ -1361,7 +1361,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   installPlayRecordHook();
 
-  // src/preload/core/hooks.ts
+  // fpk/src/preload/core/hooks.ts
   var HookType = /* @__PURE__ */ ((HookType2) => {
     HookType2["OnReady"] = "onReady";
     HookType2["OnDomChange"] = "onDomChange";
@@ -1382,7 +1382,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     hooks[type].forEach((fn) => fn(...args));
   }
 
-  // src/preload/core/pageMode.ts
+  // fpk/src/preload/core/pageMode.ts
   var GW_PREFIX = "/app/fntvplus";
   function pagePath() {
     return pagePathOf(location.pathname || "");
@@ -1415,7 +1415,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return url;
   }
 
-  // src/preload/core/i18n.ts
+  // fpk/src/preload/core/i18n.ts
   var LS_KEY2 = "fntv-lang";
   var EN = {
     // 自动连播卡（autoplayNext.ts）
@@ -1791,7 +1791,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return interpolate(out, params);
   }
 
-  // src/preload/plugins/a11y.ts
+  // fpk/src/preload/plugins/a11y.ts
   var log3 = logger_default;
   var MODAL_IDS = [
     ["fnos-settings-panel", "\u8BBE\u7F6E\u9762\u677F"],
@@ -1911,7 +1911,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     fixAria();
   });
 
-  // src/shim/node_fs.js
+  // fpk/src/shim/node_fs.js
   function existsSync() {
     return false;
   }
@@ -1919,7 +1919,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return null;
   }
 
-  // src/shim/node_path.js
+  // fpk/src/shim/node_path.js
   function normalize(p) {
     const parts = String(p).split(/[\\/]+/).filter(Boolean);
     const out = [];
@@ -1946,7 +1946,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     return i <= 0 ? "." : n.slice(0, i);
   }
 
-  // src/preload/plugins/animeLib.ts
+  // fpk/src/preload/plugins/animeLib.ts
   var ANIME_REL = join("third_party", "anime", "anime.min.js");
   function resolveAnimePath() {
     const cands = [
@@ -1989,10 +1989,10 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
   });
 
-  // src/preload/plugins/autoplayNext.ts
+  // fpk/src/preload/plugins/autoplayNext.ts
   init_electron();
 
-  // src/preload/plugins/skipInject.ts
+  // fpk/src/preload/plugins/skipInject.ts
   init_electron();
   var log4 = logger_default;
   var CAPTURE_API_RE = /(^|\/)(upload|saveEditDetail|getEditDetail|editDetail)(\?|$)/i;
@@ -2303,7 +2303,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }
   });
 
-  // src/preload/plugins/autoplayNext.ts
+  // fpk/src/preload/plugins/autoplayNext.ts
   var LS_KEY3 = "fntv-autonext";
   var APPEAR_AT = 60;
   var AUTO_AT = 5;
@@ -2476,7 +2476,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     }, 1e3);
   });
 
-  // src/preload/plugins/customLogo.ts
+  // fpk/src/preload/plugins/customLogo.ts
   init_electron();
   var LOGO_API_BASE = "/app/fntvplus/api/bridge/logos/";
   var log5 = logger_default;
@@ -2982,7 +2982,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     applyLogoToDom();
   });
 
-  // src/preload/plugins/danmakuHeat.ts
+  // fpk/src/preload/plugins/danmakuHeat.ts
   var HEAT_ID = "fntv-danmaku-heat";
   var LS_KEY4 = "fntv_danmaku_enabled";
   var ITEMS_EVENT = "fntv:danmaku-items";
@@ -3108,10 +3108,10 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     });
   });
 
-  // src/preload/plugins/danmakuWeb.ts
+  // fpk/src/preload/plugins/danmakuWeb.ts
   init_electron();
 
-  // src/preload/plugins/embyWall/detail/beautifyStyle.ts
+  // fpk/src/preload/plugins/embyWall/detail/beautifyStyle.ts
   var STYLE_ID2 = "fnos-beautify-css";
   var HERO = ':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)';
   var COL = `:has(> ${HERO}):is(:has([data-id="details"]), :has([class*="grid-cols-[repeat(auto-fill,52px"])):has(> :nth-child(3))`;
@@ -4558,7 +4558,7 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
     apply();
   }
 
-  // src/preload/plugins/danmakuWeb.ts
+  // fpk/src/preload/plugins/danmakuWeb.ts
   var log6 = logger_default;
   var loadedGuids = /* @__PURE__ */ new Set();
   var GUID_RE2 = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
@@ -6441,7 +6441,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   }
   hookRouteChanges();
 
-  // src/preload/plugins/embyWall/modals/feedback.ts
+  // fpk/src/preload/plugins/embyWall/modals/feedback.ts
   init_electron();
   var ABOUT_LINK_URL = "https://github.com/YDMY007/Fntv-Plus";
   var FEEDBACK_LINK_URL = "https://wj.qq.com/s2/27390788/787a/";
@@ -6722,7 +6722,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     modal.style.display = "flex";
   };
 
-  // src/preload/plugins/embyWall/state.ts
+  // fpk/src/preload/plugins/embyWall/state.ts
   var S = {
     logEnabled: false,
     detailBoxless: false,
@@ -6782,7 +6782,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     S.logEnabled = v;
   }
 
-  // src/preload/plugins/embyWall/theme.ts
+  // fpk/src/preload/plugins/embyWall/theme.ts
   var UI_THEME_KEY = "fnos-ui-theme";
   function getUiTheme() {
     try {
@@ -7069,7 +7069,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/log.ts
+  // fpk/src/preload/plugins/embyWall/log.ts
   init_electron();
   var LOG_TAG = "[EmbyWall]";
   function applyEmbyWallDebugFilter(payload) {
@@ -7119,7 +7119,7 @@ html.fnos-perf.dark{
     emitLog(LOG_TAG + "[CAROUSEL] " + a.join(" "));
   }
 
-  // src/preload/plugins/embyWall/carousel/images.ts
+  // fpk/src/preload/plugins/embyWall/carousel/images.ts
   var _imgActive = 0;
   var _imgQueue = [];
   var IMG_MAX_CONCURRENT = 5;
@@ -7332,6 +7332,24 @@ html.fnos-perf.dark{
       return null;
     }
   }
+  function tmdbIdFromItemData(d) {
+    if (!d || typeof d !== "object") return 0;
+    const direct = [
+      d.tmdbId,
+      d.tmdb_id,
+      d.ProviderIds && (d.ProviderIds.Tmdb || d.ProviderIds.tmdb),
+      d.externalIds && (d.externalIds.tmdb_id || d.externalIds.tmdb)
+    ];
+    for (const c of direct) {
+      if (c != null && /^\d+$/.test(String(c).trim())) return Number(String(c).trim());
+    }
+    const trimId = d.trimId || d.trim_id;
+    if (typeof trimId === "string") {
+      const m = trimId.match(/^(?:tt|tm)(\d+)$/i);
+      if (m) return Number(m[1]);
+    }
+    return 0;
+  }
   function mapItemDetail(json, id, base) {
     const d = json && json.data || {};
     const strmTag = detectStrmOrCloud(d);
@@ -7406,6 +7424,8 @@ html.fnos-perf.dark{
       rating,
       statusText,
       genres,
+      // [lc-1274] 携带 TMDB id（trim_id 剥前缀），轮播 logo 查询可走 id 精确匹配
+      tmdbId: tmdbIdFromItemData(d),
       desc: (d.overview || "").trim(),
       title: (d.title || d.name || "").trim(),
       strmTag
@@ -7435,38 +7455,10 @@ html.fnos-perf.dark{
     return map;
   }
 
-  // src/preload/plugins/embyWall/carousel/logo.ts
+  // fpk/src/preload/plugins/hotUpdates.ts
   init_electron();
 
-  // src/preload/plugins/embyWall/detail/glass.ts
-  var DETAIL_HERO_SEL = ':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)';
-  var ACTIVE_VIEW_SEL = ".trim-ui__cache-outlet--exclude";
-  function isDetailPage() {
-    const _href = location.href.split(/[?#]/)[0];
-    return /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)/.test(_href) || /\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(_href);
-  }
-  function findActiveDetailView() {
-    const views = document.querySelectorAll(ACTIVE_VIEW_SEL);
-    for (let i = views.length - 1; i >= 0; i--) {
-      const v = views[i];
-      if (v.offsetParent !== null && v.querySelector(DETAIL_HERO_SEL)) return v;
-    }
-    return null;
-  }
-  function findDetailHero(view) {
-    return view.querySelector(DETAIL_HERO_SEL);
-  }
-  function findHeroBackdropImg(hero) {
-    const img = hero.querySelector("img.size-full");
-    if (img && (img.currentSrc || img.src)) return img;
-    const imgs = Array.from(hero.querySelectorAll("img")).filter((im) => im.currentSrc || im.src).sort((a, b) => (b.offsetHeight || 0) - (a.offsetHeight || 0));
-    return imgs[0] || null;
-  }
-
-  // src/preload/plugins/hotUpdates.ts
-  init_electron();
-
-  // src/preload/plugins/embyWall/carousel/itemListApi.ts
+  // fpk/src/preload/plugins/embyWall/carousel/itemListApi.ts
   init_electron();
   var ITEM_LIST_PATH = "/v/api/v1/item/list";
   var LIB_PAGE_SIZE = 1e3;
@@ -7552,7 +7544,8 @@ html.fnos-perf.dark{
         // 横版大图仍由 fetchItemDetail(data.backdrops) 补
         desc: String(it.overview || "").trim(),
         mediaType: mediaTypeOf(it),
-        tmdbId: 0,
+        tmdbId: tmdbIdFromItemData(it),
+        // [lc-1274] trim_id 剥前缀，logo 查询走 id 精确匹配
         totalEps: Number(it.number_of_episodes) || 0,
         localEps: Number(it.local_number_of_episodes) || 0,
         totalSeasons: Number(it.number_of_seasons) || 0,
@@ -7628,7 +7621,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/hotUpdates.ts
+  // fpk/src/preload/plugins/hotUpdates.ts
   var PANEL_ID = "fntv-hot-updates";
   var STYLE_ID3 = "fntv-hot-updates-style";
   var BLOCK_KEY = "fntv-hot-blocked";
@@ -8762,7 +8755,7 @@ html.fnos-perf.dark{
   }
   registerHook("onReady" /* OnReady */, initHotUpdates);
 
-  // src/preload/plugins/embyWall/carousel/href.ts
+  // fpk/src/preload/plugins/embyWall/carousel/href.ts
   var _seasonHrefCache = /* @__PURE__ */ new Map();
   async function resolveSeasonHref(show) {
     const kind = show && show.mediaType === "movie" ? "movie" : "tv";
@@ -8788,7 +8781,7 @@ html.fnos-perf.dark{
     return fallback;
   }
 
-  // src/preload/plugins/embyWall/carousel/styles.ts
+  // fpk/src/preload/plugins/embyWall/carousel/styles.ts
   function buildCarouselStyle2(container, wrapper, shows, base, rebuild) {
     const log22 = (...a) => log7("[s2]", ...a);
     const imgUrl = (p, w) => {
@@ -9764,7 +9757,7 @@ html.fnos-perf.dark{
     log42("\u6837\u5F0F4 3D\u65CB\u8F6C\u6728\u9A6C\u8F6E\u64AD\u6CE8\u5165\u5B8C\u6210, cards=", cards.length);
   }
 
-  // src/preload/plugins/embyWall/carousel/progress.ts
+  // fpk/src/preload/plugins/embyWall/carousel/progress.ts
   function buildLoadingPlaceholder(target) {
     if (!document.getElementById("fnos-ph-style")) {
       const st = document.createElement("style");
@@ -10251,13 +10244,13 @@ html.fnos-perf.dark{
     });
   }
 
-  // src/preload/plugins/embyWall/carousel/api.ts
+  // fpk/src/preload/plugins/embyWall/carousel/api.ts
   var onShowsReady = null;
   function setOnShowsReady(fn) {
     onShowsReady = fn;
   }
   var SHOWS_CACHE_KEY = "fntv-carousel-shows-v1";
-  var persistShows = () => {
+  function persistShows() {
     try {
       if (!S.apiShows.length) return;
       const snap = S.apiShows.map((s) => ({
@@ -10278,12 +10271,32 @@ html.fnos-perf.dark{
         statusText: s.statusText,
         mediaType: s.mediaType,
         strmTag: s.strmTag,
-        _backdropIsPortrait: s._backdropIsPortrait
+        _backdropIsPortrait: s._backdropIsPortrait,
+        tmdbId: s.tmdbId,
+        // [lc-1274] 缓存快照携带, 整页重载恢复后 logo 仍可走 id 精确匹配
+        tmdbLogo: s.tmdbLogo
+        // [lc-1274] 已解析的 TMDB logo dataUrl 一并落盘, 强刷后渲染时零网络秒复用
       }));
       sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(snap));
     } catch (_) {
+      try {
+        const noLogo = S.apiShows.map((s) => {
+          const { tmdbLogo, ...rest } = s;
+          return rest;
+        });
+        sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(noLogo));
+      } catch (_2) {
+        try {
+          const slim = S.apiShows.map((s) => {
+            const { tmdbLogo, _backdropBlob, ...rest } = s;
+            return rest;
+          });
+          sessionStorage.setItem(SHOWS_CACHE_KEY, JSON.stringify(slim));
+        } catch (_3) {
+        }
+      }
     }
-  };
+  }
   var restoreShows = () => {
     if (S.apiShows.length > 0) return;
     try {
@@ -10494,6 +10507,7 @@ html.fnos-perf.dark{
           if (detail.backdrop && !fromDom) s.backdrop = detail.backdrop;
           if (detail.poster && !s.poster) s.poster = detail.poster;
           if (detail.logo) s.logo = detail.logo;
+          if (detail.tmdbId) s.tmdbId = detail.tmdbId;
           if (detail.strmTag) s.strmTag = detail.strmTag;
           if (detail.totalEps) s.totalEps = detail.totalEps;
           if (detail.localEps) s.localEps = detail.localEps;
@@ -10597,7 +10611,35 @@ html.fnos-perf.dark{
     }, 1500);
   }
 
-  // src/preload/plugins/embyWall/carousel/logo.ts
+  // fpk/src/preload/plugins/embyWall/carousel/logo.ts
+  init_electron();
+
+  // fpk/src/preload/plugins/embyWall/detail/glass.ts
+  var DETAIL_HERO_SEL = ':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)';
+  var ACTIVE_VIEW_SEL = ".trim-ui__cache-outlet--exclude";
+  function isDetailPage() {
+    const _href = location.href.split(/[?#]/)[0];
+    return /\/v\/(tv|movie)\/[a-f0-9]{32}($|\/)/.test(_href) || /\/v\/(tv|movie)\/season\/[a-f0-9]{32}/.test(_href);
+  }
+  function findActiveDetailView() {
+    const views = document.querySelectorAll(ACTIVE_VIEW_SEL);
+    for (let i = views.length - 1; i >= 0; i--) {
+      const v = views[i];
+      if (v.offsetParent !== null && v.querySelector(DETAIL_HERO_SEL)) return v;
+    }
+    return null;
+  }
+  function findDetailHero(view) {
+    return view.querySelector(DETAIL_HERO_SEL);
+  }
+  function findHeroBackdropImg(hero) {
+    const img = hero.querySelector("img.size-full");
+    if (img && (img.currentSrc || img.src)) return img;
+    const imgs = Array.from(hero.querySelectorAll("img")).filter((im) => im.currentSrc || im.src).sort((a, b) => (b.offsetHeight || 0) - (a.offsetHeight || 0));
+    return imgs[0] || null;
+  }
+
+  // fpk/src/preload/plugins/embyWall/carousel/logo.ts
   async function resolveShowLogo(show, base) {
     try {
       if (show.logo) {
@@ -10684,6 +10726,7 @@ html.fnos-perf.dark{
                 }
                 show.tmdbLogo = img.dataUrl;
                 swapTitleToLogo(info, img.dataUrl);
+                persistShows();
                 log7("tmdb logo applied:", show.title);
                 return;
               } catch (e) {
@@ -10693,6 +10736,7 @@ html.fnos-perf.dark{
             if (whiteFallback) {
               show.tmdbLogo = whiteFallback;
               swapTitleToLogo(info, whiteFallback);
+              persistShows();
               log7("tmdb logo applied(\u7EAF\u767D\u515C\u5E95):", show.title);
               return;
             }
@@ -10700,6 +10744,7 @@ html.fnos-perf.dark{
             if (fa) {
               show.tmdbLogo = fa;
               swapTitleToLogo(info, fa);
+              persistShows();
               log7("fanart logo applied:", show.title);
               return;
             }
@@ -11010,7 +11055,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/carousel/render.ts
+  // fpk/src/preload/plugins/embyWall/carousel/render.ts
   function destroyCarousel() {
     if (S.carouselCleanup) {
       try {
@@ -11536,7 +11581,7 @@ html.fnos-perf.dark{
     log7("carousel injected");
   }
 
-  // src/preload/plugins/embyWall/login.ts
+  // fpk/src/preload/plugins/embyWall/login.ts
   init_electron();
   (function autoJumpToTv() {
     const tryJump = () => {
@@ -11647,7 +11692,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/pageBg.ts
+  // fpk/src/preload/plugins/embyWall/pageBg.ts
   var STYLE_ID4 = "fntv-page-bg-style";
   var LAYER_ID = "fntv-page-bg-layer";
   function cssUrl(raw) {
@@ -11716,10 +11761,10 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/modals/patch.ts
+  // fpk/src/preload/plugins/embyWall/modals/patch.ts
   init_electron();
 
-  // src/preload/plugins/embyWall/nav/scroll.ts
+  // fpk/src/preload/plugins/embyWall/nav/scroll.ts
   (function narrowMode() {
     try {
       const orig = window.matchMedia;
@@ -11778,7 +11823,7 @@ html.fnos-perf.dark{
     });
   }
 
-  // src/preload/plugins/embyWall/detail/backdrop.ts
+  // fpk/src/preload/plugins/embyWall/detail/backdrop.ts
   var BACKDROP_ID = "fnos-detail-backdrop";
   var INSTANT_ID = "fnos-instant-layer";
   var CACHE_PREFIX = "fntvDetailPoster:";
@@ -12006,7 +12051,7 @@ html.fnos-perf.dark{
     if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
-  // src/preload/plugins/embyWall/detail/tmdbCard.ts
+  // fpk/src/preload/plugins/embyWall/detail/tmdbCard.ts
   init_electron();
   var CARD_ID2 = "fnos-beautify-tmdb-card";
   var SERIES_PANEL_SEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
@@ -12952,7 +12997,7 @@ html.fnos-perf.dark{
     _resetState();
   }
 
-  // src/preload/plugins/embyWall/detail/epResolution.ts
+  // fpk/src/preload/plugins/embyWall/detail/epResolution.ts
   var PILL = "fnos-ep-res";
   var PILL_IMG = "fnos-ep-res-img";
   var HIDE = "fnos-res-native-hidden";
@@ -13075,7 +13120,7 @@ html.fnos-perf.dark{
     };
   }
 
-  // src/preload/plugins/embyWall/detail/virtualBand.ts
+  // fpk/src/preload/plugins/embyWall/detail/virtualBand.ts
   var MARK = "__fntvFullSlice";
   var LIVE_CLS = "fnos-vband-live";
   var PAD_VAR = "--fntv-vband-pad";
@@ -13285,7 +13330,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/detail/seasonNav.ts
+  // fpk/src/preload/plugins/embyWall/detail/seasonNav.ts
   var PANEL_SEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
   var NAV_ID = "fnos-season-nav";
   var RETRY_DELAYS3 = [0, 350, 900, 1800, 3e3, 4200];
@@ -13473,7 +13518,7 @@ html.fnos-perf.dark{
     _removeNav();
   }
 
-  // src/preload/plugins/embyWall/detail/heroTint.ts
+  // fpk/src/preload/plugins/embyWall/detail/heroTint.ts
   var TINT_VAR = "--fnos-hero-tint";
   var BRIGHT_ATTR = "data-fntv-hero-bright";
   var BRIGHT_LUM = 0.5;
@@ -13605,7 +13650,7 @@ html.fnos-perf.dark{
     _pendingImg = null;
   }
 
-  // src/preload/plugins/embyWall/detail/veil.ts
+  // fpk/src/preload/plugins/embyWall/detail/veil.ts
   var VEIL_ID = "fnos-page-veil";
   var HOLD_MAX_MS = 900;
   var FADE_MS = 260;
@@ -13649,7 +13694,7 @@ html.fnos-perf.dark{
     });
   }
 
-  // src/preload/plugins/embyWall/detail/immersive.ts
+  // fpk/src/preload/plugins/embyWall/detail/immersive.ts
   var OBS_MAX_LIFE = 4e3;
   var BACKDROP_REFRESH_DELAY = 700;
   var _obs2 = null;
@@ -13774,7 +13819,7 @@ html.fnos-perf.dark{
     releaseNavVeil();
   }
 
-  // src/preload/plugins/embyWall/modals/patch.ts
+  // fpk/src/preload/plugins/embyWall/modals/patch.ts
   var _patchApplyModal = null;
   var _patchApplyProgHandler = null;
   function fntvCenterText(text, size, color, extra = "") {
@@ -14034,7 +14079,7 @@ html.fnos-perf.dark{
   } catch (e) {
   }
 
-  // src/preload/plugins/embyWall/modals/telemetry.ts
+  // fpk/src/preload/plugins/embyWall/modals/telemetry.ts
   init_electron();
   var SUB = "var(--fnos-ui-sub,#888)";
   var MUTED = "var(--fnos-ui-muted,#999)";
@@ -14164,7 +14209,7 @@ html.fnos-perf.dark{
     return wrap;
   }
 
-  // src/preload/plugins/embyWall/nav/inject.ts
+  // fpk/src/preload/plugins/embyWall/nav/inject.ts
   init_electron();
   function injectVideoPreviewExternalPlay() {
     if (document.getElementById("fnos-video-preview-hook")) return;
@@ -14317,7 +14362,7 @@ html.fnos-perf.dark{
     log7("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5DF2\u6CE8\u5165(\u81EA\u52A8\u5F39\u7A97\u9009\u62E9 + \u6807\u9898\u680F\u5916\u90E8\u6253\u5F00\u6309\u94AE)");
   }
 
-  // src/preload/plugins/embyWall/detail/epBackfill.ts
+  // fpk/src/preload/plugins/embyWall/detail/epBackfill.ts
   init_electron();
   var BTN_ID = "fnos-epfix-btn";
   var ANCHOR_MARK = "data-fnos-epfix-anchor";
@@ -14739,7 +14784,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/detail/customScraper.ts
+  // fpk/src/preload/plugins/embyWall/detail/customScraper.ts
   init_electron();
   var CS_BTN_ID = "fnos-cs-scraper-btn";
   var CONCURRENCY2 = 4;
@@ -14994,10 +15039,10 @@ html.fnos-perf.dark{
     }, d));
   }
 
-  // src/preload/plugins/embyWall/detail/jav.ts
+  // fpk/src/preload/plugins/embyWall/detail/jav.ts
   init_electron();
 
-  // src/preload/plugins/embyWall/detail/folderScraper.ts
+  // fpk/src/preload/plugins/embyWall/detail/folderScraper.ts
   init_electron();
   var FOLDER_BTN_ID = "fnos-folder-scraper-btn";
   var CONCURRENCY3 = 4;
@@ -15369,7 +15414,7 @@ html.fnos-perf.dark{
   }
   bootstrapFromSettings2();
 
-  // src/preload/plugins/embyWall/detail/jav.ts
+  // fpk/src/preload/plugins/embyWall/detail/jav.ts
   var JAV_BTN_ID = "fnos-jav-btn";
   var _running4 = false;
   function movieGuid() {
@@ -15936,7 +15981,7 @@ html.fnos-perf.dark{
     }
   }
 
-  // src/preload/plugins/embyWall/carousel/bootCover.ts
+  // fpk/src/preload/plugins/embyWall/carousel/bootCover.ts
   var STYLE_ID5 = "fntv-boot-style";
   var BAR_ID = "fntv-boot-bar";
   var POLL_MS = 120;
@@ -15991,7 +16036,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     setTimeout(lift, HARD_LIFT_MS);
   }
 
-  // src/preload/plugins/embyWall.ts
+  // fpk/src/preload/plugins/embyWall.ts
   init_electron();
   setOnShowsReady(injectCarousel);
   function handle2() {
@@ -20705,7 +20750,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   }
   registerHook("onReady" /* OnReady */, handle2);
 
-  // src/preload/plugins/glassUI.ts
+  // fpk/src/preload/plugins/glassUI.ts
   var LOG = "[GlassUI]";
   var K = {
     enabled: "fntvGlass.enabled",
@@ -21622,7 +21667,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   }
   registerHook("onReady" /* OnReady */, handle3);
 
-  // src/preload/plugins/listLayout.ts
+  // fpk/src/preload/plugins/listLayout.ts
   var MIN_PAD = 20;
   function isLibraryNavHref(href) {
     if (!href) return false;
@@ -21793,7 +21838,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   });
   registerHook("onDomChange" /* OnDomChange */, startPolling);
 
-  // src/preload/plugins/mobileStyle.ts
+  // fpk/src/preload/plugins/mobileStyle.ts
   var STYLE_ID6 = "fnos-mobile-css";
   var MQ_NARROW = "(min-width: 640.5px)";
   var MQ_COMPACT = "(min-width: 820.5px)";
@@ -22029,7 +22074,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   registerHook("onReady" /* OnReady */, installMobileStyle);
   registerHook("onDomChange" /* OnDomChange */, ensure2);
 
-  // src/preload/plugins/pageAnim.ts
+  // fpk/src/preload/plugins/pageAnim.ts
   var GRID_SEL = '[class*="flex-wrap"][class*="gap-x"]';
   var MODAL_SEL = '[role="dialog"], .semi-modal-wrapper';
   function getAnime() {
@@ -22304,7 +22349,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   }
   registerHook("onReady" /* OnReady */, initPageAnim);
 
-  // src/preload/plugins/personWorks.ts
+  // fpk/src/preload/plugins/personWorks.ts
   init_electron();
   var STYLE_ID7 = "fnos-person-works-style";
   var PANEL_ID2 = "fnos-person-works";
@@ -22632,7 +22677,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   }
   registerHook("onReady" /* OnReady */, handle4);
 
-  // src/preload/plugins/playMemory.ts
+  // fpk/src/preload/plugins/playMemory.ts
   var LS_RATE = "fntv-play-rate";
   var LS_VOL = "fntv-play-volume";
   var LS_MUTE = "fntv-play-mute";
@@ -22724,7 +22769,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     }, 1500);
   });
 
-  // src/preload/plugins/previewThumb.ts
+  // fpk/src/preload/plugins/previewThumb.ts
   var OV_ID = "fntv-thumb-ov";
   var DUMP_KEY = "fntvDumpProgressBar";
   var wired = false;
@@ -22903,7 +22948,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     tick();
   });
 
-  // src/preload/plugins/watchHistory.ts
+  // fpk/src/preload/plugins/watchHistory.ts
   init_electron();
   var LOG2 = "[WatchHistory]";
   var ENTRY_ID = "fntv-wh-entry";
@@ -24948,7 +24993,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     return out;
   }
 
-  // src/preload/plugins/watchReport.ts
+  // fpk/src/preload/plugins/watchReport.ts
   var PANEL_ID4 = "fntv-wh";
   var BTN_ID2 = "fntv-wrapped-btn";
   var OV_ID2 = "fntv-wrapped";
@@ -25443,7 +25488,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     }, 4e3);
   });
 
-  // src/preload/plugins/watchedSync.ts
+  // fpk/src/preload/plugins/watchedSync.ts
   init_electron();
   var _scanning = false;
   async function scanWatchedShows() {
@@ -25505,7 +25550,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     }));
   };
 
-  // src/web-entry.ts
+  // fpk/src/web-entry.ts
   function boot() {
     try {
       runHooks("onReady" /* OnReady */);
