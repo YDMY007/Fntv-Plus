@@ -1,6 +1,6 @@
 appname=fntvplus
 release_version=1.0.2
-version=1.0.2
+version=1.0.2-262
 display_name=Fntv-Plus
 desc=飞牛影视网页端增强：NAS 装一次，电视/平板/手机/电脑浏览器打开即是增强版。沉浸式美化（海报墙/轮播 4 型/详情页柔光玻璃/Logo 自定义）、B站弹幕 + 自建源 + 弹弹play 兜底、豆瓣/Bangumi/Trakt 同步、跳过片头/播放记忆、TMDB 信息卡、观影记录与年度报告、自定义刮削源回填。经反向代理注入，不改动飞牛系统与影视应用任何文件，卸载即还原。PC 重度观影可选 Windows 桌面客户端（MPV 硬解/原盘）。
 source=thirdparty
