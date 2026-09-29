@@ -26,11 +26,14 @@ function signWith(key, secret, url, data) {
   return 'nonce=' + nonce + '&timestamp=' + timestamp + '&sign=' + md5(signStr);
 }
 
-// [lc-1281] 签名材料单次求解：本地 chunk 提取（零网络，命中后永久缓存）。
-//   ⚠ 性能要点：此前（lc-1275）把 oracle 放在最前，导致**每个** fnOS 接口请求都先做一次
-//   局域网往返 —— 首页轮播要发几十个请求（item/list + 10 条 item 详情 + 每张图 + logo 查询）
-//   全部叠加，用户感知「等很久才加载出数据」。本地提取材料与服务端 env 注入的是同一套
-//   （都来自官方影视应用），签名算法也完全一致，故本地优先、oracle 仅作兜底。
+// [lc-1286] ⚠ 签名必须 oracle 优先（回退 lc-1281 的「本地优先」优化——那是错的）。
+//   lc-1281 为省一次局域网往返，把本地 chunk 提取提到最前，并假设「本地材料与服务端 env
+//   注入的是同一套、等价」。该假设不成立：本地提取是**正则抓取**页面 chunk 里的 KEY/SECRET，
+//   可能抓到不完整/过期的材料 —— 一旦「抓到但签不对」，返回值看似有效，oracle 兜底就永远
+//   轮不到，于是所有 fnOS 请求全部 invalid sign（用户日志实证：item/list code=5000
+//   invalid sign + 18 条 item 详情 Authx 全空 + 海报全数加载失败）。
+//   服务端 oracle 用的是 fnOS 运行时注入的权威材料（与官方影视应用同源），签名必然有效，
+//   因此必须放在最前；本地提取仅作 oracle 不可用（旧版后端/网络异常）时的兜底。
 let _signMaterialsPromise = null;
 function localSignMaterials() {
   if (!_signMaterialsPromise) {
@@ -43,15 +46,9 @@ function localSignMaterials() {
 
 async function genAuthxAsync(url, data) {
   const path = String(url || '');
-  // ① 本地材料优先（零网络，命中后从内存缓存直取）
-  try {
-    const m = await localSignMaterials();
-    if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
-  } catch (e) { /* 提取失败 → oracle 兜底 */ }
-  // ② 签名 oracle 兜底：本地提取失败（SPA 更新致 chunk 特征失配）时，请服务端按
-  //   「原样 dataJson 字符串」计算 Authx。服务端材料由 fnOS 运行时 env 注入、永不过期，
-  //   根治「jav 回填等带 nonce 的 fnOS POST 全部 invalid sign」（lc-1275）。
-  //   仅在本地不可用时才付这次往返，正常路径零额外延迟。
+  // ① 签名 oracle 优先：服务端按「原样 dataJson 字符串」计算 Authx，材料由 fnOS 运行时
+  //   env 注入、永不过期、与官方影视应用同源 —— 正常环境下唯一的权威来源。
+  //   dataJson 与后续 fetch body 是同一对象的同一 stringify 形态，字节严格一致。
   try {
     const dataJson = data === undefined || data === null ? '' : JSON.stringify(data);
     const r = await fetch('/app/fntvplus/api/bridge/fnos/authx', {
@@ -61,7 +58,12 @@ async function genAuthxAsync(url, data) {
       body: JSON.stringify({ path, dataJson }),
     }).then((x) => x.json());
     if (r && r.ok && r.authx) return r.authx;
-  } catch (e) { /* oracle 不可用（旧版后端/网络失败）→ 回放兜底 */ }
+  } catch (e) { /* oracle 不可用（旧版后端/网络异常）→ 本地提取兜底 */ }
+  // ② 本地提取兜底：从页面 chunk 抓 KEY/SECRET（零网络）。仅在 oracle 不可用时使用。
+  try {
+    const m = await localSignMaterials();
+    if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
+  } catch (e) { /* 提取失败 → 回放兜底 */ }
   // ③ 回放：diag.ts 捕获的页面自身合法签名（body 哈希不一致时服务端会拒绝，仅作最后兜底）
   return getCapturedAuthx(path) || '';
 }

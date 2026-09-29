@@ -430,11 +430,6 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   async function genAuthxAsync(url, data) {
     const path = String(url || "");
     try {
-      const m = await localSignMaterials();
-      if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
-    } catch (e) {
-    }
-    try {
       const dataJson = data === void 0 || data === null ? "" : JSON.stringify(data);
       const r = await fetch("/app/fntvplus/api/bridge/fnos/authx", {
         method: "POST",
@@ -443,6 +438,11 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         body: JSON.stringify({ path, dataJson })
       }).then((x) => x.json());
       if (r && r.ok && r.authx) return r.authx;
+    } catch (e) {
+    }
+    try {
+      const m = await localSignMaterials();
+      if (m && m.key && m.secret) return signWith(m.key, m.secret, path, data);
     } catch (e) {
     }
     return getCapturedAuthx(path) || "";
@@ -6950,6 +6950,8 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   --fnos-exit-border-off:1px solid rgba(90,120,200,.18);
   --fnos-skel-bg:rgba(255,255,255,.45);
   --fnos-skel-shine:rgba(255,255,255,.8);
+  /* [lc-1286] \u8F6E\u64AD\u9AA8\u67B6\u5361\u7247\u5E95\u8272\uFF1A\u968F\u4E3B\u9898\u5B9E\u65F6\u5207\u6362\uFF08\u9AA8\u67B6\u82E5\u5199\u6B7B\u5185\u8054\u8272\uFF0C\u4F1A\u4E0E\u540E\u5230\u7684\u4E3B\u9898\u4E0D\u4E00\u81F4\uFF09 */
+  --fnos-skel-card:#e8f0fe;
   --fnos-sidebar-btn-bg:rgba(52,64,100,.24);
   /* [lc-1099] \u62BD\u5C49\u9762\u677F/\u906E\u7F69\u7684 backdrop-filter \u503C\u8D70\u53D8\u91CF: applySidebarGlass \u5199\u7684\u662F inline !important,
      \u6837\u5F0F\u8868\u95F8\u538B\u4E0D\u4F4F, \u6027\u80FD\u6A21\u5F0F\u9760 html.fnos-perf \u628A\u53D8\u91CF\u89E3\u6790\u6210 none \u5728\u8BA1\u7B97\u671F\u5173\u6389 */
@@ -7033,6 +7035,7 @@ html.dark{
   --fnos-exit-border-off:1px solid rgba(140,160,220,.18);
   --fnos-skel-bg:rgba(160,168,190,.18);
   --fnos-skel-shine:rgba(200,208,228,.18);
+  --fnos-skel-card:#1e1b17;
   --fnos-sidebar-btn-bg:rgba(30,34,52,.38);
   --fnos-qr-bg:rgba(220,226,240,.95);
   --fnos-modal-overlay:rgba(0,0,0,.60);
@@ -10008,7 +10011,7 @@ html.fnos-perf.dark{
         const bg = document.createElement("div");
         bg.className = "fntv-s4-skelbg";
         bg.style.backgroundImage = "none";
-        bg.style.background = _isDark ? "#1e1b17" : "#e8f0fe";
+        bg.style.background = "var(--fnos-skel-card, #e8f0fe)";
         const shine = document.createElement("div");
         shine.className = "fntv-s4-skel";
         shine.style.cssText = "position:absolute;inset:0;opacity:.5;z-index:0";

@@ -220,7 +220,13 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
       const bg = document.createElement('div');
       bg.className = 'fntv-s4-skelbg'; // [lc-842] 不复用 .fntv-s4-bg(其 ::before 写死黑色渐变遮罩, 会把浅色卡片压成深色); 仅作纯色占位 + shimmer
       bg.style.backgroundImage = 'none';
-      bg.style.background = _isDark ? '#1e1b17' : '#e8f0fe'; // [lc-843→844] 浅色模式用淡蓝底(非灰非纯白); 深色保留 #1e1b17
+      // [lc-1286] ⚠ 不写死内联色，改用随主题实时变化的 CSS 变量。
+      //   原实现 `_isDark ? '#1e1b17' : '#e8f0fe'` 把颜色烤进内联样式：骨架在页面早期创建，
+      //   那一刻 isSurfaceDark() 的判定可能因 html.dark 尚未写入/中途切换而与最终主题不符
+      //   → 骨架卡片固定成深色，而同屏其它元素（走 CSS 变量）随后变浅，出现「浅色页面里
+      //   一块深色空档」（用户报告：占位图本来浅色、后面突然变深/成了空块）。
+      //   --fnos-skel-card 由 theme.ts 的 :root / html.dark 两套值定义，切主题即时生效。
+      bg.style.background = 'var(--fnos-skel-card, #e8f0fe)';
       const shine = document.createElement('div');
       shine.className = 'fntv-s4-skel';
       shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';

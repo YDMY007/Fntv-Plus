@@ -153,6 +153,8 @@ export function injectUiThemeStyle(): void {
   --fnos-exit-border-off:1px solid rgba(90,120,200,.18);
   --fnos-skel-bg:rgba(255,255,255,.45);
   --fnos-skel-shine:rgba(255,255,255,.8);
+  /* [lc-1286] 轮播骨架卡片底色：随主题实时切换（骨架若写死内联色，会与后到的主题不一致） */
+  --fnos-skel-card:#e8f0fe;
   --fnos-sidebar-btn-bg:rgba(52,64,100,.24);
   /* [lc-1099] 抽屉面板/遮罩的 backdrop-filter 值走变量: applySidebarGlass 写的是 inline !important,
      样式表闸压不住, 性能模式靠 html.fnos-perf 把变量解析成 none 在计算期关掉 */
@@ -236,6 +238,7 @@ html.dark{
   --fnos-exit-border-off:1px solid rgba(140,160,220,.18);
   --fnos-skel-bg:rgba(160,168,190,.18);
   --fnos-skel-shine:rgba(200,208,228,.18);
+  --fnos-skel-card:#1e1b17;
   --fnos-sidebar-btn-bg:rgba(30,34,52,.38);
   --fnos-qr-bg:rgba(220,226,240,.95);
   --fnos-modal-overlay:rgba(0,0,0,.60);
