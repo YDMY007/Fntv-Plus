@@ -124,18 +124,28 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
             if (response && response.certificateError) {
                 log.info('检测到证书验证错误，询问用户是否信任');
 
+                // 证书错误可能发生在重定向链末端而非用户填写的地址本身：
+                // fnOS 的 80 端口是重定向端口，登录请求会被 301 到 https://IP:真实端口，
+                // TLS 握手失败的是重定向目标。必须对真正握手失败的主机(certHost)弹窗并写入
+                // 信任列表——只信原始 server 的话，重试永远再次命中未信任的重定向目标，
+                // 弹窗无限循环（用户报障「一直弹证书不信任」）。
+                const certHost: string = response.certHost || response.moveUrl || server;
+
                 // 显示证书信任对话框
                 const mainWindow = getMainWindow();
                 const shouldTrust = await showCertificateTrustDialog(
-                    server,
+                    certHost,
                     response.message || '未知证书错误',
                     mainWindow
                 );
 
                 if (shouldTrust) {
-                    // 用户选择信任，添加到信任列表并重试登录
-                    addTrustedHost(server);
-                    log.info('用户信任证书，重试登录');
+                    // 用户选择信任：重定向目标与原始地址都入信任列表（原始 http 地址仅是兜底，不会有害）
+                    addTrustedHost(certHost);
+                    if (certHost !== server) {
+                        addTrustedHost(server);
+                    }
+                    log.info(`用户信任证书(${certHost})，重试登录`);
 
                     // 递归调用重试登录
                     return handleLogin(event, loginData);

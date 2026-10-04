@@ -4,7 +4,7 @@ import { setTimeout } from 'timers/promises';
 import https from 'https';
 import { session } from 'electron';
 import log from '../logger';
-import { isTrusted, showCertificateTrustDialog, isCertificateError, addTrustedHost } from '../cert_trust';
+import { isTrusted, showCertificateTrustDialog, isCertificateError, addTrustedHost, isPrivateHostUrl } from '../cert_trust';
 
 /**
  * [lc-294] 主进程 API 鉴权补全: 转发 persist:fntv 会话里的 fnOS 鉴权 Cookie(如 Trim-MC-token)。
@@ -52,6 +52,7 @@ export interface ApiResponse<T = any> {
     data?: T;
     message?: string;
     certificateError?: boolean; // 标识是否为证书错误
+    certHost?: string;          // 实际 TLS 握手失败的 baseUrl：重定向链末端可能与调用方传入的 baseUrl 不同
     moveUrl?: string; // 重定向URL
     htmlResponse?: boolean;     // 命中网页(HTML)而非接口 JSON —— 多为地址/端口填错
     networkError?: boolean;     // 连接层失败(无 HTTP 响应: DNS/端口/网络不可达) —— 与业务报错区分
@@ -150,8 +151,10 @@ export async function request<T = any>(
         ...extraHeaders
     };
 
-    // 根据URL是否已被信任来决定是否验证证书
-    const shouldIgnoreCert = isTrusted(baseUrl);
+    // 根据URL是否已被信任来决定是否验证证书。
+    // 私有/本地地址直接免验证（内网 fnOS 自签证书是正常预期，与 Chromium 侧 lc-286 对齐）——
+    // 否则 80 端口重定向到 https 真实端口时每次都会弹「不受信任的SSL证书」对话框。
+    const shouldIgnoreCert = isTrusted(baseUrl) || isPrivateHostUrl(baseUrl);
 
     const config = {
         headers,
@@ -325,16 +328,19 @@ export async function request<T = any>(
 
             log.error(`请求异常: [${errorCode}] ${errorMsg} | Resp: ${respData} | URL: ${fullUrl}`);
 
-            // 检查是否为证书验证错误且URL未被信任
-            if (isCertificateError(error) && !isTrusted(baseUrl)) {
+            // 检查是否为证书验证错误且URL未被信任（私有地址已在上面免验证，理论上到不了这里，双保险防弹窗）
+            if (isCertificateError(error) && !isTrusted(baseUrl) && !isPrivateHostUrl(baseUrl)) {
                 log.warn(`检测到证书验证错误: code: ${errorCode}, msg: ${errorMsg}, URL: ${fullUrl}`);
 
-                // 返回特殊的证书错误响应，让上层处理
+                // 返回特殊的证书错误响应，让上层处理。
+                // certHost 必须带上：重定向(fnOS 80 端口→https真实端口)后真正握手失败的是
+                // 新 baseUrl，调用方若只信任原始 server 会导致重试永远再次弹窗(死循环)。
                 return {
                     success: false,
                     message: errorMsg,
                     // 添加一个特殊标识表示这是证书错误
-                    certificateError: true
+                    certificateError: true,
+                    certHost: baseUrl
                 } as ApiResponse<T> & { certificateError?: boolean };
             }
 

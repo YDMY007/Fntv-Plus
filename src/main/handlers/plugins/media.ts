@@ -13,7 +13,7 @@ import * as http from 'http';
 import { fileURLToPath } from 'url';
 import { PlayStatusData, ItemListRequest } from '../../../modules/fn_api/types';
 import { escape } from 'querystring';
-import { isTrusted } from '../../../modules/cert_trust';
+import { isTrusted, isPrivateHostUrl } from '../../../modules/cert_trust';
 import { getSessionCookieHeader } from '../../../modules/fn_api/request';
 import { getMainWindow } from '../../common/mainwin';
 import * as doubanSync from './doubanSync';
@@ -829,7 +829,9 @@ async function handleExternalPlay(_event: IpcMainEvent, req: ExtPlayRequest): Pr
 
 // 生成代理URL
 function getProxyUrl(cfg: fnConfig.Config, itemGuid: string, sourceIndex: number = 0): string {
-    const skipVerify = isTrusted(cfg.domain || '') ? '1' : '0';
+    // 私有/本地地址与已信任主机同样跳过证书验证（内网 fnOS 自签证书是正常预期，lc-286 同方针；
+    // 否则免弹窗改造后私有地址永不入信任列表，https 内网直连播放会因自签证书失败）
+    const skipVerify = (isTrusted(cfg.domain || '') || isPrivateHostUrl(cfg.domain || '')) ? '1' : '0';
     const useNasLocal = cfg.nasProxyEnabled === true ? '1' : '0';
     // urlencode
     const domain = escape(cfg.domain || '');

@@ -334,3 +334,22 @@ export function isCertificateError(error: any): boolean {
     // 关键：直接检查 error.code 是否在我们的 Set 中
     return error && CERTIFICATE_ERROR_CODES.has(error.code);
 }
+
+/**
+ * 判断 URL 主机是否为私有/本地地址。
+ * 内网 fnOS 使用自签名证书是正常预期，Node 侧请求与 main.ts 的 isPrivateUrl
+ * （Chromium 侧导航, lc-286）同一安全逻辑：私有地址不做证书验证、不弹信任对话框。
+ */
+export function isPrivateHostUrl(url: string): boolean {
+    try {
+        const hostname = new URL(
+            url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`
+        ).hostname.toLowerCase();
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+        if (/^10(\.\d{1,3}){3}$/.test(hostname)) return true;
+        if (/^172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}$/.test(hostname)) return true;
+        if (/^192\.168(\.\d{1,3}){2}$/.test(hostname)) return true;
+        if (hostname.startsWith('fe80:') || hostname.startsWith('fc') || hostname.startsWith('fd')) return true;
+    } catch { /* 解析失败 → 不匹配 */ }
+    return false;
+}
