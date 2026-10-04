@@ -74,7 +74,10 @@ options = {
     --固定弹幕的显示时间
     fixtime = 5,
     --字体
-    fontname = "sans-serif",
+    -- [lc-1298] 不能用 "sans-serif"：libass 经 directwrite 匹配时中文会落到
+    -- "Microsoft YaHei UI Bold"（UI 窄体变体 + 700 权重），字距挤、笔画糊，观感怪异。
+    -- 显式指定屏显正文字体；libass 对不存在的字体名自动回退，macOS/Linux 也不受影响。
+    fontname = "Microsoft YaHei",
     --字体大小 
     fontsize = 50,
     --字体阴影
@@ -86,7 +89,9 @@ options = {
     --全部弹幕的显示范围(0.0-1.0)
     displayarea = 0.85,
     --描边 0-4
-    outline = 1.0,
+    -- [lc-1298] 1.0 → 1.2：1080p PlayRes 1:1 渲染下 1px 描边抗锯齿发虚（视觉"糊"），
+    -- 1.2 配合 50px 字号边缘更实；>1.5 会盖住笔画内部细节，不再上调。
+    outline = 1.2,
     -- 限制屏幕中同时显示的最大弹幕数量，0 表示不限制
     max_screen_danmaku = 0,
     -- [lc-1253] 相同弹幕聚合：merge_window 秒窗口内（以组首为锚）同文本同类型合并为一条，

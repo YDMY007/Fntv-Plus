@@ -666,3 +666,31 @@ function call_cmd_async(args, callback)
         mp.abort_async_command(abort_signal)
     end
 end
+-- [lc-1299] 弹幕字号自适应（检测显示分辨率/窗口大小，DPI 缩放自动涵盖）：
+-- 渲染 ASS 的 PlayRes 固定 1920×1080，libass 会把 PlayRes 缩放到当前视频帧显示尺寸——
+-- 同一 fontsize 在 4K 全屏被拉伸 2 倍（弹幕显小）、半屏窗口只有一半（弹幕显大），
+-- 观感占比漂移。此处按「当前显示区高 / 1080」补偿，使弹幕占屏高比例恒定。
+-- osd-height = 当前窗口客户区高（物理像素，全屏=屏高），display-height = 显示器物理分辨率，
+-- 二者均为物理像素口径，Windows 125%/150% DPI 缩放无需单独检测（占比恒定即观感一致）。
+FONT_BASE_HEIGHT = 1080
+
+function get_display_render_height()
+    local oh = mp.get_property_number('osd-height') or 0
+    if oh > 0 then return oh end
+    local dh = mp.get_property_number('display-height') or 0
+    if dh > 0 then return dh end
+    return FONT_BASE_HEIGHT
+end
+
+function get_font_scale()
+    local scale = get_display_render_height() / FONT_BASE_HEIGHT
+    -- 钳位防极端环境（画中画小窗 / 多屏拼接）
+    if scale < 0.5 then return 0.5 end
+    if scale > 4 then return 4 end
+    return scale
+end
+
+function adaptive_fontsize()
+    local fs = tonumber(options.fontsize) or 50
+    return math.floor(fs * get_font_scale() + 0.5)
+end

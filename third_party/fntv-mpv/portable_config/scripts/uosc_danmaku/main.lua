@@ -525,9 +525,11 @@ local function collect_danmaku_sources()
     for _, source in pairs(DANMAKU.sources) do
         if not source.blocked and source.fname then
             if not file_exists(source.fname) then
+                -- [lc-1299] 裸 return 返回 nil，调用方 #danmaku_input 对 nil 取长度直接崩掉脚本；
+                -- 跳过失效源继续收集其余可用源（部分源失效不应拖死整条链）
                 show_message("未找到弹幕文件", 3)
-                msg.info("未找到弹幕文件")
-                return
+                msg.info("未找到弹幕文件: " .. tostring(source.fname))
+                goto continue
             end
             table.insert(danmaku_input, source.fname)
 
@@ -535,6 +537,7 @@ local function collect_danmaku_sources()
                 table.insert(delays, source.delay_segments)
             end
         end
+        ::continue::
     end
 
     return danmaku_input, delays

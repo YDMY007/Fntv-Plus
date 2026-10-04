@@ -15,6 +15,10 @@ local utils = require("mp.utils")
 local INTERVAL = options.vf_fps and 0.01 or 0.001
 local osd_width, osd_height, pause = 0, 0, true
 
+-- [lc-1299] 字号自适应：实现放 utils.lua（parse.lua 排版轨道与渲染 Style 必须共用同一字号，
+-- 否则轨道按基础字号排、渲染按缩放字号画 → 重叠）。这里包一层 local 引用便于本文件调用。
+local adaptive_fontsize = adaptive_fontsize
+
 -- 提取 \move 参数 (x1, y1, x2, y2) 并返回
 local function parse_move_tag(text)
     -- 匹配包括小数和负数在内的坐标值
@@ -124,9 +128,67 @@ local function escape_filter_path(p)
     return "'" .. p .. "'"
 end
 
-local function danmaku_filter_arg()
-    return "@" .. FILTER_LABEL .. ":lavfi=[ass=filename=" .. escape_filter_path(get_render_ass_path()) .. "]"
+-- [lc-1297] 图内前置 hwdownload：D3D11VA 硬解帧是 d3d11 硬件表面，ass 滤镜只收软件帧，
+-- 硬帧直进 → "Impossible to convert … mpv_src_in0 → auto_scale_0" → 整图配置失败 →
+-- mpv 禁用滤镜（vf add 命令本身返回 true，脚本侧无从得知）→ 弹幕加载成功却一条不显示
+-- （2026-10-03 用户实测 HEVC 10bit：16391 条弹幕全零显示）。
+-- 修法 = 图首插 hwdownload,format=<当前视频像素格式> 把硬帧拉回软件侧再交 ass 渲染；
+-- format 必须与 hwdec 输出位深一致（10bit p010→p010le、8bit nv12→nv12；写死 yuv420p 会因
+-- 输出回传 GPU 的格式协商失败——实测 hwdownload 后不接 format 也一样失败）。
+-- mpv 的 lavfi wrapper 在 ass 渲染后自动把软件帧 hwupload 回 GPU，VO 侧无需干预。
+-- 实测（本仓库 mpv v0.41.0-157 + vo=gpu-next + hwdec=auto/d3d11va）：
+--   10bit 硬解 hwdownload,format=p010le,ass → VO p010 ✓；8bit 硬解 hwdownload,format=nv12,ass → VO nv12 ✓
+--   软解（hwdec-current=no）时帧本就是软件格式，hwdownload 无 hw 帧可下会失败
+--   → 仅在 hwdec-current 激活时才插入本段。
+local function hw_pixelformat_le(fmt)
+    -- video-params/pixelformat 给的是 mpv 名（p010/nv12/yuv420p10…），format= 要 little-endian 全名
+    if fmt == "p010" then return "p010le" end
+    if fmt == "yuv420p10" then return "yuv420p10le" end
+    if fmt == "yuv422p10" then return "yuv422p10le" end
+    if fmt == "yuv444p10" then return "yuv444p10le" end
+    if fmt == "yuv420p16" then return "yuv420p16le" end
+    if fmt == "yuv422p16" then return "yuv422p16le" end
+    if fmt == "yuv444p16" then return "yuv444p16le" end
+    return fmt
 end
+
+local function danmaku_filter_graph()
+    local graph = ""
+    local hwdec = mp.get_property("hwdec-current")
+    if hwdec and hwdec ~= "no" and hwdec ~= "" then
+        -- ⚠️ video-params.pixelformat 在硬解时是表面格式（d3d11），不能传给 format=；
+        -- 底层像素格式在 video-params.hw-pixelformat（实测 gpu-next+d3d11va: p010/nv12）。
+        local params = mp.get_property_native("video-params")
+        local pixfmt = params and hw_pixelformat_le(params["hw-pixelformat"] or "") or ""
+        if pixfmt and pixfmt ~= "" then
+            graph = "hwdownload,format=" .. pixfmt .. ","
+        end
+    end
+    return graph .. "ass=filename=" .. escape_filter_path(get_render_ass_path())
+end
+
+local function danmaku_filter_arg()
+    return "@" .. FILTER_LABEL .. ":lavfi=[" .. danmaku_filter_graph() .. "]"
+end
+
+-- [lc-1289] watch_later 毒化自愈（「黑屏只有声音」根因修复）：
+-- mpv 默认 watch-later-options 含 vf，弹幕滤镜挂链期间退出会把整条 vf（含指向按 PID 命名的
+-- danmaku-render-<pid>.ass 的 lavfi 滤镜）存进 watch_later；下场播放恢复该链时，本进程的
+-- ASS 还没写、旧 PID 的文件已不存在 → lavfi ass "fopen failed" → 整条 vf 链初始化失败 →
+-- mpv 直接弃掉视频轨（"Video: no video"，黑屏只有声音；2026-10-01 实测 96 个 watch_later 全中毒）。
+-- on_load 在选项恢复之后、滤镜链初始化之前执行，摘掉这两枚脚本自管滤镜即可保住视频轨；
+-- 弹幕显示时 show_danmaku_func 会走 write_render_file + vf add 的正常路径重新挂上。
+-- mpv.conf 侧已加 watch-later-options=-vf 阻止 vf 再被保存，本钩子兜底存量毒文件。
+local function strip_stale_danmaku_filters()
+    local filters = mp.get_property_native("vf")
+    if type(filters) ~= "table" then return end
+    for _, f in ipairs(filters) do
+        if f.label == FILTER_LABEL or f.label == "danmaku" then
+            mp.commandv("vf", "remove", "@" .. tostring(f.label))
+        end
+    end
+end
+mp.add_hook("on_load", 50, strip_stale_danmaku_filters)
 
 -- 虚拟画布(PlayRes)与字号：与 OSD 路径 render() 完全同一套超宽屏修正，
 -- 区别仅在画布按视频原生尺寸取比例（滤镜渲染发生在视频帧上，而非 OSD 矩形）
@@ -136,10 +198,11 @@ local function canvas_geometry()
     local vh = mp.get_property_number('height') or 0
     local ratio = (vw > 0 and vh > 0) and vw / vh
         or (osd_height > 0 and osd_width / osd_height or 16 / 9)
-    local fontsize = options.fontsize
+    -- [lc-1299] 字号 = 面板值 × 显示缩放（4K/窗口大小自动补偿），超宽屏修正在缩放之后叠加
+    local fontsize = adaptive_fontsize()
     if width / height < ratio then
         height = width / ratio
-        fontsize = options.fontsize - ratio * 2
+        fontsize = fontsize - ratio * 2
     end
     return width, height, math.floor(fontsize)
 end
@@ -155,7 +218,9 @@ local function write_render_file()
     local displayarea = height * tonumber(options.displayarea)
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    local outline = tonumber(options.outline) or 1.0
+    -- [lc-1299] 描边/阴影随字号同比缩放：4K 下 1.2px 描边对 100px 字太细（等效发糊），
+    -- 与字号共用同一 scale 保证任何显示环境下描边/字高的视觉比例一致
+    local outline = (tonumber(options.outline) or 1.0) * get_font_scale()
     local shadow = tonumber(options.shadow) or 0.0
     local fontname = options.fontname
 
@@ -239,6 +304,11 @@ local function write_render_file()
     return true
 end
 
+-- [lc-1297] timer 声明必须前置于 fallback_to_osd（其回调引用 timer:resume()），
+-- 否则函数捕获的是同名全局(nil)而非本 local → 回退路径一跑就崩。定时器的实际创建
+-- 保持在 render() 定义之后（构造参数要传 render），此处先声明占位。
+local timer
+
 local function remove_danmaku_filter()
     if filter_active then
         mp.commandv("vf", "remove", "@" .. FILTER_LABEL)
@@ -248,6 +318,34 @@ end
 
 -- 尝试滤镜路径：成功返回 true；首次尝试即真实挂载（单独探针挂/撤会多两次滤镜链
 -- 重配，首显时可感知卡顿）。任何一步失败都置 filter_available=false 永久回退。
+-- [lc-1297] ⚠️ vf add 的返回值只代表「命令被接受」，滤镜图的配置是异步的：图配置失败时
+-- mpv 会 "Disabling filter" 并把该条目从 vf 属性里剔除（enabled=false / 条目消失），
+-- 但 Lua 侧 commandv 仍返回 true。旧实现据此认定成功，硬解弹幕全灭且永不回退。
+-- 因此挂链后必须核对 vf 属性确认滤镜真实存活（下一事件循环 tick 内完成），
+-- 失效即回退 OSD 定时器路径，保证任何环境（无 interop 的 VO、异常驱动等）都有弹幕。
+local function filter_label_alive()
+    local filters = mp.get_property_native("vf")
+    if type(filters) ~= "table" then return false end
+    for _, f in ipairs(filters) do
+        if f.label == FILTER_LABEL and f.enabled ~= false then
+            return true
+        end
+    end
+    return false
+end
+
+local function fallback_to_osd(reason)
+    remove_danmaku_filter()
+    if filter_available ~= false then
+        msg.warn("[lc-1297] lavfi ass 滤镜不可用(" .. reason .. ")，弹幕回退 OSD 定时器渲染")
+    end
+    filter_available = false
+    render()
+    if not pause then
+        timer:resume()
+    end
+end
+
 local function try_filter_path()
     if filter_available == false then return false end
     if write_render_file() then
@@ -258,6 +356,17 @@ local function try_filter_path()
                 msg.info("[lc-1273] 弹幕走 lavfi ass 滤镜渲染（libass 按帧 pts 插值，全屏抖动根治）")
             end
             filter_available = true
+            -- [lc-1297] 挂链后验证：滤镜图配置失败时 mpv 会在下一 tick 内把它从 vf 剔除。
+            -- 先同步查一次（快速失败路径），再挂一个一次性定时器兜底查（异步失败路径）。
+            if not filter_label_alive() then
+                fallback_to_osd("挂链即失效")
+                return true  -- 已切到 OSD 路径，调用方无需再走回退分支
+            end
+            mp.add_timeout(0.25, function()
+                if filter_active and filter_available and not filter_label_alive() then
+                    fallback_to_osd("挂链后被 mpv 禁用")
+                end
+            end)
             return true
         end
     end
@@ -282,14 +391,15 @@ function render()
     local delay = get_delay_for_time(DELAYS, pos)
 
     local fontname = options.fontname
-    local fontsize = options.fontsize
+    -- [lc-1299] OSD 回退路径同样走自适应字号
+    local fontsize = adaptive_fontsize()
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
 
     local width, height = 1920, 1080
     local ratio = osd_width / osd_height
     if width / height < ratio then
         height = width / ratio
-        fontsize = options.fontsize - ratio * 2
+        fontsize = fontsize - ratio * 2
     end
 
     local ass_events = {}
@@ -321,7 +431,7 @@ function render()
     overlay:update()
 end
 
-local timer = mp.add_periodic_timer(INTERVAL, render, true)
+timer = mp.add_periodic_timer(INTERVAL, render, true)
 
 function parse_danmaku(ass_file_path, from_menu, no_osd)
     parse_ass_events(ass_file_path, function(err, events)
@@ -457,6 +567,35 @@ end
 
 mp.observe_property('osd-width', 'number', function(_, value) osd_width = value or osd_width end)
 mp.observe_property('osd-height', 'number', function(_, value) osd_height = value or osd_height end)
+
+-- [lc-1299] 显示环境变化 → 自适应字号跟随：
+--   窗口拖拽缩放 / 全屏切换（osd-height 变）、换显示器（display-height 变）、
+--   Windows DPI 缩放调整（窗口物理像素随系统缩放变化，同样体现为 osd-height 变）。
+--   字号写死在渲染 ASS 的 Style 里，必须重建文件并重挂滤镜才生效；
+--   OSD 回退路径下一轮 render() 自然取新值，无需重建。防抖：resize 拖动期间连发，
+--   0.5s 静默后只重建一次。
+local resize_debounce = nil
+local function on_display_geometry_changed()
+    if resize_debounce then resize_debounce:kill() end
+    resize_debounce = mp.add_timeout(0.5, function()
+        resize_debounce = nil
+        if ENABLED and COMMENTS ~= nil and filter_available and filter_active then
+            msg.info(string.format("[lc-1299] 显示区变化（%dx%d），字号自适应重建: %d px",
+                osd_width, osd_height, adaptive_fontsize()))
+            try_filter_path()
+        end
+    end)
+end
+mp.observe_property('osd-height', 'number', function(_, value)
+    local old = osd_height
+    osd_height = value or osd_height
+    if old > 0 and osd_height > 0 and math.abs(osd_height - old) > 2 then
+        on_display_geometry_changed()
+    end
+end)
+mp.observe_property('display-height', 'number', function(_, value)
+    if value and value > 0 then on_display_geometry_changed() end
+end)
 -- [lc-1272] 步进=两显示帧(2/fps)：更新频率是刷新率的整约数，逐帧位置严格对齐，
 --   消除「100Hz 更新 × 120Hz 显示」错频造成的抖动；比 1/fps 省一半重排开销。
 --   [lc-1273] 滤镜路径下无定时器可调，跳过。

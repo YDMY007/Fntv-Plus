@@ -519,7 +519,9 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
 
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    local fontsize = tonumber(options.fontsize) or 50
+    -- [lc-1299] 排版轨道/文本宽度估算必须与渲染 Style 用同一自适应字号：
+    -- 渲染端按「显示区高/1080」缩放字号，轨道仍按基础字号排会重叠/露缝。
+    local fontsize = adaptive_fontsize()
     local scrolltime = tonumber(options.scrolltime) or 15
     local fixtime = tonumber(options.fixtime) or 5
     local outline = tonumber(options.outline) or 1.0
