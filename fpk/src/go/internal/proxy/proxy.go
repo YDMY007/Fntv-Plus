@@ -20,6 +20,7 @@ import (
 	"html"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -151,7 +152,17 @@ func makeProxy(d Deps, strip string) http.HandlerFunc {
 		// 克隆请求并改写目标。
 		outReq := r.Clone(r.Context())
 		outReq.URL = &target
-		outReq.Host = upstream.Host
+		// [访问码] Host 头策略：fnOS 的访问码门禁把解锁 Cookie（os-access-code）绑定到
+		// Web 主机校验——实测同一 Cookie，Host=NAS地址 时放行、Host=127.0.0.1:端口 时
+		// 重新拦截。上游是回环地址时若沿用旧 host:端口 形态的 Host，每个被代理请求都会
+		// 被上游重新门禁，用户表现为「输完访问码后无限重新弹门禁页」。因此回环上游保留
+		// 浏览器原始 Host（连接目标仍是回环 upstream，仅改 Host 头）；自定义远程上游
+		// 维持旧行为不动。
+		if isLoopbackHost(upstream.Host) {
+			outReq.Host = r.Host
+		} else {
+			outReq.Host = upstream.Host
+		}
 		outReq.RequestURI = "" // 必须清空，否则 RoundTrip 报错
 		outReq.Header.Del("Accept-Encoding")
 		outReq.Header.Del("Connection")
@@ -331,6 +342,21 @@ func singleJoiningSlash(a, b string) string {
 // isVPath 是否影视页命名空间路径（/v 或 /v/*）。
 func isVPath(p string) bool {
 	return p == "/v" || strings.HasPrefix(p, "/v/")
+}
+
+// isLoopbackHost 判断 upstream.Host（host:port）是否指向本机回环地址。
+// 用于 Host 头策略：回环上游保留浏览器原始 Host（访问码 Cookie 绑定 Web 主机校验）。
+func isLoopbackHost(hostPort string) bool {
+	h := hostPort
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		h = hh // host:port / [::1]:port 形态取 host；裸 "::1" 解析失败则保留原值
+	}
+	h = strings.Trim(h, "[]")
+	switch strings.ToLower(h) {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	}
+	return false
 }
 
 // returnParamNames 是重定向 Location 里「回跳目标」查询参数名（fnOS 网关/登录页约定）。

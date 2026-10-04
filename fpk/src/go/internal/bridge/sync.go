@@ -58,7 +58,8 @@ func (b *Bridge) doubanWatched(w http.ResponseWriter, r *http.Request) {
 		"parent_guid": "", "exclude_folder": 1,
 		"sort_column": "sort_title", "sort_type": "ASC",
 	})
-	resp, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", listBody, req.Cookie)
+	fnCall := browserFnOSCall(r, req.Cookie)
+	resp, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", listBody, fnCall)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "libraryTotal": 0, "note": err.Error()})
 		return
@@ -86,7 +87,7 @@ func (b *Bridge) doubanWatched(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[idx] = pair{it: it, a: b.analyzeItem(it, req.Cookie)}
+			results[idx] = pair{it: it, a: b.analyzeItem(it, fnCall)}
 		}(i, it)
 	}
 	wg.Wait()
@@ -117,7 +118,7 @@ type analyzeResult struct {
 }
 
 // analyzeItem 忠实移植桌面版：电影看 watched/watched_ts；剧集钻取 季→集 累加时长+统计已看。
-func (b *Bridge) analyzeItem(it fnItem, cookie string) analyzeResult {
+func (b *Bridge) analyzeItem(it fnItem, call fnOSCall) analyzeResult {
 	empty := analyzeResult{}
 	lpMs := int64(0)
 	if it.WatchedTS > 0 {
@@ -154,7 +155,7 @@ func (b *Bridge) analyzeItem(it fnItem, cookie string) analyzeResult {
 		"parent_guid": it.GUID, "exclude_folder": 1,
 		"sort_column": "sort_title", "sort_type": "ASC",
 	})
-	if children, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", childrenBody, cookie); err == nil {
+	if children, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", childrenBody, call); err == nil {
 		if cd, ok := children["data"].(map[string]any); ok {
 			if cl, ok := cd["list"].([]any); ok {
 				for _, raw := range cl {
@@ -164,7 +165,7 @@ func (b *Bridge) analyzeItem(it fnItem, cookie string) analyzeResult {
 					ct := strings.ToLower(c.Type)
 					if ct == "episode" || ct == "movie" {
 						addLeaf(c)
-					} else if eps, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/episode/list/"+c.GUID, nil, cookie); err == nil {
+					} else if eps, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/episode/list/"+c.GUID, nil, call); err == nil {
 						if el, ok := eps["data"].([]any); ok {
 							for _, er := range el {
 								b2, _ := json.Marshal(er)
@@ -180,7 +181,7 @@ func (b *Bridge) analyzeItem(it fnItem, cookie string) analyzeResult {
 	}
 	// 兜底：单层剧集结构（子级钻取无果时 episode/list/{本条目}）
 	if totalEp == 0 {
-		if eps, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/episode/list/"+it.GUID, nil, cookie); err == nil {
+		if eps, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/episode/list/"+it.GUID, nil, call); err == nil {
 			if el, ok := eps["data"].([]any); ok {
 				for _, er := range el {
 					b2, _ := json.Marshal(er)
@@ -570,11 +571,62 @@ func decodeBangumiResp(resp *http.Response) (int, map[string]any, error) {
 	return resp.StatusCode, out, nil
 }
 
+// bangumiErrLabel 网络失败归类（对齐桌面版 classifyBgmError）：err != nil → 网络层细分；
+// 否则按 HTTP 状态码归类。返回（中文标签, 简述）。
+// 背景（2026-10-03 真机定位）：api.bgm.tv 已被墙——系统/公共 UDP DNS 均被注入假应答，
+// 真实 IP 的 TLS 握手亦被 SNI 阻断，唯一出路是自定义代理。旧日志只打原始 error，
+// 用户分不清网络还是 Token 问题；现在统一带标签落日志 + 面板展示。
+func bangumiErrLabel(st int, err error) (string, string) {
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		switch {
+		case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded"):
+			return "网络", "连接超时(疑似被墙或网络不通)"
+		case strings.Contains(msg, "reset") || strings.Contains(msg, "eof") || strings.Contains(msg, "broken pipe"):
+			return "网络", "连接被重置(疑似 SNI 阻断)"
+		case strings.Contains(msg, "no such host") || strings.Contains(msg, "dns"):
+			return "网络", "DNS 解析失败(疑似污染)"
+		case strings.Contains(msg, "refused"):
+			return "网络", "连接被拒绝"
+		case strings.Contains(msg, "tls") || strings.Contains(msg, "certificate") || strings.Contains(msg, "x509"):
+			return "网络", "TLS 握手失败(疑似劫持)"
+		}
+		return "网络", "网络异常: " + err.Error()
+	}
+	switch {
+	case st == 401 || st == 403:
+		return "密钥", fmt.Sprintf("Token 失效/未授权(HTTP %d)", st)
+	case st == 429:
+		return "限流", "请求过于频繁(HTTP 429)"
+	case st >= 500:
+		return "服务", fmt.Sprintf("Bangumi 服务端异常(HTTP %d)", st)
+	case st >= 400:
+		return "请求", fmt.Sprintf("HTTP %d", st)
+	}
+	return "请求", "未知错误"
+}
+
+// ---- 最近同步状态（内存态；面板 GET bangumi/sync-status 展示，重启清零）----
+var (
+	bgmStatusMu   sync.Mutex
+	bgmLastStatus map[string]any
+)
+
+func setBgmStatus(ok bool, stage, label, detail string) {
+	bgmStatusMu.Lock()
+	defer bgmStatusMu.Unlock()
+	bgmLastStatus = map[string]any{
+		"ts": time.Now().UnixMilli(), "ok": ok, "stage": stage, "label": label, "detail": detail,
+	}
+}
+
 // bangumiSyncProgress {guid, percentage, item}：播放进度 → Bangumi 标记（在看/看过）。
 // 忠实移植 syncOnProgress：TV → 搜索条目 → 定位集 → 标集看过；Movie → 标条目看过/在看。
 // [v0.50.0] 入参变更：item 由前端直连 play/info 解析好后传入（原先后端自查 play/info，
 // 但后端转发只有 document.cookie，fnOS 会话 token 为 httpOnly 拿不到 → 恒未登录，lc-057 同款断链）。
 // 开关/阈值由后端读 settings 检查（bangumiSyncEnabled / bangumiSyncThreshold）。
+// [2026-10-03] 端点全部换现行 v0 API：旧 GET /v0/search/subject、POST /v0/episode/{id}/status/watched、
+// POST /v0/subject/{id}/status/do|watched 均已下线（OpenAPI 规范核实）——网络通了也必挂的隐患。
 func (b *Bridge) bangumiSyncProgress(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		GUID       string         `json:"guid"`
@@ -619,31 +671,40 @@ func (b *Bridge) bangumiSyncProgress(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "缺少剧集标题/集号"})
 			return
 		}
-		st, sr, err := b.bangumiReq(http.MethodGet, "/v0/search/subject?q="+url.QueryEscape(showTitle)+"&type=2", token, nil)
-		if err != nil || st != http.StatusOK {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("Bangumi 搜索失败(%d)", st)})
+		subjectID, failMsg := b.bangumiSearchSubject(token, showTitle)
+		if failMsg != "" {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": failMsg})
 			return
 		}
-		subjectID := findBangumiSubjectID(sr)
-		if subjectID <= 0 {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "Bangumi 未找到条目: " + showTitle})
-			return
-		}
-		st, er, err := b.bangumiReq(http.MethodGet, fmt.Sprintf("/v0/episodes?subject_id=%d&type=0&limit=100", subjectID), token, nil)
+		// 标集前必须先收藏条目（在看）；失败不拦——后续标集自会暴露真实原因（桌面同语义）
+		b.bangumiCollect(token, subjectID, false)
+		st, er, err := b.bangumiReq(http.MethodGet, fmt.Sprintf("/v0/episodes?subject_id=%d&type=0&limit=200", subjectID), token, nil)
 		if err != nil || st != http.StatusOK {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "拉取集列表失败"})
+			label, brief := bangumiErrLabel(st, err)
+			logf("[bangumi][%s] 拉取集列表失败 subject=%d: %s", label, subjectID, brief)
+			setBgmStatus(false, "episodes", label, fmt.Sprintf("%s 第 %d 集：拉取集列表失败 %s", showTitle, epNum, brief))
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("拉取集列表失败[%s] %s", label, brief)})
 			return
 		}
 		epID := findBangumiEpisodeID(er, int(epNum))
 		if epID <= 0 {
+			setBgmStatus(false, "episodes", "未匹配", fmt.Sprintf("%s：条目内无第 %d 集（可能是 SP/特别篇）", showTitle, epNum))
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("未找到第 %d 集", epNum)})
 			return
 		}
-		if st, _, err := b.bangumiReq(http.MethodPost, fmt.Sprintf("/v0/episode/%d/status/watched", epID), token, map[string]any{}); err != nil || st >= 400 {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("标记集失败(%d)", st)})
+		st, _, err = b.bangumiReq(http.MethodPut, fmt.Sprintf("/v0/users/-/collections/-/episodes/%d", epID), token, map[string]any{"type": 2})
+		if err != nil || st >= 400 {
+			label, brief := bangumiErrLabel(st, err)
+			logf("[bangumi][%s] 标记单集失败 episode=%d: %s", label, epID, brief)
+			setBgmStatus(false, "episode-watched", label, fmt.Sprintf("%s 第 %d 集：%s", showTitle, epNum, brief))
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("标记集失败[%s] %s", label, brief)})
 			return
 		}
-		bangumiMarkSubject(b, token, subjectID, req.Percentage >= 100)
+		setBgmStatus(true, "episode-watched", "", fmt.Sprintf("%s 第 %d 集 → 已标看过", showTitle, epNum))
+		logf("[bangumi] 已标记 %s 第 %d 集 (subject=%d episode=%d)", showTitle, epNum, subjectID, epID)
+		if req.Percentage >= 100 {
+			b.bangumiCollect(token, subjectID, true)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "subject_id": subjectID, "episode_id": epID, "message": fmt.Sprintf("已标记 %s 第 %d 集", showTitle, epNum)})
 		return
 	}
@@ -651,26 +712,123 @@ func (b *Bridge) bangumiSyncProgress(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "缺少影片标题"})
 		return
 	}
-	st, sr, err := b.bangumiReq(http.MethodGet, "/v0/search/subject?q="+url.QueryEscape(movieTitle)+"&type=1", token, nil)
-	if err != nil || st != http.StatusOK {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("Bangumi 搜索失败(%d)", st)})
+	subjectID, failMsg := b.bangumiSearchSubject(token, movieTitle)
+	if failMsg != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": failMsg})
 		return
 	}
-	subjectID := findBangumiSubjectID(sr)
-	if subjectID <= 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "Bangumi 未找到条目: " + movieTitle})
+	stage, name := "collect-doing", "在看"
+	if req.Percentage >= 100 {
+		stage, name = "collect-watched", "看过"
+	}
+	if st, _, err := b.bangumiReq(http.MethodPost, fmt.Sprintf("/v0/users/-/collections/%d", subjectID), token, map[string]any{"type": map[bool]int{false: 3, true: 2}[req.Percentage >= 100]}); err != nil || st >= 400 {
+		label, brief := bangumiErrLabel(st, err)
+		logf("[bangumi][%s] 标条目%s失败 subject=%d: %s", label, name, subjectID, brief)
+		setBgmStatus(false, stage, label, fmt.Sprintf("「%s」标条目%s失败：%s", movieTitle, name, brief))
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": fmt.Sprintf("标记失败[%s] %s", label, brief)})
 		return
 	}
-	bangumiMarkSubject(b, token, subjectID, req.Percentage >= 100)
+	setBgmStatus(true, stage, "", fmt.Sprintf("「%s」已标%s（电影）", movieTitle, name))
+	logf("[bangumi] 已标记 %s → 条目%s (subject=%d)", movieTitle, name, subjectID)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "subject_id": subjectID, "message": "已标记 " + movieTitle})
 }
 
-func bangumiMarkSubject(b *Bridge, token string, subjectID int64, watched bool) {
-	path := fmt.Sprintf("/v0/subject/%d/status/watched", subjectID)
-	if !watched {
-		path = fmt.Sprintf("/v0/subject/%d/status/do", subjectID)
+// bangumiSearchSubject POST /v0/search/subjects（现行端点，须带 Token）。
+// filter type=[2,6]（动画+三次元）对齐桌面版——旧版电影走 type=1 是「书」，属复制笔误。
+// 失败返回面板/前端可直读的消息串（带归类标签），成功返回 subjectID（""）。
+func (b *Bridge) bangumiSearchSubject(token, title string) (int64, string) {
+	body := map[string]any{"keyword": title, "sort": "match", "filter": map[string]any{"type": []int{2, 6}}}
+	st, sr, err := b.bangumiReq(http.MethodPost, "/v0/search/subjects?limit=5", token, body)
+	if err != nil || st != http.StatusOK {
+		label, brief := bangumiErrLabel(st, err)
+		logf("[bangumi][%s] 搜索条目失败 %q: %s", label, title, brief)
+		setBgmStatus(false, "search", label, fmt.Sprintf("「%s」搜索失败：%s", title, brief))
+		return 0, fmt.Sprintf("Bangumi 搜索失败[%s] %s", label, brief)
 	}
-	_, _, _ = b.bangumiReq(http.MethodPost, path, token, map[string]any{})
+	id := findBangumiSubjectID(sr)
+	if id <= 0 {
+		setBgmStatus(false, "search", "未匹配", fmt.Sprintf("「%s」搜索无结果（标题差异过大？）", title))
+		return 0, "Bangumi 未找到条目: " + title
+	}
+	return id, ""
+}
+
+// bangumiCollect POST /v0/users/-/collections/{id}（现行端点）：watched=false → 在看(3)，true → 看过(2)。
+// 失败归类落日志 + 最近状态；返回是否成功供电影路径决定整体成败。
+func (b *Bridge) bangumiCollect(token string, subjectID int64, watched bool) bool {
+	t, stage, name := 3, "collect-doing", "在看"
+	if watched {
+		t, stage, name = 2, "collect-watched", "看过"
+	}
+	st, _, err := b.bangumiReq(http.MethodPost, fmt.Sprintf("/v0/users/-/collections/%d", subjectID), token, map[string]any{"type": t})
+	if err != nil || st >= 400 {
+		label, brief := bangumiErrLabel(st, err)
+		logf("[bangumi][%s] 标条目%s失败 subject=%d: %s", label, name, subjectID, brief)
+		setBgmStatus(false, stage, label, fmt.Sprintf("标条目%s失败(subject %d)：%s", name, subjectID, brief))
+		return false
+	}
+	logf("[bangumi] 条目 %d → %s (HTTP %d)", subjectID, name, st)
+	return true
+}
+
+// bangumiSyncStatus GET：最近一次同步结果（成功/失败 + 归类原因），供设置面板展示。
+func (b *Bridge) bangumiSyncStatus(w http.ResponseWriter, _ *http.Request) {
+	bgmStatusMu.Lock()
+	s := bgmLastStatus
+	bgmStatusMu.Unlock()
+	if s == nil {
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+// bangumiProbe GET：连接诊断（面板「测试连接」）。① GET /calendar（公开端点）测网络链路，
+// 并报出实际走的传输路（自定义代理/公共DNS直连/系统直连）；② 有 Token 再 GET /v0/me 测有效性。
+func (b *Bridge) bangumiProbe(w http.ResponseWriter, _ *http.Request) {
+	_, via := b.bangumiClient()
+	t0 := time.Now()
+	st, _, err := b.bangumiReq(http.MethodGet, "/calendar", "", nil)
+	network := map[string]any{"via": via}
+	if err != nil || st >= 400 {
+		label, brief := bangumiErrLabel(st, err)
+		if err == nil {
+			brief = fmt.Sprintf("HTTP %d", st)
+		}
+		logf("[bangumi][%s] 探针：网络不通 %s", label, brief)
+		network["ok"] = false
+		network["detail"] = brief
+		network["hint"] = "bgm.tv 需代理可达，请在设置里配置自定义代理"
+	} else {
+		network["ok"] = true
+		network["detail"] = fmt.Sprintf("HTTP %d", st)
+		network["latencyMs"] = time.Since(t0).Milliseconds()
+	}
+	tokenOut := map[string]any{}
+	switch token := getSetting(b.cfg, "bangumiToken"); {
+	case token == "":
+		tokenOut["checked"] = false
+		tokenOut["detail"] = "未配置 Token"
+	case network["ok"] != true:
+		tokenOut["checked"] = false
+		tokenOut["detail"] = "网络不通，未验证（先解决网络）"
+	default:
+		st2, _, err2 := b.bangumiReq(http.MethodGet, "/v0/me", token, nil)
+		if err2 != nil || st2 >= 400 {
+			_, brief := bangumiErrLabel(st2, err2)
+			if err2 == nil {
+				brief = fmt.Sprintf("HTTP %d（401/403=Token 失效）", st2)
+			}
+			tokenOut["checked"] = true
+			tokenOut["ok"] = false
+			tokenOut["detail"] = brief
+		} else {
+			tokenOut["checked"] = true
+			tokenOut["ok"] = true
+			tokenOut["detail"] = "Token 有效"
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"transport": via, "network": network, "token": tokenOut})
 }
 
 func findBangumiSubjectID(resp map[string]any) int64 {
@@ -691,7 +849,8 @@ func findBangumiEpisodeID(resp map[string]any, epNum int) int64 {
 	if data, ok := resp["data"].([]any); ok {
 		for _, raw := range data {
 			if e, ok := raw.(map[string]any); ok {
-				if toInt64(e["ep"]) == int64(epNum) || toInt64(e["number"]) == int64(epNum) {
+				// 现行 v0 API 分集对象只有 ep/sort 字段（旧 API 的 number 已不存在）
+				if toInt64(e["ep"]) == int64(epNum) || toInt64(e["sort"]) == int64(epNum) {
 					return toInt64(e["id"])
 				}
 			}

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"fntvplus/internal/config"
@@ -171,6 +172,72 @@ func TestGatewayLoginRedirectChain(t *testing.T) {
 	}
 	if strings.Contains(s, "__payload__") || strings.Contains(s, "FNTV_PLUS_GW_SHIM_BEGIN") {
 		t.Errorf("登录页不应被注入 payload/路径 shim: %q", s)
+	}
+}
+
+// TestIsLoopbackHost 回环地址判断（Host 头策略的开关条件）。
+func TestIsLoopbackHost(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"127.0.0.1:5666", true},
+		{"127.0.0.1", true},
+		{"localhost:22350", true},
+		{"LOCALHOST", true},
+		{"[::1]:8080", true},
+		{"::1", true},
+		{"192.168.31.170:17777", false},
+		{"example.com", false},
+		{"nas.local:5666", false},
+	}
+	for _, c := range cases {
+		if got := isLoopbackHost(c.in); got != c.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// TestUpstreamHostPreserved [访问码] 回环上游必须保留浏览器原始 Host 头：
+// fnOS 访问码门禁把解锁 Cookie（os-access-code）绑定 Web 主机校验，实测同一 Cookie
+// Host=NAS地址 放行、Host=127.0.0.1:端口 重新拦截。Host 被改写成回环形态时每个被
+// 代理请求都会被上游重新门禁（用户报障「输完访问码后无限重新弹门禁页」）。
+func TestUpstreamHostPreserved(t *testing.T) {
+	var seenHost atomic.Value
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHost.Store(r.Host)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><head></head><body>home</body></html>"))
+	}))
+	defer up.Close()
+	upURL, err := url.Parse(up.URL)
+	if err != nil {
+		t.Fatalf("parse upstream: %v", err)
+	}
+	srv := NewServer(Deps{Upstream: upURL, Config: config.Default(), Injector: mustInjector(t)})
+	ps := httptest.NewServer(srv)
+	defer ps.Close()
+
+	req, _ := http.NewRequest("GET", ps.URL+"/app/fntvplus/v/", nil)
+	resp, err := noRedirectClient.Do(req)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	got, _ := seenHost.Load().(string)
+	if got == "" {
+		t.Fatal("上游未收到请求")
+	}
+	// 浏览器面向的是 ps（127.0.0.1:<psPort>）；回环上游必须原样保留该 Host，
+	// 而不是改写成上游自己的 127.0.0.1:<upPort>
+	want := ps.Listener.Addr().String()
+	if got != want {
+		t.Fatalf("上游看到的 Host = %q, want 浏览器原始 Host %q（Host 保留未生效）", got, want)
+	}
+	if got == upURL.Host {
+		t.Fatalf("上游看到的 Host = 上游自身地址 %q，说明 Host 未保留", got)
 	}
 }
 

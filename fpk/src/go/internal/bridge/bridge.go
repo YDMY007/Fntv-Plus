@@ -8,6 +8,9 @@
 //	GET  /app/fntvplus/api/bridge/tmdb/img    TMDB 图片代理（image.tmdb.org 直出）
 //	POST /app/fntvplus/api/bridge/trakt/*     Trakt 设备授权/凭证/scrobble/同步
 //	GET  /app/fntvplus/api/bridge/bangumi/calendar  Bangumi 日历
+//	POST /app/fntvplus/api/bridge/bangumi/sync-progress  Bangumi 播放进度标记（在看/看过）
+//	GET  /app/fntvplus/api/bridge/bangumi/sync-status    最近一次同步结果（面板展示失败原因）
+//	GET  /app/fntvplus/api/bridge/bangumi/probe          连接诊断（网络链路 + Token 有效性）
 //	POST /app/fntvplus/api/bridge/douban/status     豆瓣登录状态（网页端暂未适配登录）
 //
 // 安全边界：proxy 域名白名单；fnOS 桥只接受 /v/api/ 开头的路径；cookie 由前端显式转发。
@@ -104,6 +107,8 @@ func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/trakt/token", b.traktTokenSave)
 	mux.HandleFunc("/app/fntvplus/api/bridge/bangumi/calendar", b.bangumiCalendar)
 	mux.HandleFunc("/app/fntvplus/api/bridge/bangumi/sync-progress", b.bangumiSyncProgress)
+	mux.HandleFunc("/app/fntvplus/api/bridge/bangumi/sync-status", b.bangumiSyncStatus)
+	mux.HandleFunc("/app/fntvplus/api/bridge/bangumi/probe", b.bangumiProbe)
 	mux.HandleFunc("/app/fntvplus/api/bridge/douban/watched", b.doubanWatched)
 	mux.HandleFunc("/app/fntvplus/api/bridge/douban/enrich", b.doubanEnrich)
 	mux.HandleFunc("/app/fntvplus/api/bridge/douban/status", b.doubanStatus)
@@ -831,7 +836,7 @@ func (b *Bridge) traktSyncWatched(w http.ResponseWriter, r *http.Request) {
 		"sort_type": "DESC", "sort_column": "create_time",
 		"exclude_grouped_video": 1, "page": 1, "page_size": 200,
 	})
-	list, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", json.RawMessage(body), req.Cookie)
+	list, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/item/list", json.RawMessage(body), browserFnOSCall(r, req.Cookie))
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "item/list 失败: " + err.Error()})
 		return
@@ -1404,7 +1409,27 @@ func (b *Bridge) doubanStatus(w http.ResponseWriter, r *http.Request) {
 /* ========== 内部工具 ========== */
 
 // callFnOSJSON 带签名 + cookie 的 fnOS 调用，解析 JSON 返回。
-func (b *Bridge) callFnOSJSON(method, path string, body json.RawMessage, cookie string) (map[string]any, error) {
+// fnOSCall 是服务端调用 fnOS 上游所需的浏览器侧凭证（[访问码] 门禁适配）。
+// 门禁开启时上游按 Web 主机校验解锁 Cookie（os-access-code，HttpOnly）——
+// document.cookie 里拿不到它，必须用浏览器 fetch 自动附带的全量 Cookie 头；
+// 且校验绑定 Host，回环上游请求若带 127.0.0.1 形态 Host 会被重新门禁
+// （与 makeProxy 的 Host 保留同一教训，用户报障「输完访问码后无限弹门禁页」）。
+type fnOSCall struct {
+	Cookie string
+	Host   string
+}
+
+// browserFnOSCall 从入站请求构建 fnOSCall：优先浏览器自动附带的全量 Cookie 头
+// （含 HttpOnly 门禁/会话 Cookie），缺失时回落 body 里带来的 cookie（老 payload 兼容）。
+func browserFnOSCall(r *http.Request, fallbackCookie string) fnOSCall {
+	c := r.Header.Get("Cookie")
+	if c == "" {
+		c = fallbackCookie
+	}
+	return fnOSCall{Cookie: c, Host: r.Host}
+}
+
+func (b *Bridge) callFnOSJSON(method, path string, body json.RawMessage, call fnOSCall) (map[string]any, error) {
 	var bodyReader io.Reader
 	dataJSON := ""
 	if len(body) > 0 {
@@ -1417,8 +1442,12 @@ func (b *Bridge) callFnOSJSON(method, path string, body json.RawMessage, cookie 
 	}
 	req.Header.Set("Authx", genAuthx(path, dataJSON))
 	req.Header.Set("Content-Type", "application/json")
-	if cookie != "" {
-		req.Header.Set("Cookie", cookie)
+	if call.Cookie != "" {
+		req.Header.Set("Cookie", call.Cookie)
+	}
+	// [访问码] 保留浏览器原始 Host：上游按 Web 主机校验解锁 Cookie（同 makeProxy）
+	if call.Host != "" {
+		req.Host = call.Host
 	}
 	resp, err := b.client.Do(req)
 	if err != nil {

@@ -93,9 +93,9 @@ func libMediaType(ty string) string {
 }
 
 // personCreditsUncached 全量作品真抓取（桌面版 collectCreditsUncached 同逻辑）。
-func (b *Bridge) personCreditsUncached(guid, cookie string) map[string]any {
+func (b *Bridge) personCreditsUncached(guid string, call fnOSCall) map[string]any {
 	// ① person 详情 → imdbId / name
-	pd, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/person/"+guid, nil, cookie)
+	pd, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/person/"+guid, nil, call)
 	if err != nil {
 		return map[string]any{"error": "fnOS 请求失败：" + err.Error()}
 	}
@@ -120,7 +120,7 @@ func (b *Bridge) personCreditsUncached(guid, cookie string) map[string]any {
 			"person_guid": guid, "page": 1, "page_size": 200, "job": job,
 			"sort_column": "update_time", "sort_type": "desc",
 		})
-		j, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/person/item/list", body, cookie)
+		j, err := b.callFnOSJSON(http.MethodPost, "/v/api/v1/person/item/list", body, call)
 		if err != nil {
 			continue // 单 job 失败忽略
 		}
@@ -271,8 +271,8 @@ func (b *Bridge) personCreditsUncached(guid, cookie string) map[string]any {
 }
 
 // personBriefUncached 演员简报（职业分类/生日/出生地/代表作前二；桌面版 fetchBriefUncached 同逻辑）。
-func (b *Bridge) personBriefUncached(guid, cookie string) map[string]any {
-	pd, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/person/"+guid, nil, cookie)
+func (b *Bridge) personBriefUncached(guid string, call fnOSCall) map[string]any {
+	pd, err := b.callFnOSJSON(http.MethodGet, "/v/api/v1/person/"+guid, nil, call)
 	if err != nil {
 		return map[string]any{"error": "fnOS 请求失败：" + err.Error()}
 	}
@@ -371,7 +371,7 @@ func (b *Bridge) personCredits(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c)
 		return
 	}
-	out := b.personCreditsUncached(req.GUID, req.Cookie)
+	out := b.personCreditsUncached(req.GUID, browserFnOSCall(r, req.Cookie))
 	if out["error"] == nil {
 		personCacheSet(key, out, personCreditsTTL) // 失败结果不缓存（桌面版同语义）
 	}
@@ -390,7 +390,7 @@ func (b *Bridge) personBrief(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, c)
 		return
 	}
-	out := b.personBriefUncached(req.GUID, req.Cookie)
+	out := b.personBriefUncached(req.GUID, browserFnOSCall(r, req.Cookie))
 	if out["error"] == nil {
 		personCacheSet(key, out, personBriefTTL)
 	}
