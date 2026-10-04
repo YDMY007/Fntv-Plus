@@ -1676,19 +1676,19 @@ function sourceLabel(s: string): string {
     if (s === 'bangumi') return '番剧区（B站正版）';
     if (s === 'video') return '视频区（UP主搬运）';
     if (s === 'danmu_api+bilibili') return '自建源 + B站（低于阈值聚合）';
+    if (s === 'dandanplay') return '弹弹play';
     return s || '未知';
 }
 
 // [lc-1226] 三来源的静态元信息（顺序 = 实际尝试顺序）。
-// 弹弹play 只在 MPV 链路参与（它是 MPV 的 Lua 脚本）——网页播放器这条链路上没有它，
-// 故这里标「不适用」而不是伪造一条「未命中」。
-// [lc-1228] 顺序改为「自建源 → 内置 B站 → 弹弹play(兜底)」：弹弹play 的弹幕库在内置凭证下
-// 只作兜底（官方约定要求按需使用），其剧集识别仍在 MPV 最前（网页链路不适用）。
+// [lc-1228→lc-1302] 顺序为「自建源 → 内置 B站 → 弹弹play(兜底)」：弹弹play 的弹幕库在
+// 内置凭证下按需使用（官方约定）；自 lc-1302 起网页链路也接入兜底（此前仅 MPV），
+// 主进程 biliRunner 在 B站 也未命中时自动降级到弹弹play。
 // name/role 存中文原文，渲染时才过 t()（与设置面板文案同一套词条）。
-const DM_SOURCES: { id: string; name: string; role: string; mpvOnly?: boolean }[] = [
+const DM_SOURCES: { id: string; name: string; role: string }[] = [
     { id: 'danmu_api', name: '自建弹幕接口（danmu_api）', role: '首选源：只认精确匹配，命中即用' },
     { id: 'bilibili', name: '内置 B站', role: '次选源：模糊匹配，与 MPV 弹幕同源' },
-    { id: 'dandanplay', name: '弹弹play', role: '兜底源（仅 MPV）：前两者都拿不到弹幕时才启用', mpvOnly: true },
+    { id: 'dandanplay', name: '弹弹play', role: '兜底源：前两者都拿不到弹幕时才启用' },
 ];
 
 /** 单个来源该显示什么结论：优先用主进程回传的实测结果，没有则按配置状态如实说明。 */
@@ -1929,14 +1929,12 @@ function renderDetailRows(): void {
     const traces: any[] = Array.isArray((meta as any).sources) ? (meta as any).sources : [];
     const srcBox = document.createElement('div');
     srcBox.className = 'fntv-dm-srcs';
-    // 网页链路实际只有「自建源 → 内置 B站」两跳，弹弹play 是 MPV 的 Lua 脚本（不在这条链路上）。
+    // 网页链路三源：自建源 → 内置 B站 → 弹弹play（兜底，lc-1302 起参与网页链路）。
     const isSelfHosted = /^自建源/.test(String(meta.source || ''));
     for (const def of DM_SOURCES) {
         const trace = traces.find((x) => x && x.id === def.id);
         let fb = t(def.role);
-        if (def.id === 'dandanplay') {
-            fb = t('不适用于网页播放器（弹弹play 由 MPV 侧使用）');
-        } else if (def.id === 'bilibili') {
+        if (def.id === 'bilibili') {
             fb = isSelfHosted ? t('自建源已命中，无需兜底') : t(def.role);
         } else if (def.id === 'danmu_api' && isSelfHosted) {
             fb = t('本次弹幕即由此源提供');
@@ -1956,7 +1954,7 @@ function renderDetailRows(): void {
         txt.className = 'fntv-dm-src-txt';
         const nm = document.createElement('div');
         nm.className = 'fntv-dm-src-name';
-        nm.textContent = def.mpvOnly ? t('弹弹play（仅 MPV）') : t(def.name);
+        nm.textContent = t(def.name);
         const nt = document.createElement('div');
         nt.className = 'fntv-dm-src-note' + (st.err ? ' fntv-dm-src-err' : '');
         nt.textContent = st.note;
@@ -2021,9 +2019,12 @@ function renderDetailRows(): void {
     const tip = document.createElement('div');
     // 底部说明必须跟着实际来源走：自建源命中时写「数据来源：B站」是错信息（用户正是看着这句报的匹配 bug）。
     // preload 插件独立加载、import 不到主进程 danmuApi.isSelfHostedSource，只能按来源标签前缀判断。
-    tip.textContent = /^自建源/.test(String(meta.source || '')) || meta.source === 'danmu_api+bilibili'
+    const srcStr = String(meta.source || '');
+    tip.textContent = /^自建源/.test(srcStr) || srcStr === 'danmu_api+bilibili'
         ? '数据来源：自建弹幕接口 danmu_api（只认精确匹配，低于聚合阈值自动叠加内置B站）'
-        : '数据来源：B站（与 MPV 弹幕同源）';
+        : srcStr === 'dandanplay'
+            ? '数据来源：弹弹play 开放 API（兜底源，内置凭证按需使用）'
+            : '数据来源：B站（与 MPV 弹幕同源）';
     Object.assign(tip.style, {
         paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',
         color: 'rgba(245,245,247,.4)', fontSize: '12px', lineHeight: '1.5',

@@ -296,7 +296,7 @@ const EN: Record<string, string> = {
     '③ 弹弹play': '③ Dandanplay',
     '首选源。开启并填好地址后最先取弹幕，只认精确匹配（番名与季号完全一致），命中即用。': 'Primary source. Fetches danmaku first once enabled with a valid address; accepts exact matches only (title and season must match exactly).',
     '次选源。自建源未命中时用它：按番名+集数匹配 B站 番剧区/视频区，是本应用一直以来的默认链路。': 'Secondary source. Used when the self-hosted API misses: matches the Bilibili bangumi/video sections by title + episode number — the default path this app has always used.',
-    '兜底源（仅 MPV）。先用来识别剧集拿到规范番名；其弹幕库只在前两者都拿不到弹幕时才取，避免过度消耗内置共享配额。填了自己的专属凭证则立即参与。': 'Fallback (MPV only). Used first to identify the episode and obtain a canonical title; its danmaku library is fetched only when neither source above finds danmaku, avoiding overuse of the shared built-in quota. With your own credential it participates immediately.',
+    '兜底源：前两者都拿不到弹幕时才启用': 'Fallback: fetched only when neither source above finds danmaku.',
     '取弹幕按 ① → ② → ③ 依次尝试，命中即停，全部未命中才判定为无弹幕。弹弹play 的剧集识别在最前（它提供规范番名）。播放时可在 MPV「B站弹幕配置」或网页播放器弹幕弹窗的「来源详情」里逐条查看各源的结果。': 'Danmaku is fetched in order ① → ② → ③, stopping at the first hit; only if all miss is it treated as "no danmaku". Dandanplay\'s episode identification runs first (it supplies the canonical title). During playback, see per-source results in MPV\'s "Bilibili danmaku config" or the web player\'s danmaku popup → "Source details".',
     '弹幕按以下顺序依次尝试，命中即停：': 'Danmaku sources are tried in this order, stopping at the first hit:',
     '弹弹play（仅 MPV）': 'Dandanplay (MPV only)',

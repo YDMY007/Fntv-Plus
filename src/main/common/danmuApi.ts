@@ -334,8 +334,9 @@ function seasonToInt(s: string): number {
  */
 const SEASON_MARK_RE = /第\s*(0*\d{1,2}|[一二三四五六七八九十]{1,3})\s*[季部]|season\s*0*(\d{1,2})|\bs\s*0*(\d{1,2})\b/gi;
 
-/** 拆「作品主名 + 季号」：季号写法多样，先剥季号再归一化，两边才在同一口径下可比。 */
-function splitSeason(raw: string): { name: string; season: number } {
+/** 拆「作品主名 + 季号」：季号写法多样，先剥季号再归一化，两边才在同一口径下可比。
+ *  [lc-1302] 导出：弹弹play 候选准入档位（dandanplay.ts ddpTier）用同一口径比较主名与季号。 */
+export function splitSeason(raw: string): { name: string; season: number } {
     let season = 0;
     const body = String(raw || '').replace(SEASON_MARK_RE, (_m, cn, en, sn) => {
         if (!season) season = seasonToInt(cn || en || sn);

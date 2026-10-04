@@ -3,6 +3,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import logger from '../../modules/logger';
 import * as danmuApi from './danmuApi';
+import * as dandanplay from './dandanplay';
 const log = logger.component('biliRunner');
 
 /**
@@ -286,6 +287,10 @@ export async function runBiliDanmaku(
                         detail: biliRes.matched_title ? `命中《${biliRes.matched_title}》` : '匹配成功',
                         count: biliLines.length,
                     });
+                    traces.push({
+                        id: 'dandanplay', attempted: false, used: false,
+                        skippedReason: '前两源已合并命中，未启用（兜底源按需使用）',
+                    });
                     return {
                         ...biliRes,
                         danmaku_count: mergedCount,
@@ -319,6 +324,10 @@ export async function runBiliDanmaku(
             id: 'bilibili', attempted: false, used: false,
             skippedReason: '自建源已命中，无需兜底',
         });
+        traces.push({
+            id: 'dandanplay', attempted: false, used: false,
+            skippedReason: '自建源已命中，未启用（兜底源按需使用）',
+        });
         return { ...pre, sources: traces };
     }
     traces.push({
@@ -334,6 +343,11 @@ export async function runBiliDanmaku(
             id: 'bilibili', attempted: false, used: false,
             skippedReason: '「B站弹幕搜索」已关闭（网页弹幕设置里可重新开启）',
         });
+        // [lc-1302] 用户显式关掉 B站 兜底 = 只用自建源：弹弹play 一并跳过（尊重配置，不偷偷扩源）
+        traces.push({
+            id: 'dandanplay', attempted: false, used: false,
+            skippedReason: '「B站弹幕搜索」已关闭，未启用（兜底源按需使用）',
+        });
         return { ok: false, error: 'B站弹幕搜索未启用', sources: traces };
     }
     try {
@@ -345,6 +359,20 @@ export async function runBiliDanmaku(
                 count: r.danmaku_count,
             }
             : { id: 'bilibili', attempted: true, used: false, error: r.error || '未知错误' });
+        // [lc-1302] B站 也未命中 → 弹弹play 兜底（官方约定弹幕库按需使用，故置于两源之后；
+        //   命中即写 XML 到同一 out，返回同契约结果。失败/未命中保留 B站 的失败根因原样返回。）
+        if (!r.ok) {
+            const ddp = await dandanplay.autoFetchBili(String(title || ''), Number(ep) || 0, Number(season) || 0, out);
+            if (ddp.ok) {
+                traces.push({
+                    id: 'dandanplay', attempted: true, used: true,
+                    detail: ddp.matched_title ? `命中《${ddp.matched_title}》` : '匹配成功',
+                    count: ddp.danmaku_count,
+                });
+                return { ...ddp, sources: traces };
+            }
+            traces.push({ id: 'dandanplay', attempted: true, used: false, error: ddp.error || '弹弹play 未命中' });
+        }
         return { ...r, sources: traces };
     } catch (e: any) {
         log.warn('[biliRunner] run 异常: ' + (e?.message || e));
@@ -420,6 +448,11 @@ export async function runBiliDanmakuCandidates(
         .candidates(String(title || ''), Number(ep) || 0, Number(season) || 0)
         .catch(() => null);
 
+    // [lc-1302] 弹弹play 候选（ddp:<episodeId> 伪 id）与自建源并列参与手动搜索
+    const ddpP: Promise<BiliCandidate[]> = dandanplay
+        .candidates(String(title || ''), Number(ep) || 0, Number(season) || 0)
+        .catch(() => [] as BiliCandidate[]);
+
     const biliP = (async (): Promise<BiliCandidatesResult> => {
         let mod: any;
         try {
@@ -443,21 +476,23 @@ export async function runBiliDanmakuCandidates(
         }
     })();
 
-    const [selfCands, biliRes] = await Promise.all([selfP, biliP]);
+    const [selfCands, ddpCands, biliRes] = await Promise.all([selfP, ddpP, biliP]);
     const selfList: BiliCandidate[] = Array.isArray(selfCands) ? selfCands : [];
+    const ddpList: BiliCandidate[] = Array.isArray(ddpCands) ? ddpCands : [];
     const biliList: BiliCandidate[] = (biliRes && biliRes.ok && Array.isArray(biliRes.candidates))
         ? biliRes.candidates : [];
 
     const merged: BiliCandidate[] = [];
     selfList.forEach((c, i) => { c.index = i; merged.push(c); });
-    biliList.forEach((c, i) => { c.index = selfList.length + i; merged.push(c); });
+    ddpList.forEach((c, i) => { c.index = selfList.length + i; merged.push(c); });
+    biliList.forEach((c, i) => { c.index = selfList.length + ddpList.length + i; merged.push(c); });
 
     const selfStatus = {
         active: danmuApi.isActive(),
         matched: selfList.length > 0,
         count: selfList.length,
     };
-    log.info(`[biliRunner] 候选合并：自建源 ${selfList.length} 个（${selfStatus.active ? '已启用' : '未启用'}） + B站 ${biliList.length} 个`);
+    log.info(`[biliRunner] 候选合并：自建源 ${selfList.length} 个（${selfStatus.active ? '已启用' : '未启用'}） + 弹弹play ${ddpList.length} 个 + B站 ${biliList.length} 个`);
 
     if (!merged.length) {
         return { ok: false, error: (biliRes && biliRes.error) || '未找到候选', selfHosted: selfStatus };
@@ -482,6 +517,13 @@ export async function runBiliDanmakuByBvid(
     //   这条分支【不降级】：该 id 不是 B站 bvid，拿给内置链路必然失败，直接回错误更有诊断价值。
     const dmapiId = danmuApi.parsePrefixedId(bvid);
     if (dmapiId) return danmuApi.fetchById(dmapiId, String(title || ''), out, seriesKey);
+    // [lc-1302] 弹弹play 伪 id（`ddp:<episodeId>`）按 episodeId 直取，同样不降级；
+    //   单集 id 不能代表整季，不做源锁定（后续集由自动路径重新匹配）。
+    if (String(bvid).startsWith(dandanplay.ID_PREFIX)) {
+        const ddpId = Number(String(bvid).slice(dandanplay.ID_PREFIX.length));
+        if (!ddpId || ddpId <= 0) return { ok: false, error: '弹弹play 候选 id 无效' };
+        return dandanplay.fetchById(ddpId, String(title || ''), out);
+    }
     let mod: any;
     try {
         mod = loadModule();
