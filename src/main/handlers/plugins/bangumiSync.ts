@@ -129,6 +129,59 @@ const SUBJECT_COLLECT = 2; // 看过
 // 章节收藏类型：0=未 1=想看 2=看过
 const EPISODE_WATCHED = 2;
 
+// ---- 失败原因归类（网络 / 密钥 / 限流 / 服务端 / 其他）----
+// 背景（2026-10-03 真机定位）：api.bgm.tv 已被墙——系统 DNS 与公共 UDP DNS（223.5.5.5 等）
+// 均被注入假应答（Facebook 段 IP），拿到真实 IP 后 TLS 握手仍被 SNI 阻断（同 IP 换 SNI 可通）。
+// 「免梯子直连」的两条腿（公共 DNS + 直连 IP）全部失效，唯一出路是自定义代理。
+// 此前失败只打 axios 原始 message，用户分不清是网络还是 Token 问题——现在统一归类并在
+// 日志里带 [网络]/[密钥] 标签 + 处置建议，同步面板同步展示。
+type BgmErrKind = 'auth' | 'rate' | 'server' | 'network' | 'other';
+
+interface BgmErrInfo {
+    kind: BgmErrKind;
+    /** 中文标签：网络 / 密钥 / 限流 / 服务 / 请求 */
+    label: string;
+    /** 简短原因（如「连接被重置」「HTTP 401」） */
+    detail: string;
+    /** 处置建议 */
+    hint: string;
+}
+
+/** axios 错误 → 归类。有响应看状态码；无响应按错误码细分网络层原因。 */
+function classifyBgmError(e: any): BgmErrInfo {
+    const status: number = (e && e.response && e.response.status) || 0;
+    const code: string = String((e && e.code) || '');
+    const msg = String((e && e.message) || e || '');
+    if (status === 401 || status === 403) {
+        return { kind: 'auth', label: '密钥', detail: `HTTP ${status}`, hint: 'Token 失效/未授权(需 write:collection 权限)——请到 next.bgm.tv/demo/access-token 重新生成并更新' };
+    }
+    if (status === 429) return { kind: 'rate', label: '限流', detail: 'HTTP 429', hint: '请求过于频繁，稍后自动重试' };
+    if (status >= 500) return { kind: 'server', label: '服务', detail: `HTTP ${status}`, hint: 'Bangumi 服务端异常，稍后自动重试' };
+    if (status >= 400) return { kind: 'other', label: '请求', detail: `HTTP ${status}`, hint: msg.slice(0, 120) };
+    const hay = code + ' ' + msg;
+    if (/EAI_AGAIN|ENOTFOUND|getaddrinfo/i.test(hay)) {
+        return { kind: 'network', label: '网络', detail: 'DNS 解析失败', hint: 'DNS 无法解析 api.bgm.tv(可能被污染)，请配置自定义代理' };
+    }
+    if (/ECONNRESET|EPIPE|socket hang up|Connection reset/i.test(hay)) {
+        return { kind: 'network', label: '网络', detail: '连接被重置', hint: '疑似被墙(SNI 阻断)——「免梯子直连」无法绕过，请在设置面板配置自定义代理' };
+    }
+    if (/ECONNABORTED|ETIMEDOUT|timeout/i.test(hay)) {
+        return { kind: 'network', label: '网络', detail: '连接超时', hint: '无法连通 api.bgm.tv(疑似被墙或网络不通)，请配置自定义代理' };
+    }
+    if (/ECONNREFUSED/i.test(hay)) {
+        return { kind: 'network', label: '网络', detail: '连接被拒绝', hint: '目标不可达；若已配代理请检查代理是否可用' };
+    }
+    if (/EPROTO|CERT|SSL|TLS|OPENSSL/i.test(hay)) {
+        return { kind: 'network', label: '网络', detail: 'TLS 握手失败', hint: '疑似连接被劫持/阻断，请配置自定义代理' };
+    }
+    return { kind: 'network', label: '网络', detail: (code || msg).slice(0, 80) || '未知网络错误', hint: '网络异常，请检查网络或配置自定义代理' };
+}
+
+/** 统一失败日志：[Bangumi][网络] 搜索「xx」失败:连接被重置 —— 疑似被墙… */
+function logBgmFailure(scope: string, info: BgmErrInfo): void {
+    log.warn(`[Bangumi][${info.label}] ${scope}失败:${info.detail} —— ${info.hint}`);
+}
+
 /** Bangumi 官方要求：非浏览器请求须带开发者ID/应用名；开源项目附项目主页；分发应用附版本号 */
 function bangumiUA(): string {
     let ver = 'unknown';
@@ -206,23 +259,25 @@ interface BgSubject { id: number; name: string; name_cn: string; type: number; e
 interface BgEpisode { id: number; ep: number; sort: number; name: string; name_cn: string; type: number; }
 
 /** [lc-1173] 搜索原始请求。authFail=true 表示 HTTP 401/403（Token 失效/未授权），与「确认无结果」区分：
- *  axios 对 4xx 会 throw，旧代码把它和空结果一起静默吞掉，Token 失效时日志只说「无结果」误导排查。 */
-async function searchSubjectRaw(keyword: string): Promise<{ items: BgSubject[]; authFail: boolean }> {
+ *  axios 对 4xx 会 throw，旧代码把它和空结果一起静默吞掉，Token 失效时日志只说「无结果」误导排查。
+ *  errInfo 携带归类后的失败原因（网络/密钥/限流…），供 syncOnProgress 记录到「最近同步状态」。 */
+async function searchSubjectRaw(keyword: string): Promise<{ items: BgSubject[]; authFail: boolean; errInfo: BgmErrInfo | null }> {
     try {
         const resp = await http().post('/v0/search/subjects?limit=10', {
             keyword,
             sort: 'match',
             filter: { type: [2, 6] }, // 2=动画 6=三次元(电视剧/真人)
         });
-        return { items: (resp.data && resp.data.data) || [], authFail: false };
+        return { items: (resp.data && resp.data.data) || [], authFail: false, errInfo: null };
     } catch (e: any) {
         const status = e && e.response && e.response.status;
         if (status === 401 || status === 403) {
-            log.warn(`搜索「${keyword}」被拒绝(HTTP ${status})：Bangumi Token 失效/未授权，请在设置面板重新生成并填入`);
-            return { items: [], authFail: true };
+            logBgmFailure(`搜索「${keyword}」`, classifyBgmError(e));
+            return { items: [], authFail: true, errInfo: classifyBgmError(e) };
         }
-        log.warn(`搜索条目失败「${keyword}」:`, e && e.message);
-        return { items: [], authFail: false };
+        const info = classifyBgmError(e);
+        logBgmFailure(`搜索「${keyword}」`, info);
+        return { items: [], authFail: false, errInfo: info };
     }
 }
 
@@ -272,19 +327,26 @@ async function fallbackSubjectFromCalendar(keyword: string): Promise<number | nu
 
 /** 按标题搜索条目，返回最佳匹配的 subject_id（优先动画 type=2；eps 接近预期者） */
 async function searchSubject(tvTitle: string, expectedEps: number): Promise<number | null> {
+    const r = await searchSubjectDetailed(tvTitle, expectedEps);
+    return r.id;
+}
+
+/** 同 searchSubject，但把失败原因（网络/密钥/未匹配）一并带回，供同步链路记录状态 */
+async function searchSubjectDetailed(tvTitle: string, expectedEps: number): Promise<{ id: number | null; errInfo: BgmErrInfo | null }> {
     const cached = subjectCache.get(tvTitle);
-    if (cached) return cached;
-    const { items } = await searchSubjectRaw(tvTitle);
+    if (cached) return { id: cached, errInfo: null };
+    const { items, errInfo } = await searchSubjectRaw(tvTitle);
     if (items.length === 0) {
+        if (errInfo) return { id: null, errInfo }; // 请求层失败（网络/密钥），不是「确认无结果」
         // [lc-1173] 搜索确认无结果 → 每日放送兜底（Bangumi 条目名与刮削标题常有出入）
         const fb = await fallbackSubjectFromCalendar(tvTitle);
         if (fb) {
             subjectCache.set(tvTitle, fb);
             scheduleSave();
-            return fb;
+            return { id: fb, errInfo: null };
         }
-        log.warn(`搜索「${tvTitle}」无结果`);
-        return null;
+        log.warn(`[Bangumi][未匹配] 搜索「${tvTitle}」无结果（搜索+每日放送兜底均未命中）——多为刮削标题与 Bangumi 条目名差异过大`);
+        return { id: null, errInfo: { kind: 'other', label: '未匹配', detail: '搜索无结果', hint: '刮削标题与 Bangumi 条目名差异过大，可到 bgm.tv 搜原名核对' } };
     }
     // 排序：优先 type=2(动画)；再按 eps 与预期差距小者；都没有 eps 信息则取首个
     const scored = items.map(s => ({
@@ -296,14 +358,14 @@ async function searchSubject(tvTitle: string, expectedEps: number): Promise<numb
     subjectCache.set(tvTitle, best.id);
     scheduleSave();
     log.info(`搜索「${tvTitle}」命中 subject ${best.id}（${best.name_cn || best.name}，type=${best.type}，eps=${best.eps}）`);
-    return best.id;
+    return { id: best.id, errInfo: null };
 }
 
-/** 取条目的正篇剧集列表，找 ep==epNum 的 episode_id */
-async function getEpisodeId(subjectId: number, epNum: number): Promise<number | null> {
+/** 取条目的正篇剧集列表，找 ep==epNum 的 episode_id（失败原因随 errInfo 带回） */
+async function getEpisodeId(subjectId: number, epNum: number): Promise<{ id: number | null; errInfo: BgmErrInfo | null }> {
     const key = `${subjectId}|${epNum}`;
     const cached = episodeCache.get(key);
-    if (cached) return cached;
+    if (cached) return { id: cached, errInfo: null };
     try {
         const resp = await http().get('/v0/episodes', {
             params: { subject_id: subjectId, type: 0, limit: 200 }, // type=0 正篇
@@ -313,40 +375,116 @@ async function getEpisodeId(subjectId: number, epNum: number): Promise<number | 
         let hit = eps.find(e => Number(e.ep) === epNum);
         if (!hit) hit = eps.find(e => Number(e.sort) === epNum);
         if (!hit) {
-            log.warn(`subject ${subjectId} 未找到第 ${epNum} 集（共 ${eps.length} 集）`);
-            return null;
+            log.warn(`[Bangumi][未匹配] subject ${subjectId} 未找到第 ${epNum} 集（共 ${eps.length} 集）`);
+            return { id: null, errInfo: { kind: 'other', label: '未匹配', detail: `条目内无第 ${epNum} 集`, hint: '集号与 Bangumi 分集对不上（可能是 SP/特别篇）' } };
         }
         episodeCache.set(key, hit.id);
         log.info(`subject ${subjectId} 第 ${epNum} 集 → episode_id ${hit.id}`);
-        return hit.id;
+        return { id: hit.id, errInfo: null };
     } catch (e: any) {
-        log.warn(`取剧集列表失败 subject ${subjectId}:`, e && e.message);
-        return null;
+        const info = classifyBgmError(e);
+        logBgmFailure(`取剧集列表 subject ${subjectId}`, info);
+        return { id: null, errInfo: info };
     }
 }
 
-/** 标记条目收藏状态（3=在看 / 2=看过），标集前必须先收藏 */
-async function markSubject(subjectId: number, type: number): Promise<boolean> {
+/** 标记条目收藏状态（3=在看 / 2=看过），标集前必须先收藏（失败原因随 errInfo 带回） */
+async function markSubject(subjectId: number, type: number): Promise<{ ok: boolean; errInfo: BgmErrInfo | null }> {
     try {
         const resp = await http().post(`/v0/users/-/collections/${subjectId}`, { type });
         log.info(`标记条目 ${subjectId} → type=${type}（${type === SUBJECT_DOING ? '在看' : '看过'}）status=${resp.status}`);
-        return resp.status < 300;
+        return { ok: resp.status < 300, errInfo: null };
     } catch (e: any) {
-        log.warn(`标记条目失败 ${subjectId}:`, e && e.response && e.response.status, e && e.message);
-        return false;
+        const info = classifyBgmError(e);
+        logBgmFailure(`标记条目 ${subjectId}（${type === SUBJECT_DOING ? '在看' : '看过'}）`, info);
+        return { ok: false, errInfo: info };
     }
 }
 
-/** 标记单集为看过（type=2）。须先收藏条目，否则 400 subject not collected */
-async function markEpisodeWatched(episodeId: number): Promise<boolean> {
+/** 标记单集为看过（type=2）。须先收藏条目，否则 400 subject not collected（失败原因随 errInfo 带回） */
+async function markEpisodeWatched(episodeId: number): Promise<{ ok: boolean; errInfo: BgmErrInfo | null }> {
     try {
         const resp = await http().put(`/v0/users/-/collections/-/episodes/${episodeId}`, { type: EPISODE_WATCHED });
         log.info(`标记单集 ${episodeId} 看过 status=${resp.status}`);
-        return resp.status < 300;
+        return { ok: resp.status < 300, errInfo: null };
     } catch (e: any) {
-        log.warn(`标记单集失败 ${episodeId}:`, e && e.response && e.response.status, e && e.message);
-        return false;
+        const info = classifyBgmError(e);
+        logBgmFailure(`标记单集 ${episodeId}`, info);
+        return { ok: false, errInfo: info };
     }
+}
+
+// ---- 最近同步状态（供设置面板展示 + 磁盘持久化，重启不丢）----
+// 只在 syncOnProgress 链路的落点上更新（成功/失败都记），meta 刮削类请求不写入，
+// 避免自定义刮削的正常回落污染「同步状态」。
+interface BgmSyncStatus {
+    ts: number;
+    ok: boolean;
+    /** 失败阶段：search/episodes/collect-doing/collect-watched/episode-watched */
+    stage: string;
+    /** 归类标签：网络/密钥/限流/服务/未匹配/请求 */
+    label: string;
+    /** 简短原因 + 建议 */
+    detail: string;
+}
+let _lastStatus: BgmSyncStatus | null = null;
+let _statusFile = '';
+try { _statusFile = path.join(app.getPath('userData'), 'bangumi_sync_status.json'); } catch (e) { _statusFile = ''; }
+
+function loadStatus(): void {
+    if (!_statusFile) return;
+    try {
+        if (fs.existsSync(_statusFile)) _lastStatus = JSON.parse(fs.readFileSync(_statusFile, 'utf8'));
+    } catch (e) { /* 文件损坏按无记录处理 */ }
+}
+
+function recordSyncStatus(ok: boolean, stage: string, label: string, detail: string): void {
+    _lastStatus = { ts: Date.now(), ok, stage, label, detail };
+    try {
+        if (_statusFile) fs.writeFileSync(_statusFile, JSON.stringify(_lastStatus));
+    } catch (e) { /* 写失败不影响同步 */ }
+}
+
+/**
+ * 连接诊断探针（设置面板「测试连接」按钮调用）：
+ *  1) GET /calendar（公开端点，无需 Token）→ 测网络链路（按当前传输方式：代理/免梯子直连/系统直连）；
+ *  2) 有 Token 再 GET /v0/me → 测 Token 是否有效。
+ *  返回 {transport, network:{ok,kind?,detail,latencyMs?,hint?}, token:{checked,ok?,detail}}。
+ */
+export async function probeBangumi(): Promise<any> {
+    const transport = proxyModule.resolveProxyAgent()
+        ? '自定义代理'
+        : (fnConfig.getTmdbDirectConnect() ? '免梯子直连(公共DNS)' : '系统直连');
+    let network: any;
+    const t0 = Date.now();
+    try {
+        const cfg: any = { timeout: 8000, headers: { 'User-Agent': bangumiUA() } };
+        withTransport(cfg); // 与真实同步请求同一条传输链路，测的才是实际会走的路
+        await axios.get(`${BANGUMI_API}/calendar`, cfg);
+        network = { ok: true, detail: 'HTTP 200', latencyMs: Date.now() - t0 };
+    } catch (e: any) {
+        const info = classifyBgmError(e);
+        logBgmFailure('[探针] 网络连通性(calendar)', info);
+        network = { ok: false, kind: info.kind, detail: info.detail, hint: info.hint };
+    }
+
+    const token = fnConfig.getBangumiToken();
+    let tok: any;
+    if (!token) {
+        tok = { checked: false, detail: '未配置 Token' };
+    } else if (!network.ok) {
+        tok = { checked: false, detail: '网络不通，未验证（先解决网络）' };
+    } else {
+        try {
+            await http().get('/v0/me', { timeout: 8000 });
+            tok = { checked: true, ok: true, detail: 'Token 有效' };
+        } catch (e: any) {
+            const info = classifyBgmError(e);
+            logBgmFailure('[探针] Token 校验(/v0/me)', info);
+            tok = { checked: true, ok: false, detail: `${info.detail}（${info.hint}）` };
+        }
+    }
+    return { transport, network, token: tok };
 }
 
 /**
@@ -402,17 +540,25 @@ export async function syncOnProgress(
         // （missSet 检查已提前，不会刷屏）；网络类失败与「在看」标记失败不加 missSet，下次进度重试。
         const mediaValid = duration > 0;
         if (mediaValid && !subjectDoingMarked.has(itemGuid)) {
-            const subjectId = await searchSubject(searchTitle, totalEps);
-            if (!subjectId) {
-                missSet.add(itemGuid);
-                log.warn(`[Bangumi] 无法定位「${searchTitle}」的条目（搜索+每日放送兜底均未命中），本会话跳过该集 guid=${itemGuid.slice(0, 8)}`);
+            const sr = await searchSubjectDetailed(searchTitle, totalEps);
+            if (!sr.id) {
+                // [2026-10-03] 只有「确认无结果」才本会话放弃；网络/密钥类失败下次进度事件重试
+                // （旧代码一律加 missSet，与下方注释宣称的「网络失败会重试」自相矛盾）。
+                const retryable = !!sr.errInfo && sr.errInfo.label !== '未匹配';
+                if (!retryable) missSet.add(itemGuid);
+                const ei = sr.errInfo;
+                recordSyncStatus(false, 'search', ei ? ei.label : '未匹配', `「${searchTitle}」${ei ? `${ei.detail} —— ${ei.hint}` : '搜索+每日放送兜底均未命中'}`);
+                log.warn(`[Bangumi] 无法定位「${searchTitle}」的条目${retryable ? '（网络/密钥类失败，下次进度重试）' : '，本会话跳过该集'} guid=${itemGuid.slice(0, 8)}`);
                 return;
             }
-            const ok = await markSubject(subjectId, SUBJECT_DOING);
-            if (ok) {
+            const doing = await markSubject(sr.id, SUBJECT_DOING);
+            if (doing.ok) {
                 subjectDoingMarked.add(itemGuid);
+                recordSyncStatus(true, 'collect-doing', '', `「${searchTitle}」已标在看`);
             } else {
-                log.warn(`[Bangumi] 标「在看」失败（subject ${subjectId}），下次进度事件重试`);
+                const ei = doing.errInfo;
+                recordSyncStatus(false, 'collect-doing', ei ? ei.label : '请求', `标「在看」失败（subject ${sr.id}）${ei ? `：${ei.detail}` : ''}`);
+                log.warn(`[Bangumi] 标「在看」失败（subject ${sr.id}），下次进度事件重试`);
                 return;
             }
         }
@@ -426,29 +572,41 @@ export async function syncOnProgress(
         if (missSet.has(itemGuid)) return;
 
         // 1. 搜条目拿 subject_id
-        const subjectId = await searchSubject(searchTitle, totalEps);
-        if (!subjectId) {
-            missSet.add(itemGuid);
+        const sr2 = await searchSubjectDetailed(searchTitle, totalEps);
+        if (!sr2.id) {
+            // 网络类失败同样不进 missSet，下次进度重试；「确认无结果」才本会话放弃
+            const retryable = !!sr2.errInfo && sr2.errInfo.label !== '未匹配';
+            if (!retryable) missSet.add(itemGuid);
+            const ei = sr2.errInfo;
+            if (ei) recordSyncStatus(false, 'search', ei.label, `「${searchTitle}」${ei.detail} —— ${ei.hint}`);
             return;
         }
+        const subjectId = sr2.id;
 
         // 电影(剧场版/无集信息)：无 episode 可标，直接把条目标为「看过」。
         // 此前这条路径会静默穿过到 !epNum 检查被无声吞掉 —— 99% 看完也没同步的根因。
         if (!isEpisodic) {
-            const ok = await markSubject(subjectId, SUBJECT_COLLECT);
-            if (ok) {
+            const r = await markSubject(subjectId, SUBJECT_COLLECT);
+            if (r.ok) {
                 markedSet.add(itemGuid);
+                recordSyncStatus(true, 'collect-watched', '', `「${searchTitle}」已标看过（电影，进度 ${percentage}%）`);
                 log.info(`已同步：「${searchTitle}」（电影，进度 ${percentage}%）→ Bangumi 条目看过`);
             } else {
+                const ei = r.errInfo;
+                recordSyncStatus(false, 'collect-watched', ei ? ei.label : '请求', `「${searchTitle}」标看过失败${ei ? `：${ei.detail}` : ''}`);
                 missSet.add(itemGuid);
             }
             return;
         }
 
         // 2. 取 episode_id
-        const episodeId = await getEpisodeId(subjectId, epNum);
-        if (!episodeId) {
-            missSet.add(itemGuid);
+        const er = await getEpisodeId(subjectId, epNum);
+        if (!er.id) {
+            // 网络类失败下次进度重试；「条目内无该集」才本会话放弃
+            const retryable = !!er.errInfo && er.errInfo.label !== '未匹配';
+            if (!retryable) missSet.add(itemGuid);
+            const ei = er.errInfo;
+            if (ei) recordSyncStatus(false, 'episodes', ei.label, `${tvTitle} 第 ${epNum} 集：${ei.detail} —— ${ei.hint}`);
             return;
         }
 
@@ -456,13 +614,18 @@ export async function syncOnProgress(
         await markSubject(subjectId, SUBJECT_DOING);
 
         // 4. 标该集看过
-        const ok = await markEpisodeWatched(episodeId);
-        if (!ok) {
-            log.warn(`标记 ${tvTitle} 第 ${epNum} 集失败，本会话不再重试`);
-            missSet.add(itemGuid);
+        const r = await markEpisodeWatched(er.id);
+        if (!r.ok) {
+            // 网络类失败（被墙超时/重置等）下次进度重试；请求类（400 等）本会话放弃
+            const retryable = !!r.errInfo && r.errInfo.label !== '请求';
+            if (!retryable) missSet.add(itemGuid);
+            const ei = r.errInfo;
+            recordSyncStatus(false, 'episode-watched', ei ? ei.label : '请求', `${tvTitle} 第 ${epNum} 集标记失败${ei ? `：${ei.detail} —— ${ei.hint}` : ''}`);
+            log.warn(`标记 ${tvTitle} 第 ${epNum} 集失败${retryable ? '（下次进度重试）' : '，本会话不再重试'}`);
             return;
         }
         markedSet.add(itemGuid);
+        recordSyncStatus(true, 'episode-watched', '', `${tvTitle} 第 ${epNum} 集 → 已标看过`);
         log.info(`已同步：${tvTitle} 第 ${epNum} 集 → Bangumi 看过`);
 
         // 5. 末集或飞牛已看完 → 条目标看过
@@ -748,6 +911,15 @@ export function init(): void {
     loadCache();
     loadDescCache();       // 加载每集简介缓存
     loadMetaCache();       // [多源刮削] 加载条目级元数据缓存
+    loadStatus();          // 加载「最近同步状态」（面板展示用，重启不丢）
+    // 注册 IPC：连接诊断探针（设置面板「测试连接」）——网络链路 + Token 有效性一次说清
+    registerHandler('bangumi:probe', async () => {
+        return probeBangumi();
+    }, { useHandle: true });
+    // 注册 IPC：最近一次同步结果（成功/失败 + 归类原因），供设置面板展示
+    registerHandler('bangumi:sync-status', async () => {
+        return _lastStatus;
+    }, { useHandle: true });
     // 注册 IPC：供 preload 选集页调用获取 Bangumi 每集简介
     registerHandler('bangumi:episode-descs', async (_e: any, tvTitle: string, totalEps: number) => {
         return fetchEpisodeDescs(tvTitle, totalEps);

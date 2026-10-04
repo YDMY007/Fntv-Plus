@@ -2630,6 +2630,76 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     bangumiStatus.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;';
     secBodyBangumi.appendChild(bangumiStatus);
 
+    // ── 最近同步状态 + 连接诊断（回答「标记失败是网络还是密钥」——2026-10-03 bgm.tv 被墙排查）──
+    const bangumiSyncLine = document.createElement('div');
+    bangumiSyncLine.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;line-height:1.5;';
+    bangumiSyncLine.textContent = t('最近同步：加载中…');
+    secBodyBangumi.appendChild(bangumiSyncLine);
+
+    const bangumiProbeRow = document.createElement('div');
+    bangumiProbeRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;';
+    const bangumiProbeBtn = mkBtn(t('测试连接'), true);
+    bangumiProbeRow.appendChild(bangumiProbeBtn);
+    const bangumiProbeNote = document.createElement('span');
+    bangumiProbeNote.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-muted);flex:1;line-height:1.4;';
+    bangumiProbeNote.textContent = t('测网络链路(按当前代理/直连设置) + Token 是否有效');
+    bangumiProbeRow.appendChild(bangumiProbeNote);
+    secBodyBangumi.appendChild(bangumiProbeRow);
+
+    const bangumiProbeOut = document.createElement('div');
+    bangumiProbeOut.style.cssText = 'font-size:11px;color:var(--fnos-ui-sub);margin-top:4px;line-height:1.5;display:none;';
+    secBodyBangumi.appendChild(bangumiProbeOut);
+
+    /** 拉取并渲染「最近同步状态」（面板构建时 + 每次打开设置回填时调用） */
+    const refreshBangumiSyncLine = (): void => {
+      ipcRenderer.invoke('bangumi:sync-status').then((s: any) => {
+        if (!s || !s.ts) {
+          bangumiSyncLine.textContent = t('最近同步：暂无记录（看过一集后这里会显示结果）');
+          bangumiSyncLine.style.color = 'var(--fnos-ui-muted)';
+          return;
+        }
+        bangumiSyncLine.textContent = t('最近同步：') + (s.ok
+          ? `✓ ${s.detail || ''} · ${new Date(s.ts).toLocaleString('zh-CN')}`
+          : `✗ [${s.label || '失败'}] ${s.detail || ''} · ${new Date(s.ts).toLocaleString('zh-CN')}`);
+        bangumiSyncLine.style.color = s.ok ? 'var(--fnos-ui-ok)' : 'var(--fnos-ui-warn)';
+      }).catch(() => { bangumiSyncLine.textContent = t('最近同步：暂无记录'); });
+    };
+    refreshBangumiSyncLine();
+
+    bangumiProbeBtn.addEventListener('click', async (e: Event) => {
+      e.stopPropagation();
+      bangumiProbeBtn.disabled = true;
+      bangumiProbeOut.style.display = 'block';
+      bangumiProbeOut.style.color = 'var(--fnos-ui-sub)';
+      bangumiProbeOut.textContent = t('测试中…');
+      try {
+        const r: any = await ipcRenderer.invoke('bangumi:probe');
+        const parts: string[] = [];
+        let allOk = true;
+        if (r && r.network && r.network.ok) {
+          parts.push(`网络:正常(${r.network.latencyMs}ms,经${r.transport})`);
+        } else {
+          allOk = false;
+          parts.push(`网络:不通(${(r && r.network && r.network.detail) || '未知'})${(r && r.network && r.network.hint) ? '——' + r.network.hint : ''}`);
+        }
+        if (r && r.token) {
+          if (r.token.checked) {
+            if (r.token.ok) parts.push('Token:有效');
+            else { allOk = false; parts.push(`Token:无效(${r.token.detail})`); }
+          } else {
+            parts.push(`Token:${r.token.detail}`);
+          }
+        }
+        bangumiProbeOut.textContent = parts.join('；');
+        bangumiProbeOut.style.color = allOk ? 'var(--fnos-ui-ok)' : 'var(--fnos-ui-warn)';
+      } catch (err: any) {
+        bangumiProbeOut.textContent = t('测试失败：') + String((err && err.message) || err);
+        bangumiProbeOut.style.color = 'var(--fnos-ui-warn)';
+      } finally {
+        bangumiProbeBtn.disabled = false;
+      }
+    });
+
     // Bangumi 集数级同步开关
     const bangumiSyncRow = document.createElement('div');
     bangumiSyncRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;'
@@ -5705,6 +5775,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         // Bangumi 同步开关 + 阈值回填
         swBangumiSync.checked = !!s.bangumiSyncEnabled;
         bangumiThresholdInput.value = String(s.bangumiSyncThreshold || 80);
+        // 最近同步状态刷新（每次打开设置面板都取最新，标记失败原因直接可见）
+        refreshBangumiSyncLine();
       });
       seg('custom-scraper', () => {
         // [自定义刮削] 开关/地址回填 + 运行时 S 同步（按钮挂载读 S）

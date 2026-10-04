@@ -5,7 +5,8 @@
 //  - t('中文原文') 直接以中文原文查目标语言词典，未收录时原样返回 —— zh 永不缺翻译，
 //    任何调用点零风险接入（不 wrap 也是合法 zh 界面），存量文案可增量迁移；
 //  - 动态数值用 {n} 具名占位插值，中英文语序各自独立；
-//  - 语言：localStorage 'fntv-lang' 显式选择 > navigator.language 探测（en* → en，其余 zh）；
+//  - 语言：localStorage 'fntv-lang' 显式选择；无显式选择一律默认中文（lc-1291：不再按
+//    navigator.language 探测成英文——英文系统首装也应是中文界面，英文由设置面板手动切换）；
 //    切换即写存储 + 派发 fntv:lang-changed，调用方（设置面板）随后整页刷新使全部已渲染文案生效
 //    （与轮播样式切换同一「改完重载」机制，不做运行时 DOM 文本替换那套复杂回写）。
 //  - 仅影响 Fntv-Plus 注入的界面文案；fnOS 原生 UI 与主进程文案不在渲染进程职责内。
@@ -144,6 +145,10 @@ const EN: Record<string, string> = {
     '明细日志（逐层附请求原始信息）': 'Verbose log (per-layer request detail)',
     'B站弹幕搜索': 'Bilibili search',
     '手动搜索': 'Manual search',
+    '清除弹幕': 'Clear danmaku',
+    '已清除 ✓': 'Cleared ✓',
+    '已手动清除（自动匹配记忆已重置；用「手动搜索」重新选定，或重启应用重跑自动匹配）':
+        'Cleared manually (auto-match memory reset; re-pick via Manual search, or restart the app to re-run auto matching)',
     '搜索': 'Search',
     '正在搜索…': 'Searching…',
     '展开后自动按当前番名搜索，也可改关键词重搜': 'Searches the current title automatically when opened; edit the keyword to re-search',
@@ -366,7 +371,8 @@ const EN: Record<string, string> = {
 
 let cachedLang: Lang | null = null;
 
-/** 当前语言：localStorage 显式选择 > navigator.language 探测（en* → en，其余 zh）。 */
+/** 当前语言：localStorage 显式选择；无显式选择一律默认中文（lc-1291：首装不再按
+ * navigator.language 探测——英文系统首次安装也直接中文，英文在设置面板手动切换）。 */
 export function getLang(): Lang {
     if (cachedLang) return cachedLang;
     try {
@@ -375,12 +381,8 @@ export function getLang(): Lang {
             cachedLang = v;
             return cachedLang;
         }
-    } catch { /* 隐私模式等 localStorage 不可用，走探测 */ }
-    try {
-        cachedLang = /^en/i.test(navigator.language || '') ? 'en' : 'zh';
-    } catch {
-        cachedLang = 'zh';
-    }
+    } catch { /* 隐私模式等 localStorage 不可用，走默认中文 */ }
+    cachedLang = 'zh';
     return cachedLang;
 }
 
