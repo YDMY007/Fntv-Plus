@@ -119,3 +119,9 @@ fpk/dev/
 fpk/docs/功能可行性评估.md
 fpk/docs/刮削渠道查验报告.md
 fpk/docs/自定义刮削交接报告.md
+
+# Lua 手工备份与 Python 缓存：本地留存，不入库（会随 extraFiles 进安装器）
+*.bak.*
+*.bak
+__pycache__/
+*.pyc
