@@ -89,6 +89,18 @@ local function has_local_marks(section)
     return skip_shared.have_intro or skip_shared.have_outro
 end
 
+-- [lc-1293] 该段是否有「真实数据」（用户规则：没设置、没数据就不显示按钮）：
+--   所有真实来源（本地精确标记 / 服务端 2 值 / AniSkip / theintrodb / 面板打点）都写
+--   opts.manual_*，唯独章节检测不写它 —— 因此判定式与 detect_by_manual 完全同式：
+--   终点 > 起点 ⇔ 该段确有数据。章节猜出的候选区间不得借显示窗口单独造出按钮。
+--   （定义在 update_skip_button 之前：避免 Lua 局部函数前向引用解析成全局 nil。）
+local function has_real_marks(section)
+    if section == 'intro' then
+        return (opts.manual_intro_end or 0) > (opts.manual_intro_start or 0)
+    end
+    return (opts.manual_outro_end or 0) > (opts.manual_outro_start or 0)
+end
+
 -- MBTN_LEFT 强制绑定当前是否已注册
 local click_bound = false
 local CLICK_BIND = "fntv_smart_skip_click"
@@ -335,15 +347,21 @@ end
 --   ② 点击跳过不再跳「固定时间点」而是按打点得出的区间时长相对跳过（见 do_skip_jump），
 --   因此按钮激活时把时长（e - s）记到 skip_btn.seg_len，供点击时使用；
 --   ③ 落点/时长每次刷新（而非仅 kind 变化时）——改完标记后按钮必须立即跟随，否则带旧值去跳。
--- [lc-1266] 显示判定改为「时间窗口 ∪ 标记区间」：
+-- [lc-1266] 显示判定 =「时间窗口 ∪ 标记区间」，且 [lc-1293] 必须有真实数据（见下方门卫）：
 --   片头：播放开始后 N 秒内（窗口）∪ 标记区间起点前提前量 ~ 区间终点；
 --   片尾：距视频结束剩 N 秒内（窗口）∪ 同上；
---   两个窗口与标记无关，即使标记没命中（如整季标记落到别集/时长不同的集）按钮也会按时出现；
---   但都必须有可用区间（有时长才跳得了）。
+--   窗口与标记无关，数据在（opts.manual_* 已被真实来源写入）但标记没命中（如整季标记
+--   落到别集/时长不同的集）时按钮仍按时出现；但没数据时窗口不得单独造出按钮。
 local function update_skip_button(curr_pos, result)
     local show, label, target, seg_len = false, "", 0, 0
     local dur = mutils.dur() or 0
-    if result and result.intro and not skip_state.intro_done then
+    -- [lc-1293] 硬门卫：该段必须有真实数据（人工/服务端/兜底来源写入的 opts.manual_*）。
+    --   否则 AUTO 模式下章节检测的候选 + 时间窗口（片头开播 300s 内/片尾结束前 180s 内）
+    --   会让「没设置、没数据」的片也弹出按钮（用户规则：没设置没数据一律不显示）。
+    --   章节模式(CHAPTER)例外：章节是用户显式选定的数据源，本身即「数据」。
+    local chapters_are_source = (opts.detect_mode == DETECT_MODE.CHAPTER)
+    if result and result.intro and not skip_state.intro_done
+        and (chapters_are_source or has_real_marks('intro')) then
         local s, e = result.intro[1], result.intro[2]
         local in_time_window = curr_pos <= mutils.window_for(opts, 'intro')
         local in_marks = curr_pos >= s - mutils.lead_for(opts) and curr_pos <= e - BUTTON_EPSILON
@@ -353,7 +371,8 @@ local function update_skip_button(curr_pos, result)
             show, label, target, seg_len = true, "跳过片头", e, e - s
         end
     end
-    if not show and result and result.outro and not skip_state.outro_done then
+    if not show and result and result.outro and not skip_state.outro_done
+        and (chapters_are_source or has_real_marks('outro')) then
         local s, e = result.outro[1], result.outro[2]
         local remain = (dur > 0) and (dur - curr_pos) or math.huge
         local in_time_window = remain <= mutils.window_for(opts, 'outro')
