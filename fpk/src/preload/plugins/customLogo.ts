@@ -110,12 +110,14 @@ function syncCustomData(dataUrl: string): void {
   try { ipcRenderer.invoke('settings:set-logo-custom-data', dataUrl).catch(() => {}); } catch { /* ignore */ }
 }
 
-/** 按选项解析 logo dataURI；default → 登记的默认图，preset → 预设文件，custom → localStorage dataURL。 */
+/** 按选项解析 logo dataURI；default → 登记的默认图，preset → 预设文件，custom → localStorage dataURL。
+ *  [lc-1295] 任何一路解析不到都兜底默认图（绝不留空 src 挂裂图）。 */
 export function resolveLogoSrc(choice?: LogoChoice): string {
   const c = choice || getChoice();
   if (c.type === 'preset' && c.presetId) {
     const p = PRESETS.find((x) => x.id === c.presetId);
-    return p ? presetDataUri(p) : '';
+    // 预设清单对不上（旧版本存的 presetId 已下线）→ 兜底默认图
+    return p ? (presetDataUri(p) || LOGO_API_BASE + 'fntv_default.png') : LOGO_API_BASE + 'fntv_default.png';
   }
   if (c.type === 'custom') {
     // 本机无数据（换设备且上传图超限未同步/手动清了存储）→ 兜底默认图，绝不留空 src 挂裂图
@@ -150,6 +152,12 @@ export function applyLogoToDom(choice?: LogoChoice): void {
       }, 4000);
     }
   }
+  // [lc-1295] 加载失败兜底：预设文件缺失 / customData 跨设备未同步 / 网络异常 → 一律回退
+  // 默认图，绝不让 <img> 挂裂图（用户报障：换设备后首页 logo 变「裂开图标」）。
+  img.onerror = () => {
+    const fallback = LOGO_API_BASE + 'fntv_default.png';
+    if (img && img.getAttribute('src') !== fallback) img.setAttribute('src', fallback);
+  };
   const src = resolveLogoSrc(choice);
   img.style.visibility = onHome ? 'visible' : 'hidden';
   if (src && img.getAttribute('src') !== src) img.setAttribute('src', src);

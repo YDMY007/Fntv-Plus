@@ -14,7 +14,10 @@ import (
 //go:embed logos
 var logosFS embed.FS
 
-var logoFileRe = regexp.MustCompile(`^(cn|intl)_[a-z0-9_]+\.png$`)
+// logoFileRe 白名单：预设图（cn_/intl_ 前缀）+ 默认兜底图 fntv_default.png。
+// [lc-1295] 曾漏掉 fntv_default —— 前端「默认/换设备数据缺失」兜底请求它时被 404 拒，
+// 表现为首页 logo 变「裂开图标」（用户报障：换个设备又变成裂图）。
+var logoFileRe = regexp.MustCompile(`^(fntv_default|(cn|intl)_[a-z0-9_]+)\.png$`)
 
 func (b *Bridge) handleLogoFile(w http.ResponseWriter, r *http.Request) {
 	file := strings.TrimPrefix(r.URL.Path, "/app/fntvplus/api/bridge/logos/")

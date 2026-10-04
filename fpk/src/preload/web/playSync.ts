@@ -101,9 +101,11 @@ function handleRecord(body: any): void {
           marked.add(guid);
           log.info('[play-sync]', String(r.message), `（${Math.floor(percentage)}%）`);
         } else if (r && !r.ok) {
-          // 未达阈值/未开启/未配 Token：不记 miss（后续上报还会到达阈值；用户可能随时开启）
+          // 未达阈值/未开启/未配 Token：不记 miss 不记日志（后续上报还会到达阈值；用户可能随时开启）
           const msg = String((r && r.message) || '');
           if (msg.indexOf('未达阈值') === -1 && msg.indexOf('未开启') === -1 && msg.indexOf('Token') === -1) {
+            // 失败原因后端已归类（[网络]/[密钥]/[限流]/[未匹配]），落日志供排查（missed 去重不会刷屏）
+            log.error('[play-sync][Bangumi]', msg, `（${Math.floor(percentage)}%）`);
             missed.add(guid);
           }
         }

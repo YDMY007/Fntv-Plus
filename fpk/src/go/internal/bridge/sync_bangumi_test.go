@@ -118,3 +118,76 @@ func TestBangumiClientPriorityProxyOverDirect(t *testing.T) {
 		t.Fatalf("via = %q", via)
 	}
 }
+
+func TestBangumiErrLabelClassification(t *testing.T) {
+	// [2026-10-03] 失败归类：面板与日志据此区分「网络被墙 / Token 失效 / 限流 / 服务端」——
+	// 此前只打原始 error，用户分不清该修网络还是换 Token。
+	cases := []struct {
+		st    int
+		err   error
+		label string
+	}{
+		{0, fmt.Errorf("context deadline exceeded"), "网络"},
+		{0, fmt.Errorf("dial tcp: connection reset by peer"), "网络"},
+		{0, fmt.Errorf("dial udp: lookup api.bgm.tv: no such host"), "网络"},
+		{401, nil, "密钥"},
+		{403, nil, "密钥"},
+		{429, nil, "限流"},
+		{502, nil, "服务"},
+		{400, nil, "请求"},
+	}
+	for _, c := range cases {
+		label, brief := bangumiErrLabel(c.st, c.err)
+		if label != c.label {
+			t.Fatalf("bangumiErrLabel(%d, %v) label = %q, want %q", c.st, c.err, label, c.label)
+		}
+		if brief == "" {
+			t.Fatalf("bangumiErrLabel(%d, %v) brief 为空", c.st, c.err)
+		}
+	}
+}
+
+func TestFindBangumiEpisodeIDMatchesV0Fields(t *testing.T) {
+	// 现行 v0 API 分集对象只有 ep/sort（旧 API 的 number 字段已不存在），必须按 ep→sort 匹配
+	resp := map[string]any{
+		"data": []any{
+			map[string]any{"id": 101, "ep": 1, "sort": 1.0},
+			map[string]any{"id": 102, "ep": 2, "sort": 2.0},
+			map[string]any{"id": 103, "ep": float64(0), "sort": 3.0}, // SP：ep=0，按 sort 命中第 3 集
+		},
+	}
+	if got := findBangumiEpisodeID(resp, 2); got != 102 {
+		t.Fatalf("ep 精确匹配: got %d, want 102", got)
+	}
+	if got := findBangumiEpisodeID(resp, 3); got != 103 {
+		t.Fatalf("sort 兜底匹配: got %d, want 103", got)
+	}
+	if got := findBangumiEpisodeID(map[string]any{"data": []any{}}, 1); got != 0 {
+		t.Fatalf("空列表应返回 0, got %d", got)
+	}
+}
+
+func TestFindBangumiSubjectIDTakesFirstHit(t *testing.T) {
+	resp := map[string]any{
+		"data": []any{map[string]any{"id": 425}, map[string]any{"id": 999}},
+	}
+	if got := findBangumiSubjectID(resp); got != 425 {
+		t.Fatalf("got %d, want 425", got)
+	}
+	if got := findBangumiSubjectID(map[string]any{"data": []any{}}); got != 0 {
+		t.Fatalf("无结果应返回 0, got %d", got)
+	}
+}
+
+func TestSetBgmStatusShape(t *testing.T) {
+	setBgmStatus(false, "search", "网络", "连接被重置(疑似 SNI 阻断)")
+	bgmStatusMu.Lock()
+	s := bgmLastStatus
+	bgmStatusMu.Unlock()
+	if s == nil || s["ok"] != false || s["label"] != "网络" || s["stage"] != "search" {
+		t.Fatalf("状态记录形状不对: %v", s)
+	}
+	if _, ok := s["ts"].(int64); !ok {
+		t.Fatalf("ts 应为毫秒时间戳 int64: %v", s["ts"])
+	}
+}

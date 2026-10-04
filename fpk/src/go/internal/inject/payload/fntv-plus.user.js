@@ -586,7 +586,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     } catch {
     }
   }
-  var _signMaterialsPromise, LS_KEY, shimExports, SETTINGS_KEY_MAP, ipcRenderer, shell;
+  var _signMaterialsPromise, LS_KEY, shimExports, SETTINGS_KEY_MAP, smSeasonCache, ipcRenderer, shell;
   var init_electron = __esm({
     "src/shim/electron.js"() {
       "use strict";
@@ -632,6 +632,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         "danmu-api": "danmuApi",
         "hot-source": "hotSource"
       };
+      smSeasonCache = /* @__PURE__ */ new Map();
       ipcRenderer = {
         invoke(channel, ...args) {
           if (channel === "settings:get") {
@@ -817,6 +818,12 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
               item: args[2] || null
             });
           }
+          if (channel === "bangumi:probe") {
+            return apiGet("/app/fntvplus/api/bridge/bangumi/probe");
+          }
+          if (channel === "bangumi:sync-status") {
+            return apiGet("/app/fntvplus/api/bridge/bangumi/sync-status");
+          }
           if (channel === "douban:enrich-one") return Promise.resolve(null);
           if (channel === "douban:sync-progress") {
             return apiPost("/app/fntvplus/api/bridge/douban/sync-progress", {
@@ -899,6 +906,198 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
           if (channel === "settings:test-danmu-api") return apiPost("/app/fntvplus/api/bridge/danmu/test", { base: args[0] });
           if (channel === "play-movie" || channel === "external-play" || channel === "pause" || channel === "media:control") {
             return Promise.resolve(void 0);
+          }
+          if (channel === "skip-manual:get-config") {
+            return Promise.resolve({ enabled: true, writeBack: true, defaultScope: "episode", leadSeconds: 5, introSoftLimit: 300 });
+          }
+          if (channel === "skip-manual:effective" || channel === "skip-manual:set" || channel === "skip-manual:clear") {
+            const SM_LS_KEY = "fntv:skip-manual";
+            const smNum = (v) => typeof v === "number" && isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : 0;
+            const smReadStore = () => {
+              try {
+                const d = JSON.parse(localStorage.getItem(SM_LS_KEY) || "{}");
+                if (d && d.version === 1 && d.entries && typeof d.entries === "object") return d;
+              } catch (e) {
+              }
+              return { version: 1, entries: {} };
+            };
+            const smWriteStore = (s) => {
+              try {
+                localStorage.setItem(SM_LS_KEY, JSON.stringify(s));
+              } catch (e) {
+              }
+            };
+            const smSignedFetch = async (method, path, payload) => {
+              const headers = { "Content-Type": "application/json" };
+              headers.Authx = await genAuthxAsync(path, payload || void 0);
+              const resp = await fetch(location.origin + path, {
+                method,
+                credentials: "include",
+                headers,
+                body: payload ? JSON.stringify(payload) : void 0
+              });
+              if (!resp.ok) throw new Error("HTTP " + resp.status);
+              return resp.json();
+            };
+            const smPlayInfo = async (guid) => {
+              try {
+                const j = await smSignedFetch("POST", "/v/api/v1/play/info", { item_guid: guid });
+                const item = j && j.data && j.data.item;
+                return item ? { item, data: j.data } : null;
+              } catch (e) {
+                return null;
+              }
+            };
+            const smSeasonGuid = async (guid) => {
+              const hit = smSeasonCache.get(guid);
+              if (hit && Date.now() - hit.at < 10 * 60 * 1e3) return hit.guid || null;
+              const info = await smPlayInfo(guid);
+              const item = info && info.item;
+              const type = String(item && item.type || info && info.data && info.data.type || "").toLowerCase();
+              const sg = info && info.data ? info.data.parent_guid || item && item.parent_guid || "" : "";
+              const out = type === "episode" && sg ? String(sg) : null;
+              smSeasonCache.set(guid, { guid: out, at: Date.now() });
+              return out;
+            };
+            const smReadServer = async (guid) => {
+              for (const p of ["/v/api/v1/skipinfo/" + guid, "/api/v1/skipinfo/" + guid]) {
+                try {
+                  const j = await smSignedFetch("GET", p);
+                  if (j && j.code === 0 && j.data) {
+                    const skipStart = Number(j.data.skipStart) || 0;
+                    const skipEnd = Number(j.data.skipEnd) || 0;
+                    if (skipStart > 0 || skipEnd > 0) return { skipStart, skipEnd };
+                  }
+                } catch (e) {
+                }
+              }
+              return null;
+            };
+            const smWriteServer = async (guid, skipStart, skipEnd) => {
+              for (const p of ["/v/api/v1/skipinfo", "/api/v1/skipinfo"]) {
+                try {
+                  const j = await smSignedFetch("POST", p, { guid, skipStart, skipEnd });
+                  if (j && j.code === 0) return { ok: true };
+                } catch (e) {
+                }
+              }
+              return { ok: false, message: "\u5199\u56DE\u670D\u52A1\u7AEF\u5931\u8D25" };
+            };
+            const smSeasonEpisodes = async (seasonGuid2) => {
+              try {
+                const path = "/v/api/v1/item/list";
+                const payload = { parent_guid: seasonGuid2, exclude_folder: 1, sort_column: "index_number", sort_type: "ASC", page: 1, page_size: 200 };
+                const j = await smSignedFetch("POST", path, payload);
+                const list = j && j.data && Array.isArray(j.data.list) ? j.data.list : [];
+                return list.filter((it) => String(it && it.type || "").toLowerCase() === "episode" && it.guid).map((it) => String(it.guid));
+              } catch (e) {
+                return [];
+              }
+            };
+            if (channel === "skip-manual:effective") {
+              return (async () => {
+                const guid = String(args[0] && args[0].guid || "").trim();
+                if (!guid) return { manual: null, server: null };
+                const store = smReadStore();
+                const direct = store.entries[guid] || null;
+                if (direct) return { manual: direct, server: null };
+                const seasonGuid2 = await smSeasonGuid(guid);
+                const seasonEntry = seasonGuid2 ? store.entries[seasonGuid2] || null : null;
+                if (seasonEntry && seasonEntry.scope === "season") return { manual: seasonEntry, server: null };
+                const server = await smReadServer(guid);
+                return { manual: null, server };
+              })();
+            }
+            if (channel === "skip-manual:clear") {
+              return (async () => {
+                const guid = String(args[0] && args[0].guid || "").trim();
+                if (!guid) return { cleared: false, zeroed: false, message: "\u7F3A\u5C11 guid" };
+                const store = smReadStore();
+                let removed = false;
+                if (store.entries[guid]) {
+                  delete store.entries[guid];
+                  removed = true;
+                } else {
+                  const seasonGuid2 = await smSeasonGuid(guid);
+                  if (seasonGuid2 && store.entries[seasonGuid2]) {
+                    delete store.entries[seasonGuid2];
+                    removed = true;
+                  }
+                }
+                smWriteStore(store);
+                const zero = await smWriteServer(guid, 0, 0);
+                return { cleared: removed, zeroed: zero.ok, message: zero.ok ? void 0 : zero.message || "\u670D\u52A1\u7AEF\u6E05\u96F6\u5931\u8D25" };
+              })();
+            }
+            return (async () => {
+              const p0 = args[0] || {};
+              const guid = String(p0.guid || "").trim();
+              if (!/^[a-f0-9]{32}$/i.test(guid)) {
+                return { saved: false, writtenBack: false, written: 0, total: 0, message: "guid \u975E\u6CD5" };
+              }
+              const introStart = smNum(p0.introStart);
+              const introEnd = smNum(p0.introEnd);
+              const outroStart = smNum(p0.outroStart);
+              const outroEnd = smNum(p0.outroEnd);
+              const totalDuration = smNum(p0.totalDuration);
+              const wantSeason = !!(p0.scope === "season");
+              const fail = (message2) => ({ saved: false, writtenBack: false, written: 0, total: 0, message: message2 });
+              if (introEnd > 0 && introEnd <= introStart) return fail("\u7247\u5934\u533A\u95F4\u975E\u6CD5\uFF08\u7EC8\u70B9\u9700\u5927\u4E8E\u8D77\u70B9\uFF09");
+              if (outroEnd > 0 && outroEnd <= outroStart) return fail("\u7247\u5C3E\u533A\u95F4\u975E\u6CD5\uFF08\u7EC8\u70B9\u9700\u5927\u4E8E\u8D77\u70B9\uFF09");
+              if (introEnd === 0 && outroStart === 0) return fail("\u81F3\u5C11\u6807\u8BB0\u7247\u5934\u6216\u7247\u5C3E");
+              const fnSkipStart = introEnd > 0 ? Math.round(introEnd) : 0;
+              const fnSkipEnd = outroStart > 0 && totalDuration > 0 ? Math.max(0, Math.round(totalDuration - outroStart)) : 0;
+              const store = smReadStore();
+              let storeGuid = guid;
+              let entryScope = "episode";
+              if (wantSeason) {
+                const seasonGuid2 = await smSeasonGuid(guid);
+                if (seasonGuid2) {
+                  storeGuid = seasonGuid2;
+                  entryScope = "season";
+                }
+              }
+              store.entries[storeGuid] = {
+                guid: storeGuid,
+                scope: entryScope,
+                introStart,
+                introEnd,
+                outroStart,
+                outroEnd,
+                fnSkipStart,
+                fnSkipEnd,
+                totalDuration,
+                updatedAt: Date.now()
+              };
+              smWriteStore(store);
+              let writtenBack = false;
+              let written = 0;
+              let total = 0;
+              let message = "";
+              if (fnSkipStart > 0 || fnSkipEnd > 0) {
+                if (entryScope === "season") {
+                  const eps = await smSeasonEpisodes(storeGuid);
+                  total = eps.length;
+                  for (const epGuid of eps) {
+                    const r = await smWriteServer(epGuid, fnSkipStart, fnSkipEnd);
+                    if (r.ok) written += 1;
+                    await new Promise((res) => setTimeout(res, 200));
+                  }
+                  writtenBack = written > 0;
+                  if (total > 0 && written < total) message = "\u6574\u5B63\u5199\u56DE " + written + "/" + total + " \u96C6";
+                } else {
+                  const r = await smWriteServer(guid, fnSkipStart, fnSkipEnd);
+                  writtenBack = r.ok;
+                  total = 1;
+                  written = r.ok ? 1 : 0;
+                  if (!r.ok) message = "\u5199\u56DE\u670D\u52A1\u7AEF\u5931\u8D25\uFF1A" + (r.message || "");
+                }
+              }
+              if (introEnd > 300) {
+                message = (message ? message + "\uFF1B" : "") + "\u7247\u5934 " + Math.round(introEnd) + "s \u8D85\u8FC7\u5408\u7406\u4E0A\u9650 300s\uFF0C\u8BF7\u786E\u8BA4\u6807\u8BB0\u662F\u5426\u51C6\u786E";
+              }
+              return { saved: true, writtenBack, written, total, message: message || void 0 };
+            })();
           }
           if (channel === "skip:fetch-and-fill") {
             const guid = String(args[0] && args[0].guid || "");
@@ -1313,6 +1512,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
           } else if (r && !r.ok) {
             const msg = String(r && r.message || "");
             if (msg.indexOf("\u672A\u8FBE\u9608\u503C") === -1 && msg.indexOf("\u672A\u5F00\u542F") === -1 && msg.indexOf("Token") === -1) {
+              log2.error("[play-sync][Bangumi]", msg, `\uFF08${Math.floor(percentage)}%\uFF09`);
               missed.add(guid);
             }
           }
@@ -1803,11 +2003,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
       }
     } catch {
     }
-    try {
-      cachedLang = /^en/i.test(navigator.language || "") ? "en" : "zh";
-    } catch {
-      cachedLang = "zh";
-    }
+    cachedLang = "zh";
     return cachedLang;
   }
   function interpolate(tpl, params) {
@@ -2580,7 +2776,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
     const c = choice || getChoice();
     if (c.type === "preset" && c.presetId) {
       const p = PRESETS.find((x) => x.id === c.presetId);
-      return p ? presetDataUri(p) : "";
+      return p ? presetDataUri(p) || LOGO_API_BASE + "fntv_default.png" : LOGO_API_BASE + "fntv_default.png";
     }
     if (c.type === "custom") {
       try {
@@ -2617,6 +2813,10 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         }, 4e3);
       }
     }
+    img.onerror = () => {
+      const fallback = LOGO_API_BASE + "fntv_default.png";
+      if (img && img.getAttribute("src") !== fallback) img.setAttribute("src", fallback);
+    };
     const src = resolveLogoSrc(choice);
     img.style.visibility = onHome ? "visible" : "hidden";
     if (src && img.getAttribute("src") !== src) img.setAttribute("src", src);
@@ -5484,7 +5684,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     if (_dmObserverInstalled) return;
     _dmObserverInstalled = true;
     const PLAY_INFO_RE = /\/v\/api\/v1\/play\/info/i;
-    const extractGuid = (raw) => {
+    const extractGuid2 = (raw) => {
       var _a, _b, _c, _d;
       try {
         const body = typeof raw === "string" ? JSON.parse(raw) : raw;
@@ -5511,7 +5711,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input == null ? void 0 : input.url) || "";
       const isPlayInfo = PLAY_INFO_RE.test(url) && ((init == null ? void 0 : init.method) || "GET").toUpperCase() !== "GET" && !!(init == null ? void 0 : init.body);
       if (!isPlayInfo) return origFetch.call(this, input, init);
-      const guid = extractGuid(init.body);
+      const guid = extractGuid2(init.body);
       const resp = await origFetch.call(this, input, init);
       try {
         const ct = ((_b = (_a = resp.headers) == null ? void 0 : _a.get) == null ? void 0 : _b.call(_a, "content-type")) || "";
@@ -5538,7 +5738,7 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       const url = this._fntvDmUrl || "";
       const method = this._fntvDmMethod || "GET";
       if (PLAY_INFO_RE.test(url) && method !== "GET" && body) {
-        onPlayInfo(extractGuid(typeof body === "string" ? body : null));
+        onPlayInfo(extractGuid2(typeof body === "string" ? body : null));
       }
       return origSend.call(this, body);
     };
@@ -8498,11 +8698,11 @@ html.fnos-perf.dark{
     ipcRenderer.on("hot-data-refreshed", (_ev, payload) => {
       try {
         if (!payload || !payload.data || !payload.data.items) return;
-        const panelOpen = panel.classList.contains("open");
+        const panelOpen2 = panel.classList.contains("open");
         if (payload.source === "bangumi") {
           allBg.length = 0;
           for (const it of payload.data.items || []) allBg.push(it);
-          if (source === "bangumi" && panelOpen) {
+          if (source === "bangumi" && panelOpen2) {
             updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
             render2();
             logger_default.info("[hotUpdates] \u540E\u53F0\u5237\u65B0 Bangumi \u6570\u636E\u5DF2\u63A8\u9001\u66F4\u65B0");
@@ -8510,7 +8710,7 @@ html.fnos-perf.dark{
         } else {
           allTm.length = 0;
           for (const it of payload.data.items || []) allTm.push(it);
-          if (source !== "bangumi" && panelOpen) {
+          if (source !== "bangumi" && panelOpen2) {
             updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
             render2();
             logger_default.info("[hotUpdates] \u540E\u53F0\u5237\u65B0" + (payload.source === "douban" ? "\u8C46\u74E3" : "TMDB") + "\u6570\u636E\u5DF2\u63A8\u9001\u66F4\u65B0");
@@ -9789,6 +9989,49 @@ html.fnos-perf.dark{
   }
 
   // src/preload/plugins/embyWall/carousel/progress.ts
+  var SKEL_TEXT = {
+    dark: { tip: "rgba(225,218,245,.85)", pct: "rgba(232,221,208,.92)" },
+    light: { tip: "rgba(96,88,74,.92)", pct: "rgba(60,50,40,.92)" }
+  };
+  var _skelTheme = null;
+  var _skelThemeObserver = null;
+  function applySkelTheme(isDark) {
+    const t2 = _skelTheme;
+    if (!t2 || !t2.container.isConnected) return;
+    const c = isDark ? SKEL_TEXT.dark : SKEL_TEXT.light;
+    t2.container.setAttribute("data-fntv-skel", isDark ? "dark" : "light");
+    for (const el of t2.tipEls) el.style.color = c.tip;
+    for (const el of t2.pctEls) el.style.color = c.pct;
+    const cardBg = isDark ? SKEL_CARD_BG.dark : SKEL_CARD_BG.light;
+    for (const el of t2.cardBgs) el.style.background = cardBg;
+  }
+  var SKEL_CARD_BG = { dark: "#1e1b17", light: "#e8f0fe" };
+  function sampleSurfaceDark() {
+    try {
+      let el = _skelTheme ? _skelTheme.container : null;
+      while (el) {
+        const bg = getComputedStyle(el).backgroundColor;
+        const m = bg.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/);
+        if (m) {
+          const a = m[4] === void 0 ? 1 : parseFloat(m[4]);
+          if (a >= 0.5) {
+            const lum = 0.2126 * parseFloat(m[1]) + 0.7152 * parseFloat(m[2]) + 0.0722 * parseFloat(m[3]);
+            return lum < 128;
+          }
+        }
+        el = el.parentElement;
+      }
+    } catch {
+    }
+    return isSurfaceDark();
+  }
+  function ensureSkelThemeObserver() {
+    if (_skelThemeObserver) return;
+    _skelThemeObserver = new MutationObserver(() => {
+      if (_skelTheme && _skelTheme.container.isConnected) applySkelTheme(sampleSurfaceDark());
+    });
+    _skelThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  }
   function buildLoadingPlaceholder(target) {
     if (!document.getElementById("fnos-ph-style")) {
       const st = document.createElement("style");
@@ -9854,6 +10097,8 @@ html.fnos-perf.dark{
       (document.head || document.documentElement).appendChild(st);
     }
     target.innerHTML = "";
+    _skelTheme = null;
+    ensureSkelThemeObserver();
     target.style.borderTop = "none";
     target.style.boxShadow = "none";
     target.style.marginTop = "0";
@@ -10007,9 +10252,10 @@ html.fnos-perf.dark{
     } else if (_cs === 4) {
       ensureStyle4Css();
       container.setAttribute("data-fntv-skel", _isDark ? "dark" : "light");
-      const sk = _isDark ? { tip: "rgba(225,218,245,.85)", pct: "rgba(232,221,208,.92)" } : { tip: "rgba(96,88,74,.92)", pct: "rgba(60,50,40,.92)" };
+      const sk = SKEL_TEXT[_isDark ? "dark" : "light"];
       const track = document.createElement("div");
       track.className = "fntv-s4-track";
+      const cardBgs = [];
       const mkS4Card = (cls) => {
         const card = document.createElement("div");
         card.className = "fntv-s4-card" + (cls ? " " + cls : "");
@@ -10017,6 +10263,7 @@ html.fnos-perf.dark{
         bg.className = "fntv-s4-skelbg";
         bg.style.backgroundImage = "none";
         bg.style.background = "var(--fnos-skel-card, #e8f0fe)";
+        cardBgs.push(bg);
         const shine = document.createElement("div");
         shine.className = "fntv-s4-skel";
         shine.style.cssText = "position:absolute;inset:0;opacity:.5;z-index:0";
@@ -10086,6 +10333,7 @@ html.fnos-perf.dark{
       s4BarBox.appendChild(s4Track);
       container.appendChild(s4BarBox);
       statusEl = tip4;
+      _skelTheme = { container, tipEls: [tip4], pctEls: [percentEl], cardBgs };
     } else {
       const deco = (l, t2, r) => {
         const d = document.createElement("div");
@@ -10157,6 +10405,21 @@ html.fnos-perf.dark{
     }, 120);
     wrapper.appendChild(container);
     target.appendChild(wrapper);
+    if (_skelTheme) {
+      const theme = _skelTheme;
+      let last = _isDark;
+      const resampleTimer = window.setInterval(() => {
+        if (_skelTheme !== theme || !theme.container.isConnected) {
+          clearInterval(resampleTimer);
+          return;
+        }
+        const s = sampleSurfaceDark();
+        if (s !== last) {
+          last = s;
+          applySkelTheme(s);
+        }
+      }, 400);
+    }
     S.carouselProgressEl = null;
     S.carouselProgressCount = 0;
     const phTimer = window.setTimeout(() => {
@@ -11732,11 +11995,11 @@ html.fnos-perf.dark{
         ipcRenderer2.send("get-config");
         ipcRenderer2.once("config-data", (_e, data) => {
           try {
-            const config = data && data.config || {};
+            const config2 = data && data.config || {};
             const history2 = data && data.history || [];
-            let username = config.account || "";
+            let username = config2.account || "";
             let password = "";
-            const domain = config.domain || "";
+            const domain = config2.domain || "";
             for (const h of history2) {
               if (h.domain === domain && h.account === username && h.password) {
                 password = h.password;
@@ -14399,7 +14662,7 @@ html.fnos-perf.dark{
       const card = document.createElement("div");
       card.style.cssText = "min-width:300px;max-width:90vw;padding:20px 22px;border-radius:14px;background:var(--semi-color-bg-1,#fff);box-shadow:0 8px 30px rgba(0,0,0,0.25);color:var(--semi-color-text-0);";
       card.innerHTML = '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">\u9009\u62E9\u64AD\u653E\u65B9\u5F0F</div><div style="opacity:0.7;font-size:12px;margin-bottom:14px;">\u8981\u5982\u4F55\u64AD\u653E\u6B64\u89C6\u9891\uFF1F</div>';
-      const mkBtn2 = (label, primary, onClick) => {
+      const mkBtn3 = (label, primary, onClick) => {
         const b = document.createElement("button");
         b.textContent = label;
         b.style.cssText = "display:block;width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;" + (primary ? "background:var(--semi-color-primary,#3370ff);color:#fff;" : "background:var(--semi-color-fill-0,#f0f0f0);color:var(--semi-color-text-0);");
@@ -14418,11 +14681,11 @@ html.fnos-perf.dark{
       const playNative = () => {
         unfreezeVideo(video);
       };
-      card.appendChild(mkBtn2("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
+      card.appendChild(mkBtn3("\u{1F3AC} \u5916\u7F6E\u64AD\u653E\u5668 (PotPlayer / MPV)", true, () => {
         closeDialog();
         launchExternal(modal);
       }));
-      card.appendChild(mkBtn2("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
+      card.appendChild(mkBtn3("\u25B6 \u98DE\u725B\u539F\u751F\u64AD\u653E", false, () => {
         closeDialog();
         playNative();
       }));
@@ -16665,7 +16928,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     }
     function buildSettingsPanel() {
       if (document.getElementById("fnos-settings-panel")) return;
-      const mkBtn2 = (text, small = false) => {
+      const mkBtn3 = (text, small = false) => {
         const b = document.createElement("button");
         b.type = "button";
         b.textContent = t(text);
@@ -16899,9 +17162,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const biliFoldBody = biliFold.body;
       const biliBtns = document.createElement("div");
       biliBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
-      const logoutBiliBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
-      const saveBiliCookieBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
+      const scanBtn = mkBtn3("\u626B\u7801\u767B\u5F55", true);
+      const logoutBiliBtn = mkBtn3("\u9000\u51FA\u767B\u5F55", true);
+      const saveBiliCookieBtn = mkBtn3("\u4FDD\u5B58 Cookie", true);
       biliBtns.appendChild(scanBtn);
       biliBtns.appendChild(logoutBiliBtn);
       biliBtns.appendChild(saveBiliCookieBtn);
@@ -16964,14 +17227,80 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const bangumiBtns = document.createElement("div");
       bangumiBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveBangumiBtn = mkBtn2("\u4FDD\u5B58", true);
-      const clearBangumiBtn = mkBtn2("\u6E05\u9664", true);
+      const saveBangumiBtn = mkBtn3("\u4FDD\u5B58", true);
+      const clearBangumiBtn = mkBtn3("\u6E05\u9664", true);
       bangumiBtns.appendChild(saveBangumiBtn);
       bangumiBtns.appendChild(clearBangumiBtn);
       secBodyBangumi.appendChild(bangumiBtns);
       const bangumiStatus = document.createElement("div");
       bangumiStatus.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;min-height:14px;";
       secBodyBangumi.appendChild(bangumiStatus);
+      const bangumiSyncLine = document.createElement("div");
+      bangumiSyncLine.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);margin-top:6px;line-height:1.5;";
+      bangumiSyncLine.textContent = t("\u6700\u8FD1\u540C\u6B65\uFF1A\u52A0\u8F7D\u4E2D\u2026");
+      secBodyBangumi.appendChild(bangumiSyncLine);
+      const bangumiProbeRow = document.createElement("div");
+      bangumiProbeRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;";
+      const bangumiProbeBtn = mkBtn3(t("\u6D4B\u8BD5\u8FDE\u63A5"), true);
+      bangumiProbeRow.appendChild(bangumiProbeBtn);
+      const bangumiProbeNote = document.createElement("span");
+      bangumiProbeNote.style.cssText = "font-size:10.5px;color:var(--fnos-ui-muted);flex:1;line-height:1.4;";
+      bangumiProbeNote.textContent = t("\u6D4B\u7F51\u7EDC\u94FE\u8DEF(\u6309\u5F53\u524D\u4EE3\u7406/\u76F4\u8FDE\u8BBE\u7F6E) + Token \u662F\u5426\u6709\u6548");
+      bangumiProbeRow.appendChild(bangumiProbeNote);
+      secBodyBangumi.appendChild(bangumiProbeRow);
+      const bangumiProbeOut = document.createElement("div");
+      bangumiProbeOut.style.cssText = "font-size:11px;color:var(--fnos-ui-sub);margin-top:4px;line-height:1.5;display:none;";
+      secBodyBangumi.appendChild(bangumiProbeOut);
+      const refreshBangumiSyncLine = () => {
+        ipcRenderer.invoke("bangumi:sync-status").then((s) => {
+          if (!s || !s.ts) {
+            bangumiSyncLine.textContent = t("\u6700\u8FD1\u540C\u6B65\uFF1A\u6682\u65E0\u8BB0\u5F55\uFF08\u770B\u8FC7\u4E00\u96C6\u540E\u8FD9\u91CC\u4F1A\u663E\u793A\u7ED3\u679C\uFF09");
+            bangumiSyncLine.style.color = "var(--fnos-ui-muted)";
+            return;
+          }
+          bangumiSyncLine.textContent = t("\u6700\u8FD1\u540C\u6B65\uFF1A") + (s.ok ? `\u2713 ${s.detail || ""} \xB7 ${new Date(s.ts).toLocaleString("zh-CN")}` : `\u2717 [${s.label || "\u5931\u8D25"}] ${s.detail || ""} \xB7 ${new Date(s.ts).toLocaleString("zh-CN")}`);
+          bangumiSyncLine.style.color = s.ok ? "var(--fnos-ui-ok)" : "var(--fnos-ui-warn)";
+        }).catch(() => {
+          bangumiSyncLine.textContent = t("\u6700\u8FD1\u540C\u6B65\uFF1A\u6682\u65E0\u8BB0\u5F55");
+        });
+      };
+      refreshBangumiSyncLine();
+      bangumiProbeBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        bangumiProbeBtn.disabled = true;
+        bangumiProbeOut.style.display = "block";
+        bangumiProbeOut.style.color = "var(--fnos-ui-sub)";
+        bangumiProbeOut.textContent = t("\u6D4B\u8BD5\u4E2D\u2026");
+        try {
+          const r = await ipcRenderer.invoke("bangumi:probe");
+          const parts = [];
+          let allOk = true;
+          if (r && r.network && r.network.ok) {
+            parts.push(`\u7F51\u7EDC:\u6B63\u5E38(${r.network.latencyMs}ms,\u7ECF${r.transport || r.network.via})`);
+          } else {
+            allOk = false;
+            parts.push(`\u7F51\u7EDC:\u4E0D\u901A(${r && r.network && r.network.detail || "\u672A\u77E5"})${r && r.network && r.network.hint ? "\u2014\u2014" + r.network.hint : ""}`);
+          }
+          if (r && r.token) {
+            if (r.token.checked) {
+              if (r.token.ok) parts.push("Token:\u6709\u6548");
+              else {
+                allOk = false;
+                parts.push(`Token:\u65E0\u6548(${r.token.detail})`);
+              }
+            } else {
+              parts.push(`Token:${r.token.detail}`);
+            }
+          }
+          bangumiProbeOut.textContent = parts.join("\uFF1B");
+          bangumiProbeOut.style.color = allOk ? "var(--fnos-ui-ok)" : "var(--fnos-ui-warn)";
+        } catch (err) {
+          bangumiProbeOut.textContent = t("\u6D4B\u8BD5\u5931\u8D25\uFF1A") + String(err && err.message || err);
+          bangumiProbeOut.style.color = "var(--fnos-ui-warn)";
+        } finally {
+          bangumiProbeBtn.disabled = false;
+        }
+      });
       const bangumiSyncRow = document.createElement("div");
       bangumiSyncRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;margin-top:4px;cursor:pointer;border-radius:6px;transition:background .12s;";
       bangumiSyncRow.onmouseenter = () => {
@@ -17099,8 +17428,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const tmdbBtns = document.createElement("div");
       tmdbBtns.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const saveTmdbBtn = mkBtn2("\u4FDD\u5B58", true);
-      const clearTmdbBtn = mkBtn2("\u6E05\u9664", true);
+      const saveTmdbBtn = mkBtn3("\u4FDD\u5B58", true);
+      const clearTmdbBtn = mkBtn3("\u6E05\u9664", true);
       tmdbBtns.appendChild(saveTmdbBtn);
       tmdbBtns.appendChild(clearTmdbBtn);
       secBodyTmdb.appendChild(tmdbBtns);
@@ -17200,8 +17529,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dcWrap.appendChild(dcIpGrid);
       const dcBtns = document.createElement("div");
       dcBtns.style.cssText = "display:flex;gap:6px;";
-      const dcSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const dcUpdateBtn = mkBtn2("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
+      const dcSaveBtn = mkBtn3("\u4FDD\u5B58", true);
+      const dcUpdateBtn = mkBtn3("\u4ECE CheckTMDB \u66F4\u65B0 IP", true);
       dcBtns.appendChild(dcSaveBtn);
       dcBtns.appendChild(dcUpdateBtn);
       dcWrap.appendChild(dcBtns);
@@ -17355,9 +17684,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const doubanBtns = document.createElement("div");
       doubanBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
-      const scanDoubanBtn = mkBtn2("\u626B\u7801\u767B\u5F55", true);
-      const logoutDoubanBtn = mkBtn2("\u9000\u51FA\u767B\u5F55", true);
-      const manualBtn = mkBtn2("\u4FDD\u5B58 Cookie", true);
+      const scanDoubanBtn = mkBtn3("\u626B\u7801\u767B\u5F55", true);
+      const logoutDoubanBtn = mkBtn3("\u9000\u51FA\u767B\u5F55", true);
+      const manualBtn = mkBtn3("\u4FDD\u5B58 Cookie", true);
       doubanBtns.appendChild(scanDoubanBtn);
       doubanBtns.appendChild(logoutDoubanBtn);
       doubanBtns.appendChild(manualBtn);
@@ -17413,7 +17742,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       watchedStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);margin-bottom:6px;min-height:14px;line-height:1.5;";
       watchedStatus.textContent = t("\u8BFB\u53D6\u98DE\u725B\u300C\u5DF2\u89C2\u770B\u300D\u5217\u8868\uFF0C\u6279\u91CF\u6807\u8BB0\u5230\u8C46\u74E3\uFF08\u5DF2\u6807\u8BB0\u7684\u4F1A\u8DF3\u8FC7\uFF0C\u4E0D\u91CD\u590D\u6253\uFF09\u3002");
       watchedWrap.appendChild(watchedStatus);
-      const syncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
+      const syncBtn = mkBtn3("\u7ACB\u5373\u540C\u6B65\u5DF2\u89C2\u770B\u5217\u8868", true);
       syncBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         syncBtn.setAttribute("disabled", "true");
@@ -17441,7 +17770,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       autoInput.min = "0";
       autoInput.step = "5";
       autoInput.style.cssText = "width:64px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:6px;padding:4px 6px;";
-      const autoSave = mkBtn2("\u4FDD\u5B58", true);
+      const autoSave = mkBtn3("\u4FDD\u5B58", true);
       autoSave.style.fontSize = "11px";
       autoRow.appendChild(autoLabel);
       autoRow.appendChild(autoInput);
@@ -17543,8 +17872,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       traBody.appendChild(traSecretInput);
       const traBtnRow1 = document.createElement("div");
       traBtnRow1.style.cssText = "display:flex;gap:6px;";
-      const traSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const traClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
+      const traSaveBtn = mkBtn3("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const traClearBtn = mkBtn3("\u6E05\u9664\u51ED\u8BC1", true);
       traBtnRow1.appendChild(traSaveBtn);
       traBtnRow1.appendChild(traClearBtn);
       traBody.appendChild(traBtnRow1);
@@ -17603,9 +17932,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       });
       const traBtnRow2 = document.createElement("div");
       traBtnRow2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-      const traConnectBtn = mkBtn2("\u8FDE\u63A5 Trakt", true);
-      const traSyncBtn = mkBtn2("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
-      const traDiscBtn = mkBtn2("\u65AD\u5F00\u8FDE\u63A5", true);
+      const traConnectBtn = mkBtn3("\u8FDE\u63A5 Trakt", true);
+      const traSyncBtn = mkBtn3("\u7ACB\u5373\u540C\u6B65\u89C2\u5F71\u8BB0\u5F55", true);
+      const traDiscBtn = mkBtn3("\u65AD\u5F00\u8FDE\u63A5", true);
       traBtnRow2.appendChild(traConnectBtn);
       traBtnRow2.appendChild(traSyncBtn);
       traBtnRow2.appendChild(traDiscBtn);
@@ -17628,7 +17957,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       traScrobSub.textContent = t("\u64AD\u653E\u65F6\u5B9E\u65F6\u6253\u70B9\u5230 Trakt\uFF08\u5F00\u59CB/\u6682\u505C/\u770B\u5B8C\u226580% \u81EA\u52A8\u8BB0\u5F55\uFF09\uFF0C\u9700\u5148\u8FDE\u63A5 Trakt\u3002");
       traScrobLabelWrap.appendChild(traScrobLabel);
       traScrobLabelWrap.appendChild(traScrobSub);
-      const traScrobBtn = mkBtn2("\u2026", true);
+      const traScrobBtn = mkBtn3("\u2026", true);
       traScrobRow.appendChild(traScrobLabelWrap);
       traScrobRow.appendChild(traScrobBtn);
       traBody.appendChild(traScrobRow);
@@ -17848,9 +18177,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       ddFoldBody.appendChild(ddSecretInput);
       const ddBtns = document.createElement("div");
       ddBtns.style.cssText = "display:flex;gap:6px;";
-      const ddSaveBtn = mkBtn2("\u4FDD\u5B58\u51ED\u8BC1", true);
-      const ddClearBtn = mkBtn2("\u6E05\u9664\u51ED\u8BC1", true);
-      const ddTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const ddSaveBtn = mkBtn3("\u4FDD\u5B58\u51ED\u8BC1", true);
+      const ddClearBtn = mkBtn3("\u6E05\u9664\u51ED\u8BC1", true);
+      const ddTestBtn = mkBtn3("\u6D4B\u8BD5\u8FDE\u63A5", true);
       ddBtns.appendChild(ddSaveBtn);
       ddBtns.appendChild(ddClearBtn);
       ddBtns.appendChild(ddTestBtn);
@@ -18017,8 +18346,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmApiFoldBody.appendChild(dmApiInput);
       const dmApiBtns = document.createElement("div");
       dmApiBtns.style.cssText = "display:flex;gap:6px;";
-      const dmApiSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const dmApiTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const dmApiSaveBtn = mkBtn3("\u4FDD\u5B58", true);
+      const dmApiTestBtn = mkBtn3("\u6D4B\u8BD5\u8FDE\u63A5", true);
       dmApiBtns.appendChild(dmApiSaveBtn);
       dmApiBtns.appendChild(dmApiTestBtn);
       dmApiFoldBody.appendChild(dmApiBtns);
@@ -18045,7 +18374,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         dmApiSave();
       });
-      const dmApiDiagBtn = mkBtn2("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
+      const dmApiDiagBtn = mkBtn3("\u8FD0\u884C\u5206\u5C42\u8BCA\u65AD", true);
       dmApiBtns.appendChild(dmApiDiagBtn);
       let dmApiDiagPre = null;
       dmApiDiagBtn.addEventListener("click", async (e) => {
@@ -18111,8 +18440,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       diagPre.textContent = t("\u70B9\u51FB\u300C\u5237\u65B0\u300D\u52A0\u8F7D\u8BCA\u65AD\u4FE1\u606F\u2026");
       const diagBtns = document.createElement("div");
       diagBtns.style.cssText = "display:flex;gap:6px;padding:8px 0 0;";
-      const diagRefresh = mkBtn2("\u5237\u65B0", true);
-      const diagCopy = mkBtn2("\u590D\u5236", true);
+      const diagRefresh = mkBtn3("\u5237\u65B0", true);
+      const diagCopy = mkBtn3("\u590D\u5236", true);
       diagBtns.appendChild(diagRefresh);
       diagBtns.appendChild(diagCopy);
       const loadDiag = async () => {
@@ -18231,7 +18560,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       logFooter.appendChild(logDivider);
       const logRow = document.createElement("div");
       logRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;";
-      const liveBtn = mkBtn2("\u5237\u65B0", true);
+      const liveBtn = mkBtn3("\u5237\u65B0", true);
       logRow.appendChild(liveBtn);
       logFooter.appendChild(logRow);
       const livePre = document.createElement("pre");
@@ -18559,7 +18888,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       hotIntervalRow.appendChild(hotIntervalLabel);
       hotIntervalRow.appendChild(hotIntervalSel);
       secBodyDaily.appendChild(hotIntervalRow);
-      const hotRefreshBtn = mkBtn2("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
+      const hotRefreshBtn = mkBtn3("\u7ACB\u5373\u5237\u65B0\u6570\u636E", true);
       hotRefreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         try {
@@ -18696,8 +19025,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       const mkExtBtnRow = (body) => {
         const row2 = document.createElement("div");
         row2.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-        const save = mkBtn2("\u4FDD\u5B58", true);
-        const clear = mkBtn2("\u6E05\u9664", true);
+        const save = mkBtn3("\u4FDD\u5B58", true);
+        const clear = mkBtn3("\u6E05\u9664", true);
         row2.appendChild(save);
         row2.appendChild(clear);
         body.appendChild(row2);
@@ -18918,9 +19247,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
       const cpBtns = document.createElement("div");
       cpBtns.style.cssText = "display:flex;gap:6px;";
-      const cpSaveBtn = mkBtn2("\u4FDD\u5B58", true);
-      const cpTestBtn = mkBtn2("\u6D4B\u8BD5\u8FDE\u63A5", true);
-      const cpResetBtn = mkBtn2("\u5173\u95ED\u4EE3\u7406", true);
+      const cpSaveBtn = mkBtn3("\u4FDD\u5B58", true);
+      const cpTestBtn = mkBtn3("\u6D4B\u8BD5\u8FDE\u63A5", true);
+      const cpResetBtn = mkBtn3("\u5173\u95ED\u4EE3\u7406", true);
       cpBtns.appendChild(cpSaveBtn);
       cpBtns.appendChild(cpTestBtn);
       cpBtns.appendChild(cpResetBtn);
@@ -23107,11 +23436,784 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     tick();
   });
 
+  // src/preload/plugins/skipMarker.ts
+  init_electron();
+  var log9 = logger_default;
+  var PANEL_ID3 = "fntv-marker-panel";
+  var MARKER_STYLE_ID = "fntv-marker-panel-style";
+  var SKIP_BTN_ID = "fntv-marker-skip-btn";
+  var RECAP_BTN_ID = "fntv-recap-btn";
+  var UI_MARK = "data-fnos-ui";
+  var Z_TOP = "2147483000";
+  var CONFIG_TTL = 60 * 1e3;
+  var INTRO_TAIL_S = 15;
+  var MOUNT_POLL_MS2 = 400;
+  var MOUNT_POLL_MAX2 = 60;
+  var MOUNT_POLL_PAGE_GRACE2 = 15;
+  var GUID_RE3 = /\/v\/(?:movie|tv|video|other)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
+  var config = null;
+  var configAt = 0;
+  var currentGuid2 = "";
+  var effective = null;
+  var effectiveGuid = "";
+  var btnWrap = null;
+  var panelEl = null;
+  var skipBtnEl = null;
+  var boundVideo = null;
+  var mountPollTimer2 = null;
+  var mountPollTries2 = 0;
+  var dismissedIntro = false;
+  var dismissedOutro = false;
+  var inIntroStart = null;
+  var inIntroEnd = null;
+  var inOutroStart = null;
+  var inOutroEnd = null;
+  var scopeEpisode = null;
+  var scopeSeason = null;
+  var restoreBtnEl = null;
+  var fixBadgeEl = null;
+  var hintEl = null;
+  var backJumpBtn = null;
+  var preSeekTime = -1;
+  function extractGuid() {
+    try {
+      const m = window.location.pathname.match(GUID_RE3);
+      if (m && m[1]) return m[1].toLowerCase();
+    } catch {
+    }
+    try {
+      const v = document.querySelector("video");
+      const box = v && v.closest("[data-guid], [data-item-id], [data-itemguid]");
+      if (box) {
+        const g = box.getAttribute("data-guid") || box.getAttribute("data-item-id") || box.getAttribute("data-itemguid");
+        if (g && /^[a-f0-9]{32}$/i.test(g)) return g.toLowerCase();
+      }
+    } catch {
+    }
+    return "";
+  }
+  function isPlayerPage2() {
+    try {
+      return !!(document.querySelector("video") || document.querySelector(".videoPlayer, .playerPage, #videoPlayer"));
+    } catch {
+      return false;
+    }
+  }
+  function getVideo() {
+    return document.querySelector("video");
+  }
+  function videoDuration2() {
+    const v = getVideo();
+    return v && isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+  }
+  async function getConfig() {
+    if (config && Date.now() - configAt < CONFIG_TTL) return config;
+    try {
+      config = await ipcRenderer.invoke("skip-manual:get-config");
+      configAt = Date.now();
+      return config;
+    } catch (e) {
+      log9.warn("[skip-marker] \u8BFB\u914D\u7F6E\u5931\u8D25:", e.message);
+      return null;
+    }
+  }
+  function invalidateEffective() {
+    effective = null;
+    effectiveGuid = "";
+  }
+  async function refreshEffective(guid) {
+    if (effective && effectiveGuid === guid) return effective;
+    try {
+      effective = await ipcRenderer.invoke("skip-manual:effective", { guid });
+      effectiveGuid = guid;
+      return effective;
+    } catch (e) {
+      log9.warn("[skip-marker] \u67E5\u8BE2\u751F\u6548\u6807\u8BB0\u5931\u8D25:", e.message);
+      return null;
+    }
+  }
+  function toast(msg) {
+    try {
+      const el = document.createElement("div");
+      el.setAttribute(UI_MARK, "1");
+      el.textContent = t(msg);
+      el.style.cssText = "position:fixed;left:50%;bottom:140px;transform:translateX(-50%);z-index:" + Z_TOP + ";padding:9px 16px;border-radius:8px;font-size:12.5px;color:#fff;background:rgba(30,34,48,.92);box-shadow:0 8px 24px rgba(0,0,0,.35);transition:opacity .25s ease;pointer-events:none;";
+      document.body.appendChild(el);
+      window.setTimeout(() => {
+        el.style.opacity = "0";
+      }, 2400);
+      window.setTimeout(() => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      }, 2800);
+    } catch {
+    }
+  }
+  function mkBtn2(label, ghost) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "fntv-mk-btn" + (ghost ? " fntv-mk-ghost" : "");
+    b.textContent = t(label);
+    return b;
+  }
+  function findControlsBar2() {
+    const right = document.querySelector("xg-right-grid");
+    if (right && right.offsetHeight > 0) return right;
+    const controls = document.querySelector("xg-controls.xgplayer-controls") || document.querySelector(".xgplayer-controls");
+    if (controls && controls.offsetHeight > 0) {
+      const innerRight = controls.querySelector("xg-right-grid");
+      if (innerRight && innerRight.offsetHeight > 0) return innerRight;
+      return controls;
+    }
+    const all = document.querySelectorAll("div, nav, [role]");
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const h = el.offsetHeight;
+      const txt = el.textContent || "";
+      if ((txt.includes("\u500D\u901F") || txt.includes("\u9009\u96C6") || txt.includes("\u539F\u753B")) && h > 20 && h < 120 && el.children.length >= 2) {
+        return el;
+      }
+    }
+    return null;
+  }
+  function createControlBtn() {
+    if (btnWrap) return;
+    const wrap = document.createElement("div");
+    wrap.className = "plugin-placeholder";
+    wrap.dataset.fnosUi = "1";
+    wrap.style.position = "relative";
+    const hfull = document.createElement("div");
+    hfull.className = "h-full";
+    const flex = document.createElement("div");
+    flex.className = "flex h-full items-center justify-center";
+    flex.setAttribute("tabindex", "0");
+    const span = document.createElement("span");
+    span.className = "cursor-pointer text-lg leading-lg";
+    span.style.userSelect = "none";
+    span.style.color = "var(--semi-color-primary, #3374DB)";
+    span.textContent = t("\u6807\u8BB0");
+    flex.appendChild(span);
+    hfull.appendChild(flex);
+    wrap.appendChild(hfull);
+    wrap.addEventListener("mouseenter", () => {
+      cancelCloseMkPanel();
+      void openPanel2();
+    });
+    wrap.addEventListener("mouseleave", () => {
+      scheduleCloseMkPanel();
+    });
+    flex.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      cancelCloseMkPanel();
+      void openPanel2();
+    });
+    btnWrap = wrap;
+  }
+  function ensureControlBtn() {
+    if (btnWrap && !btnWrap.isConnected) btnWrap = null;
+    const bar2 = findControlsBar2();
+    if (!bar2) return;
+    if (!btnWrap) createControlBtn();
+    if (btnWrap && btnWrap.parentElement !== bar2) {
+      bar2.appendChild(btnWrap);
+      log9.info("[skip-marker] \u6807\u8BB0\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
+    }
+  }
+  function removeControlBtn() {
+    try {
+      if (btnWrap && btnWrap.parentNode) btnWrap.parentNode.removeChild(btnWrap);
+    } catch {
+    }
+    btnWrap = null;
+  }
+  function stopMountPoll2() {
+    if (mountPollTimer2) {
+      clearInterval(mountPollTimer2);
+      mountPollTimer2 = null;
+    }
+    mountPollTries2 = 0;
+  }
+  function startMountPoll2() {
+    if (mountPollTimer2 || btnWrap && btnWrap.isConnected) return;
+    mountPollTries2 = 0;
+    mountPollTimer2 = setInterval(() => {
+      mountPollTries2++;
+      if (btnWrap && btnWrap.isConnected || mountPollTries2 > MOUNT_POLL_MAX2 || mountPollTries2 > MOUNT_POLL_PAGE_GRACE2 && !isPlayerPage2()) {
+        stopMountPoll2();
+        return;
+      }
+      ensureControlBtn();
+    }, MOUNT_POLL_MS2);
+  }
+  function ensureSkipBtn() {
+    if (skipBtnEl && document.getElementById(SKIP_BTN_ID)) return;
+    removeSkipBtn();
+    skipBtnEl = document.createElement("button");
+    skipBtnEl.id = SKIP_BTN_ID;
+    skipBtnEl.setAttribute(UI_MARK, "1");
+    skipBtnEl.type = "button";
+    skipBtnEl.style.cssText = "position:fixed;right:28px;bottom:96px;z-index:" + Z_TOP + ";display:none;border:none;border-radius:8px;padding:9px 18px;cursor:pointer;font-size:13px;font-weight:700;color:#fff;letter-spacing:.4px;background:linear-gradient(135deg,rgba(109,127,242,.95),rgba(138,99,232,.95));box-shadow:0 8px 24px rgba(40,52,110,.4);";
+    skipBtnEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onSkipClick();
+    });
+    document.body.appendChild(skipBtnEl);
+  }
+  function removeSkipBtn() {
+    try {
+      const el = document.getElementById(SKIP_BTN_ID);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    } catch {
+    }
+    skipBtnEl = null;
+  }
+  function nativeSkipPanelVisible() {
+    try {
+      const els = document.querySelectorAll('[class*="skip" i], [id*="skip" i]');
+      for (let i = 0; i < els.length; i++) {
+        const el = els[i];
+        if (!el || el.id && el.id.startsWith("fntv-")) continue;
+        if (el.closest("[data-fnos-ui]")) continue;
+        const st = window.getComputedStyle(el);
+        if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity) === 0) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 40 && r.height > 20) return true;
+      }
+    } catch {
+    }
+    return false;
+  }
+  function onSkipClick() {
+    if (!skipBtnEl || !boundVideo) return;
+    const kind = skipBtnEl.getAttribute("data-kind");
+    const target = Number(skipBtnEl.getAttribute("data-target"));
+    if (!kind || !isFinite(target)) return;
+    try {
+      boundVideo.currentTime = target;
+    } catch {
+    }
+    if (kind === "intro") dismissedIntro = true;
+    else dismissedOutro = true;
+    skipBtnEl.style.display = "none";
+    log9.info(`[skip-marker] \u515C\u5E95\u8DF3\u8FC7(${kind}) \u2192 ${Math.round(target)}s`);
+  }
+  function onTimeUpdate() {
+    if (!skipBtnEl || !boundVideo) return;
+    if (panelOpen()) {
+      skipBtnEl.style.display = "none";
+      return;
+    }
+    const eff = effective;
+    const manual = eff && eff.manual ? eff.manual : null;
+    if (!manual) {
+      skipBtnEl.style.display = "none";
+      return;
+    }
+    if (nativeSkipPanelVisible()) {
+      skipBtnEl.style.display = "none";
+      return;
+    }
+    const cfg = config;
+    const lead = cfg ? cfg.leadSeconds : 5;
+    const cur = boundVideo.currentTime;
+    let kind = "";
+    let target = 0;
+    let label = "";
+    if (manual.introEnd > manual.introStart && cur >= manual.introStart - lead && cur <= manual.introEnd + INTRO_TAIL_S) {
+      if (!dismissedIntro) {
+        kind = "intro";
+        target = manual.introEnd;
+        label = t("\u8DF3\u8FC7\u7247\u5934");
+      }
+    } else {
+      dismissedIntro = false;
+    }
+    if (!kind && manual.outroEnd > manual.outroStart && cur >= manual.outroStart - lead && cur <= manual.outroEnd) {
+      if (!dismissedOutro) {
+        kind = "outro";
+        target = manual.outroEnd;
+        label = t("\u8DF3\u8FC7\u7247\u5C3E");
+      }
+    } else if (!kind) {
+      dismissedOutro = false;
+    }
+    if (kind) {
+      const recap = document.getElementById(RECAP_BTN_ID);
+      skipBtnEl.style.bottom = recap ? "140px" : "96px";
+      skipBtnEl.setAttribute("data-kind", kind);
+      skipBtnEl.setAttribute("data-target", String(target));
+      if (skipBtnEl.textContent !== label) skipBtnEl.textContent = label;
+      skipBtnEl.style.display = "";
+    } else {
+      skipBtnEl.style.display = "none";
+    }
+  }
+  function bindVideo() {
+    const v = getVideo();
+    if (!v || v === boundVideo) return;
+    boundVideo = v;
+    v.addEventListener("timeupdate", onTimeUpdate);
+  }
+  var _markerStyleInjected = false;
+  function injectMarkerPanelStyle() {
+    if (_markerStyleInjected) return;
+    const css = `
+.fntv-mk-list{
+  box-sizing:border-box; margin:0; padding:4px 0; width:320px;
+  background:rgba(46,47,48,.97);                 /* \u6697\u8272 --semi-color-bg-dropdown(\u540C .fntv-dm-list) */
+  border:1px solid rgba(255,255,255,.07);        /* \u7EAF\u9ED1\u753B\u9762\u4E0A\u628A\u5BB9\u5668\u8FB9\u754C\u5206\u51FA\u6765 */
+  border-radius:14px;                            /* .semi-dropdown-wrapper */
+  box-shadow:0 10px 20px #00000014, 0 10px 40px #0000001f;
+  cursor:default; overflow:auto; color:#fff; font-size:14px; line-height:20px;
+  max-height:min(86vh,920px);
+  color-scheme:dark;                             /* \u5426\u5219 number \u65CB\u94AE\u6309\u6D45\u8272\u8868\u5355\u63A7\u4EF6\u6E32\u67D3 */
+  -webkit-app-region:no-drag;                    /* fnOS \u9876\u680F\u662F\u62D6\u62FD\u533A\uFF0C\u663E\u5F0F\u6392\u9664(danmakuWeb \u540C\u6B3E) */
+  transform-origin:100% 100%;
+  opacity:0; visibility:hidden; pointer-events:none; transform:translateY(8px) scale(.96);
+  transition:opacity .18s cubic-bezier(.22,1,.36,1), transform .18s cubic-bezier(.22,1,.36,1), visibility 0s linear .18s;
+}
+.fntv-mk-list.active{opacity:1; visibility:visible; pointer-events:auto; transform:none; transition-delay:0s}
+/* \u900F\u660E\u6865\u63A5\uFF1A\u9762\u677F\u4E0E\u6309\u94AE\u4E4B\u95F4 10px \u89C6\u89C9\u95F4\u9699\uFF0C\u9F20\u6807\u7A7F\u8FC7\u65F6\u4E0D\u7B97\u79FB\u51FA\uFF08\u5F39\u5E55\u5F39\u7A97\u540C\u6B3E\uFF0C::after \u5C5E\u4E8E\u9762\u677F\u672C\u8EAB\uFF09 */
+.fntv-mk-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:12px}
+.fntv-mk-title{padding:10px 16px 2px;font-size:14px;font-weight:600;color:#fff}
+.fntv-mk-badge{display:none;padding:4px 16px 0;font-size:11px;line-height:1.5;color:#ffb46b}
+.fntv-mk-hint{padding:2px 16px 6px;font-size:11px;line-height:1.55;color:rgba(255,255,255,.45)}
+/* \u5206\u533A\u7EBF = .semi-dropdown-divider(\u540C .fntv-dm-sep) */
+.fntv-mk-sep{height:1px;margin:4px 0;background:rgba(255,255,255,.15);pointer-events:none}
+/* \u884C\uFF1A\u5DE6\u53F3\u7559\u767D 16px \u7EDF\u4E00\u7531\u884C\u627F\u62C5(\u5BB9\u5668\u53EA\u7559\u4E0A\u4E0B 4px\uFF0C\u540C .fntv-dm-list li \u7684\u8282\u594F) */
+.fntv-mk-row{display:flex;align-items:center;gap:8px;margin:0;padding:5px 16px}
+.fntv-mk-row-last{padding:8px 16px 10px}
+.fntv-mk-lab{flex:none;width:64px;font-size:12px;color:rgba(255,255,255,.85)}
+.fntv-mk-in{
+  width:76px;height:28px;padding:0 8px;box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.14);border-radius:6px;
+  background:rgba(255,255,255,.07);color:#fff;font-size:12px;
+  outline:none;box-shadow:none;appearance:none;
+}
+.fntv-mk-in::placeholder{color:rgba(255,255,255,.35)}
+.fntv-mk-in:focus{border-color:var(--semi-color-primary,#3374DB);background:rgba(255,255,255,.09)}
+.fntv-mk-unit{flex:none;font-size:11px;color:rgba(255,255,255,.45)}
+.fntv-mk-scope{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;color:rgba(255,255,255,.85)}
+.fntv-mk-row input[type=radio]{accent-color:var(--semi-color-primary,#3374DB);margin:0;cursor:pointer}
+/* \u6309\u94AE = .fntv-dm-search-btn \u89C4\u683C\uFF1Bghost = \u8F93\u5165\u6846\u540C\u6B3E\u63CF\u8FB9\u5E95(\u6B21\u7EA7\u52A8\u4F5C)\u3002
+   \u9009\u62E9\u5668\u5E26 button \u5143\u7D20\u524D\u7F00\u62AC\u7279\u5F02\u5EA6\uFF0C\u663E\u5F0F\u538B\u6389\u98DE\u725B\u9875\u9762\u5168\u5C40\u7ED9 button \u7684\u6D45\u8272 inset \u63CF\u8FB9\u4E0E
+   \u7070\u767D\u5E95(box-shadow/background)\uFF0C\u5426\u5219\u63A7\u4EF6\u5728\u6697\u5E95\u5F39\u7A97\u91CC\u53D1\u7070(dm \u641C\u7D22\u6309\u94AE\u540C\u6B3E\u5904\u7406)\u3002 */
+button.fntv-mk-btn{
+  flex:none;height:28px;padding:0 12px;box-sizing:border-box;
+  border:none;border-radius:6px;
+  background-color:var(--semi-color-primary,#3374DB);
+  color:#fff;font-size:12px;font-weight:500;cursor:pointer;
+  outline:none;box-shadow:none;appearance:none;
+}
+button.fntv-mk-btn:hover{background-color:var(--semi-color-primary-hover,#2e63c9)}
+button.fntv-mk-btn.fntv-mk-ghost{background-color:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)}
+button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
+`;
+    try {
+      const el = document.createElement("style");
+      el.id = MARKER_STYLE_ID;
+      el.textContent = css;
+      (document.head || document.documentElement).appendChild(el);
+      _markerStyleInjected = true;
+    } catch {
+    }
+  }
+  function mkNumInput() {
+    const i = document.createElement("input");
+    i.type = "number";
+    i.min = "0";
+    i.step = "0.1";
+    i.className = "fntv-mk-in";
+    return i;
+  }
+  function mkPanelRow(label, input, isIntro) {
+    const row2 = document.createElement("div");
+    row2.className = "fntv-mk-row";
+    const lab = document.createElement("span");
+    lab.className = "fntv-mk-lab";
+    lab.textContent = t(label);
+    row2.appendChild(lab);
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "fntv-mk-btn";
+    dot.style.padding = "0 10px";
+    dot.textContent = t("\u6253\u70B9");
+    dot.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = getVideo();
+      if (!v) {
+        toast("\u672A\u627E\u5230\u89C6\u9891\u5143\u7D20");
+        return;
+      }
+      if (v.seeking) {
+        toast("\u62D6\u52A8\u8FDB\u5EA6\u6761\u4E2D\uFF0C\u7A0D\u540E\u518D\u6253\u70B9");
+        return;
+      }
+      input.value = v.currentTime.toFixed(1);
+    });
+    row2.appendChild(dot);
+    row2.appendChild(input);
+    const unit = document.createElement("span");
+    unit.className = "fntv-mk-unit";
+    unit.textContent = t("\u79D2");
+    row2.appendChild(unit);
+    if (!isIntro) row2.setAttribute("data-fntv-outro-row", "1");
+    return row2;
+  }
+  function ensurePanel() {
+    if (panelEl && document.getElementById(PANEL_ID3)) return;
+    removePanel();
+    if (!btnWrap) return;
+    injectMarkerPanelStyle();
+    panelEl = document.createElement("div");
+    panelEl.id = PANEL_ID3;
+    panelEl.className = "fntv-mk-list";
+    panelEl.setAttribute(UI_MARK, "1");
+    panelEl.setAttribute("data-fntv-marker", "1");
+    panelEl.style.cssText = "position:absolute;right:-6px;bottom:calc(100% + 10px);z-index:30;box-sizing:border-box;margin:0;padding:4px 0;width:320px;background:rgba(46,47,48,.97);border:1px solid rgba(255,255,255,.07);border-radius:14px;box-shadow:0 10px 20px #00000014,0 10px 40px #0000001f;cursor:default;overflow:auto;color:#fff;font-size:14px;line-height:20px;max-height:min(86vh,920px);color-scheme:dark;-webkit-app-region:no-drag;transform-origin:100% 100%;";
+    const title = document.createElement("div");
+    title.className = "fntv-mk-title";
+    title.textContent = t("\u7247\u5934/\u7247\u5C3E\u624B\u52A8\u6807\u8BB0");
+    panelEl.appendChild(title);
+    fixBadgeEl = document.createElement("div");
+    fixBadgeEl.className = "fntv-mk-badge";
+    fixBadgeEl.textContent = t("\u4FEE\u6B63\u6A21\u5F0F\uFF1A\u5DF2\u9884\u586B\u5F53\u524D\u751F\u6548\u503C\uFF0C\u8C03\u6574\u540E\u4FDD\u5B58\u5C06\u8986\u76D6\u81EA\u52A8\u6570\u636E");
+    panelEl.appendChild(fixBadgeEl);
+    hintEl = document.createElement("div");
+    hintEl.className = "fntv-mk-hint";
+    panelEl.appendChild(hintEl);
+    panelEl.appendChild(mkSep());
+    inIntroStart = mkNumInput();
+    inIntroEnd = mkNumInput();
+    inOutroStart = mkNumInput();
+    inOutroEnd = mkNumInput();
+    panelEl.appendChild(mkPanelRow("\u7247\u5934\u8D77\u70B9", inIntroStart, true));
+    panelEl.appendChild(mkPanelRow("\u7247\u5934\u7EC8\u70B9", inIntroEnd, true));
+    panelEl.appendChild(mkPanelRow("\u7247\u5C3E\u8D77\u70B9", inOutroStart, false));
+    panelEl.appendChild(mkPanelRow("\u7247\u5C3E\u7EC8\u70B9", inOutroEnd, false));
+    const seekRow = document.createElement("div");
+    seekRow.className = "fntv-mk-row";
+    const seekIntro = mkBtn2("\u8BD5\u8DF3\u7247\u5934\u5C3E", false);
+    seekIntro.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = getVideo();
+      const end = Number(inIntroEnd && inIntroEnd.value);
+      if (!v || !end) {
+        toast("\u8BF7\u5148\u6807\u8BB0\u7247\u5934\u7EC8\u70B9");
+        return;
+      }
+      preSeekTime = v.currentTime;
+      v.currentTime = end;
+      if (backJumpBtn) backJumpBtn.style.display = "";
+    });
+    const seekOutro = mkBtn2("\u8BD5\u8DF3\u7247\u5C3E", false);
+    seekOutro.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = getVideo();
+      const start = Number(inOutroStart && inOutroStart.value);
+      if (!v || !start) {
+        toast("\u8BF7\u5148\u6807\u8BB0\u7247\u5C3E\u8D77\u70B9");
+        return;
+      }
+      preSeekTime = v.currentTime;
+      v.currentTime = start;
+      if (backJumpBtn) backJumpBtn.style.display = "";
+    });
+    backJumpBtn = mkBtn2("\u56DE\u5230\u539F\u4F4D", true);
+    backJumpBtn.style.display = "none";
+    backJumpBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = getVideo();
+      if (v && preSeekTime >= 0) v.currentTime = preSeekTime;
+      preSeekTime = -1;
+      if (backJumpBtn) backJumpBtn.style.display = "none";
+    });
+    seekRow.appendChild(seekIntro);
+    seekRow.appendChild(seekOutro);
+    seekRow.appendChild(backJumpBtn);
+    panelEl.appendChild(seekRow);
+    panelEl.appendChild(mkSep());
+    const scopeRow = document.createElement("div");
+    scopeRow.className = "fntv-mk-row";
+    scopeEpisode = document.createElement("input");
+    scopeEpisode.type = "radio";
+    scopeEpisode.name = "fntv-marker-scope";
+    scopeEpisode.value = "episode";
+    scopeSeason = document.createElement("input");
+    scopeSeason.type = "radio";
+    scopeSeason.name = "fntv-marker-scope";
+    scopeSeason.value = "season";
+    const labEp = document.createElement("label");
+    labEp.className = "fntv-mk-scope";
+    labEp.appendChild(scopeEpisode);
+    labEp.appendChild(document.createTextNode(t("\u4EC5\u672C\u96C6")));
+    const labSeason = document.createElement("label");
+    labSeason.className = "fntv-mk-scope";
+    labSeason.appendChild(scopeSeason);
+    labSeason.appendChild(document.createTextNode(t("\u5E94\u7528\u5230\u6574\u5B63")));
+    const scopeLab = document.createElement("span");
+    scopeLab.className = "fntv-mk-lab";
+    scopeLab.textContent = t("\u4F5C\u7528\u8303\u56F4");
+    scopeRow.appendChild(scopeLab);
+    scopeRow.appendChild(labEp);
+    scopeRow.appendChild(labSeason);
+    panelEl.appendChild(scopeRow);
+    const actRow = document.createElement("div");
+    actRow.className = "fntv-mk-row fntv-mk-row-last";
+    const saveBtn = mkBtn2("\u4FDD\u5B58", false);
+    saveBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void savePanel();
+    });
+    restoreBtnEl = mkBtn2("\u6062\u590D\u81EA\u52A8", true);
+    restoreBtnEl.style.display = "none";
+    restoreBtnEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void restoreAuto();
+    });
+    const closeBtn = mkBtn2("\u5173\u95ED", true);
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closePanel2();
+    });
+    actRow.appendChild(saveBtn);
+    actRow.appendChild(restoreBtnEl);
+    actRow.appendChild(closeBtn);
+    panelEl.appendChild(actRow);
+    btnWrap.appendChild(panelEl);
+  }
+  function mkSep() {
+    const s = document.createElement("div");
+    s.className = "fntv-mk-sep";
+    return s;
+  }
+  function panelOpen() {
+    return !!panelEl && panelEl.classList.contains("active");
+  }
+  var mkCloseTimer = null;
+  function scheduleCloseMkPanel() {
+    cancelCloseMkPanel();
+    mkCloseTimer = window.setTimeout(() => {
+      mkCloseTimer = null;
+      closePanel2();
+    }, 260);
+  }
+  function cancelCloseMkPanel() {
+    if (mkCloseTimer !== null) {
+      window.clearTimeout(mkCloseTimer);
+      mkCloseTimer = null;
+    }
+  }
+  function removePanel() {
+    try {
+      const el = document.getElementById(PANEL_ID3);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    } catch {
+    }
+    panelEl = null;
+    inIntroStart = null;
+    inIntroEnd = null;
+    inOutroStart = null;
+    inOutroEnd = null;
+    scopeEpisode = null;
+    scopeSeason = null;
+    restoreBtnEl = null;
+    fixBadgeEl = null;
+    hintEl = null;
+    backJumpBtn = null;
+  }
+  function readPanelValues() {
+    const num2 = (i) => {
+      if (!i) return 0;
+      const v = Number(i.value);
+      return isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : 0;
+    };
+    return {
+      introStart: num2(inIntroStart),
+      introEnd: num2(inIntroEnd),
+      outroStart: num2(inOutroStart),
+      outroEnd: num2(inOutroEnd)
+    };
+  }
+  function fillPanel(v) {
+    if (inIntroStart) inIntroStart.value = v.introStart > 0 ? String(v.introStart) : "";
+    if (inIntroEnd) inIntroEnd.value = v.introEnd > 0 ? String(v.introEnd) : "";
+    if (inOutroStart) inOutroStart.value = v.outroStart > 0 ? String(v.outroStart) : "";
+    if (inOutroEnd) inOutroEnd.value = v.outroEnd > 0 ? String(v.outroEnd) : "";
+  }
+  async function openPanel2() {
+    const cfg = await getConfig();
+    if (!cfg) {
+      toast("\u914D\u7F6E\u8BFB\u53D6\u5931\u8D25");
+      return;
+    }
+    const guid = extractGuid();
+    if (!guid) {
+      toast("\u65E0\u6CD5\u8BC6\u522B\u5F53\u524D\u64AD\u653E\u9879");
+      return;
+    }
+    currentGuid2 = guid;
+    ensurePanel();
+    if (!panelEl) return;
+    const eff = await refreshEffective(guid);
+    if (guid !== currentGuid2) return;
+    const total = videoDuration2();
+    const pre = { introStart: 0, introEnd: 0, outroStart: 0, outroEnd: 0 };
+    if (eff && eff.manual) {
+      pre.introStart = eff.manual.introStart || 0;
+      pre.introEnd = eff.manual.introEnd || 0;
+      pre.outroStart = eff.manual.outroStart || 0;
+      pre.outroEnd = eff.manual.outroEnd || 0;
+    } else if (eff && eff.server) {
+      pre.introEnd = eff.server.skipStart || 0;
+      if (total > 0 && eff.server.skipEnd > 0) {
+        pre.outroStart = Math.max(0, Math.round((total - eff.server.skipEnd) * 10) / 10);
+        pre.outroEnd = Math.round(total * 10) / 10;
+      }
+    }
+    fillPanel(pre);
+    const isFix = !!(eff && !eff.manual && eff.server && (eff.server.skipStart > 0 || eff.server.skipEnd > 0));
+    const hasManual = !!(eff && eff.manual);
+    if (fixBadgeEl) fixBadgeEl.style.display = isFix ? "block" : "none";
+    if (restoreBtnEl) restoreBtnEl.style.display = hasManual ? "" : "none";
+    if (hintEl) {
+      hintEl.textContent = isFix ? t("\u81EA\u52A8\u6570\u636E\u4E0D\u51C6\uFF1F\u8C03\u6574\u6570\u503C\u6216\u91CD\u65B0\u6253\u70B9\uFF0C\u4FDD\u5B58\u540E\u5C06\u8986\u76D6\u81EA\u52A8\u6570\u636E\u5E76\u5199\u56DE\u670D\u52A1\u7AEF\u3002") : t("\u64AD\u653E\u5230\u7247\u5934/\u7247\u5C3E\u65F6\u70B9\u300C\u6253\u70B9\u300D\u8BB0\u5F55\u5F53\u524D\u65F6\u523B\uFF0C\u6216\u76F4\u63A5\u586B\u79D2\u6570\uFF1B\u300C\u8BD5\u8DF3\u300D\u53EF\u6821\u51C6\u3002\u4FDD\u5B58\u540E\u5199\u56DE\u98DE\u725B\u670D\u52A1\u7AEF\uFF08\u53EF\u5728\u8BBE\u7F6E\u5173\u95ED\uFF09\u3002");
+    }
+    if (scopeEpisode && scopeSeason) {
+      scopeEpisode.checked = cfg.defaultScope !== "season";
+      scopeSeason.checked = cfg.defaultScope === "season";
+    }
+    if (mkCloseTimer !== null) {
+      cancelCloseMkPanel();
+      closePanel2();
+      return;
+    }
+    panelEl.classList.add("active");
+  }
+  function closePanel2() {
+    if (panelEl) panelEl.classList.remove("active");
+  }
+  async function savePanel() {
+    const v = readPanelValues();
+    if (v.introEnd > 0 && v.introEnd <= v.introStart) {
+      toast("\u7247\u5934\u533A\u95F4\u975E\u6CD5\uFF1A\u7EC8\u70B9\u9700\u5927\u4E8E\u8D77\u70B9");
+      return;
+    }
+    if (v.outroEnd > 0 && v.outroEnd <= v.outroStart) {
+      toast("\u7247\u5C3E\u533A\u95F4\u975E\u6CD5\uFF1A\u7EC8\u70B9\u9700\u5927\u4E8E\u8D77\u70B9");
+      return;
+    }
+    if (v.introEnd === 0 && v.outroStart === 0) {
+      toast("\u81F3\u5C11\u6807\u8BB0\u7247\u5934\u6216\u7247\u5C3E");
+      return;
+    }
+    const scope = scopeSeason && scopeSeason.checked ? "season" : "episode";
+    try {
+      const r = await ipcRenderer.invoke("skip-manual:set", {
+        guid: currentGuid2,
+        scope,
+        introStart: v.introStart,
+        introEnd: v.introEnd,
+        outroStart: v.outroStart,
+        outroEnd: v.outroEnd,
+        totalDuration: videoDuration2()
+      });
+      if (!r || !r.saved) {
+        toast(r && r.message || "\u4FDD\u5B58\u5931\u8D25");
+        return;
+      }
+      invalidateEffective();
+      let msg = t("\u5DF2\u4FDD\u5B58");
+      if (r.total > 1) msg += t("\uFF08\u6574\u5B63\u5199\u56DE ") + r.written + "/" + r.total + "\uFF09";
+      else if (r.writtenBack) msg += t("\uFF0C\u5DF2\u5199\u56DE\u670D\u52A1\u7AEF");
+      if (r.message) msg += "\uFF1B" + t(r.message);
+      toast(msg);
+      closePanel2();
+      void ensureAll();
+    } catch (e) {
+      toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + e.message);
+    }
+  }
+  async function restoreAuto() {
+    try {
+      const r = await ipcRenderer.invoke("skip-manual:clear", { guid: currentGuid2 });
+      invalidateEffective();
+      toast(r && r.zeroed ? t("\u5DF2\u6062\u590D\u81EA\u52A8\uFF1A\u670D\u52A1\u7AEF\u5DF2\u6E05\u96F6\uFF0C\u81EA\u52A8\u6570\u636E\u5C06\u91CD\u65B0\u586B\u5145") : t("\u672C\u5730\u6807\u8BB0\u5DF2\u6E05\u9664") + (r && r.message ? "\uFF1B" + t(r.message) : ""));
+      closePanel2();
+      ipcRenderer.invoke("skip:fetch-and-fill", { guid: currentGuid2, force: true }).catch(() => {
+      });
+      void ensureAll();
+    } catch (e) {
+      toast("\u6062\u590D\u81EA\u52A8\u5931\u8D25\uFF1A" + e.message);
+    }
+  }
+  function teardown() {
+    stopMountPoll2();
+    cancelCloseMkPanel();
+    removeControlBtn();
+    removePanel();
+    removeSkipBtn();
+    boundVideo = null;
+    currentGuid2 = "";
+    invalidateEffective();
+  }
+  async function ensureAll() {
+    try {
+      const cfg = await getConfig();
+      if (!cfg || !cfg.enabled) {
+        teardown();
+        return;
+      }
+      if (!isPlayerPage2()) {
+        teardown();
+        return;
+      }
+      const guid = extractGuid();
+      if (!guid) {
+        teardown();
+        return;
+      }
+      if (guid !== currentGuid2) {
+        currentGuid2 = guid;
+        dismissedIntro = false;
+        dismissedOutro = false;
+        invalidateEffective();
+        closePanel2();
+      }
+      ensureControlBtn();
+      if (!(btnWrap && btnWrap.isConnected)) startMountPoll2();
+      ensureSkipBtn();
+      bindVideo();
+      const eff = await refreshEffective(guid);
+      if (guid !== currentGuid2) return;
+      onTimeUpdate();
+    } catch (e) {
+      log9.warn("[skip-marker] ensureAll \u5F02\u5E38:", e.message);
+    }
+  }
+  registerHook("onReady" /* OnReady */, () => {
+    setTimeout(() => {
+      void ensureAll();
+    }, 1500);
+  });
+  registerHook("onDomChange" /* OnDomChange */, () => {
+    setTimeout(() => {
+      void ensureAll();
+    }, 600);
+  });
+  (async () => {
+    try {
+      await getConfig();
+    } catch (e) {
+      log9.warn("[skip-marker] \u521D\u59CB\u5316\u5931\u8D25:", e.message);
+    }
+  })();
+
   // src/preload/plugins/watchHistory.ts
   init_electron();
   var LOG2 = "[WatchHistory]";
   var ENTRY_ID = "fntv-wh-entry";
-  var PANEL_ID3 = "fntv-wh";
+  var PANEL_ID4 = "fntv-wh";
   try {
     console.log("[WatchHistory] \u63D2\u4EF6\u811A\u672C\u5DF2\u52A0\u8F7D (lc-723, \u53F3\u4E0A\u89D2\u6309\u94AE=body\u7EA7\u6D6E\u5C42+window\u6355\u83B7\u59D4\u6258)");
   } catch {
@@ -23330,7 +24432,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openPanel2();
+      openPanel3();
       const closeSb = window.fntvCloseSidebar;
       if (typeof closeSb === "function") closeSb();
     });
@@ -23356,7 +24458,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   var curIdx = 0;
   var curRating = 0;
   var WH_CSS = `
-#${PANEL_ID3}{position:fixed;inset:0;z-index:2147483640;display:none;overflow:hidden;
+#${PANEL_ID4}{position:fixed;inset:0;z-index:2147483640;display:none;overflow:hidden;
   font-family:-apple-system,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif;
   -webkit-font-smoothing:antialiased;color:var(--wh-text);
   /* [lc-1013] \u9762\u677F\u5E95 = \u73BB\u7483\u6750\u8D28\uFF1Atint \u534A\u900F\u5E95 + 165deg \u4EAE\u5EA6\u5149\u6CFD\u6E10\u53D8 + \u771F\u5B9E backdrop blur
@@ -23367,9 +24469,9 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   backdrop-filter:blur(42px) saturate(150%) brightness(var(--wh-glass-bright,.82))!important;
   -webkit-backdrop-filter:blur(42px) saturate(150%) brightness(var(--wh-glass-bright,.82))!important;
   -webkit-app-region:no-drag} /* fnOS \u65E0\u8FB9\u6846\u7A97\u53E3\u9876\u90E8 drag \u533A\u52AB\u6301\u547D\u4E2D\u6D4B\u8BD5\uFF0C\u9762\u677F\u6574\u4F53 no-drag \u9632\u70B9\u51FB\u88AB\u62D6\u7A97\u53E3\u541E\u6389 */
-#${PANEL_ID3}.show{display:block}
-#${PANEL_ID3} *{box-sizing:border-box}
-#${PANEL_ID3}{--wh-accent:#2997ff;--wh-bg:#1c1c1e;--wh-surface:rgba(255,255,255,.06);
+#${PANEL_ID4}.show{display:block}
+#${PANEL_ID4} *{box-sizing:border-box}
+#${PANEL_ID4}{--wh-accent:#2997ff;--wh-bg:#1c1c1e;--wh-surface:rgba(255,255,255,.06);
   --wh-surface2:rgba(255,255,255,.1);--wh-text:#f5f5f7;--wh-text2:#a1a1a6;--wh-text3:#6e6e73;
   --wh-line:rgba(255,255,255,.1);--wh-bar-empty:linear-gradient(180deg,#3a3a3e,#2a2a2e);
   --wh-track:rgba(255,255,255,.16);--wh-tip:rgba(24,24,30,.85);--wh-detail:rgba(20,20,26,.78);--wh-star-empty:#3a3a3e;
@@ -23380,7 +24482,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   --wh-hm-1:#0e4429;--wh-hm-2:#006d32;--wh-hm-3:#26a641;--wh-hm-4:#39d353;
   --wh-hm-1a:#1a6b46;--wh-hm-2a:#0c9c49;--wh-hm-3a:#3fd56a;--wh-hm-4a:#6cf080;
   --wh-cell-border:rgba(255,255,255,.14)}
-#${PANEL_ID3}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
+#${PANEL_ID4}.light{--wh-bg:#f5f5f7;--wh-surface:rgba(0,0,0,.04);--wh-surface2:rgba(0,0,0,.07);
   --wh-text:#1d1d1f;--wh-text2:#515154;--wh-text3:#86868b;--wh-line:rgba(0,0,0,.1);
   --wh-bar-empty:linear-gradient(180deg,#e3e3e8,#d2d2d7);--wh-track:rgba(0,0,0,.1);--wh-tip:rgba(255,255,255,.85);
   --wh-detail:rgba(250,250,254,.78);--wh-star-empty:#d2d2d7;--wh-card-bg:rgba(255,255,255,.55);--wh-hm-0:#ebedf0;--wh-hm-1:#9be9a8;--wh-hm-2:#40c463;--wh-hm-3:#30a14e;--wh-hm-4:#216e39;
@@ -23390,27 +24492,27 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   --wh-hm-1a:#b6f0c2;--wh-hm-2a:#5fd07e;--wh-hm-3a:#3fae5e;--wh-hm-4a:#2a7d49;
   --wh-cell-border:rgba(27,31,35,.12)}
 
-#${PANEL_ID3} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px;z-index:10}
-#${PANEL_ID3} .wh-topbar{display:flex;align-items:flex-start;justify-content:flex-start;gap:24px;
+#${PANEL_ID4} .wh-main{position:absolute;inset:0;top:70px;overflow-y:auto;padding:0 0 60px;z-index:10}
+#${PANEL_ID4} .wh-topbar{display:flex;align-items:flex-start;justify-content:flex-start;gap:24px;
   padding:26px 40px 14px;position:sticky;top:0;z-index:60;pointer-events:auto;
   background:inherit;transition:opacity .12s;
   -webkit-app-region:no-drag} /* fnOS \u65E0\u8FB9\u6846\u7A97\u53E3\u9876\u90E8\u662F drag \u62D6\u62FD\u533A\uFF0C\u9762\u677F\u9876\u680F\u5FC5\u987B no-drag \u624D\u80FD\u70B9\u51FB */
 /* \u8BE6\u60C5\u4E3A\u6A21\u6001\u6D6E\u5C42\uFF1A\u6253\u5F00(wh-detail-open)\u65F6\u9690\u85CF\u9762\u677F\u5185\u5DE6\u4E0A\u89D2\u6807\u9898\u533A\uFF0C\u907F\u514D\u6D6E\u5728\u8BE6\u60C5\u9875\u6700\u4E0A\u5C42\u906E\u6321\u5185\u5BB9 */
-#${PANEL_ID3}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
-#${PANEL_ID3} .wh-tb-left{display:flex;flex-direction:column;gap:2px}
-#${PANEL_ID3} .wh-title-row{display:flex;align-items:center;gap:14px}
-#${PANEL_ID3} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
-#${PANEL_ID3} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
+#${PANEL_ID4}.wh-detail-open .wh-topbar{opacity:0;visibility:hidden;pointer-events:none}
+#${PANEL_ID4} .wh-tb-left{display:flex;flex-direction:column;gap:2px}
+#${PANEL_ID4} .wh-title-row{display:flex;align-items:center;gap:14px}
+#${PANEL_ID4} .wh-title{font-size:38px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:12px}
+#${PANEL_ID4} .wh-title::before{content:'';display:inline-block;width:10px;height:10px;border-radius:3px;
   background:linear-gradient(135deg,var(--wh-accent),#7b5bff);flex-shrink:0}
-#${PANEL_ID3} .wh-active-badge{font-size:13px;font-weight:500;color:var(--wh-accent);
+#${PANEL_ID4} .wh-active-badge{font-size:13px;font-weight:500;color:var(--wh-accent);
   background:rgba(41,151,255,.1);border:1px solid rgba(41,151,255,.25);
   padding:3px 12px;border-radius:20px;white-space:nowrap;align-self:center;margin-top:6px}
-#${PANEL_ID3} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:4px;
+#${PANEL_ID4} .wh-subtitle{font-size:13px;color:var(--wh-text2);margin-top:4px;
   display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;line-height:1.6}
-#${PANEL_ID3} .wh-stat-item{display:inline-flex;align-items:baseline;gap:2px;white-space:nowrap}
-#${PANEL_ID3} .wh-stat-item b{font-size:17px;font-weight:700;color:var(--wh-text);font-variant-numeric:tabular-nums}
-#${PANEL_ID3} .wh-stat-item i{font-size:12px;font-style:normal;color:var(--wh-text3)}
-#${PANEL_ID3} .wh-stat-sep{color:var(--wh-line);font-size:12px;margin:0 2px}
+#${PANEL_ID4} .wh-stat-item{display:inline-flex;align-items:baseline;gap:2px;white-space:nowrap}
+#${PANEL_ID4} .wh-stat-item b{font-size:17px;font-weight:700;color:var(--wh-text);font-variant-numeric:tabular-nums}
+#${PANEL_ID4} .wh-stat-item i{font-size:12px;font-style:normal;color:var(--wh-text3)}
+#${PANEL_ID4} .wh-stat-sep{color:var(--wh-line);font-size:12px;margin:0 2px}
 
 /* \u2550\u2550 \u53F3\u4E0A\u89D2\u64CD\u4F5C\u6D6E\u5C42\uFF08body \u7EA7\u72EC\u7ACB\u5C42\uFF0C\u4E0D\u5C5E\u9762\u677F DOM\uFF09\u2550\u2550
    \u542B\uFF1A\u5168\u90E8/\u7535\u5F71/\u5267\u96C6/\u52A8\u6F2B \u7B5B\u9009 + \u7ACB\u5373\u540C\u6B65 + \u5173\u95ED \u2715\uFF0C\u5171 6 \u4E2A\u539F\u751F <button>\u3002
@@ -23459,48 +24561,48 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
 #fntv-wh-topbtns.light .wh-sync:hover{background:#0071e3 !important;color:#fff !important}
 #fntv-wh-topbtns .wh-sync.busy{opacity:.6;pointer-events:none}
 /* \u9AA8\u67B6\u5C4F\uFF1A\u62C9\u53D6\u98DE\u725B+TMDB \u6570\u636E\u671F\u95F4\u5728\u6D77\u62A5\u5899\u5360\u4F4D\uFF0C\u907F\u514D\u7A7A\u767D\u95EA\u70C1 */
-#${PANEL_ID3} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
+#${PANEL_ID4} .wh-skel{position:relative;flex:none;width:100%;aspect-ratio:2/3;height:auto;border-radius:var(--wh-radius);
   overflow:hidden;background:var(--wh-card-bg)}
-#${PANEL_ID3} .wh-skel::after{content:'';position:absolute;inset:0;
+#${PANEL_ID4} .wh-skel::after{content:'';position:absolute;inset:0;
   background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.08) 50%,transparent 100%);
   transform:translateX(-100%);animation:wh-shimmer 1.2s infinite}
-#${PANEL_ID3}.light .wh-skel::after{background:linear-gradient(90deg,transparent 0%,rgba(0,0,0,.06) 50%,transparent 100%)}
+#${PANEL_ID4}.light .wh-skel::after{background:linear-gradient(90deg,transparent 0%,rgba(0,0,0,.06) 50%,transparent 100%)}
 @keyframes wh-shimmer{100%{transform:translateX(100%)}}
 
-#${PANEL_ID3} .wh-section{margin-top:20px;padding:0 40px}
-#${PANEL_ID3} .wh-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
-#${PANEL_ID3} .wh-section-title{font-size:22px;font-weight:600}
-#${PANEL_ID3} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
+#${PANEL_ID4} .wh-section{margin-top:20px;padding:0 40px}
+#${PANEL_ID4} .wh-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}
+#${PANEL_ID4} .wh-section-title{font-size:22px;font-weight:600}
+#${PANEL_ID4} .wh-section-hint{font-size:12px;color:var(--wh-text3)}
 
 /* \u9876\u90E8\u4E24\u680F\u5E03\u5C40\uFF1A\u5DE6\u4FA7\u7EDF\u8BA1\u5927\u76D2\u5B50 / \u53F3\u4FA7\u70ED\u529B\u56FE\u76D2\u5B50\uFF0C\u5404\u5360\u4E00\u534A\uFF0C\u7B49\u9AD8 */
-#${PANEL_ID3} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-top:40px}
+#${PANEL_ID4} .wh-chart-split{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch;margin-top:40px}
 /* \u5DE6\u4FA7\u7EDF\u8BA1\u76D2\u5B50\uFF08\u5305\u542B\u89C2\u5F71\u6D3B\u8DC3\u5EA6\u6807\u9898 + \u5E93\u5B58\u7EDF\u8BA1 + \u8D8B\u52BF + 4 \u6570\u5B57\uFF09 */
 /* [lc-1013] \u73BB\u7483\u5361\u7247\u6750\u8D28\uFF08\u4E0E lc-1012 \u4E91\u6BCD\u589E\u5F3A\u540C\u4E00\u914D\u65B9\uFF09\uFF1Atint \u5361\u73BB\u7483 + \u5149\u6CFD\u6E10\u53D8 +
    \u539A\u5EA6\u73AF/\u9876\u7F18\u9AD8\u5149/\u5927\u8F6F\u9634\u5F71\u4E09\u5C42 box-shadow\uFF0C\u5F03 1px \u5B9E\u7EBF\u8FB9\u6846\uFF1B\u81EA\u8EAB\u518D blur \u4E00\u5C42(\u53E0\u5728\u9762\u677F\u73BB\u7483\u4E0A) */
-#${PANEL_ID3} .wh-stats-panel{
+#${PANEL_ID4} .wh-stats-panel{
   background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-card-glass)!important;
   backdrop-filter:blur(26px) saturate(150%)!important;-webkit-backdrop-filter:blur(26px) saturate(150%)!important;
   border:none!important;
   box-shadow:inset 0 0 0 1px var(--wh-ring),inset 0 1px 0 var(--wh-hi),0 16px 40px -8px rgba(0,0,0,var(--wh-glass-shadow))!important;
   border-radius:22px;padding:24px;display:flex;flex-direction:column;justify-content:center;gap:18px;min-width:0}
-#${PANEL_ID3} .wh-stats-title{font-size:22px;font-weight:700;color:var(--wh-text);letter-spacing:.3px;
+#${PANEL_ID4} .wh-stats-title{font-size:22px;font-weight:700;color:var(--wh-text);letter-spacing:.3px;
   display:flex;align-items:center;gap:10px}
-#${PANEL_ID3} .wh-stats-title::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;
+#${PANEL_ID4} .wh-stats-title::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;
   background:var(--wh-accent)}
-#${PANEL_ID3} .wh-stats-hero{display:flex;flex-direction:column;gap:8px}
-#${PANEL_ID3} .wh-stats-sub{font-size:13px;color:var(--wh-text2);line-height:1.7;word-break:break-word}
+#${PANEL_ID4} .wh-stats-hero{display:flex;flex-direction:column;gap:8px}
+#${PANEL_ID4} .wh-stats-sub{font-size:13px;color:var(--wh-text2);line-height:1.7;word-break:break-word}
 /* \u7EDF\u8BA1\u6570\u5B57\uFF1A\u5355\u6761\u6A2A\u884C 4 \u7B49\u5206\uFF0C\u5DE6\u4FA7 accent \u7AD6\u6761\u951A\u70B9 + \u5927\u6570\u5B57 + \u5355\u4F4D + \u77ED\u6807\u7B7E */
-#${PANEL_ID3} .wh-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 10px;min-width:0}
-#${PANEL_ID3} .wh-stat-row > div{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
+#${PANEL_ID4} .wh-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 10px;min-width:0}
+#${PANEL_ID4} .wh-stat-row > div{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;
   gap:5px;position:relative;padding-left:12px;min-width:0}
-#${PANEL_ID3} .wh-stat-row > div::before{content:'';position:absolute;left:0;top:3px;bottom:3px;width:3px;
+#${PANEL_ID4} .wh-stat-row > div::before{content:'';position:absolute;left:0;top:3px;bottom:3px;width:3px;
   border-radius:2px;background:var(--wh-accent);opacity:.5}
-#${PANEL_ID3} .wh-stat-row .n{display:flex;align-items:baseline;gap:2px;line-height:1}
-#${PANEL_ID3} .wh-stat-row b{font-size:27px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px;color:var(--wh-text)}
-#${PANEL_ID3} .wh-stat-row .u{font-size:12px;font-style:normal;font-weight:600;color:var(--wh-text3)}
-#${PANEL_ID3} .wh-stat-row .l{font-size:11px;color:var(--wh-text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#${PANEL_ID4} .wh-stat-row .n{display:flex;align-items:baseline;gap:2px;line-height:1}
+#${PANEL_ID4} .wh-stat-row b{font-size:27px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.3px;color:var(--wh-text)}
+#${PANEL_ID4} .wh-stat-row .u{font-size:12px;font-style:normal;font-weight:600;color:var(--wh-text3)}
+#${PANEL_ID4} .wh-stat-row .l{font-size:11px;color:var(--wh-text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 /* \u53F3\u4FA7\u70ED\u529B\u56FE\u76D2\u5B50\uFF08\u5BF9\u79F0\u73BB\u7483\u6750\u8D28\uFF0C\u540C .wh-stats-panel\uFF09 */
-#${PANEL_ID3} .wh-chart-wrap{position:relative;min-width:0;align-self:stretch;
+#${PANEL_ID4} .wh-chart-wrap{position:relative;min-width:0;align-self:stretch;
   background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-card-glass)!important;
   backdrop-filter:blur(26px) saturate(150%)!important;-webkit-backdrop-filter:blur(26px) saturate(150%)!important;
   border:none!important;
@@ -23508,96 +24610,96 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   border-radius:22px;
   padding:24px 26px;display:flex;flex-direction:column;justify-content:flex-start}
 /* GitHub \u98CE\u683C\u89C2\u5F71\u6D3B\u8DC3\u5EA6\u8D21\u732E\u70ED\u529B\u56FE\uFF1A\u5217=\u5468\u3001\u884C=\u661F\u671F\uFF0C\u989C\u8272\u6DF1\u6D45=\u5F53\u5929\u89C2\u770B\u4F5C\u54C1\u6570 */
-#${PANEL_ID3} .wh-heat{margin-top:0}
-#${PANEL_ID3} .wh-heat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
-#${PANEL_ID3} .wh-heat-title-wrap{display:flex;flex-direction:column;gap:4px;min-width:0}
-#${PANEL_ID3} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
-#${PANEL_ID3} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
-#${PANEL_ID3} .wh-heat-range-label{font-size:11px;color:var(--wh-text3);font-variant-numeric:tabular-nums;letter-spacing:.2px}
-#${PANEL_ID3} .wh-heat-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;flex:none}
-#${PANEL_ID3} .wh-heat-range{display:inline-flex;background:var(--wh-surface2);border:1px solid var(--wh-line);
+#${PANEL_ID4} .wh-heat{margin-top:0}
+#${PANEL_ID4} .wh-heat-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+#${PANEL_ID4} .wh-heat-title-wrap{display:flex;flex-direction:column;gap:4px;min-width:0}
+#${PANEL_ID4} .wh-heat-total{font-size:13px;color:var(--wh-text2)}
+#${PANEL_ID4} .wh-heat-total b{color:var(--wh-text);font-weight:700;font-variant-numeric:tabular-nums}
+#${PANEL_ID4} .wh-heat-range-label{font-size:11px;color:var(--wh-text3);font-variant-numeric:tabular-nums;letter-spacing:.2px}
+#${PANEL_ID4} .wh-heat-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;flex:none}
+#${PANEL_ID4} .wh-heat-range{display:inline-flex;background:var(--wh-surface2);border:1px solid var(--wh-line);
   border-radius:9px;padding:2px;gap:2px}
-#${PANEL_ID3} .wh-range-btn{border:none;background:transparent;color:var(--wh-text2);font-size:12px;font-weight:600;
+#${PANEL_ID4} .wh-range-btn{border:none;background:transparent;color:var(--wh-text2);font-size:12px;font-weight:600;
   padding:4px 11px;border-radius:7px;cursor:pointer;transition:background .15s,color .15s;font-family:inherit;line-height:1.4}
-#${PANEL_ID3} .wh-range-btn:hover{color:var(--wh-text)}
-#${PANEL_ID3} .wh-range-btn.active{background:var(--wh-accent);color:#fff}
-#${PANEL_ID3} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
-#${PANEL_ID3} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:3px}
-#${PANEL_ID3} .wh-heat-body{display:flex;gap:10px;align-items:flex-start;min-height:136px}
-#${PANEL_ID3} .wh-heat-body.is-h{justify-content:center}
-#${PANEL_ID3} .wh-heat-days{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);font-size:10px;color:var(--wh-text3);flex:none;margin-top:22px}
-#${PANEL_ID3} .wh-heat-days span{line-height:var(--wh-cell,12px);height:var(--wh-cell,12px);visibility:hidden}
-#${PANEL_ID3} .wh-heat-days span.show{visibility:visible}
-#${PANEL_ID3} .wh-heat-scroll{overflow-x:auto;flex:1;padding-bottom:6px;display:flex}
-#${PANEL_ID3} .wh-heat-inner{display:flex;flex-direction:column;margin:0 auto;min-width:max-content}
-#${PANEL_ID3} .wh-heat-months{position:relative;height:16px;margin-bottom:6px;width:100%;white-space:nowrap;overflow:hidden}
-#${PANEL_ID3} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
-#${PANEL_ID3} .wh-heat-cols{display:flex;gap:var(--wh-gap,4px)}
-#${PANEL_ID3} .wh-heat-week{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px)}
+#${PANEL_ID4} .wh-range-btn:hover{color:var(--wh-text)}
+#${PANEL_ID4} .wh-range-btn.active{background:var(--wh-accent);color:#fff}
+#${PANEL_ID4} .wh-heat-legend{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--wh-text3);flex:none}
+#${PANEL_ID4} .wh-heat-legend .wh-cell{width:12px;height:12px;border-radius:3px}
+#${PANEL_ID4} .wh-heat-body{display:flex;gap:10px;align-items:flex-start;min-height:136px}
+#${PANEL_ID4} .wh-heat-body.is-h{justify-content:center}
+#${PANEL_ID4} .wh-heat-days{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);font-size:10px;color:var(--wh-text3);flex:none;margin-top:22px}
+#${PANEL_ID4} .wh-heat-days span{line-height:var(--wh-cell,12px);height:var(--wh-cell,12px);visibility:hidden}
+#${PANEL_ID4} .wh-heat-days span.show{visibility:visible}
+#${PANEL_ID4} .wh-heat-scroll{overflow-x:auto;flex:1;padding-bottom:6px;display:flex}
+#${PANEL_ID4} .wh-heat-inner{display:flex;flex-direction:column;margin:0 auto;min-width:max-content}
+#${PANEL_ID4} .wh-heat-months{position:relative;height:16px;margin-bottom:6px;width:100%;white-space:nowrap;overflow:hidden}
+#${PANEL_ID4} .wh-heat-month{position:absolute;top:0;left:0;font-size:10px;color:var(--wh-text3);white-space:nowrap;padding-right:8px}
+#${PANEL_ID4} .wh-heat-cols{display:flex;gap:var(--wh-gap,4px)}
+#${PANEL_ID4} .wh-heat-week{display:grid;grid-template-rows:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px)}
 /* \u6A2A\u6392\u6A21\u5F0F\uFF08\u5468/\u6708\uFF09\uFF1A\u9876\u90E8\u661F\u671F\u6807\u7B7E + 7 \u5217\u7F51\u683C\uFF08\u884C=\u5468\uFF09 */
-#${PANEL_ID3} .wh-heat-hdays{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);
+#${PANEL_ID4} .wh-heat-hdays{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));gap:var(--wh-gap,4px);
   font-size:10px;color:var(--wh-text3);margin-bottom:5px}
-#${PANEL_ID3} .wh-heat-hdays span{text-align:center;line-height:1}
-#${PANEL_ID3} .wh-heat-hgrid{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));grid-auto-rows:var(--wh-cell,12px);gap:var(--wh-gap,4px)}
-#${PANEL_ID3} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);
+#${PANEL_ID4} .wh-heat-hdays span{text-align:center;line-height:1}
+#${PANEL_ID4} .wh-heat-hgrid{display:grid;grid-template-columns:repeat(7,var(--wh-cell,12px));grid-auto-rows:var(--wh-cell,12px);gap:var(--wh-gap,4px)}
+#${PANEL_ID4} .wh-cell{width:var(--wh-cell,12px);height:var(--wh-cell,12px);border-radius:3px;background:var(--wh-hm-0);
   box-shadow:inset 0 0 0 1px var(--wh-cell-border);
   cursor:pointer;flex-shrink:0;position:relative;
   transition:transform .15s ease, box-shadow .15s ease, filter .15s ease}
-#${PANEL_ID3} .wh-cell.l1{background:linear-gradient(135deg,var(--wh-hm-1a),var(--wh-hm-1))}
-#${PANEL_ID3} .wh-cell.l2{background:linear-gradient(135deg,var(--wh-hm-2a),var(--wh-hm-2))}
-#${PANEL_ID3} .wh-cell.l3{background:linear-gradient(135deg,var(--wh-hm-3a),var(--wh-hm-3))}
-#${PANEL_ID3} .wh-cell.l4{background:linear-gradient(135deg,var(--wh-hm-4a),var(--wh-hm-4))}
+#${PANEL_ID4} .wh-cell.l1{background:linear-gradient(135deg,var(--wh-hm-1a),var(--wh-hm-1))}
+#${PANEL_ID4} .wh-cell.l2{background:linear-gradient(135deg,var(--wh-hm-2a),var(--wh-hm-2))}
+#${PANEL_ID4} .wh-cell.l3{background:linear-gradient(135deg,var(--wh-hm-3a),var(--wh-hm-3))}
+#${PANEL_ID4} .wh-cell.l4{background:linear-gradient(135deg,var(--wh-hm-4a),var(--wh-hm-4))}
 /* \u672A\u6765\u65E5\u671F\uFF1A\u4E0E\u7A7A\u683C\u540C\u8272\u4F46\u66F4\u6DE1\uFF0C\u6E05\u6670\u53EF\u8FA8\u4F46\u4E0D\u54CD\u5E94 hover/tooltip */
-#${PANEL_ID3} .wh-cell.future{background:var(--wh-hm-0);cursor:default;opacity:.5}
-#${PANEL_ID3} .wh-cell:hover{transform:scale(1.28);box-shadow:0 3px 10px rgba(0,0,0,.45);z-index:5}
-#${PANEL_ID3} .wh-cell.future:hover{transform:none;box-shadow:none}
-#${PANEL_ID3} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
+#${PANEL_ID4} .wh-cell.future{background:var(--wh-hm-0);cursor:default;opacity:.5}
+#${PANEL_ID4} .wh-cell:hover{transform:scale(1.28);box-shadow:0 3px 10px rgba(0,0,0,.45);z-index:5}
+#${PANEL_ID4} .wh-cell.future:hover{transform:none;box-shadow:none}
+#${PANEL_ID4} .wh-chart-tip{position:absolute;transform:translate(-50%,-100%);background:var(--wh-tip);
   border:1px solid var(--wh-line);padding:7px 11px;border-radius:10px;font-size:12px;pointer-events:none;
   opacity:0;transition:.12s;white-space:nowrap;z-index:20}
-#${PANEL_ID3} .wh-chart-tip.show{opacity:1}
-#${PANEL_ID3} .wh-chart-tip b{color:var(--wh-accent)}
+#${PANEL_ID4} .wh-chart-tip.show{opacity:1}
+#${PANEL_ID4} .wh-chart-tip b{color:var(--wh-accent)}
 
 /* \u5F71\u89C6\u6E05\u5355\uFF1A\u5DF2\u770B\u5B8C / \u5728\u89C2\u770B \u53CC\u680F\u7B49\u5BBD\u62C6\u5206\uFF08\u5404\u5360\u4E00\u534A\u7A7A\u95F4\uFF09\u3002
    \u6BCF\u5217\u5185\u90E8\u7531"\u6A2A\u5411\u6EDA\u52A8\u6761"\u6539\u4E3A\u81EA\u9002\u5E94\u6362\u884C\u7F51\u683C\uFF1A\u6D77\u62A5\u968F\u5217\u5BBD\u7B49\u6BD4\u7F29\u653E\u3001\u591A\u884C\u81EA\u52A8\u6362\u884C\uFF0C
    \u6574\u4E2A\u9762\u677F\u53EA\u8D70\u7EB5\u5411\u6EDA\u52A8\uFF08\u5355\u4E00\u6EDA\u52A8\u8F74\uFF0C\u89C4\u907F\u5D4C\u5957\u6A2A\u5411\u6EDA\u52A8\u7684\u4F53\u9A8C\u95EE\u9898\uFF09\u3002 */
-#${PANEL_ID3} .wh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+#${PANEL_ID4} .wh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
   gap:16px 14px;padding:4px 4px 10px;align-content:start}
 /* \u5F71\u89C6\u6E05\u5355\uFF1A\u5DF2\u770B\u5B8C / \u5728\u89C2\u770B \u53CC\u680F\u7B49\u5BBD\u62C6\u5206\uFF08\u5404\u5360\u4E00\u534A\u7A7A\u95F4\uFF09 */
-#${PANEL_ID3} .wh-split{display:flex;gap:26px}
-#${PANEL_ID3} .wh-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
-#${PANEL_ID3} .wh-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-left:4px}
-#${PANEL_ID3} .wh-col-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
-#${PANEL_ID3} .wh-col-title::before{content:'';width:8px;height:8px;border-radius:3px;flex:none}
-#${PANEL_ID3} .wh-col.done .wh-col-title::before{background:#34c759}
-#${PANEL_ID3} .wh-col.watching .wh-col-title::before{background:#ff9f0a}
-#${PANEL_ID3} .wh-col-count{font-size:12px;color:var(--wh-text3);background:var(--wh-surface);border:1px solid var(--wh-line);padding:2px 10px;border-radius:11px}
-#${PANEL_ID3} .wh-col-empty{grid-column:1/-1;min-height:200px;flex:1;display:flex;align-items:center;justify-content:center;
+#${PANEL_ID4} .wh-split{display:flex;gap:26px}
+#${PANEL_ID4} .wh-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+#${PANEL_ID4} .wh-col-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-left:4px}
+#${PANEL_ID4} .wh-col-title{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+#${PANEL_ID4} .wh-col-title::before{content:'';width:8px;height:8px;border-radius:3px;flex:none}
+#${PANEL_ID4} .wh-col.done .wh-col-title::before{background:#34c759}
+#${PANEL_ID4} .wh-col.watching .wh-col-title::before{background:#ff9f0a}
+#${PANEL_ID4} .wh-col-count{font-size:12px;color:var(--wh-text3);background:var(--wh-surface);border:1px solid var(--wh-line);padding:2px 10px;border-radius:11px}
+#${PANEL_ID4} .wh-col-empty{grid-column:1/-1;min-height:200px;flex:1;display:flex;align-items:center;justify-content:center;
   color:var(--wh-text3);font-size:13px;text-align:center;background:var(--wh-surface);
   border:1px dashed var(--wh-line);border-radius:14px;margin:4px}
-@media (max-width:900px){#${PANEL_ID3} .wh-split{flex-direction:column}}
-#${PANEL_ID3} .wh-card{position:relative;flex:none;border-radius:var(--wh-radius);overflow:hidden;cursor:pointer;
+@media (max-width:900px){#${PANEL_ID4} .wh-split{flex-direction:column}}
+#${PANEL_ID4} .wh-card{position:relative;flex:none;border-radius:var(--wh-radius);overflow:hidden;cursor:pointer;
   background:var(--wh-card-bg);transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;outline:none}
-#${PANEL_ID3} .wh-card.poster{width:100%;aspect-ratio:2/3;height:auto}
-#${PANEL_ID3} .wh-card:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(0,0,0,.55)}
-#${PANEL_ID3} .wh-card .art{position:absolute;inset:0}
-#${PANEL_ID3} .wh-card .scrim{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.85) 6%,rgba(0,0,0,0) 50%)}
-#${PANEL_ID3} .wh-card .meta{position:absolute;left:13px;right:13px;bottom:11px}
-#${PANEL_ID3} .wh-card .name{font-size:15px;font-weight:600;line-height:1.25;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#${PANEL_ID3} .wh-card .sub{font-size:12px;color:rgba(255,255,255,.75);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#${PANEL_ID3} .wh-card .stars{display:flex;gap:2px;margin-bottom:6px}
-#${PANEL_ID3} .wh-card .stars svg{width:13px;height:13px;fill:#ffd60a}
-#${PANEL_ID3} .wh-card .stars svg.off{fill:var(--wh-star-empty)}
-#${PANEL_ID3} .wh-card .pbar{position:absolute;left:13px;right:13px;bottom:0;height:4px;border-radius:2px;background:rgba(255,255,255,.22)}
-#${PANEL_ID3} .wh-card .pfill{height:100%;border-radius:2px;background:var(--wh-accent)}
-#${PANEL_ID3} .wh-card .badge{position:absolute;top:10px;left:10px;font-size:11px;font-weight:600;padding:3px 8px;
+#${PANEL_ID4} .wh-card.poster{width:100%;aspect-ratio:2/3;height:auto}
+#${PANEL_ID4} .wh-card:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(0,0,0,.55)}
+#${PANEL_ID4} .wh-card .art{position:absolute;inset:0}
+#${PANEL_ID4} .wh-card .scrim{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.85) 6%,rgba(0,0,0,0) 50%)}
+#${PANEL_ID4} .wh-card .meta{position:absolute;left:13px;right:13px;bottom:11px}
+#${PANEL_ID4} .wh-card .name{font-size:15px;font-weight:600;line-height:1.25;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#${PANEL_ID4} .wh-card .sub{font-size:12px;color:rgba(255,255,255,.75);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#${PANEL_ID4} .wh-card .stars{display:flex;gap:2px;margin-bottom:6px}
+#${PANEL_ID4} .wh-card .stars svg{width:13px;height:13px;fill:#ffd60a}
+#${PANEL_ID4} .wh-card .stars svg.off{fill:var(--wh-star-empty)}
+#${PANEL_ID4} .wh-card .pbar{position:absolute;left:13px;right:13px;bottom:0;height:4px;border-radius:2px;background:rgba(255,255,255,.22)}
+#${PANEL_ID4} .wh-card .pfill{height:100%;border-radius:2px;background:var(--wh-accent)}
+#${PANEL_ID4} .wh-card .badge{position:absolute;top:10px;left:10px;font-size:11px;font-weight:600;padding:3px 8px;
   border-radius:8px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;border:1px solid rgba(255,255,255,.15)}
-#${PANEL_ID3} .wh-card .badge.via{top:10px;left:auto;right:10px;background:rgba(10,132,255,.28);border-color:rgba(10,132,255,.6);color:#7fd0ff}
-#${PANEL_ID3} .wh-card .badge.air.ended{background:rgba(48,209,88,.22);border-color:rgba(48,209,88,.6);color:#5be584}
-#${PANEL_ID3} .wh-card .badge.air.ongoing{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.6);color:#ffb340}
-#${PANEL_ID3} .wh-card .badge.air.air-btn{cursor:pointer;user-select:none}
-#${PANEL_ID3} .wh-card .badge.air.air-btn:hover{filter:brightness(1.18)}
-#${PANEL_ID3} .wh-card .badge.air.air-btn.ov{box-shadow:0 0 0 1px rgba(255,255,255,.5) inset}
-#${PANEL_ID3} .wh-card .badge.air.air-empty{background:rgba(255,255,255,.08);border:1px dashed rgba(255,255,255,.4);color:rgba(255,255,255,.65);opacity:.72;font-weight:500}
+#${PANEL_ID4} .wh-card .badge.via{top:10px;left:auto;right:10px;background:rgba(10,132,255,.28);border-color:rgba(10,132,255,.6);color:#7fd0ff}
+#${PANEL_ID4} .wh-card .badge.air.ended{background:rgba(48,209,88,.22);border-color:rgba(48,209,88,.6);color:#5be584}
+#${PANEL_ID4} .wh-card .badge.air.ongoing{background:rgba(255,149,0,.22);border-color:rgba(255,149,0,.6);color:#ffb340}
+#${PANEL_ID4} .wh-card .badge.air.air-btn{cursor:pointer;user-select:none}
+#${PANEL_ID4} .wh-card .badge.air.air-btn:hover{filter:brightness(1.18)}
+#${PANEL_ID4} .wh-card .badge.air.air-btn.ov{box-shadow:0 0 0 1px rgba(255,255,255,.5) inset}
+#${PANEL_ID4} .wh-card .badge.air.air-empty{background:rgba(255,255,255,.08);border:1px dashed rgba(255,255,255,.4);color:rgba(255,255,255,.65);opacity:.72;font-weight:500}
 .wh-air-menu{position:fixed;min-width:132px;background:rgba(22,22,28,.88);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:5px;box-shadow:0 14px 34px rgba(0,0,0,.55);font-size:13px;color:#fff;font-family:inherit}
 .wh-air-menu .wh-air-opt{padding:7px 12px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:9px}
 .wh-air-menu .wh-air-opt:hover{background:rgba(255,255,255,.1)}
@@ -23607,13 +24709,13 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
 .wh-air-menu .wh-air-opt.ongoing .dot{background:#ffb340}
 .wh-air-menu .wh-air-clear{margin-top:4px;padding:7px 12px;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);cursor:pointer;font-size:12px}
 .wh-air-menu .wh-air-clear:hover{color:#fff}
-#${PANEL_ID3} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
+#${PANEL_ID4} .wh-card.focused{transform:scale(1.09);transform-origin:center bottom;
   box-shadow:0 0 0 3px var(--wh-accent),0 26px 50px rgba(0,0,0,.6),0 0 38px rgba(41,151,255,.35);z-index:3}
 
-#${PANEL_ID3} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
+#${PANEL_ID4} .wh-detail-overlay{position:absolute;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(12px);
   display:none;align-items:center;justify-content:center;z-index:50}
-#${PANEL_ID3} .wh-detail-overlay.show{display:flex}
-#${PANEL_ID3} .wh-detail{width:1000px;max-width:94vw;height:82vh;max-height:82vh;overflow:hidden;
+#${PANEL_ID4} .wh-detail-overlay.show{display:flex}
+#${PANEL_ID4} .wh-detail{width:1000px;max-width:94vw;height:82vh;max-height:82vh;overflow:hidden;
   /* [lc-1013] \u8BE6\u60C5\u5F39\u7A97\u73BB\u7483\u5316\uFF1Atint \u534A\u900F(--wh-detail) + \u5149\u6CFD\u6E10\u53D8 + backdrop blur\uFF0C
      \u539A\u5EA6\u73AF/\u9876\u7F18\u9AD8\u5149\u8D70 box-shadow\uFF0C\u5F39\u7A97\u540E\u65B9\u662F\u8BE6\u60C5\u906E\u7F69(\u81EA\u5E26 rgba(0,0,0,.65)+blur(12px)) */
   background:linear-gradient(165deg,rgba(255,255,255,var(--wh-sheen1)),rgba(255,255,255,var(--wh-sheen2))),var(--wh-detail)!important;
@@ -23621,56 +24723,56 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   border:none!important;border-radius:24px;
   display:grid;grid-template-columns:6fr 4fr;align-items:stretch;
   box-shadow:0 40px 100px rgba(0,0,0,.55),inset 0 0 0 1px var(--wh-ring),inset 0 1px 0 var(--wh-hi)!important}
-#${PANEL_ID3} .wh-detail .hero{position:relative;height:100%;background:transparent;
+#${PANEL_ID4} .wh-detail .hero{position:relative;height:100%;background:transparent;
   border-radius:24px 0 0 24px;overflow:hidden}
 /* \u6D77\u62A5\u7528 <img> + object-fit:cover\uFF1A\u6D4F\u89C8\u5668\u539F\u751F\u7B49\u6BD4\u88C1\u5207\uFF0C\u65E0\u62C9\u4F38\u3001\u65E0\u9ED1\u8FB9\uFF08\u4F18\u4E8E CSS background-size\uFF09 */
-#${PANEL_ID3} .wh-detail .hero .poster{position:absolute;inset:0;
+#${PANEL_ID4} .wh-detail .hero .poster{position:absolute;inset:0;
   width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-#${PANEL_ID3} .wh-detail .hero .scrim{position:absolute;inset:0;
+#${PANEL_ID4} .wh-detail .hero .scrim{position:absolute;inset:0;
   background:linear-gradient(to top,rgba(16,16,21,.92) 0%,rgba(0,0,0,0) 55%);
   pointer-events:none}
-#${PANEL_ID3}.light .wh-detail .hero .scrim{background:transparent} /* \u7528\u6237\u8981\u6C42\uFF1A\u5220\u9664\u6D45\u8272\u6A21\u5F0F\u6D77\u62A5\u5E95\u90E8\u767D\u8272\u8F89\u5149\u6E10\u53D8 */
-#${PANEL_ID3} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
+#${PANEL_ID4}.light .wh-detail .hero .scrim{background:transparent} /* \u7528\u6237\u8981\u6C42\uFF1A\u5220\u9664\u6D45\u8272\u6A21\u5F0F\u6D77\u62A5\u5E95\u90E8\u767D\u8272\u8F89\u5149\u6E10\u53D8 */
+#${PANEL_ID4} .wh-detail .body{padding:28px 32px;overflow-y:auto;height:100%;
   background:transparent}
-#${PANEL_ID3} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
-#${PANEL_ID3} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-#${PANEL_ID3} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
-#${PANEL_ID3} .wh-detail .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
-#${PANEL_ID3} .wh-detail .chip{font-size:12px;padding:4px 11px;border-radius:14px;background:var(--wh-surface2);color:var(--wh-text)}
-#${PANEL_ID3} .wh-detail .wh-ratings{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
-#${PANEL_ID3} .wh-detail .wh-rating{flex:1 1 130px;min-width:130px;background:var(--wh-surface2);border:1px solid var(--wh-line);
+#${PANEL_ID4} .wh-detail .d-name{font-size:25px;font-weight:700;line-height:1.25}
+#${PANEL_ID4} .wh-detail .d-meta{font-size:13px;color:var(--wh-text2);margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+#${PANEL_ID4} .wh-detail .fn-badge{font-size:11px;padding:3px 9px;border-radius:8px;background:rgba(41,151,255,.16);color:var(--wh-accent);border:1px solid rgba(41,151,255,.3)}
+#${PANEL_ID4} .wh-detail .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+#${PANEL_ID4} .wh-detail .chip{font-size:12px;padding:4px 11px;border-radius:14px;background:var(--wh-surface2);color:var(--wh-text)}
+#${PANEL_ID4} .wh-detail .wh-ratings{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px}
+#${PANEL_ID4} .wh-detail .wh-rating{flex:1 1 130px;min-width:130px;background:var(--wh-surface2);border:1px solid var(--wh-line);
   border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:3px}
-#${PANEL_ID3} .wh-detail .wh-rating .rl{font-size:12px;color:var(--wh-text3);letter-spacing:.5px}
-#${PANEL_ID3} .wh-detail .wh-rating .rs{font-size:24px;font-weight:700;color:#ffcc00;
+#${PANEL_ID4} .wh-detail .wh-rating .rl{font-size:12px;color:var(--wh-text3);letter-spacing:.5px}
+#${PANEL_ID4} .wh-detail .wh-rating .rs{font-size:24px;font-weight:700;color:#ffcc00;
   font-variant-numeric:tabular-nums;line-height:1.2}
-#${PANEL_ID3} .wh-detail .wh-rating .rc{font-size:11px;color:var(--wh-text3)}
-#${PANEL_ID3} .wh-detail .overview{margin-top:12px;font-size:13px;line-height:1.7;color:var(--wh-text2)}
-#${PANEL_ID3} .wh-detail .cast{margin-top:10px;font-size:12px;color:var(--wh-text3)}
-#${PANEL_ID3} .wh-divider{height:1px;background:var(--wh-line);margin:20px 0}
-#${PANEL_ID3} .wh-mylabel{font-size:13px;color:var(--wh-text3);margin-bottom:10px;display:flex;align-items:center;gap:8px}
-#${PANEL_ID3} .wh-rate{display:flex;gap:8px;cursor:pointer;user-select:none}
-#${PANEL_ID3} .wh-rate svg{width:34px;height:34px;fill:var(--wh-star-empty);
+#${PANEL_ID4} .wh-detail .wh-rating .rc{font-size:11px;color:var(--wh-text3)}
+#${PANEL_ID4} .wh-detail .overview{margin-top:12px;font-size:13px;line-height:1.7;color:var(--wh-text2)}
+#${PANEL_ID4} .wh-detail .cast{margin-top:10px;font-size:12px;color:var(--wh-text3)}
+#${PANEL_ID4} .wh-divider{height:1px;background:var(--wh-line);margin:20px 0}
+#${PANEL_ID4} .wh-mylabel{font-size:13px;color:var(--wh-text3);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+#${PANEL_ID4} .wh-rate{display:flex;gap:8px;cursor:pointer;user-select:none}
+#${PANEL_ID4} .wh-rate svg{width:34px;height:34px;fill:var(--wh-star-empty);
   transition:transform .12s ease,fill .12s ease;transform-origin:center;transform-box:fill-box}
-#${PANEL_ID3} .wh-rate svg.on{fill:url(#fntv-wh-gold)}
-#${PANEL_ID3} .wh-rate svg:hover{transform:scale(1.18)}
-#${PANEL_ID3} .wh-review{width:100%;margin-top:12px;background:var(--wh-surface);border:1px solid var(--wh-line);
+#${PANEL_ID4} .wh-rate svg.on{fill:url(#fntv-wh-gold)}
+#${PANEL_ID4} .wh-rate svg:hover{transform:scale(1.18)}
+#${PANEL_ID4} .wh-review{width:100%;margin-top:12px;background:var(--wh-surface);border:1px solid var(--wh-line);
   border-radius:14px;padding:12px 14px;color:var(--wh-text);font-size:13px;font-family:inherit;resize:vertical;min-height:80px;outline:none}
-#${PANEL_ID3} .wh-review:focus{border-color:var(--wh-accent)}
-#${PANEL_ID3} .wh-actions{display:flex;gap:10px;margin-top:14px}
-#${PANEL_ID3} .wh-btn{border:none;padding:11px 20px;border-radius:13px;font-size:14px;font-weight:600;cursor:pointer}
-#${PANEL_ID3} .wh-btn.primary{background:var(--wh-accent);color:#fff}
-#${PANEL_ID3} .wh-btn.ghost{background:var(--wh-surface2);color:var(--wh-text)}
-#${PANEL_ID3} .wh-sessions{margin-top:8px}
-#${PANEL_ID3} .wh-sessions h4{font-size:13px;color:var(--wh-text3);font-weight:500;margin-bottom:10px}
-#${PANEL_ID3} .wh-sess{display:flex;justify-content:space-between;font-size:13px;color:var(--wh-text2);
+#${PANEL_ID4} .wh-review:focus{border-color:var(--wh-accent)}
+#${PANEL_ID4} .wh-actions{display:flex;gap:10px;margin-top:14px}
+#${PANEL_ID4} .wh-btn{border:none;padding:11px 20px;border-radius:13px;font-size:14px;font-weight:600;cursor:pointer}
+#${PANEL_ID4} .wh-btn.primary{background:var(--wh-accent);color:#fff}
+#${PANEL_ID4} .wh-btn.ghost{background:var(--wh-surface2);color:var(--wh-text)}
+#${PANEL_ID4} .wh-sessions{margin-top:8px}
+#${PANEL_ID4} .wh-sessions h4{font-size:13px;color:var(--wh-text3);font-weight:500;margin-bottom:10px}
+#${PANEL_ID4} .wh-sess{display:flex;justify-content:space-between;font-size:13px;color:var(--wh-text2);
   padding:6px 0;border-bottom:1px solid var(--wh-line)}
-#${PANEL_ID3} .wh-sess .pos{color:var(--wh-text)}
-#${PANEL_ID3} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
+#${PANEL_ID4} .wh-sess .pos{color:var(--wh-text)}
+#${PANEL_ID4} .wh-toast{position:absolute;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
   background:var(--wh-tip);border:1px solid var(--wh-line);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);
   padding:12px 22px;border-radius:14px;font-size:14px;
   opacity:0;transition:.25s;z-index:80;pointer-events:none}
-#${PANEL_ID3} .wh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-#${PANEL_ID3} .wh-sample{font-size:11px;color:var(--wh-text3);margin-top:8px}
+#${PANEL_ID4} .wh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#${PANEL_ID4} .wh-sample{font-size:11px;color:var(--wh-text3);margin-top:8px}
 `;
   function buildPanel2() {
     if (panelBuilt) return;
@@ -23679,7 +24781,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     style2.textContent = WH_CSS;
     (document.head || document.documentElement).appendChild(style2);
     const root = document.createElement("div");
-    root.id = PANEL_ID3;
+    root.id = PANEL_ID4;
     root.innerHTML = `
       <!-- \u9876\u90E8\u680F\uFF1A\u4EC5\u5DE6\u534A\u6807\u9898\u533A\uFF1B\u6253\u5F00\u8BE6\u60C5(wh-detail-open)\u65F6\u9690\u85CF\uFF0C\u907F\u514D\u6D6E\u5728\u8BE6\u60C5\u9875\u4E0A\u906E\u6321 -->
       <div class="wh-topbar">
@@ -23813,13 +24915,13 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
       _ratingCache.set(it.guid || it.name, { r: it.myRating, rv: it.myReview });
       saveRatings();
       renderWall();
-      toast("\u5DF2\u4FDD\u5B58\u4F60\u7684\u8BC4\u4EF7");
+      toast2("\u5DF2\u4FDD\u5B58\u4F60\u7684\u8BC4\u4EF7");
     });
     const dView = $("wh-d-view");
     if (dView) dView.addEventListener("click", () => {
       const it = curData[curIdx];
       if (it && it.guid) {
-        closePanel2();
+        closePanel3();
         viewItemInFnos(it);
       }
     });
@@ -23830,7 +24932,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
         closeDetail();
         return;
       }
-      if ($(PANEL_ID3) && $(PANEL_ID3).classList.contains("show")) closePanel2();
+      if ($(PANEL_ID4) && $(PANEL_ID4).classList.contains("show")) closePanel3();
     });
   }
   function renderStars(r) {
@@ -23928,7 +25030,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     }
     if (el.dataset.selfHandled === "1") return false;
     if (el.id === "wh-close") {
-      closePanel2(true);
+      closePanel3(true);
       return true;
     }
     if (el.id === "wh-sync") {
@@ -23961,13 +25063,13 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     };
     window.addEventListener("click", (e) => {
       if (topAction(e)) return;
-      const root = $(PANEL_ID3);
+      const root = $(PANEL_ID4);
       const tgt = e.target;
       if (!root || !tgt) return;
       if (!root.classList.contains("show")) return;
-      if (!tgt.closest("#" + PANEL_ID3)) return;
+      if (!tgt.closest("#" + PANEL_ID4)) return;
       if (tgt === root || tgt.classList.contains("wh-main") || tgt.classList.contains("wh-topbar")) {
-        closePanel2();
+        closePanel3();
         e.stopImmediatePropagation();
         e.preventDefault();
       }
@@ -24383,7 +25485,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     if (rv) rv.value = it.myReview || "";
     const sess = (it.sessions || []).map((s) => `<div class="wh-sess"><span>${s[0]}</span><span class="pos">${s[1]}</span></div>`).join("") || '<div class="wh-sess"><span>\u6682\u65E0\u5206\u6BB5\u8BB0\u5F55</span></div>';
     setH("wh-d-sessions", sess);
-    const panelRoot = $(PANEL_ID3);
+    const panelRoot = $(PANEL_ID4);
     if (panelRoot) {
       const detailCard = panelRoot.querySelector(".wh-detail");
       if (detailCard) {
@@ -24394,7 +25496,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
       }
     }
     $("wh-detail").classList.add("show");
-    const pr = $(PANEL_ID3);
+    const pr = $(PANEL_ID4);
     if (pr) pr.classList.add("wh-detail-open");
     hideTopBtns();
     enrichDetailOnDemand(idx);
@@ -24402,7 +25504,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   function closeDetail() {
     const detail = $("wh-detail");
     if (detail) detail.classList.remove("show");
-    const pr = $(PANEL_ID3);
+    const pr = $(PANEL_ID4);
     if (pr) pr.classList.remove("wh-detail-open");
     if (pr && pr.classList.contains("show")) showTopBtns();
   }
@@ -24802,6 +25904,37 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     if (s.includes("anime") || s.includes("cartoon")) return "\u52A8\u6F2B";
     return "\u5176\u4ED6";
   }
+  var _posterFillRunning = false;
+  async function fillPostersAsync(mapped) {
+    if (_posterFillRunning) return;
+    _posterFillRunning = true;
+    try {
+      const CHUNK = 8;
+      for (let i = 0; i < mapped.length; i += CHUNK) {
+        const slice = mapped.slice(i, i + CHUNK);
+        await Promise.all(slice.map(async (m) => {
+          if (!m.guid) return;
+          const cached2 = _posterCache2.get(m.guid);
+          if (cached2) {
+            m.poster = cached2.poster;
+            if (cached2.overview && !m.fn.overview) m.fn.overview = cached2.overview;
+          } else {
+            const res = await fetchItemPoster(m.guid);
+            m.poster = res.poster;
+            if (res.overview) m.fn.overview = res.overview;
+            if (res.poster || res.overview) _posterCache2.set(m.guid, res);
+          }
+        }));
+      }
+      savePosterCache();
+      try {
+        if ($(PANEL_ID4) && $(PANEL_ID4).classList.contains("show")) renderWall();
+      } catch {
+      }
+    } finally {
+      _posterFillRunning = false;
+    }
+  }
   async function loadWatchData(force = false) {
     try {
       const resp = await ipcRenderer.invoke("douban:get-watched-items", force).catch(() => null);
@@ -24856,24 +25989,15 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
         };
       });
       loadPosterCache();
-      const CHUNK = 4;
-      for (let i = 0; i < mapped.length; i += CHUNK) {
-        const slice = mapped.slice(i, i + CHUNK);
-        await Promise.all(slice.map(async (m) => {
-          if (!m.guid) return;
-          const cached2 = _posterCache2.get(m.guid);
-          if (cached2) {
-            m.poster = cached2.poster;
-            if (cached2.overview && !m.fn.overview) m.fn.overview = cached2.overview;
-          } else {
-            const res = await fetchItemPoster(m.guid);
-            m.poster = res.poster;
-            if (res.overview) m.fn.overview = res.overview;
-            if (res.poster || res.overview) _posterCache2.set(m.guid, res);
-          }
-        }));
+      for (const m of mapped) {
+        if (!m.guid) continue;
+        const cached2 = _posterCache2.get(m.guid);
+        if (cached2) {
+          m.poster = cached2.poster;
+          if (cached2.overview && !m.fn.overview) m.fn.overview = cached2.overview;
+        }
       }
-      savePosterCache();
+      fillPostersAsync(mapped);
       for (const m of mapped) {
         const saved = m.guid && _ratingCache.get(m.guid) || _ratingCache.get(m.name);
         if (saved && saved.r > 0) {
@@ -24980,7 +26104,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     if (sb && sb.classList.contains("busy")) return;
     if (sb) sb.classList.add("busy");
     try {
-      toast("\u6B63\u5728\u4ECE\u98DE\u725B\u5F71\u89C6\u540C\u6B65\u6700\u65B0\u89C2\u770B\u6570\u636E\u2026");
+      toast2("\u6B63\u5728\u4ECE\u98DE\u725B\u5F71\u89C6\u540C\u6B65\u6700\u65B0\u89C2\u770B\u6570\u636E\u2026");
       showSkeleton();
       const result = await loadWatchData(true);
       if (result.from === "real") {
@@ -24997,15 +26121,15 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
         const monthCountEl = $("wh-stat-month");
         const monthCount = monthCountEl ? parseInt(monthCountEl.textContent || "0", 10) : 0;
         if (sub) sub.innerHTML = buildSubtitleHTML(total, done, partial, activeDays, monthCount, false);
-        toast(`\u5DF2\u540C\u6B65 ${result.count} \u90E8\u89C2\u770B\u8BB0\u5F55\uFF08\u542B\u90E8\u5206\u770B\uFF09`);
+        toast2(`\u5DF2\u540C\u6B65 ${result.count} \u90E8\u89C2\u770B\u8BB0\u5F55\uFF08\u542B\u90E8\u5206\u770B\uFF09`);
       } else {
-        toast("\u540C\u6B65\u5931\u8D25\uFF1A\u672A\u80FD\u83B7\u53D6\u98DE\u725B\u6570\u636E\uFF08\u53EF\u80FD\u672A\u767B\u5F55\u6216\u7F51\u7EDC\u95EE\u9898\uFF09");
+        toast2("\u540C\u6B65\u5931\u8D25\uFF1A\u672A\u80FD\u83B7\u53D6\u98DE\u725B\u6570\u636E\uFF08\u53EF\u80FD\u672A\u767B\u5F55\u6216\u7F51\u7EDC\u95EE\u9898\uFF09");
       }
     } finally {
       if (sb) sb.classList.remove("busy");
     }
   }
-  function toast(msg) {
+  function toast2(msg) {
     const t2 = $("wh-toast");
     if (!t2) return;
     t2.textContent = msg;
@@ -25026,12 +26150,12 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     root.style.setProperty("backdrop-filter", "none", "important");
     root.style.setProperty("-webkit-backdrop-filter", "none", "important");
   }
-  function openPanel2() {
+  function openPanel3() {
     try {
       const __t0 = performance.now();
-      if (!$(PANEL_ID3)) panelBuilt = false;
+      if (!$(PANEL_ID4)) panelBuilt = false;
       buildPanel2();
-      const root = $(PANEL_ID3);
+      const root = $(PANEL_ID4);
       const light = detectLight();
       root.classList.toggle("light", light);
       paintBg(root);
@@ -25041,7 +26165,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
       if (tb) tb.classList.toggle("light", light);
       paintBg(root);
       [300, 1e3, 2500].forEach((d) => window.setTimeout(() => {
-        const cur = $(PANEL_ID3);
+        const cur = $(PANEL_ID4);
         if (cur && cur.classList.contains("show")) paintBg(cur);
       }, d));
       loadPersistedDayCount();
@@ -25094,8 +26218,8 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
       logger_default.error(LOG2, "openPanel failed", err);
     }
   }
-  function closePanel2(goHome = false) {
-    const root = $(PANEL_ID3);
+  function closePanel3(goHome = false) {
+    const root = $(PANEL_ID4);
     if (!root) return;
     root.classList.remove("show");
     hideTopBtns();
@@ -25153,7 +26277,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   }
 
   // src/preload/plugins/watchReport.ts
-  var PANEL_ID4 = "fntv-wh";
+  var PANEL_ID5 = "fntv-wh";
   var BTN_ID2 = "fntv-wrapped-btn";
   var OV_ID2 = "fntv-wrapped";
   function computeReport(items2, year, tsOf) {
@@ -25243,7 +26367,7 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
   }
   var _cur = null;
   function ensureButton() {
-    const panel = document.getElementById(PANEL_ID4);
+    const panel = document.getElementById(PANEL_ID5);
     if (!panel) return;
     if (document.getElementById(BTN_ID2)) return;
     const bar2 = document.getElementById("fntv-wh-topbtns");

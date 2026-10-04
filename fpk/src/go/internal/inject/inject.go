@@ -158,16 +158,29 @@ window.addEventListener('popstate',function(e){
       rs.call(history,e.state!=null?e.state:history.state,'',strip(location.pathname)+location.search+location.hash);
     }
   }catch(err){}
+  // [lc-1296] 前进/后退落到剥离条目（启动时被剥成 /v/* 的那条）后地址是原生形态，
+  // 路由渲染完立刻回填，不让地址栏停留在原生路径（停留期间刷新即跳出增强）。
+  setTimeout(function(){ if(!readd()) setTimeout(readd,60); },0);
 });
-try{
-  var n=0,timer=setInterval(function(){
-    if(++n>200){clearInterval(timer);return;}
+function readd(){
+  try{
     var root=document.getElementById('root');
     if(root&&root.childElementCount>0&&!isGw(location.pathname)&&isV(location.pathname)){
-      clearInterval(timer);
-      try{history.replaceState(history.state,'',P+location.pathname+location.search+location.hash);}catch(e){}
+      history.replaceState(history.state,'',P+location.pathname+location.search+location.hash);
+      return true;
     }
-  },50);
+  }catch(e){}
+  return false;
+}
+try{
+  // [lc-1296] 回填不再「10 秒放弃」：强刷（清缓存）时 SPA 启动可远超 200×50ms，
+  // 旧实现到点放弃 → 地址栏永远停在原生 /v/*，此时用户再刷新一次就彻底跳出增强。
+  // 现改为三层：MutationObserver 盯 #root 首次渲染立即回填（断开）→ 50ms×1200（60s）兜底
+  // → 每秒一次的常驻自愈（覆盖 popstate 回到剥离条目等一切后续漂移，成本=每秒一次路径检查）。
+  var mo=new MutationObserver(function(){ if(readd()) mo.disconnect(); });
+  mo.observe(document.documentElement,{childList:true,subtree:true});
+  var n=0,timer=setInterval(function(){ if(++n>1200||readd()) clearInterval(timer); },50);
+  setInterval(function(){ readd(); },1000);
 }catch(e){}
 /* ── 启动期 API 捕获：item/list / item/{guid}（带合法 Authx 的 SPA 自身请求）── */
 try{

@@ -238,6 +238,9 @@ function saveSettings(s) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch { /* 忽略 */ }
 }
 
+// [skip-manual] 季 guid 内存缓存（模块级：跨 invoke 存活；桌面 resolveSeasonGuid 同为模块级）
+const smSeasonCache = new Map();
+
 const ipcRenderer = {
   invoke(channel, ...args) {
     /* ── 设置：服务端持久化（NAS 端 config.json，跨浏览器共享）；失败回退 localStorage 镜像 ── */
@@ -450,6 +453,14 @@ const ipcRenderer = {
         guid: args[0], percentage: args[1], item: args[2] || null,
       });
     }
+    if (channel === 'bangumi:probe') {
+      // 连接诊断（设置面板「测试连接」）：网络链路（报实际传输路）+ Token 有效性
+      return apiGet('/app/fntvplus/api/bridge/bangumi/probe');
+    }
+    if (channel === 'bangumi:sync-status') {
+      // 最近一次同步结果（成功/失败 + 归类原因：网络/密钥/限流/未匹配），面板展示
+      return apiGet('/app/fntvplus/api/bridge/bangumi/sync-status');
+    }
     if (channel === 'douban:enrich-one') return Promise.resolve(null);
     if (channel === 'douban:sync-progress') {
       // [v0.52.0] 播放进度 → 豆瓣标「在看/看过」（后端带手动粘贴的 doubanCookie，标 interest）
@@ -546,6 +557,191 @@ const ipcRenderer = {
     if (channel === 'play-movie' || channel === 'external-play' || channel === 'pause' || channel === 'media:control') {
       return Promise.resolve(undefined);
     }
+
+    /* ── [skip-manual] 片头/片尾手动标记（桌面 skipManual.ts 同构；副本 skipMarker.ts 的数据通道）──
+     * 手动标记是 4 值(introStart/End + outroStart/End)，写回飞牛是 2 值语义（skipStart=片头跳过秒数、
+     * skipEnd=片尾从结尾跳过秒数）。派生公式与桌面 handleSet 一致：fnSkipStart=introEnd；
+     * fnSkipEnd=totalDuration-outroStart。手动标记存 localStorage（跨端共享无 NAS 侧存储，
+     * 服务端只有 2 值语义的 skipinfo）；服务端读写直连 fnOS（签名 + cookie，同 fetch-and-fill 路径）。 */
+    if (channel === 'skip-manual:get-config') {
+      // 网页端没有 skip-manual 设置面板 → 桌面 config.getSkipManualConfig 的缺省分支同值
+      return Promise.resolve({ enabled: true, writeBack: true, defaultScope: 'episode', leadSeconds: 5, introSoftLimit: 300 });
+    }
+    if (channel === 'skip-manual:effective' || channel === 'skip-manual:set' || channel === 'skip-manual:clear') {
+      const SM_LS_KEY = 'fntv:skip-manual';
+      const smNum = (v) => (typeof v === 'number' && isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : 0);
+      const smReadStore = () => {
+        try {
+          const d = JSON.parse(localStorage.getItem(SM_LS_KEY) || '{}');
+          if (d && d.version === 1 && d.entries && typeof d.entries === 'object') return d;
+        } catch (e) { /* 损坏 → 空库 */ }
+        return { version: 1, entries: {} };
+      };
+      const smWriteStore = (s) => { try { localStorage.setItem(SM_LS_KEY, JSON.stringify(s)); } catch (e) { /* 忽略 */ } };
+      const smSignedFetch = async (method, path, payload) => {
+        const headers = { 'Content-Type': 'application/json' };
+        headers.Authx = await genAuthxAsync(path, payload || undefined);
+        const resp = await fetch(location.origin + path, {
+          method, credentials: 'include', headers,
+          body: payload ? JSON.stringify(payload) : undefined,
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      };
+      // play/info → 本集元数据（parent_guid 用于季级解析；返回 null=拿不到）
+      const smPlayInfo = async (guid) => {
+        try {
+          const j = await smSignedFetch('POST', '/v/api/v1/play/info', { item_guid: guid });
+          const item = j && j.data && j.data.item;
+          return item ? { item, data: j.data } : null;
+        } catch (e) { return null; }
+      };
+      // 季 guid（10 分钟缓存，见模块级 smSeasonCache；桌面 resolveSeasonGuid 同策略；电影/单视频返回 null）
+      const smSeasonGuid = async (guid) => {
+        const hit = smSeasonCache.get(guid);
+        if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.guid || null;
+        const info = await smPlayInfo(guid);
+        const item = info && info.item;
+        const type = String(((item && item.type) || (info && info.data && info.data.type) || '')).toLowerCase();
+        const sg = info && info.data ? (info.data.parent_guid || (item && item.parent_guid) || '') : '';
+        const out = type === 'episode' && sg ? String(sg) : null;
+        smSeasonCache.set(guid, { guid: out, at: Date.now() });
+        return out;
+      };
+      // 服务端 2 值读写（双前缀尝试，与 fetch-and-fill 同款）
+      const smReadServer = async (guid) => {
+        for (const p of ['/v/api/v1/skipinfo/' + guid, '/api/v1/skipinfo/' + guid]) {
+          try {
+            const j = await smSignedFetch('GET', p);
+            if (j && j.code === 0 && j.data) {
+              const skipStart = Number(j.data.skipStart) || 0;
+              const skipEnd = Number(j.data.skipEnd) || 0;
+              if (skipStart > 0 || skipEnd > 0) return { skipStart, skipEnd };
+            }
+          } catch (e) { /* 试下一个前缀 */ }
+        }
+        return null;
+      };
+      const smWriteServer = async (guid, skipStart, skipEnd) => {
+        for (const p of ['/v/api/v1/skipinfo', '/api/v1/skipinfo']) {
+          try {
+            const j = await smSignedFetch('POST', p, { guid, skipStart, skipEnd });
+            if (j && j.code === 0) return { ok: true };
+          } catch (e) { /* 试下一个前缀 */ }
+        }
+        return { ok: false, message: '写回服务端失败' };
+      };
+      // 整季集 guid 枚举（桌面 listSeasonEpisodes 同参数；失败返回空 → 调用方降级）
+      const smSeasonEpisodes = async (seasonGuid) => {
+        try {
+          const path = '/v/api/v1/item/list';
+          const payload = { parent_guid: seasonGuid, exclude_folder: 1, sort_column: 'index_number', sort_type: 'ASC', page: 1, page_size: 200 };
+          const j = await smSignedFetch('POST', path, payload);
+          const list = (j && j.data && Array.isArray(j.data.list)) ? j.data.list : [];
+          return list
+            .filter((it) => String((it && it.type) || '').toLowerCase() === 'episode' && it.guid)
+            .map((it) => String(it.guid));
+        } catch (e) { return []; }
+      };
+
+      if (channel === 'skip-manual:effective') {
+        return (async () => {
+          const guid = String((args[0] && args[0].guid) || '').trim();
+          if (!guid) return { manual: null, server: null };
+          const store = smReadStore();
+          const direct = store.entries[guid] || null;
+          if (direct) return { manual: direct, server: null };   // 已手动修正 → 不再提示「标记不准」
+          const seasonGuid = await smSeasonGuid(guid);
+          const seasonEntry = seasonGuid ? (store.entries[seasonGuid] || null) : null;
+          if (seasonEntry && seasonEntry.scope === 'season') return { manual: seasonEntry, server: null };
+          const server = await smReadServer(guid);
+          return { manual: null, server };
+        })();
+      }
+
+      if (channel === 'skip-manual:clear') {
+        return (async () => {
+          const guid = String((args[0] && args[0].guid) || '').trim();
+          if (!guid) return { cleared: false, zeroed: false, message: '缺少 guid' };
+          const store = smReadStore();
+          // 清最贴合的一条：本集优先；无本集标记但命中季级标记时清季级（「恢复自动」预期语义）
+          let removed = false;
+          if (store.entries[guid]) { delete store.entries[guid]; removed = true; }
+          else {
+            const seasonGuid = await smSeasonGuid(guid);
+            if (seasonGuid && store.entries[seasonGuid]) { delete store.entries[seasonGuid]; removed = true; }
+          }
+          smWriteStore(store);
+          // 服务端清零（best-effort）：preload 随后以 force 重跑 skip:fetch-and-fill 自动链
+          const zero = await smWriteServer(guid, 0, 0);
+          return { cleared: removed, zeroed: zero.ok, message: zero.ok ? undefined : (zero.message || '服务端清零失败') };
+        })();
+      }
+
+      // skip-manual:set
+      return (async () => {
+        const p0 = args[0] || {};
+        const guid = String(p0.guid || '').trim();
+        if (!/^[a-f0-9]{32}$/i.test(guid)) {
+          return { saved: false, writtenBack: false, written: 0, total: 0, message: 'guid 非法' };
+        }
+        const introStart = smNum(p0.introStart);
+        const introEnd = smNum(p0.introEnd);
+        const outroStart = smNum(p0.outroStart);
+        const outroEnd = smNum(p0.outroEnd);
+        const totalDuration = smNum(p0.totalDuration);
+        const wantSeason = !!(p0.scope === 'season');
+        const fail = (message) => ({ saved: false, writtenBack: false, written: 0, total: 0, message });
+        if (introEnd > 0 && introEnd <= introStart) return fail('片头区间非法（终点需大于起点）');
+        if (outroEnd > 0 && outroEnd <= outroStart) return fail('片尾区间非法（终点需大于起点）');
+        if (introEnd === 0 && outroStart === 0) return fail('至少标记片头或片尾');
+        const fnSkipStart = introEnd > 0 ? Math.round(introEnd) : 0;
+        const fnSkipEnd = outroStart > 0 && totalDuration > 0 ? Math.max(0, Math.round(totalDuration - outroStart)) : 0;
+        // 本地保存：季级存季 guid（解析不到季则降级为单集语义）
+        const store = smReadStore();
+        let storeGuid = guid;
+        let entryScope = 'episode';
+        if (wantSeason) {
+          const seasonGuid = await smSeasonGuid(guid);
+          if (seasonGuid) { storeGuid = seasonGuid; entryScope = 'season'; }
+        }
+        store.entries[storeGuid] = {
+          guid: storeGuid, scope: entryScope,
+          introStart, introEnd, outroStart, outroEnd,
+          fnSkipStart, fnSkipEnd, totalDuration, updatedAt: Date.now(),
+        };
+        smWriteStore(store);
+        // 保存即写回（桌面同语义；网页端无写回开关，恒开）
+        let writtenBack = false;
+        let written = 0;
+        let total = 0;
+        let message = '';
+        if (fnSkipStart > 0 || fnSkipEnd > 0) {
+          if (entryScope === 'season') {
+            const eps = await smSeasonEpisodes(storeGuid);
+            total = eps.length;
+            for (const epGuid of eps) {
+              const r = await smWriteServer(epGuid, fnSkipStart, fnSkipEnd);
+              if (r.ok) written += 1;
+              await new Promise((res) => setTimeout(res, 200));
+            }
+            writtenBack = written > 0;
+            if (total > 0 && written < total) message = '整季写回 ' + written + '/' + total + ' 集';
+          } else {
+            const r = await smWriteServer(guid, fnSkipStart, fnSkipEnd);
+            writtenBack = r.ok;
+            total = 1;
+            written = r.ok ? 1 : 0;
+            if (!r.ok) message = '写回服务端失败：' + (r.message || '');
+          }
+        }
+        if (introEnd > 300) {
+          message = (message ? message + '；' : '') + '片头 ' + Math.round(introEnd) + 's 超过合理上限 300s，请确认标记是否准确';
+        }
+        return { saved: true, writtenBack, written, total, message: message || undefined };
+      })();
+    }
+
     if (channel === 'skip:fetch-and-fill') {
       // [v0.70.0] 跳过片头/片尾数据链（网页端）：直连 play/info 拿元数据 → 直连 fnOS skipinfo
       // （已有数据直接用）→ 后端外网三级链（AniSkip+MAL 映射 / theintrodb）→ 直连写回 fnOS。

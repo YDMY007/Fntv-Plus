@@ -1784,6 +1784,34 @@ function mapType(t: string | number | undefined): string {
  *   过滤 watched===1 → 返回 [{guid,title,type,thumbnail_url,overview,year,genres,cast,
  *          douban_id,douban_rating,watched,progress,last_played}, ...]
  */
+// [lc-1293] 海报后台补齐：并发拉缺失海报（8 路并发、单请求 4s 超时），落盘缓存后，
+// 面板在屏则重绘一次让海报上墙。与 loadWatchData 解耦 —— 数据先回、海报后到。
+let _posterFillRunning = false;
+async function fillPostersAsync(mapped: ShowItem[]): Promise<void> {
+    if (_posterFillRunning) return;   // 上一轮仍在拉取则不重叠（force 刷新场景等本轮回调再开）
+    _posterFillRunning = true;
+    try {
+        const CHUNK = 8;
+        for (let i = 0; i < mapped.length; i += CHUNK) {
+            const slice = mapped.slice(i, i + CHUNK);
+            await Promise.all(slice.map(async (m) => {
+                if (!m.guid) return;
+                const cached = _posterCache.get(m.guid);
+                if (cached) { m.poster = cached.poster; if (cached.overview && !m.fn.overview) m.fn.overview = cached.overview; }
+                else {
+                    const res = await fetchItemPoster(m.guid);
+                    m.poster = res.poster;
+                    if (res.overview) m.fn.overview = res.overview;
+                    if (res.poster || res.overview) _posterCache.set(m.guid, res);
+                }
+            }));
+        }
+        savePosterCache(); // 落盘持久化（含本次新拉取的海报+简介）
+        // 海报到位后面板在屏则重绘一次（renderWall 自查行存在，面板已关则空转）
+        try { if ($(PANEL_ID) && ($(PANEL_ID) as HTMLElement).classList.contains('show')) renderWall(); } catch { /* ignore */ }
+    } finally { _posterFillRunning = false; }
+}
+
 async function loadWatchData(force = false): Promise<{ count: number; from: 'real' | 'sample'; libraryTotal: number }> {
     try {
         const resp = await ipcRenderer.invoke('douban:get-watched-items', force).catch(() => null);
@@ -1840,25 +1868,17 @@ async function loadWatchData(force = false): Promise<{ count: number; from: 'rea
             douban_id: (it.douban_id || 0) as (string | number),
             };
         });
-        // 并发拉取真实竖版海报（与首页轮播图同款 item API 机制），按 guid 取 data.posters
+        // 海报+简介（总时长已由主进程 getWatchedItems 计算并随数据下发，前端不再单独拉取）
         loadPosterCache(); // 重启后从 localStorage 恢复海报+简介，避免重复拉取
-        const CHUNK = 4;
-        for (let i = 0; i < mapped.length; i += CHUNK) {
-            const slice = mapped.slice(i, i + CHUNK);
-            await Promise.all(slice.map(async (m) => {
-                if (!m.guid) return;
-                // 海报+简介（总时长已由主进程 getWatchedItems 计算并随数据下发，前端不再单独拉取）
-                const cached = _posterCache.get(m.guid);
-                if (cached) { m.poster = cached.poster; if (cached.overview && !m.fn.overview) m.fn.overview = cached.overview; }
-                else {
-                    const res = await fetchItemPoster(m.guid);
-                    m.poster = res.poster;
-                    if (res.overview) m.fn.overview = res.overview;
-                    if (res.poster || res.overview) _posterCache.set(m.guid, res);
-                }
-            }));
+        // [lc-1293] 已缓存海报同步应用（首绘即有图）；缺失的走 fillPostersAsync 后台并发补齐，
+        // 绝不 await —— 旧实现 await 全部拉完才返回，无缓存首开 25 条 ÷ 4 并发 × 单请求最长 4s
+        // 超时 → 面板骨架空转 30s+（用户报「观影界面打开卡死」，实测 [perf] 数据加载 37208ms）。
+        for (const m of mapped) {
+            if (!m.guid) continue;
+            const cached = _posterCache.get(m.guid);
+            if (cached) { m.poster = cached.poster; if (cached.overview && !m.fn.overview) m.fn.overview = cached.overview; }
         }
-        savePosterCache(); // 落盘持久化（含本次新拉取的海报+简介）
+        fillPostersAsync(mapped);
         // 合并用户已有的评分/评语：优先本地持久化缓存（按 guid，缺则 name），重启也不丢
         for (const m of mapped) {
             const saved = (m.guid && _ratingCache.get(m.guid)) || _ratingCache.get(m.name);

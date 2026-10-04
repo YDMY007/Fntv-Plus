@@ -7,6 +7,66 @@ import { log, clog } from '../log';
 // embyWall/carousel/progress.ts — 轮播骨架屏与加载进度：占位构建、进度条推进、完成收尾、STRM 不支持提示
 // 由 scripts/embywall-split.js 从 embyWall.ts 整段抽取；改实现请改这里，不要在入口文件里补。
 
+// [lc-1290] 样式4 骨架文字色板（深/浅两套，构建与主题翻转刷新共用同一来源）
+const SKEL_TEXT = {
+  dark: { tip: 'rgba(225,218,245,.85)', pct: 'rgba(232,221,208,.92)' },
+  light: { tip: 'rgba(96,88,74,.92)', pct: 'rgba(60,50,40,.92)' },
+} as const;
+
+// [lc-1290] 骨架主题翻转跟随：html.dark 增删时同步 data-fntv-skel 属性与 s4 内联文字色。
+// 卡片底色(--fnos-skel-card 变量)与占位条/指示点/进度条([data-fntv-skel] 选择器)由 CSS
+// 自动切换，这里只改属性 + 文字色。观察器常驻，仅骨架在屏时有实际动作；
+// 骨架被真轮播替换后 container.isConnected 为假即空转（与桌面版 lc-1290 同步）。
+let _skelTheme: { container: HTMLElement; tipEls: HTMLElement[]; pctEls: HTMLElement[]; cardBgs: HTMLElement[] } | null = null;
+let _skelThemeObserver: MutationObserver | null = null;
+
+function applySkelTheme(isDark: boolean): void {
+  const t = _skelTheme;
+  if (!t || !t.container.isConnected) return;
+  const c = isDark ? SKEL_TEXT.dark : SKEL_TEXT.light;
+  t.container.setAttribute('data-fntv-skel', isDark ? 'dark' : 'light');
+  for (const el of t.tipEls) el.style.color = c.tip;
+  for (const el of t.pctEls) el.style.color = c.pct;
+  // [lc-1294] 卡片底色不再依赖 var(--fnos-skel-card)（html.dark 信号可能与页面所见打架）：
+  // 按采样结论直接内联 hex，所见即所得。
+  const cardBg = isDark ? SKEL_CARD_BG.dark : SKEL_CARD_BG.light;
+  for (const el of t.cardBgs) el.style.background = cardBg;
+}
+
+// [lc-1294] 页面表面真实明暗：从骨架容器向上找第一个「不透明计算背景」采样亮度。
+// isSurfaceDark() 读 html.dark/body theme-mode 标记，但注入页上这些标记与飞牛原生主题
+// 可能互相打架（我们/系统写 dark，飞牛 React 自己渲染浅色）→ 样式4 骨架卡片底色的
+// html.dark 分支跟着变深，而页面看起来是浅色（用户报 fpk 浅色模式样式4 骨架深色块）。
+// 采样「所见即所得」：页面渲染成什么底，骨架就配什么深浅；采样失败回落 isSurfaceDark()。
+const SKEL_CARD_BG = { dark: '#1e1b17', light: '#e8f0fe' } as const;
+
+function sampleSurfaceDark(): boolean {
+    try {
+        let el: HTMLElement | null = _skelTheme ? _skelTheme.container : null;
+        while (el) {
+            const bg = getComputedStyle(el).backgroundColor;
+            const m = bg.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/);
+            if (m) {
+                const a = m[4] === undefined ? 1 : parseFloat(m[4]);
+                if (a >= 0.5) {
+                    const lum = 0.2126 * parseFloat(m[1]) + 0.7152 * parseFloat(m[2]) + 0.0722 * parseFloat(m[3]);
+                    return lum < 128;
+                }
+            }
+            el = el.parentElement;
+        }
+    } catch { /* ignore */ }
+    return isSurfaceDark();
+}
+
+function ensureSkelThemeObserver(): void {
+  if (_skelThemeObserver) return;
+  _skelThemeObserver = new MutationObserver(() => {
+    if (_skelTheme && _skelTheme.container.isConnected) applySkelTheme(sampleSurfaceDark());
+  });
+  _skelThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+}
+
 export function buildLoadingPlaceholder(target: HTMLElement): void {
   // shimmer / spinner 动画样式只注入一次
   if (!document.getElementById('fnos-ph-style')) {
@@ -74,6 +134,8 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
   }
 
   target.innerHTML = '';
+  _skelTheme = null;            // [lc-1290] 重建即作废旧骨架的主题跟随登记
+  ensureSkelThemeObserver();
   // [lc-444] 同上: 清掉section自身顶部边框/阴影/上边距, 避免细黑线
   target.style.borderTop = 'none';
   target.style.boxShadow = 'none';
@@ -207,12 +269,11 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
     ensureStyle4Css();
     container.setAttribute('data-fntv-skel', _isDark ? 'dark' : 'light');
     // 深浅配色(占位条/指示点/进度条文字): 深色模式用浅色文字, 浅色模式用深棕文字
-    const sk = _isDark
-      ? { tip: 'rgba(225,218,245,.85)', pct: 'rgba(232,221,208,.92)' }
-      : { tip: 'rgba(96,88,74,.92)', pct: 'rgba(60,50,40,.92)' };
+    const sk = SKEL_TEXT[_isDark ? 'dark' : 'light'];
     // 3D 舞台(track) + 三张卡(中间 active + 左右 prev/next, 与真实一致, 侧卡被 overflow:hidden 裁掉只露肩)
     const track = document.createElement('div');
     track.className = 'fntv-s4-track';
+    const cardBgs: HTMLElement[] = []; // [lc-1294] 登记三张卡的底色块，采样校正/主题翻转时统一重涂
     const mkS4Card = (cls: string): HTMLElement => {
       const card = document.createElement('div');
       card.className = 'fntv-s4-card' + (cls ? ' ' + cls : '');
@@ -226,7 +287,10 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
       //   → 骨架卡片固定成深色，而同屏其它元素（走 CSS 变量）随后变浅，出现「浅色页面里
       //   一块深色空档」（用户报告：占位图本来浅色、后面突然变深/成了空块）。
       //   --fnos-skel-card 由 theme.ts 的 :root / html.dark 两套值定义，切主题即时生效。
+      //   [lc-1294] 初值仅作占位：挂载后 sampleSurfaceDark() 按页面真实背景亮度重涂 hex
+      //   （var 的 html.dark 分支在标记与页面所见打架时会误深，fpk 浅色样式4 骨架深色块即此因）。
       bg.style.background = 'var(--fnos-skel-card, #e8f0fe)';
+      cardBgs.push(bg);
       const shine = document.createElement('div');
       shine.className = 'fntv-s4-skel';
       shine.style.cssText = 'position:absolute;inset:0;opacity:.5;z-index:0';
@@ -286,6 +350,7 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
     s4BarBox.appendChild(s4Track);
     container.appendChild(s4BarBox);
     statusEl = tip4;
+    _skelTheme = { container, tipEls: [tip4], pctEls: [percentEl], cardBgs }; // [lc-1290/1294] 登记主题翻转跟随
   } else {
     // [lc-582] 样式1 骨架: 紫色渐变 + 装饰海报占位 + 中央进度(原逻辑, 保持不变)
     const deco = (l: string, t: string, r: string): HTMLElement => {
@@ -359,6 +424,24 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
 
   wrapper.appendChild(container);
   target.appendChild(wrapper);
+
+  // [lc-1294] 挂载后按页面真实背景亮度校正一次深浅：初值用的是 isSurfaceDark() 标记判定，
+  //   注入页上 html.dark/body theme-mode 标记可能与页面所见（飞牛原生主题）打架，
+  //   样式4 骨架卡片底色随之误深。采样骨架向上的第一个不透明背景，「所见即所得」。
+  // [lc-1294→1297] 深浅校正改为骨架存续期「持续重采样」（400ms 低频）：
+  //   强刷（清缓存）时骨架可能建在飞牛原生「启动暗底」阶段——React 还没注水、真实浅色
+  //   主题背景未生效，此刻一次性采样取到的是暗色启动底 → 误涂深色，且之后无人纠正
+  //   （主题观察器只盯 html class 翻转，飞牛注水不改 class）。持续重采样 = 页面真实
+  //   背景一亮出来骨架立刻跟随换浅色；骨架被真轮播替换（断连）后自动停表。
+  if (_skelTheme) {
+    const theme = _skelTheme;   // 闭包身份守卫：骨架被重建（_skelTheme 换新）时旧表自行退场
+    let last = _isDark;
+    const resampleTimer = window.setInterval(() => {
+      if (_skelTheme !== theme || !theme.container.isConnected) { clearInterval(resampleTimer); return; }
+      const s = sampleSurfaceDark();
+      if (s !== last) { last = s; applySkelTheme(s); }
+    }, 400);
+  }
 
   // [lc-561] 记录数字元素, 供 fetchShowsViaIPC 抓取过程中实时更新"已加载 N 个"
   S.carouselProgressEl = null; // [lc-583] 已改用长条进度, 数字元素废弃

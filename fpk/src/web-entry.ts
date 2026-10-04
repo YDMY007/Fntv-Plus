@@ -29,6 +29,7 @@ import './preload/plugins/playMemory';
 // 播放链在网页端不可用——点击拦截后发 play-movie 是 no-op，曾导致所有播放按钮点死（lc-077）。
 import './preload/plugins/previewThumb';
 import './preload/plugins/skipInject';
+import './preload/plugins/skipMarker'; // [skip-manual] 片头/片尾手动标记（桌面版同款，数据走 shim skip-manual:* 通道）
 import './preload/plugins/watchHistory';
 import './preload/plugins/watchReport';
 import './preload/plugins/watchedSync';
