@@ -2,7 +2,7 @@
   ".url": {
     "fntvplus.Application": {
       "title": "Fntv-Plus",
-      "icon": "images/fntv_v9_{0}.png",
+      "icon": "images/fntv_v10_{0}.png",
       "type": "url",
       "protocol": "",
       "port": "",

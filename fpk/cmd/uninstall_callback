@@ -2,18 +2,62 @@
 # 卸载后回调：按卸载向导的用户选择处理数据。
 #   向导（wizard/uninstall）字段 wizard_delete_data：
 #     "no"  = 保留数据（默认）：不删任何数据，重装同名应用后设置/缓存原样恢复
-#     "yes" = 删除数据：清空本应用数据目录（$TRIM_PKGVAR = /vol[x]/@appdata/fntvplus）
-# 防误删：仅当 TRIM_PKGVAR 以 @appdata/fntvplus 结尾时才执行删除。
-# 动作与路径会输出到 fnOS 安装日志（应用中心安装/卸载详情可见），便于核对。
+#     "yes" = 删除数据：清空本应用全部数据目录
+#
+# 数据目录全集（旧版只删 VAR，设置/凭证/弹幕/TMDB 缓存全在 ETC → 重装后「数据全都在」）：
+#   $TRIM_PKGETC = /vol[x]/@appetc/fntvplus → config.json（全部设置 + 凭证密文）、
+#                                             凭证加密盐、TMDB 详情缓存、弹幕缓存
+#   $TRIM_PKGVAR = /vol[x]/@appdata/fntvplus → 运行日志（fntvplus.log / client.log）、反馈附件
+#
+# 浏览器本地（fnOS 站点 localStorage）存有少量界面偏好（主题/轮播样式等），
+# 服务端卸载删不到 —— 需用户在浏览器清除站点数据，向导文案已注明。
+#
+# 防误删：仅当路径以 @appetc/fntvplus（或 @appdata/fntvplus/etc）结尾时才执行删除。
+# 动作与路径输出到 fnOS 安装日志（应用中心卸载详情可见），便于核对。
+
+choice="${wizard_delete_data:-${WIZARD_DELETE_DATA:-}}"
+case "$choice" in
+    [Yy] | [Yy][Ee][Ss] | 1 | [Tt][Rr][Uu][Ee]) choice="yes" ;;
+    *) choice="no" ;;
+esac
+
 echo "[fntvplus] 卸载数据处理: wizard_delete_data=${wizard_delete_data:-未设置(按保留处理)}"
-echo "[fntvplus] 数据目录: ${TRIM_PKGVAR:-未知}"
-if [ "$wizard_delete_data" = "yes" ]; then
-    if [ -n "$TRIM_PKGVAR" ] && case "$TRIM_PKGVAR" in *@appdata/fntvplus) true;; *) false;; esac; then
-        echo "[fntvplus] 用户选择删除数据 -> 清空 $TRIM_PKGVAR"
-        rm -rf "$TRIM_PKGVAR"
-        echo "[fntvplus] 数据已删除"
+echo "[fntvplus] 数据目录: ETC=${TRIM_PKGETC:-未设置} VAR=${TRIM_PKGVAR:-未设置}"
+
+if [ "$choice" = "yes" ]; then
+    deleted=0
+    # etc：设置 / 凭证密文 / 加密盐 / TMDB 缓存 / 弹幕缓存 —— 重装后数据残留的主因，必须清
+    if [ -n "$TRIM_PKGETC" ]; then
+        case "$TRIM_PKGETC" in
+            *@appetc/fntvplus | *@appdata/fntvplus/etc)
+                echo "[fntvplus] 删除配置与缓存目录: $TRIM_PKGETC"
+                rm -rf "$TRIM_PKGETC" && deleted=1
+                ;;
+            *)
+                echo "[fntvplus] 配置目录路径异常（$TRIM_PKGETC），跳过删除以策安全"
+                ;;
+        esac
     else
-        echo "[fntvplus] 数据目录异常（$TRIM_PKGVAR），跳过删除以策安全"
+        echo "[fntvplus] 未提供配置目录（TRIM_PKGETC），跳过（如重装后设置仍在，请反馈安装日志）"
+    fi
+    # var：运行日志 / 反馈附件
+    if [ -n "$TRIM_PKGVAR" ]; then
+        case "$TRIM_PKGVAR" in
+            *@appdata/fntvplus)
+                echo "[fntvplus] 删除运行数据目录: $TRIM_PKGVAR"
+                rm -rf "$TRIM_PKGVAR" && deleted=1
+                ;;
+            *)
+                echo "[fntvplus] 运行目录路径异常（$TRIM_PKGVAR），跳过删除以策安全"
+                ;;
+        esac
+    else
+        echo "[fntvplus] 未提供运行目录（TRIM_PKGVAR），跳过"
+    fi
+    if [ "$deleted" = "1" ]; then
+        echo "[fntvplus] 服务端数据已删除；浏览器本地界面偏好（主题/轮播样式等）需清除浏览器站点数据"
+    else
+        echo "[fntvplus] 两个数据目录均未删除（路径校验未通过），请在应用中心查看安装日志并反馈"
     fi
 else
     echo "[fntvplus] 用户选择保留数据 -> 未做任何删除（重装 Fntv-Plus 后设置与缓存自动恢复）"

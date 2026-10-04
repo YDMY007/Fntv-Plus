@@ -109,3 +109,6 @@ scripts/nsis-debug/_*
 
 # 弹幕搜索源运行时缓存（uosc_danmaku 插件自动写入）
 third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/danmaku_source_cache.json
+
+# B站 Cookie 每日体检状态文件（运行态, 每次体检自动重写, 与 bili_cookie.txt 同目录）
+third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/bili_cookie_status.json

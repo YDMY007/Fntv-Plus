@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Fntv-Plus 图标动画 · 四版选型</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { background:#16181d; color:#e8eaf2; font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif; margin:0; padding:32px; }
+  h1 { font-size:20px; margin:0 0 6px; }
+  .sub { color:#9aa0a6; font-size:13px; margin-bottom:24px; line-height:1.7; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:20px; }
+  .card { background:#1e2129; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:18px; overflow:hidden; }
+
+  /* 图标展示盒：所有尺寸共用一套约束（关键是 img 必须 100% + 容器 overflow:hidden，
+     否则图片按原始 256px 渲染溢出压到文字上） */
+  .ib { flex:none; overflow:hidden; display:block; background:#2a2d36; }
+  .ib > img { width:100%; height:100%; display:block; }
+  .ib-128 { width:128px; height:128px; border-radius:20px; }
+  .ib-64  { width:64px;  height:64px;  border-radius:12px; }
+  .ib-32  { width:32px;  height:32px;  border-radius:8px; }
+
+  .shot { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+  h2 { font-size:15px; margin:0 0 4px; }
+  .desc { font-size:12px; color:#9aa0a6; line-height:1.7; margin:0 0 10px; }
+  .meta { font-size:11.5px; color:#7f8590; font-variant-numeric:tabular-nums; margin:0; }
+  .meta b { color:#c8ccd6; font-weight:600; }
+  .tip { margin-top:24px; padding:14px 16px; background:#1e2129; border-left:3px solid #f0904c; border-radius:8px; font-size:12.5px; color:#b9bec8; line-height:1.8; }
+  code { background:#2a2d36; padding:1px 5px; border-radius:4px; font-size:11.5px; color:#e0b48c; }
+</style>
+</head>
+<body>
+<h1>Fntv-Plus 图标动画 · 四版选型</h1>
+<p class="sub">
+  源图为现有 <code>fntv_v9_256.png</code>（橙红渐变底 + 白花 + 橙播放键），四种动效节奏。<br>
+  每版展示 <b>128px / 64px / 32px</b> 三档实际显示尺寸——小尺寸下的辨识度是关键取舍点。
+</p>
+
+<div class="grid">
+  <div class="card">
+    <div class="shot">
+      <span class="ib ib-128"><img src="variant-1-breath.webp" alt="呼吸 128px"></span>
+      <span class="ib ib-64"><img src="variant-1-breath.webp" alt="64px"></span>
+      <span class="ib ib-32"><img src="variant-1-breath.webp" alt="32px"></span>
+    </div>
+    <h2>① 呼吸</h2>
+    <p class="desc">整体极轻缩放（峰值 +4.5%）+ 同步柔光脉动。最经典、最不抢眼的 App 图标节奏，任何尺寸都自然。</p>
+    <p class="meta">28 帧 · 2.4s 一拍 · <b>153 KB</b></p>
+  </div>
+
+  <div class="card">
+    <div class="shot">
+      <span class="ib ib-128"><img src="variant-2-shine.webp" alt="扫光 128px"></span>
+      <span class="ib ib-64"><img src="variant-2-shine.webp" alt="64px"></span>
+      <span class="ib ib-32"><img src="variant-2-shine.webp" alt="32px"></span>
+    </div>
+    <h2>② 光泽扫过</h2>
+    <p class="desc">一道柔光斜扫过图标 + 全程极缓转动。高级感最强、最"贵"的一版；但扫光是细节，32px 下基本看不出。</p>
+    <p class="meta">40 帧 · 3.2s 一拍 · <b>228 KB</b></p>
+  </div>
+
+  <div class="card">
+    <div class="shot">
+      <span class="ib ib-128"><img src="variant-3-play-pulse.webp" alt="播放脉冲 128px"></span>
+      <span class="ib ib-64"><img src="variant-3-play-pulse.webp" alt="64px"></span>
+      <span class="ib ib-32"><img src="variant-3-play-pulse.webp" alt="32px"></span>
+    </div>
+    <h2>③ 播放键脉冲</h2>
+    <p class="desc">中心播放三角放大回缩（+13%），强调"这是播放器"。动感最明确；幅度已调过，不会晃眼。</p>
+    <p class="meta">26 帧 · 2.1s 一拍 · <b>87 KB</b>（体积最小）</p>
+  </div>
+
+  <div class="card">
+    <div class="shot">
+      <span class="ib ib-128"><img src="variant-4-sway.webp" alt="轻摇 128px"></span>
+      <span class="ib ib-64"><img src="variant-4-sway.webp" alt="64px"></span>
+      <span class="ib ib-32"><img src="variant-4-sway.webp" alt="32px"></span>
+    </div>
+    <h2>④ 轻摇</h2>
+    <p class="desc">整体 ±2.6° 缓摆。比呼吸更有活气、比脉冲更含蓄，居中路线；摆动时四角不留黑边（已过扫描处理）。</p>
+    <p class="meta">32 帧 · 2.7s 一拍 · <b>185 KB</b></p>
+  </div>
+</div>
+
+<div class="tip">
+  <b>选型建议</b>：把这张页面的窗口缩到手机大小（或直接看每张卡片里最小的 32px 那档）再挑——桌面图标在应用中心和桌面上常以 32–64px 显示，
+  细节型动效（②扫光）在这个尺寸会"消失"，而轮廓型动效（①呼吸 / ③脉冲 / ④轻摇）仍能看出在动。<br><br>
+  <b>交付方式</b>：选中后我把它重命名为 <code>fntv_v9_256.png</code> 覆盖（文件内容其实是动画 WebP，扩展名保持 .png——Chromium 按内容嗅探格式，
+  这正是 fndesk 的做法）；<code>fntv_v9_64.png</code> 保持现有静态图不动，省一半体积。
+</div>
+</body>
+</html>
