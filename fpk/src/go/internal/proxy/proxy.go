@@ -100,6 +100,10 @@ func NewServer(d Deps) *Server {
 	//    同时兼容裸 /v/**（SPA 内若用绝对路径 /v/... 也能命中，提升健壮性）。
 	s.mux.HandleFunc("/app/fntvplus/v/", makeProxy(d, "/app/fntvplus"))
 	s.mux.HandleFunc("/v/", makeProxy(d, ""))
+	// 4b) [访问码] 网关前缀下的其余路径（/login、/access-code 等 fnOS 原生页）也一并反代：
+	//     访问码/登录跳转链会被 gatewayLocation 拉回本命名空间（见下），没有这条兜底路由，
+	//     拉回的路径会落进 "/" 兜底反代（前缀不剥离）而 404，登录链断裂。
+	s.mux.HandleFunc("/app/fntvplus/", makeProxy(d, "/app/fntvplus"))
 
 	// 5) 兜底：/app/fntvplus 根 → 重定向到 /v/；
 	//    其余全部路径（/libs、/static 等 SPA 资源，影视网页的静态资源不一定都在 /v/ 下）
@@ -174,11 +178,38 @@ func makeProxy(d Deps, strip string) http.HandlerFunc {
 		}
 		defer resp.Body.Close()
 
+		// [lc-1296] 网关模式下改写上游 3xx 的 Location：上游的重定向是原生命名空间
+		// （实测 /v/index.html → 301 绝对地址 http://<host>:<port>/v/），浏览器照单全收
+		// 就会跳出 /app/fntvplus → 落到原生页面、增强失效（强制刷新触发路径漂移的来源之一）。
+		// [访问码] 访问码/登录链（上游 302 → /login?redirect=/v/ 等）同样会跳出命名空间，
+		// 登录完成后按 redirect 参数落在裸 /v/（用户报障「输完访问码登录后变成原始网页」）。
+		// 因此同源目标全部拉回命名空间并同步改写回跳参数；仅网关前缀请求需要改写，
+		// 端口直连模式（strip == ""）同端口自洽，无需处理。
+		if strip != "" {
+			switch resp.StatusCode {
+			case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+				if loc := resp.Header.Get("Location"); loc != "" {
+					if rewritten := gatewayLocation(loc, strip, upstream.Host, r.Host); rewritten != loc {
+						resp.Header.Set("Location", rewritten)
+						log.Printf("[fntv-proxy] rewrite redirect: %s -> %s", loc, rewritten)
+					}
+				}
+			}
+		}
+
 		ct := resp.Header.Get("Content-Type")
 		enhance := d.Config.Get().EnhancementEnabled
 
+		// [访问码] 注入只针对影视页路径（/v*）的正常响应；fnOS 登录页等其它 HTML 原样透传，
+		// 避免 payload 与网关路径 shim 干扰原生登录流程。访问码门禁页（网关以
+		// X-Trim-Safe-Code-Challenge 头标记）即使落在 /v 路径下也保持原样——门禁页
+		// 自带「验证成功后回跳当前路径」逻辑，被改写反而会破坏回跳。
+		// 3xx 的 HTML stub（http.Redirect 自带小页面）与 4xx/5xx 错误页同样不注入。
+		gatePage := resp.Header.Get("X-Trim-Safe-Code-Challenge") != ""
+		injectable := isVPath(rest) && !gatePage && resp.StatusCode >= 200 && resp.StatusCode < 300
+
 		// 非 HTML，或增强关闭 → 原样透传（含视频 206 / Range / 分块）。
-		if !enhance || !strings.Contains(strings.ToLower(ct), "text/html") {
+		if !enhance || !strings.Contains(strings.ToLower(ct), "text/html") || !injectable {
 			copyHeader(w.Header(), resp.Header)
 			w.WriteHeader(resp.StatusCode)
 			io.Copy(w, resp.Body)
@@ -295,6 +326,97 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
+}
+
+// isVPath 是否影视页命名空间路径（/v 或 /v/*）。
+func isVPath(p string) bool {
+	return p == "/v" || strings.HasPrefix(p, "/v/")
+}
+
+// returnParamNames 是重定向 Location 里「回跳目标」查询参数名（fnOS 网关/登录页约定）。
+// 注意不含 redirect_uri（OAuth 专用，值多为跨主机绝对地址，改写会破坏外链）。
+var returnParamNames = map[string]bool{
+	"redirect":   true,
+	"back":       true,
+	"next":       true,
+	"return_to":  true,
+	"returnurl":  true,
+	"return_url": true,
+	"target":     true,
+}
+
+// prefixReturnTarget 把回跳参数值拉回网关命名空间。仅处理根相对路径（/ 开头）：
+// 拒绝协议相对（//host，跨主机）、外链、已带前缀的值；"/" 拉回应用根（应用根自身会再跳 /v/）。
+func prefixReturnTarget(v, prefix string) (string, bool) {
+	if v == "" || !strings.HasPrefix(v, "/") {
+		return v, false
+	}
+	if strings.HasPrefix(v, "//") {
+		return v, false
+	}
+	if v == prefix || strings.HasPrefix(v, prefix+"/") {
+		return v, false
+	}
+	return prefix + v, true
+}
+
+// rewriteReturnParams 把 Location 查询串里回跳参数的根相对值拉回命名空间。
+// 没有任何改动时原样返回 rawQuery（保持上游的原始编码形态，不做无谓重编码）。
+func rewriteReturnParams(rawQuery, prefix string) (string, bool) {
+	if rawQuery == "" {
+		return rawQuery, false
+	}
+	vals, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return rawQuery, false
+	}
+	changed := false
+	for name, vs := range vals {
+		if !returnParamNames[name] {
+			continue
+		}
+		for i, v := range vs {
+			if nv, ok := prefixReturnTarget(v, prefix); ok {
+				vs[i] = nv
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return rawQuery, false
+	}
+	return vals.Encode(), true
+}
+
+// gatewayLocation 把上游 3xx 的 Location 拉回网关命名空间（仅网关前缀模式调用）。
+// [访问码] 覆盖同源全部路径：上游登录链（如 302 /login?redirect=/v/）会把用户甩出
+// /app/fntvplus，登录完成后按 redirect 参数落在裸 /v/ —— 增强永久失效。
+// 规则：
+//   - 根相对路径，或绝对地址指向上游主机 / 原始请求主机（同源）→ 改写为 prefix + path；
+//   - 跨主机目标（外部 OAuth 等）原样返回；
+//   - 回跳参数（redirect/back/next 等）的根相对值同步拉回，保证登录后落回增强入口；
+//   - 已带前缀的目标原样返回。
+func gatewayLocation(loc, prefix, upstreamHost, requestHost string) string {
+	u, err := url.Parse(loc)
+	if err != nil || u.Path == "" {
+		return loc
+	}
+	if u.Path == prefix || strings.HasPrefix(u.Path, prefix+"/") {
+		return loc // 已带网关前缀
+	}
+	if u.Host != "" && u.Host != upstreamHost && u.Host != requestHost {
+		return loc // 跨主机目标不动
+	}
+	out := prefix + u.Path
+	if q, changed := rewriteReturnParams(u.RawQuery, prefix); changed {
+		out += "?" + q
+	} else if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		out += "#" + u.Fragment
+	}
+	return out
 }
 
 // copyHeader 浅拷贝所有响应头（逐跳头由调用方按需删除）。
