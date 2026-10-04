@@ -125,3 +125,9 @@ fpk/docs/自定义刮削交接报告.md
 *.bak
 __pycache__/
 *.pyc
+
+# 一次性验证/调试脚本（_verify_* / test-* / nsis-debug / fpk 双入口变体 / 临时诊断测试）：本地留存
+scripts/_verify_*
+scripts/nsis-debug/
+fpk/src/web-entry.bisect.ts
+fpk/src/web-entry.pair.ts
