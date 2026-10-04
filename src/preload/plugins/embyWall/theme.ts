@@ -28,6 +28,22 @@ export function getEffectiveDark(): boolean {
   return m === 'dark';
 }
 
+/** [lc-1290] 页面表面实际明暗：优先读 html.dark / html.light / body[theme-mode] 的实时标记，
+ * 全缺位才回落系统偏好。与 getEffectiveDark()(面板存储偏好)的区别：骨架等早期创建的 UI
+ * 若按存储偏好判深浅，会与页面随后落定的主题不符(浅色页面上烤死一块深色骨架，lc-1286 同因)。
+ * 自建 UI 一律经 applyUiTheme 落 html.dark/light，故这两个 class 就是权威的实时信号。 */
+export function isSurfaceDark(): boolean {
+  try {
+    const html = document.documentElement;
+    if (html.classList.contains('dark')) return true;
+    if (html.classList.contains('light')) return false;
+    const bm = document.body ? document.body.getAttribute('theme-mode') : null;
+    if (bm === 'dark') return true;
+    if (bm === 'light') return false;
+  } catch (e) { /* ignore */ }
+  return systemPrefersDark();
+}
+
 /** 把目标主题应用到页面, 并同步飞牛原生网页主题(html class / body theme-mode / 飞牛偏好键) */
 function applyThemeToFnos(isDark: boolean): void {
   const html = document.documentElement;
@@ -138,6 +154,9 @@ export function injectUiThemeStyle(): void {
   --fnos-exit-border-off:1px solid rgba(90,120,200,.18);
   --fnos-skel-bg:rgba(255,255,255,.45);
   --fnos-skel-shine:rgba(255,255,255,.8);
+  /* [lc-1290] 轮播骨架卡片底色：随 html.dark 实时切换（骨架存续期间主题翻转也跟着换，
+     内联烤死三目色的旧写法会在浅色页面残留深色骨架块，同 fpk lc-1286） */
+  --fnos-skel-card:#e8f0fe;
   --fnos-sidebar-btn-bg:rgba(52,64,100,.24);
   /* [lc-1099] 抽屉面板/遮罩的 backdrop-filter 值走变量: applySidebarGlass 写的是 inline !important,
      样式表闸压不住, 性能模式靠 html.fnos-perf 把变量解析成 none 在计算期关掉 */
@@ -221,6 +240,7 @@ html.dark{
   --fnos-exit-border-off:1px solid rgba(140,160,220,.18);
   --fnos-skel-bg:rgba(160,168,190,.18);
   --fnos-skel-shine:rgba(200,208,228,.18);
+  --fnos-skel-card:#1e1b17;
   --fnos-sidebar-btn-bg:rgba(30,34,52,.38);
   --fnos-qr-bg:rgba(220,226,240,.95);
   --fnos-modal-overlay:rgba(0,0,0,.60);

@@ -102,15 +102,17 @@ function setChoice(c: LogoChoice): void {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); } catch (e) { log.warn('[customLogo] 持久化失败', String(e).substring(0, 80)); }
 }
 
-/** 按选项解析 logo dataURI；default → 登记的默认图，preset → 预设文件，custom → localStorage dataURL。 */
+/** 按选项解析 logo dataURI；default → 登记的默认图，preset → 预设文件，custom → localStorage dataURL。
+ *  [lc-1295] 任何一路解析不到都兜底默认图（不留空 src 挂裂图）：预设 id 下线 / customData
+ *  丢失（换设备/清了存储）在桌面端同样可能发生。 */
 export function resolveLogoSrc(choice?: LogoChoice): string {
   const c = choice || getChoice();
   if (c.type === 'preset' && c.presetId) {
     const p = PRESETS.find((x) => x.id === c.presetId);
-    return p ? presetDataUri(p) : '';
+    return p ? (presetDataUri(p) || _defaultLogoUri) : _defaultLogoUri;
   }
   if (c.type === 'custom') {
-    try { return localStorage.getItem(CUSTOM_DATA_KEY) || ''; } catch { return ''; }
+    try { return localStorage.getItem(CUSTOM_DATA_KEY) || _defaultLogoUri; } catch { return _defaultLogoUri; }
   }
   return _defaultLogoUri;
 }
@@ -119,6 +121,11 @@ export function resolveLogoSrc(choice?: LogoChoice): string {
 export function applyLogoToDom(choice?: LogoChoice): void {
   const img = document.getElementById('tb-logo') as HTMLImageElement | null;
   if (!img) return;
+  // [lc-1295] 加载失败兜底：预设文件读取失败 / customData 丢失 → 一律回退默认图，
+  // 绝不让 <img> 挂裂图（网页端同名修复，用户报障：换设备后 logo 变「裂开图标」）。
+  img.onerror = () => {
+    if (_defaultLogoUri && img.getAttribute('src') !== _defaultLogoUri) img.src = _defaultLogoUri;
+  };
   const src = resolveLogoSrc(choice);
   if (src && img.src !== src) img.src = src;
 }
