@@ -199,7 +199,17 @@ async function handleStats(url, env) {
     env.DB.prepare('SELECT COUNT(DISTINCT aid) AS c FROM ping WHERE day >= ?').bind(day(29)).first(),
     env.DB.prepare('SELECT day, COUNT(DISTINCT aid) AS c FROM ping WHERE day >= ? GROUP BY day ORDER BY day')
       .bind(day(29)).all(),
-    env.DB.prepare('SELECT ver, COUNT(DISTINCT aid) AS c FROM ping GROUP BY ver ORDER BY c DESC LIMIT 10').all(),
+    /* 版本分布：只统计**正式发布版**，过滤掉内部测试构建。
+       测试版版本号形如 1.0.2-279（正式版 + 连字符 + 构建序号），是作者本地
+       打包自测用的，出现在面板上只会把图表刷成一片 1 人的噪声
+       （2026-10-04 作者要求：带 - 的都是测试版本，不用统计）。
+       过滤用的是 SQL 里的 instr 而不是 LIKE —— '-279' 这种后缀不含通配符，
+       instr(ver,'-')>0 语义最直白，也避免手滑写错 ESCAPE。 */
+    env.DB.prepare(
+      "SELECT ver, COUNT(DISTINCT aid) AS c FROM ping " +
+      "WHERE ver IS NOT NULL AND instr(ver, '-') = 0 " +
+      'GROUP BY ver ORDER BY c DESC LIMIT 10'
+    ).all(),
     env.DB.prepare('SELECT os, COUNT(DISTINCT aid) AS c FROM ping GROUP BY os ORDER BY c DESC').all(),
     env.DB.prepare('SELECT COUNT(*) AS c FROM feedback').first(),
     env.DB.prepare(
