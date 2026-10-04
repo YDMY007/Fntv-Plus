@@ -62,9 +62,11 @@ shots/
 本地commit/
 本地commit/*
 
-# ⚠️ 版本更新日志：由维护者本人手动上传到 GitHub Release，【严禁推送 GitHub】
-# 命名约定 CHANGELOG_vX.Y.Z.md（如 CHANGELOG_v3.3.0.md），仅本地维护，不入库。
+# ⚠️ 版本更新日志根目录归档：仅本地维护，不入库。
+# （2026-10 起 resource/wiki/CHANGELOG_v*.md 为应用内「更新日志」列表的数据源，放行入库；
+#   根目录/其他位置的 CHANGELOG*.md 仍保持忽略。）
 CHANGELOG*.md
+!resource/wiki/CHANGELOG_*.md
 
 # ⚠️ 根目录一键构建脚本（build-gui.js / 构建.cmd）：用户要求【严禁推送 GitHub】
 # 仅本机双击使用，备份保存在 backup-before-rewrite 分支。
@@ -73,7 +75,7 @@ build-gui.js
 打包.cmd
 
 # resource 软件资源目录：用户要求纳入 GitHub（放行 resource/docs 下图片/资源）
-# 注意：resource/wiki 下 CHANGELOG_vX.Y.Z.md 仍按上方 CHANGELOG*.md 约定不入库（发 Release 用）
+# resource/wiki/CHANGELOG_v*.md 已由上方 !resource/wiki/CHANGELOG_*.md 放行入库
 !resource/docs/
 !resource/docs/**
 
