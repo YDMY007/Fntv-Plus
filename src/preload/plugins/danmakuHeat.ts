@@ -129,7 +129,14 @@ function updateHeat(): void {
 }
 
 function ingest(times: unknown): void {
-    if (!Array.isArray(times) || !times.length) return;
+    if (!Array.isArray(times)) return;
+    // [lc-1300] 空时间轴 = 「清除弹幕」/清屏信号：清掉已有高能条，而不是无视（旧版直接 return）
+    if (!times.length) {
+        density = [];
+        pendingTimes = null;
+        try { updateHeat(); } catch { /* ignore */ }
+        return;
+    }
     const dur = videoDuration();
     if (dur > 0) {
         density = aggregate(times as number[], dur);

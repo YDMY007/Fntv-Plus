@@ -6,6 +6,8 @@ import * as os from 'os';
 import { registerHandler } from '../core/ipcHandler';
 import * as log from '../../../modules/logger';
 import { getQrcodeLibSource } from './qrcodeLib';
+// [lc-1300] 登录态变化后立即重新体检并推送前端（否则弹幕详情面板最长 24h 显示旧状态）
+import { playbackShim } from '../../common/playbackShim';
 
 /**
  * B站弹幕 Cookie 扫码登录（集成到设置面板）
@@ -172,6 +174,9 @@ async function handleQrPoll(_event: any, key?: string): Promise<{ code: number; 
       if (!ck) ck = harvestSetCookie((r.headers as any)['set-cookie']);
       if (ck) {
         saveCookie(ck);
+        // [lc-1300] 立即体检+推送：网页弹幕详情面板的「登录状态」行马上变绿，
+        // 不必等下一次每日体检（最长 24h）或重启应用
+        void playbackShim.refreshCookieStatusNow();
         return { code: 0, status: '登录成功，Cookie 已保存', cookie: ck };
       }
       return { code: 0, status: '登录成功但未能解析 Cookie，请重试' };
@@ -213,16 +218,18 @@ async function handleClear(): Promise<{ ok: boolean; error?: string }> {
   const dir = resolveDanmakuDir();
   if (!dir) return { ok: false, error: '找不到 uosc_danmaku 目录' };
   const file = path.join(dir, 'bili_cookie.txt');
-  try {
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-      log.info('biliCookie: 已清除 Cookie -> ' + file);
+    try {
+      if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+        log.info('biliCookie: 已清除 Cookie -> ' + file);
+      }
+      // [lc-1300] 清除后立即体检+推送（面板从「已登录」切回「未配置」不用等 24h）
+      void playbackShim.refreshCookieStatusNow();
+      return { ok: true };
+    } catch (e: any) {
+      log.error('biliCookie: 清除失败', e);
+      return { ok: false, error: e?.message || String(e) };
     }
-    return { ok: true };
-  } catch (e: any) {
-    log.error('biliCookie: 清除失败', e);
-    return { ok: false, error: e?.message || String(e) };
-  }
 }
 
 // 手动粘贴 Cookie 保存（扫码/风控失效时的兜底，结构与豆瓣 manual-cookie 对齐）
@@ -232,6 +239,8 @@ async function handleManualCookie(_event: any, ck?: string): Promise<{ ok: boole
   try {
     saveCookie(cookie);
     log.info('biliCookie: 已通过手动粘贴保存 Cookie');
+    // [lc-1300] 同扫码登录：保存后立即体检+推送
+    void playbackShim.refreshCookieStatusNow();
     return { ok: true };
   } catch (e: any) {
     log.error('biliCookie: 手动保存失败', e);

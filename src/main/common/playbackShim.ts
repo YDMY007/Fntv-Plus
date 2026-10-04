@@ -3,11 +3,12 @@ import * as https from 'https';
 import * as url from 'url';
 import * as os from 'os';
 import * as path from 'path';
-import { app } from 'electron';
+import * as fs from 'fs';
+import { app, BrowserWindow } from 'electron';
 import logger from '../../modules/logger';
 import * as fnConfig from '../../modules/fn_config/config';
 import { upsertFromMpv, resolveManualSkip, upsertSeasonFallbackFromMpv } from '../handlers/plugins/skipManual';
-import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages } from './biliRunner';
+import { runBiliDanmaku, runBiliDanmakuCandidates, runBiliDanmakuByBvid, listBiliDanmakuPages, checkBiliCookie, resolveDanmakuScriptDir } from './biliRunner';
 import { ApiService } from '../../modules/fn_api/api';
 const log = logger.component('playbackShim');
 
@@ -47,6 +48,7 @@ class PlaybackShim {
         });
         this.started = true;
         app.once('quit', () => this.stop());
+        this.scheduleCookieChecks();
         log.info(`[playbackShim] 已启动，监听 127.0.0.1:${this.port}`);
     }
 
@@ -57,6 +59,90 @@ class PlaybackShim {
         }
         this.started = false;
         this.map.clear();
+    }
+
+    // ===================== [lc-1288] B站 Cookie 每日体检 =====================
+    // 动机：Cookie 过期是静默失败——WBI 番剧区搜索全部空结果、seg.so 被风控掐掉，
+    // 用户只看到「弹幕变少/搜不到」，无从知道根因。主进程每 24h 主动 nav 校验一次：
+    //   ① 结果写进 uosc_danmaku 脚本目录 bili_cookie_status.json → MPV 弹幕详情面板（Lua 打开菜单时同步读，零时延）；
+    //   ② webContents 推送 danmaku:cookie-status → 网页弹幕详情面板实时刷新；
+    //   ③ 兜底提供 GET /danmaku-cookie-status 查询端点。
+    private cookieStatus: Record<string, any> | null = null;
+    private cookieChecking = false;
+    private cookieTimer?: NodeJS.Timeout;
+
+    private scheduleCookieChecks(): void {
+        // 启动后 20s 做首次体检（避开应用启动高峰），此后每 24h 一次
+        setTimeout(() => { void this.checkCookieStatus(); }, 20 * 1000);
+        this.cookieTimer = setInterval(() => { void this.checkCookieStatus(); }, 24 * 60 * 60 * 1000);
+        app.once('quit', () => { if (this.cookieTimer) clearInterval(this.cookieTimer); });
+    }
+
+    private cookieDetail(status: string, uname?: string | null): string {
+        switch (status) {
+            case 'valid': return `已登录${uname ? `（${uname}）` : ''}`;
+            case 'expired': return 'Cookie 已过期/失效（到「设置 → 弹幕 → B站弹幕登录」重新扫码，或从浏览器复制 SESSDATA 写入脚本目录 bili_cookie.txt）';
+            case 'missing': return '未配置 Cookie（匿名模式，弹幕数量受限；到「设置 → 弹幕 → B站弹幕登录」扫码登录即可）';
+            default: return 'Cookie 校验请求失败（网络原因，稍后自动重试）';
+        }
+    }
+
+    /**
+     * [lc-1300] Cookie 登录态变化后立即重新体检并推送（biliCookie 扫码成功/手动粘贴/清除时调用）。
+     * 不做这步的话，网页弹幕详情面板最长 24h 内一直显示登录前的旧状态——
+     * 用户明明扫码成功了，面板却还写着「未登录」（实测换机登录后必现）。
+     */
+    async refreshCookieStatusNow(): Promise<void> {
+        await this.checkCookieStatus();
+    }
+
+    private async checkCookieStatus(): Promise<void> {
+        if (this.cookieChecking) return;
+        this.cookieChecking = true;
+        try {
+            const r = await checkBiliCookie();
+            const payload = {
+                status: r.cookie_status,
+                ok: !!r.ok,
+                uname: r.uname || null,
+                reason: r.reason || null,
+                detail: this.cookieDetail(r.cookie_status, r.uname),
+                checked_at: new Date().toISOString(),
+            };
+            this.cookieStatus = payload;
+            // ① 状态文件写进脚本目录（与 danmaku_source_cache.json 等运行态文件同目录）
+            try {
+                const dir = resolveDanmakuScriptDir();
+                if (dir) {
+                    fs.writeFileSync(path.join(dir, 'bili_cookie_status.json'), JSON.stringify(payload, null, 2), 'utf8');
+                }
+            } catch (e: any) {
+                log.warn('[playbackShim][cookie] 状态文件写入失败: ' + (e?.message || e));
+            }
+            // ② 实时推送全部渲染窗口（网页弹幕详情面板）
+            try {
+                for (const w of BrowserWindow.getAllWindows()) {
+                    if (!w.isDestroyed()) w.webContents.send('danmaku:cookie-status', payload);
+                }
+            } catch (e: any) {
+                log.warn('[playbackShim][cookie] 前端推送失败: ' + (e?.message || e));
+            }
+            log.info(`[playbackShim][cookie] 每日体检完成: ${payload.status}${payload.uname ? ' (' + payload.uname + ')' : ''}`);
+        } catch (e: any) {
+            log.warn('[playbackShim][cookie] 每日体检异常: ' + (e?.message || e));
+        } finally {
+            this.cookieChecking = false;
+        }
+    }
+
+    private handleCookieStatus(_req: http.IncomingMessage, res: http.ServerResponse): void {
+        if (this.cookieStatus) {
+            this.json(res, 200, this.cookieStatus);
+            return;
+        }
+        // 首次查询且尚未体检：先回「未检查」，同时立即触发一次（结果写文件/推送，下次查询即有）
+        void this.checkCookieStatus();
+        this.json(res, 200, { status: 'unknown', detail: '尚未检查（正在触发首次体检）' });
     }
 
     /**
@@ -121,6 +207,11 @@ class PlaybackShim {
         // [lc-1264] MPV 面板改提前量 → 同步 Electron 侧 skip-manual 配置
         if (pathname === '/skip-manual-config' && req.method === 'POST') {
             this.handleSkipManualConfig(req, res);
+            return;
+        }
+        // [lc-1288] B站 Cookie 体检状态查询（每日自动检查的缓存结果；MPV/网页面板兜底拉取用）
+        if (pathname === '/danmaku-cookie-status') {
+            this.handleCookieStatus(req, res);
             return;
         }
         const m = pathname.match(/^\/p\/([^/]+)\//);

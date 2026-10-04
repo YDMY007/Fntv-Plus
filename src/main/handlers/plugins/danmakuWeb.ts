@@ -3,7 +3,7 @@ import * as fnConfig from '../../../modules/fn_config/config';
 import { registerHandler } from '../core/ipcHandler';
 import log from '../../../modules/logger';
 import * as fn from '../../../modules/fn_api/api';
-import { getDanmakuItems, getDanmakuItemsByBvid, DanmakuItem, DanmakuMeta } from '../../../modules/danmaku/biliDanmaku';
+import { getDanmakuItems, getDanmakuItemsByBvid, clearDanmakuCacheByTitle, DanmakuItem, DanmakuMeta } from '../../../modules/danmaku/biliDanmaku';
 import { runBiliDanmakuCandidates } from '../../../main/common/biliRunner';
 
 /**
@@ -119,10 +119,13 @@ function init(): void {
     registerHandler('danmaku:prepare', handlePrepare, { useHandle: true });
     registerHandler('danmaku:candidates', handleCandidates, { useHandle: true });
     registerHandler('danmaku:pick', handlePick, { useHandle: true });
-    log.info('[danmakuWeb] 已注册 IPC: danmaku:prepare / danmaku:candidates / danmaku:pick');
+    registerHandler('danmaku:clear', handleClear, { useHandle: true });
+    log.info('[danmakuWeb] 已注册 IPC: danmaku:prepare / danmaku:candidates / danmaku:pick / danmaku:clear');
 }
 
-// [lc-1118] 手动搜索：按关键词搜候选（danmu_api 优选 → 未命中降级 B站），只回可直接拉取的（bvid 非空）前 5 条
+// [lc-1118] 手动搜索：按关键词搜候选（danmu_api 优选 → 未命中降级 B站），只回可直接拉取的前 8 条。
+// [lc-1300] 番剧/国创条目（B站正版，无 bvid）现在带 pgc:<ep_id> 伪 bvid（bili_danmaku.js
+//   search_candidates 生成），选定后 run_candidates 解析 epid→cid 直接拉取 —— 不再「搜到了却选不了」。
 async function handleCandidates(_event: IpcMainInvokeEvent, params: { title?: string; ep?: number; season?: number }): Promise<any> {
     const title = String(params?.title || '').trim();
     if (!title) return { ok: false, error: '缺少搜索关键词' };
@@ -133,16 +136,22 @@ async function handleCandidates(_event: IpcMainInvokeEvent, params: { title?: st
         }
         const usable = r.candidates.filter((c: any) => c && c.bvid);
         if (usable.length === 0) {
-            return { ok: false, error: `搜到 ${r.candidates.length} 个条目但没有可选定的（番剧区条目暂不支持网页端手动选定）` };
+            return { ok: false, error: `搜到 ${r.candidates.length} 个条目但没有可直接拉取弹幕的候选` };
         }
         return {
             ok: true,
-            candidates: usable.slice(0, 5).map((c: any) => ({
+            candidates: usable.slice(0, 8).map((c: any) => ({
                 bvid: String(c.bvid),
                 title: String(c.title || ''),
                 source: String(c.source || ''),
                 isCompilation: !!c.is_compilation,
+                // [lc-1301] 与 MPV 菜单同款区分：BAD_TITLE 命中才是真该避开的「⚠️解说/二创」，
+                //   「全N集」式多P 正片合集是 📁（已可按集取分P，选它正合适）
+                badTitle: !!c.bad_title,
                 sim: (typeof c.sim === 'number') ? c.sim : null,
+                // [lc-1301] B站官方弹幕数（view API stat.danmaku；pgc/dmapi 伪 id 无此字段）：
+                //   视频区候选之间就靠它分辨「正片弹幕多」与「无人发弹幕」，一步选对
+                danmakuCount: (typeof c.danmaku_count === 'number') ? c.danmaku_count : null,
             })),
         };
     } catch (e: any) {
@@ -164,6 +173,19 @@ async function handlePick(_event: IpcMainInvokeEvent, params: { title?: string; 
         return { ok: true, title, ep: res.meta.ep, isMovie: !!params?.isMovie, count: res.items.length, items: res.items, source: 'bilibili', meta: res.meta, maxScreen: fnConfig.getBiliDanmakuMaxScreen() };
     } catch (e: any) {
         return { ok: false, title, error: '弹幕获取异常: ' + (e?.message || e) };
+    }
+}
+
+// [lc-1300] 清除弹幕：按剧清掉全部季/集的磁盘缓存 + 弹幕源锁定记忆。
+// 配合手动搜索使用——自动匹配错了（缓存+锁定会永久复用错误结果），先清除再手动重选正确条目。
+async function handleClear(_event: IpcMainInvokeEvent, params: { title?: string }): Promise<any> {
+    const title = String(params?.title || '').trim();
+    if (!title) return { ok: false, error: '缺少 title' };
+    try {
+        const r = clearDanmakuCacheByTitle(title);
+        return { ok: true, files: r.files, lockCleared: r.lockCleared };
+    } catch (e: any) {
+        return { ok: false, error: '清除失败: ' + (e?.message || e) };
     }
 }
 

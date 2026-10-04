@@ -258,6 +258,17 @@ let dmFoldDetail: HTMLDivElement | null = null;
 let dmFoldSearch: HTMLDivElement | null = null;
 let dmDetailBody: HTMLDivElement | null = null;   // 详情段的内层容器(meta 到位后就地重填)
 let dmDetailShown: typeof meta | undefined;       // 上次渲染详情时的 meta 引用, 变了才重填
+// [lc-1288] 主进程每日 B站 Cookie 体检推送（danmaku:cookie-status）：
+// Cookie 过期是静默失败（搜索全空/弹幕受限），详情面板常显最新体检结论，不依赖是否跑过弹幕任务
+let pushedCookieStatus: { status?: string; uname?: string | null; detail?: string; checked_at?: string } | null = null;
+// [lc-1300] 最近一次弹幕任务实测登录态的时刻（ms）。推送体检最长 24h 一次 + 登录后立即推送，
+// 但用户「先开面板、后扫码」的窗口里推送仍是旧结论 —— meta 实测值更新时以实测为准，别让旧推送压住新事实。
+let metaCookieAt = 0;
+ipcRenderer.on('danmaku:cookie-status', (_e: unknown, p: any) => {
+    pushedCookieStatus = (p && typeof p === 'object') ? p : null;
+    // 详情段正展开着 → 就地重填（与 meta 异步到位后的处理一致）
+    if (dmDetailBody && dmDetailShown) renderDetailRows();
+});
 // [lc-1118] 手动搜索段: 搜索框 + 最多 5 条候选, 点选定条目直接拉弹幕(主进程落缓存记住选择)
 let dmSearchBody: HTMLDivElement | null = null;
 let dmSearchResults: any[] | null = null;         // null=本集还没搜过(展开时自动搜一次)
@@ -272,6 +283,9 @@ let controlsPlaced = false;
 let mountedForGuid: string | null = null;
 let loading = false;
 let inflight = false;       // 同一 guid 只允许一个在途请求（单飞，避免并发重复拉取触发 B站限流）
+// [lc-1300] 清除代际：清除弹幕时递增，在途 prepare 的响应回来发现代际变了直接丢弃 ——
+// 否则「清除」与「拉取中」赛跑，慢一步的错误匹配原样写回，用户点清除等于白点。
+let clearEpoch = 0;
 let enabled = true;
 // [lc-1117] 网页独立的「B站弹幕搜索」兜底开关（只管网页链路，MPV 侧 conf 开关不受影响）。
 // false 时 prepare 请求带 biliSearch:false，主进程跳过内置 B站降级（自建 danmu_api 优选照常）。
@@ -627,6 +641,10 @@ function injectDmPanelStyle(): void {
 .fntv-dm-cand-s{font-size:11px;color:rgba(255,255,255,.45);margin-top:2px}
 .fntv-dm-search-msg{font-size:12px;color:rgba(255,255,255,.5);padding:8px 16px;line-height:1.55}
 .fntv-dm-search-err{color:#ff8a8a}
+/* [lc-1300] 清除弹幕行：轻度警示色与普通菜单行区分；点完短暂变绿确认 */
+.fntv-dm-list li.fntv-dm-clear{justify-content:center;font-size:13px;color:#ff9c9c}
+.fntv-dm-list li.fntv-dm-clear:hover{background:rgba(255,107,107,.10)}
+.fntv-dm-list li.fntv-dm-clear.fntv-dm-clear-done{color:#5ad17a}
 /* 旋钮区: 每行「标签 + 当前值」在上、滑块在下, 与 MPV 弹幕样式面板同构 */
 .fntv-dm-knobs{display:flex;flex-direction:column;gap:14px}
 /* 「恢复默认」通铺成一行菜单项: 负 margin 抵消内层留白, 发丝线才跟分区线一样齐边 */
@@ -911,6 +929,15 @@ function renderPanel(): void {
     });
     p.appendChild(biliRow);
 
+    // [lc-1300] 第三行：「清除弹幕」—— 自动匹配错了（如 TMDB 分部命名与 B站「第N期」
+    // 对不上）时，清掉当前剧的全部匹配记忆：内存展示 + 磁盘缓存 + 源锁定。
+    // 配合下方「手动搜索」重新选定正确条目；选定后按季锁定，整季每集自动对位。
+    const clearRow = document.createElement('li');
+    clearRow.className = 'fntv-dm-clear';
+    clearRow.textContent = t('清除弹幕');
+    clearRow.addEventListener('click', (e) => { e.stopPropagation(); void clearDanmakuMatch(clearRow); });
+    p.appendChild(clearRow);
+
     const sep1 = document.createElement('div');
     sep1.className = 'fntv-dm-sep';
     p.appendChild(sep1);
@@ -1053,6 +1080,57 @@ function setBiliSearch(v: boolean): void {
     }
 }
 
+let dmClearBusy = false;
+/** [lc-1300] 「清除弹幕」：自动匹配错了时清掉当前剧的全部匹配记忆。
+ *  ① 主进程：按剧清磁盘缓存（全部季/集 json/xml/ass）+ 弹幕源锁定（danmaku_source_cache.json）
+ *     —— 只清单集没用：错误结果已按剧缓存+锁定，其他集照样命中；
+ *  ② 本地：清内存展示与会话 LRU。loadedGuids 保留（拦住 OnDomChange/maybeSetup 的自动重拉，
+ *     否则几秒内错误匹配原样回来）；重新拿弹幕走「手动搜索」选定条目（pick 不受影响），
+ *     或重开「B站弹幕搜索」开关（items 为空时它负责重试）触发一次全新自动匹配。 */
+async function clearDanmakuMatch(row: HTMLLIElement): Promise<void> {
+    if (dmClearBusy) return;
+    dmClearBusy = true;
+    clearEpoch++;   // [lc-1300] 在途 prepare 响应作废，别把刚清空的匹配又写回来
+    try {
+        const title = meta ? String(meta.searchTitle || '') : '';
+        if (title) {
+            try { await ipcRenderer.invoke('danmaku:clear', { title }); } catch { /* 主进程清不掉时本地照清 */ }
+        }
+        setItems([]);
+        if (meta) {
+            meta = {
+                ...meta, matchedTitle: '', source: '', bvid: null, cid: null,
+                aggregatedFrom: undefined, count: 0,
+                error: t('已手动清除（自动匹配记忆已重置；用「手动搜索」重新选定，或重启应用重跑自动匹配）'),
+            };
+        }
+        if (currentGuid) {
+            guidCache.delete(currentGuid);
+            loadedGuids.add(currentGuid);
+        }
+        dmSearchResults = null;
+        dmSearchErr = '';
+        dmPickedBvid = '';
+        renderSearchBody();   // 手动搜索段正展开着 → 旧候选列表立即刷新（清除后不复选旧条目）
+        resetRenderState();
+        // 高能条（danmakuHeat）同清：空时间轴事件即清屏信号（见 danmakuHeat.ingest）
+        try {
+            window.dispatchEvent(new CustomEvent(DANMAKU_ITEMS_EVENT, { detail: { times: [] } }));
+        } catch { /* ignore */ }
+        renderDetailRows();   // 详情段就地重填（收着也没关系，展开即见清除结论）
+        syncToggleUI();
+        row.textContent = t('已清除 ✓');
+        row.classList.add('fntv-dm-clear-done');
+        setTimeout(() => {
+            row.textContent = t('清除弹幕');
+            row.classList.remove('fntv-dm-clear-done');
+        }, 2200);
+        log.info('[danmakuWeb] 已清除弹幕（内存展示 + 磁盘缓存 + 源锁定）');
+    } finally {
+        dmClearBusy = false;
+    }
+}
+
 // ─── 数据拉取 ───
 
 /** 高能进度条（danmakuHeat.ts）刻意不 import 本模块，靠这个事件拿弹幕时间轴。
@@ -1129,6 +1207,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
 
     inflight = true;
     loading = true;
+    const epochAtStart = clearEpoch;   // [lc-1300] 期间用户点了「清除弹幕」→ 响应作废
     syncToggleUI();
     try {
         const res = await ipcRenderer.invoke('danmaku:prepare', { guid, biliSearch }) as any;
@@ -1138,6 +1217,11 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
             log.info('[danmakuWeb] 丢弃过期弹幕响应(已切集) guid=' + guid);
             return;
         }
+        // [lc-1300] 请求期间用户点了「清除弹幕」：同样丢弃，别把刚清空的匹配又写回来
+        if (epochAtStart !== clearEpoch) {
+            log.info('[danmakuWeb] 丢弃过期弹幕响应(清除后) guid=' + guid);
+            return;
+        }
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
             setItems(res.items as DanmakuItem[]);
             meta = res.meta as DanmakuMeta || {
@@ -1145,6 +1229,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
                 source: res.source || '', ep: res.ep || 0, season: res.season || 0, isMovie: !!res.isMovie,
                 count: res.count || items.length,
             };
+            metaCookieAt = Date.now();   // [lc-1300] 本次任务实测登录态的时刻（新鲜度仲裁用）
             maxScreen = Number(res.maxScreen) > 0 ? Math.round(Number(res.maxScreen)) : 0;
             loadedGuids.add(guid);
             guidCachePut(guid, { items: rawItems, meta, maxScreen });
@@ -1158,6 +1243,7 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
                 source: res?.source || '', ep: res?.ep ?? 0, season: res?.season || 0, isMovie: !!res?.isMovie,
                 count: 0, error: res?.error || '空',
             };
+            metaCookieAt = Date.now();   // [lc-1300] 失败结果同样经过 Cookie 实测（run 内 verify_cookie）
             log.info('[danmakuWeb] 无弹幕: ' + (res?.error || '空'));
             loadedGuids.add(guid);
         }
@@ -1589,6 +1675,7 @@ function render(): void {
 function sourceLabel(s: string): string {
     if (s === 'bangumi') return '番剧区（B站正版）';
     if (s === 'video') return '视频区（UP主搬运）';
+    if (s === 'danmu_api+bilibili') return '自建源 + B站（低于阈值聚合）';
     return s || '未知';
 }
 
@@ -1625,12 +1712,17 @@ function cookieStatusInfo(s: string): { text: string; warn: boolean; detail: str
     if (s === 'expired') return {
         text: 'Cookie 已过期 / 无效',
         warn: true,
-        detail: 'B站 登录态已失效，弹幕数量受限（候选更少、seg.so 可能被风控掐掉）。请从浏览器重新复制 SESSDATA 填回 bili_cookie.txt 后重启。',
+        detail: 'B站 登录态已失效，弹幕数量受限（候选更少、弹幕拉取可能被风控）。请到「设置 → 弹幕 → B站弹幕登录」重新扫码，或从浏览器复制 SESSDATA 写入 bili_cookie.txt 后重启。',
     };
     if (s === 'missing') return {
         text: '未登录（无 Cookie 文件）',
         warn: true,
-        detail: '未配置 bili_cookie.txt，弹幕数量受限。请把浏览器 B站 登录态 Cookie（SESSDATA 等）整行填入该文件后重启。',
+        detail: '未配置 B站 Cookie（匿名模式，弹幕数量受限）。请到「设置 → 弹幕 → B站弹幕登录」扫码登录；扫码成功后本面板立即更新。',
+    };
+    if (s === 'error') return {
+        text: '校验失败（网络原因）',
+        warn: false,
+        detail: 'B站 Cookie 体检请求失败（网络原因），稍后自动重试。',
     };
     return { text: '—', warn: false, detail: '' };
 }
@@ -1720,7 +1812,11 @@ function renderSearchBody(): void {
         tEl.textContent = (c.bvid === dmPickedBvid ? '✓ ' : '') + c.title;
         const sEl = document.createElement('div');
         sEl.className = 'fntv-dm-cand-s';
-        sEl.textContent = sourceLabel(c.source) + (c.isCompilation ? ' ⚠️合集' : '') + (c.bvid === dmPickedBvid ? t('（使用中）') : '');
+        // [lc-1301] 官方弹幕数亮出来：视频区候选之间靠它分辨「正片弹幕多」与「无人发弹幕」
+        // （0 弹幕的搬运候选盲选必失败）；番剧区/pgc 伪 id 无此字段，自然缺省
+        const dmTag = (typeof c.danmakuCount === 'number') ? ' · ' + t('{n} 条', { n: c.danmakuCount }) : '';
+        const compTag = c.isCompilation ? (c.badTitle ? ' ⚠️解说/二创' : ' 📁合集') : '';
+        sEl.textContent = sourceLabel(c.source) + dmTag + compTag + (c.bvid === dmPickedBvid ? t('（使用中）') : '');
         item.appendChild(tEl);
         item.appendChild(sEl);
         item.addEventListener('click', (e) => { e.stopPropagation(); void pickCandidate(c); });
@@ -1763,13 +1859,17 @@ async function pickCandidate(c: any): Promise<void> {
     dmSearchErr = '';
     renderSearchBody();
     try {
+        // [lc-1301] title 用系列规范名（meta.searchTitle）而不是搜索关键词：主进程按
+        //   (title,ep,season) 落缓存、按 title 播种源锁定，下一次自动加载读的是 fnOS 标题
+        //   —— 用关键词当标题的话，改词搜一次选定，记忆就落在没人会再读的键上。
         const res = await ipcRenderer.invoke('danmaku:pick', {
-            title: dmSearchKw || (meta ? meta.searchTitle : ''), ep: meta ? meta.ep : 0,
+            title: (meta && meta.searchTitle) || dmSearchKw, ep: meta ? meta.ep : 0,
             season: meta ? meta.season : 0, isMovie: meta ? meta.isMovie : false, bvid: c.bvid,
         }) as any;
         if (res && res.ok && Array.isArray(res.items) && res.items.length && currentGuid) {
             setItems(res.items as DanmakuItem[]);
             meta = (res.meta as DanmakuMeta) || meta;
+            metaCookieAt = Date.now();   // [lc-1300] 手动选定同样实测过登录态
             if (Number(res.maxScreen) > 0) maxScreen = Math.round(Number(res.maxScreen));
             dmPickedBvid = String(c.bvid);
             loadedGuids.add(currentGuid);
@@ -1809,7 +1909,16 @@ function renderDetailRows(): void {
         return;
     }
 
-    const cookie = cookieStatusInfo(meta.cookieStatus || '');
+    // [lc-1288] 登录状态优先用每日体检推送（≤24h 新鲜度，弹幕任务没跑过也能看到根因）；
+    // 无推送时回落本次弹幕任务实测的 cookie_status。
+    // [lc-1300] 新鲜度仲裁：推送体检最长 24h 一次，用户「先开面板、后扫码」时推送必是旧结论，
+    //   而本次弹幕任务实测值更新 —— meta 里带实测状态且实测时刻更新时，以实测为准。
+    const metaStatus = String((meta as any).cookieStatus || '');
+    const pushedStatus = pushedCookieStatus ? String(pushedCookieStatus.status || '') : '';
+    const pushedAt = pushedCookieStatus?.checked_at ? Date.parse(pushedCookieStatus.checked_at) : 0;
+    let cookieStatus = pushedStatus || metaStatus;
+    if (metaStatus && metaCookieAt > (isFinite(pushedAt) ? pushedAt : 0)) cookieStatus = metaStatus;
+    const cookie = cookieStatusInfo(cookieStatus);
 
     // ── [lc-1226] 三个来源的详情：谁在用、谁试过没中、谁没轮到，逐条写清 ──
     const srcCap = document.createElement('div');
@@ -1872,6 +1981,10 @@ function renderDetailRows(): void {
         ['聚合', meta.aggregatedFrom ? `${meta.aggregatedFrom} 个候选聚合` : '单源'],
         ['登录状态', cookie.text],
     ];
+    if (pushedCookieStatus && pushedCookieStatus.checked_at) {
+        rows.push(['Cookie 体检', pushedCookieStatus.checked_at.replace('T', ' ').replace(/\..*$/, '') +
+            (pushedCookieStatus.uname ? `（${pushedCookieStatus.uname}）` : '')]);
+    }
     if (meta.error) rows.push(['备注', meta.error]);
 
     // 非有效登录态：醒目红色横幅提示（一眼可见，对应 lc-336 的 Cookie 过期检查）
@@ -1908,8 +2021,8 @@ function renderDetailRows(): void {
     const tip = document.createElement('div');
     // 底部说明必须跟着实际来源走：自建源命中时写「数据来源：B站」是错信息（用户正是看着这句报的匹配 bug）。
     // preload 插件独立加载、import 不到主进程 danmuApi.isSelfHostedSource，只能按来源标签前缀判断。
-    tip.textContent = /^自建源/.test(String(meta.source || ''))
-        ? '数据来源：自建弹幕接口 danmu_api（只认精确匹配，未命中自动降级 B站）'
+    tip.textContent = /^自建源/.test(String(meta.source || '')) || meta.source === 'danmu_api+bilibili'
+        ? '数据来源：自建弹幕接口 danmu_api（只认精确匹配，低于聚合阈值自动叠加内置B站）'
         : '数据来源：B站（与 MPV 弹幕同源）';
     Object.assign(tip.style, {
         paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,.06)',

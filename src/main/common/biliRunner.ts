@@ -61,6 +61,9 @@ export interface BiliDanmakuResult {
     epid?: string | number | null;
     /** [lc-1226] 三来源各自的尝试结果（详情面板用） */
     sources?: DanmakuSourceTrace[];
+    /** [lc-1288] 自建源命中但低于聚合阈值时叠加内置B站：两源各自的条数（详情面板用） */
+    self_count?: number;
+    bilibili_count?: number;
 }
 
 export interface BiliCandidate {
@@ -90,7 +93,8 @@ let cachedModule: any = null;
 let logSinkBound = false;
 
 // ---- 候选 uosc_danmaku 脚本目录（与 biliCookie.ts / biliDanmaku.ts 保持一致）----
-function resolveDanmakuScriptDir(): string | null {
+// [lc-1288] 导出：每日 Cookie 体检的状态文件也要写进这个目录（供 MPV Lua 菜单同步读取）
+export function resolveDanmakuScriptDir(): string | null {
     const candidates: string[] = [];
     // 仅在打包态使用 resourcesPath：dev 下它指向 node_modules/electron/dist/resources，
     // 并非应用资源目录；往里写会污染 node_modules 并制造「存在但缺 bili_danmaku.js」的阴影目录。
@@ -143,6 +147,42 @@ function loadModule(): any {
     return mod;
 }
 
+// ===================== [lc-1288] 弹幕 XML 合并工具 =====================
+// 背景：自建源命中但条数低于聚合阈值时，需要叠加内置 B站 的弹幕。两条链路各自把
+// bilibili 格式的 XML 写到磁盘（danmuApi 写原始 <i> 根，bili_danmaku.js 写 <danmaku> 根），
+// 消费方（Lua / 网页解析）只认 <d p="...">text</d> 条目，因此按条目级抽行合并即可，
+// 统一重写为 <danmaku> 根（与 _write_xml 输出一致）。
+const DM_LINE_RE = /<d\s[^>]*p="[^"]*"[^>]*>[\s\S]*?<\/d>/g;
+
+/** 读取弹幕 XML 里的全部 <d ...>...</d> 条目行（文件不存在/解析为空返回 []）。 */
+function readDanmakuLines(file: string): string[] {
+    try {
+        if (!fs.existsSync(file)) return [];
+        const body = fs.readFileSync(file, 'utf8');
+        const lines = body.match(DM_LINE_RE) || [];
+        return lines.map((l) => l.trim()).filter(Boolean);
+    } catch (e: any) {
+        log.warn('[biliRunner] 读取弹幕 XML 失败: ' + (e?.message || e) + ' | ' + file);
+        return [];
+    }
+}
+
+/** 以 <danmaku> 根重写弹幕 XML（条目行去重：同 p 同文本视为同一条）。 */
+function writeMergedDanmakuXml(out: string, lines: string[]): number {
+    const seen = new Set<string>();
+    const uniq: string[] = [];
+    for (const l of lines) {
+        if (seen.has(l)) continue;
+        seen.add(l);
+        uniq.push(l);
+    }
+    const dir = path.dirname(out);
+    if (dir && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const body = ['<?xml version="1.0" encoding="UTF-8"?>', '<danmaku>', ...uniq, '</danmaku>'].join('\n');
+    fs.writeFileSync(out, body + '\n', 'utf8');
+    return uniq.length;
+}
+
 /**
  * 在主进程内运行 bili_danmaku.js，获取 B站弹幕并写出 XML 到 out。
  * @param title   干净番名
@@ -154,6 +194,40 @@ function loadModule(): any {
  * @param epTitle [lc-1220] 播放侧本集标题（供自建源核验未标季条目的分集归属；空串=无核验材料）
  * @returns 结果对象（ok=true 表示成功并写出 XML）
  */
+/**
+ * 内置 B站 链路：带超时保护地运行 bili_danmaku.js run()。
+ * [lc-1288] 从 runBiliDanmaku 主体抽出，供「首次获取」与「自建源低于阈值叠加合并」共用。
+ */
+async function runBiliChain(
+    title: string,
+    ep: number | string,
+    out: string,
+    threshold?: number | string,
+    season?: number | string,
+    timeoutMs = 60000,
+): Promise<BiliDanmakuResult> {
+    let mod: any;
+    try {
+        mod = loadModule();
+    } catch (e: any) {
+        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
+        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
+    }
+    try {
+        const runP = Promise.resolve(mod.run(title, ep, out, threshold, season));
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
+            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
+        });
+        const r = await Promise.race([runP, timeoutP]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        return (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run 无返回）' };
+    } catch (e: any) {
+        log.warn('[biliRunner] run 异常: ' + (e?.message || e));
+        return { ok: false, error: String(e?.message || e) };
+    }
+}
+
 export async function runBiliDanmaku(
     title: string,
     ep: number | string,
@@ -184,6 +258,57 @@ export async function runBiliDanmaku(
     }
     const pre = await danmuApi.autoFetch(String(title || ''), Number(ep) || 0, out, Number(season) || 0, epTitle, seriesKey, altTitle);
     if (pre) {
+        // [lc-1288] 自建源命中但条数低于聚合阈值 → 不再短路，继续跑内置 B站 并按条目合并。
+        // 旧逻辑「命中即用」让 renren 这类只有个位数弹幕的条目直接终结整条链路，
+        // B站 上两万条弹幕的官方正片永远轮不到（用户实测：自建源仅 1 条也直接用）。
+        const th = Number(threshold) || 0;
+        const selfCount = Number(pre.danmaku_count) || 0;
+        if (th > 0 && selfCount < th && pre.ok) {
+            const selfLines = readDanmakuLines(out);
+            if (selfLines.length > 0) {
+                // B站 写临时文件：失败时自建源 XML（out）原样保留，成功时合并回写 out
+                const tmpOut = out + '.bili.tmp.xml';
+                const biliRes = await runBiliChain(title, ep, tmpOut, threshold, season, timeoutMs);
+                if (biliRes && biliRes.ok) {
+                    const biliLines = readDanmakuLines(tmpOut);
+                    const mergedCount = writeMergedDanmakuXml(out, [...biliLines, ...selfLines]);
+                    try { fs.unlinkSync(tmpOut); } catch (_) { /* 清理失败无害，下次覆盖 */ }
+                    log.info(`[biliRunner] 自建源 ${selfLines.length} 条低于阈值(${th}) → 已叠加内置B站 ${biliLines.length} 条，合并去重后 ${mergedCount} 条`);
+                    traces.push({
+                        id: 'danmu_api', attempted: true, used: true,
+                        detail: pre.matched_title
+                            ? `命中《${pre.matched_title}》（精确匹配，${selfLines.length} 条低于阈值，已叠加内置B站）`
+                            : `精确匹配命中（${selfLines.length} 条低于阈值，已叠加内置B站）`,
+                        count: selfLines.length,
+                    });
+                    traces.push({
+                        id: 'bilibili', attempted: true, used: true,
+                        detail: biliRes.matched_title ? `命中《${biliRes.matched_title}》` : '匹配成功',
+                        count: biliLines.length,
+                    });
+                    return {
+                        ...biliRes,
+                        danmaku_count: mergedCount,
+                        source: 'danmu_api+bilibili',
+                        self_count: selfLines.length,
+                        bilibili_count: biliLines.length,
+                        sources: traces,
+                    };
+                }
+                // B站 链路失败：保留自建源弹幕（out 未被触碰），如实标注失败根因
+                log.warn('[biliRunner] 自建源低于阈值但内置B站叠加失败，仅用自建源: ' + ((biliRes && biliRes.error) || '未知'));
+                traces.push({
+                    id: 'danmu_api', attempted: true, used: true,
+                    detail: pre.matched_title ? `命中《${pre.matched_title}》（精确匹配）` : '精确匹配命中',
+                    count: pre.danmaku_count,
+                });
+                traces.push({
+                    id: 'bilibili', attempted: true, used: false,
+                    error: ((biliRes && biliRes.error) || '未知错误') + '（叠加失败，仅用自建源弹幕）',
+                });
+                return { ...pre, sources: traces };
+            }
+        }
         traces.push({
             id: 'danmu_api', attempted: true, used: true,
             detail: pre.matched_title ? `命中《${pre.matched_title}》（精确匹配）` : '精确匹配命中',
@@ -211,31 +336,16 @@ export async function runBiliDanmaku(
         });
         return { ok: false, error: 'B站弹幕搜索未启用', sources: traces };
     }
-    let mod: any;
     try {
-        mod = loadModule();
-    } catch (e: any) {
-        log.warn('[biliRunner] 加载 bili_danmaku.js 失败: ' + (e?.message || e));
-        traces.push({ id: 'bilibili', attempted: true, used: false, error: '弹幕脚本加载失败: ' + (e?.message || e) });
-        return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e), sources: traces };
-    }
-    try {
-        const runP = Promise.resolve(mod.run(title, ep, out, threshold, season));
-        let timeoutHandle: NodeJS.Timeout | null = null;
-        const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
-        });
-        const r = await Promise.race([runP, timeoutP]);
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        const res = (r && typeof r === 'object') ? r : { ok: false, error: '未知错误（run 无返回）' };
-        traces.push(res.ok
+        const r = await runBiliChain(title, ep, out, threshold, season, timeoutMs);
+        traces.push(r.ok
             ? {
                 id: 'bilibili', attempted: true, used: true,
-                detail: res.matched_title ? `命中《${res.matched_title}》` : '匹配成功',
-                count: res.danmaku_count,
+                detail: r.matched_title ? `命中《${r.matched_title}》` : '匹配成功',
+                count: r.danmaku_count,
             }
-            : { id: 'bilibili', attempted: true, used: false, error: res.error || '未知错误' });
-        return { ...res, sources: traces };
+            : { id: 'bilibili', attempted: true, used: false, error: r.error || '未知错误' });
+        return { ...r, sources: traces };
     } catch (e: any) {
         log.warn('[biliRunner] run 异常: ' + (e?.message || e));
         traces.push({ id: 'bilibili', attempted: true, used: false, error: String(e?.message || e) });
@@ -247,6 +357,50 @@ export async function runBiliDanmaku(
 export function resetBiliModule(): void {
     cachedModule = null;
     logSinkBound = false;
+}
+
+/**
+ * [lc-1300] 清除某剧的弹幕源锁定（bili_danmaku.js 的 danmaku_source_cache.json 键）。
+ * 网页端「清除弹幕」链路：自动匹配错了 → 清掉记忆，下次自动匹配重新全量搜索/手动重选。
+ * @returns 是否确实清掉了已存在的锁定（本来就没锁返回 false，不算失败）
+ */
+export function clearBiliSourceLock(title: string): boolean {
+    try {
+        const mod = loadModule();
+        if (typeof mod.clear_source_cache !== 'function') return false;
+        return !!mod.clear_source_cache(title);
+    } catch (e: any) {
+        log.warn('[biliRunner] 清除弹幕源锁定失败: ' + (e?.message || e));
+        return false;
+    }
+}
+
+export interface BiliCookieStatus {
+    ok: boolean;
+    /** 'valid' | 'expired' | 'missing' | 'error' */
+    cookie_status: string;
+    uname?: string | null;
+    reason?: string | null;
+    err?: string | null;
+}
+
+/**
+ * [lc-1288] B站 Cookie 体检：调 bili_danmaku.js 的 nav 校验（与每次 run 内部同一套逻辑）。
+ * 供 playbackShim 的每日定时任务调用，结果写状态文件 + 推送前端详情面板。
+ */
+export async function checkBiliCookie(): Promise<BiliCookieStatus> {
+    try {
+        const mod = loadModule();
+        if (typeof mod.cookie_check !== 'function') {
+            return { ok: false, cookie_status: 'error', reason: '脚本无 cookie_check（版本过旧）' };
+        }
+        const r = await Promise.resolve(mod.cookie_check());
+        return (r && typeof r === 'object')
+            ? r
+            : { ok: false, cookie_status: 'error', reason: 'cookie_check 无返回' };
+    } catch (e: any) {
+        return { ok: false, cookie_status: 'error', reason: String(e?.message || e) };
+    }
 }
 
 /**

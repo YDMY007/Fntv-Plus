@@ -382,6 +382,35 @@ function open_bili_config_menu()
     -- 老版本缓存或旧 shim 没这个字段时回落到单源展示，不显示成"失败"。
     table.insert(items, { title = "── 弹幕来源详情 ──", keep_open = true, selectable = false })
     do
+        -- [lc-1288] B站 Cookie 体检状态：主进程每日自动检查一次后写入脚本目录
+        --   bili_cookie_status.json（与 danmaku_source_cache.json 等运行态文件同目录）。
+        --   Cookie 失效是静默失败（WBI 搜索全空、弹幕数量受限），在这里一眼可见根因。
+        local cookie_line, cookie_warn = "（尚未检查，应用每天自动体检一次）", false
+        do
+            local cookie_file = io.open(utils.join_path(mp.get_script_directory(), "bili_cookie_status.json"), "r")
+            if cookie_file then
+                local raw = cookie_file:read("*a")
+                cookie_file:close()
+                local ok_json, j = pcall(utils.parse_json, raw or "")
+                if ok_json and type(j) == "table" and j.status then
+                    local when = tostring(j.checked_at or ""):gsub("T", " "):gsub("%..*", ""):gsub("%+[0-9:]+$", "")
+                    if j.status == "valid" then
+                        cookie_line = ("✅ 已登录%s · 检查于 %s"):format(j.uname and ("（" .. j.uname .. "）") or "", when)
+                    elseif j.status == "expired" then
+                        cookie_warn = true
+                        cookie_line = "❌ Cookie 已失效（从浏览器重新复制 SESSDATA 到脚本目录 bili_cookie.txt） · 检查于 " .. when
+                    elseif j.status == "missing" then
+                        cookie_warn = true
+                        cookie_line = "⚠️ 未配置 Cookie（匿名模式，弹幕数量受限） · 检查于 " .. when
+                    else
+                        cookie_line = "⚠️ Cookie 校验失败（网络原因，稍后自动重试） · 检查于 " .. when
+                    end
+                end
+            end
+        end
+        table.insert(items, { title = "B站 Cookie 状态", bold = true, keep_open = true, selectable = false })
+        table.insert(items, { title = "   " .. cookie_line, keep_open = true, selectable = false })
+
         -- 弹弹play 的剧集识别状态（在先；不消耗弹幕库配额）
         local dd_ok = (DANMAKU.anime and DANMAKU.anime ~= "")
         local dd_txt
@@ -455,7 +484,10 @@ function open_bili_config_menu()
     table.insert(items, { title = "── 实际匹配结果 ──", keep_open = true, selectable = false })
     if BILI_INFO and type(BILI_INFO) == "table" then
         -- [lc-1101] 来源可能是自建弹幕接口(danmu_api)，标题不能一律写「B站弹幕」
-        local src_name = (tostring(BILI_INFO.source or ""):match("danmu_api")) and "自建弹幕接口" or "B站弹幕"
+        -- [lc-1288] source 可能是合并源（自建源低于阈值时叠加内置B站）
+        local src_raw = tostring(BILI_INFO.source or "")
+        local src_name = src_raw == "danmu_api+bilibili" and "自建源+B站（低于阈值聚合）"
+            or (src_raw:match("danmu_api") and "自建弹幕接口" or "B站弹幕")
         if BILI_INFO.ok then
             -- ✅ 关联成功
             table.insert(items, { title = ("✅ %s：已关联成功"):format(src_name), bold = true, keep_open = true, selectable = false, })

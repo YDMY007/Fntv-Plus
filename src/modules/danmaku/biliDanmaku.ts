@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fnConfig from '../fn_config/config';
 import logger from '../logger';
-import { runBiliDanmaku, runBiliDanmakuByBvid } from '../../main/common/biliRunner';
+import { runBiliDanmaku, runBiliDanmakuByBvid, clearBiliSourceLock } from '../../main/common/biliRunner';
 import type { DanmakuSourceTrace } from '../../main/common/biliRunner';
 import * as danmuApi from '../../main/common/danmuApi';
 const log = logger.component('danmaku');
@@ -393,22 +393,30 @@ function safeName(s: string): string {
 // ∴ 改匹配口径必须换代际；旧代际文件是可再生的网络缓存，首次访问缓存目录时清掉。
 // 同一批改动把自建源准入从「相关性打分 ≥0.34」收紧成「只认精确匹配」，
 // 模糊匹配只留给内置 B站 链路（见 danmuApi.ts 的 exactMatchTier）。
-const CACHE_GEN = 'v2';
+// [lc-1300] v2→v3：文件名加入标题短 hash 前缀（titleHash8），「清除弹幕」才能按剧
+//   一键清掉该剧全部季/集的缓存（旧键名 title+season+ep 整体 md5，无法从文件名反查剧名）。
+//   旧 v2 命名由 sweepOldGenCache 一并清掉（可再生的网络缓存，代价是一次性重抓）。
+const CACHE_GEN = 'v3';
+function titleHash8(title: string): string {
+    return createHash('md5').update(String(title || ''), 'utf-8').digest('hex').slice(0, 8);
+}
 function cacheBaseName(title: string, ep: number, season = 0): string {
     // 季数纳入缓存键：同一番名+集数不同季的弹幕不同（如《无职转生》二/三季），
     // 必须分目录缓存，否则旧缓存会让"错误季"的弹幕长期命中。
+    const t8 = titleHash8(title);
     const h = createHash('md5').update(`${title}::${season}::${ep}`, 'utf-8').digest('hex').slice(0, 16);
-    return season > 0 ? `bili_${h}_${CACHE_GEN}_s${season}_${ep}` : `bili_${h}_${CACHE_GEN}_${ep}`;
+    return season > 0 ? `bili_${t8}_${h}_${CACHE_GEN}_s${season}_${ep}` : `bili_${t8}_${h}_${CACHE_GEN}_${ep}`;
 }
 
-/** 清掉上一代际的缓存文件（文件名不含 CACHE_GEN 的 bili_<16hex>_… 三件套）。 */
+/** 清掉上一代际的缓存文件：旧命名（bili_<16hex>_…，含无代际标记与 v2 标记两代）。
+ *  v3 新命名是 bili_<8hex标题>_<16hex>_<GEN>_…，标题前缀让「清除弹幕」能按剧枚举。 */
 let genSwept = false;
 function sweepOldGenCache(dir: string): void {
     if (genSwept) return;
     genSwept = true;
     try {
         for (const f of fs.readdirSync(dir)) {
-            if (/^bili_[0-9a-f]{16}_(s\d+_)?\d+\.(json|xml|ass)$/.test(f)) {
+            if (/^bili_[0-9a-f]{16}(_v2)?_(s\d+_)?\d+\.(json|xml|ass)$/.test(f)) {
                 try { fs.unlinkSync(path.join(dir, f)); } catch (_) { /* ignore */ }
             }
         }
@@ -690,6 +698,38 @@ export async function getDanmakuItemsByBvid(
     const kept = filterDanmakuItems(items, fnConfig.getBiliDanmakuBlockTypes(), fnConfig.getBiliDanmakuBlacklist() || '');
     meta.count = kept.length;
     return { items: kept, meta };
+}
+
+/**
+ * [lc-1300] 「清除弹幕」：清掉某剧的弹幕匹配记忆 —— 全部季/集的磁盘缓存（json/xml/ass）
+ * + 弹幕源锁定（danmaku_source_cache.json）。
+ *
+ * 场景：自动匹配错了（如《小书痴的下克上》TMDB 分部命名与 B站「第N期」口径不一致，
+ * 飞牛刮削出的标题/季数把 B站第4部的内容锁到了错条目），且错误结果会被缓存+锁定
+ * **永久复用** —— 只清单集缓存没用（其他集照样命中错缓存），必须按剧全清。
+ * 文件名前缀 titleHash8(title)（lc-1300 起 v3 命名携带）让枚举成为可能；
+ * v2 旧命名文件由 sweepOldGenCache 一次性清掉，这里无需兼顾。
+ */
+export function clearDanmakuCacheByTitle(title: string): { files: number; lockCleared: boolean } {
+    const cleanTitle = normalizeDanmakuTitle(title) || title;
+    let files = 0;
+    if (cleanTitle) {
+        try {
+            if (fs.existsSync(CACHE_DIR)) {
+                const prefix = `bili_${titleHash8(cleanTitle)}_`;
+                for (const f of fs.readdirSync(CACHE_DIR)) {
+                    if (f.startsWith(prefix)) {
+                        try { fs.unlinkSync(path.join(CACHE_DIR, f)); files++; } catch (_) { /* ignore */ }
+                    }
+                }
+            }
+        } catch (e: any) {
+            log.warn('[danmaku] 按剧清除弹幕缓存失败: ' + (e?.message || e));
+        }
+    }
+    const lockCleared = clearBiliSourceLock(cleanTitle);
+    log.info(`[danmaku] 🧹 清除弹幕匹配记忆: title="${cleanTitle}" files=${files} lockCleared=${lockCleared}`);
+    return { files, lockCleared };
 }
 
 /**
