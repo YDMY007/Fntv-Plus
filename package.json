@@ -196,6 +196,7 @@
           ]
         }
       ],
+      "artifactName": "Fntv-Plus_${version}_${arch}.${ext}",
       "category": "AudioVideo",
       "icon": "build/icon.png",
       "desktop": {
