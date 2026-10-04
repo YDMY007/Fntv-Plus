@@ -919,6 +919,11 @@
             <input type="password" id="password" placeholder="请输入密码" spellcheck="false" tabindex="3" />
             <button type="button" class="password-toggle" id="passwordToggle" title="显示/隐藏密码"><img id="passwordToggleImg" width="20px" src="./image/password-show.png" alt="显示密码" /></button>
         </div>
+        <div class="form-group has-button">
+            <label for="accessCode">访问码（可选）</label>
+            <input type="password" id="accessCode" placeholder="服务器未开启访问码门禁时请留空" spellcheck="false" autocomplete="off" tabindex="4" />
+            <button type="button" class="password-toggle" id="accessCodeToggle" title="显示/隐藏访问码"><img id="accessCodeToggleImg" width="20px" src="./image/password-show.png" alt="显示访问码" /></button>
+        </div>
         <div class="switch-container">
             <label class="switch">
                 <input type="checkbox" id="httpsSwitch" />
@@ -1015,6 +1020,9 @@
         const passwordInput = document.getElementById('password');
         const passwordToggle = document.getElementById('passwordToggle');
         const passwordToggleImg = document.getElementById('passwordToggleImg');
+        const accessCodeInput = document.getElementById('accessCode');
+        const accessCodeToggle = document.getElementById('accessCodeToggle');
+        const accessCodeToggleImg = document.getElementById('accessCodeToggleImg');
         const historyBtn = document.getElementById('historyBtn');
         const historyDropdown = document.getElementById('historyDropdown');
         const customConfirm = document.getElementById('customConfirm');
@@ -1231,15 +1239,18 @@
             const domain = domainInput.value.trim();
             const username = usernameInput.value.trim();
             const password = passwordInput.value.trim();
+            const accessCode = accessCodeInput.value.trim();
             const useHttps = document.getElementById('httpsSwitch').checked;
             const rememberPassword = document.getElementById('rememberPassword').checked;
 
-            window.log.info('登录信息:', { domain, username, useHttps, rememberPassword });
+            // 注意：日志里绝不打印访问码明文
+            window.log.info('登录信息:', { domain, username, useHttps, rememberPassword, hasAccessCode: !!accessCode });
 
             const loginData = {
                 domain: domain,
                 username: username,
                 password: password,                    // 登录必需，始终发送真实密码
+                accessCode: accessCode,                // [访问码] 可选；非空时主进程先建立网关会话
                 rememberPassword: rememberPassword,    // 仅控制是否把密码持久化到历史/配置
                 useHttps: useHttps
             };
@@ -1295,6 +1306,21 @@
             }
         });
 
+        // [访问码] 显示/隐藏切换
+        accessCodeToggle.addEventListener('click', function () {
+            if (accessCodeInput.type === 'password') {
+                accessCodeInput.type = 'text';
+                accessCodeToggleImg.src = './image/password-hide.png';
+                accessCodeToggle.title = '隐藏访问码';
+                accessCodeToggleImg.alt = '隐藏访问码';
+            } else {
+                accessCodeInput.type = 'password';
+                accessCodeToggleImg.src = './image/password-show.png';
+                accessCodeToggle.title = '显示访问码';
+                accessCodeToggleImg.alt = '显示访问码';
+            }
+        });
+
         // 历史记录按钮点击
         historyBtn.addEventListener('click', function (e) {
             e.stopPropagation();
@@ -1316,7 +1342,7 @@
             }
 
             const historyHtml = historyData.map((item, index) => `
-                <div class="history-item" data-domain="${item.domain}" data-account="${item.account}" data-password="${item.password}" data-use-https="${item.useHttps || false}" data-login-type="${item.loginType || ''}" data-fnid="${item.fnId || ''}" data-index="${index}">
+                <div class="history-item" data-domain="${item.domain}" data-account="${item.account}" data-password="${item.password}" data-access-code="${item.accessCode || ''}" data-use-https="${item.useHttps || false}" data-login-type="${item.loginType || ''}" data-fnid="${item.fnId || ''}" data-index="${index}">
                     <div class="history-content">
                         <div class="history-account">${item.account}${item.loginType === 'fnid' ? '<span class="history-fnid-badge">飞牛ID</span>' : ''}</div>
                         <div class="history-domain">${item.domain}${item.useHttps ? ' (HTTPS)' : ' (HTTP)'}</div>
@@ -1335,6 +1361,7 @@
                     const domain = item.dataset.domain;
                     const account = item.dataset.account;
                     const password = item.dataset.password;
+                    const accessCode = item.dataset.accessCode || '';
                     const useHttps = item.dataset.useHttps === 'true';
                     const loginType = item.dataset.loginType || '';
                     const fnId = item.dataset.fnid || '';
@@ -1343,6 +1370,7 @@
                     domainInput.value = loginType === 'fnid' && fnId ? fnId : domain;
                     usernameInput.value = account;
                     passwordInput.value = password;
+                    accessCodeInput.value = accessCode;
                     document.getElementById('httpsSwitch').checked = useHttps;
 
                     // 关闭下拉框
@@ -1423,6 +1451,10 @@
             document.getElementById('rememberPassword').checked = savedRemember === null ? true : savedRemember === 'true';
             if (config && config.account) {
                 usernameInput.value = config.account;
+            }
+            // [访问码] 回填已保存的访问码（主进程已解密）
+            if (config && config.accessCode) {
+                accessCodeInput.value = config.accessCode;
             }
             
             // 渲染历史记录

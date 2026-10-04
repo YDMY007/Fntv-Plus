@@ -1,9 +1,10 @@
 import * as path from 'path';
 import * as net from 'net';
 import * as log from '../../modules/logger';
-import { readConfig } from '../../modules/fn_config/config';
+import { readConfig, saveConfig, getAccessCode } from '../../modules/fn_config/config';
 import { restoreCookies } from '../../modules/fn_config/cookie';
 import { BrowserWindow } from 'electron';
+import { establishAccessCodeSession, AccessCodeVerificationError } from './accessCodeSession';
 
 /**
  * 快速可达性预检: TCP 连接 domain 的 host:port, 超时即判定不可达.
@@ -133,6 +134,35 @@ export async function setupCookieRestore(mainWindow: BrowserWindow): Promise<voi
         log.warn('没有找到已保存的配置，无法恢复 cookie');
         mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
         return;
+    }
+
+    // ── [访问码] 启动重建网关会话（fnid / 本地账号两条恢复路径共用）──
+    // persist:fntv 里上次建立的访问码授权 Cookie 重启后可能仍在，但可能已被 NAS 侧失效；
+    // 用持久化（加密）的访问码向 /access_code_verify 重新验证一次，成功则顺带把重定向
+    // 解析出的真实 origin 回写配置（修正 80 端口重定向场景）。被拒绝/网络失败 → 回登录页，
+    // 登录页会回填访问码，用户点一次「登录」即可恢复。
+    const savedAccessCode = getAccessCode();
+    if (savedAccessCode) {
+        try {
+            const accessSession = await establishAccessCodeSession(savedConfig.domain, savedAccessCode);
+            if (accessSession.baseUrl && accessSession.baseUrl !== savedConfig.domain) {
+                log.key(`[访问码] 启动重验证解析到真实源头: ${savedConfig.domain} → ${accessSession.baseUrl}`);
+                savedConfig.domain = accessSession.baseUrl;
+                savedConfig.useHttps = accessSession.baseUrl.startsWith('https://');
+                saveConfig({
+                    account: savedConfig.account || '',
+                    domain: savedConfig.domain,
+                    token: savedConfig.token,
+                    useHttps: savedConfig.useHttps,
+                    loginType: savedConfig.loginType,
+                });
+            }
+        } catch (error) {
+            const reason = error instanceof AccessCodeVerificationError ? error.reason : 'network';
+            log.warn('[访问码] 启动重建网关会话失败:', reason, '→ 跳转登录页');
+            mainWindow.loadFile(path.join(__dirname, '../../../resource/login/index.html'));
+            return;
+        }
     }
 
     // ── FN ID 登录: 用持久化的 OAuth token 重建会话 cookie ──

@@ -26,7 +26,8 @@ export class ApiService {
      * @param token - 授权令牌
      */
     constructor(baseURL: string, token: string = '') {
-        this.baseURL = baseURL;
+        // 尾斜杠归一化（上游 PR #157 同款），避免拼出 `//v/...` 双斜杠请求
+        this.baseURL = baseURL.replace(/\/+$/, '');
         this.tempDir = path.join(app.getPath('temp'), 'fntv_subtitles');
         this.token = token;
 

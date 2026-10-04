@@ -6,6 +6,7 @@ import { ApiService } from '../../../modules/fn_api/api';
 import { request, HttpMethod } from '../../../modules/fn_api/request';
 import { isTrusted } from '../../../modules/cert_trust';
 import { restoreCookies } from '../../../modules/fn_config/cookie';
+import { establishAccessCodeSession, AccessCodeVerificationError } from '../../common/accessCodeSession';
 import * as fnConfig from '../../../modules/fn_config/config';
 import * as log from '../../../modules/logger';
 
@@ -155,6 +156,8 @@ interface LoginData {
     domain: string;
     username: string;
     password: string;
+    // [访问码] fnOS 网关「应用访问码」，可选；非空时 OAuth 窗口遇网关页自动填码提交
+    accessCode?: string;
     useHttps?: boolean;
     rememberPassword?: boolean;
 }
@@ -514,10 +517,39 @@ function getInjectionScript(username: string, password: string): string {
  * 不再使用"延迟兜底收尾"：那条链路会在 OAuth 未完成时以无 token 提前收尾,
  * 复制空 cookie, 导致 /v 弹登录页(密码错误/白页)。
  */
+/**
+ * [访问码] fnOS「请输入访问码」网关页自动填码脚本（移植自上游 PR #157）。
+ * 页面契约：#access-code-input / input[name="access-code"]，标题 #page-title 文本为「请输入访问码」。
+ * 返回 true = 当前页是访问码页且已填码提交；false = 不是访问码页（调用方回落常规注入）。
+ */
+function getAccessCodeInjectionScript(accessCode: string): string {
+    return `
+        (function() {
+            var input = document.querySelector('#access-code-input, input[name="access-code"]');
+            var form = input ? input.closest('form') : null;
+            var title = document.querySelector('#page-title');
+            if (!input || !form || !title || title.textContent.trim() !== '请输入访问码') return false;
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(input, ${JSON.stringify(accessCode)});
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                var submit = form.querySelector('button[type="submit"], input[type="submit"]');
+                if (submit) submit.click();
+            }
+            return true;
+        })();
+    `;
+}
+
 export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData): Promise<void> {
     const fnId = loginData.domain.trim();
     const fnConnectUrl = buildFnConnectUrl(fnId);
-    log.info(`[FN ID] 开始 FN ID 登录: fnId=${fnId}, url=${fnConnectUrl}`);
+    // [访问码] 登录框里填了访问码 → OAuth 窗口遇网关页自动填码 + 换 token 前预建会话
+    const accessCode = (loginData.accessCode || '').trim();
+    log.info(`[FN ID] 开始 FN ID 登录: fnId=${fnId}, url=${fnConnectUrl}, hasAccessCode=${!!accessCode}`);
 
     let oauthWindow: BrowserWindow | null = null;
     let baseUrl = '';
@@ -752,16 +784,38 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
         // 注册 JS bridge 用于 WebView 与主进程通信 + 安全检查
         oauthWindow.webContents.on('did-finish-load', () => {
             if (!oauthWindow || oauthWindow.isDestroyed()) return;
-            const script = getInjectionScript(loginData.username, loginData.password);
-            oauthWindow.webContents.executeJavaScript(`
-                window.__fntvBridge = function(msg) {
-                    // 通过 console 传递消息到主进程
-                    console.log('__FNTV_BRIDGE__:' + msg);
-                };
-                ${script}
-            `).catch(err => {
-                log.error('[FN ID] JS 注入失败:', err);
-            });
+            const injectNormal = () => {
+                if (!oauthWindow || oauthWindow.isDestroyed()) return;
+                const script = getInjectionScript(loginData.username, loginData.password);
+                oauthWindow.webContents.executeJavaScript(`
+                    window.__fntvBridge = function(msg) {
+                        // 通过 console 传递消息到主进程
+                        console.log('__FNTV_BRIDGE__:' + msg);
+                    };
+                    ${script}
+                `).catch(err => {
+                    log.error('[FN ID] JS 注入失败:', err);
+                });
+            };
+            // [访问码] 用户填了访问码：先探测当前页是否 fnOS「请输入访问码」网关页，
+            // 是则自动填码提交（返回 true 后等页面跳转、did-finish-load 再触发常规注入），
+            // 不是/失败则回落常规注入，不影响原 OAuth 流程
+            if (accessCode) {
+                oauthWindow.webContents.executeJavaScript(getAccessCodeInjectionScript(accessCode))
+                    .then((handled) => {
+                        if (handled) {
+                            log.key('[FN ID] 检测到访问码网关页，已自动填码提交');
+                            return;
+                        }
+                        injectNormal();
+                    })
+                    .catch((err) => {
+                        log.error('[FN ID] 访问码页注入失败，回落常规注入:', err);
+                        injectNormal();
+                    });
+                return;
+            }
+            injectNormal();
         });
 
         // 创建一个 Promise 来等待登录完成
@@ -782,6 +836,27 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                 try {
                     if (!baseUrl) {
                         throw new Error('未能确定 NAS 地址（baseUrl 为空），无法完成登录');
+                    }
+
+                    // [访问码] 换 token 前先对 NAS 源建立访问码网关会话（Cookie 落 persist:fntv），
+                    // 否则网关可能把 /v/api/... 拦成门户 HTML；被拒绝时终止并给出明确报错。
+                    // 网络/端点缺失不阻断 —— OAuth 窗口手动输码 + 会话 cookie 复制链路仍可兜底。
+                    if (accessCode) {
+                        try {
+                            const accessSession = await establishAccessCodeSession(baseUrl, accessCode);
+                            if (accessSession.baseUrl && accessSession.baseUrl !== baseUrl) {
+                                log.key(`[FN ID] 访问码验证解析到真实源头: ${baseUrl} → ${accessSession.baseUrl}`);
+                                baseUrl = accessSession.baseUrl;
+                            }
+                        } catch (err) {
+                            if (err instanceof AccessCodeVerificationError && err.reason === 'rejected') {
+                                authRequested = false;
+                                reject(new Error('访问码错误，请检查后重试。'));
+                                return;
+                            }
+                            log.warn('[FN ID] 访问码会话建立失败(继续 OAuth 流程):',
+                                err instanceof AccessCodeVerificationError ? err.reason : err);
+                        }
                     }
 
                     const fnapi = new ApiService(baseUrl);
@@ -843,6 +918,8 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                         account: loginData.username,
                         domain: baseUrl,
                         token: token,
+                        // [访问码] 持久化（磁盘加密），启动时重建网关会话
+                        accessCode: accessCode,
                         useHttps: true,
                         loginType: 'fnid',
                     });
@@ -851,6 +928,7 @@ export async function handleFnIdLogin(event: IpcMainEvent, loginData: LoginData)
                         domain: baseUrl,
                         account: loginData.username || fnId,
                         password: loginData.rememberPassword ? loginData.password : '',
+                        accessCode: accessCode,
                         useHttps: true,
                         loginType: 'fnid',
                         fnId: fnId,

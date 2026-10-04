@@ -128,7 +128,9 @@ export async function request<T = any>(
     timeout: number = DEFAULT_TIMEOUT,
     tryTimes: number = 5,
 ): Promise<ApiResponse<T>> {
-    const fullUrl = baseUrl + url;
+    // 尾斜杠归一化（上游 PR #157 同款）：配置/重定向携带的 baseUrl 尾部多余 "/" 会拼出 `//v/...` 双斜杠
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+    const fullUrl = normalizedBaseUrl + url;
     if (method === HttpMethod.POST || method === HttpMethod.PUT) {
         data = data || {};
         data["nonce"] = generateRandomDigits(); // POST/PUT请求添加随机数防重放
@@ -138,7 +140,7 @@ export async function request<T = any>(
 
     // [lc-294] 转发 persist:fntv 会话 Cookie(含 Trim-MC-token 鉴权), 与 webview 同源鉴权.
     // 保留 mode=relay 以兼容 FN Connect 外网中继; 会话 Cookie 为空(未登录/登录中)时退化为仅 mode=relay.
-    const sessionCookieHeader = await getSessionCookieHeader(baseUrl);
+    const sessionCookieHeader = await getSessionCookieHeader(normalizedBaseUrl);
     const cookieParts = ['mode=relay'];
     if (sessionCookieHeader) cookieParts.push(sessionCookieHeader);
     const cookieHeader = cookieParts.join('; ');
@@ -154,7 +156,7 @@ export async function request<T = any>(
     // 根据URL是否已被信任来决定是否验证证书。
     // 私有/本地地址直接免验证（内网 fnOS 自签证书是正常预期，与 Chromium 侧 lc-286 对齐）——
     // 否则 80 端口重定向到 https 真实端口时每次都会弹「不受信任的SSL证书」对话框。
-    const shouldIgnoreCert = isTrusted(baseUrl) || isPrivateHostUrl(baseUrl);
+    const shouldIgnoreCert = isTrusted(normalizedBaseUrl) || isPrivateHostUrl(normalizedBaseUrl);
 
     const config = {
         headers,
@@ -190,7 +192,7 @@ export async function request<T = any>(
 
                 if (location) {
                     // 1. 解析新地址
-                    let newBaseUrl = baseUrl;
+                    let newBaseUrl = normalizedBaseUrl;
                     let newUrlPath = location;
 
                     // 如果是绝对路径 (http开头)，重新拆解 baseUrl 和 path
@@ -329,7 +331,7 @@ export async function request<T = any>(
             log.error(`请求异常: [${errorCode}] ${errorMsg} | Resp: ${respData} | URL: ${fullUrl}`);
 
             // 检查是否为证书验证错误且URL未被信任（私有地址已在上面免验证，理论上到不了这里，双保险防弹窗）
-            if (isCertificateError(error) && !isTrusted(baseUrl) && !isPrivateHostUrl(baseUrl)) {
+            if (isCertificateError(error) && !isTrusted(normalizedBaseUrl) && !isPrivateHostUrl(normalizedBaseUrl)) {
                 log.warn(`检测到证书验证错误: code: ${errorCode}, msg: ${errorMsg}, URL: ${fullUrl}`);
 
                 // 返回特殊的证书错误响应，让上层处理。
@@ -340,7 +342,7 @@ export async function request<T = any>(
                     message: errorMsg,
                     // 添加一个特殊标识表示这是证书错误
                     certificateError: true,
-                    certHost: baseUrl
+                    certHost: normalizedBaseUrl
                 } as ApiResponse<T> & { certificateError?: boolean };
             }
 

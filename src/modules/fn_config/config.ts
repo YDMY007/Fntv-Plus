@@ -50,6 +50,9 @@ export interface Config {
     account?: string;
     domain?: string;
     token?: string;
+    // [访问码] fnOS 网关「应用访问码」：磁盘上 AES 加密存储（与历史密码同套 encrypt/decrypt），
+    // 读取一律走 getAccessCode()（解密），启动时用它重建访问码会话实现免重输
+    accessCode?: string;
     useHttps?: boolean;
     loginType?: 'fnid' | 'normal';
     history?: HistoryItem[];
@@ -203,6 +206,8 @@ export interface HistoryItem {
     domain: string;
     account: string;
     password: string;
+    // [访问码] 磁盘加密存储，getHistory() 返回解密值
+    accessCode?: string;
     useHttps?: boolean;
     loginType?: 'fnid' | 'normal';
     fnId?: string;
@@ -215,6 +220,8 @@ export interface SaveConfigParams {
     account: string;
     domain: string;
     token: string;
+    // [访问码] 传入即写入（空串=清除）；不传=保留原值
+    accessCode?: string;
     useHttps?: boolean;
     loginType?: 'fnid' | 'normal';
 }
@@ -226,6 +233,8 @@ export interface AddHistoryParams {
     domain: string;
     account: string;
     password: string;
+    // [访问码] 磁盘加密存储
+    accessCode?: string;
     useHttps?: boolean;
     loginType?: 'fnid' | 'normal';
     fnId?: string;
@@ -279,6 +288,16 @@ function decrypt(encrypted: string): string {
     return decrypted;
 }
 
+// 解密（容错版）：密文缺失/损坏返回空串，不让单字段解密失败炸掉整个配置读取
+function decryptSafe(encrypted: string | undefined): string {
+    if (!encrypted) return '';
+    try {
+        return decrypt(encrypted);
+    } catch {
+        return '';
+    }
+}
+
 // 读取配置
 export function readConfig(): Config | null {
     const p = getConfigPath();
@@ -302,14 +321,25 @@ export function readConfig(): Config | null {
 }
 
 // 保存配置（账号、域名、token、HTTPS设置）
-export function saveConfig({ account, domain, token, useHttps, loginType }: SaveConfigParams): void {
+export function saveConfig({ account, domain, token, accessCode, useHttps, loginType }: SaveConfigParams): void {
     const config: Config = readConfig() || {};
     config.account = account;
     config.domain = domain;
     config.token = token;
+    // [访问码] 传入即写入（空串=清除），磁盘加密；不传=保留原值（其它 setter 走 readConfig
+    // 拿到的密文原样写回，不会泄露明文）
+    if (accessCode !== undefined) {
+        config.accessCode = accessCode ? encrypt(accessCode) : '';
+    }
     config.useHttps = useHttps || false;
     if (loginType) config.loginType = loginType;
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+// [访问码] 读取解密后的访问码（未设置/解密失败返回空串）
+export function getAccessCode(): string {
+    const config: Config = readConfig() || {};
+    return decryptSafe(config.accessCode);
 }
 
 // [lc-474] 读取已应用的热补丁版本号
@@ -370,7 +400,7 @@ export function getAppDisplayVersion(): string {
 }
 
 // 添加历史记录（域名、账号、加密密码、HTTPS设置）
-export function addHistory({ domain, account, password, useHttps, loginType, fnId }: AddHistoryParams): void {
+export function addHistory({ domain, account, password, accessCode, useHttps, loginType, fnId }: AddHistoryParams): void {
     const config: Config = readConfig() || {};
     config.history = config.history || [];
     // 移除重复项
@@ -378,7 +408,14 @@ export function addHistory({ domain, account, password, useHttps, loginType, fnI
         item => !(item.domain === domain && item.account === account)
     );
     // 添加新项
-    const entry: HistoryItem = { domain, account, password: encrypt(password), useHttps: useHttps || false };
+    const entry: HistoryItem = {
+        domain,
+        account,
+        password: encrypt(password),
+        // [访问码] 磁盘加密存储
+        accessCode: accessCode ? encrypt(accessCode) : '',
+        useHttps: useHttps || false
+    };
     if (loginType) entry.loginType = loginType;
     if (fnId) entry.fnId = fnId;
     config.history.unshift(entry);
@@ -397,6 +434,7 @@ export function getHistory(): HistoryItem[] {
         domain: item.domain,
         account: item.account,
         password: decrypt(item.password),
+        accessCode: decryptSafe(item.accessCode),
         useHttps: item.useHttps || false,
         loginType: item.loginType || undefined,
         fnId: item.fnId || undefined
@@ -1418,6 +1456,8 @@ export function setSystemPageUrl(url: string | null): void {
 Object.assign(module.exports, {
     saveConfig,
     readConfig,
+    // [访问码] 解密读取（磁盘密文，不能直接把 readConfig 的 accessCode 给渲染层）
+    getAccessCode,
     addHistory,
     getHistory,
     clearHistory,

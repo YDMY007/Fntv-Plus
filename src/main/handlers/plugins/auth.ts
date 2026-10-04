@@ -8,6 +8,7 @@ import { registerHandler } from '../core/ipcHandler';
 import * as log from '../../../modules/logger';
 import { showCertificateTrustDialog, addTrustedHost } from '../../../modules/cert_trust';
 import { isFnId, handleFnIdLogin } from './fnid_login';
+import { establishAccessCodeSession, AccessCodeVerificationError } from '../../common/accessCodeSession';
 
 /**
  * 用户认证插件
@@ -18,6 +19,8 @@ interface LoginData {
     domain: string;
     username: string;
     password: string;
+    // [访问码] fnOS 网关「应用访问码」，可选；非空时登录前先建立网关会话
+    accessCode?: string;
     useHttps?: boolean;
     rememberPassword?: boolean;
 }
@@ -32,7 +35,9 @@ function handleGetConfig(event: IpcMainEvent): void {
     try {
         const config = fnConfig.readConfig() || {};
         const history = fnConfig.getHistory() || [];
-        event.reply('config-data', { config, history });
+        // [访问码] 磁盘存的是密文，回填登录页前解密（历史记录已由 getHistory 解密）
+        const configPlain = { ...config, accessCode: fnConfig.getAccessCode() };
+        event.reply('config-data', { config: configPlain, history });
     } catch (error) {
         log.error('读取配置失败:', error);
         event.reply('config-data', { config: {}, history: [] });
@@ -63,7 +68,8 @@ function handleDeleteHistoryItem(event: IpcMainEvent, { domain, account }: Histo
 
 // 用户登录处理
 async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<void> {
-    log.info('Received loginData:', loginData);
+    // 凭证脱敏：日志里绝不出现明文密码/访问码
+    log.info('Received loginData:', { ...loginData, password: '***', accessCode: loginData.accessCode ? '***' : undefined });
 
     if (!loginData || !loginData.domain || !loginData.username || !loginData.password) {
         log.error('登录失败: 缺少必要的登录信息, loginData:', loginData);
@@ -112,8 +118,32 @@ async function handleLogin(event: IpcMainEvent, loginData: LoginData): Promise<v
         }
     }
 
-    const server = `${scheme}://${effectiveHost}`;
+    let server = `${scheme}://${effectiveHost}`;
     log.key(`登录方式 = 本地账号 (服务器地址登录) | server=${server}`);
+
+    // [访问码] 用户填了访问码 → 登录前先向 fnOS 网关 /access_code_verify 预验证并建立会话
+    // （网关授权 Cookie 落入 persist:fntv，后续主进程 API 经 lc-294 自动携带、播放链路经
+    // lc-295 搭车；跟随重定向解析出的真实 origin 回写 server，顺带修正 80 端口重定向域名）。
+    const accessCode = (loginData.accessCode || '').trim();
+    if (accessCode) {
+        try {
+            const accessSession = await establishAccessCodeSession(server, accessCode);
+            if (accessSession.baseUrl && accessSession.baseUrl !== server) {
+                log.key(`[访问码] 网关验证解析到真实源头: ${accessSession.baseUrl}`);
+                server = accessSession.baseUrl;
+            }
+        } catch (error) {
+            const isRejected = error instanceof AccessCodeVerificationError && error.reason === 'rejected';
+            log.warn('[访问码] 验证失败:', isRejected ? '访问码被拒绝' : error);
+            event.reply('login-error', {
+                title: isRejected ? '访问码错误' : '连接失败',
+                message: isRejected
+                    ? '访问码错误，请检查后重试。'
+                    : '无法连接到访问码验证服务，请检查地址、证书或网络连接。'
+            });
+            return;
+        }
+    }
 
     const fnapi0 = new fn.ApiService(server);
     let response: any = await fnapi0.login(loginData.username, loginData.password);
@@ -299,6 +329,8 @@ async function finalizeLocalLogin(event: IpcMainEvent, loginData: LoginData, ser
         account: loginData.username,
         domain: server,
         token: response.data.token,
+        // [访问码] 持久化（磁盘加密），启动时重建网关会话实现免重输；空串=清除旧值
+        accessCode: (loginData.accessCode || '').trim(),
         useHttps: loginData.useHttps
     });
 
@@ -307,6 +339,8 @@ async function finalizeLocalLogin(event: IpcMainEvent, loginData: LoginData, ser
         domain: loginData.domain,
         account: loginData.username,
         password: loginData.rememberPassword ? loginData.password : '',
+        // [访问码] 与上游一致：访问码始终随历史保存（加密），回填后一键重登
+        accessCode: (loginData.accessCode || '').trim(),
         useHttps: loginData.useHttps
     });
 
