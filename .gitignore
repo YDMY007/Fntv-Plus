@@ -112,3 +112,6 @@ third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/danmaku_source_cache.j
 
 # B站 Cookie 每日体检状态文件（运行态, 每次体检自动重写, 与 bili_cookie.txt 同目录）
 third_party/fntv-mpv/portable_config/scripts/uosc_danmaku/bili_cookie_status.json
+
+# 图标设计工位（生成脚本/预览/变体对比稿）：本地工作文件，不入库
+fpk/dev/
