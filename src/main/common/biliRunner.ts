@@ -335,9 +335,12 @@ export async function runBiliDanmaku(
         });
         return { ...pre, sources: traces };
     }
+    // [lc-1266] 失败根因用 danmuApi 的「人话版」：地址不可达（含各地址明细，如节点没运行）、
+    // 服务正常但无精确匹配、条目弹幕为空…… 直接显示在 MPV「B站弹幕配置」菜单的
+    // 「① 自建弹幕接口」一行——对标「B站 Cookie 状态」的一眼可判，不再只有笼统的「未命中」。
     traces.push({
         id: 'danmu_api', attempted: true, used: false,
-        error: '未命中（只认精确匹配；未命中即自动降级内置 B站 模糊匹配）',
+        error: danmuApi.consumeLastFailReason() || '未命中（只认精确匹配；未命中即自动降级内置 B站 模糊匹配）',
     });
 
     // [lc-1117] 网页弹幕设置可单独关掉「B站弹幕搜索」兜底（只影响网页链路；MPV 侧由 Lua 的

@@ -110,8 +110,67 @@ export function isValidBase(base: string): boolean {
     return /^https?:\/\/[a-z0-9._\-]+(:\d{1,5})?(\/[a-z0-9._\-/]*)?$/i.test(String(base || '').trim());
 }
 
-function currentBase(): string {
-    return String(fnConfig.getDanmuApiBase() || '').trim().replace(/\/+$/, '');
+// ===================== [lc-1266] 多地址按序自动切换 =====================
+// 用户网络环境会变（家里=局域网 192.168.x，学校=仅 Tailscale 100.66.x），单地址配置换个环境就
+// 全部「socket hang up」。现在支持填多条地址（弹幕设置里每行一条），请求时从「上次连通的地址」
+// 开始按序尝试：只有【传输层失败】（连接不上/被掐断/超时）才切下一个；服务端活着但回 4xx/5xx
+// 不切换——那说明地址是对的、问题在请求参数（如 TOKEN 路径写错），切换只会掩盖真实错误。
+
+/** 展示用：只留 host:port，隐藏路径里的 TOKEN 段（app.log 与面板都会显示这个）。 */
+function hostOf(base: string): string {
+    try { return new URL(base).host; } catch (_) { return '(非法地址)'; }
+}
+
+let activeBaseIdx = 0;
+/** 最近一轮 failover 各地址的传输失败明细（host:port 已脱敏，无 TOKEN），供根因文案使用。 */
+let lastFailoverErrors = '';
+let lastFailReason = '';
+
+/** 文本请求的 failover 包装：逐地址尝试，全部传输层失败时记录错误明细并返回 null。 */
+async function httpTextFailover(pathWithQuery: string, timeoutMs: number): Promise<{ body: string; host: string; ms: number } | null> {
+    const bases = fnConfig.getDanmuApiBases();
+    if (!bases.length) return null;
+    const errs: string[] = [];
+    for (let n = 0; n < bases.length; n++) {
+        const idx = (activeBaseIdx + n) % bases.length;
+        const base = bases[idx];
+        const t0 = Date.now();
+        const p = await httpGetEx(`${base}${pathWithQuery}`, timeoutMs);
+        const ms = Date.now() - t0;
+        if (p.body !== null) {
+            if (n > 0) log.info(`[danmuApi] 已切换到备用地址（第 ${idx + 1}/${bases.length} 个，${hostOf(base)}）`);
+            activeBaseIdx = idx;
+            return { body: p.body, host: hostOf(base), ms };
+        }
+        errs.push(`#${idx + 1} ${hostOf(base)} ${p.err || '连接失败'}(${ms}ms)`);
+    }
+    lastFailoverErrors = errs.join('；');
+    return null;
+}
+
+/** JSON 请求的 failover 包装：在 httpTextFailover 之上做 JSON 解析（解析失败=该地址响应异常，试下一个）。 */
+async function getJsonFailover(pathWithQuery: string, timeoutMs: number): Promise<{ j: any; host: string; ms: number } | null> {
+    const r = await httpTextFailover(pathWithQuery, timeoutMs);
+    if (!r) {
+        lastFailReason = `服务地址全部不可达 —— ${lastFailoverErrors}（请检查 danmu_api 服务、网络/节点是否在线；可在 弹幕设置→自建弹幕接口 逐个「测试连接」）`;
+        return null;
+    }
+    try {
+        return { j: JSON.parse(r.body), host: r.host, ms: r.ms };
+    } catch (e: any) {
+        log.warn(`[danmuApi] JSON 解析失败: ${e?.message || e} | ${safeUrl(r.host + pathWithQuery)}`);
+        lastFailReason = `服务有响应但返回的不是合法 JSON（${r.host}，HTTP 服务异常？）`;
+        return null;
+    }
+}
+
+/** 取走最近一次 autoFetch 失败的「人话根因」（读后即清）：biliRunner 把它放进弹幕来源详情 trace，
+ *  MPV「B站弹幕配置」菜单的「① 自建弹幕接口」一行就能显示「地址不可达(socket hang up)」这类真原因，
+ *  而不是笼统的「未命中」——对标「B站 Cookie 状态」那种一眼可判的状态展示。 */
+export function consumeLastFailReason(): string {
+    const r = lastFailReason;
+    lastFailReason = '';
+    return r;
 }
 
 // ===================== HTTP =====================
@@ -469,16 +528,17 @@ async function searchAnimes(title: string, season: number, epTitle = ''): Promis
 }
 
 async function searchWithKeyword(keyword: string, season: number, epTitle = '', timeoutMs = 12000, forceFresh = false): Promise<AnimeHit[]> {
-    const base = currentBase();
     const key = normalizeTitle(keyword);
     let animes: any[] | null = null;
     const cached = searchCache.get(key);
     if (!forceFresh && cached && Date.now() - cached.at < SEARCH_TTL) {
         animes = cached.val;
     } else {
-        const j = await getJson(`${base}/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`, timeoutMs);
+        // [lc-1266] 传输层失败时 getJsonFailover 已写「人话根因」（各地址不可达明细），这里只记服务端业务错误
+        const res = await getJsonFailover(`/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`, timeoutMs);
+        const j = res ? res.j : null;
         if (!j || j.success === false || !Array.isArray(j.animes)) {
-            log.warn(`[danmuApi] 搜索无结果或服务异常 | keyword=${keyword} err=${(j && j.errorMessage) || '无响应'}`);
+            if (j) log.warn(`[danmuApi] 搜索无结果或服务异常 | keyword=${keyword} err=${(j && j.errorMessage) || '无响应'}`);
             return [];
         }
         const list: any[] = j.animes;
@@ -514,11 +574,11 @@ async function searchWithKeyword(keyword: string, season: number, epTitle = '', 
 
 /** 取分集列表（带缓存），失败返回空数组。 */
 async function episodesOf(animeId: number): Promise<any[]> {
-    const base = currentBase();
     const key = String(animeId);
     const cached = bangumiCache.get(key);
     if (cached && Date.now() - cached.at < SEARCH_TTL) return cached.val;
-    const j = await getJson(`${base}/api/v2/bangumi/${animeId}`, 12000);
+    const res = await getJsonFailover(`/api/v2/bangumi/${animeId}`, 12000);
+    const j = res ? res.j : null;
     const eps = j && j.bangumi && Array.isArray(j.bangumi.episodes) ? j.bangumi.episodes : [];
     bangumiCache.set(key, { at: Date.now(), val: eps });
     return eps;
@@ -614,9 +674,12 @@ async function pickVerifiedEpisode(hit: AnimeHit, ep: number, epTitle: string): 
 
 /** 拉弹幕 XML 并落盘（out 由调用方给定，路径安全校验在调用方）；0 条判未命中。 */
 async function fetchXml(episodeId: number, out: string): Promise<number> {
-    const base = currentBase();
-    const body = await httpGet(`${base}/api/v2/comment/${episodeId}?format=xml`, 30000);
-    if (!body) return 0;
+    const r = await httpTextFailover(`/api/v2/comment/${episodeId}?format=xml`, 30000);
+    if (!r) {
+        lastFailReason = `弹幕库拉取失败，服务地址全部不可达 —— ${lastFailoverErrors}`;
+        return 0;
+    }
+    const body = r.body;
     const count = (body.match(/<d\s/g) || []).length;
     if (count === 0) {
         log.warn(`[danmuApi] 弹幕 0 条 | episodeId=${episodeId}`);
@@ -728,6 +791,7 @@ function rememberSeries(key: string, hit: AnimeHit): void {
 
 export async function autoFetch(title: string, ep: number, out: string, season = 0, epTitle = '', seriesKey = '', altTitle = ''): Promise<BiliDanmakuResult | null> {
     if (!isActive()) return null;
+    lastFailReason = '';
     try {
         // [lc-1220] MPV 链路只传整串 title（「番名 - S2E27: 集标题」，Lua 侧 clean_bili_title
         // 保留真实副标题），调用方没给 epTitle 时从尾段提取；网页链路已显式传 item.title。
@@ -787,6 +851,10 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             }
         }
         if (!hits.length) {
+            // [lc-1266] 给弹幕面板的人话根因：地址不可达时 getJsonFailover 已写过，这里只补「服务正常但没匹配上」
+            if (!lastFailReason) {
+                lastFailReason = '服务正常，但搜索无精确匹配条目（自建源只认「主名+季号」完全一致；手动搜索能看到的近名条目会被刻意拒收，防挂错片）';
+            }
             log.info(`[danmuApi] 未命中（无精确匹配条目）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep} season=${season}${altTitle ? ' alt=' + altTitle : ''}`);
             return null;
         }
@@ -805,9 +873,13 @@ export async function autoFetch(title: string, ep: number, out: string, season =
                 return okResult(count, title, hit.animeTitle, 1);
             }
         }
+        if (!lastFailReason) {
+            lastFailReason = `已精确匹配 ${Math.min(hits.length, MAX_TRIES)} 个条目，但都取不到有效弹幕（服务端这些条目的弹幕库为空）`;
+        }
         log.info(`[danmuApi] 未命中（${Math.min(hits.length, MAX_TRIES)} 个精确匹配条目均无有效弹幕）→ 降级内置B站(模糊匹配) | title=${title} ep=${ep}`);
         return null;
     } catch (e: any) {
+        lastFailReason = `自建源请求异常：${e?.message || e}`;
         log.warn(`[danmuApi] autoFetch 异常 → 降级内置B站: ${e?.message || e}`);
         return null;
     }
@@ -862,7 +934,8 @@ export async function candidates(title: string, ep: number, season = 0): Promise
 /** [lc-1259] 由 animeId 拉条目详情构造 AnimeHit（手动选定播种记忆用）。 */
 async function hitFromAnimeId(animeId: number): Promise<AnimeHit | null> {
     try {
-        const j = await getJson(`${currentBase()}/api/v2/bangumi/${animeId}`, 12000);
+        const res = await getJsonFailover(`/api/v2/bangumi/${animeId}`, 12000);
+        const j = res ? res.j : null;
         const b = j && j.bangumi;
         if (!b || !b.animeId) return null;
         return {

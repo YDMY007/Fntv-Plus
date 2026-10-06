@@ -2270,7 +2270,7 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     // 状态行常显：开关就在卡片首屏，回显（含「已开启但未填地址」）不能再藏进折叠区
     const dmApiStatus = document.createElement('div');
-    dmApiStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;';
+    dmApiStatus.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;white-space:pre-line;';
     dmApiBody.appendChild(dmApiStatus);
 
     // [v1.11.1] 弹幕下限（原「自建源弹幕下限」）：源链改为 自建源→B站→弹弹play 后，
@@ -2302,15 +2302,16 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
 
     const dmApiHint = document.createElement('div');
     dmApiHint.style.cssText = 'font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;';
-    dmApiHint.textContent = t('填入 NAS 上部署的 danmu_api 服务地址（聚合哔哩/爱奇艺/优酷/腾讯等多平台弹幕，密度通常高于单源 B站）。开启后作为弹幕优选源，未命中或未启用时自动降级到内置 B站 弹幕获取。下次播放时生效。');
+    dmApiHint.textContent = t('填入 NAS 上部署的 danmu_api 服务地址（聚合哔哩/爱奇艺/优酷/腾讯等多平台弹幕，密度通常高于单源 B站）。可每行一条填多个地址（如家里局域网一条 + 学校 Tailscale 一条），按顺序自动选用：当前地址连不上（如节点没运行）会自动切下一个。开启后作为弹幕优选源，未命中或未启用时自动降级到内置 B站 弹幕获取。下次播放时生效。');
     dmApiFoldBody.appendChild(dmApiHint);
 
-    const dmApiInput = document.createElement('input');
-    dmApiInput.type = 'text';
-    dmApiInput.placeholder = 'http://192.168.1.10:9321';
-    dmApiInput.style.cssText = 'width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);'
+    // [lc-1266] 单行 input → 多行 textarea：每行一条地址，按序自动切换（不同网络环境各一条）
+    const dmApiInput = document.createElement('textarea');
+    dmApiInput.rows = 2;
+    dmApiInput.placeholder = 'http://192.168.31.170:9321/你的TOKEN\nhttp://100.66.1.2:9321/你的TOKEN';
+    dmApiInput.style.cssText = 'width:100%;height:52px;font-size:11px;color:var(--fnos-ui-text);'
       + 'background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;'
-      + 'padding:6px 8px;box-sizing:border-box;margin:2px 0 6px;';
+      + 'padding:6px 8px;box-sizing:border-box;margin:2px 0 6px;resize:vertical;line-height:1.5;';
     dmApiFoldBody.appendChild(dmApiInput);
 
     const dmApiBtns = document.createElement('div');
@@ -2321,8 +2322,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     dmApiFoldBody.appendChild(dmApiBtns);
 
     const dmApiSave = (): void => {
-      const base = dmApiInput.value.trim().replace(/\/+$/, '');
-      ipcRenderer.invoke('settings:set-danmu-api', { enabled: swDanmuApi.checked, base })
+      // [lc-1266] 每行一条地址；主进程去重/限 4 条，danmuApiBase 存第一条
+      const bases = dmApiInput.value.split(/[\n;；]/).map((s: string) => s.trim()).filter(Boolean);
+      ipcRenderer.invoke('settings:set-danmu-api', { enabled: swDanmuApi.checked, base: bases[0] || '', bases })
         .then((r: any) => {
           if (r && r.ok === false) {
             dmApiStatus.textContent = String(r.error || t('保存失败'));
@@ -2386,7 +2388,8 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
       e.stopPropagation();
       dmApiStatus.textContent = t('正在测试连接…');
       dmApiStatus.style.color = 'var(--fnos-ui-sub)';
-      ipcRenderer.invoke('settings:test-danmu-api', dmApiInput.value.trim())
+      // [lc-1266] 原样把多行文本传给主进程：逐地址测试，每条独立给 ✅/❌ 结论
+      ipcRenderer.invoke('settings:test-danmu-api', dmApiInput.value)
         .then((r: any) => {
           dmApiStatus.textContent = String((r && r.message) || (r && r.ok ? t('连接正常') : t('连接失败')));
           dmApiStatus.style.color = (r && r.ok) ? 'var(--fnos-ui-sub)' : 'var(--fnos-ui-warn)';

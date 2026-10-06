@@ -149,6 +149,9 @@ export interface Config {
     // 未启用、或该源未命中（搜不到 / 相关性不足 / 0 条弹幕）时自动降级到内置 B站 弹幕链路。
     danmuApiEnabled?: boolean;
     danmuApiBase?: string;
+    // [lc-1266] 多地址按序自动切换：家里局域网 / 学校 Tailscale 等不同网络环境的入口各填一条，
+    // 哪个连通用哪个（danmuApiBase 恒等于第一条，兼容旧读取方与 uosc conf 同步）。
+    danmuApiBases?: string[];
     // 详情页「选集/演职人员/剧集卡片」玻璃背景框开关（默认关闭=保留背景框，与原版一致）
     detailBoxless?: boolean;
     // [lc-1014] 硬件加速开关（默认开启=true）：关闭时 app.disableHardwareAcceleration() 走软件合成，
@@ -1034,10 +1037,27 @@ export function getDanmuApiBase(): string {
     return typeof config.danmuApiBase === 'string' ? config.danmuApiBase : '';
 }
 
+// [lc-1266] 自建弹幕接口多地址列表（去空白/去尾斜杠/去重）：空列表时回落到单地址字段
+export function getDanmuApiBases(): string[] {
+    const config: Config = readConfig() || {};
+    const list = Array.isArray(config.danmuApiBases)
+        ? config.danmuApiBases.map((b) => String(b || '').trim().replace(/\/+$/, '')).filter(Boolean)
+        : [];
+    if (list.length) return [...new Set(list)];
+    const single = getDanmuApiBase();
+    return single ? [single] : [];
+}
+
 // [lc-1101] 设置自建弹幕接口开关与地址（地址去尾斜杠，避免拼出 `//api/v2/...` 双斜杠）
-export function setDanmuApi(enabled: boolean, base: string): void {
+// [lc-1266] bases：多地址列表（≤4 条）；danmuApiBase 恒存第一条，保持旧字段/旧读取方可用
+export function setDanmuApi(enabled: boolean, base: string, bases?: string[]): void {
     const config: Config = readConfig() || {};
     config.danmuApiEnabled = !!enabled;
+    const list = Array.isArray(bases)
+        ? bases.map((b) => String(b || '').trim().replace(/\/+$/, '')).filter(Boolean)
+        : [];
+    config.danmuApiBases = [...new Set(list)].slice(0, 4);
+    if (!config.danmuApiBases.length) delete config.danmuApiBases;
     config.danmuApiBase = String(base || '').trim().replace(/\/+$/, '');
     fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
 }

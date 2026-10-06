@@ -55,6 +55,7 @@ async function handleGetSettings(): Promise<any> {
         //   但必须明文回填供用户编辑（本机 IPC，不出网）；[lc-1104] 它不得进 conf / 日志 / 打包产物。
         danmuApiEnabled: fnConfig.getDanmuApiEnabled(),
         danmuApiBase: fnConfig.getDanmuApiBase(),
+        danmuApiBases: fnConfig.getDanmuApiBases(),
         detailBoxless: fnConfig.getDetailBoxless(),
         // [lc-1014] 硬件加速（重启生效）与性能模式（即时生效）
         hwAccelEnabled: fnConfig.getHwAccelEnabled(),
@@ -453,24 +454,46 @@ async function handleSetDandanplayCredentials(_event: any, payload: { appId?: st
 // [lc-1101] 设置「自建弹幕接口（danmu_api）」开关与地址：写 config + 同步 script-opts/uosc_danmaku.conf。
 // 开启即成为弹幕优选源（biliRunner 三个入口先问它）；未命中自动降级内置 B站 弹幕链路。
 // 地址非法时照样保存（用户可能正在配），但把校验结论回给面板，避免「开了却没反应」的哑失败。
-async function handleSetDanmuApi(_event: any, payload: { enabled?: boolean; base?: string }): Promise<any> {
+// [lc-1266] bases：多地址（家庭局域网 / 学校 Tailscale 等各一条，≤4），按序自动切换；base 兼容旧单行字段。
+async function handleSetDanmuApi(_event: any, payload: { enabled?: boolean; base?: string; bases?: string[] }): Promise<any> {
     const enabled = !!(payload && payload.enabled);
-    const base = String((payload && payload.base) || '').trim().replace(/\/+$/, '');
-    fnConfig.setDanmuApi(enabled, base);
+    const rawList: string[] = (payload && Array.isArray(payload.bases)) ? payload.bases.map((b: any) => String(b || '')) : [];
+    if (payload && typeof payload.base === 'string' && payload.base.trim()) rawList.unshift(payload.base);
+    const bases: string[] = [];
+    for (const raw of rawList) {
+        const v = String(raw || '').trim().replace(/\/+$/, '');
+        if (v && !bases.includes(v)) bases.push(v);
+        if (bases.length >= 4) break;
+    }
+    const base = bases[0] || '';
+    fnConfig.setDanmuApi(enabled, base, bases);
     writeDanmuApiConf(enabled, base);
     // [lc-1104] 不打 base 值：danmu_api 的 TOKEN 是地址的路径段，而 app.log 是用户会整段转贴的东西
-    log.info('自建弹幕接口 →', `enabled=${enabled} 地址已配置=${!!base}`);
-    if (enabled && !danmuApi.isValidBase(base)) {
-        return { ok: false, error: '地址格式应为 http://IP:端口（如 http://192.168.1.10:9321）' };
+    log.info('自建弹幕接口 →', `enabled=${enabled} 地址数=${bases.length}`);
+    if (enabled && !bases.length) {
+        return { ok: false, error: '请填写服务地址（http://IP:端口，TOKEN 作路径段；可每行一条填多个）' };
+    }
+    if (enabled && bases.some((b) => !danmuApi.isValidBase(b))) {
+        return { ok: false, error: '地址格式应为 http://IP:端口（如 http://192.168.1.10:9321），每行一条' };
     }
     return { ok: true };
 }
 
 // [lc-1101] 测试自建弹幕接口连通性（用面板当前输入的地址；留空则用已保存的地址）
+// [lc-1266] 支持多行地址逐个测（≤4）：每个地址独立给 ✅/❌ 与耗时/错误，「哪个通哪个不通」一眼可见
 async function handleTestDanmuApi(_event: any, base?: string): Promise<{ ok: boolean; message: string }> {
-    const r = await danmuApi.testConnection(typeof base === 'string' ? base.trim() : '');
-    log.info('自建弹幕接口测试 →', `${r.ok ? '成功' : '失败'}: ${r.message}`);
-    return r;
+    const list = String(base || '').split(/[\n;；]/).map((s) => s.trim()).filter(Boolean).slice(0, 4);
+    if (!list.length) list.push(...fnConfig.getDanmuApiBases().slice(0, 4));
+    if (!list.length) return { ok: false, message: '请先填写服务地址' };
+    const lines: string[] = [];
+    let anyOk = false;
+    for (let i = 0; i < list.length; i++) {
+        const r = await danmuApi.testConnection(list[i]);
+        if (r.ok) anyOk = true;
+        lines.push(`${r.ok ? '✅' : '❌'} 地址${i + 1}：${r.message}`);
+    }
+    log.info('自建弹幕接口测试 →', `${anyOk ? '存在可达地址' : '全部不可达'}（${list.length} 个，明细见面板）`);
+    return { ok: anyOk, message: lines.join('\n') };
 }
 
 // [lc-1115] 分层诊断：把一句「连不上」拆成 地址形态 / 本机路由 / DNS / TCP / TLS / 服务应答 / 三跳 / 抖动 / 代理 逐层归因。
