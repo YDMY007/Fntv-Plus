@@ -1166,4 +1166,6 @@ mp.register_script_message("bili_manual_pick", function(bvid, title, ep_str, cid
     local bvs = tostring(bvid or "")
     local id_label = (bvs:sub(1, 6) == "dmapi:") and ("自建源 ID:%s"):format(bvs:sub(7)) or ("BV:%s"):format(bvs)
     show_message(("已使用选定视频弹幕：%s（%s，%d 条）"):format(title, id_label, parsed.danmaku_count or 0), 4)
+    -- [lc-1267] 弹幕配置菜单若开着 → 原地刷新匹配结果（update-menu 对未打开的菜单无害）
+    if refresh_bili_config_menu then pcall(refresh_bili_config_menu) end
 end)

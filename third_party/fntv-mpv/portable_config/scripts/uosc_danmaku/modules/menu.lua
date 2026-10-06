@@ -330,18 +330,15 @@ end
 
 -- ===================== B站弹幕配置面板 =====================
 -- 显示当前解析结果、B站关联状态（BV号/标题/弹幕数/是否成功），而非技术参数。
-function open_bili_config_menu()
-    if not uosc_available then
-        show_message("B站弹幕配置需在 uosc 控制栏下使用", 3)
-        return
-    end
-    local items = {}
-    table.insert(items, {
-        title = "B站弹幕配置",
-        bold = true, italic = true, keep_open = true, selectable = false,
-    })
+-- ===================== 弹幕配置菜单（[lc-1267] hub-and-spoke 重排）=====================
+-- 旧版：20+ 行不可点状态条目与 4 个操作平铺一屏（「──文本──」假分隔线 + 缩进信息行），越长越难扫。
+-- 重排为 uosc 官方/上游（Tony15246、dyphire）推荐形态：
+--   动作上主菜单（≤6 条）｜状态全部进条目 hint（标题左·状态右）｜详情收进「弹幕源详情」子菜单｜
+--   解析信息降为菜单脚注｜假分隔线换 uosc 原生 separator。
+-- [lc-1267] 自刷新：搜索/选定等操作完成后经 update-menu 原地刷新（菜单未打开时 uosc 忽略，无害）。
 
-    -- 当前文件名解析出的番名/集数（即 B站 默认会搜什么）
+local function _bili_parse_state()
+    -- 当前文件名/媒体标题解析出的番名/集数（口径与旧版一致：弹弹play 干净标题优先）
     local raw_filename = mp.get_property("filename") or ""
     local path = mp.get_property("path") or ""
     local parse_target = raw_filename
@@ -526,48 +523,80 @@ function open_bili_config_menu()
                 break
             end
         end
-        if has_bili_source then
-            table.insert(items, { title = "⏳ B站弹幕：已加载（旧版无元数据）", keep_open = true, selectable = false })
-        else
-            table.insert(items, { title = "⏳ B站弹幕：尚未搜索", keep_open = true, selectable = false })
-            table.insert(items, { title = "  点击下方「立即搜索」尝试自动匹配", keep_open = true, selectable = false })
+        result_hint = has_bili_source and "已加载（旧版无元数据）" or "尚未搜索"
+        if not has_bili_source then
+            table.insert(result_items, { title = "点击「用当前解析立即搜索」尝试自动匹配", selectable = false })
         end
     end
+    props.hint = result_hint
 
-    -- 操作项
-    table.insert(items, {
-        title = "▶ 手动搜索 B站弹幕",
-        value = { "script-message-to", mp.get_script_name(), "open_bili_manual_search" },
-        keep_open = false, selectable = true,
-    })
-    table.insert(items, {
-        title = "▶ 用当前解析立即搜索 B站弹幕",
-        value = { "script-message-to", mp.get_script_name(), "bili_search_now" },
-        keep_open = false, selectable = true,
-    })
-    table.insert(items, {
-        title = "▶ 查看 bili_alias.txt 番名映射",
-        value = { "script-message-to", mp.get_script_name(), "bili_show_alias" },
-        keep_open = false, selectable = true,
-    })
-    -- [lc-1170] 弹幕源延迟设置收编进本菜单（原底栏独立按钮已删）：
-    -- 延迟是「每个弹幕源」的属性（弹弹play/B站/自建源各自可调），与本面板同属弹幕来源域。
-    -- 处理器在 main.lua 的 register_script_message("open_source_delay_menu") —— 与总菜单同款消息路由。
-    table.insert(items, {
-        title = "▶ 弹幕源延迟设置",
-        value = { "script-message-to", mp.get_script_name(), "open_source_delay_menu" },
-        keep_open = false, selectable = true,
-    })
+    -- —— 子菜单：弹幕源详情 ——
+    -- [lc-1288] B站 Cookie 体检状态（主进程每日自动检查一次写入 bili_cookie_status.json）
+    local cookie_line = "尚未检查，应用每天自动体检一次"
+    do
+        local cookie_file = io.open(utils.join_path(mp.get_script_directory(), "bili_cookie_status.json"), "r")
+        if cookie_file then
+            local raw = cookie_file:read("*a")
+            cookie_file:close()
+            local ok_json, j = pcall(utils.parse_json, raw or "")
+            if ok_json and type(j) == "table" and j.status then
+                local when = tostring(j.checked_at or ""):gsub("T", " "):gsub("%..*", ""):gsub("%+[0-9:]+$", "")
+                if j.status == "valid" then
+                    cookie_line = "✅ 已登录" .. (j.uname and ("（" .. j.uname .. "）") or "") .. " · 检查于 " .. when
+                elseif j.status == "expired" then
+                    cookie_line = "❌ 已失效（重新复制 SESSDATA 到脚本目录 bili_cookie.txt） · " .. when
+                elseif j.status == "missing" then
+                    cookie_line = "⚠️ 未配置（匿名，弹幕数量受限） · " .. when
+                else
+                    cookie_line = "⚠️ 校验失败（网络原因，稍后自动重试） · " .. when
+                end
+            end
+        end
+    end
+    local dd_txt = (DANMAKU.anime and DANMAKU.anime ~= "")
+        and ("✅ 已识别：《" .. tostring(DANMAKU.anime) .. "》" .. ((DANMAKU.episode and DANMAKU.episode ~= "") and (" · " .. tostring(DANMAKU.episode)) or ""))
+        or "➖ 未识别到条目（按文件名解析番名与集数）"
 
-    local menu_props = {
-        type = "menu_bili_config",
-        title = "B站弹幕配置",
-        search_style = "disabled",
-        items = items,
+    local detail_items = {
+        { title = "① 自建弹幕接口（danmu_api）", hint = note_api, selectable = false },
+        { title = "② 内置 B站", hint = note_bili, selectable = false },
+        { title = "③ 弹弹play 弹幕库（兜底）", hint = note_dd, selectable = false },
+        { separator = true },
+        { title = "B站 Cookie 状态", hint = cookie_line, selectable = false },
+        { title = "弹弹play 剧集识别", hint = dd_txt, selectable = false },
+        { separator = true },
+        { title = "实际匹配结果", hint = result_hint, selectable = false, items = result_items },
     }
-    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(menu_props))
+
+    props.items = {
+        { title = "手动搜索 B站 弹幕", hint = "输入番名（可带季/集）手动换源", value = { "script-message-to", mp.get_script_name(), "open_bili_manual_search" }, keep_open = false, selectable = true },
+        { title = "用当前解析立即搜索", hint = "按脚注中的番名/集数重跑匹配，完成后本菜单原地刷新", value = { "script-message-to", mp.get_script_name(), "bili_search_now" }, keep_open = true, selectable = true },
+        { separator = true },
+        { title = "弹幕源详情", hint = ("①%s ②%s ③%s"):format(mark_api, mark_bili, mark_dd), items = detail_items },
+        { title = "查看 bili_alias 番名映射", hint = "番名 → B站搜索名 的映射表", value = { "script-message-to", mp.get_script_name(), "bili_show_alias" }, keep_open = false, selectable = true },
+        -- [lc-1170] 延迟是「每个弹幕源」的属性，与本面板同属弹幕来源域（处理器在 main.lua 路由）
+        { title = "弹幕源延迟设置", value = { "script-message-to", mp.get_script_name(), "open_source_delay_menu" }, keep_open = false, selectable = true },
+    }
+    return props
 end
 
+-- [lc-1267] 菜单开着时原地刷新：update-menu 按 type 匹配已打开菜单，未打开时 uosc 忽略（无害）。
+-- 由 extra.lua（自动补源完成/失败）与 main.lua（手动选定完成）在状态变更后调用。
+function refresh_bili_config_menu()
+    if not uosc_available then return end
+    local ok, props = pcall(build_bili_config_menu_props)
+    if ok and type(props) == "table" then
+        mp.commandv("script-message-to", "uosc", "update-menu", utils.format_json(props))
+    end
+end
+
+function open_bili_config_menu()
+    if not uosc_available then
+        show_message("弹幕配置菜单需在 uosc 控制栏下使用", 3)
+        return
+    end
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(build_bili_config_menu_props()))
+end
 -- ===================== B站弹幕手动搜索 =====================
 -- 手动输入番名（可尾随集数，如「番名 3」），直连 B站 搜索并叠加弹幕。
 bili_manual_title_cache = nil
@@ -827,7 +856,9 @@ function open_bili_candidates_menu(title, ep, season)
         search_style = "disabled",
         items = new_items,
     }
-    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
+    -- [lc-1267] 加载占位 → 结果用 update-menu 原地替换（不重建菜单、不闪、保留滚动位置；菜单已被
+    -- 用户关掉时 uosc 忽略，不再像 open-menu 那样把已关闭的菜单「复活」）
+    mp.commandv("script-message-to", "uosc", "update-menu", utils.format_json(props))
 end
 
 -- [lc-1195] 合集候选 → 分P 明细菜单：逐分P 列出（Pn 标题），选择后以该分P 的 cid 精确拉取弹幕；
@@ -866,26 +897,26 @@ function open_bili_pages_menu(bvid, title, ep, cand_title)
         res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "30", api }, capture_stdout = true, capture_stderr = true })
     end
     if not res then
-        open_bili_candidates_error("请求失败（shim 未启动？）")
+        open_bili_candidates_error("请求失败（shim 未启动？）", "menu_bili_pages")
         return
     end
     local body = (res.stdout or ""):gsub("\\r?\\n$", "")
     if body:sub(1, 4) == "ERR:" then
-        open_bili_candidates_error(body:sub(5))
+        open_bili_candidates_error(body:sub(5), "menu_bili_pages")
         return
     end
     local ok_parse, parsed = pcall(utils.parse_json, body)
     if not ok_parse or type(parsed) ~= "table" then
-        open_bili_candidates_error("响应解析失败")
+        open_bili_candidates_error("响应解析失败", "menu_bili_pages")
         return
     end
     if not parsed.ok then
-        open_bili_candidates_error(parsed.error or "未知错误")
+        open_bili_candidates_error(parsed.error or "未知错误", "menu_bili_pages")
         return
     end
     local pages = parsed.pages or {}
     if #pages == 0 then
-        open_bili_candidates_error("该视频没有分P 列表")
+        open_bili_candidates_error("该视频没有分P 列表", "menu_bili_pages")
         return
     end
 
@@ -910,10 +941,12 @@ function open_bili_pages_menu(bvid, title, ep, cand_title)
         search_style = "disabled",
         items = new_items,
     }
-    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
+    -- [lc-1267] 原地替换加载占位（同候选菜单）
+    mp.commandv("script-message-to", "uosc", "update-menu", utils.format_json(props))
 end
 
-function open_bili_candidates_error(msg_text)
+-- [lc-1267] menu_type：错误要原地替换的菜单类型（候选=menu_bili_candidates / 分P=menu_bili_pages）
+function open_bili_candidates_error(msg_text, menu_type)
     if not uosc_available then
         show_message("候选搜索失败：" .. msg_text, 4)
         return
@@ -923,8 +956,9 @@ function open_bili_candidates_error(msg_text)
         { title = "点击下方返回重新搜索", keep_open = true, selectable = false },
         { title = "▶ 重新搜索", value = { "script-message-to", mp.get_script_name(), "open_bili_manual_search" }, keep_open = false, selectable = true },
     }
-    local props = { type = "menu_bili_candidates", title = "候选搜索失败", search_style = "disabled", items = items }
-    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json(props))
+    local props = { type = menu_type or "menu_bili_candidates", title = "候选搜索失败", search_style = "disabled", items = items }
+    -- [lc-1267] 原地替换加载占位；菜单已被关闭时忽略
+    mp.commandv("script-message-to", "uosc", "update-menu", utils.format_json(props))
 end
 
 -- 打开弹幕源添加管理菜单

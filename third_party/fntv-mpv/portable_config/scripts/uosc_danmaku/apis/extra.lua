@@ -663,6 +663,8 @@ function auto_search_extra(title, episode_num, season)
         -- [lc-1228] B站 没拿到 → 通知弹弹play 可以回退用内置凭证取弹幕库了。
         -- （若已有其他源弹幕，dd_flush_pending_comment 内部会自行跳过，不会重复拉。）
         if dd_flush_pending_comment then dd_flush_pending_comment("自建源/内置 B站 均未命中") end
+        -- [lc-1267] 弹幕配置菜单若开着 → 原地刷新失败根因（update-menu 对未打开的菜单无害）
+        if refresh_bili_config_menu then pcall(refresh_bili_config_menu) end
         return
     end
     msg.warn(("自动补源：叠加 B站弹幕（%s 第%s集）"):format(title, episode_num))
@@ -680,4 +682,6 @@ function auto_search_extra(title, episode_num, season)
         -- [lc-1228] B站/自建源 已提供弹幕 → 取消挂起的内置凭证 /comment（这就是降级省下的请求）
         dd_clear_pending_comment()
     end
+    -- [lc-1267] 弹幕配置菜单若开着 → 原地刷新状态摘要与逐源结论
+    if refresh_bili_config_menu then pcall(refresh_bili_config_menu) end
 end
