@@ -148,6 +148,113 @@ function get_animes(query)
         })
     end
 
+    -- [lc-1269] 第三段「B站候选」：一次输入三源齐出（自建源置顶 → 弹弹play 番剧库 → B站视频区）。
+    -- 先插占位行立即渲染，B站候选异步回来后 update-menu 原地替换（基建同 lc-1267）。
+    -- 手动搜索与自动链路不同：不给 season（用户输入里的 S2 由 bili_manual_parse 口径处理，
+    -- 经 candidates 接口的 ep 参数对位集数）。
+    if uosc_available then
+        local bili_ep = 0
+        local q = query or ""
+        local m_t, m_s = q:match("^(.-)%s+[Ss](%d+)%s*$")
+        local m_t2, m_e = q:match("^(.-)%s+第%s*(%d+)%s*[话集]")
+        if m_t2 and m_e then
+            bili_ep = tonumber(m_e) or 0
+        elseif m_t and m_s then
+            bili_ep = 1  -- 「番名 S2」形态：B站候选按第1话对位（季号经 title 影响搜索词）
+        end
+        local search_title = (m_t or m_t2 or q)
+        local season_num = tonumber(m_s) or 0
+        local query_for_bili = search_title
+        if season_num > 1 and bili_ep > 0 then
+            query_for_bili = search_title .. " 第" .. bili_ep .. "集"
+        end
+        table.insert(items, {
+            title = "🔍 正在搜索 B站 候选…",
+            keep_open = true, selectable = false, italic = true,
+        })
+        update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query)
+        mp.add_timeout(0.05, function()
+            local params = "title=" .. url_encode(query_for_bili) .. "&ep=" .. tostring(bili_ep)
+            if season_num > 0 then params = params .. "&season=" .. tostring(season_num) end
+            local api = "http://127.0.0.1:22347/danmaku-candidates?" .. params
+            local platform = mp.get_property("platform") or ""
+            local res
+            if platform == "windows" then
+                res = mp.command_native({
+                    name = "subprocess",
+                    args = { "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                             "[Console]::OutputEncoding=[Text.Encoding]::UTF8; try { (Invoke-WebRequest -Uri '" .. api .. "' -UseBasicParsing -TimeoutSec 60).Content } catch { Write-Output ('ERR:' + $_.Exception.Message) }" },
+                    capture_stdout = true, capture_stderr = true,
+                })
+            else
+                res = mp.command_native({ name = "subprocess", args = { "curl", "-sS", "--max-time", "60", api }, capture_stdout = true, capture_stderr = true })
+            end
+            -- 弹出占位行（无论成败）
+            for i = #items, 1, -1 do
+                if items[i].title == "🔍 正在搜索 B站 候选…" then
+                    table.remove(items, i)
+                    break
+                end
+            end
+            local bili_items = {}
+            local ok_req = res ~= nil
+            local body = ok_req and ((res.stdout or ""):gsub("\\r?\\n$", "")) or ""
+            if not ok_req or body == "" or body:sub(1, 4) == "ERR:" then ok_req = false end
+            local parsed
+            if ok_req then
+                local ok_p, p = pcall(utils.parse_json, body)
+                if ok_p and type(p) == "table" and p.ok then parsed = p else ok_req = false end
+            end
+            if parsed then
+                for _, c in ipairs(parsed.candidates or {}) do
+                    local cb = tostring(c.bvid or "")
+                    if cb ~= "" and cb:sub(1, 6) ~= "dmapi:" then
+                        local src_label = ({ bangumi = "番剧区", video = "视频区" })[c.source] or c.source or ""
+                        local tag = ""
+                        if c.is_compilation then
+                            tag = c.bad_title and " ⚠️解说/二创" or " 📁合集"
+                        end
+                        local dmTag = ""
+                        local dmWarn = ""
+                        if c.danmaku_count ~= nil then
+                            if (c.danmaku_count or 0) > 0 then
+                                dmTag = (" 💬%d"):format(c.danmaku_count)
+                            else
+                                dmTag = " 💬0"
+                                dmWarn = " ⚠️无人发弹幕"
+                            end
+                        end
+                        bili_items[#bili_items + 1] = {
+                            title = tostring(c.title or ""),
+                            hint = (src_label .. tag .. dmTag .. " · " .. cb .. dmWarn),
+                            value = (c.is_compilation and cb ~= "")
+                                and { "script-message-to", mp.get_script_name(), "bili_open_pages", cb, query_for_bili, tostring(bili_ep), tostring(c.title or "") }
+                                or { "script-message-to", mp.get_script_name(), "bili_manual_pick", cb, query_for_bili, tostring(bili_ep) },
+                        }
+                    end
+                end
+            end
+            if #bili_items > 0 then
+                table.insert(items, { title = "—— B站 候选（UP主搬运/官方）——", italic = true, keep_open = true, selectable = false })
+                for _, it in ipairs(bili_items) do table.insert(items, it) end
+            else
+                table.insert(items, { title = "（B站 候选无结果或查询失败）", italic = true, keep_open = true, selectable = false })
+            end
+            -- 复用候选菜单同款原地替换：本菜单 type=menu_danmaku，uosc update-menu 按 type 命中
+            mp.commandv("script-message-to", "uosc", "update-menu", utils.format_json({
+                type = menu_type,
+                title = menu_title,
+                search_style = "palette",
+                search_debounce = "submit",
+                search_suggestion = parse_title(),
+                on_search = { "script-message-to", mp.get_script_name(), "search-anime-event" },
+                footnote = footnote,
+                items = items,
+            }))
+        end)
+        return
+    end
+
     if uosc_available then
         update_menu_uosc(menu_type, menu_title, items, footnote, menu_cmd, query)
     elseif input_loaded then
@@ -301,7 +408,7 @@ function open_input_menu_uosc()
     end
 
     items[#items + 1] = {
-        hint = "  追加|ds或|dy或|dm可搜索电视剧|电影|国漫",
+        hint = "  一次输入三源齐出：自建源(置顶) + 弹弹play + B站候选；追加|ds或|dy或|dm可搜电视剧|电影|国漫",
         keep_open = true,
         selectable = false,
     }
@@ -1492,17 +1599,9 @@ mp.commandv(
     })
 )
 
-mp.commandv(
-    "script-message-to",
-    "uosc",
-    "set-button",
-    "bili_search",
-    utils.format_json({
-        icon = "search",
-        tooltip = "手动搜索B站弹幕",
-        command = "script-message open_bili_manual_search",
-    })
-)
+-- [lc-1269] 「手动搜索B站弹幕」底栏按钮已移除（uosc.conf controls 同步去掉 button:bili_search）：
+-- 与「弹幕搜索」按钮图标/交互重复。B站候选已并入「弹幕搜索」结果菜单（三源同出：自建源置顶→
+-- 弹弹play 番剧库→B站候选）；open_bili_manual_search 入口保留（总菜单/键盘绑定仍可直达）。
 
 -- [lc-216] 弹幕开关改为 command 按钮(经 toggle_danmaku 处理), 不再依赖 uosc `set show_danmaku` 用户数据桥接。
 -- 该桥接在部分 mpv 版本触发内部 tonumber 崩溃, 使整个 uosc_danmaku 控制失效(见 lc-201)。
