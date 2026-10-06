@@ -354,8 +354,10 @@ async function search_bangumi(title, ep_num, season_num) {
     }
     // 季数过滤启用时(season_num>0)，优先把"命中目标季"的候选排前面，
     // 避免被弹幕更多的其它季挤到 run 的 CAP 之外（run 最多取前 CAP 个候选拉取）。
+    // [lc-1265] 修正比较器方向：旧写法 (y命中?0:1)-(x命中?0:1) 实际把命中季排到了【最后】
+    // （石纪元S2 实测：第二季被压到第 6 位，三/四季占满前排 → 错挂第三季）。
     cands.sort((x, y) =>
-        ((isSeasonHit(y[3], season_num) ? 0 : 1) - (isSeasonHit(x[3], season_num) ? 0 : 1)) ||
+        ((isSeasonHit(x[3], season_num) ? 0 : 1) - (isSeasonHit(y[3], season_num) ? 0 : 1)) ||
         (y[0] - x[0]) ||
         (parse_count(y[2].video_review || 0) - parse_count(x[2].video_review || 0)));
     log(`[番剧区] 命中候选 ${cands.length} 个, ep_num=${ep_num} season_num=${season_num || 0}`);
@@ -388,7 +390,7 @@ async function search_bangumi(title, ep_num, season_num) {
             });
             for (const [sim, t, anime, season, ep_id, cid] of resolved) {
                 if (!cid) continue;
-                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim, season_match: isSeasonHit(season, season_num) };
+                const info = { source: 'bangumi', season_id: anime.season_id, epid: ep_id, bvid: null, sim: sim, season_match: isSeasonHit(season, season_num), cand_season: season };
                 log(`[番剧区] sim=${sim.toFixed(2)}(阈值${thr}) 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) ep序号=${ep_id} cid=${cid}`);
                 results.push([cid, t, info]);
             }
@@ -598,12 +600,21 @@ async function _wbi_pgc_search(title, ep_num, season_num, search_type, label, so
         const season_match = isSeasonHit(season, season_num);
         cands.push({ season_id, t, sim, season, season_match });
     }
-    cands.sort((x, y) => ((y.season_match ? 0 : 1) - (x.season_match ? 0 : 1)) || (y.sim - x.sim));
+    // [lc-1265] 修正比较器方向（同 search_bangumi：旧写法把季匹配候选排到最后）。
+    cands.sort((x, y) => ((x.season_match ? 0 : 1) - (y.season_match ? 0 : 1)) || (y.sim - x.sim));
     log(`[${label}WBI] 命中候选 ${cands.length} 个`);
+    for (let i = 0; i < Math.min(cands.length, 8); i++) {
+        const c = cands[i];
+        log(`[${label}WBI]   候选[${i}] sim=${c.sim.toFixed(2)} season=${c.season}(命中=${c.season_match}) ${JSON.stringify(c.t)}`);
+    }
     const results = [];
     const seen = new Set();
+    // [lc-1265] 逐个解析分集取 cid，但不再到 3 个就硬停：请求了季数(season_num>0)时，必须
+    //   解析出至少一个「季匹配」候选才收手（石纪元S2 实测：搜「石纪元」相关度把三/四季排前，
+    //   第二季在 top-3 之外被截断 → 错挂第三季）。找不到季匹配时最多解析 6 个兜底。
     for (const c of cands) {
         if (c.sim < SIM_LOW) continue;
+        if (results.length >= 3 && (results.some((r) => r[2].season_match) || results.length >= 6)) break;
         const eps = await _get_pgc_episodes(c.season_id);
         const ep = _pick_episode(eps, ep_num);
         if (!ep || !ep.cid) continue;
@@ -611,10 +622,9 @@ async function _wbi_pgc_search(title, ep_num, season_num, search_type, label, so
         seen.add(ep.cid);
         // [lc-1300] info 带 epid：search_candidates 靠它给番剧条目发 pgc: 伪 bvid，
         // 手动选定才能与视频区同通道（没有 epid 的旧信息会让候选永远「选不了」）。
-        const info = { source: sourceName, season_id: c.season_id, epid: ep.ep_id || ep.id, sim: c.sim, season_match: c.season_match };
+        const info = { source: sourceName, season_id: c.season_id, epid: ep.ep_id || ep.id, sim: c.sim, season_match: c.season_match, cand_season: c.season };
         const epLabel = ep.long_title ? `${ep.title} ${ep.long_title}` : (ep.title || '');
         results.push([ep.cid, `${c.t}${epLabel ? ' (' + epLabel + ')' : ''}`, info]);
-        if (results.length >= 3) break;
     }
     return results;
 }
@@ -688,7 +698,7 @@ async function search_video(title, ep_num, season_num) {
                 const low = t.toLowerCase();
                 const badTitle = BAD_TITLE.some((k) => low.indexOf(k) >= 0);
                 const isCompilation = (kind === 2) || badTitle;
-                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num), isCompilation, comp_kind: kind, bad_title: badTitle };
+                const info = { source: 'video', bvid: bvid, sim: sim, season_match: isSeasonHit(season, season_num), cand_season: season, isCompilation, comp_kind: kind, bad_title: badTitle };
                 const tag = tagmap[kind] || '?';
                 const mark = sim >= SIM_LOW ? '' : ' [兜底]';
                 log(`[视频区]${label ? ' (' + label + ')' : ''} sim=${sim.toFixed(2)}${tag}${mark} 候选: ${JSON.stringify(t)} season=${season}(命中=${info.season_match}) cid=${cid}`);
@@ -729,7 +739,22 @@ async function search_video(title, ep_num, season_num) {
     return results;
 }
 
-async function search_cid(title, ep_num, season_num) {
+// [lc-1265] 标题候选（与主进程 danmuApi.ts keywordCandidates 同口径）：
+// 播放侧常传「番名 - : 集标题」整串（clean_bili_title 保留真实副标题），B站 PGC 搜索对整串
+// 近乎精确 → 官方区全部 0 命中（石纪元S2 实测：脏串搜不到《第二季》，回退首段「石纪元」即中）。
+// 故候选 = 整串 → 分隔符切出的首段 → alt(fnOS 原标题)，去重保序。
+function keyword_candidates(title, alt_title) {
+    const raw = String(title || '').trim();
+    const out = [];
+    const push = (s) => { const v = String(s || '').trim(); if (v && out.indexOf(v) < 0) out.push(v); };
+    push(raw);
+    const segs = raw.split(/\s*[-–—]\s*|\s*[:：]\s*/).map((s) => s.trim()).filter(Boolean);
+    if (segs.length && segs[0]) push(segs[0]);
+    push(alt_title);
+    return out;
+}
+
+async function search_cid(title, ep_num, season_num, alt_title) {
     let t = title.replace(/\s*[\(（]\d{4}[\)）]\s*$/, '').trim();
     if (!t) return [];
     if (!ep_num || ep_num === 0) {
@@ -742,36 +767,44 @@ async function search_cid(title, ep_num, season_num) {
         }
     }
     log(`[search_cid] 开始匹配: title=${JSON.stringify(t)} ep_num=${ep_num} season_num=${season_num || 0}`);
-    // [lc-1015] 四路搜索并发起跑，仍按既有优先级取首个命中：
-    //   官方番剧(WBI) > 国创官方(WBI) > 番剧区 > 视频区(UP主搬运)。
-    // 旧版串行瀑布时，UP主内容（多数电视剧/个人剧集）要白等前面 2s 的 PGC 搜索失败；
-    // 并发后总耗时 = 最慢一路而非四路之和。未命中的后台搜索结果直接丢弃（无害）。
-    const pBangumiWbi = search_bangumi_wbi(t, ep_num, season_num).catch((e) => { log('番剧区WBI异常: ' + (e.message || e)); return []; });
-    const pGuochuangWbi = search_guochuang_wbi(t, ep_num, season_num).catch((e) => { log('国创区WBI异常: ' + (e.message || e)); return []; });
-    const pBangumi = search_bangumi(t, ep_num, season_num).catch((e) => { log('番剧区异常: ' + (e.message || e)); return []; });
-    const pVideo = search_video(t, ep_num, season_num).catch((e) => { log('视频区异常: ' + (e.message || e)); return []; });
-    const bangumiWbi = await pBangumiWbi;
-    if (bangumiWbi.length) {
-        log(`[search_cid] 官方番剧(WBI)返回 ${bangumiWbi.length} 个候选`);
-        return bangumiWbi;
-    }
-    const guochuangWbi = await pGuochuangWbi;
-    if (guochuangWbi.length) {
-        log(`[search_cid] 国创官方(WBI)返回 ${guochuangWbi.length} 个候选`);
-        return guochuangWbi;
-    }
-    const bangumi = await pBangumi;
-    if (bangumi.length) {
-        log(`[search_cid] 番剧区返回 ${bangumi.length} 个候选`);
-        return bangumi;
+    const cands = keyword_candidates(t, alt_title);
+    if (cands.length > 1) log(`[search_cid] 关键词候选 ${cands.length} 个: ${JSON.stringify(cands)}`);
+    // [lc-1265] 两轮制（旧版：单关键词 4 路并发，官方区 0 命中后视频区拿脏串照样出垃圾候选 →
+    //   错挂「第一季」并锁定整季）。第一轮各关键词只搜官方区（WBI番剧 > WBI国创 > 番剧区），
+    //   全部关键词都搜不到官方条目才进第二轮视频区——保证「官方 > 搬运」优先级不被脏串破坏。
+    for (let ci = 0; ci < cands.length; ci++) {
+        const kw = cands[ci];
+        if (ci > 0) log(`[search_cid] 官方区换词重试 #${ci + 1}: ${JSON.stringify(kw)}`);
+        const pBangumiWbi = search_bangumi_wbi(kw, ep_num, season_num).catch((e) => { log('番剧区WBI异常: ' + (e.message || e)); return []; });
+        const pGuochuangWbi = search_guochuang_wbi(kw, ep_num, season_num).catch((e) => { log('国创区WBI异常: ' + (e.message || e)); return []; });
+        const pBangumi = search_bangumi(kw, ep_num, season_num).catch((e) => { log('番剧区异常: ' + (e.message || e)); return []; });
+        const bangumiWbi = await pBangumiWbi;
+        if (bangumiWbi.length) {
+            log(`[search_cid] 官方番剧(WBI)返回 ${bangumiWbi.length} 个候选`);
+            return bangumiWbi;
+        }
+        const guochuangWbi = await pGuochuangWbi;
+        if (guochuangWbi.length) {
+            log(`[search_cid] 国创官方(WBI)返回 ${guochuangWbi.length} 个候选`);
+            return guochuangWbi;
+        }
+        const bangumi = await pBangumi;
+        if (bangumi.length) {
+            log(`[search_cid] 番剧区返回 ${bangumi.length} 个候选`);
+            return bangumi;
+        }
     }
     log('番剧区无结果，回退到视频区(UP主搬运)');
-    const video = await pVideo;
-    if (video.length) {
-        log(`[search_cid] 视频区返回 ${video.length} 个候选`);
-        return video;
+    for (let ci = 0; ci < cands.length; ci++) {
+        const kw = cands[ci];
+        if (ci > 0) log(`[search_cid] 视频区换词重试 #${ci + 1}: ${JSON.stringify(kw)}`);
+        const video = await search_video(kw, ep_num, season_num).catch((e) => { log('视频区异常: ' + (e.message || e)); return []; });
+        if (video.length) {
+            log(`[search_cid] 视频区返回 ${video.length} 个候选`);
+            return video;
+        }
     }
-    log('[search_cid] 番剧区/视频区均未匹配（已移除谐音/近似名兜底，不再猜测）');
+    log('[search_cid] 各关键词官方区/视频区均未匹配（已移除谐音/近似名兜底，不再猜测）');
     return [];
 }
 
@@ -1069,7 +1102,8 @@ function _select_danmaku(fetched, agg_threshold, agg_time_limit, min_danmaku) {
 
 // 核心入口：可被主进程 require 后调用，返回结果对象，不调用 process.exit（避免杀掉宿主进程）。
 // 副作用：会把弹幕 XML 写到 out 路径（供 MPV / PotPlayer 读取）。
-async function run(title, ep_num, out, agg_threshold, season_num) {
+// [lc-1265] alt_title：fnOS 原标题备用搜索词（runBiliChain 透传），脏番名搜不到官方条目时换词重试。
+async function run(title, ep_num, out, agg_threshold, season_num, alt_title) {
     _refresh_cookie();
     await verify_cookie();
     if (typeof ep_num === 'string') ep_num = parseInt(ep_num, 10);
@@ -1136,7 +1170,7 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         }
     }
 
-    const candidates = await search_cid(title, ep_num, season_num);
+    const candidates = await search_cid(title, ep_num, season_num, alt_title);
     if (!candidates.length) {
         log('未找到B站对应集（可能番名不匹配或网络受限）');
         return { ok: false, error: '未找到匹配的B站视频' };
@@ -1190,6 +1224,23 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         final = _filter_danmaku(final, block_types);
         log(`弹幕屏蔽类型生效: 移除 ${before - final.length} 条 (类型=${[...block_types].sort().join(',')}), 剩余 ${final.length} 条`);
     }
+    // [lc-1265] 季数硬约束（石纪元S2 实机事故：要 S2 却命中《第一季》仅 2 条 / 官方《第三季》1.8万条）：
+    //   ① 明确错季——候选标题带季号且 ≠ 请求季（如标着「第三季」）→ 一票否决，弹幕再多也不输出；
+    //   ② 模糊错季——候选未标季（搬运合集常见）但请求季数>0 → 弹幕量低于下限时弃用。
+    //   下限 = max(50, 阈值/10)。两者都不写盘、返回失败，把机会留给弹弹play 官方匹配
+    //   （Lua 挂起的 /comment / 主进程 dandanplay 兜底）。
+    const candSeason = (best_info && best_info.cand_season) || 0;
+    const seasonMismatch = season_num > 0 && !!best_info && best_info.season_match === false;
+    const explicitSeasonMismatch = seasonMismatch && candSeason > 0 && candSeason !== season_num;
+    const seasonLowFloor = Math.max(50, Math.floor((agg_threshold || 1500) / 10));
+    if (explicitSeasonMismatch) {
+        log(`❌ 弃用：候选明确标为第${candSeason}季，与请求季数(${season_num})不符 —— 不输出、不锁定，留给弹弹play 兜底`);
+        return { ok: false, error: `B站候选为第${candSeason}季，与请求季数(${season_num})不符`, season_mismatch: true };
+    }
+    if (seasonMismatch && final.length < seasonLowFloor) {
+        log(`❌ 弃用：候选未标季但与请求季数(${season_num})不符且仅 ${final.length} 条(<${seasonLowFloor}) —— 不输出、不锁定，留给弹弹play 兜底`);
+        return { ok: false, error: `B站候选与请求季数(${season_num})不符且弹幕过少(${final.length}条)`, season_mismatch: true };
+    }
     _write_xml(out, final);
     const result = {
         ok: true,
@@ -1203,6 +1254,9 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         // [lc-604] 番剧区(正版)没有 bvid, 只有 season_id/epid —— 透传给配置面板显示 ep_id 而非裸 cid
         season_id: (best_info && best_info.season_id) || null,
         epid: (best_info && best_info.epid) || null,
+        // [lc-1265] 错季标记：true = 请求第N季但首选候选标题未匹配到该季（Lua 据此决定是否
+        // 强制走弹弹play /comment 合并正确剧集；主进程 dandanplay 兜底也参考）
+        season_mismatch: seasonMismatch,
     };
     if (agg_count) result.aggregated_from = agg_count;
     result.cookie_status = (cv && cv.ok) ? 'valid' : ((cv && cv.reason === 'expired_or_invalid') ? 'expired' : 'missing');
@@ -1212,7 +1266,18 @@ async function run(title, ep_num, out, agg_threshold, season_num) {
         log(`✅ 最终输出: ${best_atitle} -> ${final.length} 条弹幕 (source=${source}) -> ${out}`);
     }
     // [lc-1194] 自动命中且拿到 bvid → 锁定为本剧弹幕源（整季后续每集直接按集取此合集的分P）
-    if (best_info && best_info.bvid && source === 'video') _lock_source(title, best_info.bvid);
+    // [lc-1265] 锁定守卫：错季命中绝不锁定（石纪元S2 实机：错挂第一季还被锁，整季被劫持）；
+    //   弹幕过少的低质视频同样不锁（大概率垃圾搬运，锁定后每集都被它截胡）。
+    const LOCK_MIN_DANMAKU = 50;
+    if (best_info && best_info.bvid && source === 'video') {
+        if (seasonMismatch) {
+            log('[源缓存] 候选与请求季数不符 → 不锁定源缓存（避免整季锁死到错误合集）');
+        } else if (final.length < LOCK_MIN_DANMAKU) {
+            log(`[源缓存] 命中弹幕仅 ${final.length} 条(<${LOCK_MIN_DANMAKU}) → 不锁定源缓存（低质候选）`);
+        } else {
+            _lock_source(title, best_info.bvid);
+        }
+    }
     return result;
 }
 

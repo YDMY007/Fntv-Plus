@@ -60,6 +60,8 @@ export interface BiliDanmakuResult {
     // [lc-607] 番剧区(正版)无 bvid, 透传 season_id/epid 供 MPV 配置面板显示 ep_id
     season_id?: string | number | null;
     epid?: string | number | null;
+    /** [lc-1265] 错季标记：true = 请求第N季但 B站首选候选与该季不符（Lua 据此强制回退弹弹play /comment） */
+    season_mismatch?: boolean;
     /** [lc-1226] 三来源各自的尝试结果（详情面板用） */
     sources?: DanmakuSourceTrace[];
     /** [lc-1288] 自建源命中但低于聚合阈值时叠加内置B站：两源各自的条数（详情面板用） */
@@ -206,6 +208,7 @@ async function runBiliChain(
     threshold?: number | string,
     season?: number | string,
     timeoutMs = 60000,
+    altTitle = '',
 ): Promise<BiliDanmakuResult> {
     let mod: any;
     try {
@@ -215,7 +218,9 @@ async function runBiliChain(
         return { ok: false, error: '弹幕脚本加载失败: ' + (e?.message || e) };
     }
     try {
-        const runP = Promise.resolve(mod.run(title, ep, out, threshold, season));
+        // [lc-1265] altTitle 一路透传进 bili_danmaku.js run()：脏番名官方区 0 命中时，
+        // 脚本内用「整串→番名首段→alt」换词重试（石纪元S2 实机：fnOS 原标题此前在这被丢弃）。
+        const runP = Promise.resolve(mod.run(title, ep, out, threshold, season, altTitle || ''));
         let timeoutHandle: NodeJS.Timeout | null = null;
         const timeoutP = new Promise<BiliDanmakuResult>((resolve) => {
             timeoutHandle = setTimeout(() => resolve({ ok: false, error: `弹幕获取超时(${timeoutMs}ms)` }), timeoutMs);
@@ -269,7 +274,7 @@ export async function runBiliDanmaku(
             if (selfLines.length > 0) {
                 // B站 写临时文件：失败时自建源 XML（out）原样保留，成功时合并回写 out
                 const tmpOut = out + '.bili.tmp.xml';
-                const biliRes = await runBiliChain(title, ep, tmpOut, threshold, season, timeoutMs);
+                const biliRes = await runBiliChain(title, ep, tmpOut, threshold, season, timeoutMs, altTitle);
                 if (biliRes && biliRes.ok) {
                     const biliLines = readDanmakuLines(tmpOut);
                     const mergedCount = writeMergedDanmakuXml(out, [...biliLines, ...selfLines]);
@@ -351,7 +356,7 @@ export async function runBiliDanmaku(
         return { ok: false, error: 'B站弹幕搜索未启用', sources: traces };
     }
     try {
-        const r = await runBiliChain(title, ep, out, threshold, season, timeoutMs);
+        const r = await runBiliChain(title, ep, out, threshold, season, timeoutMs, altTitle);
         traces.push(r.ok
             ? {
                 id: 'bilibili', attempted: true, used: true,

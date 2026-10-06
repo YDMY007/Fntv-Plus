@@ -401,14 +401,19 @@ function dd_clear_pending_comment()
 end
 
 -- 其他源都没拿到 → 回退用内置凭证发 /comment；若已有其他源弹幕则不重复拉。
-function dd_flush_pending_comment(reason)
+-- [lc-1265] force=true：已有其他源也照发（其他源质量可疑时——B站 错季/弹幕过少——正确剧集的
+--   弹幕库弹幕与已有源叠加，而不是被「已有其他源」挡掉）。
+function dd_flush_pending_comment(reason, force)
     if pending_dd_timer then pending_dd_timer:kill() pending_dd_timer = nil end
     local p = pending_dd_comment
     pending_dd_comment = nil
     if not p then return end
-    if dd_has_other_source() then
+    if dd_has_other_source() and not force then
         msg.info("弹弹play：已有其他源弹幕，无需回退 /comment")
         return
+    end
+    if force and dd_has_other_source() then
+        msg.info("弹弹play：其他源质量可疑，强制回退 /comment（弹幕将与已有源叠加）")
     end
     msg.warn(("弹弹play：其他源均未提供弹幕（%s），回退内置凭证取弹幕库（ep=%s）")
         :format(reason, tostring(p.episodeId)))

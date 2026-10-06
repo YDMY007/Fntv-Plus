@@ -468,15 +468,15 @@ async function searchAnimes(title: string, season: number, epTitle = ''): Promis
     return [];
 }
 
-async function searchWithKeyword(keyword: string, season: number, epTitle = ''): Promise<AnimeHit[]> {
+async function searchWithKeyword(keyword: string, season: number, epTitle = '', timeoutMs = 12000, forceFresh = false): Promise<AnimeHit[]> {
     const base = currentBase();
     const key = normalizeTitle(keyword);
     let animes: any[] | null = null;
     const cached = searchCache.get(key);
-    if (cached && Date.now() - cached.at < SEARCH_TTL) {
+    if (!forceFresh && cached && Date.now() - cached.at < SEARCH_TTL) {
         animes = cached.val;
     } else {
-        const j = await getJson(`${base}/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`, 12000);
+        const j = await getJson(`${base}/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`, timeoutMs);
         if (!j || j.success === false || !Array.isArray(j.animes)) {
             log.warn(`[danmuApi] 搜索无结果或服务异常 | keyword=${keyword} err=${(j && j.errorMessage) || '无响应'}`);
             return [];
@@ -769,6 +769,21 @@ export async function autoFetch(title: string, ep: number, out: string, season =
             if (altHits.length) {
                 log.info(`[danmuApi] ✅ fnOS 原标题命中 ${altHits.length} 个条目 | alt=${altTitle}`);
                 hits.push(...altHits);
+            }
+        }
+        if (!hits.length) {
+            // [lc-1265] 干净词强刷重试：自建服务端对每个关键词要现场聚合多平台上游，偶发单轮
+            // 超时/空回（石纪元S2 实机：12:00 整轮未命中，同一关键词稍后重试即精确命中 5 条第二季
+            // 条目）。只强刷干净词（番名首段/alt，绕过本地缓存），不重放整串脏词；8s 短超时防拖慢降级。
+            const cleanKws = [...new Set([
+                ...keywordCandidates(title).slice(1),
+                ...(altTitle ? [altTitle] : []),
+            ].map((k) => k.trim()).filter(Boolean))];
+            if (cleanKws.length) {
+                log.info(`[danmuApi] 首轮未命中 → 干净词强刷重试 | ${JSON.stringify(cleanKws)}`);
+                for (const kw of cleanKws) {
+                    hits.push(...await searchWithKeyword(kw, season, verifyTitle, 8000, true));
+                }
             }
         }
         if (!hits.length) {

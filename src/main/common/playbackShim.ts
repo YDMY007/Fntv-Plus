@@ -768,6 +768,9 @@ class PlaybackShim {
                     matched_title: r.matched_title || null,
                     season_id: r.season_id || null,
                     epid: r.epid || null,
+                    // [lc-1265] 错季标记：true = B站命中候选与请求季数不符（Lua 据此强制回退
+                    //   弹弹play /comment 合并正确剧集弹幕，而不是取消它）
+                    season_mismatch: r.season_mismatch === true,
                     // [lc-1226] 三来源各自的尝试结果 → MPV「弹幕来源详情」逐条展示
                     sources: r.sources || null,
                 });

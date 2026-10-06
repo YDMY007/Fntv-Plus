@@ -639,12 +639,17 @@ function auto_search_extra(title, episode_num, season)
 
     local body = http_get(api)
     local ok = false
+    -- [lc-1265] B站 命中质量信号（parsed 是下方块内局部变量，须在此捕获到外层作用域）
+    local bili_count = 0
+    local bili_bad_season = false
     if body and body ~= "" then
         local ok_parse, parsed = pcall(utils.parse_json, body)
         if ok_parse and type(parsed) == "table" then
             if parsed.ok then
                 BILI_INFO = parsed
                 msg.info(("[自动补源] B站元数据: %s"):format(body))
+                bili_count = tonumber(parsed.danmaku_count) or 0
+                bili_bad_season = (parsed.season_mismatch == true)
                 ok = true
             else
                 msg.warn("[自动补源] B站弹幕获取失败: " .. tostring(parsed.error or "未知"))
@@ -662,6 +667,17 @@ function auto_search_extra(title, episode_num, season)
     end
     msg.warn(("自动补源：叠加 B站弹幕（%s 第%s集）"):format(title, episode_num))
     add_danmaku_source_local(out_xml, false)
-    -- [lc-1228] B站/自建源 已提供弹幕 → 取消挂起的内置凭证 /comment（这就是降级省下的请求）
-    if dd_clear_pending_comment then dd_clear_pending_comment() end
+    -- [lc-1265] B站 命中质量把关：明确错季（请求第N季却命中其它季，shim 回传 season_mismatch=true）
+    -- 或弹幕极少（<50 条，大概率错挂/垃圾搬运，石纪元S2 实机：错挂「第一季」仅 2 条，弹弹play
+    -- 明明已识别出《石之战争》第1话却被取消）→ 不取消而是【强制】走挂起的弹弹play 内置凭证
+    -- /comment，正确剧集的弹幕库弹幕与 B站 源叠加。
+    local bili_suspect = bili_bad_season or (bili_count < 50)
+    if bili_suspect and dd_flush_pending_comment then
+        msg.warn(("自动补源：B站 命中质量可疑（%s，%d 条）→ 强制回退弹弹play /comment 取正确剧集弹幕")
+            :format(bili_bad_season and "季数不匹配" or "弹幕过少", bili_count))
+        dd_flush_pending_comment("B站 命中错季/弹幕过少", true)
+    elseif dd_clear_pending_comment then
+        -- [lc-1228] B站/自建源 已提供弹幕 → 取消挂起的内置凭证 /comment（这就是降级省下的请求）
+        dd_clear_pending_comment()
+    end
 end
