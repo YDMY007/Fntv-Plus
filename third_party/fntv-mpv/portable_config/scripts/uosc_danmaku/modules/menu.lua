@@ -348,8 +348,6 @@ local function _bili_parse_state()
             parse_target = mtitle
         end
     end
-    -- 优先显示弹弹play匹配到的干净标题（服务端规范中文名）；
-    -- 弹弹play未匹配时才回退到文件名解析（可能含乱码）
     local title, ep, method_label
     if DANMAKU.anime and DANMAKU.anime ~= "" then
         title = DANMAKU.anime
@@ -360,144 +358,58 @@ local function _bili_parse_state()
         title, ep, method = guess_bili_title_ep_v2(parse_target)
         method_label = ({ fast = "极速策略", legacy = "兼容链", title_only = "极速·仅标题", legacy_title_only = "兼容·仅标题" })[method] or "无"
     end
-    if title then
-        table.insert(items, { title = "解析策略：" .. method_label, keep_open = true, selectable = false })
-        table.insert(items, { title = "当前解析 → 番名：" .. title, keep_open = true, selectable = false })
-        table.insert(items, { title = "当前解析 → 集数：" .. (ep and ("第" .. ep .. "集") or "未知（将按单集/第1话搜索）"), keep_open = true, selectable = false })
-    else
-        table.insert(items, { title = "当前文件无法解析出番名（将转弹弹play兜底）", keep_open = true, selectable = false })
-    end
+    return title, ep, method_label
+end
 
-    -- 分隔线
-    table.insert(items, { title = "", keep_open = true, selectable = false })
+function build_bili_config_menu_props()
+    local title, ep, method_label = _bili_parse_state()
+    local srcs = (type(BILI_INFO) == "table") and BILI_INFO.sources or nil
+    local props = {
+        type = "menu_bili_config",
+        title = "弹幕配置",
+        search_style = "disabled",
+        footnote = title
+            and ("解析：" .. method_label .. " · 番名「" .. title .. "」· " .. (ep and ("第" .. ep .. "集") or "集数未知（按单集搜索）"))
+            or "当前文件无法解析出番名（将转弹弹play兜底）",
+    }
 
-    -- ====== [lc-1226] 弹幕来源详情：三个来源各自的结果 ======
-    -- [lc-1228] 取弹幕顺序 = ① 自建源 → ② 内置 B站 → ③ 弹弹play(兜底)：
-    --   弹弹play 的【取弹幕库】在内置凭证下降级为兜底（官方约定要求按需使用共享配额）；
-    --   但它的【识别剧集】仍最先跑——另外两个源正靠它给出的规范番名去搜索，故单独列在最前。
-    -- BILI_INFO.sources 由主进程逐源记录后透传（biliRunner.ts / playbackShim.ts）；
-    -- 老版本缓存或旧 shim 没这个字段时回落到单源展示，不显示成"失败"。
-    table.insert(items, { title = "── 弹幕来源详情 ──", keep_open = true, selectable = false })
-    do
-        -- [lc-1288] B站 Cookie 体检状态：主进程每日自动检查一次后写入脚本目录
-        --   bili_cookie_status.json（与 danmaku_source_cache.json 等运行态文件同目录）。
-        --   Cookie 失效是静默失败（WBI 搜索全空、弹幕数量受限），在这里一眼可见根因。
-        local cookie_line, cookie_warn = "（尚未检查，应用每天自动体检一次）", false
-        do
-            local cookie_file = io.open(utils.join_path(mp.get_script_directory(), "bili_cookie_status.json"), "r")
-            if cookie_file then
-                local raw = cookie_file:read("*a")
-                cookie_file:close()
-                local ok_json, j = pcall(utils.parse_json, raw or "")
-                if ok_json and type(j) == "table" and j.status then
-                    local when = tostring(j.checked_at or ""):gsub("T", " "):gsub("%..*", ""):gsub("%+[0-9:]+$", "")
-                    if j.status == "valid" then
-                        cookie_line = ("✅ 已登录%s · 检查于 %s"):format(j.uname and ("（" .. j.uname .. "）") or "", when)
-                    elseif j.status == "expired" then
-                        cookie_warn = true
-                        cookie_line = "❌ Cookie 已失效（从浏览器重新复制 SESSDATA 到脚本目录 bili_cookie.txt） · 检查于 " .. when
-                    elseif j.status == "missing" then
-                        cookie_warn = true
-                        cookie_line = "⚠️ 未配置 Cookie（匿名模式，弹幕数量受限） · 检查于 " .. when
+    -- —— 逐源结论（口径同旧版 push_source，但从独立信息行改为条目 hint）——
+    local function src_note(id, fallback_note)
+        if type(srcs) == "table" then
+            for _, s in ipairs(srcs) do
+                if type(s) == "table" and s.id == id then
+                    if s.used then
+                        local cnt = (s.count ~= nil) and (" · " .. tostring(s.count) .. " 条") or ""
+                        return "✅ " .. tostring(s.detail or "提供了本次弹幕") .. cnt, "✅"
+                    elseif s.attempted then
+                        return "❌ " .. tostring(s.error or "尝试过但未命中"), "❌"
                     else
-                        cookie_line = "⚠️ Cookie 校验失败（网络原因，稍后自动重试） · 检查于 " .. when
+                        return "➖ " .. tostring(s.skippedReason or "本轮未参与"), "➖"
                     end
                 end
             end
         end
-        table.insert(items, { title = "B站 Cookie 状态", bold = true, keep_open = true, selectable = false })
-        table.insert(items, { title = "   " .. cookie_line, keep_open = true, selectable = false })
-
-        -- 弹弹play 的剧集识别状态（在先；不消耗弹幕库配额）
-        local dd_ok = (DANMAKU.anime and DANMAKU.anime ~= "")
-        local dd_txt
-        if dd_ok then
-            dd_txt = ("✅ 已识别：《%s》%s"):format(
-                tostring(DANMAKU.anime),
-                (DANMAKU.episode and DANMAKU.episode ~= "") and (" · " .. tostring(DANMAKU.episode)) or "")
-        else
-            dd_txt = "➖ 未识别到条目（按文件名解析番名与集数）"
-        end
-        table.insert(items, { title = "弹弹play 剧集识别", bold = true, keep_open = true, selectable = false })
-        table.insert(items, { title = "   " .. dd_txt, keep_open = true, selectable = false })
-
-        -- ①② 自建源 / 内置 B站：主进程逐源记录的实测结论
-        local srcs = (type(BILI_INFO) == "table") and BILI_INFO.sources or nil
-        local function push_source(label, id, fallback_note)
-            table.insert(items, { title = label, bold = true, keep_open = true, selectable = false })
-            local note, is_used = fallback_note, false
-            if type(srcs) == "table" then
-                for _, s in ipairs(srcs) do
-                    if type(s) == "table" and s.id == id then
-                        if s.used then
-                            is_used = true
-                            local cnt = (s.count ~= nil) and (" · " .. tostring(s.count) .. " 条") or ""
-                            note = "✅ " .. tostring(s.detail or "提供了本次弹幕") .. cnt
-                        elseif s.attempted then
-                            note = "❌ " .. tostring(s.error or "尝试过但未命中")
-                        else
-                            note = "➖ " .. tostring(s.skippedReason or "本轮未参与")
-                        end
-                        break
-                    end
-                end
-            end
-            table.insert(items, { title = "   " .. note, keep_open = true, selectable = false })
-            return is_used
-        end
-        if type(BILI_INFO) == "table" then
-            local used_api = push_source("① 自建弹幕接口（danmu_api）", "danmu_api",
-                (type(srcs) == "table") and "➖ 未启用（弹幕设置 → 自建弹幕接口）"
-                    or "（无逐源记录，见下方实际匹配结果）")
-            local used_bili = push_source("② 内置 B站", "bilibili",
-                (type(srcs) == "table") and "➖ 未启用或本轮未参与" or "（无逐源记录，见下方实际匹配结果）")
-            -- ③ 弹弹play 弹幕库（兜底）：只有前两者都没拿到时才会去取
-            table.insert(items, { title = "③ 弹弹play 弹幕库（兜底）", bold = true, keep_open = true, selectable = false })
-            if used_api or used_bili then
-                table.insert(items, { title = "   ➖ 未启用（前两者已提供弹幕，无需兜底）", keep_open = true, selectable = false })
-            elseif BILI_INFO.ok then
-                table.insert(items, { title = "   ✅ 已从弹弹play 取到弹幕（前两者均未命中）", keep_open = true, selectable = false })
-            else
-                table.insert(items, { title = "   ℹ️ 前两者均未命中；弹弹play 若配置了自定义凭证会立即取弹幕库", keep_open = true, selectable = false })
-            end
-            if not used_api and not used_bili and BILI_INFO.ok == false then
-                -- 全链路失败时，把最后一条根因也摆出来（上面的逐源行已各自写明原因）
-                table.insert(items, { title = "   ↳ 最终失败：" .. tostring(BILI_INFO.error or "未知"), keep_open = true, selectable = false })
-            end
-        else
-            table.insert(items, { title = "① 自建弹幕接口（danmu_api）", bold = true, keep_open = true, selectable = false })
-            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
-            table.insert(items, { title = "② 内置 B站", bold = true, keep_open = true, selectable = false })
-            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
-            table.insert(items, { title = "③ 弹弹play 弹幕库（兜底）", bold = true, keep_open = true, selectable = false })
-            table.insert(items, { title = "   （尚未取过弹幕，无记录）", keep_open = true, selectable = false })
-        end
+        return fallback_note, "➖"
+    end
+    local has_srcs = (type(srcs) == "table")
+    local note_api, mark_api = src_note("danmu_api", has_srcs and "➖ 未启用（弹幕设置 → 自建弹幕接口）" or "（尚未取过弹幕，无逐源记录）")
+    local note_bili, mark_bili = src_note("bilibili", has_srcs and "➖ 未启用或本轮未参与" or "（尚未取过弹幕，无逐源记录）")
+    local mark_dd, note_dd = "—", "ℹ️ 兜底源：前两者均未命中时才会取弹幕库（内置凭证下自动延后）"
+    if mark_api == "✅" or mark_bili == "✅" then
+        mark_dd, note_dd = "➖", "➖ 未启用（前两者已提供弹幕，无需兜底）"
+    elseif type(BILI_INFO) == "table" and BILI_INFO.ok then
+        mark_dd, note_dd = "✅", "✅ 已从弹弹play 取到弹幕（前两者均未命中）"
     end
 
-    -- 分隔线
-    table.insert(items, { title = "", keep_open = true, selectable = false })
-
-    -- ====== 实际匹配结果（哪个源、哪条视频）======
-    table.insert(items, { title = "── 实际匹配结果 ──", keep_open = true, selectable = false })
-    if BILI_INFO and type(BILI_INFO) == "table" then
-        -- [lc-1101] 来源可能是自建弹幕接口(danmu_api)，标题不能一律写「B站弹幕」
-        -- [lc-1288] source 可能是合并源（自建源低于阈值时叠加内置B站）
+    -- —— 实际匹配结果（旧版「实际匹配结果」段收编为二级子菜单）——
+    local result_items, result_hint = {}, "⏳ 尚未搜索"
+    if type(BILI_INFO) == "table" then
         local src_raw = tostring(BILI_INFO.source or "")
         local src_name = src_raw == "danmu_api+bilibili" and "自建源+B站（低于阈值聚合）"
             or (src_raw:match("danmu_api") and "自建弹幕接口" or "B站弹幕")
         if BILI_INFO.ok then
-            -- ✅ 关联成功
-            table.insert(items, { title = ("✅ %s：已关联成功"):format(src_name), bold = true, keep_open = true, selectable = false, })
-            if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
-                table.insert(items, { title = "  📺 视频：" .. (BILI_INFO.title or "未知") .. " [" .. BILI_INFO.bvid .. "]", keep_open = true, selectable = false })
-            elseif BILI_INFO.title then
-                table.insert(items, { title = "  📺 略剧：" .. BILI_INFO.title, keep_open = true, selectable = false })
-            end
-            if BILI_INFO.danmaku_count then
-                table.insert(items, { title = "  💬 弹幕数：" .. tostring(BILI_INFO.danmaku_count) .. " 条", keep_open = true, selectable = false })
-            end
             local src_label = ({ bangumi = "番剧区（正版）", video = "视频区（UP主搬运）" })[BILI_INFO.source] or BILI_INFO.source or "未知"
-            -- 匹配来源标识: 视频区显示 BV 号; 番剧区(正版)无 bvid 但有 ep_id(剧集 ID)更友好
+            -- 匹配来源标识: 视频区显示 BV 号; 番剧区(正版)无 bvid 但有 ep_id/season_id 更友好
             local src_extra = ""
             if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
                 src_extra = "  (BV:" .. BILI_INFO.bvid .. ")"
@@ -508,14 +420,21 @@ local function _bili_parse_state()
             elseif BILI_INFO.cid then
                 src_extra = "  (cid:" .. tostring(BILI_INFO.cid) .. ")"
             end
-            table.insert(items, { title = "  🎯 匹配来源：" .. src_label .. src_extra, keep_open = true, selectable = false })
+            result_hint = ("✅ %d 条 · %s"):format(tonumber(BILI_INFO.danmaku_count) or 0, src_name)
+            if BILI_INFO.bvid and BILI_INFO.bvid ~= "" then
+                table.insert(result_items, { title = "📺 视频：" .. (BILI_INFO.title or "未知") .. " [" .. BILI_INFO.bvid .. "]", selectable = false })
+            elseif BILI_INFO.title then
+                table.insert(result_items, { title = "📺 剧集：" .. BILI_INFO.title, selectable = false })
+            end
+            if BILI_INFO.danmaku_count then
+                table.insert(result_items, { title = "💬 弹幕数：" .. tostring(BILI_INFO.danmaku_count) .. " 条", selectable = false })
+            end
+            table.insert(result_items, { title = "🎯 匹配来源：" .. src_label .. src_extra, selectable = false })
         else
-            -- ❌ 搜索失败
-            table.insert(items, { title = ("❌ %s：关联失败"):format(src_name), bold = true, keep_open = true, selectable = false })
-            table.insert(items, { title = "  原因：" .. (BILI_INFO.error or "未知错误"), keep_open = true, selectable = false })
+            result_hint = "❌ 关联失败"
+            table.insert(result_items, { title = "原因：" .. tostring(BILI_INFO.error or "未知错误"), selectable = false })
         end
     else
-        -- ⏳ 尚未搜索过
         local has_bili_source = false
         for url, source in pairs(DANMAKU.sources) do
             if url and url:match("bili_danmaku_") then
@@ -975,6 +894,15 @@ end
 
 function open_add_menu_uosc()
     local sources = {}
+    -- [lc-1302] 弹幕详情入口：清空当前弹幕与本地缓存后重新自动匹配拉取
+    -- （屏蔽类型切换后 B站 缓存需重拉才生效，这里是一键重来的通道；无源时也可用）
+    table.insert(sources, {
+        title = "▶ 清除弹幕并重新拉取",
+        hint = "清空当前弹幕与相关缓存，重新自动匹配",
+        value = "refetch-all",
+        keep_open = false,
+        selectable = true,
+    })
     for url, source in pairs(DANMAKU.sources) do
         if source.fname then
             local item = {title = url, value = url, keep_open = true,}
@@ -1130,7 +1058,13 @@ function persist_style_opts()
     end
 end
 
--- 设置弹幕样式菜单（样式改动自动持久化到 script-opts/uosc_danmaku.conf；屏蔽类型由 Electron 设置面板管理）
+-- 设置弹幕样式菜单（样式改动自动持久化到 script-opts/uosc_danmaku.conf）
+-- [lc-1268] 屏蔽类型收编进本菜单（子菜单 + checkbox 式条目）：此前注释写「屏蔽类型由 Electron
+-- 设置面板管理」，MPV 侧只有 Ctrl+k 快捷键一条暗道，看样式菜单的用户无从发现。两者本就共用
+-- danmaku_block_types.json 真源，直接以子菜单形态并入，点击即切换、即时重过滤、菜单不关。
+-- 前向声明：BLOCK_TYPE_DEFS/read_block_types_file 定义在下方「弹幕屏蔽类型快捷开关」段，
+-- 本函数运行时（脚本消息回调）才会取值，前向声明让词法可见（否则解析为全局 nil）。
+local BLOCK_TYPE_DEFS, read_block_types_file
 function add_danmaku_setup(actived, status)
     if not uosc_available then
         show_message("无uosc UI框架，不支持使用该功能", 2)
@@ -1154,11 +1088,41 @@ function add_danmaku_setup(actived, status)
         table.insert(items, item_config)
     end
 
+    -- [lc-1268] 「按类型屏蔽」子菜单（与 Ctrl+k / 设置面板同一真源 danmaku_block_types.json）
+    local blocked = {}
+    for _, v in ipairs(read_block_types_file()) do blocked[v] = true end
+    local block_children = {}
+    local blocked_count = 0
+    for _, def in ipairs(BLOCK_TYPE_DEFS) do
+        local is_blocked = blocked[def.key] == true
+        if is_blocked then blocked_count = blocked_count + 1 end
+        table.insert(block_children, {
+            title = (is_blocked and "✗ 已屏蔽：" or "✓ 显示中：") .. def.label,
+            hint = is_blocked and "点击恢复显示" or "点击屏蔽该类型",
+            value = { "script-message-to", mp.get_script_name(), "toggle-block-type", def.key, "style" },
+            keep_open = true, selectable = true,
+        })
+    end
+    if blocked_count > 0 then
+        table.insert(block_children, {
+            title = "▶ 全部显示（清空屏蔽）",
+            value = { "script-message-to", mp.get_script_name(), "toggle-block-type", "clear", "style" },
+            keep_open = true, selectable = true,
+        })
+    end
+    local block_summary = blocked_count == 0 and "全部显示" or ("已屏蔽 " .. blocked_count .. " 类")
+    table.insert(items, { separator = true })
+    table.insert(items, {
+        title = "按类型屏蔽",
+        hint = block_summary .. "（滚动/顶部/底部/逆向/高级/彩色）",
+        items = block_children,
+    })
+
     local menu_props = {
         type = "menu_style",
         title = "弹幕样式",
         search_style = "disabled",
-        footnote = "样式更改将自动保存，下次播放自动生效",
+        footnote = "样式更改将自动保存，下次播放自动生效；屏蔽类型与设置面板实时同步",
         item_actions_place = "outside",
         items = items,
         callback = { mp.get_script_name(), 'setup-danmaku-style'},
@@ -1232,6 +1196,163 @@ function danmaku_delay_setup(source_url)
 end
 
 
+-- ===================== 弹幕屏蔽类型快捷开关 =====================
+-- [lc-1302] danmaku_block_types.json 为唯一真源：本菜单（快捷键 Ctrl+k）与设置面板
+-- （网页端/桌面端「弹幕屏蔽与样式」卡）共用同一文件，任意一侧改动即时互相同步——
+--   MPV 侧切换 → 写回文件 + reload_block_types + load_danmaku 重新过滤，立即生效；
+--   面板侧改动 → 下方 2s 文件监听自动重读生效（面板打开时也会回读本文件回填勾选）。
+-- 注意：B站 源的弹幕在 bili_danmaku.js 拉取落盘时已按当时类型预过滤，对本集「取消屏蔽」
+-- 需等下次拉取；弹弹play / 自建源为原始数据，本端过滤，切换立即完整生效。
+-- 赋值给上方前向声明的局部变量（不得再写 local：会新建同名变量、让 add_danmaku_setup 内的
+-- 引用仍指向 nil 前向声明，运行时炸 nil 调用）
+BLOCK_TYPE_DEFS = {
+    { key = "scroll",   label = "滚动弹幕" },
+    { key = "top",      label = "顶部弹幕" },
+    { key = "bottom",   label = "底部弹幕" },
+    { key = "reverse",  label = "逆向弹幕" },
+    { key = "advanced", label = "高级弹幕" },
+    { key = "color",    label = "彩色弹幕" },
+}
+local block_types_file_path_cache = nil
+local block_types_last_content = nil
+local block_types_self_write_at = 0
+
+local function get_block_types_path()
+    if not block_types_file_path_cache then
+        block_types_file_path_cache = mp.command_native({ "expand-path", options.block_types_path })
+    end
+    return block_types_file_path_cache
+end
+
+-- 读真源文件，返回字符串数组（缺文件/坏 JSON 一律回落空数组 = 全部显示）
+read_block_types_file = function()
+    local arr = {}
+    local content = read_file(get_block_types_path())
+    if content then
+        local parsed = utils.parse_json(content)
+        if type(parsed) == "table" then
+            for _, v in ipairs(parsed) do
+                if type(v) == "string" then arr[#arr + 1] = v end
+            end
+        end
+    end
+    return arr
+end
+
+local function write_block_types_file(arr)
+    local sorted = {}
+    for _, v in ipairs(arr) do sorted[#sorted + 1] = v end
+    table.sort(sorted)
+    local f = io.open(get_block_types_path(), "w")
+    if not f then
+        msg.warn("[lc-1302] 弹幕屏蔽类型写入失败: " .. get_block_types_path())
+        return false
+    end
+    f:write(utils.format_json(sorted))
+    f:close()
+    block_types_self_write_at = os.time()
+    return true
+end
+
+local function block_type_label(key)
+    for _, def in ipairs(BLOCK_TYPE_DEFS) do
+        if def.key == key then return def.label end
+    end
+    return key
+end
+
+function open_block_types_menu()
+    if not uosc_available then
+        show_message("弹幕屏蔽菜单需在 uosc 控制栏下使用", 3)
+        return
+    end
+    local blocked = {}
+    for _, v in ipairs(read_block_types_file()) do blocked[v] = true end
+
+    local items = {}
+    table.insert(items, {
+        title = "屏蔽类型（与设置面板实时同步）",
+        keep_open = true, selectable = false, muted = true, italic = true,
+    })
+    for _, def in ipairs(BLOCK_TYPE_DEFS) do
+        local is_blocked = blocked[def.key] == true
+        table.insert(items, {
+            title = (is_blocked and "✗ 已屏蔽：" or "✓ 显示中：") .. def.label,
+            hint = is_blocked and "点击恢复显示" or "点击屏蔽该类型",
+            value = { "script-message-to", mp.get_script_name(), "toggle-block-type", def.key },
+            keep_open = true, selectable = true,
+        })
+    end
+    if next(blocked) ~= nil then
+        table.insert(items, {
+            title = "▶ 全部显示（清空屏蔽）",
+            value = { "script-message-to", mp.get_script_name(), "toggle-block-type", "clear" },
+            keep_open = true, selectable = true,
+        })
+    end
+
+    mp.commandv("script-message-to", "uosc", "open-menu", utils.format_json({
+        type = "menu_block_types",
+        title = "弹幕屏蔽",
+        search_style = "disabled",
+        items = items,
+    }))
+end
+
+-- 切换/清空一个屏蔽类型并立即生效。key 为 6 类之一或 "clear"。
+-- [lc-1268] src="style"：从样式菜单的「按类型屏蔽」子菜单进入 → 刷新样式菜单（原地 update-menu），
+-- 否则维持旧行为重开 Ctrl+k 独立菜单。两者读同一真源，状态天然一致。
+function toggle_block_type(key, src)
+    local arr = read_block_types_file()
+    if key == "clear" then
+        if not write_block_types_file({}) then return end
+        show_message("已清空弹幕屏蔽：全部类型显示", 3)
+    else
+        local exists, kept = false, {}
+        for _, v in ipairs(arr) do
+            if v == key then exists = true else kept[#kept + 1] = v end
+        end
+        if not exists then kept[#kept + 1] = key end
+        if not write_block_types_file(kept) then return end
+        show_message(exists and ("已取消屏蔽：" .. block_type_label(key))
+            or ("已屏蔽：" .. block_type_label(key) .. "（Ctrl+k 可恢复）"), 3)
+    end
+    reload_block_types()
+    -- 立即重过滤：从本地源文件重新转换（不重拉网络）；B站 预过滤缓存见上方注释
+    if ENABLED and COMMENTS ~= nil then
+        load_danmaku(true, true)
+    end
+    if src == "style" then
+        add_danmaku_setup(nil, nil)
+    else
+        open_block_types_menu()
+    end
+end
+
+mp.register_script_message("open_block_types_menu", open_block_types_menu)
+mp.register_script_message("toggle-block-type", function(key, src) toggle_block_type(key, src) end)
+mp.register_script_message("clear-danmaku-refetch", function() clear_danmaku_refetch() end)
+mp.add_key_binding(options.open_block_types_menu_key, "open_block_types_menu", open_block_types_menu)
+
+-- [lc-1302] 面板 → MPV 同步：轮询真源文件内容（文件仅几十字节，2s 一次开销可忽略）。
+-- 变更且非本端刚写入 → 重读 + 重过滤。未加载弹幕时静默（下次 load 自然生效）。
+mp.add_periodic_timer(2, function()
+    if not ENABLED or COMMENTS == nil then return end
+    local content = read_file(get_block_types_path()) or ""
+    if block_types_last_content == nil then
+        block_types_last_content = content
+        return
+    end
+    if content == block_types_last_content then return end
+    block_types_last_content = content
+    if os.time() - block_types_self_write_at < 5 then return end
+    reload_block_types()
+    load_danmaku(true, true)
+    show_message("设置面板已更改弹幕屏蔽，已应用", 3)
+    msg.info("[lc-1302] 检测到 danmaku_block_types.json 变更，重新过滤弹幕")
+end)
+
+
 -- 总集合弹幕菜单
 function open_add_total_menu_uosc()
     local items = {}
@@ -1240,6 +1361,7 @@ function open_add_total_menu_uosc()
         { title = "从源添加弹幕", action = "open_add_source_menu" },
         { title = "弹幕源延迟设置", action = "open_source_delay_menu" },
         { title = "弹幕样式", action = "open_setup_danmaku_menu" },
+        { title = "弹幕屏蔽（顶部/滚动/底部/彩色）", action = "open_block_types_menu" },
         { title = "弹幕内容", action = "open_content_danmaku_menu" },
     }
 
@@ -1281,6 +1403,7 @@ function open_add_total_menu_select()
         { title = "弹幕搜索", action = "open_search_danmaku_menu" },
         { title = "从源添加弹幕", action = "open_add_source_menu" },
         { title = "弹幕内容", action = "open_content_danmaku_menu" },
+        { title = "弹幕屏蔽（顶部/滚动/底部/彩色）", action = "open_block_types_menu" },
     }
     for i, config in ipairs(total_menu_items_config) do
         item_titles[i] = config.title
@@ -1548,9 +1671,82 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
     end
 end)
 
+-- [lc-1302] 清除弹幕并重新拉取：清空运行态与本地缓存（源工作文件 / 弹弹play 当前集缓存 /
+-- B站 源缓存与源决策缓存），随后按当前视频重新走自动匹配。B站 源在拉取落盘时按类型预过滤，
+-- 本功能也是「屏蔽类型切换后让 B站 缓存立即生效」的配套入口（弹幕源菜单内可达）。
+function clear_danmaku_refetch()
+    local path = mp.get_property("path")
+    if not path then
+        show_message("没有正在播放的文件", 3)
+        return
+    end
+    -- ① 先记下要清的缓存范围（episodeId 从 api_server 源 url 提取；番名用于匹配 B站 xml 缓存）
+    local dd_ids = {}
+    for url, source in pairs(DANMAKU.sources) do
+        if source.from == "api_server" then
+            local id = tostring(url):match("/comment/(%d+)")
+            if id then dd_ids[id] = true end
+        end
+    end
+    local anime = DANMAKU.anime
+    -- ② 停显示 + 清运行态
+    if ENABLED then hide_danmaku_func() end
+    COMMENTS = nil
+    BILI_INFO = nil
+    DELAY = 0
+    DELAYS = {}
+    mp.set_property_native(DELAY_PROPERTY, 0)
+    -- ③ 解除全部源引用（用户本地文件本体保留，仅解除引用）
+    for _, source in pairs(DANMAKU.sources) do
+        if source.fname and source.from ~= "user_local" and file_exists(source.fname) then
+            os.remove(source.fname)
+        end
+    end
+    DANMAKU.sources = {}
+    DANMAKU.count = 1
+    DANMAKU.anime = nil
+    DANMAKU.episode = nil
+    DANMAKU._primary_ep = nil
+    -- ④ 删缓存：per-PID 工作文件 / 弹弹play 当前集 / B站 决策与哈希缓存 / 当前番名 bili xml
+    for _, name in ipairs({ "danmaku-" .. PID .. ".json", "danmaku-" .. PID .. ".ass",
+                            "temp-" .. PID .. ".mp4", "bahamut-" .. PID .. ".json" }) do
+        local p = utils.join_path(DANMAKU_PATH, name)
+        if file_exists(p) then os.remove(p) end
+    end
+    for id in pairs(dd_ids) do
+        local p = utils.join_path(DANMAKU_PATH, "dandanplay_" .. id .. ".json")
+        if file_exists(p) then os.remove(p) end
+    end
+    local src_cache = utils.join_path(mp.command_native({ "expand-path", "~~/scripts/uosc_danmaku" }),
+        "danmaku_source_cache.json")
+    if file_exists(src_cache) then os.remove(src_cache) end
+    local ok, items = pcall(utils.readdir, DANMAKU_PATH, "files")
+    if ok and type(items) == "table" then
+        for _, name in ipairs(items) do
+            if type(name) == "string" then
+                local hit = name:match("^bili_d%d+")
+                    or (anime and anime ~= "" and name:sub(1, #"bili_danmaku_" .. anime) == "bili_danmaku_" .. anime)
+                if hit then os.remove(utils.join_path(DANMAKU_PATH, name)) end
+            end
+        end
+    end
+    -- ⑤ 重新自动匹配拉取（B站 补源标记复位，让 auto_search_extra 重新触发）
+    bili_auto_triggered = false
+    ENABLED = true
+    init(path)
+    show_message("弹幕已清除，正在重新拉取…", 4)
+    msg.info("[lc-1302] 清除弹幕并重新拉取")
+end
+
 mp.register_script_message('setup-danmaku-source', function(json)
     local event = utils.parse_json(json)
     if event.type == 'activate' then
+
+        if event.value == "refetch-all" then
+            mp.commandv("script-message-to", "uosc", "close-menu", "menu_source")
+            clear_danmaku_refetch()
+            return
+        end
 
         if event.action == "delete" then
             local rm = DANMAKU.sources[event.value]["fname"]
