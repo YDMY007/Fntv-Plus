@@ -78,6 +78,8 @@ export interface BiliCandidate {
     season: number;
     is_compilation: boolean;
     sim: number | null;
+    /** [lc-1270] 自建源候选的平台名（从条目标题「from bilibili/iqiyi/…」提取），候选菜单 hint 用 */
+    platform?: string;
 }
 
 export interface BiliCandidatesResult {

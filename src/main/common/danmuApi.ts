@@ -906,18 +906,27 @@ export async function candidates(title: string, ep: number, season = 0): Promise
                 e = await pickEpisode(hit, ep);
             }
             if (!e) continue;
+            // [lc-1270] UI 精简（对齐弹弹play 行的「干净主名 + 右侧短 hint」）：
+            // 主名剥「(年份)【类型】from 平台」尾缀；平台单独走 platform 字段给 hint。
+            const mainName = hit.animeTitle
+                .replace(/\s*[\(（](?:19|20)\d{2}[\)）]\s*/g, '')
+                .replace(/【[^】]*】/g, '')
+                .replace(/\s*from\s+[a-z0-9]+\s*$/i, '')
+                .trim();
+            const plat = (hit.animeTitle.match(/from\s+([a-z0-9]+)/i) || [])[1] || '';
             out.push({
                 index: out.length,
                 cid: null,
                 // [lc-1259] bvid 编码 animeId:episodeId（旧格式仅 episodeId）——用户选定后主进程
                 //   直接拿到 animeId 播种系列记忆，无需反查（danmu_api 无按 episodeId 反查条目的端点）
                 bvid: ID_PREFIX + hit.animeId + ':' + e.episodeId,
-                title: e.episodeTitle ? `${hit.animeTitle} · ${e.episodeTitle}` : hit.animeTitle,
+                title: e.episodeTitle ? `${mainName} · ${e.episodeTitle}` : mainName,
                 source: '自建源',
                 season: season || 0,
                 is_compilation: false,
                 sim: 1,
-            });
+                platform: plat,
+            } as BiliCandidate);
         }
         if (!out.length) {
             log.info(`[danmuApi] 候选未命中（无精确匹配条目）→ 降级内置B站候选 | title=${title} ep=${ep}`);

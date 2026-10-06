@@ -152,6 +152,8 @@ async function handleCandidates(_event: IpcMainInvokeEvent, params: { title?: st
                 // [lc-1301] B站官方弹幕数（view API stat.danmaku；pgc/dmapi 伪 id 无此字段）：
                 //   视频区候选之间就靠它分辨「正片弹幕多」与「无人发弹幕」，一步选对
                 danmakuCount: (typeof c.danmaku_count === 'number') ? c.danmaku_count : null,
+                // [lc-1270] 自建源候选的平台名（条目标题「from bilibili/iqiyi/…」提取），右缀展示
+                platform: (typeof (c as any).platform === 'string') ? (c as any).platform : '',
             })),
         };
     } catch (e: any) {

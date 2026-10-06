@@ -67,13 +67,17 @@ function get_animes(query)
     local self_cands = fetch_self_hosted_candidates(query, cur_ep)
     if #self_cands > 0 then
         table.insert(items, {
-            title = ("⭐ 自建源命中 %d 个（推荐，弹幕更全）:"):format(#self_cands),
+            title = ("⭐ 自建源命中 %d 个（推荐，弹幕更全）· 点击直接使用该条目弹幕"):format(#self_cands),
             bold = true, italic = true, keep_open = true, selectable = false,
         })
         for _, c in ipairs(self_cands) do
+            -- [lc-1270] 弹弹play 风格两段结构：title=「主名 · 集标题」（主进程已剥年份/类型/平台尾缀），
+            -- hint 右侧只放平台名；全源统一的「点击直接使用」说明收进首行段标题，不再逐行重复。
+            local ct = tostring(c.title or "")
+            local plat = tostring((c.platform ~= nil and c.platform ~= "") and c.platform or "自建源")
             table.insert(items, {
-                title = "  " .. tostring(c.title or ""),
-                hint = ("自建源 · 点击直接使用该条目弹幕（第%s集）"):format(cur_ep > 0 and tostring(cur_ep) or "?"),
+                title = ct,
+                hint = plat .. " · 第" .. (cur_ep > 0 and tostring(cur_ep) or "?") .. "集",
                 value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", tostring(c.bvid or ""), query, tostring(cur_ep) },
             })
         end
@@ -196,7 +200,9 @@ function get_animes(query)
                     break
                 end
             end
-            local bili_items = {}
+            -- [lc-1270] B站候选两段：官方（番剧区/pgc:）与 UP主搬运（视频区/BV）
+            local official_items = {}
+            local up_items = {}
             local ok_req = res ~= nil
             local body = ok_req and ((res.stdout or ""):gsub("\\r?\\n$", "")) or ""
             if not ok_req or body == "" or body:sub(1, 4) == "ERR:" then ok_req = false end
@@ -224,20 +230,40 @@ function get_animes(query)
                                 dmWarn = " ⚠️无人发弹幕"
                             end
                         end
-                        bili_items[#bili_items + 1] = {
-                            title = tostring(c.title or ""),
-                            hint = (src_label .. tag .. dmTag .. " · " .. cb .. dmWarn),
-                            value = (c.is_compilation and cb ~= "")
-                                and { "script-message-to", mp.get_script_name(), "bili_open_pages", cb, query_for_bili, tostring(bili_ep), tostring(c.title or "") }
-                                or { "script-message-to", mp.get_script_name(), "bili_manual_pick", cb, query_for_bili, tostring(bili_ep) },
-                        }
+                        -- [lc-1270] 三分流：ddp: 弹弹play（不该出现在本段，丢弃——它已有自己的番剧库段）、
+                        -- pgc:/source=bangumi 官方番剧、其余（BV+video）UP主搬运。
+                        if cb:sub(1, 4) == "ddp:" then
+                            -- 弹弹play 候选已在上方番剧库列出，这里跳过防重复展示
+                        elseif cb:sub(1, 4) == "pgc:" or c.source == "bangumi" then
+                            official_items[#official_items + 1] = {
+                                title = tostring(c.title or ""),
+                                hint = ("官方%s%s · ep:%s"):format(
+                                    src_label == "番剧区" and "番剧" or "国创",
+                                    dmTag, tostring(c.epid or cb:sub(5))),
+                                value = { "script-message-to", mp.get_script_name(), "bili_manual_pick", cb, query_for_bili, tostring(bili_ep) },
+                            }
+                        else
+                            up_items[#up_items + 1] = {
+                                title = tostring(c.title or ""),
+                                hint = (src_label .. tag .. dmTag .. " · " .. cb .. dmWarn),
+                                value = (c.is_compilation and cb ~= "")
+                                    and { "script-message-to", mp.get_script_name(), "bili_open_pages", cb, query_for_bili, tostring(bili_ep), tostring(c.title or "") }
+                                    or { "script-message-to", mp.get_script_name(), "bili_manual_pick", cb, query_for_bili, tostring(bili_ep) },
+                            }
+                        end
                     end
                 end
             end
-            if #bili_items > 0 then
-                table.insert(items, { title = "—— B站 候选（UP主搬运/官方）——", italic = true, keep_open = true, selectable = false })
-                for _, it in ipairs(bili_items) do table.insert(items, it) end
-            else
+            -- [lc-1270] 官方在前、UP主在后，各自成段（此前混在一段且标题写「UP主搬运/官方」）
+            if #official_items > 0 then
+                table.insert(items, { title = "—— B站 官方（番剧区正版）——", italic = true, keep_open = true, selectable = false })
+                for _, it in ipairs(official_items) do table.insert(items, it) end
+            end
+            if #up_items > 0 then
+                table.insert(items, { title = "—— B站 UP主搬运 ——", italic = true, keep_open = true, selectable = false })
+                for _, it in ipairs(up_items) do table.insert(items, it) end
+            end
+            if #official_items == 0 and #up_items == 0 then
                 table.insert(items, { title = "（B站 候选无结果或查询失败）", italic = true, keep_open = true, selectable = false })
             end
             -- 复用候选菜单同款原地替换：本菜单 type=menu_danmaku，uosc update-menu 按 type 命中

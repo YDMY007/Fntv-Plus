@@ -1816,7 +1816,9 @@ function renderSearchBody(): void {
         // （0 弹幕的搬运候选盲选必失败）；番剧区/pgc 伪 id 无此字段，自然缺省
         const dmTag = (typeof c.danmakuCount === 'number') ? ' · ' + t('{n} 条', { n: c.danmakuCount }) : '';
         const compTag = c.isCompilation ? (c.badTitle ? ' ⚠️解说/二创' : ' 📁合集') : '';
-        sEl.textContent = sourceLabel(c.source) + dmTag + compTag + (c.bvid === dmPickedBvid ? t('（使用中）') : '');
+        // [lc-1270] 自建源候选附平台名（title 已剥「from 平台」尾缀，平台信息移到右缀）
+        const platTag = (c.source === '自建源' && c.platform) ? ' · ' + c.platform : '';
+        sEl.textContent = sourceLabel(c.source) + platTag + dmTag + compTag + (c.bvid === dmPickedBvid ? t('（使用中）') : '');
         item.appendChild(tEl);
         item.appendChild(sEl);
         item.addEventListener('click', (e) => { e.stopPropagation(); void pickCandidate(c); });
