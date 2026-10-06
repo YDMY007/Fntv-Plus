@@ -33,6 +33,8 @@
 
 > **把飞牛影视，变成你桌面上的私人流媒体影院。** Fntv-Plus 是基于飞牛影视 Web 端、用 Electron 打造的第三方桌面客户端：冷调渐变玻璃与云母界面、Netflix 风格沉浸式剧集详情页、3D 首页轮播，**先重塑观影视觉**；再打通豆瓣 / Bangumi / Trakt 同步、B 站弹幕、演员作品库、年度观影报告，**织成你的专属观影档案**；最后叠加手柄控制、智能跳过、外链播放器等硬核播放增强——**完整支持 Windows / macOS / Linux 三平台**。
 
+> 🌐 **官方网站：[https://690075.xyz](https://690075.xyz)** —— 功能说明、界面截图、更新日志与下载入口都在这里（备用入口 https://fntv-plus.pages.dev）。下载与更新以官网及本仓库 Releases 为唯一官方渠道。
+
 <div align="center">
   <img src="resource/docs/Home123.png" width="100%" alt="">
   <p><em>图：三种不同样式海报轮播墙</em></p>
@@ -332,6 +334,8 @@ Fntv-Plus/
 ## 📦 安装与下载
 
 ### 预编译版本（推荐）
+
+**官网 [https://690075.xyz](https://690075.xyz)** 的下载区按形态（桌面客户端 / Web 版 fpk）给出直达链接；
 
 前往 GitHub [Releases 页面](https://github.com/YDMY007/Fntv-Plus/releases) 下载最新版本（国内 Gitee 不提供大文件托管，发行包统一托管于 GitHub）：
 
