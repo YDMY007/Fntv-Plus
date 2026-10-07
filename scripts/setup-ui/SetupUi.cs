@@ -314,16 +314,20 @@ namespace FntvSetupUi {
             Log("meta: version=" + _version + " exe=" + _exeName + " total=" + _totalSize + " release=" + _releaseDate);
         }
 
-        // 检测本机已装 Fntv-Plus: 卸载注册表(HKCU 优先, HKLM 次之)的 DisplayName/DisplayVersion/
-        // InstallLocation; 兜底扫默认目录里已装 exe 的文件版本。结果用于封面页「首次安装/
-        // 覆盖升级」说明与模式/路径预选(保证原地覆盖)。
+        // 检测本机已装 Fntv-Plus: 卸载注册表(HKCU 优先 → HKLM64 → HKLM32, 兼容历史
+        // 产品名 FNMedia/飞牛影视)。⚠ EB 不写 InstallLocation(实测为空), 安装目录从
+        // DisplayIcon("...exe,0")或 UninstallString("\"...Uninstall.exe\" /allusers")
+        // 反推; 安装模式优先读卸载参数, 其次目录位置, 最后 hive。兜底扫默认目录里
+        // 已装 exe 的文件版本。结果用于封面「首次安装/覆盖升级」说明与模式/路径预选。
         void DetectExistingInstall() {
             try {
                 var roots = new[] {
-                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView>(
-                        Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default),
-                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView>(
-                        Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64)
+                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView, string>(
+                        Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default, "HKCU"),
+                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView, string>(
+                        Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64, "HKLM64"),
+                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView, string>(
+                        Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry32, "HKLM32")
                 };
                 foreach (var root in roots) {
                     using (var baseKey = Microsoft.Win32.RegistryKey.OpenBaseKey(root.Item1, root.Item2)) {
@@ -331,11 +335,29 @@ namespace FntvSetupUi {
                             if (k == null) continue;
                             foreach (var sub in k.GetSubKeyNames()) {
                                 using (var sk = k.OpenSubKey(sub)) {
-                                    var name = sk == null ? null : sk.GetValue("DisplayName") as string;
-                                    if (name == null || !name.StartsWith("Fntv-Plus", StringComparison.OrdinalIgnoreCase)) continue;
-                                    _installedVersion = (sk.GetValue("DisplayVersion") as string) ?? _installedVersion;
-                                    _existingDir = (sk.GetValue("InstallLocation") as string) ?? "";
-                                    _existingMode = root.Item1 == Microsoft.Win32.RegistryHive.LocalMachine ? "all" : "user";
+                                    if (sk == null) continue;
+                                    var name = sk.GetValue("DisplayName") as string ?? "";
+                                    if (!System.Text.RegularExpressions.Regex.IsMatch(name, "fntv|fnmedia|飞牛影视",
+                                        System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
+                                    _installedVersion = (sk.GetValue("DisplayVersion") as string) ?? "";
+                                    _existingDir = ((sk.GetValue("InstallLocation") as string) ?? "").TrimEnd('\\');
+                                    var icon = (sk.GetValue("DisplayIcon") as string) ?? "";
+                                    var unstr = (sk.GetValue("UninstallString") as string) ?? "";
+                                    if (string.IsNullOrEmpty(_existingDir))
+                                        _existingDir = DirFromDisplayIcon(icon);
+                                    if (string.IsNullOrEmpty(_existingDir))
+                                        _existingDir = DirFromUninstallString(unstr);
+                                    if (unstr.IndexOf("/allusers", StringComparison.OrdinalIgnoreCase) >= 0) _existingMode = "all";
+                                    else if (unstr.IndexOf("/currentuser", StringComparison.OrdinalIgnoreCase) >= 0) _existingMode = "user";
+                                    else if (root.Item3 != "HKCU") _existingMode = "all";
+                                    else _existingMode = "user";
+                                    if (!string.IsNullOrEmpty(_existingDir)) {
+                                        if (_existingDir.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), StringComparison.OrdinalIgnoreCase))
+                                            _existingMode = "all";
+                                        else if (_existingDir.StartsWith(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"), StringComparison.OrdinalIgnoreCase))
+                                            _existingMode = "user";
+                                    }
+                                    Log("detect hit: key=" + sub + " name=" + name);
                                     break;
                                 }
                             }
@@ -347,18 +369,35 @@ namespace FntvSetupUi {
             try {
                 if (string.IsNullOrEmpty(_installedVersion)) {
                     foreach (var cand in new[] { _defaultUserPath, _defaultAllPath }) {
-                        var exe = Path.Combine(cand, _exeName);
-                        if (File.Exists(exe)) {
+                        foreach (var exeName in new[] { _exeName, "FNMedia.exe" }) {
+                            var exe = Path.Combine(cand, exeName);
+                            if (!File.Exists(exe)) continue;
                             _installedVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(exe).FileVersion ?? "";
                             _existingDir = cand;
                             _existingMode = cand == _defaultAllPath ? "all" : "user";
                             break;
                         }
+                        if (!string.IsNullOrEmpty(_installedVersion)) break;
                     }
                 }
             } catch (Exception ex) { Log("detect exe: " + ex.Message); }
-            if (_existingDir != null && _existingDir.EndsWith("\\")) _existingDir = _existingDir.TrimEnd('\\');
             Log("detect: installed=" + _installedVersion + " dir=" + _existingDir + " mode=" + _existingMode);
+        }
+
+        // DisplayIcon: "C:\...\Fntv-Plus.exe,0" → C:\...\Fntv-Plus
+        static string DirFromDisplayIcon(string s) {
+            if (string.IsNullOrEmpty(s)) return "";
+            var p = s.Split(',')[0].Trim().Trim('"');
+            if (p.Length < 4) return "";
+            try { return Path.GetDirectoryName(p) ?? ""; } catch { return ""; }
+        }
+
+        // UninstallString: "\"C:\...\Uninstall Fntv-Plus.exe\" /currentuser" → C:\...\Fntv-Plus
+        static string DirFromUninstallString(string s) {
+            if (string.IsNullOrEmpty(s)) return "";
+            var m = System.Text.RegularExpressions.Regex.Match(s, "\"([^\"]+)\"");
+            if (!m.Success) return "";
+            try { return Path.GetDirectoryName(m.Groups[1].Value) ?? ""; } catch { return ""; }
         }
 
         long TotalSize() {
