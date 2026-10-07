@@ -31,22 +31,33 @@
 
 ManifestDPIAware true
 
-Var ipcDir   ; UI 进程传来的 IPC 目录(/_IPC=); electron-updater 静默更新时为空
+; UI 进程传来的 IPC 目录(/_IPC=); electron-updater 静默更新时为空。
+; 仅安装器遍声明: 卸载器遍不展开 customInit/customInstall, 无条件声明会产生
+; 「从未引用」孤儿变量 → NSIS 警告被 electron-builder 当错误(lc-1271 实测)。
+!ifndef BUILD_UNINSTALLER
+  Var ipcDir
+  Var uiBase   ; UI 资材持久目录($TEMP\fntv-setup-<pid>)
+!endif
 
-; ── 交互安装: 解压 UI 三件套并移交, 本进程立即退出 ──
+; ── 交互安装: 解压 UI 资材并移交, 本进程立即退出 ──
+; ⚠ 不能用 $PLUGINSDIR: NSIS 进程退出时会清空它, 运行中的 UI exe 被锁残留、
+;   其余文件(WebView2 dll/www.zip)全被删 → UI 随后加载程序集即崩(lc-1271 实测)。
+;   解压到 $TEMP\fntv-setup-<pid> 持久目录, 由 UI 退出时自行清理(名称前缀约定)。
 !macro customInit
   ${GetOptions} $CMDLINE "/_IPC=" $ipcDir
   ${IfNot} ${Silent}
-    InitPluginsDir
-    File /oname=$PLUGINSDIR\FntvSetupUi.exe "${BUILD_RESOURCES_DIR}\setup-ui\FntvSetupUi.exe"
-    File /oname=$PLUGINSDIR\WebView2Loader.dll "${BUILD_RESOURCES_DIR}\setup-ui\WebView2Loader.dll"
-    File /oname=$PLUGINSDIR\Microsoft.Web.WebView2.Core.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Core.dll"
-    File /oname=$PLUGINSDIR\Microsoft.Web.WebView2.Wpf.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Wpf.dll"
-    File /oname=$PLUGINSDIR\icon.ico "${BUILD_RESOURCES_DIR}\setup-ui\icon.ico"
-    File /oname=$PLUGINSDIR\ui.zip "${BUILD_RESOURCES_DIR}\setup-ui\www.zip"
-    File /oname=$PLUGINSDIR\app-meta.json "${BUILD_RESOURCES_DIR}\setup-ui\app-meta.json"
-    File /oname=$PLUGINSDIR\totalsize.txt "${BUILD_RESOURCES_DIR}\setup-ui\totalsize.txt"
-    Exec '"$PLUGINSDIR\FntvSetupUi.exe" --setup "$EXEPATH" --www "$PLUGINSDIR"'
+    System::Call 'kernel32::GetCurrentProcessId() i.r0'
+    StrCpy $uiBase "$TEMP\fntv-setup-$0"
+    CreateDirectory "$uiBase"
+    File /oname=$uiBase\FntvSetupUi.exe "${BUILD_RESOURCES_DIR}\setup-ui\FntvSetupUi.exe"
+    File /oname=$uiBase\WebView2Loader.dll "${BUILD_RESOURCES_DIR}\setup-ui\WebView2Loader.dll"
+    File /oname=$uiBase\Microsoft.Web.WebView2.Core.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Core.dll"
+    File /oname=$uiBase\Microsoft.Web.WebView2.Wpf.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Wpf.dll"
+    File /oname=$uiBase\icon.ico "${BUILD_RESOURCES_DIR}\setup-ui\icon.ico"
+    File /oname=$uiBase\ui.zip "${BUILD_RESOURCES_DIR}\setup-ui\www.zip"
+    File /oname=$uiBase\app-meta.json "${BUILD_RESOURCES_DIR}\setup-ui\app-meta.json"
+    File /oname=$uiBase\totalsize.txt "${BUILD_RESOURCES_DIR}\setup-ui\totalsize.txt"
+    Exec '"$uiBase\FntvSetupUi.exe" --setup "$EXEPATH" --www "$uiBase"'
     Quit
   ${EndIf}
   ; 静默遍(被 UI 以 /S 拉起): 记 started 标记(UI 据此把阶段切到解压前)

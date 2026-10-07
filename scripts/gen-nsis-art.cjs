@@ -583,46 +583,16 @@ async function clipBmp1x(page, html, x2, y2, w2, h2, outFile) {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  // --disable-gpu: 软件光栅化, 避免与前台游戏/独占全屏应用抢 GPU 导致
+  // Page.captureScreenshot 协议错误(lc-1271 真机踩坑)
+  const browser = await chromium.launch({ args: ['--disable-gpu'] });
   const page = await (await browser.newContext({ deviceScaleFactor: 1 })).newPage();
   const outDir = Path.join(ROOT, 'build');
 
-  // 2x 裁片工具(与整页同源同坐标 → 与背景逐像素一致, 运行时换贴片无缝)
-  const clip2x = async (html, x, y, w, h, name) => {
-    await page.setViewportSize({ width: 1560, height: 1040 });
-    await page.setContent(html);
-    Fs.writeFileSync(Path.join(outDir, name + '.bmp'),
-      pngToBmp24(await page.screenshot({ clip: { x, y, width: w, height: h } })));
-    console.log('[gen-nsis-art]', name + '.bmp', w + 'x' + h);
-  };
-
-  // ── [v6] 每个画稿出两套: 2x(原名, 高 DPI 用) + 1x(`1x` 后缀, 96dpi/100% 用) ──
-  //    NSIS 侧按 DPI 选目录, 两套都是「尽量不缩放」的那一套; 裁片必须与整页同源同缩放,
-  //    否则换贴片时与背景对不上。
-  const both = async (html, name) => {
-    await renderBmp(page, html, 1560, 1040, Path.join(outDir, name + '.bmp'));
-    await renderBmp1x(page, html, 1560, 1040, Path.join(outDir, name + '1x.bmp'));
-  };
-  const bothClip = async (html, x, y, w, h, name) => {
-    await clip2x(html, x, y, w, h, name);
-    await clipBmp1x(page, html, x, y, w, h, Path.join(outDir, name + '1x.bmp'));
-  };
-
-  await both(welcomeHtml, 'installerWelcome');
-  await both(finishHtml, 'installerFinish');
-  await both(modePageHtml(false), 'installerMode');
-  await bothClip(modePageHtml(true), 80, 280, 724, 430, 'installerModeCardsA');
-  await bothClip(modePageHtml(false), 80, 280, 724, 430, 'installerModeCardsB');
-  await both(instPageHtml(false, 'cancel'), 'installerInst');
-  await bothClip(instPageHtml(true, 'next'), 0, 100, 1560, 200, 'installerInstDoneTitle');
-  await bothClip(instPageHtml(false, 'cancel'), 400, 810, 780, 130, 'installerInstBar');
-  await bothClip(instPageHtml(true, 'next'), 400, 810, 780, 130, 'installerInstBarDone');
-
-  // 闪屏/侧栏/页眉: 本身就是按显示尺寸 1:1 布局的小图, 保持单套
-  await renderBmp(page, splashHtml(false), 480, 300, Path.join(outDir, 'installerSplash.bmp'));
+  // ── v8(lc-1271) 起安装向导改 WPF/WebView2 自绘 UI 进程, 九件套向导画稿退役; ──
+  // 仅剩卸载器还在消费位图: AdvSplash 闪屏 + 原生页品牌侧栏。只渲染这两张。
   await renderBmp(page, splashHtml(true), 480, 300, Path.join(outDir, 'uninstallerSplash.bmp'));
   await renderBmp(page, sidebarHtml(true), 164, 314, Path.join(outDir, 'uninstallerSidebar.bmp'));
-  await renderBmp(page, headerHtml, 350, 148, Path.join(outDir, 'installerHeader.bmp'));
   await browser.close();
-  console.log('[gen-nsis-art] done (v6 双分辨率画稿 · 1x 原生渲染 + 2x)');
+  console.log('[gen-nsis-art] done (v8: 卸载器闪屏+侧栏)');
 })().catch((e) => { console.error(e); process.exit(1); });

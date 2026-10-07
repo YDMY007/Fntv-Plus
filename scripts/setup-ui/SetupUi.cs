@@ -255,6 +255,14 @@ namespace FntvSetupUi {
                 case "ready":
                     Post(MiniJson.Obj("type", "meta", "version", _version, "exeName", _exeName,
                         "mode", "user", "path", _defaultUserPath));
+                    // --auto <mode>: E2E 自动化(配合 --auto-path/--auto-exit), 无人值守真机验证
+                    string autoMode = Args.Get(_launchArgs, "auto", "");
+                    if (autoMode == "user" || autoMode == "all") {
+                        string autoPath = Args.Get(_launchArgs, "auto-path", "");
+                        if (!string.IsNullOrEmpty(autoPath)) _instDir = autoPath;
+                        Post(MiniJson.Obj("type", "folder", "path", _instDir));
+                        StartInstall(autoMode);
+                    }
                     break;
                 case "modeChanged": {
                     string mode = m.ContainsKey("mode") ? m["mode"] : "user";
@@ -394,6 +402,14 @@ namespace FntvSetupUi {
             Post(MiniJson.Obj("type", "installed"));
             _poll?.Stop();
             CleanupWork(false);
+            if (Args.Get(_launchArgs, "auto-exit", "") != null)
+                BeginInvokeShutdown();
+        }
+
+        void BeginInvokeShutdown() {
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            t.Tick += (s, e) => { t.Stop(); Shutdown(0); };
+            t.Start();
         }
 
         // --dev 或找不到安装器本体时的演示推进
@@ -439,6 +455,21 @@ namespace FntvSetupUi {
                     // 安装中途退出 UI: 子安装器继续跑完(与抖音式一致, 半途杀安装器易留脏状态)
                 }
                 CleanupWork(true);
+                // 打包态: 清理 stub 留下的 %TEMP%\fntv-setup-<pid> 资材目录。
+                // 自身 exe 还锁着该目录, 用延迟 rd 异步删(仅认 fntv-setup- 前缀, dev 模式不命中)。
+                if (!string.IsNullOrEmpty(_wwwDir)) {
+                    var baseDir = Directory.GetParent(_wwwDir);
+                    if (baseDir != null
+                        && baseDir.Name.StartsWith("fntv-setup-", StringComparison.OrdinalIgnoreCase)
+                        && baseDir.FullName.StartsWith(Path.GetTempPath(), StringComparison.OrdinalIgnoreCase)) {
+                        var psi = new System.Diagnostics.ProcessStartInfo(
+                            "cmd.exe", "/c ping -n 3 127.0.0.1 >nul & rd /s /q \"" + baseDir.FullName + "\"") {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                }
             } catch { }
             base.OnExit(e);
         }

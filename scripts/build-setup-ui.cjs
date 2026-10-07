@@ -93,8 +93,13 @@ function writeMeta(targetDir) {
   const exeName = (PKG.productName || 'Fntv-Plus') + '.exe';
   Fs.writeFileSync(Path.join(targetDir, 'app-meta.json'),
     JSON.stringify({ version: PKG.version, exeName }));
+  // 进度分母 = 预期安装后体积: 优先上一版 win-unpacked 实测, 次选 dest 估算, 最后保守常数
+  const unpacked = Path.join(ROOT, 'release', 'win-unpacked');
   const destDir = Path.join(ROOT, 'dest');
-  const approx = Fs.existsSync(destDir) ? Math.round(dirSize(destDir) * 0.94) : 250 * 1024 * 1024;
+  let approx;
+  if (Fs.existsSync(unpacked)) approx = dirSize(unpacked);
+  else if (Fs.existsSync(destDir)) approx = Math.round(dirSize(destDir) * 0.94);
+  else approx = 400 * 1024 * 1024;
   Fs.writeFileSync(Path.join(targetDir, 'totalsize.txt'), String(approx));
 }
 
