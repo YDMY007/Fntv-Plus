@@ -6,11 +6,23 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+
+internal static class Dwm {
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    public static extern int GetWindowLong(IntPtr hwnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    public static extern int SetWindowLong(IntPtr hwnd, int index, int value);
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+}
 
 namespace FntvSetupUi {
     static class Args {
@@ -201,17 +213,65 @@ namespace FntvSetupUi {
                 }
             };
             MainWindow = _win;
+            // Win11 圆角三件套: 光杆 WS_POPUP 无边框窗 DWM 不圆化(hr=0 也不画),
+            // ① WindowChrome 接管 WM_NCCALCSIZE/命中(屏蔽 THICKFRAME 的缩放与边框内缩),
+            // ② 补回 WS_THICKFRAME 样式(Electron 同款做法),
+            // ③ DWMWCP_ROUND(33=2)。Win10 无该属性, 方角静默兜底。
+            var chrome = new System.Windows.Shell.WindowChrome {
+                CaptionHeight = 0,
+                ResizeBorderThickness = new Thickness(0),
+                GlassFrameThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
+                UseAeroCaptionButtons = false
+            };
+            System.Windows.Shell.WindowChrome.SetWindowChrome(_win, chrome);
+            _win.SourceInitialized += (s, ev) => {
+                try {
+                    var hwnd = new System.Windows.Interop.WindowInteropHelper(_win).Handle;
+                    EnsureRound(hwnd);
+                    // WindowChrome 会在状态变化(最小化/还原/激活)时按 ResizeMode=NoResize
+                    // 重写窗口样式、剥掉我们补的 WS_THICKFRAME → 圆角得而复失(lc-1276 用户
+                    // 实测「先圆后方」)。挂钩子在激活/尺寸消息后自愈式重补, 幂等零开销。
+                    var src = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
+                    src?.AddHook((IntPtr h2, int msg2, IntPtr wp2, IntPtr lp2, ref bool handled2) => {
+                        if (msg2 == 0x0006 || msg2 == 0x0005) {   // WM_ACTIVATE / WM_SIZE
+                            Dispatcher.BeginInvoke(new Action(() => EnsureRound(hwnd)),
+                                DispatcherPriority.Background);
+                        }
+                        return IntPtr.Zero;
+                    });
+                } catch (Exception ex) { Log("corner pref: " + ex.Message); }
+            };
             _win.Show();
+        }
+
+        void EnsureRound(IntPtr hwnd) {
+            try {
+                const int GWL_STYLE = -16, WS_THICKFRAME = 0x00040000;
+                if ((Dwm.GetWindowLong(hwnd, GWL_STYLE) & WS_THICKFRAME) == 0) {
+                    Dwm.SetWindowLong(hwnd, GWL_STYLE, Dwm.GetWindowLong(hwnd, GWL_STYLE) | WS_THICKFRAME);
+                    Dwm.SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x27);   // NOMOVE|NOSIZE|NOZORDER|FRAMECHANGED
+                }
+                int pref = 2;   // DWMWCP_ROUND
+                Dwm.DwmSetWindowAttribute(hwnd, 33, ref pref, 4);
+            } catch (Exception ex) { Log("ensure round: " + ex.Message); }
         }
 
         System.Windows.Media.ImageSource TryLoadIcon() {
             try {
                 var p = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.ico");
-                if (File.Exists(p)) return new System.Windows.Media.Imaging.BitmapImage(new Uri(p));
-                var p2 = Path.Combine(Path.GetDirectoryName(_setupExe) ?? "", "icon.ico");
-                if (File.Exists(p2)) return new System.Windows.Media.Imaging.BitmapImage(new Uri(p2));
-            } catch { }
-            return null;
+                if (!File.Exists(p)) p = Path.Combine(Path.GetDirectoryName(_setupExe) ?? "", "icon.ico");
+                if (!File.Exists(p)) return null;
+                // BitmapImage 解 .ico 的帧不可控(曾取到小帧 → 任务栏图标发小发虚),
+                // 显式挑最大帧(256px), 任务栏/Alt-Tab 全清晰。
+                var dec = new System.Windows.Media.Imaging.IconBitmapDecoder(
+                    new Uri(p), System.Windows.Media.Imaging.BitmapCreateOptions.None,
+                    System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+                System.Windows.Media.Imaging.BitmapFrame best = null;
+                foreach (var f in dec.Frames)
+                    if (best == null || f.PixelWidth > best.PixelWidth) best = f;
+                return best;
+            } catch (Exception ex) { Log("icon: " + ex.Message); return null; }
         }
 
         // --shots=<dir>: 巡演定时截图(WebView2 CapturePreview, 不截屏幕), 含协议弹层

@@ -124,7 +124,9 @@ function makeLicense() {
 // ── 主流程 ──
 Fs.mkdirSync(OUT, { recursive: true });
 makeLicense();
-Fs.copyFileSync(Path.join(ROOT, 'build/iconfntv.png'), Path.join(SRC, 'www', 'logo.png'));
+// 品牌行 logo 用方形 App 图标(icon.png); iconfntv.png 是 2100×600 横版组合标,
+// 塞进 40px 角落后图形仅 ~10px 高, 肉眼不可辨(lc-1276 用户反馈)。
+Fs.copyFileSync(Path.join(ROOT, 'build/icon.png'), Path.join(SRC, 'www', 'logo.png'));
 
 const csc = findCsc();
 const rsp = [
