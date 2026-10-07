@@ -154,10 +154,12 @@ namespace FntvSetupUi {
 
             // 打包态: www.zip 就地解压(开发态直接用 www 目录)
             string zip = Path.Combine(_wwwDir, "www.zip");
+            if (!File.Exists(zip)) zip = Path.Combine(_wwwDir, "ui.zip");   // 兼容旧命名
             if (File.Exists(zip)) {
                 var ext = Path.Combine(_workDir, "www");
                 ZipFile.ExtractToDirectory(zip, ext);
                 _wwwDir = ext;
+                Log("www extracted -> " + ext);
             }
 
             LoadMeta();
@@ -184,6 +186,7 @@ namespace FntvSetupUi {
                     var c = _wv.CoreWebView2;
                     c.WebMessageReceived += OnWebMessage;
                     c.SetVirtualHostNameToFolderMapping("installer.local", _wwwDir, CoreWebView2HostResourceAccessKind.Allow);
+                    c.NavigationCompleted += (s2, e2) => Log("nav ok=" + e2.IsSuccess + " err=" + e2.WebErrorStatus);
                     c.Navigate(_dev ? "https://installer.local/index.html?tour=1" : "https://installer.local/index.html");
                     string shotsDir = Args.Get(_launchArgs, "shots", "");
                     if (_dev && !string.IsNullOrEmpty(shotsDir)) ScheduleShots(shotsDir);

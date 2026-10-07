@@ -54,7 +54,7 @@ ManifestDPIAware true
     File /oname=$uiBase\Microsoft.Web.WebView2.Core.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Core.dll"
     File /oname=$uiBase\Microsoft.Web.WebView2.Wpf.dll "${BUILD_RESOURCES_DIR}\setup-ui\Microsoft.Web.WebView2.Wpf.dll"
     File /oname=$uiBase\icon.ico "${BUILD_RESOURCES_DIR}\setup-ui\icon.ico"
-    File /oname=$uiBase\ui.zip "${BUILD_RESOURCES_DIR}\setup-ui\www.zip"
+    File /oname=$uiBase\www.zip "${BUILD_RESOURCES_DIR}\setup-ui\www.zip"
     File /oname=$uiBase\app-meta.json "${BUILD_RESOURCES_DIR}\setup-ui\app-meta.json"
     File /oname=$uiBase\totalsize.txt "${BUILD_RESOURCES_DIR}\setup-ui\totalsize.txt"
     Exec '"$uiBase\FntvSetupUi.exe" --setup "$EXEPATH" --www "$uiBase"'
