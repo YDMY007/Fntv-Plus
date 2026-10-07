@@ -91,8 +91,11 @@ function makeWwwZip() {
 
 function writeMeta(targetDir) {
   const exeName = (PKG.productName || 'Fntv-Plus') + '.exe';
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const releaseDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
   Fs.writeFileSync(Path.join(targetDir, 'app-meta.json'),
-    JSON.stringify({ version: PKG.version, exeName }));
+    JSON.stringify({ version: PKG.version, exeName, releaseDate }));
   // 进度分母 = 预期安装后体积: 优先上一版 win-unpacked 实测, 次选 dest 估算, 最后保守常数
   const unpacked = Path.join(ROOT, 'release', 'win-unpacked');
   const destDir = Path.join(ROOT, 'dest');

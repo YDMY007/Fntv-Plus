@@ -122,6 +122,7 @@ namespace FntvSetupUi {
         Window _win;
         WebView2 _wv;
         string _setupExe, _wwwDir, _wwwBase, _workDir, _instDir = "", _exeName = "Fntv-Plus.exe", _version = "";
+        string _installedVersion = "", _existingDir = "", _existingMode = "", _releaseDate = "";
         long _totalSize;
         string[] _launchArgs = new string[0];
         bool _dev, _installing, _finished, _launched;
@@ -177,7 +178,8 @@ namespace FntvSetupUi {
             }
 
             LoadMeta();
-            _instDir = _defaultUserPath;
+            DetectExistingInstall();
+            _instDir = string.IsNullOrEmpty(_existingDir) ? _defaultUserPath : _existingDir;
 
             _win = new Window {
                 Title = "Fntv-Plus 安装",
@@ -304,11 +306,59 @@ namespace FntvSetupUi {
                 var j = MiniJson.Parse(File.ReadAllText(Path.Combine(_wwwBase, "app-meta.json")));
                 _version = j.ContainsKey("version") ? j["version"] : "";
                 _exeName = j.ContainsKey("exeName") ? j["exeName"] : _exeName;
+                if (j.ContainsKey("releaseDate")) _releaseDate = j["releaseDate"];
             } catch { }
             try {
                 _totalSize = long.Parse(File.ReadAllText(Path.Combine(_wwwBase, "totalsize.txt")).Trim());
             } catch { _totalSize = 0; }
-            Log("meta: version=" + _version + " exe=" + _exeName + " total=" + _totalSize);
+            Log("meta: version=" + _version + " exe=" + _exeName + " total=" + _totalSize + " release=" + _releaseDate);
+        }
+
+        // 检测本机已装 Fntv-Plus: 卸载注册表(HKCU 优先, HKLM 次之)的 DisplayName/DisplayVersion/
+        // InstallLocation; 兜底扫默认目录里已装 exe 的文件版本。结果用于封面页「首次安装/
+        // 覆盖升级」说明与模式/路径预选(保证原地覆盖)。
+        void DetectExistingInstall() {
+            try {
+                var roots = new[] {
+                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView>(
+                        Microsoft.Win32.RegistryHive.CurrentUser, Microsoft.Win32.RegistryView.Default),
+                    new Tuple<Microsoft.Win32.RegistryHive, Microsoft.Win32.RegistryView>(
+                        Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64)
+                };
+                foreach (var root in roots) {
+                    using (var baseKey = Microsoft.Win32.RegistryKey.OpenBaseKey(root.Item1, root.Item2)) {
+                        using (var k = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall")) {
+                            if (k == null) continue;
+                            foreach (var sub in k.GetSubKeyNames()) {
+                                using (var sk = k.OpenSubKey(sub)) {
+                                    var name = sk == null ? null : sk.GetValue("DisplayName") as string;
+                                    if (name == null || !name.StartsWith("Fntv-Plus", StringComparison.OrdinalIgnoreCase)) continue;
+                                    _installedVersion = (sk.GetValue("DisplayVersion") as string) ?? _installedVersion;
+                                    _existingDir = (sk.GetValue("InstallLocation") as string) ?? "";
+                                    _existingMode = root.Item1 == Microsoft.Win32.RegistryHive.LocalMachine ? "all" : "user";
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(_installedVersion)) break;
+                }
+            } catch (Exception ex) { Log("detect reg: " + ex.Message); }
+            try {
+                if (string.IsNullOrEmpty(_installedVersion)) {
+                    foreach (var cand in new[] { _defaultUserPath, _defaultAllPath }) {
+                        var exe = Path.Combine(cand, _exeName);
+                        if (File.Exists(exe)) {
+                            _installedVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(exe).FileVersion ?? "";
+                            _existingDir = cand;
+                            _existingMode = cand == _defaultAllPath ? "all" : "user";
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ex) { Log("detect exe: " + ex.Message); }
+            if (_existingDir != null && _existingDir.EndsWith("\\")) _existingDir = _existingDir.TrimEnd('\\');
+            Log("detect: installed=" + _installedVersion + " dir=" + _existingDir + " mode=" + _existingMode);
         }
 
         long TotalSize() {
@@ -324,7 +374,10 @@ namespace FntvSetupUi {
             switch (type) {
                 case "ready":
                     Post(MiniJson.Obj("type", "meta", "version", _version, "exeName", _exeName,
-                        "mode", "user", "path", _defaultUserPath));
+                        "installed", _installedVersion,
+                        "mode", string.IsNullOrEmpty(_existingMode) ? "user" : _existingMode,
+                        "path", string.IsNullOrEmpty(_existingDir) ? _defaultUserPath : _existingDir,
+                        "releaseDate", _releaseDate));
                     // --auto <mode>: E2E 自动化(配合 --auto-path/--auto-exit), 无人值守真机验证
                     string autoMode = Args.Get(_launchArgs, "auto", "");
                     if (autoMode == "user" || autoMode == "all") {

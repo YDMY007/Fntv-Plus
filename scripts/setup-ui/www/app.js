@@ -147,6 +147,29 @@
     if (e.key === 'Escape' && !$('licOverlay').hidden) closeLicense(false);
   });
 
+  /* ── 安装说明状态条: 首次安装 / 版本覆盖升级 / 发布日期 ── */
+  function renderInstallInfo(m) {
+    var el = $('instInfo');
+    var txt = $('instInfoText');
+    var date = m.releaseDate || '';
+    if (m.installed) {
+      el.classList.add('upgrade');
+      if (m.installed === m.version) {
+        txt.innerHTML = '<b>覆盖重装</b> · 已安装 v' + m.installed + ' · 将覆盖修复（配置保留）';
+      } else {
+        txt.innerHTML = '<b>覆盖升级</b> · v' + m.installed + ' → v' + m.version + '（配置保留）';
+      }
+    } else {
+      txt.innerHTML = '<b>首次安装</b> · 将安装 v' + m.version + '（不影响系统内其他软件）';
+    }
+    if (date) {
+      var d = document.createElement('span');
+      d.className = 'ii-date';
+      d.textContent = '安装包发布 ' + date;
+      txt.appendChild(d);
+    }
+  }
+
   /* ── host → web ── */
   if (host) {
     host.addEventListener('message', function (e) {
@@ -161,6 +184,7 @@
           setMode(m.mode || 'user');
           setPath(m.path || '');
           $('dirHint').textContent = '点「浏览…」选择安装文件夹';
+          renderInstallInfo(m);
           break;
         case 'folder':
           if (m.path) setPath(m.path);
