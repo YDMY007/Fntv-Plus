@@ -77,7 +77,7 @@ function makeWwwZip() {
   const stage = Path.join(OUT, '_www');
   Fs.rmSync(stage, { recursive: true, force: true });
   Fs.mkdirSync(stage, { recursive: true });
-  const files = ['index.html', 'app.css', 'app.js', 'license.txt', 'logo.png'];
+  const files = ['index.html', 'app.css', 'app.js', 'license.html', 'logo.png'];
   for (const f of files) {
     Fs.copyFileSync(Path.join(www, f), Path.join(stage, f));
   }
@@ -107,21 +107,41 @@ function writeMeta(targetDir) {
 }
 
 function makeLicense() {
-  const lic = Fs.readFileSync(Path.join(ROOT, 'LICENSE'), 'utf8');
-  const isGpl = /GNU GENERAL PUBLIC LICENSE/i.test(lic);
-  const zh = [
-    'Fntv-Plus 用户许可协议',
-    '',
-    '本软件是飞牛影视(fnOS)的第三方增强客户端, 按 ' + (isGpl ? 'GNU General Public License v3' : '仓库所附开源协议') + ' 开源发布。',
-    '要点:',
-    '· 本软件是自由软件, 可在协议条款下自由使用、修改与再分发, 须保留版权与许可声明;',
-    '· 本软件按「现状」提供, 不附带任何担保, 作者不对直接或间接损失承担责任;',
-    '· 本软件与飞牛/fnOS 官方无隶属关系, 相关商标归各自权利人所有。',
-    '',
-    '以下为许可协议原文:',
-    '',
-  ].join('\r\n');
-  Fs.writeFileSync(Path.join(SRC, 'www', 'license.txt'), zh + '\r\n' + lic.replace(/\n/g, '\r\n'));
+  // 协议排版化: 中文要点导语块 + GPL 原文按段落/条款标题结构化(纯文本墙 → 可读版式)
+  const raw = Fs.readFileSync(Path.join(ROOT, 'LICENSE'), 'utf8').replace(/\r\n/g, '\n');
+  const isGpl = /GNU GENERAL PUBLIC LICENSE/i.test(raw);
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const paras = raw.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const body = paras.map((p, i) => {
+    if (i === 0 && isGpl) {
+      // 文档头: GNU GENERAL PUBLIC LICENSE / Version 3, 29 June 2007...
+      return '<div class="lic-doc-head">' + esc(p).replace(/\n/g, '<br>') + '</div>';
+    }
+    const num = p.match(/^(\d+)\.\s/);
+    if (num) {
+      return '<h4><span class="ln">' + num[1] + '</span>' +
+        esc(p.replace(/^\d+\.\s*/, '')).replace(/\n/g, ' ') + '</h4>';
+    }
+    if (/^[A-Z0-9 ,.\'()\-]+$/.test(p) && p.length < 80) {
+      return '<h3>' + esc(p) + '</h3>';   // TERMS AND CONDITIONS 等全大写节标题
+    }
+    if (/^Preamble$/i.test(p)) return '<h3>Preamble(前言)</h3>';
+    return '<p>' + esc(p).replace(/\n/g, ' ') + '</p>';
+  }).join('\n');
+
+  const html = `<div class="lic-intro">
+  <h2>Fntv-Plus 用户许可协议</h2>
+  <p>本软件是飞牛影视(fnOS)的第三方增强客户端, 按 ${isGpl ? 'GNU General Public License v3' : '仓库所附开源协议'} 开源发布。点击「同意并继续」即表示你已阅读并同意以下要点与所附协议原文。</p>
+  <ul>
+    <li>本软件是自由软件, 可在协议条款下自由使用、修改与再分发, 须保留版权与许可声明;</li>
+    <li>本软件按「现状」提供, 不附带任何担保, 作者不对直接或间接损失承担责任;</li>
+    <li>本软件与飞牛/fnOS 官方无隶属关系, 相关商标归各自权利人所有。</li>
+  </ul>
+</div>
+${body}`;
+  Fs.writeFileSync(Path.join(SRC, 'www', 'license.html'), html);
+  Fs.rmSync(Path.join(SRC, 'www', 'license.txt'), { force: true });
 }
 
 // ── 主流程 ──

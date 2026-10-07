@@ -70,10 +70,10 @@
     ov.hidden = false;
     requestAnimationFrame(function () { ov.classList.add('show'); });
     if (!licLoaded) {
-      fetch('license.txt', { cache: 'no-store' })
+      fetch('license.html', { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.text() : Promise.reject(0); })
-        .then(function (t) { $('licBody').textContent = t; licLoaded = true; })
-        .catch(function () { $('licBody').textContent = '许可协议文件缺失。本软件基于 MIT 协议开源发布。'; });
+        .then(function (t) { $('licBody').innerHTML = t; licLoaded = true; })
+        .catch(function () { $('licBody').textContent = '许可协议文件缺失。本软件按仓库所附开源协议发布。'; });
     }
   }
   function closeLicense(accept) {

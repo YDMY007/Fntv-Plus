@@ -132,10 +132,27 @@ body { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans
   box-shadow: 0 24px 70px rgba(40,70,140,.30), inset 0 1px 0 rgba(255,255,255,1); overflow: hidden; }
 .lic-head { height: 52px; flex: none; display: flex; align-items: center; justify-content: space-between;
   padding: 0 12px 0 24px; font-size: 15px; font-weight: 800; color: #1b2540; }
-.lic-body { flex: 1; overflow-y: auto; padding: 4px 26px 16px; font-size: 12.5px; line-height: 1.85;
+.lic-body { flex: 1; overflow-y: auto; padding: 4px 26px 16px; font-size: 12.5px; line-height: 1.8;
   color: #42506e; user-select: text; }
-.lic-body h3 { font-size: 13px; color: #1b2540; margin: 12px 0 4px; }
-.lic-body p { margin: 4px 0; }
+/* 导语块: 中文要点高亮底, 无边框 */
+.lic-intro { background: rgba(61,109,245,.07); border-radius: 12px;
+  padding: 13px 16px 11px; margin: 10px 0 4px; }
+.lic-intro h2 { font-size: 14.5px; color: #16233f; margin-bottom: 6px; letter-spacing: .5px; }
+.lic-intro p { margin: 0 0 8px; }
+.lic-intro ul { margin: 0; padding-left: 18px; }
+.lic-intro li { margin: 3px 0; }
+/* 原文版式: 文档头居中, 全大写节标题居中, 条款号圆标, 段落两端对齐 */
+.lic-body .lic-doc-head { text-align: center; font-weight: 800; color: #16233f;
+  line-height: 1.6; margin: 12px 0 10px; }
+.lic-body h3 { text-align: center; font-size: 13.5px; color: #16233f;
+  letter-spacing: 1.5px; margin: 18px 0 8px; }
+.lic-body h4 { margin: 16px 0 6px; font-size: 13px; color: #1b2540;
+  display: flex; align-items: center; }
+.lic-body h4 .ln { flex: none; display: inline-flex; width: 21px; height: 21px;
+  border-radius: 7px; background: rgba(61,109,245,.12); color: #3d6df5;
+  align-items: center; justify-content: center; margin-right: 9px;
+  font-size: 11.5px; font-weight: 800; }
+.lic-body p { margin: 0 0 10px; text-align: justify; }
 .lic-foot { flex: none; display: flex; justify-content: flex-end; padding: 12px 20px; }
 
 /* ── ② 安装选项页 ── */
