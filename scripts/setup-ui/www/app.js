@@ -165,7 +165,7 @@
     if (date) {
       var d = document.createElement('span');
       d.className = 'ii-date';
-      d.textContent = '安装包发布 ' + date;
+      d.textContent = '安装包构建时间 ' + date;
       txt.appendChild(d);
     }
   }
