@@ -7,12 +7,12 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<div class="stage" data-drag>
+<div class="stage">
   <div class="blob b1"></div><div class="blob b2"></div>
   <div class="blob b3"></div><div class="blob b4"></div>
   <div class="noise"></div>
 
-  <!-- 自绘窗口 chrome -->
+  <!-- 自绘窗口 chrome(仅顶部条可拖窗; 全窗拖拽会吞掉一切点击, 勿回退) -->
   <header class="chrome" data-drag>
     <div class="brand">
       <img class="logo" src="logo.png" alt="">
@@ -87,12 +87,12 @@
         <div class="optcard mode selected" id="cardUser" data-mode="user">
           <div class="radio on"><i></i></div>
           <div class="ot">仅为我安装</div>
-          <div class="od">仅为当前 Windows 用户安装 · 无需管理员权限</div>
+          <div class="od">仅为当前 Windows 用户安装<br>无需管理员权限</div>
         </div>
         <div class="optcard mode" id="cardAll" data-mode="all">
           <div class="radio"><i></i></div>
           <div class="ot">为使用这台电脑的任何人安装</div>
-          <div class="od">为所有用户安装 · 需要管理员权限</div>
+          <div class="od">为所有用户安装<br>需要管理员权限</div>
         </div>
       </div>
       <div class="optcard loc">
@@ -151,7 +151,7 @@
     </div>
   </main>
 
-  <div class="floor" data-drag>FNTV-PLUS</div>
+  <div class="floor">FNTV-PLUS</div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

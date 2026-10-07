@@ -133,7 +133,10 @@
   });
   document.querySelectorAll('[data-drag]').forEach(function (el) {
     el.addEventListener('mousedown', function (e) {
-      if (e.button === 0) send({ type: 'drag' });
+      // 只做窗口拖动; 点在可交互控件上时放行, 否则 DragMove 会吞掉本次点击
+      if (e.button !== 0) return;
+      if (e.target && e.target.closest && e.target.closest('button, a, input, .agree, .opt-left .optcard')) return;
+      send({ type: 'drag' });
     });
   });
   document.addEventListener('keydown', function (e) {

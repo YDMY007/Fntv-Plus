@@ -259,6 +259,8 @@ namespace FntvSetupUi {
             var m = MiniJson.Parse(e.TryGetWebMessageAsString());
             string type;
             if (!m.TryGetValue("type", out type)) return;
+            Log("web: " + type + (m.ContainsKey("mode") ? " mode=" + m["mode"] : "") + (m.ContainsKey("path") ? " path=" + m["path"] : "")
+                + (m.ContainsKey("x") ? " at=" + m["x"] + "," + m["y"] + " t=" + (m.ContainsKey("t") ? m["t"] : "") : ""));
             switch (type) {
                 case "ready":
                     Post(MiniJson.Obj("type", "meta", "version", _version, "exeName", _exeName,
@@ -315,14 +317,23 @@ namespace FntvSetupUi {
                 }
                 case "launch":
                     if (!_launched && _finished) {
-                        try {
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                                FileName = Path.Combine(_instDir, _exeName),
-                                UseShellExecute = true,
-                                Arguments = "--updated"
-                            });
-                            _launched = true;
-                        } catch (Exception ex) { Post(MiniJson.Obj("type", "error", "msg", "启动应用失败: " + ex.Message)); }
+                        // 刚写盘的新 exe 可能被杀软短暂锁定(首点报「找不到文件」、再点自愈,
+                        // lc-1275 用户实测) → 最多重试 3 次, 间隔 600ms
+                        string exePath = Path.Combine(_instDir, _exeName);
+                        for (int attempt = 1; attempt <= 3 && !_launched; attempt++) {
+                            try {
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                                    FileName = exePath,
+                                    UseShellExecute = true,
+                                    Arguments = "--updated"
+                                });
+                                _launched = true;
+                            } catch (Exception ex) {
+                                Log("launch attempt " + attempt + " failed: " + ex.Message);
+                                if (attempt == 3) Post(MiniJson.Obj("type", "error", "msg", "启动应用失败: " + ex.Message));
+                                else Thread.Sleep(600);
+                            }
+                        }
                     }
                     Post(MiniJson.Obj("type", "close"));
                     break;
