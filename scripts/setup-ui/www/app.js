@@ -137,7 +137,10 @@
     });
   });
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && $('screen-welcome').classList.contains('active') && state.agreed) show('options');
+    if (e.key === 'Enter') {
+      if ($('screen-welcome').classList.contains('active') && state.agreed) show('options');
+      else if ($('screen-options').classList.contains('active')) $('btnInstall').click();
+    }
     if (e.key === 'Escape' && !$('licOverlay').hidden) closeLicense(false);
   });
 
@@ -176,10 +179,12 @@
       }
     });
     send({ type: 'ready' });
-    /* ?tour=1 自动巡演: 截图验收用 */
+    /* ?tour=1 自动巡演: 截图验收用(含协议弹层一帧) */
     if (/[?&]tour=1/.test(location.search)) {
-      setTimeout(function () { $('btnWelcomeNext').disabled = false; $('agreeRow').classList.add('on'); state.agreed = true; $('btnWelcomeNext').click(); }, 1200);
-      setTimeout(function () { $('btnInstall').click(); }, 2600);
+      setTimeout(function () { openLicense(); }, 1000);
+      setTimeout(function () { closeLicense(true); }, 2300);
+      setTimeout(function () { $('btnWelcomeNext').disabled = false; $('agreeRow').classList.add('on'); state.agreed = true; $('btnWelcomeNext').click(); }, 2600);
+      setTimeout(function () { $('btnInstall').click(); }, 4000);
     }
   } else {
     /* 浏览器直接打开 www/ 时给演示数据 */

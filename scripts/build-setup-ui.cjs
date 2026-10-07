@@ -104,20 +104,21 @@ function writeMeta(targetDir) {
 }
 
 function makeLicense() {
-  const mit = Fs.readFileSync(Path.join(ROOT, 'LICENSE'), 'utf8');
+  const lic = Fs.readFileSync(Path.join(ROOT, 'LICENSE'), 'utf8');
+  const isGpl = /GNU GENERAL PUBLIC LICENSE/i.test(lic);
   const zh = [
     'Fntv-Plus 用户许可协议',
     '',
-    '本软件是飞牛影视(fnOS)的第三方增强客户端, 基于 MIT 协议开源发布。',
-    '在遵守以下要点的前提下, 你可以自由使用、复制、修改与分发本软件:',
-    '· 保留原始版权声明与许可声明;',
-    '· 本软件按「现状」提供, 作者不对任何直接或间接损失承担责任;',
-    '· 本软件与飞牛/fnOS 官方无隶属关系, 商标归各自权利人所有。',
+    '本软件是飞牛影视(fnOS)的第三方增强客户端, 按 ' + (isGpl ? 'GNU General Public License v3' : '仓库所附开源协议') + ' 开源发布。',
+    '要点:',
+    '· 本软件是自由软件, 可在协议条款下自由使用、修改与再分发, 须保留版权与许可声明;',
+    '· 本软件按「现状」提供, 不附带任何担保, 作者不对直接或间接损失承担责任;',
+    '· 本软件与飞牛/fnOS 官方无隶属关系, 相关商标归各自权利人所有。',
     '',
-    '以下为 MIT 许可协议原文:',
+    '以下为许可协议原文:',
     '',
   ].join('\r\n');
-  Fs.writeFileSync(Path.join(SRC, 'www', 'license.txt'), zh + '\r\n' + mit.replace(/\n/g, '\r\n'));
+  Fs.writeFileSync(Path.join(SRC, 'www', 'license.txt'), zh + '\r\n' + lic.replace(/\n/g, '\r\n'));
 }
 
 // ── 主流程 ──

@@ -109,7 +109,8 @@ namespace FntvSetupUi {
     public class App : Application {
         Window _win;
         WebView2 _wv;
-        string _setupExe, _wwwDir, _workDir, _instDir = "", _exeName = "Fntv-Plus.exe", _version = "";
+        string _setupExe, _wwwDir, _wwwBase, _workDir, _instDir = "", _exeName = "Fntv-Plus.exe", _version = "";
+        long _totalSize;
         string[] _launchArgs = new string[0];
         bool _dev, _installing, _finished, _launched;
         System.Diagnostics.Process _child;
@@ -151,6 +152,7 @@ namespace FntvSetupUi {
             _defaultAllPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Fntv-Plus");
 
             if (string.IsNullOrEmpty(_wwwDir)) _wwwDir = AppDomain.CurrentDomain.BaseDirectory;
+            _wwwBase = _wwwDir;   // 资材基目录(totalsize/app-meta 所在, zip 解压后 _wwwDir 会切走)
 
             // 打包态: www.zip 就地解压(开发态直接用 www 目录)
             string zip = Path.Combine(_wwwDir, "www.zip");
@@ -187,9 +189,10 @@ namespace FntvSetupUi {
                     c.WebMessageReceived += OnWebMessage;
                     c.SetVirtualHostNameToFolderMapping("installer.local", _wwwDir, CoreWebView2HostResourceAccessKind.Allow);
                     c.NavigationCompleted += (s2, e2) => Log("nav ok=" + e2.IsSuccess + " err=" + e2.WebErrorStatus);
-                    c.Navigate(_dev ? "https://installer.local/index.html?tour=1" : "https://installer.local/index.html");
                     string shotsDir = Args.Get(_launchArgs, "shots", "");
-                    if (_dev && !string.IsNullOrEmpty(shotsDir)) ScheduleShots(shotsDir);
+                    bool tour = !string.IsNullOrEmpty(shotsDir);
+                    c.Navigate(tour ? "https://installer.local/index.html?tour=1" : "https://installer.local/index.html");
+                    if (tour) ScheduleShots(shotsDir);
                 } catch (Exception ex) {
                     MessageBox.Show("WebView2 运行时初始化失败: " + ex.Message +
                         "\n\n请安装 Microsoft Edge WebView2 运行时后重试。", "Fntv-Plus 安装",
@@ -211,14 +214,15 @@ namespace FntvSetupUi {
             return null;
         }
 
-        // --shots=<dir>: dev 巡演定时截图(WebView2 CapturePreview, 不截屏幕)
+        // --shots=<dir>: 巡演定时截图(WebView2 CapturePreview, 不截屏幕), 含协议弹层
         void ScheduleShots(string dir) {
             Directory.CreateDirectory(dir);
             var beats = new[] {
-                new { delay = 900, name = "p1-welcome" },
-                new { delay = 2300, name = "p2-options" },
-                new { delay = 4300, name = "p3-progress" },
-                new { delay = 9500, name = "p4-finish" },
+                new { delay = 800, name = "p1-welcome" },
+                new { delay = 1600, name = "p1b-license" },
+                new { delay = 3400, name = "p2-options" },
+                new { delay = 5400, name = "p3-progress" },
+                new { delay = 11500, name = "p4-finish" },
             };
             foreach (var b in beats) {
                 var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(b.delay) };
@@ -237,17 +241,18 @@ namespace FntvSetupUi {
 
         void LoadMeta() {
             try {
-                var j = MiniJson.Parse(File.ReadAllText(Path.Combine(_wwwDir, "app-meta.json")));
+                var j = MiniJson.Parse(File.ReadAllText(Path.Combine(_wwwBase, "app-meta.json")));
                 _version = j.ContainsKey("version") ? j["version"] : "";
                 _exeName = j.ContainsKey("exeName") ? j["exeName"] : _exeName;
             } catch { }
+            try {
+                _totalSize = long.Parse(File.ReadAllText(Path.Combine(_wwwBase, "totalsize.txt")).Trim());
+            } catch { _totalSize = 0; }
+            Log("meta: version=" + _version + " exe=" + _exeName + " total=" + _totalSize);
         }
 
         long TotalSize() {
-            try {
-                var t = File.ReadAllText(Path.Combine(_wwwDir, "totalsize.txt")).Trim();
-                return long.Parse(t);
-            } catch { return 0; }
+            return _totalSize;
         }
 
         void OnWebMessage(object s, CoreWebView2WebMessageReceivedEventArgs e) {
