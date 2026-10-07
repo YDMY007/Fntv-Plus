@@ -180,7 +180,7 @@
         case 'meta':
           state.version = m.version || '';
           state.exeName = m.exeName || state.exeName;
-          $('verWelcome').textContent = 'v' + m.version + ' · 安装向导';
+          $('floorTag').textContent = 'FNTV-PLUS · V' + m.version;
           setMode(m.mode || 'user');
           setPath(m.path || '');
           $('dirHint').textContent = '点「浏览…」选择安装文件夹';
@@ -213,10 +213,10 @@
       setTimeout(function () { $('btnWelcomeNext').disabled = false; $('agreeRow').classList.add('on'); state.agreed = true; $('btnWelcomeNext').click(); }, 2600);
       setTimeout(function () { $('btnInstall').click(); }, 4000);
     }
-  } else {
-    /* 浏览器直接打开 www/ 时给演示数据 */
-    $('verWelcome').textContent = 'v3.8.0 · 安装向导（预览）';
-    setPath('C:\\Users\\demo\\AppData\\Local\\Programs\\Fntv-Plus');
-    setMode('user');
-  }
+    } else {
+      /* 浏览器直接打开 www/ 时给演示数据 */
+      $('floorTag').textContent = 'FNTV-PLUS · V3.8.0';
+      setPath('C:\\Users\\demo\\AppData\\Local\\Programs\\Fntv-Plus');
+      setMode('user');
+    }
 })();

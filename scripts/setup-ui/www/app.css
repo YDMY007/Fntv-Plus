@@ -68,8 +68,9 @@ body { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans
 .ft { margin-top: 8px; font-size: 15px; font-weight: 700; color: #1b2540; }
 .fd { margin-top: 5px; font-size: 11.5px; line-height: 1.62; color: #4d5a7a; }
 
-.footbar { position: absolute; left: 60px; right: 44px; bottom: 2px; height: 84px;
-  display: flex; align-items: flex-end; justify-content: space-between; }
+/* 底栏: 左右统一 60px 安全边距(与上方状态条/卡片对齐), 控件垂直居中一线 */
+.footbar { position: absolute; left: 60px; right: 60px; bottom: 8px; height: 64px;
+  display: flex; align-items: center; justify-content: space-between; }
 .footbar.center { left: 0; right: 0; justify-content: center; gap: 16px; bottom: 6px; }
 
 /* ── 安装说明状态条: 首次安装 / 覆盖升级 + 版本迁移 + 发布日期 ── */
@@ -99,8 +100,7 @@ body { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans
 .agree a { color: #3d6df5; text-decoration: none; }
 .agree a:hover { text-decoration: underline; }
 
-.pillbar { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.ver { font-size: 10.5px; color: #8896b6; letter-spacing: .5px; }
+/* 版本号统一走底部 floor 标识行(FNTV-PLUS · vX), 不再占 CTA 上方 */
 
 /* ── 药丸按钮 ── */
 .pill { position: relative; height: 50px; min-width: 170px; padding: 0 30px; border: 0; border-radius: 26px;

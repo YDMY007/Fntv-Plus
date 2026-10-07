@@ -46,6 +46,8 @@ ManifestDPIAware true
 !macro customInit
   ${GetOptions} $CMDLINE "/_IPC=" $ipcDir
   ${IfNot} ${Silent}
+    ; 编译期打点: 安装包构建时刻写入 app-meta.json(封面页「安装包发布」数据源)
+    !system 'node "${BUILD_RESOURCES_DIR}\..\scripts\stamp-meta.cjs"'
     System::Call 'kernel32::GetCurrentProcessId() i.r0'
     StrCpy $uiBase "$TEMP\fntv-setup-$0"
     CreateDirectory "$uiBase"
