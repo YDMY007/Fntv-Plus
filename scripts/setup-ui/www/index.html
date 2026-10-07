@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=780, initial-scale=1">
+<title>Fntv-Plus 安装</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="stage" data-drag>
+  <div class="blob b1"></div><div class="blob b2"></div>
+  <div class="blob b3"></div><div class="blob b4"></div>
+  <div class="noise"></div>
+
+  <!-- 自绘窗口 chrome -->
+  <header class="chrome" data-drag>
+    <div class="brand">
+      <img class="logo" src="logo.png" alt="">
+      <span class="name">Fntv-Plus</span>
+      <span class="badge" id="chromeBadge">SETUP</span>
+    </div>
+    <div class="winbtns">
+      <button class="winbtn" id="btnMin" title="最小化" tabindex="-1">
+        <svg viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="winbtn winbtn-close" id="btnClose" title="关闭" tabindex="-1">
+        <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ════ ① 欢迎 + 许可协议 ════ -->
+  <main class="screen active" id="screen-welcome">
+    <div class="hero">
+      <h1>飞牛影视 · 第三方增强客户端</h1>
+      <p class="s">自定义海报页 · 双外置播放器 · 聚合便利功能<br>在飞牛影视之上, 打造属于你的观影工作台。</p>
+    </div>
+    <div class="feats">
+      <div class="feat">
+        <div class="fi">🖼️</div>
+        <div class="ft">自定义海报页</div>
+        <div class="fd">首页轮播美化 · 海报布局自定义<br>四种轮播样式 · 玻璃主题</div>
+      </div>
+      <div class="feat">
+        <div class="fi">🎬</div>
+        <div class="ft">双外置播放器</div>
+        <div class="fd">MPV / PotPlayer 开箱即用<br>插帧 · 着色器 · ICC 校色 · 4K HDR</div>
+      </div>
+      <div class="feat">
+        <div class="fi">🧩</div>
+        <div class="ft">聚合便利功能</div>
+        <div class="fd">聚合弹幕 · 自定义刮削 · 网盘直连<br>跳过片头片尾 · 持续更新</div>
+      </div>
+    </div>
+    <div class="footbar">
+      <label class="agree" id="agreeRow">
+        <span class="cb" id="agreeCb"><svg viewBox="0 0 12 12"><path d="M2.2 6.4l2.6 2.6 5-5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>我已阅读并同意</span><a href="#" id="linkLicense">《用户许可协议》</a>
+      </label>
+      <div class="pillbar">
+        <div class="ver" id="verWelcome">v · 安装向导</div>
+        <button class="pill primary" id="btnWelcomeNext" disabled>开始安装</button>
+      </div>
+    </div>
+    <div class="lic-overlay" id="licOverlay" hidden>
+      <div class="lic-panel">
+        <div class="lic-head">
+          <span>用户许可协议</span>
+          <button class="winbtn" id="licClose"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="lic-body" id="licBody">加载中…</div>
+        <div class="lic-foot">
+          <button class="pill primary small" id="licAccept">同意并继续</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ════ ② 安装选项 ════ -->
+  <main class="screen" id="screen-options">
+    <div class="hero tight">
+      <h1>安装选项</h1>
+      <p class="s">选择安装方式与位置</p>
+    </div>
+    <div class="optgrid">
+      <div class="opt-left">
+        <div class="optcard mode selected" id="cardUser" data-mode="user">
+          <div class="radio on"><i></i></div>
+          <div class="ot">仅为我安装</div>
+          <div class="od">仅为当前 Windows 用户安装 · 无需管理员权限</div>
+        </div>
+        <div class="optcard mode" id="cardAll" data-mode="all">
+          <div class="radio"><i></i></div>
+          <div class="ot">为使用这台电脑的任何人安装</div>
+          <div class="od">为所有用户安装 · 需要管理员权限</div>
+        </div>
+      </div>
+      <div class="optcard loc">
+        <div class="ot">安装位置</div>
+        <div class="pathplate" id="pathPlate">
+          <div class="plabel">当前安装路径</div>
+          <div class="ptext" id="pathText"></div>
+        </div>
+        <div class="locrow">
+          <button class="pill secondary small" id="btnBrowse">浏览…</button>
+          <span class="dhint" id="dirHint"></span>
+        </div>
+        <div class="infoplate" id="modeHint">将为当前用户安装, 无需管理员权限。</div>
+      </div>
+    </div>
+    <div class="footbar center">
+      <button class="pill secondary" id="btnBack">上一步</button>
+      <button class="pill primary" id="btnInstall">开始安装</button>
+    </div>
+  </main>
+
+  <!-- ════ ③ 正在安装 ════ -->
+  <main class="screen" id="screen-progress">
+    <div class="prog-wrap">
+      <div class="ring">
+        <svg viewBox="0 0 120 120">
+          <defs>
+            <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#3d6df5"/>
+              <stop offset="55%" stop-color="#5566f3"/>
+              <stop offset="100%" stop-color="#7a5cf0"/>
+            </linearGradient>
+          </defs>
+          <circle class="ring-track" cx="60" cy="60" r="52"/>
+          <circle class="ring-fill" id="ringFill" cx="60" cy="60" r="52"/>
+        </svg>
+        <div class="ring-num"><span id="pctNum">0</span><i>%</i></div>
+      </div>
+      <div class="pt" id="progTitle">正在安装</div>
+      <div class="ps" id="progSub">正在将 Fntv-Plus 安装到您的计算机 · 请稍候</div>
+      <div class="bar">
+        <div class="bar-fill" id="barFill"><i class="bar-shine"></i></div>
+      </div>
+      <div class="pfile" id="progFile">正在准备…</div>
+    </div>
+  </main>
+
+  <!-- ════ ④ 完成 ════ -->
+  <main class="screen" id="screen-finish">
+    <div class="done-ring"><span>✓</span></div>
+    <div class="done-t">安装完成</div>
+    <div class="done-s">Fntv-Plus 已就绪 · 祝观影愉快<br>桌面与开始菜单已创建快捷方式</div>
+    <div class="footbar center">
+      <button class="pill secondary" id="btnFinishClose">完成</button>
+      <button class="pill primary" id="btnLaunch">立即体验</button>
+    </div>
+  </main>
+
+  <div class="floor" data-drag>FNTV-PLUS</div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

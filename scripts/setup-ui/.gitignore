@@ -1,0 +1,8 @@
+webview2.nupkg
+extracted/
+shots/
+www/logo.png
+www/license.txt
+www/app-meta.json
+www/totalsize.txt
+setup-ui.rsp
