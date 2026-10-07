@@ -92,15 +92,18 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
             && b.offsetParent !== null);
     if (buttons.length === 0) return null;
 
+    // [lc-1282] 文本统一用 textContent：innerText 读取强制样式+布局计算，本函数
+    // 在每次 DOM 变动/轮询中被全文档逐按钮调用，是布局抖动热点。能走到这里的按钮
+    // 已被上方 offsetParent 过滤为可见，textContent 与 innerText 取值等价。
     // 1) 主播放按钮：primary 样式 + 播放语义文本（电影/详情页主按钮最常见形态）
     let btn = buttons.find(b =>
-        b.classList.contains('semi-button-primary') && isPlaySemanticText(b.innerText)
+        b.classList.contains('semi-button-primary') && isPlaySemanticText(b.textContent || '')
     );
     if (btn) return btn;
 
     // 2) 任何可见按钮，含播放语义文本（覆盖主页卡片/推荐/搜索结果等入口）
     btn = buttons.find(b =>
-        isPlaySemanticText(b.innerText) && b.offsetParent !== null
+        isPlaySemanticText(b.textContent || '') && b.offsetParent !== null
     );
     if (btn) return btn;
 
@@ -112,7 +115,7 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
     for (const b of buttons) {
         const icon = b.querySelector('svg > path[d]') as SVGPathElement | null;
         const d = icon ? (icon.getAttribute('d') || '') : '';
-        const semantic = isPlaySemanticText(b.getAttribute('aria-label') || b.innerText || '');
+        const semantic = isPlaySemanticText(b.getAttribute('aria-label') || b.textContent || '');
         if (semantic && (d.startsWith('M5.984') || d.includes('18.819'))) {
             return b;
         }
@@ -130,13 +133,14 @@ function findReferenceButton(context: Document | Element = document): HTMLButton
     return null;
 }
 
-function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText: string): void {
+// [lc-1282] 返回是否真的注入了克隆按钮（供轮询退避判定「本轮有实效」）
+function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText: string): boolean {
     // 已注入按钮：标签与当前默认播放器一致则跳过；
     // 不一致（切换了 MPV/PotPlayer）则移除旧按钮、清除占用标记后重建，避免需多次刷新才更新
     const existing = document.querySelector('[data-custom-play]') as HTMLElement | null;
     if (existing) {
         const curText = (existing.getAttribute('aria-label') || existing.textContent || '').trim();
-        if (curText === btnText) return;
+        if (curText === btnText) return false;
         existing.remove();
         const ref = findReferenceButton();
         if (ref) ref.removeAttribute('data-mpv-btn'); // 清除占用标记，允许重新注入新播放器按钮
@@ -147,7 +151,7 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
         if (marked && marked.offsetParent !== null) marked.removeAttribute('data-mpv-btn');
     }
     const referenceButton = findReferenceButton();
-    if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return;
+    if (!referenceButton || referenceButton.hasAttribute('data-mpv-btn')) return false;
 
     // 仅在详情页「主播放按钮」旁注入 MPV 按钮;
     // 跳过播放控制栏里的纯图标按钮(播放/暂停, 只有 svg 无文字), 否则原生播放页控制栏会出现多余的 MPV 按钮。
@@ -156,8 +160,8 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
     //   改为按「主按钮形态」放行(primary 或 !min-w-[150px]); 仅对真正的纯图标小按钮(控制栏播放/暂停)才要求文字。
     const isMainButtonShape = referenceButton.classList.contains('semi-button-primary')
         || (referenceButton.getAttribute('class') || '').includes('!min-w-[150px]');
-    const hasText = (referenceButton.innerText || '').trim().length > 0;
-    if (!isMainButtonShape && !hasText) return;
+    const hasText = (referenceButton.textContent || '').trim().length > 0;
+    if (!isMainButtonShape && !hasText) return false;
 
     logger.info('Detected inject page, injecting play button...');
 
@@ -185,14 +189,16 @@ function clonePlayBtnAndInject(callback: (button: HTMLElement) => void, btnText:
     if (parentNode) {
         parentNode.insertBefore(newButton, referenceButton.nextSibling);
     }
+    return true;
 }
 
 // 拦截原有播放按钮，按默认播放器直接播放
-function interceptOriginalButton(defaultPlayer: 'mpv' | 'potplayer'): void {
+// [lc-1282] 返回是否真的拦截了原按钮（供轮询退避判定「本轮有实效」）
+function interceptOriginalButton(defaultPlayer: 'mpv' | 'potplayer'): boolean {
     const referenceButton = findReferenceButton();
-    if (!referenceButton || referenceButton.hasAttribute('data-mpv-intercepted')) return;
+    if (!referenceButton || referenceButton.hasAttribute('data-mpv-intercepted')) return false;
     // 已被遮罩插件拦截的按钮不再重复拦截，避免重复触发播放
-    if (referenceButton.hasAttribute('data-mask-intercepted')) return;
+    if (referenceButton.hasAttribute('data-mask-intercepted')) return false;
 
     logger.info('Detected page, intercepting original play button...');
 
@@ -213,6 +219,7 @@ function interceptOriginalButton(defaultPlayer: 'mpv' | 'potplayer'): void {
 
     // 在捕获阶段添加事件监听器，确保优先拦截
     referenceButton.addEventListener('click', clickHandler, true);
+    return true;
 }
 
 // 拦截季/选集（全部剧集）页面的主播放按钮：弹出「原生 / 外部播放器」选择，而不是立即播放
@@ -250,19 +257,20 @@ function interceptOriginalButtonWithChoice(config: PlayButtonConfig): void {
     referenceButton.addEventListener('click', clickHandler, true);
 }
 
-async function injectCustomPlayBtn(): Promise<void> {
+// [lc-1282] 返回是否实际做了注入/拦截（true=本轮有实效；页面无候选或早已完成时 false）
+async function injectCustomPlayBtn(): Promise<boolean> {
     // 获取配置
     const config = await getPlayButtonConfig();
 
     if (config.hideOriginalPlayButton) {
         // 隐藏了原生播放按钮：直接拦截原按钮（按默认外部播放器，无弹窗）
-        interceptOriginalButton(config.defaultPlayer);
+        return interceptOriginalButton(config.defaultPlayer);
     } else {
         // 未隐藏原生按钮：在详情页主播放按钮旁克隆一个外部播放器按钮（两个并排，各播各的）
         const label = config.defaultPlayer === 'potplayer' ? 'PotPlayer' : 'MPV播放';
         // [lc-614] 回调改 async: DOM 提取失败(个人视频/特殊页面)时走 tryGetItemGuidFromOriginalLogic
         // (dispatchEvent 触发飞牛发 play/info → skipInject 拦截当前 guid), 不再静默失败
-        clonePlayBtnAndInject(async (button) => {
+        return clonePlayBtnAndInject(async (button) => {
             const id = sendPlayEventToMain(button, config.defaultPlayer);
             if (id) return;
             const itemGuid = await tryGetItemGuidFromOriginalLogic(button);
@@ -282,27 +290,62 @@ function handlePlayButtonInjection(): void {
     });
 }
 
+// [lc-1282] OnDomChange 走 200ms 尾随防抖：SPA 渲染突增期每秒多批 DOM 变动，
+// 每批全文档扫按钮是布局抖动热点。防抖被连续变动饿死时由轮询兜底补上。
+let domInjectTimer: any = null;
+function handlePlayButtonInjectionDebounced(): void {
+    acceleratePoll(); // 页面仍在活跃变动 → 轮询拉回高频档并重排等待，保证漏注入最迟 ~1.2s 被兜住
+    if (domInjectTimer !== null) clearTimeout(domInjectTimer);
+    domInjectTimer = setTimeout(() => {
+        domInjectTimer = null;
+        handlePlayButtonInjection();
+    }, 200);
+}
+
 // 轮询兜底：部分入口的播放按钮是异步渲染、或仅通过属性变化出现，
 // 而 MutationObserver 仅监听 childList，可能错过；用低频轮询确保最终都能被拦截，
 // 解决“有时不调用 mpv、直接走网页播放器”的问题。
+// [lc-1282] 空转指数退避(1.2s→封顶10s)：注入完成后常态每轮都是全文档空扫，固定
+// 1.2s 永久轮询是常驻开销；仅当某轮【实际注入/拦截成功】(OnDomChange 漏掉的场景)
+// 或页面重新活跃(acceleratePoll)才回 1.2s 高频档。
 let pollTimer: any = null;
+let pollDelay = 1200;
+let pollGen = 0; // 代际守卫：acceleratePoll 作废在途回调，防止双循环
+const POLL_DELAY_MAX = 10000;
+function pollTick(): void {
+    const gen = pollGen;
+    injectCustomPlayBtn()
+        .then((didWork) => {
+            if (gen !== pollGen) return;
+            pollDelay = didWork ? 1200 : Math.min(pollDelay * 2, POLL_DELAY_MAX);
+        })
+        .catch((error) => {
+            logger.error('Error in poll injectCustomPlayBtn:', error);
+            if (gen !== pollGen) return;
+            pollDelay = Math.min(pollDelay * 2, POLL_DELAY_MAX);
+        })
+        .then(() => {
+            if (gen !== pollGen) return;
+            pollTimer = setTimeout(pollTick, pollDelay);
+        });
+}
 function startInjectionPoll(): void {
     if (pollTimer !== null) return;
-    pollTimer = setInterval(() => {
-        try {
-            if (!findReferenceButton()) return;
-            injectCustomPlayBtn().catch(error => {
-                logger.error('Error in poll injectCustomPlayBtn:', error);
-            });
-        } catch (e) {
-            // 忽略单次轮询异常，下一轮继续
-        }
-    }, 1200);
+    pollTimer = setTimeout(pollTick, pollDelay);
+}
+// [lc-1282] 页面活跃：把轮询拉回 1.2s 高频档。已排程的长等待(最长10s)直接作废重排，
+// 否则重置只影响下一档、漏注入可能仍要等满整个退避周期才被兜住。
+function acceleratePoll(): void {
+    pollDelay = 1200;
+    if (pollTimer === null) return; // 轮询尚未启动(OnReady 前)：仅重置 delay，startInjectionPoll 自然从 1.2s 起步
+    pollGen++;
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(pollTick, 1200);
 }
 
 // 注册hook
 registerHook(HookType.OnReady, handlePlayButtonInjection);
-registerHook(HookType.OnDomChange, handlePlayButtonInjection);
+registerHook(HookType.OnDomChange, handlePlayButtonInjectionDebounced);
 registerHook(HookType.OnReady, startInjectionPoll);
 
 export { };
