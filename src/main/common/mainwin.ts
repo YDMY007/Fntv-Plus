@@ -49,8 +49,11 @@ const mainwinConfig: BrowserWindowConstructorOptions = {
     icon: path.join(__dirname, '../../../build/icon.ico'),
     frame: false,
     // 透明窗口: 实现真正的 Mica/Acrylic 半透亚克力(桌面朦胧透出)
-    transparent: true,
-    backgroundColor: '#00000000',
+    // [lc-1284] 性能诊断: FNTV_NO_TRANSPARENT=1 时起不透明深色窗口(无透明合成开销),
+    //   用于 A/B 对比「透明窗口 vs fpk 浏览器标签页」的卡顿差异(配套 fps对比-*.cmd 启动器)。
+    //   不透明时 html{background:transparent} 区透出的是 backgroundColor 纯色底。
+    transparent: process.env.FNTV_NO_TRANSPARENT !== '1',
+    backgroundColor: process.env.FNTV_NO_TRANSPARENT === '1' ? '#101014' : '#00000000',
     webPreferences: {
         webgl: true,
         partition: 'persist:fntv',
