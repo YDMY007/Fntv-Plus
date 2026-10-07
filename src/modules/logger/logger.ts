@@ -328,10 +328,50 @@ export class Logger {
         return `[${timestamp}] [${levelName}] ${maskedMessage}${formattedArgs}`;
     }
 
+    // [lc-1283] 批量落盘窗口：beginBatch..endBatch 之间的日志只在 endBatch 做一次
+    // 轮转检查 + 一次 append（渲染端 'log-message-batch' 批量通道配套）。
+    // begin..end 之间必须全同步执行（无 await），否则批间会穿插其它写入破坏序。
+    private batching = false;
+    private batchBuf: string[] = [];
+    private batchErrBuf: string[] = [];
+
+    public beginBatch(): void {
+        this.batching = true;
+    }
+
+    public endBatch(): void {
+        this.batching = false;
+        const buf = this.batchBuf;
+        const errBuf = this.batchErrBuf;
+        this.batchBuf = [];
+        this.batchErrBuf = [];
+        if (buf.length === 0) return;
+        try {
+            // 整批只做一次轮转检查
+            this.checkLogRotation();
+            fs.appendFileSync(this.currentLogFile, buf.join('\n') + '\n', 'utf8');
+            if (errBuf.length > 0) {
+                fs.appendFileSync(this.errorLogFile, errBuf.join('\n') + '\n', 'utf8');
+            }
+        } catch (error) {
+            console.error('写入日志文件失败:', (error as Error).message);
+        }
+    }
+
     /**
      * 写入日志到文件
      */
     private writeToFile(level: LogLevel, formattedMessage: string): void {
+        // [lc-1283] 批量窗口内仅入缓冲，endBatch 统一一次落盘
+        if (this.batching) {
+            this.batchBuf.push(formattedMessage);
+            // WARN/ERROR 额外写入精简报错日志，便于快速定位问题
+            // 注意：排除 NOFORMAT（级别更高，常用于转发 mpv 等外部大日志），避免 error 文件变大
+            if (level >= LogLevel.WARN && level <= LogLevel.ERROR) {
+                this.batchErrBuf.push(formattedMessage);
+            }
+            return;
+        }
         try {
             // 检查是否需要轮转日志（app.log 与 app-error.log 各自独立轮转）
             this.checkLogRotation();

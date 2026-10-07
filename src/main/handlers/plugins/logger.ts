@@ -42,9 +42,27 @@ function handleLogMessage(event: IpcMainInvokeEvent, level: LogLevel, ...args: a
     }
 }
 
+// [lc-1283] 批量通道：渲染端 500ms 合流后一次发送（条目 = [level, ...args]）。
+// 逐条复用单条路由逻辑（EmbyWall 组件过滤/级别分发不变），
+// 整批经 beginBatch..endBatch 只做一次轮转检查 + 一次文件落盘。
+// begin..end 之间全同步、无 await，不会与其它写入交错。
+function handleLogMessageBatch(event: IpcMainInvokeEvent, batch: any[]): void {
+    if (!Array.isArray(batch)) return;
+    log.getLogger().beginBatch();
+    try {
+        for (const entry of batch) {
+            if (!Array.isArray(entry) || entry.length === 0) continue;
+            handleLogMessage(event, entry[0], ...entry.slice(1));
+        }
+    } finally {
+        log.getLogger().endBatch();
+    }
+}
+
 // 注册日志相关处理器
 function init(): void {
     registerHandler('log-message', handleLogMessage, { useHandle: true });
+    registerHandler('log-message-batch', handleLogMessageBatch, { useHandle: true });
 }
 
 export {
