@@ -1195,10 +1195,13 @@ end
 -- [lc-1268] 屏蔽类型收编进本菜单（子菜单 + checkbox 式条目）：此前注释写「屏蔽类型由 Electron
 -- 设置面板管理」，MPV 侧只有 Ctrl+k 快捷键一条暗道，看样式菜单的用户无从发现。两者本就共用
 -- danmaku_block_types.json 真源，直接以子菜单形态并入，点击即切换、即时重过滤、菜单不关。
+-- [lc-1285] add_danmaku_setup 增加 submenu 形参：屏蔽类型切换后原地重开并停在该子菜单，
+-- 而不是把用户弹回样式菜单根（toggle_block_type 的 src="style" 分支传 "按类型屏蔽"）。
 -- 前向声明：BLOCK_TYPE_DEFS/read_block_types_file 定义在下方「弹幕屏蔽类型快捷开关」段，
 -- 本函数运行时（脚本消息回调）才会取值，前向声明让词法可见（否则解析为全局 nil）。
 local BLOCK_TYPE_DEFS, read_block_types_file
-function add_danmaku_setup(actived, status)
+local BLOCK_TYPES_SUBMENU_ID = "按类型屏蔽"
+function add_danmaku_setup(actived, status, submenu)
     if not uosc_available then
         show_message("无uosc UI框架，不支持使用该功能", 2)
         return
@@ -1245,11 +1248,12 @@ function add_danmaku_setup(actived, status)
     end
     local block_summary = blocked_count == 0 and "全部显示" or ("已屏蔽 " .. blocked_count .. " 类")
     table.insert(items, { separator = true })
-    table.insert(items, {
-        title = "按类型屏蔽",
+    local block_item = {
+        title = BLOCK_TYPES_SUBMENU_ID,
         hint = block_summary .. "（滚动/顶部/底部/逆向/高级/彩色）",
         items = block_children,
-    })
+    }
+    table.insert(items, block_item)
 
     local menu_props = {
         type = "menu_style",
@@ -1281,7 +1285,16 @@ function add_danmaku_setup(actived, status)
     end
 
     local json_props = utils.format_json(menu_props)
-    mp.commandv("script-message-to", uosc_available and "uosc" or "ignore", actions, json_props)
+    -- [lc-1285] submenu 定位：屏蔽类型切换后原地重开并停在该子菜单，而不是把用户弹回样式菜单根。
+    -- 只在 open-menu 时用：update-menu 走 Menu:update()，它靠旧 id 保留 current 菜单
+    -- （见 uosc elements/Menu.lua 的 old_current_id / by_id），本就是原地刷新，无需定位。
+    -- open-menu 带 submenu_id 时 uosc 会 open 后立刻 activate_menu（lib/menus.lua），所以
+    -- 带定位时只发这一条，不能先发一条无定位的再发定位的（会开两遍、闪一下）。
+    if actions == "open-menu" and submenu ~= nil then
+        mp.commandv("script-message-to", "uosc", "open-menu", json_props, submenu)
+    else
+        mp.commandv("script-message-to", uosc_available and "uosc" or "ignore", actions, json_props)
+    end
 end
 
 -- 设置弹幕源延迟菜单
@@ -1456,7 +1469,9 @@ function toggle_block_type(key, src)
         load_danmaku(true, true)
     end
     if src == "style" then
-        add_danmaku_setup(nil, nil)
+        -- [lc-1285] 传 submenu 让样式菜单重开后直接停在「按类型屏蔽」，用户能连续点多项；
+        -- 此前重开在根菜单，视觉上等于「点了没反应/被弹回」。
+        add_danmaku_setup(nil, nil, BLOCK_TYPES_SUBMENU_ID)
     else
         open_block_types_menu()
     end
@@ -1749,14 +1764,29 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
     if event ~= nil then
         -- item点击 或 图标点击
         if event.type == "activate" then
+            -- [lc-1285] 屏蔽类型子菜单的条目自带 value = {"script-message-to", 本脚本,
+            -- "toggle-block-type", key, "style"}。uosc 菜单只要配了 callback，所有条目的激活都
+            -- 只回调脚本（见 uosc lib/menus.lua：type(callback)=='table' 分支不会 run_command
+            -- (event.value)），不会执行 value 里的命令。此前本回调只看 event.index，于是这些条目
+            -- 全被当成样式行处理：ordered_keys[9] 为 nil → add_danmaku_setup(nil, "updata") →
+            -- 菜单重开但类型没切换，用户看到的就是「点了没反应」。
+            -- 故先把非 nil 的 value 命令执行掉，再对样式行按 index 处理。
+            if event.action == nil and type(event.value) == "table" and event.value[1] == "script-message-to"
+                and event.value[2] == mp.get_script_name() and event.value[3] == "toggle-block-type" then
+                mp.commandv(unpack(event.value))
+                return
+            end
             if not event.action then
-                if ordered_keys[event.index] == "bold" then
+                -- 防御：非样式行（分隔线/子菜单父项等）无 ordered_keys 对应项，别带着 nil 重开菜单
+                local key = ordered_keys[event.index]
+                if key == nil then return end
+                if key == "bold" then
                     options.bold = not options.bold
                     menu_items_config.bold.hint = options.bold and "true" or "false"
                     persist_style_opts()
                 end
                 -- "updata" 模式会保留输入框文字
-                add_danmaku_setup(ordered_keys[event.index], "updata")
+                add_danmaku_setup(key, "updata")
                 return
             else
                 options[event.action] = menu_items_config[event.action]["original"]
