@@ -111,6 +111,17 @@ end
 
 local block_types = load_block_types(mp.command_native({ "expand-path", options.block_types_path }))
 
+-- [lc-1302] 屏蔽类型运行时刷新：danmaku_block_types.json 是「MPV 快捷键菜单 / 设置面板」
+-- 共用的真源文件，任意一侧改动后都须在下次加载弹幕前重读。parse_danmaku_files 开头会调用。
+function reload_block_types()
+    block_types = load_block_types(mp.command_native({ "expand-path", options.block_types_path }))
+    return block_types
+end
+
+function get_block_types()
+    return block_types
+end
+
 -- 判定必须用归一化后的 d.type/d.color：parse_xml_danmaku 的 params 序是 {time,type,size,color}，
 -- 而 parse_json_danmaku 是 {time,color,type,size} —— 两者相反，碰原始 params 必错。
 local function is_type_blocked(d)
@@ -332,6 +343,8 @@ end
 
 -- 解析弹幕文件
 function parse_danmaku_files(danmaku_input, delays)
+    -- [lc-1302] 每次转换前重读屏蔽类型：快捷键菜单/设置面板刚改过的开关立即生效
+    reload_block_types()
     local DANMAKU_PATHs = {}
     if type(danmaku_input) == "string" then
         DANMAKU_PATHs = { danmaku_input }
@@ -397,11 +410,22 @@ end
 local DanmakuArray = {}
 DanmakuArray.__index = DanmakuArray
 
+-- [lc-1286] 行高：轨道数组按**最大可能字号**建，而不是 options.fontsize 基础字号。
+-- 聚合弹幕（lc-1253）会把字号放大到 1.3 倍，DanmakuArray:new 仍按基础字号算 rows，
+-- 于是轨道数偏多（1080p/30px → 36 行）、相邻轨道 Y 间距只有基础字号 30px，
+-- 而放大后的弹幕实际高 37px → 上下行文字直接叠在一起（用户反馈「不同轨道弹幕重叠」）。
+-- 按最大字号建轨道后，任意一条放大弹幕的行高都不会超出所在轨道的间距。
+-- 上限 1.3 与 convert_danmaku_to_ass 里的放大曲线同源，改那边记得同步这里。
+local MERGE_FS_MAX_MULT = 1.3
+
 function DanmakuArray:new(res_x, res_y, font_size)
+    local row_font_size = math.max(font_size, math.ceil(font_size * MERGE_FS_MAX_MULT))
     local obj = {
         solution_y = res_y,
         font_size = font_size,
-        rows = math.floor(res_y / font_size),
+        -- 每条轨道占的高度 = max(基础字号, 放大上限)，保证放大弹幕不越界压到下一行
+        row_height = row_font_size,
+        rows = math.floor(res_y / row_font_size),
         time_length_array = {}
     }
     for i = 1, obj.rows do
@@ -411,10 +435,33 @@ function DanmakuArray:new(res_x, res_y, font_size)
     return obj
 end
 
+-- [lc-1286] 轨道 i 的 Y 坐标：统一走行高，避免调用方各写一套 math（原先散落 1+(i-1)*font_size）
+function DanmakuArray:get_y(row)
+    return 1 + (row - 1) * self.row_height
+end
+
 function DanmakuArray:set_time_length(row, time, length)
     if row > 0 and row <= self.rows then
         self.time_length_array[row] = { time = time, length = length }
     end
+end
+
+-- [lc-1286] 字号维度：轨道除时间/宽度外还要记住该行上一条的**实际字号**。
+-- 原先同轨判定只用上一条的 text_length，而聚合弹幕放大后宽度更大、占据水平空间更久，
+-- 追及判据 delta_x 用的仍是旧宽度 → 判「已经拉开距离」而放进同一行，
+-- 实际渲染时大字弹幕与小字弹幕同轨并行、上下压字（用户反馈的遮挡）。
+-- 记录 font_size 后，同轨放置要求「上一条已经完全离场」或「水平方向确已错开」。
+function DanmakuArray:set_time_length_fs(row, time, length, font_size)
+    if row > 0 and row <= self.rows then
+        self.time_length_array[row] = { time = time, length = length, font_size = font_size }
+    end
+end
+
+function DanmakuArray:get_font_size(row)
+    if row > 0 and row <= self.rows then
+        return self.time_length_array[row].font_size or self.font_size
+    end
+    return self.font_size
 end
 
 function DanmakuArray:get_time(row)
@@ -432,53 +479,101 @@ function DanmakuArray:get_length(row)
 end
 
 -- 滚动弹幕 Y 坐标算法
+-- [lc-1286] 四处修正（用户反馈：重复弹幕放大字号后与其它弹幕互相遮挡、
+--          且同屏内「速率不一样」）：
+--   ① 行间距走 array.row_height（含聚合放大上限），不再用基础字号，
+--      否则放大弹幕的实际高度超出轨道间距、压到相邻轨道（用户反馈「不同轨道重叠」）；
+--   ② 布局宽度只按**可见字符**计算（见 convert_danmaku_to_ass 的 layout_text）。
+--      原先把覆写标签 {\fs37} 也计入字宽，宽度虚高约 67% → \move 行程变长，
+--      同屏内速率与其它弹幕不一致（用户反馈「速率不一样」）；
+--   ③ 记录每行的实际字号，同轨放置时字号不同者要求上一条已完全离场——
+--      原判据只用上一条的 text_length，大字弹幕占位更久却被误判为「已错开」，
+--      于是大字与小字同轨并行、上下压字；
+--   ④ 补「上一条是否还在屏上」的校验。原算法在 bias > 0（追及时刻为正）时直接放行，
+--      但 bias > 0 只说明「新弹幕会在屏幕外追上前一条」，不代表入屏瞬间两者不重叠：
+--      实测 4 条同文本弹幕间隔 11s、滚动 15s，四条全被判进第 1 行，
+--      而第 1 条要到 t=16 才离场，第 2 条 t=12 就入屏 → t=12~16 四条并行同轨、整片叠字。
+--      现在要求复用某行时上一条已完全离场（appear_time - previous_appear_time >= roll_time），
+--      未离场则跳过该行；所有行都未离场则回退到原「追及点在屏外」的宽松判据，
+--      以免弹幕被全部丢弃（宁可局部叠字，也不整屏无弹幕）。
 function get_position_y(font_size, appear_time, text_length, resolution_x, roll_time, array)
     local velocity = (text_length + resolution_x) / roll_time
     local best_row = 0
     local best_bias = -math.huge
+    local fallback_row, fallback_size = nil, nil
 
     for i = 1, array.rows do
         local previous_appear_time = array:get_time(i)
         if array:get_time(i) < 0 then
-            array:set_time_length(i, appear_time, text_length)
-            return 1 + (i - 1) * font_size
+            array:set_time_length_fs(i, appear_time, text_length, font_size)
+            return array:get_y(i)
         end
+
+        -- 上一条是否已经完全离场：没离场就不能复用该行
+        local dt = appear_time - previous_appear_time
+        local prev_left = dt >= roll_time
+        -- 记录第一个「未离场但追及点在屏外」的候选行，供回退使用
+        if not prev_left and not fallback_row and array:get_font_size(i) == font_size then
+            local prev_len = array:get_length(i)
+            local prev_v = (prev_len + resolution_x) / roll_time
+            local dx = dt * prev_v - (prev_len + text_length) / 2
+            if dx >= 0 then
+                local dv = velocity - prev_v
+                if dv <= 0 then
+                    fallback_row = i
+                else
+                    local t_catch = previous_appear_time + dx / dv
+                    if prev_v * (t_catch - previous_appear_time) > resolution_x then
+                        fallback_row = i
+                    end
+                end
+            end
+        end
+
+        local same_size = math.abs((array:get_font_size(i) or array.font_size) - font_size) < 0.5
 
         local previous_length = array:get_length(i)
         local previous_velocity = (previous_length + resolution_x) / roll_time
         local delta_velocity = velocity - previous_velocity
-        local delta_x = (appear_time - previous_appear_time) * previous_velocity - (previous_length + text_length) / 2
+        local delta_x = dt * previous_velocity - (previous_length + text_length) / 2
+
+        -- [lc-1286]④ 上一条仍在屏上 → 该行不可用，直接看下一行
+        if not prev_left then goto continue end
 
         if delta_x >= 0 then
             if delta_velocity <= 0 then
-                array:set_time_length(i, appear_time, text_length)
-                return 1 + (i - 1) * font_size
+                if not same_size then goto continue end
+                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                return array:get_y(i)
             end
 
             local delta_time = delta_x / delta_velocity
-            local bias = appear_time - previous_appear_time - delta_time
+            local bias = dt - delta_time
             -- 判断：追及点是否在屏幕之外
             local t_catch = previous_appear_time + delta_time
             local distance_prev = previous_velocity * (t_catch - previous_appear_time)
             if distance_prev > resolution_x then
                 -- 追及发生在屏幕之外，允许放置
-                array:set_time_length(i, appear_time, text_length)
-                return 1 + (i - 1) * font_size
+                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                return array:get_y(i)
             end
             if bias > 0 then
-                array:set_time_length(i, appear_time, text_length)
-                return 1 + (i - 1) * font_size
+                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                return array:get_y(i)
             elseif bias > best_bias then
                 best_bias = bias
                 best_row = i
             end
         end
+        ::continue::
     end
+
     -- 所有行都被占用，放弃渲染
     return nil
 end
 
 -- 固定弹幕 Y 坐标算法
+-- [lc-1286] 同 get_position_y：行间距走 array.row_height，顶部/底部弹幕也不再按基础字号排。
 function get_fixed_y(font_size, appear_time, fixtime, array, from_top)
     local best_row = 0
     local best_bias = -1
@@ -493,12 +588,12 @@ function get_fixed_y(font_size, appear_time, fixtime, array, from_top)
         local previous_appear_time = array:get_time(i)
         if previous_appear_time < 0 then
             array:set_time_length(i, appear_time, 0)
-            return (i - 1) * font_size + 1
+            return array:get_y(i)
         else
             local delta_time = appear_time - previous_appear_time
             if delta_time > fixtime then
                 array:set_time_length(i, appear_time, 0)
-                return (i - 1) * font_size + 1
+                return array:get_y(i)
             elseif delta_time > best_bias then
                 best_bias = delta_time
                 best_row = i
@@ -519,9 +614,9 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
 
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    -- [lc-1299] 排版轨道/文本宽度估算必须与渲染 Style 用同一自适应字号：
-    -- 渲染端按「显示区高/1080」缩放字号，轨道仍按基础字号排会重叠/露缝。
-    local fontsize = adaptive_fontsize()
+    -- [lc-1300] 排版轨道/文本宽度估算与渲染 Style 用同一字号（原版行为：直接用
+    -- options.fontsize；lc-1299 的显示高补偿是双重缩放，已随 utils.lua 一并移除）
+    local fontsize = tonumber(options.fontsize) or 50
     local scrolltime = tonumber(options.scrolltime) or 15
     local fixtime = tonumber(options.fixtime) or 5
     local outline = tonumber(options.outline) or 1.0
@@ -609,13 +704,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         -- [lc-1253] 聚合弹幕：追加 ×N 后缀，字号按重叠次数放大（内联 \fs 覆写，log2 增长）；
         -- [lc-1256] 曲线收紧（与网页端一致）：×2 仅 +8%，×16 及以上封顶 +30%——
         -- 旧曲线 ×2 +20% / 封顶 +80% 被反馈放大过猛，观感接近翻倍。
-        -- 滚动布局宽度同步使用放大后的字号，避免入屏时刻偏移。× 用乘号字符，不与来源自带的 xN gsub 冲突
+        -- [lc-1286] 宽度估算改用 layout_text（只含真正可见的字符）。原先直接对 text 求宽，
+        -- 而 text 里含 "{\fs37}" / "{\b1\i1}" 等覆写标签——这些字符被 get_str_width 当成
+        -- 可见字宽累加 → 布局宽度虚高（实测「666」×8 在 1080p/30px 下：真实可见 111px，
+        -- 旧算法得 175px）。虚高会让轨道分配误判「两条弹幕已拉开距离」，把本该错开的
+        -- 弹幕放进同一行 → 用户看到的遮挡。反向的 ×N 后缀此前也被漏算，一并修正。
+        -- × 用乘号字符，不与来源自带的 xN gsub 冲突
         local count = tonumber(ev.count) or 1
         local ev_fs = fontsize
+        local layout_text = text
         if options.merge_same_text and count > 1 then
             local mult = 1 + 0.08 * (math.log(count) / math.log(2))
-            if mult > 1.3 then mult = 1.3 end
+            if mult > MERGE_FS_MAX_MULT then mult = MERGE_FS_MAX_MULT end
             ev_fs = math.floor(fontsize * mult + 0.5)
+            local suffix = string.format(" ×%d", count)
+            layout_text = layout_text .. suffix
             text = string.format("{\\fs%d}", ev_fs) .. text
             text = text .. string.format("{\\b1\\i1} ×%d", count)
         end
@@ -636,10 +739,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             layer = 0
             end_time_str = seconds_to_time(ev.end_time)
             style = "R2L"
-            local text_length = get_str_width(text, ev_fs)
+            -- [lc-1286] 用 layout_text（仅可见字符）求宽；宽度决定 x1/x2 与轨道冲突判定
+            local text_length = get_str_width(layout_text, ev_fs)
             local x1 = res_x + text_length / 2
             local x2 = -text_length / 2
-            local y = get_position_y(fontsize, appear_time, text_length, res_x, scrolltime, roll_array)
+            -- [lc-1286] 传该条**实际**字号（ev_fs），原先恒传基础字号 → 同轨字号判据失效
+            local y = get_position_y(ev_fs, appear_time, text_length, res_x, scrolltime, roll_array)
             if y then
                 effect = string.format("{\\move(%d, %d, %d, %d)}", x1, y, x2, y)
             end
@@ -650,7 +755,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time_str = seconds_to_time(ev.end_time)
             style = "TOP"
             local x = res_x / 2
-            local y = get_fixed_y(fontsize, appear_time, fixtime, top_array, true)
+            -- [lc-1286] 传该条实际字号 ev_fs（聚合放大的顶部弹幕同样要占更高的行）
+            local y = get_fixed_y(ev_fs, appear_time, fixtime, top_array, true)
             if y then
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
@@ -661,7 +767,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time_str = seconds_to_time(ev.end_time)
             style = "BTM"
             local x = res_x / 2
-            local y = get_fixed_y(fontsize, appear_time, fixtime, top_array, false)
+            local y = get_fixed_y(ev_fs, appear_time, fixtime, top_array, false)
             if y then
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
