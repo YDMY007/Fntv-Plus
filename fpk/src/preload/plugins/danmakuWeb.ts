@@ -233,6 +233,34 @@ html.fnos-touch-narrow .trim-ui__player--popover{
 html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
 html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
+/* ── [lc-1328] 旋转全屏（rotateFullscreen）样式补回 ──
+   飞牛构建把 xgplayer 的 rotate-fullscreen 样式裁掉了（全部 4 个页面 CSS 零命中，
+   bundle 里类名/逻辑俱在而样式缺失）→ 打开 rotateFullscreen 后播放器不会旋转。
+   按 xgplayer 官方 skin 还原。⚠ 刻意只用 !important 补 xgplayer **没写行内样式**的
+   部分（定位/变换）；宽高由 getRotateFullscreen 自己写行内 style（width=屏高/高=屏宽），
+   不能用 !important 覆盖它 —— 行内值随 window.orientation 动态变，压死会转屏后错位。 */
+html.fnos-touch-narrow .xgplayer-rotate-fullscreen{
+    position:fixed !important;
+    top:50% !important; left:50% !important;
+    margin:0 !important;
+    transform:translate(-50%,-50%) rotate(90deg) !important;
+    transform-origin:center center !important;
+    z-index:9999 !important;
+    border-radius:0 !important;
+}
+html.fnos-touch-narrow .xgplayer-rotate-fullscreen video{
+    width:100% !important; height:100% !important; object-fit:contain !important;
+    background:#000 !important;
+}
+html.fnos-touch-narrow .xgplayer-rotate-parent{
+    overflow:hidden !important;
+    background:#000 !important;
+}
+/* 旋转全屏激活态：页面 body 锁滚动（伪横屏时页面仍在竖屏文档流） */
+html.fnos-touch-narrow:has(.xgplayer-rotate-fullscreen) body{
+    overflow:hidden !important;
+}
+
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
    用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
    上一段（v1.4.1）只做了「热区 padding 撑高 + 字号缩小」——那是**纵向**的（把热区垫高到
@@ -365,33 +393,36 @@ function enableLandscapeFullscreen(): void {
                 const p = node.memoizedProps && node.memoizedProps.player;
                 if (p) {
                     const player = p;
-                    // [lc-1327] 关键：插件实例的 config 是注册时 Object.assign 出来的**副本**
+                    // [lc-1327] 插件实例的 config 是注册时 Object.assign 出来的**副本**
                     //   （T1.register: n.config=Object.assign({},n.config,a[pluginName])），
-                    //   改 player.config.fullscreen 改的是原对象、插件实例读不到 —— 旧 patch
-                    //   一直无效（真机点全屏不转横屏的根因）。必须改插件实例自身：
-                    //   player.getPlugin('fullscreen')（xgplayer 公开 API）。
+                    //   改 player.config.fullscreen 改的是原对象、插件实例读不到 —— 必须改
+                    //   插件实例自身（player.getPlugin('fullscreen')，xgplayer 公开 API）。
                     let fs: any = null;
                     try { fs = typeof player.getPlugin === 'function' ? player.getPlugin('fullscreen') : null; } catch { /* ignore */ }
                     if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
+                    // [lc-1328] 环境分派（真机复盘的第二层根因）：
+                    //   飞牛 App 内嵌的是 **Android WebView**，而 WebView 是嵌入组件、无法控制宿主
+                    //   Activity 的方向 —— screen.orientation.lock() 在 WebView 里必然失败（仅
+                    //   Chrome 浏览器支持）→ 真机点全屏只铺满、不转横屏（用户报障）。
+                    //   WebView 环境改用 xgplayer 自带的 rotateFullscreen：CSS rotate(90°) 伪横屏，
+                    //   页面内完全可控（其样式被飞牛构建裁掉，已在本表补回）。浏览器保持真转屏。
+                    //   判定：Android WebView UA 的标准标记 "; wv)"（业界标准做法）。
+                    const inWebView = /\bwv\b/.test(navigator.userAgent || '');
+                    const applyFsCfg = (cfg: any): void => {
+                        cfg.rotateFullscreen = inWebView;
+                        cfg.useScreenOrientation = !inWebView;
+                        cfg.lockOrientationType = 'landscape';
+                    };
                     let done = false;
                     // 插件实例（真生效）：toggleFullScreen 读的是 this.config（=fs.config）
-                    if (fs && fs.config) {
-                        if (!fs.config.useScreenOrientation) {
-                            fs.config.useScreenOrientation = true;
-                            fs.config.lockOrientationType = 'landscape';
-                        }
-                        done = true;
-                    }
+                    if (fs && fs.config) { applyFsCfg(fs.config); done = true; }
                     // player.config 兜底（若插件在 patch 之后才实例化，注册时会从这里拷贝）
                     player.config = player.config || {};
                     player.config.fullscreen = player.config.fullscreen || {};
-                    if (!player.config.fullscreen.useScreenOrientation) {
-                        player.config.fullscreen.useScreenOrientation = true;
-                        player.config.fullscreen.lockOrientationType = 'landscape';
-                        done = true;
-                    }
+                    applyFsCfg(player.config.fullscreen);
+                    done = true;
                     if (done) {
-                        log.info('[danmakuWeb] 已开启 xgplayer 横屏全屏 (useScreenOrientation, 插件实例=' + !!fs + ')');
+                        log.info('[danmakuWeb] 横屏全屏已配置（' + (inWebView ? 'WebView→rotateFullscreen 伪横屏' : '浏览器→useScreenOrientation 真转屏') + '，插件实例=' + !!fs + ')');
                         return true;
                     }
                     return false;

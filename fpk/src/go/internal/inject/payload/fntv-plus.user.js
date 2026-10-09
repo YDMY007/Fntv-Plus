@@ -5477,6 +5477,34 @@ html.fnos-touch-narrow .trim-ui__player--popover{
 html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
 html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
+/* \u2500\u2500 [lc-1328] \u65CB\u8F6C\u5168\u5C4F\uFF08rotateFullscreen\uFF09\u6837\u5F0F\u8865\u56DE \u2500\u2500
+   \u98DE\u725B\u6784\u5EFA\u628A xgplayer \u7684 rotate-fullscreen \u6837\u5F0F\u88C1\u6389\u4E86\uFF08\u5168\u90E8 4 \u4E2A\u9875\u9762 CSS \u96F6\u547D\u4E2D\uFF0C
+   bundle \u91CC\u7C7B\u540D/\u903B\u8F91\u4FF1\u5728\u800C\u6837\u5F0F\u7F3A\u5931\uFF09\u2192 \u6253\u5F00 rotateFullscreen \u540E\u64AD\u653E\u5668\u4E0D\u4F1A\u65CB\u8F6C\u3002
+   \u6309 xgplayer \u5B98\u65B9 skin \u8FD8\u539F\u3002\u26A0 \u523B\u610F\u53EA\u7528 !important \u8865 xgplayer **\u6CA1\u5199\u884C\u5185\u6837\u5F0F**\u7684
+   \u90E8\u5206\uFF08\u5B9A\u4F4D/\u53D8\u6362\uFF09\uFF1B\u5BBD\u9AD8\u7531 getRotateFullscreen \u81EA\u5DF1\u5199\u884C\u5185 style\uFF08width=\u5C4F\u9AD8/\u9AD8=\u5C4F\u5BBD\uFF09\uFF0C
+   \u4E0D\u80FD\u7528 !important \u8986\u76D6\u5B83 \u2014\u2014 \u884C\u5185\u503C\u968F window.orientation \u52A8\u6001\u53D8\uFF0C\u538B\u6B7B\u4F1A\u8F6C\u5C4F\u540E\u9519\u4F4D\u3002 */
+html.fnos-touch-narrow .xgplayer-rotate-fullscreen{
+    position:fixed !important;
+    top:50% !important; left:50% !important;
+    margin:0 !important;
+    transform:translate(-50%,-50%) rotate(90deg) !important;
+    transform-origin:center center !important;
+    z-index:9999 !important;
+    border-radius:0 !important;
+}
+html.fnos-touch-narrow .xgplayer-rotate-fullscreen video{
+    width:100% !important; height:100% !important; object-fit:contain !important;
+    background:#000 !important;
+}
+html.fnos-touch-narrow .xgplayer-rotate-parent{
+    overflow:hidden !important;
+    background:#000 !important;
+}
+/* \u65CB\u8F6C\u5168\u5C4F\u6FC0\u6D3B\u6001\uFF1A\u9875\u9762 body \u9501\u6EDA\u52A8\uFF08\u4F2A\u6A2A\u5C4F\u65F6\u9875\u9762\u4ECD\u5728\u7AD6\u5C4F\u6587\u6863\u6D41\uFF09 */
+html.fnos-touch-narrow:has(.xgplayer-rotate-fullscreen) body{
+    overflow:hidden !important;
+}
+
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
    \u4E0A\u4E00\u6BB5\uFF08v1.4.1\uFF09\u53EA\u505A\u4E86\u300C\u70ED\u533A padding \u6491\u9AD8 + \u5B57\u53F7\u7F29\u5C0F\u300D\u2014\u2014\u90A3\u662F**\u7EB5\u5411**\u7684\uFF08\u628A\u70ED\u533A\u57AB\u9AD8\u5230
@@ -5579,23 +5607,23 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
             } catch {
             }
             if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
+            const inWebView = /\bwv\b/.test(navigator.userAgent || "");
+            const applyFsCfg = (cfg) => {
+              cfg.rotateFullscreen = inWebView;
+              cfg.useScreenOrientation = !inWebView;
+              cfg.lockOrientationType = "landscape";
+            };
             let done = false;
             if (fs && fs.config) {
-              if (!fs.config.useScreenOrientation) {
-                fs.config.useScreenOrientation = true;
-                fs.config.lockOrientationType = "landscape";
-              }
+              applyFsCfg(fs.config);
               done = true;
             }
             player.config = player.config || {};
             player.config.fullscreen = player.config.fullscreen || {};
-            if (!player.config.fullscreen.useScreenOrientation) {
-              player.config.fullscreen.useScreenOrientation = true;
-              player.config.fullscreen.lockOrientationType = "landscape";
-              done = true;
-            }
+            applyFsCfg(player.config.fullscreen);
+            done = true;
             if (done) {
-              log6.info("[danmakuWeb] \u5DF2\u5F00\u542F xgplayer \u6A2A\u5C4F\u5168\u5C4F (useScreenOrientation, \u63D2\u4EF6\u5B9E\u4F8B=" + !!fs + ")");
+              log6.info("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5DF2\u914D\u7F6E\uFF08" + (inWebView ? "WebView\u2192rotateFullscreen \u4F2A\u6A2A\u5C4F" : "\u6D4F\u89C8\u5668\u2192useScreenOrientation \u771F\u8F6C\u5C4F") + "\uFF0C\u63D2\u4EF6\u5B9E\u4F8B=" + !!fs + ")");
               return true;
             }
             return false;
