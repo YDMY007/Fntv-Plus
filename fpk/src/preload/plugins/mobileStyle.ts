@@ -310,20 +310,52 @@ html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !
    改为上下滑手势换片（render.ts 已有 touchstart/touchend 手势，见 lc-1288）。 */
 html.fnos-narrow .fnos-poster-strip{ display:none !important; }
 
-/* B9. [lc-1290] 首页卡片行（继续观看 / 剧集列表）过大。
-   实测：站点自有 CSS 的最小断点是 (min-width:640px)，640px 以下**零响应式** —— 桌面卡片
-   宽（行内 flex 基准 / shrink-0 + JS 计算的 track 宽）在 390px 下只能显示 1.3 张，
-   一屏放不下第二张，用户报「继续观看和剧集卡片太大了」。
-   做法：不猜具体数值，按视口比例把每张卡钳到「屏宽的 30%~34%，最多 132px」，
-   一屏稳定露出 3 张（含半张余量暗示可横滑），这是 Netflix/Disney+ 移动端同款密度。
-   钳制写在卡片本身（.card-root / .library-card-root 等 shrink-0 元素）而非行容器，
-   避免破坏 JS 算的 track 布局。min-width 必须同时给，否则行内 width 会顶开 min-width。 */
+/* B9. [lc-1290→lc-1306 重做] 首页卡片行（继续观看 / 剧集列表）。
+   lc-1290 的盲钳（27vw≈105px）在真机实测（390px 网关入口、fnos 全标记点亮）暴露两问题：
+   ① 「继续观看」卡是**横版播放截图**（natural 1925×1083）套竖版卡骨架——桌面海报区定高
+      172px 是按桌面卡宽 260px 配的 1.5:1 横版；宽度被钳到 105px 后海报区变 0.61:1 竖条，
+      cover 裁得只剩原图中间 34% 宽（用户看到的就是「卡片小了但海报剪得没法看」）。
+   ② 卡内还有一层 widthCSS:104px 的死宽层（上游按桌面宽算好的行内值），钳外层后内层不变，
+      海报里的图只铺 104px 不随卡宽走。
+   lc-1306 实测定稿（在真机会话里逐项注入验证过）：
+   - 继续观看卡：改横版布局 16:9（width min(46vw,180px)，一屏 2 张），
+     海报区/死宽层全部 width:100%+aspect-ratio 收口 → 178×100，crop 比例 0.99 无损展示；
+   - 番剧/媒体库行（竖版 2:3 海报，实测几何健康）：保持钳制，仅把 15px 标题收到 13px
+     （105px 宽下 15px 只能显 6 个字，13px 显 7 字+省略号）。 */
 html.fnos-narrow .ms-container [class*="card-root"],
 html.fnos-narrow .ms-container [class*="poster-box"]{
   min-width:0 !important;
   width:clamp(92px, 27vw, 118px) !important;
   flex:0 0 clamp(92px, 27vw, 118px) !important;
 }
+/* B9.1 继续观看卡横版化：16:9 大卡（Netflix 移动端 Continue Watching 同款形态）。
+   宽度用上游行内 mr-4 的反算值 min(46vw,180px)——46vw 在 390px 是 179.4，与 180 一致，
+   平板横屏(844)时 180px 封顶不无限放大。 */
+html.fnos-narrow .ms-container .continue-card-root{
+  width:min(46vw, 180px) !important;
+  flex:0 0 min(46vw, 180px) !important;
+}
+/* 海报区（> div:first-child 是桌面定高 172px 的那层）与卡内死宽层一并收口：
+   实测链路 continue-card-root > rounded-lg(定高172) > continue-poster-box > div > div(width:104px)，
+   每层都要 width:100%，漏一层图就只铺 104px。 */
+html.fnos-narrow .ms-container .continue-card-root > div:first-child{
+  height:auto !important; aspect-ratio:16/9 !important;
+}
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div > div{
+  width:100% !important; height:100% !important;
+}
+/* B9.2 卡宽自适应后的排版收紧（真机实测：15px 标题在 105px 下只显 6 字） */
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-[15px]"]{
+  font-size:13px !important; line-height:1.35 !important;
+}
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-xs"]{
+  font-size:11px !important;
+}
+/* 卡片内/卡片间距收窄：上游 mr-4(16px)/mr-5(20px) 在 105px 卡宽下占比 15~19% */
+html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:8px !important; }
+html.fnos-narrow .ms-container .continue-card-root{ margin-right:10px !important; }
 /* 卡片内的进度条/操作层随卡宽自适应（站点按固定宽算的内联值会溢出） */
 html.fnos-narrow .ms-container [class*="card-root"] img,
 html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }

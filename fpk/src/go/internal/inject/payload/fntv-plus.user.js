@@ -4810,6 +4810,57 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
   var _headerStyleInjected = false;
   var _headerHideTimer = null;
   var HEADER_HIDE_DELAY = 2500;
+  var NARROW_TRIM_HIDE = ["\u500D\u901F", "\u539F\u753B", "\u97F3\u91CF", "\u8BBE\u7F6E"];
+  var _narrowTrimBound = false;
+  function ensureNarrowControlTrim() {
+    const apply = () => {
+      const narrow = document.documentElement.classList.contains("fnos-touch-narrow");
+      const bar2 = findControlsBar();
+      if (!bar2) return;
+      const items2 = Array.from(
+        bar2.querySelectorAll(".plugin-placeholder, .control-item, xg-icon")
+      );
+      for (const it of items2) {
+        const txt = (it.textContent || "").trim();
+        let hide = false;
+        if (txt) {
+          hide = NARROW_TRIM_HIDE.some((k) => txt.includes(k));
+        } else {
+          hide = it.tagName.toLowerCase() === "xg-icon" && !it.classList.contains("xgplayer-fullscreen");
+        }
+        const want = narrow && hide ? "none" : "";
+        if (it.style.display !== want) it.style.display = want;
+      }
+    };
+    if (_narrowTrimBound) {
+      apply();
+      return;
+    }
+    _narrowTrimBound = true;
+    const mq = (() => {
+      try {
+        return window.matchMedia("(min-width: 641px)");
+      } catch {
+        return null;
+      }
+    })();
+    const onMq = () => apply();
+    if (mq) {
+      if (mq.addEventListener) mq.addEventListener("change", onMq);
+      else mq.addListener(onMq);
+    }
+    const mo = new MutationObserver(() => {
+      if (isPlayerPage()) apply();
+    });
+    const start = () => {
+      const root = document.querySelector(".xgplayer") || document.body;
+      if (root) mo.observe(root, { childList: true, subtree: true });
+    };
+    start();
+    setTimeout(start, 1e3);
+    setTimeout(start, 3e3);
+    log6.info("[danmakuWeb] \u7A84\u5C4F\u5E95\u680F\u63A7\u4EF6\u88C1\u526A\u5DF2\u542F\u7528");
+  }
   function injectPlayerHeaderStyle() {
     if (_headerStyleInjected) return;
     const css = `
@@ -4896,6 +4947,50 @@ html.fnos-touch-narrow .xg-progress {
     display: flex !important;
     align-items: flex-end !important;
 }
+
+/* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
+   \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
+   \u4E0A\u4E00\u6BB5\uFF08v1.4.1\uFF09\u53EA\u505A\u4E86\u300C\u70ED\u533A padding \u6491\u9AD8 + \u5B57\u53F7\u7F29\u5C0F\u300D\u2014\u2014\u90A3\u662F**\u7EB5\u5411**\u7684\uFF08\u628A\u70ED\u533A\u57AB\u9AD8\u5230
+   40px \u9AD8\uFF09\uFF0C\u5BF9**\u6A2A\u5411**\u7684\u6324\u538B\u6BEB\u65E0\u4F5C\u7528\uFF0C10 \u4E2A\u63A7\u4EF6\uFF088 \u539F\u751F + \u5F39\u5E55/\u6807\u8BB0\u4E24\u4E2A\u81EA\u5EFA\uFF09\u5728 390px
+   \u91CC\u5FC5\u7136\u8D85\u51FA\uFF0C\u800C xgplayer \u7684 xg-inner-controls \u662F flex \u4E14\u4E0D\u6362\u884C\uFF0C\u8D85\u51FA\u90E8\u5206\u76F4\u63A5\u88AB
+   .xgplayer \u7684 overflow:hidden \u5403\u6389 \u2014\u2014 \u8868\u73B0\u5C31\u662F\u300C\u6324\u5728\u4E00\u8D77 + \u6700\u53F3\u4FA7\u6309\u94AE\u770B\u4E0D\u5168\u300D\u3002
+   xgplayer \u771F\u5B9E DOM\uFF08\u5B9E\u6D4B\u81EA\u98DE\u725B /v/assets/74c95604043427f0bee1d0e16bfa53af-DZn1lJtt.js\uFF09\uFF1A
+     <xg-controls class="xgplayer-controls">
+       <xg-inner-controls class="xg-inner-controls xg-pos">
+         <xg-left-grid/> <xg-center-grid/> <xg-right-grid/>
+   \u4E09\u4E2A grid \u662F\u5E76\u5217 flex \u5B50\u9879\uFF0C\u9ED8\u8BA4 min-width:auto\uFF08=\u5185\u5BB9\u5BBD\uFF0C\u4E0D\u4F1A\u88AB\u538B\u7F29\uFF09\u3002
+   \u56DB\u6B65\u6536\u53E3\uFF1A
+     \u2460 \u7ED9\u4E09\u4E2A grid \u52A0 min-width:0 \u2014\u2014 \u5141\u8BB8\u5B83\u4EEC\u88AB\u538B\u7F29\uFF0C\u8FD9\u662F\u300C\u4E0D\u6EA2\u51FA\u300D\u7684\u524D\u63D0\uFF1B
+     \u2461 \u56FE\u6807\u7C7B\u63A7\u4EF6\uFF08\u97F3\u91CF/\u8BBE\u7F6E/\u5168\u5C4F\uFF0C\u65E0\u6587\u5B57\uFF09\u6B64\u524D**\u4E00\u6761\u89C4\u5219\u90FD\u6CA1\u6709**\uFF0C\u6587\u5B57\u6309\u94AE\u7F29\u4E86\u5B83\u6CA1\u7F29\uFF0C
+        \u53F3\u4FA7\u88AB\u5B83\u4EEC\u9876\u51FA\u5C4F\u3002\u538B\u5230 26px \u89C1\u65B9 + \u6536\u7D27\u56FE\u6807\u5185\u8FB9\u8DDD\uFF1B
+     \u2462 \u6587\u5B57\u6309\u94AE\uFF08\u500D\u901F/\u539F\u753B/\u9009\u96C6/\u5F39\u5E55/\u6807\u8BB0\uFF09\u5728 \u2264430px \u5C4F\u4E0A\u6309\u5E8F\u9690\u85CF\u5230\u300C\u66F4\u591A\u300D\u4E4B\u5916\u7684\u4E24\u9879\uFF1A
+        \u4FDD\u7559 \u9009\u96C6 + \u5F39\u5E55/\u6807\u8BB0\uFF08\u6211\u4EEC\u81EA\u5DF1\u7684\u5165\u53E3\uFF09\u4E0E\u64AD\u653E/\u65F6\u95F4/\u5168\u5C4F\uFF0C\u9690\u85CF \u500D\u901F/\u539F\u753B
+        \u2014\u2014 \u7528 :nth-child \u4E0D\u53EF\u9760\uFF08\u63A7\u4EF6\u6570\u968F\u5267\u96C6\u53D8\uFF09\uFF0C\u6539\u7528\u300C\u53F3\u680F\u5185\u9664\u524D\u4E24\u9879\u5916\u9690\u85CF\u300D\u7684
+        \u7ED3\u6784\u5316\u88C1\u526A\uFF1A\u5148\u9690\u85CF\u53F3\u680F\u6240\u6709 .plugin-placeholder\uFF0C\u518D\u628A xg-icon\uFF08\u56FE\u6807\u6309\u94AE\uFF09\u4E0E
+        \u6700\u540E\u4E00\u4E2A plugin-placeholder \u653E\u56DE\u6765\u3002
+     \u2014\u2014 \u5B9E\u73B0\u89C1\u4E0B\u65B9 \xA7C1ff \u7684 JS \u6BB5\uFF0CCSS \u53EA\u8D1F\u8D23\u5C3A\u5BF8\uFF0C\u4E0D\u505A\u7ED3\u6784\u88C1\u526A\u3002 */
+
+/* \u2460 grid \u5141\u8BB8\u6536\u7F29\uFF1Amin-width:auto \u4F1A\u8BA9 flex \u5B50\u9879\u62D2\u7EDD\u538B\u7F29\uFF0C\u662F\u6EA2\u51FA\u7684\u76F4\u63A5\u539F\u56E0 */
+html.fnos-touch-narrow xg-inner-controls,
+html.fnos-touch-narrow xg-left-grid,
+html.fnos-touch-narrow xg-center-grid,
+html.fnos-touch-narrow xg-right-grid{ min-width:0 !important; }
+
+/* \u2461 \u56FE\u6807\u7C7B\u63A7\u4EF6\u6B64\u524D\u5B8C\u5168\u6CA1\u53C2\u4E0E v1.4.1 \u7684\u6536\u7F29\uFF08\u6587\u5B57\u7F29\u4E86\u3001\u56FE\u6807\u6CA1\u7F29\uFF09\u2192 \u53F3\u4FA7\u88AB\u9876\u51FA\u5C4F */
+html.fnos-touch-narrow xg-right-grid .control-item,
+html.fnos-touch-narrow xg-right-grid xg-icon,
+html.fnos-touch-narrow xg-left-grid .control-item{
+    padding:8px 1px !important;
+    min-width:26px !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; height:20px !important; }
+
+/* \u2462 \u53F3\u680F\u6574\u4F53\u4E0D\u6362\u884C + \u5141\u8BB8\u5185\u90E8\u6536\u7F29\uFF1B\u8D85\u7A84\u5C4F\uFF08\u2264360px\uFF09\u8FDB\u4E00\u6B65\u538B\u95F4\u8DDD */
+html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
+@media (max-width:360px){
+    html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
+    html.fnos-touch-narrow xg-controls .control-item{ font-size:12px !important; }
+}
 `;
     const el = document.createElement("style");
     el.id = PLAYER_HEADER_STYLE_ID;
@@ -4903,6 +4998,7 @@ html.fnos-touch-narrow .xg-progress {
     (document.head || document.documentElement).appendChild(el);
     _headerStyleInjected = true;
     installMobileFlag();
+    ensureNarrowControlTrim();
     log6.info("[danmakuWeb] \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\u7F8E\u5316 CSS \u5DF2\u6CE8\u5165");
   }
   function resetHeaderHideTimer() {
@@ -4925,11 +5021,51 @@ html.fnos-touch-narrow .xg-progress {
   var _fsFixBound = false;
   function applyVideoFullscreenClass() {
     const nativeFs = !!document.fullscreenElement;
-    const pseudoFs = !!document.querySelector(".xgplayer.xgplayer-fullscreen");
+    const pseudoFs = !!document.querySelector(
+      ".xgplayer.xgplayer-is-fullscreen, .xgplayer.xgplayer-is-cssfullscreen, .xgplayer.xgplayer-fullscreen-inner"
+    );
     document.documentElement.classList.toggle("fntv-video-fullscreen", nativeFs || pseudoFs);
+  }
+  var _landscapeBound = false;
+  function enableLandscapeFullscreen() {
+    if (_landscapeBound || !isPlayerPage()) return;
+    _landscapeBound = true;
+    const patch = () => {
+      const root = document.querySelector("[class*=xgplayer]");
+      if (!root) return false;
+      try {
+        const key = Object.keys(root).find((k) => k.startsWith("__reactFiber$"));
+        if (!key) return false;
+        let node = root[key];
+        let depth = 0;
+        while (node && depth < 15) {
+          const p = node.memoizedProps && node.memoizedProps.player;
+          if (p) {
+            p.config = p.config || {};
+            p.config.fullscreen = p.config.fullscreen || {};
+            if (p.config.fullscreen.useScreenOrientation) return true;
+            p.config.fullscreen.useScreenOrientation = true;
+            p.config.fullscreen.lockOrientationType = "landscape";
+            log6.info("[danmakuWeb] \u5DF2\u5F00\u542F xgplayer \u6A2A\u5C4F\u5168\u5C4F (useScreenOrientation)");
+            return true;
+          }
+          node = node.return;
+          depth++;
+        }
+      } catch (e) {
+        log6.warn("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5F00\u542F\u5931\u8D25:", (e == null ? void 0 : e.message) || e);
+      }
+      return false;
+    };
+    if (patch()) return;
+    setTimeout(() => {
+      if (!patch()) setTimeout(patch, 2e3);
+    }, 800);
+    setTimeout(patch, 3e3);
   }
   function bindVideoFullscreenFix() {
     if (!isPlayerPage()) return;
+    enableLandscapeFullscreen();
     if (_fsFixBound) {
       applyVideoFullscreenClass();
       return;
@@ -9777,10 +9913,12 @@ html.fnos-perf.dark{
   }
 }
 
-/* \u2500\u2500 [v1.4.8] \u6837\u5F0F1/2/3 \u5171\u7528\uFF1Awrapper 44px \u684C\u9762\u8FB9\u8DDD\u5728 390px \u89C6\u53E3\u5403\u6389\u8FD1 1/4 \u5BBD \u2192 \u6536\u7A84 16px\u3002
-   wrapper \u539F\u751F\u65E0\u7C7B\u540D\uFF0C\u4EE5 data-fntv-carousel-wrapper \u5B9A\u4F4D\uFF08\u4E09\u5904\u521B\u5EFA\u70B9\u7EDF\u4E00\u6253\u6807\uFF09\u3002 */
+/* \u2500\u2500 [v1.4.8\u2192lc-1290] \u6837\u5F0F1/2/3 \u5171\u7528\uFF1Awrapper 44px \u684C\u9762\u8FB9\u8DDD\u5728 390px \u89C6\u53E3\u5403\u6389\u8FD1 1/4 \u5BBD\u3002
+   wrapper \u539F\u751F\u65E0\u7C7B\u540D\uFF0C\u4EE5 data-fntv-carousel-wrapper \u5B9A\u4F4D\uFF08\u4E09\u5904\u521B\u5EFA\u70B9\u7EDF\u4E00\u6253\u6807\uFF09\u3002
+   [lc-1290] \u6536\u7A84\u6570\u503C\u5DF2\u8FC1\u5230 mobileStyle.ts B5c\uFF088px\uFF0C\u5E76\u4E0E\u5A92\u4F53\u5E93 section \u7684 px-[44px]
+   \u4E00\u8D77\u6536 \u2014\u2014 \u539F\u6765\u53EA\u6536 wrapper \u4E00\u5C42\uFF0C390px \u4E0B\u4E24\u4FA7\u4ECD\u5404\u7A7A 44~67px \u5373\u7528\u6237\u62A5\u7684\u300C\u8F6E\u64AD\u5DE6\u53F3\u9ED1\u6846\u300D\uFF09\u3002
+   \u4E24\u5904\u5E76\u5B58\u4F1A\u51FA\u73B0\u540C\u7279\u5F02\u6027\u6253\u67B6\uFF0C\u6545\u6B64\u5904\u53EA\u4FDD\u7559 max-width \u6536\u53E3\uFF0Cpadding \u503C\u7531 mobileStyle \u72EC\u5BB6\u58F0\u660E\u3002 */
 @media (max-width: 640px){
-  html.fnos-touch-narrow [data-fntv-carousel-wrapper]{padding-left:16px !important;padding-right:16px !important}
   /* \u5BB9\u5668\u7EDF\u4E00\u4E0D\u51FA\u5C4F\uFF1A\u5A92\u4F53\u5E93 section \u7236\u7EA7\u82E5\u6709\u6A2A\u5411\u6EA2\u51FA\uFF08\u539F\u751F\u6A2A\u6ED1\u5E26\uFF09\uFF0C\u5F3A\u5236\u6211\u4EEC\u8FD9\u5C42\u4E0D\u53C2\u4E0E */
   html.fnos-touch-narrow [data-fntv-carousel-wrapper] > div{max-width:100% !important}
 }
@@ -10122,8 +10260,16 @@ html.fnos-perf.dark{
     wrapper.style.cssText = "padding:0 44px;margin-top:0;margin-bottom:0";
     S.carouselWrapper = wrapper;
     const _cs = (() => {
-      const v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
-      return v >= 1 && v <= 4 ? v : 4;
+      let v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
+      if (v === 5) {
+        try {
+          const touch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+          if (!touch) v = 4;
+        } catch {
+          v = 4;
+        }
+      }
+      return v >= 1 && v <= 5 ? v : 4;
     })();
     const _isDark = isSurfaceDark();
     const container = document.createElement("div");
@@ -10135,6 +10281,8 @@ html.fnos-perf.dark{
       container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(160deg,rgba(120,130,160,.22),#0b1219);${_blur};box-shadow:0 26px 60px -12px rgba(0,0,0,.55)`;
     } else if (_cs === 4) {
       container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:transparent;margin:0 auto;box-shadow:none`;
+    } else if (_cs === 5) {
+      container.style.cssText = `position:relative;overflow:hidden;width:100%;height:min(56vw,340px);border-radius:18px;background:#10141c;margin:0 auto;box-shadow:none`;
     } else {
       container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
     }
@@ -10349,6 +10497,63 @@ html.fnos-perf.dark{
       container.appendChild(s4BarBox);
       statusEl = tip4;
       _skelTheme = { container, tipEls: [tip4], pctEls: [percentEl], cardBgs };
+    } else if (_cs === 5) {
+      const slideBg = document.createElement("div");
+      slideBg.style.cssText = "position:absolute;inset:0;background:#151a24;overflow:hidden;border-radius:18px";
+      const shine = document.createElement("div");
+      shine.className = "fnos-ph-skel";
+      shine.style.cssText = "position:absolute;inset:0;opacity:.4";
+      slideBg.appendChild(shine);
+      const info = document.createElement("div");
+      info.style.cssText = "position:absolute;left:0;right:0;bottom:0;padding:14px 16px;z-index:2";
+      const mkBar = (w, h, mb, r = "8px") => {
+        const b = document.createElement("div");
+        b.className = "fnos-ph-skel";
+        b.style.cssText = `width:${w};height:${h};border-radius:${r};margin-bottom:${mb};background:rgba(255,255,255,.14)`;
+        return b;
+      };
+      info.appendChild(mkBar("46%", "30px", "10px", "10px"));
+      info.appendChild(mkBar("72%", "12px", "6px"));
+      info.appendChild(mkBar("52%", "12px", "12px"));
+      const acts = document.createElement("div");
+      acts.style.cssText = "display:flex;gap:10px";
+      const b1 = document.createElement("div");
+      b1.className = "fnos-ph-skel";
+      b1.style.cssText = "width:118px;height:44px;border-radius:999px;background:rgba(255,255,255,.18)";
+      const b2 = document.createElement("div");
+      b2.className = "fnos-ph-skel";
+      b2.style.cssText = "width:118px;height:44px;border-radius:999px;background:rgba(255,255,255,.12)";
+      acts.appendChild(b1);
+      acts.appendChild(b2);
+      info.appendChild(acts);
+      slideBg.appendChild(info);
+      container.appendChild(slideBg);
+      const dots5 = document.createElement("div");
+      dots5.style.cssText = "display:flex;justify-content:center;gap:7px;margin-top:10px;height:14px";
+      for (let i = 0; i < 5; i++) {
+        const d = document.createElement("span");
+        d.style.cssText = "width:" + (i === 0 ? "24px" : "7px") + ";height:7px;border-radius:99px;background:rgba(150,140,125,.45)";
+        dots5.appendChild(d);
+      }
+      container.appendChild(dots5);
+      const s5BarBox = document.createElement("div");
+      s5BarBox.style.cssText = "position:absolute;left:0;right:0;bottom:-6px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;opacity:0";
+      percentEl = document.createElement("div");
+      percentEl.style.cssText = "font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums";
+      percentEl.textContent = "0%";
+      const s5Track = document.createElement("div");
+      s5Track.className = "fnos-ph-track";
+      fillEl = document.createElement("div");
+      fillEl.className = "fnos-ph-fill";
+      s5Track.appendChild(fillEl);
+      s5BarBox.appendChild(percentEl);
+      s5BarBox.appendChild(s5Track);
+      container.appendChild(s5BarBox);
+      statusEl = document.createElement("div");
+      statusEl.className = "fnos-ph-text";
+      statusEl.style.cssText = "position:absolute;top:14px;left:16px;font-size:12.5px;color:rgba(232,221,208,.85);letter-spacing:.5px;font-weight:600;z-index:3";
+      statusEl.textContent = "\u52A0\u8F7D\u4E2D\u2026";
+      container.appendChild(statusEl);
     } else {
       const deco = (l, t2, r) => {
         const d = document.createElement("div");
@@ -11367,6 +11572,340 @@ html.fnos-perf.dark{
     }
   }
 
+  // src/preload/plugins/embyWall/carousel/mobile.ts
+  function isTouchCapable2() {
+    try {
+      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+  function resolveCarouselStyle() {
+    let stored = null;
+    try {
+      stored = localStorage.getItem("fnos-carousel-style");
+    } catch {
+    }
+    const touch = isTouchCapable2();
+    if (touch && (stored === null || stored === "")) {
+      return 5;
+    }
+    const v = parseInt(stored || "4", 10);
+    if (v === 5 && !touch) return 4;
+    return v >= 1 && v <= 5 ? v : 4;
+  }
+  function ensureStyle5Css() {
+    if (document.getElementById("fnos-carousel-style5-style")) return;
+    const st = document.createElement("style");
+    st.id = "fnos-carousel-style5-style";
+    st.textContent = `
+/* \u2550\u2550\u2550 \u6837\u5F0F 5\uFF1A\u89E6\u5C4F\u7279\u4F9B\uFF08\u5168\u5BBD\u5355\u5361 + \u539F\u751F\u6A2A\u6ED1\uFF09\u2550\u2550\u2550
+   \u5BB9\u5668\u4E0D\u518D\u7528 aspect-ratio\uFF08\u684C\u9762 16/9 \u5728\u7AD6\u5C4F\u584C\u6210\u4E00\u6761\uFF09\uFF0C\u9AD8\u5EA6\u76F4\u63A5\u6309\u89C6\u53E3\u5BBD\u63A8\u7B97\uFF0C
+   \u6A2A\u7AD6\u5C4F\u90FD\u6210\u7ACB\uFF1A\u7AD6\u5C4F 390px \u2192 218px\uFF1B\u6A2A\u5C4F 844px \u2192 340px \u5C01\u9876\u3002 */
+[data-fntv-carousel-style="5"]{
+  position:relative;width:100%;height:min(56vw,340px);
+  border-radius:18px;overflow:hidden;background:transparent;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-scroll{
+  display:flex;width:100%;height:100%;
+  overflow-x:auto;overflow-y:hidden;
+  scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-x;              /* \u53EA\u5403\u6A2A\u5411\u624B\u52BF\uFF0C\u7EB5\u5411\u6EDA\u52A8\u8FD8\u7ED9\u5B66\u751F\u9875\u9762 */
+  scrollbar-width:none;
+  overscroll-behavior-x:contain;   /* \u6ED1\u5230\u5934\u4E0D\u628A\u6A61\u76AE\u7B4B\u4F20\u7ED9\u6574\u9875 */
+}
+[data-fntv-carousel-style="5"] .fntv-s5-scroll::-webkit-scrollbar{ display:none }
+[data-fntv-carousel-style="5"] .fntv-s5-slide{
+  position:relative;flex:0 0 100%;width:100%;height:100%;
+  scroll-snap-align:center;scroll-snap-stop:always;  /* \u4E00\u5C4F\u4E00\u505C\uFF0C\u7981\u6B62\u8FDE\u6ED1\u63A0\u8FC7 */
+  overflow:hidden;border-radius:18px;background:#10141c;
+}
+/* \u906E\u7F69\uFF1A\u5E95\u90E8\u5355\u5C42\u6E10\u53D8\uFF08\u4FE1\u606F\u53EF\u8BFB\uFF09\uFF0C\u9876\u90E8\u4E0D\u538B\u2014\u2014\u6D77\u62A5\u4E0A\u90E8\u662F\u89C6\u89C9\u4E3B\u4F53\uFF0C\u4FDD\u7559\u539F\u753B\u4EAE\u5EA6 */
+[data-fntv-carousel-style="5"] .fntv-s5-shade{
+  position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:linear-gradient(to top,rgba(0,0,0,.88) 0%,rgba(0,0,0,.55) 22%,rgba(0,0,0,.16) 46%,transparent 66%);
+}
+[data-fntv-carousel-style="5"] .fntv-s5-info{
+  position:absolute;left:0;right:0;bottom:0;z-index:2;
+  padding:14px 16px 14px;box-sizing:border-box;color:#fff;
+}
+/* \u6807\u9898/logo\uFF1Alogo \u4F18\u5148\uFF08\u6709\u56FE\u65F6\u6587\u5B57\u9690\u85CF\uFF09\uFF0C\u9AD8\u5EA6\u94B3 44px\u2014\u2014\u624B\u673A\u4E0A 84px \u7684\u684C\u9762 logo \u5360\u534A\u5C4F */
+[data-fntv-carousel-style="5"] .fntv-s5-title{
+  margin:0 0 8px;font-size:1.35rem;font-weight:800;line-height:1.2;letter-spacing:.5px;
+  text-shadow:0 2px 10px rgba(0,0,0,.65);
+}
+[data-fntv-carousel-style="5"] .fntv-s5-title.is-logo{ font-size:0;margin:0 0 6px }
+[data-fntv-carousel-style="5"] .fntv-s5-logo{
+  max-height:44px;max-width:62%;width:auto;height:auto;display:block;
+  object-fit:contain;filter:drop-shadow(0 3px 12px rgba(0,0,0,.6));
+}
+/* \u7B80\u4ECB\uFF1A\u4E24\u884C\u622A\u65AD\uFF08\u684C\u9762 3 \u884C\u5728\u89E6\u5C4F\u4E0A\u628A\u6309\u94AE\u6324\u51FA\u5361\u5916\uFF09 */
+[data-fntv-carousel-style="5"] .fntv-s5-desc{
+  font-size:.8rem;line-height:1.5;color:rgba(240,236,255,.82);
+  text-shadow:0 1px 6px rgba(0,0,0,.6);
+  margin:0 0 12px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-actions{ display:flex;gap:10px;align-items:center }
+/* \u80F6\u56CA\u6309\u94AE\uFF1A\u9AD8 44px\uFF08WCAG \u89E6\u63A7\u4E0B\u9650\uFF09\uFF0C\u6309\u538B\u6001\u4EE3\u66FF hover\uFF08\u89E6\u5C4F\u6CA1\u6709 hover\uFF09 */
+[data-fntv-carousel-style="5"] .fntv-s5-play,
+[data-fntv-carousel-style="5"] .fntv-s5-detail{
+  min-height:44px;padding:0 22px;border-radius:999px;border:none;cursor:pointer;
+  font-size:.88rem;font-weight:700;letter-spacing:1px;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:6px;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  transition:transform .15s ease,opacity .15s ease;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-play{
+  background:linear-gradient(135deg,#f0b85c,#d49a3a);color:#1a120a;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-detail{
+  background:rgba(255,255,255,.16);color:#fff;
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+[data-fntv-carousel-style="5"] .fntv-s5-play:active,
+[data-fntv-carousel-style="5"] .fntv-s5-detail:active{ transform:scale(.96);opacity:.85 }
+[data-fntv-carousel-style="5"] .fntv-s5-play.is-loading,
+[data-fntv-carousel-style="5"] .fntv-s5-detail.is-loading{ opacity:.6;pointer-events:none }
+/* \u6307\u793A\u70B9\uFF1A\u5361\u5916\u4E0B\u65B9\u72EC\u7ACB\u4E00\u884C\uFF08\u4E0E\u6309\u94AE\u5206\u79BB\uFF09\uFF0Cactive \u62C9\u957F\u6210\u80F6\u56CA\uFF1B\u6A2A\u5411\u8FC7\u591A\u65F6\u81EA\u52A8\u6536\u7A84 */
+[data-fntv-carousel-style="5"] .fntv-s5-dots{
+  display:flex;justify-content:center;align-items:center;gap:7px;
+  margin:10px 0 2px;height:14px;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-dot{
+  flex:0 0 auto;width:7px;height:7px;border-radius:99px;border:none;padding:0;cursor:pointer;
+  background:var(--fntv-s5-dot,rgba(150,140,125,.45));
+  transition:width .4s cubic-bezier(.22,1,.36,1),background-color .3s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+[data-fntv-carousel-style="5"] .fntv-s5-dot.active{
+  width:24px;background:var(--fntv-s5-dot-active,#f0b85c);
+}
+/* \u6D45\u8272\u4E3B\u9898\uFF1A\u6307\u793A\u70B9\u6362\u6DF1\u8272\uFF08container \u4E0A\u7531 JS \u6309\u4E3B\u9898\u8BBE --fntv-s5-dot-* \u53D8\u91CF\uFF0C\u6B64\u5904\u53EA\u7559\u53E3\u5F84\uFF09 */
+/* \u52A0\u8F7D\u5B8C\u6210\u524D\u6DE1\u5165\uFF08\u4E0E\u6837\u5F0F 2/4 \u7684\u63ED\u793A\u8282\u594F\u4E00\u81F4\uFF0C\u907F\u514D\u95EA\u73B0\uFF09 */
+[data-fntv-carousel-style="5"] .fntv-s5-scroll{ opacity:0;transition:opacity .45s ease }
+[data-fntv-carousel-style="5"].fntv-s5-ready .fntv-s5-scroll{ opacity:1 }
+`;
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function buildCarouselStyle5(container, wrapper, shows, base, rebuild) {
+    const log52 = (...a) => log7("[s5]", ...a);
+    ensureStyle5Css();
+    wrapper.dataset.fntvCarouselWrapper = "1";
+    wrapper.style.cssText = "display:block;padding:0;margin:0";
+    container.style.width = "100%";
+    container.style.height = "";
+    container.style.minHeight = "0";
+    container.style.maxHeight = "none";
+    container.style.aspectRatio = "auto";
+    container.style.margin = "0";
+    container.style.overflow = "hidden";
+    container.style.background = "transparent";
+    container.style.boxShadow = "none";
+    container.style.borderRadius = "18px";
+    const paintDots = () => {
+      const dark = getEffectiveDark();
+      container.style.setProperty("--fntv-s5-dot", dark ? "rgba(150,140,125,.45)" : "rgba(96,86,72,.35)");
+      container.style.setProperty("--fntv-s5-dot-active", dark ? "#f0b85c" : "#c8923a");
+    };
+    paintDots();
+    const scroller = document.createElement("div");
+    scroller.className = "fntv-s5-scroll";
+    const slides = [];
+    const logoDone = /* @__PURE__ */ new Set();
+    shows.forEach((show, i) => {
+      const slide = document.createElement("div");
+      slide.className = "fntv-s5-slide";
+      slide.dataset.index = String(i);
+      const bg = document.createElement("div");
+      bg.className = "fntv-s5-img";
+      bg.style.cssText = "position:absolute;inset:0;background-size:cover;background-position:center 25%;background-color:#10141c";
+      slide.appendChild(bg);
+      applyCarouselBackdrop(show, bg, base);
+      const shade = document.createElement("div");
+      shade.className = "fntv-s5-shade";
+      slide.appendChild(shade);
+      const info = document.createElement("div");
+      info.className = "fntv-s5-info";
+      const title = document.createElement("h3");
+      title.className = "fntv-s5-title";
+      title.textContent = show.title || "";
+      const desc = document.createElement("p");
+      desc.className = "fntv-s5-desc";
+      desc.textContent = show.desc || "";
+      const actions = document.createElement("div");
+      actions.className = "fntv-s5-actions";
+      const play = document.createElement("button");
+      play.type = "button";
+      play.className = "fntv-s5-play";
+      play.textContent = "\u5F00\u59CB\u64AD\u653E";
+      const detail = document.createElement("button");
+      detail.type = "button";
+      detail.className = "fntv-s5-detail";
+      detail.textContent = "\u66F4\u591A\u8BE6\u60C5";
+      actions.appendChild(play);
+      actions.appendChild(detail);
+      info.appendChild(title);
+      info.appendChild(desc);
+      info.appendChild(actions);
+      slide.appendChild(info);
+      resolveShowLogo(show, base).then((src) => {
+        if (!src || logoDone.has(i) || !document.body.contains(slide)) return;
+        logoDone.add(i);
+        title.textContent = "";
+        title.classList.add("is-logo");
+        const logo = document.createElement("img");
+        logo.className = "fntv-s5-logo";
+        logo.alt = show.title || "";
+        logo.src = src;
+        title.appendChild(logo);
+      }).catch(() => {
+      });
+      const spaNav = (href) => {
+        history.pushState({}, "", href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        setTimeout(() => {
+          const backBtn = !!document.querySelector('button[aria-label="\u8FD4\u56DE"]');
+          const seasonRendered = !!document.querySelector('[data-id="details"]') || !!document.querySelector(".fnos-season-2col") || !!document.querySelector('a[href*="/v/person/"]');
+          if (!backBtn && !seasonRendered) location.href = href;
+        }, 600);
+      };
+      play.addEventListener("click", (e) => {
+        e.stopPropagation();
+        play.classList.add("is-loading");
+        resolveSeasonHref(show).then((href) => {
+          play.classList.remove("is-loading");
+          spaNav(href);
+        });
+      });
+      detail.addEventListener("click", (e) => {
+        e.stopPropagation();
+        detail.classList.add("is-loading");
+        resolveSeasonHref(show).then((href) => {
+          detail.classList.remove("is-loading");
+          spaNav(href);
+        });
+      });
+      slide.addEventListener("click", (e) => {
+        if (e.target.closest(".fntv-s5-actions")) return;
+        spaNavByShow(show);
+      });
+      function spaNavByShow(s) {
+        resolveSeasonHref(s).then((href) => spaNav(href));
+      }
+      scroller.appendChild(slide);
+      slides.push(slide);
+    });
+    container.appendChild(scroller);
+    const dotsRow = document.createElement("div");
+    dotsRow.className = "fntv-s5-dots";
+    const dots = [];
+    shows.forEach((_, i) => {
+      const d = document.createElement("button");
+      d.type = "button";
+      d.className = "fntv-s5-dot" + (i === 0 ? " active" : "");
+      d.setAttribute("aria-label", "\u7B2C" + (i + 1) + "\u4E2A");
+      d.addEventListener("click", () => {
+        var _a;
+        (_a = slides[i]) == null ? void 0 : _a.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+      });
+      dotsRow.appendChild(d);
+      dots.push(d);
+    });
+    container.appendChild(dotsRow);
+    let rafPending = false;
+    const syncActive = () => {
+      rafPending = false;
+      const center = scroller.scrollLeft + scroller.clientWidth / 2;
+      let best = 0, bestDist = Infinity;
+      slides.forEach((s, i) => {
+        const c = s.offsetLeft + s.offsetWidth / 2;
+        const dist = Math.abs(c - center);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      });
+      dots.forEach((d, i) => d.classList.toggle("active", i === best));
+    };
+    scroller.addEventListener("scroll", () => {
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(syncActive);
+      }
+    }, { passive: true });
+    let autoTimer = null;
+    let touching = false;
+    let current = 0;
+    scroller.addEventListener("touchstart", () => {
+      touching = true;
+    }, { passive: true });
+    scroller.addEventListener("touchend", () => {
+      touching = false;
+    }, { passive: true });
+    scroller.addEventListener("touchcancel", () => {
+      touching = false;
+    }, { passive: true });
+    const goTo = (i) => {
+      var _a;
+      const n = slides.length;
+      if (!n) return;
+      current = (i % n + n) % n;
+      (_a = slides[current]) == null ? void 0 : _a.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    };
+    const startAuto = () => {
+      if (autoTimer) clearInterval(autoTimer);
+      autoTimer = window.setInterval(() => {
+        if (!document.body.contains(container)) {
+          if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
+          }
+          return;
+        }
+        if (document.hidden || touching) return;
+        goTo(current + 1);
+      }, 5e3);
+    };
+    const stopAuto = () => {
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+    };
+    S.carouselCleanup = () => {
+      stopAuto();
+      log52("cleanup: auto timer destroyed");
+    };
+    S.carouselResume = () => {
+      if (!document.body.contains(container)) return;
+      startAuto();
+    };
+    container.classList.remove("fntv-s5-ready");
+    const reveal = () => container.classList.add("fntv-s5-ready");
+    const firstUrl = shows[0] && shows[0]._backdropBlob || "";
+    if (firstUrl) {
+      let revealed = false;
+      const once = () => {
+        if (!revealed) {
+          revealed = true;
+          reveal();
+        }
+      };
+      const probe = new Image();
+      probe.onload = once;
+      probe.onerror = once;
+      probe.src = firstUrl;
+      setTimeout(once, 1200);
+    } else {
+      reveal();
+    }
+    if (!rebuild) wrapper.style.opacity = "";
+    startAuto();
+    log52("\u89E6\u5C4F\u7279\u4F9B\u8F6E\u64AD\u6CE8\u5165\u5B8C\u6210, slides=", slides.length);
+  }
+
   // src/preload/plugins/embyWall/carousel/render.ts
   function destroyCarousel() {
     if (S.carouselCleanup) {
@@ -11565,10 +12104,7 @@ html.fnos-perf.dark{
     }
     const container = document.createElement("div");
     container.style.cssText = "position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none";
-    const _cs = (() => {
-      const v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
-      return v >= 1 && v <= 4 ? v : 4;
-    })();
+    const _cs = resolveCarouselStyle();
     container.setAttribute("data-fntv-carousel-style", String(_cs));
     container.style.opacity = "0";
     container.style.transition = "opacity .45s ease";
@@ -11646,6 +12182,11 @@ html.fnos-perf.dark{
     }
     if (_cs === 4) {
       buildCarouselStyle4(container, wrapper, shows, base, rebuild);
+      if (!rebuild) target.appendChild(wrapper);
+      return;
+    }
+    if (_cs === 5) {
+      buildCarouselStyle5(container, wrapper, shows, base, rebuild);
       if (!rebuild) target.appendChild(wrapper);
       return;
     }
@@ -18717,7 +19258,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyAppearance.appendChild(themeRow);
       const getCs = () => {
         const v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
-        return v >= 1 && v <= 4 ? v : 4;
+        return v >= 1 && v <= 5 ? v : 4;
       };
       const csWrap = document.createElement("div");
       csWrap.style.cssText = "margin-top:14px;";
@@ -18728,7 +19269,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const csSeg = document.createElement("div");
       csSeg.id = "fnos-carousel-style-seg";
       csSeg.style.cssText = "display:flex;gap:6px;";
+      const touchCapable = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
       const csLabels = ["\u7AD6\u5411\u8F6E\u64AD", "\u6A2A\u5411\u8F6E\u64AD", "\u5806\u53E0\u5207\u6362", "\u7ACB\u4F53\u5806\u53E0"];
+      if (touchCapable) csLabels.push("\u89E6\u5C4F\u7279\u4F9B");
       csLabels.forEach((lab, idx) => {
         const b = document.createElement("button");
         b.type = "button";
@@ -22391,7 +22934,9 @@ html.fntv-boot-hide #root{visibility:hidden}
     const compactBefore = html.classList.contains("fnos-compact");
     html.classList.toggle("fnos-narrow", narrow);
     html.classList.toggle("fnos-compact", compact);
-    html.classList.toggle("fnos-touch", isTouchDevice());
+    const touch = isTouchDevice();
+    html.classList.toggle("fnos-touch", touch);
+    html.classList.toggle("fnos-touch-narrow", touch && narrow);
     const root = document.getElementById("root");
     if (root) {
       if (compact) root.style.setProperty("min-width", "0", "important");
@@ -22581,6 +23126,94 @@ html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{ bottom:12px !impo
 html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{
   width:32px !important; height:56px !important; font-size:1.7rem !important;
 }
+
+/* B5c. [lc-1290] \u8F6E\u64AD\u5DE6\u53F3\u9ED1\u6846\uFF08\u7528\u6237\u62A5\u300C\u8F6E\u64AD\u56FE\u5DE6\u53F3\u9ED1\u6846\u300D\uFF09\u3002
+   \u9010\u5C42\u7B97 390px \u89C6\u53E3\u4E0B\u7684\u5BBD\u5EA6\u9884\u7B97\uFF1A
+     \u89C6\u53E3 390 \u2212 wrapper \u5185\u8054 padding 0 44px = 302
+     \u518D \u2212 \u5A92\u4F53\u5E93 section \u81EA\u8EAB px-[44px]/px-[46px] \u2248 256
+     \u5BB9\u5668 aspect-ratio 16/9 \u2192 390 \u5BBD\u4E0B\u4EC5 144~170px \u9AD8\uFF0C\u4E24\u4FA7\u5404\u7A7A 44~67px\u3002
+   \u5373\uFF1A\u8F6E\u64AD\u5E76\u6CA1\u6709\u94FA\u6EE1\uFF0C\u662F\u88AB\u4E24\u5C42\u5404 44px \u7684\u5185\u8FB9\u8DDD\u5939\u6210\u4E86\u7A84\u6761\uFF0C\u4E24\u4FA7\u9732\u51FA\u7684\u5C31\u662F section \u5E95\u8272
+   \uFF08\u6697\u8272\u4E3B\u9898\u4E0B\u5448\u9ED1\uFF09\u3002\u4E09\u6B65\u6536\u53E3\uFF1A
+     \u2460 wrapper \u5185\u8054 padding \u7531 44px \u6536\u5230 8px\uFF08carousel/styles.ts \u7684 16px \u89C4\u5219\u73B0\u5DF2\u5728
+        \u9996\u9875\u751F\u6548\u2014\u2014\u5B83\u6B64\u524D\u6302\u5728\u4ECE\u672A\u5B89\u88C5\u7684 fnos-touch-narrow \u4E0A\uFF0C\u662F\u6B7B\u4EE3\u7801\uFF1B\u8FD9\u91CC\u7528\u66F4\u5C0F\u7684\u503C
+        \u5E76\u5728\u81EA\u5DF1\u7684\u5C42\u91CD\u65B0\u58F0\u660E\uFF0C\u907F\u514D\u4F9D\u8D56\u90A3\u4E2A\u95E8\u63A7\uFF09\uFF1B
+     \u2461 section \u7684 px-[44px]/px-[46px] \u4E00\u5E76\u6536\u7A84\uFF08wrapper \u7684\u7236\u7EA7\uFF0C\u5BBD\u662F\u53E0\u4E58\u7684\uFF0C\u53EA\u6536\u4E00\u5C42\u4E0D\u591F\uFF09\uFF1B
+     \u2462 \u5BB9\u5668\u7ED9\u4E00\u4E2A\u4E0B\u9650\u9AD8\u5EA6\uFF0C\u514D\u5F97 16:9 \u5728\u7A84\u5C4F\u4E0B\u584C\u6210\u4E00\u6761\u3002
+   \u8FB9\u8DDD\u4E0D\u80FD\u6536\u6210 0\uFF1A\u8F6E\u64AD\u53F3\u4FA7\u6709 prev/next \u5BFC\u822A\u94AE\uFF08left/right:3%\uFF09\u4E0E\u5706\u70B9\uFF0C\u5B8C\u5168\u8D34\u8FB9\u4F1A\u88AB\u5207\u3002 */
+html.fnos-narrow [data-fntv-carousel-wrapper]{ padding-left:8px !important; padding-right:8px !important; }
+/* \u5A92\u4F53\u5E93 section \u662F wrapper \u7684**\u7236\u7EA7**\uFF08render.ts \u91CC\u662F target.appendChild(wrapper)\uFF09\uFF0C
+   \u53EA\u80FD\u5411\u4E0A\u9009\uFF1A\u7528 :has(> [data-fntv-carousel-wrapper]) \u7ED1\u5B9A\u7236\u7EA7\uFF0C\u4E0D\u80FD\u5199\u6210\u5B50\u4EE3\u9009\u62E9\u5668\u3002
+   :has() \u81EA Chrome 105 / Safari 15.4 / FF 121 \u8D77\u53EF\u7528\uFF0C\u4E0D\u652F\u6301\u65F6\u53EA\u662F\u8FD9\u6761\u4E0D\u751F\u6548\uFF0C
+   \u4E0B\u9762\u7684 wrapper \u6536\u8FB9\u8DDD\u4ECD\u4F1A\u628A\u9ED1\u6846\u4ECE 67px/\u4FA7 \u964D\u5230 44px/\u4FA7\u3002 */
+html.fnos-narrow div[class*="flex-col"]:has(> [data-fntv-carousel-wrapper]){ padding-left:8px !important; padding-right:8px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"]{ height:min(46vw, 260px) !important; aspect-ratio:auto !important; max-height:none !important; }
+
+/* B5d. [lc-1290] \u6837\u5F0F 4 \u7684 3D \u90BB\u5361\u5728\u7A84\u5C4F\u9732\u592A\u591A\uFF08\xB172% \u4F4D\u79FB\u628A\u90BB\u5361\u5927\u534A\u63A8\u51FA/\u62C9\u8FDB\u753B\u9762\uFF0C
+   390px \u4E0B\u89C6\u89C9\u4E0A\u5C31\u662F\u4E24\u4FA7\u5404\u7CCA\u4E00\u5757\uFF09\u3002\u6536\u5230 \xB158% \u4E14\u7F29\u5C0F\uFF0C\u53EA\u9732\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\u3002
+   \u540C B5c\uFF1Acarousel/styles.ts \u91CC\u5DF2\u6709\u540C\u6837\u6570\u503C\uFF0C\u4F46\u90A3\u6BB5\u5728\u9996\u9875\u662F\u6B7B\u4EE3\u7801\uFF0C\u8FD9\u91CC\u72EC\u7ACB\u751F\u6548\u3002 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card{ left:2% !important; top:2% !important; width:96% !important; height:96% !important; border-radius:14px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{ transform:scale(.88) translateX(-46%) rotateY(18deg) !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{ transform:scale(.88) translateX(46%) rotateY(-18deg) !important; }
+/* \u5DE6\u53F3\u5207\u6362\u94AE\uFF08\u5BBD 32px + 3% \u8FB9\u8DDD \u2248 44px \u89E6\u63A7\u533A\uFF09\uFF1A\u538B\u5230\u5361\u7247\u4E0B\u5C42\uFF0C\u70B9\u7A7A\u767D\u4E0D\u518D\u88AB\u62A2 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{ width:28px !important; opacity:.4 !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !important; }
+
+/* B5e. \u53F3\u4FA7\u7AD6\u5411\u6D77\u62A5\u6761\uFF08\u4EC5\u6837\u5F0F 1 \u6709\uFF0Crender.ts:404 \u884C\u5185 width:150px\uFF09\uFF1A
+   \u624B\u673A\u4E0A\u4E0E\u5BB9\u5668 80/20 \u5206\u680F\u4E89\u5BBD\uFF0C\u5BB9\u5668\u53EA\u5269 302*0.8=242px \u8FD8\u8981\u88AB\u5B83\u6324\u3002\u7A84\u5C4F\u76F4\u63A5\u9690\u85CF\u6D77\u62A5\u6761\uFF0C
+   \u6539\u4E3A\u4E0A\u4E0B\u6ED1\u624B\u52BF\u6362\u7247\uFF08render.ts \u5DF2\u6709 touchstart/touchend \u624B\u52BF\uFF0C\u89C1 lc-1288\uFF09\u3002 */
+html.fnos-narrow .fnos-poster-strip{ display:none !important; }
+
+/* B9. [lc-1290\u2192lc-1306 \u91CD\u505A] \u9996\u9875\u5361\u7247\u884C\uFF08\u7EE7\u7EED\u89C2\u770B / \u5267\u96C6\u5217\u8868\uFF09\u3002
+   lc-1290 \u7684\u76F2\u94B3\uFF0827vw\u2248105px\uFF09\u5728\u771F\u673A\u5B9E\u6D4B\uFF08390px \u7F51\u5173\u5165\u53E3\u3001fnos \u5168\u6807\u8BB0\u70B9\u4EAE\uFF09\u66B4\u9732\u4E24\u95EE\u9898\uFF1A
+   \u2460 \u300C\u7EE7\u7EED\u89C2\u770B\u300D\u5361\u662F**\u6A2A\u7248\u64AD\u653E\u622A\u56FE**\uFF08natural 1925\xD71083\uFF09\u5957\u7AD6\u7248\u5361\u9AA8\u67B6\u2014\u2014\u684C\u9762\u6D77\u62A5\u533A\u5B9A\u9AD8
+      172px \u662F\u6309\u684C\u9762\u5361\u5BBD 260px \u914D\u7684 1.5:1 \u6A2A\u7248\uFF1B\u5BBD\u5EA6\u88AB\u94B3\u5230 105px \u540E\u6D77\u62A5\u533A\u53D8 0.61:1 \u7AD6\u6761\uFF0C
+      cover \u88C1\u5F97\u53EA\u5269\u539F\u56FE\u4E2D\u95F4 34% \u5BBD\uFF08\u7528\u6237\u770B\u5230\u7684\u5C31\u662F\u300C\u5361\u7247\u5C0F\u4E86\u4F46\u6D77\u62A5\u526A\u5F97\u6CA1\u6CD5\u770B\u300D\uFF09\u3002
+   \u2461 \u5361\u5185\u8FD8\u6709\u4E00\u5C42 widthCSS:104px \u7684\u6B7B\u5BBD\u5C42\uFF08\u4E0A\u6E38\u6309\u684C\u9762\u5BBD\u7B97\u597D\u7684\u884C\u5185\u503C\uFF09\uFF0C\u94B3\u5916\u5C42\u540E\u5185\u5C42\u4E0D\u53D8\uFF0C
+      \u6D77\u62A5\u91CC\u7684\u56FE\u53EA\u94FA 104px \u4E0D\u968F\u5361\u5BBD\u8D70\u3002
+   lc-1306 \u5B9E\u6D4B\u5B9A\u7A3F\uFF08\u5728\u771F\u673A\u4F1A\u8BDD\u91CC\u9010\u9879\u6CE8\u5165\u9A8C\u8BC1\u8FC7\uFF09\uFF1A
+   - \u7EE7\u7EED\u89C2\u770B\u5361\uFF1A\u6539\u6A2A\u7248\u5E03\u5C40 16:9\uFF08width min(46vw,180px)\uFF0C\u4E00\u5C4F 2 \u5F20\uFF09\uFF0C
+     \u6D77\u62A5\u533A/\u6B7B\u5BBD\u5C42\u5168\u90E8 width:100%+aspect-ratio \u6536\u53E3 \u2192 178\xD7100\uFF0Ccrop \u6BD4\u4F8B 0.99 \u65E0\u635F\u5C55\u793A\uFF1B
+   - \u756A\u5267/\u5A92\u4F53\u5E93\u884C\uFF08\u7AD6\u7248 2:3 \u6D77\u62A5\uFF0C\u5B9E\u6D4B\u51E0\u4F55\u5065\u5EB7\uFF09\uFF1A\u4FDD\u6301\u94B3\u5236\uFF0C\u4EC5\u628A 15px \u6807\u9898\u6536\u5230 13px
+     \uFF08105px \u5BBD\u4E0B 15px \u53EA\u80FD\u663E 6 \u4E2A\u5B57\uFF0C13px \u663E 7 \u5B57+\u7701\u7565\u53F7\uFF09\u3002 */
+html.fnos-narrow .ms-container [class*="card-root"],
+html.fnos-narrow .ms-container [class*="poster-box"]{
+  min-width:0 !important;
+  width:clamp(92px, 27vw, 118px) !important;
+  flex:0 0 clamp(92px, 27vw, 118px) !important;
+}
+/* B9.1 \u7EE7\u7EED\u89C2\u770B\u5361\u6A2A\u7248\u5316\uFF1A16:9 \u5927\u5361\uFF08Netflix \u79FB\u52A8\u7AEF Continue Watching \u540C\u6B3E\u5F62\u6001\uFF09\u3002
+   \u5BBD\u5EA6\u7528\u4E0A\u6E38\u884C\u5185 mr-4 \u7684\u53CD\u7B97\u503C min(46vw,180px)\u2014\u201446vw \u5728 390px \u662F 179.4\uFF0C\u4E0E 180 \u4E00\u81F4\uFF0C
+   \u5E73\u677F\u6A2A\u5C4F(844)\u65F6 180px \u5C01\u9876\u4E0D\u65E0\u9650\u653E\u5927\u3002 */
+html.fnos-narrow .ms-container .continue-card-root{
+  width:min(46vw, 180px) !important;
+  flex:0 0 min(46vw, 180px) !important;
+}
+/* \u6D77\u62A5\u533A\uFF08> div:first-child \u662F\u684C\u9762\u5B9A\u9AD8 172px \u7684\u90A3\u5C42\uFF09\u4E0E\u5361\u5185\u6B7B\u5BBD\u5C42\u4E00\u5E76\u6536\u53E3\uFF1A
+   \u5B9E\u6D4B\u94FE\u8DEF continue-card-root > rounded-lg(\u5B9A\u9AD8172) > continue-poster-box > div > div(width:104px)\uFF0C
+   \u6BCF\u5C42\u90FD\u8981 width:100%\uFF0C\u6F0F\u4E00\u5C42\u56FE\u5C31\u53EA\u94FA 104px\u3002 */
+html.fnos-narrow .ms-container .continue-card-root > div:first-child{
+  height:auto !important; aspect-ratio:16/9 !important;
+}
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div > div{
+  width:100% !important; height:100% !important;
+}
+/* B9.2 \u5361\u5BBD\u81EA\u9002\u5E94\u540E\u7684\u6392\u7248\u6536\u7D27\uFF08\u771F\u673A\u5B9E\u6D4B\uFF1A15px \u6807\u9898\u5728 105px \u4E0B\u53EA\u663E 6 \u5B57\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-[15px]"]{
+  font-size:13px !important; line-height:1.35 !important;
+}
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-xs"]{
+  font-size:11px !important;
+}
+/* \u5361\u7247\u5185/\u5361\u7247\u95F4\u8DDD\u6536\u7A84\uFF1A\u4E0A\u6E38 mr-4(16px)/mr-5(20px) \u5728 105px \u5361\u5BBD\u4E0B\u5360\u6BD4 15~19% */
+html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:8px !important; }
+html.fnos-narrow .ms-container .continue-card-root{ margin-right:10px !important; }
+/* \u5361\u7247\u5185\u7684\u8FDB\u5EA6\u6761/\u64CD\u4F5C\u5C42\u968F\u5361\u5BBD\u81EA\u9002\u5E94\uFF08\u7AD9\u70B9\u6309\u56FA\u5B9A\u5BBD\u7B97\u7684\u5185\u8054\u503C\u4F1A\u6EA2\u51FA\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"] img,
+html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }
+/* \u884C\u95F4\u8DDD\u6536\u7A84\uFF1A\u7AD9\u70B9 gap 20px\uFF08gap-x-5\uFF09\u5728 132px \u5361\u5BBD\u4E0B\u5360\u6BD4\u8FC7\u9AD8 */
+html.fnos-narrow .ms-container > *{ gap:10px !important; }
 
 /* B6. \u89C2\u5F71\u8BB0\u5F55\u9762\u677F\uFF08\u5168\u5C4F\u6D6E\u5C42\uFF09\uFF1A\u684C\u9762\u4FA7 padding 40px/\u53CC\u5217\u56FE\u8868\u5728\u624B\u673A\u4E0A\u6324\u7206 */
 html.fnos-narrow #fntv-wh .wh-topbar{ padding:16px 16px 10px !important; gap:14px !important; }
