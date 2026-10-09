@@ -11716,7 +11716,10 @@ html.fnos-perf.dark{
 }
 [data-fntv-carousel-style="5"] .fntv-s5-info{
   position:absolute;left:0;right:0;bottom:0;z-index:2;
-  padding:14px 16px 14px;box-sizing:border-box;color:#fff;
+  /* [lc-1310] \u4FE1\u606F\u5C42\u8FB9\u8DDD\u5BF9\u9F50\u539F\u751F App\uFF1A\u5C4F\u8FB9\u8DDD 20dp \u2248 4.2%\uFF08\u539F\u751F\u622A\u56FE\u9010\u50CF\u7D20\u5B9E\u6D4B\uFF0C
+     390px \u624B\u673A\u4E0A \u224816px\uFF09\u3002\u539F\u751F\u7EE7\u7EED\u89C2\u770B\u5361\u7684\u6807\u9898\u5728\u56FE\u5916\u5DE6\u5BF9\u9F50\uFF1Bhero \u8F6E\u64AD\u7684\u6807\u9898\u5728\u56FE\u5185
+     \u5E95\u90E8\u6E10\u53D8\u4E0A\uFF08\u539F\u751F\u65E0\u6B64\u7EC4\u4EF6\uFF0C\u5F62\u6001\u4E0E Netflix \u79FB\u52A8\u7AEF hero \u4E00\u81F4\uFF09\uFF0C\u5DE6\u5BF9\u9F50\u540C\u6E90\u3002 */
+  padding:14px 4.2% 14px;box-sizing:border-box;color:#fff;
 }
 /* \u6807\u9898/logo\uFF1Alogo \u4F18\u5148\uFF08\u6709\u56FE\u65F6\u6587\u5B57\u9690\u85CF\uFF09\uFF0C\u9AD8\u5EA6\u94B3 44px\u2014\u2014\u624B\u673A\u4E0A 84px \u7684\u684C\u9762 logo \u5360\u534A\u5C4F */
 [data-fntv-carousel-style="5"] .fntv-s5-title{
@@ -11727,6 +11730,11 @@ html.fnos-perf.dark{
 [data-fntv-carousel-style="5"] .fntv-s5-logo{
   max-height:44px;max-width:62%;width:auto;height:auto;display:block;
   object-fit:contain;filter:drop-shadow(0 3px 12px rgba(0,0,0,.6));
+}
+/* [lc-1310] \u5143\u4FE1\u606F\u884C\uFF08\u5BF9\u9F50\u539F\u751F App\u300C\u7B2C1\u5B63 \xB7 \u7B2C3\u96C6\u300D\uFF09\uFF1A\u6BD4\u6807\u9898\u5F31\u4E24\u7EA7\uFF0C\u7C7B\u578B\xB7\u5E74\u4EFD\xB7\u96C6\u6570 */
+[data-fntv-carousel-style="5"] .fntv-s5-meta{
+  font-size:.72rem;line-height:1.4;color:rgba(240,236,255,.62);
+  letter-spacing:.3px;margin:-4px 0 8px;
 }
 /* \u7B80\u4ECB\uFF1A\u4E24\u884C\u622A\u65AD\uFF08\u684C\u9762 3 \u884C\u5728\u89E6\u5C4F\u4E0A\u628A\u6309\u94AE\u6324\u51FA\u5361\u5916\uFF09 */
 [data-fntv-carousel-style="5"] .fntv-s5-desc{
@@ -11819,6 +11827,17 @@ html.fnos-perf.dark{
       const title = document.createElement("h3");
       title.className = "fntv-s5-title";
       title.textContent = show.title || "";
+      const metaLine = document.createElement("div");
+      metaLine.className = "fntv-s5-meta";
+      const _yr = show.year || 0;
+      const _eps = show.totalEps || show.localEps || 0;
+      const _genre = Array.isArray(show.genres) && show.genres.length ? String(show.genres[0]) : "";
+      const metaParts = [];
+      if (_genre) metaParts.push(_genre);
+      if (_yr > 0) metaParts.push(String(_yr));
+      if (_eps > 0) metaParts.push(`\u5171${_eps}\u96C6`);
+      metaLine.textContent = metaParts.join(" \xB7 ");
+      metaLine.style.display = metaParts.length ? "" : "none";
       const desc = document.createElement("p");
       desc.className = "fntv-s5-desc";
       desc.textContent = show.desc || "";
@@ -11835,6 +11854,7 @@ html.fnos-perf.dark{
       actions.appendChild(play);
       actions.appendChild(detail);
       info.appendChild(title);
+      info.appendChild(metaLine);
       info.appendChild(desc);
       info.appendChild(actions);
       slide.appendChild(info);
@@ -23262,30 +23282,28 @@ html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !
    \u6539\u4E3A\u4E0A\u4E0B\u6ED1\u624B\u52BF\u6362\u7247\uFF08render.ts \u5DF2\u6709 touchstart/touchend \u624B\u52BF\uFF0C\u89C1 lc-1288\uFF09\u3002 */
 html.fnos-narrow .fnos-poster-strip{ display:none !important; }
 
-/* B9. [lc-1290\u2192lc-1306 \u91CD\u505A] \u9996\u9875\u5361\u7247\u884C\uFF08\u7EE7\u7EED\u89C2\u770B / \u5267\u96C6\u5217\u8868\uFF09\u3002
-   lc-1290 \u7684\u76F2\u94B3\uFF0827vw\u2248105px\uFF09\u5728\u771F\u673A\u5B9E\u6D4B\uFF08390px \u7F51\u5173\u5165\u53E3\u3001fnos \u5168\u6807\u8BB0\u70B9\u4EAE\uFF09\u66B4\u9732\u4E24\u95EE\u9898\uFF1A
-   \u2460 \u300C\u7EE7\u7EED\u89C2\u770B\u300D\u5361\u662F**\u6A2A\u7248\u64AD\u653E\u622A\u56FE**\uFF08natural 1925\xD71083\uFF09\u5957\u7AD6\u7248\u5361\u9AA8\u67B6\u2014\u2014\u684C\u9762\u6D77\u62A5\u533A\u5B9A\u9AD8
-      172px \u662F\u6309\u684C\u9762\u5361\u5BBD 260px \u914D\u7684 1.5:1 \u6A2A\u7248\uFF1B\u5BBD\u5EA6\u88AB\u94B3\u5230 105px \u540E\u6D77\u62A5\u533A\u53D8 0.61:1 \u7AD6\u6761\uFF0C
-      cover \u88C1\u5F97\u53EA\u5269\u539F\u56FE\u4E2D\u95F4 34% \u5BBD\uFF08\u7528\u6237\u770B\u5230\u7684\u5C31\u662F\u300C\u5361\u7247\u5C0F\u4E86\u4F46\u6D77\u62A5\u526A\u5F97\u6CA1\u6CD5\u770B\u300D\uFF09\u3002
-   \u2461 \u5361\u5185\u8FD8\u6709\u4E00\u5C42 widthCSS:104px \u7684\u6B7B\u5BBD\u5C42\uFF08\u4E0A\u6E38\u6309\u684C\u9762\u5BBD\u7B97\u597D\u7684\u884C\u5185\u503C\uFF09\uFF0C\u94B3\u5916\u5C42\u540E\u5185\u5C42\u4E0D\u53D8\uFF0C
-      \u6D77\u62A5\u91CC\u7684\u56FE\u53EA\u94FA 104px \u4E0D\u968F\u5361\u5BBD\u8D70\u3002
-   lc-1306 \u5B9E\u6D4B\u5B9A\u7A3F\uFF08\u5728\u771F\u673A\u4F1A\u8BDD\u91CC\u9010\u9879\u6CE8\u5165\u9A8C\u8BC1\u8FC7\uFF09\uFF1A
-   - \u7EE7\u7EED\u89C2\u770B\u5361\uFF1A\u6539\u6A2A\u7248\u5E03\u5C40 16:9\uFF08width min(46vw,180px)\uFF0C\u4E00\u5C4F 2 \u5F20\uFF09\uFF0C
-     \u6D77\u62A5\u533A/\u6B7B\u5BBD\u5C42\u5168\u90E8 width:100%+aspect-ratio \u6536\u53E3 \u2192 178\xD7100\uFF0Ccrop \u6BD4\u4F8B 0.99 \u65E0\u635F\u5C55\u793A\uFF1B
-   - \u756A\u5267/\u5A92\u4F53\u5E93\u884C\uFF08\u7AD6\u7248 2:3 \u6D77\u62A5\uFF0C\u5B9E\u6D4B\u51E0\u4F55\u5065\u5EB7\uFF09\uFF1A\u4FDD\u6301\u94B3\u5236\uFF0C\u4EC5\u628A 15px \u6807\u9898\u6536\u5230 13px
-     \uFF08105px \u5BBD\u4E0B 15px \u53EA\u80FD\u663E 6 \u4E2A\u5B57\uFF0C13px \u663E 7 \u5B57+\u7701\u7565\u53F7\uFF09\u3002 */
+/* B9. [lc-1290\u2192lc-1310 \u5BF9\u9F50\u539F\u751F App \u5C3A\u5EA6] \u9996\u9875\u5361\u7247\u884C\uFF08\u7EE7\u7EED\u89C2\u770B / \u5267\u96C6\u5217\u8868\uFF09\u3002
+   lc-1306 \u4FEE\u597D\u4E86\u6A2A\u7248\u88C1\u526A\uFF1Blc-1310 \u6309\u98DE\u725B\u539F\u751F\u624B\u673A App\uFF08FN_Media 1.12.0 apk \u622A\u56FE\u9010\u50CF\u7D20
+   \u5B9E\u6D4B\uFF0C480dp \u5C4F\u5BBD\u57FA\u51C6\uFF09\u7EDF\u4E00\u4E24\u884C\u7684\u5BC6\u5EA6\uFF1A
+   \u2500\u2500 \u539F\u751F\u5B9E\u6D4B\u89C4\u683C \u2500\u2500
+   \u5C4F\u8FB9\u8DDD 20dp\uFF1B\u7AD6\u7248\u6D77\u62A5\u5361\u5BBD 140dp\uFF0829.2% \u5C4F\u5BBD\uFF09\u3001\u95F4\u8DDD 10dp\uFF082.1%\uFF09\uFF0C\u4E00\u5C4F\u6574 3 \u5F20
+   \uFF083\xD7140+2\xD710+2\xD720=480 \u95ED\u5408\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u6A2A\u7248\u5361\u4E0E\u6D77\u62A5\u884C**\u540C\u5BBD 140dp**\u3001\u56FE\u533A\u6BD4\u4F8B
+   1.89:1\uFF08140:74\uFF09\uFF0C\u4E00\u5C4F\u9732\u51FA 1.9 \u5F20\uFF08\u7B2C\u4E8C\u5F20\u9732 60% \u6697\u793A\u53EF\u6ED1\uFF09\u3002
+   \u2500\u2500 \u5BF9\u7167\u73B0\u72B6\u7684\u6539\u52A8 \u2500\u2500
+   \u7AD6\u7248\u5361 27vw\u219229vw\uFF08105px\u2192113px\uFF0C\u591A\u663E 2 \u5B57\uFF09\uFF1B\u95F4\u8DDD 8px\u21922.1vw\uFF08390px \u4E0B 8.2px \u7B49\u503C\uFF0C
+   \u5E73\u677F\u6309\u6BD4\u4F8B\u653E\u5927\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u5361 46vw\u219244vw\uFF08180px\u2192172px\uFF0C\u53F3\u4FA7\u9732\u51FA\u90BB\u5361\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\uFF09\u3002 */
 html.fnos-narrow .ms-container [class*="card-root"],
 html.fnos-narrow .ms-container [class*="poster-box"]{
   min-width:0 !important;
-  width:clamp(92px, 27vw, 118px) !important;
-  flex:0 0 clamp(92px, 27vw, 118px) !important;
+  width:clamp(96px, 29vw, 132px) !important;
+  flex:0 0 clamp(96px, 29vw, 132px) !important;
 }
 /* B9.1 \u7EE7\u7EED\u89C2\u770B\u5361\u6A2A\u7248\u5316\uFF1A16:9 \u5927\u5361\uFF08Netflix \u79FB\u52A8\u7AEF Continue Watching \u540C\u6B3E\u5F62\u6001\uFF09\u3002
-   \u5BBD\u5EA6\u7528\u4E0A\u6E38\u884C\u5185 mr-4 \u7684\u53CD\u7B97\u503C min(46vw,180px)\u2014\u201446vw \u5728 390px \u662F 179.4\uFF0C\u4E0E 180 \u4E00\u81F4\uFF0C
-   \u5E73\u677F\u6A2A\u5C4F(844)\u65F6 180px \u5C01\u9876\u4E0D\u65E0\u9650\u653E\u5927\u3002 */
+   lc-1310: 46vw\u219244vw \u2014\u2014 \u539F\u751F\u5B9E\u6D4B\u7EE7\u7EED\u89C2\u770B\u4E0E\u6D77\u62A5\u884C\u540C\u5BBD 29.2%\u3001\u95F4\u8DDD 10dp\uFF0C\u4E00\u5C4F\u9732\u51FA
+   1.9 \u5F20\uFF1B44vw \u5728 390px \u662F 171.6px\uFF0C\u53F3\u4FA7\u9732\u51FA\u7EA6 40% \u90BB\u5361\uFF0C\u6EDA\u52A8\u6697\u793A\u4E0E\u539F\u751F\u4E00\u81F4\u3002 */
 html.fnos-narrow .ms-container .continue-card-root{
-  width:min(46vw, 180px) !important;
-  flex:0 0 min(46vw, 180px) !important;
+  width:min(44vw, 172px) !important;
+  flex:0 0 min(44vw, 172px) !important;
 }
 /* \u6D77\u62A5\u533A\uFF08> div:first-child \u662F\u684C\u9762\u5B9A\u9AD8 172px \u7684\u90A3\u5C42\uFF09\u4E0E\u5361\u5185\u6B7B\u5BBD\u5C42\u4E00\u5E76\u6536\u53E3\uFF1A
    \u5B9E\u6D4B\u94FE\u8DEF continue-card-root > rounded-lg(\u5B9A\u9AD8172) > continue-poster-box > div > div(width:104px)\uFF0C
@@ -23305,9 +23323,9 @@ html.fnos-narrow .ms-container [class*="card-root"] [class*="text-[15px]"]{
 html.fnos-narrow .ms-container [class*="card-root"] [class*="text-xs"]{
   font-size:11px !important;
 }
-/* \u5361\u7247\u5185/\u5361\u7247\u95F4\u8DDD\u6536\u7A84\uFF1A\u4E0A\u6E38 mr-4(16px)/mr-5(20px) \u5728 105px \u5361\u5BBD\u4E0B\u5360\u6BD4 15~19% */
-html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:8px !important; }
-html.fnos-narrow .ms-container .continue-card-root{ margin-right:10px !important; }
+/* \u5361\u7247\u95F4\u8DDD\u5BF9\u9F50\u539F\u751F 10dp\uFF082.1vw\uFF1B390px \u4E0B \u22488.2px \u4E0E\u4E0A\u4E00\u7248\u7B49\u503C\uFF0C\u5E73\u677F\u6309\u89C6\u53E3\u653E\u5927\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:2.1vw !important; }
+html.fnos-narrow .ms-container .continue-card-root{ margin-right:2.1vw !important; }
 /* \u5361\u7247\u5185\u7684\u8FDB\u5EA6\u6761/\u64CD\u4F5C\u5C42\u968F\u5361\u5BBD\u81EA\u9002\u5E94\uFF08\u7AD9\u70B9\u6309\u56FA\u5B9A\u5BBD\u7B97\u7684\u5185\u8054\u503C\u4F1A\u6EA2\u51FA\uFF09 */
 html.fnos-narrow .ms-container [class*="card-root"] img,
 html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }

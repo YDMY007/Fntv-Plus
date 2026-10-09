@@ -100,7 +100,10 @@ export function ensureStyle5Css(): void {
 }
 [data-fntv-carousel-style="5"] .fntv-s5-info{
   position:absolute;left:0;right:0;bottom:0;z-index:2;
-  padding:14px 16px 14px;box-sizing:border-box;color:#fff;
+  /* [lc-1310] 信息层边距对齐原生 App：屏边距 20dp ≈ 4.2%（原生截图逐像素实测，
+     390px 手机上 ≈16px）。原生继续观看卡的标题在图外左对齐；hero 轮播的标题在图内
+     底部渐变上（原生无此组件，形态与 Netflix 移动端 hero 一致），左对齐同源。 */
+  padding:14px 4.2% 14px;box-sizing:border-box;color:#fff;
 }
 /* 标题/logo：logo 优先（有图时文字隐藏），高度钳 44px——手机上 84px 的桌面 logo 占半屏 */
 [data-fntv-carousel-style="5"] .fntv-s5-title{
@@ -111,6 +114,11 @@ export function ensureStyle5Css(): void {
 [data-fntv-carousel-style="5"] .fntv-s5-logo{
   max-height:44px;max-width:62%;width:auto;height:auto;display:block;
   object-fit:contain;filter:drop-shadow(0 3px 12px rgba(0,0,0,.6));
+}
+/* [lc-1310] 元信息行（对齐原生 App「第1季 · 第3集」）：比标题弱两级，类型·年份·集数 */
+[data-fntv-carousel-style="5"] .fntv-s5-meta{
+  font-size:.72rem;line-height:1.4;color:rgba(240,236,255,.62);
+  letter-spacing:.3px;margin:-4px 0 8px;
 }
 /* 简介：两行截断（桌面 3 行在触屏上把按钮挤出卡外） */
 [data-fntv-carousel-style="5"] .fntv-s5-desc{
@@ -229,6 +237,19 @@ export function buildCarouselStyle5(
     const title = document.createElement('h3');
     title.className = 'fntv-s5-title';
     title.textContent = (show as any).title || '';
+    // [lc-1310] 元信息行（对齐原生 App 继续观看卡「第1季 · 第3集」）：年份/类型/集数，
+    // 有则显示、无则整行隐藏 —— 轮播条目多为剧/电影合集，原生是单集进度，语义不同。
+    const metaLine = document.createElement('div');
+    metaLine.className = 'fntv-s5-meta';
+    const _yr = (show as any).year || 0;
+    const _eps = (show as any).totalEps || (show as any).localEps || 0;
+    const _genre = Array.isArray((show as any).genres) && (show as any).genres.length ? String((show as any).genres[0]) : '';
+    const metaParts: string[] = [];
+    if (_genre) metaParts.push(_genre);
+    if (_yr > 0) metaParts.push(String(_yr));
+    if (_eps > 0) metaParts.push(`共${_eps}集`);
+    metaLine.textContent = metaParts.join(' · ');
+    metaLine.style.display = metaParts.length ? '' : 'none';
     const desc = document.createElement('p');
     desc.className = 'fntv-s5-desc';
     desc.textContent = (show as any).desc || '';
@@ -245,6 +266,7 @@ export function buildCarouselStyle5(
     actions.appendChild(play);
     actions.appendChild(detail);
     info.appendChild(title);
+    info.appendChild(metaLine);
     info.appendChild(desc);
     info.appendChild(actions);
     slide.appendChild(info);
