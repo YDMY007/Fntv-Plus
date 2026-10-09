@@ -11,6 +11,9 @@ import './preload/web/playSync'; // 模块体自装（拦截 play/record → Ban
 import './preload/plugins/a11y';
 import './preload/plugins/animeLib';
 import './preload/plugins/autoplayNext';
+// [lc-1331] 首页卡片误触：把浮层圆钮（收藏/已看/更多）的命中区收窄到可见图形，
+// 让落在其外壳 padding 区的点击穿透到播放遮罩（用户报「老是点击到下面的三个控件按钮」）
+import './preload/plugins/cardTapZone';
 import './preload/plugins/customLogo';
 import './preload/plugins/danmakuHeat';
 import './preload/plugins/danmakuWeb';

@@ -365,6 +365,23 @@ console.log('\n[5] 全屏按钮 → 横屏全屏播放');
     '修掉死判据：原 .xgplayer.xgplayer-fullscreen 恒 false（那是按钮的类，不是状态类）');
 }
 
+// ═══ 5b. 首页卡片误触（lc-1331）═══
+console.log('\n[5b] 继续观看卡片：浮层圆钮命中区收窄');
+{
+  const tap = read('src/preload/plugins/cardTapZone.ts');
+  const entry = read('src/web-entry.ts');
+  ok(/import '\.\/preload\/plugins\/cardTapZone'/.test(entry), 'web-entry 已挂载 cardTapZone');
+  ok(/querySelectorAll\('svg'\)/.test(tap) && /while \(p && p !== card\)/.test(tap),
+    '以「可见图形为锚向上收外壳」而不是按类名枚举候选（枚举法会漏掉普通 div 外壳）');
+  ok(/pointer-events', 'none', 'important'/.test(tap) && /pointer-events', 'auto', 'important'/.test(tap),
+    '外壳 none + 图形 auto（点图形仍走原处理器，点 padding 区穿透到播放）');
+  ok(/Math\.abs\(ex - cx\) < cr\.width \* 0\.18/.test(tap) && /ey < cr\.top \+ cr\.height \* 0\.5/.test(tap),
+    '居中的播放圆钮与卡片上半部分不碰（只收窄下缘小圆钮）');
+  ok(/fnos-touch/.test(tap) && /if \(!document\.documentElement\.classList\.contains\('fnos-touch'\)\) return/.test(tap),
+    '仅触摸设备生效（桌面 hover+鼠标无需干预）');
+  ok(/data-fntv-tapfix/.test(tap), '处理过的卡片打标记（MutationObserver 反复触发不重复处理）');
+}
+
 // ═══ 6. 回归：桌面端不被波及 ═══
 console.log('\n[6] 回归 —— 桌面宽屏不受影响');
 {

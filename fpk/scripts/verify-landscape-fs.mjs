@@ -17,7 +17,7 @@
 //   E 竖向视频（aspectRatio<1）→ 不自愈
 //   对照：同一用例 C 用 git HEAD（lc-1328 版）的载荷跑 → 必须 FAIL（不转）
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import vm from 'vm';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -37,9 +37,17 @@ function extractRegion(text, startMarks = ['var _landscapeBound = false;', 'let 
   return text.slice(i, j);
 }
 
+// 反向对照用的「未修复版本」：按**提交信息**定位 lc-1328（横屏修复的前一版），
+// 不要用 HEAD —— HEAD 会随每次提交前移，对照就会退化成「拿修复后跑对照」（假通过）。
+// ⚠ 用 execFileSync 传参数数组：走 shell（cmd.exe）时 `^` 会被吃掉，
+//   `--grep=^lc-1328` 退化成无锚匹配 → 命中 lc-1329（它的正文里也写了 lc-1328）。
 const OLD_PAYLOAD = (() => {
   try {
-    return execSync('git show HEAD:fpk/src/go/internal/inject/payload/fntv-plus.user.js', {
+    const rev = execFileSync('git', ['log', '--format=%H', '--grep=^lc-1328', '-1'], { cwd: root })
+      .toString('utf8').trim().split('\n')[0];
+    if (!rev) return null;
+    console.log(`反向对照版本：${rev.slice(0, 7)}（lc-1328，横屏修复前）`);
+    return execSync(`git show ${rev}:fpk/src/go/internal/inject/payload/fntv-plus.user.js`, {
       cwd: root, maxBuffer: 64 * 1024 * 1024,
     }).toString('utf8');
   } catch { return null; }
@@ -250,9 +258,9 @@ scenario('E 竖向视频（aspectRatio<1）→ 即便原生失败也不转 90°'
   check('未进伪横屏', env.calls.rotate, 0);
 });
 
-console.log('\n──── 反向对照：同一用例 C 用 lc-1328 版载荷（git HEAD）────');
+console.log('\n──── 反向对照：同一用例 C 用 lc-1328 版载荷（lc-1329 之前）────');
 if (!oldRegion) {
-  console.log('  SKIP  取不到 git HEAD 载荷（非 git 仓库？）');
+  console.log('  SKIP  取不到 lc-1328 版载荷（非 git 仓库 / 历史被改写？）');
 } else {
   console.log('C(旧) 飞牛 App（自定义 UA 无 wv + 原生全屏被拒）→ 期望「不转」，即旧版修不了');
   const env = makeEnv({
