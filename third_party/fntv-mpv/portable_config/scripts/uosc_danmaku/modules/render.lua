@@ -5,6 +5,9 @@ local utils = require("mp.utils")
 -- [lc-1272] 渲染步进：vf_fps=yes 时 0.01s(100Hz)。120Hz 显示器与 100Hz 更新无法整除对齐，
 --   有的显示帧重复旧位置、有的帧跳新位置 → 全屏下肉眼可见「左右抖动」。
 --   display-fps 观察器会把步进改为「显示器刷新率 ÷2」(60Hz@120屏) 实现整帧对齐。
+-- [lc-1303] 步进改为 1/fps + 未知刷新率时兜底 1/60：÷2 那版让弹幕位置每两显示帧才更新一次，
+--   60Hz 屏上视频 60fps、弹幕 30fps，用户反馈「一抽一抽的，跟掉帧那样」；
+--   原先 display-fps 未知时兜底是 0.001s（1000Hz 空转，白烧一个核）也一并改掉。
 -- [lc-1273] 上述步进只对 OSD 回退路径生效。lc-1273 曾把默认路径改为 lavfi=[ass=...] 视频滤镜：
 --   mpv 的 OSD overlay 恒以 ass_render_frame(t=0) 渲染（osd_libass.c append_ass 硬编码 0），
 --   \move 在 OSD 内完全静止，只能靠 Lua 定时器逐 tick 重算 \pos；而 add_periodic_timer
@@ -17,7 +20,9 @@ local utils = require("mp.utils")
 --   「糊得不行」「调字号后又糊」）；每帧 hwdownload/hwupload + fps 补帧也重（弹幕一多就卡）；
 --   滤镜图部分时机静默挂载失败 → 「弹幕加载成功却一条不显示」。OSD 路径按屏幕分辨率渲染
 --   矢量文字（原版行为，清晰），全屏抖动由 lc-1272 步进对齐抑制。滤镜路径保留可选（=yes）。
-local INTERVAL = options.vf_fps and 0.01 or 0.001
+-- [lc-1303] 兜底 0.001 → 1/60：display-fps 在窗口建立前是 nil，旧值让定时器以 1000Hz
+--   空转（每 tick 都要重建整段 OSD ASS 字符串），是白烧一个核的隐患。
+local INTERVAL = options.vf_fps and 0.01 or (1 / 60)
 local osd_width, osd_height, pause = 0, 0, true
 
 -- 提取 \move 参数 (x1, y1, x2, y2) 并返回
@@ -214,7 +219,12 @@ end
 --   ①每条滚动弹幕的 \move 补上事件内时长 (0→dur_ms)：转换器写入的 \move 无时间参数，
 --     libass 默认只在前 10s 内插值——这正是旧实现必须逐 tick 重算 \pos 的根因
 --   ②显示延迟按段偏移事件时间；③displayarea 屏蔽（滚动弹幕 y 恒定，取 y1 即可）
---   ④合并弹幕 {\fs} ×1.5 与 &#NNN; 实体清理，与 OSD 路径 parse_comment 后处理语义一致
+--   ④&#NNN; 实体清理，与 OSD 路径 parse_comment 后处理语义一致
+--      [lc-1303] 原第 ④ 条还含「合并弹幕 {\fs} ×1.5」——已删除：排版端（parse.lua 的
+--      get_str_width / 行高 / 追及判据）全部按 ev_fs（含聚合放大 ≤1.3×）算宽度，
+--      渲染端再乘 1.5 等于双重缩放：聚合弹幕实际画出来比排出来的位置宽 50%、高 50%，
+--      同一行内压到前一条、行高 39px 的行里画 55px 的字直接越轨盖住上下行
+--      （用户截图里的重叠、以及「合并弹幕速率跟别的不一样」都是这个 1.5 造成的）。
 --   ⑤\an 锚点沿用 OSD 路径约定（SP/MSG 用 7，其余 8；转换器的 move/pos 坐标按中心锚计算）
 local function write_render_file()
     local _, height, fontsize = canvas_geometry()
@@ -268,9 +278,6 @@ local function write_render_file()
             if x1 then
                 if y1 <= displayarea then
                     local clean = text:gsub("\\move%(.-%)", "")
-                    clean = clean:gsub("\\fs(%d+)", function(size)
-                        return string.format("\\fs%d", size * 1.5)
-                    end)
                     local dur_ms = math.max(1, math.floor((end_t - start_t) * 1000 + 0.5))
                     line = string.format("Dialogue: 0,%s,%s,%s,,0,0,0,,{\\an%d\\move(%s,%s,%s,%s,0,%d)}%s",
                         seconds_to_time(start_t), seconds_to_time(end_t), event.style or "Default",
@@ -279,9 +286,6 @@ local function write_render_file()
             else
                 local _, cy = text:match("\\pos%((%-?[%d%.]+),%s*(%-?[%d%.]+).*%)")
                 if cy and tonumber(cy) <= displayarea then
-                    text = text:gsub("\\fs(%d+)", function(size)
-                        return string.format("\\fs%d", size * 1.5)
-                    end)
                     line = string.format("Dialogue: 0,%s,%s,%s,,0,0,0,,{\\an%d}%s",
                         seconds_to_time(start_t), seconds_to_time(end_t), event.style or "Default",
                         an, text)
@@ -412,12 +416,10 @@ function render()
             if text then
                 text = text:gsub("&#%d+;","")
             end
-
-            if text and text:match("\\fs%d+") then
-                text = text:gsub("\\fs(%d+)", function(size)
-                    return string.format("\\fs%d", size * 1.5)
-                end)
-            end
+            -- [lc-1303] 这里原先把文本里所有 \fs 乘 1.5，已删除。聚合弹幕的内联
+            --   {\fsN} 是排版端算好的字号（≤ 基础字号 ×1.3），再乘 1.5 会让它比排版
+            --   假设的宽 50%、高 50% —— 同一行内压到相邻弹幕、也盖住上下轨道的字。
+            --   行高按 1.3× 建（DanmakuArray:new），字号必须与排版口径一致。
 
             -- 构建 ASS 字符串
             local ass_text = text and string.format("{\\rDefault\\fn%s\\fs%d\\c&HFFFFFF&\\alpha&H%s\\bord%s\\shad%s\\b%s\\q2}%s",
@@ -572,25 +574,20 @@ mp.observe_property('osd-height', 'number', function(_, value) osd_height = valu
 
 -- [lc-1300] 显示环境变化无需重建：字号/描边不再随显示分辨率变化（原版行为，
 -- PlayRes 画布由 libass 自动缩放），渲染 ASS 内容与显示几何无关，滤镜无需重挂。
--- [lc-1272] 步进=两显示帧(2/fps)：更新频率是刷新率的整约数，逐帧位置严格对齐，
---   消除「100Hz 更新 × 120Hz 显示」错频造成的抖动；比 1/fps 省一半重排开销。
+-- [lc-1303] 步进=1/fps（每个显示帧一次，与刷新严格同拍）：
+--   原 2/fps 时弹幕位置每两显示帧才更新一次 —— 60Hz 屏上视频走 60fps、弹幕只走 30fps，
+--   观感就是用户反馈的「一抽一抽的，跟掉帧那样」；且原实现的 else 分支在 >2000Hz 才会走，
+--   判据本身也没意义，直接按刷新率重建即可（下限 1ms 防呆）。
 --   [lc-1273] 滤镜路径下无定时器可调，跳过。
 mp.observe_property('display-fps', 'number', function(_, value)
     if filter_available then return end
-    if value ~= nil then
-        local interval = 2 / value
-        if interval > INTERVAL then
-            timer:kill()
-            timer = mp.add_periodic_timer(interval, render, true)
-            if ENABLED then
-                timer:resume()
-            end
-        else
-            timer:kill()
-            timer = mp.add_periodic_timer(INTERVAL, render, true)
-            if ENABLED then
-                timer:resume()
-            end
+    if value ~= nil and value > 0 then
+        local interval = 1 / value
+        if interval < 0.001 then interval = 0.001 end
+        timer:kill()
+        timer = mp.add_periodic_timer(interval, render, true)
+        if ENABLED then
+            timer:resume()
         end
     end
 end)

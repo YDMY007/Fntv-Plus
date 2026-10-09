@@ -1137,14 +1137,15 @@ local ordered_keys = {"bold", "fontsize", "outline", "shadow", "scrolltime", "op
 -- [lc-1294] 弹幕密度档位：一个开关切两套滚动时长，**不动显示范围**。
 -- 用户口径：「显示范围不变，密集/稀疏以同屏出现的数量为据」，
 -- 且「稀疏就原来 60%，密集全部展示」——两档都不丢弹幕，只改占位时长。
--- 轨道池行数只由 displayarea 与字号决定（同屏可用行），而同屏条数 = 行数 ÷ 停留秒数：
---   字号 30、行高 39、1080p×0.85 → 23 行
---   密集 scrolltime=7  → 23/7  = 3.29 条同屏（来多少显示多少，不丢）
---   稀疏 scrolltime=12 → 23/12 = 1.92 条同屏（约为密集档的 58%，即用户要的 ~60%）
--- 停留越久每条占位越久，同时在屏的越少。故只改 scrolltime，displayarea 原样保留。
+-- [lc-1303] 修正档位方向。同屏条数 = 到达率 × 停留秒数（轨道可以接力并行，
+--   见 parse.lua get_position_y 的接力模型），所以**停留越久同屏越多**：
+--     密集 scrolltime=15 → 同屏 ≈ 到达率 × 15（覆盖热门视频的 1.5~3 条/秒，不丢弃）
+--     稀疏 scrolltime=9  → 同屏 ≈ 到达率 × 9 = 密集档的 60%（用户要的 ~60%）
+--   原表是 dense=7 / sparse=12，方向反了：把「单行容量 = 1/停留」当成了同屏条数，
+--   结果「密集」档同屏反而更少。displayarea 始终不动。
 local DENSITY_PRESETS = {
-    dense = { scrolltime = 7 },
-    sparse = { scrolltime = 12 },
+    dense = { scrolltime = 15 },
+    sparse = { scrolltime = 9 },
 }
 
 -- [lc-1252] 样式改动持久化：把当前样式键合并回 script-opts/uosc_danmaku.conf。
@@ -1275,7 +1276,7 @@ function add_danmaku_setup(actived, status, submenu)
     table.insert(items, { separator = true })
     table.insert(items, {
         title = "弹幕密度",
-        hint = dense_on and "● 密集（当前·同屏多）" or "○ 稀疏（同屏少）",
+        hint = dense_on and "● 密集（当前·全部显示）" or "○ 稀疏（同屏约 6 成）",
         value = { "script-message-to", mp.get_script_name(), "toggle-danmaku-density" },
         keep_open = true, selectable = true,
     })
@@ -1521,14 +1522,10 @@ function toggle_danmaku_density()
     if ENABLED and COMMENTS ~= nil then
         load_danmaku(true, true)
     end
-    -- 同屏条数 = 可用行数 ÷ 停留秒数，把结果直接告诉用户，所见即所得
-    local row_h = math.max(tonumber(options.fontsize) or 30,
-        math.ceil((tonumber(options.fontsize) or 30) * 1.3))
-    local rows = math.floor(1080 * (tonumber(options.displayarea) or 0.85) / row_h)
-    local onscreen = rows > 0 and (rows / preset.scrolltime) or 0
-    local label = options.dense_danmaku and "密集" or "稀疏"
-    show_message(string.format("弹幕密度：%s（同屏约 %.1f 条 / 停留 %d 秒）",
-        label, onscreen, preset.scrolltime), 3)
+    -- [lc-1303] 同屏条数 = 到达率 × 停留秒数（轨道接力，见 parse.lua get_position_y）：
+    -- 到达率要播放器跑到才知道，菜单里只能报「停留秒数 + 相对比例」，不再瞎算条数。
+    local label = options.dense_danmaku and "密集（全部显示）" or "稀疏（同屏约 6 成）"
+    show_message(string.format("弹幕密度：%s｜停留 %d 秒", label, preset.scrolltime), 3)
     add_danmaku_setup()
 end
 
