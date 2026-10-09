@@ -270,21 +270,38 @@ console.log('\n[5] 全屏按钮 → 横屏全屏播放');
   // 改 player.config.fullscreen 无效 —— 必须改 getPlugin('fullscreen') 的实例 config。
   ok(/getPlugin\('fullscreen'\)/.test(danmakuWeb),
     'patch 打到插件实例 config（getPlugin；改 player.config 是无效的副本外写法）');
-  ok(/applyFsCfg\(fs\.config\)/.test(danmakuWeb),
-    '插件实例 config 被改（toggleFullScreen 读的是 this.config=fs.config；lc-1327 副本教训）');
-  ok(/lockOrientationType = 'landscape'/.test(danmakuWeb), '锁定方向为 landscape');
-  ok(/player\.config\.fullscreen\.useScreenOrientation = true|applyFsCfg\(player\.config\.fullscreen\)/.test(danmakuWeb),
-    'player.config 兜底仍在（插件后实例化的场景注册时会从这里拷贝）');
-  // [lc-1328] WebView 环境分派：Android WebView 里 screen.orientation.lock 必败（嵌入组件
-  //   无法控制宿主 Activity 方向）→ 改走 xgplayer 自带 rotateFullscreen（CSS 伪横屏）
-  ok(/const inWebView = \/\\bwv\\b\/\.test\(navigator\.userAgent/.test(danmakuWeb),
-    '环境分派：Android WebView（UA wv 标记）→ 伪横屏 / 浏览器 → 真转屏');
-  ok(/cfg\.rotateFullscreen = inWebView/.test(danmakuWeb) && /cfg\.useScreenOrientation = !inWebView/.test(danmakuWeb),
-    'WebView 用 rotateFullscreen、浏览器用 useScreenOrientation（互斥配置）');
+  ok(/fs && fs\.config \? \[fs\.config, player\.config\.fullscreen\]/.test(danmakuWeb),
+    '插件实例 config 与 player.config 双写（toggleFullScreen 读 this.config=fs.config；lc-1327 副本教训）');
+  ok(/c\.lockOrientationType = 'landscape'/.test(danmakuWeb), '锁定方向为 landscape');
+  // [lc-1328→1329] 环境分派 + 原生失败自愈：Android WebView 里 screen.orientation.lock 必败
+  //   （嵌入组件无法控制宿主 Activity 方向），原生 requestFullscreen 还需宿主实现
+  //   onShowCustomView（没实现就 reject 且静默）→ 降级到 xgplayer 自带 rotateFullscreen。
+  ok(/inWebView: \/\\bwv\\b\/\.test\(navigator\.userAgent \|\| ''\)/.test(danmakuWeb),
+    '环境快照 fsEnv()：Android WebView（UA wv 标记）→ 伪横屏 / 浏览器 → 真转屏');
+  ok(/c\.rotateFullscreen = rotate;[\s\S]{0,120}c\.useScreenOrientation = !rotate;/.test(danmakuWeb),
+    'rotate 与 useScreenOrientation 互斥赋值（bundle：两者同开时 rotate 优先）');
+  ok(/function onFsIntent\(ev: Event\)/.test(danmakuWeb) &&
+     /document\.addEventListener\('click', onFsIntent, true\)/.test(danmakuWeb) &&
+     /document\.addEventListener\('touchend', onFsIntent, true\)/.test(danmakuWeb),
+    '点击前判定绑在 document **捕获阶段**（touchend 必须监听：移动端 xgplayer 只绑 touchend）');
+  ok(!/\.toggleFullScreen\s*=\s*function/.test(danmakuWeb),
+    '不包装 fs.toggleFullScreen —— bundle 里按钮绑的是 hook() 捕获的闭包（包装属性对点击无效）');
+  ok(/function verifyNativeFullscreen\(\)/.test(danmakuWeb) &&
+     /setTimeout\(verifyNativeFullscreen, 400\)/.test(danmakuWeb),
+    '原生路径 400ms 复核 → 仍竖屏则自愈降级（不靠 UA 猜测，iOS/自定义 UA 一并覆盖）');
+  ok(/_fsForceRotate = true/.test(danmakuWeb) && /_fsHealTried/.test(danmakuWeb),
+    '降级结论粘住（第二次点击不再试原生）+ 自愈每页只试一次');
+  ok(/!\(cur\.player\.aspectRatio < 1\)/.test(danmakuWeb),
+    '竖向内容不强行转 90°（与 xgplayer 原生 lockScreen 的 aspectRatio>1 同口径）');
   ok(/\.xgplayer-rotate-fullscreen\{/.test(danmakuWeb) && /rotate\(90deg\) !important/.test(danmakuWeb),
-    'rotate-fullscreen 样式补回（飞牛构建裁掉了它；宽高留给 xgplayer 行内样式动态写）');
-  ok(!/html\.fnos-touch-narrow \.xgplayer-rotate-fullscreen\{[\s\S]{0,400}width:100vh !important/.test(danmakuWeb),
-    '不压死 rotate 容器的宽高（行内值随 orientation 动态变，!important 会错位）');
+    'rotate-fullscreen 样式补回（飞牛构建裁掉了它）');
+  ok(/html:has\(\.xgplayer-rotate-fullscreen\) \.xgplayer-rotate-fullscreen\{[\s\S]{0,400}height:100vw !important/.test(danmakuWeb),
+    'rotate 容器补 height:100vw（getRotateFullscreen 只写 width=innerHeight；缺 height 会转成一条窄带）');
+  ok(/html:has\(\.xgplayer-rotate-fullscreen\) .{0,40}\.xgplayer-rotate-fullscreen\{/.test(danmakuWeb) &&
+     !/html\.fnos-touch-narrow \.xgplayer-rotate-fullscreen\{/.test(danmakuWeb),
+    'rotate 样式按状态类 :has() 作用域（不是布局标记）—— 自愈降级可能在「桌面模式 + 手机屏」下发生');
+  ok(!/html:has\(\.xgplayer-rotate-fullscreen\) \.xgplayer-rotate-fullscreen\{[\s\S]{0,400}width:100vh !important/.test(danmakuWeb),
+    '不压死 rotate 容器的宽（行内值随 orientation 动态变，!important 会错位）');
   ok(/__reactFiber\$/.test(danmakuWeb), '经 React fiber 取 player 实例（与 gamepad.ts lc-679 同法）');
   // 只查真实代码，剥掉注释（注释里会解释「为什么不自己调 lock」）
   const danmakuCode = danmakuWeb.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

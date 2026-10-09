@@ -233,32 +233,42 @@ html.fnos-touch-narrow .trim-ui__player--popover{
 html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
 html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
-/* ── [lc-1328] 旋转全屏（rotateFullscreen）样式补回 ──
+/* ── [lc-1328/1329] 旋转全屏（rotateFullscreen）样式补回 ──
    飞牛构建把 xgplayer 的 rotate-fullscreen 样式裁掉了（全部 4 个页面 CSS 零命中，
    bundle 里类名/逻辑俱在而样式缺失）→ 打开 rotateFullscreen 后播放器不会旋转。
-   按 xgplayer 官方 skin 还原。⚠ 刻意只用 !important 补 xgplayer **没写行内样式**的
-   部分（定位/变换）；宽高由 getRotateFullscreen 自己写行内 style（width=屏高/高=屏宽），
-   不能用 !important 覆盖它 —— 行内值随 window.orientation 动态变，压死会转屏后错位。 */
-html.fnos-touch-narrow .xgplayer-rotate-fullscreen{
+   按 bundle 里 getRotateFullscreen 的实际行为还原：
+     changeFullStyle 只给 root 挂 xgplayer-rotate-fullscreen（父级 xgplayer-rotate-parent），
+     **不写任何行内尺寸**，随后只写一句 root.style.width = 竖屏 ? innerHeight : innerWidth。
+   即：宽由 JS 写死成「屏高」，**height 得由样式给成 100vw**（转 90° 后两者互换，
+   正好铺满视口）。这是 lc-1328 漏掉的一环 —— 只给了定位/旋转、没给 height，
+   元素会保持播放器原高 → 转完是一条窄带。
+   ⚠ 选择器用 html:has(...) 而不是 html.fnos-touch-narrow：真机上「桌面模式 + 手机屏」
+   也会走 rotate（点全屏先试原生、失败自愈降级），若挂布局标记上就会样式失配。
+   自愈路径下旋转是临时状态类，退出全屏即失去选择器命中，无残留。 */
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-fullscreen{
     position:fixed !important;
     top:50% !important; left:50% !important;
     margin:0 !important;
+    height:100vw !important;
     transform:translate(-50%,-50%) rotate(90deg) !important;
     transform-origin:center center !important;
     z-index:9999 !important;
     border-radius:0 !important;
+    background:#000 !important;
 }
-html.fnos-touch-narrow .xgplayer-rotate-fullscreen video{
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-fullscreen video{
     width:100% !important; height:100% !important; object-fit:contain !important;
     background:#000 !important;
 }
-html.fnos-touch-narrow .xgplayer-rotate-parent{
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-parent{
     overflow:hidden !important;
     background:#000 !important;
 }
-/* 旋转全屏激活态：页面 body 锁滚动（伪横屏时页面仍在竖屏文档流） */
-html.fnos-touch-narrow:has(.xgplayer-rotate-fullscreen) body{
+/* 旋转全屏激活态：页面锁滚动（伪横屏时页面文档流仍是竖屏，能滚就会把画面带跑） */
+html:has(.xgplayer-rotate-fullscreen),
+html:has(.xgplayer-rotate-fullscreen) body{
     overflow:hidden !important;
+    overscroll-behavior:none !important;
 }
 
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
@@ -373,72 +383,148 @@ function applyVideoFullscreenClass(): void {
  *  为了绕开这点才把它做成配置项，由按钮自己的 click 处理器调用）。
  *
  *  做法（不改飞牛的业务代码，只改它交给 xgplayer 的配置）：
- *  经 React fiber 拿到 player 实例 → 改 player.config.fullscreen.useScreenOrientation = true。
- *  fiber 取法与 gamepad.ts:240 getXgPlayer() 完全一致（已在 lc-679 实测可用）。
+ *  经 React fiber 拿到 player 实例 → 改 player.config.fullscreen.useScreenOrientation = true
+ *  （[lc-1329 起：是否改用 rotateFullscreen 由 fsEnv() 按环境判定，见下方那一族函数）。
  *  iOS 不支持 orientation.lock（xcplayer 的 lockScreen 内部 try/catch 吞掉异常），
- *  即 iPhone 上退化为「保持竖屏进全屏」，不会报错 —— 这是 iOS 的平台限制，非本次可解。 */
+ *  即 iPhone 上退化为「保持竖屏进全屏」，不会报错 —— 这是 iOS 的平台限制；lc-1329 的
+ *  运行时自愈会在这种情况下自动降级到 CSS 伪横屏，iOS 上同样能转。 */
 let _landscapeBound = false;
+/** [lc-1329] 横屏全屏策略（跨预置重入保留）：
+ *  _fsIntentBound —— 点击前判定只绑一次（document 捕获阶段，常驻）；
+ *  _fsForceRotate —— 已确认这个环境锁不了屏/原生全屏不可用，之后一律走伪横屏（结论粘住）；
+ *  _fsHealTried  —— 「原生失败 → 降级」每页只试一次，避免用户快速进出全屏被误降级。 */
+let _fsIntentBound = false;
+let _fsForceRotate = false;
+let _fsHealTried = false;
+
+/** [lc-1329] 现取播放器实例（**每次点击都重取**，避免换集/重建播放器后拿到旧实例）。
+ *  取法与 gamepad.ts:240 getXgPlayer() 一致：React fiber 上找到挂 player 的 props。 */
+function resolveXgPlayer(): { player: any; fs: any } | null {
+    const root = document.querySelector('[class*=xgplayer]') as any;
+    if (!root) return null;
+    const key = Object.keys(root).find((k) => k.startsWith('__reactFiber$'));
+    if (!key) return null;
+    let node = root[key];
+    let depth = 0;
+    while (node && depth < 15) {
+        const p = node.memoizedProps && node.memoizedProps.player;
+        if (p) {
+            // [lc-1327] 插件实例的 config 是注册时 Object.assign 出来的**副本**
+            //   （T1.register: n.config=Object.assign({},n.config,a[pluginName])），
+            //   改 player.config.fullscreen 改的是原对象、插件实例读不到 —— 两边都要写。
+            let fs: any = null;
+            try { fs = typeof p.getPlugin === 'function' ? p.getPlugin('fullscreen') : null; } catch { /* ignore */ }
+            if (!fs && p.plugins && p.plugins.fullscreen) fs = p.plugins.fullscreen;
+            return { player: p, fs };
+        }
+        node = node.return;
+        depth++;
+    }
+    return null;
+}
+
+/** 当前环境快照（现算不缓存：窗口方向会变，全屏能力也可能变） */
+function fsEnv(): { inWebView: boolean; isTouch: boolean; isPortrait: boolean; nativeFsUsable: boolean } {
+    let nativeFsUsable = true;
+    try { nativeFsUsable = document.fullscreenEnabled !== false; } catch { /* ignore */ }
+    return {
+        // Android WebView 的标准 UA 标记 `; wv)` —— 只作判据之一，主线是下面的运行时自愈
+        inWebView: /\bwv\b/.test(navigator.userAgent || ''),
+        isTouch: (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window,
+        isPortrait: window.innerHeight > window.innerWidth,
+        nativeFsUsable,
+    };
+}
+
+/** 写 xgplayer fullscreen 配置。rotate 与 useScreenOrientation **必须互斥**：
+ *  bundle（74c95604043427f0bee1d0e16bfa53af-DZn1lJtt.js）里 toggleFullScreen 的分支顺序是
+ *  useCssFullscreen → rotateFullscreen → 原生+lockScreen，两者同开时 rotate 优先。 */
+function applyFsCfg(player: any, fs: any, rotate: boolean): void {
+    player.config = player.config || {};
+    player.config.fullscreen = player.config.fullscreen || {};
+    const list: any[] = fs && fs.config ? [fs.config, player.config.fullscreen] : [player.config.fullscreen];
+    list.forEach((c) => {
+        c.rotateFullscreen = rotate;
+        c.useScreenOrientation = !rotate;
+        c.lockOrientationType = 'landscape';
+    });
+}
+
+/** ② 原生路径的复核与自愈：点完 400ms 仍是竖屏 = 这个环境锁不了屏 / 原生全屏没生效。
+ *  真机现场（飞牛 App = Android WebView）：screen.orientation.lock() 控制的是宿主 Activity，
+ *  嵌入组件无权调用，必然失败；原生 Element.requestFullscreen 还要宿主实现
+ *  WebChromeClient.onShowCustomView，没实现时 Promise 直接 reject —— 两种失败都表现为
+ *  「点了全屏，还是竖屏」（用户报障）。这里就地降级到 CSS rotate(90°) 伪横屏。 */
+function verifyNativeFullscreen(): void {
+    const cur = resolveXgPlayer();
+    if (!cur) return;
+    const env = fsEnv();
+    // 竖向内容不该被强行转 90°（与 xgplayer 原生 lockScreen 的 aspectRatio>1 同口径；
+    // 比例未知(NaN/0)时按横向处理，不阻断）
+    const landscapeContent = !(cur.player.aspectRatio < 1);
+    if (!env.isPortrait || !env.isTouch || !landscapeContent) return;
+    // 已在伪横屏就别再折腾（CSS 旋转不改 window 尺寸，「竖屏」判定会一直为真）
+    if (document.querySelector('.xgplayer-rotate-fullscreen')) return;
+    log.info('[danmakuWeb] 原生全屏后仍为竖屏 → 降级 rotateFullscreen 伪横屏');
+    _fsForceRotate = true;
+    applyFsCfg(cur.player, cur.fs, true);
+    try { if (cur.player.fullscreen) cur.player.exitFullscreen(); } catch { /* ignore */ }
+    setTimeout(() => {
+        try {
+            if (cur.fs && typeof cur.fs.getRotateFullscreen === 'function') cur.fs.getRotateFullscreen();
+            else cur.player.getRotateFullscreen();
+        } catch (e: any) { log.warn('[danmakuWeb] 伪横屏进入失败:', e?.message || e); }
+    }, 90);
+}
+
+/** ① 点击前判定：必须在 xgplayer 自己的 handler 之前改好配置。
+ *  **不能包装 fs.toggleFullScreen** —— bundle 里按钮绑的是 afterCreate 时
+ *  `this.hook('fullscreenChange', this.toggleFullScreen)` **捕获的闭包**（hook 分发器 s1
+ *  用的是捕获的 defaultFn，不查 this.toggleFullScreen），包装属性对真实点击无效。
+ *  改在 document **捕获阶段**抢先执行（早于 target 上的绑定），顺带排一次 400ms 复核。
+ *  ⚠ 必须监听 touchend：xgplayer 在移动端只绑 touchend（不绑 click），只监听 click 会漏。 */
+function onFsIntent(ev: Event): void {
+    const el = ev.target as Element | null;
+    if (!el || typeof el.closest !== 'function' || !el.closest('.xgplayer-fullscreen')) return;
+    const cur = resolveXgPlayer();
+    if (!cur) return;
+    const env = fsEnv();
+    const rotate = env.isPortrait && (_fsForceRotate || env.inWebView || !env.nativeFsUsable);
+    applyFsCfg(cur.player, cur.fs, rotate);
+    if (rotate) {
+        _fsForceRotate = true;
+        log.info('[danmakuWeb] 全屏 → rotateFullscreen 伪横屏（WebView / 原生全屏不可用）');
+        return;
+    }
+    if (_fsHealTried) return;
+    _fsHealTried = true;
+    setTimeout(verifyNativeFullscreen, 400);
+}
+
 function enableLandscapeFullscreen(): void {
     if (_landscapeBound || !isPlayerPage()) return;
     _landscapeBound = true;
-    const patch = (): boolean => {
-        const root = document.querySelector('[class*=xgplayer]') as any;
-        if (!root) return false;
-        try {
-            const key = Object.keys(root).find((k) => k.startsWith('__reactFiber$'));
-            if (!key) return false;
-            let node = root[key];
-            let depth = 0;
-            while (node && depth < 15) {
-                const p = node.memoizedProps && node.memoizedProps.player;
-                if (p) {
-                    const player = p;
-                    // [lc-1327] 插件实例的 config 是注册时 Object.assign 出来的**副本**
-                    //   （T1.register: n.config=Object.assign({},n.config,a[pluginName])），
-                    //   改 player.config.fullscreen 改的是原对象、插件实例读不到 —— 必须改
-                    //   插件实例自身（player.getPlugin('fullscreen')，xgplayer 公开 API）。
-                    let fs: any = null;
-                    try { fs = typeof player.getPlugin === 'function' ? player.getPlugin('fullscreen') : null; } catch { /* ignore */ }
-                    if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
-                    // [lc-1328] 环境分派（真机复盘的第二层根因）：
-                    //   飞牛 App 内嵌的是 **Android WebView**，而 WebView 是嵌入组件、无法控制宿主
-                    //   Activity 的方向 —— screen.orientation.lock() 在 WebView 里必然失败（仅
-                    //   Chrome 浏览器支持）→ 真机点全屏只铺满、不转横屏（用户报障）。
-                    //   WebView 环境改用 xgplayer 自带的 rotateFullscreen：CSS rotate(90°) 伪横屏，
-                    //   页面内完全可控（其样式被飞牛构建裁掉，已在本表补回）。浏览器保持真转屏。
-                    //   判定：Android WebView UA 的标准标记 "; wv)"（业界标准做法）。
-                    const inWebView = /\bwv\b/.test(navigator.userAgent || '');
-                    const applyFsCfg = (cfg: any): void => {
-                        cfg.rotateFullscreen = inWebView;
-                        cfg.useScreenOrientation = !inWebView;
-                        cfg.lockOrientationType = 'landscape';
-                    };
-                    let done = false;
-                    // 插件实例（真生效）：toggleFullScreen 读的是 this.config（=fs.config）
-                    if (fs && fs.config) { applyFsCfg(fs.config); done = true; }
-                    // player.config 兜底（若插件在 patch 之后才实例化，注册时会从这里拷贝）
-                    player.config = player.config || {};
-                    player.config.fullscreen = player.config.fullscreen || {};
-                    applyFsCfg(player.config.fullscreen);
-                    done = true;
-                    if (done) {
-                        log.info('[danmakuWeb] 横屏全屏已配置（' + (inWebView ? 'WebView→rotateFullscreen 伪横屏' : '浏览器→useScreenOrientation 真转屏') + '，插件实例=' + !!fs + ')');
-                        return true;
-                    }
-                    return false;
-                }
-                node = node.return;
-                depth++;
-            }
-        } catch (e: any) {
-            log.warn('[danmakuWeb] 横屏全屏开启失败:', e?.message || e);
+    const preApply = (): boolean => {
+        const cur = resolveXgPlayer();
+        if (!cur) return false;
+        if (!_fsIntentBound) {
+            _fsIntentBound = true;
+            document.addEventListener('click', onFsIntent, true);
+            document.addEventListener('touchend', onFsIntent, true);
         }
-        return false;
+        const env = fsEnv();
+        const rotate = _fsForceRotate || (env.inWebView && env.isPortrait);
+        applyFsCfg(cur.player, cur.fs, rotate);
+        log.info('[danmakuWeb] 横屏全屏已接管（点击前判定：竖屏 + ' +
+            (env.inWebView ? 'WebView UA' : env.nativeFsUsable ? '浏览器' : '原生全屏不可用') +
+            ' → ' + (rotate ? 'rotateFullscreen 伪横屏' : 'useScreenOrientation 真转屏') +
+            '；原生失败 400ms 后自愈降级，插件实例=' + !!cur.fs + '）');
+        return true;
     };
-    if (patch()) return;
+    if (preApply()) return;
     // 播放器懒渲染：立即 + 延迟重试（与 bindVideoFullscreenFix 的节奏一致）
-    setTimeout(() => { if (!patch()) setTimeout(patch, 2000); }, 800);
-    setTimeout(patch, 3000);
+    setTimeout(() => { if (!preApply()) setTimeout(preApply, 2000); }, 800);
+    setTimeout(preApply, 3000);
 }
 
 function bindVideoFullscreenFix(): void {

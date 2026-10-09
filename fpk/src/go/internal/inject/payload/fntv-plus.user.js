@@ -5477,32 +5477,42 @@ html.fnos-touch-narrow .trim-ui__player--popover{
 html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
 html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
-/* \u2500\u2500 [lc-1328] \u65CB\u8F6C\u5168\u5C4F\uFF08rotateFullscreen\uFF09\u6837\u5F0F\u8865\u56DE \u2500\u2500
+/* \u2500\u2500 [lc-1328/1329] \u65CB\u8F6C\u5168\u5C4F\uFF08rotateFullscreen\uFF09\u6837\u5F0F\u8865\u56DE \u2500\u2500
    \u98DE\u725B\u6784\u5EFA\u628A xgplayer \u7684 rotate-fullscreen \u6837\u5F0F\u88C1\u6389\u4E86\uFF08\u5168\u90E8 4 \u4E2A\u9875\u9762 CSS \u96F6\u547D\u4E2D\uFF0C
    bundle \u91CC\u7C7B\u540D/\u903B\u8F91\u4FF1\u5728\u800C\u6837\u5F0F\u7F3A\u5931\uFF09\u2192 \u6253\u5F00 rotateFullscreen \u540E\u64AD\u653E\u5668\u4E0D\u4F1A\u65CB\u8F6C\u3002
-   \u6309 xgplayer \u5B98\u65B9 skin \u8FD8\u539F\u3002\u26A0 \u523B\u610F\u53EA\u7528 !important \u8865 xgplayer **\u6CA1\u5199\u884C\u5185\u6837\u5F0F**\u7684
-   \u90E8\u5206\uFF08\u5B9A\u4F4D/\u53D8\u6362\uFF09\uFF1B\u5BBD\u9AD8\u7531 getRotateFullscreen \u81EA\u5DF1\u5199\u884C\u5185 style\uFF08width=\u5C4F\u9AD8/\u9AD8=\u5C4F\u5BBD\uFF09\uFF0C
-   \u4E0D\u80FD\u7528 !important \u8986\u76D6\u5B83 \u2014\u2014 \u884C\u5185\u503C\u968F window.orientation \u52A8\u6001\u53D8\uFF0C\u538B\u6B7B\u4F1A\u8F6C\u5C4F\u540E\u9519\u4F4D\u3002 */
-html.fnos-touch-narrow .xgplayer-rotate-fullscreen{
+   \u6309 bundle \u91CC getRotateFullscreen \u7684\u5B9E\u9645\u884C\u4E3A\u8FD8\u539F\uFF1A
+     changeFullStyle \u53EA\u7ED9 root \u6302 xgplayer-rotate-fullscreen\uFF08\u7236\u7EA7 xgplayer-rotate-parent\uFF09\uFF0C
+     **\u4E0D\u5199\u4EFB\u4F55\u884C\u5185\u5C3A\u5BF8**\uFF0C\u968F\u540E\u53EA\u5199\u4E00\u53E5 root.style.width = \u7AD6\u5C4F ? innerHeight : innerWidth\u3002
+   \u5373\uFF1A\u5BBD\u7531 JS \u5199\u6B7B\u6210\u300C\u5C4F\u9AD8\u300D\uFF0C**height \u5F97\u7531\u6837\u5F0F\u7ED9\u6210 100vw**\uFF08\u8F6C 90\xB0 \u540E\u4E24\u8005\u4E92\u6362\uFF0C
+   \u6B63\u597D\u94FA\u6EE1\u89C6\u53E3\uFF09\u3002\u8FD9\u662F lc-1328 \u6F0F\u6389\u7684\u4E00\u73AF \u2014\u2014 \u53EA\u7ED9\u4E86\u5B9A\u4F4D/\u65CB\u8F6C\u3001\u6CA1\u7ED9 height\uFF0C
+   \u5143\u7D20\u4F1A\u4FDD\u6301\u64AD\u653E\u5668\u539F\u9AD8 \u2192 \u8F6C\u5B8C\u662F\u4E00\u6761\u7A84\u5E26\u3002
+   \u26A0 \u9009\u62E9\u5668\u7528 html:has(...) \u800C\u4E0D\u662F html.fnos-touch-narrow\uFF1A\u771F\u673A\u4E0A\u300C\u684C\u9762\u6A21\u5F0F + \u624B\u673A\u5C4F\u300D
+   \u4E5F\u4F1A\u8D70 rotate\uFF08\u70B9\u5168\u5C4F\u5148\u8BD5\u539F\u751F\u3001\u5931\u8D25\u81EA\u6108\u964D\u7EA7\uFF09\uFF0C\u82E5\u6302\u5E03\u5C40\u6807\u8BB0\u4E0A\u5C31\u4F1A\u6837\u5F0F\u5931\u914D\u3002
+   \u81EA\u6108\u8DEF\u5F84\u4E0B\u65CB\u8F6C\u662F\u4E34\u65F6\u72B6\u6001\u7C7B\uFF0C\u9000\u51FA\u5168\u5C4F\u5373\u5931\u53BB\u9009\u62E9\u5668\u547D\u4E2D\uFF0C\u65E0\u6B8B\u7559\u3002 */
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-fullscreen{
     position:fixed !important;
     top:50% !important; left:50% !important;
     margin:0 !important;
+    height:100vw !important;
     transform:translate(-50%,-50%) rotate(90deg) !important;
     transform-origin:center center !important;
     z-index:9999 !important;
     border-radius:0 !important;
+    background:#000 !important;
 }
-html.fnos-touch-narrow .xgplayer-rotate-fullscreen video{
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-fullscreen video{
     width:100% !important; height:100% !important; object-fit:contain !important;
     background:#000 !important;
 }
-html.fnos-touch-narrow .xgplayer-rotate-parent{
+html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-parent{
     overflow:hidden !important;
     background:#000 !important;
 }
-/* \u65CB\u8F6C\u5168\u5C4F\u6FC0\u6D3B\u6001\uFF1A\u9875\u9762 body \u9501\u6EDA\u52A8\uFF08\u4F2A\u6A2A\u5C4F\u65F6\u9875\u9762\u4ECD\u5728\u7AD6\u5C4F\u6587\u6863\u6D41\uFF09 */
-html.fnos-touch-narrow:has(.xgplayer-rotate-fullscreen) body{
+/* \u65CB\u8F6C\u5168\u5C4F\u6FC0\u6D3B\u6001\uFF1A\u9875\u9762\u9501\u6EDA\u52A8\uFF08\u4F2A\u6A2A\u5C4F\u65F6\u9875\u9762\u6587\u6863\u6D41\u4ECD\u662F\u7AD6\u5C4F\uFF0C\u80FD\u6EDA\u5C31\u4F1A\u628A\u753B\u9762\u5E26\u8DD1\uFF09 */
+html:has(.xgplayer-rotate-fullscreen),
+html:has(.xgplayer-rotate-fullscreen) body{
     overflow:hidden !important;
+    overscroll-behavior:none !important;
 }
 
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
@@ -5586,61 +5596,118 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
     document.documentElement.classList.toggle("fntv-video-fullscreen", nativeFs || pseudoFs);
   }
   var _landscapeBound = false;
+  var _fsIntentBound = false;
+  var _fsForceRotate = false;
+  var _fsHealTried = false;
+  function resolveXgPlayer() {
+    const root = document.querySelector("[class*=xgplayer]");
+    if (!root) return null;
+    const key = Object.keys(root).find((k) => k.startsWith("__reactFiber$"));
+    if (!key) return null;
+    let node = root[key];
+    let depth = 0;
+    while (node && depth < 15) {
+      const p = node.memoizedProps && node.memoizedProps.player;
+      if (p) {
+        let fs = null;
+        try {
+          fs = typeof p.getPlugin === "function" ? p.getPlugin("fullscreen") : null;
+        } catch {
+        }
+        if (!fs && p.plugins && p.plugins.fullscreen) fs = p.plugins.fullscreen;
+        return { player: p, fs };
+      }
+      node = node.return;
+      depth++;
+    }
+    return null;
+  }
+  function fsEnv() {
+    let nativeFsUsable = true;
+    try {
+      nativeFsUsable = document.fullscreenEnabled !== false;
+    } catch {
+    }
+    return {
+      // Android WebView 的标准 UA 标记 `; wv)` —— 只作判据之一，主线是下面的运行时自愈
+      inWebView: /\bwv\b/.test(navigator.userAgent || ""),
+      isTouch: (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window,
+      isPortrait: window.innerHeight > window.innerWidth,
+      nativeFsUsable
+    };
+  }
+  function applyFsCfg(player, fs, rotate) {
+    player.config = player.config || {};
+    player.config.fullscreen = player.config.fullscreen || {};
+    const list = fs && fs.config ? [fs.config, player.config.fullscreen] : [player.config.fullscreen];
+    list.forEach((c) => {
+      c.rotateFullscreen = rotate;
+      c.useScreenOrientation = !rotate;
+      c.lockOrientationType = "landscape";
+    });
+  }
+  function verifyNativeFullscreen() {
+    const cur = resolveXgPlayer();
+    if (!cur) return;
+    const env = fsEnv();
+    const landscapeContent = !(cur.player.aspectRatio < 1);
+    if (!env.isPortrait || !env.isTouch || !landscapeContent) return;
+    if (document.querySelector(".xgplayer-rotate-fullscreen")) return;
+    log6.info("[danmakuWeb] \u539F\u751F\u5168\u5C4F\u540E\u4ECD\u4E3A\u7AD6\u5C4F \u2192 \u964D\u7EA7 rotateFullscreen \u4F2A\u6A2A\u5C4F");
+    _fsForceRotate = true;
+    applyFsCfg(cur.player, cur.fs, true);
+    try {
+      if (cur.player.fullscreen) cur.player.exitFullscreen();
+    } catch {
+    }
+    setTimeout(() => {
+      try {
+        if (cur.fs && typeof cur.fs.getRotateFullscreen === "function") cur.fs.getRotateFullscreen();
+        else cur.player.getRotateFullscreen();
+      } catch (e) {
+        log6.warn("[danmakuWeb] \u4F2A\u6A2A\u5C4F\u8FDB\u5165\u5931\u8D25:", (e == null ? void 0 : e.message) || e);
+      }
+    }, 90);
+  }
+  function onFsIntent(ev) {
+    const el = ev.target;
+    if (!el || typeof el.closest !== "function" || !el.closest(".xgplayer-fullscreen")) return;
+    const cur = resolveXgPlayer();
+    if (!cur) return;
+    const env = fsEnv();
+    const rotate = env.isPortrait && (_fsForceRotate || env.inWebView || !env.nativeFsUsable);
+    applyFsCfg(cur.player, cur.fs, rotate);
+    if (rotate) {
+      _fsForceRotate = true;
+      log6.info("[danmakuWeb] \u5168\u5C4F \u2192 rotateFullscreen \u4F2A\u6A2A\u5C4F\uFF08WebView / \u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528\uFF09");
+      return;
+    }
+    if (_fsHealTried) return;
+    _fsHealTried = true;
+    setTimeout(verifyNativeFullscreen, 400);
+  }
   function enableLandscapeFullscreen() {
     if (_landscapeBound || !isPlayerPage()) return;
     _landscapeBound = true;
-    const patch = () => {
-      const root = document.querySelector("[class*=xgplayer]");
-      if (!root) return false;
-      try {
-        const key = Object.keys(root).find((k) => k.startsWith("__reactFiber$"));
-        if (!key) return false;
-        let node = root[key];
-        let depth = 0;
-        while (node && depth < 15) {
-          const p = node.memoizedProps && node.memoizedProps.player;
-          if (p) {
-            const player = p;
-            let fs = null;
-            try {
-              fs = typeof player.getPlugin === "function" ? player.getPlugin("fullscreen") : null;
-            } catch {
-            }
-            if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
-            const inWebView = /\bwv\b/.test(navigator.userAgent || "");
-            const applyFsCfg = (cfg) => {
-              cfg.rotateFullscreen = inWebView;
-              cfg.useScreenOrientation = !inWebView;
-              cfg.lockOrientationType = "landscape";
-            };
-            let done = false;
-            if (fs && fs.config) {
-              applyFsCfg(fs.config);
-              done = true;
-            }
-            player.config = player.config || {};
-            player.config.fullscreen = player.config.fullscreen || {};
-            applyFsCfg(player.config.fullscreen);
-            done = true;
-            if (done) {
-              log6.info("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5DF2\u914D\u7F6E\uFF08" + (inWebView ? "WebView\u2192rotateFullscreen \u4F2A\u6A2A\u5C4F" : "\u6D4F\u89C8\u5668\u2192useScreenOrientation \u771F\u8F6C\u5C4F") + "\uFF0C\u63D2\u4EF6\u5B9E\u4F8B=" + !!fs + ")");
-              return true;
-            }
-            return false;
-          }
-          node = node.return;
-          depth++;
-        }
-      } catch (e) {
-        log6.warn("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5F00\u542F\u5931\u8D25:", (e == null ? void 0 : e.message) || e);
+    const preApply = () => {
+      const cur = resolveXgPlayer();
+      if (!cur) return false;
+      if (!_fsIntentBound) {
+        _fsIntentBound = true;
+        document.addEventListener("click", onFsIntent, true);
+        document.addEventListener("touchend", onFsIntent, true);
       }
-      return false;
+      const env = fsEnv();
+      const rotate = _fsForceRotate || env.inWebView && env.isPortrait;
+      applyFsCfg(cur.player, cur.fs, rotate);
+      log6.info("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5DF2\u63A5\u7BA1\uFF08\u70B9\u51FB\u524D\u5224\u5B9A\uFF1A\u7AD6\u5C4F + " + (env.inWebView ? "WebView UA" : env.nativeFsUsable ? "\u6D4F\u89C8\u5668" : "\u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528") + " \u2192 " + (rotate ? "rotateFullscreen \u4F2A\u6A2A\u5C4F" : "useScreenOrientation \u771F\u8F6C\u5C4F") + "\uFF1B\u539F\u751F\u5931\u8D25 400ms \u540E\u81EA\u6108\u964D\u7EA7\uFF0C\u63D2\u4EF6\u5B9E\u4F8B=" + !!cur.fs + "\uFF09");
+      return true;
     };
-    if (patch()) return;
+    if (preApply()) return;
     setTimeout(() => {
-      if (!patch()) setTimeout(patch, 2e3);
+      if (!preApply()) setTimeout(preApply, 2e3);
     }, 800);
-    setTimeout(patch, 3e3);
+    setTimeout(preApply, 3e3);
   }
   function bindVideoFullscreenFix() {
     if (!isPlayerPage()) return;
