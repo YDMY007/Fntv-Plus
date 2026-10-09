@@ -22,6 +22,8 @@ import './preload/plugins/hotUpdates';
 import './preload/plugins/listLayout';
 // 手机/窄视口适配层（≤820 解除站点 #root 820px 裁切；≤640 手机整版排布）
 import './preload/plugins/mobileStyle';
+// [lc-1319] UI 模式手动切换按钮（右下角浮层，贴「每日放送」上方；依赖 mobileStyle 模式真源）
+import './preload/plugins/uiModeToggle';
 import './preload/plugins/pageAnim';
 import './preload/plugins/personWorks';
 import './preload/plugins/playMemory';

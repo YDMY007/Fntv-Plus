@@ -20,57 +20,82 @@ const mobileStyle = read('src/preload/plugins/mobileStyle.ts');
 const danmakuWeb = read('src/preload/plugins/danmakuWeb.ts');
 const styles = read('src/preload/plugins/embyWall/carousel/styles.ts');
 
-// ═══ 1. fnos-touch-narrow 必须全局装配 ═══
-console.log('\n[1] html.fnos-touch-narrow 全局装配（轮播窄屏规则的唯一门控）');
+// ═══ 1. UI 模式（手动切换）与布局标记装配（lc-1319 起） ═══
+console.log('\n[1] UI 模式手动切换 → 三布局标记装配（fnos-touch-narrow / narrow / compact）');
 {
-  // 抽出 applyViewportFlags 的函数体，在 vm 里跑真实源码，验证标记类装配
+  // 抽出 applyViewportFlags 的函数体，在 vm 里跑真实源码，验证「标记由 getUiMode 决定」
   const m = mobileStyle.match(/function applyViewportFlags\(\): void \{([\s\S]*?)\n\}/);
   ok(!!m, 'applyViewportFlags 可被抽取');
   const body = m ? m[1] : '';
 
-  // 构造假 html/document/window，跑真实函数体
-  const classes = new Set();
-  const html = {
-    classList: {
-      toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
-      contains: (c) => classes.has(c),
-    },
-    style: { setProperty() {}, removeProperty() {}, minWidth: '' },
+  /** 在 vm 里以指定模式/触摸能力跑真实函数体，返回挂上的 class 集合 */
+  const runFlags = (mode, touch) => {
+    const classes = new Set();
+    const sandbox = {
+      document: {
+        documentElement: {
+          classList: {
+            toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
+            contains: (c) => classes.has(c),
+          },
+          style: { setProperty() {}, removeProperty() {}, minWidth: '' },
+        },
+        getElementById: () => null,
+      },
+      window: { dispatchEvent() {} },
+      localStorage: { getItem: (k) => (k === 'fntv_ui_mode' ? (mode === 'mobile' ? 'mobile' : null) : null) },
+      navigator: { maxTouchPoints: touch ? 5 : 0 },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(
+      `function isTouchDevice(){ return ('ontouchstart' in window) || (navigator.maxTouchPoints||0)>0; }
+       function getUiMode(){ return localStorage.getItem('fntv_ui_mode') === 'mobile' ? 'mobile' : 'desktop'; }
+       function applyViewportFlags(){${body}}
+       applyViewportFlags();`,
+      sandbox
+    );
+    return classes;
   };
-  const sandbox = {
-    document: { documentElement: html, getElementById: () => null },
-    window: { matchMedia: (q) => ({ matches: q.includes('640.5') ? false : false }), dispatchEvent() {} },
-    navigator: { maxTouchPoints: 5 },
-  };
-  sandbox.window.matchMedia = (q) => ({ matches: false }); // 两个 MQ 都 false → 窄屏
-  vm.createContext(sandbox);
-  vm.runInContext(
-    `var _mqNarrow={matches:false}, _mqCompact={matches:false};
-     function isTouchDevice(){ return ('ontouchstart' in window) || (navigator.maxTouchPoints||0)>0; }
-     function applyViewportFlags(){${body}}
-     applyViewportFlags();`,
-    sandbox
-  );
-  ok(classes.has('fnos-touch-narrow'), '手机触屏 + 窄视口 → 装上 fnos-touch-narrow',
-    `实际 classes=[${[...classes]}]`);
-  ok(classes.has('fnos-narrow'), '同时保留 fnos-narrow（本文件原有段依赖）');
-  ok(classes.has('fnos-touch'), '同时保留 fnos-touch（安全区/触控语义段依赖）');
 
-  // 桌面窄窗（无触屏）不得装 touch-narrow
-  const classes2 = new Set();
-  const html2 = { classList: { toggle: (c, on) => (on ? classes2.add(c) : classes2.delete(c)), contains: () => false }, style: { setProperty() {}, removeProperty() {}, minWidth: '' } };
-  const sb2 = {
-    document: { documentElement: html2, getElementById: () => null },
-    window: { matchMedia: () => ({ matches: false }), dispatchEvent() {} },
-    navigator: { maxTouchPoints: 0 },
-  };
-  vm.createContext(sb2);
-  vm.runInContext(`var _mqNarrow={matches:false}, _mqCompact={matches:false};
-    function isTouchDevice(){ return ('ontouchstart' in window) || (navigator.maxTouchPoints||0)>0; }
-    function applyViewportFlags(){${body}}
-    applyViewportFlags();`, sb2);
-  ok(!classes2.has('fnos-touch-narrow'), '桌面窄窗口（无触屏）→ 不装 fnos-touch-narrow',
-    `实际 classes=[${[...classes2]}]`);
+  const cMobile = runFlags('mobile', true);
+  ok(cMobile.has('fnos-touch-narrow') && cMobile.has('fnos-narrow') && cMobile.has('fnos-compact'),
+    '模式=手机 → 三布局标记全开（touch-narrow / narrow / compact）', `实际 [${[...cMobile]}]`);
+  ok(cMobile.has('fnos-touch'), '触屏设备同时保留 fnos-touch（纯交互层，与布局无关）');
+
+  const cDesk = runFlags('desktop', true);
+  ok(!cDesk.has('fnos-touch-narrow') && !cDesk.has('fnos-narrow') && !cDesk.has('fnos-compact'),
+    '模式=电脑 → 三布局标记全关（哪怕设备是触屏 —— lc-1308~1318 误伤根因）', `实际 [${[...cDesk]}]`);
+  ok(cDesk.has('fnos-touch'), '电脑模式下 fnos-touch 仍按设备判定（触屏机保留）');
+
+  // 真源与自动判定废除（lc-1319）
+  ok(/export function getUiMode\(\): UiMode/.test(mobileStyle) && /export function setUiMode\(/.test(mobileStyle),
+    'mobileStyle 导出模式真源 getUiMode/setUiMode（localStorage 持久化）');
+  ok(/html\.classList\.toggle\('fnos-touch-narrow', mobile\)/.test(mobileStyle),
+    '标记装配读手动模式（不再看视口宽/触屏能力）');
+  ok(!/fnos-touch-narrow', touch && narrow/.test(mobileStyle), '旧的「触屏 && 窄视口」自动判定已移除');
+}
+
+// ═══ 1b. UI 模式联动（lc-1319）：各安装点统一读模式 ═══
+console.log('\n[1b] UI 模式联动 —— 各安装点统一读 getUiMode');
+{
+  const beautifySrc = read('src/preload/plugins/embyWall/detail/beautifyStyle.ts');
+  const carouselMobileSrc = read('src/preload/plugins/embyWall/carousel/mobile.ts');
+  const webEntrySrc = read('src/web-entry.ts');
+  const uiToggleSrc = read('src/preload/plugins/uiModeToggle.ts');
+  const embyWallSrc = read('src/preload/plugins/embyWall.ts');
+
+  ok(/classList\.toggle\('fnos-touch-narrow', getUiMode\(\) === 'mobile'\)/.test(beautifySrc),
+    'installMobileFlag（beautifyStyle，danmakuWeb 共用）改读模式');
+  ok(/getUiMode\(\) === 'mobile'/.test(carouselMobileSrc) &&
+     !/isMobileSpec/.test(carouselMobileSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')),
+    '轮播选路 resolveCarouselStyle 改读模式（旧的触屏+短边判定已删）');
+  ok(/const smallScreen = getUiMode\(\) === 'mobile'/.test(danmakuWeb),
+    '播放页字号 smallScreen 改读模式');
+  ok(/setUiMode\(next\)/.test(uiToggleSrc) && /fntv-uimode-tab/.test(uiToggleSrc),
+    'UI 模式切换按钮：点击切换（事件驱动即时生效，无需刷新）');
+  ok(/import '\.\/preload\/plugins\/uiModeToggle'/.test(webEntrySrc), 'uiModeToggle 已注册进 web-entry');
+  ok(/const mobileMode = getUiMode\(\) === 'mobile'/.test(embyWallSrc) && !/const touchCapable = mobileSpec/.test(embyWallSrc),
+    '设置面板「触屏特供」项的显示/高亮口径改读模式（电脑模式不显示死开关）');
 }
 
 // ═══ 2. 轮播左右黑框：宽度预算 ═══
@@ -193,8 +218,8 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
   // [lc-1318] 手机/平板模式：字号基准用视频画面实际高度（用户报「屏幕不大弹幕
   //   字号要自动缩放，现在的字号这么大」——竖屏画布全高 844 算出 30px，而 16:9
   //   画面只占上部 ~219px）
-  ok(/const smallScreen = isTouchEnv\(\) && Math\.min\(window\.innerWidth, window\.innerHeight\) <= 820/.test(danmakuWeb),
-    'smallScreen 口径 640→820（平板与 fnos-touch-narrow 同规）');
+  ok(/const smallScreen = getUiMode\(\) === 'mobile'/.test(danmakuWeb),
+    'smallScreen 改由手动 UI 模式决定（lc-1319；原「触屏+短边≤820」口径随自动判定一并废除）');
   ok(/const pictureH = cw \/ \(videoEl\.videoWidth \/ videoEl\.videoHeight\)/.test(danmakuWeb),
     '手机/平板字号基准用视频画面实际高度（画布全高会把竖屏字号放大 4 倍）');
   ok(/const userScale = style\.fontScale \/ DEFAULT_STYLE\.fontScale/.test(danmakuWeb),

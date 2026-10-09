@@ -1,4 +1,6 @@
 import { ABOUT_LINK_URL, openFeedbackChoiceModal } from './embyWall/modals/feedback';
+// [lc-1319] UI 模式（手动切换）真源：轮播选路/面板口径跟随 mobileStyle.getUiMode
+import { getUiMode } from './mobileStyle';
 import { UiThemeMode, applyUiTheme, getEffectiveDark, getUiTheme, injectUiThemeStyle, removeThemeModeSetting, setUiTheme } from './embyWall/theme';
 import { applyCarouselLogoNow, backfillDetailLogo } from './embyWall/carousel/logo';
 import { buildCard as buildCustomLogoCard, refreshCard as refreshCustomLogoCard } from './customLogo';
@@ -2671,13 +2673,12 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   但用户再也找不到切换入口（用户报障「外观里轮播图样式没了」）。按桌面版原样补回：
     //   1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，点击后整页回首页重载生效。
     const getCs = (): number => {
-      // [lc-1291→lc-1309] 与 mobile.resolveCarouselStyle 同口径（touchCapable 已含
-      // 触屏+短边≤820 双条件）：手机/平板上存量 '4' 是 lc-780 时代默认值、不是知情选择
-      // → 高亮「触屏特供」；显式选过 1/2/3 才高亮对应项。PC（含触屏一体机）：
-      // '4'/'5'/空 全部按 4 高亮，原样式不动。
+      // [lc-1319] 与 mobile.resolveCarouselStyle 同口径：门控改读手动 UI 模式（mobileMode）。
+      // 手机模式下存量 '4' 是 lc-780 时代默认值、不是知情选择 → 高亮「触屏特供」；
+      // 显式选过 1/2/3 才高亮对应项。电脑模式：'4'/'5'/空 全部按 4 高亮，原样式不动。
       const stored = localStorage.getItem('fnos-carousel-style');
       const v = parseInt(stored || '4', 10);
-      if (touchCapable) {
+      if (mobileMode) {
         return (v === 1 || v === 2 || v === 3) ? v : 5;
       }
       return (v === 5) ? 4 : ((v >= 1 && v <= 5) ? v : 4);
@@ -2691,15 +2692,13 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
-    // [lc-1291] 样式 5 仅触屏设备可选；桌面面板里不显示这一项（resolveCarouselStyle 同口径：
-    //   桌面即便写入 5 也会回落 4，这里不展示是避免给桌面用户一个「选了没效果」的死开关）。
-    // [lc-1309] 用户明确要求新布局**只对手机端和平板的尺寸规格生效**、PC 原样式不动：
-    // 面板第 5 项与高亮口径 = 触屏 + 短边≤820 双条件（与 mobile.resolveCarouselStyle 一致）。
-    // 触屏一体机/触屏笔记本（PC，短边>820）不显示该档，避免「选了没效果」的死开关。
-    const mobileSpec = (() => { try { return Math.min(window.innerWidth, window.innerHeight) <= 820; } catch { return false; } })();
-    const touchCapable = mobileSpec && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+    // [lc-1319] 样式 5 仅手机/平板模式可选；电脑模式面板里不显示这一项
+    // （resolveCarouselStyle 同口径：电脑模式即便写入 5 也会回落 4，
+    //   不展示是避免给用户一个「选了没效果」的死开关）。
+    // 面板第 5 项与高亮口径统一 = 手动 UI 模式（首页浮层「UI 模式」按钮切换）。
+    const mobileMode = getUiMode() === 'mobile';
     const csLabels = ['竖向轮播', '横向轮播', '堆叠切换', '立体堆叠'];
-    if (touchCapable) csLabels.push('触屏特供');
+    if (mobileMode) csLabels.push('触屏特供');
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';

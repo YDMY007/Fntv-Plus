@@ -39,8 +39,24 @@ export function isNarrowViewport(): boolean {
   try { return !window.matchMedia(MQ_NARROW).matches; } catch { return false; }
 }
 
-let _mqNarrow: MediaQueryList | null = null;
-let _mqCompact: MediaQueryList | null = null;
+/** [lc-1319] UI 模式（手动）：'mobile' = 手机/平板布局，'desktop' = 电脑布局（默认）。
+ *  取代原先「触屏能力 × 视口宽」的自动判定 —— 该判定在带触摸的桌面环境反复误伤
+ *  （lc-1308~1318 一串"内置/外置不一致""PC 被卷进来"问题的共同源头）。改为首页浮层
+ *  「UI 模式」按钮手动切换（uiModeToggle.ts），选择持久化在 localStorage 跨会话记忆。
+ *  fnos-narrow / fnos-compact / fnos-touch-narrow 三个布局标记统一由它决定；
+ *  fnos-touch（设备触摸能力）仍由 isTouchDevice() 判定（纯交互层语义，与布局无关）。 */
+export type UiMode = 'mobile' | 'desktop';
+export const UI_MODE_KEY = 'fntv_ui_mode';
+export const UI_MODE_EVENT = 'fntv:ui-mode';
+export function getUiMode(): UiMode {
+  try { return localStorage.getItem(UI_MODE_KEY) === 'mobile' ? 'mobile' : 'desktop'; } catch { return 'desktop'; }
+}
+export function setUiMode(mode: UiMode): void {
+  try { localStorage.setItem(UI_MODE_KEY, mode); } catch { /* ignore */ }
+  try { window.dispatchEvent(new CustomEvent(UI_MODE_EVENT, { detail: mode })); } catch { /* ignore */ }
+}
+
+let _uiModeBound = false;   // [lc-1319] UI_MODE_EVENT 只绑一次
 
 /** 是否真触摸设备（设备硬事实，不随窗口/鼠标移动而变）。
  *  刻意不用 @media (pointer:coarse) / (hover:hover)：截图与自动化工具会重置指针模拟，
@@ -54,33 +70,32 @@ function isTouchDevice(): boolean {
   } catch { return false; }
 }
 
-/** 按当前视口宽挂/摘 html.fnos-narrow / html.fnos-compact / html.fnos-touch-narrow 标记类（幂等）。 */
+/** 按手动 UI 模式挂/摘布局标记类（幂等）。[lc-1319] 布局标记与视口宽解耦：
+ *  mobile = 手机/平板布局（fnos-narrow + fnos-compact + fnos-touch-narrow 全开）、
+ *  desktop = 电脑布局（全关）。视口宽/触屏能力不再参与布局决策 —— 带触摸屏的
+ *  桌面环境（Windows 触屏本、内置浏览器）此前会被自动判定卷进手机布局，
+ *  lc-1308~1318 一串不一致问题皆源于此。 */
 function applyViewportFlags(): void {
   const html = document.documentElement;
-  const narrow = !_mqNarrow || !_mqNarrow.matches;     // (min-width:640.5px) 不匹配 = ≤640
-  const compact = !_mqCompact || !_mqCompact.matches;  // (min-width:820.5px) 不匹配 = ≤820
-  const narrowBefore = html.classList.contains('fnos-narrow');
-  const compactBefore = html.classList.contains('fnos-compact');
-  html.classList.toggle('fnos-narrow', narrow);
-  html.classList.toggle('fnos-compact', compact);
-  const touch = isTouchDevice();
-  html.classList.toggle('fnos-touch', touch);
-  // [lc-1290] fnos-touch-narrow 此前只由 beautifyStyle（详情页）与 danmakuWeb（播放页）
-  //   安装，首页从不安装 → carousel/styles.ts 里那一整段 @media(max-width:640px) 的轮播
-  //   手机适配（wrapper 44px→16px、s4 卡 86%→94%、邻卡位移收窄、竖屏容器加高）在首页
-  //   **全部是死代码**，用户报「轮播图左右黑框」即此。
-  //   本模块是最底层适配层（零插件依赖、boot 期注入、全站生命周期都在），标记归它装，
-  //   两处原有安装点保留（幂等 classList.toggle，重复调用无副作用）。
-  html.classList.toggle('fnos-touch-narrow', touch && narrow);
+  const mobile = getUiMode() === 'mobile';
+  const wasMobile = html.classList.contains('fnos-touch-narrow');
+  html.classList.toggle('fnos-narrow', mobile);
+  html.classList.toggle('fnos-compact', mobile);
+  // fnos-touch 保留设备触摸能力判定（纯交互层语义：安全区/热区/hover 降级），与布局无关
+  html.classList.toggle('fnos-touch', isTouchDevice());
+  // fnos-touch-narrow 是全站手机/平板布局唯一门控（底栏两行、自建面板、轮播样式 5、
+  // 卡片尺寸、播放页字号……）。lc-1290 起本模块即为安装点（首页也装），
+  // beautifyStyle / danmakuWeb 两处幂等共用同一判定来源。
+  html.classList.toggle('fnos-touch-narrow', mobile);
   // 行内兜底：#root 的 820px 钉宽来自站点自有样式表，样式表层已有 !important 覆盖，
-  // 这里再钉一份行内 !important 兜住「站点样式后加载/被重建」的时序。宽视口必须摘除。
+  // 这里再钉一份行内 !important 兜住「站点样式后加载/被重建」的时序。电脑布局必须摘除。
   const root = document.getElementById('root');
   if (root) {
-    if (compact) root.style.setProperty('min-width', '0', 'important');
+    if (mobile) root.style.setProperty('min-width', '0', 'important');
     else if (root.style.minWidth === '0px' || root.style.getPropertyValue('min-width') === '0') root.style.removeProperty('min-width');
   }
-  if (narrow !== narrowBefore || compact !== compactBefore) {
-    // 断点跨越：让按 resize 重算的 JS 布局（悬浮簇测高/文本截断）刷新一次
+  if (mobile !== wasMobile) {
+    // 模式切换：让按 resize 重算的 JS 布局（悬浮簇测高/文本截断）刷新一次
     try { window.dispatchEvent(new Event('resize')); } catch { /* 忽略 */ }
   }
 }
@@ -99,21 +114,10 @@ function ensure(): void {
 }
 
 export function installMobileStyle(): void {
-  if (typeof window.matchMedia === 'function') {
-    try {
-      if (!_mqNarrow) {
-        _mqNarrow = window.matchMedia(MQ_NARROW);
-        const h = (): void => applyViewportFlags();
-        if (_mqNarrow.addEventListener) _mqNarrow.addEventListener('change', h);
-        else (_mqNarrow as any).addListener(h);
-      }
-      if (!_mqCompact) {
-        _mqCompact = window.matchMedia(MQ_COMPACT);
-        const h = (): void => applyViewportFlags();
-        if (_mqCompact.addEventListener) _mqCompact.addEventListener('change', h);
-        else (_mqCompact as any).addListener(h);
-      }
-    } catch { /* matchMedia 不可用则按 OnDomChange 周期兜底 */ }
+  // [lc-1319] 不再监听视口宽（布局标记与视口宽已解耦）；改为监听手动 UI 模式切换事件。
+  if (!_uiModeBound) {
+    _uiModeBound = true;
+    try { window.addEventListener(UI_MODE_EVENT, () => applyViewportFlags()); } catch { /* ignore */ }
   }
   ensure();
 }

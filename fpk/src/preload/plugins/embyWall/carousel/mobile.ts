@@ -24,44 +24,25 @@ import { log } from '../log';
 import { resolveSeasonHref } from './href';
 import { resolveShowLogo } from './logo';
 import { applyCarouselBackdrop } from './images';
+// [lc-1319] 布局模式（手动切换）真源：本模块选路跟随 mobileStyle.getUiMode
+import { getUiMode } from '../../mobileStyle';
 
-/** 触屏设备硬事实判定（与 mobileStyle/beautifyStyle 同一口径，刻意不用 pointer 媒体查询） */
-function isTouchCapable(): boolean {
-  try {
-    return ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-  } catch { return false; }
-}
-
-/** [lc-1309] 手机/平板的**尺寸规格**判定：短边 ≤ 820px。
- *  用户明确要求：新布局样式**只对手机端和平板的尺寸规格生效**，PC 原样式一行不动。
- *  只判触屏不够 —— 触屏一体机/触屏笔记本的 maxTouchPoints > 0，会被误卷进来
- *  （用户实测：PC 端打开样式也变了）。短边（min(innerWidth, innerHeight)）不受
- *  横竖屏影响：手机竖屏 390/844 → 390 ✓；平板横屏 1180/820 → 820 ✓；PC 1920/1080 → 1080 ✗。
- *  820 与 mobileStyle 的 fnos-compact 断点（#root 桌面布局最小宽）对齐。 */
-function isMobileSpec(): boolean {
-  try {
-    const shortSide = Math.min(window.innerWidth, window.innerHeight);
-    return shortSide > 0 && shortSide <= 820;
-  } catch { return false; }
-}
-
-/** 渲染层入口选路。[lc-1309] 门控改为「触屏 + 手机/平板尺寸规格」双条件：
- *  用户明确要求新布局**只对手机端和平板的尺寸规格生效**、PC 原样式一行不动 ——
- *  只判触屏会误伤触屏一体机/触屏笔记本（实测 PC 端样式也被卷进去了）。
- *  触屏但尺寸超规格（PC）→ 按 4 渲染，与历史行为完全一致。
- *  [lc-1291] 自动特供：手机/平板默认落样式 5，无需进设置面板找开关。
- *  [lc-1308] 存量 '4' 是 lc-780 时代默认值、不是知情选择：手机/平板上只有**显式选过
- *  1/2/3** 才尊重存量；'4' 与空值同等对待 → 样式 5。 */
+/** 渲染层入口选路。[lc-1319] 门控改由手动 UI 模式决定（mobileStyle.getUiMode）——
+ *  lc-1309 的「触屏能力 + 短边≤820」自动判定已废弃：用户在带触摸的桌面环境
+ *  反复被误判卷进手机布局，要求改为首页浮层「UI 模式」按钮手动切换。
+ *  mobile = 手机/平板布局：默认落样式 5（[lc-1291] 自动特供），存量只有**显式选过
+ *  1/2/3** 才尊重（[lc-1308]：存量 '4' 是 lc-780 时代默认值、不是知情选择）。
+ *  desktop = 电脑布局：选了 5（手机特供）回落立体堆叠 4，与历史行为一致。 */
 export function resolveCarouselStyle(): number {
   let stored: string | null = null;
   try { stored = localStorage.getItem('fnos-carousel-style'); } catch { /* 视为未选过 */ }
-  if (isTouchCapable() && isMobileSpec()) {
+  if (getUiMode() === 'mobile') {
     const v = parseInt(stored || '4', 10);
     if (v === 1 || v === 2 || v === 3) return v;
     return 5;
   }
   const v = parseInt(stored || '4', 10);
-  if (v === 5) return 4; // 非手机/平板规格选了 5（含 PC 触屏）→ 回落立体堆叠
+  if (v === 5) return 4; // 电脑模式选了 5（手机特供）→ 回落立体堆叠
   return (v >= 1 && v <= 5) ? v : 4;
 }
 

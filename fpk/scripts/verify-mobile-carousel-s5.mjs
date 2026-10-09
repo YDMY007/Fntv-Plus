@@ -29,50 +29,42 @@ if (!mobile) {
   process.exit(1);
 }
 
-// ═══ 1. 选路逻辑：vm 沙箱跑真实 resolveCarouselStyle ═══
-console.log('\n[1] 选路逻辑（触屏+尺寸规格双门控 / PC 原样式不动 / 存量口径）');
+// ═══ 1. 选路逻辑：vm 沙箱跑真实 resolveCarouselStyle（lc-1319 起由手动 UI 模式决定） ═══
+console.log('\n[1] 选路逻辑（UI 模式门控 / 电脑模式原样式不动 / 存量口径）');
 {
   const fnSrc = mobile.match(/export function resolveCarouselStyle\(\): number \{[\s\S]*?\n\}/);
   ok(!!fnSrc, 'resolveCarouselStyle 可抽取');
-  const touchSrc = mobile.match(/function isTouchCapable\(\): boolean \{[\s\S]*?\n\}/);
-  ok(!!touchSrc, 'isTouchCapable 可抽取');
-  const specSrc = mobile.match(/function isMobileSpec\(\): boolean \{[\s\S]*?\n\}/);
-  ok(!!specSrc, 'isMobileSpec 可抽取');
   // vm 只认纯 JS：剥掉 TS 类型标注（含 let stored: string|null 这样的局部注解）
   const strip = (s) => s.replace('export ', '')
     .replace(/\(\): number /, '() ')
-    .replace(/\(\): boolean /g, '() ')
     .replace(/let stored: string \| null = null/g, 'let stored = null');
-  const body = fnSrc && touchSrc && specSrc
-    ? strip(fnSrc[0]) + '\n' + strip(touchSrc[0]) + '\n' + strip(specSrc[0]) : '';
-  // run(stored, touch, w, h)：w/h 是视口（短边 ≤820 = 手机/平板规格）
-  const run = (stored, touch, w = 390, h = 844) => {
+  const body = fnSrc ? strip(fnSrc[0]) : '';
+  // run(stored, mode)：mode = localStorage['fntv_ui_mode']（'mobile' | null=desktop）
+  const run = (stored, mode) => {
     const sb = {
-      localStorage: { getItem: () => stored },
-      window: { ...(touch ? { ontouchstart: null } : {}), innerWidth: w, innerHeight: h },
-      navigator: { maxTouchPoints: touch ? 5 : 0 },
+      localStorage: { getItem: (k) => (k === 'fntv_ui_mode' ? mode : stored) },
+      window: {},
     };
     vm.createContext(sb);
-    return vm.runInContext(body + '\nresolveCarouselStyle();', sb);
+    return vm.runInContext(`
+      function getUiMode(){ return localStorage.getItem('fntv_ui_mode') === 'mobile' ? 'mobile' : 'desktop'; }
+      ${body}
+      resolveCarouselStyle();`, sb);
   };
-  // ── 手机/平板规格（触屏 + 短边≤820）：样式 5 生效 ──
-  ok(run(null, true) === 5, '手机竖屏 390×844 + 从未选过 → 样式 5', `got ${run(null, true)}`);
-  ok(run('4', true) === 5, '手机 + 存量 4（lc-780 默认值，非知情选择）→ 样式 5', `got ${run('4', true)}`);
-  ok(run('2', true) === 2, '手机 + 显式选过 2 → 尊重为 2');
-  ok(run('1', true) === 1, '手机 + 显式选过 1 → 尊重为 1');
-  ok(run('3', true) === 3, '手机 + 显式选过 3 → 尊重为 3');
-  ok(run('5', true) === 5, '手机 + 手动选 5 → 5');
-  ok(run('9', true) === 5, '手机 + 越界值（坏数据等同未选）→ 样式 5');
-  // 平板横屏 1180×820：短边 820 仍在规格内
-  ok(run('4', true, 1180, 820) === 5, '平板横屏 1180×820（短边=820）→ 样式 5', `got ${run('4', true, 1180, 820)}`);
-  // ── [lc-1309] 用户核心诉求：PC 原样式一行不动 ──
-  ok(run('4', true, 1920, 1080) === 4, 'PC 触屏一体机 1920×1080（触屏但短边>820）→ 样式 4 原样', `got ${run('4', true, 1920, 1080)}`);
-  ok(run('4', true, 2560, 1440) === 4, 'PC 触屏 2560×1440 → 样式 4 原样');
-  ok(run(null, true, 1920, 1080) === 4, 'PC 触屏 + 从未选过 → 样式 4（不卷入）');
-  ok(run('5', true, 1920, 1080) === 4, 'PC 触屏 + 手动选 5 → 回落 4');
-  ok(run(null, false, 1920, 1080) === 4, 'PC 无触屏 + 从未选过 → 样式 4');
-  ok(run('5', false) === 4, '无触屏 + 手动选 5 → 回落 4');
-  ok(run('4', false, 1920, 1080) === 4, 'PC 无触屏 + 存量 4 → 样式 4');
+  // ── 手机/平板模式（UI 模式=手机）：样式 5 生效 ──
+  ok(run(null, 'mobile') === 5, '手机模式 + 从未选过 → 样式 5', `got ${run(null, 'mobile')}`);
+  ok(run('4', 'mobile') === 5, '手机模式 + 存量 4（lc-780 默认值，非知情选择）→ 样式 5', `got ${run('4', 'mobile')}`);
+  ok(run('2', 'mobile') === 2, '手机模式 + 显式选过 2 → 尊重为 2');
+  ok(run('1', 'mobile') === 1, '手机模式 + 显式选过 1 → 尊重为 1');
+  ok(run('3', 'mobile') === 3, '手机模式 + 显式选过 3 → 尊重为 3');
+  ok(run('5', 'mobile') === 5, '手机模式 + 手动选 5 → 5');
+  ok(run('9', 'mobile') === 5, '手机模式 + 越界值（坏数据等同未选）→ 样式 5');
+  // ── 电脑模式（默认）：一切落回桌面样式（用户核心诉求：PC 原样式一行不动） ──
+  ok(run('4', null) === 4, '电脑模式 + 存量 4 → 样式 4 原样', `got ${run('4', null)}`);
+  ok(run(null, null) === 4, '电脑模式 + 从未选过 → 样式 4');
+  ok(run('5', null) === 4, '电脑模式 + 手动选 5（手机特供）→ 回落 4');
+  ok(run('2', null) === 2, '电脑模式 + 显式选 2 → 2');
+  ok(run('9', null) === 4, '电脑模式下越界值 → 4');
 }
 
 // ═══ 2. 样式 5 的触屏设计断言（CSS 层）═══

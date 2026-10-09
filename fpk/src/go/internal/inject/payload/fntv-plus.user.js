@@ -3355,15 +3355,483 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   // src/preload/plugins/danmakuWeb.ts
   init_electron();
 
+  // src/preload/plugins/mobileStyle.ts
+  var STYLE_ID2 = "fnos-mobile-css";
+  var UI_MODE_KEY = "fntv_ui_mode";
+  var UI_MODE_EVENT = "fntv:ui-mode";
+  function getUiMode() {
+    try {
+      return localStorage.getItem(UI_MODE_KEY) === "mobile" ? "mobile" : "desktop";
+    } catch {
+      return "desktop";
+    }
+  }
+  function setUiMode(mode) {
+    try {
+      localStorage.setItem(UI_MODE_KEY, mode);
+    } catch {
+    }
+    try {
+      window.dispatchEvent(new CustomEvent(UI_MODE_EVENT, { detail: mode }));
+    } catch {
+    }
+  }
+  var _uiModeBound = false;
+  function isTouchDevice() {
+    try {
+      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+  function applyViewportFlags() {
+    const html = document.documentElement;
+    const mobile = getUiMode() === "mobile";
+    const wasMobile = html.classList.contains("fnos-touch-narrow");
+    html.classList.toggle("fnos-narrow", mobile);
+    html.classList.toggle("fnos-compact", mobile);
+    html.classList.toggle("fnos-touch", isTouchDevice());
+    html.classList.toggle("fnos-touch-narrow", mobile);
+    const root = document.getElementById("root");
+    if (root) {
+      if (mobile) root.style.setProperty("min-width", "0", "important");
+      else if (root.style.minWidth === "0px" || root.style.getPropertyValue("min-width") === "0") root.style.removeProperty("min-width");
+    }
+    if (mobile !== wasMobile) {
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {
+      }
+    }
+  }
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID2)) return;
+    const st = document.createElement("style");
+    st.id = STYLE_ID2;
+    st.textContent = MOBILE_CSS;
+    (document.head || document.documentElement).appendChild(st);
+  }
+  function ensure() {
+    ensureStyle();
+    applyViewportFlags();
+  }
+  function installMobileStyle() {
+    if (!_uiModeBound) {
+      _uiModeBound = true;
+      try {
+        window.addEventListener(UI_MODE_EVENT, () => applyViewportFlags());
+      } catch {
+      }
+    }
+    ensure();
+  }
+  var SERIES_PANEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+  var MOVIE_PANEL = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
+  var SERIES_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var MOVIE_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var MOBILE_CSS = `
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 A. fnos-compact\uFF08\u2264820px\uFF09\u7ED3\u6784\u6027\u515C\u5E95 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+
+/* A1. \u89E3\u9664\u7AD9\u70B9 #root 820px \u6700\u5C0F\u5BBD\uFF08\u771F\u51F6\u6765\u6E90\u679A\u4E3E\u4E0D\u5230\uFF0C\u6837\u5F0F\u8868 + \u884C\u5185\u53CC\u4FDD\u9669\uFF09 */
+html.fnos-compact #root{ min-width:0 !important; width:auto !important; }
+html.fnos-compact body{ overflow-x:hidden !important; }
+
+/* A2. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5185\u8054 width min(680px,100vw-80px) \u5728\u7A84\u5C4F\u4E0B\u53EA\u5269 310px \u4E14\u9AD8\u5EA6\u5403\u6EE1\uFF0C
+   \u6539\u4E3A\u8FD1\u6EE1\u5C4F\uFF08!important \u538B\u884C\u5185\u6837\u5F0F\uFF09\uFF1Bdvh \u5728\u652F\u6301\u7684\u6D4F\u89C8\u5668\u4E0A\u63A5\u7BA1\u5730\u5740\u680F\u6536\u7F29 */
+html.fnos-compact #fnos-settings-panel{
+  width:calc(100vw - 16px) !important;
+  height:calc(100vh - 56px) !important;
+  height:calc(100dvh - 56px) !important;
+  max-height:calc(100vh - 56px) !important;
+  max-height:calc(100dvh - 56px) !important;
+}
+
+/* A3. \u6BCF\u65E5\u653E\u9001\u6D6E\u5C42\u5BBD\u5EA6\u94B3\u5236\uFF08340px \u5B9A\u5BBD\u5728 \u2264360px \u624B\u673A\u4E0A\u6EA2\u51FA\uFF09 */
+html.fnos-compact #fntv-hot-panel{ width:min(340px,calc(100vw - 20px)) !important; }
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 B. fnos-narrow\uFF08\u2264640px\uFF09\u624B\u673A\u6574\u7248 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
+
+/* B1. \u9996\u9875\u60AC\u6D6E logo \u7F29\u5C0F\uFF1A390px \u4E0B\u4E0E\u539F\u751F\u9876\u680F\u641C\u7D22/\u5934\u50CF\u56FE\u6807\u8FC7\u8FD1 */
+html.fnos-narrow #tb-logo{ height:20px !important; }
+
+/* B2. \u5B63\u9875/\u7AD6\u7248\u7535\u5F71\u9875 hero\uFF1A\u6A2A\u5411\u300C\u6D77\u62A5+\u4FE1\u606F\u300D\u884C\u6539\u7EB5\u5411\u5806\u53E0\u3002
+   \u6839\u56E0\uFF1A\u4FE1\u606F\u5217\u539F\u751F w-[calc(100%-246px)]\uFF0C390px \u4E0B\u53EA\u5269 52px \u2014\u2014 \u6807\u9898\u4E00\u5B57\u4E00\u884C\u3001
+   \u64AD\u653E\u6309\u94AE(150px)\u6EA2\u51FA\u5C4F\u5E55\u53F3\u7F18\u3002\u7AD6\u7248\u7535\u5F71\u4E00\u7EA7\u9875\u8D70 O \u6BB5\u6EE1\u5C4F\u805A\u7C07\uFF0C\u6392\u9664\u3002 */
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"]{
+  height:auto !important; min-height:0 !important;
+  padding-left:16px !important; padding-right:16px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] > [class*="pt-[116px]"]{
+  flex-direction:column !important; align-items:flex-start !important;
+  gap:14px !important; padding-top:72px !important; padding-bottom:20px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="h-[320px]"][class*="w-[214px]"]{
+  width:126px !important; height:189px !important;
+}
+html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="w-[calc(100%-246px)]"]{
+  width:100% !important;
+}
+
+/* B3. \u7CFB\u5217/\u7535\u5F71\u4E00\u7EA7\u9875\u73BB\u7483\u805A\u7C07\uFF1A\u7A84\u5C4F\u4E0B\u7B80\u4ECB\u4E0D\u518D\u8BA9\u4F4D 57% \u53F3\u680F\uFF0CTMDB \u5361\u4ECE\u7EDD\u5BF9\u5B9A\u4F4D\u53F3\u5217
+   \u56DE\u6D41\u4E3A\u5757\u7EA7\uFF08DOM \u672B\u4F4D\uFF0C\u81EA\u7136\u6392\u5728\u7B80\u4ECB/\u5B63\u9009\u4E4B\u540E\uFF09\uFF0C\u805A\u7C07\u6574\u4F53\u53D8\u9AD8\u3001\u5185\u90E8\u53EF\u6EDA\u3002 */
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL},
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL}{
+  left:12px !important; right:12px !important; width:auto !important;
+  bottom:12px !important;
+  padding:14px 14px 12px !important;
+  max-height:min(58vh,520px) !important;
+  overflow-y:auto !important; overflow-x:hidden !important;
+  -webkit-overflow-scrolling:touch;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+  width:100% !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="flex-wrap"]{
+  width:100% !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] > [data-id="details"]{
+  width:calc(33.33% - 10px) !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card,
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+  position:static !important;
+  top:auto !important; bottom:auto !important; left:auto !important; right:auto !important;
+  width:auto !important; margin:12px 0 0 !important; padding:0 !important;
+  max-height:none !important; overflow:visible !important;
+}
+
+/* B4. \u60AC\u6D6E\u6309\u94AE\u884C\uFF1A\u7A84\u5C4F\u6362\u884C\uFF08\u64AD\u653E\u952E + \u6536\u85CF/\u5DF2\u770B/\u66F4\u591A\u5706\u94AE\u4E00\u6392\u653E\u4E0D\u4E0B\uFF09 */
+html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW},
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW}{
+  left:12px !important; right:12px !important; width:auto !important;
+  bottom:calc(var(--fnos-cluster-h, 360px) + 20px) !important;
+  flex-wrap:wrap !important; row-gap:10px !important;
+}
+html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"],
+html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]{
+  width:44px !important; height:44px !important;
+}
+
+/* B5. \u8F6E\u64AD\uFF1A\u6807\u9898 3.3rem/\u7B80\u4ECB 600px \u5747\u4E3A\u684C\u9762\u5C3A\u5EA6\uFF0C390px \u4E0B\u6EA2\u51FA\u88C1\u5207\u3002
+   \u4E09\u5957\u76AE\u80A4\u5171\u7528 .fnos-slide-* \u7C7B\u540D\uFF0C\u4E00\u4EFD\u89C4\u5219\u5168\u8986\u76D6\uFF1B\u7B80\u4ECB\u94B3 3 \u884C\u3002 */
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-content{
+  padding:14px 16px 34px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-meta{
+  font-size:.66rem !important; margin-bottom:.3rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title{
+  font-size:1.6rem !important; line-height:1.2 !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title-logo-img{
+  max-height:64px !important; max-width:74% !important;
+}
+html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-desc{
+  font-size:.8rem !important; line-height:1.55 !important; max-width:100% !important;
+  margin-bottom:.7rem !important;
+  display:-webkit-box !important; -webkit-line-clamp:3 !important;
+  -webkit-box-orient:vertical !important; overflow:hidden !important;
+}
+
+/* B5b. \u8F6E\u64AD\u6837\u5F0F 4\uFF08s4 3D \u5361\u7247\uFF09\uFF1A\u5BB9\u5668\u5185\u8054 aspect-ratio 16/9 \u2192 390px \u4E0B\u4EC5 210px \u9AD8\uFF0C
+   \u800C\u4FE1\u606F\u5C42(logo 64 + \u6807\u9898 + \u7B80\u4ECB + \u6309\u94AE\u5217)\u6309\u684C\u9762\u5C3A\u5EA6\u6392 \u2248 260px+ \u2192 \u6587\u5B57\u5411\u4E0A\u6EA2\u51FA\u88AB\u88C1\u3002
+   \u7A84\u5C4F\uFF1A\u5BB9\u5668\u52A0\u9AD8\u5230 240px + \u4FE1\u606F\u5C42\u5168\u9762\u6536\u7D27\uFF08logo 40/\u6807\u9898 1.2rem/\u7B80\u4ECB\u94B3 2 \u884C/\u6309\u94AE\u6A2A\u6392\u7F29\u5C0F\uFF09\uFF0C
+   \u5706\u70B9\u6307\u793A\u5668\u4E0B\u79FB\u907F\u5F00\u6309\u94AE\u884C\u3002 */
+html.fnos-narrow [data-fntv-carousel-style="4"]{
+  aspect-ratio:auto !important; height:240px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-bg{ padding:12px 14px 44px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info{
+  padding:10px 14px 38px !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .meta{
+  font-size:.6rem !important; margin-bottom:.2rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-title-logo-img{
+  max-height:40px !important; max-width:70% !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info h3{
+  font-size:1.2rem !important; margin-bottom:.2rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .desc{
+  font-size:.72rem !important; line-height:1.5 !important; max-width:100% !important; margin-bottom:.5rem !important;
+  display:-webkit-box !important; -webkit-line-clamp:2 !important;
+  -webkit-box-orient:vertical !important; overflow:hidden !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-actions{
+  flex-direction:row !important; align-items:center !important; gap:.5rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-play,
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-detail{
+  padding:.5rem 1.1rem !important; font-size:.72rem !important;
+}
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{ bottom:12px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{
+  width:32px !important; height:56px !important; font-size:1.7rem !important;
+}
+
+/* B5c. [lc-1290] \u8F6E\u64AD\u5DE6\u53F3\u9ED1\u6846\uFF08\u7528\u6237\u62A5\u300C\u8F6E\u64AD\u56FE\u5DE6\u53F3\u9ED1\u6846\u300D\uFF09\u3002
+   \u9010\u5C42\u7B97 390px \u89C6\u53E3\u4E0B\u7684\u5BBD\u5EA6\u9884\u7B97\uFF1A
+     \u89C6\u53E3 390 \u2212 wrapper \u5185\u8054 padding 0 44px = 302
+     \u518D \u2212 \u5A92\u4F53\u5E93 section \u81EA\u8EAB px-[44px]/px-[46px] \u2248 256
+     \u5BB9\u5668 aspect-ratio 16/9 \u2192 390 \u5BBD\u4E0B\u4EC5 144~170px \u9AD8\uFF0C\u4E24\u4FA7\u5404\u7A7A 44~67px\u3002
+   \u5373\uFF1A\u8F6E\u64AD\u5E76\u6CA1\u6709\u94FA\u6EE1\uFF0C\u662F\u88AB\u4E24\u5C42\u5404 44px \u7684\u5185\u8FB9\u8DDD\u5939\u6210\u4E86\u7A84\u6761\uFF0C\u4E24\u4FA7\u9732\u51FA\u7684\u5C31\u662F section \u5E95\u8272
+   \uFF08\u6697\u8272\u4E3B\u9898\u4E0B\u5448\u9ED1\uFF09\u3002\u4E09\u6B65\u6536\u53E3\uFF1A
+     \u2460 wrapper \u5185\u8054 padding \u7531 44px \u6536\u5230 8px\uFF08carousel/styles.ts \u7684 16px \u89C4\u5219\u73B0\u5DF2\u5728
+        \u9996\u9875\u751F\u6548\u2014\u2014\u5B83\u6B64\u524D\u6302\u5728\u4ECE\u672A\u5B89\u88C5\u7684 fnos-touch-narrow \u4E0A\uFF0C\u662F\u6B7B\u4EE3\u7801\uFF1B\u8FD9\u91CC\u7528\u66F4\u5C0F\u7684\u503C
+        \u5E76\u5728\u81EA\u5DF1\u7684\u5C42\u91CD\u65B0\u58F0\u660E\uFF0C\u907F\u514D\u4F9D\u8D56\u90A3\u4E2A\u95E8\u63A7\uFF09\uFF1B
+     \u2461 section \u7684 px-[44px]/px-[46px] \u4E00\u5E76\u6536\u7A84\uFF08wrapper \u7684\u7236\u7EA7\uFF0C\u5BBD\u662F\u53E0\u4E58\u7684\uFF0C\u53EA\u6536\u4E00\u5C42\u4E0D\u591F\uFF09\uFF1B
+     \u2462 \u5BB9\u5668\u7ED9\u4E00\u4E2A\u4E0B\u9650\u9AD8\u5EA6\uFF0C\u514D\u5F97 16:9 \u5728\u7A84\u5C4F\u4E0B\u584C\u6210\u4E00\u6761\u3002
+   \u8FB9\u8DDD\u4E0D\u80FD\u6536\u6210 0\uFF1A\u8F6E\u64AD\u53F3\u4FA7\u6709 prev/next \u5BFC\u822A\u94AE\uFF08left/right:3%\uFF09\u4E0E\u5706\u70B9\uFF0C\u5B8C\u5168\u8D34\u8FB9\u4F1A\u88AB\u5207\u3002 */
+html.fnos-narrow [data-fntv-carousel-wrapper]{ padding-left:8px !important; padding-right:8px !important; }
+/* \u5A92\u4F53\u5E93 section \u662F wrapper \u7684**\u7236\u7EA7**\uFF08render.ts \u91CC\u662F target.appendChild(wrapper)\uFF09\uFF0C
+   \u53EA\u80FD\u5411\u4E0A\u9009\uFF1A\u7528 :has(> [data-fntv-carousel-wrapper]) \u7ED1\u5B9A\u7236\u7EA7\uFF0C\u4E0D\u80FD\u5199\u6210\u5B50\u4EE3\u9009\u62E9\u5668\u3002
+   :has() \u81EA Chrome 105 / Safari 15.4 / FF 121 \u8D77\u53EF\u7528\uFF0C\u4E0D\u652F\u6301\u65F6\u53EA\u662F\u8FD9\u6761\u4E0D\u751F\u6548\uFF0C
+   \u4E0B\u9762\u7684 wrapper \u6536\u8FB9\u8DDD\u4ECD\u4F1A\u628A\u9ED1\u6846\u4ECE 67px/\u4FA7 \u964D\u5230 44px/\u4FA7\u3002 */
+html.fnos-narrow div[class*="flex-col"]:has(> [data-fntv-carousel-wrapper]){ padding-left:8px !important; padding-right:8px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"]{ height:min(46vw, 260px) !important; aspect-ratio:auto !important; max-height:none !important; }
+
+/* B5d. [lc-1290] \u6837\u5F0F 4 \u7684 3D \u90BB\u5361\u5728\u7A84\u5C4F\u9732\u592A\u591A\uFF08\xB172% \u4F4D\u79FB\u628A\u90BB\u5361\u5927\u534A\u63A8\u51FA/\u62C9\u8FDB\u753B\u9762\uFF0C
+   390px \u4E0B\u89C6\u89C9\u4E0A\u5C31\u662F\u4E24\u4FA7\u5404\u7CCA\u4E00\u5757\uFF09\u3002\u6536\u5230 \xB158% \u4E14\u7F29\u5C0F\uFF0C\u53EA\u9732\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\u3002
+   \u540C B5c\uFF1Acarousel/styles.ts \u91CC\u5DF2\u6709\u540C\u6837\u6570\u503C\uFF0C\u4F46\u90A3\u6BB5\u5728\u9996\u9875\u662F\u6B7B\u4EE3\u7801\uFF0C\u8FD9\u91CC\u72EC\u7ACB\u751F\u6548\u3002 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card{ left:2% !important; top:2% !important; width:96% !important; height:96% !important; border-radius:14px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{ transform:scale(.88) translateX(-46%) rotateY(18deg) !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{ transform:scale(.88) translateX(46%) rotateY(-18deg) !important; }
+/* \u5DE6\u53F3\u5207\u6362\u94AE\uFF08\u5BBD 32px + 3% \u8FB9\u8DDD \u2248 44px \u89E6\u63A7\u533A\uFF09\uFF1A\u538B\u5230\u5361\u7247\u4E0B\u5C42\uFF0C\u70B9\u7A7A\u767D\u4E0D\u518D\u88AB\u62A2 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{ width:28px !important; opacity:.4 !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !important; }
+
+/* B5e. \u53F3\u4FA7\u7AD6\u5411\u6D77\u62A5\u6761\uFF08\u4EC5\u6837\u5F0F 1 \u6709\uFF0Crender.ts:404 \u884C\u5185 width:150px\uFF09\uFF1A
+   \u624B\u673A\u4E0A\u4E0E\u5BB9\u5668 80/20 \u5206\u680F\u4E89\u5BBD\uFF0C\u5BB9\u5668\u53EA\u5269 302*0.8=242px \u8FD8\u8981\u88AB\u5B83\u6324\u3002\u7A84\u5C4F\u76F4\u63A5\u9690\u85CF\u6D77\u62A5\u6761\uFF0C
+   \u6539\u4E3A\u4E0A\u4E0B\u6ED1\u624B\u52BF\u6362\u7247\uFF08render.ts \u5DF2\u6709 touchstart/touchend \u624B\u52BF\uFF0C\u89C1 lc-1288\uFF09\u3002 */
+html.fnos-narrow .fnos-poster-strip{ display:none !important; }
+
+/* B9. [lc-1290\u2192lc-1310 \u5BF9\u9F50\u539F\u751F App \u5C3A\u5EA6] \u9996\u9875\u5361\u7247\u884C\uFF08\u7EE7\u7EED\u89C2\u770B / \u5267\u96C6\u5217\u8868\uFF09\u3002
+   lc-1306 \u4FEE\u597D\u4E86\u6A2A\u7248\u88C1\u526A\uFF1Blc-1310 \u6309\u98DE\u725B\u539F\u751F\u624B\u673A App\uFF08FN_Media 1.12.0 apk \u622A\u56FE\u9010\u50CF\u7D20
+   \u5B9E\u6D4B\uFF0C480dp \u5C4F\u5BBD\u57FA\u51C6\uFF09\u7EDF\u4E00\u4E24\u884C\u7684\u5BC6\u5EA6\uFF1A
+   \u2500\u2500 \u539F\u751F\u5B9E\u6D4B\u89C4\u683C \u2500\u2500
+   \u5C4F\u8FB9\u8DDD 20dp\uFF1B\u7AD6\u7248\u6D77\u62A5\u5361\u5BBD 140dp\uFF0829.2% \u5C4F\u5BBD\uFF09\u3001\u95F4\u8DDD 10dp\uFF082.1%\uFF09\uFF0C\u4E00\u5C4F\u6574 3 \u5F20
+   \uFF083\xD7140+2\xD710+2\xD720=480 \u95ED\u5408\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u6A2A\u7248\u5361\u4E0E\u6D77\u62A5\u884C**\u540C\u5BBD 140dp**\u3001\u56FE\u533A\u6BD4\u4F8B
+   1.89:1\uFF08140:74\uFF09\uFF0C\u4E00\u5C4F\u9732\u51FA 1.9 \u5F20\uFF08\u7B2C\u4E8C\u5F20\u9732 60% \u6697\u793A\u53EF\u6ED1\uFF09\u3002
+   \u2500\u2500 \u5BF9\u7167\u73B0\u72B6\u7684\u6539\u52A8 \u2500\u2500
+   \u7AD6\u7248\u5361 27vw\u219229vw\uFF08105px\u2192113px\uFF0C\u591A\u663E 2 \u5B57\uFF09\uFF1B\u95F4\u8DDD 8px\u21922.1vw\uFF08390px \u4E0B 8.2px \u7B49\u503C\uFF0C
+   \u5E73\u677F\u6309\u6BD4\u4F8B\u653E\u5927\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u5361 46vw\u219244vw\uFF08180px\u2192172px\uFF0C\u53F3\u4FA7\u9732\u51FA\u90BB\u5361\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\uFF09\u3002 */
+html.fnos-narrow .ms-container [class*="card-root"],
+html.fnos-narrow .ms-container [class*="poster-box"]{
+  min-width:0 !important;
+  width:clamp(96px, 29vw, 132px) !important;
+  flex:0 0 clamp(96px, 29vw, 132px) !important;
+}
+/* B9.1 \u7EE7\u7EED\u89C2\u770B\u5361\u6A2A\u7248\u5316\uFF1A16:9 \u5927\u5361\uFF08Netflix \u79FB\u52A8\u7AEF Continue Watching \u540C\u6B3E\u5F62\u6001\uFF09\u3002
+   lc-1310: 46vw\u219244vw \u2014\u2014 \u539F\u751F\u5B9E\u6D4B\u7EE7\u7EED\u89C2\u770B\u4E0E\u6D77\u62A5\u884C\u540C\u5BBD 29.2%\u3001\u95F4\u8DDD 10dp\uFF0C\u4E00\u5C4F\u9732\u51FA
+   1.9 \u5F20\uFF1B44vw \u5728 390px \u662F 171.6px\uFF0C\u53F3\u4FA7\u9732\u51FA\u7EA6 40% \u90BB\u5361\uFF0C\u6EDA\u52A8\u6697\u793A\u4E0E\u539F\u751F\u4E00\u81F4\u3002 */
+html.fnos-narrow .ms-container .continue-card-root{
+  width:min(44vw, 172px) !important;
+  flex:0 0 min(44vw, 172px) !important;
+}
+/* \u6D77\u62A5\u533A\uFF08> div:first-child \u662F\u684C\u9762\u5B9A\u9AD8 172px \u7684\u90A3\u5C42\uFF09\u4E0E\u5361\u5185\u6B7B\u5BBD\u5C42\u4E00\u5E76\u6536\u53E3\uFF1A
+   \u5B9E\u6D4B\u94FE\u8DEF continue-card-root > rounded-lg(\u5B9A\u9AD8172) > continue-poster-box > div > div(width:104px)\uFF0C
+   \u6BCF\u5C42\u90FD\u8981 width:100%\uFF0C\u6F0F\u4E00\u5C42\u56FE\u5C31\u53EA\u94FA 104px\u3002 */
+html.fnos-narrow .ms-container .continue-card-root > div:first-child{
+  height:auto !important; aspect-ratio:16/9 !important;
+}
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div,
+html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div > div{
+  width:100% !important; height:100% !important;
+}
+/* B9.2 \u5361\u5BBD\u81EA\u9002\u5E94\u540E\u7684\u6392\u7248\u6536\u7D27\uFF08\u771F\u673A\u5B9E\u6D4B\uFF1A15px \u6807\u9898\u5728 105px \u4E0B\u53EA\u663E 6 \u5B57\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-[15px]"]{
+  font-size:13px !important; line-height:1.35 !important;
+}
+html.fnos-narrow .ms-container [class*="card-root"] [class*="text-xs"]{
+  font-size:11px !important;
+}
+/* \u5361\u7247\u95F4\u8DDD\u5BF9\u9F50\u539F\u751F 10dp\uFF082.1vw\uFF1B390px \u4E0B \u22488.2px \u4E0E\u4E0A\u4E00\u7248\u7B49\u503C\uFF0C\u5E73\u677F\u6309\u89C6\u53E3\u653E\u5927\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:2.1vw !important; }
+html.fnos-narrow .ms-container .continue-card-root{ margin-right:2.1vw !important; }
+/* \u5361\u7247\u5185\u7684\u8FDB\u5EA6\u6761/\u64CD\u4F5C\u5C42\u968F\u5361\u5BBD\u81EA\u9002\u5E94\uFF08\u7AD9\u70B9\u6309\u56FA\u5B9A\u5BBD\u7B97\u7684\u5185\u8054\u503C\u4F1A\u6EA2\u51FA\uFF09 */
+html.fnos-narrow .ms-container [class*="card-root"] img,
+html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }
+/* \u884C\u95F4\u8DDD\u6536\u7A84\uFF1A\u7AD9\u70B9 gap 20px\uFF08gap-x-5\uFF09\u5728 132px \u5361\u5BBD\u4E0B\u5360\u6BD4\u8FC7\u9AD8 */
+html.fnos-narrow .ms-container > *{ gap:10px !important; }
+
+/* B6. \u89C2\u5F71\u8BB0\u5F55\u9762\u677F\uFF08\u5168\u5C4F\u6D6E\u5C42\uFF09\uFF1A\u684C\u9762\u4FA7 padding 40px/\u53CC\u5217\u56FE\u8868\u5728\u624B\u673A\u4E0A\u6324\u7206 */
+html.fnos-narrow #fntv-wh .wh-topbar{ padding:16px 16px 10px !important; gap:14px !important; }
+html.fnos-narrow #fntv-wh .wh-title{ font-size:26px !important; }
+html.fnos-narrow #fntv-wh .wh-section{ padding:0 16px !important; }
+html.fnos-narrow #fntv-wh .wh-chart-split{ grid-template-columns:1fr !important; }
+html.fnos-narrow #fntv-wh .wh-stat-row{ grid-template-columns:repeat(2,1fr) !important; }
+html.fnos-narrow #fntv-wh-topbtns{
+  top:10px !important; right:10px !important; max-width:calc(100vw - 20px) !important;
+  height:auto !important; min-height:44px !important; flex-wrap:wrap !important;
+}
+
+/* B7. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5DE6\u5206\u7C7B\u5BFC\u822A\u6539\u9876\u90E8\u6A2A\u6ED1\u884C\uFF08\u7AD6\u6392 130px \u5BFC\u822A + 180px \u5185\u5BB9\u5728\u624B\u673A\u4E0A\u6CA1\u6CD5\u770B\uFF09\u3002
+   overlay \u5B50\u8282\u70B9 = [0]\u5934\u90E8 [1]\u641C\u7D22\u6846(lc-1065) [2]bodyRow(\u5BFC\u822A+\u5185\u5BB9) [3]\u5E95\u90E8\u5F39\u7C27 */
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3){ flex-direction:column !important; }
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child{
+  flex:0 0 auto !important; max-width:none !important; min-width:0 !important;
+  flex-direction:row !important; align-items:center !important;
+  overflow-x:auto !important; overflow-y:hidden !important;
+  padding:6px 8px !important; gap:6px !important;
+  scrollbar-width:none !important;
+}
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child::-webkit-scrollbar{ display:none !important; }
+html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child > button{
+  flex:0 0 auto !important; width:auto !important; text-align:center !important;
+}
+
+/* B8. \u6C89\u6D78\u5C42\u9876\u90E8\u7559\u767D\u968F\u9876\u680F\u6536\u7D27\uFF08\u6F14\u804C\u4EBA\u5458\u4F5C\u54C1\u9762\u677F .fpw-card 162px \u5B9A\u5BBD\u53EF\u81EA\u9002\u5E94\u6362\u884C\uFF0C\u65E0\u9700\u5904\u7406\uFF09 */
+html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 C. fnos-touch\uFF08\u771F\u89E6\u6478\u8BBE\u5907\uFF0C\u4E0D\u5206\u5BBD\u7A84\uFF09\u89E6\u6478\u8BED\u4E49\u5C42 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u8FD9\u4E00\u6BB5\u53EA\u88C5\u300C\u9F20\u6807\u65F6\u4EE3\u4E0D\u5B58\u5728\u3001\u89E6\u6478\u5FC5\u987B\u8865\u300D\u7684\u4E1C\u897F\uFF1A\u5B89\u5168\u533A\u3001\u89E6\u63A7\u76EE\u6807\u3001\u6309\u538B\u53CD\u9988\u3002
+   \u684C\u9762\u7A84\u7A97\u53E3\u4E0D\u88C5 \u2014\u2014 \u684C\u9762\u7528\u9F20\u6807\uFF0Chover/\u7CBE\u786E\u70B9\u51FB\u672C\u5C31\u6B63\u5E38\uFF0C\u5957\u4E0A\u53BB\u53CD\u800C\u788D\u4E8B\u3002 */
+
+/* C1. \u5B89\u5168\u533A\u5185\u8FB9\u8DDD\u3002viewport-fit=cover \u7531 Go \u6CE8\u5165\u5C42\u8865\u9F50\uFF08inject.go patchViewport\uFF09\uFF0C
+   \u6CA1\u6709\u5B83 env() \u6052\u4E3A 0\uFF0C\u672C\u6BB5\u6574\u4F53\u5931\u6548 \u2014\u2014 \u4E24\u5904\u5FC5\u987B\u6210\u5BF9\u5B58\u5728\u3002
+   \u5199\u6CD5\u53D6 Jellyfin \u7684 conditional-max \u6E10\u8FDB\u589E\u5F3A\uFF1A\u5148\u7ED9\u9ED8\u8BA4\u503C\uFF0C\u518D\u7528 @supports(max())
+   \u63A2\u6D4B\u8986\u76D6\u4E3A max(\u5B89\u5168\u533A, \u9ED8\u8BA4\u503C)\u3002max() \u81EA Chrome 79 / Safari 11.1 / FF 75 \u8D77\u53EF\u7528\uFF0C
+   \u8001\u6D4F\u89C8\u5668\u62FF\u5230\u9ED8\u8BA4\u503C\u4E0D\u4F1A\u56E0\u6574\u6761\u58F0\u660E\u5931\u6548\u800C\u4E22\u6389\u5185\u8FB9\u8DDD\u3002 */
+html.fnos-touch #fnos-settings-panel{
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@supports (padding:max(0px,env(safe-area-inset-bottom))){
+  html.fnos-touch #fnos-settings-panel{
+    padding-bottom:max(env(safe-area-inset-bottom),16px);
+  }
+}
+
+/* C2. \u9876\u680F\u60AC\u6D6E\u6309\u94AE/\u641C\u7D22\u7B49\u8D34\u9876\u5143\u7D20\u4E0B\u538B\uFF0C\u907F\u5F00\u5218\u6D77\u5C4F\u4E0E\u72B6\u6001\u680F\u3002
+   \u62BD\u5C49\u906E\u7F69\u4E0E\u5168\u5C4F\u6D6E\u5C42\u540C\u7406\uFF08\u539F\u672C\u4ECE 0 \u5F00\u59CB\uFF0C\u6B63\u597D\u538B\u5728\u5218\u6D77\u4E0A\uFF09\u3002 */
+html.fnos-touch #fntv-wh-topbtns{
+  top:calc(10px + env(safe-area-inset-top,0px)) !important;
+}
+html.fnos-touch .fnos-instant-layer__lines{
+  padding-top:calc(84px + env(safe-area-inset-top,0px)) !important;
+}
+
+/* C3. \u5173\u95ED iOS \u957F\u6309\u5F39\u51FA\u7684\u300C\u62F7\u8D1D/\u67E5\u627E/\u5206\u4EAB\u300D\u7CFB\u7EDF\u83DC\u5355 \u2014\u2014 \u64AD\u653E\u5668\u63A7\u4EF6\u3001\u8FDB\u5EA6\u6761\u3001
+   \u5F39\u5E55\u5217\u8868\u4E0A\u957F\u6309\u4F1A\u76F4\u63A5\u7834\u574F\u4EA4\u4E92\uFF08Jellyfin videoOsd \u540C\u6B3E\u505A\u6CD5\uFF09\u3002 */
+html.fnos-touch .fnos-instant-layer,
+html.fnos-touch .fnos-instant-layer *{
+  -webkit-touch-callout:none;
+}
+
+/* C4. \u89E6\u63A7\u76EE\u6807\u4E0B\u9650 44px\uFF08WCAG 2.1 AAA / \u6EE1\u8DB3 2.2 AA \u7684 24px \u786C\u4E0B\u9650\uFF09\u3002
+   \u53EA\u57AB\u9AD8\u300C\u672C\u6765\u5C31\u5C0F\u3001\u4E14\u89E6\u63A7\u65F6\u5FC5\u987B\u70B9\u4E2D\u300D\u7684\u56FE\u6807/\u80F6\u56CA\u6309\u94AE\uFF0C\u4E0D\u52A8\u5361\u7247/\u5BFC\u822A\u9879\u7B49\u5927\u5757\u533A\u57DF\u3002
+   \u89C2\u5F71\u8BB0\u5F55\u60AC\u6D6E\u6761\u91CC\u7684\u6309\u94AE\u662F .wh-pill\uFF08\u80F6\u56CA\uFF09\uFF0C\u9760 padding \u6491\u5230 ~34px \u9AD8\uFF0C\u89E6\u6478\u4E0B\u504F\u5C0F\u3002 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill{ min-height:44px !important; }
+html.fnos-touch .fntv-hot-block{ min-width:44px !important; min-height:44px !important; }
+html.fnos-touch .fntv-dm-list li{ min-height:40px !important; }
+
+/* C5. \u6309\u538B\u53CD\u9988\uFF1A\u89E6\u6478\u7AEF\u6CA1\u6709 hover\uFF0C\u4F46\u6709 :active\u3002\u7ED9\u7EAF\u56FE\u6807\u6309\u94AE\u8865\u4E00\u4E2A\u6309\u538B\u6001\uFF0C
+   \u907F\u514D\u300C\u6309\u4E0B\u53BB\u6CA1\u6709\u4EFB\u4F55\u53CD\u9988\u300D\u7684\u624B\u611F\u65AD\u88C2\uFF08Prime Video \u7684 scale(.9) \u540C\u601D\u8DEF\uFF09\u3002 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill:active,
+html.fnos-touch .fntv-hot-block:active{
+  opacity:.7 !important;
+  transform:scale(.92);
+}
+/* C6. \u53BB\u6389 Android \u70B9\u51FB\u84DD\u5757\uFF08Jellyfin card.scss \u540C\u6B3E\uFF09\uFF0C\u6539\u7531 :active \u7EDF\u4E00\u8868\u8FBE\u3002 */
+html.fnos-touch button,
+html.fnos-touch [role="button"]{
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 D. hover \u4F9D\u8D56\u964D\u7EA7\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u89E6\u6478\u8BBE\u5907\u4E0A :hover \u53EF\u80FD\u6C38\u4E0D\u5339\u914D\u3001\u4E5F\u53EF\u80FD tap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\uFF08MDN :hover \u660E\u786E\u5217\u51FA
+   \u8FD9\u4E09\u79CD\u884C\u4E3A\uFF09\u3002\u5BF9\u300Chover \u624D\u51FA\u73B0\u300D\u7684\u4EA4\u4E92\u8865\u4E00\u4E2A\u5E38\u9A7B\u53EF\u89C1\u7684\u7B49\u4EF7\u7269\uFF0C\u800C\u4E0D\u662F\u7B80\u5355\u7981\u7528\u3002
+   \u6D89\u53CA\u7684\u5177\u4F53\u7EC4\u4EF6\u89C1 \xA7D1~\xA7D3 \u6CE8\u91CA\u3002 */
+
+/* D1. \u6BCF\u65E5\u653E\u9001\u300C\u4E0D\u611F\u5174\u8DA3\u300D\u6309\u94AE\uFF1A\u684C\u9762\u9ED8\u8BA4 opacity:0 \u9760 :hover \u6D6E\u73B0\uFF0C\u624B\u673A\u4E0A\u6C38\u4E45\u9690\u85CF\u3002
+   \u89E6\u6478\u7AEF\u76F4\u63A5\u5E38\u9A7B\u53EF\u89C1\uFF08\u6539\u4E3A\u534A\u900F\u660E\u5E38\u6001 + \u6309\u538B\u6001\u5168\u4EAE\uFF0C\u4E0D\u7528\u7EAF opacity \u786C\u5E38\u4EAE\u4EE5\u514D\u62A2\u620F\uFF09\u3002 */
+html.fnos-touch .fntv-hot-card .fntv-hot-block{
+  opacity:.55 !important;
+  transform:none !important;
+}
+html.fnos-touch .fntv-hot-card .fntv-hot-block:active{
+  opacity:1 !important;
+}
+
+/* D2. \u8F6E\u64AD\u6837\u5F0F 4 \u624B\u673A\u7248\uFF1A**\u6536\u56DE** carousel/styles.ts \u91CC\u300C\u6587\u5B57\u5C42\u6574\u5C42 display:none\u300D\u90A3\u5957\u3002
+   \u90A3\u6BB5\u6302\u5728 fnos-touch-narrow \u4E0B\uFF0C\u4E0E\u672C\u6587\u4EF6\u7684 fnos-narrow \u540C\u4E3A \u2264640\u3001\u4F46\u591A\u4E00\u5C42\u89E6\u6478\u5224\u5B9A\uFF0C
+   \u7279\u5F02\u6027\u66F4\u9AD8 \u2192 B5b \u7CBE\u5FC3\u5199\u7684\u6536\u7D27\u7248\u5F0F\uFF08logo/\u6807\u9898/\u7B80\u4ECB/\u6309\u94AE\uFF09\u6574\u6BB5\u5931\u6548\uFF0C\u624B\u673A\u4E0A\u53EA\u5269\u4E00\u5F20
+   \u5149\u79C3\u79C3\u7684\u6D77\u62A5\u3002\u6539\u7531 \xA7B5b \u4E00\u5904\u7EDF\u4E00\u63A5\u7BA1\uFF1A\u7ED9 info \u5C42\u663E\u5F0F display \u590D\u4F4D + \u624B\u673A\u6392\u7248\u3002
+   \u4E24\u79CD\u6807\u8BB0\u7C7B\u540C\u65F6\u5B58\u5728\u65F6\u672C\u6BB5\u80DC\u51FA\uFF08\u540E\u6CE8\u5165\u4E14 !important\uFF09\uFF0C\u884C\u4E3A\u56DE\u5230\u300C\u6536\u7D27\u800C\u975E\u9690\u85CF\u300D\u3002 */
+html.fnos-touch [data-fntv-carousel-style="4"] .fntv-s4-info{
+  display:block !important;
+}
+/* D3. \u89E6\u6478\u7AEF\u628A\u7EAF hover \u624D\u4EAE\u8D77\u7684\u5143\u7D20\u8865\u5E38\u9A7B\u5E95\u8272\uFF0C\u907F\u514D\u300Ctap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\u300D\u6216\u6C38\u4E0D\u51FA\u73B0\u3002
+   \u8FD9\u91CC\u53EA\u5904\u7406\u9AD8\u4EF7\u503C\u7684\u4E24\u4E2A\uFF08\u5361\u7247\u62AC\u5347/\u64AD\u653E\u952E\uFF09\uFF0C\u4E0D\u505A\u5168\u7AD9 hover \u7FFB\u7248\u3002 */
+html.fnos-touch .wh-card:hover{
+  transform:none !important;   /* tap \u540E\u7C98\u4F4F\u7684\u62AC\u5347\u4F1A\u8BA9\u6574\u9875\u5361\u7247\u9519\u4F4D\uFF0C\u76F4\u63A5\u53D6\u6D88 */
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 E. \u6EDA\u52A8\u9501\u5B9A\u5DE5\u5177\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u5F39\u5C42\u6253\u5F00\u65F6\u7981\u6B62\u80CC\u666F\u8DDF\u7740\u6EDA\u3002\u4F18\u5148\u7528 CSS \u7684 overscroll-behavior\uFF08\u4E0D\u9501 body\uFF0C
+   iOS \u4E0A\u4E0D\u4F1A\u6EDA\u52A8\u7A7F\u900F/\u4F4D\u7F6E\u4E22\u5931\uFF09\uFF1B\u4E0D\u652F\u6301\u65F6\u624D\u9000\u5316\u9501 body\u3002
+   \u6302\u5230 html.fnos-scroll-lock \u4E0A\uFF0C\u7531 JS \u5728\u5F39\u5C42\u5F00/\u5173\u65F6\u589E\u5220\u3002 */
+html.fnos-scroll-lock{
+  overflow:hidden !important;
+  overscroll-behavior:contain;
+  touch-action:none;
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 F. \u5F39\u5C42\u7A84\u5C4F\u6EA2\u51FA\u6536\u53E3\uFF08fnos-compact\uFF0C\u4E0E\u5BBD\u7A84\u540C\u5224\uFF0C\u4E0D\u5206\u89E6\u6478\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u8FD9\u6279\u7EC4\u4EF6\u90FD\u662F**\u884C\u5185 cssText \u9489\u6B7B\u5C3A\u5BF8**\uFF08dialogUI:113 min-width:420px\u3001
+   modals/feedback.ts:96/221 width:320px\u3001modals/patch.ts:71 width:340px\u3001
+   watchHistory.ts:492 grid 6fr/4fr\uFF09\u3002\u884C\u5185\u6837\u5F0F\u53EA\u80FD\u9760 !important \u538B\uFF0C\u538B\u4E0D\u52A8\u5C31\u53EA\u80FD
+   \u6EA2\u51FA\u5C4F\u5E55\u5916 \u2014\u2014 360px \u5C4F\u4E0A\u5FC5\u7136\u51FA\u4E8B\u3002\u96C6\u4E2D\u5728\u8FD9\u91CC\u6536\u53E3\uFF0C\u907F\u514D\u9010\u4E2A\u63D2\u4EF6\u6539\u884C\u5185\u503C\u3002 */
+
+/* F1. dialogUI \u5361\u7247\uFF1Amin-width \u5728 CSS \u91CC\u4F18\u5148\u4E8E max-width\uFF0C420px \u786C\u9876\u4F1A\u51FB\u7A7F\u7A84\u5C4F\u3002
+   \u7A84\u5C4F\u76F4\u63A5\u64A4\u6389 min-width\uFF0C\u6539\u7531 max-width:calc(100vw - 32px) \u51B3\u5B9A\u3002 */
+html.fnos-compact #fnos-dialog-overlay [data-fnos-dialog-card="1"]{
+  min-width:0 !important;
+  width:calc(100vw - 32px) !important;
+  max-width:calc(100vw - 32px) !important;
+  padding:18px 16px 14px !important;
+}
+/* F2. \u53CD\u9988/QQ\u7FA4\u5F39\u7A97 300~320px \u5B9A\u5BBD + 22~24px padding \u2192 360px \u4E0B\u6EA2\u51FA\uFF0C\u7EDF\u4E00\u5939\u5230\u89C6\u53E3\u5185\u3002 */
+html.fnos-compact #fnos-feedback-modal,
+html.fnos-compact #fnos-feedback-choice-modal,
+html.fnos-compact #fnos-qq-group-modal{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+  padding:18px 16px !important;
+}
+/* F3. \u8865\u4E01\u5F39\u7A97 340px \u5B9A\u5BBD\uFF08\u65E0 max-width\uFF09\uFF0C\u540C\u4E0A\u6536\u53E3\u3002 */
+html.fnos-compact #fntv-patch-apply-popup{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+}
+/* F4. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u6D6E\u5C42\uFF1A\u53CC\u680F grid 6fr/4fr \u5728\u7A84\u5C4F\u4F1A\u628A\u5DE6\u680F\u538B\u5230\u88C5\u4E0D\u4E0B\u6D77\u62A5\uFF0C
+   \u5355\u5217\u5316\uFF08\u4E0E B6 \u7684 .wh-chart-split \u5355\u5217\u4FDD\u6301\u4E00\u81F4\uFF09\u3002
+   .wh-detail \u5D4C\u5728 #fntv-wh \u9762\u677F\u5185\uFF0C\u9009\u62E9\u5668\u5FC5\u987B\u5E26\u9762\u677F ID \u524D\u7F00\u624D\u547D\u4E2D\u3002 */
+html.fnos-narrow #fntv-wh .wh-detail{
+  grid-template-columns:1fr !important;
+}
+/* F5. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u91CC\u7684\u6D77\u62A5/\u9884\u89C8\u5728\u5355\u5217\u4E0B\u6309\u89C6\u53E3\u5BBD\u81EA\u9002\u5E94\uFF0C\u907F\u514D\u56FA\u5B9A\u5BBD\u9AD8\u6EA2\u51FA\u3002 */
+html.fnos-narrow #fntv-wh .wh-detail img{
+  max-width:100% !important;
+  height:auto !important;
+}
+
+`;
+  registerHook("onReady" /* OnReady */, installMobileStyle);
+  registerHook("onDomChange" /* OnDomChange */, ensure);
+
   // src/preload/plugins/embyWall/detail/beautifyStyle.ts
-  var STYLE_ID2 = "fnos-beautify-css";
+  var STYLE_ID3 = "fnos-beautify-css";
   var HERO = ':is(.semi-always-dark[class*="h-[470px]"],.semi-always-dark[class*="min-h-[390px]"],.trim-mc__details--key-version)';
   var COL = `:has(> ${HERO}):is(:has([data-id="details"]), :has([class*="grid-cols-[repeat(auto-fill,52px"])):has(> :nth-child(3))`;
   var COL_NUM = `${COL}:has(> :nth-child(2) [class*="grid-cols-[repeat(auto-fill,52px"])`;
-  var SERIES_PANEL = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
-  var SERIES_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
-  var MOVIE_PANEL = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
-  var MOVIE_BTNROW = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var SERIES_PANEL2 = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
+  var SERIES_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
+  var MOVIE_PANEL2 = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
+  var MOVIE_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
   var MOVIE_COL = 'div[class*="mb-[46px]"][class*="flex flex-col gap-3"]:has(> div > .trim-mc__details--key-version)';
   var BEAUTIFY_CSS = `
 /* ===== 0. \u8BED\u4E49\u8BBE\u8BA1 token\uFF08\u660E/\u6697\u4E24\u5957\uFF1B\u6587\u672C\u8272\u6CBF\u7528 Semi \u4E3B\u9898\u53D8\u91CF\uFF0C\u65E0\u9700\u5728\u6B64\u91CD\u590D\uFF09===== */
@@ -4249,7 +4717,7 @@ body.fnos-series-panel .trim-mc__details--key-version.trim-mc__details--key-vers
 }
 /* \u906E\u7F69\u53D8\u8F7B\u540E\uFF0C\u60AC\u6D6E\u6587\u5B57\u9760\u6295\u5F71\u4FDD\u53EF\u8BFB\uFF08\u4E0D\u5F15\u5165\u65B0\u7684\u5E95\u8272/\u6846\uFF09\u3002
    \u53CC\u5C42\u6295\u5F71\uFF1A\u5C0F\u534A\u5F84\u538B\u4EAE\u8FB9\u3001\u5927\u534A\u5F84\u515C\u4EAE\u533A\uFF08genre \u884C\u5728\u4EAE\u90E8\u6D77\u62A5\u4E0A\u5355\u5C42\u4E0D\u591F\uFF09\u3002 */
-body.fnos-series-panel ${SERIES_BTNROW} span{
+body.fnos-series-panel ${SERIES_BTNROW2} span{
   text-shadow:0 1px 2px rgba(0,0,0,.6), 0 2px 18px rgba(0,0,0,.5) !important;
 }
 body.fnos-series-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"] img{
@@ -4293,7 +4761,7 @@ body.fnos-series-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"
   bottom:calc(var(--fnos-cluster-h, 360px) + 100px) !important;
 }
 /* N4. \u6309\u94AE\u884C\u60AC\u6D6E\uFF08wrapper \u8131\u6D41\u540E\u9AD8\u5EA6=hero\uFF0Cbottom:0 \u5373\u89C6\u53E3\u5E95\uFF09 */
-body.fnos-series-panel ${SERIES_BTNROW}{
+body.fnos-series-panel ${SERIES_BTNROW2}{
   position:absolute !important;
   bottom:calc(var(--fnos-cluster-h, 360px) + 30px) !important;
   left:26px !important;
@@ -4302,16 +4770,16 @@ body.fnos-series-panel ${SERIES_BTNROW}{
   box-sizing:border-box !important; z-index:3 !important;
 }
 /* \u6309\u94AE\u884C\u6052\u6697\u80CC\u666F\uFF08\u6D77\u62A5\u5E95\u90E8\u6E10\u53D8\uFF09\u2192 \u6587\u5B57/\u56FE\u6807\u7EDF\u4E00\u6D45\u8272\uFF08svg fill=currentColor \u5168\u94FE\u7EE7\u627F\uFF09 */
-body.fnos-series-panel ${SERIES_BTNROW} span{ color:rgba(255,255,255,.78) !important; }
-body.fnos-series-panel ${SERIES_BTNROW} svg{ color:rgba(255,255,255,.92) !important; }
+body.fnos-series-panel ${SERIES_BTNROW2} span{ color:rgba(255,255,255,.78) !important; }
+body.fnos-series-panel ${SERIES_BTNROW2} svg{ color:rgba(255,255,255,.92) !important; }
 /* \u5706\u5F62\u6309\u94AE\uFF08\u6536\u85CF/\u5DF2\u770B/\u66F4\u591A\uFF09\uFF1A\u534A\u900F\u73BB\u7483\u3001\u65E0\u8FB9\u6846\uFF08\u539F\u751F border+fill-0 \u5B9E\u5FC3\u5E95\u4E00\u5E76\u53BB\u6389\uFF09 */
-body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]{
+body.fnos-series-panel ${SERIES_BTNROW2} div[class*="size-[54px]"]{
   background:rgba(255,255,255,.10) !important;
   backdrop-filter:blur(20px) saturate(150%) !important;
   -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
   border:none !important;
 }
-body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]:hover{
+body.fnos-series-panel ${SERIES_BTNROW2} div[class*="size-[54px]"]:hover{
   background:rgba(255,255,255,.18) !important;
 }
 /* N5. \u4FE1\u606F\u9762\u677F\uFF1A\u534A\u900F\u67D4\u5149\u73BB\u7483\uFF0C\u65E0\u8FB9\u6846\u3002
@@ -4319,7 +4787,7 @@ body.fnos-series-panel ${SERIES_BTNROW} div[class*="size-[54px]"]:hover{
    [lc-1021] \u7528\u6237\u7B2C\u4E09\u8F6E\u53CD\u9988\u300C\u6574\u4E2A\u5DE6\u4E0B\u9762\u677F\u900F\u660E\u518D\u900F\u4E00\u70B9\u300D\uFF1Atint .16\u2192.09\u3001\u767D\u8272\u9AD8\u5149\u68AF\u5EA6\u518D\u964D\u3001
    blur 30\u219226\u3001brightness .78\u2192.86\uFF08\u538B\u6697\u51CF\u8F7B=\u66F4\u900F\uFF0C\u53EF\u8BFB\u6027\u4ECD\u7531 blur+saturate+\u6D45\u8272\u6587\u5B57\u6295\u5F71\u627F\u62C5\uFF09\u3002
    \u65E0\u5361\u65F6 600px\uFF08\u6B63\u597D\u5305\u4F4F\u5DE6\u5217\uFF09\uFF0C\u6709\u5361\u65F6 1020px\uFF08:has \u95E8\u63A7\uFF0C\u5361\u6302\u8F7D/\u64A4\u9664\u81EA\u52A8\u5207\u6362\uFF09\u3002 */
-body.fnos-series-panel ${SERIES_PANEL}{
+body.fnos-series-panel ${SERIES_PANEL2}{
   position:absolute !important;
   bottom:18px !important; left:26px !important;
   width:min(600px, calc(100vw - 52px)) !important;
@@ -4343,7 +4811,7 @@ body.fnos-series-panel ${SERIES_PANEL}{
   z-index:2 !important;
   animation:fnos-series-panel-in .5s cubic-bezier(.22,.61,.36,1) both;
 }
-body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card){
+body.fnos-series-panel ${SERIES_PANEL2}:has(> .fnos-beautify-card){
   width:min(1020px, calc(100vw - 52px)) !important;
 }
 @keyframes fnos-series-panel-in{
@@ -4351,7 +4819,7 @@ body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card){
   to{ opacity:1; transform:none; }
 }
 /* \u9762\u677F\u5185\u6052\u6697\u6750\u8D28 \u2192 Semi \u6587\u672C\u53D8\u91CF\u91CD\u5B9A\u4E49\u4E3A\u6D45\u8272\uFF08I \u6BB5\u5361\u6837\u5F0F\u96F6\u6539\u52A8\u81EA\u52A8\u8DDF\u968F\uFF09 */
-body.fnos-series-panel ${SERIES_PANEL}{
+body.fnos-series-panel ${SERIES_PANEL2}{
   --semi-color-text-0:rgba(255,255,255,.94);
   --semi-color-text-1:rgba(255,255,255,.72);
   --semi-color-text-2:rgba(255,255,255,.58);
@@ -4362,13 +4830,13 @@ body.fnos-series-panel ${SERIES_PANEL}{
    \u26A0 \u4E0D\u80FD innerHTML \u6574\u4F53\u66FF\u6362\uFF1A\u90A3\u662F React \u7BA1\u7406\u7684\u5B50\u6811\uFF0C\u66FF\u6362\u540E React \u5378\u8F7D\u65F6 removeChild \u4F1A\u70B8\uFF1B
    \u53EA\u6539\u6587\u672C\u8282\u70B9 data\uFF08\u622A\u65AD\u5E93\u540C\u6B3E\u624B\u6CD5\uFF09\uFF0C\u5E93\u5728 resize \u65F6\u4F1A\u6309\u5B83\u95ED\u5305\u91CC\u7684\u5168\u6587\u91CD\u65B0\u622A\u65AD \u2192
    tmdbCard.ts \u7684 resize \u76D1\u542C\u91CC\u91CD\u8DD1\u56DE\u586B\uFF08220ms \u53BB\u6296\uFF0C\u665A\u4E8E\u5E93\u7684\u540C\u6B65 handler\uFF0C\u6700\u7EC8\u6001\u5FC5\u662F\u6211\u4EEC\uFF09\u3002 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="text-justify"]{
   margin:0 !important; width:100% !important;
   font-size:14px !important; line-height:1.7 !important;
   color:rgba(255,255,255,.88) !important;
   text-shadow:0 1px 8px rgba(0,0,0,.38) !important;
 }
-body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
+body.fnos-series-panel ${SERIES_PANEL2}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
   width:calc(57% - 15px) !important;
 }
 body.fnos-series-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]{
@@ -4387,59 +4855,59 @@ body.fnos-series-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]
    \u6D77\u62A5\u5BBD\u5EA6\u662F**\u53D8\u91CF\u9489\u6B7B**\u7684\uFF08\u4E0D\u8DDF\u968F\u5361\u7247\u5B9E\u9645\u5BBD\u5EA6\uFF09\uFF1Alc-1010 \u628A\u5361\u5F3A\u6491 238px \u65F6\u6D77\u62A5\u505C\u5728 ~162px
    \u2192 \u53F3\u4FA7 76px \u7A7A\u5E26\u9732\u51FA\u6DF1\u8272\u6E10\u53D8/\u5E95\u56FE = \u7528\u6237\u622A\u56FE\u7684\u9ED1\u8FB9\uFF1B\u53CD\u8FC7\u6765\u5361\u6536\u7A84\u540E\u6D77\u62A5\u4F1A\u6EA2\u51FA\u538B\u5230\u90BB\u5361\u3002
    \u2234 \u5FC5\u987B\u628A poster-box \u5BBD\u5EA6\u6539\u56DE 100% \u8DDF\u968F\u5361\u7247\uFF0C\u539F\u751F 1px \u63CF\u8FB9\u4E0E\u300C\u65E0\u7EBF\u6761\u300D\u73BB\u7483\u4E00\u5E76\u53BB\u6846\u3002 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"]{
   margin:14px 0 0 !important; width:100% !important;
   display:flex !important; flex-wrap:nowrap !important;
   overflow-x:auto !important; overflow-y:hidden !important;
   gap:14px !important; padding:2px !important;
   scrollbar-width:none !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"]::-webkit-scrollbar{ display:none !important; }
-body.fnos-series-panel ${SERIES_PANEL}:has(> .fnos-beautify-card) > div[class*="flex-wrap"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"]::-webkit-scrollbar{ display:none !important; }
+body.fnos-series-panel ${SERIES_PANEL2}:has(> .fnos-beautify-card) > div[class*="flex-wrap"]{
   width:calc(57% - 15px) !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] > [data-id="details"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] > [data-id="details"]{
   width:calc(25% - 11px) !important; flex:0 0 auto !important;
   background:transparent !important; border:none !important; box-shadow:none !important;
   backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
 }
 /* \u6D77\u62A5\u7AD6\u7248 2:3\uFF08\u539F\u751F\u6BD4\u4F8B\uFF09+ \u5BBD\u5EA6\u8DDF\u968F\u5361\u7247\uFF08\u6390\u6389\u9ED1\u8FB9\u6839\u6E90\uFF0C\u89C1 N7 \u5934\u6CE8\uFF09+ \u53BB\u539F\u751F 1px \u63CF\u8FB9\uFF1A
    \u5BB9\u5668\u7ED9\u6BD4\u4F8B\u4E0E\u5BBD\u5EA6\u3001\u5185\u90E8 absolute \u586B\u6EE1\u94FE\u4E0D\u52A8\uFF08\u540C lc-986 \u7ED3\u8BBA\uFF09 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] .poster-box{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] .poster-box{
   width:100% !important;
   aspect-ratio:2 / 3 !important;
   border:none !important;
 }
 /* [lc-1021] \u5B63\u5361\u5185\u5C42\u9632\u9ED1\u5757\u4FDD\u9669\uFF1A\u539F\u751F\u6D77\u62A5\u5BB9\u5668/\u5360\u4F4D\u5C42\u7684\u6DF1\u8272\u5E95\uFF08--semi-color-bg-placeholder\uFF09
    \u5728\u73BB\u7483\u4E0A\u4E00\u5F8B\u900F\u660E\u5316/\u5F31\u5316 \u2014\u2014 \u56FE\u7247\u52A0\u8F7D\u671F\u95F4\u73BB\u7483\u4E0A\u4E0D\u518D\u95EA\u6DF1\u8272\u5757 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] .poster-box,
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > div:first-child{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] .poster-box,
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] > div:first-child{
   background:transparent !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] [class*="bg-[var(--semi-color-bg-placeholder)]"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] [class*="bg-[var(--semi-color-bg-placeholder)]"]{
   background:rgba(255,255,255,.06) !important;
 }
 /* \u5E95\u90E8\u6E10\u53D8\u5C42\uFF1A\u7AD6\u7248 198px \u9AD8\u7ED9 64px\uFF08\u539F 76px \u4E3A 2:3 \u8BBE\u8BA1\uFF0C\u4EC5\u5FAE\u8C03\uFF09 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > div:first-child [class*="bg-gradient-to-t"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] > div:first-child [class*="bg-gradient-to-t"]{
   height:64px !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] p{
   text-align:left !important; margin:6px 0 0 1px !important;
   font-size:12px !important;
   color:rgba(255,255,255,.9) !important;
 }
 /* \u6807\u9898/\u526F\u9898\u6587\u672C\u5757\u662F a.flex.flex-col.items-center \u2192 flex \u5C45\u4E2D\u538B\u8FC7 text-align\uFF0C\u6539\u5BB9\u5668\u5BF9\u9F50 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] > a[class*="items-center"]{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] > a[class*="items-center"]{
   align-items:flex-start !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex-wrap"] [data-id="details"] p + p{
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] [data-id="details"] p + p{
   margin:2px 0 0 1px !important;
   font-size:11px !important;
   color:rgba(255,255,255,.55) !important;
 }
 /* J \u6BB5\u4F1A\u7ED9\u5B63\u5361\u6807\u9898\u8FFD\u52A0\u6E05\u6670\u5EA6\u80F6\u56CA\uFF08\u5B63\u5361\u540C\u6837\u5E26 data-id=details + \u89D2\u6807\u4F4D\u56FE\uFF0C\u590D\u7528\u96C6\u5361\u903B\u8F91\uFF09\uFF1A
    \u539F\u751F\u6807\u9898 p \u82E5\u5E26 truncate \u4F1A\u628A\u80F6\u56CA\u88C1\u6CA1 \u2192 \u540C J \u6BB5\u7684\u89E3\u7981\u89C4\u5219\uFF0C\u6B64\u5904\u6309\u9762\u677F\u4F5C\u7528\u57DF\u91CD\u5199 */
-body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p:has(> .fnos-ep-res){
+body.fnos-series-panel ${SERIES_PANEL2} [data-id="details"] p:has(> .fnos-ep-res){
   white-space:normal !important; overflow:visible !important; text-overflow:clip !important;
 }
 /* N7b. \u5B63\u884C\u5DE6\u53F3\u5207\u6362\u5706\u94AE\uFF08seasonNav.ts\uFF09\uFF1A>4 \u5B63\u65F6\u884C\u6EA2\u51FA\u6A2A\u6ED1\u4F46\u6EDA\u52A8\u6761\u9690\u85CF\uFF08N7 \u5B9A\u7A3F 4 \u5361\u4E00\u5C4F\uFF09\uFF0C
@@ -4448,11 +4916,11 @@ body.fnos-series-panel ${SERIES_PANEL} [data-id="details"] p:has(> .fnos-ep-res)
    \u5230\u7AEF data-end=1 \u6DE1\u5316\u7981\u7528\u3002top/left/width \u7531 JS \u5B9E\u6D4B\u6D77\u62A5\u7AD6\u7248\u4E2D\u7EBF\u9489 inline\uFF08\u9762\u677F\u662F
    N5 absolute \u5B9A\u4F4D\u5BB9\u5668\uFF0CoffsetParent \u5373\u9762\u677F\uFF0C\u51E0\u4F55\u7A33\u5B9A\uFF09\uFF1B\u6C34\u5E73\u63A2\u51FA 7px \u534A\u538B\u6D77\u62A5\u8FB9\uFF0C
    \u73BB\u7483\u540E\u900F\u51FA\u6D77\u62A5\u540C Apple TV \u7FFB\u9875\u94AE\u89C2\u611F\u3002 */
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav{
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav{
   position:absolute !important; height:0 !important;
   pointer-events:none !important; z-index:3 !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button{
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav button{
   pointer-events:auto !important;
   position:absolute !important; top:0 !important; transform:translateY(-50%) !important;
   width:32px !important; height:32px !important; border-radius:50% !important;
@@ -4465,15 +4933,15 @@ body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button{
   box-shadow:0 4px 14px rgba(0,0,0,.30) !important;
   transition:background .15s ease, opacity .2s ease !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:first-child{ left:-7px !important; }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:last-child{ right:-7px !important; }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button:hover{ background:rgba(255,255,255,.20) !important; }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-season-nav button[data-end="1"]{
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav button:first-child{ left:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav button:last-child{ right:-7px !important; }
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav button:hover{ background:rgba(255,255,255,.20) !important; }
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-season-nav button[data-end="1"]{
   opacity:.28 !important; pointer-events:none !important;
 }
 /* N8. \u539F\u751F\u5916\u94FE\u884C\uFF08\u94FE\u63A5\uFF1AIMDB\u94FE\u63A5\uFF09\u9690\u85CF \u2014\u2014 \u4E0E\u5B63\u9875 A \u6BB5\u540C\u4E00\u51B3\u7B56\uFF08lc-988 \u7528\u6237\u660E\u786E\u8981\u6C42\u53BB\u6389\uFF09\uFF0C
    \u5361\u5185 N8b \u5916\u94FE\u533A\u5DF2\u8986\u76D6\uFF1B\u53CC\u6761\u4EF6\u540C A \u6BB5\uFF08\u6709\u5916\u94FE \u4E14 \u65E0\u4EBA\u7269\u94FE\u63A5\uFF09\u3002 */
-body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex flex-col gap-4"]:has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
+body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex flex-col gap-4"]:has(a[href*="imdb.com"], a[href*="themoviedb.org"]):not(:has(a[href*="/v/person/"])){
   display:none !important;
 }
 /* N8b. TMDB \u5361\uFF1A\u7EDD\u5BF9\u5B9A\u4F4D\u5230\u53F3\u5217\uFF08\u9762\u677F\u9AD8\u5EA6\u53EA\u7531\u5DE6\u5217\u7B80\u4ECB+\u5B63\u9009\u9A71\u52A8\uFF0C\u5361\u8D85\u9AD8\u65F6\u5185\u90E8\u6EDA\u52A8\uFF0C
@@ -4482,7 +4950,7 @@ body.fnos-series-panel ${SERIES_PANEL} > div[class*="flex flex-col gap-4"]:has(a
    \u26A0 [lc-1037] \u4E91\u6BCD\u5F00\u542F\u65F6\u672C\u6761 transparent \u4ECD\u80FD\u751F\u6548\u7684\u524D\u63D0\uFF1AtmdbCard \u5728\u4E00\u7EA7\u9875\u7ED9\u5361\u6253\u4E86
    data-fntv-glass-exclude\u2014\u2014\u5426\u5219 glassUI \u2461 [class*="card"] \u78E8\u7802\u5E95 (0,6,1) \u538B\u8FC7\u672C\u6761 (0,3,2)\uFF0C
    \u5361\u88AB\u6253\u56DE\u78E8\u7802\u767D\uFF08\u7528\u6237\u62A5\u969C\u300C\u767D\u70B9\u663E\u793A\u4E0D\u7A33\u5B9A\u300D\u7684\u6839\u56E0\uFF09\u3002\u5220\u90A3\u884C attr \u672C\u6761\u5728\u4E91\u6BCD\u4E0B\u5373\u5931\u6548\u3002 */
-body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card{
+body.fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card{
   position:absolute !important;
   top:16px !important; bottom:16px !important;
   left:calc(57% + 6px) !important; right:16px !important;
@@ -4493,11 +4961,11 @@ body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card{
   scrollbar-width:thin !important;
   scrollbar-color:rgba(255,255,255,.16) transparent !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
-body.fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card::-webkit-scrollbar-thumb{
+body.fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
+body.fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,.16) !important; border-radius:2px !important;
 }
-body.fnos-series-panel ${SERIES_PANEL} .fnos-showinfo__sec{
+body.fnos-series-panel ${SERIES_PANEL2} .fnos-showinfo__sec{
   border-top:none !important; padding-top:12px !important;
 }
 
@@ -4554,7 +5022,7 @@ body.fnos-movie-panel .trim-mc__details--key-version > [class*="inset-x-[46px]"]
   bottom:calc(var(--fnos-cluster-h, 360px) + 120px) !important;
 }
 /* O4. \u6309\u94AE\u884C\u60AC\u6D6E\uFF08\u540C N4\uFF1BMOVIE_BTNROW \u4E0E SERIES_BTNROW \u540C\u6784\uFF0C\u8FDB\u5EA6\u6761/meta \u884C\u968F\u884C\u4E00\u8D77\u60AC\u6D6E\uFF09*/
-body.fnos-movie-panel ${MOVIE_BTNROW}{
+body.fnos-movie-panel ${MOVIE_BTNROW2}{
   position:absolute !important;
   bottom:calc(var(--fnos-cluster-h, 360px) + 16px) !important;
   left:26px !important;
@@ -4563,27 +5031,27 @@ body.fnos-movie-panel ${MOVIE_BTNROW}{
   box-sizing:border-box !important; z-index:3 !important;
 }
 /* \u6309\u94AE/\u6587\u5B57/\u56FE\u6807\u6D45\u8272\u5316\uFF08\u7535\u5F71\u9875 meta \u8D70 div \u800C\u975E span\uFF0C\u9700\u8865 div/divider \u4E24\u7C7B\uFF09 */
-body.fnos-movie-panel ${MOVIE_BTNROW} span{
+body.fnos-movie-panel ${MOVIE_BTNROW2} span{
   color:rgba(255,255,255,.78) !important;
   text-shadow:0 1px 2px rgba(0,0,0,.6), 0 2px 18px rgba(0,0,0,.5) !important;
 }
-body.fnos-movie-panel ${MOVIE_BTNROW} svg{ color:rgba(255,255,255,.92) !important; }
-body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="text-[var(--semi-color-text"]{ color:rgba(255,255,255,.78) !important; }
-body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="text-[var(--semi-color-divider"]{ color:rgba(255,255,255,.35) !important; }
-body.fnos-movie-panel ${MOVIE_BTNROW} img{ filter:drop-shadow(0 1px 4px rgba(0,0,0,.45)); }
+body.fnos-movie-panel ${MOVIE_BTNROW2} svg{ color:rgba(255,255,255,.92) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="text-[var(--semi-color-text"]{ color:rgba(255,255,255,.78) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="text-[var(--semi-color-divider"]{ color:rgba(255,255,255,.35) !important; }
+body.fnos-movie-panel ${MOVIE_BTNROW2} img{ filter:drop-shadow(0 1px 4px rgba(0,0,0,.45)); }
 /* \u5706\u5F62\u6309\u94AE\uFF08\u6536\u85CF/\u5DF2\u770B/\u66F4\u591A\uFF09\uFF1A\u534A\u900F\u73BB\u7483\u3001\u65E0\u8FB9\u6846\uFF08\u539F\u751F border+fill-0 \u5B9E\u5FC3\u5E95\u4E00\u5E76\u53BB\u6389\uFF09 */
-body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]{
+body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="size-[54px]"]{
   background:rgba(255,255,255,.10) !important;
   backdrop-filter:blur(20px) saturate(150%) !important;
   -webkit-backdrop-filter:blur(20px) saturate(150%) !important;
   border:none !important;
 }
-body.fnos-movie-panel ${MOVIE_BTNROW} div[class*="size-[54px]"]:hover{
+body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="size-[54px]"]:hover{
   background:rgba(255,255,255,.18) !important;
 }
 /* O5. \u7B80\u4ECB\u9762\u677F\uFF1A\u534A\u900F\u67D4\u5149\u73BB\u7483\uFF08\u53C2\u6570=N5 \u7528\u6237\u4E09\u8F6E\u5B9A\u7A3F\u503C\uFF1Atint .09/blur 26/brightness .86\uFF09
    \u65E0\u5361 600px\uFF1B\u6709\u5361 1020px\uFF08:has \u95E8\u63A7\uFF09\u3002\u26A0 \u6574\u4E32\u7CBE\u786E\u7C7B\u540D\uFF08\u65E0 gap-4\uFF09\u4E0E\u6587\u4EF6\u4FE1\u606F\u533A\u533A\u5206\u3002 */
-body.fnos-movie-panel ${MOVIE_PANEL}{
+body.fnos-movie-panel ${MOVIE_PANEL2}{
   position:absolute !important;
   /* [lc-1031] min-height \u8BA9 TMDB \u5361(absolute, top/bottom:16)\u4E0D\u518D\u88AB\u7B80\u77ED\u7B80\u4ECB\u9501\u6210\u77EE\u6761\uFF1A
      \u7535\u5F71\u7B80\u4ECB\u5E38\u53EA\u6709\u4E00\u4E24\u884C\uFF0C\u9762\u677F\u968F\u4E4B\u53EA\u5269 ~150px\uFF0C\u5361\u5185\u5BB9\u88AB\u88C1\u5F97\u53EA\u5269\u8BC4\u5206+meta\u3002 */
@@ -4613,31 +5081,31 @@ body.fnos-movie-panel ${MOVIE_PANEL}{
   z-index:2 !important;
   animation:fnos-series-panel-in .5s cubic-bezier(.22,.61,.36,1) both;
 }
-body.fnos-movie-panel ${MOVIE_PANEL}:has(> .fnos-beautify-card){
+body.fnos-movie-panel ${MOVIE_PANEL2}:has(> .fnos-beautify-card){
   width:min(1020px, calc(100vw - 52px)) !important;
 }
 /* \u9762\u677F\u5185\u6052\u6697\u6750\u8D28 \u2192 Semi \u6587\u672C\u53D8\u91CF\u91CD\u5B9A\u4E49\u4E3A\u6D45\u8272\uFF08I \u6BB5\u5361\u6837\u5F0F\u96F6\u6539\u52A8\u81EA\u52A8\u8DDF\u968F\uFF09 */
-body.fnos-movie-panel ${MOVIE_PANEL}{
+body.fnos-movie-panel ${MOVIE_PANEL2}{
   --semi-color-text-0:rgba(255,255,255,.94);
   --semi-color-text-1:rgba(255,255,255,.72);
   --semi-color-text-2:rgba(255,255,255,.58);
   --semi-color-text-3:rgba(255,255,255,.42);
 }
 /* O6. \u7B80\u4ECB\uFF1A\u5168\u6587\u5C55\u793A\uFF08tmdbCard \u56DE\u586B fiber props.overview\uFF0C\u539F\u751F\u622A\u65AD+\u300C\u66F4\u591A\u300D\u540C\u6B3E\u5931\u6548\uFF09+ \u9690\u85CF\u300C\u66F4\u591A\u300D */
-body.fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+body.fnos-movie-panel ${MOVIE_PANEL2} > div[class*="text-justify"]{
   margin:0 !important; width:100% !important;
   font-size:14px !important; line-height:1.7 !important;
   color:rgba(255,255,255,.88) !important;
   text-shadow:0 1px 8px rgba(0,0,0,.38) !important;
 }
-body.fnos-movie-panel ${MOVIE_PANEL}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
+body.fnos-movie-panel ${MOVIE_PANEL2}:has(> .fnos-beautify-card) > div[class*="text-justify"]{
   width:calc(57% - 15px) !important;
 }
 body.fnos-movie-panel .fnos-intro-full [class*="ml-1"][class*="cursor-pointer"]{
   display:none !important;
 }
 /* O8b. TMDB \u7535\u5F71\u5361\uFF1A\u7EDD\u5BF9\u5B9A\u4F4D\u5230\u9762\u677F\u53F3\u5217\uFF08\u540C N8b\uFF1B\u5185\u90E8\u6EDA\u52A8\u4E0D\u6491\u9AD8\u9762\u677F\uFF1B\u5361\u81EA\u8EAB\u65E0\u6846\u65E0\u5E95\uFF09 */
-body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+body.fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card{
   position:absolute !important;
   top:16px !important; bottom:16px !important;
   left:calc(57% + 6px) !important; right:16px !important;
@@ -4648,11 +5116,11 @@ body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
   scrollbar-width:thin !important;
   scrollbar-color:rgba(255,255,255,.16) transparent !important;
 }
-body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
-body.fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card::-webkit-scrollbar-thumb{
+body.fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card::-webkit-scrollbar{ width:4px !important; }
+body.fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card::-webkit-scrollbar-thumb{
   background:rgba(255,255,255,.16) !important; border-radius:2px !important;
 }
-body.fnos-movie-panel ${MOVIE_PANEL} .fnos-showinfo__sec{
+body.fnos-movie-panel ${MOVIE_PANEL2} .fnos-showinfo__sec{
   border-top:none !important; padding-top:12px !important;
 }
 /* O10. \u4E00\u5C4F\u8BED\u4E49\uFF08\u7528\u6237\u6307\u5B9A\u300C\u4E0D\u8981\u6EDA\u52A8\u9875\u9762\u300D\uFF0Clc-1029\uFF09\uFF1A\u6F14\u804C\u4EBA\u5458/\u6587\u4EF6\u4FE1\u606F/\u89C6\u9891\u4FE1\u606F/IMDB \u884C
@@ -4687,8 +5155,8 @@ html[data-fntv-glass] body.fnos-movie-panel #custom-titlebar[data-fntv-tb]::befo
      \u538B\u6697 + \u6D45\u5B57\uFF08N/O \u539F\u6781\u6027\uFF1Btint \u4E0E\u6D77\u62A5\u540C\u8272\u7CFB = \u81EA\u52A8\u53D6\u8272\uFF09\uFF1B
    \xB7 \u4EAE\u6D77\u62A5\uFF08body[data-fntv-hero-bright=1]\uFF0CheroTint \u5168\u56FE\u5E73\u5747\u611F\u77E5\u4EAE\u5EA6 \u22650.5\uFF09\u2192 \u767D\u78E8\u7802
      \u65E0\u538B\u6697 + \u6DF1\u5B57\uFF08P3\uFF09\u3002 */
-html[data-fntv-glass] body.fnos-series-panel ${SERIES_PANEL},
-html[data-fntv-glass] body.fnos-movie-panel ${MOVIE_PANEL}{
+html[data-fntv-glass] body.fnos-series-panel ${SERIES_PANEL2},
+html[data-fntv-glass] body.fnos-movie-panel ${MOVIE_PANEL2}{
   background:linear-gradient(160deg,
     rgba(255,255,255,.06) 0%,
     rgba(255,255,255,.015) 45%,
@@ -4698,8 +5166,8 @@ html[data-fntv-glass] body.fnos-movie-panel ${MOVIE_PANEL}{
   -webkit-backdrop-filter:blur(26px) saturate(155%) brightness(.86) !important;
   box-shadow:0 18px 54px rgba(0,0,0,.24) !important;
 }
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL},
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL}{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2},
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL2}{
   background:linear-gradient(160deg,
     rgba(255,255,255,.10) 0%,
     rgba(255,255,255,.03) 45%,
@@ -4711,26 +5179,26 @@ html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_P
 }
 /* P3. \u6587\u5B57\u6781\u6027\u968F\u6D77\u62A5\uFF1A\u4EAE\u6D77\u62A5 \u2192 \u9762\u677F Semi \u53D8\u91CF\u7FFB\u6DF1 + N6/O6 \u663E\u5F0F\u767D\u5B57\u7FFB\u6DF1 + \u5B63\u5361\u6587\u672C\u7FFB\u6DF1
    + \u79FB\u9664\u767D\u5B57\u9634\u5F71\uFF1B\u6697\u6D77\u62A5\u4E0D\u5339\u914D = N/O \u539F\u6D45\u5B57\u4E0E\u9634\u5F71 */
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL},
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL}{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2},
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL2}{
   --semi-color-text-0:rgba(28,28,30,.92);
   --semi-color-text-1:rgba(28,28,30,.72);
   --semi-color-text-2:rgba(28,28,30,.58);
   --semi-color-text-3:rgba(28,28,30,.42);
 }
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} > div[class*="text-justify"],
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL} > div[class*="text-justify"]{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2} > div[class*="text-justify"],
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL2} > div[class*="text-justify"]{
   color:rgba(28,28,30,.88) !important; text-shadow:none !important;
 }
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} [data-id="details"] p{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2} [data-id="details"] p{
   color:rgba(28,28,30,.9) !important; text-shadow:none !important;
 }
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} [data-id="details"] p + p{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2} [data-id="details"] p + p{
   color:rgba(28,28,30,.55) !important;
 }
 /* P4. \u4EAE\u6D77\u62A5\u6D45\u78E8\u7802\u4E0A\u5361\u6EDA\u52A8\u6761\u6539\u6DF1\u8272\u53EF\u89C1 */
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL} > .fnos-beautify-card,
-html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL} > .fnos-beautify-card{
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card,
+html[data-fntv-glass] body[data-fntv-hero-bright="1"].fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card{
   scrollbar-color:rgba(0,0,0,.22) transparent !important;
 }
 
@@ -4767,35 +5235,23 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
 }
 `;
   function injectBeautifyStyle() {
-    if (!document.getElementById(STYLE_ID2)) {
+    if (!document.getElementById(STYLE_ID3)) {
       const st = document.createElement("style");
-      st.id = STYLE_ID2;
+      st.id = STYLE_ID3;
       st.textContent = BEAUTIFY_CSS;
       (document.head || document.documentElement).appendChild(st);
     }
     installMobileFlag();
   }
-  var _mobileFlagMq = null;
-  var MOBILE_FLAG_MQ = "(min-width: 641px)";
-  function isTouchCapable() {
-    try {
-      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-    } catch {
-      return false;
-    }
-  }
+  var _mobileFlagBound = false;
   function installMobileFlag() {
-    if (!isTouchCapable()) return;
     const apply = () => {
-      const narrow = !_mobileFlagMq || !_mobileFlagMq.matches;
-      document.documentElement.classList.toggle("fnos-touch-narrow", narrow);
+      document.documentElement.classList.toggle("fnos-touch-narrow", getUiMode() === "mobile");
     };
-    if (!_mobileFlagMq && typeof window.matchMedia === "function") {
+    if (!_mobileFlagBound) {
+      _mobileFlagBound = true;
       try {
-        _mobileFlagMq = window.matchMedia(MOBILE_FLAG_MQ);
-        const handler = () => apply();
-        if (_mobileFlagMq.addEventListener) _mobileFlagMq.addEventListener("change", handler);
-        else _mobileFlagMq.addListener(handler);
+        window.addEventListener(UI_MODE_EVENT, apply);
       } catch {
       }
     }
@@ -6187,7 +6643,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     if (paused && lastPausedDraw && !renderDirty) return;
     lastPausedDraw = paused;
     renderDirty = false;
-    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 820;
+    const smallScreen = getUiMode() === "mobile";
     const fontSizeFloor = smallScreen ? 16 : 14;
     let autoK = 1;
     if (style.autoScale) {
@@ -8160,7 +8616,7 @@ html.fnos-perf.dark{
 
   // src/preload/plugins/hotUpdates.ts
   var PANEL_ID = "fntv-hot-updates";
-  var STYLE_ID3 = "fntv-hot-updates-style";
+  var STYLE_ID4 = "fntv-hot-updates-style";
   var BLOCK_KEY = "fntv-hot-blocked";
   var DAILY_VISIBLE_KEY = "fnos-show-daily";
   var HOT_REFRESH_DAYS_KEY = "fnos-hot-refresh-days";
@@ -8273,7 +8729,7 @@ html.fnos-perf.dark{
     }
   }
   function injectStyle2() {
-    if (document.getElementById(STYLE_ID3)) return;
+    if (document.getElementById(STYLE_ID4)) return;
     const css = `
 /* ===== \u5BAB\u706F\u6309\u94AE \u2014\u2014 \u60AC\u6D6E\u53D1\u5149\u3001\u8109\u51B2\u547C\u5438\u3001\u4E00\u773C\u53EF\u89C1 ===== */
 #fntv-hot-tab {
@@ -8503,7 +8959,7 @@ html.fnos-perf.dark{
 #fntv-hot-panel.fntv-hot-light .fntv-hot-err { color: rgba(0,0,0,.6); }
 `;
     const el = document.createElement("style");
-    el.id = STYLE_ID3;
+    el.id = STYLE_ID4;
     el.textContent = css;
     (document.head || document.documentElement).appendChild(el);
   }
@@ -9010,7 +9466,7 @@ html.fnos-perf.dark{
           for (const it of payload.data.items || []) allBg.push(it);
           if (source === "bangumi" && panelOpen2) {
             updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
-            render2();
+            render3();
             logger_default.info("[hotUpdates] \u540E\u53F0\u5237\u65B0 Bangumi \u6570\u636E\u5DF2\u63A8\u9001\u66F4\u65B0");
           }
         } else {
@@ -9018,7 +9474,7 @@ html.fnos-perf.dark{
           for (const it of payload.data.items || []) allTm.push(it);
           if (source !== "bangumi" && panelOpen2) {
             updateFoot({ cachedAt: payload.cachedAt, fromCache: true });
-            render2();
+            render3();
             logger_default.info("[hotUpdates] \u540E\u53F0\u5237\u65B0" + (payload.source === "douban" ? "\u8C46\u74E3" : "TMDB") + "\u6570\u636E\u5DF2\u63A8\u9001\u66F4\u65B0");
           }
         }
@@ -9050,7 +9506,7 @@ html.fnos-perf.dark{
       }
       bindSeg();
     };
-    const render2 = () => {
+    const render3 = () => {
       const blocked = getBlockedSet();
       if (source === "bangumi") {
         const visible = allBg.filter((it) => !blocked.has(`bg|${it.id}`));
@@ -9070,7 +9526,7 @@ html.fnos-perf.dark{
           if (!m || m === sortMode) return;
           sortMode = m;
           seg.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("active", b.getAttribute("data-mode") === m));
-          render2();
+          render3();
         });
       });
     };
@@ -9082,7 +9538,7 @@ html.fnos-perf.dark{
         sortMode = s === "bangumi" ? "weekday" : "new";
         srcSeg.querySelectorAll("[data-src]").forEach((b) => b.classList.toggle("active", b.getAttribute("data-src") === s));
         applySourceUi();
-        render2();
+        render3();
         if (source === "bangumi" && !loadedBg) {
           loadedBg = true;
           loadBg();
@@ -9126,7 +9582,7 @@ html.fnos-perf.dark{
     resetEl.addEventListener("click", () => {
       resetBlocked();
       refreshReset();
-      render2();
+      render3();
     });
     const toggle = () => {
       const open = panel.classList.toggle("open");
@@ -9177,7 +9633,7 @@ html.fnos-perf.dark{
           allBg.length = 0;
           for (const it of cached2.items) allBg.push(it);
           updateFoot({ cachedAt: cached2.ts, fromCache: true });
-          render2();
+          render3();
           return;
         }
       }
@@ -9192,7 +9648,7 @@ html.fnos-perf.dark{
         allBg.length = 0;
         for (const it of res.items || []) allBg.push(it);
         updateFoot(res);
-        render2();
+        render3();
       } catch (e) {
         body.innerHTML = `<div class="fntv-hot-err">\u83B7\u53D6\u5931\u8D25\uFF1A${escapeHtml(String(e && e.message || e))}</div>`;
       }
@@ -9205,7 +9661,7 @@ html.fnos-perf.dark{
           allTm.length = 0;
           for (const it of cached2.items) allTm.push(it);
           updateFoot({ cachedAt: cached2.ts, fromCache: true });
-          render2();
+          render3();
           return;
         }
       }
@@ -9227,7 +9683,7 @@ html.fnos-perf.dark{
           body.innerHTML = `<div class="fntv-hot-err">${escapeHtml(tip)}</div>`;
           return;
         }
-        render2();
+        render3();
         if (res.warning) {
           body.insertAdjacentHTML("afterbegin", `<div class="fntv-hot-warn">\u26A0 ${escapeHtml(res.warning)}</div>`);
         }
@@ -11741,28 +12197,13 @@ html.fnos-perf.dark{
   }
 
   // src/preload/plugins/embyWall/carousel/mobile.ts
-  function isTouchCapable2() {
-    try {
-      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-    } catch {
-      return false;
-    }
-  }
-  function isMobileSpec() {
-    try {
-      const shortSide = Math.min(window.innerWidth, window.innerHeight);
-      return shortSide > 0 && shortSide <= 820;
-    } catch {
-      return false;
-    }
-  }
   function resolveCarouselStyle() {
     let stored = null;
     try {
       stored = localStorage.getItem("fnos-carousel-style");
     } catch {
     }
-    if (isTouchCapable2() && isMobileSpec()) {
+    if (getUiMode() === "mobile") {
       const v2 = parseInt(stored || "4", 10);
       if (v2 === 1 || v2 === 2 || v2 === 3) return v2;
       return 5;
@@ -12840,7 +13281,7 @@ html.fnos-perf.dark{
   }
 
   // src/preload/plugins/embyWall/pageBg.ts
-  var STYLE_ID4 = "fntv-page-bg-style";
+  var STYLE_ID5 = "fntv-page-bg-style";
   var LAYER_ID = "fntv-page-bg-layer";
   function cssUrl(raw) {
     return 'url("' + String(raw).replace(/"/g, "%22") + '")';
@@ -12867,10 +13308,10 @@ html.fnos-perf.dark{
     const html = document.documentElement;
     const mode = S.pageBgMode;
     const st = (() => {
-      let el = document.getElementById(STYLE_ID4);
+      let el = document.getElementById(STYLE_ID5);
       if (!el) {
         el = document.createElement("style");
-        el.id = STYLE_ID4;
+        el.id = STYLE_ID5;
       }
       return el;
     })();
@@ -17166,7 +17607,7 @@ html.fnos-perf.dark{
   }
 
   // src/preload/plugins/embyWall/carousel/bootCover.ts
-  var STYLE_ID5 = "fntv-boot-style";
+  var STYLE_ID6 = "fntv-boot-style";
   var BAR_ID = "fntv-boot-bar";
   var POLL_MS = 120;
   var HARD_LIFT_MS = 2500;
@@ -17176,10 +17617,10 @@ html.fnos-perf.dark{
     const p = location.pathname;
     return p === "/v" || p === "/v/";
   };
-  function ensure() {
-    if (document.getElementById(STYLE_ID5)) return;
+  function ensure2() {
+    if (document.getElementById(STYLE_ID6)) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID5;
+    st.id = STYLE_ID6;
     st.textContent = `
 #${BAR_ID}{position:fixed;top:0;left:0;right:0;height:3px;z-index:99999;pointer-events:none;background:rgba(148,156,178,.15)}
 #${BAR_ID}::after{content:'';position:absolute;left:0;top:0;height:100%;width:38%;border-radius:3px;background:var(--fnos-ui-accent,#4a8df0);animation:fntv-boot-slide 1s ease-in-out infinite}
@@ -17193,7 +17634,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     try {
       document.documentElement.classList.remove("fntv-boot-hide");
       (_a = document.getElementById(BAR_ID)) == null ? void 0 : _a.remove();
-      (_b = document.getElementById(STYLE_ID5)) == null ? void 0 : _b.remove();
+      (_b = document.getElementById(STYLE_ID6)) == null ? void 0 : _b.remove();
     } catch {
     }
     if (_poll) {
@@ -17205,7 +17646,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   function armBootCover() {
     if (_armed || !isHome()) return;
     _armed = true;
-    ensure();
+    ensure2();
     document.documentElement.classList.add("fntv-boot-hide");
     if (!document.getElementById(BAR_ID)) {
       const bar2 = document.createElement("div");
@@ -19456,7 +19897,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       const getCs = () => {
         const stored = localStorage.getItem("fnos-carousel-style");
         const v = parseInt(stored || "4", 10);
-        if (touchCapable) {
+        if (mobileMode) {
           return v === 1 || v === 2 || v === 3 ? v : 5;
         }
         return v === 5 ? 4 : v >= 1 && v <= 5 ? v : 4;
@@ -19470,16 +19911,9 @@ html.fntv-boot-hide #root{visibility:hidden}
       const csSeg = document.createElement("div");
       csSeg.id = "fnos-carousel-style-seg";
       csSeg.style.cssText = "display:flex;gap:6px;";
-      const mobileSpec = (() => {
-        try {
-          return Math.min(window.innerWidth, window.innerHeight) <= 820;
-        } catch {
-          return false;
-        }
-      })();
-      const touchCapable = mobileSpec && ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0);
+      const mobileMode = getUiMode() === "mobile";
       const csLabels = ["\u7AD6\u5411\u8F6E\u64AD", "\u6A2A\u5411\u8F6E\u64AD", "\u5806\u53E0\u5207\u6362", "\u7ACB\u4F53\u5806\u53E0"];
-      if (touchCapable) csLabels.push("\u89E6\u5C4F\u7279\u4F9B");
+      if (mobileMode) csLabels.push("\u89E6\u5C4F\u7279\u4F9B");
       csLabels.forEach((lab, idx) => {
         const b = document.createElement("button");
         b.type = "button";
@@ -23121,470 +23555,96 @@ html.fntv-boot-hide #root{visibility:hidden}
   });
   registerHook("onDomChange" /* OnDomChange */, startPolling);
 
-  // src/preload/plugins/mobileStyle.ts
-  var STYLE_ID6 = "fnos-mobile-css";
-  var MQ_NARROW = "(min-width: 640.5px)";
-  var MQ_COMPACT = "(min-width: 820.5px)";
-  var _mqNarrow = null;
-  var _mqCompact = null;
-  function isTouchDevice() {
-    try {
-      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-    } catch {
-      return false;
-    }
-  }
-  function applyViewportFlags() {
-    const html = document.documentElement;
-    const narrow = !_mqNarrow || !_mqNarrow.matches;
-    const compact = !_mqCompact || !_mqCompact.matches;
-    const narrowBefore = html.classList.contains("fnos-narrow");
-    const compactBefore = html.classList.contains("fnos-compact");
-    html.classList.toggle("fnos-narrow", narrow);
-    html.classList.toggle("fnos-compact", compact);
-    const touch = isTouchDevice();
-    html.classList.toggle("fnos-touch", touch);
-    html.classList.toggle("fnos-touch-narrow", touch && narrow);
-    const root = document.getElementById("root");
-    if (root) {
-      if (compact) root.style.setProperty("min-width", "0", "important");
-      else if (root.style.minWidth === "0px" || root.style.getPropertyValue("min-width") === "0") root.style.removeProperty("min-width");
-    }
-    if (narrow !== narrowBefore || compact !== compactBefore) {
-      try {
-        window.dispatchEvent(new Event("resize"));
-      } catch {
-      }
-    }
-  }
-  function ensureStyle() {
-    if (document.getElementById(STYLE_ID6)) return;
+  // src/preload/plugins/uiModeToggle.ts
+  var log8 = logger_default;
+  var BTN_ID2 = "fntv-uimode-tab";
+  var STYLE_ID7 = "fntv-uimode-style";
+  var _bound = false;
+  function injectStyle3() {
+    if (document.getElementById(STYLE_ID7)) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID6;
-    st.textContent = MOBILE_CSS;
+    st.id = STYLE_ID7;
+    st.textContent = `
+/* [lc-1319] UI \u6A21\u5F0F\u5207\u6362\u6309\u94AE\uFF1A\u4E0E\u300C\u6BCF\u65E5\u653E\u9001\u300D\u540C\u533A\uFF08\u5176\u6B63\u4E0A\u65B9\uFF09\uFF0C\u82F9\u679C\u98CE\u7D20\u51C0\u73BB\u7483
+   \uFF08\u65E0\u6E10\u53D8\u65E0\u53D1\u5149\uFF0C\u4E0E\u5BAB\u706F\u6309\u94AE\u533A\u5206\u4E3B\u6B21\uFF09 */
+#fntv-uimode-tab{
+  position:fixed; right:20px; bottom:76px; z-index:99998;
+  display:flex; align-items:center; gap:6px;
+  padding:8px 14px; border-radius:14px; cursor:pointer; user-select:none;
+  font-size:13px; font-weight:600; letter-spacing:.3px; color:#fff;
+  background:rgba(24,26,34,.78);
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 6px 22px rgba(0,0,0,.35);
+  transition:transform .18s ease, background .18s ease, bottom .3s ease;
+}
+#fntv-uimode-tab:hover{ transform:translateY(-2px); background:rgba(38,42,56,.88); }
+#fntv-uimode-tab:active{ transform:scale(.97); }
+/* \u624B\u673A\u7248\uFF1A\u54C1\u724C\u84DD\u70B9\u7F00\uFF0C\u4E00\u773C\u770B\u51FA\u5F53\u524D\u5904\u4E8E\u54EA\u79CD\u5E03\u5C40 */
+#fntv-uimode-tab.on{
+  border-color:rgba(51,116,219,.55);
+  background:rgba(28,42,68,.85);
+}
+`;
     (document.head || document.documentElement).appendChild(st);
   }
-  function ensure2() {
-    ensureStyle();
-    applyViewportFlags();
+  function render2() {
+    const btn = document.getElementById(BTN_ID2);
+    if (!btn) return;
+    const m = getUiMode();
+    btn.textContent = m === "mobile" ? "\u{1F4F1} \u624B\u673A\u7248" : "\u{1F5A5} \u7535\u8111\u7248";
+    btn.title = m === "mobile" ? "\u5F53\u524D\uFF1A\u624B\u673A/\u5E73\u677F\u5E03\u5C40\uFF08\u5E95\u680F\u4E24\u884C\u3001\u8F6E\u64AD\u6837\u5F0F 5\u3001\u5B57\u53F7\u81EA\u9002\u5E94\uFF09\u3002\u70B9\u51FB\u5207\u56DE\u7535\u8111\u5E03\u5C40" : "\u5F53\u524D\uFF1A\u7535\u8111\u5E03\u5C40\u3002\u70B9\u51FB\u5207\u5230\u624B\u673A/\u5E73\u677F\u5E03\u5C40";
+    btn.classList.toggle("on", m === "mobile");
   }
-  function installMobileStyle() {
-    if (typeof window.matchMedia === "function") {
+  function reposition() {
+    const btn = document.getElementById(BTN_ID2);
+    if (!btn) return;
+    const hot = document.getElementById("fntv-hot-tab");
+    const hotVisible = !!hot && hot.offsetParent !== null && hot.getBoundingClientRect().height > 0;
+    btn.style.bottom = hotVisible ? Math.round(24 + hot.getBoundingClientRect().height + 10) + "px" : "24px";
+  }
+  function mount() {
+    if (!document.body) return;
+    if (document.getElementById(BTN_ID2)) {
+      render2();
+      reposition();
+      return;
+    }
+    injectStyle3();
+    const btn = document.createElement("div");
+    btn.id = BTN_ID2;
+    btn.setAttribute("data-fnos-ui", "1");
+    btn.addEventListener("click", () => {
+      const next = getUiMode() === "mobile" ? "desktop" : "mobile";
+      setUiMode(next);
+      render2();
+      log8.info("[uiModeToggle] UI \u6A21\u5F0F\u5207\u6362\u4E3A " + next);
+    });
+    document.body.appendChild(btn);
+    render2();
+    reposition();
+    const hot = document.getElementById("fntv-hot-tab");
+    if (hot) {
       try {
-        if (!_mqNarrow) {
-          _mqNarrow = window.matchMedia(MQ_NARROW);
-          const h = () => applyViewportFlags();
-          if (_mqNarrow.addEventListener) _mqNarrow.addEventListener("change", h);
-          else _mqNarrow.addListener(h);
-        }
-        if (!_mqCompact) {
-          _mqCompact = window.matchMedia(MQ_COMPACT);
-          const h = () => applyViewportFlags();
-          if (_mqCompact.addEventListener) _mqCompact.addEventListener("change", h);
-          else _mqCompact.addListener(h);
-        }
+        new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ["style", "class"] });
       } catch {
       }
     }
-    ensure2();
   }
-  var SERIES_PANEL2 = 'div[class="relative box-border flex w-full flex-col px-[44px]"]';
-  var MOVIE_PANEL2 = 'div[class="relative flex w-full flex-col box-border px-[46px]"]';
-  var SERIES_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
-  var MOVIE_BTNROW2 = 'div[class="relative w-full"] > div[class^="mt-4 "]';
-  var MOBILE_CSS = `
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 A. fnos-compact\uFF08\u2264820px\uFF09\u7ED3\u6784\u6027\u515C\u5E95 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-
-/* A1. \u89E3\u9664\u7AD9\u70B9 #root 820px \u6700\u5C0F\u5BBD\uFF08\u771F\u51F6\u6765\u6E90\u679A\u4E3E\u4E0D\u5230\uFF0C\u6837\u5F0F\u8868 + \u884C\u5185\u53CC\u4FDD\u9669\uFF09 */
-html.fnos-compact #root{ min-width:0 !important; width:auto !important; }
-html.fnos-compact body{ overflow-x:hidden !important; }
-
-/* A2. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5185\u8054 width min(680px,100vw-80px) \u5728\u7A84\u5C4F\u4E0B\u53EA\u5269 310px \u4E14\u9AD8\u5EA6\u5403\u6EE1\uFF0C
-   \u6539\u4E3A\u8FD1\u6EE1\u5C4F\uFF08!important \u538B\u884C\u5185\u6837\u5F0F\uFF09\uFF1Bdvh \u5728\u652F\u6301\u7684\u6D4F\u89C8\u5668\u4E0A\u63A5\u7BA1\u5730\u5740\u680F\u6536\u7F29 */
-html.fnos-compact #fnos-settings-panel{
-  width:calc(100vw - 16px) !important;
-  height:calc(100vh - 56px) !important;
-  height:calc(100dvh - 56px) !important;
-  max-height:calc(100vh - 56px) !important;
-  max-height:calc(100dvh - 56px) !important;
-}
-
-/* A3. \u6BCF\u65E5\u653E\u9001\u6D6E\u5C42\u5BBD\u5EA6\u94B3\u5236\uFF08340px \u5B9A\u5BBD\u5728 \u2264360px \u624B\u673A\u4E0A\u6EA2\u51FA\uFF09 */
-html.fnos-compact #fntv-hot-panel{ width:min(340px,calc(100vw - 20px)) !important; }
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 B. fnos-narrow\uFF08\u2264640px\uFF09\u624B\u673A\u6574\u7248 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 */
-
-/* B1. \u9996\u9875\u60AC\u6D6E logo \u7F29\u5C0F\uFF1A390px \u4E0B\u4E0E\u539F\u751F\u9876\u680F\u641C\u7D22/\u5934\u50CF\u56FE\u6807\u8FC7\u8FD1 */
-html.fnos-narrow #tb-logo{ height:20px !important; }
-
-/* B2. \u5B63\u9875/\u7AD6\u7248\u7535\u5F71\u9875 hero\uFF1A\u6A2A\u5411\u300C\u6D77\u62A5+\u4FE1\u606F\u300D\u884C\u6539\u7EB5\u5411\u5806\u53E0\u3002
-   \u6839\u56E0\uFF1A\u4FE1\u606F\u5217\u539F\u751F w-[calc(100%-246px)]\uFF0C390px \u4E0B\u53EA\u5269 52px \u2014\u2014 \u6807\u9898\u4E00\u5B57\u4E00\u884C\u3001
-   \u64AD\u653E\u6309\u94AE(150px)\u6EA2\u51FA\u5C4F\u5E55\u53F3\u7F18\u3002\u7AD6\u7248\u7535\u5F71\u4E00\u7EA7\u9875\u8D70 O \u6BB5\u6EE1\u5C4F\u805A\u7C07\uFF0C\u6392\u9664\u3002 */
-html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"]{
-  height:auto !important; min-height:0 !important;
-  padding-left:16px !important; padding-right:16px !important;
-}
-html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] > [class*="pt-[116px]"]{
-  flex-direction:column !important; align-items:flex-start !important;
-  gap:14px !important; padding-top:72px !important; padding-bottom:20px !important;
-}
-html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="h-[320px]"][class*="w-[214px]"]{
-  width:126px !important; height:189px !important;
-}
-html.fnos-narrow body:not(.fnos-movie-panel) .semi-always-dark[class*="h-[470px]"] [class*="w-[calc(100%-246px)]"]{
-  width:100% !important;
-}
-
-/* B3. \u7CFB\u5217/\u7535\u5F71\u4E00\u7EA7\u9875\u73BB\u7483\u805A\u7C07\uFF1A\u7A84\u5C4F\u4E0B\u7B80\u4ECB\u4E0D\u518D\u8BA9\u4F4D 57% \u53F3\u680F\uFF0CTMDB \u5361\u4ECE\u7EDD\u5BF9\u5B9A\u4F4D\u53F3\u5217
-   \u56DE\u6D41\u4E3A\u5757\u7EA7\uFF08DOM \u672B\u4F4D\uFF0C\u81EA\u7136\u6392\u5728\u7B80\u4ECB/\u5B63\u9009\u4E4B\u540E\uFF09\uFF0C\u805A\u7C07\u6574\u4F53\u53D8\u9AD8\u3001\u5185\u90E8\u53EF\u6EDA\u3002 */
-html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2},
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2}{
-  left:12px !important; right:12px !important; width:auto !important;
-  bottom:12px !important;
-  padding:14px 14px 12px !important;
-  max-height:min(58vh,520px) !important;
-  overflow-y:auto !important; overflow-x:hidden !important;
-  -webkit-overflow-scrolling:touch;
-}
-html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="text-justify"],
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > div[class*="text-justify"]{
-  width:100% !important;
-}
-html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"],
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > div[class*="flex-wrap"]{
-  width:100% !important;
-}
-html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > div[class*="flex-wrap"] > [data-id="details"]{
-  width:calc(33.33% - 10px) !important;
-}
-html.fnos-narrow body.fnos-series-panel ${SERIES_PANEL2} > .fnos-beautify-card,
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_PANEL2} > .fnos-beautify-card{
-  position:static !important;
-  top:auto !important; bottom:auto !important; left:auto !important; right:auto !important;
-  width:auto !important; margin:12px 0 0 !important; padding:0 !important;
-  max-height:none !important; overflow:visible !important;
-}
-
-/* B4. \u60AC\u6D6E\u6309\u94AE\u884C\uFF1A\u7A84\u5C4F\u6362\u884C\uFF08\u64AD\u653E\u952E + \u6536\u85CF/\u5DF2\u770B/\u66F4\u591A\u5706\u94AE\u4E00\u6392\u653E\u4E0D\u4E0B\uFF09 */
-html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW2},
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW2}{
-  left:12px !important; right:12px !important; width:auto !important;
-  bottom:calc(var(--fnos-cluster-h, 360px) + 20px) !important;
-  flex-wrap:wrap !important; row-gap:10px !important;
-}
-html.fnos-narrow body.fnos-series-panel ${SERIES_BTNROW2} div[class*="size-[54px]"],
-html.fnos-narrow body.fnos-movie-panel ${MOVIE_BTNROW2} div[class*="size-[54px]"]{
-  width:44px !important; height:44px !important;
-}
-
-/* B5. \u8F6E\u64AD\uFF1A\u6807\u9898 3.3rem/\u7B80\u4ECB 600px \u5747\u4E3A\u684C\u9762\u5C3A\u5EA6\uFF0C390px \u4E0B\u6EA2\u51FA\u88C1\u5207\u3002
-   \u4E09\u5957\u76AE\u80A4\u5171\u7528 .fnos-slide-* \u7C7B\u540D\uFF0C\u4E00\u4EFD\u89C4\u5219\u5168\u8986\u76D6\uFF1B\u7B80\u4ECB\u94B3 3 \u884C\u3002 */
-html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-content{
-  padding:14px 16px 34px !important;
-}
-html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-meta{
-  font-size:.66rem !important; margin-bottom:.3rem !important;
-}
-html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title{
-  font-size:1.6rem !important; line-height:1.2 !important;
-}
-html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-title-logo-img{
-  max-height:64px !important; max-width:74% !important;
-}
-html.fnos-narrow [data-fntv-carousel-style] .fnos-slide-desc{
-  font-size:.8rem !important; line-height:1.55 !important; max-width:100% !important;
-  margin-bottom:.7rem !important;
-  display:-webkit-box !important; -webkit-line-clamp:3 !important;
-  -webkit-box-orient:vertical !important; overflow:hidden !important;
-}
-
-/* B5b. \u8F6E\u64AD\u6837\u5F0F 4\uFF08s4 3D \u5361\u7247\uFF09\uFF1A\u5BB9\u5668\u5185\u8054 aspect-ratio 16/9 \u2192 390px \u4E0B\u4EC5 210px \u9AD8\uFF0C
-   \u800C\u4FE1\u606F\u5C42(logo 64 + \u6807\u9898 + \u7B80\u4ECB + \u6309\u94AE\u5217)\u6309\u684C\u9762\u5C3A\u5EA6\u6392 \u2248 260px+ \u2192 \u6587\u5B57\u5411\u4E0A\u6EA2\u51FA\u88AB\u88C1\u3002
-   \u7A84\u5C4F\uFF1A\u5BB9\u5668\u52A0\u9AD8\u5230 240px + \u4FE1\u606F\u5C42\u5168\u9762\u6536\u7D27\uFF08logo 40/\u6807\u9898 1.2rem/\u7B80\u4ECB\u94B3 2 \u884C/\u6309\u94AE\u6A2A\u6392\u7F29\u5C0F\uFF09\uFF0C
-   \u5706\u70B9\u6307\u793A\u5668\u4E0B\u79FB\u907F\u5F00\u6309\u94AE\u884C\u3002 */
-html.fnos-narrow [data-fntv-carousel-style="4"]{
-  aspect-ratio:auto !important; height:240px !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-bg{ padding:12px 14px 44px !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info{
-  padding:10px 14px 38px !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .meta{
-  font-size:.6rem !important; margin-bottom:.2rem !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-title-logo-img{
-  max-height:40px !important; max-width:70% !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info h3{
-  font-size:1.2rem !important; margin-bottom:.2rem !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-info .desc{
-  font-size:.72rem !important; line-height:1.5 !important; max-width:100% !important; margin-bottom:.5rem !important;
-  display:-webkit-box !important; -webkit-line-clamp:2 !important;
-  -webkit-box-orient:vertical !important; overflow:hidden !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-actions{
-  flex-direction:row !important; align-items:center !important; gap:.5rem !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-play,
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-detail{
-  padding:.5rem 1.1rem !important; font-size:.72rem !important;
-}
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{ bottom:12px !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{
-  width:32px !important; height:56px !important; font-size:1.7rem !important;
-}
-
-/* B5c. [lc-1290] \u8F6E\u64AD\u5DE6\u53F3\u9ED1\u6846\uFF08\u7528\u6237\u62A5\u300C\u8F6E\u64AD\u56FE\u5DE6\u53F3\u9ED1\u6846\u300D\uFF09\u3002
-   \u9010\u5C42\u7B97 390px \u89C6\u53E3\u4E0B\u7684\u5BBD\u5EA6\u9884\u7B97\uFF1A
-     \u89C6\u53E3 390 \u2212 wrapper \u5185\u8054 padding 0 44px = 302
-     \u518D \u2212 \u5A92\u4F53\u5E93 section \u81EA\u8EAB px-[44px]/px-[46px] \u2248 256
-     \u5BB9\u5668 aspect-ratio 16/9 \u2192 390 \u5BBD\u4E0B\u4EC5 144~170px \u9AD8\uFF0C\u4E24\u4FA7\u5404\u7A7A 44~67px\u3002
-   \u5373\uFF1A\u8F6E\u64AD\u5E76\u6CA1\u6709\u94FA\u6EE1\uFF0C\u662F\u88AB\u4E24\u5C42\u5404 44px \u7684\u5185\u8FB9\u8DDD\u5939\u6210\u4E86\u7A84\u6761\uFF0C\u4E24\u4FA7\u9732\u51FA\u7684\u5C31\u662F section \u5E95\u8272
-   \uFF08\u6697\u8272\u4E3B\u9898\u4E0B\u5448\u9ED1\uFF09\u3002\u4E09\u6B65\u6536\u53E3\uFF1A
-     \u2460 wrapper \u5185\u8054 padding \u7531 44px \u6536\u5230 8px\uFF08carousel/styles.ts \u7684 16px \u89C4\u5219\u73B0\u5DF2\u5728
-        \u9996\u9875\u751F\u6548\u2014\u2014\u5B83\u6B64\u524D\u6302\u5728\u4ECE\u672A\u5B89\u88C5\u7684 fnos-touch-narrow \u4E0A\uFF0C\u662F\u6B7B\u4EE3\u7801\uFF1B\u8FD9\u91CC\u7528\u66F4\u5C0F\u7684\u503C
-        \u5E76\u5728\u81EA\u5DF1\u7684\u5C42\u91CD\u65B0\u58F0\u660E\uFF0C\u907F\u514D\u4F9D\u8D56\u90A3\u4E2A\u95E8\u63A7\uFF09\uFF1B
-     \u2461 section \u7684 px-[44px]/px-[46px] \u4E00\u5E76\u6536\u7A84\uFF08wrapper \u7684\u7236\u7EA7\uFF0C\u5BBD\u662F\u53E0\u4E58\u7684\uFF0C\u53EA\u6536\u4E00\u5C42\u4E0D\u591F\uFF09\uFF1B
-     \u2462 \u5BB9\u5668\u7ED9\u4E00\u4E2A\u4E0B\u9650\u9AD8\u5EA6\uFF0C\u514D\u5F97 16:9 \u5728\u7A84\u5C4F\u4E0B\u584C\u6210\u4E00\u6761\u3002
-   \u8FB9\u8DDD\u4E0D\u80FD\u6536\u6210 0\uFF1A\u8F6E\u64AD\u53F3\u4FA7\u6709 prev/next \u5BFC\u822A\u94AE\uFF08left/right:3%\uFF09\u4E0E\u5706\u70B9\uFF0C\u5B8C\u5168\u8D34\u8FB9\u4F1A\u88AB\u5207\u3002 */
-html.fnos-narrow [data-fntv-carousel-wrapper]{ padding-left:8px !important; padding-right:8px !important; }
-/* \u5A92\u4F53\u5E93 section \u662F wrapper \u7684**\u7236\u7EA7**\uFF08render.ts \u91CC\u662F target.appendChild(wrapper)\uFF09\uFF0C
-   \u53EA\u80FD\u5411\u4E0A\u9009\uFF1A\u7528 :has(> [data-fntv-carousel-wrapper]) \u7ED1\u5B9A\u7236\u7EA7\uFF0C\u4E0D\u80FD\u5199\u6210\u5B50\u4EE3\u9009\u62E9\u5668\u3002
-   :has() \u81EA Chrome 105 / Safari 15.4 / FF 121 \u8D77\u53EF\u7528\uFF0C\u4E0D\u652F\u6301\u65F6\u53EA\u662F\u8FD9\u6761\u4E0D\u751F\u6548\uFF0C
-   \u4E0B\u9762\u7684 wrapper \u6536\u8FB9\u8DDD\u4ECD\u4F1A\u628A\u9ED1\u6846\u4ECE 67px/\u4FA7 \u964D\u5230 44px/\u4FA7\u3002 */
-html.fnos-narrow div[class*="flex-col"]:has(> [data-fntv-carousel-wrapper]){ padding-left:8px !important; padding-right:8px !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"]{ height:min(46vw, 260px) !important; aspect-ratio:auto !important; max-height:none !important; }
-
-/* B5d. [lc-1290] \u6837\u5F0F 4 \u7684 3D \u90BB\u5361\u5728\u7A84\u5C4F\u9732\u592A\u591A\uFF08\xB172% \u4F4D\u79FB\u628A\u90BB\u5361\u5927\u534A\u63A8\u51FA/\u62C9\u8FDB\u753B\u9762\uFF0C
-   390px \u4E0B\u89C6\u89C9\u4E0A\u5C31\u662F\u4E24\u4FA7\u5404\u7CCA\u4E00\u5757\uFF09\u3002\u6536\u5230 \xB158% \u4E14\u7F29\u5C0F\uFF0C\u53EA\u9732\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\u3002
-   \u540C B5c\uFF1Acarousel/styles.ts \u91CC\u5DF2\u6709\u540C\u6837\u6570\u503C\uFF0C\u4F46\u90A3\u6BB5\u5728\u9996\u9875\u662F\u6B7B\u4EE3\u7801\uFF0C\u8FD9\u91CC\u72EC\u7ACB\u751F\u6548\u3002 */
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card{ left:2% !important; top:2% !important; width:96% !important; height:96% !important; border-radius:14px !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{ transform:scale(.88) translateX(-46%) rotateY(18deg) !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{ transform:scale(.88) translateX(46%) rotateY(-18deg) !important; }
-/* \u5DE6\u53F3\u5207\u6362\u94AE\uFF08\u5BBD 32px + 3% \u8FB9\u8DDD \u2248 44px \u89E6\u63A7\u533A\uFF09\uFF1A\u538B\u5230\u5361\u7247\u4E0B\u5C42\uFF0C\u70B9\u7A7A\u767D\u4E0D\u518D\u88AB\u62A2 */
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{ width:28px !important; opacity:.4 !important; }
-html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !important; }
-
-/* B5e. \u53F3\u4FA7\u7AD6\u5411\u6D77\u62A5\u6761\uFF08\u4EC5\u6837\u5F0F 1 \u6709\uFF0Crender.ts:404 \u884C\u5185 width:150px\uFF09\uFF1A
-   \u624B\u673A\u4E0A\u4E0E\u5BB9\u5668 80/20 \u5206\u680F\u4E89\u5BBD\uFF0C\u5BB9\u5668\u53EA\u5269 302*0.8=242px \u8FD8\u8981\u88AB\u5B83\u6324\u3002\u7A84\u5C4F\u76F4\u63A5\u9690\u85CF\u6D77\u62A5\u6761\uFF0C
-   \u6539\u4E3A\u4E0A\u4E0B\u6ED1\u624B\u52BF\u6362\u7247\uFF08render.ts \u5DF2\u6709 touchstart/touchend \u624B\u52BF\uFF0C\u89C1 lc-1288\uFF09\u3002 */
-html.fnos-narrow .fnos-poster-strip{ display:none !important; }
-
-/* B9. [lc-1290\u2192lc-1310 \u5BF9\u9F50\u539F\u751F App \u5C3A\u5EA6] \u9996\u9875\u5361\u7247\u884C\uFF08\u7EE7\u7EED\u89C2\u770B / \u5267\u96C6\u5217\u8868\uFF09\u3002
-   lc-1306 \u4FEE\u597D\u4E86\u6A2A\u7248\u88C1\u526A\uFF1Blc-1310 \u6309\u98DE\u725B\u539F\u751F\u624B\u673A App\uFF08FN_Media 1.12.0 apk \u622A\u56FE\u9010\u50CF\u7D20
-   \u5B9E\u6D4B\uFF0C480dp \u5C4F\u5BBD\u57FA\u51C6\uFF09\u7EDF\u4E00\u4E24\u884C\u7684\u5BC6\u5EA6\uFF1A
-   \u2500\u2500 \u539F\u751F\u5B9E\u6D4B\u89C4\u683C \u2500\u2500
-   \u5C4F\u8FB9\u8DDD 20dp\uFF1B\u7AD6\u7248\u6D77\u62A5\u5361\u5BBD 140dp\uFF0829.2% \u5C4F\u5BBD\uFF09\u3001\u95F4\u8DDD 10dp\uFF082.1%\uFF09\uFF0C\u4E00\u5C4F\u6574 3 \u5F20
-   \uFF083\xD7140+2\xD710+2\xD720=480 \u95ED\u5408\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u6A2A\u7248\u5361\u4E0E\u6D77\u62A5\u884C**\u540C\u5BBD 140dp**\u3001\u56FE\u533A\u6BD4\u4F8B
-   1.89:1\uFF08140:74\uFF09\uFF0C\u4E00\u5C4F\u9732\u51FA 1.9 \u5F20\uFF08\u7B2C\u4E8C\u5F20\u9732 60% \u6697\u793A\u53EF\u6ED1\uFF09\u3002
-   \u2500\u2500 \u5BF9\u7167\u73B0\u72B6\u7684\u6539\u52A8 \u2500\u2500
-   \u7AD6\u7248\u5361 27vw\u219229vw\uFF08105px\u2192113px\uFF0C\u591A\u663E 2 \u5B57\uFF09\uFF1B\u95F4\u8DDD 8px\u21922.1vw\uFF08390px \u4E0B 8.2px \u7B49\u503C\uFF0C
-   \u5E73\u677F\u6309\u6BD4\u4F8B\u653E\u5927\uFF09\uFF1B\u7EE7\u7EED\u89C2\u770B\u5361 46vw\u219244vw\uFF08180px\u2192172px\uFF0C\u53F3\u4FA7\u9732\u51FA\u90BB\u5361\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1\uFF09\u3002 */
-html.fnos-narrow .ms-container [class*="card-root"],
-html.fnos-narrow .ms-container [class*="poster-box"]{
-  min-width:0 !important;
-  width:clamp(96px, 29vw, 132px) !important;
-  flex:0 0 clamp(96px, 29vw, 132px) !important;
-}
-/* B9.1 \u7EE7\u7EED\u89C2\u770B\u5361\u6A2A\u7248\u5316\uFF1A16:9 \u5927\u5361\uFF08Netflix \u79FB\u52A8\u7AEF Continue Watching \u540C\u6B3E\u5F62\u6001\uFF09\u3002
-   lc-1310: 46vw\u219244vw \u2014\u2014 \u539F\u751F\u5B9E\u6D4B\u7EE7\u7EED\u89C2\u770B\u4E0E\u6D77\u62A5\u884C\u540C\u5BBD 29.2%\u3001\u95F4\u8DDD 10dp\uFF0C\u4E00\u5C4F\u9732\u51FA
-   1.9 \u5F20\uFF1B44vw \u5728 390px \u662F 171.6px\uFF0C\u53F3\u4FA7\u9732\u51FA\u7EA6 40% \u90BB\u5361\uFF0C\u6EDA\u52A8\u6697\u793A\u4E0E\u539F\u751F\u4E00\u81F4\u3002 */
-html.fnos-narrow .ms-container .continue-card-root{
-  width:min(44vw, 172px) !important;
-  flex:0 0 min(44vw, 172px) !important;
-}
-/* \u6D77\u62A5\u533A\uFF08> div:first-child \u662F\u684C\u9762\u5B9A\u9AD8 172px \u7684\u90A3\u5C42\uFF09\u4E0E\u5361\u5185\u6B7B\u5BBD\u5C42\u4E00\u5E76\u6536\u53E3\uFF1A
-   \u5B9E\u6D4B\u94FE\u8DEF continue-card-root > rounded-lg(\u5B9A\u9AD8172) > continue-poster-box > div > div(width:104px)\uFF0C
-   \u6BCF\u5C42\u90FD\u8981 width:100%\uFF0C\u6F0F\u4E00\u5C42\u56FE\u5C31\u53EA\u94FA 104px\u3002 */
-html.fnos-narrow .ms-container .continue-card-root > div:first-child{
-  height:auto !important; aspect-ratio:16/9 !important;
-}
-html.fnos-narrow .ms-container .continue-card-root .continue-poster-box,
-html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div,
-html.fnos-narrow .ms-container .continue-card-root .continue-poster-box > div > div{
-  width:100% !important; height:100% !important;
-}
-/* B9.2 \u5361\u5BBD\u81EA\u9002\u5E94\u540E\u7684\u6392\u7248\u6536\u7D27\uFF08\u771F\u673A\u5B9E\u6D4B\uFF1A15px \u6807\u9898\u5728 105px \u4E0B\u53EA\u663E 6 \u5B57\uFF09 */
-html.fnos-narrow .ms-container [class*="card-root"] [class*="text-[15px]"]{
-  font-size:13px !important; line-height:1.35 !important;
-}
-html.fnos-narrow .ms-container [class*="card-root"] [class*="text-xs"]{
-  font-size:11px !important;
-}
-/* \u5361\u7247\u95F4\u8DDD\u5BF9\u9F50\u539F\u751F 10dp\uFF082.1vw\uFF1B390px \u4E0B \u22488.2px \u4E0E\u4E0A\u4E00\u7248\u7B49\u503C\uFF0C\u5E73\u677F\u6309\u89C6\u53E3\u653E\u5927\uFF09 */
-html.fnos-narrow .ms-container [class*="card-root"]{ margin-right:2.1vw !important; }
-html.fnos-narrow .ms-container .continue-card-root{ margin-right:2.1vw !important; }
-/* \u5361\u7247\u5185\u7684\u8FDB\u5EA6\u6761/\u64CD\u4F5C\u5C42\u968F\u5361\u5BBD\u81EA\u9002\u5E94\uFF08\u7AD9\u70B9\u6309\u56FA\u5B9A\u5BBD\u7B97\u7684\u5185\u8054\u503C\u4F1A\u6EA2\u51FA\uFF09 */
-html.fnos-narrow .ms-container [class*="card-root"] img,
-html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }
-/* \u884C\u95F4\u8DDD\u6536\u7A84\uFF1A\u7AD9\u70B9 gap 20px\uFF08gap-x-5\uFF09\u5728 132px \u5361\u5BBD\u4E0B\u5360\u6BD4\u8FC7\u9AD8 */
-html.fnos-narrow .ms-container > *{ gap:10px !important; }
-
-/* B6. \u89C2\u5F71\u8BB0\u5F55\u9762\u677F\uFF08\u5168\u5C4F\u6D6E\u5C42\uFF09\uFF1A\u684C\u9762\u4FA7 padding 40px/\u53CC\u5217\u56FE\u8868\u5728\u624B\u673A\u4E0A\u6324\u7206 */
-html.fnos-narrow #fntv-wh .wh-topbar{ padding:16px 16px 10px !important; gap:14px !important; }
-html.fnos-narrow #fntv-wh .wh-title{ font-size:26px !important; }
-html.fnos-narrow #fntv-wh .wh-section{ padding:0 16px !important; }
-html.fnos-narrow #fntv-wh .wh-chart-split{ grid-template-columns:1fr !important; }
-html.fnos-narrow #fntv-wh .wh-stat-row{ grid-template-columns:repeat(2,1fr) !important; }
-html.fnos-narrow #fntv-wh-topbtns{
-  top:10px !important; right:10px !important; max-width:calc(100vw - 20px) !important;
-  height:auto !important; min-height:44px !important; flex-wrap:wrap !important;
-}
-
-/* B7. \u8BBE\u7F6E\u9762\u677F\uFF1A\u5DE6\u5206\u7C7B\u5BFC\u822A\u6539\u9876\u90E8\u6A2A\u6ED1\u884C\uFF08\u7AD6\u6392 130px \u5BFC\u822A + 180px \u5185\u5BB9\u5728\u624B\u673A\u4E0A\u6CA1\u6CD5\u770B\uFF09\u3002
-   overlay \u5B50\u8282\u70B9 = [0]\u5934\u90E8 [1]\u641C\u7D22\u6846(lc-1065) [2]bodyRow(\u5BFC\u822A+\u5185\u5BB9) [3]\u5E95\u90E8\u5F39\u7C27 */
-html.fnos-narrow #fnos-settings-panel > div:nth-child(3){ flex-direction:column !important; }
-html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child{
-  flex:0 0 auto !important; max-width:none !important; min-width:0 !important;
-  flex-direction:row !important; align-items:center !important;
-  overflow-x:auto !important; overflow-y:hidden !important;
-  padding:6px 8px !important; gap:6px !important;
-  scrollbar-width:none !important;
-}
-html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child::-webkit-scrollbar{ display:none !important; }
-html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child > button{
-  flex:0 0 auto !important; width:auto !important; text-align:center !important;
-}
-
-/* B8. \u6C89\u6D78\u5C42\u9876\u90E8\u7559\u767D\u968F\u9876\u680F\u6536\u7D27\uFF08\u6F14\u804C\u4EBA\u5458\u4F5C\u54C1\u9762\u677F .fpw-card 162px \u5B9A\u5BBD\u53EF\u81EA\u9002\u5E94\u6362\u884C\uFF0C\u65E0\u9700\u5904\u7406\uFF09 */
-html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 C. fnos-touch\uFF08\u771F\u89E6\u6478\u8BBE\u5907\uFF0C\u4E0D\u5206\u5BBD\u7A84\uFF09\u89E6\u6478\u8BED\u4E49\u5C42 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   \u8FD9\u4E00\u6BB5\u53EA\u88C5\u300C\u9F20\u6807\u65F6\u4EE3\u4E0D\u5B58\u5728\u3001\u89E6\u6478\u5FC5\u987B\u8865\u300D\u7684\u4E1C\u897F\uFF1A\u5B89\u5168\u533A\u3001\u89E6\u63A7\u76EE\u6807\u3001\u6309\u538B\u53CD\u9988\u3002
-   \u684C\u9762\u7A84\u7A97\u53E3\u4E0D\u88C5 \u2014\u2014 \u684C\u9762\u7528\u9F20\u6807\uFF0Chover/\u7CBE\u786E\u70B9\u51FB\u672C\u5C31\u6B63\u5E38\uFF0C\u5957\u4E0A\u53BB\u53CD\u800C\u788D\u4E8B\u3002 */
-
-/* C1. \u5B89\u5168\u533A\u5185\u8FB9\u8DDD\u3002viewport-fit=cover \u7531 Go \u6CE8\u5165\u5C42\u8865\u9F50\uFF08inject.go patchViewport\uFF09\uFF0C
-   \u6CA1\u6709\u5B83 env() \u6052\u4E3A 0\uFF0C\u672C\u6BB5\u6574\u4F53\u5931\u6548 \u2014\u2014 \u4E24\u5904\u5FC5\u987B\u6210\u5BF9\u5B58\u5728\u3002
-   \u5199\u6CD5\u53D6 Jellyfin \u7684 conditional-max \u6E10\u8FDB\u589E\u5F3A\uFF1A\u5148\u7ED9\u9ED8\u8BA4\u503C\uFF0C\u518D\u7528 @supports(max())
-   \u63A2\u6D4B\u8986\u76D6\u4E3A max(\u5B89\u5168\u533A, \u9ED8\u8BA4\u503C)\u3002max() \u81EA Chrome 79 / Safari 11.1 / FF 75 \u8D77\u53EF\u7528\uFF0C
-   \u8001\u6D4F\u89C8\u5668\u62FF\u5230\u9ED8\u8BA4\u503C\u4E0D\u4F1A\u56E0\u6574\u6761\u58F0\u660E\u5931\u6548\u800C\u4E22\u6389\u5185\u8FB9\u8DDD\u3002 */
-html.fnos-touch #fnos-settings-panel{
-  padding-bottom:env(safe-area-inset-bottom,0px);
-}
-@supports (padding:max(0px,env(safe-area-inset-bottom))){
-  html.fnos-touch #fnos-settings-panel{
-    padding-bottom:max(env(safe-area-inset-bottom),16px);
+  function boot() {
+    if (_bound) return;
+    _bound = true;
+    if (document.body) mount();
+    else document.addEventListener("DOMContentLoaded", mount, { once: true });
+    try {
+      new MutationObserver(() => {
+        if (!document.getElementById(BTN_ID2)) mount();
+      }).observe(document.body || document.documentElement, { childList: true });
+    } catch {
+    }
+    window.addEventListener("resize", reposition, { passive: true });
+    window.addEventListener(UI_MODE_EVENT, render2);
   }
-}
-
-/* C2. \u9876\u680F\u60AC\u6D6E\u6309\u94AE/\u641C\u7D22\u7B49\u8D34\u9876\u5143\u7D20\u4E0B\u538B\uFF0C\u907F\u5F00\u5218\u6D77\u5C4F\u4E0E\u72B6\u6001\u680F\u3002
-   \u62BD\u5C49\u906E\u7F69\u4E0E\u5168\u5C4F\u6D6E\u5C42\u540C\u7406\uFF08\u539F\u672C\u4ECE 0 \u5F00\u59CB\uFF0C\u6B63\u597D\u538B\u5728\u5218\u6D77\u4E0A\uFF09\u3002 */
-html.fnos-touch #fntv-wh-topbtns{
-  top:calc(10px + env(safe-area-inset-top,0px)) !important;
-}
-html.fnos-touch .fnos-instant-layer__lines{
-  padding-top:calc(84px + env(safe-area-inset-top,0px)) !important;
-}
-
-/* C3. \u5173\u95ED iOS \u957F\u6309\u5F39\u51FA\u7684\u300C\u62F7\u8D1D/\u67E5\u627E/\u5206\u4EAB\u300D\u7CFB\u7EDF\u83DC\u5355 \u2014\u2014 \u64AD\u653E\u5668\u63A7\u4EF6\u3001\u8FDB\u5EA6\u6761\u3001
-   \u5F39\u5E55\u5217\u8868\u4E0A\u957F\u6309\u4F1A\u76F4\u63A5\u7834\u574F\u4EA4\u4E92\uFF08Jellyfin videoOsd \u540C\u6B3E\u505A\u6CD5\uFF09\u3002 */
-html.fnos-touch .fnos-instant-layer,
-html.fnos-touch .fnos-instant-layer *{
-  -webkit-touch-callout:none;
-}
-
-/* C4. \u89E6\u63A7\u76EE\u6807\u4E0B\u9650 44px\uFF08WCAG 2.1 AAA / \u6EE1\u8DB3 2.2 AA \u7684 24px \u786C\u4E0B\u9650\uFF09\u3002
-   \u53EA\u57AB\u9AD8\u300C\u672C\u6765\u5C31\u5C0F\u3001\u4E14\u89E6\u63A7\u65F6\u5FC5\u987B\u70B9\u4E2D\u300D\u7684\u56FE\u6807/\u80F6\u56CA\u6309\u94AE\uFF0C\u4E0D\u52A8\u5361\u7247/\u5BFC\u822A\u9879\u7B49\u5927\u5757\u533A\u57DF\u3002
-   \u89C2\u5F71\u8BB0\u5F55\u60AC\u6D6E\u6761\u91CC\u7684\u6309\u94AE\u662F .wh-pill\uFF08\u80F6\u56CA\uFF09\uFF0C\u9760 padding \u6491\u5230 ~34px \u9AD8\uFF0C\u89E6\u6478\u4E0B\u504F\u5C0F\u3002 */
-html.fnos-touch #fntv-wh-topbtns .wh-pill{ min-height:44px !important; }
-html.fnos-touch .fntv-hot-block{ min-width:44px !important; min-height:44px !important; }
-html.fnos-touch .fntv-dm-list li{ min-height:40px !important; }
-
-/* C5. \u6309\u538B\u53CD\u9988\uFF1A\u89E6\u6478\u7AEF\u6CA1\u6709 hover\uFF0C\u4F46\u6709 :active\u3002\u7ED9\u7EAF\u56FE\u6807\u6309\u94AE\u8865\u4E00\u4E2A\u6309\u538B\u6001\uFF0C
-   \u907F\u514D\u300C\u6309\u4E0B\u53BB\u6CA1\u6709\u4EFB\u4F55\u53CD\u9988\u300D\u7684\u624B\u611F\u65AD\u88C2\uFF08Prime Video \u7684 scale(.9) \u540C\u601D\u8DEF\uFF09\u3002 */
-html.fnos-touch #fntv-wh-topbtns .wh-pill:active,
-html.fnos-touch .fntv-hot-block:active{
-  opacity:.7 !important;
-  transform:scale(.92);
-}
-/* C6. \u53BB\u6389 Android \u70B9\u51FB\u84DD\u5757\uFF08Jellyfin card.scss \u540C\u6B3E\uFF09\uFF0C\u6539\u7531 :active \u7EDF\u4E00\u8868\u8FBE\u3002 */
-html.fnos-touch button,
-html.fnos-touch [role="button"]{
-  -webkit-tap-highlight-color:transparent;
-}
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 D. hover \u4F9D\u8D56\u964D\u7EA7\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   \u89E6\u6478\u8BBE\u5907\u4E0A :hover \u53EF\u80FD\u6C38\u4E0D\u5339\u914D\u3001\u4E5F\u53EF\u80FD tap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\uFF08MDN :hover \u660E\u786E\u5217\u51FA
-   \u8FD9\u4E09\u79CD\u884C\u4E3A\uFF09\u3002\u5BF9\u300Chover \u624D\u51FA\u73B0\u300D\u7684\u4EA4\u4E92\u8865\u4E00\u4E2A\u5E38\u9A7B\u53EF\u89C1\u7684\u7B49\u4EF7\u7269\uFF0C\u800C\u4E0D\u662F\u7B80\u5355\u7981\u7528\u3002
-   \u6D89\u53CA\u7684\u5177\u4F53\u7EC4\u4EF6\u89C1 \xA7D1~\xA7D3 \u6CE8\u91CA\u3002 */
-
-/* D1. \u6BCF\u65E5\u653E\u9001\u300C\u4E0D\u611F\u5174\u8DA3\u300D\u6309\u94AE\uFF1A\u684C\u9762\u9ED8\u8BA4 opacity:0 \u9760 :hover \u6D6E\u73B0\uFF0C\u624B\u673A\u4E0A\u6C38\u4E45\u9690\u85CF\u3002
-   \u89E6\u6478\u7AEF\u76F4\u63A5\u5E38\u9A7B\u53EF\u89C1\uFF08\u6539\u4E3A\u534A\u900F\u660E\u5E38\u6001 + \u6309\u538B\u6001\u5168\u4EAE\uFF0C\u4E0D\u7528\u7EAF opacity \u786C\u5E38\u4EAE\u4EE5\u514D\u62A2\u620F\uFF09\u3002 */
-html.fnos-touch .fntv-hot-card .fntv-hot-block{
-  opacity:.55 !important;
-  transform:none !important;
-}
-html.fnos-touch .fntv-hot-card .fntv-hot-block:active{
-  opacity:1 !important;
-}
-
-/* D2. \u8F6E\u64AD\u6837\u5F0F 4 \u624B\u673A\u7248\uFF1A**\u6536\u56DE** carousel/styles.ts \u91CC\u300C\u6587\u5B57\u5C42\u6574\u5C42 display:none\u300D\u90A3\u5957\u3002
-   \u90A3\u6BB5\u6302\u5728 fnos-touch-narrow \u4E0B\uFF0C\u4E0E\u672C\u6587\u4EF6\u7684 fnos-narrow \u540C\u4E3A \u2264640\u3001\u4F46\u591A\u4E00\u5C42\u89E6\u6478\u5224\u5B9A\uFF0C
-   \u7279\u5F02\u6027\u66F4\u9AD8 \u2192 B5b \u7CBE\u5FC3\u5199\u7684\u6536\u7D27\u7248\u5F0F\uFF08logo/\u6807\u9898/\u7B80\u4ECB/\u6309\u94AE\uFF09\u6574\u6BB5\u5931\u6548\uFF0C\u624B\u673A\u4E0A\u53EA\u5269\u4E00\u5F20
-   \u5149\u79C3\u79C3\u7684\u6D77\u62A5\u3002\u6539\u7531 \xA7B5b \u4E00\u5904\u7EDF\u4E00\u63A5\u7BA1\uFF1A\u7ED9 info \u5C42\u663E\u5F0F display \u590D\u4F4D + \u624B\u673A\u6392\u7248\u3002
-   \u4E24\u79CD\u6807\u8BB0\u7C7B\u540C\u65F6\u5B58\u5728\u65F6\u672C\u6BB5\u80DC\u51FA\uFF08\u540E\u6CE8\u5165\u4E14 !important\uFF09\uFF0C\u884C\u4E3A\u56DE\u5230\u300C\u6536\u7D27\u800C\u975E\u9690\u85CF\u300D\u3002 */
-html.fnos-touch [data-fntv-carousel-style="4"] .fntv-s4-info{
-  display:block !important;
-}
-/* D3. \u89E6\u6478\u7AEF\u628A\u7EAF hover \u624D\u4EAE\u8D77\u7684\u5143\u7D20\u8865\u5E38\u9A7B\u5E95\u8272\uFF0C\u907F\u514D\u300Ctap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\u300D\u6216\u6C38\u4E0D\u51FA\u73B0\u3002
-   \u8FD9\u91CC\u53EA\u5904\u7406\u9AD8\u4EF7\u503C\u7684\u4E24\u4E2A\uFF08\u5361\u7247\u62AC\u5347/\u64AD\u653E\u952E\uFF09\uFF0C\u4E0D\u505A\u5168\u7AD9 hover \u7FFB\u7248\u3002 */
-html.fnos-touch .wh-card:hover{
-  transform:none !important;   /* tap \u540E\u7C98\u4F4F\u7684\u62AC\u5347\u4F1A\u8BA9\u6574\u9875\u5361\u7247\u9519\u4F4D\uFF0C\u76F4\u63A5\u53D6\u6D88 */
-}
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 E. \u6EDA\u52A8\u9501\u5B9A\u5DE5\u5177\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   \u5F39\u5C42\u6253\u5F00\u65F6\u7981\u6B62\u80CC\u666F\u8DDF\u7740\u6EDA\u3002\u4F18\u5148\u7528 CSS \u7684 overscroll-behavior\uFF08\u4E0D\u9501 body\uFF0C
-   iOS \u4E0A\u4E0D\u4F1A\u6EDA\u52A8\u7A7F\u900F/\u4F4D\u7F6E\u4E22\u5931\uFF09\uFF1B\u4E0D\u652F\u6301\u65F6\u624D\u9000\u5316\u9501 body\u3002
-   \u6302\u5230 html.fnos-scroll-lock \u4E0A\uFF0C\u7531 JS \u5728\u5F39\u5C42\u5F00/\u5173\u65F6\u589E\u5220\u3002 */
-html.fnos-scroll-lock{
-  overflow:hidden !important;
-  overscroll-behavior:contain;
-  touch-action:none;
-}
-
-/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 F. \u5F39\u5C42\u7A84\u5C4F\u6EA2\u51FA\u6536\u53E3\uFF08fnos-compact\uFF0C\u4E0E\u5BBD\u7A84\u540C\u5224\uFF0C\u4E0D\u5206\u89E6\u6478\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-   \u8FD9\u6279\u7EC4\u4EF6\u90FD\u662F**\u884C\u5185 cssText \u9489\u6B7B\u5C3A\u5BF8**\uFF08dialogUI:113 min-width:420px\u3001
-   modals/feedback.ts:96/221 width:320px\u3001modals/patch.ts:71 width:340px\u3001
-   watchHistory.ts:492 grid 6fr/4fr\uFF09\u3002\u884C\u5185\u6837\u5F0F\u53EA\u80FD\u9760 !important \u538B\uFF0C\u538B\u4E0D\u52A8\u5C31\u53EA\u80FD
-   \u6EA2\u51FA\u5C4F\u5E55\u5916 \u2014\u2014 360px \u5C4F\u4E0A\u5FC5\u7136\u51FA\u4E8B\u3002\u96C6\u4E2D\u5728\u8FD9\u91CC\u6536\u53E3\uFF0C\u907F\u514D\u9010\u4E2A\u63D2\u4EF6\u6539\u884C\u5185\u503C\u3002 */
-
-/* F1. dialogUI \u5361\u7247\uFF1Amin-width \u5728 CSS \u91CC\u4F18\u5148\u4E8E max-width\uFF0C420px \u786C\u9876\u4F1A\u51FB\u7A7F\u7A84\u5C4F\u3002
-   \u7A84\u5C4F\u76F4\u63A5\u64A4\u6389 min-width\uFF0C\u6539\u7531 max-width:calc(100vw - 32px) \u51B3\u5B9A\u3002 */
-html.fnos-compact #fnos-dialog-overlay [data-fnos-dialog-card="1"]{
-  min-width:0 !important;
-  width:calc(100vw - 32px) !important;
-  max-width:calc(100vw - 32px) !important;
-  padding:18px 16px 14px !important;
-}
-/* F2. \u53CD\u9988/QQ\u7FA4\u5F39\u7A97 300~320px \u5B9A\u5BBD + 22~24px padding \u2192 360px \u4E0B\u6EA2\u51FA\uFF0C\u7EDF\u4E00\u5939\u5230\u89C6\u53E3\u5185\u3002 */
-html.fnos-compact #fnos-feedback-modal,
-html.fnos-compact #fnos-feedback-choice-modal,
-html.fnos-compact #fnos-qq-group-modal{
-  width:calc(100vw - 32px) !important;
-  max-width:340px !important;
-  padding:18px 16px !important;
-}
-/* F3. \u8865\u4E01\u5F39\u7A97 340px \u5B9A\u5BBD\uFF08\u65E0 max-width\uFF09\uFF0C\u540C\u4E0A\u6536\u53E3\u3002 */
-html.fnos-compact #fntv-patch-apply-popup{
-  width:calc(100vw - 32px) !important;
-  max-width:340px !important;
-}
-/* F4. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u6D6E\u5C42\uFF1A\u53CC\u680F grid 6fr/4fr \u5728\u7A84\u5C4F\u4F1A\u628A\u5DE6\u680F\u538B\u5230\u88C5\u4E0D\u4E0B\u6D77\u62A5\uFF0C
-   \u5355\u5217\u5316\uFF08\u4E0E B6 \u7684 .wh-chart-split \u5355\u5217\u4FDD\u6301\u4E00\u81F4\uFF09\u3002
-   .wh-detail \u5D4C\u5728 #fntv-wh \u9762\u677F\u5185\uFF0C\u9009\u62E9\u5668\u5FC5\u987B\u5E26\u9762\u677F ID \u524D\u7F00\u624D\u547D\u4E2D\u3002 */
-html.fnos-narrow #fntv-wh .wh-detail{
-  grid-template-columns:1fr !important;
-}
-/* F5. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u91CC\u7684\u6D77\u62A5/\u9884\u89C8\u5728\u5355\u5217\u4E0B\u6309\u89C6\u53E3\u5BBD\u81EA\u9002\u5E94\uFF0C\u907F\u514D\u56FA\u5B9A\u5BBD\u9AD8\u6EA2\u51FA\u3002 */
-html.fnos-narrow #fntv-wh .wh-detail img{
-  max-width:100% !important;
-  height:auto !important;
-}
-
-`;
-  registerHook("onReady" /* OnReady */, installMobileStyle);
-  registerHook("onDomChange" /* OnDomChange */, ensure2);
+  boot();
 
   // src/preload/plugins/pageAnim.ts
   var GRID_SEL = '[class*="flex-wrap"][class*="gap-x"]';
@@ -23863,7 +23923,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
 
   // src/preload/plugins/personWorks.ts
   init_electron();
-  var STYLE_ID7 = "fnos-person-works-style";
+  var STYLE_ID8 = "fnos-person-works-style";
   var PANEL_ID2 = "fnos-person-works";
   var POSTER_BASE = "https://image.tmdb.org/t/p/w342";
   var esc2 = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -23931,7 +23991,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
   function ensureStyle2() {
     if (_styleInjected) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID7;
+    st.id = STYLE_ID8;
     st.textContent = PANEL_CSS;
     (document.head || document.documentElement).appendChild(st);
     _styleInjected = true;
@@ -24457,9 +24517,9 @@ html.fnos-narrow #fntv-wh .wh-detail img{
     if (!b) return;
     wired = true;
     wireBar(b, v);
-    log8("\u8FDB\u5EA6\u6761\u5DF2\u5B9A\u4F4D\u5E76\u63A5\u7EBF: " + (b.className || b.tagName).toString().slice(0, 80));
+    log9("\u8FDB\u5EA6\u6761\u5DF2\u5B9A\u4F4D\u5E76\u63A5\u7EBF: " + (b.className || b.tagName).toString().slice(0, 80));
   }
-  function log8(msg) {
+  function log9(msg) {
     try {
       console.info("[previewThumb]", msg);
     } catch {
@@ -24492,7 +24552,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
 
   // src/preload/plugins/skipMarker.ts
   init_electron();
-  var log9 = logger_default;
+  var log10 = logger_default;
   var PANEL_ID3 = "fntv-marker-panel";
   var MARKER_STYLE_ID = "fntv-marker-panel-style";
   var SKIP_BTN_ID = "fntv-marker-skip-btn";
@@ -24567,7 +24627,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
       configAt = Date.now();
       return config;
     } catch (e) {
-      log9.warn("[skip-marker] \u8BFB\u914D\u7F6E\u5931\u8D25:", e.message);
+      log10.warn("[skip-marker] \u8BFB\u914D\u7F6E\u5931\u8D25:", e.message);
       return null;
     }
   }
@@ -24582,7 +24642,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
       effectiveGuid = guid;
       return effective;
     } catch (e) {
-      log9.warn("[skip-marker] \u67E5\u8BE2\u751F\u6548\u6807\u8BB0\u5931\u8D25:", e.message);
+      log10.warn("[skip-marker] \u67E5\u8BE2\u751F\u6548\u6807\u8BB0\u5931\u8D25:", e.message);
       return null;
     }
   }
@@ -24670,7 +24730,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
     if (!btnWrap) createControlBtn();
     if (btnWrap && btnWrap.parentElement !== bar2) {
       bar2.appendChild(btnWrap);
-      log9.info("[skip-marker] \u6807\u8BB0\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
+      log10.info("[skip-marker] \u6807\u8BB0\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
     }
   }
   function removeControlBtn() {
@@ -24749,7 +24809,7 @@ html.fnos-narrow #fntv-wh .wh-detail img{
     if (kind === "intro") dismissedIntro = true;
     else dismissedOutro = true;
     skipBtnEl.style.display = "none";
-    log9.info(`[skip-marker] \u515C\u5E95\u8DF3\u8FC7(${kind}) \u2192 ${Math.round(target)}s`);
+    log10.info(`[skip-marker] \u515C\u5E95\u8DF3\u8FC7(${kind}) \u2192 ${Math.round(target)}s`);
   }
   function onTimeUpdate() {
     if (!skipBtnEl || !boundVideo) return;
@@ -25272,7 +25332,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
       if (guid !== currentGuid2) return;
       onTimeUpdate();
     } catch (e) {
-      log9.warn("[skip-marker] ensureAll \u5F02\u5E38:", e.message);
+      log10.warn("[skip-marker] ensureAll \u5F02\u5E38:", e.message);
     }
   }
   registerHook("onReady" /* OnReady */, () => {
@@ -25289,7 +25349,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
     try {
       await getConfig();
     } catch (e) {
-      log9.warn("[skip-marker] \u521D\u59CB\u5316\u5931\u8D25:", e.message);
+      log10.warn("[skip-marker] \u521D\u59CB\u5316\u5931\u8D25:", e.message);
     }
   })();
 
@@ -27362,7 +27422,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
 
   // src/preload/plugins/watchReport.ts
   var PANEL_ID5 = "fntv-wh";
-  var BTN_ID2 = "fntv-wrapped-btn";
+  var BTN_ID3 = "fntv-wrapped-btn";
   var OV_ID2 = "fntv-wrapped";
   function computeReport(items2, year, tsOf) {
     const monthMs = new Array(12).fill(0);
@@ -27453,11 +27513,11 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
   function ensureButton() {
     const panel = document.getElementById(PANEL_ID5);
     if (!panel) return;
-    if (document.getElementById(BTN_ID2)) return;
+    if (document.getElementById(BTN_ID3)) return;
     const bar2 = document.getElementById("fntv-wh-topbtns");
     if (!bar2) return;
     const btn = document.createElement("button");
-    btn.id = BTN_ID2;
+    btn.id = BTN_ID3;
     btn.textContent = "\u2728 \u5E74\u5EA6\u62A5\u544A";
     btn.title = "\u751F\u6210\u672C\u5E74\u5EA6\u89C2\u5F71\u62A5\u544A";
     btn.setAttribute("data-self-handled", "1");
@@ -27918,7 +27978,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
   };
 
   // src/web-entry.ts
-  function boot() {
+  function boot2() {
     try {
       runHooks("onReady" /* OnReady */);
       const observer = new MutationObserver(() => runHooks("onDomChange" /* OnDomChange */));
@@ -27929,11 +27989,11 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
     }
   }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
+    document.addEventListener("DOMContentLoaded", boot2);
   } else {
-    boot();
+    boot2();
   }
   if (typeof window !== "undefined") {
-    window.__FNTV_BOOT__ = boot;
+    window.__FNTV_BOOT__ = boot2;
   }
 })();

@@ -30,6 +30,9 @@
 //      三处均为静态表面，不随滚动重算；其余磨砂观感仍靠半透明 scrim + 一次性模糊底图。
 // ─────────────────────────────────────────────────────────────────────────────
 
+// [lc-1319] 布局模式（手动切换）真源在 mobileStyle：本模块的标记安装点跟随其判定
+import { getUiMode, UI_MODE_EVENT } from '../../mobileStyle';
+
 const STYLE_ID = 'fnos-beautify-css';
 
 /** hero 精准选择器。**必须与 glass.ts 的 DETAIL_HERO_SEL 逐字一致**（两处各存一份是刻意的：
@@ -1519,30 +1522,23 @@ export function injectBeautifyStyle(): void {
   installMobileFlag();
 }
 
-/** [v1.4.0→v1.4.1] html.fnos-touch-narrow 标记：触屏设备 + 窄视口。视口宽用 min-width 媒体
- *  查询（由 CSS 引擎评估，不受指针模拟重置影响），触屏能力一次性判定后缓存。
- *  [v1.4.1] 导出：播放页底部控件触屏段（danmakuWeb）依赖同一标记，播放页可能先于
- *  详情页出现 → 该处注入样式时也调用（幂等，Mq 只装一次）。 */
-let _mobileFlagMq: MediaQueryList | null = null;
-const MOBILE_FLAG_MQ = '(min-width: 641px)';   // ≥641px = 桌面宽，摘除标记
+/** [lc-1319] html.fnos-touch-narrow 标记：改由手动 UI 模式控制（mobileStyle.getUiMode）。
+ *  原「触屏能力 + 视口宽」自动判定在带触摸的桌面环境反复误伤（lc-1308~1318 一串
+ *  内置/外置不一致、PC 被卷进手机布局问题的共同源头），用户要求改为手动切换。
+ *  函数保留为幂等安装点（播放页 danmakuWeb 也调用），内部改为读模式 + 监听切换事件。 */
+let _mobileFlagBound = false;
 
 export function isTouchCapable(): boolean {
   try { return 'ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0; } catch { return false; }
 }
 
 export function installMobileFlag(): void {
-  if (!isTouchCapable()) return;               // 无触摸能力：永不加标记（桌面/宽屏语义）
   const apply = (): void => {
-    const narrow = !_mobileFlagMq || !_mobileFlagMq.matches;   // (min-width:641px) 不匹配 = ≤640
-    document.documentElement.classList.toggle('fnos-touch-narrow', narrow);
+    document.documentElement.classList.toggle('fnos-touch-narrow', getUiMode() === 'mobile');
   };
-  if (!_mobileFlagMq && typeof window.matchMedia === 'function') {
-    try {
-      _mobileFlagMq = window.matchMedia(MOBILE_FLAG_MQ);
-      const handler = (): void => apply();
-      if (_mobileFlagMq.addEventListener) _mobileFlagMq.addEventListener('change', handler);
-      else (_mobileFlagMq as any).addListener(handler);
-    } catch { /* matchMedia 不可用则按一次性判定 */ }
+  if (!_mobileFlagBound) {
+    _mobileFlagBound = true;
+    try { window.addEventListener(UI_MODE_EVENT, apply); } catch { /* ignore */ }
   }
   apply();
 }

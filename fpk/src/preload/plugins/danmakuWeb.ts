@@ -23,6 +23,8 @@ import { registerHook, HookType } from '../core/hooks';
 import logger from '../core/logger';
 import { t } from '../core/i18n';
 import { installMobileFlag } from './embyWall/detail/beautifyStyle';
+// [lc-1319] 布局模式（手动切换）真源：播放页字号等"手机口径"跟随模式
+import { getUiMode } from './mobileStyle';
 
 const log = logger;
 
@@ -1763,10 +1765,10 @@ function render(): void {
     renderDirty = false;
 
     // [lc-1015] 行高跟随实际字号（旧版固定 ch*0.034，调大字号后相邻行会互相压字）
-    // [v1.4.0] 手机网页：竖屏 video 高度小，字号/行高下限放宽为 16px（横屏/桌面不变）。
-    // [lc-1318] smallScreen 口径 640→820（与 fnos-touch-narrow / lc-1309 一致）：平板
-    //   （短边 768/800）也按小屏处理，字号下限与轨道高度同规。
-    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 820;
+    // [lc-1318] 手机/平板模式字号基准改用视频画面实际高度（见下方 fontBaseH）。
+    // [lc-1319] smallScreen 改由手动 UI 模式决定（原「触屏 + 短边≤820」自动判定
+    //   已废弃，用户要求布局模式手动切换）。
+    const smallScreen = getUiMode() === 'mobile';
     const fontSizeFloor = smallScreen ? 16 : 14;
     // [lc-1313] 自动缩放：按滚动轨道占用率平滑缩字号。弹幕密集时把字号压到最低 60%，
     //   让更多弹幕进屏不叠字；占用率回落到 40% 以下恢复设定值。hysteresis 防抖：
