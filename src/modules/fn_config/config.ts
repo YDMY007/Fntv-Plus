@@ -711,7 +711,10 @@ export function getBiliDanmakuBold(): boolean { const c = readConfig() || {}; re
 export function setBiliDanmakuBold(v: boolean): void {
     const c = readConfig() || {}; c.biliDanmakuBold = !!v; fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
 }
-export function getBiliDanmakuDisplayArea(): number { return numOr(readConfig() || {}, 'biliDanmakuDisplayArea', 0.85); }
+// [lc-1292] 默认 0.85 → 0.75：与 conf 密集档（dense_danmaku=yes）对齐。
+// 面板保存样式会覆写 conf 的 displayarea，若此处仍留 0.85，用户一存样式就把密集档冲掉，
+// 表现为「菜单里选着密集、实际又变稀」。轨道数 = floor(1080*area/行高)，0.75 → 20 行。
+export function getBiliDanmakuDisplayArea(): number { return numOr(readConfig() || {}, 'biliDanmakuDisplayArea', 0.75); }
 export function setBiliDanmakuDisplayArea(v: number): void {
     const c = readConfig() || {}; c.biliDanmakuDisplayArea = Math.min(1, Math.max(0, Number(v) || 0)); fs.writeFileSync(getConfigPath(), JSON.stringify(c, null, 2));
 }

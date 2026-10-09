@@ -1134,10 +1134,19 @@ local menu_items_config = {
 -- 创建一个包含键顺序的表，这是样式菜单的排布顺序
 local ordered_keys = {"bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea"}
 
+-- [lc-1292] 弹幕密度档位：一个开关切两套参数组合。
+-- 轨道池按「可见区域 / 行高」建（DanmakuArray:new），所以真正能同时上屏的条数
+-- = rows / scrolltime。旧提交态 conf 是 displayarea=0.35 + scrolltime=15
+-- → 9 行 / 1.8 条每秒，观感「稀稀拉拉」；密集档放宽区域、缩短停留 → 20 行 / 3.3 条每秒。
+local DENSITY_PRESETS = {
+    dense = { displayarea = 0.75, scrolltime = 9 },
+    sparse = { displayarea = 0.35, scrolltime = 15 },
+}
+
 -- [lc-1252] 样式改动持久化：把当前样式键合并回 script-opts/uosc_danmaku.conf。
 -- 只替换自身管理的样式键所在行，其余行（含密文凭证/开关等）逐字节保留；键不存在时追加到尾部。
 -- mpv 每次启动重新读 conf，菜单改动因此跨会话生效。bold 写 yes/no 与主进程写法一致。
-local STYLE_PERSIST_KEYS = { "bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea" }
+local STYLE_PERSIST_KEYS = { "bold", "fontsize", "outline", "shadow", "scrolltime", "opacity", "displayarea", "dense_danmaku" }
 
 function persist_style_opts()
     local conf_path = mp.command_native({ "expand-path", "~~/script-opts/uosc_danmaku.conf" })
@@ -1148,7 +1157,7 @@ function persist_style_opts()
     local vals = {}
     for _, key in ipairs(STYLE_PERSIST_KEYS) do
         local v = options[key]
-        if key == "bold" then
+        if key == "bold" or key == "dense_danmaku" then
             vals[key] = v and "yes" or "no"
         elseif v ~= nil then
             vals[key] = tostring(v)
@@ -1254,6 +1263,17 @@ function add_danmaku_setup(actived, status, submenu)
         items = block_children,
     }
     table.insert(items, block_item)
+
+    -- [lc-1292] 弹幕密度档位开关：点击即在「密集 / 宽松」两套参数间切换。
+    -- 放在屏蔽类型子菜单之后、样式数值项之后，作为独立一行 checkbox 式条目。
+    local dense_on = options.dense_danmaku ~= false
+    table.insert(items, { separator = true })
+    table.insert(items, {
+        title = "弹幕密度",
+        hint = dense_on and "● 密集（当前·推荐）" or "○ 宽松（旧观感·稀疏）",
+        value = { "script-message-to", mp.get_script_name(), "toggle-danmaku-density" },
+        keep_open = true, selectable = true,
+    })
 
     local menu_props = {
         type = "menu_style",
@@ -1479,6 +1499,32 @@ end
 
 mp.register_script_message("open_block_types_menu", open_block_types_menu)
 mp.register_script_message("toggle-block-type", function(key, src) toggle_block_type(key, src) end)
+
+-- [lc-1292] 弹幕密度档位切换：写 options → 落盘 conf → 立即重转换弹幕 → 重开样式菜单。
+-- 落盘走 persist_style_opts（它已含 dense_danmaku/displayarea/scrolltime 三个键）。
+-- 重转换用 load_danmaku(true, true)，与屏蔽类型切换同一条路径：从本地源重新过滤，不重拉网络。
+function toggle_danmaku_density()
+    local dense = options.dense_danmaku ~= false
+    local preset = dense and DENSITY_PRESETS.sparse or DENSITY_PRESETS.dense
+    options.dense_danmaku = not dense
+    options.displayarea = preset.displayarea
+    options.scrolltime = preset.scrolltime
+    -- 菜单 hint 读的是 options，同步刷新避免下次打开显示旧值
+    menu_items_config.displayarea.hint = preset.displayarea
+    menu_items_config.displayarea.original = preset.displayarea
+    menu_items_config.scrolltime.hint = preset.scrolltime
+    menu_items_config.scrolltime.original = preset.scrolltime
+    persist_style_opts()
+    if ENABLED and COMMENTS ~= nil then
+        load_danmaku(true, true)
+    end
+    local label = options.dense_danmaku and "密集" or "宽松"
+    show_message("弹幕密度：" .. label .. "（显示区域 " .. preset.displayarea
+        .. " / 速度 " .. preset.scrolltime .. "）", 3)
+    add_danmaku_setup()
+end
+
+mp.register_script_message("toggle-danmaku-density", function() toggle_danmaku_density() end)
 mp.register_script_message("clear-danmaku-refetch", function() clear_danmaku_refetch() end)
 mp.add_key_binding(options.open_block_types_menu_key, "open_block_types_menu", open_block_types_menu)
 

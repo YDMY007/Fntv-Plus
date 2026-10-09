@@ -61,12 +61,22 @@ options = {
     vf_fps = false,
     -- 设置要使用的 fps 滤镜参数
     fps = "60/1.001",
+    -- [lc-1301] lavfi ass 滤镜渲染（lc-1273 引入）默认关闭，走原版 OSD overlay 路径：
+    -- 滤镜路径把弹幕烙进视频帧，文字按【视频分辨率】光栅化——显示分辨率高于视频分辨率时
+    -- 整帧上采样，弹幕必糊；且每帧 hwdownload/hwupload 叠加 fps 补帧，弹幕一多就卡；
+    -- 滤镜图某些时机静默挂载失败还表现为「弹幕加载成功却一条不显示」。
+    -- OSD 路径由 VO 按屏幕分辨率渲染矢量文字（原版行为，清晰），全屏抖动由 lc-1272 的
+    -- 2/fps 步进 + 0.01px 坐标精度抑制。确需滤镜路径（1:1 分辨率场景的极致平滑）设 yes。
+    filter_render = false,
     -- 指定合并重复弹幕的时间间隔的容差值，单位为秒。默认值: -1，表示禁用
     merge_tolerance = -1,
     -- 指定弹幕关联历史记录文件的路径，支持绝对路径和相对路径
     history_path = "~~/danmaku-history.json",
     open_search_danmaku_menu_key = "Ctrl+d",
     show_danmaku_keyboard_key = "j",
+    -- [lc-1302] 弹幕屏蔽类型快捷开关菜单（顶部/滚动/底部/彩色等 6 类即时开关，
+    -- 与设置面板双向同步；可配置，见 input.conf 冲突说明）
+    open_block_types_menu_key = "Ctrl+k",
     -- 中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体
     chConvert = 0,
     --滚动弹幕的显示时间
@@ -88,6 +98,14 @@ options = {
     opacity = 0.7,
     --全部弹幕的显示范围(0.0-1.0)
     displayarea = 0.85,
+    -- [lc-1292] 弹幕密度档位（样式菜单里的「弹幕密度」开关）：
+    -- 轨道池按 1080p/行高 建满 27 行，但渲染端会丢弃 y > 高度*displayarea 的弹幕，
+    -- 所以真正显示的轨道数 = min(rows, floor(1080*displayarea / 行高))。
+    -- 旧提交态 conf 是 displayarea=0.35 + scrolltime=15 → 只用 9 行、容量 1.8 条/秒，
+    -- 观感「稀稀拉拉」（用户反馈）。dense 档把两者一起调高，回到 20 行 / 3.3 条/秒。
+    -- yes=密集（默认），no=宽松（保留旧观感）。切换时由 apply_density_preset 改写
+    -- displayarea / scrolltime 两个键，本值只作档位真源，不直接参与排版计算。
+    dense_danmaku = true,
     --描边 0-4
     -- [lc-1298] 1.0 → 1.2：1080p PlayRes 1:1 渲染下 1px 描边抗锯齿发虚（视觉"糊"），
     -- 1.2 配合 50px 字号边缘更实；>1.5 会盖住笔画内部细节，不再上调。

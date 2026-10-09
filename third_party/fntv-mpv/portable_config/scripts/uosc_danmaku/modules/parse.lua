@@ -418,14 +418,23 @@ DanmakuArray.__index = DanmakuArray
 -- 上限 1.3 与 convert_danmaku_to_ass 里的放大曲线同源，改那边记得同步这里。
 local MERGE_FS_MAX_MULT = 1.3
 
-function DanmakuArray:new(res_x, res_y, font_size)
+function DanmakuArray:new(res_x, res_y, font_size, displayarea)
     local row_font_size = math.max(font_size, math.ceil(font_size * MERGE_FS_MAX_MULT))
+    -- [lc-1292] 轨道池只按**可见区域**建，而不是整屏：
+    -- 渲染端（render.lua parse_comment / write_render_file）会丢弃 y > 高度*displayarea 的弹幕，
+    -- 排版端却按满屏 res_y 建满 rows，于是排到「不可见行」的弹幕全部白丢。
+    -- 实测 fontsize=30 / displayarea=0.35 / scrolltime=15 时：满屏 27 行里只有 9 行可见，
+    -- 200 条弹幕有 155 条（78%）被分配到看不见的行上——这才是「稀稀拉拉」的主因。
+    -- 可见行数 = floor(res_y * displayarea / 行高)，行高不变保证放大弹幕仍不压行。
+    local area = tonumber(displayarea) or 0.85
+    if area <= 0 or area > 1 then area = 0.85 end
+    local usable_height = res_y * area
     local obj = {
-        solution_y = res_y,
+        solution_y = usable_height,
         font_size = font_size,
         -- 每条轨道占的高度 = max(基础字号, 放大上限)，保证放大弹幕不越界压到下一行
         row_height = row_font_size,
-        rows = math.floor(res_y / row_font_size),
+        rows = math.floor(usable_height / row_font_size),
         time_length_array = {}
     }
     for i = 1, obj.rows do
@@ -677,7 +686,7 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
     -- [lc-1287] 滚动 / 顶部 / 底部弹幕共用同一个轨道池：三类弹幕的 Y 都来自同一组行，
 --   任一行同一时刻只能被一条弹幕占用，从根本上消除跨类型压字（原先 roll_array 与
 --   top_array 是两套独立行号，都从第 1 行开始排，顶部弹幕必然落在滚动弹幕的行上）。
-local track_array = DanmakuArray:new(res_x, res_y, fontsize)
+local track_array = DanmakuArray:new(res_x, res_y, fontsize, options.displayarea)
 
     local ass_header = string.format([[
 [Script Info]
