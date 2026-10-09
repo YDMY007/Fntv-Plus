@@ -188,8 +188,17 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
   const dmCode = danmakuWeb.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/l\.until/.test(dmCode), '占用率不再引用不存在的 until 字段（lc-1313 死代码）');
   ok(/l && t - l\.time < dur \? 1 : 0/.test(danmakuWeb), '占用率按 time + scrollDuration 窗口统计');
-  ok(/const fontSize = Math\.max\(10, baseFont \* autoK\)/.test(danmakuWeb),
-    'autoK 作用在 floor 之后（横屏/小画布下压缩量不再被 fontSizeFloor 吃掉）');
+  ok(/const fontSize = Math\.max\(10, baseFont \* userScale \* autoK\)/.test(danmakuWeb),
+    'autoK 与滑块倍数作用在 floor 之后（低画布下压缩量不再被 fontSizeFloor 吃掉）');
+  // [lc-1318] 手机/平板模式：字号基准用视频画面实际高度（用户报「屏幕不大弹幕
+  //   字号要自动缩放，现在的字号这么大」——竖屏画布全高 844 算出 30px，而 16:9
+  //   画面只占上部 ~219px）
+  ok(/const smallScreen = isTouchEnv\(\) && Math\.min\(window\.innerWidth, window\.innerHeight\) <= 820/.test(danmakuWeb),
+    'smallScreen 口径 640→820（平板与 fnos-touch-narrow 同规）');
+  ok(/const pictureH = cw \/ \(videoEl\.videoWidth \/ videoEl\.videoHeight\)/.test(danmakuWeb),
+    '手机/平板字号基准用视频画面实际高度（画布全高会把竖屏字号放大 4 倍）');
+  ok(/const userScale = style\.fontScale \/ DEFAULT_STYLE\.fontScale/.test(danmakuWeb),
+    '滑块拆成相对倍数（基准被 floor 顶格后倍数仍有效，否则 50%~180% 全被顶成 16）');
   ok(/__fntvAutoK/.test(danmakuWeb), '真机排查观测点 __fntvAutoK（每帧写当前系数）');
   ok(/html\.fnos-touch-narrow \.trim-ui__player--popover\{\s*\n?\s*width:min\(calc\(100vw - 16px\), 392px\) !important;/.test(danmakuWeb),
     '原生弹层窄屏收口（w-[392px] 硬编码 → 视口内限宽）');

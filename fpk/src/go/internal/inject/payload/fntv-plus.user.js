@@ -6187,7 +6187,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     if (paused && lastPausedDraw && !renderDirty) return;
     lastPausedDraw = paused;
     renderDirty = false;
-    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 640;
+    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 820;
     const fontSizeFloor = smallScreen ? 16 : 14;
     let autoK = 1;
     if (style.autoScale) {
@@ -6201,12 +6201,19 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     } else if (autoScaleK >= 0) {
       autoScaleK = -1;
     }
+    let fontBaseH = ch;
+    if (smallScreen && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+      const pictureH = cw / (videoEl.videoWidth / videoEl.videoHeight);
+      if (pictureH < fontBaseH) fontBaseH = pictureH;
+    }
+    const baseFont = Math.max(fontSizeFloor, Math.min(48, fontBaseH * DEFAULT_STYLE.fontScale));
+    const userScale = style.fontScale / DEFAULT_STYLE.fontScale;
+    const fontSize = Math.max(10, baseFont * userScale * autoK);
     try {
       window.__fntvAutoK = autoK;
+      window.__fntvDmFont = Math.round(fontSize * 10) / 10;
     } catch {
     }
-    const baseFont = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
-    const fontSize = Math.max(10, baseFont * autoK);
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));

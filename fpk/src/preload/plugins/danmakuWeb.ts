@@ -1763,9 +1763,10 @@ function render(): void {
     renderDirty = false;
 
     // [lc-1015] 行高跟随实际字号（旧版固定 ch*0.034，调大字号后相邻行会互相压字）
-    // [v1.4.0] 手机网页：竖屏 video 高度小，ch*0.036 只有 ~12-14px 且被 max(14,…)
-    // 兜底顶到 14px，观感过小；coarse 窄屏下字号/行高下限放宽为 16px（横屏/桌面不变）。
-    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 640;
+    // [v1.4.0] 手机网页：竖屏 video 高度小，字号/行高下限放宽为 16px（横屏/桌面不变）。
+    // [lc-1318] smallScreen 口径 640→820（与 fnos-touch-narrow / lc-1309 一致）：平板
+    //   （短边 768/800）也按小屏处理，字号下限与轨道高度同规。
+    const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 820;
     const fontSizeFloor = smallScreen ? 16 : 14;
     // [lc-1313] 自动缩放：按滚动轨道占用率平滑缩字号。弹幕密集时把字号压到最低 60%，
     //   让更多弹幕进屏不叠字；占用率回落到 40% 以下恢复设定值。hysteresis 防抖：
@@ -1791,13 +1792,26 @@ function render(): void {
     } else if (autoScaleK >= 0) {
         autoScaleK = -1; // 复位，下次开启时直接取目标值不闪跳
     }
-    // [lc-1315] 真机排查观测点：当前自动缩放系数（1=原尺寸；开启后密集段 <1、稀疏段 =1）
-    try { (window as any).__fntvAutoK = autoK; } catch { /* ignore */ }
-    const baseFont = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
-    // [lc-1315] autoK 作用在 floor 之后：旧式 ch*fontScale*autoK 在低画布（横屏/小窗）下
-    //   压缩量会被 fontSizeFloor 顶格吃掉（0.6×16 也 <16 → 字不缩），移动端自动缩放
-    //   等于没生效。基准先取 floor，再乘系数，10px 保底防不可读。
-    const fontSize = Math.max(10, baseFont * autoK);
+    // [lc-1318] 手机/平板模式：字号基准改用「视频画面实际高度」而不是弹幕画布全高。
+    //   画布是全视口（竖屏 844），而 16:9 画面只占上部 ~219px —— 按画布高算出的
+    //   30px 字号相对画面巨大（用户报「屏幕不大弹幕字号要自动缩放，现在的字号这
+    //   么大」）。contain 宽度受限时画面高 = cw / aspect；高受限/桌面铺满时与 ch
+    //   相等（桌面行为不变）。
+    let fontBaseH = ch;
+    if (smallScreen && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        const pictureH = cw / (videoEl.videoWidth / videoEl.videoHeight);
+        if (pictureH < fontBaseH) fontBaseH = pictureH;
+    }
+    // 基准 = floor 兜底后的「设定字号」，滑块倍数与密度系数作用其上。
+    //   [lc-1315] 系数必须在 floor 之后：旧式 ch*fontScale*autoK 在低画布下压缩量
+    //   会被 fontSizeFloor 顶格吃掉（0.6×16 也 <16 → 字不缩），10px 保底防不可读。
+    //   [lc-1318] 滑块拆成相对倍数（fontScale / 默认 fontScale）：竖屏下基准被 floor
+    //   顶到 16 后，倍数乘在基准上才有效（否则 50%~180% 全被顶成 16 一动不动）。
+    const baseFont = Math.max(fontSizeFloor, Math.min(48, fontBaseH * DEFAULT_STYLE.fontScale));
+    const userScale = style.fontScale / DEFAULT_STYLE.fontScale;
+    const fontSize = Math.max(10, baseFont * userScale * autoK);
+    // [lc-1315/1318] 真机排查观测点（AutoK: 密度系数；DmFont: 当前实际字号）
+    try { (window as any).__fntvAutoK = autoK; (window as any).__fntvDmFont = Math.round(fontSize * 10) / 10; } catch { /* ignore */ }
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
