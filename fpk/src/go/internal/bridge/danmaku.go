@@ -591,26 +591,74 @@ func jsInt(v any) int {
 	}
 }
 
-// biliFilterDanmaku 屏蔽过滤：类型（1/2/3 滚动 4 底部 5 顶部，逗号分隔）+ 黑名单（每行一个子串）。
-func (b *Bridge) biliFilterDanmaku(items []map[string]any) []map[string]any {
+// biliTypeKeys 屏蔽类型键 → B站 弹幕 mode 映射（与 MPV 端 parse.lua MODE_BLOCK_TAG、
+// 设置面板 BLOCK_TYPES 键名一致）。scroll 覆盖 1/2/3 三种滚动，advanced 覆盖 7/8。
+// [lc-1302] 此前 bridge 按 Atoi 整数解析，而面板存的是字符串键 → 「按类型屏蔽」在网页端从未生效。
+var biliTypeKeys = map[string][]int{
+	"scroll":   {1, 2, 3},
+	"bottom":   {4},
+	"top":      {5},
+	"reverse":  {6},
+	"advanced": {7, 8},
+}
+
+// biliParseBlockTypes 解析 biliDanmakuBlockTypes 设置：兼容设置面板的字符串键数组
+// （JSON 数组形态，shim/桌面端存法）与历史遗留的逗号分隔整数串。
+func biliParseBlockTypes(raw string) map[int]bool {
 	blockTypes := map[int]bool{}
-	for _, s := range strings.Split(getSetting(b.cfg, "biliDanmakuBlockTypes"), ",") {
-		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
-			blockTypes[n] = true
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return blockTypes
+	}
+	if strings.HasPrefix(raw, "[") {
+		var arr []any
+		if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+			for _, v := range arr {
+				switch tv := v.(type) {
+				case string:
+					for _, n := range biliTypeKeys[strings.TrimSpace(tv)] {
+						blockTypes[n] = true
+					}
+				default:
+					blockTypes[jsInt(v)] = true
+				}
+			}
+			return blockTypes
 		}
 	}
+	for _, s := range strings.Split(raw, ",") {
+		if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+			blockTypes[n] = true
+		} else if keys, ok := biliTypeKeys[strings.TrimSpace(s)]; ok {
+			for _, n := range keys {
+				blockTypes[n] = true
+			}
+		}
+	}
+	return blockTypes
+}
+
+// biliFilterDanmaku 屏蔽过滤：类型（1/2/3 滚动 4 底部 5 顶部，逗号分隔）+ 黑名单（每行一个子串）。
+// [lc-1302] 类型键支持字符串名（top/bottom/scroll/reverse/advanced/color），color 按颜色字段判定。
+func (b *Bridge) biliFilterDanmaku(items []map[string]any) []map[string]any {
+	rawTypes := getSetting(b.cfg, "biliDanmakuBlockTypes")
+	blockTypes := biliParseBlockTypes(rawTypes)
+	blockColor := strings.Contains(rawTypes, "color")
 	var blacklist []string
 	for _, ln := range strings.Split(getSetting(b.cfg, "biliDanmakuBlacklist"), "\n") {
 		if s := strings.TrimSpace(ln); s != "" {
 			blacklist = append(blacklist, s)
 		}
 	}
-	if len(blockTypes) == 0 && len(blacklist) == 0 {
+	if len(blockTypes) == 0 && !blockColor && len(blacklist) == 0 {
 		return items
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		if blockTypes[jsInt(it["type"])] {
+			continue
+		}
+		if blockColor && jsInt(it["color"]) != 0xFFFFFF {
 			continue
 		}
 		text := jsStr(it["text"])
@@ -1422,4 +1470,55 @@ func (b *Bridge) danmakuPick(w http.ResponseWriter, r *http.Request) {
 		"count": len(kept), "items": kept, "source": source,
 		"meta": meta, "maxScreen": maxScreen,
 	})
+}
+
+// danmakuClear 「清除弹幕」（桌面版 lc-1300 同语义的 Go 后端）：
+// 自动匹配错了时，按剧清掉全部匹配记忆 —— 只清单集没用，错误结果已按剧缓存。
+// fpk 缓存文件名是 md5(title|season|ep)（danmuCachePath），无法按标题前缀枚举，
+// 但缓存 json 的 meta.searchTitle 存了原始标题 → 遍历 danmaku-cache 目录读 meta 匹配删除。
+// 桌面版还有独立的「弹幕源锁定」文件（danmaku_source_cache.json）；fpk 的源选择随缓存
+// 文件一起存亡（meta.source），清缓存即等于锁也清了，无需第二处。
+// 前端本地内存清理（展示/会话缓存/在途响应作废）由渲染端自行完成，见 shim danmaku:clear。
+func (b *Bridge) danmakuClear(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title string `json:"title"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req)
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "缺少 title"})
+		return
+	}
+	base := b.cfg.Dir()
+	dir := filepath.Join(base, "danmaku-cache")
+	files := 0
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var cached struct {
+				Meta map[string]any `json:"meta"`
+			}
+			if json.Unmarshal(data, &cached) != nil {
+				continue
+			}
+			// searchTitle 与 matchedTitle 任一命中即删：手动 pick 后 matchedTitle 是
+			// 条目规范名（可能与搜索词不同），两把都试才不漏。
+			st := strings.TrimSpace(jsStr(cached.Meta["searchTitle"]))
+			mt := strings.TrimSpace(jsStr(cached.Meta["matchedTitle"]))
+			if st == title || mt == title {
+				if os.Remove(path) == nil {
+					files++
+				}
+			}
+		}
+	}
+	logf("[danmaku] 🧹 清除弹幕匹配记忆: title=%q files=%d", title, files)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files})
 }

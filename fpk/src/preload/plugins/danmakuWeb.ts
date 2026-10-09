@@ -473,6 +473,11 @@ let dmSearchErr = '';
 let dmSearchBusy = false;                         // 搜索/选定拉取进行中(按钮与列表进入忙态)
 let dmSearchKw = '';                              // 搜索框当前关键词(重绘后恢复输入)
 let dmPickedBvid = '';                            // 已选定的候选(bvid/dmapi:<id>), 换集清空
+// [lc-1307] 清除弹幕（桌面版 lc-1300 同语义）：忙标记 + 清除代际。
+// 代际在途作废：清除时 ++，prepare 响应回来发现代际变了直接丢弃 —— 否则「清除」与
+// 「拉取中」赛跑，慢一步的错误匹配原样写回，用户点清除等于白点。
+let dmClearBusy = false;
+let dmClearEpoch = 0;
 let dmSwitch: HTMLInputElement | null = null;     // 开关行引用: 状态变了就地改 checked, 不重绘整块面板
 let dmCloseTimer: number | null = null;        // 移出后延时关闭: 留时间让鼠标从按钮移进弹窗
 let dmDragging = false;                        // 正拖着滑块/焦点在弹窗内时不自动关闭
@@ -834,6 +839,10 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   color:#fff; cursor:pointer; font-size:14px; text-align:center; transition:background-color .16s ease;
 }
 .fntv-dm-reset:hover{background:rgba(255,255,255,.06)}
+/* [lc-1307] 清除弹幕行：轻度警示色与普通菜单行区分；点完短暂变绿确认（桌面 lc-1300 同款） */
+.fntv-dm-list li.fntv-dm-clear{justify-content:center;font-size:13px;color:#ff9c9c}
+.fntv-dm-list li.fntv-dm-clear:hover{background:rgba(255,107,107,.10)}
+.fntv-dm-list li.fntv-dm-clear.fntv-dm-clear-done{color:#5ad17a}
 /* 详情: 单行「标签左 / 值右」(iOS 设置单元格式)。原先标签/值各一行太占高 ——
    11 行把框顶到 86vh 上限仍需滚 93px，而用户明确要「展开详情就一览无余、不要滚动」。
    值可能是很长的服务端标题 → 允许折行右对齐，overflow-wrap:anywhere 兜住连号 BVID。 */
@@ -1094,6 +1103,17 @@ function renderPanel(): void {
         }
     });
     renderSearchBody();
+
+    // [lc-1307] 第四行「清除弹幕」：自动匹配错了（如 TMDB 分部命名与 B站「第N期」口径
+    // 不一致锁到错条目）时一键按剧重置 —— 与桌面版 lc-1300 同语义同位置（面板末行）。
+    const clearRow = document.createElement('li');
+    clearRow.className = 'fntv-dm-clear';
+    clearRow.textContent = t('清除弹幕');
+    clearRow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void clearDanmakuMatch(clearRow);
+    });
+    p.appendChild(clearRow);
     p.scrollTop = keepScroll;
 }
 
@@ -1292,12 +1312,13 @@ async function prepareAndLoad(targetGuid?: string | null): Promise<void> {
     inflight = true;
     loading = true;
     syncToggleUI();
+    const myEpoch = dmClearEpoch;   // [lc-1307] 清除代际：响应回来时代际变了 = 中途点过清除 → 丢弃
     try {
         const res = await ipcRenderer.invoke('danmaku:prepare', { guid, biliSearch }) as any;
         // [lc-1015] 请求期间用户可能已切到别的集（currentGuid 变了）：旧响应直接丢弃，
         // 旧版会把上一集的弹幕回写进当前集。
-        if (guid !== currentGuid) {
-            log.info('[danmakuWeb] 丢弃过期弹幕响应(已切集) guid=' + guid);
+        if (guid !== currentGuid || myEpoch !== dmClearEpoch) {
+            log.info('[danmakuWeb] 丢弃过期弹幕响应(已切集或已清除) guid=' + guid);
             return;
         }
         if (res && res.ok && Array.isArray(res.items) && res.items.length) {
@@ -1994,6 +2015,58 @@ async function pickCandidate(c: any): Promise<void> {
 }
 
 /** 详情段内容：往折叠体里就地重填。meta 是异步到的，展开着拉完也要能自己更新。 */
+/** [lc-1307] 「清除弹幕」：自动匹配错了时清掉当前剧的全部匹配记忆（桌面版 lc-1300 同语义）。
+ *  ① 后端（Go bridge /danmaku/clear）：遍历 danmaku-cache 目录读缓存 meta 的
+ *     searchTitle/matchedTitle 匹配删除 —— 错误结果已按剧缓存，只清单集没用；
+ *     fpk 无独立源锁定文件（源选择存在缓存 meta 里），清缓存即等于锁也清了。
+ *  ② 本地：清内存展示与会话 LRU。loadedGuids 保留（拦住 OnDomChange/maybeSetup 的自动
+ *     重拉，否则几秒内错误匹配原样回来）；重新拿弹幕走「手动搜索」选定条目（pick 不受
+ *     影响），或重开「B站弹幕搜索」开关触发一次全新自动匹配。
+ *  ③ 代际作废：dmClearEpoch++ 让在途 prepare 响应回来即丢弃，别把刚清空的匹配又写回。 */
+async function clearDanmakuMatch(row: HTMLLIElement): Promise<void> {
+    if (dmClearBusy) return;
+    dmClearBusy = true;
+    dmClearEpoch++;
+    try {
+        const title = meta ? String(meta.searchTitle || '') : '';
+        if (title) {
+            try { await ipcRenderer.invoke('danmaku:clear', { title }); } catch { /* 后端清不掉时本地照清 */ }
+        }
+        setItems([]);
+        if (meta) {
+            meta = {
+                ...meta, matchedTitle: '', source: '', bvid: null, cid: null,
+                aggregatedFrom: undefined, count: 0,
+                error: t('已手动清除（自动匹配记忆已重置；用「手动搜索」重新选定，或重开弹幕开关重跑自动匹配）'),
+            };
+        }
+        if (currentGuid) {
+            guidCache.delete(currentGuid);
+            loadedGuids.add(currentGuid);
+        }
+        dmSearchResults = null;
+        dmSearchErr = '';
+        dmPickedBvid = '';
+        renderSearchBody();   // 手动搜索段正展开着 → 旧候选列表立即刷新（清除后不复选旧条目）
+        resetRenderState();
+        // 高能条（danmakuHeat）同清：空时间轴事件即清屏信号（见 danmakuHeat.ingest）
+        try {
+            window.dispatchEvent(new CustomEvent(DANMAKU_ITEMS_EVENT, { detail: { times: [] } }));
+        } catch { /* ignore */ }
+        renderDetailRows();   // 详情段就地重填（收着也没关系，展开即见清除结论）
+        syncToggleUI();
+        row.textContent = t('已清除 ✓');
+        row.classList.add('fntv-dm-clear-done');
+        setTimeout(() => {
+            row.textContent = t('清除弹幕');
+            row.classList.remove('fntv-dm-clear-done');
+        }, 2200);
+        log.info('[danmakuWeb] 已清除弹幕（内存展示 + 磁盘缓存）');
+    } finally {
+        dmClearBusy = false;
+    }
+}
+
 function renderDetailRows(): void {
     const body = dmDetailBody;
     if (!body) return;

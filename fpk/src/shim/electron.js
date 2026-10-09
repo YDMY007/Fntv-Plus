@@ -290,6 +290,17 @@ const ipcRenderer = {
           dandanplayAppSecret: String(a.appSecret || '').trim(),
         });
       }
+      if (channel === 'settings:set-bili-danmaku-style') {
+        // [lc-1302] 复合设置：{ blockTypes: string[], blacklist: string } → 两键拆存。
+        // 此前无特例走通用逻辑，整个 payload 存进 biliDanmakuStyle 单键：
+        // bridge 读 biliDanmakuBlockTypes（过滤失效）、面板回填读 biliDanmakuBlockTypes（回填永远为空）。
+        // 键名与桌面版 config.json 对齐；bridge 侧 biliFilterDanmaku 已兼容字符串类型键。
+        const a = args[0] || {};
+        return apiPost('/app/fntvplus/api/settings', {
+          biliDanmakuBlockTypes: Array.isArray(a.blockTypes) ? a.blockTypes : [],
+          biliDanmakuBlacklist: typeof a.blacklist === 'string' ? a.blacklist : '',
+        });
+      }
       const p = apiPost('/app/fntvplus/api/settings', { [key]: args[0] });
       p.then(() => {
         const s = loadSettings();
@@ -307,6 +318,13 @@ const ipcRenderer = {
           // dirty：旧版（≤v0.41）把 enabled 布尔误存进 customProxy 键（非字符串），URL 已丢需重填
           return { enabled: !!(s && s.customProxyEnabled) && !!u, proxyUrl: u, dirty: raw != null && typeof raw !== 'string' };
         });
+      }
+      // [lc-1302] 弹幕屏蔽类型回填：桌面端此通道读 danmaku_block_types.json 真源（MPV 快捷键
+      // 菜单直接改写该文件）；网页端没有 MPV，回落 settings 里的 biliDanmakuBlockTypes 数组。
+      if (channel === 'settings:get-bili-danmaku-blocktypes-file') {
+        return apiGet('/app/fntvplus/api/settings').then((s) => ({
+          blockTypes: Array.isArray(s && s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [],
+        }));
       }
       const key = settingKey(channel.replace('settings:get-', ''));
       return apiGet('/app/fntvplus/api/settings').then((s) => (s && s[key] !== undefined ? s[key] : loadSettings()[key]));
@@ -893,6 +911,11 @@ const ipcRenderer = {
     }
     if (channel === 'danmaku:pick') {
       return apiPost('/app/fntvplus/api/bridge/danmaku/pick', args[0] || {});
+    }
+    // [lc-1307] 清除弹幕（桌面版 lc-1300 同语义）：后端按剧清 danmaku-cache 磁盘缓存；
+    // 内存展示/会话缓存的清理由 danmakuWeb.clearDanmakuMatch 在拿到 ok 响应后本地完成。
+    if (channel === 'danmaku:clear') {
+      return apiPost('/app/fntvplus/api/bridge/danmaku/clear', args[0] || {});
     }
     /* ── [v1.11.0] 弹弹play 开放 API（内置凭证 + 可选自定义凭证）── */
     if (channel === 'dandanplay:status') {

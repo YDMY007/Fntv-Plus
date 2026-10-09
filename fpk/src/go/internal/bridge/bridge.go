@@ -134,6 +134,8 @@ func (b *Bridge) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/app/fntvplus/api/bridge/skip/external", b.skipExternal)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/candidates", b.danmakuCandidates)
 	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/pick", b.danmakuPick)
+	// [lc-1307] 清除弹幕（桌面版 lc-1300 同语义）：自动匹配错了按剧重置全部缓存记忆
+	mux.HandleFunc("/app/fntvplus/api/bridge/danmaku/clear", b.danmakuClear)
 	mux.HandleFunc("/app/fntvplus/api/bridge/proxy/test", b.proxyTest)
 	// [v1.10.0] 扩展数据源（官方开放 API）：Fanart.tv 高清 Logo / TVMaze 分集兜底 / OMDb IMDb 评分
 	mux.HandleFunc("/app/fntvplus/api/bridge/fanart/logos", b.fanartLogosHandler)

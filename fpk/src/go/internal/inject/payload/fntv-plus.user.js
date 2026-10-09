@@ -1269,6 +1269,9 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
           if (channel === "danmaku:pick") {
             return apiPost("/app/fntvplus/api/bridge/danmaku/pick", args[0] || {});
           }
+          if (channel === "danmaku:clear") {
+            return apiPost("/app/fntvplus/api/bridge/danmaku/clear", args[0] || {});
+          }
           if (channel === "dandanplay:status") {
             return apiGet("/app/fntvplus/api/bridge/dandanplay/status");
           }
@@ -5117,6 +5120,8 @@ html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
   var dmSearchBusy = false;
   var dmSearchKw = "";
   var dmPickedBvid = "";
+  var dmClearBusy = false;
+  var dmClearEpoch = 0;
   var dmSwitch = null;
   var dmCloseTimer = null;
   var dmDragging = false;
@@ -5402,6 +5407,10 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
   color:#fff; cursor:pointer; font-size:14px; text-align:center; transition:background-color .16s ease;
 }
 .fntv-dm-reset:hover{background:rgba(255,255,255,.06)}
+/* [lc-1307] \u6E05\u9664\u5F39\u5E55\u884C\uFF1A\u8F7B\u5EA6\u8B66\u793A\u8272\u4E0E\u666E\u901A\u83DC\u5355\u884C\u533A\u5206\uFF1B\u70B9\u5B8C\u77ED\u6682\u53D8\u7EFF\u786E\u8BA4\uFF08\u684C\u9762 lc-1300 \u540C\u6B3E\uFF09 */
+.fntv-dm-list li.fntv-dm-clear{justify-content:center;font-size:13px;color:#ff9c9c}
+.fntv-dm-list li.fntv-dm-clear:hover{background:rgba(255,107,107,.10)}
+.fntv-dm-list li.fntv-dm-clear.fntv-dm-clear-done{color:#5ad17a}
 /* \u8BE6\u60C5: \u5355\u884C\u300C\u6807\u7B7E\u5DE6 / \u503C\u53F3\u300D(iOS \u8BBE\u7F6E\u5355\u5143\u683C\u5F0F)\u3002\u539F\u5148\u6807\u7B7E/\u503C\u5404\u4E00\u884C\u592A\u5360\u9AD8 \u2014\u2014
    11 \u884C\u628A\u6846\u9876\u5230 86vh \u4E0A\u9650\u4ECD\u9700\u6EDA 93px\uFF0C\u800C\u7528\u6237\u660E\u786E\u8981\u300C\u5C55\u5F00\u8BE6\u60C5\u5C31\u4E00\u89C8\u65E0\u4F59\u3001\u4E0D\u8981\u6EDA\u52A8\u300D\u3002
    \u503C\u53EF\u80FD\u662F\u5F88\u957F\u7684\u670D\u52A1\u7AEF\u6807\u9898 \u2192 \u5141\u8BB8\u6298\u884C\u53F3\u5BF9\u9F50\uFF0Coverflow-wrap:anywhere \u515C\u4F4F\u8FDE\u53F7 BVID\u3002 */
@@ -5619,6 +5628,14 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       }
     });
     renderSearchBody();
+    const clearRow = document.createElement("li");
+    clearRow.className = "fntv-dm-clear";
+    clearRow.textContent = t("\u6E05\u9664\u5F39\u5E55");
+    clearRow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void clearDanmakuMatch(clearRow);
+    });
+    p.appendChild(clearRow);
     p.scrollTop = keepScroll;
   }
   function mkFold(parent, label, body, which, onToggle) {
@@ -5781,10 +5798,11 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     inflight = true;
     loading = true;
     syncToggleUI();
+    const myEpoch = dmClearEpoch;
     try {
       const res = await ipcRenderer.invoke("danmaku:prepare", { guid, biliSearch });
-      if (guid !== currentGuid) {
-        log6.info("[danmakuWeb] \u4E22\u5F03\u8FC7\u671F\u5F39\u5E55\u54CD\u5E94(\u5DF2\u5207\u96C6) guid=" + guid);
+      if (guid !== currentGuid || myEpoch !== dmClearEpoch) {
+        log6.info("[danmakuWeb] \u4E22\u5F03\u8FC7\u671F\u5F39\u5E55\u54CD\u5E94(\u5DF2\u5207\u96C6\u6216\u5DF2\u6E05\u9664) guid=" + guid);
         return;
       }
       if (res && res.ok && Array.isArray(res.items) && res.items.length) {
@@ -6402,6 +6420,57 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
       dmSearchBusy = false;
       renderSearchBody();
       syncToggleUI();
+    }
+  }
+  async function clearDanmakuMatch(row2) {
+    if (dmClearBusy) return;
+    dmClearBusy = true;
+    dmClearEpoch++;
+    try {
+      const title = meta ? String(meta.searchTitle || "") : "";
+      if (title) {
+        try {
+          await ipcRenderer.invoke("danmaku:clear", { title });
+        } catch {
+        }
+      }
+      setItems([]);
+      if (meta) {
+        meta = {
+          ...meta,
+          matchedTitle: "",
+          source: "",
+          bvid: null,
+          cid: null,
+          aggregatedFrom: void 0,
+          count: 0,
+          error: t("\u5DF2\u624B\u52A8\u6E05\u9664\uFF08\u81EA\u52A8\u5339\u914D\u8BB0\u5FC6\u5DF2\u91CD\u7F6E\uFF1B\u7528\u300C\u624B\u52A8\u641C\u7D22\u300D\u91CD\u65B0\u9009\u5B9A\uFF0C\u6216\u91CD\u5F00\u5F39\u5E55\u5F00\u5173\u91CD\u8DD1\u81EA\u52A8\u5339\u914D\uFF09")
+        };
+      }
+      if (currentGuid) {
+        guidCache.delete(currentGuid);
+        loadedGuids.add(currentGuid);
+      }
+      dmSearchResults = null;
+      dmSearchErr = "";
+      dmPickedBvid = "";
+      renderSearchBody();
+      resetRenderState();
+      try {
+        window.dispatchEvent(new CustomEvent(DANMAKU_ITEMS_EVENT, { detail: { times: [] } }));
+      } catch {
+      }
+      renderDetailRows();
+      syncToggleUI();
+      row2.textContent = t("\u5DF2\u6E05\u9664 \u2713");
+      row2.classList.add("fntv-dm-clear-done");
+      setTimeout(() => {
+        row2.textContent = t("\u6E05\u9664\u5F39\u5E55");
+        row2.classList.remove("fntv-dm-clear-done");
+      }, 2200);
+      log6.info("[danmakuWeb] \u5DF2\u6E05\u9664\u5F39\u5E55\uFF08\u5185\u5B58\u5C55\u793A + \u78C1\u76D8\u7F13\u5B58\uFF09");
+    } finally {
+      dmClearBusy = false;
     }
   }
   function renderDetailRows() {
