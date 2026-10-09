@@ -46,17 +46,22 @@ let _headerStyleInjected = false;
 let _headerHideTimer: ReturnType<typeof setTimeout> | null = null;
 const HEADER_HIDE_DELAY = 2500; // 鼠标不动 2.5s 后自动隐藏
 
-// ─── [lc-1290] 窄屏底栏结构裁剪 ───
+// ─── [lc-1290→lc-1311] 窄屏底栏结构裁剪 ───
 // 手机竖屏下 xg-right-grid 里有 8 个原生控件（播放/时间在左栏，倍速/原画/选集/音量/设置/
 // 全屏在右栏）外加本插件注入的「弹幕」与 skipMarker 的「标记」，共 10 个。CSS 侧再怎么压缩，
 // 文字按钮本身（倍速/原画/选集各 2~3 字 + 40px 触控热区）在 390px 里也放不下 —— 必须**减少
 // 控件数量**。业界做法（Netflix / Disney+ 移动端同款）是把次要项折进「更多」弹层。
-// 这里的取舍：保留 播放/时间/选集/全屏 + 弹幕/标记（自建入口，且弹幕是本插件卖点），
-// 隐藏 倍速/原画/音量/设置（倍速与原画在宽屏恢复可见；音量/设置在窄屏由顶部栏的设置入口
-// 覆盖，不至于失能）。
+// 这里的取舍：保留 播放/时间/选集/全屏 + 弹幕（自建入口，弹幕是本插件卖点），
+// 隐藏 倍速/原画/音量/设置/标记（倍速与原画在宽屏恢复可见；音量/设置在窄屏由顶部栏的
+// 设置入口覆盖；标记入口与弹幕面板功能重叠，弹幕面板内有标记入口）。
+// [lc-1311] 隐藏机制改为 data-fntv-trimmed 属性 + 配套 !important 规则（见样式表）：
+//   上一版写行内 display:none，被本表 `.plugin-placeholder{display:flex!important}`
+//   覆盖（样式表 !important > 行内非 important）→ 裁剪形同虚设，右栏 11 项 274px
+//   撑爆 226px 容器换行（用户报障「挤在一起还显示不完全」的根因）。真机实测属性方案
+//   单行 9 项 217px=217px 闭合。
 // 判定一律按**文本内容**而非位置/序号 —— 控件数量随剧集详情（有无原画/倍速）而变，
 // nth-child 会在不同剧集上错位裁掉要留的按钮。
-const NARROW_TRIM_HIDE = ['倍速', '原画', '音量', '设置'];
+const NARROW_TRIM_HIDE = ['倍速', '原画', '音量', '设置', '标记'];
 let _narrowTrimBound = false;
 
 /** 窄屏时把次要文字按钮折掉；宽屏或离开播放页立即恢复（幂等，可反复调用）。 */
@@ -73,13 +78,14 @@ function ensureNarrowControlTrim(): void {
             const txt = (it.textContent || '').trim();
             let hide = false;
             if (txt) {
-                hide = NARROW_TRIM_HIDE.some((k) => txt.includes(k));
+                hide = NARROW_TRIM_HIDE.some((k) => txt === k);
             } else {
                 hide = it.tagName.toLowerCase() === 'xg-icon' && !it.classList.contains('xgplayer-fullscreen');
             }
-            // 用 style.display 而非 class，退出窄屏时能精确还原为 ''
-            const want = narrow && hide ? 'none' : '';
-            if (it.style.display !== want) it.style.display = want;
+            const want = narrow && hide ? '1' : null;
+            const has = it.hasAttribute('data-fntv-trimmed');
+            if (want && !has) it.setAttribute('data-fntv-trimmed', '1');
+            else if (!want && has) it.removeAttribute('data-fntv-trimmed');
         }
     };
     if (_narrowTrimBound) { apply(); return; }
@@ -170,10 +176,18 @@ html.fnos-touch-narrow xg-controls span.cursor-pointer {
     padding: 9px 2px !important;   /* 纵向 9+9 撑热区；横向 2px——右栏 6 控件 390px 里横向预算极紧 */
     white-space: nowrap !important;   /* 热区 padding 挤占内容宽时「弹幕」两字会竖排折行 */
 }
-html.fnos-touch-narrow xg-controls .plugin-placeholder {
+html.fnos-touch-narrow xg-controls .plugin-placeholder:not([data-fntv-trimmed]) {
     display: flex !important;
     align-items: center !important;
     min-height: 40px !important;
+}
+/* [lc-1311] 被裁剪项隐藏：必须走属性选择器 + !important。上一版 JS 写行内
+   display:none，被本表同文件的 flex!important 覆盖（样式表 !important > 行内非
+   important）→ 裁剪形同虚设：右栏 11 项共 274px 撑爆 226px 容器，flex-wrap 把
+   倍速/弹幕/标记 换行掉到第二行叠在其它控件上（用户报「底部的控制按键全挤
+   在一起还显示不完全」）。真机实测：属性方案后右栏单行 9 项 217px=217px 闭合。 */
+html.fnos-touch-narrow xg-controls [data-fntv-trimmed] {
+    display: none !important;
 }
 html.fnos-touch-narrow xg-right-grid { gap: 2px !important; }
 html.fnos-touch-narrow xg-left-grid { gap: 4px !important; }
@@ -230,8 +244,14 @@ html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; heig
 
 /* ③ 右栏整体不换行 + 允许内部收缩；超窄屏（≤360px）进一步压间距 */
 html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
+/* [lc-1311] 右栏自身也禁止换行（真机实测 xg-right-grid 默认 flex-wrap:wrap，
+   11 项 274px > 226px 时倍速/弹幕/标记被换到第二行叠在别的控件上），并把图标
+   类控件压到 20px——文字按钮 26px 与图标 20px 后真机 217px=217px 单行闭合。 */
+html.fnos-touch-narrow xg-right-grid{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
+html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
 @media (max-width:360px){
-    html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
     html.fnos-touch-narrow xg-controls .control-item{ font-size:12px !important; }
 }
 `;

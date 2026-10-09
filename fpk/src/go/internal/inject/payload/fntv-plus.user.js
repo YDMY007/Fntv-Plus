@@ -4813,7 +4813,7 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
   var _headerStyleInjected = false;
   var _headerHideTimer = null;
   var HEADER_HIDE_DELAY = 2500;
-  var NARROW_TRIM_HIDE = ["\u500D\u901F", "\u539F\u753B", "\u97F3\u91CF", "\u8BBE\u7F6E"];
+  var NARROW_TRIM_HIDE = ["\u500D\u901F", "\u539F\u753B", "\u97F3\u91CF", "\u8BBE\u7F6E", "\u6807\u8BB0"];
   var _narrowTrimBound = false;
   function ensureNarrowControlTrim() {
     const apply = () => {
@@ -4827,12 +4827,14 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
         const txt = (it.textContent || "").trim();
         let hide = false;
         if (txt) {
-          hide = NARROW_TRIM_HIDE.some((k) => txt.includes(k));
+          hide = NARROW_TRIM_HIDE.some((k) => txt === k);
         } else {
           hide = it.tagName.toLowerCase() === "xg-icon" && !it.classList.contains("xgplayer-fullscreen");
         }
-        const want = narrow && hide ? "none" : "";
-        if (it.style.display !== want) it.style.display = want;
+        const want = narrow && hide ? "1" : null;
+        const has = it.hasAttribute("data-fntv-trimmed");
+        if (want && !has) it.setAttribute("data-fntv-trimmed", "1");
+        else if (!want && has) it.removeAttribute("data-fntv-trimmed");
       }
     };
     if (_narrowTrimBound) {
@@ -4930,10 +4932,18 @@ html.fnos-touch-narrow xg-controls span.cursor-pointer {
     padding: 9px 2px !important;   /* \u7EB5\u5411 9+9 \u6491\u70ED\u533A\uFF1B\u6A2A\u5411 2px\u2014\u2014\u53F3\u680F 6 \u63A7\u4EF6 390px \u91CC\u6A2A\u5411\u9884\u7B97\u6781\u7D27 */
     white-space: nowrap !important;   /* \u70ED\u533A padding \u6324\u5360\u5185\u5BB9\u5BBD\u65F6\u300C\u5F39\u5E55\u300D\u4E24\u5B57\u4F1A\u7AD6\u6392\u6298\u884C */
 }
-html.fnos-touch-narrow xg-controls .plugin-placeholder {
+html.fnos-touch-narrow xg-controls .plugin-placeholder:not([data-fntv-trimmed]) {
     display: flex !important;
     align-items: center !important;
     min-height: 40px !important;
+}
+/* [lc-1311] \u88AB\u88C1\u526A\u9879\u9690\u85CF\uFF1A\u5FC5\u987B\u8D70\u5C5E\u6027\u9009\u62E9\u5668 + !important\u3002\u4E0A\u4E00\u7248 JS \u5199\u884C\u5185
+   display:none\uFF0C\u88AB\u672C\u8868\u540C\u6587\u4EF6\u7684 flex!important \u8986\u76D6\uFF08\u6837\u5F0F\u8868 !important > \u884C\u5185\u975E
+   important\uFF09\u2192 \u88C1\u526A\u5F62\u540C\u865A\u8BBE\uFF1A\u53F3\u680F 11 \u9879\u5171 274px \u6491\u7206 226px \u5BB9\u5668\uFF0Cflex-wrap \u628A
+   \u500D\u901F/\u5F39\u5E55/\u6807\u8BB0 \u6362\u884C\u6389\u5230\u7B2C\u4E8C\u884C\u53E0\u5728\u5176\u5B83\u63A7\u4EF6\u4E0A\uFF08\u7528\u6237\u62A5\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324
+   \u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\uFF09\u3002\u771F\u673A\u5B9E\u6D4B\uFF1A\u5C5E\u6027\u65B9\u6848\u540E\u53F3\u680F\u5355\u884C 9 \u9879 217px=217px \u95ED\u5408\u3002 */
+html.fnos-touch-narrow xg-controls [data-fntv-trimmed] {
+    display: none !important;
 }
 html.fnos-touch-narrow xg-right-grid { gap: 2px !important; }
 html.fnos-touch-narrow xg-left-grid { gap: 4px !important; }
@@ -4990,8 +5000,14 @@ html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; heig
 
 /* \u2462 \u53F3\u680F\u6574\u4F53\u4E0D\u6362\u884C + \u5141\u8BB8\u5185\u90E8\u6536\u7F29\uFF1B\u8D85\u7A84\u5C4F\uFF08\u2264360px\uFF09\u8FDB\u4E00\u6B65\u538B\u95F4\u8DDD */
 html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
+/* [lc-1311] \u53F3\u680F\u81EA\u8EAB\u4E5F\u7981\u6B62\u6362\u884C\uFF08\u771F\u673A\u5B9E\u6D4B xg-right-grid \u9ED8\u8BA4 flex-wrap:wrap\uFF0C
+   11 \u9879 274px > 226px \u65F6\u500D\u901F/\u5F39\u5E55/\u6807\u8BB0\u88AB\u6362\u5230\u7B2C\u4E8C\u884C\u53E0\u5728\u522B\u7684\u63A7\u4EF6\u4E0A\uFF09\uFF0C\u5E76\u628A\u56FE\u6807
+   \u7C7B\u63A7\u4EF6\u538B\u5230 20px\u2014\u2014\u6587\u5B57\u6309\u94AE 26px \u4E0E\u56FE\u6807 20px \u540E\u771F\u673A 217px=217px \u5355\u884C\u95ED\u5408\u3002 */
+html.fnos-touch-narrow xg-right-grid{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
+html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
 @media (max-width:360px){
-    html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
     html.fnos-touch-narrow xg-controls .control-item{ font-size:12px !important; }
 }
 `;

@@ -139,10 +139,18 @@ console.log('\n[4] 播放页底栏「挤在一起 + 显示不全」');
     'inner-controls / left-grid 同步处理');
   ok(/\.xgplayer-icon\{ width:20px/.test(danmakuWeb),
     '图标类控件（音量/设置/全屏）此前零规则，现已参与收缩');
-  ok(/NARROW_TRIM_HIDE = \['倍速', '原画', '音量', '设置'\]/.test(danmakuWeb),
+  ok(/NARROW_TRIM_HIDE = \['倍速', '原画', '音量', '设置', '标记'\]/.test(danmakuWeb),
     '次要文字按钮按内容裁剪（不用 nth-child：控件数随剧集变）');
   ok(/ensureNarrowControlTrim\(\)/.test(danmakuWeb), '裁剪函数被调用');
-  ok(/it\.style\.display !== want/.test(danmakuWeb), '用 style.display 记录，退出窄屏可精确还原');
+  // [lc-1311] 裁剪隐藏机制：行内 display:none 会被本表 .plugin-placeholder{display:flex!important}
+  // 覆盖（真机实测裁剪形同虚设、11 项撑爆容器换行）→ 改用 data-fntv-trimmed 属性 + 配套规则。
+  ok(/it\.setAttribute\('data-fntv-trimmed', '1'\)/.test(danmakuWeb) &&
+     /data-fntv-trimmed\]\s*\{\s*\n?\s*display: none !important/.test(danmakuWeb),
+    '裁剪走 data-fntv-trimmed 属性 + 配套 !important 规则（行内 display 会被 flex!important 覆盖）');
+  ok(/:not\(\[data-fntv-trimmed\]\)/.test(danmakuWeb),
+    'plugin-placeholder 的 display:flex!important 已排除被裁项');
+  ok(/xg-right-grid\{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; \}/.test(danmakuWeb),
+    '右栏自身禁止换行（flex-wrap:wrap 是换行叠行的直接原因）');
   ok(/xgplayer-fullscreen'\)/.test(danmakuWeb), '全屏键显式豁免（tagName 分支里保留）');
 }
 
