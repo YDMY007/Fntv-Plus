@@ -1,22 +1,25 @@
 // Command fntvplus —— Fntv-Plus 影视网页端增强后端（FPK 常驻服务）。
 //
-// 主入口：监听应用目录下的 Unix socket，经飞牛统一网关接收 /app/fntvplus/* 请求
+// 唯一正式入口：监听应用目录下的 Unix socket，经飞牛统一网关接收 /app/fntvplus/* 请求
 //（网关校验 NAS 登录态后转发，并注入 X-Trim-Userid 等身份头），回环反代影视网页并注入增强脚本。
-// 辅助入口：监听 127.0.0.1:<port>，仅本机健康检查/调试用，不对局域网开放。
+// 正式运行不监听任何 TCP 端口（应用中心上架要求：鉴权优先走统一网关、不开放公网端口）。
 //
 // 启动（本地调试）：
 //
-//	fntvplus --port 22350 --upstream http://127.0.0.1:5666
+//	fntvplus --upstream http://127.0.0.1:5666 --etc ./config --var . --dest .
+//	fntvplus --debug-tcp --port 22350 ...   # 额外开回环 TCP，仅本机排查用
 //
-// 在 fnOS 上由 cmd/main 经环境变量拉起：
+// 在 fnOS 上由 cmd/main 经环境变量拉起（socket 文件名无需显式传，自动读 ui/config 的
+// gatewaySocket 字段，与官方网关注册机制一致）：
 //
-//	fntvplus --port $TRIM_SERVICE_PORT --socket fntvplus.sock --etc $TRIM_PKGETC --var $TRIM_PKGVAR --dest $TRIM_APPDEST
+//	fntvplus --etc $TRIM_PKGETC --var $TRIM_PKGVAR --dest $TRIM_APPDEST
 //
 // 上游地址优先级：--upstream > 环境变量 FNTV_UPSTREAM > 环境变量 TRIM_SYS_WEB_PORT
 // （拼成 http://127.0.0.1:<port>）> 默认 http://127.0.0.1:5666。
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -35,14 +38,27 @@ import (
 )
 
 func main() {
-	port := flag.String("port", envOr("TRIM_SERVICE_PORT", "22350"), "监听端口")
-	sock := flag.String("socket", envOr("TRIM_GATEWAY_SOCKET", ""), "统一网关 Unix socket 文件名（置于 destDir 下；空则不监听 socket）")
+	port := flag.String("port", envOr("TRIM_SERVICE_PORT", "22350"), "调试用回环 TCP 端口（仅 --debug-tcp 时监听）")
+	sock := flag.String("socket", "", "统一网关 Unix socket 文件名（置于 destDir 下；空则从 ui/config 的 gatewaySocket 读取）")
+	debugTCP := flag.Bool("debug-tcp", false, "仅调试用：额外监听 127.0.0.1 回环 TCP 端口（正式运行不监听任何 TCP）")
 	etcDir := flag.String("etc", envOr("TRIM_PKGETC", "."), "配置目录（config.json 所在）")
 	varDir := flag.String("var", envOr("TRIM_PKGVAR", "."), "运行时数据目录")
 	destDir := flag.String("dest", envOr("TRIM_APPDEST", "."), "应用安装目录（payload 来源）")
 	upstreamFlag := flag.String("upstream", "", "回环上游地址覆盖（如 http://127.0.0.1:5666）")
 	versionFlag := flag.String("version", "", "应用版本号（缺省时按 TRIM_APPVER → manifest → 编译期注入 依次兜底）")
 	flag.Parse()
+
+	// 网关 socket 文件名：官方机制是 app/ui/config 里每个入口的 gatewaySocket 字段
+	// （只写文件名，实际路径 = ${TRIM_APPDEST}/<filename>），并非环境变量。
+	// 曾依赖过 TRIM_GATEWAY_SOCKET，但该变量查证并非 fnOS 官方注入项（全网仅一处第三方
+	// 代码使用且其注释自承为猜测），一旦不注入则 sock 为空 → 网关 socket 不监听 → 应用全瘫。
+	// 故改为：显式 --socket > ui/config 的 gatewaySocket > 环境变量（仅作兼容兜底）。
+	if *sock == "" {
+		*sock = resolveGatewaySocketName(*destDir)
+	}
+	if *sock == "" {
+		*sock = envOr("TRIM_GATEWAY_SOCKET", "")
+	}
 
 	// [v1.8.0] 版本号不再写常量，运行时解析（打包器自动维护 manifest）。
 	// [lc-167] 旧实现只读 <TRIM_APPDEST>/manifest —— FPK 安装后 manifest 落在「应用根目录」，
@@ -94,22 +110,39 @@ func main() {
 		Version:  appVersion,
 	})
 
-	// 统一网关（主入口）：监听 TRIM_APPDEST 下的 Unix socket，请求经官方网关
-	// /app/fntvplus/* 转发进来，网关已校验 NAS 登录态——本服务不再监听公网 TCP。
+	// 统一网关（唯一正式入口）：监听 TRIM_APPDEST 下的 Unix socket，请求经官方网关
+	// /app/fntvplus/* 转发进来，网关已校验 NAS 登录态。
+	//
+	// [lc-1289] 正式运行**不再监听任何 TCP 端口**（此前常驻 127.0.0.1:<port> 的
+	// 「调试/健康检查」入口已移除）。原因：manifest 的 checkport=false 只是「启动前不查
+	// 端口占用」，并非启动后的存活探测；官方文档明确「不监听固定端口的应用可以省略
+	// service_port，或设置 checkport=false」，即当前形态本就是官方认可的网关型应用。
+	// 而常驻 TCP 监听会使「伪造 X-Trim-Userid 头直连绕过网关」成为可能——鉴权本身只认
+	// 那个可伪造的头，一旦端口可达，局域网内即可免登录调用设置/桥接接口。
+	// 现改为仅 --debug-tcp 时按需开启回环监听，本机排查用，不进正式路径。
+	log.Printf("[fntvplus] v%s ready (etc=%s var=%s dest=%s)", appVersion, *etcDir, *varDir, *destDir)
 	if *sock != "" {
 		sockPath := filepath.Join(*destDir, *sock)
 		if err := serveSocket(sockPath, srv); err != nil {
 			log.Fatalf("gateway socket %s: %v", sockPath, err)
 		}
 		log.Printf("[fntvplus] gateway socket ready: %s", sockPath)
+	} else {
+		log.Printf("[fntvplus] WARNING: 未解析到网关 socket 文件名，仅有反代与注入能力，无对外入口")
 	}
 
-	// 回环 TCP（辅助入口：本机健康检查/调试；仅 127.0.0.1，不对局域网开放）。
-	addr := "127.0.0.1:" + *port
-	log.Printf("[fntvplus] v%s listening on %s (etc=%s var=%s dest=%s)", appVersion, addr, *etcDir, *varDir, *destDir)
-	if err := http.ListenAndServe(addr, srv); err != nil {
-		log.Fatalf("listen %s: %v", addr, err)
+	if *debugTCP {
+		addr := "127.0.0.1:" + *port
+		log.Printf("[fntvplus] [debug] 回环 TCP 已开启: %s", addr)
+		go func() {
+			if err := http.ListenAndServe(addr, srv); err != nil {
+				log.Printf("[fntvplus] [debug] 回环 TCP 退出: %v", err)
+			}
+		}()
 	}
+
+	// 常驻：Unix socket（正式）或调试 TCP 已就绪，此处不返回。
+	select {}
 }
 
 // serveSocket 在 sockPath 创建并监听 Unix socket，随后在后台 goroutine 常驻服务。
@@ -128,6 +161,45 @@ func serveSocket(sockPath string, h http.Handler) error {
 		}
 	}()
 	return nil
+}
+
+// resolveGatewaySocketName 从应用目录的 ui/config 里读取网关 socket 文件名。
+//
+// 官方接入方式（developer.fnnas.com/docs/core-concepts/gateway-registration/）：
+// app/ui/config 中每个入口可声明 "gatewaySocket": "<文件名>"，fnOS 网关把
+// /app/<appname>/* 转发到 ${TRIM_APPDEST}/<文件名>。该字段只写文件名、不含路径。
+//
+// 这里解析出文件名后由调用方与 TRIM_APPDEST 拼成绝对路径。解析失败返回空串，
+// 由调用方决定兜底（不猜路径——猜错会导致 socket 落在错误位置、网关连不上）。
+func resolveGatewaySocketName(destDir string) string {
+	if destDir == "" {
+		return ""
+	}
+	// ui 目录名取自 manifest 的 desktop_uidir（默认 "ui"），不硬编码。
+	uiDir := readManifestField(destDir, "desktop_uidir")
+	if uiDir == "" {
+		uiDir = "ui"
+	}
+	cfgPath := filepath.Join(destDir, uiDir, "config")
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		URL map[string]struct {
+			GatewaySocket string `json:"gatewaySocket"`
+		} `json:".url"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return ""
+	}
+	// 多个入口时取第一个非空值（本应用只有一个入口）。
+	for _, entry := range doc.URL {
+		if name := strings.TrimSpace(entry.GatewaySocket); name != "" {
+			return filepath.Base(name) // 只取文件名，防御配置里被塞入 ../ 的情况
+		}
+	}
+	return ""
 }
 
 // resolveUpstream 按优先级推导回环上游地址。
@@ -197,6 +269,23 @@ func readManifestVersion(destDir string) string {
 		return ""
 	}
 	m := regexp.MustCompile(`(?m)^\s*version\s*=\s*(\S+)`).FindStringSubmatch(string(data))
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+// readManifestField 从 <dir>/manifest 读某个 key=value 的值（打包器自动维护的字段）。
+func readManifestField(destDir, key string) string {
+	if destDir == "" || key == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(destDir, "manifest"))
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(key) + `\s*=\s*(\S+)`)
+	m := re.FindStringSubmatch(string(data))
 	if len(m) < 2 {
 		return ""
 	}
