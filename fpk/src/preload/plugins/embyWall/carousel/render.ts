@@ -724,6 +724,14 @@ export function injectCarousel(): void {
   posterStrip.addEventListener('mouseenter', _onEnter);
   posterStrip.addEventListener('mouseleave', _onLeave);
 
+  // [lc-1288] 上下滑手势 + 触摸端暂停/恢复自动轮播。
+  //   改前：手势只绑 mousedown/mouseup 指针事件，触摸设备不保证合成 mouse 事件
+  //   （无 preventDefault 时还会与页面滚动打架）→ 手机上等于没有上下滑。
+  //   且暂停自动轮播只挂 mouseenter/mouseleave，触摸端永不触发 → 6s 定时器持续翻页，
+  //   用户正在读简介时内容被强行切走（实测病灶）。
+  //   刻意**不**声明 touch-action：声明 none 会连带禁掉轮播区域的页面滚动，
+  //   得不偿失。浏览器一旦判定为滚动手势会发 touchcancel 而非 touchend，
+  //   于是「快速轻扫=翻页、慢速拖动=滚页面」自然分流，无需抢手势。
   let startY = 0, dragging = false;
   const _onDown = (e: MouseEvent): void => { startY = e.clientY; dragging = true; };
   const _onUp = (e: MouseEvent): void => {
@@ -732,8 +740,29 @@ export function injectCarousel(): void {
     if (dy < -50) goTo((currentIdx + 1) % shows.length);
     else if (dy > 50) goTo((currentIdx - 1 + shows.length) % shows.length);
   };
+  const _onTouchStart = (e: TouchEvent): void => {
+    dragging = true;
+    startY = e.touches[0] ? e.touches[0].clientY : 0;
+    clearInterval(timer);          // 触摸期间停自动轮播，抬手或被取消后再起
+  };
+  const _onTouchEnd = (e: TouchEvent): void => {
+    // 被浏览器判为滚动手势时走 touchcancel：只恢复定时器，不翻页、不动位置
+    if (e.type === 'touchend') {
+      const y = e.changedTouches[0] ? e.changedTouches[0].clientY : startY;
+      if (dragging) {
+        const dy = y - startY;
+        if (dy < -50) goTo((currentIdx + 1) % shows.length);
+        else if (dy > 50) goTo((currentIdx - 1 + shows.length) % shows.length);
+      }
+    }
+    dragging = false;
+    timer = setInterval(() => goTo((currentIdx + 1) % shows.length), 6000);
+  };
   container.addEventListener('mousedown', _onDown);
   container.addEventListener('mouseup', _onUp);
+  container.addEventListener('touchstart', _onTouchStart, { passive: true });
+  container.addEventListener('touchend', _onTouchEnd, { passive: true });
+  container.addEventListener('touchcancel', _onTouchEnd, { passive: true });
 
   // [lc-966] 注册销毁/恢复钩子: style-1 原漏注册 → destroyCarousel 对 style1 是 no-op,
   //   离开首页后 6s 定时器仍在脱离 DOM 上持续触发(后台自动翻页) + 监听泄漏。现与 styles 2/3/4 对齐。
@@ -745,6 +774,9 @@ export function injectCarousel(): void {
     posterStrip.removeEventListener('mouseleave', _onLeave);
     container.removeEventListener('mousedown', _onDown);
     container.removeEventListener('mouseup', _onUp);
+    container.removeEventListener('touchstart', _onTouchStart);
+    container.removeEventListener('touchend', _onTouchEnd);
+    container.removeEventListener('touchcancel', _onTouchEnd);
   };
   S.carouselResume = () => {
     if (!document.body.contains(container)) return; // 容器已游离则 no-op

@@ -673,6 +673,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
                 dandanplayAppSecret: String(a.appSecret || "").trim()
               });
             }
+            if (channel === "settings:set-bili-danmaku-style") {
+              const a = args[0] || {};
+              return apiPost("/app/fntvplus/api/settings", {
+                biliDanmakuBlockTypes: Array.isArray(a.blockTypes) ? a.blockTypes : [],
+                biliDanmakuBlacklist: typeof a.blacklist === "string" ? a.blacklist : ""
+              });
+            }
             const p = apiPost("/app/fntvplus/api/settings", { [key]: args[0] });
             p.then(() => {
               const s = loadSettings();
@@ -689,6 +696,11 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
                 const u = typeof raw === "string" ? raw.trim() : "";
                 return { enabled: !!(s && s.customProxyEnabled) && !!u, proxyUrl: u, dirty: raw != null && typeof raw !== "string" };
               });
+            }
+            if (channel === "settings:get-bili-danmaku-blocktypes-file") {
+              return apiGet("/app/fntvplus/api/settings").then((s) => ({
+                blockTypes: Array.isArray(s && s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : []
+              }));
             }
             const key = settingKey(channel.replace("settings:get-", ""));
             return apiGet("/app/fntvplus/api/settings").then((s) => s && s[key] !== void 0 ? s[key] : loadSettings()[key]);
@@ -9736,7 +9748,11 @@ html.fnos-perf.dark{
    \u7528\u6237\u622A\u56FE\uFF08390px \u7AD6\u5C4F\uFF09\u75C5\u7076\uFF1A\u2460\u8F6E\u64AD\u5361\u7247\u6EA2\u51FA\u5C4F\u5E55\u53F3\u7F18\u2014\u2014\u684C\u9762\u7ED9\u5A92\u4F53\u5E93 section \u9884\u7559\u7684\u5BBD
    padding/\u8FB9\u8DDD\u5728\u7A84\u5C4F\u5403\u6389\u8FD1\u56DB\u5206\u4E4B\u4E00\u5BBD\uFF0C\u5361\u7247 86% \u5BBD\u518D\u53E0\u52A0 section \u5185\u8FB9\u8DDD\u5373\u51FA\u5C4F\uFF1B
    \u2461\u6807\u9898 2rem/\u7B80\u4ECB .95rem \u5728\u7AD6\u5C4F\u4E0A\u5360\u6BD4\u8FC7\u5927\uFF0C\u7B80\u4ECB\u957F\u6587\u628A\u6309\u94AE\u6324\u51FA\u5361\u5916\uFF1B
-   \u2462prev/next \u5361 \xB172% \u4F4D\u79FB\u5728\u7A84\u5C4F\u9732\u51FA\u8FC7\u591A\u90BB\u5361\uFF08\u89C6\u89C9\u6742\u4E71\uFF09\u3002 */
+   \u2462prev/next \u5361 \xB172% \u4F4D\u79FB\u5728\u7A84\u5C4F\u9732\u51FA\u8FC7\u591A\u90BB\u5361\uFF08\u89C6\u89C9\u6742\u4E71\uFF09\u3002
+
+   [lc-1288] \u6587\u5B57\u5C42\u9690\u85CF\u90A3\u4E00\u6761\u5DF2\u8FC1\u5230 mobileStyle.ts \xA7D2 \u7EDF\u4E00\u63A5\u7BA1\uFF1A\u8FD9\u91CC\u7528
+   fnos-touch-narrow\u3001\u90A3\u8FB9\u7528 fnos-narrow\uFF0C\u4E24\u5957\u6807\u8BB0\u540C\u4E3A \u2264640 \u4F46\u524D\u8005\u591A\u4E00\u5C42\u89E6\u6478\u5224\u5B9A\uFF0C
+   \u540C\u5C4F\u65F6\u628A mobileStyle \u7CBE\u5FC3\u5199\u7684\u624B\u673A\u6392\u7248\u6574\u6BB5\u76D6\u6389\u3002\u4E24\u5904\u5E76\u5B58\u65F6\u4EE5 mobileStyle \u4E3A\u51C6\u3002 */
 @media (max-width: 640px){
   html.fnos-touch-narrow [data-fntv-carousel-style="4"]{
     border-radius:16px;
@@ -9747,9 +9763,8 @@ html.fnos-perf.dark{
   /* \u90BB\u5361\u4F4D\u79FB\u6536\u7A84\uFF1A390px \u4E0B \xB172% \u4F1A\u628A\u90BB\u5361\u5927\u534A\u63A8\u51FA\u5C4F\uFF0C\u6539\u4E3A \xB158% \u53EA\u9732\u8FB9\u7F18\u6697\u793A\u53EF\u6ED1 */
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{transform:scale(.86) translateX(-52%) rotateY(22deg)}
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{transform:scale(.86) translateX(52%) rotateY(-22deg)}
-  /* [v1.4.8b \u7528\u6237\u62CD\u677F] \u624B\u673A\u4E0A\u8F6E\u64AD\u76F4\u63A5\u4E0D\u5C55\u793A\u6587\u5B57\u5C42\uFF08\u6807\u9898/\u7B80\u4ECB/\u6309\u94AE\u6574\u5C42\u9690\u85CF\uFF09\uFF0C\u53EA\u7559\u7EAF\u6D77\u62A5\u753B\u9762\u2014\u2014
-     \u7AD6\u5C4F\u5361\u7247\u7A7A\u95F4\u5C0F\uFF0C\u6587\u5B57\u5C42\u6C38\u8FDC\u653E\u4E0D\u4E0B\uFF1B\u70B9\u5361\u7247\u8FDB\u8BE6\u60C5\u770B\u5B8C\u6574\u4FE1\u606F\u3002dots \u4FDD\u7559\uFF08\u4F4D\u7F6E\u6307\u793A+\u53EF\u70B9\u5207\u6362\uFF09\u3002 */
-  html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-info{display:none !important}
+  /* [v1.4.8b] \u6587\u5B57\u5C42\u9690\u85CF\u4E00\u6761\u5DF2\u8FC1\u81F3 mobileStyle.ts \xA7D2\uFF08\u7531 fnos-narrow \u63A5\u7BA1\u5E76\u7ED9\u51FA\u624B\u673A\u6392\u7248\uFF09\uFF0C
+     \u6B64\u5904\u4E0D\u518D\u91CD\u590D\u58F0\u660E\uFF0C\u907F\u514D\u4E24\u5957\u6807\u8BB0\u7C7B\u4E92\u76F8\u8986\u76D6\u3002 */
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{bottom:10px}
 }
 @media (max-width: 640px) and (orientation: portrait){
@@ -11927,8 +11942,28 @@ html.fnos-perf.dark{
       if (dy < -50) goTo((currentIdx + 1) % shows.length);
       else if (dy > 50) goTo((currentIdx - 1 + shows.length) % shows.length);
     };
+    const _onTouchStart = (e) => {
+      dragging = true;
+      startY = e.touches[0] ? e.touches[0].clientY : 0;
+      clearInterval(timer2);
+    };
+    const _onTouchEnd = (e) => {
+      if (e.type === "touchend") {
+        const y = e.changedTouches[0] ? e.changedTouches[0].clientY : startY;
+        if (dragging) {
+          const dy = y - startY;
+          if (dy < -50) goTo((currentIdx + 1) % shows.length);
+          else if (dy > 50) goTo((currentIdx - 1 + shows.length) % shows.length);
+        }
+      }
+      dragging = false;
+      timer2 = setInterval(() => goTo((currentIdx + 1) % shows.length), 6e3);
+    };
     container.addEventListener("mousedown", _onDown);
     container.addEventListener("mouseup", _onUp);
+    container.addEventListener("touchstart", _onTouchStart, { passive: true });
+    container.addEventListener("touchend", _onTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", _onTouchEnd, { passive: true });
     S.carouselCleanup = () => {
       clearInterval(timer2);
       container.removeEventListener("mouseenter", _onEnter);
@@ -11937,6 +11972,9 @@ html.fnos-perf.dark{
       posterStrip.removeEventListener("mouseleave", _onLeave);
       container.removeEventListener("mousedown", _onDown);
       container.removeEventListener("mouseup", _onUp);
+      container.removeEventListener("touchstart", _onTouchStart);
+      container.removeEventListener("touchend", _onTouchEnd);
+      container.removeEventListener("touchcancel", _onTouchEnd);
     };
     S.carouselResume = () => {
       if (!document.body.contains(container)) return;
@@ -18310,7 +18348,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         if (e.target !== swDanmuApi) swDanmuApi.click();
       });
       const dmApiStatus = document.createElement("div");
-      dmApiStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;";
+      dmApiStatus.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sub);padding:0 6px 4px;line-height:1.5;min-height:14px;white-space:pre-line;";
       dmApiBody.appendChild(dmApiStatus);
       const dmMinRow = document.createElement("div");
       dmMinRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;gap:10px;";
@@ -18337,12 +18375,12 @@ html.fntv-boot-hide #root{visibility:hidden}
       const dmApiFoldBody = dmApiFold.body;
       const dmApiHint = document.createElement("div");
       dmApiHint.style.cssText = "font-size:10.5px;color:var(--fnos-ui-sec);padding:0 6px 6px;line-height:1.5;";
-      dmApiHint.textContent = t("\u586B\u5165 NAS \u4E0A\u90E8\u7F72\u7684 danmu_api \u670D\u52A1\u5730\u5740\uFF08\u805A\u5408\u54D4\u54E9/\u7231\u5947\u827A/\u4F18\u9177/\u817E\u8BAF\u7B49\u591A\u5E73\u53F0\u5F39\u5E55\uFF0C\u5BC6\u5EA6\u901A\u5E38\u9AD8\u4E8E\u5355\u6E90 B\u7AD9\uFF09\u3002\u5F00\u542F\u540E\u4F5C\u4E3A\u5F39\u5E55\u4F18\u9009\u6E90\uFF0C\u672A\u547D\u4E2D\u6216\u672A\u542F\u7528\u65F6\u81EA\u52A8\u964D\u7EA7\u5230\u5185\u7F6E B\u7AD9 \u5F39\u5E55\u83B7\u53D6\u3002\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
+      dmApiHint.textContent = t("\u586B\u5165 NAS \u4E0A\u90E8\u7F72\u7684 danmu_api \u670D\u52A1\u5730\u5740\uFF08\u805A\u5408\u54D4\u54E9/\u7231\u5947\u827A/\u4F18\u9177/\u817E\u8BAF\u7B49\u591A\u5E73\u53F0\u5F39\u5E55\uFF0C\u5BC6\u5EA6\u901A\u5E38\u9AD8\u4E8E\u5355\u6E90 B\u7AD9\uFF09\u3002\u53EF\u6BCF\u884C\u4E00\u6761\u586B\u591A\u4E2A\u5730\u5740\uFF08\u5982\u5BB6\u91CC\u5C40\u57DF\u7F51\u4E00\u6761 + \u5B66\u6821 Tailscale \u4E00\u6761\uFF09\uFF0C\u6309\u987A\u5E8F\u81EA\u52A8\u9009\u7528\uFF1A\u5F53\u524D\u5730\u5740\u8FDE\u4E0D\u4E0A\uFF08\u5982\u8282\u70B9\u6CA1\u8FD0\u884C\uFF09\u4F1A\u81EA\u52A8\u5207\u4E0B\u4E00\u4E2A\u3002\u5F00\u542F\u540E\u4F5C\u4E3A\u5F39\u5E55\u4F18\u9009\u6E90\uFF0C\u672A\u547D\u4E2D\u6216\u672A\u542F\u7528\u65F6\u81EA\u52A8\u964D\u7EA7\u5230\u5185\u7F6E B\u7AD9 \u5F39\u5E55\u83B7\u53D6\u3002\u4E0B\u6B21\u64AD\u653E\u65F6\u751F\u6548\u3002");
       dmApiFoldBody.appendChild(dmApiHint);
-      const dmApiInput = document.createElement("input");
-      dmApiInput.type = "text";
-      dmApiInput.placeholder = "http://192.168.1.10:9321";
-      dmApiInput.style.cssText = "width:100%;height:32px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;margin:2px 0 6px;";
+      const dmApiInput = document.createElement("textarea");
+      dmApiInput.rows = 2;
+      dmApiInput.placeholder = "http://192.168.31.170:9321/\u4F60\u7684TOKEN\nhttp://100.66.1.2:9321/\u4F60\u7684TOKEN";
+      dmApiInput.style.cssText = "width:100%;height:52px;font-size:11px;color:var(--fnos-ui-text);background:var(--fnos-ui-input-bg);border:1px solid var(--fnos-ui-border);border-radius:7px;padding:6px 8px;box-sizing:border-box;margin:2px 0 6px;resize:vertical;line-height:1.5;";
       dmApiFoldBody.appendChild(dmApiInput);
       const dmApiBtns = document.createElement("div");
       dmApiBtns.style.cssText = "display:flex;gap:6px;";
@@ -18352,8 +18390,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmApiBtns.appendChild(dmApiTestBtn);
       dmApiFoldBody.appendChild(dmApiBtns);
       const dmApiSave = () => {
-        const base2 = dmApiInput.value.trim().replace(/\/+$/, "");
-        ipcRenderer.invoke("settings:set-danmu-api", { enabled: swDanmuApi.checked, base: base2 }).then((r) => {
+        const bases = dmApiInput.value.split(/[\n;；]/).map((s) => s.trim()).filter(Boolean);
+        ipcRenderer.invoke("settings:set-danmu-api", { enabled: swDanmuApi.checked, base: bases[0] || "", bases }).then((r) => {
           if (r && r.ok === false) {
             dmApiStatus.textContent = String(r.error || t("\u4FDD\u5B58\u5931\u8D25"));
             dmApiStatus.style.color = "var(--fnos-ui-warn)";
@@ -18416,7 +18454,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         e.stopPropagation();
         dmApiStatus.textContent = t("\u6B63\u5728\u6D4B\u8BD5\u8FDE\u63A5\u2026");
         dmApiStatus.style.color = "var(--fnos-ui-sub)";
-        ipcRenderer.invoke("settings:test-danmu-api", dmApiInput.value.trim()).then((r) => {
+        ipcRenderer.invoke("settings:test-danmu-api", dmApiInput.value).then((r) => {
           dmApiStatus.textContent = String(r && r.message || (r && r.ok ? t("\u8FDE\u63A5\u6B63\u5E38") : t("\u8FDE\u63A5\u5931\u8D25")));
           dmApiStatus.style.color = r && r.ok ? "var(--fnos-ui-sub)" : "var(--fnos-ui-warn)";
         }).catch((err) => {
@@ -20167,9 +20205,15 @@ html.fntv-boot-hide #root{visibility:hidden}
           const bt = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
           for (const b of blockToggles) b.input.checked = bt.includes(b.key);
           if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || "";
+          ipcRenderer.invoke("settings:get-bili-danmaku-blocktypes-file").then((r) => {
+            if (r && Array.isArray(r.blockTypes)) {
+              for (const b of blockToggles) b.input.checked = r.blockTypes.includes(b.key);
+            }
+          }).catch(() => {
+          });
           ddRefreshStatus();
           swDanmuApi.checked = s.danmuApiEnabled === true;
-          dmApiInput.value = s.danmuApiBase || "";
+          dmApiInput.value = Array.isArray(s.danmuApiBases) && s.danmuApiBases.length ? s.danmuApiBases.join("\n") : s.danmuApiBase || "";
           dmMinInput.value = String(s.danmuMinCount == null ? 100 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
           if (swDanmuApi.checked) {
             dmApiStatus.textContent = dmApiInput.value ? t("\u5DF2\u542F\u7528\u81EA\u5EFA\u5F39\u5E55\u63A5\u53E3\u4F5C\u4E3A\u4F18\u9009\u6E90\uFF0C\u672A\u547D\u4E2D\u65F6\u81EA\u52A8\u964D\u7EA7\u5230 B\u7AD9\u3002") : t("\u5DF2\u5F00\u542F\u4F46\u672A\u586B\u670D\u52A1\u5730\u5740 \u2014\u2014 \u5C55\u5F00\u300C\u670D\u52A1\u5730\u5740\u4E0E\u8FDE\u901A\u6D4B\u8BD5\u300D\u586B\u5199\u540E\u70B9\u4FDD\u5B58\u3002");
@@ -22332,6 +22376,13 @@ html.fntv-boot-hide #root{visibility:hidden}
   var MQ_COMPACT = "(min-width: 820.5px)";
   var _mqNarrow = null;
   var _mqCompact = null;
+  function isTouchDevice() {
+    try {
+      return "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+    } catch {
+      return false;
+    }
+  }
   function applyViewportFlags() {
     const html = document.documentElement;
     const narrow = !_mqNarrow || !_mqNarrow.matches;
@@ -22340,6 +22391,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     const compactBefore = html.classList.contains("fnos-compact");
     html.classList.toggle("fnos-narrow", narrow);
     html.classList.toggle("fnos-compact", compact);
+    html.classList.toggle("fnos-touch", isTouchDevice());
     const root = document.getElementById("root");
     if (root) {
       if (compact) root.style.setProperty("min-width", "0", "important");
@@ -22558,6 +22610,139 @@ html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child > but
 
 /* B8. \u6C89\u6D78\u5C42\u9876\u90E8\u7559\u767D\u968F\u9876\u680F\u6536\u7D27\uFF08\u6F14\u804C\u4EBA\u5458\u4F5C\u54C1\u9762\u677F .fpw-card 162px \u5B9A\u5BBD\u53EF\u81EA\u9002\u5E94\u6362\u884C\uFF0C\u65E0\u9700\u5904\u7406\uFF09 */
 html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 C. fnos-touch\uFF08\u771F\u89E6\u6478\u8BBE\u5907\uFF0C\u4E0D\u5206\u5BBD\u7A84\uFF09\u89E6\u6478\u8BED\u4E49\u5C42 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u8FD9\u4E00\u6BB5\u53EA\u88C5\u300C\u9F20\u6807\u65F6\u4EE3\u4E0D\u5B58\u5728\u3001\u89E6\u6478\u5FC5\u987B\u8865\u300D\u7684\u4E1C\u897F\uFF1A\u5B89\u5168\u533A\u3001\u89E6\u63A7\u76EE\u6807\u3001\u6309\u538B\u53CD\u9988\u3002
+   \u684C\u9762\u7A84\u7A97\u53E3\u4E0D\u88C5 \u2014\u2014 \u684C\u9762\u7528\u9F20\u6807\uFF0Chover/\u7CBE\u786E\u70B9\u51FB\u672C\u5C31\u6B63\u5E38\uFF0C\u5957\u4E0A\u53BB\u53CD\u800C\u788D\u4E8B\u3002 */
+
+/* C1. \u5B89\u5168\u533A\u5185\u8FB9\u8DDD\u3002viewport-fit=cover \u7531 Go \u6CE8\u5165\u5C42\u8865\u9F50\uFF08inject.go patchViewport\uFF09\uFF0C
+   \u6CA1\u6709\u5B83 env() \u6052\u4E3A 0\uFF0C\u672C\u6BB5\u6574\u4F53\u5931\u6548 \u2014\u2014 \u4E24\u5904\u5FC5\u987B\u6210\u5BF9\u5B58\u5728\u3002
+   \u5199\u6CD5\u53D6 Jellyfin \u7684 conditional-max \u6E10\u8FDB\u589E\u5F3A\uFF1A\u5148\u7ED9\u9ED8\u8BA4\u503C\uFF0C\u518D\u7528 @supports(max())
+   \u63A2\u6D4B\u8986\u76D6\u4E3A max(\u5B89\u5168\u533A, \u9ED8\u8BA4\u503C)\u3002max() \u81EA Chrome 79 / Safari 11.1 / FF 75 \u8D77\u53EF\u7528\uFF0C
+   \u8001\u6D4F\u89C8\u5668\u62FF\u5230\u9ED8\u8BA4\u503C\u4E0D\u4F1A\u56E0\u6574\u6761\u58F0\u660E\u5931\u6548\u800C\u4E22\u6389\u5185\u8FB9\u8DDD\u3002 */
+html.fnos-touch #fnos-settings-panel{
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@supports (padding:max(0px,env(safe-area-inset-bottom))){
+  html.fnos-touch #fnos-settings-panel{
+    padding-bottom:max(env(safe-area-inset-bottom),16px);
+  }
+}
+
+/* C2. \u9876\u680F\u60AC\u6D6E\u6309\u94AE/\u641C\u7D22\u7B49\u8D34\u9876\u5143\u7D20\u4E0B\u538B\uFF0C\u907F\u5F00\u5218\u6D77\u5C4F\u4E0E\u72B6\u6001\u680F\u3002
+   \u62BD\u5C49\u906E\u7F69\u4E0E\u5168\u5C4F\u6D6E\u5C42\u540C\u7406\uFF08\u539F\u672C\u4ECE 0 \u5F00\u59CB\uFF0C\u6B63\u597D\u538B\u5728\u5218\u6D77\u4E0A\uFF09\u3002 */
+html.fnos-touch #fntv-wh-topbtns{
+  top:calc(10px + env(safe-area-inset-top,0px)) !important;
+}
+html.fnos-touch .fnos-instant-layer__lines{
+  padding-top:calc(84px + env(safe-area-inset-top,0px)) !important;
+}
+
+/* C3. \u5173\u95ED iOS \u957F\u6309\u5F39\u51FA\u7684\u300C\u62F7\u8D1D/\u67E5\u627E/\u5206\u4EAB\u300D\u7CFB\u7EDF\u83DC\u5355 \u2014\u2014 \u64AD\u653E\u5668\u63A7\u4EF6\u3001\u8FDB\u5EA6\u6761\u3001
+   \u5F39\u5E55\u5217\u8868\u4E0A\u957F\u6309\u4F1A\u76F4\u63A5\u7834\u574F\u4EA4\u4E92\uFF08Jellyfin videoOsd \u540C\u6B3E\u505A\u6CD5\uFF09\u3002 */
+html.fnos-touch .fnos-instant-layer,
+html.fnos-touch .fnos-instant-layer *{
+  -webkit-touch-callout:none;
+}
+
+/* C4. \u89E6\u63A7\u76EE\u6807\u4E0B\u9650 44px\uFF08WCAG 2.1 AAA / \u6EE1\u8DB3 2.2 AA \u7684 24px \u786C\u4E0B\u9650\uFF09\u3002
+   \u53EA\u57AB\u9AD8\u300C\u672C\u6765\u5C31\u5C0F\u3001\u4E14\u89E6\u63A7\u65F6\u5FC5\u987B\u70B9\u4E2D\u300D\u7684\u56FE\u6807/\u80F6\u56CA\u6309\u94AE\uFF0C\u4E0D\u52A8\u5361\u7247/\u5BFC\u822A\u9879\u7B49\u5927\u5757\u533A\u57DF\u3002
+   \u89C2\u5F71\u8BB0\u5F55\u60AC\u6D6E\u6761\u91CC\u7684\u6309\u94AE\u662F .wh-pill\uFF08\u80F6\u56CA\uFF09\uFF0C\u9760 padding \u6491\u5230 ~34px \u9AD8\uFF0C\u89E6\u6478\u4E0B\u504F\u5C0F\u3002 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill{ min-height:44px !important; }
+html.fnos-touch .fntv-hot-block{ min-width:44px !important; min-height:44px !important; }
+html.fnos-touch .fntv-dm-list li{ min-height:40px !important; }
+
+/* C5. \u6309\u538B\u53CD\u9988\uFF1A\u89E6\u6478\u7AEF\u6CA1\u6709 hover\uFF0C\u4F46\u6709 :active\u3002\u7ED9\u7EAF\u56FE\u6807\u6309\u94AE\u8865\u4E00\u4E2A\u6309\u538B\u6001\uFF0C
+   \u907F\u514D\u300C\u6309\u4E0B\u53BB\u6CA1\u6709\u4EFB\u4F55\u53CD\u9988\u300D\u7684\u624B\u611F\u65AD\u88C2\uFF08Prime Video \u7684 scale(.9) \u540C\u601D\u8DEF\uFF09\u3002 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill:active,
+html.fnos-touch .fntv-hot-block:active{
+  opacity:.7 !important;
+  transform:scale(.92);
+}
+/* C6. \u53BB\u6389 Android \u70B9\u51FB\u84DD\u5757\uFF08Jellyfin card.scss \u540C\u6B3E\uFF09\uFF0C\u6539\u7531 :active \u7EDF\u4E00\u8868\u8FBE\u3002 */
+html.fnos-touch button,
+html.fnos-touch [role="button"]{
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 D. hover \u4F9D\u8D56\u964D\u7EA7\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u89E6\u6478\u8BBE\u5907\u4E0A :hover \u53EF\u80FD\u6C38\u4E0D\u5339\u914D\u3001\u4E5F\u53EF\u80FD tap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\uFF08MDN :hover \u660E\u786E\u5217\u51FA
+   \u8FD9\u4E09\u79CD\u884C\u4E3A\uFF09\u3002\u5BF9\u300Chover \u624D\u51FA\u73B0\u300D\u7684\u4EA4\u4E92\u8865\u4E00\u4E2A\u5E38\u9A7B\u53EF\u89C1\u7684\u7B49\u4EF7\u7269\uFF0C\u800C\u4E0D\u662F\u7B80\u5355\u7981\u7528\u3002
+   \u6D89\u53CA\u7684\u5177\u4F53\u7EC4\u4EF6\u89C1 \xA7D1~\xA7D3 \u6CE8\u91CA\u3002 */
+
+/* D1. \u6BCF\u65E5\u653E\u9001\u300C\u4E0D\u611F\u5174\u8DA3\u300D\u6309\u94AE\uFF1A\u684C\u9762\u9ED8\u8BA4 opacity:0 \u9760 :hover \u6D6E\u73B0\uFF0C\u624B\u673A\u4E0A\u6C38\u4E45\u9690\u85CF\u3002
+   \u89E6\u6478\u7AEF\u76F4\u63A5\u5E38\u9A7B\u53EF\u89C1\uFF08\u6539\u4E3A\u534A\u900F\u660E\u5E38\u6001 + \u6309\u538B\u6001\u5168\u4EAE\uFF0C\u4E0D\u7528\u7EAF opacity \u786C\u5E38\u4EAE\u4EE5\u514D\u62A2\u620F\uFF09\u3002 */
+html.fnos-touch .fntv-hot-card .fntv-hot-block{
+  opacity:.55 !important;
+  transform:none !important;
+}
+html.fnos-touch .fntv-hot-card .fntv-hot-block:active{
+  opacity:1 !important;
+}
+
+/* D2. \u8F6E\u64AD\u6837\u5F0F 4 \u624B\u673A\u7248\uFF1A**\u6536\u56DE** carousel/styles.ts \u91CC\u300C\u6587\u5B57\u5C42\u6574\u5C42 display:none\u300D\u90A3\u5957\u3002
+   \u90A3\u6BB5\u6302\u5728 fnos-touch-narrow \u4E0B\uFF0C\u4E0E\u672C\u6587\u4EF6\u7684 fnos-narrow \u540C\u4E3A \u2264640\u3001\u4F46\u591A\u4E00\u5C42\u89E6\u6478\u5224\u5B9A\uFF0C
+   \u7279\u5F02\u6027\u66F4\u9AD8 \u2192 B5b \u7CBE\u5FC3\u5199\u7684\u6536\u7D27\u7248\u5F0F\uFF08logo/\u6807\u9898/\u7B80\u4ECB/\u6309\u94AE\uFF09\u6574\u6BB5\u5931\u6548\uFF0C\u624B\u673A\u4E0A\u53EA\u5269\u4E00\u5F20
+   \u5149\u79C3\u79C3\u7684\u6D77\u62A5\u3002\u6539\u7531 \xA7B5b \u4E00\u5904\u7EDF\u4E00\u63A5\u7BA1\uFF1A\u7ED9 info \u5C42\u663E\u5F0F display \u590D\u4F4D + \u624B\u673A\u6392\u7248\u3002
+   \u4E24\u79CD\u6807\u8BB0\u7C7B\u540C\u65F6\u5B58\u5728\u65F6\u672C\u6BB5\u80DC\u51FA\uFF08\u540E\u6CE8\u5165\u4E14 !important\uFF09\uFF0C\u884C\u4E3A\u56DE\u5230\u300C\u6536\u7D27\u800C\u975E\u9690\u85CF\u300D\u3002 */
+html.fnos-touch [data-fntv-carousel-style="4"] .fntv-s4-info{
+  display:block !important;
+}
+/* D3. \u89E6\u6478\u7AEF\u628A\u7EAF hover \u624D\u4EAE\u8D77\u7684\u5143\u7D20\u8865\u5E38\u9A7B\u5E95\u8272\uFF0C\u907F\u514D\u300Ctap \u540E\u7C98\u4F4F\u4E0D\u6D88\u5931\u300D\u6216\u6C38\u4E0D\u51FA\u73B0\u3002
+   \u8FD9\u91CC\u53EA\u5904\u7406\u9AD8\u4EF7\u503C\u7684\u4E24\u4E2A\uFF08\u5361\u7247\u62AC\u5347/\u64AD\u653E\u952E\uFF09\uFF0C\u4E0D\u505A\u5168\u7AD9 hover \u7FFB\u7248\u3002 */
+html.fnos-touch .wh-card:hover{
+  transform:none !important;   /* tap \u540E\u7C98\u4F4F\u7684\u62AC\u5347\u4F1A\u8BA9\u6574\u9875\u5361\u7247\u9519\u4F4D\uFF0C\u76F4\u63A5\u53D6\u6D88 */
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 E. \u6EDA\u52A8\u9501\u5B9A\u5DE5\u5177\uFF08fnos-touch\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u5F39\u5C42\u6253\u5F00\u65F6\u7981\u6B62\u80CC\u666F\u8DDF\u7740\u6EDA\u3002\u4F18\u5148\u7528 CSS \u7684 overscroll-behavior\uFF08\u4E0D\u9501 body\uFF0C
+   iOS \u4E0A\u4E0D\u4F1A\u6EDA\u52A8\u7A7F\u900F/\u4F4D\u7F6E\u4E22\u5931\uFF09\uFF1B\u4E0D\u652F\u6301\u65F6\u624D\u9000\u5316\u9501 body\u3002
+   \u6302\u5230 html.fnos-scroll-lock \u4E0A\uFF0C\u7531 JS \u5728\u5F39\u5C42\u5F00/\u5173\u65F6\u589E\u5220\u3002 */
+html.fnos-scroll-lock{
+  overflow:hidden !important;
+  overscroll-behavior:contain;
+  touch-action:none;
+}
+
+/* \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550 F. \u5F39\u5C42\u7A84\u5C4F\u6EA2\u51FA\u6536\u53E3\uFF08fnos-compact\uFF0C\u4E0E\u5BBD\u7A84\u540C\u5224\uFF0C\u4E0D\u5206\u89E6\u6478\uFF09\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+   \u8FD9\u6279\u7EC4\u4EF6\u90FD\u662F**\u884C\u5185 cssText \u9489\u6B7B\u5C3A\u5BF8**\uFF08dialogUI:113 min-width:420px\u3001
+   modals/feedback.ts:96/221 width:320px\u3001modals/patch.ts:71 width:340px\u3001
+   watchHistory.ts:492 grid 6fr/4fr\uFF09\u3002\u884C\u5185\u6837\u5F0F\u53EA\u80FD\u9760 !important \u538B\uFF0C\u538B\u4E0D\u52A8\u5C31\u53EA\u80FD
+   \u6EA2\u51FA\u5C4F\u5E55\u5916 \u2014\u2014 360px \u5C4F\u4E0A\u5FC5\u7136\u51FA\u4E8B\u3002\u96C6\u4E2D\u5728\u8FD9\u91CC\u6536\u53E3\uFF0C\u907F\u514D\u9010\u4E2A\u63D2\u4EF6\u6539\u884C\u5185\u503C\u3002 */
+
+/* F1. dialogUI \u5361\u7247\uFF1Amin-width \u5728 CSS \u91CC\u4F18\u5148\u4E8E max-width\uFF0C420px \u786C\u9876\u4F1A\u51FB\u7A7F\u7A84\u5C4F\u3002
+   \u7A84\u5C4F\u76F4\u63A5\u64A4\u6389 min-width\uFF0C\u6539\u7531 max-width:calc(100vw - 32px) \u51B3\u5B9A\u3002 */
+html.fnos-compact #fnos-dialog-overlay [data-fnos-dialog-card="1"]{
+  min-width:0 !important;
+  width:calc(100vw - 32px) !important;
+  max-width:calc(100vw - 32px) !important;
+  padding:18px 16px 14px !important;
+}
+/* F2. \u53CD\u9988/QQ\u7FA4\u5F39\u7A97 300~320px \u5B9A\u5BBD + 22~24px padding \u2192 360px \u4E0B\u6EA2\u51FA\uFF0C\u7EDF\u4E00\u5939\u5230\u89C6\u53E3\u5185\u3002 */
+html.fnos-compact #fnos-feedback-modal,
+html.fnos-compact #fnos-feedback-choice-modal,
+html.fnos-compact #fnos-qq-group-modal{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+  padding:18px 16px !important;
+}
+/* F3. \u8865\u4E01\u5F39\u7A97 340px \u5B9A\u5BBD\uFF08\u65E0 max-width\uFF09\uFF0C\u540C\u4E0A\u6536\u53E3\u3002 */
+html.fnos-compact #fntv-patch-apply-popup{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+}
+/* F4. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u6D6E\u5C42\uFF1A\u53CC\u680F grid 6fr/4fr \u5728\u7A84\u5C4F\u4F1A\u628A\u5DE6\u680F\u538B\u5230\u88C5\u4E0D\u4E0B\u6D77\u62A5\uFF0C
+   \u5355\u5217\u5316\uFF08\u4E0E B6 \u7684 .wh-chart-split \u5355\u5217\u4FDD\u6301\u4E00\u81F4\uFF09\u3002
+   .wh-detail \u5D4C\u5728 #fntv-wh \u9762\u677F\u5185\uFF0C\u9009\u62E9\u5668\u5FC5\u987B\u5E26\u9762\u677F ID \u524D\u7F00\u624D\u547D\u4E2D\u3002 */
+html.fnos-narrow #fntv-wh .wh-detail{
+  grid-template-columns:1fr !important;
+}
+/* F5. \u89C2\u5F71\u8BB0\u5F55\u8BE6\u60C5\u91CC\u7684\u6D77\u62A5/\u9884\u89C8\u5728\u5355\u5217\u4E0B\u6309\u89C6\u53E3\u5BBD\u81EA\u9002\u5E94\uFF0C\u907F\u514D\u56FA\u5B9A\u5BBD\u9AD8\u6EA2\u51FA\u3002 */
+html.fnos-narrow #fntv-wh .wh-detail img{
+  max-width:100% !important;
+  height:auto !important;
+}
+
 `;
   registerHook("onReady" /* OnReady */, installMobileStyle);
   registerHook("onDomChange" /* OnDomChange */, ensure2);
@@ -23357,9 +23542,9 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
     ov.appendChild(tip);
     document.body.appendChild(ov);
     canvas2 = cv;
-    barEl.addEventListener("mousemove", (e) => {
+    const showAt = (clientX) => {
       const r = barEl.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
       const mainV = document.querySelector("video");
       if (!mainV || !mainV.duration || !isFinite(mainV.duration)) {
         ov.style.display = "none";
@@ -23368,18 +23553,48 @@ html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
       const time = ratio * mainV.duration;
       const h = ensureHidden(mainV);
       const ovW = 176;
-      const left = Math.max(8, Math.min(window.innerWidth - ovW - 8, e.clientX - ovW / 2));
+      const left = Math.max(8, Math.min(window.innerWidth - ovW - 8, clientX - ovW / 2));
       const top = Math.max(8, r.top - 112);
       ov.style.display = "flex";
       ov.style.left = left + "px";
       ov.style.top = top + "px";
       tip.textContent = esc3(fmtTime(time));
       requestFrame(h, cv, time);
-    });
-    barEl.addEventListener("mouseleave", () => {
+    };
+    const hide = () => {
       ov.style.display = "none";
       if (canvas2) canvas2.style.opacity = "0";
-    });
+    };
+    barEl.addEventListener("mousemove", (e) => showAt(e.clientX));
+    barEl.addEventListener("mouseleave", hide);
+    let touchHideTimer = null;
+    barEl.addEventListener("touchstart", (e) => {
+      const t2 = e.touches[0];
+      if (!t2) return;
+      if (touchHideTimer !== null) {
+        clearTimeout(touchHideTimer);
+        touchHideTimer = null;
+      }
+      showAt(t2.clientX);
+    }, { passive: true });
+    barEl.addEventListener("touchmove", (e) => {
+      const t2 = e.touches[0];
+      if (!t2) return;
+      if (touchHideTimer !== null) {
+        clearTimeout(touchHideTimer);
+        touchHideTimer = null;
+      }
+      showAt(t2.clientX);
+    }, { passive: true });
+    barEl.addEventListener("touchend", () => {
+      if (touchHideTimer !== null) clearTimeout(touchHideTimer);
+      touchHideTimer = window.setTimeout(hide, 700);
+    }, { passive: true });
+    barEl.addEventListener("touchcancel", () => {
+      if (touchHideTimer !== null) clearTimeout(touchHideTimer);
+      touchHideTimer = null;
+      hide();
+    }, { passive: true });
   }
   function fmtTime(sec) {
     const s = Math.max(0, Math.floor(sec));
@@ -24004,6 +24219,19 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
       mkCloseTimer = null;
     }
   }
+  var mkOutsideBound = false;
+  function bindOutsideClose() {
+    if (mkOutsideBound) return;
+    mkOutsideBound = true;
+    document.addEventListener("pointerdown", (e) => {
+      const t2 = e.target;
+      if (!t2 || !panelEl || !panelEl.classList.contains("active")) return;
+      if (panelEl.contains(t2)) return;
+      if (btnWrap && btnWrap.contains(t2)) return;
+      cancelCloseMkPanel();
+      closePanel2();
+    }, true);
+  }
   function removePanel() {
     try {
       const el = document.getElementById(PANEL_ID3);
@@ -24089,6 +24317,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
       return;
     }
     panelEl.classList.add("active");
+    bindOutsideClose();
   }
   function closePanel2() {
     if (panelEl) panelEl.classList.remove("active");

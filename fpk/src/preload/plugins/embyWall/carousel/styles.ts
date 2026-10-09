@@ -776,7 +776,11 @@ export function ensureStyle4Css(): void {
    用户截图（390px 竖屏）病灶：①轮播卡片溢出屏幕右缘——桌面给媒体库 section 预留的宽
    padding/边距在窄屏吃掉近四分之一宽，卡片 86% 宽再叠加 section 内边距即出屏；
    ②标题 2rem/简介 .95rem 在竖屏上占比过大，简介长文把按钮挤出卡外；
-   ③prev/next 卡 ±72% 位移在窄屏露出过多邻卡（视觉杂乱）。 */
+   ③prev/next 卡 ±72% 位移在窄屏露出过多邻卡（视觉杂乱）。
+
+   [lc-1288] 文字层隐藏那一条已迁到 mobileStyle.ts §D2 统一接管：这里用
+   fnos-touch-narrow、那边用 fnos-narrow，两套标记同为 ≤640 但前者多一层触摸判定，
+   同屏时把 mobileStyle 精心写的手机排版整段盖掉。两处并存时以 mobileStyle 为准。 */
 @media (max-width: 640px){
   html.fnos-touch-narrow [data-fntv-carousel-style="4"]{
     border-radius:16px;
@@ -787,9 +791,8 @@ export function ensureStyle4Css(): void {
   /* 邻卡位移收窄：390px 下 ±72% 会把邻卡大半推出屏，改为 ±58% 只露边缘暗示可滑 */
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{transform:scale(.86) translateX(-52%) rotateY(22deg)}
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{transform:scale(.86) translateX(52%) rotateY(-22deg)}
-  /* [v1.4.8b 用户拍板] 手机上轮播直接不展示文字层（标题/简介/按钮整层隐藏），只留纯海报画面——
-     竖屏卡片空间小，文字层永远放不下；点卡片进详情看完整信息。dots 保留（位置指示+可点切换）。 */
-  html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-info{display:none !important}
+  /* [v1.4.8b] 文字层隐藏一条已迁至 mobileStyle.ts §D2（由 fnos-narrow 接管并给出手机排版），
+     此处不再重复声明，避免两套标记类互相覆盖。 */
   html.fnos-touch-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{bottom:10px}
 }
 @media (max-width: 640px) and (orientation: portrait){

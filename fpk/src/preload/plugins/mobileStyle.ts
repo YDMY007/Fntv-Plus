@@ -1,21 +1,28 @@
 // preload/plugins/mobileStyle.ts — 手机浏览器/窄视口适配层（fpk 网页端专属）
 // ─────────────────────────────────────────────────────────────────────────────
-// 背景：飞牛影视网页端 #root 被站点自身钉了 min-width:820px（来源是站点运行时注入的
-// 样式表，document.styleSheets 枚举不到，只能靠 !important 压制 + 行内样式兜底），
-// 手机竖屏(≤640px)下整页按桌面宽渲染再被裁切 —— 用户报「浏览器访问整个界面乱套」。
-// 本模块是**纯增量适配层**：不改任何插件的既有行为，只在窄视口下追加覆盖样式。
+// 背景：飞牛影视网页端 #root 被站点自身钉了 min-width:820px（实测来自站点自有样式表
+// 资产 /v/assets/*.css 的 #root{width:100%;min-width:820px}，是条完全正常、可被
+// getComputedStyle 解析的规则），手机竖屏(≤640px)下整页按桌面宽渲染再被裁切 ——
+// 用户报「浏览器访问整个界面乱套」。本模块是**纯增量适配层**：不改任何插件的既有
+// 行为，只在窄视口下追加覆盖样式。
 //
-// 双断点（与 beautifyStyle 的 fnos-touch-narrow(641px) 对齐，不与其冲突）：
+// 三断点（与 beautifyStyle 的 fnos-touch-narrow(641px) 对齐，不与其冲突）：
 //   html.fnos-compact  ≤820px —— 结构性兜底：解除 #root 820px 裁切、设置/弹层宽度钳制。
 //       覆盖平板竖屏(768px)等「装不下桌面布局」的区间。
 //   html.fnos-narrow   ≤640px —— 手机整版：季页/电影页 hero 单列化、系列页玻璃聚簇
 //       改窄屏排布（简介满宽 + TMDB 卡回流）、轮播文字缩小、观影记录/设置面板移动化。
+//   html.fnos-touch    真触摸设备（不分宽窄）—— 只装「触摸语义」规则：安全区内边距、
+//       触控目标尺寸、:hover 降级为 :active。桌面窄窗口不装（桌面用鼠标，hover 本就可用）。
 //
 // 优先级策略：本样式表在 boot 时注入（早于各插件懒注入的样式表），同特异性会输给
 // 后注入者 → 所有与插件规则对抗的声明一律 !important + 带 html.fnos-* 前缀抬特异性
 // （比 beautifyStyle 最长链多出 html.fnos-narrow 两级，恒定胜出）。
 // 视口跨断点时派发一次 window resize：tmdbCard 的 --fnos-cluster-h 悬浮簇测高、
 // 列表截断库等按 resize 重算的 JS 布局随之刷新。
+//
+// ⚠ 已知冲突（勿用「加特异性」硬压，见 §D）：carousel/styles.ts 的轮播手机段用
+// beautifyStyle 装的 fnos-touch-narrow 门控，本文件 B5b 用 fnos-narrow，两者同为
+// ≤640 但前者多一层触摸判定 → 真手机上 B5b 全段失效。已在 §D 统一由本文件接管。
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { registerHook } from '../core/hooks';
@@ -35,6 +42,18 @@ export function isNarrowViewport(): boolean {
 let _mqNarrow: MediaQueryList | null = null;
 let _mqCompact: MediaQueryList | null = null;
 
+/** 是否真触摸设备（设备硬事实，不随窗口/鼠标移动而变）。
+ *  刻意不用 @media (pointer:coarse) / (hover:hover)：截图与自动化工具会重置指针模拟，
+ *  导致桌面预览时安全区/触控规则整段失灵（与 danmakuWeb / beautifyStyle 同一约定）。
+ *  maxTouchPoints 出厂即定；ontouchstart 在无触屏桌面 Chrome 里同样为真，故需并取。
+ *  判定口径与 beautifyStyle.isTouchCapable 一致；此处另存一份是因为本模块必须
+ *  零插件依赖（它是最底层适配层，不能反过来 import 美化样式表）。 */
+function isTouchDevice(): boolean {
+  try {
+    return ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+  } catch { return false; }
+}
+
 /** 按当前视口宽挂/摘 html.fnos-narrow / html.fnos-compact 标记类（幂等）。 */
 function applyViewportFlags(): void {
   const html = document.documentElement;
@@ -44,8 +63,10 @@ function applyViewportFlags(): void {
   const compactBefore = html.classList.contains('fnos-compact');
   html.classList.toggle('fnos-narrow', narrow);
   html.classList.toggle('fnos-compact', compact);
-  // 行内兜底：站点对 #root 的 820px 钉宽来源枚举不到（疑似 adoptedStyleSheet），
-  // 行内 !important 是唯一保证压得死的写法；宽视口时必须摘除还权于站点自身规则。
+  // 触摸标记：与宽窄无关，独立于断点翻转（一次判定，终身不变）。
+  html.classList.toggle('fnos-touch', isTouchDevice());
+  // 行内兜底：#root 的 820px 钉宽来自站点自有样式表，样式表层已有 !important 覆盖，
+  // 这里再钉一份行内 !important 兜住「站点样式后加载/被重建」的时序。宽视口必须摘除。
   const root = document.getElementById('root');
   if (root) {
     if (compact) root.style.setProperty('min-width', '0', 'important');
@@ -274,6 +295,139 @@ html.fnos-narrow #fnos-settings-panel > div:nth-child(3) > div:first-child > but
 
 /* B8. 沉浸层顶部留白随顶栏收紧（演职人员作品面板 .fpw-card 162px 定宽可自适应换行，无需处理） */
 html.fnos-narrow .fnos-instant-layer__lines{ padding-top:84px !important; }
+
+/* ═══════════ C. fnos-touch（真触摸设备，不分宽窄）触摸语义层 ═══════════
+   这一段只装「鼠标时代不存在、触摸必须补」的东西：安全区、触控目标、按压反馈。
+   桌面窄窗口不装 —— 桌面用鼠标，hover/精确点击本就正常，套上去反而碍事。 */
+
+/* C1. 安全区内边距。viewport-fit=cover 由 Go 注入层补齐（inject.go patchViewport），
+   没有它 env() 恒为 0，本段整体失效 —— 两处必须成对存在。
+   写法取 Jellyfin 的 conditional-max 渐进增强：先给默认值，再用 @supports(max())
+   探测覆盖为 max(安全区, 默认值)。max() 自 Chrome 79 / Safari 11.1 / FF 75 起可用，
+   老浏览器拿到默认值不会因整条声明失效而丢掉内边距。 */
+html.fnos-touch #fnos-settings-panel{
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@supports (padding:max(0px,env(safe-area-inset-bottom))){
+  html.fnos-touch #fnos-settings-panel{
+    padding-bottom:max(env(safe-area-inset-bottom),16px);
+  }
+}
+
+/* C2. 顶栏悬浮按钮/搜索等贴顶元素下压，避开刘海屏与状态栏。
+   抽屉遮罩与全屏浮层同理（原本从 0 开始，正好压在刘海上）。 */
+html.fnos-touch #fntv-wh-topbtns{
+  top:calc(10px + env(safe-area-inset-top,0px)) !important;
+}
+html.fnos-touch .fnos-instant-layer__lines{
+  padding-top:calc(84px + env(safe-area-inset-top,0px)) !important;
+}
+
+/* C3. 关闭 iOS 长按弹出的「拷贝/查找/分享」系统菜单 —— 播放器控件、进度条、
+   弹幕列表上长按会直接破坏交互（Jellyfin videoOsd 同款做法）。 */
+html.fnos-touch .fnos-instant-layer,
+html.fnos-touch .fnos-instant-layer *{
+  -webkit-touch-callout:none;
+}
+
+/* C4. 触控目标下限 44px（WCAG 2.1 AAA / 满足 2.2 AA 的 24px 硬下限）。
+   只垫高「本来就小、且触控时必须点中」的图标/胶囊按钮，不动卡片/导航项等大块区域。
+   观影记录悬浮条里的按钮是 .wh-pill（胶囊），靠 padding 撑到 ~34px 高，触摸下偏小。 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill{ min-height:44px !important; }
+html.fnos-touch .fntv-hot-block{ min-width:44px !important; min-height:44px !important; }
+html.fnos-touch .fntv-dm-list li{ min-height:40px !important; }
+
+/* C5. 按压反馈：触摸端没有 hover，但有 :active。给纯图标按钮补一个按压态，
+   避免「按下去没有任何反馈」的手感断裂（Prime Video 的 scale(.9) 同思路）。 */
+html.fnos-touch #fntv-wh-topbtns .wh-pill:active,
+html.fnos-touch .fntv-hot-block:active{
+  opacity:.7 !important;
+  transform:scale(.92);
+}
+/* C6. 去掉 Android 点击蓝块（Jellyfin card.scss 同款），改由 :active 统一表达。 */
+html.fnos-touch button,
+html.fnos-touch [role="button"]{
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* ═══════════ D. hover 依赖降级（fnos-touch）═══════════
+   触摸设备上 :hover 可能永不匹配、也可能 tap 后粘住不消失（MDN :hover 明确列出
+   这三种行为）。对「hover 才出现」的交互补一个常驻可见的等价物，而不是简单禁用。
+   涉及的具体组件见 §D1~§D3 注释。 */
+
+/* D1. 每日放送「不感兴趣」按钮：桌面默认 opacity:0 靠 :hover 浮现，手机上永久隐藏。
+   触摸端直接常驻可见（改为半透明常态 + 按压态全亮，不用纯 opacity 硬常亮以免抢戏）。 */
+html.fnos-touch .fntv-hot-card .fntv-hot-block{
+  opacity:.55 !important;
+  transform:none !important;
+}
+html.fnos-touch .fntv-hot-card .fntv-hot-block:active{
+  opacity:1 !important;
+}
+
+/* D2. 轮播样式 4 手机版：**收回** carousel/styles.ts 里「文字层整层 display:none」那套。
+   那段挂在 fnos-touch-narrow 下，与本文件的 fnos-narrow 同为 ≤640、但多一层触摸判定，
+   特异性更高 → B5b 精心写的收紧版式（logo/标题/简介/按钮）整段失效，手机上只剩一张
+   光秃秃的海报。改由 §B5b 一处统一接管：给 info 层显式 display 复位 + 手机排版。
+   两种标记类同时存在时本段胜出（后注入且 !important），行为回到「收紧而非隐藏」。 */
+html.fnos-touch [data-fntv-carousel-style="4"] .fntv-s4-info{
+  display:block !important;
+}
+/* D3. 触摸端把纯 hover 才亮起的元素补常驻底色，避免「tap 后粘住不消失」或永不出现。
+   这里只处理高价值的两个（卡片抬升/播放键），不做全站 hover 翻版。 */
+html.fnos-touch .wh-card:hover{
+  transform:none !important;   /* tap 后粘住的抬升会让整页卡片错位，直接取消 */
+}
+
+/* ═══════════ E. 滚动锁定工具（fnos-touch）═══════════
+   弹层打开时禁止背景跟着滚。优先用 CSS 的 overscroll-behavior（不锁 body，
+   iOS 上不会滚动穿透/位置丢失）；不支持时才退化锁 body。
+   挂到 html.fnos-scroll-lock 上，由 JS 在弹层开/关时增删。 */
+html.fnos-scroll-lock{
+  overflow:hidden !important;
+  overscroll-behavior:contain;
+  touch-action:none;
+}
+
+/* ═══════════ F. 弹层窄屏溢出收口（fnos-compact，与宽窄同判，不分触摸）═══════════
+   这批组件都是**行内 cssText 钉死尺寸**（dialogUI:113 min-width:420px、
+   modals/feedback.ts:96/221 width:320px、modals/patch.ts:71 width:340px、
+   watchHistory.ts:492 grid 6fr/4fr）。行内样式只能靠 !important 压，压不动就只能
+   溢出屏幕外 —— 360px 屏上必然出事。集中在这里收口，避免逐个插件改行内值。 */
+
+/* F1. dialogUI 卡片：min-width 在 CSS 里优先于 max-width，420px 硬顶会击穿窄屏。
+   窄屏直接撤掉 min-width，改由 max-width:calc(100vw - 32px) 决定。 */
+html.fnos-compact #fnos-dialog-overlay [data-fnos-dialog-card="1"]{
+  min-width:0 !important;
+  width:calc(100vw - 32px) !important;
+  max-width:calc(100vw - 32px) !important;
+  padding:18px 16px 14px !important;
+}
+/* F2. 反馈/QQ群弹窗 300~320px 定宽 + 22~24px padding → 360px 下溢出，统一夹到视口内。 */
+html.fnos-compact #fnos-feedback-modal,
+html.fnos-compact #fnos-feedback-choice-modal,
+html.fnos-compact #fnos-qq-group-modal{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+  padding:18px 16px !important;
+}
+/* F3. 补丁弹窗 340px 定宽（无 max-width），同上收口。 */
+html.fnos-compact #fntv-patch-apply-popup{
+  width:calc(100vw - 32px) !important;
+  max-width:340px !important;
+}
+/* F4. 观影记录详情浮层：双栏 grid 6fr/4fr 在窄屏会把左栏压到装不下海报，
+   单列化（与 B6 的 .wh-chart-split 单列保持一致）。
+   .wh-detail 嵌在 #fntv-wh 面板内，选择器必须带面板 ID 前缀才命中。 */
+html.fnos-narrow #fntv-wh .wh-detail{
+  grid-template-columns:1fr !important;
+}
+/* F5. 观影记录详情里的海报/预览在单列下按视口宽自适应，避免固定宽高溢出。 */
+html.fnos-narrow #fntv-wh .wh-detail img{
+  max-width:100% !important;
+  height:auto !important;
+}
+
 `;
 
 registerHook(HookType.OnReady, installMobileStyle);

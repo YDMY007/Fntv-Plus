@@ -76,6 +76,54 @@ func (i *Injector) AlreadyInjected(html string) bool {
 // /app/fntvplus/v/* 进入）时再在 <head> 最前面注入路径翻译 shim。
 // 返回 (处理后的 HTML, 是否真的做了注入)。
 // 找不到 </body> 时追加到末尾；已注入则原样返回。
+// viewportMarkers 是 viewport 修正的注入标记（独立于 payload/shim，便于单独判幂等）。
+const (
+	viewportMarkerBegin = "<!-- FNTV_PLUS_VIEWPORT_BEGIN -->"
+	viewportMarkerEnd   = "<!-- FNTV_PLUS_VIEWPORT_END -->"
+)
+
+// patchViewport 补上移动端适配的地基：给上游 viewport meta 加 viewport-fit=cover。
+//
+// 背景：飞牛影视原 meta 为 `width=device-width,initial-scale=1`，缺 viewport-fit。
+// 该属性是 env(safe-area-inset-*) 生效的**硬前置** —— 没有它，iPhone 刘海屏/底部
+// 横条方向的安全区变量恒等于 0，写多少 padding-bottom:env(...) 都是白写。
+// 上游全站 safe-area-inset 出现 0 次（实测其 CSS/JS），所以这块只能由我们补。
+//
+// 只做加法，不改上游已有的 width/initial-scale：不禁 user-scalable、不锁缩放
+// （iOS 10+ 已忽略该指令，但在 Android 上会真实禁用双指缩放并损害低视力用户）。
+// 已带 fit=cover 则原样返回，幂等。
+func patchViewport(html string) string {
+	if strings.Contains(html, viewportMarkerBegin) {
+		return html
+	}
+	lower := strings.ToLower(html)
+	// 只认 name="viewport"，避免误伤 name="apple-mobile-web-app-*" 等其它 meta。
+	start := strings.Index(lower, `<meta name="viewport"`)
+	if start < 0 {
+		return html
+	}
+	// 上游写的是自闭合形式 <meta ... />，其 "/>" 必然紧邻 ">"，不能据此判为未闭合——
+	// 只认「找不到 >」这一种非法情形。
+	tagEnd := strings.Index(lower[start:], ">")
+	if tagEnd < 0 {
+		return html
+	}
+	lowerTag := lower[start : start+tagEnd+1]
+	if strings.Contains(lowerTag, "viewport-fit=") {
+		return html
+	}
+	// 在最后一个引号前（content 值的收尾）追加 ",viewport-fit=cover"，
+	// 未闭合的标签（上游为 <meta ... />）保持原样不动。
+	insertAt := start + strings.LastIndex(lowerTag, `"`)
+	if insertAt < start {
+		return html
+	}
+	patched := html[:insertAt] + ",viewport-fit=cover" + html[insertAt:]
+	// 标记留在 meta 之后，便于缓存命中的响应肉眼确认已处理。
+	end := start + tagEnd + 1 + len(",viewport-fit=cover")
+	return patched[:end] + "\n" + viewportMarkerBegin + viewportMarkerEnd + patched[end:]
+}
+
 func (i *Injector) Inject(html string, gateway bool) (string, bool) {
 	if i.AlreadyInjected(html) {
 		return html, false
@@ -83,6 +131,9 @@ func (i *Injector) Inject(html string, gateway bool) (string, bool) {
 	if gateway {
 		html = injectGatewayShim(html)
 	}
+	// viewport 修正必须早于 payload：payload 里的安全区/窄屏样式在 <body> 前的
+	// 模块脚本里执行，而移动端浏览器只认文档解析期的首个 viewport meta。
+	html = patchViewport(html)
 	tag := i.ScriptTag()
 	idx := strings.LastIndex(strings.ToLower(html), "</body>")
 	if idx < 0 {

@@ -111,27 +111,57 @@ function wireBar(barEl: HTMLElement, main: HTMLVideoElement): void {
     document.body.appendChild(ov);
     canvas = cv;
 
-    barEl.addEventListener('mousemove', (e: MouseEvent) => {
+    /** 按进度条上的 X 坐标渲染预览浮层。鼠标/触摸共用一份，保证两端行为一致。 */
+    const showAt = (clientX: number): void => {
         const r = barEl.getBoundingClientRect();
-        const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+        const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
         const mainV = document.querySelector('video') as HTMLVideoElement | null;
         if (!mainV || !mainV.duration || !isFinite(mainV.duration)) { ov.style.display = 'none'; return; }
         const time = ratio * mainV.duration;
         const h = ensureHidden(mainV);
-        // 浮层位置：跟随鼠标 X（钳制在视口内），悬于进度条上方
+        // 浮层位置：跟随指针 X（钳制在视口内），悬于进度条上方
         const ovW = 176;
-        const left = Math.max(8, Math.min(window.innerWidth - ovW - 8, e.clientX - ovW / 2));
+        const left = Math.max(8, Math.min(window.innerWidth - ovW - 8, clientX - ovW / 2));
         const top = Math.max(8, r.top - 112);
         ov.style.display = 'flex';
         ov.style.left = left + 'px';
         ov.style.top = top + 'px';
         tip.textContent = esc(fmtTime(time));
         requestFrame(h, cv, time);
-    });
-    barEl.addEventListener('mouseleave', () => {
+    };
+    const hide = (): void => {
         ov.style.display = 'none';
         if (canvas) canvas.style.opacity = '0';
-    });
+    };
+
+    barEl.addEventListener('mousemove', (e: MouseEvent) => showAt(e.clientX));
+    barEl.addEventListener('mouseleave', hide);
+
+    // 触摸通道：原先只有 mousemove，触摸设备上永远收不到该事件 → 整个预览功能是死代码
+    // （实测手机端进度条拖动无缩略图）。这里补 touchstart/touchmove 跟手，
+    // touchend 不立刻收起而是短暂停留，让用户看清这一帧再消失。
+    let touchHideTimer: number | null = null;
+    barEl.addEventListener('touchstart', (e: TouchEvent) => {
+        const t = e.touches[0];
+        if (!t) return;
+        if (touchHideTimer !== null) { clearTimeout(touchHideTimer); touchHideTimer = null; }
+        showAt(t.clientX);
+    }, { passive: true });
+    barEl.addEventListener('touchmove', (e: TouchEvent) => {
+        const t = e.touches[0];
+        if (!t) return;
+        if (touchHideTimer !== null) { clearTimeout(touchHideTimer); touchHideTimer = null; }
+        showAt(t.clientX);
+    }, { passive: true });
+    barEl.addEventListener('touchend', () => {
+        if (touchHideTimer !== null) clearTimeout(touchHideTimer);
+        touchHideTimer = window.setTimeout(hide, 700);
+    }, { passive: true });
+    barEl.addEventListener('touchcancel', () => {
+        if (touchHideTimer !== null) clearTimeout(touchHideTimer);
+        touchHideTimer = null;
+        hide();
+    }, { passive: true });
 }
 
 function fmtTime(sec: number): string {

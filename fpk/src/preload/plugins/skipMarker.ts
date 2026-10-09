@@ -678,6 +678,26 @@ function cancelCloseMkPanel(): void {
     if (mkCloseTimer !== null) { window.clearTimeout(mkCloseTimer); mkCloseTimer = null; }
 }
 
+// [lc-1288] 触摸端「点面板外关闭」。面板开合的主通道是 mouseenter/mouseleave，
+// 触摸设备上这对事件要么不触发、要么在 tap 其它区域后粘住不消失（MDN :hover 同款陷阱），
+// 于是手机上打开面板后没有任何途径收起它。这里补一个 pointerdown 捕获通道：
+// 落在面板/触发按钮之外即关闭。与 danmakuWeb 的三通道关闭（click+touchstart+Esc）是同一思路，
+// 但用 pointerdown 统一覆盖鼠标/触摸/笔，且在捕获阶段先于站点的点击处理执行。
+let mkOutsideBound = false;
+function bindOutsideClose(): void {
+    if (mkOutsideBound) return;
+    mkOutsideBound = true;
+    document.addEventListener('pointerdown', (e: Event) => {
+        const t = e.target as Node | null;
+        if (!t || !panelEl || !panelEl.classList.contains('active')) return;
+        // 面板本体与触发按钮内部的按下不关闭（面板内有输入框/按钮，点它们不该收起）
+        if (panelEl.contains(t)) return;
+        if (btnWrap && btnWrap.contains(t)) return;
+        cancelCloseMkPanel();
+        closePanel();
+    }, true);
+}
+
 function removePanel(): void {
     try { const el = document.getElementById(PANEL_ID); if (el && el.parentNode) el.parentNode.removeChild(el); } catch { /* ignore */ }
     panelEl = null;
@@ -764,6 +784,7 @@ async function openPanel(): Promise<void> {
     // 异步竞态守卫：openPanel 等待配置/数据期间指针已移出（关闭已排程）→ 放弃本次展开
     if (mkCloseTimer !== null) { cancelCloseMkPanel(); closePanel(); return; }
     panelEl.classList.add('active');
+    bindOutsideClose();   // [lc-1288] 首次展开时才绑定 document 监听，懒且只绑一次
 }
 
 function closePanel(): void {
