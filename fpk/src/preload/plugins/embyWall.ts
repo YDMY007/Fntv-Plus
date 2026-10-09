@@ -2671,9 +2671,10 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   但用户再也找不到切换入口（用户报障「外观里轮播图样式没了」）。按桌面版原样补回：
     //   1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，点击后整页回首页重载生效。
     const getCs = (): number => {
-      // [lc-1291→lc-1308] 与 mobile.resolveCarouselStyle 同口径：触屏设备上存量 '4' 是
-      // 样式 5 诞生前的默认值、不是知情选择 → 高亮「触屏特供」；显式选过 1/2/3 才高亮
-      // 对应项。桌面非触屏：'4'/'5'/空 全部按 4 高亮，行为不变。
+      // [lc-1291→lc-1309] 与 mobile.resolveCarouselStyle 同口径（touchCapable 已含
+      // 触屏+短边≤820 双条件）：手机/平板上存量 '4' 是 lc-780 时代默认值、不是知情选择
+      // → 高亮「触屏特供」；显式选过 1/2/3 才高亮对应项。PC（含触屏一体机）：
+      // '4'/'5'/空 全部按 4 高亮，原样式不动。
       const stored = localStorage.getItem('fnos-carousel-style');
       const v = parseInt(stored || '4', 10);
       if (touchCapable) {
@@ -2692,7 +2693,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     csSeg.style.cssText = 'display:flex;gap:6px;';
     // [lc-1291] 样式 5 仅触屏设备可选；桌面面板里不显示这一项（resolveCarouselStyle 同口径：
     //   桌面即便写入 5 也会回落 4，这里不展示是避免给桌面用户一个「选了没效果」的死开关）。
-    const touchCapable = (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
+    // [lc-1309] 用户明确要求新布局**只对手机端和平板的尺寸规格生效**、PC 原样式不动：
+    // 面板第 5 项与高亮口径 = 触屏 + 短边≤820 双条件（与 mobile.resolveCarouselStyle 一致）。
+    // 触屏一体机/触屏笔记本（PC，短边>820）不显示该档，避免「选了没效果」的死开关。
+    const mobileSpec = (() => { try { return Math.min(window.innerWidth, window.innerHeight) <= 820; } catch { return false; } })();
+    const touchCapable = mobileSpec && (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
     const csLabels = ['竖向轮播', '横向轮播', '堆叠切换', '立体堆叠'];
     if (touchCapable) csLabels.push('触屏特供');
     csLabels.forEach((lab, idx) => {

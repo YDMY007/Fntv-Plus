@@ -148,15 +148,20 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
   const _cs = ((): number => {
-    // [lc-1291→lc-1308] 与 mobile.resolveCarouselStyle 同口径（不 import 是因 progress.ts
-    //   与 render.ts 的既有依赖方向，此处复制并注明来源）。lc-1308：触屏设备上存量 '4'
-    //   是样式 5 诞生前的默认值、不是知情选择 → 与空值同等对待走样式 5；显式选过 1/2/3
-    //   才尊重。桌面非触屏：'4'/'5'/空 全部按 4 渲染，行为不变。
+    // [lc-1291→lc-1309] 与 mobile.resolveCarouselStyle 同口径（不 import 是因 progress.ts
+    //   与 render.ts 的既有依赖方向，此处复制并注明来源）。
+    //   [lc-1309] 用户明确要求新布局**只对手机端和平板的尺寸规格生效**、PC 原样式不动：
+    //   门控 = 触屏 + 短边≤820px 双条件（触屏一体机/触屏笔记本的 PC 短边 > 820 → 仍走 4）。
+    //   [lc-1308] 手机/平板上存量 '4' 是 lc-780 时代默认值、非知情选择 → 与空值同等对待
+    //   走样式 5；显式选过 1/2/3 才尊重。
     let stored: string | null = null;
     try { stored = localStorage.getItem('fnos-carousel-style'); } catch { /* 视为未选过 */ }
-    let touch = false;
-    try { touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0; } catch { touch = false; }
-    if (touch) {
+    let touch = false, mobileSpec = false;
+    try {
+      touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+      mobileSpec = Math.min(window.innerWidth, window.innerHeight) <= 820;
+    } catch { touch = false; mobileSpec = false; }
+    if (touch && mobileSpec) {
       const tv = parseInt(stored || '4', 10);
       return (tv === 1 || tv === 2 || tv === 3) ? tv : 5;
     }

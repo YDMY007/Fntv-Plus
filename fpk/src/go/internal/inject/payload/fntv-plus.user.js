@@ -10334,13 +10334,15 @@ html.fnos-perf.dark{
         stored = localStorage.getItem("fnos-carousel-style");
       } catch {
       }
-      let touch = false;
+      let touch = false, mobileSpec = false;
       try {
         touch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+        mobileSpec = Math.min(window.innerWidth, window.innerHeight) <= 820;
       } catch {
         touch = false;
+        mobileSpec = false;
       }
-      if (touch) {
+      if (touch && mobileSpec) {
         const tv = parseInt(stored || "4", 10);
         return tv === 1 || tv === 2 || tv === 3 ? tv : 5;
       }
@@ -11657,14 +11659,21 @@ html.fnos-perf.dark{
       return false;
     }
   }
+  function isMobileSpec() {
+    try {
+      const shortSide = Math.min(window.innerWidth, window.innerHeight);
+      return shortSide > 0 && shortSide <= 820;
+    } catch {
+      return false;
+    }
+  }
   function resolveCarouselStyle() {
     let stored = null;
     try {
       stored = localStorage.getItem("fnos-carousel-style");
     } catch {
     }
-    const touch = isTouchCapable2();
-    if (touch) {
+    if (isTouchCapable2() && isMobileSpec()) {
       const v2 = parseInt(stored || "4", 10);
       if (v2 === 1 || v2 === 2 || v2 === 3) return v2;
       return 5;
@@ -19352,7 +19361,14 @@ html.fntv-boot-hide #root{visibility:hidden}
       const csSeg = document.createElement("div");
       csSeg.id = "fnos-carousel-style-seg";
       csSeg.style.cssText = "display:flex;gap:6px;";
-      const touchCapable = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+      const mobileSpec = (() => {
+        try {
+          return Math.min(window.innerWidth, window.innerHeight) <= 820;
+        } catch {
+          return false;
+        }
+      })();
+      const touchCapable = mobileSpec && ("ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0);
       const csLabels = ["\u7AD6\u5411\u8F6E\u64AD", "\u6A2A\u5411\u8F6E\u64AD", "\u5806\u53E0\u5207\u6362", "\u7ACB\u4F53\u5806\u53E0"];
       if (touchCapable) csLabels.push("\u89E6\u5C4F\u7279\u4F9B");
       csLabels.forEach((lab, idx) => {

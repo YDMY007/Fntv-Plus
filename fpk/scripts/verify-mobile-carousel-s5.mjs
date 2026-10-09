@@ -30,39 +30,49 @@ if (!mobile) {
 }
 
 // ═══ 1. 选路逻辑：vm 沙箱跑真实 resolveCarouselStyle ═══
-console.log('\n[1] 选路逻辑（触屏自动特供 / 桌面回落 / 存量用户不受扰）');
+console.log('\n[1] 选路逻辑（触屏+尺寸规格双门控 / PC 原样式不动 / 存量口径）');
 {
   const fnSrc = mobile.match(/export function resolveCarouselStyle\(\): number \{[\s\S]*?\n\}/);
   ok(!!fnSrc, 'resolveCarouselStyle 可抽取');
   const touchSrc = mobile.match(/function isTouchCapable\(\): boolean \{[\s\S]*?\n\}/);
   ok(!!touchSrc, 'isTouchCapable 可抽取');
+  const specSrc = mobile.match(/function isMobileSpec\(\): boolean \{[\s\S]*?\n\}/);
+  ok(!!specSrc, 'isMobileSpec 可抽取');
   // vm 只认纯 JS：剥掉 TS 类型标注（含 let stored: string|null 这样的局部注解）
   const strip = (s) => s.replace('export ', '')
     .replace(/\(\): number /, '() ')
-    .replace(/\(\): boolean /, '() ')
-    .replace(/let stored: string \| null = null/, 'let stored = null');
-  const body = fnSrc && touchSrc ? strip(fnSrc[0]) + '\n' + strip(touchSrc[0]) : '';
-  // 用 runInContext 的返回值
-  const run = (stored, touch) => {
+    .replace(/\(\): boolean /g, '() ')
+    .replace(/let stored: string \| null = null/g, 'let stored = null');
+  const body = fnSrc && touchSrc && specSrc
+    ? strip(fnSrc[0]) + '\n' + strip(touchSrc[0]) + '\n' + strip(specSrc[0]) : '';
+  // run(stored, touch, w, h)：w/h 是视口（短边 ≤820 = 手机/平板规格）
+  const run = (stored, touch, w = 390, h = 844) => {
     const sb = {
       localStorage: { getItem: () => stored },
-      window: touch ? { ontouchstart: null } : {},
+      window: { ...(touch ? { ontouchstart: null } : {}), innerWidth: w, innerHeight: h },
       navigator: { maxTouchPoints: touch ? 5 : 0 },
     };
     vm.createContext(sb);
     return vm.runInContext(body + '\nresolveCarouselStyle();', sb);
   };
-  ok(run(null, true) === 5, '触屏 + 从未选过 → 自动样式 5（用户要求「直接检测」）', `got ${run(null, true)}`);
-  ok(run(null, false) === 4, '桌面 + 从未选过 → 样式 4（桌面零变化）', `got ${run(null, false)}`);
-  // [lc-1308] 存量 '4' 是样式 5 诞生前的默认值（用户报障：内置 WebView 带存量 4 升级后
-  // 仍显示旧样式，与外置新环境不一致）→ 触屏上与空值同等对待，只有显式选过 1/2/3 才尊重。
-  ok(run('4', true) === 5, '触屏 + 存量 4（lc-780 时代默认值，非知情选择）→ 样式 5', `got ${run('4', true)}`);
-  ok(run('2', true) === 2, '触屏 + 存量用户显式选过 2 → 尊重选择为 2');
-  ok(run('1', true) === 1, '触屏 + 存量用户显式选过 1 → 尊重选择为 1');
-  ok(run('3', true) === 3, '触屏 + 存量用户显式选过 3 → 尊重选择为 3');
-  ok(run('5', true) === 5, '触屏 + 手动选 5 → 5');
-  ok(run('5', false) === 4, '桌面 + 手动选 5（理论上不可达）→ 回落 4');
-  ok(run('9', true) === 5, '触屏 + 越界值（坏数据等同未选）→ 样式 5', `got ${run('9', true)}`);
+  // ── 手机/平板规格（触屏 + 短边≤820）：样式 5 生效 ──
+  ok(run(null, true) === 5, '手机竖屏 390×844 + 从未选过 → 样式 5', `got ${run(null, true)}`);
+  ok(run('4', true) === 5, '手机 + 存量 4（lc-780 默认值，非知情选择）→ 样式 5', `got ${run('4', true)}`);
+  ok(run('2', true) === 2, '手机 + 显式选过 2 → 尊重为 2');
+  ok(run('1', true) === 1, '手机 + 显式选过 1 → 尊重为 1');
+  ok(run('3', true) === 3, '手机 + 显式选过 3 → 尊重为 3');
+  ok(run('5', true) === 5, '手机 + 手动选 5 → 5');
+  ok(run('9', true) === 5, '手机 + 越界值（坏数据等同未选）→ 样式 5');
+  // 平板横屏 1180×820：短边 820 仍在规格内
+  ok(run('4', true, 1180, 820) === 5, '平板横屏 1180×820（短边=820）→ 样式 5', `got ${run('4', true, 1180, 820)}`);
+  // ── [lc-1309] 用户核心诉求：PC 原样式一行不动 ──
+  ok(run('4', true, 1920, 1080) === 4, 'PC 触屏一体机 1920×1080（触屏但短边>820）→ 样式 4 原样', `got ${run('4', true, 1920, 1080)}`);
+  ok(run('4', true, 2560, 1440) === 4, 'PC 触屏 2560×1440 → 样式 4 原样');
+  ok(run(null, true, 1920, 1080) === 4, 'PC 触屏 + 从未选过 → 样式 4（不卷入）');
+  ok(run('5', true, 1920, 1080) === 4, 'PC 触屏 + 手动选 5 → 回落 4');
+  ok(run(null, false, 1920, 1080) === 4, 'PC 无触屏 + 从未选过 → 样式 4');
+  ok(run('5', false) === 4, '无触屏 + 手动选 5 → 回落 4');
+  ok(run('4', false, 1920, 1080) === 4, 'PC 无触屏 + 存量 4 → 样式 4');
 }
 
 // ═══ 2. 样式 5 的触屏设计断言（CSS 层）═══

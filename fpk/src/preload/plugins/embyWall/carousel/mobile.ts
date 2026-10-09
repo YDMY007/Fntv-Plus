@@ -32,26 +32,36 @@ function isTouchCapable(): boolean {
   } catch { return false; }
 }
 
-/** 渲染层入口是否允许样式 5：必须真触屏。桌面窄窗口一律回落 4（桌面样式靠鼠标才有意义）。
- *  export 供 render.ts 的 getCs 与设置面板共同使用，保证三处口径一致。
- *  [lc-1291] 自动特供：触屏设备 → 默认落样式 5，用户无需进设置面板找开关。
- *  [lc-1308] **存量 4 不再视为知情选择**（用户报障：内置 WebView 有 lc-780 时代写入的
- *  存量 '4'，升级到带样式 5 的包后仍显示旧样式，与外置新环境表现不一致）：'4' 是样式 5
- *  诞生前的默认值，存在它不代表用户在 4 与 5 之间做过选择。触屏设备上只有**显式选过
- *  1/2/3（非默认的其它形态）** 才尊重存量；'4' 与空值同等对待 → 样式 5。
- *  桌面（非触屏）行为不变：'4'/'5'/空 全部按 4 渲染。 */
+/** [lc-1309] 手机/平板的**尺寸规格**判定：短边 ≤ 820px。
+ *  用户明确要求：新布局样式**只对手机端和平板的尺寸规格生效**，PC 原样式一行不动。
+ *  只判触屏不够 —— 触屏一体机/触屏笔记本的 maxTouchPoints > 0，会被误卷进来
+ *  （用户实测：PC 端打开样式也变了）。短边（min(innerWidth, innerHeight)）不受
+ *  横竖屏影响：手机竖屏 390/844 → 390 ✓；平板横屏 1180/820 → 820 ✓；PC 1920/1080 → 1080 ✗。
+ *  820 与 mobileStyle 的 fnos-compact 断点（#root 桌面布局最小宽）对齐。 */
+function isMobileSpec(): boolean {
+  try {
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    return shortSide > 0 && shortSide <= 820;
+  } catch { return false; }
+}
+
+/** 渲染层入口选路。[lc-1309] 门控改为「触屏 + 手机/平板尺寸规格」双条件：
+ *  用户明确要求新布局**只对手机端和平板的尺寸规格生效**、PC 原样式一行不动 ——
+ *  只判触屏会误伤触屏一体机/触屏笔记本（实测 PC 端样式也被卷进去了）。
+ *  触屏但尺寸超规格（PC）→ 按 4 渲染，与历史行为完全一致。
+ *  [lc-1291] 自动特供：手机/平板默认落样式 5，无需进设置面板找开关。
+ *  [lc-1308] 存量 '4' 是 lc-780 时代默认值、不是知情选择：手机/平板上只有**显式选过
+ *  1/2/3** 才尊重存量；'4' 与空值同等对待 → 样式 5。 */
 export function resolveCarouselStyle(): number {
   let stored: string | null = null;
   try { stored = localStorage.getItem('fnos-carousel-style'); } catch { /* 视为未选过 */ }
-  const touch = isTouchCapable();
-  if (touch) {
-    // 触屏：显式选过 1/2/3 才尊重（那是用户主动离开默认的选择）；'4' 与空都走特供
+  if (isTouchCapable() && isMobileSpec()) {
     const v = parseInt(stored || '4', 10);
     if (v === 1 || v === 2 || v === 3) return v;
     return 5;
   }
   const v = parseInt(stored || '4', 10);
-  if (v === 5) return 4; // 非触屏设备选了 5 → 回落立体堆叠
+  if (v === 5) return 4; // 非手机/平板规格选了 5（含 PC 触屏）→ 回落立体堆叠
   return (v >= 1 && v <= 5) ? v : 4;
 }
 
