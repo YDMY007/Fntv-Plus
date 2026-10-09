@@ -1817,8 +1817,12 @@ mp.register_script_message("setup-danmaku-style", function(query, text)
             -- 全被当成样式行处理：ordered_keys[9] 为 nil → add_danmaku_setup(nil, "updata") →
             -- 菜单重开但类型没切换，用户看到的就是「点了没反应」。
             -- 故先把非 nil 的 value 命令执行掉，再对样式行按 index 处理。
+            -- [lc-1293] 白名单由「仅 toggle-block-type」放宽为「本脚本的任意 script-message-to」：
+            -- 原先逐个枚举，新增「弹幕密度」项（toggle-danmaku-density）后不在名单里，
+            -- 会掉到下面的 ordered_keys[event.index] —— 密度项排在 ordered_keys 之外，
+            -- key 为 nil 直接 return，表现为「点击无反应」。故改为按前缀匹配本脚本名即可。
             if event.action == nil and type(event.value) == "table" and event.value[1] == "script-message-to"
-                and event.value[2] == mp.get_script_name() and event.value[3] == "toggle-block-type" then
+                and event.value[2] == mp.get_script_name() and type(event.value[3]) == "string" then
                 mp.commandv(unpack(event.value))
                 return
             end
