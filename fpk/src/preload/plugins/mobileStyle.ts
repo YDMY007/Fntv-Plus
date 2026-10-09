@@ -181,6 +181,16 @@ html.fnos-narrow [class*="h-[80px]"][class*="bg-[var(--semi-color-bg-1)]"]{
     height:64px !important;
 }
 html.fnos-narrow #tb-logo{ top:32px !important; }
+/* [lc-1325] 页面级左留白收窄（用户报「下面的卡片全部左移，左边空距太大了」）：
+   首页标题用 px-11(44px)、卡片横滑行用任意值类 pl-[44px] —— 44px 左空距与卡片
+   间隙（8/16px）形成刺眼的不对称（实测首卡 x=44、卡间隙 8）。移动端标准留白
+   16px，两种写法一并收口（改后实测：三条横滑行 padL=16、首卡 x=16）。 */
+html.fnos-narrow [class*="px-11"]{
+    padding-left:16px !important; padding-right:16px !important;
+}
+html.fnos-narrow [class*="pl-[44px]"]{
+    padding-left:16px !important;
+}
 
 /* B2. 季页/竖版电影页 hero：横向「海报+信息」行改纵向堆叠。
    根因：信息列原生 w-[calc(100%-246px)]，390px 下只剩 52px —— 标题一字一行、

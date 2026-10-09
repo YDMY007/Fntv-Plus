@@ -111,6 +111,10 @@ console.log('\n[1c] 手机模式顶栏（首页导航栏）收口');
     '顶栏高度 80→64（移动端紧凑标准；行与外层等高不溢出）');
   ok(/html\.fnos-narrow #tb-logo\{ top:32px !important; \}/.test(mobileStyle),
     '首页 logo 跟随新顶栏中线（top 40→32，实测中线对齐）');
+  // [lc-1325] 页面级左留白收窄（标题 px-11 与卡片行 pl-[44px] 两种写法都要覆盖）
+  ok(/html\.fnos-narrow \[class\*="px-11"\]\{/.test(mobileStyle) &&
+     /html\.fnos-narrow \[class\*="pl-\[44px\]"\]\{/.test(mobileStyle),
+    '页面级左留白 44→16（实测三条横滑行首卡 x 44→16）');
 }
 
 // ═══ 2. 轮播左右黑框：宽度预算 ═══
