@@ -57,6 +57,7 @@ function render(): void {
 
 /** 贴「每日放送」按钮上方；它隐藏/不存在时落回右下角原位（bottom:24 与宫灯一致） */
 function reposition(): void {
+    watchHot();
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
     const hot = document.getElementById('fntv-hot-tab');
@@ -64,6 +65,19 @@ function reposition(): void {
     btn.style.bottom = hotVisible
         ? Math.round(24 + hot.getBoundingClientRect().height + 10) + 'px'
         : '24px';
+}
+
+let _hotObserved = false;
+/** 惰性绑定「每日放送」按钮的显隐观察。它由 hotUpdates 稍后创建（且开关切换时会整只重建），
+ *  本插件 boot 时通常还不存在 —— 真机实测首访按钮落在 bottom:24 与宫灯按钮完全重叠被盖住。 */
+function watchHot(): void {
+    if (_hotObserved) return;
+    const hot = document.getElementById('fntv-hot-tab');
+    if (!hot) return;
+    _hotObserved = true;
+    try {
+        new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ['style', 'class'] });
+    } catch { /* ignore */ }
 }
 
 function mount(): void {
@@ -82,13 +96,6 @@ function mount(): void {
     document.body.appendChild(btn);
     render();
     reposition();
-    // 跟随「每日放送」按钮的显隐变化（hotUpdates 按路由改它的 style.display）→ 重定位
-    const hot = document.getElementById('fntv-hot-tab');
-    if (hot) {
-        try {
-            new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ['style', 'class'] });
-        } catch { /* ignore */ }
-    }
 }
 
 function boot(): void {
@@ -96,10 +103,13 @@ function boot(): void {
     _bound = true;
     if (document.body) mount();
     else document.addEventListener('DOMContentLoaded', mount, { once: true });
-    // SPA 内 body 直接子节点被清（极端情况）时自愈重挂
+    // SPA 内 body 直接子节点变化时：被清则重挂；否则顺带重定位（「每日放送」由 hotUpdates
+    // 稍后创建/重建，会在 body 上触发 childList —— 靠这条通道拿到它的高度做避让）
     try {
-        new MutationObserver(() => { if (!document.getElementById(BTN_ID)) mount(); })
-            .observe(document.body || document.documentElement, { childList: true });
+        new MutationObserver(() => {
+            if (!document.getElementById(BTN_ID)) mount();
+            else { watchHot(); reposition(); }
+        }).observe(document.body || document.documentElement, { childList: true });
     } catch { /* ignore */ }
     window.addEventListener('resize', reposition, { passive: true });
     window.addEventListener(UI_MODE_EVENT, render);   // 别处改模式（未来）时同步按钮文案

@@ -3422,6 +3422,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
         window.addEventListener(UI_MODE_EVENT, () => applyViewportFlags());
       } catch {
       }
+      try {
+        if (localStorage.getItem(UI_MODE_KEY) === null) {
+          const narrow = Math.min(window.innerWidth, window.innerHeight) <= 820;
+          setUiMode(narrow ? "mobile" : "desktop");
+        }
+      } catch {
+      }
     }
     ensure();
   }
@@ -23596,11 +23603,23 @@ html.fntv-boot-hide #root{visibility:hidden}
     btn.classList.toggle("on", m === "mobile");
   }
   function reposition() {
+    watchHot();
     const btn = document.getElementById(BTN_ID2);
     if (!btn) return;
     const hot = document.getElementById("fntv-hot-tab");
     const hotVisible = !!hot && hot.offsetParent !== null && hot.getBoundingClientRect().height > 0;
     btn.style.bottom = hotVisible ? Math.round(24 + hot.getBoundingClientRect().height + 10) + "px" : "24px";
+  }
+  var _hotObserved = false;
+  function watchHot() {
+    if (_hotObserved) return;
+    const hot = document.getElementById("fntv-hot-tab");
+    if (!hot) return;
+    _hotObserved = true;
+    try {
+      new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ["style", "class"] });
+    } catch {
+    }
   }
   function mount() {
     if (!document.body) return;
@@ -23622,13 +23641,6 @@ html.fntv-boot-hide #root{visibility:hidden}
     document.body.appendChild(btn);
     render2();
     reposition();
-    const hot = document.getElementById("fntv-hot-tab");
-    if (hot) {
-      try {
-        new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ["style", "class"] });
-      } catch {
-      }
-    }
   }
   function boot() {
     if (_bound) return;
@@ -23638,6 +23650,10 @@ html.fntv-boot-hide #root{visibility:hidden}
     try {
       new MutationObserver(() => {
         if (!document.getElementById(BTN_ID2)) mount();
+        else {
+          watchHot();
+          reposition();
+        }
       }).observe(document.body || document.documentElement, { childList: true });
     } catch {
     }

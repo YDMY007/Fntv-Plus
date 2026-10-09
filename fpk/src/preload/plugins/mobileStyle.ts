@@ -118,6 +118,15 @@ export function installMobileStyle(): void {
   if (!_uiModeBound) {
     _uiModeBound = true;
     try { window.addEventListener(UI_MODE_EVENT, () => applyViewportFlags()); } catch { /* ignore */ }
+    // [lc-1320] 首访初始化：本地无选择时按当前窗口尺寸给一次初值并**固化**（窄窗=手机版、
+    //   宽窗=电脑版）——只发生一次，之后永远以手动选择为准（不随窗口变化再翻转，
+    //   与已废除的"持续自动判定"是两个东西）。
+    try {
+      if (localStorage.getItem(UI_MODE_KEY) === null) {
+        const narrow = Math.min(window.innerWidth, window.innerHeight) <= 820;
+        setUiMode(narrow ? 'mobile' : 'desktop');
+      }
+    } catch { /* ignore */ }
   }
   ensure();
 }
