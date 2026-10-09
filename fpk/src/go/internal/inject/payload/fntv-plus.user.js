@@ -23607,7 +23607,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     const btn = document.getElementById(BTN_ID2);
     if (!btn) return;
     const hot = document.getElementById("fntv-hot-tab");
-    const hotVisible = !!hot && hot.offsetParent !== null && hot.getBoundingClientRect().height > 0;
+    const hotVisible = !!hot && hot.getBoundingClientRect().height > 0 && getComputedStyle(hot).display !== "none";
     btn.style.bottom = hotVisible ? Math.round(24 + hot.getBoundingClientRect().height + 10) + "px" : "24px";
   }
   var _hotObserved = false;

@@ -61,7 +61,11 @@ function reposition(): void {
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
     const hot = document.getElementById('fntv-hot-tab');
-    const hotVisible = !!hot && hot.offsetParent !== null && hot.getBoundingClientRect().height > 0;
+    // ⚠ 不能用 offsetParent 判可见：「每日放送」按钮是 position:fixed，fixed 元素的
+    //   offsetParent 规范上恒为 null —— lc-1320 首版因此永远走 else 分支，按钮停在
+    //   bottom:24 与它完全重叠被盖住（用户报「被挡住了」）。改用 rect 高度 + display。
+    const hotVisible = !!hot && hot.getBoundingClientRect().height > 0
+        && getComputedStyle(hot).display !== 'none';
     btn.style.bottom = hotVisible
         ? Math.round(24 + hot.getBoundingClientRect().height + 10) + 'px'
         : '24px';
