@@ -433,6 +433,22 @@ function injectMarkerPanelStyle(): void {
   transition:opacity .18s cubic-bezier(.22,1,.36,1), transform .18s cubic-bezier(.22,1,.36,1), visibility 0s linear .18s;
 }
 .fntv-mk-list.active{opacity:1; visibility:visible; pointer-events:auto; transform:none; transition-delay:0s}
+/* [lc-1315] 窄屏面板定位同弹幕面板：lc-1314 两行布局把「标记」按钮从右栏最右挪到
+   第二行中部，原内联 right:-6px（假设按钮贴视口右缘）会把面板推出视口。
+   fixed + 居中 + 底栏上方与按钮水平位置解耦；!important 压内联定位；激活态
+   transform 必须带 translateX(-50%)（transform 单一属性，写 none 会踢掉居中）。 */
+html.fnos-touch-narrow .fntv-mk-list{
+  position:fixed !important;
+  left:50% !important; right:auto !important;
+  bottom:calc(136px + max(8px, env(safe-area-inset-bottom)) + 10px) !important;
+  width:min(92vw, 360px) !important;
+  max-height:min(62vh, 560px) !important;
+  transform-origin:50% 100% !important;
+  transform:translateX(-50%) translateY(8px) scale(.96) !important;
+}
+html.fnos-touch-narrow .fntv-mk-list.active{
+  transform:translateX(-50%) !important;
+}
 /* 透明桥接：面板与按钮之间 10px 视觉间隙，鼠标穿过时不算移出（弹幕弹窗同款，::after 属于面板本身） */
 .fntv-mk-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:12px}
 .fntv-mk-title{padding:10px 16px 2px;font-size:14px;font-weight:600;color:#fff}

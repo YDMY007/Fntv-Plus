@@ -4963,6 +4963,15 @@ html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:
    \u5168\u5C4F\u906E\u7F69\u5C42\uFF08class \u542B !w-full\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A\u906E\u7F69\u4ECD\u94FA\u6EE1\u3001\u6D6E\u52A8\u5F39\u7A97\u6536\u53E3\uFF09\u3002 */
 html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
 
+/* [lc-1315] \u539F\u751F\u64AD\u653E\u9875\u5F39\u5C42\uFF08\u9009\u96C6/\u500D\u901F/\u539F\u753B/CC/\u8BBE\u7F6E\u5171\u7528 .trim-ui__player--popover\uFF09
+   \u7A84\u5C4F\u6536\u53E3\uFF1A\u672C\u4F53 tailwind \u5B9A\u5BBD w-[392px] \u786C\u7F16\u7801\uFF0C390px \u89C6\u53E3\u4E0B\u53F3\u7F18\u6EA2\u51FA 3px\uFF1B
+   \u7EDF\u4E00\u9650\u5BBD\u5230\u89C6\u53E3\u5185\u5E76\u7559 8px \u8FB9\u8DDD\u3001\u9AD8\u5EA6\u7ED9\u89C6\u53E3\u7559\u767D\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A392\u2192374\u3001
+   \u53F3\u7F18 393\u2192384 \u5B8C\u6574\u53EF\u89C1\uFF09\u3002\u5F39\u7A97\u672C\u4F53\u662F flex\uFF0C\u6536\u7A84\u540E\u5185\u5BB9\u81EA\u884C\u91CD\u6392\u3002 */
+html.fnos-touch-narrow .trim-ui__player--popover{
+    width:min(calc(100vw - 16px), 392px) !important;
+    max-height:calc(100vh - 120px) !important;
+}
+
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
    \u4E0A\u4E00\u6BB5\uFF08v1.4.1\uFF09\u53EA\u505A\u4E86\u300C\u70ED\u533A padding \u6491\u9AD8 + \u5B57\u53F7\u7F29\u5C0F\u300D\u2014\u2014\u90A3\u662F**\u7EB5\u5411**\u7684\uFF08\u628A\u70ED\u533A\u57AB\u9AD8\u5230
@@ -5326,15 +5335,25 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
    \u6DE1\u5165\u8DEF\u5F84\uFF1Adisplay \u5148\u7FFB\u5757\u518D\u8D70 opacity\u2014\u2014\u6D4F\u89C8\u5668\u5BF9 display:none\u2192block + transition \u7EC4\u5408
    \u5728\u540C\u5E27\u6E32\u67D3\u65F6\u8FC7\u6E21\u4F1A\u4E22\uFF0C\u4F46\u6253\u5F00\u662F\u300C\u77AC\u95F4\u53EF\u89C1\u53EF\u63A5\u53D7\u300D\uFF0C\u5173\u95ED\u6DE1\u51FA\u7167\u5E38\u8D70\u5B8C\u624D\u56DE none\uFF09\u3002 */
 html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
-/* [v1.4.0] \u624B\u673A\u7F51\u9875\uFF1A320px \u5B9A\u5BBD + right:-6px \u4F1A\u6EA2\u51FA\u7AD6\u5C4F\u89C6\u53E3\u3002\u89E6\u5C4F\u7A84\u5C4F(html.fnos-touch-narrow,
-   \u7531 beautifyStyle \u6CE8\u5165\u4FA7\u5B89\u88C5;\u5F39\u5E55\u6309\u94AE\u6302\u8F7D\u665A\u4E8E\u8BE6\u60C5\u9875\u6837\u5F0F\u6CE8\u5165,\u64AD\u653E\u9875\u65E0\u8BE5\u6807\u8BB0\u65F6\u6B64\u5904\u56DE\u9000
-   max-width \u5A92\u4F53\u67E5\u8BE2)\u4E0B\u6539\u4E3A\u89C6\u53E3\u5BBD\u51CF\u8FB9\u8DDD\u3001\u8D34\u89C6\u53E3\u53F3\u7F18\u3002 */
-@media (max-width: 640px){
-  html.fnos-touch-narrow .fntv-dm-list{
-    width:min(92vw, 360px);
-    right:calc(-1 * (100vw - 100%) / 2 + 4vw);   /* wrap \u53F3\u7F18\u2248\u89C6\u53E3\u53F3\u7F18 \u2192 \u9762\u677F\u53F3\u7F18\u5185\u7F29 4vw */
-    max-height:72vh;
-  }
+/* [lc-1315] \u7A84\u5C4F\uFF08\u542B 641~820 \u89E6\u5C4F/\u5E73\u677F\uFF09\u9762\u677F\u6539 fixed \u8D34\u5E95\u5C45\u4E2D\u3002
+   v1.4.0 \u7684 right \u516C\u5F0F\u5047\u8BBE\u300C\u5F39\u5E55\u6309\u94AE\u5728\u89C6\u53E3\u53F3\u7F18\u300D\uFF08\u5F53\u65F6\u7684\u5355\u884C\u5E95\u680F\u6210\u7ACB\uFF09\uFF1Blc-1314
+   \u4E24\u884C\u5E03\u5C40\u628A\u300C\u5F39\u5E55\u300D\u6309\u94AE\u632A\u5230\u7B2C\u4E8C\u884C\u5DE6/\u4E2D\u90E8\u540E\uFF0C\u516C\u5F0F\u628A\u9762\u677F\u6574\u4F53\u63A8\u51FA\u89C6\u53E3\u5DE6\u4FA7
+   \uFF08\u771F\u673A\u5B9E\u6D4B\u9762\u677F x=-101\uFF1A\u5DE6\u5BF9\u9F50\u6587\u5B57\u5168\u5728\u5C4F\u5916\uFF0C\u53EA\u5269\u53F3\u7F18\u5F00\u5173\u4E0E\u5C45\u4E2D\u300C\u6E05\u9664\u5F39\u5E55\u300D
+   \u53EF\u89C1\u2014\u2014\u7528\u6237\u622A\u56FE\u5373\u6B64\uFF09\u3002fixed + \u6C34\u5E73\u5C45\u4E2D + \u951A\u5728\u5E95\u680F\u4E0A\u65B9 = \u4E0E\u6309\u94AE\u6C34\u5E73\u4F4D\u7F6E\u89E3\u8026\uFF0C
+   \u4EFB\u610F\u89C6\u53E3\u5B8C\u6574\u53EF\u89C1\u3002bottom \u91CC 136px \u4E0E [lc-1314] \u5E95\u680F\u9AD8\u4E00\u81F4\uFF08\u6539\u5E95\u680F\u9AD8\u9700\u540C\u6B65\uFF09\u3002 */
+html.fnos-touch-narrow .fntv-dm-list{
+    position:fixed !important;
+    left:50% !important; right:auto !important;
+    bottom:calc(136px + max(8px, env(safe-area-inset-bottom)) + 10px) !important;
+    width:min(92vw, 360px) !important;
+    max-height:min(62vh, 560px) !important;
+    transform-origin:50% 100% !important;
+    transform:translateX(-50%) translateY(8px) scale(.96) !important;
+}
+/* \u6FC0\u6D3B\u6001\u5FC5\u987B\u5E26 translateX(-50%)\uFF1Atransform \u662F\u5355\u4E00\u5C5E\u6027\uFF0C\u76F4\u63A5\u5199 none \u4F1A\u628A\u5C45\u4E2D\u8E22\u6389
+   \uFF08\u8FDB\u573A\u52A8\u753B\u4E0E\u5C45\u4E2D\u5171\u7528\u540C\u4E00 transform\uFF0C\u4E8C\u8005\u5408\u6210\u5199\uFF09 */
+html.fnos-touch-narrow .fntv-dm-list.active{
+    transform:translateX(-50%) !important;
 }
 /* \u900F\u660E\u6865\u63A5: \u5F39\u7A97\u4E0E\u6309\u94AE\u4E4B\u95F4\u7559 10px \u89C6\u89C9\u95F4\u9699, \u4F46\u9F20\u6807\u7A7F\u8FC7\u65F6\u4E0D\u80FD\u7B97\u300C\u79FB\u51FA\u300D\u2014\u2014
    hover \u89E6\u53D1\u7684\u5F39\u7A97\u82E5\u5728\u534A\u8DEF\u5173\u6389, \u5C31\u6C38\u8FDC\u79FB\u4E0D\u8FDB\u53BB\u62D6\u6ED1\u5757\u3002\u4F2A\u5143\u7D20\u5C5E\u4E8E\u5F39\u7A97\u672C\u8EAB\u3002 */
@@ -6146,7 +6165,8 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     let autoK = 1;
     if (style.autoScale) {
       const scrollLanes = laneScroll.length;
-      const busy = scrollLanes > 0 ? laneScroll.reduce((s, l) => s + (l && l.until > t2 ? 1 : 0), 0) : 0;
+      const dur = style.scrollDuration;
+      const busy = scrollLanes > 0 ? laneScroll.reduce((s, l) => s + (l && t2 - l.time < dur ? 1 : 0), 0) : 0;
       const occ = busy / Math.max(1, scrollLanes);
       const target = occ <= 0.4 ? 1 : Math.max(0.6, 1 - (occ - 0.4) * (0.4 / 0.6));
       autoScaleK = autoScaleK < 0 ? target : autoScaleK + (target - autoScaleK) * 0.15;
@@ -6154,7 +6174,12 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     } else if (autoScaleK >= 0) {
       autoScaleK = -1;
     }
-    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale * autoK));
+    try {
+      window.__fntvAutoK = autoK;
+    } catch {
+    }
+    const baseFont = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
+    const fontSize = Math.max(10, baseFont * autoK);
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
@@ -24768,6 +24793,22 @@ html.fnos-narrow #fntv-wh .wh-detail img{
   transition:opacity .18s cubic-bezier(.22,1,.36,1), transform .18s cubic-bezier(.22,1,.36,1), visibility 0s linear .18s;
 }
 .fntv-mk-list.active{opacity:1; visibility:visible; pointer-events:auto; transform:none; transition-delay:0s}
+/* [lc-1315] \u7A84\u5C4F\u9762\u677F\u5B9A\u4F4D\u540C\u5F39\u5E55\u9762\u677F\uFF1Alc-1314 \u4E24\u884C\u5E03\u5C40\u628A\u300C\u6807\u8BB0\u300D\u6309\u94AE\u4ECE\u53F3\u680F\u6700\u53F3\u632A\u5230
+   \u7B2C\u4E8C\u884C\u4E2D\u90E8\uFF0C\u539F\u5185\u8054 right:-6px\uFF08\u5047\u8BBE\u6309\u94AE\u8D34\u89C6\u53E3\u53F3\u7F18\uFF09\u4F1A\u628A\u9762\u677F\u63A8\u51FA\u89C6\u53E3\u3002
+   fixed + \u5C45\u4E2D + \u5E95\u680F\u4E0A\u65B9\u4E0E\u6309\u94AE\u6C34\u5E73\u4F4D\u7F6E\u89E3\u8026\uFF1B!important \u538B\u5185\u8054\u5B9A\u4F4D\uFF1B\u6FC0\u6D3B\u6001
+   transform \u5FC5\u987B\u5E26 translateX(-50%)\uFF08transform \u5355\u4E00\u5C5E\u6027\uFF0C\u5199 none \u4F1A\u8E22\u6389\u5C45\u4E2D\uFF09\u3002 */
+html.fnos-touch-narrow .fntv-mk-list{
+  position:fixed !important;
+  left:50% !important; right:auto !important;
+  bottom:calc(136px + max(8px, env(safe-area-inset-bottom)) + 10px) !important;
+  width:min(92vw, 360px) !important;
+  max-height:min(62vh, 560px) !important;
+  transform-origin:50% 100% !important;
+  transform:translateX(-50%) translateY(8px) scale(.96) !important;
+}
+html.fnos-touch-narrow .fntv-mk-list.active{
+  transform:translateX(-50%) !important;
+}
 /* \u900F\u660E\u6865\u63A5\uFF1A\u9762\u677F\u4E0E\u6309\u94AE\u4E4B\u95F4 10px \u89C6\u89C9\u95F4\u9699\uFF0C\u9F20\u6807\u7A7F\u8FC7\u65F6\u4E0D\u7B97\u79FB\u51FA\uFF08\u5F39\u5E55\u5F39\u7A97\u540C\u6B3E\uFF0C::after \u5C5E\u4E8E\u9762\u677F\u672C\u8EAB\uFF09 */
 .fntv-mk-list::after{content:'';position:absolute;left:0;right:0;top:100%;height:12px}
 .fntv-mk-title{padding:10px 16px 2px;font-size:14px;font-weight:600;color:#fff}

@@ -165,6 +165,35 @@ console.log('\n[4] 播放页底栏「挤在一起/显示不全」→ 两行布�
     '播放信息弹窗窄屏收口（排除全屏遮罩层）');
 }
 
+// ═══ 4b. 弹出面板定位 + 弹幕自动缩放（lc-1315） ═══
+console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
+{
+  // 面板窄屏 fixed 居中：与按钮水平位置解耦（lc-1314 两行后按钮不再贴右缘，
+  // 原 right 公式把面板推出视口左侧——真机实测弹幕面板 x=-101、文字全在屏外）
+  ok(/html\.fnos-touch-narrow \.fntv-dm-list\{\s*\n?\s*position:fixed !important;/.test(danmakuWeb),
+    '弹幕面板：窄屏 fixed 定位（与按钮水平位置解耦）');
+  ok(/left:50% !important; right:auto !important;/.test(danmakuWeb), '弹幕面板：水平居中');
+  ok(/bottom:calc\(136px \+ max\(8px, env\(safe-area-inset-bottom\)\) \+ 10px\) !important/.test(danmakuWeb),
+    '弹幕面板：锚在底栏上方（136px = [lc-1314] 底栏高）');
+  ok(/html\.fnos-touch-narrow \.fntv-dm-list\.active\{\s*\n?\s*transform:translateX\(-50%\) !important;/.test(danmakuWeb),
+    '弹幕面板：激活态 transform 保留居中（与进出场动画合成）');
+  const skipMarkerSrc = read('src/preload/plugins/skipMarker.ts');
+  ok(/html\.fnos-touch-narrow \.fntv-mk-list\{\s*\n?\s*position:fixed !important;/.test(skipMarkerSrc),
+    '标记面板：同款 fixed 居中（!important 压内联 right:-6px）');
+  ok(/html\.fnos-touch-narrow \.fntv-mk-list\.active\{\s*\n?\s*transform:translateX\(-50%\) !important;/.test(skipMarkerSrc),
+    '标记面板：激活态 transform 保留居中');
+  // autoScale 占用率：LaneSlot={time,width} 没有 until（lc-1313 引用不存在的字段 = 死代码）
+  // 剥注释再测：本段注释里会引用 lc-1313 的旧写法作为史实说明，不算代码
+  const dmCode = danmakuWeb.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(!/l\.until/.test(dmCode), '占用率不再引用不存在的 until 字段（lc-1313 死代码）');
+  ok(/l && t - l\.time < dur \? 1 : 0/.test(danmakuWeb), '占用率按 time + scrollDuration 窗口统计');
+  ok(/const fontSize = Math\.max\(10, baseFont \* autoK\)/.test(danmakuWeb),
+    'autoK 作用在 floor 之后（横屏/小画布下压缩量不再被 fontSizeFloor 吃掉）');
+  ok(/__fntvAutoK/.test(danmakuWeb), '真机排查观测点 __fntvAutoK（每帧写当前系数）');
+  ok(/html\.fnos-touch-narrow \.trim-ui__player--popover\{\s*\n?\s*width:min\(calc\(100vw - 16px\), 392px\) !important;/.test(danmakuWeb),
+    '原生弹层窄屏收口（w-[392px] 硬编码 → 视口内限宽）');
+}
+
 // ═══ 5. 横屏全屏 ═══
 console.log('\n[5] 全屏按钮 → 横屏全屏播放');
 {

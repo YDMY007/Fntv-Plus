@@ -203,6 +203,15 @@ html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:
    全屏遮罩层（class 含 !w-full）不受影响（真机验证：遮罩仍铺满、浮动弹窗收口）。 */
 html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
 
+/* [lc-1315] 原生播放页弹层（选集/倍速/原画/CC/设置共用 .trim-ui__player--popover）
+   窄屏收口：本体 tailwind 定宽 w-[392px] 硬编码，390px 视口下右缘溢出 3px；
+   统一限宽到视口内并留 8px 边距、高度给视口留白（真机验证：392→374、
+   右缘 393→384 完整可见）。弹窗本体是 flex，收窄后内容自行重排。 */
+html.fnos-touch-narrow .trim-ui__player--popover{
+    width:min(calc(100vw - 16px), 392px) !important;
+    max-height:calc(100vh - 120px) !important;
+}
+
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
    用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
    上一段（v1.4.1）只做了「热区 padding 撑高 + 字号缩小」——那是**纵向**的（把热区垫高到
@@ -763,15 +772,25 @@ function injectDmPanelStyle(): void {
    淡入路径：display 先翻块再走 opacity——浏览器对 display:none→block + transition 组合
    在同帧渲染时过渡会丢，但打开是「瞬间可见可接受」，关闭淡出照常走完才回 none）。 */
 html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
-/* [v1.4.0] 手机网页：320px 定宽 + right:-6px 会溢出竖屏视口。触屏窄屏(html.fnos-touch-narrow,
-   由 beautifyStyle 注入侧安装;弹幕按钮挂载晚于详情页样式注入,播放页无该标记时此处回退
-   max-width 媒体查询)下改为视口宽减边距、贴视口右缘。 */
-@media (max-width: 640px){
-  html.fnos-touch-narrow .fntv-dm-list{
-    width:min(92vw, 360px);
-    right:calc(-1 * (100vw - 100%) / 2 + 4vw);   /* wrap 右缘≈视口右缘 → 面板右缘内缩 4vw */
-    max-height:72vh;
-  }
+/* [lc-1315] 窄屏（含 641~820 触屏/平板）面板改 fixed 贴底居中。
+   v1.4.0 的 right 公式假设「弹幕按钮在视口右缘」（当时的单行底栏成立）；lc-1314
+   两行布局把「弹幕」按钮挪到第二行左/中部后，公式把面板整体推出视口左侧
+   （真机实测面板 x=-101：左对齐文字全在屏外，只剩右缘开关与居中「清除弹幕」
+   可见——用户截图即此）。fixed + 水平居中 + 锚在底栏上方 = 与按钮水平位置解耦，
+   任意视口完整可见。bottom 里 136px 与 [lc-1314] 底栏高一致（改底栏高需同步）。 */
+html.fnos-touch-narrow .fntv-dm-list{
+    position:fixed !important;
+    left:50% !important; right:auto !important;
+    bottom:calc(136px + max(8px, env(safe-area-inset-bottom)) + 10px) !important;
+    width:min(92vw, 360px) !important;
+    max-height:min(62vh, 560px) !important;
+    transform-origin:50% 100% !important;
+    transform:translateX(-50%) translateY(8px) scale(.96) !important;
+}
+/* 激活态必须带 translateX(-50%)：transform 是单一属性，直接写 none 会把居中踢掉
+   （进场动画与居中共用同一 transform，二者合成写） */
+html.fnos-touch-narrow .fntv-dm-list.active{
+    transform:translateX(-50%) !important;
 }
 /* 透明桥接: 弹窗与按钮之间留 10px 视觉间隙, 但鼠标穿过时不能算「移出」——
    hover 触发的弹窗若在半路关掉, 就永远移不进去拖滑块。伪元素属于弹窗本身。 */
@@ -1726,8 +1745,14 @@ function render(): void {
     let autoK = 1;
     if (style.autoScale) {
         const scrollLanes = laneScroll.length;
+        // [lc-1315] 占用率取值修正：LaneSlot 自 lc-1303 轨道接力模型起就是 {time,width}，
+        //   没有 until 字段——lc-1313 写的 `l.until > t` 恒为 false → busy 恒 0 →
+        //   占用率恒 0 → 自动缩放从未生效（用户报「弹幕缩放未生效」的死代码根因）。
+        //   占用窗口与分配/碰撞同口径：一条滚动弹幕自进屏（time）到滚出左缘
+        //   （time + scrollDuration）为止占着轨道。
+        const dur = style.scrollDuration;
         const busy = scrollLanes > 0
-            ? laneScroll.reduce<number>((s, l) => s + (l && l.until > t ? 1 : 0), 0)
+            ? laneScroll.reduce<number>((s, l) => s + (l && t - l.time < dur ? 1 : 0), 0)
             : 0;
         const occ = busy / Math.max(1, scrollLanes);
         // 目标系数：占用率 40% 以下 = 1（原字号），40%~100% 线性压到 0.6
@@ -1737,7 +1762,13 @@ function render(): void {
     } else if (autoScaleK >= 0) {
         autoScaleK = -1; // 复位，下次开启时直接取目标值不闪跳
     }
-    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale * autoK));
+    // [lc-1315] 真机排查观测点：当前自动缩放系数（1=原尺寸；开启后密集段 <1、稀疏段 =1）
+    try { (window as any).__fntvAutoK = autoK; } catch { /* ignore */ }
+    const baseFont = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
+    // [lc-1315] autoK 作用在 floor 之后：旧式 ch*fontScale*autoK 在低画布（横屏/小窗）下
+    //   压缩量会被 fontSizeFloor 顶格吃掉（0.6×16 也 <16 → 字不缩），移动端自动缩放
+    //   等于没生效。基准先取 floor，再乘系数，10px 保底防不可读。
+    const fontSize = Math.max(10, baseFont * autoK);
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
