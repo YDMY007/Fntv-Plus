@@ -119,10 +119,31 @@ html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="con
    的文字按钮压到 13px 腾横向空间，而「选集」的 span 恰好没有这个类 → 保持原生
    tailwind text-lg 的 16px，一排按钮大小不一（用户报「字号统一和选集一样大」）。
    lc-1314 两行布局后横向预算充足（右行 10 项 16px 实测 298px ≤ 350px 容器），
-   统一回 16px；横向 padding 仍收 2px 防窄屏溢出。 */
+   统一回 16px；横向 padding 仍收 2px 防窄屏溢出。
+
+   [lc-1330] 二次报障「播放页竖屏下底部字体字号还是不统一，换设备有些字号一样有些
+   不一样，全部改成和选集这个字号一样」——上一条只钉了两组选择器，漏了三处：
+     ① 「时间行弱化」规则 「xg-left-grid .control-item:not(:first-child)」 特异性 (0,3,2)
+        **高于**统一规则的 (0,2,2)，两者都是 !important 时它赢 → 左行（时间…）11px、
+        右行 16px；而 「:not(:first-child)」 命中几个元素取决于**原生插件启用情况**，
+        换设备/换片就是另一套结果 —— 「有些一样有些不一样」的来源；
+     ② 「xg-controls .xgplayer-time{font-size:11px}」 压根不在统一规则覆盖范围内
+        （时间不是 .control-item）；
+     ③ 「@media (max-width:360px)」 只压 .control-item / span.cursor-pointer，倍速·原画的
+        「.icon-text」 与时间不跟着压 → 窄屏上比例又变一套。
+   本版一次钉全：**所有带文字的选择器同值 16px**（含 .icon-text / .btn-text / .xgplayer-time
+   及其内层 span），并**删掉全部按设备分叉的字号**（基准「选集」用的是 tailwind text-lg，
+   本身不随视口变；想统一就不能让别处随视口变）。窄屏防溢出改收 padding，不再动字号。 */
+html.fnos-touch-narrow xg-controls .control-item,
+html.fnos-touch-narrow xg-controls span.cursor-pointer,
+html.fnos-touch-narrow xg-controls .icon-text,
+html.fnos-touch-narrow xg-controls .btn-text,
+html.fnos-touch-narrow xg-controls .xgplayer-time,
+html.fnos-touch-narrow xg-controls .xgplayer-time span {
+    font-size: 16px !important;
+}
 html.fnos-touch-narrow xg-controls .control-item,
 html.fnos-touch-narrow xg-controls span.cursor-pointer {
-    font-size: 16px !important;
     padding: 9px 2px !important;   /* 纵向 9+9 撑热区；横向 2px 收紧防窄屏横向溢出 */
     white-space: nowrap !important;   /* 热区 padding 挤占内容宽时「弹幕」两字会竖排折行 */
 }
@@ -133,9 +154,9 @@ html.fnos-touch-narrow xg-controls .plugin-placeholder {
 }
 html.fnos-touch-narrow xg-right-grid { gap: 2px !important; }
 html.fnos-touch-narrow xg-left-grid { gap: 4px !important; }
-/* 时间行弱化：数字串是底栏最宽的静态元素，缩一号并降透明度（信息保留） */
+/* 时间行只弱化透明度（lc-1330 去掉 11px：字号必须与选集一致，弱化交给透明度）
+   ⚠ 别再往这条里加 font-size —— 它的特异性高于上面的统一规则，加了就又分叉。 */
 html.fnos-touch-narrow xg-left-grid .control-item:not(:first-child) {
-    font-size: 11px !important;
     opacity: .75;
     padding: 9px 2px !important;
 }
@@ -309,13 +330,16 @@ html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; heig
    右栏自身的不换行与收缩约束（两行布局下右栏独占一整行，仍不允许内部折行）。 */
 html.fnos-touch-narrow xg-right-grid{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; }
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
+/* [lc-1330] 时间字号不再单独压小（11px→16px，与选集一致；弱化靠透明度）。
+   注：原 「xg-controls .xgplayer-time{font-size:11px}」 已删除。 */
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
-html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
 @media (max-width:360px){
-    /* [lc-1316] 超窄屏兜底：16px 统一字号在 ≤360px 下横向会满，压到 12px 保不溢出
-       （span.cursor-pointer 与 .control-item 同步压，否则两者又不一致） */
+    /* [lc-1330] 超窄屏兜底**只收 padding/gap，不再改字号** ——
+       16px 统一字号在 ≤360px 下横向会吃满，但改字号就是「换设备字号不一样」的老毛病
+       （基准「选集」是 tailwind text-lg，不随视口变）。收 padding 省出的是同样的横向空间。 */
     html.fnos-touch-narrow xg-controls .control-item,
-    html.fnos-touch-narrow xg-controls span.cursor-pointer{ font-size:12px !important; }
+    html.fnos-touch-narrow xg-controls span.cursor-pointer{ padding-left:0 !important; padding-right:0 !important; }
+    html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
 }
 `;
     const el = document.createElement('style');

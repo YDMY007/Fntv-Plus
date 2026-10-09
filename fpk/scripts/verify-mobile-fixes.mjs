@@ -7,13 +7,50 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// 双向验证用：FNTV_DANMAKU_SRC=<旧版本文件> 可把被测源码换成历史版本，
+// 用来确认「修好之前这些断言确实会 FAIL」（否则断言可能只是空转）。
+const SRC_OVERRIDE = process.env.FNTV_DANMAKU_SRC || '';
+const read = (p) => {
+  if (SRC_OVERRIDE && p === 'src/preload/plugins/danmakuWeb.ts') return fs.readFileSync(SRC_OVERRIDE, 'utf8');
+  return fs.readFileSync(path.join(ROOT, p), 'utf8');
+};
 
 let pass = 0, fail = 0;
 const ok = (cond, name, detail = '') => {
   if (cond) { pass++; console.log(`  ✅ ${name}`); }
   else { fail++; console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`); }
 };
+
+/** 把一份 CSS 文本（含 @media）扫成规则表：[{sel, body, media}]。
+ *  本项目注入的样式是扁平 CSS + @media，一个花括号栈足够；比逐条正则可靠 ——
+ *  「同一属性散落多条规则、特异性互相盖」正是 lc-1330 那个 bug 的形状。 */
+function scanCssRules(css) {
+  const clean = String(css).replace(/\/\*[\s\S]*?\*\//g, '');   // 注释里会有反例示例
+  const rules = [];
+  const media = [];
+  let buf = '';
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    if (ch === '@') {
+      const open = clean.indexOf('{', i);
+      if (open < 0) break;
+      media.push(clean.slice(i, open).trim());
+      i = open;
+      continue;
+    }
+    if (ch === '{') {
+      const end = clean.indexOf('}', i);
+      if (end < 0) break;
+      rules.push({ sel: buf.trim(), body: clean.slice(i + 1, end), media: media.join(' ') });
+      buf = '';
+      i = end;
+      continue;
+    }
+    if (ch === '}') { media.pop(); buf = ''; continue; }
+    buf += ch;
+  }
+  return rules;
+}
 
 // ── 被测源码 ────────────────────────────────────────────────────────────
 const mobileStyle = read('src/preload/plugins/mobileStyle.ts');
@@ -246,13 +283,30 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
   ok(/__fntvAutoK/.test(danmakuWeb), '真机排查观测点 __fntvAutoK（每帧写当前系数）');
   ok(/html\.fnos-touch-narrow \.trim-ui__player--popover\{\s*\n?\s*width:min\(calc\(100vw - 16px\), 392px\) !important;/.test(danmakuWeb),
     '原生弹层窄屏收口（w-[392px] 硬编码 → 视口内限宽）');
-  // [lc-1316] 底栏文字按钮字号统一 16px（= 原生「选集」text-lg 实测值）。
-  // v1.4.1 曾把带 cursor-pointer 的按钮压到 13px，而「选集」的 span 恰好没有这个
-  // 类 → 保持 16px，一排按钮大小不一（用户报「字号统一和选集一样大」）。
-  ok(/span\.cursor-pointer \{\s*\n?\s*font-size: 16px !important;/.test(danmakuWeb),
-    '底栏文字按钮统一 16px（cursor-pointer 与 control-item 两组选择器同值）');
-  ok(/max-width:360px\)\{[\s\S]{0,250}span\.cursor-pointer\{ font-size:12px !important; \}/.test(danmakuWeb),
-    '≤360px 超窄兜底同步压两个选择器（避免宽度回落时又不一致）');
+  // [lc-1316→1330] 底栏字号统一 16px（= 原生「选集」的 tailwind text-lg 实测值）。
+  // lc-1316 只钉了 .control-item / span.cursor-pointer 两组，漏了：时间行那条第 11px
+  // 规则（特异性 (0,3,2) 反而**高于**统一规则 (0,2,2)，且命中数与原生插件启用情况有关
+  // → 「换设备有些一样有些不一样」）、.xgplayer-time、倍音·原画的 .icon-text，
+  // 以及 ≤360px 只压两组选择器的媒体查询。lc-1330 改成「一次钉全 + 不按设备分叉」。
+  // 下面用 CSS 规则扫描（而不是逐条正则）来保证**覆盖完整 + 取值唯一**：
+  // 这条断言当初就是缺的，所以才会出现「只钉了两组」这种漏网。
+  {
+    const fontRules = scanCssRules(danmakuWeb)
+      .filter((r) => /font-size/.test(r.body) && /xg-controls|xg-left-grid|xg-right-grid/.test(r.sel));
+    const sizes = [...new Set(fontRules.flatMap((r) => [...r.body.matchAll(/font-size:\s*([^;!]+)/g)].map((m) => m[1].trim())))];
+    ok(fontRules.length > 0, `底栏存在字号规则（扫描到 ${fontRules.length} 条）`);
+    ok(sizes.length === 1 && sizes[0] === '16px',
+      `底栏字号取值唯一且 = 选集（16px），实际: ${sizes.join(' / ') || '无'}`);
+    ok(fontRules.every((r) => !r.media),
+      '底栏字号不随设备/视口分叉（@media 内不得再出现 font-size）');
+    const union = fontRules.map((r) => r.sel).join(' ');
+    for (const carrier of ['.control-item', 'span.cursor-pointer', '.icon-text', '.btn-text', '.xgplayer-time']) {
+      ok(union.includes(carrier), `字号规则覆盖 ${carrier}（底栏带文字的载体一个都不能漏）`);
+    }
+    ok(!/xg-left-grid \.control-item:not\(:first-child\)\s*\{[\s\S]{0,200}font-size/.test(
+      danmakuWeb.replace(/\/\*[\s\S]*?\*\//g, '')),
+      '时间行那条高特异性规则里没有 font-size（否则会盖掉统一值）');
+  }
   // [lc-1317] 弹幕按钮 hover 改 PointerEvent 输入区分（带触摸屏的鼠标环境也弹面板）
   ok(/wrap\.addEventListener\('pointerenter'/.test(danmakuWeb) && /e\.pointerType === 'touch'/.test(danmakuWeb),
     '弹幕按钮 hover 用 pointerType 区分输入（不再被设备触摸能力误伤）');
