@@ -5209,6 +5209,7 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
   var appliedSignature = null;
   var styleSettling = false;
   var styleSettleTimer = null;
+  var autoScaleK = -1;
   var needRectSync = true;
   var rectTicks = 0;
   var RECT_SYNC_EVERY = 30;
@@ -5221,7 +5222,9 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
     shadow: 0,
     scrollDuration: 8,
     opacity: 0.9,
-    displayArea: 0.85
+    displayArea: 0.85,
+    autoScale: false
+    // [lc-1313] 默认关：字号严格跟滑块，开了才按密度自适应
   };
   function clampNum(v, min, max, dflt) {
     const n = Number(v);
@@ -5240,7 +5243,8 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
           shadow: clampNum(p.shadow, 0, 3, DEFAULT_STYLE.shadow),
           scrollDuration: clampNum(p.scrollDuration, 4, 16, DEFAULT_STYLE.scrollDuration),
           opacity: clampNum(p.opacity, 0.3, 1, DEFAULT_STYLE.opacity),
-          displayArea: clampNum(p.displayArea, 0.3, 1, DEFAULT_STYLE.displayArea)
+          displayArea: clampNum(p.displayArea, 0.3, 1, DEFAULT_STYLE.displayArea),
+          autoScale: !!p.autoScale
         };
       }
     } catch {
@@ -6171,7 +6175,18 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     renderDirty = false;
     const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 640;
     const fontSizeFloor = smallScreen ? 16 : 14;
-    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
+    let autoK = 1;
+    if (style.autoScale) {
+      const scrollLanes = laneScroll.length;
+      const busy = scrollLanes > 0 ? laneScroll.reduce((s, l) => s + (l && l.until > t2 ? 1 : 0), 0) : 0;
+      const occ = busy / Math.max(1, scrollLanes);
+      const target = occ <= 0.4 ? 1 : Math.max(0.6, 1 - (occ - 0.4) * (0.4 / 0.6));
+      autoScaleK = autoScaleK < 0 ? target : autoScaleK + (target - autoScaleK) * 0.15;
+      autoK = autoScaleK;
+    } else if (autoScaleK >= 0) {
+      autoScaleK = -1;
+    }
+    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale * autoK));
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
@@ -6719,6 +6734,10 @@ html.fnos-touch-narrow .fntv-dm-list:not(.active){ display:none !important; }
     Object.assign(wrap.style, { display: "flex", flexDirection: "column", gap: "14px" });
     wrap.appendChild(makeToggle(t("\u7C97\u4F53"), style.bold, (v) => {
       style.bold = v;
+      saveStyle();
+    }));
+    wrap.appendChild(makeToggle(t("\u81EA\u52A8\u7F29\u653E\uFF08\u5BC6\u96C6\u65F6\u7F29\u5C0F\uFF09"), style.autoScale, (v) => {
+      style.autoScale = v;
       saveStyle();
     }));
     const baseScale = DEFAULT_STYLE.fontScale;

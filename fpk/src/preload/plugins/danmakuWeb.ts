@@ -477,6 +477,7 @@ interface DanmakuStyle {
     scrollDuration: number; // 滚动横跨秒数（MPV scrolltime，默认 8）
     opacity: number;        // 全局不透明度 0.3~1（MPV opacity，本端默认 0.9）
     displayArea: number;    // 弹幕显示范围（占画布高比例，MPV displayarea 默认 0.85）
+    autoScale: boolean;     // [lc-1313] 自动缩放：弹幕密集时按轨道占用率缩小字号，稀疏时回到设定值
 }
 
 interface ActiveState {
@@ -600,6 +601,10 @@ let appliedSignature: string | null = null;
 let styleSettling = false;
 let styleSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
+// [lc-1313] 自动缩放的当前系数（-1 = 未激活/已复位；激活时 0.6~1 平滑跟随目标）。
+// 渲染帧内读写，模块级持有以在开关开→关→开之间保持连续。
+let autoScaleK = -1;
+
 // 画布矩形改为事件驱动 + 低频兜底（旧版每帧 getBoundingClientRect = 每帧强制 layout）
 let needRectSync = true;
 let rectTicks = 0;
@@ -616,6 +621,7 @@ const DEFAULT_STYLE: DanmakuStyle = {
     scrollDuration: 8,
     opacity: 0.9,
     displayArea: 0.85,
+    autoScale: false,   // [lc-1313] 默认关：字号严格跟滑块，开了才按密度自适应
 };
 
 function clampNum(v: any, min: number, max: number, dflt: number): number {
@@ -637,6 +643,7 @@ function loadStyle(): DanmakuStyle {
                 scrollDuration: clampNum(p.scrollDuration, 4, 16, DEFAULT_STYLE.scrollDuration),
                 opacity: clampNum(p.opacity, 0.3, 1, DEFAULT_STYLE.opacity),
                 displayArea: clampNum(p.displayArea, 0.3, 1, DEFAULT_STYLE.displayArea),
+                autoScale: !!p.autoScale,
             };
         }
     } catch { /* ignore */ }
@@ -645,6 +652,8 @@ function loadStyle(): DanmakuStyle {
 
 // 样式签名：任一项变化都让在屏弹幕的位图/行高/轨道数/滚动时长作废。
 // 刻意不含 opacity —— 它只在绘制时读，纳入签名会让拖透明度滑块时每帧清屏。
+// [lc-1313] autoScale 也不纳入：它只影响本帧 fontSize 的计算值（连续量），纳入会让
+// 密度波动时反复触发整体重建；缩放系数变化只需重设 currentFont + renderDirty。
 function styleSignature(): string {
     return `${style.bold}|${style.fontScale}|${style.outline}|${style.shadow}|${style.scrollDuration}|${style.displayArea}|${maxScreen}`;
 }
@@ -1746,7 +1755,25 @@ function render(): void {
     // 兜底顶到 14px，观感过小；coarse 窄屏下字号/行高下限放宽为 16px（横屏/桌面不变）。
     const smallScreen = isTouchEnv() && Math.min(window.innerWidth, window.innerHeight) <= 640;
     const fontSizeFloor = smallScreen ? 16 : 14;
-    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale));
+    // [lc-1313] 自动缩放：按滚动轨道占用率平滑缩字号。弹幕密集时把字号压到最低 60%，
+    //   让更多弹幕进屏不叠字；占用率回落到 40% 以下恢复设定值。hysteresis 防抖：
+    //   压缩/恢复用不同阈值，避免在临界密度上字号来回跳。平滑跟随（每帧向目标靠拢 15%）
+    //   而非阶跃 —— 阶跃会在密集段进出的瞬间肉眼可见地整体跳一下。
+    let autoK = 1;
+    if (style.autoScale) {
+        const scrollLanes = laneScroll.length;
+        const busy = scrollLanes > 0
+            ? laneScroll.reduce<number>((s, l) => s + (l && l.until > t ? 1 : 0), 0)
+            : 0;
+        const occ = busy / Math.max(1, scrollLanes);
+        // 目标系数：占用率 40% 以下 = 1（原字号），40%~100% 线性压到 0.6
+        const target = occ <= 0.4 ? 1 : Math.max(0.6, 1 - (occ - 0.4) * (0.4 / 0.6));
+        autoScaleK = autoScaleK < 0 ? target : autoScaleK + (target - autoScaleK) * 0.15;
+        autoK = autoScaleK;
+    } else if (autoScaleK >= 0) {
+        autoScaleK = -1; // 复位，下次开启时直接取目标值不闪跳
+    }
+    const fontSize = Math.max(fontSizeFloor, Math.min(48, ch * style.fontScale * autoK));
     const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
@@ -2332,6 +2359,10 @@ function buildStyleControls(): HTMLElement {
     Object.assign(wrap.style, { display: 'flex', flexDirection: 'column', gap: '14px' } as CSSStyleDeclaration);
 
     wrap.appendChild(makeToggle(t('粗体'), style.bold, (v) => { style.bold = v; saveStyle(); }));
+
+    // [lc-1313] 自动缩放开关：弹幕密集时按滚动轨道占用率把字号平滑压到最低 60%，
+    //   稀疏时回到滑块设定值。放字号滑块正上方 —— 两者共同决定最终字号，语义相邻。
+    wrap.appendChild(makeToggle(t('自动缩放（密集时缩小）'), style.autoScale, (v) => { style.autoScale = v; saveStyle(); }));
 
     // 字号：以默认 fontScale 为 100% 的相对倍数（50%~180%）
     const baseScale = DEFAULT_STYLE.fontScale;
