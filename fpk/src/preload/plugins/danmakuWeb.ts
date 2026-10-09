@@ -110,13 +110,18 @@ html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="con
    门控 html.fnos-touch-narrow（beautifyStyle 注入侧安装的触屏窄屏标记，设备硬事实
    判定，无 pointer 媒体查询的中途翻转问题；播放页可能未注入美化样式——v1.4.1 起把
    installMobileFlag 挂到本样式注入链，两处幂等共用）。
-   措施：触控热区 padding 撑到 ≥40px 高 / ≥32px 宽（视觉文字不动）；字号 14→13px、
-   控件间距 14→10px、时间行 12px 弱化，给热区扩张腾出横向空间；进度条触控带加高
-   （点拖进度是手机最高频操作，原生 14px 命中带太窄）。 */
+   措施：触控热区 padding 撑到 ≥40px 高 / ≥32px 宽（视觉文字不动）；控件间距
+   14→10px、时间行 12px 弱化；进度条触控带加高（点拖进度是手机最高频操作，
+   原生 14px 命中带太窄）。
+   [lc-1316] 字号统一 16px（= 原生「选集」实测值）：v1.4.1 曾把带 cursor-pointer
+   的文字按钮压到 13px 腾横向空间，而「选集」的 span 恰好没有这个类 → 保持原生
+   tailwind text-lg 的 16px，一排按钮大小不一（用户报「字号统一和选集一样大」）。
+   lc-1314 两行布局后横向预算充足（右行 10 项 16px 实测 298px ≤ 350px 容器），
+   统一回 16px；横向 padding 仍收 2px 防窄屏溢出。 */
 html.fnos-touch-narrow xg-controls .control-item,
 html.fnos-touch-narrow xg-controls span.cursor-pointer {
-    font-size: 13px !important;
-    padding: 9px 2px !important;   /* 纵向 9+9 撑热区；横向 2px——右栏 6 控件 390px 里横向预算极紧 */
+    font-size: 16px !important;
+    padding: 9px 2px !important;   /* 纵向 9+9 撑热区；横向 2px 收紧防窄屏横向溢出 */
     white-space: nowrap !important;   /* 热区 padding 挤占内容宽时「弹幕」两字会竖排折行 */
 }
 html.fnos-touch-narrow xg-controls .plugin-placeholder {
@@ -253,7 +258,10 @@ html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
 html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
 @media (max-width:360px){
-    html.fnos-touch-narrow xg-controls .control-item{ font-size:12px !important; }
+    /* [lc-1316] 超窄屏兜底：16px 统一字号在 ≤360px 下横向会满，压到 12px 保不溢出
+       （span.cursor-pointer 与 .control-item 同步压，否则两者又不一致） */
+    html.fnos-touch-narrow xg-controls .control-item,
+    html.fnos-touch-narrow xg-controls span.cursor-pointer{ font-size:12px !important; }
 }
 `;
     const el = document.createElement('style');

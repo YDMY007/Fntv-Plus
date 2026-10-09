@@ -192,6 +192,13 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
   ok(/__fntvAutoK/.test(danmakuWeb), '真机排查观测点 __fntvAutoK（每帧写当前系数）');
   ok(/html\.fnos-touch-narrow \.trim-ui__player--popover\{\s*\n?\s*width:min\(calc\(100vw - 16px\), 392px\) !important;/.test(danmakuWeb),
     '原生弹层窄屏收口（w-[392px] 硬编码 → 视口内限宽）');
+  // [lc-1316] 底栏文字按钮字号统一 16px（= 原生「选集」text-lg 实测值）。
+  // v1.4.1 曾把带 cursor-pointer 的按钮压到 13px，而「选集」的 span 恰好没有这个
+  // 类 → 保持 16px，一排按钮大小不一（用户报「字号统一和选集一样大」）。
+  ok(/span\.cursor-pointer \{\s*\n?\s*font-size: 16px !important;/.test(danmakuWeb),
+    '底栏文字按钮统一 16px（cursor-pointer 与 control-item 两组选择器同值）');
+  ok(/max-width:360px\)\{[\s\S]{0,250}span\.cursor-pointer\{ font-size:12px !important; \}/.test(danmakuWeb),
+    '≤360px 超窄兜底同步压两个选择器（避免宽度回落时又不一致）');
 }
 
 // ═══ 5. 横屏全屏 ═══
