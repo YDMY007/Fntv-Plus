@@ -93,6 +93,9 @@ console.log('\n[1b] UI 模式联动 —— 各安装点统一读 getUiMode');
     '播放页字号 smallScreen 改读模式');
   ok(/setUiMode\(next\)/.test(uiToggleSrc) && /fntv-uimode-tab/.test(uiToggleSrc),
     'UI 模式切换按钮：点击切换（事件驱动即时生效，无需刷新）');
+  const uiToggleCode = uiToggleSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(/btn\.style\.display = hotVisible \? '' : 'none'/.test(uiToggleCode) && !/offsetParent/.test(uiToggleCode),
+    'UI 模式按钮只在首页显示（跟随每日放送显隐）+ 判可见性不用 offsetParent（fixed 元素恒 null）');
   ok(/import '\.\/preload\/plugins\/uiModeToggle'/.test(webEntrySrc), 'uiModeToggle 已注册进 web-entry');
   ok(/const mobileMode = getUiMode\(\) === 'mobile'/.test(embyWallSrc) && !/const touchCapable = mobileSpec/.test(embyWallSrc),
     '设置面板「触屏特供」项的显示/高亮口径改读模式（电脑模式不显示死开关）');

@@ -23602,12 +23602,13 @@ html.fntv-boot-hide #root{visibility:hidden}
     btn.title = m === "mobile" ? "\u5F53\u524D\uFF1A\u624B\u673A/\u5E73\u677F\u5E03\u5C40\uFF08\u5E95\u680F\u4E24\u884C\u3001\u8F6E\u64AD\u6837\u5F0F 5\u3001\u5B57\u53F7\u81EA\u9002\u5E94\uFF09\u3002\u70B9\u51FB\u5207\u56DE\u7535\u8111\u5E03\u5C40" : "\u5F53\u524D\uFF1A\u7535\u8111\u5E03\u5C40\u3002\u70B9\u51FB\u5207\u5230\u624B\u673A/\u5E73\u677F\u5E03\u5C40";
     btn.classList.toggle("on", m === "mobile");
   }
-  function reposition() {
+  function syncAll() {
     watchHot();
     const btn = document.getElementById(BTN_ID2);
     if (!btn) return;
     const hot = document.getElementById("fntv-hot-tab");
     const hotVisible = !!hot && hot.getBoundingClientRect().height > 0 && getComputedStyle(hot).display !== "none";
+    btn.style.display = hotVisible ? "" : "none";
     btn.style.bottom = hotVisible ? Math.round(24 + hot.getBoundingClientRect().height + 10) + "px" : "24px";
   }
   var _hotObserved = false;
@@ -23617,7 +23618,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     if (!hot) return;
     _hotObserved = true;
     try {
-      new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ["style", "class"] });
+      new MutationObserver(() => syncAll()).observe(hot, { attributes: true, attributeFilter: ["style", "class"] });
     } catch {
     }
   }
@@ -23640,7 +23641,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     });
     document.body.appendChild(btn);
     render2();
-    reposition();
+    syncAll();
   }
   function boot() {
     if (_bound) return;
@@ -23650,14 +23651,11 @@ html.fntv-boot-hide #root{visibility:hidden}
     try {
       new MutationObserver(() => {
         if (!document.getElementById(BTN_ID2)) mount();
-        else {
-          watchHot();
-          reposition();
-        }
+        else syncAll();
       }).observe(document.body || document.documentElement, { childList: true });
     } catch {
     }
-    window.addEventListener("resize", reposition, { passive: true });
+    window.addEventListener("resize", syncAll, { passive: true });
     window.addEventListener(UI_MODE_EVENT, render2);
   }
   boot();

@@ -55,8 +55,11 @@ function render(): void {
     btn.classList.toggle('on', m === 'mobile');
 }
 
-/** 贴「每日放送」按钮上方；它隐藏/不存在时落回右下角原位（bottom:24 与宫灯一致） */
-function reposition(): void {
+/** 同步显隐与位置：[lc-1322] 用户要求「只在首页显示」→ 完全跟随「每日放送」按钮的
+ *  显隐（它按路由/设置开关控制自己：非首页 display:none、设置里关闭则整只移除）。
+ *  可见时贴它上方 10px；不可见/不存在时自身也隐藏（依附语义：每日放送不在，
+ *  孤零零一个切换按钮也不该出现）。 */
+function syncAll(): void {
     watchHot();
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
@@ -66,6 +69,7 @@ function reposition(): void {
     //   bottom:24 与它完全重叠被盖住（用户报「被挡住了」）。改用 rect 高度 + display。
     const hotVisible = !!hot && hot.getBoundingClientRect().height > 0
         && getComputedStyle(hot).display !== 'none';
+    btn.style.display = hotVisible ? '' : 'none';
     btn.style.bottom = hotVisible
         ? Math.round(24 + hot.getBoundingClientRect().height + 10) + 'px'
         : '24px';
@@ -80,7 +84,7 @@ function watchHot(): void {
     if (!hot) return;
     _hotObserved = true;
     try {
-        new MutationObserver(() => reposition()).observe(hot, { attributes: true, attributeFilter: ['style', 'class'] });
+        new MutationObserver(() => syncAll()).observe(hot, { attributes: true, attributeFilter: ['style', 'class'] });
     } catch { /* ignore */ }
 }
 
@@ -99,7 +103,7 @@ function mount(): void {
     });
     document.body.appendChild(btn);
     render();
-    reposition();
+    syncAll();
 }
 
 function boot(): void {
@@ -112,10 +116,10 @@ function boot(): void {
     try {
         new MutationObserver(() => {
             if (!document.getElementById(BTN_ID)) mount();
-            else { watchHot(); reposition(); }
+            else syncAll();
         }).observe(document.body || document.documentElement, { childList: true });
     } catch { /* ignore */ }
-    window.addEventListener('resize', reposition, { passive: true });
+    window.addEventListener('resize', syncAll, { passive: true });
     window.addEventListener(UI_MODE_EVENT, render);   // 别处改模式（未来）时同步按钮文案
 }
 
