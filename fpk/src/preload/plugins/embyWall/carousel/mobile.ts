@@ -23,7 +23,7 @@ import { getEffectiveDark } from '../theme';
 import { log } from '../log';
 import { resolveSeasonHref } from './href';
 import { resolveShowLogo } from './logo';
-import { applyCarouselBackdrop } from './images';
+import { applyCarouselBackdrop, fetchPortraitFallback } from './images';
 // [lc-1319] 布局模式（手动切换）真源：本模块选路跟随 mobileStyle.getUiMode
 import { getUiMode } from '../../mobileStyle';
 
@@ -79,19 +79,21 @@ export function ensureStyle5Css(): void {
   position:absolute;inset:0;z-index:1;pointer-events:none;
   background:linear-gradient(to top,rgba(0,0,0,.88) 0%,rgba(0,0,0,.55) 22%,rgba(0,0,0,.16) 46%,transparent 66%);
 }
+/* [lc-1326] 信息层重设计（用户报「各控件太挤」）：纵向节奏放宽 + 按钮改 48px 高
+   全宽半宽热区（移动端拇指标准）。原 14px 内边距 + 各元素 6~12px 间隙在真机上
+   挤成一团（logo/标题/meta/简介/按钮全部堆在底部渐变里）；重排后：
+   标题→meta 4px、meta→简介 10px、简介→按钮 16px、底部内边距 18px，呼吸感明显。 */
 [data-fntv-carousel-style="5"] .fntv-s5-info{
   position:absolute;left:0;right:0;bottom:0;z-index:2;
-  /* [lc-1310] 信息层边距对齐原生 App：屏边距 20dp ≈ 4.2%（原生截图逐像素实测，
-     390px 手机上 ≈16px）。原生继续观看卡的标题在图外左对齐；hero 轮播的标题在图内
-     底部渐变上（原生无此组件，形态与 Netflix 移动端 hero 一致），左对齐同源。 */
-  padding:14px 4.2% 14px;box-sizing:border-box;color:#fff;
+  /* [lc-1310] 屏边距 4.2% ≈ 原生 16px；纵向 18px 给按钮与卡底留呼吸 */
+  padding:16px 4.2% 18px;box-sizing:border-box;color:#fff;
 }
 /* 标题/logo：logo 优先（有图时文字隐藏），高度钳 44px——手机上 84px 的桌面 logo 占半屏 */
 [data-fntv-carousel-style="5"] .fntv-s5-title{
-  margin:0 0 8px;font-size:1.35rem;font-weight:800;line-height:1.2;letter-spacing:.5px;
+  margin:0 0 4px;font-size:1.35rem;font-weight:800;line-height:1.2;letter-spacing:.5px;
   text-shadow:0 2px 10px rgba(0,0,0,.65);
 }
-[data-fntv-carousel-style="5"] .fntv-s5-title.is-logo{ font-size:0;margin:0 0 6px }
+[data-fntv-carousel-style="5"] .fntv-s5-title.is-logo{ font-size:0;margin:0 0 8px }
 [data-fntv-carousel-style="5"] .fntv-s5-logo{
   max-height:44px;max-width:62%;width:auto;height:auto;display:block;
   object-fit:contain;filter:drop-shadow(0 3px 12px rgba(0,0,0,.6));
@@ -99,21 +101,22 @@ export function ensureStyle5Css(): void {
 /* [lc-1310] 元信息行（对齐原生 App「第1季 · 第3集」）：比标题弱两级，类型·年份·集数 */
 [data-fntv-carousel-style="5"] .fntv-s5-meta{
   font-size:.72rem;line-height:1.4;color:rgba(240,236,255,.62);
-  letter-spacing:.3px;margin:-4px 0 8px;
+  letter-spacing:.3px;margin:0 0 10px;
 }
 /* 简介：两行截断（桌面 3 行在触屏上把按钮挤出卡外） */
 [data-fntv-carousel-style="5"] .fntv-s5-desc{
-  font-size:.8rem;line-height:1.5;color:rgba(240,236,255,.82);
+  font-size:.8rem;line-height:1.55;color:rgba(240,236,255,.82);
   text-shadow:0 1px 6px rgba(0,0,0,.6);
-  margin:0 0 12px;
+  margin:0 0 16px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
-[data-fntv-carousel-style="5"] .fntv-s5-actions{ display:flex;gap:10px;align-items:center }
-/* 胶囊按钮：高 44px（WCAG 触控下限），按压态代替 hover（触屏没有 hover） */
+/* [lc-1326] 按钮行：主按钮 48px 高（拇指热区）+ 副按钮同高玻璃胶囊，等高并列 */
+[data-fntv-carousel-style="5"] .fntv-s5-actions{ display:flex;gap:12px;align-items:center }
+/* 胶囊按钮：高 48px（>WCAG 44 下限，拇指友好），按压态代替 hover（触屏没有 hover） */
 [data-fntv-carousel-style="5"] .fntv-s5-play,
 [data-fntv-carousel-style="5"] .fntv-s5-detail{
-  min-height:44px;padding:0 22px;border-radius:999px;border:none;cursor:pointer;
-  font-size:.88rem;font-weight:700;letter-spacing:1px;white-space:nowrap;
+  min-height:48px;padding:0 26px;border-radius:999px;border:none;cursor:pointer;
+  font-size:.9rem;font-weight:700;letter-spacing:1px;white-space:nowrap;
   display:inline-flex;align-items:center;gap:6px;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   transition:transform .15s ease,opacity .15s ease;
@@ -208,6 +211,23 @@ export function buildCarouselStyle5(
     bg.style.cssText = 'position:absolute;inset:0;background-size:cover;background-position:center 25%;background-color:#10141c';
     slide.appendChild(bg);
     applyCarouselBackdrop(show, bg, base);
+    // [lc-1326] 竖版海报兜底：真实手机慢网下，预载（imgGate 并发 5 + 8s 超时）可能让
+    //   部分条目既没有 _backdropBlob、fallback 的横版校验又拿不到横版图 → slide 永远
+    //   黑底（用户报「有些封面不显示」）。此时用竖版 poster cover 裁切先铺上（横版
+    //   到手后 applyCarouselBackdrop 会覆盖），比黑底强得多。只在 1.2s 后仍无背景时触发。
+    if (!(show as any)._backdropBlob) {
+      window.setTimeout(() => {
+        if (!document.body.contains(slide)) return;
+        const cur = getComputedStyle(bg).backgroundImage;
+        if (cur && cur !== 'none') return;   // 横版已到手
+        fetchPortraitFallback(show, base).then((dataUrl) => {
+          if (dataUrl && document.body.contains(slide) && getComputedStyle(bg).backgroundImage === 'none') {
+            bg.style.backgroundImage = `url("${dataUrl}")`;
+            bg.style.backgroundPosition = 'center 20%';   // 竖版海报上部是人物/标题主体
+          }
+        }).catch(() => { /* 拉不到就保持黑底渐变 */ });
+      }, 1200);
+    }
 
     const shade = document.createElement('div');
     shade.className = 'fntv-s5-shade';

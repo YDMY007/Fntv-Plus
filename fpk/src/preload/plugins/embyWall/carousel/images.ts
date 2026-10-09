@@ -107,6 +107,18 @@ export async function resolveShowBackdrop(show: any, base: string): Promise<stri
   return dataUrl;
 }
 
+// [lc-1326] 导出给样式 5 的竖版兜底：横版 backdrop 未就绪/失败时用 poster cover 裁切
+export async function fetchPortraitFallback(show: any, base: string): Promise<string | null> {
+  const p = (show && (show as any).poster) || '';
+  if (!p) return null;
+  const pic = p.startsWith('http') || p.startsWith('/v/api/') ? p : `${base}/v/api/v1/${p}`;
+  const b = await fetchImageAuth(pic, { label: 's5p:' + ((show && show.title || '').substring(0, 10)), isStrm: !!(show && show.strmTag) });
+  if (!b) return null;
+  const dataUrl = await blobToDataURL(b);
+  try { URL.revokeObjectURL(b); } catch { /* ignore */ }
+  return dataUrl;
+}
+
 // [lc-935] blob URL → base64 data URL: data URL 是自包含字符串, 不依赖 blob 注册表/文档生命周期,
 //   在 SPA 返回首页(旧文档 blob 失效)等场景下依然 100% 有效。fetch 是本地同源读取, 无网络开销。
 async function blobToDataURL(blobUrl: string): Promise<string> {

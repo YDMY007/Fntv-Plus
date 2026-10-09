@@ -8247,6 +8247,19 @@ html.fnos-perf.dark{
     }
     return dataUrl;
   }
+  async function fetchPortraitFallback(show, base) {
+    const p = show && show.poster || "";
+    if (!p) return null;
+    const pic = p.startsWith("http") || p.startsWith("/v/api/") ? p : `${base}/v/api/v1/${p}`;
+    const b = await fetchImageAuth(pic, { label: "s5p:" + (show && show.title || "").substring(0, 10), isStrm: !!(show && show.strmTag) });
+    if (!b) return null;
+    const dataUrl = await blobToDataURL(b);
+    try {
+      URL.revokeObjectURL(b);
+    } catch {
+    }
+    return dataUrl;
+  }
   async function blobToDataURL(blobUrl) {
     try {
       const resp = await fetch(blobUrl);
@@ -12274,19 +12287,21 @@ html.fnos-perf.dark{
   position:absolute;inset:0;z-index:1;pointer-events:none;
   background:linear-gradient(to top,rgba(0,0,0,.88) 0%,rgba(0,0,0,.55) 22%,rgba(0,0,0,.16) 46%,transparent 66%);
 }
+/* [lc-1326] \u4FE1\u606F\u5C42\u91CD\u8BBE\u8BA1\uFF08\u7528\u6237\u62A5\u300C\u5404\u63A7\u4EF6\u592A\u6324\u300D\uFF09\uFF1A\u7EB5\u5411\u8282\u594F\u653E\u5BBD + \u6309\u94AE\u6539 48px \u9AD8
+   \u5168\u5BBD\u534A\u5BBD\u70ED\u533A\uFF08\u79FB\u52A8\u7AEF\u62C7\u6307\u6807\u51C6\uFF09\u3002\u539F 14px \u5185\u8FB9\u8DDD + \u5404\u5143\u7D20 6~12px \u95F4\u9699\u5728\u771F\u673A\u4E0A
+   \u6324\u6210\u4E00\u56E2\uFF08logo/\u6807\u9898/meta/\u7B80\u4ECB/\u6309\u94AE\u5168\u90E8\u5806\u5728\u5E95\u90E8\u6E10\u53D8\u91CC\uFF09\uFF1B\u91CD\u6392\u540E\uFF1A
+   \u6807\u9898\u2192meta 4px\u3001meta\u2192\u7B80\u4ECB 10px\u3001\u7B80\u4ECB\u2192\u6309\u94AE 16px\u3001\u5E95\u90E8\u5185\u8FB9\u8DDD 18px\uFF0C\u547C\u5438\u611F\u660E\u663E\u3002 */
 [data-fntv-carousel-style="5"] .fntv-s5-info{
   position:absolute;left:0;right:0;bottom:0;z-index:2;
-  /* [lc-1310] \u4FE1\u606F\u5C42\u8FB9\u8DDD\u5BF9\u9F50\u539F\u751F App\uFF1A\u5C4F\u8FB9\u8DDD 20dp \u2248 4.2%\uFF08\u539F\u751F\u622A\u56FE\u9010\u50CF\u7D20\u5B9E\u6D4B\uFF0C
-     390px \u624B\u673A\u4E0A \u224816px\uFF09\u3002\u539F\u751F\u7EE7\u7EED\u89C2\u770B\u5361\u7684\u6807\u9898\u5728\u56FE\u5916\u5DE6\u5BF9\u9F50\uFF1Bhero \u8F6E\u64AD\u7684\u6807\u9898\u5728\u56FE\u5185
-     \u5E95\u90E8\u6E10\u53D8\u4E0A\uFF08\u539F\u751F\u65E0\u6B64\u7EC4\u4EF6\uFF0C\u5F62\u6001\u4E0E Netflix \u79FB\u52A8\u7AEF hero \u4E00\u81F4\uFF09\uFF0C\u5DE6\u5BF9\u9F50\u540C\u6E90\u3002 */
-  padding:14px 4.2% 14px;box-sizing:border-box;color:#fff;
+  /* [lc-1310] \u5C4F\u8FB9\u8DDD 4.2% \u2248 \u539F\u751F 16px\uFF1B\u7EB5\u5411 18px \u7ED9\u6309\u94AE\u4E0E\u5361\u5E95\u7559\u547C\u5438 */
+  padding:16px 4.2% 18px;box-sizing:border-box;color:#fff;
 }
 /* \u6807\u9898/logo\uFF1Alogo \u4F18\u5148\uFF08\u6709\u56FE\u65F6\u6587\u5B57\u9690\u85CF\uFF09\uFF0C\u9AD8\u5EA6\u94B3 44px\u2014\u2014\u624B\u673A\u4E0A 84px \u7684\u684C\u9762 logo \u5360\u534A\u5C4F */
 [data-fntv-carousel-style="5"] .fntv-s5-title{
-  margin:0 0 8px;font-size:1.35rem;font-weight:800;line-height:1.2;letter-spacing:.5px;
+  margin:0 0 4px;font-size:1.35rem;font-weight:800;line-height:1.2;letter-spacing:.5px;
   text-shadow:0 2px 10px rgba(0,0,0,.65);
 }
-[data-fntv-carousel-style="5"] .fntv-s5-title.is-logo{ font-size:0;margin:0 0 6px }
+[data-fntv-carousel-style="5"] .fntv-s5-title.is-logo{ font-size:0;margin:0 0 8px }
 [data-fntv-carousel-style="5"] .fntv-s5-logo{
   max-height:44px;max-width:62%;width:auto;height:auto;display:block;
   object-fit:contain;filter:drop-shadow(0 3px 12px rgba(0,0,0,.6));
@@ -12294,21 +12309,22 @@ html.fnos-perf.dark{
 /* [lc-1310] \u5143\u4FE1\u606F\u884C\uFF08\u5BF9\u9F50\u539F\u751F App\u300C\u7B2C1\u5B63 \xB7 \u7B2C3\u96C6\u300D\uFF09\uFF1A\u6BD4\u6807\u9898\u5F31\u4E24\u7EA7\uFF0C\u7C7B\u578B\xB7\u5E74\u4EFD\xB7\u96C6\u6570 */
 [data-fntv-carousel-style="5"] .fntv-s5-meta{
   font-size:.72rem;line-height:1.4;color:rgba(240,236,255,.62);
-  letter-spacing:.3px;margin:-4px 0 8px;
+  letter-spacing:.3px;margin:0 0 10px;
 }
 /* \u7B80\u4ECB\uFF1A\u4E24\u884C\u622A\u65AD\uFF08\u684C\u9762 3 \u884C\u5728\u89E6\u5C4F\u4E0A\u628A\u6309\u94AE\u6324\u51FA\u5361\u5916\uFF09 */
 [data-fntv-carousel-style="5"] .fntv-s5-desc{
-  font-size:.8rem;line-height:1.5;color:rgba(240,236,255,.82);
+  font-size:.8rem;line-height:1.55;color:rgba(240,236,255,.82);
   text-shadow:0 1px 6px rgba(0,0,0,.6);
-  margin:0 0 12px;
+  margin:0 0 16px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
-[data-fntv-carousel-style="5"] .fntv-s5-actions{ display:flex;gap:10px;align-items:center }
-/* \u80F6\u56CA\u6309\u94AE\uFF1A\u9AD8 44px\uFF08WCAG \u89E6\u63A7\u4E0B\u9650\uFF09\uFF0C\u6309\u538B\u6001\u4EE3\u66FF hover\uFF08\u89E6\u5C4F\u6CA1\u6709 hover\uFF09 */
+/* [lc-1326] \u6309\u94AE\u884C\uFF1A\u4E3B\u6309\u94AE 48px \u9AD8\uFF08\u62C7\u6307\u70ED\u533A\uFF09+ \u526F\u6309\u94AE\u540C\u9AD8\u73BB\u7483\u80F6\u56CA\uFF0C\u7B49\u9AD8\u5E76\u5217 */
+[data-fntv-carousel-style="5"] .fntv-s5-actions{ display:flex;gap:12px;align-items:center }
+/* \u80F6\u56CA\u6309\u94AE\uFF1A\u9AD8 48px\uFF08>WCAG 44 \u4E0B\u9650\uFF0C\u62C7\u6307\u53CB\u597D\uFF09\uFF0C\u6309\u538B\u6001\u4EE3\u66FF hover\uFF08\u89E6\u5C4F\u6CA1\u6709 hover\uFF09 */
 [data-fntv-carousel-style="5"] .fntv-s5-play,
 [data-fntv-carousel-style="5"] .fntv-s5-detail{
-  min-height:44px;padding:0 22px;border-radius:999px;border:none;cursor:pointer;
-  font-size:.88rem;font-weight:700;letter-spacing:1px;white-space:nowrap;
+  min-height:48px;padding:0 26px;border-radius:999px;border:none;cursor:pointer;
+  font-size:.9rem;font-weight:700;letter-spacing:1px;white-space:nowrap;
   display:inline-flex;align-items:center;gap:6px;
   -webkit-tap-highlight-color:transparent;touch-action:manipulation;
   transition:transform .15s ease,opacity .15s ease;
@@ -12379,6 +12395,20 @@ html.fnos-perf.dark{
       bg.style.cssText = "position:absolute;inset:0;background-size:cover;background-position:center 25%;background-color:#10141c";
       slide.appendChild(bg);
       applyCarouselBackdrop(show, bg, base);
+      if (!show._backdropBlob) {
+        window.setTimeout(() => {
+          if (!document.body.contains(slide)) return;
+          const cur = getComputedStyle(bg).backgroundImage;
+          if (cur && cur !== "none") return;
+          fetchPortraitFallback(show, base).then((dataUrl) => {
+            if (dataUrl && document.body.contains(slide) && getComputedStyle(bg).backgroundImage === "none") {
+              bg.style.backgroundImage = `url("${dataUrl}")`;
+              bg.style.backgroundPosition = "center 20%";
+            }
+          }).catch(() => {
+          });
+        }, 1200);
+      }
       const shade = document.createElement("div");
       shade.className = "fntv-s5-shade";
       slide.appendChild(shade);

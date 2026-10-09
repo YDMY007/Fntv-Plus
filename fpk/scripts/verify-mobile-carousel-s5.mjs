@@ -75,7 +75,7 @@ console.log('\n[2] 样式 5 CSS：全宽单卡 + 原生横滑 + 触控目标');
   ok(/scroll-snap-stop:always/.test(mobile), '一屏一停（禁止连滑掠过）');
   ok(/overscroll-behavior-x:contain/.test(mobile), '滑到头不把橡皮筋传给整页');
   ok(/height:min\(56vw,340px\)/.test(mobile), '高度按视口宽推算（竖屏不塌、横屏不满）');
-  ok(/min-height:44px/.test(mobile), '按钮 44px 触控下限（WCAG）');
+  ok(/min-height:48px/.test(mobile), '按钮 48px 拇指热区（lc-1326 重设计，>WCAG 44 下限）');
   ok(/-webkit-line-clamp:2/.test(mobile), '简介两行截断（用户截图里简介被裁半句的问题）');
   ok(/max-height:44px/.test(mobile), 'logo 钳 44px（桌面 84~130px 的 logo 在手机占半屏）');
   ok(/fntv-s5-ready/.test(mobile), '揭示态 class（首图就绪再淡入）');
