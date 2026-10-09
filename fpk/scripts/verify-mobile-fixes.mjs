@@ -128,30 +128,41 @@ console.log('\n[3] 首页卡片行过大（继续观看 / 剧集列表）');
   ok(/flex:0 0 clamp/.test(mobileStyle), 'flex-basis 同步钳制（卡片是 shrink-0，不给 basis 不缩）');
 }
 
-// ═══ 4. 底栏挤在一起 ═══
-console.log('\n[4] 播放页底栏「挤在一起 + 显示不全」');
+// ═══ 4. 底栏两行布局（lc-1314 取代 lc-1290~1312 的单行+裁剪） ═══
+console.log('\n[4] 播放页底栏「挤在一起/显示不全」→ 两行布局');
 {
-  // 根因：三个 grid 是并列 flex 子项，min-width:auto → 拒绝压缩 → 溢出被 overflow:hidden 吃掉
+  // 根因保留：三个 grid 是并列 flex 子项，min-width:auto → 拒绝压缩 → 溢出被 overflow:hidden 吃掉
   ok(/xg-right-grid\{[^}]*min-width:0 !important/.test(danmakuWeb),
     '给 xg-right-grid 加 min-width:0（不压缩=溢出的直接原因）');
-  ok(/xg-inner-controls,\s*\n?html\.fnos-touch-narrow xg-left-grid/.test(danmakuWeb) ||
-     /xg-inner-controls/.test(danmakuWeb),
-    'inner-controls / left-grid 同步处理');
   ok(/\.xgplayer-icon\{ width:20px/.test(danmakuWeb),
-    '图标类控件（音量/设置/全屏）此前零规则，现已参与收缩');
-  ok(/NARROW_TRIM_HIDE = \['倍速', '原画', '音量', '设置', '标记'\]/.test(danmakuWeb),
-    '次要文字按钮按内容裁剪（不用 nth-child：控件数随剧集变）');
-  ok(/ensureNarrowControlTrim\(\)/.test(danmakuWeb), '裁剪函数被调用');
-  // [lc-1311] 裁剪隐藏机制：行内 display:none 会被本表 .plugin-placeholder{display:flex!important}
-  // 覆盖（真机实测裁剪形同虚设、11 项撑爆容器换行）→ 改用 data-fntv-trimmed 属性 + 配套规则。
-  ok(/it\.setAttribute\('data-fntv-trimmed', '1'\)/.test(danmakuWeb) &&
-     /data-fntv-trimmed\]\s*\{\s*\n?\s*display: none !important/.test(danmakuWeb),
-    '裁剪走 data-fntv-trimmed 属性 + 配套 !important 规则（行内 display 会被 flex!important 覆盖）');
-  ok(/:not\(\[data-fntv-trimmed\]\)/.test(danmakuWeb),
-    'plugin-placeholder 的 display:flex!important 已排除被裁项');
-  ok(/xg-right-grid\{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; \}/.test(danmakuWeb),
-    '右栏自身禁止换行（flex-wrap:wrap 是换行叠行的直接原因）');
-  ok(/xgplayer-fullscreen'\)/.test(danmakuWeb), '全屏键显式豁免（tagName 分支里保留）');
+    '图标类控件（音量/设置/全屏）参与收缩');
+  // [lc-1314] 两行结构：inner wrap + 左右栏各占整行
+  ok(/xg-inner-controls\{\s*\n?\s*height:136px !important;\s*\n?\s*flex-wrap:wrap !important;/.test(danmakuWeb),
+    'inner-controls 两行（136px + flex-wrap:wrap）');
+  ok(/xg-left-grid,\s*\n?html\.fnos-touch-narrow xg-right-grid\{\s*\n?\s*flex:0 0 100% !important;/.test(danmakuWeb),
+    '左右栏各占整行（两行布局核心：flex:0 0 100%）');
+  ok(/xg-left-grid > :last-child\{ margin-left:auto !important; \}/.test(danmakuWeb),
+    '第一行：播控左、时间右（margin-left:auto）');
+  ok(/xg-right-grid\{ justify-content:space-evenly !important; \}/.test(danmakuWeb),
+    '第二行：功能键均布（space-evenly）');
+  ok(/xg-center-grid\{[\s\S]{0,180}bottom:110px !important/.test(danmakuWeb),
+    '进度条上移到两行之上（bottom:110px），不压第一行触控');
+  // 裁剪机制整体移除：两行下全部控件可见（「显示不完全」根治）
+  ok(!/NARROW_TRIM_HIDE/.test(danmakuWeb) && !/data-fntv-trimmed/.test(danmakuWeb) &&
+     !/ensureNarrowControlTrim/.test(danmakuWeb),
+    '结构裁剪机制整体移除（NARROW_TRIM_HIDE / data-fntv-trimmed / ensureNarrowControlTrim）');
+  // 音量归位（用户报「声音控件位置不对」）
+  ok(/\.xgplayer-volume\{\s*\n?\s*display:flex !important/.test(danmakuWeb) &&
+     /\.xgplayer-volume \.xgplayer-icon\{[\s\S]{0,200}transform:none !important/.test(danmakuWeb),
+    '音量归位：盒/包裹 flex 居中 + 去 top:12px 位移');
+  ok(/\.xgplayer-volume \.xgplayer-icon svg\{\s*\n?\s*height:24px !important; width:auto !important;/.test(danmakuWeb),
+    '音量 SVG 只设尺寸（不写 display：三个状态图由 xgplayer 显隐）');
+  ok(/\.xgplayer-volume \.xgplayer-slider\{ display:none !important; \}/.test(danmakuWeb),
+    '触摸窄屏隐藏音量滑条（92px 竖条必穿进度条/触摸端常显竖线）');
+  ok(/xgplayer-definition:has\(\.icon-text:empty\)/.test(danmakuWeb),
+    '空清晰度按钮不占位（:has 支持时生效，有文案自动恢复）');
+  ok(/trim-ui__player-modal-container:not\(\[class\*="!w-full"\]\)\{ max-width:calc\(100vw - 40px\) !important; \}/.test(danmakuWeb),
+    '播放信息弹窗窄屏收口（排除全屏遮罩层）');
 }
 
 // ═══ 5. 横屏全屏 ═══

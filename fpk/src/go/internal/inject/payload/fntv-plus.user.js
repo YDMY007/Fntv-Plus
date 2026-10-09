@@ -4813,59 +4813,6 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
   var _headerStyleInjected = false;
   var _headerHideTimer = null;
   var HEADER_HIDE_DELAY = 2500;
-  var NARROW_TRIM_HIDE = ["\u500D\u901F", "\u539F\u753B", "\u97F3\u91CF", "\u8BBE\u7F6E", "\u6807\u8BB0"];
-  var _narrowTrimBound = false;
-  function ensureNarrowControlTrim() {
-    const apply = () => {
-      const narrow = document.documentElement.classList.contains("fnos-touch-narrow");
-      const bar2 = findControlsBar();
-      if (!bar2) return;
-      const items2 = Array.from(
-        bar2.querySelectorAll(".plugin-placeholder, .control-item, xg-icon")
-      );
-      for (const it of items2) {
-        const txt = (it.textContent || "").trim();
-        let hide = false;
-        if (txt) {
-          hide = NARROW_TRIM_HIDE.some((k) => txt === k);
-        } else {
-          hide = it.tagName.toLowerCase() === "xg-icon" && !it.classList.contains("xgplayer-fullscreen");
-        }
-        const want = narrow && hide ? "1" : null;
-        const has = it.hasAttribute("data-fntv-trimmed");
-        if (want && !has) it.setAttribute("data-fntv-trimmed", "1");
-        else if (!want && has) it.removeAttribute("data-fntv-trimmed");
-      }
-    };
-    if (_narrowTrimBound) {
-      apply();
-      return;
-    }
-    _narrowTrimBound = true;
-    const mq = (() => {
-      try {
-        return window.matchMedia("(min-width: 641px)");
-      } catch {
-        return null;
-      }
-    })();
-    const onMq = () => apply();
-    if (mq) {
-      if (mq.addEventListener) mq.addEventListener("change", onMq);
-      else mq.addListener(onMq);
-    }
-    const mo = new MutationObserver(() => {
-      if (isPlayerPage()) apply();
-    });
-    const start = () => {
-      const root = document.querySelector(".xgplayer") || document.body;
-      if (root) mo.observe(root, { childList: true, subtree: true });
-    };
-    start();
-    setTimeout(start, 1e3);
-    setTimeout(start, 3e3);
-    log6.info("[danmakuWeb] \u7A84\u5C4F\u5E95\u680F\u63A7\u4EF6\u88C1\u526A\u5DF2\u542F\u7528");
-  }
   function injectPlayerHeaderStyle() {
     if (_headerStyleInjected) return;
     const css = `
@@ -4932,18 +4879,10 @@ html.fnos-touch-narrow xg-controls span.cursor-pointer {
     padding: 9px 2px !important;   /* \u7EB5\u5411 9+9 \u6491\u70ED\u533A\uFF1B\u6A2A\u5411 2px\u2014\u2014\u53F3\u680F 6 \u63A7\u4EF6 390px \u91CC\u6A2A\u5411\u9884\u7B97\u6781\u7D27 */
     white-space: nowrap !important;   /* \u70ED\u533A padding \u6324\u5360\u5185\u5BB9\u5BBD\u65F6\u300C\u5F39\u5E55\u300D\u4E24\u5B57\u4F1A\u7AD6\u6392\u6298\u884C */
 }
-html.fnos-touch-narrow xg-controls .plugin-placeholder:not([data-fntv-trimmed]) {
+html.fnos-touch-narrow xg-controls .plugin-placeholder {
     display: flex !important;
     align-items: center !important;
     min-height: 40px !important;
-}
-/* [lc-1311] \u88AB\u88C1\u526A\u9879\u9690\u85CF\uFF1A\u5FC5\u987B\u8D70\u5C5E\u6027\u9009\u62E9\u5668 + !important\u3002\u4E0A\u4E00\u7248 JS \u5199\u884C\u5185
-   display:none\uFF0C\u88AB\u672C\u8868\u540C\u6587\u4EF6\u7684 flex!important \u8986\u76D6\uFF08\u6837\u5F0F\u8868 !important > \u884C\u5185\u975E
-   important\uFF09\u2192 \u88C1\u526A\u5F62\u540C\u865A\u8BBE\uFF1A\u53F3\u680F 11 \u9879\u5171 274px \u6491\u7206 226px \u5BB9\u5668\uFF0Cflex-wrap \u628A
-   \u500D\u901F/\u5F39\u5E55/\u6807\u8BB0 \u6362\u884C\u6389\u5230\u7B2C\u4E8C\u884C\u53E0\u5728\u5176\u5B83\u63A7\u4EF6\u4E0A\uFF08\u7528\u6237\u62A5\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324
-   \u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\uFF09\u3002\u771F\u673A\u5B9E\u6D4B\uFF1A\u5C5E\u6027\u65B9\u6848\u540E\u53F3\u680F\u5355\u884C 9 \u9879 217px=217px \u95ED\u5408\u3002 */
-html.fnos-touch-narrow xg-controls [data-fntv-trimmed] {
-    display: none !important;
 }
 html.fnos-touch-narrow xg-right-grid { gap: 2px !important; }
 html.fnos-touch-narrow xg-left-grid { gap: 4px !important; }
@@ -4961,32 +4900,68 @@ html.fnos-touch-narrow .xg-progress {
     align-items: flex-end !important;
 }
 
-/* \u2500\u2500 [lc-1312] \u4E24\u680F\u5E95\u680F\uFF1A\u8FDB\u5EA6\u6761\u5E26\uFF08\u4E0A\u5C42\uFF09+ \u6309\u94AE\u5E26\uFF08\u4E0B\u5C42\u52A0\u9AD8\uFF09\u2500\u2500
-   \u7528\u6237\u62A5\u300C\u8FD8\u662F\u597D\u6324\uFF0C\u80FD\u4E0D\u80FD\u4E24\u680F\u663E\u793A\u300D\u3002\u771F\u673A\u5B9E\u6D4B\uFF08440\xD7956\uFF0C61 \u53F7\u5305\uFF09\u53D1\u73B0 xgplayer
-   \u539F\u751F\u5C31\u6709\u4E24\u5E26\u96CF\u5F62\uFF1A\u8FDB\u5EA6\u6761\u5728 xg-center-grid\uFF08y=872 h=30\uFF09\u3001\u6309\u94AE\u884C\u5728 xg-inner-controls
-   \uFF08y=892 h=64\uFF09\uFF0C\u4F46\u6309\u94AE\u5E26 64px \u88C5\u4E0D\u4E0B 40px \u89E6\u63A7\u70ED\u533A + \u65F6\u95F4/\u8FDB\u5EA6\u6324\u5728\u4E00\u8D77\u3002
-   \u4E24\u680F\u5B9A\u7A3F\uFF08\u771F\u673A\u6CE8\u5165\u9A8C\u8BC1\uFF1A\u8FDB\u5EA6\u6761\u89C6\u89C9\u5E95 881 / \u6309\u94AE\u5E26\u9876 884\uFF0C\u95F4\u9699 +3px\uFF1B\u53F3\u680F 7 \u9879\u5355\u884C\uFF1B
-   \u5DE6\u53F3\u680F 224+184=408 < 420 \u5BB9\u5668\uFF09\uFF1A
-   - inner-controls \u52A0\u9AD8\u5230 76px\u3001\u6309\u94AE\u884C\u6C89\u5E95\uFF08flex-end + padding-bottom 6px\uFF09
-   - \u5DE6\u53F3\u680F\u5404 60px \u9AD8\u3001\u5782\u76F4\u5C45\u4E2D\u3001\u7981\u6B62\u6362\u884C\u3001\u56FE\u6807 20px\u3001\u6A2A\u5411 padding \u5F52\u96F6
-   - \u8FDB\u5EA6\u6761\u89E6\u63A7\u5E26 26px \u9AD8\uFF0C\u62C7\u6307\u70B9\u62D6\u7684\u547D\u4E2D\u533A\u4E0D\u53D7\u4E24\u680F\u5F71\u54CD */
+/* \u2500\u2500 [lc-1314] \u4E24\u884C\u5E95\u680F\u7EC8\u6001\uFF1A\u64AD\u63A7\u884C + \u529F\u80FD\u884C\uFF08\u53D6\u4EE3 lc-1312 \u7684\u300C\u6309\u94AE\u5E26\u52A0\u9AD8\u300D\uFF09\u2500\u2500
+   \u7528\u6237\u62A5\u300C\u8FD8\u662F\u597D\u6324\uFF0C\u80FD\u4E0D\u80FD\u4E24\u680F\u663E\u793A\u300D\u3002lc-1312 \u53EA\u662F\u628A\u6309\u94AE\u5E26\u52A0\u9AD8\u5230 76px\uFF0C\u6309\u94AE\u4ECD\u6324\u5728
+   \u540C\u4E00\u884C\uFF1B\u672C\u7248\u628A inner-controls \u6539\u4E3A flex-wrap \u4E24\u884C\uFF1A
+     \u7B2C\u4E00\u884C = \u5DE6\u680F\uFF08\u64AD\u653E / \u5FEB\u9000\u5FEB\u8FDB / \u65F6\u95F4\uFF09\uFF0C\u65F6\u95F4\u7528 margin-left:auto \u9760\u53F3\uFF1B
+     \u7B2C\u4E8C\u884C = \u53F3\u680F\uFF08\u56FE\u6807 + \u500D\u901F/\u539F\u753B/\u9009\u96C6/\u5F39\u5E55/\u6807\u8BB0\uFF09\uFF0Cspace-evenly \u5747\u5E03\u3002
+   \u771F\u673A\u5B9E\u6D4B\uFF08440\xD7956\uFF0C\u6CE8\u5165\u9A8C\u8BC1\uFF09\uFF1A\u884C\u8DDD 54px\uFF1B\u53F3\u884C 10 \u9879 ~274px \u2264 400px \u5BB9\u5668\uFF08\u5168\u90E8
+   \u63A7\u4EF6\u53EF\u89C1\uFF0C\u500D\u901F/\u539F\u753B/\u6807\u8BB0\u56DE\u5F52\uFF0C\u88C1\u526A\u673A\u5236\u968F\u4E4B\u5E9F\u9664\uFF09\uFF1B\u8FDB\u5EA6\u6761\u4E0A\u79FB\u5230\u4E24\u884C\u4E4B\u4E0A
+   \uFF08bottom:110px\uFF09\uFF0C\u4E0E\u7B2C\u4E00\u884C\u65E0\u91CD\u53E0\uFF08\u7B2C\u4E00\u884C\u9876 840 / \u8FDB\u5EA6\u6761\u5E95 815\uFF09\u3002 */
+html.fnos-touch-narrow xg-controls{ height:136px !important; }
 html.fnos-touch-narrow xg-inner-controls{
-    height: 76px !important;
-    align-items: flex-end !important;
-    padding-bottom: 6px !important;
-    box-sizing: border-box !important;
+    height:136px !important;
+    flex-wrap:wrap !important;
+    align-content:flex-end !important;
+    padding:0 10px max(8px, env(safe-area-inset-bottom)) !important;
+    box-sizing:border-box !important;
 }
 html.fnos-touch-narrow xg-left-grid,
 html.fnos-touch-narrow xg-right-grid{
-    height: 60px !important;
-    align-items: center !important;
-    flex-wrap: nowrap !important;
-    gap: 0 !important;
-    min-width: 0 !important;
+    flex:0 0 100% !important;
+    height:54px !important;
+    align-items:center !important;
+    flex-wrap:nowrap !important;
+    gap:0 !important;
+    min-width:0 !important;
 }
-html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
-html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
-html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
+html.fnos-touch-narrow xg-left-grid{ justify-content:flex-start !important; column-gap:6px !important; }
+html.fnos-touch-narrow xg-left-grid > :last-child{ margin-left:auto !important; }
+html.fnos-touch-narrow xg-right-grid{ justify-content:space-evenly !important; }
+html.fnos-touch-narrow xg-center-grid{
+    position:absolute !important;
+    left:10px !important; right:10px !important;
+    bottom:110px !important; height:26px !important;
+    display:flex !important; align-items:center !important;
+}
+
+/* \u97F3\u91CF\u56FE\u6807\u5F52\u4F4D\uFF08\u7528\u6237\u62A5\u300C\u58F0\u97F3\u63A7\u4EF6\u4F4D\u7F6E\u4E0D\u5BF9\u300D\uFF09\uFF1Alc-1290 \u628A\u5185\u5C42 .xgplayer-icon \u7EDF\u4E00
+   \u538B\u6210 20\xD720\uFF0C\u800C\u97F3\u91CF SVG \u539F\u751F 28\xD738 \u4E14\u8BE5\u5305\u88F9\u5E26 relative top:12px \u4F4D\u79FB \u2192 glyph
+   \u6EA2\u51FA\u5BB9\u5668\u3001\u6BD4\u540C\u6392\u56FE\u6807\u4F4E 9px\u3002\u5F52\u4F4D = \u76D2\u4E0E\u5305\u88F9 flex \u5C45\u4E2D + \u53BB\u4F4D\u79FB + SVG \u53EA\u8BBE\u5C3A\u5BF8\u3002
+   \u6CE8\u610F svg \u4E0D\u80FD\u5199 display!important\uFF1A\u4E09\u4E2A\u72B6\u6001\u56FE\uFF08\u5C0F\u97F3\u91CF/\u97F3\u91CF/\u9759\u97F3\uFF09\u7531 xgplayer
+   \u6309 data-state \u5207\u6362\u663E\u9690\uFF0C\u5F3A\u8BBE display:block \u4F1A\u8BA9\u4E09\u4E2A\u53E0\u7740\u5168\u663E\uFF08\u771F\u673A\u8E29\u8FC7\uFF09\u3002 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume{
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon{
+    position:static !important; top:auto !important; bottom:auto !important; transform:none !important;
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    width:auto !important; height:auto !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon svg{
+    height:24px !important; width:auto !important;
+}
+/* \u89E6\u6478\u7A84\u5C4F\u9690\u85CF\u97F3\u91CF\u6ED1\u6761\uFF1A\u539F\u751F 92px \u7AD6\u6761\u81EA\u6309\u94AE\u9876\u5411\u4E0A\u4F38\u51FA\uFF0C\u4E24\u884C\u5E03\u5C40\u4E0B\u5FC5\u7A7F\u8FDB\u5EA6\u6761\u4E0E
+   \u7B2C\u4E00\u884C\uFF1B\u4E14\u89E6\u6478\u7AEF :hover \u7C98\u4F4F\u4F1A\u5E38\u663E\u6210\u4E00\u6761\u7A81\u5140\u7AD6\u7EBF\u3002\u97F3\u91CF\u8D70\u7269\u7406\u952E\uFF0C\u70B9\u51FB\u6309\u94AE\u4ECD\u5207\u6362\u9759\u97F3\u3002 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{ display:none !important; }
+
+/* \u6E05\u6670\u5EA6\u6309\u94AE\u65E0\u6587\u6848\uFF08\u65E0\u591A\u6E05\u6670\u5EA6\u53EF\u9009\uFF09\u65F6\u4E0D\u5360\u4F4D\uFF1B\u6709\u6587\u6848\u65F6\u8BE5\u89C4\u5219\u4E0D\u5339\u914D\u3001\u81EA\u52A8\u6062\u590D */
+html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:empty){ display:none !important; }
+
+/* \u64AD\u653E\u4FE1\u606F\u5F39\u7A97\uFF08\u53F3\u4E0A\u89D2\u8BE6\u60C5\uFF09\u7A84\u5C4F\u6536\u53E3\uFF1A\u539F\u751F ~560px \u5B9A\u5BBD\u5728 440px \u89C6\u53E3\u6A2A\u5411\u6EA2\u51FA\u3002
+   \u5168\u5C4F\u906E\u7F69\u5C42\uFF08class \u542B !w-full\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A\u906E\u7F69\u4ECD\u94FA\u6EE1\u3001\u6D6E\u52A8\u5F39\u7A97\u6536\u53E3\uFF09\u3002 */
+html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
 
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
@@ -5003,12 +4978,8 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
      \u2460 \u7ED9\u4E09\u4E2A grid \u52A0 min-width:0 \u2014\u2014 \u5141\u8BB8\u5B83\u4EEC\u88AB\u538B\u7F29\uFF0C\u8FD9\u662F\u300C\u4E0D\u6EA2\u51FA\u300D\u7684\u524D\u63D0\uFF1B
      \u2461 \u56FE\u6807\u7C7B\u63A7\u4EF6\uFF08\u97F3\u91CF/\u8BBE\u7F6E/\u5168\u5C4F\uFF0C\u65E0\u6587\u5B57\uFF09\u6B64\u524D**\u4E00\u6761\u89C4\u5219\u90FD\u6CA1\u6709**\uFF0C\u6587\u5B57\u6309\u94AE\u7F29\u4E86\u5B83\u6CA1\u7F29\uFF0C
         \u53F3\u4FA7\u88AB\u5B83\u4EEC\u9876\u51FA\u5C4F\u3002\u538B\u5230 26px \u89C1\u65B9 + \u6536\u7D27\u56FE\u6807\u5185\u8FB9\u8DDD\uFF1B
-     \u2462 \u6587\u5B57\u6309\u94AE\uFF08\u500D\u901F/\u539F\u753B/\u9009\u96C6/\u5F39\u5E55/\u6807\u8BB0\uFF09\u5728 \u2264430px \u5C4F\u4E0A\u6309\u5E8F\u9690\u85CF\u5230\u300C\u66F4\u591A\u300D\u4E4B\u5916\u7684\u4E24\u9879\uFF1A
-        \u4FDD\u7559 \u9009\u96C6 + \u5F39\u5E55/\u6807\u8BB0\uFF08\u6211\u4EEC\u81EA\u5DF1\u7684\u5165\u53E3\uFF09\u4E0E\u64AD\u653E/\u65F6\u95F4/\u5168\u5C4F\uFF0C\u9690\u85CF \u500D\u901F/\u539F\u753B
-        \u2014\u2014 \u7528 :nth-child \u4E0D\u53EF\u9760\uFF08\u63A7\u4EF6\u6570\u968F\u5267\u96C6\u53D8\uFF09\uFF0C\u6539\u7528\u300C\u53F3\u680F\u5185\u9664\u524D\u4E24\u9879\u5916\u9690\u85CF\u300D\u7684
-        \u7ED3\u6784\u5316\u88C1\u526A\uFF1A\u5148\u9690\u85CF\u53F3\u680F\u6240\u6709 .plugin-placeholder\uFF0C\u518D\u628A xg-icon\uFF08\u56FE\u6807\u6309\u94AE\uFF09\u4E0E
-        \u6700\u540E\u4E00\u4E2A plugin-placeholder \u653E\u56DE\u6765\u3002
-     \u2014\u2014 \u5B9E\u73B0\u89C1\u4E0B\u65B9 \xA7C1ff \u7684 JS \u6BB5\uFF0CCSS \u53EA\u8D1F\u8D23\u5C3A\u5BF8\uFF0C\u4E0D\u505A\u7ED3\u6784\u88C1\u526A\u3002 */
+     \u2462 [lc-1314 \u8D77] \u7ED3\u6784\u88C1\u526A\u5DF2\u5E9F\u9664\uFF1A\u5E95\u680F\u6539\u4E3A\u4E24\u884C\u5E03\u5C40\uFF08\u89C1 [lc-1314] \u6BB5\uFF09\u540E\u53F3\u884C 10 \u9879
+        ~274px \u2264 400px\uFF0C\u5168\u90E8\u63A7\u4EF6\u4FDD\u7559\u53EF\u89C1\uFF0C\u4E0D\u518D\u9690\u85CF\u4EFB\u4F55\u6309\u94AE\u3002 */
 
 /* \u2460 grid \u5141\u8BB8\u6536\u7F29\uFF1Amin-width:auto \u4F1A\u8BA9 flex \u5B50\u9879\u62D2\u7EDD\u538B\u7F29\uFF0C\u662F\u6EA2\u51FA\u7684\u76F4\u63A5\u539F\u56E0 */
 html.fnos-touch-narrow xg-inner-controls,
@@ -5025,11 +4996,9 @@ html.fnos-touch-narrow xg-left-grid .control-item{
 }
 html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; height:20px !important; }
 
-/* \u2462 \u53F3\u680F\u6574\u4F53\u4E0D\u6362\u884C + \u5141\u8BB8\u5185\u90E8\u6536\u7F29\uFF1B\u8D85\u7A84\u5C4F\uFF08\u2264360px\uFF09\u8FDB\u4E00\u6B65\u538B\u95F4\u8DDD */
-html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
-/* [lc-1311] \u53F3\u680F\u81EA\u8EAB\u4E5F\u7981\u6B62\u6362\u884C\uFF08\u771F\u673A\u5B9E\u6D4B xg-right-grid \u9ED8\u8BA4 flex-wrap:wrap\uFF0C
-   11 \u9879 274px > 226px \u65F6\u500D\u901F/\u5F39\u5E55/\u6807\u8BB0\u88AB\u6362\u5230\u7B2C\u4E8C\u884C\u53E0\u5728\u522B\u7684\u63A7\u4EF6\u4E0A\uFF09\uFF0C\u5E76\u628A\u56FE\u6807
-   \u7C7B\u63A7\u4EF6\u538B\u5230 20px\u2014\u2014\u6587\u5B57\u6309\u94AE 26px \u4E0E\u56FE\u6807 20px \u540E\u771F\u673A 217px=217px \u5355\u884C\u95ED\u5408\u3002 */
+/* \u2462 \u53F3\u680F\u4E0D\u6362\u884C + \u5141\u8BB8\u5185\u90E8\u6536\u7F29\uFF1B\u8D85\u7A84\u5C4F\uFF08\u2264360px\uFF09\u8FDB\u4E00\u6B65\u538B\u5B57\u53F7\u3002
+   [lc-1314] inner-controls \u7684\u6362\u884C\u7B56\u7565\u5DF2\u7531\u4E0A\u65B9 [lc-1314] \u6BB5\u63A5\u7BA1\uFF08wrap \u4E24\u884C\uFF09\uFF0C\u8FD9\u91CC\u53EA\u4FDD\u7559
+   \u53F3\u680F\u81EA\u8EAB\u7684\u4E0D\u6362\u884C\u4E0E\u6536\u7F29\u7EA6\u675F\uFF08\u4E24\u884C\u5E03\u5C40\u4E0B\u53F3\u680F\u72EC\u5360\u4E00\u6574\u884C\uFF0C\u4ECD\u4E0D\u5141\u8BB8\u5185\u90E8\u6298\u884C\uFF09\u3002 */
 html.fnos-touch-narrow xg-right-grid{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; }
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
@@ -5044,7 +5013,6 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
     (document.head || document.documentElement).appendChild(el);
     _headerStyleInjected = true;
     installMobileFlag();
-    ensureNarrowControlTrim();
     log6.info("[danmakuWeb] \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\u7F8E\u5316 CSS \u5DF2\u6CE8\u5165");
   }
   function resetHeaderHideTimer() {

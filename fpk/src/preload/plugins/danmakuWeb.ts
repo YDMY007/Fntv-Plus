@@ -46,68 +46,11 @@ let _headerStyleInjected = false;
 let _headerHideTimer: ReturnType<typeof setTimeout> | null = null;
 const HEADER_HIDE_DELAY = 2500; // 鼠标不动 2.5s 后自动隐藏
 
-// ─── [lc-1290→lc-1311] 窄屏底栏结构裁剪 ───
-// 手机竖屏下 xg-right-grid 里有 8 个原生控件（播放/时间在左栏，倍速/原画/选集/音量/设置/
-// 全屏在右栏）外加本插件注入的「弹幕」与 skipMarker 的「标记」，共 10 个。CSS 侧再怎么压缩，
-// 文字按钮本身（倍速/原画/选集各 2~3 字 + 40px 触控热区）在 390px 里也放不下 —— 必须**减少
-// 控件数量**。业界做法（Netflix / Disney+ 移动端同款）是把次要项折进「更多」弹层。
-// 这里的取舍：保留 播放/时间/选集/全屏 + 弹幕（自建入口，弹幕是本插件卖点），
-// 隐藏 倍速/原画/音量/设置/标记（倍速与原画在宽屏恢复可见；音量/设置在窄屏由顶部栏的
-// 设置入口覆盖；标记入口与弹幕面板功能重叠，弹幕面板内有标记入口）。
-// [lc-1311] 隐藏机制改为 data-fntv-trimmed 属性 + 配套 !important 规则（见样式表）：
-//   上一版写行内 display:none，被本表 `.plugin-placeholder{display:flex!important}`
-//   覆盖（样式表 !important > 行内非 important）→ 裁剪形同虚设，右栏 11 项 274px
-//   撑爆 226px 容器换行（用户报障「挤在一起还显示不完全」的根因）。真机实测属性方案
-//   单行 9 项 217px=217px 闭合。
-// 判定一律按**文本内容**而非位置/序号 —— 控件数量随剧集详情（有无原画/倍速）而变，
-// nth-child 会在不同剧集上错位裁掉要留的按钮。
-const NARROW_TRIM_HIDE = ['倍速', '原画', '音量', '设置', '标记'];
-let _narrowTrimBound = false;
-
-/** 窄屏时把次要文字按钮折掉；宽屏或离开播放页立即恢复（幂等，可反复调用）。 */
-function ensureNarrowControlTrim(): void {
-    const apply = (): void => {
-        const narrow = document.documentElement.classList.contains('fnos-touch-narrow');
-        const bar = findControlsBar();
-        if (!bar) return;
-        const items = Array.from(
-            bar.querySelectorAll<HTMLElement>('.plugin-placeholder, .control-item, xg-icon')
-        );
-        for (const it of items) {
-            // xg-icon（音量/设置/全屏）无文字，靠位置判断：只裁右栏里的图标，全屏键必须留
-            const txt = (it.textContent || '').trim();
-            let hide = false;
-            if (txt) {
-                hide = NARROW_TRIM_HIDE.some((k) => txt === k);
-            } else {
-                hide = it.tagName.toLowerCase() === 'xg-icon' && !it.classList.contains('xgplayer-fullscreen');
-            }
-            const want = narrow && hide ? '1' : null;
-            const has = it.hasAttribute('data-fntv-trimmed');
-            if (want && !has) it.setAttribute('data-fntv-trimmed', '1');
-            else if (!want && has) it.removeAttribute('data-fntv-trimmed');
-        }
-    };
-    if (_narrowTrimBound) { apply(); return; }
-    _narrowTrimBound = true;
-    // 视口跨越 640px 断点 → html.fnos-touch-narrow 由 mobileStyle 翻转，这里跟着重算
-    const mq = (() => { try { return window.matchMedia('(min-width: 641px)'); } catch { return null; } })();
-    const onMq = (): void => apply();
-    if (mq) {
-        if (mq.addEventListener) mq.addEventListener('change', onMq);
-        else (mq as any).addListener(onMq);
-    }
-    // 控制栏是懒渲染的，进播放页/切集后结构会重建，用 MutationObserver 持续校正
-    const mo = new MutationObserver(() => { if (isPlayerPage()) apply(); });
-    const start = (): void => {
-        const root = document.querySelector('.xgplayer') || document.body;
-        if (root) mo.observe(root, { childList: true, subtree: true });
-    };
-    start();
-    setTimeout(start, 1000);
-    setTimeout(start, 3000);
-    log.info('[danmakuWeb] 窄屏底栏控件裁剪已启用');
-}
+// ─── [lc-1290→lc-1311→lc-1314] 窄屏底栏结构裁剪（已废除） ───
+// lc-1290~lc-1311 曾在窄屏把「倍速/原画/音量/设置/标记」折掉：单行布局下 11 项必溢出。
+// lc-1314 把底栏改成两行（播控行 + 功能行）后，真机实测右行 10 项 ~274px ≤ 400px 容器，
+// 全部控件可见 —— 裁剪机制整体移除（用户报「显示不完全」的根治），布局 CSS 见
+// injectPlayerHeaderStyle 里的 [lc-1314] 段。
 
 /** 注入播放页顶部标题栏美化 CSS（仅执行一次） */
 function injectPlayerHeaderStyle(): void {
@@ -176,18 +119,10 @@ html.fnos-touch-narrow xg-controls span.cursor-pointer {
     padding: 9px 2px !important;   /* 纵向 9+9 撑热区；横向 2px——右栏 6 控件 390px 里横向预算极紧 */
     white-space: nowrap !important;   /* 热区 padding 挤占内容宽时「弹幕」两字会竖排折行 */
 }
-html.fnos-touch-narrow xg-controls .plugin-placeholder:not([data-fntv-trimmed]) {
+html.fnos-touch-narrow xg-controls .plugin-placeholder {
     display: flex !important;
     align-items: center !important;
     min-height: 40px !important;
-}
-/* [lc-1311] 被裁剪项隐藏：必须走属性选择器 + !important。上一版 JS 写行内
-   display:none，被本表同文件的 flex!important 覆盖（样式表 !important > 行内非
-   important）→ 裁剪形同虚设：右栏 11 项共 274px 撑爆 226px 容器，flex-wrap 把
-   倍速/弹幕/标记 换行掉到第二行叠在其它控件上（用户报「底部的控制按键全挤
-   在一起还显示不完全」）。真机实测：属性方案后右栏单行 9 项 217px=217px 闭合。 */
-html.fnos-touch-narrow xg-controls [data-fntv-trimmed] {
-    display: none !important;
 }
 html.fnos-touch-narrow xg-right-grid { gap: 2px !important; }
 html.fnos-touch-narrow xg-left-grid { gap: 4px !important; }
@@ -205,32 +140,68 @@ html.fnos-touch-narrow .xg-progress {
     align-items: flex-end !important;
 }
 
-/* ── [lc-1312] 两栏底栏：进度条带（上层）+ 按钮带（下层加高）──
-   用户报「还是好挤，能不能两栏显示」。真机实测（440×956，61 号包）发现 xgplayer
-   原生就有两带雏形：进度条在 xg-center-grid（y=872 h=30）、按钮行在 xg-inner-controls
-   （y=892 h=64），但按钮带 64px 装不下 40px 触控热区 + 时间/进度挤在一起。
-   两栏定稿（真机注入验证：进度条视觉底 881 / 按钮带顶 884，间隙 +3px；右栏 7 项单行；
-   左右栏 224+184=408 < 420 容器）：
-   - inner-controls 加高到 76px、按钮行沉底（flex-end + padding-bottom 6px）
-   - 左右栏各 60px 高、垂直居中、禁止换行、图标 20px、横向 padding 归零
-   - 进度条触控带 26px 高，拇指点拖的命中区不受两栏影响 */
+/* ── [lc-1314] 两行底栏终态：播控行 + 功能行（取代 lc-1312 的「按钮带加高」）──
+   用户报「还是好挤，能不能两栏显示」。lc-1312 只是把按钮带加高到 76px，按钮仍挤在
+   同一行；本版把 inner-controls 改为 flex-wrap 两行：
+     第一行 = 左栏（播放 / 快退快进 / 时间），时间用 margin-left:auto 靠右；
+     第二行 = 右栏（图标 + 倍速/原画/选集/弹幕/标记），space-evenly 均布。
+   真机实测（440×956，注入验证）：行距 54px；右行 10 项 ~274px ≤ 400px 容器（全部
+   控件可见，倍速/原画/标记回归，裁剪机制随之废除）；进度条上移到两行之上
+   （bottom:110px），与第一行无重叠（第一行顶 840 / 进度条底 815）。 */
+html.fnos-touch-narrow xg-controls{ height:136px !important; }
 html.fnos-touch-narrow xg-inner-controls{
-    height: 76px !important;
-    align-items: flex-end !important;
-    padding-bottom: 6px !important;
-    box-sizing: border-box !important;
+    height:136px !important;
+    flex-wrap:wrap !important;
+    align-content:flex-end !important;
+    padding:0 10px max(8px, env(safe-area-inset-bottom)) !important;
+    box-sizing:border-box !important;
 }
 html.fnos-touch-narrow xg-left-grid,
 html.fnos-touch-narrow xg-right-grid{
-    height: 60px !important;
-    align-items: center !important;
-    flex-wrap: nowrap !important;
-    gap: 0 !important;
-    min-width: 0 !important;
+    flex:0 0 100% !important;
+    height:54px !important;
+    align-items:center !important;
+    flex-wrap:nowrap !important;
+    gap:0 !important;
+    min-width:0 !important;
 }
-html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
-html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
-html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
+html.fnos-touch-narrow xg-left-grid{ justify-content:flex-start !important; column-gap:6px !important; }
+html.fnos-touch-narrow xg-left-grid > :last-child{ margin-left:auto !important; }
+html.fnos-touch-narrow xg-right-grid{ justify-content:space-evenly !important; }
+html.fnos-touch-narrow xg-center-grid{
+    position:absolute !important;
+    left:10px !important; right:10px !important;
+    bottom:110px !important; height:26px !important;
+    display:flex !important; align-items:center !important;
+}
+
+/* 音量图标归位（用户报「声音控件位置不对」）：lc-1290 把内层 .xgplayer-icon 统一
+   压成 20×20，而音量 SVG 原生 28×38 且该包裹带 relative top:12px 位移 → glyph
+   溢出容器、比同排图标低 9px。归位 = 盒与包裹 flex 居中 + 去位移 + SVG 只设尺寸。
+   注意 svg 不能写 display!important：三个状态图（小音量/音量/静音）由 xgplayer
+   按 data-state 切换显隐，强设 display:block 会让三个叠着全显（真机踩过）。 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume{
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon{
+    position:static !important; top:auto !important; bottom:auto !important; transform:none !important;
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    width:auto !important; height:auto !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon svg{
+    height:24px !important; width:auto !important;
+}
+/* 触摸窄屏隐藏音量滑条：原生 92px 竖条自按钮顶向上伸出，两行布局下必穿进度条与
+   第一行；且触摸端 :hover 粘住会常显成一条突兀竖线。音量走物理键，点击按钮仍切换静音。 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{ display:none !important; }
+
+/* 清晰度按钮无文案（无多清晰度可选）时不占位；有文案时该规则不匹配、自动恢复 */
+html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:empty){ display:none !important; }
+
+/* 播放信息弹窗（右上角详情）窄屏收口：原生 ~560px 定宽在 440px 视口横向溢出。
+   全屏遮罩层（class 含 !w-full）不受影响（真机验证：遮罩仍铺满、浮动弹窗收口）。 */
+html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
 
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
    用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
@@ -247,12 +218,8 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
      ① 给三个 grid 加 min-width:0 —— 允许它们被压缩，这是「不溢出」的前提；
      ② 图标类控件（音量/设置/全屏，无文字）此前**一条规则都没有**，文字按钮缩了它没缩，
         右侧被它们顶出屏。压到 26px 见方 + 收紧图标内边距；
-     ③ 文字按钮（倍速/原画/选集/弹幕/标记）在 ≤430px 屏上按序隐藏到「更多」之外的两项：
-        保留 选集 + 弹幕/标记（我们自己的入口）与播放/时间/全屏，隐藏 倍速/原画
-        —— 用 :nth-child 不可靠（控件数随剧集变），改用「右栏内除前两项外隐藏」的
-        结构化裁剪：先隐藏右栏所有 .plugin-placeholder，再把 xg-icon（图标按钮）与
-        最后一个 plugin-placeholder 放回来。
-     —— 实现见下方 §C1ff 的 JS 段，CSS 只负责尺寸，不做结构裁剪。 */
+     ③ [lc-1314 起] 结构裁剪已废除：底栏改为两行布局（见 [lc-1314] 段）后右行 10 项
+        ~274px ≤ 400px，全部控件保留可见，不再隐藏任何按钮。 */
 
 /* ① grid 允许收缩：min-width:auto 会让 flex 子项拒绝压缩，是溢出的直接原因 */
 html.fnos-touch-narrow xg-inner-controls,
@@ -269,11 +236,9 @@ html.fnos-touch-narrow xg-left-grid .control-item{
 }
 html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; height:20px !important; }
 
-/* ③ 右栏整体不换行 + 允许内部收缩；超窄屏（≤360px）进一步压间距 */
-html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
-/* [lc-1311] 右栏自身也禁止换行（真机实测 xg-right-grid 默认 flex-wrap:wrap，
-   11 项 274px > 226px 时倍速/弹幕/标记被换到第二行叠在别的控件上），并把图标
-   类控件压到 20px——文字按钮 26px 与图标 20px 后真机 217px=217px 单行闭合。 */
+/* ③ 右栏不换行 + 允许内部收缩；超窄屏（≤360px）进一步压字号。
+   [lc-1314] inner-controls 的换行策略已由上方 [lc-1314] 段接管（wrap 两行），这里只保留
+   右栏自身的不换行与收缩约束（两行布局下右栏独占一整行，仍不允许内部折行）。 */
 html.fnos-touch-narrow xg-right-grid{ flex-wrap:nowrap !important; gap:0 !important; min-width:0 !important; }
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
 html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
@@ -288,7 +253,6 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
     (document.head || document.documentElement).appendChild(el);
     _headerStyleInjected = true;
     installMobileFlag();   // [v1.4.1] 播放页可能先于详情页注入：底栏触屏段依赖触屏窄屏标记
-    ensureNarrowControlTrim(); // [lc-1290] 窄屏底栏结构裁剪（把次要文字按钮折掉）
     log.info('[danmakuWeb] 播放页顶部标题栏美化 CSS 已注入');
 }
 
