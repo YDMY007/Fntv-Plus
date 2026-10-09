@@ -521,7 +521,7 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
     local velocity = (text_length + resolution_x) / roll_time
     local best_row = 0
     local best_bias = -math.huge
-    local fallback_row, fallback_size = nil, nil
+    local fallback_row = nil
 
     for i = 1, array.rows do
         local previous_appear_time = array:get_time(i)
@@ -592,7 +592,22 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
         ::continue::
     end
 
-    -- 所有行都被占用，放弃渲染
+    -- [lc-1288] 所有行都还被占用时的回退：优先用循环中记下的 fallback_row
+    -- （该行上一条字号相同、且追及点落在屏幕之外 → 两条不会真的撞上）。
+    -- 此前 fallback_row 只算不用、直接 return nil，把整批弹幕丢成 Comment，
+    -- 表现为「一段出现一下、隔很久才出现下一段」：实测 200 条等间隔(0.35s)弹幕
+    -- 被丢弃 65 条(32.5%)、最大空档拉到 6s；修复前原样行为是 200 条全显示、
+    -- 最大空档 1.0s。
+    if fallback_row then
+        array:occupy(fallback_row, appear_time, appear_time + roll_time, font_size, text_length)
+        return array:get_y(fallback_row)
+    end
+    -- best_row 是追及最晚的一行（bias 最大，最接近自然错开），次优选择
+    if best_row > 0 then
+        array:occupy(best_row, appear_time, appear_time + roll_time, font_size, text_length)
+        return array:get_y(best_row)
+    end
+    -- 所有行都被占用且无任何候选，放弃渲染
     return nil
 end
 
