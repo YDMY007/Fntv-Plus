@@ -168,6 +168,19 @@ html.fnos-compact #fntv-hot-panel{ width:min(340px,calc(100vw - 20px)) !importan
 
 /* B1. 首页悬浮 logo 缩小：390px 下与原生顶栏搜索/头像图标过近 */
 html.fnos-narrow #tb-logo{ height:20px !important; }
+/* [lc-1324] 手机模式顶栏优化（用户报「顶部切换手机模式要优化」）。真机实测：
+   顶栏行两侧内边距 44px + 右侧 268px 图标群 shrink-0 → 标题块（"首页"）只剩
+   34px 宽（scrollWidth 74）被截成一个字；居中 logo 又夹在刷新按钮与原生图标
+   之间相贴。三项收口（改后实测：标题块 142px 完整放下、图标群右移不再相贴）：
+   ① 内边距 44→16、② 顶栏高 80→64（移动端紧凑标准）、
+   ③ 居中 logo 的 top 40→32（logo 是 fixed，原 40 对齐的是 80px 旧顶栏中线）。 */
+html.fnos-narrow [class*="justify-between"][class*="px-11"]{
+    padding:11px 16px !important;   /* 横向 44→16；纵向 py-5(20)+内容42=82 撑破 64 外层 → 11+42+11=64 与外层等高 */
+}
+html.fnos-narrow [class*="h-[80px]"][class*="bg-[var(--semi-color-bg-1)]"]{
+    height:64px !important;
+}
+html.fnos-narrow #tb-logo{ top:32px !important; }
 
 /* B2. 季页/竖版电影页 hero：横向「海报+信息」行改纵向堆叠。
    根因：信息列原生 w-[calc(100%-246px)]，390px 下只剩 52px —— 标题一字一行、

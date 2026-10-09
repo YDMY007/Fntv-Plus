@@ -101,6 +101,18 @@ console.log('\n[1b] UI 模式联动 —— 各安装点统一读 getUiMode');
     '设置面板「触屏特供」项的显示/高亮口径改读模式（电脑模式不显示死开关）');
 }
 
+// ═══ 1c. 手机模式顶栏收口（lc-1324） ═══
+console.log('\n[1c] 手机模式顶栏（首页导航栏）收口');
+{
+  ok(/html\.fnos-narrow \[class\*="justify-between"\]\[class\*="px-11"\]\{/.test(mobileStyle) &&
+     /padding:11px 16px !important/.test(mobileStyle),
+    '顶栏内边距 44→16 / 纵向 py-5→11（标题块被压成一字 34px → 实测 142px 完整放下）');
+  ok(/html\.fnos-narrow \[class\*="h-\[80px\]"\]\[class\*="bg-\[var\(--semi-color-bg-1\)\]"\]\{/.test(mobileStyle),
+    '顶栏高度 80→64（移动端紧凑标准；行与外层等高不溢出）');
+  ok(/html\.fnos-narrow #tb-logo\{ top:32px !important; \}/.test(mobileStyle),
+    '首页 logo 跟随新顶栏中线（top 40→32，实测中线对齐）');
+}
+
 // ═══ 2. 轮播左右黑框：宽度预算 ═══
 console.log('\n[2] 轮播左右黑框 —— 390px 视口下每层吃掉多少宽');
 {
