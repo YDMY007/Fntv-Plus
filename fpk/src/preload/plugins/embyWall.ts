@@ -2671,9 +2671,15 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   但用户再也找不到切换入口（用户报障「外观里轮播图样式没了」）。按桌面版原样补回：
     //   1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，点击后整页回首页重载生效。
     const getCs = (): number => {
-      // [lc-1291] 上限放到 5（触屏特供）；存储值越界回落 4。触屏判定与下方 touchCapable 同口径。
-      const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10);
-      return (v >= 1 && v <= 5) ? v : 4;
+      // [lc-1291→lc-1308] 与 mobile.resolveCarouselStyle 同口径：触屏设备上存量 '4' 是
+      // 样式 5 诞生前的默认值、不是知情选择 → 高亮「触屏特供」；显式选过 1/2/3 才高亮
+      // 对应项。桌面非触屏：'4'/'5'/空 全部按 4 高亮，行为不变。
+      const stored = localStorage.getItem('fnos-carousel-style');
+      const v = parseInt(stored || '4', 10);
+      if (touchCapable) {
+        return (v === 1 || v === 2 || v === 3) ? v : 5;
+      }
+      return (v === 5) ? 4 : ((v >= 1 && v <= 5) ? v : 4);
     };
     const csWrap = document.createElement('div');
     csWrap.style.cssText = 'margin-top:14px;';

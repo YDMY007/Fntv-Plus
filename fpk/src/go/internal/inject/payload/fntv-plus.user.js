@@ -10329,15 +10329,23 @@ html.fnos-perf.dark{
     wrapper.style.cssText = "padding:0 44px;margin-top:0;margin-bottom:0";
     S.carouselWrapper = wrapper;
     const _cs = (() => {
-      let v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
-      if (v === 5) {
-        try {
-          const touch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
-          if (!touch) v = 4;
-        } catch {
-          v = 4;
-        }
+      let stored = null;
+      try {
+        stored = localStorage.getItem("fnos-carousel-style");
+      } catch {
       }
+      let touch = false;
+      try {
+        touch = "ontouchstart" in window || (navigator.maxTouchPoints || 0) > 0;
+      } catch {
+        touch = false;
+      }
+      if (touch) {
+        const tv = parseInt(stored || "4", 10);
+        return tv === 1 || tv === 2 || tv === 3 ? tv : 5;
+      }
+      const v = parseInt(stored || "4", 10);
+      if (v === 5) return 4;
       return v >= 1 && v <= 5 ? v : 4;
     })();
     const _isDark = isSurfaceDark();
@@ -11656,11 +11664,13 @@ html.fnos-perf.dark{
     } catch {
     }
     const touch = isTouchCapable2();
-    if (touch && (stored === null || stored === "")) {
+    if (touch) {
+      const v2 = parseInt(stored || "4", 10);
+      if (v2 === 1 || v2 === 2 || v2 === 3) return v2;
       return 5;
     }
     const v = parseInt(stored || "4", 10);
-    if (v === 5 && !touch) return 4;
+    if (v === 5) return 4;
     return v >= 1 && v <= 5 ? v : 4;
   }
   function ensureStyle5Css() {
@@ -19326,8 +19336,12 @@ html.fntv-boot-hide #root{visibility:hidden}
       themeRow.style.cssText += "margin-bottom:6px;";
       secBodyAppearance.appendChild(themeRow);
       const getCs = () => {
-        const v = parseInt(localStorage.getItem("fnos-carousel-style") || "4", 10);
-        return v >= 1 && v <= 5 ? v : 4;
+        const stored = localStorage.getItem("fnos-carousel-style");
+        const v = parseInt(stored || "4", 10);
+        if (touchCapable) {
+          return v === 1 || v === 2 || v === 3 ? v : 5;
+        }
+        return v === 5 ? 4 : v >= 1 && v <= 5 ? v : 4;
       };
       const csWrap = document.createElement("div");
       csWrap.style.cssText = "margin-top:14px;";

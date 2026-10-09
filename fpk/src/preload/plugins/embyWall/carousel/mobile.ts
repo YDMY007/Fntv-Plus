@@ -34,18 +34,24 @@ function isTouchCapable(): boolean {
 
 /** 渲染层入口是否允许样式 5：必须真触屏。桌面窄窗口一律回落 4（桌面样式靠鼠标才有意义）。
  *  export 供 render.ts 的 getCs 与设置面板共同使用，保证三处口径一致。
- *  [lc-1291] 自动特供：触屏设备且用户从未手动选过样式（无存储值）→ 直接落样式 5，
- *  即「检测到手机/平板就给触屏版轮播」，用户无需进设置面板找开关；桌面与存量用户
- *  （已有存储值）完全不受影响。读 Storage 异常按未选过处理。 */
+ *  [lc-1291] 自动特供：触屏设备 → 默认落样式 5，用户无需进设置面板找开关。
+ *  [lc-1308] **存量 4 不再视为知情选择**（用户报障：内置 WebView 有 lc-780 时代写入的
+ *  存量 '4'，升级到带样式 5 的包后仍显示旧样式，与外置新环境表现不一致）：'4' 是样式 5
+ *  诞生前的默认值，存在它不代表用户在 4 与 5 之间做过选择。触屏设备上只有**显式选过
+ *  1/2/3（非默认的其它形态）** 才尊重存量；'4' 与空值同等对待 → 样式 5。
+ *  桌面（非触屏）行为不变：'4'/'5'/空 全部按 4 渲染。 */
 export function resolveCarouselStyle(): number {
   let stored: string | null = null;
   try { stored = localStorage.getItem('fnos-carousel-style'); } catch { /* 视为未选过 */ }
   const touch = isTouchCapable();
-  if (touch && (stored === null || stored === '')) {
-    return 5; // 触屏 + 从未选过 → 触屏特供
+  if (touch) {
+    // 触屏：显式选过 1/2/3 才尊重（那是用户主动离开默认的选择）；'4' 与空都走特供
+    const v = parseInt(stored || '4', 10);
+    if (v === 1 || v === 2 || v === 3) return v;
+    return 5;
   }
   const v = parseInt(stored || '4', 10);
-  if (v === 5 && !touch) return 4; // 非触屏设备选了 5 → 回落立体堆叠
+  if (v === 5) return 4; // 非触屏设备选了 5 → 回落立体堆叠
   return (v >= 1 && v <= 5) ? v : 4;
 }
 

@@ -148,15 +148,20 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
   const _cs = ((): number => {
-    // [lc-1291] 样式 5 仅触屏设备可用；非触屏选 5 回落 4（与 render.resolveCarouselStyle 同口径，
-    //   此处不 import 是因为 progress.ts 与 render.ts 的既有依赖方向，复制两行并注明来源）。
-    let v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10);
-    if (v === 5) {
-      try {
-        const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
-        if (!touch) v = 4;
-      } catch { v = 4; }
+    // [lc-1291→lc-1308] 与 mobile.resolveCarouselStyle 同口径（不 import 是因 progress.ts
+    //   与 render.ts 的既有依赖方向，此处复制并注明来源）。lc-1308：触屏设备上存量 '4'
+    //   是样式 5 诞生前的默认值、不是知情选择 → 与空值同等对待走样式 5；显式选过 1/2/3
+    //   才尊重。桌面非触屏：'4'/'5'/空 全部按 4 渲染，行为不变。
+    let stored: string | null = null;
+    try { stored = localStorage.getItem('fnos-carousel-style'); } catch { /* 视为未选过 */ }
+    let touch = false;
+    try { touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0; } catch { touch = false; }
+    if (touch) {
+      const tv = parseInt(stored || '4', 10);
+      return (tv === 1 || tv === 2 || tv === 3) ? tv : 5;
     }
+    const v = parseInt(stored || '4', 10);
+    if (v === 5) return 4;
     return (v >= 1 && v <= 5) ? v : 4;
   })();
   const _isDark = isSurfaceDark(); // [lc-1250-web] 跟随页面实际明暗（系统/原生主题标记），不再按面板存储偏好错画深色
