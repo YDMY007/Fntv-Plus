@@ -46,6 +46,63 @@ let _headerStyleInjected = false;
 let _headerHideTimer: ReturnType<typeof setTimeout> | null = null;
 const HEADER_HIDE_DELAY = 2500; // 鼠标不动 2.5s 后自动隐藏
 
+// ─── [lc-1290] 窄屏底栏结构裁剪 ───
+// 手机竖屏下 xg-right-grid 里有 8 个原生控件（播放/时间在左栏，倍速/原画/选集/音量/设置/
+// 全屏在右栏）外加本插件注入的「弹幕」与 skipMarker 的「标记」，共 10 个。CSS 侧再怎么压缩，
+// 文字按钮本身（倍速/原画/选集各 2~3 字 + 40px 触控热区）在 390px 里也放不下 —— 必须**减少
+// 控件数量**。业界做法（Netflix / Disney+ 移动端同款）是把次要项折进「更多」弹层。
+// 这里的取舍：保留 播放/时间/选集/全屏 + 弹幕/标记（自建入口，且弹幕是本插件卖点），
+// 隐藏 倍速/原画/音量/设置（倍速与原画在宽屏恢复可见；音量/设置在窄屏由顶部栏的设置入口
+// 覆盖，不至于失能）。
+// 判定一律按**文本内容**而非位置/序号 —— 控件数量随剧集详情（有无原画/倍速）而变，
+// nth-child 会在不同剧集上错位裁掉要留的按钮。
+const NARROW_TRIM_HIDE = ['倍速', '原画', '音量', '设置'];
+let _narrowTrimBound = false;
+
+/** 窄屏时把次要文字按钮折掉；宽屏或离开播放页立即恢复（幂等，可反复调用）。 */
+function ensureNarrowControlTrim(): void {
+    const apply = (): void => {
+        const narrow = document.documentElement.classList.contains('fnos-touch-narrow');
+        const bar = findControlsBar();
+        if (!bar) return;
+        const items = Array.from(
+            bar.querySelectorAll<HTMLElement>('.plugin-placeholder, .control-item, xg-icon')
+        );
+        for (const it of items) {
+            // xg-icon（音量/设置/全屏）无文字，靠位置判断：只裁右栏里的图标，全屏键必须留
+            const txt = (it.textContent || '').trim();
+            let hide = false;
+            if (txt) {
+                hide = NARROW_TRIM_HIDE.some((k) => txt.includes(k));
+            } else {
+                hide = it.tagName.toLowerCase() === 'xg-icon' && !it.classList.contains('xgplayer-fullscreen');
+            }
+            // 用 style.display 而非 class，退出窄屏时能精确还原为 ''
+            const want = narrow && hide ? 'none' : '';
+            if (it.style.display !== want) it.style.display = want;
+        }
+    };
+    if (_narrowTrimBound) { apply(); return; }
+    _narrowTrimBound = true;
+    // 视口跨越 640px 断点 → html.fnos-touch-narrow 由 mobileStyle 翻转，这里跟着重算
+    const mq = (() => { try { return window.matchMedia('(min-width: 641px)'); } catch { return null; } })();
+    const onMq = (): void => apply();
+    if (mq) {
+        if (mq.addEventListener) mq.addEventListener('change', onMq);
+        else (mq as any).addListener(onMq);
+    }
+    // 控制栏是懒渲染的，进播放页/切集后结构会重建，用 MutationObserver 持续校正
+    const mo = new MutationObserver(() => { if (isPlayerPage()) apply(); });
+    const start = (): void => {
+        const root = document.querySelector('.xgplayer') || document.body;
+        if (root) mo.observe(root, { childList: true, subtree: true });
+    };
+    start();
+    setTimeout(start, 1000);
+    setTimeout(start, 3000);
+    log.info('[danmakuWeb] 窄屏底栏控件裁剪已启用');
+}
+
 /** 注入播放页顶部标题栏美化 CSS（仅执行一次） */
 function injectPlayerHeaderStyle(): void {
     if (_headerStyleInjected) return;
@@ -133,6 +190,50 @@ html.fnos-touch-narrow .xg-progress {
     display: flex !important;
     align-items: flex-end !important;
 }
+
+/* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
+   用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
+   上一段（v1.4.1）只做了「热区 padding 撑高 + 字号缩小」——那是**纵向**的（把热区垫高到
+   40px 高），对**横向**的挤压毫无作用，10 个控件（8 原生 + 弹幕/标记两个自建）在 390px
+   里必然超出，而 xgplayer 的 xg-inner-controls 是 flex 且不换行，超出部分直接被
+   .xgplayer 的 overflow:hidden 吃掉 —— 表现就是「挤在一起 + 最右侧按钮看不全」。
+   xgplayer 真实 DOM（实测自飞牛 /v/assets/74c95604043427f0bee1d0e16bfa53af-DZn1lJtt.js）：
+     <xg-controls class="xgplayer-controls">
+       <xg-inner-controls class="xg-inner-controls xg-pos">
+         <xg-left-grid/> <xg-center-grid/> <xg-right-grid/>
+   三个 grid 是并列 flex 子项，默认 min-width:auto（=内容宽，不会被压缩）。
+   四步收口：
+     ① 给三个 grid 加 min-width:0 —— 允许它们被压缩，这是「不溢出」的前提；
+     ② 图标类控件（音量/设置/全屏，无文字）此前**一条规则都没有**，文字按钮缩了它没缩，
+        右侧被它们顶出屏。压到 26px 见方 + 收紧图标内边距；
+     ③ 文字按钮（倍速/原画/选集/弹幕/标记）在 ≤430px 屏上按序隐藏到「更多」之外的两项：
+        保留 选集 + 弹幕/标记（我们自己的入口）与播放/时间/全屏，隐藏 倍速/原画
+        —— 用 :nth-child 不可靠（控件数随剧集变），改用「右栏内除前两项外隐藏」的
+        结构化裁剪：先隐藏右栏所有 .plugin-placeholder，再把 xg-icon（图标按钮）与
+        最后一个 plugin-placeholder 放回来。
+     —— 实现见下方 §C1ff 的 JS 段，CSS 只负责尺寸，不做结构裁剪。 */
+
+/* ① grid 允许收缩：min-width:auto 会让 flex 子项拒绝压缩，是溢出的直接原因 */
+html.fnos-touch-narrow xg-inner-controls,
+html.fnos-touch-narrow xg-left-grid,
+html.fnos-touch-narrow xg-center-grid,
+html.fnos-touch-narrow xg-right-grid{ min-width:0 !important; }
+
+/* ② 图标类控件此前完全没参与 v1.4.1 的收缩（文字缩了、图标没缩）→ 右侧被顶出屏 */
+html.fnos-touch-narrow xg-right-grid .control-item,
+html.fnos-touch-narrow xg-right-grid xg-icon,
+html.fnos-touch-narrow xg-left-grid .control-item{
+    padding:8px 1px !important;
+    min-width:26px !important;
+}
+html.fnos-touch-narrow xg-right-grid .xgplayer-icon{ width:20px !important; height:20px !important; }
+
+/* ③ 右栏整体不换行 + 允许内部收缩；超窄屏（≤360px）进一步压间距 */
+html.fnos-touch-narrow xg-inner-controls{ flex-wrap:nowrap !important; }
+@media (max-width:360px){
+    html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
+    html.fnos-touch-narrow xg-controls .control-item{ font-size:12px !important; }
+}
 `;
     const el = document.createElement('style');
     el.id = PLAYER_HEADER_STYLE_ID;
@@ -140,6 +241,7 @@ html.fnos-touch-narrow .xg-progress {
     (document.head || document.documentElement).appendChild(el);
     _headerStyleInjected = true;
     installMobileFlag();   // [v1.4.1] 播放页可能先于详情页注入：底栏触屏段依赖触屏窄屏标记
+    ensureNarrowControlTrim(); // [lc-1290] 窄屏底栏结构裁剪（把次要文字按钮折掉）
     log.info('[danmakuWeb] 播放页顶部标题栏美化 CSS 已注入');
 }
 
@@ -165,21 +267,85 @@ function bindHeaderAutoHide(): void {
     log.info('[danmakuWeb] 播放页标题栏自动隐藏已启用 (' + HEADER_HIDE_DELAY + 'ms)');
 }
 
-/** 播放器全屏时给 html 打 fntv-video-fullscreen 标记, 由 mainwin.ts 的 ACRYLIC_CSS
-    在命中该 class(或原生 :fullscreen)时去掉窗口圆角/clip-path, 使视频4角变直角。
-    [lc-552] 重构检测策略: 不再依赖 ResizeObserver+尺寸阈值(时序不稳定→圆角时灵时不灵),
-    改为直接监听 xgplayer 自身的 xgplayer-fullscreen class(MutationObserver),
-    这是最可靠的全屏信号——xgplayer 进入/退出伪全屏时立即添加/移除该 class。 */
+/** 播放器全屏时给 html 打 fntv-video-fullscreen 标记, 供去掉窗口圆角/clip-path, 使视频4角变直角。
+ *  [lc-552] 重构检测策略: 不再依赖 ResizeObserver+尺寸阈值(时序不稳定→圆角时灵时不灵)。
+ *  [lc-1290] **原实现的判据是错的，恒为 false（死代码）**：它查 `.xgplayer.xgplayer-fullscreen`，
+ *  但 xgplayer 从不在播放器根节点上挂 `xgplayer-fullscreen` —— 实测飞牛 /v/assets/
+ *  74c95604043427f0bee1d0e16bfa53af-DZn1lJtt.js 里 `xgplayer-fullscreen` 只出现 4 处，
+ *  全部是**全屏按钮自身**的类（`<xg-icon class="xgplayer-fullscreen">` 及其选择器
+ *  `.xgplayer-fullscreen` 的点击绑定），不是状态类。播放器根节点上的状态类是
+ *  `xgplayer-is-fullscreen`(原生全屏) / `xgplayer-is-cssfullscreen`(CSS 伪全屏)。
+ *  改为同时认这三个，这是弹幕 canvas 全屏搬家(fullscreenHost)依赖的同一个信号。 */
 let _fsFixBound = false;
 function applyVideoFullscreenClass(): void {
     // ① 浏览器原生全屏（最高优先级）
     const nativeFs = !!document.fullscreenElement;
-    // ② 飞牛 xgplayer 伪全屏：直接检查 xgplayer-fullscreen class（xgplayer 自身管理）
-    const pseudoFs = !!document.querySelector('.xgplayer.xgplayer-fullscreen');
+    // ② xgplayer 播放器根节点上的全屏状态类（原生/CSS 伪全屏，xgplayer 自身管理）
+    const pseudoFs = !!document.querySelector(
+        '.xgplayer.xgplayer-is-fullscreen, .xgplayer.xgplayer-is-cssfullscreen, .xgplayer.xgplayer-fullscreen-inner'
+    );
     document.documentElement.classList.toggle('fntv-video-fullscreen', nativeFs || pseudoFs);
 }
+
+/** [lc-1290] 手机竖屏点全屏 → 自动转横屏（用户报障：「全屏按钮没有改为切为横屏的全屏播放」）。
+ *
+ *  取证：xgplayer 的 fullscreen 插件**自带**这套能力，飞牛只是没开。实测其 defaultConfig：
+ *    {useCssFullscreen:!1, rotateFullscreen:!1, useScreenOrientation:!1,
+ *     lockOrientationType:`landscape`, ...}
+ *  且 toggleFullScreen 里写着：进入全屏后 `n.useScreenOrientation && t.aspectRatio>1 &&
+ *  this.lockScreen(n.lockOrientationType)`，退出时 `this.unlockScreen()`。
+ *  也就是说只要把 useScreenOrientation 打开，横屏锁是它自己的原生行为，我们不必自己转屏。
+ *
+ *  为什么不能自己 screen.orientation.lock()：规范要求在**用户手势调用栈内**、且已全屏。
+ *  MutationObserver 回调不在手势栈内 → 必然抛 NotSupportedError（xcplayer 的实现正是
+ *  为了绕开这点才把它做成配置项，由按钮自己的 click 处理器调用）。
+ *
+ *  做法（不改飞牛的业务代码，只改它交给 xgplayer 的配置）：
+ *  经 React fiber 拿到 player 实例 → 改 player.config.fullscreen.useScreenOrientation = true。
+ *  fiber 取法与 gamepad.ts:240 getXgPlayer() 完全一致（已在 lc-679 实测可用）。
+ *  iOS 不支持 orientation.lock（xcplayer 的 lockScreen 内部 try/catch 吞掉异常），
+ *  即 iPhone 上退化为「保持竖屏进全屏」，不会报错 —— 这是 iOS 的平台限制，非本次可解。 */
+let _landscapeBound = false;
+function enableLandscapeFullscreen(): void {
+    if (_landscapeBound || !isPlayerPage()) return;
+    _landscapeBound = true;
+    const patch = (): boolean => {
+        const root = document.querySelector('[class*=xgplayer]') as any;
+        if (!root) return false;
+        try {
+            const key = Object.keys(root).find((k) => k.startsWith('__reactFiber$'));
+            if (!key) return false;
+            let node = root[key];
+            let depth = 0;
+            while (node && depth < 15) {
+                const p = node.memoizedProps && node.memoizedProps.player;
+                if (p) {
+                    // xgplayer 把 fullscreen 插件的 config 挂在 player.config.fullscreen
+                    p.config = p.config || {};
+                    p.config.fullscreen = p.config.fullscreen || {};
+                    if (p.config.fullscreen.useScreenOrientation) return true;
+                    p.config.fullscreen.useScreenOrientation = true;
+                    p.config.fullscreen.lockOrientationType = 'landscape';
+                    log.info('[danmakuWeb] 已开启 xgplayer 横屏全屏 (useScreenOrientation)');
+                    return true;
+                }
+                node = node.return;
+                depth++;
+            }
+        } catch (e: any) {
+            log.warn('[danmakuWeb] 横屏全屏开启失败:', e?.message || e);
+        }
+        return false;
+    };
+    if (patch()) return;
+    // 播放器懒渲染：立即 + 延迟重试（与 bindVideoFullscreenFix 的节奏一致）
+    setTimeout(() => { if (!patch()) setTimeout(patch, 2000); }, 800);
+    setTimeout(patch, 3000);
+}
+
 function bindVideoFullscreenFix(): void {
     if (!isPlayerPage()) return;
+    enableLandscapeFullscreen();
     // 非播放页(如路由切走)也要清理残留标记, 避免影响首页圆角
     if (_fsFixBound) { applyVideoFullscreenClass(); return; }
     _fsFixBound = true;

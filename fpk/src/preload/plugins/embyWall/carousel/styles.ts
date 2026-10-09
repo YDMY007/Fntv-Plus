@@ -805,10 +805,12 @@ export function ensureStyle4Css(): void {
   }
 }
 
-/* ── [v1.4.8] 样式1/2/3 共用：wrapper 44px 桌面边距在 390px 视口吃掉近 1/4 宽 → 收窄 16px。
-   wrapper 原生无类名，以 data-fntv-carousel-wrapper 定位（三处创建点统一打标）。 */
+/* ── [v1.4.8→lc-1290] 样式1/2/3 共用：wrapper 44px 桌面边距在 390px 视口吃掉近 1/4 宽。
+   wrapper 原生无类名，以 data-fntv-carousel-wrapper 定位（三处创建点统一打标）。
+   [lc-1290] 收窄数值已迁到 mobileStyle.ts B5c（8px，并与媒体库 section 的 px-[44px]
+   一起收 —— 原来只收 wrapper 一层，390px 下两侧仍各空 44~67px 即用户报的「轮播左右黑框」）。
+   两处并存会出现同特异性打架，故此处只保留 max-width 收口，padding 值由 mobileStyle 独家声明。 */
 @media (max-width: 640px){
-  html.fnos-touch-narrow [data-fntv-carousel-wrapper]{padding-left:16px !important;padding-right:16px !important}
   /* 容器统一不出屏：媒体库 section 父级若有横向溢出（原生横滑带），强制我们这层不参与 */
   html.fnos-touch-narrow [data-fntv-carousel-wrapper] > div{max-width:100% !important}
 }

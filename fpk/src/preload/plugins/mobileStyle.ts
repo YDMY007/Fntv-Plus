@@ -54,7 +54,7 @@ function isTouchDevice(): boolean {
   } catch { return false; }
 }
 
-/** 按当前视口宽挂/摘 html.fnos-narrow / html.fnos-compact 标记类（幂等）。 */
+/** 按当前视口宽挂/摘 html.fnos-narrow / html.fnos-compact / html.fnos-touch-narrow 标记类（幂等）。 */
 function applyViewportFlags(): void {
   const html = document.documentElement;
   const narrow = !_mqNarrow || !_mqNarrow.matches;     // (min-width:640.5px) 不匹配 = ≤640
@@ -63,8 +63,15 @@ function applyViewportFlags(): void {
   const compactBefore = html.classList.contains('fnos-compact');
   html.classList.toggle('fnos-narrow', narrow);
   html.classList.toggle('fnos-compact', compact);
-  // 触摸标记：与宽窄无关，独立于断点翻转（一次判定，终身不变）。
-  html.classList.toggle('fnos-touch', isTouchDevice());
+  const touch = isTouchDevice();
+  html.classList.toggle('fnos-touch', touch);
+  // [lc-1290] fnos-touch-narrow 此前只由 beautifyStyle（详情页）与 danmakuWeb（播放页）
+  //   安装，首页从不安装 → carousel/styles.ts 里那一整段 @media(max-width:640px) 的轮播
+  //   手机适配（wrapper 44px→16px、s4 卡 86%→94%、邻卡位移收窄、竖屏容器加高）在首页
+  //   **全部是死代码**，用户报「轮播图左右黑框」即此。
+  //   本模块是最底层适配层（零插件依赖、boot 期注入、全站生命周期都在），标记归它装，
+  //   两处原有安装点保留（幂等 classList.toggle，重复调用无副作用）。
+  html.classList.toggle('fnos-touch-narrow', touch && narrow);
   // 行内兜底：#root 的 820px 钉宽来自站点自有样式表，样式表层已有 !important 覆盖，
   // 这里再钉一份行内 !important 兜住「站点样式后加载/被重建」的时序。宽视口必须摘除。
   const root = document.getElementById('root');
@@ -266,6 +273,62 @@ html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-dots{ bottom:12px !impo
 html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{
   width:32px !important; height:56px !important; font-size:1.7rem !important;
 }
+
+/* B5c. [lc-1290] 轮播左右黑框（用户报「轮播图左右黑框」）。
+   逐层算 390px 视口下的宽度预算：
+     视口 390 − wrapper 内联 padding 0 44px = 302
+     再 − 媒体库 section 自身 px-[44px]/px-[46px] ≈ 256
+     容器 aspect-ratio 16/9 → 390 宽下仅 144~170px 高，两侧各空 44~67px。
+   即：轮播并没有铺满，是被两层各 44px 的内边距夹成了窄条，两侧露出的就是 section 底色
+   （暗色主题下呈黑）。三步收口：
+     ① wrapper 内联 padding 由 44px 收到 8px（carousel/styles.ts 的 16px 规则现已在
+        首页生效——它此前挂在从未安装的 fnos-touch-narrow 上，是死代码；这里用更小的值
+        并在自己的层重新声明，避免依赖那个门控）；
+     ② section 的 px-[44px]/px-[46px] 一并收窄（wrapper 的父级，宽是叠乘的，只收一层不够）；
+     ③ 容器给一个下限高度，免得 16:9 在窄屏下塌成一条。
+   边距不能收成 0：轮播右侧有 prev/next 导航钮（left/right:3%）与圆点，完全贴边会被切。 */
+html.fnos-narrow [data-fntv-carousel-wrapper]{ padding-left:8px !important; padding-right:8px !important; }
+/* 媒体库 section 是 wrapper 的**父级**（render.ts 里是 target.appendChild(wrapper)），
+   只能向上选：用 :has(> [data-fntv-carousel-wrapper]) 绑定父级，不能写成子代选择器。
+   :has() 自 Chrome 105 / Safari 15.4 / FF 121 起可用，不支持时只是这条不生效，
+   下面的 wrapper 收边距仍会把黑框从 67px/侧 降到 44px/侧。 */
+html.fnos-narrow div[class*="flex-col"]:has(> [data-fntv-carousel-wrapper]){ padding-left:8px !important; padding-right:8px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"]{ height:min(46vw, 260px) !important; aspect-ratio:auto !important; max-height:none !important; }
+
+/* B5d. [lc-1290] 样式 4 的 3D 邻卡在窄屏露太多（±72% 位移把邻卡大半推出/拉进画面，
+   390px 下视觉上就是两侧各糊一块）。收到 ±58% 且缩小，只露边缘暗示可滑。
+   同 B5c：carousel/styles.ts 里已有同样数值，但那段在首页是死代码，这里独立生效。 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card{ left:2% !important; top:2% !important; width:96% !important; height:96% !important; border-radius:14px !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.prev{ transform:scale(.88) translateX(-46%) rotateY(18deg) !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-card.next{ transform:scale(.88) translateX(46%) rotateY(-18deg) !important; }
+/* 左右切换钮（宽 32px + 3% 边距 ≈ 44px 触控区）：压到卡片下层，点空白不再被抢 */
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav{ width:28px !important; opacity:.4 !important; }
+html.fnos-narrow [data-fntv-carousel-style="4"] .fntv-s4-nav:active{ opacity:1 !important; }
+
+/* B5e. 右侧竖向海报条（仅样式 1 有，render.ts:404 行内 width:150px）：
+   手机上与容器 80/20 分栏争宽，容器只剩 302*0.8=242px 还要被它挤。窄屏直接隐藏海报条，
+   改为上下滑手势换片（render.ts 已有 touchstart/touchend 手势，见 lc-1288）。 */
+html.fnos-narrow .fnos-poster-strip{ display:none !important; }
+
+/* B9. [lc-1290] 首页卡片行（继续观看 / 剧集列表）过大。
+   实测：站点自有 CSS 的最小断点是 (min-width:640px)，640px 以下**零响应式** —— 桌面卡片
+   宽（行内 flex 基准 / shrink-0 + JS 计算的 track 宽）在 390px 下只能显示 1.3 张，
+   一屏放不下第二张，用户报「继续观看和剧集卡片太大了」。
+   做法：不猜具体数值，按视口比例把每张卡钳到「屏宽的 30%~34%，最多 132px」，
+   一屏稳定露出 3 张（含半张余量暗示可横滑），这是 Netflix/Disney+ 移动端同款密度。
+   钳制写在卡片本身（.card-root / .library-card-root 等 shrink-0 元素）而非行容器，
+   避免破坏 JS 算的 track 布局。min-width 必须同时给，否则行内 width 会顶开 min-width。 */
+html.fnos-narrow .ms-container [class*="card-root"],
+html.fnos-narrow .ms-container [class*="poster-box"]{
+  min-width:0 !important;
+  width:clamp(92px, 27vw, 118px) !important;
+  flex:0 0 clamp(92px, 27vw, 118px) !important;
+}
+/* 卡片内的进度条/操作层随卡宽自适应（站点按固定宽算的内联值会溢出） */
+html.fnos-narrow .ms-container [class*="card-root"] img,
+html.fnos-narrow .ms-container [class*="poster-box"] img{ max-width:100% !important; }
+/* 行间距收窄：站点 gap 20px（gap-x-5）在 132px 卡宽下占比过高 */
+html.fnos-narrow .ms-container > *{ gap:10px !important; }
 
 /* B6. 观影记录面板（全屏浮层）：桌面侧 padding 40px/双列图表在手机上挤爆 */
 html.fnos-narrow #fntv-wh .wh-topbar{ padding:16px 16px 10px !important; gap:14px !important; }
