@@ -205,6 +205,33 @@ html.fnos-touch-narrow .xg-progress {
     align-items: flex-end !important;
 }
 
+/* ── [lc-1312] 两栏底栏：进度条带（上层）+ 按钮带（下层加高）──
+   用户报「还是好挤，能不能两栏显示」。真机实测（440×956，61 号包）发现 xgplayer
+   原生就有两带雏形：进度条在 xg-center-grid（y=872 h=30）、按钮行在 xg-inner-controls
+   （y=892 h=64），但按钮带 64px 装不下 40px 触控热区 + 时间/进度挤在一起。
+   两栏定稿（真机注入验证：进度条视觉底 881 / 按钮带顶 884，间隙 +3px；右栏 7 项单行；
+   左右栏 224+184=408 < 420 容器）：
+   - inner-controls 加高到 76px、按钮行沉底（flex-end + padding-bottom 6px）
+   - 左右栏各 60px 高、垂直居中、禁止换行、图标 20px、横向 padding 归零
+   - 进度条触控带 26px 高，拇指点拖的命中区不受两栏影响 */
+html.fnos-touch-narrow xg-inner-controls{
+    height: 76px !important;
+    align-items: flex-end !important;
+    padding-bottom: 6px !important;
+    box-sizing: border-box !important;
+}
+html.fnos-touch-narrow xg-left-grid,
+html.fnos-touch-narrow xg-right-grid{
+    height: 60px !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 0 !important;
+    min-width: 0 !important;
+}
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
+html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
+
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
    用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
    上一段（v1.4.1）只做了「热区 padding 撑高 + 字号缩小」——那是**纵向**的（把热区垫高到

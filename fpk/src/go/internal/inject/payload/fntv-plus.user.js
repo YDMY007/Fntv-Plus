@@ -4961,6 +4961,33 @@ html.fnos-touch-narrow .xg-progress {
     align-items: flex-end !important;
 }
 
+/* \u2500\u2500 [lc-1312] \u4E24\u680F\u5E95\u680F\uFF1A\u8FDB\u5EA6\u6761\u5E26\uFF08\u4E0A\u5C42\uFF09+ \u6309\u94AE\u5E26\uFF08\u4E0B\u5C42\u52A0\u9AD8\uFF09\u2500\u2500
+   \u7528\u6237\u62A5\u300C\u8FD8\u662F\u597D\u6324\uFF0C\u80FD\u4E0D\u80FD\u4E24\u680F\u663E\u793A\u300D\u3002\u771F\u673A\u5B9E\u6D4B\uFF08440\xD7956\uFF0C61 \u53F7\u5305\uFF09\u53D1\u73B0 xgplayer
+   \u539F\u751F\u5C31\u6709\u4E24\u5E26\u96CF\u5F62\uFF1A\u8FDB\u5EA6\u6761\u5728 xg-center-grid\uFF08y=872 h=30\uFF09\u3001\u6309\u94AE\u884C\u5728 xg-inner-controls
+   \uFF08y=892 h=64\uFF09\uFF0C\u4F46\u6309\u94AE\u5E26 64px \u88C5\u4E0D\u4E0B 40px \u89E6\u63A7\u70ED\u533A + \u65F6\u95F4/\u8FDB\u5EA6\u6324\u5728\u4E00\u8D77\u3002
+   \u4E24\u680F\u5B9A\u7A3F\uFF08\u771F\u673A\u6CE8\u5165\u9A8C\u8BC1\uFF1A\u8FDB\u5EA6\u6761\u89C6\u89C9\u5E95 881 / \u6309\u94AE\u5E26\u9876 884\uFF0C\u95F4\u9699 +3px\uFF1B\u53F3\u680F 7 \u9879\u5355\u884C\uFF1B
+   \u5DE6\u53F3\u680F 224+184=408 < 420 \u5BB9\u5668\uFF09\uFF1A
+   - inner-controls \u52A0\u9AD8\u5230 76px\u3001\u6309\u94AE\u884C\u6C89\u5E95\uFF08flex-end + padding-bottom 6px\uFF09
+   - \u5DE6\u53F3\u680F\u5404 60px \u9AD8\u3001\u5782\u76F4\u5C45\u4E2D\u3001\u7981\u6B62\u6362\u884C\u3001\u56FE\u6807 20px\u3001\u6A2A\u5411 padding \u5F52\u96F6
+   - \u8FDB\u5EA6\u6761\u89E6\u63A7\u5E26 26px \u9AD8\uFF0C\u62C7\u6307\u70B9\u62D6\u7684\u547D\u4E2D\u533A\u4E0D\u53D7\u4E24\u680F\u5F71\u54CD */
+html.fnos-touch-narrow xg-inner-controls{
+    height: 76px !important;
+    align-items: flex-end !important;
+    padding-bottom: 6px !important;
+    box-sizing: border-box !important;
+}
+html.fnos-touch-narrow xg-left-grid,
+html.fnos-touch-narrow xg-right-grid{
+    height: 60px !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 0 !important;
+    min-width: 0 !important;
+}
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder{ min-width:0 !important; padding-left:0 !important; padding-right:0 !important; }
+html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !important; }
+html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
+
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
    \u4E0A\u4E00\u6BB5\uFF08v1.4.1\uFF09\u53EA\u505A\u4E86\u300C\u70ED\u533A padding \u6491\u9AD8 + \u5B57\u53F7\u7F29\u5C0F\u300D\u2014\u2014\u90A3\u662F**\u7EB5\u5411**\u7684\uFF08\u628A\u70ED\u533A\u57AB\u9AD8\u5230
