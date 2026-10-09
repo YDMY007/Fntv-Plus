@@ -23586,6 +23586,7 @@ html.fntv-boot-hide #root{visibility:hidden}
 }
 #fntv-uimode-tab:hover{ transform:translateY(-2px); background:rgba(38,42,56,.88); }
 #fntv-uimode-tab:active{ transform:scale(.97); }
+#fntv-uimode-tab svg{ flex:none; display:block; }
 /* \u624B\u673A\u7248\uFF1A\u54C1\u724C\u84DD\u70B9\u7F00\uFF0C\u4E00\u773C\u770B\u51FA\u5F53\u524D\u5904\u4E8E\u54EA\u79CD\u5E03\u5C40 */
 #fntv-uimode-tab.on{
   border-color:rgba(51,116,219,.55);
@@ -23594,11 +23595,13 @@ html.fntv-boot-hide #root{visibility:hidden}
 `;
     (document.head || document.documentElement).appendChild(st);
   }
+  var ICON_MOBILE = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.75" y="1.75" width="6.5" height="12.5" rx="2"/><circle cx="8" cy="11.7" r="0.8" fill="currentColor" stroke="none"/></svg>';
+  var ICON_DESKTOP = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.25" y="2.5" width="11.5" height="8" rx="1.5"/><path d="M1.5 13.25h13"/></svg>';
   function render2() {
     const btn = document.getElementById(BTN_ID2);
     if (!btn) return;
     const m = getUiMode();
-    btn.textContent = m === "mobile" ? "\u{1F4F1} \u624B\u673A\u7248" : "\u{1F5A5} \u7535\u8111\u7248";
+    btn.innerHTML = (m === "mobile" ? ICON_MOBILE : ICON_DESKTOP) + "<span>" + (m === "mobile" ? "\u624B\u673A\u7248" : "\u7535\u8111\u7248") + "</span>";
     btn.title = m === "mobile" ? "\u5F53\u524D\uFF1A\u624B\u673A/\u5E73\u677F\u5E03\u5C40\uFF08\u5E95\u680F\u4E24\u884C\u3001\u8F6E\u64AD\u6837\u5F0F 5\u3001\u5B57\u53F7\u81EA\u9002\u5E94\uFF09\u3002\u70B9\u51FB\u5207\u56DE\u7535\u8111\u5E03\u5C40" : "\u5F53\u524D\uFF1A\u7535\u8111\u5E03\u5C40\u3002\u70B9\u51FB\u5207\u5230\u624B\u673A/\u5E73\u677F\u5E03\u5C40";
     btn.classList.toggle("on", m === "mobile");
   }

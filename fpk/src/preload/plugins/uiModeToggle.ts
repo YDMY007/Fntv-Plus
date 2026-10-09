@@ -35,6 +35,7 @@ function injectStyle(): void {
 }
 #fntv-uimode-tab:hover{ transform:translateY(-2px); background:rgba(38,42,56,.88); }
 #fntv-uimode-tab:active{ transform:scale(.97); }
+#fntv-uimode-tab svg{ flex:none; display:block; }
 /* 手机版：品牌蓝点缀，一眼看出当前处于哪种布局 */
 #fntv-uimode-tab.on{
   border-color:rgba(51,116,219,.55);
@@ -44,11 +45,19 @@ function injectStyle(): void {
     (document.head || document.documentElement).appendChild(st);
 }
 
+/** [lc-1323] 矢量图标（16×16 线性风，stroke=currentColor 跟随文字/高亮色）：
+ *  emoji 在各系统渲染不一（Windows 彩色 blob 风、macOS 又是一套），与按钮的
+ *  苹果风玻璃质感不搭。手机 = iPhone 轮廓（圆角矩形 + Home 点）；
+ *  电脑 = 显示器 + 底座（MacBook 风宽底座线）。1.5px 描边、圆角端点。 */
+const ICON_MOBILE = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.75" y="1.75" width="6.5" height="12.5" rx="2"/><circle cx="8" cy="11.7" r="0.8" fill="currentColor" stroke="none"/></svg>';
+const ICON_DESKTOP = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.25" y="2.5" width="11.5" height="8" rx="1.5"/><path d="M1.5 13.25h13"/></svg>';
+
 function render(): void {
     const btn = document.getElementById(BTN_ID);
     if (!btn) return;
     const m = getUiMode();
-    btn.textContent = m === 'mobile' ? '📱 手机版' : '🖥 电脑版';
+    btn.innerHTML = (m === 'mobile' ? ICON_MOBILE : ICON_DESKTOP)
+        + '<span>' + (m === 'mobile' ? '手机版' : '电脑版') + '</span>';
     btn.title = m === 'mobile'
         ? '当前：手机/平板布局（底栏两行、轮播样式 5、字号自适应）。点击切回电脑布局'
         : '当前：电脑布局。点击切到手机/平板布局';
