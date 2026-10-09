@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { resolveMalId } from '../../../main/common/skipMalMap';
+import { recallSpeed, rememberSpeed, speedKeyOf, flushSpeedMemory, clampSpeed } from '../../../main/common/playbackSpeed';
 import {
     BasePlayer,
     Config,
@@ -38,6 +39,10 @@ export class MpvPlayer extends BasePlayer {
     private mpvLogTailTimer: NodeJS.Timeout | null = null;
     private mpvLogOffset: number = 0;
     private mpvLogRemainder: string = '';
+    // [lc-1304] 倍速按剧集记忆：currentSpeedKey = 当前播放项的记忆键（tv:剧名 / guid:条目），
+    //   currentSpeed = 观察 speed 属性得到的实时值（供 speed-up/down 步进与恢复判定使用）
+    private currentSpeedKey: string = '';
+    private currentSpeed: number = 1;
 
     constructor(config: Config) {
         super(config);
@@ -317,6 +322,16 @@ export class MpvPlayer extends BasePlayer {
         // 开始进度监控
         this.startProgressMonitoring();
 
+        // [lc-1304] 观察 speed 属性：倍速可能在多处被改（应用控制栏/手柄、uosc 速度菜单、
+        //   input.conf 的 [ ] 快捷键），只在这里订阅属性变化才能全接住，进而按剧集记忆。
+        try {
+            void (this.mpvInstance as any).observeProperty('speed').catch((e: any) => {
+                log.warn('观察 speed 属性失败，倍速记忆将只在应用内控制时生效:', e && e.message);
+            });
+        } catch (e: any) {
+            log.warn('观察 speed 属性异常:', e && e.message);
+        }
+
         // 监听播放结束事件
         this.mpvInstance.on('stopped', () => {
             // this.handleExit(0);
@@ -357,6 +372,14 @@ export class MpvPlayer extends BasePlayer {
                 // 更新当前播放项状态
                 this.updateCurrentItemStatus(status.value);
             }
+            // [lc-1304] 倍速变化 → 按当前剧集记下来（应用控制栏 / uosc 菜单 / [ ] 快捷键都会走到这里）
+            if (status.property === 'speed' && typeof status.value === 'number') {
+                this.currentSpeed = Number(status.value) || 1;
+                if (this.currentSpeedKey) {
+                    rememberSpeed(this.currentSpeedKey, this.currentSpeed);
+                    if (this.config.debug) log.debug(`倍速 ${this.currentSpeed} 记入 ${this.currentSpeedKey}`);
+                }
+            }
 
             // 监听播放路径位置
             if (status.property === 'path' && typeof status.value === 'string') {
@@ -386,6 +409,19 @@ export class MpvPlayer extends BasePlayer {
                     if (currentItem.ts > 0 && currentItem.ts <= 0.98 * currentItem.duration) {
                         // 使用重试机制进行跳转, 这里粗暴了点, 视频没加载没法跳，只能重试
                         this.seekWithRetry(currentItem.ts, 50000, 10);
+                    }
+
+                    // [lc-1304] 恢复该剧集上次用的倍速（同一部剧换集/换季共用一个键；
+                    //   电影/个人视频按条目各自记忆）。没有记忆时不动——保持 mpv.conf 的默认值。
+                    this.currentSpeedKey = speedKeyOf(currentItem);
+                    const remembered = recallSpeed(this.currentSpeedKey);
+                    if (remembered != null) {
+                        this.mpvInstance?.setProperty('speed', remembered).then(() => {
+                            this.currentSpeed = remembered;
+                            log.info(`[倍速记忆] 恢复 ${remembered}× (${this.currentSpeedKey})`);
+                        }).catch((err: any) => {
+                            log.warn('恢复倍速失败:', err && err.message);
+                        });
                     }
                 }
 
@@ -695,6 +731,11 @@ export class MpvPlayer extends BasePlayer {
         // 清理播放列表文件
         this.cleanupPlaylistFile();
 
+        // [lc-1304] 倍速记忆落盘兜底：写盘是 800ms 节流的，退出时可能还压在定时器里
+        try { flushSpeedMemory(); } catch { /* 落盘失败不影响退出 */ }
+        this.currentSpeedKey = '';
+        this.currentSpeed = 1;
+
         // 发射退出事件
         const event: PlayExitData = {
             code: code,
@@ -796,11 +837,15 @@ export class MpvPlayer extends BasePlayer {
                     return true;
                 case 'speed-up':
                 case 'speed-down': {
-                    const cur = Number(mpv.getProperty('speed')) || 1;
-                    let next = action === 'speed-up' ? cur + 0.1 : cur - 0.1;
-                    next = Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
+                    // [lc-1304] 原实现是 `Number(mpv.getProperty('speed')) || 1` —— node-mpv-2 的
+                    //   getProperty 返回 Promise（socket 异步命令），Number(Promise)=NaN → 恒被判成 1，
+                    //   于是「加速」每次只到 1.1、连按不叠加，「减速」同理卡在 0.9。
+                    //   改用观察 speed 属性得到的实时值同步步进。
+                    const cur = Number.isFinite(this.currentSpeed) && this.currentSpeed > 0 ? this.currentSpeed : 1;
+                    const next = clampSpeed(action === 'speed-up' ? cur + 0.1 : cur - 0.1);
+                    this.currentSpeed = next;
                     mpv.setProperty('speed', next);
-                    log.info(`[control] 倍速 -> ${next}`);
+                    log.info(`[control] 倍速 ${cur} -> ${next}`);
                     return true;
                 }
                 case 'next':
