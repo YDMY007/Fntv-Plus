@@ -4954,12 +4954,21 @@ html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon{
     display:flex !important; align-items:center !important; justify-content:center !important;
     width:auto !important; height:auto !important;
 }
+/* \u97F3\u91CF\u56FE\u6807\u5C3A\u5BF8\uFF08\u7528\u6237\u62A5\u300C\u58F0\u97F3\u63A7\u4EF6\u600E\u4E48\u56FE\u6807\u8FD9\u4E48\u5C0F\u300D\uFF09\uFF1A\u8BE5 svg \u7684 viewBox \u662F
+   \u300C0 -10 28 40\u300D\uFF0C\u56FE\u5F62\u53EA\u5360\u4E2D\u95F4\u7EA6 20\xD718 \u2014\u2014 lc-1314 \u6309\u300Csvg \u5143\u7D20\u9AD8 24px\u300D\u5BF9\u9F50
+   \u90BB\u5C45\u56FE\u6807\uFF08\u90BB\u5C45 svg 24\xD724\u3001\u56FE\u5F62\u6EE1\u94FA 16-19px\uFF09\uFF0C\u5B9E\u5F97\u56FE\u5F62\u4EC5 12\xD711\uFF0C\u5C0F 35%\u3002
+   \u6062\u590D\u539F\u751F 28\xD740 \u6E32\u67D3 \u2192 \u56FE\u5F62 \u224818px \u4E0E\u90BB\u5C45\u4E00\u81F4\uFF08getBBox \u5B9E\u6D4B\u5C45\u4E2D\u504F\u5DEE\u4EC5 1.4px\uFF09\u3002 */
 html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon svg{
-    height:24px !important; width:auto !important;
+    height:40px !important; width:auto !important;
 }
-/* \u89E6\u6478\u7A84\u5C4F\u9690\u85CF\u97F3\u91CF\u6ED1\u6761\uFF1A\u539F\u751F 92px \u7AD6\u6761\u81EA\u6309\u94AE\u9876\u5411\u4E0A\u4F38\u51FA\uFF0C\u4E24\u884C\u5E03\u5C40\u4E0B\u5FC5\u7A7F\u8FDB\u5EA6\u6761\u4E0E
-   \u7B2C\u4E00\u884C\uFF1B\u4E14\u89E6\u6478\u7AEF :hover \u7C98\u4F4F\u4F1A\u5E38\u663E\u6210\u4E00\u6761\u7A81\u5140\u7AD6\u7EBF\u3002\u97F3\u91CF\u8D70\u7269\u7406\u952E\uFF0C\u70B9\u51FB\u6309\u94AE\u4ECD\u5207\u6362\u9759\u97F3\u3002 */
-html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{ display:none !important; }
+/* \u97F3\u91CF\u6ED1\u6761\uFF08\u7528\u6237\u62A5\u300C\u58F0\u97F3\u5927\u5C0F\u63A7\u5236\u5F39\u7A97\u6CA1\u4E86\u52A8\u753B\u4E5F\u6CA1\u4E86\u300D\uFF1Alc-1314 \u66FE display:none \u6574\u6761
+   \u9690\u85CF\uFF0C\u5F39\u51FA\u4E0E\u8FC7\u6E21\u4E00\u8D77\u88AB\u6740\uFF09\u3002\u6539\u300C\u7F29\u77ED + \u8D34\u6309\u94AE\u300D\uFF1A\u539F 92px \u7AD6\u6761\u9876\u7AEF\u63A2\u5230\u8FDB\u5EA6\u7EBF\u4E0A\u65B9
+   \uFF08\u771F\u673A\u5B9E\u6D4B\u6ED1\u6761\u9876 697 < \u8FDB\u5EA6\u7EBF 700\uFF09\uFF0C\u7F29\u77ED\u5230 60px \u540E\u9876\u7AEF \u2248729 \u6536\u5728\u7B2C\u4E00\u884C\u4E0A\u6CBF\u5185\u3002
+   \u663E\u793A/\u9690\u85CF\u4ECD\u7531 xgplayer \u7684 slide-show \u8FC7\u6E21\u63A7\u5236\uFF08visibility+transition \u539F\u6837\u4FDD\u7559\uFF09\uFF0C
+   \u52A8\u753B\u81EA\u7136\u56DE\u6765\u3002 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{
+    height:60px !important;
+}
 
 /* \u6E05\u6670\u5EA6\u6309\u94AE\u65E0\u6587\u6848\uFF08\u65E0\u591A\u6E05\u6670\u5EA6\u53EF\u9009\uFF09\u65F6\u4E0D\u5360\u4F4D\uFF1B\u6709\u6587\u6848\u65F6\u8BE5\u89C4\u5219\u4E0D\u5339\u914D\u3001\u81EA\u52A8\u6062\u590D */
 html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:empty){ display:none !important; }
@@ -4970,12 +4979,17 @@ html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){
 
 /* [lc-1315] \u539F\u751F\u64AD\u653E\u9875\u5F39\u5C42\uFF08\u9009\u96C6/\u500D\u901F/\u539F\u753B/CC/\u8BBE\u7F6E\u5171\u7528 .trim-ui__player--popover\uFF09
    \u7A84\u5C4F\u6536\u53E3\uFF1A\u672C\u4F53 tailwind \u5B9A\u5BBD w-[392px] \u786C\u7F16\u7801\uFF0C390px \u89C6\u53E3\u4E0B\u53F3\u7F18\u6EA2\u51FA 3px\uFF1B
-   \u7EDF\u4E00\u9650\u5BBD\u5230\u89C6\u53E3\u5185\u5E76\u7559 8px \u8FB9\u8DDD\u3001\u9AD8\u5EA6\u7ED9\u89C6\u53E3\u7559\u767D\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A392\u2192374\u3001
-   \u53F3\u7F18 393\u2192384 \u5B8C\u6574\u53EF\u89C1\uFF09\u3002\u5F39\u7A97\u672C\u4F53\u662F flex\uFF0C\u6536\u7A84\u540E\u5185\u5BB9\u81EA\u884C\u91CD\u6392\u3002 */
+   \u7EDF\u4E00\u9650\u5BBD\u5230\u89C6\u53E3\u5185\u5E76\u7559 8px \u8FB9\u8DDD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A392\u2192374\u3001\u53F3\u7F18 393\u2192384 \u5B8C\u6574\u53EF\u89C1\uFF09\u3002
+   [lc-1317] \u9AD8\u5EA6\u4E0E\u5185\u5BB9\u5C42\u4E5F\u6536\uFF1A\u672C\u4F53\u9AD8\u5EA6\u4E0A\u9650 690px \u5728 844 \u89C6\u53E3\u5360 82% \u89C2\u611F\u8FC7\u6EE1
+   \uFF08\u7528\u6237\u62A5\u300C\u90FD\u8981\u4F18\u5316\u5F39\u7A97\u5927\u5C0F\u300D\uFF09\u2192 max-height 62vh\uFF1B\u5185\u5BB9\u5C42\u4ECD\u662F w-[392px] /
+   max-h-[690px] \u7684\u786C\u7F16\u7801\uFF08\u5916\u5C42\u6536\u53E3\u540E\u6BD4\u5B83\u7A84 18px\uFF0C\u5185\u5BB9\u88AB\u88C1\uFF09\u2192 \u540C\u6B65 max-width/
+   max-height 100%\u3002\u500D\u901F\u8FD9\u7C7B\u7A84\u6761\u5C0F\u5F39\u7A97\uFF08\u5B9E\u6D4B 132\xD7285\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u53EA\u8BBE\u4E0A\u9650\uFF09\u3002 */
 html.fnos-touch-narrow .trim-ui__player--popover{
     width:min(calc(100vw - 16px), 392px) !important;
-    max-height:calc(100vh - 120px) !important;
+    max-height:min(62vh, 690px) !important;
 }
+html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
+html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
@@ -5557,19 +5571,24 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     list.className = "fntv-dm-list";
     list.dataset.fnosUi = "1";
     wrap.appendChild(list);
-    wrap.addEventListener("mouseenter", () => {
-      if (isTouchEnv()) return;
+    let lastPointerType = "mouse";
+    wrap.addEventListener("pointerdown", (e) => {
+      lastPointerType = e.pointerType || "mouse";
+    });
+    wrap.addEventListener("pointerenter", (e) => {
+      if (e.pointerType === "touch") return;
       cancelClosePanel();
       openPanel();
     });
-    wrap.addEventListener("mouseleave", () => {
-      if (!isTouchEnv()) scheduleClosePanel();
+    wrap.addEventListener("pointerleave", (e) => {
+      if (e.pointerType === "touch") return;
+      scheduleClosePanel();
     });
     flex.addEventListener("click", (e) => {
       e.stopPropagation();
       e.preventDefault();
       cancelClosePanel();
-      if (isTouchEnv() && (dmList == null ? void 0 : dmList.classList.contains("active"))) {
+      if (lastPointerType === "touch" && (dmList == null ? void 0 : dmList.classList.contains("active"))) {
         closePanel();
       } else {
         openPanel();

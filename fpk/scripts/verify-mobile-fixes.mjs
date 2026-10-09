@@ -155,10 +155,11 @@ console.log('\n[4] 播放页底栏「挤在一起/显示不全」→ 两行布�
   ok(/\.xgplayer-volume\{\s*\n?\s*display:flex !important/.test(danmakuWeb) &&
      /\.xgplayer-volume \.xgplayer-icon\{[\s\S]{0,200}transform:none !important/.test(danmakuWeb),
     '音量归位：盒/包裹 flex 居中 + 去 top:12px 位移');
-  ok(/\.xgplayer-volume \.xgplayer-icon svg\{\s*\n?\s*height:24px !important; width:auto !important;/.test(danmakuWeb),
-    '音量 SVG 只设尺寸（不写 display：三个状态图由 xgplayer 显隐）');
-  ok(/\.xgplayer-volume \.xgplayer-slider\{ display:none !important; \}/.test(danmakuWeb),
-    '触摸窄屏隐藏音量滑条（92px 竖条必穿进度条/触摸端常显竖线）');
+  ok(/\.xgplayer-volume \.xgplayer-icon svg\{\s*\n?\s*height:40px !important; width:auto !important;/.test(danmakuWeb),
+    '音量 SVG 用原生 40px 渲染（图形 ≈18px 与邻居一致；24px 时图形仅 12px 偏小）');
+  ok(/\.xgplayer-volume \.xgplayer-slider\{\s*\n?\s*height:60px !important;/.test(danmakuWeb) &&
+     !/xgplayer-slider\{ display:none/.test(danmakuWeb),
+    '音量滑条恢复（不再 display:none，弹出/过渡动画回来）+ 缩短 60px（顶 717 不碰进度线 703）');
   ok(/xgplayer-definition:has\(\.icon-text:empty\)/.test(danmakuWeb),
     '空清晰度按钮不占位（:has 支持时生效，有文案自动恢复）');
   ok(/trim-ui__player-modal-container:not\(\[class\*="!w-full"\]\)\{ max-width:calc\(100vw - 40px\) !important; \}/.test(danmakuWeb),
@@ -199,6 +200,14 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
     '底栏文字按钮统一 16px（cursor-pointer 与 control-item 两组选择器同值）');
   ok(/max-width:360px\)\{[\s\S]{0,250}span\.cursor-pointer\{ font-size:12px !important; \}/.test(danmakuWeb),
     '≤360px 超窄兜底同步压两个选择器（避免宽度回落时又不一致）');
+  // [lc-1317] 弹幕按钮 hover 改 PointerEvent 输入区分（带触摸屏的鼠标环境也弹面板）
+  ok(/wrap\.addEventListener\('pointerenter'/.test(danmakuWeb) && /e\.pointerType === 'touch'/.test(danmakuWeb),
+    '弹幕按钮 hover 用 pointerType 区分输入（不再被设备触摸能力误伤）');
+  // [lc-1317] 原生弹层高度/内容层收口
+  ok(/html\.fnos-touch-narrow \[class\*="max-h-\[690px\]"\]\{ max-height:min\(62vh, 690px\) !important; \}/.test(danmakuWeb),
+    '原生弹层高度上限 62vh（690px 在 844 视口占 82% 过满）');
+  ok(/html\.fnos-touch-narrow \[class\*="w-\[392px\]"\]\{ max-width:100% !important; \}/.test(danmakuWeb),
+    '弹层内容层同步收窄（外层 374 时内容 392 会被裁 18px）');
 }
 
 // ═══ 5. 横屏全屏 ═══

@@ -194,12 +194,21 @@ html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon{
     display:flex !important; align-items:center !important; justify-content:center !important;
     width:auto !important; height:auto !important;
 }
+/* 音量图标尺寸（用户报「声音控件怎么图标这么小」）：该 svg 的 viewBox 是
+   「0 -10 28 40」，图形只占中间约 20×18 —— lc-1314 按「svg 元素高 24px」对齐
+   邻居图标（邻居 svg 24×24、图形满铺 16-19px），实得图形仅 12×11，小 35%。
+   恢复原生 28×40 渲染 → 图形 ≈18px 与邻居一致（getBBox 实测居中偏差仅 1.4px）。 */
 html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-icon svg{
-    height:24px !important; width:auto !important;
+    height:40px !important; width:auto !important;
 }
-/* 触摸窄屏隐藏音量滑条：原生 92px 竖条自按钮顶向上伸出，两行布局下必穿进度条与
-   第一行；且触摸端 :hover 粘住会常显成一条突兀竖线。音量走物理键，点击按钮仍切换静音。 */
-html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{ display:none !important; }
+/* 音量滑条（用户报「声音大小控制弹窗没了动画也没了」：lc-1314 曾 display:none 整条
+   隐藏，弹出与过渡一起被杀）。改「缩短 + 贴按钮」：原 92px 竖条顶端探到进度线上方
+   （真机实测滑条顶 697 < 进度线 700），缩短到 60px 后顶端 ≈729 收在第一行上沿内。
+   显示/隐藏仍由 xgplayer 的 slide-show 过渡控制（visibility+transition 原样保留），
+   动画自然回来。 */
+html.fnos-touch-narrow xg-right-grid .xgplayer-volume .xgplayer-slider{
+    height:60px !important;
+}
 
 /* 清晰度按钮无文案（无多清晰度可选）时不占位；有文案时该规则不匹配、自动恢复 */
 html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:empty){ display:none !important; }
@@ -210,12 +219,17 @@ html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){
 
 /* [lc-1315] 原生播放页弹层（选集/倍速/原画/CC/设置共用 .trim-ui__player--popover）
    窄屏收口：本体 tailwind 定宽 w-[392px] 硬编码，390px 视口下右缘溢出 3px；
-   统一限宽到视口内并留 8px 边距、高度给视口留白（真机验证：392→374、
-   右缘 393→384 完整可见）。弹窗本体是 flex，收窄后内容自行重排。 */
+   统一限宽到视口内并留 8px 边距（真机验证：392→374、右缘 393→384 完整可见）。
+   [lc-1317] 高度与内容层也收：本体高度上限 690px 在 844 视口占 82% 观感过满
+   （用户报「都要优化弹窗大小」）→ max-height 62vh；内容层仍是 w-[392px] /
+   max-h-[690px] 的硬编码（外层收口后比它窄 18px，内容被裁）→ 同步 max-width/
+   max-height 100%。倍速这类窄条小弹窗（实测 132×285）不受影响（只设上限）。 */
 html.fnos-touch-narrow .trim-ui__player--popover{
     width:min(calc(100vw - 16px), 392px) !important;
-    max-height:calc(100vh - 120px) !important;
+    max-height:min(62vh, 690px) !important;
 }
+html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
+html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
 
 /* ── [lc-1290] 手机竖屏底栏「挤在一起 + 显示不全」──
    用户报障原文：「底部的控制按键全挤在一起还显示不完全」。
@@ -1023,21 +1037,28 @@ function createControls(): void {
     // [lc-1110] 与飞牛原生按钮同交互：鼠标移上去就弹出、移出延时关闭。
     // 延时不可省 —— 弹窗锚在按钮上方(中间 6px 间隙靠 ::after 桥接)，用户还要把鼠标
     // 移进弹窗拖滑块；立即关闭等于弹窗永远碰不到。
-    // [v1.4.0] 触屏(手机网页)改 toggle 语义：①Chromium 触屏 tap 会**合成 mouseenter**
-    // （实测 tap 一次连发 4 次），hover 路径先开面板、click 再 toggle 关掉 = 永远开不了，
-    // 故触屏直接忽略 enter/leave；②没有 hover 就没有"移出关闭"，开→关只能再点按钮或点外。
-    // 鼠标设备行为一字不变。
-    wrap.addEventListener('mouseenter', () => {
-        if (isTouchEnv()) return;
+    // [lc-1317] 输入切换改用 PointerEvent.pointerType（真·输入事实），取代
+    // isTouchEnv() 的设备能力判定：v1.4.0 为避「触屏 tap 合成 mouseenter」把
+    // enter/leave 整条对触屏设备忽略——但带触摸屏的桌面环境（our iab/Windows）
+    // isTouchEnv()=true 且用户在用鼠标 → hover 完全不弹（用户报「鼠标放上去怎么
+    // 没有弹面板」）。pointerenter 只被真实指针触发，tap 合成事件走不到这里：
+    // mouse/pen → hover 开合；touch → 仅 click toggle（pointerdown 记录来源）。
+    let lastPointerType = 'mouse';
+    wrap.addEventListener('pointerdown', (e) => { lastPointerType = e.pointerType || 'mouse'; });
+    wrap.addEventListener('pointerenter', (e) => {
+        if (e.pointerType === 'touch') return;
         cancelClosePanel(); openPanel();
     });
-    wrap.addEventListener('mouseleave', () => { if (!isTouchEnv()) scheduleClosePanel(); });
-    // 点击也保留(触控板/键盘用户)：触屏=toggle 开关，鼠标=保持展开不关
+    wrap.addEventListener('pointerleave', (e) => {
+        if (e.pointerType === 'touch') return;
+        scheduleClosePanel();
+    });
+    // 点击也保留(触控板/键盘用户)：真实触摸=toggle 开关，鼠标/笔=保持展开不关
     flex.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
         cancelClosePanel();
-        if (isTouchEnv() && dmList?.classList.contains('active')) {
+        if (lastPointerType === 'touch' && dmList?.classList.contains('active')) {
             closePanel();               // 触屏：开→点按钮→关（toggle）
         } else {
             openPanel();
