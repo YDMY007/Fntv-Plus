@@ -364,14 +364,37 @@ function enableLandscapeFullscreen(): void {
             while (node && depth < 15) {
                 const p = node.memoizedProps && node.memoizedProps.player;
                 if (p) {
-                    // xgplayer 把 fullscreen 插件的 config 挂在 player.config.fullscreen
-                    p.config = p.config || {};
-                    p.config.fullscreen = p.config.fullscreen || {};
-                    if (p.config.fullscreen.useScreenOrientation) return true;
-                    p.config.fullscreen.useScreenOrientation = true;
-                    p.config.fullscreen.lockOrientationType = 'landscape';
-                    log.info('[danmakuWeb] 已开启 xgplayer 横屏全屏 (useScreenOrientation)');
-                    return true;
+                    const player = p;
+                    // [lc-1327] 关键：插件实例的 config 是注册时 Object.assign 出来的**副本**
+                    //   （T1.register: n.config=Object.assign({},n.config,a[pluginName])），
+                    //   改 player.config.fullscreen 改的是原对象、插件实例读不到 —— 旧 patch
+                    //   一直无效（真机点全屏不转横屏的根因）。必须改插件实例自身：
+                    //   player.getPlugin('fullscreen')（xgplayer 公开 API）。
+                    let fs: any = null;
+                    try { fs = typeof player.getPlugin === 'function' ? player.getPlugin('fullscreen') : null; } catch { /* ignore */ }
+                    if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
+                    let done = false;
+                    // 插件实例（真生效）：toggleFullScreen 读的是 this.config（=fs.config）
+                    if (fs && fs.config) {
+                        if (!fs.config.useScreenOrientation) {
+                            fs.config.useScreenOrientation = true;
+                            fs.config.lockOrientationType = 'landscape';
+                        }
+                        done = true;
+                    }
+                    // player.config 兜底（若插件在 patch 之后才实例化，注册时会从这里拷贝）
+                    player.config = player.config || {};
+                    player.config.fullscreen = player.config.fullscreen || {};
+                    if (!player.config.fullscreen.useScreenOrientation) {
+                        player.config.fullscreen.useScreenOrientation = true;
+                        player.config.fullscreen.lockOrientationType = 'landscape';
+                        done = true;
+                    }
+                    if (done) {
+                        log.info('[danmakuWeb] 已开启 xgplayer 横屏全屏 (useScreenOrientation, 插件实例=' + !!fs + ')');
+                        return true;
+                    }
+                    return false;
                 }
                 node = node.return;
                 depth++;

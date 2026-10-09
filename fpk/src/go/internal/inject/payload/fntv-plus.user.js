@@ -5572,13 +5572,33 @@ html.fnos-touch-narrow xg-controls .xgplayer-time{ font-size:11px !important; }
         while (node && depth < 15) {
           const p = node.memoizedProps && node.memoizedProps.player;
           if (p) {
-            p.config = p.config || {};
-            p.config.fullscreen = p.config.fullscreen || {};
-            if (p.config.fullscreen.useScreenOrientation) return true;
-            p.config.fullscreen.useScreenOrientation = true;
-            p.config.fullscreen.lockOrientationType = "landscape";
-            log6.info("[danmakuWeb] \u5DF2\u5F00\u542F xgplayer \u6A2A\u5C4F\u5168\u5C4F (useScreenOrientation)");
-            return true;
+            const player = p;
+            let fs = null;
+            try {
+              fs = typeof player.getPlugin === "function" ? player.getPlugin("fullscreen") : null;
+            } catch {
+            }
+            if (!fs && player.plugins && player.plugins.fullscreen) fs = player.plugins.fullscreen;
+            let done = false;
+            if (fs && fs.config) {
+              if (!fs.config.useScreenOrientation) {
+                fs.config.useScreenOrientation = true;
+                fs.config.lockOrientationType = "landscape";
+              }
+              done = true;
+            }
+            player.config = player.config || {};
+            player.config.fullscreen = player.config.fullscreen || {};
+            if (!player.config.fullscreen.useScreenOrientation) {
+              player.config.fullscreen.useScreenOrientation = true;
+              player.config.fullscreen.lockOrientationType = "landscape";
+              done = true;
+            }
+            if (done) {
+              log6.info("[danmakuWeb] \u5DF2\u5F00\u542F xgplayer \u6A2A\u5C4F\u5168\u5C4F (useScreenOrientation, \u63D2\u4EF6\u5B9E\u4F8B=" + !!fs + ")");
+              return true;
+            }
+            return false;
           }
           node = node.return;
           depth++;

@@ -266,9 +266,15 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
 // ═══ 5. 横屏全屏 ═══
 console.log('\n[5] 全屏按钮 → 横屏全屏播放');
 {
-  ok(/p\.config\.fullscreen\.useScreenOrientation = true/.test(danmakuWeb),
-    '开启 xgplayer 自带的 useScreenOrientation（而非自己调 orientation.lock）');
+  // [lc-1327] 插件实例 config 是注册时 Object.assign 的副本（T1.register 反查实证），
+  // 改 player.config.fullscreen 无效 —— 必须改 getPlugin('fullscreen') 的实例 config。
+  ok(/getPlugin\('fullscreen'\)/.test(danmakuWeb),
+    'patch 打到插件实例 config（getPlugin；改 player.config 是无效的副本外写法）');
+  ok(/fs\.config\.useScreenOrientation = true/.test(danmakuWeb),
+    '插件实例 config.useScreenOrientation = true（toggleFullScreen 读的是 this.config）');
   ok(/lockOrientationType = 'landscape'/.test(danmakuWeb), '锁定方向为 landscape');
+  ok(/player\.config\.fullscreen\.useScreenOrientation = true/.test(danmakuWeb),
+    'player.config 兜底仍在（插件后实例化的场景注册时会从这里拷贝）');
   ok(/__reactFiber\$/.test(danmakuWeb), '经 React fiber 取 player 实例（与 gamepad.ts lc-679 同法）');
   // 只查真实代码，剥掉注释（注释里会解释「为什么不自己调 lock」）
   const danmakuCode = danmakuWeb.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
