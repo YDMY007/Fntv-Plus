@@ -464,6 +464,27 @@ function DanmakuArray:get_font_size(row)
     return self.font_size
 end
 
+-- [lc-1287] 轨道占用到期时间：共享轨道池后，滚动弹幕与顶部/底部弹幕落在同一组行上，
+-- 各自持续时间不同（滚动 = scrolltime，固定 = fixtime）。只记 appear_time 无法判断
+-- 「这一行上的东西是否已经走完」，于是固定弹幕会复用滚动弹幕尚未离场的行 → 压字。
+-- 用 until_time 显式记录该行被占到什么时候，两类弹幕各自写自己的值。
+-- length 仍需保留：滚动弹幕的追及判据要用上一条的宽度（get_length）。
+function DanmakuArray:occupy(row, appear_time, until_time, font_size, length)
+    if row > 0 and row <= self.rows then
+        self.time_length_array[row] = {
+            time = appear_time, length = length or 0,
+            font_size = font_size, until_time = until_time,
+        }
+    end
+end
+
+function DanmakuArray:free_at(row)
+    if row > 0 and row <= self.rows then
+        return self.time_length_array[row].until_time or -1
+    end
+    return -1
+end
+
 function DanmakuArray:get_time(row)
     if row > 0 and row <= self.rows then
         return self.time_length_array[row].time
@@ -505,13 +526,16 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
     for i = 1, array.rows do
         local previous_appear_time = array:get_time(i)
         if array:get_time(i) < 0 then
-            array:set_time_length_fs(i, appear_time, text_length, font_size)
+            array:occupy(i, appear_time, appear_time + roll_time, font_size, text_length)
             return array:get_y(i)
         end
 
         -- 上一条是否已经完全离场：没离场就不能复用该行
+        -- [lc-1287] 用轨道记录的 until_time（真实到期时刻）判定，而非一律按 roll_time：
+        -- 共享轨道池后该行可能是顶部/底部弹幕（只占 fixtime 秒）或更早的滚动弹幕，
+        -- 统一用 roll_time 会把早已离场的固定弹幕误判为「还在屏上」，白占一行。
         local dt = appear_time - previous_appear_time
-        local prev_left = dt >= roll_time
+        local prev_left = appear_time >= array:free_at(i)
         -- 记录第一个「未离场但追及点在屏外」的候选行，供回退使用
         if not prev_left and not fallback_row and array:get_font_size(i) == font_size then
             local prev_len = array:get_length(i)
@@ -543,7 +567,7 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
         if delta_x >= 0 then
             if delta_velocity <= 0 then
                 if not same_size then goto continue end
-                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                array:occupy(i, appear_time, appear_time + roll_time, font_size, text_length)
                 return array:get_y(i)
             end
 
@@ -554,11 +578,11 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
             local distance_prev = previous_velocity * (t_catch - previous_appear_time)
             if distance_prev > resolution_x then
                 -- 追及发生在屏幕之外，允许放置
-                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                array:occupy(i, appear_time, appear_time + roll_time, font_size, text_length)
                 return array:get_y(i)
             end
             if bias > 0 then
-                array:set_time_length_fs(i, appear_time, text_length, font_size)
+                array:occupy(i, appear_time, appear_time + roll_time, font_size, text_length)
                 return array:get_y(i)
             elseif bias > best_bias then
                 best_bias = bias
@@ -572,8 +596,15 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
     return nil
 end
 
--- 固定弹幕 Y 坐标算法
--- [lc-1286] 同 get_position_y：行间距走 array.row_height，顶部/底部弹幕也不再按基础字号排。
+-- 固定弹幕（顶部/底部）Y 坐标算法
+-- [lc-1286] 行间距走 array.row_height。
+-- [lc-1287] 与滚动弹幕共用同一轨道池（见 convert_danmaku_to_ass 的 track_array）：
+--   原先 roll_array / top_array 是两个独立数组，两者都从第 1 行(y=1)开始排，
+--   于是顶部/底部弹幕必然落在滚动弹幕所占的行上 → 上下压字（实测 R2L[1,16]fs37
+--   与 TOP[2,7]fs30 同处 y=1 且时间重叠）。改为共享轨道后，固定弹幕会避开
+--   滚动弹幕正在占用的行。
+--   占位时长记录真实持续时间（appear_time + fixtime），而滚动弹幕记 appear_time + roll_time，
+--   两者在同一行的时间轴上才能互不误判（见 DanmakuArray:occupy / free_at）。
 function get_fixed_y(font_size, appear_time, fixtime, array, from_top)
     local best_row = 0
     local best_bias = -1
@@ -586,19 +617,22 @@ function get_fixed_y(font_size, appear_time, fixtime, array, from_top)
 
     for i = row_start, row_end, row_step do
         local previous_appear_time = array:get_time(i)
-        if previous_appear_time < 0 then
-            array:set_time_length(i, appear_time, 0)
+        -- [lc-1287] 该行若还被上一条（滚动或固定）占用且未到期，则不可用。
+        -- 原先固定弹幕只看 fixtime 内的间隔、不看滚动弹幕的 scrolltime 占用，
+        -- 于是直接抢走滚动弹幕正在用的行。
+        local free_at = array:free_at(i)
+        if previous_appear_time < 0 or appear_time >= free_at then
+            if array:get_font_size(i) ~= font_size and free_at > appear_time then goto next_row end
+            array:occupy(i, appear_time, appear_time + fixtime, font_size)
             return array:get_y(i)
         else
             local delta_time = appear_time - previous_appear_time
-            if delta_time > fixtime then
-                array:set_time_length(i, appear_time, 0)
-                return array:get_y(i)
-            elseif delta_time > best_bias then
+            if delta_time > best_bias then
                 best_bias = delta_time
                 best_row = i
             end
         end
+        ::next_row::
     end
     -- 所有行都被占用，放弃渲染
     return nil
@@ -625,8 +659,10 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
     local res_x = 1920
     local res_y = 1080
 
-    local roll_array = DanmakuArray:new(res_x, res_y, fontsize)
-    local top_array = DanmakuArray:new(res_x, res_y, fontsize)
+    -- [lc-1287] 滚动 / 顶部 / 底部弹幕共用同一个轨道池：三类弹幕的 Y 都来自同一组行，
+--   任一行同一时刻只能被一条弹幕占用，从根本上消除跨类型压字（原先 roll_array 与
+--   top_array 是两套独立行号，都从第 1 行开始排，顶部弹幕必然落在滚动弹幕的行上）。
+local track_array = DanmakuArray:new(res_x, res_y, fontsize)
 
     local ass_header = string.format([[
 [Script Info]
@@ -744,7 +780,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             local x1 = res_x + text_length / 2
             local x2 = -text_length / 2
             -- [lc-1286] 传该条**实际**字号（ev_fs），原先恒传基础字号 → 同轨字号判据失效
-            local y = get_position_y(ev_fs, appear_time, text_length, res_x, scrolltime, roll_array)
+            local y = get_position_y(ev_fs, appear_time, text_length, res_x, scrolltime, track_array)
             if y then
                 effect = string.format("{\\move(%d, %d, %d, %d)}", x1, y, x2, y)
             end
@@ -756,7 +792,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             style = "TOP"
             local x = res_x / 2
             -- [lc-1286] 传该条实际字号 ev_fs（聚合放大的顶部弹幕同样要占更高的行）
-            local y = get_fixed_y(ev_fs, appear_time, fixtime, top_array, true)
+            local y = get_fixed_y(ev_fs, appear_time, fixtime, track_array, true)
             if y then
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
@@ -767,7 +803,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time_str = seconds_to_time(ev.end_time)
             style = "BTM"
             local x = res_x / 2
-            local y = get_fixed_y(ev_fs, appear_time, fixtime, top_array, false)
+            local y = get_fixed_y(ev_fs, appear_time, fixtime, track_array, false)
             if y then
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
