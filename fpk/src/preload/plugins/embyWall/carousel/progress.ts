@@ -147,7 +147,18 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
 
   // [lc-805/lc-815] 按当前轮播样式 + 系统明暗渲染骨架: 样式2 用满铺暗底+底部内容占位(与样式2 轮播视觉一致),
   //   浅色模式改用浅色骨架, 避免"先样式1 紫底骨架→加载完才切样式2"或"暗色骨架压在浅色 fnOS 上的突兀跳变。
-  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10); return (v >= 1 && v <= 4) ? v : 4; })();
+  const _cs = ((): number => {
+    // [lc-1291] 样式 5 仅触屏设备可用；非触屏选 5 回落 4（与 render.resolveCarouselStyle 同口径，
+    //   此处不 import 是因为 progress.ts 与 render.ts 的既有依赖方向，复制两行并注明来源）。
+    let v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10);
+    if (v === 5) {
+      try {
+        const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+        if (!touch) v = 4;
+      } catch { v = 4; }
+    }
+    return (v >= 1 && v <= 5) ? v : 4;
+  })();
   const _isDark = isSurfaceDark(); // [lc-1250-web] 跟随页面实际明暗（系统/原生主题标记），不再按面板存储偏好错画深色
 
   const container = document.createElement('div');
@@ -162,6 +173,11 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
   } else if (_cs === 4) {
     // [lc-834] 样式4 骨架容器: 透明无框(与真实样式4 一致, 无背景无边框); 高度走 calc(100vh - 380px) 与真实样式4/样式1 一致, 避免加载完高度跳变
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:transparent;margin:0 auto;box-shadow:none`;
+  } else if (_cs === 5) {
+    // [lc-1291] 样式5 骨架容器: 与真实样式5 同几何（高 min(56vw,340px)、圆角 18px、暗底、
+    // 无 aspect-ratio）—— 骨架→真实轮播零跳变。真实高度由 ensureStyle5Css 的样式表给出，
+    // 骨架阶段该表可能未注入，这里按同公式给内联兜底。
+    container.style.cssText = `position:relative;overflow:hidden;width:100%;height:min(56vw,340px);border-radius:18px;background:#10141c;margin:0 auto;box-shadow:none`;
   } else {
     container.style.cssText = `position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:linear-gradient(155deg,rgba(145,115,215,.22),rgba(70,50,120,.34));${_blur};margin:0 auto;box-shadow:none`;
   }
@@ -351,6 +367,68 @@ export function buildLoadingPlaceholder(target: HTMLElement): void {
     container.appendChild(s4BarBox);
     statusEl = tip4;
     _skelTheme = { container, tipEls: [tip4], pctEls: [percentEl], cardBgs }; // [lc-1290/1294] 登记主题翻转跟随
+  } else if (_cs === 5) {
+    // [lc-1291] 样式5 骨架 = 真实样式5 的「暂停态空壳」：满铺暗底单卡 + 底部信息占位条 +
+    // 卡外指示点，与真实触屏轮播视觉零跳变。不依赖 ensureStyle5Css（骨架阶段样式表可能未注入），
+    // 全部内联 + 复用 .fnos-ph-skel/.fnos-ph-track 公共类。
+    const slideBg = document.createElement('div');
+    slideBg.style.cssText = 'position:absolute;inset:0;background:#151a24;overflow:hidden;border-radius:18px';
+    const shine = document.createElement('div');
+    shine.className = 'fnos-ph-skel';
+    shine.style.cssText = 'position:absolute;inset:0;opacity:.4';
+    slideBg.appendChild(shine);
+    // 底部信息占位（与真实 s5-info 同位同距）
+    const info = document.createElement('div');
+    info.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:14px 16px;z-index:2';
+    const mkBar = (w: string, h: string, mb: string, r = '8px'): HTMLElement => {
+      const b = document.createElement('div');
+      b.className = 'fnos-ph-skel';
+      b.style.cssText = `width:${w};height:${h};border-radius:${r};margin-bottom:${mb};background:rgba(255,255,255,.14)`;
+      return b;
+    };
+    info.appendChild(mkBar('46%', '30px', '10px', '10px'));   // 标题/logo 位
+    info.appendChild(mkBar('72%', '12px', '6px'));            // 简介行1
+    info.appendChild(mkBar('52%', '12px', '12px'));           // 简介行2
+    const acts = document.createElement('div');
+    acts.style.cssText = 'display:flex;gap:10px';
+    const b1 = document.createElement('div');
+    b1.className = 'fnos-ph-skel';
+    b1.style.cssText = 'width:118px;height:44px;border-radius:999px;background:rgba(255,255,255,.18)';
+    const b2 = document.createElement('div');
+    b2.className = 'fnos-ph-skel';
+    b2.style.cssText = 'width:118px;height:44px;border-radius:999px;background:rgba(255,255,255,.12)';
+    acts.appendChild(b1); acts.appendChild(b2);
+    info.appendChild(acts);
+    slideBg.appendChild(info);
+    container.appendChild(slideBg);
+    // 指示点（卡外，与真实 s5-dots 同位）
+    const dots5 = document.createElement('div');
+    dots5.style.cssText = 'display:flex;justify-content:center;gap:7px;margin-top:10px;height:14px';
+    for (let i = 0; i < 5; i++) {
+      const d = document.createElement('span');
+      d.style.cssText = 'width:' + (i === 0 ? '24px' : '7px') + ';height:7px;border-radius:99px;background:rgba(150,140,125,.45)';
+      dots5.appendChild(d);
+    }
+    container.appendChild(dots5);
+    // 底部居中进度条（复用公共 .fnos-ph-track，与 s2/s3 骨架一致）
+    const s5BarBox = document.createElement('div');
+    s5BarBox.style.cssText = 'position:absolute;left:0;right:0;bottom:-6px;z-index:7;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;opacity:0';
+    percentEl = document.createElement('div');
+    percentEl.style.cssText = 'font-size:13px;font-weight:700;color:rgba(232,221,208,.92);font-variant-numeric:tabular-nums';
+    percentEl.textContent = '0%';
+    const s5Track = document.createElement('div');
+    s5Track.className = 'fnos-ph-track';
+    fillEl = document.createElement('div');
+    fillEl.className = 'fnos-ph-fill';
+    s5Track.appendChild(fillEl);
+    s5BarBox.appendChild(percentEl);
+    s5BarBox.appendChild(s5Track);
+    container.appendChild(s5BarBox);
+    statusEl = document.createElement('div');
+    statusEl.className = 'fnos-ph-text';
+    statusEl.style.cssText = 'position:absolute;top:14px;left:16px;font-size:12.5px;color:rgba(232,221,208,.85);letter-spacing:.5px;font-weight:600;z-index:3';
+    statusEl.textContent = '加载中…';
+    container.appendChild(statusEl);
   } else {
     // [lc-582] 样式1 骨架: 紫色渐变 + 装饰海报占位 + 中央进度(原逻辑, 保持不变)
     const deco = (l: string, t: string, r: string): HTMLElement => {

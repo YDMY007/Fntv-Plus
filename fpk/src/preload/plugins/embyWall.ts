@@ -2671,8 +2671,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     //   但用户再也找不到切换入口（用户报障「外观里轮播图样式没了」）。按桌面版原样补回：
     //   1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，点击后整页回首页重载生效。
     const getCs = (): number => {
+      // [lc-1291] 上限放到 5（触屏特供）；存储值越界回落 4。触屏判定与下方 touchCapable 同口径。
       const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10);
-      return (v >= 1 && v <= 4) ? v : 4;
+      return (v >= 1 && v <= 5) ? v : 4;
     };
     const csWrap = document.createElement('div');
     csWrap.style.cssText = 'margin-top:14px;';
@@ -2683,7 +2684,11 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     const csSeg = document.createElement('div');
     csSeg.id = 'fnos-carousel-style-seg';
     csSeg.style.cssText = 'display:flex;gap:6px;';
+    // [lc-1291] 样式 5 仅触屏设备可选；桌面面板里不显示这一项（resolveCarouselStyle 同口径：
+    //   桌面即便写入 5 也会回落 4，这里不展示是避免给桌面用户一个「选了没效果」的死开关）。
+    const touchCapable = (('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0);
     const csLabels = ['竖向轮播', '横向轮播', '堆叠切换', '立体堆叠'];
+    if (touchCapable) csLabels.push('触屏特供');
     csLabels.forEach((lab, idx) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -4148,12 +4153,22 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         const bt: string[] = Array.isArray(s.biliDanmakuBlockTypes) ? s.biliDanmakuBlockTypes : [];
         for (const b of blockToggles) b.input.checked = bt.includes(b.key);
         if (danBlacklist && danBlacklist.ta) danBlacklist.ta.value = s.biliDanmakuBlacklist || '';
+        // [lc-1302] 屏蔽类型真源回填：桌面端读 danmaku_block_types.json（MPV 快捷键菜单 Ctrl+k
+        // 直接改写该文件）；网页端 shim 回落 settings 数组。读取失败保持上方 settings 回填值。
+        ipcRenderer.invoke('settings:get-bili-danmaku-blocktypes-file').then((r: any) => {
+          if (r && Array.isArray(r.blockTypes)) {
+            for (const b of blockToggles) b.input.checked = r.blockTypes.includes(b.key);
+          }
+        }).catch(() => {});
         // [v1.11.0] 弹弹play 卡片状态改由后端 bridge 回查（凭证来源/是否配置/开关）：
         // Secret 永不下发前端，故不能再靠 settings 里的明文回填掩码。
         ddRefreshStatus();
         // [lc-1101] 自建弹幕接口回填（地址非敏感，明文显示；程序化赋值不触发 change，不会误保存）
         swDanmuApi.checked = s.danmuApiEnabled === true;
-        dmApiInput.value = s.danmuApiBase || '';
+        // [lc-1266] 多地址逐行回填；旧配置只有单地址字段时原样显示一行
+        dmApiInput.value = (Array.isArray(s.danmuApiBases) && s.danmuApiBases.length)
+          ? s.danmuApiBases.join('\n')
+          : (s.danmuApiBase || '');
         // [v1.11.1] 弹幕下限回填（后端默认 100；0=不启用）
         dmMinInput.value = String(s.danmuMinCount == null ? 100 : Math.max(0, Math.min(9999, Math.round(Number(s.danmuMinCount) || 0))));
         if (swDanmuApi.checked) {

@@ -5,6 +5,7 @@ import { S } from '../state';
 import { applyTitleLogo, swapTitleToLogo } from './logo';
 import { autoFetchDescs, buildLoadingPlaceholder, buildStrmUnsupportedTip } from './progress';
 import { buildCarouselStyle2, buildCarouselStyle3, buildCarouselStyle4 } from './styles';
+import { buildCarouselStyle5, resolveCarouselStyle } from './mobile';
 import { fetchImageAuth } from './images';
 import { ipcRenderer } from 'electron';
 import { log } from '../log';
@@ -286,9 +287,10 @@ export function injectCarousel(): void {
   }
   const container = document.createElement('div');
   container.style.cssText = 'position:relative;overflow:hidden;width:100%;max-height:calc(100vh - 380px);aspect-ratio:16/9;border-radius:24px;background:var(--fnos-hero-container);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);margin:0 auto;box-shadow:none';
-  // [lc-780→lc-856] 轮播图样式开关：默认样式 4（立体堆叠）；1=竖向轮播 2=横向轮播 3=堆叠切换 4=立体堆叠，用户可在设置面板"外观"切换。
-  //   样式通过 [data-fntv-carousel-style="1|2|3|4"] 区分（CSS 或 JS 分支）。
-  const _cs = ((): number => { const v = parseInt(localStorage.getItem('fnos-carousel-style') || '4', 10); return (v >= 1 && v <= 4) ? v : 4; })();
+  // [lc-780→lc-1291] 轮播图样式开关：默认样式 4（立体堆叠）；1=竖向 2=横向 3=堆叠 4=立体 5=触屏特供。
+  //   样式通过 [data-fntv-carousel-style="1..5"] 区分（CSS 或 JS 分支）。
+  //   样式 5 仅真触屏设备可用（resolveCarouselStyle 内判定），桌面选 5 自动回落 4。
+  const _cs = resolveCarouselStyle();
   container.setAttribute('data-fntv-carousel-style', String(_cs));
   // [lc-582] 加载完成后淡入, 不再"直接闪出全部"(骨架→轮播平滑过渡)
   container.style.opacity = '0';
@@ -380,6 +382,13 @@ export function injectCarousel(): void {
   // [lc-822] 样式 4（3D 旋转木马）：透视 + rotateY 侧卡，借鉴 demo 的 3D 轮播交互。
   if (_cs === 4) {
     buildCarouselStyle4(container, wrapper, shows, base, rebuild);
+    if (!rebuild) target.appendChild(wrapper);
+    return;
+  }
+
+  // [lc-1291] 样式 5（触屏特供）：全宽单卡 + scroll-snap 原生横滑，仅触屏设备（resolveCarouselStyle 已兜底回落）。
+  if (_cs === 5) {
+    buildCarouselStyle5(container, wrapper, shows, base, rebuild);
     if (!rebuild) target.appendChild(wrapper);
     return;
   }
