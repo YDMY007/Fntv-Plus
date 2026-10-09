@@ -545,21 +545,27 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
         -- 统一用 roll_time 会把早已离场的固定弹幕误判为「还在屏上」，白占一行。
         local dt = appear_time - previous_appear_time
         local prev_left = appear_time >= array:free_at(i)
-        -- 记录第一个「未离场但追及点在屏外」的候选行，供回退使用
-        if not prev_left and not fallback_row and array:get_font_size(i) == font_size then
+        -- 记录「未离场但追及点在屏外」的候选行，供兜底使用
+        -- [lc-1294] 收紧为**唯一**候选行 + 必须真正错开：
+        -- 原实现有两个错，导致同轨堆叠到 7 条并行（用户反馈「往前一下、往后退、
+        -- 又闪到前面」= 同轨多条弹幕交错推进）：
+        --   错1  `if dv <= 0 then fallback_row = i`：dv==0（两条等速）也被判为可复用。
+        --        等速同轨并行时两条间距恒定、谁也追不上谁，正是「卡住不动」的观感。
+        --        改为要求 dv < 0（新弹幕更慢）——只有更慢才可能自然拉开距离。
+        --   错2  追及点判定 `prev_v*(t_catch-prev) > resolution_x`：这个量是追及时刻
+        --        上一条已走的距离，>屏宽只说明「追及时刻它已经飞出屏幕了」，
+        --        而 dx>=0 已经保证追及发生在屏内 —— 两个条件同时成立几乎不可能，
+        --        于是 fallback_row 长期为 nil，只能落到 best_row（bias 最大），
+        --        那是「追及最晚」的行，可能同屏挤着 7 条。改为直接用错开距离判定：
+        --        两条之间必须留出至少一条弹幕宽度，否则不算安全候选。
+        if not prev_left and fallback_row == nil and array:get_font_size(i) == font_size then
             local prev_len = array:get_length(i)
             local prev_v = (prev_len + resolution_x) / roll_time
-            local dx = dt * prev_v - (prev_len + text_length) / 2
-            if dx >= 0 then
-                local dv = velocity - prev_v
-                if dv <= 0 then
-                    fallback_row = i
-                else
-                    local t_catch = previous_appear_time + dx / dv
-                    if prev_v * (t_catch - previous_appear_time) > resolution_x then
-                        fallback_row = i
-                    end
-                end
+            local dv = velocity - prev_v
+            -- 必须更慢，且此刻新弹幕的头部尚未追上上一条的尾部（留一条弹幕宽的余量）
+            local gap = (prev_len + text_length) / 2 - dt * prev_v
+            if dv < 0 and gap > text_length then
+                fallback_row = i
             end
         end
 
@@ -601,8 +607,7 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
         ::continue::
     end
 
-    -- [lc-1288] 所有行都还被占用时的回退：优先用循环中记下的 fallback_row
-    -- （该行上一条字号相同、且追及点落在屏幕之外 → 两条不会真的撞上）。
+    -- [lc-1288] 所有行都还被占用时的回退：优先用循环中记下的 fallback_row。
     -- 此前 fallback_row 只算不用、直接 return nil，把整批弹幕丢成 Comment，
     -- 表现为「一段出现一下、隔很久才出现下一段」：实测 200 条等间隔(0.35s)弹幕
     -- 被丢弃 65 条(32.5%)、最大空档拉到 6s；修复前原样行为是 200 条全显示、
@@ -611,12 +616,23 @@ function get_position_y(font_size, appear_time, text_length, resolution_x, roll_
         array:occupy(fallback_row, appear_time, appear_time + roll_time, font_size, text_length)
         return array:get_y(fallback_row)
     end
-    -- best_row 是追及最晚的一行（bias 最大，最接近自然错开），次优选择
+    -- [lc-1294] best_row 是追及最晚的一行（bias 最大，最接近自然错开）。
+    -- 但 bias 的单位是秒，单看它无法区分「晚 0.1 秒的挤在一起」和「晚 3 秒的宽松错开」——
+    -- 超容量时（实测你的配置容量 0.93 条/秒、热门视频需 1.5）每条轨道会挤进 7 条并行，
+    -- 观感就是「往前一下、被顶住往后退、又闪到前面」。故加一道闸：
+    -- 复用 best_row 前要求该行与新弹幕的实际错开距离至少一条弹幕宽度，
+    -- 否则宁可返回 nil 丢弃 —— 单条丢弃是缺一条弹幕，同轨 7 条并行是全程难受。
     if best_row > 0 then
-        array:occupy(best_row, appear_time, appear_time + roll_time, font_size, text_length)
-        return array:get_y(best_row)
+        local prev_len = array:get_length(best_row)
+        local prev_v = (prev_len + resolution_x) / roll_time
+        local dt2 = appear_time - array:get_time(best_row)
+        local gap2 = (prev_len + text_length) / 2 - dt2 * prev_v
+        if gap2 > text_length then
+            array:occupy(best_row, appear_time, appear_time + roll_time, font_size, text_length)
+            return array:get_y(best_row)
+        end
     end
-    -- 所有行都被占用且无任何候选，放弃渲染
+    -- 所有行都被占用且无安全候选，放弃渲染这一条
     return nil
 end
 
@@ -674,7 +690,7 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
     local bold = options.bold and "1" or "0"
     -- [lc-1300] 排版轨道/文本宽度估算与渲染 Style 用同一字号（原版行为：直接用
     -- options.fontsize；lc-1299 的显示高补偿是双重缩放，已随 utils.lua 一并移除）
-    local fontsize = tonumber(options.fontsize) or 50
+    local fontsize = tonumber(options.fontsize) or 30
     local scrolltime = tonumber(options.scrolltime) or 15
     local fixtime = tonumber(options.fixtime) or 5
     local outline = tonumber(options.outline) or 1.0

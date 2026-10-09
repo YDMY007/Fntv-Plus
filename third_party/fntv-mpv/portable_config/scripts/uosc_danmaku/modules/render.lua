@@ -5,19 +5,20 @@ local utils = require("mp.utils")
 -- [lc-1272] 渲染步进：vf_fps=yes 时 0.01s(100Hz)。120Hz 显示器与 100Hz 更新无法整除对齐，
 --   有的显示帧重复旧位置、有的帧跳新位置 → 全屏下肉眼可见「左右抖动」。
 --   display-fps 观察器会把步进改为「显示器刷新率 ÷2」(60Hz@120屏) 实现整帧对齐。
--- [lc-1273] 上述步进只对 OSD 回退路径生效。默认路径改为 lavfi=[ass=...] 视频滤镜渲染：
+-- [lc-1273] 上述步进只对 OSD 回退路径生效。lc-1273 曾把默认路径改为 lavfi=[ass=...] 视频滤镜：
 --   mpv 的 OSD overlay 恒以 ass_render_frame(t=0) 渲染（osd_libass.c append_ass 硬编码 0），
 --   \move 在 OSD 内完全静止，只能靠 Lua 定时器逐 tick 重算 \pos；而 add_periodic_timer
 --   相位与垂直同步无锁，更新落帧间隔抖动 → 全屏（高分辨率下事件循环更忙、定时器更不稳）
 --   弹幕左右微抖，窗口模式负载低被掩盖。滤镜路径把弹幕交给视频滤镜链里的 libass，
 --   由其按每帧 pts 精确插值 \move（实测 150 帧拟合斜率 -1.3331px/帧 vs 理论 -1.3333，
---   零定时器参与），定时器相位/坐标量化问题整体消失。滤镜不可用时自动回退本 OSD 路径。
+--   零定时器参与），定时器相位/坐标量化问题整体消失。
+-- [lc-1301] 滤镜路径默认停用（options.filter_render=no，回退本 OSD 路径）：滤镜把弹幕烙进
+--   视频帧、文字按视频分辨率光栅化，显示分辨率高于视频时整帧上采样 → 弹幕必糊（用户实测
+--   「糊得不行」「调字号后又糊」）；每帧 hwdownload/hwupload + fps 补帧也重（弹幕一多就卡）；
+--   滤镜图部分时机静默挂载失败 → 「弹幕加载成功却一条不显示」。OSD 路径按屏幕分辨率渲染
+--   矢量文字（原版行为，清晰），全屏抖动由 lc-1272 步进对齐抑制。滤镜路径保留可选（=yes）。
 local INTERVAL = options.vf_fps and 0.01 or 0.001
 local osd_width, osd_height, pause = 0, 0, true
-
--- [lc-1299] 字号自适应：实现放 utils.lua（parse.lua 排版轨道与渲染 Style 必须共用同一字号，
--- 否则轨道按基础字号排、渲染按缩放字号画 → 重叠）。这里包一层 local 引用便于本文件调用。
-local adaptive_fontsize = adaptive_fontsize
 
 -- 提取 \move 参数 (x1, y1, x2, y2) 并返回
 local function parse_move_tag(text)
@@ -104,7 +105,8 @@ end
 local overlay = mp.create_osd_overlay('ass-events')
 
 -- ============================================================
--- [lc-1273] 滤镜渲染路径（默认）与 OSD 定时器路径（回退）
+-- [lc-1301] 渲染路径：默认 OSD 定时器路径（原版行为）；滤镜路径由
+--           options.filter_render=yes 显式开启（lc-1273 引入，见文件头说明）
 -- ============================================================
 local FILTER_LABEL = "fntv-danmaku"
 -- nil=未探测, true=可用, false=探测失败（本场回退 OSD 路径）
@@ -192,14 +194,15 @@ mp.add_hook("on_load", 50, strip_stale_danmaku_filters)
 
 -- 虚拟画布(PlayRes)与字号：与 OSD 路径 render() 完全同一套超宽屏修正，
 -- 区别仅在画布按视频原生尺寸取比例（滤镜渲染发生在视频帧上，而非 OSD 矩形）
+-- [lc-1300] 字号回退原版行为：直接用 options.fontsize（PlayRes 画布由 libass
+-- 自动缩放到渲染面，见 utils.lua lc-1300 注释；lc-1299 的显示高补偿是双重缩放）
 local function canvas_geometry()
     local width, height = 1920, 1080
     local vw = mp.get_property_number('width') or 0
     local vh = mp.get_property_number('height') or 0
     local ratio = (vw > 0 and vh > 0) and vw / vh
         or (osd_height > 0 and osd_width / osd_height or 16 / 9)
-    -- [lc-1299] 字号 = 面板值 × 显示缩放（4K/窗口大小自动补偿），超宽屏修正在缩放之后叠加
-    local fontsize = adaptive_fontsize()
+    local fontsize = tonumber(options.fontsize) or 30
     if width / height < ratio then
         height = width / ratio
         fontsize = fontsize - ratio * 2
@@ -218,9 +221,8 @@ local function write_render_file()
     local displayarea = height * tonumber(options.displayarea)
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    -- [lc-1299] 描边/阴影随字号同比缩放：4K 下 1.2px 描边对 100px 字太细（等效发糊），
-    -- 与字号共用同一 scale 保证任何显示环境下描边/字高的视觉比例一致
-    local outline = (tonumber(options.outline) or 1.0) * get_font_scale()
+    -- [lc-1300] 描边直接用配置值（原版行为）；lc-1299 的「随字号同比缩放」随双重缩放一并移除
+    local outline = tonumber(options.outline) or 1.0
     local shadow = tonumber(options.shadow) or 0.0
     local fontname = options.fontname
 
@@ -391,8 +393,8 @@ function render()
     local delay = get_delay_for_time(DELAYS, pos)
 
     local fontname = options.fontname
-    -- [lc-1299] OSD 回退路径同样走自适应字号
-    local fontsize = adaptive_fontsize()
+    -- [lc-1300] OSD 回退路径同样回退原版字号行为
+    local fontsize = tonumber(options.fontsize) or 30
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
 
     local width, height = 1920, 1080
@@ -478,10 +480,10 @@ function show_danmaku_func()
             end
         end
     end
-    if try_filter_path() then
+    if options.filter_render and try_filter_path() then
         return
     end
-    -- ===== OSD 回退路径（lc-1272 逻辑原样保留）=====
+    -- ===== OSD 渲染路径（lc-1301 起为默认，原版行为）=====
     render()
     if not pause then
         timer:resume()
@@ -568,34 +570,8 @@ end
 mp.observe_property('osd-width', 'number', function(_, value) osd_width = value or osd_width end)
 mp.observe_property('osd-height', 'number', function(_, value) osd_height = value or osd_height end)
 
--- [lc-1299] 显示环境变化 → 自适应字号跟随：
---   窗口拖拽缩放 / 全屏切换（osd-height 变）、换显示器（display-height 变）、
---   Windows DPI 缩放调整（窗口物理像素随系统缩放变化，同样体现为 osd-height 变）。
---   字号写死在渲染 ASS 的 Style 里，必须重建文件并重挂滤镜才生效；
---   OSD 回退路径下一轮 render() 自然取新值，无需重建。防抖：resize 拖动期间连发，
---   0.5s 静默后只重建一次。
-local resize_debounce = nil
-local function on_display_geometry_changed()
-    if resize_debounce then resize_debounce:kill() end
-    resize_debounce = mp.add_timeout(0.5, function()
-        resize_debounce = nil
-        if ENABLED and COMMENTS ~= nil and filter_available and filter_active then
-            msg.info(string.format("[lc-1299] 显示区变化（%dx%d），字号自适应重建: %d px",
-                osd_width, osd_height, adaptive_fontsize()))
-            try_filter_path()
-        end
-    end)
-end
-mp.observe_property('osd-height', 'number', function(_, value)
-    local old = osd_height
-    osd_height = value or osd_height
-    if old > 0 and osd_height > 0 and math.abs(osd_height - old) > 2 then
-        on_display_geometry_changed()
-    end
-end)
-mp.observe_property('display-height', 'number', function(_, value)
-    if value and value > 0 then on_display_geometry_changed() end
-end)
+-- [lc-1300] 显示环境变化无需重建：字号/描边不再随显示分辨率变化（原版行为，
+-- PlayRes 画布由 libass 自动缩放），渲染 ASS 内容与显示几何无关，滤镜无需重挂。
 -- [lc-1272] 步进=两显示帧(2/fps)：更新频率是刷新率的整约数，逐帧位置严格对齐，
 --   消除「100Hz 更新 × 120Hz 显示」错频造成的抖动；比 1/fps 省一半重排开销。
 --   [lc-1273] 滤镜路径下无定时器可调，跳过。
