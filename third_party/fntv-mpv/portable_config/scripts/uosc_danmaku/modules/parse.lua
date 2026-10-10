@@ -343,6 +343,38 @@ local function parse_json_danmaku(json_string, delay_segments)
 end
 
 -- 解析弹幕文件
+-- [lc-1336] 弹幕展示占比（用户手动输入 0-100）：**不改显示范围**（轨道数/displayarea 一动不动），
+-- 只按比例保留弹幕 —— 「当前展示范围内显示多少比例的弹幕」。
+-- 判定用「文本 + 时间」的稳定哈希取模：同一批弹幕每次重载保留的还是同一批。
+-- （若用随机采样，每次重载/切档都会换一批，观感像弹幕在跳。）
+local function stable_sample_key(d)
+    local s = tostring(d.text or "") .. "|" .. string.format("%.1f", tonumber(d.time) or 0)
+    local h = 0
+    for i = 1, #s do
+        h = (h * 131 + s:byte(i)) % 2147483647
+    end
+    return h
+end
+
+local function apply_display_percent(list)
+    local pct = tonumber(options.density_percent)
+    if pct == nil or pct >= 100 then
+        return list
+    end
+    if pct <= 0 then
+        msg.info("弹幕展示占比 0%：本片不显示弹幕（显示范围等其它设置未改）")
+        return {}
+    end
+    local kept = {}
+    for _, d in ipairs(list) do
+        if stable_sample_key(d) % 100 < pct then
+            kept[#kept + 1] = d
+        end
+    end
+    msg.info(string.format("弹幕展示占比 %d%%：保留 %d / %d 条（显示范围未改）", pct, #kept, #list))
+    return kept
+end
+
 function parse_danmaku_files(danmaku_input, delays)
     reload_block_types()   -- [lc-1335] 每次加载前重读屏蔽类型（Ctrl+K 即时生效）
     local DANMAKU_PATHs = {}
@@ -402,6 +434,8 @@ function parse_danmaku_files(danmaku_input, delays)
     end)
 
     all_danmaku = merge_duplicate_danmaku(all_danmaku, options.merge_tolerance)
+
+    all_danmaku = apply_display_percent(all_danmaku)
 
     return all_danmaku
 end

@@ -37,19 +37,28 @@ console.log('\n[1] 排版回到原版：轨道独占（一条轨道一条弹幕�
     '密度档位不进排版层（只由菜单改写 scrolltime，排版照常读它）');
 }
 
-console.log('\n[2] 密度开关仍然有效（三处对齐）');
+console.log('\n[2] 弹幕展示占比（手动输入 0-100）四处对齐');
 {
-  ok(/local scrolltime = tonumber\(options\.scrolltime\) or \d+/.test(parseLua),
-    '排版读 options.scrolltime（密度开关的真正作用点）');
-  ok(/^dense_danmaku=/m.test(conf) && /^scrolltime=/m.test(conf),
-    'conf 里 dense_danmaku / scrolltime 两个键在（菜单落盘也写它们）');
-  ok(/dense = \{ scrolltime = 15 \}/.test(menuLua) && /sparse = \{ scrolltime = 9 \}/.test(menuLua),
-    '菜单档位 preset = 密集 15s / 稀疏 9s');
-  ok(/register_script_message\("toggle-danmaku-density"/.test(menuLua),
-    '「弹幕密度」菜单项仍然挂着（点击改档 → 落盘 → 重载弹幕）');
+  ok(/local function apply_display_percent\(list\)/.test(parseLua) && /options\.density_percent/.test(parseLua),
+    'parse.lua 有占比过滤器，且读 options.density_percent');
+  ok(/stable_sample_key/.test(parseLua),
+    '按「文本+时间」稳定哈希采样（同一批弹幕每次重载保留同一批，不是随机抽）');
+  ok(/apply_display_percent\(all_danmaku\)/.test(parseLua.split('function parse_danmaku_files')[1] || ''),
+    'parse_danmaku_files 里真的调用了它（不是死代码）');
+  ok(/^density_percent=/m.test(conf) && !/^dense_danmaku=/m.test(conf),
+    'conf 里是 density_percent（旧的 dense_danmaku 已清掉）');
+  ok(/density_percent = 100,/.test(read(D + '/scripts/uosc_danmaku/modules/options.lua')),
+    'options 默认 100（= 全部照旧）');
+  ok(/register_script_message\("set-danmaku-density"/.test(menuLua) && /input\.get\(\{/.test(menuLua),
+    '菜单项走输入框（手动输入），不是两档开关');
+  ok(/STYLE_PERSIST_KEYS = \{[^}]*"density_percent"/.test(menuLua),
+    '落盘清单含 density_percent（改完跨会话生效）');
+  ok(!/DENSITY_PRESETS|dense_danmaku|toggle_danmaku_density/.test(menuLua),
+    '两档开关残留（preset 表 / dense_danmaku / 旧函数）已清干净');
   ok(/function reload_block_types/.test(parseLua) && /reload_block_types\(\)/.test(parseLua.split('function parse_danmaku_files')[1] || ''),
-    '屏蔽类型（Ctrl+K）的运行时刷新仍在，且每次加载前重读');
+    '屏蔽类型（Ctrl+K）运行时刷新仍在，且每次加载前重读');
 }
+
 
 console.log('\n[3] 渲染步进：每个显示帧一次（不再「÷2」）');
 {
