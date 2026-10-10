@@ -7104,7 +7104,8 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       window.__fntvDmFont = Math.round(fontSize * 10) / 10;
     } catch {
     }
-    const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
+    const laneFontH = baseFont * userScale;
+    const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, laneFontH * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
     let needRelocate = false;

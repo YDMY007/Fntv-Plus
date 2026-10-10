@@ -2042,7 +2042,15 @@ function render(): void {
     const fontSize = Math.max(10, baseFont * userScale * autoK);
     // [lc-1315/1318] 真机排查观测点（AutoK: 密度系数；DmFont: 当前实际字号）
     try { (window as any).__fntvAutoK = autoK; (window as any).__fntvDmFont = Math.round(fontSize * 10) / 10; } catch { /* ignore */ }
-    const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, fontSize * 1.08);
+    // [lc-1340] 轨道高度必须用「用户设定字号」而不是 autoK 缩放后的实际字号。
+    //   旧式 `fontSize * 1.08`（fontSize 含 autoK）会形成一个闭环：
+    //     laneH → 轨道数 n → 占用率 → autoK（平滑跟随）→ fontSize → laneH …
+    //   在阈值附近来回振荡，而 **n 一变就 relocateCursor（清屏 + 重排）** ——
+    //   用户看到的就是「弹幕出现几秒、立刻消失又重新出现」（真机报障原文）。
+    //   轨道按「可能的最大字号」留高（autoK ≤ 1，实际只会更小）→ 永远不会因为字号
+    //   比轨道高而叠字；同时 n 只随样式变化，不再随密度抖动。
+    const laneFontH = baseFont * userScale;
+    const laneH = Math.max(smallScreen ? 24 : 20, ch * LANE_RATIO, laneFontH * 1.08);
     const usableH = ch * style.displayArea;
     const n = Math.max(6, Math.floor(usableH / laneH));
 

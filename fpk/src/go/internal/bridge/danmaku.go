@@ -947,6 +947,41 @@ func danmuMarkUsed(list []danmuSourceDetail, key string, raw, count int) []danmu
 // 「缓存数据以减少请求次数」相悖。故记录上次探测时刻，TTL 内不再重复探测，直接用缓存。
 const danmuProbeTTL = 6 * time.Hour
 
+// [lc-1341] 自建源这一次「参与了但没被采用」时的重探 TTL（10 分钟）。
+//
+// 背景（真机现场）：ep5 那一次自建源失败 → 源链退到 B站 拿到一条宣传视频 → 结果**连
+// 「6 小时内不再探测」一起落盘**，于是之后每次播放都直接吃这份缓存、再也不问自建源；
+// 用户手动「清除弹幕匹配记忆」后才重跑链路，同一集自建源立刻 10720 条命中。
+// 上游是用户自建服务（偶发抖动很常见，且不受第三方配额约束），没被采用就该早点重试 ——
+// 否则一次抖动会锁死 6 小时，用户体感就是「明明自建源有弹幕却一直匹配到别处」。
+const danmuSelfRetryTTL = 10 * time.Minute
+
+// danmuSelfSourceFailed 本次链路里自建源是否「参与了但没被采用」。
+// 依据落盘 meta 里的 sources 明细（danmuServeResult 每次都写）：
+//   · used=true            → 用了自建源，不需要重探；
+//   · note="未启用"        → 用户没配自建源，与它无关；
+//   · 其余（失败/未命中/条数不足/仅作候选）→ 视作未采用，值得早点重探。
+func danmuSelfSourceFailed(meta map[string]any) bool {
+	arr, _ := meta["sources"].([]any)
+	for _, it := range arr {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		if jsStr(m["key"]) != "danmu_api" {
+			continue
+		}
+		if used, _ := m["used"].(bool); used {
+			return false
+		}
+		if jsStr(m["note"]) == "未启用" {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 // danmuCacheCheckedRecently 缓存是否在探测 TTL 内已跑过完整链路。
 // checkedAt 由 danmuServeResult / B站写缓存分支打点（走完链路才写）。
 func danmuCacheCheckedRecently(meta map[string]any) bool {
@@ -954,7 +989,11 @@ func danmuCacheCheckedRecently(meta map[string]any) bool {
 	if !ok || ts <= 0 {
 		return false
 	}
-	return time.Since(time.Unix(int64(ts), 0)) < danmuProbeTTL
+	ttl := danmuProbeTTL
+	if danmuSelfSourceFailed(meta) {
+		ttl = danmuSelfRetryTTL // [lc-1341] 自建源没被采用 → 早点重探，别锁死 6 小时
+	}
+	return time.Since(time.Unix(int64(ts), 0)) < ttl
 }
 
 // danmuCacheKey 磁盘缓存文件路径（title|season|ep 键；空配置目录返回空串）。
@@ -1266,6 +1305,10 @@ func (b *Bridge) danmakuPrepare(w http.ResponseWriter, r *http.Request) {
 			reasons = append(reasons, fmt.Sprintf("自建源 %d 条", len(kept)))
 			detail.Note = fmt.Sprintf("命中 %d 条，低于下限 %d，未采用", len(kept), b.danmuMinCount())
 		} else if reason != "" {
+			// [lc-1341] 失败路径此前完全无日志：一旦自建源没命中，日志里只有 B站 的结果，
+			// 看不出「自建源试过但为什么没中」。真机排障就卡在这里。
+			logf("[danmaku] 自建源未命中（%s）→ 继续下一个源: title=%q ep=%d season=%d",
+				reason, title, req.Ep, req.Season)
 			reasons = append(reasons, "自建源("+reason+")")
 		}
 		sources = append(sources, detail)

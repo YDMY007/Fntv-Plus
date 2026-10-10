@@ -269,7 +269,15 @@ func (b *Bridge) danmuAutoFetch(title string, ep int64, season int64) ([]map[str
 	d.Base = danmuMaskBase(b.danmuBase()) // 服务地址脱敏（路径段可能含 TOKEN）
 	hits := b.danmuSearchAnimes(title, season)
 	if len(hits) == 0 {
-		d.Note = "搜索无精确匹配条目"
+		// [lc-1341] 一次重试：自建源是用户自建服务，搜索这一跳偶发抖动（超时/瞬时 5xx）
+		// 与「确实没有这部番」在返回值上完全一样，旧实现一次不成即弃 → 源链退到 B站，
+		// 还把这个结果按 6 小时 TTL 缓存住（真机 ep5 就是这么错到宣传视频上的）。
+		// 成功结果本身有 5 分钟内存缓存，所以重试只在真失败时才真的再打一次上游。
+		time.Sleep(350 * time.Millisecond)
+		hits = b.danmuSearchAnimes(title, season)
+	}
+	if len(hits) == 0 {
+		d.Note = "搜索无精确匹配条目（含一次重试）"
 		return nil, "自建源搜索无精确匹配条目", d
 	}
 	tries := 3
