@@ -1,7 +1,8 @@
 // preload/plugins/perfDiag.ts
 // [lc-1284] 性能诊断：FPS 悬浮表 + 玻璃滤镜开关 —— 定位「桌面版卡、fpk 不卡」的壳开销。
-//   Ctrl+Alt+F  开/关 FPS 悬浮表（每 500ms 刷新：FPS · 最差帧ms · 玻璃态）
-//   Ctrl+Alt+B  开/关 玻璃滤镜（全页 backdrop-filter 强制 none）
+//   Ctrl+Shift+Alt+F  开/关 FPS 悬浮表（每 500ms 刷新：FPS · 最差帧ms · 玻璃态）
+//   Ctrl+Shift+Alt+B  开/关 玻璃滤镜（全页 backdrop-filter 强制 none）
+// [lc-1285] 热键改三键组合：原 Ctrl+Alt+F/B 与用户已有软件冲突。
 // 两个开关均写入 localStorage 跨重启生效；窗口透明与否由启动环境变量 FNTV_NO_TRANSPARENT
 // 控制（见 mainwin.ts，配套 fps对比-*.cmd 启动器），无法运行时切换。
 // 默认零开销：未开 FPS 时不跑 rAF，热键仅一个捕获监听器。
@@ -118,7 +119,7 @@ registerHook(HookType.OnReady, () => {
     applyNoGlass(); // 模块级注入时 head 可能未就绪，此处兜底
 
     document.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (!e.ctrlKey || !e.altKey || e.repeat) return;
+        if (!e.ctrlKey || !e.altKey || !e.shiftKey || e.repeat) return;
         const t = e.target as HTMLElement | null;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return; // 避开 AltGr 输入
         const k = (e.key || '').toLowerCase();
@@ -128,19 +129,19 @@ registerHook(HookType.OnReady, () => {
             const on = !lsOn(FPS_KEY);
             lsSet(FPS_KEY, on);
             if (on) startFps(); else stopFps();
-            flashHint(on ? 'FPS 显示已开启 — Ctrl+Alt+F 关闭' : 'FPS 显示已关闭');
+            flashHint(on ? 'FPS 显示已开启 — Ctrl+Shift+Alt+F 关闭' : 'FPS 显示已关闭');
         } else if (k === 'b') {
             e.preventDefault();
             e.stopPropagation();
             const on = !lsOn(NOGLASS_KEY);
             lsSet(NOGLASS_KEY, on);
             applyNoGlass();
-            flashHint(on ? '玻璃滤镜已关闭(重启仍生效) — Ctrl+Alt+B 恢复' : '玻璃滤镜已恢复');
+            flashHint(on ? '玻璃滤镜已关闭(重启仍生效) — Ctrl+Shift+Alt+B 恢复' : '玻璃滤镜已恢复');
         }
     }, true);
 
     if (lsOn(FPS_KEY)) startFps();
-    logger.info('[perfDiag] 已加载 — Ctrl+Alt+F=FPS表 Ctrl+Alt+B=玻璃开关');
+    logger.info('[perfDiag] 已加载 — Ctrl+Shift+Alt+F=FPS表 Ctrl+Shift+Alt+B=玻璃开关');
 });
 
 // 模块级：玻璃关闭态注入（放在 registerHook 之后，遵循模块级铁律的注册优先原则）
