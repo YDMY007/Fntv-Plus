@@ -566,9 +566,14 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
 
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    -- [lc-1299] 排版轨道/文本宽度估算必须与渲染 Style 用同一自适应字号：
-    -- 渲染端按「显示区高/1080」缩放字号，轨道仍按基础字号排会重叠/露缝。
-    local fontsize = adaptive_fontsize()
+    -- [lc-1339] 这里原先调 adaptive_fontsize()（lc-1299 引入的字号自适应）。该函数已由
+    -- lc-1300 从 utils.lua 删除（libass 会把 PlayRes 1080 画布自动缩放到实际渲染面，
+    -- 再乘显示高 = 双重缩放，高分屏字号翻倍、滤镜路径发糊）——但 lc-1335 把 parse.lua
+    -- 整体回退到 lc-1285 时，把**这个调用**一起回退了回来 → 运行到此处直接
+    -- 「attempt to call global 'adaptive_fontsize' (a nil value)」→ ASS 写不出来 →
+    -- 弹幕整条消失（用户报「mpv端字幕不显示」的真因）。
+    -- 回退后的正确写法：直接用 options.fontsize（与渲染端 Style 同源）。
+    local fontsize = tonumber(options.fontsize) or 50
     local scrolltime = tonumber(options.scrolltime) or 15
     local fixtime = tonumber(options.fixtime) or 5
     local outline = tonumber(options.outline) or 1.0

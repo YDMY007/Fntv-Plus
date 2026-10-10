@@ -60,6 +60,25 @@ console.log('\n[2] 弹幕展示占比（手动输入 0-100）四处对齐');
 }
 
 
+console.log('\n[2b] 回退后的 parse.lua 不引用任何已被删除的 helper（lc-1339 事故）');
+{
+  const utilsLua = read(D + '/scripts/uosc_danmaku/modules/utils.lua');
+  const NL = String.fromCharCode(10);
+  const stripLua = (src) => src.split(NL).filter((l) => l.trim().indexOf('--') !== 0).join(NL);
+  const utilsCode = stripLua(utilsLua);
+  const parseCode = stripLua(parseLua);
+  // lc-1300 从 utils.lua 删掉的函数：回退 parse.lua 时把调用带回来，运行到那里就会
+  // attempt to call a nil value → ASS 写不出来 → 弹幕整条消失（真机就是这么坏的）。
+  for (const fn of ['adaptive_fontsize', 'get_font_scale', 'get_display_render_height']) {
+  const defined = utilsCode.indexOf('function ' + fn) >= 0;
+  const called = parseCode.indexOf(fn + '(') >= 0;
+    ok(!called || defined,
+      'parse.lua 没有调用已删除的 ' + fn + '（utils.lua 里定义：' + (defined ? '有' : '无') + '）',
+      '调用点会 attempt to call a nil value → 弹幕整条消失');
+  }
+}
+
+
 console.log('\n[3] 渲染步进：每个显示帧一次（不再「÷2」）');
 {
   ok(/local interval = 1 \/ value/.test(renderLua),
