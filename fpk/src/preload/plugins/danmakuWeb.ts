@@ -54,58 +54,28 @@ const HEADER_HIDE_DELAY = 2500; // 鼠标不动 2.5s 后自动隐藏
 // 全部控件可见 —— 裁剪机制整体移除（用户报「显示不完全」的根治），布局 CSS 见
 // injectPlayerHeaderStyle 里的 [lc-1314] 段。
 
-/** 注入播放页顶部标题栏美化 CSS（仅执行一次） */
-function injectPlayerHeaderStyle(): void {
-    if (_headerStyleInjected) return;
+/** [lc-1332] 播放页底栏布局 / 字号统一 / 旋转全屏样式 —— **无条件注入**。
+ *
+ *  用户报障：「手机模式播放视频页，底部的两栏控件有时候没有正确显示，还是显示的以前的样式」。
+ *  根因：这些规则原本和标题栏/弹层样式一起放在 injectPlayerHeaderStyle()，而它只在
+ *  maybeSetup() 走到「播放页分支」时才被调用，且 isPlayerPage() 要求**当前已存在 <video>**
+ *  （`document.querySelector('video') && GUID_RE.test(location.href)`）：
+ *    · 进播放页那一刻 video 还没建（慢网 / App 公网中转，首页实测 6s 才出骨架）→ 这次不注入；
+ *    · 只能靠 OnDomChange→maybeSetup 的 800ms 尾随防抖补，而起播期 DOM 高频变动会一路重置
+ *      这个防抖（本文件另一处注释就记过「防抖被起播期高频变动饿死」），且 startMountPoll
+ *      只补「按钮入位」、**不会**再调 maybeSetup；
+ *    · 非 B站路由（个人视频 /v/other/…，GUID_RE 不匹配）则永远不注入。
+ *  三者叠加就是「有时候还是以前的样式」。底栏布局是**纯 CSS**，与播放器实例、与 URL 形态
+ *  都无关 —— 只要 xgplayer 控制栏出现就该生效，所以拆出来挂在 OnReady 无条件注入。
+ *  选择器全部限定在 xgplayer 控件 / 旋转状态类上，首页等页面无同名元素，零副作用。
+ *  ⚠ 标题栏毛玻璃、原生弹层收口那两组仍留在 injectPlayerHeaderStyle（播放页门控）：
+ *    它们的选择器会命中通用 class（header/nav/[class*=w-[392px]]），而首页 previewThumb
+ *    也会造 <video>，放全局会误伤首页。 */
+const PLAYER_CONTROLS_STYLE_ID = 'fntv-player-controls-style';
+let _controlsStyleInjected = false;
+function injectControlsLayoutStyle(): void {
+    if (_controlsStyleInjected) return;
     const css = `
-/* ── 播放页顶部标题栏：毛玻璃 + 自动隐藏 ──
-   目标：fnOS 页面级 header（含返回箭头+标题文字），非 xgplayer 自身控件 */
-html:has(video) header,
-html:has(video) nav,
-html:has(video) [role="banner"],
-html:has(video) [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
-    background: rgba(0, 0, 0, .45) !important;
-    backdrop-filter: blur(24px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
-    border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
-    transition: opacity .35s ease, transform .35s ease !important;
-}
-/* 自动隐藏状态：鼠标不动一段时间后淡出上滑 */
-html.fntv-ph-hidden header,
-html.fntv-ph-hidden nav,
-html.fntv-ph-hidden [role="banner"],
-html.fntv-ph-hidden [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transform: translateY(-8px) !important;
-}
-/* ── 隐藏播放器起播/缓冲时的加载圈（用户要求删掉的白圈）──
-   ① xgplayer 自带缓冲转圈；容器状态类 xgplayer-isloading 不动（它还联动 start 按钮显隐），
-      原生 .xgplayer-isloading .xgplayer-loading{display:block} 特异度更高，必须 !important 压过；
-   ② 飞牛播放器流加载时的 Semi「加载中…」蒙层（spinner+文字），限定在播放器根内，
-      不影响其它页面正常使用的 Semi Spin；蒙层容器整体藏，圈和文字一起消失。 */
-.xgplayer-loading {
-    display: none !important;
-}
-/* ③ xgplayer 起播遮罩 spinner（白色辐条圈 #ffffffb3，实测就是用户指的白圈本体），遮罩只有它，整个藏 */
-.xgplayer-enter {
-    display: none !important;
-}
-.trim-mc__video-player--root .semi-spin {
-    display: none !important;
-}
-.trim-mc__video-player--root div:has(> .semi-spin) {
-    display: none !important;
-}
-
 /* ── [v1.4.1] 手机网页：底部控制栏触屏适配 ──
    真实底栏 8 控件（播放/时间/倍速/原画/选集/弹幕/音量/设置/全屏）在 390px 竖屏
    实测仅余 4px 横向余量，且文字按钮点击热区只有 22px 高（Apple HIG 最低 44px）。
@@ -238,22 +208,6 @@ html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:
 
 /* 播放信息弹窗（右上角详情）窄屏收口：原生 ~560px 定宽在 440px 视口横向溢出。
    全屏遮罩层（class 含 !w-full）不受影响（真机验证：遮罩仍铺满、浮动弹窗收口）。 */
-html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
-
-/* [lc-1315] 原生播放页弹层（选集/倍速/原画/CC/设置共用 .trim-ui__player--popover）
-   窄屏收口：本体 tailwind 定宽 w-[392px] 硬编码，390px 视口下右缘溢出 3px；
-   统一限宽到视口内并留 8px 边距（真机验证：392→374、右缘 393→384 完整可见）。
-   [lc-1317] 高度与内容层也收：本体高度上限 690px 在 844 视口占 82% 观感过满
-   （用户报「都要优化弹窗大小」）→ max-height 62vh；内容层仍是 w-[392px] /
-   max-h-[690px] 的硬编码（外层收口后比它窄 18px，内容被裁）→ 同步 max-width/
-   max-height 100%。倍速这类窄条小弹窗（实测 132×285）不受影响（只设上限）。 */
-html.fnos-touch-narrow .trim-ui__player--popover{
-    width:min(calc(100vw - 16px), 392px) !important;
-    max-height:min(62vh, 690px) !important;
-}
-html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
-html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
-
 /* ── [lc-1328/1329] 旋转全屏（rotateFullscreen）样式补回 ──
    飞牛构建把 xgplayer 的 rotate-fullscreen 样式裁掉了（全部 4 个页面 CSS 零命中，
    bundle 里类名/逻辑俱在而样式缺失）→ 打开 rotateFullscreen 后播放器不会旋转。
@@ -341,6 +295,83 @@ html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !im
     html.fnos-touch-narrow xg-controls span.cursor-pointer{ padding-left:0 !important; padding-right:0 !important; }
     html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
 }
+`;
+    const el = document.createElement('style');
+    el.id = PLAYER_CONTROLS_STYLE_ID;
+    el.textContent = css;
+    (document.head || document.documentElement).appendChild(el);
+    _controlsStyleInjected = true;
+    log.info('[danmakuWeb] 底栏布局/字号/旋转全屏 CSS 已注入（无条件，不依赖播放页判定）');
+}
+
+/** 注入播放页顶部标题栏美化 CSS（仅执行一次） */
+function injectPlayerHeaderStyle(): void {
+    if (_headerStyleInjected) return;
+    const css = `
+/* ── 播放页顶部标题栏：毛玻璃 + 自动隐藏 ──
+   目标：fnOS 页面级 header（含返回箭头+标题文字），非 xgplayer 自身控件 */
+html:has(video) header,
+html:has(video) nav,
+html:has(video) [role="banner"],
+html:has(video) [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    background: rgba(0, 0, 0, .45) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
+    transition: opacity .35s ease, transform .35s ease !important;
+}
+/* 自动隐藏状态：鼠标不动一段时间后淡出上滑 */
+html.fntv-ph-hidden header,
+html.fntv-ph-hidden nav,
+html.fntv-ph-hidden [role="banner"],
+html.fntv-ph-hidden [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(-8px) !important;
+}
+/* ── 隐藏播放器起播/缓冲时的加载圈（用户要求删掉的白圈）──
+   ① xgplayer 自带缓冲转圈；容器状态类 xgplayer-isloading 不动（它还联动 start 按钮显隐），
+      原生 .xgplayer-isloading .xgplayer-loading{display:block} 特异度更高，必须 !important 压过；
+   ② 飞牛播放器流加载时的 Semi「加载中…」蒙层（spinner+文字），限定在播放器根内，
+      不影响其它页面正常使用的 Semi Spin；蒙层容器整体藏，圈和文字一起消失。 */
+.xgplayer-loading {
+    display: none !important;
+}
+/* ③ xgplayer 起播遮罩 spinner（白色辐条圈 #ffffffb3，实测就是用户指的白圈本体），遮罩只有它，整个藏 */
+.xgplayer-enter {
+    display: none !important;
+}
+.trim-mc__video-player--root .semi-spin {
+    display: none !important;
+}
+.trim-mc__video-player--root div:has(> .semi-spin) {
+    display: none !important;
+}
+
+html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
+
+/* [lc-1315] 原生播放页弹层（选集/倍速/原画/CC/设置共用 .trim-ui__player--popover）
+   窄屏收口：本体 tailwind 定宽 w-[392px] 硬编码，390px 视口下右缘溢出 3px；
+   统一限宽到视口内并留 8px 边距（真机验证：392→374、右缘 393→384 完整可见）。
+   [lc-1317] 高度与内容层也收：本体高度上限 690px 在 844 视口占 82% 观感过满
+   （用户报「都要优化弹窗大小」）→ max-height 62vh；内容层仍是 w-[392px] /
+   max-h-[690px] 的硬编码（外层收口后比它窄 18px，内容被裁）→ 同步 max-width/
+   max-height 100%。倍速这类窄条小弹窗（实测 132×285）不受影响（只设上限）。 */
+html.fnos-touch-narrow .trim-ui__player--popover{
+    width:min(calc(100vw - 16px), 392px) !important;
+    max-height:min(62vh, 690px) !important;
+}
+html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
+html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
+
 `;
     const el = document.createElement('style');
     el.id = PLAYER_HEADER_STYLE_ID;
@@ -2726,6 +2757,8 @@ function maybeSetup(): void {
 }
 
 registerHook(HookType.OnReady, () => {
+    // [lc-1332] 底栏布局/字号/旋转全屏：无条件注入（原先挂在播放页判定上 → 时序/路由一错过就不生效）
+    injectControlsLayoutStyle();
     startMountPoll();
     setTimeout(maybeSetup, 1500);
 });

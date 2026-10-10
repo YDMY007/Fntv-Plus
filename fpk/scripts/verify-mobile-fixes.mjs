@@ -21,6 +21,18 @@ const ok = (cond, name, detail = '') => {
   else { fail++; console.log(`  ❌ ${name}${detail ? ' — ' + detail : ''}`); }
 };
 
+/** 抽出 TS 文件里所有 `const css = \`...\`;` 模板（纯 CSS），逐个扫描后合并。
+ *  ⚠ 不能拿整份 .ts 直接扫：文件里有成百上千个 JS 花括号/对象字面量，
+ *  手写花括号栈会被 JS 代码带偏（lc-1332 移动样式时就踩过：选择器与规则体串位，
+ *  过滤出来恒为 0 条 —— 断言静默失效比断言失败更危险）。 */
+function scanTsCss(src) {
+  const out = [];
+  const re = /const css = `([\s\S]*?)`;/g;
+  let m;
+  while ((m = re.exec(src))) out.push(...scanCssRules(m[1]));
+  return out;
+}
+
 /** 把一份 CSS 文本（含 @media）扫成规则表：[{sel, body, media}]。
  *  本项目注入的样式是扁平 CSS + @media，一个花括号栈足够；比逐条正则可靠 ——
  *  「同一属性散落多条规则、特异性互相盖」正是 lc-1330 那个 bug 的形状。 */
@@ -245,6 +257,29 @@ console.log('\n[4] 播放页底栏「挤在一起/显示不全」→ 两行布�
     '空清晰度按钮不占位（:has 支持时生效，有文案自动恢复）');
   ok(/trim-ui__player-modal-container:not\(\[class\*="!w-full"\]\)\{ max-width:calc\(100vw - 40px\) !important; \}/.test(danmakuWeb),
     '播放信息弹窗窄屏收口（排除全屏遮罩层）');
+
+  // [lc-1332] 底栏布局必须挂在**无条件注入**的样式表上（用户报「有时候还是以前的样式」）：
+  //   原先它与标题栏/弹层一起在 injectPlayerHeaderStyle 里，而那条链只在 maybeSetup 走到
+  //   播放页分支时才跑，且 isPlayerPage() 要求当前已有 <video> → 进页那刻 video 未建、
+  //   或非 B站路由（/v/other/…）时整段样式不注入。
+  {
+    const iLayout = danmakuWeb.indexOf('function injectControlsLayoutStyle');
+    const iHeader = danmakuWeb.indexOf('function injectPlayerHeaderStyle');
+    const iNext = danmakuWeb.indexOf('function resetHeaderHideTimer');
+    ok(iLayout > 0 && iLayout < iHeader && iHeader < iNext, '两个注入函数相邻可切分');
+    const layoutFn = danmakuWeb.slice(iLayout, iHeader);
+    const headerFn = danmakuWeb.slice(iHeader, iNext);
+    ok(/xg-inner-controls\{[\s\S]{0,80}flex-wrap:wrap !important/.test(layoutFn),
+      '两行布局规则在「无条件注入」的底栏样式表里');
+    ok(/xgplayer-rotate-fullscreen/.test(layoutFn) && /height:100vw/.test(layoutFn),
+      '旋转全屏样式也一并放在无条件表里（否则播放页判定一错过，全屏又转不动）');
+    ok(!/xg-inner-controls|xgplayer-rotate-fullscreen/.test(headerFn),
+      '播放页门控的样式表里不再残留底栏/旋转规则');
+    ok(/registerHook\(HookType\.OnReady, \(\) => \{\s*\n\s*\/\/[^\n]*\n\s*injectControlsLayoutStyle\(\);/.test(danmakuWeb),
+      'OnReady 无条件调用（不依赖播放页判定 / video 是否已建）');
+    ok(/PLAYER_CONTROLS_STYLE_ID = 'fntv-player-controls-style'/.test(danmakuWeb) && /_controlsStyleInjected/.test(danmakuWeb),
+      '独立 style 元素 + 幂等标记（重复注入不叠加）');
+  }
 }
 
 // ═══ 4b. 弹出面板定位 + 弹幕自动缩放（lc-1315） ═══
@@ -291,7 +326,8 @@ console.log('\n[4b] 底栏弹出面板定位 + 弹幕自动缩放');
   // 下面用 CSS 规则扫描（而不是逐条正则）来保证**覆盖完整 + 取值唯一**：
   // 这条断言当初就是缺的，所以才会出现「只钉了两组」这种漏网。
   {
-    const fontRules = scanCssRules(danmakuWeb)
+    const allRules = scanTsCss(danmakuWeb);
+    const fontRules = allRules
       .filter((r) => /font-size/.test(r.body) && /xg-controls|xg-left-grid|xg-right-grid/.test(r.sel));
     const sizes = [...new Set(fontRules.flatMap((r) => [...r.body.matchAll(/font-size:\s*([^;!]+)/g)].map((m) => m[1].trim())))];
     ok(fontRules.length > 0, `底栏存在字号规则（扫描到 ${fontRules.length} 条）`);

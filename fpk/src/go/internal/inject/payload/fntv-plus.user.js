@@ -5369,57 +5369,11 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
   var _headerStyleInjected = false;
   var _headerHideTimer = null;
   var HEADER_HIDE_DELAY = 2500;
-  function injectPlayerHeaderStyle() {
-    if (_headerStyleInjected) return;
+  var PLAYER_CONTROLS_STYLE_ID = "fntv-player-controls-style";
+  var _controlsStyleInjected = false;
+  function injectControlsLayoutStyle() {
+    if (_controlsStyleInjected) return;
     const css = `
-/* \u2500\u2500 \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\uFF1A\u6BDB\u73BB\u7483 + \u81EA\u52A8\u9690\u85CF \u2500\u2500
-   \u76EE\u6807\uFF1AfnOS \u9875\u9762\u7EA7 header\uFF08\u542B\u8FD4\u56DE\u7BAD\u5934+\u6807\u9898\u6587\u5B57\uFF09\uFF0C\u975E xgplayer \u81EA\u8EAB\u63A7\u4EF6 */
-html:has(video) header,
-html:has(video) nav,
-html:has(video) [role="banner"],
-html:has(video) [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html:has(video) [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
-    background: rgba(0, 0, 0, .45) !important;
-    backdrop-filter: blur(24px) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
-    border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
-    transition: opacity .35s ease, transform .35s ease !important;
-}
-/* \u81EA\u52A8\u9690\u85CF\u72B6\u6001\uFF1A\u9F20\u6807\u4E0D\u52A8\u4E00\u6BB5\u65F6\u95F4\u540E\u6DE1\u51FA\u4E0A\u6ED1 */
-html.fntv-ph-hidden header,
-html.fntv-ph-hidden nav,
-html.fntv-ph-hidden [role="banner"],
-html.fntv-ph-hidden [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
-html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transform: translateY(-8px) !important;
-}
-/* \u2500\u2500 \u9690\u85CF\u64AD\u653E\u5668\u8D77\u64AD/\u7F13\u51B2\u65F6\u7684\u52A0\u8F7D\u5708\uFF08\u7528\u6237\u8981\u6C42\u5220\u6389\u7684\u767D\u5708\uFF09\u2500\u2500
-   \u2460 xgplayer \u81EA\u5E26\u7F13\u51B2\u8F6C\u5708\uFF1B\u5BB9\u5668\u72B6\u6001\u7C7B xgplayer-isloading \u4E0D\u52A8\uFF08\u5B83\u8FD8\u8054\u52A8 start \u6309\u94AE\u663E\u9690\uFF09\uFF0C
-      \u539F\u751F .xgplayer-isloading .xgplayer-loading{display:block} \u7279\u5F02\u5EA6\u66F4\u9AD8\uFF0C\u5FC5\u987B !important \u538B\u8FC7\uFF1B
-   \u2461 \u98DE\u725B\u64AD\u653E\u5668\u6D41\u52A0\u8F7D\u65F6\u7684 Semi\u300C\u52A0\u8F7D\u4E2D\u2026\u300D\u8499\u5C42\uFF08spinner+\u6587\u5B57\uFF09\uFF0C\u9650\u5B9A\u5728\u64AD\u653E\u5668\u6839\u5185\uFF0C
-      \u4E0D\u5F71\u54CD\u5176\u5B83\u9875\u9762\u6B63\u5E38\u4F7F\u7528\u7684 Semi Spin\uFF1B\u8499\u5C42\u5BB9\u5668\u6574\u4F53\u85CF\uFF0C\u5708\u548C\u6587\u5B57\u4E00\u8D77\u6D88\u5931\u3002 */
-.xgplayer-loading {
-    display: none !important;
-}
-/* \u2462 xgplayer \u8D77\u64AD\u906E\u7F69 spinner\uFF08\u767D\u8272\u8F90\u6761\u5708 #ffffffb3\uFF0C\u5B9E\u6D4B\u5C31\u662F\u7528\u6237\u6307\u7684\u767D\u5708\u672C\u4F53\uFF09\uFF0C\u906E\u7F69\u53EA\u6709\u5B83\uFF0C\u6574\u4E2A\u85CF */
-.xgplayer-enter {
-    display: none !important;
-}
-.trim-mc__video-player--root .semi-spin {
-    display: none !important;
-}
-.trim-mc__video-player--root div:has(> .semi-spin) {
-    display: none !important;
-}
-
 /* \u2500\u2500 [v1.4.1] \u624B\u673A\u7F51\u9875\uFF1A\u5E95\u90E8\u63A7\u5236\u680F\u89E6\u5C4F\u9002\u914D \u2500\u2500
    \u771F\u5B9E\u5E95\u680F 8 \u63A7\u4EF6\uFF08\u64AD\u653E/\u65F6\u95F4/\u500D\u901F/\u539F\u753B/\u9009\u96C6/\u5F39\u5E55/\u97F3\u91CF/\u8BBE\u7F6E/\u5168\u5C4F\uFF09\u5728 390px \u7AD6\u5C4F
    \u5B9E\u6D4B\u4EC5\u4F59 4px \u6A2A\u5411\u4F59\u91CF\uFF0C\u4E14\u6587\u5B57\u6309\u94AE\u70B9\u51FB\u70ED\u533A\u53EA\u6709 22px \u9AD8\uFF08Apple HIG \u6700\u4F4E 44px\uFF09\u3002
@@ -5552,22 +5506,6 @@ html.fnos-touch-narrow xg-right-grid xg-icon.xgplayer-definition:has(.icon-text:
 
 /* \u64AD\u653E\u4FE1\u606F\u5F39\u7A97\uFF08\u53F3\u4E0A\u89D2\u8BE6\u60C5\uFF09\u7A84\u5C4F\u6536\u53E3\uFF1A\u539F\u751F ~560px \u5B9A\u5BBD\u5728 440px \u89C6\u53E3\u6A2A\u5411\u6EA2\u51FA\u3002
    \u5168\u5C4F\u906E\u7F69\u5C42\uFF08class \u542B !w-full\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A\u906E\u7F69\u4ECD\u94FA\u6EE1\u3001\u6D6E\u52A8\u5F39\u7A97\u6536\u53E3\uFF09\u3002 */
-html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
-
-/* [lc-1315] \u539F\u751F\u64AD\u653E\u9875\u5F39\u5C42\uFF08\u9009\u96C6/\u500D\u901F/\u539F\u753B/CC/\u8BBE\u7F6E\u5171\u7528 .trim-ui__player--popover\uFF09
-   \u7A84\u5C4F\u6536\u53E3\uFF1A\u672C\u4F53 tailwind \u5B9A\u5BBD w-[392px] \u786C\u7F16\u7801\uFF0C390px \u89C6\u53E3\u4E0B\u53F3\u7F18\u6EA2\u51FA 3px\uFF1B
-   \u7EDF\u4E00\u9650\u5BBD\u5230\u89C6\u53E3\u5185\u5E76\u7559 8px \u8FB9\u8DDD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A392\u2192374\u3001\u53F3\u7F18 393\u2192384 \u5B8C\u6574\u53EF\u89C1\uFF09\u3002
-   [lc-1317] \u9AD8\u5EA6\u4E0E\u5185\u5BB9\u5C42\u4E5F\u6536\uFF1A\u672C\u4F53\u9AD8\u5EA6\u4E0A\u9650 690px \u5728 844 \u89C6\u53E3\u5360 82% \u89C2\u611F\u8FC7\u6EE1
-   \uFF08\u7528\u6237\u62A5\u300C\u90FD\u8981\u4F18\u5316\u5F39\u7A97\u5927\u5C0F\u300D\uFF09\u2192 max-height 62vh\uFF1B\u5185\u5BB9\u5C42\u4ECD\u662F w-[392px] /
-   max-h-[690px] \u7684\u786C\u7F16\u7801\uFF08\u5916\u5C42\u6536\u53E3\u540E\u6BD4\u5B83\u7A84 18px\uFF0C\u5185\u5BB9\u88AB\u88C1\uFF09\u2192 \u540C\u6B65 max-width/
-   max-height 100%\u3002\u500D\u901F\u8FD9\u7C7B\u7A84\u6761\u5C0F\u5F39\u7A97\uFF08\u5B9E\u6D4B 132\xD7285\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u53EA\u8BBE\u4E0A\u9650\uFF09\u3002 */
-html.fnos-touch-narrow .trim-ui__player--popover{
-    width:min(calc(100vw - 16px), 392px) !important;
-    max-height:min(62vh, 690px) !important;
-}
-html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
-html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
-
 /* \u2500\u2500 [lc-1328/1329] \u65CB\u8F6C\u5168\u5C4F\uFF08rotateFullscreen\uFF09\u6837\u5F0F\u8865\u56DE \u2500\u2500
    \u98DE\u725B\u6784\u5EFA\u628A xgplayer \u7684 rotate-fullscreen \u6837\u5F0F\u88C1\u6389\u4E86\uFF08\u5168\u90E8 4 \u4E2A\u9875\u9762 CSS \u96F6\u547D\u4E2D\uFF0C
    bundle \u91CC\u7C7B\u540D/\u903B\u8F91\u4FF1\u5728\u800C\u6837\u5F0F\u7F3A\u5931\uFF09\u2192 \u6253\u5F00 rotateFullscreen \u540E\u64AD\u653E\u5668\u4E0D\u4F1A\u65CB\u8F6C\u3002
@@ -5655,6 +5593,81 @@ html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !im
     html.fnos-touch-narrow xg-controls span.cursor-pointer{ padding-left:0 !important; padding-right:0 !important; }
     html.fnos-touch-narrow xg-right-grid{ gap:0 !important; }
 }
+`;
+    const el = document.createElement("style");
+    el.id = PLAYER_CONTROLS_STYLE_ID;
+    el.textContent = css;
+    (document.head || document.documentElement).appendChild(el);
+    _controlsStyleInjected = true;
+    log7.info("[danmakuWeb] \u5E95\u680F\u5E03\u5C40/\u5B57\u53F7/\u65CB\u8F6C\u5168\u5C4F CSS \u5DF2\u6CE8\u5165\uFF08\u65E0\u6761\u4EF6\uFF0C\u4E0D\u4F9D\u8D56\u64AD\u653E\u9875\u5224\u5B9A\uFF09");
+  }
+  function injectPlayerHeaderStyle() {
+    if (_headerStyleInjected) return;
+    const css = `
+/* \u2500\u2500 \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\uFF1A\u6BDB\u73BB\u7483 + \u81EA\u52A8\u9690\u85CF \u2500\u2500
+   \u76EE\u6807\uFF1AfnOS \u9875\u9762\u7EA7 header\uFF08\u542B\u8FD4\u56DE\u7BAD\u5934+\u6807\u9898\u6587\u5B57\uFF09\uFF0C\u975E xgplayer \u81EA\u8EAB\u63A7\u4EF6 */
+html:has(video) header,
+html:has(video) nav,
+html:has(video) [role="banner"],
+html:has(video) [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html:has(video) [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    background: rgba(0, 0, 0, .45) !important;
+    backdrop-filter: blur(24px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(150%) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, .08) !important;
+    transition: opacity .35s ease, transform .35s ease !important;
+}
+/* \u81EA\u52A8\u9690\u85CF\u72B6\u6001\uFF1A\u9F20\u6807\u4E0D\u52A8\u4E00\u6BB5\u65F6\u95F4\u540E\u6DE1\u51FA\u4E0A\u6ED1 */
+html.fntv-ph-hidden header,
+html.fntv-ph-hidden nav,
+html.fntv-ph-hidden [role="banner"],
+html.fntv-ph-hidden [class*="header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="Header"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="navbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="topbar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]),
+html.fntv-ph-hidden [class*="top-bar"]:not([class*="xgplayer"]):not([class*="control"]):not([class*="play"]) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(-8px) !important;
+}
+/* \u2500\u2500 \u9690\u85CF\u64AD\u653E\u5668\u8D77\u64AD/\u7F13\u51B2\u65F6\u7684\u52A0\u8F7D\u5708\uFF08\u7528\u6237\u8981\u6C42\u5220\u6389\u7684\u767D\u5708\uFF09\u2500\u2500
+   \u2460 xgplayer \u81EA\u5E26\u7F13\u51B2\u8F6C\u5708\uFF1B\u5BB9\u5668\u72B6\u6001\u7C7B xgplayer-isloading \u4E0D\u52A8\uFF08\u5B83\u8FD8\u8054\u52A8 start \u6309\u94AE\u663E\u9690\uFF09\uFF0C
+      \u539F\u751F .xgplayer-isloading .xgplayer-loading{display:block} \u7279\u5F02\u5EA6\u66F4\u9AD8\uFF0C\u5FC5\u987B !important \u538B\u8FC7\uFF1B
+   \u2461 \u98DE\u725B\u64AD\u653E\u5668\u6D41\u52A0\u8F7D\u65F6\u7684 Semi\u300C\u52A0\u8F7D\u4E2D\u2026\u300D\u8499\u5C42\uFF08spinner+\u6587\u5B57\uFF09\uFF0C\u9650\u5B9A\u5728\u64AD\u653E\u5668\u6839\u5185\uFF0C
+      \u4E0D\u5F71\u54CD\u5176\u5B83\u9875\u9762\u6B63\u5E38\u4F7F\u7528\u7684 Semi Spin\uFF1B\u8499\u5C42\u5BB9\u5668\u6574\u4F53\u85CF\uFF0C\u5708\u548C\u6587\u5B57\u4E00\u8D77\u6D88\u5931\u3002 */
+.xgplayer-loading {
+    display: none !important;
+}
+/* \u2462 xgplayer \u8D77\u64AD\u906E\u7F69 spinner\uFF08\u767D\u8272\u8F90\u6761\u5708 #ffffffb3\uFF0C\u5B9E\u6D4B\u5C31\u662F\u7528\u6237\u6307\u7684\u767D\u5708\u672C\u4F53\uFF09\uFF0C\u906E\u7F69\u53EA\u6709\u5B83\uFF0C\u6574\u4E2A\u85CF */
+.xgplayer-enter {
+    display: none !important;
+}
+.trim-mc__video-player--root .semi-spin {
+    display: none !important;
+}
+.trim-mc__video-player--root div:has(> .semi-spin) {
+    display: none !important;
+}
+
+html.fnos-touch-narrow .trim-ui__player-modal-container:not([class*="!w-full"]){ max-width:calc(100vw - 40px) !important; }
+
+/* [lc-1315] \u539F\u751F\u64AD\u653E\u9875\u5F39\u5C42\uFF08\u9009\u96C6/\u500D\u901F/\u539F\u753B/CC/\u8BBE\u7F6E\u5171\u7528 .trim-ui__player--popover\uFF09
+   \u7A84\u5C4F\u6536\u53E3\uFF1A\u672C\u4F53 tailwind \u5B9A\u5BBD w-[392px] \u786C\u7F16\u7801\uFF0C390px \u89C6\u53E3\u4E0B\u53F3\u7F18\u6EA2\u51FA 3px\uFF1B
+   \u7EDF\u4E00\u9650\u5BBD\u5230\u89C6\u53E3\u5185\u5E76\u7559 8px \u8FB9\u8DDD\uFF08\u771F\u673A\u9A8C\u8BC1\uFF1A392\u2192374\u3001\u53F3\u7F18 393\u2192384 \u5B8C\u6574\u53EF\u89C1\uFF09\u3002
+   [lc-1317] \u9AD8\u5EA6\u4E0E\u5185\u5BB9\u5C42\u4E5F\u6536\uFF1A\u672C\u4F53\u9AD8\u5EA6\u4E0A\u9650 690px \u5728 844 \u89C6\u53E3\u5360 82% \u89C2\u611F\u8FC7\u6EE1
+   \uFF08\u7528\u6237\u62A5\u300C\u90FD\u8981\u4F18\u5316\u5F39\u7A97\u5927\u5C0F\u300D\uFF09\u2192 max-height 62vh\uFF1B\u5185\u5BB9\u5C42\u4ECD\u662F w-[392px] /
+   max-h-[690px] \u7684\u786C\u7F16\u7801\uFF08\u5916\u5C42\u6536\u53E3\u540E\u6BD4\u5B83\u7A84 18px\uFF0C\u5185\u5BB9\u88AB\u88C1\uFF09\u2192 \u540C\u6B65 max-width/
+   max-height 100%\u3002\u500D\u901F\u8FD9\u7C7B\u7A84\u6761\u5C0F\u5F39\u7A97\uFF08\u5B9E\u6D4B 132\xD7285\uFF09\u4E0D\u53D7\u5F71\u54CD\uFF08\u53EA\u8BBE\u4E0A\u9650\uFF09\u3002 */
+html.fnos-touch-narrow .trim-ui__player--popover{
+    width:min(calc(100vw - 16px), 392px) !important;
+    max-height:min(62vh, 690px) !important;
+}
+html.fnos-touch-narrow [class*="w-[392px]"]{ max-width:100% !important; }
+html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !important; }
+
 `;
     const el = document.createElement("style");
     el.id = PLAYER_HEADER_STYLE_ID;
@@ -7641,6 +7654,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     if (!controlsPlaced) startMountPoll();
   }
   registerHook("onReady" /* OnReady */, () => {
+    injectControlsLayoutStyle();
     startMountPoll();
     setTimeout(maybeSetup, 1500);
   });
