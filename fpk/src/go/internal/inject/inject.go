@@ -174,7 +174,9 @@ func injectGatewayShim(html string) string {
 //   - 启动时：地址带 P 前缀 → replaceState 剥掉（SPA 路由才能匹配）。
 //   - pushState/replaceState 包装：SPA 推入的 /v/* 地址 → 加回 P（地址栏保持网关前缀）。
 //   - popstate（capture，且本脚本最先注册 → 先于路由监听执行）：网关地址先剥前缀再让路由读。
-//   - #root 渲染完成后把地址翻回网关前缀（补上 SPA 启动不改写地址的窗口期）。
+//   - #root 渲染完成后把地址翻回网关前缀；宽限期(1.2s)后无论渲染与否都翻（lc-1333：
+//     空渲染/慢渲染时地址栏停在原生 /v/*，一刷新即跳出增强）。
+//   - 硬导航（<a href> 点击 / location.assign|replace）同样加回前缀（lc-1333）。
 //
 // 另外挂载启动期 API 捕获（window.__fntvApiCap）：本脚本位于 <head> 最前，必然先于
 // 影视 SPA 的所有脚本执行——SPA 自己发出的 item/list（带合法 Authx）请求在此被记录
@@ -203,6 +205,27 @@ function toGw(u){
 }
 history.pushState=function(s,t,u){return ps.call(history,s,t,toGw(u));};
 history.replaceState=function(s,t,u){return rs.call(history,s,t,toGw(u));};
+// [lc-1333] 硬导航兜底：SPA 里除了 pushState，还有整页跳转 —— <a href="/v/..."> 与
+// location.assign/replace。前者拦点击（capture，先于站点的 SPA 路由处理），后者包
+// Location.prototype（assign/replace 可改；location.href= 是 [LegacyUnforgeable]，
+// 拦不到，只能靠下面的回填 + 常驻自愈把地址栏尽快拉回网关形态）。
+try{
+  var la=Location.prototype.assign,lr=Location.prototype.replace;
+  Location.prototype.assign=function(u){return la.call(this,toGw(u));};
+  Location.prototype.replace=function(u){return lr.call(this,toGw(u));};
+}catch(e){}
+try{
+  document.addEventListener('click',function(e){
+    try{
+      var t=e.target,a=t&&t.closest?t.closest('a[href]'):null;
+      if(!a||(a.target&&a.target!=='_self'))return;
+      var url=new URL(a.getAttribute('href'),location.href);
+      if(url.origin!==location.origin||!isV(url.pathname)||isGw(url.pathname))return;
+      e.preventDefault();
+      la.call(location,P+url.pathname+url.search+url.hash);
+    }catch(err){}
+  },true);
+}catch(e){}
 window.addEventListener('popstate',function(e){
   try{
     if(isGw(location.pathname)){
@@ -213,13 +236,21 @@ window.addEventListener('popstate',function(e){
   // 路由渲染完立刻回填，不让地址栏停留在原生路径（停留期间刷新即跳出增强）。
   setTimeout(function(){ if(!readd()) setTimeout(readd,60); },0);
 });
-function readd(){
+var T0=Date.now(),GRACE=1200;
+function readd(force){
   try{
+    if(isGw(location.pathname)||!isV(location.pathname))return false;
     var root=document.getElementById('root');
-    if(root&&root.childElementCount>0&&!isGw(location.pathname)&&isV(location.pathname)){
-      history.replaceState(history.state,'',P+location.pathname+location.search+location.hash);
-      return true;
-    }
+    var rendered=!!(root&&root.childElementCount>0);
+    // [lc-1333] 渲染成功立刻回填；宽限期(1.2s)过后**即便 #root 仍空**也回填。
+    // 触发场景（真机复现）：弱网 / App 公网中转时 #root 长时间空白（实测首帧 6s+，
+    // 登录授权回来那一次甚至是空渲染），此时地址栏停在原生 /v/*，用户一刷新
+    // （或 App 页面菜单的「刷新页面」）就跳出增强 →「有时候还是以前的样式」。
+    // 回填不影响路由：SPA 的初始路由在启动时就按剥离后的路径解析完了，#root 空只说明
+    // 数据没回来，此后 replaceState 也不会触发路由重解析。
+    if(!rendered&&!force&&Date.now()-T0<GRACE)return false;
+    history.replaceState(history.state,'',P+location.pathname+location.search+location.hash);
+    return true;
   }catch(e){}
   return false;
 }
@@ -231,7 +262,7 @@ try{
   var mo=new MutationObserver(function(){ if(readd()) mo.disconnect(); });
   mo.observe(document.documentElement,{childList:true,subtree:true});
   var n=0,timer=setInterval(function(){ if(++n>1200||readd()) clearInterval(timer); },50);
-  setInterval(function(){ readd(); },1000);
+  setInterval(function(){ readd(true); },1000);
 }catch(e){}
 /* ── 启动期 API 捕获：item/list / item/{guid}（带合法 Authx 的 SPA 自身请求）── */
 try{

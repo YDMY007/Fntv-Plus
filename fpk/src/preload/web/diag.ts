@@ -7,6 +7,8 @@
 //
 // 只回传我们自己的输出（[EmbyWall]/[fntv 前缀）与 error 级别，不回传页面自身噪音。
 
+import { setLogSink } from '../core/logger';
+
 const API = '/app/fntvplus/api/client-log';
 const buf: string[] = [];
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -156,6 +158,29 @@ function flush(): void {
 export function installDiag(): void {
   installCapture();
 
+  /* [lc-1333] 设备内可读的启动现场：App 的 WebView 不可调试（release + 进程非 debuggable），
+     console 拿不到；这一行会经 client.log 回传，管理页「实时日志」即可看到
+     「这次进来的是哪条路由 / 什么 UA / 布局标记是什么」——排查
+     「有时候还是以前的样式」这类问题时，它是第一手证据。
+     ⚠ 只记 pathname，丢弃 query（网关入口的 token 在 query 里，不落盘）。 */
+  try {
+    const ua = navigator.userAgent || '';
+    const html = document.documentElement;
+    const flags = ['fnos-narrow', 'fnos-compact', 'fnos-touch', 'fnos-touch-narrow']
+      .filter((c) => html.classList.contains(c)).join(',') || '-';
+    let mode = '-';
+    try { mode = localStorage.getItem('fntv_ui_mode') || '-'; } catch (_) {}
+    push('[diag] boot path=' + location.pathname + (location.search ? ' (query省略)' : '')
+      + ' wv=' + /wv/.test(ua) + ' ua=' + ua.slice(0, 90)
+      + ' flags=' + flags + ' mode=' + mode + ' vw=' + window.innerWidth + 'x' + window.innerHeight
+      + ' dm=' + (document.querySelector('video') ? 'y' : 'n'));
+  } catch (_) {}
+
+  // [lc-1333] payload 自身日志全量回传（原先只回传 [EmbyWall]/[fntv 前缀与 error）
+  try {
+    setLogSink((level, msg) => { if (level !== 'debug') push('[' + level + '] ' + msg); });
+  } catch (_) {}
+
   const orig = {
     log: console.log.bind(console),
     warn: console.warn.bind(console),
@@ -185,7 +210,7 @@ export function installDiag(): void {
     window.addEventListener('beforeunload', flush);
   } catch (_) {}
 
-  push('[diag] installed @' + location.href);
+  push('[diag] installed @' + location.pathname);
 }
 
 // 模块体顶层自动安装：本模块是 payload 第一个 import，确保先于所有插件初始化装好错误钩子

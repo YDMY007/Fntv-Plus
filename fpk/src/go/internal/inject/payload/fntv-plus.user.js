@@ -22,6 +22,94 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+  // src/preload/core/logger.ts
+  function setLogSink(fn) {
+    _sink = fn;
+  }
+  function emitSink(level, args) {
+    if (!_sink) return;
+    try {
+      _sink(level, args.map((x) => typeof x === "string" ? x : (() => {
+        try {
+          return JSON.stringify(x);
+        } catch {
+          return String(x);
+        }
+      })()).join(" "));
+    } catch {
+    }
+  }
+  var _sink, preloadLogger, logger_default;
+  var init_logger = __esm({
+    "src/preload/core/logger.ts"() {
+      "use strict";
+      init_electron();
+      _sink = null;
+      preloadLogger = {
+        debug: (...args) => {
+          emitSink("debug", args);
+          try {
+            ipcRenderer.invoke("log-message", "debug", ...args);
+          } catch (error) {
+            if (false) {
+              console.debug(...args);
+            }
+          }
+        },
+        info: (...args) => {
+          emitSink("info", args);
+          try {
+            ipcRenderer.invoke("log-message", "info", ...args);
+          } catch (error) {
+            if (false) {
+              console.info(...args);
+            }
+          }
+        },
+        warn: (...args) => {
+          emitSink("warn", args);
+          try {
+            ipcRenderer.invoke("log-message", "warn", ...args);
+          } catch (error) {
+            if (false) {
+              console.warn(...args);
+            }
+          }
+        },
+        error: (...args) => {
+          emitSink("error", args);
+          try {
+            ipcRenderer.invoke("log-message", "error", ...args);
+          } catch (error) {
+            if (false) {
+              console.error(...args);
+            }
+          }
+        },
+        log: (...args) => {
+          emitSink("info", args);
+          try {
+            ipcRenderer.invoke("log-message", "info", ...args);
+          } catch (error) {
+            if (false) {
+              console.log(...args);
+            }
+          }
+        },
+        // 方便的方法别名
+        d: (...args) => preloadLogger.debug(...args),
+        // debug简写
+        i: (...args) => preloadLogger.info(...args),
+        // info简写
+        w: (...args) => preloadLogger.warn(...args),
+        // warn简写
+        e: (...args) => preloadLogger.error(...args)
+        // error简写
+      };
+      logger_default = preloadLogger;
+    }
+  });
+
   // src/preload/web/diag.ts
   function normalizePath(url) {
     let p = String(url || "");
@@ -153,6 +241,24 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
   function installDiag() {
     installCapture();
+    try {
+      const ua = navigator.userAgent || "";
+      const html = document.documentElement;
+      const flags = ["fnos-narrow", "fnos-compact", "fnos-touch", "fnos-touch-narrow"].filter((c) => html.classList.contains(c)).join(",") || "-";
+      let mode = "-";
+      try {
+        mode = localStorage.getItem("fntv_ui_mode") || "-";
+      } catch (_) {
+      }
+      push("[diag] boot path=" + location.pathname + (location.search ? " (query\u7701\u7565)" : "") + " wv=" + /wv/.test(ua) + " ua=" + ua.slice(0, 90) + " flags=" + flags + " mode=" + mode + " vw=" + window.innerWidth + "x" + window.innerHeight + " dm=" + (document.querySelector("video") ? "y" : "n"));
+    } catch (_) {
+    }
+    try {
+      setLogSink((level, msg) => {
+        if (level !== "debug") push("[" + level + "] " + msg);
+      });
+    } catch (_) {
+    }
     const orig = {
       log: console.log.bind(console),
       warn: console.warn.bind(console),
@@ -182,12 +288,13 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
       window.addEventListener("beforeunload", flush);
     } catch (_) {
     }
-    push("[diag] installed @" + location.href);
+    push("[diag] installed @" + location.pathname);
   }
   var API, buf, timer, authxMap;
   var init_diag = __esm({
     "src/preload/web/diag.ts"() {
       "use strict";
+      init_logger();
       API = "/app/fntvplus/api/client-log";
       buf = [];
       timer = null;
@@ -1383,68 +1490,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
 
   // src/preload/web/playSync.ts
   init_electron();
-
-  // src/preload/core/logger.ts
-  init_electron();
-  var preloadLogger = {
-    debug: (...args) => {
-      try {
-        ipcRenderer.invoke("log-message", "debug", ...args);
-      } catch (error) {
-        if (false) {
-          console.debug(...args);
-        }
-      }
-    },
-    info: (...args) => {
-      try {
-        ipcRenderer.invoke("log-message", "info", ...args);
-      } catch (error) {
-        if (false) {
-          console.info(...args);
-        }
-      }
-    },
-    warn: (...args) => {
-      try {
-        ipcRenderer.invoke("log-message", "warn", ...args);
-      } catch (error) {
-        if (false) {
-          console.warn(...args);
-        }
-      }
-    },
-    error: (...args) => {
-      try {
-        ipcRenderer.invoke("log-message", "error", ...args);
-      } catch (error) {
-        if (false) {
-          console.error(...args);
-        }
-      }
-    },
-    log: (...args) => {
-      try {
-        ipcRenderer.invoke("log-message", "info", ...args);
-      } catch (error) {
-        if (false) {
-          console.log(...args);
-        }
-      }
-    },
-    // 方便的方法别名
-    d: (...args) => preloadLogger.debug(...args),
-    // debug简写
-    i: (...args) => preloadLogger.info(...args),
-    // info简写
-    w: (...args) => preloadLogger.warn(...args),
-    // warn简写
-    e: (...args) => preloadLogger.error(...args)
-    // error简写
-  };
-  var logger_default = preloadLogger;
-
-  // src/preload/web/playSync.ts
+  init_logger();
   var log2 = {
     info: (...a) => logger_default.info("[play-sync]", ...a),
     error: (...a) => logger_default.error("[play-sync]", ...a)
@@ -2032,6 +2078,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
 
   // src/preload/plugins/a11y.ts
+  init_logger();
   var log3 = logger_default;
   var MODAL_IDS = [
     ["fnos-settings-panel", "\u8BBE\u7F6E\u9762\u677F"],
@@ -2187,6 +2234,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   }
 
   // src/preload/plugins/animeLib.ts
+  init_logger();
   var ANIME_REL = join("third_party", "anime", "anime.min.js");
   function resolveAnimePath() {
     const cands = [
@@ -2234,6 +2282,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
 
   // src/preload/plugins/skipInject.ts
   init_electron();
+  init_logger();
   var log4 = logger_default;
   var CAPTURE_API_RE = /(^|\/)(upload|saveEditDetail|getEditDetail|editDetail)(\?|$)/i;
   function captureFnosApi(url, method, body, headers) {
@@ -2544,6 +2593,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   });
 
   // src/preload/plugins/autoplayNext.ts
+  init_logger();
   var LS_KEY3 = "fntv-autonext";
   var APPEAR_AT = 60;
   var AUTO_AT = 5;
@@ -2717,6 +2767,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
   });
 
   // src/preload/plugins/cardTapZone.ts
+  init_logger();
   var log5 = logger_default;
   var CARD_SEL = '.ms-container [class*="card-root"]';
   var MARK_ATTR = "data-fntv-tapfix";
@@ -2788,6 +2839,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
 
   // src/preload/plugins/customLogo.ts
   init_electron();
+  init_logger();
   var LOGO_API_BASE = "/app/fntvplus/api/bridge/logos/";
   var log6 = logger_default;
   var STORAGE_KEY = "fntvLogo.custom";
@@ -3424,6 +3476,7 @@ try{if(typeof window!=='undefined'){if(typeof window.require==='undefined'){wind
 
   // src/preload/plugins/danmakuWeb.ts
   init_electron();
+  init_logger();
 
   // src/preload/plugins/mobileStyle.ts
   var STYLE_ID2 = "fnos-mobile-css";
@@ -8716,6 +8769,7 @@ html.fnos-perf.dark{
 
   // src/preload/plugins/hotUpdates.ts
   init_electron();
+  init_logger();
 
   // src/preload/plugins/embyWall/carousel/itemListApi.ts
   init_electron();
@@ -13695,6 +13749,7 @@ html.fnos-perf.dark{
   }
 
   // src/preload/plugins/embyWall/detail/backdrop.ts
+  init_logger();
   var BACKDROP_ID = "fnos-detail-backdrop";
   var INSTANT_ID = "fnos-instant-layer";
   var CACHE_PREFIX = "fntvDetailPoster:";
@@ -23839,6 +23894,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   registerHook("onDomChange" /* OnDomChange */, startPolling);
 
   // src/preload/plugins/uiModeToggle.ts
+  init_logger();
   var log9 = logger_default;
   var BTN_ID2 = "fntv-uimode-tab";
   var STYLE_ID7 = "fntv-uimode-style";
@@ -23940,6 +23996,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   boot();
 
   // src/preload/plugins/pageAnim.ts
+  init_logger();
   var GRID_SEL = '[class*="flex-wrap"][class*="gap-x"]';
   var MODAL_SEL = '[role="dialog"], .semi-modal-wrapper';
   function getAnime() {
@@ -24845,6 +24902,7 @@ html.fntv-boot-hide #root{visibility:hidden}
 
   // src/preload/plugins/skipMarker.ts
   init_electron();
+  init_logger();
   var log11 = logger_default;
   var PANEL_ID3 = "fntv-marker-panel";
   var MARKER_STYLE_ID = "fntv-marker-panel-style";
@@ -25648,6 +25706,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
 
   // src/preload/plugins/watchHistory.ts
   init_electron();
+  init_logger();
   var LOG2 = "[WatchHistory]";
   var ENTRY_ID = "fntv-wh-entry";
   var PANEL_ID4 = "fntv-wh";
@@ -28210,6 +28269,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
 
   // src/preload/plugins/watchedSync.ts
   init_electron();
+  init_logger();
   var _scanning = false;
   async function scanWatchedShows() {
     if (_scanning) return [];
