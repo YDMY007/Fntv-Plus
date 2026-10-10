@@ -7405,7 +7405,10 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       const title = meta ? String(meta.searchTitle || "") : "";
       if (title) {
         try {
-          await ipcRenderer.invoke("danmaku:clear", { title });
+          await Promise.race([
+            ipcRenderer.invoke("danmaku:clear", { title }),
+            new Promise((r) => setTimeout(r, 4e3))
+          ]);
         } catch {
         }
       }

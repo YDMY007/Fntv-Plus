@@ -208,7 +208,7 @@ func (b *Bridge) biliSearchVideos(title string, limit int) []map[string]any {
 var (
 	reEpZh      = regexp.MustCompile(`第\s*0*([0-9]+)\s*[话集回話]`)
 	reEpRange   = regexp.MustCompile(`\d\s*[~\-–至]\s*\d`)
-	reEpPrefix  = regexp.MustCompile(`[^A-Za-z\d](?:e\.?p\.?\s*|episode\s*|#\s*)\s*0*([0-9]+)`)
+	reEpPrefix  = regexp.MustCompile(`(?i)[^A-Za-z\d](?:e\.?p\.?\s*|episode\s*|#\s*)\s*0*([0-9]+)`)   // [lc-1338] (?i)：B站标题里 EP05/ep05/Ep05 混用，旧写法只认小写
 	reDigitRuns = regexp.MustCompile(`[0-9]+`)
 )
 
@@ -241,6 +241,91 @@ func epInTitle(t string, ep int64) bool {
 		}
 	}
 	return false
+}
+
+// [lc-1338] 候选排序/剔除：B站「视频区」搜索结果里混着大量非正片（PV/预告/花絮/切片），
+// 旧实现只按「弹幕条数够不够」取第一个合格候选 —— 实测「少女乐队的呐喊」第 5 集被
+// 「大家好！我们是…我们来B站啦~」这条宣传视频（332 条）截胡，正片反而没被尝试，
+// 用户看到的弹幕自然全错；而且清掉匹配记忆后，自动匹配又会把同一条错片拉回来
+// （表现成「清除按钮点了没反应」）。
+//
+// 规则（仅当请求是「某集」时生效，电影 ep<=0 行为完全不变）：
+//   ① 标题里明确写了别的集号 → 一票否决丢掉（挂错集比没弹幕更糟，与 danmu_api 同口径）；
+//   ② 标题带 [PV/CM/MV/OP/ED/预告/花絮/采访/…] 这类非正片标记、且**没有**集号 → 丢掉；
+//   ③ 其余按「命中本集 > 无集号（搬运常不带集号）> 其它」排序，命中本集的优先试。
+var reNonEpisodeLatin = regexp.MustCompile(`(?i)(^|[^a-z])(pv|cm|mv|op|ed)([^a-z]|$)`)
+
+var nonEpisodeMarks = []string{
+	"预告", "宣传", "花絮", "采访", "访谈", "特番", "直播", "生放送",
+	"主题曲", "片头曲", "片尾曲", "开播", "定档", "声优", "我们来b站",
+	"混剪", "reaction", "解说",
+}
+
+// epNumbersInTitle 只认结构化集号（第N话/集/回/話、EP/Episode/#N），
+// 刻意不像 epInTitle 那样兼收裸数字 —— 裸数字多是年份/清晰度，用它做「错集一票否决」
+// 会误杀正片；排序阶段只需要高置信度的集号。
+func epNumbersInTitle(t string) []int64 {
+	var out []int64
+	for _, re := range []*regexp.Regexp{reEpZh, reEpPrefix} {
+		for _, m := range re.FindAllStringSubmatch(t, -1) {
+			if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+func looksLikeNonEpisode(t string) bool {
+	lower := strings.ToLower(t)
+	if reNonEpisodeLatin.MatchString(lower) {
+		return true
+	}
+	for _, m := range nonEpisodeMarks {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// orderBiliCandidates 返回可用的候选，命中本集的排在前面（其余保持 B站 原序）。
+func orderBiliCandidates(cands []map[string]any, ep int64) []map[string]any {
+	if ep <= 0 {
+		return cands
+	}
+	hit := make([]map[string]any, 0, len(cands))
+	plain := make([]map[string]any, 0, len(cands))
+	for _, v := range cands {
+		t := jsStr(v["title"])
+		eps := epNumbersInTitle(t)
+		if len(eps) > 0 {
+			match := false
+			for _, n := range eps {
+				if n == ep {
+					match = true
+					break
+				}
+			}
+			if !match {
+				logf("[danmaku] 剔出错集候选（请求第 %d 集）: %q", ep, t)
+				continue
+			}
+			hit = append(hit, v)
+			continue
+		}
+		if looksLikeNonEpisode(t) {
+			logf("[danmaku] 剔除非正片候选（PV/预告/花絮…）: %q", t)
+			continue
+		}
+		plain = append(plain, v)
+	}
+	out := append(hit, plain...)
+	if len(out) != len(cands) {
+		logf("[danmaku] 候选筛除 %d 条（剩 %d：命中本集 %d / 无集号正片 %d）",
+			len(cands)-len(out), len(out), len(hit), len(plain))
+	}
+	return out
 }
 
 // biliCidFromBvid bvid → cid（view 接口，桌面端 cid_from_bvid 同语义）。
@@ -1014,7 +1099,8 @@ func (b *Bridge) biliResolve(title string, ep, season int64) *biliResolveResult 
 	minCnt := b.danmuMinCount()
 	var fallback *biliResolveResult // 试遍都很少：留条数最多的那个，仍交给上层裁决
 	tried := 0
-	for _, v := range b.biliSearchVideos(title, 5) {
+	// [lc-1338] 先按「集号是否对得上」排序并剔除非正片/错集候选（否则宣传视频会截胡正片）
+	for _, v := range orderBiliCandidates(b.biliSearchVideos(title, 5), ep) {
 		if tried >= 3 { // 上限 3 个候选：够覆盖「首位是剪辑」的常见情形，又不至于放大请求
 			break
 		}

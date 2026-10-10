@@ -2372,7 +2372,15 @@ async function clearDanmakuMatch(row: HTMLLIElement): Promise<void> {
     try {
         const title = meta ? String(meta.searchTitle || '') : '';
         if (title) {
-            try { await ipcRenderer.invoke('danmaku:clear', { title }); } catch { /* 后端清不掉时本地照清 */ }
+            // [lc-1338] 加超时：桥不可达/请求挂住时旧写法会永远 await，dmClearBusy 卡在 true
+            // → 之后每次点击都在入口 return（用户看到的就是「点了没反应」）。4s 到点就往下走，
+            // 本地清照做、按钮状态必解锁。
+            try {
+                await Promise.race([
+                    ipcRenderer.invoke('danmaku:clear', { title }),
+                    new Promise((r) => setTimeout(r, 4000)),
+                ]);
+            } catch { /* 后端清不掉时本地照清 */ }
         }
         setItems([]);
         if (meta) {
