@@ -2554,6 +2554,9 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
     // [v0.20.0] 自动刷新开关按需移除——始终自动刷新（5 秒），保留手动「刷新」按钮
     const liveBtn = mkBtn('刷新', true);
     logRow.appendChild(liveBtn);
+    // [lc-1337] 一键复制当前日志（用户要求）：放在「刷新」旁边，复制的是**框里此刻显示的内容**
+    const copyBtn = mkBtn('复制日志', true);
+    logRow.appendChild(copyBtn);
     logFooter.appendChild(logRow);
     const livePre = document.createElement('pre');
     livePre.style.cssText = 'margin:8px 0 0;padding:10px;border-radius:8px;background:var(--fnos-ui-input-bg);'
@@ -2574,6 +2577,44 @@ btn.style.cssText = 'box-sizing:border-box;width:100%;padding:10px 12px;border-r
         .catch((e) => { livePre.textContent = '日志读取失败: ' + e; });
     };
     liveBtn.addEventListener('click', (e: Event) => { e.stopPropagation(); fetchLiveLog(); });
+    copyBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation();
+      const text = (livePre.textContent || '').trim();
+      const flash = (label: string): void => {
+        const old = copyBtn.textContent || '';
+        copyBtn.textContent = label;
+        copyBtn.disabled = true;
+        setTimeout(() => { copyBtn.textContent = old; copyBtn.disabled = false; }, 1500);
+      };
+      if (!text) { flash('无内容'); return; }
+      // 优先异步剪贴板 API（网关是 https，安全上下文满足）；失败退到 textarea + execCommand
+      // ——安卓 WebView / 老内核里 execCommand 反而是唯一能用的那条。
+      const legacy = (): boolean => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, ta.value.length);
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch { return false; }
+      };
+      try {
+        const cb = (navigator as any).clipboard;
+        if (cb && typeof cb.writeText === 'function') {
+          cb.writeText(text).then(
+            () => flash('已复制 ' + text.length + ' 字符'),
+            () => flash(legacy() ? '已复制 ' + text.length + ' 字符' : '复制失败'),
+          );
+          return;
+        }
+      } catch { /* 落到 legacy */ }
+      flash(legacy() ? '已复制 ' + text.length + ' 字符' : '复制失败');
+    });
     fetchLiveLog();
     // 面板可能随 SPA 重建，先清旧定时器再挂新的，避免轮询泄漏
     try {

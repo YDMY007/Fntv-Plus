@@ -20247,6 +20247,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       logRow.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;";
       const liveBtn = mkBtn3("\u5237\u65B0", true);
       logRow.appendChild(liveBtn);
+      const copyBtn = mkBtn3("\u590D\u5236\u65E5\u5FD7", true);
+      logRow.appendChild(copyBtn);
       logFooter.appendChild(logRow);
       const livePre = document.createElement("pre");
       livePre.style.cssText = "margin:8px 0 0;padding:10px;border-radius:8px;background:var(--fnos-ui-input-bg);color:var(--fnos-ui-text);font-size:11px;line-height:1.5;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all;";
@@ -20265,6 +20267,51 @@ html.fntv-boot-hide #root{visibility:hidden}
       liveBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         fetchLiveLog();
+      });
+      copyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const text = (livePre.textContent || "").trim();
+        const flash = (label) => {
+          const old = copyBtn.textContent || "";
+          copyBtn.textContent = label;
+          copyBtn.disabled = true;
+          setTimeout(() => {
+            copyBtn.textContent = old;
+            copyBtn.disabled = false;
+          }, 1500);
+        };
+        if (!text) {
+          flash("\u65E0\u5185\u5BB9");
+          return;
+        }
+        const legacy = () => {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0;";
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);
+            const ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            return ok;
+          } catch {
+            return false;
+          }
+        };
+        try {
+          const cb = navigator.clipboard;
+          if (cb && typeof cb.writeText === "function") {
+            cb.writeText(text).then(
+              () => flash("\u5DF2\u590D\u5236 " + text.length + " \u5B57\u7B26"),
+              () => flash(legacy() ? "\u5DF2\u590D\u5236 " + text.length + " \u5B57\u7B26" : "\u590D\u5236\u5931\u8D25")
+            );
+            return;
+          }
+        } catch {
+        }
+        flash(legacy() ? "\u5DF2\u590D\u5236 " + text.length + " \u5B57\u7B26" : "\u590D\u5236\u5931\u8D25");
       });
       fetchLiveLog();
       try {

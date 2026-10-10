@@ -67,6 +67,7 @@ function scanCssRules(css) {
 // ── 被测源码 ────────────────────────────────────────────────────────────
 const mobileStyle = read('src/preload/plugins/mobileStyle.ts');
 const danmakuWeb = read('src/preload/plugins/danmakuWeb.ts');
+const embyWall = read('src/preload/plugins/embyWall.ts');
 const styles = read('src/preload/plugins/embyWall/carousel/styles.ts');
 
 // ═══ 1. UI 模式（手动切换）与布局标记装配（lc-1319 起） ═══
@@ -399,6 +400,19 @@ console.log('\n[5] 全屏按钮 → 横屏全屏播放');
     '不自己调 screen.orientation.lock（不在用户手势栈内必抛 NotSupportedError）');
   ok(/xgplayer-is-cssfullscreen/.test(danmakuWeb),
     '修掉死判据：原 .xgplayer.xgplayer-fullscreen 恒 false（那是按钮的类，不是状态类）');
+}
+
+// ═══ 4c. 调试日志：一键复制（lc-1337）═══
+console.log('\n[4c] 设置面板·调试日志：刷新旁边的一键复制');
+{
+  ok(/const copyBtn = mkBtn\('复制日志', true\)/.test(embyWall) && /logRow\.appendChild\(copyBtn\)/.test(embyWall),
+    '「复制日志」按钮与「刷新」同一行（logRow 内，紧随其后）');
+  ok(/const text = \(livePre\.textContent \|\| ''\)\.trim\(\)/.test(embyWall),
+    '复制的是日志框里此刻显示的内容（不是重新拉一份）');
+  ok(/navigator as any\)\.clipboard/.test(embyWall) && /execCommand\('copy'\)/.test(embyWall),
+    '优先异步剪贴板 API，失败退到 textarea + execCommand（老 WebView 只有后者能用）');
+  ok(/flash\('已复制 ' \+ text\.length/.test(embyWall) && /'复制失败'/.test(embyWall) && /flash\(legacy\(\)/.test(embyWall),
+    '成功/失败都有就地反馈（按钮文案临时切换，不弹窗打断）');
 }
 
 // ═══ 5a. 自建伪横屏（lc-1334：不再依赖插件 config / React fiber）═══
