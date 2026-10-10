@@ -111,8 +111,9 @@ end
 
 local block_types = load_block_types(mp.command_native({ "expand-path", options.block_types_path }))
 
--- [lc-1302] 屏蔽类型运行时刷新：danmaku_block_types.json 是「MPV 快捷键菜单 / 设置面板」
--- 共用的真源文件，任意一侧改动后都须在下次加载弹幕前重读。parse_danmaku_files 开头会调用。
+-- [lc-1335] 屏蔽类型运行时刷新：danmaku_block_types.json 是「MPV 快捷键菜单 / 设置面板」
+-- 共用的真源文件，任一侧改动后须在下次加载弹幕前重读（parse_danmaku_files 开头调用）。
+-- 原版（lc-1285 及之前）只在脚本启动时读一次，Ctrl+K 切完要重启播放器才生效。
 function reload_block_types()
     block_types = load_block_types(mp.command_native({ "expand-path", options.block_types_path }))
     return block_types
@@ -343,8 +344,7 @@ end
 
 -- 解析弹幕文件
 function parse_danmaku_files(danmaku_input, delays)
-    -- [lc-1302] 每次转换前重读屏蔽类型：快捷键菜单/设置面板刚改过的开关立即生效
-    reload_block_types()
+    reload_block_types()   -- [lc-1335] 每次加载前重读屏蔽类型（Ctrl+K 即时生效）
     local DANMAKU_PATHs = {}
     if type(danmaku_input) == "string" then
         DANMAKU_PATHs = { danmaku_input }
@@ -410,46 +410,11 @@ end
 local DanmakuArray = {}
 DanmakuArray.__index = DanmakuArray
 
--- [lc-1286] 行高：轨道数组按**最大可能字号**建，而不是 options.fontsize 基础字号。
--- 聚合弹幕（lc-1253）会把字号放大到 1.3 倍，DanmakuArray:new 仍按基础字号算 rows，
--- 于是轨道数偏多（1080p/30px → 36 行）、相邻轨道 Y 间距只有基础字号 30px，
--- 而放大后的弹幕实际高 37px → 上下行文字直接叠在一起（用户反馈「不同轨道弹幕重叠」）。
--- 按最大字号建轨道后，任意一条放大弹幕的行高都不会超出所在轨道的间距。
--- 上限 1.3 与 convert_danmaku_to_ass 里的放大曲线同源，改那边记得同步这里。
-local MERGE_FS_MAX_MULT = 1.3
-
--- [lc-1303] 固定弹幕（顶部/底部）居中等三条常量：
---   FIXED_ZONE_HALF   滚动弹幕判定「是否走过屏幕中央」时按「中线 ± 该半径」预留净空：
---                     240px ≈ 16 个汉字 @字号30，覆盖绝大多数固定弹幕宽度。
---   FIXED_MAX_WAIT    固定弹幕为躲开穿行中的滚动弹幕，最多愿意延后多少秒出现。
---   FREE_LANE_SCORE   整行空闲的加分。取 1e5：高于任何接力行可能出现的净空（几百~几千），
---                     于是「空闲行 > 有净空的接力行」这个次序在同类行之间成立。
---   FIXED_LANE_RESERVE 预留行的减分，取 1e6：量级压过空闲加分 —— 首行/末行只有在
---                     其余所有行都接不下时才会被滚动弹幕占用，从而把这两行尽可能
---                     留给顶部/底部弹幕（它们整段窗口定在中央，行被滚动弹幕占着就只能
---                     硬塞进去压字，实测固定弹幕压字样本 59 个 → 预留后为 0）。
-local FIXED_ZONE_HALF = 240
-local FIXED_MAX_WAIT = 3.0
-local FREE_LANE_SCORE = 1e5
-local FIXED_LANE_RESERVE = 1e6
-
-function DanmakuArray:new(res_x, res_y, font_size, displayarea)
-    local row_font_size = math.max(font_size, math.ceil(font_size * MERGE_FS_MAX_MULT))
-    -- [lc-1292] 轨道池只按**可见区域**建，而不是整屏：
-    -- 渲染端（render.lua parse_comment / write_render_file）会丢弃 y > 高度*displayarea 的弹幕，
-    -- 排版端却按满屏 res_y 建满 rows，于是排到「不可见行」的弹幕全部白丢。
-    -- 实测 fontsize=30 / displayarea=0.35 / scrolltime=15 时：满屏 27 行里只有 9 行可见，
-    -- 200 条弹幕有 155 条（78%）被分配到看不见的行上——这才是「稀稀拉拉」的主因。
-    -- 可见行数 = floor(res_y * displayarea / 行高)，行高不变保证放大弹幕仍不压行。
-    local area = tonumber(displayarea) or 0.85
-    if area <= 0 or area > 1 then area = 0.85 end
-    local usable_height = res_y * area
+function DanmakuArray:new(res_x, res_y, font_size)
     local obj = {
-        solution_y = usable_height,
+        solution_y = res_y,
         font_size = font_size,
-        -- 每条轨道占的高度 = max(基础字号, 放大上限)，保证放大弹幕不越界压到下一行
-        row_height = row_font_size,
-        rows = math.floor(usable_height / row_font_size),
+        rows = math.floor(res_y / font_size),
         time_length_array = {}
     }
     for i = 1, obj.rows do
@@ -459,80 +424,10 @@ function DanmakuArray:new(res_x, res_y, font_size, displayarea)
     return obj
 end
 
--- [lc-1286] 轨道 i 的 Y 坐标：统一走行高，避免调用方各写一套 math（原先散落 1+(i-1)*font_size）
-function DanmakuArray:get_y(row)
-    return 1 + (row - 1) * self.row_height
-end
-
--- [lc-1303] 轨道占用改为**双槽位**记录：滚动链头（time/length/font_size/until_time）
---   与顶部/底部弹幕的占用窗口（fixed_until）互不覆盖。两类弹幕的冲突模型不同 ——
---   滚动弹幕之间是**追及问题**（只要错开就能共用一行），顶部/底部弹幕定在屏幕中央不动
---   （滚动弹幕穿过它必然压字，只能等它到期）。旧实现只有一个槽位、后写者覆盖前者：
---   固定弹幕的记录会抹掉滚动链头，链头上的接力判据随之失效。
-function DanmakuArray:occupy(row, appear_time, until_time, font_size, length)
+function DanmakuArray:set_time_length(row, time, length)
     if row > 0 and row <= self.rows then
-        local prev = self.time_length_array[row]
-        self.time_length_array[row] = {
-            time = appear_time, length = length or 0,
-            font_size = font_size, until_time = until_time,
-            -- 固定弹幕窗口原样保留，不参与滚动弹幕的接力判据
-            fixed_until = prev and prev.fixed_until or -1,
-            -- 屏幕中央被滚动弹幕「走空」的时刻，同样继承（见 mark_center_clear）
-            center_clear = prev and prev.center_clear or -1,
-        }
+        self.time_length_array[row] = { time = time, length = length }
     end
-end
-
--- 顶部/底部弹幕占位：只写 fixed_until，滚动链头原样保留，
--- 于是后续滚动弹幕仍能按接力判据判定这一行。
-function DanmakuArray:occupy_fixed(row, until_time)
-    if row > 0 and row <= self.rows then
-        local rec = self.time_length_array[row]
-        if rec then
-            if until_time > (rec.fixed_until or -1) then
-                rec.fixed_until = until_time
-            end
-        else
-            self.time_length_array[row] = { time = -1, length = 0, fixed_until = until_time }
-        end
-    end
-end
-
--- [lc-1303] 屏幕中央的「净空时刻」：固定弹幕恒在中央，只要该行有滚动弹幕还在
---   中央附近穿行，两者就会压字。单个槽位只记得住**最后一条**，而接力模型下一行
---   同时飞着好几条（前几条可能正穿过中央）—— 所以按「整行取最大值」记一个时间戳：
---   每放一条滚动弹幕就推进一次 = 该行中央被所有已知弹幕走空的时刻。
-function DanmakuArray:mark_center_clear(row, clear_at)
-    if row > 0 and row <= self.rows then
-        local rec = self.time_length_array[row]
-        if rec and clear_at > (rec.center_clear or -1) then
-            rec.center_clear = clear_at
-        end
-    end
-end
-
-function DanmakuArray:center_clear_at(row)
-    if row > 0 and row <= self.rows then
-        return self.time_length_array[row].center_clear or -1
-    end
-    return -1
-end
-
-function DanmakuArray:fixed_until(row)
-    if row > 0 and row <= self.rows then
-        return self.time_length_array[row].fixed_until or -1
-    end
-    return -1
-end
-
--- 该行彻底空闲的时刻 = 滚动链头离场与固定弹幕到期取较晚者
-function DanmakuArray:free_at(row)
-    if row > 0 and row <= self.rows then
-        local rec = self.time_length_array[row]
-        local a, b = rec.until_time or -1, rec.fixed_until or -1
-        return a > b and a or b
-    end
-    return -1
 end
 
 function DanmakuArray:get_time(row)
@@ -549,113 +444,57 @@ function DanmakuArray:get_length(row)
     return 0
 end
 
--- [lc-1286] 字号维度：轨道除时间/宽度外还要记住该行上一条的**实际字号**（聚合弹幕放大后更宽）。
-function DanmakuArray:get_font_size(row)
-    if row > 0 and row <= self.rows then
-        return self.time_length_array[row].font_size or self.font_size
-    end
-    return self.font_size
-end
-
 -- 滚动弹幕 Y 坐标算法
--- [lc-1303] 改为**接力模型**（用户反馈「弹幕只有十来条」「一抽一抽的」「重叠也没修好」）。
---   旧实现（lc-1286④ + lc-1294）要求某行上一条**完全离场**才能复用该行，只剩两条兜底路径
---   能把弹幕塞回去，于是要么整条丢弃、要么挤成一团。实测本机配置（fontsize=30 /
---   displayarea=0.35 → 9 行 / scrolltime=15 / 180 条弹幕）：仅 66 条上屏、79 条被丢（44%），
---   同屏最多 11 条 —— 正是「只有十来条」。
---   容量账：独占模型单行 = 1 条/roll_time，9 行合计 ≈ 0.6 条/秒（热门视频 1.5~3 条/秒必溢出）；
---   接力模型单行可并行 ≈ roll_time ÷ (弹幕宽 ÷ 速度)（15s ÷ 1.4s ≈ 10 条），9 行合计 ≈ 90 条。
---   两条硬条件（缺一即压字）：
---     ① 入轨不压字：净空 gap = 上一条速度 × 入轨间隔 - 上一条宽度 ≥ 0；
---     ② 追及发生在离场之后：本条更快时，追上上一条的时刻 ≥ 上一条飞出屏幕的时刻。
---   另外**不再「第一个能用的行就用」**（first-fit 会把弹幕全堆进第 1、2 行，
---   上几行挤成一片、下面几行空着 —— 既难看又提前触发溢出）：安全行里取净空最大的
---   那行，等于「最闲的行优先」，弹幕自然摊到全部轨道上。
---   所有行都在接力时，取净空最大的一行放入（沿用 lc-1286 起的口径：宁可局部微重叠，
---   也不整条丢弃 —— 丢一条是永久缺一条，微重叠只是瞬间擦身）。
 function get_position_y(font_size, appear_time, text_length, resolution_x, roll_time, array)
     local velocity = (text_length + resolution_x) / roll_time
-    local best_row, best_score = nil, -math.huge     -- 安全行里评分最高的
-    local loose_row, loose_slack = nil, -math.huge   -- 全都不安全时净空最大的
-    -- 本条弹幕的尾部彻底走空屏幕中央区域的时刻（供后续固定弹幕判定能否共用该行）。
-    -- 中央区域按「屏幕中线 ± FIXED_ZONE_HALF」预留：顶部/底部弹幕居中显示，
-    -- 宽到 ±240px（约 16 个汉字 @字号30）仍不会与已走空的滚动弹幕相交。
-    local clear_at = appear_time + (resolution_x / 2 + FIXED_ZONE_HALF + text_length) / velocity
-    local function place(row)
-        array:occupy(row, appear_time, appear_time + roll_time, font_size, text_length)
-        array:mark_center_clear(row, clear_at)
-        return array:get_y(row)
-    end
+    local best_row = 0
+    local best_bias = -math.huge
 
     for i = 1, array.rows do
-        -- 该行有未到期的顶部/底部弹幕：滚动弹幕穿过屏幕中央时必然压字，跳过这一行
-        if array:fixed_until(i) > appear_time then goto continue end
-
-        local score
-        local prev_time = array:get_time(i)
-        if prev_time < 0 or appear_time >= array:free_at(i) then
-            -- 整行空闲（空行 / 链头已离场 / 固定弹幕已到期）
-            score = FREE_LANE_SCORE
-        else
-            -- 该行链头还在飞 → 按接力判据判定能否并行
-            local prev_len = array:get_length(i)
-            if prev_len > 0 then
-                local prev_v = (prev_len + resolution_x) / roll_time
-                local dt = appear_time - prev_time
-                local gap = prev_v * dt - prev_len
-                local safe = gap >= 0
-                -- 本条更快 → 追及时刻 = 入轨时刻 + 净空 ÷ 速度差，要求那时链头已离场
-                if safe and velocity > prev_v then
-                    safe = appear_time + gap / (velocity - prev_v) >= prev_time + roll_time
-                end
-                if safe then
-                    score = gap
-                elseif gap > loose_slack then
-                    loose_slack, loose_row = gap, i
-                end
-            end
+        local previous_appear_time = array:get_time(i)
+        if array:get_time(i) < 0 then
+            array:set_time_length(i, appear_time, text_length)
+            return 1 + (i - 1) * font_size
         end
 
-        if score then
-            -- 首行/末行留给顶部与底部弹幕（它们整段窗口定在中央，普通行抢走后
-            -- 固定弹幕就只能硬塞进去压字）：同样空闲时优先用其它行。
-            if i == 1 or i == array.rows then
-                score = score - FIXED_LANE_RESERVE
+        local previous_length = array:get_length(i)
+        local previous_velocity = (previous_length + resolution_x) / roll_time
+        local delta_velocity = velocity - previous_velocity
+        local delta_x = (appear_time - previous_appear_time) * previous_velocity - (previous_length + text_length) / 2
+
+        if delta_x >= 0 then
+            if delta_velocity <= 0 then
+                array:set_time_length(i, appear_time, text_length)
+                return 1 + (i - 1) * font_size
             end
-            if score > best_score then
-                best_score, best_row = score, i
+
+            local delta_time = delta_x / delta_velocity
+            local bias = appear_time - previous_appear_time - delta_time
+            -- 判断：追及点是否在屏幕之外
+            local t_catch = previous_appear_time + delta_time
+            local distance_prev = previous_velocity * (t_catch - previous_appear_time)
+            if distance_prev > resolution_x then
+                -- 追及发生在屏幕之外，允许放置
+                array:set_time_length(i, appear_time, text_length)
+                return 1 + (i - 1) * font_size
+            end
+            if bias > 0 then
+                array:set_time_length(i, appear_time, text_length)
+                return 1 + (i - 1) * font_size
+            elseif bias > best_bias then
+                best_bias = bias
+                best_row = i
             end
         end
-        ::continue::
     end
-
-    if best_row then return place(best_row) end
-    -- 兜底：所有行都在接力中且都不安全 → 取净空最大的一行，把重叠面压到最小。
-    -- 净空小到半条弹幕宽以上才认输丢弃（此时屏幕已经彻底排满，硬塞只会整片糊字）。
-    if loose_row and loose_slack >= -text_length * 0.5 then
-        return place(loose_row)
-    end
+    -- 所有行都被占用，放弃渲染
     return nil
 end
 
--- 固定弹幕（顶部/底部）Y 坐标算法（返回 y 与「延后秒数」）
--- [lc-1286] 行间距走 array.row_height（含聚合放大上限）。
--- [lc-1287] 与滚动弹幕共用同一轨道池，避免「顶部弹幕必然压在滚动弹幕的行上」。
--- [lc-1303] 判定与滚动弹幕能否共用该行，看「整行中央是否已走空」（center_clear_at）：
---   ① 该行现在就能用（整行空闲 / 中央已走空 / 上一条固定弹幕已到期）→ 立即放，延后 0；
---   ② 都不能立刻用 → **延后 fixtime 上限内的最短等待**，等到最快要走空的那一行，
---      换来零压字。固定弹幕整段窗口定在中央，与穿行中的滚动弹幕是硬冲突：
---      实测「宁可压字也不等」的版本压字样本 45~59 个（≈ 三成固定弹幕被压），
---      而顶/底弹幕晚出现 1~2 秒观众无感（弹幕本身的窗口就有 5 秒，且固定弹幕
---      不滚动，不存在「追不上进度」的问题）。
---   ③ 连等待上限都等不到（全屏彻底排满）→ 取中央最先走空的一行硬放，压字窗口最短。
---   判定必须看「整行」的时间戳：只看最后一条会漏掉接力链上还在中央穿行的前几条
---   （实测压字 46 对）；反向的「本条结束后它才到中央」也不能放行，更晚入轨的弹幕
---   可能更早穿过中央。
-function get_fixed_y(font_size, appear_time, fixtime, array, from_top, resolution_x, roll_time, text_length)
-    local wait_row, wait_delay = nil, math.huge    -- 需要等待时：等待最短的可零压字行
-    local loose_row, loose_avail = nil, math.huge  -- 兜底一：只被滚动弹幕挡着的行（压字 1~2 秒）
-    local clash_row, clash_avail = nil, math.huge  -- 兜底二：被另一条固定弹幕占着的行（整段压死）
+-- 固定弹幕 Y 坐标算法
+function get_fixed_y(font_size, appear_time, fixtime, array, from_top)
+    local best_row = 0
+    local best_bias = -1
     local row_start, row_end, row_step
     if from_top then
         row_start, row_end, row_step = 1, array.rows, 1
@@ -664,43 +503,22 @@ function get_fixed_y(font_size, appear_time, fixtime, array, from_top, resolutio
     end
 
     for i = row_start, row_end, row_step do
-        -- 该行「可供固定弹幕使用」的最早时刻：滚动弹幕走空中央、或上一条固定弹幕到期
-        local fixed_until = array:fixed_until(i)
-        local avail = array:center_clear_at(i)
-        if fixed_until > avail then avail = fixed_until end
-        -- 该行上一条还在飞（未离场）的滚动弹幕：固定弹幕走后它还要穿行一段，
-        -- 但上面 center_clear 已经涵盖「是否穿过中央」，故无需再判 free_at
-
-        if avail <= appear_time then
-            array:occupy_fixed(i, appear_time + fixtime)
-            return array:get_y(i), 0
-        end
-        local delay = avail - appear_time
-        if delay < wait_delay then
-            wait_delay, wait_row = delay, i
-        end
-        if fixed_until > appear_time then
-            if avail < clash_avail then
-                clash_avail, clash_row = avail, i
+        local previous_appear_time = array:get_time(i)
+        if previous_appear_time < 0 then
+            array:set_time_length(i, appear_time, 0)
+            return (i - 1) * font_size + 1
+        else
+            local delta_time = appear_time - previous_appear_time
+            if delta_time > fixtime then
+                array:set_time_length(i, appear_time, 0)
+                return (i - 1) * font_size + 1
+            elseif delta_time > best_bias then
+                best_bias = delta_time
+                best_row = i
             end
-        elseif avail < loose_avail then
-            loose_avail, loose_row = avail, i
         end
     end
-
-    -- 等得起就等（零压字优先）
-    if wait_row and wait_delay <= FIXED_MAX_WAIT then
-        array:occupy_fixed(wait_row, appear_time + wait_delay + fixtime)
-        return array:get_y(wait_row), wait_delay
-    end
-    -- 等不起：全屏排满，硬放（原实现这里是 return nil，固定弹幕成片消失）。
-    -- 只被滚动弹幕挡着的行优先 —— 与穿行的滚动弹幕压字只有 1~2 秒，
-    -- 两条固定弹幕叠在一起则是整段窗口（5 秒）完全糊死。
-    local row = loose_row or clash_row
-    if row then
-        array:occupy_fixed(row, appear_time + fixtime)
-        return array:get_y(row), 0
-    end
+    -- 所有行都被占用，放弃渲染
     return nil
 end
 
@@ -714,9 +532,9 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
 
     local alpha = string.format("%02X", (1 - tonumber(options.opacity)) * 255)
     local bold = options.bold and "1" or "0"
-    -- [lc-1300] 排版轨道/文本宽度估算与渲染 Style 用同一字号（原版行为：直接用
-    -- options.fontsize；lc-1299 的显示高补偿是双重缩放，已随 utils.lua 一并移除）
-    local fontsize = tonumber(options.fontsize) or 30
+    -- [lc-1299] 排版轨道/文本宽度估算必须与渲染 Style 用同一自适应字号：
+    -- 渲染端按「显示区高/1080」缩放字号，轨道仍按基础字号排会重叠/露缝。
+    local fontsize = adaptive_fontsize()
     local scrolltime = tonumber(options.scrolltime) or 15
     local fixtime = tonumber(options.fixtime) or 5
     local outline = tonumber(options.outline) or 1.0
@@ -725,10 +543,8 @@ function convert_danmaku_to_ass(all_danmaku, danmaku_file)
     local res_x = 1920
     local res_y = 1080
 
-    -- [lc-1287] 滚动 / 顶部 / 底部弹幕共用同一个轨道池：三类弹幕的 Y 都来自同一组行，
---   任一行同一时刻只能被一条弹幕占用，从根本上消除跨类型压字（原先 roll_array 与
---   top_array 是两套独立行号，都从第 1 行开始排，顶部弹幕必然落在滚动弹幕的行上）。
-local track_array = DanmakuArray:new(res_x, res_y, fontsize, options.displayarea)
+    local roll_array = DanmakuArray:new(res_x, res_y, fontsize)
+    local top_array = DanmakuArray:new(res_x, res_y, fontsize)
 
     local ass_header = string.format([[
 [Script Info]
@@ -806,21 +622,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         -- [lc-1253] 聚合弹幕：追加 ×N 后缀，字号按重叠次数放大（内联 \fs 覆写，log2 增长）；
         -- [lc-1256] 曲线收紧（与网页端一致）：×2 仅 +8%，×16 及以上封顶 +30%——
         -- 旧曲线 ×2 +20% / 封顶 +80% 被反馈放大过猛，观感接近翻倍。
-        -- [lc-1286] 宽度估算改用 layout_text（只含真正可见的字符）。原先直接对 text 求宽，
-        -- 而 text 里含 "{\fs37}" / "{\b1\i1}" 等覆写标签——这些字符被 get_str_width 当成
-        -- 可见字宽累加 → 布局宽度虚高（实测「666」×8 在 1080p/30px 下：真实可见 111px，
-        -- 旧算法得 175px）。虚高会让轨道分配误判「两条弹幕已拉开距离」，把本该错开的
-        -- 弹幕放进同一行 → 用户看到的遮挡。反向的 ×N 后缀此前也被漏算，一并修正。
-        -- × 用乘号字符，不与来源自带的 xN gsub 冲突
+        -- 滚动布局宽度同步使用放大后的字号，避免入屏时刻偏移。× 用乘号字符，不与来源自带的 xN gsub 冲突
         local count = tonumber(ev.count) or 1
         local ev_fs = fontsize
-        local layout_text = text
         if options.merge_same_text and count > 1 then
             local mult = 1 + 0.08 * (math.log(count) / math.log(2))
-            if mult > MERGE_FS_MAX_MULT then mult = MERGE_FS_MAX_MULT end
+            if mult > 1.3 then mult = 1.3 end
             ev_fs = math.floor(fontsize * mult + 0.5)
-            local suffix = string.format(" ×%d", count)
-            layout_text = layout_text .. suffix
             text = string.format("{\\fs%d}", ev_fs) .. text
             text = text .. string.format("{\\b1\\i1} ×%d", count)
         end
@@ -841,12 +649,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             layer = 0
             end_time_str = seconds_to_time(ev.end_time)
             style = "R2L"
-            -- [lc-1286] 用 layout_text（仅可见字符）求宽；宽度决定 x1/x2 与轨道冲突判定
-            local text_length = get_str_width(layout_text, ev_fs)
+            local text_length = get_str_width(text, ev_fs)
             local x1 = res_x + text_length / 2
             local x2 = -text_length / 2
-            -- [lc-1286] 传该条**实际**字号（ev_fs），原先恒传基础字号 → 同轨字号判据失效
-            local y = get_position_y(ev_fs, appear_time, text_length, res_x, scrolltime, track_array)
+            local y = get_position_y(fontsize, appear_time, text_length, res_x, scrolltime, roll_array)
             if y then
                 effect = string.format("{\\move(%d, %d, %d, %d)}", x1, y, x2, y)
             end
@@ -857,18 +663,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time_str = seconds_to_time(ev.end_time)
             style = "TOP"
             local x = res_x / 2
-            -- [lc-1286] 传该条实际字号 ev_fs（聚合放大的顶部弹幕同样要占更高的行）
-            -- [lc-1303] 一并传画布宽/滚动时长/本条宽度；返回的 delay>0 表示「等了一会儿
-            --   才等到中央走空的行」，起止时间随之平移（顶/底弹幕晚 1~2 秒出现观众无感，
-            --   换来零压字）
-            local y, delay = get_fixed_y(ev_fs, appear_time, fixtime, track_array, true,
-                res_x, scrolltime, get_str_width(layout_text, ev_fs))
+            local y = get_fixed_y(fontsize, appear_time, fixtime, top_array, true)
             if y then
-                delay = delay or 0
-                if delay > 0 then
-                    start_time_str = seconds_to_time(appear_time + delay)
-                    end_time_str = seconds_to_time(ev.end_time + delay)
-                end
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
 
@@ -878,14 +674,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time_str = seconds_to_time(ev.end_time)
             style = "BTM"
             local x = res_x / 2
-            local y, delay = get_fixed_y(ev_fs, appear_time, fixtime, track_array, false,
-                res_x, scrolltime, get_str_width(layout_text, ev_fs))
+            local y = get_fixed_y(fontsize, appear_time, fixtime, top_array, false)
             if y then
-                delay = delay or 0
-                if delay > 0 then
-                    start_time_str = seconds_to_time(appear_time + delay)
-                    end_time_str = seconds_to_time(ev.end_time + delay)
-                end
                 effect = string.format("{\\pos(%d, %d)}", x, y)
             end
         end
