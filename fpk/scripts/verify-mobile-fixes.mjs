@@ -401,6 +401,32 @@ console.log('\n[5] 全屏按钮 → 横屏全屏播放');
     '修掉死判据：原 .xgplayer.xgplayer-fullscreen 恒 false（那是按钮的类，不是状态类）');
 }
 
+// ═══ 5a. 自建伪横屏（lc-1334：不再依赖插件 config / React fiber）═══
+console.log('\n[5a] 播放页全屏 → 我们自己改 UI 转横屏');
+{
+  const ps = read('src/preload/plugins/pseudoLandscape.ts');
+  ok(/export function togglePseudoLandscape/.test(ps) && /export function enterPseudoLandscape/.test(ps),
+    '伪横屏模块具备进入/切换（点同一个按钮即开/关）');
+  ok(/classList\.add\(ROT_CLASS\)/.test(ps) && /xgplayer-rotate-fullscreen/.test(ps),
+    '复用 xgplayer 自己的旋转类名（既有 rotate CSS 原样生效）');
+  ok(/root\.style\.width = window\.innerHeight/.test(ps),
+    '行内宽按 xgplayer getRotateFullscreen 同口径（= innerHeight，高度交给 CSS 的 100vw）');
+  ok(/CANVAS_CLASS/.test(ps) && /getElementById\(CANVAS_ID\)/.test(ps),
+    '弹幕画布一并旋转（syncCanvasRect 只写 left/top/宽高，不碰 transform → 不会被逐帧覆盖）');
+  ok(/preventDefault\(\)/.test(ps + danmakuWeb) === false || /ev\.preventDefault\(\)/.test(danmakuWeb),
+    '点击拦截里显式 preventDefault（拦住按钮自身处理器）');
+  ok(/ev\.stopPropagation\(\)/.test(danmakuWeb),
+    '必须 stopPropagation：否则按钮上的原生全屏处理器照样跑（真机现象=进了原生全屏但不转）');
+  ok(/if \(env\.isTouch && env\.isPortrait && contentLandscape\)/.test(danmakuWeb),
+    '仅触摸 + 竖屏 + 横向内容才自建旋转（桌面/竖向内容不干预）');
+  ok(/setPlayerResolver\(resolveXgPlayer\)/.test(danmakuWeb),
+    '尽力同步播放器内部状态（rotateDeg/fullscreen），取不到实例也不影响显示');
+  ok(/cleanupPseudoLandscape\(\)/.test(danmakuWeb.split('function leavePlayer')[1] || ''),
+    '离开播放页清场（html 门控类不会残留）');
+  ok(/#fntv-danmaku-canvas\.fntv-dm-rotate\{[\s\S]{0,120}rotate\(90deg\) !important/.test(danmakuWeb),
+    '画布旋转 CSS（按 id 锁定，避免误伤其它 canvas）');
+}
+
 // ═══ 5b. 首页卡片误触（lc-1331）═══
 console.log('\n[5b] 继续观看卡片：浮层圆钮命中区收窄');
 {

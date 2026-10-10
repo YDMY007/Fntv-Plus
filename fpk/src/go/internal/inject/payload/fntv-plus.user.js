@@ -5411,8 +5411,111 @@ html.fnos-touch-narrow body.fnos-beautify ${COL_NUM} > :nth-child(3) > div.relat
     apply2();
   }
 
-  // src/preload/plugins/danmakuWeb.ts
+  // src/preload/plugins/pseudoLandscape.ts
+  init_logger();
   var log7 = logger_default;
+  var ROT_CLASS = "xgplayer-rotate-fullscreen";
+  var STATE_ATTR = "data-fntv-pseudo-rot";
+  var HTML_CLASS = "fntv-pseudo-rot";
+  var CANVAS_CLASS = "fntv-dm-rotate";
+  var CANVAS_ID = "fntv-danmaku-canvas";
+  var _resolve = null;
+  function setPlayerResolver(fn) {
+    _resolve = fn;
+  }
+  function playerRoot() {
+    try {
+      const v = document.querySelector("video");
+      const byVideo = v && (v.closest(".xgplayer") || v.closest("[class*=xgplayer]"));
+      if (byVideo) return byVideo;
+      return document.querySelector(".xgplayer") || document.querySelector("[class*=xgplayer]");
+    } catch {
+      return null;
+    }
+  }
+  function canvasEl() {
+    try {
+      return document.getElementById(CANVAS_ID);
+    } catch {
+      return null;
+    }
+  }
+  function isPseudoLandscape() {
+    return !!document.querySelector("[" + STATE_ATTR + '="1"]');
+  }
+  function enterPseudoLandscape() {
+    const root = playerRoot();
+    if (!root) return false;
+    if (root.getAttribute(STATE_ATTR) === "1") return true;
+    root.setAttribute(STATE_ATTR, "1");
+    root.setAttribute("data-fntv-rot-w", root.style.width || "");
+    root.setAttribute("data-fntv-rot-h", root.style.height || "");
+    root.classList.add(ROT_CLASS);
+    root.style.width = window.innerHeight + "px";
+    const c = canvasEl();
+    if (c) c.classList.add(CANVAS_CLASS);
+    try {
+      document.documentElement.classList.add(HTML_CLASS);
+    } catch {
+    }
+    try {
+      const cur = _resolve ? _resolve() : null;
+      if (cur && cur.player) {
+        cur.player.rotateDeg = 90;
+        cur.player.fullscreen = true;
+      }
+    } catch {
+    }
+    log7.info("[pseudoLandscape] \u8FDB\u5165\u4F2A\u6A2A\u5C4F\uFF08\u81EA\u5EFA\uFF0C\u4E0D\u4F9D\u8D56\u63D2\u4EF6 config\uFF09");
+    return true;
+  }
+  function exitPseudoLandscape() {
+    let root = null;
+    try {
+      root = document.querySelector("[" + STATE_ATTR + '="1"]');
+    } catch {
+    }
+    if (root) {
+      root.classList.remove(ROT_CLASS);
+      root.style.width = root.getAttribute("data-fntv-rot-w") || "";
+      root.style.height = root.getAttribute("data-fntv-rot-h") || "";
+      root.removeAttribute(STATE_ATTR);
+      root.removeAttribute("data-fntv-rot-w");
+      root.removeAttribute("data-fntv-rot-h");
+    }
+    const c = canvasEl();
+    if (c) c.classList.remove(CANVAS_CLASS);
+    try {
+      document.documentElement.classList.remove(HTML_CLASS);
+    } catch {
+    }
+    try {
+      const cur = _resolve ? _resolve() : null;
+      if (cur && cur.player) {
+        cur.player.rotateDeg = 0;
+        cur.player.fullscreen = false;
+      }
+    } catch {
+    }
+    log7.info("[pseudoLandscape] \u9000\u51FA\u4F2A\u6A2A\u5C4F");
+  }
+  function togglePseudoLandscape() {
+    if (isPseudoLandscape()) {
+      exitPseudoLandscape();
+      return true;
+    }
+    return enterPseudoLandscape();
+  }
+  function cleanupPseudoLandscape() {
+    if (isPseudoLandscape()) exitPseudoLandscape();
+    try {
+      document.documentElement.classList.remove(HTML_CLASS);
+    } catch {
+    }
+  }
+
+  // src/preload/plugins/danmakuWeb.ts
+  var log8 = logger_default;
   var loadedGuids = /* @__PURE__ */ new Set();
   var GUID_RE2 = /\/v\/(?:movie|tv|video)(?:\/(?:season|episode))?\/([a-f0-9]{32})/i;
   var LS_KEY5 = "fntv_danmaku_enabled";
@@ -5597,6 +5700,22 @@ html:has(.xgplayer-rotate-fullscreen) body{
     overscroll-behavior:none !important;
 }
 
+/* \u2500\u2500 [lc-1334] \u81EA\u5EFA\u4F2A\u6A2A\u5C4F\uFF08pseudoLandscape.ts\uFF09\u914D\u5957 \u2500\u2500
+   \u64AD\u653E\u5668\u6839\u8282\u70B9\u7528\u7684\u662F xgplayer \u81EA\u5DF1\u7684\u7C7B\u540D\uFF08\u4E0A\u9762\u90A3\u7EC4\u89C4\u5219\u539F\u6837\u751F\u6548\uFF09\uFF0C\u8FD9\u91CC\u8865\u4E24\u4EF6\u753B\u5E03/\u9875\u9762\u7684\u4E8B\uFF1A
+   \u2460 \u5F39\u5E55\u753B\u5E03\u4E0E\u753B\u9762\u540C\u5411\u65CB\u8F6C\uFF1AsyncCanvasRect \u53EA\u5199 left/top/width/height\u3001\u4E0D\u78B0 transform\uFF0C
+      \u6240\u4EE5\u8FD9\u6761\u4E0D\u4F1A\u88AB\u9010\u5E27\u8986\u76D6\uFF1B\u753B\u5E03\u7684 left/top/\u5BBD\u9AD8\u6765\u81EA video \u7684 rect\uFF08\u65CB\u8F6C\u540E\u5373\u89C6\u53E3\u77E9\u5F62\uFF09\uFF0C
+      \u518D\u7ED5\u81EA\u8EAB\u4E2D\u5FC3\u8F6C 90\xB0 \u5C31\u4E0E\u65CB\u8F6C\u540E\u7684\u753B\u9762\u4E25\u4E1D\u5408\u7F1D\u5BF9\u9F50\u3002
+   \u2461 \u4F2A\u6A2A\u5C4F\u671F\u95F4\u9501\u9875\u9762\u6EDA\u52A8\uFF08\u6B64\u65F6\u9875\u9762\u4ECD\u662F\u7AD6\u5C4F\u6587\u6863\u6D41\uFF0C\u80FD\u6EDA\u5C31\u4F1A\u628A\u753B\u9762\u5E26\u8DD1\uFF09\u3002 */
+#fntv-danmaku-canvas.fntv-dm-rotate{
+    transform: rotate(90deg) !important;
+    transform-origin: center center !important;
+}
+html.fntv-pseudo-rot,
+html.fntv-pseudo-rot body{
+    overflow:hidden !important;
+    overscroll-behavior:none !important;
+}
+
 /* \u2500\u2500 [lc-1290] \u624B\u673A\u7AD6\u5C4F\u5E95\u680F\u300C\u6324\u5728\u4E00\u8D77 + \u663E\u793A\u4E0D\u5168\u300D\u2500\u2500
    \u7528\u6237\u62A5\u969C\u539F\u6587\uFF1A\u300C\u5E95\u90E8\u7684\u63A7\u5236\u6309\u952E\u5168\u6324\u5728\u4E00\u8D77\u8FD8\u663E\u793A\u4E0D\u5B8C\u5168\u300D\u3002
    \u4E0A\u4E00\u6BB5\uFF08v1.4.1\uFF09\u53EA\u505A\u4E86\u300C\u70ED\u533A padding \u6491\u9AD8 + \u5B57\u53F7\u7F29\u5C0F\u300D\u2014\u2014\u90A3\u662F**\u7EB5\u5411**\u7684\uFF08\u628A\u70ED\u533A\u57AB\u9AD8\u5230
@@ -5652,7 +5771,7 @@ html.fnos-touch-narrow xg-right-grid .plugin-placeholder xg-icon{ width:20px !im
     el.textContent = css;
     (document.head || document.documentElement).appendChild(el);
     _controlsStyleInjected = true;
-    log7.info("[danmakuWeb] \u5E95\u680F\u5E03\u5C40/\u5B57\u53F7/\u65CB\u8F6C\u5168\u5C4F CSS \u5DF2\u6CE8\u5165\uFF08\u65E0\u6761\u4EF6\uFF0C\u4E0D\u4F9D\u8D56\u64AD\u653E\u9875\u5224\u5B9A\uFF09");
+    log8.info("[danmakuWeb] \u5E95\u680F\u5E03\u5C40/\u5B57\u53F7/\u65CB\u8F6C\u5168\u5C4F CSS \u5DF2\u6CE8\u5165\uFF08\u65E0\u6761\u4EF6\uFF0C\u4E0D\u4F9D\u8D56\u64AD\u653E\u9875\u5224\u5B9A\uFF09");
   }
   function injectPlayerHeaderStyle() {
     if (_headerStyleInjected) return;
@@ -5728,7 +5847,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
     (document.head || document.documentElement).appendChild(el);
     _headerStyleInjected = true;
     installMobileFlag();
-    log7.info("[danmakuWeb] \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\u7F8E\u5316 CSS \u5DF2\u6CE8\u5165");
+    log8.info("[danmakuWeb] \u64AD\u653E\u9875\u9876\u90E8\u6807\u9898\u680F\u7F8E\u5316 CSS \u5DF2\u6CE8\u5165");
   }
   function resetHeaderHideTimer() {
     if (!isPlayerPage()) return;
@@ -5745,7 +5864,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
     document.addEventListener("mousemove", resetHeaderHideTimer, { passive: true });
     document.addEventListener("touchstart", resetHeaderHideTimer, { passive: true });
     setTimeout(resetHeaderHideTimer, 600);
-    log7.info("[danmakuWeb] \u64AD\u653E\u9875\u6807\u9898\u680F\u81EA\u52A8\u9690\u85CF\u5DF2\u542F\u7528 (" + HEADER_HIDE_DELAY + "ms)");
+    log8.info("[danmakuWeb] \u64AD\u653E\u9875\u6807\u9898\u680F\u81EA\u52A8\u9690\u85CF\u5DF2\u542F\u7528 (" + HEADER_HIDE_DELAY + "ms)");
   }
   var _fsFixBound = false;
   function applyVideoFullscreenClass() {
@@ -5813,7 +5932,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
     const landscapeContent = !(cur.player.aspectRatio < 1);
     if (!env.isPortrait || !env.isTouch || !landscapeContent) return;
     if (document.querySelector(".xgplayer-rotate-fullscreen")) return;
-    log7.info("[danmakuWeb] \u539F\u751F\u5168\u5C4F\u540E\u4ECD\u4E3A\u7AD6\u5C4F \u2192 \u964D\u7EA7 rotateFullscreen \u4F2A\u6A2A\u5C4F");
+    log8.info("[danmakuWeb] \u539F\u751F\u5168\u5C4F\u540E\u4ECD\u4E3A\u7AD6\u5C4F \u2192 \u964D\u7EA7 rotateFullscreen \u4F2A\u6A2A\u5C4F");
     _fsForceRotate = true;
     applyFsCfg(cur.player, cur.fs, true);
     try {
@@ -5825,7 +5944,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
         if (cur.fs && typeof cur.fs.getRotateFullscreen === "function") cur.fs.getRotateFullscreen();
         else cur.player.getRotateFullscreen();
       } catch (e) {
-        log7.warn("[danmakuWeb] \u4F2A\u6A2A\u5C4F\u8FDB\u5165\u5931\u8D25:", (e == null ? void 0 : e.message) || e);
+        log8.warn("[danmakuWeb] \u4F2A\u6A2A\u5C4F\u8FDB\u5165\u5931\u8D25:", (e == null ? void 0 : e.message) || e);
       }
     }, 90);
   }
@@ -5835,11 +5954,20 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
     const cur = resolveXgPlayer();
     if (!cur) return;
     const env = fsEnv();
+    const contentLandscape = !(cur.player.aspectRatio < 1);
+    if (env.isTouch && env.isPortrait && contentLandscape) {
+      if (togglePseudoLandscape()) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+    }
+    if (isPseudoLandscape()) return;
     const rotate = env.isPortrait && (_fsForceRotate || env.inWebView || !env.nativeFsUsable);
     applyFsCfg(cur.player, cur.fs, rotate);
     if (rotate) {
       _fsForceRotate = true;
-      log7.info("[danmakuWeb] \u5168\u5C4F \u2192 rotateFullscreen \u4F2A\u6A2A\u5C4F\uFF08WebView / \u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528\uFF09");
+      log8.info("[danmakuWeb] \u5168\u5C4F \u2192 rotateFullscreen \u4F2A\u6A2A\u5C4F\uFF08WebView / \u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528\uFF09");
       return;
     }
     if (_fsHealTried) return;
@@ -5848,6 +5976,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
   }
   function enableLandscapeFullscreen() {
     if (_landscapeBound || !isPlayerPage()) return;
+    setPlayerResolver(resolveXgPlayer);
     _landscapeBound = true;
     const preApply = () => {
       const cur = resolveXgPlayer();
@@ -5860,7 +5989,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
       const env = fsEnv();
       const rotate = _fsForceRotate || env.inWebView && env.isPortrait;
       applyFsCfg(cur.player, cur.fs, rotate);
-      log7.info("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5DF2\u63A5\u7BA1\uFF08\u70B9\u51FB\u524D\u5224\u5B9A\uFF1A\u7AD6\u5C4F + " + (env.inWebView ? "WebView UA" : env.nativeFsUsable ? "\u6D4F\u89C8\u5668" : "\u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528") + " \u2192 " + (rotate ? "rotateFullscreen \u4F2A\u6A2A\u5C4F" : "useScreenOrientation \u771F\u8F6C\u5C4F") + "\uFF1B\u539F\u751F\u5931\u8D25 400ms \u540E\u81EA\u6108\u964D\u7EA7\uFF0C\u63D2\u4EF6\u5B9E\u4F8B=" + !!cur.fs + "\uFF09");
+      log8.info("[danmakuWeb] \u6A2A\u5C4F\u5168\u5C4F\u5DF2\u63A5\u7BA1\uFF08\u70B9\u51FB\u524D\u5224\u5B9A\uFF1A\u7AD6\u5C4F + " + (env.inWebView ? "WebView UA" : env.nativeFsUsable ? "\u6D4F\u89C8\u5668" : "\u539F\u751F\u5168\u5C4F\u4E0D\u53EF\u7528") + " \u2192 " + (rotate ? "rotateFullscreen \u4F2A\u6A2A\u5C4F" : "useScreenOrientation \u771F\u8F6C\u5C4F") + "\uFF1B\u539F\u751F\u5931\u8D25 400ms \u540E\u81EA\u6108\u964D\u7EA7\uFF0C\u63D2\u4EF6\u5B9E\u4F8B=" + !!cur.fs + "\uFF09");
       return true;
     };
     if (preApply()) return;
@@ -5898,7 +6027,7 @@ html.fnos-touch-narrow [class*="max-h-[690px]"]{ max-height:min(62vh, 690px) !im
     setTimeout(tryObservePlayerClass, 3e3);
     window.addEventListener("resize", update, { passive: true });
     applyVideoFullscreenClass();
-    log7.info("[danmakuWeb] \u64AD\u653E\u5668\u5168\u5C4F\u53BB\u5706\u89D2\u68C0\u6D4B\u5DF2\u542F\u7528 (MutationObserver+xgplayer-fullscreen)");
+    log8.info("[danmakuWeb] \u64AD\u653E\u5668\u5168\u5C4F\u53BB\u5706\u89D2\u68C0\u6D4B\u5DF2\u542F\u7528 (MutationObserver+xgplayer-fullscreen)");
   }
   var videoEl = null;
   var canvas = null;
@@ -6304,7 +6433,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     if (!dmBtnWrap) createControls();
     if (dmBtnWrap && dmBtnWrap.parentElement !== bar2) bar2.appendChild(dmBtnWrap);
     if (!controlsPlaced) {
-      log7.info("[danmakuWeb] \u5F39\u5E55\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
+      log8.info("[danmakuWeb] \u5F39\u5E55\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
       controlsPlaced = true;
       stopMountPoll();
     }
@@ -6558,7 +6687,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       localStorage.setItem(LS_BILI_KEY, v ? "1" : "0");
     } catch {
     }
-    log7.info("[danmakuWeb] B\u7AD9\u5F39\u5E55\u641C\u7D22\u5F00\u5173 \u2192 " + v);
+    log8.info("[danmakuWeb] B\u7AD9\u5F39\u5E55\u641C\u7D22\u5F00\u5173 \u2192 " + v);
     if (currentGuid && !inflight && items.length === 0) {
       loadedGuids.delete(currentGuid);
       void prepareAndLoad(currentGuid);
@@ -6599,7 +6728,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       return;
     }
     if (inflight) {
-      log7.info("[danmakuWeb] \u5DF2\u6709\u5F39\u5E55\u8BF7\u6C42\u5728\u9014\uFF0C\u8DF3\u8FC7\u91CD\u590D\u62C9\u53D6");
+      log8.info("[danmakuWeb] \u5DF2\u6709\u5F39\u5E55\u8BF7\u6C42\u5728\u9014\uFF0C\u8DF3\u8FC7\u91CD\u590D\u62C9\u53D6");
       return;
     }
     const cached2 = guidCache.get(guid);
@@ -6610,7 +6739,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       loadedGuids.add(guid);
       renderDirty = true;
       announceItems();
-      log7.info("[danmakuWeb] \u4F1A\u8BDD\u7F13\u5B58\u547D\u4E2D " + items.length + " \u6761 guid=" + guid);
+      log8.info("[danmakuWeb] \u4F1A\u8BDD\u7F13\u5B58\u547D\u4E2D " + items.length + " \u6761 guid=" + guid);
       if (enabled2) startRender();
       return;
     }
@@ -6624,7 +6753,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     try {
       const res = await ipcRenderer.invoke("danmaku:prepare", { guid, biliSearch });
       if (guid !== currentGuid || myEpoch !== dmClearEpoch) {
-        log7.info("[danmakuWeb] \u4E22\u5F03\u8FC7\u671F\u5F39\u5E55\u54CD\u5E94(\u5DF2\u5207\u96C6\u6216\u5DF2\u6E05\u9664) guid=" + guid);
+        log8.info("[danmakuWeb] \u4E22\u5F03\u8FC7\u671F\u5F39\u5E55\u54CD\u5E94(\u5DF2\u5207\u96C6\u6216\u5DF2\u6E05\u9664) guid=" + guid);
         return;
       }
       if (res && res.ok && Array.isArray(res.items) && res.items.length) {
@@ -6643,7 +6772,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
         guidCachePut(guid, { items, meta, maxScreen });
         renderDirty = true;
         announceItems();
-        log7.info(`[danmakuWeb] \u83B7\u53D6\u5F39\u5E55 ${items.length} \u6761 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
+        log8.info(`[danmakuWeb] \u83B7\u53D6\u5F39\u5E55 ${items.length} \u6761 title="${res.title}" ep=${res.ep} movie=${res.isMovie}`);
         if (enabled2) startRender();
       } else {
         meta = {
@@ -6656,11 +6785,11 @@ html.fnos-touch-narrow .fntv-dm-list.active{
           count: 0,
           error: (res == null ? void 0 : res.error) || "\u7A7A"
         };
-        log7.info("[danmakuWeb] \u65E0\u5F39\u5E55: " + ((res == null ? void 0 : res.error) || "\u7A7A"));
+        log8.info("[danmakuWeb] \u65E0\u5F39\u5E55: " + ((res == null ? void 0 : res.error) || "\u7A7A"));
         loadedGuids.add(guid);
       }
     } catch (e) {
-      log7.error("[danmakuWeb] \u83B7\u53D6\u5F39\u5E55\u5931\u8D25:", e);
+      log8.error("[danmakuWeb] \u83B7\u53D6\u5F39\u5E55\u5931\u8D25:", e);
     } finally {
       inflight = false;
       loading = false;
@@ -6690,7 +6819,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
       } catch {
       }
       if (guid === currentGuid && (inflight || items.length)) return;
-      log7.info("[danmakuWeb] play/info \u9884\u53D6\u5F39\u5E55 guid=" + guid);
+      log8.info("[danmakuWeb] play/info \u9884\u53D6\u5F39\u5E55 guid=" + guid);
       void prepareAndLoad(guid);
     };
     const origFetch = window.fetch;
@@ -6734,7 +6863,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
   function ensureAscending(arr) {
     for (let i = 1; i < arr.length; i++) {
       if (arr[i].time < arr[i - 1].time) {
-        log7.info("[danmakuWeb] items \u975E\u5347\u5E8F\uFF08\u4E3B\u8FDB\u7A0B\u4EA7\u7269\u53EF\u80FD\u504F\u65E7\uFF09\u2192 \u6E32\u67D3\u4FA7\u8865\u6392");
+        log8.info("[danmakuWeb] items \u975E\u5347\u5E8F\uFF08\u4E3B\u8FDB\u7A0B\u4EA7\u7269\u53EF\u80FD\u504F\u65E7\uFF09\u2192 \u6E32\u67D3\u4FA7\u8865\u6392");
         arr.sort((a, b) => a.time - b.time);
         break;
       }
@@ -7254,7 +7383,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
         renderDetailRows();
         announceItems();
         if (enabled2) startRender();
-        log7.info("[danmakuWeb] \u624B\u52A8\u9009\u5B9A\u5F39\u5E55: " + items.length + " \u6761 bvid=" + c.bvid);
+        log8.info("[danmakuWeb] \u624B\u52A8\u9009\u5B9A\u5F39\u5E55: " + items.length + " \u6761 bvid=" + c.bvid);
       } else {
         const err = res && res.error || t("\u9009\u5B9A\u5931\u8D25");
         if (meta) meta.error = err;
@@ -7314,7 +7443,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
         row2.textContent = t("\u6E05\u9664\u5F39\u5E55");
         row2.classList.remove("fntv-dm-clear-done");
       }, 2200);
-      log7.info("[danmakuWeb] \u5DF2\u6E05\u9664\u5F39\u5E55\uFF08\u5185\u5B58\u5C55\u793A + \u78C1\u76D8\u7F13\u5B58\uFF09");
+      log8.info("[danmakuWeb] \u5DF2\u6E05\u9664\u5F39\u5E55\uFF08\u5185\u5B58\u5C55\u793A + \u78C1\u76D8\u7F13\u5B58\uFF09");
     } finally {
       dmClearBusy = false;
     }
@@ -7639,6 +7768,7 @@ html.fnos-touch-narrow .fntv-dm-list.active{
     }, MOUNT_POLL_MS);
   }
   function leavePlayer() {
+    cleanupPseudoLandscape();
     stopRender();
     if (canvas) {
       if (canvasHost !== null && canvas.parentElement !== document.body) {
@@ -8392,7 +8522,7 @@ html.fnos-perf.dark{
     } catch (e) {
     }
   }
-  function log8(...a) {
+  function log9(...a) {
     if (!getLogEnabled()) return;
     emitLog(LOG_TAG + " " + a.join(" "));
   }
@@ -8442,13 +8572,13 @@ html.fnos-perf.dark{
     const isStrm = !!(opts == null ? void 0 : opts.isStrm);
     const timeoutMs = (_a = opts == null ? void 0 : opts.timeoutMs) != null ? _a : isStrm ? 8e3 : 15e3;
     if (!fullUrl) {
-      if (isStrm) log8("[DIAG] fetchImg \u8DF3\u8FC7(\u7A7AURL) label=", label, "isStrm=true");
+      if (isStrm) log9("[DIAG] fetchImg \u8DF3\u8FC7(\u7A7AURL) label=", label, "isStrm=true");
       return null;
     }
     return imgGate(async () => {
       const first = await fetchImageOnce(fullUrl, timeoutMs, label, isStrm);
       if (first || !isStrm) return first;
-      log8("[DIAG] fetchImg STRm \u9996\u6B21\u5931\u8D25, \u91CD\u8BD5 1 \u6B21 label=", label);
+      log9("[DIAG] fetchImg STRm \u9996\u6B21\u5931\u8D25, \u91CD\u8BD5 1 \u6B21 label=", label);
       return await fetchImageOnce(fullUrl, Math.min(timeoutMs, 6e3), label, isStrm);
     });
   }
@@ -8467,10 +8597,10 @@ html.fnos-perf.dark{
       const ct = resp.headers.get("content-type") || "";
       const ms = Date.now() - t0;
       if (!resp.ok || !ct.startsWith("image/")) {
-        log8("[DIAG] fetchImg \u5931\u8D25", label, "status", resp.status, "ct", ct.substring(0, 24), "isStrm", isStrm, "ms", ms, "path", path.substring(0, 50));
+        log9("[DIAG] fetchImg \u5931\u8D25", label, "status", resp.status, "ct", ct.substring(0, 24), "isStrm", isStrm, "ms", ms, "path", path.substring(0, 50));
         try {
           const t2 = await resp.text();
-          log8("[DIAG] fetchImg \u975E\u56FE\u7247/\u5931\u8D25 body:", t2.substring(0, 120));
+          log9("[DIAG] fetchImg \u975E\u56FE\u7247/\u5931\u8D25 body:", t2.substring(0, 120));
         } catch (e) {
         }
         return null;
@@ -8479,8 +8609,8 @@ html.fnos-perf.dark{
       return URL.createObjectURL(blob);
     } catch (e) {
       const ms = Date.now() - t0;
-      if (e && e.name === "AbortError") log8("[DIAG] fetchImg \u8D85\u65F6(\u88AB abort) label=", label, "isStrm", isStrm, "timeoutMs", timeoutMs, "ms", ms);
-      else log8("[DIAG]  fetchImg err", label, "isStrm", isStrm, "ms", ms, String(e).substring(0, 120));
+      if (e && e.name === "AbortError") log9("[DIAG] fetchImg \u8D85\u65F6(\u88AB abort) label=", label, "isStrm", isStrm, "timeoutMs", timeoutMs, "ms", ms);
+      else log9("[DIAG]  fetchImg err", label, "isStrm", isStrm, "ms", ms, String(e).substring(0, 120));
       return null;
     } finally {
       clearTimeout(to);
@@ -8640,7 +8770,7 @@ html.fnos-perf.dark{
       const json = await resp.json();
       return mapItemDetail(json, id, base);
     } catch (e) {
-      log8("[lc-569] item detail fetch error:", String(e && e.message || e).substring(0, 120));
+      log9("[lc-569] item detail fetch error:", String(e && e.message || e).substring(0, 120));
       return null;
     }
   }
@@ -8665,7 +8795,7 @@ html.fnos-perf.dark{
   function mapItemDetail(json, id, base) {
     const d = json && json.data || {};
     const strmTag = detectStrmOrCloud(d);
-    if (strmTag) log8("[DIAG] item", id, "\u7591\u4F3C\u6765\u6E90:", strmTag, "| \u5019\u9009\u8DEF\u5F84=", String(d.path || d.file_path || "").substring(0, 90));
+    if (strmTag) log9("[DIAG] item", id, "\u7591\u4F3C\u6765\u6E90:", strmTag, "| \u5019\u9009\u8DEF\u5F84=", String(d.path || d.file_path || "").substring(0, 90));
     const pickImg2 = (v, preferLargest = false) => {
       let s = "";
       const extract2 = (it) => {
@@ -8722,7 +8852,7 @@ html.fnos-perf.dark{
     const g = d.genres || d.genre || d.types || d.categories || d.tags;
     if (Array.isArray(g)) genres = g.map((x) => typeof x === "string" ? x : (x == null ? void 0 : x.name) || (x == null ? void 0 : x.Name) || (x == null ? void 0 : x.title) || "").filter(Boolean);
     else if (typeof g === "string" && g.trim()) genres = g.split(/[,，/、|]/).map((s) => s.trim()).filter(Boolean);
-    log8("[lc-572] item genres:", JSON.stringify(genres), "(raw=", String(JSON.stringify(g) || "undefined").substring(0, 100), ")");
+    log9("[lc-572] item genres:", JSON.stringify(genres), "(raw=", String(JSON.stringify(g) || "undefined").substring(0, 100), ")");
     return {
       backdrop,
       poster,
@@ -10082,13 +10212,13 @@ html.fnos-perf.dark{
       const r = await ipcRenderer2.invoke("media:season-guid", id);
       if (r && r.ok && r.guid) {
         const href = "/v/" + kind + "/season/" + r.guid;
-        log8("[lc-772] More -> \u4E09\u7EA7\u5B63\u9875", href);
+        log9("[lc-772] More -> \u4E09\u7EA7\u5B63\u9875", href);
         _seasonHrefCache.set(id, href);
         return href;
       }
-      log8("[lc-772] More -> \u65E0\u5B63\u5B50\u7EA7, \u56DE\u9000\u4E8C\u7EA7", fallback, r && r.error ? r.error : "");
+      log9("[lc-772] More -> \u65E0\u5B63\u5B50\u7EA7, \u56DE\u9000\u4E8C\u7EA7", fallback, r && r.error ? r.error : "");
     } catch (e) {
-      log8("[lc-772] More -> \u53D6\u5B63\u5931\u8D25, \u56DE\u9000\u4E8C\u7EA7", String(e).substring(0, 90));
+      log9("[lc-772] More -> \u53D6\u5B63\u5931\u8D25, \u56DE\u9000\u4E8C\u7EA7", String(e).substring(0, 90));
     }
     _seasonHrefCache.set(id, fallback);
     return fallback;
@@ -10096,7 +10226,7 @@ html.fnos-perf.dark{
 
   // src/preload/plugins/embyWall/carousel/styles.ts
   function buildCarouselStyle2(container, wrapper, shows, base, rebuild) {
-    const log22 = (...a) => log8("[s2]", ...a);
+    const log22 = (...a) => log9("[s2]", ...a);
     const imgUrl = (p, w) => {
       if (!p) return "";
       if (p.startsWith("http") || p.startsWith("/v/api/")) return p + (w ? "?w=" + w : "");
@@ -10469,7 +10599,7 @@ html.fnos-perf.dark{
     log22("\u6837\u5F0F2 \u8F6E\u64AD\u6CE8\u5165\u5B8C\u6210, slides=", slides.length);
   }
   function buildCarouselStyle3(container, wrapper, shows, base, rebuild) {
-    const log32 = (...a) => log8("[s3]", ...a);
+    const log32 = (...a) => log9("[s3]", ...a);
     const imgUrl = (p, w) => {
       if (!p) return "";
       if (p.startsWith("http") || p.startsWith("/v/api/")) return p + (w ? "?w=" + w : "");
@@ -10860,7 +10990,7 @@ html.fnos-perf.dark{
     (document.head || document.documentElement).appendChild(st);
   }
   function buildCarouselStyle4(container, wrapper, shows, base, rebuild) {
-    const log42 = (...a) => log8("[s4]", ...a);
+    const log42 = (...a) => log9("[s4]", ...a);
     const imgUrl = (p, w) => {
       if (!p) return "";
       if (p.startsWith("http") || p.startsWith("/v/api/")) return p + (w ? "?w=" + w : "");
@@ -11680,7 +11810,7 @@ html.fnos-perf.dark{
           });
           const json = await resp.json();
           const desc = (((_a = json == null ? void 0 : json.data) == null ? void 0 : _a.overview) || ((_b = json == null ? void 0 : json.data) == null ? void 0 : _b.tv_overview) || ((_c = json == null ? void 0 : json.data) == null ? void 0 : _c.parent_overview) || "").trim();
-          log8("desc API:", show.title, desc ? "OK(" + desc.length + ")" : "FAIL", "code=" + (json == null ? void 0 : json.code));
+          log9("desc API:", show.title, desc ? "OK(" + desc.length + ")" : "FAIL", "code=" + (json == null ? void 0 : json.code));
           if (!desc) return;
           show.desc = desc;
           const info = infos[i];
@@ -11697,7 +11827,7 @@ html.fnos-perf.dark{
             info.insertBefore(d, btn);
           }
         } catch (e) {
-          log8("desc error:", show.title, e);
+          log9("desc error:", show.title, e);
         }
       }, i * 800);
     });
@@ -11733,7 +11863,7 @@ html.fnos-perf.dark{
       if (Array.isArray(arr) && arr.length) {
         const withBlob = arr.filter((s) => s && s._backdropBlob).length;
         if (withBlob === 0) {
-          log8("[lc-1280] \u5FEB\u7167\u65E0\u53EF\u7528\u6D77\u62A5 blob\uFF0C\u4E22\u5F03\u5E76\u91CD\u65B0\u62C9\u53D6:", arr.length, "\u9879");
+          log9("[lc-1280] \u5FEB\u7167\u65E0\u53EF\u7528\u6D77\u62A5 blob\uFF0C\u4E22\u5F03\u5E76\u91CD\u65B0\u62C9\u53D6:", arr.length, "\u9879");
           try {
             sessionStorage.removeItem(SHOWS_CACHE_KEY);
           } catch (_) {
@@ -11743,7 +11873,7 @@ html.fnos-perf.dark{
         S.apiShows.length = 0;
         Array.prototype.push.apply(S.apiShows, arr);
         S.carouselLoadedButNone = false;
-        log8("[lc-950] \u4ECE sessionStorage \u6062\u590D\u8F6E\u64AD\u7F13\u5B58", arr.length, "\u9879(\u542B\u6A2A\u7248\u6D77\u62A5 data URL + \u7B80\u4ECB)");
+        log9("[lc-950] \u4ECE sessionStorage \u6062\u590D\u8F6E\u64AD\u7F13\u5B58", arr.length, "\u9879(\u542B\u6A2A\u7248\u6D77\u62A5 data URL + \u7B80\u4ECB)");
       }
     } catch (_) {
     }
@@ -11834,15 +11964,15 @@ html.fnos-perf.dark{
       return t2.replace(/\s+/g, " ").trim();
     };
     try {
-      log8("[lc-564] waiting for library index (retry loop, max", timeoutMs, "ms)...");
+      log9("[lc-564] waiting for library index (retry loop, max", timeoutMs, "ms)...");
       const libIndex = await waitLibIndex(timeoutMs);
-      log8("[lc-564] library index ready:", libIndex.length, "items");
+      log9("[lc-564] library index ready:", libIndex.length, "items");
       const liveCards = scrapeVisibleCards();
       const posterById = /* @__PURE__ */ new Map();
       for (const c of liveCards) {
         if (c && c.id && c.poster) posterById.set(c.id, c.poster);
       }
-      log8("[lc-565] live-page posters by id:", posterById.size, "available (for poster merge)");
+      log9("[lc-565] live-page posters by id:", posterById.size, "available (for poster merge)");
       const cards = [];
       const seen = /* @__PURE__ */ new Set();
       for (let i = 0; i < libIndex.length && cards.length < CAROUSEL_SCRAPE_CAP; i++) {
@@ -11877,10 +12007,10 @@ html.fnos-perf.dark{
         } catch (e) {
         }
       }
-      log8("[lc-565] all-page first-screen scrape done:", cards.length, "cards; order:", cards.map((c) => c.title.substring(0, 8)).join(" \u2192 "));
+      log9("[lc-565] all-page first-screen scrape done:", cards.length, "cards; order:", cards.map((c) => c.title.substring(0, 8)).join(" \u2192 "));
       return cards;
     } catch (e) {
-      log8("[lc-564] ensureLibraryIndex error:", e);
+      log9("[lc-564] ensureLibraryIndex error:", e);
       return [];
     }
   }
@@ -11914,12 +12044,12 @@ html.fnos-perf.dark{
         clog("[lc-1083] item/list \u8FD4\u56DE 0, \u515C\u5E951: scraping /v/list/all first screen...");
         newShows = await scrapeAllPageFirstScreen(18e3, (n) => updateCarouselProgress(n));
         S.diagLastShows = newShows;
-        log8("[lc-561] all-page scrape returned", newShows.length, "cards");
+        log9("[lc-561] all-page scrape returned", newShows.length, "cards");
       }
       if (newShows.length === 0) {
-        log8("[lc-561] all-page scrape 0 cards, fallback: scrape current page live DOM");
+        log9("[lc-561] all-page scrape 0 cards, fallback: scrape current page live DOM");
         newShows = scrapeVisibleCards().slice(0, 10);
-        log8("[lc-561] live-DOM fallback got", newShows.length, "cards");
+        log9("[lc-561] live-DOM fallback got", newShows.length, "cards");
         if (newShows.length > 0) updateCarouselProgress(newShows.length);
       }
       clog("[lc-561] selected", newShows.length, "carousel items, order:", newShows.map((s) => {
@@ -11932,9 +12062,9 @@ html.fnos-perf.dark{
         S.apiLoaded = true;
         S.carouselInited = false;
         S.carouselLoadedButNone = false;
-        log8("[lc-569] fetching item details for", newShows.length, "items (live-DOM landscape + API)...");
+        log9("[lc-569] fetching item details for", newShows.length, "items (live-DOM landscape + API)...");
         const domLand = scrapeLandscapeBackdrops();
-        log8("[lc-569] live landscape backdrops by id:", domLand.size, "available");
+        log9("[lc-569] live landscape backdrops by id:", domLand.size, "available");
         const detailsPromise = Promise.all(newShows.map(async (s) => {
           const fromDom = domLand.get(s.id);
           if (fromDom) s.backdrop = fromDom;
@@ -11961,7 +12091,7 @@ html.fnos-perf.dark{
             s._backdropBlob = blob;
             return true;
           }
-          log8("[lc-768] \u8DF3\u8FC7\u65E0\u6CD5\u52A0\u8F7D\u6D77\u62A5\u7684\u9879(\u7591\u4F3C STR/\u7F51\u76D8):", (s.title || "").substring(0, 16), s.strmTag || "");
+          log9("[lc-768] \u8DF3\u8FC7\u65E0\u6CD5\u52A0\u8F7D\u6D77\u62A5\u7684\u9879(\u7591\u4F3C STR/\u7F51\u76D8):", (s.title || "").substring(0, 16), s.strmTag || "");
           return !!fromDom;
         }));
         const isLandscapeBackdrop = (s) => {
@@ -11972,7 +12102,7 @@ html.fnos-perf.dark{
         let revealAttempts = 0;
         const revealOnce = () => {
           if (S.carouselRevealed) {
-            log8("[lc-622] carousel already revealed, skip re-render");
+            log9("[lc-622] carousel already revealed, skip re-render");
             return;
           }
           const landscapeCount = newShows.filter(isLandscapeBackdrop).length;
@@ -12035,7 +12165,7 @@ html.fnos-perf.dark{
           }, "details-ready");
         }).catch((e) => {
           clearTimeout(revealTimer);
-          log8("[lc-569] item detail fetch error:", e);
+          log9("[lc-569] item detail fetch error:", e);
           completeCarouselProgress(() => {
             revealOnce();
             revealGuard();
@@ -12133,13 +12263,13 @@ html.fnos-perf.dark{
         if (whiteFallback) return whiteFallback;
         const fa = await fetchFanartLogoDataUrl(show.mediaType === "movie" ? "movie" : "tv", show.tmdbId);
         if (fa) {
-          log8("fanart logo applied:", show.title);
+          log9("fanart logo applied:", show.title);
           return fa;
         }
       }
       return null;
     } catch (e) {
-      log8("resolveShowLogo err:", show && show.title || "", e);
+      log9("resolveShowLogo err:", show && show.title || "", e);
       return null;
     }
   }
@@ -12155,10 +12285,10 @@ html.fnos-perf.dark{
             const b = await fetchImageAuth(full);
             if (b) {
               swapTitleToLogo(info, b);
-              log8("fnOS logo applied:", show.title);
-            } else log8("fnOS logo fetch fail:", show.title);
+              log9("fnOS logo applied:", show.title);
+            } else log9("fnOS logo fetch fail:", show.title);
           } catch (e) {
-            log8("local logo err:", show.title, e);
+            log9("local logo err:", show.title, e);
           }
         }, i * 600);
       } else if (show.tmdbId || show.title) {
@@ -12170,7 +12300,7 @@ html.fnos-perf.dark{
             else logoArg.title = show.title;
             const r = await ipcRenderer2.invoke("tmdb:logo", logoArg);
             if (!r || !r.ok) {
-              log8("tmdb logo none:", show.title, r && r.error || "\u65E0 logo");
+              log9("tmdb logo none:", show.title, r && r.error || "\u65E0 logo");
               return;
             }
             const paths = r.logoPaths && r.logoPaths.length ? r.logoPaths : r.logoPath ? [r.logoPath] : [];
@@ -12182,23 +12312,23 @@ html.fnos-perf.dark{
                 if (!img || !img.ok || !img.dataUrl) continue;
                 if (await isPureWhitePng(img.dataUrl)) {
                   if (!whiteFallback) whiteFallback = img.dataUrl;
-                  log8("tmdb logo \u7EAF\u767D\u5019\u9009(\u7559\u4F5C\u515C\u5E95):", show.title, p);
+                  log9("tmdb logo \u7EAF\u767D\u5019\u9009(\u7559\u4F5C\u515C\u5E95):", show.title, p);
                   continue;
                 }
                 show.tmdbLogo = img.dataUrl;
                 swapTitleToLogo(info, img.dataUrl);
                 persistShows();
-                log8("tmdb logo applied:", show.title);
+                log9("tmdb logo applied:", show.title);
                 return;
               } catch (e) {
-                log8("tmdb logo candidate err:", show.title, e);
+                log9("tmdb logo candidate err:", show.title, e);
               }
             }
             if (whiteFallback) {
               show.tmdbLogo = whiteFallback;
               swapTitleToLogo(info, whiteFallback);
               persistShows();
-              log8("tmdb logo applied(\u7EAF\u767D\u515C\u5E95):", show.title);
+              log9("tmdb logo applied(\u7EAF\u767D\u515C\u5E95):", show.title);
               return;
             }
             const fa = await fetchFanartLogoDataUrl(show.mediaType === "movie" ? "movie" : "tv", show.tmdbId);
@@ -12206,12 +12336,12 @@ html.fnos-perf.dark{
               show.tmdbLogo = fa;
               swapTitleToLogo(info, fa);
               persistShows();
-              log8("fanart logo applied:", show.title);
+              log9("fanart logo applied:", show.title);
               return;
             }
-            log8("tmdb logo \u5168\u90E8\u5019\u9009\u4E0D\u53EF\u7528:", show.title);
+            log9("tmdb logo \u5168\u90E8\u5019\u9009\u4E0D\u53EF\u7528:", show.title);
           } catch (e) {
-            log8("tmdb logo err:", show.title, e);
+            log9("tmdb logo err:", show.title, e);
           }
         }, i * 600);
       } else if (show.logo) {
@@ -12221,7 +12351,7 @@ html.fnos-perf.dark{
             const b = await fetchImageAuth(full);
             if (b) swapTitleToLogo(info, b);
           } catch (e) {
-            log8("local logo err:", show.title, e);
+            log9("local logo err:", show.title, e);
           }
         }, i * 600);
       }
@@ -12259,17 +12389,17 @@ html.fnos-perf.dark{
         body: fd
       });
       if (!resp.ok) {
-        log8("[\u56DE\u586B] upload HTTP", resp.status);
+        log9("[\u56DE\u586B] upload HTTP", resp.status);
         return null;
       }
       const j = await resp.json().catch(() => null);
       if (!j || j.code !== 0 || !((_a = j.data) == null ? void 0 : _a.hash_path)) {
-        log8("[\u56DE\u586B] upload \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
+        log9("[\u56DE\u586B] upload \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
         return null;
       }
       return j.data.hash_path;
     } catch (e) {
-      log8("[\u56DE\u586B] upload \u5F02\u5E38", String(e).substring(0, 120));
+      log9("[\u56DE\u586B] upload \u5F02\u5E38", String(e).substring(0, 120));
       return null;
     }
   }
@@ -12285,17 +12415,17 @@ html.fnos-perf.dark{
         body: JSON.stringify(body)
       });
       if (!resp.ok) {
-        log8("[\u56DE\u586B] getEditDetail HTTP", resp.status, guid);
+        log9("[\u56DE\u586B] getEditDetail HTTP", resp.status, guid);
         return null;
       }
       const j = await resp.json().catch(() => null);
       if (!j || j.code !== 0) {
-        log8("[\u56DE\u586B] getEditDetail \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
+        log9("[\u56DE\u586B] getEditDetail \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
         return null;
       }
       return j.data || null;
     } catch (e) {
-      log8("[\u56DE\u586B] getEditDetail \u5F02\u5E38", String(e).substring(0, 120));
+      log9("[\u56DE\u586B] getEditDetail \u5F02\u5E38", String(e).substring(0, 120));
       return null;
     }
   }
@@ -12316,17 +12446,17 @@ html.fnos-perf.dark{
         body: fd
       });
       if (!resp.ok) {
-        log8("[\u56DE\u586B] upload HTTP", resp.status);
+        log9("[\u56DE\u586B] upload HTTP", resp.status);
         return null;
       }
       const j = await resp.json().catch(() => null);
       if (!j || j.code !== 0 || !((_a = j.data) == null ? void 0 : _a.hash_path)) {
-        log8("[\u56DE\u586B] upload \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
+        log9("[\u56DE\u586B] upload \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
         return null;
       }
       return j.data.hash_path;
     } catch (e) {
-      log8("[\u56DE\u586B] upload \u5F02\u5E38", String(e).substring(0, 120));
+      log9("[\u56DE\u586B] upload \u5F02\u5E38", String(e).substring(0, 120));
       return null;
     }
   }
@@ -12342,17 +12472,17 @@ html.fnos-perf.dark{
         body: JSON.stringify(body)
       });
       if (!resp.ok) {
-        log8("[\u56DE\u586B] saveEditDetail HTTP", resp.status);
+        log9("[\u56DE\u586B] saveEditDetail HTTP", resp.status);
         return false;
       }
       const j = await resp.json().catch(() => null);
       if (!j || j.code !== 0) {
-        log8("[\u56DE\u586B] saveEditDetail \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
+        log9("[\u56DE\u586B] saveEditDetail \u4E1A\u52A1\u5931\u8D25", JSON.stringify(j).substring(0, 200));
         return false;
       }
       return true;
     } catch (e) {
-      log8("[\u56DE\u586B] saveEditDetail \u5F02\u5E38", String(e).substring(0, 120));
+      log9("[\u56DE\u586B] saveEditDetail \u5F02\u5E38", String(e).substring(0, 120));
       return false;
     }
   }
@@ -12372,13 +12502,13 @@ html.fnos-perf.dark{
         const data = await fnosGetEditDetail(origin, guid);
         if (!data) return;
         if (data.logos && String(data.logos).trim()) {
-          log8("[\u56DE\u586B] \u5DF2\u6709 logo, \u8DF3\u8FC7", guid, String(data.logos).substring(0, 80));
+          log9("[\u56DE\u586B] \u5DF2\u6709 logo, \u8DF3\u8FC7", guid, String(data.logos).substring(0, 80));
           return;
         }
         const tmdbId = extractTmdbId(data);
         const title = (data.title || "").trim();
         if (!tmdbId && !title) {
-          log8("[\u56DE\u586B] \u65E0 tmdbId \u4E14\u65E0\u6807\u9898, \u8DF3\u8FC7", guid);
+          log9("[\u56DE\u586B] \u65E0 tmdbId \u4E14\u65E0\u6807\u9898, \u8DF3\u8FC7", guid);
           return;
         }
         const logoArg = { mediaType };
@@ -12386,7 +12516,7 @@ html.fnos-perf.dark{
         else logoArg.title = title;
         const r = await ipcRenderer2.invoke("tmdb:logo", logoArg);
         if (!r || !r.ok) {
-          log8("[\u56DE\u586B] TMDB \u65E0 logo", tmdbId || title);
+          log9("[\u56DE\u586B] TMDB \u65E0 logo", tmdbId || title);
           return;
         }
         const paths = r.logoPaths && r.logoPaths.length ? r.logoPaths : r.logoPath ? [r.logoPath] : [];
@@ -12396,22 +12526,22 @@ html.fnos-perf.dark{
             const img = await ipcRenderer2.invoke("tmdb:image", url);
             if (!img || !img.ok || !img.dataUrl) continue;
             if (await isPureWhitePng(img.dataUrl)) {
-              log8("[\u56DE\u586B] \u7EAF\u767D\u8DF3\u8FC7", p);
+              log9("[\u56DE\u586B] \u7EAF\u767D\u8DF3\u8FC7", p);
               continue;
             }
             const hashPath = await uploadLogoToFnos(origin, img.dataUrl);
             if (!hashPath) {
-              log8("[\u56DE\u586B] \u4E0A\u4F20\u5931\u8D25", p);
+              log9("[\u56DE\u586B] \u4E0A\u4F20\u5931\u8D25", p);
               continue;
             }
             const saved = await saveEditDetail(origin, data, hashPath);
             if (saved) {
-              log8("[\u56DE\u586B] \u2705 \u5DF2\u5199\u56DE logo \u2192 guid=" + guid + " path=" + hashPath);
+              log9("[\u56DE\u586B] \u2705 \u5DF2\u5199\u56DE logo \u2192 guid=" + guid + " path=" + hashPath);
               return;
             }
-            log8("[\u56DE\u586B] \u4FDD\u5B58\u5931\u8D25", p);
+            log9("[\u56DE\u586B] \u4FDD\u5B58\u5931\u8D25", p);
           } catch (e) {
-            log8("[\u56DE\u586B] \u5019\u9009\u5931\u8D25", p, String(e).substring(0, 80));
+            log9("[\u56DE\u586B] \u5019\u9009\u5931\u8D25", p, String(e).substring(0, 80));
           }
         }
         if (tmdbId) {
@@ -12421,16 +12551,16 @@ html.fnos-perf.dark{
             if (hashPath) {
               const saved = await saveEditDetail(origin, data, hashPath);
               if (saved) {
-                log8("[\u56DE\u586B] \u2705 \u5DF2\u5199\u56DE logo(Fanart.tv) \u2192 guid=" + guid + " path=" + hashPath);
+                log9("[\u56DE\u586B] \u2705 \u5DF2\u5199\u56DE logo(Fanart.tv) \u2192 guid=" + guid + " path=" + hashPath);
                 return;
               }
-              log8("[\u56DE\u586B] \u4FDD\u5B58\u5931\u8D25(Fanart.tv \u5019\u9009)");
+              log9("[\u56DE\u586B] \u4FDD\u5B58\u5931\u8D25(Fanart.tv \u5019\u9009)");
             }
           }
         }
-        log8("[\u56DE\u586B] \u65E0\u53EF\u7528 logo", guid);
+        log9("[\u56DE\u586B] \u65E0\u53EF\u7528 logo", guid);
       } catch (e) {
-        log8("[\u56DE\u586B] err", String(e).substring(0, 120));
+        log9("[\u56DE\u586B] err", String(e).substring(0, 120));
       }
     }, 800);
   }
@@ -12639,7 +12769,7 @@ html.fnos-perf.dark{
     (document.head || document.documentElement).appendChild(st);
   }
   function buildCarouselStyle5(container, wrapper, shows, base, rebuild) {
-    const log52 = (...a) => log8("[s5]", ...a);
+    const log52 = (...a) => log9("[s5]", ...a);
     ensureStyle5Css();
     wrapper.dataset.fntvCarouselWrapper = "1";
     wrapper.style.cssText = "display:block;padding:0;margin:0";
@@ -12902,7 +13032,7 @@ html.fnos-perf.dark{
       try {
         S.carouselResume();
       } catch (e) {
-        log8("[lc-946] resumeCarousel error: " + String(e).substring(0, 80));
+        log9("[lc-946] resumeCarousel error: " + String(e).substring(0, 80));
       }
     }
   }
@@ -12938,7 +13068,7 @@ html.fnos-perf.dark{
   }
   function injectCarousel() {
     var _a, _b;
-    log8("injectCarousel called, S.carouselInited=", S.carouselInited, "S.apiShows.length=", S.apiShows.length);
+    log9("injectCarousel called, S.carouselInited=", S.carouselInited, "S.apiShows.length=", S.apiShows.length);
     if (S.carouselInited) return;
     destroyCarousel();
     const p = pagePath();
@@ -12953,23 +13083,23 @@ html.fnos-perf.dark{
     if (S.carouselWrapper && document.body.contains(S.carouselWrapper)) {
       target = S.carouselWrapper.parentElement;
       rebuild = true;
-      log8("rebuild: reusing section(parent of existing wrapper)");
+      log9("rebuild: reusing section(parent of existing wrapper)");
     } else {
       target = findMediaLibrarySection();
-      if (target) log8("media-library section found via robust search");
+      if (target) log9("media-library section found via robust search");
     }
     if (rebuild && (!target || !document.contains(target))) {
-      log8("rebuild section detached, fallback to DOM search");
+      log9("rebuild section detached, fallback to DOM search");
       target = findMediaLibrarySection();
       rebuild = false;
-      if (target) log8("media-library section found via robust search (fallback)");
+      if (target) log9("media-library section found via robust search (fallback)");
     }
     if (!target) {
-      log8("no target");
+      log9("no target");
       return;
     }
     const skeletonEl = S.carouselWrapper && S.carouselWrapper.querySelector("[data-fntv-skeleton]") || document.querySelector("[data-fntv-skeleton]");
-    log8("target found on", location.href, rebuild ? "(rebuild)" : "(first)");
+    log9("target found on", location.href, rebuild ? "(rebuild)" : "(first)");
     if (!document.getElementById("fnos-hero-action-style")) {
       const actSt = document.createElement("style");
       actSt.id = "fnos-hero-action-style";
@@ -13030,14 +13160,14 @@ html.fnos-perf.dark{
     if (S.apiShows.length === 0) {
       if (S.carouselLoadedButNone) {
         if (!S.placeholderInited) {
-          log8("all candidates unloadable(STR/\u7F51\u76D8), showing \u6682\u672A\u652F\u6301STRM\u6D77\u62A5 tip");
+          log9("all candidates unloadable(STR/\u7F51\u76D8), showing \u6682\u672A\u652F\u6301STRM\u6D77\u62A5 tip");
           buildStrmUnsupportedTip(target);
           S.placeholderInited = true;
         }
         return;
       }
       if (!S.placeholderInited) {
-        log8("api not ready, building loading skeleton with progress count");
+        log9("api not ready, building loading skeleton with progress count");
         buildLoadingPlaceholder(target);
         S.placeholderInited = true;
       }
@@ -13047,9 +13177,9 @@ html.fnos-perf.dark{
     S.carouselProgressEl = null;
     S.carouselInited = true;
     S.carouselUpdatedAt = Date.now();
-    log8("carousel data ready at", new Date(S.carouselUpdatedAt).toLocaleString("zh-CN"));
+    log9("carousel data ready at", new Date(S.carouselUpdatedAt).toLocaleString("zh-CN"));
     const shows = S.apiShows;
-    log8("injecting", shows.length, "shows (api:", S.apiShows.length, ")");
+    log9("injecting", shows.length, "shows (api:", S.apiShows.length, ")");
     const base = location.origin;
     let currentIdx = 0;
     const infos = [];
@@ -13196,7 +13326,7 @@ html.fnos-perf.dark{
       leftEl.appendChild(imgEl);
       const pic = imgUrl(show.backdrop);
       const blob = show._backdropBlob;
-      if (shows === S.apiShows && i === 0) log8("SLIDE0 src:", (blob || pic).substring(0, 80));
+      if (shows === S.apiShows && i === 0) log9("SLIDE0 src:", (blob || pic).substring(0, 80));
       const isSlideStrm = !!show.strmTag;
       const applyLandscapeCheck = () => {
         try {
@@ -13211,7 +13341,7 @@ html.fnos-perf.dark{
       };
       if (blob) {
         imgEl.onerror = () => {
-          log8("[DIAG] \u8F6E\u64AD\u4E3B\u56FE(blob\u7F13\u5B58)\u52A0\u8F7D\u5931\u8D25:", (show.title || "").substring(0, 16));
+          log9("[DIAG] \u8F6E\u64AD\u4E3B\u56FE(blob\u7F13\u5B58)\u52A0\u8F7D\u5931\u8D25:", (show.title || "").substring(0, 16));
         };
         imgEl.onload = applyLandscapeCheck;
         imgEl.src = blob;
@@ -13222,11 +13352,11 @@ html.fnos-perf.dark{
       } else if (!show._backdropIsPortrait) {
         fetchImageAuth(pic, { label: "slide#" + i + ":" + (show.title || "").substring(0, 10), isStrm: isSlideStrm }).then((b) => {
           if (!b) {
-            if (isSlideStrm) log8("[DIAG] \u8F6E\u64AD\u4E3B\u56FE fetchImageAuth \u8FD4\u56DE\u7A7A(STRM item \u6D77\u62A5\u52A0\u8F7D\u5931\u8D25):", (show.title || "").substring(0, 16), pic.substring(0, 60));
+            if (isSlideStrm) log9("[DIAG] \u8F6E\u64AD\u4E3B\u56FE fetchImageAuth \u8FD4\u56DE\u7A7A(STRM item \u6D77\u62A5\u52A0\u8F7D\u5931\u8D25):", (show.title || "").substring(0, 16), pic.substring(0, 60));
             return;
           }
           imgEl.onerror = () => {
-            log8("[DIAG] \u8F6E\u64AD\u4E3B\u56FE\u52A0\u8F7D\u5931\u8D25(img.onerror):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag || "-", pic.substring(0, 60));
+            log9("[DIAG] \u8F6E\u64AD\u4E3B\u56FE\u52A0\u8F7D\u5931\u8D25(img.onerror):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag || "-", pic.substring(0, 60));
           };
           imgEl.onload = applyLandscapeCheck;
           imgEl.src = b;
@@ -13296,11 +13426,11 @@ html.fnos-perf.dark{
       let _navigating = false;
       const spaNav = (href, tag) => {
         if (_navigating) {
-          log8(tag + " -> ignored, navigation in progress");
+          log9(tag + " -> ignored, navigation in progress");
           return;
         }
         _navigating = true;
-        log8(tag + " -> SPA navigate", href);
+        log9(tag + " -> SPA navigate", href);
         history.pushState({}, "", href);
         window.dispatchEvent(new PopStateEvent("popstate"));
         setTimeout(() => {
@@ -13309,7 +13439,7 @@ html.fnos-perf.dark{
           const _cc = S.carouselContainer;
           const homeGone = !!_cc && (!document.body.contains(_cc) || _cc.getBoundingClientRect().width === 0 || _cc.getBoundingClientRect().height === 0);
           if (!backBtn && !seasonRendered && !homeGone) {
-            log8(tag + " fallback -> full page nav (popstate not handled)", href);
+            log9(tag + " fallback -> full page nav (popstate not handled)", href);
             location.href = href;
           }
           _navigating = false;
@@ -13372,7 +13502,7 @@ html.fnos-perf.dark{
         pImg.src = placeholderSvg;
         pImg.style.cssText = "width:120px;height:170px;object-fit:cover;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.18);display:block;background:rgba(200,190,220,.25)";
         pImg.onerror = () => {
-          log8("[DIAG] \u53F3\u4FA7\u6D77\u62A5\u6761\u52A0\u8F7D\u5931\u8D25(img.onerror):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag || "-", pUrl ? pUrl.substring(0, 60) : "");
+          log9("[DIAG] \u53F3\u4FA7\u6D77\u62A5\u6761\u52A0\u8F7D\u5931\u8D25(img.onerror):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag || "-", pUrl ? pUrl.substring(0, 60) : "");
           if (pImg.src !== placeholderSvg) pImg.src = placeholderSvg;
         };
         const pUrl = imgUrl(show.poster);
@@ -13381,7 +13511,7 @@ html.fnos-perf.dark{
             if (b) pImg.src = b;
           });
         } else if (show.strmTag) {
-          log8("[DIAG] \u53F3\u4FA7\u6D77\u62A5\u6761\u65E0 poster URL(STRM item):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag);
+          log9("[DIAG] \u53F3\u4FA7\u6D77\u62A5\u6761\u65E0 poster URL(STRM item):", (show.title || "").substring(0, 16), "strmTag=", show.strmTag);
         }
         const pTitle = document.createElement("div");
         pTitle.style.cssText = "font-size:11.5px;font-weight:600;color:rgba(240,236,255,.95);text-align:center;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;line-height:1.35;letter-spacing:.3px;text-shadow:0 1px 4px rgba(0,0,0,.35)";
@@ -13503,7 +13633,7 @@ html.fnos-perf.dark{
     S.carouselShows = shows;
     S.carouselBase = base;
     applyTitleLogo(base, shows, infos);
-    log8("carousel injected");
+    log9("carousel injected");
   }
 
   // src/preload/plugins/embyWall/login.ts
@@ -13561,7 +13691,7 @@ html.fnos-perf.dark{
               }
             }
             if (!username) {
-              log8("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u8DF3\u8FC7: \u65E0\u4FDD\u5B58\u7684\u8D26\u53F7");
+              log9("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u8DF3\u8FC7: \u65E0\u4FDD\u5B58\u7684\u8D26\u53F7");
               return;
             }
             const uInput = document.getElementById("username") || document.querySelector('input[name="username"]') || document.querySelector('input[placeholder*="\u7528\u6237\u540D"]') || document.querySelector('input[placeholder*="\u8D26\u53F7"]') || function() {
@@ -13573,10 +13703,10 @@ html.fnos-perf.dark{
               return inputs.length > 0 ? inputs[0] : null;
             }();
             if (!uInput) {
-              log8("[lc-213] /v/login \u672A\u627E\u5230\u7528\u6237\u540D\u8F93\u5165\u6846");
+              log9("[lc-213] /v/login \u672A\u627E\u5230\u7528\u6237\u540D\u8F93\u5165\u6846");
               return;
             }
-            log8(`[lc-213] /v/login \u81EA\u52A8\u586B\u5145: \u7528\u6237\u540D=${username}, \u5BC6\u7801=${password ? "\u6709" : "\u65E0(\u672A\u8BB0\u4F4F\u5BC6\u7801)"}`);
+            log9(`[lc-213] /v/login \u81EA\u52A8\u586B\u5145: \u7528\u6237\u540D=${username}, \u5BC6\u7801=${password ? "\u6709" : "\u65E0(\u672A\u8BB0\u4F4F\u5BC6\u7801)"}`);
             triggerInput(uInput, username);
             if (password && pInput) {
               triggerInput(pInput, password);
@@ -13584,20 +13714,20 @@ html.fnos-perf.dark{
                 const btn = document.querySelector('button[type="submit"]') || Array.from(document.querySelectorAll("button")).find((b) => /登录/.test(b.innerText)) || document.querySelector('input[type="submit"]');
                 if (btn) {
                   btn.click();
-                  log8("[lc-213] /v/login \u5DF2\u81EA\u52A8\u70B9\u51FB\u767B\u5F55");
+                  log9("[lc-213] /v/login \u5DF2\u81EA\u52A8\u70B9\u51FB\u767B\u5F55");
                 } else {
-                  log8("[lc-213] /v/login \u672A\u627E\u5230\u767B\u5F55\u6309\u94AE");
+                  log9("[lc-213] /v/login \u672A\u627E\u5230\u767B\u5F55\u6309\u94AE");
                 }
               }, 400);
             } else {
-              log8('[lc-213] /v/login \u4EC5\u586B\u5145\u4E86\u7528\u6237\u540D, \u5BC6\u7801\u4E3A\u7A7A(\u9700\u7528\u6237\u624B\u52A8\u8F93\u5165\u6216\u52FE\u9009"\u8BB0\u4F4F\u5BC6\u7801")');
+              log9('[lc-213] /v/login \u4EC5\u586B\u5145\u4E86\u7528\u6237\u540D, \u5BC6\u7801\u4E3A\u7A7A(\u9700\u7528\u6237\u624B\u52A8\u8F93\u5165\u6216\u52FE\u9009"\u8BB0\u4F4F\u5BC6\u7801")');
             }
           } catch (e) {
-            log8("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u5904\u7406\u5F02\u5E38:", String(e).slice(0, 120));
+            log9("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u5904\u7406\u5F02\u5E38:", String(e).slice(0, 120));
           }
         });
       } catch (e) {
-        log8("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u5F02\u5E38:", String(e).slice(0, 120));
+        log9("[lc-213] /v/login \u81EA\u52A8\u586B\u5145\u5F02\u5E38:", String(e).slice(0, 120));
       }
     }, 800);
   })();
@@ -14882,7 +15012,7 @@ html.fnos-perf.dark{
           _tmdbInfoData = r.data;
           _tmdbInfoFetchedAt = r.fetchedAt || Date.now();
           _tmdbInfoError = "";
-          log8("[lc-980] TMDB \u5361\u5C31\u7EEA: " + (r.data.title || ""));
+          log9("[lc-980] TMDB \u5361\u5C31\u7EEA: " + (r.data.title || ""));
         } else {
           _tmdbInfoError = r && r.error || "TMDB \u83B7\u53D6\u5931\u8D25";
           if (_isOneLevel()) {
@@ -16183,7 +16313,7 @@ html.fnos-perf.dark{
       const title = ((titleEl == null ? void 0 : titleEl.textContent) || "fnOS \u89C6\u9891").trim();
       const m = rawUrl.match(/\/v\/api\/v1\/media\/range\/([a-f0-9]{32})/i);
       if (m) {
-        log8("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u8D70 fnOS \u64AD\u653E\u94FE\u8DEF:", title, m[1]);
+        log9("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u8D70 fnOS \u64AD\u653E\u94FE\u8DEF:", title, m[1]);
         ipcRenderer.send("external-play", { kind: "fnos", id: m[1], title });
         setTimeout(() => {
           const closeBtn = modal.querySelector(".app-layout-header-close");
@@ -16195,11 +16325,11 @@ html.fnos-perf.dark{
       let url = rawUrl;
       if (url && url.startsWith("/")) url = location.origin + url;
       if (!url || !/^https?:\/\//i.test(url)) {
-        log8("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u672A\u53D6\u5230\u6709\u6548\u76F4\u94FE:", url);
+        log9("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u672A\u53D6\u5230\u6709\u6548\u76F4\u94FE:", url);
         alert("\u672A\u80FD\u83B7\u53D6\u89C6\u9891\u76F4\u94FE\uFF0C\u65E0\u6CD5\u5916\u90E8\u6253\u5F00");
         return;
       }
-      log8("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5916\u90E8\u6253\u5F00:", title, url);
+      log9("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5916\u90E8\u6253\u5F00:", title, url);
       ipcRenderer.send("external-play", { kind: "url", url, title });
       setTimeout(() => {
         const closeBtn = modal.querySelector(".app-layout-header-close");
@@ -16253,7 +16383,7 @@ html.fnos-perf.dark{
       });
       overlay.addEventListener("mousedown", (e) => e.stopPropagation());
       document.body.appendChild(overlay);
-      log8("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5DF2\u5F39\u51FA\u64AD\u653E\u65B9\u5F0F\u9009\u62E9\u5F39\u7A97");
+      log9("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5DF2\u5F39\u51FA\u64AD\u653E\u65B9\u5F0F\u9009\u62E9\u5F39\u7A97");
     }
     function ensureButton2(modal) {
       if (modal.querySelector(".fntv-ext-open")) return;
@@ -16285,7 +16415,7 @@ html.fnos-perf.dark{
     });
     observer.observe(document.body, { childList: true, subtree: true });
     document.querySelectorAll(".trim-ui__app-layout--window").forEach((m) => handleModal(m));
-    log8("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5DF2\u6CE8\u5165(\u81EA\u52A8\u5F39\u7A97\u9009\u62E9 + \u6807\u9898\u680F\u5916\u90E8\u6253\u5F00\u6309\u94AE)");
+    log9("[\u89C6\u9891\u9884\u89C8\u5916\u653E] \u5DF2\u6CE8\u5165(\u81EA\u52A8\u5F39\u7A97\u9009\u62E9 + \u6807\u9898\u680F\u5916\u90E8\u6253\u5F00\u6309\u94AE)");
   }
 
   // src/preload/plugins/embyWall/detail/epBackfill.ts
@@ -16596,7 +16726,7 @@ html.fnos-perf.dark{
               }
             }
           }
-          log8("[epBackfill] TVMaze \u515C\u5E95\u5C31\u7EEA: " + tvmazeByNum.size + " \u96C6");
+          log9("[epBackfill] TVMaze \u515C\u5E95\u5C31\u7EEA: " + tvmazeByNum.size + " \u96C6");
         } catch (e) {
           dlog("[epBackfill] TVMaze \u515C\u5E95\u5931\u8D25(\u5FFD\u7565): " + String(e && e.message || e).substring(0, 80));
         }
@@ -16693,10 +16823,10 @@ html.fnos-perf.dark{
       } else {
         setBtn(btn, "\u2713 \u6570\u636E\u5DF2\u6700\u65B0", "\u6BCF\u96C6\u6807\u9898/\u7B80\u4ECB\u90FD\u4E0E TMDB \u4E00\u81F4\uFF0C\u65E0\u9700\u8865\u5168\u3002");
       }
-      log8("[epBackfill] \u5B8C\u6210 S" + seasonNumber + " total=" + stats.total + " filled=" + stats.filled + " fallback=" + stats.upgraded + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
+      log9("[epBackfill] \u5B8C\u6210 S" + seasonNumber + " total=" + stats.total + " filled=" + stats.filled + " fallback=" + stats.upgraded + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
     } catch (e) {
       const msg = String(e && e.message || e).substring(0, 80);
-      log8("[epBackfill] \u5931\u8D25: " + msg);
+      log9("[epBackfill] \u5931\u8D25: " + msg);
       if (btn.isConnected) {
         setBtn(btn, "\u26A0 " + msg, msg);
         btn.style.color = "var(--fnos-ui-warn,#b06a3a)";
@@ -16901,10 +17031,10 @@ html.fnos-perf.dark{
       } else {
         setBtn(btn, "\u2713 \u6570\u636E\u5DF2\u6700\u65B0", "\u4E0E\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u4E00\u81F4\uFF0C\u65E0\u9700\u56DE\u586B\u3002");
       }
-      log8("[customScraper] \u5B8C\u6210 " + (title || tmdbId) + " total=" + stats.total + " filled=" + stats.filled + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
+      log9("[customScraper] \u5B8C\u6210 " + (title || tmdbId) + " total=" + stats.total + " filled=" + stats.filled + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
     } catch (e) {
       const msg = String(e && e.message || e).substring(0, 80);
-      log8("[customScraper] \u5931\u8D25: " + msg);
+      log9("[customScraper] \u5931\u8D25: " + msg);
       if (btn.isConnected) {
         setBtn(btn, "\u26A0 " + msg, msg);
         btn.style.color = "var(--fnos-ui-warn,#b06a3a)";
@@ -17255,10 +17385,10 @@ html.fnos-perf.dark{
       } else {
         setBtn(btn, "\u2713 \u6570\u636E\u5DF2\u6700\u65B0", "\u4E0E\u81EA\u5B9A\u4E49\u522E\u524A\u670D\u52A1\u4E00\u81F4\uFF0C\u65E0\u9700\u56DE\u586B\u3002");
       }
-      log8("[folderScraper] \u5B8C\u6210 " + (folderTitle || guid) + " total=" + stats.total + " filled=" + stats.filled + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
+      log9("[folderScraper] \u5B8C\u6210 " + (folderTitle || guid) + " total=" + stats.total + " filled=" + stats.filled + " unchanged=" + stats.unchanged + " unmatched=" + stats.unmatched + " failed=" + stats.failed);
     } catch (e) {
       const msg = String(e && e.message || e).substring(0, 80);
-      log8("[folderScraper] \u5931\u8D25: " + msg);
+      log9("[folderScraper] \u5931\u8D25: " + msg);
       if (btn.isConnected) {
         setBtn(btn, "\u26A0 " + msg, msg);
         btn.style.color = "var(--fnos-ui-warn,#b06a3a)";
@@ -17694,7 +17824,7 @@ html.fnos-perf.dark{
       }
       target.click();
       await new Promise((r) => setTimeout(r, 300));
-      log8("[jav] \u5E03\u5C40\u5DF2\u81EA\u52A8\u5207\u6362\u4E3A\u6A2A\u5E45\u6D77\u62A5");
+      log9("[jav] \u5E03\u5C40\u5DF2\u81EA\u52A8\u5207\u6362\u4E3A\u6A2A\u5E45\u6D77\u62A5");
       return true;
     } catch (e) {
       dlog("[jav] \u5E03\u5C40\u5207\u6362\u5931\u8D25: " + String(e && e.message || e).substring(0, 80));
@@ -17770,7 +17900,7 @@ html.fnos-perf.dark{
       setBtn2(btn, label + " (" + done + ")");
     };
     await javScrapeFolderTree(origin, fGuid, 0, stats, tick2);
-    log8("[jav] \u6587\u4EF6\u5939\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
+    log9("[jav] \u6587\u4EF6\u5939\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
     if (stats.ok > 0) {
       markPendingLayoutSwitch();
       if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
@@ -17805,7 +17935,7 @@ html.fnos-perf.dark{
       }
       tick2("\u23F3 \u5168\u5E93\u522E\u524A");
     }
-    log8("[jav] \u5168\u5E93\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
+    log9("[jav] \u5168\u5E93\u6279\u91CF\u5B8C\u6210: ok=" + stats.ok + " fail=" + stats.fail + " nocode=" + stats.nocode);
     if (stats.ok > 0) {
       markPendingLayoutSwitch();
       if (await switchLayoutToLandscape()) _pendingLayoutSwitch = false;
@@ -17866,7 +17996,7 @@ html.fnos-perf.dark{
         return;
       }
       const meta2 = r.meta || {};
-      log8("[jav] \u547D\u4E2D " + meta2.code + "\uFF1A" + (meta2.title || "") + (Array.isArray(meta2.actresses) && meta2.actresses.length ? " / " + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB") : "") + (meta2.date ? " / " + meta2.date : ""));
+      log9("[jav] \u547D\u4E2D " + meta2.code + "\uFF1A" + (meta2.title || "") + (Array.isArray(meta2.actresses) && meta2.actresses.length ? " / " + meta2.actresses.map((a) => a && a.name).filter(Boolean).join("\u30FB") : "") + (meta2.date ? " / " + meta2.date : ""));
       const ov = buildOverview(meta2);
       setBtn2(btn, "\u23F3 \u5339\u914D\u6F14\u5458\u2026");
       const credits = await buildCredits(origin, meta2);
@@ -17932,7 +18062,7 @@ html.fnos-perf.dark{
         if (btn.isConnected) setBtn2(btn, "\u27F3 jav \u522E\u524A");
       }, 6e3);
     } catch (e) {
-      log8("[jav] \u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
+      log9("[jav] \u5931\u8D25: " + String(e && e.message || e).substring(0, 100));
       setBtn2(btn, "\u26A0 " + String(e && e.message || e).substring(0, 24), String(e && e.message || e));
       window.setTimeout(() => {
         if (btn.isConnected) {
@@ -18004,7 +18134,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   setOnShowsReady(injectCarousel);
   function handle2() {
     const base = location.origin;
-    log8("handle start");
+    log9("handle start");
     try {
       if (localStorage.getItem("fntv-perf-mode") === "1") {
         document.documentElement.classList.add("fnos-perf");
@@ -18068,13 +18198,13 @@ html.fntv-boot-hide #root{visibility:hidden}
       if (pagePath() !== _lastPath) {
         _lastPath = pagePath();
         syncTvPageClass();
-        log8("[TV\u7C7B\u540C\u6B65]", location.pathname, "isTv=", isFntvTvPage());
+        log9("[TV\u7C7B\u540C\u6B65]", location.pathname, "isTv=", isFntvTvPage());
       }
     }, 400);
     window.addEventListener("beforeunload", () => window.clearInterval(_tvClassTimer));
     if (!isFntvTvPage()) return;
     document.documentElement.classList.add("fnos-tv-page");
-    const logNav = (label) => log8("NAV", label, location.href);
+    const logNav = (label) => log9("NAV", label, location.href);
     logNav("init");
     injectUiThemeStyle();
     applyUiTheme();
@@ -18216,7 +18346,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         else if (r === "skip") skippedCount++;
       }
       if (_whitewashPasses % 20 === 1 || fixedCount > 0) {
-        log8("whitewash pass", _whitewashPasses, "fixed", fixedCount, "skipped-overlay", skippedCount);
+        log9("whitewash pass", _whitewashPasses, "fixed", fixedCount, "skipped-overlay", skippedCount);
       }
     };
     let _rcPasses = 0;
@@ -18266,7 +18396,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         if (_roundedCheck(all[i])) fixedCount++;
       }
       if (_rcPasses % 20 === 1 || fixedCount > 0) {
-        log8("rounded-corner pass", _rcPasses, "fixed-fullscreen", fixedCount);
+        log9("rounded-corner pass", _rcPasses, "fixed-fullscreen", fixedCount);
       }
     };
     setTimeout(_globalRoundedCornerEnforcer, 800);
@@ -18296,7 +18426,7 @@ html.fntv-boot-hide #root{visibility:hidden}
             if (_roundedCheck(sub[i])) fixed++;
           }
         }
-        if (fixed > 0) log8("rounded-corner incremental fixed", fixed);
+        if (fixed > 0) log9("rounded-corner incremental fixed", fixed);
       }, 200);
     });
     _rcObs.observe(document.body, { childList: true, subtree: true });
@@ -18325,7 +18455,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         const batch = _pendingClear.splice(0, _pendingClear.length);
         let fixed = 0;
         for (const root of batch) fixed += _whitewashSubtree(root);
-        if (fixed > 0) log8("whitewash incremental fixed", fixed);
+        if (fixed > 0) log9("whitewash incremental fixed", fixed);
         _forceDatePickerDark();
       }, 200);
     });
@@ -18655,22 +18785,22 @@ html.fntv-boot-hide #root{visibility:hidden}
       const swNas = addToggle("NAS \u672C\u5730\u7F51\u76D8\u4EE3\u7406", secBodyNet);
       const swWheel = addToggle("\u9F20\u6807\u6EDA\u8F6E\u6A2A\u5411\u6EDA\u52A8", secBodyUX);
       swProxy.addEventListener("change", () => {
-        log8("[\u5F00\u5173\u4FDD\u5B58] swProxy=" + swProxy.checked);
-        ipcRenderer.invoke("settings:set-download-proxy", swProxy.checked).catch((e) => log8("set-download-proxy failed", e));
+        log9("[\u5F00\u5173\u4FDD\u5B58] swProxy=" + swProxy.checked);
+        ipcRenderer.invoke("settings:set-download-proxy", swProxy.checked).catch((e) => log9("set-download-proxy failed", e));
       });
       swHide.addEventListener("change", () => {
-        log8("[\u5F00\u5173\u4FDD\u5B58] swHide=" + swHide.checked);
-        ipcRenderer.invoke("settings:set-hide-play", swHide.checked).catch((e) => log8("set-hide-play failed", e));
+        log9("[\u5F00\u5173\u4FDD\u5B58] swHide=" + swHide.checked);
+        ipcRenderer.invoke("settings:set-hide-play", swHide.checked).catch((e) => log9("set-hide-play failed", e));
       });
       swNas.addEventListener("change", () => {
-        log8("[\u5F00\u5173\u4FDD\u5B58] swNas=" + swNas.checked);
-        ipcRenderer.invoke("settings:set-nas-proxy", swNas.checked).catch((e) => log8("set-nas-proxy failed", e));
+        log9("[\u5F00\u5173\u4FDD\u5B58] swNas=" + swNas.checked);
+        ipcRenderer.invoke("settings:set-nas-proxy", swNas.checked).catch((e) => log9("set-nas-proxy failed", e));
       });
       swWheel.checked = S.wheelHScrollEnabled;
       swWheel.addEventListener("change", () => {
         S.wheelHScrollEnabled = swWheel.checked;
-        log8("[\u5F00\u5173\u4FDD\u5B58] swWheel=" + swWheel.checked);
-        ipcRenderer.invoke("settings:set-wheel-hscroll", swWheel.checked).catch((e) => log8("set-wheel-hscroll failed", e));
+        log9("[\u5F00\u5173\u4FDD\u5B58] swWheel=" + swWheel.checked);
+        ipcRenderer.invoke("settings:set-wheel-hscroll", swWheel.checked).catch((e) => log9("set-wheel-hscroll failed", e));
         wheelToScroll();
       });
       const themeRow = document.createElement("div");
@@ -18753,7 +18883,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       biliFoldBody.appendChild(aggRow);
       aggInput.addEventListener("change", () => {
         const v = parseInt(aggInput.value, 10);
-        ipcRenderer.invoke("settings:set-mpv-bili-aggregate-threshold", isNaN(v) ? 0 : v).catch((err) => log8("set-mpv-bili-aggregate-threshold failed", err));
+        ipcRenderer.invoke("settings:set-mpv-bili-aggregate-threshold", isNaN(v) ? 0 : v).catch((err) => log9("set-mpv-bili-aggregate-threshold failed", err));
       });
       const secBangumi = section("Bangumi \u767B\u5F55");
       const secBodyBangumi = secBangumi.body;
@@ -18874,7 +19004,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       bangumiSyncRow.appendChild(swBangumiSync);
       secBodyBangumi.appendChild(bangumiSyncRow);
       swBangumiSync.addEventListener("change", () => {
-        ipcRenderer.invoke("settings:set-bangumi-sync-enabled", swBangumiSync.checked).catch((err) => log8("set-bangumi-sync-enabled failed", err));
+        ipcRenderer.invoke("settings:set-bangumi-sync-enabled", swBangumiSync.checked).catch((err) => log9("set-bangumi-sync-enabled failed", err));
       });
       const bangumiThrRow = document.createElement("div");
       bangumiThrRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:8px 6px;border-radius:6px;transition:background .12s;";
@@ -18891,7 +19021,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       secBodyBangumi.appendChild(bangumiThrRow);
       bangumiThresholdInput.addEventListener("change", () => {
         const v = Number(bangumiThresholdInput.value) || 80;
-        ipcRenderer.invoke("settings:set-bangumi-sync-threshold", v).catch((err) => log8("set-bangumi-sync-threshold failed", err));
+        ipcRenderer.invoke("settings:set-bangumi-sync-threshold", v).catch((err) => log9("set-bangumi-sync-threshold failed", err));
       });
       const bangumiHintBottom = document.createElement("div");
       bangumiHintBottom.style.cssText = "font-size:10.5px;color:var(--fnos-ui-muted);margin-top:10px;line-height:1.5;";
@@ -19235,7 +19365,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       };
       const swDouban = addDoubanToggle("\u542F\u7528\u8C46\u74E3\u540C\u6B65");
       swDouban.addEventListener("change", () => {
-        ipcRenderer.invoke("settings:set-douban-enabled", swDouban.checked).catch((err) => log8("set-douban-enabled failed", err));
+        ipcRenderer.invoke("settings:set-douban-enabled", swDouban.checked).catch((err) => log9("set-douban-enabled failed", err));
       });
       const doubanBtns = document.createElement("div");
       doubanBtns.style.cssText = "display:flex;gap:6px;margin-top:6px;";
@@ -19661,7 +19791,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         const payload = { blockTypes, blacklist };
         if (_danTimer) clearTimeout(_danTimer);
         _danTimer = setTimeout(() => {
-          ipcRenderer.invoke("settings:set-bili-danmaku-style", payload).catch((err) => log8("set-bili-danmaku-style failed", err));
+          ipcRenderer.invoke("settings:set-bili-danmaku-style", payload).catch((err) => log9("set-bili-danmaku-style failed", err));
         }, 300);
       }
       for (const bt of BLOCK_TYPES) {
@@ -19885,7 +20015,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       dmMinInput.addEventListener("change", () => {
         const v = parseInt(dmMinInput.value, 10);
         const n = isNaN(v) ? 0 : Math.max(0, Math.min(9999, v));
-        ipcRenderer.invoke("settings:set-danmu-min-count", n).catch((err) => log8("set-danmu-min-count failed", err));
+        ipcRenderer.invoke("settings:set-danmu-min-count", n).catch((err) => log9("set-danmu-min-count failed", err));
       });
       const dmApiFold = mkFold2("\u670D\u52A1\u5730\u5740\u4E0E\u8FDE\u901A\u6D4B\u8BD5");
       dmApiBody.appendChild(dmApiFold.fold);
@@ -20081,7 +20211,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       debugTarget = secDebugBody;
       const swDebug = addDebugToggle("\u542F\u7528\u8C03\u8BD5\u65E5\u5FD7\uFF08\u8BE6\u7EC6\u6A21\u5F0F\uFF09");
       swDebug.addEventListener("change", () => {
-        ipcRenderer.invoke("settings:set-debug-enabled", swDebug.checked).catch((err) => log8("set-debug-enabled failed", err));
+        ipcRenderer.invoke("settings:set-debug-enabled", swDebug.checked).catch((err) => log9("set-debug-enabled failed", err));
       });
       const dbgFold = mkFold2("\u7EC4\u4EF6\u65E5\u5FD7\uFF08\u6309\u7EC4\u4EF6\u5355\u72EC\u63A7\u5236\uFF09");
       secDebugBody.appendChild(dbgFold.fold);
@@ -20105,7 +20235,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           debugComps.forEach(([k]) => {
             cur[k] = !!swDebugComps[k].checked;
           });
-          ipcRenderer.invoke("settings:set-debug-components", cur).catch((err) => log8("set-debug-components failed", err));
+          ipcRenderer.invoke("settings:set-debug-components", cur).catch((err) => log9("set-debug-components failed", err));
         });
       });
       const logFooter = document.createElement("div");
@@ -20169,7 +20299,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       skipRow.appendChild(swSkip);
       skipBody.appendChild(skipRow);
       swSkip.addEventListener("change", () => {
-        ipcRenderer.invoke("settings:set-smart-skip-enabled", swSkip.checked).catch((err) => log8("set-smart-skip-enabled failed", err));
+        ipcRenderer.invoke("settings:set-smart-skip-enabled", swSkip.checked).catch((err) => log9("set-smart-skip-enabled failed", err));
       });
       ipcRenderer.invoke("settings:get-smart-skip-enabled").then((v) => {
         swSkip.checked = !!v;
@@ -20312,11 +20442,11 @@ html.fntv-boot-hide #root{visibility:hidden}
       swLogo.checked = S.carouselLogoEnabled;
       swLogo.addEventListener("change", () => {
         S.carouselLogoEnabled = swLogo.checked;
-        ipcRenderer.invoke("settings:set-carousel-logo", swLogo.checked).catch((err) => log8("set-carousel-logo failed", err));
+        ipcRenderer.invoke("settings:set-carousel-logo", swLogo.checked).catch((err) => log9("set-carousel-logo failed", err));
         try {
           applyCarouselLogoNow();
         } catch (e) {
-          log8("applyCarouselLogoNow failed", e);
+          log9("applyCarouselLogoNow failed", e);
         }
       });
       overlay._swLogo = swLogo;
@@ -20359,8 +20489,8 @@ html.fntv-boot-hide #root{visibility:hidden}
       paintBeautify();
       beautifyInput.addEventListener("change", () => {
         S.detailBoxless = !beautifyInput.checked;
-        log8("[\u5F00\u5173\u4FDD\u5B58] \u5267\u96C6\u8BE6\u60C5\u9875\u7F8E\u5316=" + beautifyInput.checked + " (detailBoxless=" + S.detailBoxless + ")");
-        ipcRenderer.invoke("settings:set-detail-boxless", S.detailBoxless).catch((e) => log8("set-detail-boxless failed", e));
+        log9("[\u5F00\u5173\u4FDD\u5B58] \u5267\u96C6\u8BE6\u60C5\u9875\u7F8E\u5316=" + beautifyInput.checked + " (detailBoxless=" + S.detailBoxless + ")");
+        ipcRenderer.invoke("settings:set-detail-boxless", S.detailBoxless).catch((e) => log9("set-detail-boxless failed", e));
         paintBeautify();
         try {
           if (S.detailBoxless) teardownDetailBeautify();
@@ -20985,7 +21115,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         pbImageRows.style.display = S.pageBgMode === "image" ? "" : "none";
       };
       const persistPageBg = (key, value) => {
-        ipcRenderer.invoke("settings:set-" + key, value).catch((e) => log8("set page-bg failed", key, e));
+        ipcRenderer.invoke("settings:set-" + key, value).catch((e) => log9("set page-bg failed", key, e));
       };
       const setPageBgMode = (val) => {
         S.pageBgMode = val;
@@ -21587,18 +21717,18 @@ html.fntv-boot-hide #root{visibility:hidden}
         try {
           s = await ipcRenderer.invoke("settings:get");
         } catch (err) {
-          log8("SETTINGS refresh failed: settings:get invoke error", err);
+          log9("SETTINGS refresh failed: settings:get invoke error", err);
           return;
         }
         if (!s || typeof s !== "object") {
-          log8("SETTINGS refresh failed: settings:get returned", s);
+          log9("SETTINGS refresh failed: settings:get returned", s);
           return;
         }
         const seg2 = (name, fn) => {
           try {
             fn();
           } catch (err) {
-            log8(`SETTINGS refresh segment [${name}] failed`, err);
+            log9(`SETTINGS refresh segment [${name}] failed`, err);
           }
         };
         seg2("switches", () => {
@@ -21614,7 +21744,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           }
           swWheel.checked = !!s.wheelHScroll;
           S.wheelHScrollEnabled = !!s.wheelHScroll;
-          log8("[\u5F00\u5173\u56DE\u586B] swProxy=" + swProxy.checked + " swHide=" + swHide.checked + " swNas=" + swNas.checked + " \u7F8E\u5316=" + (!!_beautifyToggle && _beautifyToggle.checked) + " swWheel=" + swWheel.checked);
+          log9("[\u5F00\u5173\u56DE\u586B] swProxy=" + swProxy.checked + " swHide=" + swHide.checked + " swNas=" + swNas.checked + " \u7F8E\u5316=" + (!!_beautifyToggle && _beautifyToggle.checked) + " swWheel=" + swWheel.checked);
           S.carouselLogoEnabled = s.carouselLogoEnabled !== false;
           const _swLogoRef = overlay._swLogo;
           if (_swLogoRef) _swLogoRef.checked = S.carouselLogoEnabled;
@@ -21743,7 +21873,7 @@ html.fntv-boot-hide #root{visibility:hidden}
             dmApiStatus.style.color = dmApiInput.value ? "var(--fnos-ui-sub)" : "var(--fnos-ui-warn)";
           }
         });
-        log8("SETTINGS refresh done: bangumiSyncEnabled=" + String(s.bangumiSyncEnabled) + " swChecked=" + String(swBangumiSync.checked) + " token=" + (s.bangumiToken ? "set" : "none"));
+        log9("SETTINGS refresh done: bangumiSyncEnabled=" + String(s.bangumiSyncEnabled) + " swChecked=" + String(swBangumiSync.checked) + " token=" + (s.bangumiToken ? "set" : "none"));
       };
       document.addEventListener("click", (ev) => {
         if (overlay.style.display !== "flex") return;
@@ -21852,7 +21982,7 @@ html.fntv-boot-hide #root{visibility:hidden}
             el.style.setProperty("background-color", "transparent", "important");
             el.style.setProperty("backdrop-filter", "none", "important");
             el.style.setProperty("-webkit-backdrop-filter", "none", "important");
-            log8("[lc-875] top-nav transparentized:", (el.className || el.tagName).slice(0, 60));
+            log9("[lc-875] top-nav transparentized:", (el.className || el.tagName).slice(0, 60));
             break;
           }
         }
@@ -21894,13 +22024,13 @@ html.fntv-boot-hide #root{visibility:hidden}
           if (!drawer2) return;
           if (drawer2.classList.contains("drawer-open")) {
             animateCloseDrawer(drawer2);
-            log8("BURGER -> CLOSE (anim)");
+            log9("BURGER -> CLOSE (anim)");
           } else {
             openDrawer(drawer2);
-            log8("BURGER -> OPEN (anim)");
+            log9("BURGER -> OPEN (anim)");
           }
         }, true);
-        log8("BURGER click-hook installed (document delegation)");
+        log9("BURGER click-hook installed (document delegation)");
       }
       const drawer = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
       if (drawer && !drawer.dataset.maskHooked) {
@@ -21915,10 +22045,10 @@ html.fntv-boot-hide #root{visibility:hidden}
           e.stopImmediatePropagation();
           if (drawer.classList.contains("drawer-open")) {
             animateCloseDrawer(drawer);
-            log8("MASK -> CLOSED (anim)");
+            log9("MASK -> CLOSED (anim)");
           }
         }, true);
-        log8("MASK click-close-hook installed (capture+stop)");
+        log9("MASK click-close-hook installed (capture+stop)");
       }
       applyTopNavTransparent();
       scheduleTopLeftIconContrast(500);
@@ -22230,7 +22360,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         paintTopLeftIcons(icons, lum);
         _tlLastApply = Date.now();
       } catch (e) {
-        log8("[lc-925] \u5DE6\u4E0A\u89D2\u53CD\u8272\u5F02\u5E38: " + String(e).substring(0, 80));
+        log9("[lc-925] \u5DE6\u4E0A\u89D2\u53CD\u8272\u5F02\u5E38: " + String(e).substring(0, 80));
       } finally {
         _tlBusy = false;
       }
@@ -22270,7 +22400,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         }))
       };
       console.log("[fntvTopLeftIconDiag]", JSON.stringify(info, null, 2));
-      log8("[fntvTopLeftIconDiag] " + JSON.stringify(info));
+      log9("[fntvTopLeftIconDiag] " + JSON.stringify(info));
       return info;
     };
     ensureBurgerVisible();
@@ -22326,7 +22456,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       }
       info.seasonTitleCandidates = cand;
       console.log("[fntvDumpSeasonDOM]", JSON.stringify(info, null, 2));
-      log8("[fntvDumpSeasonDOM] " + JSON.stringify(info));
+      log9("[fntvDumpSeasonDOM] " + JSON.stringify(info));
       return info;
     };
     const injectRefreshButton = () => {
@@ -22378,7 +22508,7 @@ html.fntv-boot-hide #root{visibility:hidden}
         location.reload();
       });
       (_b = anchorEl.parentNode) == null ? void 0 : _b.insertBefore(btn, anchorEl.nextSibling);
-      log8("Refresh button injected after anchor (burger/\u9996\u9875)");
+      log9("Refresh button injected after anchor (burger/\u9996\u9875)");
     };
     injectRefreshButton();
     [1e3, 3e3, 6e3].forEach((t2) => setTimeout(injectRefreshButton, t2));
@@ -22398,11 +22528,11 @@ html.fntv-boot-hide #root{visibility:hidden}
     const hideStaleViews = () => {
       const vw = window.innerWidth, vh = window.innerHeight;
       if (document.querySelector("video")) {
-        log8("hideStaleViews: SKIP \u2014 <video> present, avoid hiding video page");
+        log9("hideStaleViews: SKIP \u2014 <video> present, avoid hiding video page");
         return;
       }
       if (document.querySelector('.videoPlayer, .playerPage, #videoPlayer, [data-itemtype="Video"]')) {
-        log8("hideStaleViews: SKIP \u2014 video container present");
+        log9("hideStaleViews: SKIP \u2014 video container present");
         return;
       }
       const candidates = [];
@@ -22431,12 +22561,12 @@ html.fntv-boot-hide #root{visibility:hidden}
         for (let i = 0; i < views.length - 1; i++) {
           const _v = views[i];
           if (!_lastHasDetail && _v.querySelector('[data-id="details"], .fnos-season-2col, .card-root')) {
-            log8("hideStaleViews: SKIP \u2014 \u89C6\u56FE\u542B\u771F\u5B9E\u8BE6\u60C5\u5185\u5BB9, \u907F\u514D\u767D\u5C4F | class=", _v.className.slice(0, 40));
+            log9("hideStaleViews: SKIP \u2014 \u89C6\u56FE\u542B\u771F\u5B9E\u8BE6\u60C5\u5185\u5BB9, \u907F\u514D\u767D\u5C4F | class=", _v.className.slice(0, 40));
             continue;
           }
           if (getComputedStyle(_v).display !== "none") {
             _v.style.display = "none";
-            log8("hideStaleViews: hid stacked view", i + 1, "/", views.length, "| class=", _v.className.slice(0, 40));
+            log9("hideStaleViews: hid stacked view", i + 1, "/", views.length, "| class=", _v.className.slice(0, 40));
           }
         }
       }
@@ -22445,7 +22575,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       const d = document.querySelector('.fixed.inset-0[class*="lg:!hidden"]');
       if (d && d.classList.contains("drawer-open")) {
         animateCloseDrawer(d);
-        log8("NAV -> DRAWER CLOSED (anim)");
+        log9("NAV -> DRAWER CLOSED (anim)");
       }
     };
     const ensureHomepageEnhanced = () => {
@@ -22466,7 +22596,7 @@ html.fntv-boot-hide #root{visibility:hidden}
           S.carouselInited = true;
           S.carouselRevealed = true;
           resumeCarousel();
-          log8("[lc-950] wrapper \u4ECD\u6302\u8F7D, \u76F4\u63A5 resume(\u96F6\u91CD\u8F7D, \u6D77\u62A5\u4FDD\u7559)");
+          log9("[lc-950] wrapper \u4ECD\u6302\u8F7D, \u76F4\u63A5 resume(\u96F6\u91CD\u8F7D, \u6D77\u62A5\u4FDD\u7559)");
           return;
         }
         const target = findMediaLibrarySection();
@@ -22477,7 +22607,7 @@ html.fntv-boot-hide #root{visibility:hidden}
             S.carouselInited = true;
             S.carouselRevealed = true;
             resumeCarousel();
-            log8("[lc-950] \u590D\u7528\u6E38\u79BB wrapper \u6302\u56DE\u65B0 section(\u96F6\u91CD\u8F7D, \u6D77\u62A5/\u7B80\u4ECB\u4FDD\u7559)");
+            log9("[lc-950] \u590D\u7528\u6E38\u79BB wrapper \u6302\u56DE\u65B0 section(\u96F6\u91CD\u8F7D, \u6D77\u62A5/\u7B80\u4ECB\u4FDD\u7559)");
             return;
           } catch (_) {
           }
@@ -22504,11 +22634,11 @@ html.fntv-boot-hide #root{visibility:hidden}
           }
           const heads = document.querySelectorAll("strong,h2,h3").length;
           const known = document.querySelectorAll(".relative.flex.flex-col.gap-6 > div").length;
-          log8("[lc-939] ensureHomepageEnhanced: \u91CD\u8BD5 6 \u6B21\u4ECD\u672A\u627E\u5230\u5A92\u4F53\u5E93\u533A\u5757, \u653E\u5F03\u91CD\u5EFA; diag headings=" + heads + " knownLayoutDivs=" + known + " pathname=" + location.pathname);
+          log9("[lc-939] ensureHomepageEnhanced: \u91CD\u8BD5 6 \u6B21\u4ECD\u672A\u627E\u5230\u5A92\u4F53\u5E93\u533A\u5757, \u653E\u5F03\u91CD\u5EFA; diag headings=" + heads + " knownLayoutDivs=" + known + " pathname=" + location.pathname);
           for (const delay of [3e3, 6e3]) {
             setTimeout(() => {
               if (!(S.carouselContainer && document.body.contains(S.carouselContainer)) && !S.carouselInited) {
-                log8("[v1.4.6] ensureHomepageEnhanced \u5EF6\u8FDF\u515C\u5E95\u91CD\u6CE8\u5165(" + delay + "ms)");
+                log9("[v1.4.6] ensureHomepageEnhanced \u5EF6\u8FDF\u515C\u5E95\u91CD\u6CE8\u5165(" + delay + "ms)");
                 injectCarousel();
               }
             }, delay);
@@ -22516,16 +22646,16 @@ html.fntv-boot-hide #root{visibility:hidden}
           return;
         }
         const diagShows = (S.apiShows || []).slice(0, 12).map((s) => ({ t: (s.title || "").substring(0, 8), hasBlob: !!s._backdropBlob, portrait: !!s._backdropIsPortrait, back: !!s.backdrop }));
-        log8("[lc-939] ensureHomepageEnhanced \u91CD\u5EFA\u524D S.apiShows.len=", S.apiShows.length, "sample=", JSON.stringify(diagShows));
+        log9("[lc-939] ensureHomepageEnhanced \u91CD\u5EFA\u524D S.apiShows.len=", S.apiShows.length, "sample=", JSON.stringify(diagShows));
         injectCarousel();
-        log8("ensureHomepageEnhanced: \u5DF2\u5F3A\u5236\u91CD\u6CE8\u5165\u8F6E\u64AD(\u8FD4\u56DE\u9996\u9875\u4E0D\u518D\u89E6\u53D1 backdrop \u7F51\u7EDC\u91CD\u62C9/\u5237\u65B0)");
+        log9("ensureHomepageEnhanced: \u5DF2\u5F3A\u5236\u91CD\u6CE8\u5165\u8F6E\u64AD(\u8FD4\u56DE\u9996\u9875\u4E0D\u518D\u89E6\u53D1 backdrop \u7F51\u7EDC\u91CD\u62C9/\u5237\u65B0)");
       };
       rebuild();
       if (S.apiShows.length === 0) {
         S.apiLoaded = false;
         S.carouselRevealed = false;
         fetchShowsViaIPC(location.origin).then(() => {
-        }).catch((e) => log8("[lc-939] ensureHomepageEnhanced \u91CD\u65B0\u62C9\u53D6\u5F02\u5E38:", e));
+        }).catch((e) => log9("[lc-939] ensureHomepageEnhanced \u91CD\u65B0\u62C9\u53D6\u5F02\u5E38:", e));
       }
     };
     try {
@@ -22606,7 +22736,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       scheduleFolderScraperButton();
       [600, 1500, 3e3].forEach((ms) => setTimeout(() => scheduleFolderScraperButton(), ms));
     } catch (e) {
-      log8("NAV hook err", String(e).substring(0, 60));
+      log9("NAV hook err", String(e).substring(0, 60));
     }
     if (isDetailPage()) {
       backfillDetailLogo();
@@ -22639,15 +22769,15 @@ html.fntv-boot-hide #root{visibility:hidden}
     injectCarousel();
     fetchShowsViaIPC(base).then(() => {
       if (S.apiShows.length === 0) {
-        log8("API empty");
+        log9("API empty");
         return;
       }
-      log8("got", S.apiShows.length, "shows from API (carousel revealed by fetchShowsViaIPC)");
+      log9("got", S.apiShows.length, "shows from API (carousel revealed by fetchShowsViaIPC)");
       if (!S.carouselInited && S.carouselRevealed) {
         S.carouselInited = false;
         injectCarousel();
       }
-    }).catch((e) => log8("fetch error:", e));
+    }).catch((e) => log9("fetch error:", e));
     function refreshCarouselPosters() {
       if (S.apiLoading) return;
       if (document.hidden) return;
@@ -22655,15 +22785,15 @@ html.fntv-boot-hide #root{visibility:hidden}
       S.apiLoaded = false;
       S.carouselRevealed = false;
       const base2 = location.origin;
-      log8("carousel refresh: re-fetching");
+      log9("carousel refresh: re-fetching");
       fetchShowsViaIPC(base2).then(() => {
         if (S.apiShows.length === 0) return;
-        log8("carousel refresh: got", S.apiShows.length, "shows");
+        log9("carousel refresh: got", S.apiShows.length, "shows");
         if (!S.carouselInited && S.carouselRevealed) {
           S.carouselInited = false;
           injectCarousel();
         }
-      }).catch((e) => log8("carousel refresh error:", e));
+      }).catch((e) => log9("carousel refresh error:", e));
     }
     const CAROUSEL_REFRESH_MS = 10 * 60 * 1e3;
     setInterval(refreshCarouselPosters, CAROUSEL_REFRESH_MS);
@@ -22672,7 +22802,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       if (document.hidden) return;
       const vid = document.querySelector("video");
       if (vid && !vid.paused) return;
-      log8("[lc-932] \u5B9A\u65F6\u6574\u9875\u91CD\u8F7D(\u6BCF 10 \u5206\u949F)");
+      log9("[lc-932] \u5B9A\u65F6\u6574\u9875\u91CD\u8F7D(\u6BCF 10 \u5206\u949F)");
       try {
         location.reload();
       } catch (_) {
@@ -22696,12 +22826,12 @@ html.fntv-boot-hide #root{visibility:hidden}
         _moHits = 0;
       }
       if (++_moHits > 40) {
-        if (_moHits === 41) log8("[web] MutationObserver \u89E6\u53D1\u98CE\u66B4(>40/s)\uFF0C\u672C\u79D2\u8DF3\u8FC7\u8F6E\u64AD\u91CD\u5EFA\uFF0C\u9632\u81EA\u6FC0\u5361\u6B7B");
+        if (_moHits === 41) log9("[web] MutationObserver \u89E6\u53D1\u98CE\u66B4(>40/s)\uFF0C\u672C\u79D2\u8DF3\u8FC7\u8F6E\u64AD\u91CD\u5EFA\uFF0C\u9632\u81EA\u6FC0\u5361\u6B7B");
         return;
       }
       if (!_isHomePath()) return;
       if (S.carouselContainer && !document.body.contains(S.carouselContainer)) {
-        log8("carousel lost, re-inject");
+        log9("carousel lost, re-inject");
         destroyCarousel();
         S.carouselContainer = null;
         S.carouselInited = false;
@@ -22712,7 +22842,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       wheelToScroll();
       if (!_isHomePath()) return;
       if (S.carouselContainer && !document.body.contains(S.carouselContainer)) {
-        log8("watchdog: carousel lost");
+        log9("watchdog: carousel lost");
         destroyCarousel();
         S.carouselContainer = null;
         S.carouselInited = false;
@@ -22781,7 +22911,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       // [lc-984] 清晰度胶囊诊断: 标题后没出现胶囊时跑它, 看原生角标是否被文本启发式命中、标题 p 是谁
       epResolution: () => epResolutionDiag()
     };
-    log8("[lc-940][DIAG] window._fntvDiag \u5DF2\u66B4\u9732, \u4F7F\u7528: _fntvDiag.rebuildSnapshot() / _fntvDiag.dumpBackdropState()");
+    log9("[lc-940][DIAG] window._fntvDiag \u5DF2\u66B4\u9732, \u4F7F\u7528: _fntvDiag.rebuildSnapshot() / _fntvDiag.dumpBackdropState()");
     const _syncVideoActiveClass = () => {
       const hasVideo = !!document.querySelector("video");
       document.documentElement.classList.toggle("fnos-video-active", hasVideo);
@@ -23895,7 +24025,7 @@ html.fntv-boot-hide #root{visibility:hidden}
 
   // src/preload/plugins/uiModeToggle.ts
   init_logger();
-  var log9 = logger_default;
+  var log10 = logger_default;
   var BTN_ID2 = "fntv-uimode-tab";
   var STYLE_ID7 = "fntv-uimode-style";
   var _bound = false;
@@ -23972,7 +24102,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       const next = getUiMode() === "mobile" ? "desktop" : "mobile";
       setUiMode(next);
       render2();
-      log9.info("[uiModeToggle] UI \u6A21\u5F0F\u5207\u6362\u4E3A " + next);
+      log10.info("[uiModeToggle] UI \u6A21\u5F0F\u5207\u6362\u4E3A " + next);
     });
     document.body.appendChild(btn);
     render2();
@@ -24867,9 +24997,9 @@ html.fntv-boot-hide #root{visibility:hidden}
     if (!b) return;
     wired = true;
     wireBar(b, v);
-    log10("\u8FDB\u5EA6\u6761\u5DF2\u5B9A\u4F4D\u5E76\u63A5\u7EBF: " + (b.className || b.tagName).toString().slice(0, 80));
+    log11("\u8FDB\u5EA6\u6761\u5DF2\u5B9A\u4F4D\u5E76\u63A5\u7EBF: " + (b.className || b.tagName).toString().slice(0, 80));
   }
-  function log10(msg) {
+  function log11(msg) {
     try {
       console.info("[previewThumb]", msg);
     } catch {
@@ -24903,7 +25033,7 @@ html.fntv-boot-hide #root{visibility:hidden}
   // src/preload/plugins/skipMarker.ts
   init_electron();
   init_logger();
-  var log11 = logger_default;
+  var log12 = logger_default;
   var PANEL_ID3 = "fntv-marker-panel";
   var MARKER_STYLE_ID = "fntv-marker-panel-style";
   var SKIP_BTN_ID = "fntv-marker-skip-btn";
@@ -24978,7 +25108,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       configAt = Date.now();
       return config;
     } catch (e) {
-      log11.warn("[skip-marker] \u8BFB\u914D\u7F6E\u5931\u8D25:", e.message);
+      log12.warn("[skip-marker] \u8BFB\u914D\u7F6E\u5931\u8D25:", e.message);
       return null;
     }
   }
@@ -24993,7 +25123,7 @@ html.fntv-boot-hide #root{visibility:hidden}
       effectiveGuid = guid;
       return effective;
     } catch (e) {
-      log11.warn("[skip-marker] \u67E5\u8BE2\u751F\u6548\u6807\u8BB0\u5931\u8D25:", e.message);
+      log12.warn("[skip-marker] \u67E5\u8BE2\u751F\u6548\u6807\u8BB0\u5931\u8D25:", e.message);
       return null;
     }
   }
@@ -25081,7 +25211,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     if (!btnWrap) createControlBtn();
     if (btnWrap && btnWrap.parentElement !== bar2) {
       bar2.appendChild(btnWrap);
-      log11.info("[skip-marker] \u6807\u8BB0\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
+      log12.info("[skip-marker] \u6807\u8BB0\u5165\u53E3\u5DF2\u6CE8\u5165\u63A7\u5236\u680F(" + String(bar2.className).slice(0, 40) + ")");
     }
   }
   function removeControlBtn() {
@@ -25160,7 +25290,7 @@ html.fntv-boot-hide #root{visibility:hidden}
     if (kind === "intro") dismissedIntro = true;
     else dismissedOutro = true;
     skipBtnEl.style.display = "none";
-    log11.info(`[skip-marker] \u515C\u5E95\u8DF3\u8FC7(${kind}) \u2192 ${Math.round(target)}s`);
+    log12.info(`[skip-marker] \u515C\u5E95\u8DF3\u8FC7(${kind}) \u2192 ${Math.round(target)}s`);
   }
   function onTimeUpdate() {
     if (!skipBtnEl || !boundVideo) return;
@@ -25683,7 +25813,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
       if (guid !== currentGuid2) return;
       onTimeUpdate();
     } catch (e) {
-      log11.warn("[skip-marker] ensureAll \u5F02\u5E38:", e.message);
+      log12.warn("[skip-marker] ensureAll \u5F02\u5E38:", e.message);
     }
   }
   registerHook("onReady" /* OnReady */, () => {
@@ -25700,7 +25830,7 @@ button.fntv-mk-btn.fntv-mk-ghost:hover{background-color:rgba(255,255,255,.13)}
     try {
       await getConfig();
     } catch (e) {
-      log11.warn("[skip-marker] \u521D\u59CB\u5316\u5931\u8D25:", e.message);
+      log12.warn("[skip-marker] \u521D\u59CB\u5316\u5931\u8D25:", e.message);
     }
   })();
 

@@ -25,9 +25,13 @@ import { fileURLToPath } from 'url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NEW_PAYLOAD = path.join(root, 'dist', 'fntv-plus.user.js');
 
-/** 从构建产物里切出「横屏全屏」那段（含模块级策略变量 + 全部相关函数）。
- *  startMark 按版本给候选：新版有 _fsIntentBound，lc-1328 版从 _landscapeBound 起。 */
-function extractRegion(text, startMarks = ['var _landscapeBound = false;', 'let _landscapeBound = false;', 'var _fsIntentBound = false;']) {
+/** 从构建产物里切出被测代码：伪横屏模块（lc-1334）+ 全屏模块（lc-1329）。
+ *  两者相邻可寻（伪横屏模块以 var ROT_CLASS 开头，全屏模块到 function bindVideoFullscreenFix 结束）。 */
+function extractRegion(text, startMarks = [
+  'var ROT_CLASS = "xgplayer-rotate-fullscreen";',
+  'var _landscapeBound = false;',
+  'let _landscapeBound = false;',
+]) {
   const endMark = 'function bindVideoFullscreenFix';
   const startMark = startMarks.find((m) => text.includes(m));
   if (!startMark) throw new Error(`切不出起点：${startMarks.join(' | ')}`);
@@ -37,10 +41,6 @@ function extractRegion(text, startMarks = ['var _landscapeBound = false;', 'let 
   return text.slice(i, j);
 }
 
-// 反向对照用的「未修复版本」：按**提交信息**定位 lc-1328（横屏修复的前一版），
-// 不要用 HEAD —— HEAD 会随每次提交前移，对照就会退化成「拿修复后跑对照」（假通过）。
-// ⚠ 用 execFileSync 传参数数组：走 shell（cmd.exe）时 `^` 会被吃掉，
-//   `--grep=^lc-1328` 退化成无锚匹配 → 命中 lc-1329（它的正文里也写了 lc-1328）。
 const OLD_PAYLOAD = (() => {
   try {
     const rev = execFileSync('git', ['log', '--format=%H', '--grep=^lc-1328', '-1'], { cwd: root })
@@ -68,6 +68,11 @@ function makeEnv({ ua, touch, portrait, fullscreenEnabled, aspect, nativeFsWorks
   let now = 0;
 
   const rootEl = {
+    _attrs: {},
+    style: { width: '', height: '' },
+    getAttribute(k) { return this._attrs[k] ?? null; },
+    setAttribute(k, v) { this._attrs[k] = String(v); },
+    removeAttribute(k) { delete this._attrs[k]; },
     classList: {
       _s: new Set(),
       add(c) { this._s.add(c); },
@@ -78,6 +83,10 @@ function makeEnv({ ua, touch, portrait, fullscreenEnabled, aspect, nativeFsWorks
   };
   rootEl['__reactFiber$test'] = null;
 
+  const fakeVideo = { closest: () => rootEl };
+  const canvasEl = {
+    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
+  };
   const fsIcon = {
     tag: 'xg-icon',
     classList: { contains: (c) => c === 'xgplayer-fullscreen', add() {}, remove() {} },
@@ -117,19 +126,25 @@ function makeEnv({ ua, touch, portrait, fullscreenEnabled, aspect, nativeFsWorks
     fullscreenEnabled,
     documentElement: { classList: rootEl.classList },
     querySelector(sel) {
-      if (sel === '[class*=xgplayer]') return rootEl;
+      if (sel === '[class*=xgplayer]' || sel === '.xgplayer') return rootEl;
+      if (sel === 'video') return fakeVideo;
       if (sel === '.xgplayer-rotate-fullscreen') return rootEl.classList.contains('xgplayer-rotate-fullscreen') ? rootEl : null;
+      if (sel === '[data-fntv-pseudo-rot="1"]') return rootEl.getAttribute('data-fntv-pseudo-rot') === '1' ? rootEl : null;
       return null;
     },
+    getElementById(id) { return id === 'fntv-danmaku-canvas' ? canvasEl : null; },
     addEventListener(type, fn, capture) { listeners.push({ type, fn, capture }); },
     removeEventListener() {},
     fullscreenElement: null,
   };
 
   const sandbox = {
-    window: win, document: doc,
+    window: win, document: doc, registerHook: () => {}, HookType: { OnReady: 'onReady', OnDomChange: 'onDomChange' },
     navigator: { userAgent: ua, maxTouchPoints: touch ? 5 : 0 },
     log: { info() {}, warn() {} },
+    // esbuild 把 logger 模块初始化拆成 helper（init_logger/logger_default），补桩
+    init_logger: () => {},
+    logger_default: { info() {}, warn() {}, error() {}, debug() {}, log() {} },
     isPlayerPage: () => true,
     setTimeout: (fn, ms) => { timers.push({ fn, at: now + (ms || 0) }); return timers.length; },
     clearTimeout() {},
@@ -160,10 +175,17 @@ function makeEnv({ ua, touch, portrait, fullscreenEnabled, aspect, nativeFsWorks
   /** 第一次进入播放页时的预置（新版：绑监听 + 预写配置；旧版：直接 patch） */
   const init = () => { sandbox.enableLandscapeFullscreen(); runTimers(4000); };
 
-  /** 真实点击全屏按钮：document 捕获阶段 → target 上的 xgplayer handler（bundle 实测的分支） */
+  /** 真实点击全屏按钮：document 捕获阶段 → （未被 stopPropagation 拦下才跑）target 上的 xgplayer handler */
   const tapFullscreen = () => {
-    const ev = { target: fsIcon, type: 'touchend' };
-    listeners.filter((l) => l.capture).forEach((l) => l.fn(ev));   // 捕获阶段（先于 target 绑定）
+    const ev = {
+      target: fsIcon, type: 'touchend', prevented: false, stopped: false,
+      preventDefault() { this.prevented = true; },
+      stopPropagation() { this.stopped = true; },
+    };
+    for (const l of listeners.filter((x) => x.capture)) {
+      l.fn(ev);
+      if (ev.stopped) return ev;                 // 目标上的处理器不会再跑（原生全屏/插件 rotate 都不进）
+    }
     // xgplayer 自己绑在按钮上的 handler = afterCreate 时 hook() 捕获的 toggleFullScreen 闭包
     const c = plugin.config;
     if (c.useCssFullscreen) { /* 未用 */ }
@@ -177,102 +199,82 @@ function makeEnv({ ua, touch, portrait, fullscreenEnabled, aspect, nativeFsWorks
         calls.native++;   // requestFullscreen() 被拒：Promise reject 被 .catch 吞掉，界面无变化
       }
     }
+    return ev;
   };
 
-  return { calls, init, tapFullscreen, runTimers, plugin, player, sandbox, win, rootEl };
+  return { calls, init, tapFullscreen, runTimers, plugin, player, sandbox, win, rootEl, canvasEl, htmlClasses: rootEl.classList, listeners };
 }
 
 // ────────────────────────── 跑用例 ──────────────────────────
 const newRegion = extractRegion(readFileSync(NEW_PAYLOAD, 'utf8'));
 const oldRegion = OLD_PAYLOAD ? extractRegion(OLD_PAYLOAD) : null;
 
+// ─────────── 用例（lc-1334：改为「我们自己转」）───────────
 const BASE = { ua: 'Mozilla/5.0 (Linux; Android 16; PLT140) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36' };
 const WV = { ua: 'Mozilla/5.0 (Linux; Android 16; PLT140 Build/BP2A; wv) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36' };
 
 function scenario(title, opts, fn) {
-  console.log(`\n${title}`);
+  console.log(`
+${title}`);
   fn(makeEnv({ region: newRegion, ...opts }));
 }
 
-scenario('A 手机 Chrome：触摸/竖屏/原生全屏与锁屏都有效 → 保持真转屏', {
+const ROT = 'xgplayer-rotate-fullscreen';
+const CSS_LOCK = 'fntv-pseudo-rot';
+
+scenario('A 触摸 + 竖屏 + 横向内容（手机浏览器 / 飞牛 App 都算这一类）→ 点击由我们自己转', {
   ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: true, lockWorks: true,
 }, (env) => {
   env.init();
-  check('预置：useScreenOrientation=true, rotate=false', `${env.plugin.config.useScreenOrientation}/${env.plugin.config.rotateFullscreen}`, 'true/false');
-  env.tapFullscreen();
-  check('点击后走原生全屏', env.calls.native, 1);
-  check('锁屏被调用（真转屏）', env.calls.lock, 1);
-  env.runTimers(600);
-  check('未降级伪横屏', env.calls.rotate, 0);
+  const ev = env.tapFullscreen();
+  check('A1 拦下按钮自身的处理器（preventDefault）', ev.prevented, true);
+  check('A2 阻断冒泡（stopPropagation → 原生全屏不进）', ev.stopped, true);
+  check('A3 未走原生全屏', env.calls.native, 0);
+  check('A4 播放器根节点挂上旋转类', env.rootEl.classList.contains(ROT), true);
+  check('A5 行内宽按 xgplayer 口径 = innerHeight', env.rootEl.style.width, '915px');
+  check('A6 弹幕画布同步旋转', env.canvasEl.classList.contains('fntv-dm-rotate'), true);
+  check('A7 html 门控类（锁滚动）', env.htmlClasses.contains(CSS_LOCK), true);
+
+  // 再点一次 = 退出
+  const ev2 = env.tapFullscreen();
+  check('A8 二次点击退出旋转类', env.rootEl.classList.contains(ROT), false);
+  check('A9 行内尺寸已还原', `${env.rootEl.style.width}|${env.rootEl.style.height}`, '|');
+  check('A10 画布还原', env.canvasEl.classList.contains('fntv-dm-rotate'), false);
+  check('A11 两次点击都被拦（不进原生）', `${ev2.prevented}/${env.calls.native}`, 'true/0');
 });
 
-scenario('B 飞牛 App（UA 含 wv）：直接伪横屏', {
-  ...WV, touch: true, portrait: true, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: true, lockWorks: false,
-}, (env) => {
-  env.init();
-  check('预置即为伪横屏配置', env.plugin.config.rotateFullscreen, true);
-  env.tapFullscreen();
-  check('点击进入 rotateFullscreen', env.calls.rotate, 1);
-  check('旋转状态类已挂上', env.rootEl.classList.contains('xgplayer-rotate-fullscreen'), true);
-  env.runTimers(600);
-  check('不重复进入', env.calls.rotate, 1);
-});
-
-scenario('C 飞牛 App（自定义 UA 无 wv + 原生全屏被拒）→ 400ms 自愈降级', {
-  ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: false, lockWorks: false,
-}, (env) => {
-  env.init();
-  check('预置仍按浏览器口径（无 wv）', env.plugin.config.useScreenOrientation, true);
-  env.tapFullscreen();
-  check('先试了原生全屏', env.calls.native, 1);
-  check('此刻还没转', env.calls.rotate, 0);
-  env.runTimers(600);
-  check('400ms 后自愈：进入伪横屏', env.calls.rotate, 1);
-  check('旋转状态类已挂上', env.rootEl.classList.contains('xgplayer-rotate-fullscreen'), true);
-  check('结论粘住 _fsForceRotate', env.sandbox._fsForceRotate, true);
-
-  // C2：退出后再点一次 → 直接伪横屏，不再折腾原生
-  env.plugin.exitFullscreen();
-  const before = env.calls.native;
-  env.tapFullscreen();
-  check('第二次点击不再试原生', env.calls.native, before);
-  check('第二次点击直接伪横屏', env.calls.rotate, 2);
-});
-
-scenario('D 桌面浏览器（无触摸、横向窗口）→ 不转、不自愈', {
+scenario('B 桌面（无触摸）→ 不拦不转，仍走原分派', {
   ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
   touch: false, portrait: false, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: true, lockWorks: false,
 }, (env) => {
   env.init();
-  env.tapFullscreen();
-  env.runTimers(600);
-  check('未进伪横屏', env.calls.rotate, 0);
+  const ev = env.tapFullscreen();
+  check('B1 未拦（鼠标环境交回原生）', ev.prevented, false);
+  check('B2 未进自建旋转', env.rootEl.classList.contains(ROT), false);
+  check('B3 走原生全屏', env.calls.native, 1);
 });
 
-scenario('E 竖向视频（aspectRatio<1）→ 即便原生失败也不转 90°', {
-  ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 0.7, nativeFsWorks: false, lockWorks: false,
+scenario('C 竖向内容（aspectRatio<1）→ 不转 90°', {
+  ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 0.7, nativeFsWorks: true, lockWorks: false,
 }, (env) => {
   env.init();
-  env.tapFullscreen();
-  env.runTimers(600);
-  check('未进伪横屏', env.calls.rotate, 0);
+  const ev = env.tapFullscreen();
+  check('C1 未拦', ev.prevented, false);
+  check('C2 未旋转', env.rootEl.classList.contains(ROT), false);
 });
 
-console.log('\n──── 反向对照：同一用例 C 用 lc-1328 版载荷（lc-1329 之前）────');
+console.log('\n──── 反向对照：lc-1333 版载荷（无伪横屏模块）→ A 组必须不成立 ────');
 if (!oldRegion) {
-  console.log('  SKIP  取不到 lc-1328 版载荷（非 git 仓库 / 历史被改写？）');
+  console.log('  SKIP  取不到 lc-1333 版载荷');
 } else {
-  console.log('C(旧) 飞牛 App（自定义 UA 无 wv + 原生全屏被拒）→ 期望「不转」，即旧版修不了');
-  const env = makeEnv({
-    region: oldRegion, ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: false, lockWorks: false,
-  });
+  const env = makeEnv({ region: oldRegion, ...BASE, touch: true, portrait: true, fullscreenEnabled: true, aspect: 16 / 9, nativeFsWorks: true, lockWorks: true });
   env.init();
-  check('旧版预置：无 wv → 走原生', env.plugin.config.useScreenOrientation, true);
-  env.tapFullscreen();
-  env.runTimers(600);
-  check('旧版：点了全屏仍竖屏（= 用户报障现场）', env.calls.rotate, 0);
+  const ev = env.tapFullscreen();
+  check('旧版：点击不会被我们拦住（没有自建旋转）', ev.prevented, false);
+  check('旧版：根节点没有旋转类（真机现象：进了原生全屏但不转）', env.rootEl.classList.contains(ROT), false);
 }
 
 const failed = results.filter((r) => !r.ok);
-console.log(`\n${failed.length === 0 ? '✅' : '❌'} ${results.length - failed.length}/${results.length} 项通过`);
+console.log(`
+${failed.length === 0 ? '✅' : '❌'} ${results.length - failed.length}/${results.length} 项通过`);
 process.exit(failed.length === 0 ? 0 : 1);

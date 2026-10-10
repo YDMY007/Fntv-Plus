@@ -25,6 +25,8 @@ import { t } from '../core/i18n';
 import { installMobileFlag } from './embyWall/detail/beautifyStyle';
 // [lc-1319] 布局模式（手动切换）真源：播放页字号等"手机口径"跟随模式
 import { getUiMode } from './mobileStyle';
+// [lc-1334] 自建伪横屏全屏（不依赖插件 config / React fiber；用户要求「我们自己改 UI 成横屏」）
+import { setPlayerResolver, togglePseudoLandscape, cleanupPseudoLandscape, isPseudoLandscape } from './pseudoLandscape';
 
 const log = logger;
 
@@ -242,6 +244,22 @@ html:has(.xgplayer-rotate-fullscreen) .xgplayer-rotate-parent{
 /* 旋转全屏激活态：页面锁滚动（伪横屏时页面文档流仍是竖屏，能滚就会把画面带跑） */
 html:has(.xgplayer-rotate-fullscreen),
 html:has(.xgplayer-rotate-fullscreen) body{
+    overflow:hidden !important;
+    overscroll-behavior:none !important;
+}
+
+/* ── [lc-1334] 自建伪横屏（pseudoLandscape.ts）配套 ──
+   播放器根节点用的是 xgplayer 自己的类名（上面那组规则原样生效），这里补两件画布/页面的事：
+   ① 弹幕画布与画面同向旋转：syncCanvasRect 只写 left/top/width/height、不碰 transform，
+      所以这条不会被逐帧覆盖；画布的 left/top/宽高来自 video 的 rect（旋转后即视口矩形），
+      再绕自身中心转 90° 就与旋转后的画面严丝合缝对齐。
+   ② 伪横屏期间锁页面滚动（此时页面仍是竖屏文档流，能滚就会把画面带跑）。 */
+#fntv-danmaku-canvas.fntv-dm-rotate{
+    transform: rotate(90deg) !important;
+    transform-origin: center center !important;
+}
+html.fntv-pseudo-rot,
+html.fntv-pseudo-rot body{
     overflow:hidden !important;
     overscroll-behavior:none !important;
 }
@@ -544,6 +562,19 @@ function onFsIntent(ev: Event): void {
     const cur = resolveXgPlayer();
     if (!cur) return;
     const env = fsEnv();
+    // [lc-1334] 触摸 + 竖屏 + 横向内容 → **我们自己转**（真机实测：App 里原生全屏不转横屏、
+    //   浏览器真转屏靠系统旋转开关，都不如页面内自建可靠）。preventDefault + stopPropagation
+    //   拦住按钮自己的处理器，原生全屏/插件 rotate 都不进。
+    const contentLandscape = !(cur.player.aspectRatio < 1);
+    if (env.isTouch && env.isPortrait && contentLandscape) {
+        if (togglePseudoLandscape()) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            return;
+        }
+        // 进不去（找不到播放器根节点）→ 落到下面的原生分派
+    }
+    if (isPseudoLandscape()) return;   // 非竖屏/不允许转时点按钮：交回插件原生行为
     const rotate = env.isPortrait && (_fsForceRotate || env.inWebView || !env.nativeFsUsable);
     applyFsCfg(cur.player, cur.fs, rotate);
     if (rotate) {
@@ -558,6 +589,8 @@ function onFsIntent(ev: Event): void {
 
 function enableLandscapeFullscreen(): void {
     if (_landscapeBound || !isPlayerPage()) return;
+    // [lc-1334] 给自建伪横屏模块一个「取当前播放器」的钩子（仅用于同步 rotateDeg/fullscreen 状态）
+    setPlayerResolver(resolveXgPlayer);
     _landscapeBound = true;
     const preApply = (): boolean => {
         const cur = resolveXgPlayer();
@@ -2676,6 +2709,8 @@ function startMountPoll(): void {
  * items/meta/currentGuid 故意不清：回到同一集时靠它们直接续播，不必再打一次 B站。
  */
 function leavePlayer(): void {
+    // [lc-1334] 伪横屏是页面内自建状态，SPA 切走时得自己收（播放器 DOM 会被销毁，但 html 上的门控类不会）
+    cleanupPseudoLandscape();
     stopRender();                       // 内部已 clearRect，画布内容一并抹掉
     if (canvas) {
         if (canvasHost !== null && canvas.parentElement !== document.body) {
