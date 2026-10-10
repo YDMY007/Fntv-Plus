@@ -74,6 +74,11 @@ build-gui.js
 构建.cmd
 打包.cmd
 
+# ⚠️ 根目录 FPS 对比启动器（透明/不透明窗口双击对比）：用户要求【严禁推送 GitHub】
+# 仅本机双击使用；lc-1284 曾误入库，lc-1342 已移出并在此拦下。
+fps对比-不透明窗口.cmd
+fps对比-正常窗口.cmd
+
 # resource 软件资源目录：用户要求纳入 GitHub（放行 resource/docs 下图片/资源）
 # resource/wiki/CHANGELOG_v*.md 已由上方 !resource/wiki/CHANGELOG_*.md 放行入库
 !resource/docs/
